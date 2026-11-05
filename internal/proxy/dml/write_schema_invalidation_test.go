@@ -30,7 +30,7 @@ func TestInsertAppendReturnsMixedOutcomeWithoutReplay(t *testing.T) {
 	wal := &invalidationTestWAL{}
 	patch := mockey.Mock(streaming.WAL).Return(wal).Build()
 	defer patch.UnPatch()
-	patch = mockey.Mock(repackInsertDataForStreamingService).Return([]message.MutableMessage{}, nil).Build()
+	patch = mockey.Mock(repackUnifiedUpsert).Return([]message.MutableMessage{}, nil).Build()
 	defer patch.UnPatch()
 	appends, invalidations := 0, 0
 	patch = mockey.Mock((*invalidationTestWAL).AppendMessagesWithOptions).To(func(_ *invalidationTestWAL, _ context.Context, _ []message.MutableMessage, _ ...streaming.AppendOption) streaming.AppendResponses {

@@ -1,3 +1,19 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package dml
 
 import (
@@ -125,13 +141,8 @@ func (ut *UpsertTask) appendUpsertAttempt(ctx context.Context, ez *message.Ciphe
 		logger.Warn(ctx, "pack insert message failed", mlog.Err(err))
 		return err
 	}
-	deleteMsgs, err := ut.packDeleteMessage(ctx, ez)
-	if err != nil {
-		logger.Warn(ctx, "pack delete message failed", mlog.Err(err))
-		return err
-	}
+	messages := insertMsgs
 
-	messages := append(insertMsgs, deleteMsgs...)
 	if ut.req.GetPartialUpdate() {
 		if err := ut.attachPartialUpdateCAS(messages); err != nil {
 			logger.Warn(ctx, "attach partial update CAS metadata failed", mlog.Err(err))
@@ -200,85 +211,11 @@ func (ut *UpsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 		mlog.FieldTaskID(ut.ID()),
 		mlog.Duration("get msgStream duration", getMsgStreamDur))
 
-	// start to repack insert data
-	var msgs []message.MutableMessage
-	// Upsert never carries an idempotency key, so it passes no header decorator.
-	if ut.partitionKeys == nil {
-		msgs, err = repackInsertDataForStreamingService(ut.TraceCtx(), ut.GetMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ez, ut.schemaVersion, ut.partialUpdateCASGroups, nil)
-	} else {
-		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(ut.TraceCtx(), ut.GetMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ut.partitionKeys, ez, ut.schema.CollectionSchema, ut.schemaVersion, ut.partialUpdateCASGroups, nil)
+	deleteKeys := ut.upsertMsg.DeleteMsg.PrimaryKeys
+	if deleteKeys == nil {
+		deleteKeys = ut.oldIDs
 	}
-	if err != nil {
-		log.Warn(ctx, "assign segmentID and repack insert data failed", mlog.Err(err))
-		ut.result.Status = merr.Status(err)
-		return nil, err
-	}
-	return msgs, nil
-}
-
-func (ut *UpsertTask) packDeleteMessage(ctx context.Context, ez *message.CipherConfig) ([]message.MutableMessage, error) {
-	if ut.upsertMsg.DeleteMsg.PrimaryKeys == nil {
-		// Fall back only when no delete subset was prepared; an empty subset
-		// means no lookup IDs should be deleted.
-		ut.upsertMsg.DeleteMsg.PrimaryKeys = ut.oldIDs
-	}
-	if typeutil.GetSizeOfIDs(ut.upsertMsg.DeleteMsg.PrimaryKeys) == 0 {
-		return nil, nil
-	}
-	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy deleteExecute upsert %d", ut.ID()))
-	collID := ut.upsertMsg.DeleteMsg.CollectionID
-	log := mlog.With(
-		mlog.FieldCollectionID(collID))
-	// hash primary keys to channels
-	vChannels, err := ut.chMgr.GetVChannels(collID)
-	if err != nil {
-		log.Warn(ctx, "get vChannels failed when deleteExecute", mlog.Err(err))
-		ut.result.Status = merr.Status(err)
-		return nil, err
-	}
-	result, numRows, err := repackDeleteMsgByHash(
-		ctx,
-		ut.upsertMsg.DeleteMsg.PrimaryKeys,
-		vChannels, ut.idAllocator,
-		ut.BeginTs(),
-		ut.upsertMsg.DeleteMsg.CollectionID, ut.upsertMsg.DeleteMsg.CollectionName,
-		ut.upsertMsg.DeleteMsg.PartitionID, ut.upsertMsg.DeleteMsg.PartitionName,
-		ut.upsertMsg.DeleteMsg.GetDbName(),
-		ut.req.Namespace,
-		ut.schema.CollectionSchema,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	var msgs []message.MutableMessage
-	for hashKey, deleteMsgs := range result {
-		vchannel := vChannels[hashKey]
-		for _, deleteMsg := range deleteMsgs {
-			msg, err := message.NewDeleteMessageBuilderV1().
-				WithHeader(&message.DeleteMessageHeader{
-					CollectionId: ut.upsertMsg.DeleteMsg.CollectionID,
-					Rows:         uint64(deleteMsg.NumRows),
-				}).
-				WithBody(deleteMsg.DeleteRequest).
-				WithVChannel(vchannel).
-				WithCipher(ez).
-				BuildMutable()
-			if err != nil {
-				return nil, err
-			}
-			msgs = append(msgs, msg)
-		}
-	}
-
-	log.Debug(ctx, "Proxy Upsert deleteExecute done",
-		mlog.FieldCollectionID(collID),
-		mlog.Strings("virtual_channels", vChannels),
-		mlog.FieldTaskID(ut.ID()),
-		mlog.Int64("numRows", numRows),
-		mlog.Duration("prepare duration", tr.ElapseSpan()))
-
-	return msgs, nil
+	return repackUnifiedUpsert(ctx, ut.GetMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result.GetIDs(), ut.partitionKeys, ut.schema.CollectionSchema, ut.schemaVersion, ez, ut.partialUpdateCASGroups, nil, deleteKeys, ut.upsertMsg.DeleteMsg.PartitionID)
 }
 
 func (ut *UpsertTask) attachPartialUpdateCAS(messages []message.MutableMessage) error {
@@ -289,7 +226,7 @@ func (ut *UpsertTask) attachPartialUpdateCAS(messages []message.MutableMessage) 
 
 	attached := make(map[string]struct{}, len(groups))
 	for _, msg := range messages {
-		if msg.MessageType() != message.MessageTypeInsert {
+		if msg.MessageType() != message.MessageTypeUpsert {
 			continue
 		}
 		vchannel := msg.VChannel()

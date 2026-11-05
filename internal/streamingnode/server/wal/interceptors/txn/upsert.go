@@ -80,11 +80,11 @@ func validateBodyCollection(ctx context.Context, msg message.ImmutableMessage, c
 		if err != nil {
 			return invalid()
 		}
-		body, err := typed.Body(ctx)
+		body, err := message.ReadUpsertMetadata(ctx, msg)
 		if err != nil {
 			return decodeError(err)
 		}
-		if typed.Header().GetCollectionId() != collectionID || body.GetInsert() == nil || body.GetDelete() == nil || body.GetInsert().GetCollectionID() != collectionID || body.GetDelete().GetCollectionID() != collectionID {
+		if typed.Header().GetCollectionId() != collectionID || body.GetPrimaryKeys() == nil {
 			return invalid()
 		}
 	case message.MessageTypeInsert:

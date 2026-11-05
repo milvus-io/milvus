@@ -99,7 +99,7 @@ func (s *TxnSession) AddNewMessage(ctx context.Context, timetick uint64) error {
 func (s *TxnSession) AddNewMessageDoneAndKeepalive(timetick uint64, typ message.MessageType) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if typ != message.MessageTypeInsert {
+	if typ != message.MessageTypeInsert && typ != message.MessageTypeUpsert {
 		s.hasNonInsert = true
 	}
 
@@ -157,6 +157,9 @@ func (s *TxnSession) RecordSuccessfulBody(msg message.ImmutableMessage) {
 	s.invalidScope = s.invalidScope || err != nil || collectionID <= 0 || msg.VChannel() != s.vchannel || msg.TxnContext() == nil || msg.TxnContext().TxnID != s.txnContext.TxnID
 	s.successfulBodies = append(s.successfulBodies, msg)
 	s.hasUpsert = s.hasUpsert || msg.MessageType() == message.MessageTypeUpsert
+	if msg.MessageType() == message.MessageTypeUpsert && message.MustAsImmutableUpsertMessageV2(msg).Header().GetDeleteRows() > 0 {
+		s.hasNonInsert = true
+	}
 }
 
 // HasUpsert reports whether a successful body uses the Upsert protocol.

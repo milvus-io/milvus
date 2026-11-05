@@ -1,6 +1,8 @@
 package segment
 
 import (
+	"context"
+
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
@@ -14,6 +16,7 @@ type segmentInsertMessage struct {
 	Message        messageutil.InsertRequest
 	Assignment     *messagespb.PartitionSegmentAssignment
 	TimeTick       uint64
+	Rows           []int64
 	PartitionCount int
 }
 
@@ -86,7 +89,15 @@ func forEachSegmentInsertMessageFromInsert(
 	if !ok {
 		return nil
 	}
-	for _, assignment := range assignments {
+	selections, err := messageutil.InsertSelections(context.Background(), raw)
+	if err != nil {
+		return err
+	}
+	for index, assignment := range assignments {
+		var rows []int64
+		if selections != nil {
+			rows = selections[index]
+		}
 		if segmentID != 0 && assignment.GetSegmentAssignment().GetSegmentId() != segmentID {
 			continue
 		}
@@ -94,6 +105,7 @@ func forEachSegmentInsertMessageFromInsert(
 			Message:        insert,
 			Assignment:     assignment,
 			TimeTick:       timeTick,
+			Rows:           rows,
 			PartitionCount: len(assignments),
 		}); err != nil {
 			return err

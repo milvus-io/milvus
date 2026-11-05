@@ -40,6 +40,9 @@ func TestQueryTransformMessageClassification(t *testing.T) {
 	} {
 		t.Run(tc.typ.String(), func(t *testing.T) {
 			msg := message.NewMutableMessageBeforeAppend(nil, map[string]string{"_t": strconv.Itoa(int(tc.typ))})
+			if tc.typ == message.MessageTypeUpsert {
+				msg = message.NewUpsertMessageBuilderV2().WithVChannel("v").WithHeader(&message.UpsertMessageHeader{DeleteRows: 1}).WithBody(&message.UpsertMessageBody{}).MustBuildMutable()
+			}
 			require.Equal(t, tc.advances, AdvancesQueryTransformMVCC(msg))
 			require.Equal(t, tc.global, IsPChannelTransformBarrier(tc.typ))
 		})

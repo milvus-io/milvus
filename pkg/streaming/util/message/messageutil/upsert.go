@@ -23,148 +23,221 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// InsertRequest exposes read-only row content from Insert or Upsert.
-// Consumers use the outer message's TimeTick and the returned assignment for visibility and placement.
-// Consumers must copy metadata before they modify the returned request.
+// InsertRequest reads selected logical rows at the storage execution boundary.
+// Source columns remain immutable. All columns use the same row selection.
 type InsertRequest interface {
-	MustBody() *msgpb.InsertRequest
-	Body(context.Context) (*msgpb.InsertRequest, error)
+	ReadRows(context.Context, *schemapb.CollectionSchema, []int64) (*msgpb.InsertRequest, error)
 }
+type insertRows struct{ msg message.ImmutableMessage }
 
-type upsertInsertRequest struct {
-	message.ImmutableUpsertMessageV2
-}
-
-func (u upsertInsertRequest) MustBody() *msgpb.InsertRequest {
-	body, err := u.Body(context.Background())
-	if err != nil {
-		panic(err)
+func (r *insertRows) ReadRows(ctx context.Context, schema *schemapb.CollectionSchema, rows []int64) (*msgpb.InsertRequest, error) {
+	var source *msgpb.InsertRequest
+	if r.msg.MessageType() == message.MessageTypeInsert {
+		body, err := message.MustAsImmutableInsertMessageV1(r.msg).Body(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if rows == nil {
+			// Historical Insert messages already have one receiving partition.
+			// Own the execution metadata and borrow immutable column payloads.
+			result := &msgpb.InsertRequest{ShardName: r.msg.VChannel(), DbName: body.GetDbName(), CollectionName: body.GetCollectionName(), PartitionName: body.GetPartitionName(), DbID: body.GetDbID(), CollectionID: body.GetCollectionID(), PartitionID: body.GetPartitionID(), SegmentID: body.GetSegmentID(), RowIDs: body.GetRowIDs(), RowData: body.GetRowData(), NumRows: body.GetNumRows(), Version: body.GetVersion(), FieldsData: typeutil.CopyFieldDataMetadata(body.GetFieldsData()), Namespace: body.Namespace}
+			if body.Base != nil {
+				result.Base = proto.Clone(body.Base).(*commonpb.MsgBase)
+			}
+			result.Timestamps = make([]uint64, len(body.GetTimestamps()))
+			for i := range result.Timestamps {
+				result.Timestamps[i] = r.msg.TimeTick()
+			}
+			return result, nil
+		}
+		source = body
+	} else {
+		upsert := message.MustAsImmutableUpsertMessageV2(r.msg)
+		body, err := upsert.Body(ctx)
+		if err != nil {
+			return nil, err
+		}
+		pk, err := typeutil.GetPrimaryFieldSchema(schema)
+		if err != nil {
+			return nil, err
+		}
+		if err := message.ValidateUpsertMessage(ctx, r.msg, pk); err != nil {
+			return nil, err
+		}
+		fields := append([]*schemapb.FieldData(nil), body.GetColumns()...)
+		field := message.UpsertPrimaryKeyColumn(pk, body.GetPrimaryKeys())
+		fields = append(fields, field)
+		source = &msgpb.InsertRequest{CollectionID: upsert.Header().GetCollectionId(), NumRows: uint64(len(body.GetRowIds())), RowIDs: body.GetRowIds(), FieldsData: fields, Version: msgpb.InsertDataVersion_ColumnBased}
 	}
-	return body
+	if rows == nil {
+		rows = make([]int64, source.GetNumRows())
+		for i := range rows {
+			rows[i] = int64(i)
+		}
+	}
+	result := &msgpb.InsertRequest{CollectionID: source.GetCollectionID(), NumRows: uint64(len(rows)), Version: msgpb.InsertDataVersion_ColumnBased, RowIDs: make([]int64, len(rows)), Timestamps: make([]uint64, len(rows))}
+	for i, row := range rows {
+		if row < 0 || uint64(row) >= source.GetNumRows() || row >= int64(len(source.GetRowIDs())) {
+			return nil, merr.WrapErrServiceInternalMsg("insert selection is out of range")
+		}
+		result.RowIDs[i] = source.RowIDs[row]
+		result.Timestamps[i] = r.msg.TimeTick()
+	}
+	result.FieldsData = typeutil.PrepareResultFieldData(source.GetFieldsData(), int64(len(rows)))
+	for index, field := range source.GetFieldsData() {
+		physical := rows
+		valid := typeutil.GetFieldDataValidData(field)
+		if field.GetVectors() != nil && field.GetVectors().GetVectorArray() == nil && len(valid) > 0 {
+			var mapping []int64
+			if r.msg.MessageType() == message.MessageTypeUpsert {
+				var err error
+				mapping, err = message.ReadUpsertCompactRows(ctx, r.msg, field.GetFieldId(), valid)
+				if err != nil {
+					return nil, err
+				}
+			} else {
+				mapping = make([]int64, len(valid))
+				cursor := int64(0)
+				for logical, exists := range valid {
+					mapping[logical] = -1
+					if exists {
+						mapping[logical] = cursor
+						cursor++
+					}
+				}
+			}
+			physical = make([]int64, 0, len(rows))
+			for _, row := range rows {
+				if row >= int64(len(mapping)) {
+					return nil, merr.WrapErrServiceInternalMsg("nullable vector validity count differs from logical rows")
+				}
+				if mapping[row] >= 0 {
+					physical = append(physical, mapping[row])
+				}
+			}
+		}
+		typeutil.AppendFieldDataByColumn(result.FieldsData[index], field, physical, rows)
+	}
+	return result, nil
 }
 
-func (u upsertInsertRequest) Body(ctx context.Context) (*msgpb.InsertRequest, error) {
-	body, err := u.ImmutableUpsertMessageV2.Body(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := ValidateUpsertBodyFormat(body); err != nil {
-		return nil, err
-	}
-	return body.GetInsert(), nil
-}
-
-// AsInsertRequest exposes the insert content and assignments without a synthetic WAL message.
-// The returned content and assignments are read-only. Unsupported message types return false.
+// AsInsertRequest returns rows and receiving-cluster segment assignments.
 func AsInsertRequest(msg message.ImmutableMessage) (InsertRequest, []*messagespb.PartitionSegmentAssignment, bool) {
 	if msg == nil {
 		return nil, nil, false
 	}
 	switch msg.MessageType() {
 	case message.MessageTypeInsert:
-		insert := message.MustAsImmutableInsertMessageV1(msg)
-		return insert, insert.Header().GetPartitions(), true
+		return &insertRows{msg: msg}, message.MustAsImmutableInsertMessageV1(msg).Header().GetPartitions(), true
 	case message.MessageTypeUpsert:
-		upsert := message.MustAsImmutableUpsertMessageV2(msg)
-		return upsertInsertRequest{upsert}, []*messagespb.PartitionSegmentAssignment{upsert.Header().GetPartition()}, true
-	default:
-		return nil, nil, false
+		return &insertRows{msg: msg}, message.MustAsImmutableUpsertMessageV2(msg).Header().GetPartitions(), true
 	}
+	return nil, nil, false
 }
 
-// AsDeleteRequest exposes explicit delete content with the final outer TimeTick.
-// Primary keys remain shared and read-only. Unsupported message types return false.
-func AsDeleteRequest(msg message.ImmutableMessage) (*msgpb.DeleteRequest, bool) {
-	deletion, ok, err := DeleteRequest(context.Background(), msg)
-	if err != nil {
-		panic(err)
+// InsertSelections computes one logical selection for every partition.
+func InsertSelections(ctx context.Context, msg message.ImmutableMessage) ([][]int64, error) {
+	if msg.MessageType() != message.MessageTypeUpsert {
+		return nil, nil
 	}
-	return deletion, ok
+	return message.ReadUpsertRowSelections(ctx, msg)
 }
 
-// DeleteRequest decodes delete content with cancellation support.
-// Upsert projections replace nested timestamps and shard metadata without copying primary keys.
-func DeleteRequest(ctx context.Context, msg message.ImmutableMessage) (*msgpb.DeleteRequest, bool, error) {
+// DeleteRequests exposes all explicit effects with the final visibility timestamp.
+func DeleteRequests(ctx context.Context, msg message.ImmutableMessage) ([]*msgpb.DeleteRequest, error) {
 	if msg == nil {
-		return nil, false, nil
+		return nil, nil
 	}
-	var deletion *msgpb.DeleteRequest
-	switch msg.MessageType() {
-	case message.MessageTypeDelete:
+	if msg.MessageType() == message.MessageTypeDelete {
 		typed, err := message.AsImmutableDeleteMessageV1(msg)
 		if err != nil {
-			return nil, true, err
-		}
-		deletion, err = typed.Body(ctx)
-		if err != nil {
-			return nil, true, err
-		}
-	case message.MessageTypeUpsert:
-		typed, err := message.AsImmutableUpsertMessageV2(msg)
-		if err != nil {
-			return nil, true, err
+			return nil, err
 		}
 		body, err := typed.Body(ctx)
 		if err != nil {
-			return nil, true, err
+			return nil, err
 		}
-		if err := ValidateUpsertBodyFormat(body); err != nil {
-			return nil, true, err
+		copy := proto.Clone(body).(*msgpb.DeleteRequest)
+		if copy.GetNumRows() < 0 {
+			return nil, merr.WrapErrServiceInternalMsg("WAL delete row count is negative")
 		}
-		deletion = body.GetDelete()
-	default:
-		return nil, false, nil
+		count := PrimaryKeyCount(copy.PrimaryKeys)
+		if copy.PrimaryKeys == nil {
+			count = len(copy.Int64PrimaryKeys)
+		}
+		if len(copy.SerializedExprPlan) > 0 {
+			count = 1
+		}
+		if copy.Base == nil {
+			copy.Base = &commonpb.MsgBase{}
+		}
+		copy.Base.Timestamp = msg.TimeTick()
+		copy.ShardName = msg.VChannel()
+		copy.Timestamps = make([]uint64, count)
+		for i := range copy.Timestamps {
+			copy.Timestamps[i] = msg.TimeTick()
+		}
+		return []*msgpb.DeleteRequest{copy}, nil
 	}
-	if deletion == nil {
-		return nil, true, merr.WrapErrServiceInternalMsg("WAL message has no delete request")
+	if msg.MessageType() != message.MessageTypeUpsert {
+		return nil, nil
 	}
-	// Construct a new protobuf wrapper rather than copying its internal synchronization state.
-	projected := &msgpb.DeleteRequest{
-		Base: &commonpb.MsgBase{}, ShardName: msg.VChannel(), DbName: deletion.GetDbName(),
-		CollectionName: deletion.GetCollectionName(), PartitionName: deletion.GetPartitionName(),
-		DbID: deletion.GetDbID(), CollectionID: deletion.GetCollectionID(), PartitionID: deletion.GetPartitionID(),
-		Int64PrimaryKeys: deletion.GetInt64PrimaryKeys(), NumRows: deletion.GetNumRows(),
-		PrimaryKeys: deletion.GetPrimaryKeys(), SerializedExprPlan: deletion.GetSerializedExprPlan(),
+	body, err := message.ReadUpsertMetadata(ctx, msg)
+	if err != nil {
+		return nil, err
 	}
-	if deletion.GetBase() != nil {
-		projected.Base = proto.Clone(deletion.GetBase()).(*commonpb.MsgBase)
+	result := make([]*msgpb.DeleteRequest, 0, len(body.GetDeleteEffects()))
+	for _, effect := range body.GetDeleteEffects() {
+		partition := int64(-1)
+		switch scope := effect.GetScope().(type) {
+		case *messagespb.UpsertDeleteEffect_AllPartitions:
+			if scope.AllPartitions == nil {
+				return nil, merr.WrapErrServiceInternalMsg("missing Upsert delete scope")
+			}
+		case *messagespb.UpsertDeleteEffect_PartitionId:
+			partition = scope.PartitionId
+			if partition <= 0 {
+				return nil, merr.WrapErrServiceInternalMsg("invalid Upsert delete partition")
+			}
+		default:
+			return nil, merr.WrapErrServiceInternalMsg("missing Upsert delete scope")
+		}
+		keys := effect.GetPrimaryKeys()
+		count := PrimaryKeyCount(keys)
+		if count == 0 {
+			return nil, merr.WrapErrServiceInternalMsg("empty Upsert delete keys")
+		}
+		times := make([]uint64, count)
+		for i := range times {
+			times[i] = msg.TimeTick()
+		}
+		result = append(result, &msgpb.DeleteRequest{CollectionID: message.MustAsImmutableUpsertMessageV2(msg).Header().GetCollectionId(), PartitionID: partition, PrimaryKeys: keys, NumRows: int64(count), Timestamps: times, ShardName: msg.VChannel()})
 	}
-	projected.Base.Timestamp = msg.TimeTick()
-	if deletion.GetNumRows() < 0 {
-		return nil, true, merr.WrapErrServiceInternalMsg("WAL delete row count is negative")
+	var deleted uint64
+	for _, request := range result {
+		deleted += uint64(request.GetNumRows())
 	}
-	count := int64(len(deletion.GetPrimaryKeys().GetIntId().GetData()) + len(deletion.GetPrimaryKeys().GetStrId().GetData()))
-	if deletion.GetPrimaryKeys() == nil {
-		count = int64(len(deletion.GetInt64PrimaryKeys()))
+	if deleted != message.MustAsImmutableUpsertMessageV2(msg).Header().GetDeleteRows() {
+		return nil, merr.WrapErrServiceInternalMsg("Upsert delete row count differs from explicit effects")
 	}
-	if msg.MessageType() == message.MessageTypeUpsert && count != deletion.GetNumRows() {
-		return nil, true, merr.WrapErrServiceInternalMsg("Upsert delete row count differs from primary key count")
-	}
-	if msg.MessageType() == message.MessageTypeDelete {
-		projected.SegmentId = deletion.GetSegmentId()
-	}
-	if len(deletion.GetSerializedExprPlan()) != 0 {
-		count = 1
-	}
-	projected.Timestamps = make([]uint64, count)
-	for i := range projected.Timestamps {
-		projected.Timestamps[i] = msg.TimeTick()
-	}
-	return projected, true, nil
+	return result, nil
 }
 
-// ValidateUpsertBodyFormat checks the compound format before consumers expose either effect.
-func ValidateUpsertBodyFormat(body *message.UpsertMessageBody) error {
-	if body.GetInsert() == nil || body.GetDelete() == nil {
-		return merr.WrapErrServiceInternalMsg("Upsert WAL message has incomplete compound content")
+// AsDeleteRequest preserves the historical independent Delete projection.
+func AsDeleteRequest(msg message.ImmutableMessage) (*msgpb.DeleteRequest, bool) {
+	if msg == nil || msg.MessageType() != message.MessageTypeDelete {
+		return nil, false
 	}
-	if body.GetInsert().GetVersion() != msgpb.InsertDataVersion_ColumnBased || len(body.GetInsert().GetRowData()) != 0 {
-		return merr.WrapErrServiceInternalMsg("Upsert WAL insert requires column-based data without row data")
+	requests, err := DeleteRequests(context.Background(), msg)
+	if err != nil {
+		panic(err)
 	}
-	return nil
+	return requests[0], true
 }

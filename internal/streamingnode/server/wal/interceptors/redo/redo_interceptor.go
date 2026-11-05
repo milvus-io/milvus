@@ -95,10 +95,8 @@ func (r *redoAppendInterceptor) waitUntilGrowingSegmentReady(ctx context.Context
 		collectionID, partitions = h.CollectionId, h.Partitions
 	case message.MessageTypeUpsert:
 		h := message.MustAsMutableUpsertMessageV2(msg).Header()
-		if h.GetPartition() == nil {
-			return status.NewUnrecoverableError("Upsert WAL message has no target partition")
-		}
-		collectionID, partitions = h.GetCollectionId(), []*message.PartitionSegmentAssignment{h.GetPartition()}
+		collectionID, partitions = h.GetCollectionId(), h.GetPartitions()
+
 	default:
 		return nil
 	}
@@ -115,8 +113,8 @@ func (r *redoAppendInterceptor) waitUntilGrowingSegmentReady(ctx context.Context
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ready:
-			// do nothing
-			return nil
+			// Check every target partition before the inner append.
+			continue
 		case <-r.gracefulStop:
 			return status.NewOnShutdownError("redo interceptor is on shutdown")
 		}

@@ -87,6 +87,28 @@ func extractPKsFromCASInsertWithContext(
 	msg message.BasicMessage,
 	descriptorGetter primaryKeyDescriptorGetter,
 ) (primarykey.Keys, casInsertScope, string, error) {
+	if msg.MessageType() == message.MessageTypeUpsert {
+		keys, err := extractPKsFromUpsert(ctx, msg, descriptorGetter)
+		if err != nil {
+			return primarykey.Keys{}, casInsertScope{}, "", err
+		}
+		body, err := message.ReadUpsertMetadata(ctx, msg)
+		if err != nil {
+			return primarykey.Keys{}, casInsertScope{}, "", err
+		}
+		var header *message.UpsertMessageHeader
+		if immutable, ok := msg.(message.ImmutableMessage); ok {
+			header = message.MustAsImmutableUpsertMessageV2(immutable).Header()
+		} else {
+			header = message.MustAsMutableUpsertMessageV2(msg.(message.MutableMessage)).Header()
+		}
+		encoded, err := message.EncodeProto(body.GetPartialUpdateCas())
+		if body.GetPartialUpdateCas() == nil {
+			return primarykey.Keys{}, casInsertScope{}, "", status.NewUnrecoverableError("partial update CAS proof is missing")
+		}
+		return keys, casInsertScope{collectionID: header.GetCollectionId(), schemaVersion: header.GetSchemaVersion()}, encoded, err
+	}
+
 	if descriptorGetter == nil {
 		return primarykey.Keys{}, casInsertScope{}, "", status.NewUnrecoverableError(
 			"partial update primary key descriptor getter is unavailable",
@@ -315,42 +337,36 @@ func extractDropCollectionID(msg message.BasicMessage) (int64, bool) {
 }
 
 // extractPKsFromUpsert validates both components before using their common PK set.
-// Validation makes the insert PK set the exact union of the two components.
+// Lock and version tracking cover inserted keys and all explicit delete keys.
 func extractPKsFromUpsert(ctx context.Context, msg message.BasicMessage, getter primaryKeyDescriptorGetter) (primarykey.Keys, error) {
 	var header *message.UpsertMessageHeader
-	var body *message.UpsertMessageBody
-	var err error
 	if immutable, ok := msg.(message.ImmutableMessage); ok {
-		typed, e := message.AsImmutableUpsertMessageV2(immutable)
-		if e != nil {
-			return primarykey.Keys{}, status.NewUnrecoverableError("invalid Upsert envelope for write tracking: %v", e)
-		}
-		header = typed.Header()
-		body, err = decodeRecoveredBody(ctx, "upsert", typed)
+		header = message.MustAsImmutableUpsertMessageV2(immutable).Header()
 	} else {
-		typed, e := message.AsMutableUpsertMessageV2(msg.(message.MutableMessage))
-		if e != nil {
-			return primarykey.Keys{}, status.NewUnrecoverableError("invalid Upsert envelope for write tracking: %v", e)
-		}
-		header = typed.Header()
-		body, err = typed.Body(ctx)
+		header = message.MustAsMutableUpsertMessageV2(msg.(message.MutableMessage)).Header()
 	}
+	body, err := message.ReadUpsertMetadata(ctx, msg)
 	if err != nil {
-		if errors.Is(err, message.ErrMalformedBody) {
-			return primarykey.Keys{}, status.NewUnrecoverableError("malformed Upsert body for write tracking: %v", err)
-		}
 		return primarykey.Keys{}, err
-	}
-	if getter == nil {
-		return primarykey.Keys{}, status.NewUnrecoverableError("Upsert primary key descriptor getter is unavailable")
 	}
 	descriptor, err := primaryKeyDescriptorOf(getter, header.GetCollectionId())
 	if err != nil {
 		return primarykey.Keys{}, err
 	}
-	primary := &schemapb.FieldSchema{FieldID: descriptor.FieldID, DataType: descriptor.DataType, IsPrimaryKey: true}
-	if err := message.ValidateUpsert(header, body, primary); err != nil {
-		return primarykey.Keys{}, status.NewUnrecoverableError("invalid Upsert body for write tracking: %v", err)
+	if err := message.ValidateUpsert(header, body, &schemapb.FieldSchema{FieldID: descriptor.FieldID, DataType: descriptor.DataType, IsPrimaryKey: true}); err != nil {
+		return primarykey.Keys{}, err
 	}
-	return primarykey.KeysOfInsert(body.GetInsert(), descriptor.FieldID, descriptor.DataType)
+	result, err := primarykey.KeysOfDelete(&msgpb.DeleteRequest{PrimaryKeys: body.GetPrimaryKeys()})
+	if err != nil {
+		return primarykey.Keys{}, err
+	}
+	result = result.Clone()
+	for _, effect := range body.GetDeleteEffects() {
+		keys, err := primarykey.KeysOfDelete(&msgpb.DeleteRequest{PrimaryKeys: effect.GetPrimaryKeys()})
+		if err != nil {
+			return primarykey.Keys{}, err
+		}
+		result.Append(keys)
+	}
+	return result, nil
 }

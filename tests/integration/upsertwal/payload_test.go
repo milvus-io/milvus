@@ -25,10 +25,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -72,11 +72,11 @@ func (s *UpsertWALSuite) TestProducerCanonicalColumnsSurvivePersistence() {
 		typed := message.MustAsMutableUpsertMessageV2(raw)
 		body := typed.MustBody()
 		second := message.MustAsMutableUpsertMessageV2(c.upsert(12, marker)).MustBody()
-		body.Insert.NumRows = 2
-		body.Insert.RowIDs = append(body.Insert.RowIDs, second.Insert.RowIDs...)
-		body.Delete.NumRows = 2
-		body.Delete.PrimaryKeys.GetIntId().Data = []int64{11, 12}
-		for _, field := range body.Insert.FieldsData {
+		body.PrimaryKeys.GetIntId().Data = []int64{11, 12}
+		body.RowIds = append(body.RowIds, second.RowIds...)
+
+		body.DeleteEffects[0].PrimaryKeys.GetIntId().Data = []int64{11, 12}
+		for _, field := range body.Columns {
 			switch field.GetFieldName() {
 			case "pk":
 				field.GetScalars().GetLongData().Data = []int64{11, 12}
@@ -99,11 +99,11 @@ func (s *UpsertWALSuite) TestProducerCanonicalColumnsSurvivePersistence() {
 			default:
 				continue
 			}
-			body.Insert.FieldsData = append(body.Insert.FieldsData, column)
+			body.Columns = append(body.Columns, column)
 		}
 		typed.OverwriteBody(body)
 		header := typed.Header()
-		header.Partition.Rows = 2
+		header.Partitions[0].Rows = 2
 		header.DeleteRows = 2
 		typed.OverwriteHeader(header)
 		return raw
@@ -205,7 +205,7 @@ func (s *UpsertWALSuite) TestFunctionOutputSurvivesReplacementAndReload() {
 		body := msg.MustBody()
 		for _, field := range c.schema.GetFields() {
 			if field.GetName() == "text" {
-				body.Insert.FieldsData = append(body.Insert.FieldsData, &schemapb.FieldData{FieldId: field.GetFieldID(), FieldName: field.GetName(), Type: field.GetDataType(), Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{text}}}}}})
+				body.Columns = append(body.Columns, &schemapb.FieldData{FieldId: field.GetFieldID(), FieldName: field.GetName(), Type: field.GetDataType(), Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{text}}}}}})
 			}
 		}
 		msg.OverwriteBody(body)
@@ -233,7 +233,7 @@ func (s *UpsertWALSuite) TestFunctionOutputSurvivesReplacementAndReload() {
 	s.Require().Equal([]string{"replacement document"}, texts)
 }
 
-func (s *UpsertWALSuite) TestRowBasedInputIsRejectedBeforeWAL() {
+func (s *UpsertWALSuite) TestDuplicatedPrimaryColumnIsRejectedBeforeWAL() {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	c := s.create(ctx)
@@ -243,7 +243,7 @@ func (s *UpsertWALSuite) TestRowBasedInputIsRejectedBeforeWAL() {
 	msg := c.upsert(11, 2)
 	typed := message.MustAsMutableUpsertMessageV2(msg)
 	body := typed.MustBody()
-	body.Insert.Version = msgpb.InsertDataVersion_RowBased
+	body.Columns = append(body.Columns, &schemapb.FieldData{FieldId: 100})
 	typed.OverwriteBody(body)
 	_, err = producer.Append(ctx, msg)
 	s.Require().Error(err)
@@ -306,20 +306,20 @@ func (s *UpsertWALSuite) TestDuplicateKeysInOneMessageAreAccepted() {
 	msg := c.upsert(11, 2)
 	typed := message.MustAsMutableUpsertMessageV2(msg)
 	body := typed.MustBody()
-	body.Insert.NumRows = 2
-	body.Insert.RowIDs = append(body.Insert.RowIDs, body.Insert.RowIDs[0]+1)
-	for _, field := range body.Insert.FieldsData {
+	body.PrimaryKeys.GetIntId().Data = []int64{11, 11}
+	body.RowIds = append(body.RowIds, body.RowIds[0]+1)
+	for _, field := range body.Columns {
 		if field.GetScalars() != nil {
 			field.GetScalars().GetLongData().Data = append(field.GetScalars().GetLongData().Data, field.GetScalars().GetLongData().Data...)
 		} else {
 			field.GetVectors().GetFloatVector().Data = append(field.GetVectors().GetFloatVector().Data, field.GetVectors().GetFloatVector().Data...)
 		}
 	}
-	body.Delete.NumRows = 2
-	body.Delete.PrimaryKeys.GetIntId().Data = []int64{11, 11}
+
+	body.DeleteEffects[0].PrimaryKeys.GetIntId().Data = []int64{11, 11}
 	typed.OverwriteBody(body)
 	header := typed.Header()
-	header.Partition.Rows = 2
+	header.Partitions[0].Rows = 2
 	header.DeleteRows = 2
 	typed.OverwriteHeader(header)
 	_, err = producer.Append(ctx, msg)
@@ -360,7 +360,7 @@ func (s *UpsertWALSuite) TestRawProduceStaleSchemaRefreshAndRetry() {
 	body := typed.MustBody()
 	for _, field := range c.schema.GetFields() {
 		if field.GetName() == "added" {
-			body.Insert.FieldsData = append(body.Insert.FieldsData, &schemapb.FieldData{FieldId: field.GetFieldID(), FieldName: field.GetName(), Type: field.GetDataType(), ValidData: []bool{true}, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{42}}}}}})
+			body.Columns = append(body.Columns, &schemapb.FieldData{FieldId: field.GetFieldID(), FieldName: field.GetName(), Type: field.GetDataType(), ValidData: []bool{true}, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{42}}}}}})
 		}
 	}
 	typed.OverwriteBody(body)
@@ -406,7 +406,7 @@ func (s *UpsertWALSuite) TestProducerValidSparseRows() {
 		raw := c.upsert(11, marker)
 		typed := message.MustAsMutableUpsertMessageV2(raw)
 		body := typed.MustBody()
-		for _, field := range body.Insert.FieldsData {
+		for _, field := range body.Columns {
 			if field.GetFieldName() == "vector" {
 				field.Field = &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 10, Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{Dim: 10, Contents: [][]byte{row}}}}}
 			}
@@ -423,4 +423,69 @@ func (s *UpsertWALSuite) TestProducerValidSparseRows() {
 	s.assertRows(ctx, c, 11, 1, 0)
 	s.assertRows(ctx, c, 11, 2, 1)
 	s.assertPhysicalRows(ctx, c, 2)
+}
+
+func (s *UpsertWALSuite) TestOneMessagePlacesRowsInMultiplePartitions() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	c := s.create(ctx)
+	producer := rawProducer(s.T(), ctx, s.Cluster, c.vchannel)
+	defer producer.Close()
+	_, err := producer.Append(ctx, c.upsert(11, 1))
+	s.Require().NoError(err)
+	status, err := s.Cluster.MilvusClient.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{CollectionName: c.name, PartitionName: "unified_other"})
+	s.Require().NoError(merr.CheckRPCCall(status, err))
+	partitions, err := s.Cluster.MilvusClient.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{CollectionName: c.name})
+	s.Require().NoError(merr.CheckRPCCall(partitions, err))
+	var other int64
+	for i, name := range partitions.PartitionNames {
+		if name == "unified_other" {
+			other = partitions.PartitionIDs[i]
+		}
+	}
+	s.Require().Positive(other)
+	raw := c.upsert(11, 2, "multi-partition")
+	typed := message.MustAsMutableUpsertMessageV2(raw)
+	body := typed.MustBody()
+	second := message.MustAsMutableUpsertMessageV2(c.upsert(12, 3)).MustBody()
+	body.PrimaryKeys.GetIntId().Data = append(body.PrimaryKeys.GetIntId().Data, 12)
+	body.RowIds = append(body.RowIds, second.RowIds...)
+	body.PartitionIndexes = []uint32{0, 1}
+	body.RequestRowMapping.RowOffsets = []uint32{0, 1}
+	for i, field := range body.Columns {
+		if field.GetScalars() != nil {
+			field.GetScalars().GetLongData().Data = append(field.GetScalars().GetLongData().Data, second.Columns[i].GetScalars().GetLongData().Data...)
+		} else {
+			field.GetVectors().GetFloatVector().Data = append(field.GetVectors().GetFloatVector().Data, second.Columns[i].GetVectors().GetFloatVector().Data...)
+		}
+	}
+	typed.OverwriteBody(body)
+	header := typed.Header()
+	header.Partitions = append(header.Partitions, &message.PartitionSegmentAssignment{PartitionId: other, Rows: 1})
+	typed.OverwriteHeader(header)
+	original, err := producer.Append(ctx, raw)
+	s.Require().NoError(err)
+	var retryResult messagespb.IdempotentInsertResult
+	s.Require().NoError(original.GetExtra(&retryResult))
+	s.Require().Equal([]int64{11, 12}, retryResult.Ids.GetIntId().Data)
+	s.Require().Equal([]uint32{0, 1}, retryResult.RowOffsets)
+	check := func() { s.assertRows(ctx, c, 11, 1, 0); s.assertRows(ctx, c, 11, 2, 1); s.assertRows(ctx, c, 12, 3, 1) }
+	// Validate persisted rows independently of the pending native query startup.
+	s.flush(ctx, c)
+	status, err = s.Cluster.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{CollectionName: c.name})
+	s.Require().NoError(merr.CheckRPCCall(status, err))
+	status, err = s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{CollectionName: c.name})
+	s.Require().NoError(merr.CheckRPCCall(status, err))
+	s.WaitForLoad(ctx, c.name)
+	check()
+	producer.Close()
+	s.restartStreamingNode(c)
+	check()
+	producer = rawProducer(s.T(), ctx, s.Cluster, c.vchannel)
+	defer producer.Close()
+	duplicate, err := producer.Append(ctx, raw)
+	s.Require().NoError(err)
+	s.Require().True(original.MessageID.EQ(duplicate.MessageID))
+	s.Require().True(proto.Equal(original.Extra, duplicate.Extra))
+	s.assertPhysicalRows(ctx, c, 3)
 }

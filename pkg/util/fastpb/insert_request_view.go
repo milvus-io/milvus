@@ -47,6 +47,7 @@ import (
 // data. Direct proto3 strings are a trusted internal input; the encoder
 // deliberately does not rescan UTF-8 payloads.
 type InsertRequestViewEncoder struct {
+	columnsOnly           bool
 	template              *msgpb.InsertRequest
 	source                *msgpb.InsertRequest
 	rows                  []int
@@ -133,6 +134,11 @@ func (c *InsertRequestViewCursor) newEncoder(template *msgpb.InsertRequest, rows
 // scratch. Callers must synchronously marshal the returned encoder before
 // requesting the next one.
 func (c *InsertRequestViewCursor) NextEncoder(template *msgpb.InsertRequest, rows []int, sizeLimit int) (*InsertRequestViewEncoder, int, error) {
+	return c.nextEncoder(template, rows, sizeLimit, nil)
+}
+
+// nextEncoder uses the same row plan for Insert framing and Upsert columns.
+func (c *InsertRequestViewCursor) nextEncoder(template *msgpb.InsertRequest, rows []int, sizeLimit int, fitsColumns func(count, size int) bool) (*InsertRequestViewEncoder, int, error) {
 	if c == nil || c.source == nil {
 		return nil, 0, insertViewInternal("nil insert request view cursor")
 	}
@@ -156,7 +162,11 @@ func (c *InsertRequestViewCursor) NextEncoder(template *msgpb.InsertRequest, row
 	planScanRow := c.scanRow
 	previous := c.lastSelectedRow
 	consumed := 0
-	aggregatedRows, err := c.sizeState.aggregateSimpleRows(rows, previous, sizeLimit)
+	aggregatedRows := 0
+	var err error
+	if fitsColumns == nil {
+		aggregatedRows, err = c.sizeState.aggregateSimpleRows(rows, previous, sizeLimit)
+	}
 	if err != nil {
 		return nil, 0, err
 	}
@@ -202,7 +212,12 @@ func (c *InsertRequestViewCursor) NextEncoder(template *msgpb.InsertRequest, row
 		if err != nil {
 			return nil, 0, err
 		}
-		if consumed > 0 && sizeLimit > 0 && encodedSize >= sizeLimit {
+		fits := sizeLimit <= 0 || encodedSize < sizeLimit
+		if fitsColumns != nil {
+			columnsSize := encodedSize - c.sizeState.previewTimestampWireSize - c.sizeState.previewRowIDWireSize - c.sizeState.previewNumRowsWireSize
+			fits = fitsColumns(consumed+1, columnsSize)
+		}
+		if consumed > 0 && !fits {
 			c.pendingRow = row
 			copy(c.pendingFieldDataIndices, c.rowFieldDataIndices)
 			copy(c.pendingFieldDeltas, c.sizeState.rowDeltas)
@@ -374,6 +389,10 @@ func (e *InsertRequestViewEncoder) checkCursorOwnership() error {
 }
 
 func (e *InsertRequestViewEncoder) appendRequest(w *insertViewWriter) error {
+	if e.columnsOnly {
+		return e.appendColumns(w, 4)
+	}
+
 	t := e.template
 	if t.GetBase() != nil {
 		if err := w.protoMessage(1, t.GetBase(), "insert base"); err != nil {
@@ -404,22 +423,8 @@ func (e *InsertRequestViewEncoder) appendRequest(w *insertViewWriter) error {
 		return err
 	}
 
-	for i, field := range e.source.GetFieldsData() {
-		if field == nil {
-			return insertViewInternal("source FieldsData[%d] is nil", i)
-		}
-		if field.GetStructArrays() != nil {
-			return insertViewInternal("source field %q (%d) still contains StructArrays; proxy must flatten struct fields before repacking", field.GetFieldName(), field.GetFieldId())
-		}
-		fieldSize, err := w.plannedInt()
-		if err != nil {
-			return err
-		}
-		if err := w.message(13, fieldSize, func() error {
-			return e.appendFieldData(w, i, field)
-		}); err != nil {
-			return err
-		}
+	if err := e.appendColumns(w, 13); err != nil {
+		return err
 	}
 
 	w.proto3Varint(14, uint64(len(e.rows)))
@@ -1416,4 +1421,26 @@ func (w *insertViewWriter) protoMessage(number protowire.Number, message proto.M
 		}
 		return w.err
 	})
+}
+
+func (e *InsertRequestViewEncoder) appendColumns(w *insertViewWriter, number protowire.Number) error {
+	for i, field := range e.source.GetFieldsData() {
+		if field == nil {
+			return insertViewInternal("source FieldsData[%d] is nil", i)
+		}
+		if field.GetStructArrays() != nil {
+			return insertViewInternal("source field %q (%d) still contains StructArrays; proxy must flatten struct fields before repacking", field.GetFieldName(), field.GetFieldId())
+		}
+		fieldSize, err := w.plannedInt()
+		if err != nil {
+			return err
+		}
+		if err := w.message(number, fieldSize, func() error {
+			return e.appendFieldData(w, i, field)
+		}); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

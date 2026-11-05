@@ -10,8 +10,9 @@ import (
 )
 
 type messageImpl struct {
-	payload    []byte
-	properties propertiesImpl
+	upsertMetadata *bodyCacheSlot
+	payload        []byte
+	properties     propertiesImpl
 }
 
 // MessageType returns the type of message.

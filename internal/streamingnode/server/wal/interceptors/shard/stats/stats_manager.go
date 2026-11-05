@@ -234,6 +234,10 @@ func (m *StatsManager) allocRows(segmentID int64, insert ModifiedMetrics, runtim
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	return m.allocRowsLocked(segmentID, insert, runtimeFlushSize)
+}
+
+func (m *StatsManager) allocRowsLocked(segmentID int64, insert ModifiedMetrics, runtimeFlushSize uint64) (bool, error) {
 	// Must be exist, otherwise it's a bug.
 	info, ok := m.segmentIndex[segmentID]
 	if !ok {
@@ -587,4 +591,49 @@ func (m *StatsManager) getConfig() statsConfig {
 type segmentWithBinarySize struct {
 	segmentID  int64
 	binarySize uint64
+}
+
+// Allocation describes one segment in an all-or-nothing batch.
+type Allocation struct {
+	SegmentID        int64
+	Modified         ModifiedMetrics
+	RuntimeFlushSize uint64
+}
+
+// AllocRowsBatch validates every segment before changing any accounting.
+func (m *StatsManager) AllocRowsBatch(batch []Allocation) error {
+	m.mu.Lock()
+	seen := make(map[int64]struct{}, len(batch))
+	for _, allocation := range batch {
+		if _, duplicate := seen[allocation.SegmentID]; duplicate {
+			m.mu.Unlock()
+			return ErrNotEnoughSpace
+		}
+		seen[allocation.SegmentID] = struct{}{}
+		stat := m.segmentStats[allocation.SegmentID]
+		if stat == nil || stat.ShouldBeSealed() {
+			m.mu.Unlock()
+			return ErrNotEnoughSpace
+		}
+		if allocation.Modified.Rows == 0 || allocation.Modified.BinarySize == 0 {
+			m.mu.Unlock()
+			return ErrNotEnoughSpace
+		}
+	}
+	var sealed []int64
+	for _, allocation := range batch {
+		seal, err := m.allocRowsLocked(allocation.SegmentID, allocation.Modified, normalizeRuntimeFlushSize(allocation.Modified, allocation.RuntimeFlushSize))
+		if err != nil {
+			panic("validated batch allocation failed")
+		}
+		if seal {
+			sealed = append(sealed, allocation.SegmentID)
+		}
+	}
+	m.mu.Unlock()
+	for _, id := range sealed {
+		m.worker.NotifySealSegment(id, policy.PolicyCapacity())
+	}
+	m.notifyIfTotalGrowingBytesOverHWM()
+	return nil
 }

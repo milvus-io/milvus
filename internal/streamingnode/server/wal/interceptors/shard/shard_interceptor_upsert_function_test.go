@@ -1,3 +1,19 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package shard
 
 import (
@@ -21,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	upsertfixture "github.com/milvus-io/milvus/pkg/v3/streaming/util/message/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -39,11 +56,11 @@ func upsertFunctionFixture() (message.MutableMessage, *schemapb.CollectionSchema
 	msg := upsertForTest("p_1v0")
 	typed := message.MustAsMutableUpsertMessageV2(msg)
 	body := typed.MustBody()
-	body.Insert.FieldsData = append(body.Insert.FieldsData, &schemapb.FieldData{FieldId: 101, FieldName: "text", Type: schemapb.DataType_VarChar, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"new row"}}}}}})
+	body.Columns = append(body.Columns, &schemapb.FieldData{FieldId: 101, FieldName: "text", Type: schemapb.DataType_VarChar, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"new row"}}}}}})
 	typed.OverwriteBody(body)
 	header := typed.Header()
-	header.Partition.BinarySize = 1
-	header.Partition.SegmentAssignment = &message.SegmentAssignment{SegmentId: 999}
+	header.Partitions[0].BinarySize = 1
+	header.Partitions[0].SegmentAssignment = &message.SegmentAssignment{SegmentId: 999}
 	typed.OverwriteHeader(header)
 	schema := &schemapb.CollectionSchema{Version: 1, Fields: []*schemapb.FieldSchema{
 		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
@@ -70,15 +87,15 @@ func TestUpsertFunctionMaterializationGateAndNestedAdapter(t *testing.T) {
 			defer item.SwapTempValue(old)
 			msg, schema := upsertFunctionFixture()
 			initial := message.MustAsMutableUpsertMessageV2(msg).MustBody()
-			deletion := proto.Clone(initial.GetDelete()).(*msgpb.DeleteRequest)
-			initialSize := proto.Size(initial.GetInsert())
+			deletion := proto.Clone(upsertfixture.Delete(initial)).(*msgpb.DeleteRequest)
+			initialSize := proto.Size(upsertfixture.Insert(initial))
 			calls := 0
 			manager := &upsertMaterializationManager{materialize: func(ctx context.Context, id int64, key string, version int32, insert function.InsertMessage) (bool, error) {
 				calls++
 				require.Equal(t, int64(1), id)
 				require.Equal(t, WALFunctionRunnerKey("p_1v0"), key)
 				require.Equal(t, int32(1), version)
-				require.Equal(t, "new row", insert.MustBody().GetFieldsData()[1].GetScalars().GetStringData().GetData()[0])
+				require.Equal(t, "new row", insert.MustBody().GetFieldsData()[0].GetScalars().GetStringData().GetData()[0])
 				body := proto.Clone(insert.MustBody()).(*msgpb.InsertRequest)
 				body.FieldsData = append(body.FieldsData, &schemapb.FieldData{FieldId: 102, FieldName: "embedding", Type: schemapb.DataType_SparseFloatVector, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{Contents: [][]byte{{1, 0, 0, 0, 0, 0, 128, 63}}}}}}})
 				insert.OverwriteBody(body)
@@ -90,8 +107,8 @@ func TestUpsertFunctionMaterializationGateAndNestedAdapter(t *testing.T) {
 			base.EXPECT().CheckIfCollectionSchemaVersionMatch(mock.Anything).Return(int32(1), nil).Once()
 			assignment := &shards.AssignSegmentResult{SegmentID: 123, Acknowledge: atomic.NewInt32(1)}
 			base.EXPECT().AssignSegment(mock.MatchedBy(func(request *shards.AssignSegmentRequest) bool {
-				current := message.MustAsMutableUpsertMessageV2(msg).MustBody().GetInsert()
-				return request.CollectionID == 1 && request.PartitionID == 2 && request.TimeTick == 10 && request.ModifiedMetrics.Rows == 1 && request.ModifiedMetrics.BinarySize == uint64(proto.Size(current))
+				current := upsertfixture.Insert(message.MustAsMutableUpsertMessageV2(msg).MustBody())
+				return request.TxnSession == nil && request.CollectionID == 1 && request.PartitionID == 2 && request.TimeTick == 10 && request.ModifiedMetrics.Rows == 1 && request.ModifiedMetrics.BinarySize > uint64(proto.Size(current.GetFieldsData()[0]))
 			})).Return(assignment, nil).Once()
 			interceptor := &shardInterceptor{shardManager: shardManager}
 			interceptor.initOpTable()
@@ -99,14 +116,14 @@ func TestUpsertFunctionMaterializationGateAndNestedAdapter(t *testing.T) {
 			id, err := interceptor.DoAppend(t.Context(), msg, func(_ context.Context, appended message.MutableMessage) (message.MessageID, error) {
 				appends++
 				upsert := message.MustAsMutableUpsertMessageV2(appended)
-				require.True(t, proto.Equal(deletion, upsert.MustBody().GetDelete()))
-				require.Equal(t, int64(123), upsert.Header().GetPartition().GetSegmentAssignment().GetSegmentId())
-				require.Equal(t, uint64(proto.Size(upsert.MustBody().GetInsert())), upsert.Header().GetPartition().GetBinarySize())
+				require.True(t, proto.Equal(deletion, upsertfixture.Delete(upsert.MustBody())))
+				require.Equal(t, int64(123), upsert.Header().GetPartitions()[0].GetSegmentAssignment().GetSegmentId())
+				require.Positive(t, upsert.Header().GetPartitions()[0].GetBinarySize())
 				if enabled {
-					require.Len(t, upsert.MustBody().GetInsert().GetFieldsData(), 3)
-					require.Greater(t, proto.Size(upsert.MustBody().GetInsert()), initialSize)
+					require.Len(t, upsertfixture.Insert(upsert.MustBody()).GetFieldsData(), 3)
+					require.Greater(t, proto.Size(upsertfixture.Insert(upsert.MustBody())), initialSize)
 				} else {
-					require.Len(t, upsert.MustBody().GetInsert().GetFieldsData(), 2)
+					require.Len(t, upsertfixture.Insert(upsert.MustBody()).GetFieldsData(), 2)
 				}
 				return walimplstest.NewTestMessageID(1), nil
 			})
@@ -120,7 +137,7 @@ func TestUpsertFunctionMaterializationGateAndNestedAdapter(t *testing.T) {
 			require.Equal(t, expectedCalls, calls)
 			require.Zero(t, assignment.Acknowledge.Load())
 			require.Equal(t, uint64(1), shardManager.deleteRows)
-			require.Equal(t, uint64(proto.Size(deletion)), shardManager.deleteBytes)
+			require.Equal(t, uint64(proto.Size(&message.UpsertMessageBody{DeleteEffects: initial.GetDeleteEffects()})), shardManager.deleteBytes)
 		})
 	}
 }

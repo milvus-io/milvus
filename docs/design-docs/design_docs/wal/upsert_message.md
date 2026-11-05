@@ -1,123 +1,104 @@
-# Upsert WAL Message
+# Unified Upsert WAL messages
 
-## Scope
+## Purpose
 
-Upsert expresses replacement in one logical WAL message. It contains complete new rows and an unconditional set of primary keys (PKs) to delete. This capability is independent of PRIMARY_KEY indexing and does not change Proxy upsert production.
+Insert, Upsert, and partial update requests use one Upsert WAL format. A logical message has one MessageID and one final visibility TimeTick. Backend chunking does not create separately acknowledged Insert and Delete messages.
 
-A producer must use stable PK-to-VChannel routing. One message targets one collection and one insert partition on one VChannel. Its delete scope covers all partitions of that collection on that VChannel. Cross-VChannel transactions and namespace-enabled collections are unsupported.
+An ordinary Insert records rows without delete effects. An Upsert records the delete effects that the primary producer has already decided. Consumers execute these explicit effects. They do not query a local PK index to infer replacement behavior.
 
-## Message contract
+This format replaces the unreleased draft Upsert format. There is no draft adapter. Historical released Insert and Delete messages remain readable. Independent Delete messages remain supported.
 
-The V2 Upsert header contains collection identity, one PartitionSegmentAssignment, an explicitly present schema version, delete-row count, and optional IdempotentInsertResult metadata in idempotent_result (field 5). The body contains only InsertRequest (field 1) and DeleteRequest (field 2). The row payload follows body encryption. Response IDs and row offsets follow the existing Insert header boundary: the header is plaintext WAL metadata and can appear in message logs. PK values repeated in response metadata are outside payload encryption.
+## Wire contract
 
-The distinct inserted and deleted PK sets must match exactly, using the schema's Int64 or VarChar PK type. Repeated PKs are permitted in either request. A repeated delete key cannot substitute for a missing key, and an extra delete key is invalid. Each request count must match its own payload. Collection IDs and the insert target partition must agree. The delete partition is AllPartitionsID.
+The header contains:
 
-InsertRequest.Version must be ColumnBased. Populated FieldsData does not override a RowBased format marker. As with Insert, producers must validate general field values and their physical representation before Produce. This includes sparse row encoding, vector dimensions, field lengths, nullable data, and recursive Array/VectorArray content. The Upsert handler checks the compound contract, not general field validity.
+| Field number | Field | Meaning |
+| --- | --- | --- |
+| 1 | collection_id | One collection identity |
+| 2 | partitions | Partition table with row counts, binary sizes, and receiving-cluster segment assignments |
+| 3 | schema_version | Explicitly present schema version, including zero |
+| 4 | delete_rows | Total explicit delete key count |
 
-Producers supply canonical field payloads. Nullable scalar values and outer Array/VectorArray rows include one physical entry for every logical row. Nullable scalar Array elements are also expanded; ordinary nullable vector payloads retain their existing compact representation. Timestamptz uses TimestamptzData, and Geometry uses WKB GeometryData. The shard does not run Proxy input conversions or a separate general field validator. Raw Produce is an internal interface; malformed general fields violate its producer contract and can fail during consumption.
+The body contains:
 
-Producers supply final PKs and RowIDs. WAL does not allocate autoID or probe for old rows. A newly allocated key behaves like any other absent key. Public autoID upsert that deletes one key and inserts a different key remains on the existing Proxy path.
+| Field number | Field | Meaning |
+| --- | --- | --- |
+| 1 | primary_keys | Inserted Int64 or VarChar keys |
+| 2 | row_ids | Inserted RowIDs |
+| 3 | partition_indexes | Partition table index for each logical row |
+| 4 | columns | Ordinary columns and materialized function outputs |
+| 5 | delete_effects | Explicit delete keys and independent deletion scope |
+| 6 | partial_update_cas | Optional CAS proof |
+| 7 | request_row_mapping | Original request offsets for retry results |
 
-The shard checks the request schema version before it checks the compound contract against the current schema. A stale request returns SchemaVersionMismatch so the producer can invalidate its schema cache and rebuild the request. Same-version violations of the compound contract remain terminal errors. General field validity remains the producer responsibility. The shard materializes function outputs under the existing function policy. It assigns the insert segment locally. Nested timestamps, segment IDs, and shard names do not define visibility or cross-cluster physical identity.
+Ordinary columns exclude PK, RowID, and Timestamp. The final message TimeTick supplies row timestamps. The body does not embed InsertRequest or DeleteRequest. It has no result copy or namespace field.
 
-## Visibility
+One message addresses one collection and one VChannel. Partition IDs are positive and unique in the partition table. Each partition has a positive row count. With one partition, partition_indexes is absent. With multiple partitions, each logical row has one valid index. The frequencies must match the header counts.
 
-The final visibility TimeTick is the autocommit Upsert timestamp or its enclosing transaction's CommitTxn timestamp.
+Each delete effect has nonempty, correctly typed keys and exactly one scope: all partitions, or one positive partition ID. Deletion scope is independent of insertion placement. Delete keys can differ from inserted keys. delete_rows must match all explicit effects.
 
-Consumers insert new rows at that timestamp. They delete matching versions whose insert timestamps are strictly earlier. Equality protects the new rows from their companion deletion. Missing old keys do not change the operation.
+Delete effects remove only versions strictly earlier than the final visible TimeTick. The new rows cannot delete themselves. A missing older version is a no-op. Multiple rows or transaction bodies can contain the same PK. The protocol preserves existing equal-TimeTick semantics and does not promise last-write-wins. It provides no atomicity across VChannels.
 
-An autocommit Upsert has one MessageID and normal AppendResult. It does not expand into an internal transaction. Backend chunking can split bytes but does not create separately acknowledged Insert/Delete operations.
+Namespace requests and namespace-enabled collections are unsupported. Proxy rejects them before sending a WAL message. StreamingNode checks the collection schema for both local and replicated Upsert admission.
 
-## Transactions
+The producer validates ordinary column values. StreamingNode checks the compound contract, scope, identity, counts, PK types, placement, CAS proof shape, and schema version. Schema mismatch precedes schema-dependent content checks.
 
-Upsert is one logical body of an existing single-VChannel transaction. Commit requires an exact, nonzero body count. After scope and body identity checks, a nonzero count mismatch returns TransactionExpired and ends the attempt so the producer can rebuild it with a new TxnID. This also covers body retransmission after a lost acknowledgment. Zero count remains a terminal error. Uncommitted, rolled-back, expired, or exclusively aborted bodies produce no visible effect.
+## Encoding and projections
 
-Uniform Commit timestamps do not express body-order replacement. Repeated PKs within one Upsert and overlaps among Upsert, Insert, and Delete bodies are accepted. These bodies use the existing transaction semantics at one TimeTick. This protocol does not promise last-write-wins for equal-TimeTick versions. Deduplication, merging, and overwrite policy belong to future pkindex work. Transactions without Upsert retain their existing semantics.
+The Proxy groups rows by VChannel and encoded size. It does not split by partition. The existing borrowed column encoder writes selected column values directly into the Upsert wire layout. It does not construct destination FieldData columns. A source-bound cursor selects a row prefix before column encoding. Incremental column plans share nullable positions and scratch across chunks. Conservative metadata budgets include PK, RowIDs, placement, request mapping, delete effects, CAS, and the envelope. A small envelope probe includes encryption metadata and fixed cipher expansion. A final physical-size check rejects unexpected cipher expansion without encoding the batch again. Each accepted chunk encodes ordinary columns once. An indivisible plain row can use existing backend chunking. Keyed and CAS writes retain their existing strict size bound.
 
-An Upsert body contains every intended delete key even if no old row exists when it arrives. If another writer commits that key before the transaction commits, the later transaction deletes the intervening version. Rollback preserves the intervening version.
+Metadata readers scan protobuf tags and lengths. They decode PK, RowIDs, placement, explicit effects, CAS, and request mapping. For ordinary columns, they retain only field descriptors. They skip scalar and vector values without invoking full Body().
 
-### Scope enforcement
+Immutable messages share a metadata projection through the existing bounded body cache. Projection loading has the same cancellation and concurrent-reader rules as full bodies. Metadata and full bodies have separate cache entries and share the cache budget and eviction policy. Projection entries account for decoded metadata and reserve space for derived row mappings. Row placement, validation, and nullable-vector positions are shared across independent segment readers. Eviction releases the metadata and these mappings together. They do not retain the decrypted payload. Historical messages do not allocate an Upsert projection entry.
 
-TxnID lookup alone does not establish scope. Before admitting an Upsert body, TimeTick compares its VChannel with the Begin session. Shard checks the canonical collection identity against the header, nested requests, and its authoritative collection-to-VChannel binding.
+Mutable payload replacement invalidates the metadata slot. Header-only segment assignment does not change body projections. Effect replacement copies unmodified encoded fields, including columns, and encodes only the new effects. Encryption still covers the complete payload. The implementation does not introduce partial encryption.
 
-After RequestCommitAndWait freezes the successful bodies, the transaction layer checks Begin, all bodies, and Commit for one VChannel and collection. This includes legacy Insert/Delete bodies before or after Upsert. TimeTick invokes this validation before Commit persistence and before shard dispatch. Shard registers Upsert in its existing operation table and always dispatches Upsert, including control and empty scopes, so the handler can reject them. Shard does not register a CommitTxn operation.
+## Append and transaction flow
 
-A rejected pre-admission body changes no successful count or lease. A rejected Commit uses marked admission rejection and the existing RejectCommit cleanup. Recovery restores complete body references and applies the same checks before a new Commit can persist. It never drops a foreign body to make a prefix appear complete.
+Proxy preparation resolves AutoID and existing API behavior before packing. Existing AutoID rows retain their PK and receive the corresponding explicit delete effect. Missing rows receive new IDs without old-version deletes. Original request offsets survive VChannel routing and size splitting. Each delete occurrence belongs to the first inserted occurrence of its PK. Matching visits inserted keys and delete occurrences once. Each chunk retains original delete order. Size planning does not consume effects.
 
-Session references do not retain persistence Ack handles. They clear on commit, rollback, expiry, abort, recovery failure, and shutdown. Legacy transactions also retain Begin and successful-body references because Upsert can arrive after a legacy body. The reference slice grows with the successful body count and retains those payloads until cleanup. This change preserves those references for scope validation, transaction validation, and recovery. It adds no overlap map. The existing memory measurement is not a bound for arbitrary payload sizes or transaction lengths.
+The normal transaction contract remains:
 
-## Retry results
+1. Begin succeeds.
+2. The producer sends bodies and waits for every successful response.
+3. The producer sends Commit.
 
-The existing local idempotency window bounds retry suppression. A keyless retry can create another version. This protocol does not add an unlimited or cross-cluster exactly-once guarantee.
+StreamingNode validates the Upsert envelope before shard business effects. TimeTick validates session scope before body admission. Transactions containing Upsert validate Begin, all successful bodies, Commit, collection identity, and exact nonzero body count. Recovery rebuilds and validates the same successful prefix. Rollback, expiry, rejection, and completion retain the existing cleanup ownership.
 
-Upsert uses the same optional idempotent_result header field and result format as Insert. An omitted field is valid; a supplied field must have valid IDs and row offsets. The keyed retry path returns the original AppendResult. It does not substitute IDs from a retry. As for Insert, an autocommit result header is paired with an idempotency key. Transaction bodies may carry metadata for their enclosing keyed Commit. Producers supply row offsets that identify distinct positions in the logical request.
+All inserted target partitions must be ready. Batch assignment selects eligible Growing segments and holds Ack references before accounting. It validates the complete allocation set before charging rows or bytes. A later partition that requires redo cannot leave a charged successful prefix. Each partition accounts for its own PK, RowID, and selected ordinary columns. Delete effects and the outer envelope are excluded from insert pressure. Existing transaction cleanup releases segment transaction references.
 
-The producer contract is: Begin succeeds, all bodies are sent, all body appends succeed, then Commit is sent. This protocol adds no support for Commit sent before body responses complete. The original TimeTick RequestCommitAndWait remains unchanged.
+RowLock and version tracking use the union of inserted and explicit delete keys. Lock-set deduplication does not change the encoded rows or effects. CAS retains its current term, snapshot, transaction, and recovery behavior. Consumers do not repeat CAS or PK-index decisions.
 
-The idempotency interceptor records each successful body's result in its existing transaction result buffer. Commit uses that buffer and the existing MergeIdempotentInsertResults path. Missing or incomplete results return TransactionExpired before Commit append, so the existing producer rebuilds the transaction. One shared completeness check covers Insert-only and mixed transactions. The buffer records missing or incomplete metadata and never caches only the remaining bodies' results. This adds no Upsert-specific mandatory field: keyless writes can omit metadata, and keyed transactions use the existing TransactionExpired path when a complete result cannot be built.
+## Retry results and Summary
 
-The common idempotency response helper supplies the buffered result to the original success and duplicate response. It preserves an Extra already supplied by the append path. There is no result merge, schema dependency, or result callback in shard or TimeTick. Result extraction in idempotency and Summary reads headers without decoding or decrypting the Upsert body. Summary still decodes the compound body for its Delete effect and preserves its atomic failure behavior.
+New Upsert messages have no IdempotentInsertResult field. The idempotency interceptor reconstructs that result from original PK and request_row_mapping. A keyed autocommit requires a complete mapping before it can acquire or return a cached result. Keyless writes can omit it.
 
-After WAL reopen, Summary facts restore committed duplicate responses. A pending transaction whose volatile result buffer was lost uses the existing TransactionExpired and whole-transaction rebuild path. This change does not reconstruct results after waiting for bodies at Commit. Existing rollback, expiry, and abort paths release rejected attempts.
+Transaction bodies use the existing result buffer and merge path. An incomplete keyed Commit returns TransactionExpired so the producer rebuilds the transaction. This change does not support Commit before body responses complete. Duplicate requests return the original AppendResult and IDs, regardless of IDs supplied by the retry.
 
-## Consumption and durability
+Summary uses the metadata projection to reconstruct retry results and explicit deletes. It does not decode ordinary columns for these records. Decode failures prevent publication of either Summary fact and stop frontier advancement. Retained WAL replay and Summary restore use the same original PK and mapping. The existing bounded idempotency window and unknown-outcome limitations remain unchanged.
 
-Consumers use read-only projections of the original Upsert. They do not construct independent WAL Insert/Delete messages. A consumer must copy request metadata before rewriting timestamps or assignments because immutable bodies share cached decoded data.
+## Consumption and persistence
 
-RecoveryStorage owns one outer Upsert or committed Txn. SegmentView retains that outer owner for L1 rows. WALMaterializer retains it for L0 deletes. Both effects and Summary coverage must complete before checkpoint publication. L1 and L0 component cursors remain independent during replay.
+The native WAL consumer builds logical row selections per partition. Every column uses the same selection. A shared row reader builds compact nullable-vector positions once and uses those positions for subsequent partition selections. PK is exposed as a storage column only at the execution boundary. RowID and final Timestamp enter the existing storage interfaces there.
 
-Summary records both write facts and delete blocks at the final timestamp. Native growing runtimes apply both effects before advancing query frontiers. IDF receives the inserted rows through the existing insert walker.
+L1 persistence, growing runtime, function-output handling, local flush replay, and recovery use this row interface. Historical Insert remains a separate readable input. Explicit delete effects feed the existing Transform and L0 paths. L1 and L0 recovery frontiers remain independent. Completion requires all effects that belong to that logical WAL position. A pure row write advances only the Growing frontier. An Upsert with explicit deletes advances Growing and Transform. Insert-only transactions follow the pure-row rule. Explicit query barriers retain their existing frontier behavior.
 
-Legacy MsgPack consumers are outside this feature's supported paths. Native consumers decode the complete compound content before applying either effect or advancing their frontiers.
+Compound protobuf decoding precedes native mutation. A decode or apply failure cannot be hidden by a later message that advances completion. L0 projection errors poison the retained position and stop further scheduling. Query replay uses receiving-cluster segment assignments and final transaction visibility.
 
-## CDC
+No support is added to the legacy MsgPack pipeline or msgdispatcher. Production activation requires the native query path from #52977, which is included in the upstream base. Deployment must still verify compatible native readers before enabling generation.
 
-Upsert requires a persisted, replicable, single-VChannel envelope without broadcast metadata. It rejects the unreplicable, nonpersisted, and PChannel-level markers. A transaction containing Upsert applies this rule to Begin, every successful body, and Commit, including recovered bodies. Legacy-only transactions keep their existing contract. The shard handler checks the envelope before business effects. Idempotency cache hits and replicated duplicate/ignore classification can return before shard; those paths check the envelope before returning a cached or ignored result. CDC forwards its explicit content and source logical identity. Secondary assigns its own segments and local visibility timestamp. It does not query a local pkindex to determine deletes.
+## CDC and activation
 
-Transaction replay preserves one Upsert body, source-ID deduplication, and the original exact Commit count. Receiving prefixes recover through the existing TxnBuffer. Switchover depends on durable row/delete state rather than primary-local index state.
+CDC forwards the primary's logical rows, placement partitions, CAS metadata, mapping, and explicit delete effects. The secondary preserves these logical effects and allocates its own segment IDs. It does not repeat PK-index decisions. Replicated messages bypass the local client idempotency window. Transaction replay uses the final Commit TimeTick.
 
-## Compatibility and activation
+Deployment uses reader-first activation. streaming.wal.upsert.unifiedEnabled defaults to false. auto remains false because the new format has no assigned release capability. The old draft 3.0.7 threshold does not describe this format. The old draft switch cannot enable this new capability. Explicit enablement requires operators to verify all readers, CDC targets, and the native query-path dependency first.
 
-`streaming.wal.upsert.enabled` defaults to false. The append adaptor checks it before interceptor mutation for local, remote, and replicated appends. Readers never consult this generation gate. Existing durable bodies can still Commit or Rollback while generation is disabled.
+Gate-off rejects new Insert, Upsert, and partial-update requests before the first send. New producers do not fall back to Insert WAL. Gate-off does not disable historical decoding or Commit/Rollback for existing durable bodies. It does not remove retained WAL records.
 
-The default remains false. An explicit true bypasses version checks. With auto configured, the existing VersionGateSwitcher keeps generation disabled until the local cluster's minimum online session version reaches 3.0.7 and remains there for one minute, then publishes true through the config center. The item is registered with the existing coordinator switcher; no separate polling service is added.
-
-Configure auto before coordinator startup. The switcher is one-shot: it does not re-arm a gate after resolving an explicit false value or after enabling it. A later change from false to auto requires restarting the coordinator to start another confirmation. Explicit true/false values remain refreshable. Embedded-etcd single-process deployments use the existing local-version resolution.
-
-The control plane guarantees that CDC secondary cluster versions lead the primary. Configure the receiving clusters' gates as well as the source gate; the local switcher does not inspect remote clusters or enable their configs. No cross-cluster capability negotiation is added. Once enabled, the switcher does not continuously reject an older node joining later and does not guarantee downgrade compatibility.
-
-Old Produce ingress rejects unknown numeric types. Other old paths can pass them through, miss their effects, or panic during conversion. Ignoring unknown messages is unsafe.
-
-Turning generation off does not remove retained Upsert history. Upgraded readers remain necessary for reopen, reassignment, CDC backlog, backups, and restore. This feature supplies no WAL rewrite or downgrade tool.
-
-Existing Proxy upsert retains its Insert/Delete transaction path. Explicit native callers receive a terminal error when generation is disabled. No shard-level transparent fallback is supplied.
-
-## Validation obligations
-
-Verification must inspect old and new row content, not only PK counts. Cover autocommit, concurrency, transaction rejection, recovery, chunking, response loss, independent L1/L0 persistence, flush/reload, compaction, function outputs, and cipher failures.
-
-Use a real Produce RPC integration helper for the native type. CDC validation requires two clusters, receiving-prefix replay, independent physical assignments, and switchover. Record unexecuted scenarios explicitly. Unit conversion tests do not establish data-level correctness.
-
-## Existing documentation
-
-Production opener, VChannel observation, and query resource construction connect the native query path. This change updates the earlier descriptions of QueryRuntime forwarding as future work. The active retained-WAL L0 implementation remains distinct from the dormant Summary-reader L0 implementation.
+Unknown-message skipping is not a compatibility strategy. Mixed-version operation and downgrade across retained new-format history are unsupported until the required reader capability is deployed. The operator-managed switch does not provide automatic mixed-version safety or a downgrade guarantee.
 
 ## Validation boundaries
 
-The tests check compound PK set equality with repeated Int64 and VarChar keys, transaction scope and exact counts, normal-order buffered response completeness, recovery, cleanup, and complete Insert/Delete effects. Tests for general field rejection and PK overlap rejection are removed because those are no longer server admission policies.
+Tests must check inserted and deleted rows, original retry results, accounting, cleanup, and recovery frontiers. Compilation and historical draft test results do not establish this contract. Benchmarks measure metadata decoding, borrowed encoding, scatter allocations, payload size, encryption, and materialized outputs separately. Performance claims require measured results.
 
-Valid sparse vectors and BM25 function output remain test cases. MinHash output is not verified. Invalid general field payloads are not tested through raw Produce because the producer must reject them before that interface. The generation gate does not establish automatic mixed-version safety or a downgrade guarantee. Test execution and remaining limits are recorded in the external verification report.
-
-## Draft field removal and generation
-
-Upsert is not released. The former UpsertMessageBody.append_result field 3 is removed, with its number and name reserved. There is no legacy body fallback and no migration that copies an unknown body field into the header. Test builders and fixtures use the header as their only result source. WAL data produced by earlier drafts of this PR is not a supported retained-history format; recreate those development fixtures.
-
-Insert/Delete and all other existing message enum values and field numbers remain unchanged. Upsert keeps its existing header fields 1 through 4 and adds idempotent_result at field 5. Protocol tests check optional presence and removal of the body accessor. Protobuf and message helpers are regenerated through the repository targets and checked for repeatability.
-
-## Query path dependency
-
-Deployment of native Upsert depends on the query-path transition in [QueryView PR #52977](https://github.com/milvus-io/milvus/pull/52977). This feature does not add Upsert adaptation to the legacy MsgPack pipeline or msgdispatcher. It does not support native Upsert with that legacy query path.
-
-The dependency's startup commit 475778acf1 is not an ancestor of this branch. The generation gate must remain disabled for deployments that still use the legacy query path. The version gate alone does not verify this dependency. This PR does not rebase or import the dependency implicitly. Query integration must be verified on the combined revision before activation.
-
-Existing MsgStream, SimpleMsgDispatcher, and flowgraph tests remain unchanged. SegmentInsertMessage retains its InsertRequest interface because native growing runtime, IDF, and WALView materialization use it to read nested Upsert rows without creating a synthetic top-level Insert message.
+This change does not enable PRIMARY_KEY indexes, import another branch's decision algorithm, change equal-TimeTick duplicate semantics, or implement cross-VChannel atomicity. Full deployment validation still requires the native query-path dependency and compatible primary and secondary readers.

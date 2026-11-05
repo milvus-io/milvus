@@ -22,7 +22,9 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	upsertfixture "github.com/milvus-io/milvus/pkg/v3/streaming/util/message/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -43,7 +45,7 @@ func (s *UpsertWALSuite) TestRawProduceRejectsForbiddenEnvelopeMarkers() {
 	}
 }
 
-func (s *UpsertWALSuite) TestGateOffAllowsDurableCommitAndLegacyProducer() {
+func (s *UpsertWALSuite) TestGateOffAllowsDurableCommitAndRejectsNewProducer() {
 	for _, mode := range []string{"false", "auto"} {
 		s.Run(mode, func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
@@ -58,7 +60,7 @@ func (s *UpsertWALSuite) TestGateOffAllowsDurableCommitAndLegacyProducer() {
 			s.Require().NotNil(begin.TxnCtx)
 			_, err = producer.Append(ctx, c.upsert(11, 2).WithTxnContext(*begin.TxnCtx))
 			s.Require().NoError(err)
-			restore := s.Cluster.MustModifyMilvusConfig(map[string]string{"streaming.wal.upsert.enabled": mode})
+			restore := s.Cluster.MustModifyMilvusConfig(map[string]string{"streaming.wal.upsert.unifiedEnabled": mode})
 			defer restore()
 			s.Require().Eventually(func() bool {
 				_, err := producer.Append(ctx, c.upsert(12, 4))
@@ -69,17 +71,38 @@ func (s *UpsertWALSuite) TestGateOffAllowsDurableCommitAndLegacyProducer() {
 			s.Require().NoError(err)
 			s.assertRows(ctx, c, 11, 1, 0)
 			s.assertRows(ctx, c, 11, 2, 1)
-			// The existing Proxy producer remains a usable upstream legacy path.
-			request := message.MustAsMutableUpsertMessageV2(c.upsert(13, 5)).MustBody().GetInsert()
+			// New API writes fail before sending any WAL message.
+			request := upsertfixture.Insert(message.MustAsMutableUpsertMessageV2(c.upsert(13, 5)).MustBody())
 			result, err := s.Cluster.MilvusClient.Upsert(ctx, &milvuspb.UpsertRequest{CollectionName: c.name, NumRows: 1, FieldsData: request.GetFieldsData()})
-			s.Require().NoError(merr.CheckRPCCall(result, err))
-			s.assertRows(ctx, c, 13, 5, 1)
+			s.Require().Error(merr.CheckRPCCall(result, err))
+			s.assertRows(ctx, c, 13, 5, 0)
 			// Gate-off also leaves retained Upsert history readable after reopening WAL.
 			producer.Close()
 			s.restartStreamingNode(c)
 			s.assertRows(ctx, c, 11, 1, 0)
 			s.assertRows(ctx, c, 11, 2, 1)
-			s.assertRows(ctx, c, 13, 5, 1)
+			s.assertRows(ctx, c, 13, 5, 0)
 		})
 	}
+}
+
+func (s *UpsertWALSuite) TestNamespaceRejectedBeforeUnifiedAppend() {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	c := s.createWithPK(ctx, schemapb.DataType_Int64, false, func(schema *schemapb.CollectionSchema) { schema.EnableNamespace = true })
+	producer := rawProducer(s.T(), ctx, s.Cluster, c.vchannel)
+	defer producer.Close()
+	_, err := producer.Append(ctx, c.upsert(11, 1))
+	s.Require().ErrorContains(err, "namespace")
+	namespace := "tenant"
+	insert, err := s.Cluster.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{CollectionName: c.name, Namespace: &namespace, NumRows: 1})
+	s.Require().ErrorContains(merr.CheckRPCCall(insert, err), "namespace")
+	upsert, err := s.Cluster.MilvusClient.Upsert(ctx, &milvuspb.UpsertRequest{CollectionName: c.name, Namespace: &namespace, NumRows: 1})
+	s.Require().ErrorContains(merr.CheckRPCCall(upsert, err), "namespace")
+	ordinary := s.create(ctx)
+	ordinaryProducer := rawProducer(s.T(), ctx, s.Cluster, ordinary.vchannel)
+	defer ordinaryProducer.Close()
+	_, err = ordinaryProducer.Append(ctx, ordinary.upsert(11, 1))
+	s.Require().NoError(err)
+	s.flush(ctx, ordinary)
 }

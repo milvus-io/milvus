@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	upsertfixture "github.com/milvus-io/milvus/pkg/v3/streaming/util/message/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
@@ -264,7 +265,7 @@ func TestProduceGuardOrdinaryTxnExpiredReplaysWholeTransaction(t *testing.T) {
 				createRealInsertMessage(t, "test-v"),
 			}
 			if upsert {
-				msgs[0] = message.NewUpsertMessageBuilderV2().WithVChannel("test-v").WithHeader(&message.UpsertMessageHeader{CollectionId: 1}).WithBody(&message.UpsertMessageBody{Insert: &msgpb.InsertRequest{CollectionID: 1}}).MustBuildMutable()
+				msgs[0] = message.NewUpsertMessageBuilderV2().WithVChannel("test-v").WithHeader(&message.UpsertMessageHeader{CollectionId: 1}).WithBody(upsertfixture.Body(&msgpb.InsertRequest{CollectionID: 1}, nil)).MustBuildMutable()
 			}
 			guard := &ProduceGuard{
 				producer: &ResumableProducer{opts: &ProducerOptions{PChannel: "p1"}},

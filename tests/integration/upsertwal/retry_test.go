@@ -58,14 +58,14 @@ func (s *upsertWALFixture) sequentialKeyedUpsertResults() {
 		s.Require().NoError(err)
 		second := c.upsert(12, 3, "sequential-keyed")
 		typed := message.MustAsMutableUpsertMessageV2(second)
-		resultHeader := typed.Header()
-		resultHeader.IdempotentResult.RowOffsets = []uint32{1}
-		typed.OverwriteHeader(resultHeader)
+		resultBody := typed.MustBody()
+		resultBody.RequestRowMapping.RowOffsets = []uint32{1}
+		typed.OverwriteBody(resultBody)
 		if mixed {
 			second = c.legacy("Insert", 12, 3)
 			insert := message.MustAsMutableInsertMessageV1(second)
 			header := insert.Header()
-			message.SetInsertHeaderIdempotentInsertResult(header, resultHeader.IdempotentResult)
+			message.SetInsertHeaderIdempotentInsertResult(header, &messagespb.IdempotentInsertResult{Ids: resultBody.PrimaryKeys, RowOffsets: resultBody.RequestRowMapping.RowOffsets})
 			insert.OverwriteHeader(header)
 		}
 		_, err = producer.Append(ctx, second.WithTxnContext(*begin.TxnCtx))
@@ -153,7 +153,7 @@ func (s *UpsertWALSuite) TestPendingKeyedUpsertUsesExistingRebuildAfterReopen() 
 	s.assertPhysicalRows(ctx, c, 2)
 }
 
-func (s *UpsertWALSuite) TestOptionalHeaderResultAndInvalidMetadata() {
+func (s *UpsertWALSuite) TestRequestMappingAndInvalidMetadata() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	c := s.create(ctx)
@@ -162,30 +162,25 @@ func (s *UpsertWALSuite) TestOptionalHeaderResultAndInvalidMetadata() {
 	s.Require().NoError(err)
 	invalid := c.upsert(11, 999, "invalid-metadata")
 	typed := message.MustAsMutableUpsertMessageV2(invalid)
-	header := typed.Header()
-	header.IdempotentResult = &messagespb.IdempotentInsertResult{RowOffsets: []uint32{0}}
-	typed.OverwriteHeader(header)
+	body := typed.MustBody()
+	body.RequestRowMapping.RowOffsets = []uint32{0, 1}
+	typed.OverwriteBody(body)
 	_, err = producer.Append(ctx, invalid)
 	s.Require().Error(err)
 	s.assertRows(ctx, c, 11, 1, 1)
 	s.assertRows(ctx, c, 11, 999, 0)
 
-	// An omitted optional field is valid on the normal keyed autocommit path.
-	write := c.upsert(11, 2, "optional-header")
-	optional := message.MustAsMutableUpsertMessageV2(write)
-	optionalHeader := optional.Header()
-	optionalHeader.IdempotentResult = nil
-	optional.OverwriteHeader(optionalHeader)
-	s.Require().Nil(message.MustAsMutableUpsertMessageV2(write).Header().GetIdempotentResult())
+	// A complete mapping reconstructs the original result after reopen.
+	write := c.upsert(11, 2, "mapped-result")
 	original, err := producer.Append(ctx, write)
 	s.Require().NoError(err)
-	s.Require().Nil(original.Extra)
+	s.Require().NotNil(original.Extra)
 	check := func() {
-		retry, err := producer.Append(ctx, c.upsert(99, 999, "optional-header"))
+		retry, err := producer.Append(ctx, c.upsert(99, 999, "mapped-result"))
 		s.Require().NoError(err)
 		s.Require().True(original.MessageID.EQ(retry.MessageID))
 		s.Require().Equal(original.TimeTick, retry.TimeTick)
-		s.Require().Nil(retry.Extra, "a retry must not replace omitted original metadata with its new IDs")
+		s.Require().True(proto.Equal(original.Extra, retry.Extra), "retry must return the original keys")
 		s.assertRows(ctx, c, 11, 1, 0)
 		s.assertRows(ctx, c, 11, 2, 1)
 		s.assertRows(ctx, c, 99, 999, 0)

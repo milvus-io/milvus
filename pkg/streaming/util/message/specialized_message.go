@@ -213,6 +213,7 @@ func (m *specializedMutableMessageImpl[H, B]) OverwriteBody(body B) {
 		m.properties.Set(messageCipherHeader, cipherHeader)
 	}
 	m.payload = payload
+	m.upsertMetadata = nil
 }
 
 // BroadcastMessage returns the broadcast message.

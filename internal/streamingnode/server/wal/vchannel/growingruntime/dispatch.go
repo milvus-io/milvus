@@ -169,9 +169,20 @@ func predecodeUpserts(ctx context.Context, msg message.ImmutableMessage) error {
 	// projections perform the later conversion, so malformed deletes cannot
 	// fail only after an insert has already reached a native segment.
 	decode := func(body message.ImmutableMessage) error {
-		if insert, assignments, ok := messageutil.AsInsertRequest(body); ok {
-			if _, err := insert.Body(ctx); err != nil {
-				return err
+		if _, assignments, ok := messageutil.AsInsertRequest(body); ok {
+			if body.MessageType() == message.MessageTypeUpsert {
+				typed := message.MustAsImmutableUpsertMessageV2(body)
+				content, err := typed.Body(ctx)
+				if err != nil {
+					return err
+				}
+				if _, err := message.UpsertSelections(typed.Header(), content); err != nil {
+					return err
+				}
+			} else {
+				if _, err := message.MustAsImmutableInsertMessageV1(body).Body(ctx); err != nil {
+					return err
+				}
 			}
 			for _, assignment := range assignments {
 				if assignment.GetSegmentAssignment().GetSegmentId() == 0 {
@@ -179,7 +190,7 @@ func predecodeUpserts(ctx context.Context, msg message.ImmutableMessage) error {
 				}
 			}
 		}
-		_, _, err := messageutil.DeleteRequest(ctx, body)
+		_, err := messageutil.DeleteRequests(ctx, body)
 		return err
 	}
 	if txn != nil {
@@ -204,31 +215,26 @@ func (r *Runtime) applyInsertMessage(ctx context.Context, raw message.ImmutableM
 }
 
 func (r *Runtime) applyLiveDeleteMessage(ctx context.Context, msg message.ImmutableMessage) error {
-	switch msg.MessageType() {
-	case message.MessageTypeDelete, message.MessageTypeUpsert:
-		deleted, _, err := messageutil.DeleteRequest(ctx, msg)
+	apply := func(inner message.ImmutableMessage) error {
+		requests, err := messageutil.DeleteRequests(ctx, inner)
 		if err != nil {
 			return err
 		}
-		return r.applyDeleteRequest(ctx, msg.TimeTick(), deleted)
-	case message.MessageTypeTxn:
-		txn := message.AsImmutableTxnMessage(msg)
-		if txn == nil {
-			return merr.WrapErrServiceInternalMsg("invalid txn WAL message")
-		}
-		return txn.RangeOver(func(inner message.ImmutableMessage) error {
-			if inner.MessageType() != message.MessageTypeDelete && inner.MessageType() != message.MessageTypeUpsert {
-				return nil
-			}
-			deleted, _, err := messageutil.DeleteRequest(ctx, inner)
-			if err != nil {
+		for _, request := range requests {
+			if err := r.applyDeleteRequest(ctx, msg.TimeTick(), request); err != nil {
 				return err
 			}
-			return r.applyDeleteRequest(ctx, msg.TimeTick(), deleted)
-		})
-	default:
+		}
 		return nil
 	}
+	if msg.MessageType() == message.MessageTypeTxn {
+		txn := message.AsImmutableTxnMessage(msg)
+		if txn == nil {
+			return merr.WrapErrServiceInternalMsg("invalid transaction")
+		}
+		return txn.RangeOver(apply)
+	}
+	return apply(msg)
 }
 
 func (r *Runtime) applyDeleteRequest(ctx context.Context, timeTick uint64, request *msgpb.DeleteRequest) error {

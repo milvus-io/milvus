@@ -26,21 +26,19 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	upsertfixture "github.com/milvus-io/milvus/pkg/v3/streaming/util/message/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 )
 
 func TestWalkUpsertInsertPreservesBody(t *testing.T) {
 	assignment := &messagespb.PartitionSegmentAssignment{PartitionId: 10, Rows: 1, SegmentAssignment: &messagespb.SegmentAssignment{SegmentId: 20}}
 	raw := message.NewUpsertMessageBuilderV2().WithVChannel("v1").
-		WithHeader(&message.UpsertMessageHeader{CollectionId: 1, Partition: assignment, DeleteRows: 1}).
-		WithBody(&message.UpsertMessageBody{
-			Insert: &msgpb.InsertRequest{
-				Version:      msgpb.InsertDataVersion_ColumnBased,
-				CollectionID: 1, PartitionID: 999, SegmentID: 888, RowIDs: []int64{4}, Timestamps: []uint64{7}, NumRows: 1,
-				FieldsData: []*schemapb.FieldData{{FieldId: 100, Type: schemapb.DataType_Int64, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{42}}}}}}},
-			},
-			Delete: &msgpb.DeleteRequest{CollectionID: 1, PartitionID: -1},
-		}).MustBuildMutable().WithTimeTick(30).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(30))
+		WithHeader(&message.UpsertMessageHeader{CollectionId: 1, SchemaVersion: func() *int32 { v := int32(1); return &v }(), Partitions: []*message.PartitionSegmentAssignment{assignment}, DeleteRows: 0}).
+		WithBody(upsertfixture.Body(&msgpb.InsertRequest{
+			Version:      msgpb.InsertDataVersion_ColumnBased,
+			CollectionID: 1, PartitionID: 999, SegmentID: 888, RowIDs: []int64{4}, Timestamps: []uint64{7}, NumRows: 1,
+			FieldsData: []*schemapb.FieldData{{FieldId: 100, Type: schemapb.DataType_Int64, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{42}}}}}}},
+		}, nil)).MustBuildMutable().WithTimeTick(30).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(30))
 	before := proto.Clone(message.MustAsImmutableUpsertMessageV2(raw).MustBody())
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}}
 	calls := 0

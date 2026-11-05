@@ -3,6 +3,7 @@ package idempotency
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
 	"github.com/pingcap/failpoint"
 
 	walpoint "github.com/milvus-io/milvus/internal/streamingnode/server/wal/failpoint"
@@ -138,7 +139,7 @@ func logIdempotencyDuplicateHit(ctx context.Context, vchannel string, key Idempo
 }
 
 func (impl *idempotencyInterceptor) appendSingleMessage(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (message.MessageID, error) {
-	key, hasIdempotencyKey, err := getIdempotencyKey(msg, impl.config)
+	key, hasIdempotencyKey, err := getIdempotencyKey(ctx, msg, impl.config)
 	if err != nil {
 		return nil, err
 	}
@@ -155,9 +156,12 @@ func (impl *idempotencyInterceptor) appendIdempotentMessage(ctx context.Context,
 			return nil, status.NewUnrecoverableError("invalid Upsert envelope: %v", err)
 		}
 	}
-	insertResult, err := getInsertResultFromInsertMessage(msg)
+	insertResult, err := getInsertResultFromInsertMessage(ctx, msg)
 	if err != nil {
 		return nil, err
+	}
+	if msg.MessageType() == message.MessageTypeUpsert && insertResult == nil {
+		return nil, status.NewInvalidArgument("keyed Upsert requires a complete request row mapping")
 	}
 	window := impl.window(msg.VChannel())
 	begin := window.Begin(key, msg)
@@ -330,7 +334,7 @@ func (impl *idempotencyInterceptor) appendTxnBegin(ctx context.Context, msg mess
 }
 
 func (impl *idempotencyInterceptor) appendTxnCommit(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (message.MessageID, error) {
-	key, hasIdempotencyKey, err := getIdempotencyKey(msg, impl.config)
+	key, hasIdempotencyKey, err := getIdempotencyKey(ctx, msg, impl.config)
 	if err != nil {
 		return nil, err
 	}
@@ -352,7 +356,7 @@ func (impl *idempotencyInterceptor) appendTxnRollback(ctx context.Context, msg m
 }
 
 func (impl *idempotencyInterceptor) appendTxnBody(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (message.MessageID, error) {
-	insertResult, err := getInsertResultFromInsertMessage(msg)
+	insertResult, err := getInsertResultFromInsertMessage(ctx, msg)
 	if err != nil {
 		return nil, err
 	}
@@ -394,7 +398,7 @@ func (impl *idempotencyInterceptor) window(vchannel string) *Window {
 // property is readable on any message type, so the window is deliberately gated
 // here to the two types it is designed to deduplicate; a key carried by any
 // other type is ignored rather than silently creating a window entry.
-func getIdempotencyKey(msg message.MutableMessage, config WindowConfig) (key IdempotencyKey, hasIdempotencyKey bool, err error) {
+func getIdempotencyKey(ctx context.Context, msg message.MutableMessage, config WindowConfig) (key IdempotencyKey, hasIdempotencyKey bool, err error) {
 	switch msg.MessageType() {
 	case message.MessageTypeInsert, message.MessageTypeUpsert, message.MessageTypeCommitTxn:
 	default:
@@ -402,7 +406,7 @@ func getIdempotencyKey(msg message.MutableMessage, config WindowConfig) (key Ide
 	}
 	rawKey := message.IdempotencyKeyOf(msg)
 	if rawKey == "" {
-		if err := rejectInsertResultWithoutKey(msg); err != nil {
+		if err := rejectInsertResultWithoutKey(ctx, msg); err != nil {
 			return "", false, err
 		}
 		return "", false, nil
@@ -417,8 +421,8 @@ func getIdempotencyKey(msg message.MutableMessage, config WindowConfig) (key Ide
 // halves of an idempotent insert travel together: an insert carrying a duplicate
 // insert result but no key would be appended outside the window, so its result
 // could never be served and a later retry would duplicate the rows.
-func rejectInsertResultWithoutKey(msg message.MutableMessage) error {
-	result, err := getInsertResultFromInsertMessage(msg)
+func rejectInsertResultWithoutKey(ctx context.Context, msg message.MutableMessage) error {
+	result, err := getInsertResultFromInsertMessage(ctx, msg)
 	if err != nil {
 		return err
 	}
@@ -437,7 +441,7 @@ func isTxnMessage(msg message.MutableMessage) bool {
 	}
 }
 
-func getInsertResultFromInsertMessage(msg message.MutableMessage) (*messagespb.IdempotentInsertResult, error) {
+func getInsertResultFromInsertMessage(ctx context.Context, msg message.MutableMessage) (*messagespb.IdempotentInsertResult, error) {
 	var result *messagespb.IdempotentInsertResult
 	switch msg.MessageType() {
 	case message.MessageTypeInsert:
@@ -451,7 +455,16 @@ func getInsertResultFromInsertMessage(msg message.MutableMessage) (*messagespb.I
 		if err != nil {
 			return nil, status.NewInvalidArgument("malformed Upsert message header")
 		}
-		result = typed.Header().GetIdempotentResult()
+		result, err = message.UpsertRetryResult(ctx, typed)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if errors.Is(err, message.ErrMalformedBody) {
+				return nil, status.NewInvalidArgument("malformed Upsert retry metadata")
+			}
+			return nil, err
+		}
 	default:
 		return nil, nil
 	}

@@ -26,18 +26,20 @@ const (
 var bodyCacheNextShard atomic.Uint32
 
 func newBodyCacheSlot() *bodyCacheSlot {
-	return &bodyCacheSlot{shard: bodyCacheNextShard.Add(1) % bodyCacheShardCount}
+	shard := bodyCacheNextShard.Add(1) % bodyCacheShardCount
+	return &bodyCacheSlot{shard: shard}
 }
 
 // The shard is fixed at construction; all other fields are protected by that
 // shard's mutex. Transaction clones share the slot, even if their TimeTick changes.
 type bodyCacheSlot struct {
-	shard      uint32
-	body       proto.Message
-	loading    *bodyCacheAttempt
-	element    *list.Element
-	lastAccess time.Time
-	bytes      int64
+	upsertMetadata *bodyCacheSlot
+	shard          uint32
+	body           proto.Message
+	loading        *bodyCacheAttempt
+	element        *list.Element
+	lastAccess     time.Time
+	bytes          int64
 }
 
 type bodyCacheAttempt struct {

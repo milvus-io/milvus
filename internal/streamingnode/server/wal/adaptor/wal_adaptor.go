@@ -181,7 +181,7 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 	}
 	if msg.MessageType() == message.MessageTypeUpsert {
 		if !paramtable.Get().StreamingCfg.UpsertWALWriteEnabled.GetAsBool() {
-			return nil, status.NewUnrecoverableError("native Upsert WAL append is disabled. Upgrade all readers and CDC targets before enabling streaming.wal.upsert.enabled")
+			return nil, status.NewUnrecoverableError("native Upsert WAL append is disabled. Upgrade all readers and CDC targets before enabling streaming.wal.upsert.unifiedEnabled")
 		}
 	}
 

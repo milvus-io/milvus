@@ -1,9 +1,10 @@
 package walview
 
 import (
+	"context"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/function"
 )
 
@@ -11,7 +12,10 @@ import (
 // RecoveryStorage may still retain text-only WAL inserts before its pack writer materializes
 // function outputs; querying that snapshot must not depend on writer timing.
 func MaterializeInsertRequest(schema *schemapb.CollectionSchema, insert SegmentInsertMessage) (*msgpb.InsertRequest, error) {
-	request := storage.CopyInsertRequestMetadata(insert.Message.MustBody())
+	request, err := insert.Message.ReadRows(context.Background(), schema, insert.Rows)
+	if err != nil {
+		return nil, err
+	}
 	request.PartitionID = insert.Assignment.GetPartitionId()
 	request.SegmentID = insert.Assignment.GetSegmentAssignment().GetSegmentId()
 	outputs, err := function.EmbeddingOutputFieldIDs(schema)

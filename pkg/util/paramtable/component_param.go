@@ -218,7 +218,6 @@ func (p *ComponentParam) versionGateItems() []*ParamItem {
 		&p.FunctionCfg.EnableWriteBeforeMaterialization,
 		&p.DataCoordCfg.ImportEnableIDRangeMsg,
 		&p.DataCoordCfg.EnableArraySortIndex,
-		&p.StreamingCfg.UpsertWALWriteEnabled,
 	}
 }
 
@@ -9839,19 +9838,16 @@ limits; requests that carry no key are accepted at any value.`,
 
 	// txn
 	p.UpsertWALWriteEnabled = ParamItem{
-		Key:          "streaming.wal.upsert.enabled",
-		Version:      "3.0.7",
-		Doc:          "Enable native Upsert WAL generation and replicated append. false: disable generation (default); auto: enable after all online local components reach 3.0.7 for one minute; true: force enable. Configure auto before coordinator startup. The control plane must keep CDC targets upgraded and enabled before the primary. Retained decoding and transaction resolution remain enabled when false.",
-		DefaultValue: "false",
-		VersionGateSwitcher: &VersionGateSwitcher{
-			EnableAutoSwitchValue: "auto",
-			PreSwitchValue:        "false",
-			GateVersion:           "3.0.7",
-			TargetValue:           "true",
-			SwitchDelay:           time.Minute,
+		Key: "streaming.wal.upsert.unifiedEnabled", DefaultValue: "false", Export: true,
+		Doc: "Enable the unified Upsert WAL format only after all readers and CDC targets support it and the QueryView dependency is deployed. The release version is not assigned; auto remains disabled. Retained decoding and transaction resolution do not use this generation gate.",
+		Formatter: func(value string) string {
+			if value == "auto" {
+				return "false"
+			}
+			return value
 		},
-		Export: true,
 	}
+
 	p.UpsertWALWriteEnabled.Init(base.mgr)
 
 	p.TxnDefaultKeepaliveTimeout = ParamItem{
