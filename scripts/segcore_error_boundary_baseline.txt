@@ -149,6 +149,7 @@ arrow	internal/core/src/storage/ArrowFileSystemChunkManager.cpp
 arrow	internal/core/src/storage/artifact/FileSink.cpp
 arrow	internal/core/src/storage/artifact/FileSink.h
 arrow	internal/core/src/storage/loon_ffi/ffi_reader_c.cpp
+arrow	internal/core/src/storage/loon_ffi/ffi_writer_c.cpp
 arrow	internal/core/src/storage/loon_ffi/util.cpp
 arrow	internal/core/src/storage/PayloadReader.cpp
 arrow	internal/core/src/storage/PayloadReader.h
