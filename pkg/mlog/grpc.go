@@ -1,7 +1,6 @@
 package mlog
 
 import (
-	"io"
 	"strings"
 	"sync/atomic"
 
@@ -27,10 +26,7 @@ type grpcLoggerBackend struct {
 	logger grpclog.LoggerV2
 }
 
-var (
-	globalGRPCLogger   = &grpcLogger{}
-	fallbackGRPCLogger = grpclog.NewLoggerV2(io.Discard, io.Discard, io.Discard)
-)
+var globalGRPCLogger = &grpcLogger{}
 
 func (l *grpcLogger) set(logger *zap.Logger, level string) {
 	// The forwarding methods add one stack frame on top of the zap adapter,
@@ -40,10 +36,8 @@ func (l *grpcLogger) set(logger *zap.Logger, level string) {
 }
 
 func (l *grpcLogger) load() grpclog.LoggerV2 {
-	if backend := l.backend.Load(); backend != nil {
-		return backend.logger
-	}
-	return fallbackGRPCLogger
+	// initGRPCLogger installs a backend before publishing this logger to gRPC.
+	return l.backend.Load().logger
 }
 
 // Info implements grpclog.LoggerV2.
