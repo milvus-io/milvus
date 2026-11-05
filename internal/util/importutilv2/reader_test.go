@@ -1389,23 +1389,34 @@ func TestImportNewReader(t *testing.T) {
 // the lower of that bound and the job's single end_ts applies.
 func TestSnapshotPChannelEnd(t *testing.T) {
 	const jobEnd = uint64(500)
+	// Option values are parsed and must be valid hybrid timestamps, so a
+	// realistic scale replaces the raw maps the old helper took directly.
+	const channelEnd = uint64(1) << 62
+	boundOption := func(ts uint64) Options {
+		return Options{
+			{Key: SourceType, Value: SourceTypeSnapshot},
+			{Key: SnapshotPChannelEndTs, Value: fmt.Sprintf(`{"dml_0":"%d"}`, ts)},
+		}
+	}
 
-	end, err := snapshotPChannelEnd(jobEnd, nil, &internalpb.SnapshotImportSource{SourceChannel: "dml_0_4600v0"})
+	// Without the option the job's single end timestamp applies and the source
+	// channel is never consulted.
+	end, err := snapshotReadEnd(Options{}, jobEnd, "dml_0_4600v0")
 	require.NoError(t, err)
 	assert.Equal(t, jobEnd, end)
 
-	end, err = snapshotPChannelEnd(jobEnd, map[string]uint64{"dml_0": 100}, &internalpb.SnapshotImportSource{SourceChannel: "dml_0_4600v0"})
+	end, err = snapshotReadEnd(boundOption(channelEnd), channelEnd+100, "dml_0_4600v0")
 	require.NoError(t, err)
-	assert.Equal(t, uint64(100), end)
+	assert.Equal(t, channelEnd, end)
 
-	end, err = snapshotPChannelEnd(jobEnd, map[string]uint64{"dml_0": 900}, &internalpb.SnapshotImportSource{SourceChannel: "dml_0_4600v0"})
+	end, err = snapshotReadEnd(boundOption(channelEnd), jobEnd, "dml_0_4600v0")
 	require.NoError(t, err)
 	assert.Equal(t, jobEnd, end)
 
-	_, err = snapshotPChannelEnd(jobEnd, map[string]uint64{"dml_0": 100}, &internalpb.SnapshotImportSource{})
+	_, err = snapshotReadEnd(boundOption(channelEnd), jobEnd, "")
 	assert.ErrorContains(t, err, "names no source channel")
 
-	_, err = snapshotPChannelEnd(jobEnd, map[string]uint64{"dml_0": 100}, &internalpb.SnapshotImportSource{SourceChannel: "dml_9_4600v0"})
+	_, err = snapshotReadEnd(boundOption(channelEnd), jobEnd, "dml_9_4600v0")
 	assert.ErrorContains(t, err, "no end bound for source channel")
 }
 
