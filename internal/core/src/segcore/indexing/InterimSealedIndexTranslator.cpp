@@ -1,4 +1,4 @@
-#include "segcore/storagev1translator/InterimSealedIndexTranslator.h"
+#include "segcore/indexing/InterimSealedIndexTranslator.h"
 
 #include <algorithm>
 #include <limits>
@@ -18,14 +18,13 @@
 #include "index/IndexTypeAdapter.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
-#include "index/contracts/build/IReaderConvertible.h"
 #include "index/vector/VectorMemBuilder.h"
 #include "index/vector/VectorTypeUtils.h"
 #include "knowhere/operands.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "segcore/Utils.h"
 
-namespace milvus::segcore::storagev1translator {
+namespace milvus::segcore {
 namespace {
 
 template <typename T>
@@ -52,8 +51,8 @@ ChunkValues(const cachinglayer::PinWrapper<Chunk*>& pin,
 }
 
 template <typename T>
-std::unique_ptr<index::IIndexReaderBase>
-BuildInterimReader(
+std::unique_ptr<index::KnowhereEngine>
+BuildInterimEngine(
     const std::shared_ptr<std::vector<cachinglayer::PinWrapper<Chunk*>>>&
         pinned_chunks,
     int64_t logical_rows,
@@ -103,12 +102,13 @@ BuildInterimReader(
         .parent_validity = validity,
     };
     auto artifact = std::move(builder).Build(input);
-    auto reader = index::IReaderConvertible::FromArtifact(std::move(artifact));
-    AssertInfo(reader->ValueType() == value_type,
-               "interim vector reader type {} disagrees with field type {}",
-               reader->ValueType(),
+    auto engine = std::make_unique<index::KnowhereEngine>(
+        std::move(*artifact).IntoEngine());
+    AssertInfo(engine->PhysicalType() == value_type,
+               "interim vector engine type {} disagrees with field type {}",
+               engine->PhysicalType(),
                value_type);
-    return reader;
+    return engine;
 }
 
 }  // namespace
@@ -181,9 +181,7 @@ InterimSealedIndexTranslator::InterimSealedIndexTranslator(
     AssertInfo(static_cast<bool>(loader_entry),
                "no index loader is registered for family {}",
                family);
-    SetReaderContract(std::move(family),
-                      vec_data_type_,
-                      loader_entry.derive_caps(build_config_));
+    (void)loader_entry.derive_caps(build_config_);
 }
 
 size_t
@@ -241,7 +239,7 @@ InterimSealedIndexTranslator::key() const {
 }
 
 std::vector<std::pair<milvus::cachinglayer::cid_t,
-                      std::unique_ptr<milvus::index::IIndexReaderBase>>>
+                      std::unique_ptr<milvus::index::KnowhereEngine>>>
 InterimSealedIndexTranslator::get_cells(
     milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
@@ -297,9 +295,9 @@ InterimSealedIndexTranslator::get_cells(
         validity = ValidityView::FromExpanded(vec_data_->GetValidData().data());
     }
 
-    std::unique_ptr<index::IIndexReaderBase> reader;
+    std::unique_ptr<index::KnowhereEngine> engine;
     if (is_sparse_) {
-        reader = BuildInterimReader<sparse_u32_f32>(pinned_chunks,
+        engine = BuildInterimEngine<sparse_u32_f32>(pinned_chunks,
                                                     logical_rows,
                                                     physical_rows,
                                                     dim_,
@@ -341,13 +339,13 @@ InterimSealedIndexTranslator::get_cells(
             return static_cast<const void*>(chunk->ValueAt(compact_offset));
         };
 
-        reader = index::DispatchPhysicalVectorDataType(
+        engine = index::DispatchPhysicalVectorDataType(
             vec_data_type_,
-            [&]<typename T>() -> std::unique_ptr<index::IIndexReaderBase> {
+            [&]<typename T>() -> std::unique_ptr<index::KnowhereEngine> {
                 if constexpr (std::is_same_v<T, float> ||
                               std::is_same_v<T, float16> ||
                               std::is_same_v<T, bfloat16>) {
-                    return BuildInterimReader<T>(pinned_chunks,
+                    return BuildInterimEngine<T>(pinned_chunks,
                                                  logical_rows,
                                                  physical_rows,
                                                  dim_,
@@ -365,17 +363,17 @@ InterimSealedIndexTranslator::get_cells(
                               vec_data_type_);
                 }
             },
-            [&]() -> std::unique_ptr<index::IIndexReaderBase> {
+            [&]() -> std::unique_ptr<index::KnowhereEngine> {
                 ThrowInfo(DataTypeInvalid,
                           "unsupported interim vector field type {}",
                           vec_data_type_);
             });
     }
 
-    AssertInfo(reader != nullptr, "interim vector builder returned no reader");
-    std::vector<std::pair<cid_t, std::unique_ptr<index::IIndexReaderBase>>>
+    AssertInfo(engine != nullptr, "interim vector builder returned no engine");
+    std::vector<std::pair<cid_t, std::unique_ptr<index::KnowhereEngine>>>
         result;
-    result.emplace_back(std::make_pair(0, std::move(reader)));
+    result.emplace_back(std::make_pair(0, std::move(engine)));
     return result;
 }
 
@@ -384,4 +382,4 @@ InterimSealedIndexTranslator::meta() {
     return &meta_;
 }
 
-}  // namespace milvus::segcore::storagev1translator
+}  // namespace milvus::segcore

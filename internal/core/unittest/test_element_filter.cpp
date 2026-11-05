@@ -195,7 +195,7 @@ TEST_P(ElementFilterSealed, RangeExpr) {
     auto array_vec_values = raw_data.get_col<VectorFieldProto>(vec_fid);
 
     // Flatten vector data and build index based on element type
-    milvus::index::IIndexReaderBasePtr indexing;
+    std::optional<BuiltTestIndex> built_index;
     std::string actual_metric;
 
     if (elem_type == DataType::VECTOR_FLOAT) {
@@ -206,10 +206,10 @@ TEST_P(ElementFilterSealed, RangeExpr) {
                 vector_data[i * array_len * dim + j] = float_vec[j];
             }
         }
-        indexing = GenVecIndexing(N * array_len,
-                                  dim,
-                                  vector_data.data(),
-                                  knowhere::IndexEnum::INDEX_HNSW);
+        built_index = GenVecIndexing(N * array_len,
+                                     dim,
+                                     vector_data.data(),
+                                     knowhere::IndexEnum::INDEX_HNSW);
         actual_metric = knowhere::metric::L2;
     } else if (elem_type == DataType::VECTOR_FLOAT16) {
         std::vector<knowhere::fp16> vector_data(dim * N * array_len);
@@ -221,10 +221,10 @@ TEST_P(ElementFilterSealed, RangeExpr) {
                 vector_data[i * array_len * dim + j] = src[j];
             }
         }
-        indexing = GenVecIndexingFloat16(N * array_len,
-                                         dim,
-                                         vector_data.data(),
-                                         knowhere::IndexEnum::INDEX_HNSW);
+        built_index = GenVecIndexingFloat16(N * array_len,
+                                            dim,
+                                            vector_data.data(),
+                                            knowhere::IndexEnum::INDEX_HNSW);
         actual_metric = knowhere::metric::L2;
     } else if (elem_type == DataType::VECTOR_BFLOAT16) {
         std::vector<knowhere::bf16> vector_data(dim * N * array_len);
@@ -236,10 +236,10 @@ TEST_P(ElementFilterSealed, RangeExpr) {
                 vector_data[i * array_len * dim + j] = src[j];
             }
         }
-        indexing = GenVecIndexingBFloat16(N * array_len,
-                                          dim,
-                                          vector_data.data(),
-                                          knowhere::IndexEnum::INDEX_HNSW);
+        built_index = GenVecIndexingBFloat16(N * array_len,
+                                             dim,
+                                             vector_data.data(),
+                                             knowhere::IndexEnum::INDEX_HNSW);
         actual_metric = knowhere::metric::L2;
     } else if (elem_type == DataType::VECTOR_INT8) {
         std::vector<int8_t> vector_data(dim * N * array_len);
@@ -251,10 +251,10 @@ TEST_P(ElementFilterSealed, RangeExpr) {
                 vector_data[i * array_len * dim + j] = src[j];
             }
         }
-        indexing = GenVecIndexingInt8(N * array_len,
-                                      dim,
-                                      vector_data.data(),
-                                      knowhere::IndexEnum::INDEX_HNSW);
+        built_index = GenVecIndexingInt8(N * array_len,
+                                         dim,
+                                         vector_data.data(),
+                                         knowhere::IndexEnum::INDEX_HNSW);
         actual_metric = knowhere::metric::L2;
     } else if (elem_type == DataType::VECTOR_BINARY) {
         int byte_dim = (dim + 7) / 8;
@@ -267,7 +267,7 @@ TEST_P(ElementFilterSealed, RangeExpr) {
                 vector_data[i * array_len * byte_dim + j] = src[j];
             }
         }
-        indexing =
+        built_index =
             GenVecIndexingBinary(N * array_len,
                                  dim,
                                  vector_data.data(),
@@ -275,13 +275,13 @@ TEST_P(ElementFilterSealed, RangeExpr) {
         actual_metric = knowhere::metric::HAMMING;
     }
 
+    auto& indexing = built_index.value();
     LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
     SetTestIndexMetadata(
         load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index = CreateTestIndex("test", std::move(indexing));
     load_index_info.index_params["metric_type"] = actual_metric;
     load_index_info.field_type = DataType::VECTOR_ARRAY;
     load_index_info.element_type = elem_type;
@@ -421,7 +421,7 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
     auto array_vec_values = raw_data.get_col<VectorFieldProto>(vec_fid);
 
     // Flatten vector data and build index based on element type
-    milvus::index::IIndexReaderBasePtr indexing;
+    std::optional<BuiltTestIndex> built_index;
     std::string actual_metric;
 
     if (elem_type == DataType::VECTOR_FLOAT) {
@@ -432,10 +432,10 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
                 vector_data[i * array_len * dim + j] = float_vec[j];
             }
         }
-        indexing = GenVecIndexing(N * array_len,
-                                  dim,
-                                  vector_data.data(),
-                                  knowhere::IndexEnum::INDEX_HNSW);
+        built_index = GenVecIndexing(N * array_len,
+                                     dim,
+                                     vector_data.data(),
+                                     knowhere::IndexEnum::INDEX_HNSW);
         actual_metric = knowhere::metric::L2;
     } else if (elem_type == DataType::VECTOR_FLOAT16) {
         std::vector<knowhere::fp16> vector_data(dim * N * array_len);
@@ -447,10 +447,10 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
                 vector_data[i * array_len * dim + j] = src[j];
             }
         }
-        indexing = GenVecIndexingFloat16(N * array_len,
-                                         dim,
-                                         vector_data.data(),
-                                         knowhere::IndexEnum::INDEX_HNSW);
+        built_index = GenVecIndexingFloat16(N * array_len,
+                                            dim,
+                                            vector_data.data(),
+                                            knowhere::IndexEnum::INDEX_HNSW);
         actual_metric = knowhere::metric::L2;
     } else if (elem_type == DataType::VECTOR_BFLOAT16) {
         std::vector<knowhere::bf16> vector_data(dim * N * array_len);
@@ -462,10 +462,10 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
                 vector_data[i * array_len * dim + j] = src[j];
             }
         }
-        indexing = GenVecIndexingBFloat16(N * array_len,
-                                          dim,
-                                          vector_data.data(),
-                                          knowhere::IndexEnum::INDEX_HNSW);
+        built_index = GenVecIndexingBFloat16(N * array_len,
+                                             dim,
+                                             vector_data.data(),
+                                             knowhere::IndexEnum::INDEX_HNSW);
         actual_metric = knowhere::metric::L2;
     } else if (elem_type == DataType::VECTOR_INT8) {
         std::vector<int8_t> vector_data(dim * N * array_len);
@@ -477,10 +477,10 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
                 vector_data[i * array_len * dim + j] = src[j];
             }
         }
-        indexing = GenVecIndexingInt8(N * array_len,
-                                      dim,
-                                      vector_data.data(),
-                                      knowhere::IndexEnum::INDEX_HNSW);
+        built_index = GenVecIndexingInt8(N * array_len,
+                                         dim,
+                                         vector_data.data(),
+                                         knowhere::IndexEnum::INDEX_HNSW);
         actual_metric = knowhere::metric::L2;
     } else if (elem_type == DataType::VECTOR_BINARY) {
         int byte_dim = (dim + 7) / 8;
@@ -493,7 +493,7 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
                 vector_data[i * array_len * byte_dim + j] = src[j];
             }
         }
-        indexing =
+        built_index =
             GenVecIndexingBinary(N * array_len,
                                  dim,
                                  vector_data.data(),
@@ -501,13 +501,13 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
         actual_metric = knowhere::metric::HAMMING;
     }
 
+    auto& indexing = built_index.value();
     LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
     SetTestIndexMetadata(
         load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index = CreateTestIndex("test", std::move(indexing));
     load_index_info.index_params["metric_type"] = actual_metric;
     load_index_info.field_type = DataType::VECTOR_ARRAY;
     load_index_info.element_type = elem_type;
@@ -881,8 +881,7 @@ TEST(ElementFilter, MultiQueryCollectResults) {
     SetTestIndexMetadata(
         load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index = CreateTestIndex("test", std::move(indexing));
     load_index_info.index_params["metric_type"] = knowhere::metric::L2;
     load_index_info.field_type = DataType::VECTOR_ARRAY;
     load_index_info.element_type = DataType::VECTOR_FLOAT;
@@ -1021,8 +1020,7 @@ TEST(ElementFilter, CollectResultsWithCosineMetric) {
     SetTestIndexMetadata(
         load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index = CreateTestIndex("test", std::move(indexing));
     load_index_info.field_type = DataType::VECTOR_ARRAY;
     load_index_info.element_type = DataType::VECTOR_FLOAT;
     segment->LoadIndex(load_index_info);
@@ -3002,8 +3000,8 @@ TEST_P(ElementFilterZeroElementBatch, FullModeAdvancesPastZeroElementBatches) {
         load_info.index_params["index_type"] = milvus::index::ASCENDING_SORT;
         SetTestIndexMetadata(
             load_info, *nested_index, milvus::index::families::kSort);
-        load_info.cache_index = CreateTestCacheIndex("zero_element_nested",
-                                                     std::move(nested_index));
+        load_info.index =
+            CreateTestIndex("zero_element_nested", std::move(nested_index));
         auto* sealed_segment = dynamic_cast<SegmentSealed*>(segment.get());
         ASSERT_NE(sealed_segment, nullptr);
         sealed_segment->LoadIndex(load_info);
@@ -3285,8 +3283,7 @@ TEST_P(ElementFilterNestedIndex, ExecutionMode) {
     SetTestIndexMetadata(
         load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index = CreateTestIndex("test", std::move(indexing));
     load_index_info.index_params["metric_type"] = knowhere::metric::L2;
     load_index_info.field_type = DataType::VECTOR_ARRAY;
     load_index_info.element_type = DataType::VECTOR_FLOAT;
@@ -3325,8 +3322,8 @@ TEST_P(ElementFilterNestedIndex, ExecutionMode) {
                 ? milvus::index::ASCENDING_SORT
                 : milvus::index::INVERTED_INDEX_TYPE;
         SetTestIndexMetadata(nested_load_info, *nested_index, family);
-        nested_load_info.cache_index =
-            CreateTestCacheIndex("nested_test", std::move(nested_index));
+        nested_load_info.index =
+            CreateTestIndex("nested_test", std::move(nested_index));
         segment->LoadIndex(nested_load_info);
     }
 
@@ -3514,8 +3511,7 @@ TEST(ElementFilterGroupBy, SealedWithIndex) {
     SetTestIndexMetadata(
         load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index = CreateTestIndex("test", std::move(indexing));
     load_index_info.index_params["metric_type"] = knowhere::metric::L2;
     load_index_info.field_type = DataType::VECTOR_ARRAY;
     load_index_info.element_type = DataType::VECTOR_FLOAT;
@@ -3746,8 +3742,7 @@ TEST(ElementFilterGroupBy, NormalGroupBy) {
     SetTestIndexMetadata(
         load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index = CreateTestIndex("test", std::move(indexing));
     load_index_info.index_params["metric_type"] = knowhere::metric::L2;
     load_index_info.field_type = DataType::VECTOR_FLOAT;
     segment->LoadIndex(load_index_info);
@@ -3897,8 +3892,7 @@ TEST(ElementFilterGroupBy, DeduplicateRowsInGroup) {
     SetTestIndexMetadata(
         load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index = CreateTestIndex("test", std::move(indexing));
     load_index_info.index_params["metric_type"] = knowhere::metric::L2;
     load_index_info.field_type = DataType::VECTOR_ARRAY;
     load_index_info.element_type = DataType::VECTOR_FLOAT;
@@ -4041,8 +4035,7 @@ TEST(ElementFilter, SearchWithNestedScalarIndex) {
     SetTestIndexMetadata(
         load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index = CreateTestIndex("test", std::move(indexing));
     load_index_info.index_params["metric_type"] = knowhere::metric::L2;
     load_index_info.field_type = DataType::VECTOR_ARRAY;
     load_index_info.element_type = DataType::VECTOR_FLOAT;
@@ -4073,8 +4066,8 @@ TEST(ElementFilter, SearchWithNestedScalarIndex) {
     nested_load_info.index_params["index_type"] = milvus::index::ASCENDING_SORT;
     SetTestIndexMetadata(
         nested_load_info, *stl_index, milvus::index::families::kSort);
-    nested_load_info.cache_index =
-        CreateTestCacheIndex("nested_test", std::move(stl_index));
+    nested_load_info.index =
+        CreateTestIndex("nested_test", std::move(stl_index));
     segment->LoadIndex(nested_load_info);
 
     // Build query plan: element_filter with nested index in full mode
@@ -4514,8 +4507,7 @@ LoadElementHnswIndex(SegmentSealed* segment,
     SetTestIndexMetadata(
         load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index = CreateTestIndex("test", std::move(indexing));
     load_index_info.index_params["metric_type"] = knowhere::metric::L2;
     load_index_info.field_type = DataType::VECTOR_ARRAY;
     load_index_info.element_type = DataType::VECTOR_FLOAT;
@@ -4573,8 +4565,7 @@ LoadNullableElementFlatIndex(SegmentSealed* segment,
     SetTestIndexMetadata(
         load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index = CreateTestIndex("test", std::move(indexing));
     load_index_info.index_params["metric_type"] = knowhere::metric::L2;
     load_index_info.field_type = DataType::VECTOR_ARRAY;
     load_index_info.element_type = DataType::VECTOR_FLOAT;
@@ -4596,8 +4587,7 @@ LoadNullableElementFlatIndexWithValidRows(SegmentSealed* segment,
     SetTestIndexMetadata(
         load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index = CreateTestIndex("test", std::move(indexing));
     load_index_info.index_params["metric_type"] = knowhere::metric::L2;
     load_index_info.field_type = DataType::VECTOR_ARRAY;
     load_index_info.element_type = DataType::VECTOR_FLOAT;
@@ -6347,7 +6337,7 @@ EnSegmentPath(const std::string& name) {
 // Builds the element-level index of `layout` through the production
 // materializer: it flattens the stored vectors and passes the element-domain
 // validity, so the IdMap maps internal ids to logical element ids.
-inline index::IIndexReaderBasePtr
+inline BuiltTestIndex
 BuildElementNullableIndex(const ElementNullableLayout& layout,
                           const std::string& index_type,
                           Config params) {
@@ -6409,13 +6399,13 @@ BuildElementNullableIndex(const ElementNullableLayout& layout,
 inline void
 LoadElementNullableIndex(SegmentSealed* segment,
                          FieldId vec,
-                         index::IIndexReaderBasePtr reader) {
+                         BuiltTestIndex built) {
     LoadIndexInfo info{};
     info.field_id = vec.get();
-    SetTestIndexMetadata(info, *reader, milvus::index::families::kVectorMem);
-    info.index_params = GenIndexParams(reader.get());
+    SetTestIndexMetadata(info, *built, milvus::index::families::kVectorMem);
+    info.index_params = GenIndexParams(built.get());
     info.index_params["metric_type"] = knowhere::metric::L2;
-    info.cache_index = CreateTestCacheIndex("test", std::move(reader));
+    info.index = CreateTestIndex("test", std::move(built));
     info.field_type = DataType::VECTOR_ARRAY;
     info.element_type = DataType::VECTOR_FLOAT;
     segment->LoadIndex(info);

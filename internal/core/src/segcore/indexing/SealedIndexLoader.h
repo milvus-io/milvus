@@ -22,7 +22,9 @@
 #include "common/Tracer.h"
 #include "common/resource_c.h"
 #include "knowhere/index/index_factory.h"
-#include "segcore/storagev1translator/IndexReaderTranslator.h"
+#include "segcore/indexing/IndexLoadUtils.h"
+#include "index/contracts/Registry.h"
+#include "index/IndexCacheConfig.h"
 #include "storage/FileManager.h"
 #include "storage/IndexEntryReader.h"
 
@@ -30,37 +32,44 @@ namespace milvus::segcore {
 struct LoadIndexInfo;
 }
 
-namespace milvus::segcore::storagev1translator {
+namespace milvus::segcore {
 
-class SealedIndexTranslator : public IndexReaderTranslator {
+/** @brief Prepare metadata and construct a sealed index with its own storage cache. */
+class SealedIndexLoader {
  public:
     // op_ctx is borrowed only for constructor metadata I/O; each Load binds its own context.
-    SealedIndexTranslator(
-        const milvus::segcore::LoadIndexInfo* load_index_info,
-        milvus::tracer::TraceContext ctx,
-        milvus::storage::FileManagerContext file_manager_context,
-        Config config,
-        milvus::OpContext* op_ctx = nullptr);
-    ~SealedIndexTranslator() override = default;
-    size_t
-    num_cells() const override;
-    milvus::cachinglayer::cid_t
-    cell_id_of(milvus::cachinglayer::uid_t uid) const override;
-    milvus::cachinglayer::LoadingResourceUsage
-    estimated_loading_usage(
-        const std::vector<milvus::cachinglayer::cid_t>& cids) const override;
-    const std::string&
-    key() const override;
-    std::vector<std::pair<milvus::cachinglayer::cid_t,
-                          std::unique_ptr<milvus::index::IIndexReaderBase>>>
-    get_cells(milvus::OpContext* ctx,
-              const std::vector<milvus::cachinglayer::cid_t>& cids) override;
-    milvus::cachinglayer::Meta*
-    meta() override;
+    SealedIndexLoader(const milvus::segcore::LoadIndexInfo* load_index_info,
+                      milvus::tracer::TraceContext ctx,
+                      milvus::storage::FileManagerContext file_manager_context,
+                      Config config,
+                      milvus::OpContext* op_ctx = nullptr);
+    // Creates an Index whose concrete implementation owns its storage cache.
+    index::IndexPtr
+    CreateIndex(milvus::OpContext* ctx);
 
+    const index::IndexFamily&
+    Family() const noexcept {
+        return family_;
+    }
+    DataType
+    ValueType() const noexcept {
+        return value_type_;
+    }
+    const index::ReaderCaps&
+    Caps() const noexcept {
+        return caps_;
+    }
+
+    cachinglayer::LoadingResourceUsage
+    EstimatedResources() const;
+    const cachinglayer::Meta&
+    CacheMetadata() const noexcept {
+        return meta_;
+    }
+
+ private:
     int64_t
-    cells_storage_bytes(
-        const std::vector<milvus::cachinglayer::cid_t>& cids) const override {
+    StorageBytes() const {
         // if index data supports lazy load internally, cell storage size becomes 0
         // currently only vector index is possible to support lazy load
         if (IsVectorDataType(index_load_info_.field_type) && lazy_load_) {
@@ -70,7 +79,10 @@ class SealedIndexTranslator : public IndexReaderTranslator {
         return std::max(index_load_info_.index_size, MIN_STORAGE_BYTES);
     }
 
- private:
+    index::IndexFamily family_;
+    DataType value_type_{DataType::NONE};
+    index::ReaderCaps caps_;
+
     struct IndexLoadInfo {
         bool enable_mmap;
         std::string mmap_dir_path;
@@ -99,9 +111,9 @@ class SealedIndexTranslator : public IndexReaderTranslator {
     IndexLoadInfo index_load_info_;
     LoadResourceRequest load_resource_request_{};
     cachinglayer::ResourceUsage shared_overhead_;
-    // Consumed by the first get_cells attempt; never retained across eviction.
+    // Consumed by the first index creation attempt.
     std::shared_ptr<storage::V1RemoteSource> prepared_legacy_source_;
     bool lazy_load_{false};
     milvus::cachinglayer::Meta meta_;
 };
-}  // namespace milvus::segcore::storagev1translator
+}  // namespace milvus::segcore

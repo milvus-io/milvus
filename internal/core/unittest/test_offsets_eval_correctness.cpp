@@ -1696,8 +1696,8 @@ TEST(OffsetsEvalIndexOnlyCorrectnessTest,
         knowhere::Version::GetCurrentVersion().VersionNumber();
     load_index_info.index_params = GenIndexParams(scalar_index.get(), "sort");
     SetTestIndexMetadata(load_index_info, *scalar_index, "sort");
-    load_index_info.cache_index =
-        CreateTestCacheIndex("offset-index-only", std::move(scalar_index));
+    load_index_info.index =
+        CreateTestIndex("offset-index-only", std::move(scalar_index));
     segment->LoadIndex(load_index_info);
     segment->DropFieldData(value_fid);
     ASSERT_FALSE(segment->HasFieldData(value_fid));
@@ -1795,8 +1795,8 @@ TEST(OffsetsEvalIndexOnlyCorrectnessTest,
         knowhere::Version::GetCurrentVersion().VersionNumber();
     load_index_info.index_params = GenIndexParams(scalar_index.get(), "sort");
     SetTestIndexMetadata(load_index_info, *scalar_index, "sort");
-    load_index_info.cache_index =
-        CreateTestCacheIndex("snapshot-index-only", std::move(scalar_index));
+    load_index_info.index =
+        CreateTestIndex("snapshot-index-only", std::move(scalar_index));
     segment->LoadIndex(load_index_info);
     segment->DropFieldData(value_fid);
     ASSERT_FALSE(segment->HasFieldData(value_fid));
@@ -1933,8 +1933,8 @@ TEST(OffsetsEvalIndexOnlyCorrectnessTest,
         knowhere::Version::GetCurrentVersion().VersionNumber();
     load_index_info.index_params = GenIndexParams(scalar_index.get(), "sort");
     SetTestIndexMetadata(load_index_info, *scalar_index, "sort");
-    load_index_info.cache_index =
-        CreateTestCacheIndex("pinned-index-only", std::move(scalar_index));
+    load_index_info.index =
+        CreateTestIndex("pinned-index-only", std::move(scalar_index));
     segment->LoadIndex(load_index_info);
     segment->DropFieldData(value_fid);
     ASSERT_FALSE(segment->HasFieldData(value_fid));
@@ -1999,8 +1999,8 @@ TEST(OffsetsEvalIndexOnlyCorrectnessTest,
         knowhere::Version::GetCurrentVersion().VersionNumber();
     load_index_info.index_params = GenIndexParams(scalar_index.get(), "sort");
     SetTestIndexMetadata(load_index_info, *scalar_index, "sort");
-    load_index_info.cache_index = CreateTestCacheIndex(
-        "offset-timestamptz-index-only", std::move(scalar_index));
+    load_index_info.index = CreateTestIndex("offset-timestamptz-index-only",
+                                            std::move(scalar_index));
     segment->LoadIndex(load_index_info);
     segment->DropFieldData(timestamp_fid);
     ASSERT_FALSE(segment->HasFieldData(timestamp_fid));
@@ -2110,8 +2110,8 @@ TEST(OffsetsEvalIndexOnlyCorrectnessTest,
         knowhere::Version::GetCurrentVersion().VersionNumber();
     scalar_load_info.index_params = GenIndexParams(scalar_index.get(), "sort");
     SetTestIndexMetadata(scalar_load_info, *scalar_index, "sort");
-    scalar_load_info.cache_index =
-        CreateTestCacheIndex("p4-scalar-index", std::move(scalar_index));
+    scalar_load_info.index =
+        CreateTestIndex("p4-scalar-index", std::move(scalar_index));
     chunked->LoadIndex(scalar_load_info);
     chunked->DropFieldData(value_fid);
     ASSERT_FALSE(chunked->HasFieldData(value_fid));
@@ -2154,8 +2154,8 @@ TEST(OffsetsEvalIndexOnlyCorrectnessTest,
     SetTestIndexMetadata(
         vector_load_info, *indexing, index::families::kVectorMem);
     vector_load_info.field_type = indexing->ValueType();
-    vector_load_info.cache_index =
-        CreateTestCacheIndex("p4-vec-index", std::move(indexing));
+    vector_load_info.index =
+        CreateTestIndex("p4-vec-index", std::move(indexing));
     vector_load_info.index_params["metric_type"] = "L2";
     chunked->LoadIndex(vector_load_info);
     chunked->DropFieldData(vec_fid);

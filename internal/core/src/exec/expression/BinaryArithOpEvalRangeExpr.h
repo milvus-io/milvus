@@ -753,7 +753,7 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
 
         auto req = MakeIndexRequirement(RequiredReader::ValueLookup);
         req.value_type = data_type;
-        SelectAndPinIndex(req);
+        SelectAndCreateIndexReader(req);
     }
 
     bool

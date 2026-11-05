@@ -17,24 +17,26 @@
 #pragma once
 
 #include <string_view>
+#include <optional>
 #include <utility>
 
 #include "index/Families.h"
 #include "index/IndexLoader.h"
 #include "index/IndexLoadInput.h"
-#include "index/contracts/query/IIndexReaderBase.h"
+#include "index/contracts/IIndex.h"
 #include "storage/artifact/FileSource.h"
 #include "storage/artifact/LoadOptions.h"
 
 namespace milvus::index {
 
+class KnowhereEngine;
+
 /**
- * @brief Loads in-memory Knowhere readers from legacy artifacts.
+ * @brief Loads in-memory Knowhere engines from legacy artifacts.
  *
  * Materialized loads populate a BinarySet; mmap loads stream ordered engine
  * entries to a local file. Embedding-list sidecars and validity remain
- * separate. Owns the opened source and fixed load options; each Load creates a
- * new reader.
+ * separate. Load transfers the source and fixed load options to the engine slot.
  */
 class VectorMemLoader final : public IndexLoader {
  public:
@@ -48,17 +50,17 @@ class VectorMemLoader final : public IndexLoader {
      * @brief Validate legacy entry inventory and runtime vector parameters.
      * @param source Opened storage source owned by the resulting loader.
      * @param options Fixed load options without a retained operation context.
-     * @return A ready loader with reusable family metadata.
+     * @return A ready loader with prepared family metadata.
      */
     static folly::coro::Task<std::unique_ptr<IndexLoader>>
     Create(OpenedIndexSource source, storage::LoadOptions options);
 
     /** @copydoc IndexLoader::Load */
-    folly::coro::Task<IIndexReaderBasePtr>
-    Load(milvus::OpContext* context = nullptr) override;
+    IndexPtr
+    Load(milvus::OpContext* context, const IndexCacheConfig& cache) override;
 
  private:
-    LegacyIndexSource source_;
+    std::optional<LegacyIndexSource> source_;
     // Retained options never keep the Create caller's op_ctx.
     storage::LoadOptions options_;
 
@@ -71,8 +73,8 @@ class VectorMemLoader final : public IndexLoader {
      * sidecars.
      * @note Runs inside RunLegacyLoad; use_async controls source I/O only.
      */
-    static folly::coro::Task<IIndexReaderBasePtr>
-    LoadLegacy(storage::FileSource& source,
+    static folly::coro::Task<std::unique_ptr<KnowhereEngine>>
+    LoadEngine(storage::FileSource& source,
                const storage::LoadOptions& opts,
                bool use_async);
 };

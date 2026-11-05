@@ -24,65 +24,16 @@
 #include "index/contracts/build/ScalarBuildInput.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
 #include "segcore/Types.h"
-#include "segcore/storagev1translator/BsonInvertedIndexTranslator.h"
-#include "segcore/storagev1translator/SealedIndexTranslator.h"
+#include "segcore/indexing/SealedIndexLoader.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/Util.h"
 #include "storage/artifact/Artifact.h"
 #include "storage/artifact/LocalDirectory.h"
 
-namespace milvus::segcore::storagev1translator {
+namespace milvus::segcore {
 namespace {
 
-TEST(BsonInvertedIndexTranslatorTest, ReservesFixedScalarReaderMemoryOnce) {
-    constexpr int64_t index_size = 4096;
-    for (const bool mmap : {false, true}) {
-        BsonInvertedIndexTranslator translator(
-            {mmap, 3, 101, index_size, {}, 0, "disable", ""},
-            storage::FileManagerContext{});
-        const auto [loaded, private_overhead, shared_overhead] =
-            translator.estimated_loading_usage({0});
-        const auto overhead = private_overhead + shared_overhead;
-        EXPECT_EQ(
-            loaded.memory_bytes,
-            (mmap ? 0 : index_size) + index::kScalarIndexFixedResidentBytes);
-        EXPECT_EQ(loaded.file_bytes, mmap ? index_size : 0);
-        EXPECT_EQ(overhead.memory_bytes, mmap ? index_size : 0);
-        EXPECT_EQ(overhead.file_bytes, mmap ? 0 : index_size);
-    }
-}
-
-TEST(IndexLoadContextTest, PriorityOverridePreservesCallerStateAndAccounting) {
-    folly::CancellationSource cancel;
-    OpContext parent(cancel.getToken());
-    parent.coload_fields = {101, 102};
-    parent.pinned_segment_state = std::make_shared<const int>(7);
-    parent.pinned_state_owner = &parent;
-    for (const auto runtime : {std::optional<int32_t>{},
-                               std::optional<int32_t>{0},
-                               std::optional<int32_t>{1}}) {
-        parent.runtime_load_priority = runtime;
-        {
-            IndexLoadContext load(&parent, 1);
-            EXPECT_EQ(load.ctx.runtime_load_priority, runtime.value_or(1));
-            EXPECT_EQ(load.ctx.coload_fields, parent.coload_fields);
-            EXPECT_EQ(load.ctx.pinned_segment_state,
-                      parent.pinned_segment_state);
-            EXPECT_EQ(load.ctx.pinned_state_owner, &parent);
-            cancel.requestCancellation();
-            EXPECT_TRUE(load.ctx.cancellation_token.isCancellationRequested());
-            load.ctx.storage_usage.scanned_cold_bytes = 3;
-            load.ctx.storage_usage.scanned_total_bytes = 5;
-        }
-        EXPECT_EQ(parent.runtime_load_priority, runtime);
-    }
-    EXPECT_EQ(parent.storage_usage.scanned_cold_bytes, 9);
-    EXPECT_EQ(parent.storage_usage.scanned_total_bytes, 15);
-    IndexLoadContext warmup(nullptr, 1);
-    EXPECT_EQ(warmup.ctx.runtime_load_priority, 1);
-}
-
-class ScalarIndexTranslatorTest : public ::testing::Test {
+class SealedIndexLoaderTest : public ::testing::Test {
  protected:
     void
     SetUp() override {
@@ -128,7 +79,7 @@ class ScalarIndexTranslatorTest : public ::testing::Test {
     storage::FileManagerContext context_;
 };
 
-TEST_F(ScalarIndexTranslatorTest,
+TEST_F(SealedIndexLoaderTest,
        NestedHybridMetadataResolvesStandaloneAndSelectedSortFiles) {
     const std::vector<std::string_view> values{
         "alpha", "beta", "beta", "gamma"};
@@ -166,21 +117,21 @@ TEST_F(ScalarIndexTranslatorTest,
             context_.use_async_load = async;
             Config config(info.index_params);
             config["nested"] = true;
-            std::unique_ptr<SealedIndexTranslator> translator;
+            std::unique_ptr<SealedIndexLoader> translator;
             {
                 folly::CancellationSource cancel;
                 OpContext creation(cancel.getToken());
                 creation.runtime_load_priority = 1;
-                translator = std::make_unique<SealedIndexTranslator>(
+                translator = std::make_unique<SealedIndexLoader>(
                     &info, tracer::TraceContext{}, context_, config, &creation);
                 cancel.requestCancellation();
             }
             EXPECT_EQ(translator->Family(), index::families::kSort);
             EXPECT_EQ(translator->ValueType(), DataType::VARCHAR);
             OpContext load;
-            auto cells = translator->get_cells(&load, {0});
-            ASSERT_EQ(cells.size(), 1);
-            const auto* reader = cells.front().second.get();
+            auto owner = translator->CreateIndex(&load);
+            auto request_reader = owner->CreateReader(&load);
+            const auto* reader = request_reader.get();
             ASSERT_NE(reader, nullptr);
             EXPECT_EQ(reader->CoordDomain(), index::Domain::Element);
             EXPECT_EQ(reader->Count(), 4);
@@ -198,7 +149,54 @@ TEST_F(ScalarIndexTranslatorTest,
     }
 }
 
-TEST_F(ScalarIndexTranslatorTest, PackedScalarLoadRequiresActualFileMetadata) {
+TEST_F(SealedIndexLoaderTest, MarisaCreatesIndexBeforeLoadingRequestStorage) {
+    const std::vector<std::string_view> values{
+        "alpha", "beta", "beta", "gamma"};
+    const index::ScalarBuildBatch<std::string_view> batch{values, {}};
+    const Config params{{"field_type", DataType::VARCHAR},
+                        {"value_type", DataType::VARCHAR},
+                        {"nullable", false}};
+    auto builder = index::BuilderRegistry<
+                       index::ScalarBuildInput<std::string_view>>::Instance()
+                       .Create(index::families::kMarisa, params);
+    auto artifact = std::move(*builder).Build({std::span(&batch, 1)});
+    storage::MemFileManagerImpl manager(context_);
+    const auto name =
+        index::PackedScalarIndexFileName(index::ScalarIndexType::MARISA);
+    auto writer = manager.CreateIndexEntryWriterUnified(name);
+    artifact->Serialize(*writer);
+    writer->Finish();
+    auto info = Info();
+    info.field_type = DataType::VARCHAR;
+    info.element_type = DataType::NONE;
+    info.index_params[index::INDEX_TYPE] = index::MARISA_TRIE;
+    info.index_files = {manager.GetRemoteIndexObjectPrefix() + "/" + name};
+    info.index_size = writer->GetTotalBytesWritten();
+    for (const bool async : {false, true}) {
+        context_.use_async_load = async;
+        auto translator = std::make_unique<SealedIndexLoader>(
+            &info, tracer::TraceContext{}, context_, Config(info.index_params));
+        ASSERT_EQ(translator->Family(), index::families::kMarisa);
+        auto index = translator->CreateIndex(nullptr);
+        translator.reset();
+        EXPECT_EQ(index->Metadata().count, 4);
+        OpContext context;
+        auto reader = index->CreateReader(&context);
+        index.reset();
+        const auto* predicate = dynamic_cast<
+            const index::IScalarPredicateReader<std::string_view>*>(
+            reader.get());
+        ASSERT_NE(predicate, nullptr);
+        const std::string_view key = "beta";
+        const auto hits = predicate->In(1, &key);
+        EXPECT_EQ(hits.size(), 4);
+        EXPECT_EQ(hits.count(), 2);
+        EXPECT_TRUE(hits[1]);
+        EXPECT_TRUE(hits[2]);
+    }
+}
+
+TEST_F(SealedIndexLoaderTest, PackedScalarLoadRequiresActualFileMetadata) {
     for (const auto type : {DataType::INT16,
                             DataType::INT32,
                             DataType::INT64,
@@ -212,7 +210,7 @@ TEST_F(ScalarIndexTranslatorTest, PackedScalarLoadRequiresActualFileMetadata) {
             LoadResourceRequest{2048, 512, 1024, 128, true};
         Config config(info.index_params);
         try {
-            SealedIndexTranslator translator(
+            SealedIndexLoader translator(
                 &info, tracer::TraceContext{}, context_, config);
             FAIL() << "an explicit resource estimate cannot replace packed "
                       "file metadata";
@@ -224,4 +222,4 @@ TEST_F(ScalarIndexTranslatorTest, PackedScalarLoadRequiresActualFileMetadata) {
 }
 
 }  // namespace
-}  // namespace milvus::segcore::storagev1translator
+}  // namespace milvus::segcore

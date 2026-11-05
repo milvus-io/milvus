@@ -17,12 +17,15 @@
 #include <vector>
 
 #include "common/Types.h"
+#include "index/contracts/IIndex.h"
 #include "common/LoadInfo.h"
-#include "segcore/storagev1translator/IndexReaderTranslator.h"
+#include "segcore/indexing/IndexLoadUtils.h"
+#include "index/contracts/Registry.h"
+#include "index/IndexCacheConfig.h"
 #include "common/resource_c.h"
 #include "storage/FileManager.h"
 
-namespace milvus::segcore::storagev1translator {
+namespace milvus::segcore {
 
 struct TextMatchIndexLoadInfo {
     bool enable_mmap;
@@ -36,44 +39,46 @@ struct TextMatchIndexLoadInfo {
     std::string shard;
 };
 
-// Loads one persisted text reader for a sealed segment field and exposes it to
-// the cache layer with a stable key and resource usage.
-class TextMatchIndexTranslator : public IndexReaderTranslator {
+/** @brief Prepare metadata and construct a sealed index with its own storage cache. */
+class TextMatchIndexLoader {
  public:
-    TextMatchIndexTranslator(
+    TextMatchIndexLoader(
         TextMatchIndexLoadInfo load_info,
         milvus::storage::FileManagerContext file_manager_context,
         milvus::Config config,
         milvus::OpContext* op_ctx = nullptr);
 
-    ~TextMatchIndexTranslator() override = default;
+    index::IndexPtr
+    CreateIndex(milvus::OpContext* ctx);
 
-    size_t
-    num_cells() const override;
+    const index::IndexFamily&
+    Family() const noexcept {
+        return family_;
+    }
+    DataType
+    ValueType() const noexcept {
+        return value_type_;
+    }
+    const index::ReaderCaps&
+    Caps() const noexcept {
+        return caps_;
+    }
 
-    milvus::cachinglayer::cid_t
-    cell_id_of(milvus::cachinglayer::uid_t uid) const override;
-
-    milvus::cachinglayer::LoadingResourceUsage
-    estimated_loading_usage(
-        const std::vector<milvus::cachinglayer::cid_t>& cids) const override;
-
-    int64_t
-    cells_storage_bytes(
-        const std::vector<milvus::cachinglayer::cid_t>&) const override;
-
-    const std::string&
-    key() const override;
-
-    std::vector<std::pair<milvus::cachinglayer::cid_t,
-                          std::unique_ptr<milvus::index::IIndexReaderBase>>>
-    get_cells(milvus::OpContext* ctx,
-              const std::vector<milvus::cachinglayer::cid_t>& cids) override;
-
-    milvus::cachinglayer::Meta*
-    meta() override;
+    cachinglayer::LoadingResourceUsage
+    EstimatedResources() const;
+    const cachinglayer::Meta&
+    CacheMetadata() const noexcept {
+        return meta_;
+    }
 
  private:
+    int64_t
+    StorageBytes() const;
+
+    index::IndexFamily family_;
+    DataType value_type_{DataType::NONE};
+    index::ReaderCaps caps_;
+
     TextMatchIndexLoadInfo load_info_;
     milvus::storage::FileManagerContext file_manager_context_;
     milvus::Config config_;
@@ -84,4 +89,4 @@ class TextMatchIndexTranslator : public IndexReaderTranslator {
     std::shared_ptr<storage::V1RemoteSource> prepared_source_;
 };
 
-}  // namespace milvus::segcore::storagev1translator
+}  // namespace milvus::segcore

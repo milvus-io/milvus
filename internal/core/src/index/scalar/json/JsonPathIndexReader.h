@@ -18,13 +18,17 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <optional>
+#include <variant>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "common/JsonCastType.h"
-#include "index/contracts/query/IIndexReaderBase.h"
+#include "index/contracts/IIndex.h"
 #include "index/contracts/query/IJsonIndexReader.h"
 
 namespace milvus::index {
@@ -39,13 +43,13 @@ IsJsonSortCast(JsonCastType cast_type);
 
 // Immutable routing metadata for one typed JSON-path index. ARRAY casts are
 // row-domain indexes whose erased ValueType is the element type. Because that
-// provenance cannot be recovered from IIndexReaderBase, callers constructing an
+// provenance cannot be recovered from IndexMetadata, callers constructing an
 // ARRAY spec must have created/opened `inner` through the ArrayView route.
 class JsonProjectedIndexSpec final {
  public:
     JsonProjectedIndexSpec(std::string json_path,
                            JsonCastType cast_type,
-                           int64_t row_count);
+                           std::optional<int64_t> row_count);
 
     const std::string&
     JsonPath() const;
@@ -60,7 +64,11 @@ class JsonProjectedIndexSpec final {
     Matches(std::string_view json_path, JsonCastType cast_type) const;
 
     void
-    ValidateInner(const IIndexReaderBase& inner) const;
+    ValidateInner(const IndexMetadata& inner) const;
+
+    /** @brief Validate offsets and construct the existence bitmap. */
+    std::shared_ptr<const TargetBitmap>
+    MakeExists(const std::vector<size_t>& offsets) const;
 
     void
     ValidateNonExistOffsets(const std::vector<size_t>& offsets) const;
@@ -68,7 +76,58 @@ class JsonProjectedIndexSpec final {
  private:
     std::string json_path_;
     JsonCastType cast_type_;
-    int64_t row_count_{0};
+    std::optional<int64_t> row_count_;
+};
+
+/** @brief Owns a typed child index and immutable JSON path/existence metadata. */
+class JsonPathIndex final : public IIndex,
+                            public std::enable_shared_from_this<JsonPathIndex> {
+ public:
+    JsonPathIndex(IndexPtr inner,
+                  JsonProjectedIndexSpec spec,
+                  const std::vector<size_t>& non_exist_offsets);
+
+    JsonPathIndex(IndexPtr inner,
+                  JsonProjectedIndexSpec spec,
+                  std::shared_ptr<const TargetBitmap> exists);
+
+    /** @brief Route JSON queries while the child storage owns the existence bitmap.
+     * The callback pins the same storage cell as ordinary child operations.
+     */
+    using PinExists =
+        std::function<std::shared_ptr<const TargetBitmap>(OpContext*)>;
+    JsonPathIndex(IndexPtr inner,
+                  JsonProjectedIndexSpec spec,
+                  PinExists pin_exists);
+
+    template <typename Index>
+    static IndexPtr
+    FromStorage(std::shared_ptr<Index> inner, JsonProjectedIndexSpec spec) {
+        PinExists pin = [inner](OpContext* ctx) {
+            auto storage = inner->PinStorage(ctx);
+            AssertInfo(storage->json_exists != nullptr,
+                       "complete JSON storage lacks existence bitmap");
+            return std::shared_ptr<const TargetBitmap>(
+                storage, storage->json_exists.get());
+        };
+        return std::make_shared<JsonPathIndex>(
+            std::move(inner), std::move(spec), std::move(pin));
+    }
+
+    IndexMetadata
+    Metadata() const override;
+
+    IIndexReaderBasePtr
+    CreateReader(milvus::OpContext* op_ctx) const override;
+
+    void
+    CancelWarmup() const override;
+
+ private:
+    friend class JsonPathIndexReader;
+    IndexPtr inner_;
+    JsonProjectedIndexSpec spec_;
+    std::variant<std::shared_ptr<const TargetBitmap>, PinExists> exists_;
 };
 
 // Path router for one ordinary typed reader. Predicate/pattern/ngram
@@ -78,11 +137,12 @@ class JsonProjectedIndexSpec final {
 class JsonPathIndexReader final : public IIndexReaderBase,
                                   public IJsonIndexReader {
  public:
-    JsonPathIndexReader(std::unique_ptr<IIndexReaderBase> inner,
-                        JsonProjectedIndexSpec spec,
-                        const std::vector<size_t>& non_exist_offsets);
-
     ~JsonPathIndexReader() override;
+
+    void
+    Prefetch() const override {
+        inner_->Prefetch();
+    }
 
     ReaderCaps
     Caps() const override;
@@ -95,12 +155,6 @@ class JsonPathIndexReader final : public IIndexReaderBase,
 
     DataType
     ValueType() const override;
-
-    int64_t
-    MemoryUsage() const override;
-
-    cachinglayer::ResourceUsage
-    CellByteSize() const override;
 
     JsonResolvedReader
     Resolve(std::string_view path, JsonCastType cast_type) const override;
@@ -115,14 +169,15 @@ class JsonPathIndexReader final : public IIndexReaderBase,
     CastTypesOf(std::string_view path) const override;
 
  private:
-    std::unique_ptr<IIndexReaderBase> inner_;
-    JsonProjectedIndexSpec spec_;
-    TargetBitmap exists_;
-    ReaderCaps caps_;
-    DataType value_type_{DataType::NONE};
-    int64_t heap_bytes_{0};
-    int64_t cell_memory_bytes_{0};
-    int64_t file_bytes_{0};
+    friend class JsonPathIndex;
+    JsonPathIndexReader(std::shared_ptr<const JsonPathIndex> index,
+                        milvus::OpContext* op_ctx);
+
+    std::shared_ptr<const JsonPathIndex> index_;
+    IIndexReaderBasePtr inner_;
+    OpContext* const op_ctx_;
+    mutable std::once_flag exists_once_;
+    mutable std::shared_ptr<const TargetBitmap> exists_;
 };
 
 }  // namespace milvus::index

@@ -1302,7 +1302,6 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     vec_index->Search(query_dataset,
                       MakeVectorSearchParams(search_info),
                       milvus::BitsetView{},
-                      nullptr,
                       result_on_index);
     EXPECT_EQ(result_on_index.distances_.size(), num_queries * TOPK);
 
@@ -1475,7 +1474,6 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     vec_index->Search(query_dataset,
                       MakeVectorSearchParams(search_info),
                       milvus::BitsetView{},
-                      nullptr,
                       result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();

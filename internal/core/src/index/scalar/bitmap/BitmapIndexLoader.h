@@ -17,6 +17,7 @@
 #pragma once
 
 #include <string_view>
+#include <optional>
 #include <utility>
 
 #include "index/Families.h"
@@ -24,17 +25,20 @@
 #include "index/IndexLoadInput.h"
 #include "index/IndexLoadPlan.h"
 #include "storage/IndexEntryFormat.h"
-#include "index/contracts/query/IIndexReaderBase.h"
+#include "index/contracts/IIndex.h"
 #include "storage/artifact/FileSource.h"
 #include "storage/artifact/LoadOptions.h"
 
 namespace milvus::index {
 
+template <typename T, typename Posting>
+struct BitmapPostingStorage;
+
 /**
- * @brief Loads bitmap readers from legacy or packed V3 artifacts.
+ * @brief Loads bitmap indexes from legacy or packed V3 artifacts.
  *
  * Owns the opened source and fixed load options; each Load creates a new
- * reader. Create retains parsed family metadata without allocating payload
+ * index. Create retains parsed family metadata without allocating payload
  * targets.
  */
 class BitmapIndexLoader final : public IndexLoader {
@@ -52,19 +56,19 @@ class BitmapIndexLoader final : public IndexLoader {
      * loading.
      * @param source Opened storage source owned by the resulting loader.
      * @param options Fixed load options without a retained operation context.
-     * @return A ready loader with reusable family metadata.
+     * @return A ready loader with prepared family metadata.
      */
     static folly::coro::Task<std::unique_ptr<IndexLoader>>
     Create(OpenedIndexSource source, storage::LoadOptions options);
 
     /** @copydoc IndexLoader::Load */
-    folly::coro::Task<IIndexReaderBasePtr>
-    Load(milvus::OpContext* context = nullptr) override;
+    IndexPtr
+    Load(milvus::OpContext* context, const IndexCacheConfig& cache) override;
 
  private:
     friend struct LoaderTestAccess;
 
-    OpenedIndexSource source_;
+    std::optional<OpenedIndexSource> source_;
     // Retained options never keep the Create caller's op_ctx.
     storage::LoadOptions options_;
 
@@ -74,15 +78,22 @@ class BitmapIndexLoader final : public IndexLoader {
     struct PreparedState;
     std::unique_ptr<PreparedState> state_;
 
-    /**
-     * @brief Decode postings using retained metadata, then attach JSON
-     * projection state.
-     * @note Runs inside RunLegacyLoad; use_async controls source I/O and batch scheduling.
-     */
-    folly::coro::Task<IIndexReaderBasePtr>
-    LoadLegacy(storage::FileSource& source,
-               const storage::LoadOptions& opts,
-               bool use_async);
+    template <typename T, typename Posting>
+    IndexPtr
+    LoadTyped(milvus::OpContext* context, const IndexCacheConfig& cache);
+
+    template <typename T, typename Posting>
+    static folly::coro::Task<std::unique_ptr<BitmapPostingStorage<T, Posting>>>
+    LoadStorage(OpenedIndexSource& source,
+                const storage::LoadOptions& options,
+                const PreparedState& prepared,
+                milvus::OpContext* context);
+
+    template <typename T, typename Posting>
+    static folly::coro::Task<std::unique_ptr<BitmapPostingStorage<T, Posting>>>
+    FinishPackedStorage(IndexLoadPlan& plan,
+                        const storage::LoadOptions& opts,
+                        bool use_async);
 
     /**
      * @brief Validate packed metadata without allocating per-load destinations.
@@ -101,17 +112,6 @@ class BitmapIndexLoader final : public IndexLoader {
                const nlohmann::json& metadata,
                const storage::LoadOptions& opts,
                const PreparedState* cached = nullptr);
-
-    /**
-     * @brief Initialize a reader from populated targets without committing them.
-     * @pre All planned reads and local writes have finished successfully.
-     * @note Async offloads blocking file operations and resumes CPU work on
-     * the loading executor. Sync executes inline on the caller thread.
-     */
-    static folly::coro::Task<IIndexReaderBasePtr>
-    FinishPacked(IndexLoadPlan& plan,
-                 const storage::LoadOptions& opts,
-                 bool use_async);
 };
 
 }  // namespace milvus::index

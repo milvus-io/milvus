@@ -22,7 +22,7 @@
 #include "storage/FileManager.h"
 #include "common/resource_c.h"
 
-namespace milvus::segcore::storagev1translator {
+namespace milvus::segcore {
 
 struct BsonInvertedIndexLoadInfo {
     bool enable_mmap;
@@ -83,4 +83,4 @@ class BsonInvertedIndexTranslator : public milvus::cachinglayer::Translator<
     std::unique_ptr<storage::V1RemoteSource> prepared_source_;
 };
 
-}  // namespace milvus::segcore::storagev1translator
+}  // namespace milvus::segcore

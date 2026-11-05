@@ -15,15 +15,9 @@
 
 #pragma once
 
-#include <string>
-#include <utility>
-
-#include "cachinglayer/Translator.h"
-#include "common/Types.h"
 #include "common/OpContext.h"
-#include "index/contracts/Registry.h"
 
-namespace milvus::segcore::storagev1translator {
+namespace milvus::index {
 
 // Each load owns its effective priority without mutating a shared caller context.
 // Storage counters are returned even when loading throws.
@@ -59,40 +53,4 @@ class IndexLoadContext {
     milvus::OpContext* parent_;
 };
 
-// Common cache translator contract for readers selected through the index
-// family registry. Loading, accounting, and cache metadata remain translator
-// specific.
-class IndexReaderTranslator
-    : public cachinglayer::Translator<index::IIndexReaderBase> {
- public:
-    const index::IndexFamily&
-    Family() const noexcept;
-
-    DataType
-    ValueType() const noexcept;
-
-    const index::ReaderCaps&
-    Caps() const noexcept;
-
- protected:
-    void
-    SetReaderContract(index::IndexFamily family,
-                      DataType value_type,
-                      index::ReaderCaps caps) {
-        family_ = std::move(family);
-        value_type_ = value_type;
-        caps_ = std::move(caps);
-    }
-
- private:
-    index::IndexFamily family_;
-    DataType value_type_{DataType::NONE};
-    index::ReaderCaps caps_;
-};
-
-// Root under which index loaders stage local files, with or without mmap.
-// QueryNode supplies localStorage.path; an empty root resolves to it.
-std::string
-LocalStagingRoot(const std::string& configured_root = {});
-
-}  // namespace milvus::segcore::storagev1translator
+}  // namespace milvus::index

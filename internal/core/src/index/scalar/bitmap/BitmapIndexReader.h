@@ -16,16 +16,21 @@
 
 #pragma once
 
+#include "index/scalar/json/JsonPathIndexReader.h"
+
 #include <cstddef>
 #include <map>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <vector>
+#include "cachinglayer/CacheSlot.h"
 
 #include <roaring/roaring.hh>
 
 #include "common/Types.h"
+#include "index/contracts/IIndex.h"
 #include "index/contracts/query/IIndexReaderBase.h"
 #include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
@@ -99,16 +104,7 @@ class BitmapMmapOwner final {
     std::string path_;
 };
 
-// The owner is declared before the map so destruction drops frozen Roaring
-// views before unmapping their backing file. Each specialization contains one
-// posting representation only.
-template <typename T, typename Posting>
-struct BitmapPostingStorage {
-    std::shared_ptr<BitmapMmapOwner> mmap_owner;
-    BitmapPostingMap<T, Posting> postings;
-};
-
-struct BitmapReaderOptions {
+struct BitmapStorageOptions {
     TargetBitmap valid_bitset;
     size_t total_num_rows{0};
     bool nested{false};
@@ -117,21 +113,65 @@ struct BitmapReaderOptions {
     bool offset_cache{false};
 };
 
+/** @brief Owns postings, validity and reverse pointers as one lifetime unit. */
+template <typename T, typename Posting>
+struct BitmapPostingStorage {
+    BitmapPostingStorage(BitmapPostingMap<T, Posting> postings,
+                         BitmapStorageOptions options,
+                         std::shared_ptr<BitmapMmapOwner> mmap_owner = nullptr);
+
+    // Reverse pointers refer to this object's keys; never copy the storage.
+    BitmapPostingStorage(const BitmapPostingStorage&) = delete;
+    BitmapPostingStorage&
+    operator=(const BitmapPostingStorage&) = delete;
+
+    cachinglayer::ResourceUsage
+    CellByteSize() const;
+
+    // Destroy frozen Roaring views before unmapping their backing file.
+    std::shared_ptr<BitmapMmapOwner> mmap_owner;
+    BitmapPostingMap<T, Posting> postings;
+    BitmapStorageOptions options;
+    std::vector<const T*> offset_cache;
+    std::shared_ptr<const TargetBitmap> json_exists;
+};
+
+// Long-lived factory result. Reader creation reuses the prepared mappings.
+template <typename T>
+IndexPtr
+CreateBitmapIndex(BitmapRoaringPostingMap<T> postings,
+                  BitmapStorageOptions options,
+                  std::shared_ptr<BitmapMmapOwner> mmap_owner = nullptr);
+
+template <typename T>
+IndexPtr
+CreateBitmapIndex(BitmapBitsetPostingMap<T> postings,
+                  BitmapStorageOptions options);
+
+template <typename T, typename Posting>
+IndexPtr
+CreateBitmapIndex(
+    std::unique_ptr<BitmapPostingStorage<T, Posting>> storage,
+    std::optional<JsonProjectedIndexSpec> projection = std::nullopt);
+
+template <typename T, typename Posting>
+IndexPtr
+CreateBitmapIndex(
+    std::shared_ptr<cachinglayer::CacheSlot<BitmapPostingStorage<T, Posting>>>
+        slot,
+    IndexMetadata metadata,
+    std::optional<JsonProjectedIndexSpec> projection = std::nullopt);
+
+// Transitional loader factories; removed when IndexLoader returns Index.
 template <typename T>
 std::unique_ptr<BitmapIndexReader<bitmap_query_t<T>>>
 CreateBitmapIndexReader(BitmapRoaringPostingMap<T> postings,
-                        BitmapReaderOptions options,
+                        BitmapStorageOptions options,
                         std::shared_ptr<BitmapMmapOwner> mmap_owner = nullptr);
 
 template <typename T>
 std::unique_ptr<BitmapIndexReader<bitmap_query_t<T>>>
-CreateBitmapIndexReader(
-    std::shared_ptr<const BitmapPostingStorage<T, roaring::Roaring>> storage,
-    BitmapReaderOptions options);
-
-template <typename T>
-std::unique_ptr<BitmapIndexReader<bitmap_query_t<T>>>
 CreateBitmapIndexReader(BitmapBitsetPostingMap<T> postings,
-                        BitmapReaderOptions options);
+                        BitmapStorageOptions options);
 
 }  // namespace milvus::index

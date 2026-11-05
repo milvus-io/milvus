@@ -1,4 +1,4 @@
-#include "segcore/storagev1translator/SealedIndexTranslator.h"
+#include "segcore/indexing/SealedIndexLoader.h"
 
 #include <filesystem>
 #include <limits>
@@ -39,7 +39,7 @@
 #include "storage/artifact/FileSource.h"
 #include "storage/artifact/LoadOptions.h"
 
-namespace milvus::segcore::storagev1translator {
+namespace milvus::segcore {
 
 namespace {
 
@@ -96,7 +96,7 @@ MakeRemoteSource(const index::IndexFamily& requested_family,
 
 }  // namespace
 
-SealedIndexTranslator::SealedIndexTranslator(
+SealedIndexLoader::SealedIndexLoader(
     const milvus::segcore::LoadIndexInfo* load_index_info,
     milvus::tracer::TraceContext ctx,
     milvus::storage::FileManagerContext file_manager_context,
@@ -145,7 +145,7 @@ SealedIndexTranslator::SealedIndexTranslator(
           !lazy_load_,
           std::nullopt,
           milvus::segcore::MetricAttributionFromShard(load_index_info->shard)) {
-    IndexLoadContext metadata_ctx(
+    index::IndexLoadContext metadata_ctx(
         op_ctx,
         index::GetValueFromConfig<int32_t>(config_, "load_priority")
             .value_or(0));
@@ -237,9 +237,9 @@ SealedIndexTranslator::SealedIndexTranslator(
     AssertInfo(static_cast<bool>(loader_entry),
                "no index loader is registered for family {}",
                resolved_family);
-    SetReaderContract(std::move(resolved_family),
-                      value_type,
-                      loader_entry.derive_caps(config_));
+    family_ = std::move(resolved_family);
+    value_type_ = value_type;
+    caps_ = loader_entry.derive_caps(config_);
 
     if (!IsVectorDataType(index_load_info_.field_type)) {
         // Family selection and resource accounting share the same inspection.
@@ -324,22 +324,8 @@ SealedIndexTranslator::SealedIndexTranslator(
     }
 }
 
-size_t
-SealedIndexTranslator::num_cells() const {
-    return 1;
-}
-
-milvus::cachinglayer::cid_t
-SealedIndexTranslator::cell_id_of(milvus::cachinglayer::uid_t uid) const {
-    return 0;
-}
-
 milvus::cachinglayer::LoadingResourceUsage
-SealedIndexTranslator::estimated_loading_usage(
-    const std::vector<milvus::cachinglayer::cid_t>& cids) const {
-    if (cids.empty()) {
-        return {};
-    }
+SealedIndexLoader::EstimatedResources() const {
     // this is an estimation, error could be up to 20%.
     // Preserve the historical 2x disk safety margin for temporary file growth
     // during writes. final_disk_cost is already counted as loaded resource, so
@@ -356,15 +342,8 @@ SealedIndexTranslator::estimated_loading_usage(
             shared_overhead_};
 }
 
-const std::string&
-SealedIndexTranslator::key() const {
-    return index_key_;
-}
-
-std::vector<std::pair<milvus::cachinglayer::cid_t,
-                      std::unique_ptr<milvus::index::IIndexReaderBase>>>
-SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
-                                 const std::vector<cid_t>& cids) {
+index::IndexPtr
+SealedIndexLoader::CreateIndex(milvus::OpContext* ctx) {
     // Release preparation metadata after this attempt, including early failure.
     auto prepared_source = std::move(prepared_legacy_source_);
     int64_t segment_id = std::stoll(index_load_info_.segment_id);
@@ -372,7 +351,7 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
     storage::LoadOptions options;
     options.enable_mmap = index_load_info_.enable_mmap;
     options.estimated_bytes = index_load_info_.index_size;
-    IndexLoadContext load_ctx(
+    index::IndexLoadContext load_ctx(
         ctx,
         index::GetValueFromConfig<int32_t>(config_, "load_priority")
             .value_or(0));
@@ -413,47 +392,49 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
                Family());
     LOG_DEBUG(
         "load index family {} with configs: {}", Family(), config_.dump());
-    index::IIndexReaderBasePtr reader;
+    const auto [loaded, overhead, shared_overhead] = EstimatedResources();
+    const index::IndexCacheConfig cache{
+        index_key_,
+        meta_,
+        loaded,
+        overhead,
+        StorageBytes(),
+        index::GetValueFromConfig<int32_t>(config_, "load_priority")
+            .value_or(0),
+        shared_overhead};
+    index::IndexPtr index;
     if (packed_v3) {
         AssertInfo(index_load_info_.index_files.size() == 1,
                    "Packed scalar index requires one file");
-        reader = loader_entry.Load(
+        index = loader_entry.Load(
             {index::IndexFiles{file_manager_context_,
                                {index_load_info_.index_files.front()},
                                index::PackedIndexStorageConfig{
                                    storage::ArtifactStorageNamespace::Index}},
-             options});
+             options,
+             cache});
     } else if (prepared_source) {
-        reader = loader_entry.Load(
+        index = loader_entry.Load(
             {index::OpenedIndexSource{
                  index::LegacyIndexSource{std::move(prepared_source), true}},
-             options});
+             options,
+             cache});
     } else {
         const auto layout = UsesV1DiskLayout(source_family_)
                                 ? storage::V1SourceLayout::DiskFiles
                                 : storage::V1SourceLayout::MemoryEntries;
-        reader = loader_entry.Load(
+        index = loader_entry.Load(
             {index::IndexFiles{
                  file_manager_context_,
                  index_load_info_.index_files,
                  index::LegacyIndexStorageConfig{
                      layout, storage::ArtifactStorageNamespace::Index}},
-             options});
+             options,
+             cache});
     }
-    AssertInfo(reader != nullptr,
-               "index loader for family {} returned a null reader",
-               Family());
-
-    std::vector<
-        std::pair<cid_t, std::unique_ptr<milvus::index::IIndexReaderBase>>>
-        result;
-    result.emplace_back(std::make_pair(0, std::move(reader)));
-    return result;
+    AssertInfo(
+        index != nullptr, "index loader for family {} returned null", Family());
+    return index;
 }
 
-milvus::cachinglayer::Meta*
-SealedIndexTranslator::meta() {
-    return &meta_;
-}
-
-}  // namespace milvus::segcore::storagev1translator
+}  // namespace milvus::segcore
