@@ -344,7 +344,7 @@ func TestQueryCoordAutoRelease(t *testing.T) {
 	assert.False(t, params.AutoReleaseEnabled.GetAsBool())
 	assert.Equal(t, 600*time.Second, params.AutoReleaseIdleTTLSeconds.GetAsDuration(time.Second))
 	assert.Equal(t, 30*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
-	assert.Equal(t, 16, params.AutoReleaseConcurrency.GetAsInt())
+	assert.Equal(t, 64, params.AutoReleaseConcurrency.GetAsInt())
 	assert.NoError(t, base.Save(params.AutoReleaseEnabled.Key, "true"))
 	assert.True(t, params.AutoReleaseEnabled.GetAsBool())
 	assert.NoError(t, base.Save(params.AutoReleaseIdleTTLSeconds.Key, "120"))
@@ -359,7 +359,7 @@ func TestQueryCoordAutoRelease(t *testing.T) {
 	assert.NoError(t, base.Save(params.AutoReleaseCheckInterval.Key, "-1"))
 	assert.Equal(t, 30*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
 	assert.NoError(t, base.Save(params.AutoReleaseConcurrency.Key, "0"))
-	assert.Equal(t, 16, params.AutoReleaseConcurrency.GetAsInt())
+	assert.Equal(t, 64, params.AutoReleaseConcurrency.GetAsInt())
 
 	// 9,223,372,036 is the largest whole number of seconds that fits time.Duration.
 	assert.NoError(t, base.Save(params.AutoReleaseIdleTTLSeconds.Key, "9223372037"))
