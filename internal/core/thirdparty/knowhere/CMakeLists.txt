@@ -68,6 +68,12 @@ endif()
 # Package CUDA runtime libraries with the GPU build for downstream images.
 if ( WITH_GPU )
     find_package(CUDAToolkit 13.2 EXACT REQUIRED)
+    set(_CUDA_RUNTIME_LIBRARIES "$<TARGET_FILE:knowhere>")
+    if ( WITH_CARDINAL )
+        list(APPEND _CUDA_RUNTIME_LIBRARIES "$<TARGET_FILE:cardinalv2>")
+    else()
+        list(APPEND _CUDA_RUNTIME_LIBRARIES "$<TARGET_FILE:cuvs::cuvs>")
+    endif()
     configure_file(install_cuda_runtime.cmake.in install_cuda_runtime.cmake.in @ONLY)
     file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/install_cuda_runtime-$<CONFIG>.cmake"
             INPUT "${CMAKE_CURRENT_BINARY_DIR}/install_cuda_runtime.cmake.in")

@@ -11,15 +11,19 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-# Inspect the built library at install time, after all GPU dependencies are linked.
+# Inspect the GPU backend directly; its CUDA dependencies may be indirect in Knowhere.
+# Other dependencies are packaged by Conan and must not block CUDA collection.
 set(CMAKE_GET_RUNTIME_DEPENDENCIES_PLATFORM "linux+elf")
 set(CMAKE_GET_RUNTIME_DEPENDENCIES_TOOL "objdump")
 set(CMAKE_GET_RUNTIME_DEPENDENCIES_COMMAND "@CMAKE_OBJDUMP@")
 get_filename_component(cuda_library_dir "@CUDAToolkit_LIBRARY_DIR@" REALPATH)
+set(cuda_library_regex "^lib(cudart|cublas(Lt)?|cusolver|cusparse|curand|cufft|nvrtc(-builtins)?|nvJitLink)\\.so")
+set(gpu_libraries "@_CUDA_RUNTIME_LIBRARIES@")
 file(GET_RUNTIME_DEPENDENCIES
-        LIBRARIES "$<TARGET_FILE:knowhere>"
+        LIBRARIES ${gpu_libraries}
         DIRECTORIES "${cuda_library_dir}"
-        PRE_EXCLUDE_REGEXES "^libcuda\\.so" "^libnvidia-"
+        PRE_INCLUDE_REGEXES "${cuda_library_regex}"
+        PRE_EXCLUDE_REGEXES ".*"
         RESOLVED_DEPENDENCIES_VAR dependencies)
 
 # NVRTC loads its builtins dynamically, so they do not appear in DT_NEEDED.
@@ -33,7 +37,8 @@ foreach(dependency IN LISTS dependencies)
         file(GET_RUNTIME_DEPENDENCIES
                 LIBRARIES ${nvrtc_builtins}
                 DIRECTORIES "${cuda_library_dir}"
-                PRE_EXCLUDE_REGEXES "^libcuda\\.so" "^libnvidia-"
+                PRE_INCLUDE_REGEXES "${cuda_library_regex}"
+                PRE_EXCLUDE_REGEXES ".*"
                 RESOLVED_DEPENDENCIES_VAR builtin_dependencies)
         list(APPEND dependencies ${nvrtc_builtins} ${builtin_dependencies})
         break()
@@ -48,7 +53,7 @@ foreach(dependency IN LISTS dependencies)
         list(APPEND cuda_dependencies "${real_path}")
     else()
         get_filename_component(name "${dependency}" NAME)
-        if(name MATCHES "^lib(cudart|cublas(Lt)?|cusolver|cusparse|curand|cufft|nvrtc(-builtins)?|nvJitLink)\\.so")
+        if(name MATCHES "${cuda_library_regex}")
             message(FATAL_ERROR "CUDA runtime ${dependency} is outside ${cuda_library_dir}")
         endif()
     endif()
