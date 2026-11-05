@@ -93,14 +93,13 @@ JsonStatsTranslator::cell_id_of(milvus::cachinglayer::uid_t) const {
     return 0;
 }
 
-std::pair<milvus::cachinglayer::ResourceUsage,
-          milvus::cachinglayer::ResourceUsage>
-JsonStatsTranslator::estimated_byte_size_of_cell(
-    milvus::cachinglayer::cid_t) const {
+milvus::cachinglayer::LoadingResourceUsage
+JsonStatsTranslator::estimated_loading_usage(
+    const std::vector<milvus::cachinglayer::cid_t>&) const {
     // This coordination cell does not own another copy of the JSON payload.
     // JsonKeyStats metadata remains segment-management overhead; the inner
     // GroupChunk and BSON slots account for their own payloads.
-    return {{0, 0}, {0, 0}};
+    return {};
 }
 
 int64_t

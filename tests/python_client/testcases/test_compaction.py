@@ -1303,7 +1303,7 @@ class TestCompactionOperation(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_during_index(self):
-        """Sustain CreateIndex requests across compaction and check indexed outputs."""
+        """Sustain idempotent CreateIndex requests across compaction of indexed inputs."""
         num_of_segment = 9
         collection_w = self.collection_insert_multi_segments_one_shard(
             prefix,
@@ -1323,9 +1323,23 @@ class TestCompactionOperation(TestcaseBase):
         assert len(source_ids) == len(sources), f"Duplicate source IDs: {sources}"
         assert sum(segment.num_rows for segment in sources) == num_of_segment * ct.default_nb
 
+        # Manual Mix filters out unindexed segments once an index is registered.
+        # Finish the source index before racing idempotent CreateIndex requests
+        # with compaction, otherwise a valid no-op can yield empty plans.
+        collection_w.create_index(
+            ct.default_float_vec_field_name,
+            ct.default_index,
+            timeout=remaining_time(deadline, "creating source index"),
+            sync=False,
+        )
+        assert self.utility_wrap.wait_for_index_building_complete(
+            collection_w.name,
+            timeout=int(remaining_time(deadline, "waiting for source index build completion")),
+        )[0], f"Source vector index did not finish building for {collection_w.name}"
+
         def create_index(timeout):
-            # sync=False acknowledges the request; actual build completion is
-            # checked below. Repeated requests are idempotent, not rebuilds.
+            # Repeated requests acknowledge the existing index; the output
+            # segments' actual index build completion is checked below.
             collection_w.create_index(ct.default_float_vec_field_name, ct.default_index, timeout=timeout, sync=False)
 
         observed = run_compaction_with_workload(

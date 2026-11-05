@@ -36,6 +36,13 @@ class BuildInputMaterializer {
     virtual void
     Add(const FieldDataPtr& batch) = 0;
 
+    // Scalar materializers do not reserve vector build capacity. Vector
+    // materializers delegate reservations to their selected engine.
+    virtual bool
+    TryReserveBuild() {
+        return true;
+    }
+
     virtual storage::ArtifactPtr
     Build() && = 0;
 };

@@ -18,7 +18,9 @@ package elementnullable
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"path"
 	"testing"
 	"time"
 
@@ -322,14 +324,95 @@ func (s *ElementNullableSuite) TestInsertValidationAndImport() {
 		})
 	}
 
+	// Binlog (backup) imports cannot fill element-nullable or nested Array
+	// sub-fields, and NumPy files cannot carry struct data: a file named after
+	// the struct is rejected before the job is created.
 	resp, err := s.Cluster.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
-		CollectionName: name,
-		Files:          []*internalpb.ImportFile{{Paths: []string{"unused.json"}}},
+		CollectionName: name, PartitionName: "_default",
+		Files:   []*internalpb.ImportFile{{Paths: []string{"backup/insert_log/", "backup/delta_log/"}}},
+		Options: []*commonpb.KeyValuePair{kv("backup", "true")},
 	})
 	s.Require().NoError(err)
 	err = merr.Error(resp.GetStatus())
-	s.Require().Error(err)
-	s.Contains(err.Error(), "bulk import of element-nullable or nested Array field items.ints is not supported yet")
+	s.Require().ErrorIs(err, merr.ErrParameterInvalid)
+	s.Contains(err.Error(), "binlog import (backup restore) into a collection with element-nullable or nested Array field items.ints is not supported")
+
+	resp, err = s.Cluster.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
+		CollectionName: name,
+		Files:          []*internalpb.ImportFile{{Paths: []string{"numpy/pk.npy", "numpy/embedding.npy", "numpy/" + structName + ".npy"}}},
+	})
+	s.Require().NoError(err)
+	err = merr.Error(resp.GetStatus())
+	s.Require().ErrorIs(err, merr.ErrImportFailed)
+	s.Contains(err.Error(), "numpy import does not support struct data: file 'numpy/"+structName+".npy' names struct field '"+structName+"'")
+
+	// A JSON import of the rows of insertFields reads back like the insert.
+	s.importJSON(ctx, name, importRows())
+	s.indexAndLoad(ctx, name)
+	s.assertRows(ctx, name)
+}
+
+// importRows are the rows of insertFields in the JSON import format: a struct
+// value is a list of element objects, a null element value is null, and a
+// nested Array value is one inner array (null for a null inner array).
+func importRows() []map[string]any {
+	return []map[string]any{
+		{
+			"pk": 1, "score": 10, "legacy": []int64{1}, "embedding": vector(1),
+			structName: []map[string]any{
+				{intsName: 11, nestedName: []any{21, nil, 23}, textName: []string{"alpha"}, nullVec: vector(1), plainVec: vector(2)},
+				{intsName: nil, nestedName: nil, textName: []string{"beta"}, nullVec: nil, plainVec: vector(3)},
+			},
+		},
+		{"pk": 2, "score": 20, "legacy": []int64{}, "embedding": vector(2), structName: []map[string]any{}},
+		{"pk": 3, "score": 30, "legacy": []int64{3}, "embedding": vector(3), structName: nil},
+	}
+}
+
+func (s *ElementNullableSuite) importJSON(ctx context.Context, name string, rows []map[string]any) {
+	data, err := json.Marshal(rows)
+	s.Require().NoError(err)
+	filePath := path.Join(s.Cluster.RootPath(), "json", name+"_"+funcutil.RandomString(8)+".json")
+	s.Require().NoError(s.Cluster.ChunkManager.Write(ctx, filePath, data))
+	resp, err := s.Cluster.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
+		CollectionName: name, Files: []*internalpb.ImportFile{{Paths: []string{filePath}}},
+	})
+	s.Require().NoError(merr.CheckRPCCall(resp.GetStatus(), err))
+	for {
+		progress, err := s.Cluster.ProxyClient.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{JobID: resp.GetJobID()})
+		s.Require().NoError(merr.CheckRPCCall(progress.GetStatus(), err))
+		s.Require().NotEqual(internalpb.ImportJobState_Failed, progress.GetState(), progress.GetReason())
+		if progress.GetState() == internalpb.ImportJobState_Completed {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			s.FailNow("import did not complete before the deadline")
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+// indexAndLoad indexes every vector field, including the element-nullable
+// vector sub-field that must be indexed before load, and loads the collection.
+func (s *ElementNullableSuite) indexAndLoad(ctx context.Context, name string) {
+	plainName := typeutil.ConcatStructFieldName(structName, plainVec)
+	nullName := typeutil.ConcatStructFieldName(structName, nullVec)
+	for _, field := range []string{"embedding", plainName, nullName} {
+		metricType := metric.L2
+		if field == plainName {
+			metricType = metric.MaxSim
+		}
+		status, err := s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+			CollectionName: name, FieldName: field, IndexName: "idx_" + funcutil.RandomString(4),
+			ExtraParams: integration.ConstructIndexParam(dim, integration.IndexHNSW, metricType),
+		})
+		s.Require().NoError(merr.CheckRPCCall(status, err))
+		s.WaitForIndexBuilt(ctx, name, field)
+	}
+	status, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{CollectionName: name})
+	s.Require().NoError(merr.CheckRPCCall(status, err))
+	s.WaitForLoad(ctx, name)
 }
 
 func (s *ElementNullableSuite) queryRow(ctx context.Context, name string, pk int64) map[string]*schemapb.FieldData {
@@ -433,22 +516,30 @@ func (s *ElementNullableSuite) TestGrowingSealedSearchAndExpressions() {
 		s.Require().NoError(merr.CheckRPCCall(status, err))
 		s.WaitForIndexBuilt(ctx, name, field)
 	}
-	for _, metricType := range []string{metric.L2, metric.MaxSim} {
-		status, err := s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
-			CollectionName: name, FieldName: nullName,
-			ExtraParams: integration.ConstructIndexParam(dim, integration.IndexHNSW, metricType),
-		})
-		s.Require().NoError(err)
-		err = merr.Error(status)
-		s.Require().Error(err)
-		if metricType == metric.MaxSim {
-			s.Contains(err.Error(), "only support element-level metrics")
-		} else {
-			s.Contains(err.Error(), "indexing element-nullable vector array field "+nullName+" is not supported yet")
-		}
-	}
+	status, err := s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+		CollectionName: name, FieldName: nullName,
+		ExtraParams: integration.ConstructIndexParam(dim, integration.IndexHNSW, metric.MaxSim),
+	})
+	s.Require().NoError(err)
+	err = merr.Error(status)
+	s.Require().Error(err)
+	s.Contains(err.Error(), "only support element-level metrics")
 
-	status, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{CollectionName: name})
+	// The element-nullable vector array must be indexed before it can be loaded.
+	status, err = s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{CollectionName: name})
+	s.Require().NoError(err)
+	err = merr.Error(status)
+	s.Require().Error(err)
+	s.Contains(err.Error(), "there is no vector index on field")
+
+	status, err = s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+		CollectionName: name, FieldName: nullName, IndexName: "idx_null",
+		ExtraParams: integration.ConstructIndexParam(dim, integration.IndexHNSW, metric.L2),
+	})
+	s.Require().NoError(merr.CheckRPCCall(status, err))
+	s.WaitForIndexBuilt(ctx, name, nullName)
+
+	status, err = s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{CollectionName: name})
 	s.Require().NoError(merr.CheckRPCCall(status, err))
 	s.WaitForLoad(ctx, name)
 	s.Require().NoError(s.insert(ctx, name, insertFields()))
@@ -473,28 +564,56 @@ func (s *ElementNullableSuite) TestGrowingSealedSearchAndExpressions() {
 				integration.GetSearchParams(integration.IndexHNSW, metric.L2), 1, dim, 1, -1)
 		}
 		result, err := s.Cluster.MilvusClient.Search(ctx, request)
+		if !embeddingList {
+			s.Require().NoError(merr.CheckRPCCall(result, err))
+			continue
+		}
 		s.Require().NoError(err)
 		err = merr.Error(result.GetStatus())
 		s.Require().Error(err)
-		if embeddingList {
-			s.Contains(err.Error(), "embedding-list search is not supported for element-nullable vector array field "+nullName)
-		} else {
-			s.Contains(err.Error(), "search on element-nullable vector array field "+nullName+" is not supported yet")
-		}
+		s.Contains(err.Error(), "embedding-list search is not supported for element-nullable vector array field "+nullName)
 	}
 
+	// Element-level predicates on element-nullable sub-fields: the null
+	// element of pk 1 is UNKNOWN, its first element matches.
 	for _, expr := range []string{
 		"element_filter(items, $[ints] > 0)",
 		"MATCH_ANY(items, $[ints] > 0)",
-		"array_contains(items[ints], 11)",
 	} {
-		result, err := s.Cluster.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
+		resp, err := s.Cluster.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
 			CollectionName: name, Expr: expr, OutputFields: []string{"pk"},
 		})
-		s.Require().NoError(err)
-		err = merr.Error(result.GetStatus())
-		s.Require().Error(err)
-		s.Contains(err.Error(), "not supported")
+		s.Require().NoError(merr.CheckRPCCall(resp, err), expr)
+		s.Require().NotEmpty(resp.GetFieldsData(), expr)
+		s.Equal([]int64{1}, resp.GetFieldsData()[0].GetScalars().GetLongData().GetData(), expr)
+	}
+
+	// Row-level filters: ints is [11, NULL], [] and a NULL struct row. A null
+	// element matches nothing in array_contains and a subscript on it is
+	// UNKNOWN, so NOT selects neither the null element nor the null row.
+	for expr, want := range map[string][]int64{
+		"array_contains(items[ints], 11)":           {1},
+		"not array_contains(items[ints], 11)":       {2},
+		"array_contains(items[ints], 0)":            nil,
+		"array_length(items[ints]) == 2":            {1},
+		"items[1][ints] == 0":                       nil,
+		"not (items[1][ints] == 0)":                 nil,
+		"items[0][ints] == 11":                      {1},
+		"items[ints] != [11]":                       {1, 2},
+		"array_length(items[0][nested_ints]) == 3":  {1},
+		"array_contains(items[0][nested_ints], 23)": {1},
+		"array_contains(items[0][nested_ints], 0)":  nil,
+		"items[1][nested_ints] == []":               nil,
+	} {
+		resp, err := s.Cluster.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
+			CollectionName: name, Expr: expr, OutputFields: []string{"pk"},
+		})
+		s.Require().NoError(merr.CheckRPCCall(resp, err), expr)
+		var got []int64
+		if fields := resp.GetFieldsData(); len(fields) > 0 {
+			got = fields[0].GetScalars().GetLongData().GetData()
+		}
+		s.ElementsMatch(want, got, expr)
 	}
 
 	resp, err := s.Cluster.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
@@ -652,7 +771,9 @@ func (s *ElementNullableSuite) TestPartialUpsertKeepsOmittedStruct() {
 	name := "w7i_partial_" + funcutil.RandomString(8)
 	s.Require().NoError(merr.Error(s.create(ctx, collectionSchema(name))))
 	plainName := typeutil.ConcatStructFieldName(structName, plainVec)
-	for _, field := range []string{"embedding", plainName} {
+	nullName := typeutil.ConcatStructFieldName(structName, nullVec)
+	// The element-nullable vector array must be indexed before it can be loaded.
+	for _, field := range []string{"embedding", plainName, nullName} {
 		metricType := metric.L2
 		if field == plainName {
 			metricType = metric.MaxSim

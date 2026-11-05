@@ -27,6 +27,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"path"
 	"strconv"
@@ -2104,7 +2105,19 @@ func (loader *segmentLoader) ReopenSegments(ctx context.Context,
 			configureUseTakeForOutput(info, collection.Schema())
 		}
 
-		err := segment.Reopen(ctx, info)
+		var err error
+		local, ok := segment.(*LocalSegment)
+		if ok && collection != nil && typeutil.IsExternalCollection(collection.Schema()) &&
+			typeutil.NewStorageColumnResolver(collection.Schema()).IsMilvusTable() &&
+			!deltaSourceUnchanged(local.LoadInfo(), info) {
+			// External refresh may add deletes to the new manifest; replay them
+			// before the new load info is published.
+			err = local.reopen(ctx, info, func() error {
+				return loader.loadDeltalogs(ctx, local, info)
+			})
+		} else {
+			err = segment.Reopen(ctx, info)
+		}
 		if err != nil {
 			mlog.Warn(context.TODO(), "failed to reopen segment", mlog.Int64("segmentID", info.GetSegmentID()), mlog.Err(err))
 			return err
@@ -2112,6 +2125,33 @@ func (loader *segmentLoader) ReopenSegments(ctx context.Context,
 	}
 
 	return nil
+}
+
+// deltaSourceUnchanged reports whether incoming references the same delete
+// sources as the published load info. Reopen publishes load info only after a
+// successful replay, so an unchanged source (e.g. index-only reopen) has
+// already been applied. Child manifests are not kept in the runtime load info,
+// so their presence always forces a replay.
+func deltaSourceUnchanged(current, incoming *querypb.SegmentLoadInfo) bool {
+	if len(incoming.GetChildManifestPaths()) != 0 || current.GetManifestPath() != incoming.GetManifestPath() {
+		return false
+	}
+	// Files are immutable; ordering and repeated references do not change their contents.
+	type identity struct {
+		fieldID int64
+		logID   int64
+		path    string
+	}
+	sources := func(info *querypb.SegmentLoadInfo) map[identity]struct{} {
+		result := make(map[identity]struct{})
+		for _, field := range info.GetDeltalogs() {
+			for _, log := range field.GetBinlogs() {
+				result[identity{field.GetFieldID(), log.GetLogID(), log.GetLogPath()}] = struct{}{}
+			}
+		}
+		return result
+	}
+	return maps.Equal(sources(current), sources(incoming))
 }
 
 func getBinlogDataDiskSize(fieldBinlog *datapb.FieldBinlog) int64 {

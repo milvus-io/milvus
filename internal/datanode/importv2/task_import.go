@@ -281,9 +281,9 @@ func (t *ImportTask) importFile(reader importutilv2.Reader, cur *importid.FileID
 			mlog.Info(t.ctx, "0 row was imported, the data may have been deleted", WrapLogFields(t)...)
 			continue
 		}
-		// the same check has been done in preimport task, double-check here since
-		// the actual import task re-reads the files
-		err = CheckStructArrayConsistency(t.GetSchema(), data)
+		// preimport normalized the same batches; the import task re-reads the
+		// files, so fill missing struct sub-fields and re-check here
+		err = NormalizeStructArrayFields(t.GetSchema(), data)
 		if err != nil {
 			return err
 		}

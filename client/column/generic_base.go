@@ -69,6 +69,31 @@ func setFieldDataValidData(fd *schemapb.FieldData, validData []bool) {
 	fd.ValidData = validData
 }
 
+// getArrayElementValidData returns the element validity of one scalar Array row of a struct
+// sub-field. Unlike row validity it has a single location.
+func getArrayElementValidData(row *schemapb.ScalarField) []bool {
+	return row.GetValidData()
+}
+
+// setArrayElementValidData writes the element validity of one scalar Array row.
+func setArrayElementValidData(row *schemapb.ScalarField, validData []bool) {
+	if row != nil {
+		row.ValidData = validData
+	}
+}
+
+// getVectorArrayElementValidData returns the element validity of one ArrayOfVector row.
+func getVectorArrayElementValidData(row *schemapb.VectorField) []bool {
+	return row.GetValidData()
+}
+
+// setVectorArrayElementValidData writes the element validity of one ArrayOfVector row.
+func setVectorArrayElementValidData(row *schemapb.VectorField, validData []bool) {
+	if row != nil {
+		row.ValidData = validData
+	}
+}
+
 var _ Column = (*genericColumnBase[any])(nil)
 
 // genericColumnBase implements `Column` interface
@@ -134,8 +159,18 @@ func (c *genericColumnBase[T]) Slice(start, end int) Column {
 	return c.slice(start, end)
 }
 
-func (c *genericColumnBase[T]) slice(start, end int) *genericColumnBase[T] {
-	l := c.Len()
+// sliceRange normalizes the logical row range [start, end) and returns it together with the
+// matching range of payload rows in values.
+func (c *genericColumnBase[T]) sliceRange(start, end int) (int, int, int, int) {
+	start, end = normalizeSliceRange(start, end, c.Len())
+	valueStart, valueEnd := start, end
+	if c.nullable && !c.sparseMode {
+		valueStart, valueEnd = compactValueRange(c.indexMapping, start, end)
+	}
+	return start, end, valueStart, valueEnd
+}
+
+func normalizeSliceRange(start, end, l int) (int, int) {
 	if start < 0 {
 		start = 0
 	}
@@ -148,11 +183,11 @@ func (c *genericColumnBase[T]) slice(start, end int) *genericColumnBase[T] {
 	if start > end {
 		start = end
 	}
+	return start, end
+}
 
-	valueStart, valueEnd := start, end
-	if c.nullable && !c.sparseMode {
-		valueStart, valueEnd = compactValueRange(c.indexMapping, start, end)
-	}
+func (c *genericColumnBase[T]) slice(start, end int) *genericColumnBase[T] {
+	start, end, valueStart, valueEnd := c.sliceRange(start, end)
 	result := &genericColumnBase[T]{
 		name:       c.name,
 		fieldType:  c.fieldType,

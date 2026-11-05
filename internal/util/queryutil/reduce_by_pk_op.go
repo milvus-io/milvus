@@ -66,10 +66,14 @@ func (op *ReduceByPKOperator) Run(ctx context.Context, span trace.Span, inputs .
 	defer sp.End()
 
 	results := inputs[0].([]*internalpb.RetrieveResults)
+	emptyComputed, computedErr := prepareComputedResults(results)
+	if computedErr != nil {
+		return nil, computedErr
+	}
 
 	validResults, hasMoreResult := filterPKResults(results)
 	if len(validResults) == 0 {
-		return []any{&internalpb.RetrieveResults{}}, nil
+		return []any{&internalpb.RetrieveResults{ComputedResults: emptyComputed}}, nil
 	}
 
 	// If only one result, return as-is
@@ -107,7 +111,11 @@ func (op *ReduceByPKOperator) mergeByPK(results []*internalpb.RetrieveResults, h
 		return nil, err
 	}
 	if len(selectedRows) == 0 {
-		return &internalpb.RetrieveResults{HasMoreResult: hasMoreResult}, nil
+		computed, err := selectComputedResults(results, nil)
+		if err != nil {
+			return nil, err
+		}
+		return &internalpb.RetrieveResults{HasMoreResult: hasMoreResult, ComputedResults: computed}, nil
 	}
 
 	merged, err := buildMergedRetrieveResults(results, selectedRows, op.schema)
@@ -223,6 +231,10 @@ func (op *ReduceByPKWithTimestampOperator) Run(ctx context.Context, span trace.S
 	defer sp.End()
 
 	results := inputs[0].([]*internalpb.RetrieveResults)
+	emptyComputed, computedErr := prepareComputedResults(results)
+	if computedErr != nil {
+		return nil, computedErr
+	}
 
 	// Positional agreement is a precondition, not something to tolerate. A
 	// short arrowRecords slice would leave later results with a nil record
@@ -258,7 +270,7 @@ func (op *ReduceByPKWithTimestampOperator) Run(ctx context.Context, span trace.S
 	}
 
 	if len(validResults) == 0 {
-		return []any{&internalpb.RetrieveResults{}}, nil
+		return []any{&internalpb.RetrieveResults{ComputedResults: emptyComputed}}, nil
 	}
 
 	// No single-result shortcut: even a single result may contain duplicate PKs
@@ -277,22 +289,29 @@ func (op *ReduceByPKWithTimestampOperator) Run(ctx context.Context, span trace.S
 // When duplicate PK found with higher timestamp, replaces the previous entry.
 func (op *ReduceByPKWithTimestampOperator) mergeByPKWithTimestamp(results []*timestampedResult, hasMoreResult bool) (*internalpb.RetrieveResults, error) {
 	cursors := make([]int64, len(results))
-	rowSizeCalculators := make([]*rowSizeCalculator, len(results))
-	for i, result := range results {
-		// withArrowRecord is what keeps the maxOutputSize guard honest on the
-		// Arrow path, where the user columns are in the record rather than in
-		// FieldsData. See rowSizeCalculator.
-		rowSizeCalculators[i] = newRowSizeCalculator(result.result).
-			withArrowRecord(result.record)
+	var rowSizeCalculators []*rowSizeCalculator
+	if op.maxOutputSize > 0 {
+		rowSizeCalculators = make([]*rowSizeCalculator, len(results))
+		for i, result := range results {
+			// Account for Arrow fields that have not been materialized yet.
+			rowSizeCalculators[i] = newRowSizeCalculator(result.result).withArrowRecord(result.record)
+		}
 	}
 
 	// Track PK -> (selectedRowIndex, timestamp) for replacement on higher timestamp
 	type pkEntry struct {
 		rowIndex int // index in selectedRows
 		ts       int64
+		size     int64 // Retained row size, reused when a newer version replaces it.
 	}
 	pkTsMap := make(map[any]pkEntry)
 
+	measureRowSize := func(result int, row int64) int64 {
+		if op.maxOutputSize <= 0 {
+			return 0
+		}
+		return rowSizeCalculators[result].rowSize(row)
+	}
 	var retSize int64
 	var selectedRows []rowRef
 	var availableCount int64 // row count for doc-level, element count for element-level
@@ -312,7 +331,6 @@ func (op *ReduceByPKWithTimestampOperator) mergeByPKWithTimestamp(results []*tim
 
 		pk := typeutil.GetPK(results[sel].result.GetIds(), cursors[sel])
 		ts := results[sel].getTimestamp(cursors[sel])
-		rowSize := rowSizeCalculators[sel].rowSize(cursors[sel])
 
 		// Compute element count for this row
 		var elemCount int64 = 1
@@ -325,7 +343,8 @@ func (op *ReduceByPKWithTimestampOperator) mergeByPKWithTimestamp(results []*tim
 
 		if entry, exists := pkTsMap[pk]; !exists {
 			// New PK - add it
-			pkTsMap[pk] = pkEntry{rowIndex: len(selectedRows), ts: ts}
+			rowSize := measureRowSize(sel, cursors[sel])
+			pkTsMap[pk] = pkEntry{rowIndex: len(selectedRows), ts: ts, size: rowSize}
 			selectedRows = append(selectedRows, rowRef{resultIdx: sel, rowIdx: cursors[sel]})
 			retSize += rowSize
 			availableCount += elemCount
@@ -334,8 +353,8 @@ func (op *ReduceByPKWithTimestampOperator) mergeByPKWithTimestamp(results []*tim
 			if ts != 0 && ts > entry.ts {
 				// Replace existing entry — swap row sizes and element counts
 				oldRef := selectedRows[entry.rowIndex]
-				oldSize := rowSizeCalculators[oldRef.resultIdx].rowSize(oldRef.rowIdx)
-				retSize = retSize - oldSize + rowSize
+				rowSize := measureRowSize(sel, cursors[sel])
+				retSize += rowSize - entry.size
 				// Adjust element count for replacement
 				if isElementLevel {
 					oldElemIndices := results[oldRef.resultIdx].result.GetElementIndices()
@@ -344,7 +363,7 @@ func (op *ReduceByPKWithTimestampOperator) mergeByPKWithTimestamp(results []*tim
 					}
 					availableCount += elemCount
 				}
-				pkTsMap[pk] = pkEntry{rowIndex: entry.rowIndex, ts: ts}
+				pkTsMap[pk] = pkEntry{rowIndex: entry.rowIndex, ts: ts, size: rowSize}
 				selectedRows[entry.rowIndex] = rowRef{resultIdx: sel, rowIdx: cursors[sel]}
 			}
 		}
@@ -361,14 +380,18 @@ func (op *ReduceByPKWithTimestampOperator) mergeByPKWithTimestamp(results []*tim
 		cursors[sel]++
 	}
 
-	if len(selectedRows) == 0 {
-		return &internalpb.RetrieveResults{HasMoreResult: hasMoreResult}, nil
-	}
-
 	// Build merged result from original results
 	origResults := make([]*internalpb.RetrieveResults, len(results))
 	for i, tr := range results {
 		origResults[i] = tr.result
+	}
+
+	if len(selectedRows) == 0 {
+		computed, err := selectComputedResults(origResults, nil)
+		if err != nil {
+			return nil, err
+		}
+		return &internalpb.RetrieveResults{HasMoreResult: hasMoreResult, ComputedResults: computed}, nil
 	}
 
 	// buildMergedRetrieveResults merges whatever FieldsData the inputs carry. On

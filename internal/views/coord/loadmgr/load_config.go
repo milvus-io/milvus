@@ -1,24 +1,23 @@
 package loadmgr
 
 import (
-	"sort"
-
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 // LoadConfig is the desired load configuration of one collection.
 // It unifies the DDL-side config (CollectionLoadInfo + LoadReplicaConfig).
 // Runtime node membership is derived from ResourceGroup by the Balancer.
 type LoadConfig struct {
+	Version                  uint64
 	DbID                     int64
 	CollectionID             int64
 	PartitionIDs             []int64
-	LoadFields               []*messagespb.LoadFieldConfig // Preload hints; empty follows the target schema, not query scope.
-	RequiredFields           []*messagespb.LoadFieldConfig // Explicit internal query scope.
+	LoadFields               []*viewpb.LoadFieldConfig // Preload hints; empty follows the target schema, not query scope.
+	RequiredFields           []*viewpb.LoadFieldConfig // Explicit internal query scope.
 	UserSpecifiedReplicaMode bool
 	Replicas                 []*ReplicaAssignment
 }
@@ -37,6 +36,7 @@ func (c *LoadConfig) Clone() *LoadConfig {
 		return nil
 	}
 	out := &LoadConfig{
+		Version:                  c.Version,
 		DbID:                     c.DbID,
 		CollectionID:             c.CollectionID,
 		UserSpecifiedReplicaMode: c.UserSpecifiedReplicaMode,
@@ -46,9 +46,9 @@ func (c *LoadConfig) Clone() *LoadConfig {
 		out.PartitionIDs = append([]int64{}, c.PartitionIDs...)
 	}
 	if len(c.LoadFields) > 0 {
-		out.LoadFields = make([]*messagespb.LoadFieldConfig, len(c.LoadFields))
+		out.LoadFields = make([]*viewpb.LoadFieldConfig, len(c.LoadFields))
 		for i, f := range c.LoadFields {
-			out.LoadFields[i] = &messagespb.LoadFieldConfig{FieldId: f.FieldId, IndexId: f.IndexId}
+			out.LoadFields[i] = proto.Clone(f).(*viewpb.LoadFieldConfig)
 		}
 	}
 	if len(c.Replicas) > 0 {
@@ -80,14 +80,9 @@ func FromAlterLoadConfigMessage(msg *messagespb.AlterLoadConfigMessageHeader) *L
 		CollectionID:             msg.GetCollectionId(),
 		PartitionIDs:             append([]int64{}, msg.GetPartitionIds()...),
 		UserSpecifiedReplicaMode: msg.GetUserSpecifiedReplicaMode(),
-		RequiredFields:           cloneFieldConfigs(msg.GetRequiredFields()),
+		RequiredFields:           FieldsFromMessage(msg.GetRequiredFields()),
 	}
-	for _, f := range msg.GetLoadFields() {
-		cfg.LoadFields = append(cfg.LoadFields, &messagespb.LoadFieldConfig{
-			FieldId: f.GetFieldId(),
-			IndexId: f.GetIndexId(),
-		})
-	}
+	cfg.LoadFields = FieldsFromMessage(msg.GetLoadFields())
 	for _, r := range msg.GetReplicas() {
 		cfg.Replicas = append(cfg.Replicas, &ReplicaAssignment{
 			ReplicaID:     r.GetReplicaId(),
@@ -98,108 +93,85 @@ func FromAlterLoadConfigMessage(msg *messagespb.AlterLoadConfigMessageHeader) *L
 	return cfg
 }
 
-// buildFromPersisted reconstructs a LoadConfig from the persisted proto triple
-// (CollectionLoadInfo, PartitionLoadInfo list, Replica list for this collection).
-// NOTE: Priority is not currently persisted in the Replica proto; recovered
-// replicas get commonpb.LoadPriority default (0 / HIGH). TODO: persist Priority.
-func buildFromPersisted(
-	info *querypb.CollectionLoadInfo,
-	partitions []*querypb.PartitionLoadInfo,
-	replicas []*querypb.Replica,
-) *LoadConfig {
+// buildFromPersisted reconstructs the complete versioned requirements.
+func buildFromPersisted(info *viewpb.CollectionLoadConfig) *LoadConfig {
 	cfg := &LoadConfig{
-		DbID:                     info.GetDbID(),
-		CollectionID:             info.GetCollectionID(),
+		Version: info.GetVersion(), DbID: info.GetDbID(), CollectionID: info.GetCollectionID(),
 		UserSpecifiedReplicaMode: info.GetUserSpecifiedReplicaMode(),
 		RequiredFields:           cloneFieldConfigs(info.GetRequiredFields()),
+		LoadFields:               cloneFieldConfigs(info.GetPreloadFields()),
+		PartitionIDs:             append([]int64(nil), info.GetPartitionIds()...),
 	}
-
-	// PartitionIDs: derived from PartitionLoadInfo list.
-	cfg.PartitionIDs = make([]int64, 0, len(partitions))
-	for _, p := range partitions {
-		cfg.PartitionIDs = append(cfg.PartitionIDs, p.GetPartitionID())
-	}
-	sort.Slice(cfg.PartitionIDs, func(i, j int) bool { return cfg.PartitionIDs[i] < cfg.PartitionIDs[j] })
-
-	// LoadFields: combine the []int64 field list with the FieldIndexID map.
-	fieldIndex := info.GetFieldIndexID()
-	for _, fieldID := range info.GetLoadFields() {
-		cfg.LoadFields = append(cfg.LoadFields, &messagespb.LoadFieldConfig{
-			FieldId: fieldID,
-			IndexId: fieldIndex[fieldID],
-		})
-	}
-
-	// Replicas belonging to this collection.
-	for _, r := range replicas {
-		if r.GetCollectionID() != cfg.CollectionID {
-			continue
-		}
+	for _, replica := range info.GetReplicas() {
 		cfg.Replicas = append(cfg.Replicas, &ReplicaAssignment{
-			ReplicaID:     r.GetID(),
-			ResourceGroup: r.GetResourceGroup(),
+			ReplicaID: replica.GetReplicaId(), ResourceGroup: replica.GetResourceGroupName(), Priority: replica.GetPriority(),
 		})
 	}
-	sort.Slice(cfg.Replicas, func(i, j int) bool {
-		return cfg.Replicas[i].ReplicaID < cfg.Replicas[j].ReplicaID
-	})
 	return cfg
 }
 
-// toCollectionLoadInfoProto serializes the top-level collection fields.
-// Partitions and Replicas are serialized separately.
-func (c *LoadConfig) toCollectionLoadInfoProto() *querypb.CollectionLoadInfo {
-	info := &querypb.CollectionLoadInfo{
+// toCollectionLoadConfigProto persists references, not index definitions or parameters.
+func (c *LoadConfig) toCollectionLoadConfigProto() *viewpb.CollectionLoadConfig {
+	info := &viewpb.CollectionLoadConfig{
+		Version:                  c.Version,
 		CollectionID:             c.CollectionID,
 		DbID:                     c.DbID,
-		ReplicaNumber:            int32(len(c.Replicas)),
-		Status:                   querypb.LoadStatus_Loaded,
 		UserSpecifiedReplicaMode: c.UserSpecifiedReplicaMode,
 		RequiredFields:           cloneFieldConfigs(c.RequiredFields),
+		PartitionIds:             append([]int64(nil), c.PartitionIDs...),
 	}
-	if len(c.LoadFields) > 0 {
-		info.LoadFields = make([]int64, 0, len(c.LoadFields))
-		info.FieldIndexID = make(map[int64]int64, len(c.LoadFields))
-		for _, f := range c.LoadFields {
-			info.LoadFields = append(info.LoadFields, f.GetFieldId())
-			if f.GetIndexId() != 0 {
-				info.FieldIndexID[f.GetFieldId()] = f.GetIndexId()
-			}
-		}
+	info.PreloadFields = cloneFieldConfigs(c.LoadFields)
+	for _, replica := range c.Replicas {
+		info.Replicas = append(info.Replicas, &viewpb.LoadReplicaConfig{
+			ReplicaId: replica.ReplicaID, ResourceGroupName: replica.ResourceGroup, Priority: replica.Priority,
+		})
 	}
 	return info
 }
 
-// toPartitionLoadInfoProtos serializes each partition to its proto.
-func (c *LoadConfig) toPartitionLoadInfoProtos() []*querypb.PartitionLoadInfo {
-	out := make([]*querypb.PartitionLoadInfo, 0, len(c.PartitionIDs))
-	for _, pid := range c.PartitionIDs {
-		out = append(out, &querypb.PartitionLoadInfo{
-			CollectionID: c.CollectionID,
-			PartitionID:  pid,
-			Status:       querypb.LoadStatus_Loaded,
-		})
+func cloneFieldConfigs(fields []*viewpb.LoadFieldConfig) []*viewpb.LoadFieldConfig {
+	if fields == nil {
+		return nil
+	}
+	out := make([]*viewpb.LoadFieldConfig, len(fields))
+	for i, field := range fields {
+		out[i] = proto.Clone(field).(*viewpb.LoadFieldConfig)
 	}
 	return out
 }
 
-// toReplicaProto serializes one ReplicaAssignment to its proto.
-func (r *ReplicaAssignment) toReplicaProto(collectionID int64) *querypb.Replica {
-	return &querypb.Replica{
-		ID:            r.ReplicaID,
-		CollectionID:  collectionID,
-		ResourceGroup: r.ResourceGroup,
-		// TODO: persist Priority once a proto field is added.
-	}
-}
-
-func cloneFieldConfigs(fields []*messagespb.LoadFieldConfig) []*messagespb.LoadFieldConfig {
+// FieldsFromMessage converts WAL intent into independent QueryView requirements.
+// Publication resolves the complete selected index set from DataCoord, since the
+// historical WAL message expresses at most one index per field.
+func FieldsFromMessage(fields []*messagespb.LoadFieldConfig) []*viewpb.LoadFieldConfig {
 	if fields == nil {
 		return nil
 	}
-	out := make([]*messagespb.LoadFieldConfig, len(fields))
-	for i, field := range fields {
-		out[i] = proto.Clone(field).(*messagespb.LoadFieldConfig)
+	out := make([]*viewpb.LoadFieldConfig, 0, len(fields))
+	for _, field := range fields {
+		next := &viewpb.LoadFieldConfig{FieldId: field.GetFieldId()}
+		if id := field.GetIndexId(); id != 0 {
+			next.IndexIds = []int64{id}
+		}
+		out = append(out, next)
+	}
+	return out
+}
+
+// FieldsToMessage projects load intent into the existing WAL message. Its scalar
+// index hint is not the authoritative QueryView index selection; publication
+// resolves every selected index from committed metadata.
+func FieldsToMessage(fields []*viewpb.LoadFieldConfig) []*messagespb.LoadFieldConfig {
+	if fields == nil {
+		return nil
+	}
+	out := make([]*messagespb.LoadFieldConfig, 0, len(fields))
+	for _, field := range fields {
+		next := &messagespb.LoadFieldConfig{FieldId: field.GetFieldId()}
+		if len(field.GetIndexIds()) != 0 {
+			next.IndexId = field.IndexIds[0]
+		}
+		out = append(out, next)
 	}
 	return out
 }

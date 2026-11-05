@@ -99,6 +99,9 @@ func (node *DataNode) CreateJob(ctx context.Context, req *workerpb.CreateJobRequ
 	task := index.NewIndexBuildTask(taskCtx, taskCancel, req, cm, node.taskManager, pluginContext)
 	ret := merr.Success()
 	if err := node.taskScheduler.TaskQueue.Enqueue(task); err != nil {
+		taskCancel()
+		task.Reset()
+		node.taskManager.DeleteIndexTaskInfos(ctx, []index.Key{{ClusterID: req.GetClusterID(), TaskID: req.GetBuildID()}})
 		mlog.Warn(context.TODO(), "DataNode failed to schedule",
 			mlog.Err(err))
 		ret = merr.Status(err)
@@ -302,6 +305,9 @@ func (node *DataNode) createIndexTask(ctx context.Context, req *workerpb.CreateJ
 	task := index.NewIndexBuildTask(taskCtx, taskCancel, req, cm, node.taskManager, pluginContext)
 	ret := merr.Success()
 	if err := node.taskScheduler.TaskQueue.Enqueue(task); err != nil {
+		taskCancel()
+		task.Reset()
+		node.taskManager.DeleteIndexTaskInfos(ctx, []index.Key{{ClusterID: req.GetClusterID(), TaskID: req.GetBuildID()}})
 		mlog.Warn(context.TODO(), "DataNode failed to schedule",
 			mlog.Err(err))
 		ret = merr.Status(err)
@@ -352,6 +358,9 @@ func (node *DataNode) createAnalyzeTask(ctx context.Context, req *workerpb.Analy
 	t := index.NewAnalyzeTask(taskCtx, taskCancel, req, node.taskManager, pluginContext)
 	ret := merr.Success()
 	if err := node.taskScheduler.TaskQueue.Enqueue(t); err != nil {
+		taskCancel()
+		t.Reset()
+		node.taskManager.DeleteAnalyzeTaskInfos(ctx, []index.Key{{ClusterID: req.GetClusterID(), TaskID: req.GetTaskID()}})
 		mlog.Warn(context.TODO(), "DataNode failed to schedule", mlog.Err(err))
 		ret = merr.Status(err)
 		return ret, nil
@@ -406,6 +415,9 @@ func (node *DataNode) createStatsTask(ctx context.Context, req *workerpb.CreateS
 	t := index.NewStatsTask(taskCtx, taskCancel, req, node.taskManager, cm, pluginContext)
 	ret := merr.Success()
 	if err := node.taskScheduler.TaskQueue.Enqueue(t); err != nil {
+		taskCancel()
+		t.Reset()
+		node.taskManager.DeleteStatsTaskInfos(ctx, []index.Key{{ClusterID: req.GetClusterID(), TaskID: req.GetTaskID()}})
 		mlog.Warn(context.TODO(), "DataNode failed to schedule", mlog.Err(err))
 		ret = merr.Status(err)
 		return ret, nil

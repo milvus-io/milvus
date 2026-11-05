@@ -1166,7 +1166,7 @@ func TestInitialCheckpointFromLastTimeTickMessage(t *testing.T) {
 	require.NotNil(t, checkpoint)
 	assert.True(t, lastConfirmed.EQ(checkpoint.MessageID))
 	assert.Equal(t, uint64(200), checkpoint.TimeTick)
-	assert.Equal(t, utility.RecoveryMagicRecoveryStorageV2, checkpoint.Magic)
+	assert.Equal(t, utility.RecoveryMagicSchemaMetadataAligned, checkpoint.Magic)
 }
 
 type recordingAckTaskScheduler struct {
@@ -1175,7 +1175,7 @@ type recordingAckTaskScheduler struct {
 	ready chan struct{}
 }
 
-func (s *recordingAckTaskScheduler) Submit(task nodescheduler.Task) nodescheduler.TaskHandle {
+func (s *recordingAckTaskScheduler) Submit(task nodescheduler.Task, opts ...nodescheduler.Option) nodescheduler.TaskHandle {
 	s.mu.Lock()
 	s.tasks = append(s.tasks, task)
 	if s.ready != nil {
@@ -1307,7 +1307,7 @@ func TestRecoverRecoveryStorageFailureReleasesResources(t *testing.T) {
 // RequestFlushThrough completes the write before it returns.
 type immediateTaskScheduler struct{}
 
-func (immediateTaskScheduler) Submit(task nodescheduler.Task) nodescheduler.TaskHandle {
+func (immediateTaskScheduler) Submit(task nodescheduler.Task, opts ...nodescheduler.Option) nodescheduler.TaskHandle {
 	_ = task.Execute(context.Background())
 	return immediateTaskHandle{}
 }

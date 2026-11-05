@@ -150,6 +150,12 @@ MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
             std::to_string(c_storage_config.max_connections).c_str());
     }
 
+    (*properties_map)[PROPERTY_FS_S3_CRT_QUEUE_SIZES] =
+        c_storage_config.crt_queue_sizes > 0
+            ? c_storage_config.crt_queue_sizes
+            : milvus::storage::LoonFFIPropertiesSingleton::GetInstance()
+                  .GetS3CrtQueueSizes();
+
     if (c_storage_config.tls_min_version != nullptr) {
         std::string tls_ver(c_storage_config.tls_min_version);
         if (!tls_ver.empty() && tls_ver != "default") {
@@ -286,6 +292,7 @@ ExternalFsPropertyKey(const std::string& extfs_prefix,
 // milvus.yaml, not from a user-supplied external_spec.
 static const std::vector<const char*> kExtfsInheritedFsFields = {
     PROPERTY_FS_MAX_CONNECTIONS,
+    PROPERTY_FS_S3_CRT_QUEUE_SIZES,
 };
 
 // PropertyValueAsString renders a PropertyVariant back to the string form
@@ -620,10 +627,15 @@ InjectExternalSpecProperties(
                         if (key == "cloud_provider" && val == "minio") {
                             continue;
                         }
+                        // Keep the legacy spec key compatible with storage's shared Broker property.
+                        const auto property =
+                            key == "azure_credential_endpoint"
+                                ? ExternalFsPropertyKey(
+                                      extfs_prefix,
+                                      PROPERTY_FS_CREDENTIAL_ENDPOINT)
+                                : extfs_prefix + key;
                         milvus_storage::api::SetValue(
-                            properties,
-                            (extfs_prefix + key).c_str(),
-                            val.c_str());
+                            properties, property.c_str(), val.c_str());
                     } catch (const simdjson::simdjson_error& per_field) {
                         LOG_WARN(
                             "extfs field parse failed, skipping "

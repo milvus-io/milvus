@@ -2212,12 +2212,16 @@ SegmentGrowingImpl::load_column_group_data_internal(
         // pushing into the bounded channel. If the consumer loop below
         // throws, unblock the task and wait for it before unwinding
         // (see #46958).
+        bool channel_exhausted = false;
         auto drain_on_unwind = folly::makeGuard([&]() {
-            try {
-                std::shared_ptr<milvus::ArrowDataWrapper> discard;
-                while (column_group_info.arrow_reader_channel->pop(discard)) {
+            if (!channel_exhausted) {
+                try {
+                    std::shared_ptr<milvus::ArrowDataWrapper> discard;
+                    while (
+                        column_group_info.arrow_reader_channel->pop(discard)) {
+                    }
+                } catch (...) {
                 }
-            } catch (...) {
             }
             storage::DrainFuture(load_future);
         });
@@ -2279,6 +2283,8 @@ SegmentGrowingImpl::load_column_group_data_internal(
                 }
             }
         }
+        // The loop consumed the close marker, even if the producer failed.
+        channel_exhausted = true;
         // access underlying feature to get exception if any
         load_future.get();
         drain_on_unwind.dismiss();
@@ -2511,12 +2517,6 @@ SegmentGrowingImpl::chunk_array_value_view_impl(
     AssertInfo(field_meta.is_native_list_array(),
                "chunk_array_value_view_impl only supports recursive ARRAY "
                "fields");
-    if (field_meta.has_nullable_array_element()) {
-        ThrowInfo(ErrorCode::NotImplemented,
-                  "expressions on element-nullable array field {} are not "
-                  "supported yet",
-                  field_meta.get_name().get());
-    }
 
     const auto* array_data = insert_record_.get_data<ArrayValue>(field_id);
     const auto size_per_chunk = array_data->get_size_per_chunk();
@@ -2708,8 +2708,39 @@ SegmentGrowingImpl::chunk_string_views_by_offsets(
     FieldId field_id,
     int64_t chunk_id,
     const FixedVector<int32_t>& offsets) const {
-    ThrowInfo(ErrorCode::NotImplemented,
-              "chunk view by offsets not implemented for growing segment");
+    auto schema = get_schema_snapshot();
+    const auto& meta = (*schema)[field_id];
+    AssertInfo(meta.get_data_type() == DataType::VARCHAR,
+               "growing string views require VARCHAR; TEXT needs LOB decoding");
+    const auto* values = insert_record_.get_data<std::string>(field_id);
+    const auto chunk_rows = values->get_size_per_chunk();
+    const auto active_count = insert_record_.ack_responder_.GetAck();
+    AssertInfo(chunk_id >= 0 && chunk_id <= active_count / chunk_rows,
+               "invalid growing string chunk");
+    std::vector<int64_t> logical;
+    logical.reserve(offsets.size());
+    for (auto offset : offsets) {
+        AssertInfo(offset >= 0 && offset < chunk_rows &&
+                       offset < active_count - chunk_id * chunk_rows,
+                   "invalid growing string offset");
+        logical.push_back(chunk_id * chunk_rows + offset);
+    }
+    FixedVector<bool> valid;
+    if (meta.is_nullable()) {
+        valid.resize(offsets.size());
+        insert_record_.get_valid_data(field_id)->bulk_is_valid(
+            logical.data(), logical.size(), valid.data());
+    }
+    std::vector<std::string_view> views;
+    views.reserve(offsets.size());
+    for (size_t i = 0; i < logical.size(); ++i) {
+        views.push_back(valid.empty() || valid[i]
+                            ? values->view_element(logical[i])
+                            : std::string_view{});
+    }
+    return cachinglayer::PinWrapper<
+        std::pair<std::vector<std::string_view>, FixedVector<bool>>>(
+        std::make_pair(std::move(views), std::move(valid)));
 }
 
 cachinglayer::PinWrapper<std::pair<std::vector<ArrayView>, FixedVector<bool>>>
@@ -2737,12 +2768,6 @@ SegmentGrowingImpl::chunk_array_value_views_by_offsets(
     AssertInfo(field_meta.is_native_list_array(),
                "chunk_array_value_views_by_offsets only supports recursive "
                "ARRAY fields");
-    if (field_meta.has_nullable_array_element()) {
-        ThrowInfo(ErrorCode::NotImplemented,
-                  "expressions on element-nullable array field {} are not "
-                  "supported yet",
-                  field_meta.get_name().get());
-    }
 
     const auto* array_data = insert_record_.get_data<ArrayValue>(field_id);
     const auto size_per_chunk = array_data->get_size_per_chunk();
@@ -3406,7 +3431,7 @@ SegmentGrowingImpl::bulk_subscript_array_impl(
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
         if (offset != INVALID_SEG_OFFSET) {
-            dst->at(i) = (*vec_ptr)[offset].output_data();
+            dst->at(i) = vec_ptr->view_element(offset).output_data();
         }
     }
 }
@@ -3597,7 +3622,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
             for (int64_t i = 0; i < count; ++i) {
                 auto offset = seg_offsets[i];
                 if (offset != INVALID_SEG_OFFSET) {
-                    dst[i] = src[offset];
+                    src.view_element(offset).output_data(dst[i]);
                 } else {
                     dst[i] =
                         Array();  // Default-construct empty Array for invalid offsets
@@ -3615,7 +3640,8 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
 
 void
 SegmentGrowingImpl::search_ids(BitsetType& bitset,
-                               const IdArray& id_array) const {
+                               const IdArray& id_array,
+                               milvus::OpContext* /*op_ctx*/) const {
     auto schema = get_schema_snapshot();
     auto field_id = schema->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(field_id.get() != -1, "Primary key is -1");

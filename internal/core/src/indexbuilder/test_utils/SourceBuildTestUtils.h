@@ -145,6 +145,12 @@ class SourceBuildTest : public ::testing::Test {
         options.mmap_dir_path = directory_->Path();
         auto context = prepared.file_manager_context;
         context.set_for_loading_index(true);
+        // Like the sealed load config, take element nullability from the
+        // field schema.
+        const auto& schema = context.fieldDataMeta.field_schema;
+        if (schema.data_type() == proto::schema::DataType::ArrayOfVector) {
+            options.params[index::ELEMENT_NULLABLE] = schema.element_nullable();
+        }
         const auto loader =
             index::LoaderRegistry::Instance().Lookup(prepared.request.family);
         AssertInfo(static_cast<bool>(loader), "fixture family has no loader");

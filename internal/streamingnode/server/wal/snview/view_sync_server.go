@@ -2,8 +2,8 @@ package snview
 
 import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
-	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -26,28 +26,21 @@ func NewPChannelViewSyncServer(walManager pchannelWALProvider) *PChannelViewSync
 func (s *PChannelViewSyncServer) SyncQueryView(stream viewpb.ViewSyncService_SyncQueryViewServer) error {
 	pchannel, err := handler.DecodeQueryViewPChannelFromIncomingContext(stream.Context())
 	if err != nil {
-		return asViewSyncStreamingGRPCError(err)
+		return err
 	}
 	rawWAL, err := s.walManager.GetAvailableWAL(pchannel)
 	if err != nil {
-		return asViewSyncStreamingGRPCError(err)
+		return err
 	}
 	provider, ok := wal.Unwrap(rawWAL).(QueryViewHandlerProvider)
 	if !ok {
-		return asViewSyncStreamingGRPCError(streamingstatus.NewChannelNotExist(pchannel.Name))
+		return viewerror.NewUnknownError("local WAL for pchannel %s does not implement query view sync", pchannel.Name)
 	}
 	queryViewHandler := provider.QueryViewHandler()
 	return handler.NewViewSyncServer(&pchannelScopedQueryViewHandler{
 		pchannel: pchannel.Name,
 		handler:  queryViewHandler,
 	}).SyncQueryViewUntil(stream, rawWAL.Unavailable())
-}
-
-func asViewSyncStreamingGRPCError(err error) error {
-	if err == nil {
-		return nil
-	}
-	return streamingstatus.NewGRPCStatusFromStreamingError(streamingstatus.AsStreamingError(err)).Err()
 }
 
 type pchannelScopedQueryViewHandler struct {

@@ -147,7 +147,9 @@ TEST_F(TextIndexTranslatorTest, LegacyResourceEstimateIncludesNullableBitmap) {
             {mmap, 3, 101, "{}", stats.MemSize(), 3, "", ""},
             fixture.context,
             config);
-        auto [loaded, overhead] = translator.estimated_byte_size_of_cell(0);
+        auto [loaded, private_overhead, shared_overhead] =
+            translator.estimated_loading_usage({0});
+        const auto overhead = private_overhead + shared_overhead;
         EXPECT_EQ(loaded.memory_bytes,
                   (mmap ? bitmap_bytes : stats.MemSize() + bitmap_bytes) +
                       index::kScalarIndexFixedResidentBytes);
@@ -157,8 +159,9 @@ TEST_F(TextIndexTranslatorTest, LegacyResourceEstimateIncludesNullableBitmap) {
         // Zero index size adds no disk overhead, even with nullable rows.
         TextMatchIndexTranslator zero_size_translator(
             {mmap, 3, 101, "{}", 0, 3, "", ""}, fixture.context, config);
-        const auto [zero_loaded, zero_overhead] =
-            zero_size_translator.estimated_byte_size_of_cell(0);
+        const auto [zero_loaded, zero_private, zero_shared] =
+            zero_size_translator.estimated_loading_usage({0});
+        const auto zero_overhead = zero_private + zero_shared;
         EXPECT_EQ(zero_loaded.memory_bytes,
                   bitmap_bytes + index::kScalarIndexFixedResidentBytes);
         EXPECT_EQ(zero_overhead.file_bytes, 0);
@@ -187,16 +190,16 @@ TEST_F(TextIndexTranslatorTest, LegacyReloadPinsModeAndRebindsCancellation) {
                 {mmap, 3, 101, "{}", stats.MemSize(), 3, "", ""},
                 fixture.context,
                 config);
-            const auto estimate = translator.estimated_byte_size_of_cell(0);
+            const auto estimate = translator.estimated_loading_usage({0});
             storagev2translator::SetStorageV2AsyncLoadEnabled(!planned_async);
             auto first = translator.get_cells(nullptr, {0});
             CheckTextReader(*first.front().second);
             EXPECT_EQ(fs->async_opens.load() > 0, planned_async);
             // Sync legacy reads use ChunkManager rather than Arrow.
             EXPECT_EQ(fs->sync_opens.load(), 0);
-            EXPECT_GE(estimate.first.memory_bytes,
+            EXPECT_GE(estimate.resident.memory_bytes,
                       first.front().second->CellByteSize().memory_bytes);
-            EXPECT_GE(estimate.first.file_bytes,
+            EXPECT_GE(estimate.resident.file_bytes,
                       first.front().second->CellByteSize().file_bytes);
             fs->ResetCounts();
             folly::CancellationSource cancel;
@@ -211,7 +214,10 @@ TEST_F(TextIndexTranslatorTest, LegacyReloadPinsModeAndRebindsCancellation) {
             EXPECT_EQ(fs->async_opens.load() > 0, planned_async);
             // Sync legacy reads use ChunkManager rather than Arrow.
             EXPECT_EQ(fs->sync_opens.load(), 0);
-            EXPECT_EQ(estimate, translator.estimated_byte_size_of_cell(0));
+            const auto repeated = translator.estimated_loading_usage({0});
+            EXPECT_EQ(estimate.resident, repeated.resident);
+            EXPECT_EQ(estimate.private_overhead, repeated.private_overhead);
+            EXPECT_EQ(estimate.shared_overhead, repeated.shared_overhead);
         }
     }
     EXPECT_TRUE(!std::filesystem::exists(fixture.root->Path() + "/loaded") ||
@@ -369,7 +375,7 @@ TEST_F(TextIndexTranslatorTest,
                 {mmap, 3, 101, "{}", stats.MemSize(), 3, "", ""},
                 fixture.context,
                 config);
-            const auto estimate = translator.estimated_byte_size_of_cell(0);
+            const auto estimate = translator.estimated_loading_usage({0});
             for (const bool current_async : {true, false}) {
                 storagev2translator::SetStorageV2AsyncLoadEnabled(
                     current_async);
@@ -379,10 +385,13 @@ TEST_F(TextIndexTranslatorTest,
                 CheckTextReader(*cells.front().second);
                 EXPECT_EQ(fs->sync_opens, planned_async ? 0 : 1);
                 EXPECT_EQ(fs->async_opens, planned_async ? 1 : 0);
-                EXPECT_EQ(estimate, translator.estimated_byte_size_of_cell(0));
-                EXPECT_GE(estimate.first.memory_bytes,
+                const auto repeated = translator.estimated_loading_usage({0});
+                EXPECT_EQ(estimate.resident, repeated.resident);
+                EXPECT_EQ(estimate.private_overhead, repeated.private_overhead);
+                EXPECT_EQ(estimate.shared_overhead, repeated.shared_overhead);
+                EXPECT_GE(estimate.resident.memory_bytes,
                           cells.front().second->CellByteSize().memory_bytes);
-                EXPECT_GE(estimate.first.file_bytes,
+                EXPECT_GE(estimate.resident.file_bytes,
                           cells.front().second->CellByteSize().file_bytes);
                 EXPECT_EQ(cells.front().second->CellByteSize().file_bytes > 0,
                           mmap);

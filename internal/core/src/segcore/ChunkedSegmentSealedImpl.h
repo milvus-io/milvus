@@ -479,7 +479,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     bool
     is_primary_field(FieldId id) const override {
-        return CaptureFieldLayout()->get_primary_field_id() == id;
+        const auto primary = CaptureFieldLayout()->get_primary_field_id();
+        return primary.has_value() && primary->get() == id.get();
     }
 
     SchemaPtr
@@ -535,7 +536,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     }
 
     void
-    search_pks(BitsetType& bitset, const std::vector<PkType>& pks) const;
+    search_pks(BitsetType& bitset,
+               const std::vector<PkType>& pks,
+               milvus::OpContext* op_ctx) const;
 
     void
     search_batch_pks(
@@ -879,7 +882,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         if (num_chunk == 0) {
             return;
         }
-        auto all_chunk_pins = pk_column->GetAllChunks(nullptr);
+        milvus::OpContext op_ctx;
+        op_ctx.runtime_load_priority =
+            milvus::proto::common::LoadPriority::HIGH;
+        auto all_chunk_pins = pk_column->GetAllChunks(&op_ctx);
 
         if (op == proto::plan::OpType::Equal) {
             // find first occurrence
@@ -971,7 +977,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         if (num_chunk == 0) {
             return;
         }
-        auto all_chunk_pins = pk_column->GetAllChunks(nullptr);
+        milvus::OpContext op_ctx;
+        op_ctx.runtime_load_priority =
+            milvus::proto::common::LoadPriority::HIGH;
+        auto all_chunk_pins = pk_column->GetAllChunks(&op_ctx);
 
         // Find the lower bound position (first value >= lower_val or > lower_val)
         auto [lower_chunk_id, lower_in_chunk_offset, lower_exact_match] =
@@ -1037,7 +1046,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     find_sorted_pk_doc_offset(
         const PK& pk,
         const std::shared_ptr<ChunkedColumnInterface>& pk_column) const {
-        auto all_chunk_pins = pk_column->GetAllChunks(nullptr);
+        milvus::OpContext op_ctx;
+        op_ctx.runtime_load_priority =
+            milvus::proto::common::LoadPriority::HIGH;
+        auto all_chunk_pins = pk_column->GetAllChunks(&op_ctx);
         auto [chunk_id, in_chunk_offset, exact_match] =
             this->pk_lower_bound<PK>(pk, pk_column.get(), all_chunk_pins, 0);
         if (!exact_match) {
@@ -1060,7 +1072,10 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         }
         std::sort(sorted_pks.begin(), sorted_pks.end());
 
-        auto all_chunk_pins = pk_column->GetAllChunks(nullptr);
+        milvus::OpContext op_ctx;
+        op_ctx.runtime_load_priority =
+            milvus::proto::common::LoadPriority::HIGH;
+        auto all_chunk_pins = pk_column->GetAllChunks(&op_ctx);
 
         size_t pk_idx = 0;
         int last_chunk_id = 0;
@@ -1157,6 +1172,15 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             if (pk >= min_val && pk <= max_val) {
                 // pk might be in this chunk
                 target_chunk_id = mid_chunk_id;
+                if (pk == min_val && mid_chunk_id > left_chunk_id) {
+                    // pk is the first value of this chunk, so rows with the
+                    // same pk may also occupy the tail of earlier chunks (a
+                    // duplicated pk straddling a chunk boundary). Keep
+                    // searching to the left for the earliest chunk holding it;
+                    // this chunk stays recorded as the fallback.
+                    right_chunk_id = mid_chunk_id - 1;
+                    continue;
+                }
                 break;
             } else if (pk < min_val) {
                 // pk is before this chunk, could be in an earlier chunk
@@ -1298,24 +1322,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         return {last_chunk_id, last_offset};
     }
 
-    template <typename S, typename T = S>
+    template <typename S, typename T = S, typename SetValidity>
     static void
-    bulk_subscript_impl(milvus::OpContext* op_ctx,
-                        const void* src_raw,
-                        const int64_t* seg_offsets,
-                        int64_t count,
-                        T* dst_raw);
-
-    template <typename S, typename T = S>
-    static void
-    bulk_subscript_impl(
-        milvus::OpContext* op_ctx,
-        ChunkedColumnInterface* field,
-        const int64_t* seg_offsets,
-        int64_t count,
-        T* dst_raw,
-        bool small_int_raw_type = false,
-        const ChunkedColumnInterface::OwnedTakeData* taken_data = nullptr);
+    bulk_subscript_impl(const ChunkedColumnInterface::TakeResult& take,
+                        T* dst_raw,
+                        SetValidity&& set_validity);
 
     static void
     bulk_subscript_impl(milvus::OpContext* op_ctx,
@@ -1325,38 +1336,24 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                         int64_t count,
                         void* dst_raw);
 
-    template <typename S>
+    template <typename S, typename SetValidity>
     static void
     bulk_subscript_ptr_impl(
-        milvus::OpContext* op_ctx,
-        ChunkedColumnInterface* field,
-        const int64_t* seg_offsets,
-        int64_t count,
+        const ChunkedColumnInterface::TakeResult& take,
         google::protobuf::RepeatedPtrField<std::string>* dst_raw,
-        const ChunkedColumnInterface::OwnedTakeData* taken_data = nullptr,
-        bool* validity = nullptr);
+        SetValidity&& set_validity);
 
-    template <typename S, typename T = S>
+    template <typename S, typename T = S, typename SetValidity>
     static void
-    bulk_subscript_ptr_impl(
-        milvus::OpContext* op_ctx,
-        const ChunkedColumnInterface* field,
-        const int64_t* seg_offsets,
-        int64_t count,
-        T* dst,
-        const ChunkedColumnInterface::OwnedTakeData* taken_data = nullptr,
-        TargetBitmap* validity = nullptr);
+    bulk_subscript_ptr_impl(const ChunkedColumnInterface::TakeResult& take,
+                            T* dst,
+                            SetValidity&& set_validity);
 
-    template <typename T>
+    template <typename T, typename SetValidity>
     static void
-    bulk_subscript_array_impl(
-        milvus::OpContext* op_ctx,
-        ChunkedColumnInterface* column,
-        const int64_t* seg_offsets,
-        int64_t count,
-        google::protobuf::RepeatedPtrField<T>* dst,
-        bool nested_array,
-        const ChunkedColumnInterface::OwnedTakeData* taken_data = nullptr);
+    bulk_subscript_array_impl(const ChunkedColumnInterface::TakeResult& take,
+                              google::protobuf::RepeatedPtrField<T>* dst,
+                              SetValidity&& set_validity);
 
     template <typename T>
     static void
@@ -1372,15 +1369,11 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     // pinned snapshot avoid re-capturing the published state.
     void
     bulk_subscript_text_impl(
-        milvus::OpContext* op_ctx,
         FieldId field_id,
         const std::shared_ptr<const RuntimeResourceState>& runtime,
-        const ChunkedColumnInterface* column,
-        const int64_t* seg_offsets,
-        int64_t count,
+        const ChunkedColumnInterface::TakeResult& take,
         google::protobuf::RepeatedPtrField<std::string>* dst,
-        const ChunkedColumnInterface::OwnedTakeData* taken_data =
-            nullptr) const;
+        bool* validity) const;
 
     std::unique_ptr<DataArray>
     fill_with_empty(FieldId field_id,
@@ -1473,7 +1466,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                      Timestamp timestamp) const override;
 
     void
-    search_ids(BitsetType& bitset, const IdArray& id_array) const override;
+    search_ids(BitsetType& bitset,
+               const IdArray& id_array,
+               milvus::OpContext* op_ctx = nullptr) const override;
 
     class StagedStateCommitter;
 

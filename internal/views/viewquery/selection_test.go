@@ -12,7 +12,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -110,8 +109,7 @@ func TestServerRejectsMismatchedHybridSelectionsBeforeAcquiring(t *testing.T) {
 	req.SubSelections = []*viewpb.SegmentSelection{{}}
 	provider := &fakeTaskProvider{}
 	_, err := NewServer(provider, &fakeScheduler{}).SearchOnView(t.Context(), req)
-	decoded := viewerror.ConvertViewError("SearchOnView", err)
-	require.ErrorIs(t, decoded, merr.ErrServiceInternal)
-	require.ErrorContains(t, decoded, "hybrid segment selections do not match subrequests")
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	require.ErrorContains(t, err, "hybrid segment selections do not match subrequests")
 	require.Nil(t, provider.searchReq)
 }

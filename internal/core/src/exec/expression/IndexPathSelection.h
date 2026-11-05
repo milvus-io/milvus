@@ -102,9 +102,10 @@ struct ExprIndexRequirement {
     // caps.exact == false is unusable and selection must fall back to RawData.
     bool accepts_candidates{true};
 
-    // Short-circuit paths bypass the inventory; do not pin unrelated scalar cells.
+    // Short-circuit path that bypasses the inventory; do not pin unrelated
+    // scalar cells. JSON shredding is not selected here: it is the fallback
+    // SegmentExpr applies when this selector returns RawData for a JSON path.
     bool is_pk_compare{false};
-    bool json_stats_eligible{false};
 
     // The upstream operator already handed down candidate offsets
     // (`has_offset_input_`). Some paths are unavailable then — e.g. today's
@@ -285,9 +286,6 @@ DetermineExecPath(const ExprIndexRequirement& req,
                   const segcore::FieldIndexCapability& capabilities) {
     if (req.is_pk_compare) {
         return {.path = ExprExecPath::PkIndex};
-    }
-    if (req.json_stats_eligible) {
-        return {.path = ExprExecPath::JsonStats};
     }
 
     const segcore::IndexCapabilityEntry* selected = nullptr;

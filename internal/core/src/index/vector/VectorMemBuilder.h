@@ -75,6 +75,9 @@ class VectorMemBuilder final : public IArtifactBuilder<VectorBuildInput<T>> {
     BuilderInputSpec
     InputSpec() const override;
 
+    bool
+    TryReserveBuild(const BuildInputShape& shape) override;
+
     storage::ArtifactPtr
         Build(const VectorBuildInput<T>& input) &&
         override;
@@ -97,6 +100,7 @@ class VectorMemBuilder final : public IArtifactBuilder<VectorBuildInput<T>> {
 
     KnowhereEngine engine_;
     knowhere::Json build_params_;
+    DataType elem_type_{DataType::NONE};
     std::optional<int64_t> expected_rows_;
     bool sealed_{false};
     bool failed_{false};

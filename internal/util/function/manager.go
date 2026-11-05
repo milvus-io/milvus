@@ -44,6 +44,10 @@ type FunctionRunnerManager interface {
 	// failures are logged and retried by later requests instead of failing
 	// collection recovery. Runners requiring pull preparation initialize on
 	// first use so a background prewarm cannot keep shared resource I/O alive.
+	// The manager retains schema without cloning it. Callers must treat schema
+	// and all nested values as immutable and supply a new snapshot for changes.
+	// This also applies after the key is updated or released: another key or a
+	// reused runner may still retain the original snapshot.
 	Alloc(collectionID int64, key string, schema *schemapb.CollectionSchema) error
 
 	// Update moves an allocated lifecycle key to a newer schema version and
@@ -53,6 +57,7 @@ type FunctionRunnerManager interface {
 	// still retained so analyzer execution can be resolved entirely by lifecycle key.
 	// Invalid function metadata is returned synchronously. Runners for older
 	// versions are kept until no key uses those versions.
+	// The supplied schema follows the same read-only snapshot contract as Alloc.
 	Update(collectionID int64, key string, schema *schemapb.CollectionSchema) error
 
 	// Release removes one lifecycle key. The collection entry and its runners
@@ -334,11 +339,11 @@ func runWithRunnerEntries(
 }
 
 func newFunctionRunnerEntry(
-	schema *schemapb.CollectionSchema,
+	schemaSnapshot *schemapb.CollectionSchema,
 	fn *schemapb.FunctionSchema,
 ) *functionRunnerEntry {
 	return &functionRunnerEntry{
-		schema:   proto.Clone(schema).(*schemapb.CollectionSchema),
+		schema:   schemaSnapshot,
 		function: proto.Clone(fn).(*schemapb.FunctionSchema),
 	}
 }
@@ -668,7 +673,7 @@ func (e *functionRunnerCollectionEntry) ensureVersion(
 	for _, signature := range versionRunners.signatures {
 		if e.runners[signature] == nil {
 			e.runners[signature] = newFunctionRunnerEntry(
-				schema,
+				versionRunners.schema,
 				functionsBySignature[signature],
 			)
 		}
@@ -688,6 +693,7 @@ func (e *functionRunnerCollectionEntry) ensureVersion(
 	return initRunnerEntries, runnerEntries, nil
 }
 
+// buildFunctionRunnerVersion retains an immutable schema snapshot.
 func buildFunctionRunnerVersion(schema *schemapb.CollectionSchema) (*functionRunnerVersion, map[string]*schemapb.FunctionSchema, error) {
 	if schema == nil {
 		return nil, nil, merr.WrapErrFunctionFailedMsg("collection schema is nil")
@@ -695,7 +701,7 @@ func buildFunctionRunnerVersion(schema *schemapb.CollectionSchema) (*functionRun
 
 	functions := embeddingFunctions(schema)
 	versionRunners := &functionRunnerVersion{
-		schema:                  proto.Clone(schema).(*schemapb.CollectionSchema),
+		schema:                  schema,
 		signatures:              make([]string, 0, len(functions)),
 		outputFieldIDs:          make([]int64, 0, len(functions)),
 		fieldIDs:                make(map[int64]struct{}),

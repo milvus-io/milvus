@@ -12,6 +12,9 @@
 include_directories(${CMAKE_HOME_DIRECTORY}/src)
 include_directories(${CMAKE_HOME_DIRECTORY}/src/thirdparty)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+if(USE_TSAN)
+    add_subdirectory(tsan)
+endif()
 include_directories(
     ${KNOWHERE_INCLUDE_DIR}
     ${SIMDJSON_INCLUDE_DIR}
@@ -90,6 +93,7 @@ set(MILVUS_TEST_FILES
 set(INDEX_TEST_FILES
         ${CMAKE_HOME_DIRECTORY}/src/segcore/storagev1translator/TextIndexTranslatorTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/LegacyIndexLoadTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/indexbuilder/BuildInputMaterializerTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/indexbuilder/MaterializerArrayTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/LoadResourceTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/PackedIndexLoadTest.cpp
@@ -189,16 +193,6 @@ else()
     list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "GcpNativeChunkManagerTest\\.cpp$")
 endif()
 
-if (LINUX)
-    message( STATUS "Building Milvus Unit Test on Linux")
-    option(USE_ASAN "Whether to use AddressSanitizer" OFF)
-    if ( USE_ASAN )
-        message( STATUS "Building Milvus using AddressSanitizer")
-        add_compile_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
-        add_link_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
-    endif()
-endif()
-
 add_compile_definitions(
         MILVUS_CPPUT_OUTPUT_DIR="${CMAKE_INSTALL_PREFIX}/cpput_output"
         MILVUS_UNIT_TEST)
@@ -252,6 +246,17 @@ endif()
 install(TARGETS all_tests DESTINATION unittest)
 
 add_executable(index_tests init_gtest.cpp ${INDEX_TEST_FILES} ${INDEX_TEST_SUPPORT_FILES})
+
+# The serialization test constructs an IndexNode subclass in Milvus.
+set_source_files_properties(
+        ${CMAKE_HOME_DIRECTORY}/src/index/vector/VectorDiskFamilyTest.cpp
+        PROPERTIES COMPILE_DEFINITIONS NOT_COMPILE_FOR_SWIG)
+if (CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+    set_property(SOURCE
+            ${CMAKE_HOME_DIRECTORY}/src/index/vector/VectorDiskFamilyTest.cpp
+            APPEND PROPERTY COMPILE_OPTIONS -msse4.2)
+endif()
+
 # milvus_core's legacy public link interface repeats static dependencies that
 # are already linked into its runtime image. Link that image directly so this
 # focused executable does not construct and destroy duplicate global objects;

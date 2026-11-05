@@ -53,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
@@ -4628,6 +4629,7 @@ func TestProxy_GetComponentStates(t *testing.T) {
 }
 
 func TestProxy_Import(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	streaming.SetupNoopWALForTest()
 
 	t.Run("Import failed", func(t *testing.T) {

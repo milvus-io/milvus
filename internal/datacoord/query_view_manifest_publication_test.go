@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metacache"
 	datacatalog "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
@@ -19,14 +20,14 @@ import (
 func TestQueryViewManifestPublicationAdvancesDataViewWithoutWatch(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	catalog := datacatalog.NewCatalog(NewMetaMemoryKV(), "", "")
-	m := &meta{ctx: ctx, catalog: catalog, segments: NewSegmentsInfo(metacache.NewMetaStore(catalog))}
-	manager, err := dataview.RecoverManager(ctx, catalog, func(context.Context, int64) (bool, error) { return true, nil }, m.loadableProjection, nil, nil)
+	catalog := datacatalog.NewCatalog(meta.NewMetaMemoryKV(), "", "")
+	m := &meta.Meta{Ctx: ctx, Catalog: catalog, Segments: meta.NewSegmentsInfo(metacache.NewMetaStore(catalog))}
+	manager, err := dataview.RecoverManager(ctx, catalog, func(context.Context, int64) (bool, error) { return true, nil }, m.LoadableProjection, nil, nil)
 	require.NoError(t, err)
-	m.dataViewManager = manager
+	m.DataViewManager = manager
 	oldManifest := packed.MarshalManifestPath("test/base", 1)
-	m.segments.SetSegment(10, NewSegmentInfo(&datapb.SegmentInfo{ID: 10, CollectionID: 1, PartitionID: 2, InsertChannel: "v", State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, StorageVersion: storage.StorageV3, ManifestPath: oldManifest, NumOfRows: 10}))
-	segments, err := m.loadableProjection(ctx, 1)
+	m.Segments.SetSegment(10, meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 10, CollectionID: 1, PartitionID: 2, InsertChannel: "v", State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, StorageVersion: storage.StorageV3, ManifestPath: oldManifest, NumOfRows: 10}))
+	segments, err := m.LoadableProjection(ctx, 1)
 	require.NoError(t, err)
 	_, err = manager.OnBootstrapCollection(ctx, dataview.BootstrapCollectionDataViewEvent{CollectionID: 1, VChannels: []string{"v"}, Segments: segments})
 	require.NoError(t, err)
@@ -34,7 +35,7 @@ func TestQueryViewManifestPublicationAdvancesDataViewWithoutWatch(t *testing.T) 
 	require.NoError(t, err)
 	defer old.Deref()
 	nextManifest := packed.MarshalManifestPath("test/base", 2)
-	require.NoError(t, m.UpdateSegmentsInfo(ctx, UpdateManifest(10, nextManifest)))
+	require.NoError(t, m.UpdateSegmentsInfo(ctx, meta.UpdateManifest(10, nextManifest)))
 	require.Eventually(t, func() bool {
 		next, err := manager.Latest(ctx, 1)
 		if err != nil || next == nil {

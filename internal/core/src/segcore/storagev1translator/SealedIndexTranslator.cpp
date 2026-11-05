@@ -282,6 +282,7 @@ SealedIndexTranslator::SealedIndexTranslator(
                 &metadata_ctx.ctx);
         }
         load_resource_request_ = resources.request;
+        shared_overhead_ = resources.shared_overhead;
         meta_.loading_overhead_config = std::move(resources.overhead);
     } else {
         load_resource_request_ =
@@ -311,6 +312,9 @@ SealedIndexTranslator::SealedIndexTranslator(
     }
     if (index_load_info_.load_resource_request.has_value()) {
         load_resource_request_ = *index_load_info_.load_resource_request;
+        // An explicit legacy estimate does not identify admitted scratch.
+        shared_overhead_ = {};
+        meta_.loading_overhead_config.reset();
     }
     storage::ThrowIfCancelled(token, "inspect sealed index metadata");
     if (!*file_manager_context_.use_async_load ||
@@ -330,10 +334,12 @@ SealedIndexTranslator::cell_id_of(milvus::cachinglayer::uid_t uid) const {
     return 0;
 }
 
-std::pair<milvus::cachinglayer::ResourceUsage,
-          milvus::cachinglayer::ResourceUsage>
-SealedIndexTranslator::estimated_byte_size_of_cell(
-    milvus::cachinglayer::cid_t cid) const {
+milvus::cachinglayer::LoadingResourceUsage
+SealedIndexTranslator::estimated_loading_usage(
+    const std::vector<milvus::cachinglayer::cid_t>& cids) const {
+    if (cids.empty()) {
+        return {};
+    }
     // this is an estimation, error could be up to 20%.
     // Preserve the historical 2x disk safety margin for temporary file growth
     // during writes. final_disk_cost is already counted as loaded resource, so
@@ -343,9 +349,11 @@ SealedIndexTranslator::estimated_byte_size_of_cell(
                 load_resource_request_.final_disk_cost),
             milvus::cachinglayer::ResourceUsage(
                 load_resource_request_.max_memory_cost -
-                    load_resource_request_.final_memory_cost,
+                    load_resource_request_.final_memory_cost -
+                    shared_overhead_.memory_bytes,
                 load_resource_request_.max_disk_cost * 2 -
-                    load_resource_request_.final_disk_cost)};
+                    load_resource_request_.final_disk_cost),
+            shared_overhead_};
 }
 
 const std::string&
