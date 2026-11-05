@@ -4,7 +4,7 @@
 
 Keep Milvus's built-in five-second thread watcher and the existing
 `milvus_thread_num` and `milvus_thread_cpu_active_num_by_pool` gauges. Add
-`milvus_thread_pool_cpu_seconds_total{thread_pool="..."}` to distinguish how
+`milvus_thread_pool_cpu_seconds_total{thread_pool="...",cpu_mode="user|system"}` to distinguish how
 many threads were active from how much CPU they consumed. The active gauge
 continues to include threads whose CPU advanced or whose sampled state is R/D;
 D can mean waiting for I/O, not executing on CPU.
@@ -19,8 +19,12 @@ No TID or raw thread name is exported as a label. Kubernetes labels continue
 to come from Prometheus discovery, as on the existing thread panel.
 
 Keep a baseline per TID containing its starttime, pool, and cumulative CPU
-ticks. Compare both TID and starttime before subtracting. Sum positive tick
-deltas per pool, then divide by SC_CLK_TCK and add to the Prometheus counter.
+ticks separately for user (utime) and system (stime). Compare both TID and
+starttime before subtracting. Sum nonnegative tick deltas per pool and mode,
+then divide by SC_CLK_TCK and add to the corresponding Prometheus counter.
+User includes user-mode execution of niced threads; nice is a scheduling
+priority, not a third per-thread CPU accumulator. The fixed cpu_mode label
+has exactly two values, so series count is twice the fixed pool count.
 Only the watcher goroutine mutates the baselines; Prometheus handles concurrent
 counter reads. Memory is O(live threads + fixed pools), and scanning costs one
 uptime read, one directory enumeration, and one stat read per thread per tick.
@@ -29,11 +33,11 @@ This replaces the previous comm + stat pair of reads.
 | Event | Accounting |
 |---|---|
 | First successful scan | Establish baselines; do not import historic CPU. |
-| Same TID and starttime | Add utime + stime delta. |
+| Same TID and starttime | Add utime and stime deltas to their respective counters. |
 | Newly observed identity born after the previous scan began | Add its observed lifetime CPU. |
 | Newly observed identity with older/ambiguous starttime | Establish a baseline only. |
 | Pool name changes | Attribute that interval to the previous pool; future intervals use the new pool. Never transfer historic totals. |
-| CPU ticks go backwards | Establish a fresh baseline; never subtract or wrap unsigned values. |
+| One mode’s CPU ticks go backwards | Rebaseline that mode; retain a valid delta for the other mode. Never subtract or wrap unsigned values. |
 | Thread stat missing, malformed, or TID mismatches directory | Keep any prior baseline while the TID remains enumerated. Skip this sample. |
 | Thread disappears from directory | Retire its baseline; retain all accumulated pool CPU. |
 | Whole scan / uptime read fails | Keep all metrics and baselines unchanged and retry next tick. |
@@ -70,8 +74,9 @@ is needed for these three pools.
 ## Dashboard and sampling limits
 
 The new CPU cores panel uses
-`sum by (pod, thread_pool) (rate(milvus_thread_pool_cpu_seconds_total[$__rate_interval]))`
-with the existing deployment selectors. A value of 2 means two CPU cores on
+`sum by (pod, thread_pool, cpu_mode) (rate(milvus_thread_pool_cpu_seconds_total[$__rate_interval]))`
+with the existing deployment selectors and separate user/system curves.
+The coverage panel sums both modes. A value of 2 means two CPU cores on
 average; do not multiply by 100. Keep sampling at five seconds, retain the
 existing Prometheus scrape interval, and use a rate window covering at least
 four scrapes.
@@ -90,7 +95,8 @@ Focused tests cover stat parsing (including unusual comm values), real Linux
 procfs, every added classification and HIGH/MIDD/LOW/Knowhere, initial and new
 thread baselines, TID reuse, renames, rollback, partial/whole scan failures,
 recovery, counter persistence after exit, tick-to-second conversion, metric
-registration and bounded labels. A synthetic 1,000-thread directory benchmark
+registration, bounded labels, independent user/system deltas and rollback,
+and preservation of user CPU for nonzero nice values. A synthetic 1,000-thread directory benchmark
 measures parsing and file-read overhead; it is not a production procfs benchmark.
 
 Full package validation requires C++ headers/libraries matching this checkout.

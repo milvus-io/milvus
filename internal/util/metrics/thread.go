@@ -48,9 +48,14 @@ type threadWatcher struct {
 	scanStart  uint64
 }
 
+type threadCPU struct {
+	user   uint64
+	system uint64
+}
+
 type threadSample struct {
 	group     string
-	cpu       uint64
+	cpu       threadCPU
 	startTime uint64
 }
 
@@ -58,7 +63,7 @@ type threadStat struct {
 	tid        int32
 	name       string
 	state      byte
-	cpu        uint64
+	cpu        threadCPU
 	startTime  uint64
 	unreadable bool
 }
@@ -163,22 +168,24 @@ func (thw *threadWatcher) updateNamedThreadMetrics() {
 
 	activeByGroup, cpuByGroup, nextSamples := collectThreadGroups(current, thw.samples, thw.scanStart)
 
-	for _, rule := range threadNameGroupRules {
-		metrics.ThreadCPUActiveNumByPool.WithLabelValues(rule.group).Set(float64(activeByGroup[rule.group]))
-	}
-	metrics.ThreadCPUActiveNumByPool.WithLabelValues(unclassifiedThreadPool).Set(float64(activeByGroup[unclassifiedThreadPool]))
-	if thw.clockTicks > 0 {
-		for _, rule := range threadNameGroupRules {
-			metrics.ThreadPoolCPUSeconds.WithLabelValues(rule.group).Add(float64(cpuByGroup[rule.group]) / thw.clockTicks)
+	publish := func(group string) {
+		metrics.ThreadCPUActiveNumByPool.WithLabelValues(group).Set(float64(activeByGroup[group]))
+		if thw.clockTicks > 0 {
+			cpu := cpuByGroup[group]
+			metrics.ThreadPoolCPUSeconds.WithLabelValues(group, "user").Add(float64(cpu.user) / thw.clockTicks)
+			metrics.ThreadPoolCPUSeconds.WithLabelValues(group, "system").Add(float64(cpu.system) / thw.clockTicks)
 		}
-		metrics.ThreadPoolCPUSeconds.WithLabelValues(unclassifiedThreadPool).Add(float64(cpuByGroup[unclassifiedThreadPool]) / thw.clockTicks)
 	}
+	for _, rule := range threadNameGroupRules {
+		publish(rule.group)
+	}
+	publish(unclassifiedThreadPool)
 	thw.samples = nextSamples
 	thw.scanStart = scanStart
 }
 
-func collectThreadGroups(current []threadStat, previous map[int32]threadSample, since uint64) (map[string]int, map[string]uint64, map[int32]threadSample) {
-	cpuByGroup := make(map[string]uint64)
+func collectThreadGroups(current []threadStat, previous map[int32]threadSample, since uint64) (map[string]int, map[string]threadCPU, map[int32]threadSample) {
+	cpuByGroup := make(map[string]threadCPU)
 	activeByGroup := make(map[string]int)
 	nextSamples := make(map[int32]threadSample, len(current))
 	for _, stat := range current {
@@ -202,15 +209,23 @@ func collectThreadGroups(current []threadStat, previous map[int32]threadSample, 
 		if !existed || previousSample.startTime != stat.startTime {
 			// A birth on the boundary tick is ambiguous; do not import old CPU.
 			if since > 0 && stat.startTime > since {
-				cpuByGroup[group] += stat.cpu
+				cpu := cpuByGroup[group]
+				cpu.user += stat.cpu.user
+				cpu.system += stat.cpu.system
+				cpuByGroup[group] = cpu
 			}
 			continue
 		}
-		if stat.cpu >= previousSample.cpu {
-			// Attribute the interval to its original pool; never move historic CPU.
-			cpuByGroup[previousSample.group] += stat.cpu - previousSample.cpu
+		// Attribute the interval to its original pool; never move historic CPU.
+		cpu := cpuByGroup[previousSample.group]
+		if stat.cpu.user >= previousSample.cpu.user {
+			cpu.user += stat.cpu.user - previousSample.cpu.user
 		}
-		if previousSample.group == group && (stat.cpu > previousSample.cpu || stat.state == 'R' || stat.state == 'D') {
+		if stat.cpu.system >= previousSample.cpu.system {
+			cpu.system += stat.cpu.system - previousSample.cpu.system
+		}
+		cpuByGroup[previousSample.group] = cpu
+		if previousSample.group == group && (stat.cpu.user > previousSample.cpu.user || stat.cpu.system > previousSample.cpu.system || stat.state == 'R' || stat.state == 'D') {
 			activeByGroup[group]++
 		}
 	}
@@ -292,10 +307,7 @@ func parseThreadStat(raw string) (threadStat, error) {
 	if err != nil {
 		return threadStat{}, err
 	}
-	if utime+stime < utime {
-		return threadStat{}, merr.WrapErrServiceInternalMsg("overflow in proc thread CPU time")
-	}
-	return threadStat{tid: int32(tid), name: raw[startComm+1 : endComm], state: fields[0][0], cpu: utime + stime, startTime: startTime}, nil
+	return threadStat{tid: int32(tid), name: raw[startComm+1 : endComm], state: fields[0][0], cpu: threadCPU{user: utime, system: stime}, startTime: startTime}, nil
 }
 
 func classifyThreadName(name string) (string, bool) {

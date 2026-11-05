@@ -15625,7 +15625,7 @@
           "datasource": {
             "uid": "${datasource}"
           },
-          "description": "Sampled user + system CPU by pool, every 5 seconds. 1 means one CPU core on average. Initial historic CPU is excluded; short-lived threads and exit tails may be missed. Pod labels come from Prometheus discovery.",
+          "description": "Sampled CPU by pool and mode (user/system), every 5 seconds. User includes niced threads. 1 means one CPU core on average. Initial historic CPU is excluded; short-lived threads and exit tails may be missed.",
           "fill": 1,
           "fillGradient": 0,
           "gridPos": {
@@ -15663,10 +15663,10 @@
           "targets": [
             {
               "exemplar": true,
-              "expr": "sum by (pod, thread_pool) (rate(milvus_thread_pool_cpu_seconds_total{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\", namespace=\"$namespace\"}[$__rate_interval]))",
+              "expr": "sum by (pod, thread_pool, cpu_mode) (rate(milvus_thread_pool_cpu_seconds_total{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\", namespace=\"$namespace\"}[$__rate_interval]))",
               "interval": "",
               "intervalFactor": 2,
-              "legendFormat": "{{pod}} {{thread_pool}}",
+              "legendFormat": "{{pod}} {{thread_pool}} {{cpu_mode}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
