@@ -728,7 +728,7 @@ TEST(JsonPathIndexOwnershipTest, RequestsShareMetadataAndRetainTypedIndex) {
     for (const auto* cast_name : {"BOOL", "ARRAY_BOOL"}) {
         BitmapRoaringPostingMap<bool> postings;
         postings[true].add(0);
-        BitmapReaderOptions options;
+        BitmapStorageOptions options;
         options.total_num_rows = 3;
         options.valid_bitset = TargetBitmap(3);
         options.valid_bitset.set(0);

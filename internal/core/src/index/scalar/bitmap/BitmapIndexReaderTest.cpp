@@ -61,10 +61,10 @@ CheckBitmapCache(bool offset_cache) {
         validity.set(0);
         co_return std::make_unique<BitmapPostingStorage<std::string, Posting>>(
             std::move(postings),
-            BitmapReaderOptions{.valid_bitset = std::move(validity),
-                                .total_num_rows = 2,
-                                .value_type = DataType::VARCHAR,
-                                .offset_cache = offset_cache});
+            BitmapStorageOptions{.valid_bitset = std::move(validity),
+                                 .total_num_rows = 2,
+                                 .value_type = DataType::VARCHAR,
+                                 .offset_cache = offset_cache});
     };
     IndexCacheConfig cache{
         "bitmap-storage-test",
@@ -167,10 +167,10 @@ TEST(BitmapIndexOwnershipTest, RequestViewsShareKeysAndRetainTheIndex) {
     validity.reset(2);
     auto index = CreateBitmapIndex<std::string>(
         std::move(postings),
-        BitmapReaderOptions{.valid_bitset = std::move(validity),
-                            .total_num_rows = 3,
-                            .value_type = DataType::VARCHAR,
-                            .offset_cache = true});
+        BitmapStorageOptions{.valid_bitset = std::move(validity),
+                             .total_num_rows = 3,
+                             .value_type = DataType::VARCHAR,
+                             .offset_cache = true});
     std::weak_ptr<IIndex> index_lifetime = index;
     auto first = index->CreateReader(nullptr);
     auto second = index->CreateReader(nullptr);

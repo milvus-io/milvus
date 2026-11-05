@@ -32,8 +32,6 @@
 #include "knowhere/expected.h"
 #include "knowhere/index/index_node.h"
 
-namespace milvus {}  // namespace milvus
-
 // Unified vector query contract. Knowhere types stay in vector interfaces and
 // implementations, not shared or scalar contracts. Construction, persistence,
 // and loading use separate objects.

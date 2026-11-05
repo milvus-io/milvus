@@ -575,7 +575,7 @@ BitmapIndexImpl<T, Posting>::CreateReader(milvus::OpContext* op_ctx) const {
 template <typename T, typename Posting>
 BitmapPostingStorage<T, Posting>::BitmapPostingStorage(
     BitmapPostingMap<T, Posting> loaded_postings,
-    BitmapReaderOptions loaded_options,
+    BitmapStorageOptions loaded_options,
     std::shared_ptr<BitmapMmapOwner> owner)
     : mmap_owner(std::move(owner)),
       postings(std::move(loaded_postings)),
@@ -656,7 +656,7 @@ BitmapMmapOwner::Size() const {
 template <typename T>
 IndexPtr
 CreateBitmapIndex(BitmapRoaringPostingMap<T> postings,
-                  BitmapReaderOptions options,
+                  BitmapStorageOptions options,
                   std::shared_ptr<BitmapMmapOwner> mmap_owner) {
     return std::make_shared<
         BitmapIndexImpl<bitmap_query_t<T>, roaring::Roaring>>(
@@ -667,7 +667,7 @@ CreateBitmapIndex(BitmapRoaringPostingMap<T> postings,
 template <typename T>
 IndexPtr
 CreateBitmapIndex(BitmapBitsetPostingMap<T> postings,
-                  BitmapReaderOptions options) {
+                  BitmapStorageOptions options) {
     return std::make_shared<BitmapIndexImpl<bitmap_query_t<T>, TargetBitmap>>(
         std::make_shared<BitmapPostingStorage<T, TargetBitmap>>(
             std::move(postings), std::move(options)));
@@ -676,7 +676,7 @@ CreateBitmapIndex(BitmapBitsetPostingMap<T> postings,
 template <typename T>
 std::unique_ptr<BitmapIndexReader<bitmap_query_t<T>>>
 CreateBitmapIndexReader(BitmapRoaringPostingMap<T> postings,
-                        BitmapReaderOptions options,
+                        BitmapStorageOptions options,
                         std::shared_ptr<BitmapMmapOwner> mmap_owner) {
     auto index = CreateBitmapIndex<T>(
         std::move(postings), std::move(options), std::move(mmap_owner));
@@ -688,7 +688,7 @@ CreateBitmapIndexReader(BitmapRoaringPostingMap<T> postings,
 template <typename T>
 std::unique_ptr<BitmapIndexReader<bitmap_query_t<T>>>
 CreateBitmapIndexReader(BitmapBitsetPostingMap<T> postings,
-                        BitmapReaderOptions options) {
+                        BitmapStorageOptions options) {
     auto index = CreateBitmapIndex<T>(std::move(postings), std::move(options));
     auto reader = index->CreateReader(nullptr);
     return std::unique_ptr<BitmapIndexReader<bitmap_query_t<T>>>(
@@ -738,17 +738,17 @@ CreateBitmapIndex(
     INSTANTIATE_BITMAP_STORAGE(T, roaring::Roaring)                           \
     INSTANTIATE_BITMAP_STORAGE(T, TargetBitmap)                               \
     template IndexPtr CreateBitmapIndex<T>(BitmapRoaringPostingMap<T>,        \
-                                           BitmapReaderOptions,               \
+                                           BitmapStorageOptions,              \
                                            std::shared_ptr<BitmapMmapOwner>); \
     template IndexPtr CreateBitmapIndex<T>(BitmapBitsetPostingMap<T>,         \
-                                           BitmapReaderOptions);              \
+                                           BitmapStorageOptions);             \
     template std::unique_ptr<BitmapIndexReader<bitmap_query_t<T>>>            \
         CreateBitmapIndexReader<T>(BitmapRoaringPostingMap<T>,                \
-                                   BitmapReaderOptions,                       \
+                                   BitmapStorageOptions,                      \
                                    std::shared_ptr<BitmapMmapOwner>);         \
     template std::unique_ptr<BitmapIndexReader<bitmap_query_t<T>>>            \
         CreateBitmapIndexReader<T>(BitmapBitsetPostingMap<T>,                 \
-                                   BitmapReaderOptions);
+                                   BitmapStorageOptions);
 
 INSTANTIATE_BITMAP_READER(bool)
 INSTANTIATE_BITMAP_READER(int8_t)

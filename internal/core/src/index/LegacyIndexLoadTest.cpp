@@ -969,12 +969,12 @@ TEST_F(LegacyIndexLoadTest, AsyncFamilyRunsOutsideLocalFilePool) {
             postings[10].add(0);
             postings[20].add(1);
             postings[10].add(2);
-            BitmapReaderOptions reader_options;
-            reader_options.total_num_rows = 3;
-            reader_options.valid_bitset = TargetBitmap(3, true);
-            reader_options.value_type = DataType::INT64;
+            BitmapStorageOptions storage_options;
+            storage_options.total_num_rows = 3;
+            storage_options.valid_bitset = TargetBitmap(3, true);
+            storage_options.value_type = DataType::INT64;
             co_return CreateBitmapIndex<int64_t>(std::move(postings),
-                                                 std::move(reader_options));
+                                                 std::move(storage_options));
         };
         storage::LoadOptions options;
         auto task = RunLegacyLoad(input, options, std::move(load), nullptr);

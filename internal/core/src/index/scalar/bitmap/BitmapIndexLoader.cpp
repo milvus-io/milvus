@@ -705,16 +705,16 @@ RebuildValidity(const BitmapRoaringPostingMap<T>& postings,
     }
 }
 
-BitmapReaderOptions
-MakeIndexOptions(TargetBitmap validity,
-                 const BitmapMeta& meta,
-                 const RuntimeParams& params) {
-    return BitmapReaderOptions{.valid_bitset = std::move(validity),
-                               .total_num_rows = meta.count,
-                               .nested = meta.nested,
-                               .value_lookup = params.value_lookup,
-                               .value_type = params.value_type,
-                               .offset_cache = params.offset_cache};
+BitmapStorageOptions
+MakeStorageOptions(TargetBitmap validity,
+                   const BitmapMeta& meta,
+                   const RuntimeParams& params) {
+    return BitmapStorageOptions{.valid_bitset = std::move(validity),
+                                .total_num_rows = meta.count,
+                                .nested = meta.nested,
+                                .value_lookup = params.value_lookup,
+                                .value_type = params.value_type,
+                                .offset_cache = params.offset_cache};
 }
 
 // Validate decoded postings, rebuild missing validity and create the selected
@@ -733,7 +733,7 @@ OpenDecodedStorage(const uint8_t* data,
     if (rebuild_validity) {
         RebuildValidity(postings, validity);
     }
-    auto options = MakeIndexOptions(std::move(validity), meta, params);
+    auto options = MakeStorageOptions(std::move(validity), meta, params);
     if constexpr (std::is_same_v<Posting, roaring::Roaring>) {
         return std::make_unique<BitmapPostingStorage<T, Posting>>(
             std::move(postings), std::move(options));
@@ -769,7 +769,7 @@ OpenDecodedMmapStorage(const uint8_t* data,
                                                    token,
                                                    use_async);
     ValidateCoordinateOwnership(frozen.postings, params.value_lookup);
-    auto options = MakeIndexOptions(std::move(validity), meta, params);
+    auto options = MakeStorageOptions(std::move(validity), meta, params);
     co_return std::make_unique<BitmapPostingStorage<T, roaring::Roaring>>(
         std::move(frozen.postings),
         std::move(options),

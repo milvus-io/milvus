@@ -104,7 +104,7 @@ class BitmapMmapOwner final {
     std::string path_;
 };
 
-struct BitmapReaderOptions {
+struct BitmapStorageOptions {
     TargetBitmap valid_bitset;
     size_t total_num_rows{0};
     bool nested{false};
@@ -117,7 +117,7 @@ struct BitmapReaderOptions {
 template <typename T, typename Posting>
 struct BitmapPostingStorage {
     BitmapPostingStorage(BitmapPostingMap<T, Posting> postings,
-                         BitmapReaderOptions options,
+                         BitmapStorageOptions options,
                          std::shared_ptr<BitmapMmapOwner> mmap_owner = nullptr);
 
     // Reverse pointers refer to this object's keys; never copy the storage.
@@ -131,7 +131,7 @@ struct BitmapPostingStorage {
     // Destroy frozen Roaring views before unmapping their backing file.
     std::shared_ptr<BitmapMmapOwner> mmap_owner;
     BitmapPostingMap<T, Posting> postings;
-    BitmapReaderOptions options;
+    BitmapStorageOptions options;
     std::vector<const T*> offset_cache;
     std::shared_ptr<const TargetBitmap> json_exists;
 };
@@ -140,13 +140,13 @@ struct BitmapPostingStorage {
 template <typename T>
 IndexPtr
 CreateBitmapIndex(BitmapRoaringPostingMap<T> postings,
-                  BitmapReaderOptions options,
+                  BitmapStorageOptions options,
                   std::shared_ptr<BitmapMmapOwner> mmap_owner = nullptr);
 
 template <typename T>
 IndexPtr
 CreateBitmapIndex(BitmapBitsetPostingMap<T> postings,
-                  BitmapReaderOptions options);
+                  BitmapStorageOptions options);
 
 template <typename T, typename Posting>
 IndexPtr
@@ -166,12 +166,12 @@ CreateBitmapIndex(
 template <typename T>
 std::unique_ptr<BitmapIndexReader<bitmap_query_t<T>>>
 CreateBitmapIndexReader(BitmapRoaringPostingMap<T> postings,
-                        BitmapReaderOptions options,
+                        BitmapStorageOptions options,
                         std::shared_ptr<BitmapMmapOwner> mmap_owner = nullptr);
 
 template <typename T>
 std::unique_ptr<BitmapIndexReader<bitmap_query_t<T>>>
 CreateBitmapIndexReader(BitmapBitsetPostingMap<T> postings,
-                        BitmapReaderOptions options);
+                        BitmapStorageOptions options);
 
 }  // namespace milvus::index
