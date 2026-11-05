@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -31,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/pipeline"
+	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -188,4 +190,43 @@ func TestGetLocalStorageMetrics(t *testing.T) {
 	missingLoader := segments.NewMockLoader(t)
 	missingLoader.EXPECT().GetLocalDiskUsage().Return(0, errors.New("disk usage unavailable")).Once()
 	require.Nil(t, getLocalStorageMetrics(missingLoader))
+}
+
+func TestGetQuotaMetricsReportsQueryViewCollections(t *testing.T) {
+	paramtable.Init()
+
+	collectionManager := segments.NewMockCollectionManager(t)
+	collectionManager.EXPECT().List().Return([]int64{1, 2}).Once()
+	collectionManager.EXPECT().Get(mock.Anything).Return(nil)
+
+	segmentManager := segments.NewMockSegmentManager(t)
+	segmentManager.EXPECT().RangeBy(mock.Anything, mock.Anything).Return()
+	segmentManager.EXPECT().GetLoadedBinlogSize().Return(int64(0)).Once()
+
+	manager := &segments.Manager{
+		Collection: collectionManager,
+		Segment:    segmentManager,
+	}
+	delegators := typeutil.NewConcurrentMap[string, delegator.ShardDelegator]()
+	node := &QueryNode{
+		manager:         manager,
+		pipelineManager: pipeline.NewManager(manager, nil, delegators),
+		delegators:      delegators,
+		serverID:        7,
+	}
+
+	wal := mock_streaming.NewMockWALAccesser(t)
+	local := mock_streaming.NewMockLocal(t)
+	local.EXPECT().GetMetricsIfLocal(mock.Anything).Return(nil, errors.New("not local")).Once()
+	wal.EXPECT().Local().Return(local).Once()
+	streaming.SetWALForTest(wal)
+	t.Cleanup(streaming.RecoverWALForTest)
+	// QueryView collections live outside the segment manager.
+	queryViewCollections := mockey.Mock((*qnview.SegmentResourceManager).CollectionIDs).Return([]int64{3, 5}).Build()
+	t.Cleanup(func() { queryViewCollections.UnPatch() })
+	node.queryViewSegments.Store(&qnview.SegmentResourceManager{})
+
+	quotaMetrics, err := getQuotaMetrics(node)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []int64{1, 2, 3, 5}, quotaMetrics.Effect.CollectionIDs)
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/apache/arrow/go/v17/parquet"
 	"github.com/apache/arrow/go/v17/parquet/file"
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -1473,34 +1475,52 @@ func TestArrayNullElement(t *testing.T) {
 	}
 }
 
-func TestStructFieldReader_toScalarField_TypeMismatch(t *testing.T) {
+func TestStructFieldReader_appendArrowScalar_TypeMismatch(t *testing.T) {
+	mem := memory.NewGoAllocator()
+	newArray := func(b array.Builder) arrow.Array {
+		defer b.Release()
+		return b.NewArray()
+	}
+	stringBuilder := array.NewStringBuilder(mem)
+	stringBuilder.Append("not_a_number")
+	stringValues := newArray(stringBuilder)
+	defer stringValues.Release()
+	floatBuilder := array.NewFloat64Builder(mem)
+	floatBuilder.Append(3.14)
+	floatValues := newArray(floatBuilder)
+	defer floatValues.Release()
+	int32Builder := array.NewInt32Builder(mem)
+	int32Builder.Append(1)
+	int32Values := newArray(int32Builder)
+	defer int32Values.Release()
+
 	tests := []struct {
 		name        string
 		elementType schemapb.DataType
-		data        []interface{}
+		values      arrow.Array
 	}{
-		{"Bool_wrong_type", schemapb.DataType_Bool, []interface{}{"not_a_bool"}},
-		{"Int8_wrong_type", schemapb.DataType_Int8, []interface{}{"not_an_int8"}},
-		{"Int16_wrong_type", schemapb.DataType_Int16, []interface{}{3.14}},
-		{"Int32_wrong_type", schemapb.DataType_Int32, []interface{}{true}},
-		{"Int64_wrong_type", schemapb.DataType_Int64, []interface{}{"not_an_int64"}},
-		{"Float_wrong_type", schemapb.DataType_Float, []interface{}{int32(1)}},
-		{"Double_wrong_type", schemapb.DataType_Double, []interface{}{int64(1)}},
-		{"VarChar_wrong_type", schemapb.DataType_VarChar, []interface{}{123}},
+		{"Bool_wrong_type", schemapb.DataType_Bool, stringValues},
+		{"Int8_wrong_type", schemapb.DataType_Int8, stringValues},
+		{"Int16_wrong_type", schemapb.DataType_Int16, floatValues},
+		{"Int32_wrong_type", schemapb.DataType_Int32, floatValues},
+		{"Int64_wrong_type", schemapb.DataType_Int64, stringValues},
+		{"Float_wrong_type", schemapb.DataType_Float, stringValues},
+		{"Double_wrong_type", schemapb.DataType_Double, stringValues},
+		{"VarChar_wrong_type", schemapb.DataType_VarChar, int32Values},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reader := &StructFieldReader{
-				field: &schemapb.FieldSchema{
-					Name:        "test_field",
-					DataType:    schemapb.DataType_Array,
-					ElementType: tt.elementType,
-				},
+			field := &schemapb.FieldSchema{
+				Name:        "test_field",
+				DataType:    schemapb.DataType_Array,
+				ElementType: tt.elementType,
 			}
-			_, err := reader.toScalarField(tt.data)
+			row, err := emptyScalarField(tt.elementType)
+			assert.NoError(t, err)
+			err = appendArrowScalar(row, field, tt.elementType, 100, tt.values, 0)
 			assert.Error(t, err)
-			assert.Contains(t, err.Error(), "expected")
+			assert.ErrorIs(t, err, merr.ErrImportFailed)
 		})
 	}
 }
@@ -1593,4 +1613,22 @@ func TestBuildVectorArrayFieldRejectsInvalidFloat(t *testing.T) {
 		_, err := buildVectorArrayFieldFromFixedSizeBinary(field, 4, vectors, 0, 1)
 		assert.Error(t, err)
 	})
+}
+
+// TestWrapParquetErr pins the column-level classification: a decode failure on
+// an immutable source is an input error, while a typed IO fault from the
+// retryable reader keeps its own code.
+func TestWrapParquetErr(t *testing.T) {
+	require.NoError(t, wrapParquetErr(nil))
+
+	decodeErr := wrapParquetErr(errors.New("parquet: invalid page header"))
+	require.True(t, errors.Is(decodeErr, merr.ErrImportFailed),
+		"a corrupt page must be an input error: %v", decodeErr)
+
+	ioErr := wrapParquetErr(merr.WrapErrIoFailed("a.parquet", errors.New("connection reset")))
+	require.Equal(t, merr.Code(merr.ErrIoFailed), merr.Code(ioErr),
+		"a typed object-store fault keeps its code: %v", ioErr)
+
+	alreadyInput := merr.WrapErrImportFailedMsg("bad value")
+	require.Same(t, alreadyInput, wrapParquetErr(alreadyInput), "an existing classification is not rewritten")
 }

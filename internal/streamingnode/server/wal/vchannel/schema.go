@@ -7,7 +7,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
 
-// GetSchemaVersion returns an owned snapshot of an exact historical schema.
+// GetSchemaVersion returns an owned snapshot of the requested schema version.
 // In particular, zero identifies version zero, never the latest schema.
 func (m *VChannelRecoveryModule) GetSchemaVersion(collectionID int64, version int32) (*streamingpb.CollectionSchemaOfVChannel, error) {
 	m.mu.Lock()
@@ -36,9 +36,10 @@ func (info *VChannelView) GetSchemaVersion(collectionID int64, version int32) (*
 
 // canonicalReadSchemaLocked is the compatibility mapping for pre-versioned
 // semantic updates (for example legacy TTL changes). The last retained normal
-// payload of that version is its read identity. Legacy same-version updates
-// retain their existing behavior until schema versioning is enabled by consumers.
-// This accessor does not change existing segment encoding recovery.
+// payload of that version supplies the most recently observed metadata. New
+// encoding/TTL updates advance SchemaVersion; metadata-only ALTERs retain it.
+// Segment encoding additionally uses its allocation boundary, not this alias.
+// TODO(#40451): give every distinct schema snapshot a unique SchemaVersion.
 func (info *VChannelView) canonicalReadSchemaLocked(version int32) *streamingpb.CollectionSchemaOfVChannel {
 	history := info.meta.GetCollectionInfo().GetSchemas()
 	for i := len(history) - 1; i >= 0; i-- {

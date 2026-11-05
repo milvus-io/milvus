@@ -63,7 +63,7 @@ const (
 
 // Const of Global Config List
 func globalConfigPrefixs() []string {
-	return []string{"metastore", "localStorage", "etcd", "tikv", "minio", "pulsar", "kafka", "rocksmq", "log", "grpc", "common", "quotaAndLimits", "trace"}
+	return []string{"metastore", "localStorage", "etcd", "tikv", "minio", "pulsar", "kafka", "rocksmq", "log", "grpc", "common", "quotaAndLimits", "trace", "queryView"}
 }
 
 // support read "milvus.yaml", "_test.yaml", "default.yaml", "user.yaml" as this order.

@@ -51,11 +51,11 @@ func ClassifyTransformLogMessage(msg message.ImmutableMessage) TransformLogKind 
 	}
 }
 
-// A transaction is classified as a whole: any Delete takes precedence, only
-// a nonempty sequence of Inserts is None, and every other transaction is a barrier.
+// A transaction is classified as a whole: any Delete takes precedence. Empty
+// transactions and sequences of Inserts are None; other transactions are barriers.
 func classifyTransformTxn(txn message.ImmutableTxnMessage) TransformLogKind {
 	if txn == nil || txn.Size() == 0 {
-		return TransformLogKindBarrier
+		return TransformLogKindNone
 	}
 	kind := TransformLogKindNone
 	_ = txn.RangeOver(func(inner message.ImmutableMessage) error {

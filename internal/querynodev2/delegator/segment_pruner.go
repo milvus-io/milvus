@@ -40,7 +40,7 @@ func PruneSegments(ctx context.Context,
 	schema *schemapb.CollectionSchema,
 	sealedSegments []SnapshotItem,
 	info PruneInfo,
-) {
+) (pruned bool) {
 	_, span := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "segmentPrune")
 	defer span.End()
 	if partitionStats == nil {
@@ -175,6 +175,10 @@ func PruneSegments(ctx context.Context,
 				pruneType,
 			).Set(bias)
 
+		// Stale partition stats can name segments that are no longer in the
+		// sealed list; only a prune that removed a segment is a use, reported
+		// to the caller, which carries it to the Proxy as a feature bit.
+		pruned = realFilteredSegments > 0
 		filterRatio := float32(realFilteredSegments) / float32(totalSegNum)
 		metrics.QueryNodeSegmentPruneRatio.
 			WithLabelValues(paramtable.GetStringNodeID(),
@@ -196,6 +200,7 @@ func PruneSegments(ctx context.Context,
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
 	mlog.Debug(ctx, "Pruned segment for search/query",
 		mlog.Duration("duration", tr.ElapseSpan()))
+	return pruned
 }
 
 type segmentDisStruct struct {

@@ -24,7 +24,6 @@
 #include <vector>
 
 #include "common/Types.h"
-#include "index/contracts/build/IReaderConvertible.h"
 #include "storage/artifact/Artifact.h"
 #include "storage/artifact/FileSink.h"
 
@@ -52,8 +51,9 @@ CreateTextIndexDirectory(const std::string& parent, std::string_view unique_id);
 size_t
 TextIndexDirectoryBytes(const storage::LocalDirectory& directory);
 
-class TextIndexArtifact final : public storage::Artifact,
-                                public IReaderConvertible {
+struct TextIndexStorage;
+
+class TextIndexArtifact final : public storage::Artifact {
  public:
     TextIndexArtifact(
         std::shared_ptr<storage::LocalDirectory> directory,
@@ -71,9 +71,9 @@ class TextIndexArtifact final : public storage::Artifact,
     void
     Serialize(storage::IndexEntryWriter& writer) const override;
 
-    IIndexReaderBasePtr
-        IntoReader() &&
-        override;
+    /** @brief Transfer the completed snapshot into a storage cache cell. */
+    std::unique_ptr<TextIndexStorage>
+    IntoStorage() &&;
 
  private:
     // Share encoding while selecting the existing format at compile time.

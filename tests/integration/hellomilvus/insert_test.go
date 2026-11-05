@@ -115,7 +115,7 @@ func (s *HelloMilvusSuite) TestInsertWithDuplicateField() {
 	mlog.Info(context.TODO(), "==================")
 }
 
-func (s *HelloMilvusSuite) TestInsertStorageV2() {
+func (s *HelloMilvusSuite) TestInsertStorageV3() {
 	c := s.Cluster
 	ctx, cancel := context.WithCancel(c.GetContext())
 	defer cancel()
@@ -183,7 +183,8 @@ func (s *HelloMilvusSuite) TestInsertStorageV2() {
 	s.NotEmpty(segments)
 	for _, segment := range segments {
 		if slices.Contains(ids, segment.ID) {
-			s.Equal(storage.StorageV2, segment.StorageVersion)
+			s.Equal(storage.StorageV3, segment.StorageVersion)
+			s.NotEmpty(segment.GetManifestPath())
 		}
 	}
 }

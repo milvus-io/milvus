@@ -306,7 +306,7 @@ func (t *RefreshExternalCollectionTask) GetKeptSegmentIDs() []int64 {
 // Existing file ranges are immutable by the external-table contract; overwrite
 // is unsupported. Properties are therefore not hashed to trigger segment rebuilds.
 func fragmentKey(f packed.Fragment) string {
-	return fmt.Sprintf("%s:%d:%d", f.FilePath, f.StartRow, f.EndRow)
+	return packed.FragmentIdentity(f)
 }
 
 // buildCurrentSegmentFragments builds segment to fragments mapping from current segments

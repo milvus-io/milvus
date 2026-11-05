@@ -21,6 +21,7 @@
 #include <fstream>
 #include <future>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -58,9 +59,9 @@ class FileWriterTestAccessor {
     }
 
     static void
-    InvalidateFd(FileWriter& writer) {
+    InvalidateFd(FileWriter& writer, int invalid_fd = -1) {
         close(writer.fd_);
-        writer.fd_ = -1;
+        writer.fd_ = invalid_fd;
     }
 };
 
@@ -158,6 +159,20 @@ TEST_F(FileWriterTest, BasicWriteWithBufferedIO) {
     std::string content((std::istreambuf_iterator<char>(file)),
                         std::istreambuf_iterator<char>());
     EXPECT_EQ(content, test_data);
+}
+
+TEST_F(FileWriterTest, FinishReportsCloseFailure) {
+    FileWriter writer((test_dir_ / "close_failure").string());
+    // Use an impossible descriptor so another thread cannot reuse the closed fd.
+    FileWriterTestAccessor::InvalidateFd(writer,
+                                         std::numeric_limits<int>::max());
+    try {
+        writer.Finish();
+        FAIL() << "expected close failure";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FileWriteFailed);
+    }
+    EXPECT_NO_THROW(writer.Finish());
 }
 
 TEST_F(FileWriterTest, FinishWithFdatasyncWriteback) {

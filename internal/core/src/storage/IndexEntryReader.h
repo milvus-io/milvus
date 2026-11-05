@@ -83,6 +83,17 @@ class IndexEntryReader {
         const std::vector<std::pair<std::string, std::string>>& name_path_pairs,
         io::Priority write_priority = io::Priority::MIDDLE);
 
+    /// Consume disjoint slices on the downloading worker, before its temporary
+    /// buffers and admission reservation are released. Calls may arrive out of
+    /// order and concurrently. The callback must write synchronously to a
+    /// preallocated destination and must not retain the data pointer. All issued
+    /// tasks drain before return or throw; CRC is combined in entry order.
+    void
+    ReadEntryStreamAt(
+        const std::string& name,
+        std::function<void(size_t offset, const uint8_t* data, size_t len)>
+            write);
+
     /// Stream entry data with joint transient-byte and slot admission.
     /// Downloads are concurrent (full bandwidth). Slices are delivered in entry
     /// order to `slice_consumer`; the data pointer is valid only for the
@@ -169,6 +180,7 @@ class IndexEntryReader {
     struct EntryStreamDownloadState {
         std::string name;
         std::unique_ptr<PositionedFileWriter> writer;
+        std::function<void(size_t, const uint8_t*, size_t)> write;
         uint32_t expected_crc;
         std::vector<RangeCrc> range_crcs;
     };
@@ -201,10 +213,13 @@ class IndexEntryReader {
                                const EntryMeta& meta,
                                io::Priority write_priority);
 
+    struct EntryStreamFailure;
+
     void
     SubmitEntryStreamDownloadTasks(const EntryMeta& meta,
                                    EntryStreamDownloadState& state,
-                                   std::vector<std::future<void>>& futures);
+                                   std::vector<std::future<void>>& futures,
+                                   EntryStreamFailure& failure);
 
     static size_t
     StreamDownloadTaskCount(const EntryMeta& meta);

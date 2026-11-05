@@ -91,18 +91,6 @@ func (n *noopBalancer) GetFrozenNodeIDs(ctx context.Context) ([]int64, error) {
 	return nil, nil
 }
 
-func (n *noopBalancer) IsRebalanceSuspended(ctx context.Context) (bool, error) {
-	return false, nil
-}
-
-func (n *noopBalancer) SuspendRebalance(ctx context.Context) error {
-	return nil
-}
-
-func (n *noopBalancer) ResumeRebalance(ctx context.Context) error {
-	return nil
-}
-
 func (n *noopBalancer) FreezeNodeIDs(ctx context.Context, nodeIDs []int64) error {
 	return nil
 }
@@ -289,6 +277,14 @@ func (n *noopWALAccesser) AnalyzerClient() AnalyzerClient {
 	return nil
 }
 
+func (n *noopWALAccesser) TransformLogStreamManager() wal.TransformLogStreamManager {
+	return nil
+}
+
 func (n *noopWALAccesser) SchemaClient() SchemaClient {
 	return nil
+}
+
+func (n *noopWALAccesser) QueryViewClient() QueryViewClient {
+	panic("QueryViewClient is unavailable in noop WAL accessor")
 }

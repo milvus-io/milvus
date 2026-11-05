@@ -8,8 +8,6 @@ This module performs rule-based logical rewrites on parsed `planpb.Expr` trees r
   - Uses global configuration from `paramtable.Get().CommonCfg.EnabledOptimizeExpr`
 - `RewriteExprWithConfig(*planpb.Expr, bool) *planpb.Expr` (in `entry.go`)
   - Same as `RewriteExpr` but allows custom configuration for testing or special cases.
-- `MergeNormalizedAnd(*planpb.Expr, *planpb.Expr) *planpb.Expr` (in `entry.go`)
-  - Combines already-rewritten user and RLS predicates using the same AND rules, without revisiting or mutating the input trees.
 
 ### Configuration
 

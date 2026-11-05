@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"math"
 	"strconv"
 	"strings"
 	"testing"
@@ -15,6 +16,40 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+func TestGetCollectionAutoReleaseIdleTTL(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		properties []*commonpb.KeyValuePair
+		ttl        time.Duration
+		invalid    bool
+	}{
+		{name: "absent"},
+		{name: "unknown key", properties: []*commonpb.KeyValuePair{{Key: "collection.autorelease.ttl.second", Value: "bad"}}},
+		{name: "override", properties: []*commonpb.KeyValuePair{{Key: "collection.autorelease.ttl.seconds", Value: "300"}}, ttl: 300 * time.Second},
+		{name: "disabled", properties: []*commonpb.KeyValuePair{{Key: CollectionAutoReleaseIdleTTLKey, Value: "-1"}}, ttl: -time.Second},
+		{name: "maximum", properties: []*commonpb.KeyValuePair{{Key: CollectionAutoReleaseIdleTTLKey, Value: strconv.FormatInt(math.MaxInt64/int64(time.Second), 10)}}, ttl: time.Duration(math.MaxInt64/int64(time.Second)) * time.Second},
+		{name: "zero", properties: []*commonpb.KeyValuePair{{Key: CollectionAutoReleaseIdleTTLKey, Value: "0"}}, invalid: true},
+		{name: "negative", properties: []*commonpb.KeyValuePair{{Key: CollectionAutoReleaseIdleTTLKey, Value: "-2"}}, invalid: true},
+		{name: "empty", properties: []*commonpb.KeyValuePair{{Key: CollectionAutoReleaseIdleTTLKey, Value: ""}}, invalid: true},
+		{name: "not an integer", properties: []*commonpb.KeyValuePair{{Key: CollectionAutoReleaseIdleTTLKey, Value: "1.5"}}, invalid: true},
+		{name: "duration overflow", properties: []*commonpb.KeyValuePair{{Key: CollectionAutoReleaseIdleTTLKey, Value: "9223372037"}}, invalid: true},
+		{name: "integer overflow", properties: []*commonpb.KeyValuePair{{Key: CollectionAutoReleaseIdleTTLKey, Value: "9223372036854775808"}}, invalid: true},
+		{name: "last value wins", properties: []*commonpb.KeyValuePair{{Key: CollectionAutoReleaseIdleTTLKey, Value: "300"}, {Key: CollectionAutoReleaseIdleTTLKey, Value: "-1"}}, ttl: -time.Second},
+		{name: "invalid duplicate", properties: []*commonpb.KeyValuePair{{Key: CollectionAutoReleaseIdleTTLKey, Value: "300"}, {Key: CollectionAutoReleaseIdleTTLKey, Value: "0"}}, invalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ttl, err := GetCollectionAutoReleaseIdleTTL(tc.properties)
+			if tc.invalid {
+				assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+				assert.Equal(t, merr.InputError, merr.GetErrorType(err))
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tc.ttl, ttl)
+		})
+	}
+}
 
 func TestIsSystemField(t *testing.T) {
 	type args struct {
@@ -684,119 +719,6 @@ func TestNamespaceShardingEnabled(t *testing.T) {
 			[]string{"other.deleted.key"},
 		)
 		assert.NoError(t, err)
-	})
-}
-
-func TestRLSEnabled(t *testing.T) {
-	t.Run("returns value when set", func(t *testing.T) {
-		enabled, err := IsRLSEnabled(&commonpb.KeyValuePair{Key: RLSEnabledKey, Value: "true"})
-		assert.NoError(t, err)
-		assert.True(t, enabled)
-	})
-
-	t.Run("uses the last duplicate value", func(t *testing.T) {
-		enabled, err := IsRLSEnabled(
-			&commonpb.KeyValuePair{Key: RLSEnabledKey, Value: "false"},
-			&commonpb.KeyValuePair{Key: RLSEnabledKey, Value: "true"},
-		)
-		assert.NoError(t, err)
-		assert.True(t, enabled)
-	})
-
-	t.Run("defaults to false", func(t *testing.T) {
-		enabled, err := IsRLSEnabled(&commonpb.KeyValuePair{Key: "other.key", Value: "true"})
-		assert.NoError(t, err)
-		assert.False(t, enabled)
-
-		enabled, err = IsRLSEnabled()
-		assert.NoError(t, err)
-		assert.False(t, enabled)
-	})
-
-	t.Run("force returns value and defaults to false", func(t *testing.T) {
-		force, err := IsRLSForce(&commonpb.KeyValuePair{Key: RLSForceKey, Value: "true"})
-		assert.NoError(t, err)
-		assert.True(t, force)
-
-		force, err = IsRLSForce()
-		assert.NoError(t, err)
-		assert.False(t, force)
-	})
-
-	t.Run("accepts standard boolean values", func(t *testing.T) {
-		for _, value := range []string{"1", "t", "T", "TRUE", "true", "True", "0", "f", "F", "FALSE", "false", "False"} {
-			err := ValidateRLSProperties(&commonpb.KeyValuePair{Key: RLSEnabledKey, Value: value})
-			assert.NoError(t, err, "value %q should be accepted", value)
-		}
-	})
-
-	t.Run("accepts force values", func(t *testing.T) {
-		for _, value := range []string{"1", "t", "T", "TRUE", "true", "True", "0", "f", "F", "FALSE", "false", "False"} {
-			err := ValidateRLSProperties(&commonpb.KeyValuePair{Key: RLSForceKey, Value: value})
-			assert.NoError(t, err)
-		}
-	})
-
-	t.Run("force requires enabled RLS in effective properties", func(t *testing.T) {
-		assert.NoError(t, ValidateRLSForceRequiresEnabled(
-			&commonpb.KeyValuePair{Key: RLSEnabledKey, Value: "true"},
-			&commonpb.KeyValuePair{Key: RLSForceKey, Value: "true"},
-		))
-		assert.NoError(t, ValidateRLSForceRequiresEnabled(
-			&commonpb.KeyValuePair{Key: RLSForceKey, Value: "false"},
-		))
-		for _, properties := range [][]*commonpb.KeyValuePair{
-			{{Key: RLSForceKey, Value: "true"}},
-			{{Key: RLSEnabledKey, Value: "false"}, {Key: RLSForceKey, Value: "true"}},
-		} {
-			err := ValidateRLSForceRequiresEnabled(properties...)
-			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-			assert.ErrorContains(t, err, RLSForceKey+"=true requires "+RLSEnabledKey+"=true")
-		}
-	})
-
-	t.Run("accepts missing key", func(t *testing.T) {
-		assert.NoError(t, ValidateRLSProperties())
-	})
-
-	t.Run("rejects invalid values", func(t *testing.T) {
-		for _, key := range []string{RLSEnabledKey, RLSForceKey} {
-			for _, value := range []string{"", "invalid", "yes", "2"} {
-				err := ValidateRLSProperties(&commonpb.KeyValuePair{Key: key, Value: value})
-				if assert.Error(t, err, "value %q should be rejected", value) {
-					assert.Contains(t, err.Error(), "invalid")
-					assert.Contains(t, err.Error(), key)
-				}
-			}
-		}
-	})
-
-	t.Run("rejects duplicate RLS properties", func(t *testing.T) {
-		for _, key := range []string{RLSEnabledKey, RLSForceKey} {
-			err := ValidateRLSProperties(
-				&commonpb.KeyValuePair{Key: key, Value: "false"},
-				&commonpb.KeyValuePair{Key: key, Value: "false"},
-			)
-			if assert.ErrorIs(t, err, merr.ErrParameterInvalid) {
-				assert.Contains(t, err.Error(), "duplicated collection property")
-				assert.Contains(t, err.Error(), key)
-			}
-		}
-	})
-
-	t.Run("rejects wrong case key", func(t *testing.T) {
-		for expected, variants := range map[string][]string{
-			RLSEnabledKey: {"RLS.ENABLED", "Rls.Enabled", "RLS.enabled"},
-			RLSForceKey:   {"RLS.FORCE", "Rls.Force", "RLS.force"},
-		} {
-			for _, key := range variants {
-				err := ValidateRLSProperties(&commonpb.KeyValuePair{Key: key, Value: "true"})
-				if assert.Error(t, err, "key %q should be rejected", key) {
-					assert.Contains(t, err.Error(), "did you mean")
-					assert.Contains(t, err.Error(), expected)
-				}
-			}
-		}
 	})
 }
 

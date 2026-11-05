@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -255,8 +256,8 @@ func newStreamingChannelLevelBalancer(t *testing.T, replica *meta.Replica) (*Cha
 		nextID++
 		return nextID, nil
 	}
-	testMeta := meta.NewMeta(idAllocator, nil, nodeManager)
-	targetMgr := meta.NewTargetManager(nil, testMeta)
+	testMeta := meta.NewMeta(idAllocator, nil, nodeManager, metacache.NewMetaStore(nil))
+	targetMgr := meta.NewTargetManager(nil, testMeta, metacache.NewMetaStore(nil))
 	dist := meta.NewDistributionManager(nodeManager)
 	scheduler := task.NewScheduler(context.Background(), testMeta, dist, targetMgr, nil, nil, nodeManager)
 	assign.InitGlobalAssignPolicyFactory(scheduler, nodeManager, dist, testMeta, targetMgr)

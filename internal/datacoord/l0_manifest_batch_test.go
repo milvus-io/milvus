@@ -19,53 +19,43 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"path"
 	"testing"
 	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// Existing operator tests supply a blocking fake. Only this test adapter uses
-// a goroutine to model native callback delivery; production submits directly.
-func mockL0ManifestSubmissions(commit func(context.Context, *packed.ManifestIOContext, string, *indexpb.StorageConfig, []packed.DeltaLogEntry) (string, error)) *mockey.Mocker {
-	return mockey.Mock(packed.SubmitManifestUpdates).To(func(ctx context.Context, io *packed.ManifestIOContext, base string, version int64, cfg *indexpb.StorageConfig, updates *packed.ManifestUpdates, complete func(packed.ManifestUpdateResult, error)) error {
-		go func() {
-			manifest, err := commit(ctx, io, packed.MarshalManifestPath(base, version), cfg, updates.DeltaLogs)
-			complete(packed.ManifestUpdateResult{ManifestPath: manifest}, err)
-		}()
-		return nil
-	}).Build()
-}
-
 func TestL0ManifestBatchSingleWorker(t *testing.T) {
-	executor := newManifestCommitExecutor(1)
-	defer executor.close()
+	executor := meta.NewManifestCommitExecutor(1)
+	defer executor.Close()
 	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
 	cache := make(map[int64]string)
-	var updates []*l0ManifestUpdate
+	var updates []*meta.L0ManifestUpdate
 	for id := int64(1); id <= 4; id++ {
 		base := fmt.Sprintf("%s/segment-%d", cfg.RootPath, id)
-		initial, err := packed.CommitManifestUpdates(base, 0, cfg, &packed.ManifestUpdates{DeltaLogs: []packed.DeltaLogEntry{{Path: base + "/_delta/1", NumEntries: 1}}})
+		initial, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(base, 0), cfg, &packed.ManifestUpdates{DeltaLogs: []packed.DeltaLogEntry{{Path: base + "/_delta/1", NumEntries: 1}}})
 		require.NoError(t, err)
-		segment := NewSegmentInfo(&datapb.SegmentInfo{ID: id, ManifestPath: initial})
+		segment := meta.NewSegmentInfo(&datapb.SegmentInfo{ID: id, ManifestPath: initial})
 		// Cached and empty steps must advance inline without losing the chain.
-		updates = append(updates, &l0ManifestUpdate{segmentID: id, segment: segment, manifestPath: initial}, &l0ManifestUpdate{segmentID: id, segment: segment})
+		updates = append(updates, &meta.L0ManifestUpdate{SegmentID: id, Segment: segment, ManifestPath: initial}, &meta.L0ManifestUpdate{SegmentID: id, Segment: segment})
 		for logID := 2; logID <= 3; logID++ {
-			updates = append(updates, &l0ManifestUpdate{
-				segmentID: id, segment: segment, storageConfig: cfg, committedV3Manifests: cache,
-				entries: []packed.DeltaLogEntry{{Path: fmt.Sprintf("%s/_delta/%d", base, logID), NumEntries: 1}},
+			updates = append(updates, &meta.L0ManifestUpdate{
+				SegmentID: id, Segment: segment, StorageConfig: cfg, CommittedV3Manifests: cache,
+				Entries: []packed.DeltaLogEntry{{Path: fmt.Sprintf("%s/_delta/%d", base, logID), NumEntries: 1}},
 			})
 		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	require.NoError(t, commitL0ManifestUpdates(ctx, executor, updates))
+	require.NoError(t, meta.CommitL0ManifestUpdates(ctx, executor, updates))
 	require.Len(t, cache, 4)
 	for _, manifest := range cache {
 		base, version, err := packed.UnmarshalManifestPath(manifest)
@@ -77,32 +67,73 @@ func TestL0ManifestBatchSingleWorker(t *testing.T) {
 	}
 }
 
-func TestL0ManifestBatchDrainsAndStopsChains(t *testing.T) {
-	executor := newManifestCommitExecutor(1)
-	defer executor.close()
+// On object storage, every revision the L0 chain publishes records the size of
+// its manifest object, and the next commit opens it with that size.
+func TestL0ManifestBatchRecordsManifestSize(t *testing.T) {
+	cfg := packed.CreateStorageConfig()
+	if cfg.GetStorageType() == "local" {
+		t.Skip("local storage records no manifest size")
+	}
+	executor := meta.NewManifestCommitExecutor(1)
+	defer executor.Close()
+	base := path.Join(cfg.GetRootPath(), fmt.Sprintf("l0-manifest-size/%d", time.Now().UnixNano()))
+	initial, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(base, packed.ManifestEarliest), cfg,
+		&packed.ManifestUpdates{DeltaLogs: []packed.DeltaLogEntry{{Path: base + "/_delta/1", NumEntries: 1}}})
+	require.NoError(t, err)
+	segment := meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 1, ManifestPath: initial})
 	cache := make(map[int64]string)
-	var updates []*l0ManifestUpdate
+	var updates []*meta.L0ManifestUpdate
+	for logID := 2; logID <= 3; logID++ {
+		updates = append(updates, &meta.L0ManifestUpdate{
+			SegmentID: 1, Segment: segment, StorageConfig: cfg, CommittedV3Manifests: cache,
+			Entries: []packed.DeltaLogEntry{{Path: fmt.Sprintf("%s/_delta/%d", base, logID), NumEntries: 1}},
+		})
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	require.NoError(t, meta.CommitL0ManifestUpdates(ctx, executor, updates))
+
+	published := segment.GetManifestPath()
+	require.Equal(t, published, cache[1])
+	revision, err := packed.ParseManifestPath(published)
+	require.NoError(t, err)
+	require.EqualValues(t, 3, revision.ManifestVersion)
+	manifestFile, err := packed.ManifestFilePath(published)
+	require.NoError(t, err)
+	data, err := packed.ReadFile(cfg, manifestFile)
+	require.NoError(t, err)
+	require.EqualValues(t, len(data), revision.Size)
+	paths, err := packed.GetDeltaLogPathsFromManifest(published, cfg)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{base + "/_delta/1", base + "/_delta/2", base + "/_delta/3"}, paths)
+}
+
+func TestL0ManifestBatchDrainsAndStopsChains(t *testing.T) {
+	executor := meta.NewManifestCommitExecutor(1)
+	defer executor.Close()
+	cache := make(map[int64]string)
+	var updates []*meta.L0ManifestUpdate
 	for id := int64(1); id <= 3; id++ {
-		segment := NewSegmentInfo(&datapb.SegmentInfo{ID: id, ManifestPath: packed.MarshalManifestPath(fmt.Sprintf("/tmp/l0/%d", id), 7)})
+		segment := meta.NewSegmentInfo(&datapb.SegmentInfo{ID: id, ManifestPath: packed.MarshalManifestPath(fmt.Sprintf("/tmp/l0/%d", id), 7)})
 		for range 2 {
-			updates = append(updates, &l0ManifestUpdate{segmentID: id, segment: segment, committedV3Manifests: cache, entries: []packed.DeltaLogEntry{{Path: "delta", NumEntries: 1}}})
+			updates = append(updates, &meta.L0ManifestUpdate{SegmentID: id, Segment: segment, CommittedV3Manifests: cache, Entries: []packed.DeltaLogEntry{{Path: "delta", NumEntries: 1}}})
 		}
 	}
 	type submission struct {
-		ctx      context.Context
-		base     string
-		complete func(packed.ManifestUpdateResult, error)
+		ctx          context.Context
+		baseManifest string
+		complete     func(packed.ManifestUpdateResult, error)
 	}
 	submitted := make(chan submission, 6)
-	patch := mockey.Mock(packed.SubmitManifestUpdates).To(func(ctx context.Context, _ *packed.ManifestIOContext, base string, _ int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates, complete func(packed.ManifestUpdateResult, error)) error {
-		submitted <- submission{ctx, base, complete}
+	patch := mockey.Mock(packed.SubmitManifestUpdates).To(func(ctx context.Context, _ *packed.ManifestIOContext, baseManifest string, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates, complete func(packed.ManifestUpdateResult, error)) error {
+		submitted <- submission{ctx, baseManifest, complete}
 		return nil
 	}).Build()
 	defer patch.UnPatch()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- commitL0ManifestUpdates(ctx, executor, updates) }()
+	go func() { done <- meta.CommitL0ManifestUpdates(ctx, executor, updates) }()
 	pending := make([]submission, 0, 3)
 	for range 3 {
 		select {
@@ -116,7 +147,9 @@ func TestL0ManifestBatchDrainsAndStopsChains(t *testing.T) {
 	failure := &packed.ManifestCommitError{Outcome: packed.ManifestCommitUnknown, Err: merr.ErrServiceUnavailable}
 	pending[0].complete(packed.ManifestUpdateResult{}, failure)
 	require.ErrorIs(t, pending[1].ctx.Err(), context.Canceled)
-	pending[1].complete(packed.ManifestUpdateResult{ManifestPath: packed.MarshalManifestPath(pending[1].base, 8)}, nil)
+	published, err := meta.AdvanceManifest(pending[1].baseManifest, 1)
+	require.NoError(t, err)
+	pending[1].complete(packed.ManifestUpdateResult{ManifestPath: published}, nil)
 	select {
 	case err := <-done:
 		t.Fatalf("returned before final callback: %v", err)
@@ -135,25 +168,29 @@ func TestL0ManifestBatchDrainsAndStopsChains(t *testing.T) {
 func TestL0ManifestBatchInlineAndRejected(t *testing.T) {
 	for _, reject := range []bool{false, true} {
 		t.Run(fmt.Sprint(reject), func(t *testing.T) {
-			executor := newManifestCommitExecutor(1)
-			defer executor.close()
-			segment := NewSegmentInfo(&datapb.SegmentInfo{ID: 1, ManifestPath: packed.MarshalManifestPath("/tmp/l0/1", 7)})
-			updates := []*l0ManifestUpdate{
-				{segmentID: 1, segment: segment, entries: []packed.DeltaLogEntry{{Path: "a"}}},
-				{segmentID: 1, segment: segment, entries: []packed.DeltaLogEntry{{Path: "b"}}},
+			executor := meta.NewManifestCommitExecutor(1)
+			defer executor.Close()
+			segment := meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 1, ManifestPath: packed.MarshalManifestPath("/tmp/l0/1", 7)})
+			updates := []*meta.L0ManifestUpdate{
+				{SegmentID: 1, Segment: segment, Entries: []packed.DeltaLogEntry{{Path: "a"}}},
+				{SegmentID: 1, Segment: segment, Entries: []packed.DeltaLogEntry{{Path: "b"}}},
 			}
 			calls := 0
-			patch := mockey.Mock(packed.SubmitManifestUpdates).To(func(_ context.Context, _ *packed.ManifestIOContext, base string, version int64, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates, complete func(packed.ManifestUpdateResult, error)) error {
+			patch := mockey.Mock(packed.SubmitManifestUpdates).To(func(_ context.Context, _ *packed.ManifestIOContext, baseManifest string, _ *indexpb.StorageConfig, _ *packed.ManifestUpdates, complete func(packed.ManifestUpdateResult, error)) error {
 				calls++
 				if reject {
 					return merr.ErrServiceUnavailable
 				}
+				_, version, err := packed.UnmarshalManifestPath(baseManifest)
+				require.NoError(t, err)
 				require.EqualValues(t, 6+calls, version)
-				complete(packed.ManifestUpdateResult{ManifestPath: packed.MarshalManifestPath(base, version+1)}, nil)
+				published, err := meta.AdvanceManifest(baseManifest, 1)
+				require.NoError(t, err)
+				complete(packed.ManifestUpdateResult{ManifestPath: published}, nil)
 				return nil
 			}).Build()
 			defer patch.UnPatch()
-			err := commitL0ManifestUpdates(context.Background(), executor, updates)
+			err := meta.CommitL0ManifestUpdates(context.Background(), executor, updates)
 			if reject {
 				require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 				require.Equal(t, 1, calls)

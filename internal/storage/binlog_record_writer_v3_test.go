@@ -483,7 +483,7 @@ func TestManifestRecordReader_ResolvesOutOfLineTextLob(t *testing.T) {
 	require.NotNil(t, output)
 	defer output.Destroy()
 
-	manifest, err := packed.CommitManifestUpdates(segmentPath, packed.ManifestEarliest, config,
+	manifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(segmentPath, packed.ManifestEarliest), config,
 		&packed.ManifestUpdates{NewFiles: output})
 	require.NoError(t, err)
 	lobFiles, err := packed.GetManifestLobFiles(manifest, config)

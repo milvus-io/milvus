@@ -31,6 +31,8 @@ enum class TantivyBindingErrorCode : int32_t {
   Tantivy = 5,
   /// Binding-internal error (ad-hoc failures, poisoned locks, ...).
   Internal = 6,
+  /// An I/O operation reported ErrorKind::NotFound; policy belongs to the caller.
+  IoNotFound = 7,
 };
 
 enum class TantivyDataType : uint8_t {

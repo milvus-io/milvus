@@ -237,8 +237,9 @@ type SyncManager struct {
 	sync.RWMutex
 	downloader storage.ChunkManager
 
-	version     *atomic.Uint64
-	resourceMap map[string]int64 // resource name -> resource id
+	version           *atomic.Uint64
+	resourceMap       map[string]int64  // resource name -> resource id
+	resourceFileNames map[string]string // resource name -> basename of the registered object path
 }
 
 func (m *SyncManager) GetVersion() uint64 {
@@ -250,15 +251,21 @@ func (m *SyncManager) Sync(ctx context.Context, version uint64, resourceList []*
 	m.Lock()
 	defer m.Unlock()
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	if version <= m.version.Load() {
 		return nil
 	}
 
 	newResourceMap := make(map[string]int64)
+	newResourceFileNames := make(map[string]string)
 	resolvedResources := make([]*ResolvedFileResource, 0, len(resourceList))
 
 	for _, resource := range resourceList {
 		newResourceMap[resource.GetName()] = resource.GetId()
+		newResourceFileNames[resource.GetName()] = path.Base(resource.GetPath())
 		localResourcePath := path.Join(m.localPath, fmt.Sprint(resource.GetId()))
 		localFilePath := path.Join(localResourcePath, path.Base(resource.GetPath()))
 		if id, ok := m.resourceMap[resource.GetName()]; ok && id == resource.GetId() {
@@ -290,6 +297,10 @@ func (m *SyncManager) Sync(ctx context.Context, version uint64, resourceList []*
 		})
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	if err := analyzer.UpdateGlobalResourceInfo(newResourceMap); err != nil {
 		return err
 	}
@@ -308,6 +319,7 @@ func (m *SyncManager) Sync(ctx context.Context, version uint64, resourceList []*
 	}
 
 	m.resourceMap = newResourceMap
+	m.resourceFileNames = newResourceFileNames
 	m.version.Store(version)
 	notifyListeners(SyncEvent{Version: version, Resources: resolvedResources})
 	return nil
@@ -317,10 +329,11 @@ func (m *SyncManager) Mode() Mode { return SyncMode }
 
 func NewSyncManager(downloader storage.ChunkManager) *SyncManager {
 	return &SyncManager{
-		BaseManager: newBaseManager(),
-		downloader:  downloader,
-		resourceMap: make(map[string]int64),
-		version:     atomic.NewUint64(0),
+		BaseManager:       newBaseManager(),
+		downloader:        downloader,
+		resourceMap:       make(map[string]int64),
+		resourceFileNames: make(map[string]string),
+		version:           atomic.NewUint64(0),
 	}
 }
 

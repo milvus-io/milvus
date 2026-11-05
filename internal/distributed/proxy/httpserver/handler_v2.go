@@ -294,14 +294,14 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(DataBaseCategory+AlterAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqWithProperties{} }, wrapperTraceLog(h.alterDatabase))))
 	router.POST(DataBaseCategory+AlterPropertiesAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReqWithProperties{} }, wrapperTraceLog(h.alterDatabase))))
 	// Query
-	router.POST(EntityCategory+QueryAction, h.dqlAdmission(restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
+	router.POST(EntityCategory+QueryAction, h.dqlAdmission(restfulSizeMiddleware(dqlTimeoutMiddleware(wrapperPost(func() any {
 		return &QueryReqV2{
 			Limit:        100,
 			OutputFields: []string{DefaultOutputFields},
 		}
 	}, wrapperTraceLog(h.query))), true)))
 	// Get
-	router.POST(EntityCategory+GetAction, h.dqlAdmission(restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
+	router.POST(EntityCategory+GetAction, h.dqlAdmission(restfulSizeMiddleware(dqlTimeoutMiddleware(wrapperPost(func() any {
 		return &CollectionIDReq{
 			OutputFields: []string{DefaultOutputFields},
 		}
@@ -319,19 +319,19 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 		return &CollectionDataReq{}
 	}, wrapperTraceLog(h.upsert))), false))
 	// Search
-	router.POST(EntityCategory+SearchAction, h.dqlAdmission(restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
+	router.POST(EntityCategory+SearchAction, h.dqlAdmission(restfulSizeMiddleware(dqlTimeoutMiddleware(wrapperPost(func() any {
 		return &SearchReqV2{
 			Limit: 100,
 		}
 	}, wrapperTraceLog(h.search))), true)))
 	// advanced_search, backward compatible uri
-	router.POST(EntityCategory+AdvancedSearchAction, h.dqlAdmission(restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
+	router.POST(EntityCategory+AdvancedSearchAction, h.dqlAdmission(restfulSizeMiddleware(dqlTimeoutMiddleware(wrapperPost(func() any {
 		return &HybridSearchReq{
 			Limit: 100,
 		}
 	}, wrapperTraceLog(h.advancedSearch))), true)))
 	// HybridSearch
-	router.POST(EntityCategory+HybridSearchAction, h.dqlAdmission(restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
+	router.POST(EntityCategory+HybridSearchAction, h.dqlAdmission(restfulSizeMiddleware(dqlTimeoutMiddleware(wrapperPost(func() any {
 		return &HybridSearchReq{
 			Limit: 100,
 		}
@@ -1487,6 +1487,15 @@ func (h *HandlersV2) addCollectionField(ctx context.Context, c *gin.Context, any
 		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return nil, err
 	}
+	// A fieldName of the form "struct[sub]" adds a sub-field to an existing
+	// struct. The full name is sent as the field name and the server parses
+	// and validates it.
+	if open := strings.IndexByte(httpReq.Schema.FieldName, '['); open >= 0 && typeutil.IsNestedArrayTypeSchema(schemaProto.GetTypeSchema()) {
+		if err := completeNestedSubFieldTypeSchema(httpReq.Schema.FieldName[:open], httpReq.Schema, schemaProto, nil); err != nil {
+			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			return nil, err
+		}
+	}
 
 	req := &milvuspb.AlterCollectionSchemaRequest{
 		DbName:         dbName,
@@ -1595,8 +1604,6 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 	req := &milvuspb.QueryRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
-		RlsPrincipal:   httpReq.RlsPrincipal,
-		SkipRls:        httpReq.SkipRls,
 		Expr:           httpReq.Filter,
 		OutputFields:   httpReq.OutputFields,
 		PartitionNames: httpReq.PartitionNames,
@@ -1650,6 +1657,9 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 		queryResp := resp.(*milvuspb.QueryResults)
 		allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 		outputData, err := buildQueryResp(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema)
+		if err == nil {
+			err = setQueryElementOffsets(outputData, queryResp.GetElementIndices())
+		}
 		if err != nil {
 			mlog.Warn(ctx, "high level restful api, fail to deal with query result", mlog.Any("response", resp), mlog.Err(err))
 			HTTPReturn(c, http.StatusOK, gin.H{
@@ -1697,8 +1707,6 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 	req := &milvuspb.QueryRequest{
 		DbName:             dbName,
 		CollectionName:     httpReq.CollectionName,
-		RlsPrincipal:       httpReq.RlsPrincipal,
-		SkipRls:            httpReq.SkipRls,
 		OutputFields:       httpReq.OutputFields,
 		PartitionNames:     httpReq.PartitionNames,
 		Expr:               filter,
@@ -1759,8 +1767,6 @@ func (h *HandlersV2) delete(ctx context.Context, c *gin.Context, anyReq any, dbN
 	req := &milvuspb.DeleteRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
-		RlsPrincipal:   httpReq.RlsPrincipal,
-		SkipRls:        httpReq.SkipRls,
 		PartitionName:  httpReq.PartitionName,
 		Expr:           httpReq.Filter,
 	}
@@ -1806,8 +1812,6 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	req := &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
-		RlsPrincipal:   httpReq.RlsPrincipal,
-		SkipRls:        httpReq.SkipRls,
 		PartitionName:  httpReq.PartitionName,
 		// PartitionName:  "_default",
 	}
@@ -1882,8 +1886,6 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	req := &milvuspb.UpsertRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
-		RlsPrincipal:   httpReq.RlsPrincipal,
-		SkipRls:        httpReq.SkipRls,
 		PartitionName:  httpReq.PartitionName,
 		PartialUpdate:  httpReq.PartialUpdate,
 		// PartitionName:  "_default",
@@ -2013,15 +2015,13 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 	var err error
 	var vectorField *schemapb.FieldSchema
 	if len(fieldName) == 0 {
-		for _, field := range collSchema.Fields {
-			if typeutil.IsVectorType(field.DataType) {
-				if len(fieldName) == 0 {
-					fieldName = field.Name
-					vectorField = field
-				} else {
-					return nil, merr.WrapErrParameterInvalidMsg("search without annsField, but already found multiple vector fields: [%s, %s,,,]", fieldName, field.Name)
-				}
+		// Same candidates as the proxy's default anns_field: top-level vectors
+		// and struct vector sub-fields.
+		for _, field := range typeutil.GetVectorFieldSchemas(collSchema) {
+			if vectorField != nil {
+				return nil, merr.WrapErrParameterInvalidMsg("search without annsField, but already found multiple vector fields: [%s, %s,,,]", vectorField.GetName(), field.GetName())
 			}
+			vectorField = field
 		}
 	} else {
 		for _, field := range collSchema.Fields {
@@ -2126,8 +2126,6 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	req := &milvuspb.SearchRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
-		RlsPrincipal:   httpReq.RlsPrincipal,
-		SkipRls:        httpReq.SkipRls,
 		Dsl:            httpReq.Filter,
 		DslType:        commonpb.DslType_BoolExprV1,
 		OutputFields:   httpReq.OutputFields,
@@ -2400,6 +2398,9 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 			outputData, err := buildQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema)
+			if err == nil {
+				err = setSearchElementOffsets(outputData, searchResp.Results.GetElementIndices())
+			}
 			if err != nil {
 				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Any("result", searchResp.Results), mlog.Err(err))
 				HTTPReturn(c, http.StatusOK, gin.H{
@@ -2459,8 +2460,6 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 	req := &milvuspb.HybridSearchRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
-		RlsPrincipal:   httpReq.RlsPrincipal,
-		SkipRls:        httpReq.SkipRls,
 		PartitionNames: httpReq.PartitionNames,
 		Requests:       []*milvuspb.SearchRequest{},
 		OutputFields:   httpReq.OutputFields,
@@ -2591,6 +2590,9 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 			outputData, err := buildQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema)
+			if err == nil {
+				err = setSearchElementOffsets(outputData, searchResp.Results.GetElementIndices())
+			}
 			if err != nil {
 				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Any("result", searchResp.Results), mlog.Err(err))
 				HTTPReturn(c, http.StatusOK, gin.H{
@@ -2819,10 +2821,11 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		if enStr, ok := httpReq.Params["enableDynamicField"]; ok {
 			enableDynamic, err = strconv.ParseBool(fmt.Sprintf("%v", enStr))
 			if err != nil {
+				err = merr.WrapErrParameterInvalidErr(err, "the value for enableDynamicField must be a boolean")
 				mlog.Warn(ctx, "high level restful api, parse enableDynamicField fail", mlog.Err(err), requestLogField)
 				HTTPAbortReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(err),
-					HTTPReturnMessage: "parse enableDynamicField fail, err:" + err.Error(),
+					HTTPReturnMessage: err.Error(),
 				})
 				return nil, err
 			}
@@ -2908,6 +2911,19 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				TypeParams:      []*commonpb.KeyValuePair{},
 				Nullable:        field.Nullable,
 				ExternalField:   field.ExternalField,
+				// Only struct sub-fields support these; they are passed on so
+				// the server rejects them instead of their being dropped here.
+				ElementNullable: field.ElementNullable,
+			}
+			if field.TypeSchema != nil {
+				fieldSchema.TypeSchema, err = field.TypeSchema.GetProto(field.FieldName)
+				if err != nil {
+					HTTPAbortReturn(c, http.StatusOK, gin.H{
+						HTTPReturnCode:    merr.Code(err),
+						HTTPReturnMessage: err.Error(),
+					})
+					return nil, err
+				}
 			}
 
 			fieldSchema.DefaultValue, err = convertDefaultValue(field.DefaultValue, dataType)

@@ -78,9 +78,11 @@ type Manager struct {
 	lastObserved          uint64
 	sealedThrough         uint64
 	latestCoveredTimeTick uint64
+	queryBarriers         map[string]uint64 // volatile per-vchannel coverage; never persisted
 	readableThrough       uint64
 	readableChanged       chan struct{}
 	transformNotifiers    map[string]*transformNotifier
+	transformSubscribers  map[string]map[*dispatchSubscription]struct{}
 	restoredTimeTick      uint64
 	terminalErr           error
 	gcFrontiers           map[string]uint64
@@ -155,6 +157,7 @@ func (m *Manager) ObserveMessage(ctx context.Context, msg message.ImmutableMessa
 	if msg.TimeTick() > m.readableThrough {
 		m.advanceReadableLocked(msg.TimeTick())
 		m.notifyTransformMessageLocked(msg)
+		m.dispatchTransformMessageLocked(msg, entry)
 	}
 	m.refreshLastAckedLocked()
 	overThreshold := m.cfg.FlushMaxBytes > 0 && m.pendingBytes >= m.cfg.FlushMaxBytes
@@ -732,6 +735,9 @@ func (m *Manager) ReadTransformEntries(ctx context.Context, vchannel string, fro
 // AdvanceGCTimeTick reports a durable transform materialization or cleanup frontier.
 func (m *Manager) AdvanceGCTimeTick(vchannel string, timetick uint64) {
 	m.mu.Lock()
+	if timetick == DroppedVChannelTimeTick {
+		delete(m.queryBarriers, vchannel)
+	}
 	if timetick > m.gcFrontiers[vchannel] {
 		m.gcFrontiers[vchannel] = timetick
 	}

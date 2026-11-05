@@ -4,11 +4,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/timetick/mock_inspector"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -31,6 +33,8 @@ func TestMaybeForcePersistedSync(t *testing.T) {
 		lastPersistedSync: typeutil.NewConcurrentMap[string, time.Time](),
 	}
 	operator := mock_inspector.NewMockTimeTickSyncOperator(t)
+	channelPatch := mockey.Mock((*mock_inspector.MockTimeTickSyncOperator).Channel).Return(types.PChannelInfo{Name: "test"}).Build()
+	defer channelPatch.UnPatch()
 	i.operators.Insert("test", operator)
 
 	operator.EXPECT().Sync(mock.Anything, true).Times(2)

@@ -43,16 +43,14 @@ namespace exec {
 
 void
 PhyExistsFilterExpr::DetermineExecPath() {
-    if (CanUseJsonStatsAtInit()) {
-        exec_path_ = ExprExecPath::JsonStats;
-        return;
-    }
+    // JsonStats is the fallback applied by EnsureExecPathDetermined() when no
+    // index serves this path; see SegmentExpr::FallbackToJsonStatsIfEligible().
     auto req = MakeIndexRequirement(RequiredReader::JsonPath);
     // EXISTS has no cast requirement. Multi-path JSON and projected exact-path
     // readers both answer Exists(Any); path matching still prevents a projected
     // reader from serving a sibling path.
     req.value_type = DataType::NONE;
-    if (!SelectAndPinIndex(req)) {
+    if (!SelectAndCreateIndexReader(req)) {
         return;
     }
     const auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
@@ -113,7 +111,9 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
                 TargetBitmap res = json_reader_->Exists(pointer);
                 TargetBitmap valid(res.size(), true);
                 return {std::move(res), std::move(valid)};
-            });
+            },
+            /*enable_cache_write=*/true,
+            feature_recorder_);
         cached_index_chunk_res_ = cached.result;
     }
     auto res = MoveOrSliceBitmap(
@@ -265,7 +265,9 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
 
                 TargetBitmap valid(active_count_, true);
                 return {std::move(res), std::move(valid)};
-            });
+            },
+            /*enable_cache_write=*/true,
+            feature_recorder_);
         cached_index_chunk_res_ = cached.result;
     }
 

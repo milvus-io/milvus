@@ -79,6 +79,12 @@ GetStructNameForArrayField(const FieldMeta& field_meta) {
     return field_name.substr(0, left);
 }
 
+ArrowSchemaPtr
+BuildFieldArrowSchema(const std::unordered_map<FieldId, FieldMeta>& fields,
+                      const std::vector<FieldId>& field_ids,
+                      bool use_field_ids,
+                      bool text_lob_as_binary = false);
+
 class Schema {
  public:
     Schema() = default;
@@ -416,7 +422,7 @@ class Schema {
     }
 
     const std::unordered_map<FieldId, FieldMeta>
-    get_field_metas(const std::vector<FieldId>& field_ids) {
+    get_field_metas(const std::vector<FieldId>& field_ids) const {
         std::unordered_map<FieldId, FieldMeta> field_metas;
         for (const auto& field_id : field_ids) {
             field_metas.emplace(field_id, operator[](field_id));
@@ -551,14 +557,21 @@ class Schema {
     }
 
     bool
-    ShouldLoadField(FieldId field_id) {
+    ShouldLoadRawField(FieldId field_id) const {
         if (bm25_function_output_fields_.count(field_id) > 0) {
             return false;
         }
         auto it = fields_.find(field_id);
-        if (it != fields_.end() && !it->second.NeedLoad()) {
-            return false;
-        }
+        return it == fields_.end() || it->second.NeedLoad();
+    }
+
+    bool
+    ShouldLoadField(FieldId field_id) const {
+        return ShouldLoadRawField(field_id) && IsFieldInLoadScope(field_id);
+    }
+
+    bool
+    IsFieldInLoadScope(FieldId field_id) const {
         return load_fields_.empty() || load_fields_.count(field_id) > 0;
     }
 
@@ -623,6 +636,17 @@ class Schema {
     // Find the first array field belonging to a struct (cached)
     const FieldMeta&
     GetFirstArrayFieldInStruct(const std::string& struct_name) const;
+
+    // Field ID of the struct array field itself. Only schemas parsed from a
+    // CollectionSchema proto know it.
+    std::optional<FieldId>
+    GetStructFieldId(const std::string& struct_name) const {
+        auto it = struct_field_ids_.find(struct_name);
+        if (it == struct_field_ids_.end()) {
+            return std::nullopt;
+        }
+        return it->second;
+    }
 
     DataType
     GetFieldType(const FieldId& field_id) const {
@@ -718,6 +742,9 @@ class Schema {
 
     // Cache for struct_name -> first array field mapping (built during AddField)
     std::unordered_map<std::string, FieldId> struct_array_field_cache_;
+
+    // struct_name -> field ID of the struct array field (built in ParseFrom)
+    std::unordered_map<std::string, FieldId> struct_field_ids_;
 
     // warmup policy settings
     // Valid values: "disable", "sync", "async" (empty string means no setting)

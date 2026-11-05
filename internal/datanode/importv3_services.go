@@ -17,6 +17,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/importv3"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -48,9 +49,9 @@ func (node *DataNode) submitReshardTask(ctx context.Context, req *datapb.Reshard
 	}
 	cm, err := node.storageFactory.NewChunkManager(ctx, req.GetStorageConfig())
 	if err != nil {
-		return merr.Status(err), nil
+		return merr.Status(storage.ToMilvusIoError(req.GetStorageConfig().GetBucketName(), err)), nil
 	}
-	pluginContext, err := hookutil.GetCPluginContext(req.GetPluginContext(), req.GetPlan().GetCollectionId())
+	pluginContext, err := hookutil.GetCollectionPluginContext(req.GetPlan().GetCollectionSchema().GetProperties(), req.GetPlan().GetCollectionId())
 	if err != nil {
 		return merr.Status(err), nil
 	}
@@ -65,7 +66,7 @@ func (node *DataNode) submitImportTaskV3(ctx context.Context, req *datapb.Import
 	if req == nil || req.GetRunId() <= 0 || req.GetStorageConfig() == nil || req.GetSlot() <= 0 || req.GetPlan() == nil {
 		return merr.Status(merr.WrapErrImportSysFailedMsg("invalid or incomplete ImportTaskV3 request")), nil
 	}
-	pluginContext, err := hookutil.GetCPluginContext(req.GetPluginContext(), req.GetPlan().GetCollectionId())
+	pluginContext, err := hookutil.GetCollectionPluginContext(req.GetPlan().GetCollectionSchema().GetProperties(), req.GetPlan().GetCollectionId())
 	if err != nil {
 		return merr.Status(err), nil
 	}
@@ -73,7 +74,7 @@ func (node *DataNode) submitImportTaskV3(ctx context.Context, req *datapb.Import
 	// BlobsWriter, so the task needs a chunk manager to build that uploader.
 	cm, err := node.storageFactory.NewChunkManager(ctx, req.GetStorageConfig())
 	if err != nil {
-		return merr.Status(err), nil
+		return merr.Status(storage.ToMilvusIoError(req.GetStorageConfig().GetBucketName(), err)), nil
 	}
 	return node.submitImportV3WorkerTask(ctx, importv3.NewImportTask(req, cm, pluginContext))
 }

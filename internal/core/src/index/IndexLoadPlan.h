@@ -39,6 +39,8 @@ namespace milvus::index {
  * loading keeps cleanup on the caller thread.
  */
 struct IndexLoadPlan {
+    // BITMAP keeps its existing ordered staging/conversion path.
+    bool worker_writes{true};
     std::vector<storage::EntryLoadPlan> entries;
     std::any load_context;
 
@@ -49,7 +51,8 @@ struct IndexLoadPlan {
 
     /** @brief Transfer cleanup responsibility, leaving the old plan empty. */
     IndexLoadPlan(IndexLoadPlan&& other) noexcept
-        : entries(std::move(other.entries)),
+        : worker_writes(other.worker_writes),
+          entries(std::move(other.entries)),
           load_context(std::move(other.load_context)) {
         other.entries.clear();
     }

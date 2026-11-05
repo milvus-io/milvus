@@ -464,6 +464,17 @@ func (t *LevelZeroCompactionTask) process(ctx context.Context, l0MemSize int64, 
 			mlog.Warn(context.TODO(), "L0 compaction splitAndWrite fail", mlog.Err(err))
 			return nil, err
 		}
+		// A successful BF pass also certifies targets with no matching Delete.
+		// Report those exact plan targets so Coord can advance their replay
+		// cursors without resampling a possibly changed segment collection.
+		for _, result := range batchResults {
+			delete(segmentBFs, result.GetSegmentID())
+		}
+		for _, segment := range batchSegments {
+			if _, noMatch := segmentBFs[segment.GetSegmentID()]; noMatch {
+				batchResults = append(batchResults, &datapb.CompactionSegment{SegmentID: segment.GetSegmentID()})
+			}
+		}
 
 		mlog.Info(context.TODO(), "L0 compaction finished one batch",
 			mlog.Int("batch no.", i),

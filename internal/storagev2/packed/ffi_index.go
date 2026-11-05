@@ -23,8 +23,9 @@ package packed
 import "C"
 
 import (
-	"path/filepath"
+	"io/fs"
 	"sort"
+	"strings"
 	"unsafe"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -37,23 +38,15 @@ import (
 // <basePath>/<ManifestIndexDir> round-trips back to its absolute form.
 const ManifestIndexDir = "_index"
 
-// ManifestIndexRelativePath expresses an absolute legacy index prefix relative
-// to the segment's manifest index directory. Index artifacts deliberately keep
-// their legacy object-storage layout outside the segment directory, so the
-// stored path normally walks back out of it; milvus-storage re-resolves it on
-// read.
-//
-// Because the walk escapes the segment directory, the resulting string encodes
-// the collection/partition/segment/build IDs of whoever built it. A manifest
-// copied verbatim to another segment therefore carries index entries that still
-// point at the ORIGINAL artifacts - the copier must re-derive them rather than
-// inherit them.
+// ManifestIndexRelativePath returns a path strictly inside this segment's
+// _index directory. New entries must never reference legacy external layouts.
 func ManifestIndexRelativePath(basePath, indexPrefix string) (string, error) {
-	relativePath, err := filepath.Rel(filepath.Join(basePath, ManifestIndexDir), indexPrefix)
-	if err != nil {
-		return "", merr.WrapErrServiceInternalErr(err, "failed to derive manifest index path")
+	prefix := strings.TrimRight(basePath, "/") + "/" + ManifestIndexDir + "/"
+	relative, ok := strings.CutPrefix(indexPrefix, prefix)
+	if basePath == "" || !ok || relative == "." || !fs.ValidPath(relative) {
+		return "", merr.WrapErrServiceInternalMsg("index artifact %s is outside segment index directory %s", indexPrefix, prefix)
 	}
-	return relativePath, nil
+	return relative, nil
 }
 
 // ManifestIndexInfo identifies a completed index artifact registered in a
@@ -64,14 +57,9 @@ func ManifestIndexRelativePath(basePath, indexPrefix string) (string, error) {
 // manifest transaction only makes the metadata visible atomically with a new
 // manifest revision; it never writes, moves, or deletes index files.
 //
-// Path is asymmetric across the FFI boundary. On write it is stored relative
-// to the segment's `<basePath>/_index` directory, so index artifacts that keep
-// their legacy layout outside the segment directory are expressed as a `..`
-// walk (see ManifestIndexRelativePath above); a full object key passed
-// here would be treated as relative and re-rooted under `_index` on read. On
-// read milvus-storage resolves the stored path back against that directory, so
-// GetManifestIndexInfos always returns the absolute artifact root and callers
-// can join IndexFileKeys onto it directly.
+// On write Path is relative to <basePath>/_index, without parent traversal.
+// On read storage resolves it to a complete artifact key. Existing legacy
+// entries can be read but cannot be added or updated with an external path.
 type ManifestIndexInfo struct {
 	ColumnName                string
 	IndexName                 string
@@ -197,6 +185,14 @@ func manifestIndexInfos(cManifest *C.LoonManifest, manifestPath string) ([]Manif
 // Every C allocation is released when this function returns, which is why the
 // per-index staging lives in its own function instead of a loop body.
 func stageIndexInfo(handle C.LoonTransactionHandle, index ManifestIndexInfo) error {
+	if index.Path == "." || !fs.ValidPath(index.Path) {
+		return merr.WrapErrServiceInternalMsg("manifest index %d requires a path inside _index: %s", index.IndexID, index.Path)
+	}
+	for _, key := range index.IndexFileKeys {
+		if key == "." || !fs.ValidPath(key) || strings.Contains(key, "/") {
+			return merr.WrapErrServiceInternalMsg("manifest index %d requires plain file names: %s", index.IndexID, key)
+		}
+	}
 	cColumnName := C.CString(index.ColumnName)
 	defer C.free(unsafe.Pointer(cColumnName))
 	cIndexName := C.CString(index.IndexName)

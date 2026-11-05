@@ -143,7 +143,7 @@ func recoverAllCollections(context.Context, int64) (bool, error) {
 // projectSegments builds a Projector returning a fixed loadable Segment set,
 // mimicking a SegmentMeta loadable projection (as datacoord provides).
 func projectSegments(segments ...LoadableSegment) Projector {
-	return func(_ context.Context, _ int64) ([]LoadableSegment, error) {
+	return func(_ context.Context, _ int64, _ *viewpb.DataViewOfCollection) ([]LoadableSegment, error) {
 		return segments, nil
 	}
 }
@@ -695,8 +695,9 @@ func TestManagerRecoveryAndDrop(t *testing.T) {
 		Shards: []*viewpb.DataViewOfShard{{
 			Vchannel: "ch-1",
 			Partitions: []*viewpb.DataViewOfPartition{{
-				PartitionId: 10,
-				SegmentIds:  []int64{100, 200},
+				PartitionId:             10,
+				SegmentIds:              []int64{100, 200},
+				SegmentManifestVersions: []int64{0, 0},
 			}},
 		}},
 	}))
@@ -958,6 +959,13 @@ func TestManagerRecoveryValidation(t *testing.T) {
 			CollectionId: 1,
 			DataVersion:  version(1, 0),
 			Shards: []*viewpb.DataViewOfShard{{Partitions: []*viewpb.DataViewOfPartition{{
+				SegmentIds: []int64{1},
+			}}}},
+		},
+		{
+			CollectionId: 1,
+			DataVersion:  version(1, 0),
+			Shards: []*viewpb.DataViewOfShard{{Partitions: []*viewpb.DataViewOfPartition{{
 				SegmentIds:              []int64{1, 2},
 				SegmentManifestVersions: []int64{1},
 			}}}},
@@ -1172,7 +1180,7 @@ func TestManagerAsyncRecomputeRequiresProjector(t *testing.T) {
 func TestManagerAsyncRecomputeRetriesFailedProjection(t *testing.T) {
 	ctx := context.Background()
 	calls := 0
-	manager := NewManager(&fakeDataViewCatalog{}, func(_ context.Context, _ int64) ([]LoadableSegment, error) {
+	manager := NewManager(&fakeDataViewCatalog{}, func(_ context.Context, _ int64, _ *viewpb.DataViewOfCollection) ([]LoadableSegment, error) {
 		calls++
 		if calls == 1 {
 			return nil, errors.New("transient projection failure")
@@ -1462,8 +1470,9 @@ func TestManagerRecoveryRestoresRowStats(t *testing.T) {
 		Shards: []*viewpb.DataViewOfShard{{
 			Vchannel: "ch-1",
 			Partitions: []*viewpb.DataViewOfPartition{{
-				PartitionId: 10,
-				SegmentIds:  []int64{100},
+				PartitionId:             10,
+				SegmentIds:              []int64{100},
+				SegmentManifestVersions: []int64{0},
 			}},
 		}},
 	}))

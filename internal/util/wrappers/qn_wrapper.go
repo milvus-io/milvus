@@ -116,6 +116,14 @@ func (qn *qnServerWrapper) QuerySegments(ctx context.Context, in *querypb.QueryR
 	return qn.QueryNode.QuerySegments(ctx, in)
 }
 
+func (qn *qnServerWrapper) Materialize(ctx context.Context, in *querypb.QueryRequest, opts ...grpc.CallOption) (*internalpb.MaterializeResults, error) {
+	return qn.QueryNode.Materialize(ctx, in)
+}
+
+func (qn *qnServerWrapper) MaterializeSegments(ctx context.Context, in *querypb.QueryRequest, opts ...grpc.CallOption) (*internalpb.MaterializeResults, error) {
+	return qn.QueryNode.MaterializeSegments(ctx, in)
+}
+
 func (qn *qnServerWrapper) QueryStreamSegments(ctx context.Context, in *querypb.QueryRequest, opts ...grpc.CallOption) (querypb.QueryNode_QueryStreamSegmentsClient, error) {
 	streamer := streamrpc.NewInMemoryStreamer[*internalpb.RetrieveResults](ctx, 16)
 
@@ -134,6 +142,10 @@ func (qn *qnServerWrapper) ShowConfigurations(ctx context.Context, in *internalp
 // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
 func (qn *qnServerWrapper) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
 	return qn.QueryNode.GetMetrics(ctx, in)
+}
+
+func (qn *qnServerWrapper) GetFeatureUsage(ctx context.Context, in *internalpb.GetFeatureUsageRequest, opts ...grpc.CallOption) (*internalpb.GetFeatureUsageResponse, error) {
+	return qn.QueryNode.GetFeatureUsage(ctx, in)
 }
 
 func (qn *qnServerWrapper) GetDataDistribution(ctx context.Context, in *querypb.GetDataDistributionRequest, opts ...grpc.CallOption) (*querypb.GetDataDistributionResponse, error) {

@@ -19,12 +19,15 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <vector>
+#include <variant>
+#include "cachinglayer/CacheSlot.h"
 
 #include "common/Types.h"
-#include "index/contracts/query/IIndexReaderBase.h"
+#include "index/contracts/IIndex.h"
 #include "index/contracts/query/IJsonIndexReader.h"
 #include "index/contracts/query/INullReader.h"
 
@@ -46,9 +49,9 @@ namespace milvus::index {
 // Immutable family state shared by root and path readers. Directory precedes
 // engine so a mapped Tantivy reader is destroyed before its owned staging
 // files. RAM states deliberately retain no directory.
-class JsonFlatIndexReaderState final {
+class JsonFlatIndexStorage final {
  public:
-    static std::shared_ptr<const JsonFlatIndexReaderState>
+    static std::unique_ptr<JsonFlatIndexStorage>
     Create(std::shared_ptr<storage::LocalDirectory> directory,
            std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine,
            std::string field_path_prefix,
@@ -72,6 +75,9 @@ class JsonFlatIndexReaderState final {
     int64_t
     FileBytes() const;
 
+    cachinglayer::ResourceUsage
+    CellByteSize() const;
+
     TargetBitmap
     FieldIsNull() const;
 
@@ -79,7 +85,7 @@ class JsonFlatIndexReaderState final {
     FieldIsNotNull() const;
 
  private:
-    JsonFlatIndexReaderState(
+    JsonFlatIndexStorage(
         std::shared_ptr<storage::LocalDirectory> directory,
         std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine,
         std::string field_path_prefix,
@@ -107,14 +113,53 @@ class JsonFlatIndexReaderState final {
     int64_t file_bytes_{0};
 };
 
+/** @brief Owns one immutable JSON field index independently of its readers. */
+class JsonFlatIndex final : public IIndex,
+                            public std::enable_shared_from_this<JsonFlatIndex> {
+ public:
+    explicit JsonFlatIndex(std::shared_ptr<const JsonFlatIndexStorage> storage);
+    JsonFlatIndex(
+        std::shared_ptr<cachinglayer::CacheSlot<JsonFlatIndexStorage>> slot,
+        std::optional<int64_t> count,
+        std::string root_path);
+
+    IndexMetadata
+    Metadata() const override;
+
+    IIndexReaderBasePtr
+    CreateReader(milvus::OpContext* op_ctx) const override;
+
+    void
+    CancelWarmup() const override;
+
+ private:
+    friend class JsonFlatIndexReader;
+    std::shared_ptr<const JsonFlatIndexStorage>
+    PinStorage(milvus::OpContext* op_ctx) const;
+    const std::string&
+    RootPath() const;
+    struct CachedStorage {
+        std::shared_ptr<cachinglayer::CacheSlot<JsonFlatIndexStorage>> slot;
+        std::optional<int64_t> count;
+        std::string root_path;
+    };
+    std::variant<std::shared_ptr<const JsonFlatIndexStorage>, CachedStorage>
+        storage_;
+};
+
 class JsonFlatIndexReader final : public IIndexReaderBase,
                                   public IJsonIndexReader,
                                   public INullReader {
  public:
     explicit JsonFlatIndexReader(
-        std::shared_ptr<const JsonFlatIndexReaderState> state);
+        std::shared_ptr<const JsonFlatIndexStorage> state);
 
     ~JsonFlatIndexReader() override;
+
+    void
+    Prefetch() const override {
+        (void)GetStorage();
+    }
 
     ReaderCaps
     Caps() const override;
@@ -127,12 +172,6 @@ class JsonFlatIndexReader final : public IIndexReaderBase,
 
     DataType
     ValueType() const override;
-
-    int64_t
-    MemoryUsage() const override;
-
-    cachinglayer::ResourceUsage
-    CellByteSize() const override;
 
     // Field-level validity. Path-bound readers intentionally expose a
     // different INullReader view: comparable values at that path.
@@ -162,7 +201,17 @@ class JsonFlatIndexReader final : public IIndexReaderBase,
     CastTypesOf(std::string_view path) const override;
 
  private:
-    std::shared_ptr<const JsonFlatIndexReaderState> state_;
+    friend class JsonFlatIndex;
+    JsonFlatIndexReader(std::shared_ptr<const JsonFlatIndex> index,
+                        milvus::OpContext* op_ctx);
+
+    std::shared_ptr<const JsonFlatIndex> index_;
+    milvus::OpContext* const op_ctx_;
+    mutable std::once_flag storage_once_;
+    mutable std::shared_ptr<const JsonFlatIndexStorage> storage_;
+
+    const std::shared_ptr<const JsonFlatIndexStorage>&
+    GetStorage() const;
 };
 
 }  // namespace milvus::index

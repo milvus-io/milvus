@@ -163,6 +163,35 @@ func TestWrap(t *testing.T) {
 	assert.False(t, IsRecoverable(err2))
 }
 
+func TestUnrecoverablePreservesStatus(t *testing.T) {
+	for _, cause := range []error{
+		merr.WrapErrParameterInvalidMsg("file resource missing not found"),
+		merr.ErrServiceInternal,
+		merr.ErrIoKeyNotFound,
+		merr.ErrIoPermissionDenied,
+		merr.ErrServiceUnavailable,
+		context.Canceled,
+		context.DeadlineExceeded,
+	} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			attempts := 0
+			err := Do(t.Context(), func() error {
+				attempts++
+				return merr.Wrap(Unrecoverable(cause), "fetch resource")
+			}, Attempts(3))
+			assert.Equal(t, 1, attempts)
+			assert.ErrorIs(t, err, cause)
+			assert.False(t, IsRecoverable(err))
+			assert.Equal(t, merr.Code(cause), merr.Code(err))
+			assert.Equal(t, merr.IsRetryableErr(cause), merr.IsRetryableErr(err))
+			assert.Equal(t, merr.GetErrorType(cause), merr.GetErrorType(err))
+			assert.Equal(t, merr.Status(merr.Wrap(cause, "fetch resource")), merr.Status(err))
+		})
+	}
+	assert.ErrorIs(t, Unrecoverable(nil), errUnrecoverable)
+	assert.False(t, IsRecoverable(Unrecoverable(nil)))
+}
+
 func TestRetryErrorParam(t *testing.T) {
 	{
 		mockErr := errors.New("mock not retry error")
@@ -288,4 +317,61 @@ func TestDo_InputErrorAbortsByDefault(t *testing.T) {
 
 	assert.ErrorIs(t, err, merr.ErrCollectionSchemaMismatch)
 	assert.Equal(t, 1, counter, "Do should abort on InputError without retrying")
+}
+
+// Once the attempts are used up, Do and Handle must return the last error
+// right away. Sleeping another backoff first only delays the caller, since no
+// retry follows it.
+func TestNoSleepAfterLastAttempt(t *testing.T) {
+	runners := map[string]func(fn func() error, opts ...Option) error{
+		"Do": func(fn func() error, opts ...Option) error {
+			return Do(context.Background(), fn, opts...)
+		},
+		"Handle": func(fn func() error, opts ...Option) error {
+			return Handle(context.Background(), func() (bool, error) {
+				return true, fn()
+			}, opts...)
+		},
+	}
+
+	for name, run := range runners {
+		t.Run(name, func(t *testing.T) {
+			calls := 0
+			mockErr := errors.New("mock error")
+			start := time.Now()
+			err := run(func() error {
+				calls++
+				return mockErr
+			}, Attempts(1), Sleep(10*time.Second))
+			assert.ErrorIs(t, err, mockErr)
+			assert.Equal(t, 1, calls)
+			assert.Less(t, time.Since(start), 5*time.Second)
+
+			// Two attempts sleep 1s between them, but not the 2s after the
+			// second one. The last attempt's error is returned.
+			calls = 0
+			start = time.Now()
+			err = run(func() error {
+				calls++
+				return fmt.Errorf("attempt %d failed", calls)
+			}, Attempts(2), Sleep(time.Second))
+			elapsed := time.Since(start)
+			assert.EqualError(t, err, "attempt 2 failed")
+			assert.Equal(t, 2, calls)
+			assert.GreaterOrEqual(t, elapsed, time.Second)
+			assert.Less(t, elapsed, 2500*time.Millisecond)
+
+			// AttemptAlways has no last attempt, so it keeps retrying.
+			calls = 0
+			err = run(func() error {
+				calls++
+				if calls < 4 {
+					return mockErr
+				}
+				return nil
+			}, AttemptAlways(), Sleep(time.Millisecond))
+			assert.NoError(t, err)
+			assert.Equal(t, 4, calls)
+		})
+	}
 }

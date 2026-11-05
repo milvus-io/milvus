@@ -283,10 +283,10 @@ VerifyNullableElementFullScanLogicalCount(
     ASSERT_EQ(struct_element_offsets->GetTotalElementCount(),
               expected_skipped_elements + expected_live_elements);
 
-    // DataGen keeps a physical payload for nullable ARRAY rows in growing
-    // storage even when the row validity bit is false. Sealed binlog
-    // serialization may discard that payload, but StructElementOffsets maps the NULL
-    // row to zero logical elements in either layout.
+    // DataGen keeps a physical payload for nullable ARRAY rows in the insert
+    // data even when the row validity bit is false. Storage does not keep it,
+    // but StructElementOffsets, which growing builds from the insert data,
+    // must still map the NULL row to zero logical elements.
     if (segment->type() == SegmentType::Sealed) {
         auto pw = segment->get_batch_views<ArrayView>(
             query_context->get_op_context(), array_fid, 0, 0, 2);
@@ -295,13 +295,12 @@ VerifyNullableElementFullScanLogicalCount(
         ASSERT_TRUE(valid);
         EXPECT_FALSE(valid[1]);
     } else {
-        auto pw = segment->chunk_data<Array>(
+        auto pw = segment->chunk_data<ArrayView>(
             query_context->get_op_context(), array_fid, 0);
         auto chunk = pw.get();
         ASSERT_EQ(chunk.row_count(), 2);
         ASSERT_TRUE(chunk.validity());
         EXPECT_FALSE(chunk.is_valid(1));
-        EXPECT_EQ(chunk.data()[1].length(), 2);
     }
     const auto null_row_range = struct_element_offsets->ElementIDRangeOfRow(1);
     EXPECT_EQ(null_row_range.first, null_row_range.second);
@@ -1697,8 +1696,8 @@ TEST(OffsetsEvalIndexOnlyCorrectnessTest,
         knowhere::Version::GetCurrentVersion().VersionNumber();
     load_index_info.index_params = GenIndexParams(scalar_index.get(), "sort");
     SetTestIndexMetadata(load_index_info, *scalar_index, "sort");
-    load_index_info.cache_index =
-        CreateTestCacheIndex("offset-index-only", std::move(scalar_index));
+    load_index_info.index =
+        CreateTestIndex("offset-index-only", std::move(scalar_index));
     segment->LoadIndex(load_index_info);
     segment->DropFieldData(value_fid);
     ASSERT_FALSE(segment->HasFieldData(value_fid));
@@ -1796,8 +1795,8 @@ TEST(OffsetsEvalIndexOnlyCorrectnessTest,
         knowhere::Version::GetCurrentVersion().VersionNumber();
     load_index_info.index_params = GenIndexParams(scalar_index.get(), "sort");
     SetTestIndexMetadata(load_index_info, *scalar_index, "sort");
-    load_index_info.cache_index =
-        CreateTestCacheIndex("snapshot-index-only", std::move(scalar_index));
+    load_index_info.index =
+        CreateTestIndex("snapshot-index-only", std::move(scalar_index));
     segment->LoadIndex(load_index_info);
     segment->DropFieldData(value_fid);
     ASSERT_FALSE(segment->HasFieldData(value_fid));
@@ -1934,8 +1933,8 @@ TEST(OffsetsEvalIndexOnlyCorrectnessTest,
         knowhere::Version::GetCurrentVersion().VersionNumber();
     load_index_info.index_params = GenIndexParams(scalar_index.get(), "sort");
     SetTestIndexMetadata(load_index_info, *scalar_index, "sort");
-    load_index_info.cache_index =
-        CreateTestCacheIndex("pinned-index-only", std::move(scalar_index));
+    load_index_info.index =
+        CreateTestIndex("pinned-index-only", std::move(scalar_index));
     segment->LoadIndex(load_index_info);
     segment->DropFieldData(value_fid);
     ASSERT_FALSE(segment->HasFieldData(value_fid));
@@ -2000,8 +1999,8 @@ TEST(OffsetsEvalIndexOnlyCorrectnessTest,
         knowhere::Version::GetCurrentVersion().VersionNumber();
     load_index_info.index_params = GenIndexParams(scalar_index.get(), "sort");
     SetTestIndexMetadata(load_index_info, *scalar_index, "sort");
-    load_index_info.cache_index = CreateTestCacheIndex(
-        "offset-timestamptz-index-only", std::move(scalar_index));
+    load_index_info.index = CreateTestIndex("offset-timestamptz-index-only",
+                                            std::move(scalar_index));
     segment->LoadIndex(load_index_info);
     segment->DropFieldData(timestamp_fid);
     ASSERT_FALSE(segment->HasFieldData(timestamp_fid));
@@ -2111,8 +2110,8 @@ TEST(OffsetsEvalIndexOnlyCorrectnessTest,
         knowhere::Version::GetCurrentVersion().VersionNumber();
     scalar_load_info.index_params = GenIndexParams(scalar_index.get(), "sort");
     SetTestIndexMetadata(scalar_load_info, *scalar_index, "sort");
-    scalar_load_info.cache_index =
-        CreateTestCacheIndex("p4-scalar-index", std::move(scalar_index));
+    scalar_load_info.index =
+        CreateTestIndex("p4-scalar-index", std::move(scalar_index));
     chunked->LoadIndex(scalar_load_info);
     chunked->DropFieldData(value_fid);
     ASSERT_FALSE(chunked->HasFieldData(value_fid));
@@ -2155,8 +2154,8 @@ TEST(OffsetsEvalIndexOnlyCorrectnessTest,
     SetTestIndexMetadata(
         vector_load_info, *indexing, index::families::kVectorMem);
     vector_load_info.field_type = indexing->ValueType();
-    vector_load_info.cache_index =
-        CreateTestCacheIndex("p4-vec-index", std::move(indexing));
+    vector_load_info.index =
+        CreateTestIndex("p4-vec-index", std::move(indexing));
     vector_load_info.index_params["metric_type"] = "L2";
     chunked->LoadIndex(vector_load_info);
     chunked->DropFieldData(vec_fid);

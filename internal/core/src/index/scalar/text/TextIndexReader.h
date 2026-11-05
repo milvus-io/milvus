@@ -19,10 +19,15 @@
 #include <cstdint>
 #include <cstddef>
 #include <memory>
+#include <mutex>
 #include <string_view>
 #include <vector>
+#include <variant>
+#include "cachinglayer/CacheSlot.h"
 
 #include "common/Types.h"
+#include "index/SharedValidityBitmap.h"
+#include "index/contracts/IIndex.h"
 #include "index/contracts/query/IIndexReaderBase.h"
 #include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/ITextMatchReader.h"
@@ -32,7 +37,7 @@ struct TantivyIndexWrapper;
 }
 
 // Text-match reader over a composed, stable tantivy snapshot. Construction and
-// loading are separate from querying. Null offsets are frozen with the same
+// loading are separate from querying. Validity is frozen with the same
 // snapshot so match results and SQL validity always share one row generation.
 
 namespace milvus::storage {
@@ -40,6 +45,93 @@ class LocalDirectory;
 }
 
 namespace milvus::index {
+
+/** @brief Owns a Tantivy snapshot, validity and its backing directory. */
+struct TextIndexStorage {
+    TextIndexStorage(
+        std::shared_ptr<storage::LocalDirectory> directory,
+        std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine,
+        std::shared_ptr<const std::vector<size_t>> null_offsets,
+        int64_t count,
+        DataType value_type,
+        bool file_backed,
+        size_t payload_bytes);
+
+    // Growing snapshots share complete words and own a private partial word.
+    TextIndexStorage(
+        std::shared_ptr<storage::LocalDirectory> directory,
+        std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine,
+        SharedValidityBitmap::Snapshot validity,
+        int64_t count,
+        DataType value_type,
+        bool file_backed,
+        size_t payload_bytes);
+
+    int64_t
+    MemoryUsage() const;
+    cachinglayer::ResourceUsage
+    CellByteSize() const;
+
+    // Destroy the engine before the optional mmap directory owner.
+    std::shared_ptr<storage::LocalDirectory> directory_;
+
+    // Composed immutable engine snapshot. Writer locks, commit timing, and append
+    // state belong to the growing owner, not this query reader.
+    std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine_;
+
+    SharedValidityBitmap::Snapshot validity_;
+
+    int64_t count_{0};
+    DataType value_type_{DataType::NONE};
+    bool file_backed_{false};
+    size_t payload_bytes_{0};
+};
+
+class TextIndexReader;
+
+/** @brief Shares a text storage version across request readers. */
+class TextIndex final : public IIndex,
+                        public std::enable_shared_from_this<TextIndex> {
+ public:
+    TextIndex(std::shared_ptr<storage::LocalDirectory> directory,
+              std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine,
+              std::shared_ptr<const std::vector<size_t>> null_offsets,
+              int64_t count,
+              DataType value_type,
+              bool file_backed,
+              size_t payload_bytes);
+
+    // Growing snapshots share complete words and own a private partial word.
+    TextIndex(std::shared_ptr<storage::LocalDirectory> directory,
+              std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine,
+              SharedValidityBitmap::Snapshot validity,
+              int64_t count,
+              DataType value_type,
+              bool file_backed,
+              size_t payload_bytes);
+
+    explicit TextIndex(std::shared_ptr<const TextIndexStorage> storage);
+    TextIndex(std::shared_ptr<cachinglayer::CacheSlot<TextIndexStorage>> slot,
+              IndexMetadata metadata);
+
+    IndexMetadata
+    Metadata() const override;
+    IIndexReaderBasePtr
+    CreateReader(milvus::OpContext* op_ctx) const override;
+    void
+    CancelWarmup() const override;
+
+ private:
+    friend class TextIndexReader;
+    std::shared_ptr<const TextIndexStorage>
+    PinStorage(milvus::OpContext* op_ctx) const;
+    struct CachedStorage {
+        std::shared_ptr<cachinglayer::CacheSlot<TextIndexStorage>> slot;
+        IndexMetadata metadata;
+    };
+    std::variant<std::shared_ptr<const TextIndexStorage>, CachedStorage>
+        storage_;
+};
 
 class TextIndexReader final : public IIndexReaderBase,
                               public ITextMatchReader,
@@ -57,6 +149,16 @@ class TextIndexReader final : public IIndexReaderBase,
         bool file_backed,
         size_t payload_bytes);
 
+    // Growing snapshots share complete words and own a private partial word.
+    TextIndexReader(
+        std::shared_ptr<storage::LocalDirectory> directory,
+        std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine,
+        SharedValidityBitmap::Snapshot validity,
+        int64_t count,
+        DataType value_type,
+        bool file_backed,
+        size_t payload_bytes);
+
     ~TextIndexReader() override;
 
     TextIndexReader(const TextIndexReader&) = delete;
@@ -64,6 +166,11 @@ class TextIndexReader final : public IIndexReaderBase,
     operator=(const TextIndexReader&) = delete;
 
     // ---- IIndexReaderBase ----------------------------------------
+
+    void
+    Prefetch() const override {
+        (void)GetStorage();
+    }
 
     ReaderCaps
     Caps() const override;
@@ -77,13 +184,7 @@ class TextIndexReader final : public IIndexReaderBase,
     DataType
     ValueType() const override;
 
-    int64_t
-    MemoryUsage() const override;
-
     // ---- Resource accounting -----------------------------------------------
-
-    cachinglayer::ResourceUsage
-    CellByteSize() const override;
 
     // ---- ITextMatchReader ----------------------------------------
 
@@ -106,31 +207,21 @@ class TextIndexReader final : public IIndexReaderBase,
     TargetBitmap
     IsNotNull() const override;
 
+    std::shared_ptr<const SharedValidityBitmap::Snapshot>
+    Validity() const;
+
  private:
-    // Allocates the result bitmap and installs the tantivy set-bit callback.
-    TargetBitmap
-    PrepareBitset() const;
+    friend class TextIndex;
+    TextIndexReader(std::shared_ptr<const TextIndex> index,
+                    milvus::OpContext* op_ctx);
 
-    // Destroy the engine before the optional mmap directory owner.
-    std::shared_ptr<storage::LocalDirectory> directory_;
+    std::shared_ptr<const TextIndex> index_;
+    milvus::OpContext* const op_ctx_;
+    mutable std::once_flag storage_once_;
+    mutable std::shared_ptr<const TextIndexStorage> storage_;
 
-    // Composed immutable engine snapshot. Writer locks, commit timing, and append
-    // state belong to the growing owner, not this query reader.
-    std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine_;
-
-    // Validity materialized once at construction instead of replaying the
-    // frozen null-offset vector on every IsNull/IsNotNull call, which sit on
-    // the query hot path. The offset vector is not retained: it would duplicate
-    // the same information at 8 bytes per null row. `all_valid_` leaves the
-    // bitmap empty rather than allocating rows/8 bytes of all-ones for a
-    // non-nullable field or a field with no nulls.
-    bool all_valid_{false};
-    TargetBitmap valid_bitmap_;
-
-    int64_t count_{0};
-    DataType value_type_{DataType::NONE};
-    bool file_backed_{false};
-    size_t payload_bytes_{0};
+    const std::shared_ptr<const TextIndexStorage>&
+    GetStorage() const;
 };
 
 }  // namespace milvus::index

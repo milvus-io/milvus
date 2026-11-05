@@ -2,6 +2,7 @@ package message
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"strings"
 	"sync"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -59,6 +61,44 @@ func isKmsKeyInvalidError(err error) bool {
 	// Check both errors.Is for local errors and string matching for errors
 	// that cross the plugin boundary (which lose type information)
 	return errors.Is(err, ErrKmsKeyInvalid) || strings.Contains(err.Error(), "kms key invalid")
+}
+
+// TryDecryptPayload makes one decryption attempt, leaving retries to the caller.
+// Terminal cipher failures panic as in Payload.
+func TryDecryptPayload(msg BasicMessage) ([]byte, error) {
+	wire := msg.IntoMessageProto()
+	header, ok := wire.Properties[messageCipherHeader]
+	if !ok {
+		return wire.Payload, nil
+	}
+	ch := &messagespb.CipherHeader{}
+	if err := DecodeProto(header, ch); err != nil {
+		panic(fmt.Sprintf("can not decode message payload: %s", err))
+	}
+	c, err := getCipher()
+	var payload []byte
+	if err == nil {
+		var decryptor hook.Decryptor
+		decryptor, err = c.GetDecryptor(ch.EzId, ch.CollectionId, ch.SafeKey)
+		if err == nil {
+			payload, err = decryptor.Decrypt(wire.Payload)
+		}
+	}
+	if err != nil {
+		if isKmsKeyInvalidError(err) {
+			return nil, errors.Mark(err, ErrKmsKeyInvalid)
+		}
+		if isRetryableCipherError(err) {
+			return nil, err
+		}
+		panic(fmt.Sprintf("can not decode message payload: %s", err))
+	}
+	return payload, nil
+}
+
+// IsRetryableCipherError shares the existing cipher retry classification with consumers.
+func IsRetryableCipherError(err error) bool {
+	return isRetryableCipherError(err)
 }
 
 // decryptPayloadWithRetry retries only recoverable cipher failures, before any

@@ -651,9 +651,7 @@ func materializeShippedDelta(t *testing.T, f *bumpFixture, seg *datapb.Compactio
 	delta := seg.GetManifestDelta()
 	require.NotNil(t, delta, "additive result must ship a manifest delta")
 	require.NotEmpty(t, delta.GetColumnGroups(), "shipped delta must carry the new column groups")
-	basePath, baseVersion, err := packed.UnmarshalManifestPath(seg.GetBaseManifest())
-	require.NoError(t, err)
-	manifest, err := packed.CommitManifestUpdates(basePath, baseVersion, f.cfg, &packed.ManifestUpdates{
+	manifest, err := packed.CommitManifestUpdates(seg.GetBaseManifest(), f.cfg, &packed.ManifestUpdates{
 		ColumnGroups: packed.ColumnGroupEntriesFromProto(delta.GetColumnGroups()),
 		Stats:        packed.StatEntriesFromProto(delta.GetStats()),
 	})
@@ -2734,7 +2732,7 @@ func TestBumpUTUnitAdditiveNoOutputFields(t *testing.T) {
 func TestBumpUTUnitNewV3WriterRejectsNonV3(t *testing.T) {
 	task := &bumpSchemaVersionCompactionTask{plan: &datapb.CompactionPlan{}}
 	_, err := task.newV3WriterResult(&schemapb.CollectionSchema{}, nil,
-		&datapb.CompactionSegmentBinlogs{StorageVersion: storage.StorageV2}, 1, "", 0)
+		&datapb.CompactionSegmentBinlogs{StorageVersion: storage.StorageV2}, 1, "")
 	require.Error(t, err)
 	require.ErrorContains(t, err, "requires a StorageV3 segment")
 }

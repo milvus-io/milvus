@@ -244,6 +244,12 @@ func (c *Client) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMe
 	})
 }
 
+func (c *Client) GetFeatureUsage(ctx context.Context, req *internalpb.GetFeatureUsageRequest, opts ...grpc.CallOption) (*internalpb.GetFeatureUsageResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*internalpb.GetFeatureUsageResponse, error) {
+		return client.GetFeatureUsage(ctx, req)
+	})
+}
+
 func (c *Client) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(

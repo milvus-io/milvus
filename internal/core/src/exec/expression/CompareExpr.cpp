@@ -37,7 +37,7 @@ namespace exec {
 
 bool
 PhyCompareFilterExpr::GatherValues(
-    const PinnedValueLookup& source,
+    const ValueLookupSource& source,
     DataType data_type,
     const int64_t* offsets,
     int64_t count,

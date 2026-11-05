@@ -16,6 +16,8 @@
 
 #include "index/scalar/bitmap/BitmapIndexReader.h"
 
+#include <mutex>
+
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -28,6 +30,7 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+#include <variant>
 
 #include <roaring/roaring.hh>
 
@@ -105,172 +108,270 @@ PostingMapHeapBytes(const BitmapPostingMap<K, Posting>& postings,
 }
 
 template <typename T, typename Posting>
+size_t
+Rank(const BitmapPostingStorage<T, Posting>& storage,
+     typename BitmapPostingMap<T, Posting>::const_iterator it) {
+    if (it == storage.postings.end()) {
+        return storage.range_keys.size();
+    }
+    const auto pos = std::lower_bound(
+        storage.range_keys.begin(),
+        storage.range_keys.end(),
+        it->first,
+        [](const T* key, const T& value) { return *key < value; });
+    return static_cast<size_t>(pos - storage.range_keys.begin());
+}
+
+// Unions [begin, end), or clears the postings outside it from a copy of the
+// valid bitset when fewer rows lie outside the range than inside it.
+template <typename T, typename Posting>
+TargetBitmap
+UnionKeyRange(const BitmapPostingStorage<T, Posting>& storage,
+              typename BitmapPostingMap<T, Posting>::const_iterator begin,
+              typename BitmapPostingMap<T, Posting>::const_iterator end) {
+    if constexpr (std::is_same_v<Posting, roaring::Roaring>) {
+        const auto& prefix = storage.range_prefix;
+        if (!prefix.empty()) {
+            const uint64_t inside =
+                prefix[Rank(storage, end)] - prefix[Rank(storage, begin)];
+            if (prefix.back() - inside < inside) {
+                auto result = storage.options.valid_bitset.clone();
+                for (auto it = storage.postings.begin(); it != begin; ++it) {
+                    ClearPosting(result, it->second);
+                }
+                for (auto it = end; it != storage.postings.end(); ++it) {
+                    ClearPosting(result, it->second);
+                }
+                return result;
+            }
+        }
+    }
+    TargetBitmap result(storage.options.total_num_rows, false);
+    for (auto it = begin; it != end; ++it) {
+        UnionPosting(result, it->second);
+    }
+    return result;
+}
+
+template <typename T, typename Posting>
+class BitmapIndexReaderImplCommon;
+
+template <typename T, typename Posting>
+class BitmapIndexReaderImpl;
+
+/** @brief Shares prepared bitmap storage across independent request views. */
+template <typename T, typename Posting>
+class BitmapIndexImpl final
+    : public IIndex,
+      public std::enable_shared_from_this<BitmapIndexImpl<T, Posting>> {
+ public:
+    using Storage = BitmapPostingStorage<owned_t<T>, Posting>;
+
+    explicit BitmapIndexImpl(std::shared_ptr<const Storage> storage)
+        : storage_(std::move(storage)) {
+        AssertInfo(
+            std::get<std::shared_ptr<const Storage>>(storage_) != nullptr,
+            "bitmap index requires storage");
+    }
+
+    BitmapIndexImpl(std::shared_ptr<cachinglayer::CacheSlot<Storage>> slot,
+                    IndexMetadata metadata)
+        : storage_(CachedStorage{std::move(slot), metadata}) {
+        AssertInfo(std::get<CachedStorage>(storage_).slot != nullptr,
+                   "bitmap index requires a cache slot");
+        AssertInfo(metadata.count && *metadata.count >= 0,
+                   "bitmap index requires a non-negative count");
+    }
+
+    IndexMetadata
+    Metadata() const override {
+        if (const auto* cached = std::get_if<CachedStorage>(&storage_)) {
+            return cached->metadata;
+        }
+        const auto& options =
+            std::get<std::shared_ptr<const Storage>>(storage_)->options;
+        return {ReaderCaps{.predicate = true,
+                           .pattern_match = std::is_same_v<T, std::string_view>,
+                           .nested = options.nested,
+                           .value_lookup = options.value_lookup,
+                           .cheap_value_lookup = options.offset_cache,
+                           .exact = !options.nested},
+                options.nested ? Domain::Element : Domain::Row,
+                options.value_type,
+                static_cast<int64_t>(options.total_num_rows)};
+    }
+
+    IIndexReaderBasePtr
+    CreateReader(milvus::OpContext* op_ctx) const override;
+
+    void
+    CancelWarmup() const override {
+        if (const auto* cached = std::get_if<CachedStorage>(&storage_)) {
+            cached->slot->CancelWarmup();
+        }
+    }
+
+ private:
+    friend class BitmapIndexReaderImplCommon<T, Posting>;
+    friend class ::milvus::index::JsonPathIndex;
+
+    std::shared_ptr<const Storage>
+    PinStorage(milvus::OpContext* op_ctx) const {
+        if (const auto* resident =
+                std::get_if<std::shared_ptr<const Storage>>(&storage_)) {
+            return *resident;
+        }
+        const auto& cached = std::get<CachedStorage>(storage_);
+        std::shared_ptr<const Storage> storage;
+        if (const auto* resident = cached.slot->TryBorrowCell(0)) {
+            storage = {cached.slot, resident};
+        } else {
+            auto pin =
+                cachinglayer::SemiInlineGet(cached.slot->PinCells(op_ctx, {0}));
+            const auto* cell = pin->get_ith_cell(0);
+            storage = {std::move(pin), cell};
+        }
+        AssertInfo(
+            storage != nullptr &&
+                storage->options.total_num_rows == *cached.metadata.count &&
+                storage->options.value_type == cached.metadata.value_type &&
+                storage->options.nested == cached.metadata.caps.nested &&
+                storage->options.value_lookup ==
+                    cached.metadata.caps.value_lookup &&
+                storage->options.offset_cache ==
+                    cached.metadata.caps.cheap_value_lookup,
+            "bitmap storage disagrees with index metadata");
+        return storage;
+    }
+
+    struct CachedStorage {
+        std::shared_ptr<cachinglayer::CacheSlot<Storage>> slot;
+        IndexMetadata metadata;
+    };
+    std::variant<std::shared_ptr<const Storage>, CachedStorage> storage_;
+};
+
+template <typename T, typename Posting>
 class BitmapIndexReaderImplCommon : public BitmapIndexReader<T> {
  public:
     using StoredT = owned_t<T>;
     using Storage = BitmapPostingStorage<StoredT, Posting>;
 
-    BitmapIndexReaderImplCommon(std::shared_ptr<const Storage> storage,
-                                BitmapReaderOptions options)
-        : storage_(std::move(storage)), options_(std::move(options)) {
-        AssertInfo(storage_ != nullptr,
-                   "bitmap reader requires posting storage");
-        AssertInfo(options_.valid_bitset.size() == options_.total_num_rows,
-                   "bitmap validity size {} does not match row count {}",
-                   options_.valid_bitset.size(),
-                   options_.total_num_rows);
-        if (options_.value_type == DataType::NONE) {
-            options_.value_type = CppDataType<T>();
-        }
-        options_.offset_cache = options_.offset_cache && options_.value_lookup;
-        if (options_.offset_cache) {
-            BuildOffsetCache();
-        }
-        // Complement range evaluation needs every valid row in exactly one
-        // posting: the loader enforces disjoint postings for value_lookup
-        // readers, and nested readers index element coordinates instead of
-        // rows. Frozen mmap and dense bitset layouts keep the forward path.
-        if constexpr (std::is_same_v<Posting, roaring::Roaring>) {
-            if (storage_->mmap_owner == nullptr && options_.value_lookup &&
-                !options_.nested) {
-                BuildRowPrefix();
-            }
-        }
+    BitmapIndexReaderImplCommon(
+        std::shared_ptr<const BitmapIndexImpl<T, Posting>> index,
+        milvus::OpContext* op_ctx)
+        : index_(std::move(index)), op_ctx_(op_ctx) {
+    }
+
+    void
+    Prefetch() const override {
+        (void)GetStorage();
     }
 
     ReaderCaps
     Caps() const override {
-        return ReaderCaps{.predicate = true,
-                          .pattern_match = std::is_same_v<T, std::string_view>,
-                          .nested = options_.nested,
-                          .value_lookup = options_.value_lookup,
-                          .cheap_value_lookup =
-                              options_.value_lookup && options_.offset_cache,
-                          .exact = !options_.nested};
+        return index_->Metadata().caps;
     }
 
     Domain
     CoordDomain() const override {
-        return options_.nested ? Domain::Element : Domain::Row;
+        return index_->Metadata().domain;
     }
 
     int64_t
     Count() const override {
-        return static_cast<int64_t>(options_.total_num_rows);
+        return *index_->Metadata().count;
     }
 
     DataType
     ValueType() const override {
-        return options_.value_type;
-    }
-
-    int64_t
-    MemoryUsage() const override {
-        auto total =
-            static_cast<int64_t>(options_.valid_bitset.size_in_bytes());
-        total += PostingMapHeapBytes(storage_->postings,
-                                     storage_->mmap_owner != nullptr);
-        total += static_cast<int64_t>(
-            offset_cache_.capacity() *
-            sizeof(typename decltype(offset_cache_)::value_type));
-        total +=
-            static_cast<int64_t>(keys_.capacity() * sizeof(const StoredT*) +
-                                 prefix_rows_.capacity() * sizeof(uint64_t));
-        return total;
-    }
-
-    cachinglayer::ResourceUsage
-    CellByteSize() const override {
-        return {MemoryUsage(),
-                storage_->mmap_owner == nullptr
-                    ? 0
-                    : static_cast<int64_t>(storage_->mmap_owner->Size())};
+        return index_->Metadata().value_type;
     }
 
     TargetBitmap
     In(size_t n, const T* values) const override {
-        AssertInfo(n == 0 || values != nullptr,
-                   "bitmap In received null values with non-zero count");
-        TargetBitmap result(options_.total_num_rows, false);
-        for (size_t i = 0; i < n; ++i) {
-            const auto it = storage_->postings.find(values[i]);
-            if (it != storage_->postings.end()) {
-                UnionPosting(result, it->second);
-            }
-        }
-        return result;
+        const auto& pin = GetStorage();
+        return InStorage(*pin, n, values);
     }
 
     TargetBitmap
     NotIn(size_t n, const T* values) const override {
-        auto result = In(n, values);
+        const auto& pin = GetStorage();
+        const auto& storage = *pin;
+        auto result = InStorage(storage, n, values);
         result.flip();
-        result &= options_.valid_bitset;
+        result &= storage.options.valid_bitset;
         return result;
     }
 
     TargetBitmap
     Range(const T& value, CompareOp op) const override {
+        const auto& pin = GetStorage();
+        const auto& storage = *pin;
         if (op == CompareOp::Equal) {
-            return In(1, &value);
+            return InStorage(storage, 1, &value);
         }
         if (op == CompareOp::NotEqual) {
-            auto result = In(1, &value);
+            auto result = InStorage(storage, 1, &value);
             result.flip();
-            result &= options_.valid_bitset;
+            result &= storage.options.valid_bitset;
             return result;
         }
 
-        auto begin = storage_->postings.begin();
-        auto end = storage_->postings.end();
+        auto begin = storage.postings.begin();
+        auto end = storage.postings.end();
         switch (op) {
             case CompareOp::LessThan:
-                end = storage_->postings.lower_bound(value);
+                end = storage.postings.lower_bound(value);
                 break;
             case CompareOp::LessEqual:
-                end = storage_->postings.upper_bound(value);
+                end = storage.postings.upper_bound(value);
                 break;
             case CompareOp::GreaterThan:
-                begin = storage_->postings.upper_bound(value);
+                begin = storage.postings.upper_bound(value);
                 break;
             case CompareOp::GreaterEqual:
-                begin = storage_->postings.lower_bound(value);
+                begin = storage.postings.lower_bound(value);
                 break;
             case CompareOp::Equal:
             case CompareOp::NotEqual:
                 break;
         }
-        return UnionKeyRange(begin, end);
+        return UnionKeyRange(storage, begin, end);
     }
 
     TargetBitmap
     Range(const T& lo, bool lo_inc, const T& hi, bool hi_inc) const override {
+        const auto& pin = GetStorage();
+        const auto& storage = *pin;
         if (hi < lo || (lo == hi && !(lo_inc && hi_inc))) {
-            return TargetBitmap(options_.total_num_rows, false);
+            return TargetBitmap(storage.options.total_num_rows, false);
         }
-        const auto begin = lo_inc ? storage_->postings.lower_bound(lo)
-                                  : storage_->postings.upper_bound(lo);
-        const auto end = hi_inc ? storage_->postings.upper_bound(hi)
-                                : storage_->postings.lower_bound(hi);
-        return UnionKeyRange(begin, end);
+        const auto begin = lo_inc ? storage.postings.lower_bound(lo)
+                                  : storage.postings.upper_bound(lo);
+        const auto end = hi_inc ? storage.postings.upper_bound(hi)
+                                : storage.postings.lower_bound(hi);
+        return UnionKeyRange(storage, begin, end);
     }
 
     std::optional<StoredT>
     Lookup(int64_t offset) const override {
-        if (!options_.value_lookup) {
+        const auto& storage = *GetStorage();
+        if (!storage.options.value_lookup) {
             return std::nullopt;
         }
-        AssertInfo(offset >= 0 &&
-                       static_cast<size_t>(offset) < options_.total_num_rows,
+        AssertInfo(offset >= 0 && static_cast<size_t>(offset) <
+                                      storage.options.total_num_rows,
                    "bitmap lookup offset {} is outside [0, {})",
                    offset,
-                   options_.total_num_rows);
+                   storage.options.total_num_rows);
         const auto coordinate = static_cast<size_t>(offset);
-        if (!options_.valid_bitset[coordinate]) {
+        if (!storage.options.valid_bitset[coordinate]) {
             return std::nullopt;
         }
-        const auto* value = options_.offset_cache ? offset_cache_[coordinate]
-                                                  : LookupPosting(coordinate);
+        const auto* value = storage.options.offset_cache
+                                ? storage.offset_cache[coordinate]
+                                : LookupPosting(storage, coordinate);
         if (value == nullptr) {
             return std::nullopt;
         }
@@ -282,18 +383,20 @@ class BitmapIndexReaderImplCommon : public BitmapIndexReader<T> {
            int64_t count,
            const std::function<void(int64_t i, const T*, bool valid)>& out)
         const override {
+        const auto& pin = GetStorage();
+        const auto& storage = *pin;
         AssertInfo(count >= 0 && (count == 0 || offsets != nullptr),
                    "bitmap Gather received invalid offsets/count");
-        if (!options_.value_lookup) {
+        if (!storage.options.value_lookup) {
             for (int64_t i = 0; i < count; ++i) {
                 out(i, nullptr, false);
             }
             return;
         }
 
-        auto values = options_.offset_cache
-                          ? GatherFromOffsetCache(offsets, count)
-                          : GatherFromPostings(offsets, count);
+        auto values = storage.options.offset_cache
+                          ? GatherFromOffsetCache(storage, offsets, count)
+                          : GatherFromPostings(storage, offsets, count);
         for (int64_t i = 0; i < count; ++i) {
             const auto* value = values[static_cast<size_t>(i)];
             if (value == nullptr) {
@@ -311,22 +414,28 @@ class BitmapIndexReaderImplCommon : public BitmapIndexReader<T> {
 
     TargetBitmap
     IsNull() const override {
-        auto result = options_.valid_bitset.clone();
+        const auto& pin = GetStorage();
+        const auto& storage = *pin;
+        auto result = storage.options.valid_bitset.clone();
         result.flip();
         return result;
     }
 
     TargetBitmap
     IsNotNull() const override {
-        return options_.valid_bitset.clone();
+        const auto& pin = GetStorage();
+        const auto& storage = *pin;
+        return storage.options.valid_bitset.clone();
     }
 
  protected:
     template <typename Matches>
     TargetBitmap
     MatchPostings(Matches&& matches) const {
-        TargetBitmap result(options_.total_num_rows, false);
-        for (const auto& [key, posting] : storage_->postings) {
+        const auto& pin = GetStorage();
+        const auto& storage = *pin;
+        TargetBitmap result(storage.options.total_num_rows, false);
+        for (const auto& [key, posting] : storage.postings) {
             if (matches(key)) {
                 UnionPosting(result, posting);
             }
@@ -342,102 +451,34 @@ class BitmapIndexReaderImplCommon : public BitmapIndexReader<T> {
     }
 
  private:
-    void
-    ValidateCoordinate(size_t coordinate, std::string_view operation) const {
-        AssertInfo(coordinate < options_.total_num_rows,
-                   "bitmap {} offset {} is outside [0, {})",
-                   operation,
-                   coordinate,
-                   options_.total_num_rows);
-    }
-
-    using PostingIter =
-        typename BitmapPostingMap<StoredT, Posting>::const_iterator;
-
-    // Unions [begin, end), or clears the postings outside it from a copy of
-    // the valid bitset when that is less work.
     TargetBitmap
-    UnionKeyRange(PostingIter begin, PostingIter end) const {
-        if constexpr (std::is_same_v<Posting, roaring::Roaring>) {
-            if (!prefix_rows_.empty() && PreferComplement(begin, end)) {
-                auto result = options_.valid_bitset.clone();
-                for (auto it = storage_->postings.begin(); it != begin; ++it) {
-                    ClearPosting(result, it->second);
-                }
-                for (auto it = end; it != storage_->postings.end(); ++it) {
-                    ClearPosting(result, it->second);
-                }
-                return result;
+    InStorage(const Storage& storage, size_t n, const T* values) const {
+        AssertInfo(n == 0 || values != nullptr,
+                   "bitmap In received null values with non-zero count");
+        TargetBitmap result(storage.options.total_num_rows, false);
+        for (size_t i = 0; i < n; ++i) {
+            const auto it = storage.postings.find(values[i]);
+            if (it != storage.postings.end()) {
+                UnionPosting(result, it->second);
             }
-        }
-        TargetBitmap result(options_.total_num_rows, false);
-        for (auto it = begin; it != end; ++it) {
-            UnionPosting(result, it->second);
         }
         return result;
     }
 
     void
-    BuildRowPrefix() {
-        keys_.reserve(storage_->postings.size());
-        prefix_rows_.reserve(storage_->postings.size() + 1);
-        prefix_rows_.push_back(0);
-        for (const auto& [key, posting] : storage_->postings) {
-            keys_.push_back(&key);
-            prefix_rows_.push_back(prefix_rows_.back() + posting.cardinality());
-        }
-    }
-
-    size_t
-    Rank(PostingIter it) const {
-        if (it == storage_->postings.end()) {
-            return keys_.size();
-        }
-        const auto pos =
-            std::lower_bound(keys_.begin(),
-                             keys_.end(),
-                             it->first,
-                             [](const StoredT* key, const StoredT& value) {
-                                 return *key < value;
-                             });
-        return static_cast<size_t>(pos - keys_.begin());
-    }
-
-    // Complement when fewer rows lie outside the range than inside it.
-    bool
-    PreferComplement(PostingIter begin, PostingIter end) const {
-        const uint64_t inside_rows =
-            prefix_rows_[Rank(end)] - prefix_rows_[Rank(begin)];
-        return prefix_rows_.back() - inside_rows < inside_rows;
-    }
-
-    void
-    BuildOffsetCache() {
-        offset_cache_.assign(options_.total_num_rows, nullptr);
-        for (const auto& [key, posting] : storage_->postings) {
-            if constexpr (std::is_same_v<Posting, roaring::Roaring>) {
-                for (auto coordinate : posting) {
-                    AssertInfo(coordinate < options_.total_num_rows,
-                               "bitmap posting coordinate {} exceeds count {}",
-                               coordinate,
-                               options_.total_num_rows);
-                    offset_cache_[coordinate] = &key;
-                }
-            } else {
-                for (size_t coordinate = 0;
-                     coordinate < options_.total_num_rows;
-                     ++coordinate) {
-                    if (posting[coordinate]) {
-                        offset_cache_[coordinate] = &key;
-                    }
-                }
-            }
-        }
+    ValidateCoordinate(const Storage& storage,
+                       size_t coordinate,
+                       std::string_view operation) const {
+        AssertInfo(coordinate < storage.options.total_num_rows,
+                   "bitmap {} offset {} is outside [0, {})",
+                   operation,
+                   coordinate,
+                   storage.options.total_num_rows);
     }
 
     const StoredT*
-    LookupPosting(size_t coordinate) const {
-        for (const auto& [key, posting] : storage_->postings) {
+    LookupPosting(const Storage& storage, size_t coordinate) const {
+        for (const auto& [key, posting] : storage.postings) {
             if (PostingContains(posting, coordinate)) {
                 return &key;
             }
@@ -446,52 +487,53 @@ class BitmapIndexReaderImplCommon : public BitmapIndexReader<T> {
     }
 
     std::vector<const StoredT*>
-    GatherFromOffsetCache(const int64_t* offsets, int64_t count) const {
+    GatherFromOffsetCache(const Storage& storage,
+                          const int64_t* offsets,
+                          int64_t count) const {
         std::vector<const StoredT*> values(static_cast<size_t>(count), nullptr);
         for (int64_t i = 0; i < count; ++i) {
             AssertInfo(offsets[i] >= 0,
                        "bitmap gather offset {} is outside [0, {})",
                        offsets[i],
-                       options_.total_num_rows);
+                       storage.options.total_num_rows);
             const auto coordinate = static_cast<size_t>(offsets[i]);
-            ValidateCoordinate(coordinate, "gather");
-            values[static_cast<size_t>(i)] = offset_cache_[coordinate];
+            ValidateCoordinate(storage, coordinate, "gather");
+            values[static_cast<size_t>(i)] = storage.offset_cache[coordinate];
         }
         return values;
     }
 
     std::vector<const StoredT*>
-    GatherFromPostings(const int64_t* offsets, int64_t count) const {
+    GatherFromPostings(const Storage& storage,
+                       const int64_t* offsets,
+                       int64_t count) const {
         std::vector<const StoredT*> values(static_cast<size_t>(count), nullptr);
         std::map<size_t, std::vector<int64_t>> wanted;
         for (int64_t i = 0; i < count; ++i) {
             AssertInfo(offsets[i] >= 0,
                        "bitmap gather offset {} is outside [0, {})",
                        offsets[i],
-                       options_.total_num_rows);
+                       storage.options.total_num_rows);
             const auto coordinate = static_cast<size_t>(offsets[i]);
-            ValidateCoordinate(coordinate, "gather");
-            if (options_.valid_bitset[coordinate]) {
-                wanted[coordinate].push_back(i);
+            ValidateCoordinate(storage, coordinate, "gather");
+            if (storage.options.valid_bitset[coordinate]) {
+                if constexpr (std::is_same_v<Posting, roaring::Roaring>) {
+                    // Sparse output requests must not enumerate a posting
+                    // proportional to the segment size. Probe keys in order
+                    // and keep the first match, as Lookup does.
+                    values[static_cast<size_t>(i)] =
+                        LookupPosting(storage, coordinate);
+                } else {
+                    wanted[coordinate].push_back(i);
+                }
             }
         }
 
-        for (const auto& [key, posting] : storage_->postings) {
-            if (wanted.empty()) {
-                break;
-            }
-            if constexpr (std::is_same_v<Posting, roaring::Roaring>) {
-                for (auto coordinate : posting) {
-                    auto match = wanted.find(coordinate);
-                    if (match == wanted.end()) {
-                        continue;
-                    }
-                    for (auto i : match->second) {
-                        values[static_cast<size_t>(i)] = &key;
-                    }
-                    wanted.erase(match);
+        if constexpr (!std::is_same_v<Posting, roaring::Roaring>) {
+            for (const auto& [key, posting] : storage.postings) {
+                if (wanted.empty()) {
+                    break;
                 }
-            } else {
                 for (auto match = wanted.begin(); match != wanted.end();) {
                     if (!posting[match->first]) {
                         ++match;
@@ -507,13 +549,17 @@ class BitmapIndexReaderImplCommon : public BitmapIndexReader<T> {
         return values;
     }
 
-    std::shared_ptr<const Storage> storage_;
-    BitmapReaderOptions options_;
-    std::vector<const StoredT*> offset_cache_;
-    // Keys in map order and prefix_rows_[i] = rows in the first i postings.
-    // Empty unless the complement path is allowed.
-    std::vector<const StoredT*> keys_;
-    std::vector<uint64_t> prefix_rows_;
+    const std::shared_ptr<const Storage>&
+    GetStorage() const {
+        std::call_once(storage_once_,
+                       [this] { storage_ = index_->PinStorage(op_ctx_); });
+        return storage_;
+    }
+
+    std::shared_ptr<const BitmapIndexImpl<T, Posting>> index_;
+    milvus::OpContext* const op_ctx_;
+    mutable std::once_flag storage_once_;
+    mutable std::shared_ptr<const Storage> storage_;
 };
 
 template <typename T, typename Posting>
@@ -567,7 +613,90 @@ class BitmapIndexReaderImpl final
     }
 };
 
+template <typename T, typename Posting>
+IIndexReaderBasePtr
+BitmapIndexImpl<T, Posting>::CreateReader(milvus::OpContext* op_ctx) const {
+    return std::make_unique<BitmapIndexReaderImpl<T, Posting>>(
+        this->shared_from_this(), op_ctx);
+}
+
 }  // namespace
+
+template <typename T, typename Posting>
+BitmapPostingStorage<T, Posting>::BitmapPostingStorage(
+    BitmapPostingMap<T, Posting> loaded_postings,
+    BitmapStorageOptions loaded_options,
+    std::shared_ptr<BitmapMmapOwner> owner)
+    : mmap_owner(std::move(owner)),
+      postings(std::move(loaded_postings)),
+      options(std::move(loaded_options)) {
+    AssertInfo(options.valid_bitset.size() == options.total_num_rows,
+               "bitmap validity size {} does not match row count {}",
+               options.valid_bitset.size(),
+               options.total_num_rows);
+    if (options.value_type == DataType::NONE) {
+        options.value_type = CppDataType<bitmap_query_t<T>>();
+    }
+    // Complement range evaluation needs every valid row in exactly one
+    // posting: the loader enforces disjoint postings for value_lookup
+    // readers, and nested readers index element coordinates instead of
+    // rows. Frozen mmap and dense bitset layouts keep the forward path.
+    if constexpr (std::is_same_v<Posting, roaring::Roaring>) {
+        if (mmap_owner == nullptr && options.value_lookup && !options.nested) {
+            range_keys.reserve(postings.size());
+            range_prefix.reserve(postings.size() + 1);
+            range_prefix.push_back(0);
+            for (const auto& [key, posting] : postings) {
+                range_keys.push_back(&key);
+                range_prefix.push_back(range_prefix.back() +
+                                       posting.cardinality());
+            }
+        }
+    }
+    options.offset_cache = options.offset_cache && options.value_lookup;
+    if (!options.offset_cache) {
+        return;
+    }
+    offset_cache.assign(options.total_num_rows, nullptr);
+    for (const auto& [key, posting] : postings) {
+        if constexpr (std::is_same_v<Posting, roaring::Roaring>) {
+            for (auto coordinate : posting) {
+                AssertInfo(coordinate < options.total_num_rows,
+                           "bitmap posting coordinate {} exceeds count {}",
+                           coordinate,
+                           options.total_num_rows);
+                offset_cache[coordinate] = &key;
+            }
+        } else {
+            for (size_t coordinate = 0; coordinate < options.total_num_rows;
+                 ++coordinate) {
+                if (posting[coordinate]) {
+                    offset_cache[coordinate] = &key;
+                }
+            }
+        }
+    }
+}
+
+template <typename T, typename Posting>
+cachinglayer::ResourceUsage
+BitmapPostingStorage<T, Posting>::CellByteSize() const {
+    auto total = static_cast<int64_t>(options.valid_bitset.size_in_bytes());
+    total += PostingMapHeapBytes(postings, mmap_owner != nullptr);
+    total += static_cast<int64_t>(offset_cache.capacity() * sizeof(const T*));
+    total += static_cast<int64_t>(range_keys.capacity() * sizeof(const T*) +
+                                  range_prefix.capacity() * sizeof(uint64_t));
+    if (json_exists) {
+        const auto bytes = static_cast<int64_t>(sizeof(TargetBitmap) +
+                                                json_exists->size_in_bytes());
+        AssertInfo(total <= std::numeric_limits<int64_t>::max() - bytes,
+                   "bitmap reader resource size exceeds int64 capacity");
+        total += bytes;
+    }
+    return {
+        total,
+        mmap_owner == nullptr ? 0 : static_cast<int64_t>(mmap_owner->Size())};
+}
 
 BitmapMmapOwner::BitmapMmapOwner(char* data, size_t size, std::string path)
     : data_(data), size_(size), path_(std::move(path)) {
@@ -593,50 +722,101 @@ BitmapMmapOwner::Size() const {
 }
 
 template <typename T>
-std::unique_ptr<BitmapIndexReader<bitmap_query_t<T>>>
-CreateBitmapIndexReader(BitmapRoaringPostingMap<T> postings,
-                        BitmapReaderOptions options,
-                        std::shared_ptr<BitmapMmapOwner> mmap_owner) {
-    using Storage = BitmapPostingStorage<T, roaring::Roaring>;
-    auto storage = std::make_shared<Storage>(Storage{
-        .mmap_owner = std::move(mmap_owner), .postings = std::move(postings)});
-    return CreateBitmapIndexReader<T>(std::move(storage), std::move(options));
+IndexPtr
+CreateBitmapIndex(BitmapRoaringPostingMap<T> postings,
+                  BitmapStorageOptions options,
+                  std::shared_ptr<BitmapMmapOwner> mmap_owner) {
+    return std::make_shared<
+        BitmapIndexImpl<bitmap_query_t<T>, roaring::Roaring>>(
+        std::make_shared<BitmapPostingStorage<T, roaring::Roaring>>(
+            std::move(postings), std::move(options), std::move(mmap_owner)));
+}
+
+template <typename T>
+IndexPtr
+CreateBitmapIndex(BitmapBitsetPostingMap<T> postings,
+                  BitmapStorageOptions options) {
+    return std::make_shared<BitmapIndexImpl<bitmap_query_t<T>, TargetBitmap>>(
+        std::make_shared<BitmapPostingStorage<T, TargetBitmap>>(
+            std::move(postings), std::move(options)));
 }
 
 template <typename T>
 std::unique_ptr<BitmapIndexReader<bitmap_query_t<T>>>
-CreateBitmapIndexReader(
-    std::shared_ptr<const BitmapPostingStorage<T, roaring::Roaring>> storage,
-    BitmapReaderOptions options) {
-    using QueryT = bitmap_query_t<T>;
-    return std::make_unique<BitmapIndexReaderImpl<QueryT, roaring::Roaring>>(
-        std::move(storage), std::move(options));
+CreateBitmapIndexReader(BitmapRoaringPostingMap<T> postings,
+                        BitmapStorageOptions options,
+                        std::shared_ptr<BitmapMmapOwner> mmap_owner) {
+    auto index = CreateBitmapIndex<T>(
+        std::move(postings), std::move(options), std::move(mmap_owner));
+    auto reader = index->CreateReader(nullptr);
+    return std::unique_ptr<BitmapIndexReader<bitmap_query_t<T>>>(
+        static_cast<BitmapIndexReader<bitmap_query_t<T>>*>(reader.release()));
 }
 
 template <typename T>
 std::unique_ptr<BitmapIndexReader<bitmap_query_t<T>>>
 CreateBitmapIndexReader(BitmapBitsetPostingMap<T> postings,
-                        BitmapReaderOptions options) {
-    using QueryT = bitmap_query_t<T>;
-    using Storage = BitmapPostingStorage<T, TargetBitmap>;
-    auto storage = std::make_shared<Storage>(
-        Storage{.mmap_owner = nullptr, .postings = std::move(postings)});
-    return std::make_unique<BitmapIndexReaderImpl<QueryT, TargetBitmap>>(
-        std::move(storage), std::move(options));
+                        BitmapStorageOptions options) {
+    auto index = CreateBitmapIndex<T>(std::move(postings), std::move(options));
+    auto reader = index->CreateReader(nullptr);
+    return std::unique_ptr<BitmapIndexReader<bitmap_query_t<T>>>(
+        static_cast<BitmapIndexReader<bitmap_query_t<T>>*>(reader.release()));
 }
 
+template <typename T, typename Posting>
+IndexPtr
+CreateBitmapIndex(std::unique_ptr<BitmapPostingStorage<T, Posting>> storage,
+                  std::optional<JsonProjectedIndexSpec> projection) {
+    auto index = std::make_shared<BitmapIndexImpl<bitmap_query_t<T>, Posting>>(
+        std::move(storage));
+    if (projection) {
+        return JsonPathIndex::FromStorage(std::move(index),
+                                          std::move(*projection));
+    }
+    return index;
+}
+
+template <typename T, typename Posting>
+IndexPtr
+CreateBitmapIndex(
+    std::shared_ptr<cachinglayer::CacheSlot<BitmapPostingStorage<T, Posting>>>
+        slot,
+    IndexMetadata metadata,
+    std::optional<JsonProjectedIndexSpec> projection) {
+    auto index = std::make_shared<BitmapIndexImpl<bitmap_query_t<T>, Posting>>(
+        std::move(slot), metadata);
+    if (projection) {
+        return JsonPathIndex::FromStorage(std::move(index),
+                                          std::move(*projection));
+    }
+    return index;
+}
+
+#define INSTANTIATE_BITMAP_STORAGE(T, P)                                      \
+    template struct BitmapPostingStorage<T, P>;                               \
+    template IndexPtr CreateBitmapIndex<T, P>(                                \
+        std::unique_ptr<BitmapPostingStorage<T, P>>,                          \
+        std::optional<JsonProjectedIndexSpec>);                               \
+    template IndexPtr CreateBitmapIndex<T, P>(                                \
+        std::shared_ptr<cachinglayer::CacheSlot<BitmapPostingStorage<T, P>>>, \
+        IndexMetadata,                                                        \
+        std::optional<JsonProjectedIndexSpec>);
+
 #define INSTANTIATE_BITMAP_READER(T)                                          \
+    INSTANTIATE_BITMAP_STORAGE(T, roaring::Roaring)                           \
+    INSTANTIATE_BITMAP_STORAGE(T, TargetBitmap)                               \
+    template IndexPtr CreateBitmapIndex<T>(BitmapRoaringPostingMap<T>,        \
+                                           BitmapStorageOptions,              \
+                                           std::shared_ptr<BitmapMmapOwner>); \
+    template IndexPtr CreateBitmapIndex<T>(BitmapBitsetPostingMap<T>,         \
+                                           BitmapStorageOptions);             \
     template std::unique_ptr<BitmapIndexReader<bitmap_query_t<T>>>            \
         CreateBitmapIndexReader<T>(BitmapRoaringPostingMap<T>,                \
-                                   BitmapReaderOptions,                       \
+                                   BitmapStorageOptions,                      \
                                    std::shared_ptr<BitmapMmapOwner>);         \
     template std::unique_ptr<BitmapIndexReader<bitmap_query_t<T>>>            \
-        CreateBitmapIndexReader<T>(                                           \
-            std::shared_ptr<const BitmapPostingStorage<T, roaring::Roaring>>, \
-            BitmapReaderOptions);                                             \
-    template std::unique_ptr<BitmapIndexReader<bitmap_query_t<T>>>            \
         CreateBitmapIndexReader<T>(BitmapBitsetPostingMap<T>,                 \
-                                   BitmapReaderOptions);
+                                   BitmapStorageOptions);
 
 INSTANTIATE_BITMAP_READER(bool)
 INSTANTIATE_BITMAP_READER(int8_t)
@@ -648,5 +828,6 @@ INSTANTIATE_BITMAP_READER(double)
 INSTANTIATE_BITMAP_READER(std::string)
 
 #undef INSTANTIATE_BITMAP_READER
+#undef INSTANTIATE_BITMAP_STORAGE
 
 }  // namespace milvus::index

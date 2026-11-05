@@ -32,6 +32,7 @@ service Proxy {
 
   rpc GetSegmentsInfo(internal.GetSegmentsInfoRequest) returns (internal.GetSegmentsInfoResponse) {}
   rpc GetQuotaMetrics(internal.GetQuotaMetricsRequest) returns (internal.GetQuotaMetricsResponse) {}
+  rpc GetFeatureUsage(internal.GetFeatureUsageRequest) returns (internal.GetFeatureUsageResponse) {}
   rpc ClearReadTaskQueue(internal.ClearReadTaskQueueRequest) returns (internal.ClearReadTaskQueueResponse) {}
   rpc SyncFileResource(internal.SyncFileResourceRequest) returns (common.Status) {}
 }
@@ -68,6 +69,9 @@ message RefreshPolicyInfoCacheRequest {
   common.MsgBase base = 1;
   int32 opType = 2;
   string opKey = 3;
+  // Partial replacement for affected roles. Absent on legacy grant/revoke
+  // notifications: receivers must fall back to coordinator visibility checks.
+  internal.CollectionVisibilitySnapshot collection_visibility = 4;
 }
 
 // Deprecated: use ClusterLimiter instead it

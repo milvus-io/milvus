@@ -20,7 +20,6 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
@@ -50,49 +49,6 @@ func (n *mockTaskNode) LBPolicy() shardclient.LBPolicy       { return n.lbPolicy
 func (n *mockTaskNode) ShardMgr() shardclient.ShardClientMgr { return nil }
 func (n *mockTaskNode) ChMgr() channelmgr.ChannelsMgr        { return n.chMgr }
 func (n *mockTaskNode) TsoAllocator() taskmodel.TsoAllocator { return nil }
-func (n *mockTaskNode) ResolveRLSEnforcement(ctx context.Context, _ metacache.Cache, rlsEnabled, rlsForce, skipRLS bool, _, _, _ string) (bool, error) {
-	if !rlsEnabled || !skipRLS {
-		return rlsEnabled, nil
-	}
-	if rlsForce {
-		return false, merr.WrapErrPrivilegeNotPermitted(
-			"%s operation denied by RLS: skip_rls is not allowed when rls.force is enabled on collection %s",
-			"import", "")
-	}
-	return false, nil
-}
-
-func (n *mockTaskNode) CheckManageRLSPrivilege(ctx context.Context, _ metacache.Cache, _ *milvuspb.AlterCollectionRequest, dbName, collectionName string) error {
-	if !paramtable.Get().CommonCfg.AuthorizationEnabled.GetAsBool() {
-		return nil
-	}
-	privilegeName := commonpb.ObjectPrivilege_PrivilegeManageRLS.String()
-	username, _, err := contextutil.GetAuthInfoFromContext(ctx)
-	if err != nil {
-		return merr.WrapErrPrivilegeNotAuthenticated("fail to get authentication info: %v", err)
-	}
-	if !paramtable.Get().CommonCfg.RootShouldBindRole.GetAsBool() && username == util.UserRoot {
-		return nil
-	}
-	roleNames := privilege.GetPrivilegeCache().GetUserRole(username)
-	roleNames = append(roleNames, util.RolePublic)
-	object := funcutil.PolicyForResource(dbName, commonpb.ObjectType_Collection.String(), collectionName)
-	enforcer := privilege.GetEnforcer()
-	for _, roleName := range roleNames {
-		isPermit, cached, version := privilege.GetResultCache(roleName, object, privilegeName)
-		if !cached {
-			isPermit, err = enforcer.Enforce(roleName, object, privilegeName)
-			if err != nil {
-				return err
-			}
-			privilege.SetResultCache(roleName, object, privilegeName, isPermit, version)
-		}
-		if isPermit {
-			return nil
-		}
-	}
-	return merr.WrapErrPrivilegeNotPermitted("%s is required", privilegeName)
-}
 
 func (n *mockTaskNode) CheckClusterPrivilege(ctx context.Context, _ interface{}, _ string, objectPrivilege string) error {
 	if !paramtable.Get().CommonCfg.AuthorizationEnabled.GetAsBool() {

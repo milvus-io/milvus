@@ -57,12 +57,6 @@ const (
 	// PrivilegeGroupPrefix prefix for privilege group
 	PrivilegeGroupPrefix = ComponentPrefix + "/privilege-group"
 
-	// RLSPolicyMetaPrefix prefix for row-level security policies
-	RLSPolicyMetaPrefix = ComponentPrefix + "/rls/policy"
-
-	// RLSPrincipalMetaPrefix prefix for row-level security principals
-	RLSPrincipalMetaPrefix = ComponentPrefix + "/rls/principal"
-
 	// FileResourceMetaPrefix prefix for file resource meta
 	FileResourceMetaPrefix = ComponentPrefix + "/file_resource_info"
 	FileResourceVersionKey = ComponentPrefix + "/file_resource_version"
@@ -89,18 +83,6 @@ func getDatabasePrefix(dbID int64) string {
 
 func BuildPrivilegeGroupkey(groupName string) string {
 	return fmt.Sprintf("%s/%s", PrivilegeGroupPrefix, groupName)
-}
-
-func BuildRLSPolicyPrefix(collectionID int64) string {
-	return fmt.Sprintf("%s/%d/", RLSPolicyMetaPrefix, collectionID)
-}
-
-func BuildRLSPolicyKey(collectionID int64, policyID int64) string {
-	return fmt.Sprintf("%s%d", BuildRLSPolicyPrefix(collectionID), policyID)
-}
-
-func BuildRLSPrincipalPrefix(collectionID int64) string {
-	return fmt.Sprintf("%s/%d/", RLSPrincipalMetaPrefix, collectionID)
 }
 
 // Legacy snapshot utilities — kept for migration tool compatibility only.

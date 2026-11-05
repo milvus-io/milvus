@@ -22,6 +22,7 @@ package testcases
 import (
 	"fmt"
 	"math/rand"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -451,7 +452,7 @@ func TestStructArrayPathReplaceVariants(t *testing.T) {
 
 	err = upsertStructArrayPathReplace(t, ctx, mc, collName, labelAndScoreSchema,
 		map[string]any{"label": []string{"subset"}, "score": []float32{8.8}}, "[2]")
-	require.ErrorContains(t, err, "requires all struct children")
+	require.ErrorContains(t, err, `sub-field "clips[embedding]" of struct field "clips" is required`)
 	require.Equal(t, want, queryStructArrayPathReplaceState(t, ctx, mc, collName))
 
 	fullVector := entity.FloatVector{7.1, 7.2, 7.3, 7.4}
@@ -490,7 +491,7 @@ func TestStructArrayPathReplaceRejectsInvalidRequestsWithoutMutation(t *testing.
 			operandSchema: labelSchema,
 			operand:       map[string]any{"label": []string{"unchanged"}},
 			path:          "[0]",
-			contains:      "requires all struct children",
+			contains:      `sub-field "clips[embedding]" of struct field "clips" is required`,
 		},
 		{
 			name:          "unknown child",
@@ -1222,6 +1223,126 @@ func TestStructArrayUpsertData(t *testing.T) {
 		WithConsistencyLevel(entity.ClStrong))
 	common.CheckErr(t, err, true)
 	require.EqualValues(t, 5, rs2.ResultCount)
+}
+
+// TestStructArrayPartialUpsertMixedNullableStruct covers a partial upsert that
+// omits a nullable struct field while the batch holds both existing rows, some
+// with a null struct, and new primary keys.
+func TestStructArrayPartialUpsertMixedNullableStruct(t *testing.T) {
+	const dim = 4
+	type clipRow struct {
+		embeddings [][]float32
+		labels     []string
+		nums       []int64
+	}
+	testCases := []struct {
+		name    string
+		sealed  []int64
+		growing []int64
+		nullIDs []int64
+		newIDs  []int64
+	}{
+		{name: "null_and_valid_rows", sealed: []int64{0, 1, 2}, growing: []int64{3, 4}, nullIDs: []int64{1, 3}, newIDs: []int64{5, 6}},
+		{name: "all_rows_null", sealed: []int64{0}, growing: []int64{1}, nullIDs: []int64{0, 1}, newIDs: []int64{2}},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+			mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+			collName := common.GenRandomString(hp.StructArrayPrefix+"_partial_mixed", 6)
+			structSchema := entity.NewStructSchema().
+				WithField(entity.NewField().WithName("embedding").WithDataType(entity.FieldTypeFloatVector).WithDim(dim)).
+				WithField(entity.NewField().WithName("label").WithDataType(entity.FieldTypeVarChar).WithMaxLength(128)).
+				WithField(entity.NewField().WithName("num").WithDataType(entity.FieldTypeInt64))
+			schema := entity.NewSchema().WithName(collName).
+				WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+				WithField(entity.NewField().WithName("normal_vector").WithDataType(entity.FieldTypeFloatVector).WithDim(dim)).
+				WithField(entity.NewField().WithName("score").WithDataType(entity.FieldTypeInt64)).
+				WithField(entity.NewField().WithName("clips").WithDataType(entity.FieldTypeArray).
+					WithElementType(entity.FieldTypeStruct).WithMaxCapacity(100).
+					WithStructSchema(structSchema).WithNullable(true))
+			common.CheckErr(t, mc.CreateCollection(ctx,
+				client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong)), true)
+
+			expected := make(map[int64]*clipRow)
+			insert := func(ids []int64) {
+				vectors := make([][]float32, len(ids))
+				rows := make([]map[string]any, len(ids))
+				for i, id := range ids {
+					vectors[i] = hp.RandFloatVector(dim)
+					if slices.Contains(tc.nullIDs, id) {
+						expected[id] = nil
+						continue
+					}
+					clip := &clipRow{}
+					for j := int64(0); j <= id%3; j++ {
+						clip.embeddings = append(clip.embeddings, hp.RandFloatVector(dim))
+						clip.labels = append(clip.labels, fmt.Sprintf("label_%d_%d", id, j))
+						clip.nums = append(clip.nums, id*10+j)
+					}
+					expected[id] = clip
+					rows[i] = map[string]any{"embedding": clip.embeddings, "label": clip.labels, "num": clip.nums}
+				}
+				_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(collName).
+					WithInt64Column("id", ids).
+					WithFloatVectorColumn("normal_vector", dim, vectors).
+					WithInt64Column("score", ids).
+					WithStructArrayColumn("clips", structSchema, rows))
+				common.CheckErr(t, err, true)
+			}
+			insert(tc.sealed)
+			loadStructArrayMutationCollection(t, ctx, mc, collName)
+			insert(tc.growing)
+
+			upsertIDs := append(append(append([]int64{}, tc.sealed...), tc.growing...), tc.newIDs...)
+			upsertVectors := make([][]float32, len(upsertIDs))
+			scores := make([]int64, len(upsertIDs))
+			for i, id := range upsertIDs {
+				upsertVectors[i] = hp.RandFloatVector(dim)
+				scores[i] = id + 1000
+			}
+			_, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(collName).
+				WithInt64Column("id", upsertIDs).
+				WithFloatVectorColumn("normal_vector", dim, upsertVectors).
+				WithInt64Column("score", scores).
+				WithPartialUpdate(true))
+			common.CheckErr(t, err, true)
+			for _, id := range tc.newIDs {
+				expected[id] = nil
+			}
+
+			result, err := mc.Query(ctx, client.NewQueryOption(collName).
+				WithFilter("id >= 0").
+				WithOutputFields("id", "score", "clips").
+				WithConsistencyLevel(entity.ClStrong))
+			common.CheckErr(t, err, true)
+			require.Equal(t, len(upsertIDs), result.ResultCount)
+			for i := 0; i < result.ResultCount; i++ {
+				id, err := result.GetColumn("id").GetAsInt64(i)
+				require.NoError(t, err)
+				score, err := result.GetColumn("score").GetAsInt64(i)
+				require.NoError(t, err)
+				require.Equal(t, id+1000, score, "id %d", id)
+				value, err := result.GetColumn("clips").Get(i)
+				require.NoError(t, err)
+				want, ok := expected[id]
+				require.True(t, ok, "unexpected id %d", id)
+				if want == nil {
+					require.Nil(t, value, "id %d", id)
+					continue
+				}
+				got := value.(map[string]any)
+				require.Equal(t, want.labels, got["label"], "id %d", id)
+				require.Equal(t, want.nums, got["num"], "id %d", id)
+				embeddings := got["embedding"].([]entity.FloatVector)
+				require.Len(t, embeddings, len(want.embeddings), "id %d", id)
+				for j, embedding := range embeddings {
+					require.Equal(t, want.embeddings[j], []float32(embedding), "id %d", id)
+				}
+			}
+		})
+	}
 }
 
 // TestStructArrayDeleteData ports test_delete_struct_array_data.

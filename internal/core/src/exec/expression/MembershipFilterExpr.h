@@ -194,6 +194,13 @@ class PhyMembershipFilterExpr : public SegmentExpr {
     // assert. No membership kind can push its structure into a scalar index,
     // so the index is never used to accelerate the scan — only to recover
     // values on the index-only fallback.
+    // Raw data is the designed path whenever it exists; an index on the field
+    // is not declined.
+    bool
+    ReportsIndexDecline() const override {
+        return false;
+    }
+
     void
     DetermineExecPath() override {
         if (has_field_data_at_init_) {
@@ -208,7 +215,7 @@ class PhyMembershipFilterExpr : public SegmentExpr {
         // advertises a cheap per-row lookup.
         auto req = MakeIndexRequirement(RequiredReader::ValueLookup);
         req.value_type = expr_->column_.data_type_;
-        if (SelectAndPinIndex(req) && IndexSupportsReverseLookup()) {
+        if (SelectAndCreateIndexReader(req) && IndexSupportsReverseLookup()) {
             return;
         }
         ClearSelectedIndex();

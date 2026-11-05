@@ -18,9 +18,8 @@ type recordingTransformHandler struct {
 	done   chan struct{}
 }
 
-func (h *recordingTransformHandler) Handle(event wal.TransformLogStreamEvent) error {
+func (h *recordingTransformHandler) Handle(event wal.TransformLogStreamEvent) {
 	h.events <- event
-	return nil
 }
 func (h *recordingTransformHandler) Close() { close(h.done) }
 func newRecordingTransformHandler() *recordingTransformHandler {
@@ -84,7 +83,6 @@ func TestQueryStreamStartsAtRetainedBoundary(t *testing.T) {
 				require.Equal(t, uint64(20), nextTransformEvent(t, handler).Entry.GetTimeTick())
 			}
 			event := nextTransformEvent(t, handler)
-			require.NoError(t, event.Err)
 			require.NotNil(t, event.SyncUp)
 			require.Equal(t, end, event.SyncUp.TimeTick)
 			select {
@@ -121,7 +119,8 @@ func TestQueryStreamResumesAfterGC(t *testing.T) {
 	require.Equal(t, uint64(30), nextTransformEvent(t, handler).Entry.GetTimeTick())
 	require.Equal(t, uint64(30), nextTransformEvent(t, handler).SyncUp.TimeTick)
 	require.NoError(t, stream.Close())
-	require.ErrorIs(t, nextTransformEvent(t, handler).Err, context.Canceled)
+	require.ErrorIs(t, stream.Error(), context.Canceled)
+	require.Empty(t, handler.events)
 	_, err = stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{VChannel: "v1", Handler: handler})
 	require.ErrorIs(t, err, context.Canceled)
 }

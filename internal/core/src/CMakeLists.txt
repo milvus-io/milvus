@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-if(MILVUS_GPU_VERSION STREQUAL "ON")
+if(WITH_GPU AND NOT INDEX_ENGINE STREQUAL "cardinal")
     project(core CXX C CUDA)
 else()
     project(core CXX C)
@@ -98,6 +98,7 @@ endif()
 add_subdirectory( pb )
 add_subdirectory( config )
 add_subdirectory( common )
+add_subdirectory( grep )
 add_subdirectory( mmap )
 add_subdirectory( monitor )
 add_subdirectory( storage )
@@ -174,6 +175,7 @@ add_library(milvus_core SHARED
     $<TARGET_OBJECTS:milvus_pb>
     $<TARGET_OBJECTS:milvus_config>
     $<TARGET_OBJECTS:milvus_common>
+    $<TARGET_OBJECTS:milvus_grep>
     $<TARGET_OBJECTS:milvus_mmap>
     $<TARGET_OBJECTS:milvus_monitor>
     $<TARGET_OBJECTS:milvus_storage>
@@ -213,5 +215,9 @@ if (ENABLE_GCP_NATIVE)
 endif()
 
 target_link_libraries(milvus_core ${LINK_TARGETS})
+milvus_check_aws_runtime(milvus_core)
+if(TARGET milvus-storage_aws_runtime_check)
+    add_dependencies(milvus_core milvus-storage_aws_runtime_check)
+endif()
 
 install(TARGETS milvus_core DESTINATION "${CMAKE_INSTALL_LIBDIR}")

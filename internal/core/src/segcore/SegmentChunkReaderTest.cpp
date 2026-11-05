@@ -281,17 +281,32 @@ class ReaderStringColumn : public ChunkedVariableColumn<std::string> {
     }
 
  protected:
-    TakeCellPin
-    MakeTakeCellPin(milvus::OpContext* ctx) const override {
-        auto pin = ChunkedVariableColumn::MakeTakeCellPin(ctx);
-        return [pin = std::move(pin), stats = stats_](int64_t chunk) {
+    TakeCellAccess
+    MakeTakeCellAccess(
+        milvus::OpContext* ctx,
+        const std::vector<int64_t>* batch_cell_ids = nullptr) const override {
+        if (batch_cell_ids != nullptr) {
+            if (!batch_cell_ids->empty()) {
+                if (stats_->fail_pin) {
+                    ThrowInfo(ErrorCode::FileReadFailed,
+                              "injected string Take failure");
+                }
+                ++stats_->pins;
+            }
+            return ChunkedVariableColumn::MakeTakeCellAccess(ctx,
+                                                             batch_cell_ids);
+        }
+        auto access =
+            ChunkedVariableColumn::MakeTakeCellAccess(ctx, batch_cell_ids);
+        return TakeCellPin([pin = std::move(std::get<TakeCellPin>(access)),
+                            stats = stats_](int64_t chunk) {
             if (stats->fail_pin) {
                 ThrowInfo(ErrorCode::FileReadFailed,
                           "injected string Take failure");
             }
             ++stats->pins;
             return pin(chunk);
-        };
+        });
     }
 
  private:
@@ -312,19 +327,25 @@ class ReaderStringSegment : public ChunkedSegmentSealedImpl {
         return Column(field);
     }
     int64_t
-    num_chunk_data(FieldId field) const override {
+    num_chunk_data(FieldId field, OpContext* = nullptr) const override {
         return Column(field)->num_chunks();
     }
     int64_t
-    chunk_size(FieldId field, int64_t chunk) const override {
+    chunk_size(FieldId field,
+               int64_t chunk,
+               OpContext* = nullptr) const override {
         return Column(field)->chunk_row_nums(chunk);
     }
     int64_t
-    num_rows_until_chunk(FieldId field, int64_t chunk) const override {
+    num_rows_until_chunk(FieldId field,
+                         int64_t chunk,
+                         OpContext* = nullptr) const override {
         return Column(field)->GetNumRowsUntilChunk(chunk);
     }
     std::pair<int64_t, int64_t>
-    get_chunk_by_offset(FieldId field, int64_t offset) const override {
+    get_chunk_by_offset(FieldId field,
+                        int64_t offset,
+                        OpContext* = nullptr) const override {
         return Column(field)->GetChunkIDByOffset(offset);
     }
     int64_t
@@ -367,19 +388,23 @@ class ReaderStringSnapshot : public SegmentReadSnapshot {
         : column_(std::move(column)) {
     }
     int64_t
-    chunk_size(FieldId, int64_t chunk) const override {
+    chunk_size(FieldId, int64_t chunk, OpContext* = nullptr) const override {
         return column_->chunk_row_nums(chunk);
     }
     int64_t
-    num_rows_until_chunk(FieldId, int64_t chunk) const override {
+    num_rows_until_chunk(FieldId,
+                         int64_t chunk,
+                         OpContext* = nullptr) const override {
         return column_->GetNumRowsUntilChunk(chunk);
     }
     std::pair<int64_t, int64_t>
-    get_chunk_by_offset(FieldId, int64_t offset) const override {
+    get_chunk_by_offset(FieldId,
+                        int64_t offset,
+                        OpContext* = nullptr) const override {
         return column_->GetChunkIDByOffset(offset);
     }
     int64_t
-    num_chunk_data(FieldId) const override {
+    num_chunk_data(FieldId, OpContext* = nullptr) const override {
         return column_->num_chunks();
     }
     int64_t
@@ -390,6 +415,11 @@ class ReaderStringSnapshot : public SegmentReadSnapshot {
     GetDataScanResources(FieldId) const override {
         ++column_reads;
         return {column_, FieldSkipMetricsView{}};
+    }
+    std::shared_ptr<const IStructElementOffsets>
+    GetStructElementOffsets(FieldId) const override {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "string test snapshot does not support struct offsets");
     }
     mutable int64_t column_reads = 0;
 

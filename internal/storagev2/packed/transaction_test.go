@@ -49,7 +49,7 @@ func TestExternalFilePropertiesRoundTrip(t *testing.T) {
 			config := &indexpb.StorageConfig{StorageType: "local", RootPath: dir}
 			exploreBase := filepath.Join(dir, "explore")
 			filePath := filepath.Join(dir, "source.parquet")
-			exploreManifest, err := CommitManifestUpdates(exploreBase, ManifestEarliest, config, &ManifestUpdates{
+			exploreManifest, err := CommitManifestUpdates(MarshalManifestPath(exploreBase, ManifestEarliest), config, &ManifestUpdates{
 				ColumnGroups: []ColumnGroupEntry{{
 					Columns: []string{"id"}, Format: tc.format,
 					Files: []ColumnGroupFileEntry{{Path: filePath, StartIndex: 0, EndIndex: 4, Properties: tc.properties}},
@@ -178,7 +178,7 @@ func TestReadColumnGroupsInvalidSourceRowCount(t *testing.T) {
 	paramtable.Init()
 	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
 	base := filepath.Join(cfg.RootPath, "segment")
-	manifest, err := CommitManifestUpdates(base, ManifestEarliest, cfg, &ManifestUpdates{
+	manifest, err := CommitManifestUpdates(MarshalManifestPath(base, ManifestEarliest), cfg, &ManifestUpdates{
 		ColumnGroups: []ColumnGroupEntry{{Columns: []string{"100"}, Format: "parquet", Files: []ColumnGroupFileEntry{{
 			Path: filepath.Join(base, "data.parquet"), EndIndex: 1,
 			Properties: map[string]string{milvusTableSourceManifestPathProperty: "source", milvusTableSourceRowCountProperty: "invalid"},
@@ -239,7 +239,7 @@ func createBaseManifest(t *testing.T, basePath string, storageConfig *indexpb.St
 	require.NoError(t, err)
 	defer out.Destroy()
 
-	manifestPath, err := CommitManifestUpdates(basePath, ManifestEarliest, storageConfig,
+	manifestPath, err := CommitManifestUpdates(MarshalManifestPath(basePath, ManifestEarliest), storageConfig,
 		&ManifestUpdates{NewFiles: out})
 	require.NoError(t, err)
 	return manifestPath

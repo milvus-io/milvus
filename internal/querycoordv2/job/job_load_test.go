@@ -28,6 +28,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -78,6 +80,25 @@ func (suite *LoadCollectionJobSuite) buildBroadcastResult(collectionID int64, pa
 			controlChannel: {},
 		},
 	}
+}
+
+func (suite *LoadCollectionJobSuite) TestGenerateAlterLoadConfigMessageUsesControlChannelWithoutAckSyncUp() {
+	msg, err := GenerateAlterLoadConfigMessage(context.Background(), &AlterLoadConfigRequest{
+		CollectionInfo: &milvuspb.DescribeCollectionResponse{
+			DbId:         10,
+			CollectionID: 100,
+			Schema:       &schemapb.CollectionSchema{},
+		},
+		Expected: ExpectedLoadConfig{
+			ExpectedPartitionIDs:  []int64{20},
+			ExpectedReplicaNumber: map[string]int{},
+		},
+	})
+
+	suite.NoError(err)
+	suite.NotNil(msg)
+	suite.Empty(msg.BroadcastHeader().VChannels)
+	suite.False(msg.BroadcastHeader().AckSyncUp)
 }
 
 // TestDescribeCollectionNotFound tests that Execute returns nil when the collection is not found.
@@ -505,7 +526,7 @@ func (suite *IncrementalExpansionSuite) SetupTest() {
 	suite.meta = meta.NewMeta(func() (int64, error) {
 		suite.nextID++
 		return suite.nextID, nil
-	}, suite.catalog, suite.nodeMgr)
+	}, suite.catalog, suite.nodeMgr, metacache.NewMetaStore(nil))
 	suite.dist = meta.NewDistributionManager(suite.nodeMgr)
 
 	suite.broker = meta.NewMockBroker(suite.T())
@@ -974,8 +995,12 @@ func (suite *IncrementalExpansionSuite) TestExpandedCollectionKeepsServingWhileN
 	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, mock.Anything, mock.Anything).Return(channels).Maybe()
 	targetMgr.EXPECT().GetSealedSegmentsByCollection(mock.Anything, mock.Anything, mock.Anything).
 		Return(map[int64]*datapb.SegmentInfo{}).Maybe()
+	targetMgr.EXPECT().GetSealedSegmentIDsByCollection(mock.Anything, mock.Anything, mock.Anything).
+		Return(typeutil.NewUniqueSet()).Maybe()
 	targetMgr.EXPECT().GetSealedSegmentsByPartition(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Return(map[int64]*datapb.SegmentInfo{}).Maybe()
+	targetMgr.EXPECT().GetSealedSegmentIDsByPartition(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(typeutil.NewUniqueSet()).Maybe()
 	targetMgr.EXPECT().IsNextTargetExist(mock.Anything, mock.Anything).Return(true).Maybe()
 	targetMgr.EXPECT().IsCurrentTargetExist(mock.Anything, mock.Anything, mock.Anything).Return(true).Maybe()
 	// The observer reads the next target's version to decide whether a

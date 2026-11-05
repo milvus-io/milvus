@@ -16,9 +16,15 @@
 
 #include <gtest/gtest.h>
 
+#include "index/scalar/spatial/RTreeIndexLoader.h"
+#include "index/test_utils/StorageTestUtils.h"
+
+#include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <exception>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -26,12 +32,187 @@
 #include <vector>
 
 #include "common/Geometry.h"
+#include "index/SingleCellIndexStorageTranslator.h"
+#include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/ISpatialReader.h"
+#include "index/growing/RTreeGrowingSpatialIndex.h"
+#include "index/scalar/spatial/RTreeIndexReader.h"
 #include "index/test_utils/AssertHelpers.h"
 #include "index/test_utils/CaseTestDriver.h"
 
 namespace milvus::index::test {
+
 namespace {
+
+TEST(RTreeIndexCacheTest,
+     ValidityViewRetainsPinAndFreshSlotUsesReadersContext) {
+    const cachinglayer::ResourceUsage limit{16 * 1024 * 1024, 0};
+    auto dlist = std::make_shared<cachinglayer::internal::DList>(
+        false, limit, limit, limit, cachinglayer::EvictionConfig{});
+    std::vector<int32_t> priorities;
+    auto load = [&](OpContext* ctx)
+        -> folly::coro::Task<std::unique_ptr<RTreeIndexState>> {
+        priorities.push_back(ctx->runtime_load_priority.value_or(-1));
+        co_return RTreeIndexState::Create(
+            RTreeQueryEngine::Create({}),
+            std::make_shared<const std::vector<size_t>>(
+                std::initializer_list<size_t>{0, 1}),
+            2);
+    };
+    IndexCacheConfig cache{
+        "rtree-storage-test",
+        cachinglayer::Meta{cachinglayer::StorageType::MEMORY,
+                           cachinglayer::CellIdMappingMode::IDENTICAL,
+                           cachinglayer::CellDataType::OTHER,
+                           CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                           true},
+        {1024 * 1024, 0},
+        {},
+        4096};
+    std::weak_ptr<cachinglayer::CacheSlot<RTreeIndexState>> slot_lifetime;
+    auto make_index = [&] {
+        auto slot = std::make_shared<cachinglayer::CacheSlot<RTreeIndexState>>(
+            std::make_unique<SingleCellIndexStorageTranslator<RTreeIndexState>>(
+                cache, false, load),
+            dlist.get(),
+            true,
+            true,
+            true,
+            std::chrono::seconds(5),
+            std::chrono::seconds(5));
+        slot_lifetime = slot;
+        return std::make_shared<RTreeIndex>(slot, 2);
+    };
+    auto index = make_index();
+    OpContext first_ctx;
+    first_ctx.runtime_load_priority = 0;
+    OpContext second_ctx;
+    second_ctx.runtime_load_priority = 1;
+    auto first = index->CreateReader(&first_ctx);
+    EXPECT_EQ(first->Count(), 2);
+    EXPECT_TRUE(priorities.empty());
+    const auto* spatial = dynamic_cast<const RTreeIndexReader*>(first.get());
+    ASSERT_NE(spatial, nullptr);
+    EXPECT_EQ(spatial->Candidates(SpatialOp::Intersects, Geometry{}).count(),
+              0);
+    const auto scanned = first_ctx.storage_usage.scanned_total_bytes.load();
+    ASSERT_GT(scanned, 0);
+    EXPECT_EQ(spatial->IsNull().count(), 2);
+    auto validity = spatial->Validity();
+    EXPECT_EQ(validity->Count(), 2);
+    EXPECT_EQ(first_ctx.storage_usage.scanned_total_bytes.load(), scanned);
+    EXPECT_EQ(priorities, (std::vector<int32_t>{0}));
+    index.reset();
+    EXPECT_FALSE(slot_lifetime.expired());
+    first.reset();
+    EXPECT_FALSE(slot_lifetime.expired());
+    EXPECT_EQ(validity->Count(), 2);
+    validity.reset();
+    EXPECT_TRUE(slot_lifetime.expired());
+    index = make_index();
+    auto second = index->CreateReader(&second_ctx);
+    EXPECT_EQ(priorities, (std::vector<int32_t>{0}));
+    const auto* nulls = dynamic_cast<const INullReader*>(second.get());
+    ASSERT_NE(nulls, nullptr);
+    EXPECT_EQ(nulls->IsNull().count(), 2);
+    EXPECT_EQ(priorities, (std::vector<int32_t>{0, 1}));
+    EXPECT_GT(second_ctx.storage_usage.scanned_total_bytes.load(), 0);
+    index.reset();
+    second.reset();
+    EXPECT_TRUE(slot_lifetime.expired());
+}
+
+TEST(RTreeIndexOwnershipTest, RetainsAuthoritativeCountForAllNullRows) {
+    auto engine = RTreeQueryEngine::Create({});
+    auto nulls = std::make_shared<const std::vector<size_t>>(
+        std::initializer_list<size_t>{0, 1});
+    std::shared_ptr<const RTreeIndexState> state =
+        RTreeIndexState::Create(std::move(engine), std::move(nulls), 2);
+    std::weak_ptr<const RTreeIndexState> lifetime = state;
+    auto index = std::make_shared<RTreeIndex>(std::move(state));
+    auto first = index->CreateReader(nullptr);
+    auto second = index->CreateReader(nullptr);
+    EXPECT_NE(first.get(), second.get());
+    EXPECT_EQ(index->Metadata().count, 2);
+    index.reset();
+    first.reset();
+    EXPECT_FALSE(lifetime.expired());
+    EXPECT_EQ(second->Count(), 2);
+    const auto* validity = dynamic_cast<const INullReader*>(second.get());
+    ASSERT_NE(validity, nullptr);
+    EXPECT_EQ(validity->IsNull().count(), 2);
+    EXPECT_EQ(validity->IsNotNull().count(), 0);
+    second.reset();
+    EXPECT_TRUE(lifetime.expired());
+}
+
+TEST(SharedValidityBitmapTest, FirstNullUses16KiBDefaultCapacity) {
+    SharedValidityBitmap writer;
+    writer.PrepareAppend(18, true);
+    EXPECT_EQ(writer.Freeze().Count(), 0);
+    EXPECT_EQ(writer.Freeze().BufferBytes(), 16 * 1024);
+    writer.AppendNull(17);
+    writer.FinishAppend(18);
+    EXPECT_EQ(writer.Freeze().ToBitmap().count(), 17);
+}
+
+TEST(SharedValidityBitmapTest, FrozenTailSurvivesAppendAndGrowth) {
+    SharedValidityBitmap writer(128);
+    writer.PrepareAppend(65, true);
+    writer.AppendNull(64);
+    writer.FinishAppend(65);
+    const auto first = writer.Freeze();
+    writer.PrepareAppend(128, true);
+    writer.AppendNull(65);
+    writer.FinishAppend(128);
+    const auto second = writer.Freeze();
+    EXPECT_EQ(first.FullWords().data(), second.FullWords().data());
+    writer.PrepareAppend(129, true);
+    writer.AppendNull(128);
+    writer.FinishAppend(129);
+    const auto grown = writer.Freeze();
+    EXPECT_NE(second.FullWords().data(), grown.FullWords().data());
+    EXPECT_EQ(grown.BufferBytes(), 2 * second.BufferBytes());
+    const auto frozen = first.ToBitmap();
+    EXPECT_EQ(frozen.size(), 65);
+    EXPECT_EQ(frozen.count(), 64);
+    EXPECT_FALSE(frozen[64]);
+    EXPECT_EQ(frozen.data()[1], ~uint64_t{1});
+    const auto latest = grown.ToBitmap();
+    EXPECT_EQ(latest.count(), 126);
+    EXPECT_FALSE(latest[64]);
+    EXPECT_FALSE(latest[65]);
+    EXPECT_FALSE(latest[128]);
+}
+
+TEST(RTreeGrowingSpatialIndexTest, PublicationsShareValidityAndFreezeTail) {
+    RTreeGrowingSpatialIndex owner(65);
+    const std::vector<std::string_view> values(65);
+    const auto valid = std::make_unique<bool[]>(65);
+    std::fill_n(valid.get(), 65, true);
+    valid[64] = false;
+    owner.Append(0, {values.size(), values.data(), valid.get()});
+    const auto first = owner.PinSnapshot();
+    const std::string_view empty;
+    const bool null = false;
+    owner.Append(65, {1, &empty, &null});
+    owner.Flush();
+    const auto second = owner.PinSnapshot();
+    const auto& before = dynamic_cast<const RTreeIndexReader&>(first.Reader());
+    const auto& after = dynamic_cast<const RTreeIndexReader&>(second.Reader());
+    ASSERT_NE(before.Validity()->FullWords().data(), nullptr);
+    EXPECT_EQ(before.Validity()->FullWords().data(),
+              after.Validity()->FullWords().data());
+    const auto old_nulls = before.IsNull();
+    const auto new_nulls = after.IsNull();
+    ASSERT_EQ(old_nulls.size(), 65);
+    ASSERT_EQ(new_nulls.size(), 66);
+    EXPECT_EQ(old_nulls.count(), 1);
+    EXPECT_TRUE(old_nulls[64]);
+    EXPECT_EQ(new_nulls.count(), 2);
+    EXPECT_TRUE(new_nulls[64]);
+    EXPECT_TRUE(new_nulls[65]);
+}
 
 constexpr auto kBackend = "SpatialRTreeHeap";
 constexpr auto kDataset = "SpatialWkbNullable";
@@ -138,10 +319,18 @@ ConcreteRTreeCases() {
                 Observe<std::string_view>{
                     .capability = &ReaderCaps::spatial,
                     .run =
-                        [](const ReaderBackend&,
-                           const ScalarTestData<std::string_view>&,
-                           IIndexReaderBasePtr& reader) {
-                            EXPECT_EQ(reader->CellByteSize().file_bytes, 0);
+                        [](const ReaderBackend& backend,
+                           const ScalarTestData<std::string_view>& data,
+                           IIndexReaderBasePtr&) {
+                            const ScalarTestInput<std::string_view> input(data);
+                            auto artifact = backend.Build(
+                                input.View(),
+                                {.row_count = data.values.size()});
+                            auto storage = OpenV3Storage<RTreeIndexLoader>(
+                                backend,
+                                SerializeV3(*artifact),
+                                {.row_count = data.values.size()});
+                            EXPECT_EQ(storage->CellByteSize().file_bytes, 0);
                         },
                 },
         });

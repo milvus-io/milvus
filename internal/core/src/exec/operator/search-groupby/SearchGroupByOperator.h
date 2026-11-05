@@ -209,9 +209,9 @@ class SealedDataGetter : public DataGetter<OutputType> {
     mutable std::unordered_map<int64_t, PinWrapper<Chunk*>> string_chunk_pins_;
     mutable std::unordered_map<int64_t, OwnedTakeData> vortex_file_data_;
 
-    // Keep the parent cell pinned longer than a resolved JSON view. The typed
-    // value interface is borrowed from the root reader or that view.
-    segcore::IndexPin index_pin_;
+    // Keep the request reader alive longer than its resolved JSON view.
+    // The typed value interface borrows from the reader or that view.
+    index::IIndexReaderBasePtr index_reader_;
     index::JsonResolvedReader json_view_;
     const index::IScalarValueReader<IndexValueType>* value_reader_{nullptr};
     std::unique_ptr<index::JsonKeyStats::ShreddingReader> shredding_reader_;
@@ -359,6 +359,7 @@ class SealedDataGetter : public DataGetter<OutputType> {
             }
         }
         if (from_data_) {
+            column_->Prepare(op_ctx_);
             auto id_offset_pair = column_->GetChunkIDByOffset(idx);
             auto chunk_id = id_offset_pair.first;
             auto inner_offset = id_offset_pair.second;
@@ -474,7 +475,8 @@ class SealedDataGetter : public DataGetter<OutputType> {
             requirement.json_path = json_path.value();
         }
 
-        const auto capabilities = segment_.IndexCapability(field_id_);
+        const auto capabilities =
+            segment_.ResolveIndexCapability(op_ctx_, field_id_);
         const auto decision = DetermineExecPath(requirement, capabilities);
         if (!decision.key.has_value()) {
             return false;
@@ -484,16 +486,16 @@ class SealedDataGetter : public DataGetter<OutputType> {
             entry != nullptr,
             "selected group-by index for field {} is absent from metadata",
             field_id_.get());
-        index_pin_ = segment_.PinIndex(op_ctx_, *decision.key);
-        if (!index_pin_) {
+        index_reader_ = segment_.CreateIndexReader(op_ctx_, *decision.key);
+        if (!index_reader_) {
             return false;
         }
-        AssertInfo(segcore::SameCaps(entry->caps, index_pin_->Caps()),
+        AssertInfo(segcore::SameCaps(entry->caps, index_reader_->Caps()),
                    "group-by index metadata for field {} does not match reader "
                    "capabilities",
                    field_id_.get());
 
-        const index::IIndexReaderBase* reader = index_pin_.get();
+        const index::IIndexReaderBase* reader = index_reader_.get();
         if constexpr (is_json) {
             if (entry->caps.json_paths) {
                 auto* json_reader =

@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
@@ -125,7 +126,7 @@ func newReleaseCollectionJobMeta(t *testing.T, collectionID, replicaID int64, no
 	t.Helper()
 
 	catalog := newReleaseJobCatalog()
-	m := meta.NewMeta(func() (int64, error) { return 0, nil }, catalog, session.NewNodeManager())
+	m := meta.NewMeta(func() (int64, error) { return 0, nil }, catalog, session.NewNodeManager(), metacache.NewMetaStore(nil))
 	err := m.PutCollectionWithoutSave(context.Background(), &meta.Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{
 			CollectionID: collectionID,
@@ -251,7 +252,7 @@ func TestReleaseCollectionJobFinalizesReplicaCleanupOnRetry(t *testing.T) {
 func TestReleaseCollectionJobIgnoresMissingCollectionAndReplica(t *testing.T) {
 	ctx := context.Background()
 	collectionID := int64(1003)
-	m := meta.NewMeta(func() (int64, error) { return 0, nil }, newReleaseJobCatalog(), session.NewNodeManager())
+	m := meta.NewMeta(func() (int64, error) { return 0, nil }, newReleaseJobCatalog(), session.NewNodeManager(), metacache.NewMetaStore(nil))
 	dist := meta.NewDistributionManager(session.NewNodeManager())
 	targetObserver, checkerController, proxyManager := newReleaseJobDeps(t, m, dist)
 

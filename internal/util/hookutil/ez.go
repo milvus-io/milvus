@@ -50,7 +50,7 @@ func decodeEZContext(encoded string) (ezID int64, key string, err error) {
 
 	ezID, err = strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
-		return 0, "", merr.Wrap(err, "invalid ezID in context")
+		return 0, "", merr.WrapErrParameterInvalidMsg("invalid ezID in EZ context: %s", parts[0])
 	}
 
 	return ezID, parts[1], nil
@@ -94,7 +94,13 @@ func CreateLocalEZ(ezID int64, encryptionKey string) error {
 		CipherConfigUnsafeEZK: encryptionKey,
 	}
 
-	return cipher.Init(config)
+	if err := cipher.Init(config); err != nil {
+		// The EZ id/key come from the request's plugin context; a failed local
+		// KMS init is a deterministic request/config rejection, not an
+		// unclassified worker error.
+		return merr.WrapErrParameterInvalidMsg("create local encryption zone %d: %v", ezID, err)
+	}
+	return nil
 }
 
 func RemoveEZ(ezID int64) error {
@@ -124,17 +130,24 @@ func BackupEZ(ezID int64) (string, error) {
 	return backupProvider.Backup(ezID)
 }
 
-func GetPluginContext(ezID int64, collectionID int64) ([]*commonpb.KeyValuePair, error) {
+func requiredEZKey(ezID, collectionID int64) ([]byte, error) {
 	cipher := GetCipher()
 	if cipher == nil {
-		return nil, nil
+		return nil, merr.Wrapf(merr.ErrServiceUnavailable, "cipher plugin is unavailable for ezID=%d, collectionID=%d", ezID, collectionID)
 	}
 
 	key := cipher.GetUnsafeKey(ezID, collectionID)
 	if len(key) == 0 {
-		return nil, merr.WrapErrParameterInvalidMsg("cannot get ez key for ezID=%d, collectionID=%d", ezID, collectionID)
+		return nil, merr.Wrapf(merr.ErrServiceUnavailable, "cannot get ez key for ezID=%d, collectionID=%d", ezID, collectionID)
 	}
+	return key, nil
+}
 
+func GetPluginContext(ezID int64, collectionID int64) ([]*commonpb.KeyValuePair, error) {
+	key, err := requiredEZKey(ezID, collectionID)
+	if err != nil {
+		return nil, err
+	}
 	return []*commonpb.KeyValuePair{{
 		Key:   CipherConfigUnsafeEZK,
 		Value: encodeEZContext(ezID, key),

@@ -56,9 +56,9 @@ class JsonStatsTranslator
     milvus::cachinglayer::cid_t
     cell_id_of(milvus::cachinglayer::uid_t uid) const override;
 
-    std::pair<milvus::cachinglayer::ResourceUsage,
-              milvus::cachinglayer::ResourceUsage>
-    estimated_byte_size_of_cell(milvus::cachinglayer::cid_t cid) const override;
+    milvus::cachinglayer::LoadingResourceUsage
+    estimated_loading_usage(
+        const std::vector<milvus::cachinglayer::cid_t>& cids) const override;
 
     int64_t
     cells_storage_bytes(
@@ -82,6 +82,7 @@ class JsonStatsTranslator
         info_proto_;
     milvus::storage::ChunkManagerPtr chunk_manager_;
     milvus_storage::ArrowFileSystemPtr fs_;
+    const bool use_async_load_;
     std::string key_;
     milvus::cachinglayer::Meta meta_;
 };

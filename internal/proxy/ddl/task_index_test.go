@@ -28,6 +28,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -401,6 +402,30 @@ func Test_deduplicate_parseIndexParams(t *testing.T) {
 				},
 			}, cit1.newTypeParams)
 	})
+}
+
+// The struct sub-field origin marker stays out of the index type params, so
+// it reaches neither index meta, DescribeIndex nor the index build.
+func Test_parseIndexParamsSkipsStructSubFieldOriginMarker(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.Enable.Key)
+	cit := &CreateIndexTask{
+		req: &milvuspb.CreateIndexRequest{
+			ExtraParams: []*commonpb.KeyValuePair{{Key: common.MetricTypeKey, Value: "MHJACCARD"}},
+		},
+		fieldSchema: &schemapb.FieldSchema{
+			FieldID:  101,
+			Name:     "FieldID",
+			DataType: schemapb.DataType_BinaryVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: DimKey, Value: "128"},
+				{Key: common.StructSubFieldAddedKey, Value: "true"},
+			},
+		},
+	}
+	assert.NoError(t, cit.parseIndexParams(context.TODO()))
+	assert.ElementsMatch(t, []*commonpb.KeyValuePair{{Key: DimKey, Value: "128"}}, cit.newTypeParams)
 }
 
 func Test_parseIndexParamsAllowsParsableParamsWithinSize(t *testing.T) {
@@ -963,39 +988,47 @@ func Test_parseIndexParams(t *testing.T) {
 	})
 
 	t.Run("create index on array field", func(t *testing.T) {
-		cit3 := &CreateIndexTask{
-			Condition: nil,
-			req: &milvuspb.CreateIndexRequest{
-				Base:           nil,
-				DbName:         "",
-				CollectionName: "",
-				FieldName:      "",
-				ExtraParams: []*commonpb.KeyValuePair{
-					{
-						Key:   common.IndexTypeKey,
-						Value: "STL_SORT",
+		for _, tc := range []struct {
+			elementType schemapb.DataType
+			supported   bool
+		}{
+			{schemapb.DataType_Bool, true},
+			{schemapb.DataType_Int8, true},
+			{schemapb.DataType_Int16, true},
+			{schemapb.DataType_Int32, true},
+			{schemapb.DataType_Int64, true},
+			{schemapb.DataType_Float, true},
+			{schemapb.DataType_Double, true},
+			{schemapb.DataType_VarChar, true},
+			{schemapb.DataType_JSON, false},
+			{schemapb.DataType_Array, false},
+			{schemapb.DataType_ArrayOfStruct, false},
+			{schemapb.DataType_FloatVector, false},
+			{schemapb.DataType_Geometry, false},
+			{schemapb.DataType_Timestamptz, false},
+		} {
+			t.Run(tc.elementType.String(), func(t *testing.T) {
+				cit := &CreateIndexTask{
+					req: &milvuspb.CreateIndexRequest{
+						ExtraParams: []*commonpb.KeyValuePair{
+							{Key: common.IndexTypeKey, Value: indexparamcheck.IndexSTLSORT},
+						},
 					},
-				},
-				IndexName: "",
-			},
-			ctx:            nil,
-			mixCoord:       nil,
-			result:         nil,
-			isAutoIndex:    false,
-			newIndexParams: nil,
-			newTypeParams:  nil,
-			collectionID:   0,
-			fieldSchema: &schemapb.FieldSchema{
-				FieldID:      101,
-				Name:         "FieldID",
-				IsPrimaryKey: false,
-				Description:  "field no.1",
-				DataType:     schemapb.DataType_Array,
-				ElementType:  schemapb.DataType_Int64,
-			},
+					fieldSchema: &schemapb.FieldSchema{
+						FieldID: 101, Name: "values", DataType: schemapb.DataType_Array,
+						ElementType: tc.elementType,
+					},
+				}
+				err := cit.parseIndexParams(context.Background())
+				if tc.supported {
+					assert.NoError(t, err)
+					assert.Equal(t, indexparamcheck.IndexSTLSORT, common.GetIndexType(cit.newIndexParams))
+					assert.False(t, cit.isAutoIndex)
+				} else {
+					assert.Error(t, err)
+				}
+			})
 		}
-		err := cit3.parseIndexParams(context.TODO())
-		assert.Error(t, err)
 	})
 
 	t.Run("pass vector index type on scalar field", func(t *testing.T) {
@@ -1479,6 +1512,15 @@ func Test_arrayOfVector_nonEmbListMetric_indexCompat(t *testing.T) {
 	// support the element vector type, not the EmbeddingList capability.
 	// This means indexes like IVF_PQ that don't have the EMB_LIST flag
 	// should still work with ArrayOfVector + COSINE.
+	t.Run("element-nullable ArrayOfVector accepts element-level index", func(t *testing.T) {
+		field := &schemapb.FieldSchema{
+			Name: "vec_field", DataType: schemapb.DataType_ArrayOfVector,
+			ElementType: schemapb.DataType_FloatVector, ElementNullable: true,
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}},
+		}
+		params := map[string]string{common.IndexTypeKey: "IVF_FLAT", common.MetricTypeKey: metric.COSINE, "nlist": "128"}
+		require.NoError(t, checkTrain(context.TODO(), field, params, testVecIndexDataTypeCheck))
+	})
 	t.Run("ArrayOfVector with COSINE should accept IVF_FLAT", func(t *testing.T) {
 		cit := &CreateIndexTask{
 			req: &milvuspb.CreateIndexRequest{
@@ -2567,6 +2609,37 @@ func Test_parseIndexParams_AutoIndex_ArrayOfVector(t *testing.T) {
 		}
 		err := task.parseIndexParams(context.TODO())
 		assert.Error(t, err)
+	})
+
+	t.Run("element-nullable ArrayOfVector autoindex keeps an element-level metric", func(t *testing.T) {
+		for _, enabled := range []string{"true", "false"} {
+			paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, enabled)
+			task := &CreateIndexTask{
+				fieldSchema: &schemapb.FieldSchema{
+					Name: "vectors", DataType: schemapb.DataType_ArrayOfVector,
+					ElementType: schemapb.DataType_FloatVector, ElementNullable: true,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}},
+				},
+				req: &milvuspb.CreateIndexRequest{},
+			}
+			require.NoError(t, task.parseIndexParams(context.TODO()))
+			metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.MetricTypeKey, task.newIndexParams)
+			require.NoError(t, err)
+			require.NotContains(t, indexparamcheck.EmbListMetrics, metricType)
+		}
+	})
+
+	t.Run("element-nullable ArrayOfVector rejects MAX_SIM", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, "true")
+		task := &CreateIndexTask{
+			fieldSchema: &schemapb.FieldSchema{
+				Name: "vectors", DataType: schemapb.DataType_ArrayOfVector,
+				ElementType: schemapb.DataType_FloatVector, ElementNullable: true,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}},
+			},
+			req: &milvuspb.CreateIndexRequest{ExtraParams: []*commonpb.KeyValuePair{{Key: common.MetricTypeKey, Value: metric.MaxSimCosine}}},
+		}
+		require.ErrorContains(t, task.parseIndexParams(context.TODO()), "only support element-level metrics")
 	})
 }
 

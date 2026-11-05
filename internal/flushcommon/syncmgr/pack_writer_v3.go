@@ -176,7 +176,7 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 	bw.initialManifestPath = bw.manifestPath
 	bw.statsBlobSize = 0
 
-	basePath, baseVersion, parseErr := packed.UnmarshalManifestPath(bw.initialManifestPath)
+	basePath, _, parseErr := packed.UnmarshalManifestPath(bw.initialManifestPath)
 	if parseErr != nil {
 		err = parseErr
 		return
@@ -225,7 +225,7 @@ func (bw *BulkPackWriterV3) Write(ctx context.Context, pack *SyncPack) (
 	// packed.ErrLoonTransient; loon's own optimistic retry covers
 	// manifest-version conflicts within a single attempt.
 	err = retry.Do(ctx, func() error {
-		newPath, commitErr := packed.CommitManifestUpdates(basePath, baseVersion, bw.storageConfig, updates)
+		newPath, commitErr := packed.CommitManifestUpdates(bw.initialManifestPath, bw.storageConfig, updates)
 		if commitErr != nil {
 			return classifyLoonErr(commitErr)
 		}
@@ -280,7 +280,10 @@ func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, ba
 	defer rec.Release()
 
 	tsFrom, tsTo := bw.getTsRange(rec)
-	pluginContextPtr := bw.getPluginContext(pack.collectionID)
+	pluginContextPtr, err := bw.getPluginContext(pack.collectionID)
+	if err != nil {
+		return nil, nil, err
+	}
 	writerFormat, schemaBasedFormats, err := bw.resolveInsertWriterFormats()
 	if err != nil {
 		return nil, nil, err
@@ -354,7 +357,29 @@ func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, ba
 		w.GetWrittenPaths,
 		getFieldNullCounts,
 	)
+	setFieldValidElementCounts(logs, bw.columnGroups, bw.schema, rec)
 	return logs, files, nil
+}
+
+// setFieldValidElementCounts records the valid element counts of the
+// VectorArray fields of rec on the binlog of each column group.
+func setFieldValidElementCounts(logs map[int64]*datapb.FieldBinlog, columnGroups []storagecommon.ColumnGroup,
+	schema *schemapb.CollectionSchema, rec storage.Record,
+) {
+	counts, _ := storage.CollectVectorArrayValidElements(schema, rec, nil, nil)
+	if len(counts) == 0 {
+		return
+	}
+	for _, columnGroup := range columnGroups {
+		fieldBinlog := logs[columnGroup.GroupID]
+		if fieldBinlog == nil {
+			continue
+		}
+		groupCounts := storage.ColumnGroupValidElementCounts(columnGroup, counts)
+		for _, binlog := range fieldBinlog.GetBinlogs() {
+			binlog.FieldValidElementCounts = groupCounts
+		}
+	}
 }
 
 func buildV3ColumnGroupFieldBinlogs(

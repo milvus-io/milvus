@@ -20,17 +20,23 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"math"
+	"strings"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/sbinet/npyio"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // malformedNpy builds a .npy prefix whose declared header length is hdrLen but
@@ -118,14 +124,29 @@ func Test_NumRows_skipsRedundantPaths(t *testing.T) {
 	assert.Equal(t, int64(3), rows)
 }
 
-// Every path redundant means the file carries no readable column. Sizing reports
-// 0 instead of an error: rejecting here would again be stricter than the reader,
-// which is where "no file for field" is raised, as it was before sizing existed.
+// A file set naming no field must fail like CreateReaders does when a required
+// field has no source; the count-only preimport would otherwise finish a
+// zero-row job as a success. The ChunkManager has no expectation, pinning that
+// the rejection opens no object.
 func Test_NumRows_allPathsRedundant(t *testing.T) {
 	cm := mocks.NewChunkManager(t)
-	rows, err := NumRows(context.Background(), cm, numpySchema("vec"),
+	_, err := NumRows(context.Background(), cm, numpySchema("vec"),
 		[]string{"README.npy", "LICENSE.npy"})
-	assert.NoError(t, err)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, merr.ErrImportFailed),
+		"a file set naming no field must be an input error: %v", err)
+	assert.Contains(t, err.Error(), "no file for field: vec")
+}
+
+// An all-optional schema accepts the same set: no column to read, zero rows.
+func Test_NumRows_allPathsRedundantAllOptional(t *testing.T) {
+	cm := mocks.NewChunkManager(t)
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+		{FieldID: 101, Name: "note", DataType: schemapb.DataType_Int64, Nullable: true},
+	}}
+	rows, err := NumRows(context.Background(), cm, schema, []string{"README.npy"})
+	require.NoError(t, err)
 	assert.Equal(t, int64(0), rows)
 }
 
@@ -153,13 +174,35 @@ func Test_NumRowsAndBytesReportsDecodedLogicalSize(t *testing.T) {
 		buf := new(bytes.Buffer)
 		require.NoError(t, npyio.Write(buf, []float32{1, 2, 3, 4}))
 		cm := cmServing(t, path, buf.Bytes())
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "fvec", DataType: schemapb.DataType_Float},
+		}}
 
-		rows, logical, _, err := NumRowsAndBytes(context.Background(), cm, numpySchema("fvec"), []string{path})
+		rows, logical, _, err := NumRowsAndBytes(context.Background(), cm, schema, []string{path})
 		require.NoError(t, err)
 		require.Equal(t, int64(4), rows)
 		// shapeProduct([4]) x npyDataTypeSize("<f4")
 		require.Equal(t, int64(4*4), logical)
 	})
+}
+
+// Test_NumRowsAndBytesRejectsTruncatedPayload pins that a .npy whose header
+// declares more data than the object holds is rejected at preimport with a
+// terminal input error. The count-only preimport must fail the job here, like
+// V2's full read does: the payload is immutable, so Reshard retrying it can
+// never succeed.
+func Test_NumRowsAndBytesRejectsTruncatedPayload(t *testing.T) {
+	buf := new(bytes.Buffer)
+	require.NoError(t, npyio.Write(buf, []int64{1, 2, 3, 4}))
+	payload := buf.Bytes()
+	require.Greater(t, len(payload), 4)
+
+	cm := cmServing(t, "pk.npy", payload[:len(payload)-3])
+	_, _, _, err := NumRowsAndBytes(context.Background(), cm, numpySchema("pk"), []string{"pk.npy"})
+	require.Error(t, err)
+	require.Contains(t, strings.ToLower(err.Error()), "eof")
+	require.True(t, errors.Is(err, merr.ErrImportFailed),
+		"a truncated payload must be an input error: %v", err)
 }
 
 // TestShapeProductAndDataTypeSize pins the two byte-math helpers the decoded
@@ -178,4 +221,136 @@ func TestShapeProductAndDataTypeSize(t *testing.T) {
 	assert.Equal(t, int64(40), npyDataTypeSize("<U10"))
 	assert.Equal(t, int64(8), npyDataTypeSize("O"))
 	assert.Equal(t, int64(0), npyDataTypeSize("notatype"))
+}
+
+// objectDtypeNpy builds a valid v1 .npy whose dtype is '|O' (a pickled
+// payload), padded the way numpy pads its header.
+func objectDtypeNpy(t *testing.T, rows int, payload []byte) []byte {
+	t.Helper()
+	dict := fmt.Sprintf("{'descr': '|O', 'fortran_order': False, 'shape': (%d,), }", rows)
+	pad := (64 - (10+len(dict)+1)%64) % 64
+	header := dict + strings.Repeat(" ", pad) + "\n"
+
+	buf := new(bytes.Buffer)
+	buf.Write([]byte{0x93, 'N', 'U', 'M', 'P', 'Y', 1, 0})
+	require.NoError(t, binary.Write(buf, binary.LittleEndian, uint16(len(header))))
+	buf.WriteString(header)
+	buf.Write(payload)
+	return buf.Bytes()
+}
+
+// Test_NumRowsAndBytesRejectsObjectDtype pins that the count stage applies the
+// reader's dtype check: an object array holds a pickle, which numpy import does
+// not support, so the job fails here instead of importing zero rows.
+func Test_NumRowsAndBytesRejectsObjectDtype(t *testing.T) {
+	content := objectDtypeNpy(t, 2, []byte{0x80, 0x04})
+	cm := cmServing(t, "vec.npy", content)
+
+	_, _, _, err := NumRowsAndBytes(context.Background(), cm, numpySchema("vec"), []string{"vec.npy"})
+	require.Error(t, err)
+	require.True(t, errors.Is(err, merr.ErrImportFailed),
+		"an unsupported dtype must be an input error: %v", err)
+	require.Contains(t, err.Error(), "is not supported")
+}
+
+// idAndVectorSchema is a required Int64 primary key and a required 8-dim vector.
+func idAndVectorSchema() *schemapb.CollectionSchema {
+	return &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{
+			FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}},
+		},
+	}}
+}
+
+// npyFile builds a .npy header with an explicit dtype and shape.
+func npyFile(t *testing.T, descr, shape string, payload []byte) []byte {
+	t.Helper()
+	dict := fmt.Sprintf("{'descr': '%s', 'fortran_order': False, 'shape': %s, }", descr, shape)
+	pad := (64 - (10+len(dict)+1)%64) % 64
+	header := dict + strings.Repeat(" ", pad) + "\n"
+
+	buf := new(bytes.Buffer)
+	buf.Write([]byte{0x93, 'N', 'U', 'M', 'P', 'Y', 1, 0})
+	require.NoError(t, binary.Write(buf, binary.LittleEndian, uint16(len(header))))
+	buf.WriteString(header)
+	buf.Write(payload)
+	return buf.Bytes()
+}
+
+// cmServingFiles serves .npy objects by path; any other access fails the test.
+func cmServingFiles(t *testing.T, files map[string][]byte) *mocks.ChunkManager {
+	t.Helper()
+	cm := mocks.NewChunkManager(t)
+	for path, data := range files {
+		cm.EXPECT().Size(mock.Anything, path).Return(int64(len(data)), nil).Maybe()
+		cm.EXPECT().ReadAt(mock.Anything, path, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, _ string, off int64, length int64) ([]byte, error) {
+				if off >= int64(len(data)) {
+					return nil, io.EOF
+				}
+				end := off + length
+				if end > int64(len(data)) {
+					end = int64(len(data))
+				}
+				return data[off:end], nil
+			}).Maybe()
+	}
+	return cm
+}
+
+// Test_NumRowsValidatesSchemaBeforeZeroRowCompletion covers inputs that count to
+// zero: invalid ones fail on the header check, the valid empty pair imports zero rows.
+func Test_NumRowsValidatesSchemaBeforeZeroRowCompletion(t *testing.T) {
+	t.Run("missing required column", func(t *testing.T) {
+		cm := cmServingFiles(t, map[string][]byte{"id.npy": npyFile(t, "<i8", "(0,)", nil)})
+		_, _, _, err := NumRowsAndBytes(context.Background(), cm, idAndVectorSchema(), []string{"id.npy"})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "no file for field: vector")
+	})
+
+	t.Run("scalar array", func(t *testing.T) {
+		cm := cmServingFiles(t, map[string][]byte{
+			"id.npy":     npyFile(t, "<i8", "()", nil),
+			"vector.npy": npyFile(t, "<f4", "()", nil),
+		})
+		_, _, _, err := NumRowsAndBytes(context.Background(), cm, idAndVectorSchema(),
+			[]string{"id.npy", "vector.npy"})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "expected shape")
+	})
+
+	t.Run("wrong dim", func(t *testing.T) {
+		cm := cmServingFiles(t, map[string][]byte{
+			"id.npy":     npyFile(t, "<i8", "(0,)", nil),
+			"vector.npy": npyFile(t, "<f4", "(0, 7)", nil),
+		})
+		_, _, _, err := NumRowsAndBytes(context.Background(), cm, idAndVectorSchema(),
+			[]string{"id.npy", "vector.npy"})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "expected dim")
+	})
+
+	t.Run("wrong element type", func(t *testing.T) {
+		cm := cmServingFiles(t, map[string][]byte{
+			"id.npy":     npyFile(t, "<f4", "(0,)", nil),
+			"vector.npy": npyFile(t, "<f4", "(0, 8)", nil),
+		})
+		_, _, _, err := NumRowsAndBytes(context.Background(), cm, idAndVectorSchema(),
+			[]string{"id.npy", "vector.npy"})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "expected element type")
+	})
+
+	t.Run("valid empty columns still import zero rows", func(t *testing.T) {
+		cm := cmServingFiles(t, map[string][]byte{
+			"id.npy":     npyFile(t, "<i8", "(0,)", nil),
+			"vector.npy": npyFile(t, "<f4", "(0, 8)", nil),
+		})
+		rows, _, _, err := NumRowsAndBytes(context.Background(), cm, idAndVectorSchema(),
+			[]string{"id.npy", "vector.npy"})
+		require.NoError(t, err)
+		require.Equal(t, int64(0), rows)
+	})
 }

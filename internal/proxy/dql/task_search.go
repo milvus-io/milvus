@@ -18,12 +18,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/agg"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
-	"github.com/milvus-io/milvus/internal/parser/planparserv2/rewriter"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
-	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/search_agg"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
@@ -32,9 +31,9 @@ import (
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
-	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
+	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -78,14 +77,33 @@ type SearchTask struct {
 
 	tr                     *timerecord.TimeRecorder
 	collectionName         string
+	resolvedDBName         string
+	resolvedCollectionName string
 	schema                 *schemaInfo
 	needRequery            bool
+	// features accumulates this request's counters during PreExecute and is
+	// flushed once when it returns. A hybrid search parses every sub-request,
+	// and Proxy.Search can run the whole task again for the un-optimized retry,
+	// the recall-evaluation ground truth and a retry.Handle re-entry; marking
+	// into a set and flushing once is what keeps "how many requests used X"
+	// equal to the number of user requests rather than the number of task runs.
+	features featureusage.FeatureSet
+	// units is the per-subrequest counterpart of features: the search
+	// parameter distributions and the retrieval kind count once per ANN
+	// subrequest. Flushed with features.
+	units featureusage.Tally
+	// collectFeatures is decided once, at the top of PreExecute: counting is on
+	// for the process and this is the first task built for the user request.
+	// When it is false, featureSink returns nil and every collect hook returns
+	// on its first line, so a request that will not be counted pays for no
+	// parameter scan, no expression walk and no JSON decode.
+	collectFeatures bool
+	// countFeatures is set only on the first task built for a user request, so
+	// the repeat runs above add nothing.
+	countFeatures          bool
 	partitionKeyMode       bool
 	partitionKeyIsolation  bool
 	largeTopKEnabled       bool
-	rlsEnabled             bool
-	rlsDBName              string
-	rlsCollectionName      string
 	enableMaterializedView bool
 	mustUsePartitionKey    bool
 	resultSizeInsufficient bool
@@ -104,6 +122,8 @@ type SearchTask struct {
 	sched             *scheduler.TaskScheduler
 	lb                shardclient.LBPolicy
 	shardClientMgr    shardclient.ShardClientMgr
+	viewQueryClient   queryclient.Client
+	queryViewPlans    []queryclient.ShardPlan
 	queryChannelsTs   map[string]Timestamp
 	queryChannelsNode *typeutil.ConcurrentMap[string, int64]
 	queryInfos        []*planpb.QueryInfo
@@ -133,28 +153,43 @@ type SearchTask struct {
 
 	hybridSubSearchInfos []hybridSubSearchInfo
 	hybridElementLevel   bool
-	rlsPredicate         *planpb.Expr
-	rlsResolved          bool
-	rlsPreset            bool
 
 	chMgr channelmgr.ChannelsMgr
-}
-
-// ResolvedRLSSnapshot is the request-local RLS decision that later attempts
-// of the same Search or HybridSearch RPC must reuse.
-type ResolvedRLSSnapshot struct {
-	CollectionID   int64
-	DBName         string
-	CollectionName string
-	Predicate      *planpb.Expr
 }
 
 // NewSearchTask constructs a search task. Only request-specific inputs are
 // taken from the caller; the host node and its dependencies are derived from
 // the taskmodel.TaskNode contract and paramtable, so the root package does not
 // need to reach into the task's private fields.
+// SetCountFeatures marks the first task built for a user request. Retries,
+// the un-optimized fallback and the recall-evaluation ground-truth run build
+// further tasks for the same request and leave it false, so one user request
+// moves each feature counter at most once.
+func (t *SearchTask) SetCountFeatures(v bool) {
+	t.countFeatures = v
+}
+
+// featureSink is where this task's feature hooks mark, or nil when the task
+// does not count. A pointer to the task's own set rather than a fresh one, so
+// counting adds no allocation.
+func (t *SearchTask) featureSink() *featureusage.FeatureSet {
+	if !t.collectFeatures {
+		return nil
+	}
+	return &t.features
+}
+
+// unitSink is featureSink for the per-subrequest counters.
+func (t *SearchTask) unitSink() *featureusage.Tally {
+	if !t.collectFeatures {
+		return nil
+	}
+	return &t.units
+}
+
 func NewSearchTask(ctx context.Context, node taskmodel.TaskNode, sched *scheduler.TaskScheduler, request *milvuspb.SearchRequest, optimizedSearch bool, isRecallEvaluation bool, tr *timerecord.TimeRecorder) *SearchTask {
 	return &SearchTask{
+		viewQueryClient: viewQueryClientFromNode(node),
 		baseTask: baseTask{
 			MetaCache: node.GetMetaCache(),
 		},
@@ -194,27 +229,6 @@ func (t *SearchTask) StorageCost() segcore.StorageCost {
 // RelatedDataSize returns the related data size reported by the last execution.
 func (t *SearchTask) RelatedDataSize() int64 {
 	return t.relatedDataSize
-}
-
-// SetResolvedRLSPredicate reuses a predicate resolved by a preparatory read.
-func (t *SearchTask) SetResolvedRLSPredicate(predicate *planpb.Expr) {
-	t.rlsPredicate = predicate
-	t.rlsResolved = true
-	t.rlsPreset = true
-}
-
-// ResolvedRLSSnapshot returns the predicate and canonical collection identity
-// after this task has resolved RLS. The predicate is immutable after resolution.
-func (t *SearchTask) ResolvedRLSSnapshot() *ResolvedRLSSnapshot {
-	if !t.rlsResolved {
-		return nil
-	}
-	return &ResolvedRLSSnapshot{
-		CollectionID:   t.GetCollectionID(),
-		DBName:         t.rlsDBName,
-		CollectionName: t.rlsCollectionName,
-		Predicate:      t.rlsPredicate,
-	}
 }
 
 // ResultSizeInsufficient reports whether the result was truncated because the
@@ -261,15 +275,37 @@ func (t *SearchTask) CanSkipAllocTimestamp() bool {
 	return consistencyLevel != commonpb.ConsistencyLevel_Strong
 }
 
-func (t *SearchTask) PreExecute(ctx context.Context) error {
+func (t *SearchTask) PreExecute(ctx context.Context) (retErr error) {
+	// Flushed however PreExecute ends: a request the Proxy rejects still asked
+	// for the feature, which is what the counters record, and the parse that
+	// marks a feature can be the very step that fails. countFeatures is what
+	// keeps a repeat run of the same user request from counting again.
+	t.collectFeatures = t.countFeatures && featureusage.Enabled()
+	if t.collectFeatures {
+		defer t.features.HitAll()
+		// The shape units (ef, nprobe, limit, nq, retrieval) are recorded at
+		// different steps of the parse, so a rejected request would leave
+		// them disagreeing with each other; they are flushed only for a
+		// request that went through.
+		defer func() {
+			if retErr == nil {
+				t.units.HitAll()
+			}
+		}()
+	}
+	t.IsAdvanced = len(t.request.GetSubReqs()) > 0
+	collectSearchRequestFeatures(t.request, t.featureSink())
+	// The request-level key scan, once. On the hybrid path this list is the
+	// rank_params, where group_size, strict_group_size and rank_group_scorer
+	// live; on the plain path it is the search params themselves.
+	scope := scopeSearch
+	if t.IsAdvanced {
+		scope = scopeHybridRequest
+	}
+	collectSearchParamKeyFeatures(t.request.GetSearchParams(), scope, t.featureSink())
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-PreExecute")
 	defer sp.End()
 
-	t.IsAdvanced = len(t.request.GetSubReqs()) > 0
-	if !t.rlsPreset {
-		t.rlsPredicate = nil
-		t.rlsResolved = false
-	}
 	t.Base.MsgType = commonpb.MsgType_Search
 	t.Base.SourceID = paramtable.GetNodeID()
 
@@ -291,36 +327,14 @@ func (t *SearchTask) PreExecute(ctx context.Context) error {
 		return err2
 	}
 	t.schema = collectionInfo.Schema
+	t.SchemaVersion = t.schema.GetVersion()
 	if err := ValidateTextStorageV3Enabled(t.schema.CollectionSchema); err != nil {
 		return err
 	}
 	t.largeTopKEnabled = collectionInfo.QueryMode == common.QueryModeLargeTopK
 	t.partitionKeyIsolation = collectionInfo.PartitionKeyIsolation
-	t.rlsEnabled = collectionInfo.RlsEnabled
-	t.rlsDBName = collectionInfo.DBName
-	if t.rlsDBName == "" {
-		t.rlsDBName = t.request.GetDbName()
-	}
-	t.rlsCollectionName = collectionInfo.Schema.GetName()
-	if !t.rlsPreset {
-		operation := "search"
-		if t.IsAdvanced {
-			operation = "hybrid search"
-		}
-		if t.rlsEnabled && t.request.GetSkipRls() {
-			if t.node == nil {
-				return merr.WrapErrServiceInternalMsg("search task has no host node for SkipRLS authorization")
-			}
-			t.rlsEnabled, err = t.node.ResolveRLSEnforcement(t.ctx, t.GetMetaCache(), t.rlsEnabled, collectionInfo.RlsForce, true,
-				t.rlsDBName, t.rlsCollectionName, operation)
-			if err != nil {
-				return err
-			}
-		}
-		if _, _, err := rlsutil.ResolveRuntimePrincipal(t.rlsEnabled, t.request.GetRlsPrincipal(), operation); err != nil {
-			return err
-		}
-	}
+	t.resolvedDBName = collectionInfo.DBName
+	t.resolvedCollectionName = collectionInfo.Schema.GetName()
 
 	t.partitionKeyMode = t.schema.IsPartitionKeyCollection()
 	partitionNames, namespaceAsPartition, err := resolveNamespacePartitionNames(t.schema.CollectionSchema, t.request.Namespace, t.request.GetPartitionNames())
@@ -349,6 +363,7 @@ func (t *SearchTask) PreExecute(ctx context.Context) error {
 
 	var aggs []agg.AggregateBase
 	t.translatedOutputFields, t.userOutputFields, t.userDynamicFields, aggs, t.userRequestedPkFieldExplicitly, err = translateOutputFields(t.request.OutputFields, t.schema, true)
+	collectOutputFieldFeatures(t.userDynamicFields, t.translatedOutputFields, t.schema, t.featureSink())
 	if err != nil {
 		log.Warn(ctx, "translate output fields failed", mlog.Err(err), mlog.FieldSchema(t.schema.CollectionSchema))
 		return err
@@ -445,9 +460,19 @@ func (t *SearchTask) PreExecute(ctx context.Context) error {
 	physicalTimeMs, _ := tsoutil.ParseHybridTs(guaranteeTs)
 	t.EntityTtlPhysicalTime = uint64(physicalTimeMs * 1000)
 	t.ConsistencyLevel = consistencyLevel
-	if t.isIterator && t.request.GetGuaranteeTimestamp() > 0 {
-		t.MvccTimestamp = t.request.GetGuaranteeTimestamp()
-		t.GuaranteeTimestamp = t.request.GetGuaranteeTimestamp()
+	if t.isIterator {
+		if t.request.GetGuaranteeTimestamp() > 0 {
+			t.MvccTimestamp = t.request.GetGuaranteeTimestamp()
+		} else if t.viewQueryClient != nil {
+			// Choose one snapshot before any shard executes, including the
+			// first page. Every retry and subsequent page retains this value.
+			t.MvccTimestamp = t.BeginTs()
+		}
+		if t.MvccTimestamp != 0 {
+			t.GuaranteeTimestamp = t.MvccTimestamp
+			physicalTimeMs, _ = tsoutil.ParseHybridTs(t.MvccTimestamp)
+			t.EntityTtlPhysicalTime = uint64(physicalTimeMs * 1000)
+		}
 	}
 	t.IsIterator = t.isIterator
 
@@ -461,11 +486,15 @@ func (t *SearchTask) PreExecute(ctx context.Context) error {
 	}
 
 	if collectionInfo.CollectionTTL != 0 {
-		physicalTime := tsoutil.PhysicalTime(t.GetBase().GetTimestamp())
+		ttlTimestamp := t.GetBase().GetTimestamp()
+		if t.isIterator && t.MvccTimestamp != 0 {
+			ttlTimestamp = t.MvccTimestamp
+		}
+		physicalTime := tsoutil.PhysicalTime(ttlTimestamp)
 		expireTime := physicalTime.Add(-time.Duration(collectionInfo.CollectionTTL))
 		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime)
 		// preventing overflow, abort
-		if t.CollectionTtlTimestamps > t.GetBase().GetTimestamp() {
+		if t.CollectionTtlTimestamps > ttlTimestamp {
 			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionInfo.CollectionTTL)
 		}
 	}
@@ -625,6 +654,11 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// Only the legacy branch carries a rank_params strategy; function_chains and
+	// function_score return earlier in selectHybridRerankMeta.
+	if len(t.request.GetFunctionChains()) == 0 && t.request.GetFunctionScore() == nil {
+		collectLegacyRankStrategy(t.request.GetSearchParams(), t.featureSink())
+	}
 
 	allFields := typeutil.GetAllFieldSchemas(t.schema.CollectionSchema)
 	vectorOutputFields := lo.Filter(allFields, func(field *schemapb.FieldSchema, _ int) bool {
@@ -673,7 +707,14 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	t.hybridSubSearchInfos = make([]hybridSubSearchInfo, len(t.request.GetSubReqs()))
 	t.hybridElementLevel = false
 	queryFieldIDs := []int64{}
+	// families collects the retrieval families of the subrequests; the
+	// combination is marked once the loop has seen them all.
+	families := 0
 	for index, subReq := range t.request.GetSubReqs() {
+		// A subrequest's own chains (L0/L1 stages) are the one place a chain
+		// is not on the top-level request, which collectSearchRequestFeatures
+		// already covered.
+		collectFunctionChainFeatures(subReq.GetFunctionChains(), t.featureSink())
 		l2Chains, querynodeFunctionChains, err := splitFunctionChainsByStage(subReq.GetFunctionChains())
 		if err != nil {
 			return merr.Wrapf(err, "sub-search[%d] function chains", index)
@@ -702,12 +743,16 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		families |= collectSubSearchUnits(t.schema.CollectionSchema, queryInfo.GetQueryFieldId(), placeholderType, subReq.GetNq(), t.unitSink())
 		if err := validateElementFilterVectorSearch(plan, t.schema.CollectionSchema, queryInfo.GetQueryFieldId(), placeholderType); err != nil {
 			return err
 		}
 
 		subSearchInfo := classifyHybridSubSearch(t.schema.CollectionSchema, queryInfo.GetQueryFieldId(), placeholderType)
 		annsField := typeutil.GetField(t.schema.CollectionSchema, queryInfo.GetQueryFieldId())
+		if err := validateElementNullableVectorArraySearch(annsField, placeholderType); err != nil {
+			return err
+		}
 		collapseConfig, elementScopeProvided, sanitizedSearchParams, err := parseAndRemoveElementScope(queryInfo.GetSearchParams())
 		if err != nil {
 			return err
@@ -826,8 +871,7 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		plan.Namespace = NamespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
 		plan.QuerynodeFunctionChains = querynodeFunctionChains
 
-		accountRLSPlan := t.rlsPredicate != nil && !rewriter.IsAlwaysTrueExpr(t.rlsPredicate)
-		internalSubReq.SerializedExprPlan, filterPlanSize, err = marshalPlanWithFilterSizeLimit(plan, filterPlanSize, accountRLSPlan)
+		internalSubReq.SerializedExprPlan, filterPlanSize, err = MarshalPlanWithMembershipFilterSizeLimit(plan, filterPlanSize)
 		if err != nil {
 			return err
 		}
@@ -841,6 +885,7 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			mlog.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
 			mlog.Stringer("plan", planparserv2.RedactPlanForLog(plan))) // may be very large if a large term is passed; membership blobs are redacted.
 	}
+	collectHybridShape(len(t.request.GetSubReqs()), families, t.featureSink())
 
 	t.hybridElementLevel = inferElementLevelHybrid(t.hybridSubSearchInfos)
 	if err := t.validateHybridArrayOfVectorGroupBy(); err != nil {
@@ -870,11 +915,14 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	}
 
 	t.GroupByFieldId = t.rankParams.GetGroupByFieldId()
+	t.GroupByFieldIds = t.rankParams.GetGroupByFieldIds()
 	t.GroupSize = t.rankParams.GetGroupSize()
 
 	if t.partitionKeyMode {
 		t.PartitionIDs = t.partitionIDsSet.Collect()
 	}
+
+	logSearchPlaceholders(ctx, log, t.request, t.queryInfos)
 
 	return nil
 }
@@ -1203,6 +1251,7 @@ func (t *SearchTask) initSearchRequest(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	collectSubSearchUnits(t.schema.CollectionSchema, t.FieldId, placeholderType, t.request.GetNq(), t.unitSink())
 	if err := validateElementFilterVectorSearch(plan, t.schema.CollectionSchema, t.FieldId, placeholderType); err != nil {
 		return err
 	}
@@ -1214,6 +1263,9 @@ func (t *SearchTask) initSearchRequest(ctx context.Context) error {
 	//   iterator, or group by (other than the PK case above).
 	annsField := typeutil.GetField(t.schema.CollectionSchema, t.FieldId)
 	if annsField != nil && annsField.GetDataType() == schemapb.DataType_ArrayOfVector {
+		if err := validateElementNullableVectorArraySearch(annsField, placeholderType); err != nil {
+			return err
+		}
 		isEmbList := isEmbeddingListPlaceholderType(placeholderType)
 
 		if isEmbList {
@@ -1255,6 +1307,7 @@ func (t *SearchTask) initSearchRequest(ctx context.Context) error {
 	t.queryInfos = append(t.queryInfos, queryInfo)
 	t.DslType = commonpb.DslType_BoolExprV1
 	t.GroupByFieldId = queryInfo.GroupByFieldId
+	t.GroupByFieldIds = queryInfo.GroupByFieldIds
 	t.GroupSize = queryInfo.GroupSize
 	if embedding.HasNonBM25AndMinHashFunctions(t.schema.Functions, []int64{queryInfo.GetQueryFieldId()}) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-call-function-udf")
@@ -1270,6 +1323,7 @@ func (t *SearchTask) initSearchRequest(ctx context.Context) error {
 		sp.AddEvent("Call-function-udf")
 	}
 
+	logSearchPlaceholders(ctx, log, t.request, t.queryInfos)
 	log.Debug(ctx, "proxy init search request",
 		mlog.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
 		mlog.Stringer("plan", planparserv2.RedactPlanForLog(plan))) // may be very large if a large term is passed; membership blobs are redacted.
@@ -1336,6 +1390,16 @@ func (t *SearchTask) tryGeneratePlan(
 	if err != nil {
 		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, err
 	}
+	collectSearchInfoFeatures(searchInfo.isIterator, searchInfo.isRangeSearch,
+		searchInfo.planInfo.GetGroupByFieldId(), searchInfo.planInfo.GetSearchIteratorV2Info() != nil,
+		searchInfo.iterativeFilter, t.featureSink())
+	collectSearchParamUnits(searchInfo.planInfo.GetSearchParams(), searchInfo.requestedLimit, t.unitSink())
+	// Only the sub-request's own keys here; PreExecute already scanned the
+	// request-level list. On the plain path params is that same list, so this
+	// would be a second scan of it for nothing.
+	if t.IsAdvanced {
+		collectSearchParamKeyFeatures(params, scopeHybridSub, t.featureSink())
+	}
 	if searchInfo.collectionID > 0 && searchInfo.collectionID != t.GetCollectionID() {
 		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, merr.WrapErrParameterInvalidMsg("collection id:%d in the request is not consistent to that in the search context,"+
 			"alias or database may have been changed: %d", searchInfo.collectionID, t.GetCollectionID())
@@ -1351,21 +1415,10 @@ func (t *SearchTask) tryGeneratePlan(
 	visitorArgs := &planparserv2.ParserVisitorArgs{
 		Timezone:         t.resolvedTimezoneStr,
 		MembershipBudget: membershipBudget,
+		OnParsedExpr:     exprFeatureObserver(t.featureSink()),
 	}
-	if !t.rlsResolved {
-		operation, isIterator := "search", searchInfo.isIterator
-		if t.IsAdvanced {
-			operation, isIterator = "hybrid search", false
-		}
-		t.rlsPredicate, err = t.resolveRLSUsingPredicate(operation, isIterator)
-		if err != nil {
-			return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, err
-		}
-		t.rlsResolved = true
-	}
-	rlsPredicate := t.rlsPredicate
 
-	hasFilter := dsl != "" || rlsPredicate != nil || len(exprTemplateValues) > 0
+	hasFilter := dsl != "" || len(exprTemplateValues) > 0
 	searchType := internalpb.SearchType_DEFAULT
 	// if function rerank is set, keep searchType DEFAULT; optimizations will be disabled in queryhook
 	if !functionRerank {
@@ -1381,26 +1434,13 @@ func (t *SearchTask) tryGeneratePlan(
 		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "search", metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, WrapPlanCreationError(planErr, "failed to create query plan")
 	}
+	collectExprTemplateFeatures(exprTemplateValues, t.featureSink())
+	collectExecFeatureBits(plan, t.collectFeatures)
 	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "search", metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
-	if err := rls.MergeNormalizedPredicateToPlan(plan, rlsPredicate); err != nil {
-		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, err
-	}
 	mlog.Debug(t.ctx, "create query plan",
 		mlog.Int("dsl_bytes", len(dsl)),
 		mlog.String("anns field", annsFieldName), mlog.Any("query info", searchInfo.planInfo))
 	return plan, searchInfo.planInfo, searchInfo.offset, searchInfo.isIterator, searchInfo.orderByFields, searchType, nil
-}
-
-func (t *SearchTask) resolveRLSUsingPredicate(operation string, isIterator bool) (*planpb.Expr, error) {
-	principalName, enforceRLS, err := rlsutil.ResolveRuntimePrincipal(t.rlsEnabled, t.request.GetRlsPrincipal(), operation)
-	if err != nil {
-		return nil, err
-	}
-	if !enforceRLS {
-		return nil, nil
-	}
-	return rls.ResolveUsingPredicate(t.ctx, t.GetCollectionID(), principalName,
-		rls.SearchAction(t.IsAdvanced, isIterator), t.schema.SchemaHelper)
 }
 
 func (t *SearchTask) tryParsePartitionIDsFromPlan(plan *planpb.PlanNode) ([]int64, error) {
@@ -1454,6 +1494,16 @@ func (t *SearchTask) Execute(ctx context.Context) error {
 	defer tr.CtxElapse(ctx, "done")
 
 	t.queryChannelsNode = typeutil.NewConcurrentMap[string, int64]()
+	if t.viewQueryClient != nil {
+		if err := t.executeByQueryView(ctx); err != nil {
+			log.Warn(ctx, "search execute by query view failed", mlog.Err(err))
+			return err
+		}
+		log.Debug(ctx, "Search Execute done.",
+			mlog.Int64("collection", t.GetCollectionID()),
+			mlog.Int64s("partitionIDs", t.GetPartitionIDs()))
+		return nil
+	}
 	// Built once, ahead of the namespace fast path below, so that the fast
 	// path derives its single-channel workload from the same value Execute
 	// would fan out -- every collection-level field, the resource-group scope
@@ -1499,6 +1549,24 @@ func (t *SearchTask) Execute(ctx context.Context) error {
 	return nil
 }
 
+func (t *SearchTask) executeByQueryView(ctx context.Context) error {
+	result, err := t.viewQueryClient.Legacy().Search(ctx, &queryclient.LegacySearchRequest{
+		Req:         t.SearchRequest,
+		BarrierMVCC: t.MvccTimestamp,
+	})
+	if err != nil {
+		return QueryViewLoadError(ctx, t.node, t.GetCollectionID(), t.GetPartitionIDs(), err)
+	}
+	if t.resultBuf == nil {
+		t.resultBuf = typeutil.NewConcurrentSet[*internalpb.SearchResults]()
+	}
+	t.queryViewPlans = append([]queryclient.ShardPlan{}, result.Plans...)
+	for _, searchResult := range result.Results {
+		t.resultBuf.Insert(searchResult)
+	}
+	return nil
+}
+
 // find the last bound based on reduced results and metric type
 // only support nq == 1, for search iterator v2
 func getLastBound(result *milvuspb.SearchResults, incomingLastBound *float32, metricType string) float32 {
@@ -1528,6 +1596,16 @@ func isEmbeddingListPlaceholderType(pt commonpb.PlaceholderType) bool {
 	default:
 		return false
 	}
+}
+
+func validateElementNullableVectorArraySearch(field *schemapb.FieldSchema, placeholderType commonpb.PlaceholderType) error {
+	if field == nil || field.GetDataType() != schemapb.DataType_ArrayOfVector || !field.GetElementNullable() {
+		return nil
+	}
+	if isEmbeddingListPlaceholderType(placeholderType) {
+		return merr.WrapErrParameterInvalidMsg("embedding-list search is not supported for element-nullable vector array field %s", field.GetName())
+	}
+	return nil
 }
 
 func validateElementFilterVectorSearch(plan *planpb.PlanNode, schema *schemapb.CollectionSchema, fieldID int64, placeholderType commonpb.PlaceholderType) error {
@@ -1576,7 +1654,9 @@ func (t *SearchTask) PostExecute(ctx context.Context) error {
 	isTopkReduce := false
 	isRecallEvaluation := false
 	storageCost := segcore.StorageCost{}
+	var execBits uint64
 	for _, r := range toReduceResults {
+		execBits |= r.GetFeatureBits()
 		if r.GetIsTopkReduce() {
 			isTopkReduce = true
 		}
@@ -1594,15 +1674,31 @@ func (t *SearchTask) PostExecute(ctx context.Context) error {
 	t.isTopkReduce = isTopkReduce
 	t.isRecallEvaluation = isRecallEvaluation
 
+	// The execution features are counted once, after the pipeline: its requery
+	// reads the output fields and adds what it fetched from remote storage to
+	// the final cost, and that read is part of this user request even though
+	// the query it runs is an internal task. Counted on the way out of every
+	// branch, with whatever cost is known by then.
+	execRecorded := false
+	recordExec := func(cost segcore.StorageCost) {
+		if !execRecorded {
+			execRecorded = true
+			recordExecFeatures(t.collectFeatures, execBits, cost.ScannedRemoteBytes)
+		}
+	}
+
 	// call pipeline
 	pipeline, err := newSearchPipeline(t)
 	if err != nil {
 		log.Warn(ctx, "Faild to create post process pipeline")
+		recordExec(storageCost)
 		return err
 	}
 	if t.result, t.storageCost, err = pipeline.Run(ctx, sp, toReduceResults, storageCost); err != nil {
+		recordExec(storageCost)
 		return err
 	}
+	recordExec(t.storageCost)
 	t.fillResult()
 	t.result.Results.OutputFields = t.userOutputFields
 	reconstructStructFieldDataForSearch(t.result, t.schema.CollectionSchema)
@@ -1668,7 +1764,11 @@ func (t *SearchTask) PostExecute(ctx context.Context) error {
 
 	if t.isIterator && t.request.GetGuaranteeTimestamp() == 0 {
 		// first page for iteration, need to set up sessionTs for iterator
-		t.result.SessionTs = getMaxMvccTsFromChannels(t.queryChannelsTs, t.BeginTs())
+		if t.viewQueryClient != nil {
+			t.result.SessionTs = t.MvccTimestamp
+		} else {
+			t.result.SessionTs = getMaxMvccTsFromChannels(t.queryChannelsTs, t.BeginTs())
+		}
 	}
 
 	metrics.ProxyReduceResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.SearchLabel).Observe(float64(tr.RecordSpan().Microseconds()) / 1000.0)

@@ -264,6 +264,66 @@ func (_c *MockCluster_GetDataDistribution_Call) RunAndReturn(run func(context.Co
 	return _c
 }
 
+// GetFeatureUsage provides a mock function with given fields: ctx, nodeID, req
+func (_m *MockCluster) GetFeatureUsage(ctx context.Context, nodeID int64, req *internalpb.GetFeatureUsageRequest) (*internalpb.GetFeatureUsageResponse, error) {
+	ret := _m.Called(ctx, nodeID, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetFeatureUsage")
+	}
+
+	var r0 *internalpb.GetFeatureUsageResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, *internalpb.GetFeatureUsageRequest) (*internalpb.GetFeatureUsageResponse, error)); ok {
+		return rf(ctx, nodeID, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64, *internalpb.GetFeatureUsageRequest) *internalpb.GetFeatureUsageResponse); ok {
+		r0 = rf(ctx, nodeID, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.GetFeatureUsageResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64, *internalpb.GetFeatureUsageRequest) error); ok {
+		r1 = rf(ctx, nodeID, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockCluster_GetFeatureUsage_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetFeatureUsage'
+type MockCluster_GetFeatureUsage_Call struct {
+	*mock.Call
+}
+
+// GetFeatureUsage is a helper method to define mock.On call
+//   - ctx context.Context
+//   - nodeID int64
+//   - req *internalpb.GetFeatureUsageRequest
+func (_e *MockCluster_Expecter) GetFeatureUsage(ctx interface{}, nodeID interface{}, req interface{}) *MockCluster_GetFeatureUsage_Call {
+	return &MockCluster_GetFeatureUsage_Call{Call: _e.mock.On("GetFeatureUsage", ctx, nodeID, req)}
+}
+
+func (_c *MockCluster_GetFeatureUsage_Call) Run(run func(ctx context.Context, nodeID int64, req *internalpb.GetFeatureUsageRequest)) *MockCluster_GetFeatureUsage_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(*internalpb.GetFeatureUsageRequest))
+	})
+	return _c
+}
+
+func (_c *MockCluster_GetFeatureUsage_Call) Return(_a0 *internalpb.GetFeatureUsageResponse, _a1 error) *MockCluster_GetFeatureUsage_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockCluster_GetFeatureUsage_Call) RunAndReturn(run func(context.Context, int64, *internalpb.GetFeatureUsageRequest) (*internalpb.GetFeatureUsageResponse, error)) *MockCluster_GetFeatureUsage_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetMetrics provides a mock function with given fields: ctx, nodeID, req
 func (_m *MockCluster) GetMetrics(ctx context.Context, nodeID int64, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	ret := _m.Called(ctx, nodeID, req)

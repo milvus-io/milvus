@@ -29,6 +29,7 @@
 #include "index/contracts/query/IIndexReaderBase.h"
 #include "index/contracts/query/ReaderCaps.h"
 #include "pb/index_coord.pb.h"
+#include "segcore/indexing/IndexInventory.h"
 #include "storage/Types.h"
 
 namespace milvus::segcore {
@@ -52,11 +53,10 @@ struct LoadIndexInfo {
             INDEX_STORE_PATH_VERSION_BUILD_ROOTED};
     std::map<std::string, std::string> index_params;
     std::vector<std::string> index_files;
-    std::shared_ptr<cachinglayer::CacheSlot<index::IIndexReaderBase>>
-        cache_index;
-    // Captured from the translator before its unique reader factory is moved
-    // into the cache slot. Segment installation consumes these values without
-    // pinning a cold payload.
+    index::IndexPtr index;
+    // Pending factory, moved into the inventory entry during registration.
+    IndexInventory::Factory lazy_index_factory;
+    // Query metadata captured when the Index is created.
     std::string index_family;
     DataType index_value_type{DataType::NONE};
     index::ReaderCaps index_caps;
@@ -87,8 +87,7 @@ struct LoadIndexInfo {
     LoadIndexInfo&
     operator=(LoadIndexInfo&&) = default;
 
-    // Copy constructor - copies metadata, leaves index pointers as nullptr
-    // since they are populated later during actual index loading
+    // Copy metadata without retaining a loaded slot or its pending factory.
     LoadIndexInfo(const LoadIndexInfo& other)
         : collection_id(other.collection_id),
           partition_id(other.partition_id),
@@ -104,7 +103,8 @@ struct LoadIndexInfo {
           index_store_path_version(other.index_store_path_version),
           index_params(other.index_params),
           index_files(other.index_files),
-          cache_index(nullptr),
+          index(nullptr),
+          lazy_index_factory(nullptr),
           index_family(other.index_family),
           index_value_type(other.index_value_type),
           index_caps(other.index_caps),
@@ -137,7 +137,8 @@ struct LoadIndexInfo {
             index_store_path_version = other.index_store_path_version;
             index_params = other.index_params;
             index_files = other.index_files;
-            cache_index = nullptr;
+            index = nullptr;
+            lazy_index_factory = nullptr;
             index_family = other.index_family;
             index_value_type = other.index_value_type;
             index_caps = other.index_caps;

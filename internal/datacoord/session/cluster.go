@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -619,6 +620,23 @@ func (c *cluster) DropImportV3(nodeID int64, in *datapb.DropImportTaskV3Request)
 }
 
 func (c *cluster) CreateIndex(nodeID int64, in *workerpb.CreateJobRequest) error {
+	if metautil.IsSegmentRooted(in.GetIndexStorePathVersion()) {
+		timeout := paramtable.Get().DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		cli, err := c.nm.GetClient(nodeID)
+		if err != nil {
+			return err
+		}
+		caps, err := cli.QuerySlot(ctx, &datapb.QuerySlotRequest{})
+		if err := merr.CheckRPCCall(caps.GetStatus(), err); err != nil {
+			return err
+		}
+		if !caps.GetSegmentRootedIndexes() {
+			return merr.Wrapf(merr.ErrServiceUnimplemented,
+				"datanode %d does not support segment-rooted index paths; upgrade all datanodes before enabling writeSegmentIndexToManifest", nodeID)
+		}
+	}
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(in.GetBuildID())
@@ -928,7 +946,11 @@ func (c *cluster) CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest,
 	properties.AppendCollectionID(collectionID)
 	// Query the selected worker, rather than infer capability from a version
 	// string. Unknown workers retain the original wire representation.
-	if len(in.GetTargetIndexes()) > 0 {
+	segmentRooted := false
+	for _, target := range in.GetTargets() {
+		segmentRooted = segmentRooted || metautil.IsSegmentRooted(target.GetIndexStorePathVersion())
+	}
+	if len(in.GetTargetIndexes()) > 0 || segmentRooted {
 		timeout := paramtable.Get().DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second)
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
@@ -939,6 +961,10 @@ func (c *cluster) CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest,
 		caps, err := cli.QuerySlot(ctx, &datapb.QuerySlotRequest{})
 		if err := merr.CheckRPCCall(caps.GetStatus(), err); err != nil {
 			return err
+		}
+		if segmentRooted && !caps.GetSegmentRootedIndexes() {
+			return merr.Wrapf(merr.ErrServiceUnimplemented,
+				"datanode %d does not support segment-rooted index copy destinations; upgrade all datanodes before enabling writeSegmentIndexToManifest", nodeID)
 		}
 		if !caps.GetCopySegmentSharedIndexes() {
 			in = proto.Clone(in).(*datapb.CopySegmentRequest)

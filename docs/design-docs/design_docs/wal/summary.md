@@ -15,7 +15,7 @@ The shared bounded-read contract (§5.4) is used by local SN TransformLog
 bootstrap subscriptions (§5.5). The Summary-based L0 consumer remains unwired,
 including range-statistics admission and Summary-owned materialization-backlog
 requests described in [L0Materializer §5](l0_materializer.md#5-read-and-materialize).
-Remote/QN subscription integration remains planned.
+The qv branch wires remote/QN subscriptions through the same Summary reader.
 
 The protocol added by this feature is still under development. Intermediate
 branch versions are not compatibility targets: removed draft messages and
@@ -588,9 +588,11 @@ A change token is captured consistently with progress. Notifications wake
 consumers to recheck state, avoiding a missed update between reading and waiting;
 they do not carry record ownership or subscription delivery guarantees. The
 revised materializer re-evaluates admission after observation, L1 completion,
-and Summary backlog requests. Notifications alone do not force L0 output. Local
-subscriptions use progress notifications to follow the tail without adding
-another WAL observer.
+and Summary backlog requests. Notifications alone do not force L0 output.
+Local bounded subscriptions use progress notifications to await coverage.
+Remote continuous subscriptions replay a captured prefix, then receive the live
+suffix directly from this same ordered PChannel observation; they introduce no
+additional WAL scanner.
 
 For unbounded TransformLog subscriptions, distinguish **readable coverage** from
 **notification scope**. `ReadableThrough` remains the complete PChannel prefix;
@@ -602,9 +604,9 @@ VChannels' ordinary messages can extend readable coverage without waking it.
 
 Scoped notifications follow query Transform MVCC semantics, using the shared
 message classification in `messageutil` rather than the presence of a stored
-Delete payload. Delete, CreateCollection, transaction commit (including an
-insert-only assembled transaction), CommitImport, Flush/ManualFlush, relevant
-DDL and schema changes notify their VChannel. Plain Inserts, property-only
+Delete payload. Delete, CreateCollection, commits containing non-Insert bodies,
+CommitImport, Flush/ManualFlush, relevant DDL and schema changes notify their
+VChannel. Plain Inserts, pure Insert and empty transactions, property-only
 AlterCollection and ordinary TimeTick confirmations do not. PChannel-wide
 FlushAll/AlterWAL and RecoveryBarrier notify every active scope. GC wakes scopes
 whose history is retired; a terminal failure wakes every scope. Cluster broadcast
@@ -618,8 +620,12 @@ The last subscription release removes it. Tokens are allocated only on reads and
 cleared on notification, coalescing messages until a reader captures another
 token. This adds O(active VChannels) notification metadata and no worker
 goroutines. Ordinary scoped notification is an O(1) lookup rather than a scan of
-all subscriptions; global barriers retain their necessary fan-out. Existing
-subscription goroutines and their bounded delivery buffers remain unchanged.
+all subscriptions; global barriers retain their necessary fan-out.
+The reader-only adaptor retains its subscription goroutines. Production remote
+continuous subscriptions instead use DispatchStream: snapshot capture and live
+observer registration share this observation lock, and subsequent PChannel
+observations forward immutable entries/progress without a waiting goroutine per
+subscription. See [TransformLog delivery](transform_log.md#4-catch-up-and-live-delivery).
 Consumers without the optional watch capability retain global notifications.
 
 Scope registration precedes the first read. Subsequent reads capture both state
@@ -676,8 +682,10 @@ when a WAL opens) limits resident encoded-buffer capacity per PChannel. Zero
 disables residency. LRU access ordering is shared by read and write admissions;
 eviction drops only the payload, retaining the complete index for future loads.
 An object larger than the budget bypasses residency without evicting the whole
-working set. No subscriber cursor pins the cache, and no cache worker/timer or
-per-VChannel goroutine is introduced. Slow consumers fall back to object reads.
+working set. No subscriber cursor pins cache residency. Each cold chunk load
+owns a temporary goroutine, shared by all its waiters; there is no persistent
+cache worker or per-VChannel cache goroutine. Slow consumers fall back to object
+reads.
 
 This is a cache-buffer budget, not a total-process memory limit. Metadata,
 pending/sealed source records, delivery batches, section decoding and buffers
@@ -687,11 +695,26 @@ An evicted buffer stays valid for readers that already acquired it. Total node
 residency scales with its number of PChannels; node-wide budgeting and scan-
 resistant admission remain future tuning work.
 
-A canceled loader cannot fail unrelated subscribers with its cancellation:
-remaining waiters retry loading with their own contexts. Other load errors are
-returned without caching them. No detached loader survives its calling read.
-I/O never holds the Manager or cache lock. Cache insertion and membership changes
-preserve the existing pending/sealed/durable snapshot boundary.
+Each cold load owns a context independent of every caller's cancellation and
+deadline. The first caller and subsequent callers are equal waiters on its
+result. Canceling a waiter removes only that reference; only the final waiter
+cancels the underlying load. The final waiter joins storage cleanup before
+returning, preserving its snapshot's local GC pin until object I/O has stopped.
+A new caller arriving during abandoned-load cleanup waits for that cleanup before
+starting a replacement. The old task cannot overwrite a new task's result.
+
+Temporary failures retry within that same shared load, retaining one exponential
+backoff sequence even when waiters join or cancel. All remaining waiters receive
+the same successful payload, including when residency is disabled or the object
+is oversized. Known permanent storage failures and malformed objects terminate
+the load and return the error to all remaining waiters; errors are not cached.
+Generic I/O, unclassified failures and operation-local timeouts retain the
+existing retry policy. Download slots are released between attempts during
+backoff; the read snapshot remains pinned while the shared load is needed.
+
+I/O and backoff never hold the Manager state mutex or cache mutex. Cache insertion
+and membership changes preserve the existing pending/sealed/durable snapshot
+boundary.
 
 GC removes the leaf with its manifest reference and discards its resident buffer.
 An in-flight old snapshot can finish under the existing read pin, but cannot
@@ -712,6 +735,16 @@ Validation must count actual chunk reads for empty ranges, page boundaries,
 same/cross-VChannel sharing and write admission; also cover eviction, disabled
 and oversized caches, concurrent cancellation/failure, out-of-order upload,
 equivalent write retries, GC during loading and restart without payload preload.
+
+Each retained immutable chunk index also keeps its successful footer-validation
+fingerprint independently of resident payload bytes. Eviction or disabled
+payload caching preserves that fingerprint; retirement discards both. Every
+reload still validates framing and hashes the footer. Only an unchanged digest
+and object size can reuse semantic validation against the same manifest index.
+Changed footer encodings undergo full decoding and index comparison. In-flight
+reads cannot repopulate retired cache state. Canceling one waiter does not
+cancel the shared load or discard its validation result while other waiters
+remain. A terminal object error is returned to every remaining waiter.
 
 ### 5.5 TransformLog Adaptor
 
@@ -735,10 +768,10 @@ if the write-side MVCC is ahead of Summary. See
 [SyncUp semantics](transform_log.md#3-entry-and-syncup-semantics) for the full
 contract and [delivery conditions](transform_log.md#4-catch-up-and-live-delivery).
 
-Remote transport, QN continuous subscriptions and their view retention are
-planned consumers. Their protocol must not be treated as enabled merely because
-the local SN adaptor exists. The current WAL L0 materializer remains independent
-of all TransformLog subscriptions. See the [WAL-view handoff](streamingnode_vchannel_wal_view.md)
+The qv branch wires remote transport and QN continuous subscriptions through
+independently owned Summary streams. The advancing view retention frontier
+remains deferred; see [Transform subscriptions](../qviews/pure_transform_subscription.md).
+The current WAL L0 materializer remains independent of all TransformLog subscriptions. See the [WAL-view handoff](streamingnode_vchannel_wal_view.md)
 for local snapshot, live-event and retention ownership.
 
 ## 6. Recovery And Term Takeover
@@ -838,10 +871,14 @@ WALSummary; the replay interval must remain available until safely summarized.
   not a supported reset procedure. A higher-term manifest causes rejection,
   rather than being adopted by a lower-term writer; that check alone cannot
   distinguish every reuse of a previous incarnation's names and terms.
-- Checkpoint CAS does not fence every component write in a large recovery
-  snapshot. The catalog's multi-batch fallback can write component metadata
-  before the guarded final commit; full cross-owner component fencing belongs
-  to the metastore/recovery integration.
+- RecoveryStorage supplies the owner's checkpoint with recovery snapshots.
+  `SaveRecoverySnapshot` wraps the transaction KV with a value-equality guard on
+  the checkpoint captured before publication. Every component batch and the
+  final commit use that guard, including the large-snapshot fallback. Initial
+  ownership is established with a checkpoint-only publication before component
+  writes. A component may precede the final checkpoint without escaping the
+  ownership check. This metadata fence does not authorize object-store deletion
+  or solve cross-owner Summary GC; see [checkpoint persistence](checkpoint-persistence.md).
 - Losing a guarded publication does not guarantee one uniform public
   superseded-owner error across backends. The catalog verifies the stored value;
   callers must handle a failed or ambiguous publication without advancing their

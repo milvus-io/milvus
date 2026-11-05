@@ -19,12 +19,41 @@
 #include <chrono>
 #include <future>
 
+#ifdef __linux__
+#include <sys/resource.h>
+#endif
+
 #include "common/EasyAssert.h"
 #include "folly/ScopeGuard.h"
+#include "folly/executors/CPUThreadPoolExecutor.h"
 #include "gtest/gtest.h"
 
 namespace milvus::storage {
 namespace {
+
+#ifdef __linux__
+TEST(AsyncLoadExecutorTest, DefaultWorkersUseNice19ForBothPriorities) {
+    const int caller_nice = getpriority(PRIO_PROCESS, 0);
+    auto worker_nice = [](folly::Executor::KeepAlive<> executor) {
+        std::promise<int> result;
+        auto value = result.get_future();
+        executor->add(
+            [&]() { result.set_value(getpriority(PRIO_PROCESS, 0)); });
+        return value.get();
+    };
+    for (const auto priority : {proto::common::LoadPriority::HIGH,
+                                proto::common::LoadPriority::LOW}) {
+        EXPECT_EQ(worker_nice(ResolveAsyncLoadExecutor({}, priority)), 19);
+    }
+    EXPECT_EQ(getpriority(PRIO_PROCESS, 0), caller_nice);
+
+    folly::CPUThreadPoolExecutor custom(1);
+    EXPECT_EQ(worker_nice(
+                  ResolveAsyncLoadExecutor(folly::getKeepAliveToken(&custom),
+                                           proto::common::LoadPriority::HIGH)),
+              caller_nice);
+}
+#endif
 
 TEST(AsyncLoadExecutorTest, ResizesExistingExecutorWithQueuedWork) {
     const int previous = GetAsyncLoadThreadPoolSize();
@@ -53,6 +82,9 @@ TEST(AsyncLoadExecutorTest, ResizesExistingExecutorWithQueuedWork) {
         }
     });
     executor->add([&]() {
+#ifdef __linux__
+        EXPECT_EQ(getpriority(PRIO_PROCESS, 0), 19);
+#endif
         first_started.set_value();
         released.wait();
         first_done.set_value();
@@ -61,6 +93,9 @@ TEST(AsyncLoadExecutorTest, ResizesExistingExecutorWithQueuedWork) {
     EXPECT_EQ(first_started.get_future().wait_for(std::chrono::seconds(2)),
               std::future_status::ready);
     executor->add([&]() {
+#ifdef __linux__
+        EXPECT_EQ(getpriority(PRIO_PROCESS, 0), 19);
+#endif
         second_started.set_value();
         released.wait();
         second_done.set_value();

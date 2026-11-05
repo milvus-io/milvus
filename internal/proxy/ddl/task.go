@@ -101,64 +101,6 @@ func validateTextStorageV3Enabled(schema *schemapb.CollectionSchema) error {
 	return nil
 }
 
-// validateAddFunctionRequiresStorageV3 rejects adding a function to an existing collection
-// unless the compaction infrastructure that backfills its output field into pre-existing
-// sealed segments is enabled. The new function-output field is materialized only by
-// compaction (bump_schema_version compaction requires a StorageV3 segment):
-//   - common.storage.useLoonFFI: StorageV3 mode (bump works only on V3 segments; TEXT needs V3).
-//   - dataCoord.compaction.bumpSchemaVersion.enabled: the bumpSchemaVersionPolicy that directly
-//     backfills pre-existing V3 segments; it defaults to false, and there is no direct trigger
-//     on the add-function DDL, so without it an already-V3 old segment never receives the output.
-//   - dataCoord.compaction.storageVersion.enabled: the storageVersionUpgradePolicy that first
-//     mix-upgrades a pre-existing V2 segment to V3 so it can be bumped.
-//
-// Without all three, the DDL would succeed while old rows silently never get the function output.
-// New writes always compute the function output at flush, so create_collection with a function is
-// unaffected; this guard applies only to add-function on an existing collection. See issue #51167.
-func validateAddFunctionRequiresStorageV3() error {
-	if !paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool() {
-		return merr.WrapErrParameterInvalidMsg("adding a function field requires StorageV3; enable common.storage.useLoonFFI")
-	}
-	if !paramtable.Get().DataCoordCfg.BumpSchemaVersionCompactionEnabled.GetAsBool() {
-		return merr.WrapErrParameterInvalidMsg("adding a function field requires schema-bump compaction to backfill existing segments; enable dataCoord.compaction.bumpSchemaVersion.enabled")
-	}
-	if !paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.GetAsBool() {
-		return merr.WrapErrParameterInvalidMsg("adding a function field requires the storage-version upgrade compaction; enable dataCoord.compaction.storageVersion.enabled")
-	}
-	return nil
-}
-
-// validateAddFunctionInputNotText rejects adding a BM25/MinHash function whose input is a
-// TEXT field. TEXT columns are stored as binary LOB references, so when the async backfill
-// compaction materializes the function output for pre-existing segments it reads the input
-// back as *array.Binary and hard-fails in stringInputsFromRecord ("cannot materialize bm25
-// from text binary values without lob decoding"); the add-function DDL would return success
-// while the backfill silently fails and old rows never get the output. Reject it up front
-// (fail-fast). VarChar inputs stay allowed, and create_collection with such a function is
-// unaffected -- its output is computed at flush from the raw text. Distinct from the
-// storage-version gate (validateAddFunctionRequiresStorageV3): this is a request-content
-// input-type constraint, not an environment/config check. See issue #51167.
-func validateAddFunctionInputNotText(schema *schemapb.CollectionSchema, function *schemapb.FunctionSchema) error {
-	switch function.GetType() {
-	case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash:
-	default:
-		// Only BM25/MinHash are materialized from string input during backfill.
-		return nil
-	}
-	fieldByName := make(map[string]*schemapb.FieldSchema, len(schema.GetFields()))
-	for _, f := range schema.GetFields() {
-		fieldByName[f.GetName()] = f
-	}
-	for _, name := range function.GetInputFieldNames() {
-		if f, ok := fieldByName[name]; ok && f.GetDataType() == schemapb.DataType_Text {
-			return merr.WrapErrParameterInvalidMsg(
-				"adding a %s function with a TEXT input field (%s) is not supported: its output cannot be backfilled into existing segments; use a VARCHAR input field",
-				function.GetType().String(), name)
-		}
-	}
-	return nil
-}
-
 type CreateCollectionTask struct {
 	baseTask
 	Condition
@@ -378,7 +320,7 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 	t.schema = &schemapb.CollectionSchema{}
 	err := proto.Unmarshal(t.Schema, t.schema)
 	if err != nil {
-		return err
+		return merr.WrapErrParameterInvalidErr(err, "failed to parse schema for collection %s", t.GetCollectionName())
 	}
 	t.schema.AutoID = false
 	t.schema.DbName = t.GetDbName()
@@ -499,11 +441,6 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	// validate row level security
-	if err := common.ValidateRLSProperties(t.GetProperties()...); err != nil {
-		return err
-	}
-
 	// Validate timezone
 	tz, exist := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, t.GetProperties())
 	if exist && !timestamptz.IsTimezoneValid(tz) {
@@ -545,6 +482,14 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 		if err := ValidateStructArrayField(structArrayField, t.schema); err != nil {
 			return err
 		}
+	}
+	// RootCoord skips this check when preserve_field_ids is set, as for a
+	// snapshot restore, which does not go through proxy.
+	if err := schemautil.RejectStructSubFieldsTextMatch(t.schema.GetStructArrayFields()); err != nil {
+		return err
+	}
+	if err := validateNativeListArrayGrowingSourceFlush(t.schema, typeutil.GetAllFieldSchemas(t.schema)...); err != nil {
+		return err
 	}
 
 	// Transform struct field names to ensure global uniqueness
@@ -647,7 +592,7 @@ func (t *AddCollectionFieldTask) PreExecute(ctx context.Context) error {
 
 	t.fieldSchema = &schemapb.FieldSchema{}
 	if err := proto.Unmarshal(t.GetSchema(), t.fieldSchema); err != nil {
-		return err
+		return merr.WrapErrParameterInvalidErr(err, "failed to parse field schema for collection %s", t.GetCollectionName())
 	}
 	if err := validateAddFieldRequest(t.oldSchema, t.fieldSchema); err != nil {
 		return err
@@ -736,6 +681,9 @@ func (t *AddCollectionStructFieldTask) PreExecute(ctx context.Context) error {
 
 	t.structFieldSchema = proto.Clone(t.GetStructArrayFieldSchema()).(*schemapb.StructArrayFieldSchema)
 	if err := validateAddStructFieldRequest(t.oldSchema, t.structFieldSchema); err != nil {
+		return err
+	}
+	if err := validateNativeListArrayGrowingSourceFlush(t.oldSchema, t.structFieldSchema.GetFields()...); err != nil {
 		return err
 	}
 	transformStructArrayFieldSubNames(t.structFieldSchema)
@@ -1062,6 +1010,12 @@ func (t *AlterCollectionSchemaTask) preExecuteAdd(ctx context.Context) error {
 	}
 
 	if plan.HasField() {
+		if plan.Kind == schemautil.AlterSchemaAddStructSubField {
+			if err := validateAddStructSubFieldRequest(t.oldSchema, plan); err != nil {
+				return err
+			}
+			return validateNativeListArrayGrowingSourceFlush(t.oldSchema, plan.Field)
+		}
 		if err := validateAddFieldRequest(t.oldSchema, plan.Field); err != nil {
 			return err
 		}
@@ -1077,7 +1031,7 @@ func (t *AlterCollectionSchemaTask) preExecuteAdd(ctx context.Context) error {
 		}
 	}
 	if plan.HasFunction() {
-		if err := validateAddFunctionRequiresStorageV3(); err != nil {
+		if err := schemautil.ValidateAddFunctionRequiresStorageV3(); err != nil {
 			return err
 		}
 		if err := schemautil.ValidateAlterSchemaAddFunctionPlan(plan); err != nil {
@@ -1121,7 +1075,7 @@ func (t *AlterCollectionSchemaTask) preExecuteAdd(ctx context.Context) error {
 		mergedSchema.Fields = append(mergedSchema.Fields, proto.Clone(plan.Field).(*schemapb.FieldSchema))
 	}
 	mergedSchema.Functions = append(mergedSchema.Functions, plan.Function)
-	if err := validateAddFunctionInputNotText(mergedSchema, plan.Function); err != nil {
+	if err := schemautil.ValidateAddFunctionInputNotText(mergedSchema, plan.Function); err != nil {
 		return err
 	}
 	if err := validator.ValidateFunction(mergedSchema, plan.Function.GetName(), false); err != nil {
@@ -1129,6 +1083,95 @@ func (t *AlterCollectionSchemaTask) preExecuteAdd(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func validateAddStructSubFieldRequest(schema *schemapb.CollectionSchema, plan *schemautil.AlterSchemaAddPlan) error {
+	structPath, field := plan.StructPath, plan.Field
+	var parent *schemapb.StructArrayFieldSchema
+	for _, structField := range schema.GetStructArrayFields() {
+		if structField.GetName() == structPath {
+			parent = structField
+			break
+		}
+	}
+	if parent == nil {
+		return merr.WrapErrParameterInvalidMsg("struct field %q not found", structPath)
+	}
+
+	rawName := plan.SubFieldName()
+	if err := validateFieldName(rawName); err != nil {
+		return err
+	}
+	storedName := typeutil.ConcatStructFieldName(structPath, rawName)
+	// The new sub-field is stored as s[x], so against other containers (top
+	// level fields, structs, and sub-fields of other structs) only that full
+	// name can clash: s[id] next to a top-level id and s[s] in struct s are
+	// valid, as they are at create collection and when a whole struct is
+	// added. The short name clashes only with a sibling in the same struct.
+	for _, existing := range schema.GetFields() {
+		if existing.GetName() == storedName {
+			return merr.WrapErrParameterInvalidMsg("duplicated field name %s", storedName)
+		}
+	}
+	for _, structField := range schema.GetStructArrayFields() {
+		if structField.GetName() == storedName {
+			return merr.WrapErrParameterInvalidMsg("duplicated field name %s", storedName)
+		}
+		if structField.GetName() != structPath {
+			continue
+		}
+		for _, existing := range structField.GetFields() {
+			if existing.GetName() == rawName || storedStructSubFieldName(structPath, existing.GetName()) == storedName {
+				return merr.WrapErrParameterInvalidMsg("duplicated field name %s", rawName)
+			}
+		}
+	}
+	if !field.GetElementNullable() {
+		return merr.WrapErrParameterInvalidMsg("added sub-field %q of struct field %q must set element_nullable=true", field.GetName(), structPath)
+	}
+	if err := schemautil.FillAddedStructSubFieldMaxCapacity(parent, field); err != nil {
+		return err
+	}
+	if field.GetIsDynamic() {
+		return merr.WrapErrParameterInvalidMsg("cannot add struct sub-field %q with a protected role", field.GetName())
+	}
+	newField := proto.Clone(field).(*schemapb.FieldSchema)
+	newField.Name = rawName
+	if err := validateAddStructSubFieldProperties(&schemapb.StructArrayFieldSchema{Fields: []*schemapb.FieldSchema{newField}}); err != nil {
+		return err
+	}
+	if typeutil.GetTotalFieldsNum(schema)+1 > paramtable.Get().ProxyCfg.MaxFieldNum.GetAsInt() {
+		return merr.WrapErrParameterInvalidMsg("maximum field's number should be limited to %d", paramtable.Get().ProxyCfg.MaxFieldNum.GetAsInt())
+	}
+	if typeutil.IsVectorType(field.GetDataType()) && len(typeutil.GetVectorFieldSchemas(schema))+1 > paramtable.Get().ProxyCfg.MaxVectorFieldNum.GetAsInt() {
+		return merr.WrapErrParameterInvalidMsg("maximum vector field's number should be limited to %d", paramtable.Get().ProxyCfg.MaxVectorFieldNum.GetAsInt())
+	}
+
+	mergedParent := proto.Clone(parent).(*schemapb.StructArrayFieldSchema)
+	for _, sibling := range mergedParent.GetFields() {
+		prefix := structPath + "["
+		if name, ok := strings.CutPrefix(sibling.GetName(), prefix); ok {
+			if stripped, valid := strings.CutSuffix(name, "]"); valid {
+				sibling.Name = stripped
+			}
+		}
+	}
+	mergedParent.Fields = append(mergedParent.Fields, newField)
+	if err := ValidateStructArrayField(mergedParent, schema); err != nil {
+		return err
+	}
+	field.Nullable = newField.Nullable
+	if newField.GetTypeSchema() != nil {
+		field.TypeSchema = newField.GetTypeSchema()
+	}
+	mergedSchema := proto.Clone(schema).(*schemapb.CollectionSchema)
+	for i, structField := range mergedSchema.GetStructArrayFields() {
+		if structField.GetName() == structPath {
+			mergedSchema.StructArrayFields[i].Fields = append(mergedSchema.StructArrayFields[i].Fields, proto.Clone(field).(*schemapb.FieldSchema))
+			break
+		}
+	}
+	return validateTextStorageV3Enabled(mergedSchema)
 }
 
 func (t *AlterCollectionSchemaTask) preExecuteDrop(ctx context.Context) error {
@@ -1144,17 +1187,14 @@ func (t *AlterCollectionSchemaTask) preExecuteDrop(ctx context.Context) error {
 				return validateDropField(t.oldSchema, f.Name)
 			}
 		}
-		// Struct array field and its sub-fields share the FieldID namespace but
-		// live outside schema.Fields. Route struct-level drops to the normal
-		// by-name path; sub-field drops are not supported in this change.
+		// Struct array fields and sub-fields share the FieldID namespace.
 		for _, sf := range t.oldSchema.StructArrayFields {
 			if sf.FieldID == id.FieldId {
 				return validateDropField(t.oldSchema, sf.Name)
 			}
 			for _, sub := range sf.Fields {
 				if sub.FieldID == id.FieldId {
-					return merr.WrapErrParameterInvalidMsg(
-						"cannot drop sub-field of struct array field: %s.%s", sf.Name, sub.Name)
+					return validateDropStructSubField(t.oldSchema, sf, sub)
 				}
 			}
 		}
@@ -1184,17 +1224,14 @@ func validateDropField(schema *schemapb.CollectionSchema, fieldName string) erro
 		return merr.WrapErrParameterInvalidMsg("field name is empty")
 	}
 
-	// Struct array fields share the name namespace with top-level fields but
-	// live in schema.StructArrayFields. Dropping the whole struct is allowed;
-	// dropping a single sub-field is not (no symmetric add-sub-field support).
+	// Struct array fields share the name namespace with top-level fields.
 	for _, sf := range schema.StructArrayFields {
 		if sf.Name == fieldName {
 			return validateDropStructArrayField(schema, sf)
 		}
 		for _, sub := range sf.Fields {
-			if sub.Name == fieldName {
-				return merr.WrapErrParameterInvalidMsg(
-					"cannot drop sub-field of struct array field: %s.%s", sf.Name, fieldName)
+			if storedStructSubFieldName(sf.GetName(), sub.GetName()) == fieldName {
+				return validateDropStructSubField(schema, sf, sub)
 			}
 		}
 	}
@@ -1264,6 +1301,43 @@ func validateDropField(schema *schemapb.CollectionSchema, fieldName string) erro
 		}
 	}
 
+	return nil
+}
+
+func validateDropStructSubField(schema *schemapb.CollectionSchema, parent *schemapb.StructArrayFieldSchema, sub *schemapb.FieldSchema) error {
+	storedName := storedStructSubFieldName(parent.GetName(), sub.GetName())
+	if len(parent.GetFields()) <= 1 {
+		return merr.WrapErrParameterInvalidMsg("cannot drop the last sub-field %q of struct field %q, drop the struct field instead", storedName, parent.GetName())
+	}
+	// The struct must keep an original sub-field; rootcoord enforces the same
+	// rule in schema evolution.
+	remaining := make([]*schemapb.FieldSchema, 0, len(parent.GetFields())-1)
+	for _, field := range parent.GetFields() {
+		if field.GetFieldID() != sub.GetFieldID() {
+			remaining = append(remaining, field)
+		}
+	}
+	if err := schemautil.CheckStructKeepsOriginalSubField(parent.GetName(), storedName, remaining); err != nil {
+		return err
+	}
+	if sub.GetIsPrimaryKey() || sub.GetAutoID() || sub.GetIsPartitionKey() || sub.GetIsClusteringKey() || sub.GetIsDynamic() || sub.GetIsFunctionOutput() || sub.GetExternalField() != "" {
+		return merr.WrapErrParameterInvalidMsg("cannot drop struct sub-field %q with a protected role", sub.GetName())
+	}
+	if typeutil.IsVectorType(sub.GetDataType()) && len(typeutil.GetVectorFieldSchemas(schema)) <= 1 {
+		return merr.WrapErrParameterInvalidMsg("cannot drop the last vector field: %s", storedName)
+	}
+	for _, fn := range schema.GetFunctions() {
+		for _, name := range fn.GetInputFieldNames() {
+			if name == storedName {
+				return merr.WrapErrParameterInvalidMsg("field is referenced by function %s as input, drop function first", fn.GetName())
+			}
+		}
+		for _, name := range fn.GetOutputFieldNames() {
+			if name == storedName {
+				return merr.WrapErrParameterInvalidMsg("field is referenced by function %s as output, drop function first", fn.GetName())
+			}
+		}
+	}
 	return nil
 }
 
@@ -1589,9 +1663,10 @@ type DescribeCollectionTask struct {
 	baseTask
 	Condition
 	*milvuspb.DescribeCollectionRequest
-	ctx      context.Context
-	mixCoord types.MixCoordClient
-	result   *milvuspb.DescribeCollectionResponse
+	ctx              context.Context
+	mixCoord         types.MixCoordClient
+	result           *milvuspb.DescribeCollectionResponse
+	internalMetadata bool
 }
 
 func (t *DescribeCollectionTask) TraceCtx() context.Context {
@@ -1654,7 +1729,11 @@ func (t *DescribeCollectionTask) Execute(ctx context.Context) error {
 		DbName:               t.GetDbName(),
 	}
 
-	ctx = DescribeCollectionRPCContext(ctx)
+	if t.internalMetadata {
+		ctx = describeCollectionMetadataContext(ctx)
+	} else {
+		ctx = DescribeCollectionRPCContext(ctx)
+	}
 	result, err := t.mixCoord.DescribeCollection(ctx, t.DescribeCollectionRequest)
 	if err != nil {
 		return err
@@ -1664,6 +1743,9 @@ func (t *DescribeCollectionTask) Execute(ctx context.Context) error {
 		t.result.Status = DescribeCollectionErrorStatus(
 			merr.Error(result.GetStatus()), t.GetDbName(), t.GetCollectionName())
 		return nil
+	}
+	if t.internalMetadata && result.GetDbName() == "" {
+		return merr.WrapErrServiceUnavailable("collection database is unavailable for visibility check")
 	}
 	if t.result.CollectionName == "" {
 		t.result.CollectionName = result.GetCollectionName()
@@ -2087,39 +2169,6 @@ func (t *AlterCollectionTask) PreExecute(ctx context.Context) error {
 		t.CollectionID = collectionID
 		return nil
 	}
-	requiresManageRLS := false
-	for _, property := range t.GetProperties() {
-		if property.GetKey() == common.RLSEnabledKey || property.GetKey() == common.RLSForceKey {
-			requiresManageRLS = true
-			break
-		}
-	}
-	if !requiresManageRLS {
-		for _, key := range t.GetDeleteKeys() {
-			if key == common.RLSEnabledKey || key == common.RLSForceKey {
-				requiresManageRLS = true
-				break
-			}
-		}
-	}
-	if requiresManageRLS {
-		if err := resolveCollectionInfo(); err != nil {
-			return err
-		}
-		canonicalDBName := collInfo.DBName
-		if canonicalDBName == "" {
-			canonicalDBName = t.GetDbName()
-		}
-		// The node is always injected by the composition root; white-box tests
-		// that build the task without a node run with authorization disabled,
-		// for which the root privilege check is a no-op anyway.
-		if t.node != nil {
-			if err := t.node.CheckManageRLSPrivilege(ctx, t.GetMetaCache(), t.AlterCollectionRequest,
-				canonicalDBName, collInfo.Schema.GetName()); err != nil {
-				return err
-			}
-		}
-	}
 
 	// External source/spec form an atomic tuple bound to the physical data
 	// layout. The only supported way to change them is RefreshExternalCollection,
@@ -2140,16 +2189,6 @@ func (t *AlterCollectionTask) PreExecute(ctx context.Context) error {
 	}
 	if err := common.ValidateNamespaceShardingEnabledNotAltered(t.GetProperties(), t.GetDeleteKeys()); err != nil {
 		return err
-	}
-	if err := common.ValidateRLSProperties(t.GetProperties()...); err != nil {
-		return err
-	}
-	for _, key := range t.GetDeleteKeys() {
-		for _, expected := range []string{common.RLSEnabledKey, common.RLSForceKey} {
-			if strings.EqualFold(key, expected) && key != expected {
-				return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", key, expected)
-			}
-		}
 	}
 
 	if err := resolveCollectionInfo(); err != nil {
@@ -2494,6 +2533,18 @@ func (t *AlterCollectionFieldTask) PreExecute(ctx context.Context) error {
 	}
 
 	t.Properties = updatePropertiesKeys(t.Properties)
+	if target := schemautil.StructAlterTarget(collSchema.CollectionSchema, t.FieldName); target != "" {
+		keys := make([]string, 0, len(t.Properties)+len(t.DeleteKeys))
+		for _, prop := range t.Properties {
+			keys = append(keys, prop.GetKey())
+		}
+		for _, key := range t.DeleteKeys {
+			keys = append(keys, updateKey(key))
+		}
+		if err := schemautil.ValidateStructFieldAlterKeys(target, t.FieldName, keys); err != nil {
+			return err
+		}
+	}
 	for _, prop := range t.Properties {
 		if !IsKeyAllowAlter(prop.Key) {
 			return merr.WrapErrParameterInvalidMsg("%s does not allow update in collection field param", prop.Key)
@@ -2533,20 +2584,18 @@ func (t *AlterCollectionFieldTask) PreExecute(ctx context.Context) error {
 
 		case common.MaxLengthKey:
 			IsStringType := false
-			fieldName := ""
 			for _, field := range collSchema.Fields {
 				if field.GetName() == t.FieldName && (typeutil.IsStringType(field.DataType) || typeutil.IsArrayContainStringElementType(field.DataType, field.ElementType)) {
 					IsStringType = true
-					fieldName = field.GetName()
 					break
 				}
 			}
 			if !IsStringType {
-				return merr.WrapErrParameterInvalidMsg("%s can not modify the maxlength for non-string types", fieldName)
+				return merr.WrapErrParameterInvalidMsg("%s can not modify the maxlength for non-string types", t.FieldName)
 			}
 			value, err := strconv.Atoi(prop.Value)
 			if err != nil {
-				return merr.WrapErrParameterInvalidMsg("%s should be an integer, but got %T", prop.Key, prop.Value)
+				return merr.WrapErrParameterInvalidErr(err, "the value for %s of field %s must be an integer", prop.Key, t.FieldName)
 			}
 
 			defaultMaxVarCharLength := paramtable.Get().ProxyCfg.MaxVarCharLength.GetAsInt64()
@@ -2555,21 +2604,19 @@ func (t *AlterCollectionFieldTask) PreExecute(ctx context.Context) error {
 			}
 		case common.MaxCapacityKey:
 			IsArrayType := false
-			fieldName := ""
 			for _, field := range collSchema.Fields {
 				if field.GetName() == t.FieldName && typeutil.IsArrayType(field.DataType) {
 					IsArrayType = true
-					fieldName = field.GetName()
 					break
 				}
 			}
 			if !IsArrayType {
-				return merr.WrapErrParameterInvalidMsg("%s can not modify the maxcapacity for non-array types", fieldName)
+				return merr.WrapErrParameterInvalidMsg("%s can not modify the maxcapacity for non-array types", t.FieldName)
 			}
 
 			maxCapacityPerRow, err := strconv.ParseInt(prop.Value, 10, 64)
 			if err != nil {
-				return merr.WrapErrParameterInvalidMsg("the value for %s of field %s must be an integer", common.MaxCapacityKey, fieldName)
+				return merr.WrapErrParameterInvalidErr(err, "the value for %s of field %s must be an integer", common.MaxCapacityKey, t.FieldName)
 			}
 			maxArrayCapacity := paramtable.Get().ProxyCfg.MaxArrayCapacity.GetAsInt64()
 			if maxCapacityPerRow > maxArrayCapacity || maxCapacityPerRow <= 0 {
@@ -4121,3 +4168,7 @@ func (t *ListResourceGroupsTask) Execute(ctx context.Context) error {
 func (t *ListResourceGroupsTask) PostExecute(ctx context.Context) error {
 	return nil
 }
+
+// UseInternalMetadata is selected only by the trusted Proxy provider. The provider
+// must authorize the resolved result before it is returned to a user.
+func (t *DescribeCollectionTask) UseInternalMetadata() { t.internalMetadata = true }

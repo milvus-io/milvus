@@ -61,6 +61,9 @@ func (s *NullDataSuite) checkNullableFieldData(fieldName string, fieldDatas []*s
 	fieldData := actual.GetScalars().GetLongData().Data
 	validData := typeutil.GetFieldDataValidData(actual)
 	s.Equal(len(validData), len(fieldData))
+	// Row validity must be in both the legacy and the field-specific location.
+	s.Equal(validData, actual.GetValidData())
+	s.Equal(validData, actual.GetScalars().GetValidData())
 	for i, ans := range actual.GetScalars().GetLongData().Data {
 		if ans < start {
 			s.False(validData[i])

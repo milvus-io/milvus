@@ -359,7 +359,7 @@ struct SearchResult {
     // Request-pinned sealed read snapshot, captured once while the read lease
     // is held. Result fill / export reuse it at the fill layer (FillTargetEntry
     // / bulk_subscript / take) instead of re-capturing the published state per
-    // output field. Deeper column/index helpers (get_raw_data, PinIndex,
+    // output field. Deeper column/index helpers (get_raw_data, CreateIndexReader,
     // HasFieldData, ...) may still self-capture; migrating them is a Phase 4
     // follow-up. Growing and non-pinned paths leave this empty.
     std::shared_ptr<const segcore::SegmentReadSnapshot> read_snapshot_;
@@ -417,6 +417,10 @@ struct SearchResult {
     StorageCost search_storage_cost_;
 
     bool element_level_{false};
+    // Execution features seen while producing this result, moved into the
+    // request's FeatureRecorder by the operator that owns the query context.
+    bool used_interim_index_{false};
+    bool strict_group_phase2_used_{false};
     std::vector<int32_t> element_indices_;
     std::optional<std::vector<std::shared_ptr<VectorIterator>>>
         element_iterators_;

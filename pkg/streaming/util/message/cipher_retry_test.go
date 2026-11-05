@@ -187,3 +187,31 @@ func TestDecodePayloadRetryBoundaries(t *testing.T) {
 	require.Equal(t, 1, getDecryptor.Times())
 	require.Equal(t, 1, decrypt.Times(), "malformed protobuf after successful decryption must not retry")
 }
+
+func TestTryDecryptPayloadPreservesTransientFailures(t *testing.T) {
+	originalCipher := cipher
+	t.Cleanup(func() { cipher = originalCipher })
+	header, err := EncodeProto(&messagespb.CipherHeader{EzId: 1, CollectionId: 10})
+	require.NoError(t, err)
+	msg := &messageImpl{payload: []byte("ciphertext"), properties: propertiesImpl{messageCipherHeader: header}}
+	for _, stage := range []string{"get decryptor", "decrypt"} {
+		t.Run(stage, func(t *testing.T) {
+			failure := status.Error(codes.Unavailable, "KMS unavailable")
+			calls := 0
+			cipher = &mockCipher{getDecryptorFunc: func(int64, int64, []byte) (hook.Decryptor, error) {
+				calls++
+				if stage == "get decryptor" {
+					return nil, failure
+				}
+				return &mockDecryptor{decryptFunc: func([]byte) ([]byte, error) {
+					return []byte("partial result"), failure
+				}}, nil
+			}}
+			payload, err := TryDecryptPayload(msg)
+			require.Nil(t, payload)
+			require.ErrorIs(t, err, failure)
+			require.True(t, IsRetryableCipherError(err))
+			require.Equal(t, 1, calls, "dispatcher owns the retry")
+		})
+	}
+}

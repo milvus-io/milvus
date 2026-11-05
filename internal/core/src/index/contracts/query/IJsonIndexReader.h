@@ -34,10 +34,9 @@ namespace milvus::index {
 // A separate resolution handle is required because implementations produce two
 // different lifetimes behind the same path-routing contract. A flat JSON index
 // creates a temporary path-bound reader, which this handle must own. A typed
-// path index already owns its child reader, so this handle only borrows it.
-// Neither form extends the lifetime of the field-level reader, parent engine,
-// or cache cell; the caller must keep the parent cache pin alive while using
-// the result.
+// path reader already owns its request-specific child reader, so this handle only borrows it.
+// Flat path readers retain their storage pin. Borrowed typed readers require
+// the parent request reader to outlive the result.
 class JsonResolvedReader {
  public:
     JsonResolvedReader() = default;
@@ -104,7 +103,7 @@ class IJsonIndexReader {
 
     // Resolve a supported path/cast pair to a predicate reader. The result may own
     // a temporary interface view or borrow a child; in either case keep the parent
-    // reader pinned while using it. Cast to the query interface once after resolve.
+    // reader alive while using it. Cast to the query interface once after resolve.
     // An empty result means this index cannot serve the path/cast pair; choosing a
     // raw or shredded-column fallback belongs to the consumer.
     virtual JsonResolvedReader

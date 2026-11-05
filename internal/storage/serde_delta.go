@@ -306,12 +306,16 @@ func (dsw *MultiFieldDeltalogStreamWriter) GetRecordWriter() (RecordWriter, erro
 	if dsw.rw != nil {
 		return dsw.rw, nil
 	}
+	pkArrowType, err := ArrowTypeForField(&schemapb.FieldSchema{DataType: dsw.pkType})
+	if err != nil {
+		return nil, err
+	}
 
 	fieldIDs := []FieldID{common.RowIDField, common.TimeStampField} // Not used.
 	fields := []arrow.Field{
 		{
 			Name:     "pk",
-			Type:     serdeMap[dsw.pkType].arrowType(0, schemapb.DataType_None, false),
+			Type:     pkArrowType,
 			Nullable: false,
 		},
 		{
@@ -385,10 +389,14 @@ func newDeltalogMultiFieldWriter(eventWriter *MultiFieldDeltalogStreamWriter, ba
 		return nil, err
 	}
 	return NewSerializeRecordWriter[*DeleteLog](rw, func(v []*DeleteLog) (Record, error) {
+		pkArrowType, err := ArrowTypeForField(&schemapb.FieldSchema{DataType: schemapb.DataType(v[0].PkType)})
+		if err != nil {
+			return nil, err
+		}
 		fields := []arrow.Field{
 			{
 				Name:     "pk",
-				Type:     serdeMap[schemapb.DataType(v[0].PkType)].arrowType(0, schemapb.DataType_None, false),
+				Type:     pkArrowType,
 				Nullable: false,
 			},
 			{

@@ -18,7 +18,7 @@ package ddl
 
 import (
 	"context"
-	"strconv"
+	"fmt"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -376,8 +376,6 @@ func (s *ImportTaskSuite) TestExecute_PassesCorrectRequestParameters() {
 		collectionID: 100,
 		partitionIDs: []int64{1, 2},
 		vchannels:    []string{"v1", "v2"},
-		rlsPrincipal: "alice",
-		skipRLS:      true,
 		schema: &schemaInfo{
 			CollectionSchema: &schemapb.CollectionSchema{
 				Name: "test_collection",
@@ -398,8 +396,6 @@ func (s *ImportTaskSuite) TestExecute_PassesCorrectRequestParameters() {
 	s.Equal([]string{"v1", "v2"}, capturedReq.ChannelNames)
 	s.Equal(uint64(0), capturedReq.DataTimestamp) // Must be 0 for proxy call
 	s.Equal(int64(0), capturedReq.JobID)          // Let DataCoord allocate
-	s.Equal("alice", capturedReq.GetRlsPrincipal())
-	s.True(capturedReq.GetSkipRls())
 }
 
 // --------------------------------
@@ -608,21 +604,23 @@ func (s *ImportTaskSuite) TestExecute_PassesTheRequestContextToMixCoord() {
 // under test sit at both ends of PreExecute -- the duplicate-key rejection runs
 // before anything is resolved, the privilege gate runs after the schema and
 // vchannels are -- so the mocks must satisfy everything in between.
-func newImportTaskForPreExecute(t *testing.T, options []*commonpb.KeyValuePair) *ImportTask {
+func newImportTaskForPreExecute(t *testing.T, options []*commonpb.KeyValuePair, schemas ...*schemapb.CollectionSchema) *ImportTask {
+	collectionSchema := &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+	}
+	if len(schemas) > 0 {
+		collectionSchema = schemas[0]
+	}
 	mockCache := NewMockCache(t)
 	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).
 		Return(int64(100), nil).Maybe()
 	mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(100)).
 		Return(&collectionInfo{
 			CollID: int64(100),
-			Schema: &schemaInfo{
-				CollectionSchema: &schemapb.CollectionSchema{
-					Name: "test_collection",
-					Fields: []*schemapb.FieldSchema{
-						{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-					},
-				},
-			},
+			Schema: &schemaInfo{CollectionSchema: collectionSchema},
 		}, nil).Maybe()
 
 	// Only reached by the ordinary-import case, which runs past the gate into
@@ -645,105 +643,6 @@ func newImportTaskForPreExecute(t *testing.T, options []*commonpb.KeyValuePair) 
 		},
 		resp: &internalpb.ImportResponse{},
 	}
-}
-
-func TestImportTask_PreExecutePinsIdentityAndRLSContext(t *testing.T) {
-	paramtable.Init()
-	gate := &paramtable.Get().ProxyCfg.RLSImportEnforcementEnabled
-	oldGate := gate.SwapTempValue("true")
-	t.Cleanup(func() { gate.SwapTempValue(oldGate) })
-	require.NoError(t, paramtable.Get().Save(paramtable.Get().CommonCfg.AuthorizationEnabled.Key, "false"))
-	t.Cleanup(func() {
-		require.NoError(t, paramtable.Get().Reset(paramtable.Get().CommonCfg.AuthorizationEnabled.Key))
-	})
-
-	for _, test := range []struct {
-		name              string
-		rlsEnabled        bool
-		skipRLS           bool
-		expectedPrincipal string
-		expectedSkipRLS   bool
-	}{
-		{name: "principal is retained for enforcement", rlsEnabled: true, expectedPrincipal: "alice"},
-		{name: "authorized bypass is retained", rlsEnabled: true, skipRLS: true, expectedSkipRLS: true},
-		{name: "unchecked bypass on disabled collection is discarded", skipRLS: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			const collectionID = int64(100)
-			cache := NewMockCache(t)
-			cache.EXPECT().GetCollectionID(mock.Anything, "request_db", "alias").Return(collectionID, nil)
-			cache.EXPECT().GetCollectionInfo(mock.Anything, "request_db", "alias", collectionID).Return(&collectionInfo{
-				CollID:     collectionID,
-				DBName:     "canonical_db",
-				RlsEnabled: test.rlsEnabled,
-				Schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
-					Name: "canonical_collection",
-					Fields: []*schemapb.FieldSchema{
-						{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-					},
-				}},
-			}, nil)
-			cache.EXPECT().GetPartitionID(mock.Anything, "canonical_db", "canonical_collection", mock.Anything).
-				Return(int64(200), nil)
-
-			channels := channelmgr.NewMockChannelsMgr(t)
-			channels.EXPECT().GetVChannels(collectionID).Return([]string{"v1"}, nil)
-			task := &ImportTask{
-				baseTask: baseTask{MetaCache: cache},
-				ctx:      context.Background(),
-				node:     &mockTaskNode{metaCache: cache, chMgr: channels},
-				req: &internalpb.ImportRequest{
-					DbName:         "request_db",
-					CollectionName: "alias",
-					Files:          []*internalpb.ImportFile{{Paths: []string{"staging/file.json"}}},
-					Options: []*commonpb.KeyValuePair{
-						{Key: "rls_principal", Value: "alice"},
-						{Key: "skip_rls", Value: strconv.FormatBool(test.skipRLS)},
-					},
-				},
-				resp: &internalpb.ImportResponse{},
-			}
-
-			require.NoError(t, task.PreExecute(context.Background()))
-			assert.Equal(t, "canonical_db", task.req.GetDbName())
-			assert.Equal(t, "canonical_collection", task.req.GetCollectionName())
-			assert.Equal(t, test.expectedPrincipal, task.rlsPrincipal)
-			assert.Equal(t, test.expectedSkipRLS, task.skipRLS)
-		})
-	}
-}
-
-func TestImportTask_PreExecuteRejectsRLSBeforeClusterUpgrade(t *testing.T) {
-	paramtable.Init()
-	gate := &paramtable.Get().ProxyCfg.RLSImportEnforcementEnabled
-	oldGate := gate.SwapTempValue("false")
-	t.Cleanup(func() { gate.SwapTempValue(oldGate) })
-
-	cache := NewMockCache(t)
-	cache.EXPECT().GetCollectionID(mock.Anything, "test_db", "test_collection").Return(int64(100), nil)
-	cache.EXPECT().GetCollectionInfo(mock.Anything, "test_db", "test_collection", int64(100)).Return(&collectionInfo{
-		CollID:     100,
-		RlsEnabled: true,
-		Schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
-			Name:   "test_collection",
-			Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
-		}},
-	}, nil)
-	task := &ImportTask{
-		baseTask: baseTask{MetaCache: cache},
-		ctx:      context.Background(),
-		req: &internalpb.ImportRequest{
-			DbName:         "test_db",
-			CollectionName: "test_collection",
-			Options: []*commonpb.KeyValuePair{
-				{Key: "rls_principal", Value: "alice"},
-				{Key: "skip_rls", Value: "true"},
-			},
-		},
-	}
-
-	err := task.PreExecute(context.Background())
-	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 }
 
 // TestImportTask_PreExecuteRequiresImportBinlogPrivilege drives the gate through
@@ -815,4 +714,96 @@ func TestImportTask_PreExecuteRejectsDuplicateOptionKeys(t *testing.T) {
 
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	assert.Contains(t, err.Error(), "duplicate import option key: backup")
+}
+
+func TestImportTask_PreExecuteRejectsNativeListArraySchema(t *testing.T) {
+	paramtable.Init()
+	backup := []*commonpb.KeyValuePair{{Key: "backup", Value: "true"}}
+	snapshot := []*commonpb.KeyValuePair{{Key: "backup", Value: "true"}, {Key: "source_type", Value: "snapshot"}}
+	const numpyMsg = "numpy import cannot fill struct field 's', which is not nullable"
+	for _, tc := range []struct {
+		name    string
+		paths   []string
+		options []*commonpb.KeyValuePair
+		// nativeListKind is the import kind named in the rejection of a
+		// native-list target; empty means file imports read native-list
+		// sub-fields.
+		nativeListKind string
+		// rejectsStruct is set for NumPy, which cannot fill the non-nullable
+		// struct of this schema.
+		rejectsStruct bool
+	}{
+		{name: "parquet", paths: []string{"staging/file.parquet"}},
+		{name: "json", paths: []string{"staging/file.json"}},
+		{name: "csv", paths: []string{"staging/file.csv"}},
+		{name: "numpy", paths: []string{"staging/file.npy"}, rejectsStruct: true},
+		{name: "binlog", paths: []string{"insert", "delta"}, options: backup, nativeListKind: "binlog import (backup restore)"},
+		{name: "snapshot", paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}, options: snapshot, nativeListKind: "snapshot-source import"},
+	} {
+		for _, elementNullable := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/element_nullable=%t", tc.name, elementNullable), func(t *testing.T) {
+				schema := &schemapb.CollectionSchema{
+					Name:   "test_collection",
+					Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+					StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "s", Fields: []*schemapb.FieldSchema{{
+						Name: "arr", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+						ElementNullable: elementNullable,
+					}}}},
+				}
+				it := newImportTaskForPreExecute(t, tc.options, schema)
+				it.req.Files = []*internalpb.ImportFile{{Id: 1, Paths: tc.paths}}
+				if tc.name == "binlog" {
+					it.req.PartitionName = "_default"
+				}
+				err := it.PreExecute(context.Background())
+				switch {
+				case tc.rejectsStruct:
+					require.ErrorIs(t, err, merr.ErrImportFailed)
+					require.Contains(t, err.Error(), numpyMsg)
+				case elementNullable && tc.nativeListKind != "":
+					require.ErrorIs(t, err, merr.ErrParameterInvalid)
+					require.Contains(t, err.Error(),
+						tc.nativeListKind+" into a collection with element-nullable or nested Array field s.arr is not supported")
+				default:
+					require.NoError(t, err)
+				}
+			})
+		}
+	}
+
+	t.Run("numpy without struct fields", func(t *testing.T) {
+		it := newImportTaskForPreExecute(t, nil)
+		it.req.Files = []*internalpb.ImportFile{{Id: 1, Paths: []string{"staging/pk.npy"}}}
+		require.NoError(t, it.PreExecute(context.Background()))
+	})
+}
+
+// TestImportTask_PreExecuteNumpyNullableStruct pins the NumPy rule in the
+// proxy: a nullable struct is accepted (its rows are imported as null), and a
+// file named after the struct or one of its sub-fields is rejected before the
+// job is created.
+func TestImportTask_PreExecuteNumpyNullableStruct(t *testing.T) {
+	paramtable.Init()
+	schema := &schemapb.CollectionSchema{
+		Name:   "test_collection",
+		Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{FieldID: 101, Name: "s", Nullable: true, Fields: []*schemapb.FieldSchema{{
+			FieldID: 102, Name: "s[arr]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+			Nullable: true, ElementNullable: true,
+		}}}},
+	}
+	run := func(paths ...string) error {
+		it := newImportTaskForPreExecute(t, nil, schema)
+		it.req.Files = []*internalpb.ImportFile{{Id: 1, Paths: paths}}
+		return it.PreExecute(context.Background())
+	}
+
+	require.NoError(t, run("staging/pk.npy"))
+	for _, name := range []string{"s", "s[arr]", "arr"} {
+		path := "staging/" + name + ".npy"
+		err := run("staging/pk.npy", path)
+		require.ErrorIs(t, err, merr.ErrImportFailed, name)
+		require.Equal(t, merr.InputError, merr.GetErrorType(err), name)
+		require.Contains(t, err.Error(), "numpy import does not support struct data: file '"+path+"' names struct field 's'", name)
+	}
 }

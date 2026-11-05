@@ -26,10 +26,24 @@
 #include "folly/executors/CPUThreadPoolExecutor.h"
 #include "folly/executors/ExecutorWithPriority.h"
 #include "folly/executors/thread_factory/NamedThreadFactory.h"
+#include "folly/executors/thread_factory/PriorityThreadFactory.h"
 #include "storage/ThreadPool.h"
 
 namespace milvus::storage {
 namespace {
+
+// Linux nice is per-thread; other platforms may apply it process-wide.
+std::shared_ptr<folly::ThreadFactory>
+MakeAsyncLoadThreadFactory() {
+    auto factory =
+        std::make_shared<folly::NamedThreadFactory>("MILVUS_ASYNC_LOAD_");
+#ifdef __linux__
+    return std::make_shared<folly::PriorityThreadFactory>(std::move(factory),
+                                                          /* nice */ 19);
+#else
+    return factory;
+#endif
+}
 
 // Owns the process-wide priority queues used by async-load CPU work.
 class PriorityThreadPoolExecutor final : public folly::CPUThreadPoolExecutor {
@@ -38,8 +52,7 @@ class PriorityThreadPoolExecutor final : public folly::CPUThreadPoolExecutor {
         : folly::CPUThreadPoolExecutor(
               threads,
               folly::CPUThreadPoolExecutor::makeDefaultPriorityQueue(2),
-              std::make_shared<folly::NamedThreadFactory>(
-                  "MILVUS_ASYNC_LOAD_")) {
+              MakeAsyncLoadThreadFactory()) {
     }
 };
 

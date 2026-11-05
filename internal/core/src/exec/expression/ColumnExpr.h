@@ -63,7 +63,8 @@ class PhyColumnExpr : public Expr {
                         expr->GetColumn().data_type_,
                         active_count) {
         if (segment->is_chunked()) {
-            num_chunk_ = segment->num_chunk_data(expr_->GetColumn().field_id_);
+            num_chunk_ = segment_chunk_reader_.NumChunkData(
+                expr_->GetColumn().field_id_);
         } else {
             num_chunk_ = upper_div(segment_chunk_reader_.active_count_,
                                    segment_chunk_reader_.SizePerChunk());
@@ -180,7 +181,7 @@ class PhyColumnExpr : public Expr {
     const segcore::SegmentChunkReader segment_chunk_reader_;
     int64_t batch_size_;
     std::shared_ptr<const milvus::expr::ColumnExpr> expr_;
-    PinnedValueLookup value_lookup_;
+    ValueLookupSource value_lookup_;
 };
 
 }  //namespace exec

@@ -70,8 +70,8 @@ MakeFixture(int64_t keys, int64_t distribution) {
     std::sort(fixture.sorted.begin(), fixture.sorted.end());
     fixture.reader = CreateBitmapIndexReader<int64_t>(
         std::move(postings),
-        BitmapReaderOptions{.valid_bitset = std::move(valid),
-                            .total_num_rows = kRows});
+        BitmapStorageOptions{.valid_bitset = std::move(valid),
+                             .total_num_rows = kRows});
     return fixture;
 }
 

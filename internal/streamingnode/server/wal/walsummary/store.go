@@ -48,13 +48,6 @@ import (
 )
 
 const (
-	// codecVersion is the on-disk chunk format version. It is written once, into
-	// the object's fixed binary header, and checked there before anything else
-	// is parsed.
-	codecVersion      = 1
-	chunkHeaderSize   = 16
-	chunkChecksumSize = sha256.Size
-
 	// manifestVersion is the on-disk manifest format version.
 	manifestVersion = 1
 	manifestHeader  = 16
@@ -70,9 +63,7 @@ const (
 )
 
 var (
-	chunkHeaderMagic = []byte("PSCCH001")
-	chunkFooterMagic = []byte("PSCFT001")
-	manifestMagic    = []byte("PSMF0001")
+	manifestMagic = []byte("PSMF0001")
 
 	// marshalOptions pins deterministic output so that a rewrite of the same
 	// generation is usually byte-identical and can be recognized as a retry
@@ -721,7 +712,7 @@ func appendSection(buf *bytes.Buffer, section proto.Message, recordCount int) (*
 	offset := uint64(buf.Len())
 	payload, err := marshalIntoBuffer(buf, section)
 	if err != nil {
-		return nil, merr.WrapErrServiceInternalMsg("failed to marshal summary section: " + err.Error())
+		return nil, merr.Wrap(err, "failed to marshal summary section")
 	}
 	return &streamingpb.VChannelSummarySectionRef{
 		Offset:      offset,
@@ -852,47 +843,6 @@ func sliceSection(
 		return nil, storeCorruptedf("invalid %s section range for vchannel %s", name, vchannel)
 	}
 	return payload[ref.GetOffset():end], nil
-}
-
-// unmarshalChunkTail decodes the object's trailer and footer and returns where
-// the payload region ends. Every section offset is bounded by that position,
-// which is what keeps a corrupt index from addressing the footer.
-func unmarshalChunkTail(payload []byte) (*streamingpb.PChannelSummaryChunkFooter, uint64, error) {
-	if len(payload) < chunkHeaderSize+chunkChecksumSize+len(chunkFooterMagic)+4 {
-		return nil, 0, storeCorruptedf("summary chunk payload too short")
-	}
-	if !bytes.Equal(payload[:len(chunkHeaderMagic)], chunkHeaderMagic) {
-		return nil, 0, storeCorruptedf("invalid summary chunk header magic")
-	}
-	if version := binary.BigEndian.Uint16(payload[8:10]); version != codecVersion {
-		return nil, 0, storeCorruptedf("unsupported summary chunk version %d", version)
-	}
-	if headerSize := binary.BigEndian.Uint32(payload[12:16]); headerSize != chunkHeaderSize {
-		return nil, 0, storeCorruptedf("invalid summary chunk header size %d", headerSize)
-	}
-	footerMagicStart := len(payload) - len(chunkFooterMagic)
-	if !bytes.Equal(payload[footerMagicStart:], chunkFooterMagic) {
-		return nil, 0, storeCorruptedf("invalid summary chunk footer magic")
-	}
-	footerLenStart := footerMagicStart - 4
-	footerChecksumStart := footerLenStart - chunkChecksumSize
-	if footerChecksumStart < chunkHeaderSize {
-		return nil, 0, storeCorruptedf("invalid summary chunk footer length offset")
-	}
-	footerLen := int(binary.BigEndian.Uint32(payload[footerLenStart:footerMagicStart]))
-	footerStart := footerChecksumStart - footerLen
-	if footerLen <= 0 || footerStart < chunkHeaderSize {
-		return nil, 0, storeCorruptedf("invalid summary chunk footer length")
-	}
-	footerPayload := payload[footerStart:footerChecksumStart]
-	if actual := sha256.Sum256(footerPayload); !bytes.Equal(payload[footerChecksumStart:footerLenStart], actual[:]) {
-		return nil, 0, storeCorruptedf("summary chunk footer checksum mismatch")
-	}
-	footer := &streamingpb.PChannelSummaryChunkFooter{}
-	if err := proto.Unmarshal(footerPayload, footer); err != nil {
-		return nil, 0, markStoreCorrupted(merr.Wrap(err, "failed to decode summary chunk footer"))
-	}
-	return footer, uint64(footerStart), nil
 }
 
 // sortedByInsertTimetick orders a vchannel's idempotency halves by the WAL
@@ -1064,22 +1014,6 @@ func recordChunk(manifest *streamingpb.PChannelSummaryManifest, entry *streaming
 	}
 }
 
-// chunkIndexEntryFromFooter mirrors a written chunk's footer into a manifest
-// entry, so retention and lazy reads work off the manifest alone.
-func chunkIndexEntryFromFooter(footer *streamingpb.PChannelSummaryChunkFooter, objectSize uint64) *streamingpb.PChannelSummaryChunkIndexEntry {
-	if footer == nil {
-		return nil
-	}
-	return &streamingpb.PChannelSummaryChunkIndexEntry{
-		Generation:    footer.GetGeneration(),
-		Term:          footer.GetTerm(),
-		ObjectSize:    objectSize,
-		StartTimeTick: footer.GetStartTimeTick(),
-		EndTimetick:   footer.GetEndTimetick(),
-		Vchannels:     footer.GetChunks(),
-	}
-}
-
 // ReadTransformSection decodes one vchannel's transform records from a chunk.
 func (s *Store) ReadTransformSection(
 	ctx context.Context,
@@ -1191,20 +1125,17 @@ func (s *Store) sweepGarbage(ctx context.Context, term int64, coverage *streamin
 
 // readChunkPayload validates a retained object against the captured manifest
 // before making its bytes available to all readers of this index node.
-func (s *Store) readChunkPayload(ctx context.Context, index *streamingpb.PChannelSummaryChunkIndexEntry) (*chunkPayload, error) {
+func (s *Store) readChunkPayload(ctx context.Context, index *streamingpb.PChannelSummaryChunkIndexEntry, verified *chunkValidation) (*chunkPayload, error) {
 	key := buildChunkKey(s.chunkManager, s.pchannel, index.GetGeneration(), index.GetTerm())
 	payload, err := s.chunkManager.Read(ctx, key)
 	if err != nil {
 		return nil, merr.Wrapf(err, "failed to read summary chunk %s", key)
 	}
-	footer, start, err := unmarshalChunkTail(payload)
+	decoded, err := validateChunkPayload(payload, s.pchannel, index, verified)
 	if err != nil {
-		return nil, err
+		return nil, merr.Wrapf(err, "failed to validate summary chunk %s", key)
 	}
-	if footer.GetPchannel() != s.pchannel || !proto.Equal(chunkIndexEntryFromFooter(footer, uint64(len(payload))), index) {
-		return nil, storeCorruptedf("summary chunk differs from retained index: %s", key)
-	}
-	return &chunkPayload{bytes: payload, footerStart: start}, nil
+	return decoded, nil
 }
 
 // chunkFooterOffset is used only with bytes produced or validated by writeChunk.

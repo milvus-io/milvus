@@ -173,11 +173,11 @@ class FileResourceTestBase(TestMilvusClientV2Base):
                 output_field_names=["sparse_vector"],
             )
         )
-        self.create_collection(client, col_name, schema=schema, **kwargs)
+        return self.create_collection(client, col_name, schema=schema, **kwargs)
 
     def create_bm25_collection_with_stop_filter(self, client, col_name, res_name, **kwargs):
         """Shortcut: BM25 collection with a remote stop-words filter."""
-        self.create_bm25_collection(
+        return self.create_bm25_collection(
             client,
             col_name,
             {
@@ -934,8 +934,8 @@ class TestMilvusClientFileResourceInvalidConfig(FileResourceTestBase):
         client = self._client()
         col_name = cf.gen_unique_str(prefix)
         # 1. create collection with non-existent resource should fail
-        error = {ct.err_code: 1100, ct.err_msg: "not found in local resource list"}
-        self.create_bm25_collection(
+        error = {ct.err_code: 1100, ct.err_msg: "not found"}
+        result, _ = self.create_bm25_collection(
             client,
             col_name,
             {
@@ -954,6 +954,8 @@ class TestMilvusClientFileResourceInvalidConfig(FileResourceTestBase):
             check_task=CheckTasks.err_res,
             check_items=error,
         )
+        assert result.code == 1100
+        assert "nonexist_resource" in result.message
 
 
 class TestMilvusClientFileResourceRefCount(FileResourceTestBase):
@@ -1091,14 +1093,16 @@ class TestMilvusClientFileResourceSyncCheck(FileResourceTestBase):
         client = self._client()
         col_name = cf.gen_unique_str(prefix)
         # 1. create collection without adding resource should fail
-        error = {ct.err_code: 1100, ct.err_msg: "not found in local resource list"}
-        self.create_bm25_collection_with_stop_filter(
+        error = {ct.err_code: 1100, ct.err_msg: "not found"}
+        result, _ = self.create_bm25_collection_with_stop_filter(
             client,
             col_name,
             "never_added_resource",
             check_task=CheckTasks.err_res,
             check_items=error,
         )
+        assert result.code == 1100
+        assert "never_added_resource" in result.message
         # 2. server should still be reachable after the failed create_collection
         self.list_file_resources(client)
 

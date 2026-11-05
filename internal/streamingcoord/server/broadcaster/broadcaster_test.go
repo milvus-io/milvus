@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -44,9 +45,22 @@ import (
 func TestBroadcaster(t *testing.T) {
 	registry.ResetRegistration()
 	paramtable.Init()
-	paramtable.Get().StreamingCfg.WALBroadcasterTombstoneCheckInternal.SwapTempValue("10ms")
-	paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxCount.SwapTempValue("2")
-	paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxLifetime.SwapTempValue("20ms")
+	// These scheduling tests have no persisted WAL checkpoints. GC must retain
+	// their tasks; dedicated tombstone tests exercise checkpoint publication.
+	checkpointPatch := mockey.Mock((*mock_metastore.MockStreamingCoordCataLog).ListPChannel).Return(nil, nil).Build()
+	t.Cleanup(func() { checkpointPatch.UnPatch() })
+	oldWALBroadcasterTombstoneCheckInternal := paramtable.Get().StreamingCfg.WALBroadcasterTombstoneCheckInternal.SwapTempValue("10ms")
+	t.Cleanup(func() {
+		paramtable.Get().StreamingCfg.WALBroadcasterTombstoneCheckInternal.SwapTempValue(oldWALBroadcasterTombstoneCheckInternal)
+	})
+	oldWALBroadcasterTombstoneMaxCount := paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxCount.SwapTempValue("2")
+	t.Cleanup(func() {
+		paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxCount.SwapTempValue(oldWALBroadcasterTombstoneMaxCount)
+	})
+	oldWALBroadcasterTombstoneMaxLifetime := paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxLifetime.SwapTempValue("20ms")
+	t.Cleanup(func() {
+		paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxLifetime.SwapTempValue(oldWALBroadcasterTombstoneMaxLifetime)
+	})
 
 	mb := mock_balancer.NewMockBalancer(t)
 	mb.EXPECT().ReplicateRole().Return(replicateutil.RolePrimary)
@@ -160,25 +174,34 @@ func TestBroadcaster(t *testing.T) {
 }
 
 func ack(t *testing.T, broadcaster Broadcaster, broadcastID uint64, vchannel string) {
-	for {
-		msg := message.NewDropCollectionMessageBuilderV1().
-			WithHeader(&message.DropCollectionMessageHeader{}).
-			WithBody(&msgpb.DropCollectionRequest{}).
-			WithBroadcast([]string{vchannel}).
-			MustBuildBroadcast().
-			WithBroadcastID(broadcastID).
-			SplitIntoMutableMessage()[0].
-			WithTimeTick(100).
-			WithLastConfirmed(walimplstest.NewTestMessageID(1)).
-			IntoImmutableMessage(walimplstest.NewTestMessageID(1))
+	ctx := t.Context()
+	msg := message.NewDropCollectionMessageBuilderV1().
+		WithHeader(&message.DropCollectionMessageHeader{}).
+		WithBody(&msgpb.DropCollectionRequest{}).
+		WithBroadcast([]string{vchannel}).
+		MustBuildBroadcast().
+		WithBroadcastID(broadcastID).
+		SplitIntoMutableMessage()[0].
+		WithTimeTick(100).
+		WithLastConfirmed(walimplstest.NewTestMessageID(1)).
+		IntoImmutableMessage(walimplstest.NewTestMessageID(1))
 
-		if err := broadcaster.Ack(context.Background(), msg); err == nil {
-			break
+	// Delayed ACKs may reach a broadcaster already closed by this test. Stop
+	// with the test instead of leaving an infinite retry loop in later tests.
+	for ctx.Err() == nil {
+		if err := broadcaster.Ack(ctx, msg); err == nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(5 * time.Millisecond):
 		}
 	}
 }
 
 func createOpeartor(t *testing.T, broadcaster *syncutil.Future[Broadcaster]) *atomic.Int64 {
+	testCtx := t.Context()
 	id := atomic.NewInt64(1)
 	appended := atomic.NewInt64(0)
 	operator := mock_streaming.NewMockWALAccesser(t)
@@ -207,8 +230,16 @@ func createOpeartor(t *testing.T, broadcaster *syncutil.Future[Broadcaster]) *at
 			broadcastID := msg.BroadcastHeader().BroadcastID
 			vchannel := msg.VChannel()
 			go func() {
-				time.Sleep(time.Duration(rand.Int31n(100)) * time.Millisecond)
-				ack(t, broadcaster.Get(), broadcastID, vchannel)
+				select {
+				case <-testCtx.Done():
+					return
+				case <-time.After(time.Duration(rand.Int31n(100)) * time.Millisecond):
+				}
+				bc, err := broadcaster.GetWithContext(testCtx)
+				if err != nil {
+					return
+				}
+				ack(t, bc, broadcastID, vchannel)
 			}()
 		}
 		return resps
@@ -486,6 +517,8 @@ func TestGetPendingSchemaFileResources(t *testing.T) {
 			3: newTask(3, alterCollectionMsg(200, nil), streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING),
 			4: newTask(4, alterCollectionMsg(300, []int64{40}), streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE),
 			5: newTask(5, createNewBroadcastMsg([]string{"v1"}), streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING),
+			// A tombstone being dropped is marked DONE until it leaves the manager.
+			6: newTask(6, createCollectionMsg(400, []int64{50}), streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE),
 		},
 	}
 

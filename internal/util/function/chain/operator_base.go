@@ -100,6 +100,8 @@ func dispatchPickByIndices(pool memory.Allocator, data arrow.Array, indices []in
 		return pickByIndices(arr, array.NewFloat64Builder(pool), indices)
 	case *array.String:
 		return pickByIndices(arr, array.NewStringBuilder(pool), indices)
+	case *array.Binary:
+		return pickByIndices(arr, array.NewBinaryBuilder(pool, arrow.BinaryTypes.Binary), indices)
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unsupported array type %T", data)
 	}

@@ -47,12 +47,14 @@ var (
 	// and other operations (insert/delete/statistics/etc.)
 	// since in concurrent situation, there operation may block each other in high payload
 
-	sqp      atomic.Pointer[conc.Pool[any]]
-	sqOnce   sync.Once
-	dp       atomic.Pointer[conc.Pool[any]]
-	dynOnce  sync.Once
-	loadPool atomic.Pointer[conc.Pool[any]]
-	loadOnce sync.Once
+	sqp       atomic.Pointer[conc.Pool[any]]
+	sqOnce    sync.Once
+	chainPool atomic.Pointer[conc.Pool[any]]
+	chainOnce sync.Once
+	dp        atomic.Pointer[conc.Pool[any]]
+	dynOnce   sync.Once
+	loadPool  atomic.Pointer[conc.Pool[any]]
+	loadOnce  sync.Once
 
 	// mutatePool serves the online write CGO path (segment Insert/Delete).
 	// It is isolated from the load/management work on DynamicPool so that a
@@ -73,6 +75,7 @@ var (
 
 	// intentionally leaked CGO tag names
 	cgoTagSQ      = C.CString("CGO_SQ")
+	cgoTagChain   = C.CString("CGO_CHAIN")
 	cgoTagLoad    = C.CString("CGO_LOAD")
 	cgoTagDynamic = C.CString("CGO_DYN")
 	cgoTagMutate  = C.CString("CGO_MUTATE")
@@ -98,6 +101,44 @@ func initSQPool() {
 		pt.Watch(pt.QueryNodeCfg.CGOPoolSizeRatio.Key, config.NewHandler("qn.sqpool.cgopoolratio", ResizeSQPool))
 		mlog.Info(context.TODO(), "init SQPool done", mlog.Int("size", initPoolSize))
 	})
+}
+
+// ChainPool bounds heavy native function-chain execution across requests.
+// Submit only at the native operator boundary, never both around a chain and
+// inside its operators: nested submissions to the same pool can deadlock.
+func chainPoolSize() int {
+	return max(1, hardware.GetCPUNum()*max(1, paramtable.Get().QueryNodeCfg.ChainPoolSizeFactor.GetAsInt()))
+}
+
+func initChainPool() {
+	chainOnce.Do(func() {
+		pt := paramtable.Get()
+		size := chainPoolSize()
+		pool := conc.NewPool[any](size,
+			conc.WithPreAlloc(false),
+			conc.WithDisablePurge(false),
+			conc.WithPreHandler(func() {
+				runtime.LockOSThread()
+				C.SetThreadName(cgoTagChain)
+			}),
+		)
+		chainPool.Store(pool)
+		pt.Watch(pt.QueryNodeCfg.ChainPoolSizeFactor.Key, config.NewHandler("qn.chainpool.sizefactor", ResizeChainPool))
+		mlog.Info(context.TODO(), "init ChainPool done", mlog.Int("size", size))
+	})
+}
+
+// GetChainPool returns the node-wide pool for heavy native chain operators.
+// It is separate from SQPool so scans cannot occupy ordinary query fetch workers.
+func GetChainPool() *conc.Pool[any] {
+	initChainPool()
+	return chainPool.Load()
+}
+
+func ResizeChainPool(evt *config.Event) {
+	if evt.HasUpdated {
+		resizePool(GetChainPool(), chainPoolSize(), "ChainPool")
+	}
 }
 
 func dynamicPoolSize() int {
@@ -301,6 +342,7 @@ func CollectPoolStats() []metrics.PoolStats {
 
 	refs := []poolRef{
 		{"SQPool", GetSQPool()},
+		{"ChainPool", GetChainPool()},
 		{"DynamicPool", GetDynamicPool()},
 		{"LoadPool", GetLoadPool()},
 		{"MutatePool", GetMutatePool()},

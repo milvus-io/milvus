@@ -226,7 +226,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     // count of chunk that has raw data
     int64_t
-    num_chunk_data(FieldId field_id) const final {
+    num_chunk_data(FieldId field_id, OpContext* = nullptr) const final {
         auto size = get_insert_record().ack_responder_.GetAck();
         return upper_div(size, segcore_config_.get_chunk_rows());
     }
@@ -237,18 +237,24 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     int64_t
-    chunk_size(FieldId field_id, int64_t chunk_id) const final {
+    chunk_size(FieldId field_id,
+               int64_t chunk_id,
+               OpContext* = nullptr) const final {
         return segcore_config_.get_chunk_rows();
     }
 
     std::pair<int64_t, int64_t>
-    get_chunk_by_offset(FieldId field_id, int64_t offset) const override {
+    get_chunk_by_offset(FieldId field_id,
+                        int64_t offset,
+                        OpContext* = nullptr) const override {
         auto size_per_chunk = segcore_config_.get_chunk_rows();
         return {offset / size_per_chunk, offset % size_per_chunk};
     }
 
     int64_t
-    num_rows_until_chunk(FieldId field_id, int64_t chunk_id) const override {
+    num_rows_until_chunk(FieldId field_id,
+                         int64_t chunk_id,
+                         OpContext* = nullptr) const override {
         return chunk_id * segcore_config_.get_chunk_rows();
     }
 
@@ -484,7 +490,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
                      Timestamp timestamp) const override;
 
     void
-    search_ids(BitsetType& bitset, const IdArray& id_array) const override;
+    search_ids(BitsetType& bitset,
+               const IdArray& id_array,
+               milvus::OpContext* op_ctx = nullptr) const override;
 
     bool
     HasIndex(FieldId field_id) const override {
@@ -496,18 +504,31 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     FieldIndexCapability
-    IndexCapability(FieldId field_id) const override {
+    ResolveIndexCapability(milvus::OpContext*,
+                           FieldId field_id) const override {
         return growing_indexes_.Capability(field_id);
     }
 
-    IndexPin
-    PinIndex(milvus::OpContext*, const IndexKey&) const override {
+    std::vector<IndexRegistration>
+    IndexRegistrations(FieldId field_id) const override {
+        std::vector<IndexRegistration> registrations;
+        const auto capability = growing_indexes_.Capability(field_id);
+        registrations.reserve(capability.entries().size());
+        for (const auto& entry : capability.entries()) {
+            registrations.push_back(RegistrationFromCapability(entry));
+        }
+        return registrations;
+    }
+
+    index::IIndexReaderBasePtr
+    CreateIndexReader(milvus::OpContext*, const IndexKey&) const override {
         return {};
     }
 
     index::GrowingIndexSnapshotPin
-    PinGrowingIndex(FieldId field_id) const override {
-        return growing_indexes_.PinSnapshot(field_id);
+    PinGrowingIndex(milvus::OpContext* op_ctx,
+                    FieldId field_id) const override {
+        return growing_indexes_.PinSnapshot(op_ctx, field_id);
     }
 
     bool
@@ -543,7 +564,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
         if (!growing_indexes_.Has(id)) {
             return true;
         }
-        auto pin = growing_indexes_.PinSnapshot(id);
+        auto pin = growing_indexes_.PinSnapshot(nullptr, id);
         if (!pin) {
             // Below threshold an all-null compact column has no chunks and no
             // engine, but validity alone is a complete materialization.
@@ -557,7 +578,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     bool
     CanReadRawVectorFromIndex(FieldId field_id) const {
-        auto pin = growing_indexes_.PinSnapshot(field_id);
+        auto pin = growing_indexes_.PinSnapshot(nullptr, field_id);
         if (!pin) {
             return false;
         }
@@ -640,6 +661,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     std::shared_ptr<const IStructElementOffsets>
     GetStructElementOffsets(FieldId field_id) const override {
+        // No check against the current schema: a reader may have taken the
+        // previous schema before a Reopen published a new one, and the alias
+        // of a sub-field that schema dropped must still resolve for it (see
+        // Reopen). Field IDs are never reused, so a kept alias cannot answer
+        // for a different field.
         std::shared_lock lock(struct_element_offsets_map_mutex_);
         auto it = struct_element_offsets_map_.find(field_id);
         if (it != struct_element_offsets_map_.end()) {

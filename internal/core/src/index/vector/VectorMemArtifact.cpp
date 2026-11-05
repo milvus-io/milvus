@@ -21,7 +21,6 @@
 
 #include "common/EasyAssert.h"
 #include "common/Utils.h"
-#include "index/vector/VectorIndexReader.h"
 #include "index/vector/VectorIndexValidDataUtils.h"
 #include "knowhere/binaryset.h"
 
@@ -103,9 +102,9 @@ VectorMemArtifact::VectorMemArtifact(KnowhereEngine engine,
                "empty embedding-list offsets must be monotonic");
 }
 
-IIndexReaderBasePtr
-VectorMemArtifact::IntoReader() && {
-    return std::make_unique<VectorIndexReader>(std::move(engine_));
+KnowhereEngine
+VectorMemArtifact::IntoEngine() && {
+    return std::move(engine_);
 }
 
 void
@@ -118,7 +117,7 @@ VectorMemArtifact::Serialize(storage::FileSink& sink) const {
     knowhere::BinarySet entries;
     if (!engine_.EmptyEmbListOffsets().empty()) {
         AppendEmptyEmbListOffsets(engine_, entries);
-    } else if (!IsAllNullNullable(engine_.native_index.GetIdMap())) {
+    } else if (!IsAllNullNullable(engine_.native_index)) {
         const auto status = engine_.native_index.Serialize(entries);
         if (status != knowhere::Status::success) {
             ThrowInfo(KnowhereStatusToErrorCode(status),
@@ -127,7 +126,7 @@ VectorMemArtifact::Serialize(storage::FileSink& sink) const {
                       knowhere::Status2String(status));
         }
     }
-    AppendValidDataToBinarySet(engine_.native_index.GetIdMap(), entries);
+    AppendValidDataToBinarySet(engine_.native_index, entries);
     ValidateEntries(entries);
 
     // FileSink owns physical slicing and publication. All entries are prepared

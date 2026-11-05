@@ -34,7 +34,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -100,6 +99,98 @@ func TestNormalizeReshardBatchKeepsBackupFunctionOutput(t *testing.T) {
 	_, has := data.Data[101]
 	require.True(t, has)
 	require.Equal(t, []int64{10, 20}, data.Data[101].(*storage.Int64FieldData).Data)
+}
+
+// TestNormalizeReshardBatchFillsMissingStructSubFields pins that the reshard
+// normalization fills element-nullable struct sub-fields a file does not carry
+// (N null elements per row, N from the present sibling) and that the spill
+// serde writes the filled columns as native lists of null elements.
+func TestNormalizeReshardBatchFillsMissingStructSubFields(t *testing.T) {
+	const structName = "clips"
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: 110,
+			Name:    structName,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID: 111, Name: typeutil.ConcatStructFieldName(structName, "ids"),
+					DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID: 112, Name: typeutil.ConcatStructFieldName(structName, "text"),
+					DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar, ElementNullable: true,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "64"}},
+				},
+				{
+					FieldID: 113, Name: typeutil.ConcatStructFieldName(structName, "emb"),
+					DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, ElementNullable: true,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+				},
+			},
+		}},
+	}
+	counts := []int{2, 0, 3}
+	ids := &storage.ArrayFieldData{ElementType: schemapb.DataType_Int64}
+	for _, n := range counts {
+		require.NoError(t, ids.AppendRow(&schemapb.ScalarField{
+			Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: make([]int64, n)}},
+		}))
+	}
+	data := &storage.InsertData{Data: map[int64]storage.FieldData{
+		100: &storage.Int64FieldData{Data: []int64{1, 2, 3}},
+		111: ids,
+	}}
+
+	var offset int64
+	source := &internalpb.ImportFile{Id: 1, IdRange: &commonpb.IDRange{Begin: 100, End: 103}}
+	require.NoError(t, normalizeReshardBatch(source, false, schema, data, 3, &offset))
+	require.Equal(t, 3, data.Data[112].RowNum())
+	require.Equal(t, 3, data.Data[113].RowNum())
+	for i, n := range counts {
+		require.Equal(t, make([]bool, n), typeutil.GetArrayElementValidData(data.Data[112].(*storage.ArrayFieldData).Data[i]))
+		require.Equal(t, make([]bool, n), typeutil.GetVectorArrayElementValidData(data.Data[113].(*storage.VectorArrayFieldData).Data[i]))
+	}
+
+	mgr, err := NewSpillManager(t.TempDir(), schema, 1)
+	require.NoError(t, err)
+	defer func() { _ = mgr.Close() }()
+	r, err := mgr.Append(0, []SpillBatch{{Data: data, Bytes: int64(data.GetMemorySize())}})
+	require.NoError(t, err)
+	require.Equal(t, int64(3), r.Rows)
+	reader, err := mgr.RangeReader(r)
+	require.NoError(t, err)
+	defer func() { _ = reader.Close() }()
+	record, err := reader.Next()
+	require.NoError(t, err)
+	for _, fieldID := range []int64{112, 113} {
+		list, ok := record.Column(fieldID).(*array.List)
+		require.True(t, ok, "field %d", fieldID)
+		require.Equal(t, len(counts), list.Len())
+		for i, n := range counts {
+			require.True(t, list.IsValid(i))
+			start, end := list.ValueOffsets(i)
+			require.Equal(t, int64(n), end-start, "field %d row %d", fieldID, i)
+			for j := start; j < end; j++ {
+				require.True(t, list.ListValues().IsNull(int(j)), "field %d row %d element %d", fieldID, i, j)
+			}
+		}
+	}
+
+	// A missing sub-field that is not element-nullable (ids) is rejected.
+	text := data.Data[112].(*storage.ArrayFieldData)
+	data = &storage.InsertData{Data: map[int64]storage.FieldData{
+		100: &storage.Int64FieldData{Data: []int64{1}},
+		112: &storage.ArrayFieldData{
+			ElementType: schemapb.DataType_VarChar, ElementNullable: true,
+			Data: []*schemapb.ScalarField{text.Data[0]},
+		},
+	}}
+	offset = 0
+	err = normalizeReshardBatch(source, false, schema, data, 1, &offset)
+	require.ErrorIs(t, err, merr.ErrImportFailed)
 }
 
 // TestRunReshardFunctionsGeneratesBM25AndMinHash pins the V2-equivalent
@@ -654,6 +745,8 @@ type reshardCallRecorder struct {
 	logicalBytes  []int64
 	spillRanges   []int
 	paths         []string
+	readContexts  []*indexcgopb.StoragePluginContext
+	writeContexts []*indexcgopb.StoragePluginContext
 	onWrite       func(call int, group fragmentInput) error
 	published     []*importv3pb.ReshardManifest
 	publishCalled atomic.Int64
@@ -671,7 +764,10 @@ func staticReshardReader(reader importutilv2.Reader) reshardReaderBuilder {
 func mockReshardBoundaries(t *testing.T, readers map[int64]reshardReaderBuilder, recorder *reshardCallRecorder) {
 	t.Helper()
 	readerMock := mockey.Mock(newReshardSourceReader).To(
-		func(ctx context.Context, _ storage.ChunkManager, _ *schemapb.CollectionSchema, file *internalpb.ImportFile, _ importutilv2.Options, _ int64, _ *indexpb.StorageConfig, _ *indexcgopb.StoragePluginContext) (importutilv2.Reader, error) {
+		func(ctx context.Context, _ storage.ChunkManager, _ *schemapb.CollectionSchema, file *internalpb.ImportFile, _ importutilv2.Options, _ int64, _ *indexpb.StorageConfig, pluginContext *indexcgopb.StoragePluginContext) (importutilv2.Reader, error) {
+			recorder.mu.Lock()
+			recorder.readContexts = append(recorder.readContexts, pluginContext)
+			recorder.mu.Unlock()
 			build, ok := readers[file.GetId()]
 			require.True(t, ok, "unexpected reshard source %d", file.GetId())
 			return build(ctx), nil
@@ -685,6 +781,7 @@ func mockReshardBoundaries(t *testing.T, readers map[int64]reshardReaderBuilder,
 			recorder.rows = append(recorder.rows, input.rows)
 			recorder.logicalBytes = append(recorder.logicalBytes, input.logicalBytes)
 			recorder.spillRanges = append(recorder.spillRanges, len(input.ranges()))
+			recorder.writeContexts = append(recorder.writeContexts, spec.pluginContext)
 			recorder.mu.Unlock()
 			if recorder.onWrite != nil {
 				if err := recorder.onWrite(call, input); err != nil {
@@ -1298,46 +1395,17 @@ func TestCleanImportV3PrefixesRemovesSpillOnly(t *testing.T) {
 	require.Equal(t, "durable", string(got))
 }
 
-// TestExecuteReshardPlanEnforcesRLSPredicate pins the Import V3 RLS contract
-// that mirrors Import V2: the job's write predicate is carried into the plan
-// and re-checked on every prepared source batch, so a row outside the
-// predicate fails the whole reshard run before any fragment is published. A
-// nil predicate (job skips RLS) is a no-op.
-func TestExecuteReshardPlanEnforcesRLSPredicate(t *testing.T) {
+func TestExecuteReshardPlanIgnoresRetiredRLSPredicate(t *testing.T) {
 	initReshardPipelineParams(t)
 	fix := newReshardPipelineFixture()
-	helper, err := typeutil.CreateSchemaHelper(fix.schema)
-	require.NoError(t, err)
-	predicate, err := planparserv2.ParseExpr(helper, "pk == 1", nil)
-	require.NoError(t, err)
-
-	runWith := func(t *testing.T, predicate *planpb.Expr, ids ...int64) (*reshardCallRecorder, error) {
-		t.Helper()
-		plan := fix.plan([]*internalpb.ImportFile{fix.source(1)}, 1)
-		plan.RlsCheckPredicate = predicate
-		readers := map[int64]reshardReaderBuilder{
-			1: staticReshardReader(&scriptReader{batches: []*storage.InsertData{fix.batch(ids...)}, size: 100}),
-		}
-		recorder := &reshardCallRecorder{}
-		mockReshardBoundaries(t, readers, recorder)
-		return recorder, executeReshardPlan(context.Background(), nil, fix.request(plan, 3), plan, nil, NewMetrics(1), nil)
+	plan := fix.plan([]*internalpb.ImportFile{fix.source(1)}, 1)
+	plan.RlsCheckPredicate = &planpb.Expr{}
+	readers := map[int64]reshardReaderBuilder{
+		1: staticReshardReader(&scriptReader{batches: []*storage.InsertData{fix.batch(1, 2)}, size: 100}),
 	}
-
-	t.Run("violating row fails the run without publishing", func(t *testing.T) {
-		recorder, err := runWith(t, predicate, 1, 2)
-		require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
-		require.Zero(t, recorder.publishCalled.Load())
-	})
-
-	t.Run("conforming rows complete", func(t *testing.T) {
-		recorder, err := runWith(t, predicate, 1, 1)
-		require.NoError(t, err)
-		require.Equal(t, int64(1), recorder.publishCalled.Load())
-	})
-
-	t.Run("nil predicate is a no-op", func(t *testing.T) {
-		recorder, err := runWith(t, nil, 1, 2)
-		require.NoError(t, err)
-		require.Equal(t, int64(1), recorder.publishCalled.Load())
-	})
+	recorder := &reshardCallRecorder{}
+	mockReshardBoundaries(t, readers, recorder)
+	err := executeReshardPlan(context.Background(), nil, fix.request(plan, 3), plan, nil, NewMetrics(1), nil)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), recorder.publishCalled.Load())
 }

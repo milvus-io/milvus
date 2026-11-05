@@ -188,7 +188,7 @@ func TestServingLeaseForcedDropCancelsTimer(t *testing.T) {
 func TestServingLeaseConfigurationIsCaptured(t *testing.T) {
 	params := paramtable.Get()
 	key := params.QueryViewCfg.LeaseDuration.Key
-	require.Equal(t, "60s", params.QueryViewCfg.LeaseDuration.DefaultValue)
+	require.Equal(t, "5s", params.QueryViewCfg.LeaseDuration.DefaultValue)
 	original := params.QueryViewCfg.LeaseDuration.GetValue()
 	t.Cleanup(func() { require.NoError(t, params.Save(key, original)) })
 	require.NoError(t, params.Save(key, "3s"))
@@ -219,9 +219,9 @@ func TestServingLeaseCancellationReleasesMVCCWait(t *testing.T) {
 			version := newPreparingSNView(1).QueryViewKey().QueryViewVersion
 			var err error
 			if search {
-				_, err = h.AcquireSearchSegmentTasks(ctx, shard.shardID, version, &viewpb.QueryPlanMVCC{}, &internalpb.SearchRequest{})
+				_, err = h.AcquireSearchSegmentTasks(ctx, shard.shardID, version, &viewpb.QueryPlanMVCC{}, &internalpb.SearchRequest{}, nil)
 			} else {
-				_, err = h.AcquireQuerySegmentTasks(ctx, shard.shardID, version, &viewpb.QueryPlanMVCC{}, &internalpb.RetrieveRequest{})
+				_, err = h.AcquireQuerySegmentTasks(ctx, shard.shardID, version, &viewpb.QueryPlanMVCC{}, &internalpb.RetrieveRequest{}, nil)
 			}
 			require.ErrorIs(t, err, context.Canceled)
 			require.Zero(t, entry.queryRefs)

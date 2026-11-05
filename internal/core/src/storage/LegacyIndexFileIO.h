@@ -33,8 +33,19 @@
 
 namespace milvus::storage {
 
+class DataCodec;
+
+// Download once, validate the envelope in memory, then decode its payload.
+// Synchronous index batches dispatch this on their existing HIGH/LOW pool.
+std::unique_ptr<DataCodec>
+ReadLegacyIndexFile(ChunkManager& chunk_manager,
+                    const std::string& path,
+                    proto::common::LoadPriority priority,
+                    folly::CancellationToken token = {});
+
 // Opens an exact legacy index object path. Local paths retain ChunkManager semantics;
 // object-store paths use Arrow range I/O when a filesystem is available.
+// Holds one shared load slot through open/size I/O, then releases it.
 [[nodiscard]] folly::coro::Task<std::shared_ptr<milvus::InputStream>>
 OpenLegacyIndexInputAsync(
     const ChunkManagerPtr& chunk_manager,
@@ -62,8 +73,8 @@ struct LegacyIndexFileInfo {
  * @brief Inspect a legacy envelope using synchronous range reads.
  * @note Opens the object as OpenLegacyIndexInputAsync does: a remote
  * filesystem serves the ranges, while a missing or local filesystem uses the
- * ChunkManager. Shares validation and metadata admission with async
- * inspection, but performs I/O inline without depending on an executor. Does
+ * ChunkManager. Small headers bypass admission; large descriptors reserve
+ * scratch bytes and one slot. Performs I/O inline without depending on an executor. Does
  * not read payloads.
  */
 LegacyIndexFileInfo
@@ -83,6 +94,9 @@ LegacyIndexLoadTransientBytes(size_t total_bytes,
 using LegacyIndexFileInfos =
     std::unordered_map<std::string, LegacyIndexFileInfo>;
 
+// Inspect at most 16 distinct objects per batch concurrently, even with shared
+// slot limits disabled. Each I/O phase also reserves a shared load slot.
+// Failure cancels siblings and drains issued I/O.
 [[nodiscard]] folly::coro::Task<std::shared_ptr<const LegacyIndexFileInfos>>
 InspectLegacyIndexFilesAsync(std::span<const std::string> files,
                              const ChunkManagerPtr& chunk_manager,
@@ -107,7 +121,8 @@ struct LegacyIndexFile {
     LegacyIndexFileInfo info;
 };
 
-// Reads and validates the bounded descriptor/event metadata under admission.
+// Reads and validates descriptor/event metadata under one shared load slot.
+// Small metadata has no byte charge; large descriptors also reserve scratch.
 // The input must remain alive and immutable throughout inspection and
 // streaming.
 [[nodiscard]] folly::coro::Task<LegacyIndexFileInfo>

@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -191,7 +192,7 @@ func TestBootstrapPermanentFailureIsUnrecoverable(t *testing.T) {
 
 func TestResolvedEmptyLoadScopeIsNotUnrestricted(t *testing.T) {
 	manager := NewManager(Config{LoadInfoProvider: fakeLoadInfoProvider{}})
-	view, err := manager.resolveLoadInfo(context.Background(), walview.VChannelWALView{LoadInfoVersion: 1})
+	view, err := manager.resolveLoadInfo(context.Background(), walview.VChannelWALView{LoadInfoVersion: 1, Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100}}}})
 	require.NoError(t, err)
 	require.NotNil(t, view.PartitionIDs)
 	require.Empty(t, view.PartitionIDs)

@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -27,12 +28,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestDDLCallbacksCollectionDDL(t *testing.T) {
+	mockQueryViewDDLResource(t)
 	core := initStreamingSystemAndCore(t)
 
 	ctx := context.Background()
@@ -174,6 +177,7 @@ func TestDDLCallbacksCollectionDDL(t *testing.T) {
 }
 
 func TestCreatePartitionMaxCountIgnoresDroppedPartitions(t *testing.T) {
+	mockQueryViewDDLResource(t)
 	Params.Save(Params.RootCoordCfg.MaxPartitionNum.Key, "2")
 	defer Params.Reset(Params.RootCoordCfg.MaxPartitionNum.Key)
 
@@ -236,4 +240,57 @@ func TestCreatePartitionMaxCountIgnoresDroppedPartitions(t *testing.T) {
 		PartitionName:  "partition_3",
 	})
 	require.ErrorContains(t, merr.CheckRPCCall(status, err), "partition number (2) exceeds max configuration (2)")
+}
+
+func TestCreatePartitionAckCallbackSyncsLoadedPartition(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+
+	ctx := context.Background()
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testCollection" + funcutil.RandomString(10)
+	partitionName := "testPartition" + funcutil.RandomString(10)
+	schemaBytes, err := proto.Marshal(&schemapb.CollectionSchema{
+		Name: collectionName,
+		Fields: []*schemapb.FieldSchema{
+			{Name: "field1", DataType: schemapb.DataType_Int64},
+		},
+	})
+	require.NoError(t, err)
+
+	status, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{DbName: dbName})
+	require.NoError(t, merr.CheckRPCCall(status, err))
+	status, err = core.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         schemaBytes,
+	})
+	require.NoError(t, merr.CheckRPCCall(status, err))
+
+	// The first sync fails, so the ack callback must retry until it succeeds.
+	type syncCall struct{ collectionID, partitionID int64 }
+	var calls []syncCall
+	patch := mockey.Mock((*qvresource.Resources).AddPartition).To(func(_ *qvresource.Resources, ctx context.Context, collectionID UniqueID, partitionID UniqueID) error {
+		calls = append(calls, syncCall{collectionID, partitionID})
+		if len(calls) == 1 {
+			return merr.WrapErrServiceNotReady("querycoord", 0, "initializing")
+		}
+		return nil
+	}).Build()
+	defer patch.UnPatch()
+
+	status, err = core.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		PartitionName:  partitionName,
+	})
+	require.NoError(t, merr.CheckRPCCall(status, err))
+
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	partitionID, ok := core.meta.GetPartitionIDByName(coll.CollectionID, partitionName)
+	require.True(t, ok)
+	require.Len(t, calls, 2)
+	for _, call := range calls {
+		require.Equal(t, syncCall{coll.CollectionID, partitionID}, call)
+	}
 }

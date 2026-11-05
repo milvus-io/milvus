@@ -31,6 +31,7 @@
 #include <string>
 #include <vector>
 
+#include "cachinglayer/Manager.h"
 #include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
@@ -142,10 +143,20 @@ SetFieldDataElementTypeIfNeeded(milvus::proto::schema::FieldData* field_data,
 
 CStatus
 SerializeSearchResultDataToCProto(
-    const milvus::proto::schema::SearchResultData& result_data,
+    milvus::proto::schema::SearchResultData& result_data,
     CProto* out_result,
     const char* allocation_error,
     const char* serialization_error) {
+    for (auto& field_data : *result_data.mutable_fields_data()) {
+        milvus::SyncFieldDataRowValidData(&field_data);
+    }
+    for (auto& field_data : *result_data.mutable_group_by_field_values()) {
+        milvus::SyncFieldDataRowValidData(&field_data);
+    }
+    if (result_data.has_group_by_field_value()) {
+        milvus::SyncFieldDataRowValidData(
+            result_data.mutable_group_by_field_value());
+    }
     auto size = result_data.ByteSizeLong();
     CBufferPtr buffer(malloc(size));
     if (buffer == nullptr) {
@@ -493,8 +504,8 @@ BuildSearchResultBatch(
             auto& field_data = it->second;
             auto& field_meta = schema->operator[](field_id);
             auto name = std::string(field_meta.get_name().get());
-            auto result =
-                FieldDataToArrow(name, *field_data, total_valid, true);
+            auto result = FieldDataToArrow(
+                name, *field_data, total_valid, true, nullptr, &field_meta);
             if (!result.ok()) {
                 return result.status();
             }
@@ -628,6 +639,8 @@ BuildSearchResultFullBatch(CSearchResult c_search_result,
         search_result->get_total_result_count() > 0) {
         auto size = search_result->seg_offsets_.size();
         milvus::OpContext op_ctx(cancel_token);
+        op_ctx.runtime_load_priority =
+            milvus::proto::common::LoadPriority::HIGH;
         for (int64_t i = 0; i < num_extra_fields; i++) {
             milvus::futures::throwIfCancelled(cancel_token);
             auto field_id = milvus::FieldId(extra_field_ids[i]);
@@ -688,7 +701,8 @@ BuildExplicitFieldsBatch(
             }
             ARROW_ASSIGN_OR_RAISE(
                 auto converted,
-                FieldDataToArrow(name, *it->second, total_rows, true));
+                FieldDataToArrow(
+                    name, *it->second, total_rows, true, nullptr, &field_meta));
             array = converted.second;
         }
 
@@ -1058,9 +1072,37 @@ MaterializeOrderedFields(
         materialize_segment_fields(segment, materialized);
     };
 
-    if (segment_fields.size() > 1) {
+    const bool fanout =
+        segment_fields.size() > 1 &&
+        (milvus::cachinglayer::Manager::GetInstance().isEvictionEnabled() ||
+         total_rows >= milvus::segcore::kSearchFanoutMinRows ||
+         std::any_of(
+             field_ids.begin(),
+             field_ids.end(),
+             [&](auto field_id) {
+                 const auto type =
+                     plan->schema_->operator[](field_id).get_data_type();
+                 return milvus::IsVectorDataType(type) ||
+                        !milvus::IsFixedSizeType(type);
+             }) ||
+         // Mmap pages can fault even when cache eviction is disabled.
+         std::any_of(segment_fields.begin(),
+                     segment_fields.end(),
+                     [&field_ids](const auto& entry) {
+                         const auto* segment = static_cast<
+                             const milvus::segcore::SegmentInternalInterface*>(
+                             entry.second.search_result->segment_);
+                         return segment != nullptr &&
+                                std::any_of(
+                                    field_ids.begin(),
+                                    field_ids.end(),
+                                    [segment](auto field_id) {
+                                        return segment->is_mmap_field(field_id);
+                                    });
+                     }));
+    if (fanout) {
         auto& pool = milvus::ThreadPools::GetThreadPool(
-            milvus::ThreadPoolPriority::MIDDLE);
+            milvus::ThreadPoolPriority::SEARCH_FANOUT);
         std::vector<std::future<void>> futures;
         futures.reserve(segment_fields.size());
         auto futures_guard = folly::makeGuard([&futures]() {
@@ -1083,7 +1125,9 @@ MaterializeOrderedFields(
             future.get();
         }
     } else {
-        materialize_one(segment_fields.begin()->second);
+        for (auto& entry : segment_fields) {
+            materialize_one(entry.second);
+        }
     }
 
     std::vector<milvus::segcore::MergeBase> result_pairs(total_rows);
@@ -1308,6 +1352,8 @@ FillOutputFieldsOrderedImpl(CSearchResult* search_results,
                 temp_result.distances_.resize(
                     materialized.segment_offsets.size(), 0.0f);
                 milvus::OpContext op_ctx(cancel_token);
+                op_ctx.runtime_load_priority =
+                    milvus::proto::common::LoadPriority::HIGH;
                 segment->FillTargetEntry(plan, temp_result, &op_ctx);
                 materialized.fields =
                     std::move(temp_result.output_fields_data_);
@@ -1439,6 +1485,8 @@ FillFieldsOrderedAsArrowRecordBatchImpl(
                 milvus::segcore::SegmentInternalInterface* segment,
                 OrderedSegmentFields& materialized) {
                 milvus::OpContext op_ctx(cancel_token);
+                op_ctx.runtime_load_priority =
+                    milvus::proto::common::LoadPriority::HIGH;
                 for (auto field_id : requested_field_ids) {
                     milvus::futures::throwIfCancelled(cancel_token);
                     auto& field_meta = plan->schema_->operator[](field_id);
@@ -1588,6 +1636,8 @@ PrepareSearchResultsForExportImpl(
         }
 
         milvus::OpContext op_ctx(cancel_token);
+        op_ctx.runtime_load_priority =
+            milvus::proto::common::LoadPriority::HIGH;
         milvus::segcore::ReduceHelper helper(search_results,
                                              plan,
                                              placeholder_group,

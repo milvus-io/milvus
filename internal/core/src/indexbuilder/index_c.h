@@ -27,6 +27,20 @@ CreateIndex(CIndex* res_index,
             const uint64_t len);
 
 CStatus
+CreateIndexBuilder(CIndex* res_index,
+                   const uint8_t* serialized_build_index_info,
+                   const uint64_t len);
+
+CStatus
+LoadIndexData(CIndex index);
+
+CStatus
+TryReserveIndexBuild(CIndex index, bool* admitted);
+
+CStatus
+BuildIndex(CIndex index);
+
+CStatus
 DeleteIndex(CIndex index);
 
 CStatus

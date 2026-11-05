@@ -480,7 +480,7 @@ struct UnaryElementFunc {
         if constexpr (std::is_same_v<GetType, proto::plan::Array>) {     \
             res[i] = false;                                              \
         } else {                                                         \
-            if (index >= src[offset].length()) {                         \
+            if (!HasArrayElementAt(src[offset], index)) {                \
                 res[i] = false;                                          \
                 valid_res[i] = false;                                    \
                 continue;                                                \
@@ -491,13 +491,38 @@ struct UnaryElementFunc {
         }                                                                \
     } while (false)
 
-template <typename ValueType, proto::plan::OpType op, FilterType filter_type>
+template <typename ValueType,
+          proto::plan::OpType op,
+          FilterType filter_type,
+          typename ArrayType = ArrayView>
 struct UnaryElementFuncForArray {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
                                        ValueType>;
+    // For `s[i][tags] == [..]` (index >= 0 with an Array literal), compare
+    // the inner Array of struct element i; a missing or null one is UNKNOWN.
+    // Returns false when the row result is UNKNOWN.
+    static bool
+    SameArray(const ArrayType& row,
+              const proto::plan::Array& val,
+              int index,
+              bool& same) {
+        if constexpr (std::is_same_v<ArrayType, ArrayValueView>) {
+            if (index >= 0) {
+                auto inner = NestedArrayElementAt(row, index);
+                if (!inner.has_value()) {
+                    return false;
+                }
+                same = inner->is_same_array(val);
+                return true;
+            }
+        }
+        same = row.is_same_array(val);
+        return true;
+    }
+
     void
-    operator()(const ArrayView* src,
+    operator()(const ArrayType* src,
                ValidityView valid_data,
                size_t size,
                const ValueType& val,
@@ -538,31 +563,27 @@ struct UnaryElementFuncForArray {
             if (has_bitmap_input && !bitmap_input[i + start_cursor]) {
                 continue;
             }
-            if constexpr (op == proto::plan::OpType::Equal) {
+            if constexpr (op == proto::plan::OpType::Equal ||
+                          op == proto::plan::OpType::NotEqual) {
                 if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
-                    res[i] = src[offset].is_same_array(val);
+                    bool same = false;
+                    if (!SameArray(src[offset], val, index, same)) {
+                        res[i] = false;
+                        valid_res[i] = false;
+                        continue;
+                    }
+                    res[i] = (op == proto::plan::OpType::Equal) == same;
                 } else {
-                    if (index >= src[offset].length()) {
+                    if (!HasArrayElementAt(src[offset], index)) {
                         res[i] = false;
                         valid_res[i] = false;
                         continue;
                     }
                     auto array_data =
                         src[offset].template get_data_unchecked<GetType>(index);
-                    res[i] = array_data == val;
-                }
-            } else if constexpr (op == proto::plan::OpType::NotEqual) {
-                if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
-                    res[i] = !src[offset].is_same_array(val);
-                } else {
-                    if (index >= src[offset].length()) {
-                        res[i] = false;
-                        valid_res[i] = false;
-                        continue;
-                    }
-                    auto array_data =
-                        src[offset].template get_data_unchecked<GetType>(index);
-                    res[i] = array_data != val;
+                    res[i] = (op == proto::plan::OpType::Equal)
+                                 ? array_data == val
+                                 : array_data != val;
                 }
             } else if constexpr (op == proto::plan::OpType::GreaterThan) {
                 UnaryArrayCompare(array_data > val);
@@ -584,7 +605,7 @@ struct UnaryElementFuncForArray {
                 } else if constexpr (std::is_same_v<GetType,
                                                     std::string_view> ||
                                      std::is_same_v<GetType, std::string>) {
-                    if (index >= src[offset].length()) {
+                    if (!HasArrayElementAt(src[offset], index)) {
                         res[i] = false;
                         valid_res[i] = false;
                         continue;
@@ -604,7 +625,7 @@ struct UnaryElementFuncForArray {
                 } else if constexpr (std::is_same_v<GetType,
                                                     std::string_view> ||
                                      std::is_same_v<GetType, std::string>) {
-                    if (index >= src[offset].length()) {
+                    if (!HasArrayElementAt(src[offset], index)) {
                         res[i] = false;
                         valid_res[i] = false;
                         continue;
@@ -924,6 +945,11 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
 
+    bool
+    SupportsJsonStatsExecPath() const override {
+        return true;
+    }
+
     void
     DetermineExecPath() override;
 
@@ -979,6 +1005,11 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     bool
     CanUseNgramIndex() const override;
 
+    // Records that the NGRAM index served this LIKE, from the two places its
+    // first phase runs: a single LIKE and the batched LIKE conjunction.
+    void
+    RecordNgramUse();
+
     // Execute ngram Phase1 only (index query), ANDs result into candidates
     // Requires: CanUseNgramIndex() == true
     // Requires: candidates must be non-empty (caller initializes with all-true,
@@ -986,7 +1017,8 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     void
     ExecuteNgramPhase1(TargetBitmap& candidates);
 
-    // Execute ngram Phase2 (post-filter verification) on candidate bitset
+    // Refine ngram candidates unless the reader guarantees exact hits for this
+    // literal/operator (a complete InnerMatch gram). Shared with LIKE AND.
     // - segment_offset: starting position in segment
     // - batch_size: number of rows to process
     // - candidates: bitmap of size batch_size
@@ -1055,7 +1087,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     // the family name is recorded at load time, so this never casts to a
     // concrete index implementation.
     bool
-    PinnedIndexIsFMIndex() const;
+    SelectedIndexIsFMIndex() const;
 
     // True when the selected pattern reader answers this expression's
     // operation with a CANDIDATE SUPERSET instead of the exact result

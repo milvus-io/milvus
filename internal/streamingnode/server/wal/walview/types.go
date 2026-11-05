@@ -7,7 +7,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -15,6 +14,11 @@ import (
 
 // VChannelWALView is the vchannel-owned WAL input view for one query view.
 type VChannelWALView struct {
+	// CaptureQueryView captures a fresh snapshot and registers its consumer under
+	// the VChannel owner lock. The callback must not perform I/O.
+	CaptureQueryView func(*viewpb.QueryViewMeta, func(VChannelWALView)) bool
+	RuntimeContext   context.Context
+
 	// WithResourceEventLock orders a barrier after all already observed WAL events.
 	WithResourceEventLock func(func())
 	ResourceEventBarrier  func(context.Context) error
@@ -32,10 +36,13 @@ type VChannelWALView struct {
 	LoadInfoVersion uint64
 	// PartitionIDs is nil for an unrestricted legacy snapshot. A non-nil empty
 	// list means load metadata was resolved and no partitions are loaded.
-	PartitionIDs []int64
-	LoadFields   []*messagespb.LoadFieldConfig
-	IndexInfos   []*indexpb.IndexInfo
-	Schema       *schemapb.CollectionSchema
+	PartitionIDs   []int64
+	LoadFields     []*viewpb.LoadFieldConfig
+	RequiredFields []*viewpb.LoadFieldConfig
+	IndexInfos     []*indexpb.IndexInfo
+	Schema         *schemapb.CollectionSchema
+	// WriteSchema is the allocation/encoding frontier, independent of the read view.
+	WriteSchema *schemapb.CollectionSchema
 
 	SegmentSnapshot                VisibleSegmentSnapshot
 	TransformLogStream             wal.TransformLogStream
@@ -87,6 +94,7 @@ type VChannelResourceEvent struct {
 	Barrier       func()
 	Message       message.ImmutableMessage
 	SegmentSealed *SegmentSealedEvent
+	QueryBarrier  *QueryBarrierEvent
 }
 
 // SegmentSealedEvent reports the DataVersion assigned when a flushed growing
@@ -95,4 +103,10 @@ type SegmentSealedEvent struct {
 	SegmentID           int64
 	VChannel            string
 	SealedAtDataVersion qviews.DataVersion
+}
+
+// QueryBarrierEvent proves complete ordered application through TimeTick for
+// one VChannel. It carries no data and is not a recovery/persistence frontier.
+type QueryBarrierEvent struct {
+	TimeTick uint64
 }

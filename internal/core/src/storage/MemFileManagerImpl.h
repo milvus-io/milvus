@@ -23,6 +23,7 @@
 #include <memory>
 #include <unordered_map>
 
+#include "folly/CancellationToken.h"
 #include "storage/IndexData.h"
 #include "storage/FileManager.h"
 #include "storage/ChunkManager.h"
@@ -58,7 +59,8 @@ class MemFileManagerImpl : public FileManagerImpl {
 
     std::map<std::string, std::unique_ptr<DataCodec>>
     LoadIndexToMemory(const std::vector<std::string>& remote_files,
-                      milvus::proto::common::LoadPriority priority);
+                      milvus::proto::common::LoadPriority priority,
+                      folly::CancellationToken token = {});
 
     std::vector<FieldDataPtr>
     CacheRawDataToMemory(const Config& config);

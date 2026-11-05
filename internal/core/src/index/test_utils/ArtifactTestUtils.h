@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <gtest/gtest.h>
 #include <arrow/io/memory.h>
 
@@ -105,11 +107,14 @@ OpenFromSource(const ReaderBackend& backend,
             std::move(options.params), source);
     }
     const auto expected_caps = loader_entry.derive_caps(options.params);
-    auto reader = loader_entry.Load(
-        {OpenedIndexSource{LegacyIndexSource{
-             std::shared_ptr<storage::FileSource>(&source, [](auto*) {}),
-             false}},
-         options});
+    auto reader = loader_entry
+                      .Load({OpenedIndexSource{LegacyIndexSource{
+                                 std::shared_ptr<storage::FileSource>(
+                                     &source, [](auto*) {}),
+                                 false}},
+                             options,
+                             milvus::index::test::TestIndexCacheConfig()})
+                      ->CreateReader(nullptr);
     CheckReaderBackend(reader, backend, expected_caps);
     return reader;
 }
@@ -134,12 +139,14 @@ inline IIndexReaderBasePtr
 OpenV3(const ReaderBackend& backend,
        const TestArtifactData& artifact,
        const BackendCaseMetadata& metadata = {},
-       bool use_async = false) {
+       bool use_async = false,
+       milvus::OpContext* context = nullptr) {
     auto input = std::make_shared<storage::RemoteInputStream>(
         std::make_shared<arrow::io::BufferReader>(
             MakePackedArtifactBuffer(artifact)));
     auto source = storage::IndexEntryReader::Open(input, input->Size());
     storage::LoadOptions options;
+    options.op_ctx = context;
     options.enable_mmap = backend.MmapRequested();
     if (options.enable_mmap) {
         options.mmap_dir_path = std::filesystem::temp_directory_path().string();
@@ -166,17 +173,21 @@ OpenV3(const ReaderBackend& backend,
             folly::coro::blockingWait(folly::coro::co_withExecutor(
                 storage::ResolveAsyncLoadExecutor({}, priority),
                 storage::AsyncIndexEntryReader::Open(input, 0, priority)));
-        reader = loader_entry.Load(
-            {OpenedIndexSource{PackedIndexSource{
-                 std::shared_ptr<storage::AsyncIndexEntryReader>(
-                     std::move(async_source))}},
-             options});
+        reader = loader_entry
+                     .Load({OpenedIndexSource{PackedIndexSource{
+                                std::shared_ptr<storage::AsyncIndexEntryReader>(
+                                    std::move(async_source))}},
+                            options,
+                            milvus::index::test::TestIndexCacheConfig()})
+                     ->CreateReader(nullptr);
     } else {
-        reader =
-            loader_entry.Load({OpenedIndexSource{PackedIndexSource{
-                                   std::shared_ptr<storage::IndexEntryReader>(
-                                       std::move(source))}},
-                               options});
+        reader = loader_entry
+                     .Load({OpenedIndexSource{PackedIndexSource{
+                                std::shared_ptr<storage::IndexEntryReader>(
+                                    std::move(source))}},
+                            options,
+                            milvus::index::test::TestIndexCacheConfig()})
+                     ->CreateReader(nullptr);
     }
     CheckReaderBackend(reader, backend, expected_caps);
     return reader;

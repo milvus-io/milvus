@@ -19,7 +19,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
+	"github.com/cockroachdb/errors"
+
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -509,20 +512,25 @@ func (s *Scheduler) runClosure(rec *taskEntry) func() (any, error) {
 			// A canceled run must never record Failed: DataCoord's stale query
 			// would fail the whole job for a run it already superseded or
 			// dropped.
-			if rec.ctx.Err() != nil {
+			switch {
+			case rec.ctx.Err() != nil:
+				// A canceled run no longer owns the job; failing it would fail
+				// a job that was already superseded.
 				rec.state = datapb.ImportTaskStateV2_Retry
 				rec.reason = rec.ctx.Err().Error()
-			} else if common.IsTerminalImportV3Err(err) {
+			case importcommon.IsTerminalImportV3Err(err):
+				// A deterministic request/input/result error fails.
 				rec.state = datapb.ImportTaskStateV2_Failed
 				rec.reason = err.Error()
-			} else {
-				// Same denylist as DataCoord's checker, shared via
-				// common.IsTerminalImportV3Err: only provably permanent errors
-				// fail the task. Everything else -- typed ErrIoFailed from an
-				// unmapped object-store 5xx, raw manifest-write errors, Loon
-				// transients, ID exhaustion -- retries until the job timeout.
-				// Loon transients and ID exhaustion need no special cases:
-				// neither carries a terminal milvus code.
+			case !merr.IsMilvusError(err) && !errors.Is(err, packed.ErrLoonTransient):
+				// An unclassified execution error fails. A bare loon
+				// transient sentinel is the exception: its producer already
+				// classified it as retryable, it just carries no Milvus code.
+				rec.state = datapb.ImportTaskStateV2_Failed
+				rec.reason = err.Error()
+			default:
+				// Transient Milvus errors (IO, not-ready, throttling, loon
+				// transient, ID exhaustion) retry with a fresh run.
 				rec.state = datapb.ImportTaskStateV2_Retry
 				rec.reason = err.Error()
 			}

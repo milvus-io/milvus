@@ -1,6 +1,7 @@
 import time
 
 import pytest
+from chaos.recovery_continuation import is_recovery_collection
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel
@@ -19,6 +20,8 @@ class TestAllCollection:
     def collection_name(self, request):
         if request.param == [] or request.param == "":
             pytest.skip("The collection name is invalid")
+        if is_recovery_collection(request.param):
+            pytest.skip("Exclusive recovery workload is verified by test_concurrent_operation using its input journal")
         yield request.param
 
     @pytest.fixture(scope="function")

@@ -38,6 +38,7 @@ const (
 	Proxy_InvalidateShardLeaderCache_FullMethodName    = "/milvus.proto.proxy.Proxy/InvalidateShardLeaderCache"
 	Proxy_GetSegmentsInfo_FullMethodName               = "/milvus.proto.proxy.Proxy/GetSegmentsInfo"
 	Proxy_GetQuotaMetrics_FullMethodName               = "/milvus.proto.proxy.Proxy/GetQuotaMetrics"
+	Proxy_GetFeatureUsage_FullMethodName               = "/milvus.proto.proxy.Proxy/GetFeatureUsage"
 	Proxy_ClearReadTaskQueue_FullMethodName            = "/milvus.proto.proxy.Proxy/ClearReadTaskQueue"
 	Proxy_SyncFileResource_FullMethodName              = "/milvus.proto.proxy.Proxy/SyncFileResource"
 )
@@ -63,6 +64,7 @@ type ProxyClient interface {
 	InvalidateShardLeaderCache(ctx context.Context, in *InvalidateShardLeaderCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	GetSegmentsInfo(ctx context.Context, in *internalpb.GetSegmentsInfoRequest, opts ...grpc.CallOption) (*internalpb.GetSegmentsInfoResponse, error)
 	GetQuotaMetrics(ctx context.Context, in *internalpb.GetQuotaMetricsRequest, opts ...grpc.CallOption) (*internalpb.GetQuotaMetricsResponse, error)
+	GetFeatureUsage(ctx context.Context, in *internalpb.GetFeatureUsageRequest, opts ...grpc.CallOption) (*internalpb.GetFeatureUsageResponse, error)
 	ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error)
 	SyncFileResource(ctx context.Context, in *internalpb.SyncFileResourceRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 }
@@ -219,6 +221,15 @@ func (c *proxyClient) GetQuotaMetrics(ctx context.Context, in *internalpb.GetQuo
 	return out, nil
 }
 
+func (c *proxyClient) GetFeatureUsage(ctx context.Context, in *internalpb.GetFeatureUsageRequest, opts ...grpc.CallOption) (*internalpb.GetFeatureUsageResponse, error) {
+	out := new(internalpb.GetFeatureUsageResponse)
+	err := c.cc.Invoke(ctx, Proxy_GetFeatureUsage_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *proxyClient) ClearReadTaskQueue(ctx context.Context, in *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error) {
 	out := new(internalpb.ClearReadTaskQueueResponse)
 	err := c.cc.Invoke(ctx, Proxy_ClearReadTaskQueue_FullMethodName, in, out, opts...)
@@ -258,6 +269,7 @@ type ProxyServer interface {
 	InvalidateShardLeaderCache(context.Context, *InvalidateShardLeaderCacheRequest) (*commonpb.Status, error)
 	GetSegmentsInfo(context.Context, *internalpb.GetSegmentsInfoRequest) (*internalpb.GetSegmentsInfoResponse, error)
 	GetQuotaMetrics(context.Context, *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error)
+	GetFeatureUsage(context.Context, *internalpb.GetFeatureUsageRequest) (*internalpb.GetFeatureUsageResponse, error)
 	ClearReadTaskQueue(context.Context, *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error)
 	SyncFileResource(context.Context, *internalpb.SyncFileResourceRequest) (*commonpb.Status, error)
 }
@@ -313,6 +325,9 @@ func (UnimplementedProxyServer) GetSegmentsInfo(context.Context, *internalpb.Get
 }
 func (UnimplementedProxyServer) GetQuotaMetrics(context.Context, *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetQuotaMetrics not implemented")
+}
+func (UnimplementedProxyServer) GetFeatureUsage(context.Context, *internalpb.GetFeatureUsageRequest) (*internalpb.GetFeatureUsageResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetFeatureUsage not implemented")
 }
 func (UnimplementedProxyServer) ClearReadTaskQueue(context.Context, *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ClearReadTaskQueue not implemented")
@@ -620,6 +635,24 @@ func _Proxy_GetQuotaMetrics_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Proxy_GetFeatureUsage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(internalpb.GetFeatureUsageRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProxyServer).GetFeatureUsage(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Proxy_GetFeatureUsage_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProxyServer).GetFeatureUsage(ctx, req.(*internalpb.GetFeatureUsageRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Proxy_ClearReadTaskQueue_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(internalpb.ClearReadTaskQueueRequest)
 	if err := dec(in); err != nil {
@@ -726,6 +759,10 @@ var Proxy_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetQuotaMetrics",
 			Handler:    _Proxy_GetQuotaMetrics_Handler,
+		},
+		{
+			MethodName: "GetFeatureUsage",
+			Handler:    _Proxy_GetFeatureUsage_Handler,
 		},
 		{
 			MethodName: "ClearReadTaskQueue",

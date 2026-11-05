@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -26,6 +27,9 @@ import (
 type growingSegment struct {
 	mu                     sync.Mutex
 	collection             *segcore.CCollection
+	encodingSchema         *schemapb.CollectionSchema
+	encodingIndexMeta      *segcorepb.CollectionIndexMeta
+	ownsCollection         bool
 	segmentID              int64
 	partitionID            int64
 	segment                segcore.CSegment
@@ -39,15 +43,19 @@ type growingSegment struct {
 }
 
 func newGrowingSegment(collection *segcore.CCollection, segmentID int64, partitionID int64) *growingSegment {
-	return &growingSegment{
-		collection:  collection,
-		segmentID:   segmentID,
-		partitionID: partitionID,
+	segment := &growingSegment{collection: collection, segmentID: segmentID, partitionID: partitionID}
+	if collection != nil {
+		segment.encodingSchema = collection.Schema()
+		segment.encodingIndexMeta = collection.IndexMeta()
 	}
+	return segment
 }
 
 func newGrowingSegmentFromVisible(ctx context.Context, collection *segcore.CCollection, visible walview.VisibleSegment) (*growingSegment, error) {
 	segment := newGrowingSegment(collection, visible.SegmentID, visible.PartitionID)
+	if visible.Schema != nil {
+		segment.encodingSchema = visible.Schema
+	}
 	segment.replaySkipThrough = visible.Assignment.GetCheckpointTimeTick()
 	if visible.Data.PersistedStorage != nil {
 		if err := segment.loadPersisted(ctx, visible); err != nil {
@@ -119,10 +127,10 @@ func (s *growingSegment) unpin() {
 	}
 	s.mu.Lock()
 	s.refs--
-	segment := s.releaseIfIdleLocked()
+	release := s.releaseIfIdleLocked()
 	s.mu.Unlock()
-	if segment != nil {
-		segment.Release()
+	if release != nil {
+		release()
 	}
 }
 
@@ -146,6 +154,9 @@ func (s *growingSegment) loadPersisted(ctx context.Context, visible walview.Visi
 	}
 	if s.segment != nil {
 		return nil
+	}
+	if err := s.prepareEncodingCollectionLocked(); err != nil {
+		return err
 	}
 	csegment, err := segcore.CreateCSegment(&segcore.CreateCSegmentRequest{
 		Collection:  s.collection,
@@ -215,7 +226,7 @@ func (s *growingSegment) applyInsert(ctx context.Context, insert walview.Segment
 	if s.collection == nil {
 		return nil
 	}
-	request, err := walview.MaterializeInsertRequest(s.collection.Schema(), insert)
+	request, err := walview.MaterializeInsertRequest(s.encodingSchema, insert)
 	if err != nil {
 		return err
 	}
@@ -227,7 +238,7 @@ func (s *growingSegment) applyInsert(ctx context.Context, insert walview.Segment
 		},
 		InsertRequest: request,
 	}
-	schema := s.collection.Schema()
+	schema := s.encodingSchema
 	record, skippedFields, err := storage.TransferInsertMsgToInsertRecord(schema, insertMsg)
 	if err != nil {
 		return err
@@ -278,6 +289,9 @@ func (s *growingSegment) applyInsert(ctx context.Context, insert walview.Segment
 }
 
 func (s *growingSegment) ensureCSegmentLocked() error {
+	if err := s.prepareEncodingCollectionLocked(); err != nil {
+		return err
+	}
 	segment, err := segcore.CreateCSegment(&segcore.CreateCSegmentRequest{
 		Collection:  s.collection,
 		SegmentID:   s.segmentID,
@@ -374,20 +388,48 @@ func (s *growingSegment) release() {
 		return
 	}
 	s.released = true
-	segment := s.releaseIfIdleLocked()
+	release := s.releaseIfIdleLocked()
 	s.mu.Unlock()
-	if segment != nil {
-		segment.Release()
+	if release != nil {
+		release()
 	}
 }
 
-func (s *growingSegment) releaseIfIdleLocked() segcore.CSegment {
-	if !s.released || s.refs > 0 || s.segment == nil {
+func (s *growingSegment) releaseIfIdleLocked() func() {
+	if !s.released || s.refs > 0 {
 		return nil
 	}
 	segment := s.segment
 	s.segment = nil
-	return segment
+	var collection *segcore.CCollection
+	if s.ownsCollection {
+		collection, s.collection = s.collection, nil
+		s.ownsCollection = false
+	}
+	return func() {
+		if segment != nil {
+			segment.Release()
+		}
+		if collection != nil {
+			collection.Release()
+		}
+	}
+}
+
+// Every segment decodes with its allocation schema. A WAL ALTER advances the
+// write frontier for new allocations but cannot change old segment payloads.
+func (s *growingSegment) prepareEncodingCollectionLocked() error {
+	if s.ownsCollection {
+		return nil
+	}
+	collection, err := segcore.CreateCCollection(&segcore.CreateCCollectionRequest{
+		CollectionID: s.collection.ID(), Schema: s.encodingSchema, IndexMeta: s.encodingIndexMeta,
+	})
+	if err != nil {
+		return err
+	}
+	s.collection, s.ownsCollection = collection, true
+	return nil
 }
 
 func loadInfoFromVisibleSegment(segment walview.VisibleSegment) *querypb.SegmentLoadInfo {

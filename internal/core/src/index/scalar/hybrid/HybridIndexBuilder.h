@@ -38,8 +38,10 @@ struct HybridBuildParams {
     int32_t cardinality_limit{0};
 
     // Which families the two sides map to. ARRAY inputs use bitmap for low
-    // cardinality and inverted for high cardinality. Scalar inputs use the
-    // configured families when supported by their engine version; otherwise
+    // cardinality and sort for high cardinality once the reader capability
+    // version and ordinary ARRAY software gate permit it, otherwise inverted.
+    // Scalar inputs use the configured families when supported by their engine
+    // version; otherwise
     // low cardinality uses bitmap, while high cardinality uses inverted for
     // strings, sort for integral types, and inverted for other types.
     std::string low_cardinality_family;

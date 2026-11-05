@@ -29,6 +29,7 @@
 #include "milvus-storage/common/extend_status.h"
 #include "segcore/storagev2translator/AsyncLoadException.h"
 #include "storage/AsyncLoadExecutor.h"
+#include "storage/EntryStreamUtils.h"
 
 namespace milvus::segcore::storagev2translator {
 namespace {
@@ -56,13 +57,20 @@ OpenOneChunkReaderAsync(
     const int64_t segment_id,
     const std::shared_ptr<milvus_storage::api::Reader>& reader,
     const size_t request_index,
-    ChunkReaderOpenSpec spec) {
+    ChunkReaderOpenSpec spec,
+    const proto::common::LoadPriority priority) {
     const auto& cancellation_token =
         co_await folly::coro::co_current_cancellation_token;
     CheckOpenCancellation(
         cancellation_token, segment_id, "AsyncChunkReader::open");
-    auto chunk_reader_result = co_await reader->get_chunk_reader_async(
-        spec.column_group_index, spec.needed_columns);
+    auto lease = co_await storage::AcquireMetadataLoadSlotAsync(
+        priority, cancellation_token);
+    CheckOpenCancellation(
+        cancellation_token, segment_id, "AsyncChunkReader::open");
+    auto chunk_reader_result = co_await folly::coro::co_withCancellation(
+        folly::CancellationToken{},
+        reader->get_chunk_reader_async(spec.column_group_index,
+                                       spec.needed_columns));
     if (!chunk_reader_result.ok()) {
         const auto error =
             milvus_storage::ToSegcoreError(chunk_reader_result.status());
@@ -91,7 +99,8 @@ OpenOneChunkReaderAsync(
 OpenChunkReadersAsyncImpl(const int64_t segment_id,
                           std::shared_ptr<milvus_storage::api::Reader> reader,
                           std::vector<ChunkReaderOpenSpec> specs,
-                          folly::CancellationToken context_cancellation_token) {
+                          folly::CancellationToken context_cancellation_token,
+                          const proto::common::LoadPriority priority) {
     const auto caller_cancellation_token =
         co_await folly::coro::co_current_cancellation_token;
     const auto cancellation_token = folly::cancellation_token_merge(
@@ -111,7 +120,7 @@ OpenChunkReadersAsyncImpl(const int64_t segment_id,
     open_tasks.reserve(specs.size());
     for (size_t i = 0; i < specs.size(); ++i) {
         open_tasks.push_back(OpenOneChunkReaderAsync(
-            segment_id, reader, i, std::move(specs[i])));
+            segment_id, reader, i, std::move(specs[i]), priority));
     }
 
     // Capture the collection failure until the external cancellation check.
@@ -154,7 +163,8 @@ OpenChunkReadersAsync(const milvus::OpContext* ctx,
             OpenChunkReadersAsyncImpl(segment_id,
                                       std::move(reader),
                                       std::move(specs),
-                                      context_cancellation_token)));
+                                      context_cancellation_token,
+                                      options.load_priority)));
     } catch (...) {
         detail::RethrowAsyncLoadException();
     }

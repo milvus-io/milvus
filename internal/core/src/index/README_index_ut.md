@@ -194,9 +194,9 @@ source, and the in-memory transport data have all left local scope, so the retur
 own the state it needs for queries.
 For loaders that need local files, the source writes them atomically to its own temporary location.
 
-The `Consume` path hands the `ArtifactPtr` to `IReaderConvertible::FromArtifact` without
-serialization; the returned Reader takes over the artifact state it needs to stay alive. This path
-verifies RAM/consumable Artifacts rather than simulating a persisted load.
+The `Consume` path extracts storage through `TextIndexArtifact::IntoStorage()` and creates a
+`TextIndex` and its request Reader without serialization. The Reader retains the storage after
+the Artifact is destroyed. This path verifies RAM text Artifacts rather than simulating a persisted load.
 
 mmap configurations use the system temporary directory as the parent directory. Files or
 [LocalDirectory.h](../storage/artifact/LocalDirectory.h) subdirectories created by the loader are

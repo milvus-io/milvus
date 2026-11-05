@@ -78,6 +78,13 @@ class PhyTermFilterExpr : public SegmentExpr {
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
 
+    // `value IN json_field[path]` scans the raw column per batch; it has no
+    // shredded-column kernel.
+    bool
+    SupportsJsonStatsExecPath() const override {
+        return !expr_->is_in_field_;
+    }
+
     void
     DetermineExecPath() override;
 
@@ -131,6 +138,9 @@ class PhyTermFilterExpr : public SegmentExpr {
     template <typename T>
     VectorPtr
     ExecVisitorImpl(EvalCtx& context);
+
+    VectorPtr
+    ExecElementLevelEmptyTerm(EvalCtx& context);
 
     template <typename T>
     VectorPtr

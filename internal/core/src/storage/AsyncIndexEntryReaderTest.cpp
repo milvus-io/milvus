@@ -499,8 +499,8 @@ TEST_F(AsyncIndexEntryReaderTest,
             return error.get_error_code();
         }
     });
-    // Magic and the combined footer/directory read bypass the held budget;
-    // __meta__ is the third read and must wait for admission.
+    // Magic and the combined footer/directory read only need a slot;
+    // __meta__ is the third read and must wait for the held byte budget.
     EXPECT_TRUE(direct_file->WaitForCallCount(2));
     EXPECT_FALSE(
         direct_file->WaitForCallCount(3, std::chrono::milliseconds(50)));
@@ -513,7 +513,7 @@ TEST_F(AsyncIndexEntryReaderTest,
 }
 
 TEST_F(AsyncIndexEntryReaderTest,
-       LargeDirectoryReadBypassesAdmissionAndDrainsOnCancel) {
+       LargeDirectoryReadBypassesByteAdmissionAndDrainsOnCancel) {
     const auto path = kV3FilePath + "_large_directory";
     {
         IndexEntryDirectStreamWriter writer(CreateOutputStream(path));
@@ -671,6 +671,57 @@ TEST_F(AsyncIndexEntryReaderTest,
     EXPECT_EQ(calls[0].destination, target.data());
     EXPECT_EQ(direct_file->AsyncReadCalls(), 0);
     EXPECT_EQ(direct_file->PeakInflight(), 1);
+}
+
+TEST_F(AsyncIndexEntryReaderTest,
+       MetadataSharesSlotsAndReleasesBeforeEntryReads) {
+    const auto priority = milvus::proto::common::LoadPriority::HIGH;
+    auto& admission = LoadAdmissionController::GetInstance();
+    const auto old_slots = admission.CapacitySlots();
+    admission.SetCapacitySlots(1);
+    auto restore =
+        folly::makeGuard([&] { admission.SetCapacitySlots(old_slots); });
+    const std::string path = kV3FilePath + "_metadata_slot";
+    {
+        auto output = CreateOutputStream(path);
+        IndexEntryDirectStreamWriter writer(output);
+        writer.PutMeta("value", 17);
+        writer.Finish();
+    }
+    auto file = std::make_shared<milvus::test::ControlledDirectReadFile>(
+        ReadLocalFileBytes(GetRootPath() + "/" + path));
+    auto input = std::make_shared<RemoteInputStream>(
+        std::static_pointer_cast<arrow::io::RandomAccessFile>(file));
+    auto lease =
+        folly::coro::blockingWait(AcquireMetadataLoadSlotAsync(priority));
+    folly::CancellationSource cancel;
+    auto pending = std::async(std::launch::async, [&] {
+        return folly::coro::blockingWait(
+            AsyncIndexEntryReader::Open(input, 0, priority, cancel.getToken())
+                .scheduleOn(ResolveAsyncLoadExecutor({}, priority)));
+    });
+    auto cleanup = folly::makeGuard([&] {
+        cancel.requestCancellation();
+        lease.Release();
+        if (pending.valid())
+            pending.wait();
+    });
+    EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(30)),
+              std::future_status::timeout);
+    EXPECT_TRUE(file->DirectReadCalls().empty());
+    cancel.requestCancellation();
+    try {
+        pending.get();
+        FAIL() << "expected cancelled metadata admission";
+    } catch (const milvus::SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), milvus::FollyCancel);
+    }
+    EXPECT_TRUE(file->DirectReadCalls().empty());
+    lease.Release();
+    const auto opened = OpenAsyncReader(input);
+    EXPECT_EQ(opened->IndexMeta().at("value").get<int>(), 17);
+    ASSERT_TRUE(admission.TryAcquire({0, 1}, LoadAdmissionPriority::High));
+    admission.Release({0, 1});
 }
 
 TEST_F(AsyncIndexEntryReaderTest, PlainEntryFallsBackToArrowBufferRead) {

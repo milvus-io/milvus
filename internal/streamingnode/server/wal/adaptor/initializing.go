@@ -46,6 +46,7 @@ func buildInterceptorParams(ctx context.Context, underlyingWALImpls walimpls.WAL
 	)
 	mvccManager := mvcc.NewMVCCManager(msg.TimeTick())
 	return &interceptors.InterceptorBuildParam{
+		Context:             ctx,
 		ChannelInfo:         underlyingWALImpls.Channel(),
 		WAL:                 syncutil.NewFuture[wal.WAL](),
 		LastTimeTickMessage: msg,

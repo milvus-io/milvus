@@ -1,10 +1,16 @@
 use super::fetch;
-use crate::error::{Result, TantivyBindingError};
+use crate::error::Result;
+#[cfg(any(feature = "analyzer-remote-tls", feature = "lindera-ipadic-neologd"))]
+use crate::error::TantivyBindingError;
 #[cfg(feature = "lindera-ipadic-neologd")]
 use lindera::dictionary::{load_dictionary_from_kind, DictionaryKind};
+#[cfg(feature = "analyzer-remote-tls")]
 use lindera_dictionary::dictionary_builder::ipadic_neologd::IpadicNeologdBuilder;
 
-#[cfg(not(feature = "lindera-ipadic-neologd"))]
+#[cfg(all(
+    feature = "analyzer-remote-tls",
+    not(feature = "lindera-ipadic-neologd")
+))]
 fn download(params: &fetch::FetchParams) -> Result<()> {
     fetch::fetch(params, IpadicNeologdBuilder::new()).map_err(|e| {
         TantivyBindingError::InternalError(format!(
@@ -12,6 +18,16 @@ fn download(params: &fetch::FetchParams) -> Result<()> {
             e.to_string()
         ))
     })
+}
+
+// Online download is compiled out; only a dictionary already built under
+// `build_dir` can be used.
+#[cfg(all(
+    not(feature = "analyzer-remote-tls"),
+    not(feature = "lindera-ipadic-neologd")
+))]
+fn download(params: &fetch::FetchParams) -> Result<()> {
+    fetch::ensure_prebuilt(params, "ipadic-neologd")
 }
 
 #[cfg(not(feature = "lindera-ipadic-neologd"))]
@@ -51,7 +67,10 @@ pub fn load_ipadic_neologd(
     })
 }
 
-#[cfg(test)]
+#[cfg(all(
+    test,
+    any(feature = "lindera-ipadic-neologd", feature = "analyzer-remote-tls")
+))]
 mod tests {
     use super::load_ipadic_neologd;
     use env_logger;

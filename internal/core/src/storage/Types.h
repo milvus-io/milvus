@@ -106,6 +106,8 @@ struct IndexMeta {
     milvus::proto::index::IndexStorePathVersion index_store_path_version{
         milvus::proto::index::IndexStorePathVersion::
             INDEX_STORE_PATH_VERSION_BUILD_ROOTED};
+    // Complete segment-rooted artifact prefix from the coordinator or loader.
+    std::string index_file_prefix;
 };
 
 struct StorageConfig {

@@ -327,7 +327,7 @@ func marshalSnapshotMetadata(snapshot *SnapshotData, manifestPaths []string, sto
 }
 
 func validateStagedSnapshotMetadata(data []byte, metadataURI string) error {
-	metadata, err := snapshotio.ParseSnapshotMetadataWithVersionCheck(data)
+	metadata, err := snapshotio.ParseSnapshotMetadata(data)
 	if err != nil {
 		return merr.WrapErrDataIntegrity(err, "invalid staged snapshot metadata")
 	}
@@ -607,7 +607,7 @@ func (r *SnapshotReader) readMetadataFile(ctx context.Context, filePath string) 
 		return nil, merr.Wrap(err, "failed to read metadata file")
 	}
 
-	metadata, err := snapshotio.ParseSnapshotMetadataWithVersionCheck(data)
+	metadata, err := snapshotio.ParseSnapshotMetadata(data)
 	if err != nil {
 		return nil, merr.WrapErrDataIntegrity(err, "invalid snapshot metadata")
 	}

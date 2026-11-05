@@ -20,14 +20,16 @@ are split by responsibility:
 - [VChannel Recovery Module](vchannel_view_module.md)
 - [Segment View Component](segment_view_module.md)
 - [L0 Materializer](l0_materializer.md)
-- [TransformLog Subscription Adaptor](transform_log.md) (future integration)
+- [TransformLog Subscription Adaptor](transform_log.md)
 - [WALSummary](summary.md)
 - [Broadcast Ack Module](broadcast_ack_module.md)
 - [StreamingNode VChannel WAL Input View](streamingnode_vchannel_wal_view.md)
 
 **Current runtime:** [WAL L0 Materializer](l0_materializer.md) retains Delete
 handles for legacy query recovery. The [Summary consumer](summary_l0_materializer.md)
-is retained for future QueryView wiring; the two implementations are not run together.
+is retained as an unwired alternative; QueryView resource preparation and
+execution already use the summary-backed subscription adaptor independently of
+L0 materialization. The two L0 implementations are not run together.
 
 ## 1. Goals
 
@@ -99,9 +101,9 @@ The checkpoint is the only:
 
 There is no Meta checkpoint, Data checkpoint, DataBarrier, or recovery mode.
 `Metrics().RecoveryTimeTick` currently reports Tracker completion, which can be
-ahead of Summary confirmation and published progress. The compatibility
-DataCoord VChannel checkpoint updater reports flush progress, not a second WAL
-recovery cursor.
+ahead of Summary confirmation and published progress. There is no periodic
+DataCoord VChannel checkpoint reporter. Streaming Flush completes through
+consuming-side acknowledgements, independently of global checkpoint publication.
 
 ## 4. Component Snapshot Checkpoints
 
@@ -155,11 +157,34 @@ when it contains no later messages: creating the reader needs no additional
 persisted TimeTick. Startup does not wait for TimeTickInspector registration.
 The barrier is delivered once, and no second logical scanner is opened.
 
-If the handoff position has been evicted, the scanner continues durable catchup.
-If a tailing reader is evicted later, it resumes durable reads from the last
-consumed message's safe physical LastConfirmedMessageID and filters out already
-consumed TimeTicks. Both paths preserve the upper scanner's transaction and
-ordering state. Cancellation releases the scanner while reading durable WAL,
+The sync operator publishes QueryMVCC from the complete ACK prefix before
+appending its confirmation to WAL and WAB. The acknowledged data is already
+durable; queries still wait for runtime consumption to reach their granted
+Growing/Transform targets. Consequently WAL and WAB consumers cannot dispatch a
+Flush and expose its new DataView/QueryView before the corresponding query
+frontiers are published. RecoveryStorage adds no per-message publication wait.
+MVCCManager remains owned by WAL initialization. After bounded recovery, the
+opener registers recovered live channels at the opening fence before append
+admission and live replay resume.
+
+WAB protects the live suffix from construction onward. RecoveryStorage marks
+only the complete prefix it has observed and dispatched as evictable, after each
+confirmation. Actual eviction retains the original capacity/TTL policy.
+This includes volatile scoped MVCCBarriers, which remain pending until consumed
+and cannot be replaced by ordinary TimeTicks. Capacity/keepalive do not evict
+unconsumed records, so startup handoff and live recovery tailing cannot lose
+this suffix. Current WAB occupancy drives producer backpressure directly.
+
+The latest durable confirmation is retained independently of queue eviction.
+Consumed volatile barriers after it follow the ordinary cache policy rather than
+waiting for another durable confirmation. Readers at or beyond that confirmation
+can rejoin the remaining queue or receive latest volatile progress after their
+cached prefix expires, without waiting for a new durable write. This applies to
+both initial catchup handoff and existing tailing offsets. Readers behind evicted
+durable data still require WAL replay. The scanner still
+supports durable catchup from the last consumed message's safe physical
+LastConfirmedMessageID, filtering already consumed TimeTicks and preserving its
+transaction and ordering state. Cancellation releases the scanner while reading durable WAL,
 paused at the startup boundary, or waiting on an empty WAB. Open failure,
 AlterWAL early return, and normal close all release the retained stream.
 
@@ -182,7 +207,7 @@ raw WAL message M
        -> PChannel/VChannel metadata
        -> affected SegmentViews and L1 materialization bound
        -> WALMaterializer.ObserveMessage retains Delete/explicit Flush handles
-       -> QueryRuntime plain immutable event (future integration)
+       -> QueryRuntime ordered immutable live event
   -> D.Release()
   -> BroadcastAck.Accept(O)
   -> all retained work and Coordinator Ack succeed without poison
@@ -249,4 +274,4 @@ feature branch receives a reader, writer, migration path, or fallback.
 12. Summary installs readable records before VChannel observation; this does not
     require Summary persistence.
 13. The current L0 consumer rebuilds unfinished Delete handles from WAL replay.
-    Only the future Summary consumer needs a barrier to expose pre-checkpoint Deletes.
+    The alternative Summary L0 consumer needs a barrier to expose pre-checkpoint Deletes.

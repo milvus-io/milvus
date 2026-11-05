@@ -52,6 +52,8 @@ func TestReplicateRoleDoesNotWaitForChannelManagerLock(t *testing.T) {
 }
 
 func TestChannelManager(t *testing.T) {
+	useTestClusterPrefix(t)
+
 	ResetStaticPChannelStatsManager()
 	RecoverPChannelStatsManager([]string{})
 
@@ -449,6 +451,7 @@ func TestChannelManager(t *testing.T) {
 }
 
 func TestAllocVirtualChannels(t *testing.T) {
+	useTestClusterPrefix(t)
 	ResetStaticPChannelStatsManager()
 	RecoverPChannelStatsManager([]string{})
 
@@ -854,6 +857,7 @@ func TestChannelManager_AddPChannels_PersistFailureRollback(t *testing.T) {
 }
 
 func TestAddPChannels_UnavailableInReplication(t *testing.T) {
+	useTestClusterPrefix(t)
 	ResetStaticPChannelStatsManager()
 	RecoverPChannelStatsManager([]string{})
 
@@ -921,6 +925,7 @@ func TestRecovery_NoReplicateConfig_AllAvailable(t *testing.T) {
 }
 
 func TestAllocVirtualChannels_SkipsUnavailableChannels(t *testing.T) {
+	useTestClusterPrefix(t)
 	ResetStaticPChannelStatsManager()
 	RecoverPChannelStatsManager([]string{})
 
@@ -966,6 +971,7 @@ func TestAllocVirtualChannels_SkipsUnavailableChannels(t *testing.T) {
 }
 
 func TestGetClusterChannels_ExcludesUnavailable(t *testing.T) {
+	useTestClusterPrefix(t)
 	ResetStaticPChannelStatsManager()
 	RecoverPChannelStatsManager([]string{})
 
@@ -1009,6 +1015,7 @@ func TestGetClusterChannels_ExcludesUnavailable(t *testing.T) {
 }
 
 func TestUpdateReplicateConfiguration_FlipsAvailability(t *testing.T) {
+	useTestClusterPrefix(t)
 	ResetStaticPChannelStatsManager()
 	RecoverPChannelStatsManager([]string{})
 
@@ -1082,6 +1089,7 @@ func TestUpdateReplicateConfiguration_FlipsAvailability(t *testing.T) {
 }
 
 func TestIsChannelAvailableInReplication(t *testing.T) {
+	useTestClusterPrefix(t)
 	// No replicateConfig → always available
 	assert.True(t, isChannelAvailableInReplication("ch1", nil))
 
@@ -1201,4 +1209,13 @@ func TestReplicateRolePublishesOnlyAfterPersistence(t *testing.T) {
 	require.Equal(t, replicateutil.RoleSecondary, m.ReplicateRole())
 	require.NoError(t, m.UpdateReplicateConfiguration(context.Background(), result))
 	require.Equal(t, replicateutil.RoleSecondary, m.ReplicateRole())
+}
+
+// useTestClusterPrefix matches the replication fixtures without depending on the local environment.
+func useTestClusterPrefix(t *testing.T) {
+	t.Helper()
+	paramtable.Init()
+	prefix := &paramtable.Get().CommonCfg.ClusterPrefix
+	oldPrefix := prefix.SwapTempValue("by-dev")
+	t.Cleanup(func() { prefix.SwapTempValue(oldPrefix) })
 }

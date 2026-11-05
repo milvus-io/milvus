@@ -1,3 +1,14 @@
+extraConfigFiles:
+  user.yaml: |+
+    # PyUDF reranking requires both the runtime and Proxy resource synchronization.
+    function:
+      pyUDF:
+        enabled: true
+    common:
+      fileResource:
+        mode:
+          proxy: sync
+
 metrics:
   serviceMonitor:
     enabled: true

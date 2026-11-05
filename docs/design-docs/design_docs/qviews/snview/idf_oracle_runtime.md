@@ -2,14 +2,19 @@
 
 ## Contract
 
-A loaded vchannel owns one current BM25 aggregate, shared by all QueryViews and
-all request DataVersions. Statistics are the newest DataView baseline successfully prepared locally for
-a received QueryView, plus applied live growing events. "Newest" is local to SN;
+Each QueryView owns references to its required BM25 fields. Within a vchannel,
+fields with the same partition scope, output field ID and function signature share
+one oracle, including growing statistics, sealed descriptors and lazy loading.
+SchemaVersion and LoadInfoVersion identify the View binding, not the shared data.
+Adding an unrelated field reuses existing BM25 fields; adding a BM25 field loads
+only that field. Views share current aggregates across request DataVersions. Statistics are the
+newest DataView baseline successfully prepared for that oracle, plus applied
+live growing events. "Newest" is local to SN;
 it does not mean the coordinator's globally latest DataVersion. They are not historical
 MVCC snapshots. Segment selection, MVCC visibility and Up serving leases remain
 versioned independently. A query plan fixes its IDF vectors and average document
-length for SN/QN execution; all BM25 subqueries in one plan read one aggregate
-state.
+length for SN/QN execution; all BM25 subqueries in one plan read fields at a common DataVersion under
+one event-application read lock and all participating oracle read locks.
 
 DataView lifecycle protects referenced objects until the view is fully Dropped.
 An old view's release acknowledgement must follow the required IDF transition,
@@ -18,22 +23,25 @@ implement a missing-object/GC full-rebuild fallback.
 
 ## Retained state
 
-- One aggregate per loaded BM25 field: document frequencies, row and token counts.
+- Per shared field, one aggregate: document frequencies, row and token counts.
 - One mutable BM25Stats per contributing growing segment, with flush/seal metadata.
 - Sealed resource descriptors (segment, partition, exact stats paths/manifest),
   without per-segment sealed statistics, memory cache or local disk cache.
 - Current DataVersion, serialized preparation and at most one shared lazy materialization.
 - Growing contribution membership (segment IDs only), without duplicate statistics.
 
-There is no DataVersion-to-statistics map or duplicate growing contribution map.
+There is no DataVersion-to-statistics map within an oracle. Different partition scopes or function semantics retain separate growing statistics
+and aggregates. A View guard retains its fields while preparing or serving. The
+last guard releases the field, cancels/drains its reads and removes it from the pool.
 Same-ID resource changes replace the old descriptor and contribution. Zero
 frequency keys are removed; map capacity can be compacted after substantial
 shrinkage.
 
 ## Initialization
 
-QueryRuntime initialization resolves load metadata and prepares its modules from
-the no-gap WALView snapshot. IDF loads sealed resources concurrently under one process-wide limit and merges
+QueryRuntime initialization installs the WAL capture and ordering context. Every
+View, including the first, prepares its own resource bindings from an exact-schema
+WALView snapshot. IDF loads sealed resources concurrently under one process-wide limit and merges
 each completed result immediately, discarding parsed segment statistics afterward.
 A worker holds its permit through both decoding and merging, preventing an
 unbounded queue of decoded segment statistics. Growing
@@ -45,10 +53,19 @@ contract. Both the growing search segment and IDF recovery use
 `MaterializeInsertRequest` and `storage.CopyInsertRequestMetadata` to own the
 request metadata and field wrappers before filling missing function outputs.
 Large column values remain borrowed read-only; existing outputs are preserved,
-and neither consumer modifies the cached Body. Missing outputs use the local
-function-runner fallback. This schema-dependent materialization remains outside
-the Body cache and is not deduplicated by it.
-Only loaded BM25 output fields contribute. Live events buffered during build are
+and neither consumer modifies the cached Body. IDF fills missing outputs through
+the shared FunctionRunnerManager using an oracle-owned registration of its exact,
+immutable collection schema. The oracle borrows that schema without deep copying
+or projecting it: other owners of the same schema version must observe the same
+complete definition. IDF explicitly prepares and executes only its required BM25
+outputs. Preparation acquires their file resources and constructs their runners before
+snapshot replay or live publication, including for an empty shard. Snapshot and
+live inserts reuse those prepared runners. Initialization failure releases the
+registration; normal retirement releases it after the oracle's consumers drain.
+Independent owner keys let other oracles and Views retain shared runners and file
+resources. This schema-dependent materialization remains outside the Body cache
+and is not deduplicated by it.
+Only required BM25 output fields contribute. Required fields come from the internal `required_fields` scope, independently of user preload hints. Live events buffered during build are
 applied before readiness. Partial initialization is never published.
 
 The default eager mode materializes the aggregate during initialization. With
@@ -64,7 +81,7 @@ planning (possibly on the same view). This classification is confined to the IDF
 resource call; tokenization, plan validation and other execution errors retain
 their original classification. A canceled or expired query context takes priority
 and is never turned into a view retry. A failed materialization is not cached.
-Changing the lazy setting affects subsequently created runtimes.
+Changing the lazy setting affects subsequently created field oracles.
 
 `queryView.idfOracle.sealedStatsLoadConcurrencyRatio` defaults to 4 times CPU cores
 and dynamically resizes the shared limit. Both new configuration keys are version
@@ -75,7 +92,7 @@ open/read retry configuration.
 
 A received QueryView prepares its explicit DataVersion before reporting Ready.
 Preparation first passes the owner final-commit check and applied-event barrier,
-then advances the single materialized aggregate. The old aggregate remains usable
+then advances that View's shared fields to a common baseline. The old aggregate remains usable
 while I/O proceeds. An unmaterialized lazy runtime only updates its target; it
 performs no sealed I/O until the first BM25 query. Once materialized, all later
 preparation is synchronous. There is no independent background advancement task
@@ -142,24 +159,53 @@ the remaining view watermark; closing the last runtime instead cancels/drains
 refresh work and releases all statistics. No scheduled worker waits for another
 queued task on the same scheduler.
 
+## Read-schema preparation
+
+A View binding captures an exact read-schema WAL snapshot and buffers the concurrent
+live tail with a bounded queue. Missing fields are prepared privately, then published
+together after the buffered tail drains. Each field remembers its snapshot cutoff,
+so even late dispatcher events covered by the snapshot cannot count twice. A final
+applied-event barrier brings reused fields through that snapshot prefix before Ready.
+Each WAL event updates each shared field once, regardless of its View reference count.
+
+The existing QueryView Acquire/Release lifecycle owns resource guards. Withdrawal
+cancels preparation/planning, but cleanup waits for borrowed operations to exit.
+The last owner removes its field and drains lazy materialization before release is
+acknowledged. Surviving fields advance through the remaining DataVersion floor before
+old DataView files may Drop. No historical schema/load identity map survives solely
+because the shared QueryRuntime remains alive.
+
+TODO: Make View resource release retryable. IDF binding Release currently waits
+for the preparation mutex, so another View's slow resource preparation can hold
+up a shared scheduler worker. Retrying must preserve the binding and its references
+until release actually completes; replacing Lock with a skipped TryLock is unsafe.
+
+Read-only CCollections are shared by `(CollectionID, SchemaVersion)` with separate
+View load scopes. Function registrations have distinct owner keys while the existing
+function manager shares unchanged function signatures. Native execution handles pin
+the exact read schema independently, so View retirement does not destroy a borrowed
+native collection. PartitionStats retains its existing View reference ownership.
+
 ## Query behavior
 
-BuildIDF/BuildIDFBatch accept a query context for lazy initialization and do not
+A bound BuildIDFBatch accepts a query context for lazy initialization and do not
 select statistics by request DataVersion. Query text is tokenized
-before reading the aggregate; a batch of field/token requests is evaluated under
-one read lock without copying the global vocabulary. Phase 2 uses the resulting
+before reading the aggregate; a batch of field/token requests aligns shared field baselines and reads them under
+the event lock and oracle read locks without copying the global vocabulary. Phase 2 uses the resulting
 plan parameters, without another Oracle read.
 
 An empty latest aggregate cannot prove that an older view has no rows. It must
 not set SearchOptimization.Skip. For an empty corpus, document-frequency lookup
 uses zero counts and average document length uses the positive fallback 1. Missing
-loaded fields are errors, not empty corpora. This keeps scoring finite without
+required fields are errors, not empty corpora. This keeps scoring finite without
 incorrectly suppressing old-view candidates.
 
 ## Cost and validation
 
-With global vocabulary U, growing statistics G and sealed metadata M, steady
-memory is O(U + G + M), independent of concurrent DataVersion count. Refresh
+For one shared field, with vocabulary U, growing statistics G and sealed
+metadata M, steady memory is O(U + G + M), independent of concurrent DataVersion
+count. Total memory sums over the field identities owned by live or draining Views;
+retired schema/load versions alone retain no field state. Refresh
 adds positive/negative delta memory plus at most C decoded segment statistics and
 C read buffers, where C is the process-wide concurrency limit. Large compactions
 may approach corpus size. The read limit bounds task count, not bytes; a very large
@@ -170,7 +216,7 @@ file cache. Eviction trades an additional old-stats S3 read for lower memory.
 
 Validate flush/compaction and same-ID replacement, concurrent inserts, delayed
 seal notification, failure/retry/cancellation atomicity, release ordering, multiple
-old/new views using one aggregate, hybrid-query consistency, empty latest corpus
+old/new views sharing unchanged fields, prompt last-owner reclamation, hybrid-query consistency, empty latest corpus
 with nonempty old-view candidates, and stable memory/read counts across many
 versions. Use real BM25 RPC validation as well as deterministic tests.
 

@@ -374,6 +374,12 @@ func ReplicaLoadPercentagesByResourceGroup(
 	// this deliberately does not.
 	channelTargets := targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.NextTargetFirst)
 	segmentTargets := targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, meta.NextTargetFirst)
+	// Size the target by its own segment count: a segment the shared store can
+	// no longer resolve is still owed by the target, so counting only the
+	// resolvable ones would report a resource group as more loaded than it is.
+	// The numerator below walks this same ID set, so both sides share one
+	// basis; an unresolvable segment simply never counts as loaded.
+	segmentTargetIDs := targetMgr.GetSealedSegmentIDsByCollection(ctx, collectionID, meta.NextTargetFirst)
 
 	// One distribution lookup per CHANNEL, shared by every replica and by the
 	// segment walk. ChannelDistManager.GetByFilter with no node filter walks
@@ -386,7 +392,7 @@ func ReplicaLoadPercentagesByResourceGroup(
 
 	figures := make(map[int64]int32, len(replicas))
 	for _, replica := range replicas {
-		figures[replica.GetID()] = replicaLoadPercentage(replica, channelTargets, segmentTargets, delegators)
+		figures[replica.GetID()] = replicaLoadPercentage(replica, channelTargets, segmentTargets, segmentTargetIDs, delegators)
 	}
 	return figures, nil
 }
@@ -431,9 +437,10 @@ func replicaLoadPercentage(
 	replica *meta.Replica,
 	channelTargets map[string]*meta.DmChannel,
 	segmentTargets map[int64]*datapb.SegmentInfo,
+	segmentTargetIDs typeutil.UniqueSet,
 	delegators map[string][]*meta.DmChannel,
 ) int32 {
-	targetNum := len(channelTargets) + len(segmentTargets)
+	targetNum := len(channelTargets) + len(segmentTargetIDs)
 	if targetNum == 0 {
 		return 0
 	}
@@ -447,9 +454,15 @@ func replicaLoadPercentage(
 			}
 		}
 	}
-	for _, segment := range segmentTargets {
+	for segmentID := range segmentTargetIDs {
+		segment, ok := segmentTargets[segmentID]
+		if !ok {
+			// Owed by the target, unresolvable right now: counted in the
+			// denominator, never as loaded.
+			continue
+		}
 		for _, delegator := range delegators[segment.GetInsertChannel()] {
-			if replica.Contains(delegator.Node) && delegator.View.Segments[segment.GetID()] != nil {
+			if replica.Contains(delegator.Node) && delegator.View.Segments[segmentID] != nil {
 				loadedCount++
 				break
 			}

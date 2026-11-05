@@ -145,6 +145,12 @@ func callWithTimeout(fn func(), timeoutHandler func(), timeout time.Duration) {
 	}
 }
 
+// InitS3CrtQueueSizes publishes node-local tuning for per-job storage configurations.
+func InitS3CrtQueueSizes(params *paramtable.ComponentParam) error {
+	status := C.InitS3CrtQueueSizes(C.uint32_t(params.MinioCfg.CRTQueueSizes.GetAsUint32()))
+	return HandleCStatus(&status, "InitS3CrtQueueSizes failed")
+}
+
 func InitStorageV2FileSystem(params *paramtable.ComponentParam) error {
 	if params.CommonCfg.StorageType.GetValue() == "local" {
 		return initLocalArrowFileSystem(params.LocalStorageCfg.Path.GetValue(), params)
@@ -182,6 +188,7 @@ func initLocalArrowFileSystem(path string, params *paramtable.ComponentParam) er
 		talon_block_size:                C.uint32_t(params.CommonCfg.StorageTalonBlockSize.GetAsUint32()),
 		talon_max_idle_per_addr:         C.uint32_t(params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32()),
 		talon_enable_for_external_table: C.bool(params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool()),
+		crt_queue_sizes:                 C.uint32_t(params.MinioCfg.CRTQueueSizes.GetAsUint32()),
 	}
 	status := C.InitArrowFileSystem(storageConfig)
 	return HandleCStatus(&status, "InitArrowFileSystem failed")
@@ -243,6 +250,7 @@ func InitRemoteArrowFileSystem(params *paramtable.ComponentParam) error {
 		talon_block_size:                C.uint32_t(params.CommonCfg.StorageTalonBlockSize.GetAsUint32()),
 		talon_max_idle_per_addr:         C.uint32_t(params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32()),
 		talon_enable_for_external_table: C.bool(params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool()),
+		crt_queue_sizes:                 C.uint32_t(params.MinioCfg.CRTQueueSizes.GetAsUint32()),
 	}
 
 	status := C.InitArrowFileSystem(storageConfig)
@@ -317,6 +325,7 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 		talon_block_size:                C.uint32_t(params.CommonCfg.StorageTalonBlockSize.GetAsUint32()),
 		talon_max_idle_per_addr:         C.uint32_t(params.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32()),
 		talon_enable_for_external_table: C.bool(params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool()),
+		crt_queue_sizes:                 C.uint32_t(params.MinioCfg.CRTQueueSizes.GetAsUint32()),
 	}
 
 	status := C.InitRemoteChunkManagerSingleton(storageConfig)
@@ -432,6 +441,7 @@ func InitTieredStorage(params *paramtable.ComponentParam) error {
 	diskHighWatermarkBytes := C.int64_t(diskHighWatermarkRatio * float64(osDiskBytes))
 	diskMaxBytes := C.int64_t(diskMaxRatio * float64(osDiskBytes))
 
+	C.SegcoreSetLazyIndexSlotEnabled(C.bool(params.QueryNodeCfg.TieredLazyIndexSlotEnabled.GetAsBool()))
 	storageUsageTrackingEnabled := C.bool(params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool())
 	lazyColumnGroupEnabled := C.bool(params.QueryNodeCfg.TieredLazyColumnGroupEnabled.GetAsBool())
 	evictionEnabled := C.bool(params.QueryNodeCfg.TieredEvictionEnabled.GetAsBool())
@@ -508,6 +518,7 @@ func UpdateTieredStorageConfig(params *paramtable.ComponentParam) error {
 
 	loadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredLoadingTimeoutMs.GetAsInt64())
 	warmupLoadingTimeoutMs := C.int64_t(params.QueryNodeCfg.TieredWarmupLoadingTimeoutMs.GetAsInt64())
+	C.SegcoreSetLazyIndexSlotEnabled(C.bool(params.QueryNodeCfg.TieredLazyIndexSlotEnabled.GetAsBool()))
 	storageUsageTrackingEnabled := C.bool(params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool())
 	lazyColumnGroupEnabled := C.bool(params.QueryNodeCfg.TieredLazyColumnGroupEnabled.GetAsBool())
 	rejectRemoteVectorOutput := C.bool(params.QueryNodeCfg.TieredRejectRemoteVectorOutput.GetAsBool())
@@ -650,6 +661,24 @@ func InitExternalVectorNullPolicy(params *paramtable.ComponentParam) error {
 			params.CommonCfg.ExternalVectorPartialNullPolicy.GetValue())
 	}
 	return nil
+}
+
+// InitExternalSparseConversionConfig applies the startup-only budget shared by
+// external load, take, index build and field-size sampling.
+func InitExternalSparseConversionConfig(params *paramtable.ComponentParam) error {
+	item := &params.CommonCfg.ExternalSparseConversionMemoryLimit
+	limit, err := strconv.ParseInt(strings.TrimSpace(item.GetValue()), 10, 64)
+	if err != nil || limit <= 0 {
+		return merr.WrapErrParameterInvalidMsg("%s must be a positive byte count, got %q", item.Key, item.GetValue())
+	}
+	if !bool(C.SetExternalSparseConversionMemoryLimit(C.int64_t(limit))) {
+		return merr.WrapErrParameterInvalidMsg("%s must be positive, got %d", item.Key, limit)
+	}
+	return nil
+}
+
+func externalSparseConversionMemoryLimit() int64 {
+	return int64(C.GetExternalSparseConversionMemoryLimit())
 }
 
 func externalVectorPartialNullAsRowNullEnabled() bool {
@@ -869,6 +898,7 @@ func SetupCoreConfigChangelCallback() {
 		paramtable.Get().QueryNodeCfg.TieredWarmupVectorField.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.RegisterCallback(updateTieredStorageConfigCallback)
+		paramtable.Get().QueryNodeCfg.TieredLazyIndexSlotEnabled.RegisterCallback(updateTieredStorageConfigCallback)
 		paramtable.Get().QueryNodeCfg.TieredLazyColumnGroupEnabled.RegisterCallback(updateTieredStorageConfigCallback)
 	})
 }
@@ -877,6 +907,15 @@ func InitInterminIndexConfig(params *paramtable.ComponentParam) error {
 	targetVersion := C.int64_t(params.QueryNodeCfg.InterimIndexTargetIndexVersion.GetAsInt64())
 	status := C.SegcoreSetInterimIndexTargetVersion(targetVersion)
 	if err := HandleCStatus(&status, "SegcoreSetInterimIndexTargetVersion failed"); err != nil {
+		return err
+	}
+
+	sparseIPAlgo := C.CString(params.QueryNodeCfg.InterimIndexSparseIPAlgo.GetValue())
+	defer C.free(unsafe.Pointer(sparseIPAlgo))
+	sparseBM25Algo := C.CString(params.QueryNodeCfg.InterimIndexSparseBM25Algo.GetValue())
+	defer C.free(unsafe.Pointer(sparseBM25Algo))
+	status = C.SegcoreSetSparseInterimIndexAlgorithms(sparseIPAlgo, sparseBM25Algo)
+	if err := HandleCStatus(&status, "SegcoreSetSparseInterimIndexAlgorithms failed"); err != nil {
 		return err
 	}
 

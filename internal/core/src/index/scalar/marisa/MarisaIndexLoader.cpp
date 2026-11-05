@@ -19,6 +19,8 @@
 #include "storage/LocalFileIOPool.h"
 #include "common/OpContext.h"
 #include "index/scalar/marisa/MarisaIndexLoader.h"
+#include "index/SingleCellIndexStorageTranslator.h"
+#include "cachinglayer/Manager.h"
 #include "index/PackedIndexLoad.h"
 #include "index/LegacyIndexLoad.h"
 #include "index/scalar/marisa/MarisaIndexParams.h"
@@ -230,34 +232,9 @@ OpenTrie(const std::string& path, bool mmap_enabled) {
         }
         return trie;
     } catch (const marisa::Exception& error) {
-        // Preserve allocation failures separately. Other MARISA failures use
-        // the staged-payload classification supplied to ClassifyMarisaError.
-        ThrowInfo(
-            ClassifyMarisaError(error, DataFormatBroken, DataFormatBroken),
-            "invalid marisa trie entry: {}",
-            error.what());
-    }
-}
-
-// Check the uint32 row domain and every key ID, allowing the historical null
-// sentinel.
-void
-ValidateStrIds(const int64_t* str_ids, size_t count, size_t num_keys) {
-    AssertInfo(count <= std::numeric_limits<uint32_t>::max(),
-               "marisa row count {} exceeds uint32_t CSR capacity",
-               count);
-    for (size_t row = 0; row < count; ++row) {
-        const auto key_id = str_ids[row];
-        if (key_id == static_cast<int64_t>(MARISA_NULL_KEY_ID)) {
-            continue;
-        }
-        if (key_id < 0 || static_cast<size_t>(key_id) >= num_keys) {
-            ThrowInfo(DataFormatBroken,
-                      "invalid marisa key id {} at row {} for {} keys",
-                      key_id,
-                      row,
-                      num_keys);
-        }
+        ThrowInfo(ClassifyMarisaError(error, FileReadFailed, DataFormatBroken),
+                  "failed to load marisa trie entry: {}",
+                  error.what());
     }
 }
 
@@ -271,12 +248,23 @@ BuildCsr(const int64_t* str_ids,
     AssertInfo(num_keys < std::numeric_limits<uint32_t>::max(),
                "marisa key count {} exceeds uint32_t CSR capacity",
                num_keys);
-    ValidateStrIds(str_ids, count, num_keys);
+    AssertInfo(count <= std::numeric_limits<uint32_t>::max(),
+               "marisa row count {} exceeds uint32_t CSR capacity",
+               count);
 
     csr_index = std::make_shared<std::vector<uint32_t>>(num_keys + 1, 0);
     for (size_t row = 0; row < count; ++row) {
         const auto key_id = str_ids[row];
         if (key_id != static_cast<int64_t>(MARISA_NULL_KEY_ID)) {
+            // Rebuilding indexes this key directly. Check its bounds during
+            // the required histogram pass, without a separate row-ID scan.
+            if (key_id < 0 || static_cast<size_t>(key_id) >= num_keys) {
+                ThrowInfo(DataFormatBroken,
+                          "invalid marisa key id {} at row {} for {} keys",
+                          key_id,
+                          row,
+                          num_keys);
+            }
             ++(*csr_index)[static_cast<size_t>(key_id) + 1];
         }
     }
@@ -291,75 +279,6 @@ BuildCsr(const int64_t* str_ids,
         if (key_id != static_cast<int64_t>(MARISA_NULL_KEY_ID)) {
             (*csr_offsets)[write_pos[static_cast<size_t>(key_id)]++] =
                 static_cast<uint32_t>(row);
-        }
-    }
-}
-
-// Cross-check CSR ranges, ordered row IDs and coverage against the row-to-key
-// mapping.
-void
-ValidateCsr(const int64_t* str_ids,
-            size_t count,
-            size_t num_keys,
-            const uint32_t* csr_index,
-            size_t csr_index_count,
-            const uint32_t* csr_offsets,
-            size_t csr_offsets_count) {
-    if (num_keys > std::numeric_limits<size_t>::max() / sizeof(uint32_t) - 1 ||
-        csr_index_count != num_keys + 1) {
-        ThrowInfo(DataFormatBroken,
-                  "invalid marisa CSR index length: expected {}, got {}",
-                  num_keys + 1,
-                  csr_index_count);
-    }
-    if (csr_index[0] != 0 || csr_index[num_keys] != csr_offsets_count) {
-        ThrowInfo(DataFormatBroken,
-                  "invalid marisa CSR bounds: first {}, last {}, offsets {}",
-                  csr_index[0],
-                  csr_index[num_keys],
-                  csr_offsets_count);
-    }
-
-    size_t valid_rows = 0;
-    for (size_t row = 0; row < count; ++row) {
-        if (str_ids[row] != static_cast<int64_t>(MARISA_NULL_KEY_ID)) {
-            ++valid_rows;
-        }
-    }
-    if (valid_rows != csr_offsets_count) {
-        ThrowInfo(DataFormatBroken,
-                  "marisa CSR offset count {} does not match {} valid rows",
-                  csr_offsets_count,
-                  valid_rows);
-    }
-
-    for (size_t key_id = 0; key_id < num_keys; ++key_id) {
-        const auto begin = csr_index[key_id];
-        const auto end = csr_index[key_id + 1];
-        if (begin > end || end > csr_offsets_count) {
-            ThrowInfo(DataFormatBroken,
-                      "invalid marisa CSR range [{}, {}) for key {}",
-                      begin,
-                      end,
-                      key_id);
-        }
-        uint32_t previous = 0;
-        bool first = true;
-        for (size_t i = begin; i < end; ++i) {
-            const auto row = csr_offsets[i];
-            if (row >= count || str_ids[row] != static_cast<int64_t>(key_id)) {
-                ThrowInfo(DataFormatBroken,
-                          "invalid marisa CSR row {} for key {}",
-                          row,
-                          key_id);
-            }
-            if (!first && row <= previous) {
-                ThrowInfo(DataFormatBroken,
-                          "marisa CSR rows for key {} are not increasing",
-                          key_id);
-            }
-            previous = row;
-            first = false;
         }
     }
 }
@@ -383,7 +302,7 @@ AddObservedBytes(size_t& total, size_t value) {
 
 // Load a legacy trie and row IDs; rebuild CSR and retain staging only for
 // mmap readers.
-folly::coro::Task<std::shared_ptr<const MarisaIndexStorage>>
+folly::coro::Task<std::unique_ptr<MarisaIndexStorage>>
 LoadState(bool use_async,
           storage::FileSource& source,
           const storage::LoadOptions& opts) {
@@ -430,7 +349,7 @@ LoadState(bool use_async,
             local_io();
         }
     }
-    auto storage = std::make_shared<MarisaIndexStorage>();
+    auto storage = std::make_unique<MarisaIndexStorage>();
     storage->value_type = value_type;
 
     std::string trie_path;
@@ -487,7 +406,6 @@ LoadState(bool use_async,
     if (!effective.enable_mmap) {
         auto str_ids = (co_await ReadEntryVector<int64_t>(
             use_async, opts, source, MARISA_STR_IDS, staging->Path()));
-        ValidateStrIds(str_ids->data(), str_ids->size(), num_keys);
 
         std::shared_ptr<std::vector<uint32_t>> csr_index;
         std::shared_ptr<std::vector<uint32_t>> csr_offsets;
@@ -502,6 +420,7 @@ LoadState(bool use_async,
         storage->str_ids_size = storage->str_ids_owner->size();
         storage->csr_index = storage->csr_index_owner->data();
         storage->csr_offsets = storage->csr_offsets_owner->data();
+        storage->Validate();
         co_return storage;
     }
 
@@ -530,7 +449,6 @@ LoadState(bool use_async,
     const auto* str_ids =
         reinterpret_cast<const int64_t*>(str_ids_mapping.Data());
     const auto str_ids_count = str_ids_bytes / sizeof(int64_t);
-    ValidateStrIds(str_ids, str_ids_count, num_keys);
 
     std::shared_ptr<std::vector<uint32_t>> csr_index_owner;
     std::shared_ptr<std::vector<uint32_t>> csr_offsets_owner;
@@ -554,6 +472,7 @@ LoadState(bool use_async,
     storage->csr_index = csr_index;
     storage->csr_offsets = csr_offsets;
     storage->file_backed_bytes = observed_bytes;
+    storage->Validate();
     co_return storage;
 }
 
@@ -618,14 +537,90 @@ MarisaIndexLoader::Create(OpenedIndexSource source,
     co_return loader;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
-MarisaIndexLoader::Load(milvus::OpContext* context) {
-    if (auto* packed = std::get_if<PackedIndexSource>(&source_)) {
-        return RunPackedIndexLoad(
-            *packed, options_, &PlanPacked, &FinishPacked, context);
+IndexPtr
+MarisaIndexLoader::Load(milvus::OpContext* context,
+                        const IndexCacheConfig& cache) {
+    AssertInfo(source_.has_value(),
+               "cached Marisa construction consumed this loader");
+    std::optional<int64_t> count;
+    if (const auto* packed = std::get_if<PackedIndexSource>(&*source_)) {
+        const auto bytes =
+            packed->Directory().At(MARISA_STR_IDS).plaintext_size;
+        if (bytes % sizeof(int64_t) != 0) {
+            ThrowInfo(DataFormatBroken, "invalid marisa row id entry size");
+        }
+        count = static_cast<int64_t>(bytes / sizeof(int64_t));
+    } else {
+        const auto rows =
+            GetValueFromConfig<int64_t>(options_.params, INDEX_NUM_ROWS_KEY);
+        // Legacy LoadInfo uses zero for both missing counts and empty segments.
+        if (rows && *rows > 0) {
+            count = *rows;
+        }
     }
-    return RunLegacyLoad(
-        std::get<LegacyIndexSource>(source_), options_, &LoadLegacy, context);
+    const auto value_type = ParseValueType(options_.params);
+    const auto* legacy = std::get_if<LegacyIndexSource>(&*source_);
+    const bool use_async =
+        legacy ? legacy->use_async
+               : std::holds_alternative<
+                     std::shared_ptr<storage::AsyncIndexEntryReader>>(
+                     std::get<PackedIndexSource>(*source_).reader);
+    auto source = std::move(*source_);
+    source_.reset();
+    auto load = [source = std::move(source),
+                 options = options_](OpContext* ctx) mutable {
+        return LoadStorage(source, options, ctx);
+    };
+    auto slot =
+        cachinglayer::Manager::GetInstance()
+            .CreateCacheSlot<MarisaIndexStorage>(
+                std::make_unique<
+                    SingleCellIndexStorageTranslator<MarisaIndexStorage>>(
+                    cache, use_async, std::move(load)),
+                context);
+    auto index =
+        std::make_shared<MarisaIndex>(std::move(slot), value_type, count);
+    if (auto spec = JsonProjectedSpec(options_.params, count)) {
+        return JsonPathIndex::FromStorage(std::move(index), std::move(*spec));
+    }
+    return index;
+}
+
+folly::coro::Task<std::unique_ptr<MarisaIndexStorage>>
+MarisaIndexLoader::LoadStorage(OpenedIndexSource& source,
+                               const storage::LoadOptions& options,
+                               milvus::OpContext* context) {
+    if (auto* packed = std::get_if<PackedIndexSource>(&source)) {
+        return RunPackedIndexLoad<std::unique_ptr<MarisaIndexStorage>>(
+            *packed, options, &PlanPacked, &FinishPackedStorage, context);
+    }
+    return RunLegacyLoad<std::unique_ptr<MarisaIndexStorage>>(
+        std::get<LegacyIndexSource>(source),
+        options,
+        [](storage::FileSource& source,
+           const storage::LoadOptions& opts,
+           bool use_async)
+            -> folly::coro::Task<std::unique_ptr<MarisaIndexStorage>> {
+            auto projection =
+                PrepareJsonProjectedOpen(families::kMarisa, source, opts);
+            auto storage = co_await LoadState(use_async, source, opts);
+            const auto rows =
+                GetValueFromConfig<int64_t>(opts.params, INDEX_NUM_ROWS_KEY);
+            if (rows && *rows > 0 && *rows != storage->str_ids_size) {
+                ThrowInfo(
+                    DataFormatBroken,
+                    "marisa index count {} disagrees with metadata count {}",
+                    storage->str_ids_size,
+                    *rows);
+            }
+            storage->json_exists =
+                co_await LoadJsonExists(use_async,
+                                        std::move(projection),
+                                        source,
+                                        storage->str_ids_size);
+            co_return storage;
+        },
+        context);
 }
 
 ReaderCaps
@@ -640,17 +635,6 @@ MarisaIndexLoader::DeriveCaps(const Config& index_meta) {
                                               .pattern_match = true,
                                               .value_lookup = true,
                                               .cheap_value_lookup = true});
-}
-
-folly::coro::Task<IIndexReaderBasePtr>
-MarisaIndexLoader::LoadLegacy(storage::FileSource& source,
-                              const storage::LoadOptions& opts,
-                              bool use_async) {
-    auto projection = PrepareJsonProjectedOpen(families::kMarisa, source, opts);
-    auto storage = (co_await LoadState(use_async, source, opts));
-    auto reader = std::make_unique<MarisaIndexReader>(std::move(storage));
-    co_return (co_await FinishJsonProjectedOpenAsync(
-        use_async, std::move(projection), source, std::move(reader)));
 }
 
 IndexLoadPlan
@@ -780,10 +764,10 @@ MarisaIndexLoader::PlanPacked(const storage::IndexEntryDirectory& directory,
     return plan;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
-MarisaIndexLoader::FinishPacked(IndexLoadPlan& plan,
-                                const storage::LoadOptions& opts,
-                                bool use_async) {
+folly::coro::Task<std::unique_ptr<MarisaIndexStorage>>
+MarisaIndexLoader::FinishPackedStorage(IndexLoadPlan& plan,
+                                       const storage::LoadOptions& opts,
+                                       bool use_async) {
     const auto priority =
         opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
             ? proto::common::LoadPriority::LOW
@@ -794,7 +778,7 @@ MarisaIndexLoader::FinishPacked(IndexLoadPlan& plan,
     AssertInfo(state != nullptr, "marisa packed load context is null");
     // Context retains the directory until the trie and both mapping guards
     // have either transferred to the reader or unwound on failure.
-    auto result = std::make_shared<MarisaIndexStorage>();
+    auto result = std::make_unique<MarisaIndexStorage>();
     result->value_type = state->value_type;
     storage::MappedRegionGuard ids_mapping;
     storage::MappedRegionGuard csr_mapping;
@@ -828,7 +812,6 @@ MarisaIndexLoader::FinishPacked(IndexLoadPlan& plan,
         result->str_ids = result->str_ids_owner->data();
     }
     result->str_ids_size = rows;
-    ValidateStrIds(result->str_ids, rows, keys);
     size_t csr_bytes = 0;
     if (state->csr.complete) {
         csr_bytes = state->csr.index_bytes + state->csr.offsets_bytes;
@@ -844,13 +827,14 @@ MarisaIndexLoader::FinishPacked(IndexLoadPlan& plan,
             result->csr_index = result->csr_index_owner->data();
             result->csr_offsets = result->csr_offsets_owner->data();
         }
-        ValidateCsr(result->str_ids,
-                    rows,
-                    keys,
-                    result->csr_index,
-                    keys + 1,
-                    result->csr_offsets,
-                    state->csr.offsets_bytes / sizeof(uint32_t));
+        // Inspect only the endpoints; persisted row IDs, middle CSR entries,
+        // and postings remain untouched during finalization.
+        if (state->csr.offsets_bytes % sizeof(uint32_t) != 0 ||
+            result->csr_index[0] != 0 ||
+            result->csr_index[keys] !=
+                state->csr.offsets_bytes / sizeof(uint32_t)) {
+            ThrowInfo(DataFormatBroken, "invalid marisa CSR endpoints");
+        }
     } else {
         std::shared_ptr<std::vector<uint32_t>> csr_index;
         std::shared_ptr<std::vector<uint32_t>> csr_offsets;
@@ -873,9 +857,10 @@ MarisaIndexLoader::FinishPacked(IndexLoadPlan& plan,
         AddObservedBytes(result->file_backed_bytes, state->str_ids_bytes);
         AddObservedBytes(result->file_backed_bytes, csr_bytes);
     }
-    co_return FinishPackedJsonProjectedOpen(
-        std::move(state->projection),
-        std::make_unique<MarisaIndexReader>(std::move(result)));
+    result->Validate();
+    result->json_exists = FinishPackedJsonExists(std::move(state->projection),
+                                                 result->str_ids_size);
+    co_return result;
 }
 
 namespace {

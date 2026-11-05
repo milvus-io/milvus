@@ -194,13 +194,6 @@ class VortexColumn final : public ChunkedColumnInterface {
                 int64_t count) override;
 
     void
-    BulkPrimitiveValueAt(milvus::OpContext* op_ctx,
-                         void* dst,
-                         const int64_t* offsets,
-                         int64_t count,
-                         bool small_int_raw_type = false) override;
-
-    void
     BulkVectorValueAt(milvus::OpContext* op_ctx,
                       void* dst,
                       const int64_t* offsets,
@@ -214,23 +207,11 @@ class VortexColumn final : public ChunkedColumnInterface {
                     int64_t count = 0) const override;
 
     void
-    BulkRawJsonAt(milvus::OpContext* op_ctx,
-                  std::function<void(Json, size_t, bool)> fn,
-                  const int64_t* offsets,
-                  int64_t count) const override;
-
-    void
     BulkRawBsonAt(milvus::OpContext* op_ctx,
                   std::function<void(BsonView, uint32_t, uint32_t)> fn,
                   const uint32_t* row_offsets,
                   const uint32_t* value_offsets,
                   int64_t count) const override;
-
-    void
-    BulkArrayAt(milvus::OpContext* op_ctx,
-                std::function<void(const ArrayView&, size_t)> fn,
-                const int64_t* offsets,
-                int64_t count) const override;
 
     void
     BulkArrayValueAt(milvus::OpContext* op_ctx,
@@ -253,6 +234,19 @@ class VortexColumn final : public ChunkedColumnInterface {
  private:
     std::unique_ptr<ColumnPlanner>
     BuildPlanner() const override;
+
+    // Same contract as ChunkedArrayColumn: the legacy ArrayView of a field
+    // with null elements is not served.
+    void
+    ValidateArrayViewTarget(TargetType target_type) const override;
+
+    void
+    RejectNullableArrayElements() const;
+
+    // Take without ValidateArrayViewTarget, for output paths such as
+    // BulkArrayValueAt that the raw column also serves for such fields.
+    TakeResultPtr
+    TakeUnchecked(milvus::OpContext* op_ctx, TakeOptions options) const;
 
     struct FileState {
         bool direct_data_scan = false;
@@ -351,9 +345,12 @@ class VortexColumn final : public ChunkedColumnInterface {
         std::optional<std::pair<int64_t, int64_t>> offset_len) const;
 
     std::shared_ptr<arrow::Table>
-    TakeArrowFromFile(milvus::OpContext* op_ctx,
-                      int64_t chunk_id,
-                      const std::vector<int64_t>& offsets) const;
+    TakeArrowFromFile(
+        milvus::OpContext* op_ctx,
+        int64_t chunk_id,
+        const std::vector<int64_t>& offsets,
+        std::shared_ptr<cachinglayer::CellAccessor<
+            milvus_storage::vortex::VortexCellGuard>> pin = nullptr) const;
 
     template <typename ArrowArrayT, typename ValueT>
     void
