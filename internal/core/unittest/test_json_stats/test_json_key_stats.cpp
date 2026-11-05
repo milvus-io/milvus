@@ -327,9 +327,9 @@ CreateMaterializeTestIndex(bool nullable, int64_t write_batch_size) {
     storage::FieldDataMeta field_meta{11, 12, id, 101, field_schema};
     storage::IndexMeta index_meta{id, 101, id, 1};
 
-    storage::StorageConfig storage_config;
-    storage_config.storage_type = "local";
-    storage_config.root_path = TestLocalPath;
+    auto storage_config = std::make_shared<milvus_storage::api::Properties>();
+    (*storage_config)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+    (*storage_config)[PROPERTY_FS_ROOT_PATH] = std::string(TestLocalPath);
     auto chunk_manager = storage::CreateChunkManager(storage_config);
     auto fs = storage::InitArrowFileSystem(storage_config);
     storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
@@ -1480,9 +1480,10 @@ class JsonKeyStatsTest : public ::testing::TestWithParam<bool> {
         int64_t index_build_id = GenerateRandomInt64(1, 100000);
         int64_t index_version = 1;
         size_ = 1000;  // Use a larger size for better testing
-        storage::StorageConfig storage_config;
-        storage_config.storage_type = "local";
-        storage_config.root_path = TestLocalPath;
+        auto storage_config =
+            std::make_shared<milvus_storage::api::Properties>();
+        (*storage_config)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+        (*storage_config)[PROPERTY_FS_ROOT_PATH] = std::string(TestLocalPath);
         chunk_manager_ = storage::CreateChunkManager(storage_config);
 
         fs_ = milvus::segcore::GetDefaultArrowFileSystem();
@@ -1635,9 +1636,10 @@ class JsonKeyStatsUploadLoadTest : public ::testing::Test {
         index_version_ = 10000;
         root_path_ = TestLocalPath;
 
-        storage::StorageConfig storage_config;
-        storage_config.storage_type = "local";
-        storage_config.root_path = root_path_;
+        auto storage_config =
+            std::make_shared<milvus_storage::api::Properties>();
+        (*storage_config)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+        (*storage_config)[PROPERTY_FS_ROOT_PATH] = std::string(root_path_);
         chunk_manager_ = storage::CreateChunkManager(storage_config);
 
         fs_ = milvus::segcore::GetDefaultArrowFileSystem();

@@ -4540,7 +4540,7 @@ CreateNullableSealedSegment(const NullableElementSearchFixture& f) {
                               0);
 
     auto storage_config = gen_local_storage_config(TestLocalPath);
-    auto cm = CreateChunkManager(storage_config);
+    auto cm = storage::CreateChunkManager(storage_config);
     auto field_data_info = PrepareSingleFieldInsertBinlog(kCollectionID,
                                                           kPartitionID,
                                                           kSegmentID,

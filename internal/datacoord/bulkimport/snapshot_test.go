@@ -2732,7 +2732,7 @@ func TestExpandSnapshotV2References(t *testing.T) {
 					files, normalized, l0, err := expandSnapshotImportFiles(context.Background(), nil, milvusstorage.NewLocalChunkManager(), SnapshotImportTestSchema(), uri, opts, metadata)
 					require.NoError(t, err)
 					require.Len(t, files, 2)
-					require.NoError(t, importutilv2.ValidateSnapshotImportPlan(files, normalized, l0))
+					require.NoError(t, importutilv2.ValidateImportPlan(files, normalized, l0))
 					for _, file := range files {
 						require.Empty(t, file.Paths)
 						version := uint32(10)
@@ -2882,7 +2882,7 @@ func TestExpandSnapshotV2StorageManifestRoundTrip(t *testing.T) {
 				require.NoError(t, err)
 				files, options, l0, err := expandSnapshotImportFiles(ctx, nil, cm, SnapshotImportTestSchema(), uri, SnapshotImportTestOptions(), metadata)
 				require.NoError(t, err)
-				require.NoError(t, importutilv2.ValidateSnapshotImportPlan(files, options, l0))
+				require.NoError(t, importutilv2.ValidateImportPlan(files, options, l0))
 				require.Len(t, files, 2)
 				require.NotNil(t, files[1].SnapshotSource.V2Reference)
 				require.Empty(t, files[1].SnapshotSource.ManifestPath)
@@ -2961,7 +2961,7 @@ func TestSnapshotImportBucketOnlyRelocation(t *testing.T) {
 					files, options, l0, err := expandSnapshotImportFiles(ctx, []int64{100}, cm, SnapshotImportTestSchema(), uri, options, metadata)
 					require.NoError(t, err)
 					require.Len(t, files, len(versions))
-					require.NoError(t, importutilv2.ValidateSnapshotImportPlan(files, options, l0))
+					require.NoError(t, importutilv2.ValidateImportPlan(files, options, l0))
 					require.Len(t, l0, 1)
 					require.Equal(t, []string{deltaKey}, l0[0].LegacyL0Deltalogs)
 					for i, file := range files {
