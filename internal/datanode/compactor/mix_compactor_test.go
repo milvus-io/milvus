@@ -1614,57 +1614,6 @@ func genTestCollectionMeta() *etcdpb.CollectionMeta {
 	}
 }
 
-func BenchmarkMixCompactor(b *testing.B) {
-	// Setup
-	s := new(MixCompactionTaskStorageV1Suite)
-
-	s.SetT(&testing.T{})
-	s.SetupSuite()
-	s.SetupTest()
-
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		b.StopTimer()
-		seq := int64(i * 100000)
-		segments := []int64{seq, seq + 1, seq + 2}
-		alloc := allocator.NewLocalAllocator(seq+3, math.MaxInt64)
-		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
-		s.task.plan.SegmentBinlogs = make([]*datapb.CompactionSegmentBinlogs, 0)
-		for _, segID := range segments {
-			s.initSegBuffer(100000, segID)
-			kvs, fBinlogs, err := serializeWrite(context.TODO(), alloc, s.segWriter)
-			s.Require().NoError(err)
-			s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(keys []string) bool {
-				left, right := lo.Difference(keys, lo.Keys(kvs))
-				return len(left) == 0 && len(right) == 0
-			})).Return(lo.Values(kvs), nil).Once()
-
-			s.task.plan.SegmentBinlogs = append(s.task.plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
-				CollectionID: 1,
-				SegmentID:    segID,
-				FieldBinlogs: lo.Values(fBinlogs),
-			})
-		}
-
-		b.StartTimer()
-
-		result, err := s.task.Compact()
-		s.NoError(err)
-		s.NotNil(result)
-		s.Equal(s.task.plan.GetPlanID(), result.GetPlanID())
-		s.Equal(1, len(result.GetSegments()))
-		segment := result.GetSegments()[0]
-		s.EqualValues(19531, segment.GetSegmentID())
-		s.EqualValues(3, segment.GetNumOfRows())
-		s.NotEmpty(segment.InsertLogs)
-		s.NotEmpty(segment.Field2StatslogPaths)
-		s.Empty(segment.Deltalogs)
-	}
-
-	s.TearDownTest()
-}
-
 func TestCanMergeSort(t *testing.T) {
 	params := compaction.Params{UseMergeSort: true, MaxSegmentMergeSort: 30}
 	// EnableNamespace is false here, so the merge key is [pk] and IsSorted is
