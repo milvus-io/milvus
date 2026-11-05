@@ -17,10 +17,7 @@
 package task
 
 import (
-	"context"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"testing"
 )
@@ -34,11 +31,5 @@ func setSegmentChangeTestParam(t *testing.T, item *paramtable.ParamItem, value s
 
 func newTestCompactionMeta(t *testing.T) *MockCompactionMeta {
 	t.Helper()
-	m := NewMockCompactionMeta(t)
-	m.EXPECT().CompactionContext().Return(context.Background()).Maybe()
-	m.EXPECT().GetCompactionChangeGroup(mock.Anything).Return((*model.SegmentChangeGroup)(nil), nil).Maybe()
-	m.EXPECT().GetProducerChangeGroup(mock.Anything, mock.Anything, mock.Anything).Return((*model.SegmentChangeGroup)(nil)).Maybe()
-	m.EXPECT().GetSegmentChangeGroupBySegmentID(mock.Anything, mock.Anything).Return((*model.SegmentChangeGroup)(nil)).Maybe()
-	m.EXPECT().RecomputeCompactionDataView(mock.Anything, mock.Anything).Return().Maybe()
-	return m
+	return NewDefaultMockCompactionMeta(t)
 }

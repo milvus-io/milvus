@@ -18,7 +18,12 @@ package datacoord
 
 import (
 	"context"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction"
+	ctask "github.com/milvus-io/milvus/internal/datacoord/compaction/task"
+	"github.com/milvus-io/milvus/internal/datacoord/copysegment"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -33,6 +38,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func newSegmentChangeTaskMeta(t *testing.T, m *meta.Meta) *ctask.CompactionTaskMeta {
+	t.Helper()
+	taskMeta, err := ctask.NewCompactionTaskMeta(t.Context(), m.Catalog)
+	require.NoError(t, err)
+	return taskMeta
+}
 
 func setSegmentChangeTestParam(t *testing.T, item *paramtable.ParamItem, value string) {
 	t.Helper()
@@ -101,42 +113,44 @@ func TestSegmentChangeRetainsL0WhilePublishing(t *testing.T) {
 		PlanID: 6000, CollectionID: 10, PartitionID: 100, Channel: "ch-1",
 		InputSegments: []int64{3001}, Type: datapb.CompactionType_Level0DeleteCompaction, State: datapb.CompactionTaskState_pipelining,
 	}
-	ci := newCompactionInspector(m, meta.NewMockAllocator(t), nil, nil, nil, nil)
-	queued, err := ci.createCompactTask(l0)
+	ci := compaction.NewSegmentChangeTestInspector(t, m, meta.NewMockAllocator(t))
+	queued, err := ci.CreateCompactTaskForTest(l0)
 	require.NoError(t, err)
-	require.NoError(t, ci.queueTasks.Enqueue(queued))
+	require.NoError(t, ci.EnqueueForTest(queued))
 	_, err = m.CompleteCompactionMutation(t.Context(), task, result)
 	require.NoError(t, err)
 	// Opt-out must still protect the already admitted group.
 	require.NoError(t, Params.Save(Params.DataCoordCfg.SegmentChangeEnabled.Key, "false"))
-	_, err = ci.createCompactTask(l0)
+	_, err = ci.CreateCompactTaskForTest(l0)
 	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
-	require.Empty(t, ci.schedule())
-	require.Zero(t, ci.queueTasks.Len(), "deferred L0 must not consume the inner sort planning budget")
-	require.Contains(t, ci.cleaningTasks, int64(6000))
-	ci.cleanFailedTasks()
-	require.Empty(t, ci.cleaningTasks)
+	require.Empty(t, ci.ScheduleForTest())
+	require.Zero(t, ci.QueueLenForTest(), "deferred L0 must not consume the inner sort planning budget")
+	require.True(t, ci.CleaningForTest(6000))
+	ci.CleanFailedForTest()
+	require.False(t, ci.CleaningForTest(6000))
 	require.Equal(t, commonpb.SegmentState_Flushed, m.GetSegment(t.Context(), 3001).GetState())
 	require.False(t, m.GetSegment(t.Context(), 3001).IsCompacting)
 	require.Equal(t, model.SegmentChangeStateStaged, m.GetSegmentChangeGroup(t.Context(), 10, 5000).State)
 	inspector := newSegmentChangeInspector(t.Context(), m, meta.NewMockAllocator(t))
 	inspector.checkAllGroups(t.Context())
 	inspector.checkAllGroups(t.Context())
-	_, err = ci.createCompactTask(l0)
+	_, err = ci.CreateCompactTaskForTest(l0)
 	require.NoError(t, err, "L0 may be replanned once outputs are published")
 }
 
 func TestSegmentChangeRetainsL0DuringCopyAdmission(t *testing.T) {
 	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "true")
 	m, _, _ := seedMixProducer(t)
-	copyMeta := &copySegmentMeta{jobs: map[int64]CopySegmentJob{
-		8000: &copySegmentJob{CopySegmentJob: &datapb.CopySegmentJob{JobId: 8000, CollectionId: 10, State: datapb.CopySegmentJobState_CopySegmentJobPending}},
-	}}
-	ci := newCompactionInspector(m, meta.NewMockAllocator(t), nil, nil, nil, nil)
-	ci.copySegmentMeta = copyMeta
-	require.True(t, ci.segmentChangeL0Exclusions().Contain("ch-1"))
-	copyMeta.jobs[8000] = &copySegmentJob{CopySegmentJob: &datapb.CopySegmentJob{JobId: 8000, CollectionId: 10, State: datapb.CopySegmentJobState_CopySegmentJobCompleted}}
-	require.False(t, ci.segmentChangeL0Exclusions().Contain("ch-1"))
+	copyMeta, err := copysegment.NewCopySegmentMeta(t.Context(), m.Catalog, m, nil, nil, nil)
+	require.NoError(t, err)
+	job := copysegment.NewTestCopyJob(8000, datapb.CopySegmentJobState_CopySegmentJobPending).(*copysegment.Job)
+	job.CollectionId = 10
+	require.NoError(t, copyMeta.AddJob(t.Context(), job))
+	ci := compaction.NewSegmentChangeTestInspector(t, m, meta.NewMockAllocator(t))
+	ci.SetCopySegmentMeta(copyMeta)
+	require.True(t, ci.L0ExclusionsForTest().Contain("ch-1"))
+	job.State = datapb.CopySegmentJobState_CopySegmentJobCompleted
+	require.False(t, ci.L0ExclusionsForTest().Contain("ch-1"))
 }
 
 func TestSegmentChangeMixProducerOptIn(t *testing.T) {
@@ -199,16 +213,18 @@ func TestSegmentChangeMixTaskRecoveryAndFlagOff(t *testing.T) {
 			require.NoError(t, err)
 			// Simulate a crash before saving meta_saved: recovery has only the
 			// executing task and the durable output/group transaction.
-			require.NoError(t, m.SaveCompactionTask(t.Context(), task))
+			taskMeta, err := ctask.NewCompactionTaskMeta(t.Context(), m.Catalog)
+			require.NoError(t, err)
+			require.NoError(t, taskMeta.SaveCompactionTask(t.Context(), task))
 			require.NoError(t, Params.Save(Params.DataCoordCfg.SegmentChangeEnabled.Key, "false"))
 			recovered := reloadSegmentChangeMeta(t, m)
-			ci := &compactionInspector{meta: recovered, allocator: meta.NewMockAllocator(t)}
-			restored, err := ci.createCompactTask(task)
+			ci := compaction.NewSegmentChangeTestInspector(t, recovered, meta.NewMockAllocator(t))
+			restored, err := ci.CreateCompactTaskForTest(task)
 			require.NoError(t, err)
 			require.Equal(t, datapb.CompactionTaskState_meta_saved, restored.GetTaskProto().GetState())
 			require.Equal(t, taskcommon.Finished, restored.GetTaskState(), "readiness must not occupy a worker slot")
 			require.False(t, restored.NeedReAssignNodeID())
-			mt := restored.(*mixCompactionTask)
+			mt := restored.(*ctask.MixCompactionTask)
 			// No worker calls are expected, even when its old result is gone.
 			mt.QueryTaskOnWorker(session.NewMockCluster(t))
 			require.False(t, mt.Process())
@@ -251,14 +267,14 @@ func TestSegmentChangeMixProducerFailureAndReadiness(t *testing.T) {
 	catalog := &segmentChangeProducerCatalog{DataCoordCatalog: m.Catalog, beforeRetry: func() {
 		// The composite retry holds segMu; inspect the in-memory store directly.
 		require.Nil(t, m.Segments.GetSegment(1001))
-		require.Nil(t, m.segmentChangeGroups[5000])
+		require.Nil(t, m.SegmentChangeGroupLockedForTest(5000))
 		require.Equal(t, commonpb.SegmentState_Flushed, m.Segments.GetSegment(2001).GetState())
 	}}
 	m.Catalog = catalog
 	m.GetCollection(10).Schema = readinessStatsSchema()
 	task.Schema = m.GetCollection(10).Schema
-	mt := newMixCompactionTask(task, meta.NewMockAllocator(t), m, nil)
-	require.NoError(t, mt.saveSegmentMeta(result))
+	mt := ctask.NewMixCompactionTask(task, meta.NewMockAllocator(t), m, newSegmentChangeTaskMeta(t, m), index.NewTestVersionManager())
+	require.NoError(t, mt.SaveSegmentMeta(result))
 	require.Equal(t, 2, catalog.writes)
 	inspector := newSegmentChangeInspector(t.Context(), m, meta.NewMockAllocator(t))
 	inspector.checkAllGroups(t.Context())
@@ -282,12 +298,13 @@ func TestSegmentChangeMixPublishSnapshotProtection(t *testing.T) {
 	require.NoError(t, err)
 	inspector := newSegmentChangeInspector(t.Context(), m, meta.NewMockAllocator(t))
 	inspector.checkAllGroups(t.Context())
-	m.snapshotMeta = createTestSnapshotMetaLoaded(t)
-	m.snapshotMeta.SetSnapshotPending(10)
+	protection := snapshot.CreateTestSnapshotMetaLoaded(t)
+	m.CompactionProtection = protection
+	protection.SetSnapshotPending(10)
 	inspector.checkAllGroups(t.Context())
 	require.Equal(t, model.SegmentChangeStateReady, m.GetSegmentChangeGroup(t.Context(), 10, 5000).State)
 	require.ElementsMatch(t, []int64{2001, 2002}, segmentChangeViewIDs(t, m))
-	m.snapshotMeta.ClearSnapshotPending(10)
+	protection.ClearSnapshotPending(10)
 	inspector.checkAllGroups(t.Context())
 	inspector.checkAllGroups(t.Context())
 	require.Equal(t, []int64{1001}, segmentChangeViewIDs(t, m))
@@ -297,19 +314,18 @@ func TestSegmentChangeMixWaitsForIndexAndPropagatesFailure(t *testing.T) {
 	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "true")
 	setSegmentChangeTestParam(t, &Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex, "1")
 	m, task, result := seedMixProducer(t)
-	m.indexMeta = newReadinessIndexMeta(10,
+	m.IndexCatalog = newReadinessIndexMeta(10,
 		map[int64]*model.Index{7: {CollectionID: 10, FieldID: 2, IndexID: 7}}, nil)
-	mt := newMixCompactionTask(task, meta.NewMockAllocator(t), m, nil)
-	require.NoError(t, mt.saveSegmentMeta(result))
+	mt := ctask.NewMixCompactionTask(task, meta.NewMockAllocator(t), m, newSegmentChangeTaskMeta(t, m), index.NewTestVersionManager())
+	require.NoError(t, mt.SaveSegmentMeta(result))
 	inspector := newSegmentChangeInspector(t.Context(), m, meta.NewMockAllocator(t))
 	inspector.checkAllGroups(t.Context())
 	require.Equal(t, model.SegmentChangeStateStaged, m.GetSegmentChangeGroup(t.Context(), 10, 5000).State)
 	require.False(t, mt.Process())
-	indexInspector := &indexInspector{meta: m}
-	require.Contains(t, indexInspector.getUnIndexTaskSegments(t.Context()), int64(1001), "staged output must remain eligible for index construction")
+	require.Contains(t, index.UnindexedSegmentsForTest(t.Context(), m, m.IndexCatalog.(*index.IndexMeta)), int64(1001), "staged output must remain eligible for index construction")
 	require.ElementsMatch(t, []int64{2001, 2002}, segmentChangeViewIDs(t, m))
 	// A nonempty member dropped before admission cannot replace its parents.
-	require.NoError(t, m.UpdateSegmentsInfo(t.Context(), UpdateStatusOperator(1001, commonpb.SegmentState_Dropped)))
+	require.NoError(t, m.UpdateSegmentsInfo(t.Context(), meta.UpdateStatusOperator(1001, commonpb.SegmentState_Dropped)))
 	inspector.checkAllGroups(t.Context())
 	require.Equal(t, model.SegmentChangeStateFailed, m.GetSegmentChangeGroup(t.Context(), 10, 5000).State)
 	require.True(t, mt.Process())
@@ -327,8 +343,8 @@ func TestSegmentChangeMixRecoveryPreservesFailedTask(t *testing.T) {
 	_, err := m.CompleteCompactionMutation(t.Context(), task, result)
 	require.NoError(t, err)
 	task.State = datapb.CompactionTaskState_failed
-	ci := &compactionInspector{meta: m, allocator: meta.NewMockAllocator(t)}
-	restored, err := ci.createCompactTask(task)
+	ci := compaction.NewSegmentChangeTestInspector(t, m, meta.NewMockAllocator(t))
+	restored, err := ci.CreateCompactTaskForTest(task)
 	require.NoError(t, err)
 	require.Equal(t, datapb.CompactionTaskState_failed, restored.GetTaskProto().GetState())
 	require.True(t, restored.Process())

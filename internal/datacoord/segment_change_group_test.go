@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
 	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -79,12 +80,13 @@ func TestSnapshotCandidatesAndPublishShareOneMetadataBoundary(t *testing.T) {
 		return result
 	}
 	require.Equal(t, []int64{2001}, ids(), "snapshot must retain the parent while its replacement is staged")
-	m.snapshotMeta = createTestSnapshotMetaLoaded(t)
-	m.snapshotMeta.SetSnapshotPending(10)
-	require.ErrorIs(t, m.commitSegmentChangeGroup(ctx, ready, 1, nil), merr.ErrServiceUnavailable,
+	protection := snapshot.CreateTestSnapshotMetaLoaded(t)
+	m.CompactionProtection = protection
+	protection.SetSnapshotPending(10)
+	require.ErrorIs(t, m.CommitSegmentChangeGroupForTest(ctx, ready, 1), merr.ErrServiceUnavailable,
 		"the final metadata write must honor snapshot protection even after publish preflight")
 	require.Equal(t, []int64{2001}, ids())
-	m.snapshotMeta.ClearSnapshotPending(10)
+	protection.ClearSnapshotPending(10)
 	require.NoError(t, m.PublishGroup(ctx, ready, meta.NewMockAllocator(t)))
 	require.Equal(t, []int64{1001}, ids(), "snapshot must include the committed replacement")
 }

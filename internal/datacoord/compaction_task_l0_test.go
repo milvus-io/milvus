@@ -54,7 +54,7 @@ type L0CompactionTaskSuite struct {
 }
 
 func (s *L0CompactionTaskSuite) SetupTest() {
-	s.mockMeta = ctask.NewMockCompactionMeta(s.T())
+	s.mockMeta = ctask.NewDefaultMockCompactionMeta(s.T())
 	s.mockCatalog = mocks.NewDataCoordCatalog(s.T())
 	s.compactionTaskMeta = ctask.NewCompactionTaskMetaOverCatalog(s.mockCatalog)
 	s.mockAlloc = allocator.NewMockAllocator(s.T())

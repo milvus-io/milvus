@@ -8131,10 +8131,10 @@ func TestAbortImport_CommittingRejected(t *testing.T) {
 
 func TestAbortImport_StartedBroadcastRejected(t *testing.T) {
 	ctx := context.Background()
-	job := &importJob{ImportJob: &datapb.ImportJob{
+	job := &bulkimport.Job{ImportJob: &datapb.ImportJob{
 		JobID: 2105, State: internalpb.ImportJobState_Uncommitted, CommitBroadcastStarted: true,
 	}}
-	im := NewMockImportMeta(t)
+	im := bulkimport.NewMockImportMeta(t)
 	im.EXPECT().GetJob(mock.Anything, int64(2105)).Return(job).Once()
 	server := &Server{importMeta: im, importJobLock: lock.NewKeyLock[int64]()}
 	server.stateCode.Store(commonpb.StateCode_Healthy)

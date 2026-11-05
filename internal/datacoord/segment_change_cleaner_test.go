@@ -18,6 +18,9 @@ package datacoord
 
 import (
 	"context"
+	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
+	ctask "github.com/milvus-io/milvus/internal/datacoord/compaction/task"
+	"github.com/milvus-io/milvus/internal/datacoord/copysegment"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"testing"
 
@@ -55,14 +58,16 @@ func (c *failNthSegmentChangeDeleteCatalog) Update(ctx context.Context, actions 
 func TestSegmentChangeCleanerWaitsForProducerAndRetirement(t *testing.T) {
 	m, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
+	compactionMeta, err := ctask.NewCompactionTaskMeta(t.Context(), m.Catalog)
+	require.NoError(t, err)
 	ready := seedPublishMeta(t, m, model.SegmentChangeSourceMixCompaction)
 	task := &datapb.CompactionTask{
 		PlanID: ready.SourceJobID, CollectionID: ready.CollectionID,
 		State: datapb.CompactionTaskState_executing,
 	}
-	require.NoError(t, m.SaveCompactionTask(t.Context(), task))
+	require.NoError(t, compactionMeta.SaveCompactionTask(t.Context(), task))
 	require.NoError(t, m.PublishGroup(t.Context(), ready, meta.NewMockAllocator(t)))
-	cleaner := &segmentChangeCleaner{mt: m}
+	cleaner := &segmentChangeCleaner{mt: m, compactionMeta: compactionMeta}
 	clean := func() {
 		cleaner.clean(t.Context(), m.GetSegmentChangeGroupsByCollection(t.Context(), 0))
 	}
@@ -70,7 +75,7 @@ func TestSegmentChangeCleanerWaitsForProducerAndRetirement(t *testing.T) {
 	require.NotNil(t, m.GetSegmentChangeGroup(t.Context(), ready.CollectionID, ready.GroupID),
 		"an executing producer still needs its retry identity")
 	task.State = datapb.CompactionTaskState_completed
-	require.NoError(t, m.SaveCompactionTask(t.Context(), task))
+	require.NoError(t, compactionMeta.SaveCompactionTask(t.Context(), task))
 	clean()
 	require.NotNil(t, m.GetSegmentChangeGroup(t.Context(), ready.CollectionID, ready.GroupID),
 		"a superseded segment may still be needed by a retained snapshot")
@@ -84,15 +89,17 @@ func TestSegmentChangeCleanerWaitsForProducerAndRetirement(t *testing.T) {
 func TestSegmentChangeCleanerWaitsForFailedMemberReclamation(t *testing.T) {
 	m, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
+	compactionMeta, err := ctask.NewCompactionTaskMeta(t.Context(), m.Catalog)
+	require.NoError(t, err)
 	ready := seedPublishMeta(t, m, model.SegmentChangeSourceMixCompaction)
-	require.NoError(t, m.SaveCompactionTask(t.Context(), &datapb.CompactionTask{
+	require.NoError(t, compactionMeta.SaveCompactionTask(t.Context(), &datapb.CompactionTask{
 		PlanID: ready.SourceJobID, CollectionID: ready.CollectionID,
 		State: datapb.CompactionTaskState_failed,
 	}))
 	failed := ready.Clone()
 	failed.State = model.SegmentChangeStateFailed
 	require.NoError(t, m.UpdateSegmentChangeGroup(t.Context(), failed))
-	cleaner := &segmentChangeCleaner{mt: m}
+	cleaner := &segmentChangeCleaner{mt: m, compactionMeta: compactionMeta}
 	cleaner.clean(t.Context(), m.GetSegmentChangeGroupsByCollection(t.Context(), 0))
 	require.NotNil(t, m.GetSegmentChangeGroup(t.Context(), failed.CollectionID, failed.GroupID))
 	require.NoError(t, m.ReclaimSegmentChangeGroup(t.Context(), failed))
@@ -103,33 +110,29 @@ func TestSegmentChangeCleanerWaitsForFailedMemberReclamation(t *testing.T) {
 }
 
 func TestSegmentChangeCleanerUsesCopyTaskIdentity(t *testing.T) {
-	copyMeta := &copySegmentMeta{
-		jobs:  make(map[int64]CopySegmentJob),
-		tasks: newCopySegmentTasks(),
-	}
-	job := &copySegmentJob{CopySegmentJob: &datapb.CopySegmentJob{
-		JobId: 700, State: datapb.CopySegmentJobState_CopySegmentJobExecuting,
-	}}
-	copyMeta.jobs[700] = job
-	task := &copySegmentTask{}
-	task.task.Store(&datapb.CopySegmentTask{
-		TaskId: 900, JobId: 700, State: datapb.CopySegmentTaskState_CopySegmentTaskInProgress,
-	})
-	copyMeta.tasks.add(task)
+	m, err := meta.NewMemoryMeta(t)
+	require.NoError(t, err)
+	copyMeta, err := copysegment.NewCopySegmentMeta(t.Context(), m.Catalog, m, nil, nil, nil)
+	require.NoError(t, err)
+	job := copysegment.NewTestCopyJob(700, datapb.CopySegmentJobState_CopySegmentJobExecuting).(*copysegment.Job)
+	require.NoError(t, copyMeta.AddJob(t.Context(), job))
+	task := copysegment.CreateTestCopyTask(100, 1).(*copysegment.Task)
+	task.Task.Store(&datapb.CopySegmentTask{TaskId: 900, JobId: 700, State: datapb.CopySegmentTaskState_CopySegmentTaskInProgress})
+	require.NoError(t, copyMeta.AddTask(t.Context(), task))
 	g := &model.SegmentChangeGroup{Source: model.SegmentChangeSourceCopySegment, SourceJobID: 900}
 	cleaner := &segmentChangeCleaner{copyMeta: copyMeta}
 	require.False(t, cleaner.producerFinished(t.Context(), g, nil))
-	task.task.Store(&datapb.CopySegmentTask{
+	task.Task.Store(&datapb.CopySegmentTask{
 		TaskId: 900, JobId: 700, State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
 	})
 	require.False(t, cleaner.producerFinished(t.Context(), g, nil), "the owning job can still retry")
 	job.State = datapb.CopySegmentJobState_CopySegmentJobCompleted
-	task.task.Store(&datapb.CopySegmentTask{
+	task.Task.Store(&datapb.CopySegmentTask{
 		TaskId: 900, JobId: 700, State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
 		CleanupRequired: true,
 	})
 	require.False(t, cleaner.producerFinished(t.Context(), g, nil), "copy output cleanup is still pending")
-	task.task.Store(&datapb.CopySegmentTask{
+	task.Task.Store(&datapb.CopySegmentTask{
 		TaskId: 900, JobId: 700, State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
 	})
 	require.True(t, cleaner.producerFinished(t.Context(), g, nil))
@@ -139,6 +142,8 @@ func TestSegmentChangeInspectorCleansOnlyFinishedProducers(t *testing.T) {
 	ctx := t.Context()
 	m, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
+	compactionMeta, err := ctask.NewCompactionTaskMeta(t.Context(), m.Catalog)
+	require.NoError(t, err)
 	compaction := &model.SegmentChangeGroup{
 		GroupID: 5000, Source: model.SegmentChangeSourceMixCompaction, SourceJobID: 5000,
 		CollectionID: 10, State: model.SegmentChangeStateCommitted,
@@ -146,10 +151,10 @@ func TestSegmentChangeInspectorCleansOnlyFinishedProducers(t *testing.T) {
 		SortJobs: map[int64]model.SegmentChangeSortJob{6000: {InputSegmentID: 1001, OutputSegmentID: 1002}},
 	}
 	require.NoError(t, m.AddSegmentChangeGroup(ctx, compaction))
-	require.NoError(t, m.SaveCompactionTask(ctx, &datapb.CompactionTask{
+	require.NoError(t, compactionMeta.SaveCompactionTask(ctx, &datapb.CompactionTask{
 		PlanID: 5000, CollectionID: 10, State: datapb.CompactionTaskState_completed,
 	}))
-	require.NoError(t, m.SaveCompactionTask(ctx, &datapb.CompactionTask{
+	require.NoError(t, compactionMeta.SaveCompactionTask(ctx, &datapb.CompactionTask{
 		PlanID: 6000, CollectionID: 10, State: datapb.CompactionTaskState_executing,
 	}))
 	importGroup := &model.SegmentChangeGroup{
@@ -157,20 +162,20 @@ func TestSegmentChangeInspectorCleansOnlyFinishedProducers(t *testing.T) {
 		CollectionID: 10, State: model.SegmentChangeStateCommitted,
 	}
 	require.NoError(t, m.AddSegmentChangeGroup(ctx, importGroup))
-	job := &importJob{ImportJob: &datapb.ImportJob{JobID: 8000, State: internalpb.ImportJobState_Importing}}
-	importMeta := NewMockImportMeta(t)
+	job := &bulkimport.Job{ImportJob: &datapb.ImportJob{JobID: 8000, State: internalpb.ImportJobState_Importing}}
+	importMeta := bulkimport.NewMockImportMeta(t)
 	importMeta.EXPECT().GetJob(mock.Anything, int64(8000)).Return(job).Maybe()
 	inspector := newSegmentChangeInspector(ctx, m, meta.NewMockAllocator(t))
-	server := &Server{meta: m, importMeta: importMeta, segmentChangeInspector: inspector}
+	server := &Server{meta: m, importMeta: importMeta, domainMetas: domainMetas{compactionTaskMeta: compactionMeta}, segmentChangeInspector: inspector}
 	server.initSegmentChangeCleaner()
 	require.Same(t, m, inspector.cleaner.mt)
 	require.Same(t, importMeta, inspector.cleaner.importMeta)
-	require.Same(t, m.externalCollectionRefreshMeta, inspector.cleaner.refreshMeta)
+	require.Same(t, server.externalCollectionRefreshMeta, inspector.cleaner.refreshMeta)
 	inspector.checkAllGroups(ctx)
 	require.NotNil(t, m.GetSegmentChangeGroup(ctx, 10, 5000), "unfinished sort task retains the compaction group")
 	require.NotNil(t, m.GetSegmentChangeGroup(ctx, 10, 7000), "unfinished import job retains the import group")
 
-	require.NoError(t, m.SaveCompactionTask(ctx, &datapb.CompactionTask{
+	require.NoError(t, compactionMeta.SaveCompactionTask(ctx, &datapb.CompactionTask{
 		PlanID: 6000, CollectionID: 10, State: datapb.CompactionTaskState_completed,
 	}))
 	job.State = internalpb.ImportJobState_Completed
@@ -203,8 +208,8 @@ func TestSegmentChangeCleanerPreservesImportPredecessorsAcrossRestart(t *testing
 	require.ErrorIs(t, m.UpdateSegmentsInfoAndChangeGroups(ctx,
 		[]metastore.UpdateAction{metastore.DeleteSegmentChangeGroup(10, 1001)}), merr.ErrDataIntegrity)
 
-	importMeta := NewMockImportMeta(t)
-	importMeta.EXPECT().GetJob(mock.Anything, jobID).Return(&importJob{ImportJob: &datapb.ImportJob{
+	importMeta := bulkimport.NewMockImportMeta(t)
+	importMeta.EXPECT().GetJob(mock.Anything, jobID).Return(&bulkimport.Job{ImportJob: &datapb.ImportJob{
 		JobID: jobID, State: internalpb.ImportJobState_Completed,
 	}}).Maybe()
 	cleaner := &segmentChangeCleaner{mt: m, importMeta: importMeta}

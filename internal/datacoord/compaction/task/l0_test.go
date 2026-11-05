@@ -39,7 +39,29 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestL0CompactionUsesUnpublishedMembersFromMetaInterface(t *testing.T) {
+	mt := NewMockCompactionMeta(t)
+	mt.EXPECT().UnpublishedSegmentMembers(mock.Anything, int64(1)).Return(typeutil.NewUniqueSet(10)).Once()
+	mt.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, filters ...meta.SegmentFilter) []*meta.SegmentInfo {
+			var selected []*meta.SegmentInfo
+			for _, id := range []int64{10, 11} {
+				segment := meta.NewSegmentInfo(&datapb.SegmentInfo{ID: id, CollectionID: 1, PartitionID: 2, InsertChannel: "ch", State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1})
+				if filters[0].Match(segment) && filters[1].Match(segment) {
+					selected = append(selected, segment)
+				}
+			}
+			return selected
+		}).Once()
+	task := NewL0CompactionTask(&datapb.CompactionTask{CollectionID: 1, PartitionID: 2, Channel: "ch", Pos: &msgpb.MsgPosition{Timestamp: 100}}, nil, mt, nil)
+	selected, _, err := task.SelectFlushedSegment()
+	require.NoError(t, err)
+	require.Len(t, selected, 1)
+	require.Equal(t, int64(11), selected[0].GetID())
+}
 
 func TestL0CompactionCommitsDeltalogsToV3Manifest(t *testing.T) {
 	meta.MockManifestUpdateSubmissions(t)

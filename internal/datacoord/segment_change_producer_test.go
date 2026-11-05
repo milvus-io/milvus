@@ -18,7 +18,14 @@ package datacoord
 
 import (
 	"context"
+	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction"
+	ctask "github.com/milvus-io/milvus/internal/datacoord/compaction/task"
+	"github.com/milvus-io/milvus/internal/datacoord/copysegment"
+	"github.com/milvus-io/milvus/internal/datacoord/externalrefresh"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/datacoord/partitionstats"
 	"testing"
 	"time"
 
@@ -52,13 +59,13 @@ func TestSegmentChangeMixSortChain(t *testing.T) {
 			require.Equal(t, model.SegmentChangeStateStaged, m.GetSegmentChangeGroup(t.Context(), 10, 5000).State)
 			// Existing groups must finish sorting after opt-out.
 			require.NoError(t, Params.Save(Params.DataCoordCfg.SegmentChangeEnabled.Key, "false"))
-			ci := &compactionInspector{meta: m, allocator: meta.NewMockAllocator(t)}
+			ci := compaction.NewSegmentChangeTestInspector(t, m, meta.NewMockAllocator(t))
 			sortPlan := proto.Clone(task).(*datapb.CompactionTask)
 			sortPlan.PlanID = 5001
 			sortPlan.Type = datapb.CompactionType_SortCompaction
 			sortPlan.InputSegments = []int64{1001}
 			require.True(t, m.GroupSortCandidates(10)[1001])
-			sortTask, err := ci.createCompactTask(sortPlan)
+			sortTask, err := ci.CreateCompactTaskForTest(sortPlan)
 			require.NoError(t, err)
 			sortResult := proto.Clone(result).(*datapb.CompactionPlanResult)
 			sortResult.PlanID = 5001
@@ -88,7 +95,7 @@ func TestSegmentChangeMixSortChain(t *testing.T) {
 			require.ErrorIs(t, m.UpdateSegmentChangeGroup(t.Context(), forged), merr.ErrDataIntegrity)
 			// Reload the real catalog before publishing the replacement output.
 			recovered := reloadSegmentChangeMeta(t, m)
-			restored, err := (&compactionInspector{meta: recovered, allocator: meta.NewMockAllocator(t)}).createCompactTask(sortPlan)
+			restored, err := (compaction.NewSegmentChangeTestInspector(t, recovered, meta.NewMockAllocator(t))).CreateCompactTaskForTest(sortPlan)
 			require.NoError(t, err)
 			restored.QueryTaskOnWorker(session.NewMockCluster(t))
 			inspector = newSegmentChangeInspector(t.Context(), recovered, meta.NewMockAllocator(t))
@@ -112,16 +119,16 @@ func TestSegmentChangeImportSubgroupsWaitForFence(t *testing.T) {
 		})))
 	}
 	s := &Server{meta: m}
-	job := &importJob{ImportJob: &datapb.ImportJob{JobID: 8000, CollectionID: 10, Vchannels: []string{"ch-1"}}}
+	job := &bulkimport.Job{ImportJob: &datapb.ImportJob{JobID: 8000, CollectionID: 10, Vchannels: []string{"ch-1"}}}
 	groups, handled, err := s.stageImportGroups(t.Context(), job, "ch-1", []int64{1001, 1002}, 0, model.SegmentChangeSourceImportJob)
 	require.True(t, handled)
 	require.NoError(t, err)
 	require.Len(t, groups, 2)
 	require.Equal(t, groups[0].GroupID, groups[1].PreviousGroupID)
-	sortTask := newMixCompactionTask(&datapb.CompactionTask{
+	sortTask := ctask.NewMixCompactionTask(&datapb.CompactionTask{
 		PlanID: 9001, CollectionID: 10, PartitionID: 100, Channel: "ch-1", Type: datapb.CompactionType_SortCompaction,
 		InputSegments: []int64{1001}, Schema: readinessVectorSchema(), CollectionTtl: int64(time.Hour),
-	}, meta.NewMockAllocator(t), m, newMockVersionManager())
+	}, meta.NewMockAllocator(t), m, newSegmentChangeTaskMeta(t, m), index.NewTestVersionManager())
 	plan, err := sortTask.BuildCompactionRequest()
 	require.NoError(t, err)
 	require.Zero(t, plan.GetCollectionTtl(), "preparation must not expire rows using provisional import timestamps")
@@ -160,7 +167,7 @@ func TestSegmentChangeImportCommittedFenceCannotBeAbandoned(t *testing.T) {
 	m, _, _ := seedMixProducer(t)
 	require.NoError(t, m.AddSegment(t.Context(), meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1", State: commonpb.SegmentState_Flushed, IsImporting: true, IsSorted: true, NumOfRows: 10, Binlogs: []*datapb.FieldBinlog{{FieldID: 2}}})))
 	s := &Server{meta: m}
-	job := &importJob{ImportJob: &datapb.ImportJob{JobID: 8000, CollectionID: 10}}
+	job := &bulkimport.Job{ImportJob: &datapb.ImportJob{JobID: 8000, CollectionID: 10}}
 	_, err := s.stageImportChange(t.Context(), job, "ch-1", []int64{1001}, 9000)
 	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 	g := m.ProducerChangeGroup(model.SegmentChangeSourceImportJob, 8000, "ch-1")
@@ -189,9 +196,10 @@ func TestSegmentChangeImportCallbackPublishesPreparedGroups(t *testing.T) {
 		})))
 	}
 	callbacks.meta = m
+	callbacks.ddl = newDDLCallbacks(callbacks)
 	job := callbacks.importMeta.GetJob(t.Context(), 1)
 	require.NoError(t, callbacks.prepareImportPublication(t.Context(), job))
-	missing := mockey.Mock((*meta).GetSegmentChangeGroup).Return((*model.SegmentChangeGroup)(nil)).Build()
+	missing := mockey.Mock((*meta.Meta).GetSegmentChangeGroup).Return((*model.SegmentChangeGroup)(nil)).Build()
 	require.ErrorIs(t, callbacks.prepareImportPublication(t.Context(), job), merr.ErrServiceUnavailable)
 	missing.UnPatch()
 	for _, g := range m.GetSegmentChangeGroupsByCollection(t.Context(), 100) {
@@ -199,7 +207,7 @@ func TestSegmentChangeImportCallbackPublishesPreparedGroups(t *testing.T) {
 		require.Zero(t, g.CommitTS)
 	}
 	require.NoError(t, Params.Save(Params.DataCoordCfg.SegmentChangeEnabled.Key, "false"))
-	require.NoError(t, callbacks.commitImportV2AckCallback(t.Context(), result),
+	require.NoError(t, callbacks.ddl.CommitImportV2AckCallback(t.Context(), result),
 		"READY import groups publish in the ack callback without an inspector tick")
 	require.Equal(t, internalpb.ImportJobState_Completed, callbacks.importMeta.GetJob(t.Context(), 1).GetState())
 	for id, ts := range map[int64]uint64{10: 200, 11: 200, 20: 300} {
@@ -219,7 +227,7 @@ func TestSegmentChangeCDCImportPublishesReadyGroupWithoutInspectorTick(t *testin
 		Binlogs: []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: 10, TimestampTo: 100}}}},
 	})))
 	s := &Server{meta: m, allocator: meta.NewMockAllocator(t)}
-	job := &importJob{ImportJob: &datapb.ImportJob{JobID: 1, CollectionID: 100}}
+	job := &bulkimport.Job{ImportJob: &datapb.ImportJob{JobID: 1, CollectionID: 100}}
 	handled, err := s.stageImportChangeFromSource(t.Context(), job, "v1", []int64{10}, 200, model.SegmentChangeSourceCDCReplicated)
 	require.NoError(t, err)
 	require.True(t, handled)
@@ -239,7 +247,7 @@ func TestSegmentChangeCDCImportWaitsForUnreadyGroup(t *testing.T) {
 		Binlogs: []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: 10, TimestampTo: 100}}}},
 	})))
 	s := &Server{meta: m, allocator: meta.NewMockAllocator(t)}
-	job := &importJob{ImportJob: &datapb.ImportJob{JobID: 1, CollectionID: 100}}
+	job := &bulkimport.Job{ImportJob: &datapb.ImportJob{JobID: 1, CollectionID: 100}}
 	handled, err := s.stageImportChangeFromSource(t.Context(), job, "v1", []int64{10}, 200, model.SegmentChangeSourceCDCReplicated)
 	require.True(t, handled)
 	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
@@ -256,8 +264,8 @@ func TestSegmentChangeSchemaBumpReplacement(t *testing.T) {
 	result.Segments[0].SegmentID = 1101
 	result.Segments[0].StorageVersion = 3
 	result.Segments[0].Manifest = packed.MarshalManifestPath("/private/tmp/bump/10/100/1101", 1)
-	bt := newBumpSchemaVersionTask(task, meta.NewMockAllocator(t), m, nil)
-	require.NoError(t, bt.saveSegmentMeta(result))
+	bt := ctask.NewBumpSchemaVersionTask(task, meta.NewMockAllocator(t), m, newSegmentChangeTaskMeta(t, m), index.NewTestVersionManager())
+	require.NoError(t, bt.SaveSegmentMeta(result))
 	require.False(t, bt.Process())
 	require.True(t, m.GetSegment(t.Context(), 1101).GetIsInvisible())
 	require.Equal(t, commonpb.SegmentState_Flushed, m.GetSegment(t.Context(), 2001).GetState())
@@ -295,19 +303,19 @@ func TestSegmentChangeCopyPublication(t *testing.T) {
 		ID: 1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
 		State: commonpb.SegmentState_Importing, IsImporting: true, IsSorted: true, NumOfRows: 84, CommitTimestamp: 7000,
 	})))
-	task := createTestCopyTask(10, 1001)
-	copyMeta, err := NewCopySegmentMeta(t.Context(), m.Catalog, m, nil, nil)
+	task := copysegment.CreateTestCopyTask(10, 1001)
+	copyMeta, err := copysegment.NewCopySegmentMeta(t.Context(), m.Catalog, m, nil, nil, nil)
 	require.NoError(t, err)
 	require.NoError(t, copyMeta.AddTask(t.Context(), task))
 	resp := &datapb.QueryCopySegmentResponse{State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted, SegmentResults: []*datapb.CopySegmentResult{{SegmentId: 1001, ImportedRows: 84, Binlogs: result.Segments[0].InsertLogs}}}
-	require.NoError(t, SyncCopySegmentTask(context.TODO(), task, resp, copyMeta, m))
+	require.NoError(t, copysegment.SyncCopySegmentTask(context.TODO(), task, resp, copyMeta, m, nil))
 	g := m.ProducerChangeGroup(model.SegmentChangeSourceCopySegment, task.GetTaskId(), "")
 	require.NotNil(t, g)
 	require.True(t, g.PreserveMemberTimestamps)
 	require.True(t, m.GetSegment(t.Context(), 1001).GetIsInvisible())
 	require.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskCompleted, copyMeta.GetTask(t.Context(), task.GetTaskId()).GetState())
-	require.NoError(t, copyMeta.UpdateTask(t.Context(), task.GetTaskId(), UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskInProgress), updateCopyTaskCleanup(true)))
-	ct := task.(*copySegmentTask)
+	require.NoError(t, copyMeta.UpdateTask(t.Context(), task.GetTaskId(), copysegment.UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskInProgress), copysegment.UpdateCopyTaskCleanup(true)))
+	ct := task.(*copysegment.Task)
 	ct.CreateTaskOnWorker(1, session.NewMockCluster(t))
 	ct.QueryTaskOnWorker(session.NewMockCluster(t))
 	require.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskCompleted, ct.GetState(), "accepted files must not be copied again after worker/task-state loss")
@@ -316,11 +324,11 @@ func TestSegmentChangeCopyPublication(t *testing.T) {
 	inspector.checkAllGroups(t.Context())
 	require.Equal(t, model.SegmentChangeStateCommitted, m.GetSegmentChangeGroup(t.Context(), 10, g.GroupID).State)
 	require.Equal(t, uint64(7000), m.GetSegment(t.Context(), 1001).GetCommitTimestamp(), "file copying must preserve source row/delete timestamps")
-	require.NoError(t, SyncCopySegmentTask(context.TODO(), task, resp, copyMeta, m), "lost task-meta response must not reset published members")
-	require.NoError(t, copyMeta.UpdateTask(t.Context(), task.GetTaskId(), UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed), updateCopyTaskCleanup(true)))
-	(&copySegmentInspector{ctx: t.Context(), meta: m}).processFailed(task)
+	require.NoError(t, copysegment.SyncCopySegmentTask(context.TODO(), task, resp, copyMeta, m, nil), "lost task-meta response must not reset published members")
+	require.NoError(t, copyMeta.UpdateTask(t.Context(), task.GetTaskId(), copysegment.UpdateCopyTaskState(datapb.CopySegmentTaskState_CopySegmentTaskFailed), copysegment.UpdateCopyTaskCleanup(true)))
+	(&copysegment.Inspector{Ctx: t.Context(), Meta: m}).ProcessFailed(task)
 	require.Equal(t, commonpb.SegmentState_Flushed, m.GetSegment(t.Context(), 1001).GetState(), "late task failure cannot withdraw a committed group")
-	require.NoError(t, cleanupRejectedCopy(t.Context(), task, m, copyMeta))
+	require.NoError(t, copysegment.CleanupRejectedCopy(t.Context(), task, m, copyMeta))
 	require.False(t, copyMeta.GetTask(t.Context(), task.GetTaskId()).GetCleanupRequired())
 }
 
@@ -334,14 +342,14 @@ func TestSegmentChangeExternalRefreshMembership(t *testing.T) {
 		Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []*datapb.Binlog{{LogID: 1001, EntriesNum: 84}}}},
 	}
 	nudges := 0
-	patch := mockey.Mock(notifySegmentIndexBuild).To(func(...UniqueID) { nudges++ }).Build()
-	err := applyExternalCollectionSegmentUpdateWithGroup(t.Context(), m, 10, 8000, []int64{2001, 2002}, []int64{2002}, []*datapb.SegmentInfo{incoming})
+	patch := mockey.Mock(meta.NotifySegmentIndexBuild).To(func(...UniqueID) { nudges++ }).Build()
+	err := externalrefresh.ApplySegmentUpdateWithGroupForTest(t.Context(), m, 10, 8000, []int64{2001, 2002}, []int64{2002}, []*datapb.SegmentInfo{incoming})
 	patch.UnPatch()
 	require.NoError(t, err, "registration retains the job for asynchronous publication")
 	require.Zero(t, nudges, "the refreshed source/spec is not visible when the group is registered")
 	require.True(t, m.GetSegment(t.Context(), 1001).GetIsInvisible())
 	require.Equal(t, commonpb.SegmentState_Flushed, m.GetSegment(t.Context(), 2001).GetState())
-	require.NoError(t, m.UpdateSegmentsInfo(t.Context(), func(pack *updateSegmentPack) bool {
+	require.NoError(t, m.UpdateSegmentsInfo(t.Context(), func(pack *meta.UpdateSegmentPack) bool {
 		pack.Get(1001).JsonKeyStats = map[int64]*datapb.JsonKeyStats{2: {JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion}}
 		return true
 	}))
@@ -351,7 +359,7 @@ func TestSegmentChangeExternalRefreshMembership(t *testing.T) {
 	require.Equal(t, model.SegmentChangeStateCommitted, m.GetSegmentChangeGroup(t.Context(), 10, 8000).State)
 	require.ElementsMatch(t, []int64{1001, 2002}, segmentChangeViewIDs(t, m))
 	require.NoError(t, Params.Save(Params.DataCoordCfg.SegmentChangeEnabled.Key, "false"))
-	require.NoError(t, applyExternalCollectionSegmentUpdateWithGroup(t.Context(), m, 10, 8000, []int64{2001, 2002}, []int64{2002}, []*datapb.SegmentInfo{incoming}))
+	require.NoError(t, externalrefresh.ApplySegmentUpdateWithGroupForTest(t.Context(), m, 10, 8000, []int64{2001, 2002}, []int64{2002}, []*datapb.SegmentInfo{incoming}))
 }
 
 func TestSegmentChangeExternalRefreshMixedPatchKeepsLegacyApply(t *testing.T) {
@@ -370,7 +378,7 @@ func TestSegmentChangeExternalRefreshMixedPatchKeepsLegacyApply(t *testing.T) {
 		StorageVersion: 3,
 		Binlogs:        []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: 1001, EntriesNum: 84}}}},
 	}
-	require.NoError(t, applyExternalCollectionSegmentUpdateWithGroup(t.Context(), m, 10, 8000,
+	require.NoError(t, externalrefresh.ApplySegmentUpdateWithGroupForTest(t.Context(), m, 10, 8000,
 		[]int64{2001, 2002}, nil, []*datapb.SegmentInfo{patch, newSegment}))
 	require.Nil(t, m.ProducerChangeGroup(model.SegmentChangeSourceExternalRefresh, 8000, ""))
 	require.Equal(t, commonpb.SegmentState_Dropped, m.GetSegment(t.Context(), 2001).GetState())
@@ -381,6 +389,9 @@ func TestSegmentChangeExternalRefreshMixedPatchKeepsLegacyApply(t *testing.T) {
 func TestSegmentChangeClusteringPublication(t *testing.T) {
 	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "true")
 	m, task, result := seedMixProducer(t)
+	statsMeta, err := partitionstats.NewPartitionStatsMeta(t.Context(), m.Catalog)
+	require.NoError(t, err)
+	m.PartitionStats = statsMeta
 	task.Type = datapb.CompactionType_ClusteringCompaction
 	task.State = datapb.CompactionTaskState_indexing
 	task.ResultSegments = []int64{1001}
@@ -390,10 +401,10 @@ func TestSegmentChangeClusteringPublication(t *testing.T) {
 		IsInvisible: true, CreatedByCompaction: true, NumOfRows: 84, IsSorted: true, Level: datapb.SegmentLevel_L2, Binlogs: result.Segments[0].InsertLogs,
 	})
 	require.NoError(t, m.AddSegment(t.Context(), output))
-	ct := newClusteringCompactionTask(task, meta.NewMockAllocator(t), m, nil, nil, nil)
-	require.NoError(t, ct.completeTask())
+	ct := ctask.NewClusteringCompactionTask(task, meta.NewMockAllocator(t), m, newSegmentChangeTaskMeta(t, m), nil, nil, nil, nil, nil, nil, index.NewTestVersionManager())
+	require.NoError(t, ct.CompleteTaskForTest())
 	require.Equal(t, datapb.CompactionTaskState_indexing, ct.GetTaskProto().GetState())
-	require.Empty(t, m.partitionStatsMeta.ListAllPartitionStatsInfos())
+	require.Empty(t, statsMeta.ListAllPartitionStatsInfos())
 	require.ElementsMatch(t, []int64{2001, 2002}, segmentChangeViewIDs(t, m))
 	inspector := newSegmentChangeInspector(t.Context(), m, meta.NewMockAllocator(t))
 	inspector.checkAllGroups(t.Context())
@@ -409,20 +420,23 @@ func TestSegmentChangeClusteringPublication(t *testing.T) {
 	version, err := m.Catalog.GetCurrentPartitionStatsVersion(t.Context(), 10, 100, "ch-1")
 	require.NoError(t, err)
 	require.Equal(t, int64(5000), version)
-	require.NoError(t, ct.completeTask())
+	require.NoError(t, ct.CompleteTaskForTest())
 	require.Equal(t, datapb.CompactionTaskState_completed, ct.GetTaskProto().GetState())
 }
 
 func TestSegmentChangeClusteringEmptyStats(t *testing.T) {
 	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "true")
 	m, task, _ := seedMixProducer(t)
+	statsMeta, err := partitionstats.NewPartitionStatsMeta(t.Context(), m.Catalog)
+	require.NoError(t, err)
+	m.PartitionStats = statsMeta
 	task.Type = datapb.CompactionType_ClusteringCompaction
 	task.State = datapb.CompactionTaskState_indexing
 	task.ResultSegments = []int64{1001}
 	task.TmpSegments = []int64{1001}
 	require.NoError(t, m.AddSegment(t.Context(), meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1", State: commonpb.SegmentState_Dropped, IsInvisible: true, Level: datapb.SegmentLevel_L2})))
-	ct := newClusteringCompactionTask(task, meta.NewMockAllocator(t), m, nil, nil, nil)
-	require.NoError(t, ct.completeTask())
+	ct := ctask.NewClusteringCompactionTask(task, meta.NewMockAllocator(t), m, newSegmentChangeTaskMeta(t, m), nil, nil, nil, nil, nil, nil, index.NewTestVersionManager())
+	require.NoError(t, ct.CompleteTaskForTest())
 	inspector := newSegmentChangeInspector(t.Context(), m, meta.NewMockAllocator(t))
 	inspector.checkAllGroups(t.Context())
 	inspector.checkAllGroups(t.Context())
@@ -431,7 +445,7 @@ func TestSegmentChangeClusteringEmptyStats(t *testing.T) {
 	require.Len(t, infos, 1)
 	require.Empty(t, infos[0].GetSegmentIDs(), "zero-row results are not partition stats members")
 	require.Empty(t, segmentChangeViewIDs(t, m))
-	require.NoError(t, ct.completeTask())
+	require.NoError(t, ct.CompleteTaskForTest())
 	require.True(t, ct.Clean())
 	infos, err = m.Catalog.ListPartitionStatsInfos(t.Context())
 	require.NoError(t, err)
@@ -446,7 +460,7 @@ func TestSegmentChangeImportFence(t *testing.T) {
 		State: commonpb.SegmentState_Flushed, IsImporting: true, NumOfRows: 10, IsSorted: true, Binlogs: []*datapb.FieldBinlog{{FieldID: 2}},
 	})))
 	s := &Server{meta: m}
-	job := &importJob{ImportJob: &datapb.ImportJob{JobID: 8000, CollectionID: 10}}
+	job := &bulkimport.Job{ImportJob: &datapb.ImportJob{JobID: 8000, CollectionID: 10}}
 	staged, err := s.stageImportChange(t.Context(), job, "ch-1", []int64{1001}, 9000)
 	require.True(t, staged)
 	require.ErrorIs(t, err, merr.ErrServiceUnavailable)

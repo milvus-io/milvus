@@ -1123,6 +1123,7 @@ func (s *statsInspectorSuite) TestUnsortedStatsConvergeWhenSortingDisabled() {
 	staged := s.mt.Segments.GetSegment(20).Clone()
 	staged.IsInvisible = true
 	s.mt.Segments.SetSegment(20, staged)
+	s.mt.Catalog = s.catalog
 	s.catalog.EXPECT().Update(mock.Anything, mock.Anything).Return(nil).Once()
 	s.Require().NoError(s.mt.AddSegmentChangeGroup(s.ctx, &model.SegmentChangeGroup{GroupID: 1, CollectionID: 1, State: model.SegmentChangeStateStaged, NewSegmentIDs: []int64{20}}))
 	s.Contains(s.inspector.getStatsCandidateSegments(s.ctx, collection), UniqueID(20))

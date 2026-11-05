@@ -449,33 +449,31 @@ func (s *ImportCheckerSuite) TestCheckTimeoutSkipCommittingJob() {
 }
 
 func (s *ImportCheckerSuite) TestCheckTimeoutPreparedGroupWithoutBroadcast() {
-	err := s.importMeta.UpdateJob(context.TODO(), s.jobID, UpdateJobState(internalpb.ImportJobState_Uncommitted))
+	err := s.importMeta.UpdateJob(context.TODO(), s.jobID, bulkimport.UpdateJobState(internalpb.ImportJobState_Uncommitted))
 	s.NoError(err)
-	s.checker.meta.segMu.Lock()
-	s.checker.meta.ensureSegmentChangeGroupStoreLocked()
-	s.checker.meta.segmentChangeGroups[5000] = &model.SegmentChangeGroup{
+	s.checker.Meta.Catalog.(*mocks.DataCoordCatalog).EXPECT().Update(mock.Anything, mock.Anything).Return(nil).Once()
+	s.NoError(s.checker.Meta.AddSegmentChangeGroup(context.TODO(), &model.SegmentChangeGroup{
 		GroupID: 5000, Source: model.SegmentChangeSourceImportJob,
 		SourceJobID: s.jobID, CollectionID: 1, State: model.SegmentChangeStateReady,
 		AwaitCommitFence: true, NewSegmentIDs: []int64{5001},
-	}
-	s.checker.meta.segMu.Unlock()
+	}))
 
-	s.checker.tryTimeoutJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.checker.TryTimeoutJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 	s.Equal(internalpb.ImportJobState_Failed, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
 }
 
 func (s *ImportCheckerSuite) TestCheckTimeoutSkipStartedCommitBroadcast() {
 	ctx := context.TODO()
-	s.NoError(s.importMeta.UpdateJob(ctx, s.jobID, UpdateJobState(internalpb.ImportJobState_Uncommitted)))
+	s.NoError(s.importMeta.UpdateJob(ctx, s.jobID, bulkimport.UpdateJobState(internalpb.ImportJobState_Uncommitted)))
 	staleSnapshot := s.importMeta.GetJob(ctx, s.jobID)
-	s.NoError(s.importMeta.UpdateJob(ctx, s.jobID, UpdateJobCommitBroadcastStarted))
-	s.checker.tryTimeoutJob(staleSnapshot)
+	s.NoError(s.importMeta.UpdateJob(ctx, s.jobID, bulkimport.UpdateJobCommitBroadcastStarted))
+	s.checker.TryTimeoutJob(staleSnapshot)
 	job := s.importMeta.GetJob(ctx, s.jobID)
 	s.Equal(internalpb.ImportJobState_Uncommitted, job.GetState())
 	s.True(job.GetCommitBroadcastStarted())
 	// Every failure path uses UpdateJobState, including worker failure and
 	// explicit rollback. They cannot undo an uncertain WAL commit.
-	s.NoError(s.importMeta.UpdateJob(ctx, s.jobID, UpdateJobState(internalpb.ImportJobState_Failed)))
+	s.NoError(s.importMeta.UpdateJob(ctx, s.jobID, bulkimport.UpdateJobState(internalpb.ImportJobState_Failed)))
 	s.Equal(internalpb.ImportJobState_Uncommitted, s.importMeta.GetJob(ctx, s.jobID).GetState())
 }
 

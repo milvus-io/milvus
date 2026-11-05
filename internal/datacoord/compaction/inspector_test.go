@@ -324,7 +324,7 @@ type CompactionPlanHandlerSuite struct {
 }
 
 func (s *CompactionPlanHandlerSuite) SetupTest() {
-	s.mockMeta = ctask.NewMockCompactionMeta(s.T())
+	s.mockMeta = ctask.NewDefaultMockCompactionMeta(s.T())
 	s.mockCleaner = partitionstats.NewMockPartitionStatsCleaner(s.T())
 	s.mockCatalog = mocks.NewDataCoordCatalog(s.T())
 	s.compactionTaskMeta = ctask.NewCompactionTaskMetaOverCatalog(s.mockCatalog)

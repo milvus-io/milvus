@@ -45,7 +45,7 @@ func TestSegmentChangeEmptyOutputs(t *testing.T) {
 			m.DataViewManager = manager
 			_, err = manager.OnCreateCollection(ctx, dataview.CreateCollectionDataViewEvent{CollectionID: 10, VChannels: []string{"ch-1"}})
 			require.NoError(t, err)
-			g := newTestGroup()
+			g := meta.NewTestGroup()
 			g.NewSegmentIDs = nil
 			if shape == "no_op" {
 				g.SupersededSegmentIDs = nil
@@ -148,17 +148,17 @@ func TestSegmentChangeEmptyOutputRecovery(t *testing.T) {
 	m, err = meta.NewMemoryMeta(t)
 	require.NoError(t, err)
 	g := seedPublishMeta(t, m, model.SegmentChangeSourceMixCompaction)
-	require.NoError(t, m.UpdateSegmentsInfo(ctx, func(pack *updateSegmentPack) bool { pack.Get(1001).NumOfRows = 0; return true }))
+	require.NoError(t, m.UpdateSegmentsInfo(ctx, func(pack *meta.UpdateSegmentPack) bool { pack.Get(1001).NumOfRows = 0; return true }))
 	g.State = model.SegmentChangeStateCommitted
 	require.ErrorIs(t, m.UpdateSegmentsInfoAndChangeGroups(ctx, []metastore.UpdateAction{metastore.SaveSegmentChangeGroup(g)},
-		SetSegmentIsInvisible(1001, false), UpdateStatusOperator(2001, commonpb.SegmentState_Dropped)), merr.ErrDataIntegrity)
+		meta.SetSegmentIsInvisible(1001, false), meta.UpdateStatusOperator(2001, commonpb.SegmentState_Dropped)), merr.ErrDataIntegrity)
 }
 
 func TestSegmentChangeProvisionalZeroRowsWaitForFinalization(t *testing.T) {
 	for _, state := range []commonpb.SegmentState{commonpb.SegmentState_Growing, commonpb.SegmentState_Flushing, commonpb.SegmentState_Importing} {
 		t.Run(state.String(), func(t *testing.T) {
 			ctx := t.Context()
-			m, g := seedStagedInspectorMeta(t, func(seg *SegmentInfo) {
+			m, g := seedStagedInspectorMeta(t, func(seg *meta.SegmentInfo) {
 				seg.State = state
 				seg.NumOfRows = 0
 				seg.Binlogs = nil
@@ -167,7 +167,7 @@ func TestSegmentChangeProvisionalZeroRowsWaitForFinalization(t *testing.T) {
 			inspector := newSegmentChangeInspector(ctx, m, meta.NewMockAllocator(t))
 			inspector.evaluateStaged(ctx, g)
 			require.Equal(t, model.SegmentChangeStateStaged, m.GetSegmentChangeGroup(ctx, 10, g.GroupID).State)
-			require.NoError(t, m.UpdateSegmentsInfo(ctx, UpdateStatusOperator(1001, commonpb.SegmentState_Flushed)))
+			require.NoError(t, m.UpdateSegmentsInfo(ctx, meta.UpdateStatusOperator(1001, commonpb.SegmentState_Flushed)))
 			inspector.evaluateStaged(ctx, g)
 			require.Equal(t, model.SegmentChangeStateReady, m.GetSegmentChangeGroup(ctx, 10, g.GroupID).State)
 		})
@@ -182,7 +182,7 @@ func TestPublishGroupRechecksAllReadinessTerms(t *testing.T) {
 			require.NoError(t, err)
 			g := seedPublishMeta(t, m, model.SegmentChangeSourceMixCompaction)
 			m.GetCollection(10).Schema = readinessStatsSchema()
-			makeReady := func(pack *updateSegmentPack) bool {
+			makeReady := func(pack *meta.UpdateSegmentPack) bool {
 				seg := pack.Get(1001)
 				seg.State = commonpb.SegmentState_Flushed
 				seg.IsSorted = true
@@ -190,7 +190,7 @@ func TestPublishGroupRechecksAllReadinessTerms(t *testing.T) {
 				seg.JsonKeyStats = map[int64]*datapb.JsonKeyStats{3: {JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion}}
 				return true
 			}
-			require.NoError(t, m.UpdateSegmentsInfo(ctx, makeReady, func(pack *updateSegmentPack) bool {
+			require.NoError(t, m.UpdateSegmentsInfo(ctx, makeReady, func(pack *meta.UpdateSegmentPack) bool {
 				seg := pack.Get(1001)
 				switch regression {
 				case "sort":

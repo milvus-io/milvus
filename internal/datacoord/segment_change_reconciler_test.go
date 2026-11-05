@@ -18,6 +18,8 @@ package datacoord
 
 import (
 	"context"
+	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
+	ctask "github.com/milvus-io/milvus/internal/datacoord/compaction/task"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"testing"
 
@@ -121,7 +123,7 @@ func TestSegmentChangeRecovery_ChunkedPublish(t *testing.T) {
 					Binlogs: []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: id}}}},
 				})))
 			}
-			g := newTestGroup()
+			g := meta.NewTestGroup()
 			g.Source = model.SegmentChangeSourceImportJob
 			g.NewSegmentIDs = []int64{1001, 1002, 1003}
 			require.NoError(t, m.AddSegmentChangeGroup(ctx, g))
@@ -244,17 +246,16 @@ func TestSegmentChangeVisibilityAndCompactionOwnership(t *testing.T) {
 	require.NoError(t, err)
 	g := seedPublishMeta(t, m, model.SegmentChangeSourceMixCompaction)
 	for _, write := range []func() error{
-		func() error { return m.UpdateSegmentsInfo(ctx, SetSegmentIsInvisible(1001, false)) },
+		func() error { return m.UpdateSegmentsInfo(ctx, meta.SetSegmentIsInvisible(1001, false)) },
 		func() error {
-			_, err := m.UpdateSegmentsInfoAndDataView(ctx, nil, SetSegmentIsInvisible(1001, false))
+			_, err := m.UpdateSegmentsInfoAndDataView(ctx, nil, meta.SetSegmentIsInvisible(1001, false))
 			return err
 		},
-		func() error { return m.UpdateSegmentsInfoAndChangeGroups(ctx, nil, SetSegmentIsInvisible(1001, false)) },
 		func() error {
-			m.SegMu.Lock()
-			defer m.SegMu.Unlock()
-			_, err := m.applySegmentCatalogMutation(m.Segments.GetSegment(1001), SegmentCatalogMutation{Operators: []UpdateOperator{SetSegmentIsInvisible(1001, false)}})
-			return err
+			return m.UpdateSegmentsInfoAndChangeGroups(ctx, nil, meta.SetSegmentIsInvisible(1001, false))
+		},
+		func() error {
+			return m.ApplySegmentCatalogMutationForTest(1001, meta.SegmentCatalogMutation{Operators: []meta.UpdateOperator{meta.SetSegmentIsInvisible(1001, false)}})
 		},
 	} {
 		require.ErrorIs(t, write(), merr.ErrDataIntegrity)
@@ -304,7 +305,7 @@ func TestSegmentChangeReclamation_RetryAndParentSafety(t *testing.T) {
 	require.True(t, m.UnpublishedSegmentMembers(ctx, 10).Contain(1001))
 	_, allowed := m.CheckAndSetSegmentsCompacting(ctx, []int64{1001})
 	require.False(t, allowed, "failed members stay protected until reclamation completes")
-	require.ErrorIs(t, m.UpdateSegmentsInfo(ctx, SetSegmentIsInvisible(1001, false)), merr.ErrDataIntegrity)
+	require.ErrorIs(t, m.UpdateSegmentsInfo(ctx, meta.SetSegmentIsInvisible(1001, false)), merr.ErrDataIntegrity)
 	require.ErrorIs(t, m.DeleteSegmentChangeGroup(ctx, 10, 1), merr.ErrDataIntegrity)
 	require.ErrorIs(t, m.UpdateSegmentsInfoAndChangeGroups(ctx, []metastore.UpdateAction{metastore.DeleteSegmentChangeGroup(10, 1)}), merr.ErrDataIntegrity)
 
@@ -401,10 +402,10 @@ func TestSegmentChangeL0Selection_PreservesAwaitingSort(t *testing.T) {
 	ordinary.ID = 3001
 	ordinary.IsSorted = false
 	require.NoError(t, m.AddSegment(ctx, ordinary))
-	task := newL0CompactionTask(&datapb.CompactionTask{
+	task := ctask.NewL0CompactionTask(&datapb.CompactionTask{
 		CollectionID: 10, PartitionID: 100, Channel: "ch-1", Pos: &msgpb.MsgPosition{Timestamp: 100},
-	}, nil, m)
-	segments, _, err := task.selectFlushedSegment()
+	}, nil, m, newSegmentChangeTaskMeta(t, m))
+	segments, _, err := task.SelectFlushedSegment()
 	require.NoError(t, err)
 	ids := make([]int64, 0, len(segments))
 	for _, segment := range segments {
@@ -412,10 +413,10 @@ func TestSegmentChangeL0Selection_PreservesAwaitingSort(t *testing.T) {
 	}
 	require.ElementsMatch(t, []int64{2001, 3001}, ids, "L0 skips group members but retains group-less awaiting-sort and visible parent targets")
 
-	handler := NewNMockHandler(t)
+	handler := meta.NewNMockHandler(t)
 	handler.EXPECT().GetCollection(mock.Anything, int64(10)).Return(m.GetCollection(10), nil)
-	policy := newSingleCompactionPolicy(m, nil, handler)
-	invisible, visible, err := policy.triggerSortCompaction(ctx, 1, 10, 0)
+	sortPolicy := policy.NewSingleCompactionPolicy(m, nil, nil, handler)
+	invisible, visible, err := sortPolicy.TriggerSortForTest(ctx, 1, 10, 0)
 	require.NoError(t, err)
 	require.Len(t, invisible, 1, "the ordinary awaiting-sort segment still gets a sort task")
 	require.Equal(t, int64(3001), invisible[0].GetSegmentsView()[0].ID)
