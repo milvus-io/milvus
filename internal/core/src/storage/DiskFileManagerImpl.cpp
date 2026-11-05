@@ -390,22 +390,21 @@ DiskFileManagerImpl::AddFileMeta(const FileMeta& file_meta) {
     return true;
 }
 
-bool
-DiskFileManagerImpl::AddJsonSharedIndexLog(const std::string& file) noexcept {
-    return AddFileInternal(
+void
+DiskFileManagerImpl::AddJsonSharedIndexLog(const std::string& file) {
+    UploadFileInternal(
         file, [this](const std::string& file_name, int slice_num) {
             return GetRemoteJsonStatsSharedIndexPath(file_name, slice_num);
         });
 }
 
-bool
-DiskFileManagerImpl::AddJsonStatsMetaLog(const std::string& file) noexcept {
+void
+DiskFileManagerImpl::AddJsonStatsMetaLog(const std::string& file) {
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    FILEMANAGER_TRY
     if (!local_chunk_manager->Exist(file)) {
-        LOG_ERROR("local meta file {} not exists", file);
-        return false;
+        ThrowInfo(
+            ErrorCode::PathNotExist, "local meta file {} not exists", file);
     }
 
     local_paths_.emplace_back(file);
@@ -424,18 +423,14 @@ DiskFileManagerImpl::AddJsonStatsMetaLog(const std::string& file) noexcept {
              file,
              remote_path,
              fileSize);
-
-    FILEMANAGER_CATCH
-    FILEMANAGER_END
-    return true;
 }
 
-bool
-DiskFileManagerImpl::AddTextLog(const std::string& file) noexcept {
-    return AddFileInternal(
-        file, [this](const std::string& file_name, int slice_num) {
-            return GetRemoteTextLogPath(file_name, slice_num);
-        });
+void
+DiskFileManagerImpl::AddTextLog(const std::string& file) {
+    UploadFileInternal(file,
+                       [this](const std::string& file_name, int slice_num) {
+                           return GetRemoteTextLogPath(file_name, slice_num);
+                       });
 }
 
 void
