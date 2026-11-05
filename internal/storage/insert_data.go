@@ -2738,6 +2738,16 @@ func (data *StringFieldData) GetMemorySize() int {
 	return data.getMemorySize()
 }
 
+// nestedArrayElementOverhead is the fixed heap cost of one inner array of a
+// nested Array row, on top of its leaf payload: the *ScalarField slot in the
+// parent slice (8 bytes), the ScalarField message (80), its oneof wrapper (8)
+// and the typed array message such as LongArray or StringArray (64), measured
+// on 64-bit Go. A null or empty inner array has no payload, so without it a
+// row of null inner arrays would count as nothing and memory-bounded batches
+// (import readers, insert buffers) would hold far more than their limit. Like
+// the string header in StringFieldData, it is a Go in-memory cost.
+const nestedArrayElementOverhead = 160
+
 func getArrayScalarFieldMemorySize(data *schemapb.ScalarField, elementType schemapb.DataType) int {
 	if data == nil {
 		return 0
@@ -2748,7 +2758,9 @@ func getArrayScalarFieldMemorySize(data *schemapb.ScalarField, elementType schem
 	if arrayData := data.GetArrayData(); arrayData != nil {
 		var size int
 		for _, element := range arrayData.GetData() {
+			size += nestedArrayElementOverhead
 			size += getArrayScalarFieldMemorySize(element, arrayData.GetElementType())
+			size += binary.Size(typeutil.GetArrayElementValidData(element))
 		}
 		return size
 	}

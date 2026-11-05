@@ -141,17 +141,15 @@ type SegmentIndexMutation struct {
 // write. action is nil when the mutation resolves to no catalog write at all;
 // record is the locked task projection used to validate manifest contents.
 //
-// install performs in-memory changes only — it never acquires fieldIndexLock, so
-// the manifest commit may run it under the segment writer lock. It returns
-// the observability update it deferred (never nil): the stored-index-size gauge
-// must serialize against MarkIndexAsDeleted via fieldIndexLock, whose write
-// side every index DDL (CreateIndex, AlterIndex, MarkIndexAsDeleted,
-// RemoveIndex) holds across an etcd round trip. The caller MUST run the
-// returned closure only after releasing the writer lock — acquiring
-// fieldIndexLock inside it would let one slow DDL stall the segment's writers —
-// and before
-// releasing keyLock(BuildID), so the install-then-metric sequence stays ordered
-// against the next writer of the same build.
+// install performs in-memory changes only — it updates indexMeta's task counters
+// and never acquires fieldIndexLock, so the manifest commit may run it under the
+// segment writer lock. It returns the observability update it deferred (never
+// nil): recording the finished task and publishing the stored-index-size gauge,
+// whose writes can wait for a Prometheus scrape. The caller MUST run the returned
+// closure only after releasing the writer lock — a scrape must not stall the
+// segment's writers — and before releasing keyLock(BuildID), so the
+// install-then-metric sequence stays ordered against the next writer of the same
+// build.
 type StagedSegmentIndexMutation struct {
 	Action  *metastore.UpdateAction
 	Record  *model.SegmentIndex
@@ -203,9 +201,11 @@ type SegmentManifestCommit struct {
 // holder (and RWMutex writer-preference can pin that read behind a pending
 // CreateIndex/DropIndex). Manifest I/O runs outside the writer lock; the final
 // catalog mutation is rebased onto the latest SegmentInfo and catalog + memory
-// publication stays under it. No lock is ever acquired inside that section:
-// the fieldIndexLock-guarded index gauge update a staged SegmentIndex mutation
-// defers runs only after the writer lock is released (still under keyLock).
+// publication stays under it. Only short, memory-only locks are taken inside
+// that section: a staged SegmentIndex install updates indexMeta's task counters,
+// never fieldIndexLock. Its observability, including the stored-index-size gauge
+// whose writes can wait for a Prometheus scrape, runs after the writer lock and
+// the fieldIndexLock read side are released (still under keyLock).
 func (m *Meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifestCommit) error {
 	var manifestUpdates []*SegmentInfo
 	defer func() { m.notifyQueryViewSegmentUpdates(ctx, manifestUpdates) }()
@@ -397,10 +397,9 @@ func (m *Meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	// records are caught by verifyNoUnexpectedIndexRecords) or is blocked until
 	// after the replace publishes (its build then reads the new manifest, so no
 	// index built from the pre-replace column values can be accepted). Index DDL
-	// holds the write side across an etcd round trip and sync.RWMutex is
-	// writer-preferring, so the read side is acquired HERE — before the writer
-	// lock — and released after the publication section, before the deferred
-	// gauge closures that re-enter it; it is never acquired under the writer
+	// takes the write side and sync.RWMutex is writer-preferring, so the read
+	// side is acquired HERE — before the writer lock — and released as soon as
+	// the publication section returns; it is never acquired under the writer
 	// lock.
 	var (
 		verifyIndexIDs   map[int64]struct{}
@@ -418,12 +417,9 @@ func (m *Meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	// rather than the I/O input.
 	//
 	// The section is an inner function so the writer lock is released before
-	// deferredIndexMetric runs. That closure takes indexMeta.fieldIndexLock for
-	// the stored-index-size gauge, and every index DDL (CreateIndex, AlterIndex,
-	// MarkIndexAsDeleted, RemoveIndex) holds that lock's write side across an
-	// etcd round trip; sync.RWMutex is writer-preferring, so acquiring it inside
-	// the writer lock would park this commit behind that round trip and stall
-	// every writer of the segment. No lock is acquired inside it.
+	// deferredIndexMetric runs. That closure publishes the stored-index-size
+	// gauge, whose writes can wait for a Prometheus scrape; under the writer lock
+	// that would stall every writer of the segment.
 	var deferredIndexMetrics []func()
 	if err := func() error {
 		defer m.LockSegments(commit.SegmentID)()
@@ -533,12 +529,9 @@ func (m *Meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 		return err
 	}
 	// The writer lock is released. The fieldIndexLock read side held since the
-	// verify-set re-resolution is released before the deferred gauge closures,
-	// which re-enter that lock; the segment manifest lock and keyLock(buildID)
-	// are still held, so the deferred gauge update stays serialized against
-	// MarkIndexAsDeleted (via fieldIndexLock) and ordered before the next writer
-	// of the same build, without ever awaiting fieldIndexLock under the writer
-	// lock.
+	// verify-set re-resolution is released before the deferred closures; the
+	// segment manifest lock and keyLock(buildID) are still held, so they stay
+	// ordered before the next writer of the same build.
 	if releaseIndexLock != nil {
 		releaseIndexLock()
 	}

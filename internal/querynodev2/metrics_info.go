@@ -148,6 +148,12 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 		return true
 	})
 
+	// QueryViews keep their collections outside the segment manager. Report
+	// them too, so that QuotaCenter's node-level protections reach them.
+	effectCollectionIDs := collectionIDs
+	if queryViewSegments := node.queryViewSegments.Load(); queryViewSegments != nil {
+		effectCollectionIDs = append(effectCollectionIDs, queryViewSegments.CollectionIDs()...)
+	}
 	return &metricsinfo.QueryNodeQuotaMetrics{
 		Hms: metricsinfo.HardwareMetrics{},
 		Rms: rms,
@@ -160,7 +166,7 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 		LoadedBinlogSize:    node.manager.Segment.GetLoadedBinlogSize(),
 		Effect: metricsinfo.NodeEffect{
 			NodeID:        node.GetNodeID(),
-			CollectionIDs: collectionIDs,
+			CollectionIDs: effectCollectionIDs,
 		},
 		DeleteBufferInfo: metricsinfo.DeleteBufferInfo{
 			CollectionDeleteBufferNum:  deleteBufferNum,

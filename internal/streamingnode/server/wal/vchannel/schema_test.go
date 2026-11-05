@@ -15,6 +15,42 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
 
+func TestWritePathRecoveryStateSharesSchemaAcrossHistoryChanges(t *testing.T) {
+	view := NewVChannelViewFromMeta(restoreSchemaTestMeta())
+	_, initial := view.GetSchema(0)
+	expected := proto.Clone(initial).(*schemapb.CollectionSchema)
+	state, ok := view.WritePathRecoveryState()
+	require.True(t, ok)
+	require.Same(t, initial, state.Schema)
+
+	updated := proto.Clone(initial).(*schemapb.CollectionSchema)
+	updated.Version++
+	updated.Description = "updated"
+	msg := message.NewAlterCollectionMessageBuilderV2().WithVChannel("v1").
+		WithHeader(&message.AlterCollectionMessageHeader{CollectionId: 1, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionSchema}}}).
+		WithBody(&message.AlterCollectionMessageBody{Updates: &message.AlterCollectionMessageUpdates{Schema: updated}}).
+		MustBuildMutable().WithTimeTick(40).WithLastConfirmedUseMessageID().IntoImmutableMessage(walimplstest.NewTestMessageID(40))
+	require.True(t, view.ObserveAlterCollectionMessageV2(message.MustAsImmutableAlterCollectionMessageV2(msg)))
+	current, ok := view.WritePathRecoveryState()
+	require.True(t, ok)
+	_, latest := view.GetSchema(0)
+	require.Same(t, latest, current.Schema)
+	require.NotSame(t, state.Schema, current.Schema)
+	require.True(t, proto.Equal(expected, state.Schema))
+
+	view.SchemaCleanupPlan(40, nil)
+	snapshot, _ := view.ConsumeDirtyAndGetSnapshot()
+	require.NotNil(t, snapshot)
+	view.MarkSnapshotPersisted(snapshot)
+	deletion, _ := view.SchemaCleanupPlan(40, nil)
+	require.NotNil(t, deletion)
+	view.MarkSchemaCleanupPersisted(deletion)
+	require.Len(t, view.AssignmentMeta().GetCollectionInfo().GetSchemas(), 1)
+	require.True(t, proto.Equal(expected, state.Schema), "retiring history must preserve retained schema contents")
+	_, latest = view.GetSchema(0)
+	require.Same(t, latest, current.Schema)
+}
+
 func TestExactSchemaVersionAfterRecovery(t *testing.T) {
 	meta := restoreSchemaTestMeta()
 	encoded, err := proto.Marshal(meta)

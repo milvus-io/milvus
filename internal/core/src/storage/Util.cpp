@@ -83,6 +83,7 @@
 #include "storage/MemFileManagerImpl.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/KeyRetriever.h"
+#include "storage/PluginLoader.h"
 #include "segcore/memory_planner.h"
 #include "mmap/Types.h"
 #include "storage/loon_ffi/ffi_reader_c.h"
@@ -1880,12 +1881,19 @@ detail::VisitFieldDataFromStorageV2Paged(
 
     for (const auto& column_group_file : remote_chunk_files) {
         // get all row groups for each file
-        auto result = milvus_storage::FileRowGroupReader::Make(
-            fs,
-            column_group_file,
-            milvus_storage::DEFAULT_READ_BUFFER_SIZE,
-            GetReaderProperties(),
-            GetArrowReaderProperties());
+        auto prepared_result = milvus_storage::PreparedParquetFile::Open(
+            fs, column_group_file, GetReaderProperties());
+        if (!prepared_result.ok()) {
+            ThrowInfo(ArrowStatusToErrorCode(prepared_result.status()),
+                      "[StorageV2] Failed to prepare file {}: {}",
+                      column_group_file,
+                      prepared_result.status().ToString());
+        }
+        auto prepared = std::move(prepared_result).ValueOrDie();
+        auto result =
+            prepared->MakeReader(nullptr,
+                                 milvus_storage::DEFAULT_READ_BUFFER_SIZE,
+                                 GetArrowReaderProperties());
         if (!result.ok()) {
             ThrowInfo(ArrowStatusToErrorCode(result.status()),
                       "[StorageV2] Failed to create file row group reader: " +
@@ -1997,6 +2005,7 @@ detail::VisitFieldDataFromStorageV2Paged(
                 pool.Submit([channel,
                              column_group_file,
                              fs,
+                             prepared,
                              parallel_degree,
                              row_groups = std::move(row_groups)]() mutable {
                     auto strategy =
@@ -2012,7 +2021,8 @@ detail::VisitFieldDataFromStorageV2Paged(
                         row_group_lists,
                         fs,
                         nullptr,
-                        milvus::proto::common::LoadPriority::HIGH);
+                        milvus::proto::common::LoadPriority::HIGH,
+                        {prepared});
                 });
 
             bool channel_exhausted = false;
@@ -2186,6 +2196,11 @@ ReadFieldDataFromManifestInto(const std::string& manifest_path,
             }
             auto reader = milvus_storage::api::Reader::create(
                 column_groups, nullptr, columns, reader_properties);
+            if (PluginLoader::GetInstance().getCipherPlugin()) {
+                reader->set_keyretriever([](const std::string& key_metadata) {
+                    return KeyRetriever().GetKey(key_metadata);
+                });
+            }
             const auto parallelism =
                 milvus_storage::ThreadPoolHolder::GetParallelism();
             auto pool =
@@ -2414,6 +2429,11 @@ VisitFieldDataFromManifestPaged(
 
     if (!(reader != nullptr)) {
         ThrowInfo(ErrorCode::FileReadFailed, "Failed to create reader");
+    }
+    if (PluginLoader::GetInstance().getCipherPlugin()) {
+        reader->set_keyretriever([](const std::string& key_metadata) {
+            return KeyRetriever().GetKey(key_metadata);
+        });
     }
     std::shared_ptr<arrow::RecordBatch> batch;
 

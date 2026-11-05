@@ -644,7 +644,9 @@ func (st *StatsTask) prepareJobRequest(ctx context.Context, segment *meta.Segmen
 		ManifestPath:                     segment.GetManifestPath(),
 		EnableManifestDelta:              true,
 	}
-	meta.WrapPluginContext(segment.GetCollectionID(), collInfo.Schema.GetProperties(), req)
+	if err := meta.WrapPluginContext(segment.GetCollectionID(), collInfo.Schema.GetProperties(), req); err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }

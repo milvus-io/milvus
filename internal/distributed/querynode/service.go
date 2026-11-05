@@ -27,6 +27,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/keepalive"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -419,6 +420,29 @@ func (s *Server) QueryStreamSegments(req *querypb.QueryRequest, srv querypb.Quer
 
 func (s *Server) QuerySegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
 	return s.querynode.QuerySegments(ctx, req)
+}
+
+func (s *Server) Materialize(ctx context.Context, req *querypb.QueryRequest) (*internalpb.MaterializeResults, error) {
+	replyUncompressed(ctx)
+	return s.querynode.Materialize(ctx, req)
+}
+
+func (s *Server) MaterializeSegments(ctx context.Context, req *querypb.QueryRequest) (*internalpb.MaterializeResults, error) {
+	replyUncompressed(ctx)
+	return s.querynode.MaterializeSegments(ctx, req)
+}
+
+// replyUncompressed sends a Materialize reply without gRPC compression: its
+// body carries its own (queryNode.materialize.codec). The request keeps the
+// caller's compressor, and gRPC would otherwise answer with it. ctx without a
+// gRPC stream (an in-process call) has nothing to set.
+func replyUncompressed(ctx context.Context) {
+	if grpc.ServerTransportStreamFromContext(ctx) == nil {
+		return
+	}
+	if err := grpc.SetSendCompressor(ctx, encoding.Identity); err != nil {
+		mlog.Warn(ctx, "failed to send the Materialize reply uncompressed", mlog.Err(err))
+	}
 }
 
 // SyncReplicaSegments syncs replica segment information to shard leader

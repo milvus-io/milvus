@@ -24,6 +24,7 @@ import (
 	"maps"
 	"math"
 	"path"
+	"unsafe"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
@@ -331,17 +332,15 @@ func (sr *StatsReader) GetPrimaryKeyStatsList() ([]*PrimaryKeyStats, error) {
 }
 
 type BM25Stats struct {
-	rowsWithToken map[uint32]int32 // mapping token => row num include token
-	numRow        int64            // total row num
-	numToken      int64            // total token num
+	rowsWithToken bm25TokenCounts // mapping token => row num include token
+	numRow        int64           // total row num
+	numToken      int64           // total token num
 }
 
 const BM25VERSION int32 = 0
 
 func NewBM25Stats() *BM25Stats {
-	return &BM25Stats{
-		rowsWithToken: map[uint32]int32{},
-	}
+	return &BM25Stats{}
 }
 
 func NewBM25StatsWithBytes(bytes []byte) (*BM25Stats, error) {
@@ -356,7 +355,7 @@ func NewBM25StatsWithBytes(bytes []byte) (*BM25Stats, error) {
 func (m *BM25Stats) Append(rows ...map[uint32]float32) {
 	for _, row := range rows {
 		for key, value := range row {
-			m.rowsWithToken[key] += 1
+			m.rowsWithToken.add(key, 1)
 			m.numToken += int64(value)
 		}
 
@@ -377,7 +376,7 @@ func (m *BM25Stats) AppendBytes(datas ...[]byte) {
 		for i := 0; i < dim; i++ {
 			index := typeutil.SparseFloatRowIndexAt(data, i)
 			value := typeutil.SparseFloatRowValueAt(data, i)
-			m.rowsWithToken[index] += 1
+			m.rowsWithToken.add(index, 1)
 			m.numToken += int64(value)
 		}
 		m.numRow += 1
@@ -393,20 +392,13 @@ func (m *BM25Stats) NumToken() int64 {
 }
 
 func (m *BM25Stats) Merge(meta *BM25Stats) {
-	for key, value := range meta.rowsWithToken {
-		m.rowsWithToken[key] += value
-	}
-	m.numRow += meta.NumRow()
+	m.rowsWithToken.apply(&meta.rowsWithToken, 1, nil, false)
+	m.numRow += meta.numRow
 	m.numToken += meta.numToken
 }
 
 func (m *BM25Stats) Minus(meta *BM25Stats) {
-	for key, value := range meta.rowsWithToken {
-		m.rowsWithToken[key] -= value
-		if m.rowsWithToken[key] == 0 {
-			delete(m.rowsWithToken, key)
-		}
-	}
+	m.rowsWithToken.apply(&meta.rowsWithToken, -1, nil, true)
 	m.numRow -= meta.numRow
 	m.numToken -= meta.numToken
 }
@@ -419,10 +411,12 @@ func (m *BM25Stats) ValidateDelta(add, remove *BM25Stats) error {
 		return merr.WrapErrDataIntegrityMsg("negative BM25 aggregate counts after replacement")
 	}
 	for _, delta := range []*BM25Stats{remove, add} {
-		for key := range delta.rowsWithToken {
-			count := int64(m.rowsWithToken[key]) + int64(add.rowsWithToken[key]) - int64(remove.rowsWithToken[key])
-			if count < 0 || count > rows || count > math.MaxInt32 {
-				return merr.WrapErrDataIntegrityMsg("invalid BM25 document frequency for token %d", key)
+		for i, shard := range delta.rowsWithToken {
+			for key := range shard {
+				count := int64(m.rowsWithToken[i][key]) + int64(add.rowsWithToken[i][key]) - int64(remove.rowsWithToken[i][key])
+				if count < 0 || count > rows || count > math.MaxInt32 {
+					return merr.WrapErrDataIntegrityMsg("invalid BM25 document frequency for token %d", key)
+				}
 			}
 		}
 	}
@@ -432,31 +426,40 @@ func (m *BM25Stats) ValidateDelta(add, remove *BM25Stats) error {
 // ApplyDelta applies a previously validated delta under the owner's write lock.
 // Remove zero-frequency keys and compact maps after a large vocabulary reduction.
 func (m *BM25Stats) ApplyDelta(add, remove *BM25Stats) {
-	previousSize := len(m.rowsWithToken)
+	previousSize := m.rowsWithToken.len()
 	m.Minus(remove)
 	m.Merge(add)
-	for key := range remove.rowsWithToken {
-		if m.rowsWithToken[key] == 0 {
-			delete(m.rowsWithToken, key)
+	for i, shard := range remove.rowsWithToken {
+		for key := range shard {
+			if m.rowsWithToken[i][key] == 0 {
+				delete(m.rowsWithToken[i], key)
+			}
 		}
 	}
-	if previousSize > 1024 && len(m.rowsWithToken)*2 < previousSize {
-		compact := make(map[uint32]int32, len(m.rowsWithToken))
-		maps.Copy(compact, m.rowsWithToken)
-		m.rowsWithToken = compact
+	if previousSize > 1024 && m.rowsWithToken.len()*2 < previousSize {
+		applyBM25StatsShards(m.rowsWithToken.len(), func(i int) {
+			shard := m.rowsWithToken[i]
+			if len(shard) == 0 {
+				m.rowsWithToken[i] = nil
+				return
+			}
+			compact := make(map[uint32]int32, len(shard))
+			maps.Copy(compact, shard)
+			m.rowsWithToken[i] = compact
+		})
 	}
 }
 
 func (m *BM25Stats) Clone() *BM25Stats {
 	return &BM25Stats{
-		rowsWithToken: maps.Clone(m.rowsWithToken),
+		rowsWithToken: m.rowsWithToken.clone(),
 		numRow:        m.numRow,
 		numToken:      m.numToken,
 	}
 }
 
 func (m *BM25Stats) Serialize() ([]byte, error) {
-	buffer := bytes.NewBuffer(make([]byte, 0, len(m.rowsWithToken)*8+20))
+	buffer := bytes.NewBuffer(make([]byte, 0, m.rowsWithToken.len()*8+20))
 
 	if err := binary.Write(buffer, common.Endian, BM25VERSION); err != nil {
 		return nil, err
@@ -470,13 +473,15 @@ func (m *BM25Stats) Serialize() ([]byte, error) {
 		return nil, err
 	}
 
-	for key, value := range m.rowsWithToken {
-		if err := binary.Write(buffer, common.Endian, key); err != nil {
-			return nil, err
-		}
+	for _, shard := range m.rowsWithToken {
+		for key, value := range shard {
+			if err := binary.Write(buffer, common.Endian, key); err != nil {
+				return nil, err
+			}
 
-		if err := binary.Write(buffer, common.Endian, value); err != nil {
-			return nil, err
+			if err := binary.Write(buffer, common.Endian, value); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -497,13 +502,15 @@ func (m *BM25Stats) SerializeToWriter(w io.Writer) error {
 		return err
 	}
 
-	for key, value := range m.rowsWithToken {
-		if err := binary.Write(w, common.Endian, key); err != nil {
-			return err
-		}
+	for _, shard := range m.rowsWithToken {
+		for key, value := range shard {
+			if err := binary.Write(w, common.Endian, key); err != nil {
+				return err
+			}
 
-		if err := binary.Write(w, common.Endian, value); err != nil {
-			return err
+			if err := binary.Write(w, common.Endian, value); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -520,14 +527,15 @@ func (m *BM25Stats) Deserialize(bs []byte) error {
 	}
 
 	dim := (len(bs) - 20) / 8
-	if dim > 0 && len(m.rowsWithToken) == 0 {
-		m.rowsWithToken = make(map[uint32]int32, dim)
-	}
 	for i := 0; i < dim; i++ {
 		off := 20 + i*8
 		key := common.Endian.Uint32(bs[off : off+4])
 		value := int32(common.Endian.Uint32(bs[off+4 : off+8]))
-		m.rowsWithToken[key] += value
+		shard := shardOf(key)
+		if m.rowsWithToken[shard] == nil {
+			m.rowsWithToken[shard] = make(map[uint32]int32, dim/bm25StatsShards+1)
+		}
+		m.rowsWithToken[shard][key] += value
 	}
 
 	m.numRow += int64(common.Endian.Uint64(bs[4:12]))
@@ -541,7 +549,7 @@ func (m *BM25Stats) BuildIDF(tf []byte) (idf []byte) {
 	for idx := 0; idx < numElements; idx++ {
 		key := typeutil.SparseFloatRowIndexAt(tf, idx)
 		value := typeutil.SparseFloatRowValueAt(tf, idx)
-		typeutil.SparseFloatRowSetAt(idf, idx, key, bm25TermIDF(value, m.numRow, m.rowsWithToken[key]))
+		typeutil.SparseFloatRowSetAt(idf, idx, key, bm25TermIDF(value, m.numRow, m.rowsWithToken.get(key)))
 	}
 	return idf
 }
@@ -571,12 +579,16 @@ func DeserializeBloomFilterStats(paths []string, blobs []*Blob) ([]*PrimaryKeySt
 	return DeserializeStats(blobs)
 }
 
-// MemSize estimates the in-memory size of this BM25Stats in bytes.
-// len(map) is O(1) in Go (reads hmap.count directly). Per-entry cost is configurable
-// via queryNode.idfOracle.bm25StatsBytesPerEntry.
+// MemSize estimates the object, live shard-map headers and token entries.
 func (m *BM25Stats) MemSize() int64 {
-	// Fixed overhead: numRow(8) + numToken(8) + map header (~100B)
-	return 120 + int64(len(m.rowsWithToken))*paramtable.Get().QueryNodeCfg.BM25StatsBytesPerEntry.GetAsInt64()
+	size := int64(unsafe.Sizeof(*m))
+	bytesPerEntry := paramtable.Get().QueryNodeCfg.BM25StatsBytesPerEntry.GetAsInt64()
+	for _, shard := range m.rowsWithToken {
+		if len(shard) != 0 {
+			size += bm25StatsMapOverhead + int64(len(shard))*bytesPerEntry
+		}
+	}
+	return size
 }
 
 // DeserializeFromReader reads BM25 stats from an io.Reader and accumulates into self.
@@ -603,7 +615,7 @@ func (m *BM25Stats) DeserializeFromReader(r io.Reader) error {
 		for off := 0; off < end; off += 8 {
 			key := common.Endian.Uint32(buf[off : off+4])
 			value := int32(common.Endian.Uint32(buf[off+4 : off+8]))
-			m.rowsWithToken[key] += value
+			m.rowsWithToken.add(key, value)
 		}
 		// Carry an incomplete record into the next read.
 		remaining = copy(buf, buf[end:n])

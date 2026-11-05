@@ -5506,6 +5506,68 @@ func TestSchemaForPathReplaceOperandsOmitsElementNullableChildren(t *testing.T) 
 	}
 }
 
+// A nested Array child that is not element_nullable is a PATH_REPLACE operand
+// like any other child: REST encodes one inner Array per row, with the
+// validity of a nullable leaf on that inner Array, in the layout the proxy
+// insert validation accepts.
+func TestSchemaForPathReplaceOperandsNestedArrayChild(t *testing.T) {
+	newSchema := func() *schemapb.CollectionSchema {
+		schema := buildElementNullableStructTestSchema(false)
+		for _, child := range schema.GetStructArrayFields()[0].GetFields() {
+			if subShortName(child) == "tags" {
+				child.ElementNullable = false
+				child.GetTypeSchema().GetArrayElement().Nullable = false
+			}
+		}
+		return schema
+	}
+	for _, tc := range []struct {
+		name, path, operand string
+		children            []string
+	}{
+		{"nested child only", "[1][tags]", `{"tags":["x",null]}`, []string{"tags"}},
+		{"whole element", "[1]", `{"score":5,"tags":["x",null]}`, []string{"score", "tags"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := newSchema()
+			body := []byte(`{"data":[{"id":1,"clips":[` + tc.operand + `]},{"id":2,"clips":[` + tc.operand + `]}]}`)
+			ops := []*schemapb.FieldPartialUpdateOp{{FieldName: "clips", Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, Path: tc.path}}
+			requestSchema, err := schemaForPathReplaceOperands(body, schema, ops)
+			require.NoError(t, err)
+			got := make([]string, 0, len(tc.children))
+			for _, child := range requestSchema.GetStructArrayFields()[0].GetFields() {
+				got = append(got, subShortName(child))
+			}
+			require.ElementsMatch(t, tc.children, got)
+
+			rows, validData, err := checkAndSetData(body, requestSchema, true, ops...)
+			require.NoError(t, err)
+			fieldsData, err := anyToColumns(rows, validData, requestSchema, false, true)
+			require.NoError(t, err)
+			var structFD *schemapb.FieldData
+			for _, field := range fieldsData {
+				if field.GetFieldName() == "clips" {
+					structFD = field
+				}
+			}
+			require.NotNil(t, structFD)
+			tags := subFieldDataByName(t, structFD, "tags")
+			require.Equal(t, schemapb.DataType_Array, tags.GetType())
+			require.Equal(t, schemapb.DataType_Array, tags.GetScalars().GetArrayData().GetElementType())
+			tagRows := tags.GetScalars().GetArrayData().GetData()
+			require.Len(t, tagRows, 2)
+			for _, row := range tagRows {
+				assert.Empty(t, row.GetValidData(), "a sub-field that is not element_nullable has no element validity")
+				require.Len(t, row.GetArrayData().GetData(), 1, "the operand holds exactly one struct element")
+				inner := row.GetArrayData().GetData()[0]
+				assert.Equal(t, []string{"x"}, inner.GetStringData().GetData())
+				assert.Equal(t, []bool{true, false}, inner.GetValidData())
+			}
+			validateStructWithProxy(t, requestSchema, structFD, 2)
+		})
+	}
+}
+
 func TestSchemaForPathReplaceOperandsRejectsMissingOrUnknownChildren(t *testing.T) {
 	for _, tc := range []struct {
 		name, path, operand, want string
