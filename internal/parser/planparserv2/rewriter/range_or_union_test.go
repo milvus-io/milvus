@@ -206,21 +206,28 @@ func TestRewriteOrRangeUnionLargeParserChain(t *testing.T) {
 // inclusive-normalized bounds but emits only literals that appear in the input.
 func TestRewriteOrRangeUnionIntegerAdjacent(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		dataType schemapb.DataType
-		input    []orUnionInterval
-		want     []orUnionInterval
+		name   string
+		column *planpb.ColumnInfo
+		input  []orUnionInterval
+		want   []orUnionInterval
 	}{
-		{"unit_ranges", schemapb.DataType_Int64, []orUnionInterval{{3, 3, true, true}, {1, 1, true, true}, {2, 2, true, true}}, []orUnionInterval{{1, 3, true, true}}},
-		{"gap_kept", schemapb.DataType_Int64, []orUnionInterval{{1, 2, true, true}, {4, 5, true, true}, {3, 3, false, true}}, []orUnionInterval{{1, 2, true, true}, {3, 3, false, true}, {4, 5, true, true}}},
-		{"exclusive_outer_bounds", schemapb.DataType_Int64, []orUnionInterval{{0, 4, false, true}, {5, 8, true, false}}, []orUnionInterval{{0, 8, false, false}}},
-		{"exclusive_chain", schemapb.DataType_Int64, []orUnionInterval{{0, 5, true, false}, {5, 6, true, true}, {7, 9, true, false}, {10, 12, false, true}}, []orUnionInterval{{0, 9, true, false}, {10, 12, false, true}}},
-		{"exclusive_both_gap", schemapb.DataType_Int64, []orUnionInterval{{0, 5, true, false}, {5, 8, false, true}}, []orUnionInterval{{0, 5, true, false}, {5, 8, false, true}}},
-		{"int8_limits", schemapb.DataType_Int8, []orUnionInterval{{-128, -1, true, true}, {0, 126, true, true}, {127, 127, true, true}}, []orUnionInterval{{-128, 127, true, true}}},
-		{"int32_mixed", schemapb.DataType_Int32, []orUnionInterval{{10, 20, true, true}, {21, 30, true, false}, {29, 40, true, true}}, []orUnionInterval{{10, 40, true, true}}},
+		{"unit_ranges", edgeTestRangeColumn(schemapb.DataType_Int64), []orUnionInterval{{3, 3, true, true}, {1, 1, true, true}, {2, 2, true, true}}, []orUnionInterval{{1, 3, true, true}}},
+		{"gap_kept", edgeTestRangeColumn(schemapb.DataType_Int64), []orUnionInterval{{1, 2, true, true}, {4, 5, true, true}, {3, 3, false, true}}, []orUnionInterval{{1, 2, true, true}, {3, 3, false, true}, {4, 5, true, true}}},
+		{"exclusive_outer_bounds", edgeTestRangeColumn(schemapb.DataType_Int64), []orUnionInterval{{0, 4, false, true}, {5, 8, true, false}}, []orUnionInterval{{0, 8, false, false}}},
+		{"exclusive_chain", edgeTestRangeColumn(schemapb.DataType_Int64), []orUnionInterval{{0, 5, true, false}, {5, 6, true, true}, {7, 9, true, false}, {10, 12, false, true}}, []orUnionInterval{{0, 9, true, false}, {10, 12, false, true}}},
+		{"exclusive_both_gap", edgeTestRangeColumn(schemapb.DataType_Int64), []orUnionInterval{{0, 5, true, false}, {5, 8, false, true}}, []orUnionInterval{{0, 5, true, false}, {5, 8, false, true}}},
+		{"int8_limits", edgeTestRangeColumn(schemapb.DataType_Int8), []orUnionInterval{{-128, -1, true, true}, {0, 126, true, true}, {127, 127, true, true}}, []orUnionInterval{{-128, 127, true, true}}},
+		{"int32_mixed", edgeTestRangeColumn(schemapb.DataType_Int32), []orUnionInterval{{10, 20, true, true}, {21, 30, true, false}, {29, 40, true, true}}, []orUnionInterval{{10, 40, true, true}}},
+		{"int16_chain", edgeTestRangeColumn(schemapb.DataType_Int16), []orUnionInterval{{5, 9, true, true}, {-3, 4, true, true}, {10, 12, true, false}}, []orUnionInterval{{-3, 12, true, false}}},
+		{"array_int64_element_level", &planpb.ColumnInfo{
+			FieldId:        101,
+			DataType:       schemapb.DataType_Array,
+			ElementType:    schemapb.DataType_Int64,
+			IsElementLevel: true,
+		}, []orUnionInterval{{4, 6, true, true}, {0, 3, true, true}, {8, 9, true, true}}, []orUnionInterval{{0, 6, true, true}, {8, 9, true, true}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			column := edgeTestRangeColumn(tc.dataType)
+			column := tc.column
 			parts := make([]*planpb.Expr, len(tc.input))
 			for i, interval := range tc.input {
 				parts[i] = orUnionRange(column, interval)
@@ -230,6 +237,8 @@ func TestRewriteOrRangeUnionIntegerAdjacent(t *testing.T) {
 			for _, leaf := range orUnionLeaves(output) {
 				predicate := leaf.GetBinaryRangeExpr()
 				require.NotNil(t, predicate)
+				require.Equal(t, column.GetDataType(), predicate.GetColumnInfo().GetDataType())
+				require.Equal(t, column.GetIsElementLevel(), predicate.GetColumnInfo().GetIsElementLevel())
 				got = append(got, orUnionInterval{predicate.GetLowerValue().GetInt64Val(), predicate.GetUpperValue().GetInt64Val(), predicate.GetLowerInclusive(), predicate.GetUpperInclusive()})
 			}
 			require.ElementsMatch(t, tc.want, got)
