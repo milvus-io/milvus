@@ -348,6 +348,30 @@ func (s *SearchReduceUtilTestSuite) TestReduceSizesFieldsDataByHits() {
 		s.Equal(4*dim, cap(ret.GetResults().GetFieldsData()[1].GetVectors().GetFloatVector().GetData()))
 	})
 
+	s.Run("no group by sizes buffers for every query", func() {
+		const (
+			nq    = 3
+			limit = 2
+		)
+		multiQueryShard := func(ids []int64, scores []float32) *schemapb.SearchResultData {
+			r := presizeShardResult(limit, ids, scores, nil)
+			r.NumQueries = nq
+			r.Topks = []int64{limit, limit, limit}
+			r.ElementIndices = &schemapb.LongArray{Data: make([]int64, len(ids))}
+			return r
+		}
+		ret, err := reduceSearchResultDataNoGroupBy(ctx, []*schemapb.SearchResultData{
+			multiQueryShard([]int64{1, 2, 3, 4, 5, 6}, []float32{9, 7, 9, 7, 9, 7}),
+			multiQueryShard([]int64{11, 12, 13, 14, 15, 16}, []float32{8, 6, 8, 6, 8, 6}),
+		}, nq, limit, metric.IP, schemapb.DataType_Int64, 0)
+		s.Require().NoError(err)
+		// Every query keeps limit rows, so each buffer holds nq*limit rows.
+		s.Equal([]int64{1, 11, 3, 13, 5, 15}, ret.GetResults().GetIds().GetIntId().GetData())
+		s.Equal(nq*limit, cap(ret.GetResults().GetIds().GetIntId().GetData()))
+		s.Equal(nq*limit, cap(ret.GetResults().GetElementIndices().GetData()))
+		s.Equal(nq*limit, cap(ret.GetResults().GetFieldsData()[0].GetScalars().GetLongData().GetData()))
+	})
+
 	s.Run("group by without hits keeps typed columns", func() {
 		empty := presizeShardResult(topk, nil, nil, nil)
 		empty.Topks = []int64{0}

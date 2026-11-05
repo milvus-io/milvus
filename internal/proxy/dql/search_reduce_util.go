@@ -644,7 +644,9 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 		},
 	}
 
-	if err := setupIdListForSearchResult(ret, pkType, reduce.PresizeRows(subSearchResultData, limit)); err != nil {
+	// Every query keeps up to limit rows, all appended to the same buffers.
+	rowCap := reduce.PresizeRows(subSearchResultData, nq*limit)
+	if err := setupIdListForSearchResult(ret, pkType, rowCap); err != nil {
 		return ret, err
 	}
 
@@ -667,7 +669,6 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 		}
 	} else {
 		// Find the first non-empty FieldsData as template.
-		rowCap := reduce.PresizeRows(subSearchResultData, nq*limit)
 		for _, result := range subSearchResultData {
 			if len(result.GetFieldsData()) > 0 {
 				ret.GetResults().FieldsData = typeutil.PrepareResultFieldData(result.GetFieldsData(), rowCap)
@@ -735,7 +736,7 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 				if subSearchResultData[subSearchIdx].ElementIndices != nil {
 					if ret.Results.ElementIndices == nil {
 						ret.Results.ElementIndices = &schemapb.LongArray{
-							Data: make([]int64, 0, min(limit, rowCap)),
+							Data: make([]int64, 0, rowCap),
 						}
 					}
 					elemIdx := subSearchResultData[subSearchIdx].ElementIndices.GetData()[resultDataIdx]
