@@ -23,6 +23,7 @@ package packed
 import "C"
 
 import (
+	"context"
 	"net/url"
 	"strings"
 	"unsafe"
@@ -63,7 +64,9 @@ func WriteFile(
 			dir := filePath[:idx]
 			cDir := C.CString(dir)
 			defer C.free(unsafe.Pointer(cDir))
+			acquireManifestFFI(context.Background())
 			result = C.loon_filesystem_create_dir(fsHandle, cDir, C.uint32_t(len(dir)), true)
+			releaseManifestFFI()
 			if err := HandleLoonFFIResult(result); err != nil {
 				return merr.WrapErrStorage(err, "failed to create parent directory %q", dir)
 			}
@@ -76,6 +79,8 @@ func WriteFile(
 		dataPtr = (*C.uint8_t)(unsafe.Pointer(&data[0]))
 	}
 
+	acquireManifestFFI(context.Background())
+	defer releaseManifestFFI()
 	result = C.loon_filesystem_write_file(
 		fsHandle,
 		cPath, pathLen,
@@ -148,6 +153,8 @@ func readFileWithExternalSpec(
 
 	var outData *C.uint8_t
 	var outSize C.uint64_t
+	acquireManifestFFI(context.Background())
+	defer releaseManifestFFI()
 	result = C.loon_filesystem_read_file_all(fsHandle, cPath, pathLen, &outData, &outSize)
 	if err := HandleLoonFFIResult(result); err != nil {
 		return nil, merr.Wrapf(err, "read file %s via filesystem %s", normalizedFilePath, filesystemPath)

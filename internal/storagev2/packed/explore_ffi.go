@@ -128,7 +128,11 @@ func GetFileInfo(
 
 	var numRows C.uint64_t
 
+	// GetFileInfo stats an external object; blocking storage I/O on this
+	// goroutine's OS thread, bounded process-wide like the other FFI calls.
+	acquireManifestFFI(context.Background())
 	result := C.loon_exttable_get_file_info(cFormat, cFilePath, cProperties, &numRows)
+	releaseManifestFFI()
 	if err := HandleLoonFFIResult(result); err != nil {
 		return nil, merr.WrapErrStorage(err, "loon_exttable_get_file_info failed")
 	}
@@ -420,11 +424,15 @@ func ExploreFilesReturnManifestPath(
 		cColumnsPtr = &cColumns[0]
 	}
 
+	// Explore lists/reads the external source and writes an explore manifest;
+	// blocking storage I/O bounded process-wide like the other FFI calls.
+	acquireManifestFFI(context.Background())
 	result := C.loon_exttable_explore(
 		cColumnsPtr, C.size_t(len(columns)),
 		cFormat, cBaseDir, cExploreDir, cProperties,
 		&numFiles, &outColumnGroupsPath,
 	)
+	releaseManifestFFI()
 	if err := HandleLoonFFIResult(result); err != nil {
 		return nil, "", merr.WrapErrStorage(err, "loon_exttable_explore failed")
 	}
@@ -469,7 +477,9 @@ func ReadFileInfosFromManifestPath(
 	defer C.loon_properties_free(cProperties)
 
 	var manifest *C.LoonManifest
+	acquireManifestFFI(context.Background())
 	result := C.loon_exttable_read_manifest(cManifestPath, cProperties, &manifest)
+	releaseManifestFFI()
 	if err := HandleLoonFFIResult(result); err != nil {
 		return nil, merr.WrapErrStorage(err, "loon_exttable_read_manifest failed")
 	}
