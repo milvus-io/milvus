@@ -377,6 +377,9 @@ func TestSyncDistributionFetchFailureChangesNothing(t *testing.T) {
 	active := newSyncTestSegment(t, 1, map[int64]*storage.BM25Stats{102: randomSyncTestStats(r, 4)})
 	active.load(t, o, 102) // preloaded, active
 	o.targetVersion.Store(1)
+	growing := randomSyncTestStats(r, 2)
+	o.RegisterGrowing(3, bm25Stats{102: growing})
+	o.LazyRemoveGrowings(2, 3)
 	broken := newSyncTestSegment(t, 2, map[int64]*storage.BM25Stats{102: randomSyncTestStats(r, 3)})
 	broken.load(t, o, 102)
 	require.NoError(t, os.RemoveAll(path.Join(o.dirPath, "2", "102")))
@@ -388,7 +391,9 @@ func TestSyncDistributionFetchFailureChangesNothing(t *testing.T) {
 	brokenStats, ok := o.sealed.Get(2)
 	require.True(t, ok)
 	assert.False(t, brokenStats.activate.Load())
-	assertCurrentField(t, o, 102, active.stats[102])
+	assertCurrentField(t, o, 102, sumStats(active.stats[102], growing))
+	assert.Contains(t, o.growing, int64(3))
+	assert.True(t, o.growingDropVersions.Contain(3))
 }
 
 // After the first target, BuildIDF reads current without the shard locks while UpdateGrowing writes it
@@ -401,7 +406,7 @@ func TestBuildIDFConcurrentWithGrowingUpdates(t *testing.T) {
 
 	updates := make([]bm25Stats, 64)
 	expected := storage.NewBM25Stats()
-	expected.Merge(o.growing[1].bm25Stats[102])
+	expected.Merge(o.growing[1][102])
 	for i := range updates {
 		updates[i] = bm25Stats{102: randomSyncTestStats(r, 3)}
 		expected.Merge(updates[i][102])
@@ -557,6 +562,99 @@ func syncHandoffTarget(d *distribution, version int64, sealed ...int64) {
 	}, []int64{1})
 }
 
+func TestSyncTargetVersionWhileIDFLocked(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		segmentIDs []int64
+	}{
+		{name: "empty"},
+		{name: "drop growing", segmentIDs: []int64{1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o := newSyncTestOracle(t, 102)
+			o.targetVersion.Store(1)
+			d := newHandoffDistribution(o)
+			for _, id := range tc.segmentIDs {
+				o.RegisterGrowing(id, genBM25StatsForField(102, 1, 3))
+				d.AddGrowing(SegmentEntry{NodeID: 1, SegmentID: id, PartitionID: 1})
+			}
+
+			o.Lock()
+			defer o.Unlock()
+			completed := make(chan error, 1)
+			go func() {
+				d.SyncTargetVersion(&querypb.SyncAction{
+					TargetVersion:   2,
+					DroppedInTarget: tc.segmentIDs,
+				}, []int64{1})
+				_, _, _, version, err := d.PinReadableSegments(1)
+				if err == nil {
+					d.Unpin(version)
+				}
+				completed <- err
+			}()
+
+			select {
+			case err := <-completed:
+				require.NoError(t, err)
+			case <-time.After(5 * time.Second):
+				t.Fatal("target publication and segment pinning waited for the IDF lock")
+			}
+			for _, id := range tc.segmentIDs {
+				version, ok := o.growingDropVersions.Get(id)
+				require.True(t, ok)
+				assert.Equal(t, int64(2), version)
+			}
+		})
+	}
+}
+
+func TestSyncDistributionGrowingDropVersions(t *testing.T) {
+	r := rand.New(rand.NewSource(15))
+	o := newSyncTestOracle(t, 102)
+	o.targetVersion.Store(1)
+	o.RegisterGrowing(1, bm25Stats{102: randomSyncTestStats(r, 4)})
+	kept := randomSyncTestStats(r, 5)
+	o.RegisterGrowing(2, bm25Stats{102: kept})
+
+	o.LazyRemoveGrowings(0, 1)
+	assert.Zero(t, o.growingDropVersions.Len())
+	o.LazyRemoveGrowings(2, 1, 999)
+	o.LazyRemoveGrowings(3, 1, 2)
+	version, ok := o.growingDropVersions.Get(1)
+	require.True(t, ok)
+	assert.Equal(t, int64(2), version)
+
+	o.UpdateGrowing(1, bm25Stats{102: randomSyncTestStats(r, 2)})
+	delta := randomSyncTestStats(r, 3)
+	o.UpdateGrowing(2, bm25Stats{102: delta})
+	o.next.SetSnapshot(syncTestSnapshot(2))
+	require.NoError(t, o.SyncDistribution())
+	assertCurrentField(t, o, 102, sumStats(kept, delta))
+	assert.NotContains(t, o.growing, int64(1))
+	assert.False(t, o.growingDropVersions.Contain(1))
+	assert.False(t, o.growingDropVersions.Contain(999))
+	version, ok = o.growingDropVersions.Get(2)
+	require.True(t, ok)
+	assert.Equal(t, int64(3), version)
+
+	o.LazyRemoveGrowings(2, 1, 999)
+	assert.False(t, o.growingDropVersions.Contain(1))
+	assert.False(t, o.growingDropVersions.Contain(999))
+	require.NoError(t, o.SyncDistribution())
+	assertCurrentField(t, o, 102, sumStats(kept, delta))
+	assert.False(t, o.growingDropVersions.Contain(1))
+	assert.False(t, o.growingDropVersions.Contain(999))
+	assert.True(t, o.growingDropVersions.Contain(2))
+
+	o.UpdateGrowing(1, bm25Stats{102: randomSyncTestStats(r, 2)})
+	o.next.SetSnapshot(syncTestSnapshot(3))
+	require.NoError(t, o.SyncDistribution())
+	assertCurrentField(t, o, 102, storage.NewBM25Stats())
+	assert.Empty(t, o.growing)
+	assert.Zero(t, o.growingDropVersions.Len())
+}
+
 // Through the real caller, a growing segment handed off to its sealed copy in the first target must count once.
 func TestGrowingHandoffFirstTargetCountsOnce(t *testing.T) {
 	r := rand.New(rand.NewSource(13))
@@ -596,4 +694,75 @@ func TestGrowingHandoffLaterTargetCountsOnce(t *testing.T) {
 	syncHandoffTarget(d, 2, 1, 2)
 	require.Eventually(t, func() bool { return o.TargetVersion() == 2 }, 10*time.Second, 10*time.Millisecond)
 	assertCurrentField(t, o, 102, sumStats(base.stats[102], sealedStats))
+}
+
+func TestGrowingHandoffLargeStats(t *testing.T) {
+	o := newSyncTestOracle(t, 102)
+	d := newHandoffDistribution(o)
+	syncHandoffTarget(d, 1)
+
+	row := make(map[uint32]float32, 1<<17)
+	for token := uint32(0); token < 1<<17; token++ {
+		row[token] = 1
+	}
+	stats := storage.NewBM25Stats()
+	stats.Append(row)
+	o.RegisterGrowing(1, bm25Stats{102: stats})
+	o.UpdateGrowing(1, bm25Stats{102: stats})
+	d.AddGrowing(SegmentEntry{NodeID: 1, SegmentID: 1, PartitionID: 1})
+	sealedStats := sumStats(stats, stats)
+	seg := newSyncTestSegment(t, 1, map[int64]*storage.BM25Stats{102: sealedStats})
+	seg.load(t, o, 102)
+	d.AddDistributions(SegmentEntry{NodeID: 1, SegmentID: 1, PartitionID: 1})
+
+	syncHandoffTarget(d, 2, 1)
+	require.Eventually(t, func() bool { return o.TargetVersion() == 2 }, 10*time.Second, time.Millisecond)
+	assertCurrentField(t, o, 102, sealedStats)
+	tf := typeutil.CreateAndSortSparseFloatRow(row)
+	idf, _, err := o.BuildIDF(102, &schemapb.SparseFloatArray{Contents: [][]byte{tf}, Dim: 1 << 17})
+	require.NoError(t, err)
+	assert.Equal(t, sealedStats.BuildIDF(tf), idf[0])
+}
+
+func TestSyncDistributionStaleTargetWhileIDFLocked(t *testing.T) {
+	o := newSyncTestOracle(t, 102)
+	o.targetVersion.Store(2)
+	o.next.SetSnapshot(syncTestSnapshot(2))
+	o.LazyRemoveGrowings(3, 1)
+
+	o.Lock()
+	done := make(chan struct{})
+	defer func() {
+		o.Unlock()
+		<-done
+	}()
+	var syncErr error
+	go func() {
+		defer close(done)
+		syncErr = o.SyncDistribution()
+	}()
+	select {
+	case <-done:
+		require.NoError(t, syncErr)
+	case <-time.After(5 * time.Second):
+		t.Fatal("an already synchronized target waited for the IDF lock")
+	}
+	version, ok := o.growingDropVersions.Get(1)
+	require.True(t, ok)
+	assert.Equal(t, int64(3), version)
+}
+
+func TestSyncTargetVersionFirstTargetDropsGrowing(t *testing.T) {
+	o := newSyncTestOracle(t, 102)
+	d := newHandoffDistribution(o)
+	o.RegisterGrowing(1, bm25Stats{102: randomSyncTestStats(rand.New(rand.NewSource(16)), 4)})
+	d.AddGrowing(SegmentEntry{NodeID: 1, SegmentID: 1, PartitionID: 1})
+	d.SyncTargetVersion(&querypb.SyncAction{
+		TargetVersion:   1,
+		DroppedInTarget: []int64{1},
+	}, []int64{1})
+	require.Equal(t, int64(1), o.TargetVersion())
+	assertCurrentField(t, o, 102, storage.NewBM25Stats())
+	assert.Empty(t, o.growing)
+	assert.Zero(t, o.growingDropVersions.Len())
 }

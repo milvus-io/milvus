@@ -403,7 +403,6 @@ func (o *openerAdaptorImpl) handleAlterWALFlushingStage(ctx context.Context, opt
 	// The control state advances atomically with the checkpoint, so the
 	// published checkpoint is the source of truth for the flushing stage.
 	snapshot.Checkpoint = checkpoint.Clone()
-	snapshot.Checkpoint.Magic = utility.RecoveryMagicRecoveryStorageV2
 	if snapshot.Checkpoint.AlterWalState.GetStage() != streamingpb.AlterWALStage_FLUSHING {
 		return merr.WrapErrDataIntegrityMsg(
 			"published pchannel recovery control is not in flushing stage for channel %s",

@@ -446,6 +446,11 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			log.Warn(ctx, "search/query channel failed, node not available",
 				mlog.Int64("nodeID", targetNode.NodeID),
 				mlog.Err(err))
+			// Caller cancellation must not blacklist the node. Deadline expiry
+			// can indicate a stalled delegator and keeps the existing policy.
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return false, err
+			}
 			lb.blacklist.Add(workload.Channel, targetNode.NodeID)
 
 			lastErr = errors.Wrapf(err, "failed to get delegator %d for channel %s", targetNode.NodeID, workload.Channel)
@@ -457,6 +462,12 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			log.Warn(ctx, "search/query channel failed",
 				mlog.Int64("nodeID", targetNode.NodeID),
 				mlog.Err(err))
+			// Check the caller context: a gRPC cancellation error does not
+			// unwrap to context.Canceled. Internal cancellation and deadline
+			// expiry keep the existing blacklist policy.
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return false, err
+			}
 			// An input error is the request's own fault: re-dispatching it to
 			// other replicas cannot make it succeed, and blacklisting the
 			// (healthy) serving node would penalize it for a bad request. Abort

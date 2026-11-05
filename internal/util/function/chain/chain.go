@@ -133,9 +133,28 @@ func (fc *FuncChain) Validate() error {
 // validateOperators is an internal helper that validates all operators in a single pass.
 // It checks that operators are not nil, have valid functions, and support the given stage.
 func (fc *FuncChain) validateOperators(stage string) error {
+	if stage == types.StageQueryScan {
+		if len(fc.operators) != 1 {
+			return merr.WrapErrParameterInvalidMsg("QueryScan requires exactly one grep operator")
+		}
+	}
 	for i, op := range fc.operators {
 		if op == nil {
 			return merr.WrapErrServiceInternalMsg("operator[%d] is nil", i)
+		}
+
+		if stage == types.StageQueryScan {
+			if _, ok := op.(*GrepOp); !ok {
+				return merr.WrapErrParameterInvalidMsg("QueryScan requires an independent grep operator")
+			}
+		}
+		if grepOp, ok := op.(*GrepOp); ok {
+			if grepOp == nil {
+				return merr.WrapErrServiceInternalMsg("operator[%d] GrepOp is nil", i)
+			}
+			if !grepOp.IsRunnable(stage) {
+				return merr.WrapErrParameterInvalidMsg("grep supports only QueryScan")
+			}
 		}
 
 		// Validate MapOp

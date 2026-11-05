@@ -153,12 +153,15 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionProperties)
 	}
 
-	// If TTL field is changed through properties, also broadcast an updated schema snapshot and mark it as schema change,
-	// so QueryNode can refresh runtime schema properties without requiring release/load.
+	// TTL field and duration change query visibility. Publish a new schema
+	// snapshot for both WAL admission/history and the legacy QueryNode pipeline.
 	ttlOld, okOld := oldProperties[common.CollectionTTLFieldKey]
 	ttlNew, okNew := newProperties[common.CollectionTTLFieldKey]
 	needTTLFieldSchemaRefresh := (okOld != okNew) || (okOld && okNew && ttlOld != ttlNew)
-	if needTTLFieldSchemaRefresh {
+	ttlDurationOld, durationOldExists := oldProperties[common.CollectionTTLConfigKey]
+	ttlDurationNew, durationNewExists := newProperties[common.CollectionTTLConfigKey]
+	needTTLDurationSchemaRefresh := durationOldExists != durationNewExists || ttlDurationOld != ttlDurationNew
+	if needTTLFieldSchemaRefresh || needTTLDurationSchemaRefresh {
 		// validate ttl field name exists in schema fields when setting it
 		if okNew {
 			found := false
@@ -178,8 +181,9 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 			header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionSchema)
 		}
 
-		// Build schema snapshot with updated properties (schema version should NOT be changed for properties-only alter).
+		// TTL semantics belong to the immutable versioned schema body.
 		schema := coll.ToCollectionSchemaPB()
+		schema.Version = coll.SchemaVersion + 1
 		schema.Properties = newPropsKeyValuePairs
 		// Preserve ExternalSource/ExternalSpec from current collection state
 		// unless this alter is itself updating them (refresh-completion sync).
@@ -205,7 +209,7 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 		WithBody(&messagespb.AlterCollectionMessageBody{
 			Updates: udpates,
 		}).
-		WithBroadcast(coll.VirtualChannelNames).
+		WithBroadcast(coll.VirtualChannelNames, message.OptBuildBroadcastAckSyncUp()).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		return err
@@ -330,7 +334,7 @@ func (c *Core) broadcastAlterCollectionForAlterDynamicField(ctx context.Context,
 				Properties: properties,
 			},
 		}).
-		WithBroadcast(coll.VirtualChannelNames).
+		WithBroadcast(coll.VirtualChannelNames, message.OptBuildBroadcastAckSyncUp()).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		return err
@@ -389,7 +393,7 @@ func (c *Core) broadcastDisableDynamicField(ctx context.Context, req *milvuspb.A
 				Properties: properties,
 			},
 		}).
-		WithBroadcast(coll.VirtualChannelNames).
+		WithBroadcast(coll.VirtualChannelNames, message.OptBuildBroadcastAckSyncUp()).
 		MustBuildBroadcast()
 	if _, err := bc.Broadcast(ctx, msg); err != nil {
 		return err

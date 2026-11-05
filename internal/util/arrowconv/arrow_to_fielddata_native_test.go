@@ -101,7 +101,7 @@ func TestArrowFieldsToProtoRejectsNonemptyNullVectorArray(t *testing.T) {
 	defer col.Release()
 	start, end := col.ValueOffsets(1)
 	require.Greater(t, end, start)
-	_, err = arrowListToVectorArray(col, field, col.Len())
+	_, err = arrowColumnToFieldData(col, field)
 	require.ErrorContains(t, err, "null ArrayOfVector row")
 }
 
@@ -145,9 +145,9 @@ func TestArrowListToVectorArrayReservesValidElementsOnly(t *testing.T) {
 			}
 			col := b.NewArray()
 			defer col.Release()
-			result, err := arrowListToVectorArray(col, field, col.Len())
+			result, err := arrowColumnToFieldData(col, field)
 			require.NoError(t, err)
-			rows := result.Vectors.GetVectorArray().GetData()
+			rows := result.GetVectors().GetVectorArray().GetData()
 			require.Len(t, rows, 2)
 			payloadCap := func(row *schemapb.VectorField) int {
 				switch data := row.GetData().(type) {

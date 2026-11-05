@@ -5,11 +5,51 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
+
+func TestWritePathRecoveryStateSharesSchemaAcrossHistoryChanges(t *testing.T) {
+	view := NewVChannelViewFromMeta(restoreSchemaTestMeta())
+	_, initial := view.GetSchema(0)
+	expected := proto.Clone(initial).(*schemapb.CollectionSchema)
+	state, ok := view.WritePathRecoveryState()
+	require.True(t, ok)
+	require.Same(t, initial, state.Schema)
+
+	updated := proto.Clone(initial).(*schemapb.CollectionSchema)
+	updated.Version++
+	updated.Description = "updated"
+	msg := message.NewAlterCollectionMessageBuilderV2().WithVChannel("v1").
+		WithHeader(&message.AlterCollectionMessageHeader{CollectionId: 1, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionSchema}}}).
+		WithBody(&message.AlterCollectionMessageBody{Updates: &message.AlterCollectionMessageUpdates{Schema: updated}}).
+		MustBuildMutable().WithTimeTick(40).WithLastConfirmedUseMessageID().IntoImmutableMessage(walimplstest.NewTestMessageID(40))
+	require.True(t, view.ObserveAlterCollectionMessageV2(message.MustAsImmutableAlterCollectionMessageV2(msg)))
+	current, ok := view.WritePathRecoveryState()
+	require.True(t, ok)
+	_, latest := view.GetSchema(0)
+	require.Same(t, latest, current.Schema)
+	require.NotSame(t, state.Schema, current.Schema)
+	require.True(t, proto.Equal(expected, state.Schema))
+
+	view.SchemaCleanupPlan(40, nil)
+	snapshot, _ := view.ConsumeDirtyAndGetSnapshot()
+	require.NotNil(t, snapshot)
+	view.MarkSnapshotPersisted(snapshot)
+	deletion, _ := view.SchemaCleanupPlan(40, nil)
+	require.NotNil(t, deletion)
+	view.MarkSchemaCleanupPersisted(deletion)
+	require.Len(t, view.AssignmentMeta().GetCollectionInfo().GetSchemas(), 1)
+	require.True(t, proto.Equal(expected, state.Schema), "retiring history must preserve retained schema contents")
+	_, latest = view.GetSchema(0)
+	require.Same(t, latest, current.Schema)
+}
 
 func TestExactSchemaVersionAfterRecovery(t *testing.T) {
 	meta := restoreSchemaTestMeta()
@@ -89,4 +129,61 @@ func TestLegacyRepeatedSchemaVersionHasOneReadIdentity(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, second.Schema.Description, read.Schema.Description)
 	require.True(t, proto.Equal(second.Schema, read.Schema), "exact lookup must return the canonical schema payload")
+}
+
+func TestAlterCollectionMetadataSnapshotRecovery(t *testing.T) {
+	meta := restoreSchemaTestMeta()
+	meta.CollectionInfo.Schemas[1].Schema.Name = "old"
+	before := proto.Clone(meta)
+	view := NewVChannelViewFromMeta(meta)
+	raw := message.NewAlterCollectionMessageBuilderV2().WithVChannel("v1").
+		WithHeader(&message.AlterCollectionMessageHeader{CollectionId: 1, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionName}}}).
+		WithBody(&message.AlterCollectionMessageBody{Updates: &message.AlterCollectionMessageUpdates{CollectionName: "renamed"}}).MustBuildMutable()
+	msg := message.MustAsImmutableAlterCollectionMessageV2(raw.WithTimeTick(40).WithLastConfirmed(walimplstest.NewTestMessageID(1)).IntoImmutableMessage(walimplstest.NewTestMessageID(2)))
+	require.True(t, view.ObserveAlterCollectionMessageV2(msg))
+	require.False(t, view.ObserveAlterCollectionMessageV2(msg), "duplicate replay is idempotent")
+	snapshot, savesSchemas := view.ConsumeDirtyAndGetSnapshot()
+	require.True(t, savesSchemas)
+	require.Len(t, snapshot.CollectionInfo.Schemas, 3)
+	require.True(t, proto.Equal(before, meta), "metadata ALTER must not mutate the previous snapshot")
+	require.NotSame(t, snapshot.CollectionInfo.Schemas[1].Schema, snapshot.CollectionInfo.Schemas[2].Schema)
+	require.NotSame(t, snapshot.CollectionInfo.Schemas[1].Schema.Fields[0], snapshot.CollectionInfo.Schemas[2].Schema.Fields[0])
+	require.Equal(t, snapshot.CollectionInfo.Schemas[1].Schema.Version, snapshot.CollectionInfo.Schemas[2].Schema.Version)
+	require.EqualValues(t, 20, snapshot.CollectionInfo.Schemas[1].CheckpointTimeTick)
+	require.Equal(t, "old", snapshot.CollectionInfo.Schemas[1].Schema.Name)
+	require.EqualValues(t, 40, snapshot.CollectionInfo.Schemas[2].CheckpointTimeTick)
+	recovered := NewVChannelViewFromMeta(snapshot)
+	latest, err := recovered.GetSchemaVersion(1, 1)
+	require.NoError(t, err)
+	require.Equal(t, "renamed", latest.Schema.Name)
+	_, historical := recovered.GetSchema(25)
+	require.Equal(t, "old", historical.Name)
+	state, ok := recovered.WritePathRecoveryState()
+	require.True(t, ok)
+	require.Equal(t, "renamed", state.Schema.Name)
+	require.EqualValues(t, 1, state.Schema.Version)
+}
+
+func TestExactSchemaVersionPreservesSnapshot(t *testing.T) {
+	meta := restoreSchemaTestMeta()
+	old := meta.CollectionInfo.Schemas[0].Schema
+	old.Name = "before"
+	old.Properties = common.NewKeyValuePairs(map[string]string{
+		common.CollectionTTLConfigKey: "30", common.MaxFieldIDKey: "100", common.TimezoneKey: "UTC",
+	})
+	latest := meta.CollectionInfo.Schemas[1].Schema
+	latest.Name, latest.DbName, latest.Description = "renamed", "newdb", "new description"
+	latest.ExternalSource, latest.ExternalSpec = "s3://new", "{}"
+	latest.Properties = common.NewKeyValuePairs(map[string]string{
+		common.CollectionTTLConfigKey: "60", common.CollectionTTLFieldKey: "expires", common.MaxFieldIDKey: "101",
+		common.TimezoneKey: "Asia/Shanghai", common.CollectionOnTruncatingKey: "true",
+	})
+	before := proto.Clone(meta)
+	view := NewVChannelViewFromMeta(meta)
+	selected, err := view.GetSchemaVersion(1, 0)
+	require.NoError(t, err)
+	require.Zero(t, selected.Schema.Version)
+	require.True(t, proto.Equal(old, selected.Schema), "historical versions retain their own metadata")
+	require.NotSame(t, old, selected.Schema)
+	require.True(t, proto.Equal(before, meta), "lookup must not alter stored allocation-time history")
 }

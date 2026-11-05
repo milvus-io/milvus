@@ -42,7 +42,7 @@ while [ -h "$SOURCE" ]; do
     [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
 done
 ROOT_DIR="$(cd -P "$(dirname "$SOURCE")/.." && pwd)"
-source ${ROOT_DIR}/scripts/setenv.sh
+source ${ROOT_DIR}/scripts/setenv.sh || exit 1
 
 MILVUS_CORE_DIR="${ROOT_DIR}/internal/core"
 MILVUS_CORE_UNITTEST_DIR="${MILVUS_CORE_DIR}/output/unittest"
@@ -61,6 +61,10 @@ echo "MILVUS_CORE_DIR = ${MILVUS_CORE_DIR}"
 echo "MILVUS_CORE_UNITTEST_DIR = ${MILVUS_CORE_UNITTEST_DIR}"
 
 # Parallel execution settings
+if [[ "${MILVUS_ENABLE_TSAN}" == "ON" ]]; then
+    CPP_UT_SHARDS=${CPP_UT_SHARDS:-1}
+    TEST_TIMEOUT=${TEST_TIMEOUT:-1800}
+fi
 CPP_UT_SHARDS=${CPP_UT_SHARDS:-3}
 CPP_UT_PARALLEL=${CPP_UT_PARALLEL:-true}
 

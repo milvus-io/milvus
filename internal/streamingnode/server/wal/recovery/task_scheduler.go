@@ -47,7 +47,7 @@ func newScopedTaskScheduler(inner nodescheduler.Scheduler) *scopedTaskScheduler 
 	}
 }
 
-func (s *scopedTaskScheduler) Submit(task nodescheduler.Task) nodescheduler.TaskHandle {
+func (s *scopedTaskScheduler) Submit(task nodescheduler.Task, opts ...nodescheduler.Option) nodescheduler.TaskHandle {
 	entry := &scopedTaskEntry{done: make(chan struct{})}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -61,7 +61,7 @@ func (s *scopedTaskScheduler) Submit(task nodescheduler.Task) nodescheduler.Task
 	s.tasks[entry.id] = entry
 	// TODO: Add fairness between PChannels in NodeScheduler so a busy WAL
 	// cannot monopolize the shared queue and workers.
-	entry.inner = s.inner.Submit(&trackedTask{owner: s, id: entry.id, task: task})
+	entry.inner = s.inner.Submit(&trackedTask{owner: s, id: entry.id, task: task}, opts...)
 	return scopedTaskHandle{owner: s, entry: entry}
 }
 

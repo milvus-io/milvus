@@ -27,7 +27,10 @@ func TestFlushJoinsIndependentL1AndL0Completion(t *testing.T) {
 			scheduler := nodescheduler.New(1)
 			defer scheduler.Close()
 			var tasks []nodescheduler.Task
-			patch := mockey.Mock(mockey.GetMethod(scheduler, "Submit")).To(func(task nodescheduler.Task) nodescheduler.TaskHandle { tasks = append(tasks, task); return nil }).Build()
+			patch := mockey.Mock(mockey.GetMethod(scheduler, "Submit")).To(func(task nodescheduler.Task, _ ...nodescheduler.Option) nodescheduler.TaskHandle {
+				tasks = append(tasks, task)
+				return nil
+			}).Build()
 			defer patch.UnPatch()
 			lifecycle := segment.NewSegmentLifecycleWriter(nil, 1)
 			commit := mockey.Mock(mockey.GetMethod(lifecycle, "CommitL1Segment")).Return(&viewpb.DataVersion{StreamingVersion: 1}, nil).Build()
@@ -68,7 +71,10 @@ func TestManagerFlushesIdleDeletesWhileL1IsGrowing(t *testing.T) {
 	scheduler := nodescheduler.New(1)
 	defer scheduler.Close()
 	tasks := make(chan nodescheduler.Task, 2)
-	patch := mockey.Mock(mockey.GetMethod(scheduler, "Submit")).To(func(task nodescheduler.Task) nodescheduler.TaskHandle { tasks <- task; return nil }).Build()
+	patch := mockey.Mock(mockey.GetMethod(scheduler, "Submit")).To(func(task nodescheduler.Task, _ ...nodescheduler.Option) nodescheduler.TaskHandle {
+		tasks <- task
+		return nil
+	}).Build()
 	defer patch.UnPatch()
 	writer := mockey.Mock((*l0materializer.SyncMaterializer).Materialize).Return(nil).Build()
 	defer writer.UnPatch()
@@ -97,7 +103,10 @@ func TestL0WaitsForGrowingRegistrationOnly(t *testing.T) {
 	scheduler := nodescheduler.New(1)
 	defer scheduler.Close()
 	var tasks []nodescheduler.Task
-	patch := mockey.Mock(mockey.GetMethod(scheduler, "Submit")).To(func(task nodescheduler.Task) nodescheduler.TaskHandle { tasks = append(tasks, task); return nil }).Build()
+	patch := mockey.Mock(mockey.GetMethod(scheduler, "Submit")).To(func(task nodescheduler.Task, _ ...nodescheduler.Option) nodescheduler.TaskHandle {
+		tasks = append(tasks, task)
+		return nil
+	}).Build()
 	defer patch.UnPatch()
 	lifecycle := segment.NewSegmentLifecycleWriter(nil, 1)
 	ensure := mockey.Mock(mockey.GetMethod(lifecycle, "EnsureGrowingSegment")).Return(nil).Build()

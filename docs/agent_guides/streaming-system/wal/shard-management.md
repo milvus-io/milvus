@@ -4,6 +4,12 @@ The Shard interceptor manages per-PChannel collection/partition/segment in-memor
 
 See [Collection Messages](../message/message-semantic-collection.md) for per-message semantics and the messages handled by this interceptor.
 
+Every schema-relevant AlterCollection mask updates the current schema snapshot,
+including collection/database names, description, properties and external
+source/spec. Only the `schema` mask flushes/fences segment allocation; ordinary
+metadata updates keep SchemaVersion unchanged. RecoveryStorage applies the same
+mask semantics. `collection.on.truncating` remains coordinator/DataCoord state.
+
 ## Seal Policies
 
 Growing segments are sealed when any registered policy triggers. See `internal/streamingnode/server/wal/interceptors/shard/policy/seal_policy.go` for the full list of policies.

@@ -60,6 +60,7 @@
 #include "storage/LoadOverheadController.h"
 #include "storage/LocalFileIOPool.h"
 #include "storage/Util.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::segcore::storagev2translator {
 
@@ -605,19 +606,23 @@ ManifestGroupTranslator::cell_id_of(milvus::cachinglayer::uid_t uid) const {
     return uid;
 }
 
-std::pair<milvus::cachinglayer::ResourceUsage,
-          milvus::cachinglayer::ResourceUsage>
-ManifestGroupTranslator::estimated_byte_size_of_cell(
-    milvus::cachinglayer::cid_t cid) const {
-    assert(cid < meta_.chunk_memory_size_.size());
-    auto cell_sz = meta_.chunk_memory_size_[cid];
-    auto overhead_sz = loading_overhead_bytes(cell_sz);
-
-    if (use_mmap_) {
-        return {{0, cell_sz}, {overhead_sz, cell_sz}};
-    } else {
-        return {{cell_sz, 0}, {overhead_sz, 0}};
+milvus::cachinglayer::LoadingResourceUsage
+ManifestGroupTranslator::estimated_loading_usage(
+    const std::vector<milvus::cachinglayer::cid_t>& cids) const {
+    int64_t cell_bytes = 0;
+    int64_t overhead_bytes = 0;
+    for (const auto cid : cids) {
+        assert(cid < meta_.chunk_memory_size_.size());
+        const auto size = meta_.chunk_memory_size_[cid];
+        cell_bytes += size;
+        overhead_bytes += loading_overhead_bytes(size);
     }
+    const cachinglayer::ResourceUsage overhead{overhead_bytes,
+                                               use_mmap_ ? cell_bytes : 0};
+    return {use_mmap_ ? cachinglayer::ResourceUsage{0, cell_bytes}
+                      : cachinglayer::ResourceUsage{cell_bytes, 0},
+            {},
+            overhead};
 }
 
 const std::string&
@@ -672,6 +677,7 @@ ManifestGroupTranslator::get_cells_legacy(
     milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids,
     std::vector<milvus::segcore::CellSpec> cell_specs) const {
+    const auto priority = ResolveLoadPriority(ctx, load_priority_);
     std::vector<CellResult> cells;
     cells.reserve(cids.size());
 
@@ -684,11 +690,14 @@ ManifestGroupTranslator::get_cells_legacy(
         std::move(cell_specs),
         std::move(factory),
         FieldDataLoadBatchSplitTargetBytes(),
-        load_priority_,
-        [this](const std::vector<std::shared_ptr<arrow::Table>>& tables,
-               const int64_t cid) {
+        priority,
+        [this, priority](
+            const std::vector<std::shared_ptr<arrow::Table>>& tables,
+            const int64_t cid) {
             return load_group_chunk(
-                tables, static_cast<milvus::cachinglayer::cid_t>(cid));
+                tables,
+                static_cast<milvus::cachinglayer::cid_t>(cid),
+                priority);
         });
 
     LOG_DEBUG(
@@ -753,6 +762,7 @@ std::vector<ManifestGroupTranslator::CellResult>
 ManifestGroupTranslator::get_cells_via_async_pipeline(
     milvus::OpContext* ctx,
     std::vector<milvus::segcore::CellSpec> cell_specs) const {
+    const auto priority = ResolveLoadPriority(ctx, load_priority_);
     LOG_INFO(
         "[StorageV3] translator {} uses async load pipeline for {} cells in "
         "manifest column group {} of segment {}",
@@ -762,7 +772,7 @@ ManifestGroupTranslator::get_cells_via_async_pipeline(
         segment_id_);
     AsyncLoadPipelineOptions options{
         .read_window_bytes = static_cast<size_t>(async_read_window_bytes_),
-        .load_priority = load_priority_};
+        .load_priority = priority};
     if (use_mmap_) {
         options.finalization_executor_provider = []() {
             return storage::LocalFileIOPool::GetInstance().GetExecutor();
@@ -773,10 +783,13 @@ ManifestGroupTranslator::get_cells_via_async_pipeline(
         segment_id_,
         std::move(cell_specs),
         chunk_reader_,
-        [this](const std::vector<std::shared_ptr<arrow::Table>>& tables,
-               const int64_t cid) {
+        [this, priority](
+            const std::vector<std::shared_ptr<arrow::Table>>& tables,
+            const int64_t cid) {
             return load_group_chunk(
-                tables, static_cast<milvus::cachinglayer::cid_t>(cid));
+                tables,
+                static_cast<milvus::cachinglayer::cid_t>(cid),
+                priority);
         },
         std::move(options)));
 }
@@ -784,7 +797,8 @@ ManifestGroupTranslator::get_cells_via_async_pipeline(
 std::unique_ptr<milvus::GroupChunk>
 ManifestGroupTranslator::load_group_chunk(
     const std::vector<std::shared_ptr<arrow::Table>>& tables,
-    const milvus::cachinglayer::cid_t cid) const {
+    const milvus::cachinglayer::cid_t cid,
+    milvus::proto::common::LoadPriority priority) const {
     assert(!tables.empty());
     // Use the first table's schema as reference for field iteration
     const auto& schema = tables[0]->schema();
@@ -891,7 +905,7 @@ ManifestGroupTranslator::load_group_chunk(
                                     array_vecs,
                                     mmap_populate_,
                                     filepath.string(),
-                                    load_priority_,
+                                    priority,
                                     writeback_mode_);
     }
 

@@ -72,6 +72,7 @@ func nullableUpsertVector(dataType schemapb.DataType, values []int64, valid []bo
 }
 
 func TestUpsertPreExecuteNullableVectorValidity(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	for _, dataType := range []schemapb.DataType{
 		schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector,
 		schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector,

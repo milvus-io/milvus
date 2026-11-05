@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestScopedTaskSchedulerWaitIdle(t *testing.T) {
@@ -140,9 +141,15 @@ func TestScopedTaskSchedulerDelegatesDelayedRetry(t *testing.T) {
 		if len(attempts) == 1 {
 			close(started)
 			<-release
+		}
+		if len(attempts) <= 2 {
 			return nodescheduler.ErrDelay
 		}
 		return nil
+	}), nodescheduler.WithBackoff(typeutil.BackoffConfig{
+		InitialInterval: 150 * time.Millisecond,
+		Multiplier:      2,
+		MaxInterval:     600 * time.Millisecond,
 	}))
 	<-started
 	second := scheduler.Submit(nodeschedulerTaskFunc(func(context.Context) error {
@@ -150,13 +157,14 @@ func TestScopedTaskSchedulerDelegatesDelayedRetry(t *testing.T) {
 		return nil
 	}))
 	close(release)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	require.NoError(t, first.Wait(ctx))
 	require.NoError(t, second.Wait(ctx))
-	require.Len(t, attempts, 2)
-	require.GreaterOrEqual(t, attempts[1].Sub(attempts[0]), 100*time.Millisecond)
-	require.Equal(t, []string{"retry", "other", "retry"}, order)
+	require.Len(t, attempts, 3)
+	require.GreaterOrEqual(t, attempts[1].Sub(attempts[0]), 150*time.Millisecond)
+	require.GreaterOrEqual(t, attempts[2].Sub(attempts[1]), 300*time.Millisecond)
+	require.Equal(t, []string{"retry", "other", "retry", "retry"}, order)
 	require.NoError(t, scheduler.WaitIdle(ctx))
 }
 

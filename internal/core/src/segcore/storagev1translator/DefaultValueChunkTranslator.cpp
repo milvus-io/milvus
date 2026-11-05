@@ -215,30 +215,31 @@ DefaultValueChunkTranslator::value_size() const {
     return value_size;
 }
 
-std::pair<milvus::cachinglayer::ResourceUsage,
-          milvus::cachinglayer::ResourceUsage>
-DefaultValueChunkTranslator::estimated_byte_size_of_cell(
-    milvus::cachinglayer::cid_t cid) const {
-    // TODO: actually only the first cell is used, other cells share the same buffer,
-    // but for now we estimate the same size for all cells
-    auto value_size = this->value_size();
-    auto rows_begin = meta_.num_rows_until_chunk_[cid];
-    auto rows_end = meta_.num_rows_until_chunk_[cid + 1];
-    auto rows = rows_end - rows_begin;
-    auto cell_bytes = value_size * rows;
-    if (struct_offsets_) {
-        std::vector<int32_t> starts(rows + 1);
-        struct_offsets_->CopyRowElementStarts(rows_begin, rows, starts.data());
-        auto elements = starts.back() - starts.front();
-        cell_bytes = (rows + elements + 1) * sizeof(int64_t) +
-                     (rows + elements + 7) / 8 +
-                     elements * std::max<int64_t>(1, value_size);
+milvus::cachinglayer::LoadingResourceUsage
+DefaultValueChunkTranslator::estimated_loading_usage(
+    const std::vector<milvus::cachinglayer::cid_t>& cids) const {
+    // TODO: cells share a buffer, but retain the per-cell resident allowance.
+    const auto value_size = this->value_size();
+    int64_t cell_bytes = 0;
+    for (const auto cid : cids) {
+        const auto rows_begin = meta_.num_rows_until_chunk_[cid];
+        const auto rows = meta_.num_rows_until_chunk_[cid + 1] - rows_begin;
+        if (struct_offsets_) {
+            std::vector<int32_t> starts(rows + 1);
+            struct_offsets_->CopyRowElementStarts(
+                rows_begin, rows, starts.data());
+            const auto elements = starts.back() - starts.front();
+            cell_bytes += (rows + elements + 1) * sizeof(int64_t) +
+                          (rows + elements + 7) / 8 +
+                          elements * std::max<int64_t>(1, value_size);
+        } else {
+            cell_bytes += value_size * rows;
+        }
     }
-    if (use_mmap_) {
-        return {{0, cell_bytes}, {0, 0}};
-    } else {
-        return {{cell_bytes, 0}, {0, 0}};
-    }
+    return {use_mmap_ ? cachinglayer::ResourceUsage{0, cell_bytes}
+                      : cachinglayer::ResourceUsage{cell_bytes, 0},
+            {},
+            {}};
 }
 
 const std::string&
