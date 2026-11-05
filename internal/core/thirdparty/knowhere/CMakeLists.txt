@@ -14,7 +14,7 @@
 # Update KNOWHERE_VERSION for the first occurrence
 milvus_add_pkg_config("knowhere")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-set( KNOWHERE_VERSION 47ee81806a58402ac4a402188f3a930a53f1528e )
+set( KNOWHERE_VERSION e3d82c3fcdae960246b0bb7f6349ed67d2c89243 )
 set( GIT_REPOSITORY  "https://github.com/marcelo-cjl/knowhere.git")
 
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")
@@ -63,6 +63,15 @@ if ( NOT knowhere_POPULATED )
     # knowhere
     add_subdirectory( ${knowhere_SOURCE_DIR}
                       ${knowhere_BINARY_DIR} )
+endif()
+
+# Package CUDA runtime libraries with the GPU build for downstream images.
+if ( WITH_GPU )
+    find_package(CUDAToolkit 13.2 EXACT REQUIRED)
+    configure_file(install_cuda_runtime.cmake.in install_cuda_runtime.cmake.in @ONLY)
+    file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/install_cuda_runtime-$<CONFIG>.cmake"
+            INPUT "${CMAKE_CURRENT_BINARY_DIR}/install_cuda_runtime.cmake.in")
+    install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/install_cuda_runtime-$<CONFIG>.cmake")
 endif()
 
 # Install the SVS runtime shared library alongside libknowhere.so so that

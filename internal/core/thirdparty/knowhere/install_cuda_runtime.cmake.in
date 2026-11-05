@@ -1,0 +1,68 @@
+#-------------------------------------------------------------------------------
+# Copyright (C) 2019-2020 Zilliz. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+# with the License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software distributed under the License
+# is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+# or implied. See the License for the specific language governing permissions and limitations under the License.
+#-------------------------------------------------------------------------------
+
+# Inspect the built library at install time, after all GPU dependencies are linked.
+set(CMAKE_GET_RUNTIME_DEPENDENCIES_PLATFORM "linux+elf")
+set(CMAKE_GET_RUNTIME_DEPENDENCIES_TOOL "objdump")
+set(CMAKE_GET_RUNTIME_DEPENDENCIES_COMMAND "@CMAKE_OBJDUMP@")
+get_filename_component(cuda_library_dir "@CUDAToolkit_LIBRARY_DIR@" REALPATH)
+file(GET_RUNTIME_DEPENDENCIES
+        LIBRARIES "$<TARGET_FILE:knowhere>"
+        DIRECTORIES "${cuda_library_dir}"
+        PRE_EXCLUDE_REGEXES "^libcuda\\.so" "^libnvidia-"
+        RESOLVED_DEPENDENCIES_VAR dependencies)
+
+# NVRTC loads its builtins dynamically, so they do not appear in DT_NEEDED.
+foreach(dependency IN LISTS dependencies)
+    get_filename_component(name "${dependency}" NAME)
+    if(name MATCHES "^libnvrtc\\.so")
+        file(GLOB nvrtc_builtins "${cuda_library_dir}/libnvrtc-builtins.so*")
+        if(NOT nvrtc_builtins)
+            message(FATAL_ERROR "NVRTC runtime is missing its builtins in ${cuda_library_dir}")
+        endif()
+        file(GET_RUNTIME_DEPENDENCIES
+                LIBRARIES ${nvrtc_builtins}
+                DIRECTORIES "${cuda_library_dir}"
+                PRE_EXCLUDE_REGEXES "^libcuda\\.so" "^libnvidia-"
+                RESOLVED_DEPENDENCIES_VAR builtin_dependencies)
+        list(APPEND dependencies ${nvrtc_builtins} ${builtin_dependencies})
+        break()
+    endif()
+endforeach()
+
+set(cuda_dependencies)
+foreach(dependency IN LISTS dependencies)
+    get_filename_component(real_path "${dependency}" REALPATH)
+    get_filename_component(directory "${real_path}" DIRECTORY)
+    if(directory STREQUAL cuda_library_dir)
+        list(APPEND cuda_dependencies "${real_path}")
+    else()
+        get_filename_component(name "${dependency}" NAME)
+        if(name MATCHES "^lib(cudart|cublas(Lt)?|cusolver|cusparse|curand|cufft|nvrtc(-builtins)?|nvJitLink)\\.so")
+            message(FATAL_ERROR "CUDA runtime ${dependency} is outside ${cuda_library_dir}")
+        endif()
+    endif()
+endforeach()
+
+# Start from each matching alias to preserve both linker and SONAME symlinks.
+# Only the toolkit's library directory is searched, excluding drivers and stubs.
+file(GLOB cuda_libraries "${cuda_library_dir}/*.so*")
+foreach(library IN LISTS cuda_libraries)
+    get_filename_component(real_path "${library}" REALPATH)
+    list(FIND cuda_dependencies "${real_path}" dependency_index)
+    if(NOT dependency_index EQUAL -1)
+        file(INSTALL "${library}"
+                DESTINATION "${CMAKE_INSTALL_PREFIX}/@CMAKE_INSTALL_LIBDIR@"
+                TYPE SHARED_LIBRARY FOLLOW_SYMLINK_CHAIN)
+    endif()
+endforeach()

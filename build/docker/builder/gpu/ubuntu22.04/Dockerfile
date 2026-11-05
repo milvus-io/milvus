@@ -1,6 +1,6 @@
 FROM ghcr.io/astral-sh/uv:0.11.23 AS uv
 
-FROM nvidia/cuda:12.9.1-devel-ubuntu22.04 as builder
+FROM nvidia/cuda:13.2.0-devel-ubuntu22.04 as builder
 
 ARG TARGETARCH
 
