@@ -173,8 +173,10 @@ func (v *visitor) mergeAndParts(parts []*planpb.Expr) *planpb.Expr {
 	parts = v.combineAndInWithRange(parts)
 	parts = v.combineAndInWithEqual(parts)
 	parts = v.combineAndNotEqualsToNotIn(parts)
-	// As for OR: an AlwaysFalse operand decides the AND, and an AlwaysTrue one
-	// must not block a factor that the other clauses share.
+	// As for OR: an AlwaysFalse operand decides the AND. An AlwaysTrue one is
+	// dropped as well; it cannot block a factor here, since only the clauses
+	// that contain the factor are grouped, but it would still count against
+	// the branch budget.
 	operands, alwaysFalse := dropLogicalConstants(parts, planpb.BinaryExpr_LogicalAnd)
 	if alwaysFalse {
 		return newAlwaysFalseExpr()

@@ -204,6 +204,18 @@ func TestRewrite_CommonFactorAnd_Cases(t *testing.T) {
 			atom:      `plain == 1`,
 			atomCount: 1,
 		},
+		{
+			// The parser already folds a literal `true and X` to X, so the
+			// constant comes from a clause that the IN / != merge turns into
+			// AlwaysTrue on a non-nullable field. Only the clauses that contain
+			// the factor are grouped, so the constant clause stays out of the
+			// group and is folded away.
+			name:      "always true clause does not block a factor",
+			expr:      `(plain in [1, 2] or plain != 1) and (tenant == 7 or price > 100) and (tenant == 7 or rating > 4)`,
+			want:      `tenant == 7 or (price > 100 and rating > 4)`,
+			atom:      `tenant == 7`,
+			atomCount: 1,
+		},
 	}
 
 	for _, c := range cases {

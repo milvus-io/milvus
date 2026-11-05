@@ -584,6 +584,17 @@ func TestRewrite_CommonFactor_Cases(t *testing.T) {
 			atom:      `plain == 1`,
 			atomCount: 1,
 		},
+		{
+			// The parser already folds a literal `false or X` to X, so the
+			// constant comes from a contradictory branch that the same-column
+			// merge turns into AlwaysFalse. It shares no factor and must be
+			// dropped before factoring, not block it.
+			name:      "always false branch does not block a factor",
+			expr:      `(plain > 200 and plain < 100) or (tenant == 7 and price > 100) or (tenant == 7 and rating > 4)`,
+			want:      `tenant == 7 and (price > 100 or rating > 4)`,
+			atom:      `tenant == 7`,
+			atomCount: 1,
+		},
 	}
 
 	for _, c := range cases {
