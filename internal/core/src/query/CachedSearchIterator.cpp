@@ -240,7 +240,8 @@ CachedSearchIterator::CachedSearchIterator(
     const SearchInfo& search_info,
     const std::map<std::string, std::string>& index_info,
     const BitsetView& bitset,
-    const milvus::DataType& data_type) {
+    const milvus::DataType& data_type,
+    milvus::OpContext* op_context) {
     if (column == nullptr) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "Column is nullptr, cannot initialize iterator");
@@ -259,9 +260,9 @@ CachedSearchIterator::CachedSearchIterator(
         index_info,
         bitset,
         data_type,
-        [this, column, &query_ds, &search_info, &bitset](
+        [this, op_context, column, &query_ds, &search_info, &bitset](
             int64_t chunk_id, int64_t physical_begin) {
-            auto pw = column->DataOfChunk(nullptr, chunk_id)
+            auto pw = column->DataOfChunk(op_context, chunk_id)
                           .transform<const void*>([](const auto& x) {
                               return static_cast<const void*>(x);
                           });
@@ -277,7 +278,7 @@ CachedSearchIterator::CachedSearchIterator(
             // must be the element count in this chunk, not the row count.
             if (search_info.struct_element_offsets_ != nullptr) {
                 auto elem_offsets_pw =
-                    column->VectorArrayOffsets(nullptr, chunk_id);
+                    column->VectorArrayOffsets(op_context, chunk_id);
                 chunk_size = elem_offsets_pw.get()[chunk_size];
             }
             // pw guarantees chunk_data is kept alive.

@@ -65,12 +65,13 @@ type CompactionInspector interface {
 var _ CompactionInspector = (*compactionInspector)(nil)
 
 type compactionInfo struct {
-	state        commonpb.CompactionState
-	executingCnt int
-	completedCnt int
-	failedCnt    int
-	timeoutCnt   int
-	mergeInfos   map[int64]*milvuspb.CompactionMergeInfo
+	state           commonpb.CompactionState
+	executingCnt    int
+	completedCnt    int
+	failedCnt       int
+	timeoutCnt      int
+	unclassifiedCnt int
+	mergeInfos      map[int64]*milvuspb.CompactionMergeInfo
 }
 
 type compactionInspector struct {
@@ -101,7 +102,7 @@ func (c *compactionInspector) getCompactionInfo(ctx context.Context, triggerID i
 
 func summaryCompactionState(triggerID int64, tasks []*datapb.CompactionTask) *compactionInfo {
 	ret := &compactionInfo{}
-	var executingCnt, pipeliningCnt, completedCnt, failedCnt, timeoutCnt, analyzingCnt, indexingCnt, cleanedCnt, metaSavedCnt, stats int
+	var executingCnt, pipeliningCnt, completedCnt, failedCnt, timeoutCnt, analyzingCnt, indexingCnt, cleanedCnt, metaSavedCnt, stats, unclassifiedCnt int
 	mergeInfos := make(map[int64]*milvuspb.CompactionMergeInfo)
 
 	for _, task := range tasks {
@@ -125,11 +126,26 @@ func summaryCompactionState(triggerID int64, tasks []*datapb.CompactionTask) *co
 			indexingCnt++
 		case datapb.CompactionTaskState_cleaned:
 			cleanedCnt++
+			switch task.GetTerminalState() {
+			case datapb.CompactionTaskState_unknown:
+				// terminal_state is unknown for tasks cleaned before the field
+				// was introduced. Preserve their historical successful outcome.
+				completedCnt++
+			case datapb.CompactionTaskState_completed:
+				completedCnt++
+			case datapb.CompactionTaskState_failed:
+				failedCnt++
+			case datapb.CompactionTaskState_timeout:
+				timeoutCnt++
+			default:
+				unclassifiedCnt++
+			}
 		case datapb.CompactionTaskState_meta_saved:
 			metaSavedCnt++
 		case datapb.CompactionTaskState_statistic:
 			stats++
 		default:
+			unclassifiedCnt++
 		}
 		mergeInfos[task.GetPlanID()] = getCompactionMergeInfo(task)
 	}
@@ -138,12 +154,19 @@ func summaryCompactionState(triggerID int64, tasks []*datapb.CompactionTask) *co
 	ret.completedCnt = completedCnt
 	ret.timeoutCnt = timeoutCnt
 	ret.failedCnt = failedCnt
+	ret.unclassifiedCnt = unclassifiedCnt
 	ret.mergeInfos = mergeInfos
 
-	if ret.executingCnt != 0 {
-		ret.state = commonpb.CompactionState_Executing
-	} else {
+	if triggerID == -1 && len(tasks) == 0 {
 		ret.state = commonpb.CompactionState_Completed
+	} else if ret.unclassifiedCnt != 0 {
+		ret.state = commonpb.CompactionState_UndefiedState
+	} else if ret.executingCnt != 0 {
+		ret.state = commonpb.CompactionState_Executing
+	} else if ret.completedCnt+ret.failedCnt+ret.timeoutCnt != 0 {
+		ret.state = commonpb.CompactionState_Completed
+	} else {
+		ret.state = commonpb.CompactionState_UndefiedState
 	}
 
 	mlog.Info(context.TODO(), "compaction states",
@@ -157,7 +180,8 @@ func summaryCompactionState(triggerID int64, tasks []*datapb.CompactionTask) *co
 		mlog.Int("analyzingCnt", analyzingCnt),
 		mlog.Int("indexingCnt", indexingCnt),
 		mlog.Int("cleanedCnt", cleanedCnt),
-		mlog.Int("metaSavedCnt", metaSavedCnt))
+		mlog.Int("metaSavedCnt", metaSavedCnt),
+		mlog.Int("unclassifiedCnt", unclassifiedCnt))
 	return ret
 }
 
@@ -412,7 +436,13 @@ func (c *compactionInspector) cleanCompactionTaskMeta() {
 	for _, tasks := range triggers {
 		for _, task := range tasks {
 			if task.State == datapb.CompactionTaskState_cleaned {
-				duration := time.Since(time.Unix(task.StartTime, 0)).Seconds()
+				retentionStart := task.GetEndTime()
+				if retentionStart == 0 {
+					// Tasks persisted before end_time was populated retain the
+					// historical start-time behavior after an upgrade.
+					retentionStart = task.GetStartTime()
+				}
+				duration := time.Since(time.Unix(retentionStart, 0)).Seconds()
 				if duration > Params.DataCoordCfg.CompactionDropToleranceInSeconds.GetAsDuration(time.Second).Seconds() {
 					// try best to delete meta
 					err := c.meta.DropCompactionTask(context.TODO(), task)

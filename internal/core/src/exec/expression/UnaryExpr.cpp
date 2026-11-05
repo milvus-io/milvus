@@ -2057,11 +2057,10 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
         return;
     }
 
-    // JsonStats: use JSON statistics to skip segments when possible.
-    if (CanUseJsonStatsAtInit()) {
-        exec_path_ = ExprExecPath::JsonStats;
-        return;
-    }
+    // JsonStats is not chosen here: EnsureExecPathDetermined() upgrades a
+    // RawData outcome to JsonStats when the segment has stats for the field,
+    // so a usable JSON path index selected below always wins over the
+    // shredded-column scan.
 
     // JSON array literals are only executable from raw data. Decide this
     // before the base selector pins a JSON index so a cold or failed index
