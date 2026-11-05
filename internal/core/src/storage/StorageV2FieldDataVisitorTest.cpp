@@ -158,9 +158,9 @@ class StorageV2FieldDataVisitorTest : public ::testing::Test {
             std::filesystem::temp_directory_path().string(),
             "milvus-storage-v2-visitor-XXXXXX",
             "storage-v2 visitor test");
-        StorageConfig config;
-        config.storage_type = "local";
-        config.root_path = directory_->Path();
+        auto config = std::make_shared<milvus_storage::api::Properties>();
+        (*config)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+        (*config)[PROPERTY_FS_ROOT_PATH] = std::string(directory_->Path());
         fs_ = InitArrowFileSystem(config);
         auto schema = std::make_shared<Schema>();
         field_id_ = schema->AddDebugField("value", DataType::INT64).get();

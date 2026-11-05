@@ -142,9 +142,10 @@ TEST(V1ArtifactIOTest, RoundTripsSlicedEntryThroughProductionTransport) {
         std::filesystem::temp_directory_path().string(),
         "milvus-filesink-test-XXXXXX",
         "V1 artifact IO test");
-    StorageConfig storage_config;
-    storage_config.storage_type = "local";
-    storage_config.root_path = remote_root->Path() + "/";
+    auto storage_config = std::make_shared<milvus_storage::api::Properties>();
+    (*storage_config)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+    (*storage_config)[PROPERTY_FS_ROOT_PATH] =
+        std::string(remote_root->Path() + "/");
     auto chunk_manager = CreateChunkManager(storage_config);
     auto filesystem = InitArrowFileSystem(storage_config);
     FieldDataMeta field_meta = {1, 2, 3, 100};
@@ -196,9 +197,10 @@ class V1BorrowedFileTest : public ::testing::Test {
         root_ = LocalDirectory::CreateOwned(local->GetRootPath(),
                                             "milvus-borrowed-file-XXXXXX",
                                             "V1 borrowed file test");
-        StorageConfig config;
-        config.storage_type = "local";
-        config.root_path = root_->Path() + "/remote";
+        auto config = std::make_shared<milvus_storage::api::Properties>();
+        (*config)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+        (*config)[PROPERTY_FS_ROOT_PATH] =
+            std::string(root_->Path() + "/remote");
         context_ =
             std::make_unique<FileManagerContext>(FieldDataMeta{1, 2, 3, 100},
                                                  IndexMeta{3,
@@ -490,9 +492,10 @@ TEST(V1ArtifactIOTest, RetainsRawBufferUntilUpload) {
         std::filesystem::temp_directory_path().string(),
         "milvus-filesink-stream-test-XXXXXX",
         "V1 artifact stream test");
-    StorageConfig storage_config;
-    storage_config.storage_type = "local";
-    storage_config.root_path = remote_root->Path() + "/";
+    auto storage_config = std::make_shared<milvus_storage::api::Properties>();
+    (*storage_config)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+    (*storage_config)[PROPERTY_FS_ROOT_PATH] =
+        std::string(remote_root->Path() + "/");
     auto chunk_manager = CreateChunkManager(storage_config);
     auto filesystem = InitArrowFileSystem(storage_config);
     FieldDataMeta field_meta = {1, 2, 3, 100};

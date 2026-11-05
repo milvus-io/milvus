@@ -97,21 +97,11 @@ main(int argc, char** argv) {
     // Initialize expression function factory (registers aggregate functions like count, sum, min, max)
     InitExecExpressionFunctionFactory();
 
-    // Test-suite master switch: MILVUS_USE_ARROW_FS_CHUNK_MANAGER=1 runs
-    // every test that obtains a chunk manager via CreateChunkManager (the
-    // remote chunk manager singleton below, DataGen, indexbuilder, ...) on
-    // the ArrowFileSystem backed IO path instead of the legacy one.
-    if (auto* env = std::getenv("MILVUS_USE_ARROW_FS_CHUNK_MANAGER")) {
-        std::string value(env);
-        milvus::storage::SetUseArrowFileSystemChunkManager(value == "1" ||
-                                                           value == "true");
-    }
-
     milvus::storage::LocalChunkManagerSingleton::GetInstance().Init(
         TestLocalPath);
-    milvus::storage::StorageConfig local_config;
-    local_config.storage_type = "local";
-    local_config.root_path = TestRemotePath;
+    auto local_config = std::make_shared<milvus_storage::api::Properties>();
+    (*local_config)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+    (*local_config)[PROPERTY_FS_ROOT_PATH] = std::string(TestRemotePath);
     milvus::storage::RemoteChunkManagerSingleton::GetInstance().Init(
         local_config);
     milvus::storage::MmapManager::GetInstance().Init(

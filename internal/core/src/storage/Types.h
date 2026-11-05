@@ -110,56 +110,6 @@ struct IndexMeta {
     std::string index_file_prefix;
 };
 
-struct StorageConfig {
-    std::string address = "localhost:9000";
-    std::string bucket_name = "a-bucket";
-    std::string access_key_id = "minioadmin";
-    std::string access_key_value = "minioadmin";
-    std::string root_path = "files";
-    std::string storage_type = "minio";
-    std::string cloud_provider = "aws";
-    std::string iam_endpoint = "";
-    std::string log_level = "warn";
-    std::string region = "";
-    bool useSSL = false;
-    std::string sslCACert = "";
-    bool useIAM = false;
-    bool useVirtualHost = false;
-    int64_t requestTimeoutMs = 3000;
-    bool gcp_native_without_auth = false;
-    std::string gcp_credential_json = "";
-    uint32_t max_connections = 100;
-    std::string tls_min_version = "";
-    bool use_crc32c_checksum = false;
-    uint32_t talon_mode = 0;
-    uint32_t talon_small_read_threshold = 0;
-    std::string talon_coordinator = "";
-    uint32_t talon_block_size = 0;
-    uint32_t talon_max_idle_per_addr = 0;
-    bool talon_enable_for_external_table = false;
-
-    std::string
-    ToString() const {
-        std::stringstream ss;
-        ss << "[address=" << address << ", bucket_name=" << bucket_name
-           << ", root_path=" << root_path << ", storage_type=" << storage_type
-           << ", cloud_provider=" << cloud_provider
-           << ", iam_endpoint=" << iam_endpoint << ", log_level=" << log_level
-           << ", region=" << region << ", useSSL=" << std::boolalpha << useSSL
-           << ", sslCACert=" << sslCACert.size()  // only print cert length
-           << ", useIAM=" << std::boolalpha << useIAM
-           << ", useVirtualHost=" << std::boolalpha << useVirtualHost
-           << ", requestTimeoutMs=" << requestTimeoutMs
-           << ", maxConnections=" << max_connections
-           << ", gcp_native_without_auth=" << std::boolalpha
-           << gcp_native_without_auth << ", tls_min_version=" << tls_min_version
-           << ", use_crc32c_checksum=" << std::boolalpha << use_crc32c_checksum
-           << "]";
-
-        return ss.str();
-    }
-};
-
 struct MmapConfig {
     std::string cache_read_ahead_policy;
     std::string mmap_path;

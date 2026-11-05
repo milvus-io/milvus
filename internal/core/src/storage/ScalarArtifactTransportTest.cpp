@@ -42,10 +42,11 @@ class ScalarArtifactTransportTest : public ::testing::Test {
             std::filesystem::temp_directory_path().string(),
             "scalar-transport-XXXXXX",
             "scalar transport test");
-        StorageConfig storage;
-        storage.storage_type = "local";
+        auto storage = std::make_shared<milvus_storage::api::Properties>();
+        (*storage)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
         // The output writer must create this missing parent itself.
-        storage.root_path = root_->Path() + "/remote";
+        (*storage)[PROPERTY_FS_ROOT_PATH] =
+            std::string(root_->Path() + "/remote");
         FieldDataMeta field{1, 2, 3, 101};
         field.field_schema.set_data_type(proto::schema::DataType::VarChar);
         context_ = FileManagerContext(field,

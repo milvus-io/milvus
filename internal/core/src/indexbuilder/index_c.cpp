@@ -74,39 +74,6 @@ WriteArtifactStats(const milvus::storage::ArtifactStats& stats,
 
 }  // namespace
 
-milvus::storage::StorageConfig
-get_storage_config(const milvus::proto::indexcgo::StorageConfig& config) {
-    auto storage_config = milvus::storage::StorageConfig();
-    storage_config.address = std::string(config.address());
-    storage_config.bucket_name = std::string(config.bucket_name());
-    storage_config.access_key_id = std::string(config.access_keyid());
-    storage_config.access_key_value = std::string(config.secret_access_key());
-    storage_config.root_path = std::string(config.root_path());
-    storage_config.storage_type = std::string(config.storage_type());
-    storage_config.cloud_provider = std::string(config.cloud_provider());
-    storage_config.iam_endpoint = std::string(config.iamendpoint());
-    storage_config.useSSL = config.usessl();
-    storage_config.sslCACert = config.sslcacert();
-    storage_config.useIAM = config.useiam();
-    storage_config.region = config.region();
-    storage_config.useVirtualHost = config.use_virtual_host();
-    storage_config.requestTimeoutMs = config.request_timeout_ms();
-    storage_config.gcp_credential_json =
-        std::string(config.gcpcredentialjson());
-    storage_config.max_connections = config.max_connections();
-    storage_config.tls_min_version = std::string(config.ssl_tls_min_version());
-    storage_config.use_crc32c_checksum = config.use_crc32c_checksum();
-    storage_config.talon_mode = config.talon_mode();
-    storage_config.talon_small_read_threshold =
-        config.talon_small_read_threshold();
-    storage_config.talon_coordinator = config.talon_coordinator();
-    storage_config.talon_block_size = config.talon_block_size();
-    storage_config.talon_max_idle_per_addr = config.talon_max_idle_per_addr();
-    storage_config.talon_enable_for_external_table =
-        config.talon_enable_for_external_table();
-    return storage_config;
-}
-
 milvus::OptFieldT
 get_opt_field(const ::google::protobuf::RepeatedPtrField<
               milvus::proto::indexcgo::OptionalFieldInfo>& field_infos) {
@@ -177,13 +144,13 @@ void
 configure_manifest_file_manager_context(
     milvus::storage::FileManagerContext& file_manager_context,
     const milvus::proto::indexcgo::BuildIndexInfo& build_index_info,
-    const milvus::storage::StorageConfig& storage_config) {
+    const std::shared_ptr<const milvus_storage::api::Properties>&
+        storage_config) {
     if (build_index_info.manifest().empty()) {
         return;
     }
 
-    auto loon_properties = MakeInternalPropertiesFromStorageConfig(
-        ToCStorageConfig(storage_config));
+    auto loon_properties = MakeInternalProperties(storage_config);
     if (!build_index_info.external_source().empty()) {
         InjectExternalSpecProperties(*loon_properties,
                                      build_index_info.collectionid(),
@@ -361,7 +328,7 @@ BuildJsonKeyIndex(ProtoLayoutInterface result,
             build_index_info->field_schema().data_type());
 
         auto storage_config =
-            get_storage_config(build_index_info->storage_config());
+            MakeStorageProperties(build_index_info->storage_config());
         auto config = get_config(build_index_info);
 
         // init file manager

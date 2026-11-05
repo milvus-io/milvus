@@ -146,6 +146,7 @@ arrow	internal/core/src/segcore/storagev2translator/ManifestGroupTranslator.h
 arrow	internal/core/src/segcore/TextColumnCache.cpp
 arrow	internal/core/src/segcore/TextColumnCache.h
 arrow	internal/core/src/storage/ArrowFileSystemChunkManager.cpp
+arrow	internal/core/src/storage/ArrowFileSystemChunkManager.h
 arrow	internal/core/src/storage/artifact/FileSink.cpp
 arrow	internal/core/src/storage/artifact/FileSink.h
 arrow	internal/core/src/storage/loon_ffi/ffi_reader_c.cpp
@@ -166,9 +167,12 @@ arrow	internal/core/src/storage/RemoteOutputStream.h
 arrow	internal/core/src/storage/StatusToErrorCode.h
 arrow	internal/core/src/storage/Util.cpp
 arrow	internal/core/src/storage/Util.h
+milvus_storage	internal/core/src/clustering/analyze_c.cpp
 milvus_storage	internal/core/src/common/Schema.cpp
 milvus_storage	internal/core/src/grep/SegmentGrep.cpp
 milvus_storage	internal/core/src/indexbuilder/BuildSession.cpp
+milvus_storage	internal/core/src/indexbuilder/index_c.cpp
+milvus_storage	internal/core/src/indexbuilder/IndexBuildCapiAdapter.cpp
 milvus_storage	internal/core/src/mmap/SparseVortexFileSystem.cpp
 milvus_storage	internal/core/src/mmap/VortexColumn.cpp
 milvus_storage	internal/core/src/mmap/VortexColumnGroup.cpp
@@ -219,12 +223,10 @@ milvus_storage	internal/core/src/storage/loon_ffi/milvus_table_c.cpp
 milvus_storage	internal/core/src/storage/loon_ffi/property_singleton.h
 milvus_storage	internal/core/src/storage/loon_ffi/util.cpp
 milvus_storage	internal/core/src/storage/loon_ffi/util.h
-milvus_storage	internal/core/src/storage/minio/MinioChunkManager.cpp
+milvus_storage	internal/core/src/storage/RemoteChunkManagerSingleton.h
 milvus_storage	internal/core/src/storage/RemoteInputStream.cpp
 milvus_storage	internal/core/src/storage/StatusToErrorCode.h
 milvus_storage	internal/core/src/storage/storage_c.cpp
-milvus_storage	internal/core/src/storage/StorageV2FSCache.cpp
-milvus_storage	internal/core/src/storage/StorageV2FSCache.h
 milvus_storage	internal/core/src/storage/Util.cpp
 milvus_storage	internal/core/src/storage/Util.h
 tantivy	internal/core/src/common/Common.cpp

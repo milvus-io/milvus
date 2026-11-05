@@ -58,20 +58,12 @@
 #include "common/Schema.h"
 #include "common/FieldDataInterface.h"
 #include "pb/common.pb.h"
-#include "storage/StorageV2FSCache.h"
-#ifdef AZURE_BUILD_DIR
-#include "storage/azure/AzureChunkManager.h"
-#endif
-#ifdef ENABLE_GCP_NATIVE
-#include "storage/gcp-native-storage/GcpNativeChunkManager.h"
-#endif
 #include "storage/ArrowFileSystemChunkManager.h"
 #include "storage/ChunkManager.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/InsertData.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/MemFileManagerImpl.h"
-#include "storage/minio/MinioChunkManager.h"
 #include "storage/RecordBatchSize.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
@@ -177,26 +169,6 @@ NormalizeExternalArrowByType(const std::shared_ptr<arrow::Array>& array,
                              DataType element_type,
                              const FieldMeta& field_meta,
                              bool preserve_array_element_validity = false);
-
-enum class CloudProviderType : int8_t {
-    UNKNOWN = 0,
-    AWS = 1,
-    GCP = 2,
-    ALIYUN = 3,
-    AZURE = 4,
-    TENCENTCLOUD = 5,
-    GCPNATIVE = 6,
-    HUAWEICLOUD = 7,
-};
-
-std::map<std::string, CloudProviderType> CloudProviderType_Map = {
-    {"aws", CloudProviderType::AWS},
-    {"gcp", CloudProviderType::GCP},
-    {"aliyun", CloudProviderType::ALIYUN},
-    {"azure", CloudProviderType::AZURE},
-    {"tencent", CloudProviderType::TENCENTCLOUD},
-    {"gcpnative", CloudProviderType::GCPNATIVE},
-    {"huawei", CloudProviderType::HUAWEICLOUD}};
 
 // in arrow, null_bitmap read from the least significant bit
 std::vector<uint8_t>
@@ -1284,148 +1256,38 @@ ReleaseArrowUnused() {
     }
 }
 
-static std::atomic<bool> use_arrow_fs_chunk_manager{false};
-
-void
-SetUseArrowFileSystemChunkManager(bool use) {
-    use_arrow_fs_chunk_manager.store(use);
-    LOG_INFO("remote chunk manager backend set to {}",
-             use ? "ArrowFileSystemChunkManager" : "legacy");
-}
-
-bool
-UseArrowFileSystemChunkManager() {
-    return use_arrow_fs_chunk_manager.load();
-}
-
-// Route a storage config to the ArrowFileSystem backed chunk manager when the
-// switch is on. milvus-storage owns provider-support classification: Make
-// returns nullptr for any config it has no producer for (unknown / empty /
-// gcpnative provider, or a rejected config), and CreateChunkManager then falls
-// back to the legacy chunk managers.
-static ChunkManagerPtr
-TryCreateArrowFileSystemChunkManager(const StorageConfig& storage_config) {
-    if (!UseArrowFileSystemChunkManager()) {
-        return nullptr;
-    }
-    return ArrowFileSystemChunkManager::Make(storage_config);
-}
-
 ChunkManagerPtr
-CreateLegacyChunkManager(const StorageConfig& storage_config) {
-    auto storage_type = ChunkManagerType_Map[storage_config.storage_type];
-    switch (storage_type) {
-        case ChunkManagerType::Local: {
-            return std::make_shared<LocalChunkManager>(
-                storage_config.root_path);
-        }
-        case ChunkManagerType::Minio: {
-            return std::make_shared<MinioChunkManager>(storage_config);
-        }
-        case ChunkManagerType::Remote: {
-            auto cloud_provider_type =
-                CloudProviderType_Map[storage_config.cloud_provider];
-            switch (cloud_provider_type) {
-                case CloudProviderType::AWS: {
-                    return std::make_shared<AwsChunkManager>(storage_config);
-                }
-                case CloudProviderType::GCP: {
-                    return std::make_shared<GcpChunkManager>(storage_config);
-                }
-                case CloudProviderType::ALIYUN: {
-                    return std::make_shared<AliyunChunkManager>(storage_config);
-                }
-                case CloudProviderType::TENCENTCLOUD: {
-                    return std::make_shared<TencentCloudChunkManager>(
-                        storage_config);
-                }
-                case CloudProviderType::HUAWEICLOUD: {
-                    return std::make_shared<HuaweiCloudChunkManager>(
-                        storage_config);
-                }
-#ifdef AZURE_BUILD_DIR
-                case CloudProviderType::AZURE: {
-                    return std::make_shared<AzureChunkManager>(storage_config);
-                }
-#endif
-#ifdef ENABLE_GCP_NATIVE
-                case CloudProviderType::GCPNATIVE: {
-                    return std::make_shared<GcpNativeChunkManager>(
-                        storage_config);
-                }
-#endif
-                default: {
-                    return std::make_shared<MinioChunkManager>(storage_config);
-                }
-            }
-        }
-        default: {
-            ThrowInfo(ConfigInvalid,
-                      "unsupported storage_config.storage_type {}",
-                      fmt::underlying(storage_type));
-        }
+CreateChunkManager(
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties) {
+    const auto storage_type =
+        GetStorageProperty<std::string>(properties, PROPERTY_FS_STORAGE_TYPE);
+    if (storage_type == "local") {
+        return std::make_shared<LocalChunkManager>(
+            GetStorageProperty<std::string>(properties, PROPERTY_FS_ROOT_PATH));
     }
+    if (storage_type != "minio" && storage_type != "remote") {
+        ThrowInfo(ConfigInvalid, "unsupported storage type {}", storage_type);
+    }
+    return ArrowFileSystemChunkManager::Make(properties);
 }
 
-ChunkManagerPtr
-CreateChunkManager(const StorageConfig& storage_config) {
-    // The ArrowFileSystem backed chunk manager (when enabled) handles every
-    // storage type; try it once up front and fall back to the legacy managers
-    // when it declines (switch off, or no producer for the provider).
-    if (auto cm = TryCreateArrowFileSystemChunkManager(storage_config);
-        cm != nullptr) {
-        return cm;
-    }
-    return CreateLegacyChunkManager(storage_config);
-}
-
-StorageV2FSCache::Key
-ToStorageV2FSCacheKey(const StorageConfig& storage_config) {
-    StorageV2FSCache::Key conf;
-    if (storage_config.storage_type == "local") {
-        std::string path(storage_config.root_path);
-        conf.root_path = path;
-        conf.storage_type = "local";
-    } else {
-        conf.address = std::string(storage_config.address);
-        conf.bucket_name = std::string(storage_config.bucket_name);
-        conf.access_key_id = std::string(storage_config.access_key_id);
-        conf.access_key_value = std::string(storage_config.access_key_value);
-        conf.root_path = std::string(storage_config.root_path);
-        // milvus-storage only understands "remote"; "minio" is the
-        // deprecated alias of it in `common.storageType`.
-        conf.storage_type = storage_config.storage_type == "minio"
-                                ? "remote"
-                                : std::string(storage_config.storage_type);
-        conf.cloud_provider = std::string(storage_config.cloud_provider);
-        conf.iam_endpoint = std::string(storage_config.iam_endpoint);
-        conf.log_level = std::string(storage_config.log_level);
-        conf.region = std::string(storage_config.region);
-        conf.useSSL = storage_config.useSSL;
-        conf.sslCACert = std::string(storage_config.sslCACert);
-        conf.useIAM = storage_config.useIAM;
-        conf.useVirtualHost = storage_config.useVirtualHost;
-        conf.requestTimeoutMs = storage_config.requestTimeoutMs;
-        conf.gcp_credential_json =
-            std::string(storage_config.gcp_credential_json);
-        conf.use_custom_part_upload = true;
-        conf.max_connections = storage_config.max_connections;
-        conf.tls_min_version = storage_config.tls_min_version;
-        conf.use_crc32c_checksum = storage_config.use_crc32c_checksum;
-        conf.talon_mode = storage_config.talon_mode;
-        conf.talon_small_read_threshold =
-            storage_config.talon_small_read_threshold;
-        conf.talon_coordinator = storage_config.talon_coordinator;
-        conf.talon_block_size = storage_config.talon_block_size;
-        conf.talon_max_idle_per_addr = storage_config.talon_max_idle_per_addr;
-    }
-    return conf;
+arrow::Result<milvus_storage::ArrowFileSystemPtr>
+GetArrowFileSystem(
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties) {
+    return milvus_storage::FilesystemCache::getInstance().get(
+        MakeInternalProperties(properties), "");
 }
 
 milvus_storage::ArrowFileSystemPtr
-InitArrowFileSystem(milvus::storage::StorageConfig storage_config) {
-    return StorageV2FSCache::Instance().Get(
-        ToStorageV2FSCacheKey(storage_config));
+InitArrowFileSystem(
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties) {
+    auto fs = GetArrowFileSystem(properties);
+    if (!fs.ok()) {
+        LOG_WARN("create arrow file system failed, error: {}",
+                 fs.status().ToString());
+        return nullptr;
+    }
+    return *fs;
 }
 
 FieldDataPtr

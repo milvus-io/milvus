@@ -2213,12 +2213,10 @@ aliyun (ecs): https://www.alibabacloud.com/help/en/elastic-compute-service/lates
 		DefaultValue: DefaultMinioCloudProvider,
 		Version:      "2.4.1",
 		Doc: `Cloud Provider of S3. Supports: "aws", "gcp", "aliyun".
-Cloud Provider of Google Cloud Storage. Supports: "gcpnative".
 You can use "aws" for other cloud provider supports S3 API with signature v4, e.g.: minio
 You can use "gcp" for other cloud provider supports S3 API with signature v2
 You can use "aliyun" for other cloud provider uses virtual host style bucket
-You can use "gcpnative" for the Google Cloud Platform provider. Uses service account credentials
-for authentication.
+The legacy "gcpnative" provider is not supported by C++ storage.
 When useIAM enabled, only "aws", "gcp", "aliyun" is supported for now`,
 		Export: true,
 	}

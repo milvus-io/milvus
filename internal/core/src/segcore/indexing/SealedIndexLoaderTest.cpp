@@ -41,9 +41,9 @@ class SealedIndexLoaderTest : public ::testing::Test {
             std::filesystem::temp_directory_path().string(),
             "scalar-translator-XXXXXX",
             "scalar translator test");
-        storage::StorageConfig storage;
-        storage.storage_type = "local";
-        storage.root_path = root_->Path();
+        auto storage = std::make_shared<milvus_storage::api::Properties>();
+        (*storage)[PROPERTY_FS_STORAGE_TYPE] = std::string("local");
+        (*storage)[PROPERTY_FS_ROOT_PATH] = std::string(root_->Path());
         storage::FieldDataMeta field{1, 2, 3, 101};
         field.field_schema.set_name("profile[values]");
         field.field_schema.set_data_type(proto::schema::DataType::Array);
