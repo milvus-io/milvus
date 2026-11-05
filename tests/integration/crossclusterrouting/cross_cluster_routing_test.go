@@ -27,10 +27,12 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/tests/integration"
@@ -96,9 +98,21 @@ func (s *CrossClusterRoutingSuite) TestCrossClusterRouting() {
 	conn, err = process.DailGRPClient(s.Cluster.GetContext(), address, randomClusterKey, s.Cluster.DefaultStreamingNode().GetNodeID())
 	s.NoError(err)
 	defer conn.Close()
-	queryClient = querypb.NewQueryNodeClient(conn)
-	_, err = queryClient.Search(s.Cluster.GetContext(), &querypb.SearchRequest{})
-	assert.Contains(s.T(), err.Error(), merr.ErrServiceCrossClusterRouting.Error())
+	stateClient := streamingpb.NewStreamingNodeStateServiceClient(conn)
+	_, err = stateClient.GetComponentStates(s.Cluster.GetContext(), &milvuspb.GetComponentStatesRequest{})
+	s.Require().Error(err)
+	streamingErr := status.AsStreamingError(status.ConvertStreamingError("GetComponentStates", err))
+	s.Require().NotNil(streamingErr)
+	s.True(streamingErr.IsIgnoredOperation())
+	s.Contains(streamingErr.Cause, merr.ErrServiceCrossClusterRouting.Error())
+
+	// The same registered RPC must succeed with this cluster's routing key.
+	conn, err = process.DailGRPClient(s.Cluster.GetContext(), address, s.Cluster.RootPath(), s.Cluster.DefaultStreamingNode().GetNodeID())
+	s.Require().NoError(err)
+	defer conn.Close()
+	state, err := streamingpb.NewStreamingNodeStateServiceClient(conn).GetComponentStates(s.Cluster.GetContext(), &milvuspb.GetComponentStatesRequest{})
+	s.Require().NoError(merr.CheckRPCCall(state, err))
+	s.Equal(commonpb.StateCode_Healthy, state.GetState().GetStateCode())
 }
 
 func TestCrossClusterRoutingSuite(t *testing.T) {

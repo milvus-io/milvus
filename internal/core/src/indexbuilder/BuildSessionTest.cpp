@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -319,12 +321,16 @@ TEST_F(BuildSessionTest, TextFieldUsesTextFamilyAndSchemaAnalyzer) {
         auto loader =
             index::LoaderRegistry::Instance().Lookup(index::families::kText);
         ASSERT_TRUE(static_cast<bool>(loader));
-        auto reader = loader.Load(
-            {index::IndexFiles{prepared.file_manager_context,
-                               {stats.Files()[0].file_name},
-                               index::PackedIndexStorageConfig{
-                                   storage::ArtifactStorageNamespace::TextLog}},
-             options});
+        auto reader =
+            loader
+                .Load({index::IndexFiles{
+                           prepared.file_manager_context,
+                           {stats.Files()[0].file_name},
+                           index::PackedIndexStorageConfig{
+                               storage::ArtifactStorageNamespace::TextLog}},
+                       options,
+                       milvus::index::test::TestIndexCacheConfig()})
+                ->CreateReader(nullptr);
         ASSERT_NE(reader, nullptr);
         EXPECT_EQ(reader->ValueType(), DataType::TEXT);
         EXPECT_EQ(reader->Count(), texts.size());

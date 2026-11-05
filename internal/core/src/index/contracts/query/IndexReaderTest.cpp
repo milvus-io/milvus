@@ -93,15 +93,6 @@ ObserveReaderMetadata(const ReaderBackend& backend,
 
     ExpectInterfacesMatchCaps<T>(*reader);
 
-    const auto first_memory = reader->MemoryUsage();
-    const auto first_usage = reader->CellByteSize();
-    EXPECT_GE(first_memory, 0);
-    EXPECT_GE(first_usage.memory_bytes, 0);
-    EXPECT_GE(first_usage.file_bytes, 0);
-    EXPECT_EQ(reader->MemoryUsage(), first_memory);
-    const auto second_usage = reader->CellByteSize();
-    EXPECT_EQ(second_usage.memory_bytes, first_usage.memory_bytes);
-    EXPECT_EQ(second_usage.file_bytes, first_usage.file_bytes);
     EXPECT_EQ(reader->Count(), data.values.size());
     EXPECT_EQ(reader->CoordDomain(), data.domain);
     EXPECT_EQ(reader->ValueType(), backend.ExpectedValueType());

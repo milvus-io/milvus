@@ -82,7 +82,7 @@ func TestUpdateCommitTimestamp_SegmentNotFound(t *testing.T) {
 // Reject violations at the entry point so C++ segcore never sees an invalid
 // commit_ts that would silently lower row timestamps during load-time overwrite.
 
-// segWithBinlogs builds a Flushed SegmentInfo carrying a single binlog whose
+// segWithBinlogs builds a Flushed meta.SegmentInfo carrying a single binlog whose
 // TimestampTo == maxTsTo, used to exercise the max(binlog.TimestampTo) check.
 func segWithBinlogs(id int64, maxTsTo uint64) *meta.SegmentInfo {
 	return &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{

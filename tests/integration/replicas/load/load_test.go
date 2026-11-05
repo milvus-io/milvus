@@ -425,6 +425,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs() {
 	s.NoError(err)
 	s.True(merr.Ok(resp2.Status))
 	s.Len(resp2.GetReplicas(), 5)
+	s.waitForQueryViewDistribution(ctx, 5, 15)
 
 	// test load collection with dynamic update
 	s.loadCollection(collectionName, dbName, 3, rgs[:3])
@@ -438,17 +439,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs() {
 		return len(resp3.GetReplicas()) == 3
 	}, 30*time.Second, 1*time.Second)
 
-	s.Eventually(func() bool {
-		segmentNum, channelNum := 0, 0
-		for _, qn := range s.Cluster.GetAllStreamingAndQueryNodesClient() {
-			resp, err := qn.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
-			s.NoError(err)
-			s.True(merr.Ok(resp.Status))
-			segmentNum += len(resp.Segments)
-			channelNum += len(resp.Channels)
-		}
-		return segmentNum == 9 && channelNum == 3
-	}, 30*time.Second, 1*time.Second)
+	s.waitForQueryViewDistribution(ctx, 3, 9)
 
 	s.loadCollection(collectionName, dbName, 2, rgs[3:])
 	s.Eventually(func() bool {
@@ -461,17 +452,7 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs() {
 		return len(resp3.GetReplicas()) == 2
 	}, 30*time.Second, 1*time.Second)
 
-	s.Eventually(func() bool {
-		segmentNum, channelNum := 0, 0
-		for _, qn := range s.Cluster.GetAllStreamingAndQueryNodesClient() {
-			resp, err := qn.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
-			s.NoError(err)
-			s.True(merr.Ok(resp.Status))
-			segmentNum += len(resp.Segments)
-			channelNum += len(resp.Channels)
-		}
-		return segmentNum == 6 && channelNum == 2
-	}, 30*time.Second, 1*time.Second)
+	s.waitForQueryViewDistribution(ctx, 2, 6)
 
 	// test load collection with dynamic update
 	s.loadCollection(collectionName, dbName, 5, rgs)
@@ -485,7 +466,35 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs() {
 		return len(resp3.GetReplicas()) == 5
 	}, 30*time.Second, 1*time.Second)
 
+	s.waitForQueryViewDistribution(ctx, 5, 15)
 	s.releaseCollection(dbName, collectionName)
+}
+
+// Verify serving shard replicas separately from confirmed QN segment resources.
+// StreamingNodes no longer expose the QueryNode distribution RPC.
+func (s *LoadTestSuite) waitForQueryViewDistribution(ctx context.Context, replicas, segments int) {
+	s.Require().Eventually(func() bool {
+		response, err := s.Cluster.MilvusClient.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+			DbName: dbName, CollectionName: collectionName,
+		})
+		if merr.CheckRPCCall(response, err) != nil || len(response.GetReplicas()) != replicas {
+			return false
+		}
+		for _, replica := range response.GetReplicas() {
+			if len(replica.GetShardReplicas()) != 1 {
+				return false
+			}
+		}
+		loaded := 0
+		for _, qn := range s.Cluster.GetAllQueryNodes() {
+			distribution, err := s.Cluster.MixCoordClient.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{NodeID: qn.GetNodeID()})
+			if merr.CheckRPCCall(distribution, err) != nil {
+				return false
+			}
+			loaded += len(distribution.GetSealedSegmentIDs())
+		}
+		return loaded == segments
+	}, 30*time.Second, time.Second)
 }
 
 func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_WithoutRG() {
@@ -712,18 +721,47 @@ func (s *LoadTestSuite) TestDynamicUpdateLoadConfigs_OnLoadingCollection() {
 		return len(resp3.GetReplicas()) == 5
 	}, 30*time.Second, 1*time.Second)
 
-	s.Eventually(func() bool {
-		segmentNum, channelNum := 0, 0
-		for _, qn := range s.Cluster.GetAllStreamingAndQueryNodesClient() {
-			resp, err := qn.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
-			s.NoError(err)
-			s.True(merr.Ok(resp.Status))
-			segmentNum += len(resp.Segments)
-			channelNum += len(resp.Channels)
+	s.Require().Eventually(func() bool {
+		progress, err := s.Cluster.MilvusClient.GetLoadingProgress(ctx, &milvuspb.GetLoadingProgressRequest{
+			DbName: dbName, CollectionName: collectionName,
+		})
+		if merr.CheckRPCCall(progress, err) != nil || progress.GetProgress() != 100 {
+			return false
 		}
-		mlog.Info(context.TODO(), "get data distribution", mlog.Int("segmentNum", segmentNum), mlog.Int("channelNum", channelNum))
-		return segmentNum == 5 && channelNum == 5
-	}, 30*time.Second, 1*time.Second)
+		replicas, err := s.Cluster.MilvusClient.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+			DbName: dbName, CollectionName: collectionName, WithShardNodes: true,
+		})
+		if merr.CheckRPCCall(replicas, err) != nil || len(replicas.GetReplicas()) != rgNum {
+			return false
+		}
+		queryNodes := make(map[int64]struct{}, rgNum)
+		for _, replica := range replicas.GetReplicas() {
+			if len(replica.GetShardReplicas()) != 1 {
+				return false
+			}
+			shard := replica.GetShardReplicas()[0]
+			if shard.GetLeaderID() == 0 {
+				return false
+			}
+			workers := 0
+			for _, nodeID := range shard.GetNodeIds() {
+				// SN owns planning; only QNs own sealed segment placement.
+				if nodeID == shard.GetLeaderID() {
+					continue
+				}
+				workers++
+				distribution, err := s.Cluster.MixCoordClient.GetQueryNodeDistribution(ctx, &querypb.GetQueryNodeDistributionRequest{NodeID: nodeID})
+				if merr.CheckRPCCall(distribution, err) != nil || len(distribution.GetSealedSegmentIDs()) != 1 {
+					return false
+				}
+				queryNodes[nodeID] = struct{}{}
+			}
+			if workers != 1 {
+				return false
+			}
+		}
+		return len(queryNodes) == rgNum
+	}, 30*time.Second, time.Second)
 
 	s.releaseCollection(dbName, collectionName)
 }

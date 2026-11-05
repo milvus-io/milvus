@@ -172,7 +172,7 @@ OpenIndexSource(const IndexLoadRequest& request) {
         std::shared_ptr<storage::IndexEntryReader>(std::move(source))}};
 }
 
-// Open the requested source and create reusable family load state. Source
+// Open the requested source and create prepared family load state. Source
 // context is detached before the returned loader escapes this function.
 folly::coro::Task<std::unique_ptr<IndexLoader>>
 CreateIndexLoader(const LoaderEntry& loader_entry, IndexLoadRequest request) {
@@ -202,31 +202,9 @@ CreateIndexLoader(const LoaderEntry& loader_entry, IndexLoadRequest request) {
     co_return loader;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
-LoadIndexAsync(const LoaderEntry& loader_entry, IndexLoadRequest request) {
-    AssertInfo(loader_entry.create != nullptr,
-               "Index family has no loader factory");
-    auto* context = request.options.op_ctx;
-    const auto operation_token =
-        context ? context->cancellation_token : folly::CancellationToken{};
-    const auto token = folly::cancellation_token_merge(
-        operation_token, co_await folly::coro::co_current_cancellation_token);
-    // Await Load inside the loader's scope; returning its lazy task would
-    // destroy the loader before that task can use its retained source.
-    auto run = [&]() -> folly::coro::Task<IIndexReaderBasePtr> {
-        storage::ThrowIfCancelled(token, "create index loader");
-        auto loader =
-            co_await CreateIndexLoader(loader_entry, std::move(request));
-        AssertInfo(loader != nullptr, "Index factory returned null loader");
-        storage::ThrowIfCancelled(token, "load index reader");
-        co_return co_await loader->Load(context);
-    };
-    co_return co_await folly::coro::co_withCancellation(token, run());
-}
-
 }  // namespace
 
-IIndexReaderBasePtr
+IndexPtr
 LoaderEntry::Load(IndexLoadRequest request) const {
     bool use_async;
     if (auto* files = std::get_if<IndexFiles>(&request.source)) {
@@ -244,11 +222,16 @@ LoaderEntry::Load(IndexLoadRequest request) const {
                          std::get<PackedIndexSource>(opened_source).reader);
     }
     const auto priority = Priority(request.options.op_ctx);
-    auto task = LoadIndexAsync(*this, std::move(request));
-    if (!use_async)
-        return folly::coro::blockingWait(std::move(task));
-    return folly::coro::blockingWait(folly::coro::co_withExecutor(
-        storage::ResolveAsyncLoadExecutor({}, priority), std::move(task)));
+    auto* context = request.options.op_ctx;
+    auto cache = std::move(request.cache);
+    auto prepare = CreateIndexLoader(*this, std::move(request));
+    auto loader = use_async
+                      ? folly::coro::blockingWait(folly::coro::co_withExecutor(
+                            storage::ResolveAsyncLoadExecutor({}, priority),
+                            std::move(prepare)))
+                      : folly::coro::blockingWait(std::move(prepare));
+    // Synchronous warmup must not block the executor that loads its cells.
+    return loader->Load(context, cache);
 }
 
 }  // namespace milvus::index

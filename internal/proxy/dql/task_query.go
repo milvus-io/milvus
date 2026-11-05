@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
+	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -86,6 +87,8 @@ type QueryTask struct {
 	partitionKeyMode bool
 	shardclientMgr   shardclient.ShardClientMgr
 	lb               shardclient.LBPolicy
+	viewQueryClient  queryclient.Client
+	queryViewPlans   []queryclient.ShardPlan
 	channelsMvcc     map[string]Timestamp
 	// Output snapshots for internal partial-update reads, independent of the
 	// channelsMvcc input overrides. Only successful shard responses are recorded.
@@ -130,6 +133,7 @@ type QueryTask struct {
 // behavior where such reads are not gated by the partition-key check.
 func NewQueryTask(ctx context.Context, node taskmodel.TaskNode, request *milvuspb.QueryRequest, plan *planpb.PlanNode, retrieveReq *internalpb.RetrieveRequest, cache metacache.Cache, mustUsePartitionKey bool) *QueryTask {
 	return &QueryTask{
+		viewQueryClient: viewQueryClientFromNode(node),
 		baseTask: baseTask{
 			MetaCache: cache,
 		},
@@ -159,8 +163,9 @@ func (t *QueryTask) MarkInternal() {
 	t.internalTask = true
 }
 
-// BindReadSchema fixes an internal read to its parent operation's schema.
-// Metadata refresh must not silently change a requery or an upsert read/merge.
+// BindReadSchema fixes an internal read to its parent operation's schema. A
+// QueryView with that exact schema must be ready; public metadata refreshes must
+// not silently switch a requery or an upsert's read/merge operation.
 func (t *QueryTask) BindReadSchema(collectionID int64, schema *metacache.SchemaInfo) {
 	t.boundCollectionID, t.boundReadSchema = collectionID, schema
 }
@@ -1034,23 +1039,34 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	physicalTimeMs, _ := tsoutil.ParseHybridTs(guaranteeTs)
 	t.EntityTtlPhysicalTime = uint64(physicalTimeMs * 1000)
 	// need modify mvccTs and guaranteeTs for iterator specially
-	if t.queryParams.isIterator && t.request.GetGuaranteeTimestamp() > 0 {
-		t.MvccTimestamp = t.request.GetGuaranteeTimestamp()
-		t.GuaranteeTimestamp = t.request.GetGuaranteeTimestamp()
+	if t.queryParams.isIterator {
+		if t.request.GetGuaranteeTimestamp() > 0 {
+			t.MvccTimestamp = t.request.GetGuaranteeTimestamp()
+		} else if t.viewQueryClient != nil {
+			// Choose one snapshot before any shard executes, including the
+			// first page. Every retry and subsequent page retains this value.
+			t.MvccTimestamp = t.BeginTs()
+		}
+		if t.MvccTimestamp != 0 {
+			t.GuaranteeTimestamp = t.MvccTimestamp
+			physicalTimeMs, _ = tsoutil.ParseHybridTs(t.MvccTimestamp)
+			t.EntityTtlPhysicalTime = uint64(physicalTimeMs * 1000)
+		}
 	}
 	t.IsIterator = queryParams.isIterator
 
-	collectionTTL := collectionInfo.CollectionTTL
-	if t.boundReadSchema != nil {
-		collectionTTL = metacache.GetCollectionTTL(t.boundReadSchema.GetProperties())
-	}
+	collectionTTL := metacache.GetCollectionTTL(t.schema.GetProperties())
 	if collectionTTL != 0 {
-		physicalTime := tsoutil.PhysicalTime(t.GetBase().GetTimestamp())
+		ttlTimestamp := t.GetBase().GetTimestamp()
+		if t.queryParams.isIterator && t.MvccTimestamp != 0 {
+			ttlTimestamp = t.MvccTimestamp
+		}
+		physicalTime := tsoutil.PhysicalTime(ttlTimestamp)
 		expireTime := physicalTime.Add(-time.Duration(collectionTTL))
 		t.CollectionTtlTimestamps = tsoutil.ComposeTSByTime(expireTime)
 		// preventing overflow, abort
-		if t.CollectionTtlTimestamps > t.GetBase().GetTimestamp() {
-			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", t.GetBase().GetTimestamp(), collectionTTL)
+		if t.CollectionTtlTimestamps > ttlTimestamp {
+			return merr.WrapErrServiceInternalMsg("ttl timestamp overflow, base timestamp: %d, ttl duration %v", ttlTimestamp, collectionTTL)
 		}
 	}
 	deadline, ok := t.TraceCtx().Deadline()
@@ -1074,7 +1090,9 @@ func (t *QueryTask) Execute(ctx context.Context) error {
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.RetrieveResults]()
 	t.executeStart = time.Now()
 	path, err := executePathQuery, error(nil)
-	if paramtable.Get().ProxyCfg.MaterializeEnabled.GetAsBool() && t.materializeInScope() {
+	// Materialize currently routes through the legacy delegator. QueryView
+	// requests must retain their View-bound execution and requery snapshots.
+	if t.viewQueryClient == nil && paramtable.Get().ProxyCfg.MaterializeEnabled.GetAsBool() && t.materializeInScope() {
 		path, err = t.executeMaterialize(ctx)
 	} else {
 		err = t.executeWorkload(ctx, t.queryShard)
@@ -1092,6 +1110,14 @@ func (t *QueryTask) executeWorkload(ctx context.Context, exec shardclient.Execut
 		mlog.Int64s("partitionIDs", t.GetPartitionIDs()),
 		mlog.String("requestType", t.getQueryLabel()))
 
+	if t.viewQueryClient != nil {
+		if err := t.executeByQueryView(ctx); err != nil {
+			log.Warn(ctx, "fail to execute query by query view", mlog.Err(err))
+			return err
+		}
+		log.Debug(ctx, "Query Execute done.")
+		return nil
+	}
 	// Built once, ahead of the namespace fast path below, so that the fast
 	// path derives its single-channel workload from the same value Execute
 	// would fan out -- every collection-level field, the resource-group scope
@@ -1134,8 +1160,31 @@ func (t *QueryTask) executeWorkload(ctx context.Context, exec shardclient.Execut
 	return nil
 }
 
+func (t *QueryTask) executeByQueryView(ctx context.Context) error {
+	request := &queryclient.LegacyQueryRequest{
+		Req: t.RetrieveRequest, Plans: t.queryViewPlans, Schema: t.schema.CollectionSchema,
+		BarrierMVCC: t.MvccTimestamp,
+	}
+
+	result, err := t.viewQueryClient.Legacy().Query(ctx, request)
+	if err != nil {
+		return QueryViewLoadError(ctx, t.node, t.GetCollectionID(), t.GetPartitionIDs(), err)
+	}
+	for _, retrieveResult := range result.Results {
+		t.resultBuf.Insert(retrieveResult)
+	}
+	// Both frontiers belong to one complete Strong WAL snapshot, including
+	// successful empty shards. The last channel change is the CAS read boundary.
+	for _, plan := range result.Plans {
+		if t.actualChannelsMvcc != nil {
+			t.RecordChannelMvcc(plan.ShardID.VChannel, max(plan.Mvcc.GetGrowingTimetick(), plan.Mvcc.GetTransformingTimetick()))
+		}
+	}
+	return nil
+}
+
 func (t *QueryTask) PostExecute(ctx context.Context) error {
-	tr := timerecord.NewTimeRecorder("QueryTask PostExecute")
+	tr := timerecord.NewTimeRecorder("queryTask PostExecute")
 	defer func() {
 		tr.CtxElapse(ctx, "done")
 	}()
@@ -1236,7 +1285,11 @@ func (t *QueryTask) PostExecute(ctx context.Context) error {
 
 	if t.queryParams.isIterator && t.request.GetGuaranteeTimestamp() == 0 {
 		// first page for iteration, need to set up sessionTs for iterator
-		t.result.SessionTs = getMaxMvccTsFromChannels(t.channelsMvcc, t.BeginTs())
+		if t.viewQueryClient != nil {
+			t.result.SessionTs = t.MvccTimestamp
+		} else {
+			t.result.SessionTs = getMaxMvccTsFromChannels(t.channelsMvcc, t.BeginTs())
+		}
 	}
 	if err := t.formatTimeFields(ctx); err != nil {
 		return err
@@ -1544,5 +1597,12 @@ func (t *QueryTask) OnEnqueue() error {
 	}
 	t.Base.MsgType = commonpb.MsgType_Retrieve
 	t.Base.SourceID = paramtable.GetNodeID()
+	return nil
+}
+
+func viewQueryClientFromNode(node taskmodel.TaskNode) queryclient.Client {
+	if provider, ok := node.(interface{ ViewQueryClient() queryclient.Client }); ok {
+		return provider.ViewQueryClient()
+	}
 	return nil
 }

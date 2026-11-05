@@ -362,7 +362,8 @@ func (f *testOneWALFramework) testAppend(ctx context.Context, w wal.WAL) ([]mess
 				begin := message.MustAsImmutableBeginTxnMessageV2(immutableMsg)
 				b := message.NewImmutableTxnMessageBuilder(begin)
 				txnCtx := appendResult.TxnCtx
-				for i := 0; i < int(rand.Int31n(5)); i++ {
+				bodyCount := 1 + int(rand.Int31n(5))
+				for i := 0; i < bodyCount; i++ {
 					msg = message.CreateTestEmptyInsertMesage(int64(i), map[string]string{})
 					msg.WithTxnContext(*txnCtx)
 					appendResult, err = w.Append(ctx, msg)

@@ -16,8 +16,8 @@ type LoadConfig struct {
 	DbID                     int64
 	CollectionID             int64
 	PartitionIDs             []int64
-	LoadFields               []*viewpb.LoadFieldConfig // Preload hints; empty follows the target schema, not query scope.
-	RequiredFields           []*viewpb.LoadFieldConfig // Explicit internal query scope.
+	LoadFields               []*viewpb.LoadFieldConfig // Explicit preload set; empty means no preloaded fields.
+	RequiredFields           []*viewpb.LoadFieldConfig // Explicit allowed query scope; empty means no user fields.
 	UserSpecifiedReplicaMode bool
 	Replicas                 []*ReplicaAssignment
 }

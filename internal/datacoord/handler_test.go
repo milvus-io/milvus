@@ -49,7 +49,7 @@ func TestRetrieveSegment(t *testing.T) {
 			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
 		}
 		indexed := typeutil.NewUniqueSet(1, 2)
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(3),
 			typeutil.NewUniqueSet(1, 2),
@@ -68,7 +68,7 @@ func TestRetrieveSegment(t *testing.T) {
 			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
 		}
 		indexed := typeutil.NewUniqueSet(1)
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(3),
 			typeutil.NewUniqueSet(1, 2),
@@ -87,7 +87,7 @@ func TestRetrieveSegment(t *testing.T) {
 			3: segment(3, commonpb.SegmentState_Flushed, 2),
 		}
 		indexed := typeutil.NewUniqueSet(1)
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(3),
 			typeutil.NewUniqueSet(1, 2),
@@ -105,7 +105,7 @@ func TestRetrieveSegment(t *testing.T) {
 			2: segment(2, commonpb.SegmentState_Flushed, 1),
 		}
 		indexed := typeutil.NewUniqueSet(1, 2)
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(2),
 			typeutil.NewUniqueSet(1),
@@ -124,7 +124,7 @@ func TestRetrieveSegment(t *testing.T) {
 			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
 			4: segment(4, commonpb.SegmentState_Flushed, 1, 2),
 		}
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(1, 2, 3, 4),
 			make(typeutil.UniqueSet),
@@ -143,7 +143,7 @@ func TestRetrieveSegment(t *testing.T) {
 			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
 			4: segment(4, commonpb.SegmentState_Flushed, 1, 2),
 		}
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(1, 3, 4),
 			typeutil.NewUniqueSet(2),
@@ -162,7 +162,7 @@ func TestRetrieveSegment(t *testing.T) {
 			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
 			4: segment(4, commonpb.SegmentState_Flushed, 3),
 		}
-		flushed, _ := retrieveSegment(
+		flushed, _ := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(1, 2, 3, 4),
 			make(typeutil.UniqueSet),
@@ -184,7 +184,7 @@ func TestRetrieveSegment(t *testing.T) {
 		// Segment 5 remains serviceable while segment 4 falls back to 1 and 2.
 		// Recursive deduplication must remove 5 without selecting unready 3.
 		indexed := typeutil.NewUniqueSet(1, 2, 5)
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(4, 5),
 			typeutil.NewUniqueSet(1, 2, 3),
@@ -201,7 +201,7 @@ func TestRetrieveSegment(t *testing.T) {
 			1: segment(1, commonpb.SegmentState_Dropped),
 			2: segment(2, commonpb.SegmentState_Flushed, 1),
 		}
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(2),
 			typeutil.NewUniqueSet(1),
@@ -223,7 +223,7 @@ func TestRetrieveSegment(t *testing.T) {
 			6: segment(6, commonpb.SegmentState_Flushed, 3, 5),
 		}
 		indexed := typeutil.NewUniqueSet(1, 2, 6)
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(4, 6),
 			typeutil.NewUniqueSet(1, 2, 3, 5),
@@ -245,7 +245,7 @@ func TestRetrieveSegment(t *testing.T) {
 			6: segment(6, commonpb.SegmentState_Flushed, 3, 5),
 		}
 		indexed := typeutil.NewUniqueSet(1, 2, 3, 5, 6)
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(4, 6),
 			typeutil.NewUniqueSet(1, 2, 3, 5),
@@ -2330,7 +2330,7 @@ func TestHasCommittedManifest(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			actual, err := hasCommittedManifest(test.segment)
+			actual, err := meta.HasCommittedManifest(test.segment)
 			if test.expectedErr != nil {
 				require.ErrorIs(t, err, test.expectedErr)
 				assert.Contains(t, err.Error(), "invalid manifest path for segment 2004")
@@ -2889,53 +2889,67 @@ func TestGenSnapshot_CommitTimestamp(t *testing.T) {
 		assert.NotNil(t, snapshotData)
 		assert.Equal(t, 1, len(snapshotData.Segments), "segment with commit_ts=5000 must appear at snapshotTs=6000")
 		assert.Equal(t, int64(999), snapshotData.Segments[0].SegmentId)
+		assert.Equal(t, uint64(5000), snapshotData.Segments[0].GetCommitTimestamp())
 	})
 }
 
 func TestServerHandler_GetCollectionRetry(t *testing.T) {
-	newHandler := func(b broker.Broker) *ServerHandler {
+	newHandler := func() *ServerHandler {
 		m := &meta.Meta{MetaStore: metacache.NewMetaStore(nil)}
-		return newServerHandler(&Server{broker: b, meta: m})
+		return newServerHandler(&Server{broker: &broker.MockBroker{}, meta: m})
 	}
 
+	// Internal loading uses DescribeCollectionInternal directly so Restoring
+	// collections remain visible; public HasCollection intentionally hides them.
 	t.Run("dropped collection is not retried", func(t *testing.T) {
-		b := broker.NewMockBroker(t)
-		b.EXPECT().HasCollection(mock.Anything, int64(1)).Return(false, nil).Once()
+		describe := mockey.Mock((*broker.MockBroker).DescribeCollectionInternal).
+			Return(nil, merr.ErrCollectionNotFound).Build()
+		defer describe.UnPatch()
 
-		coll, err := newHandler(b).GetCollection(context.TODO(), 1)
+		coll, err := newHandler().GetCollection(context.TODO(), 1)
 		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
 		assert.Nil(t, coll)
+		assert.Equal(t, 1, describe.Times())
 	})
 
 	t.Run("transient error is retried", func(t *testing.T) {
-		b := broker.NewMockBroker(t)
-		b.EXPECT().HasCollection(mock.Anything, int64(1)).Return(false, merr.ErrServiceUnavailable).Once()
-		b.EXPECT().HasCollection(mock.Anything, int64(1)).Return(true, nil).Once()
-		b.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(&milvuspb.DescribeCollectionResponse{
-			Status:       merr.Success(),
-			CollectionID: 1,
-		}, nil).Once()
-		b.EXPECT().ShowPartitionsInternal(mock.Anything, int64(1)).Return([]int64{10}, nil).Once()
+		calls := 0
+		describe := mockey.Mock((*broker.MockBroker).DescribeCollectionInternal).To(
+			func(_ *broker.MockBroker, _ context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+				calls++
+				if calls == 1 {
+					return nil, merr.ErrServiceUnavailable
+				}
+				return &milvuspb.DescribeCollectionResponse{
+					Status: merr.Success(), CollectionID: collectionID,
+				}, nil
+			}).Build()
+		defer describe.UnPatch()
+		partitions := mockey.Mock((*broker.MockBroker).ShowPartitionsInternal).Return([]int64{10}, nil).Build()
+		defer partitions.UnPatch()
 
-		coll, err := newHandler(b).GetCollection(context.TODO(), 1)
-		assert.NoError(t, err)
+		coll, err := newHandler().GetCollection(context.TODO(), 1)
+		require.NoError(t, err)
+		require.NotNil(t, coll)
 		assert.Equal(t, int64(1), coll.ID)
+		assert.Equal(t, 2, describe.Times())
+		assert.Equal(t, 1, partitions.Times())
 	})
 
 	t.Run("collection gone from the cache after load", func(t *testing.T) {
-		b := broker.NewMockBroker(t)
-		b.EXPECT().HasCollection(mock.Anything, int64(1)).Return(true, nil).Once()
-		b.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(&milvuspb.DescribeCollectionResponse{
-			Status:       merr.Success(),
-			CollectionID: 1,
-		}, nil).Once()
-		b.EXPECT().ShowPartitionsInternal(mock.Anything, int64(1)).Return([]int64{10}, nil).Once()
+		describe := mockey.Mock((*broker.MockBroker).DescribeCollectionInternal).Return(&milvuspb.DescribeCollectionResponse{
+			Status: merr.Success(), CollectionID: 1,
+		}, nil).Build()
+		defer describe.UnPatch()
+		partitions := mockey.Mock((*broker.MockBroker).ShowPartitionsInternal).Return([]int64{10}, nil).Build()
+		defer partitions.UnPatch()
 		// GC drops the collection between the load and the read.
 		dropAfterAdd := mockey.Mock((*meta.Meta).AddCollection).Return().Build()
 		defer dropAfterAdd.UnPatch()
 
-		coll, err := newHandler(b).GetCollection(context.TODO(), 1)
+		coll, err := newHandler().GetCollection(context.TODO(), 1)
 		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
 		assert.Nil(t, coll)
+		assert.Equal(t, 1, describe.Times())
 	})
 }

@@ -106,6 +106,7 @@ func TestSegmentResourceRetryBackoffIsolation(t *testing.T) {
 func TestSegmentResourceRetrySatisfiedReadBypassesDelay(t *testing.T) {
 	runResourceSchedulingTest(t, "a newly available compatible read publishes Ready during backoff", func(t *testing.T, f *resourceSchedulingFixture) {
 		b := f.r.bindings[0]
+		b.manifest = 1 // A known revision permits reuse without revalidating metadata.
 		f.onPrepare = func(*segmentBinding) error { return merr.WrapErrServiceNotReadyMsg("materialization pending") }
 		f.wake()
 		f.runNext()

@@ -35,10 +35,20 @@ func (s *Server) broadcastDropResourceGroup(ctx context.Context, req *milvuspb.D
 	}
 	defer broadcaster.Close()
 
-	replicas := s.meta.GetByResourceGroup(ctx, req.GetResourceGroup())
-	if len(replicas) > 0 {
-		err := merr.WrapErrParameterInvalid("empty resource group", fmt.Sprintf("resource group %s has collection %d loaded", req.GetResourceGroup(), replicas[0].GetCollectionID()))
-		return false, merr.Wrapf(err, "some replicas still loaded in resource group[%s], release it first", req.GetResourceGroup())
+	if s.qviewsRuntime != nil {
+		for _, cfg := range s.qviewsRuntime.loadConfigStore.Snapshot().ConfigsMap() {
+			for _, replica := range cfg.Replicas {
+				if replica.ResourceGroup == req.GetResourceGroup() {
+					return false, merr.WrapErrParameterInvalidMsg("resource group %s has collection %d loaded; release it first", req.GetResourceGroup(), cfg.CollectionID)
+				}
+			}
+		}
+	} else {
+		replicas := s.meta.GetByResourceGroup(ctx, req.GetResourceGroup())
+		if len(replicas) > 0 {
+			err := merr.WrapErrParameterInvalid("empty resource group", fmt.Sprintf("resource group %s has collection %d loaded", req.GetResourceGroup(), replicas[0].GetCollectionID()))
+			return false, merr.Wrapf(err, "some replicas still loaded in resource group[%s], release it first", req.GetResourceGroup())
+		}
 	}
 	if ignored, err := s.meta.CheckIfResourceGroupDropable(ctx, req.GetResourceGroup()); err != nil || ignored {
 		return ignored, err

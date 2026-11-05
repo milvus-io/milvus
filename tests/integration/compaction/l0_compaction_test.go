@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -242,9 +243,8 @@ func (s *CompactionSuite) TestL0Compaction() {
 }
 
 // TestL0CompactionDeltaLogOnV3Segment verifies that after L0 compaction,
-// V3 (manifest) L1 target segments have their Deltalogs populated in etcd.
-// Without the fix, V3 segments would have empty Deltalogs because the
-// compaction result only updated the manifest path, not the deltalog prefix.
+// V3 L1 targets publish the delta files in their manifests and the matching
+// aggregate statistics in etcd. V3 no longer persists per-FieldBinlog keys.
 func (s *CompactionSuite) TestL0CompactionDeltaLogOnV3Segment() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*10)
 	defer cancel()
@@ -373,7 +373,12 @@ func (s *CompactionSuite) TestL0CompactionDeltaLogOnV3Segment() {
 		hasL1 := lo.SomeBy(flushed, func(seg *datapb.SegmentInfo) bool {
 			return seg.GetLevel() == datapb.SegmentLevel_L1
 		})
-		return !hasL0 && hasL1
+		hasCompactedL0 := lo.SomeBy(segments, func(seg *datapb.SegmentInfo) bool {
+			return seg.GetLevel() == datapb.SegmentLevel_L0 &&
+				seg.GetState() == commonpb.SegmentState_Dropped && seg.GetCompacted()
+		})
+		// Absence of a flushed L0 alone also holds before materialization.
+		return hasCompactedL0 && !hasL0 && hasL1
 	}
 	for !l0CompactionDone() {
 		select {
@@ -384,29 +389,34 @@ func (s *CompactionSuite) TestL0CompactionDeltaLogOnV3Segment() {
 		}
 	}
 
-	// Verify: L1 segment should have Deltalogs populated with correct entry count
+	// Verify the published manifest, not the removed V3 deltalog catalog keys.
 	flushed := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
 		return segment.GetState() == commonpb.SegmentState_Flushed && segment.GetLevel() == datapb.SegmentLevel_L1
 	})
 	s.Require().NotEmpty(flushed, "expected at least one flushed L1 segment")
 
 	for _, seg := range flushed {
+		deltalogs, err := packed.GetDeltaLogsFromManifestWithExtfs(
+			seg.GetManifestPath(), packed.CreateStorageConfig(), packed.ExternalSpecContext{})
+		s.Require().NoError(err)
 		mlog.Info(context.TODO(), "checking L1 segment after L0 compaction",
 			mlog.FieldSegmentID(seg.GetID()),
 			mlog.Int64("numOfRows", seg.GetNumOfRows()),
 			mlog.Int64("storageVersion", seg.GetStorageVersion()),
-			mlog.Int("deltalogFieldCount", len(seg.GetDeltalogs())),
+			mlog.Int("deltalogFieldCount", len(deltalogs)),
 		)
-		s.NotEmpty(seg.GetDeltalogs(), "L1 segment should have Deltalogs after L0 compaction")
+		s.NotEmpty(deltalogs, "L1 manifest should have Deltalogs after L0 compaction")
 
 		totalDeletedRows := int64(0)
-		for _, dl := range seg.GetDeltalogs() {
+		for _, dl := range deltalogs {
 			for _, b := range dl.GetBinlogs() {
 				totalDeletedRows += b.GetEntriesNum()
 			}
 		}
 		s.EqualValues(deleteCnt, totalDeletedRows,
 			"Deltalogs EntriesNum should match deletion count")
+		s.EqualValues(deleteCnt, seg.GetStats().GetDeleteNumRows(),
+			"catalog statistics should match the manifest deletion count")
 	}
 
 	mlog.Info(context.TODO(), "TestL0CompactionDeltaLogOnV3Segment succeed")

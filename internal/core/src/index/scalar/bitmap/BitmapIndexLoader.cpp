@@ -18,6 +18,10 @@
 #include "index/scalar/bitmap/BitmapIndexLoader.h"
 #include "index/PackedIndexLoad.h"
 #include "index/LegacyIndexLoad.h"
+#include "index/LegacyIndexLoad-inl.h"
+#include "index/PackedIndexLoad-inl.h"
+#include "index/SingleCellIndexStorageTranslator.h"
+#include "cachinglayer/Manager.h"
 
 #include <bit>
 #include <cerrno>
@@ -701,61 +705,60 @@ RebuildValidity(const BitmapRoaringPostingMap<T>& postings,
     }
 }
 
-BitmapReaderOptions
-MakeReaderOptions(TargetBitmap validity,
-                  const BitmapMeta& meta,
-                  const RuntimeParams& params) {
-    return BitmapReaderOptions{.valid_bitset = std::move(validity),
-                               .total_num_rows = meta.count,
-                               .nested = meta.nested,
-                               .value_lookup = params.value_lookup,
-                               .value_type = params.value_type,
-                               .offset_cache = params.offset_cache};
+BitmapStorageOptions
+MakeStorageOptions(TargetBitmap validity,
+                   const BitmapMeta& meta,
+                   const RuntimeParams& params) {
+    return BitmapStorageOptions{.valid_bitset = std::move(validity),
+                                .total_num_rows = meta.count,
+                                .nested = meta.nested,
+                                .value_lookup = params.value_lookup,
+                                .value_type = params.value_type,
+                                .offset_cache = params.offset_cache};
 }
 
 // Validate decoded postings, rebuild missing validity and create the selected
 // heap layout.
-template <typename T>
-std::unique_ptr<IIndexReaderBase>
-OpenDecodedState(const uint8_t* data,
-                 size_t size,
-                 const BitmapMeta& meta,
-                 const RuntimeParams& params,
-                 TargetBitmap validity,
-                 bool rebuild_validity,
-                 BitmapLayout layout) {
+template <typename T, typename Posting>
+std::unique_ptr<BitmapPostingStorage<T, Posting>>
+OpenDecodedStorage(const uint8_t* data,
+                   size_t size,
+                   const BitmapMeta& meta,
+                   const RuntimeParams& params,
+                   TargetBitmap validity,
+                   bool rebuild_validity) {
     auto postings =
         DecodePostings<T>(data, size, meta.index_length, meta.count);
     ValidateCoordinateOwnership(postings, params.value_lookup);
     if (rebuild_validity) {
         RebuildValidity(postings, validity);
     }
-    auto options = MakeReaderOptions(std::move(validity), meta, params);
-    if (layout == BitmapLayout::Roaring) {
-        return CreateBitmapIndexReader<T>(std::move(postings),
-                                          std::move(options));
+    auto options = MakeStorageOptions(std::move(validity), meta, params);
+    if constexpr (std::is_same_v<Posting, roaring::Roaring>) {
+        return std::make_unique<BitmapPostingStorage<T, Posting>>(
+            std::move(postings), std::move(options));
+    } else {
+        BitmapBitsetPostingMap<T> bitset_postings;
+        for (const auto& [key, posting] : postings) {
+            bitset_postings.emplace(key, ToBitset(posting, meta.count));
+        }
+        return std::make_unique<BitmapPostingStorage<T, Posting>>(
+            std::move(bitset_postings), std::move(options));
     }
-
-    BitmapBitsetPostingMap<T> bitset_postings;
-    for (const auto& [key, posting] : postings) {
-        bitset_postings.emplace(key, ToBitset(posting, meta.count));
-    }
-    return CreateBitmapIndexReader<T>(std::move(bitset_postings),
-                                      std::move(options));
 }
 
 // Build a reader whose frozen posting views retain the mapped-file owner.
 template <typename T>
-folly::coro::Task<std::unique_ptr<IIndexReaderBase>>
-OpenDecodedMmapState(const uint8_t* data,
-                     size_t size,
-                     const BitmapMeta& meta,
-                     const RuntimeParams& params,
-                     TargetBitmap validity,
-                     bool rebuild_validity,
-                     const storage::LoadOptions& opts,
-                     const folly::CancellationToken& token,
-                     bool use_async) {
+folly::coro::Task<std::unique_ptr<BitmapPostingStorage<T, roaring::Roaring>>>
+OpenDecodedMmapStorage(const uint8_t* data,
+                       size_t size,
+                       const BitmapMeta& meta,
+                       const RuntimeParams& params,
+                       TargetBitmap validity,
+                       bool rebuild_validity,
+                       const storage::LoadOptions& opts,
+                       const folly::CancellationToken& token,
+                       bool use_async) {
     auto frozen = co_await DecodeFrozenPostings<T>(data,
                                                    size,
                                                    meta.index_length,
@@ -766,10 +769,11 @@ OpenDecodedMmapState(const uint8_t* data,
                                                    token,
                                                    use_async);
     ValidateCoordinateOwnership(frozen.postings, params.value_lookup);
-    auto options = MakeReaderOptions(std::move(validity), meta, params);
-    co_return CreateBitmapIndexReader<T>(std::move(frozen.postings),
-                                         std::move(options),
-                                         std::move(frozen.owner));
+    auto options = MakeStorageOptions(std::move(validity), meta, params);
+    co_return std::make_unique<BitmapPostingStorage<T, roaring::Roaring>>(
+        std::move(frozen.postings),
+        std::move(options),
+        std::move(frozen.owner));
 }
 
 // Dispatch supported persisted key types without converting their payload
@@ -802,62 +806,15 @@ DispatchBitmapType(DataType value_type, F&& fn) {
     }
 }
 
-std::unique_ptr<IIndexReaderBase>
-DispatchOpen(DataType value_type,
-             const uint8_t* data,
-             size_t size,
-             const BitmapMeta& meta,
-             const RuntimeParams& params,
-             TargetBitmap validity,
-             bool rebuild_validity,
-             BitmapLayout layout) {
-    return DispatchBitmapType<std::unique_ptr<IIndexReaderBase>>(
-        value_type, [&]<typename T>() {
-            return OpenDecodedState<T>(data,
-                                       size,
-                                       meta,
-                                       params,
-                                       std::move(validity),
-                                       rebuild_validity,
-                                       layout);
-        });
-}
-
-folly::coro::Task<std::unique_ptr<IIndexReaderBase>>
-DispatchMmapOpen(DataType value_type,
-                 const uint8_t* data,
-                 size_t size,
-                 const BitmapMeta& meta,
-                 const RuntimeParams& params,
-                 TargetBitmap validity,
-                 bool rebuild_validity,
-                 const storage::LoadOptions& opts,
-                 const folly::CancellationToken& token,
-                 bool use_async) {
-    return DispatchBitmapType<
-        folly::coro::Task<std::unique_ptr<IIndexReaderBase>>>(
-        value_type, [&]<typename T>() {
-            return OpenDecodedMmapState<T>(data,
-                                           size,
-                                           meta,
-                                           params,
-                                           std::move(validity),
-                                           rebuild_validity,
-                                           opts,
-                                           token,
-                                           use_async);
-        });
-}
-
 // Load legacy payloads; mmap mode stages portable bytes before producing
 // frozen views.
-folly::coro::Task<std::unique_ptr<IIndexReaderBase>>
+template <typename T, typename Posting>
+folly::coro::Task<std::unique_ptr<BitmapPostingStorage<T, Posting>>>
 LoadBitmapPayload(bool use_async,
                   storage::FileSource& source,
                   const storage::LoadOptions& opts,
                   const RuntimeParams& params,
-                  const BitmapMeta& meta,
-                  BitmapLayout layout) {
+                  const BitmapMeta& meta) {
     TargetBitmap validity(meta.count, meta.nested || !params.nullable);
     bool rebuild_validity = params.nullable && !meta.nested;
     if (source.HasEntry(BITMAP_INDEX_VALID_BITSET)) {
@@ -867,114 +824,116 @@ LoadBitmapPayload(bool use_async,
         rebuild_validity = false;
     }
 
-    if (opts.enable_mmap && layout == BitmapLayout::Roaring) {
-        const auto priority =
-            opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
-                ? proto::common::LoadPriority::LOW
-                : proto::common::LoadPriority::HIGH;
-        std::optional<TemporaryFileGuard> portable_file;
-        size_t size = 0;
-        int fd = -1;
-        char* mapped = nullptr;
-        IIndexReaderBasePtr reader;
-        std::exception_ptr failure;
-        try {
-            {
-                auto local_io = [&] {
-                    portable_file.emplace(CreateTemporaryFile(
-                        opts.mmap_dir_path, "bitmap_portable"));
-                    portable_file->Close();
-                };
-                if (use_async) {
-                    co_await storage::RunLocalFileIOAsync(local_io, priority);
-                } else {
-                    local_io();
+    if constexpr (std::is_same_v<Posting, roaring::Roaring>) {
+        if (opts.enable_mmap) {
+            const auto priority =
+                opts.op_ctx &&
+                        opts.op_ctx->runtime_load_priority.value_or(0) != 0
+                    ? proto::common::LoadPriority::LOW
+                    : proto::common::LoadPriority::HIGH;
+            std::optional<TemporaryFileGuard> portable_file;
+            size_t size = 0;
+            int fd = -1;
+            char* mapped = nullptr;
+            std::unique_ptr<BitmapPostingStorage<T, Posting>> storage;
+            std::exception_ptr failure;
+            try {
+                {
+                    auto local_io = [&] {
+                        portable_file.emplace(CreateTemporaryFile(
+                            opts.mmap_dir_path, "bitmap_portable"));
+                        portable_file->Close();
+                    };
+                    if (use_async) {
+                        co_await storage::RunLocalFileIOAsync(local_io,
+                                                              priority);
+                    } else {
+                        local_io();
+                    }
                 }
-            }
-            co_await source.ReadEntryToLocalFileAsync(
-                BITMAP_INDEX_DATA, portable_file->Path(), use_async);
-            {
-                auto local_io = [&] {
-                    size = storage::LocalFileSize(
-                        portable_file->Path(),
-                        "failed to size bitmap mmap input");
-                    if (size == 0) {
-                        ThrowInfo(
-                            DataFormatBroken,
-                            "bitmap data is empty for non-empty mmap index");
+                co_await source.ReadEntryToLocalFileAsync(
+                    BITMAP_INDEX_DATA, portable_file->Path(), use_async);
+                {
+                    auto local_io = [&] {
+                        size = storage::LocalFileSize(
+                            portable_file->Path(),
+                            "failed to size bitmap mmap input");
+                        if (size == 0) {
+                            ThrowInfo(DataFormatBroken,
+                                      "bitmap data is empty for non-empty mmap "
+                                      "index");
+                        }
+                        fd = open(portable_file->Path().c_str(), O_RDONLY);
+                        if (fd == -1) {
+                            ThrowInfo(FileOpenFailed,
+                                      "failed to open bitmap file {}: {}",
+                                      portable_file->Path(),
+                                      std::strerror(errno));
+                        }
+                        mapped = static_cast<char*>(
+                            mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0));
+                        const auto saved_errno = errno;
+                        if (mapped == MAP_FAILED) {
+                            ThrowInfo(MmapError,
+                                      "failed to map bitmap file {}: {}",
+                                      portable_file->Path(),
+                                      std::strerror(saved_errno));
+                        }
+                        // Conversion scans portable postings once, in order. Best-effort only.
+                        (void)::madvise(mapped, size, MADV_SEQUENTIAL);
+                    };
+                    if (use_async) {
+                        co_await storage::RunLocalFileIOAsync(local_io,
+                                                              priority);
+                    } else {
+                        local_io();
                     }
-                    fd = open(portable_file->Path().c_str(), O_RDONLY);
-                    if (fd == -1) {
-                        ThrowInfo(FileOpenFailed,
-                                  "failed to open bitmap file {}: {}",
-                                  portable_file->Path(),
-                                  std::strerror(errno));
-                    }
-                    mapped = static_cast<char*>(
-                        mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0));
-                    const auto saved_errno = errno;
-                    if (mapped == MAP_FAILED) {
-                        ThrowInfo(MmapError,
-                                  "failed to map bitmap file {}: {}",
-                                  portable_file->Path(),
-                                  std::strerror(saved_errno));
-                    }
-                    // Conversion scans portable postings once, in order. Best-effort only.
-                    (void)::madvise(mapped, size, MADV_SEQUENTIAL);
-                };
-                if (use_async) {
-                    co_await storage::RunLocalFileIOAsync(local_io, priority);
-                } else {
-                    local_io();
                 }
+                const auto operation_token =
+                    opts.op_ctx ? opts.op_ctx->cancellation_token
+                                : folly::CancellationToken{};
+                const auto token = folly::cancellation_token_merge(
+                    operation_token,
+                    co_await folly::coro::co_current_cancellation_token);
+                storage = co_await OpenDecodedMmapStorage<T>(
+                    reinterpret_cast<const uint8_t*>(mapped),
+                    size,
+                    meta,
+                    params,
+                    std::move(validity),
+                    rebuild_validity,
+                    opts,
+                    token,
+                    use_async);
+            } catch (...) {
+                failure = std::current_exception();
             }
-            const auto operation_token = opts.op_ctx
-                                             ? opts.op_ctx->cancellation_token
-                                             : folly::CancellationToken{};
-            const auto token = folly::cancellation_token_merge(
-                operation_token,
-                co_await folly::coro::co_current_cancellation_token);
-            reader = co_await DispatchMmapOpen(
-                params.value_type,
-                reinterpret_cast<const uint8_t*>(mapped),
-                size,
-                meta,
-                params,
-                std::move(validity),
-                rebuild_validity,
-                opts,
-                token,
-                use_async);
-        } catch (...) {
-            failure = std::current_exception();
+            auto cleanup = [&] {
+                if (mapped != nullptr && mapped != MAP_FAILED)
+                    (void)::munmap(mapped, size);
+                if (fd >= 0) {
+                    EvictFilePageCache(fd);
+                    (void)::close(fd);
+                }
+                portable_file.reset();
+            };
+            if (use_async)
+                co_await storage::RunLocalFileIOAsync(cleanup, priority);
+            else
+                cleanup();
+            if (failure)
+                std::rethrow_exception(failure);
+            co_return storage;
         }
-        auto cleanup = [&] {
-            if (mapped != nullptr && mapped != MAP_FAILED)
-                (void)::munmap(mapped, size);
-            if (fd >= 0) {
-                EvictFilePageCache(fd);
-                (void)::close(fd);
-            }
-            portable_file.reset();
-        };
-        if (use_async)
-            co_await storage::RunLocalFileIOAsync(cleanup, priority);
-        else
-            cleanup();
-        if (failure)
-            std::rethrow_exception(failure);
-        co_return reader;
     }
 
     auto data = co_await source.ReadEntryAsync(BITMAP_INDEX_DATA, use_async);
-    co_return DispatchOpen(params.value_type,
-                           data.data(),
-                           data.size(),
-                           meta,
-                           params,
-                           std::move(validity),
-                           rebuild_validity,
-                           layout);
+    co_return OpenDecodedStorage<T, Posting>(data.data(),
+                                             data.size(),
+                                             meta,
+                                             params,
+                                             std::move(validity),
+                                             rebuild_validity);
 }
 
 /**
@@ -1059,11 +1018,12 @@ BitmapIndexLoader::Create(OpenedIndexSource source,
     auto loader = std::unique_ptr<BitmapIndexLoader>(
         new BitmapIndexLoader(std::move(source), std::move(options)));
     auto state = std::make_unique<PreparedState>();
-    if (const auto* packed = std::get_if<PackedIndexSource>(&loader->source_)) {
+    if (const auto* packed =
+            std::get_if<PackedIndexSource>(&*loader->source_)) {
         *state = PreparePackedState(
             packed->Directory(), packed->Metadata(), loader->options_);
     } else {
-        const auto& legacy = std::get<LegacyIndexSource>(loader->source_);
+        const auto& legacy = std::get<LegacyIndexSource>(*loader->source_);
         state->params = ParseRuntimeParams(loader->options_.params);
         const auto& params = state->params;
         if (params.value_type == DataType::NONE ||
@@ -1093,36 +1053,102 @@ BitmapIndexLoader::Create(OpenedIndexSource source,
     co_return loader;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
-BitmapIndexLoader::Load(milvus::OpContext* context) {
+template <typename T, typename Posting>
+IndexPtr
+BitmapIndexLoader::LoadTyped(milvus::OpContext* context,
+                             const IndexCacheConfig& cache) {
+    auto caps = DeriveCaps(options_.params);
+    caps.json_paths = false;
+    const IndexMetadata metadata{
+        caps,
+        state_->meta.nested ? Domain::Element : Domain::Row,
+        state_->params.value_type,
+        static_cast<int64_t>(state_->meta.count)};
+    const auto* legacy = std::get_if<LegacyIndexSource>(&*source_);
+    const bool use_async =
+        legacy ? legacy->use_async
+               : std::holds_alternative<
+                     std::shared_ptr<storage::AsyncIndexEntryReader>>(
+                     std::get<PackedIndexSource>(*source_).reader);
+    auto source = std::move(*source_);
+    source_.reset();
+    auto load = [source = std::move(source),
+                 options = options_,
+                 prepared = *state_](OpContext* ctx) mutable {
+        return LoadStorage<T, Posting>(source, options, prepared, ctx);
+    };
+    auto slot = cachinglayer::Manager::GetInstance()
+                    .CreateCacheSlot<BitmapPostingStorage<T, Posting>>(
+                        std::make_unique<SingleCellIndexStorageTranslator<
+                            BitmapPostingStorage<T, Posting>>>(
+                            cache, use_async, std::move(load)),
+                        context);
+    return CreateBitmapIndex<T, Posting>(
+        std::move(slot),
+        metadata,
+        JsonProjectedSpec(options_.params, metadata.count));
+}
+
+template <typename T, typename Posting>
+folly::coro::Task<std::unique_ptr<BitmapPostingStorage<T, Posting>>>
+BitmapIndexLoader::LoadStorage(OpenedIndexSource& source,
+                               const storage::LoadOptions& options,
+                               const PreparedState& prepared,
+                               milvus::OpContext* context) {
     const auto operation_token =
         context ? context->cancellation_token : folly::CancellationToken{};
     const auto token = folly::cancellation_token_merge(
         operation_token, co_await folly::coro::co_current_cancellation_token);
-    if (auto* packed = std::get_if<PackedIndexSource>(&source_)) {
-        co_return co_await RunPackedIndexLoad(
+    if (auto* packed = std::get_if<PackedIndexSource>(&source)) {
+        co_return co_await RunPackedIndexLoad<
+            std::unique_ptr<BitmapPostingStorage<T, Posting>>>(
             *packed,
-            options_,
-            [this, token](const auto& directory,
-                          const auto& metadata,
-                          const auto& options) {
-                auto plan =
-                    PlanPacked(directory, metadata, options, state_.get());
+            options,
+            [&prepared, token](
+                const auto& directory, const auto& metadata, const auto& opts) {
+                auto plan = PlanPacked(directory, metadata, opts, &prepared);
                 std::any_cast<const std::shared_ptr<PackedBitmapState>&>(
                     plan.load_context)
                     ->cancellation_token = token;
                 return plan;
             },
-            &FinishPacked,
+            &FinishPackedStorage<T, Posting>,
             context);
     }
-    co_return co_await RunLegacyLoad(
-        std::get<LegacyIndexSource>(source_),
-        options_,
-        [this](auto& source, const auto& options, bool use_async) {
-            return LoadLegacy(source, options, use_async);
+    co_return co_await RunLegacyLoad<
+        std::unique_ptr<BitmapPostingStorage<T, Posting>>>(
+        std::get<LegacyIndexSource>(source),
+        options,
+        [&prepared](storage::FileSource& files,
+                    const storage::LoadOptions& opts,
+                    bool use_async)
+            -> folly::coro::Task<
+                std::unique_ptr<BitmapPostingStorage<T, Posting>>> {
+            auto projection =
+                PrepareJsonProjectedOpen(families::kBitmap, files, opts);
+            auto storage = co_await LoadBitmapPayload<T, Posting>(
+                use_async, files, opts, prepared.params, prepared.meta);
+            storage->json_exists =
+                co_await LoadJsonExists(use_async,
+                                        std::move(projection),
+                                        files,
+                                        storage->options.total_num_rows);
+            co_return storage;
         },
         context);
+}
+
+IndexPtr
+BitmapIndexLoader::Load(milvus::OpContext* context,
+                        const IndexCacheConfig& cache) {
+    AssertInfo(source_.has_value(),
+               "cached bitmap construction consumed this loader");
+    return DispatchBitmapType<IndexPtr>(
+        state_->params.value_type, [&]<typename T>() {
+            return state_->layout == BitmapLayout::Roaring
+                       ? LoadTyped<T, roaring::Roaring>(context, cache)
+                       : LoadTyped<T, TargetBitmap>(context, cache);
+        });
 }
 
 ReaderCaps
@@ -1138,17 +1164,6 @@ BitmapIndexLoader::DeriveCaps(const Config& index_meta) {
             .value_lookup = params.value_lookup,
             .cheap_value_lookup = params.value_lookup && params.offset_cache,
             .exact = !params.nested});
-}
-
-folly::coro::Task<IIndexReaderBasePtr>
-BitmapIndexLoader::LoadLegacy(storage::FileSource& source,
-                              const storage::LoadOptions& opts,
-                              bool use_async) {
-    auto projection = PrepareJsonProjectedOpen(families::kBitmap, source, opts);
-    auto inner = co_await LoadBitmapPayload(
-        use_async, source, opts, state_->params, state_->meta, state_->layout);
-    co_return (co_await FinishJsonProjectedOpenAsync(
-        use_async, std::move(projection), source, std::move(inner)));
 }
 
 IndexLoadPlan
@@ -1218,10 +1233,11 @@ BitmapIndexLoader::PlanPacked(const storage::IndexEntryDirectory& directory,
     return plan;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
-BitmapIndexLoader::FinishPacked(IndexLoadPlan& plan,
-                                const storage::LoadOptions& opts,
-                                bool use_async) {
+template <typename T, typename Posting>
+folly::coro::Task<std::unique_ptr<BitmapPostingStorage<T, Posting>>>
+BitmapIndexLoader::FinishPackedStorage(IndexLoadPlan& plan,
+                                       const storage::LoadOptions& opts,
+                                       bool use_async) {
     const auto state =
         std::any_cast<std::shared_ptr<PackedBitmapState>>(plan.load_context);
     if (state->meta.count % 8 != 0) {
@@ -1230,7 +1246,7 @@ BitmapIndexLoader::FinishPacked(IndexLoadPlan& plan,
         bytes[state->meta.count / 8] &=
             static_cast<uint8_t>((1u << (state->meta.count % 8)) - 1u);
     }
-    IIndexReaderBasePtr inner;
+    std::unique_ptr<BitmapPostingStorage<T, Posting>> storage;
     if (state->file) {
         const auto priority =
             opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
@@ -1271,17 +1287,22 @@ BitmapIndexLoader::FinishPacked(IndexLoadPlan& plan,
             } else {
                 local_io();
             }
-            inner = co_await DispatchMmapOpen(
-                state->params.value_type,
-                reinterpret_cast<const uint8_t*>(mapped),
-                state->file->file_size,
-                state->meta,
-                state->params,
-                std::move(*state->validity),
-                state->rebuild_validity,
-                opts,
-                state->cancellation_token,
-                use_async);
+            if constexpr (std::is_same_v<Posting, roaring::Roaring>) {
+                storage = co_await OpenDecodedMmapStorage<T>(
+                    reinterpret_cast<const uint8_t*>(mapped),
+                    state->file->file_size,
+                    state->meta,
+                    state->params,
+                    std::move(*state->validity),
+                    state->rebuild_validity,
+                    opts,
+                    state->cancellation_token,
+                    use_async);
+            } else {
+                AssertInfo(
+                    false,
+                    "bitmap bitset cannot have a frozen Roaring file target");
+            }
         } catch (...) {
             failure = std::current_exception();
         }
@@ -1302,17 +1323,16 @@ BitmapIndexLoader::FinishPacked(IndexLoadPlan& plan,
         if (failure)
             std::rethrow_exception(failure);
     } else {
-        inner = DispatchOpen(state->params.value_type,
-                             state->data->data(),
-                             state->data->size(),
-                             state->meta,
-                             state->params,
-                             std::move(*state->validity),
-                             state->rebuild_validity,
-                             state->layout);
+        storage = OpenDecodedStorage<T, Posting>(state->data->data(),
+                                                 state->data->size(),
+                                                 state->meta,
+                                                 state->params,
+                                                 std::move(*state->validity),
+                                                 state->rebuild_validity);
     }
-    co_return FinishPackedJsonProjectedOpen(std::move(state->projection),
-                                            std::move(inner));
+    storage->json_exists = FinishPackedJsonExists(
+        std::move(state->projection), storage->options.total_num_rows);
+    co_return storage;
 }
 
 namespace {

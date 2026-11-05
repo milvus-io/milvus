@@ -81,7 +81,7 @@ TEST(SegmentTextFieldLoadTest, MultipleFieldDataBatchesKeepGlobalNullOffsets) {
               manager);
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
     segment->LoadFieldData(info);
-    auto pin = segment->PinGrowingIndex(FieldId(101));
+    auto pin = segment->PinGrowingIndex(nullptr, FieldId(101));
     ASSERT_TRUE(static_cast<bool>(pin));
     EXPECT_EQ(pin.CoveredRowEnd(), 8);
     ExpectNullRows(pin.Reader(),
@@ -107,7 +107,7 @@ TEST(SegmentTextFieldLoadTest, SingleNullableFieldDataBatchPreservesRows) {
         manager);
     auto segment = CreateGrowingSegment(schema, empty_index_meta);
     segment->LoadFieldData(info);
-    auto pin = segment->PinGrowingIndex(FieldId(101));
+    auto pin = segment->PinGrowingIndex(nullptr, FieldId(101));
     ASSERT_TRUE(static_cast<bool>(pin));
     ExpectNullRows(pin.Reader(), {true, false, true, false});
     ExpectOnlyTextMatchHit(TextReader(pin.Reader()), "alpha", 0, 4);
@@ -144,7 +144,7 @@ CheckLoadedSuffix(const std::vector<std::string>& inserted,
     // LoadFieldData reserves and publishes the complete range. It exercises
     // the raw-column adapter and growing-index feed at the same offset.
     segment->LoadFieldData(info);
-    auto pin = segment->PinGrowingIndex(FieldId(101));
+    auto pin = segment->PinGrowingIndex(nullptr, FieldId(101));
     ASSERT_TRUE(static_cast<bool>(pin));
     ASSERT_EQ(pin.CoveredRowEnd(), inserted.size() + loaded.size());
     auto all_valid = std::vector<bool>(inserted.size(), true);
@@ -264,7 +264,7 @@ TEST(SegmentTextFieldLoadTest, SealedTextIndexDecodesRemoteLobReferences) {
     sealed->SetTextLobPathForTesting(FieldId(101), lob_path);
     segment->LoadFieldData(info);
     sealed->CreateTextIndex(FieldId(101));
-    auto pin = PinSealedText(*sealed, FieldId(101));
+    auto pin = CreateSealedTextReader(*sealed, FieldId(101));
     ASSERT_TRUE(static_cast<bool>(pin));
     ExpectOnlyTextMatchHit(TextReader(*pin.get()), term, 1, texts.size());
 }
@@ -361,7 +361,7 @@ TEST(SegmentTextFieldLoadTest,
     segment->SetLoadInfo(info);
     tracer::TraceContext trace;
     segment->Load(trace, nullptr);
-    auto pin = segment->PinGrowingIndex(FieldId(101));
+    auto pin = segment->PinGrowingIndex(nullptr, FieldId(101));
     ASSERT_TRUE(static_cast<bool>(pin));
     ASSERT_EQ(pin.CoveredRowEnd(), rows);
     const auto& text = TextReader(pin.Reader());

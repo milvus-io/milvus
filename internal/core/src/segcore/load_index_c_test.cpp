@@ -9,6 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <folly/FBVector.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -138,11 +140,11 @@ class BinarySetSource final : public storage::FileSource {
     std::map<std::string, std::vector<uint8_t>> entries_;
 };
 
-// The C API releases its cache-owned reader. Each reader retains the same
+// The C API releases its Index. Each Index retains the same
 // DiskFileManager generation owner used by production load cleanup.
-class LocalDirOwningReader : public index::IIndexReaderBase {
+class LocalDirOwningIndex : public index::IIndex {
  public:
-    explicit LocalDirOwningReader(const storage::FileManagerContext& context)
+    explicit LocalDirOwningIndex(const storage::FileManagerContext& context)
         : disk_file_manager_(
               std::make_shared<storage::DiskFileManagerImpl>(context)),
           local_index_prefix_(disk_file_manager_->GetLocalIndexObjectPrefix()) {
@@ -154,39 +156,26 @@ class LocalDirOwningReader : public index::IIndexReaderBase {
     }
 
     void
-    KeepGenerationAlive(index::IIndexReaderBasePtr reader) {
+    KeepGenerationAlive(index::IndexPtr reader) {
         dependent_generations_.push_back(std::move(reader));
     }
 
-    index::ReaderCaps
-    Caps() const override {
+    index::IndexMetadata
+    Metadata() const override {
+        return {{}, index::Domain::Row, DataType::VECTOR_FLOAT, 0};
+    }
+    index::IIndexReaderBasePtr
+    CreateReader(OpContext*) const override {
         return {};
     }
-    index::Domain
-    CoordDomain() const override {
-        return index::Domain::Row;
-    }
-    int64_t
-    Count() const override {
-        return 0;
-    }
-    DataType
-    ValueType() const override {
-        return DataType::VECTOR_FLOAT;
-    }
-    int64_t
-    MemoryUsage() const override {
-        return 0;
-    }
-    cachinglayer::ResourceUsage
-    CellByteSize() const override {
-        return {0, 0};
+    void
+    CancelWarmup() const override {
     }
 
  private:
     std::shared_ptr<storage::DiskFileManagerImpl> disk_file_manager_;
     std::string local_index_prefix_;
-    std::vector<index::IIndexReaderBasePtr> dependent_generations_;
+    std::vector<index::IndexPtr> dependent_generations_;
 };
 
 milvus::storage::FileManagerContext
@@ -217,14 +206,14 @@ MakeFileManagerContext(const milvus::segcore::LoadIndexInfo& load_index_info) {
         field_meta, index_meta, local_chunk_manager, nullptr);
 }
 
-std::pair<std::unique_ptr<LocalDirOwningReader>, std::string>
-CreateLocalDirOwningReaderFile(
+std::pair<std::unique_ptr<LocalDirOwningIndex>, std::string>
+CreateLocalDirOwningIndexFile(
     const milvus::storage::FileManagerContext& file_manager_context,
     const std::string& file_name) {
     auto local_chunk_manager =
         milvus::storage::LocalChunkManagerSingleton::GetInstance()
             .GetChunkManager();
-    auto index = std::make_unique<LocalDirOwningReader>(file_manager_context);
+    auto index = std::make_unique<LocalDirOwningIndex>(file_manager_context);
     auto local_file = index->LocalIndexPrefix() + file_name;
     local_chunk_manager->CreateFile(local_file);
     EXPECT_TRUE(local_chunk_manager->Exist(local_file));
@@ -300,9 +289,12 @@ TEST(CApiTest, LoadIndexSearch) {
         index::LoaderRegistry::Instance().Lookup(adapted.family);
     ASSERT_TRUE(static_cast<bool>(loader));
     auto reader =
-        loader.Load({index::OpenedIndexSource{index::LegacyIndexSource{
-                         std::make_shared<BinarySetSource>(binary_set), false}},
-                     options});
+        loader
+            .Load({index::OpenedIndexSource{index::LegacyIndexSource{
+                       std::make_shared<BinarySetSource>(binary_set), false}},
+                   options,
+                   milvus::index::test::TestIndexCacheConfig()})
+            ->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
     EXPECT_EQ(reader->Count(), N);
     auto* vectors = dynamic_cast<const index::IVectorReader*>(reader.get());
@@ -319,7 +311,6 @@ TEST(CApiTest, LoadIndexSearch) {
     vectors->Search(query_dataset,
                     {conf, knowhere::metric::L2, TOPK, {}},
                     milvus::BitsetView{},
-                    nullptr,
                     loaded_result);
     ASSERT_EQ(loaded_result.seg_offsets_.size(), num_query * TOPK);
     ASSERT_EQ(loaded_result.distances_.size(), num_query * TOPK);
@@ -457,15 +448,15 @@ TEST(LoadIndexCTest, CleanLoadedIndexDoesNotRemoveSiblingGeneration) {
 
     auto file_manager_context = MakeFileManagerContext(load_index_info);
     auto [index, index_file] =
-        CreateLocalDirOwningReaderFile(file_manager_context, "index_data");
-    auto [cache_index, cache_index_file] = CreateLocalDirOwningReaderFile(
-        file_manager_context, "cache_index_data");
-    auto [sibling_index, sibling_file] = CreateLocalDirOwningReaderFile(
+        CreateLocalDirOwningIndexFile(file_manager_context, "index_data");
+    auto [cache_index, cache_index_file] =
+        CreateLocalDirOwningIndexFile(file_manager_context, "cache_index_data");
+    auto [sibling_index, sibling_file] = CreateLocalDirOwningIndexFile(
         file_manager_context, "sibling_index_data");
     // Both owned generations leave with the cache; the independently held
     // sibling generation must survive the C API cleanup.
     index->KeepGenerationAlive(std::move(cache_index));
-    load_index_info.cache_index = CreateReaderCache(std::move(index));
+    load_index_info.index = std::move(index);
     ASSERT_TRUE(local_chunk_manager->Exist(index_file));
     ASSERT_TRUE(local_chunk_manager->Exist(cache_index_file));
     ASSERT_NE(sibling_index, nullptr);
@@ -574,7 +565,6 @@ Test_Indexing_Without_Predicate() {
     vec_index->Search(query_dataset,
                       MakeVectorSearchParams(search_info),
                       milvus::BitsetView{},
-                      nullptr,
                       result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
@@ -708,7 +698,6 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     vec_index->Search(query_dataset,
                       MakeVectorSearchParams(search_info),
                       milvus::BitsetView{},
-                      nullptr,
                       result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
@@ -839,7 +828,6 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     vec_index->Search(query_dataset,
                       MakeVectorSearchParams(search_info),
                       milvus::BitsetView{},
-                      nullptr,
                       result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
@@ -972,7 +960,6 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     vec_index->Search(query_dataset,
                       MakeVectorSearchParams(search_info),
                       milvus::BitsetView{},
-                      nullptr,
                       result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
@@ -1103,7 +1090,6 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     vec_index->Search(query_dataset,
                       MakeVectorSearchParams(search_info),
                       milvus::BitsetView{},
-                      nullptr,
                       result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
@@ -1234,7 +1220,6 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     vec_index->Search(query_dataset,
                       MakeVectorSearchParams(search_info),
                       milvus::BitsetView{},
-                      nullptr,
                       result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
@@ -1369,7 +1354,6 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     vec_index->Search(query_dataset,
                       MakeVectorSearchParams(search_info),
                       milvus::BitsetView{},
-                      nullptr,
                       result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
@@ -1504,7 +1488,6 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     vec_index->Search(query_dataset,
                       MakeVectorSearchParams(search_info),
                       milvus::BitsetView{},
-                      nullptr,
                       result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
@@ -1639,7 +1622,6 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     vec_index->Search(query_dataset,
                       MakeVectorSearchParams(search_info),
                       milvus::BitsetView{},
-                      nullptr,
                       result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();
@@ -1784,7 +1766,6 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     vec_index->Search(query_dataset,
                       MakeVectorSearchParams(search_info),
                       milvus::BitsetView{},
-                      nullptr,
                       result_on_index);
     auto ids = result_on_index.seg_offsets_.data();
     auto dis = result_on_index.distances_.data();

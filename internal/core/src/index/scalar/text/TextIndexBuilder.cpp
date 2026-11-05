@@ -289,7 +289,7 @@ TextIndexBuilder::Build(const ScalarBuildInput<std::string_view>& input) && {
     return FinishArtifact();
 }
 
-storage::ArtifactPtr
+std::unique_ptr<TextIndexArtifact>
 TextIndexBuilder::Build(const TextIndexBuildSource& source) && {
     AssertInfo(static_cast<bool>(source.produce),
                "text build source has no producer");
@@ -308,7 +308,7 @@ TextIndexBuilder::Build(const TextIndexBuildSource& source) && {
     return FinishArtifact();
 }
 
-storage::ArtifactPtr
+std::unique_ptr<TextIndexArtifact>
 TextIndexBuilder::FinishArtifact() {
     auto params = std::move(params_);
     auto directory = std::move(directory_);

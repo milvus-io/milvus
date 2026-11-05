@@ -14,6 +14,8 @@
 
 #pragma once
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <span>
 #include <string>
 #include <string_view>
@@ -59,9 +61,56 @@ SetTestIndexMetadata(segcore::LoadIndexInfo& info,
     }
 }
 
+// Record the request context at the same boundary as production Index objects.
+class ContextObservingIndex final : public index::IIndex {
+ public:
+    ContextObservingIndex(index::IndexPtr index, OpContext** observed)
+        : index_(std::move(index)), observed_(observed) {
+    }
+    index::IndexMetadata
+    Metadata() const override {
+        return index_->Metadata();
+    }
+    index::IIndexReaderBasePtr
+    CreateReader(OpContext* ctx) const override {
+        *observed_ = ctx;
+        return index_->CreateReader(ctx);
+    }
+    void
+    CancelWarmup() const override {
+        index_->CancelWarmup();
+    }
+
+ private:
+    index::IndexPtr index_;
+    OpContext** observed_;
+};
+
+// A fixture keeps the loaded Index for segment installation and a reader for
+// assertions made before installation.
+struct BuiltTestIndex {
+    index::IndexPtr index;
+    index::IIndexReaderBasePtr reader;
+    BuiltTestIndex(index::IndexPtr value)
+        : index(std::move(value)), reader(index->CreateReader(nullptr)) {
+    }
+    index::IIndexReaderBase*
+    get() const {
+        return reader.get();
+    }
+    index::IIndexReaderBase*
+    operator->() const {
+        return reader.get();
+    }
+    index::IIndexReaderBase&
+    operator*() const {
+        return *reader;
+    }
+};
+
 namespace test_index_detail {
 
-inline index::IIndexReaderBasePtr
+inline BuiltTestIndex
 LoadPublished(const std::string& family,
               const Config& params,
               storage::FileManagerContext context,
@@ -84,7 +133,8 @@ LoadPublished(const std::string& family,
             {index::IndexFiles{std::move(context),
                                std::move(paths),
                                index::PackedIndexStorageConfig{}},
-             std::move(options)});
+             std::move(options),
+             milvus::index::test::TestIndexCacheConfig()});
     }
     return loader.Load(
         {index::IndexFiles{std::move(context),
@@ -97,13 +147,14 @@ LoadPublished(const std::string& family,
                                        family == index::families::kJsonFlat
                                    ? storage::V1SourceLayout::DiskFiles
                                    : storage::V1SourceLayout::MemoryEntries}},
-         std::move(options)});
+         std::move(options),
+         milvus::index::test::TestIndexCacheConfig()});
 }
 
 // Consumer fixtures open persisted artifacts through the same loader boundary
 // as a segment. In particular, vector Load performs knowhere preparation that
 // consuming the just-built artifact would bypass.
-inline index::IIndexReaderBasePtr
+inline BuiltTestIndex
 PersistAndLoad(storage::ArtifactPtr artifact,
                const std::string& family,
                const Config& params) {
@@ -125,7 +176,7 @@ PersistAndLoad(storage::ArtifactPtr artifact,
 }
 
 template <typename T>
-index::IIndexReaderBasePtr
+BuiltTestIndex
 BuildScalar(const std::string& family,
             int64_t count,
             const T* values,
@@ -163,7 +214,7 @@ BuildScalar(const std::string& family,
 }  // namespace test_index_detail
 
 template <typename T>
-inline index::IIndexReaderBasePtr
+inline BuiltTestIndex
 BuildTestScalarIndex(const std::string& family,
                      int64_t count,
                      const T* values,
@@ -180,7 +231,7 @@ BuildTestScalarIndex(const std::string& family,
 }
 
 template <typename T>
-inline index::IIndexReaderBasePtr
+inline BuiltTestIndex
 BuildTestVectorIndex(
     int64_t count,
     int64_t dim,
@@ -229,7 +280,7 @@ BuildTestVectorIndex(
 }
 
 // The caller owns source files and their storage root for the reader lifetime.
-inline index::IIndexReaderBasePtr
+inline BuiltTestIndex
 BuildTestIndexFromSource(indexbuilder::BuildRequest request,
                          storage::FileManagerContext context) {
     indexbuilder::BuildSession session(request, context);

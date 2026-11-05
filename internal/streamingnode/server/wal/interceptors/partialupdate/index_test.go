@@ -1,6 +1,7 @@
 package partialupdate
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -100,7 +101,7 @@ func TestPKVersionIndexNormalizesNegativeBudget(t *testing.T) {
 
 func TestPKVersionIndexRejectsEvictedReadWindow(t *testing.T) {
 	idx := newPKVersionIndex(30*time.Second, versionIndexBudgetForEntries(100))
-	idx.channel("").retainedSinceTS = 50
+	idx.channel("").forgottenWriteTS = 50
 	requirePartialUpdateRetryable(t, idx.Verify("", nil, 49, 80))
 }
 
@@ -109,19 +110,65 @@ func TestPKVersionIndexRejectsCommitBeforeRead(t *testing.T) {
 	requireUnrecoverable(t, idx.Verify("", nil, 100, 99))
 }
 
-func TestPKVersionIndexRejectsReadWindowBeyondTTL(t *testing.T) {
-	idx := newPKVersionIndex(30*time.Second, versionIndexBudgetForEntries(100))
-	readTS := tsoutil.ComposeTSByTime(time.Now())
-	commitTS := tsoutil.AddPhysicalDurationOnTs(readTS, 31*time.Second)
-	requirePartialUpdateRetryable(t, idx.Verify("", nil, readTS, commitTS))
+func TestPKVersionIndexAcceptsIdleSnapshot(t *testing.T) {
+	for _, pk := range []any{int64(1), "pk-1"} {
+		t.Run(fmt.Sprint(pk), func(t *testing.T) {
+			idx := newPKVersionIndex(30*time.Second, versionIndexBudgetForEntries(2))
+			readTS := tsoutil.ComposeTSByTime(time.Now())
+			commitTS := tsoutil.AddPhysicalDurationOnTs(readTS, time.Hour)
+
+			// An empty channel has lost no history, regardless of elapsed time.
+			idx.Advance(commitTS)
+			require.NoError(t, idx.Verify("v1", []any{pk}, readTS, commitTS))
+			require.Zero(t, idx.channel("v1").forgottenWriteTS)
+
+			idx.UpdateAll("v1", []any{pk}, readTS)
+			// Verify itself may evict the record. The snapshot already includes
+			// this last write, so equality with the forgotten boundary is valid.
+			require.NoError(t, idx.Verify("v1", []any{pk}, readTS, commitTS))
+			require.Equal(t, readTS, idx.channel("v1").forgottenWriteTS)
+			require.Zero(t, idx.budget.used.Load())
+			requirePartialUpdateRetryable(t, idx.Verify("v1", []any{pk}, readTS-1, commitTS))
+
+			idx.Advance(tsoutil.AddPhysicalDurationOnTs(commitTS, time.Hour))
+			require.Equal(t, readTS, idx.channel("v1").forgottenWriteTS)
+			require.NoError(t, idx.Verify("v1", []any{pk}, readTS, commitTS))
+		})
+	}
 }
 
-func TestPKVersionIndexDirectlyRejectsReadWindowBeyondTTL(t *testing.T) {
-	idx := newPKVersionIndex(30*time.Second, versionIndexBudgetForEntries(100))
-	readTS := tsoutil.ComposeTSByTime(time.Now())
-	commitTS := tsoutil.AddPhysicalDurationOnTs(readTS, 31*time.Second)
+func TestPKVersionIndexRejectsConflictAfterEviction(t *testing.T) {
+	for _, pk := range []any{int64(1), "pk-1"} {
+		t.Run(fmt.Sprint(pk), func(t *testing.T) {
+			idx := newPKVersionIndex(30*time.Second, versionIndexBudgetForEntries(2))
+			readTS := tsoutil.ComposeTSByTime(time.Now())
+			writeTS := tsoutil.AddPhysicalDurationOnTs(readTS, time.Second)
+			commitTS := tsoutil.AddPhysicalDurationOnTs(readTS, time.Hour)
+			idx.UpdateAll("v1", []any{pk}, writeTS)
+			idx.Advance(commitTS)
+			require.Zero(t, idx.budget.used.Load())
+			requirePartialUpdateRetryable(t, idx.Verify("v1", []any{pk}, readTS, commitTS))
+			require.NoError(t, idx.Verify("v1", []any{pk}, writeTS, commitTS))
+			// TimeTick cleanup on this WAL must not invalidate other channels.
+			require.NoError(t, idx.Verify("v2", []any{pk}, readTS, commitTS))
+		})
+	}
+}
 
-	requirePartialUpdateRetryable(t, idx.channel("").verifyReadWindowLocked(readTS, commitTS))
+func TestPKVersionIndexForgottenBudgetWriteNeverExpires(t *testing.T) {
+	for _, pk := range []any{int64(1), "pk-1"} {
+		t.Run(fmt.Sprint(pk), func(t *testing.T) {
+			idx := newPKVersionIndex(30*time.Second, 0)
+			writeTS := tsoutil.ComposeTSByTime(time.Now())
+			commitTS := tsoutil.AddPhysicalDurationOnTs(writeTS, time.Hour)
+			idx.UpdateAll("v1", []any{pk}, writeTS)
+			idx.Advance(commitTS)
+			requirePartialUpdateRetryable(t, idx.Verify("v1", []any{pk}, writeTS-1, commitTS))
+			require.NoError(t, idx.Verify("v1", []any{pk}, writeTS, commitTS))
+			idx.UpdateAll("v1", []any{pk}, writeTS-1)
+			require.Equal(t, writeTS, idx.channel("v1").forgottenWriteTS)
+		})
+	}
 }
 
 func TestPKVersionIndexBudgetFailsClosed(t *testing.T) {
@@ -136,7 +183,8 @@ func TestPKVersionIndexBudgetFailsClosed(t *testing.T) {
 	channel.mu.Lock()
 	require.Len(t, channel.expirations, 1)
 	channel.mu.Unlock()
-	requirePartialUpdateRetryable(t, idx.Verify("v1", nil, 11, 12))
+	requirePartialUpdateRetryable(t, idx.Verify("v1", nil, 10, 12))
+	require.NoError(t, idx.Verify("v1", []any{int64(2)}, 11, 12))
 }
 
 func TestPKVersionIndexUpdatesExistingPKAtCapacity(t *testing.T) {
@@ -164,7 +212,7 @@ func TestPKVersionIndexIgnoresOlderWriteForExistingPK(t *testing.T) {
 
 func TestPKVersionIndexIgnoresWriteOlderThanRetention(t *testing.T) {
 	idx := newPKVersionIndex(30*time.Second, versionIndexBudgetForEntries(1))
-	idx.channel("v1").retainedSinceTS = 100
+	idx.channel("v1").forgottenWriteTS = 100
 	idx.UpdateAll("v1", []any{int64(1)}, 90)
 
 	size, _ := snapshotPKVersionIndex(idx)
@@ -312,7 +360,8 @@ func TestPKVersionIndexAccountsStringBytes(t *testing.T) {
 	idx.UpdateAll("v1", []any{strings.Repeat("x", 4)}, 101)
 
 	require.Equal(t, budget, idx.budget.used.Load())
-	requirePartialUpdateRetryable(t, idx.Verify("v1", nil, 101, 102))
+	requirePartialUpdateRetryable(t, idx.Verify("v1", nil, 100, 102))
+	require.NoError(t, idx.Verify("v1", nil, 101, 102))
 }
 
 func TestPKVersionIndexBudgetMissIsVChannelScoped(t *testing.T) {
@@ -321,7 +370,8 @@ func TestPKVersionIndexBudgetMissIsVChannelScoped(t *testing.T) {
 	idx.UpdateAll("v2", []any{int64(2)}, 101)
 
 	require.NoError(t, idx.Verify("v1", nil, 100, 102))
-	requirePartialUpdateRetryable(t, idx.Verify("v2", nil, 101, 102))
+	requirePartialUpdateRetryable(t, idx.Verify("v2", nil, 100, 102))
+	require.NoError(t, idx.Verify("v2", nil, 101, 102))
 }
 
 func TestPKVersionIndexKeepsVChannelsSeparate(t *testing.T) {

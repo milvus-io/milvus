@@ -43,6 +43,7 @@ import (
 	chaintypes "github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -1224,7 +1225,8 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 }
 
 type requeryOperator struct {
-	readSchema *schemaInfo
+	readSchema     *schemaInfo
+	queryViewPlans []queryclient.ShardPlan
 
 	traceCtx         context.Context
 	outputFieldNames []string
@@ -1247,11 +1249,9 @@ type requeryOperator struct {
 	node taskmodel.TaskNode
 }
 
-func newRequeryOperator(t *SearchTask, _ map[string]any) (operator, error) {
-	pkField, err := t.schema.GetPkField()
-	if err != nil {
-		return nil, err
-	}
+// requeryOutputFields is shared by Phase 1 dependency validation and field refill.
+// These internal dependencies do not change the final user output projection.
+func (t *SearchTask) requeryOutputFields() []string {
 	outputFieldNames := typeutil.NewSet(t.translatedOutputFields...)
 	if t.GetIsAdvanced() && t.rerankMeta != nil {
 		outputFieldNames.Insert(t.rerankMeta.GetInputFieldNames()...)
@@ -1271,6 +1271,14 @@ func newRequeryOperator(t *SearchTask, _ map[string]any) (operator, error) {
 			outputFieldNames.Insert(highlightDynFields...)
 		}
 	}
+	return outputFieldNames.Collect()
+}
+
+func newRequeryOperator(t *SearchTask, _ map[string]any) (operator, error) {
+	pkField, err := t.schema.GetPkField()
+	if err != nil {
+		return nil, err
+	}
 	queryChannelsNode := make(map[string]int64)
 	if t.queryChannelsNode != nil {
 		t.queryChannelsNode.Range(func(channel string, nodeID int64) bool {
@@ -1288,8 +1296,9 @@ func newRequeryOperator(t *SearchTask, _ map[string]any) (operator, error) {
 	}
 	return &requeryOperator{
 		readSchema:         t.schema,
+		queryViewPlans:     t.queryViewPlans,
 		traceCtx:           t.TraceCtx(),
-		outputFieldNames:   outputFieldNames.Collect(),
+		outputFieldNames:   t.requeryOutputFields(),
 		timestamp:          t.BeginTs(),
 		dbName:             dbName,
 		collectionName:     collectionName,
@@ -1357,6 +1366,8 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 		preferredNodes[k] = v
 	}
 	qt := &QueryTask{
+		viewQueryClient: viewQueryClientFromNode(op.node),
+		queryViewPlans:  op.queryViewPlans,
 		baseTask: baseTask{
 			MetaCache: op.node.GetMetaCache(),
 		},

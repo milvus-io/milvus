@@ -27,27 +27,23 @@
 
 #include <folly/synchronization/DistributedMutex.h>
 
-#include "cachinglayer/CacheSlot.h"
 #include "common/OpContext.h"
 #include "common/Types.h"
-#include "index/contracts/query/IIndexReaderBase.h"
+#include "index/contracts/IIndex.h"
 #include "segcore/indexing/FieldIndexCapability.h"
-#include "segcore/indexing/IndexPin.h"
+#include "index/contracts/query/IIndexReaderBase.h"
 
-// Sealed index registrations, resolved metadata/slots, and reader pins.
-// Keep an IndexPin alive while using its borrowed reader.
+// Sealed index registrations, resolved owners, and request readers.
+// Keep each request reader alive while using interfaces borrowed from it.
 namespace milvus::segcore {
 
 class IndexInventory {
  public:
-    using RootSlot = std::shared_ptr<
-        milvus::cachinglayer::CacheSlot<index::IIndexReaderBase>>;
-
     struct ResolvedData {
         std::string family;
         DataType value_type;
         index::ReaderCaps caps;
-        RootSlot slot;
+        index::IndexPtr index;
     };
 
     using Factory = std::function<ResolvedData(milvus::OpContext*)>;
@@ -55,7 +51,7 @@ class IndexInventory {
     // Runtime snapshots share entries and their initialization results.
     class Entry {
      public:
-        Entry(IndexCapabilityEntry meta, RootSlot slot);
+        Entry(IndexCapabilityEntry meta, index::IndexPtr index);
         Entry(IndexRegistration registration, Factory factory);
 
         const IndexRegistration&
@@ -66,8 +62,12 @@ class IndexInventory {
         const ResolvedData&
         Resolve(milvus::OpContext* op_ctx) const;
 
-        RootSlot
+        index::IndexPtr
         Peek() const;
+
+        // Retirement is remembered even when lazy initialization has not finished.
+        void
+        CancelWarmup() const;
 
      private:
         // Registration is immutable; resolved data is immutable once ready.
@@ -77,16 +77,16 @@ class IndexInventory {
         mutable folly::DistributedMutex init_mutex_;
         // Publishes resolved_ to Resolve() and Peek() without taking the lock.
         mutable std::atomic<bool> ready_{false};
+        mutable std::atomic<bool> retired_{false};
     };
 
     // ---- Build side (load) --------------------------------------------------
-    // Installs a shared entry without resolving it. Returns the replaced entry's
-    // existing slot, if any; retire it after publishing the new runtime.
-    RootSlot
+    // Installs a shared entry without resolving it. Returns the replaced entry, if any; retire it after publishing the new runtime.
+    std::shared_ptr<Entry>
     Register(std::shared_ptr<Entry> entry);
 
-    // Returns the removed slot for post-publication retirement.
-    RootSlot
+    // Returns the removed entry for post-publication retirement.
+    std::shared_ptr<Entry>
     Drop(const IndexKey& key);
 
     // Resolves this field's entries and assembles a fresh capability list.
@@ -102,15 +102,14 @@ class IndexInventory {
     std::vector<IndexRegistration>
     Entries(FieldId field_id) const;
 
-    // Internal lifecycle snapshot for post-publication warmup retirement.
-    // Query consumers never receive slots through this API.
-    std::vector<RootSlot>
-    Slots() const;
+    // Retain all entries without resolving them, for post-publication retirement.
+    std::vector<std::shared_ptr<Entry>>
+    SnapshotEntries() const;
 
-    // Pins the selected key, resolving its entry and loading its reader if needed.
-    // Missing keys return an empty pin; resolution, load, and caps errors propagate.
-    IndexPin
-    PinIndex(milvus::OpContext* op_ctx, const IndexKey& key) const;
+    // Resolves the selected key and retains its request reader.
+    // Missing keys return nullptr; resolution, load, and caps errors propagate.
+    index::IIndexReaderBasePtr
+    CreateIndexReader(milvus::OpContext* op_ctx, const IndexKey& key) const;
 
  private:
     using FieldEntries =
@@ -121,9 +120,8 @@ class IndexInventory {
 // Related ownership boundaries:
 //   - Element-to-row offsets are column-derived runtime state, shared by struct
 //     fields and replaced with the column. Readers must not retain stale copies.
-//   - Readers report owned resources through IIndexReaderBase; translators
-//     handle cache admission/accounting. Remote artifact estimates are not
-//     memory usage.
+//   - Concrete storage cells report cache usage; remote artifact estimates
+//     describe admission requirements rather than live memory usage.
 //   - GrowingIndexSet uniquely owns growing publishers; GrowingIndexSnapshotPin retains one
 //     published reader generation and its contiguous row coverage together.
 
