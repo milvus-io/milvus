@@ -375,6 +375,57 @@ func (s *RowsSuite) TestNullablePointerColumns() {
 	})
 }
 
+func (s *RowsSuite) TestNullableJSONAndVectorColumns() {
+	type NullableRow struct {
+		ID       int64
+		Meta     *map[string]any
+		FloatVec *[]float32
+		BinVec   *[]byte
+		Fp16Vec  *[]byte
+		Bf16Vec  *[]byte
+		Int8Vec  *[]int8
+	}
+
+	sch := entity.NewSchema().
+		WithField(entity.NewField().WithName("ID").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("Meta").WithDataType(entity.FieldTypeJSON).WithNullable(true)).
+		WithField(entity.NewField().WithName("FloatVec").WithDataType(entity.FieldTypeFloatVector).WithDim(2).WithNullable(true)).
+		WithField(entity.NewField().WithName("BinVec").WithDataType(entity.FieldTypeBinaryVector).WithDim(8).WithNullable(true)).
+		WithField(entity.NewField().WithName("Fp16Vec").WithDataType(entity.FieldTypeFloat16Vector).WithDim(2).WithNullable(true)).
+		WithField(entity.NewField().WithName("Bf16Vec").WithDataType(entity.FieldTypeBFloat16Vector).WithDim(2).WithNullable(true)).
+		WithField(entity.NewField().WithName("Int8Vec").WithDataType(entity.FieldTypeInt8Vector).WithDim(2).WithNullable(true))
+
+	meta := map[string]any{"a": 1}
+	floatVec := []float32{1, 2}
+	binVec := []byte{1}
+	fp16Vec := []byte{1, 2, 3, 4}
+	bf16Vec := []byte{5, 6, 7, 8}
+	int8Vec := []int8{1, 2}
+
+	columns, err := AnyToColumns([]any{
+		&NullableRow{ID: 1, Meta: &meta, FloatVec: &floatVec, BinVec: &binVec, Fp16Vec: &fp16Vec, Bf16Vec: &bf16Vec, Int8Vec: &int8Vec},
+		&NullableRow{ID: 2},
+		&NullableRow{ID: 3, Meta: &meta, FloatVec: &floatVec, BinVec: &binVec, Fp16Vec: &fp16Vec, Bf16Vec: &bf16Vec, Int8Vec: &int8Vec},
+	}, false, sch)
+	s.Require().NoError(err)
+	s.Require().Len(columns, len(sch.Fields))
+
+	for _, col := range columns {
+		s.Equal(3, col.Len(), "column %s length should match row count", col.Name())
+		s.NoError(col.ValidateNullable(), "column %s", col.Name())
+		if col.Name() == "ID" {
+			continue
+		}
+		s.True(col.Nullable(), "column %s should be nullable", col.Name())
+		s.Len(col.FieldData().GetValidData(), 3, "column %s", col.Name())
+		for idx, expectNull := range []bool{false, true, false} {
+			isNull, err := col.IsNull(idx)
+			s.NoError(err)
+			s.Equal(expectNull, isNull, "column %s row %d", col.Name(), idx)
+		}
+	}
+}
+
 func (s *RowsSuite) TestRowsToTimestamptzColumn() {
 	s.Run("plain_time", func() {
 		type TimestamptzRow struct {
