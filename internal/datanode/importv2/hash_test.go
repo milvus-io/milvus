@@ -2,6 +2,11 @@ package importv2
 
 import (
 	"fmt"
+	"math"
+	"os"
+	"path/filepath"
+	"runtime"
+	"runtime/pprof"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -16,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -201,7 +207,7 @@ func TestGetRowsStatsPartitionKeyDefaultError(t *testing.T) {
 	require.Nil(t, stats)
 }
 
-func TestNewHashedData(t *testing.T) {
+func TestGatherHashRowsEmptySelections(t *testing.T) {
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			{
@@ -213,7 +219,7 @@ func TestNewHashedData(t *testing.T) {
 		},
 	}
 
-	got, err := newHashedData(schema, 2, 2, 0)
+	got, err := gatherHashRows(schema, &storage.InsertData{}, [][][]int{{nil, nil}, {nil, nil}})
 	assert.NoError(t, err)
 	assert.Equal(t, 2, len(got))
 	for i := 0; i < 2; i++ {
@@ -303,12 +309,8 @@ func hashSchemaWithVector() *schemapb.CollectionSchema {
 	}
 }
 
-// TestHashDataBySchemaSparseBatchDoesNotOverAllocate pins the floor rowsHint:
-// a batch with fewer rows than buckets must not reserve one full row per
-// bucket (numBuckets x rowSize per batch regardless of batch size, an OOM
-// hazard for high-dim vectors with many partitions). Sparse buckets get zero
-// initial capacity and grow on demand; dense batches still preallocate the
-// average.
+// TestHashDataBySchemaSparseBatchDoesNotOverAllocate verifies that bucket
+// capacity follows routed rows rather than reserving a row in every bucket.
 func TestHashDataBySchemaSparseBatchDoesNotOverAllocate(t *testing.T) {
 	schema := hashSchemaWithVector()
 	vchannels := []string{"c1", "c2", "c3", "c4"}
@@ -341,8 +343,8 @@ func TestHashDataBySchemaSparseBatchDoesNotOverAllocate(t *testing.T) {
 	}
 	assert.Equal(t, 15, emptyBuckets)
 
-	// Dense: 64 rows across 16 buckets -> every bucket preallocates the floor
-	// average of 4 rows (uneven hashing may grow individual buckets further).
+	// Dense: each bucket reserves exactly its routed row count, including
+	// zero capacity for empty buckets when the distribution is uneven.
 	rows, err = storage.NewInsertData(schema)
 	assert.NoError(t, err)
 	for i := 0; i < 64; i++ {
@@ -353,7 +355,7 @@ func TestHashDataBySchemaSparseBatchDoesNotOverAllocate(t *testing.T) {
 	for i := range hashed {
 		for j := range hashed[i] {
 			vec := hashed[i][j].Data[102].(*storage.FloatVectorFieldData)
-			assert.GreaterOrEqual(t, cap(vec.Data), 4*32)
+			assert.Equal(t, vec.RowNum()*32, cap(vec.Data))
 		}
 	}
 }
@@ -586,4 +588,441 @@ func TestMergeHashedStats(t *testing.T) {
 	assert.Equal(t, int64(35), dst["channel1"].PartitionRows[2])
 	assert.Equal(t, int64(150), dst["channel1"].PartitionDataSize[1])
 	assert.Equal(t, int64(350), dst["channel1"].PartitionDataSize[2])
+}
+
+func TestHashDataBySchemaRoutingAndOrder(t *testing.T) {
+	keys := []struct {
+		dataType schemapb.DataType
+		values   []any
+	}{
+		{schemapb.DataType_Int64, []any{int64(0), int64(-1), int64(42), int64(math.MinInt64), int64(math.MaxInt64)}},
+		{schemapb.DataType_VarChar, []any{"", "tenant-a", "租户", "tenant-b", "tenant-a"}},
+	}
+	for _, pk := range keys {
+		// None represents a collection without a partition key.
+		for _, partType := range []schemapb.DataType{schemapb.DataType_None, schemapb.DataType_Int64, schemapb.DataType_VarChar} {
+			for _, channelCount := range []int{1, 3} {
+				for _, partitionCount := range []int{1, 4} {
+					if partType == schemapb.DataType_None && partitionCount != 1 {
+						continue
+					}
+					t.Run(fmt.Sprintf("pk=%s/part=%s/channels=%d/partitions=%d", pk.dataType, partType, channelCount, partitionCount), func(t *testing.T) {
+						schema := typeutil.AppendSystemFields(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+							{FieldID: 100, Name: "pk", DataType: pk.dataType, IsPrimaryKey: true},
+						}})
+						if partType != schemapb.DataType_None {
+							schema.Fields = append(schema.Fields, &schemapb.FieldSchema{FieldID: 101, Name: "part", DataType: partType, IsPartitionKey: true})
+						}
+						channels := make([]string, channelCount)
+						for i := range channels {
+							channels[i] = fmt.Sprintf("channel-%d", channelCount-i)
+						}
+						partitions := make([]int64, partitionCount)
+						for i := range partitions {
+							partitions[i] = int64(100 - i*7)
+						}
+						var input []map[int64]any
+						for i := 0; i < 31; i++ {
+							row := map[int64]any{common.RowIDField: int64(1000 + i), common.TimeStampField: int64(9000 - i), 100: pk.values[i%len(pk.values)]}
+							if partType != schemapb.DataType_None {
+								for _, part := range keys {
+									if part.dataType == partType {
+										row[101] = part.values[(i/2)%len(part.values)]
+									}
+								}
+							}
+							input = append(input, row)
+						}
+						assertHashRows(t, schema, channels, partitions, input)
+					})
+				}
+			}
+		}
+	}
+}
+
+// Exercise logical rows across nulls, including compact nullable vectors. The
+// expected values come from the fixture, not GetRow on the source or HashData.
+func TestHashDataBySchemaFieldValuesAndNulls(t *testing.T) {
+	arrayValue := func(values ...int64) *schemapb.ScalarField {
+		return &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: values}}}
+	}
+	vectorArrayValue := func(values ...float32) *schemapb.VectorField {
+		return &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: values}}}
+	}
+	cases := []struct {
+		dataType schemapb.DataType
+		dim      string
+		element  schemapb.DataType
+		values   []any
+	}{
+		{dataType: schemapb.DataType_Bool, values: []any{false, true, false}},
+		{dataType: schemapb.DataType_Int8, values: []any{int8(0), int8(-7), int8(100)}},
+		{dataType: schemapb.DataType_Int16, values: []any{int16(0), int16(-300), int16(400)}},
+		{dataType: schemapb.DataType_Int32, values: []any{int32(0), int32(-70000), int32(90000)}},
+		{dataType: schemapb.DataType_Int64, values: []any{int64(0), int64(-1), int64(math.MaxInt64)}},
+		{dataType: schemapb.DataType_Timestamptz, values: []any{int64(0), int64(-1234), int64(5678)}},
+		{dataType: schemapb.DataType_Float, values: []any{float32(0), float32(-1.25), float32(3.5)}},
+		{dataType: schemapb.DataType_Double, values: []any{float64(0), float64(-1.25), float64(3.5)}},
+		{dataType: schemapb.DataType_String, values: []any{"", "hello", "中文"}},
+		{dataType: schemapb.DataType_VarChar, values: []any{"", "hello", "中文"}},
+		{dataType: schemapb.DataType_Text, values: []any{"", "hello", "中文"}},
+		{dataType: schemapb.DataType_JSON, values: []any{[]byte("{}"), []byte(`{"n":1}`), []byte(`{"s":"中文"}`)}},
+		{dataType: schemapb.DataType_Geometry, values: []any{[]byte{1, 2}, []byte{3, 4}, []byte{5, 6}}},
+		{dataType: schemapb.DataType_Array, element: schemapb.DataType_Int64, values: []any{arrayValue(), arrayValue(1), arrayValue(-2, 3)}},
+		{dataType: schemapb.DataType_FloatVector, dim: "2", values: []any{[]float32{0, 0}, []float32{1.5, -2}, []float32{3, 4}}},
+		{dataType: schemapb.DataType_BinaryVector, dim: "16", values: []any{[]byte{0, 0}, []byte{1, 2}, []byte{3, 4}}},
+		{dataType: schemapb.DataType_Float16Vector, dim: "2", values: []any{[]byte{0, 0, 0, 0}, []byte{0, 60, 0, 64}, []byte{0, 66, 0, 68}}},
+		{dataType: schemapb.DataType_BFloat16Vector, dim: "2", values: []any{[]byte{0, 0, 0, 0}, []byte{128, 63, 0, 64}, []byte{64, 64, 128, 64}}},
+		{dataType: schemapb.DataType_Int8Vector, dim: "2", values: []any{[]int8{0, 0}, []int8{-1, 2}, []int8{3, -4}}},
+		{dataType: schemapb.DataType_SparseFloatVector, values: []any{
+			typeutil.CreateSparseFloatRow([]uint32{1}, []float32{1}),
+			typeutil.CreateSparseFloatRow([]uint32{2, 9}, []float32{2, 3}),
+			typeutil.CreateSparseFloatRow([]uint32{20}, []float32{4}),
+		}},
+		{dataType: schemapb.DataType_ArrayOfVector, dim: "2", element: schemapb.DataType_FloatVector, values: []any{
+			vectorArrayValue(), vectorArrayValue(1, 2), vectorArrayValue(3, 4, 5, 6),
+		}},
+	}
+	for _, tc := range cases {
+		for _, nullable := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/nullable=%t", tc.dataType, nullable), func(t *testing.T) {
+				field := &schemapb.FieldSchema{FieldID: 102, Name: "payload", DataType: tc.dataType, ElementType: tc.element, Nullable: nullable}
+				if tc.dim != "" {
+					field.TypeParams = []*commonpb.KeyValuePair{{Key: common.DimKey, Value: tc.dim}}
+				}
+				if tc.dataType == schemapb.DataType_JSON {
+					field.Name, field.IsDynamic = common.MetaFieldName, true
+				}
+				schema := typeutil.AppendSystemFields(&schemapb.CollectionSchema{EnableDynamicField: field.IsDynamic, Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+					{FieldID: 101, Name: "part", DataType: schemapb.DataType_Int64, IsPartitionKey: true},
+					field,
+				}})
+				var input []map[int64]any
+				for i := 0; i < 15; i++ {
+					value := tc.values[(i/2)%len(tc.values)]
+					if nullable && i%3 == 0 {
+						value = nil
+					}
+					// Vary keys independently of the validity pattern to exercise
+					// logical-to-physical offsets after gathering into buckets.
+					input = append(input, map[int64]any{common.RowIDField: int64(i), common.TimeStampField: int64(100 + i), 100: int64(i % 2), 101: int64(i % 5), 102: value})
+				}
+				assertHashRows(t, schema, []string{"v2", "v1", "v0"}, []int64{20, 10}, input)
+			})
+		}
+	}
+}
+
+// Use the public hashing primitives as the oracle, independently of the
+// production routing closures and row-copy implementation.
+func assertHashRows(t *testing.T, schema *schemapb.CollectionSchema, channels []string, partitions []int64, input []map[int64]any) {
+	t.Helper()
+	source, err := storage.NewInsertDataWithFunctionOutputField(schema)
+	require.NoError(t, err)
+	want := make([][][]map[int64]any, len(channels))
+	for c := range want {
+		want[c] = make([][]map[int64]any, len(partitions))
+	}
+	for _, row := range input {
+		require.NoError(t, source.Append(row))
+		c, p := expectedHashBucket(t, row[100], len(channels)), 0
+		if len(partitions) > 1 {
+			p = expectedHashBucket(t, row[101], len(partitions))
+		}
+		want[c][p] = append(want[c][p], row)
+	}
+	got, err := HashDataBySchema(schema, channels, partitions, source)
+	require.NoError(t, err)
+	require.Len(t, got, len(channels))
+	for c := range want {
+		require.Len(t, got[c], len(partitions))
+		for p, rows := range want[c] {
+			bucket := got[c][p]
+			require.NotNil(t, bucket)
+			require.Equal(t, len(rows), bucket.GetRowNum(), "bucket [%d][%d]", c, p)
+			require.Len(t, bucket.Data, len(source.Data))
+			for id, column := range bucket.Data {
+				require.IsType(t, source.Data[id], column)
+				require.Equal(t, source.Data[id].GetDataType(), column.GetDataType())
+				require.Equal(t, source.Data[id].GetNullable(), column.GetNullable())
+				require.Equal(t, len(rows), column.RowNum(), "field %d in bucket [%d][%d]", id, c, p)
+				var validity []bool
+				for i, row := range rows {
+					require.Equal(t, row[id], column.GetRow(i), "field %d, row %d in bucket [%d][%d]", id, i, c, p)
+					validity = append(validity, row[id] != nil)
+				}
+				if column.GetNullable() {
+					if len(rows) == 0 {
+						require.Empty(t, column.GetValidData())
+					} else {
+						require.Equal(t, validity, column.GetValidData())
+					}
+				}
+				if sparse, ok := column.(*storage.SparseFloatVectorFieldData); ok {
+					var dim int64
+					for _, row := range rows {
+						if value, ok := row[id].([]byte); ok {
+							dim = max(dim, typeutil.SparseFloatRowDim(value))
+						}
+					}
+					require.Equal(t, dim, sparse.Dim, "field %d dimension in bucket [%d][%d]", id, c, p)
+				}
+			}
+		}
+	}
+	for i, row := range input {
+		require.Equal(t, row, source.GetRow(i), "source row %d changed during hashing", i)
+	}
+}
+
+func TestHashDataBySchemaAllNullColumn(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{
+			FieldID: 102, Name: "vec", DataType: schemapb.DataType_FloatVector, Nullable: true,
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+		},
+	}}
+	assertHashRows(t, schema, []string{"v1", "v0"}, []int64{10}, []map[int64]any{
+		{100: int64(1), 102: nil}, {100: int64(2), 102: nil}, {100: int64(3), 102: nil},
+	})
+}
+
+func expectedHashBucket(t *testing.T, key any, count int) int {
+	t.Helper()
+	var hash uint32
+	switch key := key.(type) {
+	case int64:
+		var err error
+		hash, err = typeutil.Hash32Int64(key)
+		require.NoError(t, err)
+	case string:
+		hash = typeutil.HashString2Uint32(key)
+	default:
+		t.Fatalf("unsupported fixture key %T", key)
+	}
+	return int(uint64(hash) % uint64(count))
+}
+
+func TestHashDataBySchemaEmptyAndInvalidInput(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}}
+	t.Run("empty_batch", func(t *testing.T) {
+		assertHashRows(t, schema, []string{"v1", "v0"}, []int64{20}, nil)
+	})
+	rows, err := storage.NewInsertData(schema)
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name       string
+		schema     *schemapb.CollectionSchema
+		rows       *storage.InsertData
+		channels   []string
+		partitions []int64
+	}{
+		{"nil_schema", nil, rows, []string{"v0"}, []int64{10}},
+		{"nil_data", schema, nil, []string{"v0"}, []int64{10}},
+		{"no_channels", schema, rows, nil, []int64{10}},
+		{"no_partitions", schema, rows, []string{"v0"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := HashDataBySchema(tc.schema, tc.channels, tc.partitions, tc.rows)
+			require.ErrorIs(t, err, merr.ErrServiceInternal)
+			require.Nil(t, got)
+		})
+	}
+	t.Run("no_primary_key", func(t *testing.T) {
+		_, wantErr := typeutil.GetPrimaryFieldSchema(&schemapb.CollectionSchema{})
+		require.Error(t, wantErr)
+		got, err := HashDataBySchema(&schemapb.CollectionSchema{}, []string{"v0"}, []int64{10}, rows)
+		require.Error(t, err)
+		require.Equal(t, merr.Code(wantErr), merr.Code(err))
+		require.Nil(t, got)
+	})
+}
+
+func TestHashDataBySchemaStructSubfieldsAndFunctionOutput(t *testing.T) {
+	schema := typeutil.AppendSystemFields(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 102, Name: "function_output", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: 110, Name: "items", Nullable: true,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 111, Name: "items.price", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: true},
+				{
+					FieldID: 112, Name: "items.vector", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, Nullable: true,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+				},
+			},
+		}},
+	})
+	var input []map[int64]any
+	for i := 0; i < 12; i++ {
+		row := map[int64]any{
+			common.RowIDField: int64(i), common.TimeStampField: int64(100 + i), 100: int64(i % 3),
+			102: typeutil.CreateSparseFloatRow([]uint32{uint32(i + 1)}, []float32{float32(i + 1)}),
+			111: nil, 112: nil,
+		}
+		if i%3 != 0 {
+			row[111] = &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{int64(i), int64(i + 1)}}}}
+			row[112] = &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{float32(i), 1, float32(i + 1), 2}}}}
+		}
+		input = append(input, row)
+	}
+	assertHashRows(t, schema, []string{"v2", "v1", "v0"}, []int64{10}, input)
+}
+
+func TestHashDataBySchemaOwnsDenseVectorBuffers(t *testing.T) {
+	schema := hashSchemaWithVector()
+	source, err := storage.NewInsertData(schema)
+	require.NoError(t, err)
+	vector := make([]float32, 32)
+	vector[0], vector[31] = 1, 2
+	require.NoError(t, source.Append(map[int64]any{100: int64(7), 101: int64(8), 102: vector}))
+	got, err := HashDataBySchema(schema, []string{"v0"}, []int64{10}, source)
+	require.NoError(t, err)
+	bucket := got[0][0]
+	bucket.Data[100].(*storage.Int64FieldData).Data[0] = 70
+	bucket.Data[102].(*storage.FloatVectorFieldData).Data[0] = 99
+	require.Equal(t, int64(7), source.Data[100].GetRow(0))
+	require.Equal(t, float32(1), source.Data[102].(*storage.FloatVectorFieldData).Data[0])
+	source.Data[102].(*storage.FloatVectorFieldData).Data[31] = 88
+	require.Equal(t, float32(2), bucket.Data[102].(*storage.FloatVectorFieldData).Data[31])
+}
+
+func TestHashDataBySchemaGatherErrors(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 102, Name: "value", DataType: schemapb.DataType_Int64},
+	}}
+	t.Run("unknown_source_field", func(t *testing.T) {
+		rows := &storage.InsertData{Data: map[int64]storage.FieldData{
+			100: &storage.Int64FieldData{Data: []int64{1}},
+			999: &storage.Int64FieldData{Data: []int64{2}},
+		}}
+		got, err := HashDataBySchema(schema, []string{"v0"}, []int64{10}, rows)
+		require.Nil(t, got)
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+	})
+	t.Run("incompatible_source_column", func(t *testing.T) {
+		rows := &storage.InsertData{Data: map[int64]storage.FieldData{
+			100: &storage.Int64FieldData{Data: []int64{1}},
+			102: &storage.StringFieldData{Data: []string{"wrong type"}},
+		}}
+		got, err := HashDataBySchema(schema, []string{"v0"}, []int64{10}, rows)
+		require.Nil(t, got)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+}
+
+func BenchmarkHashDataBySchema(b *testing.B) {
+	for _, tc := range []struct {
+		name     string
+		dim      int
+		scalars  int
+		nullable bool
+		skewed   bool
+	}{
+		{name: "wide_fields", dim: 128, scalars: 32},
+		{name: "high_dim_skewed", dim: 768, scalars: 8, skewed: true},
+		{name: "nullable_vector", dim: 768, scalars: 8, nullable: true},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			const rowCount = 4096
+			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "part", DataType: schemapb.DataType_Int64, IsPartitionKey: true},
+				{
+					FieldID: 102, Name: "vec", DataType: schemapb.DataType_FloatVector, Nullable: tc.nullable,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: fmt.Sprint(tc.dim)}},
+				},
+			}}
+			for i := 0; i < tc.scalars; i++ {
+				schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+					FieldID: int64(103 + i), Name: fmt.Sprintf("scalar%d", i), DataType: schemapb.DataType_Int64,
+				})
+			}
+			schema = typeutil.AppendSystemFields(schema)
+			rows, err := storage.NewInsertData(schema)
+			require.NoError(b, err)
+			vector := make([]float32, tc.dim)
+			for i := range vector {
+				vector[i] = float32(i+1) / float32(tc.dim)
+			}
+			for i := 0; i < rowCount; i++ {
+				partitionKey := int64(i*97 + 17)
+				if tc.skewed {
+					partitionKey = 7
+				}
+				row := map[int64]any{
+					common.RowIDField: int64(i), common.TimeStampField: int64(1000 + i),
+					100: int64(i), 101: partitionKey, 102: vector,
+				}
+				if tc.nullable && (i*73+19)%100 < 50 {
+					row[102] = nil
+				}
+				for j := 0; j < tc.scalars; j++ {
+					row[int64(103+j)] = int64(i + j)
+				}
+				require.NoError(b, rows.Append(row))
+			}
+			channels := []string{"v0", "v1", "v2", "v3"}
+			partitions := make([]int64, 16)
+			for i := range partitions {
+				partitions[i] = int64(i + 1)
+			}
+			b.ReportAllocs()
+			b.SetBytes(int64(rows.GetMemorySize()))
+			var result HashedData
+			measureMemory := os.Getenv("MILVUS_HASH_BENCH_MEMORY") == "1"
+			var before runtime.MemStats
+			if measureMemory {
+				runtime.GC()
+				runtime.ReadMemStats(&before)
+			}
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				result, err = HashDataBySchema(schema, channels, partitions, rows)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.StopTimer()
+			if measureMemory {
+				var after, live runtime.MemStats
+				runtime.ReadMemStats(&after)
+				runtime.GC()
+				runtime.ReadMemStats(&live)
+				b.ReportMetric(float64(before.HeapAlloc), "heap_base_B")
+				b.ReportMetric(float64(after.HeapAlloc), "heap_after_B")
+				b.ReportMetric(float64(live.HeapAlloc), "heap_live_B")
+				b.ReportMetric(float64(before.HeapInuse), "heap_inuse_base_B")
+				b.ReportMetric(float64(after.HeapInuse), "heap_inuse_after_B")
+				b.ReportMetric(float64(live.HeapInuse), "heap_inuse_live_B")
+				if path := os.Getenv("MILVUS_HASH_BENCH_HEAP_PROFILE"); path != "" {
+					profileDir, err := os.OpenRoot(filepath.Dir(path))
+					require.NoError(b, err)
+					b.Cleanup(func() { require.NoError(b, profileDir.Close()) })
+					profile, err := profileDir.Create(filepath.Base(path))
+					require.NoError(b, err)
+					err = pprof.WriteHeapProfile(profile)
+					closeErr := profile.Close()
+					require.NoError(b, err)
+					require.NoError(b, closeErr)
+				}
+				runtime.KeepAlive(rows)
+				runtime.KeepAlive(result)
+			}
+			b.ReportMetric(float64(rowCount)*float64(b.N)/b.Elapsed().Seconds(), "rows/s")
+			var totalRows int
+			for _, buckets := range result {
+				for _, bucket := range buckets {
+					totalRows += bucket.GetRowNum()
+				}
+			}
+			require.Equal(b, rowCount, totalRows)
+		})
+	}
 }
