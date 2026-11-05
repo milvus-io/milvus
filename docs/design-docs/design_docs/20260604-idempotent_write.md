@@ -25,9 +25,9 @@ restart or a WAL failover rather than only covering in-process retries.
 
 This document owns the client contract and dedup-window behavior.
 [WALSummary Design](wal/summary.md) owns the shared storage format, persistence,
-recovery, retention and GC protocols. The standalone summary is implemented;
-connecting it to recovery and restoring interceptor windows remains the
-[async integration work](wal/summary.md#7-implementation-and-integration-status).
+recovery, retention and GC protocols. RecoveryStorage restores interceptor
+windows at the startup barrier using a bounded newest-history read; see
+[WALSummary integration](wal/summary.md#7-implementation-and-integration-status).
 
 Idempotency is always available for `Insert`: a non-empty client-supplied key
 opts that request into deduplication. A request without a key is an ordinary
@@ -69,8 +69,9 @@ cannot be done correctly for autoID collections at all.
 - An `Insert` retried with the same idempotency key is applied at most once.
 - A duplicate retry returns the original attempt's primary keys, so the client's view
   of assigned IDs is stable across retries.
-- The guarantee survives streaming node restart and WAL failover, including an outage
-  long enough that wall-clock TTLs would have expired.
+- Retained records survive streaming node restart and WAL failover within the
+  configured PChannel TTL and size budget. Process-local access refreshes are not
+  a recovery guarantee.
 - No data loss in the summary store under any crash point.
 - Keyless inserts bypass request-level deduplication and create no idempotency records.
 
@@ -108,14 +109,20 @@ Legacy global or collection enable settings have no effect.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `streaming.idempotency.maxBytesPerWindow` | `16MiB` | Per-vchannel in-memory window cap. Nothing is evicted until this is reached; then oldest-first. |
+| `streaming.idempotency.ttlPerPChannel` | `1h` | Idle TTL for committed records in a PChannel. Duplicate access refreshes it in memory; recovery uses original commit time. |
+| `streaming.idempotency.maxSizePerPChannel` | `256MB` | Estimated record bytes shared across all VChannels in one PChannel, evicted by last access. Recovery plans newest chunks by encoded Insert + Idempotency section bytes, including one boundary chunk. |
+| `streaming.idempotency.bestEffortMinCountPerVChannel` | `16` | Soft per-VChannel count preference under capacity pressure; TTL and PChannel capacity override it. Recovery reserves no minimum. |
 | `streaming.summary.maxBytesPerPChannel` | `4GB` | Shared WALSummary retained-object byte budget per pchannel. GC-eligible chunks remain retained until this budget is exceeded; `0` disables the byte bound. |
 | `streaming.idempotency.maxKeyLength` | `256` | Maximum accepted explicit key length in bytes. |
 
-The retained-object budget is pchannel-wide, while the in-memory window cap
-is per vchannel. This affects the effective retry horizon on a shared pchannel;
-see [Retention](#retention). The mapping to the standalone manager and its
-independent sealing triggers is described in
+Idempotency retention is captured when a WAL opens; these three settings are
+not dynamically refreshed. Nonpositive TTL or maxSize uses the default;
+minCount zero disables the soft preference. The former
+`streaming.idempotency.maxBytesPerWindow` remains registered but no longer
+controls retention. No alias is provided for the unreleased unscoped names.
+
+The shared retained-object budget remains independent of the idempotency cache;
+see [Retention](#retention) and
 [WALSummary configuration](wal/summary.md#34-configuration-and-checkpoint-integration).
 
 ### Client API
@@ -248,37 +255,64 @@ One window per vchannel, keyed by idempotency key. `Begin(key)` returns one of:
 
 ### Retention
 
-Retention is **byte-bounded at both layers**, and neither of them promises a duration.
+**Committed records in memory, per PChannel.** All VChannel windows share one
+estimated byte counter and last-access order. A completed append starts its idle
+TTL. A duplicate access refreshes the TTL and moves the record to the newest
+position. Expired records cannot answer duplicates and are removed in bounded
+cleanup batches even when the channel is idle. Pending owners and waiters retain
+their existing lifecycle and do not count as committed cache entries.
 
-**Window (memory), per vchannel.** Nothing is evicted while the window is under
-`maxBytesPerWindow`. Once it is full, entries are replaced oldest-first by commit
-timetick. There is no TTL and no minimum entry count. This is the layer that
-bounds anything per vchannel, and it is the right one: memory is what a vchannel
-consumes individually.
+When `maxSizePerPChannel` is exceeded, capacity eviction first selects the oldest
+record among VChannels with more than `bestEffortMinCountPerVChannel` records. If none is
+above that count, it evicts the globally oldest record. TTL always takes
+precedence. The count is a soft preference, with no guaranteed retention period
+or per-VChannel memory reservation. Whole records are evicted; an indivisible
+record larger than the PChannel budget cannot remain cached. The byte estimate
+counts retained request/result data, not all Go container overhead or process RSS.
 
-**Store (objects), per pchannel.** Durable retry history follows
-[WALSummary retention](wal/summary.md#4-retention-gc). The idempotency consumer
-accepts expiry under the shared Summary retention budget; consumers requiring data
-for materialization supply their own durable GC frontiers. Production wiring
-uses the byte budget and does not configure a chunk-count bound. Eligibility
-alone does not remove a chunk: retention first requires exceeding the budget.
-There is no minimum retention duration or time-based expiry. The in-memory
-window and durable history can therefore retain different spans. On a busy
-pchannel, traffic from other vchannels can shorten a quiet vchannel's history
-after recovery. Neither layer promises a minimum retention duration.
+**Recovery, per PChannel.** Before accepting appends, RecoveryStorage captures an
+atomic pending/sealed/durable Summary view. Before object I/O it selects a newest
+chunk suffix using manifest TimeTicks and the sum of the eligible VChannels'
+Insert and Idempotency section lengths. Pending records use their encoded fact
+size; sealed sections use equivalent protobuf lengths. These bytes are charged
+before key deduplication. One whole boundary chunk is included, so selection
+can exceed the byte target by that boundary block. There is no per-VChannel
+count reservation or decode-dependent extension into older chunks.
 
-Two consequences follow, and both must be stated plainly because they change what
-the feature promises:
+Selected durable chunks are scheduled oldest first in batches of at most four
+concurrent reads through the shared cache. After each batch joins, acquired
+payloads are re-admitted/promoted oldest to newest, so out-of-order downloads
+cannot leave old chunks favored over new ones. The encoded bytes remain
+available for TransformLog reads under the same cache budget. Sections are
+processed individually, without a whole-chunk candidate array and sort. Ordered chunk boundaries and
+each VChannel's ordered section survive into the startup snapshot. A newer key
+version removes the old slot and appends at its chronological position; stable
+compaction discards obsolete slots, without sorting. The compatibility map and
+ordered view share the same immutable Record/result data.
 
-- **Duplicate visibility is measured in bytes of writes, not in time.** On a busy
-  pchannel the retained window may span minutes; on a quiet one it may span days.
-- **An idle vchannel does not release its window over time.** Memory is bounded by
-  `maxBytesPerWindow`, not reclaimed by inactivity.
+The interceptor merges sections within each chunk directly into its PChannel
+window, with O(VChannel-count-in-chunk) cursors. The common single-section case
+needs no heap maintenance. There is no per-VChannel recovery sort or subsequent
+full-record aggregation/global sort on WAL startup. Generic unordered Snapshot
+callers retain the sorting fallback. This changes neither original-age TTL nor
+capacity/soft-floor eviction decisions. Required read/decode errors
+cancel and join the batch and fail recovery without a partial window.
 
-This is deliberate. A byte-bounded rule is invalidated only by new data arriving,
-which is exactly the condition under which forgetting old keys is safe; a horizon
-expressed in time is invalidated by time passing, so a time-only rule would empty
-the window after an outage -- exactly when a resuming client needs it.
+Original commit age is used for TTL filtering and window reconstruction; access
+refreshes are never persisted. The live window still applies its estimated
+record-byte cap before accepting appends. Whole-object transfer, decoding and
+bounded concurrent payloads have additional costs: the selection target is not
+a download or RSS limit. A frequently retried old key may disappear on restart
+even if it was still cached in the former process.
+
+**Store objects, per PChannel.** Durable shared history follows
+[WALSummary retention](wal/summary.md#4-retention-gc), independently of the cache
+TTL and byte budget. Idempotency accepts expiry under that shared budget;
+materialization consumers retain their own durable GC frontiers. This change
+neither filters other consumers' records nor changes checkpoint/GC safety. The
+cache can retain less history than the shared store, and recovery can return
+less history than the former process's cache. Neither TTL nor minCount promises
+a minimum duplicate visibility duration under capacity pressure.
 
 ### DDL that empties a collection
 
@@ -456,15 +490,17 @@ several messages split from one old insert can share a TimeTick.
 
 Trade-offs that were argued and settled, with what was rejected and why.
 
-### Retention is byte-bounded, with no duration promised
+### PChannel TTL and budget with soft VChannel protection
 
-The window evicts oldest-first once `maxBytesPerWindow` is reached. An entry
-count does not bound memory because one entry may carry many primary keys.
-A wall-clock TTL would discard the retry history during an outage, precisely
-when a resuming client needs it. The feature therefore promises neither a TTL
-nor a minimum duration; see [Retention](#retention).
+A global byte budget bounds retained result data without multiplying a per-window
+budget by the number of VChannels. Idle TTL reclaims inactive history. Last-access
+ordering lets active retries extend their in-memory visibility; those refreshes
+are deliberately not a durability promise. A soft record count gives quiet
+VChannels some preference without adding per-VChannel recovery scans or strong
+reservations. Recovery instead reads only the newest eligible suffix; see
+[Retention](#retention).
 
-The separate object-budget and consumer-frontier decisions are documented in
+The shared object budget and consumer-frontier decisions remain documented in
 [WALSummary retention](wal/summary.md#4-retention-gc).
 
 ### DDL preserves request history
@@ -494,8 +530,9 @@ without a key do not acquire an idempotency identity retroactively.
 
 `InsertMessageHeader.idempotent_result` remains an optional field; older readers
 ignore it. Reader-side physical deduplication and WALSummary are always active.
-The current RecoveryStorage reads Summary for transform recovery and runs
-retention GC; restoring idempotency interceptor windows remains follow-up work.
+RecoveryStorage reads Summary for transform recovery and bounded idempotency
+restoration, and runs shared retention GC. Existing Summary data remains readable;
+no access timestamp or per-key eviction cursor is added to the durable format.
 
 **No data migration.** The feature is unreleased; there is no earlier on-disk format.
 
@@ -503,7 +540,8 @@ retention GC; restoring idempotency interceptor windows remains follow-up work.
 
 **Unit** — proxy explicit-key opt-in, keyless pass-through, ignored legacy
 switches, key length validation, autoID routing stability and result merging; window
-owner/wait/duplicate decisions, byte-cap eviction, restore-from-snapshot,
+owner/wait/duplicate decisions, cross-VChannel LRU eviction, idle TTL cleanup,
+soft-count preference, original-age restoration, restore-from-snapshot,
 transaction commit dedup with rollback synthesis, expired transaction buffers,
 replicated bypass, and DDL preservation of request history.
 
@@ -513,13 +551,18 @@ Shared codec, persistence, recovery and GC tests are described in
 **StreamingNode integration** — `TestWALIdempotencyAppend` in
 `wal_idempotency_test.go` checks duplicate responses within one open WAL,
 including the original message ID, TimeTick and last-confirmed position.
-This test does not prove durable window recovery. Summary write/restore and
-checkpoint-gating tests exercise the shared storage integration, while restoring
-the interceptor's idempotency windows remains unfinished.
+`TestRecoveryStartsWALSummary` reopens the WAL and verifies the
+original append result. Bounded recovery tests assert actual chunk-read counts,
+TTL boundaries, duplicate-key selection, keyless skipping, cancellation, and
+snapshot consistency across concurrent seal/upload/append transitions.
 
-**Known gaps:** SDK → proxy → full interceptor-chain coverage, durable-window
-recovery through that chain, failover during an in-flight append, and long-running
-memory tests under skewed shard load.
+A local SDK → proxy → full interceptor-chain experiment with a one-minute TTL
+also checks duplicate autoIDs before and after restarting the same persistent
+namespace: local accesses keep an old entry alive, a recent entry restores its
+original result, and the old entry's access refresh does not survive restart.
+
+**Known gaps:** an automated SDK restart harness, failover during an in-flight
+append, and long-running memory tests under skewed shard load.
 
 ## Future Work
 
@@ -530,10 +573,6 @@ memory tests under skewed shard load.
   [section indexes](wal/summary.md#25-chunk-format-and-read-validation) to load
   keys and offsets first and fetch primary keys only when a duplicate is served.
   This requires a consumer read path that does not eagerly rebuild full results.
-- **Durable window integration.** Connect window restoration to the shared
-  [async recovery workflow](wal/summary.md#7-implementation-and-integration-status).
-  Additional summary consumers and their retention requirements belong to that
-  design rather than this feature's API contract.
 
 ## Known Limitations
 
@@ -541,14 +580,13 @@ memory tests under skewed shard load.
   nothing was written, but some WAL implementations may land the write despite returning
   an error (the pulsar walimpls documents exactly this). In that window a same-key retry
   re-owns the key and appends again, producing duplicate rows — the same outcome a retry
-  without idempotency would produce. The planned recovery integration must
-  reconstruct landed keys from summary data and replay; the current branch does
-  not yet wire this into WAL open. Closing the live-process gap requires the
-  window to reconcile against the recovery-side observer.
-- **Visibility is a byte budget, not a promise in time.** Two shards with different write
-  rates have very different effective dedup horizons.
-- **Idle windows are not released.** Memory is bounded by `maxBytesPerWindow` but is not
-  reclaimed by inactivity.
+  without idempotency would produce. WAL open reconstructs retained landed keys
+  from Summary and replay within the configured TTL and budget. Closing the
+  live-process gap requires reconciliation against the recovery-side observer.
+- **Retention is bounded.** Capacity pressure can shorten the effective retry
+  horizon; process-local access refreshes are not restored after failover.
+- **The byte budget is not RSS.** Expiry removes cached records, while window
+  metadata, in-flight requests, Summary objects and decoding have separate costs.
 - **Shared-store limitations.** Assignment identity, checkpoint fencing and
   unresolved cross-owner GC constraints are described in
   [WALSummary](wal/summary.md#63-storage-lifetime-and-failure-boundaries).

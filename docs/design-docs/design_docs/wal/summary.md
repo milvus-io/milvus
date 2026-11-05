@@ -462,16 +462,35 @@ more objects; discovery must still consider all of them.
 ### 5.1 Idempotency
 
 [Idempotent Write](../20260604-idempotent_write.md) owns key derivation, duplicate
-responses and per-vchannel window eviction. WALSummary stores the committed
-facts needed to reconstruct those responses: the key and original row offsets
+responses and PChannel cache retention with soft per-VChannel preferences.
+WALSummary stores the committed facts needed to reconstruct those responses: the key and original row offsets
 from the annotation, plus primary keys and original WAL positions from the
 paired insert record. A committed transaction contributes its committed write
 unit, not independent dedup entries for its uncommitted bodies.
 
 `ReadIdempotencyEntries` and `ReadIdempotencyEntriesOfVChannels` select entries
 by vchannel and TimeTick across retained chunks and in-memory records. The
-consumer rebuilds its window from these records and applies its own memory
-budget. WALSummary does not persist window membership or a per-key eviction
+general APIs return the full requested range. Startup uses
+`ReadIdempotencySnapshots`: it captures pending, sealed and durable records at
+one boundary and plans a newest chunk suffix before I/O. Manifest TimeTicks
+apply `streaming.idempotency.ttlPerPChannel`; the sum of Insert and Idempotency
+section lengths charges `maxSizePerPChannel`, including one whole boundary
+chunk. Pending/sealed facts consume equivalent encoded bytes. Keyless sections
+are skipped, repeated keys do not reduce planned encoded cost, and no
+`bestEffortMinCountPerVChannel` reservation expands the suffix.
+
+Selected chunks are read oldest first in bounded batches of four through the
+shared cache. Ordered post-load admission promotes newer chunks even when reads
+finish out of order, without downloading their acquired payloads again. Each
+section is decoded once by this reader and each VChannel/key retains its newest
+result. `ReadIdempotencyRecovery` preserves chunk boundaries and per-section
+TimeTick order through the handoff. Replaced key slots are removed rather than
+updated in place, then compacted without sorting. The per-VChannel compatibility
+view shares the same Record/result objects; `ReadIdempotencySnapshots` remains
+its map-based wrapper. Startup consumes the ordered view by a chunk-local merge,
+not by collecting and sorting all records again. The live window still enforces
+its own record-byte budget. WALSummary
+does not persist access refreshes, window membership or a per-key eviction
 cursor. It does keep runtime consumer frontiers where retention safety requires
 them, as for L0Materializer. DDL does not invalidate executed-request history;
 replicated writes do not contribute foreign keys to the local dedup view.
@@ -908,14 +927,30 @@ RecoveryStorage supplies ordered observation and scheduler lifetime, combines
 AckTracker completion with `LastAcked`, and runs Summary backlog checks
 independently of Tracker stalls and catalog retries.
 At the startup RecoveryBarrier, RecoveryStorage populates
-`RecoverySnapshot.SummarySnapshots` from all retained idempotency sections and
-records staged or sealed during WAL replay, without waiting for their uploads.
-It enumerates VChannels from Summary, including history absent from the current
-write path, and reads the whole retained range rather than filtering by the
-WAL checkpoint. A single multi-VChannel read avoids fetching each chunk once
-per VChannel. The interceptor rebuilds its windows and applies its byte cap
-before the WAL accepts appends. A read or decode failure fails WAL open rather
-than admitting writes with an incomplete deduplication window.
+`RecoverySnapshot.SummarySnapshots` from a manifest-planned newest suffix within
+the PChannel idempotency TTL and encoded-section budget, including one whole
+boundary chunk. Pending, sealed and durable state are captured under the
+manager lock, with a local read pin held through all downloads and decoding.
+Replay-staged facts participate without waiting for uploads. The read is
+independent of the WAL checkpoint and does not enumerate every VChannel.
+
+The chunk list is fixed before object I/O, then read oldest to newest in batches
+of at most four parallel cache reads. Every batch joins before the next begins;
+on failure its remaining readers are cancelled and joined before releasing the
+pin. Ordered cache promotion keeps newer selected chunks resident for subsequent
+TransformLog reads even if old downloads finish last. Sections are decoded
+without building and sorting a full-chunk candidate list. Repeated keys keep
+the newest commit, without extending the selected suffix after deduplication.
+The startup snapshot carries ordered chunk/section groups as well as its
+compatible VChannel map. The interceptor merges only the current chunk's sorted
+sections, using reusable cursors and cached comparison keys, and inserts directly
+into the live window. Snapshot construction and ordered window restoration do
+not perform full-record sorting; the unordered-map fallback remains available
+for other callers. Empty/sparse obsolete sections release their old arrays.
+Original commit age is retained; process-local refreshes and per-VChannel soft
+counts are not recovered. Required read/decode failures fail WAL open instead
+of admitting a partial window. The final live cache applies its record-byte
+budget before writes begin; serialized selection is not a hard transfer/RSS cap.
 
 `ReadTransform` captures durable indexes, sealed records, pending records and
 readable coverage under the same lock. It returns caller-owned whole entries,
@@ -1137,14 +1172,22 @@ across restart. Backlog tests cover source Ack followed by silence,
 pressure-triggered sealing, absence of age-triggered sealing, and cancellation.
 Recovery tests cover retained
 idempotency history before the checkpoint, staged/sealed replay at the barrier,
-and WAL-open failure on unreadable history; interceptor-builder tests verify
-that recovered keys return the original append result without another append.
+and WAL-open failure on unreadable selected history. Bounded idempotency tests
+also check actual payload-read counts, TTL boundary filtering, skipping all-keyless
+objects, encoded-byte planning before deduplication, parallel loads finishing in
+reverse order, newest-cache retention and TransformLog reuse, failed-batch
+cancellation/join, and concurrent seal/upload snapshots;
+interceptor-builder tests verify that recovered keys return the original append
+result without another append.
 These tests do not establish distributed GC safety.
 
 Key source files, relative to the repository root:
 
 - `internal/streamingnode/server/wal/walsummary/{manager,async}.go`: observation,
   sealing, scheduling, confirmation and consumer reads.
+- `internal/streamingnode/server/wal/walsummary/idempotency_recovery.go`:
+  PChannel-budgeted startup selection; `idempotency_recovery_test.go` covers the
+  read boundary and payload fetch behavior.
 - `internal/streamingnode/server/wal/walsummary/{store,recover,gc}.go`: object
   format, manifest discovery, recovery and local garbage collection.
 - Tests in that package, especially `store_test.go`, `recover_test.go`,

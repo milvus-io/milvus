@@ -1806,6 +1806,10 @@ streaming:
     concurrencyRatio: 4 # The concurrency ratio based on number of CPU for wal broadcaster, 4 by default.
   txn:
     defaultKeepaliveTimeout: 10s # The default keepalive timeout for wal txn, 10s by default
+  idempotency:
+    ttlPerPChannel: 1h # Idle TTL for committed Insert keys in each PChannel. Access refreshes are in memory only; recovery uses original commit time. Applied when the WAL opens.
+    maxSizePerPChannel: 256MB # Estimated record-byte budget shared by all VChannels in one PChannel. LRU eviction; not a process RSS limit. Recovery preselects the newest chunks by encoded Insert + Idempotency section bytes, including one boundary chunk.
+    bestEffortMinCountPerVChannel: 16 # Soft capacity preference per VChannel. PChannel TTL and maxSize take precedence; no per-VChannel recovery guarantee. Applied when the WAL opens.
   walWriteAheadBuffer:
     capacity: 64m # WAB cache capacity. Capacity/keepalive eviction only removes records consumed by RecoveryStorage and preserves the durable catchup anchor. Also scales walRateLimit.writeAheadBuffer.slowdownRatio.
     keepalive: 30s # WAB cache TTL. Expired records are evictable only after RecoveryStorage consumes them; the durable catchup anchor is retained.

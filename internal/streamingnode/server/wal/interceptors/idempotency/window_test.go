@@ -40,41 +40,22 @@ func TestIdempotencyWindowBeginCompleteAndDuplicate(t *testing.T) {
 	assert.Equal(t, uint64(100), duplicate.Entry.SourceTimeTick)
 }
 
-// Complete order is append-completion order, not commit-timetick order: the
-// idempotency interceptor is outermost while the timetick is assigned by the
-// inner timetick interceptor, so concurrent appends on one vchannel can
-// complete out of order. commitOrder must stay sorted by commit timetick —
-// eviction and the evicted watermark read its head as "oldest", and the
-// recovery-side window sorts its entries the same way.
-func TestWindowCommitOrderSortedByCommitTimetick(t *testing.T) {
-	window := NewWindow(WindowConfig{})
-	completeKey(t, window, "a", 100)
-	completeKey(t, window, "b", 90)
-	completeKey(t, window, "c", 95)
-
-	require.Equal(t, []IdempotencyKey{"b", "c", "a"}, window.commitOrder)
-
-	// Byte-cap eviction drops the oldest entry by commit timetick ("b"), not
-	// the first-completed one ("a").
+// Capacity follows local access/completion order, independently of the
+// TimeTick order assigned by the inner interceptor.
+func TestWindowEvictionFollowsAccessOrder(t *testing.T) {
 	probe := NewWindow(WindowConfig{})
 	completeKey(t, probe, "a", 100)
 	entrySize := probe.bytes
-	require.Positive(t, entrySize)
-	capped := NewWindow(WindowConfig{MaxBytes: entrySize * 2})
-	completeKey(t, capped, "a", 100)
-	completeKey(t, capped, "b", 90)
-	completeKey(t, capped, "c", 95)
-	require.NotContains(t, capped.entries, IdempotencyKey("b"))
-	require.Contains(t, capped.entries, IdempotencyKey("a"))
-	require.Contains(t, capped.entries, IdempotencyKey("c"))
-	require.Equal(t, BeginDecisionOwner, capped.Begin("b", nil).Decision)
+	window := NewWindow(WindowConfig{MaxSize: entrySize * 2})
+	completeKey(t, window, "a", 100)
+	completeKey(t, window, "b", 90)
+	completeKey(t, window, "c", 95)
+	require.NotContains(t, window.entries, IdempotencyKey("a"))
+	require.Contains(t, window.entries, IdempotencyKey("b"))
+	require.Contains(t, window.entries, IdempotencyKey("c"))
+	require.Equal(t, BeginDecisionOwner, window.Begin("a", nil).Decision)
 }
 
-// The byte cap is the window's only retention bound. Age is deliberately not
-// one: an entry the store handed over is servable however old it is, because an
-// upstream resuming after an outage is exactly who must be deduplicated. What
-// bounds the window instead is memory, since each entry carries the per-row
-// primary keys of its insert.
 func TestWindowByteCapEvictsOldestFirst(t *testing.T) {
 	// Measure the size of one entry so the cap below admits exactly one. Keys and
 	// commit timeticks are chosen so both entries account the same.
@@ -83,7 +64,7 @@ func TestWindowByteCapEvictsOldestFirst(t *testing.T) {
 	entrySize := probe.bytes
 	require.Positive(t, entrySize)
 
-	window := NewWindow(WindowConfig{MaxBytes: entrySize})
+	window := NewWindow(WindowConfig{MaxSize: entrySize})
 	completeKey(t, window, "a", 100)
 	require.Contains(t, window.entries, IdempotencyKey("a"))
 	// The second entry pushes the window over the byte cap; the oldest goes.
@@ -222,7 +203,7 @@ func TestIdempotencyWindowEvictAppliesMaxBytes(t *testing.T) {
 	entrySize := probe.bytes
 	require.Positive(t, entrySize)
 
-	window := NewWindow(WindowConfig{MaxBytes: entrySize * 2})
+	window := NewWindow(WindowConfig{MaxSize: entrySize * 2})
 
 	completeKey(t, window, "key-1", 10)
 	completeKey(t, window, "key-2", 20)
@@ -240,7 +221,7 @@ func TestIdempotencyWindowCompleteReportsEvictionCount(t *testing.T) {
 	entrySize := probe.bytes
 	require.Positive(t, entrySize)
 
-	window := NewWindow(WindowConfig{MaxBytes: entrySize})
+	window := NewWindow(WindowConfig{MaxSize: entrySize})
 
 	begin := window.Begin("key-1", nil)
 	require.Equal(t, BeginDecisionOwner, begin.Decision)
@@ -298,7 +279,7 @@ func TestIdempotencyWindowRestoreDeduplicatesRepeatedKey(t *testing.T) {
 
 	window.mu.Lock()
 	defer window.mu.Unlock()
-	require.Len(t, window.commitOrder, 1, "a repeated key must occupy one commit-order slot")
+	require.Equal(t, 1, window.order.Len(), "a repeated key must occupy one access-order slot")
 	assert.Equal(t, newer.Size(), window.bytes, "the repeated key's bytes must be counted once")
 	entry, ok := window.entries["key-1"]
 	require.True(t, ok)
@@ -306,10 +287,7 @@ func TestIdempotencyWindowRestoreDeduplicatesRepeatedKey(t *testing.T) {
 		"the newest record must win")
 }
 
-// The store's retention budget is per pchannel while the window's is per
-// vchannel, so a restored set can legitimately arrive over this window's cap.
-// It must be trimmed at load rather than carried until the next write, which on
-// an idle vchannel may never come.
+// A standalone window also enforces its manager's global cap while loading.
 func TestIdempotencyWindowRestoreEnforcesByteCap(t *testing.T) {
 	records := make([]*idempotencyview.Record, 0, 8)
 	for i := 0; i < 8; i++ {
@@ -328,7 +306,7 @@ func TestIdempotencyWindowRestoreEnforcesByteCap(t *testing.T) {
 	}
 	// A cap that fits roughly half of them.
 	cap := records[0].Size() * 4
-	window := NewWindowFromSnapshot(WindowConfig{MaxBytes: cap}, &idempotencyview.Snapshot{Records: records})
+	window := NewWindowFromSnapshot(WindowConfig{MaxSize: cap}, &idempotencyview.Snapshot{Records: records})
 
 	window.mu.Lock()
 	defer window.mu.Unlock()
@@ -340,7 +318,7 @@ func TestIdempotencyWindowRestoreEnforcesByteCap(t *testing.T) {
 }
 
 func TestIdempotencyWindowRestoreFromSnapshot(t *testing.T) {
-	// Everything the store hands over is immediately servable, however old it is.
+	// A direct constructor with TTL disabled retains old facts for this join test.
 	window := NewWindowFromSnapshot(WindowConfig{}, &idempotencyview.Snapshot{
 		Records: []*idempotencyview.Record{
 			{

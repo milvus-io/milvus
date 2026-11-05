@@ -2,7 +2,7 @@ package recovery
 
 import (
 	"context"
-	"math"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/idempotencyview"
@@ -70,9 +70,12 @@ L:
 	}
 	snapshot = r.buildInitialRecoverySnapshot()
 	snapshot.TxnBuffer = rs.TxnBuffer()
-	snapshot.SummarySnapshots, err = r.buildIdempotencySnapshots(ctx)
+	snapshot.SummaryRecovery, err = r.buildIdempotencySnapshots(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if snapshot.SummaryRecovery != nil {
+		snapshot.SummarySnapshots = snapshot.SummaryRecovery.VChannels
 	}
 	vchannelCount := len(snapshot.WritePathRecovery.VChannels)
 	segmentCount := len(snapshot.WritePathRecovery.GrowingSegments)
@@ -107,55 +110,16 @@ func (r *recoveryStorageImpl) buildInitialRecoverySnapshot() *RecoverySnapshot {
 	return snapshot
 }
 
-// buildIdempotencySnapshots combines retained chunks with the records staged during
-// startup replay, including sealed chunks whose uploads are still pending. It
-// runs at the recovery barrier before the interceptor accepts writes.
-//
-// The whole retained range is read. What bounds it is retention itself -- the
-// summary applies its retention policy to the chunk set -- and the window
-// applies its own byte cap when it loads them.
-//
-// Transient object reads retry in the shared load until recovery or cancellation.
-// A permanent read failure or cancellation fails WAL open, never yielding a partial window. A
-// window missing entries answers a retry of a write that DID land by appending
-// it again, which is a way to duplicate writes on a channel whose clients were
-// told they had idempotency.
-func (r *recoveryStorageImpl) buildIdempotencySnapshots(
-	ctx context.Context,
-) (map[string]*idempotencyview.Snapshot, error) {
+// buildIdempotencySnapshots restores only the newest retained keyed facts within
+// the PChannel's TTL and size budget. Process-local access refreshes and soft
+// per-VChannel floors are deliberately not recovery promises.
+func (r *recoveryStorageImpl) buildIdempotencySnapshots(ctx context.Context) (*idempotencyview.RecoverySnapshot, error) {
 	if r.summaryManager == nil {
 		return nil, nil
 	}
-	// The vchannels come from the summary rather than the recovered write path:
-	// the write path's vchannels are collections and segments, a different
-	// question from which channels have a dedup history, and a pchannel holds
-	// records for vchannels the write path does not know about yet.
-	vchannels := r.summaryManager.IdempotencyVChannels()
-	if len(vchannels) == 0 {
-		return nil, nil
-	}
-	// One pass over the chunks for ALL vchannels: a chunk is a pchannel-wide
-	// object, so reading them one vchannel at a time would download each chunk
-	// once per vchannel and block the WAL open for as long as that takes.
-	allSections, err := r.summaryManager.ReadIdempotencyEntriesOfVChannels(ctx, vchannels, 0, math.MaxUint64)
+	snapshots, err := r.summaryManager.ReadIdempotencyRecovery(ctx, idempotencyview.LoadRetentionConfig(), time.Now())
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to read the idempotency summary")
-	}
-	snapshots := make(map[string]*idempotencyview.Snapshot, len(vchannels))
-	for _, vchannel := range vchannels {
-		sections, ok := allSections[vchannel]
-		if !ok || len(sections.Inserts) == 0 {
-			continue
-		}
-		records, err := idempotencyview.RecordsFromSections(sections.Idempotency, sections.Inserts)
-		if err != nil {
-			return nil, merr.Wrapf(err, "failed to rebuild the idempotency window of vchannel %s", vchannel)
-		}
-		snapshots[vchannel] = &idempotencyview.Snapshot{
-			PChannel: r.channel.Name,
-			VChannel: vchannel,
-			Records:  records,
-		}
 	}
 	return snapshots, nil
 }
