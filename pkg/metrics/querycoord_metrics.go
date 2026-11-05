@@ -195,6 +195,33 @@ var (
 		}, []string{nodeIDLabelName})
 )
 
+// Load pacing.
+var (
+	QueryCoordLoadPacerBandwidth = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "load_pacer_bandwidth_bytes",
+			Help:      "bytes per second the pacer believes a node loads segments at",
+		}, []string{nodeIDLabelName})
+
+	QueryCoordLoadPacerInflightBytes = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "load_pacer_inflight_bytes",
+			Help:      "bytes of segment data on their way to a node",
+		}, []string{nodeIDLabelName})
+
+	QueryCoordLoadPacerWaitTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "load_pacer_wait_total",
+			Help:      "segment loads the pacer held back in QueryCoord because the node was at its cap",
+		}, []string{nodeIDLabelName})
+)
+
 // RegisterQueryCoord registers QueryCoord metrics
 func RegisterQueryCoord(registry *prometheus.Registry) {
 	QueryCoordLoadDemandMemoryBytes.WithLabelValues(common.DefaultResourceGroupName).Add(0)
@@ -217,6 +244,15 @@ func RegisterQueryCoord(registry *prometheus.Registry) {
 	registry.MustRegister(QueryCoordResourceGroupReplicaTotal)
 	registry.MustRegister(QueryCoordReplicaRONodeTotal)
 	registry.MustRegister(QueryCoordLastHeartbeatTimeStamp)
+	registry.MustRegister(QueryCoordLoadPacerBandwidth)
+	registry.MustRegister(QueryCoordLoadPacerInflightBytes)
+	registry.MustRegister(QueryCoordLoadPacerWaitTotal)
+}
+
+// CleanQueryCoordMetricsWithNodeID drops a gone node's per-node gauges.
+func CleanQueryCoordMetricsWithNodeID(nodeID int64) {
+	QueryCoordLoadPacerBandwidth.DeleteLabelValues(fmt.Sprint(nodeID))
+	QueryCoordLoadPacerInflightBytes.DeleteLabelValues(fmt.Sprint(nodeID))
 }
 
 func CleanQueryCoordMetricsWithCollectionID(collectionID int64) {
