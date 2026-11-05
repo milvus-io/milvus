@@ -603,6 +603,42 @@ func (s *WriteSuite) TestDelete() {
 	})
 }
 
+func (s *WriteSuite) TestDeleteEscapesVarCharIDs() {
+	for _, tc := range []struct {
+		name string
+		pk   string
+		expr string
+	}{
+		{"plain", "abc", `id in ["abc","other"]`},
+		{"double_quote", `a"b`, `id in ["a\"b","other"]`},
+		{"trailing_backslash", `a\`, `id in ["a\\","other"]`},
+		{"literal_escape", `a\n`, `id in ["a\\n","other"]`},
+		{"newline", "a\nb", `id in ["a\nb","other"]`},
+		{"unicode", "a中文", `id in ["a中文","other"]`},
+		{"single_quote", "a'b", `id in ["a'b","other"]`},
+		{"backslash_quote", `a\"b`, `id in ["a\\\"b","other"]`},
+		{"empty_string", "", `id in ["","other"]`},
+	} {
+		s.Run(tc.name, func() {
+			ctx := context.Background()
+			collectionName := s.randString(6)
+			ids := []string{tc.pk, "other"}
+			s.mock.EXPECT().Delete(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DeleteRequest) (*milvuspb.MutationResult, error) {
+				s.Equal(tc.expr, req.GetExpr())
+				return &milvuspb.MutationResult{
+					Status:    merr.Success(),
+					DeleteCnt: 2,
+				}, nil
+			}).Once()
+
+			result, err := s.client.Delete(ctx, NewDeleteOption(collectionName).WithStringIDs("id", ids))
+			s.Require().NoError(err)
+			s.EqualValues(2, result.DeleteCount)
+			s.Equal([]string{tc.pk, "other"}, ids)
+		})
+	}
+}
+
 func TestWithIdempotencyKeyContext(t *testing.T) {
 	parent := context.Background()
 	ctx := withIdempotencyKey(parent, "key-1")

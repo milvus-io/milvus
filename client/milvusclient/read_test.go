@@ -620,6 +620,52 @@ func (s *ReadSuite) TestQuery() {
 	})
 }
 
+func (s *ReadSuite) TestQueryEscapesVarCharIDs() {
+	for _, tc := range []struct {
+		name string
+		pk   string
+		expr string
+	}{
+		{"plain", "abc", `ID in ["abc","other"]`},
+		{"double_quote", `a"b`, `ID in ["a\"b","other"]`},
+		{"trailing_backslash", `a\`, `ID in ["a\\","other"]`},
+		{"literal_escape", `a\n`, `ID in ["a\\n","other"]`},
+		{"newline", "a\nb", `ID in ["a\nb","other"]`},
+		{"unicode", "a中文", `ID in ["a中文","other"]`},
+		{"single_quote", "a'b", `ID in ["a'b","other"]`},
+		{"backslash_quote", `a\"b`, `ID in ["a\\\"b","other"]`},
+		{"empty_string", "", `ID in ["","other"]`},
+	} {
+		s.Run(tc.name, func() {
+			ctx := context.Background()
+			collectionName := s.randString(6)
+			schema := entity.NewSchema().WithName(collectionName).
+				WithField(entity.NewField().WithName("ID").WithDataType(entity.FieldTypeVarChar).WithIsPrimaryKey(true).WithMaxLength(64))
+			s.setupCache(collectionName, schema)
+			ids := column.NewColumnVarChar("ID", []string{tc.pk, "other"})
+			s.mock.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+				s.Equal(tc.expr, req.GetExpr())
+				return &milvuspb.QueryResults{
+					Status:       merr.Success(),
+					OutputFields: []string{"ID"},
+					FieldsData:   []*schemapb.FieldData{s.getVarcharFieldData("ID", []string{tc.pk, "other"})},
+				}, nil
+			}).Twice()
+
+			// Reusing the same column must not quote its values a second time.
+			for range 2 {
+				rs, err := s.client.Query(ctx, NewQueryOption(collectionName).WithIDs(ids).WithOutputFields("ID"))
+				s.Require().NoError(err)
+				s.Equal(2, rs.ResultCount)
+				pk, err := rs.GetColumn("ID").Get(0)
+				s.Require().NoError(err)
+				s.Equal(tc.pk, pk)
+				s.Equal([]string{tc.pk, "other"}, ids.Data())
+			}
+		})
+	}
+}
+
 func TestRead(t *testing.T) {
 	suite.Run(t, new(ReadSuite))
 }
