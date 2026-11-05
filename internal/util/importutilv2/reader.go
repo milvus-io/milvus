@@ -290,8 +290,10 @@ func resolveSnapshotV2Source(ctx context.Context, cm storage.ChunkManager, sourc
 	ref := source.GetV2Reference()
 	uri, _ := funcutil.GetAttrByKeyFromRepeatedKV(SnapshotSourceURI, options)
 	layout, _ := funcutil.GetAttrByKeyFromRepeatedKV(SnapshotLayout, options)
-	boundary := &snapshotstorage.SnapshotData{Layout: datapb.SnapshotLayout_SnapshotLayoutReferenced,
-		ManifestPaths: []string{ref.GetSnapshotManifestPath()}}
+	boundary := &snapshotstorage.SnapshotData{
+		Layout:        datapb.SnapshotLayout_SnapshotLayoutReferenced,
+		ManifestPaths: []string{ref.GetSnapshotManifestPath()},
+	}
 	if layout == "self-contained" {
 		boundary.Layout = datapb.SnapshotLayout_SnapshotLayoutSelfContained
 	}

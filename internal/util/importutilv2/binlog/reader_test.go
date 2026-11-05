@@ -3382,8 +3382,10 @@ func TestSnapshotV2BitmapResolutionFailures(t *testing.T) {
 			schema := typeutil.AppendSystemFields(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 			}})
-			source := &internalpb.SnapshotImportSource{Version: 14,
-				V2Reference: &internalpb.SnapshotImportV2Reference{SegmentId: 20, SnapshotManifestPath: "snapshot.avro"}}
+			source := &internalpb.SnapshotImportSource{
+				Version:     14,
+				V2Reference: &internalpb.SnapshotImportV2Reference{SegmentId: 20, SnapshotManifestPath: "snapshot.avro"},
+			}
 			budget := int64(1 << 20)
 			var want error = merr.ErrDataIntegrity
 			var resolve SnapshotV2Resolver
@@ -3400,8 +3402,10 @@ func TestSnapshotV2BitmapResolutionFailures(t *testing.T) {
 					if mode == "invalid_inventory" {
 						return &datapb.SegmentDescription{}, nil
 					}
-					return &datapb.SegmentDescription{Binlogs: []*datapb.FieldBinlog{{FieldID: 7, ChildFields: []int64{0, 1, 100},
-						Binlogs: []*datapb.Binlog{{LogPath: "root/data"}}}}}, nil
+					return &datapb.SegmentDescription{Binlogs: []*datapb.FieldBinlog{{
+						FieldID: 7, ChildFields: []int64{0, 1, 100},
+						Binlogs: []*datapb.Binlog{{LogPath: "root/data"}},
+					}}}, nil
 				}
 				if mode == "avro_read" {
 					want = merr.ErrIoPermissionDenied

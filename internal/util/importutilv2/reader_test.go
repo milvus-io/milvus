@@ -1341,8 +1341,10 @@ func TestResolveSnapshotV2Avro(t *testing.T) {
 	for _, mode := range []string{"referenced", "moved", "bucket_root", "absent_prefix", "wrong_id", "wrong_version", "wrong_commit", "wrong_scope", "l0", "missing", "corrupt", "invalid_avro_path", "outside_manifest", "outside_data", "cancel"} {
 		t.Run(mode, func(t *testing.T) {
 			dataPath := root + "/files/insert"
-			source := &internalpb.SnapshotImportSource{Version: 14, SourceCommitTimestamp: 300, SourceChannel: "source", SourcePartitionId: 10,
-				V2Reference: &internalpb.SnapshotImportV2Reference{SegmentId: 20, SnapshotManifestPath: avroPath, SnapshotFormatVersion: 6}}
+			source := &internalpb.SnapshotImportSource{
+				Version: 14, SourceCommitTimestamp: 300, SourceChannel: "source", SourcePartitionId: 10,
+				V2Reference: &internalpb.SnapshotImportV2Reference{SegmentId: 20, SnapshotManifestPath: avroPath, SnapshotFormatVersion: 6},
+			}
 			opts := Options{{Key: BackupFlag, Value: "true"}, {Key: SourceType, Value: SourceTypeSnapshot}, {Key: SnapshotSourceURI, Value: uri}, {Key: SnapshotLayout, Value: "self-contained"}}
 			segment := &datapb.SegmentDescription{SegmentId: 20, PartitionId: 10, ChannelName: "source", StorageVersion: storage.StorageV2, CommitTimestamp: 300, SegmentLevel: datapb.SegmentLevel_L1}
 			switch mode {
@@ -1440,8 +1442,10 @@ func TestSnapshotV2CrossBucketRebase(t *testing.T) {
 				source.V2Reference.OriginalKeyPrefix = nil
 				opts[len(opts)-1].Value = "referenced"
 			}
-			data, err := snapshotio.MarshalSegmentManifest(&datapb.SegmentDescription{SegmentId: 20, StorageVersion: storage.StorageV2, SegmentLevel: datapb.SegmentLevel_L1,
-				Binlogs: []*datapb.FieldBinlog{{FieldID: 7, Binlogs: []*datapb.Binlog{{LogPath: path}}}}})
+			data, err := snapshotio.MarshalSegmentManifest(&datapb.SegmentDescription{
+				SegmentId: 20, StorageVersion: storage.StorageV2, SegmentLevel: datapb.SegmentLevel_L1,
+				Binlogs: []*datapb.FieldBinlog{{FieldID: 7, Binlogs: []*datapb.Binlog{{LogPath: path}}}},
+			})
 			require.NoError(t, err)
 			read := mockey.Mock((*sourceCM).Read).Return(data, nil).Build()
 			defer read.UnPatch()
@@ -1471,12 +1475,20 @@ func TestSnapshotV2ReaderFactoryDispatch(t *testing.T) {
 			ctx := context.Background()
 			cm := storage.NewLocalChunkManager()
 			cfg := &indexpb.StorageConfig{StorageType: "local"}
-			opts := Options{{Key: BackupFlag, Value: "true"}, {Key: SourceType, Value: SourceTypeSnapshot},
-				{Key: SnapshotSourceURI, Value: "s3://bucket/root/snapshots/1/metadata/2.json"}, {Key: SnapshotLayout, Value: "referenced"}}
-			source := &internalpb.SnapshotImportSource{Version: 10, SourceCommitTimestamp: 300,
-				V2Reference: &internalpb.SnapshotImportV2Reference{SegmentId: 20, SnapshotManifestPath: "root/snapshots/1/manifests/20.avro", SnapshotFormatVersion: 6}}
-			segment := &datapb.SegmentDescription{SegmentId: 20, StorageVersion: storage.StorageV2, SegmentLevel: datapb.SegmentLevel_L1, CommitTimestamp: 300,
-				Binlogs: []*datapb.FieldBinlog{{FieldID: 7, Binlogs: []*datapb.Binlog{{LogPath: "root/data"}}}}}
+			opts := Options{
+				{Key: BackupFlag, Value: "true"},
+				{Key: SourceType, Value: SourceTypeSnapshot},
+				{Key: SnapshotSourceURI, Value: "s3://bucket/root/snapshots/1/metadata/2.json"},
+				{Key: SnapshotLayout, Value: "referenced"},
+			}
+			source := &internalpb.SnapshotImportSource{
+				Version: 10, SourceCommitTimestamp: 300,
+				V2Reference: &internalpb.SnapshotImportV2Reference{SegmentId: 20, SnapshotManifestPath: "root/snapshots/1/manifests/20.avro", SnapshotFormatVersion: 6},
+			}
+			segment := &datapb.SegmentDescription{
+				SegmentId: 20, StorageVersion: storage.StorageV2, SegmentLevel: datapb.SegmentLevel_L1, CommitTimestamp: 300,
+				Binlogs: []*datapb.FieldBinlog{{FieldID: 7, Binlogs: []*datapb.Binlog{{LogPath: "root/data"}}}},
+			}
 			var shared *binlog.SnapshotL0Deletes
 			if mode == "shared_v2" {
 				source.Version, source.SourceChannel, source.SourcePartitionId = 14, "source", 10
@@ -1550,10 +1562,16 @@ func TestSnapshotV2FactoryPreparesMixedDeletes(t *testing.T) {
 	ctx := context.Background()
 	cm := storage.NewLocalChunkManager()
 	cfg := &indexpb.StorageConfig{StorageType: "local"}
-	opts := Options{{Key: BackupFlag, Value: "true"}, {Key: SourceType, Value: SourceTypeSnapshot},
-		{Key: SnapshotSourceURI, Value: "s3://bucket/root/snapshots/1/metadata/2.json"}, {Key: SnapshotLayout, Value: "referenced"}}
-	v2 := &internalpb.SnapshotImportSource{Version: 14, SourceChannel: "source", SourcePartitionId: 10,
-		V2Reference: &internalpb.SnapshotImportV2Reference{SegmentId: 20, SnapshotManifestPath: "root/snapshots/1/manifests/20.avro", SnapshotFormatVersion: 6}}
+	opts := Options{
+		{Key: BackupFlag, Value: "true"},
+		{Key: SourceType, Value: SourceTypeSnapshot},
+		{Key: SnapshotSourceURI, Value: "s3://bucket/root/snapshots/1/metadata/2.json"},
+		{Key: SnapshotLayout, Value: "referenced"},
+	}
+	v2 := &internalpb.SnapshotImportSource{
+		Version: 14, SourceChannel: "source", SourcePartitionId: 10,
+		V2Reference: &internalpb.SnapshotImportV2Reference{SegmentId: 20, SnapshotManifestPath: "root/snapshots/1/manifests/20.avro", SnapshotFormatVersion: 6},
+	}
 	v3 := &internalpb.SnapshotImportSource{Version: 14, SourceChannel: "source", SourcePartitionId: 10, ManifestPath: packed.MarshalManifestPath("root/data", 1)}
 	files := []*internalpb.ImportFile{{SnapshotSource: v2}, {SnapshotSource: v3}}
 	l0 := &internalpb.SnapshotImportL0Source{SourceChannel: "source", SourcePartitionId: 10}

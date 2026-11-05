@@ -2403,8 +2403,10 @@ func TestExpandSnapshotV2References(t *testing.T) {
 					}
 					snapshot.ManifestPaths = []string{"root/snapshots/1/manifests/arbitrary-first.avro", "root/snapshots/1/manifests/arbitrary-second.avro"}
 					if withL0 {
-						snapshot.Segments = append(snapshot.Segments, &datapb.SegmentDescription{SegmentId: 99, PartitionId: 10, ChannelName: "source", SegmentLevel: datapb.SegmentLevel_L0, StorageVersion: milvusstorage.StorageV2,
-							Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: "root/files/delta"}}}}})
+						snapshot.Segments = append(snapshot.Segments, &datapb.SegmentDescription{
+							SegmentId: 99, PartitionId: 10, ChannelName: "source", SegmentLevel: datapb.SegmentLevel_L0, StorageVersion: milvusstorage.StorageV2,
+							Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: "root/files/delta"}}}},
+						})
 						snapshot.ManifestPaths = append(snapshot.ManifestPaths, "root/snapshots/1/manifests/l0.avro")
 					}
 					read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
