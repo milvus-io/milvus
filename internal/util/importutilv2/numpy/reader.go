@@ -79,7 +79,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 }
 
 func (r *reader) Read() (*storage.InsertData, error) {
-	insertData, err := storage.NewInsertDataWithFunctionOutputField(r.schema)
+	insertData, err := storage.NewInsertDataBuilder(r.schema).WithFunctionOutputFields().Build()
 	if err != nil {
 		return nil, err
 	}

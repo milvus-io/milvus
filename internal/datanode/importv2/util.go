@@ -564,7 +564,7 @@ func AppendNullableDefaultFieldsData(schema *schemapb.CollectionSchema, data *st
 
 		// if the FieldData is not found, or it is nil, add a new column and fill with null or default
 		dataType := field.GetDataType()
-		fieldData, err := storage.NewFieldData(dataType, field, rowNum)
+		fieldData, err := storage.NewFieldDataBuilder(dataType, field).WithCapacity(rowNum).Build()
 		if err != nil {
 			return err
 		}
@@ -708,7 +708,7 @@ func FillDynamicData(schema *schemapb.CollectionSchema, data *storage.InsertData
 	}
 
 	// if the FieldData is not found, or it is nil, add a new column and fill with empty json
-	fieldData, err := storage.NewFieldData(dynamicField.GetDataType(), dynamicField, rowNum)
+	fieldData, err := storage.NewFieldDataBuilder(dynamicField.GetDataType(), dynamicField).WithCapacity(rowNum).Build()
 	if err != nil {
 		return err
 	}

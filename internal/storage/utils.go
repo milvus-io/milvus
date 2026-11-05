@@ -1957,7 +1957,7 @@ func fillMissingFields(schema *schemapb.CollectionSchema, insertData *InsertData
 				}
 			}
 			// Create default field data if not found
-			fieldData, err := NewFieldData(field.DataType, field, int(batchRows))
+			fieldData, err := NewFieldDataBuilder(field.DataType, field).WithCapacity(int(batchRows)).Build()
 			if err != nil {
 				return merr.WrapErrServiceInternalMsg("failed to create default field data for field %s: %v", field.Name, err)
 			}
@@ -1992,7 +1992,7 @@ func fillMissingStructChild(field *schemapb.FieldSchema, sibling FieldData, sibl
 	if sibling.GetNullable() && len(sibling.GetValidData()) != numRows {
 		return nil, merr.WrapErrDataIntegrityMsg("struct sibling %s has %d validity entries, expected %d", siblingSchema.GetName(), len(sibling.GetValidData()), numRows)
 	}
-	filled, err := NewFieldData(field.GetDataType(), field, numRows)
+	filled, err := NewFieldDataBuilder(field.GetDataType(), field).WithCapacity(numRows).Build()
 	if err != nil {
 		return nil, err
 	}

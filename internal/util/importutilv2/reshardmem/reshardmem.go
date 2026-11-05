@@ -50,7 +50,7 @@ const ReserveRatio = 0.1
 // InsertData.Data map entry, the slice headers, the append-grown capacity
 // beyond len and the allocator size-class rounding. Calibrated by measuring
 // the HeapAlloc delta of 4-row fragments built the way hash routing builds
-// them (NewInsertDataWithCap + AppendRow): ~173B per field at a 15-field
+// them (InsertDataBuilder.WithCapacity + AppendRow): ~173B per field at a 15-field
 // temporary schema, ~615B at 5 fields; 200B keeps a margin for the
 // string/JSON-heavy field mixes. Fragments only dominate the live set when
 // buckets split every source batch into many small pieces, which is exactly

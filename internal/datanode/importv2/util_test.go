@@ -474,7 +474,7 @@ func Test_CheckRowsEqual(t *testing.T) {
 		DataType: schemapb.DataType_Bool,
 	}
 	schema.Fields = append(schema.Fields, newField)
-	insertData.Data[newField.GetFieldID()], _ = storage.NewFieldData(newField.GetDataType(), newField, 1)
+	insertData.Data[newField.GetFieldID()], _ = storage.NewFieldDataBuilder(newField.GetDataType(), newField).WithCapacity(1).Build()
 	err = CheckRowsEqual(schema, insertData)
 	assert.Error(t, err)
 
@@ -1092,7 +1092,7 @@ func Test_AppendNullableDefaultFieldsData(t *testing.T) {
 			assert.Error(t, err)
 
 			// the new field data is empty, it will be filled by AppendNullableDefaultFieldsData
-			insertData.Data[fieldSchema.GetFieldID()], err = storage.NewFieldData(fieldSchema.GetDataType(), fieldSchema, 0)
+			insertData.Data[fieldSchema.GetFieldID()], err = storage.NewFieldData(fieldSchema.GetDataType(), fieldSchema)
 			assert.NoError(t, err)
 			err = AppendNullableDefaultFieldsData(schema, insertData, count)
 			assert.NoError(t, err)
@@ -1215,7 +1215,7 @@ func TestUtil_FillDynamicData(t *testing.T) {
 	schema.Fields = append(schema.Fields, dynamicField)
 
 	// the dynamic field has one row, which is illegal
-	insertData.Data[dynamicFieldID], err = storage.NewFieldData(dynamicField.DataType, dynamicField, count)
+	insertData.Data[dynamicFieldID], err = storage.NewFieldDataBuilder(dynamicField.DataType, dynamicField).WithCapacity(count).Build()
 	assert.NoError(t, err)
 	err = insertData.Data[dynamicFieldID].AppendRow([]byte("{}"))
 	assert.NoError(t, err)
@@ -1223,7 +1223,7 @@ func TestUtil_FillDynamicData(t *testing.T) {
 	assert.Error(t, err)
 
 	// the dynamic field is empty, dynamic data is filled
-	insertData.Data[dynamicFieldID], err = storage.NewFieldData(dynamicField.DataType, dynamicField, count)
+	insertData.Data[dynamicFieldID], err = storage.NewFieldDataBuilder(dynamicField.DataType, dynamicField).WithCapacity(count).Build()
 	assert.NoError(t, err)
 	err = FillDynamicData(schema, insertData, count)
 	assert.NoError(t, err)

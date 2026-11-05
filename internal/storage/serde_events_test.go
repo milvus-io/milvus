@@ -463,7 +463,7 @@ func TestRecordToInsertDataBranches(t *testing.T) {
 	})
 
 	t.Run("insert data initializer misses field", func(t *testing.T) {
-		mockNewInsertData := mockey.Mock(NewInsertDataWithFunctionOutputField).
+		mockNewInsertData := mockey.Mock((*InsertDataBuilder).Build).
 			Return(&InsertData{Data: map[FieldID]FieldData{}}, nil).Build()
 		defer mockNewInsertData.UnPatch()
 
@@ -1370,7 +1370,7 @@ func nullableDenseVectorSerdeInsertData(t *testing.T, tc nullableDenseVectorSerd
 	t.Helper()
 
 	vectorField := schema.GetFields()[3]
-	vectorData, err := NewFieldData(tc.dataType, vectorField, 3)
+	vectorData, err := NewFieldDataBuilder(tc.dataType, vectorField).WithCapacity(3).Build()
 	require.NoError(t, err)
 	require.NoError(t, vectorData.AppendRow(tc.row0))
 	require.NoError(t, vectorData.AppendRow(nil))

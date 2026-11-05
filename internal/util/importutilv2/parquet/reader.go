@@ -121,7 +121,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 }
 
 func (r *reader) Read() (*storage.InsertData, error) {
-	insertData, err := storage.NewInsertDataWithCap(r.schema, r.rowsPerBuffer, true)
+	insertData, err := storage.NewInsertDataBuilder(r.schema).WithCapacity(r.rowsPerBuffer).WithFunctionOutputFields().Build()
 	if err != nil {
 		return nil, err
 	}
