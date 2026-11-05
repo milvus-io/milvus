@@ -365,10 +365,11 @@ ordered fragment readers
 - Ordinary import materializes `timestamp = ImportJob.DataTs`; backup keeps the
   source timestamp carried in the fragment and requires it.
 - Writer options come from the `WriterSpec`. Column groups are encrypted with the
-  **target** collection's CMEK zone, while fragment readers use the read/source
-  plugin context. **TEXT columns are the deliberate exception: they are written
-  plaintext.** The target-zone plugin context is still threaded all the way down
-  into the TEXT-aware writer, but its two call sites
+  **target** collection's CMEK zone. Reshard uses the source plugin context only
+  to read original backup data; it writes fragments with the target context,
+  which fragment readers also use. **TEXT columns are the deliberate exception:
+  they are written plaintext.** The target-zone plugin context is still threaded
+  all the way down into the TEXT-aware writer, but its two call sites
   (`internal/flushcommon/syncmgr/pack_writer_v3.go`,
   `internal/storage/binlog_record_writer.go`) intentionally do not apply it yet,
   because the TEXT read chain has no key retriever wiring: segcore reads V3

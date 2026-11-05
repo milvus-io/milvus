@@ -167,8 +167,7 @@ func (p *preImportV3Task) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 	job := p.importMeta.GetJob(context.TODO(), p.GetJobID())
 	req, err := AssemblePreImportV3Request(p, job)
 	if err != nil {
-		// Source inventories are immutable. Retrying the same malformed task
-		// cannot restore its missing scope or deletes.
+		// Request assembly validates source inventory and required writer context.
 		if updateErr := p.importMeta.UpdateJob(context.TODO(), p.GetJobID(),
 			UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error())); updateErr != nil {
 			mlog.Warn(context.TODO(), "failed to mark preimport v3 job failed after assemble error", WrapTaskLog(p, mlog.Err(updateErr))...)

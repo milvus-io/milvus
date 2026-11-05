@@ -372,8 +372,9 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 	binlogReaderOpts := []BinlogReaderOption{}
 	pluginContext := rwOptions.pluginContext
 	if hookutil.IsClusterEncryptionEnabled() {
-		// Reader pluginContext from import tasks
-		if rwOptions.pluginContext != nil {
+		// Import resolves the source independently of the target schema,
+		// including an explicit nil context for plaintext input.
+		if rwOptions.pluginContextSet {
 			pluginContext = rwOptions.pluginContext
 		} else {
 			ez := hookutil.GetEzByCollProperties(schema.GetProperties(), rwOptions.collectionID)
@@ -644,22 +645,24 @@ func NewBinlogRecordWriter(ctx context.Context, collectionID, partitionID, segme
 
 	opts := []StreamWriterOption{}
 	pluginContext := rwOptions.pluginContext
-	if hookutil.IsClusterEncryptionEnabled() {
-		ez := hookutil.GetEzByCollProperties(schema.GetProperties(), collectionID)
-		if ez != nil {
-			encryptor, edek, err := hookutil.GetCipher().GetEncryptor(ez.EzID, ez.CollectionID)
+	if ez := hookutil.GetEzByCollProperties(schema.GetProperties(), collectionID); ez != nil {
+		if rwOptions.version == StorageV1 {
+			cipher := hookutil.GetCipher()
+			if cipher == nil {
+				return nil, merr.Wrapf(merr.ErrServiceUnavailable, "cipher plugin is unavailable for collection %d", collectionID)
+			}
+			encryptor, edek, err := cipher.GetEncryptor(ez.EzID, ez.CollectionID)
 			if err != nil {
 				return nil, err
 			}
 			opts = append(opts, GetEncryptionOptions(ez.EzID, edek, encryptor)...)
-
-			unsafe := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
-			if pluginContext == nil && len(unsafe) > 0 {
-				pluginContext = &indexcgopb.StoragePluginContext{
-					EncryptionZoneId: ez.EzID,
-					CollectionId:     ez.CollectionID,
-					EncryptionKey:    base64.StdEncoding.EncodeToString(unsafe),
-				}
+		} else if pluginContext == nil || pluginContext.GetEncryptionKey() == "" {
+			// A valid in-flight context may finish without another key lookup.
+			// An absent context for an encrypted target must never mean plaintext.
+			var err error
+			pluginContext, err = hookutil.GetCollectionPluginContext(schema.GetProperties(), collectionID)
+			if err != nil {
+				return nil, err
 			}
 		}
 	}
