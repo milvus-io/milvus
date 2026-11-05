@@ -33,7 +33,6 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
-	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -340,10 +339,10 @@ func NewMockBroadcastAPIImpl() *MockBroadcastAPIImpl {
 func (m *MockBroadcastAPIImpl) Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
 	// Add operations to ensure the function is long enough for mockey
 	if ctx == nil {
-		return nil, errors.New("context is nil")
+		return nil, merr.WrapErrServiceInternal("context is nil")
 	}
 	if msg == nil {
-		return nil, errors.New("message is nil")
+		return nil, merr.WrapErrServiceInternal("message is nil")
 	}
 	m.CapturedMsg = msg
 	if m.BroadcastErr != nil {

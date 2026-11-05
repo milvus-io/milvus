@@ -241,11 +241,11 @@ func getCompactTime(ts Timestamp, coll *meta.CollectionInfo) (*view.CompactTime,
 	if collectionTTL > 0 {
 		ttexpired := pts.Add(-collectionTTL)
 		ttexpiredLogic := tsoutil.ComposeTS(ttexpired.UnixNano()/int64(time.Millisecond), 0)
-		return &view.CompactTime{ts, ttexpiredLogic, collectionTTL}, nil
+		return &view.CompactTime{StartTime: ts, ExpireTime: ttexpiredLogic, CollectionTTL: collectionTTL}, nil
 	}
 
 	// no expiration time
-	return &view.CompactTime{ts, 0, 0}, nil
+	return &view.CompactTime{StartTime: ts, ExpireTime: 0, CollectionTTL: 0}, nil
 }
 
 // TrigerCompaction is the public interface to send compaction signal to work queue.

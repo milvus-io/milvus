@@ -1144,9 +1144,7 @@ func (suite *MetaBasicSuite) TestValidateSegmentState_BlockedBySnapshot() {
 		m := &meta.Meta{
 			Segments: latestSegments,
 		}
-		if sm != nil {
-			m.CompactionProtection = sm
-		}
+		m.CompactionProtection = sm
 
 		err := m.ValidateSegmentStateBeforeCompleteCompactionMutation(task)
 		suite.Error(err)
@@ -1163,9 +1161,7 @@ func (suite *MetaBasicSuite) TestValidateSegmentState_BlockedBySnapshot() {
 		m := &meta.Meta{
 			Segments: latestSegments,
 		}
-		if sm != nil {
-			m.CompactionProtection = sm
-		}
+		m.CompactionProtection = sm
 
 		err := m.ValidateSegmentStateBeforeCompleteCompactionMutation(task)
 		suite.Error(err)
@@ -1178,9 +1174,7 @@ func (suite *MetaBasicSuite) TestValidateSegmentState_BlockedBySnapshot() {
 		m := &meta.Meta{
 			Segments: latestSegments,
 		}
-		if sm != nil {
-			m.CompactionProtection = sm
-		}
+		m.CompactionProtection = sm
 
 		err := m.ValidateSegmentStateBeforeCompleteCompactionMutation(task)
 		suite.NoError(err)
@@ -1222,9 +1216,7 @@ func (suite *MetaBasicSuite) TestValidateSegmentState_BlockedBySnapshot() {
 		m := &meta.Meta{
 			Segments: multiSegments,
 		}
-		if sm != nil {
-			m.CompactionProtection = sm
-		}
+		m.CompactionProtection = sm
 
 		err := m.ValidateSegmentStateBeforeCompleteCompactionMutation(multiTask)
 		suite.Error(err)
@@ -1241,9 +1233,7 @@ func (suite *MetaBasicSuite) TestValidateSegmentState_BlockedBySnapshot() {
 		m := &meta.Meta{
 			Segments: latestSegments,
 		}
-		if sm != nil {
-			m.CompactionProtection = sm
-		}
+		m.CompactionProtection = sm
 
 		err := m.ValidateSegmentStateBeforeCompleteCompactionMutation(task)
 		suite.NoError(err)
@@ -1259,9 +1249,7 @@ func (suite *MetaBasicSuite) TestValidateSegmentState_BlockedBySnapshot() {
 		m := &meta.Meta{
 			Segments: latestSegments,
 		}
-		if sm != nil {
-			m.CompactionProtection = sm
-		}
+		m.CompactionProtection = sm
 
 		l0Task := &datapb.CompactionTask{
 			PlanID:        8001,
@@ -1283,9 +1271,7 @@ func (suite *MetaBasicSuite) TestValidateSegmentState_BlockedBySnapshot() {
 		m := &meta.Meta{
 			Segments: latestSegments,
 		}
-		if sm != nil {
-			m.CompactionProtection = sm
-		}
+		m.CompactionProtection = sm
 
 		l0Task := &datapb.CompactionTask{
 			PlanID:        8002,
@@ -1306,9 +1292,7 @@ func (suite *MetaBasicSuite) TestValidateSegmentState_BlockedBySnapshot() {
 		m := &meta.Meta{
 			Segments: latestSegments,
 		}
-		if sm != nil {
-			m.CompactionProtection = sm
-		}
+		m.CompactionProtection = sm
 
 		err := m.ValidateSegmentStateBeforeCompleteCompactionMutation(task)
 		suite.Error(err)
