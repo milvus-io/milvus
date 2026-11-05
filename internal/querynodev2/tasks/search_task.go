@@ -461,7 +461,7 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 // cutoffs, since the Proxy takes them from each request's own timestamp. A
 // later cutoff only filters out more rows, so every member gets a subset of
 // what its own cutoffs allow, and its requery, which uses its own cutoffs,
-// still finds every row the search returned. canMerge keeps an entity TTL
+// still finds every row the search returned. Merge keeps an entity TTL
 // cutoff of 0, which segcore replaces with the MVCC timestamp, out of groups
 // with nonzero ones.
 func (t *SearchTask) ttlCutoffs() (collectionTTL, entityTTLPhysicalTime uint64) {
