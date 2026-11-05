@@ -116,12 +116,13 @@ func TestSessionWatcher_RejectedWatchRetriesWithoutReplay(t *testing.T) {
 }
 
 // A replay that fails with a retriable error runs the attempt again, so it must
-// stop the watch it created. Only the installed watch stays open.
+// stop the watch it created. Only the installed watch stays open, until the next
+// re-watch replaces it.
 func TestSessionWatcher_FailedReplayCancelsItsWatch(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	created := clientv3.WatchResponse{Created: true}
-	w, stub := newRecoveringWatcher(ctx, t, created, created)
+	w, stub := newRecoveringWatcher(ctx, t, created, created, created)
 	replays := 0
 	w.rewatch = func(map[string]*Session) error {
 		replays++
@@ -136,4 +137,9 @@ func TestSessionWatcher_FailedReplayCancelsItsWatch(t *testing.T) {
 	require.Len(t, stub.watchCtxs, 2)
 	require.ErrorIs(t, stub.watchCtxs[0].Err(), context.Canceled, "the failed attempt's watch must stop")
 	require.NoError(t, stub.watchCtxs[1].Err(), "the installed watch must stay open")
+
+	require.NoError(t, w.handleWatchErr(rpctypes.ErrLeaderChanged))
+	require.Len(t, stub.watchCtxs, 3)
+	require.ErrorIs(t, stub.watchCtxs[1].Err(), context.Canceled, "a re-watch replaces the installed watch")
+	require.NoError(t, stub.watchCtxs[2].Err())
 }

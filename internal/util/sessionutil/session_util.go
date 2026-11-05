@@ -805,6 +805,7 @@ type sessionWatcher struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 	rch       clientv3.WatchChan
+	cancelRch context.CancelFunc // releases rch's context once a re-watch has replaced it
 	eventCh   chan *SessionEvent
 	prefix    string
 	rewatch   Rewatch
@@ -1036,7 +1037,10 @@ func (w *sessionWatcher) handleReWatch() (err error) {
 	} else if err = w.rewatch(sessions); err != nil {
 		return err
 	}
-	w.rch = rch
+	if w.cancelRch != nil {
+		w.cancelRch()
+	}
+	w.rch, w.cancelRch = rch, cancelWatch
 	return nil
 }
 
