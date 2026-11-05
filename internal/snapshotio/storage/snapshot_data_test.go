@@ -3635,3 +3635,32 @@ func TestSnapshotReader_FutureManifest(t *testing.T) {
 	require.Len(t, snapshot.Segments, 1)
 	assert.Equal(t, int64(123), snapshot.Segments[0].GetSegmentId())
 }
+
+func TestRebaseSelfContainedSnapshotData_SameKeyPrefix(t *testing.T) {
+	for _, root := range []string{"", "bundle"} {
+		for _, version := range []int64{storage.StorageV2, storage.StorageV3} {
+			t.Run(fmt.Sprintf("root=%s/storage=%d", root, version), func(t *testing.T) {
+				key := path.Join(root, "files", "segment")
+				uri := "s3://original-bucket/" + key
+				segment := &datapb.SegmentDescription{StorageVersion: version,
+					Binlogs:      []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: uri}, {LogPath: key}, {}}}},
+					Deltalogs:    []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: uri}}}},
+					ManifestPath: uri}
+				if version == storage.StorageV3 {
+					segment.ManifestPath = packed.MarshalManifestPath(uri, 7)
+				}
+				err := snapshotstorage.RebaseSelfContainedSnapshotData(&snapshotstorage.SnapshotData{Segments: []*datapb.SegmentDescription{segment}}, root, root)
+				require.NoError(t, err)
+				require.Equal(t, key, segment.Deltalogs[0].Binlogs[0].LogPath)
+				if version == storage.StorageV2 {
+					require.Equal(t, key, segment.Binlogs[0].Binlogs[0].LogPath)
+					require.Equal(t, key, segment.Binlogs[0].Binlogs[1].LogPath)
+					require.Empty(t, segment.Binlogs[0].Binlogs[2].LogPath)
+					require.Equal(t, key, segment.ManifestPath)
+				} else {
+					require.Equal(t, packed.MarshalManifestPath(key, 7), segment.ManifestPath)
+				}
+			})
+		}
+	}
+}

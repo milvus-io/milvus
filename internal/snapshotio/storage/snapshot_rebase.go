@@ -38,12 +38,16 @@ func newSnapshotRootRebaser(oldRoot string, newRoot string) snapshotRootRebaser 
 }
 
 func (r snapshotRootRebaser) rebasePath(src string) string {
-	if src == "" || r.oldRoot == r.newRoot {
+	if src == "" {
 		return src
 	}
 	// Root relocation is prefix-only: it supports moving the whole exported
 	// bundle while preserving its internal layout, not arbitrary path rewrites.
 	normalized := NormalizeSnapshotObjectPath(src)
+	if r.oldRoot == r.newRoot {
+		// A bucket-only move still needs to discard the original URI identity.
+		return normalized
+	}
 	if r.oldRoot == "" {
 		if normalized == "" {
 			return r.newRoot

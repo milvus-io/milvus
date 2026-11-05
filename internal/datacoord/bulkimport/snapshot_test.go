@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -2448,7 +2449,7 @@ func TestExpandSnapshotV2References(t *testing.T) {
 func TestExpandSnapshotV2ReferenceValidation(t *testing.T) {
 	paramtable.Init()
 	PatchSnapshotImportInstance(t)
-	for _, mode := range []string{"avro_count", "malformed_storage_manifest"} {
+	for _, mode := range []string{"avro_count", "malformed_storage_manifest", "outside_v2_manifest", "foreign_v2_manifest", "plain_v3_manifest"} {
 		t.Run(mode, func(t *testing.T) {
 			snapshot := SnapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
 			snapshot.Segments[0].StorageVersion = milvusstorage.StorageV2
@@ -2457,7 +2458,16 @@ func TestExpandSnapshotV2ReferenceValidation(t *testing.T) {
 			if mode == "avro_count" {
 				snapshot.ManifestPaths = snapshot.ManifestPaths[:1]
 			} else {
-				snapshot.Segments[0].ManifestPath = "{invalid"
+				switch mode {
+				case "malformed_storage_manifest":
+					snapshot.Segments[0].ManifestPath = "{invalid"
+				case "outside_v2_manifest":
+					snapshot.Segments[0].ManifestPath = "outside/manifest.json"
+				case "foreign_v2_manifest":
+					snapshot.Segments[0].ManifestPath = "s3://other/root/files/manifest.json"
+				case "plain_v3_manifest":
+					snapshot.Segments[1].ManifestPath = "root/files/manifest.json"
+				}
 			}
 			read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
 			defer read.UnPatch()
@@ -2471,5 +2481,66 @@ func TestExpandSnapshotV2ReferenceValidation(t *testing.T) {
 				require.Contains(t, err.Error(), "manifest counts differ")
 			}
 		})
+	}
+}
+
+func TestExpandSnapshotV2StorageManifestRoundTrip(t *testing.T) {
+	paramtable.Init()
+	PatchSnapshotImportInstance(t)
+	type sourceCM struct{ milvusstorage.ChunkManager }
+	for _, mixed := range []bool{false, true} {
+		for _, manifestKind := range []string{"empty", "plain", "packed"} {
+			t.Run(fmt.Sprintf("mixed=%t/manifest=%s", mixed, manifestKind), func(t *testing.T) {
+				ctx := context.Background()
+				const root = "root"
+				cm := &sourceCM{}
+				objects := make(map[string][]byte)
+				rootPath := mockey.Mock((*sourceCM).RootPath).Return(root).Build()
+				defer rootPath.UnPatch()
+				write := mockey.Mock((*sourceCM).Write).To(func(_ *sourceCM, _ context.Context, key string, data []byte) error {
+					objects[key] = append([]byte(nil), data...)
+					return nil
+				}).Build()
+				defer write.UnPatch()
+				read := mockey.Mock((*sourceCM).Read).To(func(_ *sourceCM, _ context.Context, key string) ([]byte, error) {
+					data, ok := objects[key]
+					if !ok {
+						return nil, merr.ErrIoKeyNotFound
+					}
+					return data, nil
+				}).Build()
+				defer read.UnPatch()
+				snapshot := SnapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
+				for i, segment := range snapshot.Segments {
+					base := path.Join(root, "files", "segment", strconv.FormatInt(segment.SegmentId, 10))
+					segment.ChannelName = "source"
+					segment.ManifestPath = packed.MarshalManifestPath(base, 7)
+					if !mixed || i == 0 {
+						segment.StorageVersion = milvusstorage.StorageV2
+						switch manifestKind {
+						case "empty":
+							segment.ManifestPath = ""
+						case "plain":
+							segment.ManifestPath = path.Join(base, "manifest.json")
+						}
+					}
+				}
+				metadataPath, err := snapshotstorage.NewSnapshotWriter(cm).Save(ctx, snapshot)
+				require.NoError(t, err)
+				uri := "s3://source/" + metadataPath
+				metadata, err := snapshotstorage.NewSnapshotReader(cm).ReadMetadata(ctx, uri)
+				require.NoError(t, err)
+				files, options, l0, err := expandSnapshotImportFiles(ctx, nil, cm, SnapshotImportTestSchema(), uri, SnapshotImportTestOptions(), metadata)
+				require.NoError(t, err)
+				require.NoError(t, importutilv2.ValidateSnapshotImportPlan(files, options, l0))
+				require.Len(t, files, 2)
+				require.NotNil(t, files[1].SnapshotSource.V2Reference)
+				require.Empty(t, files[1].SnapshotSource.ManifestPath)
+				if mixed {
+					require.Nil(t, files[0].SnapshotSource.V2Reference)
+					require.Equal(t, snapshot.Segments[1].ManifestPath, files[0].SnapshotSource.ManifestPath)
+				}
+			})
+		}
 	}
 }

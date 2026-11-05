@@ -1414,11 +1414,22 @@ func TestSnapshotV2CrossBucketRebase(t *testing.T) {
 	cm := &sourceCM{}
 	bucket := mockey.Mock((*sourceCM).BucketName).Return("new-bucket").Build()
 	defer bucket.UnPatch()
-	for _, mode := range []string{"moved", "unmatched_prefix", "credentials", "referenced"} {
+	for _, mode := range []string{"moved", "same_prefix", "bucket_root", "unmatched_prefix", "credentials", "referenced"} {
 		t.Run(mode, func(t *testing.T) {
 			source := &internalpb.SnapshotImportSource{Version: 10, V2Reference: &internalpb.SnapshotImportV2Reference{SegmentId: 20, SnapshotManifestPath: "new/snapshots/1/manifests/20.avro", SnapshotFormatVersion: 6, OriginalKeyPrefix: proto.String("old")}}
 			opts := Options{{Key: BackupFlag, Value: "true"}, {Key: SourceType, Value: SourceTypeSnapshot}, {Key: SnapshotSourceURI, Value: "s3://new-bucket/new/snapshots/1/metadata/2.json"}, {Key: SnapshotLayout, Value: "self-contained"}}
 			path := "s3://old-bucket/old/files/insert"
+			wantPath := "new/files/insert"
+			if mode == "same_prefix" {
+				source.V2Reference.OriginalKeyPrefix = proto.String("new")
+				path = "s3://old-bucket/new/files/insert"
+			}
+			if mode == "bucket_root" {
+				source.V2Reference.OriginalKeyPrefix = proto.String("")
+				source.V2Reference.SnapshotManifestPath = "snapshots/1/manifests/20.avro"
+				opts[2].Value = "s3://new-bucket/snapshots/1/metadata/2.json"
+				path, wantPath = "s3://old-bucket/files/insert", "files/insert"
+			}
 			if mode == "unmatched_prefix" {
 				path = "s3://old-bucket/other/files/insert"
 			}
@@ -1447,7 +1458,7 @@ func TestSnapshotV2CrossBucketRebase(t *testing.T) {
 				require.Error(t, err)
 			} else {
 				require.NoError(t, err)
-				require.Equal(t, "new/files/insert", segment.Binlogs[0].Binlogs[0].LogPath)
+				require.Equal(t, wantPath, segment.Binlogs[0].Binlogs[0].LogPath)
 			}
 		})
 	}
