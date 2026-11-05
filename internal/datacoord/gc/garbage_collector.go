@@ -2623,7 +2623,6 @@ func (gc *GarbageCollector) RecycleUnusedJSONStatsFiles(ctx context.Context, sig
 
 		gc.ackSignal(signal)
 		for _, fieldStats := range seg.GetJsonKeyStats() {
-			log := mlog.With(mlog.Int64("segmentID", seg.GetID()), mlog.Int64("fieldID", fieldStats.GetFieldID()))
 			if fieldStats.GetJsonKeyStatsDataFormat() > maxJSONStatsDataFormat {
 				maxJSONStatsDataFormat = fieldStats.GetJsonKeyStatsDataFormat()
 			}
@@ -2656,11 +2655,17 @@ func (gc *GarbageCollector) RecycleUnusedJSONStatsFiles(ctx context.Context, sig
 				// Wait for all remove tasks done.
 				if err := conc.BlockOnAll(futures...); err != nil {
 					// error is logged, and can be ignored here.
-					log.Warn(ctx, "some task failure in remove object pool", mlog.Err(err))
+					mlog.Warn(ctx, "some task failure in remove object pool",
+						mlog.FieldSegmentID(seg.GetID()),
+						mlog.FieldFieldID(fieldStats.GetFieldID()),
+						mlog.Err(err))
 				}
 
 				if err != nil {
-					log.Warn(ctx, "json stats files recycle failed when walk with prefix", mlog.Err(err))
+					mlog.Warn(ctx, "json stats files recycle failed when walk with prefix",
+						mlog.FieldSegmentID(seg.GetID()),
+						mlog.FieldFieldID(fieldStats.GetFieldID()),
+						mlog.Err(err))
 					return
 				}
 			}
@@ -2751,7 +2756,6 @@ func (gc *GarbageCollector) RecycleUnusedJSONIndexFiles(ctx context.Context, sig
 
 		gc.ackSignal(signal)
 		for _, fieldStats := range seg.GetJsonKeyStats() {
-			log := mlog.With(mlog.Int64("segmentID", seg.GetID()), mlog.Int64("fieldID", fieldStats.GetFieldID()))
 			// clear low version task
 			for i := int64(1); i < fieldStats.GetVersion(); i++ {
 				prefix := fmt.Sprintf("%s/%s/%d/%d/%d/%d/%d/%d", gc.Option.Cli.RootPath(), common.JSONIndexPath,
@@ -2781,11 +2785,17 @@ func (gc *GarbageCollector) RecycleUnusedJSONIndexFiles(ctx context.Context, sig
 				// Wait for all remove tasks done.
 				if err := conc.BlockOnAll(futures...); err != nil {
 					// error is logged, and can be ignored here.
-					log.Warn(ctx, "some task failure in remove object pool", mlog.Err(err))
+					mlog.Warn(ctx, "some task failure in remove object pool",
+						mlog.FieldSegmentID(seg.GetID()),
+						mlog.FieldFieldID(fieldStats.GetFieldID()),
+						mlog.Err(err))
 				}
 
 				if err != nil {
-					log.Warn(ctx, "json index files recycle failed when walk with prefix", mlog.Err(err))
+					mlog.Warn(ctx, "json index files recycle failed when walk with prefix",
+						mlog.FieldSegmentID(seg.GetID()),
+						mlog.FieldFieldID(fieldStats.GetFieldID()),
+						mlog.Err(err))
 					return
 				}
 			}

@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -1324,6 +1325,72 @@ func TestGarbageCollector_recycleUnusedJSONStatsFiles_GlobalFormatPrefixOnce(t *
 		"gc/json_stats/1": 1,
 		"gc/json_stats/2": 1,
 	}, walkCalls)
+}
+
+// TestGarbageCollector_recycleUnusedJSONFiles_FailureLogFields tests that a failure while
+// clearing an old version logs exactly the segment and field it happened on.
+func TestGarbageCollector_recycleUnusedJSONFiles_FailureLogFields(t *testing.T) {
+	ctx := context.Background()
+	mt := &meta.Meta{
+		Catalog: &datacoord.Catalog{},
+		Segments: meta.NewSegmentsInfoWithSegments(map[int64]*meta.SegmentInfo{
+			1002: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:           1002,
+					CollectionID: 100,
+					PartitionID:  10,
+					State:        commonpb.SegmentState_Flushed,
+					JsonKeyStats: map[int64]*datapb.JsonKeyStats{
+						102: {FieldID: 102, Version: 2, BuildID: 402},
+					},
+				},
+			},
+		}),
+		MetaStore: metacache.NewMetaStore(nil),
+	}
+	cli := storage.NewLocalChunkManager(objectstorage.RootPath("gc"))
+	gcx := gc.NewGarbageCollector(mt, &ServerHandler{}, gc.GcOption{Cli: cli})
+	defer gcx.Close()
+
+	mockRemove := mockey.Mock((*storage.LocalChunkManager).Remove).Return(assert.AnError).Build()
+	defer mockRemove.UnPatch()
+	mockWalk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).To(
+		func(cm *storage.LocalChunkManager, ctx context.Context, prefix string,
+			recursive bool, fn storage.ChunkObjectWalkFunc,
+		) error {
+			fn(&storage.ChunkObjectInfo{FilePath: prefix + "/old_file"})
+			return assert.AnError
+		}).Build()
+	defer mockWalk.UnPatch()
+
+	testCases := []struct {
+		name           string
+		recycle        func()
+		walkFailureLog string
+	}{
+		{
+			name:           "stats",
+			recycle:        func() { gcx.RecycleUnusedJSONStatsFiles(ctx, nil) },
+			walkFailureLog: "json stats files recycle failed when walk with prefix",
+		},
+		{
+			name:           "index",
+			recycle:        func() { gcx.RecycleUnusedJSONIndexFiles(ctx, nil) },
+			walkFailureLog: "json index files recycle failed when walk with prefix",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "info"})
+
+			tc.recycle()
+
+			logs := sink.String()
+			assert.Contains(t, logs, `["some task failure in remove object pool"] [segmentID=1002] [fieldID=102] [error=`)
+			assert.Contains(t, logs, `["`+tc.walkFailureLog+`"] [segmentID=1002] [fieldID=102] [error=`)
+		})
+	}
 }
 
 func TestGarbageCollector_recycleDroppedSegments_V3(t *testing.T) {
