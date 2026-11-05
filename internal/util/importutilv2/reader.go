@@ -58,9 +58,6 @@ type ReaderFactory struct {
 	cfg     *indexpb.StorageConfig
 	options Options
 	storage func() (readerStorage, error)
-	// pchannelEndTS is the job's per-PChannel end bounds, parsed once and shared
-	// by every file the task reads. Empty when the job cuts at one timestamp.
-	pchannelEndTS func() (map[string]uint64, error)
 }
 
 type readerStorage struct {
@@ -72,9 +69,6 @@ type readerStorage struct {
 func NewReaderFactory(ctx context.Context, cm storage.ChunkManager, cfg *indexpb.StorageConfig, options Options) *ReaderFactory {
 	return &ReaderFactory{
 		cm: cm, cfg: cfg, options: options,
-		pchannelEndTS: sync.OnceValues(func() (map[string]uint64, error) {
-			return GetSnapshotPChannelEndTs(options)
-		}),
 		storage: sync.OnceValues(func() (readerStorage, error) {
 			// Use the task context, never the first file's context. Cache a
 			// resolution error for this attempt too; a retry creates a new factory.
@@ -131,19 +125,7 @@ func (f *ReaderFactory) NewReader(ctx context.Context, schema *schemapb.Collecti
 			return nil, err
 		}
 	}
-	bounds, err := f.pchannelEnd()
-	if err != nil {
-		return nil, err
-	}
-	return newReader(ctx, resolved.cm, schema, file, f.options, bufferSize, resolved.cfg, deleteBudget, shared, resolved.encryption, bounds)
-}
-
-// pchannelEnd is the job's per-PChannel end bounds, parsed on first use.
-func (f *ReaderFactory) pchannelEnd() (map[string]uint64, error) {
-	if f.pchannelEndTS == nil {
-		return nil, nil
-	}
-	return f.pchannelEndTS()
+	return newReader(ctx, resolved.cm, schema, file, f.options, bufferSize, resolved.cfg, deleteBudget, shared, resolved.encryption)
 }
 
 // PrepareSnapshotDeletes is task-local and shared by PreImport and Import. The
@@ -159,11 +141,7 @@ func (f *ReaderFactory) PrepareSnapshotDeletes(ctx context.Context, schema *sche
 	if err != nil {
 		return nil, err
 	}
-	bounds, err := f.pchannelEnd()
-	if err != nil {
-		return nil, err
-	}
-	end, err = snapshotPChannelEnd(end, bounds, source)
+	end, err = snapshotReadEnd(f.options, end, source.GetSourceChannel())
 	if err != nil {
 		return nil, err
 	}
@@ -221,36 +199,10 @@ func readerSource(source *internalpb.SnapshotImportSource, shared bool) *interna
 	return source
 }
 
-type snapshotChannelSource interface {
-	GetSourceChannel() string
-}
-
-// snapshotPChannelEnd applies the job's per-PChannel end bounds to one source
-// file or delete scope. Data and deletes use the same inclusive bound so the
-// imported state ends exactly where replication resumes: post-bound rows are
-// not imported, and post-bound deletes are not applied early. Both the job and
-// channel bounds are upper bounds, so the lower one wins.
-func snapshotPChannelEnd(jobEnd uint64, bounds map[string]uint64, source snapshotChannelSource) (uint64, error) {
-	if len(bounds) == 0 {
-		return jobEnd, nil
-	}
-
-	channel := source.GetSourceChannel()
-	if channel == "" {
-		return 0, merr.WrapErrServiceInternalMsg("snapshot import carries per-PChannel end bounds but the file names no source channel")
-	}
-	end, ok := SnapshotPChannelEnd(bounds, channel)
-	if !ok {
-		return 0, merr.WrapErrServiceInternalMsg("snapshot import carries no end bound for source channel %s", channel)
-	}
-
-	return min(jobEnd, end), nil
-}
-
 func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema,
 	importFile *internalpb.ImportFile, options Options, bufferSize int, storageConfig *indexpb.StorageConfig,
 	snapshotDeleteBudget int64, shared *binlog.SnapshotL0Deletes,
-	encryption binlog.SourceEncryption, pchannelEndTS map[string]uint64,
+	encryption binlog.SourceEncryption,
 ) (Reader, error) {
 	source := readerSource(importFile.GetSnapshotSource(), shared != nil)
 	if IsBackup(options) {
@@ -265,7 +217,7 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 				return nil, err
 			}
 			if source != nil {
-				tsEnd, err = snapshotPChannelEnd(tsEnd, pchannelEndTS, importFile.GetSnapshotSource())
+				tsEnd, err = snapshotReadEnd(options, tsEnd, importFile.GetSnapshotSource().GetSourceChannel())
 				if err != nil {
 					return nil, err
 				}
