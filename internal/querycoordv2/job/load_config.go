@@ -90,7 +90,8 @@ type ExpectedLoadConfig struct {
 	ExpectedPartitionIDs             []int64
 	ExpectedReplicaNumber            map[string]int // map resource group name to replica number in resource group
 	ExpectedFieldIndexID             map[int64]int64
-	ExpectedLoadFields               []int64
+	ExpectedLoadFields               []int64 // Explicit preloads, already resolved by the request adapter.
+	ExpectedRequiredFields           []*messagespb.LoadFieldConfig
 	ExpectedPriority                 commonpb.LoadPriority
 	ExpectedUserSpecifiedReplicaMode bool
 }
@@ -165,6 +166,7 @@ func (c *CurrentLoadConfig) IntoLoadConfigMessageHeader() *messagespb.AlterLoadC
 		CollectionId:             c.Collection.CollectionID,
 		PartitionIds:             partitionIDs,
 		LoadFields:               loadFields,
+		RequiredFields:           c.Collection.GetRequiredFields(),
 		Replicas:                 replicas,
 		UserSpecifiedReplicaMode: c.GetUserSpecifiedReplicaMode(),
 	}
@@ -190,6 +192,7 @@ func GenerateAlterLoadConfigMessage(ctx context.Context, req *AlterLoadConfigReq
 		CollectionId:             req.CollectionInfo.CollectionID,
 		PartitionIds:             partitionIDs,
 		LoadFields:               loadFields,
+		RequiredFields:           req.Expected.ExpectedRequiredFields,
 		Replicas:                 loadReplicaConfigs,
 		UserSpecifiedReplicaMode: req.Expected.ExpectedUserSpecifiedReplicaMode,
 	}

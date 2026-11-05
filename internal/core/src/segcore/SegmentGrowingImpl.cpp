@@ -3268,7 +3268,7 @@ SegmentGrowingImpl::bulk_subscript_sparse_float_vector_impl(
         return;
     }
 
-    auto pin = PinGrowingIndex(field_id);
+    auto pin = PinGrowingIndex(op_ctx, field_id);
     AssertInfo(pin,
                "growing sparse vector field {} has neither raw data nor an "
                "index reader",
@@ -3355,7 +3355,7 @@ SegmentGrowingImpl::bulk_subscript_impl(milvus::OpContext* op_ctx,
         return;
     }
 
-    auto pin = PinGrowingIndex(field_id);
+    auto pin = PinGrowingIndex(op_ctx, field_id);
     AssertInfo(pin,
                "growing vector field {} has neither raw data nor an index "
                "reader",

@@ -16,18 +16,23 @@
 
 #pragma once
 
+#include "cachinglayer/Utils.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
+#include <variant>
 
 #include <marisa.h>
 
 #include "common/Types.h"
+#include "index/contracts/IIndex.h"
 #include "index/contracts/query/IIndexReaderBase.h"
 #include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/IPatternMatchReader.h"
@@ -36,6 +41,11 @@
 
 // Trie-backed string predicates, patterns, reverse lookup, and null queries.
 // The reader is row-level only: it has no nested-mode constructor input.
+
+namespace milvus::cachinglayer {
+template <typename T>
+class CacheSlot;
+}
 
 namespace milvus::storage {
 class LocalDirectory;
@@ -77,11 +87,19 @@ class MarisaMmapOwner final {
 // Immutable owner/view bundle shared by readers. Owner fields precede the trie
 // so the trie is destroyed before mapped paths are removed by MarisaMmapOwner.
 struct MarisaIndexStorage final {
+    /** @brief Validate loaded trie and row/CSR views before publication. */
+    void
+    Validate() const;
+
+    cachinglayer::ResourceUsage
+    CellByteSize() const;
+
     std::shared_ptr<MarisaMmapOwner> mmap_owner;
     std::shared_ptr<const std::vector<int64_t>> str_ids_owner;
     std::shared_ptr<const std::vector<uint32_t>> csr_index_owner;
     std::shared_ptr<const std::vector<uint32_t>> csr_offsets_owner;
     std::shared_ptr<const marisa::Trie> trie;
+    std::shared_ptr<const TargetBitmap> json_exists;
     // row -> trie key id. Heap-owned or a view over mapped bytes.
     const int64_t* str_ids{nullptr};
     size_t str_ids_size{0};
@@ -92,6 +110,47 @@ struct MarisaIndexStorage final {
     DataType value_type{DataType::VARCHAR};
     // Exact bytes owned through mmap-backed staging files.
     size_t file_backed_bytes{0};
+};
+
+/** @brief Owns one Marisa storage version shared by request readers. */
+class MarisaIndex final : public IIndex,
+                          public std::enable_shared_from_this<MarisaIndex> {
+ public:
+    explicit MarisaIndex(std::shared_ptr<const MarisaIndexStorage> storage);
+
+    /** @brief Retain a cold storage slot; metadata and reader creation do no I/O.
+     * @param count Known row count, or nullopt for legacy artifacts without it.
+     * @note The slot must load the same immutable index version on every reload.
+     */
+    MarisaIndex(
+        std::shared_ptr<cachinglayer::CacheSlot<MarisaIndexStorage>> slot,
+        DataType value_type,
+        std::optional<int64_t> count);
+
+    IndexMetadata
+    Metadata() const override;
+
+    IIndexReaderBasePtr
+    CreateReader(milvus::OpContext* op_ctx) const override;
+
+    void
+    CancelWarmup() const override;
+
+ private:
+    friend class MarisaIndexReader;
+    friend class JsonPathIndex;
+    struct CachedStorage {
+        std::shared_ptr<cachinglayer::CacheSlot<MarisaIndexStorage>> slot;
+        DataType value_type;
+        std::optional<int64_t> count;
+    };
+
+    // Retains the exact cache cell until the query operation finishes.
+    std::shared_ptr<const MarisaIndexStorage>
+    PinStorage(milvus::OpContext* op_ctx) const;
+
+    std::variant<std::shared_ptr<const MarisaIndexStorage>, CachedStorage>
+        storage_;
 };
 
 class MarisaIndexReader final : public IIndexReaderBase,
@@ -105,6 +164,11 @@ class MarisaIndexReader final : public IIndexReaderBase,
 
     ~MarisaIndexReader() override;
 
+    void
+    Prefetch() const override {
+        (void)GetStorage();
+    }
+
     ReaderCaps
     Caps() const override;
 
@@ -116,12 +180,6 @@ class MarisaIndexReader final : public IIndexReaderBase,
 
     DataType
     ValueType() const override;
-
-    int64_t
-    MemoryUsage() const override;
-
-    cachinglayer::ResourceUsage
-    CellByteSize() const override;
 
     TargetBitmap
     In(size_t n, const std::string_view* values) const override;
@@ -161,18 +219,21 @@ class MarisaIndexReader final : public IIndexReaderBase,
     IsNotNull() const override;
 
  private:
-    size_t
-    LookupKeyId(std::string_view value) const;
+    friend class MarisaIndex;
+    MarisaIndexReader(std::shared_ptr<const MarisaIndex> index,
+                      milvus::OpContext* op_ctx);
 
-    std::vector<size_t>
-    PrefixMatchKeyIds(std::string_view prefix) const;
+    const std::shared_ptr<const MarisaIndexStorage>&
+    GetStorage() const {
+        std::call_once(storage_once_,
+                       [this] { storage_ = index_->PinStorage(op_ctx_); });
+        return storage_;
+    }
 
-    // marisa's key order is not always lexicographic; range paths choose the
-    // appropriate route based on this result.
-    bool
-    InLexicographicOrder() const;
-
-    std::shared_ptr<const MarisaIndexStorage> storage_;
+    std::shared_ptr<const MarisaIndex> index_;
+    milvus::OpContext* const op_ctx_;
+    mutable std::once_flag storage_once_;
+    mutable std::shared_ptr<const MarisaIndexStorage> storage_;
 };
 
 }  // namespace milvus::index

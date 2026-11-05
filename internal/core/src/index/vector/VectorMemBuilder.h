@@ -23,6 +23,7 @@
 #include "index/contracts/build/IArtifactBuilder.h"
 #include "index/contracts/build/VectorBuildInput.h"
 #include "index/vector/KnowhereEngine.h"
+#include "index/vector/VectorMemArtifact.h"
 #include "knowhere/operands.h"
 
 namespace milvus::index {
@@ -82,7 +83,7 @@ class VectorMemBuilder final : public IArtifactBuilder<VectorBuildInput<T>> {
         Build(const VectorBuildInput<T>& input) &&
         override;
 
-    storage::ArtifactPtr
+    std::unique_ptr<VectorMemArtifact>
     Build(const InterimVectorBuildInput<T>& input) &&;
 
  private:

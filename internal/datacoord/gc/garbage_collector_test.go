@@ -75,6 +75,8 @@ import (
 )
 
 func TestGarbageCollectorManifestReadContextPerSweep(t *testing.T) {
+	checkpointCatalog := MockCheckpointCatalog(t, 1000)
+
 	for _, dropped := range []bool{false, true} {
 		for _, cancelRead := range []bool{false, true} {
 			t.Run(fmt.Sprintf("dropped=%t/cancel=%t", dropped, cancelRead), func(t *testing.T) {
@@ -100,7 +102,8 @@ func TestGarbageCollectorManifestReadContextPerSweep(t *testing.T) {
 				dm.SnapshotMeta = nil
 				m.CompactionProtection = nil
 				gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{
-					Cli: storage.NewLocalChunkManager(objectstorage.RootPath(root)),
+					StreamingNodeCatalog: checkpointCatalog,
+					Cli:                  storage.NewLocalChunkManager(objectstorage.RootPath(root)),
 				}))
 				// A read failure cannot authorize deletion of a manifest still present.
 				defer mockey.Mock((*GarbageCollector).manifestExists).Return(true).Build().UnPatch()
@@ -206,6 +209,8 @@ func validateMinioPrefixElements(t *testing.T, manager *storage.RemoteChunkManag
 }
 
 func Test_garbageCollector_scan(t *testing.T) {
+	checkpointCatalog := MockCheckpointCatalog(t, 1000)
+
 	bucketName := `datacoord-ut` + strings.ToLower(funcutil.RandomString(8))
 	rootPath := paramtable.Get().MinioCfg.RootPath.GetValue()
 	// TODO change to Params
@@ -217,12 +222,13 @@ func Test_garbageCollector_scan(t *testing.T) {
 
 	t.Run("key is reference", func(t *testing.T) {
 		gc := NewGarbageCollector(mt, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{
-			Cli:              cli,
-			Enabled:          true,
-			CheckInterval:    time.Minute * 30,
-			ScanInterval:     time.Hour * 7 * 24,
-			MissingTolerance: time.Hour * 24,
-			DropTolerance:    time.Hour * 24,
+			StreamingNodeCatalog: checkpointCatalog,
+			Cli:                  cli,
+			Enabled:              true,
+			CheckInterval:        time.Minute * 30,
+			ScanInterval:         time.Hour * 7 * 24,
+			MissingTolerance:     time.Hour * 24,
+			DropTolerance:        time.Hour * 24,
 		}))
 		gc.RecycleUnusedBinlogFiles(context.TODO())
 
@@ -235,12 +241,13 @@ func Test_garbageCollector_scan(t *testing.T) {
 
 	t.Run("missing all but save tolerance", func(t *testing.T) {
 		gc := NewGarbageCollector(mt, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{
-			Cli:              cli,
-			Enabled:          true,
-			CheckInterval:    time.Minute * 30,
-			ScanInterval:     time.Hour * 7 * 24,
-			MissingTolerance: time.Hour * 24,
-			DropTolerance:    time.Hour * 24,
+			StreamingNodeCatalog: checkpointCatalog,
+			Cli:                  cli,
+			Enabled:              true,
+			CheckInterval:        time.Minute * 30,
+			ScanInterval:         time.Hour * 7 * 24,
+			MissingTolerance:     time.Hour * 24,
+			DropTolerance:        time.Hour * 24,
 		}))
 		gc.RecycleUnusedBinlogFiles(context.TODO())
 
@@ -261,12 +268,13 @@ func Test_garbageCollector_scan(t *testing.T) {
 		require.NoError(t, err)
 
 		gc := NewGarbageCollector(mt, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{
-			Cli:              cli,
-			Enabled:          true,
-			CheckInterval:    time.Minute * 30,
-			ScanInterval:     time.Hour * 7 * 24,
-			MissingTolerance: time.Hour * 24,
-			DropTolerance:    time.Hour * 24,
+			StreamingNodeCatalog: checkpointCatalog,
+			Cli:                  cli,
+			Enabled:              true,
+			CheckInterval:        time.Minute * 30,
+			ScanInterval:         time.Hour * 7 * 24,
+			MissingTolerance:     time.Hour * 24,
+			DropTolerance:        time.Hour * 24,
 		}))
 		gc.Start()
 		gc.RecycleUnusedBinlogFiles(context.TODO())
@@ -291,12 +299,13 @@ func Test_garbageCollector_scan(t *testing.T) {
 		require.NoError(t, err)
 
 		gc := NewGarbageCollector(mt, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{
-			Cli:              cli,
-			Enabled:          true,
-			CheckInterval:    time.Minute * 30,
-			ScanInterval:     time.Hour * 7 * 24,
-			MissingTolerance: time.Hour * 24,
-			DropTolerance:    0,
+			StreamingNodeCatalog: checkpointCatalog,
+			Cli:                  cli,
+			Enabled:              true,
+			CheckInterval:        time.Minute * 30,
+			ScanInterval:         time.Hour * 7 * 24,
+			MissingTolerance:     time.Hour * 24,
+			DropTolerance:        0,
 		}))
 		signal := make(chan gcCmd)
 		gc.RecycleDroppedSegments(context.TODO(), signal)
@@ -309,12 +318,13 @@ func Test_garbageCollector_scan(t *testing.T) {
 	})
 	t.Run("missing gc all", func(t *testing.T) {
 		gc := NewGarbageCollector(mt, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{
-			Cli:              cli,
-			Enabled:          true,
-			CheckInterval:    time.Minute * 30,
-			ScanInterval:     time.Hour * 7 * 24,
-			MissingTolerance: 0,
-			DropTolerance:    0,
+			StreamingNodeCatalog: checkpointCatalog,
+			Cli:                  cli,
+			Enabled:              true,
+			CheckInterval:        time.Minute * 30,
+			ScanInterval:         time.Hour * 7 * 24,
+			MissingTolerance:     0,
+			DropTolerance:        0,
 		}))
 		gc.Start()
 		gc.RecycleUnusedBinlogFiles(context.TODO())
@@ -332,12 +342,13 @@ func Test_garbageCollector_scan(t *testing.T) {
 
 	t.Run("list object with error", func(t *testing.T) {
 		gc := NewGarbageCollector(mt, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{
-			Cli:              cli,
-			Enabled:          true,
-			CheckInterval:    time.Minute * 30,
-			ScanInterval:     time.Hour * 7 * 24,
-			MissingTolerance: 0,
-			DropTolerance:    0,
+			StreamingNodeCatalog: checkpointCatalog,
+			Cli:                  cli,
+			Enabled:              true,
+			CheckInterval:        time.Minute * 30,
+			ScanInterval:         time.Hour * 7 * 24,
+			MissingTolerance:     0,
+			DropTolerance:        0,
 		}))
 		gc.Start()
 		gc.RecycleUnusedBinlogFiles(context.TODO())
@@ -1664,9 +1675,10 @@ func testRecycleUnusedIndexFiles(t *testing.T, version indexpb.IndexStorePathVer
 }
 
 func TestGarbageCollector_clearETCD(t *testing.T) {
+	checkpointCatalog := MockCheckpointCatalog(t, 1000)
+
 	catalog := catalogmocks.NewDataCoordCatalog(t)
-	channelExists := mockey.Mock((*catalogmocks.DataCoordCatalog).ChannelExists).Return(true, nil).Build()
-	defer channelExists.UnPatch()
+
 	catalog.On("DropChannelCheckpoint",
 		mock.Anything,
 		mock.Anything,
@@ -2225,8 +2237,9 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 		m,
 		meta.NewMockHandlerWithMeta(m),
 		GcTestDomainOption(&snapshot.SnapshotTestMetas{IndexMeta: im, SnapshotMeta: sm}, GcOption{
-			Cli:           cm,
-			DropTolerance: 1,
+			StreamingNodeCatalog: checkpointCatalog,
+			Cli:                  cm,
+			DropTolerance:        1,
 		}))
 	// Snapshot layer transparent: no segment is blocked.
 	mockIsSegBlocked := mockey.Mock((*snapshot.SnapshotMeta).IsSegmentGCBlocked).Return(false).Build()
@@ -2849,15 +2862,18 @@ func (s *GarbageCollectorSuite) TestRunRecycleTaskWithPauser() {
 }
 
 func (s *GarbageCollectorSuite) TestAvoidGCLoadedSegments() {
+	checkpointCatalog := MockCheckpointCatalog(s.T(), 1000)
+
 	handler := meta.NewNMockHandler(s.T())
 	handler.EXPECT().ListLoadedSegments(mock.Anything).Return([]int64{1}, nil).Once()
 	gc := NewGarbageCollector(s.meta, handler, GcTestDomainOption(s.dm, GcOption{
-		Cli:              s.cli,
-		Enabled:          true,
-		CheckInterval:    time.Millisecond * 10,
-		ScanInterval:     time.Hour * 7 * 24,
-		MissingTolerance: time.Hour * 24,
-		DropTolerance:    time.Hour * 24,
+		StreamingNodeCatalog: checkpointCatalog,
+		Cli:                  s.cli,
+		Enabled:              true,
+		CheckInterval:        time.Millisecond * 10,
+		ScanInterval:         time.Hour * 7 * 24,
+		MissingTolerance:     time.Hour * 24,
+		DropTolerance:        time.Hour * 24,
 	}))
 
 	s.meta.AddSegment(context.TODO(), &meta.SegmentInfo{
@@ -2879,6 +2895,8 @@ func TestGarbageCollector(t *testing.T) {
 }
 
 func TestGarbageCollector_recycleDroppedSegments_NoIndexCollection(t *testing.T) {
+	checkpointCatalog := MockCheckpointCatalog(t, 1000)
+
 	const (
 		collectionID    = int64(100)
 		indexID         = int64(200)
@@ -2912,8 +2930,6 @@ func TestGarbageCollector_recycleDroppedSegments_NoIndexCollection(t *testing.T)
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			catalog := catalogmocks.NewDataCoordCatalog(t)
-			channelExists := mockey.Mock((*catalogmocks.DataCoordCatalog).ChannelExists).Return(false, nil).Build()
-			defer channelExists.UnPatch()
 
 			store := metacache.NewMetaStore(catalog)
 			im := &index.IndexMeta{
@@ -2949,7 +2965,7 @@ func TestGarbageCollector_recycleDroppedSegments_NoIndexCollection(t *testing.T)
 				}).Build()
 			defer mockRecycle.UnPatch()
 
-			gc := NewGarbageCollector(mt, handler, GcTestDomainOption(&snapshot.SnapshotTestMetas{IndexMeta: im}, GcOption{DropTolerance: 0}))
+			gc := NewGarbageCollector(mt, handler, GcTestDomainOption(&snapshot.SnapshotTestMetas{IndexMeta: im}, GcOption{StreamingNodeCatalog: checkpointCatalog, DropTolerance: 0}))
 			gc.RecycleDroppedSegments(context.Background(), nil)
 
 			require.Equal(t, []int64{parentSegmentID}, recycled)
@@ -3018,6 +3034,8 @@ func setupDroppedSegmentWithIndexForGC(t *testing.T) (*meta.Meta, *snapshot.Snap
 }
 
 func TestGarbageCollector_recycleDroppedSegments_RecyclesSegmentIndexMeta(t *testing.T) {
+	checkpointCatalog := MockCheckpointCatalog(t, 1000)
+
 	ctx := context.Background()
 	m, dm, segment, segIdx, binlogPath := setupDroppedSegmentWithIndexForGC(t)
 
@@ -3038,8 +3056,9 @@ func TestGarbageCollector_recycleDroppedSegments_RecyclesSegmentIndexMeta(t *tes
 		}).Maybe()
 
 	gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{
-		Cli:           cm,
-		DropTolerance: 0,
+		StreamingNodeCatalog: checkpointCatalog,
+		Cli:                  cm,
+		DropTolerance:        0,
 	}))
 
 	assert.Empty(t, dm.IndexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID),
@@ -3060,6 +3079,8 @@ func TestGarbageCollector_recycleDroppedSegments_RecyclesSegmentIndexMeta(t *tes
 // failure, or cleanup) is removed from meta instead of erroring forever on the
 // empty manifest path.
 func TestGarbageCollector_recycleDroppedSegments_StorageV3WithoutManifest(t *testing.T) {
+	checkpointCatalog := MockCheckpointCatalog(t, 1000)
+
 	ctx := context.Background()
 	m, dm, err := newMemoryMetaWithSnapshot(t)
 	require.NoError(t, err)
@@ -3080,8 +3101,9 @@ func TestGarbageCollector_recycleDroppedSegments_StorageV3WithoutManifest(t *tes
 	cm := mocks.NewChunkManager(t)
 	cm.EXPECT().RootPath().Return("root").Maybe()
 	gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{
-		Cli:           cm,
-		DropTolerance: 0,
+		StreamingNodeCatalog: checkpointCatalog,
+		Cli:                  cm,
+		DropTolerance:        0,
 	}))
 
 	gc.RecycleDroppedSegments(ctx, nil)
@@ -3090,13 +3112,16 @@ func TestGarbageCollector_recycleDroppedSegments_StorageV3WithoutManifest(t *tes
 }
 
 func TestGarbageCollector_recycleDroppedSegments_FileDeleteFailureKeepsMeta(t *testing.T) {
+	checkpointCatalog := MockCheckpointCatalog(t, 1000)
+
 	ctx := context.Background()
 	m, dm, segment, _, _ := setupDroppedSegmentWithIndexForGC(t)
 
 	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test"))
 	gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{
-		Cli:           cli,
-		DropTolerance: 0,
+		StreamingNodeCatalog: checkpointCatalog,
+		Cli:                  cli,
+		DropTolerance:        0,
 	}))
 
 	mockRemoveObjectFiles := mockey.Mock((*GarbageCollector).RemoveObjectFiles).Return(errors.New("remove failed")).Build()
@@ -3109,13 +3134,16 @@ func TestGarbageCollector_recycleDroppedSegments_FileDeleteFailureKeepsMeta(t *t
 }
 
 func TestGarbageCollector_recycleDroppedSegments_IndexMetaFailureKeepsSegmentMeta(t *testing.T) {
+	checkpointCatalog := MockCheckpointCatalog(t, 1000)
+
 	ctx := context.Background()
 	m, dm, segment, _, _ := setupDroppedSegmentWithIndexForGC(t)
 
 	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test"))
 	gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{
-		Cli:           cli,
-		DropTolerance: 0,
+		StreamingNodeCatalog: checkpointCatalog,
+		Cli:                  cli,
+		DropTolerance:        0,
 	}))
 
 	mockRemoveObjectFiles := mockey.Mock((*GarbageCollector).RemoveObjectFiles).Return(nil).Build()
@@ -3130,6 +3158,8 @@ func TestGarbageCollector_recycleDroppedSegments_IndexMetaFailureKeepsSegmentMet
 }
 
 func TestGarbageCollector_recycleDroppedSegments_IndexSnapshotReference(t *testing.T) {
+	checkpointCatalog := MockCheckpointCatalog(t, 1000)
+
 	ctx := context.Background()
 	m, dm, segment, segIdx, _ := setupDroppedSegmentWithIndexForGC(t)
 	dm.SnapshotMeta = &snapshot.SnapshotMeta{}
@@ -3137,8 +3167,9 @@ func TestGarbageCollector_recycleDroppedSegments_IndexSnapshotReference(t *testi
 
 	cli := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test"))
 	gc := NewGarbageCollector(m, meta.NewMockHandler(), GcTestDomainOption(dm, GcOption{
-		Cli:           cli,
-		DropTolerance: 0,
+		StreamingNodeCatalog: checkpointCatalog,
+		Cli:                  cli,
+		DropTolerance:        0,
 	}))
 
 	mockIsSegmentBlocked := mockey.Mock((*snapshot.SnapshotMeta).IsSegmentGCBlocked).Return(false).Build()
@@ -3977,17 +4008,17 @@ func TestGarbageCollector_recycleSnapshots_OrphanCleanup(t *testing.T) {
 }
 
 func TestCheckDroppedSegmentGC_CommitTimestamp(t *testing.T) {
+	checkpointCatalog := MockCheckpointCatalog(t, 1000)
+
 	t.Run("import segment not GCed when commit_timestamp > cpTimestamp", func(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
-		channelExists := mockey.Mock((*catalogmocks.DataCoordCatalog).ChannelExists).Return(true, nil).Build()
-		defer channelExists.UnPatch()
 
 		m := &meta.Meta{
 			Catalog:   catalog,
 			MetaStore: metacache.NewMetaStore(catalog),
 		}
 
-		gc := NewGarbageCollector(m, meta.NewMockHandler(), GcOption{})
+		gc := NewGarbageCollector(m, meta.NewMockHandler(), GcOption{StreamingNodeCatalog: checkpointCatalog})
 
 		segment := &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID:              200,
@@ -4005,8 +4036,6 @@ func TestCheckDroppedSegmentGC_CommitTimestamp(t *testing.T) {
 
 	t.Run("import segment GCed when commit_timestamp <= cpTimestamp", func(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
-		channelExists := mockey.Mock((*catalogmocks.DataCoordCatalog).ChannelExists).Return(true, nil).Build()
-		defer channelExists.UnPatch()
 
 		m := &meta.Meta{
 			Catalog:   catalog,
@@ -4014,7 +4043,8 @@ func TestCheckDroppedSegmentGC_CommitTimestamp(t *testing.T) {
 		}
 
 		gc := NewGarbageCollector(m, meta.NewMockHandler(), GcOption{
-			DropTolerance: 0,
+			StreamingNodeCatalog: checkpointCatalog,
+			DropTolerance:        0,
 		})
 
 		segment := &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{

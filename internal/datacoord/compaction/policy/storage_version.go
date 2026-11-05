@@ -117,7 +117,7 @@ func (policy *StorageVersionUpgradePolicy) Trigger(ctx context.Context) (map[Com
 		return map[CompactionTriggerType][]view.CompactionView{TriggerTypeStorageVersionUpgrade: nil}, nil
 	}
 
-	collections := policy.meta.GetCollections()
+	collections := policy.meta.CollectionsForPreparation(ctx)
 	views := make([]view.CompactionView, 0)
 	for _, collection := range collections {
 		if policy.currentCount >= maxCount {

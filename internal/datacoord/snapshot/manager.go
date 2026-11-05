@@ -18,7 +18,6 @@ package snapshot
 
 import (
 	"context"
-	"math"
 	"slices"
 	"sort"
 	"strconv"
@@ -357,8 +356,10 @@ type SnapshotManager interface {
 // Implementation: Struct and Constructor
 // ============================================================================
 
-// snapshotManager implements the SnapshotManager interface.
+// Manager implements the SnapshotManager interface.
 type Manager struct {
+	CollectionRestorer RestoreCollectionManager
+	IndexMeta          *index.IndexMeta
 	// Core dependencies
 	meta            *meta.Meta                  // Segment metadata management
 	snapshotMeta    *SnapshotMeta               // Snapshot metadata management
@@ -921,6 +922,9 @@ func (sm *Manager) finishRestoreSnapshot(
 	rollback RollbackFunc,
 	validateResources ValidateResourcesFunc,
 ) (jobID int64, err error) {
+	if sm.CollectionRestorer != nil {
+		return sm.broadcastRestoreCollection(ctx, snapshotData, snapshotName, sourceCollectionID, targetCollectionName, targetDbName, pinID, external, snapshotS3Location, externalSpec)
+	}
 	snapshotFingerprint := ""
 	if external {
 		snapshotFingerprint, err = snapshotstorage.SnapshotFingerprint(snapshotData)
@@ -1312,6 +1316,7 @@ func (sm *Manager) restoreData(
 	external bool,
 	externalSpec string,
 	expectedSnapshotFingerprint string,
+	publication ...*restorePublication,
 ) (int64, error) {
 	mlog.Info(ctx, "restore data started",
 		mlog.String("snapshot", snapshotName),
@@ -1421,6 +1426,7 @@ func (sm *Manager) restoreData(
 		snapshotS3Location,
 		externalSpec,
 		actualSnapshotFingerprint,
+		publication...,
 	); err != nil {
 		mlog.Error(context.TODO(), "failed to create restore job", mlog.Err(err))
 		if external {
@@ -1616,14 +1622,21 @@ func (sm *Manager) createRestoreJob(
 	snapshotS3Location string,
 	externalSpec string,
 	snapshotFingerprint string,
+	publication ...*restorePublication,
 ) error {
+	var starts map[string]uint64
+	createsCollection := false
+	if len(publication) > 0 {
+		starts = publication[0].starts
+		createsCollection = publication[0].createsCollection
+	}
 	// Validate which segments exist in local meta for same-cluster restore.
 	// External restore reads source metadata from object storage; source
 	// segments do not exist in the target cluster's DataCoord meta.
 	validSegments := make([]*datapb.SegmentDescription, 0, len(snapshotData.Segments))
 	for _, segDesc := range snapshotData.Segments {
 		sourceSegmentID := segDesc.GetSegmentId()
-		if !external {
+		if !external && !createsCollection {
 			segInfo := sm.meta.GetSegment(ctx, sourceSegmentID)
 			if segInfo == nil {
 				mlog.Warn(ctx, "source segment not found in meta, skipping",
@@ -1634,12 +1647,15 @@ func (sm *Manager) createRestoreJob(
 		validSegments = append(validSegments, segDesc)
 	}
 
-	// Allocate target segment IDs
-	// AllocN returns (start, end, error), where end = start + count
-	targetSegmentIDStart, _, err := sm.Allocator.AllocN(int64(len(validSegments)))
-	if err != nil {
-		mlog.Error(context.TODO(), "failed to allocate segment IDs", mlog.Err(err))
-		return err
+	// The callback allocates IDs once and persists them in the Job before any
+	// native target segment is registered. Retries find that Job by WAL JobID.
+	var targetSegmentIDStart int64
+	if len(validSegments) > 0 {
+		var err error
+		targetSegmentIDStart, _, err = sm.Allocator.AllocN(int64(len(validSegments)))
+		if err != nil {
+			return err
+		}
 	}
 
 	// Create ID mappings and pre-register target segments
@@ -1682,38 +1698,9 @@ func (sm *Manager) createRestoreJob(
 			return err
 		}
 
-		// Prepare positions with correct channel names
-		startPos := segDesc.GetStartPosition()
-		dmlPos := segDesc.GetDmlPosition()
-		if startPos != nil {
-			startPos.ChannelName = targetChannelName
+		if !createsCollection {
+			targetSegments[targetSegmentID] = copysegment.RestoredSegmentInfo(segDesc, targetCollection, targetPartitionID, targetSegmentID, targetChannelName, starts[targetChannelName])
 		}
-		if dmlPos != nil {
-			dmlPos.ChannelName = targetChannelName
-		}
-
-		// Pre-register target segment in meta. NewSegmentInfo eagerly
-		// populates Stats so concurrent RLock readers don't race on a
-		// lazy init.
-		newSegment := meta.NewSegmentInfo(&datapb.SegmentInfo{
-			ID:                  targetSegmentID,
-			CollectionID:        targetCollection,
-			PartitionID:         targetPartitionID,
-			InsertChannel:       targetChannelName,
-			NumOfRows:           segDesc.GetNumOfRows(),
-			State:               commonpb.SegmentState_Importing,
-			MaxRowNum:           Params.DataCoordCfg.SegmentMaxSize.GetAsInt64(),
-			Level:               segDesc.GetSegmentLevel(),
-			CreatedByCompaction: false,
-			LastExpireTime:      math.MaxUint64,
-			StartPosition:       startPos,
-			DmlPosition:         dmlPos,
-			StorageVersion:      segDesc.GetStorageVersion(),
-			IsSorted:            segDesc.GetIsSorted(),
-			CommitTimestamp:     segDesc.GetCommitTimestamp(),
-			IsImporting:         true,
-		})
-		targetSegments[targetSegmentID] = newSegment
 	}
 
 	// Pre-register all target segments in meta to ensure they exist when copy tasks run
@@ -1752,15 +1739,18 @@ func (sm *Manager) createRestoreJob(
 				{Key: "copy_index", Value: "true"},
 				{Key: "source_type", Value: "snapshot"},
 			},
-			TotalSegments:       int64(len(idMappings)),
-			TotalRows:           totalRows,
-			SnapshotName:        snapshotData.SnapshotInfo.GetName(),
-			SourceCollectionId:  snapshotData.SnapshotInfo.GetCollectionId(),
-			PinId:               pinID,
-			External:            external,
-			SnapshotS3Location:  snapshotS3Location,
-			ExternalSpec:        externalSpec,
-			SnapshotFingerprint: snapshotFingerprint,
+			TotalSegments:                int64(len(idMappings)),
+			TotalRows:                    totalRows,
+			SnapshotName:                 snapshotData.SnapshotInfo.GetName(),
+			SourceCollectionId:           snapshotData.SnapshotInfo.GetCollectionId(),
+			PinId:                        pinID,
+			External:                     external,
+			SnapshotS3Location:           snapshotS3Location,
+			ExternalSpec:                 externalSpec,
+			SnapshotFingerprint:          snapshotFingerprint,
+			TransformStartAfterTimeticks: starts,
+			CreatesCollection:            createsCollection,
+			ChannelMapping:               channelMapping,
 		},
 		Tr:            timerecord.NewTimeRecorder("copy segment job"),
 		SnapshotCache: &copysegment.CopySegmentSnapshotCache{},

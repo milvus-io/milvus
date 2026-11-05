@@ -1747,7 +1747,7 @@ CreateFieldDataFromDataArray(ssize_t raw_count,
     return field_data;
 }
 
-inline index::IIndexReaderBasePtr
+inline BuiltTestIndex
 GenVecIndexing(int64_t N,
                int64_t dim,
                const float* vec,
@@ -1764,7 +1764,7 @@ GenVecIndexing(int64_t N,
                                        use_knowhere_build_pool);
 }
 
-inline index::IIndexReaderBasePtr
+inline BuiltTestIndex
 GenVecIndexingFloat16(int64_t N,
                       int64_t dim,
                       const knowhere::fp16* vec,
@@ -1781,7 +1781,7 @@ GenVecIndexingFloat16(int64_t N,
                                                 use_knowhere_build_pool);
 }
 
-inline index::IIndexReaderBasePtr
+inline BuiltTestIndex
 GenVecIndexingBFloat16(int64_t N,
                        int64_t dim,
                        const knowhere::bf16* vec,
@@ -1798,7 +1798,7 @@ GenVecIndexingBFloat16(int64_t N,
                                                 use_knowhere_build_pool);
 }
 
-inline index::IIndexReaderBasePtr
+inline BuiltTestIndex
 GenVecIndexingInt8(int64_t N,
                    int64_t dim,
                    const int8_t* vec,
@@ -1815,7 +1815,7 @@ GenVecIndexingInt8(int64_t N,
                                         use_knowhere_build_pool);
 }
 
-inline index::IIndexReaderBasePtr
+inline BuiltTestIndex
 GenVecIndexingBinary(int64_t N,
                      int64_t dim,
                      const uint8_t* vec,
@@ -1833,7 +1833,7 @@ GenVecIndexingBinary(int64_t N,
 }
 
 template <typename T>
-inline index::IIndexReaderBasePtr
+inline BuiltTestIndex
 GenScalarIndexing(int64_t N, const T* data) {
     static_assert(std::is_arithmetic_v<T>,
                   "sorted scalar fixtures support arithmetic types");

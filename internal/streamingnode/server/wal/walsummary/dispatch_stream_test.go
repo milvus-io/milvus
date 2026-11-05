@@ -433,10 +433,9 @@ func TestDispatchStreamKeepsExistingFastForwardPolicy(t *testing.T) {
 	require.EqualValues(t, 30, nextTransformEvent(t, h).Entry.GetTimeTick())
 }
 
-// The extraction still uses the append-time query planner, which advances its
-// Transform frontier for every committed transaction. Both replay and live
-// dispatch must cover that target until ordered frontier publication lands.
-func TestDispatchStreamPreservesCommittedInsertProgress(t *testing.T) {
+// Insert-only transactions do not advance the Transform frontier or emit live
+// events. A subsequent Delete must be the next delivered event.
+func TestDispatchStreamSkipsInsertOnlyTransactions(t *testing.T) {
 	for _, rows := range [][][]int64{nil, {{1}}} {
 		m := NewManager(ManagerConfig{})
 		historical := newTestIdempotentTxnMessage(t, "v", 10, "", rows)
@@ -450,8 +449,9 @@ func TestDispatchStreamPreservesCommittedInsertProgress(t *testing.T) {
 		require.Equal(t, historical.TimeTick(), nextTransformEvent(t, h).SyncUp.TimeTick)
 		live := newTestIdempotentTxnMessage(t, "v", 20, "", rows)
 		m.ObserveMessage(t.Context(), live)
+		m.ObserveMessage(t.Context(), newTestDeleteMessage(t, "v", 30, 1, 123))
 		event := nextTransformEvent(t, h)
-		require.Nil(t, event.Entry)
-		require.Equal(t, live.TimeTick(), event.SyncUp.TimeTick)
+		require.NotNil(t, event.Entry)
+		require.EqualValues(t, 30, event.Entry.GetTimeTick())
 	}
 }

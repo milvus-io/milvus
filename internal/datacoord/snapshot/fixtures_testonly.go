@@ -180,3 +180,5 @@ func InsertTestSnapshot(sm *SnapshotMeta, info *datapb.SnapshotInfo, segmentIDs,
 	sm.SnapshotID2RefIndex.Insert(info.GetId(), NewLoadedSnapshotRefIndex(segmentIDs, buildIDs))
 	sm.addToSecondaryIndexes(info)
 }
+
+func (m *SnapshotExportManager) ContextForTest() context.Context { return m.ctx }

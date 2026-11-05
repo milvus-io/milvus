@@ -54,7 +54,7 @@
 #include "storage/AsyncLoadExecutor.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/RemoteInputStream.h"
-#include "segcore/storagev1translator/IndexReaderTranslator.h"
+#include "index/IndexLoadContext.h"
 #include "folly/futures/Future.h"
 #include "futures/Executor.h"
 #include "index/Utils.h"
@@ -83,7 +83,7 @@
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "segcore/Utils.h"
 #include "segcore/default_fs.h"
-#include "segcore/storagev1translator/BsonInvertedIndexTranslator.h"
+#include "segcore/json_stats/BsonInvertedIndexTranslator.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/FileManager.h"
 #include "storage/LocalChunkManager.h"
@@ -2395,7 +2395,7 @@ JsonKeyStats::LoadSharedKeyIndex(
     const std::string& warmup_policy,
     OpContext* ctx) {
     // shared_key_index_files are absolute remote paths (basePath already prepended)
-    segcore::storagev1translator::BsonInvertedIndexLoadInfo load_info;
+    segcore::BsonInvertedIndexLoadInfo load_info;
     load_info.enable_mmap = enable_mmap;
     load_info.segment_id = segment_id_;
     load_info.field_id = field_id_;
@@ -2405,8 +2405,7 @@ JsonKeyStats::LoadSharedKeyIndex(
     load_info.warmup_policy = warmup_policy;
     load_info.shard = shard_;
     std::unique_ptr<cachinglayer::Translator<index::BsonInvertedIndex>>
-        translator = std::make_unique<
-            segcore::storagev1translator::BsonInvertedIndexTranslator>(
+        translator = std::make_unique<segcore::BsonInvertedIndexTranslator>(
             load_info, file_manager_context_, ctx);
 
     bson_index_cache_slot_ =
@@ -2428,7 +2427,7 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx,
     file_manager_context_.use_async_load =
         file_manager_context_.use_async_load.value_or(
             segcore::storagev2translator::StorageV2AsyncLoadEnabled());
-    segcore::storagev1translator::IndexLoadContext preparation_ctx(
+    index::IndexLoadContext preparation_ctx(
         op_ctx, GetValueFromConfig<int32_t>(config, LOAD_PRIORITY).value_or(0));
     auto* context = &preparation_ctx.ctx;
     storage::ThrowIfCancelled(context->cancellation_token,

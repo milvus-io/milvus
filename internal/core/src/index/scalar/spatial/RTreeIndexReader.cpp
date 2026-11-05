@@ -68,7 +68,7 @@ RTreeIndexState::RTreeIndexState(
       memory_usage_(memory_usage) {
 }
 
-std::shared_ptr<const RTreeIndexState>
+std::unique_ptr<RTreeIndexState>
 RTreeIndexState::Create(std::shared_ptr<const RTreeQueryEngine> engine,
                         std::shared_ptr<const std::vector<size_t>> null_offsets,
                         int64_t total_num_rows) {
@@ -99,7 +99,7 @@ RTreeIndexState::Create(std::shared_ptr<const RTreeQueryEngine> engine,
         std::move(engines), std::move(validity), total_num_rows);
 }
 
-std::shared_ptr<const RTreeIndexState>
+std::unique_ptr<RTreeIndexState>
 RTreeIndexState::CreateFromValidatedShards(
     std::vector<std::shared_ptr<const RTreeQueryEngine>> engines,
     SharedValidityBitmap::Snapshot validity,
@@ -136,7 +136,7 @@ RTreeIndexState::CreateFromValidatedShards(
                    "R-Tree engine memory size must not be negative");
         add_bytes(static_cast<uint64_t>(engine_bytes));
     }
-    return std::shared_ptr<const RTreeIndexState>(new RTreeIndexState(
+    return std::unique_ptr<RTreeIndexState>(new RTreeIndexState(
         std::move(engines), std::move(validity), total_num_rows, memory_usage));
 }
 
@@ -160,9 +160,80 @@ RTreeIndexState::MemoryUsage() const {
     return memory_usage_;
 }
 
+RTreeIndex::RTreeIndex(std::shared_ptr<const RTreeIndexState> state)
+    : storage_(state) {
+    AssertInfo(state != nullptr, "R-Tree reader state must not be null");
+}
+
+RTreeIndex::RTreeIndex(
+    std::shared_ptr<cachinglayer::CacheSlot<RTreeIndexState>> slot,
+    int64_t count)
+    : storage_(CachedStorage{std::move(slot), count}) {
+    AssertInfo(std::get<CachedStorage>(storage_).slot != nullptr,
+               "R-Tree requires a cache slot");
+    AssertInfo(count >= 0, "R-Tree count must not be negative");
+}
+
+IndexMetadata
+RTreeIndex::Metadata() const {
+    const auto* resident =
+        std::get_if<std::shared_ptr<const RTreeIndexState>>(&storage_);
+    return {ReaderCaps{.spatial = true, .exact = false},
+            Domain::Row,
+            DataType::GEOMETRY,
+            resident ? (*resident)->Count()
+                     : std::get<CachedStorage>(storage_).count};
+}
+
+std::shared_ptr<const RTreeIndexState>
+RTreeIndex::PinStorage(milvus::OpContext* op_ctx) const {
+    if (const auto* resident =
+            std::get_if<std::shared_ptr<const RTreeIndexState>>(&storage_)) {
+        return *resident;
+    }
+    const auto& cached = std::get<CachedStorage>(storage_);
+    std::shared_ptr<const RTreeIndexState> storage;
+    if (const auto* resident = cached.slot->TryBorrowCell(0)) {
+        storage = {cached.slot, resident};
+    } else {
+        auto pin =
+            cachinglayer::SemiInlineGet(cached.slot->PinCells(op_ctx, {0}));
+        const auto* cell = pin->get_ith_cell(0);
+        storage = {std::move(pin), cell};
+    }
+    AssertInfo(storage != nullptr && storage->Count() == cached.count,
+               "R-Tree storage disagrees with index metadata");
+    return storage;
+}
+
+void
+RTreeIndex::CancelWarmup() const {
+    if (const auto* cached = std::get_if<CachedStorage>(&storage_)) {
+        cached->slot->CancelWarmup();
+    }
+}
+
+IIndexReaderBasePtr
+RTreeIndex::CreateReader(milvus::OpContext* op_ctx) const {
+    return IIndexReaderBasePtr(
+        new RTreeIndexReader(shared_from_this(), op_ctx));
+}
+
 RTreeIndexReader::RTreeIndexReader(std::shared_ptr<const RTreeIndexState> state)
-    : state_(std::move(state)) {
-    AssertInfo(state_ != nullptr, "R-Tree reader state must not be null");
+    : RTreeIndexReader(std::make_shared<RTreeIndex>(std::move(state)),
+                       nullptr) {
+}
+
+RTreeIndexReader::RTreeIndexReader(std::shared_ptr<const RTreeIndex> index,
+                                   milvus::OpContext* op_ctx)
+    : index_(std::move(index)), op_ctx_(op_ctx) {
+}
+
+const std::shared_ptr<const RTreeIndexState>&
+RTreeIndexReader::GetStorage() const {
+    std::call_once(storage_once_,
+                   [this] { storage_ = index_->PinStorage(op_ctx_); });
+    return storage_;
 }
 
 RTreeIndexReader::~RTreeIndexReader() = default;
@@ -170,7 +241,7 @@ RTreeIndexReader::~RTreeIndexReader() = default;
 ReaderCaps
 RTreeIndexReader::Caps() const {
     // The MBR filter returns a superset; execution refines against exact geometry.
-    return ReaderCaps{.spatial = true, .exact = false};
+    return index_->Metadata().caps;
 }
 
 Domain
@@ -180,7 +251,7 @@ RTreeIndexReader::CoordDomain() const {
 
 int64_t
 RTreeIndexReader::Count() const {
-    return state_->Count();
+    return *index_->Metadata().count;
 }
 
 DataType
@@ -188,15 +259,10 @@ RTreeIndexReader::ValueType() const {
     return DataType::GEOMETRY;
 }
 
-int64_t
-RTreeIndexReader::MemoryUsage() const {
-    return state_->MemoryUsage();
-}
-
 cachinglayer::ResourceUsage
-RTreeIndexReader::CellByteSize() const {
+RTreeIndexState::CellByteSize() const {
     // Every referenced Boost shard is resident. No mmap/file-backed bytes
-    // remain owned by this reader. MemoryUsage counts a shared shard once per
+    // remain owned by this state. MemoryUsage counts a shared shard once per
     // generation and is not additive across concurrently pinned generations;
     // growing accounting must take the union of shared engine and validity-buffer
     // owners. The embedded validity snapshot is included in sizeof(state).
@@ -206,30 +272,33 @@ RTreeIndexReader::CellByteSize() const {
 TargetBitmap
 RTreeIndexReader::Candidates(SpatialOp op, const Geometry& query_geom) const {
     static_cast<void>(op);
-    if (!query_geom.IsValid() || state_->Engines().empty()) {
-        return IsNotNull();
+    const auto& storage = GetStorage();
+    if (!query_geom.IsValid() || storage->Engines().empty()) {
+        return storage->Validity().ToBitmap();
     }
     GeosContextGuard context;
-    TargetBitmap result(static_cast<size_t>(state_->Count()), false);
-    for (const auto& engine : state_->Engines()) {
+    TargetBitmap result(static_cast<size_t>(storage->Count()), false);
+    for (const auto& engine : storage->Engines()) {
         const auto has_query_box = engine->ForEachCandidate(
             query_geom.GetGeometry(), context.Get(), [&](int64_t offset) {
-                AssertInfo(offset >= 0 && offset < state_->Count(),
+                AssertInfo(offset >= 0 && offset < storage->Count(),
                            "R-Tree candidate offset {} is outside [0, {})",
                            offset,
-                           state_->Count());
+                           storage->Count());
                 result.set(static_cast<size_t>(offset));
             });
         if (!has_query_box) {
-            return IsNotNull();
+            return storage->Validity().ToBitmap();
         }
     }
     return result;
 }
 
-const SharedValidityBitmap::Snapshot&
+std::shared_ptr<const SharedValidityBitmap::Snapshot>
 RTreeIndexReader::Validity() const {
-    return state_->Validity();
+    const auto& storage = GetStorage();
+    const auto* validity = &storage->Validity();
+    return {storage, validity};
 }
 
 TargetBitmap
@@ -241,7 +310,7 @@ RTreeIndexReader::IsNull() const {
 
 TargetBitmap
 RTreeIndexReader::IsNotNull() const {
-    return state_->Validity().ToBitmap();
+    return GetStorage()->Validity().ToBitmap();
 }
 
 }  // namespace milvus::index

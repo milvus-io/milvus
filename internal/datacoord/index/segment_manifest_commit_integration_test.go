@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -64,6 +65,8 @@ func manifestIndexEntryForCommitTest(t *testing.T, m *meta.Meta, indexMeta *Inde
 }
 
 func TestCommitSegmentManifestPublishesIndexTaskAtomically(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
 	const (
 		collectionID = int64(1)
 		partitionID  = int64(10)
@@ -82,9 +85,22 @@ func TestCommitSegmentManifestPublishesIndexTaskAtomically(t *testing.T) {
 		CollectionID:   collectionID,
 		PartitionID:    partitionID,
 		State:          commonpb.SegmentState_Flushed,
+		Level:          datapb.SegmentLevel_L1,
+		InsertChannel:  "index-publication-vchannel",
+		NumOfRows:      4096,
 		StorageVersion: storage.StorageV3,
 		ManifestPath:   oldManifest,
 	})))
+	manager, err := dataview.RecoverManager(ctx, mt.Catalog.(dataview.Catalog), func(context.Context, int64) (bool, error) { return true, nil }, mt.LoadableProjection, nil, nil)
+	require.NoError(t, err)
+	mt.DataViewManager = manager
+	loadable, err := mt.LoadableProjection(ctx, collectionID, nil)
+	require.NoError(t, err)
+	_, err = manager.OnBootstrapCollection(ctx, dataview.BootstrapCollectionDataViewEvent{CollectionID: collectionID, VChannels: []string{"index-publication-vchannel"}, Segments: loadable})
+	require.NoError(t, err)
+	previous, err := manager.Latest(ctx, collectionID)
+	require.NoError(t, err)
+	defer previous.Deref()
 	require.NoError(t, dm.IndexMeta.AddSegmentIndex(context.Background(), &model.SegmentIndex{
 		CollectionID:          collectionID,
 		PartitionID:           partitionID,
@@ -144,6 +160,19 @@ func TestCommitSegmentManifestPublishesIndexTaskAtomically(t *testing.T) {
 	require.Equal(t, commonpb.IndexState_Finished, published.IndexState)
 	require.Equal(t, []string{"0", "1"}, published.IndexFileKeys)
 	require.EqualValues(t, 2000, published.IndexSerializedSize)
+	// The same physical-index commit must drive a new DataView even though
+	// SegmentID and SchemaVersion did not change. Retained Views keep revision 3.
+	require.Eventually(t, func() bool {
+		next, err := manager.Latest(ctx, collectionID)
+		if err != nil || next == nil {
+			return false
+		}
+		defer next.Deref()
+		return next.Version().GetStreamingVersion() == previous.Version().GetStreamingVersion() &&
+			next.Version().GetCompactVersion() == previous.Version().GetCompactVersion()+1 &&
+			next.DataView().GetShards()[0].GetPartitions()[0].GetSegmentManifestVersions()[0] == 4
+	}, 5*time.Second, time.Millisecond)
+	require.EqualValues(t, 3, previous.DataView().GetShards()[0].GetPartitions()[0].GetSegmentManifestVersions()[0])
 }
 
 // The manifest entry is assembled before CommitSegmentManifest takes the

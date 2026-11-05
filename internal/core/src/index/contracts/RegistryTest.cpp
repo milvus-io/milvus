@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <gtest/gtest.h>
 
 #include <atomic>
@@ -43,6 +45,11 @@
 
 namespace milvus::index::test {
 namespace {
+
+static_assert(!std::is_default_constructible_v<IndexLoadRequest>);
+static_assert(!std::is_constructible_v<IndexLoadRequest,
+                                       OpenedIndexSource,
+                                       storage::LoadOptions>);
 
 class EmptyArtifact final : public storage::Artifact {
  public:
@@ -97,14 +104,24 @@ class EmptyReader final : public IIndexReaderBase {
         return DataType::INT64;
     }
 
-    int64_t
-    MemoryUsage() const override {
-        return 0;
-    }
+ private:
+    ReaderCaps caps_;
+};
 
-    cachinglayer::ResourceUsage
-    CellByteSize() const override {
-        return {0, 0};
+class EmptyIndex final : public IIndex {
+ public:
+    explicit EmptyIndex(ReaderCaps caps = {}) : caps_(caps) {
+    }
+    IndexMetadata
+    Metadata() const override {
+        return {caps_, Domain::Row, DataType::INT64, 0};
+    }
+    IIndexReaderBasePtr
+    CreateReader(milvus::OpContext*) const override {
+        return std::make_unique<EmptyReader>(caps_);
+    }
+    void
+    CancelWarmup() const override {
     }
 
  private:
@@ -129,10 +146,10 @@ struct LoaderProbeA : IndexLoader {
         result->options_ = std::move(options);
         co_return result;
     }
-    folly::coro::Task<IIndexReaderBasePtr>
-    Load(milvus::OpContext*) override {
+    IndexPtr
+    Load(milvus::OpContext*, const IndexCacheConfig&) override {
         load_thread = std::this_thread::get_id();
-        co_return std::make_unique<EmptyReader>(DeriveCaps(options_.params));
+        return std::make_shared<EmptyIndex>(DeriveCaps(options_.params));
     }
 };
 
@@ -159,12 +176,12 @@ struct LoaderFailureProbe : IndexLoader {
         co_return loader;
     }
 
-    folly::coro::Task<IIndexReaderBasePtr>
-    Load(milvus::OpContext*) override {
+    IndexPtr
+    Load(milvus::OpContext*, const IndexCacheConfig&) override {
         if (mode == "load_error") {
             ThrowInfo(DataFormatBroken, "reader loading failed");
         }
-        co_return std::make_unique<EmptyReader>();
+        return std::make_shared<EmptyIndex>();
     }
 };
 
@@ -175,7 +192,8 @@ ProbeLoadRequest(TestArtifactSource& source, Config params = Config::object()) {
     return {OpenedIndexSource{LegacyIndexSource{
                 std::shared_ptr<storage::FileSource>(&source, [](auto*) {}),
                 false}},
-            std::move(options)};
+            std::move(options),
+            TestIndexCacheConfig()};
 }
 
 std::string
@@ -368,32 +386,39 @@ TEST(RegistryTest, LoaderDeriveAndCreateDispatchIndependently) {
     TestArtifactSource source(artifact);
     storage::LoadOptions options;
     options.params = {{"predicate", true}};
-    auto reader = loader_entry.Load(
-        {OpenedIndexSource{LegacyIndexSource{
-             std::shared_ptr<storage::FileSource>(&source, [](auto*) {}),
-             false}},
-         options});
+    auto reader = loader_entry
+                      .Load({OpenedIndexSource{LegacyIndexSource{
+                                 std::shared_ptr<storage::FileSource>(
+                                     &source, [](auto*) {}),
+                                 false}},
+                             options,
+                             milvus::index::test::TestIndexCacheConfig()})
+                      ->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
     EXPECT_TRUE(reader->Caps().predicate);
     EXPECT_EQ(LoaderProbeA::create_thread, std::this_thread::get_id());
     EXPECT_EQ(LoaderProbeA::load_thread, std::this_thread::get_id());
 }
 
-TEST(RegistryTest, AsyncOpenedSourceRunsOnLoadingExecutor) {
+TEST(RegistryTest, AsyncSourcePreparationRunsOnLoadingExecutor) {
     const LoaderEntry entry{&LoaderProbeA::DeriveCaps, &LoaderProbeA::Create};
     TestArtifactData artifact;
     TestArtifactSource source(artifact);
     storage::LoadOptions options;
     options.params = {{"predicate", true}};
-    auto reader = entry.Load(
-        {OpenedIndexSource{LegacyIndexSource{
-             std::shared_ptr<storage::FileSource>(&source, [](auto*) {}),
-             true}},
-         options});
+    auto reader = entry
+                      .Load({OpenedIndexSource{LegacyIndexSource{
+                                 std::shared_ptr<storage::FileSource>(
+                                     &source, [](auto*) {}),
+                                 true}},
+                             options,
+                             milvus::index::test::TestIndexCacheConfig()})
+                      ->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
     EXPECT_TRUE(reader->Caps().predicate);
     EXPECT_NE(LoaderProbeA::create_thread, std::this_thread::get_id());
-    EXPECT_NE(LoaderProbeA::load_thread, std::this_thread::get_id());
+    // Slot creation stays on the caller so synchronous warmup can use the I/O executor.
+    EXPECT_EQ(LoaderProbeA::load_thread, std::this_thread::get_id());
 }
 
 TEST(RegistryTest, LoaderEntryRequiresBothFunctions) {
@@ -407,7 +432,8 @@ TEST(RegistryTest, LoaderEntryRequiresBothFunctions) {
     TestArtifactSource source(artifact);
     const LoaderEntry incomplete{&LoaderProbeA::DeriveCaps, nullptr};
     ExpectSegcoreError(ErrorCode::UnexpectedError, [&] {
-        static_cast<void>(incomplete.Load(ProbeLoadRequest(source)));
+        static_cast<void>(
+            incomplete.Load(ProbeLoadRequest(source))->CreateReader(nullptr));
     });
 }
 
@@ -438,7 +464,8 @@ TEST(RegistryTest, LoaderCreationAndLoadFailuresPreserveErrorCode) {
                                   : ErrorCode::DataFormatBroken;
         ExpectSegcoreError(expected, [&] {
             static_cast<void>(
-                entry.Load(ProbeLoadRequest(source, {{"mode", mode}})));
+                entry.Load(ProbeLoadRequest(source, {{"mode", mode}}))
+                    ->CreateReader(nullptr));
         });
     }
 }

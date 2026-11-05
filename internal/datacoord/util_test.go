@@ -57,6 +57,7 @@ func (suite *UtilSuite) TestCompactionMergeInfoEnums() {
 		datapb.CompactionType_SingleCompaction:                     commonpb.CompactionType_CompactionTypeSingle,
 		datapb.CompactionType_MinorCompaction:                      commonpb.CompactionType_CompactionTypeMinor,
 		datapb.CompactionType_MajorCompaction:                      commonpb.CompactionType_CompactionTypeMajor,
+		datapb.CompactionType_RestoreLevel0DeleteCompaction:        commonpb.CompactionType_CompactionTypeLevel0Delete,
 		datapb.CompactionType_Level0DeleteCompaction:               commonpb.CompactionType_CompactionTypeLevel0Delete,
 		datapb.CompactionType_ClusteringCompaction:                 commonpb.CompactionType_CompactionTypeClustering,
 		datapb.CompactionType_SortCompaction:                       commonpb.CompactionType_CompactionTypeSort,

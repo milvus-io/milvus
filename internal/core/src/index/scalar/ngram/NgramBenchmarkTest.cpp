@@ -76,7 +76,7 @@ struct NgramBenchmarkData {
     FieldId field_id;
     expr_index::RawFieldFiles raw_files;
     segcore::SegmentSealedUPtr segment;
-    // The segment's cache slot owns this reader through every measurement.
+    index::IIndexReaderBasePtr ngram_reader;
     const index::INgramReader* ngram;
     index::IIndexReaderBasePtr inverted;
 
@@ -107,7 +107,8 @@ struct NgramBenchmarkData {
             index::NGRAM_INDEX_TYPE,
             {field},
             {{index::MIN_GRAM, 2}, {index::MAX_GRAM, 4}});
-        ngram = dynamic_cast<const index::INgramReader*>(opened.reader.get());
+        ngram_reader = opened.index->CreateReader(nullptr);
+        ngram = dynamic_cast<const index::INgramReader*>(ngram_reader.get());
         AssertInfo(ngram != nullptr,
                    "benchmark requires a production NGRAM reader");
         expr_index::InstallIndex(

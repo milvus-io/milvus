@@ -208,12 +208,12 @@ CreateSealedWithFieldDataLoaded(const SchemaPtr& schema,
     return segment;
 }
 
-inline IndexPin
-PinSealedText(const SegmentInternalInterface& segment, FieldId field) {
+inline index::IIndexReaderBasePtr
+CreateSealedTextReader(const SegmentInternalInterface& segment, FieldId field) {
     const auto capability = segment.ResolveIndexCapability(nullptr, field);
     for (const auto& entry : capability.entries()) {
         if (entry.caps.text_match)
-            return segment.PinIndex(nullptr, entry.key);
+            return segment.CreateIndexReader(nullptr, entry.key);
     }
     return {};
 }

@@ -21,6 +21,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -60,6 +61,24 @@ func TestMixCoordCollectionAvailability(t *testing.T) {
 		b := broker.NewCoordinatorBroker(&mixCoordImpl{rootcoordServer: core})
 		assert.True(t, b.IsCollectionAvailable(123))
 		assert.False(t, b.IsCollectionAvailable(124))
+	})
+}
+
+func TestMixCoordGetCollectionProperties(t *testing.T) {
+	mockey.PatchConvey("collection properties use the in-process metadata reader", t, func() {
+		core := &rootcoord.Core{}
+		ctx := context.Background()
+		properties := []*commonpb.KeyValuePair{{Key: "collection.autorelease.ttl.seconds", Value: "20"}}
+		mockey.Mock((*rootcoord.Core).GetCollectionProperties).To(func(receiver *rootcoord.Core, actualCtx context.Context, id int64) ([]*commonpb.KeyValuePair, error) {
+			require.Same(t, core, receiver)
+			require.Equal(t, ctx, actualCtx)
+			require.Equal(t, int64(123), id)
+			return properties, nil
+		}).Build()
+		mix := &mixCoordImpl{rootcoordServer: core}
+		got, err := mix.GetCollectionProperties(ctx, 123)
+		require.NoError(t, err)
+		require.Equal(t, properties, got)
 	})
 }
 
@@ -227,6 +246,59 @@ func TestMixCoord_FlushAll(t *testing.T) {
 			assert.Equal(t, expectedErr, err)
 			assert.Nil(t, resp)
 		})
+	})
+}
+
+func TestMixCoordDropCollectionDataView(t *testing.T) {
+	mockey.PatchConvey("delegate collection data view deletion to datacoord", t, func() {
+		dataCoord := &datacoord.Server{}
+		coord := &mixCoordImpl{datacoordServer: dataCoord}
+		mockey.Mock((*datacoord.Server).DropCollectionDataView).
+			To(func(ctx context.Context, collectionID int64) error {
+				assert.Equal(t, int64(100), collectionID)
+				return nil
+			}).Build()
+
+		assert.NoError(t, coord.DropCollectionDataView(context.Background(), 100))
+	})
+}
+
+func TestMixCoordInitializesBeforeStartingDataAndQueryCoord(t *testing.T) {
+	mockey.PatchConvey("initialize both coordinators before starting background workers", t, func() {
+		dataCoord := &datacoord.Server{}
+		queryCoord := &querycoordv2.Server{}
+		coord := &mixCoordImpl{
+			ctx:              context.Background(),
+			datacoordServer:  dataCoord,
+			queryCoordServer: queryCoord,
+		}
+		var initialized atomic.Int32
+		var startedTooEarly atomic.Bool
+
+		mockey.Mock((*datacoord.Server).Init).To(func() error {
+			initialized.Add(1)
+			return nil
+		}).Build()
+		mockey.Mock((*querycoordv2.Server).Init).To(func() error {
+			initialized.Add(1)
+			return nil
+		}).Build()
+		mockey.Mock((*datacoord.Server).Start).To(func() error {
+			if initialized.Load() != 2 {
+				startedTooEarly.Store(true)
+			}
+			return nil
+		}).Build()
+		mockey.Mock((*querycoordv2.Server).Start).To(func() error {
+			if initialized.Load() != 2 {
+				startedTooEarly.Store(true)
+			}
+			return nil
+		}).Build()
+
+		assert.NoError(t, coord.initDataAndQueryCoord())
+		assert.Equal(t, int32(2), initialized.Load())
+		assert.False(t, startedTooEarly.Load())
 	})
 }
 

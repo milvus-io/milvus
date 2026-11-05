@@ -17,10 +17,12 @@
 package process
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -73,4 +75,24 @@ func TestProcessPIDAndKill(t *testing.T) {
 		t.Fatal("Kill must close the graceful shutdown channel after killing the process")
 	}
 	require.ErrorIs(t, mp.Kill(), os.ErrProcessDone)
+}
+
+func TestGetAddressReturnsBeforeProcessJoin(t *testing.T) {
+	notifier := syncutil.NewAsyncTaskNotifier[error]()
+	mp := &MilvusProcess{notifier: notifier}
+	// Process exit cancels the workers before background can join them and
+	// finish the notifier. Address discovery must return without that result.
+	notifier.Cancel()
+	t.Cleanup(func() { notifier.Finish(nil) })
+	done := make(chan error, 1)
+	go func() {
+		_, err := mp.GetAddress(context.Background())
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("address discovery is waiting for the worker join that depends on it")
+	}
 }

@@ -21,13 +21,14 @@ func TestQueryViewManifestPublicationAdvancesDataViewWithoutWatch(t *testing.T) 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	catalog := datacatalog.NewCatalog(meta.NewMetaMemoryKV(), "", "")
-	m := &meta.Meta{Ctx: ctx, Catalog: catalog, Segments: meta.NewSegmentsInfo(metacache.NewMetaStore(catalog))}
+	store := metacache.NewMetaStore(catalog)
+	m := &meta.Meta{Ctx: ctx, Catalog: catalog, MetaStore: store, Segments: meta.NewSegmentsInfo(store)}
 	manager, err := dataview.RecoverManager(ctx, catalog, func(context.Context, int64) (bool, error) { return true, nil }, m.LoadableProjection, nil, nil)
 	require.NoError(t, err)
 	m.DataViewManager = manager
 	oldManifest := packed.MarshalManifestPath("test/base", 1)
 	m.Segments.SetSegment(10, meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 10, CollectionID: 1, PartitionID: 2, InsertChannel: "v", State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, StorageVersion: storage.StorageV3, ManifestPath: oldManifest, NumOfRows: 10}))
-	segments, err := m.LoadableProjection(ctx, 1)
+	segments, err := m.LoadableProjection(ctx, 1, nil)
 	require.NoError(t, err)
 	_, err = manager.OnBootstrapCollection(ctx, dataview.BootstrapCollectionDataViewEvent{CollectionID: 1, VChannels: []string{"v"}, Segments: segments})
 	require.NoError(t, err)

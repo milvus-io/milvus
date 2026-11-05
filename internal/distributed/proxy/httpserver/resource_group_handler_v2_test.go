@@ -49,7 +49,7 @@ func validateRequestBodyTestCases(t *testing.T, testEngine http.Handler, queryTe
 			assert.Nil(t, err, "case %d: ", i)
 			assert.Equal(t, testcase.errCode, returnBody.Code, "case %d: ", i, string(testcase.requestBody))
 			if testcase.errCode != 0 {
-				assert.Equal(t, testcase.errMsg, returnBody.Message, "case %d: ", i, string(testcase.requestBody))
+				testcase.assertErrorMessage(t, returnBody.Message)
 			}
 			fmt.Println(w.Body.String())
 		})

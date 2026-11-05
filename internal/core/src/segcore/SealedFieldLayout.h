@@ -151,6 +151,12 @@ class SealedFieldLayout {
     get_primary_field_id() const {
         return schema_->get_primary_field_id();
     }
+    DataType
+    get_primary_field_type() const {
+        // Physical PK identity is schema metadata, independent of load scope.
+        auto primary = schema_->get_primary_field_id();
+        return primary ? (*schema_)[*primary].get_data_type() : DataType::NONE;
+    }
     std::optional<FieldId>
     get_dynamic_field_id() const {
         return schema_->get_dynamic_field_id();

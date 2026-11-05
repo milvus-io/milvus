@@ -14,7 +14,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <gtest/gtest.h>
+#include "index/scalar/marisa/MarisaIndexReader.h"
+
+#include "index/scalar/marisa/MarisaIndexLoader.h"
+#include "index/test_utils/StorageTestUtils.h"
+
+#include "folly/ScopeGuard.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -37,6 +45,7 @@
 #include <utility>
 #include "index/scalar/marisa/MarisaIndexLoader.h"
 #include "index/test_utils/LoaderTestAccess.h"
+#include "folly/coro/BlockingWait.h"
 #include <cerrno>
 #include <fcntl.h>
 #include <fstream>
@@ -166,15 +175,19 @@ TEST(MarisaIndexArtifactTest, V3MmapReaderOwnsPersistedState) {
     EXPECT_GT(
         persisted.metadata.at(std::string(kCsrNumKeysMeta)).get<uint64_t>(), 0);
 
-    auto reader = OpenV3(
-        backend, persisted, {.row_count = 5, .values = Config::object()});
+    auto storage =
+        OpenV3Storage<MarisaIndexLoader>(backend, persisted, {.row_count = 5});
+    const auto usage = storage->CellByteSize();
+    auto index = std::make_shared<MarisaIndex>(std::move(storage));
+    auto reader = index->CreateReader(nullptr);
+    index.reset();
     artifact.reset();
     persisted.entries.clear();
     persisted.metadata.clear();
     ASSERT_NE(reader, nullptr);
     ExpectBetaRows(*reader);
-    EXPECT_GE(reader->MemoryUsage(), 0);
-    EXPECT_GT(reader->CellByteSize().file_bytes, 0);
+    EXPECT_GE(usage.memory_bytes, 0);
+    EXPECT_GT(usage.file_bytes, 0);
 }
 
 TEST(MarisaIndexArtifactTest, AsyncHeapAndMmapRoundTrip) {
@@ -188,6 +201,181 @@ TEST(MarisaIndexArtifactTest, AsyncHeapAndMmapRoundTrip) {
         const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
         ASSERT_NE(nulls, nullptr);
         EXPECT_EQ(nulls->IsNull().count(), 1);
+    }
+}
+
+TEST(MarisaIndexArtifactTest, LegacyLoadsRejectCountMismatchBeforePublication) {
+    const auto& backend =
+        ScalarReaderBackends().Get<std::string_view>("MarisaVarchar");
+    const auto artifact = BuildMarisa(backend);
+    const auto data = SerializeV1V2(*artifact);
+    for (const bool mmap : {false, true}) {
+        for (const bool async : {false, true}) {
+            SCOPED_TRACE(::testing::Message() << mmap << async);
+            auto staging = storage::LocalDirectory::CreateOwned(
+                std::filesystem::temp_directory_path().string(),
+                "marisa-bad-count-XXXXXX",
+                "marisa count test");
+            storage::LoadOptions options;
+            options.params = backend.LoadParams({.row_count = 5});
+            options.params[INDEX_NUM_ROWS_KEY] = 4;
+            options.enable_mmap = mmap;
+            options.mmap_dir_path = staging->Path();
+            IndexCacheConfig cache{
+                staging->Path(),
+                cachinglayer::Meta{mmap ? cachinglayer::StorageType::DISK
+                                        : cachinglayer::StorageType::MEMORY,
+                                   cachinglayer::CellIdMappingMode::IDENTICAL,
+                                   cachinglayer::CellDataType::OTHER,
+                                   CacheWarmupPolicy::CacheWarmupPolicy_Sync,
+                                   true},
+                {1024 * 1024, 1024 * 1024},
+                {},
+                4096};
+            auto source = std::make_shared<TestArtifactSource>(
+                data, storage::Generation::V1V2);
+            ExpectSegcoreError(ErrorCode::DataFormatBroken, [&] {
+                (void)LoaderRegistry::Instance()
+                    .Lookup(backend.Family())
+                    .Load({OpenedIndexSource{
+                               LegacyIndexSource{std::move(source), async}},
+                           options,
+                           cache});
+            });
+            EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+        }
+    }
+}
+
+TEST(MarisaIndexArtifactTest, CachedLegacyCountFallsBackToStorageWhenUnknown) {
+    const auto& backend =
+        ScalarReaderBackends().Get<std::string_view>("MarisaVarcharMmap");
+    const auto artifact = BuildMarisa(backend);
+    const auto data = SerializeV1V2(*artifact);
+    for (const bool known_count : {false, true}) {
+        auto staging = storage::LocalDirectory::CreateOwned(
+            std::filesystem::temp_directory_path().string(),
+            "marisa-legacy-cache-XXXXXX",
+            "Marisa legacy cache test");
+        auto source = std::make_shared<TestArtifactSource>(
+            data, storage::Generation::V1V2);
+        storage::LoadOptions options;
+        options.enable_mmap = true;
+        options.mmap_dir_path = staging->Path();
+        options.params = AnnotateJsonProjectionCompleteness(
+            backend.LoadParams({.row_count = 5}), *source);
+        if (known_count) {
+            options.params[INDEX_NUM_ROWS_KEY] = 5;
+        } else {
+            options.params.erase(INDEX_NUM_ROWS_KEY);
+        }
+        IndexCacheConfig cache{
+            staging->Path(),
+            cachinglayer::Meta{cachinglayer::StorageType::DISK,
+                               cachinglayer::CellIdMappingMode::IDENTICAL,
+                               cachinglayer::CellDataType::OTHER,
+                               CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                               true},
+            {1024 * 1024, 1024 * 1024},
+            {},
+            4096};
+        auto index = LoaderRegistry::Instance()
+                         .Lookup(backend.Family())
+                         .Load({OpenedIndexSource{LegacyIndexSource{
+                                    std::move(source), false}},
+                                options,
+                                cache});
+        EXPECT_EQ(index->Metadata().count.has_value(), known_count);
+        auto reader = index->CreateReader(nullptr);
+        EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+        EXPECT_EQ(reader->Count(), 5);
+        EXPECT_EQ(std::filesystem::is_empty(staging->Path()), known_count);
+        ExpectBetaRows(*reader);
+    }
+}
+
+TEST(MarisaIndexArtifactTest,
+     CachedPackedStorageLoadsOnDemandAndWarmsOnOneWorker) {
+    const auto old_workers = storage::GetAsyncLoadThreadPoolSize();
+    storage::SetAsyncLoadThreadPoolSize(1);
+    auto restore = folly::makeGuard(
+        [&] { storage::SetAsyncLoadThreadPoolSize(old_workers); });
+    for (const bool mmap : {false, true}) {
+        for (const bool async : {false, true}) {
+            for (const bool warmup : {false, true}) {
+                SCOPED_TRACE(::testing::Message() << mmap << async << warmup);
+                const auto& backend =
+                    ScalarReaderBackends().Get<std::string_view>(
+                        mmap ? "MarisaVarcharMmap" : "MarisaVarchar");
+                auto staging = storage::LocalDirectory::CreateOwned(
+                    std::filesystem::temp_directory_path().string(),
+                    "marisa-cache-XXXXXX",
+                    "Marisa cache test");
+                auto input = std::make_shared<storage::RemoteInputStream>(
+                    std::make_shared<arrow::io::BufferReader>(
+                        MakePackedArtifactBuffer(
+                            SerializedMarisa(backend.Name()))));
+                auto sync_source =
+                    storage::IndexEntryReader::Open(input, input->Size());
+                storage::LoadOptions options;
+                options.enable_mmap = mmap;
+                options.mmap_dir_path = staging->Path();
+                options.params = AnnotateJsonProjectionCompleteness(
+                    backend.LoadParams({.row_count = 5}),
+                    sync_source->Directory(),
+                    sync_source->IndexMeta());
+                PackedIndexSource source{
+                    std::shared_ptr<storage::IndexEntryReader>(
+                        std::move(sync_source))};
+                if (async) {
+                    source.reader =
+                        std::shared_ptr<storage::AsyncIndexEntryReader>(
+                            folly::coro::blockingWait(
+                                folly::coro::co_withExecutor(
+                                    storage::ResolveAsyncLoadExecutor(
+                                        {}, proto::common::LoadPriority::HIGH),
+                                    storage::AsyncIndexEntryReader::Open(
+                                        input,
+                                        0,
+                                        proto::common::LoadPriority::HIGH))));
+                }
+                IndexCacheConfig cache{
+                    staging->Path(),
+                    cachinglayer::Meta{
+                        mmap ? cachinglayer::StorageType::DISK
+                             : cachinglayer::StorageType::MEMORY,
+                        cachinglayer::CellIdMappingMode::IDENTICAL,
+                        cachinglayer::CellDataType::OTHER,
+                        warmup ? CacheWarmupPolicy::CacheWarmupPolicy_Sync
+                               : CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                        true},
+                    {1024 * 1024, 1024 * 1024},
+                    {},
+                    4096};
+                auto index = LoaderRegistry::Instance()
+                                 .Lookup(backend.Family())
+                                 .Load({OpenedIndexSource{std::move(source)},
+                                        options,
+                                        cache});
+                input.reset();
+                EXPECT_EQ(index->Metadata().count, 5);
+                folly::CancellationSource cancellation;
+                OpContext ctx(cancellation.getToken());
+                auto reader = index->CreateReader(&ctx);
+                EXPECT_EQ(reader->Count(), 5);
+                if (!warmup) {
+                    EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+                    cancellation.requestCancellation();
+                    ExpectSegcoreError(ErrorCode::FollyCancel,
+                                       [&] { ExpectBetaRows(*reader); });
+                    EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+                }
+                OpContext retry;
+                reader = index->CreateReader(&retry);
+                index.reset();
+                ExpectBetaRows(*reader);
+            }
+        }
     }
 }
 
@@ -241,11 +429,14 @@ TEST(MarisaIndexArtifactTest, AsyncCancellationRemovesPlannedFiles) {
         LoaderRegistry::Instance().Lookup(backend.Family());
     input->armed = true;
     ExpectSegcoreError(ErrorCode::FollyCancel, [&] {
-        static_cast<void>(loader_entry.Load(
-            {OpenedIndexSource{PackedIndexSource{
-                 std::shared_ptr<storage::AsyncIndexEntryReader>(
-                     std::move(source))}},
-             options}));
+        static_cast<void>(
+            loader_entry
+                .Load({OpenedIndexSource{PackedIndexSource{
+                           std::shared_ptr<storage::AsyncIndexEntryReader>(
+                               std::move(source))}},
+                       options,
+                       milvus::index::test::TestIndexCacheConfig()})
+                ->CreateReader(nullptr));
     });
     EXPECT_TRUE(cancellation.isCancellationRequested());
     EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
@@ -428,8 +619,9 @@ TEST(MarisaIndexArtifactTest, TrieReadFailureReportsFileReadFailed) {
     // Opening succeeds; MARISA read then fails on the directory with EISDIR.
     ASSERT_TRUE(std::filesystem::create_directory(trie.staging->path));
     ExpectSegcoreError(ErrorCode::FileReadFailed, [&] {
-        static_cast<void>(
-            LoaderTestAccess::Finish<MarisaIndexLoader>(plan, options));
+        static_cast<void>(folly::coro::blockingWait(
+            LoaderTestAccess::StorageFinisher<MarisaIndexLoader>()(
+                plan, options, false)));
     });
 }
 
@@ -631,7 +823,10 @@ ExpectUnvisitedMarisaMappings() {
     // posting region would SIGBUS. Keep the CSR index, including its terminal
     // entry, available for the loader's two endpoint checks and the reader's
     // constant-time pointer check. Middle entries and postings need no scan.
-    auto reader = LoaderTestAccess::Finish<MarisaIndexLoader>(plan, options);
+    auto index = std::make_shared<MarisaIndex>(folly::coro::blockingWait(
+        LoaderTestAccess::StorageFinisher<MarisaIndexLoader>()(
+            plan, options, false)));
+    auto reader = index->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
     EXPECT_EQ(reader->Count(), 5);
 }
