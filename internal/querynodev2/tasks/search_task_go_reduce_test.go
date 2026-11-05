@@ -1509,6 +1509,50 @@ func TestExecuteMergedSubTasks(t *testing.T) {
 	t.Logf("merged slicing OK: sub-task NQs=%v, topK=%d", subTaskNqs, topK)
 }
 
+// TestExecuteMergedSubTasksUsesLatestTTLCutoffs merges a request whose
+// collection TTL cutoff expires no row into one whose cutoff expires every
+// row. The group must run with the later cutoffs: with the owner's, the
+// member would get rows that are expired at its own cutoff.
+func TestExecuteMergedSubTasksUsesLatestTTLCutoffs(t *testing.T) {
+	const (
+		numSegments       = 2
+		msgLength         = 100
+		nq          int64 = 1
+		topK        int64 = 5
+	)
+
+	ts := setupTestSegments(t, numSegments, msgLength, setupOpts{SkipSearchReq: true})
+	defer ts.cleanup()
+
+	// Rows are written at timestamps below msgLength, so a collection TTL
+	// cutoff of msgLength expires all of them.
+	cutoffs := []struct{ collectionTTL, entityTTL uint64 }{
+		{collectionTTL: 0, entityTTL: 1_000},
+		{collectionTTL: msgLength, entityTTL: 2_000},
+	}
+	tasks := make([]*SearchTask, len(cutoffs))
+	for i, c := range cutoffs {
+		queryReq, err := mock_segcore.GenQueryRequest(
+			ts.collection.GetCCollection(), ts.segIDs, nq, topK, testCollectionID)
+		require.NoError(t, err)
+		queryReq.Req.CollectionTtlTimestamps = c.collectionTTL
+		queryReq.Req.EntityTtlPhysicalTime = c.entityTTL
+		tasks[i] = NewSearchTask(context.Background(), ts.collection, ts.manager, queryReq, 1)
+	}
+	require.True(t, tasks[0].Merge(tasks[1]))
+	collectionTTL, entityTTL := tasks[0].ttlCutoffs()
+	assert.Equal(t, uint64(msgLength), collectionTTL)
+	assert.Equal(t, uint64(2_000), entityTTL)
+
+	require.NoError(t, tasks[0].PreExecute())
+	require.NoError(t, tasks[0].Execute())
+	for i := range tasks {
+		slice := &schemapb.SearchResultData{}
+		require.NoError(t, proto.Unmarshal(tasks[0].subTaskAt(i).SearchResult().SlicedBlob, slice))
+		assert.Empty(t, slice.GetIds().GetIntId().GetData(), "request %d got rows the latest cutoff expires", i)
+	}
+}
+
 func TestExecuteSearchGroupTakeForOutputDecision(t *testing.T) {
 	ts := setupTestSegments(t, 2, 100, setupOpts{SkipSearchReq: true})
 	defer ts.cleanup()

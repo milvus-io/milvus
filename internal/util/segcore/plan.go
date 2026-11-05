@@ -193,6 +193,13 @@ func (req *SearchRequest) EnableExprCache() bool {
 	return req.enableExprCache
 }
 
+// SetTTLCutoffs replaces the collection and entity TTL cutoffs taken from the
+// request.
+func (req *SearchRequest) SetTTLCutoffs(collectionTTL, entityTTLPhysicalTime typeutil.Timestamp) {
+	req.collectionTTL = collectionTTL
+	req.entityTTLPhysicalTime = entityTTLPhysicalTime
+}
+
 // FeatureBits returns the execution feature bits of the request's plan.
 func (req *SearchRequest) FeatureBits() uint64 {
 	if req == nil || req.plan == nil {

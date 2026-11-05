@@ -223,7 +223,9 @@ func TestSearchTaskPreExecuteEntityTTLUsesTaskTimestamp(t *testing.T) {
 		updateTS           uint64
 		level              commonpb.ConsistencyLevel
 		requestGuaranteeTS uint64
+		iterator           bool
 		guaranteeTS        uint64
+		mvccTS             uint64
 	}{
 		{name: "strong", level: commonpb.ConsistencyLevel_Strong, guaranteeTS: schedulerTS},
 		{name: "bounded", level: commonpb.ConsistencyLevel_Bounded, guaranteeTS: tsoutil.AddPhysicalDurationOnTs(schedulerTS, -gracefulTime)},
@@ -232,12 +234,20 @@ func TestSearchTaskPreExecuteEntityTTLUsesTaskTimestamp(t *testing.T) {
 		{name: "eventually", level: commonpb.ConsistencyLevel_Eventually, guaranteeTS: updateTS},
 		{name: "default eventually", useDefault: true, defaultLevel: commonpb.ConsistencyLevel_Eventually, guaranteeTS: updateTS},
 		{name: "strong, collection updated after the task", level: commonpb.ConsistencyLevel_Strong, updateTS: newerUpdateTS, guaranteeTS: newerUpdateTS},
+		// Strong is 0, so an explicit guarantee timestamp takes the legacy path.
+		{name: "legacy strong with a guarantee timestamp", level: commonpb.ConsistencyLevel_Strong, requestGuaranteeTS: lastWriteTS, guaranteeTS: lastWriteTS},
+		// A later iterator page reads at the iterator's session timestamp.
+		{name: "iterator page", level: commonpb.ConsistencyLevel_Bounded, requestGuaranteeTS: lastWriteTS, iterator: true, guaranteeTS: lastWriteTS, mvccTS: lastWriteTS},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			collectionInfo.ConsistencyLevel = tc.defaultLevel
 			collectionInfo.UpdateTimestamp = updateTS
 			if tc.updateTS != 0 {
 				collectionInfo.UpdateTimestamp = tc.updateTS
+			}
+			searchParams := getValidSearchParams()
+			if tc.iterator {
+				searchParams = append(searchParams, &commonpb.KeyValuePair{Key: IteratorField, Value: "true"})
 			}
 			task := &SearchTask{
 				baseTask:      baseTask{MetaCache: newTestCache()},
@@ -247,7 +257,7 @@ func TestSearchTaskPreExecuteEntityTTLUsesTaskTimestamp(t *testing.T) {
 				request: &milvuspb.SearchRequest{
 					CollectionName:        collectionName,
 					Nq:                    1,
-					SearchParams:          getValidSearchParams(),
+					SearchParams:          searchParams,
 					ConsistencyLevel:      tc.level,
 					UseDefaultConsistency: tc.useDefault,
 					GuaranteeTimestamp:    tc.requestGuaranteeTS,
@@ -259,6 +269,7 @@ func TestSearchTaskPreExecuteEntityTTLUsesTaskTimestamp(t *testing.T) {
 
 			require.NoError(t, task.PreExecute(context.Background()))
 			require.Equal(t, tc.guaranteeTS, task.GetGuaranteeTimestamp())
+			require.Equal(t, tc.mvccTS, task.GetMvccTimestamp())
 			require.Equal(t, uint64(schedulerTime.UnixMicro()), task.GetEntityTtlPhysicalTime())
 		})
 	}

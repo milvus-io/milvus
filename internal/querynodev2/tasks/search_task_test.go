@@ -463,6 +463,40 @@ func TestSearchTaskMergeFunctionChains(t *testing.T) {
 	}
 }
 
+// A request without an entity TTL cutoff runs with the MVCC timestamp
+// instead, so it must not share a batch with a request that has one.
+func TestSearchTaskMergeEntityTTLCutoffs(t *testing.T) {
+	serializedPlan, err := proto.Marshal(&planpb.PlanNode{})
+	require.NoError(t, err)
+	newTask := func(entityTTL uint64) *SearchTask {
+		return &SearchTask{
+			nq: 1, topk: 10, groupSize: 1,
+			originNqs: []int64{1}, originTopks: []int64{10},
+			notifier: make(chan error, 1),
+			req: &querypb.SearchRequest{
+				Req: &internalpb.SearchRequest{
+					CollectionID: 1000, SerializedExprPlan: serializedPlan, EntityTtlPhysicalTime: entityTTL,
+				},
+				DmlChannels: []string{"channel1"},
+			},
+		}
+	}
+	for _, tc := range []struct {
+		name          string
+		first, second uint64
+		wantMerge     bool
+	}{
+		{name: "both unset", wantMerge: true},
+		{name: "both set", first: 1_000, second: 2_000, wantMerge: true},
+		{name: "only the first set", first: 1_000},
+		{name: "only the second set", second: 1_000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.wantMerge, newTask(tc.first).MergeWith(newTask(tc.second)))
+		})
+	}
+}
+
 func (s *SearchTaskSuite) TestSearchTaskMinNQ() {
 	s.Run("fallback_to_total_nq_without_origin", func() {
 		task := &SearchTask{nq: 8}
