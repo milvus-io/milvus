@@ -87,39 +87,11 @@ func (v *visitor) factorCommonOrPredicates(parts []*planpb.Expr) *planpb.Expr {
 		}
 	}
 
-	// Factors keep their first-branch order; a factor repeated inside a
-	// branch is emitted once. Emitted keys are marked with last+1.
-	factors := make([]*planpb.Expr, 0, len(branches[0]))
-	for j, c := range branches[0] {
-		if k := keys[0][j]; k != "" && common[k] == last {
-			factors = append(factors, c)
-			common[k] = last + 1
-		}
+	factors, residuals, absorbed := v.splitCommonFactors(branches, keys, common, last, planpb.BinaryExpr_LogicalOr)
+	if absorbed >= 0 {
+		// The branch is exactly F, so F absorbs the OR: F OR (F AND R) = F.
+		return v.mergeAndParts(factors)
 	}
-
-	residuals := make([]*planpb.Expr, 0, len(parts))
-	for i, conjuncts := range branches {
-		rest := make([]*planpb.Expr, 0, len(conjuncts))
-		for j, c := range conjuncts {
-			if k := keys[i][j]; k == "" || common[k] < last {
-				rest = append(rest, c)
-			}
-		}
-		if len(rest) == 0 {
-			// The branch is exactly F, so F absorbs the OR: F OR (F AND R) = F.
-			return v.mergeAndParts(factors)
-		}
-		// A single remaining conjunct is already normalized. A longer
-		// remainder is merged again: removing a factor can change a
-		// same-column group (for example leave a single IN), and the merge
-		// fixes the operand order a second rewrite would produce.
-		residual := rest[0]
-		if len(rest) > 1 {
-			residual = v.mergeAndParts(rest)
-		}
-		residuals = appendFlattened(residuals, residual, planpb.BinaryExpr_LogicalOr)
-	}
-
 	// The residual OR and the new AND are normalized with the same rules a
 	// second rewrite would apply, which keeps the rewrite idempotent.
 	residual := v.mergeOrParts(residuals)
@@ -246,40 +218,69 @@ func (v *visitor) factorCommonAndPredicates(parts []*planpb.Expr) *planpb.Expr {
 func (v *visitor) groupCommonClauses(parts []*planpb.Expr, clauses [][]*planpb.Expr, keys [][]string,
 	group []int, common map[string]int, last int,
 ) *planpb.Expr {
-	// Factors keep their order in the first clause of the group; a factor
-	// repeated inside a clause is emitted once. Emitted keys are marked with
-	// last+1.
-	first := group[0]
-	factors := make([]*planpb.Expr, 0, len(clauses[first]))
-	for j, d := range clauses[first] {
-		if k := keys[first][j]; k != "" && common[k] == last {
-			factors = append(factors, d)
+	groupClauses := make([][]*planpb.Expr, len(group))
+	groupKeys := make([][]string, len(group))
+	for g, i := range group {
+		groupClauses[g], groupKeys[g] = clauses[i], keys[i]
+	}
+	factors, residuals, absorbed := v.splitCommonFactors(groupClauses, groupKeys, common, last, planpb.BinaryExpr_LogicalAnd)
+	if absorbed >= 0 {
+		// The clause is exactly F, already in merged form.
+		return parts[group[absorbed]]
+	}
+	residual := v.mergeAndParts(residuals)
+	return v.mergeOrParts(appendFlattened(factors, residual, planpb.BinaryExpr_LogicalOr))
+}
+
+// splitCommonFactors is the factor and residual pass shared by both
+// directions. operands are the inner operands of each outer operand (the AND
+// conjuncts of each OR branch when op is OR, the OR disjuncts of each AND
+// clause when op is AND), keys their factor keys, and the shared factors are
+// the keys k with common[k] == last.
+//
+// factors are the shared predicates in their order in operands[0]; a factor
+// repeated inside an operand is emitted once (emitted keys are marked with
+// last+1, so common is modified). residuals are the operands with the factors
+// removed, each merged again with the inner op and spliced into a flat op
+// chain. When an operand is exactly the shared set, absorbed is its index and
+// residuals is nil; otherwise absorbed is -1.
+func (v *visitor) splitCommonFactors(operands [][]*planpb.Expr, keys [][]string, common map[string]int, last int,
+	op planpb.BinaryExpr_BinaryOp,
+) (factors, residuals []*planpb.Expr, absorbed int) {
+	factors = make([]*planpb.Expr, 0, len(operands[0]))
+	for j, e := range operands[0] {
+		if k := keys[0][j]; k != "" && common[k] == last {
+			factors = append(factors, e)
 			common[k] = last + 1
 		}
 	}
 
-	residuals := make([]*planpb.Expr, 0, len(group))
-	for _, i := range group {
-		rest := make([]*planpb.Expr, 0, len(clauses[i]))
-		for j, d := range clauses[i] {
+	residuals = make([]*planpb.Expr, 0, len(operands))
+	for i, inner := range operands {
+		rest := make([]*planpb.Expr, 0, len(inner))
+		for j, e := range inner {
 			if k := keys[i][j]; k == "" || common[k] < last {
-				rest = append(rest, d)
+				rest = append(rest, e)
 			}
 		}
 		if len(rest) == 0 {
-			// The clause is exactly F, already in merged form.
-			return parts[i]
+			return factors, nil, i
 		}
-		// As in the OR direction, a longer remainder is merged again.
+		// A single remaining operand is already normalized. A longer
+		// remainder is merged again: removing a factor can change a
+		// same-column group (for example leave a single IN), and the merge
+		// fixes the operand order a second rewrite would produce.
 		residual := rest[0]
 		if len(rest) > 1 {
-			residual = v.mergeOrParts(rest)
+			if op == planpb.BinaryExpr_LogicalOr {
+				residual = v.mergeAndParts(rest)
+			} else {
+				residual = v.mergeOrParts(rest)
+			}
 		}
-		residuals = appendFlattened(residuals, residual, planpb.BinaryExpr_LogicalAnd)
+		residuals = appendFlattened(residuals, residual, op)
 	}
-
-	residual := v.mergeAndParts(residuals)
-	return v.mergeOrParts(appendFlattened(factors, residual, planpb.BinaryExpr_LogicalOr))
+	return factors, residuals, -1
 }
 
 // flattenLogical splits e into the operands of its op chain (AND conjuncts or
