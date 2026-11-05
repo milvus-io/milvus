@@ -149,6 +149,8 @@ arrow	internal/core/src/storage/ArrowFileSystemChunkManager.cpp
 arrow	internal/core/src/storage/artifact/FileSink.cpp
 arrow	internal/core/src/storage/artifact/FileSink.h
 arrow	internal/core/src/storage/loon_ffi/ffi_reader_c.cpp
+arrow	internal/core/src/storage/loon_ffi/ffi_reader_status.h
+arrow	internal/core/src/storage/loon_ffi/ffi_reader_stream.h
 arrow	internal/core/src/storage/loon_ffi/util.cpp
 arrow	internal/core/src/storage/PayloadReader.cpp
 arrow	internal/core/src/storage/PayloadReader.h
@@ -212,6 +214,8 @@ milvus_storage	internal/core/src/storage/IndexEntryEncryptedLocalWriter.h
 milvus_storage	internal/core/src/storage/LegacyIndexFileIO.cpp
 milvus_storage	internal/core/src/storage/LegacyIndexFileIO.h
 milvus_storage	internal/core/src/storage/loon_ffi/ffi_reader_c.cpp
+milvus_storage	internal/core/src/storage/loon_ffi/ffi_reader_status.h
+milvus_storage	internal/core/src/storage/loon_ffi/ffi_reader_stream.h
 milvus_storage	internal/core/src/storage/loon_ffi/loon_error_code.h
 milvus_storage	internal/core/src/storage/loon_ffi/milvus_table_c.cpp
 milvus_storage	internal/core/src/storage/loon_ffi/property_singleton.h
