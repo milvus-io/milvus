@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
@@ -415,4 +416,44 @@ func TestRerunOfSaveBinlogPathsOperatorsKeepsTheBinlogs(t *testing.T) {
 	}
 	require.Equal(t, []int64{1001, 1002}, logIDs)
 	require.Len(t, binlogs[0].GetBinlogs(), 1, "the request is left unchanged")
+}
+
+// UpdateManifestVersion reads a committed segment only under its writer lock. A
+// batch that reaches a segment another writer holds reruns instead of using a
+// missing copy, and its version check then sees what that writer published, so
+// a stale version cannot overwrite a newer one.
+func TestUpdateManifestVersionRerunsBehindAHeldSegment(t *testing.T) {
+	ctx := context.Background()
+	withManifest := func(id int64) *datapb.SegmentInfo {
+		segment := flushedTestSegment(id, 10)
+		segment.ManifestPath = packed.MarshalManifestPath("/base", 5)
+		return segment
+	}
+	m, _ := newSegmentLockTestMeta(t, withManifest(100), withManifest(200))
+	manifestVersion := func(id int64) int64 {
+		_, version, err := packed.UnmarshalManifestPath(m.GetSegment(ctx, id).GetManifestPath())
+		require.NoError(t, err)
+		return version
+	}
+
+	unlock := m.LockSegments(100)
+	done := make(chan error, 1)
+	go func() {
+		done <- m.UpdateSegmentsInfo(ctx, UpdateManifestVersion(200, 6), UpdateManifestVersion(100, 6))
+	}()
+	select {
+	case err := <-done:
+		require.FailNow(t, "the write finished while another writer held a segment it updates", "err: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	// The holder publishes a newer version of segment 100, then releases it.
+	held := m.GetSegment(ctx, 100).Clone()
+	held.ManifestPath = packed.MarshalManifestPath("/base", 7)
+	m.Segments.SetSegment(100, held)
+	unlock()
+
+	waitDone(t, done, "the write")
+	require.EqualValues(t, 7, manifestVersion(100), "a stale version must not overwrite a newer one")
+	require.EqualValues(t, 6, manifestVersion(200))
 }

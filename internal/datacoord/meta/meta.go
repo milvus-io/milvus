@@ -1744,7 +1744,7 @@ func UpdateManifestVersion(segmentID int64, manifestVersion int64) UpdateOperato
 		// manifest. Other operators in this batch may already have changed it.
 		segment := modPack.Segments[segmentID]
 		if segment == nil {
-			segment = modPack.Meta.Segments.GetSegment(segmentID)
+			segment = modPack.Peek(segmentID)
 		}
 		if segment == nil {
 			mlog.Warn(modPack.Meta.Ctx, "meta update: update manifest version failed - segment not found",
