@@ -24,9 +24,11 @@ import (
 	pkroot "github.com/milvus-io/milvus/internal/pkindex"
 )
 
-// The errors of a Committer that a retry cannot fix. Every other error of a
-// Committer is retryable.
+// Committer errors identify a fenced owner, a rejected request, or SST IDs
+// that must change before retry. Other errors permit retry with the same request.
 var (
+	// ErrSSTReclaimed requires new SST IDs before the flush can be retried.
+	ErrSSTReclaimed = errors.New("primary key index manifest may have reclaimed a table of the flush")
 	// ErrFenced reports that the pchannel is assigned to a higher term. The
 	// WAL instance of the old term must stop.
 	ErrFenced = errors.New("primary key index manifest is fenced by a newer term")
@@ -47,7 +49,8 @@ func IsFatal(err error) bool {
 // flush commits of a handover and the manifest lookups of a recovery.
 //
 // The calls return an error that matches ErrFenced when the pchannel is
-// assigned to a higher term, and ErrRejected when a retry cannot fix the error.
+// assigned to a higher term, ErrSSTReclaimed when tables need new IDs, and
+// ErrRejected when a retry cannot fix the error.
 type Committer interface {
 	// CommitFlush applies a flush and returns the complete manifest after
 	// it. A retry with the same arguments after a lost response returns the

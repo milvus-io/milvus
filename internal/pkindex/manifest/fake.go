@@ -31,7 +31,8 @@ import (
 // FakeManifest is a manifest of one vchannel as a fake manifest service
 // keeps it. Tests use it to fake a Committer.
 type FakeManifest struct {
-	View View
+	MaxReclaimedSSTID sst.ID
+	View              View
 	// LastFlushTerm is the term of the last flush that changed the manifest.
 	LastFlushTerm int64
 	// IndexID is the index ID of the first flush.
@@ -89,6 +90,11 @@ func FakeFlush(cur *FakeManifest, assigned int64, args FlushArgs, basePath strin
 			return nil, false, errors.Wrapf(ErrRejected, "vchannel %s: duplicate table %d", args.VChannel, t.ID)
 		}
 		seen[t.ID] = struct{}{}
+	}
+	for _, t := range args.AddTables {
+		if t.ID <= cur.MaxReclaimedSSTID {
+			return nil, false, errors.Wrapf(ErrSSTReclaimed, "table %d is reclaimed", t.ID)
+		}
 	}
 	next := cur.clone()
 	next.View.Version++

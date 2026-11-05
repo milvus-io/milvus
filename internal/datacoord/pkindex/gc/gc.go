@@ -45,12 +45,12 @@ const MinGrace = 10 * time.Minute
 type Config struct {
 	// Interval is the time between two rounds. It must be positive.
 	Interval time.Duration
-	// Grace is the minimum age of an SST that no retained body references, and
-	// of a body whose version is above the current version, before it is
-	// deleted. It must be at least MinGrace. It must be longer than the longest
-	// time from an object write to its commit: from a manifest body write to
-	// its pointer swap, from an SST upload to its flush commit, and from a
-	// compaction output upload to its compact commit.
+	// Grace is the minimum age of an SST that no retained body references
+	// before it is deleted. It must be at least MinGrace. It selects the SSTs
+	// to delete and does not keep a commit safe: the reclaimed SST ID of the
+	// pointer does (see Reclaimer). It should be longer than the usual time
+	// from an SST upload to its flush commit, so that the flush does not get
+	// manifest.ErrSSTReclaimed and send its tables again.
 	Grace time.Duration
 	// RetainVersions is the number of versions, up to and including the
 	// current version, whose bodies are kept.
@@ -68,8 +68,21 @@ type Config struct {
 	MissingTolerance time.Duration
 }
 
-// InFlightOutputs returns the SST IDs that running compactions of an index on
-// a vchannel may still commit. It must list an output from before its upload until its
+// Reclaimer raises the reclaimed SST ID of the pointer of a vchannel, on the
+// predicate that the stored pointer is still pointer, the value the GC read.
+// After a nil return, no flush can add an SST at or below id. It is
+// implemented by manifest.Manager.
+type Reclaimer interface {
+	AdvanceMaxReclaimedSSTID(ctx context.Context, collectionID, indexID int64, vchannel string, pointer string, id int64) error
+}
+
+// Paused reports whether garbage collection of a collection is paused, for
+// example by a backup that copies the object storage. A nil Paused means that
+// the GC is never paused.
+type Paused func(collectionID int64) bool
+
+// InFlightOutputs returns the SST IDs that running compactions of a vchannel
+// may still commit. It must list an output from before its upload until its
 // commit takes effect or its task is abandoned for good. A nil function means
 // that no compaction runs.
 type InFlightOutputs func(ctx context.Context, collectionID, indexID int64, vchannel string) ([]int64, error)
@@ -78,12 +91,14 @@ type InFlightOutputs func(ctx context.Context, collectionID, indexID int64, vcha
 // bodies outside the retention and the SSTs that no retained body references.
 // It reads the current version from the meta store, never from a cache.
 type GC struct {
-	meta     manifest.MetaStore
-	store    manifest.ObjectStore
-	rootPath string
-	cfg      Config
-	inFlight InFlightOutputs
-	now      func() time.Time
+	meta      manifest.MetaStore
+	store     manifest.ObjectStore
+	rootPath  string
+	cfg       Config
+	reclaimer Reclaimer
+	inFlight  InFlightOutputs
+	paused    Paused
+	now       func() time.Time
 
 	// indexDeps and dropper are set by EnableIndexRecovery; nil disables the
 	// GC by index ID.
@@ -95,17 +110,23 @@ type GC struct {
 }
 
 // New returns a GC over the pointers in meta and the objects in store, under
-// rootPath of the object storage. It returns ErrInvalidConfig when cfg.Interval is not
-// positive, cfg.Grace is below MinGrace, or a retention value or a tolerance
-// is negative.
+// rootPath of the object storage. Before it deletes SSTs of a vchannel, it
+// raises the reclaimed SST ID of the pointer through reclaimer. It deletes
+// nothing of a collection while paused reports true for it. It returns
+// ErrInvalidConfig when cfg.Interval is not positive, cfg.Grace is below
+// MinGrace, or a retention value is negative.
 func New(meta manifest.MetaStore, store manifest.ObjectStore, rootPath string,
-	cfg Config, inFlight InFlightOutputs,
+	cfg Config, reclaimer Reclaimer, inFlight InFlightOutputs, paused Paused,
 ) (*GC, error) {
 	if cfg.Interval <= 0 || cfg.Grace < MinGrace || cfg.RetainVersions < 0 || cfg.RetainDuration < 0 ||
 		cfg.DropTolerance < 0 || cfg.MissingTolerance < 0 {
 		return nil, errors.Wrapf(ErrInvalidConfig, "%+v", cfg)
 	}
-	return &GC{meta: meta, store: store, rootPath: rootPath, cfg: cfg, inFlight: inFlight, now: time.Now}, nil
+	return &GC{meta: meta, store: store, rootPath: rootPath, cfg: cfg, reclaimer: reclaimer, inFlight: inFlight, paused: paused, now: time.Now}, nil
+}
+
+func (g *GC) isPaused(collectionID int64) bool {
+	return g.paused != nil && g.paused(collectionID)
 }
 
 // Start runs one round every cfg.Interval until ctx is done or Close is
@@ -154,7 +175,7 @@ func (g *GC) RunOnce(ctx context.Context) error {
 			return nil
 		}
 		collectionID, indexID, vchannel, ok := manifest.ParsePointerKey(key)
-		if !ok {
+		if !ok || g.isPaused(collectionID) {
 			continue
 		}
 		if err := g.runVChannel(ctx, collectionID, indexID, vchannel); err != nil {
@@ -171,11 +192,15 @@ func (g *GC) RunOnce(ctx context.Context) error {
 // runVChannel collects one index on one vchannel. It reads the in-flight compaction
 // outputs, then the pointer and the current body, then the other manifest
 // bodies, then the SSTs. It deletes nothing when the current body key is not
-// directly under the manifest dir of the index on the vchannel or the current
-// sst_base_path is not its SST base path (see pkmanifest.SSTBasePath). It
-// deletes the bodies outside the retention, and, when every
-// retained body could be read, the SSTs older than Grace that are neither
-// referenced by a retained body nor an in-flight output.
+// directly under the manifest dir of the vchannel or the current
+// sst_base_path is not the SST base path of the vchannel (see
+// pkindex.SSTBasePath). It deletes the bodies outside the retention. It never
+// deletes a body above the current version: a commit that writes such a body
+// can still win the pointer write. When every retained body could be read, it
+// selects the SSTs older than Grace that are neither referenced by a retained
+// body nor an in-flight output, raises the reclaimed SST ID of the pointer it
+// read to the highest selected ID, and deletes the selected SSTs only when
+// that succeeds.
 func (g *GC) runVChannel(ctx context.Context, collectionID, indexID int64, vchannel string) error {
 	live := map[int64]struct{}{}
 	if g.inFlight != nil {
@@ -187,7 +212,7 @@ func (g *GC) runVChannel(ctx context.Context, collectionID, indexID int64, vchan
 			live[id] = struct{}{}
 		}
 	}
-	cur, curKey, err := g.current(ctx, collectionID, indexID, vchannel)
+	cur, curKey, pointer, err := g.current(ctx, collectionID, indexID, vchannel)
 	if err != nil || cur == nil {
 		return err
 	}
@@ -201,54 +226,37 @@ func (g *GC) runVChannel(ctx context.Context, collectionID, indexID int64, vchan
 	now := g.now()
 
 	minKept := cur.GetVersion() - int64(g.cfg.RetainVersions) + 1
-	var kept, drop []string
+	var kept, bodies []string
 	err = g.store.Walk(ctx, dir+"/", func(key string, mod time.Time) bool {
 		version, ok := pkmanifest.ParseManifestBodyKey(dir, key)
 		if !ok || key == curKey {
 			return true
 		}
-		age := now.Sub(mod)
-		var keep bool
-		if version > cur.GetVersion() {
-			keep = age <= g.cfg.Grace
-		} else {
-			keep = version >= minKept || age <= g.cfg.RetainDuration
-		}
-		if keep {
+		if version > cur.GetVersion() || version >= minKept || now.Sub(mod) <= g.cfg.RetainDuration {
 			kept = append(kept, key)
 		} else {
-			drop = append(drop, key)
+			bodies = append(bodies, key)
 		}
 		return true
 	})
 	if err != nil {
 		return markUnavailable(err, "walk manifest bodies of %s", vchannel)
 	}
-	bodies := len(drop)
 
-	addSSTs(live, cur)
-	if err := g.addRetainedSSTs(ctx, live, kept); err != nil {
-		// the live set is incomplete: delete no SST of this vchannel
-		mlog.Warn(ctx, "pkindex gc skips the sst sweep of vchannel",
-			mlog.FieldCollectionID(collectionID), mlog.Int64("indexID", indexID), mlog.FieldVChannel(vchannel), mlog.Err(err))
-	} else {
-		base := cur.GetSstBasePath()
-		err = g.store.Walk(ctx, base+"/", func(key string, mod time.Time) bool {
-			id, ok := pkmanifest.ParseSSTKey(base, key)
-			if !ok {
-				return true
-			}
-			if _, ok := live[id]; !ok && now.Sub(mod) > g.cfg.Grace {
-				drop = append(drop, key)
-			}
-			return true
-		})
-		if err != nil {
-			return markUnavailable(err, "walk ssts of %s", vchannel)
-		}
+	ssts, err := g.selectSSTs(ctx, collectionID, indexID, vchannel, cur, pointer, kept, live, now)
+	if err != nil {
+		return err
 	}
 
+	drop := append(bodies, ssts...)
 	if len(drop) == 0 {
+		return nil
+	}
+	if g.isPaused(collectionID) {
+		// a pause came during the scan; the raised reclaimed sst ID only
+		// makes a flush use new IDs, and the next round deletes
+		mlog.Info(ctx, "pkindex gc skips the deletes of vchannel, gc is paused",
+			mlog.FieldCollectionID(collectionID), mlog.FieldVChannel(vchannel))
 		return nil
 	}
 	if err := g.store.MultiRemove(ctx, drop); err != nil {
@@ -257,34 +265,81 @@ func (g *GC) runVChannel(ctx context.Context, collectionID, indexID int64, vchan
 	mlog.Info(ctx, "pkindex gc removed objects",
 		mlog.FieldCollectionID(collectionID), mlog.Int64("indexID", indexID), mlog.FieldVChannel(vchannel),
 		mlog.Int64("currentVersion", cur.GetVersion()),
-		mlog.Int("bodies", bodies), mlog.Int("ssts", len(drop)-bodies))
+		mlog.Int("bodies", len(bodies)), mlog.Int("ssts", len(ssts)))
 	return nil
 }
 
-// current reads the pointer of an index on a vchannel and the body it names. It returns
-// nil when the vchannel has no pointer.
-func (g *GC) current(ctx context.Context, collectionID, indexID int64, vchannel string) (*pkindexpb.Manifest, string, error) {
+// selectSSTs returns the keys of the SSTs of a vchannel that GC can delete:
+// SSTs older than Grace that no retained body references and that are not in
+// live. Before it returns them, it raises the reclaimed SST ID of pointer to
+// the highest of their IDs. It returns no key when a retained body cannot be
+// read or the raise fails; the next round tries again.
+func (g *GC) selectSSTs(ctx context.Context, collectionID, indexID int64, vchannel string, cur *pkindexpb.Manifest,
+	pointer string, kept []string, live map[int64]struct{}, now time.Time,
+) ([]string, error) {
+	addSSTs(live, cur)
+	if err := g.addRetainedSSTs(ctx, live, kept); err != nil {
+		// the live set is incomplete: delete no SST of this vchannel
+		mlog.Warn(ctx, "pkindex gc skips the sst sweep of vchannel",
+			mlog.FieldCollectionID(collectionID), mlog.FieldVChannel(vchannel), mlog.Err(err))
+		return nil, nil
+	}
+	base := cur.GetSstBasePath()
+	var keys []string
+	var maxID int64
+	err := g.store.Walk(ctx, base+"/", func(key string, mod time.Time) bool {
+		id, ok := pkmanifest.ParseSSTKey(base, key)
+		if !ok {
+			return true
+		}
+		if _, ok := live[id]; !ok && now.Sub(mod) > g.cfg.Grace {
+			keys = append(keys, key)
+			maxID = max(maxID, id)
+		}
+		return true
+	})
+	if err != nil {
+		return nil, markUnavailable(err, "walk ssts of %s", vchannel)
+	}
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	if err := g.reclaimer.AdvanceMaxReclaimedSSTID(ctx, collectionID, indexID, vchannel, pointer, maxID); err != nil {
+		// a commit changed the pointer after the read, or the write failed:
+		// delete no SST of this vchannel in this round
+		mlog.Info(ctx, "pkindex gc skips the sst sweep of vchannel, the reclaimed sst ID is not raised",
+			mlog.FieldCollectionID(collectionID), mlog.FieldVChannel(vchannel),
+			mlog.Int64("reclaimedSSTID", maxID), mlog.Err(err))
+		return nil, nil
+	}
+	return keys, nil
+}
+
+// current reads the pointer of a vchannel and the body it names. It returns
+// the body, the body key and the stored pointer value, or a nil body when the
+// vchannel has no pointer.
+func (g *GC) current(ctx context.Context, collectionID, indexID int64, vchannel string) (*pkindexpb.Manifest, string, string, error) {
 	key := manifest.PointerKey(collectionID, indexID, vchannel)
 	value, found, err := g.meta.Load(ctx, key)
 	if err != nil {
-		return nil, "", markUnavailable(err, "load manifest pointer %s", key)
+		return nil, "", "", markUnavailable(err, "load manifest pointer %s", key)
 	}
 	if !found {
-		return nil, "", nil
+		return nil, "", "", nil
 	}
 	var p pkindexpb.ManifestPointer
 	if err := proto.Unmarshal([]byte(value), &p); err != nil {
-		return nil, "", errors.Mark(errors.Wrapf(err, "decode manifest pointer %s", key), pkindex.ErrCorrupted)
+		return nil, "", "", errors.Mark(errors.Wrapf(err, "decode manifest pointer %s", key), pkindex.ErrCorrupted)
 	}
 	m, err := g.readBody(ctx, p.GetBodyKey())
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	if m.GetVersion() != p.GetVersion() {
-		return nil, "", errors.Mark(errors.Newf("manifest body %s has version %d, pointer has %d",
+		return nil, "", "", errors.Mark(errors.Newf("manifest body %s has version %d, pointer has %d",
 			p.GetBodyKey(), m.GetVersion(), p.GetVersion()), pkindex.ErrCorrupted)
 	}
-	return m, p.GetBodyKey(), nil
+	return m, p.GetBodyKey(), value, nil
 }
 
 // addRetainedSSTs adds to live the SSTs that the bodies at keys reference.

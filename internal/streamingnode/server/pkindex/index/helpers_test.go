@@ -163,6 +163,11 @@ type testIndex struct {
 	store     *countingStore
 	committer *fakeCommitter
 	nextID    atomic.Int64
+	// syncFloor is where SyncIDAllocator moves nextID when nextID is below
+	// it, as a sync of a real allocator skips its old local batch. 0 means
+	// that a sync changes nothing.
+	syncFloor atomic.Int64
+	syncs     atomic.Int64
 	observed  atomic.Uint64
 	params    atomic.Pointer[Params]
 }
@@ -202,6 +207,12 @@ func (ti *testIndex) open(t *testing.T) {
 		Logger:       mlog.With(mlog.FieldModule("pkindex")),
 		Engine:       ti.shared,
 		AllocID:      func(context.Context) (int64, error) { return ti.nextID.Add(1), nil },
+		SyncIDAllocator: func() {
+			ti.syncs.Add(1)
+			if floor := ti.syncFloor.Load(); ti.nextID.Load() < floor {
+				ti.nextID.Store(floor)
+			}
+		},
 		Store:        ti.store,
 		Committer:    ti.committer,
 		Params:       func() Params { return *ti.params.Load() },

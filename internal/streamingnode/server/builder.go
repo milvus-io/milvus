@@ -81,7 +81,7 @@ func (b *ServerBuilder) Build() *Server {
 	}, func(ctx context.Context) (int64, error) {
 		id, err := resource.Resource().IDAllocator().Allocate(ctx)
 		return int64(id), err
-	})
+	}, func() { resource.Resource().IDAllocator().Sync() })
 	if err != nil {
 		panic(fmt.Sprintf("setup the primary key index manager failed: %v", err))
 	}

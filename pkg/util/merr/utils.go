@@ -900,6 +900,13 @@ func WrapErrChannelMisrouted(name string, msg ...string) error {
 	return warpChannelErr(ErrChannelMisrouted, name, msg...)
 }
 
+// WrapErrChannelPKIndexSSTReclaimed is used by the primary key index manifest
+// service when a flush of the vchannel name adds an SST that garbage
+// collection may have deleted.
+func WrapErrChannelPKIndexSSTReclaimed(name string, msg ...string) error {
+	return warpChannelErr(ErrChannelPKIndexSSTReclaimed, name, msg...)
+}
+
 // Segment related
 func WrapErrSegmentNotFound(id int64, msg ...string) error {
 	err := wrapFields(ErrSegmentNotFound, value("segment", id))

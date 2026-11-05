@@ -193,3 +193,13 @@ func TestClientGetRecoveryManifestsCountMismatch(t *testing.T) {
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, manifest.ErrRejected), err)
 }
+
+func TestClientReclaimedSSTRequiresNewIDs(t *testing.T) {
+	cause := merr.WrapErrChannelPKIndexSSTReclaimed("v")
+	c := newTestClient(&fakeCoordClient{flushErr: cause})
+	_, err := c.CommitFlush(context.Background(), manifest.FlushArgs{VChannel: "v"})
+	require.True(t, errors.Is(err, manifest.ErrSSTReclaimed), "%v", err)
+	require.ErrorIs(t, err, cause)
+	require.False(t, manifest.IsFatal(err))
+	require.False(t, errors.Is(err, manifest.ErrRejected))
+}

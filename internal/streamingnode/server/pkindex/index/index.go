@@ -336,7 +336,19 @@ func (idx *indexImpl) handover(ctx context.Context) (bool, error) {
 		// it, and the retry does not rotate again.
 		idx.pending.Store(p)
 	}
-	err := idx.commit(ctx, p)
+	var err error
+	for renamed := false; ; renamed = true {
+		err = idx.commit(ctx, p)
+		if !errors.Is(err, manifest.ErrSSTReclaimed) {
+			break
+		}
+		if rerr := idx.renameTables(ctx, p); rerr != nil {
+			return false, rerr
+		}
+		if renamed {
+			return false, err
+		}
+	}
 	if p.request == nil {
 		// a failed DropFrozen must not be retried, the next engine open cleans up
 		idx.pending.Store(nil)

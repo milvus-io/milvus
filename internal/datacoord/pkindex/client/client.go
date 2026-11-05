@@ -54,7 +54,8 @@ var (
 // is built over a nil Client: a Manager without a working Committer must not
 // start.
 //
-// Every error that is not fenced or rejected is retryable: a context cancel
+// ErrSSTReclaimed requires new SST IDs before retry. Every other error that
+// is not fenced or rejected is retryable: a context cancel
 // or deadline error, a gRPC status error with code DeadlineExceeded or
 // Canceled, and merr.ErrServiceUnavailable, which also covers a connection
 // failure and a gRPC transport error that carries no merr code.
@@ -214,7 +215,8 @@ func (c *client) GetRecoveryManifests(ctx context.Context, refs []manifest.VChan
 
 // fromServiceErr translates an error of the manifest service into the errors
 // of the Committer contract. The code of a fenced term becomes ErrFenced. Any
-// other merr code that is not retryable becomes ErrRejected: the service
+// reclaimed SST error becomes ErrSSTReclaimed. Every other merr code that
+// is not retryable becomes ErrRejected: the service
 // rejected the request for good (an invalid request, a stale term, a
 // corrupted manifest, a failed disk of the coordinator). A retryable merr
 // code, a context cancel or deadline, and any other error stay as they are:
@@ -226,6 +228,8 @@ func fromServiceErr(err error) error {
 	switch {
 	case err == nil:
 		return nil
+	case errors.Is(err, merr.ErrChannelPKIndexSSTReclaimed):
+		return errors.Mark(err, manifest.ErrSSTReclaimed)
 	case errors.Is(err, merr.ErrChannelNotAvailable):
 		return errors.Mark(err, manifest.ErrFenced)
 	case merr.IsCanceledOrTimeout(err):

@@ -96,6 +96,8 @@ type ManagerConfig struct {
 	Engine *engine.SharedResources
 	// AllocID allocates the IDs of new tables.
 	AllocID func(ctx context.Context) (int64, error)
+	// SyncIDAllocator discards cached IDs before reclaimed SSTs are renamed.
+	SyncIDAllocator func()
 	// Store moves tables between local disk and object storage.
 	Store index.TableStore
 	// StorageRootPath is the root path of the object storage

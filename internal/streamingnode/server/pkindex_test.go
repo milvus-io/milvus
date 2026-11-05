@@ -60,7 +60,7 @@ func TestPKIndexSetupOff(t *testing.T) {
 	params.Save(params.StreamingCfg.PKIndexEnabled.Key, "false")
 	defer params.Reset(params.StreamingCfg.PKIndexEnabled.Key)
 
-	mgr, closePKIndex, err := indexmanager.Setup(context.Background(), nil, nil, nil)
+	mgr, closePKIndex, err := indexmanager.Setup(context.Background(), nil, nil, nil, nil)
 	require.NoError(t, err)
 	assert.Nil(t, mgr)
 	assert.Nil(t, closePKIndex)
@@ -79,7 +79,7 @@ func TestPKIndexSetupOn(t *testing.T) {
 		defer params.Reset(params.StreamingCfg.PKIndexDataDir.Key)
 		cli := &fakeManifestClient{}
 
-		mgr, closePKIndex, err := indexmanager.Setup(context.Background(), cm, newCommitter(cli), func(context.Context) (int64, error) { return 0, nil })
+		mgr, closePKIndex, err := indexmanager.Setup(context.Background(), cm, newCommitter(cli), func(context.Context) (int64, error) { return 0, nil }, nil)
 		require.NoError(t, err)
 		require.NotNil(t, mgr)
 		require.NotNil(t, closePKIndex)
@@ -97,7 +97,7 @@ func TestPKIndexSetupOn(t *testing.T) {
 		defer params.Reset(params.LocalStorageCfg.Path.Key)
 		cli := &fakeManifestClient{}
 
-		mgr, closePKIndex, err := indexmanager.Setup(context.Background(), cm, newCommitter(cli), func(context.Context) (int64, error) { return 0, nil })
+		mgr, closePKIndex, err := indexmanager.Setup(context.Background(), cm, newCommitter(cli), func(context.Context) (int64, error) { return 0, nil }, nil)
 		require.NoError(t, err)
 		require.NotNil(t, mgr)
 		assert.NotNil(t, indexmanager.CommitterForTest(mgr))
@@ -116,7 +116,7 @@ func TestPKIndexSetupOffDoesNotBuildTheCommitter(t *testing.T) {
 	mgr, closePKIndex, err := indexmanager.Setup(context.Background(), nil, func(context.Context) (manifest.Committer, func(), error) {
 		t.Fatal("the committer must not be built when the index is off")
 		return nil, nil, nil
-	}, nil)
+	}, nil, nil)
 	require.NoError(t, err)
 	assert.Nil(t, mgr)
 	assert.Nil(t, closePKIndex)

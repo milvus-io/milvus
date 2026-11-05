@@ -41,10 +41,11 @@ const openFileReserve = 10000
 // streaming.pkindex.enabled is true. It returns (nil, nil, nil) when the
 // index is off. newCommitter builds the Committer and the function that
 // releases it; it is called only when the index is on. allocID allocates the
-// IDs of new tables, from the ID allocator of the resource. The returned
+// IDs of new tables, from the ID allocator of the resource. syncIDAllocator
+// discards cached IDs before reclaimed tables receive new IDs. The returned
 // close function closes the manager, the committer and the shared caches, in
 // this order; call it after the WAL manager closes.
-func Setup(ctx context.Context, cm storage.ChunkManager, newCommitter func(context.Context) (manifest.Committer, func(), error), allocID func(context.Context) (int64, error)) (Manager, func(), error) {
+func Setup(ctx context.Context, cm storage.ChunkManager, newCommitter func(context.Context) (manifest.Committer, func(), error), allocID func(context.Context) (int64, error), syncIDAllocator func()) (Manager, func(), error) {
 	cfg := &paramtable.Get().StreamingCfg
 	if !cfg.PKIndexEnabled.GetAsBool() {
 		return nil, nil, nil
@@ -70,6 +71,7 @@ func Setup(ctx context.Context, cm storage.ChunkManager, newCommitter func(conte
 		Root:                    root,
 		Engine:                  shared,
 		AllocID:                 allocID,
+		SyncIDAllocator:         syncIDAllocator,
 		Store:                   store,
 		StorageRootPath:         cm.RootPath(),
 		Committer:               committer,

@@ -113,7 +113,9 @@ type OpenConfig struct {
 	// Engine are the node-level engine caches.
 	Engine  *engine.SharedResources
 	AllocID func(ctx context.Context) (int64, error)
-	Store   TableStore
+	// SyncIDAllocator discards cached IDs before reclaimed SSTs are renamed.
+	SyncIDAllocator func()
+	Store           TableStore
 	// Committer changes and finds the manifests.
 	Committer manifest.Committer
 	Params    func() Params

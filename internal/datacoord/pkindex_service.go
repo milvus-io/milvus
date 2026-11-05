@@ -141,7 +141,9 @@ func (s chunkManagerStore) MultiRemove(ctx context.Context, keys []string) error
 }
 
 // initPKIndex builds the primary key index manifest manager and GC on the meta
-// kv and cm, and gives the manager to the service. An invalid GC configuration
+// kv and cm, and gives the manager to the service. The GC exists only when
+// dataCoord.enableGarbageCollection is true, and it follows the pauses of the
+// garbage collector of the segments (GcControl). An invalid GC configuration
 // leaves s.pkindexGC nil and does not stop the manager.
 func (s *Server) initPKIndex(cm storage.ChunkManager) {
 	meta := metaKVStore{kv: s.kv}
@@ -158,13 +160,22 @@ func (s *Server) initPKIndex(cm storage.ChunkManager) {
 		DropTolerance:    Params.DataCoordCfg.GCDropTolerance.GetAsDuration(time.Second),
 		MissingTolerance: Params.DataCoordCfg.GCMissingTolerance.GetAsDuration(time.Second),
 	}
-	gc, err := pkindexgc.New(meta, store, rootPath, cfg,
+	mgr := manifest.New(meta, store, rootPath)
+	s.pkindexService.SetManager(mgr)
+	if !Params.DataCoordCfg.EnableGarbageCollection.GetAsBool() {
+		mlog.Info(s.ctx, "garbage collection is disabled, the primary key index gc does not start")
+		return
+	}
+	var paused pkindexgc.Paused
+	if s.garbageCollector != nil {
+		paused = s.garbageCollector.isPaused
+	}
+	gc, err := pkindexgc.New(meta, store, rootPath, cfg, mgr,
 		// TODO: pass the outputs of the in-flight compactions of the primary
 		// key index SSTs when that compaction exists.
 		// TODO: add to the live set the tables that a streaming node still
 		// reads on demand from object storage.
-		nil)
-	mgr := manifest.New(meta, store, rootPath)
+		nil, paused)
 	if err != nil {
 		mlog.Error(s.ctx, "init primary key index gc failed, the gc is disabled", mlog.Err(err))
 	} else {
@@ -174,12 +185,11 @@ func (s *Server) initPKIndex(cm storage.ChunkManager) {
 				return s.broker.HasCollection(ctx, collectionID)
 			},
 			CollectionPaused: func(collectionID int64) bool {
-				return s.garbageCollector != nil && s.garbageCollector.collectionGCPaused(collectionID)
+				return s.garbageCollector != nil && s.garbageCollector.isPaused(collectionID)
 			},
 		}, mgr)
 		s.pkindexGC = gc
 	}
-	s.pkindexService.SetManager(mgr)
 }
 
 // pkIndexPresence returns what the index meta knows about the index indexID

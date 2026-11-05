@@ -71,6 +71,9 @@ message SSTRef {
 message ManifestPointer {
   int64 version = 1;
   string body_key = 2; // complete object key of the manifest body
+  // GC may have deleted any SST whose ID is not greater than this value.
+  // It only increases.
+  int64 max_reclaimed_sst_id = 3;
 }
 ```
 
@@ -96,6 +99,10 @@ Rules of the model:
 - **No primary key type.** The manifest and the SSTs hold only encoded keys.
   No reader of the manifest decodes a key, and the primary key type of a
   collection does not change, so the manifest does not record it.
+- **`max_reclaimed_sst_id` is on the pointer, not on the body.** GC raises it
+  before it deletes SSTs, and a flush must not add an SST at or below it. GC
+  changes it without a new version, and the pointer write is the one atomic
+  step that both GC and a commit go through. See "Garbage Collection".
 - **`last_flush_term`.** Only a flush writes it. It tells a retry from a
   regression when the checkpoint of a flush does not move forward. Fencing does
   not use it.
@@ -177,6 +184,7 @@ Then the flush is applied to the manifest:
 | Checkpoint does not move forward, flush term ≠ `last_flush_term` | `ErrCheckpointRegressed` |
 | An SST ID is in the manifest, or is twice in the flush | `ErrDuplicateSST` |
 | `reset_time_tick` is set | New version: the SSTs of the flush replace the SST list, checkpoint moves forward, `last_flush_term` becomes the flush term. An SST of the old list can come again |
+| An SST ID is not above `max_reclaimed_sst_id` of the pointer | `ErrSSTReclaimed` |
 | Otherwise | New version: SSTs go to the front, checkpoint moves forward, `last_flush_term` becomes the flush term |
 
 Notes:
@@ -193,7 +201,10 @@ Notes:
   collection ([lifecycle](lifecycle.md#truncate-reset-the-index-in-place)).
   The retry of an applied reset is an applied retry, as for every flush. The
   existing mark-sweep removes the replaced SSTs.
-- The duplicate check runs only when the checkpoint moves forward.
+- The duplicate check and the reclaimed check run only when the checkpoint
+  moves forward. So `ErrSSTReclaimed` means that the flush did not take
+  effect: an applied flush returns its version on a retry, also after GC
+  raised the value.
 - The pointer write of a flush is in the same meta kv transaction as a
   condition on the pchannel meta. See "Commit Steps and Crash Windows".
 
@@ -240,9 +251,11 @@ time. Different vchannels commit at the same time.
 ```
 Manager (holds the vchannel lock)
   1. Load the current version: from the cache, or from the pointer and its body.
-  2. Apply the edit. If nothing changes, return the current version.
+  2. Apply the edit, with max_reclaimed_sst_id of the loaded pointer. If
+     nothing changes, return the current version.
   3. Write the new body to <manifest dir>/<version>-<uuid>.pb.
-  4. Write the pointer in one meta kv transaction:
+  4. Write the pointer, with the same max_reclaimed_sst_id, in one meta kv
+     transaction:
        first version: on the condition KeyNotExist(pointer key)
        later version: on the condition ValueEqual(pointer key, loaded value)
        a flush also: on the condition ValueEqual(pchannel meta key, bytes
@@ -298,7 +311,7 @@ Crash windows:
 | Crash point | State after the crash | Effect |
 |---|---|---|
 | Before step 3 completes | No new object, or a partial upload | Caller retries |
-| After step 3, before step 4 | An unreferenced body | GC deletes it after `grace` while its version is above the current version. After a later commit reaches its version, GC deletes it by the body retention rules |
+| After step 3, before step 4 | An unreferenced body | GC keeps it while its version is above the current version. After a later commit passes its version, GC deletes it by the body retention rules |
 | During step 4, result unknown | Pointer is old or new | Caller retries. The retry loads the pointer and applies the edit, or finds an applied retry |
 | After step 4, before the reply | New version is committed | A flush retry with the same term is idempotent |
 
@@ -373,7 +386,9 @@ errors:
 - Categories from `internal/pkindex`, attached with `errors.Mark`.
 
 The service translates each error once, before it returns. `ErrFenced` maps to
-`ChannelNotAvailable`. All other errors go through `pkindex.ToMerr`.
+`ChannelNotAvailable`, and `ErrSSTReclaimed` maps to
+`ChannelPKIndexSSTReclaimed` (code 508, added by this work). All other errors
+go through `pkindex.ToMerr`.
 
 `pkindex.ToMerr` checks the category marks before a merr in the error chain. This
 order matters here: the meta kv and the chunk manager already return merr
@@ -390,7 +405,9 @@ marks those failures as `ErrUnavailable`, and the mark must win.
 | `checkpoint_time_tick` is 0 | Request check, `CommitFlush` | `ServiceInternal` | No (caller bug) |
 | `index_id` is not positive | Request check, `CommitFlush`, each target of `GetRecoveryManifests` | `ServiceInternal` | No (caller bug) |
 | `reset_time_tick` is above `checkpoint_time_tick` | Request check, `CommitFlush` | `ServiceInternal` | No (caller bug) |
+| An SST ID is not positive | Request check, `CommitFlush` | `ServiceInternal` | No (caller bug) |
 | `ErrFenced` | Flush | `ChannelNotAvailable` | No. Stop the writes on the pchannel |
+| `ErrSSTReclaimed` | Flush | `ChannelPKIndexSSTReclaimed` | Not with the same request. Send the tables again under new SST IDs |
 | Meta kv or object storage failure (`ErrUnavailable`) | Load, write, walk | `ServiceUnavailable` | Yes |
 | Object storage failure that a retry does not fix: permission denied, bucket not found, invalid credentials, entity too large | Load, write | Its own code (`IoPermissionDenied`, `IoBucketNotFound`, `IoInvalidCredentials`, `IoEntityTooLarge`) | No |
 | Pointer write failed, for example on a failed condition | Commit step 5 | `ServiceUnavailable` | Yes |
@@ -467,33 +484,68 @@ Manifest bodies:
 |---|---|
 | Current body (the pointer names it) | Always |
 | Version ≤ current | Version is in the newest `manifestRetainVersions` versions (current included), or age ≤ `manifestRetainDuration` |
-| Version > current (not committed yet, or never) | Age ≤ `grace` |
+| Version > current (not committed yet, or never) | Always, until the current version passes it |
 
 GC deletes a body at or below the current version and outside the newest
 `manifestRetainVersions` versions when the body is older than
 `manifestRetainDuration`. `grace` does not apply to it. The pointer only moves
 up, so such a body never becomes the current version again.
 
+GC does not delete a body above the current version, at any age. Its commit
+can stall between the body write and the pointer write. If GC deleted the body
+after `grace`, the pointer write could still succeed and name a missing body.
+When the current version passes the body, a commit that names it can no longer
+win the pointer write, because that write is on the condition of an older
+pointer value. The body then falls under the rules of the row above it.
+
 A body in the retained version range is kept even when it lost the pointer
 write. Bodies do not record their parent, so GC cannot tell the winner from the
 loser in that range.
 
 SST files: the live set is the SSTs of all retained bodies plus the in-flight
-compaction outputs. GC deletes an SST that is not in the live set and is older
-than `grace`. If GC cannot read a retained body, it deletes no SST of that
+compaction outputs. GC selects an SST that is not in the live set and is older
+than `grace`. If GC cannot read a retained body, it selects no SST of that
 vchannel in that round. It still deletes the bodies outside the retention.
+
+### Reclaimed SST ID
+
+The age of an SST does not keep a commit safe. A flush retry can upload an SST
+again, after GC selected it and before GC deletes it, and then commit it. A
+check of the pointer or the age just before the delete leaves the same window.
+
+So GC raises `max_reclaimed_sst_id` before it deletes SSTs:
+
+1. GC selects the SSTs to delete, with the pointer value that it read at the
+   start of the vchannel.
+2. GC calls `Manager.AdvanceMaxReclaimedSSTID` with that pointer value and the
+   highest selected ID. Under the vchannel lock, the manager writes the
+   pointer with the raised value, on the condition `ValueEqual(pointer key,
+   value that GC read)`. If the stored value is already at least that ID, it
+   writes nothing.
+3. Only when the call succeeds does GC delete the selected SSTs. When it fails,
+   GC deletes no SST of that vchannel in this round.
+
+Both orders are safe. If a commit changes the pointer before step 2, the
+condition fails and GC deletes nothing; the next round sees the committed
+SSTs as live. If step 2 succeeds first, a flush that adds one of the selected
+SSTs gets `ErrSSTReclaimed`. Both steps are conditional writes of the same key
+in the meta kv, so the result does not depend on clocks, and it also holds
+when an old DataCoord still runs GC after a failover.
+
+The value is an upper bound, not the set of deleted IDs. A flush with an SST
+ID below it gets `ErrSSTReclaimed` even when GC did not delete that SST. This
+can happen when a new owner uses IDs from an old local batch of the ID
+allocator. The caller then sends the tables again under new IDs.
+
+A compaction is not checked. Its outputs are in the in-flight set until their
+commit takes effect, so GC never selects them.
 
 ### Grace window
 
-`grace` must be longer than the longest time from an object write to its
-commit:
-
-- a manifest body write to its pointer write,
-- an SST upload to its flush commit,
-- a compaction output upload to its compaction commit.
-
-GC deletes an SST, or a body above the current version, that stays
-uncommitted longer than `grace`. GC rejects a `grace` below `MinGrace`
+`grace` selects the SSTs to delete. It does not keep a commit safe; the
+reclaimed SST ID does. `grace` should be longer than the usual time from an
+SST upload to its flush commit. Else the flush gets `ErrSSTReclaimed` and
+uploads its tables again. GC rejects a `grace` below `MinGrace`
 (10 minutes). DataCoord then logs an error and does not start GC. The unit of
 the parameter is seconds. A duration string such as `"1h"` reads as 0, so GC
 does not start. Compaction outputs do not depend on `grace`, because they are in
@@ -525,7 +577,7 @@ removes the objects. The rules and their reasons are in
 | Parameter | Default | Meaning |
 |---|---|---|
 | `dataCoord.pkindex.gc.interval` | 3600 s | Time between two rounds. Must be positive |
-| `dataCoord.pkindex.gc.grace` | 86400 s | Minimum age of an unreferenced SST, or of a body above the current version, before GC deletes it. Must be at least 600 s (`MinGrace`) |
+| `dataCoord.pkindex.gc.grace` | 86400 s | Minimum age of an unreferenced SST before GC deletes it. Must be at least 600 s (`MinGrace`) |
 | `dataCoord.pkindex.gc.manifestRetainVersions` | 8 | Number of newest versions kept, current included |
 | `dataCoord.pkindex.gc.manifestRetainDuration` | 3600 s | Minimum age of a body at or below the current version, outside the newest versions, before GC deletes it |
 
@@ -558,7 +610,7 @@ The first version has no pointer to compare with. `ValueEqual` cannot express
   pointer. If the first commit of a vchannel writes the body (and the streaming
   node uploads SSTs) but the pointer write never succeeds, GC does not see
   these objects. A later successful flush of the vchannel creates the pointer,
-  and GC then deletes them after `grace`. If no flush of the vchannel succeeds
+  and GC then deletes them by the retention rules. If no flush of the vchannel succeeds
   before it is dropped, the GC by index ID removes them after its tolerance.
 - **Snapshot protection.** Collection snapshots protect segments and index
   builds, but not primary key index SSTs.
@@ -567,8 +619,10 @@ The first version has no pointer to compare with. `ValueEqual` cannot express
   GC has no input for these tables yet.
 - **Pointer listing cost.** Each GC round lists all pointers in one call. The
   cost with very many vchannels is not measured.
-- **Stalled commits.** A commit that stalls longer than `grace` loses its
-  objects. The committed manifest can then refer to deleted files.
+- **Starved SST deletes.** GC raises the reclaimed SST ID on the condition
+  that the pointer did not change since its read. A vchannel that commits more
+  often than GC takes to scan it gets no SST deleted. This delays deletes and
+  does not affect correctness.
 - **Stale cache.** After a DataCoord failover, an old DataCoord can keep a stale
   cache entry. It refreshes the entry only after a failed pointer write.
 - **Fenced retry that changes nothing.** A flush that changes nothing does not
@@ -577,3 +631,18 @@ The first version has no pointer to compare with. `ValueEqual` cannot express
   term change between that read and the return. The fenced owner does not
   write bad data: its next flush that changes the manifest fails the term
   check or the condition of the write.
+
+### Reclaimed compaction outputs
+
+The reclaimed SST ID also applies to new compaction outputs. The manager first
+checks for an applied retry, then rejects any new output ID at or below the
+pointer's `max_reclaimed_sst_id`. Every pointer update preserves that value,
+including compaction and truncate commits. A compaction commit that wins before
+GC raises the value changes the pointer and makes GC abandon its SST sweep.
+
+The in-flight output list alone is insufficient: a compaction can start after
+GC reads that list and stall beyond the grace window before the SST scan.
+Reclaimed outputs must receive new IDs before they can be committed.
+
+GC obeys `dataCoord.enableGarbageCollection` and collection pauses. It checks
+for a pause before scanning a collection and again before deleting objects.

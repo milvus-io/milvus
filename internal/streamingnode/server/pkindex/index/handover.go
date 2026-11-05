@@ -33,7 +33,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
-// pendingHandover is a prepared handover. Every retry sends the same request,
+// pendingHandover is a prepared handover. Except after ErrSSTReclaimed,
+// every retry sends the same request,
 // so the manifest service sees an exact retry (checkpoint not advanced, every
 // SST present) and returns the committed manifest after a lost response.
 type pendingHandover struct {
@@ -136,10 +137,9 @@ func (idx *indexImpl) prepare(ctx context.Context) (*pendingHandover, error) {
 // same p after a retryable error.
 //
 // It uploads every table of the request when no upload finished yet, or when
-// the last upload is older than Params.ReuploadAfter. The second case keeps
-// the tables safe from the coordinator garbage collection (grace window)
-// before the commit. The keys and files do not change, so the request does
-// not change either.
+// the last upload is older than Params.ReuploadAfter. Reupload reduces GC
+// selection; the pointer watermark provides safety. A reclaimed error makes
+// handover replace the IDs and upload again.
 //
 // commit installs the returned manifest and retires the generations only when
 // the manifest has the request in effect: its version is not below the
@@ -241,4 +241,48 @@ func linkCommitted(dir string, s engine.StagedTable) (string, error) {
 		return "", pkroot.MarkIO(err, "link sst %d to %s", s.Info.ID, path)
 	}
 	return path, nil
+}
+
+// renameTables gives every table of the pending request p a new ID after the
+// manifest service returned ErrSSTReclaimed: garbage collection may have
+// deleted the uploaded objects, and the manifest service rejects the old IDs
+// for good. The frozen generations and covered stay the same, so the Index
+// does not rotate again. It first syncs the ID allocator, so that the new IDs
+// are above every ID allocated before, links each local file under its new
+// ID, and clears the upload time, so that the next step uploads the tables
+// under the new keys. On error p does not change. The local links under the
+// old IDs are removed; the objects under the old keys are garbage.
+func (idx *indexImpl) renameTables(ctx context.Context, p *pendingHandover) error {
+	if idx.cfg.SyncIDAllocator != nil {
+		idx.cfg.SyncIDAllocator()
+	}
+	tables := make([]manifest.TableRef, 0, len(p.request.AddTables))
+	local := make(map[sst.ID]string, len(p.request.AddTables))
+	for _, t := range p.request.AddTables {
+		raw, err := idx.cfg.AllocID(ctx)
+		if err != nil {
+			return errors.Wrapf(err, "allocate a new id for sst %d", int64(t.ID))
+		}
+		id := sst.ID(raw)
+		path := committedPath(idx.committedDir, id)
+		if err := os.Link(p.local[t.ID], path); err != nil && !errors.Is(err, fs.ErrExist) {
+			return pkroot.MarkIO(err, "link sst %d to %s", int64(t.ID), path)
+		}
+		t.ID = id
+		tables = append(tables, t)
+		local[id] = path
+	}
+	old := p.local
+	request := *p.request
+	request.AddTables = tables
+	p.request, p.local, p.uploadedAt = &request, local, time.Time{}
+	for id, path := range old {
+		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			idx.logger.Warn(ctx, "failed to remove the local link of a renamed table",
+				mlog.Int64("sstID", int64(id)), mlog.String("path", path), mlog.Err(err))
+		}
+	}
+	idx.logger.Info(ctx, "primary key index handover renamed its tables, the manifest may have reclaimed the old ids",
+		mlog.Int("ssts", len(tables)), mlog.Uint64("checkpointTimeTick", p.covered))
+	return nil
 }

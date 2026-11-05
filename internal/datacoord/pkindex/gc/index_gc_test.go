@@ -218,7 +218,7 @@ func TestNewRejectsNegativeTolerances(t *testing.T) {
 		"missing": {Interval: time.Minute, Grace: time.Hour, MissingTolerance: -1},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := New(manifest.NewFakeMetaStore(), manifest.NewFakeObjectStore(), testRoot, cfg, nil)
+			_, err := New(manifest.NewFakeMetaStore(), manifest.NewFakeObjectStore(), testRoot, cfg, nil, nil, nil)
 			assert.True(t, errors.Is(err, ErrInvalidConfig))
 		})
 	}

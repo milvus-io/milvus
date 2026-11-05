@@ -280,6 +280,7 @@ func TestToMerr(t *testing.T) {
 	}{
 		{"fenced", pkmanifest.ErrFenced, merr.Code(merr.ErrChannelNotAvailable), false},
 		{"wrapped fenced", errors.Wrap(pkmanifest.ErrFenced, "context"), merr.Code(merr.ErrChannelNotAvailable), false},
+		{"sst reclaimed", errors.Wrap(manifest.ErrSSTReclaimed, "context"), merr.Code(merr.ErrChannelPKIndexSSTReclaimed), false},
 		{"term not assigned", manifest.ErrTermNotAssigned, merr.Code(merr.ErrServiceInternal), false},
 		{"no manifest", manifest.ErrNoManifest, merr.Code(merr.ErrServiceInternal), false},
 		{"checkpoint regressed", manifest.ErrCheckpointRegressed, merr.Code(merr.ErrServiceInternal), false},
@@ -354,6 +355,7 @@ func TestInvalidFlush(t *testing.T) {
 		"zero term":                  func(r *pkindexpb.CommitFlushRequest) { r.PchannelTerm = 0 },
 		"zero checkpoint":            func(r *pkindexpb.CommitFlushRequest) { r.CheckpointTimeTick = 0 },
 		"reset after the checkpoint": func(r *pkindexpb.CommitFlushRequest) { r.ResetTimeTick = r.GetCheckpointTimeTick() + 1 },
+		"zero sst ID":                func(r *pkindexpb.CommitFlushRequest) { r.AddSsts = []*pkindexpb.SSTRef{{Id: 0}} },
 	}
 	for name, change := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -286,6 +286,7 @@ func (c *pchannel) indexConfig(spec IndexSpec) index.OpenConfig {
 		SSTBasePath:        manifest.SSTBasePath(cfg.StorageRootPath, spec.CollectionID, spec.IndexID, spec.VChannel),
 		Engine:             cfg.Engine,
 		AllocID:            cfg.AllocID,
+		SyncIDAllocator:    cfg.SyncIDAllocator,
 		Store:              cfg.Store,
 		Committer:          cfg.Committer,
 		Params:             func() index.Params { return cfg.Params().Params },

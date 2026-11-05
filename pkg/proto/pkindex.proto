@@ -45,6 +45,9 @@ message ManifestPointer {
   int64 version = 1;
   // Complete object key of the Manifest body.
   string body_key = 2;
+  // Garbage collection may have deleted any SST whose ID is not greater
+  // than this value. It only increases.
+  int64 max_reclaimed_sst_id = 3;
 }
 
 message CommitFlushRequest {

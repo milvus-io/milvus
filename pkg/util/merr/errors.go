@@ -124,6 +124,11 @@ var (
 	// stale shard-map at the caller (proxy). Retryable so the caller can
 	// re-resolve the shard map and dispatch to the correct node.
 	ErrChannelMisrouted = newMilvusError("channel misrouted: not owned by this node", 507, true)
+	// A primary key index flush adds an SST whose ID is not above the
+	// reclaimed SST ID of the manifest pointer: garbage collection may have
+	// deleted that SST. The flush did not take effect. A retry with the same
+	// request fails again; the caller must use new SST IDs.
+	ErrChannelPKIndexSSTReclaimed = newMilvusError("primary key index sst may be reclaimed", 508, false)
 
 	// Segment related
 	ErrSegmentNotFound    = newMilvusError("segment not found", 600, false)
