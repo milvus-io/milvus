@@ -804,8 +804,10 @@ func (s *RefreshExternalCollectionTaskSuite) TestRebuildSegmentFakeBinlogs() {
 			defer cancel()
 			schema := &schemapb.CollectionSchema{Version: 9, Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "pk", ExternalField: "pk", DataType: schemapb.DataType_Int64},
-				{FieldID: 101, Name: "vector", IsFunctionOutput: true, DataType: schemapb.DataType_FloatVector,
-					TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+				{
+					FieldID: 101, Name: "vector", IsFunctionOutput: true, DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}},
+				},
 			}}
 			task := s.newTask(ctx, &datapb.RefreshExternalCollectionTaskRequest{Schema: schema})
 			task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
@@ -859,7 +861,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestRebuildSegmentFakeBinlogs() {
 				s.Equal(seg.GetNumOfRows(), updated.GetNumOfRows())
 				s.Equal("final", updated.GetManifestPath())
 				s.Equal(int32(9), updated.GetSchemaVersion())
-				s.Equal(int64(storage.StorageV3), updated.GetStorageVersion())
+				s.Equal(storage.StorageV3, updated.GetStorageVersion())
 				s.Equal(seg.GetTextStatsLogs(), updated.GetTextStatsLogs())
 				s.Equal(seg.GetJsonKeyStats(), updated.GetJsonKeyStats())
 				s.Require().Len(updated.GetBinlogs(), 1)
