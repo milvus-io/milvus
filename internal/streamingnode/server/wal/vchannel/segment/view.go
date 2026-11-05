@@ -480,6 +480,22 @@ func (info *SegmentView) AssignmentMeta() *streamingpb.SegmentAssignmentMeta {
 	return proto.Clone(info.meta).(*streamingpb.SegmentAssignmentMeta)
 }
 
+// SchemaReference is what keeps a retained segment's schema versions alive.
+// Schema GC reads it on every cleanup pass, so it avoids cloning the assignment.
+type SchemaReference struct {
+	CreateTimeTick uint64
+	SchemaVersion  int32
+}
+
+func (info *SegmentView) SchemaReference() SchemaReference {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	return SchemaReference{
+		CreateTimeTick: info.createSegmentTimeTick,
+		SchemaVersion:  info.meta.GetSchemaVersion(),
+	}
+}
+
 func (info *SegmentView) WritePathRecoveryState() (moduleapi.SegmentWritePathRecoveryState, bool) {
 	info.mu.Lock()
 	defer info.mu.Unlock()
