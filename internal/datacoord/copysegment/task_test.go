@@ -2314,31 +2314,41 @@ func TestCopiedSegmentIndexType(t *testing.T) {
 			ctx := context.Background()
 			catalog := kvdatacoord.NewCatalog(meta.NewMetaMemoryKV(), "", "")
 			im := index.CreateTestIndexMeta(t, 1, map[int64]*model.Index{
-				300: {CollectionID: 1, FieldID: 101, IndexID: 300, IndexName: "custom_vector",
-					IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}}},
+				300: {
+					CollectionID: 1, FieldID: 101, IndexID: 300, IndexName: "custom_vector",
+					IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}},
+				},
 			}, catalog)
 			store := metacache.NewMetaStore(catalog)
 			m := &meta.Meta{Segments: meta.NewSegmentsInfo(store), MetaStore: store}
-			segment := meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 100, CollectionID: 1, PartitionID: 10,
+			segment := meta.NewSegmentInfo(&datapb.SegmentInfo{
+				ID: 100, CollectionID: 1, PartitionID: 10,
 				NumOfRows: 4096, StorageVersion: storage.StorageV3,
-				ManifestPath: packed.MarshalManifestPath("files/insert_log/1/10/100", 1)})
+				ManifestPath: packed.MarshalManifestPath("files/insert_log/1/10/100", 1),
+			})
 			m.Segments.SetSegment(100, segment)
 			task := CreateTestCopyTask(1, 100)
-			info := &datapb.VectorScalarIndexInfo{FieldId: 101, IndexId: 200, BuildId: 5001,
+			info := &datapb.VectorScalarIndexInfo{
+				FieldId: 101, IndexId: 200, BuildId: 5001,
 				IndexName: "custom_vector", IndexType: indexType, Version: 1,
 				IndexFilePaths: []string{"index.bin"}, IndexSize: 1024,
-				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED}
-			result := &datapb.CopySegmentResult{SegmentId: 100, ImportedRows: 4096,
-				IndexInfos: map[int64]*datapb.VectorScalarIndexInfo{5001: info}}
+				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+			}
+			result := &datapb.CopySegmentResult{
+				SegmentId: 100, ImportedRows: 4096,
+				IndexInfos: map[int64]*datapb.VectorScalarIndexInfo{5001: info},
+			}
 			effectiveType := indexType
 			if effectiveType == "" {
 				effectiveType = "HNSW"
 			}
-			entry := packed.ManifestIndexInfo{IndexID: 300, FieldID: 101, BuildID: 5001,
+			entry := packed.ManifestIndexInfo{
+				IndexID: 300, FieldID: 101, BuildID: 5001,
 				IndexName: "custom_vector", IndexType: effectiveType, IndexVersion: 1,
 				Path: "files/insert_log/1/10/100/_index/5001/1", IndexFileKeys: []string{"index.bin"},
 				IndexStorePathVersion: info.IndexStorePathVersion,
-				Properties:            map[string]string{common.IndexTypeKey: effectiveType}}
+				Properties:            map[string]string{common.IndexTypeKey: effectiveType},
+			}
 			verified, err := verifyCopiedManifestIndexOwnership(result, task, m, im, segment, "files", []packed.ManifestIndexInfo{entry})
 			require.NoError(t, err)
 			for _, published := range []map[int64]int64{nil, verified} {
