@@ -171,8 +171,16 @@ func (bw *BulkPackWriterV2) getBucketName() string {
 	return paramtable.Get().MinioCfg.BucketName.GetValue()
 }
 
-func (bw *BulkPackWriterV2) getPluginContext(collectionID int64) (*indexcgopb.StoragePluginContext, error) {
-	return hookutil.GetCollectionPluginContext(bw.schema.GetProperties(), collectionID)
+func (bw *BulkPackWriterV2) getPluginContext(ctx context.Context, collectionID int64) (*indexcgopb.StoragePluginContext, error) {
+	var pluginContext *indexcgopb.StoragePluginContext
+	// Key lookup is part of the critical write path. Use the same retry policy
+	// as storage writes before surfacing an error to SyncTask.HandleError.
+	err := retry.Do(ctx, func() error {
+		var err error
+		pluginContext, err = hookutil.GetCollectionPluginContext(bw.schema.GetProperties(), collectionID)
+		return err
+	}, bw.writeRetryOpts...)
+	return pluginContext, err
 }
 
 func (bw *BulkPackWriterV2) getTsRange(rec storage.Record) (tsFrom, tsTo uint64) {
@@ -204,7 +212,7 @@ func (bw *BulkPackWriterV2) writeInserts(ctx context.Context, pack *SyncPack) (m
 	defer rec.Release()
 
 	tsFrom, tsTo := bw.getTsRange(rec)
-	pluginContextPtr, err := bw.getPluginContext(pack.collectionID)
+	pluginContextPtr, err := bw.getPluginContext(ctx, pack.collectionID)
 	if err != nil {
 		return nil, "", err
 	}

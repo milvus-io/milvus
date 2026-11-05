@@ -280,7 +280,7 @@ func (bw *BulkPackWriterV3) writeInserts(ctx context.Context, pack *SyncPack, ba
 	defer rec.Release()
 
 	tsFrom, tsTo := bw.getTsRange(rec)
-	pluginContextPtr, err := bw.getPluginContext(pack.collectionID)
+	pluginContextPtr, err := bw.getPluginContext(ctx, pack.collectionID)
 	if err != nil {
 		return nil, nil, err
 	}
