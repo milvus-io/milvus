@@ -114,7 +114,7 @@ func ValidateSnapshotImportFiles(files []*internalpb.ImportFile, options Options
 		uri, _ := funcutil.GetAttrByKeyFromRepeatedKV(SnapshotSourceURI, options)
 		layout, _ := funcutil.GetAttrByKeyFromRepeatedKV(SnapshotLayout, options)
 		if uri == "" || layout == "" ||
-			len(files[0].GetPaths()) != 0 || source.GetManifestPath() != "" ||
+			len(files[0].GetPaths()) != 0 || source.GetManifestPath() != "" || source.GetV2Reference() != nil ||
 			source.GetSourceCommitTimestamp() != 0 || source.GetTargetPartitionId() != 0 ||
 			source.GetSourceChannel() != "" || source.GetSourcePartitionId() != 0 ||
 			len(source.GetLegacyL0Deltalogs())+len(source.GetManifestL0Deltalogs()) != 0 {
@@ -128,7 +128,7 @@ func ValidateSnapshotImportFiles(files []*internalpb.ImportFile, options Options
 	_, mappingErr := funcutil.GetAttrByKeyFromRepeatedKV(PartitionMapping, options)
 	for _, file := range files {
 		source := file.GetSnapshotSource()
-		if source != nil && (source.GetVersion() < 1 || source.GetVersion() > 8) {
+		if source != nil && (source.GetVersion() < 1 || source.GetVersion() > 17 || source.GetVersion() == SnapshotPreparationVersion) {
 			return merr.Wrapf(merr.ErrServiceUnimplemented, "unsupported snapshot import source version %d", source.GetVersion())
 		}
 		// Development versions persisted L0 paths in every segment descriptor.
@@ -138,9 +138,8 @@ func ValidateSnapshotImportFiles(files []*internalpb.ImportFile, options Options
 		if len(source.GetLegacyL0Deltalogs())+len(source.GetManifestL0Deltalogs()) != 0 {
 			return merr.Wrapf(merr.ErrServiceUnimplemented, "snapshot import tasks with inline L0 are no longer supported; resubmit the snapshot import")
 		}
-		contractVersion := source.GetVersion()
+		contractVersion := SnapshotSourceContractVersion(source)
 		if SnapshotSourceUsesSharedL0(source) {
-			contractVersion -= 4
 			if source.GetSourceChannel() == "" || source.GetSourcePartitionId() <= 0 {
 				return merr.WrapErrServiceInternalMsg("invalid task-shared snapshot source descriptor")
 			}
@@ -169,9 +168,20 @@ func ValidateSnapshotImportFiles(files []*internalpb.ImportFile, options Options
 		if source == nil || len(file.GetPaths()) != 0 {
 			return merr.WrapErrServiceInternalMsg("mixed snapshot import source representations")
 		}
-		base, version, err := packed.UnmarshalManifestPath(source.GetManifestPath())
-		if err != nil || base == "" || version == packed.ManifestLatest {
-			return merr.WrapErrServiceInternalMsg("snapshot descriptor requires an exact data manifest")
+		if ref := source.GetV2Reference(); ref != nil {
+			if source.GetVersion() < 10 || source.GetManifestPath() != "" || ref.GetSegmentId() <= 0 ||
+				strings.TrimSpace(ref.GetSnapshotManifestPath()) == "" || ref.GetSnapshotFormatVersion() < 0 {
+				return merr.WrapErrServiceInternalMsg("invalid snapshot V2 reference")
+			}
+			layout, _ := funcutil.GetAttrByKeyFromRepeatedKV(SnapshotLayout, options)
+			if ref.OriginalKeyPrefix != nil && layout != "self-contained" {
+				return merr.WrapErrServiceInternalMsg("original_key_prefix requires a self-contained snapshot")
+			}
+		} else {
+			base, version, err := packed.UnmarshalManifestPath(source.GetManifestPath())
+			if err != nil || base == "" || version == packed.ManifestLatest {
+				return merr.WrapErrServiceInternalMsg("snapshot descriptor requires an exact data manifest")
+			}
 		}
 		size += proto.Size(file)
 		if size > SnapshotSourcePlanMaxBytes {
@@ -185,7 +195,21 @@ func ValidateSnapshotImportFiles(files []*internalpb.ImportFile, options Options
 // versions 1-4, but require a separate L0 inventory. Older workers reject the
 // version rather than silently ignoring deletes they do not know how to bind.
 func SnapshotSourceUsesSharedL0(source *internalpb.SnapshotImportSource) bool {
-	return source.GetVersion() >= 5 && source.GetVersion() <= 8
+	v := source.GetVersion()
+	return (v >= 5 && v <= 8) || (v >= 14 && v <= 17)
+}
+
+// SnapshotSourceContractVersion returns the reader's local/external and routing
+// capabilities without changing the durable descriptor or its source payload.
+func SnapshotSourceContractVersion(source *internalpb.SnapshotImportSource) uint32 {
+	v := source.GetVersion()
+	if v >= 10 && v <= 17 {
+		v -= 9
+	}
+	if v >= 5 && v <= 8 {
+		v -= 4
+	}
+	return v
 }
 
 type snapshotSourceScope struct {
