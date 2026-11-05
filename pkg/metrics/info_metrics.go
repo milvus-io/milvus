@@ -44,6 +44,15 @@ var (
 		},
 	)
 
+	ThreadPoolCPUSeconds = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Name:      "thread_pool_cpu_seconds_total",
+			Help:      "Sampled user and system CPU seconds by OS thread pool; excludes the initial baseline and may miss exiting threads.",
+		},
+		[]string{"thread_pool"},
+	)
+
 	ThreadCPUActiveNumByPool = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
