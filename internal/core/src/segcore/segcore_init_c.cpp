@@ -286,6 +286,15 @@ SegcoreSetKnowhereBuildThreadPoolNum(const uint32_t num_threads) {
     CGO_CATCH_AND_LOG("SegcoreSetKnowhereBuildThreadPoolNum")
 }
 
+extern "C" CStatus
+SegcoreSetMRLRefineRatio(const float value) {
+    try {
+        milvus::config::KnowhereSetMRLRefineRatio(value);
+        return milvus::SuccessCStatus();
+    }
+    CGO_CATCH_AND_RETURN_CSTATUS
+}
+
 extern "C" void
 SegcoreSetKnowhereSearchThreadPoolNum(const uint32_t num_threads) {
     try {

@@ -16,7 +16,9 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
 
 #include "nlohmann/json.hpp"
@@ -28,6 +30,9 @@ struct OpContext;
 // Per-open loading options. Loader implementations interpret family-specific
 // parameters; the storage boundary does not persist or reinterpret them.
 namespace milvus::storage {
+
+using VectorDataView = std::function<const void*(size_t)>;
+using VectorDataViewScope = std::function<VectorDataView(milvus::OpContext*)>;
 
 struct LoadOptions {
     // Open with file-backed bulk ownership. A family may stream format
@@ -52,6 +57,12 @@ struct LoadOptions {
     // persist this bag; the selected family's static open function immediately
     // parses its own typed settings from it.
     nlohmann::json params = nlohmann::json::object();
+
+    // Optional factory for search-scoped access to raw vector rows. Vector
+    // loaders pass it to wrappers that refine against segment-owned data. Each
+    // produced callback owns its row pins only for the consuming search; none
+    // of this runtime state is persisted by the artifact.
+    VectorDataViewScope vector_data_view_scope;
 
     // Per-operation context: cancellation token, runtime load priority, cold-byte
     // accounting. Borrowed, never owned; may be null.

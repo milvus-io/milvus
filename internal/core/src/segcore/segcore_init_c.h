@@ -95,6 +95,9 @@ SegcoreSetSimdType(const char*);
 void
 SegcoreEnableKnowhereScoreConsistency();
 
+CStatus
+SegcoreSetMRLRefineRatio(const float value);
+
 void
 SegcoreSetKnowhereBuildThreadPoolNum(const uint32_t num_threads);
 

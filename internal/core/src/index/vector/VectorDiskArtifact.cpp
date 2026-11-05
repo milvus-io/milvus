@@ -59,15 +59,23 @@ VectorDiskArtifact::Serialize(storage::FileSink& sink) const {
                       "failed to serialize disk vector index: {}",
                       knowhere::Status2String(status));
         }
-        AssertInfo(entries.binary_map_.empty(),
-                   "disk vector index unexpectedly returned in-memory "
-                   "serialized entries");
+        for (const auto& [name, entry] : entries.binary_map_) {
+            AssertInfo(entry != nullptr && entry->size >= 0 &&
+                           (entry->size == 0 || entry->data != nullptr),
+                       "disk vector index returned invalid sidecar {}",
+                       name);
+        }
         auto output = file_manager_->TakeOutput();
         files = file_manager_->LocalFiles();
-        AssertInfo(!output.empty() || !files.empty(),
-                   "vector disk artifact has no completed output");
+        AssertInfo(
+            !output.empty() || !files.empty() || !entries.binary_map_.empty(),
+            "vector disk artifact has no completed output");
         // Transfer complete buffers to the sink. A failed attempt discards its
         // output; the retained engine can serialize again into a fresh sink.
+        for (const auto& [name, entry] : entries.binary_map_) {
+            sink.WriteEntry(
+                name, entry->data.get(), static_cast<size_t>(entry->size));
+        }
         for (auto& [path, buffer] : output) {
             sink.WriteRawEntry(std::filesystem::path(path).filename().string(),
                                std::move(buffer));

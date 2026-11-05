@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <memory>
 #include <functional>
 #include <cstdlib>
@@ -29,6 +30,7 @@
 #include "index/contracts/query/IIndexReaderBase.h"
 #include "index/Meta.h"
 #include "segcore/SegmentInterface.h"
+#include "storage/artifact/LoadOptions.h"
 
 namespace milvus::segcore {
 
@@ -205,7 +207,9 @@ bool
 CanLazyCreateSealedIndexSlot(const LoadIndexInfo& load_index_info);
 
 void
-PrepareLazySealedIndexSlot(LoadIndexInfo& load_index_info);
+PrepareLazySealedIndexSlot(
+    LoadIndexInfo& load_index_info,
+    storage::VectorDataViewScope vector_data_view_scope = {});
 
 IndexRegistration
 MakeSealedIndexRegistration(const LoadIndexInfo& info);
@@ -216,7 +220,8 @@ MakeSealedIndexCapability(const LoadIndexInfo& info);
 void
 LoadIndexData(milvus::tracer::TraceContext& ctx,
               milvus::segcore::LoadIndexInfo* load_index_info,
-              milvus::OpContext* op_ctx = nullptr);
+              milvus::OpContext* op_ctx = nullptr,
+              storage::VectorDataViewScope vector_data_view_scope = {});
 
 /**
  * Convert Milvus timestamp to physical time in milliseconds.

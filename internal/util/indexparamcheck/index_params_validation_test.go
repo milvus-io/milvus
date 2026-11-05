@@ -167,6 +167,54 @@ func TestExpandIndexParams(t *testing.T) {
 	})
 }
 
+func TestResolveAutoIndexParams(t *testing.T) {
+	autoIndexConfig := map[string]string{
+		common.IndexTypeKey:  "HNSW",
+		common.MetricTypeKey: "IP",
+		"M":                  "30",
+	}
+
+	t.Run("use defaults", func(t *testing.T) {
+		resolvedAutoIndexParams, resolvedUserParams, metricSpecified, err :=
+			ResolveAutoIndexParams(map[string]string{}, autoIndexConfig)
+		assert.NoError(t, err)
+		assert.False(t, metricSpecified)
+		assert.Equal(t, autoIndexConfig, resolvedAutoIndexParams)
+		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: common.AutoIndexName},
+			{Key: common.MetricTypeKey, Value: "IP"},
+		}, resolvedUserParams)
+	})
+
+	t.Run("overlay supported user params", func(t *testing.T) {
+		userParams := map[string]string{
+			common.IndexTypeKey:     common.AutoIndexName,
+			common.MetricTypeKey:    "L2",
+			common.MRLDimKey:        "1024",
+			common.WithMRLRefineKey: "true",
+		}
+		resolvedAutoIndexParams, resolvedUserParams, metricSpecified, err :=
+			ResolveAutoIndexParams(userParams, autoIndexConfig)
+		assert.NoError(t, err)
+		assert.True(t, metricSpecified)
+		assert.Equal(t, "HNSW", resolvedAutoIndexParams[common.IndexTypeKey])
+		assert.Equal(t, "L2", resolvedAutoIndexParams[common.MetricTypeKey])
+		assert.Equal(t, "1024", resolvedAutoIndexParams[common.MRLDimKey])
+		assert.Equal(t, "true", resolvedAutoIndexParams[common.WithMRLRefineKey])
+		assert.ElementsMatch(t, []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: common.AutoIndexName},
+			{Key: common.MetricTypeKey, Value: "L2"},
+			{Key: common.MRLDimKey, Value: "1024"},
+			{Key: common.WithMRLRefineKey, Value: "true"},
+		}, resolvedUserParams)
+	})
+
+	t.Run("reject unsupported user param", func(t *testing.T) {
+		_, _, _, err := ResolveAutoIndexParams(map[string]string{"nlist": "1024"}, autoIndexConfig)
+		assert.ErrorContains(t, err, "only metric type can be passed when use AutoIndex")
+	})
+}
+
 func TestValidateFieldIndexParams(t *testing.T) {
 	paramtable.Init()
 
@@ -181,6 +229,14 @@ func TestValidateFieldIndexParams(t *testing.T) {
 		DataType: schemapb.DataType_BinaryVector,
 		TypeParams: []*commonpb.KeyValuePair{
 			{Key: common.DimKey, Value: "512"},
+		},
+	}
+	denseField := &schemapb.FieldSchema{
+		FieldID:  103,
+		Name:     "dense",
+		DataType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "128"},
 		},
 	}
 
@@ -275,6 +331,61 @@ func TestValidateFieldIndexParams(t *testing.T) {
 		err := ValidateFieldIndexParams(sparseField, params)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "exceeds limit")
+	})
+
+	t.Run("mrl validates base index at prefix dimension", func(t *testing.T) {
+		params := map[string]string{
+			common.IndexTypeKey:     "FLAT",
+			common.MetricTypeKey:    metric.COSINE,
+			common.MRLDimKey:        "32",
+			common.WithMRLRefineKey: "true",
+		}
+		assert.NoError(t, ValidateFieldIndexParams(denseField, params))
+		assert.Equal(t, "128", params[common.DimKey])
+	})
+
+	t.Run("mrl refine flag is normalized", func(t *testing.T) {
+		params := map[string]string{
+			common.IndexTypeKey:     "FLAT",
+			common.MetricTypeKey:    metric.L2,
+			common.MRLDimKey:        "32",
+			common.WithMRLRefineKey: "True",
+		}
+		assert.NoError(t, ValidateFieldIndexParams(denseField, params))
+		assert.Equal(t, "true", params[common.WithMRLRefineKey])
+	})
+
+	for name, values := range map[string]map[string]string{
+		"invalid prefix": {
+			common.MRLDimKey: "128",
+		},
+		"refine without prefix": {
+			common.WithMRLRefineKey: "true",
+		},
+		"invalid refine value": {
+			common.MRLDimKey:        "32",
+			common.WithMRLRefineKey: "sometimes",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			params := map[string]string{
+				common.IndexTypeKey:  "FLAT",
+				common.MetricTypeKey: metric.L2,
+			}
+			for key, value := range values {
+				params[key] = value
+			}
+			assert.Error(t, ValidateFieldIndexParams(denseField, params))
+		})
+	}
+
+	t.Run("mrl rejects unsupported vector field", func(t *testing.T) {
+		params := map[string]string{
+			common.IndexTypeKey:  "MINHASH_LSH",
+			common.MetricTypeKey: "MHJACCARD",
+			common.MRLDimKey:     "32",
+		}
+		assert.Error(t, ValidateFieldIndexParams(binaryField, params))
 	})
 }
 

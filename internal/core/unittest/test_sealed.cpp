@@ -1282,6 +1282,100 @@ TEST(SealedLazyIndexSlot, HnswArtifactStaysColdUntilPin) {
     ASSERT_EQ(snapshot->runtime->indexes.Slots().size(), 1);
 }
 
+TEST(SealedLazyIndexSlot, MRLRefinementRetainsViewAcrossDeferredLoading) {
+    constexpr int64_t dim = 4;
+    constexpr int64_t rows = 3;
+    auto [schema, vector] = MakeLazyVectorSchema(dim);
+    LazyIndexSourceFixture fixture;
+    fixture.Initialize();
+    const std::vector<float> values{0.0F,
+                                    0.0F,
+                                    10.0F,
+                                    0.0F,
+                                    0.1F,
+                                    0.0F,
+                                    0.0F,
+                                    0.0F,
+                                    2.0F,
+                                    0.0F,
+                                    0.0F,
+                                    0.0F};
+    auto prepared =
+        fixture.Prepare(7022,
+                        DataType::VECTOR_FLOAT,
+                        DataType::NONE,
+                        false,
+                        knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+                        rows,
+                        dim,
+                        {{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+                         {MRL_DIM_KEY, 2},
+                         {WITH_MRL_REFINE_KEY, true}});
+    auto data = storage::CreateFieldData(
+        DataType::VECTOR_FLOAT, DataType::NONE, false, dim, rows);
+    data->FillFieldData(values.data(), rows);
+    fixture.WriteInsert(prepared, data);
+    const auto artifact =
+        MakeLazyLoadInfo(schema,
+                         vector,
+                         7022,
+                         knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+                         fixture.Publish(prepared),
+                         rows,
+                         dim);
+    for (const bool lazy : {false, true}) {
+        SCOPED_TRACE(lazy);
+        auto info = artifact;
+        info.index_params[MRL_DIM_KEY] = "2";
+        info.index_params[WITH_MRL_REFINE_KEY] = "true";
+        int searches = 0;
+        storage::VectorDataViewScope view = [&values, &searches](OpContext*) {
+            ++searches;
+            return [&values](size_t id) {
+                return static_cast<const void*>(values.data() + id * dim);
+            };
+        };
+        IndexInventory inventory;
+        const auto registration = MakeSealedIndexRegistration(info);
+        if (lazy) {
+            PrepareLazySealedIndexSlot(info, view);
+            inventory.Register(std::make_shared<IndexInventory::Entry>(
+                registration, std::move(info.lazy_index_factory)));
+            folly::CancellationSource cancelled;
+            cancelled.requestCancellation();
+            OpContext ctx(cancelled.getToken());
+            EXPECT_THROW(inventory.PinIndex(&ctx, registration.key),
+                         std::exception);
+            EXPECT_TRUE(inventory.Slots().empty());
+        } else {
+            milvus::tracer::TraceContext trace{};
+            LoadIndexData(trace, &info, nullptr, view);
+            inventory.Register(std::make_shared<IndexInventory::Entry>(
+                MakeSealedIndexCapability(info), std::move(info.cache_index)));
+        }
+        view = {};
+        auto pin = inventory.PinIndex(nullptr, registration.key);
+        ASSERT_TRUE(pin);
+        EXPECT_EQ(searches, 0);
+        const auto* reader =
+            dynamic_cast<const index::IVectorReader*>(pin.get());
+        ASSERT_NE(reader, nullptr);
+        const std::array<float, dim> query{};
+        index::VectorSearchParams params{{}, knowhere::metric::L2, 2, {}};
+        for (int attempt = 1; attempt <= 2; ++attempt) {
+            SearchResult result;
+            reader->Search(knowhere::GenDataSet(1, dim, query.data()),
+                           params,
+                           nullptr,
+                           nullptr,
+                           result);
+            ASSERT_EQ(result.seg_offsets_.size(), 2);
+            EXPECT_EQ(result.seg_offsets_.front(), 1);
+            EXPECT_EQ(searches, attempt);
+        }
+    }
+}
+
 class SealedCardinalWarmupTest
     : public ::testing::TestWithParam<std::tuple<bool, std::string>> {};
 

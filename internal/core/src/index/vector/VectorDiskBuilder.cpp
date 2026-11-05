@@ -309,6 +309,7 @@ VectorDiskBuilder<T>::VectorDiskBuilder(DataType elem_type,
                   PhysicalVectorDataType<T>());
     }
     engine_->SetDim(dim);
+    ConfigureMRL(*engine_, dim, build_params_);
 }
 
 template <typename T>

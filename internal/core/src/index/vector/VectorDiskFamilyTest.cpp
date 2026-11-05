@@ -18,6 +18,7 @@
 
 #ifdef BUILD_DISK_ANN
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -62,12 +63,13 @@ namespace {
 // Exercise the native Serialize boundary without building a real ANN index.
 class SerializationTestNode final : public knowhere::IndexNode {
  public:
-    explicit SerializationTestNode(std::function<knowhere::Status()> serialize)
+    explicit SerializationTestNode(
+        std::function<knowhere::Status(knowhere::BinarySet&)> serialize)
         : serialize_(std::move(serialize)) {
     }
     knowhere::Status
-    Serialize(knowhere::BinarySet&) const override {
-        return serialize_();
+    Serialize(knowhere::BinarySet& entries) const override {
+        return serialize_(entries);
     }
     knowhere::Status
     Train(const knowhere::DataSetPtr,
@@ -133,7 +135,7 @@ class SerializationTestNode final : public knowhere::IndexNode {
     }
 
  private:
-    std::function<knowhere::Status()> serialize_;
+    std::function<knowhere::Status(knowhere::BinarySet&)> serialize_;
 };
 
 class SerializationTestSink final : public storage::FileSink {
@@ -143,8 +145,13 @@ class SerializationTestSink final : public storage::FileSink {
         return storage::Generation::V1V2;
     }
     void
-    WriteEntry(std::string_view, const void*, size_t) override {
-        throw std::logic_error("unexpected sliced entry");
+    WriteEntry(std::string_view name, const void* data, size_t size) override {
+        if (fail_write) {
+            throw std::runtime_error("sink write failed");
+        }
+        ++entries;
+        EXPECT_EQ(name, "metadata");
+        EXPECT_EQ(std::string(static_cast<const char*>(data), size), "payload");
     }
     void
     WriteEntryFromLocalFile(std::string_view, const std::string&) override {
@@ -174,6 +181,7 @@ class SerializationTestSink final : public storage::FileSink {
     }
     int files{0};
     int buffers{0};
+    int entries{0};
     bool fail_write{false};
 };
 
@@ -256,6 +264,7 @@ struct DiskBuildCase {
     std::vector<uint8_t> legacy_validity;
     // A resident payload; the raw file then holds only its header.
     const void* tensor = nullptr;
+    knowhere::ViewDataOp view_data;
 };
 
 template <typename T>
@@ -281,6 +290,10 @@ BuildDisk(const std::string& raw_path,
                    {DISK_ANN_BUILD_DRAM_BUDGET, "2"},
                    {DISK_ANN_BUILD_THREAD_NUM, "2"}},
     });
+    if (build.view_data) {
+        adapted.params[MRL_DIM_KEY] = build.dim / 2;
+        adapted.params[WITH_MRL_REFINE_KEY] = true;
+    }
     adapted.params["local_dir"] = staging_dir;
     auto builder =
         BuilderRegistry<PreparedVectorBuildFiles<T>>::Instance().Create(
@@ -368,6 +381,8 @@ BuildDisk(const std::string& raw_path,
     options.params[DISK_ANN_LOAD_THREAD_NUM] = 2;
     options.enable_mmap = build.mmap;
     options.mmap_dir_path = staging_dir;
+    options.vector_data_view_scope =
+        [view_data = build.view_data](milvus::OpContext*) { return view_data; };
     opened.base =
         LoaderRegistry::Instance()
             .Lookup(adapted.family)
@@ -594,7 +609,7 @@ TEST(VectorDiskFileManagerTest, MetadataCannotConvertLegacyFilesToRaw) {
 }
 
 TEST(VectorDiskFamilyTest, SerializationRequiresMemoryOrFileOutput) {
-    for (int outputs = 0; outputs < 4; ++outputs) {
+    for (int outputs = 0; outputs < 8; ++outputs) {
         SCOPED_TRACE(outputs);
         auto owner = storage::LocalDirectory::CreateOwned(
             "/tmp", "vector_serialize_XXXXXX", "serialization output test");
@@ -606,9 +621,14 @@ TEST(VectorDiskFamilyTest, SerializationRequiresMemoryOrFileOutput) {
             "L2",
             knowhere::Version::GetCurrentVersion().VersionNumber());
         int calls = 0;
-        engine->native_index =
-            knowhere::Index<SerializationTestNode>::Create([&] {
+        engine->native_index = knowhere::Index<SerializationTestNode>::Create(
+            [&](knowhere::BinarySet& entries) {
                 ++calls;
+                if (outputs & 4) {
+                    auto bytes = std::shared_ptr<uint8_t[]>(new uint8_t[7]);
+                    std::copy_n("payload", 7, bytes.get());
+                    entries.Append("metadata", std::move(bytes), 7);
+                }
                 for (bool memory : {false, true}) {
                     if ((outputs & (memory ? 1 : 2)) == 0) {
                         continue;
@@ -631,22 +651,24 @@ TEST(VectorDiskFamilyTest, SerializationRequiresMemoryOrFileOutput) {
                 EXPECT_NE(std::string(error.what()).find("no completed output"),
                           std::string::npos);
             }
-            EXPECT_EQ(sink.buffers + sink.files, 0);
+            EXPECT_EQ(sink.buffers + sink.files + sink.entries, 0);
         } else {
             ASSERT_NO_THROW(artifact.Serialize(sink));
             EXPECT_EQ(sink.buffers, outputs & 1 ? 1 : 0);
             EXPECT_EQ(sink.files, outputs & 2 ? 1 : 0);
+            EXPECT_EQ(sink.entries, outputs & 4 ? 1 : 0);
         }
         EXPECT_EQ(calls, 1);
         EXPECT_TRUE(manager->TakeOutput().empty());
-        if (outputs == 1) {
+        if (outputs == 1 || outputs == 4 || outputs == 5) {
             SerializationTestSink failed;
             failed.fail_write = true;
             EXPECT_THROW(artifact.Serialize(failed), std::runtime_error);
             EXPECT_TRUE(manager->TakeOutput().empty());
             SerializationTestSink retry;
             ASSERT_NO_THROW(artifact.Serialize(retry));
-            EXPECT_EQ(retry.buffers, 1);
+            EXPECT_EQ(retry.buffers, outputs & 1 ? 1 : 0);
+            EXPECT_EQ(retry.entries, outputs & 4 ? 1 : 0);
             EXPECT_EQ(calls, 3);
         }
     }
@@ -714,6 +736,45 @@ TEST(VectorDiskFamilyTest, Float16BuildLoadSearch) {
 
 TEST(VectorDiskFamilyTest, BFloat16BuildLoadSearch) {
     RunOrdinaryDiskSearch<bfloat16>(false);
+}
+
+TEST(VectorDiskFamilyTest, MRLBuildLoadAndRefine) {
+    auto files = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_disk_mrl_XXXXXX", "vector disk MRL test");
+    const auto raw_path = files->Path() + "/raw";
+    auto values = MakeRows<float>();
+    // Only rows 0 and 1 may tie for the nearest prefix.
+    for (int64_t row = 2; row < kRows; ++row) {
+        values[row * kDim] += 1.0f;
+    }
+    std::copy_n(values.data(), kDim / 2, values.data() + kDim);
+    WriteRaw(raw_path, values, kRows, kDim);
+    OpenedDiskIndex<float> opened;
+    BuildDisk(
+        raw_path, files->Path(), opened, {.view_data = [&values](size_t id) {
+            return static_cast<const void*>(values.data() + id * kDim);
+        }});
+    ASSERT_NE(opened.base, nullptr);
+    const auto* reader = dynamic_cast<const IVectorReader*>(opened.base.get());
+    ASSERT_NE(reader, nullptr);
+    EXPECT_EQ(reader->Dim(), kDim);
+    EXPECT_FALSE(reader->HasRawData());
+
+    VectorSearchParams params{
+        // This correctness test must retrieve both identical vector prefixes.
+        .search_params_ = {{DISK_ANN_QUERY_LIST, kRows}},
+        .metric_type_ = "L2",
+        .topk_ = 2,
+    };
+    SearchResult result;
+    reader->Search(GenDataset(1, kDim, values.data() + kDim),
+                   params,
+                   BitsetView{},
+                   nullptr,
+                   result);
+    ASSERT_EQ(result.seg_offsets_.size(), 2);
+    EXPECT_EQ(result.seg_offsets_[0], 1);
+    EXPECT_FLOAT_EQ(result.distances_[0], 0.0F);
 }
 
 TEST(VectorDiskFamilyTest, MmapCapabilityAndSearch) {
