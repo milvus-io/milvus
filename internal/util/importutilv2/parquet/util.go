@@ -65,18 +65,10 @@ func WrapNullElementErr(field *schemapb.FieldSchema) error {
 		fmt.Sprintf("array element is not allowed to be null value for field '%s'", field.GetName()))
 }
 
-func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, schema *schemapb.CollectionSchema) (map[int64]*FieldReader, error) {
-	// Create map for all fields including sub-fields from StructArrayFields
-	allFields := typeutil.GetAllFieldSchemas(schema)
-	nameToField := lo.KeyBy(allFields, func(field *schemapb.FieldSchema) string {
-		return field.GetName()
-	})
-
-	pqSchema, err := fileReader.Schema()
-	if err != nil {
-		return nil, merr.WrapErrImportFailedMsg("get parquet schema failed, err=%v", err)
-	}
-
+// ValidateSchema checks the file's arrow schema against the collection without
+// touching column data, and returns the struct columns it found. CreateFieldReaders
+// and the sizing stage both use it.
+func ValidateSchema(schema *schemapb.CollectionSchema, pqSchema *arrow.Schema) (map[string]int, error) {
 	if err := rejectFlatStructSubFieldColumns(schema, pqSchema); err != nil {
 		return nil, err
 	}
@@ -118,27 +110,25 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 	}
 
 	// Original flat format handling
-	err = isSchemaEqual(schema, pqSchema)
-	if err != nil {
+	if err := isSchemaEqual(schema, pqSchema); err != nil {
 		return nil, merr.WrapErrImportFailedMsg("schema not equal, err=%v", err)
 	}
 
-	// this loop is for "how many fields are provided by this parquet file?"
-	readFields := make(map[string]int64)
-	crs := make(map[int64]*FieldReader)
+	// A provided field that no import may provide.
+	nameToField := lo.KeyBy(typeutil.GetAllFieldSchemas(schema), func(field *schemapb.FieldSchema) string {
+		return field.GetName()
+	})
 	allowInsertAutoID, _ := common.IsAllowInsertAutoID(schema.GetProperties()...)
-	for i, pqField := range pqSchema.Fields() {
+	for _, pqField := range pqSchema.Fields() {
 		// Skip if it's a struct column
 		if _, isStruct := nestedStructs[pqField.Name]; isStruct {
 			continue
 		}
-
 		field, ok := nameToField[pqField.Name]
 		if !ok {
 			// redundant fields, ignore. only accepts a special field "$meta" to store dynamic data
 			continue
 		}
-
 		// auto-id field must not be provided
 		if typeutil.IsAutoPKField(field) && !allowInsertAutoID {
 			return nil, merr.WrapErrImportFailed(
@@ -156,6 +146,42 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 						"set collection property '%s' to enable", field.GetName(), common.CollectionAllowInsertNonBM25FunctionOutputs))
 			}
 		}
+	}
+	return nestedStructs, nil
+}
+
+func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, schema *schemapb.CollectionSchema) (map[int64]*FieldReader, error) {
+	// Create map for all fields including sub-fields from StructArrayFields
+	allFields := typeutil.GetAllFieldSchemas(schema)
+	nameToField := lo.KeyBy(allFields, func(field *schemapb.FieldSchema) string {
+		return field.GetName()
+	})
+
+	pqSchema, err := fileReader.Schema()
+	if err != nil {
+		return nil, merr.WrapErrImportFailedMsg("get parquet schema failed, err=%v", err)
+	}
+
+	nestedStructs, err := ValidateSchema(schema, pqSchema)
+	if err != nil {
+		return nil, err
+	}
+
+	// this loop is for "how many fields are provided by this parquet file?"
+	readFields := make(map[string]int64)
+	crs := make(map[int64]*FieldReader)
+	for i, pqField := range pqSchema.Fields() {
+		// Skip if it's a struct column
+		if _, isStruct := nestedStructs[pqField.Name]; isStruct {
+			continue
+		}
+
+		field, ok := nameToField[pqField.Name]
+		if !ok {
+			// redundant fields, ignore. only accepts a special field "$meta" to store dynamic data
+			continue
+		}
+
 		cr, err := NewFieldReader(ctx, fileReader, i, field, common2.GetSchemaTimezone(schema))
 		if err != nil {
 			return nil, err
