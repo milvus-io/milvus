@@ -1008,12 +1008,19 @@ func (w *sessionWatcher) handleWatchErr(err error) error {
 // sessions (a unary request that also refreshes the etcd auth token), opens a
 // fresh watch stream from the new revision, then replays the sessions through
 // the rewatch hook.
-func (w *sessionWatcher) handleReWatch() error {
+func (w *sessionWatcher) handleReWatch() (err error) {
 	sessions, revision, err := w.s.GetSessions(w.ctx, w.prefix)
 	if err != nil {
 		return err
 	}
-	rch := w.s.etcdCli.Watch(w.ctx, path.Join(w.s.metaRoot, DefaultServiceRoot, w.prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision), clientv3.WithCreatedNotify())
+	// A failed attempt runs again, so its watch must not stay open on w.ctx.
+	watchCtx, cancelWatch := context.WithCancel(w.ctx)
+	defer func() {
+		if err != nil {
+			cancelWatch()
+		}
+	}()
+	rch := w.s.etcdCli.Watch(watchCtx, path.Join(w.s.metaRoot, DefaultServiceRoot, w.prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision), clientv3.WithCreatedNotify())
 	// Watch returns once the stream is created or rejected. A rejection, e.g. by a
 	// learner, must fail this attempt: the read above keeps succeeding, so without
 	// retry.Do's backoff this would spin and replay the sessions every time.

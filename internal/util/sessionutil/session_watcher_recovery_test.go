@@ -30,9 +30,10 @@ import (
 type recoveringSessionEtcd struct {
 	clientv3.KV
 	clientv3.Watcher
-	getCalls int
-	revision int64
-	events   chan clientv3.WatchResponse
+	getCalls  int
+	revision  int64
+	events    chan clientv3.WatchResponse
+	watchCtxs []context.Context
 }
 
 func (c *recoveringSessionEtcd) Get(context.Context, string, ...clientv3.OpOption) (*clientv3.GetResponse, error) {
@@ -46,7 +47,8 @@ func (c *recoveringSessionEtcd) Get(context.Context, string, ...clientv3.OpOptio
 	}, nil
 }
 
-func (c *recoveringSessionEtcd) Watch(_ context.Context, key string, opts ...clientv3.OpOption) clientv3.WatchChan {
+func (c *recoveringSessionEtcd) Watch(ctx context.Context, key string, opts ...clientv3.OpOption) clientv3.WatchChan {
+	c.watchCtxs = append(c.watchCtxs, ctx)
 	c.revision = clientv3.OpGet(key, opts...).Rev()
 	return c.events
 }
@@ -111,4 +113,27 @@ func TestSessionWatcher_RejectedWatchRetriesWithoutReplay(t *testing.T) {
 	require.NoError(t, w.handleWatchErr(rejected.Err()))
 	require.Equal(t, 3, stub.getCalls, "the leader change and the rejection each fail one attempt")
 	require.Equal(t, 1, replays, "only the created watch replays the sessions")
+}
+
+// A replay that fails with a retriable error runs the attempt again, so it must
+// stop the watch it created. Only the installed watch stays open.
+func TestSessionWatcher_FailedReplayCancelsItsWatch(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	created := clientv3.WatchResponse{Created: true}
+	w, stub := newRecoveringWatcher(ctx, t, created, created)
+	replays := 0
+	w.rewatch = func(map[string]*Session) error {
+		replays++
+		if replays == 1 {
+			return rpctypes.ErrLeaderChanged
+		}
+		return nil
+	}
+
+	require.NoError(t, w.handleWatchErr(rpctypes.ErrLeaderChanged))
+	require.Equal(t, 2, replays)
+	require.Len(t, stub.watchCtxs, 2)
+	require.ErrorIs(t, stub.watchCtxs[0].Err(), context.Canceled, "the failed attempt's watch must stop")
+	require.NoError(t, stub.watchCtxs[1].Err(), "the installed watch must stay open")
 }
