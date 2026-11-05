@@ -18,6 +18,7 @@ package externalrefresh
 
 import (
 	"context"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1360,27 +1361,37 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 	})
 
 	t.Run("off keeps the native transition", func(t *testing.T) {
-		mockey.PatchConvey("off", t, func() {
-			pt := paramtable.Get()
-			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "false")
-			defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
+		for _, enabled := range []bool{false, true} {
+			t.Run("segment_change_"+strconv.FormatBool(enabled), func(t *testing.T) {
+				previous := Params.DataCoordCfg.SegmentChangeEnabled.SwapTempValue(strconv.FormatBool(enabled))
+				t.Cleanup(func() { Params.DataCoordCfg.SegmentChangeEnabled.SwapTempValue(previous) })
+				mockey.PatchConvey("off", t, func() {
+					pt := paramtable.Get()
+					pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "false")
+					defer pt.Reset(pt.DataCoordCfg.RefreshWaitForIndex.Key)
 
-			debt := []int64{555}
-			refreshMeta, mt, job := stage(t, nil, &debt)
-			applied := 0
-			checker := NewRefreshChecker(ctx, mt, &index.IndexMeta{}, refreshMeta, make(chan struct{}), nil,
-				func(context.Context, *datapb.ExternalCollectionRefreshJob) error { applied++; return nil },
-				nil, nil, nil)
+					debt := []int64{555}
+					refreshMeta, mt, job := stage(t, nil, &debt)
+					applied := 0
+					checker := NewRefreshChecker(ctx, mt, &index.IndexMeta{}, refreshMeta, make(chan struct{}), nil,
+						func(context.Context, *datapb.ExternalCollectionRefreshJob) error { applied++; return nil },
+						nil, nil, nil)
 
-			checker.AggregateJobState(job)
+					checker.AggregateJobState(job)
 
-			done := refreshMeta.GetJob(1)
-			assert.Equal(t, indexpb.JobState_JobStateFinished, done.GetState(),
-				"with the wait off, ingest done is finished - exactly as before")
-			assert.Equal(t, int64(100), done.GetProgress())
-			assert.Equal(t, 1, applied)
-			assert.Zero(t, done.GetIndexWaitStartedTime(), "the wait marker belongs to the wait")
-		})
+					done := refreshMeta.GetJob(1)
+					assert.Equal(t, indexpb.JobState_JobStateFinished, done.GetState(),
+						"with the wait off, ingest done is finished - exactly as before")
+					assert.Equal(t, int64(100), done.GetProgress())
+					assert.Equal(t, 1, applied)
+					if enabled {
+						assert.NotZero(t, done.GetIndexWaitStartedTime())
+					} else {
+						assert.Zero(t, done.GetIndexWaitStartedTime())
+					}
+				})
+			})
+		}
 	})
 
 	t.Run("on applies once and holds while segments are unindexed", func(t *testing.T) {
