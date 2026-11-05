@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	pkgcommon "github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -170,4 +171,108 @@ func TestArrayOfVectorToFieldData_RejectsUnsupportedOrInvalidInput(t *testing.T)
 		16,
 	)
 	require.Error(t, err)
+}
+
+func TestArrayOfVectorToFieldData_ElementNullable(t *testing.T) {
+	float16Expected := append(typeutil.Float32ToFloat16Bytes(0.25), typeutil.Float32ToFloat16Bytes(0.5)...)
+	bfloat16Expected := append(typeutil.Float32ToBFloat16Bytes(0.25), typeutil.Float32ToBFloat16Bytes(0.5)...)
+
+	tests := []struct {
+		name        string
+		elementType schemapb.DataType
+		dim         int
+		vector      []any
+		payload     func(*schemapb.VectorField) []byte
+		expected    []byte
+	}{
+		{
+			name:        "binary",
+			elementType: schemapb.DataType_BinaryVector,
+			dim:         16,
+			vector:      numbers("3", "11"),
+			payload:     (*schemapb.VectorField).GetBinaryVector,
+			expected:    []byte{3, 11},
+		},
+		{
+			name:        "float16",
+			elementType: schemapb.DataType_Float16Vector,
+			dim:         2,
+			vector:      numbers("0.25", "0.5"),
+			payload:     (*schemapb.VectorField).GetFloat16Vector,
+			expected:    float16Expected,
+		},
+		{
+			name:        "bfloat16",
+			elementType: schemapb.DataType_BFloat16Vector,
+			dim:         2,
+			vector:      numbers("0.25", "0.5"),
+			payload:     (*schemapb.VectorField).GetBfloat16Vector,
+			expected:    bfloat16Expected,
+		},
+		{
+			name:        "int8",
+			elementType: schemapb.DataType_Int8Vector,
+			dim:         2,
+			vector:      numbers("1", "-2"),
+			payload:     (*schemapb.VectorField).GetInt8Vector,
+			expected:    typeutil.Int8ArrayToBytes([]int8{1, -2}),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			field := vectorArrayField(tt.elementType, tt.dim)
+			field.ElementNullable = true
+
+			// The payload holds only the non-null vectors.
+			row, err := ArrayOfVectorToFieldData([]any{nil, tt.vector, nil}, field, tt.dim)
+			require.NoError(t, err)
+			require.Equal(t, int64(tt.dim), row.GetDim())
+			require.Equal(t, tt.expected, tt.payload(row))
+			require.Equal(t, []bool{false, true, false}, typeutil.GetVectorArrayElementValidData(row))
+
+			// All vectors null: a typed empty payload.
+			row, err = ArrayOfVectorToFieldData([]any{nil, nil}, field, tt.dim)
+			require.NoError(t, err)
+			require.NotNil(t, row.GetData())
+			require.Empty(t, tt.payload(row))
+			require.Equal(t, []bool{false, false}, typeutil.GetVectorArrayElementValidData(row))
+		})
+	}
+
+	field := vectorArrayField(schemapb.DataType_FloatVector, 2)
+	field.ElementNullable = true
+	row, err := ArrayOfVectorToFieldData([]any{numbers("0.25", "0.5"), nil}, field, 2)
+	require.NoError(t, err)
+	require.Equal(t, []float32{0.25, 0.5}, row.GetFloatVector().GetData())
+	require.Equal(t, []bool{true, false}, typeutil.GetVectorArrayElementValidData(row))
+
+	row, err = ArrayOfVectorToFieldData([]any{nil}, field, 2)
+	require.NoError(t, err)
+	require.NotNil(t, row.GetFloatVector())
+	require.Empty(t, row.GetFloatVector().GetData())
+
+	// Dimension errors keep the logical position.
+	_, err = ArrayOfVectorToFieldData([]any{nil, numbers("0.25")}, field, 2)
+	require.ErrorIs(t, err, merr.ErrImportFailed)
+	require.Contains(t, err.Error(), "position=1")
+}
+
+func TestArrayOfVectorToFieldData_NotElementNullable(t *testing.T) {
+	field := vectorArrayField(schemapb.DataType_FloatVector, 2)
+	row, err := ArrayOfVectorToFieldData([]any{numbers("0.25", "0.5")}, field, 2)
+	require.NoError(t, err)
+	require.Nil(t, typeutil.GetVectorArrayElementValidData(row))
+
+	_, err = ArrayOfVectorToFieldData([]any{numbers("0.25", "0.5"), nil}, field, 2)
+	require.ErrorIs(t, err, merr.ErrImportFailed)
+	require.Contains(t, err.Error(), "element 1 is null, but the sub-field is not element-nullable")
+
+	// Unparsable vector elements are input errors, not raw strconv errors.
+	_, err = ArrayOfVectorToFieldData([]any{numbers("1", "256")}, vectorArrayField(schemapb.DataType_BinaryVector, 16), 16)
+	require.ErrorIs(t, err, merr.ErrImportFailed)
+	_, err = ArrayOfVectorToFieldData([]any{numbers("1", "200")}, vectorArrayField(schemapb.DataType_Int8Vector, 2), 2)
+	require.ErrorIs(t, err, merr.ErrImportFailed)
+	_, err = ArrayOfVectorToFieldData([]any{numbers("1", "1e40")}, field, 2)
+	require.ErrorIs(t, err, merr.ErrImportFailed)
 }

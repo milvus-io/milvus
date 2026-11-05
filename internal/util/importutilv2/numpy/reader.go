@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type reader struct {
@@ -41,7 +42,27 @@ type reader struct {
 	frs   map[int64]*FieldReader // fieldID -> FieldReader
 }
 
+// ValidateSchema rejects a NumPy import that cannot fill the collection or
+// that carries struct data. NumPy carries one file per top-level field and has
+// no form for a struct field, so every struct row is imported as null: a
+// collection with a struct field that is not nullable is rejected, and so is a
+// file named after a struct field or one of its sub-fields, whose data would
+// otherwise be ignored. paths are the files of one NumPy import.
+func ValidateSchema(schema *schemapb.CollectionSchema, paths []string) error {
+	for _, structField := range schema.GetStructArrayFields() {
+		if !structField.GetNullable() {
+			return merr.WrapErrImportFailedMsg(
+				"numpy import cannot fill struct field '%s', which is not nullable: numpy files cannot carry struct data; use JSON, CSV or Parquet files",
+				structField.GetName())
+		}
+	}
+	return checkStructFilePaths(schema, paths)
+}
+
 func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, paths []string, bufferSize int) (*reader, error) {
+	if err := ValidateSchema(schema, paths); err != nil {
+		return nil, err
+	}
 	fields := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
 		return field.GetFieldID()
 	})
