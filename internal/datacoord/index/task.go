@@ -148,6 +148,9 @@ func (it *indexBuildTask) UpdateStateWithMeta(state indexpb.JobState, failReason
 		return err
 	}
 	it.SetState(state, failReason)
+	if state == indexpb.JobState_JobStateFinished {
+		it.meta.RecomputeDataView(it.meta.Ctx, it.CollectionID)
+	}
 	return nil
 }
 
@@ -169,6 +172,9 @@ func (it *indexBuildTask) SetJobInfo(result *workerpb.IndexTaskInfo) error {
 		if err := it.indexMeta.FinishTask(result); err != nil {
 			return err
 		}
+	}
+	if !published && result.GetState() == commonpb.IndexState_Finished {
+		it.meta.RecomputeDataView(it.meta.Ctx, it.CollectionID)
 	}
 	it.SetState(indexpb.JobState(result.GetState()), result.GetFailReason())
 	return nil
@@ -229,7 +235,7 @@ func (it *indexBuildTask) publishIndexToManifest(result *workerpb.IndexTaskInfo)
 	// Project the worker result now so an invalid one is rejected before any
 	// manifest I/O. CommitSegmentManifest repeats this under indexMeta's
 	// per-buildID lock and persists that authoritative copy.
-	finished, _, err := it.indexMeta.buildFinishedSegmentIndex(segIdx, result)
+	finished, err := it.indexMeta.buildFinishedSegmentIndex(segIdx, result)
 	if err != nil {
 		return false, err
 	}
@@ -750,7 +756,9 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *meta.S
 		ExternalSpec:              schema.GetExternalSpec(),
 	}
 
-	meta.WrapPluginContext(segment.GetCollectionID(), schema.GetProperties(), req)
+	if err := meta.WrapPluginContext(segment.GetCollectionID(), schema.GetProperties(), req); err != nil {
+		return nil, err
+	}
 	if metautil.IsSegmentRooted(segIndex.IndexStorePathVersion) {
 		base, _, err := packed.UnmarshalManifestPath(segment.GetManifestPath())
 		if err != nil {

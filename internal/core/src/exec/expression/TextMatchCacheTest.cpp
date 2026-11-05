@@ -315,7 +315,7 @@ TEST(TextMatchCacheTest, ExprResCacheGrowingTextBypassesReadAndWrite) {
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
                     raw_data.owner);
-        auto pin = seg->PinGrowingIndex(FieldId(101));
+        auto pin = seg->PinGrowingIndex(nullptr, FieldId(101));
         ASSERT_TRUE(pin);
         ASSERT_EQ(TextReader(pin.Reader()).MatchQuery("football", 1).count(),
                   N);

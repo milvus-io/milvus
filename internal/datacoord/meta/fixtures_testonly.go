@@ -1838,3 +1838,7 @@ func AssertNoStatsTaskEvent(t *testing.T) {
 	default:
 	}
 }
+
+func (s *MockMixCoord) EnsureCollectionReady(context.Context, *querypb.EnsureCollectionReadyRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}

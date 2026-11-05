@@ -49,6 +49,8 @@ type L0CompactionTask struct {
 	Allocator          allocator.Allocator
 	meta               meta.CompactionMeta
 	compactionTaskMeta *CompactionTaskMeta
+	// LookupRestoreJob supplies the durable copy recipe without depending on the copysegment module.
+	LookupRestoreJob func(context.Context, int64) *datapb.CopySegmentJob
 
 	times                *taskcommon.Times
 	CommittedV3Manifests map[int64]string
@@ -90,6 +92,12 @@ func (t *L0CompactionTask) GetTaskVersion() int64 {
 
 func (t *L0CompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	log := mlog.With(mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()), mlog.FieldNodeID(t.GetTaskProto().GetNodeID()))
+	if t.restoreMutationApplied() {
+		if err := t.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_meta_saved)); err != nil {
+			log.Warn(t.context(), "retrying restored delete completion metadata", mlog.Err(err))
+		}
+		return
+	}
 	plan, err := t.BuildCompactionRequest()
 	if err != nil {
 		log.Warn(context.TODO(), "l0CompactionTask failed to build compaction request", mlog.Err(err))
@@ -316,16 +324,24 @@ func (t *L0CompactionTask) ShadowClone(opts ...compactionTaskOpt) *datapb.Compac
 
 func (t *L0CompactionTask) SelectFlushedSegment() ([]*meta.SegmentInfo, []*datapb.CompactionSegmentBinlogs, error) {
 	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
-	// Select flushed L1/L2 segments for LevelZero compaction that meets the condition:
-	// dmlPos < triggerInfo.pos
-	flushedSegments := t.meta.SelectSegments(context.TODO(), meta.WithCollection(taskProto.GetCollectionID()), meta.SegmentFilterFunc(func(info *meta.SegmentInfo) bool {
-		return (taskProto.GetPartitionID() == common.AllPartitionsID || info.GetPartitionID() == taskProto.GetPartitionID()) &&
-			info.GetInsertChannel() == taskProto.GetChannel() &&
-			(info.GetState() == commonpb.SegmentState_Sealed || meta.IsFlushState(info.GetState())) &&
-			!info.GetIsImporting() &&
-			info.GetLevel() != datapb.SegmentLevel_L0 &&
-			meta.SegmentEffectiveTs(info.SegmentInfo) < taskProto.GetPos().GetTimestamp()
-	}))
+	var flushedSegments []*meta.SegmentInfo
+	if taskProto.GetType() == datapb.CompactionType_RestoreLevel0DeleteCompaction {
+		var err error
+		flushedSegments, err = t.restoreTargets()
+		if err != nil {
+			return nil, nil, err
+		}
+	} else {
+		// Ordinary L0 compaction selects bases older than the trigger position.
+		flushedSegments = t.meta.SelectSegments(t.context(), meta.WithCollection(taskProto.GetCollectionID()), meta.SegmentFilterFunc(func(info *meta.SegmentInfo) bool {
+			return (taskProto.GetPartitionID() == common.AllPartitionsID || info.GetPartitionID() == taskProto.GetPartitionID()) &&
+				info.GetInsertChannel() == taskProto.GetChannel() &&
+				(info.GetState() == commonpb.SegmentState_Sealed || meta.IsFlushState(info.GetState())) &&
+				!info.GetIsImporting() &&
+				info.GetLevel() != datapb.SegmentLevel_L0 &&
+				meta.SegmentEffectiveTs(info.SegmentInfo) < taskProto.GetPos().GetTimestamp()
+		}))
+	}
 
 	sealedSegBinlogs := []*datapb.CompactionSegmentBinlogs{}
 	for _, info := range flushedSegments {
@@ -360,7 +376,7 @@ func (t *L0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 	plan := &datapb.CompactionPlan{
 		PlanID:        taskProto.GetPlanID(),
 		StartTime:     taskProto.GetStartTime(),
-		Type:          taskProto.GetType(),
+		Type:          datapb.CompactionType_Level0DeleteCompaction,
 		Channel:       taskProto.GetChannel(),
 		CollectionTtl: taskProto.GetCollectionTtl(),
 		TotalRows:     taskProto.GetTotalRows(),
@@ -418,7 +434,9 @@ func (t *L0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 		mlog.Any("target segments count", len(flushedSegBinlogs)),
 		mlog.Any("PreAllocatedLogIDs", logIDRange))
 
-	meta.WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan)
+	if err := meta.WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan); err != nil {
+		return nil, err
+	}
 	return plan, nil
 }
 
@@ -463,6 +481,28 @@ func (t *L0CompactionTask) saveTaskMeta(task *datapb.CompactionTask) error {
 
 func (t *L0CompactionTask) SaveSegmentMeta(outputSegs []*datapb.CompactionSegment) error {
 	ctx := t.context()
+	cursorUpdates, err := t.transformCursorUpdates(ctx, outputSegs)
+	if err != nil {
+		return err
+	}
+	if t.GetTaskProto().GetType() == datapb.CompactionType_RestoreLevel0DeleteCompaction {
+		if t.restoreMutationApplied() {
+			return nil
+		}
+		targets, err := t.restoreTargets()
+		if err != nil {
+			return err
+		}
+		allowed := make(map[int64]struct{}, len(targets))
+		for _, segment := range targets {
+			allowed[segment.GetID()] = struct{}{}
+		}
+		for _, output := range outputSegs {
+			if _, ok := allowed[output.GetSegmentID()]; !ok {
+				return merr.WrapErrDataIntegrityMsg("restore compaction returned unexpected segment %d", output.GetSegmentID())
+			}
+		}
+	}
 	var operators []meta.UpdateOperator
 	v3Deltalogs := make(map[int64][]*datapb.FieldBinlog)
 	for _, seg := range outputSegs {
@@ -499,13 +539,14 @@ func (t *L0CompactionTask) SaveSegmentMeta(outputSegs []*datapb.CompactionSegmen
 		}
 	}
 
-	// Retire the compacted L0 input segments in the same catalog transaction that
-	// publishes the targets' merged deltalogs, so the whole L0 result is atomic:
-	// either every target gains its deltalogs and every input turns
-	// Dropped/Compacted, or nothing changes. For V3 targets both halves fold into
-	// one CommitSegmentManifests call (manifest pointer advance + these operators
-	// in a single UpdateSegmentsInfo); with no V3 target the operators alone go
-	// through UpdateSegmentsInfo.
+	// The cursor is certified only for the deltalogs committed by this result.
+	// Keep these updates in the same transaction as both V2/V3 output publication.
+	operators = append(operators, cursorUpdates...)
+
+	// Retire inputs in the same catalog mutation as target deltalogs and cursors.
+	// The catalog commits atomically within its transaction limit; oversized L0
+	// results persist deltalogs before target records and retire inputs last.
+	// V3 folds its manifest pointers and these operators into one publication.
 	for _, segID := range t.GetTaskProto().InputSegments {
 		operators = append(operators, meta.UpdateStatusOperator(segID, commonpb.SegmentState_Dropped), meta.UpdateCompactedOperator(segID))
 	}

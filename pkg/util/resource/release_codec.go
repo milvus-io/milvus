@@ -22,6 +22,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/protoadapt"
 
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/fastpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -64,6 +65,15 @@ func (c releaseCodec) Marshal(v any) (mem.BufferSlice, error) {
 		defer MsgPins.Release(v)
 	}
 
+	// MaterializeResults carries large opaque body entries: send them as
+	// views instead of copying them into a marshal buffer
+	// (marshalMaterializeResults). The views outlive this call, so the type
+	// must never become MsgPinnable (its pins would be released before gRPC
+	// writes the views).
+	if m, ok := v.(*internalpb.MaterializeResults); ok {
+		return marshalMaterializeResults(m)
+	}
+
 	size := proto.Size(msg)
 	marshalOptions := proto.MarshalOptions{UseCachedSize: true}
 	var out mem.BufferSlice
@@ -93,6 +103,12 @@ func (c releaseCodec) Unmarshal(data mem.BufferSlice, v any) error {
 	msg := messageV2Of(v)
 	if msg == nil {
 		return merr.WrapErrServiceInternalMsg("releaseCodec: %T does not implement proto.Message", v)
+	}
+
+	// MaterializeResults: no copy of the body; it stays in the received
+	// buffers, referenced (see unmarshalMaterializeResults).
+	if m, ok := v.(*internalpb.MaterializeResults); ok {
+		return unmarshalMaterializeResults(data, m)
 	}
 
 	buf := data.MaterializeToBuffer(c.pool())

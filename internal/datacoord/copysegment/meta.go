@@ -40,7 +40,7 @@ import (
 //
 // ARCHITECTURE:
 // - CopySegmentMeta: Interface defining all metadata operations
-// - copySegmentMeta: Implementation with in-memory cache and persistent storage
+// - Meta: Implementation with in-memory cache and persistent storage
 // - copySegmentTasks: Helper struct for managing task collections
 //
 // DATA MODEL:
@@ -85,6 +85,8 @@ type CopySegmentMeta interface {
 	UpdateJob(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error
 	UpdateJobInState(ctx context.Context, jobID int64, expectedState datapb.CopySegmentJobState, actions ...UpdateCopySegmentJobAction) (bool, error)
 	UpdateJobStateAndReleaseRef(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error
+	// FailJobForDroppedCollection requires authoritative confirmation that the target is dropped.
+	FailJobForDroppedCollection(ctx context.Context, jobID int64) error
 	GetJob(ctx context.Context, jobID int64) CopySegmentJob
 	GetJobBy(ctx context.Context, filters ...CopySegmentJobFilter) []CopySegmentJob
 	CountJobBy(ctx context.Context, filters ...CopySegmentJobFilter) int
@@ -239,7 +241,7 @@ func (t *copySegmentTasks) getByCollectionID(collectionID int64) []CopySegmentTa
 // Metadata Implementation
 // ===========================================================================================
 
-// copySegmentMeta implements CopySegmentMeta with in-memory caching and persistent storage.
+// Meta implements CopySegmentMeta with in-memory caching and persistent storage.
 type Meta struct {
 	mu           lock.RWMutex // Protects jobs and tasks maps
 	ctx          context.Context
@@ -506,7 +508,43 @@ func (m *Meta) CountJobBy(ctx context.Context, filters ...CopySegmentJobFilter) 
 // prevented because only one caller observes the `!wasTerminal → isTerminal`
 // transition under m.mu; every subsequent caller sees wasTerminal=true.
 func (m *Meta) UpdateJobStateAndReleaseRef(ctx context.Context, jobID int64, actions ...UpdateCopySegmentJobAction) error {
+	return m.updateJobStateAndReleaseRef(ctx, jobID, false, actions...)
+}
+
+// FailJobForDroppedCollection ends the publication obligation after the target's
+// authoritative metadata confirms deletion. Unlike a timeout or task failure,
+// deletion also terminates a fully copied restore. The existing terminal guard
+// prevents stale checks from changing Completed jobs or releasing pins twice.
+func (m *Meta) FailJobForDroppedCollection(ctx context.Context, jobID int64) error {
+	return m.updateJobStateAndReleaseRef(ctx, jobID, true,
+		UpdateCopyJobState(datapb.CopySegmentJobState_CopySegmentJobFailed),
+		UpdateCopyJobReason("restore target collection dropped"))
+}
+
+func (m *Meta) updateJobStateAndReleaseRef(ctx context.Context, jobID int64, targetDropped bool, actions ...UpdateCopySegmentJobAction) error {
 	m.mu.Lock()
+	current := m.Jobs[jobID]
+	if current != nil {
+		state := current.GetState()
+		if state == datapb.CopySegmentJobState_CopySegmentJobCompleted || state == datapb.CopySegmentJobState_CopySegmentJobFailed {
+			m.mu.Unlock()
+			return nil
+		}
+		// Completed copy tasks are the durable publication prerequisite. Once
+		// every expected segment is copied, publication retries cannot fail the
+		// job or release its data, even after a crash between publishing the
+		// collection and persisting the job's Completed state.
+		if !targetDropped && current.(*Job).GetCreatesCollection() && allRestoreSegmentsCopied(current, m.Tasks.getByJobID(jobID)) {
+			next := current.Clone()
+			for _, action := range actions {
+				action(next)
+			}
+			if next.GetState() != datapb.CopySegmentJobState_CopySegmentJobCompleted {
+				m.mu.Unlock()
+				return nil
+			}
+		}
+	}
 	prevJob, updatedJob, err := m.updateJob(ctx, jobID, actions...)
 	if err != nil {
 		m.mu.Unlock()
@@ -664,6 +702,9 @@ func (m *Meta) UpdateTask(ctx context.Context, taskID int64, actions ...UpdateCo
 		updatedTask := task.Clone()
 		for _, action := range actions {
 			action(updatedTask)
+		}
+		if task.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskCompleted && updatedTask.GetState() != task.GetState() {
+			return nil // A late worker response cannot revoke installed copy data.
 		}
 		err := m.Catalog.SaveCopySegmentTask(ctx, updatedTask.(*Task).Task.Load())
 		if err != nil {

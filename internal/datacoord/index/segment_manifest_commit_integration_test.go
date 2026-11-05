@@ -27,11 +27,13 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -50,7 +52,7 @@ func manifestIndexEntryForCommitTest(t *testing.T, m *meta.Meta, indexMeta *Inde
 	}
 	segIdx, ok := indexMeta.GetIndexJob(buildID)
 	require.True(t, ok)
-	finished, _, err := indexMeta.buildFinishedSegmentIndex(segIdx, taskInfo)
+	finished, err := indexMeta.buildFinishedSegmentIndex(segIdx, taskInfo)
 	require.NoError(t, err)
 	entry, err := meta.BuildManifestIndexInfo(m, m.GetSegment(context.Background(), segmentID), finished)
 	require.NoError(t, err)
@@ -63,6 +65,8 @@ func manifestIndexEntryForCommitTest(t *testing.T, m *meta.Meta, indexMeta *Inde
 }
 
 func TestCommitSegmentManifestPublishesIndexTaskAtomically(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
 	const (
 		collectionID = int64(1)
 		partitionID  = int64(10)
@@ -81,9 +85,22 @@ func TestCommitSegmentManifestPublishesIndexTaskAtomically(t *testing.T) {
 		CollectionID:   collectionID,
 		PartitionID:    partitionID,
 		State:          commonpb.SegmentState_Flushed,
+		Level:          datapb.SegmentLevel_L1,
+		InsertChannel:  "index-publication-vchannel",
+		NumOfRows:      4096,
 		StorageVersion: storage.StorageV3,
 		ManifestPath:   oldManifest,
 	})))
+	manager, err := dataview.RecoverManager(ctx, mt.Catalog.(dataview.Catalog), func(context.Context, int64) (bool, error) { return true, nil }, mt.LoadableProjection, nil, nil)
+	require.NoError(t, err)
+	mt.DataViewManager = manager
+	loadable, err := mt.LoadableProjection(ctx, collectionID, nil)
+	require.NoError(t, err)
+	_, err = manager.OnBootstrapCollection(ctx, dataview.BootstrapCollectionDataViewEvent{CollectionID: collectionID, VChannels: []string{"index-publication-vchannel"}, Segments: loadable})
+	require.NoError(t, err)
+	previous, err := manager.Latest(ctx, collectionID)
+	require.NoError(t, err)
+	defer previous.Deref()
 	require.NoError(t, dm.IndexMeta.AddSegmentIndex(context.Background(), &model.SegmentIndex{
 		CollectionID:          collectionID,
 		PartitionID:           partitionID,
@@ -143,6 +160,19 @@ func TestCommitSegmentManifestPublishesIndexTaskAtomically(t *testing.T) {
 	require.Equal(t, commonpb.IndexState_Finished, published.IndexState)
 	require.Equal(t, []string{"0", "1"}, published.IndexFileKeys)
 	require.EqualValues(t, 2000, published.IndexSerializedSize)
+	// The same physical-index commit must drive a new DataView even though
+	// SegmentID and SchemaVersion did not change. Retained Views keep revision 3.
+	require.Eventually(t, func() bool {
+		next, err := manager.Latest(ctx, collectionID)
+		if err != nil || next == nil {
+			return false
+		}
+		defer next.Deref()
+		return next.Version().GetStreamingVersion() == previous.Version().GetStreamingVersion() &&
+			next.Version().GetCompactVersion() == previous.Version().GetCompactVersion()+1 &&
+			next.DataView().GetShards()[0].GetPartitions()[0].GetSegmentManifestVersions()[0] == 4
+	}, 5*time.Second, time.Millisecond)
+	require.EqualValues(t, 3, previous.DataView().GetShards()[0].GetPartitions()[0].GetSegmentManifestVersions()[0])
 }
 
 // The manifest entry is assembled before CommitSegmentManifest takes the
@@ -538,21 +568,14 @@ func TestCommitSegmentManifestRetiresIndexEtcdRowWhenGated(t *testing.T) {
 
 // Regression test for a stall between the manifest commit and every index DDL.
 //
-// The staged index install updates the stored-index-size gauge, which must
-// serialize against MarkIndexAsDeleted via indexMeta.fieldIndexLock — and every
-// index DDL (CreateIndex, AlterIndex, MarkIndexAsDeleted, RemoveIndex) holds
-// that lock's WRITE side across an etcd round trip. The install used to run the
-// gauge update inside the commit's segMu critical section, so one concurrent
-// DDL made the commit hold segMu for up to the etcd request timeout, stalling
-// every GetSegment/SelectSegments/SaveBinlogPaths. The fix defers the
-// fieldIndexLock-guarded gauge until after segMu is released (still under the
-// buildID key lock).
-//
-// In the style of TestCommitSegmentManifestTakesKeyLockBeforeSegMu, this
-// asserts the invariant rather than racing a window: hold fieldIndexLock's
-// write side, let the commit park on the deferred gauge, and check that segMu
-// is free and publication already completed.
-func TestCommitSegmentManifestDefersFieldIndexLockOutsideSegMu(t *testing.T) {
+// Index DDL takes indexMeta.fieldIndexLock's write side to install field index
+// definitions. The commit installs its staged SegmentIndex mutations inside its
+// segMu critical section, so it must never wait for that lock: sync.RWMutex is
+// writer-preferring, and a commit parked on it with segMu held stalls every
+// GetSegment/SelectSegments/SaveBinlogPaths. The install updates indexMeta's
+// memory-only task counters, and the stored-index-size gauge is published from
+// them without the lock, so the whole commit completes while the lock is held.
+func TestCommitSegmentManifestDoesNotWaitForIndexDDL(t *testing.T) {
 	meta.WithSegmentIndexManifestWrites(t, true)
 	meta.NewFakeManifestStore(t)
 	ctx := context.TODO()
@@ -563,7 +586,7 @@ func TestCommitSegmentManifestDefersFieldIndexLockOutsideSegMu(t *testing.T) {
 
 	segIdx, ok := mDomains.IndexMeta.GetIndexJob(meta.RestartBuildID)
 	require.True(t, ok)
-	finished, _, err := mDomains.IndexMeta.buildFinishedSegmentIndex(segIdx, &workerpb.IndexTaskInfo{
+	finished, err := mDomains.IndexMeta.buildFinishedSegmentIndex(segIdx, &workerpb.IndexTaskInfo{
 		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
 		BuildID:               meta.RestartBuildID,
 		State:                 commonpb.IndexState_Finished,
@@ -574,9 +597,7 @@ func TestCommitSegmentManifestDefersFieldIndexLockOutsideSegMu(t *testing.T) {
 	require.NoError(t, err)
 	baseManifest := m.GetSegment(ctx, meta.RestartSegID).GetManifestPath()
 
-	// Stand in for any index DDL mid-etcd-round-trip: CreateIndex, AlterIndex,
-	// MarkIndexAsDeleted and RemoveIndex all hold fieldIndexLock's write side
-	// across their catalog write.
+	// Stand in for an index DDL installing definitions.
 	mDomains.IndexMeta.fieldIndexLock.Lock()
 
 	committed := make(chan error, 1)
@@ -603,43 +624,65 @@ func TestCommitSegmentManifestDefersFieldIndexLockOutsideSegMu(t *testing.T) {
 		})
 	}()
 
-	// Let the commit run until it parks on the deferred gauge. Manifest I/O and
-	// the catalog write are in-memory here, so it reaches its blocking point
-	// well within this window.
 	select {
-	case err := <-committed:
+	case err = <-committed:
 		mDomains.IndexMeta.fieldIndexLock.Unlock()
-		t.Fatalf("commit finished without waiting on the held field index lock: %v", err)
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
+		mDomains.IndexMeta.fieldIndexLock.Unlock()
+		<-committed
+		t.Fatal("commit waited on the field index lock")
 	}
+	require.NoError(t, err)
+	assert.NotEqual(t, baseManifest, m.GetSegment(ctx, meta.RestartSegID).GetManifestPath(),
+		"publication must complete while index DDL holds the field index lock")
+}
 
-	// The load-bearing assertion. Parked on fieldIndexLock, the commit must
-	// hold no segMu; otherwise every segment reader queues behind the DDL's
-	// etcd round trip for its whole duration.
-	acquired := m.SegMu.TryLock()
-	if acquired {
-		m.SegMu.Unlock()
-	}
-	var publishedManifest string
-	if acquired {
-		// segMu is provably free, so reading through it cannot hang; the
-		// pointer must already have advanced, proving the commit finished its
-		// entire publication section before waiting on fieldIndexLock.
-		publishedManifest = m.GetSegment(ctx, meta.RestartSegID).GetManifestPath()
-	}
-	mDomains.IndexMeta.fieldIndexLock.Unlock()
+// Regression test for a stall between the manifest commit and a Prometheus
+// scrape. A scrape holds the stored-index-size gauge vector's read lock while it
+// sends series, and creating or deleting a series waits for it, so a gauge write
+// inside the commit's segMu critical section would stall every segment reader
+// for the length of the scrape. The commit publishes the gauge only after segMu
+// is released.
+func TestCommitSegmentManifestPublishesIndexSizeOutsideSegMu(t *testing.T) {
+	meta.WithSegmentIndexManifestWrites(t, true)
+	meta.NewFakeManifestStore(t)
+	ctx := context.TODO()
 
-	select {
-	case err := <-committed:
-		require.NoError(t, err)
-	case <-time.After(30 * time.Second):
-		t.Fatal("commit did not complete after the field index lock was released")
-	}
+	catalog := datacoord.NewCatalog(meta.NewMetaMemoryKV(), "", "")
+	m, mDomains := BootMetaForRestart(t, catalog, meta.RestartCollID)
+	SeedRestartTask(t, m, mDomains.IndexMeta)
+	baseManifest := m.GetSegment(ctx, meta.RestartSegID).GetManifestPath()
 
-	require.True(t, acquired,
-		"commit is holding segMu while blocked on fieldIndexLock: a concurrent index DDL would stall every segment reader")
-	assert.NotEqual(t, baseManifest, publishedManifest,
-		"publication must complete before the commit waits on fieldIndexLock")
+	metrics.DataCoordStoredIndexFilesSize.Reset()
+	t.Cleanup(metrics.DataCoordStoredIndexFilesSize.Reset)
+	release := holdStoredIndexSizeScrape(t)
+
+	// Publishing the finished task creates the collection's series.
+	segIdx, ok := mDomains.IndexMeta.GetIndexJob(meta.RestartBuildID)
+	require.True(t, ok)
+	it := NewIndexBuildTask(segIdx, 1, m, mDomains.IndexMeta, nil, nil, nil)
+	committed := make(chan error, 1)
+	go func() {
+		committed <- it.SetJobInfo(&workerpb.IndexTaskInfo{
+			BuildID:               meta.RestartBuildID,
+			State:                 commonpb.IndexState_Finished,
+			IndexFileKeys:         []string{"0", "1"},
+			SerializedSize:        4096,
+			IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+		})
+	}()
+
+	require.Eventually(t, func() bool {
+		if !m.SegMu.TryLock() {
+			return false
+		}
+		defer m.SegMu.Unlock()
+		return m.Segments.GetSegment(meta.RestartSegID).GetManifestPath() != baseManifest
+	}, 10*time.Second, time.Millisecond, "commit held segMu while its gauge write waited for the scrape")
+	require.Empty(t, committed, "the gauge write must wait for the scrape")
+	release()
+	require.NoError(t, <-committed)
+	require.Equal(t, map[int64]int64{meta.RestartCollID: 4096}, storedIndexSizeSeries(t))
 }
 
 // A backfill replace holds fieldIndexLock's read side across its publication

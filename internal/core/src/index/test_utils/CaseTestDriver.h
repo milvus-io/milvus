@@ -121,16 +121,6 @@ ExpectReaderBase(const ReaderBackend& backend,
     const auto caps = reader.Caps();
     EXPECT_EQ(caps.nested, reader.CoordDomain() == Domain::Element);
     EXPECT_FALSE(caps.cheap_value_lookup && !caps.value_lookup);
-
-    const auto memory = reader.MemoryUsage();
-    const auto usage = reader.CellByteSize();
-    EXPECT_GE(memory, 0);
-    EXPECT_GE(usage.memory_bytes, 0);
-    EXPECT_GE(usage.file_bytes, 0);
-    EXPECT_EQ(reader.MemoryUsage(), memory);
-    const auto repeated_usage = reader.CellByteSize();
-    EXPECT_EQ(repeated_usage.memory_bytes, usage.memory_bytes);
-    EXPECT_EQ(repeated_usage.file_bytes, usage.file_bytes);
 }
 
 inline void

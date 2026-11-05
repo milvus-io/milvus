@@ -1,0 +1,15 @@
+[package]
+name = "milvus-grep-core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+grep = { git = "https://github.com/BurntSushi/ripgrep.git", rev = "e89fff89ac9af12e8d4ce9d5fd07beb408ca730f" }
+memchr = "2.7"
+regex-syntax = "0.8"
+
+[build-dependencies]
+cbindgen = { version = "0.27.0", default-features = false }

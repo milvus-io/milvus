@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/pyudf"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -126,6 +127,9 @@ type Proxy struct {
 
 	// materialized view
 	enableMaterializedView bool
+
+	// query view
+	viewQueryClient queryclient.Client
 
 	// delete rate limiter
 	enableComplexDeleteLimit bool
@@ -514,6 +518,25 @@ func (node *Proxy) SetQueryNodeCreator(f func(ctx context.Context, addr string, 
 	node.shardMgr.SetClientCreatorFunc(f)
 }
 
+func (node *Proxy) SetViewQueryClient(client queryclient.Client) {
+	node.viewQueryClient = client
+}
+
+// GetCollectionVChannels returns the vchannels of a collection via the proxy's
+// GetCollection flow (metacache). It backs the QueryView client's
+// collection → vchannel resolution.
+func (node *Proxy) GetCollectionVChannels(ctx context.Context, collectionID int64) ([]string, error) {
+	metaCache := node.getMetaCache()
+	if metaCache == nil {
+		return nil, merr.WrapErrServiceInternalMsg("meta cache is not initialized")
+	}
+	collInfo, err := metaCache.GetCollectionInfo(ctx, "", "", collectionID)
+	if err != nil {
+		return nil, err
+	}
+	return append([]string(nil), collInfo.VChannels...), nil
+}
+
 // GetRateLimiter returns the rateLimiter in Proxy.
 func (node *Proxy) GetRateLimiter() (types.Limiter, error) {
 	if node.simpleLimiter == nil {
@@ -521,3 +544,5 @@ func (node *Proxy) GetRateLimiter() (types.Limiter, error) {
 	}
 	return node.simpleLimiter, nil
 }
+
+func (node *Proxy) ViewQueryClient() queryclient.Client { return node.viewQueryClient }

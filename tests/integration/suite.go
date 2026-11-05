@@ -62,10 +62,11 @@ func caseTimeoutFromEnvironment(getenv func(string) string) (time.Duration, erro
 type MiniClusterSuite struct {
 	suite.Suite
 
-	envConfigs map[string]string
-	Cluster    *cluster.MiniClusterV3
-	cancelFunc context.CancelFunc
-	opt        clusterSuiteOption
+	envConfigs     map[string]string
+	clusterOptions []cluster.MiniClusterV3Option
+	Cluster        *cluster.MiniClusterV3
+	cancelFunc     context.CancelFunc
+	opt            clusterSuiteOption
 }
 
 // WorkDir returns the work directory of the cluster.
@@ -95,22 +96,21 @@ func (s *MiniClusterSuite) WithOptions(options ...ClusterSuiteOption) {
 	}
 }
 
+// WithClusterOptions configures subprocess fixtures before cluster creation.
+func (s *MiniClusterSuite) WithClusterOptions(options ...cluster.MiniClusterV3Option) {
+	s.clusterOptions = append(s.clusterOptions, options...)
+}
+
 // SetupSuite initializes the MiniClusterSuite by setting up the environment and starting the cluster.
 // After it is called, the cluster is ready for tests.
 func (s *MiniClusterSuite) SetupSuite() {
 	paramtable.Init()
-	// Element-nullable and nested Array fields are gated at the proxy until the
-	// feature is complete; integration suites exercise them.
-	enableKey := paramtable.Get().ProxyCfg.EnableElementNullAndNestedArray.Key
-	if _, ok := s.envConfigs[strings.ToUpper(strings.ReplaceAll(enableKey, ".", "_"))]; !ok {
-		s.WithMilvusConfig(enableKey, "true")
-	}
 	s.T().Log("Setup test...")
 	s.T().Log("Setup case timeout", caseTimeout)
 	ctx, cancel := context.WithTimeout(context.Background(), caseTimeout) //nolint:gosec // cancel is stored and called in TearDownSuite()
 	s.cancelFunc = cancel
 
-	s.Cluster = cluster.NewMiniClusterV3(ctx, cluster.WithExtraEnv(s.envConfigs), cluster.WithWorkDir(s.WorkDir()))
+	s.Cluster = cluster.NewMiniClusterV3(ctx, append([]cluster.MiniClusterV3Option{cluster.WithExtraEnv(s.envConfigs), cluster.WithWorkDir(s.WorkDir())}, s.clusterOptions...)...)
 	s.T().Log("Setup test success")
 }
 

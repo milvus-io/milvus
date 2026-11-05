@@ -27,6 +27,7 @@ import (
 	"golang.org/x/exp/maps"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -86,6 +87,7 @@ type IMetaTable interface {
 	AlterDatabase(ctx context.Context, newDB *model.Database, ts typeutil.Timestamp) error
 
 	AddCollection(ctx context.Context, coll *model.Collection) error
+	CompleteRestoreCollection(ctx context.Context, collectionID UniqueID) error
 	DropCollection(ctx context.Context, collectionID UniqueID, ts Timestamp) error
 	RemoveCollection(ctx context.Context, collectionID UniqueID, ts Timestamp) error
 	// GetCollectionID retrieves the corresponding collectionID based on the collectionName.
@@ -95,6 +97,7 @@ type IMetaTable interface {
 	GetCollectionByName(ctx context.Context, dbName string, collectionName string, ts Timestamp, allowUnavailable bool) (*model.Collection, error)
 	GetCollectionByID(ctx context.Context, dbName string, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error)
 	GetCollectionByIDWithMaxTs(ctx context.Context, collectionID UniqueID) (*model.Collection, error)
+	GetCollectionProperties(ctx context.Context, collectionID UniqueID) ([]*commonpb.KeyValuePair, error)
 	ListCollections(ctx context.Context, dbName string, ts Timestamp, onlyAvail bool) ([]*model.Collection, error)
 	ListAllAvailCollections(ctx context.Context) map[int64][]int64
 	// ListAllAvailPartitions returns the partition ids of all available collections.
@@ -156,9 +159,11 @@ type IMetaTable interface {
 	GetPrivilegeGroupRoles(ctx context.Context, groupName string) ([]*milvuspb.RoleEntity, error)
 
 	AddFileResource(ctx context.Context, resource *internalpb.FileResourceInfo) error
-	RemoveFileResource(ctx context.Context, name string) (error, bool)
+	PrepareRemoveFileResource(ctx context.Context, name string) (*internalpb.FileResourceInfo, error)
+	RemoveFileResource(ctx context.Context, name string, resourceID int64) (error, bool)
 	HasFileResource(ctx context.Context) bool
 	ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64)
+	FindFileResource(ctx context.Context, name string) *internalpb.FileResourceInfo
 	GetFileResourcesByNames(ctx context.Context, names ...string) ([]*internalpb.FileResourceInfo, error)
 	GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error)
 	IncFileResourceRefCnt(ids []int64) error
@@ -294,7 +299,7 @@ func (mt *MetaTable) reload() error {
 					mt.partitionName2ID[collection.CollectionID][partition.PartitionName] = partition.PartitionID
 				}
 			}
-			if collection.Available() {
+			if collection.Available() || collection.State == pb.CollectionState_CollectionRestoring {
 				mt.names.insert(dbName, collection.Name, collection.CollectionID)
 				for _, fileResourceID := range collection.FileResourceIds {
 					mt.fileResourceRefCnt[fileResourceID]++
@@ -332,7 +337,7 @@ func (mt *MetaTable) reload() error {
 	mlog.Info(mt.ctx, "rootcoord start to recover the channel stats for streaming coord balancer")
 	vchannels := make([]string, 0, len(mt.collID2Meta)*2)
 	for _, coll := range mt.collID2Meta {
-		if coll.Available() {
+		if coll.Available() || coll.State == pb.CollectionState_CollectionRestoring {
 			vchannels = append(vchannels, coll.VirtualChannelNames...)
 		}
 	}
@@ -494,6 +499,11 @@ func (mt *MetaTable) CheckIfDatabaseDroppable(ctx context.Context, req *milvuspb
 		return err
 	}
 
+	for _, collection := range mt.collID2Meta {
+		if collection.DBName == dbName && collection.State == pb.CollectionState_CollectionRestoring {
+			return merr.WrapErrParameterInvalidMsg("database:%s contains a restoring collection", dbName)
+		}
+	}
 	colls, err := mt.listCollectionFromCache(ctx, dbName, true)
 	if err != nil {
 		return err
@@ -574,7 +584,7 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 	// Note:
 	// 1, idempotency check was already done outside;
 	// 2, no need to check time travel logic, since ts should always be the latest;
-	if coll.State != pb.CollectionState_CollectionCreated {
+	if coll.State != pb.CollectionState_CollectionCreated && coll.State != pb.CollectionState_CollectionRestoring {
 		return merr.WrapErrServiceInternalMsg("collection state should be created, collection name: %s, collection id: %d, state: %s", coll.Name, coll.CollectionID, coll.State)
 	}
 
@@ -608,7 +618,9 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 
 	mt.collID2Meta[coll.CollectionID] = coll.Clone()
 	mt.names.insert(coll.DBName, coll.Name, coll.CollectionID)
-	mt.increaseAvailableCollectionCountLocked(coll.DBID)
+	if coll.Available() {
+		mt.increaseAvailableCollectionCountLocked(coll.DBID)
+	}
 	// Build partition name index for the new collection
 	mt.partitionName2ID[coll.CollectionID] = make(map[string]int64)
 	for _, partition := range coll.Partitions {
@@ -629,6 +641,31 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 		mlog.Int64("id", coll.CollectionID),
 		mlog.Uint64("ts", coll.CreateTime),
 	)
+	return nil
+}
+
+// CompleteRestoreCollection makes an already-published snapshot accessible.
+func (mt *MetaTable) CompleteRestoreCollection(ctx context.Context, collectionID UniqueID) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+	coll := mt.collID2Meta[collectionID]
+	if coll == nil {
+		return merr.WrapErrCollectionNotFound(collectionID)
+	}
+	if coll.Available() {
+		return nil
+	}
+	if coll.State != pb.CollectionState_CollectionRestoring {
+		return merr.WrapErrServiceNotReadyMsg("collection %d is no longer restoring", collectionID)
+	}
+	clone := coll.Clone()
+	clone.State = pb.CollectionState_CollectionCreated
+	ctx = contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	if err := mt.catalog.AlterCollection(ctx, coll, clone, metastore.MODIFY, clone.UpdateTimestamp, false); err != nil {
+		return err
+	}
+	mt.collID2Meta[collectionID] = clone
+	mt.increaseAvailableCollectionCountLocked(clone.DBID)
 	return nil
 }
 
@@ -988,6 +1025,19 @@ func (mt *MetaTable) GetCollectionByID(ctx context.Context, dbName string, colle
 // GetCollectionByIDWithMaxTs get collection, dbName can be ignored if ts is max timestamps
 func (mt *MetaTable) GetCollectionByIDWithMaxTs(ctx context.Context, collectionID UniqueID) (*model.Collection, error) {
 	return mt.GetCollectionByID(ctx, "", collectionID, typeutil.MaxTimestamp, false)
+}
+
+func (mt *MetaTable) GetCollectionProperties(ctx context.Context, collectionID UniqueID) ([]*commonpb.KeyValuePair, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+	collection := mt.collID2Meta[collectionID]
+	if collection == nil || !collection.Available() {
+		return nil, merr.WrapErrCollectionNotFound(collectionID)
+	}
+	return collection.Properties, nil
 }
 
 // ListAllAvailCollections returns available collection IDs grouped by database.
@@ -2589,10 +2639,13 @@ func (mt *MetaTable) AddFileResource(ctx context.Context, resource *internalpb.F
 	defer mt.ddLock.Unlock()
 
 	if old, ok := mt.fileResourceName2Meta[resource.Name]; ok {
-		if old.Path == resource.Path {
+		if old.Path == resource.Path && old.Id == resource.Id {
 			return nil
 		}
-		return merr.WrapErrParameterInvalidMsg("file resource %s already exists", resource.Name)
+		return merr.WrapErrServiceInternalMsg("file resource %s conflicts with persisted resource %d", resource.Name, old.Id)
+	}
+	if old, ok := mt.fileResourceID2Meta[resource.Id]; ok {
+		return merr.WrapErrServiceInternalMsg("file resource ID %d is already used by %s", resource.Id, old.Name)
 	}
 
 	err := mt.catalog.SaveFileResource(ctx, resource, mt.fileResourceVersion+1)
@@ -2606,13 +2659,26 @@ func (mt *MetaTable) AddFileResource(ctx context.Context, resource *internalpb.F
 	return nil
 }
 
-func (mt *MetaTable) RemoveFileResource(ctx context.Context, name string) (error, bool) {
+func (mt *MetaTable) PrepareRemoveFileResource(ctx context.Context, name string) (*internalpb.FileResourceInfo, error) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+	resource, ok := mt.fileResourceName2Meta[name]
+	if !ok {
+		return nil, nil
+	}
+	if mt.fileResourceRefCnt[resource.Id] > 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("file resource %s is still in use: %d", resource.Name, mt.fileResourceRefCnt[resource.Id])
+	}
+	return proto.Clone(resource).(*internalpb.FileResourceInfo), nil
+}
+
+func (mt *MetaTable) RemoveFileResource(ctx context.Context, name string, resourceID int64) (error, bool) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
-	if resource, ok := mt.fileResourceName2Meta[name]; ok {
+	if resource, ok := mt.fileResourceName2Meta[name]; ok && resource.Id == resourceID {
 		if mt.fileResourceRefCnt[resource.Id] > 0 {
-			return merr.WrapErrParameterInvalidMsg("file resource %s is still in use: %d", resource.Name, mt.fileResourceRefCnt[resource.Id]), false
+			return merr.WrapErrServiceUnavailableMsg("file resource %s is still in use: %d", resource.Name, mt.fileResourceRefCnt[resource.Id]), false
 		}
 
 		err := mt.catalog.RemoveFileResource(ctx, resource.Id, mt.fileResourceVersion+1)
@@ -2634,6 +2700,16 @@ func (mt *MetaTable) ListFileResource(ctx context.Context) ([]*internalpb.FileRe
 	defer mt.ddLock.RUnlock()
 
 	return lo.Values(mt.fileResourceID2Meta), mt.fileResourceVersion
+}
+
+// FindFileResource returns a copy of the named resource, or nil if it is absent.
+func (mt *MetaTable) FindFileResource(ctx context.Context, name string) *internalpb.FileResourceInfo {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+	if resource := mt.fileResourceName2Meta[name]; resource != nil {
+		return proto.Clone(resource).(*internalpb.FileResourceInfo)
+	}
+	return nil
 }
 
 // GetFileResourcesByNames resolves unbound names together under the metadata lock.

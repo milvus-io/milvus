@@ -194,7 +194,7 @@ type CopySegmentTask interface {
 	Clone() CopySegmentTask
 }
 
-// copySegmentTask implements CopySegmentTask with atomic state updates.
+// Task implements CopySegmentTask with atomic state updates.
 type Task struct {
 	Task atomic.Pointer[datapb.CopySegmentTask] // Atomic pointer for concurrent access
 	// Keep a failed task in the scheduler until completed-output cleanup is durable.
@@ -829,54 +829,7 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 		)
 	}
 
-	// Read complete snapshot data from S3 to retrieve source segment binlogs
-	var (
-		snapshotData *snapshotstorage.SnapshotData
-		err          error
-	)
-	concreteJob, ok := job.(*Job)
-	if !ok || concreteJob.SnapshotCache == nil {
-		return nil, merr.WrapErrServiceInternalMsg(
-			"copy segment job %d has no snapshot cache",
-			job.GetJobId(),
-		)
-	}
-	snapshotData, err = concreteJob.SnapshotCache.load(func() (*snapshotstorage.SnapshotData, error) {
-		var loaded *snapshotstorage.SnapshotData
-		if job.GetExternal() {
-			resolved, resolveErr := snapshotstorage.ResolveForeignStorage(
-				ctx,
-				snapshotstorage.InstanceConfigFromParamtable(Params),
-				snapshotstorage.DirectionRestore,
-				job.GetSnapshotS3Location(),
-				job.GetExternalSpec(),
-			)
-			if resolveErr != nil {
-				return nil, resolveErr
-			}
-			loaded, err = t.SnapshotMeta.ReadExternalSnapshotDataWithChunkManager(
-				ctx,
-				resolved.ForeignCM,
-				job.GetSnapshotS3Location(),
-				true,
-			)
-		} else {
-			loaded, err = t.SnapshotMeta.ReadSnapshotData(ctx, job.GetSourceCollectionId(), job.GetSnapshotName(), true)
-		}
-		if err != nil {
-			return nil, err
-		}
-		if expected := job.GetSnapshotFingerprint(); expected != "" {
-			actual, fingerprintErr := snapshotstorage.SnapshotFingerprint(loaded)
-			if fingerprintErr != nil {
-				return nil, fingerprintErr
-			}
-			if actual != expected {
-				return nil, merr.WrapErrDataIntegrityMsg("external snapshot changed after restore job creation")
-			}
-		}
-		return loaded, nil
-	})
+	snapshotData, err := loadCopySnapshot(ctx, job, t.SnapshotMeta)
 	if err != nil {
 		mlog.Error(context.TODO(), "failed to read snapshot data for copy segment task",
 			append(WrapCopySegmentTaskLog(task), mlog.Err(err))...)
@@ -1171,6 +1124,9 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			return nil
 		}
 		defer locks.Unlock(task.GetTaskId())
+		if current := copyMeta.GetTask(ctx, task.GetTaskId()); current != nil && current.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskCompleted {
+			return nil // A duplicate copy result must not overwrite materialized deletes.
+		}
 		// Even a late result rejected below owns files that need durable cleanup.
 		// Re-arming an already cleaned task is safe because prefix deletion is idempotent.
 		if err := copyMeta.UpdateTask(ctx, task.GetTaskId(), UpdateCopyTaskCleanup(true)); err != nil {
@@ -1206,6 +1162,9 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 				result.GetStatslogs(), result.GetDeltalogs(), result.GetBm25Logs())
 			op2 := meta.UpdateStatusOperator(result.GetSegmentId(), commonpb.SegmentState_Flushed)
 			op3 := meta.UpdateIsImporting(result.GetSegmentId(), false)
+			if job := copyMeta.GetJob(ctx, task.GetJobId()); job != nil && job.(*Job).GetCreatesCollection() {
+				op3 = meta.UpdateIsImporting(result.GetSegmentId(), true)
+			}
 			operators := []meta.UpdateOperator{op1, op2, op3}
 			// A copy target is a freshly created, exclusively owned segment and the
 			// worker returns a complete manifest pointer - including the copied
@@ -1386,7 +1345,13 @@ func verifyCopiedManifestIndexOwnership(result *datapb.CopySegmentResult, task C
 		for key, value := range common.KeyValuePairs(definition.IndexParams).ToMap() {
 			expectedParams[key] = value
 		}
-		if entry.IndexType != meta.GetIndexType(definition.IndexParams) || !maps.Equal(entry.Properties, expectedParams) {
+		info := copied[entry.BuildID]
+		expectedType := meta.GetIndexType(definition.IndexParams)
+		if info.GetIndexType() != "" {
+			expectedType = info.GetIndexType()
+			expectedParams[common.IndexTypeKey] = expectedType
+		}
+		if entry.IndexType != expectedType || !maps.Equal(entry.Properties, expectedParams) {
 			return nil, merr.WrapErrServiceInternalMsg(
 				"copied manifest index %d has changed target parameters; retry the restore", entry.IndexID)
 		}
@@ -1394,7 +1359,6 @@ func verifyCopiedManifestIndexOwnership(result *datapb.CopySegmentResult, task C
 			return nil, merr.Wrapf(merr.ErrDataIntegrity,
 				"copied manifest of segment %d has an invalid artifact path for build %d", result.GetSegmentId(), entry.BuildID)
 		}
-		info := copied[entry.BuildID]
 		if info == nil || info.GetIndexName() != entry.IndexName || info.GetFieldId() != entry.FieldID ||
 			info.GetVersion() != entry.IndexVersion || info.GetIndexStorePathVersion() != entry.IndexStorePathVersion ||
 			!slices.Equal(slices.Sorted(slices.Values(info.GetIndexFilePaths())), slices.Sorted(slices.Values(entry.IndexFileKeys))) {
@@ -1645,6 +1609,7 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 			PartitionID:               partitionID,
 			IndexID:                   targetIndexID,
 			BuildID:                   indexInfo.GetBuildId(),
+			IndexType:                 indexInfo.GetIndexType(),
 			IndexState:                commonpb.IndexState_Finished,
 			IndexFileKeys:             indexInfo.GetIndexFilePaths(),
 			IndexSerializedSize:       uint64(indexInfo.GetIndexSize()),
@@ -1833,4 +1798,51 @@ func syncJSONKeyIndexes(ctx context.Context, result *datapb.CopySegmentResult,
 			mlog.FieldSegmentID(result.GetSegmentId()),
 			mlog.Int("count", len(result.GetJsonKeyIndexInfos())))...)
 	return nil
+}
+
+func loadCopySnapshot(ctx context.Context, job CopySegmentJob, snapshots SnapshotSource) (*snapshotstorage.SnapshotData, error) {
+	concreteJob, ok := job.(*Job)
+	if !ok || concreteJob.SnapshotCache == nil {
+		return nil, merr.WrapErrServiceInternalMsg(
+			"copy segment job %d has no snapshot cache",
+			job.GetJobId(),
+		)
+	}
+	return concreteJob.SnapshotCache.load(func() (*snapshotstorage.SnapshotData, error) {
+		var loaded *snapshotstorage.SnapshotData
+		var err error
+		if job.GetExternal() {
+			resolved, resolveErr := snapshotstorage.ResolveForeignStorage(
+				ctx,
+				snapshotstorage.InstanceConfigFromParamtable(Params),
+				snapshotstorage.DirectionRestore,
+				job.GetSnapshotS3Location(),
+				job.GetExternalSpec(),
+			)
+			if resolveErr != nil {
+				return nil, resolveErr
+			}
+			loaded, err = snapshots.ReadExternalSnapshotDataWithChunkManager(
+				ctx,
+				resolved.ForeignCM,
+				job.GetSnapshotS3Location(),
+				true,
+			)
+		} else {
+			loaded, err = snapshots.ReadSnapshotData(ctx, job.GetSourceCollectionId(), job.GetSnapshotName(), true)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if expected := job.GetSnapshotFingerprint(); expected != "" {
+			actual, fingerprintErr := snapshotstorage.SnapshotFingerprint(loaded)
+			if fingerprintErr != nil {
+				return nil, fingerprintErr
+			}
+			if actual != expected {
+				return nil, merr.WrapErrDataIntegrityMsg("external snapshot changed after restore job creation")
+			}
+		}
+		return loaded, nil
+	})
 }

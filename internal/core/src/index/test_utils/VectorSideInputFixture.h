@@ -169,7 +169,6 @@ class VectorSideInputFixture : public ::testing::Test {
             vectors->Search(GenDataset(1, kDim, query.data()),
                             params,
                             BitsetView(excluded.data(), kRows),
-                            nullptr,
                             result);
             EXPECT_EQ(result.total_nq_, 1);
             EXPECT_EQ(result.unity_topK_, 3);

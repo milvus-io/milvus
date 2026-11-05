@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration/cluster/process"
@@ -78,6 +80,20 @@ func WithExtraEnv(env map[string]string) MiniClusterV3Option {
 	}
 }
 
+// WithProcessEnv supplies additional environment for each new process incarnation.
+func WithProcessEnv(env func(role string, nodeID int64) map[string]string) MiniClusterV3Option {
+	return func(c *MiniClusterV3) { c.processEnv = env }
+}
+
+// WithMetricsPorts gives every process its own metrics/HTTP port, a free
+// one picked when the process is created, so a test can scrape one
+// (MilvusProcess.GetMetricsAddr).
+func WithMetricsPorts() MiniClusterV3Option {
+	return func(c *MiniClusterV3) {
+		c.metricsPorts = true
+	}
+}
+
 // NewMiniClusterV3 creates a new mini cluster v3.
 func NewMiniClusterV3(
 	ctx context.Context,
@@ -99,6 +115,15 @@ func NewMiniClusterV3(
 	for _, opt := range opts {
 		opt(client)
 	}
+	// SetupSuite cannot tear down a cluster whose constructor did not return.
+	// In particular, a readiness timeout must not leave nodes occupying the
+	// fixed integration-test ports for the next suite.
+	defer func() {
+		if failure := recover(); failure != nil {
+			client.Stop()
+			panic(failure)
+		}
+	}()
 	client.init()
 	client.Logger().Info(ctx,
 
@@ -114,6 +139,8 @@ type MiniClusterV3 struct {
 	rootPath              string
 	configRefreshInterval time.Duration
 	extraEnv              map[string]string
+	processEnv            func(role string, nodeID int64) map[string]string
+	metricsPorts          bool
 
 	defaultMixCoord      *process.MixcoordProcess
 	defaultProxy         *process.ProxyProcess
@@ -191,8 +218,9 @@ func (c *MiniClusterV3) init() {
 
 // initClients initializes the clients.
 func (c *MiniClusterV3) initClients() {
-	c.initMilvusClient()
+	// Observe a failed coordinator before waiting for dependent Proxy readiness.
 	c.initInternalClient()
+	c.initMilvusClient()
 }
 
 // initMilvusClient initializes the milvus client.
@@ -201,13 +229,13 @@ func (c *MiniClusterV3) initMilvusClient() {
 		return
 	}
 
-	_, err := c.defaultProxy.GetAddress(context.Background())
+	_, err := c.defaultProxy.GetAddress(c.ctx)
 	if err != nil {
 		panic(err)
 	}
 
 	// wait for proxy ready.
-	clientConn, err := grpc.DialContext(context.Background(), "localhost:19530", getGrpcDialOpt()...)
+	clientConn, err := grpc.DialContext(c.ctx, "localhost:19530", getGrpcDialOpt()...)
 	if err != nil {
 		panic(err)
 	}
@@ -560,7 +588,7 @@ func (c *MiniClusterV3) AddMixCoord(opts ...ClusterOperationOpt) (mp *process.Mi
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	mc := process.NewMixCoordProcess(c.getOptions()...)
+	mc := process.NewMixCoordProcess(c.getOptions("mixcoord")...)
 	c.mixcoord[mc.GetNodeID()] = mc
 	return mc
 }
@@ -586,7 +614,7 @@ func (c *MiniClusterV3) AddQueryNodes(num int, opts ...ClusterOperationOpt) (mps
 
 	qns := make([]*process.QueryNodeProcess, 0, num)
 	for i := 0; i < num; i++ {
-		qn := process.NewQueryNodeProcess(c.getOptions()...)
+		qn := process.NewQueryNodeProcess(c.getOptions("querynode")...)
 		c.querynode[qn.GetNodeID()] = qn
 		qns = append(qns, qn)
 	}
@@ -610,7 +638,7 @@ func (c *MiniClusterV3) AddQueryNode(opts ...ClusterOperationOpt) (mp *process.Q
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	qn := process.NewQueryNodeProcess(c.getOptions()...)
+	qn := process.NewQueryNodeProcess(c.getOptions("querynode")...)
 	c.querynode[qn.GetNodeID()] = qn
 	return qn
 }
@@ -645,7 +673,7 @@ func (c *MiniClusterV3) AddDataNode(opts ...ClusterOperationOpt) (mp *process.Da
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	dn := process.NewDataNodeProcess(c.getOptions()...)
+	dn := process.NewDataNodeProcess(c.getOptions("datanode")...)
 	c.datanode[dn.GetNodeID()] = dn
 	return dn
 }
@@ -667,7 +695,7 @@ func (c *MiniClusterV3) AddStreamingNode(opts ...ClusterOperationOpt) (mp *proce
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	sn := process.NewStreamingNodeProcess(c.getOptions()...)
+	sn := process.NewStreamingNodeProcess(c.getOptions("streamingnode")...)
 	c.streamingnode[sn.GetNodeID()] = sn
 	return sn
 }
@@ -689,7 +717,7 @@ func (c *MiniClusterV3) AddProxy(opts ...ClusterOperationOpt) (mp *process.Proxy
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	pn := process.NewProxyProcess(c.getOptions()...)
+	pn := process.NewProxyProcess(c.getOptions("proxy")...)
 	c.proxy[pn.GetNodeID()] = pn
 	return pn
 }
@@ -705,21 +733,33 @@ func (c *MiniClusterV3) getClusterOperationOpt(opts ...ClusterOperationOpt) *clu
 	return coo
 }
 
-func (c *MiniClusterV3) getOptions() []process.Option {
+func (c *MiniClusterV3) getOptions(role string) []process.Option {
 	c.nodeID++
 	env := map[string]string{
-		"QUOTAANDLIMITS_ENABLED":  "false", // disable the quota limits by default to avoid rpc failure.
-		"PROXY_IP":                "localhost",
-		"STREAMINGNODE_IP":        "localhost",
-		"QUERYNODE_IP":            "localhost",
-		"DATANODE_IP":             "localhost",
-		"ROOTCOORD_IP":            "localhost",
-		"PROXY_PORT":              "19530",
-		"ROOTCOORD_DMLCHANNELNUM": "2", // set smaller dml channel num to speed up the test.
-		paramtable.MilvusConfigRefreshIntervalEnvKey: c.configRefreshInterval.String(), // set smaller config refresh interval to speed up the test.
+		// QueryView resource preparation requires StorageV3 data and manifest
+		// index publication. Explicit format-specific suites may override these.
+		"COMMON_STORAGE_USELOONFFI":                   "true",
+		"DATACOORD_INDEX_WRITESEGMENTINDEXTOMANIFEST": "true",
+		"QUOTAANDLIMITS_ENABLED":                      "false", // disable the quota limits by default to avoid rpc failure.
+		"PROXY_IP":                                    "localhost",
+		"STREAMINGNODE_IP":                            "localhost",
+		"QUERYNODE_IP":                                "localhost",
+		"DATANODE_IP":                                 "localhost",
+		"ROOTCOORD_IP":                                "localhost",
+		"PROXY_PORT":                                  "19530",
+		"ROOTCOORD_DMLCHANNELNUM":                     "2",                              // set smaller dml channel num to speed up the test.
+		paramtable.MilvusConfigRefreshIntervalEnvKey:  c.configRefreshInterval.String(), // set smaller config refresh interval to speed up the test.
+	}
+	if c.metricsPorts {
+		env["METRICS_PORT"] = strconv.Itoa(funcutil.GetAvailablePort())
 	}
 	for k, v := range c.extraEnv {
 		env[k] = v
+	}
+	if c.processEnv != nil {
+		for k, v := range c.processEnv(role, c.nodeID) {
+			env[k] = v
+		}
 	}
 	return []process.Option{
 		process.WithWorkDir(c.workDir),

@@ -219,9 +219,9 @@ func TestMarshalReduceResult_ZeroCopyStringsSurviveDataFrameRelease(t *testing.T
 	builder.SetFieldType(scoreFieldName, schemapb.DataType_Float)
 	builder.SetFieldNullable(scoreFieldName, false)
 	require.NoError(t, builder.AddColumnFromChunks(scoreFieldName, []arrow.Array{scoreArr}))
-	builder.SetFieldType(groupByColName, schemapb.DataType_VarChar)
-	builder.SetFieldID(groupByColName, groupByFieldID)
-	builder.SetFieldNullable(groupByColName, false)
+	builder.SetFieldSchema(groupByColName, &schemapb.FieldSchema{
+		FieldID: groupByFieldID, DataType: schemapb.DataType_VarChar,
+	})
 	require.NoError(t, builder.AddColumnFromChunks(groupByColName, []arrow.Array{groupByArr}))
 	df := builder.Build()
 	released := false
@@ -375,9 +375,11 @@ func buildDFWithGroupByArrowArray(
 	builder.SetFieldNullable(scoreFieldName, false)
 	require.NoError(t, builder.AddColumnFromChunks(scoreFieldName, []arrow.Array{scoreArr}))
 	groupByColName := groupByColumnName(groupByFieldID)
-	builder.SetFieldType(groupByColName, groupByType)
-	builder.SetFieldID(groupByColName, groupByFieldID)
-	builder.SetFieldNullable(groupByColName, groupByNullable)
+	// Match native Arrow import: a group-by collection field carries a full
+	// declaration, not computed-column metadata with only an optional ID.
+	builder.SetFieldSchema(groupByColName, &schemapb.FieldSchema{
+		FieldID: groupByFieldID, DataType: groupByType, Nullable: groupByNullable,
+	})
 	require.NoError(t, builder.AddColumnFromChunks(groupByColName, []arrow.Array{groupByArr}))
 	return builder.Build()
 }

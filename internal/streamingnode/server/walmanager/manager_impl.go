@@ -132,6 +132,20 @@ func (m *managerImpl) GetAvailableWAL(channel types.PChannelInfo) (wal.WAL, erro
 	return nopCloseWAL{l}, nil
 }
 
+// GetAvailableRawWALByPChannel returns the available raw wal instance for the pchannel.
+func (m *managerImpl) GetAvailableRawWALByPChannel(pchannel string) (wal.WAL, error) {
+	if !m.lifetime.AddIf(isGetable) {
+		return nil, errWALManagerClosed
+	}
+	defer m.lifetime.Done()
+
+	l := m.getWALLifetime(pchannel).GetWAL()
+	if l == nil || !l.IsAvailable() {
+		return nil, status.NewChannelNotExist(pchannel)
+	}
+	return l, nil
+}
+
 func (m *managerImpl) Metrics() (*types.StreamingNodeMetrics, error) {
 	if !m.lifetime.AddIf(isGetable) {
 		return nil, errWALManagerClosed

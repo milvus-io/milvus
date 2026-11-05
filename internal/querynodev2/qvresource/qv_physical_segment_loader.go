@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
@@ -37,13 +39,20 @@ func (l *queryViewPhysicalSegmentLoader) Load(ctx context.Context, info *querypb
 			_ = loaded.Release(context.Background())
 		}
 	}()
-	if err := l.loader.LoadSegment(ctx, loaded, info); err != nil {
-		return nil, err
-	}
-	if err := l.loader.LoadDeltaLogs(ctx, loaded, info); err != nil {
-		return nil, err
-	}
-	if err := l.loader.LoadPKCandidate(ctx, loaded, info); err != nil {
+	// The PK candidate only reads the stats files named by the load info, so
+	// load it while segcore loads column data instead of after it. The first
+	// failure cancels the other branch.
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		return l.loader.LoadPKCandidate(gctx, loaded, info)
+	})
+	g.Go(func() error {
+		if err := l.loader.LoadSegment(gctx, loaded, info); err != nil {
+			return err
+		}
+		return l.loader.LoadDeltaLogs(gctx, loaded, info)
+	})
+	if err := g.Wait(); err != nil {
 		return nil, err
 	}
 	if err := l.loader.FinalizeLoad(loaded); err != nil {

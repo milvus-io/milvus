@@ -24,6 +24,9 @@ func (m *partitionManager) asyncFlushSegment(
 		l, err := m.wal.GetWithContext(ctx)
 		if err != nil {
 			m.Logger().Info(ctx, "stop flushing segment before wal is ready",
+				mlog.FieldVChannel(m.vchannel),
+				mlog.FieldCollectionID(m.collectionID),
+				mlog.FieldPartitionID(m.partitionID),
 				mlog.FieldSegmentID(segment.GetSegmentID()),
 				mlog.Err(err))
 			return
@@ -38,7 +41,10 @@ func (m *partitionManager) asyncFlushSegment(
 			segment:      segment,
 			wal:          l,
 		}
-		w.SetLogger(m.Logger())
+		w.SetLogger(m.Logger().With(
+			mlog.FieldVChannel(m.vchannel),
+			mlog.FieldCollectionID(m.collectionID),
+			mlog.FieldPartitionID(m.partitionID)))
 		w.do()
 	}()
 }

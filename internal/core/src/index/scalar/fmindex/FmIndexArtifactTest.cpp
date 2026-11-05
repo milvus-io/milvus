@@ -15,6 +15,10 @@
 // limitations under the License.
 
 #include <gtest/gtest.h>
+#include "index/scalar/fmindex/FmIndexReader.h"
+
+#include "index/scalar/fmindex/FmIndexLoader.h"
+#include "index/test_utils/StorageTestUtils.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -30,6 +34,7 @@
 #include "index/test_utils/ArtifactTestUtils.h"
 #include "index/test_utils/ScalarTestData.h"
 #include "segcore/SegcoreConfig.h"
+#include "storage/artifact/LocalDirectory.h"
 
 namespace milvus::index::test {
 namespace {
@@ -86,6 +91,76 @@ ExpectFmQueries(const IIndexReaderBase& reader, size_t expected_nulls) {
     EXPECT_EQ(hits.count(), 3);
 }
 
+TEST(FmIndexArtifactTest, CachedStorageBindsRequestAndRetainsReloadSource) {
+    for (const bool mmap : {false, true}) {
+        for (const bool async : {false, true}) {
+            SCOPED_TRACE(::testing::Message() << mmap << async);
+            const auto& backend = ScalarReaderBackends().Get<std::string_view>(
+                mmap ? "FmIndexVarcharMmap" : "FmIndexVarchar");
+            auto staging = storage::LocalDirectory::CreateOwned(
+                std::filesystem::temp_directory_path().string(),
+                "fm-cache-XXXXXX",
+                "FM cache test");
+            auto input = std::make_shared<storage::RemoteInputStream>(
+                std::make_shared<arrow::io::BufferReader>(
+                    MakePackedArtifactBuffer(SerializedFm(backend.Name()))));
+            auto sync_source =
+                storage::IndexEntryReader::Open(input, input->Size());
+            PackedIndexSource source{std::shared_ptr<storage::IndexEntryReader>(
+                std::move(sync_source))};
+            if (async) {
+                source.reader = std::shared_ptr<storage::AsyncIndexEntryReader>(
+                    folly::coro::blockingWait(folly::coro::co_withExecutor(
+                        storage::ResolveAsyncLoadExecutor(
+                            {}, proto::common::LoadPriority::HIGH),
+                        storage::AsyncIndexEntryReader::Open(
+                            input, 0, proto::common::LoadPriority::HIGH))));
+            }
+            storage::LoadOptions options;
+            options.enable_mmap = mmap;
+            options.mmap_dir_path = staging->Path();
+            options.params = backend.LoadParams({.row_count = 9});
+            IndexCacheConfig cache{
+                staging->Path(),
+                cachinglayer::Meta{mmap ? cachinglayer::StorageType::DISK
+                                        : cachinglayer::StorageType::MEMORY,
+                                   cachinglayer::CellIdMappingMode::IDENTICAL,
+                                   cachinglayer::CellDataType::OTHER,
+                                   CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                                   true},
+                {1024 * 1024, 1024 * 1024},
+                {},
+                4096};
+            auto index =
+                LoaderRegistry::Instance()
+                    .Lookup(backend.Family())
+                    .Load(
+                        {OpenedIndexSource{std::move(source)}, options, cache});
+            input.reset();
+            EXPECT_EQ(index->Metadata().count, 9);
+            folly::CancellationSource cancellation;
+            cancellation.requestCancellation();
+            OpContext cancelled(cancellation.getToken());
+            auto reader = index->CreateReader(&cancelled);
+            EXPECT_EQ(reader->Count(), 9);
+            const auto* pattern =
+                dynamic_cast<const IPatternMatchReader*>(reader.get());
+            ASSERT_NE(pattern, nullptr);
+            EXPECT_FALSE(pattern->ShouldUseForOp(PatternOp::Match, "%"));
+            EXPECT_FALSE(pattern->ShouldUseForOp(PatternOp::RegexMatch, ".*"));
+            EXPECT_TRUE(pattern->ShouldUseForOp(PatternOp::PrefixMatch, ""));
+            EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+            ExpectSegcoreError(ErrorCode::FollyCancel,
+                               [&] { ExpectFmQueries(*reader, 2); });
+            index->CancelWarmup();
+            OpContext retry;
+            reader = index->CreateReader(&retry);
+            index.reset();
+            ExpectFmQueries(*reader, 2);
+        }
+    }
+}
+
 TEST(FmIndexArtifactTest, LegacySerializationIsRejectedExactly) {
     const auto& backend =
         ScalarReaderBackends().Get<std::string_view>("FmIndexVarcharNonNull");
@@ -108,16 +183,20 @@ TEST_P(FmIndexV3OwnershipTest, ReaderOwnsPersistedState) {
     EXPECT_EQ(persisted.metadata.at(std::string(kTotalRowsMeta)), 9);
     EXPECT_EQ(persisted.metadata.at(std::string(kNullableMeta)), true);
 
-    auto reader = OpenV3(
-        backend, persisted, {.row_count = 9, .values = Config::object()});
+    auto storage =
+        OpenV3Storage<FmIndexLoader>(backend, persisted, {.row_count = 9});
+    const auto usage = storage->CellByteSize();
+    auto index = std::make_shared<FmIndex>(std::move(storage));
+    auto reader = index->CreateReader(nullptr);
+    index.reset();
     artifact.reset();
     persisted.entries.clear();
     persisted.metadata.clear();
     ASSERT_NE(reader, nullptr);
     ExpectFmQueries(*reader, 2);
-    EXPECT_GE(reader->MemoryUsage(), 0);
+    EXPECT_GE(usage.memory_bytes, 0);
     if (backend.MmapRequested()) {
-        EXPECT_GT(reader->CellByteSize().file_bytes, 0);
+        EXPECT_GT(usage.file_bytes, 0);
     }
 }
 

@@ -51,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -587,9 +588,10 @@ func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerFailsUnsupportedSegmentRoot
 
 func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerRetriesOtherErrors() {
 	tests := []struct {
-		name     string
-		external bool
-		err      error
+		name            string
+		external        bool
+		writeToManifest bool
+		err             error
 	}{
 		{
 			name:     "external service not ready",
@@ -597,7 +599,12 @@ func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerRetriesOtherErrors() {
 			err:      merr.WrapErrServiceNotReady("datanode", 10, "Initializing"),
 		},
 		{
-			name:     "local unimplemented",
+			name:            "segment rooted service not ready",
+			writeToManifest: true,
+			err:             merr.ErrServiceNotReady,
+		},
+		{
+			name:     "legacy local unimplemented",
 			external: false,
 			err:      merr.Wrapf(merr.ErrServiceUnimplemented, "unsupported local task"),
 		},
@@ -607,6 +614,7 @@ func (s *CopySegmentTaskSuite) TestCreateTaskOnWorkerRetriesOtherErrors() {
 		s.Run(test.name, func() {
 			task := CreateTestCopyTask(100, 2001).(*Task)
 			task.Task.Load().State = datapb.CopySegmentTaskState_CopySegmentTaskPending
+			UpdateCopyTaskIndexWriteToManifest(test.writeToManifest)(task)
 			copyMeta, _ := NewCopySegmentTaskTestMeta(s.T(), task)
 			task.CopyMeta = copyMeta
 
@@ -920,9 +928,9 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ReconcilesDataView() {
 	err := SyncCopySegmentTask(task, resp, copyMeta, m, nil)
 	s.NoError(err)
 
-	segments, err := m.LoadableProjection(ctx, 100)
+	segments, err := m.LoadableProjection(ctx, 100, nil)
 	s.NoError(err)
-	_, err = m.DataViewManager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64) ([]dataview.LoadableSegment, error) {
+	_, err = m.DataViewManager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64, _ *viewpb.DataViewOfCollection) ([]dataview.LoadableSegment, error) {
 		return segments, nil
 	})
 	s.NoError(err)
@@ -2306,4 +2314,69 @@ func TestCopyTaskPinsSegmentIndexLayout(t *testing.T) {
 	old.Task.Load().IndexWriteToManifest = proto.Bool(true)
 	_, known = old.GetIndexStorePathVersion()
 	require.False(t, known)
+}
+
+func TestCopiedSegmentIndexType(t *testing.T) {
+	for _, indexType := range []string{"", "HNSW_SQ"} {
+		t.Run("type="+indexType, func(t *testing.T) {
+			ctx := context.Background()
+			catalog := kvdatacoord.NewCatalog(meta.NewMetaMemoryKV(), "", "")
+			im := index.CreateTestIndexMeta(t, 1, map[int64]*model.Index{
+				300: {
+					CollectionID: 1, FieldID: 101, IndexID: 300, IndexName: "custom_vector",
+					IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}},
+				},
+			}, catalog)
+			store := metacache.NewMetaStore(catalog)
+			m := &meta.Meta{Segments: meta.NewSegmentsInfo(store), MetaStore: store}
+			segment := meta.NewSegmentInfo(&datapb.SegmentInfo{
+				ID: 100, CollectionID: 1, PartitionID: 10,
+				NumOfRows: 4096, StorageVersion: storage.StorageV3,
+				ManifestPath: packed.MarshalManifestPath("files/insert_log/1/10/100", 1),
+			})
+			m.Segments.SetSegment(100, segment)
+			task := CreateTestCopyTask(1, 100)
+			info := &datapb.VectorScalarIndexInfo{
+				FieldId: 101, IndexId: 200, BuildId: 5001,
+				IndexName: "custom_vector", IndexType: indexType, Version: 1,
+				IndexFilePaths: []string{"index.bin"}, IndexSize: 1024,
+				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+			}
+			result := &datapb.CopySegmentResult{
+				SegmentId: 100, ImportedRows: 4096,
+				IndexInfos: map[int64]*datapb.VectorScalarIndexInfo{5001: info},
+			}
+			effectiveType := indexType
+			if effectiveType == "" {
+				effectiveType = "HNSW"
+			}
+			entry := packed.ManifestIndexInfo{
+				IndexID: 300, FieldID: 101, BuildID: 5001,
+				IndexName: "custom_vector", IndexType: effectiveType, IndexVersion: 1,
+				Path: "files/insert_log/1/10/100/_index/5001/1", IndexFileKeys: []string{"index.bin"},
+				IndexStorePathVersion: info.IndexStorePathVersion,
+				Properties:            map[string]string{common.IndexTypeKey: effectiveType},
+			}
+			verified, err := verifyCopiedManifestIndexOwnership(result, task, m, im, segment, "files", []packed.ManifestIndexInfo{entry})
+			require.NoError(t, err)
+			for _, published := range []map[int64]int64{nil, verified} {
+				require.NoError(t, syncVectorScalarIndexes(ctx, result, task, m, im, nil, published))
+				restored, ok := im.GetIndexJob(5001)
+				require.True(t, ok)
+				assert.Equal(t, indexType, restored.IndexType)
+				assert.EqualValues(t, 300, restored.IndexID)
+				assert.Equal(t, indexType, model.UnmarshalSegmentIndexModel(model.MarshalSegmentIndexModel(restored)).IndexType)
+			}
+
+			entry.IndexType = "wrong_type"
+			entry.Properties[common.IndexTypeKey] = "wrong_type"
+			_, err = verifyCopiedManifestIndexOwnership(result, task, m, im, segment, "files", []packed.ManifestIndexInfo{entry})
+			require.Error(t, err)
+			entry.IndexType = effectiveType
+			entry.Properties[common.IndexTypeKey] = effectiveType
+			entry.Properties["M"] = "unexpected"
+			_, err = verifyCopiedManifestIndexOwnership(result, task, m, im, segment, "files", []packed.ManifestIndexInfo{entry})
+			require.Error(t, err)
+		})
+	}
 }

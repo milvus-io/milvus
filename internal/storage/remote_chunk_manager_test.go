@@ -838,7 +838,7 @@ func TestAzureChunkManager(t *testing.T) {
 		defer cancel()
 
 		testCM, err := newAzureChunkManager(ctx, testBucket, testMultiSaveRoot)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		defer testCM.RemoveWithPrefix(ctx, testMultiSaveRoot)
 
 		err = testCM.Write(ctx, path.Join(testMultiSaveRoot, "key_1"), []byte("111"))
@@ -867,7 +867,7 @@ func TestAzureChunkManager(t *testing.T) {
 		defer cancel()
 
 		testCM, err := newAzureChunkManager(ctx, testBucket, testRemoveRoot)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		defer testCM.RemoveWithPrefix(ctx, testRemoveRoot)
 
 		prepareTests := []struct {

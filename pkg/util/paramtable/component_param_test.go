@@ -313,6 +313,61 @@ func TestMembershipFilterSizeFallbackKeys(t *testing.T) {
 	})
 }
 
+func TestProxyEnableAutoLoad(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true))
+	params := proxyConfig{}
+	params.init(base)
+	item := &params.EnableAutoLoad
+
+	assert.Equal(t, "proxy.enableAutoLoad", item.Key)
+	assert.Equal(t, "false", item.DefaultValue)
+	assert.True(t, item.Export)
+	assert.False(t, item.GetAsBool())
+
+	assert.NoError(t, base.Save(item.Key, "true"))
+	assert.True(t, item.GetAsBool())
+	assert.NoError(t, base.Save(item.Key, "false"))
+	assert.False(t, item.GetAsBool())
+}
+
+func TestQueryCoordAutoRelease(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true))
+	params := queryCoordConfig{}
+	params.init(base)
+	for _, name := range []string{"AutoReleaseEnabled", "AutoReleaseIdleTTLSeconds", "AutoReleaseCheckInterval", "AutoReleaseConcurrency"} {
+		field, ok := reflect.TypeOf(&params).Elem().FieldByName(name)
+		assert.True(t, ok)
+		assert.Equal(t, "true", field.Tag.Get("refreshable"), name)
+	}
+
+	assert.Equal(t, "queryCoord.autoRelease.enabled", params.AutoReleaseEnabled.Key)
+	assert.False(t, params.AutoReleaseEnabled.GetAsBool())
+	assert.Equal(t, 600*time.Second, params.AutoReleaseIdleTTLSeconds.GetAsDuration(time.Second))
+	assert.Equal(t, 30*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
+	assert.Equal(t, 16, params.AutoReleaseConcurrency.GetAsInt())
+	assert.NoError(t, base.Save(params.AutoReleaseEnabled.Key, "true"))
+	assert.True(t, params.AutoReleaseEnabled.GetAsBool())
+	assert.NoError(t, base.Save(params.AutoReleaseIdleTTLSeconds.Key, "120"))
+	assert.Equal(t, 120*time.Second, params.AutoReleaseIdleTTLSeconds.GetAsDuration(time.Second))
+	assert.NoError(t, base.Save(params.AutoReleaseCheckInterval.Key, "5"))
+	assert.Equal(t, 5*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
+	assert.NoError(t, base.Save(params.AutoReleaseConcurrency.Key, "4"))
+	assert.Equal(t, 4, params.AutoReleaseConcurrency.GetAsInt())
+
+	assert.NoError(t, base.Save(params.AutoReleaseIdleTTLSeconds.Key, "0"))
+	assert.Equal(t, 600*time.Second, params.AutoReleaseIdleTTLSeconds.GetAsDuration(time.Second))
+	assert.NoError(t, base.Save(params.AutoReleaseCheckInterval.Key, "-1"))
+	assert.Equal(t, 30*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
+	assert.NoError(t, base.Save(params.AutoReleaseConcurrency.Key, "0"))
+	assert.Equal(t, 16, params.AutoReleaseConcurrency.GetAsInt())
+
+	// 9,223,372,036 is the largest whole number of seconds that fits time.Duration.
+	assert.NoError(t, base.Save(params.AutoReleaseIdleTTLSeconds.Key, "9223372037"))
+	assert.Equal(t, 600*time.Second, params.AutoReleaseIdleTTLSeconds.GetAsDuration(time.Second))
+	assert.NoError(t, base.Save(params.AutoReleaseCheckInterval.Key, "9223372037"))
+	assert.Equal(t, 30*time.Second, params.AutoReleaseCheckInterval.GetAsDuration(time.Second))
+}
+
 func TestComponentParam_StorageIopsParams(t *testing.T) {
 	params := &ComponentParam{}
 	params.Init(NewBaseTable(SkipRemote(true), SkipEnv(true)))
@@ -496,6 +551,22 @@ func TestTieredLazyIndexSlotConfig(t *testing.T) {
 	assert.False(t, item.GetAsBool())
 }
 
+func TestComponentParam_MaterializeEnabled(t *testing.T) {
+	Init()
+	params := Get()
+	item := &params.ProxyCfg.MaterializeEnabled
+	t.Cleanup(func() { params.Reset(item.Key) })
+
+	assert.Equal(t, "proxy.materialize.enabled", item.Key)
+	assert.Equal(t, "false", item.DefaultValue)
+	assert.False(t, item.Export)
+	assert.Nil(t, item.VersionGateSwitcher)
+	assert.False(t, item.GetAsBool())
+
+	assert.NoError(t, params.Save(item.Key, "true"))
+	assert.True(t, item.GetAsBool())
+}
+
 func TestComponentParam_IDFLazyLoadSealedStats(t *testing.T) {
 	Init()
 	params := Get()
@@ -573,8 +644,8 @@ func TestComponentParam_QueryViewConcurrency(t *testing.T) {
 }
 
 func TestComponentParam(t *testing.T) {
-	Init()
-	params := Get()
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true), SkipEnv(true)))
 
 	t.Run("query node zero copy config key", func(t *testing.T) {
 		assert.Equal(t, "queryNode.search.enableResultZeroCopy", params.QueryNodeCfg.EnableResultZeroCopy.Key)
@@ -1481,12 +1552,6 @@ func TestComponentParam(t *testing.T) {
 		t.Logf("channelWorkPoolSize: %d", channelWorkPoolSize)
 		assert.Equal(t, -1, Params.ChannelWorkPoolSize.GetAsInt())
 
-		updateChannelCheckpointMaxParallel := Params.UpdateChannelCheckpointMaxParallel.GetAsInt()
-		t.Logf("updateChannelCheckpointMaxParallel: %d", updateChannelCheckpointMaxParallel)
-		assert.Equal(t, 10, Params.UpdateChannelCheckpointMaxParallel.GetAsInt())
-		assert.Equal(t, 128, Params.MaxChannelCheckpointsPerRPC.GetAsInt())
-		assert.Equal(t, 10*time.Second, Params.ChannelCheckpointUpdateTickInSeconds.GetAsDuration(time.Second))
-
 		assert.Equal(t, 4, Params.ImportConcurrencyPerCPUCore.GetAsInt())
 		assert.Equal(t, int64(16), Params.MaxImportFileSizeInGB.GetAsInt64())
 		assert.Equal(t, 16*1024*1024, Params.ImportBaseBufferSize.GetAsInt())
@@ -1851,8 +1916,8 @@ func TestDataCoordForceMergeMemoryFactorConfig(t *testing.T) {
 }
 
 func TestForbiddenItem(t *testing.T) {
-	Init()
-	params := Get()
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true), SkipEnv(true)))
 
 	params.baseTable.mgr.OnEvent(&config.Event{
 		Key:   params.CommonCfg.ClusterPrefix.Key,
@@ -1915,8 +1980,8 @@ func TestCachedParam(t *testing.T) {
 }
 
 func TestFallbackParam(t *testing.T) {
-	Init()
-	params := Get()
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true), SkipEnv(true)))
 	params.Save("common.chanNamePrefix.cluster", "foo")
 
 	assert.Equal(t, "foo", params.CommonCfg.ClusterPrefix.GetValue())
@@ -1948,17 +2013,16 @@ func TestWriteSegmentIndexToManifest(t *testing.T) {
 	params := ComponentParam{}
 	params.Init(NewBaseTable(SkipRemote(true)))
 
-	// Off by default: manifest publication is opt-in, and the legacy
-	// etcd-only path must be what a cluster gets without configuration.
+	// QueryView physical preparation follows the published Manifest version.
+	assert.True(t, params.DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
+
+	params.Save(params.DataCoordCfg.WriteSegmentIndexToManifest.Key, "false")
 	assert.False(t, params.DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
 
 	params.Save(params.DataCoordCfg.WriteSegmentIndexToManifest.Key, "true")
 	assert.True(t, params.DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
 
-	// A value that does not parse as a boolean reads as false, i.e. the
-	// legacy behavior. Under the old etcd-write polarity this silently
-	// entered the one-way off state; with publication opt-in the failure is
-	// merely "the operator thinks it is on", with no durability consequence.
+	// Explicit invalid boolean values retain the parameter parser's behavior.
 	params.Save(params.DataCoordCfg.WriteSegmentIndexToManifest.Key, "yes")
 	assert.False(t, params.DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
 }

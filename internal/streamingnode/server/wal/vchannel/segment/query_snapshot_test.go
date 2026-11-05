@@ -7,12 +7,23 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 func TestQuerySnapshotUsesDurableBaseAndAllUnpublishedChunks(t *testing.T) {
-	view := newSegmentViewFromMeta(&streamingpb.SegmentAssignmentMeta{SegmentId: 1, Vchannel: "v1", State: streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING, CheckpointTimeTick: 10, Stat: &streamingpb.SegmentAssignmentStat{ModifiedRows: 5}}, nil)
+	view := newSegmentViewFromMeta(&streamingpb.SegmentAssignmentMeta{
+		SegmentId:          1,
+		Vchannel:           "v1",
+		State:              streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
+		CheckpointTimeTick: 10,
+		Stat:               &streamingpb.SegmentAssignmentStat{ModifiedRows: 5},
+		PersistedStorage: &streamingpb.L1SegmentPersistedStorage{
+			Binlogs:    []*streamingpb.L1SegmentBinLogs{{FromTimeTick: 5, ToTimeTick: 10}},
+			Statistics: &datapb.Statistics{NullCounts: map[int64]int64{100: 1}},
+		},
+	}, nil)
 	var released atomic.Int32
 	first, firstOwner := newTrackedRetained(t, 20, &released)
 	second, secondOwner := newTrackedRetained(t, 30, &released)
@@ -36,8 +47,21 @@ func TestQuerySnapshotUsesDurableBaseAndAllUnpublishedChunks(t *testing.T) {
 	require.Equal(t, int32(2), released.Load())
 	require.Equal(t, uint64(20), snapshot.Data.InsertMessages[0].TimeTick())
 	require.Equal(t, uint64(30), snapshot.Data.InsertMessages[1].TimeTick())
-	snapshot.Assignment.Stat.ModifiedRows = 100
+	view.dirty = true
+	for _, meta := range []*streamingpb.SegmentAssignmentMeta{
+		snapshot.Assignment, view.AssignmentMeta(), view.ConsumeDirtyAndGetSnapshot(),
+	} {
+		meta.Stat.ModifiedRows = 100
+		meta.PersistedStorage.Binlogs[0].ToTimeTick = 100
+		meta.PersistedStorage.Statistics.NullCounts[100] = 100
+	}
+	require.Equal(t, uint64(7), view.meta.GetStat().GetModifiedRows())
 	require.Equal(t, uint64(5), view.durableMeta.GetStat().GetModifiedRows())
+	require.Equal(t, uint64(10), view.meta.PersistedStorage.Binlogs[0].GetToTimeTick())
+	require.Equal(t, int64(1), view.durableMeta.PersistedStorage.Statistics.GetNullCounts()[100])
+	frozen := view.ConsumeDirtyAndGetSnapshot()
+	require.Equal(t, uint64(10), frozen.PersistedStorage.Binlogs[0].GetToTimeTick())
+	require.Equal(t, int64(1), frozen.PersistedStorage.Statistics.GetNullCounts()[100])
 }
 
 func TestQuerySnapshotUsesCommittedSealedVersion(t *testing.T) {

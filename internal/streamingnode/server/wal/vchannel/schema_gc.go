@@ -3,6 +3,7 @@ package vchannel
 import (
 	"slices"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 )
 
@@ -11,7 +12,7 @@ import (
 // is the published WAL checkpoint, never the checkpoint being saved this round.
 func (info *VChannelView) SchemaCleanupPlan(
 	replayFloor uint64,
-	segments []*streamingpb.SegmentAssignmentMeta,
+	segments []segment.SchemaReference,
 ) (*streamingpb.VChannelMeta, bool) {
 	info.mu.Lock()
 	defer info.mu.Unlock()
@@ -47,15 +48,15 @@ func (info *VChannelView) SchemaCleanupPlan(
 	for i := floorIndex; i < len(schemas); i++ {
 		keep[i] = true
 	}
-	for _, segment := range segments {
-		if i, _ := info.GetSchemaLocked(segment.GetStat().GetCreateSegmentTimeTick()); i >= 0 {
+	for _, ref := range segments {
+		if i, _ := info.GetSchemaLocked(ref.CreateTimeTick); i >= 0 {
 			keep[i] = true
 		}
 		// Migrated segments may have a synthetic allocation timestamp. Keep
 		// their encoding version too, until their recovery metadata is removed.
 		for i := len(schemas) - 1; i >= 0; i-- {
 			if schemas[i].GetState() == streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL &&
-				schemas[i].GetSchema().GetVersion() == segment.GetSchemaVersion() {
+				schemas[i].GetSchema().GetVersion() == ref.SchemaVersion {
 				keep[i] = true
 				break
 			}

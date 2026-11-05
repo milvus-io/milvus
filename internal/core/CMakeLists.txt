@@ -62,6 +62,10 @@ endif ()
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pipe")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pipe")
 
+# Folly's async exception traces walk native frame pointers across coroutine callers.
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-omit-frame-pointer")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fno-omit-frame-pointer")
+
 # Enable hardware popcnt for all compilation units on x86_64.
 # PopCountHelper in bitset/detail/popcount.h is header-only; without this flag,
 # __builtin_popcountll falls back to __popcountdi2 software emulation.
@@ -458,6 +462,12 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/clustering/
 # Install common
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/common/
         DESTINATION include/common
+        FILES_MATCHING PATTERN "*_c.h"
+)
+
+# Install the independent Grep runner C ABI for Go consumers.
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/grep/
+        DESTINATION include/grep
         FILES_MATCHING PATTERN "*_c.h"
 )
 

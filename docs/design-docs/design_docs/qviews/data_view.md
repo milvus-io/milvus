@@ -5,9 +5,10 @@
 - Independent Approver: @congqixia
 - Design Review: 2026-07-29
 
-This document defines the DataView-only contract implemented by the current
-DataView PR. QueryView placement, SegmentMeta, Balancer, snapshot I/O, and
-physical Segment GC are deliberately outside this component.
+This document defines the DataView manager and its production integration
+contracts. QueryView placement, SegmentMeta, Balancer, snapshot I/O and physical
+Segment GC have separate owners; the publication and retention interfaces
+between those owners are described below.
 
 ## Model
 
@@ -20,11 +21,16 @@ updates preserve that identity; only schema publication advances it.
 consumer through `DataViewRef`:
 
 ```text
-Collection -> VChannel -> Partition -> loadable (Segment ID, Manifest version)
+Collection (SchemaVersion, DataVersion) -> VChannel -> Partition -> loadable (Segment ID, Manifest version, Transform start)
 ```
 
-Each partition stores `segment_ids` and `segment_manifest_versions` as parallel
-packed arrays. The manager also stores the collection-level `DataVersion`
+Each partition stores `segment_ids`, `segment_manifest_versions` and
+`segment_transform_start_after_timeticks` as parallel packed arrays. The cursor
+belongs to the selected physical base, not a later mutable SegmentInfo. Keeping
+it with the immutable snapshot permits removal, replay and recovery to recalculate
+A without substituting another base's coverage. QN still obtains its actual
+loaded base cursor atomically through SegmentLoadInfo; this array is not a
+separate worker replay position. The manager also stores the collection-level `DataVersion`
 (`streaming_version`, `compact_version`). A caller must pass a `LoadableSegment`
 descriptor after its own loadability gate:
 
@@ -34,13 +40,17 @@ type LoadableSegment struct {
     VChannel        string
     PartitionID     int64
     ManifestVersion int64
+    TransformStartAfterTimetick uint64 // coverage of the selected physical base
+    PartitionStatsVersion int64 // immutable clustering statistics for this partition
+    RowNum          int64 // in-memory published footprint, not persisted
 }
 ```
 
 The manager does not query SegmentMeta or infer state, level, visibility,
 importing, indexes, manifest versions, delete frontiers, or compaction lineage.
 The projection function supplied to `Recompute` is the single source of
-membership: it reads the current SegmentMeta and returns the loadable Segments.
+membership: it reads the current SegmentMeta and the borrowed previous committed
+snapshot, and returns the complete loadable Segment frontier.
 Within one snapshot it keeps a Segment ID in only one VChannel/Partition:
 re-adding it at the same location with the same Manifest version is a no-op, a
 higher Manifest version updates it, and a lower version is a data-integrity
@@ -70,11 +80,40 @@ version is kept) rather than regressed: after an L0 compaction advanced the
 Manifest, a replay that has not yet observed the new manifest must not roll the
 snapshot back.
 
-TODO: The current branch deliberately does not persist or publish
-`transform_start_after_timetick`. A safe monotonic frontier depends on a
-StreamingNode-owned shard Flush barrier that is outside this PR. The required
-producer protocol is described in
-[Transform Start-After TimeTick](transform_start_after_timetick.md).
+The DataCoord producer persists two per-shard inputs with every DataVersion:
+`W = GrowingTransformStartAfterTimeTick` and
+`A = CompactedTransformStartAfterTimeTick`. Both begin at the VChannel's
+CreateCollection WAL TimeTick. W advances only with a final L1 SaveBinlogPaths
+publication carrying an SN proof. A is the minimum cursor of the exact Segment
+bases in the new snapshot across every partition; it is recomputed on Flush and
+Compaction, and may decrease. An empty shard uses A=W.
+
+The shared TransformLog start is calculated as `F = min(W, A)` when projecting
+DataView into QueryView. There is no F field in the DataView proto. W and F are
+nondecreasing, while published snapshots remain immutable. Recovery uses each
+version's own W/A. Checkpoint reports neither calculate these inputs nor trigger
+DataView versions. SN proves W using its completely observed WAL prefix and all
+L1 Segments whose final publication is outstanding, including concurrent Flush
+RPCs and other partitions; it excludes only the Segment in this atomic request.
+
+TransformLog/L0 materialization through T waits for final publication of every
+L1 created before T. Pending imports and other asynchronous publications retain
+their own fences. See [Transform Start-After TimeTick](transform_start_after_timetick.md)
+for the proof, atomic publication requirements, and retention obligations.
+
+## Supported read Schema
+
+SchemaVersion is persisted with each immutable collection snapshot. Initial
+creation supplies the collection schema. All ordinary mutations clone the latest
+schema identity. DDL alone advances it, with CompactVersion +1, either directly
+without changing segment bases or with a checked complete materialized projection.
+A replay at or behind the committed schema is a no-op. Publication failure leaves
+the old snapshot intact. Schema-only changes notify readers just like membership
+changes. QueryView takes its schema from this exact snapshot, never from latest
+collection metadata. SegmentMeta updates notify schema waiters independently of
+the best-effort recompute queue. A waiter registers before reading the projection,
+so queue saturation and metadata-only changes cannot lose its wakeup. See
+[Schema evolution](schema_evolution.md).
 
 ## Lifecycle
 
@@ -132,10 +171,15 @@ compact_version)`.
 |---|---|
 | Create | first snapshot `(1,0)` |
 | Bootstrap | first snapshot `(1,0)` for a Collection that predates DataView management (upgrade migration) |
-| Flush (PrepareFlush commit) | `(S,C) -> (S+1,C)` |
-| Compaction, import, copy, external refresh, drop partition, truncate, L0 manifest advance (Recompute) | `(S,C) -> (S,C+1)` when the rebuilt snapshot differs |
+| Flush (PrepareFlush commit) | `(S,C) -> (S+1,0)` |
+| Compaction, index Manifest publication, import, copy, external refresh, drop partition, truncate, L0 manifest advance (Recompute) | `(S,C) -> (S,C+1)` when the rebuilt snapshot differs |
 | No membership or Manifest-version change | return the current version without persisting |
 | Drop collection | delete all persisted snapshots; no new snapshot |
+
+CompactVersion counts changes within one StreamingVersion epoch. Final Flush
+starts the next epoch and resets CompactVersion: `(7,9) -> (8,0)` still advances
+the lexicographically ordered DataVersion. Non-streaming publication preserves S
+and increments C.
 
 `streaming_version` is the publication epoch used by StreamingNode to decide
 whether a flushed Segment must still participate in growing-side queries. Only
@@ -184,6 +228,16 @@ The binding survives DataView snapshot GC while SegmentMeta exists. Full QueryVi
 integration must additionally protect Segment records and objects needed by old
 views or unacknowledged publications; this change does not enable that GC protocol.
 
+## Import publication
+
+Coordinator-owned CommitImport callbacks synchronously reconcile the committed
+SegmentMeta projection before marking ImportJob Completed. The collection broadcast
+resource lock orders commits through this durable publication. Failure leaves the
+job Committing and retries idempotently. Load/Refresh owns QueryView Up waiting;
+import completion itself is independent of QN readiness. Pending uncommitted
+imports constrain W advancement without blocking membership publication; see the
+[Transform frontier contract](transform_start_after_timetick.md).
+
 ## Async reconciliation
 
 TODO: `Recompute` is a stopgap. It rebuilds the whole snapshot from the
@@ -193,15 +247,15 @@ DataCoord offline side (compact/index pipelines) is refactored, those owners
 should update the DataView directly through specific DataView events, and this
 projection-based reconciliation can be retired.
 
-Compaction (mix/clustering/L0/sort/bump-schema-version), import commit, copy
-completion, external refresh, drop partition, and truncate do not publish
-membership events. Instead, after their SegmentMeta mutation commits, the owner
-requests an asynchronous reconciliation by calling
-`Manager.Recompute(ctx, collectionID)`. Successful single/batched Manifest
-publication also requests reconciliation through the shared post-publication
-hook, after catalog and memory updates and outside Segment/Manifest locks.
-This includes index artifacts and Text/JSON stats; notification is preserved
-when SegmentMeta Watch is removed. Metadata-only/no-op reconciliations retain
+Compaction (mix/clustering/L0/sort/bump-schema-version), copy completion and
+background SegmentMeta updates request asynchronous reconciliation after their
+metadata mutation commits by calling
+`Manager.Recompute(ctx, collectionID)`. Every committed Manifest-pointer change
+also requests reconciliation through
+the shared post-publication notification path, including single/batched Manifest
+transactions, text/JSON stats, index publication, schema bump and backfill.
+This path runs outside metadata/Manifest locks after catalog and memory commit,
+and requests DataView recomputation. Metadata-only/no-op reconciliations retain
 the same version when the projected snapshot is unchanged.
 The queue and its worker live inside the Manager: a non-blocking, per-Collection
 deduplicated request (a Collection with a pending request is not queued again),
@@ -215,13 +269,54 @@ construction (`NewManager(catalog, project)` / `RecoverManager(..., project)`)
 and the worker starts with the manager: it is bounded by the constructor's ctx
 for `RecoverManager` and by the process lifetime for `NewManager`.
 
-The projection runs under the Collection lock and reads SegmentMeta only: it is
+The projection runs under the Collection lock and reads SegmentMeta plus the
+previous committed snapshot supplied by the manager: it is
 non-blocking and must not re-enter the Manager. It resolves the loadable
-membership - `Flushed`, non-L0, non-importing, visible Segments with a data
-footprint - including each Segment's Manifest version parsed from its
-SegmentMeta. A projection that reports a Manifest version lower than the stored
+membership, including each Segment's Manifest version parsed from SegmentMeta.
+Ordinary Flush retains its existing contract. Compaction admission follows the
+frontier rules below. A projection that reports a Manifest version lower than the stored
 one is a data-integrity error (monotonicity); zero preserves the stored
 version.
+
+## Compaction admission and recovery frontier
+
+A compaction result joins DataView only after sorting has completed when sort
+compaction is enabled (external collections remain exempt), and every configured
+IndexID is Finished. Scalar indexes and multiple JSON-path indexes on one field
+all participate. Small/no-training indexes use the scheduler's explicit Finished
+state; this does not require an index file when the builder intentionally skips
+training. A collection without indexes has no index prerequisite.
+
+The producer flattens the legacy query-recovery lineage selection before
+publishing a snapshot. It selects a complete, non-overlapping frontier, retaining
+parents while any replacement output is unready. Dropped parents remain eligible
+only when retired by compaction. An unready intermediate may be traversed through
+its complete ready ancestry, but cannot itself enter DataView. Thus a Mix output
+can continue through Sort without being made query-visible first. M:N replacements
+and successive sort branches switch only when their selected frontier covers the
+whole input set without ancestor/descendant overlap. Empty outputs retire their
+inputs without waiting for nonexistent data or indexes.
+
+The previous committed DataView supplies already-admitted Segment IDs. Those
+segments remain admitted when later CreateIndex/DropIndex changes requirements;
+publication must not regress to an older ancestor frontier. The same snapshot is
+supplied during recovery and schema certification. An unready result with no
+complete available ancestor frontier makes projection fail closed, preserving the
+last complete DataView rather than publishing partial data or an unready leaf.
+
+Physical compaction can still retire parent SegmentMeta before query admission.
+Dropped-segment GC snapshots all retained DataView references once per sweep and
+protects both those bases and their descendant metadata: intermediate lineage is
+needed to relate current leaves to a retained base. After DataView version GC and
+all live references move forward, old bases and their intermediate lineage become
+eligible for the existing physical GC checks. This also protects unloaded
+collections whose latest DataView still selects parents.
+
+Compaction completion and manifest publication trigger reconciliation. Index
+completion without a manifest artifact (including small/no-training builds) and
+index removal also trigger it. The whole selected frontier and its Manifest
+versions enter one new CompactVersion; there is no per-output publication and no
+new persistent compaction publication group.
 
 ## Manager API
 
@@ -277,11 +372,68 @@ bug (see the precondition on the type).
 the exact requested version. An unknown Collection, a nil version, or a version
 that has already been collected returns `(nil, nil)`.
 
-When QueryView integration is introduced, a QueryView must retain its exact
+The coordview interface integration retains each QueryView's exact
 `DataViewRef` through Preparing, Ready, Up, Down, Unrecoverable, and Dropping,
-and release it only after reaching Dropped. Recovered QueryViews must reacquire
-their persisted DataVersion before GC is enabled. This lifecycle integration is
-outside the current PR.
+and releases it only after the Dropped deletion has been persisted. New views
+acquire their reference before preempting existing views; a missing version
+returns a retriable system error so the caller can rebuild its plan. Recovered
+QueryViews reacquire their persisted DataVersion; a genuinely missing version
+enters terminal cleanup. MixCoord initializes DataCoord, then QueryCoord with
+this provider, and only starts their background workers after both recoveries
+complete. Thus exact references are restored before DataView GC can run.
+
+Both `Get` and `Deref` can wait on the per-Collection mutation lock, which may
+be held across persistence. QueryView consumers must call them without holding
+a shard-manager lock. AddPreparing revalidates manager lifecycle and version
+ordering after acquiring the reference; removal detaches reference ownership
+under the manager lock and dereferences after unlocking. The DataView mutation
+and GC serialization contract is unchanged.
+
+### View consumer interfaces
+
+The current implementation exposes two consumer contracts:
+
+- `qviews.DataViewRefProvider.Get` supplies exact-version references to
+  `ShardViewRegistry` through `RecoverShardViewRegistryWithDataViews`. Each
+  state machine owns one acquired reference.
+- `api.DataViewPublisher.RegisterDataViewListener` synchronously replays existing
+  immutable collection objects and publishes subsequent updates without a
+  missing-update window. Balancer reads these objects from its resident cache.
+
+The [Balancer Cache implementation](balancer_cache.md) replaces the Balancer's
+snapshot-pull path with `RegisterDataViewListener` synchronous publication hooks. At each committed publication, DataViewManager supplies a read-only
+Collection object with immutable membership and matching RowNum. The native
+projection is materialized once and retained for the latest publication. Each
+desired shard also publishes `TotalRows` and `SegmentCount`, so reconciliation
+does not rescan segments for these aggregates. Indexes and summaries are built
+once per published version, not per reconcile. The obsolete global and scoped
+DataViewSnapshot pull APIs have been removed.
+
+The hook covers create/bootstrap, recompute publication, successful flush
+commit, recovery footprint initialization, and logical collection drop. Abort
+does not publish a prepared DataView. Membership, DataVersion, RowNum, and shard
+summaries must belong to one publication; later recovery footprint fills must
+replace published read objects even if DataVersion is unchanged. The hook does
+not perform I/O or re-enter the manager. Registration and initial replay must
+not leave a missing-update window.
+
+Neither native planning snapshots nor cache read objects pin DataVersions.
+The exact-version `Get` performed by `AddPreparing` remains the acquisition
+point against GC. An old read object may remain readable after GC has collected
+its version, but it cannot then be used to create a new QueryView; the caller
+must replan. Do not expose mutable reference counters/tombstones through the
+cache object or call the copying `DataViewRef.DataView()` on its read path.
+
+`DataViewRef.Stats(segmentID)` exposes the reference's per-version RowNum map.
+Stats are immutable after publication and are not persisted. Recovery fills
+the latest version from SegmentMeta; retained historical versions may have
+unknown stats. Shard statistics combine the contributing retained versions,
+preferring the newest known footprint for each segment. An explicit presence
+flag distinguishes unknown from a published zero; only unknown values may
+fall back to known row statistics retained for planning. In the cache,
+the fallback and affected node contributions are maintained at publication,
+rather than reconstructed by reconciliation. Fallback values can be reclaimed
+when no latest/resident view needs them.
 
 Because DataVersion and DataViewRef are Collection-scoped while QueryView is
 Shard-scoped, one Shard can otherwise keep an old complete Collection snapshot
@@ -372,11 +524,30 @@ separate concern.
 `retainLatest` is normalized to at least one. The current DataCoord metadata GC
 invokes this operation for live Collections with `retainLatest = 1`.
 
-Holding a `DataViewRef` currently protects only the DataView snapshot. Future
-physical Segment GC integration must also treat every Segment in a live
-referenced DataView as protected. Until QueryView references have been
-recovered, that integration must fail closed. The current PR does not add this
-cross-component protection path.
+A DataViewRef directly protects its immutable snapshot. Dropped-segment GC also
+calls `ReferencedSegments` and protects every member of every retained
+non-tombstone snapshot, including an unreferenced version that remains
+acquirable. `dataViewCompactionProtection` extends this set along parent-to-child
+lineage to retain the successor metadata needed to relate current leaves to
+retained bases. Version GC removes eligible old snapshots before that sweep.
+
+Coordinator initialization restores DataCoord/DataViews, then QueryCoord/View
+references, before starting their background workers. The dropped-segment sweep
+must not run ahead of that recovery ordering. This integration protects segment
+membership and lineage; it is not a complete retention protocol for every
+historical index build, Manifest revision, schema or Summary object.
+
+Dropped-segment GC snapshots each relevant PChannel's durable checkpoint from
+StreamingNode catalog once at the start of each sweep. All segments and
+VChannels on that PChannel reuse its `WALCheckpoint.time_tick` for the sweep;
+the next sweep reads a fresh checkpoint. A missing checkpoint or failed read
+retains that PChannel's segments. Historical DataCoord checkpoints and the
+potentially newer control checkpoint are not GC frontiers. Removed VChannels
+must also satisfy the physical checkpoint gate. Segment commit/DML time must
+be at or below this frontier, in addition to retention, compaction-index,
+loaded-segment, snapshot, collection-pause and retained-DataView/lineage checks.
+These gates are cumulative; satisfying the physical checkpoint alone does not
+permit deletion of a protected segment.
 
 Dropping a collection persists the CollectionMeta Dropping state before deleting
 all DataView snapshots. Existing Refs remain valid from their in-memory snapshot
@@ -388,11 +559,13 @@ recognizes the CollectionMeta tombstone and removes the remaining DataView keys.
 
 The manager no longer owns `SegmentStore`, loadability checks, resident/visible
 split, temporary flush snapshots, SegmentMeta-derived delete-frontier
-projection, event-driven repair, Balancer snapshots, Segment reference queries,
+projection, event-driven repair, Balancer policy, Segment reference queries,
 or caller-supplied protected-version lists. The event API is reduced to
 Create/Bootstrap/PrepareFlush/Recompute/Drop; membership is a materialized view
-of SegmentMeta rather than an event-accumulated log. The delete frontier remains
-a TODO until the StreamingNode shard barrier is implemented.
+of SegmentMeta rather than an event-accumulated log. The planned frontier
+producer extends this projection with a W/A-based, consistent coverage
+calculation; it does not restore the removed unsynchronized SegmentMeta-only
+frontier calculation. See [Transform Start-After TimeTick](transform_start_after_timetick.md).
 
 ## Native scheduling statistics
 
@@ -432,9 +605,10 @@ prepare freezes the statistics; changing configuration before commit cannot
 change the prepared snapshot's cost. Invalid cost values retain the manager's
 last valid sampled value.
 
-Changing configuration or Schema does not trigger a DataView update or balance
-pass. A membership/Manifest no-op retains the existing statistics. The next
-normal DataView update uses the then-current cost. Previously published native
+Changing cost configuration alone does not trigger a DataView update or balance
+pass. A membership/Manifest no-op retains the existing statistics. A schema DDL
+publication does advance DataView as defined above. The next DataView update
+uses the then-current cost. Previously published native
 objects and retained DataViewRefs remain immutable, so historical QueryViews
 continue using their own footprint. Different DataVersions may therefore carry
 different logical sizes for the same Segment.
@@ -451,3 +625,10 @@ placement statistics forward the retained DataViewRef's physical and logical
 statistics together. A single `LostStats` flag describes absence of the entire
 footprint; known zero values do not imply missing statistics. The Balancer never
 recalculates the model or reads `segmentBaseCost`.
+
+## Partition statistics and pruning
+
+[Global segment pruning](query/segment_pruning.md) defines immutable DataView
+statistics references, SN resource readiness and shared ownership, and per-worker
+Plan selections. Scalar and vector clustering pruning run on SN during Phase 1;
+QN applies the recorded selection before acquiring execution handles.

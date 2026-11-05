@@ -49,7 +49,7 @@ func TestRetrieveSegment(t *testing.T) {
 			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
 		}
 		indexed := typeutil.NewUniqueSet(1, 2)
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(3),
 			typeutil.NewUniqueSet(1, 2),
@@ -68,7 +68,7 @@ func TestRetrieveSegment(t *testing.T) {
 			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
 		}
 		indexed := typeutil.NewUniqueSet(1)
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(3),
 			typeutil.NewUniqueSet(1, 2),
@@ -87,7 +87,7 @@ func TestRetrieveSegment(t *testing.T) {
 			3: segment(3, commonpb.SegmentState_Flushed, 2),
 		}
 		indexed := typeutil.NewUniqueSet(1)
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(3),
 			typeutil.NewUniqueSet(1, 2),
@@ -105,7 +105,7 @@ func TestRetrieveSegment(t *testing.T) {
 			2: segment(2, commonpb.SegmentState_Flushed, 1),
 		}
 		indexed := typeutil.NewUniqueSet(1, 2)
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(2),
 			typeutil.NewUniqueSet(1),
@@ -124,7 +124,7 @@ func TestRetrieveSegment(t *testing.T) {
 			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
 			4: segment(4, commonpb.SegmentState_Flushed, 1, 2),
 		}
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(1, 2, 3, 4),
 			make(typeutil.UniqueSet),
@@ -143,7 +143,7 @@ func TestRetrieveSegment(t *testing.T) {
 			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
 			4: segment(4, commonpb.SegmentState_Flushed, 1, 2),
 		}
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(1, 3, 4),
 			typeutil.NewUniqueSet(2),
@@ -162,7 +162,7 @@ func TestRetrieveSegment(t *testing.T) {
 			3: segment(3, commonpb.SegmentState_Flushed, 1, 2),
 			4: segment(4, commonpb.SegmentState_Flushed, 3),
 		}
-		flushed, _ := retrieveSegment(
+		flushed, _ := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(1, 2, 3, 4),
 			make(typeutil.UniqueSet),
@@ -184,7 +184,7 @@ func TestRetrieveSegment(t *testing.T) {
 		// Segment 5 remains serviceable while segment 4 falls back to 1 and 2.
 		// Recursive deduplication must remove 5 without selecting unready 3.
 		indexed := typeutil.NewUniqueSet(1, 2, 5)
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(4, 5),
 			typeutil.NewUniqueSet(1, 2, 3),
@@ -201,7 +201,7 @@ func TestRetrieveSegment(t *testing.T) {
 			1: segment(1, commonpb.SegmentState_Dropped),
 			2: segment(2, commonpb.SegmentState_Flushed, 1),
 		}
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(2),
 			typeutil.NewUniqueSet(1),
@@ -223,7 +223,7 @@ func TestRetrieveSegment(t *testing.T) {
 			6: segment(6, commonpb.SegmentState_Flushed, 3, 5),
 		}
 		indexed := typeutil.NewUniqueSet(1, 2, 6)
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(4, 6),
 			typeutil.NewUniqueSet(1, 2, 3, 5),
@@ -245,7 +245,7 @@ func TestRetrieveSegment(t *testing.T) {
 			6: segment(6, commonpb.SegmentState_Flushed, 3, 5),
 		}
 		indexed := typeutil.NewUniqueSet(1, 2, 3, 5, 6)
-		flushed, dropped := retrieveSegment(
+		flushed, dropped := meta.RetrieveSegment(
 			segments,
 			typeutil.NewUniqueSet(4, 6),
 			typeutil.NewUniqueSet(1, 2, 3, 5),
@@ -2330,7 +2330,7 @@ func TestHasCommittedManifest(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			actual, err := hasCommittedManifest(test.segment)
+			actual, err := meta.HasCommittedManifest(test.segment)
 			if test.expectedErr != nil {
 				require.ErrorIs(t, err, test.expectedErr)
 				assert.Contains(t, err.Error(), "invalid manifest path for segment 2004")
@@ -2633,6 +2633,7 @@ func TestGenSnapshot_RejectsSegmentWithoutChannelSeekPosition(t *testing.T) {
 }
 
 func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
+	indexType := "HNSW_SQ"
 	version := indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED
 	handler := &ServerHandler{
 		s: &Server{
@@ -2650,6 +2651,7 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 				PartitionID:           20,
 				SegmentID:             segmentID,
 				IndexID:               10,
+				IndexType:             indexType,
 				BuildID:               30,
 				IndexVersion:          40,
 				IndexState:            commonpb.IndexState_Finished,
@@ -2666,7 +2668,9 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 	mockIndexName := mockey.Mock((*index.IndexMeta).GetIndexNameByID).Return("vec_idx").Build()
 	defer mockIndexName.UnPatch()
 
-	mockIndexParams := mockey.Mock((*index.IndexMeta).GetIndexParams).Return(nil).Build()
+	mockIndexParams := mockey.Mock((*index.IndexMeta).GetIndexParams).To(func(*index.IndexMeta, UniqueID, UniqueID) []*commonpb.KeyValuePair {
+		return []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}}
+	}).Build()
 	defer mockIndexParams.UnPatch()
 
 	mockTypeParams := mockey.Mock((*index.IndexMeta).GetTypeParams).Return(nil).Build()
@@ -2676,6 +2680,9 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, indexFiles, 1)
+	assert.Equal(t, "HNSW_SQ", indexFiles[0].GetIndexType())
+	assert.Equal(t, "vec_idx", indexFiles[0].GetIndexName())
+	assert.Equal(t, "HNSW_SQ", meta.GetIndexType(indexFiles[0].GetIndexParams()))
 	assert.Equal(t, int64(2), indexFiles[0].GetSegmentID())
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, indexFiles[0].GetIndexStorePathVersion())
 	assert.Equal(t, []string{"files/index_v1/1/20/2/30/40/index_data"}, indexFiles[0].GetIndexFilePaths())
@@ -2690,9 +2697,19 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 	indexFiles, err = uncompressIndexFiles(handler, segment)
 	require.NoError(t, err)
 	require.Len(t, indexFiles, 1)
+	assert.Equal(t, "HNSW_SQ", indexFiles[0].GetIndexType())
+	assert.Equal(t, "vec_idx", indexFiles[0].GetIndexName())
+	assert.Equal(t, "HNSW_SQ", meta.GetIndexType(indexFiles[0].GetIndexParams()))
 	assert.Equal(t, segment.GetID(), indexFiles[0].GetSegmentID())
 	assert.Equal(t, version, indexFiles[0].GetIndexStorePathVersion())
 	assert.Equal(t, []string{"/data/legacy/insert_log/1/20/2/_index/30/40/index_data"}, indexFiles[0].GetIndexFilePaths())
+
+	indexType = ""
+	indexFiles, err = uncompressIndexFiles(handler, segment)
+	require.NoError(t, err)
+	require.Len(t, indexFiles, 1)
+	assert.Empty(t, indexFiles[0].GetIndexType())
+	assert.Equal(t, "HNSW", meta.GetIndexType(indexFiles[0].GetIndexParams()))
 
 	segment.ManifestPath = ""
 	indexFiles, err = uncompressIndexFiles(handler, segment)
@@ -2872,53 +2889,67 @@ func TestGenSnapshot_CommitTimestamp(t *testing.T) {
 		assert.NotNil(t, snapshotData)
 		assert.Equal(t, 1, len(snapshotData.Segments), "segment with commit_ts=5000 must appear at snapshotTs=6000")
 		assert.Equal(t, int64(999), snapshotData.Segments[0].SegmentId)
+		assert.Equal(t, uint64(5000), snapshotData.Segments[0].GetCommitTimestamp())
 	})
 }
 
 func TestServerHandler_GetCollectionRetry(t *testing.T) {
-	newHandler := func(b broker.Broker) *ServerHandler {
+	newHandler := func() *ServerHandler {
 		m := &meta.Meta{MetaStore: metacache.NewMetaStore(nil)}
-		return newServerHandler(&Server{broker: b, meta: m})
+		return newServerHandler(&Server{broker: &broker.MockBroker{}, meta: m})
 	}
 
+	// Internal loading uses DescribeCollectionInternal directly so Restoring
+	// collections remain visible; public HasCollection intentionally hides them.
 	t.Run("dropped collection is not retried", func(t *testing.T) {
-		b := broker.NewMockBroker(t)
-		b.EXPECT().HasCollection(mock.Anything, int64(1)).Return(false, nil).Once()
+		describe := mockey.Mock((*broker.MockBroker).DescribeCollectionInternal).
+			Return(nil, merr.ErrCollectionNotFound).Build()
+		defer describe.UnPatch()
 
-		coll, err := newHandler(b).GetCollection(context.TODO(), 1)
+		coll, err := newHandler().GetCollection(context.TODO(), 1)
 		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
 		assert.Nil(t, coll)
+		assert.Equal(t, 1, describe.Times())
 	})
 
 	t.Run("transient error is retried", func(t *testing.T) {
-		b := broker.NewMockBroker(t)
-		b.EXPECT().HasCollection(mock.Anything, int64(1)).Return(false, merr.ErrServiceUnavailable).Once()
-		b.EXPECT().HasCollection(mock.Anything, int64(1)).Return(true, nil).Once()
-		b.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(&milvuspb.DescribeCollectionResponse{
-			Status:       merr.Success(),
-			CollectionID: 1,
-		}, nil).Once()
-		b.EXPECT().ShowPartitionsInternal(mock.Anything, int64(1)).Return([]int64{10}, nil).Once()
+		calls := 0
+		describe := mockey.Mock((*broker.MockBroker).DescribeCollectionInternal).To(
+			func(_ *broker.MockBroker, _ context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+				calls++
+				if calls == 1 {
+					return nil, merr.ErrServiceUnavailable
+				}
+				return &milvuspb.DescribeCollectionResponse{
+					Status: merr.Success(), CollectionID: collectionID,
+				}, nil
+			}).Build()
+		defer describe.UnPatch()
+		partitions := mockey.Mock((*broker.MockBroker).ShowPartitionsInternal).Return([]int64{10}, nil).Build()
+		defer partitions.UnPatch()
 
-		coll, err := newHandler(b).GetCollection(context.TODO(), 1)
-		assert.NoError(t, err)
+		coll, err := newHandler().GetCollection(context.TODO(), 1)
+		require.NoError(t, err)
+		require.NotNil(t, coll)
 		assert.Equal(t, int64(1), coll.ID)
+		assert.Equal(t, 2, describe.Times())
+		assert.Equal(t, 1, partitions.Times())
 	})
 
 	t.Run("collection gone from the cache after load", func(t *testing.T) {
-		b := broker.NewMockBroker(t)
-		b.EXPECT().HasCollection(mock.Anything, int64(1)).Return(true, nil).Once()
-		b.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(&milvuspb.DescribeCollectionResponse{
-			Status:       merr.Success(),
-			CollectionID: 1,
-		}, nil).Once()
-		b.EXPECT().ShowPartitionsInternal(mock.Anything, int64(1)).Return([]int64{10}, nil).Once()
+		describe := mockey.Mock((*broker.MockBroker).DescribeCollectionInternal).Return(&milvuspb.DescribeCollectionResponse{
+			Status: merr.Success(), CollectionID: 1,
+		}, nil).Build()
+		defer describe.UnPatch()
+		partitions := mockey.Mock((*broker.MockBroker).ShowPartitionsInternal).Return([]int64{10}, nil).Build()
+		defer partitions.UnPatch()
 		// GC drops the collection between the load and the read.
 		dropAfterAdd := mockey.Mock((*meta.Meta).AddCollection).Return().Build()
 		defer dropAfterAdd.UnPatch()
 
-		coll, err := newHandler(b).GetCollection(context.TODO(), 1)
+		coll, err := newHandler().GetCollection(context.TODO(), 1)
 		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
 		assert.Nil(t, coll)
+		assert.Equal(t, 1, describe.Times())
 	})
 }

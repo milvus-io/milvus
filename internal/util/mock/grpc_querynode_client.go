@@ -102,6 +102,14 @@ func (m *GrpcQueryNodeClient) QuerySegments(ctx context.Context, in *querypb.Que
 	return &internalpb.RetrieveResults{}, m.Err
 }
 
+func (m *GrpcQueryNodeClient) Materialize(ctx context.Context, in *querypb.QueryRequest, opts ...grpc.CallOption) (*internalpb.MaterializeResults, error) {
+	return &internalpb.MaterializeResults{}, m.Err
+}
+
+func (m *GrpcQueryNodeClient) MaterializeSegments(ctx context.Context, in *querypb.QueryRequest, opts ...grpc.CallOption) (*internalpb.MaterializeResults, error) {
+	return &internalpb.MaterializeResults{}, m.Err
+}
+
 func (m *GrpcQueryNodeClient) QueryStreamSegments(ctx context.Context, in *querypb.QueryRequest, opts ...grpc.CallOption) (querypb.QueryNode_QueryStreamSegmentsClient, error) {
 	return &streamrpc.LocalQueryClient{}, m.Err
 }

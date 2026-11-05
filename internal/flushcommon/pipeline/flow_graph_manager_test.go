@@ -59,7 +59,6 @@ func TestFlowGraphManager(t *testing.T) {
 	mockBroker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil).Maybe()
 	mockBroker.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return([]*datapb.SegmentInfo{}, nil).Maybe()
 	mockBroker.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	mockBroker.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	wbm := writebuffer.NewMockBufferManager(t)
 	wbm.EXPECT().Register(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
@@ -72,7 +71,6 @@ func TestFlowGraphManager(t *testing.T) {
 		Ctx:                context.TODO(),
 		Broker:             mockBroker,
 		Session:            &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 0}},
-		CheckpointUpdater:  util.NewChannelCheckpointUpdater(mockBroker),
 		SyncMgr:            syncmgr.NewMockSyncManager(t),
 		WriteBufferManager: wbm,
 		Allocator:          allocator.NewMockAllocator(t),
