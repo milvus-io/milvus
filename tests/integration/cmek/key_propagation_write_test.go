@@ -82,8 +82,8 @@ func (s *propagationFlushSuite) TestFlush() {
 		err      error
 	}
 	flushed := make(chan flushResult, 1)
-	// Flush now waits for consuming-side L1/L0 completion. Observe the fault
-	// while that same request is in flight, then let it finish after recovery.
+	// In 3.0 the Flush RPC acknowledges sealing. Observe persistence through
+	// GetFlushState at this same request's timestamp, then recover the key.
 	go func() {
 		response, err := s.Cluster.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{
 			DbName: s.dbName, CollectionNames: []string{collection},
@@ -94,11 +94,6 @@ func (s *propagationFlushSuite) TestFlush() {
 		s.fixture.waitForRetry(s.T(), fault, func() {
 			s.Require().True(maps.Equal(before, s.objectSnapshot(ctx, prefixes...)),
 				"key-unavailable flush created or overwrote target objects, including unpublished files")
-			select {
-			case result := <-flushed:
-				s.T().Fatalf("original Flush returned while writer key was unavailable: response=%v err=%v", result.response, result.err)
-			default:
-			}
 			state, err := s.Cluster.MixCoordClient.GetFlushState(ctx, &datapb.GetFlushStateRequest{
 				FlushTs: insert.GetTimestamp(), CollectionID: collectionID,
 			})
@@ -142,7 +137,7 @@ func (s *propagationFlushSuite) TestFlush() {
 	case <-ctx.Done():
 		s.T().Fatalf("original Flush did not finish after key recovery: %v", ctx.Err())
 	}
-	ids := flush.GetFlushCollSegIDs()[collection].GetData()
+	ids := flushSegmentIDs(flush, collection)
 	s.Require().NotEmpty(ids)
 	flushTs := flush.GetCollFlushTs()[collection]
 	s.WaitForFlush(ctx, ids, flushTs, s.dbName, collection)

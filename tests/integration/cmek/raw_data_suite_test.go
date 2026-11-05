@@ -245,6 +245,16 @@ func (s *rawDataSuite) assertRawLoadedSegments(ctx context.Context, collectionID
 	}, 3*time.Minute, 500*time.Millisecond)
 }
 
+// 3.0 reports newly sealed segments separately from segments that had already
+// flushed. Both belong to the original Flush; its timestamp fences persistence.
+func flushSegmentIDs(response *milvuspb.FlushResponse, collection string) []int64 {
+	ids := typeutil.NewUniqueSet(response.GetCollSegIDs()[collection].GetData()...)
+	ids.Insert(response.GetFlushCollSegIDs()[collection].GetData()...)
+	result := ids.Collect()
+	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
+	return result
+}
+
 func (s *rawDataSuite) rawFlushedSegments(collection string, flushed []int64) []*datapb.SegmentInfo {
 	var segments []*datapb.SegmentInfo
 	s.Require().Eventually(func() bool {

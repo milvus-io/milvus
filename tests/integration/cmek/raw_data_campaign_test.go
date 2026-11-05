@@ -118,7 +118,7 @@ func (s *rawDataSuite) prepareRawDataCampaign(ctx context.Context, c rawDataCamp
 	s.insertRawDataBatch(ctx, description, c.fields, rawDataRows)
 	flush, err := s.Cluster.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{DbName: s.dbName, CollectionNames: []string{collection}})
 	s.Require().NoError(merr.CheckRPCCall(flush, err))
-	ids := flush.GetFlushCollSegIDs()[collection].GetData()
+	ids := flushSegmentIDs(flush, collection)
 	s.Require().NotEmpty(ids)
 	s.WaitForFlush(ctx, ids, flush.GetCollFlushTs()[collection], s.dbName, collection)
 	segments := s.rawFlushedSegments(collection, ids)

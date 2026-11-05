@@ -45,7 +45,7 @@ The entry-point tables generate **49 cases**, including successful paths and fau
 
 | Entry point | Cases | Paths exercised | Writer-key failure expectation |
 | --- | ---: | --- | --- |
-| `TestKeyPropagationFlush` | 4 | V2/V3 ordinary flush. | No persisted output or completed flush; restoring the key completes the original batch and Flush request. |
+| `TestKeyPropagationFlush` | 4 | V2/V3 ordinary flush. | No persisted output or completed flush state; restoring the key completes the original batch at the original Flush timestamp. |
 | `TestKeyPropagationIndex` | 10 | V2/V3 physical vector and scalar builds; V3 default-value build with no source file for the added field. | No dispatch or changed objects; the same build IDs complete after restoration. |
 | `TestKeyPropagationImport` | 18 | Protocol V2 (8) and V3 (10); all four source/target encryption combinations. V3 includes reshard fragments and the separately dispatched final writer. | PreImport fails before dispatch. Import and reshard retry, then complete the same tasks after restoration. Faults target encrypted outputs. |
 | `TestKeyPropagationCompaction` | 8 | V2/V3 Sort and Mix, including each plan's Text Stats. | Failed plan, no output segments or changed objects, and no key registration on the cold DataNode. |
