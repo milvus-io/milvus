@@ -23,6 +23,36 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+// An exhausted retry should return the last error without waiting for a retry
+// that will never happen. The pre-fix behavior waited for the full backoff.
+func TestDo_NoSleepAfterFinalAttempt(t *testing.T) {
+	wantErr := errors.New("last attempt failed")
+	attempts := 0
+	start := time.Now()
+	err := Do(context.Background(), func() error {
+		attempts++
+		return wantErr
+	}, Attempts(1), Sleep(time.Second))
+
+	assert.ErrorIs(t, err, wantErr)
+	assert.Equal(t, 1, attempts)
+	assert.Less(t, time.Since(start), 500*time.Millisecond, "must not sleep after the final attempt")
+}
+
+func TestHandle_NoSleepAfterFinalAttempt(t *testing.T) {
+	wantErr := errors.New("last attempt failed")
+	attempts := 0
+	start := time.Now()
+	err := Handle(context.Background(), func() (bool, error) {
+		attempts++
+		return true, wantErr
+	}, Attempts(1), Sleep(time.Second))
+
+	assert.ErrorIs(t, err, wantErr)
+	assert.Equal(t, 1, attempts)
+	assert.Less(t, time.Since(start), 500*time.Millisecond, "must not sleep after the final attempt")
+}
+
 func TestDo(t *testing.T) {
 	ctx := context.Background()
 
