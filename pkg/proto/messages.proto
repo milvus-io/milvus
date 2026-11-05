@@ -74,6 +74,7 @@ enum MessageType {
     UpdateImport                 = 49;
     AddFileResource              = 50;
     RemoveFileResource           = 51;
+    Upsert                       = 52;
 
     // AlterWAL is used to alter the wal configuration to the current cluster.
     AlterWAL             = 700;
@@ -201,13 +202,15 @@ message InsertMessageHeader {
 // the client: the primary keys the FIRST attempt produced on this write unit,
 // and where each of them belongs in the client's original request.
 //
-// It has two roles. As a field of InsertMessageHeader it is what the streaming
+// It has two roles. As a field of InsertMessageHeader or UpsertMessageHeader it is what the streaming
 // node stores so the answer survives; as the payload of an append result's
 // `extra` it is what the proxy reads back to rebuild MutationResult. It is
 // defined here, next to the header, because the header is what makes it durable.
 //
 // THIS FIELD IS THE ONE EXCEPTION to the "keep the header light" rule above, and
-// the exception is deliberate:
+// the exception is deliberate. Upsert uses the same header boundary so retry
+// and recovery can read its result without decoding the compound body.
+//
 //
 //   - ids cannot be recovered from the body. For autoID the keys are
 //     server-allocated and a retry allocates different ones, so a duplicate must
@@ -248,6 +251,23 @@ message SegmentAssignment {
 message DeleteMessageHeader {
     int64 collection_id = 1;
     uint64 rows = 2;
+}
+
+// Upsert is one atomic delete-and-insert write unit. Row data stays in the body; retry metadata follows Insert.
+message UpsertMessageHeader {
+    int64 collection_id = 1;
+    PartitionSegmentAssignment partition = 2;
+    optional int32 schema_version = 3;
+    uint64 delete_rows = 4;
+    optional IdempotentInsertResult idempotent_result = 5;
+}
+
+message UpsertMessageBody {
+    msg.InsertRequest insert = 1;
+    msg.DeleteRequest delete = 2;
+    // Removed before release. Results have one source: the header.
+    reserved 3;
+    reserved "append_result";
 }
 
 // FlushMessageHeader just nothing.

@@ -40,7 +40,7 @@ func ClassifyTransformLogMessage(msg message.ImmutableMessage) TransformLogKind 
 		return TransformLogKindNone
 	}
 	switch msg.MessageType() {
-	case message.MessageTypeDelete:
+	case message.MessageTypeDelete, message.MessageTypeUpsert:
 		return TransformLogKindDelete
 	case message.MessageTypeInsert:
 		return TransformLogKindNone
@@ -51,8 +51,8 @@ func ClassifyTransformLogMessage(msg message.ImmutableMessage) TransformLogKind 
 	}
 }
 
-// A transaction is classified as a whole: any Delete takes precedence. Empty
-// transactions and sequences of Inserts are None; other transactions are barriers.
+// A transaction is classified as a whole: delete-bearing bodies take precedence.
+// Empty transactions and pure row writes are None; other transactions are barriers.
 func classifyTransformTxn(txn message.ImmutableTxnMessage) TransformLogKind {
 	if txn == nil || txn.Size() == 0 {
 		return TransformLogKindNone
@@ -60,7 +60,7 @@ func classifyTransformTxn(txn message.ImmutableTxnMessage) TransformLogKind {
 	kind := TransformLogKindNone
 	_ = txn.RangeOver(func(inner message.ImmutableMessage) error {
 		switch inner.MessageType() {
-		case message.MessageTypeDelete:
+		case message.MessageTypeDelete, message.MessageTypeUpsert:
 			kind = TransformLogKindDelete
 		case message.MessageTypeInsert:
 		default:
@@ -92,8 +92,7 @@ func (o TransformEntryOption) acceptDelete(partitionID int64, timeTick uint64) b
 // Inserts produce no entry; other payload-free messages produce a barrier
 // containing only their TimeTick. A filtered-out Delete still produces no entry.
 //
-// A committed Txn containing Delete produces one entry at the outer Txn
-// TimeTick, holding the Delete blocks of every Delete child.
+// A committed Txn produces one entry at its outer TimeTick with every applicable delete block.
 func BuildTransformLogEntry(msg message.ImmutableMessage, opt TransformEntryOption) *streamingpb.TransformLogEntry {
 	switch ClassifyTransformLogMessage(msg) {
 	case TransformLogKindNone:
@@ -102,15 +101,15 @@ func BuildTransformLogEntry(msg message.ImmutableMessage, opt TransformEntryOpti
 		return &streamingpb.TransformLogEntry{TimeTick: msg.TimeTick()}
 	}
 	switch msg.MessageType() {
-	case message.MessageTypeDelete:
-		deleted := message.MustAsImmutableDeleteMessageV1(msg)
-		return transformEntryFromDeletes(msg.TimeTick(), []message.ImmutableDeleteMessageV1{deleted}, opt)
+	case message.MessageTypeDelete, message.MessageTypeUpsert:
+		deleted, _ := AsDeleteRequest(msg)
+		return transformEntryFromDeletes(msg.TimeTick(), []*msgpb.DeleteRequest{deleted}, opt)
 	case message.MessageTypeTxn:
 		txn := message.AsImmutableTxnMessage(msg)
-		deletes := make([]message.ImmutableDeleteMessageV1, 0)
+		deletes := make([]*msgpb.DeleteRequest, 0)
 		_ = txn.RangeOver(func(im message.ImmutableMessage) error {
-			if im.MessageType() == message.MessageTypeDelete {
-				deletes = append(deletes, message.MustAsImmutableDeleteMessageV1(im))
+			if deleted, ok := AsDeleteRequest(im); ok {
+				deletes = append(deletes, deleted)
 			}
 			return nil
 		})
@@ -120,10 +119,10 @@ func BuildTransformLogEntry(msg message.ImmutableMessage, opt TransformEntryOpti
 	}
 }
 
-func transformEntryFromDeletes(timeTick uint64, deletes []message.ImmutableDeleteMessageV1, opt TransformEntryOption) *streamingpb.TransformLogEntry {
+func transformEntryFromDeletes(timeTick uint64, deletes []*msgpb.DeleteRequest, opt TransformEntryOption) *streamingpb.TransformLogEntry {
 	blocks := make([]*streamingpb.TransformDeleteBlock, 0, len(deletes))
 	for _, deleted := range deletes {
-		request := cloneDeleteRequest(deleted.MustBody())
+		request := cloneDeleteRequest(deleted)
 		if request == nil {
 			continue
 		}

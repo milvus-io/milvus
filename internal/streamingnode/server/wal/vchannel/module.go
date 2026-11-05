@@ -236,7 +236,7 @@ func (m *VChannelRecoveryModule) ObserveMessage(
 		m.handleTruncateCollectionMessage(ctx, retained)
 	case message.MessageTypeCreateSegment:
 		m.handleCreateSegmentMessage(ctx, message.MustAsRetainedImmutableCreateSegmentMessageV2(retained))
-	case message.MessageTypeInsert, message.MessageTypeTxn:
+	case message.MessageTypeInsert, message.MessageTypeUpsert, message.MessageTypeTxn:
 		m.handleInsertMessage(ctx, retained)
 	case message.MessageTypeFlush:
 		m.handleFlushMessage(ctx, retained)

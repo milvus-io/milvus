@@ -196,7 +196,7 @@ func (cm *QueryMVCCManager) applyLocked(msg message.ImmutableMessage, insertOnly
 		current.TransformingTimetick = tick
 	case message.MessageTypeInsert:
 		current.GrowingTimetick = max(current.GrowingTimetick, tick)
-	case message.MessageTypeDelete, message.MessageTypeCommitTxn:
+	case message.MessageTypeDelete, message.MessageTypeUpsert, message.MessageTypeCommitTxn:
 		current.TransformingTimetick = max(current.TransformingTimetick, tick)
 		current.GrowingTimetick = max(current.GrowingTimetick, tick)
 	default:

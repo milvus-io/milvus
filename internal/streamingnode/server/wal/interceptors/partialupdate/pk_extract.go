@@ -7,6 +7,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility/primarykey"
@@ -311,4 +312,45 @@ func extractDropCollectionID(msg message.BasicMessage) (int64, bool) {
 		return 0, true
 	}
 	return dropMsg.Header().GetCollectionId(), true
+}
+
+// extractPKsFromUpsert validates both components before using their common PK set.
+// Validation makes the insert PK set the exact union of the two components.
+func extractPKsFromUpsert(ctx context.Context, msg message.BasicMessage, getter primaryKeyDescriptorGetter) (primarykey.Keys, error) {
+	var header *message.UpsertMessageHeader
+	var body *message.UpsertMessageBody
+	var err error
+	if immutable, ok := msg.(message.ImmutableMessage); ok {
+		typed, e := message.AsImmutableUpsertMessageV2(immutable)
+		if e != nil {
+			return primarykey.Keys{}, status.NewUnrecoverableError("invalid Upsert envelope for write tracking: %v", e)
+		}
+		header = typed.Header()
+		body, err = decodeRecoveredBody(ctx, "upsert", typed)
+	} else {
+		typed, e := message.AsMutableUpsertMessageV2(msg.(message.MutableMessage))
+		if e != nil {
+			return primarykey.Keys{}, status.NewUnrecoverableError("invalid Upsert envelope for write tracking: %v", e)
+		}
+		header = typed.Header()
+		body, err = typed.Body(ctx)
+	}
+	if err != nil {
+		if errors.Is(err, message.ErrMalformedBody) {
+			return primarykey.Keys{}, status.NewUnrecoverableError("malformed Upsert body for write tracking: %v", err)
+		}
+		return primarykey.Keys{}, err
+	}
+	if getter == nil {
+		return primarykey.Keys{}, status.NewUnrecoverableError("Upsert primary key descriptor getter is unavailable")
+	}
+	descriptor, err := primaryKeyDescriptorOf(getter, header.GetCollectionId())
+	if err != nil {
+		return primarykey.Keys{}, err
+	}
+	primary := &schemapb.FieldSchema{FieldID: descriptor.FieldID, DataType: descriptor.DataType, IsPrimaryKey: true}
+	if err := message.ValidateUpsert(header, body, primary); err != nil {
+		return primarykey.Keys{}, status.NewUnrecoverableError("invalid Upsert body for write tracking: %v", err)
+	}
+	return primarykey.KeysOfInsert(body.GetInsert(), descriptor.FieldID, descriptor.DataType)
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/replicate/mock_replicates"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate/replicates"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
@@ -68,4 +69,21 @@ func TestReplicateInterceptor(t *testing.T) {
 	assert.Nil(t, msgID4)
 
 	interceptor.Close()
+}
+
+func TestReplicatedUpsertEnvelopePrecedesDuplicateClassification(t *testing.T) {
+	for _, marker := range []string{"_np", "_pcl", "_bh", "_ur"} {
+		t.Run(marker, func(t *testing.T) {
+			manager := mock_replicates.NewMockReplicatesManager(t)
+			interceptor := NewInterceptorBuilder().Build(&interceptors.InterceptorBuildParam{ReplicateManager: manager})
+			msg := message.NewUpsertMessageBuilderV2().WithVChannel("p_1v0").WithProperty(marker, "").WithHeader(&message.UpsertMessageHeader{}).WithBody(&message.UpsertMessageBody{}).MustBuildMutable()
+			msg.WithReplicateHeader(&message.ReplicateHeader{ClusterID: "source", MessageID: walimplstest.NewTestMessageID(1), LastConfirmedMessageID: walimplstest.NewTestMessageID(0), TimeTick: 10})
+			_, err := interceptor.DoAppend(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+				t.Fatal("invalid envelope reached append")
+				return nil, nil
+			})
+			assert.Error(t, err)
+			assert.True(t, status.AsStreamingError(err).IsUnrecoverable())
+		})
+	}
 }

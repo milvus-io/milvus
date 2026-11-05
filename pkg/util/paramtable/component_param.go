@@ -222,6 +222,7 @@ func (p *ComponentParam) versionGateItems() []*ParamItem {
 		&p.FunctionCfg.EnableWriteBeforeMaterialization,
 		&p.DataCoordCfg.ImportEnableIDRangeMsg,
 		&p.DataCoordCfg.EnableArraySortIndex,
+		&p.StreamingCfg.UpsertWALWriteEnabled,
 	}
 }
 
@@ -9575,6 +9576,7 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 }
 
 type streamingConfig struct {
+	UpsertWALWriteEnabled                            ParamItem `refreshable:"true"`
 	SchemaCacheTTL                                   ParamItem `refreshable:"false"`
 	QueryViewLiveEventDispatchConcurrencyPerPChannel ParamItem `refreshable:"true"`
 
@@ -9984,6 +9986,22 @@ Zero disables this key-length bound; requests that carry no key are accepted at 
 	p.IdempotencyMaxKeyLength.Init(base.mgr)
 
 	// txn
+	p.UpsertWALWriteEnabled = ParamItem{
+		Key:          "streaming.wal.upsert.enabled",
+		Version:      "3.0.7",
+		Doc:          "Enable native Upsert WAL generation and replicated append. false: disable generation (default); auto: enable after all online local components reach 3.0.7 for one minute; true: force enable. Configure auto before coordinator startup. The control plane must keep CDC targets upgraded and enabled before the primary. Retained decoding and transaction resolution remain enabled when false.",
+		DefaultValue: "false",
+		VersionGateSwitcher: &VersionGateSwitcher{
+			EnableAutoSwitchValue: "auto",
+			PreSwitchValue:        "false",
+			GateVersion:           "3.0.7",
+			TargetValue:           "true",
+			SwitchDelay:           time.Minute,
+		},
+		Export: true,
+	}
+	p.UpsertWALWriteEnabled.Init(base.mgr)
+
 	p.TxnDefaultKeepaliveTimeout = ParamItem{
 		Key:          "streaming.txn.defaultKeepaliveTimeout",
 		Version:      "2.5.0",

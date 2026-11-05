@@ -179,6 +179,11 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 		// if the wal is fenced, we should reject all append operations.
 		return nil, status.NewChannelFenced(w.Channel().String())
 	}
+	if msg.MessageType() == message.MessageTypeUpsert {
+		if !paramtable.Get().StreamingCfg.UpsertWALWriteEnabled.GetAsBool() {
+			return nil, status.NewUnrecoverableError("native Upsert WAL append is disabled. Upgrade all readers and CDC targets before enabling streaming.wal.upsert.enabled")
+		}
+	}
 
 	if msg.MessageType().IsDMLMessageType() && w.IsRejected() {
 		// if the wal is rate limit rejected, we reject all the DML operation to protect the wal from being overloaded.
