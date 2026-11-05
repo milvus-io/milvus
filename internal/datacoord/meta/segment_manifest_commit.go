@@ -992,6 +992,9 @@ func (m *Meta) applySegmentCatalogMutation(current *SegmentInfo, mutation Segmen
 		segment = current.Clone()
 	}
 	applySegmentCatalogTypedFields(segment, mutation)
+	if err := m.validateSegmentChangeVisibilityLocked(pack.Segments, nil); err != nil {
+		return nil, err
+	}
 	if err := pack.Validate(); err != nil {
 		return nil, err
 	}

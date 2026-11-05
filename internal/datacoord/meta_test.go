@@ -493,6 +493,7 @@ func (suite *MetaBasicSuite) TestCollection() {
 }
 
 func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
+	setSegmentChangeTestParam(suite.T(), &Params.DataCoordCfg.SegmentChangeEnabled, "false")
 	ms := metacache.NewMetaStore(nil)
 	getLatestSegments := func() *meta.SegmentsInfo {
 		latestSegments := meta.NewSegmentsInfo(ms)
@@ -1156,6 +1157,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {
 }
 
 func (suite *MetaBasicSuite) TestCompleteMixCompactionMutation_UsesCompositeUpdate() {
+	setSegmentChangeTestParam(suite.T(), &Params.DataCoordCfg.SegmentChangeEnabled, "false")
 	ms := metacache.NewMetaStore(nil)
 	mockChMgr := mocks.NewChunkManager(suite.T())
 
@@ -1570,6 +1572,7 @@ func (suite *MetaBasicSuite) TestRecalculateSegmentPosition() {
 }
 
 func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions() {
+	setSegmentChangeTestParam(suite.T(), &Params.DataCoordCfg.SegmentChangeEnabled, "false")
 	ms := metacache.NewMetaStore(nil)
 	mockChMgr := mocks.NewChunkManager(suite.T())
 
@@ -2064,6 +2067,7 @@ func (suite *MetaBasicSuite) TestSetSegment() {
 }
 
 func (suite *MetaBasicSuite) TestCompleteBumpSchemaVersionCompactionMutation() {
+	setSegmentChangeTestParam(suite.T(), &Params.DataCoordCfg.SegmentChangeEnabled, "false")
 	ms := metacache.NewMetaStore(nil)
 	// Helper to build a SegmentsInfo containing a single healthy Flushed segment with the given ID.
 	makeSegments := func(segID int64, state commonpb.SegmentState) *meta.SegmentsInfo {

@@ -77,6 +77,23 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// CommitSegmentChangeGroupForTest exercises the final metadata boundary.
+func (m *Meta) CommitSegmentChangeGroupForTest(ctx context.Context, g *model.SegmentChangeGroup, ts uint64) error {
+	return m.commitSegmentChangeGroup(ctx, g, ts, nil)
+}
+
+func (m *Meta) ApplySegmentCatalogMutationForTest(segmentID int64, mutation SegmentCatalogMutation) error {
+	m.SegMu.Lock()
+	defer m.SegMu.Unlock()
+	_, err := m.applySegmentCatalogMutation(m.Segments.GetSegment(segmentID), mutation)
+	return err
+}
+
+// SegmentChangeGroupLockedForTest reads a group while the caller holds SegMu.
+func (m *Meta) SegmentChangeGroupLockedForTest(id int64) *model.SegmentChangeGroup {
+	return m.segmentChangeGroups[id].Clone()
+}
+
 func GetFieldBinlogIDs(fieldID int64, logIDs ...int64) *datapb.FieldBinlog {
 	l := &datapb.FieldBinlog{
 		FieldID: fieldID,

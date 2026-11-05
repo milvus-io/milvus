@@ -27,9 +27,6 @@ packages:
       Trigger:
         config:
           mockname: MockTrigger
-  github.com/milvus-io/milvus/internal/datacoord/compaction/task:
-    interfaces:
-      CompactionMeta:
   github.com/milvus-io/milvus/internal/datacoord/compaction/view:
     interfaces:
       CollectionTopologyQuerier:
@@ -48,6 +45,11 @@ packages:
           filename: mock_segment_manager.go
   github.com/milvus-io/milvus/internal/datacoord/meta:
     interfaces:
+      CompactionMeta:
+        config:
+          dir: "{{.InterfaceDir}}/../compaction/task"
+          outpkg: task
+          inpackage: False
       Handler:
         config:
           mockname: NMockHandler
