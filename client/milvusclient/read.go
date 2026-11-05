@@ -36,6 +36,7 @@ func (c *Client) Search(ctx context.Context, option SearchOption, callOptions ..
 	if err != nil {
 		return nil, err
 	}
+	req.GuaranteeTimestamp = c.guaranteeTimestamp(req.GetCollectionName(), req.GetConsistencyLevel(), req.GetUseDefaultConsistency(), req.GetGuaranteeTimestamp())
 	collection, err := c.getCollection(ctx, req.GetCollectionName())
 	if err != nil {
 		return nil, err
@@ -175,6 +176,7 @@ func (c *Client) Query(ctx context.Context, option QueryOption, callOptions ...g
 	if err != nil {
 		return resultSet, err
 	}
+	req.GuaranteeTimestamp = c.guaranteeTimestamp(req.GetCollectionName(), req.GetConsistencyLevel(), req.GetUseDefaultConsistency(), req.GetGuaranteeTimestamp())
 
 	collection, err := c.getCollection(ctx, req.GetCollectionName())
 	if err != nil {
@@ -214,6 +216,7 @@ func (c *Client) HybridSearch(ctx context.Context, option HybridSearchOption, ca
 	if err != nil {
 		return nil, err
 	}
+	req.GuaranteeTimestamp = c.guaranteeTimestamp(req.GetCollectionName(), req.GetConsistencyLevel(), req.GetUseDefaultConsistency(), req.GetGuaranteeTimestamp())
 
 	collection, err := c.getCollection(ctx, req.GetCollectionName())
 	if err != nil {

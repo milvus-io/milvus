@@ -53,6 +53,7 @@ func (c *Client) Insert(ctx context.Context, option InsertOption, callOptions ..
 				return err
 			}
 
+			c.collCache.UpdateWriteTs(option.CollectionName(), resp.GetTimestamp())
 			result.InsertCount = resp.GetInsertCnt()
 			result.IDs, err = column.IDColumns(collection.Schema, resp.GetIDs(), 0, -1)
 			if err != nil {
@@ -80,6 +81,7 @@ func (c *Client) Delete(ctx context.Context, option DeleteOption, callOptions ..
 		if err = merr.CheckRPCCall(resp, err); err != nil {
 			return err
 		}
+		c.collCache.UpdateWriteTs(req.GetCollectionName(), resp.GetTimestamp())
 		result.DeleteCount = resp.GetDeleteCnt()
 		return nil
 	})
@@ -108,6 +110,7 @@ func (c *Client) Upsert(ctx context.Context, option UpsertOption, callOptions ..
 			if err = merr.CheckRPCCall(resp, err); err != nil {
 				return err
 			}
+			c.collCache.UpdateWriteTs(option.CollectionName(), resp.GetTimestamp())
 			result.UpsertCount = resp.GetUpsertCnt()
 			result.IDs, err = column.IDColumns(collection.Schema, resp.GetIDs(), 0, -1)
 			if err != nil {

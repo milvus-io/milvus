@@ -134,7 +134,14 @@ func (c *Client) DropCollection(ctx context.Context, option DropCollectionOption
 		resp, err := milvusService.DropCollection(ctx, req, callOptions...)
 		return merr.CheckRPCCall(resp, err)
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	// the collection may be re-created with a different schema, evict both
+	// the schema cache and the stale write timestamp
+	c.collCache.Evict(req.GetCollectionName())
+	c.collCache.EvictWriteTs(req.GetCollectionName())
+	return nil
 }
 
 func (c *Client) TruncateCollection(ctx context.Context, option TruncateCollectionOption, callOptions ...grpc.CallOption) error {
@@ -148,37 +155,60 @@ func (c *Client) TruncateCollection(ctx context.Context, option TruncateCollecti
 func (c *Client) RenameCollection(ctx context.Context, option RenameCollectionOption, callOptions ...grpc.CallOption) error {
 	req := option.Request()
 
-	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.RenameCollection(ctx, req, callOptions...)
 		return merr.CheckRPCCall(resp, err)
 	})
+	if err != nil {
+		return err
+	}
+	// schema is tied to the old collection name, evict both the schema cache
+	// and the write timestamp bound to the old name
+	c.collCache.Evict(req.GetOldName())
+	c.collCache.EvictWriteTs(req.GetOldName())
+	return nil
 }
 
 func (c *Client) AlterCollectionProperties(ctx context.Context, option AlterCollectionPropertiesOption, callOptions ...grpc.CallOption) error {
 	req := option.Request()
 
-	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.AlterCollection(ctx, req, callOptions...)
 		return merr.CheckRPCCall(resp, err)
 	})
+	if err != nil {
+		return err
+	}
+	c.collCache.Evict(req.GetCollectionName())
+	return nil
 }
 
 func (c *Client) DropCollectionProperties(ctx context.Context, option DropCollectionPropertiesOption, callOptions ...grpc.CallOption) error {
 	req := option.Request()
 
-	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.AlterCollection(ctx, req, callOptions...)
 		return merr.CheckRPCCall(resp, err)
 	})
+	if err != nil {
+		return err
+	}
+	c.collCache.Evict(req.GetCollectionName())
+	return nil
 }
 
 func (c *Client) AlterCollectionFieldProperty(ctx context.Context, option AlterCollectionFieldPropertiesOption, callOptions ...grpc.CallOption) error {
 	req := option.Request()
 
-	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.AlterCollectionField(ctx, req, callOptions...)
 		return merr.CheckRPCCall(resp, err)
 	})
+	if err != nil {
+		return err
+	}
+	c.collCache.Evict(req.GetCollectionName())
+	return nil
 }
 
 func (c *Client) GetCollectionStats(ctx context.Context, opt GetCollectionOption) (map[string]string, error) {
@@ -209,5 +239,9 @@ func (c *Client) AddCollectionField(ctx context.Context, opt AddCollectionFieldO
 		resp, err := milvusService.AddCollectionField(ctx, req, callOpts...)
 		return merr.CheckRPCCall(resp, err)
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	c.collCache.Evict(req.GetCollectionName())
+	return nil
 }
