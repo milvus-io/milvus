@@ -2809,11 +2809,6 @@ type proxyConfig struct {
 	MaxSearchAggregationResultEntries ParamItem `refreshable:"true"`
 	MaterializeEnabled                ParamItem `refreshable:"true"`
 
-	// EnableElementNullAndNestedArray is a temporary preview switch that lets
-	// the proxy accept element-nullable and nested Array fields while the feature
-	// is incomplete. It is removed together with the gate.
-	EnableElementNullAndNestedArray ParamItem `refreshable:"true"`
-
 	AccessLog AccessLogConfig
 
 	// connection manager
@@ -3397,15 +3392,6 @@ please adjust in embedded Milvus: false`,
 		Doc:          "switch for whether proxy shall skip partition key check when inserting data",
 	}
 	p.SkipPartitionKeyCheck.Init(base.mgr)
-
-	p.EnableElementNullAndNestedArray = ParamItem{
-		Key:          "proxy.enableElementNullAndNestedArray",
-		Version:      "3.1.0",
-		DefaultValue: "false",
-		Doc:          "temporary preview switch: accept element-nullable and nested Array fields, which are not complete yet; for tests only",
-		Export:       false,
-	}
-	p.EnableElementNullAndNestedArray.Init(base.mgr)
 
 	p.ResolveAliasForPrivilege = ParamItem{
 		Key:          "proxy.resolveAliasForPrivilege",

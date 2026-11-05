@@ -820,3 +820,151 @@ func (s *ElementNullableSuite) TestPartialUpsertKeepsOmittedStruct() {
 	s.assertRowsWithScore(ctx, name, third)
 	s.assertNullStructRow(ctx, name, 4, third(4))
 }
+
+// pathReplaceItems runs a PATH_REPLACE upsert of the items struct on one row.
+// children must carry exactly one struct element each.
+func (s *ElementNullableSuite) pathReplaceItems(ctx context.Context, name string, pk int64, path string, children ...*schemapb.FieldData) {
+	for _, child := range children {
+		typeutil.SetFieldDataValidData(child, []bool{true})
+	}
+	result, err := s.Cluster.MilvusClient.Upsert(ctx, &milvuspb.UpsertRequest{
+		CollectionName: name, NumRows: 1, PartialUpdate: true,
+		HashKeys: integration.GenerateHashKeys(1),
+		FieldsData: []*schemapb.FieldData{
+			{
+				FieldName: "pk", FieldId: 100, Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{pk}}},
+				}},
+			},
+			{
+				FieldName: structName, FieldId: 104, Type: schemapb.DataType_ArrayOfStruct,
+				Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: children}},
+			},
+		},
+		FieldOps: []*schemapb.FieldPartialUpdateOp{{
+			FieldName: structName, Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, Path: path,
+		}},
+	})
+	s.Require().NoError(merr.CheckRPCCall(result, err))
+	s.Equal(int64(1), result.GetUpsertCnt())
+}
+
+// nestedTextOperand is a nested_text operand row holding one inner Array.
+func nestedTextOperand(values ...string) *schemapb.FieldData {
+	field := scalarField(textName, 107, arrayRow(schemapb.DataType_VarChar, nil, stringRow(values...)))
+	field.GetScalars().GetArrayData().ElementType = schemapb.DataType_Array
+	return field
+}
+
+// nested_text is a nested Array sub-field that is not element_nullable.
+// PATH_REPLACE replaces one of its inner Arrays, alone or as part of a whole
+// struct element, on rows read from a growing and from a sealed segment.
+func (s *ElementNullableSuite) TestPathReplaceNestedArraySubField() {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+	name := "path_nested_" + funcutil.RandomString(8)
+	s.Require().NoError(merr.Error(s.create(ctx, collectionSchema(name))))
+	plainName := typeutil.ConcatStructFieldName(structName, plainVec)
+	nullName := typeutil.ConcatStructFieldName(structName, nullVec)
+	for _, field := range []string{"embedding", plainName, nullName} {
+		metricType := metric.L2
+		if field == plainName {
+			metricType = metric.MaxSim
+		}
+		status, err := s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+			CollectionName: name, FieldName: field, IndexName: "idx_" + funcutil.RandomString(4),
+			ExtraParams: integration.ConstructIndexParam(dim, integration.IndexHNSW, metricType),
+		})
+		s.Require().NoError(merr.CheckRPCCall(status, err))
+		s.WaitForIndexBuilt(ctx, name, field)
+	}
+	status, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{CollectionName: name})
+	s.Require().NoError(merr.CheckRPCCall(status, err))
+	s.WaitForLoad(ctx, name)
+	s.Require().NoError(s.insert(ctx, name, insertFields()))
+
+	children := func() map[string]*schemapb.FieldData {
+		fields := s.queryRow(ctx, name, 1)
+		result := make(map[string]*schemapb.FieldData)
+		for _, child := range fields[structName].GetStructArrays().GetFields() {
+			result[child.GetFieldName()] = child
+		}
+		s.Require().Len(result, 5)
+		return result
+	}
+	assertText := func(got map[string]*schemapb.FieldData, want ...[]string) {
+		row := got[textName].GetScalars().GetArrayData().GetData()[0]
+		s.Empty(row.GetValidData())
+		s.Require().Len(row.GetArrayData().GetData(), len(want))
+		for i, inner := range want {
+			s.Equal(inner, row.GetArrayData().GetData()[i].GetStringData().GetData(), "nested_text element %d", i)
+			s.Empty(row.GetArrayData().GetData()[i].GetValidData())
+		}
+	}
+	// Only nested_text element 1 changes; the other sub-fields keep the
+	// inserted values.
+	assertChildPath := func() {
+		got := children()
+		assertText(got, []string{"alpha"}, []string{"gamma", "delta"})
+		ints := got[intsName].GetScalars().GetArrayData().GetData()[0]
+		s.Equal([]bool{true, false}, ints.GetValidData())
+		s.Equal([]int64{11, 0}, ints.GetLongData().GetData())
+		nested := got[nestedName].GetScalars().GetArrayData().GetData()[0]
+		s.Equal([]bool{true, false}, nested.GetValidData())
+		s.Equal([]int64{21, 0, 23}, nested.GetArrayData().GetData()[0].GetLongData().GetData())
+		s.Equal(append(vector(2), vector(3)...), got[plainVec].GetVectors().GetVectorArray().GetData()[0].GetFloatVector().GetData())
+		s.Equal([]bool{true, false}, got[nullVec].GetVectors().GetVectorArray().GetData()[0].GetValidData())
+	}
+	// The whole element 0 is replaced; the omitted element_nullable sub-fields
+	// become null at that element.
+	assertElementPath := func() {
+		got := children()
+		assertText(got, []string{"omega"}, []string{"gamma", "delta"})
+		s.Equal([]bool{false, false}, got[intsName].GetScalars().GetArrayData().GetData()[0].GetValidData())
+		s.Equal([]bool{false, false}, got[nestedName].GetScalars().GetArrayData().GetData()[0].GetValidData())
+		s.Equal([]bool{false, false}, got[nullVec].GetVectors().GetVectorArray().GetData()[0].GetValidData())
+		s.Equal(append(vector(9), vector(3)...), got[plainVec].GetVectors().GetVectorArray().GetData()[0].GetFloatVector().GetData())
+	}
+
+	// The old row is read from a growing segment.
+	s.pathReplaceItems(ctx, name, 1, "[1]["+textName+"]", nestedTextOperand("gamma", "delta"))
+	assertChildPath()
+	s.flushAndReload(ctx, name)
+	assertChildPath()
+
+	// The old row is read from a sealed segment.
+	s.pathReplaceItems(ctx, name, 1, "[0]",
+		nestedTextOperand("omega"),
+		vectorField(plainVec, 109, vectorRow(vector(9))))
+	assertElementPath()
+	s.flushAndReload(ctx, name)
+	assertElementPath()
+
+	// An operand with two inner Arrays is not one element.
+	result, err := s.Cluster.MilvusClient.Upsert(ctx, &milvuspb.UpsertRequest{
+		CollectionName: name, NumRows: 1, PartialUpdate: true,
+		HashKeys: integration.GenerateHashKeys(1),
+		FieldsData: []*schemapb.FieldData{
+			{
+				FieldName: "pk", FieldId: 100, Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1}}},
+				}},
+			},
+			{
+				FieldName: structName, FieldId: 104, Type: schemapb.DataType_ArrayOfStruct,
+				Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: []*schemapb.FieldData{func() *schemapb.FieldData {
+					field := scalarField(textName, 107, arrayRow(schemapb.DataType_VarChar, nil, stringRow("a"), stringRow("b")))
+					field.GetScalars().GetArrayData().ElementType = schemapb.DataType_Array
+					return field
+				}()}}},
+			},
+		},
+		FieldOps: []*schemapb.FieldPartialUpdateOp{{
+			FieldName: structName, Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, Path: "[0][" + textName + "]",
+		}},
+	})
+	s.Require().ErrorContains(merr.CheckRPCCall(result, err), "must contain exactly one element")
+	assertElementPath()
+}
