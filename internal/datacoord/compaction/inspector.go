@@ -506,7 +506,7 @@ func (c *Inspector) cleanPartitionStats() error {
 	}
 	infos := c.partitionStatsMeta.ListAllPartitionStatsInfos()
 	for _, info := range infos {
-		collInfo := c.meta.(*meta.Meta).GetCollection(info.GetCollectionID())
+		collInfo := c.meta.GetCollection(info.GetCollectionID())
 		if collInfo == nil {
 			unusedPartStats = append(unusedPartStats, info)
 			continue
@@ -664,7 +664,8 @@ func (c *Inspector) createCompactTask(t *datapb.CompactionTask) (ctask.Compactio
 	if t.GetType() == datapb.CompactionType_Level0DeleteCompaction && c.segmentChangeL0Exclusions().Contain(t.GetChannel()) {
 		return nil, merr.WrapErrServiceUnavailableMsg("L0 compaction is deferred while segment change publication is pending")
 	}
-	if m, ok := c.meta.(*meta.Meta); ok {
+	{
+		m := c.meta
 		group, err := m.GetCompactionChangeGroup(t)
 		if err != nil {
 			return nil, err
@@ -712,7 +713,7 @@ func (c *Inspector) createCompactTask(t *datapb.CompactionTask) (ctask.Compactio
 	if err := c.meta.ValidateSegmentStateBeforeCompleteCompactionMutation(t); err != nil {
 		return nil, err
 	}
-	if m, ok := c.meta.(*meta.Meta); ok && m.ReserveGroupSort(t) {
+	if c.meta.ReserveGroupSort(t) {
 		return task, nil
 	}
 	exist, succeed := c.meta.CheckAndSetSegmentsCompacting(context.TODO(), t.GetInputSegments())

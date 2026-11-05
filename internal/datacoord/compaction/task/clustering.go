@@ -145,7 +145,7 @@ func (t *ClusteringCompactionTask) CreateTaskOnWorker(nodeID int64, cluster sess
 }
 
 func (t *ClusteringCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
-	if m, ok := t.meta.(*meta.Meta); ok && m.ProducerChangeGroup(model.SegmentChangeSourceClustering, t.GetTaskProto().GetPlanID(), t.GetTaskProto().GetChannel()) != nil {
+	if t.meta.GetProducerChangeGroup(model.SegmentChangeSourceClustering, t.GetTaskProto().GetPlanID(), t.GetTaskProto().GetChannel()) != nil {
 		t.Process()
 		return
 	}
@@ -421,7 +421,7 @@ func (t *ClusteringCompactionTask) BuildCompactionRequest() (*datapb.CompactionP
 		ClusteringKeyField:        taskProto.GetClusteringKeyField().GetFieldID(),
 		MaxSegmentRows:            taskProto.GetMaxSegmentRows(),
 		PreferSegmentRows:         taskProto.GetPreferSegmentRows(),
-		AnalyzeResultPath:         path.Join(t.meta.(*meta.Meta).ChunkManager.RootPath(), common.AnalyzeStatsPath, metautil.JoinIDPath(taskProto.AnalyzeTaskID, taskProto.AnalyzeVersion)),
+		AnalyzeResultPath:         path.Join(t.meta.CompactionStorageRoot(), common.AnalyzeStatsPath, metautil.JoinIDPath(taskProto.AnalyzeTaskID, taskProto.AnalyzeVersion)),
 		AnalyzeSegmentIds:         taskProto.GetInputSegments(),
 		BeginLogID:                logIDRange.Begin, // BeginLogID is deprecated, but still assign it for compatibility.
 		PreAllocatedSegmentIDs:    taskProto.GetPreAllocatedSegmentIDs(),
@@ -499,7 +499,7 @@ func (t *ClusteringCompactionTask) processStats() error {
 				tmpToResultSegments[segmentID] = nil
 				continue
 			}
-			to, ok := t.meta.(*meta.Meta).GetCompactionTo(segmentID)
+			to, ok := t.meta.GetCompactionTo(segmentID)
 			if !ok || to == nil {
 				select {
 				case meta.GetStatsTaskChSingleton() <- segmentID:
@@ -594,14 +594,15 @@ func (t *ClusteringCompactionTask) regeneratePartitionStats(tmpToResultSegments 
 }
 
 func (t *ClusteringCompactionTask) processIndexing() error {
-	if m, ok := t.meta.(*meta.Meta); ok {
+	{
+		m := t.meta
 		if Params.DataCoordCfg.SegmentChangeEnabled.GetAsBool() {
 			if _, _, err := m.StageAdmittedChange(context.TODO(), meta.ClusteringPublicationGroup(t.GetTaskProto()), true); err != nil {
 				return err
 			}
 			return t.completeTask()
 		}
-		if m.ProducerChangeGroup(model.SegmentChangeSourceClustering, t.GetTaskProto().GetPlanID(), t.GetTaskProto().GetChannel()) != nil {
+		if m.GetProducerChangeGroup(model.SegmentChangeSourceClustering, t.GetTaskProto().GetPlanID(), t.GetTaskProto().GetChannel()) != nil {
 			return t.completeTask()
 		}
 	}
@@ -663,8 +664,9 @@ func (t *ClusteringCompactionTask) markInputSegmentsDropped() error {
 // indexed is the final state of a clustering compaction task
 // one task should only run this once
 func (t *ClusteringCompactionTask) completeTask() error {
-	if m, ok := t.meta.(*meta.Meta); ok {
-		g, handled, err := m.StageExistingChange(m.Ctx, meta.ClusteringPublicationGroup(t.GetTaskProto()))
+	{
+		m := t.meta
+		g, handled, err := m.StageAdmittedChange(m.CompactionContext(), meta.ClusteringPublicationGroup(t.GetTaskProto()), false)
 		if err != nil {
 			return err
 		}
@@ -714,8 +716,9 @@ func (t *ClusteringCompactionTask) completeTask() error {
 	// schedule an asynchronous DataView snapshot reconciliation. The recompute
 	// runs on the latest SegmentMeta, so it observes both the visibility flip
 	// and the input retirement in one projection.
-	if mt, ok := t.meta.(*meta.Meta); ok {
-		mt.RecomputeDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
+	{
+		mt := t.meta
+		mt.RecomputeCompactionDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
 	}
 
 	return nil
@@ -751,20 +754,16 @@ func (t *ClusteringCompactionTask) resetSegmentCompacting() {
 }
 
 func (t *ClusteringCompactionTask) doClean() error {
-	if m, ok := t.meta.(*meta.Meta); ok {
-		g := m.ProducerChangeGroup(model.SegmentChangeSourceClustering, t.GetTaskProto().GetPlanID(), t.GetTaskProto().GetChannel())
+	{
+		m := t.meta
+		g := m.GetProducerChangeGroup(model.SegmentChangeSourceClustering, t.GetTaskProto().GetPlanID(), t.GetTaskProto().GetChannel())
 		if g != nil && g.State == model.SegmentChangeStateCommitted && t.GetTaskProto().GetState() != datapb.CompactionTaskState_completed {
 			if err := t.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_completed)); err != nil {
 				return err
 			}
 		}
 		if g != nil && !g.IsTerminal() {
-			g.State = model.SegmentChangeStateAborted
-			g.FailReason = "clustering task cleaned before publication"
-			if err := m.UpdateSegmentChangeGroup(m.Ctx, g); err != nil {
-				return err
-			}
-			if err := m.ReclaimSegmentChangeGroup(m.Ctx, g); err != nil {
+			if err := m.AbortProducerChange(context.TODO(), g, "clustering task cleaned before publication"); err != nil {
 				return err
 			}
 		}
@@ -827,7 +826,7 @@ func (t *ClusteringCompactionTask) doClean() error {
 				// tmpSegment is always invisible
 				operators = append(operators, meta.UpdateStatusOperator(segID, commonpb.SegmentState_Dropped))
 				if !hasResultSegments {
-					toSegments, _ := t.meta.(*meta.Meta).GetCompactionTo(segID)
+					toSegments, _ := t.meta.GetCompactionTo(segID)
 					for _, toSeg := range toSegments {
 						operators = append(operators, meta.UpdateStatusOperator(toSeg.GetID(), commonpb.SegmentState_Dropped))
 					}
@@ -885,7 +884,7 @@ func (t *ClusteringCompactionTask) doAnalyze() error {
 		return err
 	}
 
-	t.analyzeScheduler.Enqueue(analyze.NewAnalyzeTask(proto.Clone(analyzeTask).(*indexpb.AnalyzeTask), t.meta.(*meta.Meta), t.analyzeMeta))
+	t.analyzeScheduler.Enqueue(analyze.NewAnalyzeTask(proto.Clone(analyzeTask).(*indexpb.AnalyzeTask), t.meta, t.analyzeMeta))
 
 	mlog.Info(context.TODO(), "submit analyze task", mlog.Int64("planID", t.GetTaskProto().GetPlanID()), mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()), mlog.Int64("collectionID", t.GetTaskProto().GetCollectionID()), mlog.Int64("id", t.GetTaskProto().GetAnalyzeTaskID()))
 	return t.UpdateAndSaveTaskMeta(SetState(datapb.CompactionTaskState_analyzing))

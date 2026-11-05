@@ -211,19 +211,19 @@ func TestSegmentChangeImportCallbackPublishesPreparedGroups(t *testing.T) {
 func TestSegmentChangeCDCImportPublishesReadyGroupWithoutInspectorTick(t *testing.T) {
 	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "true")
 	m, _, _ := seedMixProducer(t)
-	m.dataViewManager = nil
-	m.AddCollection(&collectionInfo{ID: 100, Schema: readinessVectorSchema(), VChannelNames: []string{"v1"}})
-	require.NoError(t, m.AddSegment(t.Context(), NewSegmentInfo(&datapb.SegmentInfo{
+	m.DataViewManager = nil
+	m.AddCollection(&meta.CollectionInfo{ID: 100, Schema: readinessVectorSchema(), VChannelNames: []string{"v1"}})
+	require.NoError(t, m.AddSegment(t.Context(), meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID: 10, CollectionID: 100, PartitionID: 1, InsertChannel: "v1", State: commonpb.SegmentState_Flushed,
 		IsImporting: true, IsSorted: true, NumOfRows: 10,
 		Binlogs: []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: 10, TimestampTo: 100}}}},
 	})))
-	s := &Server{meta: m, allocator: newMockAllocator(t)}
+	s := &Server{meta: m, allocator: meta.NewMockAllocator(t)}
 	job := &importJob{ImportJob: &datapb.ImportJob{JobID: 1, CollectionID: 100}}
 	handled, err := s.stageImportChangeFromSource(t.Context(), job, "v1", []int64{10}, 200, model.SegmentChangeSourceCDCReplicated)
 	require.NoError(t, err)
 	require.True(t, handled)
-	require.Equal(t, model.SegmentChangeStateCommitted, m.producerChangeGroup(model.SegmentChangeSourceCDCReplicated, 1, "v1").State)
+	require.Equal(t, model.SegmentChangeStateCommitted, m.ProducerChangeGroup(model.SegmentChangeSourceCDCReplicated, 1, "v1").State)
 	require.False(t, m.GetSegment(t.Context(), 10).GetIsInvisible())
 }
 
@@ -231,19 +231,19 @@ func TestSegmentChangeCDCImportWaitsForUnreadyGroup(t *testing.T) {
 	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "true")
 	setSegmentChangeTestParam(t, &Params.DataCoordCfg.EnableSortCompaction, "true")
 	m, _, _ := seedMixProducer(t)
-	m.dataViewManager = nil
-	m.AddCollection(&collectionInfo{ID: 100, Schema: readinessVectorSchema(), VChannelNames: []string{"v1"}})
-	require.NoError(t, m.AddSegment(t.Context(), NewSegmentInfo(&datapb.SegmentInfo{
+	m.DataViewManager = nil
+	m.AddCollection(&meta.CollectionInfo{ID: 100, Schema: readinessVectorSchema(), VChannelNames: []string{"v1"}})
+	require.NoError(t, m.AddSegment(t.Context(), meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID: 10, CollectionID: 100, PartitionID: 1, InsertChannel: "v1", State: commonpb.SegmentState_Flushed,
 		IsImporting: true, NumOfRows: 10,
 		Binlogs: []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: 10, TimestampTo: 100}}}},
 	})))
-	s := &Server{meta: m, allocator: newMockAllocator(t)}
+	s := &Server{meta: m, allocator: meta.NewMockAllocator(t)}
 	job := &importJob{ImportJob: &datapb.ImportJob{JobID: 1, CollectionID: 100}}
 	handled, err := s.stageImportChangeFromSource(t.Context(), job, "v1", []int64{10}, 200, model.SegmentChangeSourceCDCReplicated)
 	require.True(t, handled)
 	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
-	require.Equal(t, model.SegmentChangeStateStaged, m.producerChangeGroup(model.SegmentChangeSourceCDCReplicated, 1, "v1").State)
+	require.Equal(t, model.SegmentChangeStateStaged, m.ProducerChangeGroup(model.SegmentChangeSourceCDCReplicated, 1, "v1").State)
 	require.True(t, m.GetSegment(t.Context(), 10).GetIsInvisible())
 }
 
@@ -372,7 +372,7 @@ func TestSegmentChangeExternalRefreshMixedPatchKeepsLegacyApply(t *testing.T) {
 	}
 	require.NoError(t, applyExternalCollectionSegmentUpdateWithGroup(t.Context(), m, 10, 8000,
 		[]int64{2001, 2002}, nil, []*datapb.SegmentInfo{patch, newSegment}))
-	require.Nil(t, m.producerChangeGroup(model.SegmentChangeSourceExternalRefresh, 8000, ""))
+	require.Nil(t, m.ProducerChangeGroup(model.SegmentChangeSourceExternalRefresh, 8000, ""))
 	require.Equal(t, commonpb.SegmentState_Dropped, m.GetSegment(t.Context(), 2001).GetState())
 	require.Equal(t, patch.ManifestPath, m.GetSegment(t.Context(), 2002).GetManifestPath())
 	require.False(t, m.GetSegment(t.Context(), 1001).GetIsInvisible())

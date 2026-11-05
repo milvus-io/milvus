@@ -117,7 +117,7 @@ func TestSegmentChangeRetainsL0WhilePublishing(t *testing.T) {
 	ci.cleanFailedTasks()
 	require.Empty(t, ci.cleaningTasks)
 	require.Equal(t, commonpb.SegmentState_Flushed, m.GetSegment(t.Context(), 3001).GetState())
-	require.False(t, m.GetSegment(t.Context(), 3001).isCompacting)
+	require.False(t, m.GetSegment(t.Context(), 3001).IsCompacting)
 	require.Equal(t, model.SegmentChangeStateStaged, m.GetSegmentChangeGroup(t.Context(), 10, 5000).State)
 	inspector := newSegmentChangeInspector(t.Context(), m, meta.NewMockAllocator(t))
 	inspector.checkAllGroups(t.Context())

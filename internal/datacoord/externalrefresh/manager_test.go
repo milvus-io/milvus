@@ -949,6 +949,8 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResu
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := context.Background()
+			previous := Params.DataCoordCfg.SegmentChangeEnabled.SwapTempValue(test.staging)
+			t.Cleanup(func() { Params.DataCoordCfg.SegmentChangeEnabled.SwapTempValue(previous) })
 			catalog := &StubCatalog{}
 			refreshMeta, err := NewExternalCollectionRefreshMeta(ctx, catalog)
 			assert.NoError(t, err)
@@ -1002,6 +1004,7 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResu
 				NumOfRows:    9,
 			}})
 			mt := &meta.Meta{
+				Ctx:       ctx,
 				Catalog:   catalog,
 				Segments:  segments,
 				MetaStore: ms,
@@ -1020,20 +1023,18 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsMergesTaskResu
 			})
 			require.NoError(t, err)
 			if test.staging == "true" {
-				group := mt.producerChangeGroup(model.SegmentChangeSourceExternalRefresh, 1, "")
+				group := mt.ProducerChangeGroup(model.SegmentChangeSourceExternalRefresh, 1, "")
 				require.NotNil(t, group)
 				require.Equal(t, model.SegmentChangeStateStaged, group.State)
-				require.Equal(t, commonpb.SegmentState_Flushed, mt.segments.GetSegment(2).GetState())
-				require.True(t, mt.segments.GetSegment(10).GetIsInvisible())
-				require.True(t, mt.segments.GetSegment(20).GetIsInvisible())
-				inspector := newSegmentChangeInspector(ctx, mt, newMockAllocator(t))
-				inspector.evaluateStaged(ctx, group)
-				group = mt.GetSegmentChangeGroup(ctx, 100, 1)
-				require.Equal(t, model.SegmentChangeStateReady, group.State)
-				inspector.tryPublish(ctx, group)
+				require.Equal(t, commonpb.SegmentState_Flushed, mt.Segments.GetSegment(2).GetState())
+				require.True(t, mt.Segments.GetSegment(10).GetIsInvisible())
+				require.True(t, mt.Segments.GetSegment(20).GetIsInvisible())
+				group.State = model.SegmentChangeStateReady
+				require.NoError(t, mt.UpdateSegmentChangeGroup(ctx, group))
+				require.NoError(t, mt.PublishGroup(ctx, group, meta.NewMockAllocator(t)))
 				require.Equal(t, model.SegmentChangeStateCommitted, mt.GetSegmentChangeGroup(ctx, 100, 1).State)
 			} else {
-				require.Nil(t, mt.producerChangeGroup(model.SegmentChangeSourceExternalRefresh, 1, ""))
+				require.Nil(t, mt.ProducerChangeGroup(model.SegmentChangeSourceExternalRefresh, 1, ""))
 			}
 
 			assert.Equal(t, commonpb.SegmentState_Flushed, mt.Segments.GetSegment(1).GetState())
@@ -1130,6 +1131,7 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsWithoutBaselin
 		Partitions:    []int64{1},
 	})
 	mt := &meta.Meta{
+		Ctx:       ctx,
 		Catalog:   catalog,
 		Segments:  meta.NewSegmentsInfo(ms),
 		MetaStore: ms,
@@ -1141,6 +1143,7 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsWithoutBaselin
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.SegmentState_Flushed, mt.Segments.GetSegment(10).GetState())
+	assert.Equal(t, Params.DataCoordCfg.SegmentChangeEnabled.GetAsBool(), mt.Segments.GetSegment(10).GetIsInvisible())
 }
 
 // Applying a refresh must not enqueue index builds by itself: a refresh that
@@ -1175,6 +1178,7 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsDoesNotNotifyI
 		NumOfRows:    5,
 	}})
 	mt := &meta.Meta{
+		Ctx:       ctx,
 		Catalog:   catalog,
 		Segments:  segments,
 		MetaStore: ms,

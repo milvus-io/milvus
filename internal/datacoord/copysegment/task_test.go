@@ -2213,7 +2213,7 @@ func (s *CopySegmentTaskSuite) TestCopyManifestVerificationParallelAndFailClosed
 	task, copies, m, im, resp := s.newCopiedManifestReadBackFixture()
 	original := resp.GetSegmentResults()[0]
 	for _, id := range []int64{2002, 2003} {
-		taskProto := task.(*copySegmentTask).task.Load()
+		taskProto := task.(*Task).Task.Load()
 		taskProto.IdMappings = append(taskProto.IdMappings, &datapb.CopySegmentIDMapping{TargetSegmentId: id})
 		segment := m.GetSegment(context.Background(), 2001).Clone()
 		segment.ID = id

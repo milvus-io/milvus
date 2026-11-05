@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
@@ -52,7 +53,7 @@ func (c *failNthSegmentChangeDeleteCatalog) Update(ctx context.Context, actions 
 }
 
 func TestSegmentChangeCleanerWaitsForProducerAndRetirement(t *testing.T) {
-	m, err := newMemoryMeta(t)
+	m, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
 	ready := seedPublishMeta(t, m, model.SegmentChangeSourceMixCompaction)
 	task := &datapb.CompactionTask{
@@ -60,7 +61,7 @@ func TestSegmentChangeCleanerWaitsForProducerAndRetirement(t *testing.T) {
 		State: datapb.CompactionTaskState_executing,
 	}
 	require.NoError(t, m.SaveCompactionTask(t.Context(), task))
-	require.NoError(t, m.publishGroup(t.Context(), ready, newMockAllocator(t)))
+	require.NoError(t, m.PublishGroup(t.Context(), ready, meta.NewMockAllocator(t)))
 	cleaner := &segmentChangeCleaner{mt: m}
 	clean := func() {
 		cleaner.clean(t.Context(), m.GetSegmentChangeGroupsByCollection(t.Context(), 0))
@@ -81,7 +82,7 @@ func TestSegmentChangeCleanerWaitsForProducerAndRetirement(t *testing.T) {
 }
 
 func TestSegmentChangeCleanerWaitsForFailedMemberReclamation(t *testing.T) {
-	m, err := newMemoryMeta(t)
+	m, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
 	ready := seedPublishMeta(t, m, model.SegmentChangeSourceMixCompaction)
 	require.NoError(t, m.SaveCompactionTask(t.Context(), &datapb.CompactionTask{
@@ -94,7 +95,7 @@ func TestSegmentChangeCleanerWaitsForFailedMemberReclamation(t *testing.T) {
 	cleaner := &segmentChangeCleaner{mt: m}
 	cleaner.clean(t.Context(), m.GetSegmentChangeGroupsByCollection(t.Context(), 0))
 	require.NotNil(t, m.GetSegmentChangeGroup(t.Context(), failed.CollectionID, failed.GroupID))
-	require.NoError(t, m.reclaimSegmentChangeGroup(t.Context(), failed))
+	require.NoError(t, m.ReclaimSegmentChangeGroup(t.Context(), failed))
 	require.Equal(t, commonpb.SegmentState_Flushed, m.GetSegment(t.Context(), 2001).GetState(),
 		"reclamation must leave the original parent available")
 	cleaner.clean(t.Context(), m.GetSegmentChangeGroupsByCollection(t.Context(), 0))
@@ -136,7 +137,7 @@ func TestSegmentChangeCleanerUsesCopyTaskIdentity(t *testing.T) {
 
 func TestSegmentChangeInspectorCleansOnlyFinishedProducers(t *testing.T) {
 	ctx := t.Context()
-	m, err := newMemoryMeta(t)
+	m, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
 	compaction := &model.SegmentChangeGroup{
 		GroupID: 5000, Source: model.SegmentChangeSourceMixCompaction, SourceJobID: 5000,
@@ -159,7 +160,7 @@ func TestSegmentChangeInspectorCleansOnlyFinishedProducers(t *testing.T) {
 	job := &importJob{ImportJob: &datapb.ImportJob{JobID: 8000, State: internalpb.ImportJobState_Importing}}
 	importMeta := NewMockImportMeta(t)
 	importMeta.EXPECT().GetJob(mock.Anything, int64(8000)).Return(job).Maybe()
-	inspector := newSegmentChangeInspector(ctx, m, newMockAllocator(t))
+	inspector := newSegmentChangeInspector(ctx, m, meta.NewMockAllocator(t))
 	server := &Server{meta: m, importMeta: importMeta, segmentChangeInspector: inspector}
 	server.initSegmentChangeCleaner()
 	require.Same(t, m, inspector.cleaner.mt)
@@ -180,7 +181,7 @@ func TestSegmentChangeInspectorCleansOnlyFinishedProducers(t *testing.T) {
 
 func TestSegmentChangeCleanerPreservesImportPredecessorsAcrossRestart(t *testing.T) {
 	ctx := t.Context()
-	m, err := newMemoryMeta(t)
+	m, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
 	const jobID int64 = 8000
 	for ordinal, id := range []int64{1001, 1002, 1003} {
@@ -214,8 +215,8 @@ func TestSegmentChangeCleanerPreservesImportPredecessorsAcrossRestart(t *testing
 	last := m.GetSegmentChangeGroup(ctx, 10, 1003)
 	last.State = model.SegmentChangeStateAborted
 	require.NoError(t, m.UpdateSegmentChangeGroup(ctx, last))
-	failedCatalog := &failNthSegmentChangeDeleteCatalog{DataCoordCatalog: m.catalog, failAt: 2}
-	m.catalog = failedCatalog
+	failedCatalog := &failNthSegmentChangeDeleteCatalog{DataCoordCatalog: m.Catalog, failAt: 2}
+	m.Catalog = failedCatalog
 	cleaner.clean(ctx, m.GetSegmentChangeGroupsByCollection(ctx, 10))
 	require.Equal(t, []int64{1003, 1002}, failedCatalog.deletedID,
 		"the cleaner must delete the successor first and stop at a failed delete")
@@ -235,7 +236,7 @@ func TestSegmentChangeCleanerPreservesImportPredecessorsAcrossRestart(t *testing
 
 func TestSegmentChangeGroupCompositeWriteCannotOrphanNewSuccessor(t *testing.T) {
 	ctx := t.Context()
-	m, err := newMemoryMeta(t)
+	m, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
 	first := &model.SegmentChangeGroup{
 		GroupID: 1001, Source: model.SegmentChangeSourceImportJob, SourceJobID: 8000,
@@ -259,7 +260,7 @@ func TestSegmentChangeGroupCompositeWriteCannotOrphanNewSuccessor(t *testing.T) 
 
 func TestSegmentChangeGroupCreationRequiresPersistedPredecessor(t *testing.T) {
 	ctx := t.Context()
-	m, err := newMemoryMeta(t)
+	m, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
 	first := &model.SegmentChangeGroup{
 		GroupID: 1001, Source: model.SegmentChangeSourceImportJob, SourceJobID: 8000,

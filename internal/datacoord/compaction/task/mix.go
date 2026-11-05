@@ -126,10 +126,11 @@ func (t *MixCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 	// Group registration is the durable result anchor. A worker result or
 	// task-meta response can be lost after it commits; resume without asking
 	// the worker to execute the same logical change again.
-	if m, ok := t.Meta.(*meta.Meta); ok {
+	{
+		m := t.Meta
 		group, err := m.GetCompactionChangeGroup(task)
 		if err != nil {
-			mlog.Warn(m.Ctx, "cannot resume compaction change group", mlog.Int64("planID", task.GetPlanID()), mlog.Err(err))
+			mlog.Warn(m.CompactionContext(), "cannot resume compaction change group", mlog.Int64("planID", task.GetPlanID()), mlog.Err(err))
 			return
 		}
 		if group != nil {
@@ -240,7 +241,8 @@ func NewMixCompactionTask(t *datapb.CompactionTask,
 }
 
 func (t *MixCompactionTask) processMetaSaved() bool {
-	if m, ok := t.Meta.(*meta.Meta); ok {
+	{
+		m := t.Meta
 		group, err := m.GetCompactionChangeGroup(t.GetTaskProto())
 		if err != nil {
 			return false
@@ -260,7 +262,8 @@ func (t *MixCompactionTask) processMetaSaved() bool {
 		}
 	}
 	var resultOpts []compactionTaskOpt
-	if m, ok := t.Meta.(*meta.Meta); ok {
+	{
+		m := t.Meta
 		if group, err := m.GetCompactionChangeGroup(t.GetTaskProto()); err == nil && group != nil {
 			resultOpts = append(resultOpts, setResultSegments(meta.CompactionGroupResultIDs(group, t.GetTaskProto())))
 		}
@@ -296,13 +299,14 @@ func (t *MixCompactionTask) SaveSegmentMeta(result *datapb.CompactionPlanResult)
 	// Legacy mutations publish immediately and need an asynchronous snapshot
 	// reconciliation. Staged results leave the inputs live; the group inspector
 	// owns their later DataView publication and retirement.
-	if mt, ok := t.Meta.(*meta.Meta); ok {
+	{
+		mt := t.Meta
 		group, err := mt.GetCompactionChangeGroup(t.GetTaskProto())
 		if err != nil {
 			return err
 		}
 		if group == nil {
-			mt.RecomputeDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
+			mt.RecomputeCompactionDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
 		} else {
 			newSegmentIDs = meta.CompactionGroupResultIDs(group, t.GetTaskProto())
 		}
@@ -374,7 +378,8 @@ func (t *MixCompactionTask) Clean() bool {
 }
 
 func (t *MixCompactionTask) doClean() error {
-	if m, ok := t.Meta.(*meta.Meta); ok {
+	{
+		m := t.Meta
 		group, err := m.GetCompactionChangeGroup(t.GetTaskProto())
 		if err != nil {
 			return err
@@ -384,12 +389,7 @@ func (t *MixCompactionTask) doClean() error {
 			_, materialized = group.SortJobs[t.GetTaskID()]
 		}
 		if group != nil && !group.IsTerminal() && !materialized {
-			group.State = model.SegmentChangeStateAborted
-			group.FailReason = "compaction task canceled before group publication"
-			if err := m.UpdateSegmentChangeGroup(context.TODO(), group); err != nil {
-				return err
-			}
-			if err := m.ReclaimSegmentChangeGroup(context.TODO(), group); err != nil {
+			if err := m.AbortProducerChange(context.TODO(), group, "compaction task canceled before group publication"); err != nil {
 				return err
 			}
 		}
@@ -459,8 +459,9 @@ func (t *MixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		CurrentScalarIndexVersion: t.ievm.ResolveScalarIndexVersion(),
 	}
 	if taskProto.GetType() == datapb.CompactionType_SortCompaction && len(taskProto.GetInputSegments()) == 1 {
-		if m, ok := t.Meta.(*meta.Meta); ok {
-			if g := m.GetSegmentChangeGroupBySegmentID(m.Ctx, taskProto.GetInputSegments()[0]); g != nil && g.AwaitCommitFence {
+		{
+			m := t.Meta
+			if g := m.GetSegmentChangeGroupBySegmentID(m.CompactionContext(), taskProto.GetInputSegments()[0]); g != nil && g.AwaitCommitFence {
 				// Pending import rows acquire their effective timestamp at the
 				// commit fence. Their provisional file timestamps must not cause
 				// relative collection TTL to remove rows during preparation.

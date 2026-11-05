@@ -368,7 +368,7 @@ func TestSelectFlushedSegment_RespectsCommitTimestamp(t *testing.T) {
 
 	makeTask := func(triggerTs uint64) *L0CompactionTask {
 		mockAlloc := allocator.NewMockAllocator(t)
-		mockMeta := NewMockCompactionMeta(t)
+		mockMeta := newTestCompactionMeta(t)
 		mockMeta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).
 			RunAndReturn(func(ctx context.Context, filters ...meta.SegmentFilter) []*meta.SegmentInfo {
 				return applyFilters([]*meta.SegmentInfo{importSeg}, filters...)

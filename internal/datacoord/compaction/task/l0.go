@@ -524,8 +524,9 @@ func (t *L0CompactionTask) SaveSegmentMeta(outputSegs []*datapb.CompactionSegmen
 		}
 		// The L0 SegmentMeta mutation is committed (deltalogs + manifest recorded);
 		// the DataView snapshot is reconciled asynchronously from SegmentMeta.
-		if mt, ok := t.meta.(*meta.Meta); ok {
-			mt.RecomputeDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
+		{
+			mt := t.meta
+			mt.RecomputeCompactionDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
 		}
 		return nil
 	}
@@ -537,8 +538,9 @@ func (t *L0CompactionTask) SaveSegmentMeta(outputSegs []*datapb.CompactionSegmen
 	// recompute observes the new Manifest version, so the DataView advances
 	// compact_version even though membership is unchanged (L0 is a hard
 	// trigger: a Manifest-version change has no dedicated counter).
-	if mt, ok := t.meta.(*meta.Meta); ok {
-		mt.RecomputeDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
+	{
+		mt := t.meta
+		mt.RecomputeCompactionDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
 	}
 	return nil
 }
@@ -638,12 +640,7 @@ func (t *L0CompactionTask) buildL0V3ManifestCommit(ctx context.Context, segmentI
 }
 
 func (t *L0CompactionTask) context() context.Context {
-	if mt, ok := t.meta.(*meta.Meta); ok && mt.Ctx != nil {
-		return mt.Ctx
-	}
-	// Unit-test CompactionMeta implementations do not own the DataCoord
-	// lifecycle context. Production tasks always take the meta context above.
-	return context.Background()
+	return t.meta.CompactionContext()
 }
 
 func (t *L0CompactionTask) GetSlotUsage() int64 {

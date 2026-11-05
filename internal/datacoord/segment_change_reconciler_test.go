@@ -43,7 +43,7 @@ import (
 
 func TestRetrySegmentChangeRecovery(t *testing.T) {
 	attempts := 0
-	require.NoError(t, retrySegmentChangeRecovery(t.Context(), func() error {
+	require.NoError(t, meta.RetrySegmentChangeRecovery(t.Context(), func() error {
 		attempts++
 		if attempts < 3 {
 			return merr.WrapErrServiceUnavailableMsg("temporary recovery failure")
@@ -52,7 +52,7 @@ func TestRetrySegmentChangeRecovery(t *testing.T) {
 	}))
 	require.Equal(t, 3, attempts)
 	attempts = 0
-	require.ErrorIs(t, retrySegmentChangeRecovery(t.Context(), func() error {
+	require.ErrorIs(t, meta.RetrySegmentChangeRecovery(t.Context(), func() error {
 		attempts++
 		return merr.WrapErrDataIntegrityMsg("missing committed member")
 	}), merr.ErrDataIntegrity)

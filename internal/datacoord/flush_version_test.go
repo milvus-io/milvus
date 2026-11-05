@@ -100,25 +100,25 @@ func TestSortEnabledFlushHandoffWithSegmentChangeDisabled(t *testing.T) {
 	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "false")
 	setSegmentChangeTestParam(t, &Params.DataCoordCfg.EnableCompaction, "true")
 	setSegmentChangeTestParam(t, &Params.DataCoordCfg.EnableSortCompaction, "true")
-	m, err := newMemoryMeta(t)
+	m, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
-	manager := dataview.NewManager(m.catalog.(dataview.Catalog), nil)
-	m.dataViewManager = manager
+	manager := dataview.NewManager(m.Catalog.(dataview.Catalog), nil)
+	m.DataViewManager = manager
 	schema := readinessVectorSchema()
-	m.AddCollection(&collectionInfo{ID: 100, Schema: schema, VChannelNames: []string{"ch1"}})
+	m.AddCollection(&meta.CollectionInfo{ID: 100, Schema: schema, VChannelNames: []string{"ch1"}})
 	_, err = manager.OnCreateCollection(t.Context(), dataview.CreateCollectionDataViewEvent{
 		CollectionID: 100, VChannels: []string{"ch1"},
 	})
 	require.NoError(t, err)
 	// This is the SegmentMeta shape written by a sort-enabled flush with the
 	// flag off: still invisible to compaction, but already sealed in DataView.
-	require.NoError(t, m.AddSegment(t.Context(), NewSegmentInfo(&datapb.SegmentInfo{
+	require.NoError(t, m.AddSegment(t.Context(), meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID: 10, CollectionID: 100, PartitionID: 10, InsertChannel: "ch1",
 		State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
 		NumOfRows: 10, IsInvisible: true, SealedAtDataVersion: &viewpb.DataVersion{StreamingVersion: 1},
 		Binlogs: []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: 10, EntriesNum: 10}}}},
 	})))
-	_, err = manager.RecomputeNow(t.Context(), 100, m.loadableProjection)
+	_, err = manager.RecomputeNow(t.Context(), 100, m.LoadableProjection)
 	require.NoError(t, err)
 	ref, err := manager.Latest(t.Context(), 100)
 	require.NoError(t, err)
@@ -135,7 +135,7 @@ func TestSortEnabledFlushHandoffWithSegmentChangeDisabled(t *testing.T) {
 		}},
 	})
 	require.NoError(t, err)
-	_, err = manager.RecomputeNow(t.Context(), 100, m.loadableProjection)
+	_, err = manager.RecomputeNow(t.Context(), 100, m.LoadableProjection)
 	require.NoError(t, err)
 	ref, err = manager.Latest(t.Context(), 100)
 	require.NoError(t, err)
@@ -189,7 +189,7 @@ func (s *ServerSuite) setupFlushVersionCatalog() (*datacoordkv.Catalog, dataview
 	})
 	require.NoError(s.T(), err)
 	s.testServer.meta.Catalog = catalog
-	s.testServer.DataViewManager = manager
+	s.testServer.dataViewManager = manager
 	return catalog, manager
 }
 
@@ -248,7 +248,7 @@ func (s *ServerSuite) TestFlushVersionSurvivesRetryRecoveryAndDataViewGC() {
 		return true, nil
 	}, nil, nil, nil)
 	require.NoError(s.T(), err)
-	s.testServer.DataViewManager = recovered
+	s.testServer.dataViewManager = recovered
 	require.True(s.T(), proto.Equal(a, s.flushVersion(reqA)))
 
 	// Compaction may retire the source before SN retries. The original version

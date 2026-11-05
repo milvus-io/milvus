@@ -68,12 +68,12 @@ func seedPublishMeta(t *testing.T, m *meta.Meta, source model.SegmentChangeSourc
 
 func TestSnapshotCandidatesAndPublishShareOneMetadataBoundary(t *testing.T) {
 	ctx := t.Context()
-	m, err := newMemoryMeta(t)
+	m, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
 	ready := seedPublishMeta(t, m, model.SegmentChangeSourceMixCompaction)
 	ids := func() []int64 {
 		var result []int64
-		for _, segment := range m.snapshotCandidateSegments(10) {
+		for _, segment := range m.SnapshotCandidateSegments(10) {
 			result = append(result, segment.GetID())
 		}
 		return result
@@ -85,13 +85,13 @@ func TestSnapshotCandidatesAndPublishShareOneMetadataBoundary(t *testing.T) {
 		"the final metadata write must honor snapshot protection even after publish preflight")
 	require.Equal(t, []int64{2001}, ids())
 	m.snapshotMeta.ClearSnapshotPending(10)
-	require.NoError(t, m.publishGroup(ctx, ready, newMockAllocator(t)))
+	require.NoError(t, m.PublishGroup(ctx, ready, meta.NewMockAllocator(t)))
 	require.Equal(t, []int64{1001}, ids(), "snapshot must include the committed replacement")
 }
 
 func TestRowCountExcludesUnpublishedChangeMembers(t *testing.T) {
 	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "true")
-	m, err := newMemoryMeta(t)
+	m, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
 	ready := seedPublishMeta(t, m, model.SegmentChangeSourceMixCompaction)
 	count := func() {
@@ -103,14 +103,14 @@ func TestRowCountExcludesUnpublishedChangeMembers(t *testing.T) {
 	// Existing groups still determine visibility after admission is disabled.
 	require.NoError(t, Params.Save(Params.DataCoordCfg.SegmentChangeEnabled.Key, "false"))
 	count()
-	require.NoError(t, m.publishGroup(t.Context(), ready, newMockAllocator(t)))
+	require.NoError(t, m.PublishGroup(t.Context(), ready, meta.NewMockAllocator(t)))
 	count()
 }
 
 func TestRowCountKeepsInvisibleFlushWithoutGroup(t *testing.T) {
-	m, err := newMemoryMeta(t)
+	m, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
-	require.NoError(t, m.AddSegment(t.Context(), NewSegmentInfo(&datapb.SegmentInfo{
+	require.NoError(t, m.AddSegment(t.Context(), meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID: 7, CollectionID: 10, PartitionID: 100, State: commonpb.SegmentState_Flushed,
 		IsInvisible: true, NumOfRows: 42,
 	})))
@@ -119,7 +119,7 @@ func TestRowCountKeepsInvisibleFlushWithoutGroup(t *testing.T) {
 }
 
 func TestRowCountExcludesAbortedMembersBeforeReclamation(t *testing.T) {
-	m, err := newMemoryMeta(t)
+	m, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
 	group := seedPublishMeta(t, m, model.SegmentChangeSourceMixCompaction)
 	group.State = model.SegmentChangeStateAborted

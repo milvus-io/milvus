@@ -2251,15 +2251,15 @@ func TestExternalCollectionRefreshChecker_WaitsForSegmentChangePublication(t *te
 		applies := 0
 		checker := NewRefreshChecker(ctx, mt, nil, refreshMeta, make(chan struct{}), nil,
 			func(context.Context, *datapb.ExternalCollectionRefreshJob) error { applies++; return nil }, nil, nil, nil)
-		checker.aggregateJobState(refreshMeta.GetJob(1))
+		checker.AggregateJobState(refreshMeta.GetJob(1))
 		held := refreshMeta.GetJob(1)
 		require.Equal(t, indexpb.JobState_JobStateInProgress, held.GetState())
 		require.NotZero(t, held.GetIndexWaitStartedTime())
 		require.Equal(t, 1, applies)
-		checker.aggregateJobState(held)
+		checker.AggregateJobState(held)
 		require.Equal(t, indexpb.JobState_JobStateInProgress, refreshMeta.GetJob(1).GetState())
 		group.State = model.SegmentChangeStateCommitted
-		checker.aggregateJobState(refreshMeta.GetJob(1))
+		checker.AggregateJobState(refreshMeta.GetJob(1))
 		require.Equal(t, indexpb.JobState_JobStateFinished, refreshMeta.GetJob(1).GetState())
 		require.Equal(t, 1, applies)
 	})
