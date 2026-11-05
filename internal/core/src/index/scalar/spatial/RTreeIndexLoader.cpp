@@ -379,34 +379,28 @@ RTreeIndexLoader::Create(OpenedIndexSource source,
 
 folly::coro::Task<IndexPtr>
 RTreeIndexLoader::Load(milvus::OpContext* context,
-                       const IndexCacheConfig* cache) {
+                       const IndexCacheConfig& cache) {
     AssertInfo(source_.has_value(),
                "cached R-Tree construction consumed this loader");
-    if (cache) {
-        const auto count = ReadRequiredRowCount(options_.params);
-        const auto* legacy = std::get_if<LegacyIndexSource>(&*source_);
-        const bool use_async =
-            legacy ? legacy->use_async
-                   : std::holds_alternative<
-                         std::shared_ptr<storage::AsyncIndexEntryReader>>(
-                         std::get<PackedIndexSource>(*source_).reader);
-        auto source = std::move(*source_);
-        source_.reset();
-        auto load = [source = std::move(source),
-                     options = options_](OpContext* ctx) mutable {
-            return LoadStorage(source, options, ctx);
-        };
-        auto slot =
-            cachinglayer::Manager::GetInstance()
-                .CreateCacheSlot<RTreeIndexState>(
-                    std::make_unique<
-                        SingleCellIndexStorageTranslator<RTreeIndexState>>(
-                        *cache, use_async, std::move(load)),
-                    context);
-        co_return std::make_shared<RTreeIndex>(std::move(slot), count);
-    }
-    co_return std::make_shared<RTreeIndex>(
-        co_await LoadStorage(*source_, options_, context));
+    const auto count = ReadRequiredRowCount(options_.params);
+    const auto* legacy = std::get_if<LegacyIndexSource>(&*source_);
+    const bool use_async =
+        legacy ? legacy->use_async
+               : std::holds_alternative<
+                     std::shared_ptr<storage::AsyncIndexEntryReader>>(
+                     std::get<PackedIndexSource>(*source_).reader);
+    auto source = std::move(*source_);
+    source_.reset();
+    auto load = [source = std::move(source),
+                 options = options_](OpContext* ctx) mutable {
+        return LoadStorage(source, options, ctx);
+    };
+    auto slot =
+        cachinglayer::Manager::GetInstance().CreateCacheSlot<RTreeIndexState>(
+            std::make_unique<SingleCellIndexStorageTranslator<RTreeIndexState>>(
+                cache, use_async, std::move(load)),
+            context);
+    co_return std::make_shared<RTreeIndex>(std::move(slot), count);
 }
 
 folly::coro::Task<std::unique_ptr<RTreeIndexState>>

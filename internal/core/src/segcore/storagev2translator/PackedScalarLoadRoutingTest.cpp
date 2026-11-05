@@ -9,6 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <gtest/gtest.h>
 
 #include <arrow/filesystem/localfs.h>
@@ -149,7 +151,8 @@ class PackedScalarLoadRoutingTest : public ::testing::Test {
             .Lookup(index::families::kSort)
             .Load({index::IndexFiles{
                        context_, {path}, index::PackedIndexStorageConfig{}},
-                   options})
+                   options,
+                   milvus::index::test::TestIndexCacheConfig()})
             ->CreateReader(nullptr);
     }
 

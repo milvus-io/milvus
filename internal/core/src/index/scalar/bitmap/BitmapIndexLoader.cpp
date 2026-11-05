@@ -1055,8 +1055,8 @@ BitmapIndexLoader::Create(OpenedIndexSource source,
 
 template <typename T, typename Posting>
 IndexPtr
-BitmapIndexLoader::CreateCached(const IndexCacheConfig& cache,
-                                milvus::OpContext* context) {
+BitmapIndexLoader::LoadTyped(milvus::OpContext* context,
+                             const IndexCacheConfig& cache) {
     auto caps = DeriveCaps(options_.params);
     caps.json_paths = false;
     const IndexMetadata metadata{
@@ -1140,31 +1140,14 @@ BitmapIndexLoader::LoadStorage(OpenedIndexSource& source,
 
 folly::coro::Task<IndexPtr>
 BitmapIndexLoader::Load(milvus::OpContext* context,
-                        const IndexCacheConfig* cache) {
+                        const IndexCacheConfig& cache) {
     AssertInfo(source_.has_value(),
                "cached bitmap construction consumed this loader");
-    if (cache) {
-        co_return DispatchBitmapType<IndexPtr>(
-            state_->params.value_type, [&]<typename T>() {
-                return state_->layout == BitmapLayout::Roaring
-                           ? CreateCached<T, roaring::Roaring>(*cache, context)
-                           : CreateCached<T, TargetBitmap>(*cache, context);
-            });
-    }
-    auto load =
-        [&]<typename T, typename Posting>() -> folly::coro::Task<IndexPtr> {
-        auto storage = co_await LoadStorage<T, Posting>(
-            *source_, options_, *state_, context);
-        auto projection =
-            JsonProjectedSpec(options_.params, storage->options.total_num_rows);
-        co_return CreateBitmapIndex<T, Posting>(std::move(storage),
-                                                std::move(projection));
-    };
-    co_return co_await DispatchBitmapType<folly::coro::Task<IndexPtr>>(
+    co_return DispatchBitmapType<IndexPtr>(
         state_->params.value_type, [&]<typename T>() {
             return state_->layout == BitmapLayout::Roaring
-                       ? load.template operator()<T, roaring::Roaring>()
-                       : load.template operator()<T, TargetBitmap>();
+                       ? LoadTyped<T, roaring::Roaring>(context, cache)
+                       : LoadTyped<T, TargetBitmap>(context, cache);
         });
 }
 

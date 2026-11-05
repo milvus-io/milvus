@@ -523,15 +523,12 @@ VectorDiskLoader::Create(OpenedIndexSource source,
 
 folly::coro::Task<IndexPtr>
 VectorDiskLoader::Load(milvus::OpContext* context,
-                       const IndexCacheConfig* cache) {
+                       const IndexCacheConfig& cache) {
     AssertInfo(source_.has_value(),
                "cached vector construction consumed this loader");
     const auto params = ParseRuntimeParams(options_.params);
-    if (!cache) {
-        co_return co_await RunLegacyLoad(
-            *source_, options_, &LoadLegacy, context);
-    }
-    auto cache_config = *cache;
+
+    auto cache_config = cache;
     // Native lazy engines still need admission and resident metadata accounting.
     if (knowhere::IndexFactory::Instance().FeatureCheck(
             params.index_type, knowhere::feature::LAZY_LOAD)) {
@@ -564,17 +561,6 @@ VectorDiskLoader::DeriveCaps(const Config& index_meta) {
     // ReaderCaps is scalar-shaped. Vector family/type metadata is sufficient
     // for current pre-pin selection; no speculative vector cap fields live here.
     return {};
-}
-
-folly::coro::Task<IndexPtr>
-VectorDiskLoader::LoadLegacy(storage::FileSource& source,
-                             const storage::LoadOptions& opts,
-                             bool use_async) {
-    const auto params = ParseDiskLoadMetadata(opts.params);
-    const auto open_options = ParseOpenOptions(opts.params, params);
-    auto engine = co_await LoadEngine(source, opts, use_async);
-    co_return std::make_shared<VectorIndex>(open_options.beamwidth,
-                                            std::move(*engine));
 }
 
 folly::coro::Task<std::unique_ptr<KnowhereEngine>>

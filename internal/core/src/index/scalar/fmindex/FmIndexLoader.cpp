@@ -305,38 +305,31 @@ FmIndexLoader::Create(OpenedIndexSource source, storage::LoadOptions options) {
 }
 
 folly::coro::Task<IndexPtr>
-FmIndexLoader::Load(milvus::OpContext* context, const IndexCacheConfig* cache) {
+FmIndexLoader::Load(milvus::OpContext* context, const IndexCacheConfig& cache) {
     AssertInfo(source_.has_value(),
                "cached FM-index construction consumed this loader");
-    if (cache) {
-        PackedFmState metadata;
-        ValidatePackedMetadata(
-            metadata, source_->Directory(), source_->Metadata(), options_);
-        const bool use_async = std::holds_alternative<
-            std::shared_ptr<storage::AsyncIndexEntryReader>>(source_->reader);
-        auto source = std::move(*source_);
-        source_.reset();
-        auto load = [source = std::move(source),
-                     options = options_](OpContext* ctx) mutable {
-            return RunPackedIndexLoad<std::unique_ptr<FmIndexStorage>>(
-                source, options, &PlanPacked, &FinishPackedStorage, ctx);
-        };
-        auto slot =
-            cachinglayer::Manager::GetInstance()
-                .CreateCacheSlot<FmIndexStorage>(
-                    std::make_unique<
-                        SingleCellIndexStorageTranslator<FmIndexStorage>>(
-                        *cache, use_async, std::move(load)),
-                    context);
-        co_return std::make_shared<FmIndex>(
-            std::move(slot),
-            metadata.runtime.value_type,
-            metadata.total_rows,
-            segcore::SegcoreConfig::default_config().get_fmindex_cost_ratio());
-    }
+    PackedFmState metadata;
+    ValidatePackedMetadata(
+        metadata, source_->Directory(), source_->Metadata(), options_);
+    const bool use_async =
+        std::holds_alternative<std::shared_ptr<storage::AsyncIndexEntryReader>>(
+            source_->reader);
+    auto source = std::move(*source_);
+    source_.reset();
+    auto load = [source = std::move(source),
+                 options = options_](OpContext* ctx) mutable {
+        return RunPackedIndexLoad<std::unique_ptr<FmIndexStorage>>(
+            source, options, &PlanPacked, &FinishPackedStorage, ctx);
+    };
+    auto slot =
+        cachinglayer::Manager::GetInstance().CreateCacheSlot<FmIndexStorage>(
+            std::make_unique<SingleCellIndexStorageTranslator<FmIndexStorage>>(
+                cache, use_async, std::move(load)),
+            context);
     co_return std::make_shared<FmIndex>(
-        co_await RunPackedIndexLoad<std::unique_ptr<FmIndexStorage>>(
-            *source_, options_, &PlanPacked, &FinishPackedStorage, context),
+        std::move(slot),
+        metadata.runtime.value_type,
+        metadata.total_rows,
         segcore::SegcoreConfig::default_config().get_fmindex_cost_ratio());
 }
 

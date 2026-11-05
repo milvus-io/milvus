@@ -31,33 +31,33 @@ struct IndexCacheConfig;
  * @brief Family-internal contract for prepared state that can create index owners.
  *
  * A concrete family's Create entry owns family validation and metadata parsing.
- * The returned loader owns that family's reusable state; this interface
+ * The returned loader owns that family's prepared state; this interface
  * exposes no storage-format properties or partially completed source-opening
  * steps.
  * External loading consumers use LoaderEntry::Load instead of this interface.
- * @note Resident Load calls on one instance must be sequential. Keep the instance alive
- * until its task finishes. A returned index owns its resources independently.
+ * @note Load consumes the prepared source once. Keep the loader alive until
+ * its task finishes. A returned Index owns its cache and reload source independently.
  */
 class IndexLoader {
  public:
     virtual ~IndexLoader() = default;
 
     /**
-     * @brief Materialize a new index from the already-opened index.
+     * @brief Consume the prepared source and create an index with its storage cache.
      * @param context Borrowed for this call only; nullptr uses default priority
      * and inherited coroutine cancellation. Keep it alive through completion.
-     * @param cache Optional storage cache policy; cached construction consumes
-     * the prepared loader source, including on failure. Do not reuse it afterward.
-     * @return An index owning resident storage or its cache and reload source.
+     * @param cache Required storage cache policy. Construction consumes the
+     * prepared source, including on failure. Keep cache alive through completion;
+     * do not reuse the loader afterward.
+     * @return An index owning its cache and reload source.
      * @note On failure, issued I/O drains and temporary targets are cleaned up
-     * before the exception propagates. Resident Load calls may retry.
+     * before the exception propagates. Recreate the loader to retry construction.
      * @note A Task does not imply a thread hop. Synchronous transport executes
      * on the calling thread; asynchronous implementations preserve I/O
      * scheduling.
      */
     virtual folly::coro::Task<IndexPtr>
-    Load(milvus::OpContext* context = nullptr,
-         const IndexCacheConfig* cache = nullptr) = 0;
+    Load(milvus::OpContext* context, const IndexCacheConfig& cache) = 0;
 };
 
 }  // namespace milvus::index

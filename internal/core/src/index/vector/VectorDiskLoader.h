@@ -53,15 +53,14 @@ class VectorDiskLoader final : public IndexLoader {
      * options.
      * @param source Opened storage source owned by the resulting loader.
      * @param options Fixed load options without a retained operation context.
-     * @return A ready loader with reusable family metadata.
+     * @return A ready loader with prepared family metadata.
      */
     static folly::coro::Task<std::unique_ptr<IndexLoader>>
     Create(OpenedIndexSource source, storage::LoadOptions options);
 
     /** @copydoc IndexLoader::Load */
     folly::coro::Task<IndexPtr>
-    Load(milvus::OpContext* context = nullptr,
-         const IndexCacheConfig* cache = nullptr) override;
+    Load(milvus::OpContext* context, const IndexCacheConfig& cache) override;
 
     /**
      * @brief Select entries that need eager async reads for the disk backend.
@@ -89,11 +88,6 @@ class VectorDiskLoader final : public IndexLoader {
      */
     static folly::coro::Task<std::unique_ptr<KnowhereEngine>>
     LoadEngine(storage::FileSource& source,
-               const storage::LoadOptions& opts,
-               bool use_async);
-
-    static folly::coro::Task<IndexPtr>
-    LoadLegacy(storage::FileSource& source,
                const storage::LoadOptions& opts,
                bool use_async);
 };

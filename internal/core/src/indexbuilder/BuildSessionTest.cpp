@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -326,7 +328,8 @@ TEST_F(BuildSessionTest, TextFieldUsesTextFamilyAndSchemaAnalyzer) {
                            {stats.Files()[0].file_name},
                            index::PackedIndexStorageConfig{
                                storage::ArtifactStorageNamespace::TextLog}},
-                       options})
+                       options,
+                       milvus::index::test::TestIndexCacheConfig()})
                 ->CreateReader(nullptr);
         ASSERT_NE(reader, nullptr);
         EXPECT_EQ(reader->ValueType(), DataType::TEXT);

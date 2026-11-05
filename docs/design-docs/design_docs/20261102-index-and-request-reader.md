@@ -36,6 +36,10 @@ Segment snapshot -> Index version -> resident Storage/Engine or internal cache
                                                               -> compute result
 ```
 
+Persisted loading always requires an explicit `IndexCacheConfig` and creates an internal cache
+slot. A resident Storage/Engine is used by direct in-memory construction, such as growing
+publication or Artifact conversion, not as an alternative persisted-load mode.
+
 ## Decisions
 
 - **Keep query interfaces on Reader.** `IIndex` owns metadata and resources and creates request

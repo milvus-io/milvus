@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <gtest/gtest.h>
 
 #include <arrow/filesystem/localfs.h>
@@ -444,7 +446,8 @@ TEST_F(TextIndexTranslatorTest,
                                        index::PackedIndexStorageConfig{
                                            storage::ArtifactStorageNamespace::
                                                TextLog}},
-                                   options})
+                                   options,
+                                   milvus::index::test::TestIndexCacheConfig()})
                             ->CreateReader(nullptr);
                     CheckTextReader(*reader);
                     const bool expected_async =

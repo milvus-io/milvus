@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include "index/test_utils/LoaderTestAccess.h"
 #include "folly/coro/BlockingWait.h"
 #include "index/PackedIndexLoad.h"
@@ -427,8 +429,9 @@ TEST(ScalarIndexV3AsyncTest, NativeDirectEntryReadsByFamily) {
             auto reader =
                 LoaderRegistry::Instance()
                     .Lookup(backend.Family())
-                    .Load(
-                        {OpenedIndexSource{PackedIndexSource{source}}, options})
+                    .Load({OpenedIndexSource{PackedIndexSource{source}},
+                           options,
+                           milvus::index::test::TestIndexCacheConfig()})
                     ->CreateReader(nullptr);
             ASSERT_NE(reader, nullptr);
             EXPECT_EQ(reader->Count(), 4);
@@ -495,11 +498,12 @@ TEST(ScalarIndexV3AsyncTest, BitmapUsesBufferedPlannedReads) {
         options.params = backend.LoadParams({.row_count = 7});
         options.enable_mmap = mmap;
         options.mmap_dir_path = staging->Path();
-        auto reader =
-            LoaderRegistry::Instance()
-                .Lookup(backend.Family())
-                .Load({OpenedIndexSource{PackedIndexSource{source}}, options})
-                ->CreateReader(nullptr);
+        auto reader = LoaderRegistry::Instance()
+                          .Lookup(backend.Family())
+                          .Load({OpenedIndexSource{PackedIndexSource{source}},
+                                 options,
+                                 milvus::index::test::TestIndexCacheConfig()})
+                          ->CreateReader(nullptr);
         ASSERT_NE(reader, nullptr);
         EXPECT_GT(remote->AsyncReadCalls(), 0);
         EXPECT_EQ(remote->ReadAtCalls(), previous_read_at);
@@ -554,7 +558,11 @@ TEST(ScalarIndexV3AsyncTest, InvertedCancelledDirectReadCanRetry) {
         folly::CancellationSource cancellation;
         OpContext context(cancellation.getToken());
         auto loading = std::async(std::launch::async, [&] {
-            return run(loader->Load(&context))->CreateReader(nullptr);
+            return folly::coro::blockingWait(
+                       loader->Load(
+                           &context,
+                           milvus::index::test::TestIndexCacheConfig()))
+                ->CreateReader(nullptr);
         });
         auto drain = folly::makeGuard([&] {
             cancellation.requestCancellation();
@@ -574,7 +582,11 @@ TEST(ScalarIndexV3AsyncTest, InvertedCancelledDirectReadCanRetry) {
         drain.dismiss();
         EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
         OpContext retry;
-        auto reader = run(loader->Load(&retry))->CreateReader(nullptr);
+        loader = run(InvertedIndexLoader::Create(
+            OpenedIndexSource{PackedIndexSource{source}}, options));
+        auto reader = folly::coro::blockingWait(
+                          loader->Load(&retry, TestIndexCacheConfig()))
+                          ->CreateReader(nullptr);
         ASSERT_NE(reader, nullptr);
         const auto* pattern =
             dynamic_cast<const IPatternMatchReader*>(reader.get());
@@ -695,7 +707,11 @@ CheckControlledPackedLoad(bool cancel_first) {
         folly::CancellationSource cancel;
         OpContext context(cancel.getToken());
         auto loading = std::async(std::launch::async, [&] {
-            return run(loader->Load(&context))->CreateReader(nullptr);
+            return folly::coro::blockingWait(
+                       loader->Load(
+                           &context,
+                           milvus::index::test::TestIndexCacheConfig()))
+                ->CreateReader(nullptr);
         });
         auto drain = folly::makeGuard([&] {
             cancel.requestCancellation();
@@ -726,7 +742,11 @@ CheckControlledPackedLoad(bool cancel_first) {
             EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
             remote->SetAutoComplete(true);
             OpContext retry_context;
-            reader = run(loader->Load(&retry_context))->CreateReader(nullptr);
+            loader = run(SortedIndexLoader::Create(
+                OpenedIndexSource{PackedIndexSource{source}}, options));
+            reader = folly::coro::blockingWait(
+                         loader->Load(&retry_context, TestIndexCacheConfig()))
+                         ->CreateReader(nullptr);
         } else {
             reader = loading.get();
         }
@@ -770,7 +790,8 @@ TEST(ScalarIndexV3AsyncTest, CancelledPayloadDrainsAndPreparedLoaderRetries) {
     CheckControlledPackedLoad(true);
 }
 
-TEST(ScalarIndexV3LoadTest, BitmapCreateDefersTargetsAndSupportsFreshLoads) {
+TEST(ScalarIndexV3LoadTest,
+     BitmapCreateDefersTargetsAndCreatesIndependentReaders) {
     const auto old_mode = storage::FileWriter::GetMode();
     auto restore_mode = folly::makeGuard(
         [old_mode] { storage::FileWriter::SetMode(old_mode); });
@@ -823,12 +844,14 @@ TEST(ScalarIndexV3LoadTest, BitmapCreateDefersTargetsAndSupportsFreshLoads) {
             EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
             folly::CancellationSource first;
             OpContext first_context(first.getToken());
-            // Low priority uses direct I/O; the second load defaults to buffered.
+            // Low-priority warmup uses direct I/O; request readers reuse the cell.
             first_context.runtime_load_priority = 1;
-            auto reader1 =
-                run(loader->Load(&first_context))->CreateReader(nullptr);
+            auto index = folly::coro::blockingWait(
+                loader->Load(&first_context, TestIndexCacheConfig()));
+            auto reader1 = index->CreateReader(&first_context);
+            reader1->Prefetch();
             first.requestCancellation();
-            auto reader2 = run(loader->Load())->CreateReader(nullptr);
+            auto reader2 = index->CreateReader(nullptr);
             loader.reset();
             for (const auto* reader : {reader1.get(), reader2.get()}) {
                 EXPECT_EQ(reader->Count(), 1000);
@@ -842,6 +865,7 @@ TEST(ScalarIndexV3LoadTest, BitmapCreateDefersTargetsAndSupportsFreshLoads) {
             }
             reader1.reset();
             reader2.reset();
+            index.reset();
             EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
         }
     }
@@ -1011,7 +1035,8 @@ TEST(ScalarIndexV3LoadTest, FailedCreateDetachesBorrowedSourceContext) {
     OpContext context(opening.getToken());
     options.op_ctx = &context;
     IndexLoadRequest request{OpenedIndexSource{PackedIndexSource{source}},
-                             options};
+                             options,
+                             milvus::index::test::TestIndexCacheConfig()};
     const auto loader_entry =
         LoaderRegistry::Instance().Lookup(backend.Family());
     ExpectPackedLoadError(DataTypeInvalid, [&] {
@@ -1049,7 +1074,8 @@ TEST(ScalarIndexV3LoadTest, LoaderEntryLoadPreservesOperationCancellation) {
                 .Load({OpenedIndexSource{PackedIndexSource{
                            std::shared_ptr<storage::AsyncIndexEntryReader>(
                                std::move(source))}},
-                       options})
+                       options,
+                       milvus::index::test::TestIndexCacheConfig()})
                 ->CreateReader(nullptr));
     });
 }
@@ -1093,7 +1119,8 @@ TEST(ScalarIndexV3ErrorCodeTest, CorruptPayloadCleansSyncAndAsyncTargets) {
                                    PackedIndexSource{std::shared_ptr<
                                        storage::AsyncIndexEntryReader>(
                                        std::move(async_source))}},
-                               options})
+                               options,
+                               milvus::index::test::TestIndexCacheConfig()})
                         ->CreateReader(nullptr));
             } else {
                 static_cast<void>(
@@ -1101,7 +1128,8 @@ TEST(ScalarIndexV3ErrorCodeTest, CorruptPayloadCleansSyncAndAsyncTargets) {
                         .Load({OpenedIndexSource{PackedIndexSource{
                                    std::shared_ptr<storage::IndexEntryReader>(
                                        std::move(source))}},
-                               options})
+                               options,
+                               milvus::index::test::TestIndexCacheConfig()})
                         ->CreateReader(nullptr));
             }
         });

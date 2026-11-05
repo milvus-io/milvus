@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -164,7 +166,8 @@ BuildVectorReader(DataType field_type,
         loader.Load({index::IndexFiles{std::move(context),
                                        std::move(files),
                                        index::LegacyIndexStorageConfig{}},
-                     std::move(options)});
+                     std::move(options),
+                     milvus::index::test::TestIndexCacheConfig()});
     auto reader = owner->CreateReader(nullptr);
     sink.ReleaseLocalStaging();
     return {std::move(owner),

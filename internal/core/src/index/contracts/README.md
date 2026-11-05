@@ -190,7 +190,13 @@ any other IO. A caller that needs both persistence and direct queries must finis
 consuming the Artifact.
 
 `LoaderEntry::Load` opens the persisted source, then calls `LoaderEntry::create` to create the
-internal `IndexLoader` and completes `Load`, returning an `IndexPtr`. Callers create a
+internal `IndexLoader` and completes `Load`, returning an `IndexPtr`. Every persisted load
+requires an explicit `IndexCacheConfig`; the Index owns the resulting Storage/Engine cache slot.
+The loader consumes its prepared source once, including when construction fails. Recreate the
+loader to retry construction; a successfully constructed slot retains its source for later loads
+and retries. Warmup controls when storage is loaded, not whether a cache slot is used.
+Growing publication and direct Artifact conversion can still create resident Index objects without
+using the persisted-load interface. Callers create a
 request reader with `index->CreateReader(op_ctx)`. The loader does not depend on the builder or the
 original Artifact. `FileSource` resolves a logical entry into a buffer, a local file, or a
 file-backed handle.

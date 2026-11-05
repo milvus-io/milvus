@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <gtest/gtest.h>
 #include "index/scalar/marisa/MarisaIndexReader.h"
 
@@ -207,43 +209,40 @@ TEST(MarisaIndexArtifactTest, LegacyLoadsRejectCountMismatchBeforePublication) {
         ScalarReaderBackends().Get<std::string_view>("MarisaVarchar");
     const auto artifact = BuildMarisa(backend);
     const auto data = SerializeV1V2(*artifact);
-    for (const bool cached : {false, true}) {
-        for (const bool mmap : {false, true}) {
-            for (const bool async : {false, true}) {
-                SCOPED_TRACE(::testing::Message() << cached << mmap << async);
-                auto staging = storage::LocalDirectory::CreateOwned(
-                    std::filesystem::temp_directory_path().string(),
-                    "marisa-bad-count-XXXXXX",
-                    "marisa count test");
-                storage::LoadOptions options;
-                options.params = backend.LoadParams({.row_count = 5});
-                options.params[INDEX_NUM_ROWS_KEY] = 4;
-                options.enable_mmap = mmap;
-                options.mmap_dir_path = staging->Path();
-                IndexCacheConfig cache{
-                    staging->Path(),
-                    cachinglayer::Meta{
-                        mmap ? cachinglayer::StorageType::DISK
-                             : cachinglayer::StorageType::MEMORY,
-                        cachinglayer::CellIdMappingMode::IDENTICAL,
-                        cachinglayer::CellDataType::OTHER,
-                        CacheWarmupPolicy::CacheWarmupPolicy_Sync,
-                        true},
-                    {1024 * 1024, 1024 * 1024},
-                    {},
-                    4096};
-                auto source = std::make_shared<TestArtifactSource>(
-                    data, storage::Generation::V1V2);
-                ExpectSegcoreError(ErrorCode::DataFormatBroken, [&] {
-                    (void)LoaderRegistry::Instance()
-                        .Lookup(backend.Family())
-                        .Load({OpenedIndexSource{
-                                   LegacyIndexSource{std::move(source), async}},
-                               options,
-                               cached ? std::optional{cache} : std::nullopt});
-                });
-                EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
-            }
+    for (const bool mmap : {false, true}) {
+        for (const bool async : {false, true}) {
+            SCOPED_TRACE(::testing::Message() << mmap << async);
+            auto staging = storage::LocalDirectory::CreateOwned(
+                std::filesystem::temp_directory_path().string(),
+                "marisa-bad-count-XXXXXX",
+                "marisa count test");
+            storage::LoadOptions options;
+            options.params = backend.LoadParams({.row_count = 5});
+            options.params[INDEX_NUM_ROWS_KEY] = 4;
+            options.enable_mmap = mmap;
+            options.mmap_dir_path = staging->Path();
+            IndexCacheConfig cache{
+                staging->Path(),
+                cachinglayer::Meta{mmap ? cachinglayer::StorageType::DISK
+                                        : cachinglayer::StorageType::MEMORY,
+                                   cachinglayer::CellIdMappingMode::IDENTICAL,
+                                   cachinglayer::CellDataType::OTHER,
+                                   CacheWarmupPolicy::CacheWarmupPolicy_Sync,
+                                   true},
+                {1024 * 1024, 1024 * 1024},
+                {},
+                4096};
+            auto source = std::make_shared<TestArtifactSource>(
+                data, storage::Generation::V1V2);
+            ExpectSegcoreError(ErrorCode::DataFormatBroken, [&] {
+                (void)LoaderRegistry::Instance()
+                    .Lookup(backend.Family())
+                    .Load({OpenedIndexSource{
+                               LegacyIndexSource{std::move(source), async}},
+                           options,
+                           cache});
+            });
+            EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
         }
     }
 }
@@ -435,7 +434,8 @@ TEST(MarisaIndexArtifactTest, AsyncCancellationRemovesPlannedFiles) {
                 .Load({OpenedIndexSource{PackedIndexSource{
                            std::shared_ptr<storage::AsyncIndexEntryReader>(
                                std::move(source))}},
-                       options})
+                       options,
+                       milvus::index::test::TestIndexCacheConfig()})
                 ->CreateReader(nullptr));
     });
     EXPECT_TRUE(cancellation.isCancellationRequested());

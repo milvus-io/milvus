@@ -496,51 +496,39 @@ NgramIndexLoader::Create(OpenedIndexSource source,
 
 folly::coro::Task<IndexPtr>
 NgramIndexLoader::Load(milvus::OpContext* context,
-                       const IndexCacheConfig* cache) {
+                       const IndexCacheConfig& cache) {
     AssertInfo(source_.has_value(),
                "cached ngram construction consumed this loader");
-    if (cache) {
-        std::optional<int64_t> count;
-        const auto rows =
-            GetValueFromConfig<int64_t>(options_.params, INDEX_NUM_ROWS_KEY);
-        if (rows && *rows > 0)
-            count = *rows;
-        const auto runtime = ParseRuntimeParams(options_.params);
-        auto caps = DeriveCaps(options_.params);
-        caps.json_paths = false;
-        const IndexMetadata metadata{
-            caps, Domain::Row, runtime.value_type, count};
-        const auto* legacy = std::get_if<LegacyIndexSource>(&*source_);
-        const bool use_async =
-            legacy ? legacy->use_async
-                   : std::holds_alternative<
-                         std::shared_ptr<storage::AsyncIndexEntryReader>>(
-                         std::get<PackedIndexSource>(*source_).reader);
-        auto source = std::move(*source_);
-        source_.reset();
-        auto load = [source = std::move(source),
-                     options = options_](OpContext* ctx) mutable {
-            return LoadStorage(source, options, ctx);
-        };
-        auto slot =
-            cachinglayer::Manager::GetInstance()
-                .CreateCacheSlot<NgramIndexStorage>(
-                    std::make_unique<
-                        SingleCellIndexStorageTranslator<NgramIndexStorage>>(
-                        *cache, use_async, std::move(load)),
-                    context);
-        auto index = std::make_shared<NgramIndex>(
-            std::move(slot), metadata, runtime.min_gram, runtime.max_gram);
-        if (auto spec = JsonProjectedSpec(options_.params, count)) {
-            co_return JsonPathIndex::FromStorage(std::move(index),
-                                                 std::move(*spec));
-        }
-        co_return index;
-    }
+    std::optional<int64_t> count;
+    const auto rows =
+        GetValueFromConfig<int64_t>(options_.params, INDEX_NUM_ROWS_KEY);
+    if (rows && *rows > 0)
+        count = *rows;
+    const auto runtime = ParseRuntimeParams(options_.params);
+    auto caps = DeriveCaps(options_.params);
+    caps.json_paths = false;
+    const IndexMetadata metadata{caps, Domain::Row, runtime.value_type, count};
+    const auto* legacy = std::get_if<LegacyIndexSource>(&*source_);
+    const bool use_async =
+        legacy ? legacy->use_async
+               : std::holds_alternative<
+                     std::shared_ptr<storage::AsyncIndexEntryReader>>(
+                     std::get<PackedIndexSource>(*source_).reader);
+    auto source = std::move(*source_);
+    source_.reset();
+    auto load = [source = std::move(source),
+                 options = options_](OpContext* ctx) mutable {
+        return LoadStorage(source, options, ctx);
+    };
+    auto slot =
+        cachinglayer::Manager::GetInstance().CreateCacheSlot<NgramIndexStorage>(
+            std::make_unique<
+                SingleCellIndexStorageTranslator<NgramIndexStorage>>(
+                cache, use_async, std::move(load)),
+            context);
     auto index = std::make_shared<NgramIndex>(
-        co_await LoadStorage(*source_, options_, context));
-    if (auto spec =
-            JsonProjectedSpec(options_.params, index->Metadata().count)) {
+        std::move(slot), metadata, runtime.min_gram, runtime.max_gram);
+    if (auto spec = JsonProjectedSpec(options_.params, count)) {
         co_return JsonPathIndex::FromStorage(std::move(index),
                                              std::move(*spec));
     }

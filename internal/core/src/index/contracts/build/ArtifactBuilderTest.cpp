@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -476,7 +478,8 @@ RunVectorArtifactLifecycle(const VectorLifecycleProfile& profile,
                                  std::shared_ptr<storage::FileSource>(
                                      &source, [](auto*) {}),
                                  false}},
-                             options})
+                             options,
+                             milvus::index::test::TestIndexCacheConfig()})
                       ->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
     EXPECT_EQ(reader->CoordDomain(), Domain::Row);
@@ -733,8 +736,9 @@ TEST_F(VectorSideInputFixture,
     auto reader =
         LoaderRegistry::Instance()
             .Lookup(adapted.family)
-            .Load(
-                {OpenedIndexSource{LegacyIndexSource{source, false}}, options})
+            .Load({OpenedIndexSource{LegacyIndexSource{source, false}},
+                   options,
+                   milvus::index::test::TestIndexCacheConfig()})
             ->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
     ExpectReaderResults(*reader, knowhere::IndexEnum::INDEX_HNSW);
@@ -838,7 +842,8 @@ TEST_F(VectorSideInputFixture,
                               std::move(paths),
                               LegacyIndexStorageConfig{
                                   storage::V1SourceLayout::DiskFiles}},
-                   options})
+                   options,
+                   milvus::index::test::TestIndexCacheConfig()})
             ->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
     ExpectReaderResults(*reader, knowhere::IndexEnum::INDEX_DISKANN);

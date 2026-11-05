@@ -466,43 +466,36 @@ TextIndexLoader::Create(OpenedIndexSource source,
 
 folly::coro::Task<IndexPtr>
 TextIndexLoader::Load(milvus::OpContext* context,
-                      const IndexCacheConfig* cache) {
+                      const IndexCacheConfig& cache) {
     AssertInfo(source_.has_value(),
                "cached text construction consumed this loader");
-    if (cache) {
-        std::optional<int64_t> count;
-        const auto rows =
-            GetValueFromConfig<int64_t>(options_.params, INDEX_NUM_ROWS_KEY);
-        if (rows && *rows > 0)
-            count = *rows;
-        const auto runtime = ParseRuntimeParams(options_.params);
-        const IndexMetadata metadata{DeriveCaps(options_.params),
-                                     Domain::Row,
-                                     runtime.value_type,
-                                     count};
-        const auto* legacy = std::get_if<LegacyIndexSource>(&*source_);
-        const bool use_async =
-            legacy ? legacy->use_async
-                   : std::holds_alternative<
-                         std::shared_ptr<storage::AsyncIndexEntryReader>>(
-                         std::get<PackedIndexSource>(*source_).reader);
-        auto source = std::move(*source_);
-        source_.reset();
-        auto load = [source = std::move(source),
-                     options = options_](OpContext* ctx) mutable {
-            return LoadStorage(source, options, ctx);
-        };
-        auto slot =
-            cachinglayer::Manager::GetInstance()
-                .CreateCacheSlot<TextIndexStorage>(
-                    std::make_unique<
-                        SingleCellIndexStorageTranslator<TextIndexStorage>>(
-                        *cache, use_async, std::move(load)),
-                    context);
-        co_return std::make_shared<TextIndex>(std::move(slot), metadata);
-    }
-    co_return std::make_shared<TextIndex>(
-        co_await LoadStorage(*source_, options_, context));
+    std::optional<int64_t> count;
+    const auto rows =
+        GetValueFromConfig<int64_t>(options_.params, INDEX_NUM_ROWS_KEY);
+    if (rows && *rows > 0)
+        count = *rows;
+    const auto runtime = ParseRuntimeParams(options_.params);
+    const IndexMetadata metadata{
+        DeriveCaps(options_.params), Domain::Row, runtime.value_type, count};
+    const auto* legacy = std::get_if<LegacyIndexSource>(&*source_);
+    const bool use_async =
+        legacy ? legacy->use_async
+               : std::holds_alternative<
+                     std::shared_ptr<storage::AsyncIndexEntryReader>>(
+                     std::get<PackedIndexSource>(*source_).reader);
+    auto source = std::move(*source_);
+    source_.reset();
+    auto load = [source = std::move(source),
+                 options = options_](OpContext* ctx) mutable {
+        return LoadStorage(source, options, ctx);
+    };
+    auto slot =
+        cachinglayer::Manager::GetInstance().CreateCacheSlot<TextIndexStorage>(
+            std::make_unique<
+                SingleCellIndexStorageTranslator<TextIndexStorage>>(
+                cache, use_async, std::move(load)),
+            context);
+    co_return std::make_shared<TextIndex>(std::move(slot), metadata);
 }
 
 folly::coro::Task<std::unique_ptr<TextIndexStorage>>

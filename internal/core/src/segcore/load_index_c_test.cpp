@@ -9,6 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <folly/FBVector.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -290,7 +292,8 @@ TEST(CApiTest, LoadIndexSearch) {
         loader
             .Load({index::OpenedIndexSource{index::LegacyIndexSource{
                        std::make_shared<BinarySetSource>(binary_set), false}},
-                   options})
+                   options,
+                   milvus::index::test::TestIndexCacheConfig()})
             ->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
     EXPECT_EQ(reader->Count(), N);

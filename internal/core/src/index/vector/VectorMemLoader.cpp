@@ -488,13 +488,10 @@ VectorMemLoader::Create(OpenedIndexSource source,
 
 folly::coro::Task<IndexPtr>
 VectorMemLoader::Load(milvus::OpContext* context,
-                      const IndexCacheConfig* cache) {
+                      const IndexCacheConfig& cache) {
     AssertInfo(source_.has_value(),
                "cached vector construction consumed this loader");
-    if (!cache) {
-        co_return co_await RunLegacyLoad(
-            *source_, options_, &LoadLegacy, context);
-    }
+
     const auto params = ParseRuntimeParams(options_.params);
     const bool use_async = source_->use_async;
     auto source = std::move(*source_);
@@ -507,7 +504,7 @@ VectorMemLoader::Load(milvus::OpContext* context,
     auto slot =
         cachinglayer::Manager::GetInstance().CreateCacheSlot<KnowhereEngine>(
             std::make_unique<SingleCellIndexStorageTranslator<KnowhereEngine>>(
-                *cache, use_async, std::move(load)),
+                cache, use_async, std::move(load)),
             context);
     co_return std::make_shared<VectorIndex>(std::move(slot),
                                             params.physical_type,
@@ -521,14 +518,6 @@ VectorMemLoader::DeriveCaps(const Config& index_meta) {
     // ReaderCaps is scalar-shaped. Family/type metadata identifies this as a
     // vector reader; no vector capability expansion is implied here.
     return {};
-}
-
-folly::coro::Task<IndexPtr>
-VectorMemLoader::LoadLegacy(storage::FileSource& source,
-                            const storage::LoadOptions& opts,
-                            bool use_async) {
-    auto engine = co_await LoadEngine(source, opts, use_async);
-    co_return std::make_shared<VectorIndex>(std::move(*engine));
 }
 
 folly::coro::Task<std::unique_ptr<KnowhereEngine>>

@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <arrow/api.h>
 #include <arrow/array/array_base.h>
 #include <arrow/array/builder_base.h>
@@ -380,7 +382,8 @@ class TestVectorArrayStorageV2 : public testing::Test {
                                    std::move(paths),
                                    index::LegacyIndexStorageConfig{
                                        storage::V1SourceLayout::MemoryEntries}},
-                 std::move(options)})
+                 std::move(options),
+                 milvus::index::test::TestIndexCacheConfig()})
             ->CreateReader(op_ctx);
     }
 

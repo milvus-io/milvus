@@ -566,8 +566,8 @@ InvertedIndexLoader::Create(OpenedIndexSource source,
 
 template <typename T>
 IndexPtr
-InvertedIndexLoader::CreateCached(const IndexCacheConfig& cache,
-                                  milvus::OpContext* context) {
+InvertedIndexLoader::LoadTyped(milvus::OpContext* context,
+                               const IndexCacheConfig& cache) {
     const auto runtime = ParseRuntimeParams(options_.params);
     std::optional<int64_t> count;
     // Segment row counts do not describe the element domain of nested indexes.
@@ -640,26 +640,12 @@ InvertedIndexLoader::LoadStorage(OpenedIndexSource& source,
 
 folly::coro::Task<IndexPtr>
 InvertedIndexLoader::Load(milvus::OpContext* context,
-                          const IndexCacheConfig* cache) {
+                          const IndexCacheConfig& cache) {
     AssertInfo(source_.has_value(),
                "cached inverted construction consumed this loader");
-    if (cache) {
-        co_return DispatchInvertedType<IndexPtr>(
-            ParseRuntimeParams(options_.params).value_type,
-            [&]<typename T>() { return CreateCached<T>(*cache, context); });
-    }
-    auto load = [&]<typename T>() -> folly::coro::Task<IndexPtr> {
-        auto index = std::make_shared<InvertedIndex<T>>(
-            co_await LoadStorage<T>(*source_, options_, context));
-        if (auto spec =
-                JsonProjectedSpec(options_.params, index->Metadata().count)) {
-            co_return JsonPathIndex::FromStorage(std::move(index),
-                                                 std::move(*spec));
-        }
-        co_return index;
-    };
-    co_return co_await DispatchInvertedType<folly::coro::Task<IndexPtr>>(
-        ParseRuntimeParams(options_.params).value_type, load);
+    co_return DispatchInvertedType<IndexPtr>(
+        ParseRuntimeParams(options_.params).value_type,
+        [&]<typename T>() { return LoadTyped<T>(context, cache); });
 }
 
 ReaderCaps

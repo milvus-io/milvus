@@ -14,6 +14,8 @@
 
 #pragma once
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <span>
 #include <string>
 #include <string_view>
@@ -131,7 +133,8 @@ LoadPublished(const std::string& family,
             {index::IndexFiles{std::move(context),
                                std::move(paths),
                                index::PackedIndexStorageConfig{}},
-             std::move(options)});
+             std::move(options),
+             milvus::index::test::TestIndexCacheConfig()});
     }
     return loader.Load(
         {index::IndexFiles{std::move(context),
@@ -144,7 +147,8 @@ LoadPublished(const std::string& family,
                                        family == index::families::kJsonFlat
                                    ? storage::V1SourceLayout::DiskFiles
                                    : storage::V1SourceLayout::MemoryEntries}},
-         std::move(options)});
+         std::move(options),
+         milvus::index::test::TestIndexCacheConfig()});
 }
 
 // Consumer fixtures open persisted artifacts through the same loader boundary

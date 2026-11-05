@@ -539,58 +539,48 @@ MarisaIndexLoader::Create(OpenedIndexSource source,
 
 folly::coro::Task<IndexPtr>
 MarisaIndexLoader::Load(milvus::OpContext* context,
-                        const IndexCacheConfig* cache) {
+                        const IndexCacheConfig& cache) {
     AssertInfo(source_.has_value(),
                "cached Marisa construction consumed this loader");
-    if (cache) {
-        std::optional<int64_t> count;
-        if (const auto* packed = std::get_if<PackedIndexSource>(&*source_)) {
-            const auto bytes =
-                packed->Directory().At(MARISA_STR_IDS).plaintext_size;
-            if (bytes % sizeof(int64_t) != 0) {
-                ThrowInfo(DataFormatBroken, "invalid marisa row id entry size");
-            }
-            count = static_cast<int64_t>(bytes / sizeof(int64_t));
-        } else {
-            const auto rows = GetValueFromConfig<int64_t>(options_.params,
-                                                          INDEX_NUM_ROWS_KEY);
-            // Legacy LoadInfo uses zero for both missing counts and empty segments.
-            if (rows && *rows > 0) {
-                count = *rows;
-            }
+    std::optional<int64_t> count;
+    if (const auto* packed = std::get_if<PackedIndexSource>(&*source_)) {
+        const auto bytes =
+            packed->Directory().At(MARISA_STR_IDS).plaintext_size;
+        if (bytes % sizeof(int64_t) != 0) {
+            ThrowInfo(DataFormatBroken, "invalid marisa row id entry size");
         }
-        const auto value_type = ParseValueType(options_.params);
-        const auto* legacy = std::get_if<LegacyIndexSource>(&*source_);
-        const bool use_async =
-            legacy ? legacy->use_async
-                   : std::holds_alternative<
-                         std::shared_ptr<storage::AsyncIndexEntryReader>>(
-                         std::get<PackedIndexSource>(*source_).reader);
-        auto source = std::move(*source_);
-        source_.reset();
-        auto load = [source = std::move(source),
-                     options = options_](OpContext* ctx) mutable {
-            return LoadStorage(source, options, ctx);
-        };
-        auto slot =
-            cachinglayer::Manager::GetInstance()
-                .CreateCacheSlot<MarisaIndexStorage>(
-                    std::make_unique<
-                        SingleCellIndexStorageTranslator<MarisaIndexStorage>>(
-                        *cache, use_async, std::move(load)),
-                    context);
-        auto index =
-            std::make_shared<MarisaIndex>(std::move(slot), value_type, count);
-        if (auto spec = JsonProjectedSpec(options_.params, count)) {
-            co_return JsonPathIndex::FromStorage(std::move(index),
-                                                 std::move(*spec));
+        count = static_cast<int64_t>(bytes / sizeof(int64_t));
+    } else {
+        const auto rows =
+            GetValueFromConfig<int64_t>(options_.params, INDEX_NUM_ROWS_KEY);
+        // Legacy LoadInfo uses zero for both missing counts and empty segments.
+        if (rows && *rows > 0) {
+            count = *rows;
         }
-        co_return index;
     }
-    auto index = std::make_shared<MarisaIndex>(
-        co_await LoadStorage(*source_, options_, context));
-    if (auto spec =
-            JsonProjectedSpec(options_.params, index->Metadata().count)) {
+    const auto value_type = ParseValueType(options_.params);
+    const auto* legacy = std::get_if<LegacyIndexSource>(&*source_);
+    const bool use_async =
+        legacy ? legacy->use_async
+               : std::holds_alternative<
+                     std::shared_ptr<storage::AsyncIndexEntryReader>>(
+                     std::get<PackedIndexSource>(*source_).reader);
+    auto source = std::move(*source_);
+    source_.reset();
+    auto load = [source = std::move(source),
+                 options = options_](OpContext* ctx) mutable {
+        return LoadStorage(source, options, ctx);
+    };
+    auto slot =
+        cachinglayer::Manager::GetInstance()
+            .CreateCacheSlot<MarisaIndexStorage>(
+                std::make_unique<
+                    SingleCellIndexStorageTranslator<MarisaIndexStorage>>(
+                    cache, use_async, std::move(load)),
+                context);
+    auto index =
+        std::make_shared<MarisaIndex>(std::move(slot), value_type, count);
+    if (auto spec = JsonProjectedSpec(options_.params, count)) {
         co_return JsonPathIndex::FromStorage(std::move(index),
                                              std::move(*spec));
     }

@@ -36,7 +36,7 @@ class RTreeIndexState;
 /**
  * @brief Loads R-tree indexes from legacy or packed V3 artifacts.
  *
- * Owns the opened source until resident loading or transfer into a cached Index.
+ * Owns the opened source until Load transfers it into the Index cache slot.
  */
 class RTreeIndexLoader final : public IndexLoader {
  public:
@@ -51,15 +51,14 @@ class RTreeIndexLoader final : public IndexLoader {
      * inventory.
      * @param source Opened storage source owned by the resulting loader.
      * @param options Fixed load options without a retained operation context.
-     * @return A ready loader with reusable family metadata.
+     * @return A ready loader with prepared family metadata.
      */
     static folly::coro::Task<std::unique_ptr<IndexLoader>>
     Create(OpenedIndexSource source, storage::LoadOptions options);
 
     /** @copydoc IndexLoader::Load */
     folly::coro::Task<IndexPtr>
-    Load(milvus::OpContext* context = nullptr,
-         const IndexCacheConfig* cache = nullptr) override;
+    Load(milvus::OpContext* context, const IndexCacheConfig& cache) override;
 
  private:
     friend struct LoaderTestAccess;

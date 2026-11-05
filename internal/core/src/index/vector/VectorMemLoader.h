@@ -36,8 +36,7 @@ class KnowhereEngine;
  *
  * Materialized loads populate a BinarySet; mmap loads stream ordered engine
  * entries to a local file. Embedding-list sidecars and validity remain
- * separate. Resident loads reuse the source sequentially; cached construction
- * transfers it with fixed load options to the engine slot.
+ * separate. Load transfers the source and fixed load options to the engine slot.
  */
 class VectorMemLoader final : public IndexLoader {
  public:
@@ -51,15 +50,14 @@ class VectorMemLoader final : public IndexLoader {
      * @brief Validate legacy entry inventory and runtime vector parameters.
      * @param source Opened storage source owned by the resulting loader.
      * @param options Fixed load options without a retained operation context.
-     * @return A ready loader with reusable family metadata.
+     * @return A ready loader with prepared family metadata.
      */
     static folly::coro::Task<std::unique_ptr<IndexLoader>>
     Create(OpenedIndexSource source, storage::LoadOptions options);
 
     /** @copydoc IndexLoader::Load */
     folly::coro::Task<IndexPtr>
-    Load(milvus::OpContext* context = nullptr,
-         const IndexCacheConfig* cache = nullptr) override;
+    Load(milvus::OpContext* context, const IndexCacheConfig& cache) override;
 
  private:
     std::optional<LegacyIndexSource> source_;
@@ -77,11 +75,6 @@ class VectorMemLoader final : public IndexLoader {
      */
     static folly::coro::Task<std::unique_ptr<KnowhereEngine>>
     LoadEngine(storage::FileSource& source,
-               const storage::LoadOptions& opts,
-               bool use_async);
-
-    static folly::coro::Task<IndexPtr>
-    LoadLegacy(storage::FileSource& source,
                const storage::LoadOptions& opts,
                bool use_async);
 };

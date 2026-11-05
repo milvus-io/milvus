@@ -856,8 +856,8 @@ SortedIndexLoader::Create(OpenedIndexSource source,
 
 template <typename T>
 IndexPtr
-SortedIndexLoader::CreateCached(const IndexCacheConfig& cache,
-                                milvus::OpContext* context) {
+SortedIndexLoader::LoadTyped(milvus::OpContext* context,
+                             const IndexCacheConfig& cache) {
     auto caps = DeriveCaps(options_.params);
     caps.json_paths = false;
     const IndexMetadata metadata{
@@ -946,31 +946,15 @@ SortedIndexLoader::LoadStorage(OpenedIndexSource& source,
 
 folly::coro::Task<IndexPtr>
 SortedIndexLoader::Load(milvus::OpContext* context,
-                        const IndexCacheConfig* cache) {
+                        const IndexCacheConfig& cache) {
     AssertInfo(source_.has_value(),
                "cached sorted construction consumed this loader");
-    if (cache) {
-        if (IsStringDataType(state_->params.value_type)) {
-            co_return CreateCached<std::string_view>(*cache, context);
-        }
-        co_return DispatchPackedNumeric(
-            state_->params.value_type,
-            [&]<typename T>() { return CreateCached<T>(*cache, context); });
-    }
-    auto load = [&]<typename T>() -> folly::coro::Task<IndexPtr> {
-        auto index = std::make_shared<SortedIndex<T>>(
-            co_await LoadStorage<T>(*source_, options_, *state_, context));
-        if (auto spec =
-                JsonProjectedSpec(options_.params, index->Metadata().count)) {
-            co_return JsonPathIndex::FromStorage(std::move(index),
-                                                 std::move(*spec));
-        }
-        co_return index;
-    };
     if (IsStringDataType(state_->params.value_type)) {
-        co_return co_await load.template operator()<std::string_view>();
+        co_return LoadTyped<std::string_view>(context, cache);
     }
-    co_return co_await DispatchPackedNumeric(state_->params.value_type, load);
+    co_return DispatchPackedNumeric(
+        state_->params.value_type,
+        [&]<typename T>() { return LoadTyped<T>(context, cache); });
 }
 
 ReaderCaps

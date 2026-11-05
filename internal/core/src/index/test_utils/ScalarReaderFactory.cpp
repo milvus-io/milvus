@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include "index/test_utils/ScalarReaderFactory.h"
 
 #include <algorithm>
@@ -276,7 +278,8 @@ ReaderBackend::Open(storage::ArtifactPtr artifact,
                       .Load({OpenedIndexSource{PackedIndexSource{
                                  std::shared_ptr<storage::IndexEntryReader>(
                                      std::move(source))}},
-                             options})
+                             options,
+                             milvus::index::test::TestIndexCacheConfig()})
                       ->CreateReader(nullptr);
     ValidateReader(Name(), *this, expected_caps, reader);
     return reader;

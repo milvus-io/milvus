@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <gtest/gtest.h>
 
 #include <atomic>
@@ -43,6 +45,11 @@
 
 namespace milvus::index::test {
 namespace {
+
+static_assert(!std::is_default_constructible_v<IndexLoadRequest>);
+static_assert(!std::is_constructible_v<IndexLoadRequest,
+                                       OpenedIndexSource,
+                                       storage::LoadOptions>);
 
 class EmptyArtifact final : public storage::Artifact {
  public:
@@ -140,7 +147,7 @@ struct LoaderProbeA : IndexLoader {
         co_return result;
     }
     folly::coro::Task<IndexPtr>
-    Load(milvus::OpContext*, const IndexCacheConfig*) override {
+    Load(milvus::OpContext*, const IndexCacheConfig&) override {
         load_thread = std::this_thread::get_id();
         co_return std::make_shared<EmptyIndex>(DeriveCaps(options_.params));
     }
@@ -170,7 +177,7 @@ struct LoaderFailureProbe : IndexLoader {
     }
 
     folly::coro::Task<IndexPtr>
-    Load(milvus::OpContext*, const IndexCacheConfig*) override {
+    Load(milvus::OpContext*, const IndexCacheConfig&) override {
         if (mode == "load_error") {
             ThrowInfo(DataFormatBroken, "reader loading failed");
         }
@@ -185,7 +192,8 @@ ProbeLoadRequest(TestArtifactSource& source, Config params = Config::object()) {
     return {OpenedIndexSource{LegacyIndexSource{
                 std::shared_ptr<storage::FileSource>(&source, [](auto*) {}),
                 false}},
-            std::move(options)};
+            std::move(options),
+            TestIndexCacheConfig()};
 }
 
 std::string
@@ -383,7 +391,8 @@ TEST(RegistryTest, LoaderDeriveAndCreateDispatchIndependently) {
                                  std::shared_ptr<storage::FileSource>(
                                      &source, [](auto*) {}),
                                  false}},
-                             options})
+                             options,
+                             milvus::index::test::TestIndexCacheConfig()})
                       ->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
     EXPECT_TRUE(reader->Caps().predicate);
@@ -391,7 +400,7 @@ TEST(RegistryTest, LoaderDeriveAndCreateDispatchIndependently) {
     EXPECT_EQ(LoaderProbeA::load_thread, std::this_thread::get_id());
 }
 
-TEST(RegistryTest, AsyncOpenedSourceRunsOnLoadingExecutor) {
+TEST(RegistryTest, AsyncSourcePreparationRunsOnLoadingExecutor) {
     const LoaderEntry entry{&LoaderProbeA::DeriveCaps, &LoaderProbeA::Create};
     TestArtifactData artifact;
     TestArtifactSource source(artifact);
@@ -402,12 +411,14 @@ TEST(RegistryTest, AsyncOpenedSourceRunsOnLoadingExecutor) {
                                  std::shared_ptr<storage::FileSource>(
                                      &source, [](auto*) {}),
                                  true}},
-                             options})
+                             options,
+                             milvus::index::test::TestIndexCacheConfig()})
                       ->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
     EXPECT_TRUE(reader->Caps().predicate);
     EXPECT_NE(LoaderProbeA::create_thread, std::this_thread::get_id());
-    EXPECT_NE(LoaderProbeA::load_thread, std::this_thread::get_id());
+    // Slot creation stays on the caller so synchronous warmup can use the I/O executor.
+    EXPECT_EQ(LoaderProbeA::load_thread, std::this_thread::get_id());
 }
 
 TEST(RegistryTest, LoaderEntryRequiresBothFunctions) {

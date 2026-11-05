@@ -41,9 +41,10 @@ of string dictionary/postings are each encapsulated in a type-specific storage v
 keys use `owned_t<T>`, and string lookups use transparent comparison; `Lookup` returns owned values,
 and the `string_view` from `Gather` is valid only during the synchronous callback.
 
-Resident and cached loads use the same typed storage loader, including format validation and
-JSON existence data. The resident path constructs the Index immediately; the cached path invokes
-the storage loader when the slot loads its cell.
+Persisted loads require `IndexCacheConfig` and construct an Index owning a typed cache slot.
+The slot invokes the storage loader for warmup or demand loading, including format validation and
+JSON existence data. Tests use the same path, with synchronous warmup when they need Load to
+finish storage I/O before returning; no uncached persisted-load branch exists.
 
 ## V3 loading
 

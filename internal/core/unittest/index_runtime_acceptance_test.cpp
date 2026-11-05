@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -136,7 +138,8 @@ TEST_P(ScalarArtifactRoundTripTest,
                                  std::shared_ptr<storage::FileSource>(
                                      &source, [](auto*) {}),
                                  false}},
-                             options})
+                             options,
+                             milvus::index::test::TestIndexCacheConfig()})
                       ->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
 

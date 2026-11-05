@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <gtest/gtest.h>
 
 #include <array>
@@ -87,7 +89,9 @@ LoadFloatVectors(const VectorBuildInput<float>& input, bool vector_array) {
     options.params = adapted.params;
     auto entry = LoaderRegistry::Instance().Lookup(adapted.family);
     return entry
-        .Load({OpenedIndexSource{LegacyIndexSource{source, false}}, options})
+        .Load({OpenedIndexSource{LegacyIndexSource{source, false}},
+               options,
+               milvus::index::test::TestIndexCacheConfig()})
         ->CreateReader(nullptr);
 }
 
@@ -555,8 +559,9 @@ TEST(VectorReaderContractTest, SparseRetrievalRespectsRuntimeCapability) {
     auto reader =
         LoaderRegistry::Instance()
             .Lookup(adapted.family)
-            .Load(
-                {OpenedIndexSource{LegacyIndexSource{source, false}}, options})
+            .Load({OpenedIndexSource{LegacyIndexSource{source, false}},
+                   options,
+                   milvus::index::test::TestIndexCacheConfig()})
             ->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
     const auto* vectors = dynamic_cast<const IVectorReader*>(reader.get());
@@ -621,8 +626,9 @@ TEST(VectorReaderContractTest, AllNullSparseIndexAcceptsEmptyRetrieval) {
     auto reader =
         LoaderRegistry::Instance()
             .Lookup(adapted.family)
-            .Load(
-                {OpenedIndexSource{LegacyIndexSource{source, false}}, options})
+            .Load({OpenedIndexSource{LegacyIndexSource{source, false}},
+                   options,
+                   milvus::index::test::TestIndexCacheConfig()})
             ->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
     const auto* vectors = dynamic_cast<const IVectorReader*>(reader.get());

@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <gtest/gtest.h>
 #include <arrow/io/memory.h>
 
@@ -110,7 +112,8 @@ OpenFromSource(const ReaderBackend& backend,
                                  std::shared_ptr<storage::FileSource>(
                                      &source, [](auto*) {}),
                                  false}},
-                             options})
+                             options,
+                             milvus::index::test::TestIndexCacheConfig()})
                       ->CreateReader(nullptr);
     CheckReaderBackend(reader, backend, expected_caps);
     return reader;
@@ -174,14 +177,16 @@ OpenV3(const ReaderBackend& backend,
                      .Load({OpenedIndexSource{PackedIndexSource{
                                 std::shared_ptr<storage::AsyncIndexEntryReader>(
                                     std::move(async_source))}},
-                            options})
+                            options,
+                            milvus::index::test::TestIndexCacheConfig()})
                      ->CreateReader(nullptr);
     } else {
         reader = loader_entry
                      .Load({OpenedIndexSource{PackedIndexSource{
                                 std::shared_ptr<storage::IndexEntryReader>(
                                     std::move(source))}},
-                            options})
+                            options,
+                            milvus::index::test::TestIndexCacheConfig()})
                      ->CreateReader(nullptr);
     }
     CheckReaderBackend(reader, backend, expected_caps);

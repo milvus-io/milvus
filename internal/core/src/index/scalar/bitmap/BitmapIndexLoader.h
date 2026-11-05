@@ -56,15 +56,14 @@ class BitmapIndexLoader final : public IndexLoader {
      * loading.
      * @param source Opened storage source owned by the resulting loader.
      * @param options Fixed load options without a retained operation context.
-     * @return A ready loader with reusable family metadata.
+     * @return A ready loader with prepared family metadata.
      */
     static folly::coro::Task<std::unique_ptr<IndexLoader>>
     Create(OpenedIndexSource source, storage::LoadOptions options);
 
     /** @copydoc IndexLoader::Load */
     folly::coro::Task<IndexPtr>
-    Load(milvus::OpContext* context = nullptr,
-         const IndexCacheConfig* cache = nullptr) override;
+    Load(milvus::OpContext* context, const IndexCacheConfig& cache) override;
 
  private:
     friend struct LoaderTestAccess;
@@ -81,7 +80,7 @@ class BitmapIndexLoader final : public IndexLoader {
 
     template <typename T, typename Posting>
     IndexPtr
-    CreateCached(const IndexCacheConfig& cache, milvus::OpContext* context);
+    LoadTyped(milvus::OpContext* context, const IndexCacheConfig& cache);
 
     template <typename T, typename Posting>
     static folly::coro::Task<std::unique_ptr<BitmapPostingStorage<T, Posting>>>

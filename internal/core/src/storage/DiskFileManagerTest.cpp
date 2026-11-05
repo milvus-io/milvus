@@ -9,6 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <arrow/result.h>
 #include <boost/filesystem/operations.hpp>
 #include <boost/filesystem/path.hpp>
@@ -159,7 +161,8 @@ struct PublishedConsumerIndex {
                 .Load({index::IndexFiles{std::move(context),
                                          Files(),
                                          index::PackedIndexStorageConfig{}},
-                       std::move(options)})
+                       std::move(options),
+                       milvus::index::test::TestIndexCacheConfig()})
                 ->CreateReader(nullptr);
         }
         return loader
@@ -170,7 +173,8 @@ struct PublishedConsumerIndex {
                            type.family == index::families::kVectorDisk
                                ? storage::V1SourceLayout::DiskFiles
                                : storage::V1SourceLayout::MemoryEntries}},
-                   std::move(options)})
+                   std::move(options),
+                   milvus::index::test::TestIndexCacheConfig()})
             ->CreateReader(nullptr);
     }
 };

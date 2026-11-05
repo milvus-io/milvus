@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <gtest/gtest.h>
 #include <filesystem>
 #include "common/OpContext.h"
@@ -177,7 +179,9 @@ BuildAndLoad(const AdaptedIndexType& adapted,
     options.mmap_dir_path = "/tmp";
     return LoaderRegistry::Instance()
         .Lookup(adapted.family)
-        .Load({OpenedIndexSource{LegacyIndexSource{source, false}}, options})
+        .Load({OpenedIndexSource{LegacyIndexSource{source, false}},
+               options,
+               milvus::index::test::TestIndexCacheConfig()})
         ->CreateReader(nullptr);
 }
 
@@ -704,7 +708,8 @@ TEST(VectorFamilyEdgeTest, InterimIVFPQChunksBuildAddAndFilteredSearch) {
     auto base = LoaderRegistry::Instance()
                     .Lookup(adapted.family)
                     .Load({OpenedIndexSource{LegacyIndexSource{source, false}},
-                           options})
+                           options,
+                           milvus::index::test::TestIndexCacheConfig()})
                     ->CreateReader(nullptr);
     ASSERT_NE(base, nullptr);
     const auto* reader = dynamic_cast<const IVectorReader*>(base.get());

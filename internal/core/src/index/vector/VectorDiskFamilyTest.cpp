@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <gtest/gtest.h>
 
 #ifdef BUILD_DISK_ANN
@@ -261,7 +263,7 @@ struct DiskBuildCase {
     std::vector<uint8_t> legacy_validity;
     // A resident payload; the raw file then holds only its header.
     const void* tensor = nullptr;
-    bool cached = false;
+    bool defer_load = false;
     OpContext* reader_context = nullptr;
     std::optional<IndexCacheConfig> cache_config;
 };
@@ -376,9 +378,9 @@ BuildDisk(const std::string& raw_path,
     options.params[DISK_ANN_LOAD_THREAD_NUM] = 2;
     options.enable_mmap = build.mmap;
     options.mmap_dir_path = staging_dir;
-    std::optional<IndexCacheConfig> cache;
-    if (build.cached) {
-        cache.emplace(IndexCacheConfig{
+    auto cache = milvus::index::test::TestIndexCacheConfig();
+    if (build.defer_load) {
+        cache = IndexCacheConfig{
             staging_dir + "/engine_cache",
             cachinglayer::Meta{cachinglayer::StorageType::DISK,
                                cachinglayer::CellIdMappingMode::IDENTICAL,
@@ -387,10 +389,10 @@ BuildDisk(const std::string& raw_path,
                                true},
             {1024 * 1024, 1024 * 1024},
             {},
-            4096});
+            4096};
     }
     if (build.cache_config) {
-        cache = build.cache_config;
+        cache = *build.cache_config;
     }
     auto index = LoaderRegistry::Instance()
                      .Lookup(adapted.family)
@@ -400,14 +402,16 @@ BuildDisk(const std::string& raw_path,
                                            storage::V1SourceLayout::DiskFiles}},
                             options,
                             cache});
-    if (build.cached)
+    if (build.defer_load)
         EXPECT_FALSE(index->Metadata().count.has_value());
     opened.base = index->CreateReader(build.reader_context);
 }
 
 template <typename T>
 void
-RunOrdinaryDiskSearch(bool mmap, bool resident = false, bool cached = false) {
+RunOrdinaryDiskSearch(bool mmap,
+                      bool resident = false,
+                      bool defer_load = false) {
     auto files = storage::LocalDirectory::CreateOwned(
         "/tmp", "vector_disk_family_XXXXXX", "vector disk family test");
     const auto raw_path = files->Path() + "/raw";
@@ -419,7 +423,7 @@ RunOrdinaryDiskSearch(bool mmap, bool resident = false, bool cached = false) {
               opened,
               {.mmap = mmap,
                .tensor = resident ? values.data() : nullptr,
-               .cached = cached});
+               .defer_load = defer_load});
     ASSERT_NE(opened.base, nullptr);
     const auto* reader = dynamic_cast<const IVectorReader*>(opened.base.get());
     ASSERT_NE(reader, nullptr);
@@ -694,7 +698,7 @@ TEST(VectorDiskCacheTest, ColdMetadataAndCancelledCountDoNotOpenEngine) {
     BuildDisk(raw_path,
               files->Path(),
               opened,
-              {.cached = true, .reader_context = &context});
+              {.defer_load = true, .reader_context = &context});
     ASSERT_NE(opened.base, nullptr);
     const auto* vector = dynamic_cast<const IVectorReader*>(opened.base.get());
     ASSERT_NE(vector, nullptr);
@@ -748,10 +752,11 @@ TEST(VectorDiskCacheTest, NativeLazyEngineUsesAdmissionAndResidentAccounting) {
         {8192, 0}};
     OpContext ctx;
     OpenedDiskIndex<float> opened;
-    BuildDisk(raw_path,
-              files->Path(),
-              opened,
-              {.cached = true, .reader_context = &ctx, .cache_config = config});
+    BuildDisk(
+        raw_path,
+        files->Path(),
+        opened,
+        {.defer_load = true, .reader_context = &ctx, .cache_config = config});
     ASSERT_NE(opened.base, nullptr);
     const auto* vector = dynamic_cast<const IVectorReader*>(opened.base.get());
     ASSERT_NE(vector, nullptr);
@@ -784,7 +789,7 @@ TEST(VectorDiskCacheTest, NativeLazyEngineUsesAdmissionAndResidentAccounting) {
     BuildDisk(raw_path,
               files->Path(),
               opened,
-              {.cached = true, .cache_config = config});
+              {.defer_load = true, .cache_config = config});
     vector = dynamic_cast<const IVectorReader*>(opened.base.get());
     ASSERT_NE(vector, nullptr);
     try {

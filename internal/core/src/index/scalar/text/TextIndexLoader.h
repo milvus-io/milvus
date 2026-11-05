@@ -36,7 +36,7 @@ struct TextIndexStorage;
 /**
  * @brief Loads text readers from legacy or packed V3 artifacts.
  *
- * Owns fixed load options and the source; cached construction transfers the source to the slot.
+ * Owns fixed load options and the source; Load transfers the source to the slot.
  */
 class TextIndexLoader final : public IndexLoader {
  public:
@@ -51,15 +51,14 @@ class TextIndexLoader final : public IndexLoader {
      * await Load.
      * @param source Opened storage source owned by the resulting loader.
      * @param options Fixed load options without a retained operation context.
-     * @return A ready loader with reusable family metadata.
+     * @return A ready loader with prepared family metadata.
      */
     static folly::coro::Task<std::unique_ptr<IndexLoader>>
     Create(OpenedIndexSource source, storage::LoadOptions options);
 
     /** @copydoc IndexLoader::Load */
     folly::coro::Task<IndexPtr>
-    Load(milvus::OpContext* context = nullptr,
-         const IndexCacheConfig* cache = nullptr) override;
+    Load(milvus::OpContext* context, const IndexCacheConfig& cache) override;
 
  private:
     friend struct LoaderTestAccess;

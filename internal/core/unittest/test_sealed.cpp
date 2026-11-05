@@ -9,6 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <fmt/core.h>
 #include "test_utils/skip_metrics_test_utils.h"
 #include <folly/CancellationToken.h>
@@ -314,7 +316,8 @@ BuildSourceBackedVectorIndex(Config params,
                        adapted.family == index::families::kVectorDisk
                            ? storage::V1SourceLayout::DiskFiles
                            : storage::V1SourceLayout::MemoryEntries}},
-               std::move(options)});
+               std::move(options),
+               milvus::index::test::TestIndexCacheConfig()});
 }
 
 std::vector<IndexCapabilityEntry>

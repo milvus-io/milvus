@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <gtest/gtest.h>
 #include <array>
 #include <atomic>
@@ -985,7 +987,7 @@ TEST_F(LegacyIndexLoadTest, AsyncFamilyRunsOutsideLocalFilePool) {
     }
 }
 
-TEST_F(LegacyIndexLoadTest, CreateKeepsMetadataForFreshLoadContexts) {
+TEST_F(LegacyIndexLoadTest, CreateKeepsMetadataForIndependentRequestReaders) {
     for (const auto* name : {"BitmapVarchar", "SortedVarchar"}) {
         SCOPED_TRACE(name);
         const auto& backend =
@@ -1026,11 +1028,13 @@ TEST_F(LegacyIndexLoadTest, CreateKeepsMetadataForFreshLoadContexts) {
         opening.requestCancellation();
         folly::CancellationSource first;
         OpContext first_context(first.getToken());
-        auto reader1 = Run(loader->Load(&first_context))->CreateReader(nullptr);
+        auto index = folly::coro::blockingWait(
+            loader->Load(nullptr, TestIndexCacheConfig()));
+        auto reader1 = index->CreateReader(&first_context);
+        reader1->Prefetch();
         first.requestCancellation();
         OpContext second_context;
-        auto reader2 =
-            Run(loader->Load(&second_context))->CreateReader(nullptr);
+        auto reader2 = index->CreateReader(&second_context);
         for (const auto& [path, count] : metadata_reads)
             EXPECT_EQ(fs_->files.at(path)->DirectReadCalls().size(), count);
         loader.reset();
@@ -1047,6 +1051,7 @@ TEST_F(LegacyIndexLoadTest, CreateKeepsMetadataForFreshLoadContexts) {
         }
         reader1.reset();
         reader2.reset();
+        index.reset();
         EXPECT_TRUE(std::filesystem::is_empty(staging_));
     }
 }
@@ -1071,7 +1076,8 @@ TEST_F(LegacyIndexLoadTest, FailedCreateDetachesBorrowedSourceContext) {
     options.params["field_type"] = DataType::NONE;
     options.params["value_type"] = DataType::NONE;
     IndexLoadRequest request{OpenedIndexSource{LegacyIndexSource{source, true}},
-                             options};
+                             options,
+                             milvus::index::test::TestIndexCacheConfig()};
     const auto loader_entry =
         LoaderRegistry::Instance().Lookup(backend.Family());
     ExpectError(DataTypeInvalid, [&] {
@@ -1084,7 +1090,7 @@ TEST_F(LegacyIndexLoadTest, FailedCreateDetachesBorrowedSourceContext) {
     EXPECT_TRUE(std::filesystem::is_empty(staging_));
 }
 
-TEST_F(LegacyIndexLoadTest, CancelledLoadDoesNotPoisonPreparedMetadata) {
+TEST_F(LegacyIndexLoadTest, CancelledConstructionCanRecreateLoader) {
     PersistSorted();
     const auto& backend =
         ScalarReaderBackends().Get<std::string_view>("SortedVarchar");
@@ -1104,10 +1110,18 @@ TEST_F(LegacyIndexLoadTest, CancelledLoadDoesNotPoisonPreparedMetadata) {
     folly::CancellationSource cancelled;
     cancelled.requestCancellation();
     OpContext rejected(cancelled.getToken());
-    ExpectError(FollyCancel,
-                [&] { Run(loader->Load(&rejected))->CreateReader(nullptr); });
+    ExpectError(FollyCancel, [&] {
+        folly::coro::blockingWait(
+            loader->Load(&rejected,
+                         milvus::index::test::TestIndexCacheConfig()))
+            ->CreateReader(nullptr);
+    });
     EXPECT_TRUE(std::filesystem::is_empty(staging_));
-    auto reader = Run(loader->Load())->CreateReader(nullptr);
+    loader = Run(loader_entry.create(
+        OpenedIndexSource{LegacyIndexSource{source, true}}, options));
+    auto reader =
+        folly::coro::blockingWait(loader->Load(nullptr, TestIndexCacheConfig()))
+            ->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
     EXPECT_EQ(reader->Count(), 4);
 }
@@ -1141,7 +1155,8 @@ TEST_F(LegacyIndexLoadTest,
                                  backend.Family() == families::kInverted
                                      ? storage::V1SourceLayout::DiskFiles
                                      : storage::V1SourceLayout::MemoryEntries}},
-                         options})
+                         options,
+                         milvus::index::test::TestIndexCacheConfig()})
                     ->CreateReader(nullptr);
             const auto* pattern =
                 dynamic_cast<const IPatternMatchReader*>(reader.get());
@@ -1194,7 +1209,8 @@ TEST_F(LegacyIndexLoadTest, AdditionalFamiliesPreserveAsyncQueryResults) {
                                       paths_,
                                       LegacyIndexStorageConfig{
                                           storage::V1SourceLayout::DiskFiles}},
-                           Options(backend.LoadParams({.row_count = 4}), mmap)})
+                           Options(backend.LoadParams({.row_count = 4}), mmap),
+                           milvus::index::test::TestIndexCacheConfig()})
                     ->CreateReader(nullptr);
             ASSERT_NE(reader, nullptr);
             EXPECT_EQ(reader->Count(), 4);
@@ -1269,7 +1285,8 @@ TEST_F(LegacyIndexLoadTest, InvertedSlicedNullOffsetsPreserveRows) {
                                   paths_,
                                   LegacyIndexStorageConfig{
                                       storage::V1SourceLayout::DiskFiles}},
-                       Options(backend.LoadParams({.row_count = rows}), mmap)})
+                       Options(backend.LoadParams({.row_count = rows}), mmap),
+                       milvus::index::test::TestIndexCacheConfig()})
                 ->CreateReader(nullptr);
         ASSERT_NE(reader, nullptr);
         EXPECT_EQ(reader->Count(), rows);
@@ -1311,7 +1328,8 @@ TEST_F(LegacyIndexLoadTest, TextSlicedNullOffsetsPreserveAllNullRows) {
                                   paths_,
                                   LegacyIndexStorageConfig{
                                       storage::V1SourceLayout::DiskFiles}},
-                       Options(backend.LoadParams({.row_count = rows}), mmap)})
+                       Options(backend.LoadParams({.row_count = rows}), mmap),
+                       milvus::index::test::TestIndexCacheConfig()})
                 ->CreateReader(nullptr);
         ASSERT_NE(reader, nullptr);
         EXPECT_EQ(reader->Count(), rows);
@@ -1357,7 +1375,8 @@ TEST_F(LegacyIndexLoadTest, RTreeSlicedNullOffsetsPreserveCandidates) {
                                   paths_,
                                   LegacyIndexStorageConfig{
                                       storage::V1SourceLayout::DiskFiles}},
-                       Options(backend.LoadParams({.row_count = rows}), mmap)})
+                       Options(backend.LoadParams({.row_count = rows}), mmap),
+                       milvus::index::test::TestIndexCacheConfig()})
                 ->CreateReader(nullptr);
         ASSERT_NE(reader, nullptr);
         const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
@@ -1435,7 +1454,8 @@ TEST_F(LegacyIndexLoadTest, JsonProjectedSlicedOffsetsRemainDistinct) {
                 LoaderRegistry::Instance()
                     .Lookup(ResolveLoadFamily(backend.Family(), *source))
                     .Load({OpenedIndexSource{LegacyIndexSource{source, true}},
-                           options})
+                           options,
+                           milvus::index::test::TestIndexCacheConfig()})
                     ->CreateReader(nullptr);
             ASSERT_NE(reader, nullptr);
             EXPECT_EQ(reader->Count(), rows);
@@ -1512,7 +1532,8 @@ TEST_F(LegacyIndexLoadTest, ReversedSliceCompletionPreservesEveryRow) {
             return LoaderRegistry::Instance()
                 .Lookup(backend.Family())
                 .Load({OpenedIndexSource{LegacyIndexSource{source, true}},
-                       options})
+                       options,
+                       milvus::index::test::TestIndexCacheConfig()})
                 ->CreateReader(nullptr);
         });
         auto drain = folly::makeGuard([&] {
@@ -1560,7 +1581,7 @@ TEST_F(LegacyIndexLoadTest, ReversedSliceCompletionPreservesEveryRow) {
     }
 }
 
-TEST_F(LegacyIndexLoadTest, MidReadCancellationDrainsThenRetriesSameLoader) {
+TEST_F(LegacyIndexLoadTest, MidReadCancellationDrainsThenRetriesSameSlot) {
     for (bool mmap : {false, true}) {
         SCOPED_TRACE(mmap);
         PersistSorted();
@@ -1582,6 +1603,10 @@ TEST_F(LegacyIndexLoadTest, MidReadCancellationDrainsThenRetriesSameLoader) {
                         std::shared_ptr<storage::FileSource>(std::move(source)),
                         true}},
                     options));
+        auto cache = TestIndexCacheConfig();
+        cache.meta.cache_warmup_policy =
+            CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+        auto index = folly::coro::blockingWait(loader->Load(nullptr, cache));
         auto file = DataFile();
         ASSERT_NE(file, nullptr);
         file->ResetCounters();
@@ -1589,7 +1614,9 @@ TEST_F(LegacyIndexLoadTest, MidReadCancellationDrainsThenRetriesSameLoader) {
         folly::CancellationSource cancel;
         OpContext interrupted(cancel.getToken());
         auto load = std::async(std::launch::async, [&] {
-            return Run(loader->Load(&interrupted))->CreateReader(nullptr);
+            auto reader = index->CreateReader(&interrupted);
+            reader->Prefetch();
+            return reader;
         });
         auto drain = folly::makeGuard([&] {
             cancel.requestCancellation();
@@ -1609,7 +1636,7 @@ TEST_F(LegacyIndexLoadTest, MidReadCancellationDrainsThenRetriesSameLoader) {
         EXPECT_TRUE(std::filesystem::is_empty(staging_));
         file->SetAutoComplete(true);
         OpContext fresh;
-        auto reader = Run(loader->Load(&fresh))->CreateReader(nullptr);
+        auto reader = index->CreateReader(&fresh);
         const auto* pattern =
             dynamic_cast<const IPatternMatchReader*>(reader.get());
         const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
@@ -1629,6 +1656,7 @@ TEST_F(LegacyIndexLoadTest, MidReadCancellationDrainsThenRetriesSameLoader) {
         EXPECT_GT(file->DirectReadCalls().size(), 1);
         loader.reset();
         reader.reset();
+        index.reset();
         EXPECT_TRUE(std::filesystem::is_empty(staging_));
     }
 }
@@ -1686,7 +1714,8 @@ TEST_F(LegacyIndexLoadTest, VectorHeapAndMmapPreserveNullableAndAllNullRows) {
                                paths_,
                                LegacyIndexStorageConfig{
                                    storage::V1SourceLayout::MemoryEntries}},
-                           options})
+                           options,
+                           milvus::index::test::TestIndexCacheConfig()})
                     ->CreateReader(nullptr);
             const auto* vectors =
                 dynamic_cast<const IVectorReader*>(reader.get());
@@ -1754,7 +1783,8 @@ TEST_F(LegacyIndexLoadTest, EmptyEmbeddingListsKeepValidParentRows) {
                                   paths_,
                                   LegacyIndexStorageConfig{
                                       storage::V1SourceLayout::MemoryEntries}},
-                       options})
+                       options,
+                       milvus::index::test::TestIndexCacheConfig()})
                 ->CreateReader(nullptr);
         const auto* vectors = dynamic_cast<const IVectorReader*>(reader.get());
         ASSERT_NE(vectors, nullptr);
@@ -1800,7 +1830,8 @@ TEST_F(LegacyIndexLoadTest,
                                   paths_,
                                   LegacyIndexStorageConfig{
                                       storage::V1SourceLayout::MemoryEntries}},
-                       Options(params, mmap)})
+                       Options(params, mmap),
+                       milvus::index::test::TestIndexCacheConfig()})
                 ->CreateReader(nullptr);
         };
     const std::vector<float> query{0, 1, 0, 0};
@@ -1934,7 +1965,9 @@ TEST_F(LegacyIndexLoadTest,
     auto load = std::async(std::launch::async, [&] {
         return LoaderRegistry::Instance()
             .Lookup(backend.Family())
-            .Load({OpenedIndexSource{LegacyIndexSource{source, true}}, options})
+            .Load({OpenedIndexSource{LegacyIndexSource{source, true}},
+                   options,
+                   milvus::index::test::TestIndexCacheConfig()})
             ->CreateReader(nullptr);
     });
     auto drain = folly::makeGuard([&] {
@@ -1967,7 +2000,8 @@ TEST_F(LegacyIndexLoadTest, DisabledAsyncUsesLegacySynchronousTransport) {
                               paths_,
                               LegacyIndexStorageConfig{
                                   storage::V1SourceLayout::MemoryEntries}},
-                   options})
+                   options,
+                   milvus::index::test::TestIndexCacheConfig()})
             ->CreateReader(nullptr);
     const auto* pattern =
         dynamic_cast<const IPatternMatchReader*>(reader.get());
@@ -2228,7 +2262,8 @@ TEST_F(LegacyIndexLoadTest, CorruptOrFailedReadKeepsCodeAndRemovesMmapStaging) {
                                   paths_,
                                   LegacyIndexStorageConfig{
                                       storage::V1SourceLayout::MemoryEntries}},
-                       options})
+                       options,
+                       milvus::index::test::TestIndexCacheConfig()})
                 ->CreateReader(nullptr);
         });
         EXPECT_TRUE(std::filesystem::is_empty(staging_));
@@ -2254,7 +2289,8 @@ TEST_F(LegacyIndexLoadTest, CancellationDrainsRemoteReadBeforeRemovingStaging) {
                               paths_,
                               LegacyIndexStorageConfig{
                                   storage::V1SourceLayout::MemoryEntries}},
-                   options})
+                   options,
+                   milvus::index::test::TestIndexCacheConfig()})
             ->CreateReader(nullptr);
     });
     auto drain = folly::makeGuard([&] {

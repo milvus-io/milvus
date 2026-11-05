@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <arrow/io/memory.h>
 
 #include <atomic>
@@ -261,7 +263,8 @@ BuildIndex(FieldId field_id,
     auto owner = loader.Load(
         {index::OpenedIndexSource{index::PackedIndexSource{
              std::shared_ptr<storage::IndexEntryReader>(std::move(source))}},
-         options});
+         options,
+         milvus::index::test::TestIndexCacheConfig()});
     auto reader = owner->CreateReader(nullptr);
     AssertInfo(reader != nullptr, "consumer fixture loader returned no reader");
     return {std::move(owner),
