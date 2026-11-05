@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/client/v3/column"
 	"github.com/milvus-io/milvus/client/v3/entity"
 	"github.com/milvus-io/milvus/client/v3/index"
+	"github.com/milvus-io/milvus/client/v3/internal/merr"
 )
 
 const (
@@ -86,7 +87,8 @@ type AnnRequest struct {
 	offset          int
 	templateParams  map[string]any
 
-	functionScore *entity.FunctionScore
+	functionScore  *entity.FunctionScore
+	functionChains []*entity.FunctionChain
 }
 
 func NewAnnRequest(annField string, limit int, vectors ...entity.Vector) *AnnRequest {
@@ -100,9 +102,17 @@ func NewAnnRequest(annField string, limit int, vectors ...entity.Vector) *AnnReq
 }
 
 func (r *AnnRequest) searchRequest() (*milvuspb.SearchRequest, error) {
+	chains, err := functionChainProtos(r.functionChains, entity.FunctionChainStageL0Rerank, entity.FunctionChainStageL1Rerank, entity.FunctionChainStageL2Rerank)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateSearchChains(chains, r.functionScore, r.searchParam); err != nil {
+		return nil, err
+	}
 	request := &milvuspb.SearchRequest{
-		Dsl:     r.expr,
-		DslType: commonpb.DslType_BoolExprV1,
+		Dsl:            r.expr,
+		DslType:        commonpb.DslType_BoolExprV1,
+		FunctionChains: chains,
 	}
 
 	// Determine search mode and build request accordingly
@@ -418,6 +428,11 @@ func (opt *searchOption) Request() (*milvuspb.SearchRequest, error) {
 	request.UseDefaultConsistency = opt.useDefaultConsistencyLevel
 	request.OutputFields = opt.outputFields
 	if opt.searchAggregation != nil {
+		for _, chain := range request.FunctionChains {
+			if chain.Stage == entity.FunctionChainStageL1Rerank {
+				return nil, merr.WrapErrParameterInvalidMsg("L1 function chains cannot be used with search_aggregation")
+			}
+		}
 		if opt.annRequest.groupByField != "" || opt.annRequest.groupSize != 0 || opt.annRequest.strictGroupSize {
 			return nil, errors.New("search_aggregation and group_by_field/group_size are mutually exclusive")
 		}
@@ -646,10 +661,11 @@ type hybridSearchOption struct {
 	useDefaultConsistency bool
 	consistencyLevel      entity.ConsistencyLevel
 
-	limit         int
-	offset        int
-	reranker      Reranker
-	functionScore *entity.FunctionScore
+	limit          int
+	offset         int
+	reranker       Reranker
+	functionScore  *entity.FunctionScore
+	functionChains []*entity.FunctionChain
 }
 
 func (opt *hybridSearchOption) WithConsistencyLevel(cl entity.ConsistencyLevel) *hybridSearchOption {
@@ -724,8 +740,27 @@ func (opt *hybridSearchOption) WithOffset(offset int) *hybridSearchOption {
 }
 
 func (opt *hybridSearchOption) HybridRequest() (*milvuspb.HybridSearchRequest, error) {
+	chains, err := functionChainProtos(opt.functionChains, entity.FunctionChainStageL2Rerank)
+	if err != nil {
+		return nil, err
+	}
+	if len(chains) > 0 && (opt.reranker != nil || opt.functionScore != nil) {
+		return nil, merr.WrapErrParameterInvalidMsg("function_chains cannot be used with a ranker or function_score")
+	}
+	if err := validateHybridChains(chains, len(opt.reqs)); err != nil {
+		return nil, err
+	}
 	requests := make([]*milvuspb.SearchRequest, 0, len(opt.reqs))
 	for _, annRequest := range opt.reqs {
+		if annRequest == nil {
+			return nil, merr.WrapErrParameterInvalidMsg("hybrid sub-search must not be nil")
+		}
+		if _, err := functionChainProtos(annRequest.functionChains, entity.FunctionChainStageL0Rerank, entity.FunctionChainStageL1Rerank); err != nil {
+			return nil, err
+		}
+		if len(annRequest.functionChains) > 0 && opt.functionScore != nil {
+			return nil, merr.WrapErrParameterInvalidMsg("function_score cannot be used with nested function_chains")
+		}
 		req, err := annRequest.searchRequest()
 		if err != nil {
 			return nil, err
@@ -753,6 +788,7 @@ func (opt *hybridSearchOption) HybridRequest() (*milvuspb.HybridSearchRequest, e
 		ConsistencyLevel:      commonpb.ConsistencyLevel(opt.consistencyLevel),
 		OutputFields:          opt.outputFields,
 		RankParams:            params,
+		FunctionChains:        chains,
 	}
 
 	if opt.functionScore != nil {
@@ -779,6 +815,7 @@ type QueryOption interface {
 }
 
 type queryOption struct {
+	functionChains             []*entity.FunctionChain
 	collectionName             string
 	partitionNames             []string
 	namespace                  *string
@@ -796,7 +833,15 @@ type queryOption struct {
 // it aliases the caller's backing arrays (see WithTemplateParam). Treat it as
 // valid only while those slices are unmodified.
 func (opt *queryOption) Request() (*milvuspb.QueryRequest, error) {
+	chains, err := functionChainProtos(opt.functionChains, entity.FunctionChainStageQueryScan)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateQueryChains(chains, opt.outputFields, opt.queryParams); err != nil {
+		return nil, err
+	}
 	req := &milvuspb.QueryRequest{
+		FunctionChains: chains,
 		CollectionName: opt.collectionName,
 		PartitionNames: opt.partitionNames,
 		Namespace:      opt.namespace,
