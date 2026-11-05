@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
 	"google.golang.org/grpc/metadata"
 
@@ -34,35 +33,6 @@ type Response interface {
 
 type ServiceInterceptor[Req Request, Resp Response] interface {
 	Call(ctx context.Context, request Req) (Resp, error)
-}
-
-// serviceProviderMetricError lets a provider preserve a non-failure metric
-// outcome, such as "abandon" for a request that could not be enqueued, while
-// keeping the original error identity and merr code intact for the response.
-type serviceProviderMetricError struct {
-	err    error
-	status string
-	cause  string
-}
-
-func (e *serviceProviderMetricError) Error() string {
-	return e.err.Error()
-}
-
-func (e *serviceProviderMetricError) Unwrap() error {
-	return e.err
-}
-
-func withServiceProviderMetric(err error, status, cause string) error {
-	return &serviceProviderMetricError{err: err, status: status, cause: cause}
-}
-
-func serviceCallMetricLabel(err error) (string, string) {
-	var metricErr *serviceProviderMetricError
-	if errors.As(err, &metricErr) {
-		return metricErr.status, metricErr.cause
-	}
-	return failMetricLabel(err)
 }
 
 func NewInterceptor[Req Request, Resp Response](proxy *Proxy, method string) (*InterceptorImpl[Req, Resp], error) {
@@ -100,6 +70,12 @@ type InterceptorImpl[Req Request, Resp Response] struct {
 	onError    func(err error) (Resp, error)
 }
 
+// Call runs a proxy service-layer method through the health check and
+// response finalization hooks. It deliberately does not record
+// milvus_proxy_req_count: the request is counted exactly once at the boundary
+// it entered through -- UnaryRequestStatsInterceptor for gRPC, wrapperPost for
+// REST v2 -- and a second count here would double-report every request. It
+// only owns the latency series, which no boundary covers for these methods.
 func (i *InterceptorImpl[Req, Resp]) Call(ctx context.Context, request Req,
 ) (Resp, error) {
 	if err := merr.CheckHealthy(i.proxy.GetStateCode()); err != nil {
@@ -110,10 +86,6 @@ func (i *InterceptorImpl[Req, Resp]) Call(ctx context.Context, request Req,
 	defer sp.End()
 	tr := timerecord.NewTimeRecorder(i.method)
 	nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
-	dbName := request.GetDbName()
-	collectionName := request.GetCollectionName()
-	metrics.ProxyFunctionCall.WithLabelValues(nodeID, i.method,
-		metrics.TotalLabel, metrics.CauseNA, dbName, collectionName).Inc()
 	defer func() {
 		metrics.ProxyReqLatency.WithLabelValues(nodeID, i.method).
 			Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -121,30 +93,14 @@ func (i *InterceptorImpl[Req, Resp]) Call(ctx context.Context, request Req,
 
 	resp, err := i.onCall(ctx, request)
 	if err != nil {
-		status, cause := serviceCallMetricLabel(err)
-		metrics.ProxyFunctionCall.WithLabelValues(nodeID, i.method,
-			status, cause, dbName, collectionName).Inc()
 		return i.onError(err)
 	}
 
 	if i.onResponse != nil && merr.Ok(resp.GetStatus()) {
 		if err := i.onResponse(resp); err != nil {
-			status, cause := serviceCallMetricLabel(err)
-			metrics.ProxyFunctionCall.WithLabelValues(nodeID, i.method,
-				status, cause, dbName, collectionName).Inc()
 			return i.onError(err)
 		}
 	}
-
-	if !merr.Ok(resp.GetStatus()) {
-		status, cause := failMetricLabel(merr.Error(resp.GetStatus()))
-		metrics.ProxyFunctionCall.WithLabelValues(nodeID, i.method,
-			status, cause, dbName, collectionName).Inc()
-		return resp, nil
-	}
-
-	metrics.ProxyFunctionCall.WithLabelValues(nodeID, i.method,
-		metrics.SuccessLabel, metrics.CauseNA, dbName, collectionName).Inc()
 
 	return resp, nil
 }
@@ -368,7 +324,7 @@ func (node *RemoteProxyServiceProvider) DescribeCollection(ctx context.Context,
 		log.Warn(ctx, "DescribeCollection failed to enqueue",
 			mlog.Err(err))
 
-		return nil, withServiceProviderMetric(err, metrics.AbandonLabel, metrics.CauseNA)
+		return nil, err
 	}
 
 	log.Debug(ctx, "DescribeCollection enqueued",
