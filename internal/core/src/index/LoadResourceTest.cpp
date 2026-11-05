@@ -157,7 +157,14 @@ class MetadataChunkManager : public storage::LocalChunkManager {
     }
     uint64_t
     Read(const std::string& path, void* data, uint64_t bytes) override {
-        const auto count = LocalChunkManager::Read(path, 0, data, bytes);
+        return Read(path, 0, data, bytes);
+    }
+    uint64_t
+    Read(const std::string& path,
+         uint64_t offset,
+         void* data,
+         uint64_t bytes) override {
+        const auto count = LocalChunkManager::Read(path, offset, data, bytes);
         if (after_read)
             after_read();
         return count;
@@ -619,6 +626,14 @@ TEST(LegacyHybridResourceEstimate, ResolvesPersistedChildType) {
                                                            child_params,
                                                            mmap,
                                                            rows);
+                        const auto high_tasks =
+                            monitor::
+                                internal_storage_pool_task_submitted_total_high
+                                    .Value();
+                        const auto low_tasks =
+                            monitor::
+                                internal_storage_pool_task_submitted_total_low
+                                    .Value();
                         resources = ScalarIndexFileLoadResource(DataType::INT64,
                                                                 index_size,
                                                                 params,
@@ -626,6 +641,16 @@ TEST(LegacyHybridResourceEstimate, ResolvesPersistedChildType) {
                                                                 rows,
                                                                 sync_files,
                                                                 ctx);
+                        EXPECT_EQ(
+                            monitor::
+                                internal_storage_pool_task_submitted_total_high
+                                    .Value(),
+                            high_tasks);
+                        EXPECT_EQ(
+                            monitor::
+                                internal_storage_pool_task_submitted_total_low
+                                    .Value(),
+                            low_tasks);
                     }
                     EXPECT_EQ(resources.request.final_memory_cost,
                               expected.final_memory_cost);
