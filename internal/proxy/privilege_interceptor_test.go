@@ -383,7 +383,7 @@ func TestPrivilegeInterceptorRunningRequests(t *testing.T) {
 	assert.NoError(t, err)
 
 	list := &milvuspb.ListRunningRequestsRequest{}
-	cancel := &milvuspb.CancelRequestsRequest{RequestIds: []int64{1}}
+	cancel := &milvuspb.CancelRequestsRequest{RequestIds: []string{"25-to03zu-1"}}
 	for _, tc := range []struct {
 		user              string
 		req               any

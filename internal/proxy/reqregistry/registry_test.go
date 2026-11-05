@@ -34,11 +34,11 @@ import (
 
 func TestRegisterUnregister(t *testing.T) {
 	r := New()
-	ctx, e := r.Register(context.Background(), Info{RequestID: 1, Type: TypeSearch, DBName: "db", CollectionName: "c", User: "u"})
+	ctx, e := r.Register(context.Background(), Info{Type: TypeSearch, DBName: "db", CollectionName: "c", User: "u"})
 	require.NotNil(t, e)
 	assert.Same(t, e, FromContext(ctx))
 	assert.Equal(t, 1, r.Len())
-	assert.Same(t, e, r.Get(1))
+	assert.Same(t, e, r.Get(e.RequestID()))
 	assert.Nil(t, ctx.Err())
 
 	snap := e.Snapshot(time.Now())
@@ -48,7 +48,7 @@ func TestRegisterUnregister(t *testing.T) {
 
 	r.Unregister(e)
 	assert.Equal(t, 0, r.Len())
-	assert.Nil(t, r.Get(1))
+	assert.Nil(t, r.Get(e.RequestID()))
 	// the derived ctx is released, but not as an operator cancel
 	assert.ErrorIs(t, ctx.Err(), context.Canceled)
 	assert.Nil(t, CancelCause(ctx))
@@ -65,17 +65,18 @@ func TestFromContextWithoutEntry(t *testing.T) {
 
 func TestCancel(t *testing.T) {
 	r := New()
-	ctx, e := r.Register(context.Background(), Info{RequestID: 7, Type: TypeQuery, DBName: "db", CollectionName: "c"})
+	ctx, e := r.Register(context.Background(), Info{Type: TypeQuery, DBName: "db", CollectionName: "c"})
 	e.AddTask(100)
 	e.AddTask(101)
 	e.MarkRunning(30 * time.Millisecond)
 
 	now := time.Now()
-	canceled, repeated, notFound := r.Cancel([]int64{7, 8}, "", "root", "too heavy", now)
+	missing := e.RequestID() + "0"
+	canceled, repeated, notFound := r.Cancel([]string{e.RequestID(), missing}, "", "root", "too heavy", now)
 	assert.Empty(t, repeated)
 	require.Len(t, canceled, 1)
-	assert.Equal(t, []int64{8}, notFound)
-	assert.Equal(t, int64(7), canceled[0].RequestID)
+	assert.Equal(t, []string{missing}, notFound)
+	assert.Equal(t, e.RequestID(), canceled[0].RequestID)
 	assert.Equal(t, []int64{100, 101}, canceled[0].TaskIDs)
 	assert.Equal(t, StateRunning, canceled[0].State)
 	assert.Equal(t, int64(30), canceled[0].QueuedMS)
@@ -90,15 +91,15 @@ func TestCancel(t *testing.T) {
 
 	at, ok := e.CanceledAt()
 	assert.True(t, ok)
-	assert.Equal(t, now, at)
+	assert.True(t, at.Equal(now))
 
 	// a second cancel of the same request, before it has left, reports it as
 	// repeated, in state Canceling, so the id does not vanish from the answer
-	canceled, repeated, notFound = r.Cancel([]int64{7}, "", "root", "again", now)
+	canceled, repeated, notFound = r.Cancel([]string{e.RequestID()}, "", "root", "again", now)
 	assert.Empty(t, canceled)
 	assert.Empty(t, notFound)
 	require.Len(t, repeated, 1)
-	assert.Equal(t, int64(7), repeated[0].RequestID)
+	assert.Equal(t, e.RequestID(), repeated[0].RequestID)
 	assert.Equal(t, StateCanceling, repeated[0].State)
 	// and the cause stays the first operator's
 	assert.Contains(t, CancelCause(ctx).Error(), "too heavy")
@@ -116,7 +117,7 @@ func TestCancel(t *testing.T) {
 func TestCancelCauseIgnoresClientCancellation(t *testing.T) {
 	r := New()
 	parent, parentCancel := context.WithCancel(context.Background())
-	ctx, e := r.Register(parent, Info{RequestID: 3})
+	ctx, e := r.Register(parent, Info{})
 	defer r.Unregister(e)
 
 	parentCancel()
@@ -126,15 +127,16 @@ func TestCancelCauseIgnoresClientCancellation(t *testing.T) {
 
 func TestListFilters(t *testing.T) {
 	r := New()
-	_, e1 := r.Register(context.Background(), Info{RequestID: 1, DBName: "db1", CollectionName: "a", User: "alice"})
-	_, e2 := r.Register(context.Background(), Info{RequestID: 2, DBName: "db1", CollectionName: "b", User: "bob"})
-	_, e3 := r.Register(context.Background(), Info{RequestID: 3, DBName: "db2", CollectionName: "a", User: "alice"})
+	_, e1 := r.Register(context.Background(), Info{DBName: "db1", CollectionName: "a", User: "alice"})
+	_, e2 := r.Register(context.Background(), Info{DBName: "db1", CollectionName: "b", User: "bob"})
+	_, e3 := r.Register(context.Background(), Info{DBName: "db2", CollectionName: "a", User: "alice"})
 	defer r.Unregister(e1)
 	defer r.Unregister(e2)
 	defer r.Unregister(e3)
+	id1, id2, id3 := e1.RequestID(), e2.RequestID(), e3.RequestID()
 
-	ids := func(infos []Info) []int64 {
-		out := make([]int64, 0, len(infos))
+	ids := func(infos []Info) []string {
+		out := make([]string, 0, len(infos))
 		for _, info := range infos {
 			out = append(out, info.RequestID)
 		}
@@ -142,15 +144,15 @@ func TestListFilters(t *testing.T) {
 	}
 	now := time.Now()
 
-	assert.ElementsMatch(t, []int64{1, 2, 3}, ids(r.List(Filter{}, now)))
-	assert.ElementsMatch(t, []int64{1, 2}, ids(r.List(Filter{DBName: "db1"}, now)))
-	assert.ElementsMatch(t, []int64{1, 3}, ids(r.List(Filter{CollectionName: "a"}, now)))
-	assert.ElementsMatch(t, []int64{1}, ids(r.List(Filter{DBName: "db1", User: "alice"}, now)))
+	assert.ElementsMatch(t, []string{id1, id2, id3}, ids(r.List(Filter{}, now)))
+	assert.ElementsMatch(t, []string{id1, id2}, ids(r.List(Filter{DBName: "db1"}, now)))
+	assert.ElementsMatch(t, []string{id1, id3}, ids(r.List(Filter{CollectionName: "a"}, now)))
+	assert.ElementsMatch(t, []string{id1}, ids(r.List(Filter{DBName: "db1", User: "alice"}, now)))
 	assert.Empty(t, ids(r.List(Filter{DBName: "db2", User: "bob"}, now)))
 
 	// elapsed is measured against the time passed to List
 	assert.Empty(t, ids(r.List(Filter{MinElapsed: time.Hour}, now)))
-	assert.ElementsMatch(t, []int64{1, 2, 3}, ids(r.List(Filter{MinElapsed: time.Hour}, now.Add(2*time.Hour))))
+	assert.ElementsMatch(t, []string{id1, id2, id3}, ids(r.List(Filter{MinElapsed: time.Hour}, now.Add(2*time.Hour))))
 	for _, info := range r.List(Filter{}, now.Add(time.Second)) {
 		assert.GreaterOrEqual(t, info.ElapsedMS, int64(1000))
 	}
@@ -159,7 +161,7 @@ func TestListFilters(t *testing.T) {
 func TestExprPrefixIsBounded(t *testing.T) {
 	r := New()
 	long := strings.Repeat("x", ExprPrefixLimit*3)
-	_, e := r.Register(context.Background(), Info{RequestID: 1, Expr: long})
+	_, e := r.Register(context.Background(), Info{Expr: long})
 	defer r.Unregister(e)
 	assert.Len(t, e.Snapshot(time.Now()).Expr, ExprPrefixLimit)
 }
@@ -181,7 +183,7 @@ func TestExprPrefixNeverSplitsACharacter(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := New()
-			_, e := r.Register(context.Background(), Info{RequestID: 1, Expr: tc.expr})
+			_, e := r.Register(context.Background(), Info{Expr: tc.expr})
 			defer r.Unregister(e)
 			got := e.Snapshot(time.Now()).Expr
 			assert.Len(t, got, tc.want)
@@ -200,7 +202,7 @@ func TestExprPrefixNeverSplitsACharacter(t *testing.T) {
 
 func TestSnapshotIsolatesTaskIDs(t *testing.T) {
 	r := New()
-	_, e := r.Register(context.Background(), Info{RequestID: 1})
+	_, e := r.Register(context.Background(), Info{})
 	defer r.Unregister(e)
 	e.AddTask(1)
 	snap := e.Snapshot(time.Now())
@@ -210,7 +212,7 @@ func TestSnapshotIsolatesTaskIDs(t *testing.T) {
 
 func TestMarkRunningOnlyFirstTaskSetsQueueTime(t *testing.T) {
 	r := New()
-	_, e := r.Register(context.Background(), Info{RequestID: 1})
+	_, e := r.Register(context.Background(), Info{})
 	defer r.Unregister(e)
 	e.MarkRunning(10 * time.Millisecond)
 	e.MarkRunning(500 * time.Millisecond)
@@ -225,13 +227,13 @@ func TestConcurrentUse(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 0; i < n; i++ {
 		wg.Add(1)
-		go func(id int64) {
+		go func(i int64) {
 			defer wg.Done()
-			ctx, e := r.Register(context.Background(), Info{RequestID: id, DBName: "db"})
-			e.AddTask(id * 10)
+			ctx, e := r.Register(context.Background(), Info{DBName: "db"})
+			e.AddTask(i * 10)
 			e.MarkRunning(time.Millisecond)
-			if id%2 == 0 {
-				canceled, _, _ := r.Cancel([]int64{id}, "", "op", "", time.Now())
+			if i%2 == 0 {
+				canceled, _, _ := r.Cancel([]string{e.RequestID()}, "", "op", "", time.Now())
 				assert.Len(t, canceled, 1)
 				assert.ErrorIs(t, CancelCause(ctx), merr.ErrRequestCanceled)
 			}
@@ -245,15 +247,15 @@ func TestConcurrentUse(t *testing.T) {
 
 func TestCancelHeldToOwner(t *testing.T) {
 	r := New()
-	aliceCtx, _ := r.Register(context.Background(), Info{RequestID: 1, Type: TypeSearch, User: "alice"})
-	bobCtx, _ := r.Register(context.Background(), Info{RequestID: 2, Type: TypeSearch, User: "bob"})
+	aliceCtx, alice := r.Register(context.Background(), Info{Type: TypeSearch, User: "alice"})
+	bobCtx, bob := r.Register(context.Background(), Info{Type: TypeSearch, User: "bob"})
 
 	// alice names both ids: hers is canceled, bob's is reported exactly like
 	// an id that does not exist, and is left running.
-	canceled, _, notFound := r.Cancel([]int64{1, 2, 3}, "alice", "alice", "", time.Now())
+	canceled, _, notFound := r.Cancel([]string{alice.RequestID(), bob.RequestID(), "nope"}, "alice", "alice", "", time.Now())
 	require.Len(t, canceled, 1)
-	assert.Equal(t, int64(1), canceled[0].RequestID)
-	assert.Equal(t, []int64{2, 3}, notFound)
+	assert.Equal(t, alice.RequestID(), canceled[0].RequestID)
+	assert.Equal(t, []string{bob.RequestID(), "nope"}, notFound)
 	assert.ErrorIs(t, aliceCtx.Err(), context.Canceled)
 	assert.NoError(t, bobCtx.Err())
 }

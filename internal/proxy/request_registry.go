@@ -51,16 +51,9 @@ func (node *Proxy) registerRequest(ctx context.Context, info reqregistry.Info) (
 	if node.requests == nil {
 		return ctx, nil
 	}
-	cache := node.GetMetaCache()
-	if cache == nil {
-		return ctx, nil
-	}
-	requestID, err := cache.AllocID(ctx)
-	if err != nil {
-		mlog.Warn(ctx, "failed to allocate a request id; the request runs unregistered", mlog.Err(err))
-		return ctx, nil
-	}
-	info.RequestID = requestID
+	// The registry names the request itself, from the proxy id, the process
+	// start and a local sequence: registration takes no lock and no call to
+	// the coordinator, so it cannot fail.
 	info.ProxyID = paramtable.GetNodeID()
 	info.User = GetCurUserFromContextOrDefault(ctx)
 	info.ClientAddr = clientAddrFromContext(ctx)
@@ -104,7 +97,7 @@ func (node *Proxy) listRunningRequests(filter reqregistry.Filter) []reqregistry.
 // it. A request an earlier call already stopped is returned too, in state
 // Canceling, but is neither logged nor counted again. A non-empty owner
 // limits the call to requests that user issued.
-func (node *Proxy) cancelRequests(ctx context.Context, requestIDs []int64, owner, operator, reason string) (canceled []reqregistry.Info, notFound []int64) {
+func (node *Proxy) cancelRequests(ctx context.Context, requestIDs []string, owner, operator, reason string) (canceled []reqregistry.Info, notFound []string) {
 	if node.requests == nil {
 		return nil, requestIDs
 	}
@@ -114,7 +107,7 @@ func (node *Proxy) cancelRequests(ctx context.Context, requestIDs []int64, owner
 		mlog.Info(ctx, "request canceled by operator",
 			mlog.String("operator", operator),
 			mlog.String("reason", reason),
-			mlog.Int64("requestID", info.RequestID),
+			mlog.String("requestID", info.RequestID),
 			mlog.String("type", info.Type),
 			mlog.String("db", info.DBName),
 			mlog.String("collection", info.CollectionName),
@@ -323,7 +316,7 @@ func (node *Proxy) CancelRequests(ctx context.Context, request *milvuspb.CancelR
 		mlog.Info(ctx, "request canceled by operator",
 			mlog.String("operator", operator),
 			mlog.String("reason", request.GetReason()),
-			mlog.Int64("requestID", info.GetRequestId()),
+			mlog.String("requestID", info.GetRequestId()),
 			mlog.Int64("servedByProxyID", info.GetProxyId()),
 			mlog.String("type", info.GetType()),
 			mlog.String("db", info.GetDbName()),

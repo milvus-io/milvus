@@ -24,7 +24,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -124,28 +123,25 @@ func TestStatusIfCanceled(t *testing.T) {
 }
 
 func TestRegisterAndCancelRequestOnProxy(t *testing.T) {
-	cache := NewMockCache(t)
-	cache.EXPECT().AllocID(mock.Anything).Return(int64(4242), nil)
-	node := &Proxy{requests: reqregistry.New()}
-	node.metaCache = cache
+	node := &Proxy{requests: newTestRequests()}
 
 	parent := peer.NewContext(context.Background(), &peer.Peer{Addr: &net.TCPAddr{IP: net.IPv4(10, 0, 0, 2), Port: 1}})
 	ctx, entry := node.registerRequest(parent, searchRequestInfo(&milvuspb.SearchRequest{DbName: "db", CollectionName: "c", Nq: 1}))
 	require.NotNil(t, entry)
 	assert.Same(t, entry, reqregistry.FromContext(ctx))
-	assert.Equal(t, int64(4242), entry.RequestID())
+	assert.Equal(t, testReqID(1), entry.RequestID())
 
 	listed := node.listRunningRequests(reqregistry.Filter{DBName: "db"})
 	require.Len(t, listed, 1)
-	assert.Equal(t, int64(4242), listed[0].RequestID)
+	assert.Equal(t, testReqID(1), listed[0].RequestID)
 	assert.Equal(t, "10.0.0.2:1", listed[0].ClientAddr)
 	assert.Equal(t, reqregistry.StateQueued, listed[0].State)
 	assert.Empty(t, node.listRunningRequests(reqregistry.Filter{DBName: "other"}))
 
-	canceled, notFound := node.cancelRequests(context.Background(), []int64{4242, 1}, "", "root", "test")
+	canceled, notFound := node.cancelRequests(context.Background(), []string{testReqID(1), testReqID(2)}, "", "root", "test")
 	require.Len(t, canceled, 1)
-	assert.Equal(t, []int64{1}, notFound)
-	assert.Equal(t, int64(4242), canceled[0].RequestID)
+	assert.Equal(t, []string{testReqID(2)}, notFound)
+	assert.Equal(t, testReqID(1), canceled[0].RequestID)
 	assert.ErrorIs(t, reqregistry.CancelCause(ctx), merr.ErrRequestCanceled)
 	assert.True(t, canceled[0].ElapsedMS >= 0)
 
@@ -161,29 +157,28 @@ func TestRegisterRequestIsBestEffort(t *testing.T) {
 		ctx, entry := node.registerRequest(context.Background(), reqregistry.Info{})
 		assert.Nil(t, entry)
 		assert.Nil(t, reqregistry.FromContext(ctx))
-		canceled, notFound := node.cancelRequests(context.Background(), []int64{1}, "", "root", "")
+		canceled, notFound := node.cancelRequests(context.Background(), []string{testReqID(1)}, "", "root", "")
 		assert.Empty(t, canceled)
-		assert.Equal(t, []int64{1}, notFound)
+		assert.Equal(t, []string{testReqID(1)}, notFound)
 		assert.Nil(t, node.listRunningRequests(reqregistry.Filter{}))
 	})
 
-	t.Run("id allocation fails", func(t *testing.T) {
-		cache := NewMockCache(t)
-		cache.EXPECT().AllocID(mock.Anything).Return(int64(0), errors.New("rootcoord unreachable"))
-		node := &Proxy{requests: reqregistry.New()}
-		node.metaCache = cache
+	t.Run("registration needs no coordinator", func(t *testing.T) {
+		// The id comes from the proxy itself, so a proxy whose meta cache
+		// (and with it the coordinator's id allocator) is unavailable still
+		// registers every request and can cancel it.
+		node := &Proxy{requests: newTestRequests()}
 		ctx, entry := node.registerRequest(context.Background(), reqregistry.Info{})
-		assert.Nil(t, entry, "the request still runs, only unregistered")
+		require.NotNil(t, entry)
+		defer node.unregisterRequest(entry)
+		assert.Equal(t, testReqID(1), entry.RequestID())
 		assert.Nil(t, ctx.Err())
-		assert.Equal(t, 0, node.requests.Len())
+		assert.Equal(t, 1, node.requests.Len())
 	})
 }
 
 func TestUnregisterReleasesContextWithoutOperatorCause(t *testing.T) {
-	cache := NewMockCache(t)
-	cache.EXPECT().AllocID(mock.Anything).Return(int64(1), nil)
-	node := &Proxy{requests: reqregistry.New()}
-	node.metaCache = cache
+	node := &Proxy{requests: newTestRequests()}
 
 	ctx, entry := node.registerRequest(context.Background(), reqregistry.Info{})
 	node.unregisterRequest(entry)
@@ -205,11 +200,7 @@ func TestCancelCountsOnlyWhatItActuallyCanceled(t *testing.T) {
 	counter := metrics.ProxyRequestCanceledTotal.WithLabelValues(nodeID, reqregistry.TypeSearch)
 	before := testutil.ToFloat64(counter)
 
-	cache := NewMockCache(t)
-	cache.EXPECT().AllocID(mock.Anything).Return(int64(11), nil).Once()
-	cache.EXPECT().AllocID(mock.Anything).Return(int64(12), nil).Once()
-	node := &Proxy{requests: reqregistry.New()}
-	node.metaCache = cache
+	node := &Proxy{requests: newTestRequests()}
 
 	_, e1 := node.registerRequest(context.Background(), searchRequestInfo(&milvuspb.SearchRequest{DbName: "db", CollectionName: "c"}))
 	_, e2 := node.registerRequest(context.Background(), searchRequestInfo(&milvuspb.SearchRequest{DbName: "db", CollectionName: "c"}))
@@ -217,14 +208,14 @@ func TestCancelCountsOnlyWhatItActuallyCanceled(t *testing.T) {
 	defer node.unregisterRequest(e2)
 
 	// one call, two real cancellations and one id nobody holds
-	canceled, notFound := node.cancelRequests(context.Background(), []int64{11, 12, 99}, "", "root", "test")
+	canceled, notFound := node.cancelRequests(context.Background(), []string{testReqID(1), testReqID(2), testReqID(99)}, "", "root", "test")
 	require.Len(t, canceled, 2)
-	assert.Equal(t, []int64{99}, notFound)
+	assert.Equal(t, []string{testReqID(99)}, notFound)
 	assert.Equal(t, float64(2), testutil.ToFloat64(counter)-before)
 
 	// canceling the same requests again, before they have left, still
 	// returns them, now in state Canceling, but counts nothing
-	canceled, notFound = node.cancelRequests(context.Background(), []int64{11, 12}, "", "root", "test")
+	canceled, notFound = node.cancelRequests(context.Background(), []string{testReqID(1), testReqID(2)}, "", "root", "test")
 	require.Len(t, canceled, 2)
 	assert.Empty(t, notFound)
 	for _, info := range canceled {
@@ -239,11 +230,7 @@ func TestCancelCountsOnlyWhatItActuallyCanceled(t *testing.T) {
 }
 
 func TestListLocalRunningRequests(t *testing.T) {
-	cache := NewMockCache(t)
-	cache.EXPECT().AllocID(mock.Anything).Return(int64(1), nil).Once()
-	cache.EXPECT().AllocID(mock.Anything).Return(int64(2), nil).Once()
-	node := &Proxy{requests: reqregistry.New()}
-	node.metaCache = cache
+	node := &Proxy{requests: newTestRequests()}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	_, e1 := node.registerRequest(context.Background(), searchRequestInfo(&milvuspb.SearchRequest{
@@ -260,21 +247,21 @@ func TestListLocalRunningRequests(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, merr.Ok(resp.GetStatus()))
 	require.Len(t, resp.GetRequests(), 2)
-	byID := lo.KeyBy(resp.GetRequests(), func(r *milvuspb.RunningRequestInfo) int64 { return r.GetRequestId() })
-	assert.Equal(t, reqregistry.TypeSearch, byID[1].GetType())
-	assert.Equal(t, "db1", byID[1].GetDbName())
-	assert.Equal(t, int64(3), byID[1].GetNq())
-	assert.Equal(t, int64(10), byID[1].GetTopk())
-	assert.True(t, byID[1].GetCancellable())
-	assert.NotZero(t, byID[1].GetStartTimeMs())
-	assert.Equal(t, reqregistry.TypeQuery, byID[2].GetType())
-	assert.Equal(t, "id > 0", byID[2].GetExpr())
+	byID := lo.KeyBy(resp.GetRequests(), func(r *milvuspb.RunningRequestInfo) string { return r.GetRequestId() })
+	assert.Equal(t, reqregistry.TypeSearch, byID[testReqID(1)].GetType())
+	assert.Equal(t, "db1", byID[testReqID(1)].GetDbName())
+	assert.Equal(t, int64(3), byID[testReqID(1)].GetNq())
+	assert.Equal(t, int64(10), byID[testReqID(1)].GetTopk())
+	assert.True(t, byID[testReqID(1)].GetCancellable())
+	assert.NotZero(t, byID[testReqID(1)].GetStartTimeMs())
+	assert.Equal(t, reqregistry.TypeQuery, byID[testReqID(2)].GetType())
+	assert.Equal(t, "id > 0", byID[testReqID(2)].GetExpr())
 
 	// the filters are applied on this proxy, not by the caller
 	resp, err = node.ListLocalRunningRequests(context.Background(), &milvuspb.ListRunningRequestsRequest{DbName: "db2"})
 	require.NoError(t, err)
 	require.Len(t, resp.GetRequests(), 1)
-	assert.Equal(t, int64(2), resp.GetRequests()[0].GetRequestId())
+	assert.Equal(t, testReqID(2), resp.GetRequests()[0].GetRequestId())
 
 	resp, err = node.ListLocalRunningRequests(context.Background(), &milvuspb.ListRunningRequestsRequest{MinElapsedMs: 1 << 40})
 	require.NoError(t, err)
@@ -282,26 +269,23 @@ func TestListLocalRunningRequests(t *testing.T) {
 }
 
 func TestCancelLocalRequests(t *testing.T) {
-	cache := NewMockCache(t)
-	cache.EXPECT().AllocID(mock.Anything).Return(int64(7), nil)
-	node := &Proxy{requests: reqregistry.New()}
-	node.metaCache = cache
+	node := &Proxy{requests: newTestRequests()}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	ctx, entry := node.registerRequest(context.Background(), searchRequestInfo(&milvuspb.SearchRequest{DbName: "db", CollectionName: "c"}))
 	defer node.unregisterRequest(entry)
 
 	resp, err := node.CancelLocalRequests(context.Background(), &milvuspb.CancelRequestsRequest{
-		RequestIds: []int64{7, 8},
+		RequestIds: []string{testReqID(1), testReqID(2)},
 		Reason:     "too heavy",
 	})
 	require.NoError(t, err)
 	require.True(t, merr.Ok(resp.GetStatus()))
 	require.Len(t, resp.GetCanceled(), 1)
-	assert.Equal(t, int64(7), resp.GetCanceled()[0].GetRequestId())
+	assert.Equal(t, testReqID(1), resp.GetCanceled()[0].GetRequestId())
 	// an id this proxy does not hold is reported back; only the coordinator,
 	// which sees every proxy, can call it not found for the cluster
-	assert.Equal(t, []int64{8}, resp.GetNotFound())
+	assert.Equal(t, []string{testReqID(2)}, resp.GetNotFound())
 
 	cause := reqregistry.CancelCause(ctx)
 	require.ErrorIs(t, cause, merr.ErrRequestCanceled)
@@ -311,7 +295,7 @@ func TestCancelLocalRequests(t *testing.T) {
 }
 
 func TestPublicRunningRequestHandlersDelegateToCoordinator(t *testing.T) {
-	node := &Proxy{requests: reqregistry.New()}
+	node := &Proxy{requests: newTestRequests()}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	mixc := mocks.NewMockMixCoordClient(t)
 	node.mixCoord = mixc
@@ -320,7 +304,7 @@ func TestPublicRunningRequestHandlersDelegateToCoordinator(t *testing.T) {
 		return req.GetBase().GetMsgType() == commonpb.MsgType_ListRunningRequests
 	})).Return(&milvuspb.ListRunningRequestsResponse{
 		Status:   merr.Success(),
-		Requests: []*milvuspb.RunningRequestInfo{{RequestId: 5, ProxyId: 999}},
+		Requests: []*milvuspb.RunningRequestInfo{{RequestId: "999-to03zu-5", ProxyId: 999}},
 	}, nil)
 	listResp, err := node.ListRunningRequests(context.Background(), &milvuspb.ListRunningRequestsRequest{})
 	require.NoError(t, err)
@@ -336,27 +320,27 @@ func TestPublicRunningRequestHandlersDelegateToCoordinator(t *testing.T) {
 	})).Return(&milvuspb.CancelRequestsResponse{
 		Status: merr.Success(),
 		Canceled: []*milvuspb.RunningRequestInfo{
-			{RequestId: 5, ProxyId: 999, ElapsedMs: 42, State: reqregistry.StateRunning},
-			{RequestId: 8, ProxyId: 999, State: reqregistry.StateCanceling},
+			{RequestId: "999-to03zu-5", ProxyId: 999, ElapsedMs: 42, State: reqregistry.StateRunning},
+			{RequestId: "999-to03zu-8", ProxyId: 999, State: reqregistry.StateCanceling},
 		},
-		NotFound:     []int64{6},
-		Undetermined: []int64{7},
+		NotFound:     []string{"999-to03zu-6"},
+		Undetermined: []string{"999-to03zu-7"},
 	}, nil)
-	cancelResp, err := node.CancelRequests(context.Background(), &milvuspb.CancelRequestsRequest{RequestIds: []int64{5, 6, 8}, Reason: "r"})
+	cancelResp, err := node.CancelRequests(context.Background(), &milvuspb.CancelRequestsRequest{RequestIds: []string{"999-to03zu-5", "999-to03zu-6", "999-to03zu-8"}, Reason: "r"})
 	require.NoError(t, err)
 	require.Len(t, cancelResp.GetCanceled(), 2)
 	assert.Equal(t, int64(42), cancelResp.GetCanceled()[0].GetElapsedMs())
-	assert.Equal(t, []int64{6}, cancelResp.GetNotFound())
-	assert.Equal(t, []int64{7}, cancelResp.GetUndetermined())
+	assert.Equal(t, []string{"999-to03zu-6"}, cancelResp.GetNotFound())
+	assert.Equal(t, []string{"999-to03zu-7"}, cancelResp.GetUndetermined())
 	// the audit trail names this operator for 5 only; the repeated cancel of
 	// 8 is answered but not attributed to them
 	assert.Equal(t, 1, strings.Count(logs.String(), "request canceled by operator"))
-	assert.Contains(t, logs.String(), "requestID=5")
-	assert.NotContains(t, logs.String(), "requestID=8")
+	assert.Contains(t, logs.String(), "999-to03zu-5")
+	assert.NotContains(t, logs.String(), "999-to03zu-8")
 }
 
 func TestCancelRequestsRejectsEmptyIDs(t *testing.T) {
-	node := &Proxy{requests: reqregistry.New()}
+	node := &Proxy{requests: newTestRequests()}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	// no coordinator call is expected: the request never leaves this proxy
 	resp, err := node.CancelRequests(context.Background(), &milvuspb.CancelRequestsRequest{})
@@ -365,14 +349,14 @@ func TestCancelRequestsRejectsEmptyIDs(t *testing.T) {
 }
 
 func TestRunningRequestHandlersRejectUnhealthyProxy(t *testing.T) {
-	node := &Proxy{requests: reqregistry.New()}
+	node := &Proxy{requests: newTestRequests()}
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 
 	listResp, err := node.ListRunningRequests(context.Background(), &milvuspb.ListRunningRequestsRequest{})
 	require.NoError(t, err)
 	assert.False(t, merr.Ok(listResp.GetStatus()))
 
-	cancelResp, err := node.CancelRequests(context.Background(), &milvuspb.CancelRequestsRequest{RequestIds: []int64{1}})
+	cancelResp, err := node.CancelRequests(context.Background(), &milvuspb.CancelRequestsRequest{RequestIds: []string{testReqID(1)}})
 	require.NoError(t, err)
 	assert.False(t, merr.Ok(cancelResp.GetStatus()))
 
@@ -380,7 +364,7 @@ func TestRunningRequestHandlersRejectUnhealthyProxy(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, merr.Ok(localListResp.GetStatus()))
 
-	localCancelResp, err := node.CancelLocalRequests(context.Background(), &milvuspb.CancelRequestsRequest{RequestIds: []int64{1}})
+	localCancelResp, err := node.CancelLocalRequests(context.Background(), &milvuspb.CancelRequestsRequest{RequestIds: []string{testReqID(1)}})
 	require.NoError(t, err)
 	assert.False(t, merr.Ok(localCancelResp.GetStatus()))
 }
@@ -389,7 +373,7 @@ func TestRunningRequestHandlersRejectUnhealthyProxy(t *testing.T) {
 // proxy names the caller as the user, and refuses to name anyone else.
 func TestRunningRequestCallsHeldToCaller(t *testing.T) {
 	newNode := func(t *testing.T) (*Proxy, *mocks.MockMixCoordClient) {
-		node := &Proxy{requests: reqregistry.New()}
+		node := &Proxy{requests: newTestRequests()}
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 		mixc := mocks.NewMockMixCoordClient(t)
 		node.mixCoord = mixc
@@ -421,14 +405,14 @@ func TestRunningRequestCallsHeldToCaller(t *testing.T) {
 		mixc.EXPECT().CancelRequests(mock.Anything, mock.MatchedBy(func(req *milvuspb.CancelRequestsRequest) bool {
 			return req.GetUser() == "pat"
 		})).Return(&milvuspb.CancelRequestsResponse{Status: merr.Success()}, nil).Once()
-		resp, err := node.CancelRequests(held, &milvuspb.CancelRequestsRequest{RequestIds: []int64{1}})
+		resp, err := node.CancelRequests(held, &milvuspb.CancelRequestsRequest{RequestIds: []string{testReqID(1)}})
 		require.NoError(t, err)
 		assert.True(t, merr.Ok(resp.GetStatus()))
 	})
 
 	t.Run("cancel of another user is denied", func(t *testing.T) {
 		node, _ := newNode(t)
-		resp, err := node.CancelRequests(held, &milvuspb.CancelRequestsRequest{RequestIds: []int64{1}, User: "bob"})
+		resp, err := node.CancelRequests(held, &milvuspb.CancelRequestsRequest{RequestIds: []string{testReqID(1)}, User: "bob"})
 		require.NoError(t, err)
 		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrPrivilegeNotPermitted)
 	})
@@ -444,23 +428,36 @@ func TestRunningRequestCallsHeldToCaller(t *testing.T) {
 		ctx := GetContext(context.Background(), "olive:pwd")
 		_, err := node.ListRunningRequests(ctx, &milvuspb.ListRunningRequestsRequest{})
 		require.NoError(t, err)
-		_, err = node.CancelRequests(ctx, &milvuspb.CancelRequestsRequest{RequestIds: []int64{1}, User: "bob"})
+		_, err = node.CancelRequests(ctx, &milvuspb.CancelRequestsRequest{RequestIds: []string{testReqID(1)}, User: "bob"})
 		require.NoError(t, err)
 	})
 }
 
 // The owner named on a cancel is checked by the proxy holding the request.
 func TestCancelLocalRequestsHeldToOwner(t *testing.T) {
-	node := &Proxy{requests: reqregistry.New()}
+	node := &Proxy{requests: newTestRequests()}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
-	aliceCtx, _ := node.requests.Register(context.Background(), reqregistry.Info{RequestID: 1, User: "alice"})
-	bobCtx, _ := node.requests.Register(context.Background(), reqregistry.Info{RequestID: 2, User: "bob"})
+	aliceCtx, _ := node.requests.Register(context.Background(), reqregistry.Info{User: "alice"})
+	bobCtx, _ := node.requests.Register(context.Background(), reqregistry.Info{User: "bob"})
 
-	resp, err := node.CancelLocalRequests(context.Background(), &milvuspb.CancelRequestsRequest{RequestIds: []int64{1, 2}, User: "alice"})
+	resp, err := node.CancelLocalRequests(context.Background(), &milvuspb.CancelRequestsRequest{RequestIds: []string{testReqID(1), testReqID(2)}, User: "alice"})
 	require.NoError(t, err)
 	require.Len(t, resp.GetCanceled(), 1)
-	assert.Equal(t, int64(1), resp.GetCanceled()[0].GetRequestId())
-	assert.Equal(t, []int64{2}, resp.GetNotFound())
+	assert.Equal(t, testReqID(1), resp.GetCanceled()[0].GetRequestId())
+	assert.Equal(t, []string{testReqID(2)}, resp.GetNotFound())
 	assert.Error(t, aliceCtx.Err())
 	assert.NoError(t, bobCtx.Err())
+}
+
+// newTestRequests returns a registry whose ids are those of proxy 25 started
+// at 2026-11-04 23:31:06 UTC, so a test can name the n-th request it
+// registers as testReqID(n).
+func newTestRequests() *reqregistry.Registry {
+	r := reqregistry.New()
+	r.SetIdentity(25, time.Unix(1793835066, 0))
+	return r
+}
+
+func testReqID(seq int) string {
+	return "25-to03zu-" + strconv.FormatInt(int64(seq), 36)
 }

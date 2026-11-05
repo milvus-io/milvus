@@ -497,10 +497,10 @@ type CancelResult struct {
 	Canceled []*milvuspb.RunningRequestInfo
 	// NotFound lists the ids no proxy holds. It is filled only when every
 	// proxy answered.
-	NotFound []int64
+	NotFound []string
 	// Undetermined lists the ids nobody canceled while some proxy did not
 	// answer: any of them may be running on that proxy.
-	Undetermined []int64
+	Undetermined []string
 	// NodeResults has one row per proxy.
 	NodeResults []*milvuspb.RunningRequestNodeResult
 }

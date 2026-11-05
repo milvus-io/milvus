@@ -1402,9 +1402,11 @@ type ListRunningRequestsReq struct {
 func (req *ListRunningRequestsReq) GetDbName() string { return req.DbName }
 
 type CancelRequestsReq struct {
-	RequestIDs []int64 `json:"requestIds" binding:"required"`
-	Reason     string  `json:"reason"`
-	User       string  `json:"user"`
+	// Ids exactly as listRunningRequests returned them. They are strings so
+	// that a client decoding JSON numbers as doubles cannot round them.
+	RequestIDs []string `json:"requestIds" binding:"required"`
+	Reason     string   `json:"reason"`
+	User       string   `json:"user"`
 }
 
 type GetQuotaMetricsReq struct{}

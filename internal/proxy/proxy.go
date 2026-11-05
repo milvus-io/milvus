@@ -264,6 +264,11 @@ func (node *Proxy) initSession() error {
 	}
 	node.session.Init(typeutil.ProxyRole, node.address, false)
 	sessionutil.SaveServerInfo(typeutil.ProxyRole, node.session.ServerID)
+	if node.requests != nil {
+		// Running-request ids carry the node id and this process's start, so
+		// they are set before the proxy serves anything.
+		node.requests.SetIdentity(node.session.ServerID, time.Now())
+	}
 	return nil
 }
 

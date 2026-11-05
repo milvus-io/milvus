@@ -33,7 +33,10 @@ package reqregistry
 
 import (
 	"context"
+	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -68,7 +71,8 @@ const ExprPrefixLimit = 256
 // Info is the listable description of a request. Snapshot returns a copy with
 // ElapsedMS computed at that moment.
 type Info struct {
-	RequestID      int64
+	// RequestID is "<proxy id>-<proxy start>-<sequence>"; see Registry.
+	RequestID      string
 	ProxyID        int64
 	Type           string
 	DBName         string
@@ -121,11 +125,16 @@ func (f Filter) matches(info *Info, now time.Time) bool {
 // registering goroutine, the scheduler (task linkage) and an operator's cancel
 // all touch it.
 type Entry struct {
-	mu         sync.Mutex // guards info, canceled, canceledAt
-	info       Info
-	cancel     context.CancelCauseFunc
-	canceled   bool
-	canceledAt time.Time
+	mu       sync.Mutex // guards info, canceled, canceledAfter
+	info     Info       // info.RequestID is left empty; snapshots fill it
+	cancel   context.CancelCauseFunc
+	canceled bool
+	// canceledAfter is when Cancel was first called, as an offset from
+	// info.StartTime: a Duration rather than a time.Time keeps Entry within
+	// one allocation size class.
+	canceledAfter time.Duration
+	seq           uint64  // key in Registry.entries
+	prefix        *string // the registry's id prefix when this entry was registered
 }
 
 // User returns the name of the user who issued the request.
@@ -145,6 +154,7 @@ func (e *Entry) Snapshot(now time.Time) Info {
 
 func (e *Entry) snapshotLocked(now time.Time) Info {
 	info := e.info
+	info.RequestID = e.requestID()
 	info.TaskIDs = append([]int64(nil), e.info.TaskIDs...)
 	info.ElapsedMS = now.Sub(info.StartTime).Milliseconds()
 	if e.canceled {
@@ -154,8 +164,12 @@ func (e *Entry) snapshotLocked(now time.Time) Info {
 }
 
 // RequestID of the entry.
-func (e *Entry) RequestID() int64 {
-	return e.info.RequestID
+func (e *Entry) RequestID() string {
+	return e.requestID()
+}
+
+func (e *Entry) requestID() string {
+	return *e.prefix + strconv.FormatUint(e.seq, 36)
 }
 
 // AddTask records a scheduler task id that belongs to this request. Called by
@@ -194,7 +208,7 @@ func (e *Entry) Cancel(operator, reason string, now time.Time) (Info, bool) {
 	}
 	snapshot := e.snapshotLocked(now)
 	e.canceled = true
-	e.canceledAt = now
+	e.canceledAfter = now.Sub(e.info.StartTime)
 	e.cancel(merr.WrapErrRequestCanceled(operator, reason))
 	return snapshot, true
 }
@@ -203,7 +217,10 @@ func (e *Entry) Cancel(operator, reason string, now time.Time) (Info, bool) {
 func (e *Entry) CanceledAt() (time.Time, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.canceledAt, e.canceled
+	if !e.canceled {
+		return time.Time{}, false
+	}
+	return e.info.StartTime.Add(e.canceledAfter), true
 }
 
 type ctxKey struct{}
@@ -232,28 +249,68 @@ func CancelCause(ctx context.Context) error {
 }
 
 // Registry holds the requests currently registered on one proxy.
+//
+// It names each request "<proxy id>-<proxy start>-<sequence>", for example
+// "25-to03zu-rs": the proxy's node id in decimal, the Unix second this
+// registry's identity was set (the proxy process start) in base 36, and a
+// per-process sequence number in base 36. The node id says which proxy holds
+// the request; the start second keeps ids distinct across restarts even when
+// a node id is reused (a fixed test node id, or a wiped etcd); the sequence
+// distinguishes requests within the process. The first two parts are fixed
+// for the process, so the registry keys entries by the sequence alone and
+// builds the string only when it reports a request. Ids are strings so that
+// they stay exact in JSON.
 type Registry struct {
-	entries *typeutil.ConcurrentMap[int64, *Entry]
+	prefix  atomic.Pointer[string] // "<proxy id>-<proxy start>-"
+	seq     atomic.Uint64
+	entries *typeutil.ConcurrentMap[uint64, *Entry]
 }
 
-// New returns an empty registry.
+// New returns an empty registry whose ids carry proxy id 0 until SetIdentity
+// is called.
 func New() *Registry {
-	return &Registry{entries: typeutil.NewConcurrentMap[int64, *Entry]()}
+	r := &Registry{entries: typeutil.NewConcurrentMap[uint64, *Entry]()}
+	r.SetIdentity(0, time.Now())
+	return r
+}
+
+// SetIdentity sets the proxy id and start time that ids issued from now on
+// carry. The proxy calls it once its session has a node id, before it serves
+// requests.
+func (r *Registry) SetIdentity(proxyID int64, start time.Time) {
+	prefix := strconv.FormatInt(proxyID, 10) + "-" + strconv.FormatInt(start.Unix(), 36) + "-"
+	r.prefix.Store(&prefix)
+}
+
+// parseID returns the sequence of an id issued by this registry. An id with
+// another prefix (another proxy, or this proxy before a restart) or not in
+// canonical form is not this registry's, so each request has exactly one id.
+func (r *Registry) parseID(id string) (uint64, bool) {
+	rest, ok := strings.CutPrefix(id, *r.prefix.Load())
+	if !ok {
+		return 0, false
+	}
+	seq, err := strconv.ParseUint(rest, 36, 64)
+	if err != nil || seq == 0 || strconv.FormatUint(seq, 36) != rest {
+		return 0, false
+	}
+	return seq, true
 }
 
 // Register records a request and returns the derived context that the request
 // must run under, plus the entry. The caller must call Unregister when the RPC
 // returns (normally in a defer), which also releases the derived context.
-// info.RequestID must be set by the caller; StartTime, State, ElapsedMS and
-// Cancellable are filled here.
+// The registry assigns the request id; StartTime, State, ElapsedMS and
+// Cancellable are filled here too.
 func (r *Registry) Register(ctx context.Context, info Info) (context.Context, *Entry) {
 	ctx, cancel := context.WithCancelCause(ctx)
+	info.RequestID = ""
 	info.StartTime = time.Now()
 	info.State = StateQueued
 	info.Cancellable = true
 	info.Expr = exprPrefix(info.Expr)
-	e := &Entry{info: info, cancel: cancel}
-	r.entries.Insert(info.RequestID, e)
+	e := &Entry{info: info, cancel: cancel, seq: r.seq.Add(1), prefix: r.prefix.Load()}
+	r.entries.Insert(e.seq, e)
 	return context.WithValue(ctx, ctxKey{}, e), e
 }
 
@@ -277,7 +334,7 @@ func (r *Registry) Unregister(e *Entry) {
 	if e == nil {
 		return
 	}
-	r.entries.Remove(e.info.RequestID)
+	r.entries.Remove(e.seq)
 	// Release the derived ctx. A request that finished normally has never
 	// been canceled; give context.Canceled so nothing downstream mistakes
 	// this bookkeeping release for an operator cancel.
@@ -285,8 +342,12 @@ func (r *Registry) Unregister(e *Entry) {
 }
 
 // Get returns the entry for requestID, or nil.
-func (r *Registry) Get(requestID int64) *Entry {
-	e, _ := r.entries.Get(requestID)
+func (r *Registry) Get(requestID string) *Entry {
+	seq, ok := r.parseID(requestID)
+	if !ok {
+		return nil
+	}
+	e, _ := r.entries.Get(seq)
 	return e
 }
 
@@ -298,7 +359,7 @@ func (r *Registry) Len() int {
 // List returns a snapshot of every registered request matching filter.
 func (r *Registry) List(filter Filter, now time.Time) []Info {
 	result := make([]Info, 0, r.entries.Len())
-	r.entries.Range(func(_ int64, e *Entry) bool {
+	r.entries.Range(func(_ uint64, e *Entry) bool {
 		info := e.Snapshot(now)
 		if filter.matches(&info, now) {
 			result = append(result, info)
@@ -314,19 +375,23 @@ func (r *Registry) List(filter Filter, now time.Time) []Info {
 // cancellation; repeated holds the requests an earlier call had already
 // stopped and that have not left yet, in state Canceling, so that canceling
 // twice still tells the caller what the id is; notFound holds the ids this
-// registry does not hold.
+// registry does not hold, including ids issued by another proxy and strings
+// that are not ids at all. The id in canceled and repeated is the one the
+// caller gave.
 //
 // A non-empty owner restricts the cancel to requests issued by that user: the
 // id of another user's request is reported as not held, so a caller limited
 // to their own requests learns nothing about anyone else's.
-func (r *Registry) Cancel(requestIDs []int64, owner, operator, reason string, now time.Time) (canceled, repeated []Info, notFound []int64) {
+func (r *Registry) Cancel(requestIDs []string, owner, operator, reason string, now time.Time) (canceled, repeated []Info, notFound []string) {
 	for _, id := range requestIDs {
-		e, ok := r.entries.Get(id)
-		if !ok || (owner != "" && e.User() != owner) {
+		e := r.Get(id)
+		if e == nil || (owner != "" && e.User() != owner) {
 			notFound = append(notFound, id)
 			continue
 		}
-		if snapshot, first := e.Cancel(operator, reason, now); first {
+		snapshot, first := e.Cancel(operator, reason, now)
+		snapshot.RequestID = id
+		if first {
 			canceled = append(canceled, snapshot)
 		} else {
 			repeated = append(repeated, snapshot)

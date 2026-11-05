@@ -3047,7 +3047,7 @@ func (c *Core) CancelRequests(ctx context.Context, req *milvuspb.CancelRequestsR
 	}
 
 	mlog.Info(ctx, "canceled running requests",
-		mlog.Int64s("requestIDs", req.GetRequestIds()),
+		mlog.Strings("requestIDs", req.GetRequestIds()),
 		mlog.String("reason", req.GetReason()),
 		mlog.Int("canceled", len(result.Canceled)),
 		mlog.Int("notFound", len(result.NotFound)),
