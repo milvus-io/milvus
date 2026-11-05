@@ -1717,6 +1717,8 @@ TEST(HashTableVarcharKeyTest, TestLongKeysNullsAndDuplicates) {
 
 TEST(HashTableVarcharKeyTest, TestDifferentKeysWithSameBucketAndTag) {
     auto table = createVarcharHashTable();
+    // groupProbe allocates the table even for empty input, so the key search
+    // uses the real bucket mask, not 0. Without it the recheck below may fail.
     milvus::exec::HashLookup init(table->hashers());
     probeVarcharValues(*table, {}, init);
     const auto keys = findVarcharKeysWithSameProbeSignature(*table, 3);
