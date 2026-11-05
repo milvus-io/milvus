@@ -5329,9 +5329,7 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
       id_(segment_id),
       primary_key_field_id_(
           schema->get_primary_field_id().value_or(FieldId(-1))),
-      primary_key_type_(primary_key_field_id_ == FieldId(-1)
-                            ? DataType::NONE
-                            : (*schema)[primary_key_field_id_].get_data_type()),
+      primary_key_type_(schema->get_primary_field_type()),
       is_sorted_by_pk_(is_sorted_by_pk),
       // Every branch reports a row's matches in input order; DeletedRecord
       // relies on it.

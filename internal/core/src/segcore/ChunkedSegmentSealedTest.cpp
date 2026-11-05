@@ -622,7 +622,25 @@ TEST(test_chunk_segment, ViewReadStateRetainsColumnsAndSharesDeletes) {
     EXPECT_EQ(retained->get_deleted_count(), 1);
 }
 
-TEST(test_chunk_segment, ViewScopeDoesNotExposePhysicalTTLDependency) {
+TEST(test_chunk_segment, EmptyViewScopeRetainsPrimaryKeyMetadata) {
+    for (auto type : {DataType::INT64, DataType::VARCHAR}) {
+        auto schema = std::make_shared<Schema>();
+        auto pk = schema->AddDebugField("pk", type);
+        schema->set_primary_field_id(pk);
+        auto layout = std::make_shared<const segcore::SealedFieldLayout>(
+            schema, segcore::LoadScope({}));
+        EXPECT_EQ(layout->get_primary_field_id(), pk);
+        EXPECT_EQ(layout->get_primary_field_type(), type);
+        EXPECT_FALSE(layout->IsFieldInLoadScope(pk));
+        EXPECT_FALSE(layout->ShouldLoadField(pk));
+        segcore::ChunkedSegmentSealedImpl physical(
+            layout, nullptr, segcore::SegcoreConfig::default_config(), 1);
+        auto read = physical.PinReadState();
+        EXPECT_THROW(read->ValidateLogicalFields({pk}), SegcoreError);
+    }
+}
+
+TEST(test_chunk_segment, ViewScopeDoesNotLoadExcludedTTLField) {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     auto ttl = schema->AddDebugField("ttl", DataType::TIMESTAMPTZ);
@@ -630,13 +648,34 @@ TEST(test_chunk_segment, ViewScopeDoesNotExposePhysicalTTLDependency) {
     schema->set_primary_field_id(pk);
     schema->set_ttl_field_id(ttl);
     auto layout = std::make_shared<const segcore::SealedFieldLayout>(
-        schema, segcore::LoadScope({pk.get(), value.get()}, {pk.get(), value.get()}));
+        schema,
+        segcore::LoadScope({pk.get(), value.get()}, {pk.get(), value.get()}));
     segcore::ChunkedSegmentSealedImpl physical(
         layout, nullptr, segcore::SegcoreConfig::default_config(), 1);
     auto read = physical.PinReadState();
-    EXPECT_TRUE(layout->ShouldLoadField(ttl));
+    EXPECT_FALSE(layout->IsFieldInLoadScope(ttl));
+    EXPECT_FALSE(layout->ShouldLoadField(ttl));
     EXPECT_NO_THROW(read->ValidateLogicalFields({pk, value}));
     EXPECT_THROW(read->ValidateLogicalFields({ttl}), SegcoreError);
+}
+
+TEST(test_chunk_segment, ViewReadSchemaControlsTTLWithSharedReadState) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    auto ttl = schema->AddDebugField("ttl", DataType::TIMESTAMPTZ);
+    auto value = schema->AddDebugField("value", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    schema->set_ttl_field_id(ttl);
+    auto layout = std::make_shared<const segcore::SealedFieldLayout>(
+        schema,
+        segcore::LoadScope({pk.get(), ttl.get(), value.get()},
+                           {pk.get(), value.get()}));
+    segcore::ChunkedSegmentSealedImpl physical(
+        layout, nullptr, segcore::SegcoreConfig::default_config(), 1);
+    auto read = physical.PinReadState();
+    // TTL dependencies are eager only when included in the required scope.
+    EXPECT_TRUE(layout->ShouldLoadField(ttl));
+    EXPECT_NO_THROW(read->ValidateLogicalFields({pk, ttl, value}));
 
     // Sharing physical columns must not select the query's TTL policy.
     auto no_ttl = std::make_shared<Schema>();
