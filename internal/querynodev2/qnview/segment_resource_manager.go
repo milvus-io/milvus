@@ -2,6 +2,7 @@ package qnview
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"sync"
 	"time"
@@ -41,6 +42,9 @@ type SegmentResourceManager struct {
 	closeOnce   sync.Once
 	// Tracks owners through actual cleanup, including views removed from the map.
 	drain sync.WaitGroup
+
+	// viewsByCollection counts the views of each collection for quota metrics.
+	viewsByCollection map[int64]int
 }
 
 type viewResources struct {
@@ -115,7 +119,7 @@ type segmentResource struct {
 }
 
 func NewSegmentResourceManager(ctx context.Context, scheduler nodescheduler.Scheduler, loader PhysicalSegmentLoader, estimator SegmentResourceEstimator, metadata SegmentLoadInfoProvider, buffer TransformLogBuffer, collections QueryViewCollectionRuntimeManager) *SegmentResourceManager {
-	return &SegmentResourceManager{ctx: ctx, scheduler: scheduler, loader: loader, estimator: estimator, metadata: metadata, buffer: buffer, collections: collections, views: make(map[qviews.QueryViewKey]*viewResources), resources: make(map[int64]*segmentResource)}
+	return &SegmentResourceManager{ctx: ctx, scheduler: scheduler, loader: loader, estimator: estimator, metadata: metadata, buffer: buffer, collections: collections, views: make(map[qviews.QueryViewKey]*viewResources), viewsByCollection: make(map[int64]int), resources: make(map[int64]*segmentResource)}
 }
 
 func (m *SegmentResourceManager) Acquire(req AcquireSegments) {
@@ -138,6 +142,7 @@ func (m *SegmentResourceManager) Acquire(req AcquireSegments) {
 	v.buffer, bindErr = m.buffer.Bind(qviews.NewQueryViewAtQueryNode(req.Meta, req.View).(*qviews.QueryViewAtQueryNode))
 	m.drain.Add(1)
 	m.views[req.Key] = v
+	m.viewsByCollection[req.Meta.GetCollectionId()]++
 	for _, partition := range req.View.GetPartitions() {
 		for i, id := range partition.GetSegmentIds() {
 			r := m.resources[id]
@@ -639,6 +644,13 @@ func (r *segmentResource) closeIfUnusedLocked() bool {
 	return true
 }
 
+// CollectionIDs returns the collections this node holds QueryViews for.
+func (m *SegmentResourceManager) CollectionIDs() []int64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Collect(maps.Keys(m.viewsByCollection))
+}
+
 func (m *SegmentResourceManager) Release(req ReleaseSegments) {
 	m.mu.Lock()
 	v := m.views[req.Key]
@@ -646,6 +658,11 @@ func (m *SegmentResourceManager) Release(req ReleaseSegments) {
 	var resources []*segmentResource
 	if v != nil {
 		m.drain.Add(1) // Join the release callback as well as the resource owners.
+		if id := v.req.Meta.GetCollectionId(); m.viewsByCollection[id] > 1 {
+			m.viewsByCollection[id]--
+		} else {
+			delete(m.viewsByCollection, id)
+		}
 		v.released = true
 		v.cancel()
 		for _, b := range v.bindings {
