@@ -1342,6 +1342,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_EmptyManifestStillClearsI
 }
 
 func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ManifestUpdateAndClearImportingFlag() {
+	setSegmentChangeTestParam(s.T(), &Params.DataCoordCfg.SegmentChangeEnabled, "false")
 	meta.MockManifestIndexSubmissions(s.T())
 	collectionID := int64(1)
 	segmentID := int64(102)
