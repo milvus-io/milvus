@@ -24,7 +24,6 @@
 #include <vector>
 
 #include "common/Types.h"
-#include "index/contracts/build/IIndexConvertible.h"
 #include "storage/artifact/Artifact.h"
 #include "storage/artifact/FileSink.h"
 
@@ -54,8 +53,7 @@ TextIndexDirectoryBytes(const storage::LocalDirectory& directory);
 
 struct TextIndexStorage;
 
-class TextIndexArtifact final : public storage::Artifact,
-                                public IIndexConvertible {
+class TextIndexArtifact final : public storage::Artifact {
  public:
     TextIndexArtifact(
         std::shared_ptr<storage::LocalDirectory> directory,
@@ -76,10 +74,6 @@ class TextIndexArtifact final : public storage::Artifact,
     /** @brief Transfer the completed snapshot into a storage cache cell. */
     std::unique_ptr<TextIndexStorage>
     IntoStorage() &&;
-
-    IndexPtr
-        IntoIndex() &&
-        override;
 
  private:
     // Share encoding while selecting the existing format at compile time.

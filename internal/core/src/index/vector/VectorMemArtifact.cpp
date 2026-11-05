@@ -21,7 +21,6 @@
 
 #include "common/EasyAssert.h"
 #include "common/Utils.h"
-#include "index/vector/VectorIndexReader.h"
 #include "index/vector/VectorIndexValidDataUtils.h"
 #include "knowhere/binaryset.h"
 
@@ -106,11 +105,6 @@ VectorMemArtifact::VectorMemArtifact(KnowhereEngine engine,
 KnowhereEngine
 VectorMemArtifact::IntoEngine() && {
     return std::move(engine_);
-}
-
-IndexPtr
-VectorMemArtifact::IntoIndex() && {
-    return std::make_shared<VectorIndex>(std::move(*this).IntoEngine());
 }
 
 void

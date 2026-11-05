@@ -24,10 +24,10 @@ concrete family by field shape, nested state, version and the low/high-cardinali
 and then hands the same complete input to that family; the Hybrid Artifact records the selector. The
 platform AUTOINDEX configuration is not part of the Hybrid policy here.
 
-`TextIndexArtifact` implements the optional consuming Index conversion, handing the completed
-Tantivy engine, the null state and the directory owner, when needed, to `TextIndex`. The
-conversion consumes the Artifact; Hybrid and JSON projected Artifacts only wrap the serialized state
-of the selection or projection and do not pass this capability through.
+`TextIndexArtifact::IntoStorage() &&` transfers the completed Tantivy engine, null state and
+directory owner into `TextIndexStorage`. The caller places that storage in a cache slot or
+constructs a resident `TextIndex`. Hybrid and JSON projected Artifacts only wrap the serialized
+state of the selection or projection.
 
 Numeric and string readers of the same family may share a query flow templated on the value type,
 and all of them inherit `PatternMatchReaderAdapter<Derived, T>`. The adapter's primary template is

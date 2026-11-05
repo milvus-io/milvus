@@ -38,7 +38,7 @@ Segment snapshot -> Index version -> resident Storage/Engine or internal cache
 
 Persisted loading always requires an explicit `IndexCacheConfig` and creates an internal cache
 slot. A resident Storage/Engine is used by direct in-memory construction, such as growing
-publication or Artifact conversion, not as an alternative persisted-load mode.
+publication or concrete Artifact storage/engine extraction, not as an alternative persisted-load mode.
 
 ## Decisions
 

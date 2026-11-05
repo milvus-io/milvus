@@ -103,7 +103,6 @@ set(INDEX_TEST_FILES
         ${CMAKE_HOME_DIRECTORY}/src/index/PackedIndexLoadTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/contracts/RegistryTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/contracts/build/ArtifactBuilderTest.cpp
-        ${CMAKE_HOME_DIRECTORY}/src/index/contracts/build/ReaderConvertibleTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/contracts/growing/GrowingIndexTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/contracts/query/IndexReaderTest.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/contracts/query/JsonIndexReaderTest.cpp

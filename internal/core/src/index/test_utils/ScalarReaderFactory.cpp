@@ -27,6 +27,8 @@
 
 #include "index/IndexTypeAdapter.h"
 #include "index/PackedIndexLoad.h"
+#include "index/scalar/text/TextIndexArtifact.h"
+#include "index/scalar/text/TextIndexReader.h"
 #include "storage/IndexEntryDirectStreamWriter.h"
 #include "storage/RemoteInputStream.h"
 #include "storage/RemoteOutputStream.h"
@@ -235,8 +237,14 @@ ReaderBackend::Open(storage::ArtifactPtr artifact,
         }
         const auto expected_caps =
             Loader(spec_.load_families.front()).derive_caps(params);
-        auto reader = IIndexConvertible::FromArtifact(std::move(artifact))
-                          ->CreateReader(nullptr);
+        auto* text = dynamic_cast<TextIndexArtifact*>(artifact.get());
+        if (!text) {
+            throw std::logic_error(Name() +
+                                   ": consume mode requires a text artifact");
+        }
+        auto reader =
+            std::make_shared<TextIndex>(std::move(*text).IntoStorage())
+                ->CreateReader(nullptr);
         ValidateReader(Name(), *this, expected_caps, reader);
         return reader;
     }

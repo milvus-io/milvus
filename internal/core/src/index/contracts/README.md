@@ -19,7 +19,7 @@ the current interfaces and ownership rules.
 
 | Object | Responsibility | Ownership and lifetime |
 |---|---|---|
-| `IIndex` | Owns one index version, known metadata, and its Storage or Engine | Loads and supported Artifact conversions return `IndexPtr`; snapshots and request readers retain that version |
+| `IIndex` | Owns one index version, known metadata, and its Storage or Engine | Loads return `IndexPtr`; callers can also construct an Index from concrete Artifact storage or engine extraction; snapshots and request readers retain that version |
 | `IIndexReaderBase` + query mixins | Queries through one bound operation context | `IIndex::CreateReader(op_ctx)` returns a `unique_ptr`; consumers borrow interfaces, and concrete operations retain the required storage pins |
 | `IArtifactBuilder<Input>` | Runs one synchronous build over the complete input materialized by the caller | `Build(input) &&` consumes the builder and returns the finished Artifact; neither the builder nor the Artifact may retain the borrowed input |
 | `storage::Artifact` | Holds the result of one build | Exposes `Serialize`; the family defines whether a concrete state can be serialized to a target storage generation |
@@ -184,10 +184,10 @@ up the concrete loader.
 sink; the sink is responsible for transport, slicing, naming, and publication metadata, and upload
 orchestration belongs to the caller. The existence of the interface does not mean that every
 Artifact state supports every storage generation; unsupported combinations must fail explicitly.
-`IIndexConvertible` is an optional consuming capability: `FromArtifact` takes over the Artifact,
-checks the capability, and calls `IntoIndex() &&`, without implicitly performing serialize/load or
-any other IO. A caller that needs both persistence and direct queries must finish persisting before
-consuming the Artifact.
+Completed text and vector Artifacts expose concrete consuming methods:
+`TextIndexArtifact::IntoStorage() &&` and `VectorMemArtifact::IntoEngine() &&`.
+Neither method implicitly performs serialize/load or other I/O. A caller that needs both
+persistence and direct queries must finish persisting before consuming the Artifact.
 
 `LoaderEntry::Load` opens the persisted source, then calls `LoaderEntry::create` to create the
 internal `IndexLoader` and completes `Load`, returning an `IndexPtr`. Every persisted load
@@ -195,7 +195,7 @@ requires an explicit `IndexCacheConfig`; the Index owns the resulting Storage/En
 The loader consumes its prepared source once, including when construction fails. Recreate the
 loader to retry construction; a successfully constructed slot retains its source for later loads
 and retries. Warmup controls when storage is loaded, not whether a cache slot is used.
-Growing publication and direct Artifact conversion can still create resident Index objects without
+Growing publication and concrete Artifact storage/engine extraction can still create resident Index objects without
 using the persisted-load interface. Callers create a
 request reader with `index->CreateReader(op_ctx)`. The loader does not depend on the builder or the
 original Artifact. `FileSource` resolves a logical entry into a buffer, a local file, or a

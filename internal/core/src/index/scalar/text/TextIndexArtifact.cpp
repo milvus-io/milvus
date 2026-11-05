@@ -168,11 +168,6 @@ TextIndexArtifact::IntoStorage() && {
         payload_bytes_);
 }
 
-IndexPtr
-TextIndexArtifact::IntoIndex() && {
-    return std::make_shared<TextIndex>(std::move(*this).IntoStorage());
-}
-
 void
 TextIndexArtifact::Serialize(storage::FileSink& sink) const {
     SerializeImpl(sink);
