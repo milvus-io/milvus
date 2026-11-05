@@ -337,7 +337,15 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		srw.Close()
 		return nil, err
 	}
-	rr = newMaterializedRecordReader(rr, materializer)
+	preparer, err := newFunctionInputPreparer(writerSchema, writerSchema.GetFunctions(), existingFields,
+		t.plan.GetSegmentBinlogs()[0].GetManifest(), t.compactionParams.StorageConfig)
+	if err != nil {
+		materializer.Close()
+		rr.Close()
+		srw.Close()
+		return nil, err
+	}
+	rr = newMaterializedRecordReader(ctx, rr, materializer, preparer)
 	initReaderCost := time.Since(phaseStart)
 
 	rr = wrapReaderWithTimestampOverwrite(rr, t.plan.GetSegmentBinlogs()[0].GetCommitTimestamp())

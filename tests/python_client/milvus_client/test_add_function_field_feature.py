@@ -386,6 +386,105 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
 
         self.drop_collection(client, collection_name)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("function_type", ["bm25", "minhash"])
+    def test_add_function_field_text_lob_backfill_and_new_rows(self, function_type):
+        """Historical out-of-line TEXT remains intact while new function output is backfilled."""
+        client = self._client()
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        old_text = "historicalanchortoken " + "alpha beta gamma " * 5000
+        assert len(old_text.encode("utf-8")) > 65536
+        new_text = "newanchortoken delta epsilon zeta"
+
+        schema = client.create_schema(enable_dynamic_field=False, auto_id=False)
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("doc", DataType.TEXT, nullable=True, enable_analyzer=True)
+        schema.add_field("vec", DataType.FLOAT_VECTOR, dim=4)
+        index_params = client.prepare_index_params()
+        index_params.add_index(field_name="vec", index_type="AUTOINDEX", metric_type="L2")
+        client.create_collection(collection_name, schema=schema, index_params=index_params, consistency_level="Strong")
+
+        old_rows = [
+            {"id": 0, "doc": old_text, "vec": [0.0, 0.0, 0.0, 0.0]},
+            {"id": 1, "doc": "", "vec": [1.0, 0.0, 0.0, 0.0]},
+            {"id": 2, "doc": None, "vec": [0.0, 1.0, 0.0, 0.0]},
+        ]
+        client.insert(collection_name, old_rows)
+        client.flush(collection_name)
+        assert self.wait_for_index_ready(client, collection_name, index_name="vec", timeout=120)
+        client.load_collection(collection_name)
+
+        if function_type == "bm25":
+            output_field = FieldSchema(name="derived", dtype=DataType.SPARSE_FLOAT_VECTOR)
+            function = Function(
+                name="bm25_text_lob",
+                function_type=FunctionType.BM25,
+                input_field_names=["doc"],
+                output_field_names=["derived"],
+            )
+            index_type, metric_type, index_extra = "SPARSE_INVERTED_INDEX", "BM25", {}
+            old_query, new_query = "historicalanchortoken", "newanchortoken"
+            search_params = {"metric_type": metric_type}
+        else:
+            output_field = FieldSchema(name="derived", dtype=DataType.BINARY_VECTOR, dim=512)
+            function = Function(
+                name="minhash_text_lob",
+                function_type=FunctionType.MINHASH,
+                input_field_names=["doc"],
+                output_field_names=["derived"],
+                params={"num_hashes": 16, "shingle_size": 3, "token_level": "word"},
+            )
+            index_type, metric_type, index_extra = "MINHASH_LSH", "MHJACCARD", {"mh_lsh_band": 8}
+            old_query, new_query = old_text, new_text
+            search_params = {"metric_type": metric_type, "params": {}}
+
+        bound_index = client.prepare_index_params()
+        bound_index.add_index(field_name="derived", index_type=index_type, metric_type=metric_type, params=index_extra)
+        client.add_function_field(collection_name, output_field, function, index_params=bound_index)
+        assert self.wait_for_schema_version_consistency(client, collection_name)
+        assert self.wait_for_index_ready(client, collection_name, index_name="derived", timeout=180)
+        client.load_collection(collection_name)
+
+        self.wait_for_search_hit(
+            client,
+            collection_name,
+            data=[old_query],
+            anns_field="derived",
+            expected_id=0,
+            label=f"{function_type} historical TEXT LOB",
+            search_params=search_params,
+            output_fields=["id"],
+        )
+        client.insert(collection_name, [{"id": 3, "doc": new_text, "vec": [0.0, 0.0, 1.0, 0.0]}])
+        client.flush(collection_name)
+        assert self.wait_for_index_ready(client, collection_name, index_name="derived", timeout=180)
+        self.wait_for_search_hit(
+            client,
+            collection_name,
+            data=[new_query],
+            anns_field="derived",
+            expected_id=3,
+            label=f"{function_type} new TEXT row",
+            search_params=search_params,
+            output_fields=["id"],
+        )
+        rows = client.query(collection_name, filter="id in [0, 1, 2, 3]", output_fields=["id", "doc"], limit=4)
+        assert {row["id"]: row["doc"] for row in rows} == {0: old_text, 1: "", 2: None, 3: new_text}
+
+        self.release_collection(client, collection_name)
+        client.load_collection(collection_name)
+        self.wait_for_search_hit(
+            client,
+            collection_name,
+            data=[old_query],
+            anns_field="derived",
+            expected_id=0,
+            label=f"{function_type} TEXT LOB after reload",
+            search_params=search_params,
+            output_fields=["id"],
+        )
+        self.drop_collection(client, collection_name)
+
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_bm25_function_field_creates_bound_index(self):
         """

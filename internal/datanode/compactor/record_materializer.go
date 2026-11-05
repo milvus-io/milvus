@@ -17,6 +17,8 @@
 package compactor
 
 import (
+	"context"
+	"io"
 	"sync"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -135,16 +137,29 @@ func (m *RecordMaterializer) WrapWithSelection(rec storage.Record, selection *re
 		}
 		base = selected
 	}
-	if !m.hasMaterialization() {
-		return base, nil
+	wrapped, err := m.WrapWithInputs(base, base)
+	if err != nil {
+		cleanupMaterializedRecord(base)
 	}
+	return wrapped, err
+}
 
+// WrapWithInputs computes function outputs from logicalInputs while retaining
+// writeBase as the physical source of all unchanged columns. Both inputs are
+// borrowed and must have the same row order and length.
+func (m *RecordMaterializer) WrapWithInputs(writeBase, logicalInputs storage.Record) (storage.Record, error) {
+	if writeBase.Len() != logicalInputs.Len() {
+		return nil, merr.WrapErrFunctionFailedMsg("function input row count mismatch: write=%d, logical=%d", writeBase.Len(), logicalInputs.Len())
+	}
+	if !m.hasMaterialization() {
+		return writeBase, nil
+	}
 	functionOutputs := make(map[int64]arrow.Array)
 	for _, materializer := range m.materializers {
-		arrays, err := materializer.Materialize(base)
+		arrays, err := materializer.Materialize(logicalInputs)
 		if err != nil {
+			releaseArrowArrays(arrays)
 			releaseArrowArrays(functionOutputs)
-			cleanupMaterializedRecord(base)
 			return nil, err
 		}
 		for fieldID, arr := range arrays {
@@ -152,9 +167,9 @@ func (m *RecordMaterializer) WrapWithSelection(rec storage.Record, selection *re
 		}
 	}
 	if len(functionOutputs) == 0 {
-		return base, nil
+		return writeBase, nil
 	}
-	return &materializedRecord{base: base, computed: functionOutputs}, nil
+	return &materializedRecord{base: writeBase, computed: functionOutputs}, nil
 }
 
 func (m *RecordMaterializer) Close() {
@@ -256,6 +271,32 @@ func newSelectedRecord(base storage.Record, schema *schemapb.CollectionSchema, p
 }
 
 func buildSelectedColumn(base storage.Record, field *schemapb.FieldSchema, selection *recordSelection) (arrow.Array, error) {
+	if field.GetDataType() == schemapb.DataType_Text {
+		col := base.Column(field.GetFieldID())
+		switch col.(type) {
+		case *array.String, *array.Binary:
+		default:
+			return nil, merr.WrapErrDataIntegrityMsg("TEXT field %d has unexpected Arrow representation %T", field.GetFieldID(), col)
+		}
+		if len(selection.ranges) == 0 {
+			return array.NewSlice(col, 0, 0), nil
+		}
+		if len(selection.ranges) == 1 {
+			r := selection.ranges[0]
+			return array.NewSlice(col, int64(r.start), int64(r.end)), nil
+		}
+		slices := make([]arrow.Array, 0, len(selection.ranges))
+		defer func() {
+			for _, part := range slices {
+				part.Release()
+			}
+		}()
+		for _, r := range selection.ranges {
+			slices = append(slices, array.NewSlice(col, int64(r.start), int64(r.end)))
+		}
+		return array.Concatenate(slices, memory.DefaultAllocator)
+	}
+
 	builder := storage.NewRecordBuilder(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}})
 	defer builder.Release()
 	for _, rowRange := range selection.ranges {
@@ -300,18 +341,20 @@ func (r *selectedRecord) cleanupDerived() {
 }
 
 type materializedRecordReader struct {
+	ctx          context.Context
 	base         storage.RecordReader
 	materializer *RecordMaterializer
+	preparer     *functionInputPreparer
 	current      storage.Record
 }
 
 var _ storage.RecordReader = (*materializedRecordReader)(nil)
 
-func newMaterializedRecordReader(base storage.RecordReader, materializer *RecordMaterializer) storage.RecordReader {
+func newMaterializedRecordReader(ctx context.Context, base storage.RecordReader, materializer *RecordMaterializer, preparer *functionInputPreparer) storage.RecordReader {
 	if !materializer.hasMaterialization() {
 		return base
 	}
-	return &materializedRecordReader{base: base, materializer: materializer}
+	return &materializedRecordReader{ctx: ctx, base: base, materializer: materializer, preparer: preparer}
 }
 
 func (r *materializedRecordReader) Next() (storage.Record, error) {
@@ -321,9 +364,25 @@ func (r *materializedRecordReader) Next() (storage.Record, error) {
 	}
 	rec, err := r.base.Next()
 	if err != nil {
+		if err == io.EOF && r.preparer != nil {
+			if finishErr := r.preparer.Finish(); finishErr != nil {
+				return nil, finishErr
+			}
+		}
 		return nil, err
 	}
-	wrapped, err := r.materializer.Wrap(rec)
+	var wrapped storage.Record
+	if r.preparer == nil || len(r.preparer.requiredTextIDs) == 0 {
+		wrapped, err = r.materializer.Wrap(rec)
+	} else {
+		var logical storage.Record
+		var cleanup func()
+		logical, cleanup, err = r.preparer.Prepare(r.ctx, rec)
+		if err == nil {
+			wrapped, err = r.materializer.WrapWithInputs(rec, logical)
+		}
+		cleanup()
+	}
 	if err != nil {
 		// rec stays owned by the base reader; it is released on its next
 		// Next/Close, never here.
@@ -339,7 +398,15 @@ func (r *materializedRecordReader) Close() error {
 		r.current = nil
 	}
 	r.materializer.Close()
-	return r.base.Close()
+	var preparerErr error
+	if r.preparer != nil {
+		preparerErr = r.preparer.Close()
+	}
+	baseErr := r.base.Close()
+	if preparerErr != nil {
+		return preparerErr
+	}
+	return baseErr
 }
 
 type bm25FunctionMaterializer struct {
@@ -388,9 +455,6 @@ func newMinHashFunctionMaterializer(schema *schemapb.CollectionSchema, runner fu
 		if inputField == nil || typeutil.GetField(schema, inputField.GetFieldID()) == nil {
 			return nil, merr.WrapErrFunctionFailedMsg("input field not found in schema")
 		}
-		if inputField.GetDataType() != schemapb.DataType_VarChar {
-			return nil, merr.WrapErrFunctionFailedMsg("input field data type must be varchar for minhash function materialization; text input requires LOB decoding")
-		}
 		inputFieldIDs = append(inputFieldIDs, inputField.GetFieldID())
 	}
 
@@ -434,9 +498,6 @@ func newBM25FunctionMaterializer(schema *schemapb.CollectionSchema, runner funct
 	for _, inputField := range inputFields {
 		if inputField == nil || typeutil.GetField(schema, inputField.GetFieldID()) == nil {
 			return nil, merr.WrapErrParameterInvalidMsg("input field not found in schema")
-		}
-		if inputField.GetDataType() != schemapb.DataType_VarChar {
-			return nil, merr.WrapErrParameterInvalidMsg("input field data type must be varchar for bm25 function materialization; text input requires LOB decoding")
 		}
 		inputFieldIDs = append(inputFieldIDs, inputField.GetFieldID())
 	}
@@ -608,9 +669,9 @@ func stringInputsFromRecord(rec storage.Record, fieldID int64) ([]string, error)
 			}
 		}
 	case *array.Binary:
-		return nil, merr.WrapErrFunctionFailedMsg("cannot materialize bm25 from text binary values without lob decoding")
+		return nil, merr.WrapErrFunctionFailedMsg("function input field %d requires decoded Arrow String values, got Binary LOB references", fieldID)
 	default:
-		return nil, merr.WrapErrFunctionFailedMsg("input field %d data type must be varchar or text for bm25 function materialization, got %T", fieldID, col)
+		return nil, merr.WrapErrFunctionFailedMsg("function input field %d requires Arrow String values, got %T", fieldID, col)
 	}
 	return inputs, nil
 }

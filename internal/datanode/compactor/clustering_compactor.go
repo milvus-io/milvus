@@ -700,7 +700,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 		mlog.Warn(ctx, "new record materializer wrong", mlog.Err(err))
 		return err
 	}
-	rr = newMaterializedRecordReader(rr, materializer)
+	rr = newMaterializedRecordReader(ctx, rr, materializer, nil)
 	rr = wrapReaderWithTimestampOverwrite(rr, segment.GetCommitTimestamp())
 	defer rr.Close()
 
