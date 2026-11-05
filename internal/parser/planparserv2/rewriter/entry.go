@@ -192,6 +192,20 @@ func exprHasNaN(e *planpb.Expr) bool {
 		return exprHasNaN(real.UnaryExpr.GetChild())
 	case *planpb.Expr_BinaryExpr:
 		return exprHasNaN(real.BinaryExpr.GetLeft()) || exprHasNaN(real.BinaryExpr.GetRight())
+	case *planpb.Expr_BinaryArithExpr:
+		return exprHasNaN(real.BinaryArithExpr.GetLeft()) || exprHasNaN(real.BinaryArithExpr.GetRight())
+	case *planpb.Expr_CallExpr:
+		for _, param := range real.CallExpr.GetFunctionParameters() {
+			if exprHasNaN(param) {
+				return true
+			}
+		}
+	case *planpb.Expr_BinaryArithOpEvalRangeExpr:
+		return genericValueHasNaN(real.BinaryArithOpEvalRangeExpr.GetRightOperand()) || genericValueHasNaN(real.BinaryArithOpEvalRangeExpr.GetValue())
+	case *planpb.Expr_TimestamptzArithCompareExpr:
+		return genericValueHasNaN(real.TimestamptzArithCompareExpr.GetCompareValue())
+	case *planpb.Expr_MatchExpr:
+		return exprHasNaN(real.MatchExpr.GetPredicate())
 	}
 	return false
 }

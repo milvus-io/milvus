@@ -106,6 +106,16 @@ The rewriter can be configured via the following parameter (refreshable at runti
     - `(10 < x <= 20) OR (20 <= x < 30)` → `(10 < x < 30)` (adjacent with inclusive)
     - Disjoint intervals remain separate: `(10 < x < 20) OR (30 < x < 40)` → remains as OR
   - Inclusivity handling: AND prefers exclusive on equal bounds (stronger), OR prefers inclusive (weaker)
+  - Integer-domain folding:
+    - On non-nullable integer scalar columns (`Int8`, `Int16`, `Int32`, `Int64`), bounded or unbounded ranges covering the entire representable type domain (e.g., `x >= -128 AND x <= 127` for Int8) are folded to `AlwaysTrueExpr`.
+    - Range predicates impossible to satisfy within the type's domain (e.g., `x > 127` or `x < -128` for Int8) are folded to `AlwaysFalseExpr`.
+    - Nullable, JSON, and array columns bypass integer-domain folding to strictly preserve SQL three-valued logic (NULL remains UNKNOWN under outer operators like `NOT`).
+
+5) Expression deduplication (`entry.go`)
+- Eliminates duplicate identical expressions within flattened AND/OR chains ($A \land A \equiv A$, $A \lor A \equiv A$).
+- Uses deterministic Protobuf serialization with 64-bit FNV-1a hashing for expected $O(N)$ bucketed lookups, confirmed by `proto.Equal` to guard against hash collisions.
+- Safety exclusions: expressions containing `NaN` (recursively checked across value-carrying nodes including `BinaryArithExpr` and `CallExpr`), as well as non-deterministic or multi-instance operators (`RandomSampleExpr`, `ElementFilterExpr`, `RoaringFilterExpr`), are excluded from deduplication.
+- Runs before any domain-specific simplifications and again before folding back to a binary expression tree.
 
 ### General Notes
 - All merges require operands to target the same column (same `ColumnInfo`, including nested path/element type).
@@ -118,26 +128,30 @@ The rewriter can be configured via the following parameter (refreshable at runti
 ### Pass Ordering (current)
 - OR branch:
   1. Flatten
-  2. ARRAY `Contains` / `ContainsAny` → `ContainsAny`
-  3. OR `==` → IN
-  4. TEXT_MATCH merge (no options)
-  5. Range weaken (same-direction bounds)
-  6. BinaryRangeExpr merge (overlapping/adjacent intervals)
-  7. IN ∪ IN union
-  8. IN vs NotEqual simplification
-  9. IN vs Equal redundancy elimination
-  10. Fold back to BinaryExpr
+  2. Deduplicate identical expressions (`deduplicateIdenticalExprs`)
+  3. ARRAY `Contains` / `ContainsAny` → `ContainsAny`
+  4. OR `==` → IN
+  5. TEXT_MATCH merge (no options)
+  6. Range weaken (same-direction bounds)
+  7. BinaryRangeExpr merge (overlapping/adjacent intervals, integer-domain folding)
+  8. IN ∪ IN union
+  9. IN vs NotEqual simplification
+  10. IN vs Equal redundancy elimination
+  11. Deduplicate identical expressions (`deduplicateIdenticalExprs`)
+  12. Fold back to BinaryExpr
 - AND branch:
   1. Flatten
-  2. ARRAY `Contains` / `ContainsAll` → `ContainsAll`
-  3. Range tighten / interval construction
-  4. BinaryRangeExpr merge (intersection, also with UnaryRangeExpr)
-  5. IN ∩ IN intersection (if any)
-  6. IN vs NotEqual simplification
-  7. IN ∩ range filtering
-  8. IN vs Equal redundancy elimination
-  9. AND `!=` → NOT IN
-  10. Fold back to BinaryExpr
+  2. Deduplicate identical expressions (`deduplicateIdenticalExprs`)
+  3. ARRAY `Contains` / `ContainsAll` → `ContainsAll`
+  4. Range tighten / interval construction (integer-domain folding)
+  5. BinaryRangeExpr merge (intersection, also with UnaryRangeExpr, integer-domain folding)
+  6. IN ∩ IN intersection (if any)
+  7. IN vs NotEqual simplification
+  8. IN ∩ range filtering
+  9. IN vs Equal redundancy elimination
+  10. AND `!=` → NOT IN
+  11. Deduplicate identical expressions (`deduplicateIdenticalExprs`)
+  12. Fold back to BinaryExpr
 
 Multiple `!=` predicates not consumed by the cross-rule may still combine into NOT IN under AND. Each construction of IN will be normalized (sorted and deduplicated). TEXT_MATCH OR merge concatenates literals with a single space; no tokenization, deduplication, or sorting is performed.
 

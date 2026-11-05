@@ -19,6 +19,10 @@ func buildSchemaHelperForPhase2Test(t *testing.T) *typeutil.SchemaHelper {
 		{FieldID: 104, Name: "int16_field", DataType: schemapb.DataType_Int16},
 		{FieldID: 105, Name: "int32_field", DataType: schemapb.DataType_Int32},
 		{FieldID: 106, Name: "status", DataType: schemapb.DataType_Int64},
+		{FieldID: 107, Name: "nullable_int8_field", DataType: schemapb.DataType_Int8, Nullable: true},
+		{FieldID: 108, Name: "nullable_int16_field", DataType: schemapb.DataType_Int16, Nullable: true},
+		{FieldID: 109, Name: "nullable_int32_field", DataType: schemapb.DataType_Int32, Nullable: true},
+		{FieldID: 110, Name: "nullable_int64_field", DataType: schemapb.DataType_Int64, Nullable: true},
 	}
 	schema := &schemapb.CollectionSchema{
 		Name:   "phase2_test",
@@ -134,4 +138,81 @@ func TestRewrite_LiteralAndTrueIdentity_Elimination(t *testing.T) {
 	require.NotNil(t, ur128)
 	require.Equal(t, int64(101), ur128.GetColumnInfo().GetFieldId())
 	require.Equal(t, int64(1), ur128.GetValue().GetInt64Val())
+}
+
+func TestRewrite_NullableIntegerDomainPreservation(t *testing.T) {
+	helper := buildSchemaHelperForPhase2Test(t)
+
+	// 1. Impossible upper bound: nullable_int8_field > 127
+	// Must NOT fold to AlwaysFalseExpr, because NULL > 127 evaluates to UNKNOWN.
+	expr1, err1 := parser.ParseExpr(helper, "nullable_int8_field > 127", nil)
+	require.NoError(t, err1)
+	require.NotNil(t, expr1)
+	require.False(t, rewriter.IsAlwaysFalseExpr(expr1), "nullable > 127 must not fold to AlwaysFalse")
+	require.NotNil(t, expr1.GetUnaryRangeExpr(), "predicate structure should be preserved")
+
+	// 2. Impossible lower bound: nullable_int8_field < -128
+	// Must NOT fold to AlwaysFalseExpr.
+	expr2, err2 := parser.ParseExpr(helper, "nullable_int8_field < -128", nil)
+	require.NoError(t, err2)
+	require.NotNil(t, expr2)
+	require.False(t, rewriter.IsAlwaysFalseExpr(expr2), "nullable < -128 must not fold to AlwaysFalse")
+	require.NotNil(t, expr2.GetUnaryRangeExpr())
+
+	// 3. NOT on impossible bound: not (nullable_int8_field > 127)
+	// Under 3VL, NOT(UNKNOWN) = UNKNOWN. It must NOT fold to AlwaysTrueExpr.
+	expr3, err3 := parser.ParseExpr(helper, "not (nullable_int8_field > 127)", nil)
+	require.NoError(t, err3)
+	require.NotNil(t, expr3)
+	require.False(t, rewriter.IsAlwaysTrueExpr(expr3), "not (nullable > 127) must not fold to AlwaysTrue")
+	ue3 := expr3.GetUnaryExpr()
+	require.NotNil(t, ue3, "NOT expression must be retained")
+
+	// 4. Full domain range: nullable_int8_field >= -128 and nullable_int8_field <= 127
+	// Must NOT fold to AlwaysTrueExpr, because NULL is neither >= -128 nor <= 127.
+	expr4, err4 := parser.ParseExpr(helper, "nullable_int8_field >= -128 and nullable_int8_field <= 127", nil)
+	require.NoError(t, err4)
+	require.NotNil(t, expr4)
+	require.False(t, rewriter.IsAlwaysTrueExpr(expr4), "nullable full domain must not fold to AlwaysTrue")
+	require.NotNil(t, expr4.GetBinaryRangeExpr(), "full-domain range should remain BinaryRangeExpr")
+
+	// 5. Test with Int16, Int32, Int64 nullable types
+	// Int16 impossible bound & NOT & full-domain
+	expr16, err16 := parser.ParseExpr(helper, "nullable_int16_field > 32767", nil)
+	require.NoError(t, err16)
+	require.False(t, rewriter.IsAlwaysFalseExpr(expr16), "nullable Int16 > 32767 must not fold to AlwaysFalse")
+	expr16Not, err16Not := parser.ParseExpr(helper, "not (nullable_int16_field > 32767)", nil)
+	require.NoError(t, err16Not)
+	require.False(t, rewriter.IsAlwaysTrueExpr(expr16Not), "not (nullable Int16 > 32767) must not fold to AlwaysTrue")
+	expr16Full, err16Full := parser.ParseExpr(helper, "nullable_int16_field >= -32768 and nullable_int16_field <= 32767", nil)
+	require.NoError(t, err16Full)
+	require.False(t, rewriter.IsAlwaysTrueExpr(expr16Full), "nullable Int16 full domain must not fold to AlwaysTrue")
+
+	// Int32 impossible bound & NOT & full-domain
+	expr32, err32 := parser.ParseExpr(helper, "nullable_int32_field > 2147483647", nil)
+	require.NoError(t, err32)
+	require.False(t, rewriter.IsAlwaysFalseExpr(expr32), "nullable Int32 > 2147483647 must not fold to AlwaysFalse")
+	expr32Not, err32Not := parser.ParseExpr(helper, "not (nullable_int32_field > 2147483647)", nil)
+	require.NoError(t, err32Not)
+	require.False(t, rewriter.IsAlwaysTrueExpr(expr32Not), "not (nullable Int32 > 2147483647) must not fold to AlwaysTrue")
+	expr32Full, err32Full := parser.ParseExpr(helper, "nullable_int32_field >= -2147483648 and nullable_int32_field <= 2147483647", nil)
+	require.NoError(t, err32Full)
+	require.False(t, rewriter.IsAlwaysTrueExpr(expr32Full), "nullable Int32 full domain must not fold to AlwaysTrue")
+
+	// Int64 impossible bound & NOT & full-domain
+	// 9223372036854775807 is MaxInt64; > MaxInt64 is impossible in the Int64 domain.
+	expr64, err64 := parser.ParseExpr(helper, "nullable_int64_field > 9223372036854775807", nil)
+	require.NoError(t, err64)
+	require.NotNil(t, expr64)
+	require.False(t, rewriter.IsAlwaysFalseExpr(expr64), "nullable Int64 > MaxInt64 must not fold to AlwaysFalse")
+
+	expr64Not, err64Not := parser.ParseExpr(helper, "not (nullable_int64_field > 9223372036854775807)", nil)
+	require.NoError(t, err64Not)
+	require.NotNil(t, expr64Not)
+	require.False(t, rewriter.IsAlwaysTrueExpr(expr64Not), "not (nullable Int64 > MaxInt64) must not fold to AlwaysTrue")
+
+	expr64Full, err64Full := parser.ParseExpr(helper, "nullable_int64_field >= -9223372036854775808 and nullable_int64_field <= 9223372036854775807", nil)
+	require.NoError(t, err64Full)
+	require.NotNil(t, expr64Full)
+	require.False(t, rewriter.IsAlwaysTrueExpr(expr64Full), "nullable Int64 full domain must not fold to AlwaysTrue")
 }

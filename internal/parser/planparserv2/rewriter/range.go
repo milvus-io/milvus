@@ -671,6 +671,7 @@ func (v *visitor) combineAndBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 			continue
 		}
 		if len(g.intervals) == 1 {
+			// Single interval: fold if integer full-domain, otherwise keep as is.
 			iv := g.intervals[0]
 			if iv.isBinaryRange && isIntegerRangeFullDomain(g.col, g.effDt, iv.lower, iv.lowerInc, iv.upper, iv.upperInc) {
 				used[iv.exprIndex] = true
@@ -904,6 +905,7 @@ func (v *visitor) combineOrBinaryRanges(parts []*planpb.Expr) []*planpb.Expr {
 			continue
 		}
 		if len(g.intervals) == 1 {
+			// Single interval: fold if integer full-domain, otherwise keep as is.
 			iv := g.intervals[0]
 			if iv.isBinaryRange && isIntegerRangeFullDomain(g.col, g.effDt, iv.lower, iv.lowerInc, iv.upper, iv.upperInc) {
 				used[iv.exprIndex] = true

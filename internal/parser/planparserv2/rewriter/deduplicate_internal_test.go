@@ -266,6 +266,49 @@ func TestDeduplicate_SafetyExclusions(t *testing.T) {
 	}
 	require.False(t, canDeduplicate(rfExpr), "RoaringFilterExpr must not be deduplicated")
 
+	// 5. BinaryArithExpr containing NaN
+	arithNaNExpr := &planpb.Expr{
+		Expr: &planpb.Expr_BinaryArithExpr{
+			BinaryArithExpr: &planpb.BinaryArithExpr{
+				Left: &planpb.Expr{
+					Expr: &planpb.Expr_ValueExpr{
+						ValueExpr: &planpb.ValueExpr{
+							Value: &planpb.GenericValue{Val: &planpb.GenericValue_FloatVal{FloatVal: math.NaN()}},
+						},
+					},
+				},
+				Right: &planpb.Expr{
+					Expr: &planpb.Expr_ValueExpr{
+						ValueExpr: &planpb.ValueExpr{
+							Value: &planpb.GenericValue{Val: &planpb.GenericValue_FloatVal{FloatVal: 1.0}},
+						},
+					},
+				},
+				Op: planpb.ArithOpType_Add,
+			},
+		},
+	}
+	require.False(t, canDeduplicate(arithNaNExpr), "BinaryArithExpr with NaN must not be deduplicated")
+
+	// 6. CallExpr containing NaN
+	callNaNExpr := &planpb.Expr{
+		Expr: &planpb.Expr_CallExpr{
+			CallExpr: &planpb.CallExpr{
+				FunctionName: "test_fn",
+				FunctionParameters: []*planpb.Expr{
+					{
+						Expr: &planpb.Expr_ValueExpr{
+							ValueExpr: &planpb.ValueExpr{
+								Value: &planpb.GenericValue{Val: &planpb.GenericValue_FloatVal{FloatVal: math.NaN()}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	require.False(t, canDeduplicate(callNaNExpr), "CallExpr with NaN must not be deduplicated")
+
 	// Verify normal expression CAN be deduplicated
 	normalExpr := &planpb.Expr{
 		Expr: &planpb.Expr_UnaryRangeExpr{
