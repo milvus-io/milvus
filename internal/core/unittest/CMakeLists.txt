@@ -310,26 +310,27 @@ add_test(NAME index_tests COMMAND index_tests)
 install(TARGETS index_tests DESTINATION unittest)
 
 add_executable(index_runtime_acceptance_test
+        init_gtest.cpp
         index_runtime_acceptance_test.cpp
         ${CMAKE_HOME_DIRECTORY}/src/index/test_utils/TestArtifactIO.cpp
         )
 
+# Use the same shared-runtime boundary as index_tests to avoid duplicate
+# global objects from milvus_core's transitive static dependencies.
 target_link_libraries(index_runtime_acceptance_test
+        PRIVATE
         GTest::gtest
-        GTest::gtest_main
-        GTest::gmock
-        milvus_core
-        milvus_conan_deps
-        knowhere
-        milvus-storage
-        )
-
-target_link_options(index_runtime_acceptance_test PRIVATE "-L${PLANPARSER_LIB_DIR}")
-target_link_libraries(index_runtime_acceptance_test milvus-planparser-cpp)
-set_target_properties(index_runtime_acceptance_test PROPERTIES
-        BUILD_RPATH "${PLANPARSER_LIB_DIR}"
-        INSTALL_RPATH "${PLANPARSER_LIB_DIR}"
-        )
+        "$<COMPILE_ONLY:milvus_core>"
+        "$<TARGET_FILE:milvus_core>"
+        "$<TARGET_FILE:milvus-storage>"
+        "$<TARGET_FILE:knowhere>"
+        "${INDEX_TEST_MILVUS_COMMON_LIBRARY}"
+        gRPC::grpc++
+        Boost::filesystem
+        glog::glog
+        "${INDEX_TEST_FOLLY_LIBRARY}"
+        "${INDEX_TEST_FMT_LIBRARY}")
+add_dependencies(index_runtime_acceptance_test milvus_core)
 
 install(TARGETS index_runtime_acceptance_test DESTINATION unittest)
 
