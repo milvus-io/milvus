@@ -1093,15 +1093,13 @@ TEST_F(LegacyIndexLoadTest,
 }
 
 TEST_F(LegacyIndexLoadTest, AdditionalFamiliesPreserveAsyncQueryResults) {
-    for (const auto* name :
-         {"NgramVarcharMin2Max4Heap", "SpatialRTreeHeap", "JsonFlatV7"}) {
+    for (const auto* name : {"NgramVarcharMin2Max4Heap", "SpatialRTreeHeap"}) {
         for (bool mmap : {false, true}) {
             SCOPED_TRACE(name);
             SCOPED_TRACE(mmap);
             const auto& backend =
                 ScalarReaderBackends().Get<std::string_view>(name);
             const bool spatial = backend.Family() == families::kRTree;
-            const bool json = backend.Family() == families::kJsonFlat;
             std::vector<std::string> values{"alpha", "beta", "beta", "null"};
             if (spatial) {
                 values.clear();
@@ -1110,11 +1108,6 @@ TEST_F(LegacyIndexLoadTest, AdditionalFamiliesPreserveAsyncQueryResults) {
                     values.push_back(Geometry(GetThreadLocalGEOSContext(), wkt)
                                          .to_wkb_string());
                 }
-            } else if (json) {
-                values = {R"({"a":"alpha"})",
-                          R"({"a":"beta"})",
-                          R"({"a":"beta"})",
-                          R"({"a":"ignored"})"};
             }
             ScalarTestData<std::string_view> data(std::move(values));
             data.validity.reset(3);
@@ -1140,24 +1133,6 @@ TEST_F(LegacyIndexLoadTest, AdditionalFamiliesPreserveAsyncQueryResults) {
                     spatial_reader->Candidates(SpatialOp::Intersects, query),
                     4,
                     {1, 2});
-            } else if (json) {
-                const auto* json_reader =
-                    dynamic_cast<const IJsonIndexReader*>(reader.get());
-                ASSERT_NE(json_reader, nullptr);
-                ExpectHits(json_reader->Exists("/a"), 4, {0, 1, 2});
-                auto resolved = json_reader->Resolve(
-                    "/a", JsonCastType::FromString("VARCHAR"));
-                ASSERT_TRUE(resolved);
-                const auto* scalar = dynamic_cast<
-                    const IScalarPredicateReader<std::string_view>*>(
-                    resolved.get());
-                ASSERT_NE(scalar, nullptr);
-                const std::string_view term = "beta";
-                ExpectHits(scalar->In(1, &term), 4, {1, 2});
-                const auto* nulls =
-                    dynamic_cast<const INullReader*>(resolved.get());
-                ASSERT_NE(nulls, nullptr);
-                ExpectHits(nulls->IsNull(), 4, {3});
             } else {
                 const auto* ngram =
                     dynamic_cast<const INgramReader*>(reader.get());
@@ -1167,12 +1142,9 @@ TEST_F(LegacyIndexLoadTest, AdditionalFamiliesPreserveAsyncQueryResults) {
                 ngram->Candidates("beta", PatternOp::InnerMatch, candidates);
                 ExpectHits(candidates, 4, {1, 2});
             }
-            if (!json) {
-                const auto* nulls =
-                    dynamic_cast<const INullReader*>(reader.get());
-                ASSERT_NE(nulls, nullptr);
-                ExpectHits(nulls->IsNull(), 4, {3});
-            }
+            const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
+            ASSERT_NE(nulls, nullptr);
+            ExpectHits(nulls->IsNull(), 4, {3});
             ExpectNativeReads();
             reader.reset();
             EXPECT_TRUE(std::filesystem::is_empty(staging_));

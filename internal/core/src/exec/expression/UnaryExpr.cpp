@@ -246,18 +246,15 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     case proto::plan::GenericValue::ValCase::kBoolVal:
                         result = ExecRangeVisitorImplForIndex<bool>();
                         break;
-                    case proto::plan::GenericValue::ValCase::kInt64Val:
-                        if (PinnedJsonIndexIsFlat()) {
-                            result = ExecRangeVisitorImplForIndex<int64_t>();
-                        } else {
-                            proto::plan::GenericValue double_val;
-                            double_val.set_float_val(
-                                static_cast<double>(expr_->val_.int64_val()));
-                            value_arg_.SetValue<double>(double_val);
-                            arg_inited_ = true;
-                            result = ExecRangeVisitorImplForIndex<double>();
-                        }
+                    case proto::plan::GenericValue::ValCase::kInt64Val: {
+                        proto::plan::GenericValue double_val;
+                        double_val.set_float_val(
+                            static_cast<double>(expr_->val_.int64_val()));
+                        value_arg_.SetValue<double>(double_val);
+                        arg_inited_ = true;
+                        result = ExecRangeVisitorImplForIndex<double>();
                         break;
+                    }
                     case proto::plan::GenericValue::ValCase::kFloatVal:
                         result = ExecRangeVisitorImplForIndex<double>();
                         break;
@@ -828,8 +825,7 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
                 }
             }
             return res;
-        },
-        IndexValidityMode::Default);
+        });
     if (reverse) {
         auto column = std::dynamic_pointer_cast<ColumnVector>(batch_res);
         AssertInfo(column != nullptr && column->IsBitmap(),
@@ -2182,11 +2178,13 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
         data_type == DataType::ARRAY
             ? expr_->column_.element_type_
             : (field_type_ == DataType::JSON ? value_type_ : data_type);
-    req.requires_flat_json_index =
-        data_type == DataType::JSON &&
+    if (data_type == DataType::JSON &&
         expr_->val_.val_case() ==
             proto::plan::GenericValue::ValCase::kInt64Val &&
-        !IsInt64SafeForJsonDoubleIndex(expr_->val_.int64_val());
+        !IsInt64SafeForJsonDoubleIndex(expr_->val_.int64_val())) {
+        exec_path_ = ExprExecPath::RawData;
+        return;
+    }
     if (is_pattern && SelectAndPinIndex(req) &&
         ngram_reader_->CanHandle(GetValueFromProto<std::string>(expr_->val_),
                                  ToIndexPatternOp(expr_->op_type_))) {

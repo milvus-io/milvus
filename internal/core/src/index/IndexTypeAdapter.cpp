@@ -84,8 +84,7 @@ ScalarArtifactType(const IndexFamily& family) {
     if (family == families::kFmIndex) {
         return ScalarIndexType::FMINDEX;
     }
-    if (family == families::kInverted || family == families::kText ||
-        family == families::kJsonFlat) {
+    if (family == families::kInverted || family == families::kText) {
         return ScalarIndexType::INVERTED;
     }
     return ScalarIndexType::NONE;
@@ -162,7 +161,7 @@ JsonCastValueType(const JsonCastType& cast) {
         case JsonCastType::DataType::VARCHAR:
             return DataType::VARCHAR;
         case JsonCastType::DataType::JSON:
-            return DataType::JSON;
+            ThrowInfo(Unsupported, "JSON cast JSON has no physical index");
         default:
             ThrowInfo(DataTypeInvalid, "unsupported JSON cast type: {}", cast);
     }
@@ -316,52 +315,40 @@ AdaptIndexType(const IndexTypeAdapterRequest& request) {
         // RuntimeJsonCastType rewrote changes this value.
         result.params[JSON_CAST_TYPE] = cast.ToString();
         result.value_type = JsonCastValueType(cast);
-        if (cast.element_type() == JsonCastType::DataType::JSON) {
-            if (request.index_type != INVERTED_INDEX_TYPE &&
-                request.index_type != NGRAM_INDEX_TYPE) {
-                ThrowInfo(
-                    Unsupported,
-                    "JSON flat index requires INVERTED or NGRAM spelling, "
-                    "got {}",
-                    request.index_type);
-            }
-            result.family = families::kJsonFlat;
-        } else {
-            const auto cast_type = cast.element_type();
-            auto index_type = request.index_type;
-            if (index_type == NGRAM_INDEX_TYPE &&
-                cast_type != JsonCastType::DataType::VARCHAR) {
-                // 2.6.0 and 2.6.1 accepted NGRAM with a BOOL or DOUBLE JSON
-                // cast (indexparamcheck requires VARCHAR since #44157), and
-                // the legacy factory built and loaded those indexes as JSON
-                // INVERTED indexes. Their artifacts are INVERTED, so build,
-                // V3 file naming and load all use the INVERTED type.
-                index_type = INVERTED_INDEX_TYPE;
-                result.params[INDEX_TYPE] = index_type;
-            }
-            if (index_type == ASCENDING_SORT) {
-                if (!IsJsonSortCast(cast)) {
-                    ThrowInfo(Unsupported,
-                              "JSON sort index requires DOUBLE, VARCHAR or "
-                              "typed ARRAY cast, got {}",
-                              cast);
-                }
-            } else if (index_type == BITMAP_INDEX_TYPE) {
-                if (cast_type != JsonCastType::DataType::BOOL &&
-                    cast_type != JsonCastType::DataType::VARCHAR) {
-                    ThrowInfo(Unsupported,
-                              "JSON bitmap index requires BOOL or VARCHAR "
-                              "cast, got {}",
-                              cast);
-                }
-            } else if (index_type != NGRAM_INDEX_TYPE &&
-                       index_type != INVERTED_INDEX_TYPE &&
-                       index_type != HYBRID_INDEX_TYPE) {
-                ThrowInfo(
-                    Unsupported, "unsupported JSON index type: {}", index_type);
-            }
-            result.family = ScalarFamily(index_type, result.value_type, false);
+        const auto cast_type = cast.element_type();
+        auto index_type = request.index_type;
+        if (index_type == NGRAM_INDEX_TYPE &&
+            cast_type != JsonCastType::DataType::VARCHAR) {
+            // 2.6.0 and 2.6.1 accepted NGRAM with a BOOL or DOUBLE JSON
+            // cast (indexparamcheck requires VARCHAR since #44157), and
+            // the legacy factory built and loaded those indexes as JSON
+            // INVERTED indexes. Their artifacts are INVERTED, so build,
+            // V3 file naming and load all use the INVERTED type.
+            index_type = INVERTED_INDEX_TYPE;
+            result.params[INDEX_TYPE] = index_type;
         }
+        if (index_type == ASCENDING_SORT) {
+            if (!IsJsonSortCast(cast)) {
+                ThrowInfo(Unsupported,
+                          "JSON sort index requires DOUBLE, VARCHAR or "
+                          "typed ARRAY cast, got {}",
+                          cast);
+            }
+        } else if (index_type == BITMAP_INDEX_TYPE) {
+            if (cast_type != JsonCastType::DataType::BOOL &&
+                cast_type != JsonCastType::DataType::VARCHAR) {
+                ThrowInfo(Unsupported,
+                          "JSON bitmap index requires BOOL or VARCHAR "
+                          "cast, got {}",
+                          cast);
+            }
+        } else if (index_type != NGRAM_INDEX_TYPE &&
+                   index_type != INVERTED_INDEX_TYPE &&
+                   index_type != HYBRID_INDEX_TYPE) {
+            ThrowInfo(
+                Unsupported, "unsupported JSON index type: {}", index_type);
+        }
+        result.family = ScalarFamily(index_type, result.value_type, false);
     } else if (request.field_type == DataType::ARRAY) {
         // ARRAY indexes expose predicates over their element type; field_type
         // retains the parent ARRAY identity and coordinate semantics.

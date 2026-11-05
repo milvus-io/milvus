@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -292,7 +293,11 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 					mlog.Int64("fieldID", req.GetFieldID()),
 					mlog.String("indexName", req.GetIndexName()))
 				metrics.IndexRequestCounter.WithLabelValues(metrics.SuccessLabel).Inc()
-				return merr.Success(), nil
+				status := merr.Success()
+				if isJSON && indexparams.IsJSONFlatIndex(schemapb.DataType_JSON, req.GetIndexParams()) {
+					status.Reason = indexparams.JSONFlatIndexDeprecationReason
+				}
+				return status, nil
 			}
 			mlog.Error(ctx, "Check CanCreateIndex fail", mlog.Err(err))
 			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
@@ -349,7 +354,11 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		mlog.String("IndexName", idx.IndexName), mlog.Int64("fieldID", idx.FieldID),
 		mlog.Int64("IndexID", idx.IndexID))
 	metrics.IndexRequestCounter.WithLabelValues(metrics.SuccessLabel).Inc()
-	return merr.Success(), nil
+	status := merr.Success()
+	if isJSON && indexparams.IsJSONFlatIndex(schemapb.DataType_JSON, req.GetIndexParams()) {
+		status.Reason = indexparams.JSONFlatIndexDeprecationReason
+	}
+	return status, nil
 }
 
 func UpdateParams(idx *model.Index, from []*commonpb.KeyValuePair, updates []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
@@ -863,6 +872,20 @@ func newIndexCoverageChecker(indexID int64, segments map[int64]*indexStats) func
 // ancestry is served by the query frontier with finished indexes for this index.
 // Row counts retain their current collection-wide perspective.
 func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, idx *model.Index, segments map[int64]*indexStats, realTime bool, ts Timestamp) {
+	if indexparams.IsJSONFlatIndex(schemapb.DataType_JSON, idx.IndexParams) && s.meta != nil && s.indexMeta != nil && s.indexMeta.JSONFlatIndexFilter(idx.CollectionID)(idx) {
+		var totalRows int64
+		for _, segment := range segments {
+			if segment.state == commonpb.SegmentState_Flushed || segment.state == commonpb.SegmentState_Flushing {
+				totalRows += segment.numRows
+			}
+		}
+		indexInfo.TotalRows = totalRows
+		indexInfo.IndexedRows = totalRows
+		indexInfo.PendingIndexRows = 0
+		indexInfo.State = commonpb.IndexState_Finished
+		indexInfo.IndexStateFailReason = ""
+		return
+	}
 	var (
 		cntNone          = 0
 		cntUnissued      = 0
@@ -1331,7 +1354,7 @@ func (s *Server) ListIndexes(ctx context.Context, req *indexpb.ListIndexesReques
 		}, nil
 	}
 
-	indexes := s.indexMeta.GetIndexesForCollection(req.GetCollectionID(), "")
+	indexes := s.indexMeta.GetPhysicalIndexesForCollection(req.GetCollectionID())
 
 	indexInfos := lo.Map(indexes, func(idx *model.Index, _ int) *indexpb.IndexInfo {
 		return &indexpb.IndexInfo{

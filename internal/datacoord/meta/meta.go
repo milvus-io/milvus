@@ -237,6 +237,15 @@ func NewMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 
 	// Install the index catalog and compaction protection after all goroutines complete
 	mt.IndexCatalog = indexCatalog
+	if indexCatalog != nil {
+		indexCatalog.SetCollectionSchemaGetter(func(collectionID UniqueID) *schemapb.CollectionSchema {
+			collection := mt.GetCollection(collectionID)
+			if collection == nil {
+				return nil
+			}
+			return collection.Schema
+		})
+	}
 	if protection != nil {
 		mt.CompactionProtection = protection
 	}

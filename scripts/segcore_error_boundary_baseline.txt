@@ -235,11 +235,6 @@ tantivy	internal/core/src/index/scalar/inverted/InvertedIndexBuilder.h
 tantivy	internal/core/src/index/scalar/inverted/InvertedIndexLoader.cpp
 tantivy	internal/core/src/index/scalar/inverted/InvertedIndexReader.cpp
 tantivy	internal/core/src/index/scalar/inverted/InvertedIndexReader.h
-tantivy	internal/core/src/index/scalar/json/JsonFlatIndexBuilder.cpp
-tantivy	internal/core/src/index/scalar/json/JsonFlatIndexBuilder.h
-tantivy	internal/core/src/index/scalar/json/JsonFlatIndexLoader.cpp
-tantivy	internal/core/src/index/scalar/json/JsonFlatIndexReader.cpp
-tantivy	internal/core/src/index/scalar/json/JsonFlatIndexReader.h
 tantivy	internal/core/src/index/scalar/ngram/NgramIndexBuilder.cpp
 tantivy	internal/core/src/index/scalar/ngram/NgramIndexBuilder.h
 tantivy	internal/core/src/index/scalar/ngram/NgramIndexLoader.cpp

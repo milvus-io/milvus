@@ -98,10 +98,9 @@ even when they appear in the same template inheritance list.
 - Input views are borrowed only for the duration of the call. `owned_t<string_view>` is `string`,
   and every other type is `T`; compressed structures may reconstruct values on the call stack, so
   `Lookup` must not return a dangling view.
-- `JsonResolvedReader` may own a temporary reader view or borrow a child reader, but both forms
-  require the parent reader's pin to stay alive. An empty `CastTypesOf(path)` means the shape is not
-  supported; when it is non-empty and the path exists in no row, `Exists` returns an all-zero
-  bitmap.
+- `JsonResolvedReader` borrows a typed path's child reader and requires the parent reader's pin to
+  stay alive. An empty `CastTypesOf(path)` means the shape is not supported; when it is non-empty
+  and the path exists in no row, `Exists` returns an all-zero bitmap.
 - `CompareOp`, `PatternOp`, and `SpatialOp` use enums local to the contract; plan or engine enums
   are converted at the boundary. JSON routing uses `JsonCastType`, which does not mean that every
   `DataType` is usable.

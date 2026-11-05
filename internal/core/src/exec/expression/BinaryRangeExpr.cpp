@@ -125,44 +125,32 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                                JsonNumericBoundRequiresPreciseInt64Comparison(
                                    expr_->upper_val_));
 
-            // Keep sparse JsonFlat offset batches candidate-local when raw
-            // JSON is resident.  An index-only segment cannot use the generic
-            // JSON reverse-lookup path, so it must query the typed JsonFlat
-            // executor and gather the requested rows instead.
-            const bool use_json_flat_raw_offsets =
-                exec_path_ == ExprExecPath::ScalarIndex && has_offset_input_ &&
-                PinnedJsonIndexIsFlat() && num_data_chunk_ > 0;
-            if (exec_path_ == ExprExecPath::ScalarIndex &&
-                !use_json_flat_raw_offsets) {
+            if (exec_path_ == ExprExecPath::ScalarIndex) {
                 if (is_numeric) {
-                    if (!use_double && PinnedJsonIndexIsFlat()) {
-                        result = ExecRangeVisitorImplForIndex<int64_t>(input);
+                    proto::plan::GenericValue double_lower_val;
+                    if (lower_type ==
+                        proto::plan::GenericValue::ValCase::kInt64Val) {
+                        double_lower_val.set_float_val(
+                            static_cast<double>(expr_->lower_val_.int64_val()));
                     } else {
-                        proto::plan::GenericValue double_lower_val;
-                        if (lower_type ==
-                            proto::plan::GenericValue::ValCase::kInt64Val) {
-                            double_lower_val.set_float_val(static_cast<double>(
-                                expr_->lower_val_.int64_val()));
-                        } else {
-                            double_lower_val.set_float_val(
-                                expr_->lower_val_.float_val());
-                        }
-                        proto::plan::GenericValue double_upper_val;
-                        if (upper_type ==
-                            proto::plan::GenericValue::ValCase::kInt64Val) {
-                            double_upper_val.set_float_val(static_cast<double>(
-                                expr_->upper_val_.int64_val()));
-                        } else {
-                            double_upper_val.set_float_val(
-                                expr_->upper_val_.float_val());
-                        }
-
-                        lower_arg_.SetValue<double>(double_lower_val);
-                        upper_arg_.SetValue<double>(double_upper_val);
-                        arg_inited_ = true;
-
-                        result = ExecRangeVisitorImplForIndex<double>(input);
+                        double_lower_val.set_float_val(
+                            expr_->lower_val_.float_val());
                     }
+                    proto::plan::GenericValue double_upper_val;
+                    if (upper_type ==
+                        proto::plan::GenericValue::ValCase::kInt64Val) {
+                        double_upper_val.set_float_val(
+                            static_cast<double>(expr_->upper_val_.int64_val()));
+                    } else {
+                        double_upper_val.set_float_val(
+                            expr_->upper_val_.float_val());
+                    }
+
+                    lower_arg_.SetValue<double>(double_lower_val);
+                    upper_arg_.SetValue<double>(double_upper_val);
+                    arg_inited_ = true;
+
+                    result = ExecRangeVisitorImplForIndex<double>(input);
                 } else if (lower_type ==
                            proto::plan::GenericValue::ValCase::kStringVal) {
                     result = ExecRangeVisitorImplForIndex<std::string>(input);
@@ -443,10 +431,6 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex(OffsetVector* input) {
             return func(reader, val1, val2, lower_inclusive, upper_inclusive);
         };
     if (input != nullptr) {
-        if (PinnedJsonIndexIsFlat()) {
-            return ProcessIndexChunksAndGatherByOffsets<T>(
-                execute_sub_batch, *input, val1, val2);
-        }
         if (cached_result_ == nullptr) {
             const auto* reader = PredicateReader<ReaderType>();
             AssertInfo(reader != nullptr, "invalid scalar predicate type");
