@@ -139,6 +139,13 @@ handover when a retry can not help:
   good. Examples are a bug of the caller, an invalid request, and a
   corrupted stored manifest.
 
+One more sentinel is not fatal but changes the retry:
+
+- `index.ErrSSTReclaimed`: the flush did not take effect because a table ID
+  is not above the reclaimed SST ID of the manifest pointer. Garbage
+  collection may have deleted the table. The handover sends the tables again
+  under new IDs (see [New IDs after a reclaim](#new-ids-after-a-reclaim)).
+
 Every other error is retryable. The handover code does not look at merr
 codes. The adapter over the manifest service client translates them, in a
 later change (see [Not done in this change](#not-done-in-this-change)):
@@ -146,6 +153,7 @@ later change (see [Not done in this change](#not-done-in-this-change)):
 | Manifest service code | Handover error |
 |---|---|
 | `ChannelNotAvailable` | `ErrFenced` |
+| `ChannelPKIndexSSTReclaimed` | `ErrSSTReclaimed` |
 | `ServiceInternal`, `ParameterInvalid`, `DataIntegrity` | `ErrRejected` |
 | `ServiceUnavailable`, `ServiceNotReady`, a timeout, a cancel | retryable, unchanged |
 
@@ -278,10 +286,12 @@ Upload (skipped when the request is nil):
   if no upload finished, or the upload is older than grace/2:
       upload each table to <sst_base_path>/<id>, record the upload time
 
-Commit (a retry sends the same pending request):
+Commit (a retry sends the same pending request, except after ErrSSTReclaimed):
   request is nil:  DropFrozen the generations, lastCommittedTimeTick = covered
   otherwise:       before := installed version
                    CommitFlush(request) → complete manifest
+                   ErrSSTReclaimed: give the tables new IDs, upload, commit
+                                    again at once; a second one fails the step
                    manifest.version < before or
                    manifest.checkpoint < covered:  ErrRejected, keep the generations
                    installIfNewer(manifest, retire the generations)
@@ -346,17 +356,44 @@ not committed.
 
 ### Upload again before a late retry
 
-Coordinator garbage collection keeps an uploaded table that no manifest lists
-only for the [grace window](manifest.md#grace-window) (24 hours by default). A
-retry can come after that window, for example after a long coordinator outage.
-Then GC has deleted the tables, the retry commits, and the manifest lists
-objects that do not exist.
+Coordinator garbage collection deletes an uploaded table that no manifest
+lists after the [grace window](manifest.md#grace-window) (24 hours by
+default). A retry can come after that window, for example after a long
+coordinator outage.
 
 So the pending request records its upload time. `Upload` uploads the tables
 before the first `Commit` sends the request. When more than grace/2 passed
 since that upload, `Upload` uploads the same tables under the same keys again
 before the retry sends the request. The upload is idempotent and refreshes the
 object modification time. The request does not change.
+
+This only makes it less likely that GC selects the tables. It does not keep
+the commit safe: GC can select a table, the retry can upload it again and
+commit, and GC can then delete it. The reclaimed SST ID of the manifest
+service closes that window (see [Reclaimed SST ID](manifest.md#reclaimed-sst-id)).
+
+### New IDs after a reclaim
+
+A commit that returns `ErrSSTReclaimed` did not take effect: the manifest
+service checks for an applied retry first. Some of the uploaded objects may be
+gone, and the manifest service rejects the old IDs for good. So the `Index`
+renames the tables of the pending request:
+
+1. Sync the ID allocator (`SyncIDAllocator`). It drops the IDs of its local
+   batch, so the next IDs are above every ID allocated before. Without the
+   sync, a new owner can get IDs from an old batch that are still below the
+   reclaimed SST ID.
+2. Allocate a new ID for each table and hard-link the local file to
+   `committed/<new id>.sst`. The content of a table does not hold its ID.
+3. Replace the tables of the request, keep the frozen generations and the
+   covered time tick, and clear the upload time. Remove the links under the
+   old IDs. The objects under the old keys are garbage for GC.
+4. Upload and commit again at once. If the commit returns `ErrSSTReclaimed`
+   again, the `Index` renames once more and the step fails with a retryable
+   error, so the next try comes after the backoff.
+
+This is the only case in which a retry does not send the same request. It
+does not rotate again and does not add a frozen generation.
 
 ### Prepare does nothing while lastObserved did not move
 
@@ -647,6 +684,7 @@ reach 64 MiB and hand over through triggers 2 and 4.
 | Case | Handling |
 |---|---|
 | Retryable upload, download or commit error (any error without a fatal sentinel: object storage, network, manifest service not ready, timeout, cancel) | Exponential backoff from 1 s to `handover.maxBackoff` (60 s), no limit on retries. A manifest lookup uses `retry.Do` and read `handover.maxBackoff` when they start. A handover uses `typeutil.BackoffWithInstant`: it reads `handover.maxBackoff` when the `Index` opens and after a successful handover that follows a failure, and its wait has a jitter of ±50 %. The pending request keeps the same table IDs. |
+| Reclaimed tables (`index.ErrSSTReclaimed`) on a commit | Not fatal. New IDs, upload and commit at once (see [New IDs after a reclaim](#new-ids-after-a-reclaim)); a second rejection in one step backs off like a retryable error. |
 | Fenced (`index.ErrFenced`) on a commit | The `Index` stops its handovers. `OnFatal` marks the WAL unavailable: a newer owner has the pchannel. |
 | Corrupted (`pkindex.ErrCorrupted`) in a handover | The `Index` stops its handovers. `OnFatal` marks the WAL unavailable. The WAL is assigned again and recovers on another node. |
 | Corrupted (`pkindex.ErrCorrupted`) in a lookup on the write path | `Decide` returns the error and calls `OnFatal`, which marks the WAL unavailable. |
@@ -697,7 +735,7 @@ Metrics:
 | `streaming.pkindex.memTableSize` | `4m` | No, read when an `Index` opens | Memtable size of the engine of one vchannel. |
 | `streaming.walRecovery.tail.softWatermark` | `8g` | Yes, at the next observed TimeTick | Existing key. Soft pressure trigger. |
 | `dataNode.segment.syncPeriod` | `600` (s) | Yes, at the next observed TimeTick | Existing key. Stall trigger, in observed time. |
-| `dataCoord.pkindex.gc.grace` | `86400` (s) | No, read when the params are read | Key of the manifest service, defined here byte-identical to its definition there. `ReuploadAfter` of the primary key index is half of it: a retry uploads the tables again after that age, so that the garbage collection of the manifest service does not remove them before the commit. |
+| `dataCoord.pkindex.gc.grace` | `86400` (s) | No, read when the params are read | Key of the manifest service, defined here byte-identical to its definition there. `ReuploadAfter` of the primary key index is half of it: a retry uploads the tables again after that age, so that the garbage collection of the manifest service is less likely to select them before the commit. |
 
 The first backoff wait (1 s) is a constant.
 
@@ -766,7 +804,11 @@ Unit tests cover these cases:
 - Handover: injected upload and commit failures. The request is pending
   before the upload, so a failed upload keeps it and the retry does not
   rotate again. A retry keeps the table IDs and sends the same request, also
-  after a lost response. A retry after grace/2 uploads again. An empty
+  after a lost response. A retry after grace/2 uploads again. A commit
+  rejected with `ErrSSTReclaimed` is sent again at once with the same tables
+  and checkpoint under new IDs above every earlier ID, uploaded again; a
+  second rejection fails the step without a fatal error; a retry of an
+  applied flush is not rejected after the reclaimed SST ID rises. An empty
   handover retires its generations and moves `lastCommittedTimeTick`. An
   older manifest does not replace a newer one. A returned manifest below the
   installed version, with a checkpoint below the covered time tick, or with

@@ -109,6 +109,9 @@ type Config struct {
 	StorageRootPath string
 	Shared          *engine.SharedResources
 	AllocID         func(ctx context.Context) (int64, error)
+	// SyncIDAllocator, when not nil, drops the IDs that AllocID keeps in a
+	// local batch, so that the next IDs are above every ID allocated before.
+	SyncIDAllocator func()
 	Store           TableStore
 	Committer       Committer
 	Params          func() Params

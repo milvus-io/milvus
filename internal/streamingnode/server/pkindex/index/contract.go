@@ -41,6 +41,12 @@ var (
 	// for good: a bug of the caller, an invalid request, or a corrupted
 	// stored manifest. The same request fails the same way again.
 	ErrRejected = errors.New("primary key index manifest rejected the request")
+	// ErrSSTReclaimed reports that the flush did not take effect because it
+	// adds a table whose ID is not above the reclaimed SST ID of the
+	// manifest: garbage collection may have deleted that table. The same
+	// request fails again; a retry must send the tables under new IDs. It is
+	// not fatal.
+	ErrSSTReclaimed = errors.New("primary key index manifest may have reclaimed a table of the flush")
 )
 
 // IsFatal reports whether err ends the WAL instance: the term is fenced by a
@@ -82,7 +88,8 @@ type FlushArgs struct {
 // part of the manifest service that it uses.
 //
 // The call returns an error that matches ErrFenced when the pchannel is
-// assigned to a higher term, and ErrRejected when a retry cannot fix the error.
+// assigned to a higher term, ErrSSTReclaimed when the tables need new IDs, and
+// ErrRejected when a retry cannot fix the error.
 type Committer interface {
 	// CommitFlush applies a flush and returns the complete manifest after
 	// it. A retry with the same arguments after a lost response returns the
