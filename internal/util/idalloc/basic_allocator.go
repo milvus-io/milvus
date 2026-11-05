@@ -44,13 +44,15 @@ func (a *localAllocator) allocateOne() (uint64, error) {
 	return 0, errExhausted
 }
 
-// update updates the local allocator.
-func (a *localAllocator) update(start uint64, count int) {
+// update replaces the remaining range of the local allocator, and returns false if the new range is rejected.
+func (a *localAllocator) update(start uint64, count int) bool {
 	// local allocator can be only increasing.
-	if start >= a.endStartID {
-		a.nextStartID = start
-		a.endStartID = start + uint64(count)
+	if count <= 0 || start < a.endStartID {
+		return false
 	}
+	a.nextStartID = start
+	a.endStartID = start + uint64(count)
+	return true
 }
 
 // expire expires all id in the local allocator.
