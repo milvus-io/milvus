@@ -28,6 +28,9 @@ import (
 const (
 	CanceledCode int32 = 10000
 	TimeoutCode  int32 = 10001
+	// RequestCanceledCode is the code of ErrRequestCanceled: a request an
+	// operator stopped with CancelRequests.
+	RequestCanceledCode int32 = 3002
 )
 
 type ErrorType int32
@@ -339,7 +342,7 @@ var (
 	// client that simply went away, and from ErrSegcoreFollyCancel (2038), which
 	// is a QueryNode-internal signal. Non-retriable: the request was stopped on
 	// purpose, so an SDK must not re-issue it.
-	ErrRequestCanceled = newMilvusError("request canceled", 3002, false)
+	ErrRequestCanceled = newMilvusError("request canceled", RequestCanceledCode, false)
 	ErrRequestNotFound = newMilvusError("request not found", 3003, false, WithErrorType(InputError))
 )
 
