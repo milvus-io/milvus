@@ -101,6 +101,32 @@ func ResolveSnapshotImportStorage(ctx context.Context, cm storage.ChunkManager,
 	return resolved.ForeignCM, resolved.ForeignStorageConfig, nil
 }
 
+// snapshotReadEnd resolves the inclusive end timestamp that cuts one snapshot
+// source file or delete scope: the lower of the job's single end_ts and the
+// source channel's per-PChannel bound. Data and deletes use the same bound so
+// the imported state ends exactly where replication resumes: post-bound rows
+// are not imported, and post-bound deletes are not applied early. Jobs without
+// the per-PChannel option keep the job's end_ts and never decode JSON; the
+// option is parsed at reader creation, not per row.
+func snapshotReadEnd(options Options, jobEnd uint64, sourceChannel string) (uint64, error) {
+	bounds, err := GetSnapshotPChannelEndTs(options)
+	if err != nil {
+		return 0, err
+	}
+	if len(bounds) == 0 {
+		return jobEnd, nil
+	}
+	if sourceChannel == "" {
+		return 0, merr.WrapErrServiceInternalMsg("snapshot import carries per-PChannel end bounds but the file names no source channel")
+	}
+	end, ok := SnapshotPChannelEnd(bounds, sourceChannel)
+	if !ok {
+		return 0, merr.WrapErrServiceInternalMsg("snapshot import carries no end bound for source channel %s", sourceChannel)
+	}
+
+	return min(jobEnd, end), nil
+}
+
 // ValidateSnapshotImportFiles runs on expanded/persisted input, not on the
 // public metadata URI. Losing the descriptor must fail even on an old ACK path
 // that preserves only the deliberately empty legacy paths.
