@@ -2982,6 +2982,7 @@ ChunkedSegmentSealedImpl::load_column_group_data_internal(
                 GroupChunkType::DEFAULT,
                 field_metas,
                 column_group_info,
+                fs,
                 std::move(insert_files),
                 std::move(metadata.row_group_meta_list),
                 info.enable_mmap,
