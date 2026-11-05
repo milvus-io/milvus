@@ -790,6 +790,45 @@ func TestReadFragmentsFromManifest_FiltersColumns(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to parse manifest path")
 }
 
+func TestManifestMissingColumns(t *testing.T) {
+	readErr := merr.WrapErrServiceUnavailableMsg("manifest read unavailable")
+	for _, tc := range []struct {
+		name    string
+		columns []string
+		groups  []manifestColumnGroup
+		err     error
+		want    []string
+	}{
+		{name: "empty request"},
+		{name: "empty manifest", columns: []string{"101", "text"}, want: []string{"101", "text"}},
+		{
+			name: "columns across groups", columns: []string{"101", "text"},
+			groups: []manifestColumnGroup{{Columns: []string{"text"}}, {Columns: []string{"101"}}},
+		},
+		{
+			name: "missing order and deduplication", columns: []string{"b", "101", "a", "b"},
+			groups: []manifestColumnGroup{{Columns: []string{"101", "unrequested"}}}, want: []string{"b", "a"},
+		},
+		{name: "read error", columns: []string{"101"}, err: readErr},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			read := mockey.Mock(readColumnGroupsFromManifest).Return(tc.groups, tc.err).Build()
+			defer read.UnPatch()
+			missing, err := ManifestMissingColumns("pinned-manifest", nil, tc.columns)
+			require.ErrorIs(t, err, tc.err)
+			require.Equal(t, tc.want, missing)
+			reads := 1
+			if len(tc.columns) == 0 {
+				reads = 0
+			}
+			require.Equal(t, reads, read.Times())
+			has, err := ManifestHasColumns("pinned-manifest", nil, tc.columns)
+			require.ErrorIs(t, err, tc.err)
+			require.Equal(t, tc.err == nil && len(tc.want) == 0, has)
+		})
+	}
+}
+
 func TestMarshalUnmarshalManifestPath(t *testing.T) {
 	original := "/base/path/to/manifest"
 	version := int64(42)
