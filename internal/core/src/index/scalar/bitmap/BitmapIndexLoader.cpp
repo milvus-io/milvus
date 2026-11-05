@@ -1138,12 +1138,12 @@ BitmapIndexLoader::LoadStorage(OpenedIndexSource& source,
         context);
 }
 
-folly::coro::Task<IndexPtr>
+IndexPtr
 BitmapIndexLoader::Load(milvus::OpContext* context,
                         const IndexCacheConfig& cache) {
     AssertInfo(source_.has_value(),
                "cached bitmap construction consumed this loader");
-    co_return DispatchBitmapType<IndexPtr>(
+    return DispatchBitmapType<IndexPtr>(
         state_->params.value_type, [&]<typename T>() {
             return state_->layout == BitmapLayout::Roaring
                        ? LoadTyped<T, roaring::Roaring>(context, cache)

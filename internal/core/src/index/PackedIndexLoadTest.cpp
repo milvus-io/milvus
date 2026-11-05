@@ -558,10 +558,8 @@ TEST(ScalarIndexV3AsyncTest, InvertedCancelledDirectReadCanRetry) {
         folly::CancellationSource cancellation;
         OpContext context(cancellation.getToken());
         auto loading = std::async(std::launch::async, [&] {
-            return folly::coro::blockingWait(
-                       loader->Load(
-                           &context,
-                           milvus::index::test::TestIndexCacheConfig()))
+            return loader
+                ->Load(&context, milvus::index::test::TestIndexCacheConfig())
                 ->CreateReader(nullptr);
         });
         auto drain = folly::makeGuard([&] {
@@ -584,9 +582,8 @@ TEST(ScalarIndexV3AsyncTest, InvertedCancelledDirectReadCanRetry) {
         OpContext retry;
         loader = run(InvertedIndexLoader::Create(
             OpenedIndexSource{PackedIndexSource{source}}, options));
-        auto reader = folly::coro::blockingWait(
-                          loader->Load(&retry, TestIndexCacheConfig()))
-                          ->CreateReader(nullptr);
+        auto reader =
+            loader->Load(&retry, TestIndexCacheConfig())->CreateReader(nullptr);
         ASSERT_NE(reader, nullptr);
         const auto* pattern =
             dynamic_cast<const IPatternMatchReader*>(reader.get());
@@ -707,10 +704,8 @@ CheckControlledPackedLoad(bool cancel_first) {
         folly::CancellationSource cancel;
         OpContext context(cancel.getToken());
         auto loading = std::async(std::launch::async, [&] {
-            return folly::coro::blockingWait(
-                       loader->Load(
-                           &context,
-                           milvus::index::test::TestIndexCacheConfig()))
+            return loader
+                ->Load(&context, milvus::index::test::TestIndexCacheConfig())
                 ->CreateReader(nullptr);
         });
         auto drain = folly::makeGuard([&] {
@@ -744,8 +739,7 @@ CheckControlledPackedLoad(bool cancel_first) {
             OpContext retry_context;
             loader = run(SortedIndexLoader::Create(
                 OpenedIndexSource{PackedIndexSource{source}}, options));
-            reader = folly::coro::blockingWait(
-                         loader->Load(&retry_context, TestIndexCacheConfig()))
+            reader = loader->Load(&retry_context, TestIndexCacheConfig())
                          ->CreateReader(nullptr);
         } else {
             reader = loading.get();
@@ -846,8 +840,7 @@ TEST(ScalarIndexV3LoadTest,
             OpContext first_context(first.getToken());
             // Low-priority warmup uses direct I/O; request readers reuse the cell.
             first_context.runtime_load_priority = 1;
-            auto index = folly::coro::blockingWait(
-                loader->Load(&first_context, TestIndexCacheConfig()));
+            auto index = loader->Load(&first_context, TestIndexCacheConfig());
             auto reader1 = index->CreateReader(&first_context);
             reader1->Prefetch();
             first.requestCancellation();

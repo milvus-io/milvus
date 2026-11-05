@@ -486,7 +486,7 @@ VectorMemLoader::Create(OpenedIndexSource source,
     co_return loader;
 }
 
-folly::coro::Task<IndexPtr>
+IndexPtr
 VectorMemLoader::Load(milvus::OpContext* context,
                       const IndexCacheConfig& cache) {
     AssertInfo(source_.has_value(),
@@ -506,10 +506,10 @@ VectorMemLoader::Load(milvus::OpContext* context,
             std::make_unique<SingleCellIndexStorageTranslator<KnowhereEngine>>(
                 cache, use_async, std::move(load)),
             context);
-    co_return std::make_shared<VectorIndex>(std::move(slot),
-                                            params.physical_type,
-                                            params.index_type,
-                                            params.metric_type);
+    return std::make_shared<VectorIndex>(std::move(slot),
+                                         params.physical_type,
+                                         params.index_type,
+                                         params.metric_type);
 }
 
 ReaderCaps

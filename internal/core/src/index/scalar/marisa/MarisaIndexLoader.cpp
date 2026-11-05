@@ -537,7 +537,7 @@ MarisaIndexLoader::Create(OpenedIndexSource source,
     co_return loader;
 }
 
-folly::coro::Task<IndexPtr>
+IndexPtr
 MarisaIndexLoader::Load(milvus::OpContext* context,
                         const IndexCacheConfig& cache) {
     AssertInfo(source_.has_value(),
@@ -581,10 +581,9 @@ MarisaIndexLoader::Load(milvus::OpContext* context,
     auto index =
         std::make_shared<MarisaIndex>(std::move(slot), value_type, count);
     if (auto spec = JsonProjectedSpec(options_.params, count)) {
-        co_return JsonPathIndex::FromStorage(std::move(index),
-                                             std::move(*spec));
+        return JsonPathIndex::FromStorage(std::move(index), std::move(*spec));
     }
-    co_return index;
+    return index;
 }
 
 folly::coro::Task<std::unique_ptr<MarisaIndexStorage>>

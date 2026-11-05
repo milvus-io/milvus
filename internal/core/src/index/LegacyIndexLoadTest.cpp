@@ -1027,8 +1027,7 @@ TEST_F(LegacyIndexLoadTest, CreateKeepsMetadataForIndependentRequestReaders) {
         opening.requestCancellation();
         folly::CancellationSource first;
         OpContext first_context(first.getToken());
-        auto index = folly::coro::blockingWait(
-            loader->Load(nullptr, TestIndexCacheConfig()));
+        auto index = loader->Load(nullptr, TestIndexCacheConfig());
         auto reader1 = index->CreateReader(&first_context);
         reader1->Prefetch();
         first.requestCancellation();
@@ -1110,17 +1109,14 @@ TEST_F(LegacyIndexLoadTest, CancelledConstructionCanRecreateLoader) {
     cancelled.requestCancellation();
     OpContext rejected(cancelled.getToken());
     ExpectError(FollyCancel, [&] {
-        folly::coro::blockingWait(
-            loader->Load(&rejected,
-                         milvus::index::test::TestIndexCacheConfig()))
+        loader->Load(&rejected, milvus::index::test::TestIndexCacheConfig())
             ->CreateReader(nullptr);
     });
     EXPECT_TRUE(std::filesystem::is_empty(staging_));
     loader = Run(loader_entry.create(
         OpenedIndexSource{LegacyIndexSource{source, true}}, options));
     auto reader =
-        folly::coro::blockingWait(loader->Load(nullptr, TestIndexCacheConfig()))
-            ->CreateReader(nullptr);
+        loader->Load(nullptr, TestIndexCacheConfig())->CreateReader(nullptr);
     ASSERT_NE(reader, nullptr);
     EXPECT_EQ(reader->Count(), 4);
 }
@@ -1605,7 +1601,7 @@ TEST_F(LegacyIndexLoadTest, MidReadCancellationDrainsThenRetriesSameSlot) {
         auto cache = TestIndexCacheConfig();
         cache.meta.cache_warmup_policy =
             CacheWarmupPolicy::CacheWarmupPolicy_Disable;
-        auto index = folly::coro::blockingWait(loader->Load(nullptr, cache));
+        auto index = loader->Load(nullptr, cache);
         auto file = DataFile();
         ASSERT_NE(file, nullptr);
         file->ResetCounters();

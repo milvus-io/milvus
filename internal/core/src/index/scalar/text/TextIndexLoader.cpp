@@ -464,7 +464,7 @@ TextIndexLoader::Create(OpenedIndexSource source,
     co_return loader;
 }
 
-folly::coro::Task<IndexPtr>
+IndexPtr
 TextIndexLoader::Load(milvus::OpContext* context,
                       const IndexCacheConfig& cache) {
     AssertInfo(source_.has_value(),
@@ -495,7 +495,7 @@ TextIndexLoader::Load(milvus::OpContext* context,
                 SingleCellIndexStorageTranslator<TextIndexStorage>>(
                 cache, use_async, std::move(load)),
             context);
-    co_return std::make_shared<TextIndex>(std::move(slot), metadata);
+    return std::make_shared<TextIndex>(std::move(slot), metadata);
 }
 
 folly::coro::Task<std::unique_ptr<TextIndexStorage>>

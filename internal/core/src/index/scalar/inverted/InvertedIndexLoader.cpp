@@ -638,12 +638,12 @@ InvertedIndexLoader::LoadStorage(OpenedIndexSource& source,
         context);
 }
 
-folly::coro::Task<IndexPtr>
+IndexPtr
 InvertedIndexLoader::Load(milvus::OpContext* context,
                           const IndexCacheConfig& cache) {
     AssertInfo(source_.has_value(),
                "cached inverted construction consumed this loader");
-    co_return DispatchInvertedType<IndexPtr>(
+    return DispatchInvertedType<IndexPtr>(
         ParseRuntimeParams(options_.params).value_type,
         [&]<typename T>() { return LoadTyped<T>(context, cache); });
 }

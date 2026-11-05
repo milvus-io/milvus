@@ -231,8 +231,7 @@ LoaderEntry::Load(IndexLoadRequest request) const {
                             std::move(prepare)))
                       : folly::coro::blockingWait(std::move(prepare));
     // Synchronous warmup must not block the executor that loads its cells.
-    return folly::coro::blockingWait(folly::coro::co_withCancellation(
-        OperationCancellationToken(context), loader->Load(context, cache)));
+    return loader->Load(context, cache);
 }
 
 }  // namespace milvus::index

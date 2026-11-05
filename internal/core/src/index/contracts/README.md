@@ -190,7 +190,9 @@ Neither method implicitly performs serialize/load or other I/O. A caller that ne
 persistence and direct queries must finish persisting before consuming the Artifact.
 
 `LoaderEntry::Load` opens the persisted source, then calls `LoaderEntry::create` to create the
-internal `IndexLoader` and completes `Load`, returning an `IndexPtr`. Every persisted load
+internal `IndexLoader`. After asynchronous preparation completes, its synchronous `Load`
+constructs the Index and cache slot, returning an `IndexPtr`; synchronous warmup may load storage
+before returning. Every persisted load
 requires an explicit `IndexCacheConfig`; the Index owns the resulting Storage/Engine cache slot.
 The loader consumes its prepared source once, including when construction fails. Recreate the
 loader to retry construction; a successfully constructed slot retains its source for later loads

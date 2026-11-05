@@ -56,7 +56,7 @@ class VectorMemLoader final : public IndexLoader {
     Create(OpenedIndexSource source, storage::LoadOptions options);
 
     /** @copydoc IndexLoader::Load */
-    folly::coro::Task<IndexPtr>
+    IndexPtr
     Load(milvus::OpContext* context, const IndexCacheConfig& cache) override;
 
  private:

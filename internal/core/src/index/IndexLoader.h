@@ -16,7 +16,6 @@
 
 #pragma once
 
-#include "folly/coro/Task.h"
 #include "index/contracts/IIndex.h"
 
 namespace milvus {
@@ -35,8 +34,8 @@ struct IndexCacheConfig;
  * exposes no storage-format properties or partially completed source-opening
  * steps.
  * External loading consumers use LoaderEntry::Load instead of this interface.
- * @note Load consumes the prepared source once. Keep the loader alive until
- * its task finishes. A returned Index owns its cache and reload source independently.
+ * @note Load consumes the prepared source once. A returned Index owns its cache
+ * and reload source independently.
  */
 class IndexLoader {
  public:
@@ -45,18 +44,15 @@ class IndexLoader {
     /**
      * @brief Consume the prepared source and create an index with its storage cache.
      * @param context Borrowed for this call only; nullptr uses default priority
-     * and inherited coroutine cancellation. Keep it alive through completion.
-     * @param cache Required storage cache policy. Construction consumes the
-     * prepared source, including on failure. Keep cache alive through completion;
+     * and no request cancellation.
+     * @param cache Required storage cache policy, borrowed for this call.
+     * Construction consumes the prepared source, including on failure;
      * do not reuse the loader afterward.
      * @return An index owning its cache and reload source.
-     * @note On failure, issued I/O drains and temporary targets are cleaned up
-     * before the exception propagates. Recreate the loader to retry construction.
-     * @note A Task does not imply a thread hop. Synchronous transport executes
-     * on the calling thread; asynchronous implementations preserve I/O
-     * scheduling.
+     * @note Synchronous warmup may perform I/O before returning. Recreate the
+     * loader to retry construction after failure.
      */
-    virtual folly::coro::Task<IndexPtr>
+    virtual IndexPtr
     Load(milvus::OpContext* context, const IndexCacheConfig& cache) = 0;
 };
 

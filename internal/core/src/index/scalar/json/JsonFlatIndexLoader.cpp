@@ -459,7 +459,7 @@ JsonFlatIndexLoader::Create(OpenedIndexSource source,
     co_return loader;
 }
 
-folly::coro::Task<IndexPtr>
+IndexPtr
 JsonFlatIndexLoader::Load(milvus::OpContext* context,
                           const IndexCacheConfig& cache) {
     AssertInfo(source_.has_value(),
@@ -489,7 +489,7 @@ JsonFlatIndexLoader::Load(milvus::OpContext* context,
                     SingleCellIndexStorageTranslator<JsonFlatIndexStorage>>(
                     cache, use_async, std::move(load)),
                 context);
-    co_return std::make_shared<JsonFlatIndex>(
+    return std::make_shared<JsonFlatIndex>(
         std::move(slot), count, runtime.nested_path);
 }
 

@@ -377,7 +377,7 @@ RTreeIndexLoader::Create(OpenedIndexSource source,
     co_return loader;
 }
 
-folly::coro::Task<IndexPtr>
+IndexPtr
 RTreeIndexLoader::Load(milvus::OpContext* context,
                        const IndexCacheConfig& cache) {
     AssertInfo(source_.has_value(),
@@ -400,7 +400,7 @@ RTreeIndexLoader::Load(milvus::OpContext* context,
             std::make_unique<SingleCellIndexStorageTranslator<RTreeIndexState>>(
                 cache, use_async, std::move(load)),
             context);
-    co_return std::make_shared<RTreeIndex>(std::move(slot), count);
+    return std::make_shared<RTreeIndex>(std::move(slot), count);
 }
 
 folly::coro::Task<std::unique_ptr<RTreeIndexState>>

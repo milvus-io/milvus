@@ -944,17 +944,17 @@ SortedIndexLoader::LoadStorage(OpenedIndexSource& source,
         context);
 }
 
-folly::coro::Task<IndexPtr>
+IndexPtr
 SortedIndexLoader::Load(milvus::OpContext* context,
                         const IndexCacheConfig& cache) {
     AssertInfo(source_.has_value(),
                "cached sorted construction consumed this loader");
     if (IsStringDataType(state_->params.value_type)) {
-        co_return LoadTyped<std::string_view>(context, cache);
+        return LoadTyped<std::string_view>(context, cache);
     }
-    co_return DispatchPackedNumeric(
-        state_->params.value_type,
-        [&]<typename T>() { return LoadTyped<T>(context, cache); });
+    return DispatchPackedNumeric(state_->params.value_type, [&]<typename T>() {
+        return LoadTyped<T>(context, cache);
+    });
 }
 
 ReaderCaps

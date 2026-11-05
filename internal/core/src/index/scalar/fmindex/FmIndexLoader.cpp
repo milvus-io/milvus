@@ -304,7 +304,7 @@ FmIndexLoader::Create(OpenedIndexSource source, storage::LoadOptions options) {
     co_return loader;
 }
 
-folly::coro::Task<IndexPtr>
+IndexPtr
 FmIndexLoader::Load(milvus::OpContext* context, const IndexCacheConfig& cache) {
     AssertInfo(source_.has_value(),
                "cached FM-index construction consumed this loader");
@@ -326,7 +326,7 @@ FmIndexLoader::Load(milvus::OpContext* context, const IndexCacheConfig& cache) {
             std::make_unique<SingleCellIndexStorageTranslator<FmIndexStorage>>(
                 cache, use_async, std::move(load)),
             context);
-    co_return std::make_shared<FmIndex>(
+    return std::make_shared<FmIndex>(
         std::move(slot),
         metadata.runtime.value_type,
         metadata.total_rows,
