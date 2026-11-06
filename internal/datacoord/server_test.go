@@ -42,7 +42,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
-	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
@@ -957,18 +956,7 @@ func TestGetSegmentsByStates(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-		mixCoord := mocks.NewMixCoord(t)
-		svr.mixCoord = mixCoord
 		channelName := "ch"
-		mixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-			return &milvuspb.DescribeCollectionResponse{
-				Status:              merr.Success(),
-				CollectionName:      "test_collection",
-				CollectionID:        req.CollectionID,
-				Schema:              &schemapb.CollectionSchema{},
-				VirtualChannelNames: []string{fmt.Sprintf("%s%d", channelName, req.CollectionID)},
-			}, nil
-		})
 
 		type testCase struct {
 			collID          int64
@@ -1021,9 +1009,10 @@ func TestGetSegmentsByStates(t *testing.T) {
 			},
 		}
 		svr.meta.AddCollection(&meta.CollectionInfo{
-			ID:         1,
-			Partitions: []int64{1, 2},
-			Schema:     nil,
+			ID:            1,
+			Partitions:    []int64{1, 2},
+			Schema:        &schemapb.CollectionSchema{Name: "test_collection"},
+			VChannelNames: []string{fmt.Sprintf("%s%d", channelName, 1)},
 			StartPositions: []*commonpb.KeyDataPair{
 				{
 					Key:  "ch1",
@@ -1032,9 +1021,10 @@ func TestGetSegmentsByStates(t *testing.T) {
 			},
 		})
 		svr.meta.AddCollection(&meta.CollectionInfo{
-			ID:         2,
-			Partitions: []int64{3},
-			Schema:     nil,
+			ID:            2,
+			Partitions:    []int64{3},
+			Schema:        &schemapb.CollectionSchema{Name: "test_collection"},
+			VChannelNames: []string{fmt.Sprintf("%s%d", channelName, 2)},
 			StartPositions: []*commonpb.KeyDataPair{
 				{
 					Key:  "ch1",
@@ -1589,6 +1579,11 @@ func TestGetRecoveryInfo(t *testing.T) {
 		mockHandler := meta.NewNMockHandler(t)
 		mockHandler.EXPECT().GetQueryVChanPositions(mock.Anything, mock.Anything).Return(&datapb.VchannelInfo{})
 		svr.handler = mockHandler
+		svr.meta.AddCollection(&meta.CollectionInfo{
+			ID:            0,
+			Schema:        meta.NewTestSchema(),
+			VChannelNames: []string{"vchan1"},
+		})
 
 		req := &datapb.GetRecoveryInfoRequest{
 			CollectionID: 0,
@@ -1633,7 +1628,8 @@ func TestGetRecoveryInfo(t *testing.T) {
 			return meta.NewMockMixCoord(), nil
 		}
 		svr.meta.AddCollection(&meta.CollectionInfo{
-			Schema: meta.NewTestSchema(),
+			Schema:        meta.NewTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1738,8 +1734,9 @@ func TestGetRecoveryInfo(t *testing.T) {
 			return meta.NewMockMixCoord(), nil
 		}
 		svr.meta.AddCollection(&meta.CollectionInfo{
-			ID:     0,
-			Schema: meta.NewTestSchema(),
+			ID:            0,
+			Schema:        meta.NewTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1919,8 +1916,9 @@ func TestGetRecoveryInfo(t *testing.T) {
 			return meta.NewMockMixCoord(), nil
 		}
 		svr.meta.AddCollection(&meta.CollectionInfo{
-			ID:     0,
-			Schema: meta.NewTestSchema(),
+			ID:            0,
+			Schema:        meta.NewTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1963,8 +1961,9 @@ func TestGetRecoveryInfo(t *testing.T) {
 			return meta.NewMockMixCoord(), nil
 		}
 		svr.meta.AddCollection(&meta.CollectionInfo{
-			ID:     0,
-			Schema: meta.NewTestSchema(),
+			ID:            0,
+			Schema:        meta.NewTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -2002,8 +2001,9 @@ func TestGetRecoveryInfo(t *testing.T) {
 			return meta.NewMockMixCoord(), nil
 		}
 		svr.meta.AddCollection(&meta.CollectionInfo{
-			ID:     0,
-			Schema: meta.NewTestSchema(),
+			ID:            0,
+			Schema:        meta.NewTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -3272,45 +3272,6 @@ func Test_initGarbageCollection(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid port")
 	})
-}
-
-func TestLoadCollectionFromRootCoord(t *testing.T) {
-	for _, tc := range []struct {
-		name          string
-		describeErr   error
-		partitionsErr error
-	}{
-		{name: "missing", describeErr: merr.ErrCollectionNotFound},
-		{name: "describe unavailable", describeErr: merr.ErrServiceUnavailable},
-		{name: "partition metadata unavailable", partitionsErr: merr.ErrServiceUnavailable},
-		{name: "restoring collection is internally loadable"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			mockey.PatchConvey(tc.name, t, func() {
-				b := &broker.MockBroker{}
-				public := mockey.Mock((*broker.MockBroker).HasCollection).Return(false, nil).Build()
-				mockey.Mock((*broker.MockBroker).DescribeCollectionInternal).Return(&milvuspb.DescribeCollectionResponse{
-					CollectionID: 1, VirtualChannelNames: []string{"target"},
-				}, tc.describeErr).Build()
-				mockey.Mock((*broker.MockBroker).ShowPartitionsInternal).Return([]int64{2000}, tc.partitionsErr).Build()
-				s := &Server{broker: b, meta: meta.NewEmptyTestMeta()}
-				err := s.loadCollectionFromRootCoord(t.Context(), 1)
-				switch {
-				case tc.describeErr != nil:
-					assert.ErrorIs(t, err, tc.describeErr)
-				case tc.partitionsErr != nil:
-					assert.ErrorIs(t, err, tc.partitionsErr)
-				default:
-					assert.NoError(t, err)
-					coll := s.meta.GetCollection(1)
-					require.NotNil(t, coll)
-					assert.Equal(t, []int64{2000}, coll.Partitions)
-					assert.Equal(t, []string{"target"}, coll.VChannelNames)
-				}
-				assert.Zero(t, public.Times(), "public visibility must not gate internal metadata loading")
-			})
-		})
-	}
 }
 
 func TestUpdateAutoBalanceConfigLoop(t *testing.T) {

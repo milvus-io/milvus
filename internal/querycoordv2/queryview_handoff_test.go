@@ -11,7 +11,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord"
+	"github.com/milvus-io/milvus/internal/metacache"
 	catalogkv "github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
@@ -51,7 +53,11 @@ func newHandoffServer(t *testing.T) (*Server, func(string, int64)) {
 	resourcePatch := mockey.Mock(qvresource.Resource).Return(runtime.resources).Build()
 	t.Cleanup(func() { resourcePatch.UnPatch() })
 	t.Cleanup(runtime.readyChanges.Close)
-	s := &Server{qviewsRuntime: runtime, broker: &meta.CoordinatorBroker{}}
+	s := &Server{
+		qviewsRuntime: runtime,
+		broker:        &meta.CoordinatorBroker{},
+		meta:          newViewMeta(&metacache.CollectionInfo{ID: 1, VChannelNames: []string{"v0", "v1"}, Schema: &schemapb.CollectionSchema{}}),
+	}
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	var mu sync.Mutex
 	stats := map[qviews.ShardID]*coordview.ShardStats{}

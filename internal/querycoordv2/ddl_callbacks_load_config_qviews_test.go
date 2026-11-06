@@ -46,15 +46,10 @@ import (
 
 func TestLoadCollectionBroadcastsLoadConfigToControlChannel(t *testing.T) {
 	ctx := context.Background()
-	server, catalog, broker := newLoadConfigQViewsServer(t)
+	server, catalog, _ := newLoadConfigQViewsServer(t)
 	collectionID := int64(100)
 	vchannels := []string{"v0", "v1"}
-	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
-		Return(testDescribeCollection(collectionID, vchannels), nil).Twice()
-	broker.EXPECT().GetPartitions(mock.Anything, collectionID).
-		Return([]int64{10, 20}, nil).Once()
-	broker.EXPECT().GetCollectionLoadInfo(mock.Anything, collectionID).
-		Return([]string{meta.DefaultResourceGroupName}, int64(1), nil).Once()
+	putTestCollection(server, testDescribeCollection(collectionID, vchannels), 10, 20)
 
 	var captured message.BroadcastMutableMessage
 	registerCaptureBroadcast(t, func(msg message.BroadcastMutableMessage) {
@@ -74,13 +69,10 @@ func TestLoadCollectionBroadcastsLoadConfigToControlChannel(t *testing.T) {
 
 func TestLoadPartitionsBroadcastsLoadConfigToControlChannel(t *testing.T) {
 	ctx := context.Background()
-	server, _, broker := newLoadConfigQViewsServer(t)
+	server, _, _ := newLoadConfigQViewsServer(t)
 	collectionID := int64(100)
 	vchannels := []string{"v0", "v1"}
-	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
-		Return(testDescribeCollection(collectionID, vchannels), nil).Twice()
-	broker.EXPECT().GetCollectionLoadInfo(mock.Anything, collectionID).
-		Return([]string{meta.DefaultResourceGroupName}, int64(1), nil).Once()
+	putTestCollection(server, testDescribeCollection(collectionID, vchannels), 10, 20)
 
 	var captured message.BroadcastMutableMessage
 	registerCaptureBroadcast(t, func(msg message.BroadcastMutableMessage) {
@@ -99,7 +91,7 @@ func TestLoadPartitionsBroadcastsLoadConfigToControlChannel(t *testing.T) {
 
 func TestReleaseCollectionUsesQViewsLoadConfigAsLoadedSource(t *testing.T) {
 	ctx := context.Background()
-	server, _, broker := newLoadConfigQViewsServer(t)
+	server, _, _ := newLoadConfigQViewsServer(t)
 	collectionID := int64(100)
 	vchannels := []string{"v0", "v1"}
 	require.NoError(t, server.qviewsRuntime.loadConfigStore.Put(ctx, &loadmgr.LoadConfig{
@@ -112,8 +104,7 @@ func TestReleaseCollectionUsesQViewsLoadConfigAsLoadedSource(t *testing.T) {
 	}))
 	require.False(t, server.meta.Exist(ctx, collectionID))
 
-	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
-		Return(testDescribeCollection(collectionID, vchannels), nil).Twice()
+	putTestCollection(server, testDescribeCollection(collectionID, vchannels), 10, 20)
 	var captured message.BroadcastMutableMessage
 	registerCaptureBroadcast(t, func(msg message.BroadcastMutableMessage) {
 		captured = msg
@@ -130,7 +121,7 @@ func TestReleaseCollectionUsesQViewsLoadConfigAsLoadedSource(t *testing.T) {
 
 func TestReleasePartitionsDropLoadConfigBroadcastsToControlChannel(t *testing.T) {
 	ctx := context.Background()
-	server, _, broker := newLoadConfigQViewsServer(t)
+	server, _, _ := newLoadConfigQViewsServer(t)
 	collectionID := int64(100)
 	vchannels := []string{"v0", "v1"}
 	require.NoError(t, server.qviewsRuntime.loadConfigStore.Put(ctx, &loadmgr.LoadConfig{
@@ -138,8 +129,7 @@ func TestReleasePartitionsDropLoadConfigBroadcastsToControlChannel(t *testing.T)
 		PartitionIDs: []int64{10},
 	}))
 
-	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
-		Return(testDescribeCollection(collectionID, vchannels), nil).Twice()
+	putTestCollection(server, testDescribeCollection(collectionID, vchannels), 10, 20)
 	var captured message.BroadcastMutableMessage
 	registerCaptureBroadcast(t, func(msg message.BroadcastMutableMessage) {
 		captured = msg
@@ -189,7 +179,8 @@ func newLoadConfigQViewsServer(t *testing.T, configure ...func(*loadmgr.LoadConf
 	var nextID atomic.Int64
 	nextID.Store(999)
 	allocateID := func() (int64, error) { return nextID.Add(1), nil }
-	m := meta.NewMeta(allocateID, catalog, nodeMgr, metacache.NewMetaStore(nil))
+	store := metacache.NewMetaStore(nil)
+	m := meta.NewMeta(allocateID, catalog, nodeMgr, store)
 	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:  1,
 		Address: "localhost",
@@ -202,6 +193,7 @@ func newLoadConfigQViewsServer(t *testing.T, configure ...func(*loadmgr.LoadConf
 	t.Cleanup(usage.close)
 	return &Server{
 		meta:            m,
+		metaView:        store,
 		idAllocator:     allocateID,
 		broker:          broker,
 		qviewsRuntime:   runtime,
@@ -225,6 +217,19 @@ func registerCaptureBroadcast(t *testing.T, capture func(message.BroadcastMutabl
 	broadcast.ResetBroadcaster()
 	broadcast.Register(mb)
 	t.Cleanup(broadcast.ResetBroadcaster)
+}
+
+// putTestCollection publishes coll and its partitions to the server's
+// collection view, as RootCoord would.
+func putTestCollection(s *Server, coll *milvuspb.DescribeCollectionResponse, partitions ...int64) {
+	s.metaView.(metacache.MetaStore).PutCollection(&metacache.CollectionInfo{
+		ID:            coll.GetCollectionID(),
+		Schema:        coll.GetSchema(),
+		Partitions:    partitions,
+		VChannelNames: coll.GetVirtualChannelNames(),
+		DatabaseName:  coll.GetDbName(),
+		DatabaseID:    coll.GetDbId(),
+	})
 }
 
 func testDescribeCollection(collectionID int64, vchannels []string) *milvuspb.DescribeCollectionResponse {

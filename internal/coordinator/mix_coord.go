@@ -232,6 +232,15 @@ func (s *mixCoordImpl) initInternal() error {
 	}
 	s.fileResourceObserver.InitProxy(s.rootcoordServer.GetProxyClientManager())
 
+	// RootCoord's MetaTable, loaded in Init, owns collection metadata.
+	// DataCoord and QueryCoord read it through the shared MetaStore.
+	collectionSource, err := s.rootcoordServer.CollectionSource()
+	if err != nil {
+		mlog.Error(s.ctx, "rootCoord collection source unavailable", mlog.Err(err))
+		return err
+	}
+	s.metaStore.SetCollectionSource(collectionSource)
+
 	if err := s.rootcoordServer.Start(); err != nil {
 		mlog.Error(s.ctx, "rootCoord start failed", mlog.Err(err))
 		return err
@@ -585,11 +594,6 @@ func (s *mixCoordImpl) DropCollection(ctx context.Context, req *milvuspb.DropCol
 
 func (s *mixCoordImpl) HasCollection(ctx context.Context, req *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	return s.rootcoordServer.HasCollection(ctx, req)
-}
-
-// IsCollectionAvailable is an in-process, positive-only GC fast path.
-func (s *mixCoordImpl) IsCollectionAvailable(collectionID int64) bool {
-	return s.rootcoordServer.IsCollectionAvailable(collectionID)
 }
 
 func (s *mixCoordImpl) DescribeCollection(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {

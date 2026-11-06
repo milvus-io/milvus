@@ -9,10 +9,9 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	catalogkv "github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
-	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -96,10 +95,9 @@ func TestReleasePartitionsWaitsForHandoff(t *testing.T) {
 func TestReleasePartitionsRepeatedFullReleaseWaits(t *testing.T) {
 	s := newReleaseTestServer(t)
 	manager := s.qviewsRuntime.shardViewRegistry.Ensure(qviews.ShardID{ReplicaID: 1, VChannel: "p_100v0"})
-	s.broker = &meta.CoordinatorBroker{}
+	s.meta = newViewMeta(&metacache.CollectionInfo{ID: 100})
 	patches := []*mockey.Mocker{
 		mockey.Mock((*Server).startBroadcastWithCollectionIDLock).Return(stubBroadcaster{}, nil).Build(),
-		mockey.Mock((*meta.CoordinatorBroker).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{CollectionID: 100}, nil).Build(),
 		mockey.Mock((*Server).getCurrentLoadConfig).Return(job.CurrentLoadConfig{}).Build(),
 	}
 	for _, patch := range patches {

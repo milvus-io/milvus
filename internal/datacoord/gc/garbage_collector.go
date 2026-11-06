@@ -33,7 +33,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/analyze"
-	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/copysegment"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
@@ -67,7 +66,6 @@ type GcOption struct {
 	ScanInterval     time.Duration        // interval for scan residue for interupted log wrttien
 
 	StreamingNodeCatalog metastore.StreamingNodeCataLog
-	Broker               broker.Broker
 	RemoveObjectPool     *conc.Pool[struct{}]
 	DataViewGC           DataViewGarbageCollector
 
@@ -999,7 +997,7 @@ func (gc *GarbageCollector) recycleDataViews(ctx context.Context, signal <-chan 
 	logger.Info(ctx, "start recycleDataViews")
 	defer func() { logger.Info(ctx, "recycleDataViews done", mlog.Duration("timeCost", time.Since(start))) }()
 
-	for _, collection := range gc.Meta.GetCollections() {
+	for _, collection := range gc.Meta.GetAllCollections() {
 		if ctx.Err() != nil {
 			return
 		}
@@ -1575,7 +1573,6 @@ func (gc *GarbageCollector) RecycleChannelCPMeta(ctx context.Context, signal <-c
 		return
 	}
 
-	availability, _ := gc.Option.Broker.(broker.CollectionAvailability)
 	skippedCnt := 0
 	// The checkpoints of collections that may be dropped, by collection: a
 	// dropped collection's checkpoints go together, after the rest of its meta.
@@ -1600,9 +1597,9 @@ func (gc *GarbageCollector) RecycleChannelCPMeta(ctx context.Context, signal <-c
 		if ctx.Err() != nil {
 			return
 		}
-		// A positive resident lookup avoids schema conversion, task scheduling,
-		// per-collection timeouts and retaining live IDs for the entire sweep.
-		if availability != nil && availability.IsCollectionAvailable(collectionID) {
+		// A Dropping collection counts as dropped here: its checkpoints go as
+		// soon as GcConfirm sees its segment meta removed.
+		if gc.Meta.GetCollection(collectionID).IsCreated() {
 			skippedCnt++
 			continue
 		}
@@ -1630,34 +1627,23 @@ func (gc *GarbageCollector) RecycleChannelCPMeta(ctx context.Context, signal <-c
 	mlog.Info(ctx, "GC channel cp done", mlog.Int("skippedChannelCP", skippedCnt))
 }
 
-// collectionRecyclable reports whether RootCoord has dropped the collection and
-// all its segments are recycled, the condition RootCoord uses to remove the
+// collectionRecyclable reports whether all segments of a collection that is
+// no longer Created are recycled, the condition RootCoord uses to remove the
 // collection meta.
 func (gc *GarbageCollector) collectionRecyclable(ctx context.Context, collectionID int64) bool {
-	timeoutCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	has, err := gc.Option.Broker.HasCollection(timeoutCtx, collectionID)
-	cancel()
-	if err != nil || has {
-		// skip checkpoints GC of this cycle if describe collection fails or the collection state is available.
-		mlog.Debug(ctx, "skip channel cp GC, the collection state is available",
-			mlog.Int64("collectionID", collectionID),
-			mlog.Bool("exists", has), mlog.Err(err))
-		return false
-	}
-	// Skip to GC if all segments meta of the corresponding collection are not removed
 	return gc.Meta.MetaStore.GcConfirm(ctx, collectionID, -1)
 }
 
 // recycleDroppedCollection drops what DataCoord still keeps for a collection
 // that RootCoord has dropped and whose segments are all recycled: its segment
-// change groups, its cached collection info and metrics, and the checkpoints
-// of its vChannels. The checkpoints go last: they are what brings GC back to
-// the collection if an earlier step fails.
+// change groups and the checkpoints of its vChannels. The checkpoints go last:
+// they are what brings GC back to the collection if an earlier step fails.
+// RootCoord removes the collection itself, and DataCoord cleans up its
+// metrics on OnCollectionRemoved.
 func (gc *GarbageCollector) recycleDroppedCollection(ctx context.Context, collectionID int64, vChannels []string) error {
 	if err := gc.Meta.DropSegmentChangeGroupsOfCollection(ctx, collectionID); err != nil {
 		return err
 	}
-	gc.Meta.DropCollection(collectionID)
 	var errs []error
 	for _, vChannel := range vChannels {
 		if err := gc.Meta.DropChannelCheckpoint(vChannel); err != nil {
@@ -3022,17 +3008,9 @@ func (gc *GarbageCollector) recycleSnapshots(ctx context.Context, signal <-chan 
 				copysegment.SetSnapshotActivePinsGauge(r.CollectionID, r.SnapshotName, r.ActivePins)
 			}
 
-			// Step 2: if the collection was dropped, cascade-delete orphan snapshots.
-			timeoutCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-			has, err := gc.Option.Broker.HasCollection(timeoutCtx, collectionID)
-			cancel()
-			if err != nil {
-				log.Warn(ctx, "failed to check collection existence for orphan snapshot cleanup",
-					mlog.Int64("collectionID", collectionID),
-					mlog.Err(err))
-				continue
-			}
-			if has {
+			// Step 2: if the collection was dropped, cascade-delete orphan
+			// snapshots. A Dropping collection counts as dropped.
+			if gc.Meta.GetCollection(collectionID).IsCreated() {
 				// Collection still exists, not an orphan — expired pins already reaped above.
 				continue
 			}
