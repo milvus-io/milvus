@@ -834,26 +834,47 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 
 func (node *Proxy) BatchDescribeCollection(ctx context.Context, request *milvuspb.BatchDescribeCollectionRequest) (*milvuspb.BatchDescribeCollectionResponse, error) {
 	collectionNames := request.GetCollectionName()
-	if len(collectionNames) == 0 {
+	collectionIDs := request.GetCollectionID()
+	if len(collectionNames) == 0 && len(collectionIDs) == 0 {
 		return &milvuspb.BatchDescribeCollectionResponse{
-			Status: merr.Status(merr.WrapErrParameterMissingMsg("collection names cannot be empty")),
+			Status: merr.Status(merr.WrapErrParameterMissingMsg("collection names or collection IDs cannot be empty")),
 		}, nil
 	}
 
-	responses := make([]*milvuspb.DescribeCollectionResponse, 0, len(collectionNames))
-
-	for _, collectionName := range collectionNames {
-		describeCollectionRequest := &milvuspb.DescribeCollectionRequest{
-			DbName:         request.GetDbName(),
-			CollectionName: collectionName,
-		}
-
-		describeCollectionResponse, err := node.DescribeCollection(ctx, describeCollectionRequest)
-		// If there's an error, create a response with error status
-		if err != nil {
-			describeCollectionResponse = &milvuspb.DescribeCollectionResponse{
-				Status:         merr.Status(err),
+	// Each collection is described on its own, exactly as a single
+	// DescribeCollection request would. Names take precedence: collection IDs
+	// are used only when no name is given.
+	describeRequests := make([]*milvuspb.DescribeCollectionRequest, 0, len(collectionNames)+len(collectionIDs))
+	if len(collectionNames) > 0 {
+		for _, collectionName := range collectionNames {
+			describeRequests = append(describeRequests, &milvuspb.DescribeCollectionRequest{
+				DbName:         request.GetDbName(),
 				CollectionName: collectionName,
+			})
+		}
+	} else {
+		for _, collectionID := range collectionIDs {
+			describeRequests = append(describeRequests, &milvuspb.DescribeCollectionRequest{
+				DbName:       request.GetDbName(),
+				CollectionID: collectionID,
+			})
+		}
+	}
+
+	responses := make([]*milvuspb.DescribeCollectionResponse, 0, len(describeRequests))
+	for _, describeCollectionRequest := range describeRequests {
+		describeCollectionResponse, err := node.DescribeCollection(ctx, describeCollectionRequest)
+		if err != nil {
+			describeCollectionResponse = &milvuspb.DescribeCollectionResponse{Status: merr.Status(err)}
+		}
+		// A failed entry carries the name or ID it was requested by, so the
+		// caller can tell which collection it is about.
+		if !merr.Ok(describeCollectionResponse.GetStatus()) {
+			if describeCollectionResponse.GetCollectionName() == "" {
+				describeCollectionResponse.CollectionName = describeCollectionRequest.GetCollectionName()
+			}
+			if describeCollectionResponse.GetCollectionID() == 0 {
+				describeCollectionResponse.CollectionID = describeCollectionRequest.GetCollectionID()
 			}
 		}
 		responses = append(responses, describeCollectionResponse)
