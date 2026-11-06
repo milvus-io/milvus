@@ -334,12 +334,38 @@ func TestUpsertPackingDuplicateDeleteOccurrences(t *testing.T) {
 	}
 }
 
-func TestUpsertPreExecuteRejectsNamespaceBeforeMetadata(t *testing.T) {
-	namespace := "tenant"
-	insert, _ := newIdempotentRepackInsertMsg(1)
-	insert.Namespace = &namespace
-	require.ErrorContains(t, (&InsertTask{insertMsg: insert}).PreExecute(context.Background()), "namespace")
-	require.ErrorContains(t, (&UpsertTask{req: &milvuspb.UpsertRequest{Namespace: &namespace}}).PreExecute(context.Background()), "namespace")
+func TestUpsertPreExecuteNamespaceFormatGate(t *testing.T) {
+	for _, enabled := range []string{"false", "true"} {
+		t.Run(enabled, func(t *testing.T) {
+			gate := &paramtable.Get().StreamingCfg.EnableUpsertMessage
+			previous := gate.SwapTempValue(enabled)
+			defer gate.SwapTempValue(previous)
+			for _, operation := range []string{"insert", "upsert"} {
+				t.Run(operation, func(t *testing.T) {
+					cache := NewMockCache(t)
+					expectedError := merr.WrapErrCollectionNotFound("namespace_test")
+					if enabled == "false" {
+						cache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, "namespace_test").Return(int64(0), expectedError).Once()
+					}
+					namespace := "tenant"
+					var err error
+					if operation == "insert" {
+						insert, _ := newIdempotentRepackInsertMsg(1)
+						insert.CollectionName = "namespace_test"
+						insert.Namespace = &namespace
+						err = (&InsertTask{baseTask: baseTask{MetaCache: cache}, insertMsg: insert}).PreExecute(context.Background())
+					} else {
+						err = (&UpsertTask{baseTask: baseTask{MetaCache: cache}, req: &milvuspb.UpsertRequest{CollectionName: "namespace_test", Namespace: &namespace}}).PreExecute(context.Background())
+					}
+					if enabled == "true" {
+						require.ErrorContains(t, err, "Upsert WAL does not support namespace requests")
+					} else {
+						require.ErrorIs(t, err, expectedError)
+					}
+				})
+			}
+		})
+	}
 }
 
 func BenchmarkUpsertSplitScaling(b *testing.B) {

@@ -1982,7 +1982,7 @@ func (it *UpsertTask) deletePreExecute(ctx context.Context) error {
 }
 
 func (it *UpsertTask) PreExecute(ctx context.Context) error {
-	if it.req.Namespace != nil {
+	if paramtable.Get().StreamingCfg.EnableUpsertMessage.GetAsBool() && it.req.Namespace != nil {
 		return merr.WrapErrParameterInvalidMsg("Upsert WAL does not support namespace requests")
 	}
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-PreExecute")
@@ -2037,8 +2037,10 @@ func (it *UpsertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	it.schema = schema
-	if err := streamingmessage.ValidateUpsertSchema(schema.CollectionSchema); err != nil {
-		return err
+	if paramtable.Get().StreamingCfg.EnableUpsertMessage.GetAsBool() {
+		if err := streamingmessage.ValidateUpsertSchema(schema.CollectionSchema); err != nil {
+			return err
+		}
 	}
 	it.schemaVersion = schema.Version
 	if err := dql.ValidateTextStorageV3Enabled(schema.CollectionSchema); err != nil {

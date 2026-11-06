@@ -86,11 +86,9 @@ func (impl *shardInterceptor) Name() string {
 // DoAppend assigns segment for every partition in the message.
 func (impl *shardInterceptor) DoAppend(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (msgID message.MessageID, err error) {
 	op, ok := impl.ops[msg.MessageType()]
-	if ok && (msg.MessageType() == message.MessageTypeUpsert ||
-		!funcutil.IsControlChannel(msg.VChannel()) || msg.IsPChannelLevel()) {
+	if ok && (!funcutil.IsControlChannel(msg.VChannel()) || msg.IsPChannelLevel()) {
 		// If the message type is registered in the interceptor, use the registered operation.
-		// Upsert always reaches its handler for scope validation.
-		// Other control-channel messages only order DDL/DCL and skip shard effects.
+		// Control-channel messages skip shard effects unless they are PChannel-level.
 		return op(ctx, msg, appendOp)
 	}
 	return appendOp(ctx, msg)
