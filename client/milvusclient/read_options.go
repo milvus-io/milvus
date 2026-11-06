@@ -67,6 +67,7 @@ type searchOption struct {
 	searchAggregation          *SearchAggregation
 	consistencyLevel           entity.ConsistencyLevel
 	useDefaultConsistencyLevel bool
+	guaranteeTimestamp         uint64
 }
 
 type AnnRequest struct {
@@ -416,6 +417,7 @@ func (opt *searchOption) Request() (*milvuspb.SearchRequest, error) {
 	request.SkipRls = opt.skipRLS
 	request.ConsistencyLevel = commonpb.ConsistencyLevel(opt.consistencyLevel)
 	request.UseDefaultConsistency = opt.useDefaultConsistencyLevel
+	request.GuaranteeTimestamp = opt.guaranteeTimestamp
 	request.OutputFields = opt.outputFields
 	if opt.searchAggregation != nil {
 		if opt.annRequest.groupByField != "" || opt.annRequest.groupSize != 0 || opt.annRequest.strictGroupSize {
@@ -496,6 +498,14 @@ func (opt *searchOption) WithOutputFields(fieldNames ...string) *searchOption {
 func (opt *searchOption) WithConsistencyLevel(consistencyLevel entity.ConsistencyLevel) *searchOption {
 	opt.consistencyLevel = consistencyLevel
 	opt.useDefaultConsistencyLevel = false
+	return opt
+}
+
+// WithGuaranteeTimestamp sets a caller-provided guarantee_timestamp for the
+// request. It is intended to be used together with the entity.ClCustomized
+// consistency level.
+func (opt *searchOption) WithGuaranteeTimestamp(ts uint64) *searchOption {
+	opt.guaranteeTimestamp = ts
 	return opt
 }
 
@@ -645,6 +655,7 @@ type hybridSearchOption struct {
 	outputFields          []string
 	useDefaultConsistency bool
 	consistencyLevel      entity.ConsistencyLevel
+	guaranteeTimestamp    uint64
 
 	limit         int
 	offset        int
@@ -655,6 +666,14 @@ type hybridSearchOption struct {
 func (opt *hybridSearchOption) WithConsistencyLevel(cl entity.ConsistencyLevel) *hybridSearchOption {
 	opt.consistencyLevel = cl
 	opt.useDefaultConsistency = false
+	return opt
+}
+
+// WithGuaranteeTimestamp sets a caller-provided guarantee_timestamp for the
+// request. It is intended to be used together with the entity.ClCustomized
+// consistency level.
+func (opt *hybridSearchOption) WithGuaranteeTimestamp(ts uint64) *hybridSearchOption {
+	opt.guaranteeTimestamp = ts
 	return opt
 }
 
@@ -751,6 +770,7 @@ func (opt *hybridSearchOption) HybridRequest() (*milvuspb.HybridSearchRequest, e
 		Requests:              requests,
 		UseDefaultConsistency: opt.useDefaultConsistency,
 		ConsistencyLevel:      commonpb.ConsistencyLevel(opt.consistencyLevel),
+		GuaranteeTimestamp:    opt.guaranteeTimestamp,
 		OutputFields:          opt.outputFields,
 		RankParams:            params,
 	}
@@ -788,6 +808,7 @@ type queryOption struct {
 	outputFields               []string
 	consistencyLevel           entity.ConsistencyLevel
 	useDefaultConsistencyLevel bool
+	guaranteeTimestamp         uint64
 	expr                       string
 	templateParams             map[string]any
 }
@@ -808,6 +829,7 @@ func (opt *queryOption) Request() (*milvuspb.QueryRequest, error) {
 		QueryParams:           entity.MapKvPairs(opt.queryParams),
 		ConsistencyLevel:      opt.consistencyLevel.CommonConsistencyLevel(),
 		UseDefaultConsistency: opt.useDefaultConsistencyLevel,
+		GuaranteeTimestamp:    opt.guaranteeTimestamp,
 	}
 
 	req.ExprTemplateValues = make(map[string]*schemapb.TemplateValue)
@@ -877,6 +899,14 @@ func (opt *queryOption) WithOutputFields(fieldNames ...string) *queryOption {
 func (opt *queryOption) WithConsistencyLevel(consistencyLevel entity.ConsistencyLevel) *queryOption {
 	opt.consistencyLevel = consistencyLevel
 	opt.useDefaultConsistencyLevel = false
+	return opt
+}
+
+// WithGuaranteeTimestamp sets a caller-provided guarantee_timestamp for the
+// request. It is intended to be used together with the entity.ClCustomized
+// consistency level.
+func (opt *queryOption) WithGuaranteeTimestamp(ts uint64) *queryOption {
+	opt.guaranteeTimestamp = ts
 	return opt
 }
 

@@ -578,7 +578,7 @@ func (s *CollectionSuite) TestAddCollectionField() {
 		var header metadata.MD
 		s.NoError(s.client.AddCollectionField(ctx, option, grpc.Header(&header)))
 		s.Equal([]string{"legacy"}, header.Get("fallback-rpc"))
-		_, cached := s.client.collCache.collections.Get(collName)
+		_, cached := s.client.collCache.collections.Get(newCollectionCacheKey(s.client.getCurrentDB(), collName))
 		s.False(cached)
 	})
 
@@ -621,7 +621,7 @@ func (s *CollectionSuite) TestAddCollectionField() {
 		field := entity.NewField().WithName(fieldName).WithDataType(entity.FieldTypeInt64).WithNullable(true)
 		err := s.client.AddCollectionField(ctx, NewAddCollectionFieldOption(collName, field))
 		s.ErrorIs(err, merr.ErrParameterInvalid)
-		_, cached := s.client.collCache.collections.Get(collName)
+		_, cached := s.client.collCache.collections.Get(newCollectionCacheKey(s.client.getCurrentDB(), collName))
 		s.True(cached)
 	})
 
