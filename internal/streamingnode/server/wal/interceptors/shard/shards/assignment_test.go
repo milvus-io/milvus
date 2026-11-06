@@ -178,7 +178,7 @@ func TestAssignmentTransactionReferencesFollowSessionLifecycle(t *testing.T) {
 					worker.SetLogger(mlog.With())
 					require.False(t, worker.checkIfReady(), "body Ack cannot release a transaction reference")
 				}
-				session.AddNewMessageDoneAndKeepalive(200, message.MessageTypeInsert)
+				session.AddNewMessageDoneAndKeepalive(message.CreateTestEmptyInsertMesage(1, nil).WithTimeTick(200).WithLastConfirmedUseMessageID().IntoImmutableMessage(walimplstest.NewTestMessageID(1)))
 				switch outcome {
 				case "commit", "rejected":
 					require.NoError(t, session.RequestCommitAndWait(t.Context(), 201, count))

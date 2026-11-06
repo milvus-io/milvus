@@ -44,9 +44,8 @@ func TestCommitBodyCount(t *testing.T) {
 				typ := message.MessageTypeInsert
 				if tc.upsert {
 					typ = message.MessageTypeUpsert
-					s.RecordUpsertEffects(tc.deleteRows)
 				}
-				s.AddNewMessageDoneAndKeepalive(2, typ)
+				s.AddNewMessageDoneAndKeepalive(newTxnBodyMessage(2, typ, tc.deleteRows))
 			}
 			require.Equal(t, tc.actual > 0 && tc.deleteRows == 0, s.IsInsertOnly())
 			// An admitted but failed append is not a logical body.
@@ -86,7 +85,7 @@ func TestCommitBodyCountWaitsForInflight(t *testing.T) {
 		t.Fatalf("Commit returned before body completion: %v", err)
 	default:
 	}
-	s.AddNewMessageDoneAndKeepalive(2, message.MessageTypeInsert)
+	s.AddNewMessageDoneAndKeepalive(newTxnBodyMessage(2, message.MessageTypeInsert, 0))
 	require.NoError(t, <-done)
 	s.CommitDone()
 }
@@ -102,7 +101,7 @@ func TestRecoveredSessionBodyCount(t *testing.T) {
 	s, err := m.GetSessionOfTxn(1)
 	require.NoError(t, err)
 	require.NoError(t, s.AddNewMessage(context.Background(), 3))
-	s.AddNewMessageDoneAndKeepalive(3, message.MessageTypeInsert)
+	s.AddNewMessageDoneAndKeepalive(newTxnBodyMessage(3, message.MessageTypeInsert, 0))
 	require.NoError(t, s.RequestCommitAndWait(context.Background(), 4, 2), "count includes recovered and newly appended bodies")
 	s.CommitDone()
 	m.CleanupTxnUntil(5)
@@ -114,8 +113,18 @@ func TestRecoveredSessionBodyCount(t *testing.T) {
 }
 
 func TestCommitClassificationWaitsForInflightBody(t *testing.T) {
-	for _, typ := range []message.MessageType{message.MessageTypeInsert, message.MessageTypeDelete} {
-		t.Run(typ.String(), func(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		typ        message.MessageType
+		deleteRows uint64
+		insertOnly bool
+	}{
+		{"insert", message.MessageTypeInsert, 0, true},
+		{"delete", message.MessageTypeDelete, 0, false},
+		{"upsert-rows", message.MessageTypeUpsert, 0, true},
+		{"upsert-delete", message.MessageTypeUpsert, 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			metrics := metricsutil.NewTxnMetrics("classification-inflight")
 			defer metrics.Close()
 			session := newTxnSession("v", message.TxnContext{TxnID: 1, Keepalive: time.Second}, 10, metrics.BeginTxn())
@@ -123,17 +132,25 @@ func TestCommitClassificationWaitsForInflightBody(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 			defer cancel()
 			require.NoError(t, session.AddNewMessage(ctx, 11))
-			done := make(chan error, 1)
-			go func() { done <- session.RequestCommitAndWait(ctx, 12, 1) }()
+			type commitResult struct {
+				err        error
+				insertOnly bool
+			}
+			done := make(chan commitResult, 1)
+			go func() {
+				err := session.RequestCommitAndWait(ctx, 12, 1)
+				done <- commitResult{err, session.IsInsertOnly()}
+			}()
 			require.Eventually(t, func() bool { return session.State() == message.TxnStateOnCommit }, time.Second, time.Millisecond)
 			select {
-			case err := <-done:
-				t.Fatalf("commit completed before body classification: %v", err)
+			case result := <-done:
+				t.Fatalf("commit completed before body classification: %v", result.err)
 			default:
 			}
-			session.AddNewMessageDoneAndKeepalive(11, typ)
-			require.NoError(t, <-done)
-			require.Equal(t, typ == message.MessageTypeInsert, session.IsInsertOnly())
+			session.AddNewMessageDoneAndKeepalive(newTxnBodyMessage(11, tc.typ, tc.deleteRows))
+			result := <-done
+			require.NoError(t, result.err)
+			require.Equal(t, tc.insertOnly, result.insertOnly, "classification must be visible to the awakened Commit waiter")
 			session.CommitDone()
 		})
 	}

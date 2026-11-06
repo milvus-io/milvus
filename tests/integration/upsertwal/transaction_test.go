@@ -54,6 +54,7 @@ func (s *UpsertWALSuite) TestProxyInsertKeepsExistingDuplicateBehavior() {
 	c := s.create(ctx)
 	for _, marker := range []int64{1, 2} {
 		request := upsertfixture.Insert(message.MustAsMutableUpsertMessageV2(c.upsert(11, marker)).MustBody())
+		request.FieldsData[len(request.FieldsData)-1].FieldName = "pk"
 		result, err := s.Cluster.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{CollectionName: c.name, NumRows: 1, FieldsData: request.GetFieldsData()})
 		s.Require().NoError(merr.CheckRPCCall(result, err))
 	}

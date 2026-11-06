@@ -7515,7 +7515,7 @@ func TestUpsertNamespaceUsesFinalFormat(t *testing.T) {
 				if kind == "request" {
 					task.req.Namespace = &namespace
 				} else {
-					task.schema.CollectionSchema.EnableNamespace = true
+					task.schema.EnableNamespace = true
 				}
 				reached := merr.WrapErrServiceUnavailable("legacy packing reached")
 				patch := mockey.Mock(repackInsertDataForStreamingService).Return(nil, reached).Build()

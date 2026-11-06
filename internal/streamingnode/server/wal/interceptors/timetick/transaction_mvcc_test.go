@@ -45,8 +45,8 @@ func TestTransactionQueryFrontiersPublishTogether(t *testing.T) {
 			for i, typ := range tc.bodies {
 				tick := uint64(20 + i)
 				require.NoError(t, session.AddNewMessage(ctx, tick))
-				session.AddNewMessageDoneAndKeepalive(tick, typ)
 				body := createQueryTestMessage(t, tick, "v", typ, true, true)
+				session.AddNewMessageDoneAndKeepalive(body.IntoImmutableMessage(walimplstest.NewTestMessageID(1)))
 				cm.UpdateMVCC(body)
 				require.EqualValues(t, 10, queryFrontier(t, cm, "v").GrowingTimetick)
 			}

@@ -79,40 +79,39 @@ func (s *TxnSession) AddNewMessage(ctx context.Context, timetick uint64) error {
 	return nil
 }
 
-// AddNewMessageDoneAndKeepalive decreases the in flight count of the session and keepalive the session.
-// notify the committedWait channel if the in flight count is 0 and committed waited.
-func (s *TxnSession) AddNewMessageDoneAndKeepalive(timetick uint64, typ message.MessageType) {
+// AddNewMessageDoneAndKeepalive records successful body effects, renews the lease,
+// and completes admission before notifying a waiting Commit.
+func (s *TxnSession) AddNewMessageDoneAndKeepalive(msg message.ImmutableMessage) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if typ != message.MessageTypeInsert && typ != message.MessageTypeUpsert {
+	switch msg.MessageType() {
+	case message.MessageTypeInsert:
+	case message.MessageTypeUpsert:
+		if message.MustAsImmutableUpsertMessageV2(msg).Header().GetDeleteRows() > 0 {
+			s.hasNonInsert = true
+		}
+	default:
 		s.hasNonInsert = true
 	}
 
+	timetick := msg.TimeTick()
 	// make a refresh lease here.
 	if s.lastTimetick < timetick {
 		s.lastTimetick = timetick
 	}
-	s.inFlightCount--
 	s.bodyCount++
+	s.inFlightCount--
 	if s.doneWait != nil && s.inFlightCount == 0 {
 		close(s.doneWait)
 	}
 }
 
 // IsInsertOnly is stable after RequestCommitAndWait succeeds. Record successful
-// body types before releasing their in-flight slots, including recovered bodies.
+// body effects before releasing their in-flight slots, including recovered bodies.
 func (s *TxnSession) IsInsertOnly() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.bodyCount > 0 && !s.hasNonInsert
-}
-
-// RecordUpsertEffects classifies a successful Upsert without retaining its body.
-// Callers record effects before releasing the body's in-flight slot.
-func (s *TxnSession) RecordUpsertEffects(deleteRows uint64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.hasNonInsert = s.hasNonInsert || deleteRows > 0
 }
 
 // AddNewMessageFail decreases the in flight count of the session but not refresh the lease.

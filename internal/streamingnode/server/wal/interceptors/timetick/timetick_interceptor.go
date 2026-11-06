@@ -106,8 +106,8 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 					txnSession.AddNewMessageFail()
 					return
 				}
-				// perform keepalive for the transaction session if append success.
-				txnSession.AddNewMessageDoneAndKeepalive(msg.TimeTick(), msg.MessageType())
+				// Complete successful body effects before the deferred ACK.
+				txnSession.AddNewMessageDoneAndKeepalive(immutableMsg)
 			}()
 		}
 	}
@@ -119,9 +119,6 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 	}
 	if immutableMsg, err = impl.appendMsg(ctx, msg, append); err != nil {
 		return nil, err
-	}
-	if txnSession != nil && msg.MessageType() == message.MessageTypeUpsert {
-		txnSession.RecordUpsertEffects(message.MustAsImmutableUpsertMessageV2(immutableMsg).Header().GetDeleteRows())
 	}
 	return immutableMsg.MessageID(), nil
 }
