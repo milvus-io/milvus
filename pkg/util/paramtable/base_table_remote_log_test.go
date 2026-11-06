@@ -23,6 +23,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -92,6 +93,7 @@ etcd.ssl.tlsMinVersion: %q
 
 				base := NewBaseTable(Files([]string{"milvus.yaml"}), SkipEnv(true), Interval(0))
 				t.Cleanup(base.Manager().Close)
+				assert.False(t, base.EtcdSourceInitialized())
 				assert.Nil(t, base.etcdClient, "retain local configuration when the remote client cannot initialize")
 				assert.Equal(t, value, base.Get("etcd.ssl."+key), "runtime configuration stays raw")
 				assert.Equal(t, config.RedactedValue, base.Manager().ProjectConfigs()[strings.ToLower("etcd.ssl."+key)])
@@ -107,4 +109,61 @@ etcd.ssl.tlsMinVersion: %q
 			})
 		}
 	}
+}
+
+func TestBaseTableRemoteConfigReadyAfterInitialLoad(t *testing.T) {
+	_, clientPort := setupEmbedEtcd(t)
+	dir := t.TempDir()
+	t.Setenv("MILVUSCONF", dir)
+	content := fmt.Sprintf("etcd.endpoints: 127.0.0.1:%d\n", clientPort)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "milvus.yaml"), []byte(content), 0o600))
+
+	base := NewBaseTable(Files([]string{"milvus.yaml"}), SkipEnv(true), Interval(0))
+	t.Cleanup(func() {
+		base.Manager().Close()
+		base.etcdClient.Close()
+	})
+	assert.True(t, base.EtcdSourceInitialized())
+	_, exists := base.Manager().GetEtcdSource()
+	assert.True(t, exists)
+}
+
+func TestBaseTableRemoteConfigNotReadyOnDialFailure(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("MILVUSCONF", dir)
+	content := fmt.Sprintf("etcd.endpoints: 127.0.0.1:%d\netcd.dialTimeout: 100\n", freePort(t))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "milvus.yaml"), []byte(content), 0o600))
+
+	base := NewBaseTable(Files([]string{"milvus.yaml"}), SkipEnv(true), Interval(0))
+	t.Cleanup(base.Manager().Close)
+	assert.False(t, base.EtcdSourceInitialized())
+	_, exists := base.Manager().GetEtcdSource()
+	assert.False(t, exists)
+}
+
+func TestBaseTableRemoteConfigNotReadyWhenInitialLoadFails(t *testing.T) {
+	const canary = "initial-etcd-read-secret-canary"
+	_, clientPort := setupEmbedEtcd(t)
+	dir := t.TempDir()
+	t.Setenv("MILVUSCONF", dir)
+	content := fmt.Sprintf("etcd.endpoints: 127.0.0.1:%d\n", clientPort)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "milvus.yaml"), []byte(content), 0o600))
+	sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "debug"})
+
+	patch := mockey.Mock((*config.EtcdSource).GetConfigurations).
+		To(func(*config.EtcdSource) (map[string]string, error) {
+			return nil, merr.WrapErrServiceInternal("initial etcd read failed: " + canary)
+		}).Build()
+	defer patch.UnPatch()
+
+	base := NewBaseTable(Files([]string{"milvus.yaml"}), SkipEnv(true), Interval(0))
+	t.Cleanup(func() {
+		base.Manager().Close()
+		base.etcdClient.Close()
+	})
+	assert.False(t, base.EtcdSourceInitialized())
+	_, exists := base.Manager().GetEtcdSource()
+	assert.True(t, exists, "AddSource registers the source before attempting the initial load")
+	assert.Contains(t, sink.String(), "init with etcd source failed")
+	assert.NotContains(t, sink.String(), canary)
 }
