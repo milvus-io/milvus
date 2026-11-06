@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <boost/iterator/counting_iterator.hpp>
+#include <folly/ScopeGuard.h>
 #include "common/FastMem.h"
 #include <cxxabi.h>
 #include <algorithm>
@@ -1341,6 +1342,24 @@ SegmentGrowingImpl::load_column_group_data_internal(
             this->get_segment_id(),
             column_group_id.get());
 
+        // The load task captures this frame by reference and may be blocked
+        // pushing into the bounded channel. If the consumer loop below
+        // throws, unblock the task and wait for it before unwinding
+        // (see #46958).
+        bool channel_exhausted = false;
+        auto drain_on_unwind = folly::makeGuard([&]() {
+            if (!channel_exhausted) {
+                try {
+                    std::shared_ptr<milvus::ArrowDataWrapper> discard;
+                    while (
+                        column_group_info.arrow_reader_channel->pop(discard)) {
+                    }
+                } catch (...) {
+                }
+            }
+            storage::DrainFuture(load_future);
+        });
+
         std::shared_ptr<milvus::ArrowDataWrapper> r;
 
         std::unordered_map<FieldId, std::vector<FieldDataPtr>> field_data_map;
@@ -1397,8 +1416,11 @@ SegmentGrowingImpl::load_column_group_data_internal(
                 }
             }
         }
+        // The loop consumed the close marker, even if the producer failed.
+        channel_exhausted = true;
         // access underlying feature to get exception if any
         load_future.get();
+        drain_on_unwind.dismiss();
 
         for (auto& [field_id, field_data] : field_data_map) {
             load_field_data_common(field_id,
