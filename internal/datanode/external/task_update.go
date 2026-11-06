@@ -349,8 +349,7 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 	usedFragments := make(map[string]bool)
 	var keptSegments []*datapb.SegmentInfo
 	var patchedSegments []*datapb.SegmentInfo
-	// Reason counters count baseline segments. A segment can increment both
-	// patch counters when deltalogs and missing columns are refreshed together.
+	// Reason counters count baseline segments.
 	removedFragmentSegments := 0
 	missingFunctionOutputSegments := 0
 	deltalogRefreshedSegments := 0
@@ -364,6 +363,15 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 			return nil, merr.Wrap(err, "resolve function output columns")
 		}
 	}
+
+	// milvus-table segments never take the add-column path. It appends a
+	// column group in the external format, and storage has no milvus-table
+	// column group format. Their columns come from the source segment manifest
+	// whenever the segment manifest is built, or rebuilt for new deltalogs.
+	// ChildFields could not drive the check anyway: StorageV3 segments do not
+	// persist binlogs, so after a DataCoord restart every column would look
+	// missing.
+	isMilvusTable := t.parsedSpec != nil && t.parsedSpec.Format == externalspec.FormatMilvusTable
 
 	// Check each current segment
 	for _, seg := range t.req.GetCurrentSegments() {
@@ -420,7 +428,10 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 			continue
 		}
 
-		missingColumns := missingExternalColumns(seg, t.req.GetSchema())
+		var missingColumns []string
+		if !isMilvusTable {
+			missingColumns = missingExternalColumns(seg, t.req.GetSchema())
+		}
 		shouldRefreshDeltalogs, err := t.shouldRefreshMilvusTableDeltalogs(seg, fragments, matchedNewFragments)
 		if err != nil {
 			return nil, err
@@ -441,13 +452,7 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 		}
 
 		if len(missingColumns) > 0 {
-			segmentToPatch := seg
-			patchFragments := fragments
-			if patchedSegment != nil {
-				segmentToPatch = patchedSegment
-				patchFragments = matchedNewFragments
-			}
-			patchedWithColumns, err := t.patchSegmentForMissingColumns(ctx, segmentToPatch, patchFragments, missingColumns)
+			patchedWithColumns, err := t.patchSegmentForMissingColumns(ctx, seg, fragments, missingColumns)
 			if err != nil {
 				return nil, err
 			}
