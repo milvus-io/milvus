@@ -172,6 +172,7 @@ func NewNode(info *nodeDef, t *SearchTask) (*Node, error) {
 }
 
 type searchReduceOperator struct {
+	scoreRewritten      bool
 	traceCtx            context.Context
 	primaryFieldSchema  *schemapb.FieldSchema
 	nq                  int64
@@ -196,6 +197,7 @@ func newSearchReduceOperator(t *SearchTask, params map[string]any) (operator, er
 		offset = v
 	}
 	return &searchReduceOperator{
+		scoreRewritten:      chain.QueryNodeChainsWriteScore(t.request.GetFunctionChains()),
 		traceCtx:            t.TraceCtx(),
 		primaryFieldSchema:  pkField,
 		nq:                  t.GetNq(),
@@ -216,7 +218,7 @@ func (op *searchReduceOperator) run(ctx context.Context, span trace.Span, inputs
 	metricType := getMetricType(toReduceResults)
 	result, err := reduceResults(
 		op.traceCtx, toReduceResults, op.nq, op.topK, op.offset,
-		metricType, op.primaryFieldSchema.GetDataType(), op.queryInfos[0], false, op.isSearchAggregation, op.collectionID, op.partitionIDs)
+		metricType, op.primaryFieldSchema.GetDataType(), op.queryInfos[0], false, op.isSearchAggregation, op.collectionID, op.partitionIDs, op.scoreRewritten)
 	if err != nil {
 		return nil, err
 	}
@@ -225,6 +227,7 @@ func (op *searchReduceOperator) run(ctx context.Context, span trace.Span, inputs
 }
 
 type hybridSearchReduceOperator struct {
+	scoresRewritten    []bool
 	traceCtx           context.Context
 	subReqs            []*internalpb.SubSearchRequest
 	primaryFieldSchema *schemapb.FieldSchema
@@ -240,6 +243,7 @@ func newHybridSearchReduceOperator(t *SearchTask, _ map[string]any) (operator, e
 		return nil, err
 	}
 	return &hybridSearchReduceOperator{
+		scoresRewritten:    t.subSearchScoresRewritten(),
 		traceCtx:           t.TraceCtx(),
 		subReqs:            t.GetSubReqs(),
 		primaryFieldSchema: pkField,
@@ -287,7 +291,7 @@ func (op *hybridSearchReduceOperator) run(ctx context.Context, span trace.Span, 
 		subMetricType := getMetricType(internalResults)
 		result, err := reduceResults(
 			op.traceCtx, internalResults, subReq.GetNq(), subReq.GetTopk(), subReq.GetOffset(), subMetricType,
-			op.primaryFieldSchema.GetDataType(), op.queryInfos[index], true, false, op.collectionID, op.partitionIDs)
+			op.primaryFieldSchema.GetDataType(), op.queryInfos[index], true, false, op.collectionID, op.partitionIDs, scoreRewrittenAt(op.scoresRewritten, index))
 		if err != nil {
 			return nil, err
 		}
@@ -308,6 +312,18 @@ func newElementBestCollapseOperator(t *SearchTask, _ map[string]any) (operator, 
 		configs:            t.hybridCollapseConfigs(),
 		elementLevelHybrid: t.hybridElementLevel,
 	}, nil
+}
+
+func (t *SearchTask) subSearchScoresRewritten() []bool {
+	rewritten := make([]bool, len(t.request.GetSubReqs()))
+	for index, subReq := range t.request.GetSubReqs() {
+		rewritten[index] = chain.QueryNodeChainsWriteScore(subReq.GetFunctionChains())
+	}
+	return rewritten
+}
+
+func scoreRewrittenAt(rewritten []bool, index int) bool {
+	return index < len(rewritten) && rewritten[index]
 }
 
 func (t *SearchTask) hybridCollapseConfigs() []elementCollapseConfig {
@@ -963,6 +979,7 @@ func serializeAggHitFields(fields map[int64]interface{}, fieldIDToName map[int64
 }
 
 type rerankOperator struct {
+	scoresRewritten  []bool
 	nq               int64
 	topK             int64
 	offset           int64
@@ -1023,6 +1040,7 @@ func newRerankOperator(t *SearchTask, params map[string]any) (operator, error) {
 			})
 		}
 		return &rerankOperator{
+			scoresRewritten:  t.subSearchScoresRewritten(),
 			nq:               t.GetNq(),
 			topK:             t.rankParams.limit,
 			offset:           t.rankParams.offset,
@@ -1068,6 +1086,7 @@ func buildChainFromMeta(
 		}
 		if searchParams != nil {
 			buildCtx.ModelExtraInfo = searchParams.ModelExtraInfo
+			buildCtx.Search.ScoresRewritten = searchParams.ScoresRewritten
 		}
 		return chain.FuncChainFromReprWithContext(m.repr, alloc, buildCtx)
 	case *legacyRerankMeta:
@@ -1143,6 +1162,7 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 		ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
 		DBName:    op.dbName,
 	}
+	searchParams.ScoresRewritten = op.scoresRewritten
 	fc, err := buildChainFromMeta(op.rerankMeta, op.collSchema, inputMetrics, searchParams, alloc)
 	if err != nil {
 		for _, df := range dataframes {

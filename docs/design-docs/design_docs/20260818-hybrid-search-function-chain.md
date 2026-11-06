@@ -505,6 +505,17 @@ score after that sub-search's L0 and L1 stages:
 ANN score_i -> L0_i -> reduce_i -> L1_i -> Proxy sub-result_i -> top-level fusion
 ```
 
+Proxy derives whether each sub-search wrote `$score` from that sub-search's
+L0/L1 outputs and passes the state to Merge through runtime build context.
+Rewritten scores are larger-is-better business values: Merge preserves their
+scale even with `norm_score=true`, without applying the original metric's
+normalization formula. Users must explicitly normalize business scores when
+their scales need to be comparable. With `norm_score=false`, a mixture of raw
+distances and business scores converts only the raw distances to the
+larger-is-better direction. Untouched metric scores retain their existing
+normalization and ordering rules. Legacy weighted fusion uses the same state;
+RRF continues to use ranks. The original metric and public protobuf are unchanged.
+
 L0 is segment-local. L1 sees the QueryNode worker's cross-segment reduced
 candidates; an L1 `limit` therefore changes that sub-search's candidate budget
 before Proxy-level distributed reduction and top-level fusion. Existing

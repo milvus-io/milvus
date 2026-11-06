@@ -19,12 +19,14 @@ package dql
 import (
 	"context"
 	"fmt"
+	"math"
 	"slices"
 	"testing"
 	"time"
 
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/bytedance/mockey"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
@@ -43,10 +45,105 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestProxyScorePipeline(t *testing.T) {
+	paramtable.Init()
+	makeChain := func(stage schemapb.FunctionChainStage) *schemapb.FunctionChain {
+		return &schemapb.FunctionChain{Stage: stage, Ops: []*schemapb.FunctionChainOp{{
+			Op: "map", Outputs: []string{"$score"},
+			Expr: &schemapb.FunctionChainExpr{
+				Name: "num_combine",
+				Args: []*schemapb.FunctionChainExprArg{
+					{Arg: &schemapb.FunctionChainExprArg_Column{Column: &schemapb.FunctionChainColumnArg{Name: "$score"}}},
+					{Arg: &schemapb.FunctionChainExprArg_Column{Column: &schemapb.FunctionChainColumnArg{Name: "$score"}}},
+				},
+				Params: map[string]*schemapb.FunctionParamValue{"mode": {Value: &schemapb.FunctionParamValue_StringValue{StringValue: "sum"}}},
+			},
+		}}}
+	}
+	l0 := makeChain(schemapb.FunctionChainStage_FunctionChainStageL0Rerank)
+	l2 := makeChain(schemapb.FunctionChainStage_FunctionChainStageL2Rerank)
+	l2.Ops = append(l2.Ops, &schemapb.FunctionChainOp{
+		Op: "sort", Inputs: []string{"$score", "$id"},
+		Params: map[string]*schemapb.FunctionParamValue{"desc": {Value: &schemapb.FunctionParamValue_BoolValue{BoolValue: true}}},
+	})
+	task := &SearchTask{
+		ctx: t.Context(), SearchRequest: &internalpb.SearchRequest{Nq: 1, Topk: 3},
+		request: &milvuspb.SearchRequest{FunctionChains: []*schemapb.FunctionChain{l2, l0}},
+		schema: mustNewSchemaInfo(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		}}), queryInfos: []*planpb.QueryInfo{{}},
+	}
+	reduceOp, err := newSearchReduceOperator(task, nil)
+	require.NoError(t, err)
+	require.True(t, reduceOp.(*searchReduceOperator).scoreRewritten)
+	inputs := []*internalpb.SearchResults{
+		{MetricType: "L2", ResultData: &schemapb.SearchResultData{NumQueries: 1, TopK: 3, Topks: []int64{2}, Ids: testSearchResultIDs(3, 1), Scores: []float32{90, 30}}},
+		{MetricType: "L2", ResultData: &schemapb.SearchResultData{NumQueries: 1, TopK: 3, Topks: []int64{1}, Ids: testSearchResultIDs(2), Scores: []float32{60}}},
+	}
+	span := trace.SpanFromContext(t.Context())
+	reduced, err := reduceOp.run(t.Context(), span, inputs)
+	require.NoError(t, err)
+	repr, err := chain.ProtoChainToRepr(l2)
+	require.NoError(t, err)
+	rerank := &rerankOperator{nq: 1, topK: 3, roundDecimal: -1, rerankMeta: &functionChainRerankMeta{repr: repr}}
+	outputs, err := rerank.run(t.Context(), span, reduced...)
+	require.NoError(t, err)
+	result := outputs[0].(*milvuspb.SearchResults).GetResults()
+	require.Equal(t, []int64{3, 2, 1}, result.GetIds().GetIntId().GetData())
+	require.Equal(t, []float32{180, 120, 60}, result.GetScores())
+
+	task.request.SubReqs = []*milvuspb.SubSearchRequest{{FunctionChains: []*schemapb.FunctionChain{l0}}, {}}
+	require.Equal(t, []bool{true, false}, task.subSearchScoresRewritten())
+	task.SubReqs = []*internalpb.SubSearchRequest{{Nq: 1, Topk: 2}, {Nq: 1, Topk: 2}}
+	task.queryInfos = []*planpb.QueryInfo{{}, {}}
+	hybridOp, err := newHybridSearchReduceOperator(task, nil)
+	require.NoError(t, err)
+	subResults := make([]*internalpb.SubSearchResults, 2)
+	for index := range subResults {
+		subResults[index] = &internalpb.SubSearchResults{
+			ReqIndex: int64(index), MetricType: "L2", NumQueries: 1, TopK: 2,
+			ResultData: &schemapb.SearchResultData{NumQueries: 1, TopK: 2, Topks: []int64{2}, Ids: testSearchResultIDs(1, 2), Scores: []float32{-1, -2}},
+		}
+	}
+	hybridOutput, err := hybridOp.run(t.Context(), span, []*internalpb.SearchResults{{IsAdvanced: true, SubResults: subResults}})
+	require.NoError(t, err)
+	hybridResults := hybridOutput[0].([]*milvuspb.SearchResults)
+	require.Equal(t, []float32{-1, -2}, hybridResults[0].GetResults().GetScores())
+	require.Equal(t, []float32{1, 2}, hybridResults[1].GetResults().GetScores())
+	require.Equal(t, []string{"L2", "L2"}, hybridOutput[1])
+
+	mergeRepr, err := chain.ProtoChainToRepr(&schemapb.FunctionChain{
+		Stage: schemapb.FunctionChainStage_FunctionChainStageL2Rerank,
+		Ops: []*schemapb.FunctionChainOp{{Op: "merge", Params: map[string]*schemapb.FunctionParamValue{
+			"strategy":   {Value: &schemapb.FunctionParamValue_StringValue{StringValue: "sum"}},
+			"norm_score": {Value: &schemapb.FunctionParamValue_BoolValue{BoolValue: true}},
+		}}},
+	})
+	require.NoError(t, err)
+	task.IsAdvanced = true
+	task.rankParams = &rankParams{limit: 2, roundDecimal: -1}
+	for _, meta := range []rerankMeta{
+		&functionChainRerankMeta{repr: mergeRepr},
+		&legacyRerankMeta{legacyParams: []*commonpb.KeyValuePair{
+			{Key: "strategy", Value: "weighted"}, {Key: "params", Value: `{"weights":[1,1],"norm_score":true}`},
+		}},
+	} {
+		task.rerankMeta = meta
+		hybridRerank, err := newRerankOperator(task, nil)
+		require.NoError(t, err)
+		fused, err := hybridRerank.run(t.Context(), span, hybridOutput...)
+		require.NoError(t, err)
+		fusedData := fused[0].(*milvuspb.SearchResults).GetResults()
+		require.Equal(t, []int64{1, 2}, fusedData.GetIds().GetIntId().GetData())
+		require.InDeltaSlice(t, []float32{-0.5, -1 - 2*float32(math.Atan(2))/math.Pi}, fusedData.GetScores(), 1e-6)
+	}
+}
 
 func TestSearchPipeline(t *testing.T) {
 	suite.Run(t, new(SearchPipelineSuite))
@@ -177,6 +274,7 @@ func (s *SearchPipelineSuite) TestSearchReduceOp() {
 	}
 	data := genTestSearchResultData(nq, topk, schemapb.DataType_Int64, "intField", 102, false)
 	op := searchReduceOperator{
+		false,
 		context.Background(),
 		pk,
 		nq,
@@ -221,6 +319,7 @@ func (s *SearchPipelineSuite) TestHybridSearchReduceOp() {
 	}
 
 	op := hybridSearchReduceOperator{
+		nil,
 		context.Background(),
 		subReqs,
 		pk,
@@ -267,6 +366,7 @@ func (s *SearchPipelineSuite) TestRerankOp() {
 	offset := int64(0)
 
 	reduceOp := searchReduceOperator{
+		false,
 		context.Background(),
 		schema.Fields[0],
 		nq,
@@ -406,6 +506,7 @@ func (s *SearchPipelineSuite) TestRerankOpWithFunctionChainMeta() {
 	limit := int64(3)
 
 	reduceOp := searchReduceOperator{
+		false,
 		context.Background(),
 		schema.Fields[0],
 		nq,
