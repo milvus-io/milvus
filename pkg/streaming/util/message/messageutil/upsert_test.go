@@ -120,7 +120,7 @@ func TestUpsertNestedColumnsSharePartitionSelection(t *testing.T) {
 	require.Equal(t, []float32{2, 12}, chosen[1].GetFloatVector().Data)
 }
 
-func BenchmarkUnifiedUpsertConsumerScatter(b *testing.B) {
+func BenchmarkUpsertConsumerScatter(b *testing.B) {
 	const rows = 1024
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}}
 	for _, partitions := range []int{1, 8} {

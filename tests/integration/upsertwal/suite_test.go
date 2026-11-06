@@ -85,7 +85,7 @@ func (s *upsertWALFixture) SetupSuite() {
 			walpoint.BeforeIdempotencyAppend + `=return("` + filepath.Join(s.controlDir, "commit.json") + `")`,
 		}, ";")}
 	}))
-	s.WithMilvusConfig("streaming.wal.upsert.unifiedEnabled", "true")
+	s.WithMilvusConfig("streaming.wal.enableUpsertMessage", "true")
 	s.WithMilvusConfig("function.enableWriteBeforeMaterialization", "true")
 	s.WithMilvusConfig("common.session.ttl", "10")
 	s.WithMilvusConfig("metrics.port", "0")

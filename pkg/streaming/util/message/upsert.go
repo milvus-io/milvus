@@ -193,10 +193,10 @@ func UpsertPrimaryKeyColumn(primary *schemapb.FieldSchema, keys *schemapb.IDs) *
 }
 
 // ValidateUpsertSchema rejects collections whose namespace routing cannot use
-// the unified protocol. This check also applies to replicated appends.
+// the Upsert protocol. This check also applies to replicated appends.
 func ValidateUpsertSchema(schema *schemapb.CollectionSchema) error {
 	if schema.GetEnableNamespace() {
-		return merr.WrapErrParameterInvalidMsg("unified Upsert WAL does not support namespace collections")
+		return merr.WrapErrParameterInvalidMsg("Upsert WAL does not support namespace collections")
 	}
 	return nil
 }

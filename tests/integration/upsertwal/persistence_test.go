@@ -144,7 +144,7 @@ func (s *UpsertWALSuite) TestReplacementSurvivesFlushRestartAndReload() {
 
 // The persisted path is independently testable before #52977 changes QueryNode
 // startup. Live growing queries remain covered by the native runtime tests.
-func (s *UpsertWALSuite) TestUnifiedFormatPersistsThroughRealWAL() {
+func (s *UpsertWALSuite) TestUpsertFormatPersistsThroughRealWAL() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	c := s.create(ctx)
@@ -165,7 +165,7 @@ func (s *UpsertWALSuite) TestUnifiedFormatPersistsThroughRealWAL() {
 	s.assertPhysicalRows(ctx, c, 2)
 }
 
-func (s *UpsertWALSuite) TestUnifiedTransactionInterveningWriteAndKeyedReopen() {
+func (s *UpsertWALSuite) TestUpsertTransactionInterveningWriteAndKeyedReopen() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	c := s.create(ctx)
@@ -206,7 +206,7 @@ func (s *UpsertWALSuite) TestUnifiedTransactionInterveningWriteAndKeyedReopen() 
 
 // Check both public producers through WAL persistence. Live QueryView startup
 // remains a separate deployment dependency.
-func (s *UpsertWALSuite) TestUnifiedPublicInsertAndUpsertPersist() {
+func (s *UpsertWALSuite) TestPublicInsertAndUpsertPersist() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	c := s.create(ctx)

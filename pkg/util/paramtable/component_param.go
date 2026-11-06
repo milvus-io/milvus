@@ -9430,7 +9430,7 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 }
 
 type streamingConfig struct {
-	UpsertWALWriteEnabled                            ParamItem `refreshable:"true"`
+	EnableUpsertMessage                              ParamItem `refreshable:"true"`
 	SchemaCacheTTL                                   ParamItem `refreshable:"false"`
 	QueryViewLiveEventDispatchConcurrencyPerPChannel ParamItem `refreshable:"true"`
 
@@ -9837,9 +9837,9 @@ limits; requests that carry no key are accepted at any value.`,
 	p.IdempotencyMaxKeyLength.Init(base.mgr)
 
 	// txn
-	p.UpsertWALWriteEnabled = ParamItem{
-		Key: "streaming.wal.upsert.unifiedEnabled", DefaultValue: "false", Export: true,
-		Doc: "Enable the unified Upsert WAL format only after all readers and CDC targets support it and the QueryView dependency is deployed. The release version is not assigned; auto remains disabled. Retained decoding and transaction resolution do not use this generation gate.",
+	p.EnableUpsertMessage = ParamItem{
+		Key: "streaming.wal.enableUpsertMessage", DefaultValue: "false", Export: true,
+		Doc: "Enable the Upsert WAL format only after all readers and CDC targets support it and the QueryView dependency is deployed. The release version is not assigned; auto remains disabled. Retained decoding and transaction resolution do not use this generation gate.",
 		Formatter: func(value string) string {
 			if value == "auto" {
 				return "false"
@@ -9848,7 +9848,7 @@ limits; requests that carry no key are accepted at any value.`,
 		},
 	}
 
-	p.UpsertWALWriteEnabled.Init(base.mgr)
+	p.EnableUpsertMessage.Init(base.mgr)
 
 	p.TxnDefaultKeepaliveTimeout = ParamItem{
 		Key:          "streaming.txn.defaultKeepaliveTimeout",

@@ -45,7 +45,7 @@ func TestUpsertViewEncoderDirectColumns(t *testing.T) {
 	require.Equal(t, []uint32{0, 2}, decoded.RequestRowMapping.RowOffsets)
 }
 
-func BenchmarkUnifiedUpsertViewEncoding(b *testing.B) {
+func BenchmarkUpsertViewEncoding(b *testing.B) {
 	const rows = 1024
 	source := &msgpb.InsertRequest{NumRows: rows, RowIDs: make([]int64, rows), Timestamps: make([]uint64, rows), FieldsData: []*schemapb.FieldData{{FieldId: 101, Type: schemapb.DataType_FloatVector, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 128, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, rows*128)}}}}}}}
 	selected := make([]int, rows)

@@ -433,13 +433,13 @@ func (s *UpsertWALSuite) TestOneMessagePlacesRowsInMultiplePartitions() {
 	defer producer.Close()
 	_, err := producer.Append(ctx, c.upsert(11, 1))
 	s.Require().NoError(err)
-	status, err := s.Cluster.MilvusClient.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{CollectionName: c.name, PartitionName: "unified_other"})
+	status, err := s.Cluster.MilvusClient.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{CollectionName: c.name, PartitionName: "upsert_other"})
 	s.Require().NoError(merr.CheckRPCCall(status, err))
 	partitions, err := s.Cluster.MilvusClient.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{CollectionName: c.name})
 	s.Require().NoError(merr.CheckRPCCall(partitions, err))
 	var other int64
 	for i, name := range partitions.PartitionNames {
-		if name == "unified_other" {
+		if name == "upsert_other" {
 			other = partitions.PartitionIDs[i]
 		}
 	}

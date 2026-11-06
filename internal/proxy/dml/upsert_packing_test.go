@@ -43,16 +43,16 @@ import (
 
 func TestMain(m *testing.M) {
 	paramtable.Init()
-	// Producer tests run against readers that support the unified format.
-	paramtable.Get().StreamingCfg.UpsertWALWriteEnabled.SwapTempValue("true")
+	// Producer tests run against readers that support the Upsert format.
+	paramtable.Get().StreamingCfg.EnableUpsertMessage.SwapTempValue("true")
 	os.Exit(m.Run())
 }
 
-func unifiedPackingSchema() *schemapb.CollectionSchema {
+func upsertPackingSchema() *schemapb.CollectionSchema {
 	return &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}, {FieldID: 101, Name: "part", DataType: schemapb.DataType_Int64, IsPartitionKey: true}, {FieldID: 102, Name: "payload", DataType: schemapb.DataType_VarChar}}}
 }
 
-func TestUnifiedPackingMultiplePartitionsAndOriginalOffsets(t *testing.T) {
+func TestUpsertPackingMultiplePartitionsAndOriginalOffsets(t *testing.T) {
 	source, result := newIdempotentRepackInsertMsg(16)
 	before := proto.Clone(source.InsertRequest)
 	cache := NewMockCache(t)
@@ -60,7 +60,7 @@ func TestUnifiedPackingMultiplePartitionsAndOriginalOffsets(t *testing.T) {
 	cache.EXPECT().GetPartitionID(mock.Anything, "db", "coll", "partition_0").Return(int64(300), nil)
 	cache.EXPECT().GetPartitionID(mock.Anything, "db", "coll", "partition_1").Return(int64(301), nil)
 	key := &insertIdempotencyDecoration{key: "key"}
-	rows, err := repackUnifiedUpsert(context.Background(), cache, []string{"p_100v0"}, source, result.IDs, source.FieldsData[1], unifiedPackingSchema(), 0, nil, nil, key, nil, 0)
+	rows, err := repackUpsertMessages(context.Background(), cache, []string{"p_100v0"}, source, result.IDs, source.FieldsData[1], upsertPackingSchema(), 0, nil, nil, key, nil, 0)
 	require.NoError(t, err)
 	require.Len(t, rows, 1, "partitions must not split a VChannel write")
 	upsert := message.MustAsMutableUpsertMessageV2(rows[0])
@@ -77,11 +77,11 @@ func TestUnifiedPackingMultiplePartitionsAndOriginalOffsets(t *testing.T) {
 	}
 	require.Equal(t, offsets, body.RequestRowMapping.RowOffsets)
 	require.Equal(t, result.IDs.GetIntId().Data, body.PrimaryKeys.GetIntId().Data)
-	require.NoError(t, message.ValidateUpsert(upsert.Header(), body, unifiedPackingSchema().Fields[0]))
+	require.NoError(t, message.ValidateUpsert(upsert.Header(), body, upsertPackingSchema().Fields[0]))
 	require.True(t, proto.Equal(before, source.InsertRequest))
 }
 
-func TestUnifiedPackingSplitRetryAndExplicitEffects(t *testing.T) {
+func TestUpsertPackingSplitRetryAndExplicitEffects(t *testing.T) {
 	split := &paramtable.Get().ProxyCfg.SplitChunkProxy
 	previous := split.SwapTempValue("true")
 	defer split.SwapTempValue(previous)
@@ -92,7 +92,7 @@ func TestUnifiedPackingSplitRetryAndExplicitEffects(t *testing.T) {
 	cache := NewMockCache(t)
 	cache.EXPECT().GetPartitionID(mock.Anything, "db", "coll", "_default").Return(int64(200), nil)
 	deletion := &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 3}}}}
-	rows, err := repackUnifiedUpsert(context.Background(), cache, []string{"p_100v0"}, source, result.IDs, nil, unifiedPackingSchema(), 1, nil, nil, &insertIdempotencyDecoration{key: "split"}, deletion, -1)
+	rows, err := repackUpsertMessages(context.Background(), cache, []string{"p_100v0"}, source, result.IDs, nil, upsertPackingSchema(), 1, nil, nil, &insertIdempotencyDecoration{key: "split"}, deletion, -1)
 	require.NoError(t, err)
 	require.Greater(t, len(rows), 1)
 	var offsets []uint32
@@ -104,7 +104,7 @@ func TestUnifiedPackingSplitRetryAndExplicitEffects(t *testing.T) {
 		typed := message.MustAsMutableUpsertMessageV2(raw)
 		body := typed.MustBody()
 		require.Empty(t, body.PartitionIndexes)
-		require.NoError(t, message.ValidateUpsert(typed.Header(), body, unifiedPackingSchema().Fields[0]))
+		require.NoError(t, message.ValidateUpsert(typed.Header(), body, upsertPackingSchema().Fields[0]))
 		offsets = append(offsets, body.RequestRowMapping.RowOffsets...)
 		for _, effect := range body.DeleteEffects {
 			require.NotNil(t, effect.GetAllPartitions())
@@ -115,23 +115,23 @@ func TestUnifiedPackingSplitRetryAndExplicitEffects(t *testing.T) {
 	require.Equal(t, []int64{1, 3}, deleted)
 }
 
-func TestUnifiedPackingGenerationGateRejectsBeforeCacheOrSend(t *testing.T) {
-	item := &paramtable.Get().StreamingCfg.UpsertWALWriteEnabled
+func TestUpsertPackingGenerationGateRejectsBeforeCacheOrSend(t *testing.T) {
+	item := &paramtable.Get().StreamingCfg.EnableUpsertMessage
 	old := item.SwapTempValue("false")
 	defer item.SwapTempValue(old)
 	source, result := newIdempotentRepackInsertMsg(1)
-	rows, err := repackUnifiedUpsert(context.Background(), NewMockCache(t), []string{"p_100v0"}, source, result.IDs, nil, unifiedPackingSchema(), 1, nil, nil, nil, nil, 0)
+	rows, err := repackUpsertMessages(context.Background(), NewMockCache(t), []string{"p_100v0"}, source, result.IDs, nil, upsertPackingSchema(), 1, nil, nil, nil, nil, 0)
 	require.Error(t, err)
 	require.Nil(t, rows)
 }
 
-func TestUnifiedPackingCASAndNullableVector(t *testing.T) {
+func TestUpsertPackingCASAndNullableVector(t *testing.T) {
 	source, result := newIdempotentRepackInsertMsg(3)
 	source.FieldsData = append(source.FieldsData, &schemapb.FieldData{FieldId: 103, Type: schemapb.DataType_FloatVector, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, ValidData: []bool{true, false, true}, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 5, 6}}}}}})
 	cache := NewMockCache(t)
 	cache.EXPECT().GetPartitionID(mock.Anything, "db", "coll", "_default").Return(int64(200), nil)
 	proof := &messagespb.PartialUpdateCAS{}
-	rows, err := repackUnifiedUpsert(context.Background(), cache, []string{"p_100v0"}, source, result.IDs, nil, unifiedPackingSchema(), 1, nil, map[string]*messagespb.PartialUpdateCAS{"p_100v0": proof}, nil, nil, 0)
+	rows, err := repackUpsertMessages(context.Background(), cache, []string{"p_100v0"}, source, result.IDs, nil, upsertPackingSchema(), 1, nil, map[string]*messagespb.PartialUpdateCAS{"p_100v0": proof}, nil, nil, 0)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.True(t, message.HasPartialUpdateCAS(rows[0]))
@@ -141,7 +141,7 @@ func TestUnifiedPackingCASAndNullableVector(t *testing.T) {
 	require.Equal(t, []bool{true, false, true}, body.Columns[2].GetVectors().ValidData)
 }
 
-func TestUnifiedPackingOversizedPlainRowUsesWALChunking(t *testing.T) {
+func TestUpsertPackingOversizedPlainRowUsesWALChunking(t *testing.T) {
 	split := &paramtable.Get().ProxyCfg.SplitChunkProxy
 	old := split.SwapTempValue("true")
 	defer split.SwapTempValue(old)
@@ -151,15 +151,15 @@ func TestUnifiedPackingOversizedPlainRowUsesWALChunking(t *testing.T) {
 	source, result := newIdempotentRepackInsertMsgWithPayload(1, strings.Repeat("x", 2<<20))
 	cache := NewMockCache(t)
 	cache.EXPECT().GetPartitionID(mock.Anything, "db", "coll", "_default").Return(int64(200), nil)
-	messages, err := repackUnifiedUpsert(context.Background(), cache, []string{"p_100v0"}, source, result.IDs, nil, unifiedPackingSchema(), 1, nil, nil, nil, nil, 0)
+	messages, err := repackUpsertMessages(context.Background(), cache, []string{"p_100v0"}, source, result.IDs, nil, upsertPackingSchema(), 1, nil, nil, nil, nil, 0)
 	require.NoError(t, err)
 	require.Len(t, messages, 1)
 	require.Greater(t, messages[0].EstimateSize(), limit.GetAsInt())
-	_, err = repackUnifiedUpsert(context.Background(), cache, []string{"p_100v0"}, source, result.IDs, nil, unifiedPackingSchema(), 1, nil, nil, &insertIdempotencyDecoration{key: "bounded"}, nil, 0)
+	_, err = repackUpsertMessages(context.Background(), cache, []string{"p_100v0"}, source, result.IDs, nil, upsertPackingSchema(), 1, nil, nil, &insertIdempotencyDecoration{key: "bounded"}, nil, 0)
 	require.ErrorIs(t, err, merr.ErrParameterTooLarge)
 }
 
-func BenchmarkUnifiedUpsertProxyPacking(b *testing.B) {
+func BenchmarkUpsertProxyPacking(b *testing.B) {
 	for _, partitions := range []bool{false, true} {
 		name := "single_partition"
 		if partitions {
@@ -180,7 +180,7 @@ func BenchmarkUnifiedUpsertProxyPacking(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				messages, err := repackUnifiedUpsert(context.Background(), cache, []string{"p_100v0"}, source, result.IDs, partitionKeys, unifiedPackingSchema(), 1, nil, nil, &insertIdempotencyDecoration{key: "bench"}, nil, 0)
+				messages, err := repackUpsertMessages(context.Background(), cache, []string{"p_100v0"}, source, result.IDs, partitionKeys, upsertPackingSchema(), 1, nil, nil, &insertIdempotencyDecoration{key: "bench"}, nil, 0)
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -192,28 +192,28 @@ func BenchmarkUnifiedUpsertProxyPacking(b *testing.B) {
 	}
 }
 
-func TestUnifiedPackingRejectsNamespaceBeforeRouting(t *testing.T) {
+func TestUpsertPackingRejectsNamespaceBeforeRouting(t *testing.T) {
 	for _, enabled := range []bool{false, true} {
 		source, result := newIdempotentRepackInsertMsg(1)
-		schema := unifiedPackingSchema()
+		schema := upsertPackingSchema()
 		schema.EnableNamespace = enabled
 		if !enabled {
 			namespace := "tenant"
 			source.Namespace = &namespace
 		}
-		_, err := repackUnifiedUpsert(context.Background(), NewMockCache(t), []string{"p_100v0"}, source, result.IDs, nil, schema, 1, nil, nil, nil, nil, 0)
+		_, err := repackUpsertMessages(context.Background(), NewMockCache(t), []string{"p_100v0"}, source, result.IDs, nil, schema, 1, nil, nil, nil, nil, 0)
 		require.ErrorContains(t, err, "namespace")
 	}
 }
 
-func TestUnifiedPackingEncodingWork(t *testing.T) {
-	if os.Getenv("MILVUS_TEST_UNIFIED_PACKING_WORK") == "" {
+func TestUpsertPackingEncodingWork(t *testing.T) {
+	if os.Getenv("MILVUS_TEST_UPSERT_PACKING_WORK") == "" {
 		executable, err := os.Executable()
 		require.NoError(t, err)
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, executable, "-test.run=^TestUnifiedPackingEncodingWork$", "-test.v") // #nosec G204 -- Re-exec the current test binary with a fixed filter.
-		cmd.Env = append(os.Environ(), "MILVUS_TEST_UNIFIED_PACKING_WORK=1")
+		cmd := exec.CommandContext(ctx, executable, "-test.run=^TestUpsertPackingEncodingWork$", "-test.v") // #nosec G204 -- Re-exec the current test binary with a fixed filter.
+		cmd.Env = append(os.Environ(), "MILVUS_TEST_UPSERT_PACKING_WORK=1")
 		output, err := cmd.CombinedOutput()
 		t.Logf("%s", output)
 		require.NoError(t, err)
@@ -250,7 +250,7 @@ func TestUnifiedPackingEncodingWork(t *testing.T) {
 					config = &message.CipherConfig{EzID: 7, CollectionID: 10}
 				}
 				fixture.encryptCalls, fixture.encryptBytes = 0, 0
-				messages, err := repackUnifiedUpsert(context.Background(), cache, []string{"p_100v0"}, source, result.IDs, nil, unifiedPackingSchema(), 1, config, nil, &insertIdempotencyDecoration{key: "work"}, nil, 0)
+				messages, err := repackUpsertMessages(context.Background(), cache, []string{"p_100v0"}, source, result.IDs, nil, upsertPackingSchema(), 1, config, nil, &insertIdempotencyDecoration{key: "work"}, nil, 0)
 				require.NoError(t, err)
 				require.Greater(t, len(messages), 2)
 				var offsets []uint32
@@ -275,7 +275,7 @@ func TestUnifiedPackingEncodingWork(t *testing.T) {
 	}
 }
 
-func TestUnifiedPackingDuplicateDeleteOccurrences(t *testing.T) {
+func TestUpsertPackingDuplicateDeleteOccurrences(t *testing.T) {
 	for _, stringsPK := range []bool{false, true} {
 		const count = 1024
 		source, result := newIdempotentRepackInsertMsgWithPayload(count, strings.Repeat("x", 1024))
@@ -283,7 +283,7 @@ func TestUnifiedPackingDuplicateDeleteOccurrences(t *testing.T) {
 		for i := range count {
 			keys.GetIntId().Data[i] = int64(i % 4)
 		}
-		schema := unifiedPackingSchema()
+		schema := upsertPackingSchema()
 		if stringsPK {
 			values := make([]string, count)
 			for i := range count {
@@ -319,7 +319,7 @@ func TestUnifiedPackingDuplicateDeleteOccurrences(t *testing.T) {
 		cache := NewMockCache(t)
 		cache.EXPECT().GetPartitionID(mock.Anything, "db", "coll", "_default").Return(int64(200), nil)
 		result.IDs = keys
-		messages, err := repackUnifiedUpsert(context.Background(), cache, []string{"p_100v0"}, source, keys, nil, schema, 1, nil, nil, &insertIdempotencyDecoration{key: "duplicate"}, keys, -1)
+		messages, err := repackUpsertMessages(context.Background(), cache, []string{"p_100v0"}, source, keys, nil, schema, 1, nil, nil, &insertIdempotencyDecoration{key: "duplicate"}, keys, -1)
 		require.NoError(t, err)
 		require.Equal(t, 2, calls, "one direct check and one production match for all chunks")
 		require.Equal(t, 4*count, visits)
@@ -344,7 +344,7 @@ func TestUnifiedPackingDuplicateDeleteOccurrences(t *testing.T) {
 	}
 }
 
-func TestUnifiedPreExecuteRejectsNamespaceBeforeMetadata(t *testing.T) {
+func TestUpsertPreExecuteRejectsNamespaceBeforeMetadata(t *testing.T) {
 	namespace := "tenant"
 	insert, _ := newIdempotentRepackInsertMsg(1)
 	insert.Namespace = &namespace
@@ -352,7 +352,7 @@ func TestUnifiedPreExecuteRejectsNamespaceBeforeMetadata(t *testing.T) {
 	require.ErrorContains(t, (&UpsertTask{req: &milvuspb.UpsertRequest{Namespace: &namespace}}).PreExecute(context.Background()), "namespace")
 }
 
-func BenchmarkUnifiedUpsertSplitScaling(b *testing.B) {
+func BenchmarkUpsertSplitScaling(b *testing.B) {
 	block, err := aes.NewCipher(make([]byte, 32))
 	if err != nil {
 		b.Fatal(err)
@@ -391,7 +391,7 @@ func BenchmarkUnifiedUpsertSplitScaling(b *testing.B) {
 				b.ReportAllocs()
 				b.ResetTimer()
 				for i := 0; i < b.N; i++ {
-					messages, err := repackUnifiedUpsert(context.Background(), cache, []string{"p_100v0"}, source, result.IDs, nil, unifiedPackingSchema(), 1, config, nil, &insertIdempotencyDecoration{key: "bench"}, nil, 0)
+					messages, err := repackUpsertMessages(context.Background(), cache, []string{"p_100v0"}, source, result.IDs, nil, upsertPackingSchema(), 1, config, nil, &insertIdempotencyDecoration{key: "bench"}, nil, 0)
 					if err != nil {
 						b.Fatal(err)
 					}
@@ -407,7 +407,7 @@ func BenchmarkUnifiedUpsertSplitScaling(b *testing.B) {
 	}
 }
 
-func BenchmarkUnifiedUpsertDuplicateMatching(b *testing.B) {
+func BenchmarkUpsertDuplicateMatching(b *testing.B) {
 	for _, stringPK := range []bool{false, true} {
 		for _, count := range []int{1024, 4096, 16384} {
 			b.Run(fmt.Sprintf("string_%v/rows_%d", stringPK, count), func(b *testing.B) {
@@ -432,7 +432,7 @@ func BenchmarkUnifiedUpsertDuplicateMatching(b *testing.B) {
 	}
 }
 
-func TestUnifiedPackingDeleteOccurrencesAcrossChunkBoundaries(t *testing.T) {
+func TestUpsertPackingDeleteOccurrencesAcrossChunkBoundaries(t *testing.T) {
 	for _, stringPK := range []bool{false, true} {
 		const rows = 512
 		source, _ := newIdempotentRepackInsertMsgWithPayload(rows, strings.Repeat("x", 4096))
@@ -443,7 +443,7 @@ func TestUnifiedPackingDeleteOccurrencesAcrossChunkBoundaries(t *testing.T) {
 			texts[i] = fmt.Sprint(i / 64)
 		}
 		keys := &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ints}}}
-		schema := unifiedPackingSchema()
+		schema := upsertPackingSchema()
 		if stringPK {
 			keys = &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: texts}}}
 			schema.Fields[0].DataType = schemapb.DataType_VarChar
@@ -456,7 +456,7 @@ func TestUnifiedPackingDeleteOccurrencesAcrossChunkBoundaries(t *testing.T) {
 		defer limit.SwapTempValue(previous)
 		cache := NewMockCache(t)
 		cache.EXPECT().GetPartitionID(mock.Anything, "db", "coll", "_default").Return(int64(200), nil)
-		messages, err := repackUnifiedUpsert(context.Background(), cache, []string{"p_100v0"}, source, keys, nil, schema, 1, nil, nil, &insertIdempotencyDecoration{key: "boundary"}, keys, -1)
+		messages, err := repackUpsertMessages(context.Background(), cache, []string{"p_100v0"}, source, keys, nil, schema, 1, nil, nil, &insertIdempotencyDecoration{key: "boundary"}, keys, -1)
 		require.NoError(t, err)
 		var gotInts []int64
 		var gotStrings []string

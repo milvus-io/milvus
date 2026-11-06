@@ -178,11 +178,11 @@ func checkMaxInsertSize(ctx context.Context, op string, size int) error {
 }
 
 func (it *InsertTask) PreExecute(ctx context.Context) error {
-	if err := requireUnifiedUpsertGeneration(); err != nil {
+	if err := requireUpsertWALGeneration(); err != nil {
 		return err
 	}
 	if it.insertMsg.Namespace != nil {
-		return merr.WrapErrParameterInvalidMsg("unified Upsert WAL does not support namespace requests")
+		return merr.WrapErrParameterInvalidMsg("Upsert WAL does not support namespace requests")
 	}
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Insert-PreExecute")
 	defer sp.End()

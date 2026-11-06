@@ -1035,7 +1035,7 @@ func (x *InsertMessageHeader) GetIdempotentResult() *IdempotentInsertResult {
 }
 
 // IdempotentInsertResult returns the original primary keys and request offsets.
-// Historical Insert headers retain this result. Unified Upsert reconstructs it
+// Historical Insert headers retain this result. Upsert reconstructs it
 // from primary_keys and request_row_mapping without decoding ordinary columns.
 // AppendResult.extra uses the same result type for both message formats.
 type IdempotentInsertResult struct {
@@ -1093,15 +1093,24 @@ func (x *IdempotentInsertResult) GetIds() *schemapb.IDs {
 	return nil
 }
 
-// PartitionSegmentAssignment is the segment assignment of a partition.
+// Describes the insert rows assigned to one partition.
 type PartitionSegmentAssignment struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	PartitionId       int64              `protobuf:"varint,1,opt,name=partition_id,json=partitionId,proto3" json:"partition_id,omitempty"`
-	Rows              uint64             `protobuf:"varint,2,opt,name=rows,proto3" json:"rows,omitempty"`
-	BinarySize        uint64             `protobuf:"varint,3,opt,name=binary_size,json=binarySize,proto3" json:"binary_size,omitempty"`
+	// Target partition within the message's collection.
+	PartitionId int64 `protobuf:"varint,1,opt,name=partition_id,json=partitionId,proto3" json:"partition_id,omitempty"`
+	// Number of logical insert rows assigned to this partition.
+	// For Upsert, this matches the partition_indexes occurrence count.
+	// A single-partition Upsert omits indexes and assigns all rows here.
+	Rows uint64 `protobuf:"varint,2,opt,name=rows,proto3" json:"rows,omitempty"`
+	// Estimated insert data bytes for this partition's rows.
+	// For Upsert, excludes delete effects and the outer message envelope.
+	// Do not repeat the size of the entire multi-partition batch.
+	BinarySize uint64 `protobuf:"varint,3,opt,name=binary_size,json=binarySize,proto3" json:"binary_size,omitempty"`
+	// Physical placement assigned by the receiving StreamingNode before append.
+	// A CDC secondary replaces source placement with its own local assignment.
 	SegmentAssignment *SegmentAssignment `protobuf:"bytes,4,opt,name=segment_assignment,json=segmentAssignment,proto3" json:"segment_assignment,omitempty"`
 }
 
@@ -1165,12 +1174,13 @@ func (x *PartitionSegmentAssignment) GetSegmentAssignment() *SegmentAssignment {
 	return nil
 }
 
-// SegmentAssignment is the assignment of a segment.
+// Physical insert placement within the receiving cluster.
 type SegmentAssignment struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// Local segment that receives the assigned insert rows.
 	SegmentId int64 `protobuf:"varint,1,opt,name=segment_id,json=segmentId,proto3" json:"segment_id,omitempty"`
 }
 
@@ -1269,16 +1279,27 @@ func (x *DeleteMessageHeader) GetRows() uint64 {
 	return 0
 }
 
-// Upsert carries rows and explicit deletion effects for one collection and VChannel.
+// Describes one logical write for one collection and one VChannel.
+// The outer message properties carry VChannel, TimeTick, transaction context,
+// and the idempotency key. The partition table controls insert placement only.
 type UpsertMessageHeader struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	CollectionId  int64                         `protobuf:"varint,1,opt,name=collection_id,json=collectionId,proto3" json:"collection_id,omitempty"`
-	Partitions    []*PartitionSegmentAssignment `protobuf:"bytes,2,rep,name=partitions,proto3" json:"partitions,omitempty"`
-	SchemaVersion *int32                        `protobuf:"varint,3,opt,name=schema_version,json=schemaVersion,proto3,oneof" json:"schema_version,omitempty"`
-	DeleteRows    uint64                        `protobuf:"varint,4,opt,name=delete_rows,json=deleteRows,proto3" json:"delete_rows,omitempty"`
+	// Collection that owns all inserted rows and explicit delete effects.
+	// Must match the collection identity encoded in the message's VChannel.
+	CollectionId int64 `protobuf:"varint,1,opt,name=collection_id,json=collectionId,proto3" json:"collection_id,omitempty"`
+	// Nonempty insert target table with unique, positive partition IDs.
+	// Each entry has a positive row count. Table order defines partition_indexes.
+	// Entry row counts must sum to the number of inserted primary keys.
+	Partitions []*PartitionSegmentAssignment `protobuf:"bytes,2,rep,name=partitions,proto3" json:"partitions,omitempty"`
+	// Exact schema version used to prepare the row batch.
+	// Producers must supply this field, including an explicit version zero.
+	SchemaVersion *int32 `protobuf:"varint,3,opt,name=schema_version,json=schemaVersion,proto3,oneof" json:"schema_version,omitempty"`
+	// Sum of primary key counts across every explicit delete effect.
+	// Zero means that the message has no delete effects.
+	DeleteRows uint64 `protobuf:"varint,4,opt,name=delete_rows,json=deleteRows,proto3" json:"delete_rows,omitempty"`
 }
 
 func (x *UpsertMessageHeader) Reset() {
@@ -1341,17 +1362,47 @@ func (x *UpsertMessageHeader) GetDeleteRows() uint64 {
 	return 0
 }
 
+// Contains inserted rows and optional explicit deletion of older versions.
+// Insert, Upsert, and partial-update APIs use this format. Ordinary Insert
+// requests have no delete effects. Consumers never infer deletes from inserted PKs.
+// Rows and effects use one final visibility TimeTick, supplied by the message
+// or its transaction Commit. Equal-TimeTick duplicates do not imply last-write-wins.
+// Separate metadata fields permit PK projection without decoding ordinary columns.
 type UpsertMessageBody struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	PrimaryKeys       *schemapb.IDs            `protobuf:"bytes,1,opt,name=primary_keys,json=primaryKeys,proto3" json:"primary_keys,omitempty"`
-	RowIds            []int64                  `protobuf:"varint,2,rep,packed,name=row_ids,json=rowIds,proto3" json:"row_ids,omitempty"`
-	PartitionIndexes  []uint32                 `protobuf:"varint,3,rep,packed,name=partition_indexes,json=partitionIndexes,proto3" json:"partition_indexes,omitempty"`
-	Columns           []*schemapb.FieldData    `protobuf:"bytes,4,rep,name=columns,proto3" json:"columns,omitempty"`
-	DeleteEffects     []*UpsertDeleteEffect    `protobuf:"bytes,5,rep,name=delete_effects,json=deleteEffects,proto3" json:"delete_effects,omitempty"`
-	PartialUpdateCas  *PartialUpdateCAS        `protobuf:"bytes,6,opt,name=partial_update_cas,json=partialUpdateCas,proto3" json:"partial_update_cas,omitempty"`
+	// Inserted Int64 or VarChar primary keys, in logical row order.
+	// The key type must match the schema. AutoID values are already resolved.
+	// The columns field must not contain another primary key column.
+	PrimaryKeys *schemapb.IDs `protobuf:"bytes,1,opt,name=primary_keys,json=primaryKeys,proto3" json:"primary_keys,omitempty"`
+	// Internal RowIDs, one for each inserted primary key, in the same order.
+	// RowID and user PK have separate roles, even when AutoID makes values equal.
+	RowIds []int64 `protobuf:"varint,2,rep,packed,name=row_ids,json=rowIds,proto3" json:"row_ids,omitempty"`
+	// Maps each logical row to the header's partition table.
+	// Values are zero-based table indexes, not partition IDs.
+	//
+	// Omit this field for one partition; every row uses table entry zero.
+	// For multiple partitions, supply one valid index per inserted primary key.
+	// Each entry's occurrence count must equal that partition's header row count.
+	PartitionIndexes []uint32 `protobuf:"varint,3,rep,packed,name=partition_indexes,json=partitionIndexes,proto3" json:"partition_indexes,omitempty"`
+	// Ordinary user columns and materialized function outputs.
+	// Excludes PK, RowID, and Timestamp fields. Each field ID occurs at most once.
+	// Columns follow the logical row order of primary_keys and share its selection.
+	// Nullable columns retain existing FieldData validity and compact-vector encodings.
+	// The final visible message TimeTick supplies the inserted row timestamps.
+	Columns []*schemapb.FieldData `protobuf:"bytes,4,rep,name=columns,proto3" json:"columns,omitempty"`
+	// Explicit keys and scopes for deleting older row versions.
+	// Deletion scope is independent of insert placement and inserted key membership.
+	// An empty list means no old versions are deleted.
+	DeleteEffects []*UpsertDeleteEffect `protobuf:"bytes,5,rep,name=delete_effects,json=deleteEffects,proto3" json:"delete_effects,omitempty"`
+	// Proof for the existing partial-update compare-and-swap (CAS) protocol.
+	// Omit it for writes without CAS. Presence must match the outer CAS marker.
+	PartialUpdateCas *PartialUpdateCAS `protobuf:"bytes,6,opt,name=partial_update_cas,json=partialUpdateCas,proto3" json:"partial_update_cas,omitempty"`
+	// Maps inserted rows back to the original client request after routing/splitting.
+	// Required when an idempotent retry must return the original row results.
+	// No separate result copy is stored in this header or body.
 	RequestRowMapping *UpsertRequestRowMapping `protobuf:"bytes,7,opt,name=request_row_mapping,json=requestRowMapping,proto3" json:"request_row_mapping,omitempty"`
 }
 
@@ -1436,11 +1487,15 @@ func (x *UpsertMessageBody) GetRequestRowMapping() *UpsertRequestRowMapping {
 	return nil
 }
 
+// Preserves request row identity across VChannel routing and message splitting.
+// Retry results combine these offsets with the original stored primary_keys.
 type UpsertRequestRowMapping struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// Original request offset for each inserted primary key, in the same order.
+	// The count must equal the inserted PK count. Offsets are not chunk-local.
 	RowOffsets []uint32 `protobuf:"varint,1,rep,packed,name=row_offsets,json=rowOffsets,proto3" json:"row_offsets,omitempty"`
 }
 
@@ -1483,17 +1538,25 @@ func (x *UpsertRequestRowMapping) GetRowOffsets() []uint32 {
 	return nil
 }
 
+// Deletes versions strictly older than the message's final visible TimeTick.
+// A transaction body uses the Commit TimeTick for both inserts and deletes.
+// Newly inserted rows cannot delete themselves. Missing older versions are a no-op.
 type UpsertDeleteEffect struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// Producers must select exactly one scope, independent of the insert table.
+	//
 	// Types that are assignable to Scope:
 	//
 	//	*UpsertDeleteEffect_AllPartitions
 	//	*UpsertDeleteEffect_PartitionId
-	Scope       isUpsertDeleteEffect_Scope `protobuf_oneof:"scope"`
-	PrimaryKeys *schemapb.IDs              `protobuf:"bytes,3,opt,name=primary_keys,json=primaryKeys,proto3" json:"primary_keys,omitempty"`
+	Scope isUpsertDeleteEffect_Scope `protobuf_oneof:"scope"`
+	// Nonempty keys whose older versions must be deleted.
+	// The key type must match the collection's PK schema.
+	// Keys need not equal or be a subset of inserted keys.
+	PrimaryKeys *schemapb.IDs `protobuf:"bytes,3,opt,name=primary_keys,json=primaryKeys,proto3" json:"primary_keys,omitempty"`
 }
 
 func (x *UpsertDeleteEffect) Reset() {
@@ -1561,10 +1624,13 @@ type isUpsertDeleteEffect_Scope interface {
 }
 
 type UpsertDeleteEffect_AllPartitions struct {
+	// Every partition of this collection within the message's VChannel.
 	AllPartitions *UpsertAllPartitions `protobuf:"bytes,1,opt,name=all_partitions,json=allPartitions,proto3,oneof"`
 }
 
 type UpsertDeleteEffect_PartitionId struct {
+	// One positive partition ID, which need not receive inserted rows.
+	// Do not use sentinel values for the all-partitions scope.
 	PartitionId int64 `protobuf:"varint,2,opt,name=partition_id,json=partitionId,proto3,oneof"`
 }
 
@@ -1572,6 +1638,7 @@ func (*UpsertDeleteEffect_AllPartitions) isUpsertDeleteEffect_Scope() {}
 
 func (*UpsertDeleteEffect_PartitionId) isUpsertDeleteEffect_Scope() {}
 
+// Presence selects all collection partitions within the message's VChannel.
 type UpsertAllPartitions struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache

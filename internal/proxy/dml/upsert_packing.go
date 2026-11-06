@@ -33,21 +33,21 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func requireUnifiedUpsertGeneration() error {
-	if !paramtable.Get().StreamingCfg.UpsertWALWriteEnabled.GetAsBool() {
-		return merr.WrapErrServiceUnavailableMsg("unified Upsert WAL generation is disabled; upgrade all readers before enabling it")
+func requireUpsertWALGeneration() error {
+	if !paramtable.Get().StreamingCfg.EnableUpsertMessage.GetAsBool() {
+		return merr.WrapErrServiceUnavailableMsg("Upsert WAL generation is disabled; upgrade all readers before enabling it")
 	}
 	return nil
 }
 
-// repackUnifiedUpsert groups only by VChannel and encoded size. Partition IDs
+// repackUpsertMessages groups only by VChannel and encoded size. Partition IDs
 // remain per-row placement, independent of explicit deletion scope.
-func repackUnifiedUpsert(ctx context.Context, cache Cache, channels []string, source *msgstream.InsertMsg, ids *schemapb.IDs, partitionKeys *schemapb.FieldData, schema *schemapb.CollectionSchema, version int32, cipher *message.CipherConfig, cas map[string]*messagespb.PartialUpdateCAS, idempotency *insertIdempotencyDecoration, deleted *schemapb.IDs, deletePartition int64) ([]message.MutableMessage, error) {
-	if err := requireUnifiedUpsertGeneration(); err != nil {
+func repackUpsertMessages(ctx context.Context, cache Cache, channels []string, source *msgstream.InsertMsg, ids *schemapb.IDs, partitionKeys *schemapb.FieldData, schema *schemapb.CollectionSchema, version int32, cipher *message.CipherConfig, cas map[string]*messagespb.PartialUpdateCAS, idempotency *insertIdempotencyDecoration, deleted *schemapb.IDs, deletePartition int64) ([]message.MutableMessage, error) {
+	if err := requireUpsertWALGeneration(); err != nil {
 		return nil, err
 	}
 	if source.Namespace != nil {
-		return nil, merr.WrapErrParameterInvalidMsg("unified Upsert WAL does not support namespace requests")
+		return nil, merr.WrapErrParameterInvalidMsg("Upsert WAL does not support namespace requests")
 	}
 	if err := message.ValidateUpsertSchema(schema); err != nil {
 		return nil, err
