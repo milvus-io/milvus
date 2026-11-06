@@ -1,0 +1,48 @@
+{
+  "python": {
+    "cwd": "tests/python_client",
+    "files": [
+      "milvus_client/test_milvus_client_struct_array_add_subfield.py",
+      "milvus_client/test_milvus_client_struct_array_added_subfield_types.py",
+      "milvus_client/test_milvus_client_struct_array_bulk_import.py",
+      "milvus_client/test_milvus_client_struct_array_concurrent_mutations.py",
+      "milvus_client/test_milvus_client_struct_array_concurrent_read_write.py",
+      "milvus_client/test_milvus_client_struct_array_concurrent_schema_updates.py",
+      "milvus_client/test_milvus_client_struct_array_concurrent_subfield_drop.py",
+      "milvus_client/test_milvus_client_struct_array_dml.py",
+      "milvus_client/test_milvus_client_struct_array_field_properties.py",
+      "milvus_client/test_milvus_client_struct_array_growing_sealed_search.py",
+      "milvus_client/test_milvus_client_struct_array_import_validation.py",
+      "milvus_client/test_milvus_client_struct_array_indexed_query.py",
+      "milvus_client/test_milvus_client_struct_array_indexed_subfields.py",
+      "milvus_client/test_milvus_client_struct_array_mmap_warmup.py",
+      "milvus_client/test_milvus_client_struct_array_nested_array_children.py",
+      "milvus_client/test_milvus_client_struct_array_nested_array_predicates.py",
+      "milvus_client/test_milvus_client_struct_array_nested_validity.py",
+      "milvus_client/test_milvus_client_struct_array_nullable_predicates.py",
+      "milvus_client/test_milvus_client_struct_array_nullable_scalar_children.py",
+      "milvus_client/test_milvus_client_struct_array_nullable_vector_coordinates.py",
+      "milvus_client/test_milvus_client_struct_array_partial_update_paths.py",
+      "milvus_client/test_milvus_client_struct_array_partial_update_rejection.py",
+      "milvus_client/test_milvus_client_struct_array_partition_isolation.py",
+      "milvus_client/test_milvus_client_struct_array_protobuf_validity.py",
+      "milvus_client/test_milvus_client_struct_array_query_null_reduction.py",
+      "milvus_client/test_milvus_client_struct_array_schema_rbac.py",
+      "milvus_client/test_milvus_client_struct_array_schema_validation.py",
+      "milvus_client/test_milvus_client_struct_array_search_validation.py",
+      "milvus_client/test_milvus_client_struct_array_storage_v3_flush.py",
+      "milvus_client/test_milvus_client_struct_array_vector_index_metric.py",
+      "milvus_client/test_milvus_client_struct_array_vector_scores.py"
+    ]
+  },
+  "rest": {
+    "cwd": "tests/restful_client_v2",
+    "files": [
+      "testcases/test_struct_array_dml.py",
+      "testcases/test_struct_array_field_properties.py",
+      "testcases/test_struct_array_import_rejection.py",
+      "testcases/test_struct_array_partial_update.py",
+      "testcases/test_struct_array_subfield_evolution.py"
+    ]
+  }
+}

@@ -456,6 +456,65 @@ TEST(Growing, StructArrayRepresentativeFollowsSchemaOrder) {
     EXPECT_EQ(offsets->ElementIDRangeOfRow(0), std::make_pair(0, 2));
 }
 
+// A message missing the representative child must use sibling lengths when
+// synthesizing the missing nullable child and advancing element offsets.
+TEST(Growing, InsertMissingRepresentativeUsesSiblingLengths) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    // first is the representative (proto order first). element_nullable=true
+    // so the ARRAY sub-fields are native-list (compensation requires it).
+    auto first = schema->AddDebugArrayField(
+        "items[first]", DataType::INT32, false, true);
+    auto second = schema->AddDebugArrayField(
+        "items[second]", DataType::INT32, false, true);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+
+    InsertRecordProto insert;
+    insert.set_num_rows(1);
+    auto* pk_data = insert.add_fields_data();
+    pk_data->set_field_id(pk.get());
+    pk_data->set_type(proto::schema::DataType::Int64);
+    pk_data->mutable_scalars()->mutable_long_data()->add_data(1);
+    // Only the non-representative sibling is present; the representative is
+    // omitted to exercise an older-schema message against the current segment.
+    auto* second_data = insert.add_fields_data();
+    second_data->set_field_id(second.get());
+    second_data->set_type(proto::schema::DataType::Array);
+    auto* rows = second_data->mutable_scalars()->mutable_array_data();
+    rows->set_element_type(proto::schema::DataType::Int32);
+    auto* row = rows->add_data();
+    for (int i = 0; i < 3; ++i) {
+        row->mutable_int_data()->add_data(i);
+        row->mutable_valid_data()->Add(
+            true);  // element_nullable: leaf validity
+    }
+
+    const int64_t row_id = 1;
+    const Timestamp timestamp = 1;
+    ASSERT_NO_THROW(segment->Insert(
+        segment->PreInsert(1), 1, &row_id, &timestamp, &insert));
+
+    // Offsets advanced from the sibling's lengths; the synthesized
+    // representative reads 3 null elements.
+    auto offsets = segment->GetStructElementOffsets(first);
+    ASSERT_NE(offsets, nullptr);
+    EXPECT_EQ(offsets.get(), segment->GetStructElementOffsets(second).get());
+    EXPECT_EQ(offsets->ElementIDRangeOfRow(0), std::make_pair(0, 3));
+    EXPECT_EQ(offsets->GetRowCount(), 1);
+    EXPECT_EQ(offsets->GetTotalElementCount(), 3);
+
+    milvus::OpContext op_ctx;
+    const int64_t row_ids[] = {0};
+    auto result = segment->bulk_subscript(&op_ctx, first, row_ids, 1);
+    ASSERT_EQ(result->scalars().array_data().data_size(), 1);
+    EXPECT_EQ(result->scalars().array_data().data(0).valid_data_size(), 3);
+    for (const bool valid :
+         result->scalars().array_data().data(0).valid_data()) {
+        EXPECT_FALSE(valid);
+    }
+}
+
 TEST(Growing, ReopenBackfillsStructChildBeforeInsertLengths) {
     const FieldId pk(100);
     const FieldId source(101);
