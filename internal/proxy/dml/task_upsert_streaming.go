@@ -229,19 +229,13 @@ func (ut *UpsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 		return append(inserts, deletes...), nil
 	}
 
-	deleteKeys := ut.upsertMsg.DeleteMsg.PrimaryKeys
-	if deleteKeys == nil {
-		deleteKeys = ut.oldIDs
+	if err := validateUpsertNamespace(ut.req.Namespace, ut.schema.CollectionSchema); err != nil {
+		return nil, err
 	}
-	return repackUpsertMessages(ctx, ut.GetMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result.GetIDs(), ut.partitionKeys, ut.schema.CollectionSchema, ut.schemaVersion, ez, ut.partialUpdateCASGroups, nil, deleteKeys, ut.upsertMsg.DeleteMsg.PartitionID)
+	return repackUpsertMessages(ctx, ut.GetMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result.GetIDs(), ut.partitionKeys, ut.schema.CollectionSchema, ut.schemaVersion, ez, ut.partialUpdateCASGroups, nil, ut.upsertMsg.DeleteMsg.GetPrimaryKeys(), ut.upsertMsg.DeleteMsg.PartitionID)
 }
 
 func (ut *UpsertTask) packDeleteMessage(ctx context.Context, ez *message.CipherConfig) ([]message.MutableMessage, error) {
-	if ut.upsertMsg.DeleteMsg.PrimaryKeys == nil {
-		// Fall back only when no delete subset was prepared; an empty subset
-		// means no lookup IDs should be deleted.
-		ut.upsertMsg.DeleteMsg.PrimaryKeys = ut.oldIDs
-	}
 	if typeutil.GetSizeOfIDs(ut.upsertMsg.DeleteMsg.PrimaryKeys) == 0 {
 		return nil, nil
 	}

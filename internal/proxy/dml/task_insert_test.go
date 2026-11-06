@@ -889,16 +889,14 @@ func TestInsertTask_Namespace(t *testing.T) {
 			idAllocator: idAllocator,
 		}
 		gate := &paramtable.Get().StreamingCfg.EnableUpsertMessage
-		previous := gate.SwapTempValue("true")
+		previous := gate.SwapTempValue("false")
 		defer gate.SwapTempValue(previous)
-		err := it.PreExecute(context.Background())
-		assert.ErrorContains(t, err, "namespace")
-		assert.Empty(t, it.insertMsg.FieldsData)
-
-		gate.SwapTempValue("false")
 		require.NoError(t, it.PreExecute(context.Background()))
 		require.NotEmpty(t, it.insertMsg.FieldsData)
-		gate.SwapTempValue(previous)
+		gate.SwapTempValue("true")
+		it.vChannels = []string{"p_0v0"}
+		err := it.Execute(context.Background())
+		require.ErrorContains(t, err, "namespace")
 
 		// namespace data is not set
 		it = InsertTask{
@@ -1428,28 +1426,52 @@ func collectIdempotentRepackOffsets(t *testing.T, msgs []message.MutableMessage,
 	return offsets
 }
 
-func TestInsertPreExecuteNamespaceFormatGate(t *testing.T) {
-	for _, enabled := range []string{"false", "true"} {
-		t.Run(enabled, func(t *testing.T) {
-			gate := &paramtable.Get().StreamingCfg.EnableUpsertMessage
-			previous := gate.SwapTempValue(enabled)
-			defer gate.SwapTempValue(previous)
-			cache := NewMockCache(t)
-			expectedError := merr.WrapErrCollectionNotFound("namespace_test")
-			if enabled == "false" {
-				cache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, "namespace_test").Return(int64(0), expectedError).Once()
-			}
-			namespace := "tenant"
-			insert, _ := newIdempotentRepackInsertMsg(1)
-			insert.CollectionName = "namespace_test"
-			insert.Namespace = &namespace
-			err := (&InsertTask{baseTask: baseTask{MetaCache: cache}, insertMsg: insert}).PreExecute(t.Context())
-
-			if enabled == "true" {
-				require.ErrorContains(t, err, "Upsert WAL does not support namespace requests")
-			} else {
-				require.ErrorIs(t, err, expectedError)
-			}
-		})
+func TestInsertNamespaceUsesFinalFormat(t *testing.T) {
+	for _, kind := range []string{"request", "collection"} {
+		for _, mode := range []string{"false", "true"} {
+			t.Run(kind+"/"+mode, func(t *testing.T) {
+				gate := &paramtable.Get().StreamingCfg.EnableUpsertMessage
+				previous := gate.SwapTempValue("false")
+				defer gate.SwapTempValue(previous)
+				source, result := newIdempotentRepackInsertMsg(1)
+				schema := upsertPackingSchema()
+				namespace := "tenant"
+				if kind == "request" {
+					source.Namespace = &namespace
+				} else {
+					schema.EnableNamespace = true
+				}
+				task := &InsertTask{ctx: t.Context(), insertMsg: source, result: result, schema: schema, collectionID: 100, vChannels: []string{"p_100v0"}}
+				reached := merr.WrapErrServiceUnavailable("legacy packing reached")
+				patch := mockey.Mock(repackInsertDataForStreamingService).Return(nil, reached).Build()
+				defer patch.UnPatch()
+				gate.SwapTempValue(mode)
+				err := task.Execute(t.Context())
+				if mode == "true" {
+					require.ErrorContains(t, err, "namespace")
+				} else {
+					require.ErrorIs(t, err, reached)
+				}
+			})
+		}
 	}
+}
+
+func TestInsertFormatDecisionSurvivesGateChangeDuringValidation(t *testing.T) {
+	gate := &paramtable.Get().StreamingCfg.EnableUpsertMessage
+	previous := gate.SwapTempValue("true")
+	defer gate.SwapTempValue(previous)
+	source, result := newIdempotentRepackInsertMsg(1)
+	task := &InsertTask{ctx: t.Context(), insertMsg: source, result: result, schema: upsertPackingSchema(), collectionID: 100, vChannels: []string{"p_100v0"}}
+	var original func(*string, *schemapb.CollectionSchema) error
+	check := mockey.Mock(validateUpsertNamespace).Origin(&original).To(func(namespace *string, schema *schemapb.CollectionSchema) error {
+		err := original(namespace, schema)
+		gate.SwapTempValue("false")
+		return err
+	}).Build()
+	defer check.UnPatch()
+	reached := merr.WrapErrServiceUnavailable("Upsert packing reached")
+	pack := mockey.Mock(repackUpsertMessages).Return(nil, reached).Build()
+	defer pack.UnPatch()
+	require.ErrorIs(t, task.Execute(t.Context()), reached)
 }
