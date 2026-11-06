@@ -9,6 +9,7 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from pymilvus.client.types import LoadState
+from pymilvus.grpc_gen import milvus_pb2, schema_pb2
 from utils.util_pymilvus import *
 
 prefix = "client_collection"
@@ -124,6 +125,85 @@ class TestMilvusClientCollectionInvalid(TestMilvusClientV2Base):
         # Try to create collection and expect error
         error = {ct.err_code: 65535, ct.err_msg: expected_msg}
         self.create_collection(client, collection_name, invalid_dim, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.fixture
+    def raw_collection_schema(self, user, password, db_name):
+        client = self._client(user=user, password=password, db_name=db_name)
+        name = cf.gen_collection_name_by_testcase_name()
+        schema = schema_pb2.CollectionSchema(name=name)
+        schema.fields.add(name="id", data_type=schema_pb2.Int64, is_primary_key=True)
+        schema.fields.add(name="vector", data_type=schema_pb2.FloatVector).type_params.add(key="dim", value="4")
+        try:
+            yield client, schema
+        finally:
+            try:
+                if client.has_collection(name):
+                    self.drop_collection(client, name)
+            finally:
+                self.close(client)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("dim,cause", [("abc", "invalid syntax"), ("9223372036854775808", "value out of range")])
+    def test_milvus_client_collection_invalid_dimension_parse(self, raw_collection_schema, db_name, dim, cause):
+        """Malformed dimensions reach server validation and retain their parse cause."""
+        client, schema = raw_collection_schema
+        schema.fields[1].type_params[0].value = dim
+        # Send raw protobuf so SDK validation cannot hide the server error.
+        status = client._get_connection()._stub.CreateCollection(
+            milvus_pb2.CreateCollectionRequest(
+                db_name=db_name, collection_name=schema.name, schema=schema.SerializeToString()
+            ),
+            timeout=30,
+        )
+        assert status.code == 1100, status
+        assert status.extra_info.get("is_input_error") == "true", status
+        assert not status.retriable, status
+        for text in ("dim", "vector", dim, cause):
+            assert text in status.reason, status
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("in_struct", [False, True])
+    def test_milvus_client_collection_invalid_skip_load(self, raw_collection_schema, db_name, in_struct):
+        """Invalid skipLoad values identify ordinary and normalized struct fields."""
+        client, schema = raw_collection_schema
+        if in_struct:
+            struct = schema.struct_array_fields.add(name="items")
+            struct.type_params.add(key="max_capacity", value="10")
+            field = struct.fields.add(name="payload", data_type=schema_pb2.Array, element_type=schema_pb2.Bool)
+            field.type_params.add(key="max_capacity", value="10")
+        else:
+            field = schema.fields.add(name="payload", data_type=schema_pb2.Bool)
+        field.type_params.add(key="field.skipLoad", value="invalid_bool")
+        status = client._get_connection()._stub.CreateCollection(
+            milvus_pb2.CreateCollectionRequest(
+                db_name=db_name, collection_name=schema.name, schema=schema.SerializeToString()
+            ),
+            timeout=30,
+        )
+        assert status.code == 1100, status
+        assert status.extra_info.get("is_input_error") == "true", status
+        assert not status.retriable, status
+        field_name = "items[payload]" if in_struct else "payload"
+        for text in ("field.skipLoad", f"of field {field_name} must be a boolean", "invalid_bool"):
+            assert text in status.reason, status
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("add_field", [False, True])
+    def test_milvus_client_collection_malformed_schema(self, raw_collection_schema, db_name, add_field):
+        """CreateCollection and AddCollectionField classify malformed schema bytes."""
+        client, schema = raw_collection_schema
+        stub = client._get_connection()._stub
+        if add_field:
+            self.create_collection(client, schema.name, dimension=4)
+            method, request_type = stub.AddCollectionField, milvus_pb2.AddCollectionFieldRequest
+        else:
+            method, request_type = stub.CreateCollection, milvus_pb2.CreateCollectionRequest
+        status = method(request_type(db_name=db_name, collection_name=schema.name, schema=b"\xff"), timeout=30)
+        assert status.code == 1100, status
+        assert status.extra_info.get("is_input_error") == "true", status
+        assert not status.retriable, status
+        for text in ("schema", schema.name, "proto:"):
+            assert text in status.reason, status
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="pymilvus issue 1554")
@@ -4171,7 +4251,7 @@ class TestMilvusClientDescribeCollectionValid(TestMilvusClientV2Base):
             "functions": [],
             "aliases": [],
             "consistency_level": 0,
-            'consistency_level_name': 'Strong',
+            "consistency_level_name": "Strong",
             "properties": {"timezone": "UTC"},
             "num_partitions": 1,
             "enable_dynamic_field": True,

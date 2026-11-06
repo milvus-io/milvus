@@ -1979,8 +1979,8 @@ func TestCreateCollection(t *testing.T) {
 		path: path,
 		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2, "idType": "Varchar",` +
 			`"params": {"max_length": 256, "enableDynamicField": 100, "shardsNum": 2, "consistencyLevel": "unknown", "ttlSeconds": 3600}}`),
-		errMsg:  "parse enableDynamicField fail, err:strconv.ParseBool: parsing \"100\": invalid syntax",
-		errCode: 65535,
+		errMsg:  "the value for enableDynamicField must be a boolean: strconv.ParseBool: parsing \"100\": invalid syntax",
+		errCode: 1100,
 	})
 
 	for _, testcase := range postTestCases {
@@ -4079,4 +4079,27 @@ func TestInsertMalformedBodyNeverReachesProxy(t *testing.T) {
 				"a malformed body must not be accepted: %s", tt.body)
 		})
 	}
+}
+
+func TestCreateCollectionQuickInvalidEnableDynamicField(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	proxy := mocks.NewMockProxy(t)
+	engine := initHTTPServerV2(proxy, false)
+	req := httptest.NewRequest(http.MethodPost, versionalV2(CollectionCategory, CreateAction),
+		strings.NewReader(`{"collectionName":"invalid_dynamic","dimension":128,"params":{"enableDynamicField":"invalid_bool"}}`))
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var response ReturnErrMsg
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	assert.Equal(t, int32(1100), response.Code)
+	assert.Contains(t, response.Message, "enableDynamicField")
+	assert.Contains(t, response.Message, "invalid_bool")
+	assert.Contains(t, response.Message, "invalid syntax")
+	proxy.AssertNotCalled(t, "CreateCollection", mock.Anything, mock.Anything)
+	proxy.AssertNotCalled(t, "CreateIndex", mock.Anything, mock.Anything)
 }

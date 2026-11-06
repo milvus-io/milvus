@@ -6428,3 +6428,76 @@ func TestSearchTask_SearchRequeryPolicy(t *testing.T) {
 		assert.False(t, task.needRequery, "only pk output should not trigger requery under outputvector policy")
 	})
 }
+
+func TestSearchTaskCheckNqMalformedPlaceholder(t *testing.T) {
+	for _, advanced := range []bool{false, true} {
+		name := "search"
+		wantContext := "failed to unmarshal placeholder group:"
+		if advanced {
+			name = "hybrid search"
+			wantContext = "failed to unmarshal placeholder group for sub search:"
+		}
+		t.Run(name, func(t *testing.T) {
+			request := &milvuspb.SearchRequest{
+				SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: []byte{0xff}},
+			}
+			if advanced {
+				request = convertHybridSearchToSearch(&milvuspb.HybridSearchRequest{
+					Requests: []*milvuspb.SearchRequest{request},
+				})
+			}
+			task := &searchTask{
+				SearchRequest: &internalpb.SearchRequest{IsAdvanced: advanced},
+				request:       request,
+			}
+			_, err := task.checkNq(context.Background())
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.ErrorIs(t, err, proto.Error)
+			status := merr.Status(err)
+			assert.Equal(t, int32(1100), status.GetCode())
+			assert.Equal(t, "true", status.GetExtraInfo()[merr.InputErrorFlagKey])
+			assert.False(t, status.GetRetriable())
+			assert.Contains(t, status.GetReason(), wantContext)
+			assert.Contains(t, status.GetReason(), "proto:")
+		})
+	}
+}
+
+func TestSearchTaskCheckNqCompatibility(t *testing.T) {
+	placeholder, err := proto.Marshal(&commonpb.PlaceholderGroup{
+		Placeholders: []*commonpb.PlaceholderValue{
+			{Tag: "$0", Type: commonpb.PlaceholderType_FloatVector, Values: [][]byte{{0, 0, 0, 0}, {0, 0, 0, 0}}},
+		},
+	})
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name     string
+		advanced bool
+		nq       int64
+	}{
+		{name: "search infers nq"},
+		{name: "search explicit nq", nq: 2},
+		{name: "hybrid infers nq", advanced: true},
+		{name: "hybrid explicit nq", advanced: true, nq: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := &milvuspb.SearchRequest{
+				Nq:          tc.nq,
+				SearchInput: &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: placeholder},
+			}
+			if tc.advanced {
+				request = convertHybridSearchToSearch(&milvuspb.HybridSearchRequest{
+					Requests: []*milvuspb.SearchRequest{request},
+				})
+			}
+			task := &searchTask{
+				SearchRequest: &internalpb.SearchRequest{IsAdvanced: tc.advanced},
+				request:       request,
+			}
+			nq, err := task.checkNq(context.Background())
+			require.NoError(t, err)
+			assert.Equal(t, int64(2), nq)
+			assert.Equal(t, nq, task.request.GetNq())
+		})
+	}
+}

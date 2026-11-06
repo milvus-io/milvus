@@ -368,7 +368,7 @@ func getNqFromSubSearch(req *milvuspb.SubSearchRequest) (int64, error) {
 		x := &commonpb.PlaceholderGroup{}
 		err := proto.Unmarshal(req.GetPlaceholderGroup(), x)
 		if err != nil {
-			return 0, err
+			return 0, merr.WrapErrParameterInvalidErr(err, "failed to unmarshal placeholder group for sub search")
 		}
 		total := int64(0)
 		for _, h := range x.GetPlaceholders() {
@@ -385,7 +385,7 @@ func getNq(req *milvuspb.SearchRequest) (int64, error) {
 		x := &commonpb.PlaceholderGroup{}
 		err := proto.Unmarshal(req.GetPlaceholderGroup(), x)
 		if err != nil {
-			return 0, err
+			return 0, merr.WrapErrParameterInvalidErr(err, "failed to unmarshal placeholder group")
 		}
 		total := int64(0)
 		for _, h := range x.GetPlaceholders() {

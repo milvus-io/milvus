@@ -2054,10 +2054,11 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		if enStr, ok := httpReq.Params["enableDynamicField"]; ok {
 			enableDynamic, err = strconv.ParseBool(fmt.Sprintf("%v", enStr))
 			if err != nil {
+				err = merr.WrapErrParameterInvalidErr(err, "the value for enableDynamicField must be a boolean")
 				log.Ctx(ctx).Warn("high level restful api, parse enableDynamicField fail", zap.Error(err), zap.Any("request", anyReq))
 				HTTPAbortReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(err),
-					HTTPReturnMessage: "parse enableDynamicField fail, err:" + err.Error(),
+					HTTPReturnMessage: err.Error(),
 				})
 				return nil, err
 			}
