@@ -436,7 +436,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
               },
               segment_id) {
         growing_indexes_.Initialize(
-            *schema_, index_meta_, segcore_config_, id_, insert_record_);
+            *schema_,
+            index_meta_,
+            segcore_config_,
+            id_,
+            insert_record_,
+            [this](FieldId id) { return !schema_->is_function_output(id); });
         this->InitializeTextLobSpillovers();
         this->InitializeStructElementOffsets();
         this->UpdateResourceTracking();
@@ -825,6 +830,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
  private:
     void
+    InitializeFunctionOutputIndexes(
+        const Schema& schema,
+        const std::function<bool(FieldId)>& has_field_in_input);
+
+    void
     CompleteGrowingRawRange(int64_t row_begin,
                             int64_t row_end,
                             bool require_index_flush);
@@ -933,6 +943,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     // reads no longer exclude each other in either direction.
 
     GrowingIndexSet growing_indexes_;
+    std::once_flag function_output_indexes_once_;
     AckResponder growing_raw_ready_;
     mutable std::mutex growing_index_feed_mutex_;
     int64_t growing_index_feed_cursor_{0};

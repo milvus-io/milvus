@@ -52,6 +52,7 @@
 #include "knowhere/dataset.h"
 #include "knowhere/object.h"
 #include "knowhere/sparse_utils.h"
+#include "milvus-storage/packed/writer.h"
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
@@ -70,6 +71,7 @@
 #include "test_utils/DataGen.h"
 #include "test_utils/ManifestTestUtil.h"
 #include "test_utils/SegcoreConfigUtils.h"
+#include "test_utils/TmpPath.h"
 #include "test_utils/storage_test_utils.h"
 
 using namespace milvus::segcore;
@@ -282,6 +284,143 @@ TEST(Growing, LoadStorageV3ManifestRejectsShortRequiredRows) {
     EXPECT_EQ(segment->get_row_count(), 0);
 
     std::filesystem::remove_all(base_path);
+}
+
+class GrowingFunctionOutputRecoveryTest
+    : public testing::TestWithParam<int64_t> {};
+
+TEST_P(GrowingFunctionOutputRecoveryTest, RecoversSparseIndex) {
+    auto old_schema = std::make_shared<Schema>();
+    AddStorageV3SystemFields(old_schema);
+    auto pk = old_schema->AddDebugField("pk", DataType::INT64);
+    old_schema->set_primary_field_id(pk);
+    old_schema->set_schema_version(1);
+
+    auto schema = std::make_shared<Schema>(*old_schema);
+    schema->set_schema_version(2);
+    auto sparse = schema->AddDebugField("sparse_out",
+                                        DataType::VECTOR_SPARSE_U32_F32,
+                                        0,
+                                        knowhere::metric::BM25);
+    schema->add_function_output_field_id(sparse);
+    constexpr int64_t rows = 64;
+    FieldIndexMeta sparse_index(sparse,
+                                {{"index_type", "SPARSE_INVERTED_INDEX"},
+                                 {"metric_type", "BM25"},
+                                 {"bm25_k1", "1.2"},
+                                 {"bm25_b", "0.75"},
+                                 {"bm25_avgdl", "100"}},
+                                {});
+    auto index_meta = std::make_shared<CollectionIndexMeta>(
+        rows, std::map<FieldId, FieldIndexMeta>{{sparse, sparse_index}});
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore restore(config);
+    config.set_enable_interim_segment_index(true);
+    config.set_nlist(1);
+
+    for (bool has_output : {false, true}) {
+        SCOPED_TRACE(has_output);
+        milvus::test::TmpPath path;
+        auto stored_schema = has_output ? schema : old_schema;
+        milvus::proto::segcore::SegmentLoadInfo load_info;
+        load_info.set_segmentid(3);
+        load_info.set_storageversion(GetParam());
+        load_info.set_num_of_rows(rows);
+        if (GetParam() == STORAGE_V3) {
+            milvus::test::V3SegmentTestData data(
+                stored_schema, 1, rows, 1, TestLocalPath, path.get().string());
+            ASSERT_EQ(ManifestHasField(data, sparse), has_output);
+            load_info.set_manifest_path(data.ManifestPathJson());
+        } else if (GetParam() == STORAGE_V2) {
+            auto arrow_schema = stored_schema->ConvertToArrowSchema();
+            auto data = DataGen(stored_schema, rows);
+            auto batch = ConvertToArrowRecordBatch(data, 1, arrow_schema);
+            // Group IDs deliberately differ from field IDs. Selection must
+            // inspect the columns stored in the packed file.
+            std::vector<std::string> files{path.get().string() + "/1"};
+            std::vector<std::vector<int>> groups(1);
+            for (int i = 0; i < arrow_schema->num_fields(); ++i) {
+                groups.front().push_back(i);
+            }
+            milvus_storage::StorageConfig storage_config;
+            auto writer_result = milvus_storage::PackedRecordBatchWriter::Make(
+                GetDefaultArrowFileSystem(),
+                files,
+                arrow_schema,
+                storage_config,
+                groups);
+            ASSERT_TRUE(writer_result.ok());
+            auto writer = writer_result.ValueOrDie();
+            ASSERT_TRUE(writer->Write(batch).ok());
+            ASSERT_TRUE(writer->Close().ok());
+            auto* group = load_info.add_binlog_paths();
+            group->set_fieldid(9999);
+            auto* binlog = group->add_binlogs();
+            binlog->set_entries_num(rows);
+            binlog->set_log_path(files.front());
+        } else {
+            auto data = DataGen(stored_schema, rows);
+            auto cm = storage::RemoteChunkManagerSingleton::GetInstance()
+                          .GetRemoteChunkManager();
+            auto binlogs = PrepareInsertBinlog(
+                kCollectionID, kPartitionID, kSegmentID, data, cm);
+            ASSERT_EQ(binlogs.field_infos.contains(sparse.get()), has_output);
+            for (const auto& [id, info] : binlogs.field_infos) {
+                ASSERT_EQ(info.insert_files.size(), 1);
+                auto* field = load_info.add_binlog_paths();
+                field->set_fieldid(id);
+                auto* binlog = field->add_binlogs();
+                binlog->set_entries_num(rows);
+                binlog->set_log_path(info.insert_files.front());
+            }
+        }
+        auto segment = CreateGrowingSegment(schema, index_meta, 3, config);
+        ASSERT_FALSE(segment->HasIndex(sparse));
+        segment->SetLoadInfo(load_info);
+        milvus::tracer::TraceContext trace_ctx;
+        ASSERT_NO_THROW(segment->Load(trace_ctx, nullptr));
+        EXPECT_EQ(segment->get_row_count(), rows);
+        EXPECT_TRUE(segment->FieldAccessible(pk));
+        EXPECT_EQ(segment->FieldAccessible(sparse), has_output);
+        EXPECT_EQ(segment->HasIndex(sparse), has_output);
+        if (has_output) {
+            auto pin = segment->PinGrowingIndex(sparse);
+            ASSERT_TRUE(pin);
+            EXPECT_EQ(pin.CoveredRowEnd(), rows);
+        }
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(StorageVersions,
+                         GrowingFunctionOutputRecoveryTest,
+                         testing::Values(int64_t{1}, STORAGE_V2, STORAGE_V3));
+
+TEST(Growing, RegisterDenseFunctionOutputIndexOnInsert) {
+    auto schema = std::make_shared<Schema>();
+    const auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    const auto embedding = schema->AddDebugField(
+        "embedding", DataType::VECTOR_FLOAT, 8, knowhere::metric::L2);
+    schema->add_function_output_field_id(embedding);
+    FieldIndexMeta index(
+        embedding, {{"index_type", "HNSW"}, {"metric_type", "L2"}}, {});
+    auto meta = std::make_shared<CollectionIndexMeta>(
+        1000, std::map<FieldId, FieldIndexMeta>{{embedding, index}});
+    auto& config = SegcoreConfig::default_config();
+    ScopedSegcoreConfigRestore restore(config);
+    config.set_enable_interim_segment_index(true);
+    auto segment = CreateGrowingSegment(schema, meta, 3, config);
+    ASSERT_FALSE(segment->HasIndex(embedding));
+
+    auto data = DataGen(schema, 2);
+    auto offset = segment->PreInsert(2);
+    segment->Insert(offset,
+                    2,
+                    data.row_ids_.data(),
+                    data.timestamps_.data(),
+                    std::make_shared<InsertRecordProto>(*data.raw_));
+    EXPECT_TRUE(segment->HasIndex(embedding));
+    EXPECT_EQ(segment->get_row_count(), 2);
 }
 
 TEST(Growing, InsertSkipsMissingFunctionOutputField) {
