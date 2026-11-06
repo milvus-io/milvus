@@ -30,10 +30,11 @@ func NewTxnManager(pchannel types.PChannelInfo, uncommittedTxnBuilders map[messa
 			beginMessages.TimeTick(),
 			m.BeginTxn(),
 		)
-		session.RecordBegin(beginMessages)
 		for _, msg := range body {
 			session.AddNewMessage(context.Background(), msg.TimeTick())
-			session.RecordSuccessfulBody(msg)
+			if msg.MessageType() == message.MessageTypeUpsert {
+				session.RecordUpsertEffects(message.MustAsImmutableUpsertMessageV2(msg).Header().GetDeleteRows())
+			}
 			session.AddNewMessageDoneAndKeepalive(msg.TimeTick(), msg.MessageType())
 		}
 		sessions[session.TxnContext().TxnID] = session

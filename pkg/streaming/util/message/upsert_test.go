@@ -184,14 +184,13 @@ func TestUpsertRejectsIncompleteContract(t *testing.T) {
 }
 
 func TestUpsertSelectionsShareProjectionAcrossReaders(t *testing.T) {
-	header, body, primary := upsertFixture()
+	header, body, _ := upsertFixture()
 	raw := message.NewUpsertMessageBuilderV2().WithVChannel("p_1v0").WithHeader(header).WithBody(body).MustBuildMutable().WithTimeTick(42).WithLastConfirmedUseMessageID().IntoImmutableMessage(walimplstest.NewTestMessageID(42))
 	first, err := message.ReadUpsertRowSelections(t.Context(), raw)
 	require.NoError(t, err)
 	second, err := message.ReadUpsertRowSelections(t.Context(), message.MustAsImmutableUpsertMessageV2(raw))
 	require.NoError(t, err)
 	require.Equal(t, &first[0][0], &second[0][0], "segment readers share the immutable row selection")
-	require.NoError(t, message.ValidateUpsertMessage(t.Context(), raw, primary))
 	positions, err := message.ReadUpsertCompactRows(t.Context(), raw, 101, []bool{true, false, true})
 	require.NoError(t, err)
 	again, err := message.ReadUpsertCompactRows(t.Context(), raw, 101, []bool{true, false, true})

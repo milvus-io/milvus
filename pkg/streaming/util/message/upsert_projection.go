@@ -18,7 +18,6 @@ package message
 
 import (
 	"context"
-	"strconv"
 	"sync"
 
 	"github.com/cockroachdb/errors"
@@ -225,13 +224,11 @@ func (m *messageImpl) replaceUpsertPayload(payload []byte) error {
 // retains columns or plaintext. Eviction releases all derived mappings too.
 type upsertProjection struct {
 	*UpsertMessageBody
-	mu            sync.Mutex
-	placementKey  string
-	rows          [][]int64
-	placementErr  error
-	validationKey string
-	validationErr error
-	compact       map[int64][]int64
+	mu           sync.Mutex
+	placementKey string
+	rows         [][]int64
+	placementErr error
+	compact      map[int64][]int64
 }
 
 func upsertProjectionOf(ctx context.Context, msg BasicMessage) (*upsertProjection, *UpsertMessageHeader, error) {
@@ -299,25 +296,6 @@ func ReadUpsertRowSelections(ctx context.Context, msg BasicMessage) ([][]int64, 
 		return UpsertSelections(header, projection.UpsertMessageBody)
 	}
 	return projection.rows, projection.placementErr
-}
-
-// ValidateUpsertMessage shares immutable content validation across partitions.
-func ValidateUpsertMessage(ctx context.Context, msg BasicMessage, primary *schemapb.FieldSchema) error {
-	projection, header, err := upsertProjectionOf(ctx, msg)
-	if err != nil {
-		return err
-	}
-	key := upsertProjectionKey(header) + "/" + strconv.FormatInt(primary.GetFieldID(), 10) + "/" + strconv.Itoa(int(primary.GetDataType()))
-	projection.mu.Lock()
-	defer projection.mu.Unlock()
-	if projection.validationKey == "" {
-		projection.validationErr = ValidateUpsert(header, projection.UpsertMessageBody, primary)
-		projection.validationKey = key
-	}
-	if projection.validationKey != key {
-		return ValidateUpsert(header, projection.UpsertMessageBody, primary)
-	}
-	return projection.validationErr
 }
 
 // ReadUpsertCompactRows shares nullable-vector logical-to-physical positions.

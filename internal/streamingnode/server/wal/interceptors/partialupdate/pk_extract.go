@@ -336,7 +336,7 @@ func extractDropCollectionID(msg message.BasicMessage) (int64, bool) {
 	return dropMsg.Header().GetCollectionId(), true
 }
 
-// extractPKsFromUpsert validates both components before using their common PK set.
+// extractPKsFromUpsert reads the PK types and values needed by lock tracking.
 // Lock and version tracking cover inserted keys and all explicit delete keys.
 func extractPKsFromUpsert(ctx context.Context, msg message.BasicMessage, getter primaryKeyDescriptorGetter) (primarykey.Keys, error) {
 	var header *message.UpsertMessageHeader
@@ -353,18 +353,21 @@ func extractPKsFromUpsert(ctx context.Context, msg message.BasicMessage, getter 
 	if err != nil {
 		return primarykey.Keys{}, err
 	}
-	if err := message.ValidateUpsert(header, body, &schemapb.FieldSchema{FieldID: descriptor.FieldID, DataType: descriptor.DataType, IsPrimaryKey: true}); err != nil {
-		return primarykey.Keys{}, err
-	}
 	result, err := primarykey.KeysOfDelete(&msgpb.DeleteRequest{PrimaryKeys: body.GetPrimaryKeys()})
 	if err != nil {
 		return primarykey.Keys{}, err
+	}
+	if (descriptor.DataType == schemapb.DataType_Int64 && result.Kind != primarykey.KindInt64) || (descriptor.DataType == schemapb.DataType_VarChar && result.Kind != primarykey.KindString) {
+		return primarykey.Keys{}, status.NewUnrecoverableError("Upsert primary key type differs from schema")
 	}
 	result = result.Clone()
 	for _, effect := range body.GetDeleteEffects() {
 		keys, err := primarykey.KeysOfDelete(&msgpb.DeleteRequest{PrimaryKeys: effect.GetPrimaryKeys()})
 		if err != nil {
 			return primarykey.Keys{}, err
+		}
+		if keys.Kind != result.Kind {
+			return primarykey.Keys{}, status.NewUnrecoverableError("Upsert delete primary key type differs from schema")
 		}
 		result.Append(keys)
 	}

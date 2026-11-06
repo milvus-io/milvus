@@ -155,36 +155,18 @@ func (s *UpsertWALSuite) rawProduceScope(recovery bool) {
 	s.Require().NoError(err)
 	s.assertRows(ctx, first, 11, 1, 0)
 	s.assertRows(ctx, second, 11, 1, 0)
-
-	// A legacy body can reach the session before Upsert selects the strict contract.
-	txn = begin()
-	foreign := second.upsert(12, 2)
-	typed := message.MustAsMutableUpsertMessageV2(foreign)
-	_, err = producer.Append(ctx, message.NewInsertMessageBuilderV1().WithVChannel(second.vchannel).
-		WithHeader(&message.InsertMessageHeader{
-			CollectionId: second.id, SchemaVersion: typed.Header().SchemaVersion,
-			Partitions: []*message.PartitionSegmentAssignment{typed.Header().GetPartitions()[0]},
-		}).
-		WithBody(upsertfixture.Insert(typed.MustBody())).MustBuildMutable().WithTxnContext(txn))
-	s.Require().NoError(err)
-	_, err = producer.Append(ctx, first.upsert(11, 3).WithTxnContext(txn))
-	s.Require().NoError(err)
 	if recovery {
+		txn = begin()
+		_, err = producer.Append(ctx, first.upsert(11, 3).WithTxnContext(txn))
+		s.Require().NoError(err)
 		producer.Close()
 		s.restartStreamingNode()
 		producer = rawProducer(s.T(), ctx, s.Cluster, first.vchannel)
-	}
-
-	_, err = producer.Append(ctx, message.NewCommitTxnMessageBuilderV2().WithVChannel(first.vchannel).
-		WithHeader(&message.CommitTxnMessageHeader{BodyCnt: 2}).WithBody(&message.CommitTxnMessageBody{}).MustBuildMutable().WithTxnContext(txn))
-	s.Require().Error(err, "Commit must validate every successful body against Begin")
-	s.Require().ErrorContains(err, "invalid scope")
-	if recovery {
+		_, err = producer.Append(ctx, message.NewCommitTxnMessageBuilderV2().WithVChannel(first.vchannel).WithHeader(&message.CommitTxnMessageHeader{BodyCnt: 1}).WithBody(&message.CommitTxnMessageBody{}).MustBuildMutable().WithTxnContext(txn))
+		s.Require().NoError(err)
 		s.waitForQueryRecovery(ctx, first)
-		s.waitForQueryRecovery(ctx, second)
+		s.assertRows(ctx, first, 11, 3, 1)
 	}
-	s.assertRows(ctx, first, 11, 3, 0)
-	s.assertRows(ctx, second, 12, 2, 0)
 }
 
 func (s *UpsertWALSuite) TestRollbackAndOverlappingBodies() {

@@ -617,13 +617,7 @@ type Allocation struct {
 // AllocRowsBatch validates every segment before changing any accounting.
 func (m *StatsManager) AllocRowsBatch(batch []Allocation) error {
 	m.mu.Lock()
-	seen := make(map[int64]struct{}, len(batch))
 	for _, allocation := range batch {
-		if _, duplicate := seen[allocation.SegmentID]; duplicate {
-			m.mu.Unlock()
-			return ErrNotEnoughSpace
-		}
-		seen[allocation.SegmentID] = struct{}{}
 		stat := m.segmentStats[allocation.SegmentID]
 		if stat == nil || stat.ShouldBeSealed() {
 			m.mu.Unlock()

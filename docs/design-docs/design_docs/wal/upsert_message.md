@@ -63,7 +63,7 @@ The normal transaction contract remains:
 2. The producer sends bodies and waits for every successful response.
 3. The producer sends Commit.
 
-The common WAL Append entry validates each Upsert envelope before the interceptor chain, including idempotency duplicates and replicated duplicate/ignore paths. TimeTick validates session scope before body admission. Transactions containing Upsert validate Begin, all successful bodies, Commit, collection identity, and exact nonzero body count. Recovery rebuilds and validates the same successful prefix. Rollback, expiry, rejection, and completion retain the existing cleanup ownership.
+The common WAL Append entry validates each Upsert envelope before the interceptor chain, including idempotency duplicates and replicated duplicate/ignore paths. TimeTick checks transaction VChannel membership before Upsert body admission. Commit uses the existing logical body count: a nonzero body_cnt must equal successful body appends, while zero retains the legacy compatibility behavior. Sessions retain counts and a lightweight effects classification, not complete Begin/body messages for Commit revalidation. Recovery restores the same count and effects classification. Rollback, expiry, rejection, and completion retain the existing cleanup ownership.
 
 All inserted target partitions must be ready. Batch assignment selects eligible Growing segments and holds Ack references before accounting. It validates the complete allocation set before charging rows or bytes. A later partition that requires redo cannot leave a charged successful prefix. Each partition accounts for its own PK, RowID, and selected ordinary columns. Delete effects and the outer envelope are excluded from insert pressure. Existing transaction cleanup releases segment transaction references.
 
@@ -83,7 +83,7 @@ The native WAL consumer builds logical row selections per partition. Every colum
 
 L1 persistence, growing runtime, function-output handling, local flush replay, and recovery use this row interface. Historical Insert remains a separate readable input. Explicit delete effects feed the existing Transform and L0 paths. L1 and L0 recovery frontiers remain independent. Completion requires all effects that belong to that logical WAL position. A pure row write advances only the Growing frontier. An Upsert with explicit deletes advances Growing and Transform. Insert-only transactions follow the pure-row rule. Explicit query barriers retain their existing frontier behavior.
 
-Compound protobuf decoding precedes native mutation. A decode or apply failure cannot be hidden by a later message that advances completion. L0 projection errors poison the retained position and stop further scheduling. Query replay uses receiving-cluster segment assignments and final transaction visibility.
+Each component decodes and converts through its actual apply path. There is no whole-unit predecode or rollback. A decode or apply failure stops processing before applied-frontier publication and cannot be hidden by a later message that advances completion. L0 projection errors poison the retained position and stop further scheduling. Query replay uses receiving-cluster segment assignments and final transaction visibility.
 
 No support is added to the legacy MsgPack pipeline or msgdispatcher. Production activation requires the native query path from #52977, which is included in the upstream base. Deployment must still verify compatible native readers before enabling Upsert messages.
 

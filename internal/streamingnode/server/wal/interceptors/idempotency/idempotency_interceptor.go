@@ -476,6 +476,7 @@ func getInsertResultFromInsertMessage(ctx context.Context, msg message.MutableMe
 			}
 			return nil, err
 		}
+		return result, nil
 	default:
 		return nil, nil
 	}

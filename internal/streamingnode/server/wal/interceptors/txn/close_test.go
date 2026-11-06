@@ -31,10 +31,8 @@ func TestCloseReleasesReferencesWithoutResolvingUncertainCommit(t *testing.T) {
 	metrics := metricsutil.NewTxnMetrics("upsert-close")
 	defer metrics.Close()
 	s := newTxnSession("p_1v0", message.TxnContext{TxnID: 1, Keepalive: time.Second}, 0, metrics.BeginTxn())
-	body := message.NewUpsertMessageBuilderV2().WithVChannel(s.VChannel()).
-		WithHeader(&message.UpsertMessageHeader{}).WithBody(&message.UpsertMessageBody{}).MustBuildMutable().IntoImmutableMessage(nil)
 	require.NoError(t, s.AddNewMessage(context.Background(), 0))
-	s.RecordSuccessfulBody(body)
+	s.RecordUpsertEffects(0)
 	s.AddNewMessageDoneAndKeepalive(0, message.MessageTypeUpsert)
 	require.NoError(t, s.RequestCommitAndWait(context.Background(), 0, 1))
 	cleaned := false
@@ -43,7 +41,6 @@ func TestCloseReleasesReferencesWithoutResolvingUncertainCommit(t *testing.T) {
 	m.Close()
 	require.Equal(t, message.TxnStateOnCommit, s.State(), "WAL recovery owns the ambiguous outcome")
 	require.True(t, cleaned)
-	require.Empty(t, s.SuccessfulBodies())
 	require.Empty(t, m.sessions)
 	require.Empty(t, m.recoveredSessions)
 	select {

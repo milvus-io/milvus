@@ -8,7 +8,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
@@ -39,21 +38,16 @@ func newTxnSession(
 // TxnSession is a session for a transaction.
 type TxnSession struct {
 	mu               sync.Mutex
-	vchannel         string             // The vchannel of the session.
-	lastTimetick     uint64             // session last timetick.
-	expired          bool               // The flag indicates the transaction has trigger expired once.
-	txnContext       message.TxnContext // transaction id of the session
-	inFlightCount    int                // The message is in flight count of the session.
-	bodyCount        uint64             // Successfully appended logical bodies, excluding backend retries.
-	state            message.TxnState   // The state of the session.
-	doneWait         chan struct{}      // The channel for waiting the transaction committed.
-	rollback         bool               // The flag indicates the transaction is rollbacked.
-	cleanupCallbacks []func()           // The cleanup callbacks function for the session.
-	referencesClosed bool
-	beginMessage     message.ImmutableMessage
-	invalidScope     bool
-	successfulBodies []message.ImmutableMessage
-	hasUpsert        bool
+	vchannel         string                       // The vchannel of the session.
+	lastTimetick     uint64                       // session last timetick.
+	expired          bool                         // The flag indicates the transaction has trigger expired once.
+	txnContext       message.TxnContext           // transaction id of the session
+	inFlightCount    int                          // The message is in flight count of the session.
+	bodyCount        uint64                       // Successfully appended logical bodies, excluding backend retries.
+	state            message.TxnState             // The state of the session.
+	doneWait         chan struct{}                // The channel for waiting the transaction committed.
+	rollback         bool                         // The flag indicates the transaction is rollbacked.
+	cleanupCallbacks []func()                     // The cleanup callbacks function for the session.
 	hasNonInsert     bool                         // A successful body requires Transform consumption.
 	metricsGuard     *metricsutil.TxnMetricsGuard // The metrics guard for the session.
 }
@@ -68,10 +62,9 @@ func (s *TxnSession) TxnContext() message.TxnContext {
 	return s.txnContext
 }
 
-// ValidateUpsertScope rejects an invalid envelope before transaction admission changes state.
-func (s *TxnSession) ValidateUpsertScope(vchannel string) error {
-	_, collectionID, _, err := funcutil.ParseVChannel(vchannel)
-	if err != nil || collectionID <= 0 || vchannel != s.vchannel || funcutil.IsControlChannel(vchannel) {
+// ValidateVChannelMembership checks transaction membership before body admission.
+func (s *TxnSession) ValidateVChannelMembership(vchannel string) error {
+	if vchannel != s.vchannel {
 		return status.NewUnrecoverableError("Upsert transaction body has an invalid vchannel scope")
 	}
 	return nil
@@ -122,58 +115,12 @@ func (s *TxnSession) IsInsertOnly() bool {
 	return s.bodyCount > 0 && !s.hasNonInsert
 }
 
-// RecordBegin retains the successful Begin envelope for complete Commit validation.
-func (s *TxnSession) RecordBegin(msg message.ImmutableMessage) {
+// RecordUpsertEffects classifies a successful Upsert without retaining its body.
+// Callers record effects before releasing the body's in-flight slot.
+func (s *TxnSession) RecordUpsertEffects(deleteRows uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.referencesClosed {
-		return
-	}
-	s.beginMessage = msg
-}
-
-// BeginMessage returns the retained Begin envelope.
-func (s *TxnSession) BeginMessage() message.ImmutableMessage {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.beginMessage
-}
-
-// HasInvalidScope preserves invalid recovered-prefix evidence until transaction resolution.
-func (s *TxnSession) HasInvalidScope() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.invalidScope
-}
-
-// RecordSuccessfulBody retains a successful body before its in-flight slot is released.
-func (s *TxnSession) RecordSuccessfulBody(msg message.ImmutableMessage) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.referencesClosed {
-		return
-	}
-	_, collectionID, _, err := funcutil.ParseVChannel(msg.VChannel())
-	s.invalidScope = s.invalidScope || err != nil || collectionID <= 0 || msg.VChannel() != s.vchannel || msg.TxnContext() == nil || msg.TxnContext().TxnID != s.txnContext.TxnID
-	s.successfulBodies = append(s.successfulBodies, msg)
-	s.hasUpsert = s.hasUpsert || msg.MessageType() == message.MessageTypeUpsert
-	if msg.MessageType() == message.MessageTypeUpsert && message.MustAsImmutableUpsertMessageV2(msg).Header().GetDeleteRows() > 0 {
-		s.hasNonInsert = true
-	}
-}
-
-// HasUpsert reports whether a successful body uses the Upsert protocol.
-func (s *TxnSession) HasUpsert() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.hasUpsert
-}
-
-// SuccessfulBodies returns an independent reference list. Commit admission freezes its input first.
-func (s *TxnSession) SuccessfulBodies() []message.ImmutableMessage {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]message.ImmutableMessage(nil), s.successfulBodies...)
+	s.hasNonInsert = s.hasNonInsert || deleteRows > 0
 }
 
 // AddNewMessageFail decreases the in flight count of the session but not refresh the lease.
@@ -232,7 +179,7 @@ func (s *TxnSession) RequestCommitAndWait(ctx context.Context, timetick uint64, 
 	case <-waitCh:
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		if !s.hasUpsert && bodyCnt != 0 && bodyCnt != s.bodyCount {
+		if bodyCnt != 0 && bodyCnt != s.bodyCount {
 			// No Commit has reached WAL. End this attempt and release references;
 			// the producer retries the entire transaction with a fresh TxnID.
 			s.state = message.TxnStateRollbacked
@@ -346,11 +293,6 @@ func (s *TxnSession) cleanup() {
 	s.metricsGuard.Done(s.state)
 	s.metricsGuard = nil
 	s.cleanupCallbacks = nil
-	s.referencesClosed = true
-	s.beginMessage = nil
-	s.invalidScope = false
-	s.successfulBodies = nil
-	s.hasUpsert = false
 }
 
 // getDoneChan returns the channel for waiting the transaction committed.
