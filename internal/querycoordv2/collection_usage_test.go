@@ -79,10 +79,49 @@ func setActivityTime(manager *collectionUsageManager, collectionID int64, at tim
 	manager.mu.Unlock()
 }
 
+// scanAndWait scans and waits until the releases the scan queued have finished.
+func scanAndWait(t *testing.T, manager *collectionUsageManager) {
+	t.Helper()
+	manager.scan(context.Background())
+	waitReleasesDone(t, manager)
+}
+
+func waitReleasesDone(t *testing.T, manager *collectionUsageManager) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		manager.mu.Lock()
+		defer manager.mu.Unlock()
+		return len(manager.releasing) == 0
+	}, 5*time.Second, time.Millisecond)
+}
+
+// useGlobalTTLForTest makes every collection use the global idle TTL.
+func useGlobalTTLForTest(t *testing.T, manager *collectionUsageManager) {
+	broker := meta.NewMockBroker(t)
+	broker.EXPECT().GetCollectionProperties(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	manager.broker = broker
+}
+
+// queueIdleReleases queues collections whose activity predates the idle TTL
+// enableAutoReleaseForTest sets.
+func queueIdleReleases(manager *collectionUsageManager, collectionIDs ...int64) {
+	for _, collectionID := range collectionIDs {
+		setActivityTime(manager, collectionID, time.Now().Add(-20*time.Second))
+	}
+	manager.queueReleases(context.Background(), collectionIDs)
+}
+
+func setReleaseConcurrencyForTest(t *testing.T, concurrency string) {
+	t.Helper()
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.QueryCoordCfg.AutoReleaseConcurrency.Key, concurrency))
+	t.Cleanup(func() { require.NoError(t, params.Reset(params.QueryCoordCfg.AutoReleaseConcurrency.Key)) })
+}
+
 func TestCollectionUsageRefreshesOnEveryDQLAttempt(t *testing.T) {
 	enableAutoReleaseForTest(t)
 	s, manager, _, releaseCount := newUsageTestManager(t)
-	manager.scan(context.Background())
+	scanAndWait(t, manager)
 	_, exists := activityTime(manager, 100)
 	require.True(t, exists)
 
@@ -95,17 +134,17 @@ func TestCollectionUsageRefreshesOnEveryDQLAttempt(t *testing.T) {
 		require.NoError(t, merr.CheckRPCCall(status, err))
 		lastActiveAt, _ := activityTime(manager, 100)
 		require.False(t, lastActiveAt.Before(before))
-		manager.scan(context.Background())
+		scanAndWait(t, manager)
 		require.Zero(t, *releaseCount)
 	}
 
 	// There is no end notification. A query which is still running after TTL
 	// does not prevent release and must use the existing DQL retry path.
 	setActivityTime(manager, 100, time.Now().Add(-9*time.Second))
-	manager.scan(context.Background())
+	scanAndWait(t, manager)
 	require.Zero(t, *releaseCount)
 	setActivityTime(manager, 100, time.Now().Add(-10*time.Second))
-	manager.scan(context.Background())
+	scanAndWait(t, manager)
 	require.Equal(t, 1, *releaseCount)
 }
 
@@ -123,7 +162,7 @@ func TestCollectionUsageHotEnableAndScanInterval(t *testing.T) {
 	autoLoadWatchers := len(dispatcher.Get(autoLoadKey))
 	intervalWatchers := len(dispatcher.Get(intervalKey))
 	_, manager, _, _ := newUsageTestManager(t)
-	manager.scan(context.Background())
+	scanAndWait(t, manager)
 	_, exists := activityTime(manager, 100)
 	require.False(t, exists, "startup disabled must not initialize activity")
 	manager.start(context.Background())
@@ -165,12 +204,12 @@ func TestCollectionUsageFeatureGatesClearActivityAndRestartTTL(t *testing.T) {
 			enableAutoReleaseForTest(t)
 			require.NoError(t, params.Save(gate.key, "false"))
 			s, manager, _, releaseCount := newUsageTestManager(t)
-			manager.scan(context.Background())
+			scanAndWait(t, manager)
 			_, exists := activityTime(manager, 100)
 			require.False(t, exists)
 
 			require.NoError(t, params.Save(gate.key, "true"))
-			manager.scan(context.Background())
+			scanAndWait(t, manager)
 			_, exists = activityTime(manager, 100)
 			require.True(t, exists)
 			setActivityTime(manager, 100, time.Now().Add(-10*time.Second))
@@ -182,11 +221,11 @@ func TestCollectionUsageFeatureGatesClearActivityAndRestartTTL(t *testing.T) {
 			require.NoError(t, merr.CheckRPCCall(status, err))
 			_, exists = activityTime(manager, 100)
 			require.False(t, exists, "disabled DQL must not recreate activity")
-			manager.scan(context.Background())
+			scanAndWait(t, manager)
 			require.Zero(t, *releaseCount)
 
 			require.NoError(t, params.Save(gate.key, "true"))
-			manager.scan(context.Background())
+			scanAndWait(t, manager)
 			lastActiveAt, exists := activityTime(manager, 100)
 			require.True(t, exists)
 			require.WithinDuration(t, time.Now(), lastActiveAt, time.Second)
@@ -198,16 +237,16 @@ func TestCollectionUsageFeatureGatesClearActivityAndRestartTTL(t *testing.T) {
 func TestCollectionUsageHotTTLAppliesToScan(t *testing.T) {
 	enableAutoReleaseForTest(t)
 	_, manager, _, releaseCount := newUsageTestManager(t)
-	manager.scan(context.Background())
+	scanAndWait(t, manager)
 	initial := time.Now().Add(-11 * time.Second)
 	setActivityTime(manager, 100, initial)
 	params := paramtable.Get()
 	key := params.QueryCoordCfg.AutoReleaseIdleTTLSeconds.Key
 	require.NoError(t, params.Save(key, "20"))
-	manager.scan(context.Background())
+	scanAndWait(t, manager)
 	require.Zero(t, *releaseCount, "extending TTL must postpone release")
 	require.NoError(t, params.Save(key, "5"))
-	manager.scan(context.Background())
+	scanAndWait(t, manager)
 	require.Equal(t, 1, *releaseCount, "shortening TTL must use the existing timestamp")
 	lastActiveAt, _ := activityTime(manager, 100)
 	require.Equal(t, initial, lastActiveAt, "changing TTL must not reset activity")
@@ -231,7 +270,7 @@ func TestCollectionUsageUsesDifferentCollectionTTLs(t *testing.T) {
 		return nil, nil
 	})
 	manager.broker = broker
-	manager.scan(context.Background())
+	scanAndWait(t, manager)
 	for _, id := range []int64{100, 200, 300, 400} {
 		setActivityTime(manager, id, time.Now().Add(-11*time.Second))
 	}
@@ -240,7 +279,7 @@ func TestCollectionUsageUsesDifferentCollectionTTLs(t *testing.T) {
 		released <- id
 		return nil
 	}
-	manager.scan(context.Background())
+	scanAndWait(t, manager)
 	require.Len(t, released, 2)
 	require.ElementsMatch(t, []int64{200, 400}, []int64{<-released, <-released})
 }
@@ -254,7 +293,7 @@ func TestCollectionUsageDynamicCollectionTTL(t *testing.T) {
 		return properties, nil
 	})
 	manager.broker = broker
-	manager.scan(context.Background())
+	scanAndWait(t, manager)
 	initial := time.Now().Add(-6 * time.Second)
 	setActivityTime(manager, 100, initial)
 	configVersion := s.qviewsRuntime.loadConfigStore.GetConfigVersion(100)
@@ -265,7 +304,7 @@ func TestCollectionUsageDynamicCollectionTTL(t *testing.T) {
 			properties = []*commonpb.KeyValuePair{{Key: common.CollectionAutoReleaseIdleTTLKey, Value: value}}
 		}
 		before := *releaseCount
-		manager.scan(context.Background())
+		scanAndWait(t, manager)
 		if value == "5" {
 			require.Equal(t, before+1, *releaseCount)
 		} else {
@@ -280,7 +319,7 @@ func TestCollectionUsageDynamicCollectionTTL(t *testing.T) {
 	lastActiveAt, _ := activityTime(manager, 100)
 	require.True(t, lastActiveAt.After(initial), "DQL must still refresh activity while auto release is disabled for this collection")
 	properties = []*commonpb.KeyValuePair{{Key: common.CollectionAutoReleaseIdleTTLKey, Value: "5"}}
-	manager.scan(context.Background())
+	scanAndWait(t, manager)
 	require.Equal(t, 1, *releaseCount, "enabling auto release must respect the latest DQL activity")
 }
 
@@ -289,20 +328,20 @@ func TestCollectionUsageInvalidTTLFallsBackToGlobalTTL(t *testing.T) {
 		t.Run(value, func(t *testing.T) {
 			enableAutoReleaseForTest(t)
 			_, manager, _, releaseCount := newUsageTestManager(t)
-			manager.scan(context.Background())
+			scanAndWait(t, manager)
 			broker := meta.NewMockBroker(t)
 			broker.EXPECT().GetCollectionProperties(mock.Anything, int64(100)).Return(
 				[]*commonpb.KeyValuePair{{Key: common.CollectionAutoReleaseIdleTTLKey, Value: value}}, nil,
-			).Twice()
+			).Times(3) // two scans and the check before the release
 			manager.broker = broker
 
 			setActivityTime(manager, 100, time.Now().Add(-5*time.Second))
-			manager.scan(context.Background())
+			scanAndWait(t, manager)
 			require.Zero(t, *releaseCount, "invalid TTL must respect the global idle TTL")
 
 			initial := time.Now().Add(-11 * time.Second)
 			setActivityTime(manager, 100, initial)
-			manager.scan(context.Background())
+			scanAndWait(t, manager)
 			require.Equal(t, 1, *releaseCount, "invalid TTL must allow release after the global idle TTL")
 			lastActiveAt, _ := activityTime(manager, 100)
 			require.Equal(t, initial, lastActiveAt, "falling back to the global TTL must not reset activity")
@@ -322,13 +361,13 @@ func TestCollectionUsageSkipsUnavailableMetadata(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			enableAutoReleaseForTest(t)
 			_, manager, _, releaseCount := newUsageTestManager(t)
-			manager.scan(context.Background())
+			scanAndWait(t, manager)
 			initial := time.Now().Add(-11 * time.Second)
 			setActivityTime(manager, 100, initial)
 			broker := meta.NewMockBroker(t)
 			broker.EXPECT().GetCollectionProperties(mock.Anything, int64(100)).Return(nil, tc.err).Once()
 			manager.broker = broker
-			manager.scan(context.Background())
+			scanAndWait(t, manager)
 			require.Zero(t, *releaseCount, "a failed lookup must not fall back to the global TTL and release")
 			lastActiveAt, _ := activityTime(manager, 100)
 			require.Equal(t, initial, lastActiveAt)
@@ -346,8 +385,8 @@ func TestCollectionUsageReadsLoadedPropertiesOnEveryScan(t *testing.T) {
 		[]*commonpb.KeyValuePair{{Key: common.CollectionAutoReleaseIdleTTLKey, Value: "-1"}}, nil,
 	).Twice()
 	manager.broker = broker
-	manager.scan(context.Background())
-	manager.scan(context.Background())
+	scanAndWait(t, manager)
+	scanAndWait(t, manager)
 	require.Zero(t, *releaseCount)
 }
 
@@ -422,7 +461,7 @@ func TestCollectionUsageInitializesFromRecoveredLoadConfig(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, merr.TimeoutCode, status.GetCode())
 	before := time.Now()
-	manager.scan(context.Background())
+	scanAndWait(t, manager)
 	lastActiveAt, exists := activityTime(manager, 100)
 	require.True(t, exists, "a load config starts the idle timer without a readiness RPC")
 	require.False(t, lastActiveAt.Before(before))
@@ -431,7 +470,7 @@ func TestCollectionUsageInitializesFromRecoveredLoadConfig(t *testing.T) {
 func TestCollectionUsageCleansReleasedCollectionAndRestartsTTL(t *testing.T) {
 	enableAutoReleaseForTest(t)
 	s, manager, _, releaseCount := newUsageTestManager(t)
-	manager.scan(context.Background())
+	scanAndWait(t, manager)
 	config := s.qviewsRuntime.loadConfigStore.Get(100).Config.Clone()
 	setActivityTime(manager, 100, time.Now().Add(-20*time.Second))
 	s.qviewsRuntime.loadConfigStore.StopPlanning(100)
@@ -446,7 +485,7 @@ func TestCollectionUsageCleansReleasedCollectionAndRestartsTTL(t *testing.T) {
 
 	require.NoError(t, s.qviewsRuntime.loadConfigStore.Put(context.Background(), config))
 	before := time.Now()
-	manager.scan(context.Background())
+	scanAndWait(t, manager)
 	lastActiveAt, exists := activityTime(manager, 100)
 	require.True(t, exists)
 	require.False(t, lastActiveAt.Before(before))
@@ -456,13 +495,12 @@ func TestCollectionUsageCleansReleasedCollectionAndRestartsTTL(t *testing.T) {
 func TestCollectionUsageReleaseConcurrency(t *testing.T) {
 	enableAutoReleaseForTest(t)
 	_, manager, _, _ := newUsageTestManager(t)
-	params := paramtable.Get()
-	concurrencyKey := params.QueryCoordCfg.AutoReleaseConcurrency.Key
-	require.NoError(t, params.Save(concurrencyKey, "2"))
-	t.Cleanup(func() { require.NoError(t, params.Reset(concurrencyKey)) })
+	useGlobalTTLForTest(t, manager)
+	setReleaseConcurrencyForTest(t, "2")
 
 	const collections = 5
-	started := make(chan struct{}, collections)
+	// Room for duplicate releases, so a regression fails instead of blocking.
+	started := make(chan struct{}, 2*collections)
 	unblock := make(chan struct{})
 	var releaseOnce sync.Once
 	releaseAll := func() { releaseOnce.Do(func() { close(unblock) }) }
@@ -484,11 +522,7 @@ func TestCollectionUsageReleaseConcurrency(t *testing.T) {
 		return nil
 	}
 
-	done := make(chan struct{})
-	go func() {
-		manager.releaseCollections(context.Background(), []int64{1, 2, 3, 4, 5})
-		close(done)
-	}()
+	queueIdleReleases(manager, 1, 2, 3, 4, 5)
 	for i := 0; i < 2; i++ {
 		select {
 		case <-started:
@@ -501,15 +535,73 @@ func TestCollectionUsageReleaseConcurrency(t *testing.T) {
 		t.Fatal("release exceeded configured concurrency")
 	case <-time.After(100 * time.Millisecond):
 	}
+	// A scan while every slot is busy queues nothing twice.
+	queueIdleReleases(manager, 1, 2, 3, 4, 5)
 
 	releaseAll()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("concurrent releases did not finish")
-	}
-	require.EqualValues(t, 2, maxActive.Load())
+	waitReleasesDone(t, manager)
 	require.EqualValues(t, collections, calls.Load())
+	require.EqualValues(t, 2, maxActive.Load())
+}
+
+func TestCollectionUsageSlowReleaseHoldsOnlyItsSlot(t *testing.T) {
+	enableAutoReleaseForTest(t)
+	_, manager, _, _ := newUsageTestManager(t)
+	useGlobalTTLForTest(t, manager)
+	setReleaseConcurrencyForTest(t, "2")
+
+	stuck := make(chan struct{})
+	t.Cleanup(func() { close(stuck) })
+	var released atomic.Int32
+	manager.release = func(_ context.Context, collectionID int64) error {
+		if collectionID == 1 {
+			<-stuck
+		}
+		released.Add(1)
+		return nil
+	}
+	queueIdleReleases(manager, 1)
+	// Collections found by a later scan release through the remaining slot.
+	queueIdleReleases(manager, 2, 3)
+	require.Eventually(t, func() bool { return released.Load() == 2 }, time.Second, time.Millisecond)
+}
+
+func TestCollectionUsageQueuedReleaseChecksIdlenessAgain(t *testing.T) {
+	for name, change := range map[string]func(*collectionUsageManager, *atomic.Bool){
+		"queried while queued":      func(m *collectionUsageManager, _ *atomic.Bool) { m.touch(2) },
+		"TTL disabled while queued": func(_ *collectionUsageManager, disabled *atomic.Bool) { disabled.Store(true) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			enableAutoReleaseForTest(t)
+			_, manager, _, _ := newUsageTestManager(t)
+			setReleaseConcurrencyForTest(t, "1")
+			var disabled atomic.Bool
+			broker := meta.NewMockBroker(t)
+			broker.EXPECT().GetCollectionProperties(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, collectionID int64) ([]*commonpb.KeyValuePair, error) {
+				if collectionID == 2 && disabled.Load() {
+					return []*commonpb.KeyValuePair{{Key: common.CollectionAutoReleaseIdleTTLKey, Value: "-1"}}, nil
+				}
+				return nil, nil
+			}).Maybe()
+			manager.broker = broker
+
+			first := make(chan struct{})
+			released := make(chan int64, 2)
+			manager.release = func(_ context.Context, collectionID int64) error {
+				if collectionID == 1 {
+					<-first
+				}
+				released <- collectionID
+				return nil
+			}
+			queueIdleReleases(manager, 1, 2)
+			change(manager, &disabled)
+			close(first)
+			waitReleasesDone(t, manager)
+			require.Len(t, released, 1, "collection 2 stays loaded")
+			require.EqualValues(t, 1, <-released)
+		})
+	}
 }
 
 func TestCollectionUsageConcurrentTouchAndScan(t *testing.T) {

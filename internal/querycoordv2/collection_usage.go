@@ -22,8 +22,6 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/sync/errgroup"
-
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -41,6 +39,12 @@ type collectionUsageManager struct {
 	configWatcher config.EventHandler
 	configChanged chan struct{}
 
+	// releaseQueue holds idle collections waiting for a release slot;
+	// releasing holds every collection queued or being released.
+	releaseQueue     []int64
+	releasing        map[int64]struct{}
+	releasesInFlight int
+
 	loadConfigs *loadmgr.LoadConfigStore
 	broker      meta.Broker
 	release     func(context.Context, int64) error
@@ -56,6 +60,7 @@ func newCollectionUsageManager(
 ) *collectionUsageManager {
 	m := &collectionUsageManager{
 		lastActiveAt:  make(map[int64]time.Time),
+		releasing:     make(map[int64]struct{}),
 		loadConfigs:   loadConfigs,
 		broker:        broker,
 		release:       release,
@@ -205,50 +210,89 @@ func (m *collectionUsageManager) scan(ctx context.Context) {
 			candidates = append(candidates, collectionID)
 		}
 	}
-	m.releaseCollections(ctx, candidates)
+	m.queueReleases(ctx, candidates)
 }
 
 func (m *collectionUsageManager) shouldRelease(ctx context.Context, collectionID int64) bool {
+	m.mu.Lock()
+	lastActiveAt, initialized := m.lastActiveAt[collectionID]
+	_, releasing := m.releasing[collectionID]
+	m.mu.Unlock()
+	if releasing {
+		return false
+	}
 	ttl, err := m.idleTTL(ctx, collectionID)
 	if err != nil {
 		mlog.RatedWarn(ctx, 1.0, "failed to get collection auto release TTL, skip this scan",
 			mlog.FieldCollectionID(collectionID), mlog.Err(err))
 		return false
 	}
-	m.mu.Lock()
-	lastActiveAt, initialized := m.lastActiveAt[collectionID]
-	m.mu.Unlock()
 
 	// Start the idle TTL on the first scan and skip release for this round.
 	if !initialized {
 		m.initializeLastActiveAt(collectionID)
 		return false
 	}
+	return idleFor(lastActiveAt, ttl)
+}
+
+// stillIdle checks a queued collection again right before its release: a
+// query, a manual release, disabling auto release or a TTL change while it was
+// queued keeps it loaded, and a later scan evaluates it again.
+func (m *collectionUsageManager) stillIdle(ctx context.Context, collectionID int64) bool {
+	m.mu.Lock()
+	lastActiveAt, tracked := m.lastActiveAt[collectionID]
+	m.mu.Unlock()
+	if !tracked {
+		return false
+	}
+	ttl, err := m.idleTTL(ctx, collectionID)
+	return err == nil && idleFor(lastActiveAt, ttl)
+}
+
+func idleFor(lastActiveAt time.Time, ttl time.Duration) bool {
 	return ttl > 0 && time.Since(lastActiveAt) >= ttl
 }
 
-func (m *collectionUsageManager) releaseCollections(ctx context.Context, collectionIDs []int64) {
-	if len(collectionIDs) == 0 {
-		return
-	}
-	var group errgroup.Group
-	group.SetLimit(min(paramtable.Get().QueryCoordCfg.AutoReleaseConcurrency.GetAsInt(), len(collectionIDs)))
+// queueReleases queues idle collections that are not already queued or being
+// released. Scans do not wait for releases, so a slow release holds only its
+// own slot instead of the next scan.
+func (m *collectionUsageManager) queueReleases(ctx context.Context, collectionIDs []int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for _, collectionID := range collectionIDs {
-		if ctx.Err() != nil {
-			break
+		if _, queued := m.releasing[collectionID]; !queued {
+			m.releasing[collectionID] = struct{}{}
+			m.releaseQueue = append(m.releaseQueue, collectionID)
 		}
-		group.Go(func() error {
-			if ctx.Err() != nil {
-				return nil
-			}
-			if err := m.release(ctx, collectionID); err != nil {
-				mlog.Warn(ctx, "failed to auto release idle collection",
-					mlog.FieldCollectionID(collectionID), mlog.Err(err))
-			}
-			return nil
-		})
 	}
-	_ = group.Wait()
+	m.dispatchReleasesLocked(ctx)
+}
+
+func (m *collectionUsageManager) dispatchReleasesLocked(ctx context.Context) {
+	limit := paramtable.Get().QueryCoordCfg.AutoReleaseConcurrency.GetAsInt()
+	for m.releasesInFlight < limit && len(m.releaseQueue) > 0 && ctx.Err() == nil {
+		collectionID := m.releaseQueue[0]
+		m.releaseQueue = m.releaseQueue[1:]
+		m.releasesInFlight++
+		m.wg.Add(1)
+		go m.runRelease(ctx, collectionID)
+	}
+}
+
+func (m *collectionUsageManager) runRelease(ctx context.Context, collectionID int64) {
+	defer m.wg.Done()
+	if m.stillIdle(ctx, collectionID) {
+		if err := m.release(ctx, collectionID); err != nil {
+			mlog.Warn(ctx, "failed to auto release idle collection",
+				mlog.FieldCollectionID(collectionID), mlog.Err(err))
+		}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.releasesInFlight--
+	delete(m.releasing, collectionID)
+	m.dispatchReleasesLocked(ctx)
 }
 
 func (m *collectionUsageManager) initializeLastActiveAt(collectionID int64) {
