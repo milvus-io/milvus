@@ -539,10 +539,10 @@ func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collec
 	var base *segmentBase
 	var reuse segments.ReadState
 	// Normal sealed same-ID additive manifests preserve the row domain. External
-	// snapshots may replace it, so they require an identical manifest to share.
+	// snapshots may replace it, so they require the same manifest revision to share.
 	m.mu.Lock()
 	for _, candidate := range r.bases {
-		sameManifest := info.GetManifestPath() != "" && candidate.snapshot.LoadInfo.GetManifestPath() == info.GetManifestPath()
+		sameManifest := info.GetManifestPath() != "" && packed.SameManifestPath(candidate.snapshot.LoadInfo.GetManifestPath(), info.GetManifestPath())
 		if candidate.segment.TransformStartAfterTimeTick() <= info.GetTransformStartAfterTimetick() && (sameManifest || (!typeutil.IsExternalCollection(collection.Schema()) && candidate.snapshot.LoadInfo.GetNumOfRows() == info.GetNumOfRows())) {
 			base = candidate
 			break
