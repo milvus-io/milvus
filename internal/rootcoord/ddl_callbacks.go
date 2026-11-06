@@ -45,6 +45,8 @@ func RegisterDDLCallbacks(core *Core) {
 	ddlCallback.registerRBACCallbacks()
 	ddlCallback.registerDatabaseCallbacks()
 	ddlCallback.registerAliasCallbacks()
+	registry.RegisterAddFileResourceV2AckCallback(ddlCallback.addFileResourceV2AckCallback)
+	registry.RegisterRemoveFileResourceV2AckCallback(ddlCallback.removeFileResourceV2AckCallback)
 }
 
 // registerRBACCallbacks registers the rbac callbacks.
