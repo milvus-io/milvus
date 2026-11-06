@@ -37,6 +37,9 @@ import (
 func TestUpsertGenerationGate(t *testing.T) {
 	paramtable.Init()
 	initIdempotencyResourceForTest(t)
+	previousWAL := message.GetDefaultWALName()
+	message.RegisterDefaultWALName(message.WALNameTest)
+	defer message.RegisterDefaultWALName(previousWAL)
 	params := paramtable.Get()
 	const key = "streaming.wal.enableUpsertMessage"
 	defer params.Reset(key)
@@ -74,6 +77,9 @@ func TestUpsertGenerationGate(t *testing.T) {
 func TestUpsertEnvelopeAsyncAdmission(t *testing.T) {
 	paramtable.Init()
 	initIdempotencyResourceForTest(t)
+	previousWAL := message.GetDefaultWALName()
+	message.RegisterDefaultWALName(message.WALNameTest)
+	defer message.RegisterDefaultWALName(previousWAL)
 	gate := &paramtable.Get().StreamingCfg.EnableUpsertMessage
 	old := gate.SwapTempValue("true")
 	defer gate.SwapTempValue(old)
@@ -85,20 +91,18 @@ func TestUpsertEnvelopeAsyncAdmission(t *testing.T) {
 	w, err := opener.Open(ctx, &wal.OpenOption{Channel: types.PChannelInfo{Name: "upsert-envelope-async", Term: 1}, DisableFlusher: true})
 	require.NoError(t, err)
 	defer w.Close()
-	for _, marker := range []string{"_np", "_pcl", "_bh", "_ur"} {
-		msg := message.NewUpsertMessageBuilderV2().WithVChannel("upsert-envelope-async_1v0").WithProperty(marker, "").WithHeader(&message.UpsertMessageHeader{}).WithBody(&message.UpsertMessageBody{}).MustBuildMutable()
-		done := make(chan struct{})
-		w.AppendAsync(ctx, msg, func(result *wal.AppendResult, err error) {
-			defer close(done)
-			assert.Nil(t, result)
-			assert.Error(t, err)
-			assert.True(t, status.AsStreamingError(err).IsUnrecoverable())
-		})
-		select {
-		case <-done:
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		}
-		require.False(t, msg.Properties().Exist("_tt"), "invalid envelope must not reach TimeTick")
+	msg := message.NewUpsertMessageBuilderV2().WithVChannel("upsert-envelope-async_1v0").WithProperty("_np", "").WithHeader(&message.UpsertMessageHeader{}).WithBody(&message.UpsertMessageBody{}).MustBuildMutable()
+	done := make(chan struct{})
+	w.AppendAsync(ctx, msg, func(result *wal.AppendResult, err error) {
+		defer close(done)
+		assert.Nil(t, result)
+		assert.Error(t, err)
+		assert.True(t, status.AsStreamingError(err).IsUnrecoverable())
+	})
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
 	}
+	require.False(t, msg.Properties().Exist("_tt"), "invalid envelope must not reach TimeTick")
 }

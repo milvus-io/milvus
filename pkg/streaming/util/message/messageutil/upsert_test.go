@@ -27,8 +27,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
 
 func testUpsertRows(t *testing.T, nullable bool) (message.ImmutableMessage, *schemapb.CollectionSchema) {
@@ -154,4 +156,46 @@ func BenchmarkUpsertConsumerScatter(b *testing.B) {
 			}
 		})
 	}
+}
+
+func transformUpsert(tick uint64) message.ImmutableMessage {
+	keys := &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"one", "two"}}}}
+	return message.NewUpsertMessageBuilderV2().WithVChannel("p_1v0").
+		WithHeader(&message.UpsertMessageHeader{CollectionId: 1, Partitions: []*message.PartitionSegmentAssignment{{PartitionId: 2, Rows: 2}}, DeleteRows: 2}).
+		WithBody(&message.UpsertMessageBody{PrimaryKeys: keys, RowIds: []int64{1, 2}, DeleteEffects: []*messagespb.UpsertDeleteEffect{{PrimaryKeys: keys, Scope: &messagespb.UpsertDeleteEffect_AllPartitions{AllPartitions: &messagespb.UpsertAllPartitions{}}}}}).MustBuildMutable().WithTimeTick(tick).WithLastConfirmedUseMessageID().IntoImmutableMessage(walimplstest.NewTestMessageID(int64(tick)))
+}
+
+func transformDelete(tick uint64, partition int64, key string) message.ImmutableMessage {
+	return message.NewDeleteMessageBuilderV1().WithVChannel("p_1v0").
+		WithHeader(&message.DeleteMessageHeader{CollectionId: 1, Rows: 1}).
+		WithBody(&msgpb.DeleteRequest{
+			CollectionID: 1, PartitionID: partition, NumRows: 1,
+			PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{key}}}},
+		}).MustBuildMutable().WithTimeTick(tick).WithLastConfirmedUseMessageID().IntoImmutableMessage(walimplstest.NewTestMessageID(int64(tick)))
+}
+
+func TestUpsertAndMixedTransactionTransformBlocks(t *testing.T) {
+	upsertEntry := BuildTransformLogEntry(transformUpsert(30), TransformEntryOption{})
+	require.Equal(t, uint64(30), upsertEntry.GetTimeTick())
+	begin := message.NewBeginTxnMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&message.BeginTxnMessageHeader{}).
+		WithBody(&message.BeginTxnMessageBody{}).MustBuildMutable().WithTxnContext(message.TxnContext{TxnID: 1}).WithTimeTick(31).
+		WithLastConfirmedUseMessageID().IntoImmutableMessage(walimplstest.NewTestMessageID(31))
+	builder := message.NewImmutableTxnMessageBuilder(message.MustAsImmutableBeginTxnMessageV2(begin))
+	builder.Add(transformUpsert(32))
+	builder.Add(transformDelete(33, 4, "txn-delete"))
+	commit := message.NewCommitTxnMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&message.CommitTxnMessageHeader{BodyCnt: 2}).
+		WithBody(&message.CommitTxnMessageBody{}).MustBuildMutable().WithTxnContext(message.TxnContext{TxnID: 1}).WithTimeTick(40).
+		WithLastConfirmedUseMessageID().IntoImmutableMessage(walimplstest.NewTestMessageID(40))
+	txn, err := builder.Build(message.MustAsImmutableCommitTxnMessageV2(commit))
+	require.NoError(t, err)
+	txnEntry := BuildTransformLogEntry(txn, TransformEntryOption{})
+	for _, entry := range []*streamingpb.TransformLogEntry{upsertEntry, txnEntry} {
+		blocks := entry.GetDelete().GetBlocks()
+		require.Equal(t, int64(-1), blocks[0].GetPartitionId())
+		require.Equal(t, []string{"one", "two"}, blocks[0].GetPrimaryKeys().GetStrId().GetData())
+	}
+	require.Equal(t, uint64(40), txnEntry.GetTimeTick())
+	require.Len(t, txnEntry.GetDelete().GetBlocks(), 2)
+	require.Equal(t, int64(4), txnEntry.GetDelete().GetBlocks()[1].GetPartitionId())
+	require.Equal(t, []string{"txn-delete"}, txnEntry.GetDelete().GetBlocks()[1].GetPrimaryKeys().GetStrId().GetData())
 }

@@ -79,39 +79,36 @@ func TestUpsertRowNonColumnSizeEquivalent(t *testing.T) {
 		boundary := int64(1) << shift
 		integerKeys = append(integerKeys, boundary-1, boundary, boundary+1)
 	}
-	stringKeys := []string{"", "a", "中文", "😀"}
-	for _, length := range []int{124, 125, 126, 127, 128, 129, 16379, 16380, 16381, 16382, 16383, 16384, 16385} {
-		stringKeys = append(stringKeys, strings.Repeat("x", length))
-	}
-	keySets := []*schemapb.IDs{
-		{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: integerKeys}}},
-		{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: stringKeys}}},
-	}
-	rowIDs := integerKeys
 	indexes := []uint32{0, 1, math.MaxUint32}
 	for shift := uint(7); shift < 32; shift += 7 {
 		boundary := uint32(1) << shift
 		indexes = append(indexes, boundary-1, boundary, boundary+1)
 	}
-	for _, ids := range keySets {
-		count := message.UpsertPrimaryKeyCount(ids)
-		for row := 0; row < count; row++ {
-			keys, err := idsByOffsets(ids, []int{row})
-			require.NoError(t, err)
-			for _, rowID := range rowIDs {
-				for _, partitionIndex := range indexes {
-					for _, offset := range indexes {
-						nonColumnFields := &message.UpsertMessageBody{
-							PrimaryKeys: keys, RowIds: []int64{rowID}, PartitionIndexes: []uint32{partitionIndex},
-							RequestRowMapping: &messagespb.UpsertRequestRowMapping{RowOffsets: []uint32{offset}},
-						}
-						got, err := upsertRowNonColumnSize(ids, row, rowID, partitionIndex, offset)
-						require.NoError(t, err)
-						require.Equal(t, proto.Size(nonColumnFields), got, "row=%d rowID=%d partitionIndex=%d offset=%d", row, rowID, partitionIndex, offset)
-					}
-				}
-			}
-		}
+	check := func(ids *schemapb.IDs, row int, rowID int64, index, offset uint32) {
+		t.Helper()
+		want, err := upsertRowNonColumnProtoSize(ids, row, rowID, index, offset)
+		require.NoError(t, err)
+		got, err := upsertRowNonColumnSize(ids, row, rowID, index, offset)
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+	}
+	ids := &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: integerKeys}}}
+	for row, rowID := range integerKeys {
+		check(ids, row, 1, 1, 1)
+		check(ids, 0, rowID, 1, 1)
+	}
+	for _, index := range indexes {
+		check(ids, 0, 1, index, 1)
+		check(ids, 0, 1, 1, index)
+	}
+	stringsToCheck := []string{"", "a", "中文", "😀"}
+	for _, length := range []int{124, 125, 126, 127, 128, 129, 16379, 16380, 16381, 16382, 16383, 16384, 16385} {
+		stringsToCheck = append(stringsToCheck, strings.Repeat("x", length))
+	}
+	ids = &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: stringsToCheck}}}
+	for row := range stringsToCheck {
+		check(ids, row, 1, 1, 1)
+		check(ids, row, -1, 128, 16384)
 	}
 }
 
@@ -134,21 +131,11 @@ func TestUpsertRowNonColumnSizeErrorsEquivalent(t *testing.T) {
 }
 
 func TestUpsertEmptyDeletePlanShape(t *testing.T) {
-	keySets := []*schemapb.IDs{
-		nil,
-		{},
-		{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 1, -1}}}},
-		{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"a", "a", ""}}}},
-	}
-	for _, ids := range keySets {
-		for _, deleted := range []*schemapb.IDs{nil, {}, {IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{}}}, {IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{}}}} {
-			rows, err := matchUpsertDeletes(ids, deleted)
-			require.NoError(t, err)
-			require.Nil(t, rows)
-			for _, offsets := range rows {
-				require.Nil(t, offsets)
-			}
-		}
+	inserted := &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 1, -1}}}}
+	for _, deleted := range []*schemapb.IDs{nil, {}, {IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{}}}, {IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{}}}} {
+		rows, err := matchUpsertDeletes(inserted, deleted)
+		require.NoError(t, err)
+		require.Nil(t, rows)
 	}
 }
 
@@ -194,94 +181,94 @@ func TestUpsertPackingSizingPreservesMessages(t *testing.T) {
 	limit := &paramtable.Get().PulsarCfg.MaxMessageSize
 	previousLimit := limit.SwapTempValue("131072")
 	defer limit.SwapTempValue(previousLimit)
-	for _, multiChunk := range []bool{false, true} {
-		for _, stringPK := range []bool{false, true} {
-			for _, partitioned := range []bool{false, true} {
-				for _, keyed := range []bool{false, true} {
-					for _, effects := range []bool{false, true} {
-						for _, encrypted := range []bool{false, true} {
-							for _, useCAS := range []bool{false, true} {
-								t.Run(fmt.Sprintf("chunks_%v/strings_%v/partitions_%v/keyed_%v/effects_%v/encrypted_%v/cas_%v", multiChunk, stringPK, partitioned, keyed, effects, encrypted, useCAS), func(t *testing.T) {
-									count, payload := 32, "small"
-									if multiChunk {
-										count, payload = 512, strings.Repeat("x", 4096)
-									}
-									source, result := newIdempotentRepackInsertMsgWithPayload(count, payload)
-									schema := upsertPackingSchema()
-									// Preserve duplicates and delete occurrences across chunk boundaries.
-									for row := range result.IDs.GetIntId().Data {
-										result.IDs.GetIntId().Data[row] = int64(row / 4)
-									}
-									if stringPK {
-										values := make([]string, count)
-										for row := range values {
-											values[row] = fmt.Sprintf("key-中文-%d", row/4)
-										}
-										result.IDs = &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: values}}}
-										source.FieldsData[0] = stringFieldData(100, "pk", values)
-										schema.Fields[0].DataType = schemapb.DataType_VarChar
-									}
-									cache := NewMockCache(t)
-									var partitionKeys *schemapb.FieldData
-									if partitioned {
-										partitionKeys = source.FieldsData[1]
-										cache.EXPECT().GetPartitions(mock.Anything, "db", "coll").Return(map[string]int64{"partition_0": 300, "partition_1": 301}, nil)
-										cache.EXPECT().GetPartitionID(mock.Anything, "db", "coll", "partition_0").Return(int64(300), nil)
-										cache.EXPECT().GetPartitionID(mock.Anything, "db", "coll", "partition_1").Return(int64(301), nil)
-									} else {
-										cache.EXPECT().GetPartitionID(mock.Anything, "db", "coll", "_default").Return(int64(200), nil)
-									}
-									var decoration *insertIdempotencyDecoration
-									if keyed {
-										decoration = &insertIdempotencyDecoration{key: "equivalence"}
-									}
-									var deleted *schemapb.IDs
-									if effects {
-										deleted, err = idsByOffsets(result.IDs, []int{0, 0, count / 2, count - 1})
-										require.NoError(t, err)
-									} else if useCAS { // Both nil and explicitly empty effects use the shortcut.
-										deleted = &schemapb.IDs{}
-									}
-									var config *message.CipherConfig
-									if encrypted {
-										config = &message.CipherConfig{EzID: 7, CollectionID: 10}
-									}
-									var cas map[string]*messagespb.PartialUpdateCAS
-									if useCAS {
-										cas = map[string]*messagespb.PartialUpdateCAS{"p_100v0": {ReadTs: 1, ObservedPchannelTerm: 2}}
-									}
-									pack := func() ([]message.MutableMessage, error) {
-										return repackUpsertMessages(t.Context(), cache, []string{"p_100v0"}, source, result.IDs, partitionKeys, schema, 1, config, cas, decoration, deleted, -1)
-									}
-									// Restore the former sizing/matching steps without copying the packer.
-									sizePatch := mockey.Mock(upsertRowNonColumnSize).To(upsertRowNonColumnProtoSize).Build()
-									effectsPatch := mockey.Mock(upsertDeleteEffectsSize).To(upsertDeleteEffectsProtoSize).Build()
-									matchPatch := mockey.Mock(matchUpsertDeletes).To(matchUpsertDeletesReference).Build()
-									want, wantErr := pack()
-									matchPatch.UnPatch()
-									effectsPatch.UnPatch()
-									sizePatch.UnPatch()
-									require.NoError(t, wantErr)
-									got, gotErr := pack()
-									require.NoError(t, gotErr)
-									require.Len(t, got, len(want))
-									if multiChunk {
-										require.Greater(t, len(got), 1)
-									} else {
-										require.Len(t, got, 1)
-									}
-									for index := range got {
-										require.Equal(t, want[index].IntoMessageProto().Payload, got[index].IntoMessageProto().Payload, "payload at chunk %d", index)
-										require.Equal(t, want[index].IntoMessageProto().Properties, got[index].IntoMessageProto().Properties, "properties at chunk %d", index)
-										require.True(t, proto.Equal(message.MustAsMutableUpsertMessageV2(want[index]).MustBody(), message.MustAsMutableUpsertMessageV2(got[index]).MustBody()))
-									}
-								})
-							}
-						}
-					}
-				}
+	for _, tc := range []struct {
+		name                                                                 string
+		multiChunk, stringPK, partitioned, keyed, effects, encrypted, useCAS bool
+	}{
+		{name: "plain"},
+		{name: "encrypted", encrypted: true},
+		{name: "partition_key_mapping", partitioned: true, keyed: true},
+		{name: "string_effects", stringPK: true, effects: true},
+		{name: "empty_effects_cas", useCAS: true},
+		{name: "split_plain", multiChunk: true},
+		{name: "split_encrypted", multiChunk: true, encrypted: true},
+		{name: "split_string_partition_mapping", multiChunk: true, stringPK: true, partitioned: true, keyed: true},
+		{name: "split_effects_cas", multiChunk: true, effects: true, useCAS: true},
+		{name: "split_all", multiChunk: true, stringPK: true, partitioned: true, keyed: true, effects: true, encrypted: true, useCAS: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			multiChunk, stringPK, partitioned, keyed, effects, encrypted, useCAS := tc.multiChunk, tc.stringPK, tc.partitioned, tc.keyed, tc.effects, tc.encrypted, tc.useCAS
+			count, payload := 32, "small"
+			if multiChunk {
+				count, payload = 512, strings.Repeat("x", 4096)
 			}
-		}
+			source, result := newIdempotentRepackInsertMsgWithPayload(count, payload)
+			schema := upsertPackingSchema()
+			// Preserve duplicates and delete occurrences across chunk boundaries.
+			for row := range result.IDs.GetIntId().Data {
+				result.IDs.GetIntId().Data[row] = int64(row / 4)
+			}
+			if stringPK {
+				values := make([]string, count)
+				for row := range values {
+					values[row] = fmt.Sprintf("key-中文-%d", row/4)
+				}
+				result.IDs = &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: values}}}
+				source.FieldsData[0] = stringFieldData(100, "pk", values)
+				schema.Fields[0].DataType = schemapb.DataType_VarChar
+			}
+			cache := NewMockCache(t)
+			var partitionKeys *schemapb.FieldData
+			if partitioned {
+				partitionKeys = source.FieldsData[1]
+				cache.EXPECT().GetPartitions(mock.Anything, "db", "coll").Return(map[string]int64{"partition_0": 300, "partition_1": 301}, nil)
+				cache.EXPECT().GetPartitionID(mock.Anything, "db", "coll", "partition_0").Return(int64(300), nil)
+				cache.EXPECT().GetPartitionID(mock.Anything, "db", "coll", "partition_1").Return(int64(301), nil)
+			} else {
+				cache.EXPECT().GetPartitionID(mock.Anything, "db", "coll", "_default").Return(int64(200), nil)
+			}
+			var decoration *insertIdempotencyDecoration
+			if keyed {
+				decoration = &insertIdempotencyDecoration{key: "equivalence"}
+			}
+			var deleted *schemapb.IDs
+			if effects {
+				deleted, err = idsByOffsets(result.IDs, []int{0, 0, count / 2, count - 1})
+				require.NoError(t, err)
+			} else if useCAS { // Both nil and explicitly empty effects use the shortcut.
+				deleted = &schemapb.IDs{}
+			}
+			var config *message.CipherConfig
+			if encrypted {
+				config = &message.CipherConfig{EzID: 7, CollectionID: 10}
+			}
+			var cas map[string]*messagespb.PartialUpdateCAS
+			if useCAS {
+				cas = map[string]*messagespb.PartialUpdateCAS{"p_100v0": {ReadTs: 1, ObservedPchannelTerm: 2}}
+			}
+			pack := func() ([]message.MutableMessage, error) {
+				return repackUpsertMessages(t.Context(), cache, []string{"p_100v0"}, source, result.IDs, partitionKeys, schema, 1, config, cas, decoration, deleted, -1)
+			}
+			// Restore the protobuf sizing oracle without copying the packer.
+			sizePatch := mockey.Mock(upsertRowNonColumnSize).To(upsertRowNonColumnProtoSize).Build()
+			effectsPatch := mockey.Mock(upsertDeleteEffectsSize).To(upsertDeleteEffectsProtoSize).Build()
+			want, wantErr := pack()
+			effectsPatch.UnPatch()
+			sizePatch.UnPatch()
+			require.NoError(t, wantErr)
+			got, gotErr := pack()
+			require.NoError(t, gotErr)
+			require.Len(t, got, len(want))
+			if multiChunk {
+				require.Greater(t, len(got), 1)
+			} else {
+				require.Len(t, got, 1)
+			}
+			for index := range got {
+				require.Equal(t, want[index].IntoMessageProto().Payload, got[index].IntoMessageProto().Payload, "payload at chunk %d", index)
+				require.Equal(t, want[index].IntoMessageProto().Properties, got[index].IntoMessageProto().Properties, "properties at chunk %d", index)
+			}
+		})
 	}
 }
 

@@ -17,16 +17,22 @@ import (
 
 func TestCommitBodyCount(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		expected uint64
-		actual   int
-		valid    bool
+		name       string
+		expected   uint64
+		actual     int
+		valid      bool
+		upsert     bool
+		deleteRows uint64
 	}{
-		{"complete", 2, 2, true},
-		{"missing", 2, 1, false},
-		{"upper_retry_duplicate", 1, 2, false},
-		{"empty", 0, 0, false},
-		{"legacy_nonempty", 0, 2, true},
+		{"complete", 2, 2, true, false, 0},
+		{"missing", 2, 1, false, false, 0},
+		{"upper_retry_duplicate", 1, 2, false, false, 0},
+		{"empty", 0, 0, false, false, 0},
+		{"legacy_nonempty", 0, 2, true, false, 0},
+		{"upsert_complete", 1, 1, true, true, 0},
+		{"upsert_missing", 2, 1, false, true, 1},
+		{"upsert_legacy_zero", 0, 1, true, true, 0},
+		{"upsert_delete_effects", 1, 1, true, true, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := newTxnSession("v1", message.TxnContext{TxnID: 1, Keepalive: message.TxnKeepaliveInfinite}, 1, metricsutil.NewTxnMetrics("body-count").BeginTxn())
@@ -35,8 +41,14 @@ func TestCommitBodyCount(t *testing.T) {
 			s.RegisterCleanup(func() { cleaned = true }, 1)
 			for i := 0; i < tc.actual; i++ {
 				require.NoError(t, s.AddNewMessage(context.Background(), 2))
-				s.AddNewMessageDoneAndKeepalive(2, message.MessageTypeInsert)
+				typ := message.MessageTypeInsert
+				if tc.upsert {
+					typ = message.MessageTypeUpsert
+					s.RecordUpsertEffects(tc.deleteRows)
+				}
+				s.AddNewMessageDoneAndKeepalive(2, typ)
 			}
+			require.Equal(t, tc.actual > 0 && tc.deleteRows == 0, s.IsInsertOnly())
 			// An admitted but failed append is not a logical body.
 			require.NoError(t, s.AddNewMessage(context.Background(), 3))
 			s.AddNewMessageFail()

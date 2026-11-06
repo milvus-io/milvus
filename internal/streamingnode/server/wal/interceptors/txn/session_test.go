@@ -691,3 +691,55 @@ func newImmutableBeginTxnMessageWithVChannel(vchannel string, txnID int64, timet
 		IntoImmutableMessage(rmq.NewRmqID(1))
 	return message.MustAsImmutableBeginTxnMessageV2(msg)
 }
+
+func TestTransactionVChannelMembership(t *testing.T) {
+	for _, channel := range []string{"p_1v0", "p_vcchan", ""} {
+		s := newTxnSession(channel, message.TxnContext{}, 10, nil)
+		require.NoError(t, s.ValidateVChannelMembership(channel))
+		require.Error(t, s.ValidateVChannelMembership(channel+"foreign"))
+		require.Zero(t, s.inFlightCount)
+		require.Zero(t, s.bodyCount)
+		require.Equal(t, uint64(10), s.lastTimetick)
+	}
+}
+
+func TestManagerRecoversUpsertEffects(t *testing.T) {
+	resource.InitForTest(t)
+	for _, effects := range []bool{false, true} {
+		ctx := message.TxnContext{TxnID: 70}
+		begin := message.NewBeginTxnMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&message.BeginTxnMessageHeader{}).WithBody(&message.BeginTxnMessageBody{}).MustBuildMutable().WithTxnContext(ctx).WithTimeTick(10).WithLastConfirmedUseMessageID().IntoImmutableMessage(walimplstest.NewTestMessageID(10))
+		header := &message.UpsertMessageHeader{CollectionId: 1}
+		if effects {
+			header.DeleteRows = 1
+		}
+		body := message.NewUpsertMessageBuilderV2().WithVChannel("p_1v0").WithHeader(header).WithBody(&message.UpsertMessageBody{}).MustBuildMutable().WithTxnContext(ctx).WithTimeTick(11).WithLastConfirmedUseMessageID().IntoImmutableMessage(walimplstest.NewTestMessageID(11))
+		manager := NewTxnManager(types.PChannelInfo{Name: "test"}, map[message.TxnID]*message.ImmutableTxnMessageBuilder{70: message.NewImmutableTxnMessageBuilder(message.MustAsImmutableBeginTxnMessageV2(begin)).Add(body)})
+		session, err := manager.GetSessionOfTxn(70)
+		require.NoError(t, err)
+		require.Equal(t, !effects, session.IsInsertOnly())
+		manager.Close()
+	}
+}
+
+func TestManagerCloseCleansSessionsAndPreservesUncertainCommit(t *testing.T) {
+	metrics := metricsutil.NewTxnMetrics("manager-close")
+	defer metrics.Close()
+	s := newTxnSession("p_1v0", message.TxnContext{TxnID: 1, Keepalive: time.Second}, 0, metrics.BeginTxn())
+	require.NoError(t, s.AddNewMessage(context.Background(), 0))
+	s.AddNewMessageDoneAndKeepalive(0, message.MessageTypeInsert)
+	require.NoError(t, s.RequestCommitAndWait(context.Background(), 0, 1))
+	cleaned := false
+	s.RegisterCleanup(func() { cleaned = true }, 0)
+	m := &TxnManager{sessions: map[message.TxnID]*TxnSession{1: s}, recoveredSessions: map[message.TxnID]struct{}{1: {}}, recoveredSessionsDoneChan: make(chan struct{})}
+	m.Close()
+	require.Equal(t, message.TxnStateOnCommit, s.State(), "WAL recovery owns the ambiguous outcome")
+	require.True(t, cleaned)
+	require.Empty(t, m.sessions)
+	require.Empty(t, m.recoveredSessions)
+	select {
+	case <-m.RecoverDone():
+	default:
+		t.Fatal("close must release recovery waiters")
+	}
+	m.Close()
+}

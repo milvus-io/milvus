@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"math/rand"
+	"os"
 	"strconv"
 	"sync"
 	"testing"
@@ -27,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/uniquegenerator"
@@ -310,4 +312,9 @@ func constructPlaceholderGroup(nq, dim int) *commonpb.PlaceholderGroup {
 			},
 		},
 	}
+}
+
+func TestMain(m *testing.M) {
+	paramtable.Init()
+	os.Exit(m.Run())
 }

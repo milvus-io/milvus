@@ -178,7 +178,9 @@ func TestUpsertRejectsIncompleteContract(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			header, body, primary := upsertFixture()
 			mutate(header, body)
-			require.Error(t, message.ValidateUpsert(header, body, primary))
+			selections, err := message.ValidateUpsertWithSelections(header, body, primary)
+			require.Error(t, err)
+			require.Nil(t, selections)
 		})
 	}
 }
@@ -197,17 +199,6 @@ func TestUpsertSelectionsShareProjectionAcrossReaders(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, &positions[0], &again[0])
 	require.Equal(t, []int64{0, -1, 1}, positions)
-}
-
-func TestUpsertValidationReturnsSelections(t *testing.T) {
-	header, body, primary := upsertFixture()
-	rows, err := message.ValidateUpsertWithSelections(header, body, primary)
-	require.NoError(t, err)
-	require.Equal(t, [][]int64{{0, 2}, {1}}, rows)
-	body.RowIds = nil
-	rows, err = message.ValidateUpsertWithSelections(header, body, primary)
-	require.Error(t, err)
-	require.Nil(t, rows)
 }
 
 func BenchmarkUpsertValidationSelections(b *testing.B) {

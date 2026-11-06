@@ -2,6 +2,7 @@ package shard
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -34,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
@@ -999,5 +1001,64 @@ func TestDropPartitionUpdatesManagerAfterAppend(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, []string{"append", "drop"}, events)
 		})
+	}
+}
+
+func TestControlChannelPChannelLevelMessageRunsShardHandler(t *testing.T) {
+	manager := mock_shards.NewMockShardManager(t)
+	manager.EXPECT().FlushAllAndFenceSegmentAllocUntil(uint64(10)).Return([]int64{2}, nil).Once()
+	interceptor := &shardInterceptor{shardManager: manager}
+	interceptor.initOpTable()
+	broadcast := message.NewFlushAllMessageBuilderV2().WithHeader(&message.FlushAllMessageHeader{}).WithBody(&message.FlushAllMessageBody{}).WithClusterLevelBroadcast(message.ClusterChannels{Channels: []string{"p"}, ControlChannel: "p_vcchan"}).MustBuildBroadcast()
+	broadcast.WithBroadcastID(1)
+	messages := broadcast.SplitIntoMutableMessage()
+	require.Len(t, messages, 1)
+	msg := messages[0].WithTimeTick(10)
+	require.Equal(t, "p_vcchan", msg.VChannel())
+	require.True(t, msg.IsPChannelLevel())
+	expectedID := walimplstest.NewTestMessageID(12)
+	calls := 0
+	id, err := interceptor.DoAppend(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		calls++
+		return expectedID, nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, expectedID, id)
+	require.Equal(t, 1, calls)
+}
+
+func TestShardDispatcherPassThrough(t *testing.T) {
+	for _, kind := range []string{"unregistered_commit", "control_ddl", "control_upsert"} {
+		for _, fail := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/failure=%t", kind, fail), func(t *testing.T) {
+				interceptor := &shardInterceptor{shardManager: mock_shards.NewMockShardManager(t)}
+				interceptor.initOpTable()
+				var msg message.MutableMessage
+				switch kind {
+				case "unregistered_commit":
+					msg = message.NewCommitTxnMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&message.CommitTxnMessageHeader{}).WithBody(&message.CommitTxnMessageBody{}).MustBuildMutable()
+				case "control_ddl":
+					msg = message.NewCreatePartitionMessageBuilderV1().WithVChannel("p_vcchan").WithHeader(&message.CreatePartitionMessageHeader{}).WithBody(&msgpb.CreatePartitionRequest{}).MustBuildMutable()
+				case "control_upsert":
+					msg = upsertForTest("p_vcchan")
+				}
+				ctx := context.Background()
+				expectedID := walimplstest.NewTestMessageID(12)
+				var expectedError error
+				if fail {
+					expectedError = context.Canceled
+				}
+				calls := 0
+				id, err := interceptor.DoAppend(ctx, msg, func(actualCtx context.Context, actual message.MutableMessage) (message.MessageID, error) {
+					calls++
+					require.Equal(t, ctx, actualCtx)
+					require.Same(t, msg, actual)
+					return expectedID, expectedError
+				})
+				require.Equal(t, 1, calls)
+				require.Equal(t, expectedID, id)
+				require.ErrorIs(t, err, expectedError)
+			})
+		}
 	}
 }

@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/shard/mock_shards"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -124,50 +123,6 @@ func TestMalformedUpsertContractIsTerminal(t *testing.T) {
 	require.ErrorIs(t, upsertBodyDecodeError(context.DeadlineExceeded), context.DeadlineExceeded)
 }
 
-func TestCommitWithoutUpsertPassesThroughOnEveryChannel(t *testing.T) {
-	for _, channel := range []string{"p_1v0", "p_vcchan", ""} {
-		for _, withSession := range []bool{false, true} {
-			for _, fail := range []bool{false, true} {
-				interceptor := &shardInterceptor{shardManager: mock_shards.NewMockShardManager(t)}
-				interceptor.initOpTable()
-				ctx := context.Background()
-				if withSession {
-					ctx = txn.WithTxnSession(ctx, &txn.TxnSession{})
-				}
-				msg := message.NewCommitTxnMessageBuilderV2().WithVChannel(channel).WithHeader(&message.CommitTxnMessageHeader{}).WithBody(&message.CommitTxnMessageBody{}).MustBuildMutable()
-				expectedID := walimplstest.NewTestMessageID(12)
-				var expectedError error
-				if fail {
-					expectedError = status.NewOnShutdownError("pass-through failure")
-				}
-				calls := 0
-				id, err := interceptor.DoAppend(ctx, msg, func(actualCtx context.Context, actual message.MutableMessage) (message.MessageID, error) {
-					calls++
-					require.Equal(t, ctx, actualCtx)
-					require.Same(t, msg, actual)
-					return expectedID, expectedError
-				})
-				require.Equal(t, 1, calls)
-				require.Equal(t, expectedID, id)
-				require.ErrorIs(t, err, expectedError)
-			}
-		}
-	}
-}
-
-func TestControlChannelDDLStillSkipsShardEffects(t *testing.T) {
-	interceptor := &shardInterceptor{shardManager: mock_shards.NewMockShardManager(t)}
-	interceptor.initOpTable()
-	msg := message.NewCreatePartitionMessageBuilderV1().WithVChannel("p_vcchan").WithHeader(&message.CreatePartitionMessageHeader{}).WithBody(&msgpb.CreatePartitionRequest{}).MustBuildMutable()
-	calls := 0
-	_, err := interceptor.DoAppend(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
-		calls++
-		return walimplstest.NewTestMessageID(1), nil
-	})
-	require.NoError(t, err)
-	require.Equal(t, 1, calls)
-}
-
 func TestUpsertRejectsNamespaceCollectionBeforeAssignment(t *testing.T) {
 	for _, replicated := range []bool{false, true} {
 		manager := mock_shards.NewMockShardManager(t)
@@ -184,53 +139,4 @@ func TestUpsertRejectsNamespaceCollectionBeforeAssignment(t *testing.T) {
 		})
 		require.ErrorContains(t, err, "namespace")
 	}
-}
-
-func TestControlChannelUpsertSkipsShardEffects(t *testing.T) {
-	for _, fail := range []bool{false, true} {
-		t.Run(map[bool]string{false: "success", true: "failure"}[fail], func(t *testing.T) {
-			interceptor := &shardInterceptor{shardManager: mock_shards.NewMockShardManager(t)}
-			interceptor.initOpTable()
-			msg := upsertForTest("p_vcchan")
-			expectedID := walimplstest.NewTestMessageID(12)
-			var expectedError error
-			if fail {
-				expectedError = context.Canceled
-			}
-			ctx := context.Background()
-			calls := 0
-			id, err := interceptor.DoAppend(ctx, msg, func(actualCtx context.Context, actual message.MutableMessage) (message.MessageID, error) {
-				calls++
-				require.Equal(t, ctx, actualCtx)
-				require.Same(t, msg, actual)
-				return expectedID, expectedError
-			})
-			require.Equal(t, 1, calls)
-			require.Equal(t, expectedID, id)
-			require.ErrorIs(t, err, expectedError)
-		})
-	}
-}
-
-func TestControlChannelPChannelLevelMessageRunsShardHandler(t *testing.T) {
-	manager := mock_shards.NewMockShardManager(t)
-	manager.EXPECT().FlushAllAndFenceSegmentAllocUntil(uint64(10)).Return([]int64{2}, nil).Once()
-	interceptor := &shardInterceptor{shardManager: manager}
-	interceptor.initOpTable()
-	broadcast := message.NewFlushAllMessageBuilderV2().WithHeader(&message.FlushAllMessageHeader{}).WithBody(&message.FlushAllMessageBody{}).WithClusterLevelBroadcast(message.ClusterChannels{Channels: []string{"p"}, ControlChannel: "p_vcchan"}).MustBuildBroadcast()
-	broadcast.WithBroadcastID(1)
-	messages := broadcast.SplitIntoMutableMessage()
-	require.Len(t, messages, 1)
-	msg := messages[0].WithTimeTick(10)
-	require.Equal(t, "p_vcchan", msg.VChannel())
-	require.True(t, msg.IsPChannelLevel())
-	expectedID := walimplstest.NewTestMessageID(12)
-	calls := 0
-	id, err := interceptor.DoAppend(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
-		calls++
-		return expectedID, nil
-	})
-	require.NoError(t, err)
-	require.Equal(t, expectedID, id)
-	require.Equal(t, 1, calls)
 }

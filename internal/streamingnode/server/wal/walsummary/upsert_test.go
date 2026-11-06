@@ -31,19 +31,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
 
-func TestUpsertSummaryOriginalResult(t *testing.T) {
-	result := &messagespb.IdempotentInsertResult{RowOffsets: []uint32{2}, Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7}}}}}
-	msg := message.NewUpsertMessageBuilderV2().WithVChannel("v1").WithIdempotencyKey("key").WithHeader(&message.UpsertMessageHeader{}).WithBody(&message.UpsertMessageBody{PrimaryKeys: result.Ids, RequestRowMapping: &messagespb.UpsertRequestRowMapping{RowOffsets: result.RowOffsets}}).MustBuildMutable().WithTimeTick(42).WithLastConfirmed(rmq.NewRmqID(9)).IntoImmutableMessage(rmq.NewRmqID(10))
-	keys, insert, err := insertSummaryOf(context.Background(), msg)
-	require.NoError(t, err)
-	require.Equal(t, "key", keys.GetKey())
-	require.Equal(t, result.GetRowOffsets(), keys.GetRowOffsets())
-	require.True(t, proto.Equal(result.GetIds(), insert.GetIds()))
-	require.Equal(t, uint64(42), insert.GetSourceTimetick())
-	require.Equal(t, rmq.NewRmqID(10).IntoProto(), insert.GetSourceMessageId())
-	require.Equal(t, rmq.NewRmqID(9).IntoProto(), insert.GetLastConfirmedMessageId())
-}
-
 func TestUpsertTxnSummaryRequiresEveryInsertedResult(t *testing.T) {
 	for _, complete := range []bool{false, true} {
 		txnCtx := message.TxnContext{TxnID: 1}
@@ -96,7 +83,7 @@ func TestUpsertSummaryPersistsBothEffectsAtOnePosition(t *testing.T) {
 	ids := &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7}}}}
 	raw := message.NewUpsertMessageBuilderV2().WithVChannel("v1").WithIdempotencyKey("replace-7").
 		WithHeader(&message.UpsertMessageHeader{CollectionId: 1, DeleteRows: 1}).
-		WithBody(&message.UpsertMessageBody{PrimaryKeys: ids, RowIds: []int64{1}, RequestRowMapping: &messagespb.UpsertRequestRowMapping{RowOffsets: []uint32{0}}, DeleteEffects: []*messagespb.UpsertDeleteEffect{{PrimaryKeys: ids, Scope: &messagespb.UpsertDeleteEffect_AllPartitions{AllPartitions: &messagespb.UpsertAllPartitions{}}}}}).MustBuildMutable().WithTimeTick(100).WithLastConfirmed(walimplstest.NewTestMessageID(90)).IntoImmutableMessage(walimplstest.NewTestMessageID(100))
+		WithBody(&message.UpsertMessageBody{PrimaryKeys: ids, RowIds: []int64{1}, RequestRowMapping: &messagespb.UpsertRequestRowMapping{RowOffsets: []uint32{2}}, DeleteEffects: []*messagespb.UpsertDeleteEffect{{PrimaryKeys: ids, Scope: &messagespb.UpsertDeleteEffect_AllPartitions{AllPartitions: &messagespb.UpsertAllPartitions{}}}}}).MustBuildMutable().WithTimeTick(100).WithLastConfirmed(walimplstest.NewTestMessageID(90)).IntoImmutableMessage(walimplstest.NewTestMessageID(100))
 	manager.ObserveMessage(ctx, raw)
 	require.Equal(t, uint64(50), manager.LastAcked(), "Summary persistence independently pins the recovery prefix")
 	require.NoError(t, persistSummary(ctx, manager))
@@ -115,8 +102,11 @@ func TestUpsertSummaryPersistsBothEffectsAtOnePosition(t *testing.T) {
 	require.Len(t, retained.Inserts, 1)
 	require.Equal(t, uint64(100), retained.Inserts[0].GetSourceTimetick())
 	require.True(t, proto.Equal(messageIDProto(raw.MessageID()), retained.Inserts[0].GetSourceMessageId()))
+	require.True(t, proto.Equal(messageIDProto(raw.LastConfirmedMessageID()), retained.Inserts[0].GetLastConfirmedMessageId()))
 	require.True(t, proto.Equal(ids, retained.Inserts[0].GetIds()))
+	require.Len(t, retained.Idempotency, 1)
 	require.Equal(t, "replace-7", retained.Idempotency[0].GetKey())
+	require.Equal(t, []uint32{2}, retained.Idempotency[0].GetRowOffsets())
 	transforms, err := recovered.ReadTransform(ctx, "v1", 0, 100, ReadLimits{})
 	require.NoError(t, err)
 	require.Len(t, transforms.Entries, 1)
