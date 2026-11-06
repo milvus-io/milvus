@@ -2252,6 +2252,33 @@ func TestMakePropertiesFromStorageConfig_NilConfig(t *testing.T) {
 	assert.Contains(t, err.Error(), "storageConfig is required")
 }
 
+func TestMakePropertiesFromStorageConfig_DoesNotPublishBrokerPolicy(t *testing.T) {
+	publication := mockey.Mock(initCredentialBrokerPolicy).
+		Return(merr.WrapErrServiceInternalMsg("broker policy publication failed")).Build()
+	defer publication.UnPatch()
+
+	props, err := MakePropertiesFromStorageConfig(&indexpb.StorageConfig{StorageType: "local"}, nil)
+	require.NoError(t, err)
+	defer FreeProperties(props)
+	require.NotNil(t, props)
+	assert.Zero(t, publication.Times())
+}
+
+func TestInjectExternalSpecProperties_PublishesBrokerPolicy(t *testing.T) {
+	wantErr := merr.WrapErrServiceInternalMsg("broker policy publication failed")
+	publication := mockey.Mock(initCredentialBrokerPolicy).Return(wantErr).Build()
+	defer publication.UnPatch()
+
+	props, err := MakePropertiesFromStorageConfig(&indexpb.StorageConfig{StorageType: "local"}, nil)
+	require.NoError(t, err)
+	defer FreeProperties(props)
+	require.NoError(t, injectExternalSpecProperties(props, 42, "", ""))
+	require.Zero(t, publication.Times())
+	err = injectExternalSpecProperties(props, 42, "s3://bucket/key", `{"format":"parquet"}`)
+	require.ErrorIs(t, err, wantErr)
+	require.Equal(t, 1, publication.Times())
+}
+
 func TestMakePropertiesFromStorageConfig_LocalType(t *testing.T) {
 	tmpDir := t.TempDir()
 	config := &indexpb.StorageConfig{

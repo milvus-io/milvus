@@ -32,6 +32,7 @@ import "C"
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"math"
 	"strconv"
 	"strings"
@@ -146,6 +147,9 @@ func callWithTimeout(fn func(), timeoutHandler func(), timeout time.Duration) {
 }
 
 func InitStorageV2FileSystem(params *paramtable.ComponentParam) error {
+	if err := InitCredentialBrokerPolicy(params); err != nil {
+		return err
+	}
 	if params.CommonCfg.StorageType.GetValue() == "local" {
 		return InitLocalArrowFileSystem(params.LocalStorageCfg.Path.GetValue())
 	}
@@ -988,4 +992,16 @@ func InitPluginLoader() error {
 
 func CleanPluginLoader() {
 	C.CleanPluginLoader()
+}
+
+// InitCredentialBrokerPolicy publishes the immutable startup allowlist to native readers.
+func InitCredentialBrokerPolicy(params *paramtable.ComponentParam) error {
+	data, err := json.Marshal(params.CommonCfg.CredentialBrokerPolicy().Endpoints())
+	if err != nil {
+		return merr.WrapErrServiceInternalErr(err, "encode credential broker policy")
+	}
+	value := C.CString(string(data))
+	defer C.free(unsafe.Pointer(value))
+	status := C.InitCredentialBrokerPolicy(value)
+	return HandleCStatus(&status, "InitCredentialBrokerPolicy failed")
 }
