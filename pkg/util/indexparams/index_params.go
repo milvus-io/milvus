@@ -17,6 +17,7 @@
 package indexparams
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -24,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -195,7 +197,7 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 	} else {
 		maxDegree = params.CommonCfg.MaxDegree.GetValue()
 		searchListSize = params.CommonCfg.SearchListSize.GetValue()
-		// Keep an explicit PQ budget ratio; server settings provide the default.
+		// SDK and generic Knowhere settings take precedence over the legacy fallback.
 		if ratio, ok := indexParams[PQCodeBudgetRatioKey]; ok {
 			pqCodeBudgetGBRatio = ratio
 		} else {
@@ -212,6 +214,30 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 	indexParams[SearchCacheBudgetRatioKey] = searchCacheBudgetGBRatio
 
 	return nil
+}
+
+// LogPQCodeBudgetOverride reports a conflicting legacy setting at index creation,
+// after generic defaults and the DiskANN fallback have been applied.
+func LogPQCodeBudgetOverride(ctx context.Context, params *paramtable.ComponentParam, indexParams map[string]string, fromSDK bool) {
+	if params.AutoIndexConfig.Enable.GetAsBool() {
+		return
+	}
+	if codec := indexParams["quant_type"]; codec != "" && codec != "PQ" {
+		return
+	}
+	key := params.CommonCfg.PQCodeBudgetGBRatio.Key
+	legacy, legacyErr := strconv.ParseFloat(params.GetWithDefault(key, ""), 64)
+	selected, selectedErr := strconv.ParseFloat(indexParams[PQCodeBudgetRatioKey], 64)
+	if legacyErr != nil || selectedErr != nil || legacy == selected {
+		return
+	}
+	source := "SDK"
+	if !fromSDK {
+		source = "knowhere." + indexParams[common.IndexTypeKey] + ".build." + PQCodeBudgetRatioKey
+	}
+	mlog.Info(ctx, "legacy DiskANN PQ code budget ratio overridden",
+		mlog.String("source", source), mlog.Float64("value", selected),
+		mlog.String("legacyKey", key), mlog.Float64("legacyValue", legacy))
 }
 
 func GetIndexParams(indexParams []*commonpb.KeyValuePair, key string) string {

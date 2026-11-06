@@ -789,7 +789,8 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Key:          "common.DiskIndex.PQCodeBudgetGBRatio",
 		Version:      "2.0.0",
 		DefaultValue: fmt.Sprintf("%f", DefaultPQCodeBudgetGBRatio),
-		Export:       true,
+		// Compatibility fallback; new deployments use knowhere.<index>.build.pq_code_budget_gb_ratio.
+		Export: false,
 	}
 	p.PQCodeBudgetGBRatio.Init(base.mgr)
 

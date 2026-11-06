@@ -17,6 +17,7 @@
 package indexparams
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -56,6 +58,7 @@ func TestDiskIndexParams(t *testing.T) {
 		var params paramtable.ComponentParam
 		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 		params.Save(params.AutoIndexConfig.Enable.Key, "true")
+		params.Save(params.CommonCfg.PQCodeBudgetGBRatio.Key, "0.25")
 
 		mapString := make(map[string]string)
 		mapString[BuildRatioKey] = "{\"pq_code_budget_gb\": 0.125, \"num_threads\": 1}"
@@ -83,6 +86,9 @@ func TestDiskIndexParams(t *testing.T) {
 		buildNumThreadsRatio, err := strconv.ParseFloat(indexParams[NumBuildThreadRatioKey], 64)
 		assert.NoError(t, err)
 		assert.Equal(t, 1.0, buildNumThreadsRatio)
+		sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "info"})
+		LogPQCodeBudgetOverride(context.Background(), &params, indexParams, true)
+		assert.NotContains(t, sink.String(), "legacy DiskANN PQ code budget ratio overridden")
 	})
 
 	t.Run("fill index params with wrong auto index param", func(t *testing.T) {
@@ -583,51 +589,82 @@ func TestBigDataIndex_parse(t *testing.T) {
 }
 
 func TestDiskIndexPQBudgetOverride(t *testing.T) {
-	for _, tc := range []struct {
-		name          string
-		requestRatio  string
-		knowhereRatio string
-		wantRatio     string
-	}{
-		{"server fallback", "", "", "0.1875"},
-		{"explicit request", "0.0625", "", "0.0625"},
-		{"legacy server default takes precedence", "", "0.25", "0.1875"},
-		{"request overrides both server defaults", "0.0625", "0.25", "0.0625"},
-		{"invalid request is not replaced", "invalid", "", "invalid"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var params paramtable.ComponentParam
-			params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
-			params.Save(params.AutoIndexConfig.Enable.Key, "false")
-			params.Save(params.CommonCfg.PQCodeBudgetGBRatio.Key, "0.1875")
-			// Isolate the legacy fallback from defaults in the repository YAML.
-			key := params.KnowhereConfig.IndexParam.KeyPrefix + "DISKANN.build." + PQCodeBudgetRatioKey
-			params.Remove(key)
-			if tc.knowhereRatio != "" {
-				params.Save(key, tc.knowhereRatio)
-			}
+	for _, indexType := range []string{"DISKANN", "AISAQ"} {
+		for _, tc := range []struct {
+			name           string
+			requestRatio   string
+			knowhereRatio  string
+			legacyRatio    string
+			wantRatio      string
+			wantSource     string
+			disableGeneric bool
+			codec          string
+		}{
+			{"server fallback", "", "", "0.1875", "0.1875", "", false, ""},
+			{"explicit request", "0.0625", "", "0.1875", "0.0625", "SDK", false, ""},
+			{"generic default overrides common", "", "0.25", "0.1875", "0.25", "knowhere", false, ""},
+			{"request overrides both server defaults", "0.0625", "0.25", "0.1875", "0.0625", "SDK", false, ""},
+			{"invalid request is not replaced", "invalid", "", "0.1875", "invalid", "", false, ""},
+			{"generic config disabled", "", "0.25", "0.1875", "0.1875", "", true, ""},
+			{"built in fallback", "", "", "", "0.125000", "", false, ""},
+			{"no legacy key", "0.0625", "", "", "0.0625", "", false, ""},
+			{"generic config without legacy key", "", "0.25", "", "0.25", "", false, ""},
+			{"equivalent numeric values", "0.0625", "", "0.062500", "0.0625", "", false, ""},
+			{"RaBitQ does not log PQ changes", "", "0.25", "0.1875", "0.25", "", false, "RABITQ"},
+		} {
+			t.Run(indexType+"/"+tc.name, func(t *testing.T) {
+				var params paramtable.ComponentParam
+				params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+				params.Save(params.AutoIndexConfig.Enable.Key, "false")
+				params.Save(params.KnowhereConfig.Enable.Key, strconv.FormatBool(!tc.disableGeneric))
+				params.Remove(params.CommonCfg.PQCodeBudgetGBRatio.Key)
+				if tc.legacyRatio != "" {
+					params.Save(params.CommonCfg.PQCodeBudgetGBRatio.Key, tc.legacyRatio)
+				}
+				// Isolate the legacy fallback from defaults in the repository YAML.
+				key := params.KnowhereConfig.IndexParam.KeyPrefix + indexType + ".build." + PQCodeBudgetRatioKey
+				params.Remove(key)
+				if tc.knowhereRatio != "" {
+					params.Save(key, tc.knowhereRatio)
+				}
 
-			indexParams := map[string]string{MaxDegreeKey: "1"}
-			if tc.requestRatio != "" {
-				indexParams[PQCodeBudgetRatioKey] = tc.requestRatio
-			}
-			assert.NoError(t, FillDiskIndexParams(&params, indexParams))
-			indexParams, err := params.KnowhereConfig.MergeIndexParams("DISKANN", paramtable.BuildStage, indexParams)
-			assert.NoError(t, err)
-			assert.Equal(t, tc.wantRatio, indexParams[PQCodeBudgetRatioKey])
-			assert.Equal(t, params.CommonCfg.MaxDegree.GetValue(), indexParams[MaxDegreeKey])
+				indexParams := map[string]string{MaxDegreeKey: "1", common.IndexTypeKey: indexType, "quant_type": tc.codec}
+				if tc.requestRatio != "" {
+					indexParams[PQCodeBudgetRatioKey] = tc.requestRatio
+				}
+				if params.KnowhereConfig.Enable.GetAsBool() {
+					_, err := params.KnowhereConfig.MergeIndexParams(indexType, paramtable.BuildStage, indexParams)
+					assert.NoError(t, err)
+				}
+				assert.NoError(t, FillDiskIndexParams(&params, indexParams))
+				assert.Equal(t, tc.wantRatio, indexParams[PQCodeBudgetRatioKey])
+				assert.Equal(t, params.CommonCfg.MaxDegree.GetValue(), indexParams[MaxDegreeKey])
+				sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "info"})
+				LogPQCodeBudgetOverride(context.Background(), &params, indexParams, tc.requestRatio != "")
+				if tc.wantSource == "" {
+					assert.NotContains(t, sink.String(), "legacy DiskANN PQ code budget ratio overridden")
+				} else {
+					source := tc.wantSource
+					if source == "knowhere" {
+						source = key
+					}
+					assert.Contains(t, sink.String(), "legacy DiskANN PQ code budget ratio overridden")
+					assert.Contains(t, sink.String(), "source="+source)
+					assert.Contains(t, sink.String(), "legacyKey="+params.CommonCfg.PQCodeBudgetGBRatio.Key)
+				}
 
-			// Verify the chosen ratio reaches the actual per-segment build budget.
-			err = SetDiskIndexBuildParams(indexParams, 4<<30)
-			if tc.wantRatio == "invalid" {
-				assert.Error(t, err)
-				return
-			}
-			assert.NoError(t, err)
-			ratio, err := strconv.ParseFloat(tc.wantRatio, 64)
-			assert.NoError(t, err)
-			assert.Equal(t, fmt.Sprintf("%f", 4*ratio), indexParams[PQCodeBudgetKey])
-		})
+				// Verify the chosen ratio reaches the actual per-segment build budget.
+				err := SetDiskIndexBuildParams(indexParams, 4<<30)
+				if tc.wantRatio == "invalid" {
+					assert.Error(t, err)
+					return
+				}
+				assert.NoError(t, err)
+				ratio, err := strconv.ParseFloat(tc.wantRatio, 64)
+				assert.NoError(t, err)
+				assert.Equal(t, fmt.Sprintf("%f", 4*ratio), indexParams[PQCodeBudgetKey])
+			})
+		}
 	}
 }
 
