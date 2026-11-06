@@ -19,14 +19,17 @@ package segments
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
+	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -186,12 +189,24 @@ func (suite *SearchSuite) TestSearchGrowing() {
 	suite.manager.Segment.Unpin(segments)
 }
 
+// setNonMatchingWorkerCandidate installs stats for a segment containing only PK 0.
+func setNonMatchingWorkerCandidate(t testing.TB, segment Segment, queryPKs ...int64) {
+	t.Helper()
+	segment.(*LocalSegment).skipGrowingBF = false
+	bfs := pkoracle.NewBloomFilterSet(segment.ID(), segment.Partition(), segment.Type())
+	bfs.UpdatePkCandidate([]storage.PrimaryKey{storage.NewInt64PrimaryKey(0)})
+	segment.SetPKCandidate(bfs)
+	require.True(t, segment.PkCandidateExist())
+	for _, pk := range queryPKs {
+		require.False(t, segment.MayPkExist(storage.NewLocationsCache(storage.NewInt64PrimaryKey(pk))))
+	}
+}
+
 func (suite *SearchSuite) TestSearchWithFilter() {
 	ctx := context.Background()
 
 	// create more sealed segments with different pk ranges for testing
 	// seg1: pk [0], seg2: pk [0,1], ..., seg10: pk [0..9]
-	loader := NewLoader(ctx, suite.manager, suite.chunkManager)
 	for i := range 10 {
 		segID := int64(i + 1000)
 		msgLen := i + 1
@@ -225,9 +240,9 @@ func (suite *SearchSuite) TestSearchWithFilter() {
 		)
 		suite.Require().NoError(err)
 
-		bfs, err := loader.loadSingleBloomFilterSet(ctx, suite.collectionID, loadInfo, SegmentTypeSealed)
-		suite.Require().NoError(err)
-		seg.SetPKCandidate(bfs)
+		if i == 0 {
+			setNonMatchingWorkerCandidate(suite.T(), seg, math.MaxInt64)
+		}
 
 		for _, binlog := range binlogs {
 			err = seg.(*LocalSegment).LoadFieldData(ctx, binlog.FieldID, int64(msgLen), binlog)
@@ -242,7 +257,7 @@ func (suite *SearchSuite) TestSearchWithFilter() {
 	// Segment pruning by PK filter now happens at the delegator layer (before RPC).
 	// SearchHistorical receives only the segments assigned to it and searches all of them.
 	suite.Run("SearchHistoricalSearchesAllAssignedSegments", func() {
-		searchReq, err := mock_segcore.GenSearchPlanAndRequests(suite.collection.GetCCollection(), segIDs, mock_segcore.IndexFaissIDMap, 1)
+		searchReq, err := mock_segcore.GenSearchPlanAndRequestsWithNoMatchPKPredicate(suite.collection.GetCCollection(), segIDs, 1, 1)
 		suite.NoError(err)
 
 		res, segments, err := SearchHistorical(ctx, suite.manager, searchReq,
@@ -264,7 +279,6 @@ func (suite *SearchSuite) TestSearchWithFilter() {
 
 func (suite *SearchSuite) TestSearchStreamingWithFilterDoesNotPruneGrowing() {
 	ctx := context.Background()
-	loader := NewLoader(ctx, suite.manager, suite.chunkManager)
 
 	growingSegIDs := make([]int64, 0, 10)
 	for i := range 10 {
@@ -299,9 +313,9 @@ func (suite *SearchSuite) TestSearchStreamingWithFilterDoesNotPruneGrowing() {
 		)
 		suite.Require().NoError(err)
 
-		bfs, err := loader.loadSingleBloomFilterSet(ctx, suite.collectionID, loadInfo, SegmentTypeGrowing)
-		suite.Require().NoError(err)
-		seg.SetPKCandidate(bfs)
+		if i == 0 {
+			setNonMatchingWorkerCandidate(suite.T(), seg, math.MaxInt64)
+		}
 
 		insertMsg, err := mock_segcore.GenInsertMsg(suite.collection.GetCCollection(), suite.partitionID, segID, msgLen)
 		suite.Require().NoError(err)
@@ -314,7 +328,7 @@ func (suite *SearchSuite) TestSearchStreamingWithFilterDoesNotPruneGrowing() {
 		growingSegIDs = append(growingSegIDs, segID)
 	}
 
-	searchReq, err := mock_segcore.GenSearchPlanAndRequests(suite.collection.GetCCollection(), growingSegIDs, mock_segcore.IndexFaissIDMap, 1)
+	searchReq, err := mock_segcore.GenSearchPlanAndRequestsWithNoMatchPKPredicate(suite.collection.GetCCollection(), growingSegIDs, 1, 1)
 	suite.NoError(err)
 
 	res, segments, err := SearchStreaming(ctx, suite.manager, searchReq,
