@@ -129,6 +129,10 @@ func (r *insertRowsReader) ReadRows(ctx context.Context, schema *schemapb.Collec
 			// Row selection preserves the source dimension bounds, including empty selections.
 			vectors := result.FieldsData[index].GetVectors()
 			vectors.Dim = field.GetVectors().GetDim()
+			if vectors.GetSparseFloatVector() == nil {
+				// All-null encoded chunks omit the sparse payload.
+				vectors.Data = &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{}}
+			}
 			vectors.GetSparseFloatVector().Dim = field.GetVectors().GetSparseFloatVector().GetDim()
 		}
 	}
