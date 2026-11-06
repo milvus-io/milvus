@@ -28,6 +28,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	ctask "github.com/milvus-io/milvus/internal/datacoord/compaction/task"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -36,19 +38,19 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func l0LockFixture(t *testing.T, targets ...int64) (*meta, *l0CompactionTask, []*datapb.CompactionSegment) {
+func l0LockFixture(t *testing.T, targets ...int64) (*meta.Meta, *ctask.L0CompactionTask, []*datapb.CompactionSegment) {
 	t.Helper()
 	ctx := context.Background()
-	mt, err := newMemoryMeta(t)
+	mt, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
-	require.NoError(t, mt.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+	require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID: 100, CollectionID: 1, PartitionID: 10,
 		State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L0,
 	})))
 	var output []*datapb.CompactionSegment
 	for _, id := range targets {
 		base := fmt.Sprintf("/tmp/milvus/insert_log/1/10/%d", id)
-		require.NoError(t, mt.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+		require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID: id, CollectionID: 1, PartitionID: 10, NumOfRows: 100,
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
 			StorageVersion: storage.StorageV3, ManifestPath: packed.MarshalManifestPath(base, 7),
@@ -60,7 +62,7 @@ func l0LockFixture(t *testing.T, targets ...int64) (*meta, *l0CompactionTask, []
 			}}}},
 		})
 	}
-	task := newL0CompactionTask(&datapb.CompactionTask{PlanID: 1, InputSegments: []int64{100}}, nil, mt)
+	task := ctask.NewL0CompactionTask(&datapb.CompactionTask{PlanID: 1, InputSegments: []int64{100}}, nil, mt, ctask.NewCompactionTaskMetaOverCatalog(mt.Catalog))
 	return mt, task, output
 }
 
@@ -79,7 +81,7 @@ func TestL0ManifestIOAllowsUnrelatedRPCs(t *testing.T) {
 	ctx := context.Background()
 	mt, task, output := l0LockFixture(t, 200)
 	base := "/tmp/milvus/insert_log/1/10/300"
-	require.NoError(t, mt.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+	require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID: 300, CollectionID: 1, PartitionID: 10, NumOfRows: 10,
 		State: commonpb.SegmentState_Growing, Level: datapb.SegmentLevel_L1,
 		StorageVersion: storage.StorageV3, ManifestPath: packed.MarshalManifestPath(base, 1),
@@ -99,7 +101,7 @@ func TestL0ManifestIOAllowsUnrelatedRPCs(t *testing.T) {
 	defer patch.UnPatch()
 	defer unblock()
 	done := make(chan error, 1)
-	go func() { done <- task.saveSegmentMeta(output) }()
+	go func() { done <- task.SaveSegmentMeta(output) }()
 	select {
 	case <-entered:
 	case <-time.After(5 * time.Second):
@@ -129,7 +131,7 @@ func TestL0ManifestIOAllowsUnrelatedRPCs(t *testing.T) {
 	require.NoError(t, awaitL0Result(t, read))
 	require.Equal(t, packed.MarshalManifestPath(base, 2), mt.GetSegment(ctx, 300).GetManifestPath())
 	// Also rebase a normal metadata change on the L0 target itself.
-	require.NoError(t, mt.UpdateSegmentsInfo(ctx, UpdateIsImporting(200, true)))
+	require.NoError(t, mt.UpdateSegmentsInfo(ctx, meta.UpdateIsImporting(200, true)))
 	require.Equal(t, commonpb.SegmentState_Flushed, mt.GetSegment(ctx, 100).GetState())
 	unblock()
 	require.NoError(t, awaitL0Result(t, done))
@@ -155,7 +157,7 @@ func (c *failOnceL0Catalog) AlterSegments(ctx context.Context, segments []*datap
 func TestL0ManifestRetryAfterCatalogFailure(t *testing.T) {
 	ctx := context.Background()
 	mt, task, output := l0LockFixture(t, 200, 201)
-	mt.catalog = &failOnceL0Catalog{DataCoordCatalog: mt.catalog, fail: true}
+	mt.Catalog = &failOnceL0Catalog{DataCoordCatalog: mt.Catalog, fail: true}
 	var mu sync.Mutex
 	calls := make(map[string]int)
 	patch := mockey.Mock(packed.AddDeltaLogsToManifestOverwrite).To(
@@ -167,15 +169,15 @@ func TestL0ManifestRetryAfterCatalogFailure(t *testing.T) {
 			return packed.MarshalManifestPath(base, version+1), err
 		}).Build()
 	defer patch.UnPatch()
-	require.ErrorIs(t, task.saveSegmentMeta(output), merr.ErrServiceUnavailable)
+	require.ErrorIs(t, task.SaveSegmentMeta(output), merr.ErrServiceUnavailable)
 	for _, id := range []int64{200, 201} {
 		require.Empty(t, mt.GetSegment(ctx, id).GetDeltalogs())
 		require.Zero(t, mt.GetSegment(ctx, id).GetStats().GetDeleteNumRows())
 	}
 	require.Equal(t, commonpb.SegmentState_Flushed, mt.GetSegment(ctx, 100).GetState())
-	require.NoError(t, task.saveSegmentMeta(output))
+	require.NoError(t, task.SaveSegmentMeta(output))
 	// A later meta_saved failure replays the same result once more.
-	require.NoError(t, task.saveSegmentMeta(output))
+	require.NoError(t, task.SaveSegmentMeta(output))
 	require.Len(t, calls, 2)
 	for _, n := range calls {
 		require.Equal(t, 1, n)
@@ -203,18 +205,18 @@ func TestL0ManifestRejectsChangedTargetBeforeBatchPublication(t *testing.T) {
 					mu.Unlock()
 					if change {
 						if drop {
-							err = mt.UpdateSegmentsInfo(ctx, UpdateStatusOperator(200, commonpb.SegmentState_Dropped))
+							err = mt.UpdateSegmentsInfo(ctx, meta.UpdateStatusOperator(200, commonpb.SegmentState_Dropped))
 						} else {
-							err = mt.UpdateSegmentsInfo(ctx, UpdateManifestVersion(200, 9))
+							err = mt.UpdateSegmentsInfo(ctx, meta.UpdateManifestVersion(200, 9))
 						}
 					}
 					return packed.MarshalManifestPath(base, version+1), err
 				}).Build()
 			defer patch.UnPatch()
-			require.ErrorIs(t, task.saveSegmentMeta(output), merr.ErrServiceUnavailable)
+			require.ErrorIs(t, task.SaveSegmentMeta(output), merr.ErrServiceUnavailable)
 			require.Equal(t, commonpb.SegmentState_Flushed, mt.GetSegment(ctx, 100).GetState())
 			require.Empty(t, mt.GetSegment(ctx, 201).GetDeltalogs(), "other targets must not be published on conflict")
-			require.NoError(t, task.saveSegmentMeta(output))
+			require.NoError(t, task.SaveSegmentMeta(output))
 			require.Equal(t, commonpb.SegmentState_Dropped, mt.GetSegment(ctx, 100).GetState())
 			if drop {
 				require.Equal(t, commonpb.SegmentState_Dropped, mt.GetSegment(ctx, 200).GetState())
@@ -248,12 +250,12 @@ func TestL0ManifestRetryAfterPartialCommitFailure(t *testing.T) {
 			return packed.MarshalManifestPath(base, version+1), err
 		}).Build()
 	defer patch.UnPatch()
-	require.ErrorIs(t, task.saveSegmentMeta(output), merr.ErrServiceUnavailable)
+	require.ErrorIs(t, task.SaveSegmentMeta(output), merr.ErrServiceUnavailable)
 	for _, id := range []int64{200, 201} {
 		require.Empty(t, mt.GetSegment(ctx, id).GetDeltalogs())
 	}
 	require.Equal(t, commonpb.SegmentState_Flushed, mt.GetSegment(ctx, 100).GetState())
-	require.NoError(t, task.saveSegmentMeta(output))
+	require.NoError(t, task.SaveSegmentMeta(output))
 	require.Equal(t, 1, calls[packed.MarshalManifestPath("/tmp/milvus/insert_log/1/10/200", 7)])
 	require.Equal(t, 2, calls[packed.MarshalManifestPath(failedBase, 7)])
 	for _, id := range []int64{200, 201} {
@@ -273,13 +275,13 @@ func TestL0ManifestConcurrentRetryPreservesManifestContents(t *testing.T) {
 		DeltaLogs: []packed.DeltaLogEntry{{Path: base + "/_delta/seed", NumEntries: 0}},
 	})
 	require.NoError(t, err)
-	mt, err := newMemoryMeta(t)
+	mt, err := meta.NewMemoryMeta(t)
 	require.NoError(t, err)
-	require.NoError(t, mt.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+	require.NoError(t, mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID: 200, State: commonpb.SegmentState_Flushed, ManifestPath: initial,
 	})))
-	makeOp := func(id int64) UpdateOperator {
-		return AddL0DeltalogsAndUpdateManifestOperator(200, []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{
+	makeOp := func(id int64) meta.UpdateOperator {
+		return meta.AddL0DeltalogsAndUpdateManifestOperator(200, []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{
 			LogID: id, LogPath: fmt.Sprintf("%s/_delta/%d", base, id), EntriesNum: 1,
 		}}}}, cfg, nil)
 	}

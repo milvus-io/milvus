@@ -27,6 +27,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/datacoord/partitionstats"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -36,21 +39,23 @@ import (
 
 func newIndexReadinessTestServer(segments []*datapb.SegmentInfo, states map[int64]commonpb.IndexState) (*Server, *model.Index) {
 	paramtable.Init()
-	index := &model.Index{
+	idx := &model.Index{
 		CollectionID: 1, FieldID: 10, IndexID: 10, CreateTime: 100,
 		IndexParams: []*commonpb.KeyValuePair{{Key: "index_type", Value: "IVF_FLAT"}},
 	}
-	s := &Server{ctx: context.Background(), meta: &meta{
-		collections:        typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		partitionStatsMeta: &partitionStatsMeta{partitionStatsInfos: make(map[string]map[int64]*partitionStatsInfo)},
-		channelCPs:         &channelCPs{checkpoints: make(map[string]*msgpb.MsgPosition)},
-		segments:           NewSegmentsInfo(),
-		indexMeta: &indexMeta{
-			indexes:        map[UniqueID]map[UniqueID]*model.Index{1: {10: index}},
-			segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+	s := &Server{ctx: context.Background(), meta: &meta.Meta{
+		Collections: typeutil.NewConcurrentMap[UniqueID, *meta.CollectionInfo](),
+
+		ChannelCPs: &meta.ChannelCPs{Checkpoints: make(map[string]*msgpb.MsgPosition)},
+		Segments:   meta.NewSegmentsInfo(),
+		IndexCatalog: &index.IndexMeta{
+			Indexes:        map[UniqueID]map[UniqueID]*model.Index{1: {10: idx}},
+			SegmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 		},
 	}}
-	s.meta.collections.Insert(1, &collectionInfo{ID: 1, Schema: &schemapb.CollectionSchema{
+	s.indexMeta = s.meta.IndexCatalog.(*index.IndexMeta)
+	s.partitionStatsMeta = &partitionstats.PartitionStatsMeta{PartitionStatsInfos: make(map[string]map[int64]*partitionstats.PartitionStatsInfo)}
+	s.meta.Collections.Insert(1, &meta.CollectionInfo{ID: 1, Schema: &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 10, Name: "vector", DataType: schemapb.DataType_FloatVector},
 			{FieldID: 20, Name: "scalar", DataType: schemapb.DataType_Int64},
@@ -63,7 +68,7 @@ func newIndexReadinessTestServer(segments []*datapb.SegmentInfo, states map[int6
 		if len(segment.Binlogs) == 0 {
 			segment.Binlogs = []*datapb.FieldBinlog{{FieldID: 10, Binlogs: []*datapb.Binlog{{LogID: segment.ID, LogPath: fmt.Sprintf("insert_log/1/1/%d/10/%d", segment.ID, segment.ID), EntriesNum: segment.NumOfRows}}}}
 		}
-		s.meta.segments.SetSegment(segment.GetID(), NewSegmentInfo(segment))
+		s.meta.Segments.SetSegment(segment.GetID(), meta.NewSegmentInfo(segment))
 	}
 	for segmentID, state := range states {
 		indexes := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
@@ -71,10 +76,10 @@ func newIndexReadinessTestServer(segments []*datapb.SegmentInfo, states map[int6
 			SegmentID: segmentID, CollectionID: 1, IndexID: 10,
 			IndexState: state, CurrentIndexVersion: 7, FailReason: "build failed",
 		})
-		s.meta.indexMeta.segmentIndexes.Insert(segmentID, indexes)
+		s.indexMeta.SegmentIndexes.Insert(segmentID, indexes)
 	}
 	s.stateCode.Store(commonpb.StateCode_Healthy)
-	return s, index
+	return s, idx
 }
 
 // Exercise the metadata collector as well as the state calculation: import
@@ -136,10 +141,10 @@ func TestIndexReadinessDataTimestamp(t *testing.T) {
 			if !test.noIndex {
 				states[1] = test.state
 			}
-			s, index := newIndexReadinessTestServer([]*datapb.SegmentInfo{segment}, states)
-			stats := s.selectSegmentIndexesStats(context.Background(), WithCollection(1))
-			info := &indexpb.IndexInfo{IndexID: index.IndexID}
-			s.completeIndexInfo(info, index, stats, test.realTime, 100)
+			s, idx := newIndexReadinessTestServer([]*datapb.SegmentInfo{segment}, states)
+			stats := s.selectSegmentIndexesStats(context.Background(), meta.WithCollection(1))
+			info := &indexpb.IndexInfo{IndexID: idx.IndexID}
+			s.completeIndexInfo(info, idx, stats, test.realTime, 100)
 			require.Equal(t, test.wantState, info.GetState())
 			require.EqualValues(t, 100, info.GetTotalRows())
 			require.Equal(t, test.wantIndexed, info.GetIndexedRows())
@@ -171,10 +176,10 @@ func TestIndexReadinessVisibility(t *testing.T) {
 					if state != commonpb.IndexState_Unissued {
 						states[2] = state
 					}
-					s, index := newIndexReadinessTestServer(segments, states)
-					info := &indexpb.IndexInfo{IndexID: index.IndexID}
-					stats := s.selectSegmentIndexesStats(context.Background(), WithCollection(1))
-					s.completeIndexInfo(info, index, stats, realTime, 100)
+					s, idx := newIndexReadinessTestServer(segments, states)
+					info := &indexpb.IndexInfo{IndexID: idx.IndexID}
+					stats := s.selectSegmentIndexesStats(context.Background(), meta.WithCollection(1))
+					s.completeIndexInfo(info, idx, stats, realTime, 100)
 					invisibleState := commonpb.IndexState_Finished
 					if !createdByCompaction {
 						invisibleState = commonpb.IndexState_InProgress
@@ -192,11 +197,11 @@ func TestIndexReadinessVisibility(t *testing.T) {
 					require.EqualValues(t, 100, info.GetIndexedRows())
 					require.EqualValues(t, 100, info.GetPendingIndexRows())
 
-					visible := s.meta.segments.GetSegment(2).Clone()
+					visible := s.meta.Segments.GetSegment(2).Clone()
 					visible.IsInvisible = false
-					s.meta.segments.SetSegment(2, visible)
-					stats = s.selectSegmentIndexesStats(context.Background(), WithCollection(1))
-					s.completeIndexInfo(info, index, stats, realTime, 100)
+					s.meta.Segments.SetSegment(2, visible)
+					stats = s.selectSegmentIndexesStats(context.Background(), meta.WithCollection(1))
+					s.completeIndexInfo(info, idx, stats, realTime, 100)
 					wantState := commonpb.IndexState_InProgress
 					if createdByCompaction {
 						wantState = commonpb.IndexState_Finished
@@ -223,10 +228,10 @@ func TestIndexReadinessCompactionLineage(t *testing.T) {
 	}
 	for _, state := range []commonpb.IndexState{commonpb.IndexState_InProgress, commonpb.IndexState_Finished} {
 		t.Run(state.String(), func(t *testing.T) {
-			s, index := newIndexReadinessTestServer(segments, map[int64]commonpb.IndexState{1: commonpb.IndexState_Finished, 3: state})
-			stats := s.selectSegmentIndexesStats(context.Background(), WithCollection(1))
-			info := &indexpb.IndexInfo{IndexID: index.IndexID}
-			s.completeIndexInfo(info, index, stats, false, 100)
+			s, idx := newIndexReadinessTestServer(segments, map[int64]commonpb.IndexState{1: commonpb.IndexState_Finished, 3: state})
+			stats := s.selectSegmentIndexesStats(context.Background(), meta.WithCollection(1))
+			info := &indexpb.IndexInfo{IndexID: idx.IndexID}
+			s.completeIndexInfo(info, idx, stats, false, 100)
 			require.Equal(t, commonpb.IndexState_Finished, info.GetState(), "the recursive query frontier retains the finished grandparent")
 			require.EqualValues(t, 80, info.GetTotalRows())
 			if state == commonpb.IndexState_InProgress {
@@ -246,11 +251,11 @@ func TestIndexReadinessStatusAPIs(t *testing.T) {
 		LastExpireTime: math.MaxUint64, CommitTimestamp: 99,
 		Stats: &datapb.Statistics{TimestampFrom: 1, TimestampTo: 2},
 	}
-	s, index := newIndexReadinessTestServer([]*datapb.SegmentInfo{segment}, map[int64]commonpb.IndexState{1: commonpb.IndexState_InProgress})
+	s, idx := newIndexReadinessTestServer([]*datapb.SegmentInfo{segment}, map[int64]commonpb.IndexState{1: commonpb.IndexState_InProgress})
 	ctx := context.Background()
 	t.Run("DescribeIndex uses explicit request cutoff", func(t *testing.T) {
-		t.Cleanup(func() { index.CreateTime = 100 })
-		index.CreateTime = 98
+		t.Cleanup(func() { idx.CreateTime = 100 })
+		idx.CreateTime = 98
 		response, err := s.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{CollectionID: 1, Timestamp: 100})
 		require.NoError(t, err)
 		require.Len(t, response.GetIndexInfos(), 1)
