@@ -451,6 +451,103 @@ func (s *SearchIteratorSuite) TestNextWithLimit() {
 	s.ErrorIs(err, io.EOF, "limit reached, return EOF")
 }
 
+func (s *SearchIteratorSuite) TestNextPinsSessionTs() {
+	ctx := context.Background()
+	collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+
+	token := fmt.Sprintf("iter_token_%s", s.randString(8))
+	const sessionTs = uint64(123456)
+
+	s.mock.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionID: 1,
+		Schema:       s.schema.ProtoMessage(),
+	}, nil).Once()
+	// compatibility probe, the server does not return a session ts
+	s.mock.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries:              1,
+			TopK:                    1,
+			Ids:                     &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
+			Scores:                  []float32{0.1},
+			Topks:                   []int64{1},
+			SearchIteratorV2Results: &schemapb.SearchIteratorV2Results{Token: token},
+		},
+	}, nil).Once()
+
+	iter, err := s.client.SearchIterator(ctx, NewSearchIteratorOption(collectionName, entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 {
+		return rand.Float32()
+	}))))
+	s.Require().NoError(err)
+
+	// first page: request has no guarantee timestamp, server returns session ts
+	s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		s.Zero(sr.GetGuaranteeTimestamp())
+		return &milvuspb.SearchResults{
+			Status:    merr.Success(),
+			SessionTs: sessionTs,
+			Results: &schemapb.SearchResultData{
+				NumQueries: 1,
+				TopK:       1,
+				FieldsData: []*schemapb.FieldData{
+					s.getInt64FieldData("ID", []int64{1}),
+				},
+				Ids: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{
+							Data: []int64{1},
+						},
+					},
+				},
+				Scores:  []float32{0.5},
+				Topks:   []int64{1},
+				Recalls: []float32{1},
+				SearchIteratorV2Results: &schemapb.SearchIteratorV2Results{
+					Token:     token,
+					LastBound: 0.5,
+				},
+			},
+		}, nil
+	}).Once()
+
+	rs, err := iter.Next(ctx)
+	s.NoError(err)
+	s.EqualValues(1, rs.IDs.Len())
+
+	// second page: request must pin the session ts as guarantee timestamp
+	s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+		s.EqualValues(sessionTs, sr.GetGuaranteeTimestamp())
+		return &milvuspb.SearchResults{
+			Status:    merr.Success(),
+			SessionTs: sessionTs,
+			Results: &schemapb.SearchResultData{
+				NumQueries: 1,
+				TopK:       1,
+				FieldsData: []*schemapb.FieldData{
+					s.getInt64FieldData("ID", []int64{}),
+				},
+				Ids: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{
+							Data: []int64{},
+						},
+					},
+				},
+				Scores:  []float32{},
+				Topks:   []int64{0},
+				Recalls: []float32{1.0},
+				SearchIteratorV2Results: &schemapb.SearchIteratorV2Results{
+					Token:     token,
+					LastBound: 0.5,
+				},
+			},
+		}, nil
+	}).Once()
+
+	_, err = iter.Next(ctx)
+	s.ErrorIs(err, io.EOF)
+}
+
 func (s *SearchIteratorSuite) TestNextMalformedResponse() {
 	ctx := context.Background()
 	token := fmt.Sprintf("iter_token_%s", s.randString(8))
@@ -751,6 +848,52 @@ func (s *QueryIteratorSuite) TestQueryIteratorWithLimit() {
 	_, err = iter.Next(ctx)
 	s.Error(err)
 	s.ErrorIs(err, io.EOF, "limit reached, return EOF")
+}
+
+func (s *QueryIteratorSuite) TestQueryIteratorPinsSessionTs() {
+	ctx := context.Background()
+	collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+	const sessionTs = uint64(987654)
+
+	s.mock.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionID: 1,
+		Schema:       s.schema.ProtoMessage(),
+	}, nil).Once()
+
+	// init query: request has no guarantee timestamp, server returns session ts
+	s.mock.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, qr *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+		s.Zero(qr.GetGuaranteeTimestamp())
+		return &milvuspb.QueryResults{
+			Status:    merr.Success(),
+			SessionTs: sessionTs,
+			FieldsData: []*schemapb.FieldData{
+				s.getInt64FieldData("ID", []int64{1, 2, 3}),
+				s.getVarcharFieldData("Name", []string{"a", "b", "c"}),
+			},
+		}, nil
+	}).Once()
+
+	iter, err := s.client.QueryIterator(ctx, NewQueryIteratorOption(collectionName).
+		WithOutputFields("ID", "Name").
+		WithBatchSize(3))
+	s.Require().NoError(err)
+
+	// first Next returns the cached first page
+	rs, err := iter.Next(ctx)
+	s.NoError(err)
+	s.EqualValues(3, rs.ResultCount)
+
+	// subsequent page: request must pin the session ts as guarantee timestamp
+	s.mock.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, qr *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+		s.EqualValues(sessionTs, qr.GetGuaranteeTimestamp())
+		return &milvuspb.QueryResults{
+			Status:     merr.Success(),
+			FieldsData: []*schemapb.FieldData{},
+		}, nil
+	}).Once()
+
+	_, err = iter.Next(ctx)
+	s.ErrorIs(err, io.EOF)
 }
 
 func (s *QueryIteratorSuite) TestQueryIteratorWithVarCharPK() {

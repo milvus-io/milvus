@@ -138,51 +138,96 @@ func (c *Client) DropCollection(ctx context.Context, option DropCollectionOption
 		resp, err := milvusService.DropCollection(ctx, req, callOptions...)
 		return merr.CheckRPCCall(resp, err)
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	// the collection may be re-created with a different schema, evict both
+	// the schema cache and the stale write timestamp
+	key := newCollectionCacheKey(c.getCurrentDB(), req.GetCollectionName())
+	c.collCache.Evict(key)
+	c.collCache.EvictWriteTs(key)
+	return nil
 }
 
 func (c *Client) TruncateCollection(ctx context.Context, option TruncateCollectionOption, callOptions ...grpc.CallOption) error {
 	req := option.Request()
-	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.TruncateCollection(ctx, req, callOptions...)
 		return merr.CheckRPCCall(resp, err)
 	})
+	if err != nil {
+		return err
+	}
+	// truncate removes all rows; the cached write timestamp points at data
+	// that no longer exists, so clear it to avoid a stale session read
+	// watermark. the schema is unchanged by truncate, so it stays cached.
+	c.collCache.EvictWriteTs(newCollectionCacheKey(c.getCurrentDB(), req.GetCollectionName()))
+	return nil
 }
 
 func (c *Client) RenameCollection(ctx context.Context, option RenameCollectionOption, callOptions ...grpc.CallOption) error {
 	req := option.Request()
 
-	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.RenameCollection(ctx, req, callOptions...)
 		return merr.CheckRPCCall(resp, err)
 	})
+	if err != nil {
+		return err
+	}
+	// the old name no longer exists and the new name may carry a stale
+	// schema from a previously cached collection, so evict both; the write
+	// timestamp is migrated to the new name because rename keeps the same
+	// write timeline
+	oldKey := newCollectionCacheKey(c.getCurrentDB(), req.GetOldName())
+	newKey := newCollectionCacheKey(c.getCurrentDB(), req.GetNewName())
+	c.collCache.Evict(oldKey)
+	c.collCache.Evict(newKey)
+	c.collCache.RenameWriteTs(oldKey, newKey)
+	return nil
 }
 
 func (c *Client) AlterCollectionProperties(ctx context.Context, option AlterCollectionPropertiesOption, callOptions ...grpc.CallOption) error {
 	req := option.Request()
 
-	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.AlterCollection(ctx, req, callOptions...)
 		return merr.CheckRPCCall(resp, err)
 	})
+	if err != nil {
+		return err
+	}
+	c.collCache.Evict(newCollectionCacheKey(c.getCurrentDB(), req.GetCollectionName()))
+	return nil
 }
 
 func (c *Client) DropCollectionProperties(ctx context.Context, option DropCollectionPropertiesOption, callOptions ...grpc.CallOption) error {
 	req := option.Request()
 
-	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.AlterCollection(ctx, req, callOptions...)
 		return merr.CheckRPCCall(resp, err)
 	})
+	if err != nil {
+		return err
+	}
+	c.collCache.Evict(newCollectionCacheKey(c.getCurrentDB(), req.GetCollectionName()))
+	return nil
 }
 
 func (c *Client) AlterCollectionFieldProperty(ctx context.Context, option AlterCollectionFieldPropertiesOption, callOptions ...grpc.CallOption) error {
 	req := option.Request()
 
-	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.AlterCollectionField(ctx, req, callOptions...)
 		return merr.CheckRPCCall(resp, err)
 	})
+	if err != nil {
+		return err
+	}
+	c.collCache.Evict(newCollectionCacheKey(c.getCurrentDB(), req.GetCollectionName()))
+	return nil
 }
 
 func (c *Client) GetCollectionStats(ctx context.Context, opt GetCollectionOption) (map[string]string, error) {
@@ -210,7 +255,7 @@ func (c *Client) alterCollectionSchemaRequest(ctx context.Context, req *milvuspb
 		if err := merr.CheckRPCCall(resp.GetAlterStatus(), err); err != nil {
 			return err
 		}
-		c.collCache.Evict(req.GetCollectionName())
+		c.collCache.Evict(newCollectionCacheKey(c.getCurrentDB(), req.GetCollectionName()))
 		return nil
 	})
 }
@@ -267,7 +312,7 @@ func (c *Client) AddCollectionField(ctx context.Context, opt AddCollectionFieldO
 		if err := merr.CheckRPCCall(resp, err); err != nil {
 			return err
 		}
-		c.collCache.Evict(req.GetCollectionName())
+		c.collCache.Evict(newCollectionCacheKey(c.getCurrentDB(), req.GetCollectionName()))
 		return nil
 	})
 }
@@ -299,5 +344,9 @@ func (c *Client) AddCollectionStructField(ctx context.Context, opt AddCollection
 		resp, err := milvusService.AddCollectionStructField(ctx, req, callOpts...)
 		return merr.CheckRPCCall(resp, err)
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	c.collCache.Evict(newCollectionCacheKey(c.getCurrentDB(), req.GetCollectionName()))
+	return nil
 }

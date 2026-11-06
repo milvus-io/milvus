@@ -49,6 +49,21 @@ func (m *ConcurrentMap[K, V]) Insert(key K, value V) {
 	m.inner.Store(key, value)
 }
 
+// GetOrInsert loads the value for key if present, otherwise stores and returns
+// the provided value. The bool reports whether the value was already present.
+func (m *ConcurrentMap[K, V]) GetOrInsert(key K, value V) (V, bool) {
+	actual, loaded := m.inner.LoadOrStore(key, value)
+	return actual.(V), loaded
+}
+
+// Range calls f for each key/value pair in the map. If f returns false,
+// iteration stops. The iteration order is unspecified.
+func (m *ConcurrentMap[K, V]) Range(f func(key K, value V) bool) {
+	m.inner.Range(func(k, v any) bool {
+		return f(k.(K), v.(V))
+	})
+}
+
 func (m *ConcurrentMap[K, V]) Remove(key K) {
 	m.inner.Delete(key)
 }
