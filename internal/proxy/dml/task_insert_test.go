@@ -878,6 +878,7 @@ func TestInsertTask_Namespace(t *testing.T) {
 			ctx: context.Background(),
 			insertMsg: &msgstream.InsertMsg{
 				InsertRequest: &msgpb.InsertRequest{
+					Base:           &commonpb.MsgBase{},
 					CollectionName: "test",
 					Namespace:      &namespace,
 					NumRows:        100,

@@ -123,9 +123,11 @@ func (s *UpsertWALSuite) TestNamespaceRejectedBeforeUpsertAppend() {
 	_, err := producer.Append(ctx, c.upsert(11, 1))
 	s.Require().ErrorContains(err, "namespace")
 	namespace := "tenant"
-	insert, err := s.Cluster.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{CollectionName: c.name, Namespace: &namespace, NumRows: 1})
+	fields := upsertfixture.Insert(message.MustAsMutableUpsertMessageV2(c.upsert(11, 1)).MustBody()).GetFieldsData()
+	fields[len(fields)-1].FieldName = "pk"
+	insert, err := s.Cluster.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{CollectionName: c.name, Namespace: &namespace, NumRows: 1, FieldsData: fields})
 	s.Require().ErrorContains(merr.CheckRPCCall(insert, err), "namespace")
-	upsert, err := s.Cluster.MilvusClient.Upsert(ctx, &milvuspb.UpsertRequest{CollectionName: c.name, Namespace: &namespace, NumRows: 1})
+	upsert, err := s.Cluster.MilvusClient.Upsert(ctx, &milvuspb.UpsertRequest{CollectionName: c.name, Namespace: &namespace, NumRows: 1, FieldsData: fields})
 	s.Require().ErrorContains(merr.CheckRPCCall(upsert, err), "namespace")
 	ordinary := s.create(ctx)
 	ordinaryProducer := rawProducer(s.T(), ctx, s.Cluster, ordinary.vchannel)
@@ -205,6 +207,8 @@ func (s *upsertWALFixture) waitForProxyUpsertFormat(ctx context.Context, mode st
 		}
 		for key, value := range configs {
 			if strings.EqualFold(key, "streaming.wal.enableUpsertMessage") || strings.EqualFold(key, "streamingwalenableupsertmessage") {
+				// The configuration view annotates each value with its source.
+				value, _, _ = strings.Cut(value, "[")
 				return value == mode
 			}
 		}
