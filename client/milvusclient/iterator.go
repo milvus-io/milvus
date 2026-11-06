@@ -263,7 +263,7 @@ func (it *queryIterator) composeIteratorExpr() string {
 		}
 		return fmt.Sprintf("(%s) and %s", expr, pkFilter)
 	case entity.FieldTypeVarChar:
-		pkFilter := fmt.Sprintf(`%s > "%s"`, pkName, it.lastPK)
+		pkFilter := fmt.Sprintf("%s > %q", pkName, it.lastPK)
 		if len(expr) == 0 {
 			return pkFilter
 		}

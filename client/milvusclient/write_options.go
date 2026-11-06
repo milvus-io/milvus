@@ -877,7 +877,7 @@ func (opt *deleteOption) WithInt64IDs(fieldName string, ids []int64) *deleteOpti
 }
 
 func (opt *deleteOption) WithStringIDs(fieldName string, ids []string) *deleteOption {
-	opt.expr = fmt.Sprintf("%s in [%s]", fieldName, strings.Join(lo.Map(ids, func(id string, _ int) string { return fmt.Sprintf("\"%s\"", id) }), ","))
+	opt.expr = fmt.Sprintf("%s in [%s]", fieldName, strings.Join(lo.Map(ids, func(id string, _ int) string { return fmt.Sprintf("%q", id) }), ","))
 	return opt
 }
 
