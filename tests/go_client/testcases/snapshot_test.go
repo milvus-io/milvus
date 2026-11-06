@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/apache/arrow/go/v17/parquet"
@@ -22,6 +23,7 @@ import (
 	miniogo "github.com/minio/minio-go/v7"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -3109,4 +3111,257 @@ func TestSnapshotRestoreWithMultipleJSONPathIndexes(t *testing.T) {
 	err = mc.DropSnapshot(ctx, client.NewDropSnapshotOption(snapshotName, collName))
 	common.CheckErr(t, err, true)
 	mlog.Info(context.TODO(), "Test completed: multiple JSON path indexes restored successfully")
+}
+
+// TestImportStorageV2AndMixedSnapshotSource combines real exported V3 data with
+// independently written V2 packed chunks. It also exercises Avro rebasing after
+// moving a self-contained bundle; the extra unlisted file must never be opened.
+func TestImportStorageV2AndMixedSnapshotSource(t *testing.T) {
+	runStorageV2AndMixedSnapshotImport(t, "object_keys")
+}
+
+func TestImportSnapshotV2PlainManifest(t *testing.T) {
+	runStorageV2AndMixedSnapshotImport(t, "plain_manifest")
+}
+
+func TestImportSnapshotV2SamePrefixCrossBucket(t *testing.T) {
+	runStorageV2AndMixedSnapshotImport(t, "same_prefix_bucket")
+}
+
+func runStorageV2AndMixedSnapshotImport(t *testing.T, compatibility string) {
+	for _, mixed := range []bool{false, true} {
+		for _, selfContained := range []bool{false, true} {
+			if compatibility == "same_prefix_bucket" && !selfContained {
+				continue
+			}
+			t.Run(fmt.Sprintf("mixed=%t/self_contained=%t", mixed, selfContained), func(t *testing.T) {
+				ctx := hp.CreateContext(t, 10*time.Minute)
+				mc := hp.CreateDefaultMilvusClient(ctx, t)
+				baseURL, apiKey := snapshotImportRESTConfig()
+				sourceName, targetName := common.GenRandomString("v2_source", 6), common.GenRandomString("v2_target", 6)
+				snapshotName := common.GenRandomString("v2_snapshot", 6)
+				prefix, moved := common.GenRandomString("v2_export", 8), common.GenRandomString("v2_moved", 8)
+				cfg := getMinIOConfig()
+				minio, err := newMinIOClient(cfg)
+				require.NoError(t, err)
+				skipIfMinIOUnreachable(ctx, t, minio, cfg.bucket)
+				var jobID, foreignBucket string
+				t.Cleanup(func() {
+					cleanup, cancel := context.WithTimeout(context.Background(), time.Minute)
+					defer cancel()
+					if jobID != "" {
+						_, _ = bulkwriter.AbortImport(cleanup, bulkwriter.NewAbortImportOption(baseURL, jobID).WithAPIKey(apiKey))
+					}
+					_ = mc.DropSnapshot(cleanup, client.NewDropSnapshotOption(snapshotName, sourceName))
+					for _, name := range []string{sourceName, targetName} {
+						_ = mc.DropCollection(cleanup, client.NewDropCollectionOption(name))
+					}
+					cleanupMinIOPrefix(cleanup, minio, cfg.bucket, prefix+"/")
+					cleanupMinIOPrefix(cleanup, minio, cfg.bucket, moved+"/")
+					if foreignBucket != "" {
+						cleanupMinIOPrefix(cleanup, minio, foreignBucket, prefix+"/")
+						require.NoError(t, minio.RemoveBucket(cleanup, foreignBucket))
+					}
+				})
+				for _, name := range []string{sourceName, targetName} {
+					schema := entity.NewSchema().WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+						WithField(entity.NewField().WithName("value").WithDataType(entity.FieldTypeInt64)).
+						WithField(entity.NewField().WithName("vector").WithDataType(entity.FieldTypeFloatVector).WithDim(2))
+					require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(name, schema).WithConsistencyLevel(entity.ClStrong).
+						WithIndexOptions(client.NewCreateIndexOption(name, "vector", index.NewAutoIndex(entity.L2)))))
+				}
+				_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(sourceName).WithInt64Column("id", []int64{1}).WithInt64Column("value", []int64{11}).WithFloatVectorColumn("vector", 2, [][]float32{{1, 2}}))
+				require.NoError(t, err)
+				require.NoError(t, flushWithRetry(ctx, mc, sourceName))
+				require.NoError(t, waitForAllIndexesBuilt(ctx, mc, sourceName, 2*time.Minute))
+				require.NoError(t, mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapshotName, sourceName)))
+				exportID, err := mc.ExportSnapshot(ctx, client.NewExportSnapshotOption(snapshotName, sourceName, prefix))
+				require.NoError(t, err)
+				exported, err := waitForExportComplete(ctx, mc, exportID, 2*time.Minute)
+				require.NoError(t, err)
+				uri := exported.GetSnapshotMetadataUri()
+				serverCfg := snapshotFixtureStorageConfig(t, cfg, uri)
+				metadataKey, err := snapshotFixtureObjectKey(uri, cfg.bucket, serverCfg.address, "", "")
+				require.NoError(t, err)
+				rootEnd := strings.LastIndex(metadataKey, "/snapshots/")
+				require.Greater(t, rootEnd, 0)
+				bundleRoot := metadataKey[:rootEnd]
+				obj, err := minio.GetObject(ctx, cfg.bucket, metadataKey, miniogo.GetObjectOptions{})
+				require.NoError(t, err)
+				raw, err := io.ReadAll(obj)
+				require.NoError(t, err)
+				require.NoError(t, obj.Close())
+				metadata, err := snapshotio.ParseSnapshotMetadata(raw)
+				require.NoError(t, err)
+				require.NotEmpty(t, metadata.GetStoragev2ManifestList(), "mixed fixture requires an exported V3 segment")
+				put := func(key string, data []byte) {
+					_, err := minio.PutObject(ctx, cfg.bucket, key, bytes.NewReader(data), int64(len(data)), miniogo.PutObjectOptions{})
+					require.NoError(t, err)
+				}
+				// Match the packed-file fixture contract used by
+				// StorageV2FieldDataVisitorTest.cpp: one physical row group.
+				packedMetadata := func(writer *pqarrow.FileWriter, fields string, rows, rowBytes int) {
+					require.NoError(t, writer.AppendKeyValueMetadata("group_field_id_list", fields))
+					require.NoError(t, writer.AppendKeyValueMetadata("row_group_metadata", fmt.Sprintf("%d|%d|0", rows*rowBytes, rows)))
+					require.NoError(t, writer.AppendKeyValueMetadata("storage_version", "1.0.0"))
+				}
+				firstAvro, err := snapshotFixtureObjectKey(metadata.ManifestList[0], cfg.bucket, serverCfg.address, "", "")
+				require.NoError(t, err)
+				obj, err = minio.GetObject(ctx, cfg.bucket, firstAvro, miniogo.GetObjectOptions{})
+				require.NoError(t, err)
+				raw, err = io.ReadAll(obj)
+				require.NoError(t, err)
+				require.NoError(t, obj.Close())
+				firstSegment, err := snapshotio.ParseSegmentManifest(raw, int(metadata.FormatVersion))
+				require.NoError(t, err)
+				require.EqualValues(t, 3, firstSegment.StorageVersion)
+				require.NotEmpty(t, firstSegment.ChannelName)
+				partitionID := firstSegment.PartitionId
+				segmentID := int64(700000000000000001)
+				segment := &datapb.SegmentDescription{SegmentId: segmentID, PartitionId: partitionID, ChannelName: firstSegment.ChannelName, StorageVersion: 2, SegmentLevel: datapb.SegmentLevel_L1, NumOfRows: 3}
+				var fields []arrow.Field
+				for _, id := range []int64{0, 1, 100, 101, 102} {
+					var typ arrow.DataType = arrow.PrimitiveTypes.Int64
+					if id == 102 {
+						typ = &arrow.FixedSizeBinaryType{ByteWidth: 8}
+					}
+					fields = append(fields, arrow.Field{Name: fmt.Sprint(id), Type: typ, Metadata: arrow.NewMetadata([]string{"PARQUET:field_id"}, []string{fmt.Sprint(id)})})
+				}
+				group := &datapb.FieldBinlog{FieldID: 7} // No ChildFields: discover physical IDs from footers.
+				for chunk, ids := range [][]int64{{1001, 1002}, {1003}} {
+					arrowSchema := arrow.NewSchema(fields, nil)
+					builder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+					for _, id := range ids {
+						for col, value := range []int64{id, 100, id, id * 10} {
+							builder.Field(col).(*array.Int64Builder).Append(value)
+						}
+						builder.Field(4).(*array.FixedSizeBinaryBuilder).Append([]byte{0, 0, 128, 63, 0, 0, 0, 64})
+					}
+					record := builder.NewRecord()
+					builder.Release()
+					var buf bytes.Buffer
+					writer, err := pqarrow.NewFileWriter(arrowSchema, &buf, nil, pqarrow.NewArrowWriterProperties(pqarrow.WithStoreSchema()))
+					require.NoError(t, err)
+					packedMetadata(writer, "0,1,100,101,102", len(ids), 40)
+					require.NoError(t, writer.Write(record))
+					record.Release()
+					require.NoError(t, writer.Close())
+					key := fmt.Sprintf("%s/files/v2/chunk-%d.parquet", bundleRoot, chunk)
+					put(key, buf.Bytes())
+					if compatibility == "same_prefix_bucket" {
+						key = extTestURI(serverCfg, key)
+					}
+					group.Binlogs = append(group.Binlogs, &datapb.Binlog{LogPath: key, EntriesNum: int64(len(ids))})
+				}
+				segment.Binlogs = []*datapb.FieldBinlog{group}
+				put(bundleRoot+"/files/v2/unlisted.parquet", []byte("must not be read"))
+				avroPath := fmt.Sprintf("%s/snapshots/%d/manifests/v2.avro", bundleRoot, metadata.SnapshotInfo.CollectionId)
+				avro, err := snapshotio.MarshalSegmentManifest(segment)
+				require.NoError(t, err)
+				put(avroPath, avro)
+				if !mixed {
+					metadata.ManifestList, metadata.SegmentIds, metadata.Storagev2ManifestList = nil, nil, nil
+				}
+				if compatibility == "plain_manifest" {
+					manifestKey := bundleRoot + "/files/v2/manifest.json"
+					put(manifestKey, []byte("{}"))
+					metadata.Storagev2ManifestList = append(metadata.Storagev2ManifestList,
+						&datapb.StorageV2SegmentManifest{SegmentId: segmentID, Manifest: manifestKey})
+				}
+				metadata.ManifestList = append(metadata.ManifestList, avroPath)
+				metadata.SegmentIds = append(metadata.SegmentIds, segmentID)
+				if selfContained {
+					// Exercise task-shared deletion in both PreImport and Import.
+					deleteSchema := arrow.NewSchema(fields[:2], nil)
+					builder := array.NewRecordBuilder(memory.DefaultAllocator, deleteSchema)
+					builder.Field(0).(*array.Int64Builder).Append(1002)
+					builder.Field(1).(*array.Int64Builder).Append(200)
+					record := builder.NewRecord()
+					builder.Release()
+					var buf bytes.Buffer
+					writer, err := pqarrow.NewFileWriter(deleteSchema, &buf, nil, pqarrow.NewArrowWriterProperties(pqarrow.WithStoreSchema()))
+					require.NoError(t, err)
+					packedMetadata(writer, "0,1", 1, 16)
+					require.NoError(t, writer.Write(record))
+					record.Release()
+					require.NoError(t, writer.Close())
+					deltaPath := bundleRoot + "/files/v2/l0.parquet"
+					put(deltaPath, buf.Bytes())
+					l0 := &datapb.SegmentDescription{
+						SegmentId: segmentID + 1, PartitionId: partitionID, ChannelName: firstSegment.ChannelName, SegmentLevel: datapb.SegmentLevel_L0, StorageVersion: 2,
+						Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: deltaPath, EntriesNum: 1}}}},
+					}
+					data, err := snapshotio.MarshalSegmentManifest(l0)
+					require.NoError(t, err)
+					l0Avro := bundleRoot + "/snapshots/l0.avro"
+					put(l0Avro, data)
+					metadata.ManifestList = append(metadata.ManifestList, l0Avro)
+					metadata.SegmentIds = append(metadata.SegmentIds, l0.SegmentId)
+				}
+				if !selfContained {
+					metadata.Layout = datapb.SnapshotLayout_SnapshotLayoutReferenced
+				}
+				raw, err = protojson.Marshal(metadata)
+				require.NoError(t, err)
+				put(metadataKey, raw)
+				externalSpec := ""
+				if compatibility == "same_prefix_bucket" {
+					foreignBucket = strings.ToLower(strings.ReplaceAll(common.GenRandomString("snapshot-v2", 10), "_", "-"))
+					require.NoError(t, minio.MakeBucket(ctx, foreignBucket, miniogo.MakeBucketOptions{}))
+					for object := range minio.ListObjects(ctx, cfg.bucket, miniogo.ListObjectsOptions{Prefix: prefix + "/", Recursive: true}) {
+						require.NoError(t, object.Err)
+						_, err := minio.CopyObject(ctx, miniogo.CopyDestOptions{Bucket: foreignBucket, Object: object.Key},
+							miniogo.CopySrcOptions{Bucket: cfg.bucket, Object: object.Key})
+						require.NoError(t, err)
+					}
+					// Remove the original objects so reading the old bucket cannot pass.
+					cleanupMinIOPrefix(ctx, minio, cfg.bucket, prefix+"/")
+					if object, ok := <-minio.ListObjects(ctx, cfg.bucket, miniogo.ListObjectsOptions{Prefix: prefix + "/", Recursive: true}); ok {
+						require.NoError(t, object.Err)
+						t.Fatalf("original snapshot object remains after relocation: %s", object.Key)
+					}
+					serverCfg.bucket = foreignBucket
+					uri = extTestURI(serverCfg, metadataKey)
+					externalSpec = extTestSpec(serverCfg, "parquet")
+				} else if selfContained {
+					uri, err = relocateSnapshotBundle(ctx, minio, cfg.bucket, uri, prefix, moved)
+					require.NoError(t, err)
+				}
+				importOption := bulkwriter.NewBulkImportOption(baseURL, targetName, [][]string{{uri}}).WithAPIKey(apiKey).
+					WithOption("backup", "true").WithOption("source_type", "snapshot").WithOption("auto_commit", "true")
+				if externalSpec != "" {
+					importOption.WithOption("external_spec", externalSpec)
+				}
+				response, err := bulkwriter.BulkImport(ctx, importOption)
+				require.NoError(t, err)
+				require.Empty(t, response.Message)
+				jobID = response.Data.JobID
+				require.NotEmpty(t, jobID)
+				_, err = waitForSnapshotImportState(ctx, baseURL, apiKey, jobID, "Completed", 3*time.Minute)
+				require.NoError(t, err)
+				load, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(targetName))
+				require.NoError(t, err)
+				require.NoError(t, load.Await(ctx))
+				result, err := mc.Query(ctx, client.NewQueryOption(targetName).WithFilter("id >= 0").WithOutputFields("id", "value").WithLimit(10).WithConsistencyLevel(entity.ClStrong))
+				require.NoError(t, err)
+				actual := make(map[int64]int64)
+				for i := 0; i < result.Len(); i++ {
+					id, err := result.GetColumn("id").GetAsInt64(i)
+					require.NoError(t, err)
+					value, err := result.GetColumn("value").GetAsInt64(i)
+					require.NoError(t, err)
+					actual[id] = value
+				}
+				expected := map[int64]int64{1001: 10010, 1002: 10020, 1003: 10030}
+				if selfContained {
+					delete(expected, 1002)
+				}
+				if mixed {
+					expected[1] = 11
+				}
+				require.Equal(t, expected, actual)
+				require.Equal(t, len(expected), result.Len())
+			})
+		}
+	}
 }

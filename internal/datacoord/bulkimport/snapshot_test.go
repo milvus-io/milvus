@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1938,11 +1939,11 @@ func TestExpandSnapshotImportFiles(t *testing.T) {
 			mutate: func(snapshot *snapshotstorage.SnapshotData) {
 				snapshot.Collection.Partitions["second"] = 20
 				snapshot.Segments = append(snapshot.Segments, &datapb.SegmentDescription{
-					SegmentId: 30, PartitionId: 20, SegmentLevel: datapb.SegmentLevel_L1, StorageVersion: milvusstorage.StorageV2,
+					SegmentId: 30, PartitionId: 20, SegmentLevel: datapb.SegmentLevel_L1, StorageVersion: milvusstorage.StorageV1,
 				})
 			},
 			expected: merr.ErrOperationNotSupported,
-			message:  "only supports StorageV3",
+			message:  "only supports StorageV2 and StorageV3",
 		},
 		{
 			name: "reject l0 without channel identity",
@@ -1953,12 +1954,12 @@ func TestExpandSnapshotImportFiles(t *testing.T) {
 			message:  "requires source channel identity",
 		},
 		{
-			name: "reject non v3",
+			name: "reject V1",
 			mutate: func(snapshot *snapshotstorage.SnapshotData) {
-				snapshot.Segments[0].StorageVersion = milvusstorage.StorageV2
+				snapshot.Segments[0].StorageVersion = milvusstorage.StorageV1
 			},
 			expected: merr.ErrOperationNotSupported,
-			message:  "only supports StorageV3",
+			message:  "only supports StorageV2 and StorageV3",
 		},
 		{
 			name: "reject latest manifest",
@@ -2371,6 +2372,177 @@ func TestSnapshotImportManifestDeleteTimestamps(t *testing.T) {
 					}
 				})
 			}
+		}
+	}
+}
+
+func TestExpandSnapshotV2References(t *testing.T) {
+	paramtable.Init()
+	PatchSnapshotImportInstance(t)
+	for _, mixed := range []bool{false, true} {
+		for _, prefix := range []*string{nil, proto.String(""), proto.String("old/root")} {
+			for _, withL0 := range []bool{false, true} {
+				t.Run(fmt.Sprintf("mixed=%t/prefix=%v/l0=%t", mixed, prefix, withL0), func(t *testing.T) {
+					layout := datapb.SnapshotLayout_SnapshotLayoutReferenced
+					if prefix != nil {
+						layout = datapb.SnapshotLayout_SnapshotLayoutSelfContained
+					}
+					snapshot := SnapshotImportTestData(layout)
+					// The returned reader view has already overwritten S3Location.
+					uri := "s3://source/root/snapshots/1/metadata/2.json"
+					snapshot.SnapshotInfo.S3Location = uri
+					metadata := &datapb.SnapshotMetadata{FormatVersion: 6, SnapshotInfo: &datapb.SnapshotInfo{}}
+					if prefix != nil {
+						metadata.SnapshotInfo.S3Location = "s3://source/" + strings.TrimPrefix(*prefix+"/snapshots/1/metadata/2.json", "/")
+					}
+					for i, segment := range snapshot.Segments {
+						segment.ChannelName, segment.CommitTimestamp = "source", 300
+						if !mixed || i == 0 {
+							segment.StorageVersion, segment.ManifestPath = milvusstorage.StorageV2, ""
+						}
+					}
+					snapshot.ManifestPaths = []string{"root/snapshots/1/manifests/arbitrary-first.avro", "root/snapshots/1/manifests/arbitrary-second.avro"}
+					if withL0 {
+						snapshot.Segments = append(snapshot.Segments, &datapb.SegmentDescription{
+							SegmentId: 99, PartitionId: 10, ChannelName: "source", SegmentLevel: datapb.SegmentLevel_L0, StorageVersion: milvusstorage.StorageV2,
+							Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: "root/files/delta"}}}},
+						})
+						snapshot.ManifestPaths = append(snapshot.ManifestPaths, "root/snapshots/1/manifests/l0.avro")
+					}
+					read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
+					defer read.UnPatch()
+					opts := append(SnapshotImportTestOptions(), &commonpb.KeyValuePair{Key: importutilv2.SnapshotSourceURI, Value: uri}, &commonpb.KeyValuePair{Key: importutilv2.SnapshotLayout, Value: "referenced"})
+					if prefix != nil {
+						opts[len(opts)-1].Value = "self-contained"
+					}
+					files, normalized, l0, err := expandSnapshotImportFiles(context.Background(), nil, milvusstorage.NewLocalChunkManager(), SnapshotImportTestSchema(), uri, opts, metadata)
+					require.NoError(t, err)
+					require.Len(t, files, 2)
+					require.NoError(t, importutilv2.ValidateSnapshotImportPlan(files, normalized, l0))
+					for _, file := range files {
+						require.Empty(t, file.Paths)
+						version := uint32(10)
+						if withL0 {
+							version += 4
+						}
+						require.Equal(t, version, file.SnapshotSource.Version)
+						require.EqualValues(t, 300, file.SnapshotSource.SourceCommitTimestamp)
+						wire, err := proto.Marshal(file)
+						require.NoError(t, err)
+						var recovered internalpb.ImportFile
+						require.NoError(t, proto.Unmarshal(wire, &recovered))
+						require.True(t, proto.Equal(file, &recovered))
+					}
+					// Sorted segment 20 still references the first, unsorted Avro.
+					ref := files[1].SnapshotSource.V2Reference
+					require.EqualValues(t, 20, ref.SegmentId)
+					require.Equal(t, snapshot.ManifestPaths[0], ref.SnapshotManifestPath)
+					require.Equal(t, prefix, ref.OriginalKeyPrefix)
+					if mixed {
+						require.Nil(t, files[0].SnapshotSource.V2Reference)
+						require.Equal(t, snapshot.Segments[1].ManifestPath, files[0].SnapshotSource.ManifestPath)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestExpandSnapshotV2ReferenceValidation(t *testing.T) {
+	paramtable.Init()
+	PatchSnapshotImportInstance(t)
+	for _, mode := range []string{"avro_count", "malformed_storage_manifest", "outside_v2_manifest", "foreign_v2_manifest", "plain_v3_manifest"} {
+		t.Run(mode, func(t *testing.T) {
+			snapshot := SnapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
+			snapshot.Segments[0].StorageVersion = milvusstorage.StorageV2
+			snapshot.Segments[0].ManifestPath = ""
+			snapshot.ManifestPaths = []string{"root/snapshots/1/manifests/20.avro", "root/snapshots/1/manifests/10.avro"}
+			if mode == "avro_count" {
+				snapshot.ManifestPaths = snapshot.ManifestPaths[:1]
+			} else {
+				switch mode {
+				case "malformed_storage_manifest":
+					snapshot.Segments[0].ManifestPath = "{invalid"
+				case "outside_v2_manifest":
+					snapshot.Segments[0].ManifestPath = "outside/manifest.json"
+				case "foreign_v2_manifest":
+					snapshot.Segments[0].ManifestPath = "s3://other/root/files/manifest.json"
+				case "plain_v3_manifest":
+					snapshot.Segments[1].ManifestPath = "root/files/manifest.json"
+				}
+			}
+			read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
+			defer read.UnPatch()
+			files, _, sources, err := expandSnapshotImportFiles(context.Background(), nil, milvusstorage.NewLocalChunkManager(),
+				SnapshotImportTestSchema(), "s3://source/root/snapshots/1/metadata/2.json", SnapshotImportTestOptions(), &datapb.SnapshotMetadata{FormatVersion: 6})
+			require.Error(t, err)
+			require.Nil(t, files)
+			require.Nil(t, sources)
+			if mode == "avro_count" {
+				require.ErrorIs(t, err, merr.ErrDataIntegrity)
+				require.Contains(t, err.Error(), "manifest counts differ")
+			}
+		})
+	}
+}
+
+func TestExpandSnapshotV2StorageManifestRoundTrip(t *testing.T) {
+	paramtable.Init()
+	PatchSnapshotImportInstance(t)
+	type sourceCM struct{ milvusstorage.ChunkManager }
+	for _, mixed := range []bool{false, true} {
+		for _, manifestKind := range []string{"empty", "plain", "packed"} {
+			t.Run(fmt.Sprintf("mixed=%t/manifest=%s", mixed, manifestKind), func(t *testing.T) {
+				ctx := context.Background()
+				const root = "root"
+				cm := &sourceCM{}
+				objects := make(map[string][]byte)
+				rootPath := mockey.Mock((*sourceCM).RootPath).Return(root).Build()
+				defer rootPath.UnPatch()
+				write := mockey.Mock((*sourceCM).Write).To(func(_ *sourceCM, _ context.Context, key string, data []byte) error {
+					objects[key] = append([]byte(nil), data...)
+					return nil
+				}).Build()
+				defer write.UnPatch()
+				read := mockey.Mock((*sourceCM).Read).To(func(_ *sourceCM, _ context.Context, key string) ([]byte, error) {
+					data, ok := objects[key]
+					if !ok {
+						return nil, merr.ErrIoKeyNotFound
+					}
+					return data, nil
+				}).Build()
+				defer read.UnPatch()
+				snapshot := SnapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
+				for i, segment := range snapshot.Segments {
+					base := path.Join(root, "files", "segment", strconv.FormatInt(segment.SegmentId, 10))
+					segment.ChannelName = "source"
+					segment.ManifestPath = packed.MarshalManifestPath(base, 7)
+					if !mixed || i == 0 {
+						segment.StorageVersion = milvusstorage.StorageV2
+						switch manifestKind {
+						case "empty":
+							segment.ManifestPath = ""
+						case "plain":
+							segment.ManifestPath = path.Join(base, "manifest.json")
+						}
+					}
+				}
+				metadataPath, err := snapshotstorage.NewSnapshotWriter(cm).Save(ctx, snapshot)
+				require.NoError(t, err)
+				uri := "s3://source/" + metadataPath
+				metadata, err := snapshotstorage.NewSnapshotReader(cm).ReadMetadata(ctx, uri)
+				require.NoError(t, err)
+				files, options, l0, err := expandSnapshotImportFiles(ctx, nil, cm, SnapshotImportTestSchema(), uri, SnapshotImportTestOptions(), metadata)
+				require.NoError(t, err)
+				require.NoError(t, importutilv2.ValidateSnapshotImportPlan(files, options, l0))
+				require.Len(t, files, 2)
+				require.NotNil(t, files[1].SnapshotSource.V2Reference)
+				require.Empty(t, files[1].SnapshotSource.ManifestPath)
+				if mixed {
+					require.Nil(t, files[0].SnapshotSource.V2Reference)
+					require.Equal(t, snapshot.Segments[1].ManifestPath, files[0].SnapshotSource.ManifestPath)
+				}
+			})
 		}
 	}
 }
