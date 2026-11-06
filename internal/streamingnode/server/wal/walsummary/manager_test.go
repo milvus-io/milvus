@@ -1021,12 +1021,19 @@ func TestIdempotencyKeyOfIsGatedByOriginAndType(t *testing.T) {
 	keyed := newTestIdempotentInsertMessage(t, vchannel, 100, "key-a", []int64{1}, []uint32{0})
 	assert.Equal(t, "key-a", idempotencyKeyOf(keyed))
 
-	// A replicated insert preserves the SOURCE cluster's key. Remembering it
-	// locally would drive replicated appends down the duplicate path after a
-	// restart, so it must read as keyless.
+	// A replicated insert preserves the SOURCE cluster's key and insert result.
+	// Both are remembered, so a window rebuilt after a restart can answer a
+	// client retry on a promoted cluster. The replicate interceptor never
+	// consults the window for a replicated append, so the record cannot drive
+	// one down the duplicate path.
+	header := &message.InsertMessageHeader{CollectionId: 1}
+	message.SetInsertHeaderIdempotentInsertResult(header, &messagespb.IdempotentInsertResult{
+		RowOffsets: []uint32{0},
+		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7}}}},
+	})
 	replicated := message.NewInsertMessageBuilderV1().
 		WithVChannel(vchannel).
-		WithHeader(&message.InsertMessageHeader{CollectionId: 1}).
+		WithHeader(header).
 		WithBody(&msgpb.InsertRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert}}).
 		WithIdempotencyKey("key-from-source").
 		MustBuildMutable().
@@ -1040,13 +1047,13 @@ func TestIdempotencyKeyOfIsGatedByOriginAndType(t *testing.T) {
 		WithTimeTick(101).
 		WithLastConfirmed(walimplstest.NewTestMessageID(101)).
 		IntoImmutableMessage(walimplstest.NewTestMessageID(102))
-	assert.Empty(t, idempotencyKeyOf(replicated))
+	assert.Equal(t, "key-from-source", idempotencyKeyOf(replicated))
 	keys, insert := insertSummaryOf(replicated)
 	require.NotNil(t, keys)
-	assert.Empty(t, keys.GetKey())
+	assert.Equal(t, "key-from-source", keys.GetKey())
 	require.NotNil(t, insert)
 	assert.Equal(t, replicated.TimeTick(), insert.GetSourceTimetick())
-	assert.Nil(t, insert.GetIds())
+	assert.Equal(t, []int64{7}, insert.GetIds().GetIntId().GetData())
 
 	// The key property alone must not materialize a record for a type the
 	// append path never deduplicates.

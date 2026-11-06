@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -117,28 +118,77 @@ func TestInterceptorBypassesReplicatedInsert(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, replicatedID.EQ(msgID))
 	require.Equal(t, 2, appendCount)
+}
 
-	// A replicated insert with a fresh key must leave no trace in the window: a
-	// later native insert reusing that key is still the owner and appends.
-	ctx = utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
-	_, err = interceptor.DoAppend(ctx, withTestReplicateHeader(newIdempotentInsertMessage(t, "v1", "key-2")), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
-		appendCount++
-		return newTestMessageID(12), nil
-	})
-	require.NoError(t, err)
-	require.Equal(t, 3, appendCount)
+// A replicated insert is recorded after it lands, so a client retry on this
+// cluster after a promotion answers with the source cluster's primary keys
+// instead of appending a second copy.
+func TestInterceptorRecordsReplicatedInsert(t *testing.T) {
+	interceptor := newInterceptor(WindowConfig{})
+	insertResult := &messagespb.IdempotentInsertResult{
+		RowOffsets: []uint32{0, 1},
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{100, 101}}},
+		},
+	}
 
-	nativeID := newTestMessageID(13)
-	ctx = utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
-	msgID, err = interceptor.DoAppend(ctx, newIdempotentInsertMessage(t, "v1", "key-2"), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+	appendCount := 0
+	replicatedID := newTestMessageID(12)
+	replicatedLastConfirmed := newTestMessageID(11)
+	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	_, err := interceptor.DoAppend(ctx, withTestReplicateHeader(newIdempotentInsertMessageWithInsertResult(t, "v1", "key-2", insertResult)), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
 		appendCount++
 		utility.ReplaceAppendResultTimeTick(ctx, 200)
-		utility.ReplaceAppendResultLastConfirmedMessageID(ctx, newTestMessageID(12))
-		return nativeID, nil
+		utility.ReplaceAppendResultLastConfirmedMessageID(ctx, replicatedLastConfirmed)
+		return replicatedID, nil
 	})
 	require.NoError(t, err)
-	require.True(t, nativeID.EQ(msgID))
-	require.Equal(t, 4, appendCount)
+	require.Equal(t, 1, appendCount)
+
+	ctx = utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	msgID, err := interceptor.DoAppend(ctx, newIdempotentInsertMessage(t, "v1", "key-2"), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		appendCount++
+		return newTestMessageID(13), nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, appendCount)
+	require.True(t, replicatedID.EQ(msgID))
+
+	extra := utility.GetExtraAppendResult(ctx)
+	require.Equal(t, uint64(200), extra.TimeTick)
+	require.True(t, replicatedLastConfirmed.EQ(extra.LastConfirmedMessageID))
+	require.True(t, proto.Equal(insertResult, extra.Extra.(*messagespb.IdempotentInsertResult)))
+}
+
+// A replicated insert whose key the window already holds replaces the entry:
+// the source evicted the key and a client legally reused it, so the newer
+// write is what a retry must see.
+func TestInterceptorReplicatedInsertOverwritesSameKey(t *testing.T) {
+	interceptor := newInterceptor(WindowConfig{})
+
+	appendCount := 0
+	appendAt := func(timetick uint64, id int64) func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		return func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			appendCount++
+			utility.ReplaceAppendResultTimeTick(ctx, timetick)
+			utility.ReplaceAppendResultLastConfirmedMessageID(ctx, newTestMessageID(id-1))
+			return newTestMessageID(id), nil
+		}
+	}
+	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	_, err := interceptor.DoAppend(ctx, withTestReplicateHeader(newIdempotentInsertMessage(t, "v1", "key-1")), appendAt(100, 10))
+	require.NoError(t, err)
+	ctx = utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	_, err = interceptor.DoAppend(ctx, withTestReplicateHeader(newIdempotentInsertMessage(t, "v1", "key-1")), appendAt(200, 20))
+	require.NoError(t, err)
+	require.Equal(t, 2, appendCount)
+
+	ctx = utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	msgID, err := interceptor.DoAppend(ctx, newIdempotentInsertMessage(t, "v1", "key-1"), appendAt(300, 30))
+	require.NoError(t, err)
+	require.Equal(t, 2, appendCount)
+	require.True(t, newTestMessageID(20).EQ(msgID))
+	require.Equal(t, uint64(200), utility.GetExtraAppendResult(ctx).TimeTick)
 }
 
 func TestInterceptorSecondaryNativeDuplicateReachesReplicateGate(t *testing.T) {
@@ -221,6 +271,464 @@ func TestInterceptorBypassesReplicatedTxnCommit(t *testing.T) {
 	_, err = interceptor.DoAppend(utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{}), withTestReplicateHeader(newCommit()), append)
 	require.NoError(t, err)
 	require.Equal(t, 3, appendCount)
+}
+
+func newReplicatedTxnBody(t *testing.T, txnCtx message.TxnContext, id int64, offset uint32) message.MutableMessage {
+	t.Helper()
+	return withTestReplicateHeader(newIdempotentInsertMessageWithInsertResult(t, "v1", "", &messagespb.IdempotentInsertResult{
+		RowOffsets: []uint32{offset},
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{id}}},
+		},
+	}).WithTxnContext(txnCtx))
+}
+
+func newKeyedCommit(txnCtx message.TxnContext, bodyCnt uint64) message.MutableMessage {
+	return message.NewCommitTxnMessageBuilderV2().
+		WithVChannel("v1").
+		WithHeader(&message.CommitTxnMessageHeader{BodyCnt: bodyCnt}).
+		WithBody(&message.CommitTxnMessageBody{}).
+		WithIdempotencyKey("txn-key").
+		MustBuildMutable().
+		WithTxnContext(txnCtx)
+}
+
+// The replicate interceptor rejects a replicated commit whose accepted bodies
+// fall short of its body count, and the source replays the whole transaction.
+// Bodies that already landed are ignored on the replay, so their buffered
+// results must survive the rejected commit: the commit that finally lands
+// records every body.
+func TestInterceptorReplicatedTxnReplayAfterRejectedCommitRecordsAllBodies(t *testing.T) {
+	interceptor := newInterceptor(WindowConfig{})
+	txnCtx := message.TxnContext{TxnID: 8, Keepalive: 10}
+	appendCount := 0
+	ok := func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		appendCount++
+		utility.ReplaceAppendResultTimeTick(ctx, 100)
+		utility.ReplaceAppendResultLastConfirmedMessageID(ctx, newTestMessageID(9))
+		return newTestMessageID(int64(10 + appendCount)), nil
+	}
+	fail := func(err error) func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		return func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			return nil, err
+		}
+	}
+	newCtx := func() context.Context {
+		return utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	}
+
+	// First delivery: body 1 lands, body 2 fails, the commit is rejected.
+	_, err := interceptor.DoAppend(newCtx(), newReplicatedTxnBody(t, txnCtx, 700, 0), ok)
+	require.NoError(t, err)
+	_, err = interceptor.DoAppend(newCtx(), newReplicatedTxnBody(t, txnCtx, 701, 1), fail(status.NewInner("append failed")))
+	require.Error(t, err)
+	_, err = interceptor.DoAppend(newCtx(), withTestReplicateHeader(newKeyedCommit(txnCtx, 2)), fail(status.NewTransactionExpired("body count mismatch")))
+	require.Error(t, err)
+
+	// Replay: body 1 is ignored as already accepted, body 2 and the commit land.
+	_, err = interceptor.DoAppend(newCtx(), newReplicatedTxnBody(t, txnCtx, 700, 0), fail(status.NewIgnoreOperation("already accepted")))
+	require.Error(t, err)
+	_, err = interceptor.DoAppend(newCtx(), newReplicatedTxnBody(t, txnCtx, 701, 1), ok)
+	require.NoError(t, err)
+	_, err = interceptor.DoAppend(newCtx(), withTestReplicateHeader(newKeyedCommit(txnCtx, 2)), ok)
+	require.NoError(t, err)
+	require.Equal(t, 3, appendCount)
+
+	ctx := newCtx()
+	_, err = interceptor.DoAppend(ctx, newKeyedCommit(message.TxnContext{TxnID: 9, Keepalive: 10}, 2), ok)
+	require.NoError(t, err)
+	require.Equal(t, 3, appendCount, "the retry must be served from the window")
+	extra := utility.GetExtraAppendResult(ctx).Extra.(*messagespb.IdempotentInsertResult)
+	require.ElementsMatch(t, []int64{700, 701}, extra.GetIds().GetIntId().GetData())
+}
+
+// The replicate interceptor accepts a body before the body's insert result is
+// buffered here. After a stream reconnect, a replayed commit can run while the
+// original body is still between the two steps. The commit must wait for the
+// body's result, or it lands without its key recorded.
+func TestInterceptorReplicatedCommitWaitsForInflightBodyResult(t *testing.T) {
+	interceptor := newInterceptor(WindowConfig{})
+	txnCtx := message.TxnContext{TxnID: 12, Keepalive: 10}
+	var appendCount atomic.Int32
+	ok := func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		n := appendCount.Add(1)
+		utility.ReplaceAppendResultTimeTick(ctx, 100)
+		utility.ReplaceAppendResultLastConfirmedMessageID(ctx, newTestMessageID(9))
+		return newTestMessageID(int64(10 + n)), nil
+	}
+	newCtx := func() context.Context {
+		return utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	}
+
+	_, err := interceptor.DoAppend(newCtx(), newReplicatedTxnBody(t, txnCtx, 700, 0), ok)
+	require.NoError(t, err)
+
+	// The original body 2 is accepted by the inner layers, but its append does
+	// not return yet.
+	bodyAccepted := make(chan struct{})
+	releaseBody := make(chan struct{})
+	bodyDone := make(chan error, 1)
+	go func() {
+		_, err := interceptor.DoAppend(newCtx(), newReplicatedTxnBody(t, txnCtx, 701, 1), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			close(bodyAccepted)
+			<-releaseBody
+			return ok(ctx, msg)
+		})
+		bodyDone <- err
+	}()
+	<-bodyAccepted
+
+	// The replayed commit arrives on the reconnected stream.
+	var commitAppended atomic.Bool
+	commitDone := make(chan error, 1)
+	go func() {
+		_, err := interceptor.DoAppend(newCtx(), withTestReplicateHeader(newKeyedCommit(txnCtx, 2)), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			commitAppended.Store(true)
+			return ok(ctx, msg)
+		})
+		commitDone <- err
+	}()
+	require.Never(t, commitAppended.Load, 200*time.Millisecond, 10*time.Millisecond,
+		"the commit must wait until the in-flight body has buffered its result")
+
+	close(releaseBody)
+	require.NoError(t, <-bodyDone)
+	require.NoError(t, <-commitDone)
+	require.EqualValues(t, 3, appendCount.Load())
+
+	ctx := newCtx()
+	_, err = interceptor.DoAppend(ctx, newKeyedCommit(message.TxnContext{TxnID: 13, Keepalive: 10}, 2), ok)
+	require.NoError(t, err)
+	require.EqualValues(t, 3, appendCount.Load(), "the retry must be served from the window")
+	extra := utility.GetExtraAppendResult(ctx).Extra.(*messagespb.IdempotentInsertResult)
+	require.ElementsMatch(t, []int64{700, 701}, extra.GetIds().GetIntId().GetData())
+}
+
+// appendInBackground runs DoAppend in another goroutine. Its append blocks
+// until release is closed, after it has signaled entered.
+func appendInBackground(interceptor *idempotencyInterceptor, msg message.MutableMessage, inner interceptors.Append) (chan struct{}, chan struct{}, chan error) {
+	entered, release, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	go func() {
+		ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+		_, err := interceptor.DoAppend(ctx, msg, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			close(entered)
+			<-release
+			return inner(ctx, msg)
+		})
+		done <- err
+	}()
+	return entered, release, done
+}
+
+// The replicate interceptor advances the replicate checkpoint before a
+// replicated keyed write returns here to be recorded. A promotion in that gap
+// would let a client retry the key before the window holds it, so an
+// AlterReplicateConfig waits until the replicated write is recorded.
+func TestInterceptorAlterReplicateConfigWaitsForReplicatedRecord(t *testing.T) {
+	interceptor := newInterceptor(WindowConfig{})
+	var appendCount atomic.Int32
+	ok := func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		n := appendCount.Add(1)
+		utility.ReplaceAppendResultTimeTick(ctx, 100)
+		utility.ReplaceAppendResultLastConfirmedMessageID(ctx, newTestMessageID(9))
+		return newTestMessageID(int64(10 + n)), nil
+	}
+
+	entered, release, insertDone := appendInBackground(interceptor, withTestReplicateHeader(newIdempotentInsertMessageWithInsertResult(t, "v1", "key-p", &messagespb.IdempotentInsertResult{
+		RowOffsets: []uint32{0},
+		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{800}}}},
+	})), ok)
+	<-entered
+
+	var alterAppended atomic.Bool
+	alterDone := make(chan error, 1)
+	go func() {
+		alter := message.NewAlterReplicateConfigMessageBuilderV2().WithAllVChannel().
+			WithHeader(&message.AlterReplicateConfigMessageHeader{}).
+			WithBody(&message.AlterReplicateConfigMessageBody{}).MustBuildMutable()
+		_, err := interceptor.DoAppend(context.Background(), alter, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			alterAppended.Store(true)
+			return newTestMessageID(30), nil
+		})
+		alterDone <- err
+	}()
+	require.Never(t, alterAppended.Load, 200*time.Millisecond, 10*time.Millisecond,
+		"the promotion must wait until the replicated write is recorded")
+
+	close(release)
+	require.NoError(t, <-insertDone)
+	require.NoError(t, <-alterDone)
+
+	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	_, err := interceptor.DoAppend(ctx, newIdempotentInsertMessage(t, "v1", "key-p"), ok)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, appendCount.Load(), "the retry must be served from the window")
+	extra := utility.GetExtraAppendResult(ctx).Extra.(*messagespb.IdempotentInsertResult)
+	require.Equal(t, []int64{800}, extra.GetIds().GetIntId().GetData())
+}
+
+// A replicated begin drops the buffer of its txn after its append. A body of
+// the same txn that a reconnected stream replays in that gap must not lose its
+// buffered result to that drop.
+func TestInterceptorReplicatedBeginDoesNotDropLaterBodyResult(t *testing.T) {
+	interceptor := newInterceptor(WindowConfig{})
+	txnCtx := message.TxnContext{TxnID: 14, Keepalive: 10}
+	var appendCount atomic.Int32
+	ok := func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		n := appendCount.Add(1)
+		utility.ReplaceAppendResultTimeTick(ctx, 100)
+		utility.ReplaceAppendResultLastConfirmedMessageID(ctx, newTestMessageID(9))
+		return newTestMessageID(int64(10 + n)), nil
+	}
+	newCtx := func() context.Context {
+		return utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	}
+
+	begin := withTestReplicateHeader(message.NewBeginTxnMessageBuilderV2().
+		WithVChannel("v1").
+		WithHeader(&message.BeginTxnMessageHeader{}).
+		WithBody(&message.BeginTxnMessageBody{}).
+		MustBuildMutable().
+		WithTxnContext(txnCtx))
+	entered, release, beginDone := appendInBackground(interceptor, begin, ok)
+	<-entered
+
+	var bodyAppended atomic.Bool
+	bodyDone := make(chan error, 1)
+	go func() {
+		_, err := interceptor.DoAppend(newCtx(), newReplicatedTxnBody(t, txnCtx, 900, 0), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+			bodyAppended.Store(true)
+			return ok(ctx, msg)
+		})
+		bodyDone <- err
+	}()
+	require.Never(t, bodyAppended.Load, 200*time.Millisecond, 10*time.Millisecond,
+		"the body must wait until the begin has dropped the old buffer")
+
+	close(release)
+	require.NoError(t, <-beginDone)
+	require.NoError(t, <-bodyDone)
+	_, err := interceptor.DoAppend(newCtx(), withTestReplicateHeader(newKeyedCommit(txnCtx, 1)), ok)
+	require.NoError(t, err)
+	require.EqualValues(t, 3, appendCount.Load())
+
+	ctx := newCtx()
+	_, err = interceptor.DoAppend(ctx, newKeyedCommit(message.TxnContext{TxnID: 15, Keepalive: 10}, 1), ok)
+	require.NoError(t, err)
+	require.EqualValues(t, 3, appendCount.Load(), "the retry must be served from the window")
+	extra := utility.GetExtraAppendResult(ctx).Extra.(*messagespb.IdempotentInsertResult)
+	require.Equal(t, []int64{900}, extra.GetIds().GetIntId().GetData())
+}
+
+// After a restart the replicate side still holds the bodies persisted before
+// it, but the idempotency buffer is empty, so only the bodies delivered after
+// the restart are buffered. A commit whose buffered body count falls short of
+// its body count must not be recorded: a missing record lets a retry append
+// again, while a partial record would answer it with missing primary keys.
+func TestInterceptorReplicatedTxnCommitWithMissingBodiesIsNotRecorded(t *testing.T) {
+	interceptor := newInterceptor(WindowConfig{})
+	txnCtx := message.TxnContext{TxnID: 10, Keepalive: 10}
+	appendCount := 0
+	ok := func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		appendCount++
+		utility.ReplaceAppendResultTimeTick(ctx, 100)
+		utility.ReplaceAppendResultLastConfirmedMessageID(ctx, newTestMessageID(9))
+		return newTestMessageID(int64(10 + appendCount)), nil
+	}
+	newCtx := func() context.Context {
+		return utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	}
+
+	// Body 1 landed before the restart and is ignored on the resend.
+	_, err := interceptor.DoAppend(newCtx(), newReplicatedTxnBody(t, txnCtx, 700, 0), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		return nil, status.NewIgnoreOperation("already accepted")
+	})
+	require.Error(t, err)
+	_, err = interceptor.DoAppend(newCtx(), newReplicatedTxnBody(t, txnCtx, 701, 1), ok)
+	require.NoError(t, err)
+	_, err = interceptor.DoAppend(newCtx(), withTestReplicateHeader(newKeyedCommit(txnCtx, 2)), ok)
+	require.NoError(t, err)
+	require.Equal(t, 2, appendCount)
+
+	// A native retry of the key is the owner and appends.
+	_, err = interceptor.DoAppend(newCtx(), newKeyedCommit(message.TxnContext{TxnID: 11, Keepalive: 10}, 0), ok)
+	require.Error(t, err, "the native commit has no buffered bodies, so it fails as an owner instead of being served")
+	require.Equal(t, 2, appendCount)
+	require.Equal(t, 0, interceptor.window("v1").Len())
+}
+
+// seedReplicatedKey records key on the window through a replicated insert, the
+// way an earlier write that the source has since evicted would have.
+func seedReplicatedKey(t *testing.T, interceptor *idempotencyInterceptor, key string, id int64) {
+	t.Helper()
+	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	_, err := interceptor.DoAppend(ctx, withTestReplicateHeader(newIdempotentInsertMessageWithInsertResult(t, "v1", key, &messagespb.IdempotentInsertResult{
+		RowOffsets: []uint32{0},
+		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{id}}}},
+	})), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		require.Equal(t, message.IdempotencyKey(key), message.IdempotencyKeyOf(msg), "a recorded write keeps its key in the WAL")
+		utility.ReplaceAppendResultTimeTick(ctx, 50)
+		utility.ReplaceAppendResultLastConfirmedMessageID(ctx, newTestMessageID(4))
+		return newTestMessageID(5), nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, interceptor.window("v1").Len())
+}
+
+// A replicated write that lands under a key but cannot be recorded makes any
+// entry held for that key describe an older write. The entry must be dropped,
+// or a retry after a promotion is answered with the older write's primary keys.
+func TestInterceptorUnrecordableReplicatedTxnForgetsStaleEntry(t *testing.T) {
+	interceptor := newInterceptor(WindowConfig{})
+	seedReplicatedKey(t, interceptor, "txn-key", 1)
+
+	txnCtx := message.TxnContext{TxnID: 12, Keepalive: 10}
+	ok := func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		utility.ReplaceAppendResultTimeTick(ctx, 100)
+		utility.ReplaceAppendResultLastConfirmedMessageID(ctx, newTestMessageID(9))
+		return newTestMessageID(20), nil
+	}
+	newCtx := func() context.Context {
+		return utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	}
+	// Body 1 is ignored as already accepted, so the commit cannot be recorded.
+	_, err := interceptor.DoAppend(newCtx(), newReplicatedTxnBody(t, txnCtx, 700, 0), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		return nil, status.NewIgnoreOperation("already accepted")
+	})
+	require.Error(t, err)
+	_, err = interceptor.DoAppend(newCtx(), newReplicatedTxnBody(t, txnCtx, 701, 1), ok)
+	require.NoError(t, err)
+	_, err = interceptor.DoAppend(newCtx(), withTestReplicateHeader(newKeyedCommit(txnCtx, 2)), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		require.Empty(t, message.IdempotencyKeyOf(msg), "the WAL summary must not restore a key the window forgot")
+		return ok(ctx, msg)
+	})
+	require.NoError(t, err)
+
+	require.Equal(t, BeginDecisionOwner, interceptor.window("v1").Begin("txn-key", nil).Decision)
+}
+
+// The same holds for a replicated insert whose result header cannot be read.
+func TestInterceptorMalformedReplicatedInsertForgetsStaleEntry(t *testing.T) {
+	interceptor := newInterceptor(WindowConfig{})
+	seedReplicatedKey(t, interceptor, "key-1", 1)
+
+	malformed := withTestReplicateHeader(newIdempotentInsertMessageWithInsertResult(t, "v1", "key-1", &messagespb.IdempotentInsertResult{
+		RowOffsets: []uint32{0, 1},
+		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{10}}}},
+	}))
+	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	_, err := interceptor.DoAppend(ctx, malformed, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		require.Empty(t, message.IdempotencyKeyOf(msg), "the WAL summary must not restore a key the window forgot")
+		return newTestMessageID(30), nil
+	})
+	require.NoError(t, err, "a replicated write must land even when its key cannot be recorded")
+
+	require.Equal(t, BeginDecisionOwner, interceptor.window("v1").Begin("key-1", nil).Decision)
+}
+
+// After a restart the replicate side recovers an open replicated transaction
+// from the WAL and ignores the resent bodies it already holds. Restoring their
+// buffered results from the same TxnBuffer lets the commit record every body.
+//
+// A replicated body keeps the source cluster's finite keepalive (only the begin
+// is rewritten to infinite), and the reopened WAL places the vchannel MVCC far
+// ahead of the body's timetick. The restored result must survive that: the
+// source owns the transaction's lifecycle, so reclamation relies on the
+// txn-active check alone.
+func TestInterceptorRestoresReplicatedTxnBuffersFromTxnBuffer(t *testing.T) {
+	beginCtx := message.TxnContext{TxnID: 13, Keepalive: message.TxnKeepaliveInfinite}
+	bodyCtx := message.TxnContext{TxnID: 13, Keepalive: 10 * time.Second}
+	rh := &message.ReplicateHeader{
+		ClusterID:              "source-cluster",
+		MessageID:              newTestMessageID(1),
+		LastConfirmedMessageID: newTestMessageID(1),
+		TimeTick:               1,
+		VChannel:               "v1",
+	}
+	begin := message.NewBeginTxnMessageBuilderV2().
+		WithVChannel("v1").
+		WithHeader(&message.BeginTxnMessageHeader{}).
+		WithBody(&message.BeginTxnMessageBody{}).
+		MustBuildMutable().
+		WithTxnContext(beginCtx).
+		WithReplicateHeader(rh).
+		WithTimeTick(10).
+		WithLastConfirmed(newTestMessageID(9)).
+		IntoImmutableMessage(newTestMessageID(10))
+	body1 := newReplicatedTxnBody(t, bodyCtx, 700, 0).
+		WithTimeTick(11).
+		WithLastConfirmed(newTestMessageID(9)).
+		IntoImmutableMessage(newTestMessageID(11))
+	txnBuffer := utility.NewTxnBuffer(mlog.With(), metricsutil.NewScanMetrics(types.PChannelInfo{}).NewScannerMetrics())
+	txnBuffer.HandleImmutableMessages([]message.ImmutableMessage{begin, body1}, 11)
+
+	// The reopened WAL's recovery MVCC is far beyond the body's timetick plus one
+	// source keepalive: without the replicated-body exemption this Restore would
+	// expire the builder it just filled.
+	recoveryTimeTick := tsoutil.AddPhysicalDurationOnTs(11, 2*bodyCtx.Keepalive)
+	mvccManager := mvcc.NewMVCCManager(recoveryTimeTick)
+	mvccManager.ApplyRecoveryBarrier("v1", recoveryTimeTick)
+	interceptor := newIdempotencyInterceptorWithParam(WindowConfig{}, &interceptors.InterceptorBuildParam{
+		MVCCManager: mvccManager,
+	})
+	interceptor.restoreReplicatedTxnBuffers(txnBuffer)
+
+	ok := func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		utility.ReplaceAppendResultTimeTick(ctx, 100)
+		utility.ReplaceAppendResultLastConfirmedMessageID(ctx, newTestMessageID(9))
+		return newTestMessageID(20), nil
+	}
+	newCtx := func() context.Context {
+		return utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	}
+	_, err := interceptor.DoAppend(newCtx(), newReplicatedTxnBody(t, bodyCtx, 700, 0), func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		return nil, status.NewIgnoreOperation("already accepted")
+	})
+	require.Error(t, err)
+	_, err = interceptor.DoAppend(newCtx(), newReplicatedTxnBody(t, bodyCtx, 701, 1), ok)
+	require.NoError(t, err)
+	_, err = interceptor.DoAppend(newCtx(), withTestReplicateHeader(newKeyedCommit(bodyCtx, 2)), ok)
+	require.NoError(t, err)
+
+	entry := interceptor.window("v1").Begin("txn-key", nil)
+	require.Equal(t, BeginDecisionDuplicate, entry.Decision)
+	require.ElementsMatch(t, []int64{700, 701}, entry.Entry.InsertResult.GetIds().GetIntId().GetData())
+}
+
+// A replicated transaction is recorded on its commit with the insert results
+// merged from its replicated bodies, so a native commit retrying the same key
+// after a promotion short-circuits with the source cluster's primary keys.
+func TestInterceptorRecordsReplicatedTxnCommit(t *testing.T) {
+	interceptor := newInterceptor(WindowConfig{})
+	txnCtx := message.TxnContext{TxnID: 7, Keepalive: 10}
+	newCommit := func() message.MutableMessage { return newKeyedCommit(txnCtx, 1) }
+	appendCount := 0
+	append := func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
+		appendCount++
+		utility.ReplaceAppendResultTimeTick(ctx, 100)
+		utility.ReplaceAppendResultLastConfirmedMessageID(ctx, newTestMessageID(9))
+		return newTestMessageID(int64(10 + appendCount)), nil
+	}
+
+	body := withTestReplicateHeader(newIdempotentInsertMessageWithInsertResult(t, "v1", "", &messagespb.IdempotentInsertResult{
+		RowOffsets: []uint32{0},
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{700}}},
+		},
+	}).WithTxnContext(txnCtx))
+	_, err := interceptor.DoAppend(utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{}), body, append)
+	require.NoError(t, err)
+	_, err = interceptor.DoAppend(utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{}), withTestReplicateHeader(newCommit()), append)
+	require.NoError(t, err)
+	require.Equal(t, 2, appendCount)
+
+	ctx := utility.WithExtraAppendResult(context.Background(), &utility.ExtraAppendResult{})
+	msgID, err := interceptor.DoAppend(ctx, newCommit(), append)
+	require.NoError(t, err)
+	require.Equal(t, 2, appendCount)
+	require.True(t, newTestMessageID(12).EQ(msgID))
+	extra := utility.GetExtraAppendResult(ctx).Extra.(*messagespb.IdempotentInsertResult)
+	require.Equal(t, []int64{700}, extra.GetIds().GetIntId().GetData())
 }
 
 func TestInterceptorDuplicateTxnCommitRollsBackRetriedTxn(t *testing.T) {
