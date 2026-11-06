@@ -492,12 +492,8 @@ TEST(Growing, InsertMissingRepresentativeUsesSiblingLengths) {
 
     const int64_t row_id = 1;
     const Timestamp timestamp = 1;
-    ASSERT_NO_THROW(
-        segment->Insert(segment->PreInsert(1),
-                        1,
-                        &row_id,
-                        &timestamp,
-                        std::make_shared<InsertRecordProto>(insert)));
+    ASSERT_NO_THROW(segment->Insert(
+        segment->PreInsert(1), 1, &row_id, &timestamp, &insert));
 
     // Offsets advanced from the sibling's lengths; the synthesized
     // representative reads 3 null elements.
