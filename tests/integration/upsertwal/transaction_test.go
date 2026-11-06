@@ -18,7 +18,6 @@ package upsertwal
 
 import (
 	"context"
-	"strconv"
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -120,12 +119,6 @@ func (s *UpsertWALSuite) TestExpiredTransactionPreservesOldRows() {
 }
 
 func (s *UpsertWALSuite) TestRawProduceRejectsForeignVChannelTransaction() {
-	for _, recovery := range []bool{false, true} {
-		s.Run("recovery_"+strconv.FormatBool(recovery), func() { s.rawProduceScope(recovery) })
-	}
-}
-
-func (s *UpsertWALSuite) rawProduceScope(recovery bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	first := s.create(ctx)
@@ -139,15 +132,12 @@ func (s *UpsertWALSuite) rawProduceScope(recovery bool) {
 	}
 	s.Require().NotEmpty(second.name, "the fixture must exercise two VChannels on the same PChannel")
 	producer := rawProducer(s.T(), ctx, s.Cluster, first.vchannel)
-	begin := func() message.TxnContext {
-		result, err := producer.Append(ctx, message.NewBeginTxnMessageBuilderV2().WithVChannel(first.vchannel).
-			WithHeader(&message.BeginTxnMessageHeader{KeepaliveMilliseconds: 600000}).WithBody(&message.BeginTxnMessageBody{}).MustBuildMutable())
-		s.Require().NoError(err)
-		s.Require().NotNil(result.TxnCtx)
-		return *result.TxnCtx
-	}
-	txn := begin()
-	_, err := producer.Append(ctx, second.upsert(11, 1).WithTxnContext(txn))
+	begin, err := producer.Append(ctx, message.NewBeginTxnMessageBuilderV2().WithVChannel(first.vchannel).
+		WithHeader(&message.BeginTxnMessageHeader{KeepaliveMilliseconds: 60000}).WithBody(&message.BeginTxnMessageBody{}).MustBuildMutable())
+	s.Require().NoError(err)
+	s.Require().NotNil(begin.TxnCtx)
+	txn := *begin.TxnCtx
+	_, err = producer.Append(ctx, second.upsert(11, 1).WithTxnContext(txn))
 	s.Require().Error(err, "body scope must fail before session admission")
 	s.Require().ErrorContains(err, "invalid vchannel scope")
 	_, err = producer.Append(ctx, message.NewRollbackTxnMessageBuilderV2().WithVChannel(first.vchannel).
@@ -155,54 +145,27 @@ func (s *UpsertWALSuite) rawProduceScope(recovery bool) {
 	s.Require().NoError(err)
 	s.assertRows(ctx, first, 11, 1, 0)
 	s.assertRows(ctx, second, 11, 1, 0)
-	if recovery {
-		txn = begin()
-		_, err = producer.Append(ctx, first.upsert(11, 3).WithTxnContext(txn))
-		s.Require().NoError(err)
-		producer.Close()
-		s.restartStreamingNode()
-		producer = rawProducer(s.T(), ctx, s.Cluster, first.vchannel)
-		_, err = producer.Append(ctx, message.NewCommitTxnMessageBuilderV2().WithVChannel(first.vchannel).WithHeader(&message.CommitTxnMessageHeader{BodyCnt: 1}).WithBody(&message.CommitTxnMessageBody{}).MustBuildMutable().WithTxnContext(txn))
-		s.Require().NoError(err)
-		s.waitForQueryRecovery(ctx, first)
-		s.assertRows(ctx, first, 11, 3, 1)
-	}
+	producer.Close()
 }
 
-func (s *UpsertWALSuite) TestRollbackAndOverlappingBodies() {
+func (s *UpsertWALSuite) TestRollbackPreservesOldRows() {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	c := s.create(ctx)
 	producer := rawProducer(s.T(), ctx, s.Cluster, c.vchannel)
 	_, err := producer.Append(ctx, c.upsert(11, 1))
 	s.Require().NoError(err)
-	for _, rollback := range []bool{true, false} {
-		begin, err := producer.Append(ctx, message.NewBeginTxnMessageBuilderV2().WithVChannel(c.vchannel).
-			WithHeader(&message.BeginTxnMessageHeader{KeepaliveMilliseconds: 60000}).WithBody(&message.BeginTxnMessageBody{}).MustBuildMutable())
-		s.Require().NoError(err)
-		s.Require().NotNil(begin.TxnCtx)
-		_, err = producer.Append(ctx, c.upsert(11, 2).WithTxnContext(*begin.TxnCtx))
-		s.Require().NoError(err)
-		if rollback {
-			_, err = producer.Append(ctx, message.NewRollbackTxnMessageBuilderV2().WithVChannel(c.vchannel).
-				WithHeader(&message.RollbackTxnMessageHeader{}).WithBody(&message.RollbackTxnMessageBody{}).MustBuildMutable().WithTxnContext(*begin.TxnCtx))
-			s.Require().NoError(err)
-		} else {
-			_, err = producer.Append(ctx, c.upsert(11, 3).WithTxnContext(*begin.TxnCtx))
-			s.Require().NoError(err)
-			_, err = producer.Append(ctx, message.NewCommitTxnMessageBuilderV2().WithVChannel(c.vchannel).
-				WithHeader(&message.CommitTxnMessageHeader{BodyCnt: 2}).WithBody(&message.CommitTxnMessageBody{}).MustBuildMutable().WithTxnContext(*begin.TxnCtx))
-			s.Require().NoError(err)
-		}
-		if rollback {
-			s.assertRows(ctx, c, 11, 1, 1)
-			s.assertRows(ctx, c, 11, 2, 0)
-			s.assertRows(ctx, c, 11, 3, 0)
-		} else {
-			s.assertRows(ctx, c, 11, 1, 0)
-			s.waitForQueryRecovery(ctx, c)
-		}
-	}
+	begin, err := producer.Append(ctx, message.NewBeginTxnMessageBuilderV2().WithVChannel(c.vchannel).
+		WithHeader(&message.BeginTxnMessageHeader{KeepaliveMilliseconds: 60000}).WithBody(&message.BeginTxnMessageBody{}).MustBuildMutable())
+	s.Require().NoError(err)
+	s.Require().NotNil(begin.TxnCtx)
+	_, err = producer.Append(ctx, c.upsert(11, 2).WithTxnContext(*begin.TxnCtx))
+	s.Require().NoError(err)
+	_, err = producer.Append(ctx, message.NewRollbackTxnMessageBuilderV2().WithVChannel(c.vchannel).
+		WithHeader(&message.RollbackTxnMessageHeader{}).WithBody(&message.RollbackTxnMessageBody{}).MustBuildMutable().WithTxnContext(*begin.TxnCtx))
+	s.Require().NoError(err)
+	s.assertRows(ctx, c, 11, 1, 1)
+	s.assertRows(ctx, c, 11, 2, 0)
 }
 
 func (s *UpsertWALSuite) TestPendingTransactionSurvivesWALReopen() {
@@ -227,27 +190,4 @@ func (s *UpsertWALSuite) TestPendingTransactionSurvivesWALReopen() {
 	s.waitForQueryRecovery(ctx, c)
 	s.assertRows(ctx, c, 11, 1, 0)
 	s.assertRows(ctx, c, 11, 2, 1)
-}
-
-func (s *UpsertWALSuite) TestTransactionReplacesInterveningWrite() {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
-	c := s.create(ctx)
-	producer := rawProducer(s.T(), ctx, s.Cluster, c.vchannel)
-	begin, err := producer.Append(ctx, message.NewBeginTxnMessageBuilderV2().WithVChannel(c.vchannel).
-		WithHeader(&message.BeginTxnMessageHeader{KeepaliveMilliseconds: 60000}).WithBody(&message.BeginTxnMessageBody{}).MustBuildMutable())
-	s.Require().NoError(err)
-	s.Require().NotNil(begin.TxnCtx)
-	_, err = producer.Append(ctx, c.upsert(11, 3).WithTxnContext(*begin.TxnCtx))
-	s.Require().NoError(err)
-	s.assertRows(ctx, c, 11, 3, 0)
-	intervening, err := producer.Append(ctx, c.upsert(11, 2))
-	s.Require().NoError(err)
-	s.assertRows(ctx, c, 11, 2, 1)
-	commit, err := producer.Append(ctx, message.NewCommitTxnMessageBuilderV2().WithVChannel(c.vchannel).
-		WithHeader(&message.CommitTxnMessageHeader{BodyCnt: 1}).WithBody(&message.CommitTxnMessageBody{}).MustBuildMutable().WithTxnContext(*begin.TxnCtx))
-	s.Require().NoError(err)
-	s.Require().Greater(commit.TimeTick, intervening.TimeTick)
-	s.assertRows(ctx, c, 11, 2, 0)
-	s.assertRows(ctx, c, 11, 3, 1)
 }

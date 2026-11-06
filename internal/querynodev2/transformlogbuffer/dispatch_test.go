@@ -10,7 +10,9 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -219,4 +221,32 @@ func TestDispatchHonorsExclusiveSegmentCursor(t *testing.T) {
 	}
 	require.NoError(t, reg.WaitTransformVisible(ctx, 110))
 	require.Equal(t, []uint64{110}, segment.appliedTicks())
+}
+
+func TestDispatchReplaysTransformPayload(t *testing.T) {
+	mockey.PatchConvey("retained entry payload reaches apply unchanged", t, func() {
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		streams := newFakeStreamManager()
+		buffer := New(streams, 1)
+		defer buffer.Close()
+		guard, err := buffer.Acquire(ctx, newTestQueryView("v", 0))
+		require.NoError(t, err)
+		defer guard.Release()
+		entry := &streamingpb.TransformLogEntry{TimeTick: 20, Entry: &streamingpb.TransformLogEntry_Delete{Delete: &streamingpb.TransformDeleteEntry{Blocks: []*streamingpb.TransformDeleteBlock{{PartitionId: 2, PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7, 9}}}}}}}}}
+		stream := streams.stream("v")
+		stream.emit(wal.TransformLogStreamEvent{VChannel: "v", Entry: entry})
+		stream.emit(wal.TransformLogStreamEvent{VChannel: "v", SyncUp: &wal.TransformLogSyncUp{TimeTick: 20}})
+		var got *streamingpb.TransformLogEntry
+		var original func(*fakeSegment, context.Context, *streamingpb.TransformLogEntry) error
+		mockey.Mock((*fakeSegment).ApplyTransform).Origin(&original).To(func(s *fakeSegment, ctx context.Context, entry *streamingpb.TransformLogEntry) error {
+			got = proto.Clone(entry).(*streamingpb.TransformLogEntry)
+			return original(s, ctx, entry)
+		}).Build()
+		registration, err := buffer.RegisterSegment(ctx, &fakeSegment{id: 1, vchannel: "v"})
+		require.NoError(t, err)
+		defer registration.Unregister()
+		require.NoError(t, registration.WaitCatchup(ctx))
+		require.True(t, proto.Equal(entry, got))
+	})
 }

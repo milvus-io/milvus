@@ -32,7 +32,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -40,13 +39,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
-
-func TestMain(m *testing.M) {
-	paramtable.Init()
-	// Producer tests run against readers that support the Upsert format.
-	paramtable.Get().StreamingCfg.EnableUpsertMessage.SwapTempValue("true")
-	os.Exit(m.Run())
-}
 
 func upsertPackingSchema() *schemapb.CollectionSchema {
 	return &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}, {FieldID: 101, Name: "part", DataType: schemapb.DataType_Int64, IsPartitionKey: true}, {FieldID: 102, Name: "payload", DataType: schemapb.DataType_VarChar}}}
@@ -331,40 +323,6 @@ func TestUpsertPackingDuplicateDeleteOccurrences(t *testing.T) {
 		require.Equal(t, count, deletes)
 		require.True(t, proto.Equal(keys, effects))
 		patch.UnPatch()
-	}
-}
-
-func TestUpsertPreExecuteNamespaceFormatGate(t *testing.T) {
-	for _, enabled := range []string{"false", "true"} {
-		t.Run(enabled, func(t *testing.T) {
-			gate := &paramtable.Get().StreamingCfg.EnableUpsertMessage
-			previous := gate.SwapTempValue(enabled)
-			defer gate.SwapTempValue(previous)
-			for _, operation := range []string{"insert", "upsert"} {
-				t.Run(operation, func(t *testing.T) {
-					cache := NewMockCache(t)
-					expectedError := merr.WrapErrCollectionNotFound("namespace_test")
-					if enabled == "false" {
-						cache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, "namespace_test").Return(int64(0), expectedError).Once()
-					}
-					namespace := "tenant"
-					var err error
-					if operation == "insert" {
-						insert, _ := newIdempotentRepackInsertMsg(1)
-						insert.CollectionName = "namespace_test"
-						insert.Namespace = &namespace
-						err = (&InsertTask{baseTask: baseTask{MetaCache: cache}, insertMsg: insert}).PreExecute(context.Background())
-					} else {
-						err = (&UpsertTask{baseTask: baseTask{MetaCache: cache}, req: &milvuspb.UpsertRequest{CollectionName: "namespace_test", Namespace: &namespace}}).PreExecute(context.Background())
-					}
-					if enabled == "true" {
-						require.ErrorContains(t, err, "Upsert WAL does not support namespace requests")
-					} else {
-						require.ErrorIs(t, err, expectedError)
-					}
-				})
-			}
-		})
 	}
 }
 

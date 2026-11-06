@@ -74,49 +74,6 @@ func TestAssignmentSharedTimeTickOrder(t *testing.T) {
 	}
 }
 
-func TestAssignmentFailureLeavesNoPartialAccounting(t *testing.T) {
-	manager, segments := newAssignmentTestManager(t)
-	first, second := assignmentRequest(2), assignmentRequest(3)
-	pm := manager.partitionManagers[PartitionUniqueKey{CollectionID: 1, PartitionID: 3}]
-	pm.fencedAssignTimeTick = 200
-	_, err := manager.AssignSegments([]*AssignSegmentRequest{first, second})
-	require.ErrorIs(t, err, ErrFencedAssign)
-	state := resource.Resource().SegmentStatsManager().GetStatsOfSegment(2)
-	require.Zero(t, state.Modified.Rows)
-	require.Zero(t, state.Modified.BinarySize)
-	require.Zero(t, state.RuntimeFlushSize)
-	require.Zero(t, segments[0].AckSem())
-	second.TimeTick = 201
-	results, err := manager.AssignSegments([]*AssignSegmentRequest{first, second})
-	require.NoError(t, err)
-	for index, result := range results {
-		require.EqualValues(t, 1, segments[index].AckSem())
-		result.Ack()
-		require.Zero(t, segments[index].AckSem())
-		state := resource.Resource().SegmentStatsManager().GetStatsOfSegment(segments[index].GetSegmentID())
-		require.EqualValues(t, 5, state.Modified.Rows)
-		require.EqualValues(t, 50, state.Modified.BinarySize)
-		require.EqualValues(t, 100, state.RuntimeFlushSize)
-	}
-}
-
-func TestPrepareAssignmentDoesNotAcquireReferencesOrAccount(t *testing.T) {
-	manager, segments := newAssignmentTestManager(t)
-	req := assignmentRequest(2)
-	req.TxnSession = &mockedSession{}
-	manager.mu.Lock()
-	selected, err := manager.partitionManagers[PartitionUniqueKey{CollectionID: 1, PartitionID: 2}].prepareAssignment(req)
-	manager.mu.Unlock()
-	require.NoError(t, err)
-	require.Same(t, segments[0], selected)
-	require.Zero(t, selected.AckSem())
-	require.Zero(t, selected.TxnSem())
-	state := resource.Resource().SegmentStatsManager().GetStatsOfSegment(2)
-	require.Zero(t, state.Modified.Rows)
-	require.Zero(t, state.Modified.BinarySize)
-	require.Zero(t, state.RuntimeFlushSize)
-}
-
 func TestAssignmentAccountingFailureReleasesDistinctAcks(t *testing.T) {
 	manager, segments := newAssignmentTestManager(t)
 	calls := 0
@@ -260,7 +217,7 @@ func TestAssignmentTransactionReferencesFollowSessionLifecycle(t *testing.T) {
 }
 
 func TestAssignmentLaterPartitionFailuresCanRetryWithoutDoubleCharge(t *testing.T) {
-	for _, failure := range []string{"missing", "waiting", "old"} {
+	for _, failure := range []string{"missing", "waiting", "old", "fenced"} {
 		t.Run(failure, func(t *testing.T) {
 			manager, segments := newAssignmentTestManager(t)
 			key := PartitionUniqueKey{CollectionID: 1, PartitionID: 3}
@@ -268,6 +225,9 @@ func TestAssignmentLaterPartitionFailuresCanRetryWithoutDoubleCharge(t *testing.
 			first, second := assignmentRequest(2), assignmentRequest(3)
 			var want error
 			switch failure {
+			case "fenced":
+				pm.fencedAssignTimeTick = 200
+				want = ErrFencedAssign
 			case "missing":
 				delete(manager.partitionManagers, key)
 				want = ErrPartitionNotFound
@@ -282,11 +242,13 @@ func TestAssignmentLaterPartitionFailuresCanRetryWithoutDoubleCharge(t *testing.
 			require.ErrorIs(t, err, want)
 			for _, segment := range segments {
 				require.Zero(t, segment.AckSem())
+				require.Zero(t, segment.TxnSem())
 				state := resource.Resource().SegmentStatsManager().GetStatsOfSegment(segment.GetSegmentID())
 				require.Zero(t, state.Modified.Rows)
 				require.Zero(t, state.Modified.BinarySize)
 				require.Zero(t, state.RuntimeFlushSize)
 			}
+			pm.fencedAssignTimeTick = 0
 			manager.partitionManagers[key] = pm
 			pm.segments = map[int64]*segmentAllocManager{3: segments[1]}
 			second.TimeTick = 201

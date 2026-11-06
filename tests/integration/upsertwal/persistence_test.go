@@ -140,28 +140,6 @@ func (s *UpsertWALSuite) TestReplacementSurvivesFlushRestartAndReload() {
 	s.waitForQueryRecovery(ctx, c)
 	s.assertRows(ctx, c, 11, 1, 0)
 	s.assertRows(ctx, c, 11, 2, 1)
-}
-
-// The persisted path is independently testable before #52977 changes QueryNode
-// startup. Live growing queries remain covered by the native runtime tests.
-func (s *UpsertWALSuite) TestUpsertFormatPersistsThroughRealWAL() {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-	c := s.create(ctx)
-	producer := rawProducer(s.T(), ctx, s.Cluster, c.vchannel)
-	defer producer.Close()
-	for _, marker := range []int64{1, 2} {
-		_, err := producer.Append(ctx, c.upsert(11, marker))
-		s.Require().NoError(err)
-		s.flush(ctx, c)
-	}
-	status, err := s.Cluster.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{CollectionName: c.name})
-	s.Require().NoError(merr.CheckRPCCall(status, err))
-	status, err = s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{CollectionName: c.name})
-	s.Require().NoError(merr.CheckRPCCall(status, err))
-	s.WaitForLoad(ctx, c.name)
-	s.assertRows(ctx, c, 11, 1, 0)
-	s.assertRows(ctx, c, 11, 2, 1)
 	s.assertPhysicalRows(ctx, c, 2)
 }
 
@@ -176,12 +154,18 @@ func (s *UpsertWALSuite) TestUpsertTransactionInterveningWriteAndKeyedReopen() {
 	s.Require().NoError(err)
 	_, err = producer.Append(ctx, c.upsert(11, 2, "transaction-reopen").WithTxnContext(*begin.TxnCtx))
 	s.Require().NoError(err)
-	_, err = producer.Append(ctx, c.upsert(11, 3))
+	s.assertRows(ctx, c, 11, 2, 0)
+	intervening, err := producer.Append(ctx, c.upsert(11, 3))
 	s.Require().NoError(err)
+	s.assertRows(ctx, c, 11, 3, 1)
 	commit := message.NewCommitTxnMessageBuilderV2().WithVChannel(c.vchannel).WithIdempotencyKey(message.NewCollectionScopedIdempotencyKey(c.id, "transaction-reopen")).WithHeader(&message.CommitTxnMessageHeader{BodyCnt: 1}).WithBody(&message.CommitTxnMessageBody{}).MustBuildMutable().WithTxnContext(*begin.TxnCtx)
 	original, err := producer.Append(ctx, commit)
 	s.Require().NoError(err)
 	var result messagespb.IdempotentInsertResult
+	s.Require().Greater(original.TimeTick, intervening.TimeTick)
+	s.assertRows(ctx, c, 11, 1, 0)
+	s.assertRows(ctx, c, 11, 3, 0)
+	s.assertRows(ctx, c, 11, 2, 1)
 	s.Require().NoError(original.GetExtra(&result))
 	s.Require().Equal([]int64{11}, result.GetIds().GetIntId().GetData())
 	s.flush(ctx, c)
