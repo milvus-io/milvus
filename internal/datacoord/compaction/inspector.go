@@ -333,102 +333,6 @@ func (c *Inspector) Start() {
 	go c.loopClean()
 }
 
-func (c *Inspector) LoadMeta() {
-	triggers := c.compactionTaskMeta.GetCompactionTasks()
-	var failedTasks []*datapb.CompactionTask
-	for _, tasks := range triggers {
-		for _, task := range tasks {
-			if ctask.IsCompactionTaskCleaned(task) {
-				mlog.Info(context.TODO(), "compactionInspector loadMeta abandon compactionTask",
-					mlog.Int64("planID", task.GetPlanID()),
-					mlog.String("type", task.GetType().String()),
-					mlog.String("state", task.GetState().String()))
-				continue
-			}
-
-			t, err := c.createCompactTask(task)
-			if err != nil {
-				mlog.Info(context.TODO(), "compactionInspector loadMeta create compactionTask failed, defer cleanup",
-					mlog.Int64("planID", task.GetPlanID()),
-					mlog.String("type", task.GetType().String()),
-					mlog.String("state", task.GetState().String()),
-					mlog.Err(err),
-				)
-				failedTasks = append(failedTasks, task)
-				continue
-			}
-			if t.NeedReAssignNodeID() {
-				if err = c.submitTask(t); err != nil {
-					mlog.Info(context.TODO(), "compactionInspector loadMeta submit task failed, defer cleanup",
-						mlog.Int64("planID", task.GetPlanID()),
-						mlog.String("type", task.GetType().String()),
-						mlog.String("state", task.GetState().String()),
-						mlog.Err(err),
-					)
-					failedTasks = append(failedTasks, task)
-					continue
-				}
-				mlog.Info(context.TODO(), "compactionInspector loadMeta submitTask",
-					mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
-					mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
-					mlog.FieldCollectionID(t.GetTaskProto().GetCollectionID()),
-					mlog.String("type", task.GetType().String()),
-					mlog.String("state", t.GetTaskProto().GetState().String()))
-			} else {
-				c.restoreTask(t)
-				mlog.Info(context.TODO(), "compactionInspector loadMeta restoreTask",
-					mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
-					mlog.Int64("triggerID", t.GetTaskProto().GetTriggerID()),
-					mlog.FieldCollectionID(t.GetTaskProto().GetCollectionID()),
-					mlog.String("type", task.GetType().String()),
-					mlog.String("state", t.GetTaskProto().GetState().String()))
-			}
-		}
-	}
-
-	if len(failedTasks) > 0 {
-		c.stopWg.Add(1)
-		go c.cleanupFailedCompactionTasks(failedTasks)
-	}
-}
-
-func (c *Inspector) cleanupFailedCompactionTasks(tasks []*datapb.CompactionTask) {
-	defer c.stopWg.Done()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() {
-		select {
-		case <-c.stopCh:
-			cancel()
-		case <-ctx.Done():
-		}
-	}()
-
-	total := len(tasks)
-	mlog.Info(ctx, "start cleaning up failed compaction tasks", mlog.Int("total", total))
-	cleaned := 0
-	for _, task := range tasks {
-		select {
-		case <-ctx.Done():
-			mlog.Info(ctx, "failed compaction task cleanup aborted",
-				mlog.Int("cleaned", cleaned),
-				mlog.Int("remaining", total-cleaned))
-			return
-		default:
-		}
-		if err := c.compactionTaskMeta.DropCompactionTask(ctx, task); err != nil {
-			mlog.Warn(ctx, "drop failed compaction task failed",
-				mlog.Int64("planID", task.GetPlanID()), mlog.Err(err))
-			continue
-		}
-		cleaned++
-	}
-	mlog.Info(ctx, "failed compaction task cleanup finished",
-		mlog.Int("cleaned", cleaned),
-		mlog.Int("total", total))
-}
-
 func (c *Inspector) loopSchedule() {
 	interval := paramtable.Get().DataCoordCfg.CompactionScheduleInterval.GetAsDuration(time.Millisecond)
 	mlog.Info(context.TODO(), "compactionInspector start loop schedule", mlog.Duration("schedule interval", interval))
@@ -622,7 +526,7 @@ func (c *Inspector) getCompactionTask(planID int64) ctask.CompactionTask {
 
 func (c *Inspector) EnqueueCompaction(task *datapb.CompactionTask) error {
 	log := mlog.With(mlog.Int64("planID", task.GetPlanID()), mlog.Int64("triggerID", task.GetTriggerID()), mlog.FieldCollectionID(task.GetCollectionID()), mlog.String("type", task.GetType().String()))
-	t, err := c.createCompactTask(task)
+	t, err := c.admitCompactionTask(task)
 	if err != nil {
 		// Conflict is normal
 		if errors.Is(err, merr.ErrCompactionPlanConflict) {
@@ -659,42 +563,9 @@ func (c *Inspector) EnqueueCompaction(task *datapb.CompactionTask) error {
 	return nil
 }
 
-// set segments compacting, one segment can only participate one compactionTask
-func (c *Inspector) createCompactTask(t *datapb.CompactionTask) (ctask.CompactionTask, error) {
-	if t.GetType() == datapb.CompactionType_Level0DeleteCompaction && c.segmentChangeL0Exclusions().Contain(t.GetChannel()) {
-		return nil, merr.WrapErrServiceUnavailableMsg("L0 compaction is deferred while segment change publication is pending")
-	}
-	{
-		m := c.meta
-		group, err := m.GetCompactionChangeGroup(t)
-		if err != nil {
-			return nil, err
-		}
-		if group != nil {
-			// Recovery of a durable output/group transaction must not reserve
-			// its own parents a second time or dispatch another worker task.
-			restored := proto.Clone(t).(*datapb.CompactionTask)
-			switch restored.GetState() {
-			case datapb.CompactionTaskState_failed, datapb.CompactionTaskState_timeout, datapb.CompactionTaskState_completed:
-				// Preserve terminal task decisions; Clean will abort an unpublished
-				// group rather than revive a canceled/failed compaction on restart.
-			default:
-				restored.State = datapb.CompactionTaskState_meta_saved
-				if t.GetType() == datapb.CompactionType_ClusteringCompaction {
-					restored.State = datapb.CompactionTaskState_indexing
-				}
-			}
-			restored.ResultSegments = meta.CompactionGroupResultIDs(group, t)
-			m.SetSegmentsCompacting(context.TODO(), t.GetInputSegments(), true)
-			if t.GetType() == datapb.CompactionType_ClusteringCompaction {
-				return ctask.NewClusteringCompactionTask(restored, c.allocator, c.meta, c.compactionTaskMeta, c.indexMeta, c.analyzeMeta, c.partitionStatsMeta, c.partitionStatsCleaner, c.handler, c.analyzeScheduler, c.ievm), nil
-			}
-			if t.GetType() == datapb.CompactionType_BumpSchemaVersionCompaction {
-				return ctask.NewBumpSchemaVersionTask(restored, c.allocator, c.meta, c.compactionTaskMeta, c.ievm), nil
-			}
-			return ctask.NewMixCompactionTask(restored, c.allocator, c.meta, c.compactionTaskMeta, c.ievm), nil
-		}
-	}
+// newCompactionTask only constructs the state machine; it neither claims
+// segments nor interprets an existing segment change group.
+func (c *Inspector) newCompactionTask(t *datapb.CompactionTask) (ctask.CompactionTask, error) {
 	var task ctask.CompactionTask
 	switch t.GetType() {
 	case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction:
@@ -708,22 +579,50 @@ func (c *Inspector) createCompactTask(t *datapb.CompactionTask) (ctask.Compactio
 	default:
 		return nil, merr.WrapErrIllegalCompactionPlan("illegal compaction type")
 	}
-	// Revalidate input and snapshot state at admission so a protection change
-	// after planning cannot enter the task queue unchecked.
-	if err := c.meta.ValidateSegmentStateBeforeCompleteCompactionMutation(t); err != nil {
+	return task, nil
+}
+
+// admitCompactionTask accepts new work. Existing durable output belongs to the
+// recovery path and must never be re-stamped or have its reservations rolled back
+// by EnqueueCompaction's new-task failure handling.
+func (c *Inspector) admitCompactionTask(t *datapb.CompactionTask) (ctask.CompactionTask, error) {
+	task, err := c.newCompactionTask(t)
+	if err != nil {
 		return nil, err
 	}
+	group, err := c.meta.GetCompactionChangeGroup(t)
+	if err != nil {
+		return nil, err
+	}
+	if group != nil {
+		return nil, merr.WrapErrCompactionPlanConflict("compaction plan already has a durable segment change group")
+	}
+	if t.GetType() == datapb.CompactionType_Level0DeleteCompaction && c.segmentChangeL0Exclusions().Contain(t.GetChannel()) {
+		return nil, merr.WrapErrServiceUnavailableMsg("L0 compaction is deferred while segment change publication is pending")
+	}
+	if err := c.claimCompactionInputs(t); err != nil {
+		return nil, err
+	}
+	return task, nil
+}
+
+// claimCompactionInputs validates input/snapshot state and atomically reserves
+// inputs. Both new tasks and recovered tasks without durable outputs need this.
+func (c *Inspector) claimCompactionInputs(t *datapb.CompactionTask) error {
+	if err := c.meta.ValidateSegmentStateBeforeCompleteCompactionMutation(t); err != nil {
+		return err
+	}
 	if c.meta.ReserveGroupSort(t) {
-		return task, nil
+		return nil
 	}
 	exist, succeed := c.meta.CheckAndSetSegmentsCompacting(context.TODO(), t.GetInputSegments())
 	if !exist {
-		return nil, merr.WrapErrIllegalCompactionPlan("segment not exist")
+		return merr.WrapErrIllegalCompactionPlan("segment not exist")
 	}
 	if !succeed {
-		return nil, merr.WrapErrCompactionPlanConflict("segment is compacting")
+		return merr.WrapErrCompactionPlanConflict("segment is compacting")
 	}
-	return task, nil
+	return nil
 }
 
 // checkCompaction retrieves executing tasks and calls each task's Process() method

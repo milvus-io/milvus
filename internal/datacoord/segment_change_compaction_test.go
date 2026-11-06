@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/compaction"
@@ -114,14 +115,14 @@ func TestSegmentChangeRetainsL0WhilePublishing(t *testing.T) {
 		InputSegments: []int64{3001}, Type: datapb.CompactionType_Level0DeleteCompaction, State: datapb.CompactionTaskState_pipelining,
 	}
 	ci := compaction.NewSegmentChangeTestInspector(t, m, meta.NewMockAllocator(t))
-	queued, err := ci.CreateCompactTaskForTest(l0)
+	queued, err := ci.AdmitCompactionTaskForTest(l0)
 	require.NoError(t, err)
 	require.NoError(t, ci.EnqueueForTest(queued))
 	_, err = m.CompleteCompactionMutation(t.Context(), task, result)
 	require.NoError(t, err)
 	// Opt-out must still protect the already admitted group.
 	require.NoError(t, Params.Save(Params.DataCoordCfg.SegmentChangeEnabled.Key, "false"))
-	_, err = ci.CreateCompactTaskForTest(l0)
+	_, err = ci.AdmitCompactionTaskForTest(l0)
 	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 	require.Empty(t, ci.ScheduleForTest())
 	require.Zero(t, ci.QueueLenForTest(), "deferred L0 must not consume the inner sort planning budget")
@@ -134,7 +135,7 @@ func TestSegmentChangeRetainsL0WhilePublishing(t *testing.T) {
 	inspector := newSegmentChangeInspector(t.Context(), m, meta.NewMockAllocator(t))
 	inspector.checkAllGroups(t.Context())
 	inspector.checkAllGroups(t.Context())
-	_, err = ci.CreateCompactTaskForTest(l0)
+	_, err = ci.AdmitCompactionTaskForTest(l0)
 	require.NoError(t, err, "L0 may be replanned once outputs are published")
 }
 
@@ -219,7 +220,7 @@ func TestSegmentChangeMixTaskRecoveryAndFlagOff(t *testing.T) {
 			require.NoError(t, Params.Save(Params.DataCoordCfg.SegmentChangeEnabled.Key, "false"))
 			recovered := reloadSegmentChangeMeta(t, m)
 			ci := compaction.NewSegmentChangeTestInspector(t, recovered, meta.NewMockAllocator(t))
-			restored, err := ci.CreateCompactTaskForTest(task)
+			restored, err := ci.RecoverCompactionTaskForTest(task)
 			require.NoError(t, err)
 			require.Equal(t, datapb.CompactionTaskState_meta_saved, restored.GetTaskProto().GetState())
 			require.Equal(t, taskcommon.Finished, restored.GetTaskState(), "readiness must not occupy a worker slot")
@@ -344,7 +345,7 @@ func TestSegmentChangeMixRecoveryPreservesFailedTask(t *testing.T) {
 	require.NoError(t, err)
 	task.State = datapb.CompactionTaskState_failed
 	ci := compaction.NewSegmentChangeTestInspector(t, m, meta.NewMockAllocator(t))
-	restored, err := ci.CreateCompactTaskForTest(task)
+	restored, err := ci.RecoverCompactionTaskForTest(task)
 	require.NoError(t, err)
 	require.Equal(t, datapb.CompactionTaskState_failed, restored.GetTaskProto().GetState())
 	require.True(t, restored.Process())
@@ -352,4 +353,22 @@ func TestSegmentChangeMixRecoveryPreservesFailedTask(t *testing.T) {
 	require.Equal(t, model.SegmentChangeStateAborted, m.GetSegmentChangeGroup(t.Context(), 10, 5000).State)
 	require.Equal(t, commonpb.SegmentState_Flushed, m.GetSegment(t.Context(), 2001).GetState())
 	require.Equal(t, datapb.CompactionTaskState_failed, restored.GetTaskProto().GetTerminalState())
+}
+
+func TestSegmentChangeCompactionInitPreservesRecoveryConflict(t *testing.T) {
+	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "true")
+	m, task, result := seedMixProducer(t)
+	_, err := m.CompleteCompactionMutation(t.Context(), task, result)
+	require.NoError(t, err)
+	taskMeta := newSegmentChangeTaskMeta(t, m)
+	conflicting := proto.Clone(task).(*datapb.CompactionTask)
+	conflicting.CollectionID++
+	taskMeta.SaveCompactionTaskMemory(conflicting)
+	server := &Server{ctx: t.Context(), meta: m}
+	server.compactionTaskMeta = taskMeta
+	require.ErrorIs(t, server.initCompaction(), merr.ErrDataIntegrity)
+	require.Nil(t, server.compactionInspector)
+	require.Nil(t, server.compactionTriggerManager)
+	require.Len(t, taskMeta.GetCompactionTasksByTriggerID(task.GetTriggerID()), 1)
+	require.NotNil(t, m.GetSegmentChangeGroup(t.Context(), task.GetCollectionID(), task.GetPlanID()))
 }

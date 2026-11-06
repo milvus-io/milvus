@@ -65,7 +65,7 @@ func TestSegmentChangeMixSortChain(t *testing.T) {
 			sortPlan.Type = datapb.CompactionType_SortCompaction
 			sortPlan.InputSegments = []int64{1001}
 			require.True(t, m.GroupSortCandidates(10)[1001])
-			sortTask, err := ci.CreateCompactTaskForTest(sortPlan)
+			sortTask, err := ci.AdmitCompactionTaskForTest(sortPlan)
 			require.NoError(t, err)
 			sortResult := proto.Clone(result).(*datapb.CompactionPlanResult)
 			sortResult.PlanID = 5001
@@ -95,7 +95,7 @@ func TestSegmentChangeMixSortChain(t *testing.T) {
 			require.ErrorIs(t, m.UpdateSegmentChangeGroup(t.Context(), forged), merr.ErrDataIntegrity)
 			// Reload the real catalog before publishing the replacement output.
 			recovered := reloadSegmentChangeMeta(t, m)
-			restored, err := (compaction.NewSegmentChangeTestInspector(t, recovered, meta.NewMockAllocator(t))).CreateCompactTaskForTest(sortPlan)
+			restored, err := (compaction.NewSegmentChangeTestInspector(t, recovered, meta.NewMockAllocator(t))).RecoverCompactionTaskForTest(sortPlan)
 			require.NoError(t, err)
 			restored.QueryTaskOnWorker(session.NewMockCluster(t))
 			inspector = newSegmentChangeInspector(t.Context(), recovered, meta.NewMockAllocator(t))

@@ -390,7 +390,9 @@ func (s *Server) initDataCoord() (initErr error) {
 	if err != nil {
 		return err
 	}
-	s.initCompaction()
+	if err = s.initCompaction(); err != nil {
+		return err
+	}
 	mlog.Info(s.ctx, "init compaction done")
 
 	s.initAnalyzeInspector()
@@ -973,14 +975,18 @@ func (s *Server) initExternalCollectionInspector(storageCli storage.ChunkManager
 	}
 }
 
-func (s *Server) initCompaction() {
+func (s *Server) initCompaction() error {
 	partitionStatsCleaner := partitionstats.NewPartitionStatsCleaner(s.meta.ChunkManager, s.catalog, s.analyzeMeta, s.partitionStatsMeta)
 	cph := compaction.NewCompactionInspector(s.meta, s.compactionTaskMeta, s.indexMeta, s.analyzeMeta, s.partitionStatsMeta, s.compactionTargetMeta, partitionStatsCleaner, s.allocator, s.handler, s.globalScheduler, s.globalScheduler, s.indexEngineVersionManager)
-	cph.LoadMeta()
+	if err := cph.LoadMeta(); err != nil {
+		cph.Stop()
+		return err
+	}
 	s.compactionInspector = cph
 	s.compactionTriggerManager = compaction.NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.indexMeta, s.compactionTaskMeta, s.partitionStatsMeta, s.compactionTargetMeta, s.indexEngineVersionManager)
 	s.compactionTriggerManager.InitForceMergeMemoryQuerier(s.nodeManager, s.mixCoord, s.session)
 	s.compactionTrigger = compaction.NewCompactionTrigger(s.meta, s.indexMeta, s.compactionInspector, s.allocator, s.handler, s.indexEngineVersionManager)
+	return nil
 }
 
 func (s *Server) stopCompaction() {
