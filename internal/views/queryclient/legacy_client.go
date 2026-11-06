@@ -35,7 +35,6 @@ type LegacyClient interface {
 	Search(ctx context.Context, req *LegacySearchRequest) (*LegacySearchResult, error)
 	Query(ctx context.Context, req *LegacyQueryRequest) (*LegacyQueryResult, error)
 	MaxRetries() int
-	ReduceStreamEnabled() bool
 }
 
 type LegacySearchRequest struct {
@@ -45,10 +44,9 @@ type LegacySearchRequest struct {
 	// BarrierMVCC fixes a scalar snapshot and actively establishes WAL coverage.
 	// Mutually exclusive with MVCC. Zero preserves ordinary consistency sampling.
 	BarrierMVCC uint64
-	// AllowStreaming enables streaming reduction for supported Search requests.
+	// AllowStreaming is resolved by Proxy from server configuration and Search eligibility.
 	AllowStreaming bool
-	// Benchmark-only overrides; nil enable and zero bytes retain client defaults.
-	EnableReduceStream     *bool
+	// ReduceStreamChunkBytes is the server setting captured for this request.
 	ReduceStreamChunkBytes int
 }
 
@@ -69,10 +67,9 @@ type LegacyQueryRequest struct {
 	// BarrierMVCC fixes a scalar snapshot and actively establishes WAL coverage.
 	// Mutually exclusive with MVCC. Zero preserves ordinary consistency sampling.
 	BarrierMVCC uint64
-	// AllowStreaming enables streaming reduction for supported Query requests.
+	// AllowStreaming is resolved by Proxy from server configuration and Query eligibility.
 	AllowStreaming bool
-	// Benchmark-only overrides; nil enable and zero bytes retain client defaults.
-	EnableReduceStream     *bool
+	// ReduceStreamChunkBytes is the server setting captured for this request.
 	ReduceStreamChunkBytes int
 	// Plans binds an internal requery to the original Search attempt. Non-nil
 	// (including empty) never resolves a new schema, view or MVCC.
@@ -96,10 +93,8 @@ func (c *legacyOnlyClient) Legacy() LegacyClient {
 }
 
 type legacyClient struct {
-	shardClient            *shardViewQueryClient
-	shardResolver          resolver.ShardResolver
-	enableReduceStream     bool
-	reduceStreamChunkBytes int
+	shardClient   *shardViewQueryClient
+	shardResolver resolver.ShardResolver
 }
 
 func NewLegacyViewQueryClient(
@@ -126,10 +121,8 @@ func newLegacyClient(
 	shardClient.queryHook = cfg.QueryHook
 	shardClient.loadChecks = newCollectionLoadChecks(cfg.LoadInfoClient)
 	return &legacyClient{
-		shardClient:            shardClient,
-		shardResolver:          shardResolver,
-		enableReduceStream:     cfg.EnableReduceStream,
-		reduceStreamChunkBytes: cfg.ReduceStreamChunkBytes,
+		shardClient:   shardClient,
+		shardResolver: shardResolver,
 	}
 }
 
@@ -137,25 +130,10 @@ func (c *legacyClient) MaxRetries() int {
 	return c.shardClient.maxRetries
 }
 
-func (c *legacyClient) ReduceStreamEnabled() bool {
-	return c.enableReduceStream
-}
-
 func (c *legacyClient) Search(ctx context.Context, req *LegacySearchRequest) (result *LegacySearchResult, err error) {
 	defer func() { err = toMilvusError(err) }()
-	enableReduceStream := c.enableReduceStream
-	if req.EnableReduceStream != nil {
-		enableReduceStream = *req.EnableReduceStream
-		if enableReduceStream && !req.AllowStreaming {
-			return nil, merr.WrapErrParameterInvalidMsg("enableReduceStream=true is not supported for this Search request")
-		}
-	}
-	if enableReduceStream && req.AllowStreaming {
-		chunkBytes := c.reduceStreamChunkBytes
-		if req.ReduceStreamChunkBytes > 0 {
-			chunkBytes = req.ReduceStreamChunkBytes
-		}
-		return c.searchStream(ctx, req, chunkBytes)
+	if req.AllowStreaming {
+		return c.searchStream(ctx, req, req.ReduceStreamChunkBytes)
 	}
 
 	vchannels, err := c.shardResolver.ResolveVChannels(ctx, req.Req.CollectionID)
@@ -267,19 +245,8 @@ func (c *legacyClient) Query(ctx context.Context, req *LegacyQueryRequest) (resu
 	if req.Plans != nil {
 		return c.queryRetainedPlans(ctx, req)
 	}
-	enableReduceStream := c.enableReduceStream
-	if req.EnableReduceStream != nil {
-		enableReduceStream = *req.EnableReduceStream
-		if enableReduceStream && !req.AllowStreaming {
-			return nil, merr.WrapErrParameterInvalidMsg("enableReduceStream=true is not supported for this Query request")
-		}
-	}
-	if enableReduceStream && req.AllowStreaming {
-		chunkBytes := c.reduceStreamChunkBytes
-		if req.ReduceStreamChunkBytes > 0 {
-			chunkBytes = req.ReduceStreamChunkBytes
-		}
-		return c.queryStream(ctx, req, chunkBytes)
+	if req.AllowStreaming {
+		return c.queryStream(ctx, req, req.ReduceStreamChunkBytes)
 	}
 	vchannels, err := c.shardResolver.ResolveVChannels(ctx, req.Req.CollectionID)
 	if err != nil {

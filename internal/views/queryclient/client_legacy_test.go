@@ -79,7 +79,7 @@ func TestLegacyClientSearchReducesIteratorVChannelStreams(t *testing.T) {
 	queryNode := qviews.NewQueryNode(11)
 
 	client := NewLegacyViewQueryClient(
-		ViewQueryClientConfig{MaxRetries: 1, EnableReduceStream: true, ReduceStreamChunkBytes: 20},
+		ViewQueryClientConfig{MaxRetries: 1},
 		&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
 			shardA.VChannel: legacySearchPlan(shardA, queryNode),
 			shardB.VChannel: legacySearchPlan(shardB, queryNode),
@@ -94,7 +94,7 @@ func TestLegacyClientSearchReducesIteratorVChannelStreams(t *testing.T) {
 	)
 
 	result, err := client.Legacy().Search(context.Background(), &LegacySearchRequest{
-		AllowStreaming: true,
+		AllowStreaming: true, ReduceStreamChunkBytes: 20,
 		Req: &internalpb.SearchRequest{
 			CollectionID:     collectionID,
 			ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
@@ -128,7 +128,7 @@ func TestLegacyClientPlainANNUsesStreamingWhenEnabled(t *testing.T) {
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	queryNode := qviews.NewQueryNode(11)
 	client := NewLegacyViewQueryClient(
-		ViewQueryClientConfig{MaxRetries: 1, EnableReduceStream: true, ReduceStreamChunkBytes: 20},
+		ViewQueryClientConfig{MaxRetries: 1},
 		&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
 			shardID.VChannel: legacySearchPlan(shardID, queryNode),
 		}},
@@ -140,7 +140,7 @@ func TestLegacyClientPlainANNUsesStreamingWhenEnabled(t *testing.T) {
 		},
 	)
 
-	result, err := client.Legacy().Search(context.Background(), &LegacySearchRequest{AllowStreaming: true, Req: &internalpb.SearchRequest{
+	result, err := client.Legacy().Search(context.Background(), &LegacySearchRequest{AllowStreaming: true, ReduceStreamChunkBytes: 20, Req: &internalpb.SearchRequest{
 		CollectionID:     100,
 		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
 		Nq:               1,
@@ -186,12 +186,12 @@ func TestLegacyClientGroupedSearchStreamingSwitch(t *testing.T) {
 				return stream, nil
 			}
 			client := NewLegacyViewQueryClient(
-				ViewQueryClientConfig{MaxRetries: 1, EnableReduceStream: enabled, ReduceStreamChunkBytes: 1},
+				ViewQueryClientConfig{MaxRetries: 1},
 				&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{shard.VChannel: legacySearchPlan(shard, node)}},
 				service, &legacyResolver{vchannels: []string{shard.VChannel}},
 			)
 			result, err := client.Legacy().Search(context.Background(), &LegacySearchRequest{
-				AllowStreaming: true,
+				AllowStreaming: enabled, ReduceStreamChunkBytes: 1,
 				Req: &internalpb.SearchRequest{CollectionID: 100, ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
 					Nq: 1, Topk: 2, GroupSize: 2, GroupByFieldIds: []int64{101}, MetricType: "IP"},
 			})
@@ -242,7 +242,7 @@ func TestLegacyClientIteratorSearchUsesBatchWhenStreamingDisabled(t *testing.T) 
 		},
 	)
 
-	result, err := client.Legacy().Search(context.Background(), &LegacySearchRequest{AllowStreaming: true, Req: &internalpb.SearchRequest{
+	result, err := client.Legacy().Search(context.Background(), &LegacySearchRequest{Req: &internalpb.SearchRequest{
 		CollectionID:     100,
 		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
 		Nq:               1,
@@ -262,7 +262,7 @@ func TestLegacyClientSearchUsesBatchForUnsupportedIterator(t *testing.T) {
 	queryNode := qviews.NewQueryNode(11)
 	batchResult := newTestSearchChunk(1, []int64{10}, []float32{0.9})
 	client := NewLegacyViewQueryClient(
-		ViewQueryClientConfig{MaxRetries: 1, EnableReduceStream: true},
+		ViewQueryClientConfig{MaxRetries: 1},
 		&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
 			shardID.VChannel: legacySearchPlan(shardID, queryNode),
 		}},
@@ -299,7 +299,7 @@ func TestLegacyClientSearchReturnsUnconsumedStream(t *testing.T) {
 	openCount := 0
 
 	client := NewLegacyViewQueryClient(
-		ViewQueryClientConfig{MaxRetries: 2, EnableReduceStream: true, ReduceStreamChunkBytes: 32},
+		ViewQueryClientConfig{MaxRetries: 2},
 		&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
 			shardID.VChannel: legacySearchPlan(shardID, queryNode),
 		}},
@@ -314,7 +314,7 @@ func TestLegacyClientSearchReturnsUnconsumedStream(t *testing.T) {
 		},
 	)
 
-	result, err := client.Legacy().Search(context.Background(), &LegacySearchRequest{AllowStreaming: true, Req: &internalpb.SearchRequest{
+	result, err := client.Legacy().Search(context.Background(), &LegacySearchRequest{AllowStreaming: true, ReduceStreamChunkBytes: 32, Req: &internalpb.SearchRequest{
 		CollectionID:     100,
 		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
 		Nq:               1,
@@ -325,7 +325,6 @@ func TestLegacyClientSearchReturnsUnconsumedStream(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, openCount)
 	require.Equal(t, 2, client.Legacy().MaxRetries())
-	require.True(t, client.Legacy().ReduceStreamEnabled())
 	require.NotNil(t, result.Stream)
 	_, err = result.Stream.Recv()
 	require.ErrorContains(t, err, "first receive failed")
@@ -340,7 +339,7 @@ func TestLegacyClientQueryReturnsRawResults(t *testing.T) {
 	queryNode := qviews.NewQueryNode(11)
 
 	client := NewLegacyViewQueryClient(
-		ViewQueryClientConfig{MaxRetries: 1, EnableReduceStream: true},
+		ViewQueryClientConfig{MaxRetries: 1},
 		&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
 			shardID.VChannel: legacyQueryPlan(shardID, queryNode),
 		}},
@@ -383,7 +382,7 @@ func TestLegacyClientQueryReducesIteratorVChannelStreams(t *testing.T) {
 	queryNode := qviews.NewQueryNode(11)
 
 	client := NewLegacyViewQueryClient(
-		ViewQueryClientConfig{MaxRetries: 1, EnableReduceStream: true, ReduceStreamChunkBytes: 32},
+		ViewQueryClientConfig{MaxRetries: 1},
 		&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
 			shardA.VChannel: legacyQueryPlan(shardA, queryNode),
 			shardB.VChannel: legacyQueryPlan(shardB, queryNode),
@@ -396,7 +395,7 @@ func TestLegacyClientQueryReducesIteratorVChannelStreams(t *testing.T) {
 	)
 
 	result, err := client.Legacy().Query(context.Background(), &LegacyQueryRequest{
-		AllowStreaming: true,
+		AllowStreaming: true, ReduceStreamChunkBytes: 32,
 		Req: &internalpb.RetrieveRequest{
 			CollectionID:     collectionID,
 			ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
@@ -440,7 +439,7 @@ func TestLegacyClientQueryReducesUnlimitedOrdinaryVChannelStreams(t *testing.T) 
 	}
 
 	client := NewLegacyViewQueryClient(
-		ViewQueryClientConfig{MaxRetries: 1, EnableReduceStream: true, ReduceStreamChunkBytes: 32},
+		ViewQueryClientConfig{MaxRetries: 1},
 		&legacyPlanClient{getQueryPlan: func(_ context.Context, shard qviews.ShardID, input *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
 			plan := legacyQueryPlan(shard, queryNode)
 			plan.Request = &viewpb.QueryPlan_LegacyRetrieveRequest{LegacyRetrieveRequest: proto.Clone(input.GetLegacyRetrieveRequest()).(*internalpb.RetrieveRequest)}
@@ -453,7 +452,7 @@ func TestLegacyClientQueryReducesUnlimitedOrdinaryVChannelStreams(t *testing.T) 
 		&legacyResolver{vchannels: []string{shardA.VChannel, shardB.VChannel}},
 	)
 
-	request := &LegacyQueryRequest{Req: req, Schema: schema, AllowStreaming: SupportsQueryStream(req)}
+	request := &LegacyQueryRequest{Req: req, Schema: schema, AllowStreaming: SupportsQueryStream(req), ReduceStreamChunkBytes: 32}
 	result, err := client.Legacy().Query(t.Context(), request)
 	require.NoError(t, err)
 	require.NotNil(t, result.Stream)
@@ -469,8 +468,7 @@ func TestLegacyClientQueryReducesUnlimitedOrdinaryVChannelStreams(t *testing.T) 
 	_, err = result.Stream.Recv()
 	require.ErrorIs(t, err, io.EOF)
 
-	streaming := false
-	request.EnableReduceStream = &streaming
+	request.AllowStreaming = false
 	batch, err := client.Legacy().Query(t.Context(), request)
 	require.NoError(t, err)
 	require.Nil(t, batch.Stream)
@@ -507,7 +505,7 @@ func TestLegacyClientElementFilterQueryStreamingParity(t *testing.T) {
 			left.ElementIndices = []*internalpb.ElementIndices{{Indices: []int32{0, 2, 4}}, {Indices: []int32{1}}}
 			right.ElementIndices = []*internalpb.ElementIndices{{Indices: []int32{1, 3}}, {Indices: []int32{0}}}
 			client := NewLegacyViewQueryClient(
-				ViewQueryClientConfig{MaxRetries: 1, EnableReduceStream: streaming, ReduceStreamChunkBytes: 1},
+				ViewQueryClientConfig{MaxRetries: 1},
 				&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
 					shardA.VChannel: legacyQueryPlan(shardA, qviews.NewQueryNode(11)),
 					shardB.VChannel: legacyQueryPlan(shardB, qviews.NewQueryNode(12)),
@@ -518,7 +516,7 @@ func TestLegacyClientElementFilterQueryStreamingParity(t *testing.T) {
 			request := &internalpb.RetrieveRequest{CollectionID: 100, Limit: 4, IsIterator: iterator, SerializedExprPlan: planBytes}
 			require.True(t, SupportsQueryStream(request))
 			result, err := client.Legacy().Query(context.Background(), &LegacyQueryRequest{
-				Req: request, Schema: schema, AllowStreaming: SupportsQueryStream(request),
+				Req: request, Schema: schema, AllowStreaming: streaming && SupportsQueryStream(request), ReduceStreamChunkBytes: 1,
 			})
 			require.NoError(t, err)
 			results := result.Results
@@ -574,7 +572,7 @@ func TestLegacyClientQueryReducesGroupedVChannelStreams(t *testing.T) {
 	}
 
 	client := NewLegacyViewQueryClient(
-		ViewQueryClientConfig{MaxRetries: 1, EnableReduceStream: true, ReduceStreamChunkBytes: 1 << 20},
+		ViewQueryClientConfig{MaxRetries: 1},
 		&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
 			shardA.VChannel: legacyQueryPlan(shardA, queryNode),
 			shardB.VChannel: legacyQueryPlan(shardB, queryNode),
@@ -591,8 +589,8 @@ func TestLegacyClientQueryReducesGroupedVChannelStreams(t *testing.T) {
 	}}
 
 	result, err := client.Legacy().Query(context.Background(), &LegacyQueryRequest{
-		AllowStreaming: true,
-		Schema:         schema,
+		AllowStreaming: true, ReduceStreamChunkBytes: 1 << 20,
+		Schema: schema,
 		Req: &internalpb.RetrieveRequest{
 			CollectionID:    100,
 			GroupByFieldIds: []int64{100},
