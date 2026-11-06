@@ -2348,6 +2348,7 @@ func TestGenSnapshot_RejectsSegmentWithoutChannelSeekPosition(t *testing.T) {
 }
 
 func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
+	indexType := "HNSW_SQ"
 	handler := &ServerHandler{
 		s: &Server{
 			meta: &meta{
@@ -2364,6 +2365,7 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 				PartitionID:           20,
 				SegmentID:             segmentID,
 				IndexID:               10,
+				IndexType:             indexType,
 				BuildID:               30,
 				IndexVersion:          40,
 				IndexState:            commonpb.IndexState_Finished,
@@ -2380,7 +2382,9 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 	mockIndexName := mockey.Mock((*indexMeta).GetIndexNameByID).Return("vec_idx").Build()
 	defer mockIndexName.UnPatch()
 
-	mockIndexParams := mockey.Mock((*indexMeta).GetIndexParams).Return(nil).Build()
+	mockIndexParams := mockey.Mock((*indexMeta).GetIndexParams).To(func(*indexMeta, UniqueID, UniqueID) []*commonpb.KeyValuePair {
+		return []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}}
+	}).Build()
 	defer mockIndexParams.UnPatch()
 
 	mockTypeParams := mockey.Mock((*indexMeta).GetTypeParams).Return(nil).Build()
@@ -2391,6 +2395,15 @@ func TestUncompressIndexFilesPreservesIndexStorePathVersion(t *testing.T) {
 	require.Len(t, indexFiles, 1)
 	assert.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED, indexFiles[0].GetIndexStorePathVersion())
 	assert.Equal(t, []string{"files/index_v1/1/20/2/30/40/index_data"}, indexFiles[0].GetIndexFilePaths())
+	assert.Equal(t, "HNSW_SQ", indexFiles[0].GetIndexType())
+	assert.Equal(t, "vec_idx", indexFiles[0].GetIndexName())
+	assert.Equal(t, "HNSW_SQ", GetIndexType(indexFiles[0].GetIndexParams()))
+
+	indexType = ""
+	indexFiles = uncompressIndexFiles(handler, 1, 2)
+	require.Len(t, indexFiles, 1)
+	assert.Empty(t, indexFiles[0].GetIndexType())
+	assert.Equal(t, "HNSW", GetIndexType(indexFiles[0].GetIndexParams()))
 }
 
 func TestUncompressJsonStatsForSnapshotPaths(t *testing.T) {

@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -109,6 +110,65 @@ func TestDDLCallbacksAlterCollectionAddStructField(t *testing.T) {
 		Schema:         getFieldSchema("profile"),
 	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+}
+
+func TestDDLCallbacksAlterCollectionAddStructFieldRejectsTextMatch(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+	ctx := context.Background()
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testCollection" + funcutil.RandomString(10)
+	createCollectionForTest(t, ctx, core, dbName, collectionName)
+
+	for _, key := range []string{common.EnableMatchKey, common.EnableAnalyzerKey} {
+		structField := newRootAddStructFieldSchema("profile")
+		structField.Fields[0].ElementType = schemapb.DataType_VarChar
+		structField.Fields[0].TypeParams = append(structField.Fields[0].TypeParams,
+			&commonpb.KeyValuePair{Key: common.MaxLengthKey, Value: "16"},
+			&commonpb.KeyValuePair{Key: key, Value: "true"})
+		resp, err := core.AddCollectionStructField(ctx, &milvuspb.AddCollectionStructFieldRequest{
+			DbName: dbName, CollectionName: collectionName, StructArrayFieldSchema: structField,
+		})
+		err = merr.CheckRPCCall(resp, err)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, key+" is not supported on struct sub-field profile[ints]")
+	}
+}
+
+func TestDDLCallbacksExternalCollectionRejectsAddStructField(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+	ctx := context.Background()
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testExternal" + funcutil.RandomString(10)
+
+	resp, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{DbName: dbName})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+	schema := &schemapb.CollectionSchema{
+		Name: collectionName,
+		Fields: []*schemapb.FieldSchema{{
+			Name: "field1", DataType: schemapb.DataType_Int64, ExternalField: "field1",
+		}},
+		ExternalSource: "s3://bucket/path/",
+		ExternalSpec:   `{"format":"parquet","extfs":{"anonymous":"true","region":"us-east-1","cloud_provider":"aws"}}`,
+	}
+	schemaBytes, err := proto.Marshal(schema)
+	require.NoError(t, err)
+	resp, err = core.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		DbName: dbName, CollectionName: collectionName, Schema: schemaBytes,
+		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+
+	structField := newRootAddStructFieldSchema("profile")
+	structField.Fields[0].ElementNullable = true
+	resp, err = core.AddCollectionStructField(ctx, &milvuspb.AddCollectionStructFieldRequest{
+		DbName: dbName, CollectionName: collectionName, StructArrayFieldSchema: structField,
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+	require.Contains(t, resp.GetReason(), "does not support struct fields")
+
+	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+	require.NoError(t, err)
+	require.Empty(t, coll.StructArrayFields)
 }
 
 func getUserFields(fields []*model.Field) []*model.Field {

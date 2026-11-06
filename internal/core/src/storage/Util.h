@@ -96,6 +96,9 @@ std::shared_ptr<arrow::ArrayBuilder>
 CreateArrowBuilder(DataType data_type);
 
 std::shared_ptr<arrow::ArrayBuilder>
+CreateArrowBuilder(const FieldMeta& field_meta);
+
+std::shared_ptr<arrow::ArrayBuilder>
 CreateArrowBuilder(DataType data_type,
                    DataType element_type,
                    int dim,
@@ -116,6 +119,9 @@ CreateArrowScalarFromDefaultValue(const FieldMeta& field_meta);
 
 std::shared_ptr<arrow::Schema>
 CreateArrowSchema(DataType data_type, bool nullable);
+
+std::shared_ptr<arrow::Schema>
+CreateArrowSchema(const FieldMeta& field_meta);
 
 std::shared_ptr<arrow::Schema>
 CreateArrowSchema(DataType data_type, int dim, bool nullable);
@@ -497,6 +503,14 @@ GetFieldIDList(FieldId column_group_id,
                const std::string& filepath,
                const std::shared_ptr<arrow::Schema>& arrow_schema,
                milvus_storage::ArrowFileSystemPtr fs);
+
+// Returns the PARQUET:field_id of every column stored in a packed file, in
+// column order, reading only the file footer. Throws a SegcoreError carrying
+// the storage error code on a failed read, and DataFormatBroken when a column
+// has no valid field id.
+std::vector<int64_t>
+GetPackedFileColumnFieldIDs(const milvus_storage::ArrowFileSystemPtr& fs,
+                            const std::string& filepath);
 
 // Convert a single row of an Arrow ListArray to a protobuf ScalarField.
 // The element type is inferred from the ListArray's value type.

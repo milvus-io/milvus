@@ -63,17 +63,19 @@ var _ globalTask.Task = (*indexBuildTask)(nil)
 var errVectorArrayFieldBinlogNotFound = errors.New("vector array field binlog not found")
 
 func fieldSchemaForIndexBuild(schema *schemapb.CollectionSchema, field *schemapb.FieldSchema) *schemapb.FieldSchema {
-	if field == nil || field.GetNullable() {
+	if field == nil {
 		return field
 	}
 	for _, structField := range schema.GetStructArrayFields() {
-		if !structField.GetNullable() {
-			continue
-		}
 		for _, subField := range structField.GetFields() {
 			if subField.GetFieldID() == field.GetFieldID() {
+				if field.GetNullable() == structField.GetNullable() {
+					return field
+				}
+				// A struct sub-field shares its parent's row validity, including
+				// when the parent is non-nullable.
 				buildField := proto.Clone(field).(*schemapb.FieldSchema)
-				buildField.Nullable = true
+				buildField.Nullable = structField.GetNullable()
 				return buildField
 			}
 		}
@@ -218,7 +220,14 @@ func (it *indexBuildTask) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 					}
 					isVectorArrayIndex = typeutil.IsVectorArrayType(f.GetDataType())
 					isEmbeddingListIndex = isVectorArrayIndex && isEmbeddingListMetric(indexParams)
-					if isVectorArrayIndex {
+					validElements, exact := exactVectorArrayValidElementCount(segment, f)
+					if exact {
+						estimatedVectorArrayVectors = validElements
+						log.Info(ctx, "vector array valid element count from segment statistics",
+							mlog.Int64("fieldID", f.GetFieldID()),
+							mlog.Int64("validElements", validElements))
+					}
+					if isVectorArrayIndex && !exact {
 						estimate, err := estimateVectorArrayElementCountForIndexBuild(segment.SegmentInfo, collectionInfo.Schema, f)
 						if err != nil {
 							failReason := "failed to estimate vector array element count, count is unknown: " + err.Error()
@@ -344,6 +353,19 @@ func isEmbeddingListMetric(indexParams []*commonpb.KeyValuePair) bool {
 	}
 }
 
+// exactVectorArrayValidElementCount returns the valid element count of an
+// element-nullable VectorArray field recorded in the segment Statistics. The
+// byte-size estimate counts the offset/validity overhead of null elements as
+// vectors, so the recorded count replaces it whenever it exists. Segments
+// written before the count was recorded have no entry and keep the estimate.
+func exactVectorArrayValidElementCount(segment *SegmentInfo, field *schemapb.FieldSchema) (int64, bool) {
+	if segment == nil || !typeutil.IsVectorArrayType(field.GetDataType()) || !field.GetElementNullable() {
+		return 0, false
+	}
+	count, ok := segment.EnsureStats().GetValidElementCounts()[field.GetFieldID()]
+	return count, ok
+}
+
 type vectorArrayElementCountEstimate struct {
 	vectorCount        int64
 	emptyOnStaleSchema bool
@@ -360,9 +382,8 @@ func estimateVectorArrayElementCountForIndexBuild(segment *datapb.SegmentInfo, s
 		return vectorArrayElementCountEstimate{vectorCount: count}, nil
 	}
 	if isMissingVectorArrayFieldOnStaleSchema(err, segment, schema, field) {
-		// A nullable field added after this segment was written has no binlog in the
-		// stale segment. For index build purposes it contributes zero vectors and
-		// should be fake-finished by the threshold check below.
+		// An added sub-field has no binlog in an older segment even when its
+		// parent struct is non-nullable. It contributes zero indexed vectors.
 		return vectorArrayElementCountEstimate{emptyOnStaleSchema: true}, nil
 	}
 	if errors.Is(err, errVectorArrayFieldBinlogNotFound) && segment.GetManifestPath() != "" {
@@ -419,12 +440,22 @@ func estimateVectorArrayElementCount(segment *datapb.SegmentInfo, field *schemap
 }
 
 func isMissingVectorArrayFieldOnStaleSchema(err error, segment *datapb.SegmentInfo, schema *schemapb.CollectionSchema, field *schemapb.FieldSchema) bool {
-	return errors.Is(err, errVectorArrayFieldBinlogNotFound) &&
-		segment != nil &&
-		schema != nil &&
-		field != nil &&
-		field.GetNullable() &&
-		segment.GetSchemaVersion() < schema.GetVersion()
+	if !errors.Is(err, errVectorArrayFieldBinlogNotFound) || segment == nil || schema == nil || field == nil || segment.GetSchemaVersion() >= schema.GetVersion() {
+		return false
+	}
+	for _, structField := range schema.GetStructArrayFields() {
+		for _, subField := range structField.GetFields() {
+			if subField.GetFieldID() == field.GetFieldID() {
+				// Two schema changes leave an old segment without this child's
+				// binlog: adding the child to an existing struct (the child is
+				// element-nullable) and adding the whole nullable struct with
+				// AddCollectionStructField (its old rows are null struct rows,
+				// whatever the child's element_nullable).
+				return structField.GetNullable() || subField.GetElementNullable()
+			}
+		}
+	}
+	return field.GetNullable()
 }
 
 func fieldBinlogContainsField(fieldBinlog *datapb.FieldBinlog, fieldID int64) bool {

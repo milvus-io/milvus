@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"time"
 
 	"github.com/cockroachdb/errors"
 
@@ -27,6 +28,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // This file implements the meta-layer of SegmentChangeGroup, the atomic
@@ -393,6 +396,32 @@ func (m *meta) HasStagedSegment(ctx context.Context, collectionID, segmentID int
 	}
 	group := m.segmentChangeGroups[groupID]
 	return group != nil && (collectionID <= 0 || group.CollectionID == collectionID)
+}
+
+// aliveStagedMembers returns the set of segments currently staged by an ALIVE
+// (STAGED/READY) group of collectionID (collectionID <= 0 returns members of
+// every collection). The legacy view paths use it to exclude staged members
+// from every read surface — including ones that do not filter IsInvisible
+// (e.g. getEarliestSegmentDMLPos, design R10) — without per-segment locking.
+// Staged members are invisible by construction, but a view that only filters
+// IsImporting would otherwise leak their DML position / partition into the
+// read set.
+func (m *meta) aliveStagedMembers(ctx context.Context, collectionID int64) typeutil.UniqueSet {
+	m.segMu.RLock()
+	defer m.segMu.RUnlock()
+	members := typeutil.NewUniqueSet()
+	for _, g := range m.segmentChangeGroups {
+		if collectionID > 0 && g.CollectionID != collectionID {
+			continue
+		}
+		if g.State != model.SegmentChangeStateStaged && g.State != model.SegmentChangeStateReady {
+			continue
+		}
+		for _, id := range g.NewSegmentIDs {
+			members.Insert(id)
+		}
+	}
+	return members
 }
 
 // GetSegmentChangeGroupByReferencedSegment returns the ALIVE group that
@@ -813,7 +842,13 @@ func (m *meta) UpdateSegmentsInfoAndChangeGroups(ctx context.Context, groupActio
 		actions = append(actions, action)
 	}
 
-	if err := m.catalog.Update(ctx, actions...); err != nil {
+	// Retry the same idempotent catalog actions until they are durably applied
+	// or the caller cancels. An explicit predicate also retries InputError-typed
+	// failures, matching the atomic publication contract on master.
+	if err := retry.Do(ctx, func() error {
+		return m.catalog.Update(ctx, actions...)
+	}, retry.AttemptAlways(), retry.MaxSleepTime(10*time.Second),
+		retry.RetryErr(func(error) bool { return true })); err != nil {
 		mlog.Error(ctx, "meta update: update segments info and segment change groups failed",
 			mlog.Int("segments", len(updatePack.segments)),
 			mlog.Int("groupActions", len(groupActions)),

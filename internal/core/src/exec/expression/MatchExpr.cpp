@@ -38,10 +38,9 @@ using MatchType = milvus::expr::MatchType;
 // Returns true if the row matches the condition
 //
 // Word-wise implementation: the row's element bits are consumed in 64-bit
-// chunks (bitmap word width) instead of bit by bit. Invalid elements are
-// masked out with the valid bitmap, which preserves the per-bit semantics:
-// only valid elements are counted, and MatchAll requires every *valid*
-// element to match (vacuously true when the row has no valid elements).
+// chunks (bitmap word width) instead of bit by bit. An UNKNOWN element (valid
+// bit 0) counts as a miss: it adds no hit, and MatchAll requires every element
+// to be a hit (vacuously true for an empty row).
 template <MatchType match_type, bool all_valid>
 bool
 MatchSingleRow(int64_t bitset_start,
@@ -59,26 +58,17 @@ MatchSingleRow(int64_t bitset_start,
             static_cast<size_t>(std::min(kWordBits, row_elem_count - done));
         const size_t pos = static_cast<size_t>(bitset_start + done);
         word_t m = match_bitset.read(pos, n);
-        if constexpr (all_valid) {
-            if constexpr (match_type == MatchType::MatchAll) {
-                const word_t full = (n == static_cast<size_t>(kWordBits))
-                                        ? ~word_t(0)
-                                        : ((word_t(1) << n) - 1);
-                if (m != full) {
-                    return false;
-                }
-                continue;
+        if constexpr (!all_valid) {
+            m &= valid_bitset.read(pos, n);
+        }
+        if constexpr (match_type == MatchType::MatchAll) {
+            const word_t full = (n == static_cast<size_t>(kWordBits))
+                                    ? ~word_t(0)
+                                    : ((word_t(1) << n) - 1);
+            if (m != full) {
+                return false;
             }
-        } else {
-            const word_t v = valid_bitset.read(pos, n);
-            m &= v;
-            if constexpr (match_type == MatchType::MatchAll) {
-                // Some valid element unmatched?
-                if (m != v) {
-                    return false;
-                }
-                continue;
-            }
+            continue;
         }
         if constexpr (match_type == MatchType::MatchAny) {
             if (m != 0) {
@@ -102,7 +92,7 @@ MatchSingleRow(int64_t bitset_start,
     if constexpr (match_type == MatchType::MatchAny) {
         return false;
     } else if constexpr (match_type == MatchType::MatchAll) {
-        // Every (valid) element matched; empty array returns true
+        // Every element matched; empty array returns true
         // (vacuous truth).
         return true;
     } else if constexpr (match_type == MatchType::MatchLeast) {

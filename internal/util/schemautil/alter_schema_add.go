@@ -17,9 +17,15 @@
 package schemautil
 
 import (
+	"strconv"
+	"strings"
+
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -30,12 +36,16 @@ const (
 	AlterSchemaAddField AlterSchemaAddKind = iota + 1
 	AlterSchemaAddFunction
 	AlterSchemaAddFunctionField
+	AlterSchemaAddStructSubField
 )
 
 type AlterSchemaAddPlan struct {
 	Kind     AlterSchemaAddKind
 	Field    *schemapb.FieldSchema
 	Function *schemapb.FunctionSchema
+	// StructPath is the parent struct s of a struct sub-field add, parsed
+	// from the field name s[b]; Field keeps the full name s[b].
+	StructPath string
 	// Index meta bound to the newly added field, parsed from
 	// FieldInfo.index_name/extra_params. A vector-type function output field
 	// always materializes a bound index so that bump-schema-version compaction
@@ -51,6 +61,11 @@ func (p *AlterSchemaAddPlan) HasField() bool {
 
 func (p *AlterSchemaAddPlan) HasFunction() bool {
 	return p != nil && p.Function != nil
+}
+
+// SubFieldName returns b of a struct sub-field add whose field name is s[b].
+func (p *AlterSchemaAddPlan) SubFieldName() string {
+	return strings.TrimSuffix(strings.TrimPrefix(p.Field.GetName(), p.StructPath+"["), "]")
 }
 
 func ParseAlterSchemaAddRequest(addRequest *milvuspb.AlterCollectionSchemaRequest_AddRequest) (*AlterSchemaAddPlan, error) {
@@ -70,6 +85,7 @@ func ParseAlterSchemaAddRequest(addRequest *milvuspb.AlterCollectionSchemaReques
 	var field *schemapb.FieldSchema
 	var indexName string
 	var indexExtraParams []*commonpb.KeyValuePair
+	var structPath string
 	if len(fieldInfos) == 1 {
 		fieldInfo := fieldInfos[0]
 		if fieldInfo == nil || fieldInfo.GetFieldSchema() == nil {
@@ -78,14 +94,26 @@ func ParseAlterSchemaAddRequest(addRequest *milvuspb.AlterCollectionSchemaReques
 		field = fieldInfo.GetFieldSchema()
 		indexName = fieldInfo.GetIndexName()
 		indexExtraParams = fieldInfo.GetExtraParams()
+		var err error
+		if structPath, err = ParseStructSubFieldName(field.GetName()); err != nil {
+			return nil, err
+		}
 	}
-
 	var function *schemapb.FunctionSchema
 	if len(funcSchemas) == 1 {
 		function = funcSchemas[0]
 		if function == nil {
 			return nil, merr.WrapErrParameterInvalidMsg("function schema is nil")
 		}
+	}
+	if structPath != "" {
+		if function != nil {
+			return nil, merr.WrapErrParameterInvalidMsg("adding a struct sub-field cannot be combined with a function")
+		}
+		if indexName != "" || len(indexExtraParams) != 0 {
+			return nil, merr.WrapErrParameterInvalidMsg("binding an index while adding a struct sub-field is not supported yet")
+		}
+		return &AlterSchemaAddPlan{Kind: AlterSchemaAddStructSubField, Field: field, StructPath: structPath}, nil
 	}
 
 	switch {
@@ -104,6 +132,44 @@ func ParseAlterSchemaAddRequest(addRequest *milvuspb.AlterCollectionSchemaReques
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg("fieldInfos and function schema are both empty")
 	}
+}
+
+// ParseStructSubFieldName parses the name of a field to add. A name s[b] adds
+// sub-field b to struct s and returns s; a name without brackets adds a
+// top-level field and returns "". Only one level is supported in this release.
+func ParseStructSubFieldName(name string) (string, error) {
+	open := strings.IndexByte(name, '[')
+	if open < 0 {
+		if strings.IndexByte(name, ']') >= 0 {
+			return "", invalidStructSubFieldName(name)
+		}
+		return "", nil
+	}
+	structName, rest := name[:open], name[open:]
+	segments := 0
+	for rest != "" {
+		end := strings.IndexByte(rest, ']')
+		if rest[0] != '[' || end < 0 {
+			return "", invalidStructSubFieldName(name)
+		}
+		segment := rest[1:end]
+		if segment == "" || strings.IndexByte(segment, '[') >= 0 {
+			return "", invalidStructSubFieldName(name)
+		}
+		segments++
+		rest = rest[end+1:]
+	}
+	if structName == "" {
+		return "", invalidStructSubFieldName(name)
+	}
+	if segments > 1 {
+		return "", merr.WrapErrParameterInvalidMsg("nested struct is not supported: field name %q must be struct_name[sub_field_name]", name)
+	}
+	return structName, nil
+}
+
+func invalidStructSubFieldName(name string) error {
+	return merr.WrapErrParameterInvalidMsg("invalid struct sub-field name %q: must be struct_name[sub_field_name]", name)
 }
 
 func ValidateAlterSchemaAddFunctionPlan(plan *AlterSchemaAddPlan) error {
@@ -183,6 +249,106 @@ func CheckNoFunctionCascade(existingFunctions []*schemapb.FunctionSchema, newFun
 			return merr.WrapErrParameterInvalidMsg(
 				"function %s input field %s is the output of another function; function cascade is not supported",
 				newFunction.GetName(), input)
+		}
+	}
+	return nil
+}
+
+// subFieldMaxCapacityParams returns the type params holding a struct
+// sub-field's max_capacity: the root of type_schema for a nested Array, the
+// field's own type params otherwise.
+func subFieldMaxCapacityParams(field *schemapb.FieldSchema) []*commonpb.KeyValuePair {
+	if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+		return field.GetTypeSchema().GetTypeParams()
+	}
+	return field.GetTypeParams()
+}
+
+// FillAddedStructSubFieldMaxCapacity sets max_capacity on a sub-field being
+// added to parent. All sub-fields of a struct share one max_capacity, so the
+// value comes from the existing sub-fields. A value given in the request must
+// equal it. A nested Array may also mirror it in its own type params.
+func FillAddedStructSubFieldMaxCapacity(parent *schemapb.StructArrayFieldSchema, field *schemapb.FieldSchema) error {
+	var structCapacity string
+	for _, sibling := range parent.GetFields() {
+		if value, ok := common.GetStringValue(subFieldMaxCapacityParams(sibling), common.MaxCapacityKey); ok {
+			structCapacity = value
+			break
+		}
+	}
+	if structCapacity == "" {
+		return nil
+	}
+
+	given := [][]*commonpb.KeyValuePair{subFieldMaxCapacityParams(field)}
+	if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+		given = append(given, field.GetTypeParams())
+	}
+	for _, params := range given {
+		value, ok := common.GetStringValue(params, common.MaxCapacityKey)
+		if ok && !sameCapacity(value, structCapacity) {
+			return merr.WrapErrParameterInvalidMsg(
+				"max_capacity of added sub-field %s is %s, but struct field %s uses %s; omit it to use the struct's value",
+				field.GetName(), value, parent.GetName(), structCapacity)
+		}
+	}
+
+	if _, ok := common.GetStringValue(subFieldMaxCapacityParams(field), common.MaxCapacityKey); ok {
+		return nil
+	}
+	param := &commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: structCapacity}
+	if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+		field.TypeSchema.TypeParams = append(field.TypeSchema.TypeParams, param)
+	} else {
+		field.TypeParams = append(field.TypeParams, param)
+	}
+	return nil
+}
+
+func sameCapacity(a, b string) bool {
+	x, errA := strconv.ParseInt(a, 10, 64)
+	y, errB := strconv.ParseInt(b, 10, 64)
+	if errA != nil || errB != nil {
+		return a == b
+	}
+	return x == y
+}
+
+// StructFieldAlterableKeys lists the properties alter_collection_field accepts
+// on a struct field or a struct sub-field. max_capacity is shared by all
+// sub-fields of a struct, and sub-fields get no text index, so max_capacity,
+// max_length and the analyzer params are not alterable there. The
+// warmup.scalarField-style keys are only read from collection properties, so
+// a field only takes warmup.
+var StructFieldAlterableKeys = []string{
+	common.MmapEnabledKey,
+	common.FieldDescriptionKey,
+	common.WarmupKey,
+}
+
+// StructAlterTarget reports whether name is a struct field or a struct
+// sub-field of schema, as "struct field" or "struct sub-field". It returns ""
+// for anything else.
+func StructAlterTarget(schema *schemapb.CollectionSchema, name string) string {
+	for _, structField := range schema.GetStructArrayFields() {
+		if structField.GetName() == name {
+			return "struct field"
+		}
+		for _, sub := range structField.GetFields() {
+			if sub.GetName() == name {
+				return "struct sub-field"
+			}
+		}
+	}
+	return ""
+}
+
+// ValidateStructFieldAlterKeys rejects properties that alter_collection_field
+// cannot change on a struct field or a struct sub-field.
+func ValidateStructFieldAlterKeys(target, name string, keys []string) error {
+	for _, key := range keys {
+		if !lo.Contains(StructFieldAlterableKeys, key) {
+			return merr.WrapErrParameterInvalidMsg("%s can not be altered on %s %s", key, target, name)
 		}
 	}
 	return nil

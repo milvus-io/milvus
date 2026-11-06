@@ -966,6 +966,50 @@ func createTestCopyTask(collectionID int64, segmentID int64) CopySegmentTask {
 	return task
 }
 
+func TestCopiedSegmentIndexType(t *testing.T) {
+	for _, indexType := range []string{"HNSW_SQ", ""} {
+		t.Run("index_type="+indexType, func(t *testing.T) {
+			ctx := context.Background()
+			catalog := kvdatacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+			im := createTestIndexMeta(t, 1, map[int64]*model.Index{
+				300: {
+					CollectionID: 1,
+					FieldID:      101,
+					IndexID:      300,
+					IndexName:    "custom_vector",
+					IndexParams:  []*commonpb.KeyValuePair{{Key: "index_type", Value: "HNSW"}},
+				},
+			}, catalog)
+			m := &meta{indexMeta: im}
+			result := &datapb.CopySegmentResult{
+				SegmentId:    100,
+				ImportedRows: 4096,
+				IndexInfos: map[int64]*datapb.VectorScalarIndexInfo{
+					5001: {
+						FieldId:        101,
+						IndexId:        200,
+						BuildId:        5001,
+						IndexName:      "custom_vector",
+						IndexType:      indexType,
+						IndexFilePaths: []string{"index.bin"},
+					},
+				},
+			}
+			require.NoError(t, syncVectorScalarIndexes(ctx, result, createTestCopyTask(1, 100), m, nil))
+			restored, ok := im.GetIndexJob(5001)
+			require.True(t, ok)
+			assert.Equal(t, indexType, restored.IndexType)
+			assert.Equal(t, int64(300), restored.IndexID)
+
+			// Read the serialized metadata through the real catalog, as on restart.
+			persisted, err := catalog.ListSegmentIndexes(ctx, 1)
+			require.NoError(t, err)
+			require.Len(t, persisted, 1)
+			assert.Equal(t, indexType, persisted[0].IndexType)
+		})
+	}
+}
+
 func newTestCopyJob(jobID int64, state datapb.CopySegmentJobState) CopySegmentJob {
 	return &copySegmentJob{
 		CopySegmentJob: &datapb.CopySegmentJob{

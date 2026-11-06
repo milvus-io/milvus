@@ -167,6 +167,7 @@ func TestSingleFieldRecordWriterMemoryExpansionRatio(t *testing.T) {
 		name          string
 		field         *schemapb.FieldSchema
 		expectedRatio int
+		wantErr       bool
 	}{
 		{
 			name: "legacy int32 array",
@@ -185,7 +186,7 @@ func TestSingleFieldRecordWriterMemoryExpansionRatio(t *testing.T) {
 				ElementType: schemapb.DataType_Array,
 				TypeSchema:  array(array(leaf(schemapb.DataType_Int32))),
 			},
-			expectedRatio: 4,
+			expectedRatio: 1,
 		},
 		{
 			name: "deeply nested int64 array",
@@ -197,7 +198,7 @@ func TestSingleFieldRecordWriterMemoryExpansionRatio(t *testing.T) {
 					leaf(schemapb.DataType_Int64),
 				))),
 			},
-			expectedRatio: 8,
+			wantErr: true,
 		},
 		{
 			name: "nested float array",
@@ -215,6 +216,10 @@ func TestSingleFieldRecordWriterMemoryExpansionRatio(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			var buffer bytes.Buffer
 			writer, err := newSingleFieldRecordWriter(test.field, &buffer)
+			if test.wantErr {
+				require.Error(t, err)
+				return
+			}
 			require.NoError(t, err)
 			require.Equal(t, test.expectedRatio, writer.memoryExpansionRatio)
 			require.NoError(t, writer.Close())
@@ -339,7 +344,7 @@ func TestRecordToInsertDataBranches(t *testing.T) {
 			},
 		}
 		builder := array.NewBuilder(memory.DefaultAllocator,
-			serdeMap[schemapb.DataType_FloatVector].arrowType(2, schemapb.DataType_None, false))
+			serdeMap[schemapb.DataType_FloatVector].legacyArrowType(2, schemapb.DataType_None, false))
 		require.NoError(t, serdeMap[schemapb.DataType_FloatVector].serialize(
 			builder, []float32{1, 2}, schemapb.DataType_None, 0, false))
 		arr := builder.NewArray()
@@ -375,7 +380,7 @@ func TestRecordToInsertDataBranches(t *testing.T) {
 		}
 		entry := serdeMap[schemapb.DataType_ArrayOfVector]
 		builder := array.NewBuilder(memory.DefaultAllocator,
-			entry.arrowType(2, schemapb.DataType_FloatVector, false))
+			entry.legacyArrowType(2, schemapb.DataType_FloatVector, false))
 		require.NoError(t, entry.serialize(builder, &schemapb.VectorField{
 			Dim: 2,
 			Data: &schemapb.VectorField_FloatVector{
@@ -808,6 +813,12 @@ func TestPackedBinlogReadersUseSourceContext(t *testing.T) {
 			defer enabled.UnPatch()
 			cipher := mockey.Mock(hookutil.GetCipher).Return(fakeUnsafeKeyCipher{}).Build()
 			defer cipher.UnPatch()
+			probeFields := mockey.Mock(packed.GetPackedFileFieldIDs).To(
+				func(_ []string, _ *indexpb.StorageConfig, got *indexcgopb.StoragePluginContext) ([][]int64, error) {
+					require.Equal(t, tc.want, got)
+					return [][]int64{{100}}, nil
+				}).Build()
+			defer probeFields.UnPatch()
 			open := mockey.Mock(newPackedRecordReader).To(
 				func(_ []string, _ *schemapb.CollectionSchema, _ int64, _ *indexpb.StorageConfig,
 					got *indexcgopb.StoragePluginContext, _ packed.ExternalReaderContext, _ ...packed.ReaderOption,
@@ -826,6 +837,7 @@ func TestPackedBinlogReadersUseSourceContext(t *testing.T) {
 			defer reader.Close()
 			_, err = reader.Next()
 			require.ErrorIs(t, err, io.EOF)
+			require.Equal(t, 1, probeFields.Times())
 			require.Equal(t, 1, open.Times())
 			if len(tc.options) > 0 {
 				require.Zero(t, cipher.Times(), "resolved sources must not look up the target key")
@@ -983,12 +995,7 @@ func TestNewManifestRecordReaderPresentFieldsSkipManifestRead(t *testing.T) {
 	require.NotNil(t, reader)
 }
 
-// TestNewManifestRecordReaderPartialStructErrors pins that the struct-array
-// all-or-nothing check in filterSchemaToPresentFields surfaces through the reader:
-// a physically-present set that covers only SOME children of a struct array is a
-// data-integrity violation, so NewManifestRecordReader must return an error and
-// never open the manifest.
-func TestNewManifestRecordReaderPartialStructErrors(t *testing.T) {
+func TestNewManifestRecordReaderPartialStruct(t *testing.T) {
 	schema := &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64}},
 		StructArrayFields: []*schemapb.StructArrayFieldSchema{
@@ -1000,12 +1007,14 @@ func TestNewManifestRecordReaderPartialStructErrors(t *testing.T) {
 	}
 	mockEnc := mockey.Mock(hookutil.IsClusterEncryptionEnabled).Return(false).Build()
 	defer mockEnc.UnPatch()
-	// present covers only ONE of the struct's two children -> partial struct.
+	// The manifest has one of the struct's two children.
 	mockFieldIDs := mockey.Mock(packed.GetManifestFieldIDs).Return(map[int64]struct{}{100: {}, 201: {}}, nil).Build()
 	defer mockFieldIDs.UnPatch()
 	mockReader := mockey.Mock(NewRecordReaderFromManifest).To(
-		func(string, *schemapb.CollectionSchema, int64, *indexpb.StorageConfig, *indexcgopb.StoragePluginContext, ...RwOption) (RecordReader, error) {
-			t.Fatal("must not open the manifest when the present set is a partial struct")
+		func(_ string, readSchema *schemapb.CollectionSchema, _ int64, _ *indexpb.StorageConfig, _ *indexcgopb.StoragePluginContext, _ ...RwOption) (RecordReader, error) {
+			require.Len(t, readSchema.GetStructArrayFields(), 1)
+			require.Len(t, readSchema.GetStructArrayFields()[0].GetFields(), 1)
+			require.Equal(t, int64(201), readSchema.GetStructArrayFields()[0].GetFields()[0].GetFieldID())
 			return nil, nil
 		}).Build()
 	defer mockReader.UnPatch()
@@ -1014,7 +1023,7 @@ func TestNewManifestRecordReaderPartialStructErrors(t *testing.T) {
 		WithVersion(StorageV3),
 		WithStorageConfig(&indexpb.StorageConfig{RootPath: "root"}),
 	)
-	require.Error(t, err)
+	require.NoError(t, err)
 }
 
 func TestBinlogSerializeWriter(t *testing.T) {

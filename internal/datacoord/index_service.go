@@ -1293,6 +1293,7 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 							IndexID:                   segIdx.IndexID,
 							BuildID:                   segIdx.BuildID,
 							IndexName:                 indexName,
+							IndexType:                 segIdx.IndexType,
 							IndexParams:               indexParams,
 							IndexFilePaths:            indexFilePaths,
 							SerializedSize:            segIdx.IndexSerializedSize,
