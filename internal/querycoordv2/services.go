@@ -685,8 +685,8 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 		dstNodeSet.Insert(replica.GetRWNodes()...)
 	} else {
 		for _, dstNode := range req.GetDstNodeIDs() {
-			if !replica.Contains(dstNode) {
-				err := merr.WrapErrNodeNotFound(dstNode, "destination node not found in the same replica")
+			if !replica.ContainRWNode(dstNode) {
+				err := merr.WrapErrNodeNotFound(dstNode, "destination node not found in the same replica's read-write nodes")
 				mlog.Warn(context.TODO(), "failed to balance to the destination node", mlog.Err(err))
 				return merr.Status(err), nil
 			}
