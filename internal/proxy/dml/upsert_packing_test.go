@@ -174,20 +174,6 @@ func BenchmarkUpsertProxyPacking(b *testing.B) {
 	}
 }
 
-func TestUpsertPackingRejectsNamespaceBeforeRouting(t *testing.T) {
-	for _, enabled := range []bool{false, true} {
-		source, result := newIdempotentRepackInsertMsg(1)
-		schema := upsertPackingSchema()
-		schema.EnableNamespace = enabled
-		if !enabled {
-			namespace := "tenant"
-			source.Namespace = &namespace
-		}
-		_, err := repackUpsertMessages(context.Background(), NewMockCache(t), []string{"p_100v0"}, source, result.IDs, nil, schema, 1, nil, nil, nil, nil, 0)
-		require.ErrorContains(t, err, "namespace")
-	}
-}
-
 func TestUpsertPackingEncodingWork(t *testing.T) {
 	if os.Getenv("MILVUS_TEST_UPSERT_PACKING_WORK") == "" {
 		executable, err := os.Executable()
@@ -451,5 +437,40 @@ func TestUpsertPackingDeleteOccurrencesAcrossChunkBoundaries(t *testing.T) {
 		} else {
 			require.Equal(t, ints, gotInts)
 		}
+	}
+}
+
+func TestUpsertCASProofAcrossSizeChunks(t *testing.T) {
+	split := &paramtable.Get().ProxyCfg.SplitChunkProxy
+	previousSplit := split.SwapTempValue("true")
+	defer split.SwapTempValue(previousSplit)
+	limit := &paramtable.Get().PulsarCfg.MaxMessageSize
+	previousLimit := limit.SwapTempValue("131072")
+	defer limit.SwapTempValue(previousLimit)
+	proof := &messagespb.PartialUpdateCAS{ReadTs: 1, ObservedPchannelTerm: 2}
+	for _, kind := range []string{"valid", "missing", "nil"} {
+		t.Run(kind, func(t *testing.T) {
+			source, result := newIdempotentRepackInsertMsgWithPayload(256, strings.Repeat("x", 4096))
+			cache := NewMockCache(t)
+			cache.EXPECT().GetPartitionID(mock.Anything, "db", "coll", "_default").Return(int64(200), nil)
+			proofs := map[string]*messagespb.PartialUpdateCAS{}
+			switch kind {
+			case "valid":
+				proofs["p_100v0"] = proof
+			case "nil":
+				proofs["p_100v0"] = nil
+			}
+			msgs, err := repackUpsertMessages(t.Context(), cache, []string{"p_100v0"}, source, result.IDs, nil, upsertPackingSchema(), 1, nil, proofs, nil, nil, 0)
+			if kind != "valid" {
+				require.ErrorContains(t, err, "missing partial update CAS proof")
+				return
+			}
+			require.NoError(t, err)
+			require.Greater(t, len(msgs), 1)
+			for _, msg := range msgs {
+				require.True(t, message.HasPartialUpdateCAS(msg))
+				require.True(t, proto.Equal(proof, message.MustAsMutableUpsertMessageV2(msg).MustBody().GetPartialUpdateCas()))
+			}
+		})
 	}
 }

@@ -56,7 +56,10 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 	var err error
 	idempotency := it.idempotentInsertDecoration()
 	if paramtable.Get().StreamingCfg.EnableUpsertMessage.GetAsBool() {
-		msgs, err = repackUpsertMessages(ctx, it.GetMetaCache(), channelNames, it.insertMsg, it.result.GetIDs(), it.partitionKeys, it.schema, it.schemaVersion, ez, nil, idempotency, nil, 0)
+		err = validateUpsertNamespace(it.insertMsg.Namespace, it.schema)
+		if err == nil {
+			msgs, err = repackUpsertMessages(ctx, it.GetMetaCache(), channelNames, it.insertMsg, it.result.GetIDs(), it.partitionKeys, it.schema, it.schemaVersion, ez, nil, idempotency, nil, 0)
+		}
 	} else if it.partitionKeys == nil {
 		msgs, err = repackInsertDataForStreamingService(ctx, it.GetMetaCache(), channelNames, it.insertMsg, it.result, ez, it.schemaVersion, nil, idempotency)
 	} else {

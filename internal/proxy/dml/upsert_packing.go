@@ -33,15 +33,17 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// validateUpsertNamespace checks the namespace restrictions of the selected WAL format.
+func validateUpsertNamespace(namespace *string, schema *schemapb.CollectionSchema) error {
+	if namespace != nil {
+		return merr.WrapErrParameterInvalidMsg("Upsert WAL does not support namespace requests")
+	}
+	return message.ValidateUpsertSchema(schema)
+}
+
 // repackUpsertMessages groups only by VChannel and encoded size. Partition IDs
 // remain per-row placement, independent of explicit deletion scope.
 func repackUpsertMessages(ctx context.Context, cache Cache, channels []string, source *msgstream.InsertMsg, ids *schemapb.IDs, partitionKeys *schemapb.FieldData, schema *schemapb.CollectionSchema, version int32, cipher *message.CipherConfig, cas map[string]*messagespb.PartialUpdateCAS, idempotency *insertIdempotencyDecoration, deleted *schemapb.IDs, deletePartition int64) ([]message.MutableMessage, error) {
-	if source.Namespace != nil {
-		return nil, merr.WrapErrParameterInvalidMsg("Upsert WAL does not support namespace requests")
-	}
-	if err := message.ValidateUpsertSchema(schema); err != nil {
-		return nil, err
-	}
 	routing, err := assignChannelsByPK(ids, channels, source)
 	if err != nil {
 		return nil, err
@@ -105,12 +107,20 @@ func repackUpsertMessages(ctx context.Context, cache Cache, channels []string, s
 		if err != nil {
 			return nil, err
 		}
+		var proof *messagespb.PartialUpdateCAS
+		if cas != nil {
+			var ok bool
+			proof, ok = cas[channel]
+			if !ok || proof == nil {
+				return nil, merr.WrapErrServiceInternalMsg("missing partial update CAS proof")
+			}
+		}
 		fixedBytes := 0
 		bounded := paramtable.Get().ProxyCfg.SplitChunkProxy.GetAsBool() && paramtable.Get().PulsarCfg.MaxMessageSize.GetAsInt() > 0
 		if bounded {
 			// Build only a tiny envelope probe. No candidate column payload is encoded
 			// or encrypted. The reserve covers changing packed-length varints.
-			probeBody := &message.UpsertMessageBody{PartialUpdateCas: cas[channel]}
+			probeBody := &message.UpsertMessageBody{PartialUpdateCas: proof}
 			probeBuilder := message.NewUpsertMessageBuilderV2().WithVChannel(channel).WithHeader(&message.UpsertMessageHeader{CollectionId: source.GetCollectionID(), SchemaVersion: &version}).WithBody(probeBody).WithCipher(cipher).WithIdempotencyKey(idempotency.idempotencyKey())
 			if cas != nil {
 				probeBuilder.WithProperty("_puc", "")
@@ -188,13 +198,7 @@ func repackUpsertMessages(ctx context.Context, cache Cache, channels []string, s
 					body.PartitionIndexes[i] = index
 				}
 			}
-			if cas != nil {
-				proof, ok := cas[channel]
-				if !ok || proof == nil {
-					return nil, merr.WrapErrServiceInternalMsg("missing partial update CAS proof")
-				}
-				body.PartialUpdateCas = proof
-			}
+			body.PartialUpdateCas = proof
 			var deleteOffsets []int
 			if deleteRows != nil {
 				for _, row := range selected {

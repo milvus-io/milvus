@@ -1261,7 +1261,7 @@ func TestUpsertDeleteMessageCipher(t *testing.T) {
 						Base: &commonpb.MsgBase{}, DbName: "db", CollectionName: "upsert_cipher", PartitionName: "_default",
 						NumRows: 2, RowIDs: []int64{1, 2}, Timestamps: []uint64{12345, 12345}, FieldsData: []*schemapb.FieldData{field}, Version: msgpb.InsertDataVersion_ColumnBased,
 					}},
-					DeleteMsg: &msgstream.DeleteMsg{DeleteRequest: &msgpb.DeleteRequest{DbName: "db", CollectionName: "upsert_cipher", CollectionID: 10, PartitionID: 20, PartitionName: "_default"}},
+					DeleteMsg: &msgstream.DeleteMsg{DeleteRequest: &msgpb.DeleteRequest{DbName: "db", CollectionName: "upsert_cipher", CollectionID: 10, PartitionID: 20, PartitionName: "_default", PrimaryKeys: ids}},
 				},
 			}
 			task.SetTs(12345)
@@ -7503,25 +7503,100 @@ func TestUpsertLegacyPackingPreservesCAS(t *testing.T) {
 	}
 }
 
-func TestUpsertPreExecuteNamespaceFormatGate(t *testing.T) {
-	for _, enabled := range []string{"false", "true"} {
-		t.Run(enabled, func(t *testing.T) {
-			gate := &paramtable.Get().StreamingCfg.EnableUpsertMessage
-			previous := gate.SwapTempValue(enabled)
-			defer gate.SwapTempValue(previous)
-			cache := NewMockCache(t)
-			expectedError := merr.WrapErrCollectionNotFound("namespace_test")
-			if enabled == "false" {
-				cache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, "namespace_test").Return(int64(0), expectedError).Once()
-			}
-			namespace := "tenant"
-			err := (&UpsertTask{baseTask: baseTask{MetaCache: cache}, req: &milvuspb.UpsertRequest{CollectionName: "namespace_test", Namespace: &namespace}}).PreExecute(t.Context())
+func TestUpsertNamespaceUsesFinalFormat(t *testing.T) {
+	for _, kind := range []string{"request", "collection"} {
+		for _, mode := range []string{"false", "true"} {
+			t.Run(kind+"/"+mode, func(t *testing.T) {
+				gate := &paramtable.Get().StreamingCfg.EnableUpsertMessage
+				previous := gate.SwapTempValue("false")
+				defer gate.SwapTempValue(previous)
+				task := partialUpdateCASRealPackTestTask(t, []int64{10}, []int64{10}, nil)
+				namespace := "tenant"
+				if kind == "request" {
+					task.req.Namespace = &namespace
+				} else {
+					task.schema.CollectionSchema.EnableNamespace = true
+				}
+				reached := merr.WrapErrServiceUnavailable("legacy packing reached")
+				patch := mockey.Mock(repackInsertDataForStreamingService).Return(nil, reached).Build()
+				defer patch.UnPatch()
+				gate.SwapTempValue(mode)
+				_, err := task.packInsertMessage(t.Context(), nil)
+				if mode == "true" {
+					require.ErrorContains(t, err, "namespace")
+				} else {
+					require.ErrorIs(t, err, reached)
+				}
+			})
+		}
+	}
+}
 
-			if enabled == "true" {
-				require.ErrorContains(t, err, "Upsert WAL does not support namespace requests")
-			} else {
-				require.ErrorIs(t, err, expectedError)
-			}
-		})
+func TestUpsertFormatDecisionSurvivesGateChangeDuringValidation(t *testing.T) {
+	gate := &paramtable.Get().StreamingCfg.EnableUpsertMessage
+	previous := gate.SwapTempValue("true")
+	defer gate.SwapTempValue(previous)
+	task := partialUpdateCASRealPackTestTask(t, []int64{10}, []int64{10}, nil)
+	var original func(*string, *schemapb.CollectionSchema) error
+	check := mockey.Mock(validateUpsertNamespace).Origin(&original).To(func(namespace *string, schema *schemapb.CollectionSchema) error {
+		err := original(namespace, schema)
+		gate.SwapTempValue("false")
+		return err
+	}).Build()
+	defer check.UnPatch()
+	reached := merr.WrapErrServiceUnavailable("Upsert packing reached")
+	pack := mockey.Mock(repackUpsertMessages).Return(nil, reached).Build()
+	defer pack.UnPatch()
+	_, err := task.packInsertMessage(t.Context(), nil)
+	require.ErrorIs(t, err, reached)
+}
+
+func TestDeletePreExecuteOwnsPreparedKeys(t *testing.T) {
+	for _, mode := range []string{"false", "true"} {
+		for _, kind := range []string{"nil", "empty", "subset"} {
+			t.Run(mode+"/"+kind, func(t *testing.T) {
+				gate := &paramtable.Get().StreamingCfg.EnableUpsertMessage
+				previous := gate.SwapTempValue(mode)
+				defer gate.SwapTempValue(previous)
+				task := partialUpdateCASRealPackTestTask(t, []int64{10, 20}, []int64{10, 20}, []int64{10})
+				task.oldIDs = partialUpdateCASIDs([]int64{10, 20})
+				task.partitionKeyMode = true
+				var want []int64
+				switch kind {
+				case "nil":
+					task.upsertMsg.DeleteMsg.PrimaryKeys = nil
+					want = []int64{10, 20}
+				case "empty":
+					task.upsertMsg.DeleteMsg.PrimaryKeys = partialUpdateCASIDs(nil)
+				case "subset":
+					task.upsertMsg.DeleteMsg.PrimaryKeys = partialUpdateCASIDs([]int64{20})
+					want = []int64{20}
+				}
+				require.NoError(t, task.deletePreExecute(t.Context()))
+				prepared := task.upsertMsg.DeleteMsg.GetPrimaryKeys()
+				if kind == "nil" {
+					require.Same(t, task.oldIDs, prepared)
+				}
+				partition := mockey.Mock((*metacache.MetaCache).GetPartitionID).Return(int64(200), nil).Build()
+				defer partition.UnPatch()
+				alloc := mockey.Mock((*allocator.IDAllocator).Alloc).Return(int64(1000), int64(1001), nil).Build()
+				defer alloc.UnPatch()
+				msgs, err := task.packInsertMessage(t.Context(), nil)
+				require.NoError(t, err)
+				var deleted []int64
+				for _, msg := range msgs {
+					switch msg.MessageType() {
+					case streamingmessage.MessageTypeUpsert:
+						for _, effect := range streamingmessage.MustAsMutableUpsertMessageV2(msg).MustBody().GetDeleteEffects() {
+							deleted = append(deleted, effect.GetPrimaryKeys().GetIntId().GetData()...)
+						}
+					case streamingmessage.MessageTypeDelete:
+						deleted = append(deleted, streamingmessage.MustAsMutableDeleteMessageV1(msg).MustBody().GetPrimaryKeys().GetIntId().GetData()...)
+					}
+				}
+				require.Equal(t, want, deleted)
+				require.Same(t, prepared, task.upsertMsg.DeleteMsg.GetPrimaryKeys())
+			})
+		}
 	}
 }
