@@ -76,6 +76,7 @@
 #include "mmap/Types.h"
 #include "storage/loon_ffi/ffi_reader_c.h"
 #include "storage/loon_ffi/util.h"
+#include "storage/StatusToErrorCode.h"
 #include "milvus-storage/common/constants.h"
 #include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/ffi_c.h"
@@ -1644,15 +1645,24 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
     for (auto& column_group_file : remote_chunk_files) {
         // get all row groups for each file
         std::vector<std::vector<int64_t>> row_group_lists;
-        auto result = milvus_storage::FileRowGroupReader::Make(
-            fs,
-            column_group_file,
-            milvus_storage::DEFAULT_READ_BUFFER_SIZE,
-            GetReaderProperties(),
-            GetArrowReaderProperties());
-        AssertInfo(result.ok(),
-                   "[StorageV2] Failed to create file row group reader: " +
-                       result.status().ToString());
+        auto prepared_result = milvus_storage::PreparedParquetFile::Open(
+            fs, column_group_file, GetReaderProperties());
+        if (!prepared_result.ok()) {
+            ThrowInfo(ArrowStatusToErrorCode(prepared_result.status()),
+                      "[StorageV2] Failed to prepare file {}: {}",
+                      column_group_file,
+                      prepared_result.status().ToString());
+        }
+        auto prepared = std::move(prepared_result).ValueOrDie();
+        auto result =
+            prepared->MakeReader(nullptr,
+                                 milvus_storage::DEFAULT_READ_BUFFER_SIZE,
+                                 GetArrowReaderProperties());
+        if (!result.ok()) {
+            ThrowInfo(ArrowStatusToErrorCode(result.status()),
+                      "[StorageV2] Failed to create file row group reader: " +
+                          result.status().ToString());
+        }
         auto reader = result.ValueOrDie();
 
         auto row_group_num =
@@ -1673,7 +1683,7 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
         // split row groups for parallel reading
         auto strategy = std::make_unique<segcore::ParallelDegreeSplitStrategy>(
             parallel_degree);
-        auto load_future = pool.Submit([&]() {
+        auto load_future = pool.Submit([&, prepared]() {
             return LoadWithStrategy(std::vector<std::string>{column_group_file},
                                     field_data_info.arrow_reader_channel,
                                     DEFAULT_FIELD_MAX_MEMORY_LIMIT,
@@ -1681,7 +1691,8 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                                     row_group_lists,
                                     fs,
                                     nullptr,
-                                    milvus::proto::common::LoadPriority::HIGH);
+                                    milvus::proto::common::LoadPriority::HIGH,
+                                    {prepared});
         });
         // read field data from channel
         std::shared_ptr<milvus::ArrowDataWrapper> r;
