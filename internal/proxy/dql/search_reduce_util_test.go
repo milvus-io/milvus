@@ -2,8 +2,10 @@ package dql
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
@@ -11,8 +13,75 @@ import (
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestProxyScoreDistanceRestoration(t *testing.T) {
+	for _, metricType := range []string{"L2", "HAMMING", "JACCARD", "IP", "COSINE"} {
+		distance := metricType == "L2" || metricType == "HAMMING" || metricType == "JACCARD"
+		require.Equal(t, distance, shouldRestoreDistance(metricType, nil))
+		require.Equal(t, distance, shouldRestoreDistance(metricType, []bool{false}))
+		require.False(t, shouldRestoreDistance(metricType, []bool{true}))
+	}
+}
+
+func TestProxyScoreSemantics(t *testing.T) {
+	paramtable.Init()
+	for _, rewritten := range []bool{false, true} {
+		for _, inputOrder := range [][]int{{0}, {0, 1}, {1, 0}} {
+			for _, mode := range []string{"plain", "group", "hybrid_group"} {
+				t.Run(fmt.Sprintf("rewritten=%v/input_order=%v/%s", rewritten, inputOrder, mode), func(t *testing.T) {
+					inputs := make([]*schemapb.SearchResultData, len(inputOrder))
+					for index, source := range inputOrder {
+						inputs[index] = &schemapb.SearchResultData{
+							NumQueries: 1, TopK: 2, Topks: []int64{2},
+							Ids:                &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{int64(source + 1), int64(source + 3)}}}},
+							Scores:             []float32{-float32(source + 1), -float32(source + 3)},
+							GroupByFieldValues: []*schemapb.FieldData{multiGroupByTestStringField(101, []string{fmt.Sprint(source + 1), fmt.Sprint(source + 3)})},
+						}
+					}
+					info := reduce.NewReduceSearchResultInfo(1, 2).WithPkType(schemapb.DataType_Int64).
+						WithMetricType("L2")
+					if mode != "plain" {
+						info.WithGroupByFieldIds([]int64{101}).WithGroupSize(1).WithAdvance(mode == "hybrid_group")
+					}
+					result, err := reduceSearchResult(t.Context(), inputs, info, rewritten)
+					require.NoError(t, err)
+					expectedIDs := []int64{1, 3}
+					if len(inputOrder) == 2 {
+						if mode == "hybrid_group" {
+							expectedIDs = []int64{1, 2, 3, 4}
+						} else {
+							expectedIDs = []int64{1, 2}
+						}
+					}
+					ids := result.GetResults().GetIds().GetIntId().GetData()
+					if mode == "hybrid_group" {
+						require.ElementsMatch(t, expectedIDs, ids)
+					} else {
+						require.Equal(t, expectedIDs, ids)
+					}
+					expectedScores := make([]float32, len(expectedIDs))
+					expectedGroups := make([]string, len(expectedIDs))
+					for index, id := range ids {
+						expectedScores[index] = float32(id)
+						expectedGroups[index] = fmt.Sprint(id)
+						if rewritten {
+							expectedScores[index] = -expectedScores[index]
+						}
+					}
+					require.Equal(t, expectedScores, result.GetResults().GetScores())
+					require.Equal(t, []int64{int64(len(expectedIDs))}, result.GetResults().GetTopks())
+					if mode != "plain" {
+						require.Len(t, result.GetResults().GetGroupByFieldValues(), 1)
+						require.Equal(t, expectedGroups, result.GetResults().GetGroupByFieldValues()[0].GetScalars().GetStringData().GetData())
+					}
+				})
+			}
+		}
+	}
+}
 
 type SearchReduceUtilTestSuite struct {
 	suite.Suite

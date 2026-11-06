@@ -7,13 +7,26 @@ import pytest
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common.common_type import CaseLabel, CheckTasks
-from pymilvus import DataType, FunctionChain, FunctionChainStage
+from pymilvus import AnnSearchRequest, DataType, FunctionChain, FunctionChainStage, RRFRanker, WeightedRanker
 from pymilvus.exceptions import ParamError
 from pymilvus.function_chain import col, fn
 from pymilvus.function_chain.chain import FunctionChainExpr
 
 STAGES = [FunctionChainStage.L0_RERANK, FunctionChainStage.L1_RERANK, FunctionChainStage.L2_RERANK]
 MODES = ["sum", "multiply", "min", "max", "avg", "weighted"]
+
+L2_QUERIES = [[1.0, 0.0], [5.0, 0.0]]
+L0 = FunctionChainStage.L0_RERANK
+L1 = FunctionChainStage.L1_RERANK
+L2 = FunctionChainStage.L2_RERANK
+L2_SEARCH_CASES = [
+    ("none", 1),
+    ("aux", 1),
+    ("identity_l0", 1),
+    ("identity_l1", 1),
+    ("l2_reads_distance", 1),
+    *[(mode, sign) for mode in ("l0", "l1", "l2", "l0_l1", "all") for sign in (1, -1)],
+]
 
 # Independent, hand-calculated results for (8, 2), (-4, 6), (0, -2), (1.5, .5).
 COMBINED = {
@@ -622,3 +635,275 @@ class TestMilvusClientFunctionChainBuiltinIndependent(TestMilvusClientV2Base):
         params = {"function": "exp", "origin": 0, "scale": 2, **override}
         with pytest.raises(ParamError):
             fn.decay(col("a"), **params)
+
+
+class TestMilvusClientFunctionChainL2(TestMilvusClientV2Base):
+    """Full candidate recall keeps score expectations independent of worker and segment placement."""
+
+    skip_global_role_cleanup = True
+
+    def _collection(self, client, shards, other_metric="L2"):
+        name = cf.gen_unique_str("fc_l2_score")
+        schema = self.create_schema(client, auto_id=False, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("ts", DataType.INT64)
+        schema.add_field("other_score", DataType.INT64)
+        schema.add_field("label", DataType.VARCHAR, max_length=32)
+        indexes = self.prepare_index_params(client)[0]
+        for field, metric in (("vector", "L2"), ("other_vector", other_metric)):
+            schema.add_field(field, DataType.FLOAT_VECTOR, dim=2)
+            indexes.add_index(field_name=field, index_type="FLAT", metric_type=metric)
+        self.create_collection(
+            client,
+            name,
+            schema=schema,
+            index_params=indexes,
+            shards_num=shards,
+            consistency_level="Strong",
+        )
+        rows = [
+            {
+                "id": pk,
+                "ts": 10 * pk,
+                "other_score": -pk,
+                "label": f"row_{pk}",
+                "vector": [float(pk), 0.0],
+                "other_vector": [float(5 - pk), 0.0],
+            }
+            for pk in range(1, 5)
+        ]
+        for batch in (rows[:2], rows[2:]):
+            self.insert(client, name, batch)
+            self.flush(client, name)
+        self.load_collection(client, name)
+        return name, rows
+
+    @staticmethod
+    def _rewrite(stage, field="ts", sign=1, output="$score"):
+        return FunctionChain(stage).map(
+            output, fn.num_combine(col(field), col(field), mode="weighted", weights=[sign, sign])
+        )
+
+    def _search_chains(self, mode, sign):
+        if mode == "none":
+            return []
+        if mode == "aux":
+            return [self._rewrite(L0, output="temporary"), self._rewrite(L1, output="temporary")]
+        if mode.startswith("identity_"):
+            stage = L0 if mode == "identity_l0" else L1
+            return [FunctionChain(stage).map("$score", fn.num_combine(col("$score"), col("$score"), mode="avg"))]
+        if mode == "l2_reads_distance":
+            return [
+                FunctionChain(L2)
+                .map("$score", fn.num_combine(col("$score"), col("$score"), mode="sum"))
+                .sort(col("$score"), desc=True, tie_break_col=col("$id"))
+            ]
+        if mode in ("l0", "l1", "l2"):
+            chain = self._rewrite({"l0": L0, "l1": L1, "l2": L2}[mode], sign=sign)
+            if mode == "l2":
+                chain.sort(col("$score"), desc=True, tie_break_col=col("$id"))
+            return [chain]
+        chains = [
+            self._rewrite(L0, sign=sign),
+            FunctionChain(L1).map(
+                "$score", fn.num_combine(col("$score"), col("ts"), mode="weighted", weights=[1, sign])
+            ),
+        ]
+        if mode == "all":
+            chains.append(
+                FunctionChain(L2)
+                .map("$score", fn.num_combine(col("$score"), col("$score"), mode="sum"))
+                .sort(col("$score"), desc=True, tie_break_col=col("$id"))
+            )
+        return list(reversed(chains))
+
+    @staticmethod
+    def _assert_hits(results, expected, descending, limit, offset=0):
+        assert len(results) == len(L2_QUERIES)
+        for hits, scores in zip(results, expected):
+            ordered = sorted(scores, key=lambda pk: (-scores[pk] if descending else scores[pk], pk))
+            assert [hit["id"] for hit in hits] == ordered[offset : offset + limit]
+            for hit in hits:
+                assert hit["distance"] == pytest.approx(scores[hit["id"]], rel=2e-6, abs=1e-6)
+                assert hit["entity"]["label"] == f"row_{hit['id']}"
+                assert "temporary" not in hit["entity"]
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("shards,grouped", [(1, False), (2, False), (1, True), (2, True)])
+    @pytest.mark.parametrize("mode,sign", L2_SEARCH_CASES)
+    def test_l2_search_score_preservation(self, shards, grouped, mode, sign):
+        client = self._client()
+        name, rows = self._collection(client, shards)
+        chains = self._search_chains(mode, sign)
+        kwargs = {"group_by_field": "label", "group_size": 1} if grouped else {}
+        expected = []
+        for query in L2_QUERIES:
+            scores = {}
+            for row in rows:
+                distance = (row["vector"][0] - query[0]) ** 2
+                if mode in ("none", "aux"):
+                    score = distance
+                elif mode.startswith("identity_"):
+                    score = -distance
+                elif mode == "l2_reads_distance":
+                    score = 2 * distance
+                else:
+                    factor = {"l0_l1": 3, "all": 6}.get(mode, 2)
+                    score = factor * sign * row["ts"]
+                scores[row["id"]] = score
+            expected.append(scores)
+        results = self.search(
+            client,
+            name,
+            data=L2_QUERIES,
+            anns_field="vector",
+            limit=len(rows),
+            search_params={"metric_type": "L2"},
+            output_fields=["label"],
+            function_chains=chains,
+            **kwargs,
+        )[0]
+        self._assert_hits(results, expected, mode not in ("none", "aux"), len(rows))
+        paged_chains = self._search_chains(mode, sign)
+        final_chain = next((chain for chain in paged_chains if chain.stage == L2), None)
+        if final_chain is None:
+            final_chain = FunctionChain(L2)
+            paged_chains.append(final_chain)
+        final_chain.limit(2, offset=1)
+        paged = self.search(
+            client,
+            name,
+            data=L2_QUERIES,
+            anns_field="vector",
+            limit=len(rows),
+            search_params={"metric_type": "L2"},
+            output_fields=["label"],
+            function_chains=paged_chains,
+            **kwargs,
+        )[0]
+        self._assert_hits(paged, expected, mode not in ("none", "aux"), 2, 1)
+        empty = self.search(
+            client,
+            name,
+            data=L2_QUERIES,
+            anns_field="vector",
+            limit=len(rows),
+            filter="id < 0",
+            search_params={"metric_type": "L2"},
+            output_fields=["label"],
+            function_chains=chains,
+            **kwargs,
+        )[0]
+        assert len(empty) == len(L2_QUERIES)
+        assert all(not hits for hits in empty)
+
+    @staticmethod
+    def _hybrid_oracle(rows, metrics, rewritten, normalize, strategy, empty_first, first_sign=1):
+        expected = []
+        descending = strategy in ("rrf", "legacy_rrf") or normalize or any(rewritten) or "IP" in metrics
+        for query in L2_QUERIES:
+            paths = []
+            for index, (field, metric) in enumerate(zip(("vector", "other_vector"), metrics)):
+                scores = {}
+                for row in [] if index == 0 and empty_first else rows:
+                    if rewritten[index]:
+                        value = 2 * first_sign * row["ts"] if index == 0 else 2 * row["other_score"]
+                    elif metric == "L2":
+                        value = (row[field][0] - query[0]) ** 2
+                    else:
+                        value = row[field][0] * query[0]
+                    scores[row["id"]] = value
+                if strategy in ("rrf", "legacy_rrf"):
+                    order = sorted(
+                        scores, key=lambda pk: (-scores[pk] if rewritten[index] or metric == "IP" else scores[pk], pk)
+                    )
+                    scores = {pk: 1 / (60 + rank) for rank, pk in enumerate(order, 1)}
+                elif not rewritten[index]:
+                    if metric == "L2" and descending:
+                        scores = {pk: 1 - 2 * math.atan(value) / math.pi for pk, value in scores.items()}
+                    elif metric == "IP" and normalize:
+                        scores = {pk: 0.5 + math.atan(value) / math.pi for pk, value in scores.items()}
+                paths.append(scores)
+            combined = {}
+            for pk in set(paths[0]) | set(paths[1]):
+                present = [path[pk] for path in paths if pk in path]
+                if strategy in ("weighted", "legacy_weighted"):
+                    combined[pk] = 0.25 * paths[0].get(pk, 0) + 0.75 * paths[1].get(pk, 0)
+                elif strategy == "max":
+                    combined[pk] = max(present)
+                elif strategy == "avg":
+                    combined[pk] = sum(present) / len(present)
+                else:
+                    combined[pk] = sum(present)
+            expected.append(combined)
+        return expected, descending
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("shards,grouped", [(1, False), (2, False), (1, True), (2, True)])
+    @pytest.mark.parametrize("rewrite", ["none", "aux", "l0", "l1", "both", "both_negative"])
+    @pytest.mark.parametrize("other_metric", ["L2", "IP"])
+    def test_l2_hybrid_merge_score_preservation(self, shards, grouped, rewrite, other_metric):
+        client = self._client()
+        name, rows = self._collection(client, shards, other_metric)
+        first_chains, second_chains = [], []
+        first_sign = -1 if rewrite == "both_negative" else 1
+        if rewrite == "aux":
+            first_chains = [self._rewrite(L0, output="temporary")]
+            second_chains = [self._rewrite(L1, "other_score", output="temporary")]
+        elif rewrite in ("l0", "l1", "both", "both_negative"):
+            first_chains = [self._rewrite(L1 if rewrite == "l1" else L0, sign=first_sign)]
+            if rewrite in ("both", "both_negative"):
+                second_chains = [self._rewrite(L1, "other_score")]
+        rewritten = [rewrite in ("l0", "l1", "both", "both_negative"), rewrite in ("both", "both_negative")]
+        metrics = ["L2", other_metric]
+        kwargs = {"group_by_field": "label", "group_size": 1} if grouped else {}
+        strategies = ["weighted", "sum", "max", "avg", "legacy_weighted"]
+        if not grouped:
+            strategies += ["rrf", "legacy_rrf"]
+        for empty_first in (False, True):
+            requests = [
+                AnnSearchRequest(
+                    data=L2_QUERIES,
+                    anns_field=field,
+                    param={"metric_type": metric},
+                    limit=len(rows),
+                    expr="id < 0" if index == 0 and empty_first else "",
+                    function_chains=chains,
+                )
+                for index, (field, metric, chains) in enumerate(
+                    zip(("vector", "other_vector"), metrics, (first_chains, second_chains))
+                )
+            ]
+            for strategy in strategies:
+                for normalize in [False] if strategy in ("rrf", "legacy_rrf") else [False, True]:
+                    expected, descending = self._hybrid_oracle(
+                        rows, metrics, rewritten, normalize, strategy, empty_first, first_sign
+                    )
+                    chains, ranker = None, None
+                    if strategy == "legacy_weighted":
+                        ranker = WeightedRanker(0.25, 0.75, norm_score=normalize)
+                    elif strategy == "legacy_rrf":
+                        ranker = RRFRanker(60)
+                    else:
+                        params = {} if strategy == "rrf" else {"norm_score": normalize}
+                        if strategy == "weighted":
+                            params["weights"] = [0.25, 0.75]
+                        chains = FunctionChain(L2).merge(strategy, **params)
+                    results = self.hybrid_search(
+                        client,
+                        name,
+                        requests,
+                        ranker,
+                        limit=2,
+                        offset=1,
+                        output_fields=["label"],
+                        function_chains=chains,
+                        **kwargs,
+                    )[0]
+                    try:
+                        self._assert_hits(results, expected, descending, 2, 1)
+                    except AssertionError as error:
+                        raise AssertionError(
+                            f"strategy={strategy}, norm_score={normalize}, empty_first={empty_first}, "
+                            f"rewrite={rewrite}, metrics={metrics}, grouped={grouped}: {error}"
+                        ) from error
