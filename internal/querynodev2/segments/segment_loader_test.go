@@ -695,6 +695,42 @@ func (suite *SegmentLoaderSuite) TestLoadFail() {
 	suite.Error(err)
 }
 
+func (suite *SegmentLoaderSuite) TestLoadSealedNilCandidateFailureCleanup() {
+	for _, stage := range []string{"data", "delta"} {
+		suite.Run(stage, func() {
+			ctx := context.Background()
+			loader := suite.loader.(*segmentLoader)
+			loadErr := errors.New("injected load failure")
+			var captured *LocalSegment
+			loadData := mockey.Mock((*segmentLoader).LoadSegment).To(
+				func(_ *segmentLoader, _ context.Context, segment Segment, _ *querypb.SegmentLoadInfo) error {
+					captured = segment.(*LocalSegment)
+					suite.Nil(captured.pkCandidate)
+					if stage == "data" {
+						return loadErr
+					}
+					return nil
+				}).Build()
+			defer loadData.UnPatch()
+			loadDeltas := mockey.Mock((*segmentLoader).loadDeltalogs).Return(loadErr).Build()
+			defer loadDeltas.UnPatch()
+
+			loaded, err := loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
+				SegmentID: suite.segmentID, PartitionID: suite.partitionID, CollectionID: suite.collectionID,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+			})
+			suite.Require().ErrorIs(err, loadErr)
+			suite.Empty(loaded)
+			suite.Require().NotNil(captured)
+			suite.False(captured.ptrLock.PinIfNotReleased())
+			suite.NotPanics(func() { captured.Release(ctx) })
+			suite.Nil(loader.manager.Segment.GetWithType(suite.segmentID, SegmentTypeSealed))
+			suite.False(loader.loadingSegments.Contain(suite.segmentID))
+			suite.True(loader.committedResource.IsZero())
+		})
+	}
+}
+
 func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 	ctx := context.Background()
 	loadInfos := make([]*querypb.SegmentLoadInfo, 0, suite.segmentNum)
@@ -726,15 +762,10 @@ func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 	segments, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, loadInfos...)
 	suite.NoError(err)
 
-	// Will load bloom filter with sealed segments
+	// Regular sealed workers do not load PK candidates.
+	suite.Require().Len(segments, suite.segmentNum)
 	for _, segment := range segments {
-		for pk := 0; pk < 100; pk++ {
-			lc := storage.NewLocationsCache(storage.NewInt64PrimaryKey(int64(pk)))
-			pkReady := segment.PkCandidateExist()
-			suite.Require().True(pkReady)
-			exist := segment.MayPkExist(lc)
-			suite.Require().True(exist)
-		}
+		suite.False(segment.PkCandidateExist())
 	}
 
 	// Load growing
@@ -1097,6 +1128,11 @@ func (suite *SegmentLoaderSuite) TestLoadVirtualPKExternalCollectionLoadsDeltaLo
 	pkField := GetPkField(suite.schema)
 	suite.Require().NotNil(pkField)
 	pkField.Name = common.VirtualPKFieldName
+	for _, field := range suite.schema.GetFields() {
+		if !field.GetIsPrimaryKey() && field.GetFieldID() >= common.StartOfUserFieldID {
+			field.ExternalField = field.GetName()
+		}
+	}
 	suite.Require().NoError(suite.manager.Collection.UpdateSchema(suite.collectionID, suite.schema, 1))
 
 	msgLength := 100
@@ -1130,6 +1166,31 @@ func (suite *SegmentLoaderSuite) TestLoadVirtualPKExternalCollectionLoadsDeltaLo
 	suite.Require().NoError(err)
 	suite.Require().Len(segments, 1)
 	suite.Equal(int64(msgLength-2), segments[0].RowNum())
+	suite.False(segments[0].PkCandidateExist())
+}
+
+func (suite *SegmentLoaderSuite) TestLoadSealedExternalRealPKSkipsBloomFilter() {
+	ctx := context.Background()
+	loadInfo, _, _ := suite.makeExternalRealPKBFLoadInfo(ctx)
+	pkField := GetPkField(suite.schema)
+	pkField.ExternalField = pkField.GetName()
+	suite.Require().NoError(suite.manager.Collection.UpdateSchema(suite.collectionID, suite.schema, 1))
+
+	loader := suite.loader.(*segmentLoader)
+	// Isolate candidate loading from segcore and delta-file I/O.
+	loadData := mockey.Mock((*segmentLoader).LoadSegment).Return(nil).Build()
+	defer loadData.UnPatch()
+	loadDeltas := mockey.Mock((*segmentLoader).loadDeltalogs).Return(nil).Build()
+	defer loadDeltas.UnPatch()
+	readBF := mockey.Mock(packed.ReadFileWithExternalSpec).
+		Return(nil, errors.New("worker must not load sealed bloom filters")).Build()
+	defer readBF.UnPatch()
+
+	segments, err := loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, loadInfo)
+	suite.Require().NoError(err)
+	suite.Require().Len(segments, 1)
+	suite.False(segments[0].PkCandidateExist())
+	suite.Zero(readBF.Times())
 }
 
 func (suite *SegmentLoaderSuite) TestLoadDupDeltaLogs() {
@@ -1496,58 +1557,6 @@ func (suite *SegmentLoaderSuite) makeExternalRealPKBFLoadInfo(ctx context.Contex
 		StorageVersion: storage.StorageV3,
 		InsertChannel:  fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 	}, externalStatsPaths, payload
-}
-
-func (suite *SegmentLoaderSuite) TestLoadSingleBloomFilterSetExternalRealPKUsesExternalStats() {
-	ctx := context.Background()
-	loadInfo, externalStatsPaths, payload := suite.makeExternalRealPKBFLoadInfo(ctx)
-
-	readCalls := atomic.NewInt32(0)
-	var gotPaths []string
-	patchRead := mockey.Mock(packed.ReadFileWithExternalSpec).
-		To(func(sc *indexpb.StorageConfig, filePath string, extfs packed.ExternalSpecContext) ([]byte, error) {
-			readCalls.Inc()
-			gotPaths = append(gotPaths, filePath)
-			suite.Equal(suite.collectionID, extfs.CollectionID)
-			suite.Equal(suite.schema.GetExternalSource(), extfs.Source)
-			suite.Equal(suite.schema.GetExternalSpec(), extfs.Spec)
-			return payload, nil
-		}).Build()
-	defer patchRead.UnPatch()
-
-	bfs, err := suite.loader.(*segmentLoader).loadSingleBloomFilterSet(ctx, suite.collectionID, loadInfo, SegmentTypeSealed)
-
-	suite.NoError(err)
-	suite.EqualValues(2, readCalls.Load())
-	suite.Equal(externalStatsPaths, gotPaths)
-	suite.True(bfs.PkCandidateExist())
-	suite.True(bfs.MayPkExist(storage.NewLocationsCache(storage.NewInt64PrimaryKey(1))))
-}
-
-func (suite *SegmentLoaderSuite) TestLoadSingleBloomFilterSetExternalRealPKIgnoresBloomFilterDisable() {
-	paramtable.Get().Save(paramtable.Get().CommonCfg.BloomFilterEnabled.Key, "false")
-	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.BloomFilterEnabled.Key)
-
-	ctx := context.Background()
-	loadInfo, externalStatsPaths, payload := suite.makeExternalRealPKBFLoadInfo(ctx)
-
-	readCalls := atomic.NewInt32(0)
-	var gotPaths []string
-	patchRead := mockey.Mock(packed.ReadFileWithExternalSpec).
-		To(func(sc *indexpb.StorageConfig, filePath string, extfs packed.ExternalSpecContext) ([]byte, error) {
-			readCalls.Inc()
-			gotPaths = append(gotPaths, filePath)
-			return payload, nil
-		}).Build()
-	defer patchRead.UnPatch()
-
-	bfs, err := suite.loader.(*segmentLoader).loadSingleBloomFilterSet(ctx, suite.collectionID, loadInfo, SegmentTypeSealed)
-
-	suite.NoError(err)
-	suite.EqualValues(2, readCalls.Load())
-	suite.Equal(externalStatsPaths, gotPaths)
-	suite.True(bfs.PkCandidateExist())
-	suite.True(bfs.MayPkExist(storage.NewLocationsCache(storage.NewInt64PrimaryKey(1))))
 }
 
 func (suite *SegmentLoaderSuite) TestLoadBloomFilterSetExternalRealPKUsesExternalStats() {

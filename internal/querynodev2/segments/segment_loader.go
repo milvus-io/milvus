@@ -354,63 +354,6 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			return merr.Wrap(err, "At LoadDeltaLogs")
 		}
 
-		schema := collection.Schema()
-		isExternalCollection := typeutil.IsExternalCollection(schema)
-		isMilvusTableRealPK := typeutil.NewStorageColumnResolver(schema).IsMilvusTable() &&
-			HasExternalPrimaryKey(schema)
-		if !segment.PkCandidateExist() {
-			mlog.Debug(context.TODO(), "loading PK candidate for segment", mlog.Int64("segmentID", segment.ID()))
-			if isExternalCollection {
-				var candidate pkoracle.Candidate
-				if isMilvusTableRealPK {
-					bfs, err := loader.loadSingleBloomFilterSet(ctx, loadInfo.GetCollectionID(), loadInfo, segment.Type())
-					if err != nil {
-						return merr.Wrap(err, "At LoadBloomFilter")
-					}
-					if bfs.PkCandidateExist() {
-						segment.SetPKCandidate(bfs)
-						bfs.Charge()
-						mlog.Info(context.TODO(), "using external real-PK bloom filter candidate",
-							mlog.FieldSegmentID(loadInfo.GetSegmentID()))
-					}
-					if !segment.PkCandidateExist() {
-						return merr.WrapErrServiceInternalMsg("milvus-table real-PK segment missing bloom filter stats")
-					}
-				} else {
-					candidate = pkoracle.NewExternalSegmentCandidate(
-						loadInfo.GetSegmentID(),
-						loadInfo.GetPartitionID(),
-						segment.Type(),
-					)
-				}
-				if candidate != nil {
-					segment.SetPKCandidate(candidate)
-					mlog.Info(context.TODO(), "using external collection PK candidate",
-						mlog.FieldSegmentID(loadInfo.GetSegmentID()),
-						mlog.Bool("realPK", isMilvusTableRealPK))
-				}
-
-				// Check for truncated segment ID collision with other segments being loaded.
-				if !isMilvusTableRealPK {
-					collisions := detectVirtualPKCollisions(loadInfo.GetSegmentID(), infos)
-					for _, collidingID := range collisions {
-						mlog.Warn(context.TODO(), "virtual PK collision detected: two segments share truncated segment ID",
-							mlog.Int64("segmentID1", loadInfo.GetSegmentID()),
-							mlog.Int64("segmentID2", collidingID),
-							mlog.Int64("truncatedID", loadInfo.GetSegmentID()&0xFFFFFFFF))
-					}
-				}
-			} else if paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool() {
-				bfs, err := loader.loadSingleBloomFilterSet(ctx, loadInfo.GetCollectionID(), loadInfo, segment.Type())
-				if err != nil {
-					return merr.Wrap(err, "At LoadBloomFilter")
-				}
-				segment.SetPKCandidate(bfs)
-				// Charge bloom filter resource
-				bfs.Charge()
-			}
-		}
-
 		if segment.Level() != datapb.SegmentLevel_L0 {
 			loader.manager.Segment.Put(ctx, segmentType, segment)
 		}
@@ -662,56 +605,6 @@ func (loader *segmentLoader) GetChunkManager() storage.ChunkManager {
 	return loader.cm
 }
 
-// load single bloom filter
-func (loader *segmentLoader) loadSingleBloomFilterSet(ctx context.Context, collectionID int64, loadInfo *querypb.SegmentLoadInfo, segtype SegmentType) (*pkoracle.BloomFilterSet, error) {
-	partitionID := loadInfo.PartitionID
-	segmentID := loadInfo.SegmentID
-	bfs := pkoracle.NewBloomFilterSet(segmentID, partitionID, segtype)
-
-	collection := loader.manager.Collection.Get(collectionID)
-	if collection == nil {
-		err := merr.WrapErrCollectionNotFound(collectionID)
-		mlog.Warn(context.TODO(), "failed to get collection while loading segment", mlog.Err(err))
-		return nil, err
-	}
-
-	mlog.Debug(ctx, "start loading remote...", mlog.Int("segmentNum", 1))
-
-	schema := collection.Schema()
-	isExternalCollection := typeutil.IsExternalCollection(schema)
-	isMilvusTableRealPK := typeutil.NewStorageColumnResolver(schema).IsMilvusTable() &&
-		HasExternalPrimaryKey(schema)
-	if !paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool() && !isMilvusTableRealPK {
-		mlog.Info(context.TODO(), "skip loading bloom filter for remote segment because bloom filter is disabled")
-		return bfs, nil
-	}
-	if isExternalCollection && !isMilvusTableRealPK {
-		mlog.Debug(context.TODO(), "virtual-PK external collection: returning empty bloom filter set")
-		return bfs, nil
-	}
-
-	pkField := GetPkField(schema)
-	mlog.Debug(ctx, "loading bloom filter for remote...")
-	pkStatsBinlogs, err := packed.NewStatsResolverFromLoadInfo(loadInfo).BloomFilterPaths(pkField.GetFieldID())
-	if err != nil {
-		return nil, err
-	}
-	err = loader.loadBloomFilter(ctx, segmentID, bfs, pkStatsBinlogs, loader.bloomFilterDownloaderWithSchema(loadInfo.GetCollectionID(), schema, isMilvusTableRealPK))
-	if err != nil {
-		mlog.Warn(context.TODO(), "load remote segment bloom filter failed",
-			mlog.Int64("partitionID", partitionID),
-			mlog.Int64("segmentID", segmentID),
-			mlog.Err(err),
-		)
-		return nil, err
-	}
-	if isMilvusTableRealPK && !bfs.PkCandidateExist() {
-		return nil, merr.WrapErrServiceInternalMsg("milvus-table real-PK segment missing bloom filter stats")
-	}
-
-	return bfs, nil
-}
-
 func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionID int64, infos ...*querypb.SegmentLoadInfo) ([]*pkoracle.BloomFilterSet, error) {
 	if len(infos) == 0 {
 		return nil, nil
@@ -866,21 +759,6 @@ func separateIndexAndBinlog(loadInfo *querypb.SegmentLoadInfo) (map[int64]*Index
 	}
 
 	return indexedFieldInfos, fieldBinlogs
-}
-
-// detectVirtualPKCollisions checks if any segments in infos share the same
-// truncated (lower 32 bits) segment ID as segmentID. A collision means two
-// segments produce overlapping virtual PK spaces.
-func detectVirtualPKCollisions(segmentID int64, infos []*querypb.SegmentLoadInfo) []int64 {
-	truncatedID := segmentID & 0xFFFFFFFF
-	var collisions []int64
-	for _, info := range infos {
-		if info.GetSegmentID() != segmentID &&
-			(info.GetSegmentID()&0xFFFFFFFF) == truncatedID {
-			collisions = append(collisions, info.GetSegmentID())
-		}
-	}
-	return collisions
 }
 
 func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema) (
@@ -1264,16 +1142,9 @@ func (loader *segmentLoader) loadBloomFilter(
 	return loader.loadBloomFilterWithDownloader(ctx, segmentID, bfs, binlogPaths, downloader)
 }
 
-// bloomFilterDownloader returns the byte downloader used for PK bloom-filter
+// bloomFilterDownloaderWithSchema returns the byte downloader used for PK bloom-filter
 // stats. Milvus-table real-PK stats live in the external source filesystem;
 // ordinary internal stats stay on the local chunk manager.
-func (loader *segmentLoader) bloomFilterDownloader(
-	collection *Collection,
-	useExternalSpec bool,
-) func(context.Context, []string) ([][]byte, error) {
-	return loader.bloomFilterDownloaderWithSchema(collection.ID(), collection.Schema(), useExternalSpec)
-}
-
 func (loader *segmentLoader) bloomFilterDownloaderWithSchema(collectionID int64, schema *schemapb.CollectionSchema, useExternalSpec bool) func(context.Context, []string) ([][]byte, error) {
 	if !useExternalSpec {
 		return loader.cm.MultiRead
