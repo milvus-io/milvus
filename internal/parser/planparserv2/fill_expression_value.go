@@ -541,8 +541,12 @@ func FillBinaryArithOpEvalRangeExpressionValue(expr *planpb.BinaryArithOpEvalRan
 			lDataType = expr.GetColumnInfo().GetElementType()
 		}
 
-		if err = checkValidModArith(expr.GetArithOp(), expr.GetColumnInfo().GetDataType(), expr.GetColumnInfo().GetElementType(),
-			rDataType, schemapb.DataType_None); err != nil {
+		// The column's own field name isn't resolvable here (no schema is
+		// threaded into this deferred, template-fill-time path); the parse-time
+		// check in parser_visitor.go already reports the field name for the
+		// common, non-template case.
+		if err = checkValidModArith(expr.GetArithOp(), expr.GetColumnInfo().GetDataType(), expr.GetColumnInfo().GetElementType(), "",
+			rDataType, schemapb.DataType_None, ""); err != nil {
 			return err
 		}
 

@@ -709,18 +709,36 @@ func canArithmeticDataType(left, right schemapb.DataType) bool {
 //	return canArithmeticDataType(left.dataType, getArrayElementType(right))
 //}
 
-func canArithmetic(left, leftElement, right, rightElement schemapb.DataType, reverse bool) error {
-	if typeutil.IsArrayType(left) {
-		left = leftElement
+// describeArithOperand renders an operand of an arithmetic/bitwise/modulo
+// expression for error messages. When the operand is backed by a named
+// collection field, it names the field and its actual data type (e.g.
+// "field 'price' is DOUBLE") so the user can tell which field is at fault;
+// otherwise it falls back to describing just the type.
+func describeArithOperand(dataType, elementType schemapb.DataType, fieldName string) string {
+	actualType := dataType
+	if typeutil.IsArrayType(dataType) {
+		actualType = elementType
 	}
-	if typeutil.IsArrayType(right) {
-		right = rightElement
+	if fieldName != "" {
+		return fmt.Sprintf("field '%s' is %s", fieldName, actualType.String())
 	}
+	return actualType.String()
+}
+
+func canArithmetic(left, leftElement, right, rightElement schemapb.DataType, leftFieldName, rightFieldName string, reverse bool) error {
 	if reverse {
-		left, right = right, left
+		left, leftElement, leftFieldName, right, rightElement, rightFieldName = right, rightElement, rightFieldName, left, leftElement, leftFieldName
 	}
-	if !canArithmeticDataType(left, right) {
-		return merr.WrapErrQueryPlanMsg("cannot perform arithmetic between %s field and %s", left.String(), right.String())
+	effectiveLeft, effectiveRight := left, right
+	if typeutil.IsArrayType(effectiveLeft) {
+		effectiveLeft = leftElement
+	}
+	if typeutil.IsArrayType(effectiveRight) {
+		effectiveRight = rightElement
+	}
+	if !canArithmeticDataType(effectiveLeft, effectiveRight) {
+		return merr.WrapErrQueryPlanMsg("cannot perform arithmetic between %s and %s",
+			describeArithOperand(left, leftElement, leftFieldName), describeArithOperand(right, rightElement, rightFieldName))
 	}
 	return nil
 }
@@ -757,16 +775,32 @@ func hexDigit(n uint32) byte {
 	return byte(n-10) + 'a'
 }
 
-func checkValidModArith(tokenType planpb.ArithOpType, leftType, leftElementType, rightType, rightElementType schemapb.DataType) error {
+// describeNonIntegerOperands describes whichever of the two operands are not
+// integer-compatible, so modulo/bitwise type errors can name the offending
+// field(s) and their actual data type instead of a generic message.
+func describeNonIntegerOperands(leftType, leftElementType schemapb.DataType, leftFieldName string, rightType, rightElementType schemapb.DataType, rightFieldName string) string {
+	var bad []string
+	if !canConvertToIntegerType(leftType, leftElementType) {
+		bad = append(bad, describeArithOperand(leftType, leftElementType, leftFieldName))
+	}
+	if !canConvertToIntegerType(rightType, rightElementType) {
+		bad = append(bad, describeArithOperand(rightType, rightElementType, rightFieldName))
+	}
+	return strings.Join(bad, " and ")
+}
+
+func checkValidModArith(tokenType planpb.ArithOpType, leftType, leftElementType schemapb.DataType, leftFieldName string, rightType, rightElementType schemapb.DataType, rightFieldName string) error {
 	switch tokenType {
 	case planpb.ArithOpType_Mod:
 		if !canConvertToIntegerType(leftType, leftElementType) || !canConvertToIntegerType(rightType, rightElementType) {
-			return merr.WrapErrQueryPlanMsg("modulo can only apply on integer types")
+			return merr.WrapErrQueryPlanMsg("modulo requires an integer field, but %s",
+				describeNonIntegerOperands(leftType, leftElementType, leftFieldName, rightType, rightElementType, rightFieldName))
 		}
 	case planpb.ArithOpType_BitAnd, planpb.ArithOpType_BitOr, planpb.ArithOpType_BitXor,
 		planpb.ArithOpType_Shl, planpb.ArithOpType_Shr:
 		if !canConvertToIntegerType(leftType, leftElementType) || !canConvertToIntegerType(rightType, rightElementType) {
-			return merr.WrapErrQueryPlanMsg("bitwise operations can only apply on integer types")
+			return merr.WrapErrQueryPlanMsg("bitwise operators require an integer field, but %s",
+				describeNonIntegerOperands(leftType, leftElementType, leftFieldName, rightType, rightElementType, rightFieldName))
 		}
 	default:
 	}
