@@ -635,7 +635,9 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 		JsonStatsWriteBatchSize:          Params.DataCoordCfg.JSONStatsWriteBatchSize.GetAsInt64(),
 		ManifestPath:                     segment.GetManifestPath(),
 	}
-	WrapPluginContext(segment.GetCollectionID(), collInfo.Schema.GetProperties(), req)
+	if err := WrapPluginContext(segment.GetCollectionID(), collInfo.Schema.GetProperties(), req); err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }
