@@ -10,7 +10,6 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <numeric>
-#include "index/scalar/sort/SortedMembership.h"
 #include "ChunkedSegmentSealedImpl.h"
 #include "segcore/default_fs.h"
 
@@ -71,6 +70,7 @@
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
 #include "common/GeometryCache.h"
+#include "common/GallopingSearch.h"
 #include "common/GroupChunk.h"
 #include "common/Json.h"
 #include "common/JsonCastType.h"
@@ -197,6 +197,42 @@ struct ManifestLoadTask {
 };
 
 namespace {
+
+// Use separate conservative gates for streaming and replay, based on the
+// actual PK column's chunk count. Batch size alone does not predict the
+// benefit of avoiding repeated searches across chunks.
+constexpr size_t kMinSortedStreamDeleteChunks = 16;
+constexpr size_t kMinSortedLoadDeleteChunks = 32;
+
+// Sort an index permutation, then move PKs and timestamps together in place.
+// In particular, VARCHAR sorting never copies the character buffers.
+template <typename Compare>
+void
+ReorderDeleteBatch(std::vector<PkType>& pks,
+                   std::vector<Timestamp>& timestamps,
+                   Compare compare) {
+    std::vector<size_t> order(pks.size());
+    std::iota(order.begin(), order.end(), 0);
+    std::sort(order.begin(), order.end(), compare);
+    for (size_t i = 0; i < order.size(); ++i) {
+        if (order[i] == i) {
+            continue;
+        }
+        auto pk = std::move(pks[i]);
+        auto ts = timestamps[i];
+        size_t dst = i;
+        while (order[dst] != i) {
+            const auto src = order[dst];
+            pks[dst] = std::move(pks[src]);
+            timestamps[dst] = timestamps[src];
+            order[dst] = dst;
+            dst = src;
+        }
+        pks[dst] = std::move(pk);
+        timestamps[dst] = ts;
+        order[dst] = dst;
+    }
+}
 
 // Formats field identifiers for manifest-load diagnostics.
 [[nodiscard]] std::string
@@ -3621,16 +3657,43 @@ ChunkedSegmentSealedImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     AssertInfo(info.row_count > 0, "The row count of deleted record is 0");
     AssertInfo(info.primary_keys, "Deleted primary keys is null");
     AssertInfo(info.timestamps, "Deleted timestamps is null");
-    // step 1: get pks and timestamps
-    auto field_id = primary_key_field_id_;
-    AssertInfo(field_id.get() != -1, "Primary key is -1");
-    int64_t size = info.row_count;
+    auto snapshot = CapturePublishedState();
+    AssertInfo(primary_key_field_id_.get() != -1, "Primary key is -1");
+    const auto size = info.row_count;
     std::vector<PkType> pks(size);
     ParsePksFromIDs(pks, primary_key_type_, *info.primary_keys);
     auto timestamps = reinterpret_cast<const Timestamp*>(info.timestamps);
 
-    // step 2: push delete info to delete_record
-    deleted_record_->LoadPush(std::move(pks), timestamps);
+    const bool use_sorted_search = UseSortedDeleteSearch(*snapshot, true);
+    std::vector<Timestamp> sorted_timestamps;
+    if (use_sorted_search) {
+        sorted_timestamps.assign(timestamps, timestamps + size);
+        // Every row must see its earliest effective delete first, including
+        // unsorted replay batches and multiple insertion versions of one PK.
+        ReorderDeleteBatch(pks, sorted_timestamps, [&](size_t a, size_t b) {
+            return std::tie(pks[a], sorted_timestamps[a], a) <
+                   std::tie(pks[b], sorted_timestamps[b], b);
+        });
+        timestamps = sorted_timestamps.data();
+    } else {
+        // Keep master's earliest-delete fix on the binary-search and
+        // non-sorted/virtual-PK paths as well.
+        timestamps = DeletedRecord<true>::SortByTimestamp(
+            pks, timestamps, sorted_timestamps);
+    }
+    deleted_record_->LoadPush(pks,
+                              timestamps,
+                              [&](const std::vector<PkType>& batch,
+                                  const Timestamp* batch_ts,
+                                  const auto& callback) {
+                                  search_batch_pks_from_state(
+                                      snapshot,
+                                      use_sorted_search,
+                                      batch,
+                                      [&](size_t i) { return batch_ts[i]; },
+                                      false,
+                                      callback);
+                              });
 }
 
 void
@@ -4809,11 +4872,42 @@ ChunkedSegmentSealedImpl::search_pks(BitsetType& bitset,
     }
 }
 
-// Reports a row's matches in ascending timestamp order, which is their
-// input order for the timestamp-sorted batches DeletedRecord pushes;
-// DeletedRecord relies on it.
+bool
+ChunkedSegmentSealedImpl::UseSortedDeleteSearch(
+    const PublishedSegmentState& snapshot, bool load_replay) const {
+    if (!is_sorted_by_pk_ || snapshot.runtime == nullptr ||
+        snapshot.runtime->virtual_pk2offset != nullptr) {
+        return false;
+    }
+    if (primary_key_field_id_.get() == -1) {
+        return false;
+    }
+    const auto column = get_column(snapshot.runtime, primary_key_field_id_);
+    return column != nullptr &&
+           column->num_chunks() >= (load_replay ? kMinSortedLoadDeleteChunks
+                                                : kMinSortedStreamDeleteChunks);
+}
+
 void
 ChunkedSegmentSealedImpl::search_batch_pks(
+    const std::vector<PkType>& pks,
+    const std::function<Timestamp(const size_t idx)>& get_timestamp,
+    bool include_same_ts,
+    const std::function<void(const SegOffset offset, const Timestamp ts)>&
+        callback) const {
+    auto snapshot = CapturePublishedState();
+    search_batch_pks_from_state(snapshot,
+                                UseSortedDeleteSearch(*snapshot, false),
+                                pks,
+                                get_timestamp,
+                                include_same_ts,
+                                callback);
+}
+
+void
+ChunkedSegmentSealedImpl::search_batch_pks_from_state(
+    const std::shared_ptr<const PublishedSegmentState>& snapshot,
+    bool use_sorted_search,
     const std::vector<PkType>& pks,
     const std::function<Timestamp(const size_t idx)>& get_timestamp,
     bool include_same_ts,
@@ -4824,7 +4918,6 @@ ChunkedSegmentSealedImpl::search_batch_pks(
     // so short-circuit without touching the raw timestamp column.
     // For StorageV2: pins the timestamp column and indexes into chunks.
     // PK lookup and timestamp data come from the same published runtime.
-    auto snapshot = CapturePublishedState();
     auto runtime = snapshot->runtime;
     auto effective_commit_ts =
         snapshot->commit_ts != 0 ? std::optional<Timestamp>{snapshot->commit_ts}
@@ -4933,112 +5026,124 @@ ChunkedSegmentSealedImpl::search_batch_pks(
                                    return ts1 < ts2;
                                };
 
-    // Merge the batch against the sorted primary-key column. The batch is
-    // visited through a permutation ordered by (pk, ts, input index), so
-    // each chunk is scanned once: the batch keys that fall in the chunk's
-    // [first, last] range are located by VisitOrderedMatches, which advances
-    // a cursor by galloping search from the previous hit instead of a binary
-    // search from the start for every key. Equal keys (one pk deleted at
-    // several timestamps) form one group. A row's matches are reported in
-    // ascending timestamp order, which for the timestamp-sorted batches that
-    // DeletedRecord pushes is their input order.
-    auto merge_sorted = [&](auto key_of, auto chunk_view) {
-        using Key = decltype(key_of(pks[0]));
-        std::vector<Timestamp> batch_ts(pks.size());
-        for (size_t j = 0; j < pks.size(); ++j) {
-            batch_ts[j] = get_timestamp(j);
+    const bool keys_sorted =
+        use_sorted_search && std::is_sorted(pks.begin(), pks.end());
+    size_t first_pk = 0;
+    auto search_sorted_chunk = [&](size_t rows,
+                                   int64_t base,
+                                   auto value_at,
+                                   auto key_at) {
+        if (rows == 0) {
+            return;
         }
-        std::vector<size_t> order(pks.size());
-        std::iota(order.begin(), order.end(), 0);
-        std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
-            auto ka = key_of(pks[a]);
-            auto kb = key_of(pks[b]);
-            if (ka != kb) {
-                return ka < kb;
+        // Segment PKs are globally sorted. Keep groups that can also occur in
+        // the next chunk: advancing to the end of this chunk's matches would
+        // lose duplicate PKs straddling a chunk boundary.
+        first_pk =
+            GallopingLowerBound(pks.size(), first_pk, value_at(0), key_at);
+        size_t pos = 0;
+        for (size_t j = first_pk;
+             j < pks.size() && !(value_at(rows - 1) < key_at(j));) {
+            const auto target = key_at(j);
+            size_t next = j + 1;
+            while (next < pks.size() && key_at(next) == target) {
+                ++next;
             }
-            return std::tie(batch_ts[a], a) < std::tie(batch_ts[b], b);
-        });
-        // distinct keys and, for each, the range of `order` it covers
-        std::vector<Key> keys;
-        std::vector<size_t> group_begin;
-        keys.reserve(pks.size());
-        group_begin.reserve(pks.size() + 1);
-        for (size_t j = 0; j < order.size(); ++j) {
-            auto k = key_of(pks[order[j]]);
-            if (keys.empty() || keys.back() != k) {
-                keys.push_back(k);
-                group_begin.push_back(j);
+            pos = GallopingLowerBound(rows, pos, target, value_at);
+            size_t end = pos;
+            while (end < rows && value_at(end) == target) {
+                ++end;
             }
-        }
-        group_begin.push_back(order.size());
-
-        size_t qlo = 0;
-        auto num_chunk = pk_column->num_chunks();
-        for (int i = 0; i < num_chunk && qlo < keys.size(); ++i) {
-            auto [n, value_at] = chunk_view(i);
-            if (n == 0) {
-                continue;
-            }
-            auto first = value_at(0);
-            auto last = value_at(n - 1);
-            qlo = std::lower_bound(keys.begin() + qlo, keys.end(), first) -
-                  keys.begin();
-            size_t qhi =
-                std::upper_bound(keys.begin() + qlo, keys.end(), last) -
-                keys.begin();
-            if (qlo == qhi) {
-                continue;
-            }
-            auto rows_until_chunk = pk_column->GetNumRowsUntilChunk(i);
-            size_t g = qlo;
-            milvus::index::detail::VisitOrderedMatches(
-                static_cast<size_t>(n),
-                std::span<const Key>(keys.data() + qlo, qhi - qlo),
-                value_at,
-                [&](size_t cursor, const Key& value) {
-                    while (keys[g] < value) {
-                        ++g;
+            // Search each distinct PK once, but retain every delete event and
+            // its order. Different insert versions can need different deletes.
+            for (size_t k = j; k < next; ++k) {
+                const auto timestamp = get_timestamp(k);
+                for (size_t offset = pos; offset < end; ++offset) {
+                    const auto segment_offset = base + offset;
+                    if (timestamp_hit(read_ts(segment_offset), timestamp)) {
+                        callback(SegOffset(segment_offset), timestamp);
                     }
-                    auto offset =
-                        static_cast<int64_t>(cursor) + rows_until_chunk;
-                    auto insert_ts = read_ts(offset);
-                    for (size_t j = group_begin[g]; j < group_begin[g + 1];
-                         ++j) {
-                        auto timestamp = batch_ts[order[j]];
-                        if (timestamp_hit(insert_ts, timestamp)) {
-                            callback(SegOffset(offset), timestamp);
-                        }
-                    }
-                });
-            // keys equal to `last` may continue in the next chunk
+                }
+            }
+            pos = end;
+            j = next;
         }
     };
 
     switch (primary_key_type_) {
         case DataType::INT64: {
-            merge_sorted([](const PkType& pk) { return std::get<int64_t>(pk); },
-                         [&](int i) {
-                             auto src = reinterpret_cast<const int64_t*>(
-                                 all_chunk_pins[i].get()->RawData());
-                             return std::make_pair(
-                                 pk_column->chunk_row_nums(i),
-                                 [src](size_t r) { return src[r]; });
-                         });
+            auto num_chunk = pk_column->num_chunks();
+            for (int i = 0; i < num_chunk; ++i) {
+                const auto& pw = all_chunk_pins[i];
+                auto src =
+                    reinterpret_cast<const int64_t*>(pw.get()->RawData());
+                auto chunk_row_num = pk_column->chunk_row_nums(i);
+                if (keys_sorted) {
+                    search_sorted_chunk(
+                        chunk_row_num,
+                        pk_column->GetNumRowsUntilChunk(i),
+                        [&](size_t offset) { return src[offset]; },
+                        [&](size_t j) { return std::get<int64_t>(pks[j]); });
+                    continue;
+                }
+                for (size_t j = 0; j < pks.size(); j++) {
+                    // get int64 pks
+                    auto target = std::get<int64_t>(pks[j]);
+                    auto timestamp = get_timestamp(j);
+                    auto it = std::lower_bound(
+                        src,
+                        src + chunk_row_num,
+                        target,
+                        [](const int64_t& elem, const int64_t& value) {
+                            return elem < value;
+                        });
+                    auto num_rows_until_chunk =
+                        pk_column->GetNumRowsUntilChunk(i);
+                    for (; it != src + chunk_row_num && *it == target; ++it) {
+                        auto offset = it - src + num_rows_until_chunk;
+                        auto insert_ts = read_ts(offset);
+                        if (timestamp_hit(insert_ts, timestamp)) {
+                            callback(SegOffset(offset), timestamp);
+                        }
+                    }
+                }
+            }
+
             break;
         }
         case DataType::VARCHAR: {
-            merge_sorted(
-                [](const PkType& pk) {
-                    return std::string_view(std::get<std::string>(pk));
-                },
-                [&](int i) {
-                    auto string_chunk =
-                        static_cast<StringChunk*>(all_chunk_pins[i].get());
-                    return std::make_pair(
-                        string_chunk->RowNums(), [string_chunk](size_t r) {
-                            return string_chunk->operator[](r);
+            auto num_chunk = pk_column->num_chunks();
+            for (int i = 0; i < num_chunk; ++i) {
+                // TODO @xiaocai2333, @sunby: chunk need to record the min/max.
+                auto num_rows_until_chunk = pk_column->GetNumRowsUntilChunk(i);
+                const auto& pw = all_chunk_pins[i];
+                auto string_chunk = static_cast<StringChunk*>(pw.get());
+                if (keys_sorted) {
+                    search_sorted_chunk(
+                        string_chunk->RowNums(),
+                        num_rows_until_chunk,
+                        [&](size_t offset) { return (*string_chunk)[offset]; },
+                        [&](size_t j) -> std::string_view {
+                            return std::get<std::string>(pks[j]);
                         });
-                });
+                    continue;
+                }
+                for (size_t j = 0; j < pks.size(); ++j) {
+                    // get varchar pks
+                    auto& target = std::get<std::string>(pks[j]);
+                    auto timestamp = get_timestamp(j);
+                    auto offset = string_chunk->binary_search_string(target);
+                    for (; offset != -1 && offset < string_chunk->RowNums() &&
+                           string_chunk->operator[](offset) == target;
+                         ++offset) {
+                        auto segment_offset = offset + num_rows_until_chunk;
+                        auto insert_ts = read_ts(segment_offset);
+                        if (timestamp_hit(insert_ts, timestamp)) {
+                            callback(SegOffset(segment_offset), timestamp);
+                        }
+                    }
+                }
+            }
             break;
         }
         default: {
@@ -5336,61 +5441,13 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
                  const Timestamp* timestamps,
                  const std::function<void(const SegOffset offset,
                                           const Timestamp ts)>& callback) {
-              auto snapshot = CapturePublishedState();
-              auto runtime = snapshot->runtime;
-              if (snapshot->commit_ts != 0) {
-                  // For import segments with commit_ts, row timestamps are
-                  // overwritten to commit_ts. Filter with the same published
-                  // snapshot used for PK lookup, so pre-commit and
-                  // same-timestamp deletes never reach DeletedRecord.
-                  auto delete_is_after_insert = [&](size_t i) {
-                      return timestamps[i] > snapshot->commit_ts;
-                  };
-                  if (!is_sorted_by_pk_) {
-                      if (runtime != nullptr &&
-                          runtime->virtual_pk2offset != nullptr) {
-                          for (size_t i = 0; i < pks.size(); i++) {
-                              if (!delete_is_after_insert(i)) {
-                                  continue;
-                              }
-                              for (auto offset :
-                                   runtime->virtual_pk2offset->find(pks[i])) {
-                                  callback(SegOffset(offset), timestamps[i]);
-                              }
-                          }
-                          return;
-                      }
-                      auto pk_index = PinPkIndex(runtime, nullptr);
-                      auto* pk_cell = pk_index.get();
-                      if (pk_cell == nullptr || !pk_cell->has_pk2offset()) {
-                          return;
-                      }
-                      for (size_t i = 0; i < pks.size(); i++) {
-                          if (!delete_is_after_insert(i)) {
-                              continue;
-                          }
-                          auto offsets = pk_cell->pk2offset().find(pks[i]);
-                          for (auto offset : offsets) {
-                              callback(SegOffset(offset), timestamps[i]);
-                          }
-                      }
-                  } else {
-                      // read_ts() inside search_batch_pks yields commit_ts for
-                      // these segments, so insert_ts < delete_ts with
-                      // include_same_ts=false is delete_is_after_insert.
-                      this->search_batch_pks(
-                          pks,
-                          [&](const size_t idx) { return timestamps[idx]; },
-                          false,
-                          callback);
-                  }
-              } else {
-                  this->search_batch_pks(
-                      pks,
-                      [&](const size_t idx) { return timestamps[idx]; },
-                      false,
-                      callback);
-              }
+              // PK lookup and insertion timestamps (including commit_ts for
+              // imported segments) come from one published snapshot.
+              this->search_batch_pks(
+                  pks,
+                  [&](const size_t idx) { return timestamps[idx]; },
+                  false,
+                  callback);
           },
           segment_id)) {
     if (schema->index_meta() != index_meta) {
@@ -7273,11 +7330,8 @@ ChunkedSegmentSealedImpl::Delete(int64_t size,
     std::vector<PkType> pks(size);
     ParsePksFromIDs(pks, primary_key_type_, *ids);
 
-    // filter out the deletions that the primary key not exists
-    std::vector<std::tuple<Timestamp, PkType>> ordering(size);
-    for (int i = 0; i < size; i++) {
-        ordering[i] = std::make_tuple(timestamps_raw[i], pks[i]);
-    }
+    std::vector<Timestamp> sorted_timestamps;
+    sorted_timestamps.reserve(size);
     // If PK state is unavailable (for example, only metadata is loaded by the
     // Go-side cache), filtering could lose deletions, so preserve them all.
     auto pk_index = PinPkIndex(runtime, nullptr);
@@ -7286,35 +7340,48 @@ ChunkedSegmentSealedImpl::Delete(int64_t size,
     auto has_pk_index =
         virtual_pk2offset != nullptr ||
         (pk_index.get() != nullptr && !pk_index.get()->empty_pks());
-    if (has_pk_index) {
-        auto end = std::remove_if(
-            ordering.begin(),
-            ordering.end(),
-            [&](const std::tuple<Timestamp, PkType>& record) {
-                if (virtual_pk2offset != nullptr) {
-                    return !virtual_pk2offset->contain(std::get<1>(record));
-                }
-                return !pk_index.get()->contain(std::get<1>(record));
-            });
-        size = end - ordering.begin();
-        ordering.resize(size);
+    size_t retained = 0;
+    for (size_t i = 0; i < pks.size(); ++i) {
+        if (has_pk_index &&
+            !(virtual_pk2offset != nullptr ? virtual_pk2offset->contain(pks[i])
+                                           : pk_index.get()->contain(pks[i]))) {
+            continue;
+        }
+        if (retained != i) {
+            pks[retained] = std::move(pks[i]);
+        }
+        sorted_timestamps.push_back(timestamps_raw[i]);
+        ++retained;
     }
-    if (size == 0) {
+    pks.resize(retained);
+    if (pks.empty()) {
         return SegcoreError::success();
     }
 
-    // step 1: sort timestamp
-    std::sort(ordering.begin(), ordering.end());
-    std::vector<PkType> sort_pks(size);
-    std::vector<Timestamp> sort_timestamps(size);
-
-    for (int i = 0; i < size; i++) {
-        auto [t, pk] = ordering[i];
-        sort_timestamps[i] = t;
-        sort_pks[i] = pk;
-    }
-
-    deleted_record_->StreamPush(std::move(sort_pks), sort_timestamps.data());
+    const bool use_sorted_search = UseSortedDeleteSearch(*snapshot, false);
+    ReorderDeleteBatch(pks, sorted_timestamps, [&](size_t a, size_t b) {
+        if (use_sorted_search) {
+            // Preserve ascending delete timestamps for each physical row,
+            // while enabling a forward search through the sorted PK column.
+            return std::tie(pks[a], sorted_timestamps[a]) <
+                   std::tie(pks[b], sorted_timestamps[b]);
+        }
+        return std::tie(sorted_timestamps[a], pks[a]) <
+               std::tie(sorted_timestamps[b], pks[b]);
+    });
+    deleted_record_->StreamPush(pks,
+                                sorted_timestamps.data(),
+                                [&](const std::vector<PkType>& batch,
+                                    const Timestamp* batch_ts,
+                                    const auto& callback) {
+                                    search_batch_pks_from_state(
+                                        snapshot,
+                                        use_sorted_search,
+                                        batch,
+                                        [&](size_t i) { return batch_ts[i]; },
+                                        false,
+                                        callback);
+                                });
     return SegcoreError::success();
 }
 

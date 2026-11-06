@@ -32,6 +32,32 @@
 namespace milvus::index {
 namespace {
 
+TEST(GallopingLowerBoundTest, EmptyRangeDoesNotReadValues) {
+    EXPECT_EQ(GallopingLowerBound(0,
+                                  0,
+                                  1,
+                                  [](size_t) {
+                                      ADD_FAILURE() << "empty range was read";
+                                      return 0;
+                                  }),
+              0);
+}
+
+TEST(GallopingLowerBoundTest, ExponentialBracketDoesNotOverflow) {
+    const auto size = std::numeric_limits<size_t>::max();
+    auto value_at = [&](size_t i) {
+        EXPECT_LT(i, size);
+        return i;
+    };
+    for (size_t cursor : {size_t{0}, size_t{1}, size / 2, size - 1, size}) {
+        EXPECT_EQ(GallopingLowerBound(size, cursor, size, value_at), size);
+        if (cursor < size) {
+            EXPECT_EQ(GallopingLowerBound(size, cursor, size - 1, value_at),
+                      size - 1);
+        }
+    }
+}
+
 template <typename T>
 class SortedMembershipTest : public testing::Test {};
 using SortedMembershipTypes =
