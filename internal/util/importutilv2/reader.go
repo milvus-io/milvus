@@ -141,6 +141,10 @@ func (f *ReaderFactory) PrepareSnapshotDeletes(ctx context.Context, schema *sche
 	if err != nil {
 		return nil, err
 	}
+	end, err = snapshotReadEnd(f.options, end, source.GetSourceChannel())
+	if err != nil {
+		return nil, err
+	}
 	resolved, err := f.storage()
 	if err != nil {
 		return nil, err
@@ -171,21 +175,36 @@ func NewReader(ctx context.Context,
 	return NewReaderFactory(ctx, cm, storageConfig, options).NewReader(ctx, schema, importFile, bufferSize, snapshotDeleteBudget, nil)
 }
 
+// readerSource adapts a validated descriptor to the 1-4 contract the data
+// reader implements. Only this view is narrowed: never mutate the persisted
+// descriptor, and never expand L0 paths back into a segment, because a shared
+// task borrows its prepared bitmap instead of opening L0 again.
+func readerSource(source *internalpb.SnapshotImportSource, shared bool) *internalpb.SnapshotImportSource {
+	if source == nil {
+		return nil
+	}
+	switch {
+	case shared:
+		source = proto.Clone(source).(*internalpb.SnapshotImportSource)
+		source.Version = SnapshotSourceBaseVersion(source) - 4
+		source.SourceChannel = ""
+		source.SourcePartitionId = 0
+	case SnapshotSourceScoped(source):
+		// A per-PChannel bound rides on tsEnd, not on the descriptor, so the
+		// scope bit only has to leave the version. The clone keeps the channel
+		// for anything that reports which file was cut.
+		source = proto.Clone(source).(*internalpb.SnapshotImportSource)
+		source.Version = SnapshotSourceBaseVersion(source)
+	}
+	return source
+}
+
 func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema,
 	importFile *internalpb.ImportFile, options Options, bufferSize int, storageConfig *indexpb.StorageConfig,
 	snapshotDeleteBudget int64, shared *binlog.SnapshotL0Deletes,
 	encryption binlog.SourceEncryption,
 ) (Reader, error) {
-	source := importFile.GetSnapshotSource()
-	if shared != nil {
-		// Adapt only the validated reader view. Never expand L0 paths back
-		// into a segment or mutate the persisted descriptor: the reader must
-		// borrow the task's prepared bitmap instead of opening L0 again.
-		source = proto.Clone(source).(*internalpb.SnapshotImportSource)
-		source.Version -= 4
-		source.SourceChannel = ""
-		source.SourcePartitionId = 0
-	}
+	source := readerSource(importFile.GetSnapshotSource(), shared != nil)
 	if IsBackup(options) {
 		tsStart, tsEnd, err := ParseTimeRange(options)
 		if err != nil {
@@ -198,6 +217,10 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 				return nil, err
 			}
 			if source != nil {
+				tsEnd, err = snapshotReadEnd(options, tsEnd, importFile.GetSnapshotSource().GetSourceChannel())
+				if err != nil {
+					return nil, err
+				}
 				if shared != nil {
 					return binlog.NewStorageV3ManifestReaderWithSharedL0(ctx, cm, schema, storageConfig,
 						source.GetManifestPath(), tsStart, tsEnd, bufferSize, encryption, source, snapshotDeleteBudget, shared, validate)
