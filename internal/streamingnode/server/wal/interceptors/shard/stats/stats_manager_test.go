@@ -740,3 +740,29 @@ func TestBatchAllocationDoesNotChargeSuccessfulPrefixOnRetry(t *testing.T) {
 	require.Equal(t, ModifiedMetrics{Rows: 1, BinarySize: 15}, manager.GetStatsOfSegment(20).Modified)
 	require.Equal(t, uint64(55), manager.vchannelStats["v1"].Insert.BinarySize)
 }
+
+func TestAssignmentCapacityCheckDoesNotAccount(t *testing.T) {
+	stat := createSegmentStats(1, 10, 100)
+	manager := &StatsManager{segmentStats: map[int64]*SegmentStats{1: stat}}
+	manager.worker = newSealWorker(manager)
+	before := *stat
+	require.True(t, manager.CanAllocRows(1))
+	require.Equal(t, before, *stat)
+	stat.ReachLimit = true
+	before = *stat
+	require.False(t, manager.CanAllocRows(1))
+	require.Equal(t, before, *stat)
+	select {
+	case signal := <-manager.worker.sealNotifier:
+		require.EqualValues(t, 1, signal.segmentID)
+		require.Equal(t, policy.PolicyNameCapacity, signal.sealPolicy.Policy)
+	default:
+		t.Fatal("full segment lost its immediate capacity hint")
+	}
+	require.False(t, manager.CanAllocRows(999))
+	select {
+	case <-manager.worker.sealNotifier:
+		t.Fatal("missing segment generated a capacity hint")
+	default:
+	}
+}

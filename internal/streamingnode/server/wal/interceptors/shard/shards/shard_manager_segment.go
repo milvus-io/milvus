@@ -7,7 +7,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
@@ -130,30 +129,11 @@ func (m *shardManagerImpl) FlushSegment(msg message.ImmutableFlushMessageV2) {
 // AssignSegment assigns a segment for a assign segment request.
 // It uses the latest schema version from collection info.
 func (m *shardManagerImpl) AssignSegment(req *AssignSegmentRequest) (*AssignSegmentResult, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	uniqueKey := PartitionUniqueKey{CollectionID: req.CollectionID, PartitionID: req.PartitionID}
-	pm, ok := m.partitionManagers[uniqueKey]
-	if !ok {
-		return nil, ErrPartitionNotFound
+	results, err := m.AssignSegments([]*AssignSegmentRequest{req})
+	if err != nil {
+		return nil, err
 	}
-
-	// Populate SchemaVersion from the current collection info into req.
-	// Callers construct req without knowing the schema version; this is the
-	// single place that resolves and stamps it before forwarding to partitionManager.
-	if info := m.collections[req.CollectionID]; info != nil {
-		req.SchemaVersion = info.SchemaVersion()
-		req.RequiresStorageV3 = info.RequiresStorageV3()
-		req.RuntimeFlushSize = info.RuntimeFlushSize(req.ModifiedMetrics)
-	}
-
-	result, err := pm.AssignSegment(req)
-	if err == nil {
-		m.metrics.ObserveInsert(req.ModifiedMetrics.Rows, req.ModifiedMetrics.BinarySize)
-		return result, nil
-	}
-	return nil, err
+	return results[0], nil
 }
 
 // ApplyDelete: TODO move the L0 flush operation here.
@@ -268,56 +248,33 @@ func (m *shardManagerImpl) AssignSegments(requests []*AssignSegmentRequest) ([]*
 		if pm == nil {
 			return nil, ErrPartitionNotFound
 		}
-		if req.TimeTick <= pm.fencedAssignTimeTick {
-			return nil, ErrFencedAssign
-		}
 		if info := m.collections[req.CollectionID]; info != nil {
 			req.SchemaVersion = info.SchemaVersion()
 			req.RequiresStorageV3 = info.RequiresStorageV3()
 			req.RuntimeFlushSize = info.RuntimeFlushSize(req.ModifiedMetrics)
 		}
-		var tooOld bool
-		for _, segment := range pm.segments {
-			if segment.inner.State != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING {
-				continue
-			}
-			if req.TimeTick <= segment.CreateSegmentTimeTick() {
-				tooOld = true
-				continue
-			}
-			if state := resource.Resource().SegmentStatsManager().GetStatsOfSegment(segment.GetSegmentID()); state == nil || state.ShouldBeSealed() {
-				continue
-			}
-			selected[index] = segment
-			break
+		segment, err := pm.prepareAssignment(req)
+		if err != nil {
+			return nil, err
 		}
-		if selected[index] == nil {
-			if tooOld {
-				return nil, ErrTimeTickTooOld
-			}
-			pm.asyncAllocSegment(req.SchemaVersion, req.RequiresStorageV3)
-			return nil, ErrWaitForNewSegment
-		}
+		selected[index] = segment
 		allocations[index] = stats.Allocation{SegmentID: selected[index].GetSegmentID(), Modified: req.ModifiedMetrics, RuntimeFlushSize: req.RuntimeFlushSize}
 	}
-	for _, segment := range selected {
-		segment.ackSem.Inc()
+	// A capacity crossing can trigger sealing inside accounting. Hold every
+	// Ack before that notification; failed accounting releases the entire set.
+	results := make([]*AssignSegmentResult, len(requests))
+	for index, segment := range selected {
+		results[index] = segment.acquireAck()
 	}
 	if err := resource.Resource().SegmentStatsManager().AllocRowsBatch(allocations); err != nil {
-		for _, segment := range selected {
-			segment.ackSem.Dec()
+		for _, result := range results {
+			result.Ack()
 		}
 		return nil, ErrWaitForNewSegment
 	}
-	results := make([]*AssignSegmentResult, len(requests))
 	for index, req := range requests {
-		segment := selected[index]
-		if req.TxnSession != nil {
-			segment.txnSem.Inc()
-			req.TxnSession.RegisterCleanup(func() { segment.txnSem.Dec() }, req.TimeTick)
-		}
+		selected[index].registerTxnCleanup(req)
 		m.metrics.ObserveInsert(req.ModifiedMetrics.Rows, req.ModifiedMetrics.BinarySize)
-		results[index] = &AssignSegmentResult{SegmentID: segment.GetSegmentID(), Acknowledge: &segment.ackSem}
 	}
 	return results, nil
 }

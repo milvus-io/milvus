@@ -1982,9 +1982,6 @@ func (it *UpsertTask) deletePreExecute(ctx context.Context) error {
 }
 
 func (it *UpsertTask) PreExecute(ctx context.Context) error {
-	if err := requireUpsertWALGeneration(); err != nil {
-		return err
-	}
 	if it.req.Namespace != nil {
 		return merr.WrapErrParameterInvalidMsg("Upsert WAL does not support namespace requests")
 	}

@@ -45,8 +45,6 @@ var (
 
 	ErrTimeTickTooOld    = errors.New("time tick is too old")
 	ErrWaitForNewSegment = errors.New("wait for new segment")
-	ErrNotGrowing        = errors.New("segment is not growing")
-	ErrNotEnoughSpace    = stats.ErrNotEnoughSpace
 )
 
 // ShardManagerRecoverParam is the parameter for recovering the segment assignment manager.

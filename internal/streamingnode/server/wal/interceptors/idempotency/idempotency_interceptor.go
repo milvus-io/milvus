@@ -151,11 +151,6 @@ func (impl *idempotencyInterceptor) appendSingleMessage(ctx context.Context, msg
 }
 
 func (impl *idempotencyInterceptor) appendIdempotentMessage(ctx context.Context, msg message.MutableMessage, key IdempotencyKey, append interceptors.Append) (message.MessageID, error) {
-	if msg.MessageType() == message.MessageTypeUpsert {
-		if err := message.ValidateUpsertEnvelope(msg); err != nil {
-			return nil, status.NewUnrecoverableError("invalid Upsert envelope: %v", err)
-		}
-	}
 	insertResult, err := getInsertResultFromInsertMessage(ctx, msg)
 	if err != nil {
 		return nil, err
@@ -455,7 +450,7 @@ func getInsertResultFromInsertMessage(ctx context.Context, msg message.MutableMe
 		if err != nil {
 			return nil, status.NewInvalidArgument("malformed Upsert message header")
 		}
-		result, err = message.UpsertRetryResult(ctx, typed)
+		result, err = message.BuildUpsertResult(ctx, typed)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil, ctx.Err()

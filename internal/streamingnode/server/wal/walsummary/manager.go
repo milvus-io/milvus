@@ -344,7 +344,7 @@ func insertResultOf(ctx context.Context, msg message.ImmutableMessage) (*message
 		if replicated {
 			return nil, true, nil
 		}
-		result, err := message.UpsertRetryResult(ctx, msg)
+		result, err := message.BuildUpsertResult(ctx, msg)
 		return result, true, err
 	case message.MessageTypeTxn:
 		txn := message.AsImmutableTxnMessage(msg)

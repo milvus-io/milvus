@@ -4,13 +4,13 @@ import (
 	"context"
 	"math"
 
-	"github.com/cockroachdb/errors"
-
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
@@ -86,19 +86,6 @@ func (m *partitionManager) AddSegment(s *segmentAllocManager) {
 // GetSegmentManager returns the segment manager of the given segment ID.
 func (m *partitionManager) GetSegmentManager(segmentID int64) *segmentAllocManager {
 	return m.segments[segmentID]
-}
-
-// AssignSegment assigns a segment for a assign segment request.
-// req.SchemaVersion must be set by the caller before invoking.
-func (m *partitionManager) AssignSegment(req *AssignSegmentRequest) (*AssignSegmentResult, error) {
-	// !!! We have promised that the fencedAssignTimeTick is always less than new incoming insert request by Barrier TimeTick of ManualFlush.
-	// So it's just a promise check here.
-	// If the request time tick is less than the fenced time tick, the assign operation is fenced.
-	// A special error will be returned to indicate the assign operation is fenced.
-	if req.TimeTick <= m.fencedAssignTimeTick {
-		return nil, ErrFencedAssign
-	}
-	return m.assignSegment(req)
 }
 
 // WaitPendingGrowingSegmentReady waits until the growing segment is ready.
@@ -190,26 +177,31 @@ func (m *partitionManager) MustRemoveFlushedSegment(segmentID int64) {
 	delete(m.segments, segmentID)
 }
 
-// assignSegment assigns a segment for a assign segment request and return should trigger a seal operation.
-func (m *partitionManager) assignSegment(req *AssignSegmentRequest) (*AssignSegmentResult, error) {
-	// Alloc segment for insert at allocated segments.
+// prepareAssignment selects a candidate without accounting or references.
+// The caller holds shardManagerImpl.mu through final batch accounting. This
+// selection is not a reservation; StatsManager rechecks the entire batch.
+func (m *partitionManager) prepareAssignment(req *AssignSegmentRequest) (*segmentAllocManager, error) {
+	if req.TimeTick <= m.fencedAssignTimeTick {
+		return nil, ErrFencedAssign
+	}
 	var lastErr error
 	for _, segment := range m.segments {
-		result, err := segment.AllocRows(req)
-		if err == nil {
-			return result, nil
+		// Preserve the legacy single-assignment TimeTick precedence, including
+		// flushed segments still awaiting their asynchronous Flush message.
+		if req.TimeTick <= segment.CreateSegmentTimeTick() {
+			lastErr = ErrTimeTickTooOld
+			continue
 		}
-		if errors.Is(err, ErrTimeTickTooOld) {
-			// Return error directly.
-			lastErr = err
+		if segment.inner.State != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING {
+			continue
+		}
+		if resource.Resource().SegmentStatsManager().CanAllocRows(segment.GetSegmentID()) {
+			return segment, nil
 		}
 	}
 	if lastErr != nil {
 		return nil, lastErr
 	}
-
-	// There is no segment can be allocated for the insert request.
-	// Ask a new pending segment to insert.
 	m.asyncAllocSegment(req.SchemaVersion, req.RequiresStorageV3)
 	return nil, ErrWaitForNewSegment
 }

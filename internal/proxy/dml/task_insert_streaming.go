@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -54,7 +55,13 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 	var msgs []message.MutableMessage
 	var err error
 	idempotency := it.idempotentInsertDecoration()
-	msgs, err = repackUpsertMessages(ctx, it.GetMetaCache(), channelNames, it.insertMsg, it.result.GetIDs(), it.partitionKeys, it.schema, it.schemaVersion, ez, nil, idempotency, nil, 0)
+	if paramtable.Get().StreamingCfg.EnableUpsertMessage.GetAsBool() {
+		msgs, err = repackUpsertMessages(ctx, it.GetMetaCache(), channelNames, it.insertMsg, it.result.GetIDs(), it.partitionKeys, it.schema, it.schemaVersion, ez, nil, idempotency, nil, 0)
+	} else if it.partitionKeys == nil {
+		msgs, err = repackInsertDataForStreamingService(ctx, it.GetMetaCache(), channelNames, it.insertMsg, it.result, ez, it.schemaVersion, nil, idempotency)
+	} else {
+		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(ctx, it.GetMetaCache(), channelNames, it.insertMsg, it.result, it.partitionKeys, ez, it.schema, it.schemaVersion, nil, idempotency)
+	}
 	if err != nil {
 		mlog.Warn(ctx, "assign segmentID and repack insert data failed", mlog.Err(err))
 		it.result.Status = merr.Status(err)
