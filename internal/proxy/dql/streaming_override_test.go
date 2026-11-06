@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/util/searchutil"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
@@ -228,6 +229,27 @@ func TestQueryTaskRejectsInvalidStreamingOverrides(t *testing.T) {
 				require.Equal(t, 1, legacy.queryCalled)
 			}
 		}
+	}
+}
+
+func TestQueryFunctionChainsStayOnBatch(t *testing.T) {
+	for _, force := range []string{"", "false", "true"} {
+		t.Run("override="+force, func(t *testing.T) {
+			legacy := &fakeLegacyQueryClient{reduceStreamEnabled: true, queryResult: &queryclient.LegacyQueryResult{}}
+			task := newQueryViewQueryTask(legacy, 1)
+			task.request.FunctionChains = []*schemapb.FunctionChain{{Stage: schemapb.FunctionChainStage_FunctionChainStageQueryScan}}
+			if force != "" {
+				task.request.QueryParams = []*commonpb.KeyValuePair{{Key: "enableReduceStream", Value: force}}
+			}
+			err := task.Execute(context.Background())
+			if force == "true" {
+				require.ErrorContains(t, err, "not supported")
+				require.Zero(t, legacy.queryCalled)
+			} else {
+				require.NoError(t, err)
+				require.False(t, legacy.lastQueryRequest.AllowStreaming)
+			}
+		})
 	}
 }
 
