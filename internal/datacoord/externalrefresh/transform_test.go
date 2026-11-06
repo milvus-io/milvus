@@ -132,7 +132,7 @@ func TestExternalRefreshTransformOrigin(t *testing.T) {
 	replacement = proto.Clone(mt.Segments.GetSegment(30).SegmentInfo).(*datapb.SegmentInfo)
 	replacement.ManifestPath = packed.MarshalManifestPath("files/insert_log/100/1/30", 2)
 	starts := map[string]uint64{channel: 500}
-	require.NoError(t, applyExternalCollectionSegmentUpdateAtFence(ctx, mt, collectionID, []int64{10, 30}, nil, []*datapb.SegmentInfo{patched, replacement}, starts))
+	require.NoError(t, applyExternalCollectionSegmentUpdateAtFence(ctx, mt, collectionID, []int64{10, 30}, nil, []*datapb.SegmentInfo{patched, replacement}, starts, false))
 	_, err = mt.DataViewManager.RecomputeNow(ctx, collectionID, mt.LoadableProjection)
 	require.NoError(t, err)
 	mt.DataViewManager = recoverManager()
@@ -143,9 +143,9 @@ func TestExternalRefreshTransformOrigin(t *testing.T) {
 	require.Equal(t, uint64(500), shard.GetCompactedTransformStartAfterTimetick())
 	require.Equal(t, []uint64{500, 500}, shard.GetPartitions()[0].GetSegmentTransformStartAfterTimeticks())
 	ref.Deref()
-	require.NoError(t, applyExternalCollectionSegmentUpdateAtFence(ctx, mt, collectionID, []int64{10, 30}, nil, []*datapb.SegmentInfo{patched, replacement}, starts))
+	require.NoError(t, applyExternalCollectionSegmentUpdateAtFence(ctx, mt, collectionID, []int64{10, 30}, nil, []*datapb.SegmentInfo{patched, replacement}, starts, false))
 	require.Equal(t, uint64(500), mt.Segments.GetSegment(10).GetTransformStartAfterTimetick())
-	require.Error(t, applyExternalCollectionSegmentUpdateAtFence(ctx, mt, collectionID, nil, nil, nil, map[string]uint64{"missing": 500}))
+	require.Error(t, applyExternalCollectionSegmentUpdateAtFence(ctx, mt, collectionID, nil, nil, nil, map[string]uint64{"missing": 500}, false))
 	// Missing creation metadata must stay retriable rather than borrowing a checkpoint.
 	_, err = mt.DataViewManager.OnCreateCollection(ctx, dataview.CreateCollectionDataViewEvent{CollectionID: 200, VChannels: []string{channel}})
 	require.NoError(t, err)
@@ -166,5 +166,5 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 	updatedSegments []*datapb.SegmentInfo,
 	logFields ...mlog.Field,
 ) error {
-	return applyExternalCollectionSegmentUpdateAtFence(ctx, mt, collectionID, baselineSegmentIDs, keptSegmentIDs, updatedSegments, nil, logFields...)
+	return applyExternalCollectionSegmentUpdateAtFence(ctx, mt, collectionID, baselineSegmentIDs, keptSegmentIDs, updatedSegments, nil, false, logFields...)
 }
