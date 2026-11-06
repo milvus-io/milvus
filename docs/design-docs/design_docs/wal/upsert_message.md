@@ -93,7 +93,9 @@ No support is added to the legacy MsgPack pipeline or msgdispatcher. Production 
 
 CDC forwards the primary's logical rows, placement partitions, CAS metadata, mapping, and explicit delete effects. The secondary preserves these logical effects and allocates its own segment IDs. It does not repeat PK-index decisions. Replicated messages bypass the local client idempotency window. Transaction replay uses the final Commit TimeTick.
 
-Deployment uses reader-first activation. streaming.wal.enableUpsertMessage defaults to false. auto remains false because the new format has no assigned release capability. The old draft 3.0.7 threshold does not describe this format. The old draft switch cannot enable this new capability. Explicit enablement requires operators to verify all readers, CDC targets, and the native query-path dependency first.
+Deployment uses reader-first activation. streaming.wal.enableUpsertMessage defaults to auto and uses the standard 3.1.0 version gate. In a distributed deployment, auto remains false until all registered online components in the local cluster reach 3.1.0 and the one-minute stability window elapses. The standard embedded-etcd path resolves the gate from the local process version because that process is the whole cluster. Explicit false keeps the legacy format. Explicit true bypasses the version check; operators must verify compatible readers, the native query path, and CDC targets before forcing activation. The old draft configuration keys cannot enable this format.
+
+Automatic switching checks only the local cluster version condition. It does not verify CDC target compatibility or provide a downgrade guarantee. CDC deployment management must ensure compatible targets before activation.
 
 When the switch is false, Proxy selects the existing WAL format before packing. Insert requests produce Insert messages. Upsert and partial-update requests produce the existing Insert/Delete transaction with the same CAS metadata. This path retains partition splitting, size splitting, and Insert-header retry results. When true, Proxy selects Upsert messages and uses the format described above.
 
@@ -101,7 +103,7 @@ The selection covers the complete packing attempt. An append error does not trig
 
 Client retries use the same per-VChannel idempotency key and original row offsets through either format. The existing bounded window and unknown-outcome contract still apply. Unkeyed requests do not gain an exactly-once guarantee from format selection.
 
-Unknown-message skipping is not a compatibility strategy. Mixed-version operation and downgrade across retained new-format history are unsupported until the required reader capability is deployed. The operator-managed switch does not provide automatic mixed-version safety or a downgrade guarantee.
+Unknown-message skipping is not a compatibility strategy. Mixed-version operation and downgrade across retained new-format history are unsupported until the required reader capability is deployed. The standard version gate does not provide a downgrade guarantee for retained Upsert history.
 
 ## Validation boundaries
 
