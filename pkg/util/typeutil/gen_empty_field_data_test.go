@@ -63,14 +63,33 @@ func TestGenEmptyScalarFieldDataLayout(t *testing.T) {
 				require.NotNil(t, field.GetScalars().GetLongData())
 				require.Empty(t, field.GetScalars().GetLongData().GetData())
 			case schemapb.DataType_Timestamptz:
-				// Preserve the shared helper's historical empty-result layout.
-				require.NotNil(t, field.GetScalars().GetLongData())
-				require.Nil(t, field.GetScalars().GetTimestamptzData())
-				require.Empty(t, field.GetScalars().GetLongData().GetData())
+				// A Timestamptz column carries its payload in the field-specific
+				// TimestamptzData variant, the same one the other producers and
+				// consumers of Timestamptz FieldData switch on.
+				require.Nil(t, field.GetScalars().GetLongData())
+				require.NotNil(t, field.GetScalars().GetTimestamptzData())
+				require.Empty(t, field.GetScalars().GetTimestamptzData().GetData())
 			default:
 				require.NotNil(t, field.GetScalars().GetStringData())
 				require.Empty(t, field.GetScalars().GetStringData().GetData())
 			}
 		})
 	}
+}
+
+func TestGenEmptyTimestamptzFieldData(t *testing.T) {
+	field := &schemapb.FieldSchema{
+		Name:     "updated_at_tz",
+		FieldID:  101,
+		DataType: schemapb.DataType_Timestamptz,
+	}
+
+	data, err := GenEmptyFieldData(field)
+	require.NoError(t, err)
+	require.Equal(t, schemapb.DataType_Timestamptz, data.GetType())
+	// A Timestamptz column carries its payload in the field-specific
+	// TimestamptzData variant, the same one every producer and consumer of
+	// Timestamptz FieldData switches on; LongData is the Int64 payload.
+	require.NotNil(t, data.GetScalars().GetTimestamptzData())
+	require.Nil(t, data.GetScalars().GetLongData())
 }
