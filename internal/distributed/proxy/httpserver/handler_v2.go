@@ -439,6 +439,7 @@ type (
 
 func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 	return func(gCtx *gin.Context) {
+		serverUnknownFieldPolicy := paramtable.Get().HTTPCfg.V2UnknownFieldPolicy.GetValue()
 		req := newReq()
 		var bindErr error
 		if dataReq, ok := req.(*CollectionDataReq); ok {
@@ -465,6 +466,15 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 					HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
 				})
 			}
+			return
+		}
+		unknownFieldPolicy, err := resolveV2UnknownFieldPolicy(gCtx, serverUnknownFieldPolicy)
+		if err != nil {
+			HTTPAbortReturn(gCtx, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			return
+		}
+		if err := checkV2UnknownFields(gCtx, req, unknownFieldPolicy); err != nil {
+			HTTPAbortReturn(gCtx, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 			return
 		}
 		dbName := ""
