@@ -60,6 +60,12 @@ type searchIteratorV2 struct {
 	option SearchIteratorOption
 	schema *entity.Schema
 	limit  int64
+	db     string
+
+	// sessionTs is the snapshot timestamp returned by the server on the
+	// first page. It is pinned as the guarantee_timestamp for all subsequent
+	// pages so every batch reads from the same data snapshot.
+	sessionTs uint64
 }
 
 func (it *searchIteratorV2) Next(ctx context.Context) (ResultSet, error) {
@@ -90,6 +96,16 @@ func (it *searchIteratorV2) next(ctx context.Context) (ResultSet, error) {
 	if err != nil {
 		return ResultSet{}, err
 	}
+	// pin the request to the database captured at iterator creation, matching
+	// the direct Search path, so a concurrent UseDatabase cannot route the
+	// pages to another database
+	req.DbName = it.db
+
+	// pin the server-provided session timestamp once the first page has
+	// established the snapshot, so every subsequent page reads it
+	if it.sessionTs > 0 {
+		req.GuaranteeTimestamp = it.sessionTs
+	}
 
 	var rs ResultSet
 
@@ -98,6 +114,10 @@ func (it *searchIteratorV2) next(ctx context.Context) (ResultSet, error) {
 		err = merr.CheckRPCCall(resp, err)
 		if err != nil {
 			return err
+		}
+
+		if sessionTs := resp.GetSessionTs(); sessionTs > 0 {
+			it.sessionTs = sessionTs
 		}
 
 		iteratorInfo := resp.GetResults().GetSearchIteratorV2Results()
@@ -131,6 +151,7 @@ func (it *searchIteratorV2) setupCollectionID(ctx context.Context) error {
 	return it.client.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 			CollectionName: opt.collectionName,
+			DbName:         it.db,
 		})
 		if err := merr.CheckRPCCall(resp, err); err != nil {
 			return err
@@ -153,11 +174,18 @@ func (it *searchIteratorV2) probeCompatiblity(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	req.DbName = it.db
 	return it.client.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.Search(ctx, req)
 		err = merr.CheckRPCCall(resp, err)
 		if err != nil {
 			return err
+		}
+
+		// pin the probe's session timestamp so even the first real page reads
+		// the same MVCC snapshot the server selected for the probe
+		if sessionTs := resp.GetSessionTs(); sessionTs > 0 {
+			it.sessionTs = sessionTs
 		}
 
 		if resp.GetResults().GetSearchIteratorV2Results() == nil || resp.GetResults().GetSearchIteratorV2Results().GetToken() == "" {
@@ -176,6 +204,7 @@ func newSearchIteratorV2(ctx context.Context, client *Client, option SearchItera
 		client: client,
 		option: option,
 		limit:  option.Limit(),
+		db:     client.getCurrentDB(),
 	}
 	if err := iter.setupCollectionID(ctx); err != nil {
 		return nil, err
@@ -204,6 +233,12 @@ func newSearchIteratorV1(_ *Client) (*searchIteratorV1, error) {
 // SearchIterator creates a search iterator from a collection.
 //
 // If the server supports search iterator V2, it creates a search iterator V2.
+//
+// Note: the iterator pins the server-returned session timestamp
+// (SearchResults.session_ts) as the guarantee_timestamp for all subsequent
+// pages, so every batch reads from the same data snapshot - this matches the
+// pymilvus/java/cpp/rust SDKs. When the server does not return a session
+// timestamp, requests are sent without an explicit guarantee_timestamp.
 func (c *Client) SearchIterator(ctx context.Context, option SearchIteratorOption, callOptions ...grpc.CallOption) (SearchIterator, error) {
 	if err := option.ValidateParams(); err != nil {
 		return nil, err
@@ -232,6 +267,7 @@ type queryIterator struct {
 	client *Client
 	option QueryIteratorOption
 	schema *entity.Schema
+	db     string
 
 	// pagination state
 	expr         string   // base expression from option
@@ -243,6 +279,11 @@ type queryIterator struct {
 
 	// cached results
 	cached ResultSet
+
+	// sessionTs is the snapshot timestamp returned by the server on the
+	// first page. It is pinned as the guarantee_timestamp for all subsequent
+	// pages so every batch reads from the same data snapshot.
+	sessionTs uint64
 }
 
 // composeIteratorExpr builds the filter expression for pagination.
@@ -279,6 +320,16 @@ func (it *queryIterator) fetchNextBatch(ctx context.Context) (ResultSet, error) 
 	if err != nil {
 		return ResultSet{}, err
 	}
+	// pin the request to the database captured at iterator creation, matching
+	// the direct Query path, so a concurrent UseDatabase cannot route the
+	// pages to another database
+	req.DbName = it.db
+
+	// pin the server-provided session timestamp once the first page has
+	// established the snapshot, so every subsequent page reads it
+	if it.sessionTs > 0 {
+		req.GuaranteeTimestamp = it.sessionTs
+	}
 
 	// override expression and limit for pagination
 	req.Expr = it.composeIteratorExpr()
@@ -293,6 +344,10 @@ func (it *queryIterator) fetchNextBatch(ctx context.Context) (ResultSet, error) 
 		err = merr.CheckRPCCall(resp, err)
 		if err != nil {
 			return err
+		}
+
+		if sessionTs := resp.GetSessionTs(); sessionTs > 0 {
+			it.sessionTs = sessionTs
 		}
 
 		resultSet, err = it.client.parseQueryResult(it.schema, resp.GetOutputFields(), resp)
@@ -383,8 +438,9 @@ func newQueryIterator(ctx context.Context, client *Client, option QueryIteratorO
 	if err != nil {
 		return nil, err
 	}
+	db := client.getCurrentDB()
 
-	collection, err := client.getCollection(ctx, req.GetCollectionName())
+	collection, err := client.getCollectionInDB(ctx, db, req.GetCollectionName())
 	if err != nil {
 		return nil, err
 	}
@@ -412,6 +468,7 @@ func newQueryIterator(ctx context.Context, client *Client, option QueryIteratorO
 		client:       client,
 		option:       option,
 		schema:       collection.Schema,
+		db:           db,
 		expr:         req.GetExpr(),
 		outputFields: outputFields,
 		pkField:      pkField,
@@ -430,6 +487,12 @@ func newQueryIterator(ctx context.Context, client *Client, option QueryIteratorO
 }
 
 // QueryIterator creates a query iterator from a collection.
+//
+// Note: the iterator pins the server-returned session timestamp
+// (QueryResults.session_ts) as the guarantee_timestamp for all subsequent
+// pages, so every batch reads from the same data snapshot - this matches the
+// pymilvus/java/cpp/rust SDKs. When the server does not return a session
+// timestamp, requests are sent without an explicit guarantee_timestamp.
 func (c *Client) QueryIterator(ctx context.Context, option QueryIteratorOption, callOptions ...grpc.CallOption) (QueryIterator, error) {
 	if err := option.ValidateParams(); err != nil {
 		return nil, err
