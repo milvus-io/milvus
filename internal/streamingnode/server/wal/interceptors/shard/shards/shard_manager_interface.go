@@ -4,6 +4,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
@@ -43,6 +44,13 @@ type ShardManager interface {
 	FlushSegment(msg message.ImmutableFlushMessageV2)
 
 	AssignSegment(req *AssignSegmentRequest) (*AssignSegmentResult, error)
+
+	AssignSegments(requests []*AssignSegmentRequest) ([]*AssignSegmentResult, error)
+
+	// GetWriteSchema returns a snapshot with a ready collection schema or an error.
+	GetWriteSchema(collectionID int64, vchannel string) (*streamingpb.CollectionSchemaOfVChannel, error)
+
+	RecordDelete(vchannel string, timeTick, rows, binarySize uint64)
 
 	ApplyDelete(msg message.MutableDeleteMessageV1) error
 

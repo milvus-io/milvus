@@ -271,3 +271,27 @@ func TestUpsertFunctionMaterializationPreservesCallerCancellation(t *testing.T) 
 		require.False(t, status.AsStreamingError(err).IsUnrecoverable())
 	})
 }
+
+func TestUpsertCASMismatchSkipsMaterialization(t *testing.T) {
+	mockey.PatchConvey("CAS mismatch", t, func() {
+		gate := &paramtable.Get().FunctionCfg.EnableWriteBeforeMaterialization
+		previous := gate.SwapTempValue("true")
+		defer gate.SwapTempValue(previous)
+		msg, schema := upsertFunctionFixture()
+		msg.Properties().ToRawMap()["_puc"] = ""
+		base := mock_shards.NewMockShardManager(t)
+		base.EXPECT().CheckIfCollectionSchemaVersionMatch(mock.Anything).Return(int32(1), nil).Once()
+		manager := &upsertMaterializationManager{materialize: func(context.Context, int64, string, int32, function.InsertMessage) (bool, error) {
+			t.Fatal("invalid CAS reached materialization")
+			return false, nil
+		}}
+		mockey.Mock(function.GetManager).Return(manager).Build()
+		interceptor := &shardInterceptor{shardManager: &upsertSchemaManager{MockShardManager: base, schema: schema}}
+		interceptor.initOpTable()
+		_, err := interceptor.DoAppend(t.Context(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+			t.Fatal("invalid CAS reached append")
+			return nil, nil
+		})
+		require.ErrorContains(t, err, "CAS marker and proof differ")
+	})
+}

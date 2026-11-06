@@ -18,7 +18,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/fastpb"
@@ -459,14 +458,6 @@ func (impl *shardInterceptor) Close() {
 	}
 }
 
-type writeSchemaProvider interface {
-	GetWriteSchema(int64, string) (*streamingpb.CollectionSchemaOfVChannel, error)
-}
-
-type deletePressureRecorder interface {
-	RecordDelete(vchannel string, timeTick, rows, binarySize uint64)
-}
-
 // mutableUpsertInsert exposes nested row content to the existing function manager.
 type mutableUpsertInsert struct {
 	message.MutableUpsertMessageV2
@@ -491,21 +482,6 @@ func (u mutableUpsertInsert) OverwriteBody(insert *msgpb.InsertRequest) {
 	u.MutableUpsertMessageV2.OverwriteBody(body)
 }
 
-func (impl *shardInterceptor) writeSchema(collectionID int64, vchannel string) (*schemapb.CollectionSchema, error) {
-	provider, ok := impl.shardManager.(writeSchemaProvider)
-	if !ok {
-		return nil, status.NewInner("shard write schema is not available")
-	}
-	schema, err := provider.GetWriteSchema(collectionID, vchannel)
-	if err != nil {
-		return nil, err
-	}
-	if schema.GetSchema() == nil {
-		return nil, status.NewInner("shard write schema is not ready")
-	}
-	return schema.GetSchema(), nil
-}
-
 func (impl *shardInterceptor) handleUpsert(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	upsert, err := message.AsMutableUpsertMessageV2(msg)
 	if err != nil {
@@ -524,11 +500,12 @@ func (impl *shardInterceptor) handleUpsert(ctx context.Context, msg message.Muta
 	if err != nil {
 		return nil, err
 	}
-	schema, err := impl.writeSchema(collectionID, msg.VChannel())
+	writeSchema, err := impl.shardManager.GetWriteSchema(collectionID, msg.VChannel())
 	if err != nil {
 		return nil, err
 	}
 
+	schema := writeSchema.GetSchema()
 	if err := message.ValidateUpsertSchema(schema); err != nil {
 		return nil, status.NewInvalidArgument("%v", err)
 	}
@@ -540,8 +517,12 @@ func (impl *shardInterceptor) handleUpsert(ctx context.Context, msg message.Muta
 	if err != nil {
 		return nil, upsertBodyDecodeError(err)
 	}
-	if err := message.ValidateUpsert(header, body, primary); err != nil {
+	selections, err := message.ValidateUpsertWithSelections(header, body, primary)
+	if err != nil {
 		return nil, status.NewUnrecoverableError("invalid Upsert body: %v", err)
+	}
+	if (body.GetPartialUpdateCas() != nil) != message.HasPartialUpdateCAS(msg) {
+		return nil, status.NewUnrecoverableError("Upsert CAS marker and proof differ")
 	}
 	if paramtable.Get().FunctionCfg.EnableWriteBeforeMaterialization.GetAsBool() {
 		_, err := function.GetManager().Materialize(function.WithDeferredPreparation(ctx), collectionID, WALFunctionRunnerKey(msg.VChannel()), version, mutableUpsertInsert{MutableUpsertMessageV2: upsert, primary: primary})
@@ -557,24 +538,6 @@ func (impl *shardInterceptor) handleUpsert(ctx context.Context, msg message.Muta
 			return nil, errors.Join(status.NewUnrecoverableError("failed to materialize function fields before WAL append"), err)
 		}
 	}
-	body, err = message.ReadUpsertMetadata(ctx, msg)
-	if err != nil {
-		return nil, upsertBodyDecodeError(err)
-	}
-	if err := message.ValidateUpsert(header, body, primary); err != nil {
-		return nil, status.NewUnrecoverableError("invalid Upsert body: %v", err)
-	}
-	recorder, ok := impl.shardManager.(deletePressureRecorder)
-	if !ok {
-		return nil, status.NewInner("shard delete accounting is not available")
-	}
-	selections, err := message.UpsertSelections(header, body)
-	if err != nil {
-		return nil, err
-	}
-	if (body.GetPartialUpdateCas() != nil) != message.HasPartialUpdateCAS(msg) {
-		return nil, status.NewUnrecoverableError("Upsert CAS marker and proof differ")
-	}
 	content, err := upsert.Body(ctx)
 	if err != nil {
 		return nil, upsertBodyDecodeError(err)
@@ -584,37 +547,20 @@ func (impl *shardInterceptor) handleUpsert(ctx context.Context, msg message.Muta
 	primaryColumn := message.UpsertPrimaryKeyColumn(primary, content.GetPrimaryKeys())
 	fields := append(append([]*schemapb.FieldData(nil), content.GetColumns()...), primaryColumn)
 	source := &msgpb.InsertRequest{NumRows: uint64(len(content.GetRowIds())), RowIDs: content.GetRowIds(), Timestamps: make([]uint64, len(content.GetRowIds())), FieldsData: fields, Version: msgpb.InsertDataVersion_ColumnBased}
+	sizes, err := fastpb.UpsertPartitionSizes(source, selections)
+	if err != nil {
+		return nil, err
+	}
+	session := txn.GetTxnSessionFromContext(ctx)
 	requests := make([]*shards.AssignSegmentRequest, len(header.GetPartitions()))
 	for index, partition := range header.GetPartitions() {
-		rows := make([]int, len(selections[index]))
-		for i, row := range selections[index] {
-			rows[i] = int(row)
-		}
-		selectedRowIDs := make([]int64, len(rows))
-		for i, row := range rows {
-			selectedRowIDs[i] = content.RowIds[row]
-		}
-		encoder, err := fastpb.NewUpsertViewEncoder(&message.UpsertMessageBody{RowIds: selectedRowIDs}, source, rows)
-		if err != nil {
-			return nil, err
-		}
-		size, err := encoder.EncodedSize()
-		if err != nil {
-			return nil, err
-		}
-		partition.BinarySize = uint64(size)
+		partition.BinarySize = sizes[index]
 		requests[index] = &shards.AssignSegmentRequest{CollectionID: collectionID, PartitionID: partition.GetPartitionId(), ModifiedMetrics: stats.ModifiedMetrics{Rows: partition.GetRows(), BinarySize: partition.GetBinarySize()}, TimeTick: msg.TimeTick()}
-		if session := txn.GetTxnSessionFromContext(ctx); session != nil {
+		if session != nil {
 			requests[index].TxnSession = session
 		}
 	}
-	assigner, ok := impl.shardManager.(interface {
-		AssignSegments([]*shards.AssignSegmentRequest) ([]*shards.AssignSegmentResult, error)
-	})
-	if !ok {
-		return nil, status.NewInner("batch segment assignment is unavailable")
-	}
-	assignments, err := assigner.AssignSegments(requests)
+	assignments, err := impl.shardManager.AssignSegments(requests)
 	if errors.IsAny(err, shards.ErrTimeTickTooOld, shards.ErrWaitForNewSegment, shards.ErrFencedAssign) {
 		return nil, redo.ErrRedo
 	}
@@ -627,7 +573,7 @@ func (impl *shardInterceptor) handleUpsert(ctx context.Context, msg message.Muta
 	}
 	upsert.OverwriteHeader(header)
 	if header.GetDeleteRows() > 0 {
-		recorder.RecordDelete(msg.VChannel(), msg.TimeTick(), header.GetDeleteRows(), uint64(proto.Size(&message.UpsertMessageBody{DeleteEffects: body.GetDeleteEffects()})))
+		impl.shardManager.RecordDelete(msg.VChannel(), msg.TimeTick(), header.GetDeleteRows(), uint64(proto.Size(&message.UpsertMessageBody{DeleteEffects: body.GetDeleteEffects()})))
 	}
 
 	return appendOp(ctx, msg)

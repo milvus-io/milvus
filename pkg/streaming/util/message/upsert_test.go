@@ -199,3 +199,51 @@ func TestUpsertSelectionsShareProjectionAcrossReaders(t *testing.T) {
 	require.Equal(t, &positions[0], &again[0])
 	require.Equal(t, []int64{0, -1, 1}, positions)
 }
+
+func TestUpsertValidationReturnsSelections(t *testing.T) {
+	header, body, primary := upsertFixture()
+	rows, err := message.ValidateUpsertWithSelections(header, body, primary)
+	require.NoError(t, err)
+	require.Equal(t, [][]int64{{0, 2}, {1}}, rows)
+	body.RowIds = nil
+	rows, err = message.ValidateUpsertWithSelections(header, body, primary)
+	require.Error(t, err)
+	require.Nil(t, rows)
+}
+
+func BenchmarkUpsertValidationSelections(b *testing.B) {
+	for _, shared := range []bool{false, true} {
+		name := "duplicate"
+		if shared {
+			name = "shared"
+		}
+		b.Run(name, func(b *testing.B) {
+			header, body, primary := upsertFixture()
+			const count = 4096
+			header.Partitions[0].Rows = count / 2
+			header.Partitions[1].Rows = count / 2
+			body.PrimaryKeys = &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: make([]int64, count)}}}
+			body.RowIds = make([]int64, count)
+			body.PartitionIndexes = make([]uint32, count)
+			for i := range body.PartitionIndexes {
+				body.PartitionIndexes[i] = uint32(i % 2)
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if shared {
+					if _, err := message.ValidateUpsertWithSelections(header, body, primary); err != nil {
+						b.Fatal(err)
+					}
+				} else {
+					if err := message.ValidateUpsert(header, body, primary); err != nil {
+						b.Fatal(err)
+					}
+					if _, err := message.UpsertSelections(header, body); err != nil {
+						b.Fatal(err)
+					}
+				}
+			}
+		})
+	}
+}

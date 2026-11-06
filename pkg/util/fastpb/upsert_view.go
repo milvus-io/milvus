@@ -113,3 +113,43 @@ func (e *UpsertViewEncoder) SetMetadata(metadata *messagespb.UpsertMessageBody) 
 	e.metadata = payload
 	return nil
 }
+
+// UpsertPartitionSizes computes the same row-and-column sizes as independent
+// Upsert views. Scratch is shared, but each partition starts a new row selection.
+// The source and selections must remain unchanged during this call.
+func UpsertPartitionSizes(source *msgpb.InsertRequest, selections [][]int64) ([]uint64, error) {
+	cursor, err := NewInsertRequestViewCursor(source)
+	if err != nil {
+		return nil, err
+	}
+	sizes := make([]uint64, len(selections))
+	capacity := 0
+	for _, selection := range selections {
+		capacity = max(capacity, len(selection))
+	}
+	rows := make([]int, 0, capacity)
+	rowIDs := make([]int64, 0, capacity)
+	for index, selection := range selections {
+		rows = rows[:0]
+		rowIDs = rowIDs[:0]
+		for _, row := range selection {
+			rows = append(rows, int(row))
+			rowIDs = append(rowIDs, source.RowIDs[row])
+		}
+		// Partition selections can interleave. Reset logical and compact positions
+		// while retaining field plans and scratch owned by this sizing call.
+		clear(cursor.fieldDataIndices)
+		cursor.scanRow = 0
+		cursor.lastSelectedRow = -1
+		cursor.pendingRow = -1
+		encoder, _, err := cursor.NextEncoder(&msgpb.InsertRequest{}, rows, 0)
+		if err != nil {
+			return nil, err
+		}
+		size := encoder.size - protowire.SizeTag(10) - protowire.SizeBytes(encoder.sizePlan[0]) - protowire.SizeTag(11) - protowire.SizeBytes(encoder.sizePlan[1]) - protowire.SizeTag(14) - protowire.SizeVarint(uint64(len(rows)))
+		sizes[index] = uint64(size + proto.Size(&messagespb.UpsertMessageBody{RowIds: rowIDs}))
+		// No encoder escapes this size-only operation or needs a MarshalTo call.
+		cursor.activeEncoder = nil
+	}
+	return sizes, nil
+}

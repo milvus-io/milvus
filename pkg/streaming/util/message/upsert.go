@@ -91,12 +91,20 @@ func UpsertSelections(header *UpsertMessageHeader, body *UpsertMessageBody) ([][
 // ValidateUpsert checks the compound contract. Producers validate column values.
 // Metadata-only projections contain column descriptors without their values.
 func ValidateUpsert(header *UpsertMessageHeader, body *UpsertMessageBody, primary *schemapb.FieldSchema) error {
+	_, err := ValidateUpsertWithSelections(header, body, primary)
+	return err
+}
+
+// ValidateUpsertWithSelections validates the compound contract and returns its
+// row selections. Callers must not change row placement after validation.
+func ValidateUpsertWithSelections(header *UpsertMessageHeader, body *UpsertMessageBody, primary *schemapb.FieldSchema) ([][]int64, error) {
 	invalid := func(reason string) error { return merr.WrapErrServiceInternalMsg("invalid Upsert: %s", reason) }
 	if header.GetCollectionId() <= 0 || header.SchemaVersion == nil || primary == nil || !primary.GetIsPrimaryKey() {
-		return invalid("missing collection, schema version or primary key schema")
+		return nil, invalid("missing collection, schema version or primary key schema")
 	}
-	if _, err := UpsertSelections(header, body); err != nil {
-		return err
+	selections, err := UpsertSelections(header, body)
+	if err != nil {
+		return nil, err
 	}
 	validKeys := func(ids *schemapb.IDs) bool {
 		switch primary.GetDataType() {
@@ -110,55 +118,55 @@ func ValidateUpsert(header *UpsertMessageHeader, body *UpsertMessageBody, primar
 		return false
 	}
 	if !validKeys(body.GetPrimaryKeys()) {
-		return invalid("primary key type differs from schema")
+		return nil, invalid("primary key type differs from schema")
 	}
 	seen := map[int64]struct{}{}
 	for _, column := range body.GetColumns() {
 		id := column.GetFieldId()
 		if id <= 1 || id == primary.GetFieldID() {
-			return invalid("columns contain a primary key or system field")
+			return nil, invalid("columns contain a primary key or system field")
 		}
 		if _, ok := seen[id]; ok {
-			return invalid("duplicate column")
+			return nil, invalid("duplicate column")
 		}
 		seen[id] = struct{}{}
 	}
 	var deleted uint64
 	for _, effect := range body.GetDeleteEffects() {
 		if !validKeys(effect.GetPrimaryKeys()) || UpsertPrimaryKeyCount(effect.GetPrimaryKeys()) == 0 {
-			return invalid("empty or mistyped delete keys")
+			return nil, invalid("empty or mistyped delete keys")
 		}
 		switch scope := effect.GetScope().(type) {
 		case *messagespb.UpsertDeleteEffect_AllPartitions:
 			if scope.AllPartitions == nil {
-				return invalid("missing delete scope")
+				return nil, invalid("missing delete scope")
 			}
 		case *messagespb.UpsertDeleteEffect_PartitionId:
 			if scope.PartitionId <= 0 {
-				return invalid("invalid delete partition")
+				return nil, invalid("invalid delete partition")
 			}
 		default:
-			return invalid("missing delete scope")
+			return nil, invalid("missing delete scope")
 		}
 		deleted += uint64(UpsertPrimaryKeyCount(effect.GetPrimaryKeys()))
 	}
 	if deleted != header.GetDeleteRows() {
-		return invalid("delete count differs from effects")
+		return nil, invalid("delete count differs from effects")
 	}
 	if mapping := body.GetRequestRowMapping(); mapping != nil {
 		if len(mapping.GetRowOffsets()) != UpsertPrimaryKeyCount(body.GetPrimaryKeys()) {
-			return invalid("request row mapping count differs")
+			return nil, invalid("request row mapping count differs")
 		}
 		if err := ValidateIdempotentInsertResult(&messagespb.IdempotentInsertResult{Ids: body.GetPrimaryKeys(), RowOffsets: mapping.GetRowOffsets()}); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if cas := body.GetPartialUpdateCas(); cas != nil {
 		if err := validatePartialUpdateCAS(cas); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return selections, nil
 }
 
 // BuildUpsertResult constructs the insert result from original keys and row offsets
