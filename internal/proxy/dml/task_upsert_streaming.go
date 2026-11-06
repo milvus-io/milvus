@@ -182,7 +182,8 @@ func (ut *UpsertTask) appendUpsertAttempt(ctx context.Context, ez *message.Ciphe
 		ut.partialState.appendAttempted = true
 	}
 	resp := streaming.WAL().AppendMessages(ctx, messages...)
-	invalidateMismatchedWriteSchema(ctx, ut.GetMetaCache(), ut.collectionID, resp)
+	// Result accounting resolves channels through the collection cache.
+	defer invalidateMismatchedWriteSchema(ctx, ut.GetMetaCache(), ut.collectionID, resp)
 	if ut.partialState != nil {
 		if err := ut.recordPartialAppend(messages, resp); err != nil {
 			return err
