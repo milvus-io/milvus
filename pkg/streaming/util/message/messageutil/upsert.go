@@ -39,7 +39,8 @@ type insertRows struct{ msg message.ImmutableMessage }
 
 func (r *insertRows) ReadRows(ctx context.Context, schema *schemapb.CollectionSchema, rows []int64) (*msgpb.InsertRequest, error) {
 	var source *msgpb.InsertRequest
-	if r.msg.MessageType() == message.MessageTypeInsert {
+	switch r.msg.MessageType() {
+	case message.MessageTypeInsert:
 		body, err := message.MustAsImmutableInsertMessageV1(r.msg).Body(ctx)
 		if err != nil {
 			return nil, err
@@ -58,7 +59,7 @@ func (r *insertRows) ReadRows(ctx context.Context, schema *schemapb.CollectionSc
 			return result, nil
 		}
 		source = body
-	} else {
+	case message.MessageTypeUpsert:
 		upsert := message.MustAsImmutableUpsertMessageV2(r.msg)
 		body, err := upsert.Body(ctx)
 		if err != nil {
@@ -72,6 +73,8 @@ func (r *insertRows) ReadRows(ctx context.Context, schema *schemapb.CollectionSc
 		field := message.UpsertPrimaryKeyColumn(pk, body.GetPrimaryKeys())
 		fields = append(fields, field)
 		source = &msgpb.InsertRequest{CollectionID: upsert.Header().GetCollectionId(), NumRows: uint64(len(body.GetRowIds())), RowIDs: body.GetRowIds(), FieldsData: fields, Version: msgpb.InsertDataVersion_ColumnBased}
+	default:
+		panic("unexpected insert rows message type")
 	}
 	if rows == nil {
 		rows = make([]int64, source.GetNumRows())
@@ -93,13 +96,14 @@ func (r *insertRows) ReadRows(ctx context.Context, schema *schemapb.CollectionSc
 		valid := typeutil.GetFieldDataValidData(field)
 		if field.GetVectors() != nil && field.GetVectors().GetVectorArray() == nil && len(valid) > 0 {
 			var mapping []int64
-			if r.msg.MessageType() == message.MessageTypeUpsert {
+			switch r.msg.MessageType() {
+			case message.MessageTypeUpsert:
 				var err error
 				mapping, err = message.ReadUpsertCompactRows(ctx, r.msg, field.GetFieldId(), valid)
 				if err != nil {
 					return nil, err
 				}
-			} else {
+			case message.MessageTypeInsert:
 				mapping = make([]int64, len(valid))
 				cursor := int64(0)
 				for logical, exists := range valid {

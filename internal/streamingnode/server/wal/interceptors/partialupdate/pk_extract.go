@@ -87,7 +87,8 @@ func extractPKsFromCASInsertWithContext(
 	msg message.BasicMessage,
 	descriptorGetter primaryKeyDescriptorGetter,
 ) (primarykey.Keys, casInsertScope, string, error) {
-	if msg.MessageType() == message.MessageTypeUpsert {
+	switch msg.MessageType() {
+	case message.MessageTypeUpsert:
 		keys, err := extractPKsFromUpsert(ctx, msg, descriptorGetter)
 		if err != nil {
 			return primarykey.Keys{}, casInsertScope{}, "", err
@@ -107,55 +108,57 @@ func extractPKsFromCASInsertWithContext(
 			return primarykey.Keys{}, casInsertScope{}, "", status.NewUnrecoverableError("partial update CAS proof is missing")
 		}
 		return keys, casInsertScope{collectionID: header.GetCollectionId(), schemaVersion: header.GetSchemaVersion()}, encoded, err
-	}
+	case message.MessageTypeInsert:
+		if descriptorGetter == nil {
+			return primarykey.Keys{}, casInsertScope{}, "", status.NewUnrecoverableError(
+				"partial update primary key descriptor getter is unavailable",
+			)
+		}
+		header, err := insertHeader(msg)
+		if err != nil {
+			return primarykey.Keys{}, casInsertScope{}, "", status.NewUnrecoverableError(
+				"decode partial update insert message failed: %v",
+				err,
+			)
+		}
+		if header.GetCollectionId() == 0 {
+			return primarykey.Keys{}, casInsertScope{}, "", status.NewUnrecoverableError(
+				"partial update CAS insert collection id is empty",
+			)
+		}
+		if header.SchemaVersion == nil {
+			return primarykey.Keys{}, casInsertScope{}, "", status.NewUnrecoverableError(
+				"partial update CAS insert schema version is missing",
+			)
+		}
 
-	if descriptorGetter == nil {
-		return primarykey.Keys{}, casInsertScope{}, "", status.NewUnrecoverableError(
-			"partial update primary key descriptor getter is unavailable",
-		)
-	}
-	header, err := insertHeader(msg)
-	if err != nil {
-		return primarykey.Keys{}, casInsertScope{}, "", status.NewUnrecoverableError(
-			"decode partial update insert message failed: %v",
-			err,
-		)
-	}
-	if header.GetCollectionId() == 0 {
-		return primarykey.Keys{}, casInsertScope{}, "", status.NewUnrecoverableError(
-			"partial update CAS insert collection id is empty",
-		)
-	}
-	if header.SchemaVersion == nil {
-		return primarykey.Keys{}, casInsertScope{}, "", status.NewUnrecoverableError(
-			"partial update CAS insert schema version is missing",
-		)
-	}
+		scope := casInsertScope{
+			collectionID:  header.GetCollectionId(),
+			schemaVersion: header.GetSchemaVersion(),
+		}
+		descriptor, err := primaryKeyDescriptorOf(descriptorGetter, scope.collectionID)
+		if err != nil {
+			return primarykey.Keys{}, casInsertScope{}, "", err
+		}
 
-	scope := casInsertScope{
-		collectionID:  header.GetCollectionId(),
-		schemaVersion: header.GetSchemaVersion(),
+		body, err := decodeInsertBody(ctx, msg)
+		if err != nil {
+			return primarykey.Keys{}, casInsertScope{}, "", err
+		}
+		keys, err := primarykey.KeysOfInsertDeclared(body, descriptor.FieldID, descriptor.DataType)
+		if err != nil {
+			return primarykey.Keys{}, casInsertScope{}, "", err
+		}
+		encoded := body.GetBase().GetProperties()["_puc"]
+		if encoded == "" {
+			return primarykey.Keys{}, casInsertScope{}, "", status.NewUnrecoverableError(
+				"partial update CAS body metadata is missing",
+			)
+		}
+		return keys, scope, encoded, nil
+	default:
+		return primarykey.Keys{}, casInsertScope{}, "", status.NewUnrecoverableError("partial update CAS requires an Insert or Upsert message")
 	}
-	descriptor, err := primaryKeyDescriptorOf(descriptorGetter, scope.collectionID)
-	if err != nil {
-		return primarykey.Keys{}, casInsertScope{}, "", err
-	}
-
-	body, err := decodeInsertBody(ctx, msg)
-	if err != nil {
-		return primarykey.Keys{}, casInsertScope{}, "", err
-	}
-	keys, err := primarykey.KeysOfInsertDeclared(body, descriptor.FieldID, descriptor.DataType)
-	if err != nil {
-		return primarykey.Keys{}, casInsertScope{}, "", err
-	}
-	encoded := body.GetBase().GetProperties()["_puc"]
-	if encoded == "" {
-		return primarykey.Keys{}, casInsertScope{}, "", status.NewUnrecoverableError(
-			"partial update CAS body metadata is missing",
-		)
-	}
-	return keys, scope, encoded, nil
 }
 
 // extractPKsFromOrdinaryInsert extracts the PKs of an ordinary insert, with or
