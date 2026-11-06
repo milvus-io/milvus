@@ -64,7 +64,7 @@ func TestSearchAggregationTopHitsMetricDirection(t *testing.T) {
 									testStringFieldData(102, []string{"red", "red", "blue", "blue"}),
 								},
 							}
-							result, err := NewSearchAggregationComputer(data, aggCtx, metricType).Compute(context.Background())
+							result, err := newComputerFromMaterializedFixture(data, aggCtx, metricType).Compute(context.Background())
 							require.NoError(t, err)
 							require.Len(t, result, 1)
 							require.Len(t, result[0], 1)

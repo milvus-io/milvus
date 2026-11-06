@@ -91,7 +91,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceSearchResultWithGroupByPreser
 	}
 
 	results, err := reduceSearchResultDataWithGroupBy(context.Background(), []*schemapb.SearchResultData{shardA, shardB},
-		1, 2, metric.IP, schemapb.DataType_Int64, 0, 1, []int64{101}, false)
+		1, 2, metric.IP, schemapb.DataType_Int64, 0, 1, []int64{101})
 
 	struts.Require().NoError(err)
 	struts.Equal(int64(24), results.GetResults().GetAllSearchCount())
@@ -114,7 +114,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceSearchResultWithEmptyGroupDat
 		PrimaryFieldName: "",
 	}
 	results, err := reduceSearchResultDataWithGroupBy(context.Background(), []*schemapb.SearchResultData{emptyData},
-		nq, topk, "L2", schemapb.DataType_Int64, 0, 1, []int64{101}, false)
+		nq, topk, "L2", schemapb.DataType_Int64, 0, 1, []int64{101})
 	struts.Require().NoError(err)
 	struts.Equal([]int64{0}, results.GetResults().GetTopks())
 	struts.Empty(results.Results.GetGroupByFieldValues(),
@@ -202,7 +202,7 @@ func (struts *SearchReduceUtilTestSuite) TestReduceWithEmptyFieldsData() {
 			},
 		}
 
-		results, err := reduceSearchResultDataWithGroupBy(ctx, []*schemapb.SearchResultData{searchResultData1, searchResultData2}, nq, topK, "L2", schemapb.DataType_Int64, offset, int64(2), []int64{101}, false)
+		results, err := reduceSearchResultDataWithGroupBy(ctx, []*schemapb.SearchResultData{searchResultData1, searchResultData2}, nq, topK, "L2", schemapb.DataType_Int64, offset, int64(2), []int64{101})
 		struts.NoError(err)
 		struts.NotNil(results)
 		// FieldsData should be empty since all inputs were empty
@@ -340,7 +340,7 @@ func (s *SearchReduceUtilTestSuite) TestReduceSizesFieldsDataByHits() {
 	})
 
 	s.Run("group by", func() {
-		ret, err := reduceSearchResultDataWithGroupBy(ctx, shards(), 1, topk, metric.IP, schemapb.DataType_Int64, 0, 2, []int64{101}, false)
+		ret, err := reduceSearchResultDataWithGroupBy(ctx, shards(), 1, topk, metric.IP, schemapb.DataType_Int64, 0, 2, []int64{101})
 		s.Require().NoError(err)
 		s.Equal([]int64{1, 3, 2, 4}, ret.GetResults().GetIds().GetIntId().GetData())
 		s.Equal(4, cap(ret.GetResults().GetFieldsData()[0].GetScalars().GetLongData().GetData()))
@@ -350,7 +350,7 @@ func (s *SearchReduceUtilTestSuite) TestReduceSizesFieldsDataByHits() {
 	s.Run("group by without hits keeps typed columns", func() {
 		empty := presizeShardResult(topk, nil, nil, nil)
 		empty.Topks = []int64{0}
-		ret, err := reduceSearchResultDataWithGroupBy(ctx, []*schemapb.SearchResultData{empty, empty}, 1, topk, metric.IP, schemapb.DataType_Int64, 0, 2, []int64{101}, false)
+		ret, err := reduceSearchResultDataWithGroupBy(ctx, []*schemapb.SearchResultData{empty, empty}, 1, topk, metric.IP, schemapb.DataType_Int64, 0, 2, []int64{101})
 		s.Require().NoError(err)
 		s.Require().Len(ret.GetResults().GetFieldsData(), 2)
 		s.NotNil(ret.GetResults().GetFieldsData()[1].GetVectors().GetFloatVector())
