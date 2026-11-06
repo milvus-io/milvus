@@ -17,6 +17,7 @@
 package sst
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -89,4 +90,28 @@ func TestAbort(t *testing.T) {
 	ents, err := os.ReadDir(dir)
 	require.NoError(t, err)
 	assert.Empty(t, ents, "abort must leave nothing behind")
+}
+
+func TestWriterEstimatedSizeTracksFileSize(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWriter(dir, 77)
+	require.NoError(t, err)
+	val := make([]byte, 512)
+	var prev uint64
+	for i := 0; i < 2000; i++ {
+		for j := range val {
+			val[j] = byte(i*31 + j*j)
+		}
+		require.NoError(t, w.Add([]byte(fmt.Sprintf("key%08d", i)), val))
+		if i%500 == 499 {
+			cur := w.EstimatedSize()
+			require.Greater(t, cur, prev)
+			prev = cur
+		}
+	}
+	est := w.EstimatedSize()
+	info, err := w.Close()
+	require.NoError(t, err)
+	require.Greater(t, info.Size, int64(0))
+	require.InEpsilon(t, float64(info.Size), float64(est), 0.1)
 }

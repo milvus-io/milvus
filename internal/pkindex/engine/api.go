@@ -120,8 +120,11 @@ type Lifecycle interface {
 	// writes are never paused. It returns the frozen generation.
 	RotateIncrement(ctx context.Context) (Generation, error)
 
-	// StageFrozen writes a frozen generation out as SSTs and stages them
-	// outside it, named by sst.ID, newest first. Because the generation is
+	// StageFrozen merges a frozen generation into SSTs and stages them
+	// outside it, named by sst.ID. Each key keeps only its newest value, and
+	// tombstones are kept. The tables are in key order and their key ranges
+	// do not overlap; a generation above a size cap gives more than one
+	// table, and an empty generation gives none. Because the generation is
 	// frozen the result is stable, and calling it again for the same
 	// generation returns the very same tables under the very same IDs, so an
 	// upload that retries after a failure or a restart stays idempotent.

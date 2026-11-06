@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/pkindex/codec"
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
 )
 
@@ -74,46 +75,43 @@ func TestHandoverCycle(t *testing.T) {
 	requireSegment(t, e, pk(n), n)
 }
 
-// TestStageFrozenOrdersNewestFirst covers one generation holding several
+// TestStageFrozenMergesGeneration covers one generation holding several
 // overlapping L0 SSTs, which happens whenever a memtable fills up before the
-// rotation. The staged set must come back newest first, because that is the
-// order InstallCommitted resolves overlapping keys in.
-func TestStageFrozenOrdersNewestFirst(t *testing.T) {
+// rotation. Staging must merge them into one table that holds the newest
+// value of each key, tombstones included.
+func TestStageFrozenMergesGeneration(t *testing.T) {
 	e := newTestEngine(t)
 	ctx := context.Background()
-	baseDir := t.TempDir()
 	// stands in for a memtable filling up mid-generation
 	flushActive := func() { require.NoError(t, e.active.db.Flush()) }
 
-	require.NoError(t, e.Write(ctx, []Mutation{
-		{Key: pk(1), Value: entry(10)},
-		{Key: pk(2), Value: entry(20)},
-	}))
+	require.NoError(t, e.Write(ctx, []Mutation{put(pk(1), 10), put(pk(2), 20), put(pk(3), 30)}))
 	flushActive()
-	require.NoError(t, e.Write(ctx, []Mutation{
-		{Key: pk(1), Delete: true},
-		{Key: pk(2), Value: entry(21)},
-	}))
+	require.NoError(t, e.Write(ctx, []Mutation{put(pk(2), 21), del(pk(3))}))
 	flushActive()
-	require.NoError(t, e.Write(ctx, []Mutation{{Key: pk(2), Value: entry(22)}}))
+	require.NoError(t, e.Write(ctx, []Mutation{put(pk(4), 40)}))
 
 	gen, err := e.RotateIncrement(ctx)
 	require.NoError(t, err)
-	infos, err := e.StageFrozen(ctx, gen)
+	staged, err := e.StageFrozen(ctx, gen)
 	require.NoError(t, err)
-	require.Len(t, infos, 3)
+	require.Len(t, staged, 1)
+	info := staged[0].Info
+	assert.Equal(t, int64(4), info.NumEntries)
+	assert.Equal(t, pk(1), info.MinKey)
+	assert.Equal(t, pk(4), info.MaxKey)
 
-	// the newest table holds only pk(2)
-	assert.Equal(t, int64(1), infos[0].Info.NumEntries)
-	assert.Equal(t, pk(2), infos[0].Info.MinKey)
-
-	commitTables(t, e, baseDir, infos, nil)
-	require.NoError(t, e.DropFrozen(ctx, gen))
-
-	// answered by the baseline alone now: the delete must still win over the
-	// older put, and the latest put over the earlier ones
-	assert.Nil(t, getOne(t, e, pk(1)), "a deleted pk must not resurrect from an older table")
-	requireSegment(t, e, pk(2), 22)
+	r, err := sst.OpenReader(staged[0].Path, nil, sst.ExpectSize(info.Size))
+	require.NoError(t, err)
+	defer r.Close()
+	v, ok, err := r.Get(pk(2))
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, entry(21), v, "the newest value of a key must win")
+	v, ok, err = r.Get(pk(3))
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.True(t, codec.IsTombstone(v), "a delete must be staged as a tombstone")
 }
 
 // TestRotateKeepsConcurrentWrites is the reason rotation freezes instead of
@@ -250,8 +248,8 @@ func TestDropRemovesGenerationOutsideLock(t *testing.T) {
 	requireReadWriteUnblocked(t, e)
 }
 
-// The SSTs a memtable flush produces become baseline tables as they are, so
-// they must carry the bloom filter too.
+// The tables staged out of a generation become baseline tables as they are,
+// so they must carry the bloom filter too.
 func TestDrainedTablesCarryBloomFilter(t *testing.T) {
 	e := newTestEngine(t)
 	ctx := context.Background()
@@ -277,11 +275,10 @@ func TestDrainedTablesCarryBloomFilter(t *testing.T) {
 	requireSegment(t, e, pk(4242), 2121)
 }
 
-// A memtable flush writes its SSTs through pebble, not through sst.Writer, so
-// only a shared options template keeps the two producers on one table format.
+// A staged table must have the pinned table format like every other table.
 // A baseline table is served to every other role, so a divergence here would
 // only surface on another node.
-func TestFlushOutputUsesPinnedTableFormat(t *testing.T) {
+func TestStagedTablesUsePinnedTableFormat(t *testing.T) {
 	e := newTestEngine(t)
 	ctx := context.Background()
 	require.NoError(t, e.Write(ctx, []Mutation{
@@ -295,7 +292,7 @@ func TestFlushOutputUsesPinnedTableFormat(t *testing.T) {
 	require.NotEmpty(t, infos)
 
 	for _, f := range infos {
-		assert.Equal(t, sst.TableFormat, f.Info.TableFormat, "flush output %d", f.Info.ID)
+		assert.Equal(t, sst.TableFormat, f.Info.TableFormat, "staged table %d", f.Info.ID)
 		// the Info is read back from the file, so this is the file's own format
 		r, err := sst.OpenReader(f.Path, nil, sst.ExpectSize(f.Info.Size))
 		require.NoError(t, err)

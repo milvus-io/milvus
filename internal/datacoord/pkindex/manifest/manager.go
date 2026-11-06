@@ -20,6 +20,7 @@
 package manifest
 
 import (
+	"bytes"
 	"context"
 	"sync"
 	"time"
@@ -80,13 +81,18 @@ var (
 	// ErrDuplicateSST reports an edit that adds an SST ID the manifest already
 	// has, or that lists the same SST ID twice.
 	ErrDuplicateSST = errors.New("sst ID is already in the manifest or repeated in the edit")
-	// ErrStaleEdit reports a compaction whose inputs are not a contiguous run
-	// of the manifest SST list, except an applied retry: no input is in the
-	// list and all outputs are in the list.
-	ErrStaleEdit = errors.New("compaction inputs are not in the manifest")
-	// ErrSSTReclaimed reports a flush that is not an applied retry and adds an
+	// ErrStaleEdit reports a compaction that does not fit the manifest, except
+	// an applied retry (no input is in the list and all outputs are in the
+	// list). It covers a concurrent edit and a malformed compaction alike:
+	// the inputs are not a contiguous range of the SST list in the same
+	// order; the inputs split a run; the outputs are not one new run (no run
+	// id, mixed run ids, a run id already in the list, a key range with its
+	// min key above its max key, or ranges that overlap or are not in
+	// ascending order); or an L0 table would end up behind a run.
+	ErrStaleEdit = errors.New("compaction edit does not fit the manifest")
+	// ErrSSTReclaimed reports an edit that is not an applied retry and adds an
 	// SST ID that is not above the reclaimed SST ID of the pointer: garbage
-	// collection may have deleted that SST. The flush did not take effect.
+	// collection may have deleted that SST. The edit did not take effect.
 	ErrSSTReclaimed = errors.New("sst ID is not above the reclaimed sst ID")
 )
 
@@ -106,16 +112,18 @@ type vchannelManifest struct {
 // the caller must not change them.
 //
 // The cache of a vchannel is filled on its first use and is refreshed only
-// after a failed write. Until then, the manager does not see the commits of
-// another coordinator. LoadPointers does not use the cache. The predicates of
-// each write keep commits safe when the cache is stale: a flush writes on the
-// predicate that the pchannel meta still holds the value that the flush term
-// was checked against.
+// after a failed write and after an edit that is rejected as stale. Until
+// then, the manager does not see the commits of another coordinator.
+// LoadPointers does not use the cache. The predicates of each write keep
+// commits safe when the cache is stale: a flush writes on the predicate that
+// the pchannel meta still holds the value that the flush term was checked
+// against.
 type Manager struct {
 	meta     MetaStore
 	store    ObjectStore
 	rootPath string
 	locks    *lock.KeyLock[string]
+	observer Observer
 
 	mu        sync.Mutex
 	manifests map[string]*vchannelManifest // by pointer key
@@ -155,8 +163,15 @@ func (m *Manager) CommitFlush(ctx context.Context, req *pkindexpb.CommitFlushReq
 // CommitCompaction applies a compaction (see applyCompaction) and returns the
 // resulting version.
 func (m *Manager) CommitCompaction(ctx context.Context, collectionID int64, vchannel string, c Compaction) (*pkindexpb.Manifest, error) {
-	return m.commit(ctx, collectionID, vchannel, nil, func(cur *pkindexpb.Manifest, _ int64) (*pkindexpb.Manifest, error) {
-		return applyCompaction(cur, c)
+	return m.commit(ctx, collectionID, vchannel, nil, func(cur *pkindexpb.Manifest, maxReclaimed int64) (*pkindexpb.Manifest, error) {
+		next, err := applyCompaction(cur, c)
+		if err != nil || next == nil {
+			return next, err
+		}
+		if err := checkReclaimedSSTs(vchannel, c.Outputs, maxReclaimed); err != nil {
+			return nil, err
+		}
+		return next, nil
 	})
 }
 
@@ -247,6 +262,8 @@ func (m *Manager) LoadPointers(ctx context.Context, targets []Target) []PointerR
 // one it loaded, or does not exist for the first version. The same write also
 // requires preds; it does not write their keys. apply also gets the reclaimed
 // SST ID of the loaded pointer, and the new pointer keeps that value.
+// When apply rejects the edit as stale, commit forgets the cached manifest,
+// so the next load reads the pointer and the body from the stores.
 func (m *Manager) commit(ctx context.Context, collectionID int64, vchannel string, preds []predicates.Predicate,
 	apply func(cur *pkindexpb.Manifest, maxReclaimed int64) (*pkindexpb.Manifest, error),
 ) (*pkindexpb.Manifest, error) {
@@ -266,6 +283,9 @@ func (m *Manager) commit(ctx context.Context, collectionID int64, vchannel strin
 	}
 	next, err := apply(curManifest, maxReclaimed)
 	if err != nil {
+		if errors.Is(err, ErrStaleEdit) {
+			m.forget(key)
+		}
 		return nil, err
 	}
 	if next == nil {
@@ -297,7 +317,44 @@ func (m *Manager) commit(ctx context.Context, collectionID int64, vchannel strin
 		return nil, markUnavailable(err, "write manifest pointer %s version %d", key, next.GetVersion())
 	}
 	m.remember(key, &vchannelManifest{pb: next, pointer: ptr, maxReclaimed: maxReclaimed})
+	if m.observer != nil {
+		m.observer.ManifestChanged(ctx, next)
+	}
 	return next, nil
+}
+
+// Observer is told of every manifest the manager commits and, by the GC, of
+// every current manifest it reads. The manifest is shared; do not change it.
+//
+// The manager may call ManifestChanged while it holds the lock of that
+// vchannel. The observer must return quickly and must not call the Manager
+// from inside the callback: a call to Current, CommitFlush or CommitCompaction
+// for the same vchannel would deadlock.
+//
+// Calls can be concurrent. They can repeat for an unchanged manifest (the GC
+// reports every round). They can carry an older version than one already
+// reported (the GC reads the pointer outside the lock of the manager). The
+// observer must keep the highest version per vchannel and ignore older ones.
+type Observer interface {
+	ManifestChanged(ctx context.Context, m *pkindexpb.Manifest)
+}
+
+// SetObserver sets the observer of committed manifests. Call it before
+// anything commits.
+func (m *Manager) SetObserver(o Observer) { m.observer = o }
+
+// Current returns the current manifest of t, or nil when t has none. The
+// manifest is shared with the cache; the caller must not change it. Current
+// serves from the cache and can lag the commits of another coordinator.
+func (m *Manager) Current(ctx context.Context, t Target) (*pkindexpb.Manifest, error) {
+	key := PointerKey(t.CollectionID, t.VChannel)
+	m.locks.Lock(key)
+	defer m.locks.Unlock(key)
+	cur, err := m.load(ctx, key)
+	if err != nil || cur == nil {
+		return nil, err
+	}
+	return cur.pb, nil
 }
 
 // load returns the cached manifest of the pointer key, or reads it from the
@@ -387,10 +444,13 @@ func (m *Manager) forget(key string) {
 	m.mu.Unlock()
 }
 
-// Compaction is the edit that replaces a contiguous run of SSTs with merged SSTs.
+// Compaction is the edit that replaces a contiguous range of SSTs with the
+// merged SSTs of one new run. The inputs must not split a run, and the L0
+// tables must stay a prefix of the SST list (see ErrStaleEdit). The outputs
+// may be empty when all keys of the inputs are dropped.
 type Compaction struct {
 	Inputs  []int64
-	Outputs []*pkindexpb.SSTRef // newest first
+	Outputs []*pkindexpb.SSTRef // one run: ascending key order, all with the same run id
 }
 
 // applyFlush applies a flush to cur, which is nil when the vchannel has no
@@ -427,28 +487,31 @@ func applyFlush(cur *pkindexpb.Manifest, req *pkindexpb.CommitFlushRequest, sstB
 	if err := checkNewSSTs(base.GetVchannel(), idSet(base.GetSsts()), req.GetAddSsts()); err != nil {
 		return nil, err
 	}
-	for _, s := range req.GetAddSsts() {
-		if s.GetId() <= maxReclaimed {
-			return nil, errors.Wrapf(ErrSSTReclaimed, "vchannel %s: sst %d, reclaimed sst ID %d", base.GetVchannel(), s.GetId(), maxReclaimed)
-		}
+	if err := checkReclaimedSSTs(base.GetVchannel(), req.GetAddSsts(), maxReclaimed); err != nil {
+		return nil, err
 	}
 	next := nextVersion(base)
 	next.LastFlushTerm = req.GetPchannelTerm()
 	next.CheckpointTimeTick = req.GetCheckpointTimeTick()
-	next.Ssts = append(cloneSSTs(req.GetAddSsts()), next.GetSsts()...)
+	added := cloneSSTs(req.GetAddSsts())
+	for _, s := range added {
+		s.RunId = 0 // a flush always creates L0 tables
+	}
+	next.Ssts = append(added, next.GetSsts()...)
 	return next, nil
 }
 
 // applyCompaction applies a compaction to cur. When the inputs are a non-empty
-// contiguous run of the SST list of cur, in the same order, it returns a new
-// version, in which the outputs replace the inputs at the position of
-// the inputs; the checkpoint and the last flush term do not change. When the inputs are
-// not empty, no input is in the SST list of cur and all outputs are in it, the
-// compaction is an applied retry and applyCompaction returns nil. It returns
-// ErrNoManifest when cur is nil, ErrStaleEdit in all other cases where
-// the inputs are not such a run, and ErrDuplicateSST when an output ID is
-// already in the SST list of cur or is listed twice in the outputs. It does
-// not change cur.
+// contiguous range of the SST list of cur, in the same order, and they do not
+// split a run, and the outputs are empty or one new run, and the L0 tables
+// stay a prefix of the list, it returns a new version, in which the outputs
+// replace the inputs at the position of the inputs; the checkpoint and the
+// last flush term do not change. When the inputs are not empty, no input is in
+// the SST list of cur and all outputs are in it, the compaction is an applied
+// retry and applyCompaction returns nil. It returns ErrNoManifest when cur is
+// nil, ErrStaleEdit in all other cases where the inputs or the outputs break
+// one of these rules, and ErrDuplicateSST when an output ID is already in the
+// SST list of cur or is listed twice in the outputs. It does not change cur.
 func applyCompaction(cur *pkindexpb.Manifest, c Compaction) (*pkindexpb.Manifest, error) {
 	if cur == nil {
 		return nil, ErrNoManifest
@@ -475,12 +538,18 @@ func applyCompaction(cur *pkindexpb.Manifest, c Compaction) (*pkindexpb.Manifest
 	if err := checkNewSSTs(cur.GetVchannel(), idSet(list), c.Outputs); err != nil {
 		return nil, err
 	}
+	if err := checkRunEdit(cur.GetVchannel(), list, start, len(c.Inputs), c.Outputs); err != nil {
+		return nil, err
+	}
 	next := nextVersion(cur)
 	merged := make([]*pkindexpb.SSTRef, 0, len(list)-len(c.Inputs)+len(c.Outputs))
 	merged = append(merged, next.GetSsts()[:start]...)
 	merged = append(merged, cloneSSTs(c.Outputs)...)
 	merged = append(merged, next.GetSsts()[start+len(c.Inputs):]...)
 	next.Ssts = merged
+	if err := checkL0Prefix(cur.GetVchannel(), merged); err != nil {
+		return nil, err
+	}
 	return next, nil
 }
 
@@ -540,4 +609,72 @@ func idSet(list []*pkindexpb.SSTRef) map[int64]struct{} {
 		set[s.GetId()] = struct{}{}
 	}
 	return set
+}
+
+// checkRunEdit returns ErrStaleEdit when the inputs list[start:start+n] split
+// a run, or when the outputs do not form one new run: every output must carry
+// the same run id, which is not 0 and not in list, each output must have a min
+// key not above its max key, and the key ranges of the outputs must be in
+// ascending order without overlap. Empty outputs are valid (all keys of the
+// inputs are dropped): only the checks on the inputs apply.
+func checkRunEdit(vchannel string, list []*pkindexpb.SSTRef, start, n int, outputs []*pkindexpb.SSTRef) error {
+	stale := func(format string, args ...any) error {
+		return errors.Wrapf(ErrStaleEdit, "vchannel %s: "+format, append([]any{vchannel}, args...)...)
+	}
+	if first := list[start]; first.GetRunId() != 0 && start > 0 && list[start-1].GetRunId() == first.GetRunId() {
+		return stale("input %d splits run %d", first.GetId(), first.GetRunId())
+	}
+	end := start + n
+	if last := list[end-1]; last.GetRunId() != 0 && end < len(list) && list[end].GetRunId() == last.GetRunId() {
+		return stale("input %d splits run %d", last.GetId(), last.GetRunId())
+	}
+	if len(outputs) == 0 {
+		return nil
+	}
+	runID := outputs[0].GetRunId()
+	if runID == 0 {
+		return stale("outputs have no run id")
+	}
+	for _, s := range list {
+		if s.GetRunId() == runID {
+			return stale("run %d is already in the manifest", runID)
+		}
+	}
+	for i, o := range outputs {
+		if o.GetRunId() != runID {
+			return stale("output %d has run %d, the first output has run %d", o.GetId(), o.GetRunId(), runID)
+		}
+		if bytes.Compare(o.GetMinKey(), o.GetMaxKey()) > 0 {
+			return stale("output %d has min key above its max key", o.GetId())
+		}
+		if i > 0 && bytes.Compare(o.GetMinKey(), outputs[i-1].GetMaxKey()) <= 0 {
+			return stale("outputs %d and %d overlap or are out of order", outputs[i-1].GetId(), o.GetId())
+		}
+	}
+	return nil
+}
+
+// checkL0Prefix returns ErrStaleEdit when an L0 table (run id 0) follows a
+// run table in list: the L0 tables must be a prefix of the list.
+func checkL0Prefix(vchannel string, list []*pkindexpb.SSTRef) error {
+	seenRun := false
+	for _, s := range list {
+		if s.GetRunId() != 0 {
+			seenRun = true
+		} else if seenRun {
+			return errors.Wrapf(ErrStaleEdit, "vchannel %s: L0 table %d is behind a run", vchannel, s.GetId())
+		}
+	}
+	return nil
+}
+
+// checkReclaimedSSTs rejects new references to objects that GC may have deleted.
+// Applied retries bypass this check because they add no reference.
+func checkReclaimedSSTs(vchannel string, tables []*pkindexpb.SSTRef, maxReclaimed int64) error {
+	for _, table := range tables {
+		if table.GetId() <= maxReclaimed {
+			return errors.Wrapf(ErrSSTReclaimed, "vchannel %s: sst %d, reclaimed sst ID %d", vchannel, table.GetId(), maxReclaimed)
+		}
+	}
+	return nil
 }

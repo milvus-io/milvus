@@ -284,13 +284,20 @@ Invariants:
 
 ### Staging and idempotent retries
 
-Pebble numbers its files per DB, so two generations produce the same file
-names, and a generation's directory disappears when it retires. `StageFrozen`
-therefore hard-links every output into a staging directory of its own, under
-the ID allocated for it, and records the order in a list, `STAGED`, written
-last. The links are synced to disk before the list is written, so a power loss
-cannot keep a list that names a missing table. Pebble flushes are one step of this; staging also covers the tables Pebble
-flushed earlier on its own, the ordering, the IDs and the list.
+A generation's directory disappears when it retires, so `StageFrozen` writes
+the generation out into a staging directory of its own. It flushes the
+memtable, then merges all entries of the generation in key order into one
+table. Each key keeps only its newest value, and tombstones are kept. Above a
+size cap (128 MiB) the output is split into several tables with disjoint key
+ranges. Each table is named by the ID allocated for it, and the order is
+recorded in a list, `STAGED`, written last. Each table file is synced before it
+is renamed into place, and the directory is synced before the list is written,
+so a power loss cannot keep a list that names a missing table. An empty
+generation gives no tables and an empty list.
+
+The merge solves a read cost. One Pebble memtable flush makes a small file, so
+committing the files one by one turned a handover into dozens of tables with
+overlapping key ranges, and each lookup checked the bloom filter of every one.
 
 That list is what makes a retry safe. A second call for the same generation
 finds it and returns exactly the same tables under exactly the same IDs, so an
@@ -306,15 +313,16 @@ make its own link or copy and hand that back as the table's `Path`.
 ### Recency order of SSTs
 
 A memtable flushes whenever it fills, so one frozen generation commonly holds
-several L0 tables with overlapping key ranges. If they reach the committed set
-in the wrong order, a deleted key comes back to life.
+several L0 tables with overlapping key ranges. `StageFrozen` resolves them
+inside the generation: the merge keeps the newest value of each key, so a
+deleted key stays deleted.
 
-`StageFrozen` returns the tables newest first. Flushes of one generation are
-serial and nothing compacts or ingests, so the tables' sequence number ranges
-are disjoint and descending `LargestSeqNum` is recency order. `sst.Info`
-carries no ordering field: list order is the contract. Whoever records the
-committed set must keep a newer generation's tables ahead of an older
-generation's, and keep the order `StageFrozen` returned within a generation.
+The tables `StageFrozen` returns for one generation are in key order and do
+not overlap, so their order among themselves does not change what a read sees.
+Across generations the key ranges do overlap. `sst.Info` carries no ordering
+field: list order is the contract. Whoever records the committed set must keep
+a newer generation's tables ahead of an older generation's, and keep the order
+`StageFrozen` returned within a generation.
 
 ### Locking
 
@@ -384,7 +392,7 @@ type Mutation struct {
 // data moving between layers, and shutdown
 type Lifecycle interface {
     RotateIncrement(ctx) (Generation, error)
-    StageFrozen(ctx, gen) ([]StagedTable, error)  // newest first, staged by ID
+    StageFrozen(ctx, gen) ([]StagedTable, error)  // merged, key order, staged by ID
     FrozenGenerations() []Generation               // newest first
     InstallCommitted(ctx, tables []CommittedTable, retire ...Generation) error
     DropFrozen(ctx, gens ...Generation) error        // the oldest frozen ones, in one call
@@ -513,7 +521,10 @@ Unit tests, run with `-race`:
 - engine: write then read; delete masks; the active generation overrides the
   committed set; committed recency order; the full handover cycle; concurrent
   writes during a cycle are all retained; several overlapping L0 tables in one
-  generation keep deletes and latest values after the cycle; flush outputs
+  generation are merged into one staged table that keeps deletes and latest
+  values; a large generation is staged as tables with disjoint key ranges;
+  the staged tables answer every lookup like the generation did; a failed
+  staging writes no `STAGED` and is redone under new IDs; staged tables
   carry the filter; committed lookups hit the node-level cache; a lookup right
   after an install faults in neither index nor filter; a table that stays in
   the set keeps its reader and its cached blocks, and a failed open leaves the

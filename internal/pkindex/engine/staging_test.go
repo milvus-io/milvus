@@ -17,11 +17,15 @@
 package engine
 
 import (
+	"bytes"
 	"context"
+	"math/rand"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -84,4 +88,120 @@ func TestStagedTableReadableUntilRetired(t *testing.T) {
 	require.NoError(t, e.DropFrozen(ctx, gen))
 	_, err = os.Stat(staged)
 	assert.True(t, os.IsNotExist(err), "retiring a generation removes its staging")
+}
+
+// A generation above the size cap is staged as several tables whose key
+// ranges follow each other without overlap.
+func TestStageFrozenSplitsLargeGeneration(t *testing.T) {
+	old := stagedTableTargetBytes
+	stagedTableTargetBytes = 4 << 10
+	defer func() { stagedTableTargetBytes = old }()
+
+	e := newTestEngine(t)
+	ctx := context.Background()
+	const n = 2000
+	muts := make([]Mutation, 0, n)
+	for i := int64(0); i < n; i++ {
+		muts = append(muts, put(pk(i), i))
+	}
+	require.NoError(t, e.Write(ctx, muts))
+	gen, err := e.RotateIncrement(ctx)
+	require.NoError(t, err)
+	staged, err := e.StageFrozen(ctx, gen)
+	require.NoError(t, err)
+	require.Greater(t, len(staged), 1)
+
+	var total int64
+	for i, s := range staged {
+		total += s.Info.NumEntries
+		if i > 0 {
+			assert.Negative(t, bytes.Compare(staged[i-1].Info.MaxKey, s.Info.MinKey),
+				"table %d must start after table %d ends", i, i-1)
+		}
+	}
+	assert.Equal(t, int64(n), total)
+}
+
+// The staged tables, once installed in place of the generation, must answer
+// every lookup the same way the generation did.
+func TestStagedTablesAnswerLikeTheGeneration(t *testing.T) {
+	e := newTestEngine(t)
+	ctx := context.Background()
+	rng := rand.New(rand.NewSource(42))
+	for round := 0; round < 5; round++ {
+		muts := make([]Mutation, 0, 200)
+		for i := 0; i < 200; i++ {
+			key := pk(rng.Int63n(500))
+			if rng.Intn(3) == 0 {
+				muts = append(muts, del(key))
+			} else {
+				muts = append(muts, put(key, rng.Int63n(1<<20)))
+			}
+		}
+		require.NoError(t, e.Write(ctx, muts))
+		require.NoError(t, e.active.db.Flush())
+	}
+
+	keys := make([][]byte, 0, 600)
+	for i := int64(0); i < 600; i++ {
+		keys = append(keys, pk(i))
+	}
+	before, err := e.MultiGet(ctx, keys)
+	require.NoError(t, err)
+
+	gen, err := e.RotateIncrement(ctx)
+	require.NoError(t, err)
+	staged, err := e.StageFrozen(ctx, gen)
+	require.NoError(t, err)
+	// links taken first, because retiring the generation removes its staging
+	commitTables(t, e, t.TempDir(), staged, nil, gen)
+	require.Empty(t, e.FrozenGenerations())
+
+	after, err := e.MultiGet(ctx, keys)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+}
+
+// A staging that fails part way writes no STAGED, and the next attempt
+// starts over and completes.
+func TestStageFrozenFailureLeavesNoStagedList(t *testing.T) {
+	old := stagedTableTargetBytes
+	stagedTableTargetBytes = 4 << 10
+	defer func() { stagedTableTargetBytes = old }()
+
+	var nextID, failAt atomic.Int64
+	nextID.Store(1000)
+	failAt.Store(1002) // the second table of the first attempt
+	e := newTestEngine(t, func(c *Config) {
+		c.AllocID = func(context.Context) (int64, error) {
+			id := nextID.Add(1)
+			if id == failAt.Load() {
+				return 0, errors.New("injected id allocation failure")
+			}
+			return id, nil
+		}
+	})
+	ctx := context.Background()
+	muts := make([]Mutation, 0, 2000)
+	for i := int64(0); i < 2000; i++ {
+		muts = append(muts, put(pk(i), i))
+	}
+	require.NoError(t, e.Write(ctx, muts))
+	gen, err := e.RotateIncrement(ctx)
+	require.NoError(t, err)
+
+	_, err = e.StageFrozen(ctx, gen)
+	require.Error(t, err)
+	_, err = os.Stat(filepath.Join(stagedDir(e.cfg.Dir, gen), stagedListName))
+	require.True(t, os.IsNotExist(err), "a failed staging must not write STAGED")
+
+	failAt.Store(-1)
+	staged, err := e.StageFrozen(ctx, gen)
+	require.NoError(t, err)
+	var total int64
+	for _, s := range staged {
+		require.Greater(t, int64(s.Info.ID), int64(1002), "the retry must use new IDs")
+		total += s.Info.NumEntries
+	}
+	assert.Equal(t, int64(2000), total)
 }
