@@ -2938,7 +2938,7 @@ SegmentGrowingImpl::bulk_subscript_text_impl(FieldId field_id,
         }
         auto& cache = GetGlobalTextColumnCache();
         cache.ReadBatchInto(
-            lob_base_path, fs, *properties, encoded_refs, &resolved);
+            lob_base_path, fs, properties, encoded_refs, &resolved);
         for (size_t j = 0; j < loaded_indices.size(); ++j) {
             set_output(loaded_indices[j], std::move(*resolved.Mutable(j)));
         }
@@ -4298,7 +4298,7 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
 std::unordered_map<FieldId, std::vector<FieldDataPtr>>
 SegmentGrowingImpl::LoadColumnGroup(
     const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
-    const std::shared_ptr<milvus_storage::api::Properties>& properties,
+    const std::shared_ptr<const milvus_storage::api::Properties>& properties,
     int64_t index,
     int64_t row_limit) {
     AssertInfo(index < column_groups->size(),

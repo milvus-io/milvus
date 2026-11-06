@@ -1214,6 +1214,20 @@ TEST_F(StorageTest, InitArrowReaderConfig) {
 
     status = InitArrowReaderConfig(CArrowReaderConfig{0, 0});
     ASSERT_EQ(status.error_code, Success) << status.error_msg;
+    auto updated_properties =
+        LoonFFIPropertiesSingleton::GetInstance().GetProperties();
+    EXPECT_NE(properties, updated_properties);
+    EXPECT_EQ(updated_properties,
+              LoonFFIPropertiesSingleton::GetInstance().GetProperties());
+    auto old_hole = milvus_storage::api::GetValue<int64_t>(
+        properties, PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT);
+    ASSERT_TRUE(old_hole.ok()) << old_hole.status();
+    EXPECT_EQ(old_hole.ValueOrDie(), hole_size_limit.ValueOrDie());
+    auto old_range = milvus_storage::api::GetValue<int64_t>(
+        properties, PROPERTY_READER_PARQUET_PREBUFFER_RANGE_SIZE_LIMIT);
+    ASSERT_TRUE(old_range.ok()) << old_range.status();
+    EXPECT_EQ(old_range.ValueOrDie(), range_size_limit.ValueOrDie());
+
     cache_options = GetArrowReaderProperties().cache_options();
     EXPECT_EQ(cache_options.hole_size_limit,
               default_cache_options.hole_size_limit);
