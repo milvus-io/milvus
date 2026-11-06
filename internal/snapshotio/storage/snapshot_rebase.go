@@ -19,6 +19,7 @@ package storage
 import (
 	"strings"
 
+	"github.com/milvus-io/milvus/internal/snapshotio"
 	milvusstorage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -41,24 +42,10 @@ func (r snapshotRootRebaser) rebasePath(src string) string {
 	if src == "" || r.oldRoot == r.newRoot {
 		return src
 	}
-	// Root relocation is prefix-only: it supports moving the whole exported
-	// bundle while preserving its internal layout, not arbitrary path rewrites.
 	normalized := NormalizeSnapshotObjectPath(src)
-	if r.oldRoot == "" {
-		if normalized == "" {
-			return r.newRoot
-		}
-		return r.newRoot + "/" + strings.TrimLeft(normalized, "/")
-	}
-	if normalized == r.oldRoot {
-		return r.newRoot
-	}
-	if strings.HasPrefix(normalized, r.oldRoot+"/") {
-		relativePath := strings.TrimPrefix(normalized, r.oldRoot+"/")
-		if r.newRoot == "" {
-			return relativePath
-		}
-		return r.newRoot + "/" + relativePath
+	rebased := snapshotio.RebaseObjectPath(normalized, r.oldRoot, r.newRoot)
+	if rebased != normalized {
+		return rebased
 	}
 	return src
 }

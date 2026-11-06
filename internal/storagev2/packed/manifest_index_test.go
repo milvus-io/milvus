@@ -14,6 +14,7 @@ import (
 	"path"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -152,4 +153,52 @@ func TestCommitManifestUpdates_DropIndex(t *testing.T) {
 		require.Len(t, indexes, 1)
 		require.EqualValues(t, 11, indexes[0].IndexID)
 	})
+}
+
+func TestReplaceCopiedManifestIndexes(t *testing.T) {
+	for _, mode := range []string{"replace", "drop only", "empty"} {
+		t.Run(mode, func(t *testing.T) {
+			cfg := manifestTestStorageConfig(t)
+			base := path.Join(cfg.RootPath, "copied/segment")
+			old := indexEntry(t, base, path.Join(base, "_index/100/1"), 10, 100)
+			published, err := CommitManifestUpdates(MarshalManifestPath(base, 0), cfg, &ManifestUpdates{
+				Indexes: []ManifestIndexInfo{old},
+				Stats:   []StatEntry{{Key: "bm25", Files: []string{"stats.bin"}}},
+			})
+			require.NoError(t, err)
+			_, version, err := UnmarshalManifestPath(published)
+			require.NoError(t, err)
+			ids := []int64{10, 10}
+			var indexes []ManifestIndexInfo
+			if mode == "replace" {
+				indexes = []ManifestIndexInfo{indexEntry(t, base, path.Join(base, "_index/200/1"), 20, 200)}
+			}
+			if mode == "empty" {
+				// Revision zero has no index entries and no physical object.
+				version, ids = 0, nil
+			}
+			read := mockey.Mock(GetManifestIndexInfos).To(func(string, *indexpb.StorageConfig) ([]ManifestIndexInfo, error) {
+				t.Error("copied-manifest replacement must not resolve drops by rereading")
+				return nil, nil
+			}).Build()
+			defer read.UnPatch()
+			got, err := ReplaceCopiedManifestIndexes(base, version, cfg, ids, indexes)
+			read.UnPatch()
+			require.NoError(t, err)
+			if mode == "empty" {
+				require.Equal(t, MarshalManifestPath(base, 0), got)
+				return
+			}
+			files, err := ReadManifestFiles(got, cfg)
+			require.NoError(t, err)
+			require.Len(t, files.StatsFiles, 1, "other manifest sections survive replacement")
+			if mode == "replace" {
+				require.Len(t, files.Indexes, 1)
+				require.EqualValues(t, 20, files.Indexes[0].IndexID)
+				require.EqualValues(t, 200, files.Indexes[0].BuildID)
+			} else {
+				require.Empty(t, files.Indexes)
+			}
+		})
+	}
 }
