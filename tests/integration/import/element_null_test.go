@@ -1115,28 +1115,16 @@ func (s *importTestBase) enWriteNumpy(ctx context.Context, rows []enRow, extra .
 	return paths
 }
 
-// runElementNullImportNumpyAndBinlog covers the import paths that carry no
-// struct data. A binlog (backup) import into a collection with element-nullable
-// or nested Array sub-fields is rejected. NumPy files carry no struct data: a
+// runElementNullImportNumpy covers NumPy files, which carry no struct data: a
 // NumPy import into a collection whose struct is nullable imports every struct
 // row as null, one into a collection whose struct is not nullable is rejected,
-// and so is a file named after the struct or one of its sub-fields.
-func (s *importTestBase) runElementNullImportNumpyAndBinlog() {
+// and so is a file named after the struct or one of its sub-fields. Binlog
+// imports are covered by struct_evolution_restore_test.go.
+func (s *importTestBase) runElementNullImportNumpy() {
 	ctx, cancel := context.WithTimeout(s.Cluster.GetContext(), 10*time.Minute)
 	defer cancel()
 	name := "en_numpy_" + funcutil.RandomString(8)
 	s.enCreate(ctx, enSchema(name, enBaseChildren))
-
-	resp, err := s.Cluster.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
-		CollectionName: name, PartitionName: "_default",
-		Files:   []*internalpb.ImportFile{{Paths: []string{"backup/insert_log/", "backup/delta_log/"}}},
-		Options: []*commonpb.KeyValuePair{enKV(importutilv2.BackupFlag, "true")},
-	})
-	s.Require().NoError(err)
-	err = merr.Error(resp.GetStatus())
-	s.Require().ErrorIs(err, merr.ErrParameterInvalid)
-	s.Require().ErrorContains(err,
-		"binlog import (backup restore) into a collection with element-nullable or nested Array field "+enStruct+".label is not supported")
 
 	// A file named after the struct, a sub-field's stored name or its own name
 	// is rejected by the importer before it reads any file, so the job fails
@@ -1161,7 +1149,7 @@ func (s *importTestBase) runElementNullImportNumpyAndBinlog() {
 		rows[i].elems = nil
 	}
 	s.enCreateIndexes(ctx, name)
-	resp, err = s.Cluster.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
+	resp, err := s.Cluster.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
 		CollectionName: name,
 		Files:          []*internalpb.ImportFile{{Paths: s.enWriteNumpy(ctx, rows)}},
 	})
@@ -1212,8 +1200,8 @@ func (s *ElementNullImportSuite) TestParquet() {
 	s.runElementNullImport(importutilv2.FileTypeParquet)
 }
 
-func (s *ElementNullImportSuite) TestNumpyAndBinlog() {
-	s.runElementNullImportNumpyAndBinlog()
+func (s *ElementNullImportSuite) TestNumpy() {
+	s.runElementNullImportNumpy()
 }
 
 func TestElementNullImport(t *testing.T) {
@@ -1244,8 +1232,8 @@ func (s *ElementNullImportV3Suite) TestParquetV3() {
 	s.runElementNullImport(importutilv2.FileTypeParquet)
 }
 
-func (s *ElementNullImportV3Suite) TestNumpyAndBinlogV3() {
-	s.runElementNullImportNumpyAndBinlog()
+func (s *ElementNullImportV3Suite) TestNumpyV3() {
+	s.runElementNullImportNumpy()
 }
 
 func TestElementNullImportV3(t *testing.T) {

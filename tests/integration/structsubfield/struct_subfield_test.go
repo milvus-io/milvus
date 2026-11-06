@@ -373,8 +373,8 @@ func (s *StructSubFieldSuite) TestLoadFieldsBeforeAndAfterReload() {
 
 // TestBulkImportAfterAddingSubField imports a JSON file written for the schema
 // before the add: the added element-nullable sub-field reads back as one null
-// per element, and a null struct row stays null. Binlog (backup) imports are
-// still rejected, and so is a NumPy file named after the added sub-field.
+// per element, and a null struct row stays null. A NumPy file named after the
+// added sub-field is rejected.
 func (s *StructSubFieldSuite) TestBulkImportAfterAddingSubField() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
@@ -383,16 +383,6 @@ func (s *StructSubFieldSuite) TestBulkImportAfterAddingSubField() {
 	s.add(ctx, name, scalarSchema("c", schemapb.DataType_Int64, true))
 
 	resp, err := s.Cluster.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
-		CollectionName: name, PartitionName: "_default",
-		Files:   []*internalpb.ImportFile{{Paths: []string{"backup/insert_log/", "backup/delta_log/"}}},
-		Options: []*commonpb.KeyValuePair{param("backup", "true")},
-	})
-	s.Require().NoError(err)
-	err = merr.Error(resp.GetStatus())
-	s.Require().ErrorIs(err, merr.ErrParameterInvalid)
-	s.Require().ErrorContains(err, "binlog import (backup restore) into a collection with element-nullable or nested Array field S.c is not supported")
-
-	resp, err = s.Cluster.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
 		CollectionName: name, Files: []*internalpb.ImportFile{{Paths: []string{"numpy/pk.npy", "numpy/embedding.npy", "numpy/c.npy"}}},
 	})
 	s.Require().NoError(merr.CheckRPCCall(resp.GetStatus(), err))
