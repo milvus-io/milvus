@@ -60,7 +60,7 @@ func TestPackedWriterKeyLookupRetry(t *testing.T) {
 	}{
 		{name: "recovers within write budget", failures: 2, lookups: 3},
 		{name: "preserves unavailable error after budget", failures: 3, lookups: 3},
-		{name: "cancelled sync does not fetch key", cancel: true},
+		{name: "canceled sync does not fetch key", cancel: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			key := bytes.Repeat([]byte{0x51}, 32)
