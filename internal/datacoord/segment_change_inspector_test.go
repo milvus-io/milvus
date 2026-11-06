@@ -97,6 +97,19 @@ func TestSegmentChangeInspector_StagedTimeoutAborts(t *testing.T) {
 	require.Contains(t, got.FailReason, "staging timeout")
 }
 
+func TestSegmentChangeInspector_ProducerOwnedWaitDoesNotTimeOut(t *testing.T) {
+	for _, source := range []model.SegmentChangeSource{model.SegmentChangeSourceClustering, model.SegmentChangeSourceCopySegment, model.SegmentChangeSourceExternalRefresh} {
+		t.Run(source.String(), func(t *testing.T) {
+			m, group := seedStagedInspectorMeta(t, func(seg *meta.SegmentInfo) { seg.IsSorted = false })
+			group.Source = source
+			group.CreateTS = time.Now().Add(-2 * time.Hour).Unix()
+			i := newSegmentChangeInspector(context.Background(), m, meta.NewMockAllocator(t))
+			i.evaluateStaged(context.Background(), group)
+			require.Equal(t, model.SegmentChangeStateStaged, m.GetSegmentChangeGroup(context.Background(), 10, 1).State)
+		})
+	}
+}
+
 func TestSegmentChangeInspector_MemberDroppedFails(t *testing.T) {
 	m, group := seedStagedInspectorMeta(t)
 	require.NoError(t, m.UpdateSegmentsInfo(context.Background(), meta.UpdateStatusOperator(1001, commonpb.SegmentState_Dropped)))

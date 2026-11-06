@@ -1293,6 +1293,69 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_ClearsImportingFlagOnComp
 	s.False(updated.GetIsImporting())
 }
 
+func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_StagingAllowsL0() {
+	setSegmentChangeTestParam(s.T(), &Params.DataCoordCfg.SegmentChangeEnabled, "true")
+	ctx := context.Background()
+	catalog := catalogmocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+	store := metacache.NewMetaStore(catalog)
+	mt := &meta.Meta{Ctx: ctx, Catalog: catalog, Segments: meta.NewSegmentsInfo(store), MetaStore: store}
+	mt.Segments.SetSegment(100, meta.NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 100, CollectionID: 1, PartitionID: 10, InsertChannel: "ch1",
+		State: commonpb.SegmentState_Importing, Level: datapb.SegmentLevel_L0, IsImporting: true,
+	}))
+	copyCatalog := catalogmocks.NewDataCoordCatalog(s.T())
+	copyCatalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
+	copyCatalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
+	copyCatalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	copyMeta, err := NewCopySegmentMeta(ctx, copyCatalog, nil, nil, nil, nil)
+	s.Require().NoError(err)
+	task := CreateTestCopyTask(1, 100)
+	resp := &datapb.QueryCopySegmentResponse{
+		State:          datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+		SegmentResults: []*datapb.CopySegmentResult{{SegmentId: 100}},
+	}
+	s.Require().NoError(SyncCopySegmentTask(ctx, task, resp, copyMeta, mt, nil))
+	segment := mt.GetSegment(ctx, 100)
+	s.Equal(commonpb.SegmentState_Flushed, segment.GetState())
+	s.False(segment.GetIsImporting())
+	s.Nil(mt.ProducerChangeGroup(model.SegmentChangeSourceCopySegment, task.GetTaskId(), ""))
+}
+
+func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_StagesOnlyNonL0() {
+	setSegmentChangeTestParam(s.T(), &Params.DataCoordCfg.SegmentChangeEnabled, "true")
+	ctx := context.Background()
+	mt, err := meta.NewMemoryMeta(s.T())
+	s.Require().NoError(err)
+	for id, level := range map[int64]datapb.SegmentLevel{100: datapb.SegmentLevel_L0, 101: datapb.SegmentLevel_L1} {
+		s.Require().NoError(mt.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
+			ID: id, CollectionID: 1, PartitionID: 10, InsertChannel: "ch1",
+			State: commonpb.SegmentState_Importing, Level: level, IsImporting: true, NumOfRows: 10,
+		})))
+	}
+	copyCatalog := catalogmocks.NewDataCoordCatalog(s.T())
+	copyCatalog.EXPECT().ListCopySegmentJobs(mock.Anything).Return(nil, nil)
+	copyCatalog.EXPECT().ListCopySegmentTasks(mock.Anything).Return(nil, nil)
+	copyCatalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	copyMeta, err := NewCopySegmentMeta(ctx, copyCatalog, nil, nil, nil, nil)
+	s.Require().NoError(err)
+	task := CreateTestCopyTask(1, 100).(*Task)
+	taskProto := proto.Clone(task.Task.Load()).(*datapb.CopySegmentTask)
+	taskProto.IdMappings = append(taskProto.IdMappings, &datapb.CopySegmentIDMapping{SourceSegmentId: 2, TargetSegmentId: 101, PartitionId: 10})
+	task.Task.Store(taskProto)
+	resp := &datapb.QueryCopySegmentResponse{
+		State:          datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
+		SegmentResults: []*datapb.CopySegmentResult{{SegmentId: 100}, {SegmentId: 101}},
+	}
+	s.Require().NoError(SyncCopySegmentTask(ctx, task, resp, copyMeta, mt, nil))
+	s.False(mt.GetSegment(ctx, 100).GetIsImporting())
+	s.False(mt.GetSegment(ctx, 100).GetIsInvisible())
+	s.True(mt.GetSegment(ctx, 101).GetIsInvisible())
+	group := mt.ProducerChangeGroup(model.SegmentChangeSourceCopySegment, task.GetTaskId(), "")
+	s.Require().NotNil(group)
+	s.Equal([]int64{101}, group.NewSegmentIDs)
+}
+
 func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_EmptyManifestStillClearsImportingFlag() {
 	setSegmentChangeTestParam(s.T(), &Params.DataCoordCfg.SegmentChangeEnabled, "false")
 	collectionID := int64(1)

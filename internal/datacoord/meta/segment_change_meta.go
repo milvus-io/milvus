@@ -647,6 +647,12 @@ func (m *Meta) updateSegmentsInfoAndChangeGroupsLocked(ctx context.Context, data
 // the input claim and new output ownership. Public transitions cannot change
 // membership or the durable producer identity.
 func (m *Meta) updateSegmentsInfoAndChangeGroupsMaterializedLocked(ctx context.Context, dataView *viewpb.DataViewOfCollection, groupActions []metastore.UpdateAction, replacement *model.SegmentChangeGroup, operators ...UpdateOperator) error {
+	return m.updateSegmentChangesLocked(ctx, dataView, groupActions, replacement, false, operators...)
+}
+
+// recovery is used only before DataView recovery and before RPCs or workers run.
+// It completes an already-started publication, not a new compaction.
+func (m *Meta) updateSegmentChangesLocked(ctx context.Context, dataView *viewpb.DataViewOfCollection, groupActions []metastore.UpdateAction, replacement *model.SegmentChangeGroup, recovery bool, operators ...UpdateOperator) error {
 	for _, action := range groupActions {
 		if _, ok := action.Entry.(metastore.SegmentChangeGroupEntry); !ok {
 			return merr.WrapErrServiceInternalMsg(
@@ -783,7 +789,7 @@ func (m *Meta) updateSegmentsInfoAndChangeGroupsMaterializedLocked(ctx context.C
 			entry.Group.State != model.SegmentChangeStateCommitted {
 			continue
 		}
-		if (entry.Group.Source == model.SegmentChangeSourceMixCompaction ||
+		if !recovery && (entry.Group.Source == model.SegmentChangeSourceMixCompaction ||
 			entry.Group.Source == model.SegmentChangeSourceSortCompaction ||
 			entry.Group.Source == model.SegmentChangeSourceClustering ||
 			entry.Group.Source == model.SegmentChangeSourceBumpSchema) &&

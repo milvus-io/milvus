@@ -216,6 +216,42 @@ func TestSegmentChangeImportCallbackPublishesPreparedGroups(t *testing.T) {
 	}
 }
 
+func TestSegmentChangeImportSchemaMismatchBeforeCommit(t *testing.T) {
+	for _, started := range []bool{false, true} {
+		t.Run(map[bool]string{false: "before_broadcast", true: "broadcast_started"}[started], func(t *testing.T) {
+			setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "true")
+			s, _, _ := newImportCommitCallbackTest(t)
+			m, _, _ := seedMixProducer(t)
+			m.DataViewManager = nil
+			schema := readinessVectorSchema()
+			schema.Version = 2
+			m.AddCollection(&meta.CollectionInfo{ID: 100, Schema: schema, VChannelNames: []string{"v1", "v2"}})
+			for id, channel := range map[int64]string{10: "v1", 11: "v1", 20: "v2"} {
+				require.NoError(t, m.AddSegment(t.Context(), meta.NewSegmentInfo(&datapb.SegmentInfo{
+					ID: id, CollectionID: 100, PartitionID: 1, InsertChannel: channel, State: commonpb.SegmentState_Flushed,
+					IsImporting: true, IsSorted: true, NumOfRows: 10, SchemaVersion: 1,
+					Binlogs: []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: id}}}},
+				})))
+			}
+			s.meta = m
+			if started {
+				require.NoError(t, s.importMeta.UpdateJob(t.Context(), 1, bulkimport.UpdateJobCommitBroadcastStarted))
+			}
+			job := s.importMeta.GetJob(t.Context(), 1)
+			require.ErrorIs(t, s.prepareImportPublication(t.Context(), job), merr.ErrImportSysFailed)
+			job = s.importMeta.GetJob(t.Context(), 1)
+			if started {
+				require.Equal(t, internalpb.ImportJobState_Uncommitted, job.GetState())
+				require.True(t, job.GetCommitBroadcastStarted())
+			} else {
+				require.Equal(t, internalpb.ImportJobState_Failed, job.GetState())
+				require.NoError(t, m.AbortFailedImportGroups(t.Context(), 1))
+				require.Equal(t, commonpb.SegmentState_Dropped, m.GetSegment(t.Context(), 10).GetState())
+			}
+		})
+	}
+}
+
 func TestSegmentChangeCDCImportPublishesReadyGroupWithoutInspectorTick(t *testing.T) {
 	setSegmentChangeTestParam(t, &Params.DataCoordCfg.SegmentChangeEnabled, "true")
 	m, _, _ := seedMixProducer(t)

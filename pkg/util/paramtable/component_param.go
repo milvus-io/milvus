@@ -7804,7 +7804,7 @@ Startup continuously schedules bounded concurrent reads and retries failed reads
 		Key:          "dataCoord.segmentChange.stagingTimeout",
 		Version:      "3.0.4",
 		DefaultValue: "3600",
-		Doc:          "The maximum duration in seconds a segment change group may stay staged before the batch is aborted (STAGED -> ABORTED), bounding unconvergeable or externally-dropped batches.",
+		Doc:          "The maximum duration in seconds that eligible compaction segment change groups may wait for readiness before aborting. Import, clustering, copy and external refresh use their producer lifecycle instead.",
 		Export:       true,
 	}
 	p.SegmentChangeStagingTimeout.Init(base.mgr)
