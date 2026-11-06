@@ -29,6 +29,9 @@ import (
 	"strconv"
 	"strings"
 
+	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/reflect/protoreflect"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
@@ -139,10 +142,8 @@ func (c IndexCandidate) coversPath(nestedPath []string) bool {
 // bookkeeping scalars rather than predicate or output structure:
 // QueryInfo.materialized_view_involved, bm25_avgdl, query_field_id,
 // search_topk_ratio, refine_topk_ratio, search_iterator_v2_info.token,
-// VectorANNS.placeholder_tag, JSONContainsExpr.elements_same_type (a hint
-// the parser derives from the values it already reports), and the
-// expressions inside function chain operations (the chains themselves are
-// summarized).
+// VectorANNS.placeholder_tag, and the expressions inside function chain
+// operations (the chains themselves are summarized).
 type PlanExplanation struct {
 	Version        int                        `json:"version"`
 	PlanType       string                     `json:"plan_type"`
@@ -160,12 +161,15 @@ type PlanExplanation struct {
 	// so a present empty namespace is not the same plan as an absent one.
 	Namespace *string `json:"namespace,omitempty"`
 	// UnknownNodeCount counts expression nodes, value kinds, and plan node
-	// kinds this version does not recognize. Zero means every node of the
-	// plan was recognized; it says nothing about the plan fields listed above
-	// as outside the contract.
+	// kinds this version does not recognize, whether they decode as a Go type
+	// this version has no case for or, when the plan comes from a newer
+	// planpb, as unknown fields on an otherwise empty union. Zero means every
+	// node of the plan was recognized; it says nothing about the plan fields
+	// listed above as outside the contract.
 	UnknownNodeCount int `json:"unknown_node_count"`
 	// Detail says why PlanType is "unknown": the Go type of an unrecognized
-	// plan node kind, or that none is set.
+	// plan node kind, the unknown field numbers it arrived under, or that
+	// none is set.
 	Detail string `json:"detail,omitempty"`
 }
 
@@ -336,13 +340,21 @@ type PredicateNode struct {
 	// field: the values are tested for membership in the array or JSON field,
 	// instead of the field's value being tested against the list.
 	InField bool `json:"in_field,omitempty"`
+	// ElementsSameType is the json_contains flag over Values: false when the
+	// parser saw a mixed-kind list. On a JSON column segcore runs the typed
+	// contains when it is true and the generic one when it is false, and a
+	// false flag also keeps the node off the scalar-index path (JSON stats
+	// can still serve it). Present on json_contains nodes only, hence the
+	// pointer.
+	ElementsSameType *bool `json:"elements_same_type,omitempty"`
 	// Template is the expression-template variable the value(s) came from.
 	// For arith_compare it names the template behind Value; OperandTemplate
 	// names the one behind Operand.
 	Template        string `json:"template,omitempty"`
 	OperandTemplate string `json:"operand_template,omitempty"`
 	// Detail says why Node is "unknown": the Go type of an unrecognized
-	// expression kind, or that the expression is missing or not set.
+	// expression kind, the unknown field numbers it arrived under, or that
+	// the expression is missing or not set.
 	Detail string `json:"detail,omitempty"`
 }
 
@@ -371,6 +383,37 @@ type BlobSummary struct {
 
 func (b *BlobSummary) String() string {
 	return fmt.Sprintf("<%d bytes>", b.Bytes)
+}
+
+// ArrayValue is an array literal of the plan: its elements, the SameType flag
+// segcore reads (a stored array never equals a non-empty literal marked
+// mixed, and an array index is consulted only for one that is not), and the
+// ElementType the parser recorded. The elements do not determine SameType:
+// the parser clears it for a mixed-kind literal such as [1, 2.0], and a
+// template array arrives with it false (ElementType JSON) when the client
+// sent JSON data and true (ElementType Int64) when it sent typed data, same
+// elements either way. ElementType is omitted when the plan carries none: an
+// empty literal, or a mixed one written in the expression. A mixed array
+// inside JSON template data keeps the type of its first element.
+type ArrayValue struct {
+	Elements    []any  `json:"elements"`
+	SameType    bool   `json:"same_type"`
+	ElementType string `json:"element_type,omitempty"`
+}
+
+// UnknownValue stands in for a value the explainer cannot describe: a
+// GenericValue kind this build has no case for, or one that arrives as an
+// empty union carrying fields under numbers this build's planpb does not
+// know, which is how a kind added by a newer producer decodes. Either counts
+// in unknown_node_count. An object rather than a marker string, so it cannot
+// be mistaken for a string value. Unknown fields beside a recognized kind are
+// not reported.
+type UnknownValue struct {
+	Detail string `json:"unknown_value"`
+}
+
+func (u *UnknownValue) String() string {
+	return "<unknown value: " + u.Detail + ">"
 }
 
 // Float32 and Float64 are the explanation's float types. They marshal as JSON
@@ -481,7 +524,7 @@ func ExplainPlan(plan *planpb.PlanNode, schema *typeutil.SchemaHelper, opts *Exp
 		out.PlanType = PlanTypeUnknown
 		out.Detail = fmt.Sprintf("%T", node)
 		if node == nil {
-			out.Detail = "plan node not set"
+			out.Detail = emptyOneofDetail(plan.ProtoReflect(), "plan node not set")
 		}
 	}
 
@@ -784,12 +827,14 @@ func (e *explainer) expr(expr *planpb.Expr) *PredicateNode {
 	case *planpb.Expr_AlwaysTrueExpr:
 		return &PredicateNode{Node: NodeAlwaysTrue}
 	case *planpb.Expr_JsonContainsExpr:
+		sameType := node.JsonContainsExpr.GetElementsSameType()
 		return &PredicateNode{
-			Node:     NodeJSONContains,
-			Op:       node.JsonContainsExpr.GetOp().String(),
-			Field:    e.column(node.JsonContainsExpr.GetColumnInfo()),
-			Values:   e.values(node.JsonContainsExpr.GetElements(), node.JsonContainsExpr.GetTemplateVariableName()),
-			Template: node.JsonContainsExpr.GetTemplateVariableName(),
+			Node:             NodeJSONContains,
+			Op:               node.JsonContainsExpr.GetOp().String(),
+			Field:            e.column(node.JsonContainsExpr.GetColumnInfo()),
+			Values:           e.values(node.JsonContainsExpr.GetElements(), node.JsonContainsExpr.GetTemplateVariableName()),
+			ElementsSameType: &sameType,
+			Template:         node.JsonContainsExpr.GetTemplateVariableName(),
 		}
 	case *planpb.Expr_CallExpr:
 		params := node.CallExpr.GetFunctionParameters()
@@ -893,7 +938,7 @@ func (e *explainer) expr(expr *planpb.Expr) *PredicateNode {
 		e.unknown++
 		detail := fmt.Sprintf("%T", node)
 		if node == nil {
-			detail = "expression not set"
+			detail = emptyOneofDetail(expr.ProtoReflect(), "expression not set")
 		}
 		return &PredicateNode{Node: NodeUnknown, Detail: detail}
 	}
@@ -1055,6 +1100,15 @@ func (e *explainer) values(vs []*planpb.GenericValue, template string) []any {
 func (e *explainer) genericValue(v *planpb.GenericValue) any {
 	switch val := v.GetVal().(type) {
 	case nil:
+		// An empty union is a value the plan left empty (an unfilled template
+		// bound), unless the message carries fields this build cannot decode.
+		if v == nil {
+			return nil
+		}
+		if detail := unknownFieldsDetail(v.ProtoReflect()); detail != "" {
+			e.unknown++
+			return &UnknownValue{Detail: detail}
+		}
 		return nil
 	case *planpb.GenericValue_BoolVal:
 		return val.BoolVal
@@ -1065,13 +1119,59 @@ func (e *explainer) genericValue(v *planpb.GenericValue) any {
 	case *planpb.GenericValue_StringVal:
 		return val.StringVal
 	case *planpb.GenericValue_ArrayVal:
-		return e.values(val.ArrayVal.GetArray(), "")
+		return e.arrayValue(val.ArrayVal)
 	case *planpb.GenericValue_BytesVal:
 		return &BlobSummary{Bytes: len(val.BytesVal)}
 	default:
 		e.unknown++
-		return fmt.Sprintf("<unknown value %T>", val)
+		return &UnknownValue{Detail: fmt.Sprintf("%T", val)}
 	}
+}
+
+func (e *explainer) arrayValue(arr *planpb.Array) *ArrayValue {
+	out := &ArrayValue{
+		Elements: e.values(arr.GetArray(), ""),
+		SameType: arr.GetSameType(),
+	}
+	if arr.GetElementType() != schemapb.DataType_None {
+		out.ElementType = arr.GetElementType().String()
+	}
+	return out
+}
+
+// emptyOneofDetail explains a oneof that decoded as unset: fallback when the
+// message really is empty, the unknown field numbers when it carries fields
+// this build's planpb has no case for.
+func emptyOneofDetail(m protoreflect.Message, fallback string) string {
+	if detail := unknownFieldsDetail(m); detail != "" {
+		return detail
+	}
+	return fallback
+}
+
+// unknownFieldsDetail lists the field numbers in a message's unknown fields,
+// "" when there are none. The decoder already validated the wire format, so
+// the byte-count fallback is for completeness.
+func unknownFieldsDetail(m protoreflect.Message) string {
+	raw := m.GetUnknown()
+	if len(raw) == 0 {
+		return ""
+	}
+	var nums []string
+	for rest := raw; len(rest) > 0; {
+		num, _, n := protowire.ConsumeField(rest)
+		if n < 0 {
+			return fmt.Sprintf("%d bytes of unknown fields", len(raw))
+		}
+		if s := strconv.Itoa(int(num)); !slices.Contains(nums, s) {
+			nums = append(nums, s)
+		}
+		rest = rest[n:]
+	}
+	if len(nums) == 1 {
+		return "unknown field " + nums[0]
+	}
+	return "unknown fields " + strings.Join(nums, ", ")
 }
 
 func interval(iv *planpb.Interval) *IntervalExplanation {
@@ -1203,7 +1303,10 @@ func writeNode(b *strings.Builder, n *PredicateNode, depth int) {
 // textValue renders a predicate value for the text view. Strings are quoted
 // so element boundaries survive (["a b", "c"] and ["a", "b c"] differ),
 // floats keep the JSON spelling so 2.0 is not read as 2, and a value the plan
-// left empty (an unfilled template bound) prints as null, as in JSON.
+// left empty (an unfilled template bound) prints as null, as in JSON. An
+// array literal prints as its elements, with a (same_type=false) suffix when
+// the parser marked it so: the elements can look the same either way, and
+// segcore treats the two differently.
 func textValue(v any) string {
 	switch val := v.(type) {
 	case nil:
@@ -1212,6 +1315,11 @@ func textValue(v any) string {
 		return strconv.Quote(val)
 	case Float64:
 		return floatText(float64(val), 64)
+	case *ArrayValue:
+		if !val.SameType {
+			return textValue(val.Elements) + "(same_type=false)"
+		}
+		return textValue(val.Elements)
 	case []any:
 		parts := make([]string, len(val))
 		for i, item := range val {
@@ -1255,6 +1363,9 @@ func describeNode(n *PredicateNode) string {
 	if n.Values != nil {
 		// Present but empty prints as [], as in JSON: `f in []` matches nothing.
 		parts = append(parts, textValue(n.Values))
+	}
+	if n.ElementsSameType != nil && !*n.ElementsSameType {
+		parts = append(parts, "elements_same_type=false")
 	}
 	if len(n.ExtraValues) > 0 {
 		parts = append(parts, "extra="+textValue(n.ExtraValues))
