@@ -157,6 +157,11 @@ func initIdempotencyResourceForTest(t *testing.T) storage.ChunkManager {
 	vchannels := make(map[string]*streamingpb.VChannelMeta)
 
 	rc := mocks.NewMockMixCoordClient(t)
+	var nextID atomic.Int64
+	rc.EXPECT().AllocID(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *rootcoordpb.AllocIDRequest, opts ...grpc.CallOption) (*rootcoordpb.AllocIDResponse, error) {
+		start := nextID.Add(int64(req.Count)) - int64(req.Count) + 1
+		return &rootcoordpb.AllocIDResponse{Status: merr.Success(), ID: start, Count: req.Count}, nil
+	}).Maybe()
 	tso := atomic.Uint64{}
 	tso.Store(1000)
 	rc.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *rootcoordpb.AllocTimestampRequest, opts ...grpc.CallOption) (*rootcoordpb.AllocTimestampResponse, error) {

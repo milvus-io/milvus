@@ -24,6 +24,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | CommitImport / RollbackImport | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
 | Insert | Single VChannel | No | — |
 | Delete | Single VChannel | No | — |
+| Upsert | Single VChannel | No | — |
 | CreateSegment *(SelfControlled)* | Single VChannel | No | — |
 | Flush *(SelfControlled)* | Single VChannel | No | — |
 | ManualFlush | Broadcast: collection VChannels + CChannel, AckSyncUp, Unreplicable (`_ur`) | Yes (data VChannels) | SharedDBName + ExclusiveCollectionName |
@@ -47,6 +48,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 - **RollbackImport**: The DataCoord callback marks an uncommitted job Failed; committed jobs are unchanged.
 - **UpdateImport**: Assigns the per-file ID ranges to an in-progress import job once preimport reports exact row counts; replicated so both clusters derive identical PK/RowID. DataCoord ack callback only (no local recovery data work).
 - **Insert** / **Delete**: DML on a single VChannel. CipherEnabled.
+- **Upsert**: The common WAL format for Insert, Upsert, and partial update when enabled. Ordinary Insert carries rows only; replacement writes carry producer-decided explicit delete effects. One logical record has one MessageID and final visibility TimeTick. Its partition table and per-row indexes can place rows in several partitions of the same collection/VChannel. Delete scope is independent of insert placement. Deletes affect strictly older versions. Equal-TimeTick duplicates retain existing semantics without a last-write-wins guarantee. The `streaming.wal.enableUpsertMessage` default is `auto`, using the standard 3.1.0 version gate. Explicit false keeps legacy producers; retained history remains readable. The gate does not check CDC targets or guarantee downgrade safety. See [Unified Insert and Upsert WAL format](../../../design-docs/design_docs/wal/upsert_message.md).
 - **CreateSegment** / **Flush**: WAL-generated (SelfControlled). Allocates or seals a growing segment.
 - **ManualFlush**: Flushes the collection on the receiving cluster, on either replication role. Broadcasts to all collection VChannels plus CChannel and waits for local L1/L0 completion with AckSyncUp. See [Local Flush Control](../wal/local-flush.md) for ordering between replicated transactions.
 - **AlterLoadConfig**: Modifies load configuration — partition set, replica count, load fields, etc. CChannel-only, consumed by QueryCoord.

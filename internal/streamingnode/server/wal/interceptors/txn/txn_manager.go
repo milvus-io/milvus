@@ -32,7 +32,7 @@ func NewTxnManager(pchannel types.PChannelInfo, uncommittedTxnBuilders map[messa
 		)
 		for _, msg := range body {
 			session.AddNewMessage(context.Background(), msg.TimeTick())
-			session.AddNewMessageDoneAndKeepalive(msg.TimeTick(), msg.MessageType())
+			session.AddNewMessageDoneAndKeepalive(msg)
 		}
 		sessions[session.TxnContext().TxnID] = session
 		recoveredSessions[session.TxnContext().TxnID] = struct{}{}
@@ -208,5 +208,21 @@ func (m *TxnManager) GracefulClose(ctx context.Context) error {
 		return ctx.Err()
 	case <-m.closed.CloseCh():
 		return nil
+	}
+}
+
+// Close releases session resources after the WAL has stopped and drained append work.
+// It preserves unresolved transaction outcomes for durable WAL recovery.
+func (m *TxnManager) Close() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id, session := range m.sessions {
+		session.Cleanup()
+		delete(m.sessions, id)
+		delete(m.recoveredSessions, id)
+	}
+	m.notifyRecoverDone()
+	if m.closed != nil {
+		m.closed.Close()
 	}
 }

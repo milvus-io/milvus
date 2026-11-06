@@ -268,7 +268,10 @@ func (r *oracleRuntime) collectGrowingInsertStats(ctx context.Context, stats bm2
 	if len(stats) == 0 {
 		return nil
 	}
-	request := insert.Message.MustBody()
+	request, err := insert.RowsReader.ReadRows(ctx, r.schema, insert.Rows)
+	if err != nil {
+		return err
+	}
 	missing := false
 	for fieldID := range stats {
 		if !function.HasFieldData(request.GetFieldsData(), fieldID) {

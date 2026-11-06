@@ -3,6 +3,7 @@ package idempotency
 import (
 	"context"
 
+	"github.com/cockroachdb/errors"
 	"github.com/pingcap/failpoint"
 
 	walpoint "github.com/milvus-io/milvus/internal/streamingnode/server/wal/failpoint"
@@ -75,13 +76,15 @@ func newIdempotencyInterceptorWithParam(config WindowConfig, param *interceptors
 		replicateManager := param.ReplicateManager
 		replicateRole = replicateManager.Role
 	}
-	return &idempotencyInterceptor{
+
+	impl := &idempotencyInterceptor{
 		windows:                typeutil.NewConcurrentMap[string, *Window](),
 		txnInsertResultBuffers: idempotencyutils.NewTxnInsertResultBuffers(currentTimeTick, txnActive),
 		txnActive:              txnActive,
 		replicateRole:          replicateRole,
 		config:                 config,
 	}
+	return impl
 }
 
 func newIdempotencyInterceptorWithSnapshots(config WindowConfig, snapshots map[string]*idempotencyview.Snapshot, param *interceptors.InterceptorBuildParam) *idempotencyInterceptor {
@@ -136,7 +139,7 @@ func logIdempotencyDuplicateHit(ctx context.Context, vchannel string, key Idempo
 }
 
 func (impl *idempotencyInterceptor) appendSingleMessage(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (message.MessageID, error) {
-	key, hasIdempotencyKey, err := getIdempotencyKey(msg, impl.config)
+	key, hasIdempotencyKey, err := getIdempotencyKey(ctx, msg, impl.config)
 	if err != nil {
 		return nil, err
 	}
@@ -148,15 +151,17 @@ func (impl *idempotencyInterceptor) appendSingleMessage(ctx context.Context, msg
 }
 
 func (impl *idempotencyInterceptor) appendIdempotentMessage(ctx context.Context, msg message.MutableMessage, key IdempotencyKey, append interceptors.Append) (message.MessageID, error) {
+	insertResult, err := getInsertResultFromInsertMessage(ctx, msg)
+	if err != nil {
+		return nil, err
+	}
+	if msg.MessageType() == message.MessageTypeUpsert && insertResult == nil {
+		return nil, status.NewInvalidArgument("keyed Upsert requires a complete request row mapping")
+	}
 	window := impl.window(msg.VChannel())
 	begin := window.Begin(key, msg)
 	switch begin.Decision {
 	case BeginDecisionOwner:
-		insertResult, err := getInsertResultFromInsertMessage(msg)
-		if err != nil {
-			window.Fail(begin.Pending, err, msg)
-			return nil, err
-		}
 		failpoint.Inject("beforeIdempotencyAppend", func(value failpoint.Value) {
 			walpoint.Hit(ctx, value, walpoint.BeforeIdempotencyAppend, msg, nil, insertResult)
 		})
@@ -202,25 +207,16 @@ func (impl *idempotencyInterceptor) appendIdempotentTxnCommitMessage(ctx context
 	switch begin.Decision {
 	case BeginDecisionOwner:
 		insertResult := impl.txnInsertResultBuffers.Build(msg)
+
 		// The buffered per-body results are consumed by Build above and are no
 		// longer needed whether or not the commit append succeeds. Drop them on
 		// every Owner exit so a failed commit does not leak the txn buffer.
 		defer impl.txnInsertResultBuffers.Remove(msg)
 		if insertResult == nil {
-			// A keyed commit is only synthesized from the insert path, and the
-			// proxy stamps an IdempotentInsertResult onto every insert header when
-			// idempotency is enabled — so a nil Build means the txn buffer expired
-			// early (its MVCC-driven expiry clock can run ahead of the txn
-			// session's timetick-driven one under concurrent non-txn traffic).
-			// Completing with a nil result would permanently persist an entry
-			// whose duplicates return the retry's own unpersisted IDs; fail the
-			// commit with TransactionExpired instead. The classification matters:
-			// this failure is deterministic on a bare commit retry (the buffer is
-			// gone and Fail below reopens the Owner slot), so a recoverable code
-			// would make the streaming producer hot-retry the commit forever.
-			// TransactionExpired is unrecoverable for the resumable producer and
-			// makes produceTxn rebuild the whole transaction — re-appending the
-			// bodies repopulates this buffer, so the rebuilt commit converges.
+			// The producer waits for every body response before Commit. Missing
+			// or incomplete buffered results require a whole-transaction retry.
+			// Do not commit and cache a partial response.
+
 			err := status.NewTransactionExpired("idempotent txn commit lost its buffered insert results; rebuild the transaction")
 			window.Fail(begin.Pending, err, msg)
 			return nil, err
@@ -233,9 +229,11 @@ func (impl *idempotencyInterceptor) appendIdempotentTxnCommitMessage(ctx context
 			window.Fail(begin.Pending, err, msg)
 			return nil, err
 		}
+
 		failpoint.Inject("afterIdempotencyAppend", func(value failpoint.Value) {
 			walpoint.Hit(ctx, value, walpoint.AfterIdempotencyAppend, msg, msgID, insertResult)
 		})
+
 		window.Complete(begin.Pending, commitResultFromAppendContext(ctx, msgID, insertResult), msg)
 		return msgID, nil
 	case BeginDecisionWait:
@@ -331,12 +329,13 @@ func (impl *idempotencyInterceptor) appendTxnBegin(ctx context.Context, msg mess
 }
 
 func (impl *idempotencyInterceptor) appendTxnCommit(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (message.MessageID, error) {
-	key, hasIdempotencyKey, err := getIdempotencyKey(msg, impl.config)
+	key, hasIdempotencyKey, err := getIdempotencyKey(ctx, msg, impl.config)
 	if err != nil {
 		return nil, err
 	}
 	if !hasIdempotencyKey {
-		// Append pass-through messages without idempotency handling.
+		// No keyed response is needed after this transaction resolves.
+		defer impl.txnInsertResultBuffers.Remove(msg)
 		return append(ctx, msg)
 	}
 	return impl.appendIdempotentTxnCommitMessage(ctx, msg, key, append)
@@ -352,11 +351,11 @@ func (impl *idempotencyInterceptor) appendTxnRollback(ctx context.Context, msg m
 }
 
 func (impl *idempotencyInterceptor) appendTxnBody(ctx context.Context, msg message.MutableMessage, append interceptors.Append) (message.MessageID, error) {
-	insertResult, err := getInsertResultFromInsertMessage(msg)
+	insertResult, err := getInsertResultFromInsertMessage(ctx, msg)
 	if err != nil {
 		return nil, err
 	}
-	if insertResult == nil {
+	if insertResult == nil && msg.MessageType() != message.MessageTypeInsert && msg.MessageType() != message.MessageTypeUpsert {
 		// Append pass-through txn body without idempotent insert result handoff.
 		return append(ctx, msg)
 	}
@@ -394,15 +393,15 @@ func (impl *idempotencyInterceptor) window(vchannel string) *Window {
 // property is readable on any message type, so the window is deliberately gated
 // here to the two types it is designed to deduplicate; a key carried by any
 // other type is ignored rather than silently creating a window entry.
-func getIdempotencyKey(msg message.MutableMessage, config WindowConfig) (key IdempotencyKey, hasIdempotencyKey bool, err error) {
+func getIdempotencyKey(ctx context.Context, msg message.MutableMessage, config WindowConfig) (key IdempotencyKey, hasIdempotencyKey bool, err error) {
 	switch msg.MessageType() {
-	case message.MessageTypeInsert, message.MessageTypeCommitTxn:
+	case message.MessageTypeInsert, message.MessageTypeUpsert, message.MessageTypeCommitTxn:
 	default:
 		return "", false, nil
 	}
 	rawKey := message.IdempotencyKeyOf(msg)
 	if rawKey == "" {
-		if err := rejectInsertResultWithoutKey(msg); err != nil {
+		if err := rejectInsertResultWithoutKey(ctx, msg); err != nil {
 			return "", false, err
 		}
 		return "", false, nil
@@ -417,15 +416,12 @@ func getIdempotencyKey(msg message.MutableMessage, config WindowConfig) (key Ide
 // halves of an idempotent insert travel together: an insert carrying a duplicate
 // insert result but no key would be appended outside the window, so its result
 // could never be served and a later retry would duplicate the rows.
-func rejectInsertResultWithoutKey(msg message.MutableMessage) error {
-	if msg.MessageType() != message.MessageTypeInsert {
-		return nil
-	}
-	insertMsg, err := message.AsMutableInsertMessageV1(msg)
+func rejectInsertResultWithoutKey(ctx context.Context, msg message.MutableMessage) error {
+	result, err := getInsertResultFromInsertMessage(ctx, msg)
 	if err != nil {
-		return status.NewInvalidArgument("malformed insert message header")
+		return err
 	}
-	if _, hasInsertResult := message.IdempotentInsertResultFromInsertHeader(insertMsg.Header()); hasInsertResult {
+	if result != nil {
 		return status.NewInvalidArgument("idempotency insert result header requires idempotency key")
 	}
 	return nil
@@ -440,16 +436,32 @@ func isTxnMessage(msg message.MutableMessage) bool {
 	}
 }
 
-func getInsertResultFromInsertMessage(msg message.MutableMessage) (*messagespb.IdempotentInsertResult, error) {
-	if msg.MessageType() != message.MessageTypeInsert {
-		return nil, nil
-	}
-	insertMsg, err := message.AsMutableInsertMessageV1(msg)
-	if err != nil {
-		return nil, status.NewInvalidArgument("malformed insert message header")
-	}
-	result, hasInsertResult := message.IdempotentInsertResultFromInsertHeader(insertMsg.Header())
-	if !hasInsertResult {
+func getInsertResultFromInsertMessage(ctx context.Context, msg message.MutableMessage) (*messagespb.IdempotentInsertResult, error) {
+	var result *messagespb.IdempotentInsertResult
+	switch msg.MessageType() {
+	case message.MessageTypeInsert:
+		typed, err := message.AsMutableInsertMessageV1(msg)
+		if err != nil {
+			return nil, status.NewInvalidArgument("malformed insert message header")
+		}
+		result = typed.Header().GetIdempotentResult()
+	case message.MessageTypeUpsert:
+		typed, err := message.AsMutableUpsertMessageV2(msg)
+		if err != nil {
+			return nil, status.NewInvalidArgument("malformed Upsert message header")
+		}
+		result, err = message.BuildUpsertResult(ctx, typed)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if errors.Is(err, message.ErrMalformedBody) {
+				return nil, status.NewInvalidArgument("malformed Upsert retry result")
+			}
+			return nil, err
+		}
+		return result, nil
+	default:
 		return nil, nil
 	}
 	if err := message.ValidateIdempotentInsertResult(result); err != nil {
@@ -469,6 +481,10 @@ func commitResultFromAppendContext(ctx context.Context, msgID message.MessageID,
 	}
 	if insertResult != nil {
 		result.IdempotentResult = insertResult
+		// Use the same buffered result for the original and duplicate response.
+		if extra != nil && extra.Extra == nil {
+			extra.Extra = insertResult
+		}
 	}
 	return result
 }

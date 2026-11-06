@@ -44,7 +44,12 @@ type ShardManager interface {
 
 	AssignSegment(req *AssignSegmentRequest) (*AssignSegmentResult, error)
 
-	ApplyDelete(msg message.MutableDeleteMessageV1) error
+	AssignSegments(requests []*AssignSegmentRequest) ([]*AssignSegmentResult, error)
+
+	// GetWriteSchema returns a snapshot with a ready collection schema or an error.
+	GetWriteSchema(collectionID int64, vchannel string) (*schemapb.CollectionSchema, error)
+
+	RecordDelete(vchannel string, timeTick, rows, binarySize uint64)
 
 	WaitUntilGrowingSegmentReady(uniquePartitionKey PartitionUniqueKey) (<-chan struct{}, error)
 

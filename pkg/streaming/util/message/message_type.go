@@ -35,6 +35,11 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 		CipherEnabled:  true,
 		DMLMessageType: true,
 	},
+	MessageTypeUpsert: {
+		LogLevel:       mlog.DebugLevel,
+		CipherEnabled:  true,
+		DMLMessageType: true,
+	},
 	MessageTypeDelete: {
 		LogLevel:       mlog.DebugLevel,
 		CipherEnabled:  true,

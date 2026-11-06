@@ -458,6 +458,8 @@ func (i *appendInterceptor) extractOrdinaryWriteSet(ctx context.Context, msg mes
 			return set, status.NewUnrecoverableError("partial update dropped collection has empty collection id")
 		}
 		set.droppedCollectionID = collectionID
+	} else if msg.MessageType() == message.MessageTypeUpsert {
+		set.pks, err = extractPKsFromUpsert(ctx, msg, i.pkDescriptorGetter)
 	} else if msg.MessageType() == message.MessageTypeInsert {
 		set.pks, err = extractPKsFromOrdinaryInsertWithContext(ctx, msg, i.pkDescriptorGetter)
 	}

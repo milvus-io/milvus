@@ -168,21 +168,6 @@ func TestReassignAutoIDByOffsetChannelsUsesAssignChannelsByPK(t *testing.T) {
 	}
 }
 
-func TestBuildInsertWriteUnitIdempotentInsertResult(t *testing.T) {
-	extra, err := buildInsertWriteUnitIdempotentInsertResult(
-		&schemapb.IDs{
-			IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{10, 11, 12}}},
-		},
-		[]int{2, 0},
-	)
-	require.NoError(t, err)
-	require.Equal(t, []uint32{2, 0}, extra.GetRowOffsets())
-	require.Equal(t, []int64{12, 10}, extra.GetIds().GetIntId().GetData())
-
-	_, err = buildInsertWriteUnitIdempotentInsertResult(&schemapb.IDs{}, []int{0})
-	require.Error(t, err)
-}
-
 func TestMergeDuplicateInsertResults(t *testing.T) {
 	extra, err := anypb.New(&messagespb.IdempotentInsertResult{
 		RowOffsets: []uint32{2, 0},

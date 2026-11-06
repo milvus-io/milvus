@@ -106,8 +106,8 @@ func (impl *timeTickAppendInterceptor) DoAppend(ctx context.Context, msg message
 					txnSession.AddNewMessageFail()
 					return
 				}
-				// perform keepalive for the transaction session if append success.
-				txnSession.AddNewMessageDoneAndKeepalive(msg.TimeTick(), msg.MessageType())
+				// Complete successful body effects before the deferred ACK.
+				txnSession.AddNewMessageDoneAndKeepalive(immutableMsg)
 			}()
 		}
 	}
@@ -140,6 +140,7 @@ func (impl *timeTickAppendInterceptor) GracefulClose() {
 func (impl *timeTickAppendInterceptor) Close() {
 	resource.Resource().TimeTickInspector().UnregisterSyncOperator(impl.operator)
 	impl.operator.Close()
+	impl.txnManager.Close()
 }
 
 // handleBegin handle the begin transaction message.

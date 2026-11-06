@@ -1943,3 +1943,25 @@ func checkedAddSize(a, b int, label string) (int, error) {
 	}
 	return a + b, nil
 }
+
+// hasFixedWidthSimpleFields excludes nullable, sparse and nested payloads from
+// conservative Upsert prefix aggregation. Other inputs retain row-wise sizing.
+func (s *insertRequestSizeState) hasFixedWidthSimpleFields() bool {
+	for i := range s.fields {
+		field := &s.fields[i]
+		if field.class == insertFieldPlanNone {
+			continue
+		}
+		if len(field.validData) != 0 {
+			return false
+		}
+		if field.class == insertFieldPlanScalar && (field.valuePlan == insertFieldValueScalarEmpty || field.valuePlan == insertFieldValueScalarPacked) {
+			continue
+		}
+		if field.class == insertFieldPlanVector && (field.valuePlan == insertFieldValueVectorEmpty || field.valuePlan == insertFieldValueVectorDenseBytes || field.valuePlan == insertFieldValueVectorFloat) {
+			continue
+		}
+		return false
+	}
+	return true
+}

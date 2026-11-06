@@ -59,6 +59,20 @@ restart resumes from the existing checkpoint and immutable source WAL; there is 
 additional replication-term high-water mark to allocate or recover. Existing WAL
 assignment terms and fencing retain their separate writer-ownership role.
 
+## Unified row-write format
+
+CDC forwards Upsert rows, partition identities, explicit delete effects, CAS proof,
+and original request mapping. The secondary preserves these decisions and assigns
+its own segments. It does not query a local PK index to infer deletes. Transaction
+replay retains Commit visibility and the existing source-ID prefix rules.
+
+`streaming.wal.enableUpsertMessage` defaults to auto with the standard 3.1.0
+version gate. Automatic switching checks registered online components in the local
+cluster, with the distributed stability window or standard embedded-etcd local
+version path. It does not check CDC target compatibility or establish downgrade
+safety for retained records. Deployment management must keep targets compatible.
+See [Unified Insert and Upsert WAL format](../../../design-docs/design_docs/wal/upsert_message.md).
+
 ## Recovery
 
 On WAL open, `RecoverReplicateManager` loads the `ReplicateConfig` and `ReplicateCheckpoint` from the [RecoveryStorage](../wal/recovery-storage.md) snapshot. For SECONDARY clusters, it also recovers in-progress transaction state from the `TxnBuffer` (uncommitted replicated transactions), so that the secondary can continue receiving body/commit messages for the interrupted transaction.

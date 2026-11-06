@@ -220,6 +220,7 @@ func (p *ComponentParam) versionGateItems() []*ParamItem {
 		&p.FunctionCfg.EnableWriteBeforeMaterialization,
 		&p.DataCoordCfg.ImportEnableIDRangeMsg,
 		&p.DataCoordCfg.EnableArraySortIndex,
+		&p.StreamingCfg.EnableUpsertMessage,
 	}
 }
 
@@ -9460,6 +9461,7 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 }
 
 type streamingConfig struct {
+	EnableUpsertMessage                              ParamItem `refreshable:"true"`
 	SchemaCacheTTL                                   ParamItem `refreshable:"false"`
 	QueryViewLiveEventDispatchConcurrencyPerPChannel ParamItem `refreshable:"true"`
 
@@ -9864,6 +9866,22 @@ limits; requests that carry no key are accepted at any value.`,
 		Export:       false,
 	}
 	p.IdempotencyMaxKeyLength.Init(base.mgr)
+
+	p.EnableUpsertMessage = ParamItem{
+		Key:          "streaming.wal.enableUpsertMessage",
+		Version:      "3.1.0",
+		DefaultValue: "auto",
+		Export:       true,
+		Doc:          "Select the producer WAL format. StreamingNode accepts supported Upsert messages regardless of this setting. auto: enable after all registered online components in this cluster reach 3.1.0 and the one-minute stability window elapses; false: use legacy Insert/Delete messages; true: force enable and bypass the version gate. This gate does not check CDC target versions or provide a downgrade guarantee. Retained decoding and durable transaction resolution remain available.",
+		VersionGateSwitcher: &VersionGateSwitcher{
+			EnableAutoSwitchValue: "auto",
+			PreSwitchValue:        "false",
+			GateVersion:           "3.1.0",
+			TargetValue:           "true",
+			SwitchDelay:           time.Minute,
+		},
+	}
+	p.EnableUpsertMessage.Init(base.mgr)
 
 	// txn
 	p.TxnDefaultKeepaliveTimeout = ParamItem{

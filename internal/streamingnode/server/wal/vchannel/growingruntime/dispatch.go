@@ -109,7 +109,7 @@ func (r *Runtime) dispatchMessage(ctx context.Context, msg message.ImmutableMess
 			return nil
 		}
 		return r.applyInsertMessage(ctx, msg)
-	case message.MessageTypeTxn:
+	case message.MessageTypeUpsert, message.MessageTypeTxn:
 		if applyGrowing {
 			if err := r.applyInsertMessage(ctx, msg); err != nil {
 				return err
@@ -156,25 +156,26 @@ func (r *Runtime) applyInsertMessage(ctx context.Context, raw message.ImmutableM
 }
 
 func (r *Runtime) applyLiveDeleteMessage(ctx context.Context, msg message.ImmutableMessage) error {
-	switch msg.MessageType() {
-	case message.MessageTypeDelete:
-		deleted := message.MustAsImmutableDeleteMessageV1(msg)
-		return r.applyDeleteRequest(ctx, msg.TimeTick(), deleted.MustBody())
-	case message.MessageTypeTxn:
-		txn := message.AsImmutableTxnMessage(msg)
-		if txn == nil {
-			return merr.WrapErrServiceInternalMsg("invalid txn WAL message")
+	apply := func(inner message.ImmutableMessage) error {
+		requests, err := messageutil.DeleteRequests(ctx, inner)
+		if err != nil {
+			return err
 		}
-		return txn.RangeOver(func(inner message.ImmutableMessage) error {
-			if inner.MessageType() != message.MessageTypeDelete {
-				return nil
+		for _, request := range requests {
+			if err := r.applyDeleteRequest(ctx, msg.TimeTick(), request); err != nil {
+				return err
 			}
-			deleted := message.MustAsImmutableDeleteMessageV1(inner)
-			return r.applyDeleteRequest(ctx, msg.TimeTick(), deleted.MustBody())
-		})
-	default:
+		}
 		return nil
 	}
+	if msg.MessageType() == message.MessageTypeTxn {
+		txn := message.AsImmutableTxnMessage(msg)
+		if txn == nil {
+			return merr.WrapErrServiceInternalMsg("invalid transaction")
+		}
+		return txn.RangeOver(apply)
+	}
+	return apply(msg)
 }
 
 func (r *Runtime) applyDeleteRequest(ctx context.Context, timeTick uint64, request *msgpb.DeleteRequest) error {

@@ -138,13 +138,45 @@ func (m *Manager) ObserveMessage(ctx context.Context, msg message.ImmutableMessa
 		return
 	}
 
-	idempotency, insert := insertSummaryOf(msg)
+	idempotency, insert, resultErr := insertSummaryOf(ctx, msg)
+	if resultErr != nil {
+		m.mu.Lock()
+		failed := m.setTerminalErrorLocked(resultErr)
+		m.mu.Unlock()
+		if failed {
+			m.reportTerminalError(ctx, resultErr)
+		}
+		return
+	}
 	var entry *streamingpb.TransformLogEntry
-	// Barriers only advance the consumer window; Summary stores Delete payloads,
-	// not payload-free BarrierEntries.
 	if messageutil.ClassifyTransformLogMessage(msg) == messageutil.TransformLogKindDelete {
+		// Result and delete projections skip ordinary columns. Validate all
+		// explicit effects before publishing either Summary record.
+		decode := func(inner message.ImmutableMessage) error {
+			if inner.MessageType() != message.MessageTypeUpsert {
+				return nil
+			}
+			_, err := messageutil.DeleteRequests(ctx, inner)
+			return err
+		}
+		var err error
+		if txn := message.AsImmutableTxnMessage(msg); txn != nil {
+			err = txn.RangeOver(decode)
+		} else {
+			err = decode(msg)
+		}
+		if err != nil {
+			m.mu.Lock()
+			failed := m.setTerminalErrorLocked(err)
+			m.mu.Unlock()
+			if failed {
+				m.reportTerminalError(ctx, err)
+			}
+			return
+		}
 		entry = messageutil.BuildTransformLogEntry(msg, messageutil.TransformEntryOption{})
 	}
+
 	m.mu.Lock()
 	if m.terminalErr != nil {
 		m.mu.Unlock()
@@ -209,15 +241,16 @@ func stagedRecordSize(msg message.ImmutableMessage, record *stagedRecord) uint64
 
 // insertSummaryOf records every committed insert unit. Keyless writes retain
 // their WAL positions without acquiring an idempotency identity. Optional
-// results come from headers; recording an insert never decodes its Body.
-func insertSummaryOf(msg message.ImmutableMessage) (
-	*streamingpb.VChannelSummaryIdempotencyRecord,
-	*streamingpb.VChannelSummaryInsertRecord,
-) {
-	result, hasInsert := insertResultOf(msg)
-	if !hasInsert {
-		return nil, nil
+// Insert results come from headers; Upsert results use the metadata projection.
+func insertSummaryOf(ctx context.Context, msg message.ImmutableMessage) (*streamingpb.VChannelSummaryIdempotencyRecord, *streamingpb.VChannelSummaryInsertRecord, error) {
+	result, hasInsert, err := insertResultOf(ctx, msg)
+	if err != nil {
+		return nil, nil, err
 	}
+	if !hasInsert {
+		return nil, nil, nil
+	}
+
 	key := idempotencyKeyOf(msg)
 	insert := &streamingpb.VChannelSummaryInsertRecord{
 		SourceMessageId:        messageIDProto(msg.MessageID()),
@@ -234,7 +267,7 @@ func insertSummaryOf(msg message.ImmutableMessage) (
 		insert.Ids = result.GetIds()
 		keys.RowOffsets = result.GetRowOffsets()
 	}
-	return keys, insert
+	return keys, insert, nil
 }
 
 // idempotencyKeyOf returns the client key a message was appended with, or ""
@@ -259,7 +292,7 @@ func idempotencyKeyOf(msg message.ImmutableMessage) string {
 	// so if one ever did arrive it would stage a record with nil Ids and answer
 	// a later duplicate with no primary keys.
 	switch msg.MessageType() {
-	case message.MessageTypeInsert:
+	case message.MessageTypeInsert, message.MessageTypeUpsert:
 		return string(message.IdempotencyKeyOf(msg))
 	case message.MessageTypeTxn:
 		// What reaches an observer is the ASSEMBLED txn, not the CommitTxn the
@@ -284,61 +317,64 @@ func idempotencyKeyOf(msg message.ImmutableMessage) string {
 }
 
 // insertResultOf reports whether the message contains committed inserts and
-// returns their optional header result. Replicated writes do not restore
+// returns their optional result. Replicated writes do not restore
 // source-cluster results; missing results do not erase the write fact.
 //
 // For a transaction it is REBUILT from the insert bodies rather than read off
 // the commit: the interceptor merges the per-body results in memory and hands
 // them to the window, and nothing stamps the merged value onto the CommitTxn
-// message, so the wire has only the per-body headers. Merging them in
+// message. Insert headers and Upsert PK/mapping carry these results. Merging them in
 // RangeOver order reproduces exactly what the interceptor built (both go
 // through MergeIdempotentInsertResults over the bodies in append order), which
 // is what makes a post-restart duplicate answer with the same primary keys the
 // first attempt returned.
-func insertResultOf(msg message.ImmutableMessage) (*messagespb.IdempotentInsertResult, bool) {
+func insertResultOf(ctx context.Context, msg message.ImmutableMessage) (*messagespb.IdempotentInsertResult, bool, error) {
 	replicated := msg.ReplicateHeader() != nil
 	switch msg.MessageType() {
 	case message.MessageTypeInsert:
 		if replicated {
-			return nil, true
+			return nil, true, nil
 		}
-		insertMsg, err := message.AsImmutableInsertMessageV1(msg)
+		typed, err := message.AsImmutableInsertMessageV1(msg)
 		if err != nil {
-			return nil, true
+			return nil, true, nil
 		}
-		result, _ := message.IdempotentInsertResultFromInsertHeader(insertMsg.Header())
-		return result, true
+		return typed.Header().GetIdempotentResult(), true, nil
+	case message.MessageTypeUpsert:
+		if replicated {
+			return nil, true, nil
+		}
+		result, err := message.BuildUpsertResult(ctx, msg)
+		return result, true, err
 	case message.MessageTypeTxn:
-		txnMsg := message.AsImmutableTxnMessage(msg)
-		if txnMsg == nil {
-			return nil, false
+		txn := message.AsImmutableTxnMessage(msg)
+		if txn == nil {
+			return nil, false, nil
 		}
 		var results []*messagespb.IdempotentInsertResult
-		hasInsert := false
-		_ = txnMsg.RangeOver(func(sub message.ImmutableMessage) error {
-			if sub.MessageType() != message.MessageTypeInsert {
-				return nil
-			}
-			hasInsert = true
-			if replicated {
-				return nil
-			}
-			insertMsg, err := message.AsImmutableInsertMessageV1(sub)
+		hasInsert, missing := false, false
+		err := txn.RangeOver(func(body message.ImmutableMessage) error {
+			result, insert, err := insertResultOf(ctx, body)
 			if err != nil {
-				return nil
+				return err
 			}
-			if result, ok := message.IdempotentInsertResultFromInsertHeader(insertMsg.Header()); ok {
+			hasInsert = hasInsert || insert
+			missing = missing || (insert && result == nil)
+			if result != nil {
 				results = append(results, result)
 			}
 			return nil
 		})
-		merged, _, err := message.MergeIdempotentInsertResults(results...)
 		if err != nil {
-			return nil, hasInsert
+			return nil, hasInsert, err
 		}
-		return merged, hasInsert
+		if missing {
+			return nil, hasInsert, nil
+		}
+		merged, _, err := message.MergeIdempotentInsertResults(results...)
+		return merged, hasInsert, err
 	default:
-		return nil, false
+		return nil, false, nil
 	}
 }
 

@@ -129,41 +129,19 @@ func (m *shardManagerImpl) FlushSegment(msg message.ImmutableFlushMessageV2) {
 // AssignSegment assigns a segment for a assign segment request.
 // It uses the latest schema version from collection info.
 func (m *shardManagerImpl) AssignSegment(req *AssignSegmentRequest) (*AssignSegmentResult, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	uniqueKey := PartitionUniqueKey{CollectionID: req.CollectionID, PartitionID: req.PartitionID}
-	pm, ok := m.partitionManagers[uniqueKey]
-	if !ok {
-		return nil, ErrPartitionNotFound
+	results, err := m.AssignSegments([]*AssignSegmentRequest{req})
+	if err != nil {
+		return nil, err
 	}
-
-	// Populate SchemaVersion from the current collection info into req.
-	// Callers construct req without knowing the schema version; this is the
-	// single place that resolves and stamps it before forwarding to partitionManager.
-	if info := m.collections[req.CollectionID]; info != nil {
-		req.SchemaVersion = info.SchemaVersion()
-		req.RequiresStorageV3 = info.RequiresStorageV3()
-		req.RuntimeFlushSize = info.RuntimeFlushSize(req.ModifiedMetrics)
-	}
-
-	result, err := pm.AssignSegment(req)
-	if err == nil {
-		m.metrics.ObserveInsert(req.ModifiedMetrics.Rows, req.ModifiedMetrics.BinarySize)
-		return result, nil
-	}
-	return nil, err
+	return results[0], nil
 }
 
-// ApplyDelete: TODO move the L0 flush operation here.
-func (m *shardManagerImpl) ApplyDelete(msg message.MutableDeleteMessageV1) error {
+// RecordDelete accounts only the delete portion of a logical write.
+func (m *shardManagerImpl) RecordDelete(vchannel string, timeTick, rows, binarySize uint64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	rows := msg.Header().GetRows()
 	m.metrics.ObserveDelete(rows)
-	resource.Resource().SegmentStatsManager().RecordDelete(m.pchannel.Name, msg.VChannel(), msg.TimeTick(), rows, uint64(msg.EstimateSize()))
-	return nil
+	resource.Resource().SegmentStatsManager().RecordDelete(m.pchannel.Name, vchannel, timeTick, rows, binarySize)
 }
 
 // WaitUntilGrowingSegmentReady waits until the growing segment is ready.
@@ -250,4 +228,47 @@ func (m *shardManagerImpl) AsyncFlushSegment(signal utils.SealSegmentSignal) {
 	if err := pm.AsyncFlushSegment(signal); err != nil {
 		logger.Warn(m.ctx, "segment not found when AsyncMustSeal, may be already sealed", mlog.Err(err))
 	}
+}
+
+// AssignSegments assigns one receiving-cluster segment per target partition.
+// No rows or bytes are charged until all targets pass admission.
+func (m *shardManagerImpl) AssignSegments(requests []*AssignSegmentRequest) ([]*AssignSegmentResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	selected := make([]*segmentAllocManager, len(requests))
+	allocations := make([]stats.Allocation, len(requests))
+	for index, req := range requests {
+		pm := m.partitionManagers[PartitionUniqueKey{CollectionID: req.CollectionID, PartitionID: req.PartitionID}]
+		if pm == nil {
+			return nil, ErrPartitionNotFound
+		}
+		if info := m.collections[req.CollectionID]; info != nil {
+			req.SchemaVersion = info.SchemaVersion()
+			req.RequiresStorageV3 = info.RequiresStorageV3()
+			req.RuntimeFlushSize = info.RuntimeFlushSize(req.ModifiedMetrics)
+		}
+		segment, err := pm.prepareAssignment(req)
+		if err != nil {
+			return nil, err
+		}
+		selected[index] = segment
+		allocations[index] = stats.Allocation{SegmentID: selected[index].GetSegmentID(), Modified: req.ModifiedMetrics, RuntimeFlushSize: req.RuntimeFlushSize}
+	}
+	// A capacity crossing can trigger sealing inside accounting. Hold every
+	// Ack before that notification; failed accounting releases the entire set.
+	results := make([]*AssignSegmentResult, len(requests))
+	for index, segment := range selected {
+		results[index] = segment.acquireAck()
+	}
+	if err := resource.Resource().SegmentStatsManager().AllocRowsBatch(allocations); err != nil {
+		for _, result := range results {
+			result.Ack()
+		}
+		return nil, ErrWaitForNewSegment
+	}
+	for index, req := range requests {
+		selected[index].registerTxnCleanup(req)
+		m.metrics.ObserveInsert(req.ModifiedMetrics.Rows, req.ModifiedMetrics.BinarySize)
+	}
+	return results, nil
 }

@@ -174,38 +174,17 @@ func (s *segmentAllocManager) IsFlushed() bool {
 	return s.inner.State == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED
 }
 
-// AllocRows ask for rows from current segment.
-// Only growing and not fenced segment can alloc rows.
-func (s *segmentAllocManager) AllocRows(req *AssignSegmentRequest) (*AssignSegmentResult, error) {
-	if req.TimeTick <= s.inner.Stat.CreateSegmentTimeTick {
-		// The incoming insert request's timetick is less than the segment's create time tick,
-		// return ErrTimeTickTooOld and reallocate new timetick.
-		return nil, ErrTimeTickTooOld
-	}
-	if s.inner.State != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING {
-		// The segment is not growing, return ErrWaitForNewSegment.
-		return nil, ErrNotGrowing
-	}
-
-	// Hold an acknowledge before allocation because a successful allocation can
-	// immediately trigger a capacity seal. The flush worker must wait until the
-	// corresponding insert has been appended to the WAL.
+// acquireAck protects the append before accounting can trigger capacity sealing.
+func (s *segmentAllocManager) acquireAck() *AssignSegmentResult {
 	s.ackSem.Inc()
-	err := resource.Resource().SegmentStatsManager().AllocRows(s.GetSegmentID(), req.ModifiedMetrics, req.RuntimeFlushSize)
-	if err != nil {
-		s.ackSem.Dec()
-		return nil, err
-	}
+	return &AssignSegmentResult{SegmentID: s.GetSegmentID(), Acknowledge: &s.ackSem}
+}
 
-	// register the txn session cleanup to the segment.
+// registerTxnCleanup runs only after successful accounting. The existing session
+// contract keeps the body in flight until cleanup registration has completed.
+func (s *segmentAllocManager) registerTxnCleanup(req *AssignSegmentRequest) {
 	if req.TxnSession != nil {
 		s.txnSem.Inc()
 		req.TxnSession.RegisterCleanup(func() { s.txnSem.Dec() }, req.TimeTick)
 	}
-
-	// persist stats if too dirty.
-	return &AssignSegmentResult{
-		SegmentID:   s.GetSegmentID(),
-		Acknowledge: &s.ackSem,
-	}, nil
 }
