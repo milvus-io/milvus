@@ -466,10 +466,10 @@ func (c *externalCollectionRefreshChecker) aggregateJobState(job *datapb.Externa
 	// rest of its life, whatever the parameter says NOW. This is the only exit
 	// that does not re-run the apply, so keying it on the parameter instead of
 	// the marker would make turning the parameter off mid-wait replay the
-	// apply - and applyExternalRefreshPatch clears TextStatsLogs/JsonKeyStats,
-	// so that replay would discard indexes built during the very wait it was
-	// disabling. Off now simply means release the job: finish it at once
-	// without waiting, which is what an operator disabling the hold wants.
+	// apply with older text/JSON placeholders. That replay would discard stats
+	// built during the very wait it was disabling. Off now simply means release
+	// the job: finish it at once without waiting, which is what an operator
+	// disabling the hold wants.
 	if state == indexpb.JobState_JobStateFinished && job.GetIndexWaitStartedTime() != 0 {
 		if c.indexWaitEnabled() && !c.indexWaitDone(job) {
 			return
