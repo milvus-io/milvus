@@ -171,7 +171,11 @@ func (s *propagationFlushSuite) TestFlush() {
 		DbName: s.dbName, CollectionName: collection,
 	})
 	s.Require().NoError(merr.CheckRPCCall(status, err))
-	s.CheckCollectionCacheReleased(collectionID)
+	if s.version == 3 {
+		s.assertParquetReleased(ctx, collectionID)
+	} else {
+		s.CheckCollectionCacheReleased(collectionID)
+	}
 	status, err = s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName: s.dbName, CollectionName: collection, ReplicaNumber: 1, LoadFields: campaign.loadFields,
 	})
@@ -204,7 +208,12 @@ func (s *propagationImportSuite) SetupSuite() {
 	s.WithMilvusConfig("dataCoord.import.enableIDRangeMsg", "true")
 	// Leave time to replace DN between independently dispatched stages. The
 	// test checks task metadata, so an unexpected early dispatch fails it.
-	s.WithMilvusConfig("dataCoord.import.checkIntervalHigh", "20")
+	checkInterval := "15"
+	if s.faultStage == "preimport" {
+		// The fault is terminal, so there is no next stage to isolate.
+		checkInterval = "2"
+	}
+	s.WithMilvusConfig("dataCoord.import.checkIntervalHigh", checkInterval)
 	s.WithMilvusConfig("dataCoord.import.scheduleInterval", "0.1")
 	s.WithMilvusConfig("dataCoord.taskCheckInterval", "1")
 	s.setupRawData(2) // backup input is a real packed-binlog collection

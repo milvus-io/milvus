@@ -20,7 +20,16 @@ type metricsTransformSegment struct {
 
 func (s *metricsTransformSegment) QuerySegment() segments.Segment { return s.physical }
 
-type metricsTestSegment struct{ segments.Segment }
+type metricsTestSegment struct {
+	segments.Segment
+	loadInfo *querypb.SegmentLoadInfo
+	stats    map[int64]*querypb.JsonStatsInfo
+}
+
+func (s *metricsTestSegment) LoadInfo() *querypb.SegmentLoadInfo { return s.loadInfo }
+func (s *metricsTestSegment) GetFieldJSONIndexStats() map[int64]*querypb.JsonStatsInfo {
+	return s.stats
+}
 
 func (*metricsTestSegment) ID() int64                             { panic("unpatched") }
 func (*metricsTestSegment) Collection() int64                     { panic("unpatched") }
@@ -48,13 +57,17 @@ func TestSegmentResourceMetricsRetainsPhysicalBases(t *testing.T) {
 		// participates in metrics; separate physical bases do add their memory.
 		m := &SegmentResourceManager{resources: make(map[int64]*segmentResource)}
 		r := &segmentResource{manager: m, id: 10, collectionID: 1, scheduled: true}
-		base := func() *segmentBase {
-			return &segmentBase{segment: &transformStartSegment{TransformSegment: &metricsTransformSegment{physical: &metricsTestSegment{}}}}
+		base := func(manifest string, buildID int64) *segmentBase {
+			physical := &metricsTestSegment{
+				loadInfo: &querypb.SegmentLoadInfo{ManifestPath: manifest},
+				stats:    map[int64]*querypb.JsonStatsInfo{102: {BuildID: buildID, VersionID: 1}},
+			}
+			return &segmentBase{segment: &transformStartSegment{TransformSegment: &metricsTransformSegment{physical: physical}}}
 		}
-		r.bases = []*segmentBase{base(), base()}
+		r.bases = []*segmentBase{base("manifest-1", 40), base("manifest-2", 50)}
 		m.resources[10] = r
 		m.resources[11] = &segmentResource{collectionID: 1} // No physical resources yet.
-		m.resources[12] = &segmentResource{collectionID: 1, closing: true, bases: []*segmentBase{base()}}
+		m.resources[12] = &segmentResource{collectionID: 1, closing: true, bases: []*segmentBase{base("retired", 60)}}
 		require.Empty(t, m.SegmentMetrics(99, 5))
 		result := make(chan []*metricsinfo.Segment, 1)
 		go func() { result <- m.SegmentMetrics(1, 5) }()
@@ -73,6 +86,10 @@ func TestSegmentResourceMetricsRetainsPhysicalBases(t *testing.T) {
 		require.EqualValues(t, 5, got[0].NodeID)
 		require.Len(t, got[0].IndexedFields, 1)
 		require.True(t, got[0].IndexedFields[0].HasRawData)
+		require.ElementsMatch(t, []metricsinfo.SegmentData{
+			{ManifestPath: "manifest-1", JSONStats: map[int64]metricsinfo.JSONStatsIdentity{102: {BuildID: 40, Version: 1}}},
+			{ManifestPath: "manifest-2", JSONStats: map[int64]metricsinfo.JSONStatsIdentity{102: {BuildID: 50, Version: 1}}},
+		}, got[0].LoadedData)
 		m.mu.Lock()
 		for _, base := range r.bases {
 			require.Zero(t, base.operationRefs)

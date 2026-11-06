@@ -161,6 +161,7 @@ type Segment struct {
 	IsInvisible          bool            `json:"is_invisible,omitempty"`
 	LoadedTimestamp      string          `json:"loaded_timestamp,omitempty,string"`
 	IndexedFields        []*IndexedField `json:"index_fields,omitempty"`
+	LoadedData           []SegmentData   `json:"loaded_data,omitempty"`
 	ResourceGroup        string          `json:"resource_group,omitempty"`
 	LoadedInsertRowCount int64           `json:"loaded_insert_row_count,omitempty,string"` // inert row count for growing segment that excludes the deleted row count in QueryNode
 	MemSize              int64           `json:"mem_size,omitempty,string"`                // memory size of segment in QueryNode
@@ -171,6 +172,17 @@ type Segment struct {
 	SyncingRows    int64 `json:"syncing_rows,omitempty,string"`
 
 	IsIndexed bool `json:"is_indexed,omitempty"` // indicate whether the segment is indexed
+}
+
+// SegmentData identifies the data and stats loaded by one physical segment base.
+type SegmentData struct {
+	ManifestPath string                      `json:"manifest_path,omitempty"`
+	JSONStats    map[int64]JSONStatsIdentity `json:"json_stats,omitempty"`
+}
+
+type JSONStatsIdentity struct {
+	BuildID int64 `json:"build_id,string"`
+	Version int64 `json:"version,string"`
 }
 
 type IndexedField struct {

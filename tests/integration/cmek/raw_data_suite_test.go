@@ -203,38 +203,47 @@ func (s *rawDataSuite) assertLoadedFields(ctx context.Context, collectionID int6
 	s.Require().Equal(expected, actual)
 }
 
+func (s *rawDataSuite) queryNodeSegments(ctx context.Context, collectionID int64) ([]*metricsinfo.Segment, error) {
+	request, err := metricsinfo.ConstructGetMetricsRequest(map[string]interface{}{
+		metricsinfo.MetricTypeKey: metricsinfo.SegmentKey, metricsinfo.MetricRequestParamCollectionIDKey: collectionID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var segments []*metricsinfo.Segment
+	for _, process := range s.Cluster.GetAllQueryNodes() {
+		response, err := process.MustGetClient(ctx).GetMetrics(ctx, request)
+		if err := merr.CheckRPCCall(response, err); err != nil {
+			return nil, err
+		}
+		var loaded []*metricsinfo.Segment
+		if err := json.Unmarshal([]byte(response.GetResponse()), &loaded); err != nil {
+			return nil, err
+		}
+		segments = append(segments, loaded...)
+	}
+	return segments, nil
+}
+
 func (s *rawDataSuite) assertRawLoadedSegments(ctx context.Context, collectionID int64, expected []*datapb.SegmentInfo) {
 	expectedIDs := make(map[int64]struct{}, len(expected))
 	for _, segment := range expected {
 		expectedIDs[segment.GetID()] = struct{}{}
 	}
 	s.Require().Eventually(func() bool {
+		segments, err := s.queryNodeSegments(ctx, collectionID)
+		if err != nil {
+			return false
+		}
 		seen := make(map[int64]int, len(expectedIDs))
-		for _, process := range s.Cluster.GetAllQueryNodes() {
-			client := process.MustGetClient(ctx)
-			request, err := metricsinfo.ConstructGetMetricsRequest(map[string]interface{}{
-				metricsinfo.MetricTypeKey: metricsinfo.SegmentKey, metricsinfo.MetricRequestParamCollectionIDKey: collectionID,
-			})
-			if err != nil {
+		for _, segment := range segments {
+			if segment.CollectionID != collectionID || segment.State != "Sealed" {
 				return false
 			}
-			response, err := client.GetMetrics(ctx, request)
-			if err = merr.CheckRPCCall(response, err); err != nil {
+			if _, ok := expectedIDs[segment.SegmentID]; !ok {
 				return false
 			}
-			var segments []*metricsinfo.Segment
-			if err := json.Unmarshal([]byte(response.GetResponse()), &segments); err != nil {
-				return false
-			}
-			for _, segment := range segments {
-				if segment.CollectionID != collectionID || segment.State != "Sealed" {
-					return false
-				}
-				if _, ok := expectedIDs[segment.SegmentID]; !ok {
-					return false
-				}
-				seen[segment.SegmentID]++
-			}
+			seen[segment.SegmentID]++
 		}
 		for segmentID := range expectedIDs {
 			if seen[segmentID] != 1 {
