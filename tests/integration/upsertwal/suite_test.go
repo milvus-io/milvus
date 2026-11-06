@@ -76,7 +76,7 @@ func TestMain(m *testing.M) { os.Exit(fixture.Run(m)) }
 
 func (s *upsertWALFixture) SetupSuite() {
 	s.controlDir = s.T().TempDir()
-	s.WithClusterOptions(cluster.WithProcessEnv(func(role string, _ int64) map[string]string {
+	s.WithClusterOptions(cluster.WithMetricsPorts(), cluster.WithProcessEnv(func(role string, _ int64) map[string]string {
 		if role != "streamingnode" {
 			return nil
 		}
@@ -88,7 +88,6 @@ func (s *upsertWALFixture) SetupSuite() {
 	s.WithMilvusConfig("streaming.wal.enableUpsertMessage", "true")
 	s.WithMilvusConfig("function.enableWriteBeforeMaterialization", "true")
 	s.WithMilvusConfig("common.session.ttl", "10")
-	s.WithMilvusConfig("metrics.port", "0")
 	s.WithMilvusConfig("dataCoord.enableCompaction", "true")
 	s.WithMilvusConfig("dataCoord.compaction.enableAutoCompaction", "false")
 	s.WithMilvusConfig("pulsar.maxMessageSize", "524288")

@@ -18,10 +18,14 @@ package upsertwal
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
+	"testing"
 	"time"
 
+	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -30,6 +34,9 @@ import (
 	upsertfixture "github.com/milvus-io/milvus/pkg/v3/streaming/util/message/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/tests/integration"
+	"github.com/milvus-io/milvus/tests/integration/cluster"
 )
 
 func (s *UpsertWALSuite) TestGateOffAllowsDurableCommitAndLegacyProducer() {
@@ -45,18 +52,20 @@ func (s *UpsertWALSuite) TestGateOffAllowsDurableCommitAndLegacyProducer() {
 	s.Require().NotNil(begin.TxnCtx)
 	_, err = producer.Append(ctx, c.upsert(11, 2).WithTxnContext(*begin.TxnCtx))
 	s.Require().NoError(err)
+	pending := c.upsert(12, 4)
 	restore := s.Cluster.MustModifyMilvusConfig(map[string]string{"streaming.wal.enableUpsertMessage": "false"})
 	defer restore()
-	s.Require().Eventually(func() bool {
-		_, err := producer.Append(ctx, c.upsert(12, 4))
-		return err != nil && strings.Contains(err.Error(), "native Upsert WAL append is disabled")
-	}, 10*time.Second, 100*time.Millisecond, "the generation gate must reject new Upsert appends")
+	s.waitForProxyUpsertFormat(ctx, "false")
+	// A message generated before the update still appends after generation stops.
+	_, err = producer.Append(ctx, pending)
+	s.Require().NoError(err)
+	s.assertRows(ctx, c, 12, 4, 1)
 	_, err = producer.Append(ctx, message.NewCommitTxnMessageBuilderV2().WithVChannel(c.vchannel).
 		WithHeader(&message.CommitTxnMessageHeader{BodyCnt: 1}).WithBody(&message.CommitTxnMessageBody{}).MustBuildMutable().WithTxnContext(*begin.TxnCtx))
 	s.Require().NoError(err)
 	s.assertRows(ctx, c, 11, 1, 0)
 	s.assertRows(ctx, c, 11, 2, 1)
-	// API writes use legacy messages while new raw Upsert is rejected.
+	// API writes select legacy messages while previously generated Upsert remains supported.
 	request := upsertfixture.Insert(message.MustAsMutableUpsertMessageV2(c.upsert(13, 5)).MustBody())
 
 	for _, column := range request.GetFieldsData() {
@@ -137,11 +146,7 @@ func (s *UpsertWALSuite) TestKeyedInsertRetryAcrossWALFormats() {
 			setMode := func(mode string) {
 				restore := s.Cluster.MustModifyMilvusConfig(map[string]string{"streaming.wal.enableUpsertMessage": mode})
 				s.T().Cleanup(restore)
-				s.Require().Eventually(func() bool {
-					// Gate-off attempts cannot mutate this separate probe key.
-					_, err := producer.Append(ctx, c.upsert(99, 99))
-					return (err == nil) == (mode == "true")
-				}, 10*time.Second, 100*time.Millisecond)
+				s.waitForProxyUpsertFormat(ctx, mode)
 			}
 			setMode(firstMode)
 			fields := upsertfixture.Insert(message.MustAsMutableUpsertMessageV2(c.upsert(11, 1)).MustBody()).GetFieldsData()
@@ -180,4 +185,68 @@ func (s *UpsertWALSuite) TestKeyedInsertRetryAcrossWALFormats() {
 			checkRetry()
 		})
 	}
+}
+
+// Observe the producer config without writing probe rows or depending on append rejection.
+func (s *upsertWALFixture) waitForProxyUpsertFormat(ctx context.Context, mode string) {
+	s.Require().Eventually(func() bool {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+s.Cluster.DefaultProxy().GetMetricsAddr()+"/api/v1/_cluster/configs", nil)
+		if err != nil {
+			return false
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		configs := map[string]string{}
+		if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&configs) != nil {
+			return false
+		}
+		for key, value := range configs {
+			if strings.EqualFold(key, "streaming.wal.enableUpsertMessage") || strings.EqualFold(key, "streamingwalenableupsertmessage") {
+				return value == mode
+			}
+		}
+		return false
+	}, 10*time.Second, 100*time.Millisecond, "Proxy must observe the requested producer format")
+}
+
+// Keep StreamingNode's periodic config refresh behind the producer's refresh.
+// This exercises a propagation window, not a mixed-version rollout.
+type UpsertWALConfigWindowSuite struct{ upsertWALFixture }
+
+func TestUpsertWALConfigWindow(t *testing.T) { suite.Run(t, new(UpsertWALConfigWindowSuite)) }
+
+func (s *UpsertWALConfigWindowSuite) SetupSuite() {
+	s.WithClusterOptions(cluster.WithMetricsPorts(), cluster.WithProcessEnv(func(role string, _ int64) map[string]string {
+		if role == "streamingnode" {
+			return map[string]string{paramtable.MilvusConfigRefreshIntervalEnvKey: "1h"}
+		}
+		return nil
+	}))
+	s.WithMilvusConfig("streaming.wal.enableUpsertMessage", "false")
+	s.WithOptions(integration.WithDropAllCollectionsWhenTestTearDown())
+	s.MiniClusterSuite.SetupSuite()
+}
+
+func (s *UpsertWALConfigWindowSuite) TestProducerEnablesBeforeStreamingNodeRefresh() {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	c := s.create(ctx)
+	s.waitForProxyUpsertFormat(ctx, "false")
+	restore := s.Cluster.MustModifyMilvusConfig(map[string]string{"streaming.wal.enableUpsertMessage": "true"})
+	defer restore()
+	s.waitForProxyUpsertFormat(ctx, "true")
+	fields := upsertfixture.Insert(message.MustAsMutableUpsertMessageV2(c.upsert(11, 1)).MustBody()).GetFieldsData()
+	for _, field := range fields {
+		for _, schemaField := range c.schema.GetFields() {
+			if field.GetFieldId() == schemaField.GetFieldID() {
+				field.FieldName = schemaField.GetName()
+			}
+		}
+	}
+	inserted, err := s.Cluster.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{CollectionName: c.name, NumRows: 1, FieldsData: fields})
+	s.Require().NoError(merr.CheckRPCCall(inserted, err))
+	s.assertRows(ctx, c, 11, 1, 1)
 }
