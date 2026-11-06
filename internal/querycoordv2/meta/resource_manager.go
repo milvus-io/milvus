@@ -36,9 +36,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/metrics"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/retry"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
@@ -1096,7 +1098,20 @@ func (rm *ResourceManager) unassignNode(ctx context.Context, node int64) (string
 		mrg.UnassignNode(node)
 		rg := mrg.ToResourceGroup()
 
-		if err := rm.catalog.SaveResourceGroup(ctx, rg.GetMeta()); err != nil {
+		// Saving the whole resource group is an unconditional overwrite, so it is
+		// safe to retry a transient etcd error (e.g. leader changed during an etcd
+		// restart) even if the failed attempt was applied. The retry is bounded
+		// because rm.rwmutex is held; a persistent failure still exits to reload
+		// a consistent state.
+		//
+		// A failed save exits the process, so the caller (e.g. a SuspendNode RPC
+		// whose client went away) must not decide it by canceling ctx. Each save
+		// keeps the metastore's own request timeout, which still aborts.
+		saveCtx := context.WithoutCancel(ctx)
+		err := retry.Do(saveCtx, func() error {
+			return rm.catalog.SaveResourceGroup(saveCtx, rg.GetMeta())
+		}, retry.RetryErr(etcd.IsRetriableEtcdErr))
+		if err != nil {
 			log.Fatal("unassign node from resource group",
 				zap.String("rgName", rg.GetName()),
 				zap.Int64("node", node),

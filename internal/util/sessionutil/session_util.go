@@ -61,6 +61,10 @@ const (
 
 var errSessionVersionCheckFailure = errors.New("session version check failure")
 
+// transientEtcdErrRetryInterval is how long ProcessActiveStandBy waits before
+// retrying a registration that failed with a transient etcd error.
+var transientEtcdErrRetryInterval = time.Second
+
 // errSessionExpiredAtClientSide is a keepalive deadline cause compared by
 // identity via errors.Is(context.Cause(ctx), ...). It must stay a bare
 // package-level sentinel rather than a merr error: merr's errors.Is walks the
@@ -759,26 +763,38 @@ func (s *Session) GoingStop() error {
 	}
 
 	completeKey := s.getCompleteKey()
-	resp, err := s.etcdCli.Get(s.ctx, completeKey, clientv3.WithCountOnly())
-	if err != nil {
-		s.Logger().Error("fail to get the session", zap.String("key", completeKey), zap.Error(err))
+	timeout := paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(s.ctx, timeout)
+	defer cancel()
+	// Publishing Stopping is idempotent, including when a successful Put loses
+	// its response. Bound the entire operation so graceful shutdown cannot
+	// wait indefinitely for etcd to recover.
+	err := retry.Do(ctx, func() error {
+		resp, err := s.etcdCli.Get(ctx, completeKey, clientv3.WithCountOnly())
+		if err != nil {
+			return err
+		}
+		if resp.Count == 0 {
+			return nil
+		}
+		s.Stopping = true
+		sessionJSON, err := json.Marshal(s)
+		if err != nil {
+			return err
+		}
+		_, err = s.etcdCli.Put(ctx, completeKey, string(sessionJSON), clientv3.WithLease(*s.LeaseID))
 		return err
+	}, retry.Attempts(0), retry.RetryErr(etcd.IsRetriableEtcdErr))
+	if err != nil && ctx.Err() != nil {
+		err = ctx.Err()
 	}
-	if resp.Count == 0 {
-		return nil
-	}
-	s.Stopping = true
-	sessionJSON, err := json.Marshal(s)
 	if err != nil {
-		s.Logger().Error("fail to marshal the session", zap.String("key", completeKey))
-		return err
+		s.Logger().Error("fail to update the session to stopping state", zap.String("key", completeKey), zap.Error(err))
 	}
-	_, err = s.etcdCli.Put(s.ctx, completeKey, string(sessionJSON), clientv3.WithLease(*s.LeaseID))
-	if err != nil {
-		s.Logger().Error("fail to update the session to stopping state", zap.String("key", completeKey))
-		return err
-	}
-	return nil
+	return err
 }
 
 // SessionEvent indicates the changes of other servers.
@@ -813,16 +829,19 @@ func (w *sessionWatcher) closeEventCh() {
 	})
 }
 
-func (w *sessionWatcher) start(ctx context.Context) {
+func (w *sessionWatcher) start() {
 	w.wg.Add(1)
 	go func() {
 		defer w.wg.Done()
 		for {
 			select {
-			case <-ctx.Done():
+			case <-w.ctx.Done():
 				return
 			case wresp, ok := <-w.rch:
 				if !ok {
+					if w.ctx.Err() != nil {
+						return
+					}
 					w.closeEventCh()
 					log.Warn("session watch channel closed")
 					return
@@ -872,7 +891,7 @@ func (s *Session) WatchServices(prefix string, revision int64, rewatch Rewatch) 
 		rewatch:  rewatch,
 		validate: func(s *Session) bool { return true },
 	}
-	w.start(ctx)
+	w.start()
 	return w
 }
 
@@ -894,12 +913,15 @@ func (s *Session) WatchServicesWithVersionRange(prefix string, r semver.Range, r
 		rewatch:  rewatch,
 		validate: func(s *Session) bool { return r(s.Version) },
 	}
-	w.start(ctx)
+	w.start()
 	return w
 }
 
 func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) {
 	log := log.Ctx(w.ctx)
+	if w.ctx.Err() != nil {
+		return
+	}
 	if wresp.Err() != nil {
 		err := w.handleWatchErr(wresp.Err())
 		if err != nil {
@@ -952,18 +974,27 @@ func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) {
 			eventType = SessionDelEvent
 		}
 		log.Debug("WatchService", zap.Any("event type", eventType))
-		w.eventCh <- &SessionEvent{
+		select {
+		case w.eventCh <- &SessionEvent{
 			EventType: eventType,
 			Session:   session,
+		}:
+		case <-w.ctx.Done():
+			return
 		}
 	}
 }
 
 func (w *sessionWatcher) handleWatchErr(err error) error {
+	if w.ctx.Err() != nil {
+		return w.ctx.Err()
+	}
 	// Only recoverable errors are re-watched. ErrCompacted needs a fresh
 	// revision; auth-token errors (etcd auth enabled) need the watch
 	// re-established because clientv3 won't refresh the token on a live watch
-	// stream. Any other error closes the channel. See etcd.IsRetriableWatchErr.
+	// stream. Transient etcd unavailability (leader changes, member restarts,
+	// ...) while authenticating a new watch stream also needs re-watching.
+	// Any other error closes the channel. See etcd.IsRetriableWatchErr.
 	if !etcd.IsRetriableWatchErr(err) {
 		// close event channel
 		log.Ctx(w.ctx).Warn("Watch service found error", zap.Error(err))
@@ -971,12 +1002,16 @@ func (w *sessionWatcher) handleWatchErr(err error) error {
 		return err
 	}
 
-	// Re-establish the watch with a bounded retry. handleReWatch issues a unary
-	// request first, which refreshes the etcd auth token via clientv3's unary
-	// retry interceptor. Only keep retrying transient errors (e.g. a still-stale
-	// auth token); a non-transient failure aborts immediately. The retry runs on
-	// the watcher ctx so Stop() interrupts it.
-	if reErr := retry.Do(w.ctx, w.handleReWatch, retry.RetryErr(etcd.IsRetriableWatchErr)); reErr != nil {
+	// Re-establish the watch with backoff. handleReWatch issues a unary request
+	// first, which refreshes the etcd auth token via clientv3's unary retry
+	// interceptor. Transient errors are retried until etcd recovers or the
+	// watcher is stopped: deciding that etcd has been unavailable for too long
+	// belongs to the session keepalive, which exits the process once the lease
+	// really expires. A non-transient failure aborts immediately.
+	if reErr := retry.Do(w.ctx, w.handleReWatch, retry.Attempts(0), retry.RetryErr(etcd.IsRetriableWatchErr)); reErr != nil {
+		if w.ctx.Err() != nil {
+			return w.ctx.Err()
+		}
 		log.Ctx(w.ctx).Warn("re-watch session service failed", zap.String("prefix", w.prefix), zap.Error(reErr))
 		w.closeEventCh()
 		return reErr
@@ -997,6 +1032,9 @@ func (w *sessionWatcher) handleReWatch() error {
 		log.Ctx(w.ctx).Warn("re-watch session service but no rewatch logic provided", zap.String("prefix", w.prefix))
 	} else if err = w.rewatch(sessions); err != nil {
 		return err
+	}
+	if w.ctx.Err() != nil {
+		return w.ctx.Err()
 	}
 	w.rch = w.s.etcdCli.Watch(w.ctx, path.Join(w.s.metaRoot, DefaultServiceRoot, w.prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision))
 	return nil
@@ -1077,10 +1115,22 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 		for _, role := range oldRoles {
 			sessions, _, err := s.GetSessions(s.ctx, role)
 			if err != nil {
+				if etcd.IsRetriableEtcdErr(err) {
+					// Do not skip the legacy session check just because etcd is
+					// briefly unavailable; retry the whole registration instead.
+					return false, -1, err
+				}
 				log.Debug("failed to get old sessions", zap.String("role", role), zap.Error(err))
 				continue
 			}
-			if len(sessions) > 0 {
+			for key, session := range sessions {
+				// A committed activation also writes the legacy coordinator keys.
+				// If its response was lost, let our own compatibility keys reach
+				// the transaction's actual-lease check below. Any foreign session
+				// must still prevent activation.
+				if key == role && session.ServerID == s.ServerID && session.LeaseID != nil && *session.LeaseID == *s.LeaseID {
+					continue
+				}
 				log.Info("old session exists", zap.String("role", role))
 				return false, -1, merr.ErrOldSessionExists
 			}
@@ -1106,13 +1156,27 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 			}
 		}
 
-		txnResp, err := s.etcdCli.Txn(s.ctx).If(compareOps...).Then(ops...).Commit()
+		txnResp, err := s.etcdCli.Txn(s.ctx).If(compareOps...).Then(ops...).Else(clientv3.OpGet(s.activeKey)).Commit()
 		if err != nil {
 			log.Error("register active key to etcd failed", zap.Error(err))
 			return false, -1, err
 		}
 		doRegistered := txnResp.Succeeded
 		revision := txnResp.Header.GetRevision()
+		if !doRegistered {
+			// A transient error (e.g. leader changed, request timed out) does not
+			// tell whether the txn was applied, so an earlier attempt may already
+			// have registered this session. Only this session writes keys under its
+			// lease, so an active key held by the lease means the registration
+			// committed; without this check the session would wait for its own
+			// active key to be deleted forever.
+			if kvs := txnResp.Responses[0].GetResponseRange().GetKvs(); len(kvs) == 1 && kvs[0].Lease == int64(*s.LeaseID) {
+				log.Info(fmt.Sprintf("ACTIVE %s has already been registered by this session", s.ServerName),
+					zap.Int64("revision", kvs[0].ModRevision))
+				doRegistered = true
+				revision = kvs[0].ModRevision
+			}
+		}
 		if doRegistered {
 			s.registeredRevision.Store(revision)
 			log.Info(fmt.Sprintf("register ACTIVE %s", s.ServerName), zap.Int64("revision", revision))
@@ -1135,7 +1199,24 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 		if err != nil {
 			if err == merr.ErrOldSessionExists {
 				// If old session exists, wait and retry
-				time.Sleep(100 * time.Millisecond)
+				select {
+				case <-time.After(100 * time.Millisecond):
+				case <-s.ctx.Done():
+					return s.ctx.Err()
+				}
+				continue
+			}
+			if etcd.IsRetriableEtcdErr(err) {
+				// etcd is briefly unavailable, e.g. a member restart or a leader
+				// election. Txn is not retried by clientv3, so retry the
+				// registration here; registerActiveFn detects an attempt that
+				// was applied despite the error.
+				log.Warn("register active key hit a transient etcd error, retry", zap.Error(err))
+				select {
+				case <-time.After(transientEtcdErrRetryInterval):
+				case <-s.ctx.Done():
+					return s.ctx.Err()
+				}
 				continue
 			}
 			// Some error such as ErrLeaseNotFound, is not retryable.
