@@ -527,6 +527,65 @@ func (_c *MockWorker_Stop_Call) RunAndReturn(run func()) *MockWorker_Stop_Call {
 	return _c
 }
 
+// SyncIndexMeta provides a mock function with given fields: ctx, req
+func (_m *MockWorker) SyncIndexMeta(ctx context.Context, req *querypb.SyncIndexMetaRequest) (*commonpb.Status, error) {
+	ret := _m.Called(ctx, req)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SyncIndexMeta")
+	}
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.SyncIndexMetaRequest) (*commonpb.Status, error)); ok {
+		return rf(ctx, req)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.SyncIndexMetaRequest) *commonpb.Status); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.SyncIndexMetaRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockWorker_SyncIndexMeta_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SyncIndexMeta'
+type MockWorker_SyncIndexMeta_Call struct {
+	*mock.Call
+}
+
+// SyncIndexMeta is a helper method to define mock.On call
+//   - ctx context.Context
+//   - req *querypb.SyncIndexMetaRequest
+func (_e *MockWorker_Expecter) SyncIndexMeta(ctx interface{}, req interface{}) *MockWorker_SyncIndexMeta_Call {
+	return &MockWorker_SyncIndexMeta_Call{Call: _e.mock.On("SyncIndexMeta", ctx, req)}
+}
+
+func (_c *MockWorker_SyncIndexMeta_Call) Run(run func(ctx context.Context, req *querypb.SyncIndexMetaRequest)) *MockWorker_SyncIndexMeta_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.SyncIndexMetaRequest))
+	})
+	return _c
+}
+
+func (_c *MockWorker_SyncIndexMeta_Call) Return(_a0 *commonpb.Status, _a1 error) *MockWorker_SyncIndexMeta_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockWorker_SyncIndexMeta_Call) RunAndReturn(run func(context.Context, *querypb.SyncIndexMetaRequest) (*commonpb.Status, error)) *MockWorker_SyncIndexMeta_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // UpdateSchema provides a mock function with given fields: ctx, req
 func (_m *MockWorker) UpdateSchema(ctx context.Context, req *querypb.UpdateSchemaRequest) (*commonpb.Status, error) {
 	ret := _m.Called(ctx, req)

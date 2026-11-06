@@ -3,7 +3,10 @@
 package segments
 
 import (
+	context "context"
+
 	schemapb "github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	indexpb "github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	querypb "github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	segcorepb "github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	mock "github.com/stretchr/testify/mock"
@@ -303,6 +306,55 @@ func (_c *MockCollectionManager_Unref_Call) Return(_a0 bool) *MockCollectionMana
 }
 
 func (_c *MockCollectionManager_Unref_Call) RunAndReturn(run func(int64, uint32) bool) *MockCollectionManager_Unref_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UpdateIndexMeta provides a mock function with given fields: ctx, collectionID, indexInfos, version
+func (_m *MockCollectionManager) UpdateIndexMeta(ctx context.Context, collectionID int64, indexInfos []*indexpb.IndexInfo, version int64) error {
+	ret := _m.Called(ctx, collectionID, indexInfos, version)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateIndexMeta")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, []*indexpb.IndexInfo, int64) error); ok {
+		r0 = rf(ctx, collectionID, indexInfos, version)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCollectionManager_UpdateIndexMeta_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateIndexMeta'
+type MockCollectionManager_UpdateIndexMeta_Call struct {
+	*mock.Call
+}
+
+// UpdateIndexMeta is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+//   - indexInfos []*indexpb.IndexInfo
+//   - version int64
+func (_e *MockCollectionManager_Expecter) UpdateIndexMeta(ctx interface{}, collectionID interface{}, indexInfos interface{}, version interface{}) *MockCollectionManager_UpdateIndexMeta_Call {
+	return &MockCollectionManager_UpdateIndexMeta_Call{Call: _e.mock.On("UpdateIndexMeta", ctx, collectionID, indexInfos, version)}
+}
+
+func (_c *MockCollectionManager_UpdateIndexMeta_Call) Run(run func(ctx context.Context, collectionID int64, indexInfos []*indexpb.IndexInfo, version int64)) *MockCollectionManager_UpdateIndexMeta_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].([]*indexpb.IndexInfo), args[3].(int64))
+	})
+	return _c
+}
+
+func (_c *MockCollectionManager_UpdateIndexMeta_Call) Return(_a0 error) *MockCollectionManager_UpdateIndexMeta_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCollectionManager_UpdateIndexMeta_Call) RunAndReturn(run func(context.Context, int64, []*indexpb.IndexInfo, int64) error) *MockCollectionManager_UpdateIndexMeta_Call {
 	_c.Call.Return(run)
 	return _c
 }

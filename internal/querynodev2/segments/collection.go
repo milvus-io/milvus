@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -54,6 +55,10 @@ type CollectionManager interface {
 	// version. The manager derives the logical schema version from schema.Version
 	// when a schema payload is present.
 	UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema, schemaBarrierTs uint64) error
+	// UpdateIndexMeta applies a collection index list with the version QueryCoord
+	// gave it. A list older than the applied one is ignored. A collection that is
+	// not on this node has nothing to update.
+	UpdateIndexMeta(ctx context.Context, collectionID int64, indexInfos []*indexpb.IndexInfo, version int64) error
 }
 
 type collectionManager struct {
@@ -121,10 +126,11 @@ func (m *collectionManager) acquireCollectionLease(collectionID int64) (*Collect
 func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) error {
 	logicalSchemaVersion := getLoadMetaSchemaVersion(schema, loadMeta)
 	schemaBarrierTs := loadMeta.GetSchemaBarrierTs()
+	indexInfoVersion := loadMeta.GetIndexInfoVersion()
 
 	if collection, ok := m.acquireCollectionLease(collectionID); ok {
 		defer m.Unref(collectionID, 1)
-		return m.putOrRefExisting(collectionID, collection, schema, meta, logicalSchemaVersion, schemaBarrierTs)
+		return m.putOrRefExisting(collectionID, collection, schema, meta, logicalSchemaVersion, schemaBarrierTs, indexInfoVersion)
 	}
 
 	m.mut.Lock()
@@ -132,7 +138,7 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 		collection.refCount.Inc()
 		m.mut.Unlock()
 		defer m.Unref(collectionID, 1)
-		return m.putOrRefExisting(collectionID, collection, schema, meta, logicalSchemaVersion, schemaBarrierTs)
+		return m.putOrRefExisting(collectionID, collection, schema, meta, logicalSchemaVersion, schemaBarrierTs, indexInfoVersion)
 	}
 	defer m.mut.Unlock()
 
@@ -148,12 +154,12 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 	return nil
 }
 
-func (m *collectionManager) putOrRefExisting(collectionID int64, collection *Collection, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, logicalSchemaVersion uint64, schemaBarrierTs uint64) error {
+func (m *collectionManager) putOrRefExisting(collectionID int64, collection *Collection, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, logicalSchemaVersion uint64, schemaBarrierTs uint64, indexInfoVersion int64) error {
 	// Existing collections may be reached by a later load result or by a
 	// same-version properties refresh. Keep the Go-side logical schema version
 	// separate from the barrier timestamp so stale schema payloads cannot roll
 	// back fields, while newer properties-only payloads can still refresh.
-	plan, shouldUpdate, err := collection.applyLoadUpdate(schema, meta, logicalSchemaVersion, schemaBarrierTs)
+	plan, shouldUpdate, err := collection.applyLoadUpdate(schema, meta, logicalSchemaVersion, schemaBarrierTs, indexInfoVersion)
 	if err != nil {
 		return err
 	}
@@ -184,6 +190,16 @@ func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.Co
 	//   properties-only schema snapshots such as ttl_field changes.
 	_, _, err := collection.applySchemaUpdate(schema, logicalSchemaVersion, schemaBarrierTs)
 	return err
+}
+
+func (m *collectionManager) UpdateIndexMeta(ctx context.Context, collectionID int64, indexInfos []*indexpb.IndexInfo, version int64) error {
+	collection, ok := m.acquireCollectionLease(collectionID)
+	if !ok {
+		return nil
+	}
+	defer m.Unref(collectionID, 1)
+
+	return collection.updateIndexMeta(ComposeIndexMeta(ctx, indexInfos, collection.Schema()), version)
 }
 
 // ShouldUpdateCollectionSchema reports whether an UpdateSchema payload would
@@ -334,6 +350,9 @@ type Collection struct {
 	schema     atomic.Pointer[collectionSchemaSnapshot]
 	isGpuIndex bool
 	loadFields typeutil.Set[int64]
+	// indexInfoVersion is the version of the index list applied to ccollection,
+	// protected by mu. See LoadMetaInfo.index_info_version.
+	indexInfoVersion int64
 
 	refCount *atomic.Uint32
 }
@@ -416,7 +435,7 @@ func (c *Collection) CreateCSegment(req *segcore.CreateCSegmentRequest) (segcore
 	return segcore.CreateCSegment(req)
 }
 
-func (c *Collection) updateIndexMeta(meta *segcorepb.CollectionIndexMeta) error {
+func (c *Collection) updateIndexMeta(meta *segcorepb.CollectionIndexMeta, version int64) error {
 	if meta == nil {
 		return nil
 	}
@@ -427,10 +446,18 @@ func (c *Collection) updateIndexMeta(meta *segcorepb.CollectionIndexMeta) error 
 	if c.ccollection == nil {
 		return merr.WrapErrServiceInternal("update index meta on released collection")
 	}
-	if proto.Equal(c.ccollection.IndexMeta(), meta) {
+	// A list read before the applied one can miss an index created since, so
+	// it must not replace the applied one.
+	if version < c.indexInfoVersion {
 		return nil
 	}
-	return c.ccollection.UpdateIndexMeta(meta)
+	if !proto.Equal(c.ccollection.IndexMeta(), meta) {
+		if err := c.ccollection.UpdateIndexMeta(meta); err != nil {
+			return err
+		}
+	}
+	c.indexInfoVersion = version
+	return nil
 }
 
 func (c *Collection) updateSchema(schema *schemapb.CollectionSchema, version uint64) error {
@@ -450,7 +477,7 @@ func (c *Collection) applySchemaUpdate(schema *schemapb.CollectionSchema, logica
 	return c.applySchemaUpdateLocked(schema, logicalSchemaVersion, schemaBarrierTs)
 }
 
-func (c *Collection) applyLoadUpdate(schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, logicalSchemaVersion uint64, schemaBarrierTs uint64) (collectionSchemaUpdatePlan, bool, error) {
+func (c *Collection) applyLoadUpdate(schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, logicalSchemaVersion uint64, schemaBarrierTs uint64, indexInfoVersion int64) (collectionSchemaUpdatePlan, bool, error) {
 	c.lockSchemaTransitionForUpdate()
 	defer c.unlockSchemaTransitionForUpdate()
 
@@ -458,9 +485,9 @@ func (c *Collection) applyLoadUpdate(schema *schemapb.CollectionSchema, meta *se
 	if err != nil {
 		return collectionSchemaUpdatePlan{}, false, err
 	}
-	// Always update index meta to ensure newly indexed fields are visible
-	// for search plan creation (CollectionIndexMeta::HasField check).
-	if err := c.updateIndexMeta(meta); err != nil {
+	// Update index meta to ensure newly indexed fields are visible for search
+	// plan creation (CollectionIndexMeta::HasField check).
+	if err := c.updateIndexMeta(meta, indexInfoVersion); err != nil {
 		return collectionSchemaUpdatePlan{}, false, err
 	}
 	// The temporary manager lease keeps the collection alive while this update
@@ -614,12 +641,14 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 	}
 
 	isGpuIndex := false
+	indexInfoVersion := int64(0)
 	req := &segcore.CreateCCollectionRequest{
 		Schema:        loadSchema,
 		LoadFieldList: loadFieldIDs.Collect(),
 	}
 	if indexMeta != nil && len(indexMeta.GetIndexMetas()) > 0 && indexMeta.GetMaxIndexRowCount() > 0 {
 		req.IndexMeta = indexMeta
+		indexInfoVersion = loadMetaInfo.GetIndexInfoVersion()
 		for _, indexMeta := range indexMeta.GetIndexMetas() {
 			isGpuIndex = gpuIndexRequiresGpu(indexMeta.GetIndexParams())
 			if isGpuIndex {
@@ -644,6 +673,8 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		refCount:      atomic.NewUint32(0),
 		isGpuIndex:    isGpuIndex,
 		loadFields:    loadFieldIDs,
+
+		indexInfoVersion: indexInfoVersion,
 	}
 	for _, partitionID := range loadMetaInfo.GetPartitionIDs() {
 		coll.partitions.Insert(partitionID)

@@ -712,6 +712,10 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		return err
 	}
 	log.Debug(ctx, "work loads segments done")
+	// The load may have created the collection on the node with an older index
+	// list. WatchDmChannels can do the same without coming here; see the
+	// comment at its PutOrRef for how the published set covers that.
+	sd.forgetIndexMetaWorker(targetNodeID, req.GetIndexInfoList(), req.GetLoadMeta().GetIndexInfoVersion())
 
 	if err := sd.syncCollectionMeta(ctx, req); err != nil {
 		log.Warn(ctx, "failed to sync collection metadata on delegator", mlog.Err(err))

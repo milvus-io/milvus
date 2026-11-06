@@ -8,6 +8,7 @@ import (
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	schemapb "github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	streamrpc "github.com/milvus-io/milvus/internal/util/streamrpc"
+	indexpb "github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	querypb "github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	mock "github.com/stretchr/testify/mock"
@@ -1237,6 +1238,54 @@ func (_c *MockShardDelegator_SyncDistribution_Call) Return() *MockShardDelegator
 
 func (_c *MockShardDelegator_SyncDistribution_Call) RunAndReturn(run func(context.Context, ...SegmentEntry)) *MockShardDelegator_SyncDistribution_Call {
 	_c.Run(run)
+	return _c
+}
+
+// SyncIndexMeta provides a mock function with given fields: ctx, indexInfos, version
+func (_m *MockShardDelegator) SyncIndexMeta(ctx context.Context, indexInfos []*indexpb.IndexInfo, version int64) error {
+	ret := _m.Called(ctx, indexInfos, version)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SyncIndexMeta")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, []*indexpb.IndexInfo, int64) error); ok {
+		r0 = rf(ctx, indexInfos, version)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockShardDelegator_SyncIndexMeta_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SyncIndexMeta'
+type MockShardDelegator_SyncIndexMeta_Call struct {
+	*mock.Call
+}
+
+// SyncIndexMeta is a helper method to define mock.On call
+//   - ctx context.Context
+//   - indexInfos []*indexpb.IndexInfo
+//   - version int64
+func (_e *MockShardDelegator_Expecter) SyncIndexMeta(ctx interface{}, indexInfos interface{}, version interface{}) *MockShardDelegator_SyncIndexMeta_Call {
+	return &MockShardDelegator_SyncIndexMeta_Call{Call: _e.mock.On("SyncIndexMeta", ctx, indexInfos, version)}
+}
+
+func (_c *MockShardDelegator_SyncIndexMeta_Call) Run(run func(ctx context.Context, indexInfos []*indexpb.IndexInfo, version int64)) *MockShardDelegator_SyncIndexMeta_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].([]*indexpb.IndexInfo), args[2].(int64))
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_SyncIndexMeta_Call) Return(_a0 error) *MockShardDelegator_SyncIndexMeta_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardDelegator_SyncIndexMeta_Call) RunAndReturn(run func(context.Context, []*indexpb.IndexInfo, int64) error) *MockShardDelegator_SyncIndexMeta_Call {
+	_c.Call.Return(run)
 	return _c
 }
 
