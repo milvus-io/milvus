@@ -17,10 +17,13 @@
 package http
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
+	"html"
+	"io"
 	"net/http"
 	netpprof "net/http/pprof"
 	"os"
@@ -281,7 +284,7 @@ func RegisterCheckComponentReady(checkActive func(role string) error) {
 func RegisterWebUIHandler() {
 	httpFS := http.FS(staticFiles)
 	fileServer := http.FileServer(httpFS)
-	serveIndex := serveFile(RouteWebUI+"index.html", httpFS)
+	serveIndex := serveWebUIIndex(httpFS)
 	Register(&Handler{
 		Path:            RouteWebUI,
 		Handler:         handleNotFound(fileServer, serveIndex),
@@ -297,6 +300,68 @@ func RegisterWebUIHandler() {
 		AdminAuth:       true,
 		BrowserDocument: true,
 	})
+}
+
+// serveWebUIIndex serves the SPA shell with a base path derived from the
+// requested WebUI mount point. Doing this in the server keeps the generated
+// WebUI bundle untouched and makes relative assets work on deep links.
+func serveWebUIIndex(fs http.FileSystem) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !acceptsHTML(r) {
+			http.NotFound(w, r)
+			return
+		}
+
+		file, err := fs.Open("webui/index.html")
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		defer file.Close()
+
+		fi, err := file.Stat()
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		content, err := io.ReadAll(file)
+		if err != nil {
+			http.Error(w, "failed to read WebUI index", http.StatusInternalServerError)
+			return
+		}
+
+		basePath := webUIBasePath(r.URL.Path)
+		basename, _ := json.Marshal(basePath[:len(basePath)-1])
+		// The value is embedded in an inline script, so escape HTML-sensitive
+		// characters in addition to JSON string encoding.
+		basename = bytes.ReplaceAll(basename, []byte("<"), []byte(`\u003c`))
+		basename = bytes.ReplaceAll(basename, []byte(">"), []byte(`\u003e`))
+		basename = bytes.ReplaceAll(basename, []byte("&"), []byte(`\u0026`))
+
+		const headTag = "<head>"
+		head := bytes.Index(content, []byte(headTag))
+		if head < 0 {
+			http.Error(w, "WebUI index has no head element", http.StatusInternalServerError)
+			return
+		}
+		injection := fmt.Sprintf("<base href=\"%s\"><script>window.basename=%s;</script>", html.EscapeString(basePath), basename)
+		content = bytes.Join([][]byte{content[:head+len(headTag)], []byte(injection), content[head+len(headTag):]}, nil)
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		http.ServeContent(w, r, fi.Name(), fi.ModTime(), bytes.NewReader(content))
+	}
+}
+
+func webUIBasePath(requestPath string) string {
+	webUIPath := strings.TrimSuffix(RouteWebUI, "/")
+	index := strings.LastIndex(requestPath, webUIPath)
+	if index >= 0 {
+		end := index + len(webUIPath)
+		if end == len(requestPath) || requestPath[end] == '/' {
+			return requestPath[:end] + "/"
+		}
+	}
+	return RouteWebUI
 }
 
 type responseInterceptor struct {
