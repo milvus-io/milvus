@@ -170,7 +170,7 @@ func buildGrowingInsertData(schema *schemapb.CollectionSchema, pack *flushPack) 
 	insertMessages := make([]*msgstream.InsertMsg, 0, len(pack.Inserts))
 	for _, raw := range pack.Inserts {
 		if err := forEachSegmentInsertMessage(raw, pack.SegmentID, func(insert segmentInsertMessage) error {
-			request, err := insert.Message.ReadRows(context.Background(), schema, insert.Rows)
+			request, err := insert.RowsReader.ReadRows(context.Background(), schema, insert.Rows)
 			if err != nil {
 				return err
 			}

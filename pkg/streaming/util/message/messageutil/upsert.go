@@ -30,14 +30,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// InsertRequest reads selected logical rows at the storage execution boundary.
+// InsertRowsReader reads selected logical rows at the storage execution boundary.
 // Source columns remain immutable. All columns use the same row selection.
-type InsertRequest interface {
+type InsertRowsReader interface {
 	ReadRows(context.Context, *schemapb.CollectionSchema, []int64) (*msgpb.InsertRequest, error)
 }
-type insertRows struct{ msg message.ImmutableMessage }
+type insertRowsReader struct{ msg message.ImmutableMessage }
 
-func (r *insertRows) ReadRows(ctx context.Context, schema *schemapb.CollectionSchema, rows []int64) (*msgpb.InsertRequest, error) {
+func (r *insertRowsReader) ReadRows(ctx context.Context, schema *schemapb.CollectionSchema, rows []int64) (*msgpb.InsertRequest, error) {
 	var source *msgpb.InsertRequest
 	switch r.msg.MessageType() {
 	case message.MessageTypeInsert:
@@ -129,16 +129,16 @@ func (r *insertRows) ReadRows(ctx context.Context, schema *schemapb.CollectionSc
 	return result, nil
 }
 
-// AsInsertRequest returns rows and receiving-cluster segment assignments.
-func AsInsertRequest(msg message.ImmutableMessage) (InsertRequest, []*messagespb.PartitionSegmentAssignment, bool) {
+// AsInsertRowsReader returns rows and receiving-cluster segment assignments.
+func AsInsertRowsReader(msg message.ImmutableMessage) (InsertRowsReader, []*messagespb.PartitionSegmentAssignment, bool) {
 	if msg == nil {
 		return nil, nil, false
 	}
 	switch msg.MessageType() {
 	case message.MessageTypeInsert:
-		return &insertRows{msg: msg}, message.MustAsImmutableInsertMessageV1(msg).Header().GetPartitions(), true
+		return &insertRowsReader{msg: msg}, message.MustAsImmutableInsertMessageV1(msg).Header().GetPartitions(), true
 	case message.MessageTypeUpsert:
-		return &insertRows{msg: msg}, message.MustAsImmutableUpsertMessageV2(msg).Header().GetPartitions(), true
+		return &insertRowsReader{msg: msg}, message.MustAsImmutableUpsertMessageV2(msg).Header().GetPartitions(), true
 	}
 	return nil, nil, false
 }
@@ -190,7 +190,7 @@ func DeleteRequests(ctx context.Context, msg message.ImmutableMessage) ([]*msgpb
 	if msg.MessageType() != message.MessageTypeUpsert {
 		return nil, nil
 	}
-	body, err := message.ReadUpsertMetadata(ctx, msg)
+	body, err := message.ReadUpsertProjection(ctx, msg)
 	if err != nil {
 		return nil, err
 	}

@@ -30,8 +30,8 @@ import (
 
 func TestUpsertViewEncoderDirectColumns(t *testing.T) {
 	source := &msgpb.InsertRequest{NumRows: 3, RowIDs: []int64{10, 20, 30}, Timestamps: []uint64{1, 1, 1}, FieldsData: []*schemapb.FieldData{{FieldId: 101, Type: schemapb.DataType_FloatVector, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4, 5, 6}}}}}}}}
-	meta := &messagespb.UpsertMessageBody{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7, 9}}}}, RowIds: []int64{10, 30}, PartitionIndexes: []uint32{0, 1}, RequestRowMapping: &messagespb.UpsertRequestRowMapping{RowOffsets: []uint32{0, 2}}}
-	encoder, err := NewUpsertViewEncoder(meta, source, []int{0, 2})
+	nonColumnFields := &messagespb.UpsertMessageBody{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7, 9}}}}, RowIds: []int64{10, 30}, PartitionIndexes: []uint32{0, 1}, RequestRowMapping: &messagespb.UpsertRequestRowMapping{RowOffsets: []uint32{0, 2}}}
+	encoder, err := NewUpsertViewEncoder(nonColumnFields, source, []int{0, 2})
 	require.NoError(t, err)
 	size, err := encoder.EncodedSize()
 	require.NoError(t, err)
@@ -53,7 +53,7 @@ func BenchmarkUpsertViewEncoding(b *testing.B) {
 	for i := range selected {
 		selected[i] = i
 	}
-	metadata := &messagespb.UpsertMessageBody{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: make([]int64, rows)}}}, RowIds: source.RowIDs}
+	nonColumnFields := &messagespb.UpsertMessageBody{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: make([]int64, rows)}}}, RowIds: source.RowIDs}
 	for _, outputs := range []bool{false, true} {
 		name := "dense"
 		if outputs {
@@ -66,7 +66,7 @@ func BenchmarkUpsertViewEncoding(b *testing.B) {
 		b.Run(name, func(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				encoder, err := NewUpsertViewEncoder(metadata, source, selected)
+				encoder, err := NewUpsertViewEncoder(nonColumnFields, source, selected)
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -98,8 +98,8 @@ func TestUpsertCursorSharesNullablePositionsAcrossSizeChunks(t *testing.T) {
 		require.Positive(t, count)
 		_, _, err = cursor.NextEncoder(rows, 40, prefix, 0)
 		require.ErrorContains(t, err, "has not been marshaled")
-		metadata := &messagespb.UpsertMessageBody{RowIds: source.RowIDs[rows[0] : rows[count-1]+1]}
-		require.NoError(t, encoder.SetMetadata(metadata))
+		nonColumnFields := &messagespb.UpsertMessageBody{RowIds: source.RowIDs[rows[0] : rows[count-1]+1]}
+		require.NoError(t, encoder.SetNonColumnFields(nonColumnFields))
 		size, err := encoder.EncodedSize()
 		require.NoError(t, err)
 		payload := make([]byte, size)
@@ -229,14 +229,14 @@ func TestUpsertBulkPrefixFillsExactChunkBoundary(t *testing.T) {
 			encoder, consumed, err := cursor.NextEncoder(remaining, limit, budget, 19)
 			require.NoError(t, err)
 			require.Equal(t, want, consumed)
-			metadata := &messagespb.UpsertMessageBody{RowIds: source.RowIDs[remaining[0] : remaining[consumed-1]+1]}
-			require.NoError(t, encoder.SetMetadata(metadata))
+			nonColumnFields := &messagespb.UpsertMessageBody{RowIds: source.RowIDs[remaining[0] : remaining[consumed-1]+1]}
+			require.NoError(t, encoder.SetNonColumnFields(nonColumnFields))
 			size, err := encoder.EncodedSize()
 			require.NoError(t, err)
 			actual := make([]byte, size)
 			_, err = encoder.MarshalTo(actual)
 			require.NoError(t, err)
-			reference, err := NewUpsertViewEncoder(metadata, source, remaining[:consumed])
+			reference, err := NewUpsertViewEncoder(nonColumnFields, source, remaining[:consumed])
 			require.NoError(t, err)
 			expected := make([]byte, size)
 			_, err = reference.MarshalTo(expected)
@@ -252,12 +252,12 @@ func TestUpsertBulkPrefixFillsExactChunkBoundary(t *testing.T) {
 	}
 }
 
-func TestUpsertMetadataRejectsInvalidUTF8BeforeMarshal(t *testing.T) {
+func TestUpsertNonColumnFieldsRejectInvalidUTF8BeforeMarshal(t *testing.T) {
 	source := &msgpb.InsertRequest{NumRows: 1, RowIDs: []int64{1}, Timestamps: []uint64{1}}
 	cursor, err := NewUpsertViewCursor(source)
 	require.NoError(t, err)
 	encoder, _, err := cursor.NextEncoder([]int{0}, 0, []int{0, 0}, 0)
 	require.NoError(t, err)
-	err = encoder.SetMetadata(&messagespb.UpsertMessageBody{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{string([]byte{0xff})}}}}})
+	err = encoder.SetNonColumnFields(&messagespb.UpsertMessageBody{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{string([]byte{0xff})}}}}})
 	require.Error(t, err)
 }

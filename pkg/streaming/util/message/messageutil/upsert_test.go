@@ -49,7 +49,7 @@ func TestUpsertSelectedRowsAndIndependentEffects(t *testing.T) {
 	for _, nullable := range []bool{false, true} {
 		raw, schema := testUpsertRows(t, nullable)
 		before := proto.Clone(message.MustAsImmutableUpsertMessageV2(raw).MustBody())
-		rows, partitions, ok := AsInsertRequest(raw)
+		rows, partitions, ok := AsInsertRowsReader(raw)
 		require.True(t, ok)
 		require.Len(t, partitions, 2)
 		selections, err := InsertSelections(context.Background(), raw)
@@ -106,7 +106,7 @@ func TestUpsertNestedColumnsSharePartitionSelection(t *testing.T) {
 	}
 	body.Columns = append(body.Columns, &schemapb.FieldData{FieldId: 102, Type: schemapb.DataType_ArrayOfStruct, Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: []*schemapb.FieldData{{FieldId: 103, Type: schemapb.DataType_Array, Field: &schemapb.FieldData_Scalars{Scalars: array}}}}}}, &schemapb.FieldData{FieldId: 104, Type: schemapb.DataType_ArrayOfVector, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_VectorArray{VectorArray: vectors}}}})
 	raw = message.NewUpsertMessageBuilderV2().WithVChannel("p_1v0").WithHeader(original.Header()).WithBody(body).MustBuildMutable().WithTimeTick(42).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(43))
-	reader, _, ok := AsInsertRequest(raw)
+	reader, _, ok := AsInsertRowsReader(raw)
 	require.True(t, ok)
 	selected, err := reader.ReadRows(context.Background(), schema, []int64{0, 2})
 	require.NoError(t, err)
@@ -141,7 +141,7 @@ func BenchmarkUpsertConsumerScatter(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				reader, _, _ := AsInsertRequest(raw)
+				reader, _, _ := AsInsertRowsReader(raw)
 				selections, err := InsertSelections(context.Background(), raw)
 				if err != nil {
 					b.Fatal(err)

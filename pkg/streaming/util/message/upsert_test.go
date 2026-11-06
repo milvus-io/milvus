@@ -68,7 +68,7 @@ func TestUpsertEnvelope(t *testing.T) {
 	}
 }
 
-func TestUpsertMetadataSkipsColumnsAndSharesDecode(t *testing.T) {
+func TestUpsertProjectionSkipsColumnsAndSharesDecode(t *testing.T) {
 	h, b, _ := upsertFixture()
 	b.RequestRowMapping = &messagespb.UpsertRequestRowMapping{RowOffsets: []uint32{0, 1, 2}}
 	payload, err := proto.Marshal(b)
@@ -81,9 +81,9 @@ func TestUpsertMetadataSkipsColumnsAndSharesDecode(t *testing.T) {
 	payload = protowire.AppendBytes(payload, column)
 	template := message.NewUpsertMessageBuilderV2().WithVChannel("p_1v0").WithHeader(h).WithBody(b).MustBuildMutable()
 	raw := message.NewImmutableMesasge(walimplstest.NewTestMessageID(1), payload, template.IntoMessageProto().Properties)
-	first, err := message.ReadUpsertMetadata(t.Context(), raw)
+	first, err := message.ReadUpsertProjection(t.Context(), raw)
 	require.NoError(t, err)
-	second, err := message.ReadUpsertMetadata(t.Context(), message.MustAsImmutableUpsertMessageV2(raw))
+	second, err := message.ReadUpsertProjection(t.Context(), message.MustAsImmutableUpsertMessageV2(raw))
 	require.NoError(t, err)
 	require.Same(t, first, second)
 	require.Nil(t, first.Columns[0].Field)
@@ -94,15 +94,15 @@ func TestUpsertMetadataSkipsColumnsAndSharesDecode(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestUpsertReplacementInvalidatesMetadata(t *testing.T) {
+func TestUpsertReplacementInvalidatesProjection(t *testing.T) {
 	h, b, _ := upsertFixture()
 	msg := message.MustAsMutableUpsertMessageV2(message.NewUpsertMessageBuilderV2().WithVChannel("p_1v0").WithHeader(h).WithBody(b).MustBuildMutable())
-	before, err := message.ReadUpsertMetadata(t.Context(), msg)
+	before, err := message.ReadUpsertProjection(t.Context(), msg)
 	require.NoError(t, err)
 	encoded := msg.IntoMessageProto().Payload
 	effect := &messagespb.UpsertDeleteEffect{Scope: &messagespb.UpsertDeleteEffect_AllPartitions{AllPartitions: &messagespb.UpsertAllPartitions{}}, PrimaryKeys: b.PrimaryKeys}
 	require.NoError(t, message.ReplaceUpsertDeleteEffects(t.Context(), msg, []*messagespb.UpsertDeleteEffect{effect}))
-	after, err := message.ReadUpsertMetadata(t.Context(), msg)
+	after, err := message.ReadUpsertProjection(t.Context(), msg)
 	require.NoError(t, err)
 	require.NotSame(t, before, after)
 	require.Empty(t, before.DeleteEffects)
@@ -116,7 +116,7 @@ func TestUpsertProjectionConcurrentReadersAndBodyReplacement(t *testing.T) {
 	rawMutable := message.NewUpsertMessageBuilderV2().WithVChannel("p_1v0").WithHeader(header).WithBody(body).MustBuildMutable()
 	mutable := message.MustAsMutableUpsertMessageV2(rawMutable)
 	raw := rawMutable.WithTimeTick(10).WithLastConfirmedUseMessageID().IntoImmutableMessage(walimplstest.NewTestMessageID(1))
-	first, err := message.ReadUpsertMetadata(t.Context(), raw)
+	first, err := message.ReadUpsertProjection(t.Context(), raw)
 	require.NoError(t, err)
 	var readers sync.WaitGroup
 	for i := 0; i < 16; i++ {
@@ -124,7 +124,7 @@ func TestUpsertProjectionConcurrentReadersAndBodyReplacement(t *testing.T) {
 		go func() {
 			defer readers.Done()
 			for j := 0; j < 20; j++ {
-				projection, err := message.ReadUpsertMetadata(t.Context(), raw)
+				projection, err := message.ReadUpsertProjection(t.Context(), raw)
 				require.NoError(t, err)
 				require.Same(t, first, projection)
 			}
@@ -134,13 +134,13 @@ func TestUpsertProjectionConcurrentReadersAndBodyReplacement(t *testing.T) {
 	replacement := proto.Clone(body).(*message.UpsertMessageBody)
 	replacement.PrimaryKeys.GetIntId().Data[0] = 99
 	mutable.OverwriteBody(replacement)
-	current, err := message.ReadUpsertMetadata(t.Context(), mutable)
+	current, err := message.ReadUpsertProjection(t.Context(), mutable)
 	require.NoError(t, err)
 	require.Equal(t, int64(99), current.PrimaryKeys.GetIntId().Data[0])
 	require.Equal(t, int64(4), first.PrimaryKeys.GetIntId().Data[0])
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err = message.ReadUpsertMetadata(ctx, raw)
+	_, err = message.ReadUpsertProjection(ctx, raw)
 	require.ErrorIs(t, err, context.Canceled)
 }
 

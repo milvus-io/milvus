@@ -51,7 +51,7 @@ func BenchmarkUpsertProjection(b *testing.B) {
 		for _, projection := range []bool{false, true} {
 			mode := "full"
 			if projection {
-				mode = "metadata"
+				mode = "projection"
 			}
 			b.Run(name+"/"+mode, func(b *testing.B) {
 				b.ReportAllocs()
@@ -66,7 +66,7 @@ func BenchmarkUpsertProjection(b *testing.B) {
 						}
 					}
 					if projection {
-						if _, err := decodeUpsertMetadata(data); err != nil {
+						if _, err := decodeUpsertProjection(data); err != nil {
 							b.Fatal(err)
 						}
 					} else {

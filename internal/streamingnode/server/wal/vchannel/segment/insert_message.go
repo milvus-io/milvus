@@ -13,7 +13,7 @@ import (
 // segment. It is persistence-owned and intentionally does not depend on the
 // persistence module.
 type segmentInsertMessage struct {
-	Message        messageutil.InsertRequest
+	RowsReader     messageutil.InsertRowsReader
 	Assignment     *messagespb.PartitionSegmentAssignment
 	TimeTick       uint64
 	Rows           []int64
@@ -85,7 +85,7 @@ func forEachSegmentInsertMessageFromInsert(
 	timeTick uint64,
 	visit func(segmentInsertMessage) error,
 ) error {
-	insert, assignments, ok := messageutil.AsInsertRequest(raw)
+	reader, assignments, ok := messageutil.AsInsertRowsReader(raw)
 	if !ok {
 		return nil
 	}
@@ -102,7 +102,7 @@ func forEachSegmentInsertMessageFromInsert(
 			continue
 		}
 		if err := visit(segmentInsertMessage{
-			Message:        insert,
+			RowsReader:     reader,
 			Assignment:     assignment,
 			TimeTick:       timeTick,
 			Rows:           rows,

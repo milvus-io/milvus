@@ -33,13 +33,13 @@ func newBodyCacheSlot() *bodyCacheSlot {
 // The shard is fixed at construction; all other fields are protected by that
 // shard's mutex. Transaction clones share the slot, even if their TimeTick changes.
 type bodyCacheSlot struct {
-	upsertMetadata *bodyCacheSlot
-	shard          uint32
-	body           proto.Message
-	loading        *bodyCacheAttempt
-	element        *list.Element
-	lastAccess     time.Time
-	bytes          int64
+	upsertProjectionCache *bodyCacheSlot
+	shard                 uint32
+	body                  proto.Message
+	loading               *bodyCacheAttempt
+	element               *list.Element
+	lastAccess            time.Time
+	bytes                 int64
 }
 
 type bodyCacheAttempt struct {

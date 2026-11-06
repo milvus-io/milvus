@@ -29,10 +29,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// ReadUpsertMetadata reads row identity, placement, effects and CAS without
-// decoding column values. Column descriptors contain only their field IDs.
-// The returned metadata is read-only and never retains the plaintext payload.
-func ReadUpsertMetadata(ctx context.Context, msg BasicMessage) (*UpsertMessageBody, error) {
+// ReadUpsertProjection reads PK, RowID, partition indexes, delete effects,
+// request row mapping, CAS and column descriptors without decoding ordinary
+// column values. Descriptors contain only field IDs. The returned projection
+// is read-only and does not retain the plaintext payload.
+func ReadUpsertProjection(ctx context.Context, msg BasicMessage) (*UpsertMessageBody, error) {
 	if msg == nil || msg.MessageType() != MessageTypeUpsert {
 		return nil, merr.WrapErrServiceInternalMsg("expected an Upsert message")
 	}
@@ -50,25 +51,25 @@ func ReadUpsertMetadata(ctx context.Context, msg BasicMessage) (*UpsertMessageBo
 }
 
 func (m *messageImpl) readUpsertProjection(ctx context.Context) (*upsertProjection, error) {
-	if m.upsertMetadata == nil {
-		m.upsertMetadata = newBodyCacheSlot()
+	if m.upsertProjectionCache == nil {
+		m.upsertProjectionCache = newBodyCacheSlot()
 	}
-	return cachedUpsertMetadata(ctx, m, m.upsertMetadata)
+	return cachedUpsertProjection(ctx, m, m.upsertProjectionCache)
 }
 
 func (m *immutableMessageImpl) readUpsertProjection(ctx context.Context) (*upsertProjection, error) {
 	cache := globalBodyCache()
 	shard := &cache.shards[m.bodyCache.shard]
 	shard.mu.Lock()
-	if m.bodyCache.upsertMetadata == nil {
-		m.bodyCache.upsertMetadata = &bodyCacheSlot{shard: m.bodyCache.shard}
+	if m.bodyCache.upsertProjectionCache == nil {
+		m.bodyCache.upsertProjectionCache = &bodyCacheSlot{shard: m.bodyCache.shard}
 	}
-	slot := m.bodyCache.upsertMetadata
+	slot := m.bodyCache.upsertProjectionCache
 	shard.mu.Unlock()
-	return cachedUpsertMetadata(ctx, m, slot)
+	return cachedUpsertProjection(ctx, m, slot)
 }
 
-func cachedUpsertMetadata(ctx context.Context, msg interface {
+func cachedUpsertProjection(ctx context.Context, msg interface {
 	decodePayload(context.Context) ([]byte, error)
 }, slot *bodyCacheSlot,
 ) (*upsertProjection, error) {
@@ -77,7 +78,7 @@ func cachedUpsertMetadata(ctx context.Context, msg interface {
 		if err != nil {
 			return nil, 0, err
 		}
-		body, err := decodeUpsertMetadata(payload)
+		body, err := decodeUpsertProjection(payload)
 		if err != nil {
 			return nil, 0, errors.Wrap(ErrMalformedBody, err.Error())
 		}
@@ -114,7 +115,7 @@ func upsertWireFields(payload []byte, visit func(protowire.Number, protowire.Typ
 	return nil
 }
 
-func decodeUpsertMetadata(payload []byte) (*UpsertMessageBody, error) {
+func decodeUpsertProjection(payload []byte) (*UpsertMessageBody, error) {
 	var selected []byte
 	var columns []*schemapb.FieldData
 	err := upsertWireFields(payload, func(number protowire.Number, kind protowire.Type, encoded, value []byte) error {
@@ -216,11 +217,11 @@ func (m *messageImpl) replaceUpsertPayload(payload []byte) error {
 		m.properties.Set(messageCipherHeader, cipherHeader)
 	}
 	m.payload = payload
-	m.upsertMetadata = nil
+	m.upsertProjectionCache = nil
 	return nil
 }
 
-// upsertProjection owns derived row mappings with the cached metadata. It never
+// upsertProjection owns derived row mappings with the cached projection. It never
 // retains columns or plaintext. Eviction releases all derived mappings too.
 type upsertProjection struct {
 	*UpsertMessageBody

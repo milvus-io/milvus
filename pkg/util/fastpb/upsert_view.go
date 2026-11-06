@@ -24,17 +24,17 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 )
 
-// UpsertViewEncoder writes borrowed columns directly after independent row
-// metadata. It uses the Insert view encoder's field plans and nullable cursors.
+// UpsertViewEncoder writes borrowed columns directly after independent non-column
+// fields. It uses the Insert view encoder's field plans and nullable cursors.
 type UpsertViewEncoder struct {
-	metadata []byte
-	columns  *InsertRequestViewEncoder
+	encodedNonColumnFields []byte
+	columns                *InsertRequestViewEncoder
 }
 
 func (*UpsertViewEncoder) BodyType() *messagespb.UpsertMessageBody { return nil }
-func NewUpsertViewEncoder(metadata *messagespb.UpsertMessageBody, source *msgpb.InsertRequest, rows []int) (*UpsertViewEncoder, error) {
-	if len(metadata.GetColumns()) != 0 {
-		return nil, insertViewInternal("Upsert view metadata must not own columns")
+func NewUpsertViewEncoder(nonColumnFields *messagespb.UpsertMessageBody, source *msgpb.InsertRequest, rows []int) (*UpsertViewEncoder, error) {
+	if len(nonColumnFields.GetColumns()) != 0 {
+		return nil, insertViewInternal("Upsert non-column fields must not include columns")
 	}
 	encoder, err := NewInsertRequestViewEncoder(&msgpb.InsertRequest{}, source, rows)
 	if err != nil {
@@ -45,16 +45,16 @@ func NewUpsertViewEncoder(metadata *messagespb.UpsertMessageBody, source *msgpb.
 	encoder.columnsOnly = true
 	// The Insert plan starts with packed timestamps and RowIDs.
 	encoder.sizePlan = encoder.sizePlan[2:]
-	payload, err := proto.Marshal(metadata)
+	payload, err := proto.Marshal(nonColumnFields)
 	if err != nil {
 		return nil, err
 	}
-	return &UpsertViewEncoder{metadata: payload, columns: encoder}, nil
+	return &UpsertViewEncoder{encodedNonColumnFields: payload, columns: encoder}, nil
 }
 
 func (e *UpsertViewEncoder) EncodedSize() (int, error) {
 	size, err := e.columns.EncodedSize()
-	return len(e.metadata) + size, err
+	return len(e.encodedNonColumnFields) + size, err
 }
 
 func (e *UpsertViewEncoder) MarshalTo(dst []byte) (int, error) {
@@ -65,9 +65,9 @@ func (e *UpsertViewEncoder) MarshalTo(dst []byte) (int, error) {
 	if len(dst) < size {
 		return 0, insertViewInternal("Upsert destination is too small")
 	}
-	copy(dst, e.metadata)
-	n, err := e.columns.MarshalTo(dst[len(e.metadata):])
-	return n + len(e.metadata), err
+	copy(dst, e.encodedNonColumnFields)
+	n, err := e.columns.MarshalTo(dst[len(e.encodedNonColumnFields):])
+	return n + len(e.encodedNonColumnFields), err
 }
 
 // UpsertViewCursor shares nullable positions and size-plan scratch across chunks.
@@ -82,15 +82,15 @@ func NewUpsertViewCursor(source *msgpb.InsertRequest) (*UpsertViewCursor, error)
 	return &UpsertViewCursor{columns: cursor}, nil
 }
 
-// NextEncoder plans columns without encoding them. metadataPrefix contains
-// cumulative row-metadata budgets. fixedBytes reserves the envelope and cipher.
+// NextEncoder plans columns without encoding them. nonColumnSizePrefix contains
+// cumulative row-nonColumnFields budgets. fixedBytes reserves the envelope and cipher.
 // The first row is returned even when it exceeds the budget.
-func (c *UpsertViewCursor) NextEncoder(rows []int, limit int, metadataPrefix []int, fixedBytes int) (*UpsertViewEncoder, int, error) {
-	if len(metadataPrefix) != len(rows)+1 {
-		return nil, 0, insertViewInternal("Upsert metadata budget length differs from rows")
+func (c *UpsertViewCursor) NextEncoder(rows []int, limit int, nonColumnSizePrefix []int, fixedBytes int) (*UpsertViewEncoder, int, error) {
+	if len(nonColumnSizePrefix) != len(rows)+1 {
+		return nil, 0, insertViewInternal("Upsert non-column field budget length differs from rows")
 	}
 	encoder, count, err := c.columns.nextEncoder(&msgpb.InsertRequest{}, rows, 0, func(count, size int) bool {
-		return limit <= 0 || size+fixedBytes+metadataPrefix[count]-metadataPrefix[0] <= limit
+		return limit <= 0 || size+fixedBytes+nonColumnSizePrefix[count]-nonColumnSizePrefix[0] <= limit
 	})
 	if err != nil {
 		return nil, 0, err
@@ -101,16 +101,16 @@ func (c *UpsertViewCursor) NextEncoder(rows []int, limit int, metadataPrefix []i
 	return &UpsertViewEncoder{columns: encoder}, count, nil
 }
 
-// SetMetadata completes an accepted prefix before its single MarshalTo call.
-func (e *UpsertViewEncoder) SetMetadata(metadata *messagespb.UpsertMessageBody) error {
-	if len(metadata.GetColumns()) != 0 {
-		return insertViewInternal("Upsert view metadata must not own columns")
+// SetNonColumnFields completes an accepted prefix before its single MarshalTo call.
+func (e *UpsertViewEncoder) SetNonColumnFields(nonColumnFields *messagespb.UpsertMessageBody) error {
+	if len(nonColumnFields.GetColumns()) != 0 {
+		return insertViewInternal("Upsert non-column fields must not include columns")
 	}
-	payload, err := proto.Marshal(metadata)
+	payload, err := proto.Marshal(nonColumnFields)
 	if err != nil {
 		return err
 	}
-	e.metadata = payload
+	e.encodedNonColumnFields = payload
 	return nil
 }
 

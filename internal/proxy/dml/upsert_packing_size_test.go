@@ -73,7 +73,7 @@ func matchUpsertDeletesReference(inserted, deleted *schemapb.IDs) ([][]int, erro
 	return rows, nil
 }
 
-func TestUpsertRowMetadataSizeEquivalent(t *testing.T) {
+func TestUpsertRowNonColumnSizeEquivalent(t *testing.T) {
 	integerKeys := []int64{math.MinInt64, -129, -128, -1, 0, 1, math.MaxInt64}
 	for shift := uint(7); shift < 63; shift += 7 {
 		boundary := int64(1) << shift
@@ -101,13 +101,13 @@ func TestUpsertRowMetadataSizeEquivalent(t *testing.T) {
 			for _, rowID := range rowIDs {
 				for _, partitionIndex := range indexes {
 					for _, offset := range indexes {
-						metadata := &message.UpsertMessageBody{
+						nonColumnFields := &message.UpsertMessageBody{
 							PrimaryKeys: keys, RowIds: []int64{rowID}, PartitionIndexes: []uint32{partitionIndex},
 							RequestRowMapping: &messagespb.UpsertRequestRowMapping{RowOffsets: []uint32{offset}},
 						}
-						got, err := upsertPlainRowMetadataSize(ids, row, rowID, partitionIndex, offset)
+						got, err := upsertRowNonColumnSize(ids, row, rowID, partitionIndex, offset)
 						require.NoError(t, err)
-						require.Equal(t, proto.Size(metadata), got, "row=%d rowID=%d partitionIndex=%d offset=%d", row, rowID, partitionIndex, offset)
+						require.Equal(t, proto.Size(nonColumnFields), got, "row=%d rowID=%d partitionIndex=%d offset=%d", row, rowID, partitionIndex, offset)
 					}
 				}
 			}
@@ -115,7 +115,7 @@ func TestUpsertRowMetadataSizeEquivalent(t *testing.T) {
 	}
 }
 
-func TestUpsertRowMetadataSizeErrorsEquivalent(t *testing.T) {
+func TestUpsertRowNonColumnSizeErrorsEquivalent(t *testing.T) {
 	keySets := []*schemapb.IDs{
 		nil,
 		{},
@@ -125,7 +125,7 @@ func TestUpsertRowMetadataSizeErrorsEquivalent(t *testing.T) {
 	for _, ids := range keySets {
 		for _, row := range []int{-1, 1, 2} {
 			_, want := idsByOffsets(ids, []int{row})
-			_, got := upsertPlainRowMetadataSize(ids, row, 1, 1, 1)
+			_, got := upsertRowNonColumnSize(ids, row, 1, 1, 1)
 			require.Error(t, want)
 			require.Error(t, got)
 			require.Equal(t, want.Error(), got.Error())
@@ -152,7 +152,7 @@ func TestUpsertEmptyDeletePlanShape(t *testing.T) {
 	}
 }
 
-func upsertRowMetadataProtoSize(ids *schemapb.IDs, row int, rowID int64, partitionIndex, requestOffset uint32) (int, error) {
+func upsertRowNonColumnProtoSize(ids *schemapb.IDs, row int, rowID int64, partitionIndex, requestOffset uint32) (int, error) {
 	keys, err := idsByOffsets(ids, []int{row})
 	if err != nil {
 		return 0, err
@@ -254,8 +254,8 @@ func TestUpsertPackingSizingPreservesMessages(t *testing.T) {
 										return repackUpsertMessages(t.Context(), cache, []string{"p_100v0"}, source, result.IDs, partitionKeys, schema, 1, config, cas, decoration, deleted, -1)
 									}
 									// Restore the former sizing/matching steps without copying the packer.
-									sizePatch := mockey.Mock(upsertPlainRowMetadataSize).To(upsertRowMetadataProtoSize).Build()
-									effectsPatch := mockey.Mock(upsertDeleteMetadataSize).To(upsertDeleteMetadataProtoSize).Build()
+									sizePatch := mockey.Mock(upsertRowNonColumnSize).To(upsertRowNonColumnProtoSize).Build()
+									effectsPatch := mockey.Mock(upsertDeleteEffectsSize).To(upsertDeleteEffectsProtoSize).Build()
 									matchPatch := mockey.Mock(matchUpsertDeletes).To(matchUpsertDeletesReference).Build()
 									want, wantErr := pack()
 									matchPatch.UnPatch()
@@ -290,7 +290,7 @@ func TestUpsertPlainRowSizingDoesNotAllocate(t *testing.T) {
 	var size int
 	var err error
 	allocations := testing.AllocsPerRun(10, func() {
-		size, err = upsertPlainRowMetadataSize(ids, 0, -1, math.MaxUint32, math.MaxUint32)
+		size, err = upsertRowNonColumnSize(ids, 0, -1, math.MaxUint32, math.MaxUint32)
 	})
 	require.NoError(t, err)
 	require.Positive(t, size)
@@ -319,7 +319,7 @@ func TestUpsertDeleteMatchingRemainsEquivalent(t *testing.T) {
 	}
 }
 
-func upsertDeleteMetadataProtoSize(ids *schemapb.IDs, offsets []int, partition int64) (int, error) {
+func upsertDeleteEffectsProtoSize(ids *schemapb.IDs, offsets []int, partition int64) (int, error) {
 	if len(offsets) == 0 {
 		return 0, nil
 	}
@@ -330,7 +330,7 @@ func upsertDeleteMetadataProtoSize(ids *schemapb.IDs, offsets []int, partition i
 	return proto.Size(&message.UpsertMessageBody{DeleteEffects: []*messagespb.UpsertDeleteEffect{{PrimaryKeys: keys, Scope: &messagespb.UpsertDeleteEffect_PartitionId{PartitionId: partition}}}}), nil
 }
 
-func TestEffectMetadataBudgetEquivalent(t *testing.T) {
+func TestUpsertDeleteEffectsBudgetEquivalent(t *testing.T) {
 	sets := []*schemapb.IDs{
 		{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{math.MinInt64, -1, 0, 1, 127, 128, 16383, 16384, math.MaxInt64}}}},
 		{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"", "a", "中文", strings.Repeat("x", 127), strings.Repeat("x", 128), strings.Repeat("x", 16383), strings.Repeat("x", 16384)}}}},
@@ -344,7 +344,7 @@ func TestEffectMetadataBudgetEquivalent(t *testing.T) {
 		offsetSets = append(offsetSets, all)
 		for _, offsets := range offsetSets {
 			for _, partition := range []int64{-1, 0, 1, 127, 128, 16384, math.MaxInt64} {
-				effectSize, err := upsertDeleteMetadataSize(ids, offsets, partition)
+				effectSize, err := upsertDeleteEffectsSize(ids, offsets, partition)
 				require.NoError(t, err)
 				for row := 0; row < message.UpsertPrimaryKeyCount(ids); row++ {
 					for _, rowID := range []int64{-1, 0, 127, 128, math.MaxInt64} {
@@ -357,7 +357,7 @@ func TestEffectMetadataBudgetEquivalent(t *testing.T) {
 								require.NoError(t, err)
 								body.DeleteEffects = []*messagespb.UpsertDeleteEffect{{PrimaryKeys: deleted, Scope: &messagespb.UpsertDeleteEffect_PartitionId{PartitionId: partition}}}
 							}
-							size, err := upsertPlainRowMetadataSize(ids, row, rowID, mapping, mapping)
+							size, err := upsertRowNonColumnSize(ids, row, rowID, mapping, mapping)
 							require.NoError(t, err)
 							require.Equal(t, proto.Size(body), size+effectSize)
 						}
@@ -368,12 +368,12 @@ func TestEffectMetadataBudgetEquivalent(t *testing.T) {
 	}
 }
 
-func TestEffectMetadataSizeErrorsEquivalent(t *testing.T) {
+func TestUpsertDeleteEffectsSizeErrorsEquivalent(t *testing.T) {
 	sets := []*schemapb.IDs{nil, {}, {IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}}, {IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"a"}}}}}
 	for _, ids := range sets {
 		for _, offsets := range [][]int{{-1}, {1}, {0, 5}} {
 			_, want := idsByOffsets(ids, offsets)
-			_, got := upsertDeleteMetadataSize(ids, offsets, -1)
+			_, got := upsertDeleteEffectsSize(ids, offsets, -1)
 			require.Error(t, want)
 			require.Error(t, got)
 			require.Equal(t, want.Error(), got.Error())

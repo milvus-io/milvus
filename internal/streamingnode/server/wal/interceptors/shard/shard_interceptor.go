@@ -509,7 +509,7 @@ func (impl *shardInterceptor) handleUpsert(ctx context.Context, msg message.Muta
 	if err != nil {
 		return nil, err
 	}
-	body, err := message.ReadUpsertMetadata(ctx, msg)
+	body, err := message.ReadUpsertProjection(ctx, msg)
 	if err != nil {
 		return nil, upsertBodyDecodeError(err)
 	}

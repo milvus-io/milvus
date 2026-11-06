@@ -93,7 +93,7 @@ func extractPKsFromCASInsertWithContext(
 		if err != nil {
 			return primarykey.Keys{}, casInsertScope{}, "", err
 		}
-		body, err := message.ReadUpsertMetadata(ctx, msg)
+		body, err := message.ReadUpsertProjection(ctx, msg)
 		if err != nil {
 			return primarykey.Keys{}, casInsertScope{}, "", err
 		}
@@ -348,7 +348,7 @@ func extractPKsFromUpsert(ctx context.Context, msg message.BasicMessage, getter 
 	} else {
 		header = message.MustAsMutableUpsertMessageV2(msg.(message.MutableMessage)).Header()
 	}
-	body, err := message.ReadUpsertMetadata(ctx, msg)
+	body, err := message.ReadUpsertProjection(ctx, msg)
 	if err != nil {
 		return primarykey.Keys{}, err
 	}

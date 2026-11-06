@@ -268,7 +268,7 @@ func (r *oracleRuntime) collectGrowingInsertStats(ctx context.Context, stats bm2
 	if len(stats) == 0 {
 		return nil
 	}
-	request, err := insert.Message.ReadRows(ctx, r.schema, insert.Rows)
+	request, err := insert.RowsReader.ReadRows(ctx, r.schema, insert.Rows)
 	if err != nil {
 		return err
 	}
