@@ -1140,14 +1140,15 @@ func (s *importTestBase) runElementNullImportNumpyAndBinlog() {
 		"binlog import (backup restore) into a collection with element-nullable or nested Array field "+enStruct+".label is not supported")
 
 	// A file named after the struct, a sub-field's stored name or its own name
-	// is rejected before the job is created.
+	// is rejected by the importer before it reads any file, so the job fails
+	// with the same message.
 	for _, fileName := range []string{enStruct, typeutil.ConcatStructFieldName(enStruct, "label"), "tags"} {
 		resp, err := s.Cluster.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
 			CollectionName: name,
 			Files:          []*internalpb.ImportFile{{Paths: s.enWriteNumpy(ctx, enBatch(1, 2, false), fileName)}},
 		})
-		s.Require().NoError(err)
-		err = merr.Error(resp.GetStatus())
+		s.Require().NoError(merr.CheckRPCCall(resp.GetStatus(), err), fileName)
+		err = WaitForImportDone(ctx, s.Cluster, resp.GetJobID())
 		s.Require().ErrorIs(err, merr.ErrImportFailed, fileName)
 		s.Require().ErrorContains(err, "numpy import does not support struct data: file", fileName)
 		s.Require().ErrorContains(err, "names struct field '"+enStruct+"'", fileName)
@@ -1183,8 +1184,8 @@ func (s *importTestBase) runElementNullImportNumpyAndBinlog() {
 		CollectionName: required,
 		Files:          []*internalpb.ImportFile{{Paths: s.enWriteNumpy(ctx, enBatch(1, 2, false))}},
 	})
-	s.Require().NoError(err)
-	err = merr.Error(resp.GetStatus())
+	s.Require().NoError(merr.CheckRPCCall(resp.GetStatus(), err))
+	err = WaitForImportDone(ctx, s.Cluster, resp.GetJobID())
 	s.Require().ErrorIs(err, merr.ErrImportFailed)
 	s.Require().ErrorContains(err, "numpy import cannot fill struct field '"+enStruct+"', which is not nullable")
 }

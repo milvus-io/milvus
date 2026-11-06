@@ -724,7 +724,6 @@ func TestImportTask_PreExecuteRejectsNativeListArraySchema(t *testing.T) {
 	paramtable.Init()
 	backup := []*commonpb.KeyValuePair{{Key: "backup", Value: "true"}}
 	snapshot := []*commonpb.KeyValuePair{{Key: "backup", Value: "true"}, {Key: "source_type", Value: "snapshot"}}
-	const numpyMsg = "numpy import cannot fill struct field 's', which is not nullable"
 	for _, tc := range []struct {
 		name    string
 		paths   []string
@@ -733,14 +732,13 @@ func TestImportTask_PreExecuteRejectsNativeListArraySchema(t *testing.T) {
 		// native-list target; empty means file imports read native-list
 		// sub-fields.
 		nativeListKind string
-		// rejectsStruct is set for NumPy, which cannot fill the non-nullable
-		// struct of this schema.
-		rejectsStruct bool
 	}{
 		{name: "parquet", paths: []string{"staging/file.parquet"}},
 		{name: "json", paths: []string{"staging/file.json"}},
 		{name: "csv", paths: []string{"staging/file.csv"}},
-		{name: "numpy", paths: []string{"staging/file.npy"}, rejectsStruct: true},
+		// NumPy schema rules run in the datanode, so the proxy accepts the
+		// request and the job reports the rejection.
+		{name: "numpy", paths: []string{"staging/file.npy"}},
 		{name: "binlog", paths: []string{"insert", "delta"}, options: backup, nativeListKind: "binlog import (backup restore)"},
 		{name: "snapshot", paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}, options: snapshot, nativeListKind: "snapshot-source import"},
 	} {
@@ -760,17 +758,13 @@ func TestImportTask_PreExecuteRejectsNativeListArraySchema(t *testing.T) {
 					it.req.PartitionName = "_default"
 				}
 				err := it.PreExecute(context.Background())
-				switch {
-				case tc.rejectsStruct:
-					require.ErrorIs(t, err, merr.ErrImportFailed)
-					require.Contains(t, err.Error(), numpyMsg)
-				case elementNullable && tc.nativeListKind != "":
+				if elementNullable && tc.nativeListKind != "" {
 					require.ErrorIs(t, err, merr.ErrParameterInvalid)
 					require.Contains(t, err.Error(),
 						tc.nativeListKind+" into a collection with element-nullable or nested Array field s.arr is not supported")
-				default:
-					require.NoError(t, err)
+					return
 				}
+				require.NoError(t, err)
 			})
 		}
 	}
@@ -782,11 +776,11 @@ func TestImportTask_PreExecuteRejectsNativeListArraySchema(t *testing.T) {
 	})
 }
 
-// TestImportTask_PreExecuteNumpyNullableStruct pins the NumPy rule in the
-// proxy: a nullable struct is accepted (its rows are imported as null), and a
-// file named after the struct or one of its sub-fields is rejected before the
-// job is created.
-func TestImportTask_PreExecuteNumpyNullableStruct(t *testing.T) {
+// TestImportTask_PreExecuteSkipsNumpySchemaCheck pins that the NumPy schema
+// rules run in the datanode: a nullable struct is accepted, and a file named
+// after the struct or one of its sub-fields reaches the import job, which
+// reports the rejection.
+func TestImportTask_PreExecuteSkipsNumpySchemaCheck(t *testing.T) {
 	paramtable.Init()
 	schema := &schemapb.CollectionSchema{
 		Name:   "test_collection",
@@ -804,10 +798,6 @@ func TestImportTask_PreExecuteNumpyNullableStruct(t *testing.T) {
 
 	require.NoError(t, run("staging/pk.npy"))
 	for _, name := range []string{"s", "s[arr]", "arr"} {
-		path := "staging/" + name + ".npy"
-		err := run("staging/pk.npy", path)
-		require.ErrorIs(t, err, merr.ErrImportFailed, name)
-		require.Equal(t, merr.InputError, merr.GetErrorType(err), name)
-		require.Contains(t, err.Error(), "numpy import does not support struct data: file '"+path+"' names struct field 's'", name)
+		require.NoError(t, run("staging/pk.npy", "staging/"+name+".npy"), name)
 	}
 }

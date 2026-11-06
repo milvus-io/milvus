@@ -325,8 +325,8 @@ func (s *ElementNullableSuite) TestInsertValidationAndImport() {
 	}
 
 	// Binlog (backup) imports cannot fill element-nullable or nested Array
-	// sub-fields, and NumPy files cannot carry struct data: a file named after
-	// the struct is rejected before the job is created.
+	// sub-fields. A NumPy file named after the struct is rejected by the
+	// importer before it reads the file, so the job fails with that message.
 	resp, err := s.Cluster.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
 		CollectionName: name, PartitionName: "_default",
 		Files:   []*internalpb.ImportFile{{Paths: []string{"backup/insert_log/", "backup/delta_log/"}}},
@@ -341,10 +341,9 @@ func (s *ElementNullableSuite) TestInsertValidationAndImport() {
 		CollectionName: name,
 		Files:          []*internalpb.ImportFile{{Paths: []string{"numpy/pk.npy", "numpy/embedding.npy", "numpy/" + structName + ".npy"}}},
 	})
-	s.Require().NoError(err)
-	err = merr.Error(resp.GetStatus())
-	s.Require().ErrorIs(err, merr.ErrImportFailed)
-	s.Contains(err.Error(), "numpy import does not support struct data: file 'numpy/"+structName+".npy' names struct field '"+structName+"'")
+	s.Require().NoError(merr.CheckRPCCall(resp.GetStatus(), err))
+	s.Contains(s.waitImportFailed(ctx, resp.GetJobID()),
+		"numpy import does not support struct data: file 'numpy/"+structName+".npy' names struct field '"+structName+"'")
 
 	// A JSON import of the rows of insertFields reads back like the insert.
 	s.importJSON(ctx, name, importRows())
@@ -366,6 +365,25 @@ func importRows() []map[string]any {
 		},
 		{"pk": 2, "score": 20, "legacy": []int64{}, "embedding": vector(2), structName: []map[string]any{}},
 		{"pk": 3, "score": 30, "legacy": []int64{3}, "embedding": vector(3), structName: nil},
+	}
+}
+
+// waitImportFailed returns the reason of a job that must end in Failed.
+func (s *ElementNullableSuite) waitImportFailed(ctx context.Context, jobID string) string {
+	for {
+		progress, err := s.Cluster.ProxyClient.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{JobID: jobID})
+		s.Require().NoError(merr.CheckRPCCall(progress.GetStatus(), err))
+		switch progress.GetState() {
+		case internalpb.ImportJobState_Failed:
+			return progress.GetReason()
+		case internalpb.ImportJobState_Completed:
+			s.FailNow("import completed, want a failure", progress.GetReason())
+		}
+		select {
+		case <-ctx.Done():
+			s.FailNow("import did not fail before the deadline")
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
 }
 
