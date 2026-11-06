@@ -71,6 +71,65 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
 
         raise AssertionError(f"{label} search was not ready within {timeout}s, attempts={attempts}: {last_error}")
 
+    def wait_for_search_ids(
+        self,
+        client,
+        collection_name,
+        data,
+        anns_field,
+        expected_ids,
+        label,
+        search_params=None,
+        output_fields=None,
+        limit=3,
+        timeout=30,
+        interval=1,
+    ):
+        """Poll a search until its topK ids equal expected_ids, in order.
+
+        Same contract as wait_for_search_hit, for the cases that compare a whole
+        result list rather than membership. Search errors are retried like a
+        result mismatch: a bound index reported ready by describe_index is not
+        yet guaranteed to be loaded on the query node, so the first search after
+        add_function_field can legitimately raise "field index of the field: ...
+        is not loaded" for a moment. Letting that exception escape spends none of
+        the retry budget the caller asked for.
+        """
+        poll_start = time.time()
+        deadline = poll_start + timeout
+        last_error = None
+        attempts = 0
+        search_res = None
+
+        while time.time() < deadline:
+            attempts += 1
+            try:
+                search_kwargs = {
+                    "collection_name": collection_name,
+                    "data": data,
+                    "anns_field": anns_field,
+                    "limit": limit,
+                    "output_fields": output_fields or ["id"],
+                }
+                if search_params is not None:
+                    search_kwargs["search_params"] = search_params
+
+                search_res = client.search(**search_kwargs)
+                hit_ids = [hit["id"] for hit in search_res[0]]
+                if hit_ids == expected_ids:
+                    log.info(
+                        f"{label} search converged after {time.time() - poll_start:.2f}s, "
+                        f"attempts={attempts}, ids={hit_ids}"
+                    )
+                    return search_res[0]
+                last_error = f"{label} search returned ids={hit_ids}, expected {expected_ids}"
+            except Exception as exc:
+                last_error = str(exc)
+
+            time.sleep(interval)
+
+        raise AssertionError(f"{label} search did not converge within {timeout}s, attempts={attempts}: {last_error}")
+
     @pytest.mark.tags(CaseLabel.L0)
     def test_add_bm25_function_field_main_path(self):
         """
@@ -1957,27 +2016,16 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         for query_text in bm25_queries:
             base_res = bm25_base_results[query_text]
             base_ids = [hit["id"] for hit in base_res]
-            added_res = []
-            added_ids = []
-            poll_start = time.time()
-            while time.time() - poll_start < 30:
-                added_res = client.search(
-                    bm25_collection_name,
-                    data=[query_text],
-                    anns_field="sparse_added",
-                    limit=3,
-                    output_fields=["id", "text"],
-                    search_params={"metric_type": "BM25"},
-                )[0]
-                added_ids = [hit["id"] for hit in added_res]
-                if added_ids == base_ids:
-                    break
-                time.sleep(1)
-            else:
-                raise AssertionError(
-                    f"BM25 added output did not match base output for {query_text}: "
-                    f"base_ids={base_ids}, added_ids={added_ids}"
-                )
+            added_res = self.wait_for_search_ids(
+                client,
+                bm25_collection_name,
+                data=[query_text],
+                anns_field="sparse_added",
+                expected_ids=base_ids,
+                label=f"BM25 added output for {query_text}",
+                output_fields=["id", "text"],
+                search_params={"metric_type": "BM25"},
+            )
 
             for base_hit, added_hit in zip(base_res, added_res):
                 if "distance" in base_hit and "distance" in added_hit:
@@ -1987,24 +2035,29 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         self.release_collection(client, bm25_collection_name)
         client.load_collection(bm25_collection_name)
 
+        # A reload puts the added field's index back through the same load path,
+        # so poll here for the same reason Step 8 does.
         for query_text in bm25_queries:
-            base_res = client.search(
+            base_res = self.wait_for_search_ids(
+                client,
                 bm25_collection_name,
                 data=[query_text],
                 anns_field="sparse_base",
-                limit=3,
+                expected_ids=[hit["id"] for hit in bm25_base_results[query_text]],
+                label=f"BM25 base output after reload for {query_text}",
                 output_fields=["id", "text"],
                 search_params={"metric_type": "BM25"},
-            )[0]
-            added_res = client.search(
+            )
+            self.wait_for_search_ids(
+                client,
                 bm25_collection_name,
                 data=[query_text],
                 anns_field="sparse_added",
-                limit=3,
+                expected_ids=[hit["id"] for hit in base_res],
+                label=f"BM25 added output after reload for {query_text}",
                 output_fields=["id", "text"],
                 search_params={"metric_type": "BM25"},
-            )[0]
-            assert [hit["id"] for hit in added_res] == [hit["id"] for hit in base_res]
+            )
 
         self.drop_collection(client, bm25_collection_name)
 
@@ -2104,27 +2157,16 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         for query_text in minhash_queries:
             base_res = minhash_base_results[query_text]
             base_ids = [hit["id"] for hit in base_res]
-            added_res = []
-            added_ids = []
-            poll_start = time.time()
-            while time.time() - poll_start < 30:
-                added_res = client.search(
-                    minhash_collection_name,
-                    data=[query_text],
-                    anns_field="mh_added",
-                    limit=3,
-                    output_fields=["id", "doc"],
-                    search_params={"metric_type": "MHJACCARD", "params": {}},
-                )[0]
-                added_ids = [hit["id"] for hit in added_res]
-                if added_ids == base_ids:
-                    break
-                time.sleep(1)
-            else:
-                raise AssertionError(
-                    f"MinHash added output did not match base output for {query_text}: "
-                    f"base_ids={base_ids}, added_ids={added_ids}"
-                )
+            added_res = self.wait_for_search_ids(
+                client,
+                minhash_collection_name,
+                data=[query_text],
+                anns_field="mh_added",
+                expected_ids=base_ids,
+                label=f"MinHash added output for {query_text}",
+                output_fields=["id", "doc"],
+                search_params={"metric_type": "MHJACCARD", "params": {}},
+            )
 
             for base_hit, added_hit in zip(base_res, added_res):
                 if "distance" in base_hit and "distance" in added_hit:
@@ -2134,24 +2176,28 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         self.release_collection(client, minhash_collection_name)
         client.load_collection(minhash_collection_name)
 
+        # Same reasoning as the BM25 reload above.
         for query_text in minhash_queries:
-            base_res = client.search(
+            base_res = self.wait_for_search_ids(
+                client,
                 minhash_collection_name,
                 data=[query_text],
                 anns_field="mh_base",
-                limit=3,
+                expected_ids=[hit["id"] for hit in minhash_base_results[query_text]],
+                label=f"MinHash base output after reload for {query_text}",
                 output_fields=["id", "doc"],
                 search_params={"metric_type": "MHJACCARD", "params": {}},
-            )[0]
-            added_res = client.search(
+            )
+            self.wait_for_search_ids(
+                client,
                 minhash_collection_name,
                 data=[query_text],
                 anns_field="mh_added",
-                limit=3,
+                expected_ids=[hit["id"] for hit in base_res],
+                label=f"MinHash added output after reload for {query_text}",
                 output_fields=["id", "doc"],
                 search_params={"metric_type": "MHJACCARD", "params": {}},
-            )[0]
-            assert [hit["id"] for hit in added_res] == [hit["id"] for hit in base_res]
+            )
 
         self.drop_collection(client, minhash_collection_name)
 
@@ -3068,23 +3114,22 @@ class TestMilvusClientAddFunctionFieldFeature(TestMilvusClientV2Base):
         """
         client = self._client()
 
+        # wait_for_search_hit retries search errors as well as misses, which this
+        # local loop did not: a bound index can report ready before the query
+        # node has loaded it.
         def assert_minhash_hit(collection_name, query_text, expected_id, label, timeout=60):
-            poll_start = time.time()
-            last_hit_ids = []
-            while time.time() - poll_start < timeout:
-                search_res = client.search(
-                    collection_name,
-                    data=[query_text],
-                    anns_field="mh",
-                    limit=5,
-                    output_fields=["id", "doc"],
-                    search_params={"metric_type": "MHJACCARD", "params": {}},
-                )
-                last_hit_ids = [hit["id"] for hit in search_res[0]]
-                if expected_id in last_hit_ids:
-                    return search_res
-                time.sleep(1)
-            raise AssertionError(f"{label} expected id {expected_id}, got {last_hit_ids}")
+            return self.wait_for_search_hit(
+                client,
+                collection_name,
+                data=[query_text],
+                anns_field="mh",
+                expected_id=expected_id,
+                label=label,
+                limit=5,
+                output_fields=["id", "doc"],
+                search_params={"metric_type": "MHJACCARD", "params": {}},
+                timeout=timeout,
+            )
 
         # Positive path: num_hashes=32, shingle_size=5, mh_lsh_band=8.
         collection_name = cf.gen_collection_name_by_testcase_name()
