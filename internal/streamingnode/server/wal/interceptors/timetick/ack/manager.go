@@ -116,7 +116,14 @@ func (ta *AckManager) AllocateForAppend(ctx context.Context, barrierTimeTick uin
 // Concurrent safe to call with Allocate.
 func (ta *AckManager) SyncAndGetAcknowledged(ctx context.Context) ([]*AckDetail, error) {
 	// local timestamp may out of date, sync the underlying allocator before get last all acknowledged.
-	resource.Resource().TSOAllocator().SyncIfExpired(50 * time.Millisecond)
+	// Only this sync waits for the remote allocator, and it doesn't hold ta.mu,
+	// so the appends keep allocating from the cached range while the time tick stays fresh.
+	allocator := resource.Resource().TSOAllocator()
+	allocator.SyncIfExpired(50 * time.Millisecond)
+	if err := allocator.WaitRefresh(ctx); err != nil {
+		// A failed refresh is retried by next sync, the cached range is still valid to push time tick forward.
+		mlog.Warn(ctx, "refresh timestamp allocator failed", mlog.Err(err))
+	}
 
 	// Allocate may be uncalled in long term, and the recorder may be out of date.
 	// Do a Allocate and Ack, can sync up the recorder with internal timetick.TimestampAllocator latest time.
