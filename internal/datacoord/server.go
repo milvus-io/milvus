@@ -191,6 +191,8 @@ type Server struct {
 
 	statsInspector                   *stats.Inspector
 	indexInspector                   *index.IndexInspector
+	manifestIndexBackfillInspector   *index.ManifestIndexBackfillInspector
+	manifestIndexRollbackInspector   *index.ManifestIndexRollbackInspector
 	analyzeInspector                 *analyze.AnalyzeInspector
 	talonPrewarmInspector            *TalonPrewarmInspector
 	segmentChangeInspector           *segmentChangeInspector
@@ -408,6 +410,10 @@ func (s *Server) initDataCoord() (initErr error) {
 
 	s.initIndexInspector(storageCli)
 	mlog.Info(s.ctx, "init task scheduler done")
+
+	s.manifestIndexRollbackInspector = index.NewManifestIndexRollbackInspector(s.ctx, s.meta, s.indexMeta)
+	s.initManifestIndexBackfillInspector()
+	mlog.Info(s.ctx, "init manifest index backfill inspector done")
 
 	s.initStatsInspector()
 	mlog.Info(s.ctx, "init statsJobManager done")
@@ -1001,6 +1007,12 @@ func (s *Server) initIndexInspector(storageCli storage.ChunkManager) {
 	}
 }
 
+func (s *Server) initManifestIndexBackfillInspector() {
+	if s.manifestIndexBackfillInspector == nil {
+		s.manifestIndexBackfillInspector = index.NewManifestIndexBackfillInspector(s.ctx, s.meta, s.indexMeta)
+	}
+}
+
 func (s *Server) initStatsInspector() {
 	if s.statsInspector == nil {
 		s.statsInspector = stats.NewStatsInspector(s.ctx, s.notifyStatsChan, s.meta, s.statsTaskMeta, s.globalScheduler, s.allocator, s.handler, s.compactionInspector, s.indexEngineVersionManager)
@@ -1124,6 +1136,12 @@ func (s *Server) collectMetaMetrics(ctx context.Context) {
 func (s *Server) startTaskScheduler() {
 	s.statsInspector.Start()
 	s.indexInspector.Start()
+	if s.manifestIndexBackfillInspector != nil {
+		s.manifestIndexBackfillInspector.Start()
+	}
+	if s.manifestIndexRollbackInspector != nil {
+		s.manifestIndexRollbackInspector.Start()
+	}
 	s.analyzeInspector.Start()
 	s.segmentChangeInspector.Start()
 	// Note: externalCollectionInspector.Start() is called in startServerLoop as a goroutine
@@ -1461,6 +1479,15 @@ func (s *Server) Stop() error {
 
 	s.indexInspector.Stop()
 	mlog.Info(s.ctx, "datacoord index inspector stopped")
+
+	if s.manifestIndexBackfillInspector != nil {
+		s.manifestIndexBackfillInspector.Stop()
+	}
+	mlog.Info(s.ctx, "datacoord manifest index backfill inspector stopped")
+	if s.manifestIndexRollbackInspector != nil {
+		s.manifestIndexRollbackInspector.Stop()
+	}
+	mlog.Info(s.ctx, "datacoord manifest index rollback inspector stopped")
 
 	s.analyzeInspector.Stop()
 	mlog.Info(s.ctx, "datacoord analyze inspector stopped")
