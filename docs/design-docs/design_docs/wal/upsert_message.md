@@ -65,7 +65,7 @@ Proxy routes by the final PK to business VChannels. A specified partition suppli
 
 Producers construct ordinary, persisted, replicable messages on the collection business VChannel. This is an internal producer contract, not an Upsert-specific flags validation requirement at each interceptor. Generic builder and replication property handling remains unchanged. The shard dispatcher keeps the existing CChannel skip rule and PChannel-level exception.
 
-The common WAL Append entry checks activation. TimeTick and transaction handling retain their existing position in the interceptor chain. Partial-update locking covers the union of inserted keys and explicit delete keys. CAS uses the existing proof, conflict, retry, and version-tracking paths.
+The activation setting controls producer format selection only. StreamingNode accepts supported Upsert records regardless of its local setting. TimeTick and transaction handling retain their existing position in the interceptor chain. Partial-update locking covers the union of inserted keys and explicit delete keys. CAS uses the existing proof, conflict, retry, and version-tracking paths.
 
 The shard handler checks schema compatibility and ownership, prepares function materialization when enabled, and assigns all insert targets as a batch. Every partition must be ready. Per-partition selection checks fencing, TimeTick, Growing state, and capacity. No rows or bytes are charged until all candidates are available. Ack references precede batch accounting, including capacity-triggered sealing. Failed accounting releases those references. Transaction cleanup retains its existing segment-reference lifecycle.
 
@@ -128,7 +128,7 @@ The native QueryView path from #52977 is a reader dependency and is included in 
 
 The gate checks local cluster versions only. It does not verify CDC target compatibility or guarantee downgrade safety for retained WAL history. Deployment management must ensure compatible CDC targets before activation.
 
-Format selection occurs before packing. Append failure does not trigger a second append in another format. Already packed requests retain their format during producer retries. StreamingNode rejects new Upsert appends while disabled. Disabling during an in-flight request can therefore fail that append. Retained Upsert decoding and Commit/Rollback for durable bodies remain available. Disabling generation does not make old readers safe to read retained new-format records.
+Format selection occurs before packing. Append failure does not trigger a second append in another format. Already packed requests retain their format during producer retries. Disabling the setting stops producers from generating new Upsert records. Already generated records and in-flight requests can still append. Retained Upsert decoding and Commit/Rollback for durable bodies remain available. Disabling generation does not make old readers safe to read retained new-format records.
 
 ## Validation requirements
 

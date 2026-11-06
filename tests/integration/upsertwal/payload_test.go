@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	upsertfixture "github.com/milvus-io/milvus/pkg/v3/streaming/util/message/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -240,6 +241,9 @@ func (s *UpsertWALSuite) TestDuplicatedPrimaryColumnIsRejectedBeforeWAL() {
 	producer := rawProducer(s.T(), ctx, s.Cluster, c.vchannel)
 	_, err := producer.Append(ctx, c.upsert(11, 1))
 	s.Require().NoError(err)
+	restore := s.Cluster.MustModifyMilvusConfig(map[string]string{"streaming.wal.enableUpsertMessage": "false"})
+	defer restore()
+	s.waitForProxyUpsertFormat(ctx, "false")
 	msg := c.upsert(11, 2)
 	typed := message.MustAsMutableUpsertMessageV2(msg)
 	body := typed.MustBody()
@@ -394,7 +398,6 @@ func (s *UpsertWALSuite) TestProducerValidSparseRows() {
 	s.Require().NoError(merr.CheckRPCCall(result, err))
 	s.WaitForLoad(ctx, name)
 	c := collection{name: name, id: desc.GetCollectionID(), vchannel: desc.GetVirtualChannelNames()[0], partition: partitions.GetPartitionIDs()[0], schema: desc.GetSchema()}
-	producer := rawProducer(s.T(), ctx, s.Cluster, c.vchannel)
 	encode := func(indices []uint32, values []float32) []byte {
 		row := make([]byte, len(indices)*8)
 		for i, index := range indices {
@@ -414,12 +417,33 @@ func (s *UpsertWALSuite) TestProducerValidSparseRows() {
 		typed.OverwriteBody(body)
 		return raw
 	}
-	good := encode([]uint32{1, 3}, []float32{1, 2})
-	_, err = producer.Append(ctx, build(1, good))
-	s.Require().NoError(err)
+	good := encode([]uint32{7}, []float32{1})
+	insertFields := upsertfixture.Insert(message.MustAsMutableUpsertMessageV2(build(1, good)).MustBody()).GetFieldsData()
+	for _, field := range insertFields {
+		for _, schemaField := range c.schema.GetFields() {
+			if field.GetFieldId() == schemaField.GetFieldID() {
+				field.FieldName = schemaField.GetName()
+			}
+		}
+	}
+	inserted, err := s.Cluster.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{CollectionName: c.name, NumRows: 1, FieldsData: insertFields})
+	s.Require().NoError(merr.CheckRPCCall(inserted, err))
 	s.assertRows(ctx, c, 11, 1, 1)
-	_, err = producer.Append(ctx, build(2, good))
-	s.Require().NoError(err)
+	upsertFields := upsertfixture.Insert(message.MustAsMutableUpsertMessageV2(build(2, good)).MustBody()).GetFieldsData()
+	for _, field := range upsertFields {
+		for _, schemaField := range c.schema.GetFields() {
+			if field.GetFieldId() == schemaField.GetFieldID() {
+				field.FieldName = schemaField.GetName()
+			}
+		}
+	}
+	upserted, err := s.Cluster.MilvusClient.Upsert(ctx, &milvuspb.UpsertRequest{CollectionName: c.name, NumRows: 1, FieldsData: upsertFields})
+	s.Require().NoError(merr.CheckRPCCall(upserted, err))
+	s.assertRows(ctx, c, 11, 1, 0)
+	s.assertRows(ctx, c, 11, 2, 1)
+	s.assertPhysicalRows(ctx, c, 2)
+	// Restart before flush so native growing execution must rebuild sparse rows from WAL.
+	s.restartStreamingNode(c)
 	s.assertRows(ctx, c, 11, 1, 0)
 	s.assertRows(ctx, c, 11, 2, 1)
 	s.assertPhysicalRows(ctx, c, 2)

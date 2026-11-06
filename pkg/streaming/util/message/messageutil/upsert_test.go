@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func testUpsertRows(t *testing.T, nullable bool) (message.ImmutableMessage, *schemapb.CollectionSchema) {
@@ -198,4 +199,77 @@ func TestUpsertAndMixedTransactionTransformBlocks(t *testing.T) {
 	require.Len(t, txnEntry.GetDelete().GetBlocks(), 2)
 	require.Equal(t, int64(4), txnEntry.GetDelete().GetBlocks()[1].GetPartitionId())
 	require.Equal(t, []string{"txn-delete"}, txnEntry.GetDelete().GetBlocks()[1].GetPrimaryKeys().GetStrId().GetData())
+}
+
+func TestInsertRowsReaderPreservesSparseDimensions(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		for _, nullable := range []bool{false, true} {
+			t.Run(fmt.Sprintf("legacy=%t/nullable=%t", legacy, nullable), func(t *testing.T) {
+				contents := [][]byte{
+					typeutil.CreateSparseFloatRow([]uint32{7}, []float32{1}),
+					typeutil.CreateSparseFloatRow([]uint32{3}, []float32{2}),
+					typeutil.CreateSparseFloatRow([]uint32{15}, []float32{3}),
+				}
+				vector := &schemapb.VectorField{Dim: 32, Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{Dim: 16, Contents: contents}}}
+				if nullable {
+					vector.ValidData = []bool{true, false, true}
+					vector.GetSparseFloatVector().Contents = [][]byte{contents[0], contents[2]}
+				}
+				column := &schemapb.FieldData{FieldId: 101, Type: schemapb.DataType_SparseFloatVector, Field: &schemapb.FieldData_Vectors{Vectors: vector}}
+				schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+					{FieldID: 101, Name: "vector", DataType: schemapb.DataType_SparseFloatVector, Nullable: nullable},
+				}}
+				var raw message.ImmutableMessage
+				if legacy {
+					body := &msgpb.InsertRequest{CollectionID: 1, NumRows: 3, RowIDs: []int64{10, 20, 30}, FieldsData: []*schemapb.FieldData{column}, Version: msgpb.InsertDataVersion_ColumnBased}
+					raw = message.NewInsertMessageBuilderV1().WithVChannel("p_1v0").WithHeader(&message.InsertMessageHeader{}).WithBody(body).MustBuildMutable().WithTimeTick(42).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(42))
+				} else {
+					body := &message.UpsertMessageBody{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3}}}}, RowIds: []int64{10, 20, 30}, Columns: []*schemapb.FieldData{column}}
+					raw = message.NewUpsertMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&message.UpsertMessageHeader{CollectionId: 1, Partitions: []*message.PartitionSegmentAssignment{{PartitionId: 10, Rows: 3}}}).WithBody(body).MustBuildMutable().WithTimeTick(42).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(42))
+				}
+				sourcePayload := append([]byte(nil), raw.Payload()...)
+				sourceColumn := proto.Clone(column)
+				var decodedSource proto.Message
+				if legacy {
+					decodedSource = message.MustAsImmutableInsertMessageV1(raw).MustBody()
+				} else {
+					decodedSource = message.MustAsImmutableUpsertMessageV2(raw).MustBody()
+				}
+				decodedBefore := proto.Clone(decodedSource)
+				reader, _, ok := AsInsertRowsReader(raw)
+				require.True(t, ok)
+				for _, selection := range [][]int64{nil, {2, 0}, {1}} {
+					result, err := reader.ReadRows(t.Context(), schema, selection)
+					require.NoError(t, err)
+					got := result.GetFieldsData()[0].GetVectors()
+					require.Equal(t, int64(32), got.GetDim())
+					require.Equal(t, int64(16), got.GetSparseFloatVector().GetDim())
+					logical := selection
+					if logical == nil {
+						logical = []int64{0, 1, 2}
+					}
+					var wantContents [][]byte
+					var wantValidity []bool
+					for _, row := range logical {
+						valid := !nullable || row != 1
+						if nullable {
+							wantValidity = append(wantValidity, valid)
+						}
+						if valid {
+							wantContents = append(wantContents, contents[row])
+						}
+					}
+					require.Equal(t, wantValidity, got.GetValidData())
+					require.Equal(t, len(wantContents), len(got.GetSparseFloatVector().GetContents()))
+					for i := range wantContents {
+						require.Equal(t, wantContents[i], got.GetSparseFloatVector().GetContents()[i])
+					}
+					require.Equal(t, sourcePayload, raw.Payload())
+					require.True(t, proto.Equal(decodedBefore, decodedSource))
+				}
+				require.True(t, proto.Equal(sourceColumn, column))
+			})
+		}
+	}
 }

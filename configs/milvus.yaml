@@ -1744,7 +1744,7 @@ queryView:
 # Any configuration related to the streaming service.
 streaming:
   wal:
-    enableUpsertMessage: auto # Select the Upsert WAL format. auto: enable after all registered online components in this cluster reach 3.1.0 and the one-minute stability window elapses; false: use legacy Insert/Delete messages; true: force enable and bypass the version gate. This gate does not check CDC target versions or provide a downgrade guarantee. Retained decoding and durable transaction resolution remain available.
+    enableUpsertMessage: auto # Select the producer WAL format. StreamingNode accepts supported Upsert messages regardless of this setting. auto: enable after all registered online components in this cluster reach 3.1.0 and the one-minute stability window elapses; false: use legacy Insert/Delete messages; true: force enable and bypass the version gate. This gate does not check CDC target versions or provide a downgrade guarantee. Retained decoding and durable transaction resolution remain available.
   schemaCacheTTL: 900 # Idle lifetime in seconds of cached schema bodies. Non-positive values disable schema body retention.
   queryView:
     liveEventDispatchConcurrencyRatioPerPChannel: 0.25 # QueryRuntime live-event worker count per PChannel is max(1, floor(CPU count * ratio)). Updates existing worker pools dynamically.

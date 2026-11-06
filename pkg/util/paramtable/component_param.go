@@ -9842,7 +9842,7 @@ limits; requests that carry no key are accepted at any value.`,
 		Version:      "3.1.0",
 		DefaultValue: "auto",
 		Export:       true,
-		Doc:          "Select the Upsert WAL format. auto: enable after all registered online components in this cluster reach 3.1.0 and the one-minute stability window elapses; false: use legacy Insert/Delete messages; true: force enable and bypass the version gate. This gate does not check CDC target versions or provide a downgrade guarantee. Retained decoding and durable transaction resolution remain available.",
+		Doc:          "Select the producer WAL format. StreamingNode accepts supported Upsert messages regardless of this setting. auto: enable after all registered online components in this cluster reach 3.1.0 and the one-minute stability window elapses; false: use legacy Insert/Delete messages; true: force enable and bypass the version gate. This gate does not check CDC target versions or provide a downgrade guarantee. Retained decoding and durable transaction resolution remain available.",
 		VersionGateSwitcher: &VersionGateSwitcher{
 			EnableAutoSwitchValue: "auto",
 			PreSwitchValue:        "false",

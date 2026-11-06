@@ -24,17 +24,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/registry"
-	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-func TestUpsertGenerationGate(t *testing.T) {
+func TestUpsertAppendIgnoresProducerGate(t *testing.T) {
 	paramtable.Init()
 	initIdempotencyResourceForTest(t)
 	previousWAL := message.GetDefaultWALName()
@@ -56,25 +56,26 @@ func TestUpsertGenerationGate(t *testing.T) {
 	defer w.Close()
 	build := func() message.MutableMessage {
 		return message.NewUpsertMessageBuilderV2().WithVChannel("upsert-gate-channel_1v0").
-			WithHeader(&message.UpsertMessageHeader{}).WithBody(&message.UpsertMessageBody{}).MustBuildMutable()
+			WithHeader(&message.UpsertMessageHeader{CollectionId: 1, Partitions: []*message.PartitionSegmentAssignment{{PartitionId: 10, Rows: 1}}}).WithBody(&message.UpsertMessageBody{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7}}}}, RowIds: []int64{1}}).MustBuildMutable()
 	}
-	for _, configured := range []string{"false", "auto"} {
+	for _, configured := range []string{"true", "false"} {
 		require.NoError(t, params.Save(key, configured))
 		for _, replicated := range []bool{false, true} {
 			msg := build()
 			if replicated {
 				msg.WithReplicateHeader(&message.ReplicateHeader{ClusterID: "source", MessageID: walimplstest.NewTestMessageID(1), LastConfirmedMessageID: walimplstest.NewTestMessageID(0), TimeTick: 10})
 			}
+			// The producer can build a message before its config update reaches StreamingNode.
+			require.NoError(t, params.Save(key, "false"))
 			result, err := w.Append(ctx, msg)
-			require.Nil(t, result)
-			require.Error(t, err)
-			require.True(t, status.AsStreamingError(err).IsUnrecoverable())
-			require.False(t, msg.Properties().Exist("_tt"), "the disabled message must not reach TimeTick allocation")
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.True(t, msg.Properties().Exist("_tt"))
 		}
 	}
 }
 
-func TestUpsertActivationErrorReachesAsyncCallback(t *testing.T) {
+func TestUpsertAppendAsyncIgnoresProducerGate(t *testing.T) {
 	paramtable.Init()
 	initIdempotencyResourceForTest(t)
 	previousWAL := message.GetDefaultWALName()
@@ -91,18 +92,17 @@ func TestUpsertActivationErrorReachesAsyncCallback(t *testing.T) {
 	w, err := opener.Open(ctx, &wal.OpenOption{Channel: types.PChannelInfo{Name: "upsert-activation-async", Term: 1}, DisableFlusher: true})
 	require.NoError(t, err)
 	defer w.Close()
-	msg := message.NewUpsertMessageBuilderV2().WithVChannel("upsert-activation-async_1v0").WithHeader(&message.UpsertMessageHeader{}).WithBody(&message.UpsertMessageBody{}).MustBuildMutable()
+	msg := message.NewUpsertMessageBuilderV2().WithVChannel("upsert-activation-async_1v0").WithHeader(&message.UpsertMessageHeader{CollectionId: 1, Partitions: []*message.PartitionSegmentAssignment{{PartitionId: 10, Rows: 1}}}).WithBody(&message.UpsertMessageBody{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7}}}}, RowIds: []int64{1}}).MustBuildMutable()
 	done := make(chan struct{})
 	w.AppendAsync(ctx, msg, func(result *wal.AppendResult, err error) {
 		defer close(done)
-		assert.Nil(t, result)
-		assert.Error(t, err)
-		assert.True(t, status.AsStreamingError(err).IsUnrecoverable())
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
 	})
 	select {
 	case <-done:
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	require.False(t, msg.Properties().Exist("_tt"), "disabled Upsert must not reach TimeTick")
+	require.True(t, msg.Properties().Exist("_tt"))
 }

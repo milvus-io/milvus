@@ -125,6 +125,12 @@ func (r *insertRowsReader) ReadRows(ctx context.Context, schema *schemapb.Collec
 			}
 		}
 		typeutil.AppendFieldDataByColumn(result.FieldsData[index], field, physical, rows)
+		if field.GetType() == schemapb.DataType_SparseFloatVector {
+			// Row selection preserves the source dimension bounds, including empty selections.
+			vectors := result.FieldsData[index].GetVectors()
+			vectors.Dim = field.GetVectors().GetDim()
+			vectors.GetSparseFloatVector().Dim = field.GetVectors().GetSparseFloatVector().GetDim()
+		}
 	}
 	return result, nil
 }
