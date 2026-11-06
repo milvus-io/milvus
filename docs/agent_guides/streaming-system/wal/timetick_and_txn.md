@@ -117,8 +117,8 @@ See [Transaction Messages](../message/message-semantic-txn.md) for message types
 5. **Expire**: Expiration TimeTick = `lastTimetick + keepalive`. Each successful body append refreshes `lastTimetick` (lease renewal). Once current TimeTick ≥ expiration, the transaction is unrecoverably failed (`STREAMING_CODE_TRANSACTION_EXPIRED`).
 6. **Force-fail**: The [Lock](lock.md) interceptor aborts all active transactions in the affected scope after an exclusive operation is successfully appended. Failed, deduplicated and explicitly ignored operations do not abort.
 
-The normal producer waits for all body responses before Commit. Upsert admission
-checks VChannel membership against the session. A session retains successful
+The producer guarantees one VChannel per transaction and waits for all body
+responses before Commit. A session retains successful
 logical body counts and effects classification, not complete members for Commit
 revalidation. Row-only Upsert remains insert-only; explicit deletes require
 Transform consumption. Recovery restores these counts and classification.

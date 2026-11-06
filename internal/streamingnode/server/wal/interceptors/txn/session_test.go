@@ -692,17 +692,6 @@ func newImmutableBeginTxnMessageWithVChannel(vchannel string, txnID int64, timet
 	return message.MustAsImmutableBeginTxnMessageV2(msg)
 }
 
-func TestTransactionVChannelMembership(t *testing.T) {
-	for _, channel := range []string{"p_1v0", "p_vcchan", ""} {
-		s := newTxnSession(channel, message.TxnContext{}, 10, nil)
-		require.NoError(t, s.ValidateVChannelMembership(channel))
-		require.Error(t, s.ValidateVChannelMembership(channel+"foreign"))
-		require.Zero(t, s.inFlightCount)
-		require.Zero(t, s.bodyCount)
-		require.Equal(t, uint64(10), s.lastTimetick)
-	}
-}
-
 func TestManagerRecoversUpsertEffects(t *testing.T) {
 	resource.InitForTest(t)
 	for _, effects := range []bool{false, true} {

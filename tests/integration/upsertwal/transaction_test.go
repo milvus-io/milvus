@@ -25,7 +25,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	upsertfixture "github.com/milvus-io/milvus/pkg/v3/streaming/util/message/testutils"
-	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
@@ -116,36 +115,6 @@ func (s *UpsertWALSuite) TestExpiredTransactionPreservesOldRows() {
 	s.Require().True(status.AsStreamingError(err).IsTxnExpired())
 	s.assertRows(ctx, c, 11, 1, 1)
 	s.assertRows(ctx, c, 11, 2, 0)
-}
-
-func (s *UpsertWALSuite) TestRawProduceRejectsForeignVChannelTransaction() {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-	first := s.create(ctx)
-	var second collection
-	for attempt := 0; attempt < 8; attempt++ {
-		candidate := s.create(ctx)
-		if funcutil.ToPhysicalChannel(candidate.vchannel) == funcutil.ToPhysicalChannel(first.vchannel) {
-			second = candidate
-			break
-		}
-	}
-	s.Require().NotEmpty(second.name, "the fixture must exercise two VChannels on the same PChannel")
-	producer := rawProducer(s.T(), ctx, s.Cluster, first.vchannel)
-	begin, err := producer.Append(ctx, message.NewBeginTxnMessageBuilderV2().WithVChannel(first.vchannel).
-		WithHeader(&message.BeginTxnMessageHeader{KeepaliveMilliseconds: 60000}).WithBody(&message.BeginTxnMessageBody{}).MustBuildMutable())
-	s.Require().NoError(err)
-	s.Require().NotNil(begin.TxnCtx)
-	txn := *begin.TxnCtx
-	_, err = producer.Append(ctx, second.upsert(11, 1).WithTxnContext(txn))
-	s.Require().Error(err, "body scope must fail before session admission")
-	s.Require().ErrorContains(err, "invalid vchannel scope")
-	_, err = producer.Append(ctx, message.NewRollbackTxnMessageBuilderV2().WithVChannel(first.vchannel).
-		WithHeader(&message.RollbackTxnMessageHeader{}).WithBody(&message.RollbackTxnMessageBody{}).MustBuildMutable().WithTxnContext(txn))
-	s.Require().NoError(err)
-	s.assertRows(ctx, first, 11, 1, 0)
-	s.assertRows(ctx, second, 11, 1, 0)
-	producer.Close()
 }
 
 func (s *UpsertWALSuite) TestRollbackPreservesOldRows() {
