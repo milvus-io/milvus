@@ -701,6 +701,56 @@ func TestQuery(t *testing.T) {
 	}
 }
 
+func TestQueryNegativeLimitOrOffset(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Times(3)
+
+	testEngine := initHTTPServer(mp, false)
+	testCases := []struct {
+		requestBody []byte
+		errCode     int32
+		errMsg      string
+	}{
+		{
+			requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "filter": "book_id > 0", "limit": -1}`),
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+			errMsg:      "limit [-1] is invalid, should be greater than 0",
+		},
+		{
+			requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "filter": "book_id > 0", "limit": -100, "offset": 1}`),
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+			errMsg:      "limit [-100] is invalid, should be greater than 0",
+		},
+		{
+			requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "filter": "book_id > 0", "offset": -1}`),
+			errCode:     merr.Code(merr.ErrParameterInvalid),
+			errMsg:      "offset [-1] is invalid, should be greater than or equal to 0",
+		},
+	}
+	for i, tc := range testCases {
+		bodyReader := bytes.NewReader(tc.requestBody)
+		req := httptest.NewRequest(http.MethodPost, versional(VectorQueryPath), bodyReader)
+		req.SetBasicAuth(util.UserRoot, getDefaultRootPassword())
+		w := httptest.NewRecorder()
+		testEngine.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code, "case %d: %s", i, string(tc.requestBody))
+		returnBody := &ReturnErrMsg{}
+		err := json.Unmarshal(w.Body.Bytes(), returnBody)
+		assert.Nil(t, err, "case %d", i)
+		assert.Equal(t, tc.errCode, returnBody.Code, "case %d: %s", i, string(tc.requestBody))
+		assert.Contains(t, returnBody.Message, tc.errMsg, "case %d: %s", i, string(tc.requestBody))
+	}
+}
+
 func genQueryRequest() *http.Request {
 	jsonBody := []byte(`{"collectionName": "` + DefaultCollectionName + `" , "filter": "book_id in [1,2,3]"}`)
 	bodyReader := bytes.NewReader(jsonBody)
