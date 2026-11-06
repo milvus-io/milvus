@@ -74,24 +74,24 @@ func TestUpsertGenerationGate(t *testing.T) {
 	}
 }
 
-func TestUpsertEnvelopeAsyncAdmission(t *testing.T) {
+func TestUpsertActivationErrorReachesAsyncCallback(t *testing.T) {
 	paramtable.Init()
 	initIdempotencyResourceForTest(t)
 	previousWAL := message.GetDefaultWALName()
 	message.RegisterDefaultWALName(message.WALNameTest)
 	defer message.RegisterDefaultWALName(previousWAL)
 	gate := &paramtable.Get().StreamingCfg.EnableUpsertMessage
-	old := gate.SwapTempValue("true")
+	old := gate.SwapTempValue("false")
 	defer gate.SwapTempValue(old)
 	opener, err := registry.MustGetBuilder(message.WALNameTest, timetick.NewInterceptorBuilder()).Build()
 	require.NoError(t, err)
 	defer opener.Close()
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	w, err := opener.Open(ctx, &wal.OpenOption{Channel: types.PChannelInfo{Name: "upsert-envelope-async", Term: 1}, DisableFlusher: true})
+	w, err := opener.Open(ctx, &wal.OpenOption{Channel: types.PChannelInfo{Name: "upsert-activation-async", Term: 1}, DisableFlusher: true})
 	require.NoError(t, err)
 	defer w.Close()
-	msg := message.NewUpsertMessageBuilderV2().WithVChannel("upsert-envelope-async_1v0").WithProperty("_np", "").WithHeader(&message.UpsertMessageHeader{}).WithBody(&message.UpsertMessageBody{}).MustBuildMutable()
+	msg := message.NewUpsertMessageBuilderV2().WithVChannel("upsert-activation-async_1v0").WithHeader(&message.UpsertMessageHeader{}).WithBody(&message.UpsertMessageBody{}).MustBuildMutable()
 	done := make(chan struct{})
 	w.AppendAsync(ctx, msg, func(result *wal.AppendResult, err error) {
 		defer close(done)
@@ -104,5 +104,5 @@ func TestUpsertEnvelopeAsyncAdmission(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	require.False(t, msg.Properties().Exist("_tt"), "invalid envelope must not reach TimeTick")
+	require.False(t, msg.Properties().Exist("_tt"), "disabled Upsert must not reach TimeTick")
 }

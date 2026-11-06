@@ -63,7 +63,9 @@ The normal transaction contract remains:
 2. The producer sends bodies and waits for every successful response.
 3. The producer sends Commit.
 
-The common WAL Append entry validates each Upsert envelope before the interceptor chain, including idempotency duplicates and replicated duplicate/ignore paths. TimeTick checks transaction VChannel membership before Upsert body admission. Commit uses the existing logical body count: a nonzero body_cnt must equal successful body appends, while zero retains the legacy compatibility behavior. Sessions retain counts and a lightweight effects classification, not complete Begin/body messages for Commit revalidation. Recovery restores the same count and effects classification. Rollback, expiry, rejection, and completion retain the existing cleanup ownership.
+Upsert producers construct ordinary, persisted, replicable messages on the collection business VChannel. This is an internal producer contract. Append and individual interceptors do not add Upsert-specific flags validation. Existing generic property handling remains unchanged.
+
+TimeTick checks transaction VChannel membership before Upsert body admission. Commit uses the existing logical body count: a nonzero body_cnt must equal successful body appends, while zero retains the legacy compatibility behavior. Sessions retain counts and a lightweight effects classification, not complete Begin/body messages for Commit revalidation. Recovery restores the same count and effects classification. Rollback, expiry, rejection, and completion retain the existing cleanup ownership.
 
 All inserted target partitions must be ready. Batch assignment selects eligible Growing segments and holds Ack references before accounting. It validates the complete allocation set before charging rows or bytes. A later partition that requires redo cannot leave a charged successful prefix. Each partition accounts for its own PK, RowID, and selected ordinary columns. Delete effects and the outer envelope are excluded from insert pressure. Existing transaction cleanup releases segment transaction references.
 

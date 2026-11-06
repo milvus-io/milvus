@@ -32,23 +32,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func (s *UpsertWALSuite) TestRawProduceRejectsForbiddenEnvelopeMarkers() {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
-	c := s.create(ctx)
-	producer := rawProducer(s.T(), ctx, s.Cluster, c.vchannel)
-	_, err := producer.Append(ctx, c.upsert(11, 1))
-	s.Require().NoError(err)
-	for _, marker := range []string{"_ur", "_np", "_pcl", "_bh"} {
-		msg := c.upsert(11, 2)
-		msg.Properties().ToRawMap()[marker] = ""
-		_, err := producer.Append(ctx, msg)
-		s.Require().Error(err, "forbidden marker %s", marker)
-		s.assertRows(ctx, c, 11, 1, 1)
-		s.assertRows(ctx, c, 11, 2, 0)
-	}
-}
-
 func (s *UpsertWALSuite) TestGateOffAllowsDurableCommitAndLegacyProducer() {
 	for _, mode := range []string{"false", "auto"} {
 		s.Run(mode, func() {
