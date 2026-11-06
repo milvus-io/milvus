@@ -1887,6 +1887,36 @@ func TestSelectImportFields_BackupCompatibility(t *testing.T) {
 				{FieldID: 201, Name: "a"}, {FieldID: 202, Name: "b"},
 			}}}
 		}, want: []int64{0, 1, 100, 101, 201, 202}},
+		// A sub-field added after the segment was written is element-nullable
+		// and has no binlog; the struct is still read and the reader fills it.
+		{name: "added_sub_field_missing", present: []int64{100, 101, 201}, mutate: func(s *schemapb.CollectionSchema) {
+			s.StructArrayFields = []*schemapb.StructArrayFieldSchema{{FieldID: 200, Fields: []*schemapb.FieldSchema{
+				{FieldID: 201, Name: "a"},
+				{FieldID: 202, Name: "b", DataType: schemapb.DataType_ArrayOfVector, ElementNullable: true},
+				{FieldID: 203, Name: "c", DataType: schemapb.DataType_Array, ElementNullable: true},
+			}}}
+		}, want: []int64{0, 1, 100, 101, 201}},
+		{name: "added_sub_field_missing_nullable_struct", present: []int64{100, 101, 201}, mutate: func(s *schemapb.CollectionSchema) {
+			s.StructArrayFields = []*schemapb.StructArrayFieldSchema{{FieldID: 200, Nullable: true, Fields: []*schemapb.FieldSchema{
+				{FieldID: 201, Name: "a"}, {FieldID: 202, Name: "b", ElementNullable: true},
+			}}}
+		}, want: []int64{0, 1, 100, 101, 201}},
+		// The stored column of a dropped sub-field is not in the target schema.
+		{name: "dropped_sub_field_ignored", present: []int64{100, 101, 201, 299}, mutate: func(s *schemapb.CollectionSchema) {
+			s.StructArrayFields = []*schemapb.StructArrayFieldSchema{{FieldID: 200, Fields: []*schemapb.FieldSchema{
+				{FieldID: 201, Name: "a"}, {FieldID: 202, Name: "b", ElementNullable: true},
+			}}}
+		}, want: []int64{0, 1, 100, 101, 201}},
+		{name: "required_sub_field_missing_beside_added", present: []int64{100, 101, 201}, mutate: func(s *schemapb.CollectionSchema) {
+			s.StructArrayFields = []*schemapb.StructArrayFieldSchema{{FieldID: 200, Fields: []*schemapb.FieldSchema{
+				{FieldID: 201, Name: "a"}, {FieldID: 202, Name: "b", ElementNullable: true}, {FieldID: 203, Name: "c"},
+			}}}
+		}, errText: "no binlog for struct field:c"},
+		{name: "non_nullable_struct_absent", present: []int64{100, 101}, mutate: func(s *schemapb.CollectionSchema) {
+			s.StructArrayFields = []*schemapb.StructArrayFieldSchema{{FieldID: 200, Fields: []*schemapb.FieldSchema{
+				{FieldID: 201, Name: "a", ElementNullable: true}, {FieldID: 202, Name: "b", ElementNullable: true},
+			}}}
+		}, errText: "no binlog for struct field:a"},
 		{name: "partial_struct_rejected", present: []int64{100, 101, 201}, mutate: func(s *schemapb.CollectionSchema) {
 			s.StructArrayFields = []*schemapb.StructArrayFieldSchema{{FieldID: 200, Nullable: true, Fields: []*schemapb.FieldSchema{
 				{FieldID: 201, Name: "a"}, {FieldID: 202, Name: "b"},
