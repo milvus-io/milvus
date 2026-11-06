@@ -51,6 +51,10 @@ type CollectionManager interface {
 	Unref(collectionID int64, count uint32) bool
 	// UpdateSchema update the underlying collection schema of the provided collection.
 	UpdateSchema(collectionID int64, schema *schemapb.CollectionSchema, version uint64) error
+	// UpdateIndexMeta applies a collection index meta with the version QueryCoord
+	// gave its index list. A meta older than the applied one is ignored. A
+	// collection that is not on this node has nothing to update.
+	UpdateIndexMeta(collectionID int64, meta *segcorepb.CollectionIndexMeta, version int64) error
 }
 
 type collectionManager struct {
@@ -103,12 +107,10 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 				zap.Any("schema", schema),
 			)
 		}
-		// Always update index meta to ensure newly indexed fields are visible
-		// for search plan creation (CollectionIndexMeta::HasField check).
-		if meta != nil {
-			if err := collection.ccollection.UpdateIndexMeta(meta); err != nil {
-				return err
-			}
+		// Update index meta to ensure newly indexed fields are visible for search
+		// plan creation (CollectionIndexMeta::HasField check).
+		if err := collection.updateIndexMeta(meta, loadMeta.GetIndexInfoVersion()); err != nil {
+			return err
 		}
 		collection.Ref(1)
 		return nil
@@ -141,6 +143,17 @@ func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.Co
 	}
 	collection.schema.Store(schema)
 	return nil
+}
+
+func (m *collectionManager) UpdateIndexMeta(collectionID int64, meta *segcorepb.CollectionIndexMeta, version int64) error {
+	m.mut.Lock()
+	defer m.mut.Unlock()
+
+	collection, ok := m.collections[collectionID]
+	if !ok {
+		return nil
+	}
+	return collection.updateIndexMeta(meta, version)
 }
 
 func (m *collectionManager) updateMetric() {
@@ -201,6 +214,9 @@ type Collection struct {
 	isGpuIndex    bool
 	loadFields    typeutil.Set[int64]
 	schemaVersion uint64
+	// indexInfoVersion is the version of the index list applied to ccollection,
+	// protected by collectionManager.mut. See LoadMetaInfo.index_info_version.
+	indexInfoVersion int64
 
 	refCount *atomic.Uint32
 }
@@ -316,12 +332,14 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 	}
 
 	isGpuIndex := false
+	indexInfoVersion := int64(0)
 	req := &segcore.CreateCCollectionRequest{
 		Schema:        loadSchema,
 		LoadFieldList: loadFieldIDs.Collect(),
 	}
 	if indexMeta != nil && len(indexMeta.GetIndexMetas()) > 0 && indexMeta.GetMaxIndexRowCount() > 0 {
 		req.IndexMeta = indexMeta
+		indexInfoVersion = loadMetaInfo.GetIndexInfoVersion()
 		for _, indexMeta := range indexMeta.GetIndexMetas() {
 			isGpuIndex = gpuIndexRequiresGpu(indexMeta.GetIndexParams())
 			if isGpuIndex {
@@ -347,6 +365,8 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		refCount:      atomic.NewUint32(0),
 		isGpuIndex:    isGpuIndex,
 		loadFields:    loadFieldIDs,
+
+		indexInfoVersion: indexInfoVersion,
 	}
 	for _, partitionID := range loadMetaInfo.GetPartitionIDs() {
 		coll.partitions.Insert(partitionID)
@@ -354,6 +374,19 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 	coll.schema.Store(schema)
 
 	return coll, nil
+}
+
+func (c *Collection) updateIndexMeta(meta *segcorepb.CollectionIndexMeta, version int64) error {
+	// A list read before the applied one can miss an index created since, so
+	// it must not replace the applied one.
+	if meta == nil || version < c.indexInfoVersion {
+		return nil
+	}
+	if err := c.ccollection.UpdateIndexMeta(meta); err != nil {
+		return err
+	}
+	c.indexInfoVersion = version
+	return nil
 }
 
 // Only for test

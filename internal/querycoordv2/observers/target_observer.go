@@ -489,6 +489,7 @@ func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collect
 	var partitions []int64
 	var indexInfo []*indexpb.IndexInfo
 	var err error
+	var indexInfoVersion int64
 	for _, d := range collReadyDelegatorList {
 		updateVersionAction := ob.genSyncAction(ctx, d.View, newVersion)
 		replica := ob.meta.GetByCollectionAndNode(ctx, collectionID, d.Node)
@@ -506,14 +507,14 @@ func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collect
 			}
 
 			// Get collection index info
-			indexInfo, err = ob.broker.ListIndexes(ctx, collectionID)
+			indexInfo, indexInfoVersion, err = utils.ListIndexesWithVersion(ctx, ob.broker, collectionID)
 			if err != nil {
 				log.Warn("fail to get index info of collection", zap.Error(err))
 				return false
 			}
 		}
 
-		if !ob.syncToDelegator(ctx, replica, d.View, updateVersionAction, partitions, indexInfo) {
+		if !ob.syncToDelegator(ctx, replica, d.View, updateVersionAction, partitions, indexInfo, indexInfoVersion) {
 			return false
 		}
 	}
@@ -521,7 +522,7 @@ func (ob *TargetObserver) syncNextTargetToDelegator(ctx context.Context, collect
 }
 
 func (ob *TargetObserver) syncToDelegator(ctx context.Context, replica *meta.Replica, LeaderView *meta.LeaderView, action *querypb.SyncAction,
-	partitions []int64, indexInfo []*indexpb.IndexInfo,
+	partitions []int64, indexInfo []*indexpb.IndexInfo, indexInfoVersion int64,
 ) bool {
 	replicaID := replica.GetID()
 
@@ -540,10 +541,11 @@ func (ob *TargetObserver) syncToDelegator(ctx context.Context, replica *meta.Rep
 		Channel:      LeaderView.Channel,
 		Actions:      []*querypb.SyncAction{action},
 		LoadMeta: &querypb.LoadMetaInfo{
-			LoadType:      ob.meta.GetLoadType(ctx, LeaderView.CollectionID),
-			CollectionID:  LeaderView.CollectionID,
-			PartitionIDs:  partitions,
-			ResourceGroup: replica.GetResourceGroup(),
+			LoadType:         ob.meta.GetLoadType(ctx, LeaderView.CollectionID),
+			CollectionID:     LeaderView.CollectionID,
+			PartitionIDs:     partitions,
+			ResourceGroup:    replica.GetResourceGroup(),
+			IndexInfoVersion: indexInfoVersion,
 		},
 		Version:       time.Now().UnixNano(),
 		IndexInfoList: indexInfo,
