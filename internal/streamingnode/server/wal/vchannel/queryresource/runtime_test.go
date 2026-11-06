@@ -130,7 +130,7 @@ func TestManagerQueuedMessageDoesNotRetainAck(t *testing.T) {
 			require.NoError(t, walview.ForEachSegmentInsertMessage(queued, 1, func(selected walview.SegmentInsertMessage) error {
 				count++
 				require.Equal(t, raw.TimeTick(), selected.TimeTick)
-				body, err := selected.Message.ReadRows(context.Background(), nil, selected.Rows)
+				body, err := selected.RowsReader.ReadRows(context.Background(), nil, selected.Rows)
 				require.NoError(t, err)
 				require.Equal(t, uint64(2), body.GetNumRows())
 				require.Equal(t, decodedBody.RowIDs, body.RowIDs, "retained row identity remains usable after persistence Ack")

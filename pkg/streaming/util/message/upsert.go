@@ -89,7 +89,7 @@ func UpsertSelections(header *UpsertMessageHeader, body *UpsertMessageBody) ([][
 }
 
 // ValidateUpsert checks the compound contract. Producers validate column values.
-// Metadata-only projections contain column descriptors without their values.
+// Projections contain column descriptors without their values.
 func ValidateUpsert(header *UpsertMessageHeader, body *UpsertMessageBody, primary *schemapb.FieldSchema) error {
 	_, err := ValidateUpsertWithSelections(header, body, primary)
 	return err
@@ -172,7 +172,7 @@ func ValidateUpsertWithSelections(header *UpsertMessageHeader, body *UpsertMessa
 // BuildUpsertResult constructs the insert result from original keys and row offsets
 // without decoding columns. Append, transaction buffering, recovery, and retry share it.
 func BuildUpsertResult(ctx context.Context, msg BasicMessage) (*messagespb.IdempotentInsertResult, error) {
-	body, err := ReadUpsertMetadata(ctx, msg)
+	body, err := ReadUpsertProjection(ctx, msg)
 	if err != nil {
 		return nil, err
 	}

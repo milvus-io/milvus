@@ -126,12 +126,12 @@ func repackUpsertMessages(ctx context.Context, cache Cache, channels []string, s
 			if !bounded {
 				continue
 			}
-			size, err := upsertPlainRowMetadataSize(ids, row, source.RowIDs[row], uint32(len(rows)), uint32(row))
+			size, err := upsertRowNonColumnSize(ids, row, source.RowIDs[row], uint32(len(rows)), uint32(row))
 			if err != nil {
 				return nil, err
 			}
 			if deleteRows != nil {
-				effectsSize, err := upsertDeleteMetadataSize(deleted, deleteRows[row], deletePartition)
+				effectsSize, err := upsertDeleteEffectsSize(deleted, deleteRows[row], deletePartition)
 				if err != nil {
 					return nil, err
 				}
@@ -216,7 +216,7 @@ func repackUpsertMessages(ctx context.Context, cache Cache, channels []string, s
 				body.DeleteEffects = []*messagespb.UpsertDeleteEffect{effect}
 				header.DeleteRows = uint64(len(deleteOffsets))
 			}
-			if err := encoder.SetMetadata(body); err != nil {
+			if err := encoder.SetNonColumnFields(body); err != nil {
 				return nil, err
 			}
 			builder := message.NewUpsertMessageBuilderV2().WithHeader(header).WithBodyEncoder(encoder).WithVChannel(channel).WithCipher(cipher).WithIdempotencyKey(idempotency.idempotencyKey())
@@ -287,9 +287,9 @@ func upsertWireSize(msg message.MutableMessage) int {
 	return size
 }
 
-// upsertPlainRowMetadataSize equals proto.Size of the existing conservative
-// one-row metadata object. It keeps its framing and budget unchanged.
-func upsertPlainRowMetadataSize(ids *schemapb.IDs, row int, rowID int64, partitionIndex, requestOffset uint32) (int, error) {
+// upsertRowNonColumnSize equals proto.Size of the existing conservative
+// one-row non-column object. It keeps its framing and budget unchanged.
+func upsertRowNonColumnSize(ids *schemapb.IDs, row int, rowID int64, partitionIndex, requestOffset uint32) (int, error) {
 	keysSize, err := upsertKeysSize(ids, []int{row})
 	if err != nil {
 		return 0, err
@@ -330,9 +330,9 @@ func upsertKeysSize(ids *schemapb.IDs, offsets []int) (int, error) {
 	return 0, merr.WrapErrServiceInternalMsg("unsupported mutation result ids type")
 }
 
-// upsertDeleteMetadataSize preserves the original sizing object's partition_id
+// upsertDeleteEffectsSize preserves the original sizing object's partition_id
 // oneof, including -1. The actual message uses all_partitions for that scope.
-func upsertDeleteMetadataSize(ids *schemapb.IDs, offsets []int, partitionID int64) (int, error) {
+func upsertDeleteEffectsSize(ids *schemapb.IDs, offsets []int, partitionID int64) (int, error) {
 	if len(offsets) == 0 {
 		return 0, nil
 	}

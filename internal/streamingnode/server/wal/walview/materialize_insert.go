@@ -12,7 +12,7 @@ import (
 // RecoveryStorage may still retain text-only WAL inserts before its pack writer materializes
 // function outputs; querying that snapshot must not depend on writer timing.
 func MaterializeInsertRequest(schema *schemapb.CollectionSchema, insert SegmentInsertMessage) (*msgpb.InsertRequest, error) {
-	request, err := insert.Message.ReadRows(context.Background(), schema, insert.Rows)
+	request, err := insert.RowsReader.ReadRows(context.Background(), schema, insert.Rows)
 	if err != nil {
 		return nil, err
 	}

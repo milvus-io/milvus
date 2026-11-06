@@ -11,7 +11,7 @@ import (
 
 // SegmentInsertMessage is row content selected for one segment from an outer WAL message.
 type SegmentInsertMessage struct {
-	Message    messageutil.InsertRequest
+	RowsReader messageutil.InsertRowsReader
 	Assignment *messagespb.PartitionSegmentAssignment
 	TimeTick   uint64
 	Rows       []int64
@@ -59,7 +59,7 @@ func forEachSegmentInsertMessageFromInsert(
 	timeTick uint64,
 	visit func(SegmentInsertMessage) error,
 ) error {
-	insert, assignments, ok := messageutil.AsInsertRequest(raw)
+	reader, assignments, ok := messageutil.AsInsertRowsReader(raw)
 	if !ok {
 		return nil
 	}
@@ -76,7 +76,7 @@ func forEachSegmentInsertMessageFromInsert(
 			continue
 		}
 		if err := visit(SegmentInsertMessage{
-			Message:    insert,
+			RowsReader: reader,
 			Assignment: assignment,
 			TimeTick:   timeTick,
 			Rows:       rows,

@@ -472,7 +472,7 @@ func getInsertResultFromInsertMessage(ctx context.Context, msg message.MutableMe
 				return nil, ctx.Err()
 			}
 			if errors.Is(err, message.ErrMalformedBody) {
-				return nil, status.NewInvalidArgument("malformed Upsert retry metadata")
+				return nil, status.NewInvalidArgument("malformed Upsert retry result")
 			}
 			return nil, err
 		}

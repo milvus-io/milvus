@@ -33,7 +33,7 @@ func TestMaterializeInsertPreservesWALAndExistingOutputs(t *testing.T) {
 	assignment := &messagespb.PartitionSegmentAssignment{PartitionId: 10, SegmentAssignment: &messagespb.SegmentAssignment{SegmentId: 20}}
 	inputFor := func(body *msgpb.InsertRequest) SegmentInsertMessage {
 		raw := message.NewInsertMessageBuilderV1().WithVChannel("v1").WithHeader(&message.InsertMessageHeader{Partitions: []*messagespb.PartitionSegmentAssignment{assignment}}).WithBody(body).MustBuildMutable().WithTimeTick(10).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(10))
-		return SegmentInsertMessage{Message: func() messageutil.InsertRequest { rows, _, _ := messageutil.AsInsertRequest(raw); return rows }(), Assignment: assignment, TimeTick: 10}
+		return SegmentInsertMessage{RowsReader: func() messageutil.InsertRowsReader { rows, _, _ := messageutil.AsInsertRowsReader(raw); return rows }(), Assignment: assignment, TimeTick: 10}
 	}
 	input := inputFor(body)
 	before := proto.Clone(body)
@@ -47,7 +47,7 @@ func TestMaterializeInsertPreservesWALAndExistingOutputs(t *testing.T) {
 	patch := mockey.Mock((*function.FunctionRunnerLocalStore).FillEmbeddingData).Return(context.Canceled).Build()
 	defer patch.UnPatch()
 	materializedInput := inputFor(output)
-	cached, err := materializedInput.Message.ReadRows(context.Background(), schema, nil)
+	cached, err := materializedInput.RowsReader.ReadRows(context.Background(), schema, nil)
 	require.NoError(t, err)
 	materialized, err := MaterializeInsertRequest(schema, materializedInput)
 	require.NoError(t, err)
