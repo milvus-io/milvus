@@ -516,6 +516,58 @@ func TestAsyncManifestSingleExecutorSubmissions(t *testing.T) {
 	require.False(t, called)
 }
 
+// Prebuilt properties read what per-read properties read. A submission copies
+// them, so they may be freed while the read still waits for a worker.
+func TestSubmitManifestIndexInfosWithProperties(t *testing.T) {
+	cfg := manifestTestStorageConfig(t)
+	manifest, err := CommitManifestUpdates(MarshalManifestPath(path.Join(cfg.RootPath, "prebuilt-properties"), 0), cfg, &ManifestUpdates{
+		Indexes: []ManifestIndexInfo{{ColumnName: "100", IndexName: "index", IndexType: "FLAT", Path: "artifact", FieldID: 100, IndexID: 1, BuildID: 2}},
+	})
+	require.NoError(t, err)
+	type result struct {
+		entries []ManifestIndexInfo
+		err     error
+	}
+	io := NewManifestIOContext(1)
+	defer io.Close()
+	read := func(properties *ManifestReadProperties) <-chan result {
+		done := make(chan result, 1)
+		complete := func(entries []ManifestIndexInfo, err error) { done <- result{entries, err} }
+		if properties == nil {
+			require.NoError(t, SubmitManifestIndexInfos(context.Background(), io, manifest, cfg, complete))
+		} else {
+			require.NoError(t, SubmitManifestIndexInfosWithProperties(context.Background(), io, manifest, properties, complete))
+		}
+		return done
+	}
+	want := <-read(nil)
+	require.NoError(t, want.err)
+	require.Len(t, want.entries, 1)
+	properties, err := NewManifestReadProperties(cfg)
+	require.NoError(t, err)
+	for range 3 {
+		got := <-read(properties)
+		require.NoError(t, got.err)
+		require.Equal(t, want.entries, got.entries)
+	}
+
+	release := make(chan struct{})
+	var unblock sync.Once
+	defer unblock.Do(func() { close(release) })
+	entered, err := testQueueManifestBlock(io, release)
+	require.NoError(t, err)
+	<-entered
+	queued := read(properties)
+	properties.Close()
+	unblock.Do(func() { close(release) })
+	got := <-queued
+	require.NoError(t, got.err)
+	require.Equal(t, want.entries, got.entries)
+
+	_, err = NewManifestReadProperties(nil)
+	require.Error(t, err)
+}
+
 func TestAsyncManifestSubmissionCancellationDrains(t *testing.T) {
 	for _, operation := range []string{"read", "commit"} {
 		t.Run(operation, func(t *testing.T) {

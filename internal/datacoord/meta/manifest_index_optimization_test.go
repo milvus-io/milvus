@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
@@ -82,6 +83,18 @@ func TestManifestReadBudgetSharedAndCancellable(t *testing.T) {
 	require.Len(t, entered, 6)
 }
 
+// noIndexCatalog lets manifest recovery run in this package, which cannot import
+// the index package. Reads in these tests yield no index records.
+type noIndexCatalog struct{ SegmentIndexCatalog }
+
+func (noIndexCatalog) NewManifestIndexRecovery() ManifestIndexRecovery { return noIndexRecovery{} }
+
+type noIndexRecovery struct{}
+
+func (noIndexRecovery) Install(*model.SegmentIndex) { panic("no index catalog") }
+func (noIndexRecovery) Finish()                     {}
+func (noIndexRecovery) Installed() int              { return 0 }
+
 // A delayed first read must not impose a barrier on subsequent segments.
 func TestManifestRecoveryContinuouslySchedulesReads(t *testing.T) {
 	MockManifestIndexSubmissions(t)
@@ -89,6 +102,7 @@ func TestManifestRecoveryContinuouslySchedulesReads(t *testing.T) {
 	defer Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue(old)
 	m, err := NewMemoryMeta(t)
 	require.NoError(t, err)
+	m.IndexCatalog = noIndexCatalog{}
 	for i := int64(1); i <= 5; i++ {
 		require.NoError(t, m.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
 			ID: i, CollectionID: 300, PartitionID: 30, State: commonpb.SegmentState_Flushed,
@@ -132,6 +146,7 @@ func TestManifestRecoverySingleExecutor(t *testing.T) {
 	defer Params.DataCoordCfg.ManifestCommitConcurrency.SwapTempValue(oldCommit)
 	m, err := NewMemoryMeta(t)
 	require.NoError(t, err)
+	m.IndexCatalog = noIndexCatalog{}
 	root := t.TempDir()
 	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: root}
 	m.ChunkManager = storage.NewLocalChunkManager(objectstorage.RootPath(root))
@@ -161,6 +176,7 @@ func TestManifestRecoveryFailureDrainsAcceptedReads(t *testing.T) {
 	defer Params.DataCoordCfg.SegmentIndexManifestLoadConcurrency.SwapTempValue(old)
 	m, err := NewMemoryMeta(t)
 	require.NoError(t, err)
+	m.IndexCatalog = noIndexCatalog{}
 	for i := int64(1); i <= 5; i++ {
 		require.NoError(t, m.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
 			ID: i, CollectionID: 300, PartitionID: 30, State: commonpb.SegmentState_Flushed,
@@ -173,7 +189,7 @@ func TestManifestRecoveryFailureDrainsAcceptedReads(t *testing.T) {
 		complete func([]packed.ManifestIndexInfo, error)
 	}
 	pending := make(chan pendingRead, 5)
-	reader := mockey.Mock(packed.SubmitManifestIndexInfos).To(func(ctx context.Context, _ *packed.ManifestIOContext, _ string, _ *indexpb.StorageConfig, complete func([]packed.ManifestIndexInfo, error)) error {
+	reader := mockey.Mock(packed.SubmitManifestIndexInfosWithProperties).To(func(ctx context.Context, _ *packed.ManifestIOContext, _ string, _ *packed.ManifestReadProperties, complete func([]packed.ManifestIndexInfo, error)) error {
 		pending <- pendingRead{ctx, complete}
 		return nil
 	}).Build()

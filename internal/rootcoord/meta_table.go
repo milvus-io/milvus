@@ -280,6 +280,13 @@ func (mt *MetaTable) reload() error {
 	if err != nil {
 		return err
 	}
+	// Every recovered collection is indexed below; size the indexes once.
+	recoveredCollections := 0
+	for _, collections := range collectionsByDB {
+		recoveredCollections += len(collections)
+	}
+	mt.collID2Meta = make(map[UniqueID]*model.Collection, recoveredCollections)
+	mt.partitionName2ID = make(map[int64]map[string]int64, recoveredCollections)
 
 	// in order to support backward compatibility with meta of the old version, it also
 	// needs to reload collections that have no database
@@ -296,6 +303,7 @@ func (mt *MetaTable) reload() error {
 
 		start := time.Now()
 		collections := collectionsByDB[db.ID]
+		mt.names.reserve(dbName, len(collections))
 		for _, collection := range collections {
 			if collection.DBName != "" && collection.DBName != dbName {
 				mlog.Warn(mt.ctx,
@@ -310,7 +318,7 @@ func (mt *MetaTable) reload() error {
 			ensureCollectionMaxFieldIDProperty(collection)
 			mt.setCollectionLocked(collection)
 			// Build partition name index
-			mt.partitionName2ID[collection.CollectionID] = make(map[string]int64)
+			mt.partitionName2ID[collection.CollectionID] = make(map[string]int64, len(collection.Partitions))
 			for _, partition := range collection.Partitions {
 				if partition.Available() {
 					mt.partitionName2ID[collection.CollectionID][partition.PartitionName] = partition.PartitionID
@@ -381,6 +389,7 @@ func (mt *MetaTable) reload() error {
 func (mt *MetaTable) reloadWithNonDatabase(oldCollections []*model.Collection) error {
 	collectionNum := int64(0)
 	partitionNum := int64(0)
+	mt.names.reserve(util.DefaultDBName, len(oldCollections))
 	for _, collection := range oldCollections {
 		ensureCollectionMaxFieldIDProperty(collection)
 		mt.setCollectionLocked(collection)

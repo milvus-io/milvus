@@ -135,8 +135,6 @@ func (i *IndexInspector) Start() {
 	meta.SetBuildIndexConsumer(i.ctx.Done())
 	i.wg.Add(1)
 	go i.forwardBuildIndexCh(i.ctx)
-	i.reloadFromMeta()
-	i.requeuePendingIndexSegments(i.getUnIndexTaskSegments(i.ctx)...)
 	i.wg.Add(1)
 	go i.createIndexForSegmentLoop(i.ctx)
 }
@@ -147,9 +145,15 @@ func (i *IndexInspector) Stop() {
 }
 
 func (i *IndexInspector) createIndexForSegmentLoop(ctx context.Context) {
+	defer i.wg.Done()
+	// Only this loop creates index builds and consumes the pending segments,
+	// so it re-enqueues the unfinished builds and queues the unindexed segments
+	// itself before its first round, instead of holding DataCoord's startup on
+	// scans of every segment index and every segment.
+	i.reloadFromMeta()
+	i.requeuePendingIndexSegments(i.getUnIndexTaskSegments(ctx)...)
 	mlog.Info(ctx, "start create index for segment loop...",
 		mlog.Int64("TaskCheckInterval", Params.DataCoordCfg.TaskCheckInterval.GetAsInt64()))
-	defer i.wg.Done()
 
 	ticker := time.NewTicker(Params.DataCoordCfg.TaskCheckInterval.GetAsDuration(time.Second))
 	defer ticker.Stop()
@@ -491,34 +495,41 @@ func (i *IndexInspector) estimateIndexFieldSize(ctx context.Context, coll *meta.
 	return fieldSize
 }
 
+// reloadFromMeta re-enqueues the Unissued, Retry and InProgress builds of the
+// segments in meta, skipping deleted builds and the builds of deleted field
+// indexes as GetSegmentIndexes does. It filters the resident builds by state
+// before any lookup, so it clones only the builds it enqueues.
 func (i *IndexInspector) reloadFromMeta() {
-	segments := i.meta.GetAllSegmentsUnsafe()
-	for _, segment := range segments {
-		for _, segIndex := range i.indexMeta.GetSegmentIndexes(segment.GetCollectionID(), segment.ID) {
-			if segIndex.IsDeleted || (segIndex.IndexState != commonpb.IndexState_Unissued &&
-				segIndex.IndexState != commonpb.IndexState_Retry &&
-				segIndex.IndexState != commonpb.IndexState_InProgress) {
-				continue
-			}
-
-			indexParams := i.indexMeta.GetIndexParams(segment.CollectionID, segIndex.IndexID)
-			fieldID := i.indexMeta.GetFieldIDByIndexID(segment.CollectionID, segIndex.IndexID)
-			// Only the local cache is consulted: recovery runs synchronously in
-			// Start(), so it must not load collections through rootcoord. On a
-			// cold cache the estimation falls back to the conservative binlog
-			// size, which is the pre-optimization behavior.
-			fieldSize := i.estimateIndexFieldSize(i.ctx, i.meta.GetCollection(segment.GetCollectionID()), segment, fieldID)
-			taskSlot := CalculateIndexTaskSlot(fieldSize, segment.NumOfRows, indexParams)
-
-			i.scheduler.Enqueue(NewIndexBuildTask(
-				model.CloneSegmentIndex(segIndex),
-				taskSlot,
-				i.meta,
-				i.indexMeta,
-				i.Handler,
-				i.storageCli,
-				i.indexEngineVersionManager,
-			))
+	i.indexMeta.rangeSegmentIndexesBySegment(func(segIndex *model.SegmentIndex) bool {
+		if segIndex.IsDeleted || (segIndex.IndexState != commonpb.IndexState_Unissued &&
+			segIndex.IndexState != commonpb.IndexState_Retry &&
+			segIndex.IndexState != commonpb.IndexState_InProgress) {
+			return true
 		}
-	}
+		// A segment in meta in any state, dropped included.
+		segment := i.meta.GetSegment(i.ctx, segIndex.SegmentID)
+		if segment == nil || !i.indexMeta.IsIndexExist(segment.CollectionID, segIndex.IndexID) {
+			return true
+		}
+
+		indexParams := i.indexMeta.GetIndexParams(segment.CollectionID, segIndex.IndexID)
+		fieldID := i.indexMeta.GetFieldIDByIndexID(segment.CollectionID, segIndex.IndexID)
+		// Only the local cache is consulted: this recovery pass must not load
+		// collections through rootcoord. On a cold cache the estimation falls
+		// back to the conservative binlog size, which is the pre-optimization
+		// behavior.
+		fieldSize := i.estimateIndexFieldSize(i.ctx, i.meta.GetCollection(segment.GetCollectionID()), segment, fieldID)
+		taskSlot := CalculateIndexTaskSlot(fieldSize, segment.NumOfRows, indexParams)
+
+		i.scheduler.Enqueue(NewIndexBuildTask(
+			model.CloneSegmentIndex(segIndex),
+			taskSlot,
+			i.meta,
+			i.indexMeta,
+			i.Handler,
+			i.storageCli,
+			i.indexEngineVersionManager,
+		))
+		return true
+	})
 }

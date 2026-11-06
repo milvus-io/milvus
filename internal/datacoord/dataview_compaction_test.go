@@ -90,9 +90,9 @@ func admissionFinishIndexes(m *meta.Meta, id int64, indexes ...int64) {
 	}
 }
 
-func admissionView(t *testing.T, m *meta.Meta) ([]int64, *viewpb.DataVersion) {
+func admissionView(t *testing.T, m *meta.Meta, collectionID int64) ([]int64, *viewpb.DataVersion) {
 	t.Helper()
-	ref, err := m.DataViewManager.Latest(t.Context(), 1)
+	ref, err := m.DataViewManager.Latest(t.Context(), collectionID)
 	require.NoError(t, err)
 	defer ref.Deref()
 	var ids []int64
@@ -108,7 +108,7 @@ func admissionRecompute(t *testing.T, m *meta.Meta, want ...int64) *viewpb.DataV
 	t.Helper()
 	_, err := m.DataViewManager.RecomputeNow(t.Context(), 1, m.LoadableProjection)
 	require.NoError(t, err)
-	ids, version := admissionView(t, m)
+	ids, version := admissionView(t, m, 1)
 	require.ElementsMatch(t, want, ids)
 	return version
 }
@@ -192,9 +192,37 @@ func TestDataViewCompactionAdmissionMissingParentFailsClosed(t *testing.T) {
 	admissionRetire(m, 1)
 	_, err := m.DataViewManager.RecomputeNow(t.Context(), 1, m.LoadableProjection)
 	require.ErrorContains(t, err, "no complete ready ancestor frontier")
-	ids, after := admissionView(t, m)
+	ids, after := admissionView(t, m, 1)
 	require.Equal(t, []int64{1}, ids)
 	require.Equal(t, before, after)
+}
+
+// While the manifest index scan runs, an unfinished index of an output whose
+// manifest records indexes may only be one the scan has not installed yet.
+func TestDataViewCompactionAdmissionRecordsManifestIndexRecheck(t *testing.T) {
+	m := compactionAdmissionMeta(t)
+	for _, id := range []int64{1, 2} {
+		m.Segments.SetSegment(id, admissionSegment(id))
+	}
+	admissionRecompute(t, m, 1, 2)
+	m.Segments.SetSegment(3, admissionSegment(3, 1, 2))
+	admissionRetire(m, 1, 2)
+
+	m.BeginManifestIndexRecovery()
+	admissionRecompute(t, m, 1, 2)
+	require.Empty(t, m.EndManifestIndexRecovery(), "the scan installs no index for a manifest without one")
+
+	output := m.GetSegment(t.Context(), 3).Clone()
+	output.ManifestHasIndex = true
+	m.Segments.SetSegment(3, output)
+	admissionRecompute(t, m, 1, 2)
+	require.Empty(t, m.EndManifestIndexRecovery(), "nothing is recorded outside the scan")
+
+	m.BeginManifestIndexRecovery()
+	admissionRecompute(t, m, 1, 2)
+	admissionFinishIndexes(m, 3, 10, 11, 12)
+	require.Equal(t, []int64{1}, m.EndManifestIndexRecovery())
+	admissionRecompute(t, m, 3)
 }
 
 func TestDataViewCompactionAdmissionNoIndexAndEmptyOutput(t *testing.T) {

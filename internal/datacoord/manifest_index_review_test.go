@@ -21,14 +21,18 @@ import (
 	"path"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -102,7 +106,13 @@ func TestInitMetaDoesNotReplayManifestScan(t *testing.T) {
 				return true, nil
 			})
 			err := server.initMeta(cm)
-			require.Equal(t, 1, reads[good])
+			if mode == "dataview-failure" {
+				// A later phase that fails first cancels the manifest scan, which
+				// may not have read every manifest yet; none is read twice.
+				require.LessOrEqual(t, reads[good], 1)
+			} else {
+				require.Equal(t, 1, reads[good])
+			}
 			if mode == "transient" || mode == "dataview-reload" {
 				require.NoError(t, err)
 				require.NotNil(t, server.meta)
@@ -121,13 +131,110 @@ func TestInitMetaDoesNotReplayManifestScan(t *testing.T) {
 				require.Nil(t, server.meta)
 				require.Nil(t, server.dataViewManager)
 				require.False(t, retry.IsRecoverable(err))
-				if mode == "invalid" || mode == "dataview-failure" {
+				switch mode {
+				case "invalid":
 					require.ErrorIs(t, err, merr.ErrDataIntegrity)
 					require.Equal(t, 1, reads[bad])
-				} else {
+				case "dataview-failure":
+					require.ErrorIs(t, err, merr.ErrDataIntegrity)
+					require.LessOrEqual(t, reads[bad], 1)
+				default:
 					require.Equal(t, 3, reads[bad])
 				}
 			}
 		})
 	}
+}
+
+// The manifest scan may finish after DataView recovery projected a collection.
+// A compaction output whose index only its manifest records must still replace
+// its parent in the recovered DataView.
+func TestInitMetaRechecksDataViewsAfterManifestScan(t *testing.T) {
+	meta.WithSegmentIndexManifestWrites(t, true)
+	meta.NewFakeManifestStore(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	kv := meta.NewMetaMemoryKV()
+	catalog := datacoord.NewCatalog(kv, "", "")
+	m, metas := index.BootMetaForRestart(t, catalog, meta.RestartCollID)
+	index.SeedRestartFixture(t, m, metas.IndexMeta)
+	parentID := meta.RestartSegID - 1
+	output := m.GetSegment(ctx, meta.RestartSegID).Clone()
+	require.True(t, output.GetManifestHasIndex())
+	output.InsertChannel = "v1"
+	output.CompactionFrom = []int64{parentID}
+	output.CreatedByCompaction = true
+	output.IsSorted = true
+	output.TransformStartAfterTimetick = 50
+	parentManifest := packed.MarshalManifestPath(storage.SegmentManifestBasePath("/tmp/test-restart", meta.RestartCollID, output.GetPartitionID(), parentID), 1)
+	parent := &datapb.SegmentInfo{
+		ID: parentID, CollectionID: meta.RestartCollID, PartitionID: output.GetPartitionID(), InsertChannel: "v1",
+		State: commonpb.SegmentState_Dropped, Compacted: true, NumOfRows: 1000, TransformStartAfterTimetick: 50,
+		StorageVersion: storage.StorageV3, ManifestPath: parentManifest,
+	}
+	require.NoError(t, catalog.AlterSegments(ctx, []*datapb.SegmentInfo{parent, output.SegmentInfo}))
+	require.NoError(t, catalog.SaveChannelCheckpoint(ctx, "v1", &msgpb.MsgPosition{ChannelName: "v1", MsgID: []byte{1}, Timestamp: 100}))
+
+	// Start the scan only after the first projection returned.
+	var (
+		project   func(*meta.Meta, context.Context, int64, *viewpb.DataViewOfCollection) ([]dataview.LoadableSegment, error)
+		reload    func(*meta.Meta, context.Context) error
+		projected = make(chan struct{})
+		once      sync.Once
+		first     []int64
+	)
+	projection := mockey.Mock((*meta.Meta).LoadableProjection).Origin(&project).To(func(m *meta.Meta, ctx context.Context, collectionID int64, previous *viewpb.DataViewOfCollection) ([]dataview.LoadableSegment, error) {
+		segments, err := project(m, ctx, collectionID, previous)
+		once.Do(func() {
+			first = lo.Map(segments, func(segment dataview.LoadableSegment, _ int) int64 { return segment.SegmentID })
+			close(projected)
+		})
+		return segments, err
+	}).Build()
+	defer projection.UnPatch()
+	scan := mockey.Mock((*meta.Meta).ReloadSegmentIndexesFromManifests).Origin(&reload).To(func(m *meta.Meta, ctx context.Context) error {
+		select {
+		case <-projected:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		return reload(m, ctx)
+	}).Build()
+	defer scan.UnPatch()
+
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-restart"))
+	svrCatalog := datacoord.NewCatalog(kv, cm.RootPath(), "")
+	store := meta.NewMetaStoreWithCollections(svrCatalog)
+	store.PutCollection(&meta.CollectionInfo{ID: meta.RestartCollID, VChannelNames: []string{"v1"}})
+	server := &Server{ctx: ctx, kv: kv, broker: broker.NewCoordinatorBroker(nil), catalog: svrCatalog, metaStore: store}
+	server.SetDataViewCollectionRecoveryValidator(func(context.Context, int64) (bool, error) {
+		return true, nil
+	})
+	require.NoError(t, server.initMeta(cm))
+	require.Equal(t, []int64{parentID}, first, "the first projection ran before the scan installed the index")
+	selected, _ := admissionView(t, server.meta, meta.RestartCollID)
+	require.Equal(t, []int64{meta.RestartSegID}, selected)
+}
+
+// A later phase that fails must cancel the running manifest scan and wait for it:
+// the scan writes segment markers through the shared MetaStore, so it must not
+// outlive a failed initMeta.
+func TestInitMetaCancelsAndJoinsManifestScanOnFailure(t *testing.T) {
+	stopped := false
+	scan := mockey.Mock((*meta.Meta).ReloadSegmentIndexesFromManifests).To(func(_ *meta.Meta, ctx context.Context) error {
+		<-ctx.Done()
+		// Finish well after the cancel, so that only a join sees it stop.
+		time.Sleep(100 * time.Millisecond)
+		stopped = true
+		return ctx.Err()
+	}).Build()
+	defer scan.UnPatch()
+	listViews := mockey.Mock((*datacoord.Catalog).ListAllDataViews).Return(nil, retry.Unrecoverable(merr.WrapErrDataIntegrityMsg("invalid DataView catalog"))).Build()
+	defer listViews.UnPatch()
+	server := &Server{ctx: t.Context(), kv: meta.NewMetaMemoryKV(), broker: broker.NewCoordinatorBroker(nil)}
+
+	err := server.initMeta(storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-restart")))
+
+	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+	require.True(t, stopped)
 }

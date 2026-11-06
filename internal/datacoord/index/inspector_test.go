@@ -298,6 +298,12 @@ func TestIndexInspector_StartIndexesNotifiedSegment(t *testing.T) {
 	inspector := NewIndexInspector(ctx, make(chan int64, 1), m, im, scheduler, alloc, handler, mocks.NewChunkManager(t), NewIndexEngineVersionManager())
 	inspector.Start()
 	defer inspector.Stop()
+	// The loop queues the unindexed segments before its first round.
+	assert.Eventually(t, func() bool {
+		inspector.pendingIndexMu.Lock()
+		defer inspector.pendingIndexMu.Unlock()
+		return inspector.pendingIndexSegs.Contain(pendingSegID)
+	}, 5*time.Second, 10*time.Millisecond)
 
 	m.Segments.SetSegment(segID, newFlushedSegment(segID))
 	meta.NotifySegmentIndexBuild(segID)
@@ -441,6 +447,152 @@ func TestIndexInspector_ProcessIndexSegmentsCreatesIndex(t *testing.T) {
 
 	assert.Empty(t, inspector.popIndexSegments(true))
 	assert.Contains(t, im.GetSegmentIndexes(collID, segID), indexID)
+}
+
+func TestIndexInspector_ReloadFromMetaEnqueuesResumableBuilds(t *testing.T) {
+	const (
+		collID         = UniqueID(2)
+		otherCollID    = UniqueID(3)
+		vecFieldID     = UniqueID(101)
+		scalarFieldID  = UniqueID(102)
+		vecIndexID     = UniqueID(10)
+		scalarIndexID  = UniqueID(11)
+		deletedIndexID = UniqueID(12)
+		removedIndexID = UniqueID(13) // its builds outlive the field index
+		numRows        = int64(1000)
+	)
+	vecIndexParams := []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}}
+	scalarIndexParams := []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "INVERTED"}}
+	m := meta.NewEmptyTestMeta()
+	im := NewSegmentIndexMeta(nil)
+	im.Indexes[collID] = map[UniqueID]*model.Index{
+		vecIndexID:     {CollectionID: collID, FieldID: vecFieldID, IndexID: vecIndexID, IndexParams: vecIndexParams},
+		scalarIndexID:  {CollectionID: collID, FieldID: scalarFieldID, IndexID: scalarIndexID, IndexParams: scalarIndexParams},
+		deletedIndexID: {CollectionID: collID, FieldID: scalarFieldID, IndexID: deletedIndexID, IsDeleted: true},
+	}
+	// Every segment has these field sizes, so the slot of a build follows from
+	// its index, and the two indexes have different slots.
+	binlogs := []*datapb.FieldBinlog{
+		{FieldID: vecFieldID, Binlogs: []*datapb.Binlog{{MemorySize: 300 << 20}}},
+		{FieldID: scalarFieldID, Binlogs: []*datapb.Binlog{{MemorySize: 20 << 20}}},
+	}
+	wantSlot := map[UniqueID]int64{
+		vecIndexID:    CalculateIndexTaskSlot(300<<20, numRows, vecIndexParams),
+		scalarIndexID: CalculateIndexTaskSlot(20<<20, numRows, scalarIndexParams),
+	}
+	assert.NotEqual(t, wantSlot[vecIndexID], wantSlot[scalarIndexID])
+	addSegment := func(segID, collectionID UniqueID, state commonpb.SegmentState) {
+		m.Segments.SetSegment(segID, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: segID, CollectionID: collectionID, PartitionID: 1, NumOfRows: numRows, State: state, Binlogs: binlogs,
+		}})
+	}
+	buildID := UniqueID(1000)
+	addBuild := func(segID, collectionID, indexID UniqueID, state commonpb.IndexState, deleted bool) UniqueID {
+		buildID++
+		im.updateSegmentIndex(&model.SegmentIndex{
+			SegmentID: segID, CollectionID: collectionID, PartitionID: 1, NumRows: numRows,
+			IndexID: indexID, BuildID: buildID, IndexState: state, IsDeleted: deleted,
+		})
+		return buildID
+	}
+
+	want := make(map[UniqueID]UniqueID) // build ID -> index ID
+	segID := UniqueID(100)
+	for _, segmentCase := range []struct {
+		inMeta bool
+		state  commonpb.SegmentState
+	}{
+		{inMeta: true, state: commonpb.SegmentState_Flushed},
+		// Segments still in meta resume their builds whatever their state.
+		{inMeta: true, state: commonpb.SegmentState_Dropped},
+		{inMeta: true, state: commonpb.SegmentState_Growing},
+		{inMeta: false},
+	} {
+		for state := range commonpb.IndexState_name {
+			for _, deleted := range []bool{false, true} {
+				segID++
+				if segmentCase.inMeta {
+					addSegment(segID, collID, segmentCase.state)
+				}
+				indexState := commonpb.IndexState(state)
+				resumable := indexState == commonpb.IndexState_Unissued ||
+					indexState == commonpb.IndexState_InProgress || indexState == commonpb.IndexState_Retry
+				for _, indexID := range []UniqueID{vecIndexID, scalarIndexID, deletedIndexID, removedIndexID} {
+					built := addBuild(segID, collID, indexID, indexState, deleted)
+					if segmentCase.inMeta && resumable && !deleted && (indexID == vecIndexID || indexID == scalarIndexID) {
+						want[built] = indexID
+					}
+				}
+			}
+		}
+	}
+	// A build is matched with the field indexes of its segment's collection,
+	// not of the collection it records.
+	segID++
+	addSegment(segID, collID, commonpb.SegmentState_Flushed)
+	want[addBuild(segID, 0, vecIndexID, commonpb.IndexState_Unissued, false)] = vecIndexID
+	segID++
+	addSegment(segID, otherCollID, commonpb.SegmentState_Flushed)
+	addBuild(segID, collID, vecIndexID, commonpb.IndexState_Unissued, false)
+
+	got := make(map[UniqueID]*indexBuildTask)
+	scheduler := task.NewMockGlobalScheduler(t)
+	scheduler.EXPECT().Enqueue(mock.Anything).Run(func(enqueued task.Task) {
+		buildTask := enqueued.(*indexBuildTask)
+		got[buildTask.BuildID] = buildTask
+	}).Maybe()
+	NewIndexInspector(context.Background(), nil, m, im, scheduler, nil, nil, nil, nil).reloadFromMeta()
+
+	assert.Len(t, want, 19)
+	assert.ElementsMatch(t, lo.Keys(want), lo.Keys(got))
+	for id, buildTask := range got {
+		// A task owns a clone of the resident build.
+		resident, _ := im.SegmentBuildInfo.Get(id)
+		assert.Equal(t, model.CloneSegmentIndex(resident), buildTask.SegmentIndex)
+		assert.NotSame(t, resident, buildTask.SegmentIndex)
+		assert.Equal(t, wantSlot[want[id]], buildTask.GetTaskSlot())
+	}
+}
+
+func TestIndexInspector_StartRequeuesUnindexedSegments(t *testing.T) {
+	// No round runs during the test (long interval, drained event channels),
+	// so the pending segments are the ones the loop queued when it started.
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.TaskCheckInterval.Key, "3600")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.TaskCheckInterval.Key)
+	meta.DrainBuildIndexChForTest()
+	defer meta.DrainBuildIndexChForTest()
+
+	const (
+		collID    = UniqueID(2)
+		indexID   = UniqueID(10)
+		unindexed = UniqueID(100)
+		indexed   = UniqueID(101)
+	)
+	m := meta.NewEmptyTestMeta()
+	im := NewSegmentIndexMeta(nil)
+	im.Indexes[collID] = map[UniqueID]*model.Index{indexID: {CollectionID: collID, FieldID: 101, IndexID: indexID}}
+	for _, segID := range []UniqueID{unindexed, indexed} {
+		m.Segments.SetSegment(segID, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: segID, CollectionID: collID, State: commonpb.SegmentState_Flushed, IsSorted: true, Level: datapb.SegmentLevel_L1,
+		}})
+	}
+	im.updateSegmentIndex(&model.SegmentIndex{
+		SegmentID: indexed, CollectionID: collID, IndexID: indexID, BuildID: 1, IndexState: commonpb.IndexState_Finished,
+	})
+
+	// Should a round run anyway, it defers the build instead of creating one.
+	handler := meta.NewNMockHandler(t)
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(nil, errors.New("mock schema unavailable")).Maybe()
+	inspector := NewIndexInspector(context.Background(), make(chan int64, 1), m, im, task.NewMockGlobalScheduler(t), nil, handler, nil, nil)
+	inspector.Start()
+	defer inspector.Stop()
+
+	var pending []UniqueID
+	assert.Eventually(t, func() bool {
+		pending = append(pending, inspector.popIndexSegments(true)...)
+		return len(pending) > 0
+	}, 10*time.Second, 10*time.Millisecond)
+	assert.ElementsMatch(t, []UniqueID{unindexed}, pending)
 }
 
 func TestIndexInspector_CreateIndexForSegment_FMIndexUsesMemoryBasedSlots(t *testing.T) {

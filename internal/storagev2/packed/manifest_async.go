@@ -282,6 +282,15 @@ func (io *ManifestIOContext) submitOpen(ctx context.Context, manifest ManifestJS
 		return err
 	}
 	defer C.loon_properties_free(properties)
+	return io.submitOpenWithProperties(ctx, manifest, properties, resolver, complete)
+}
+
+// submitOpenWithProperties is submitOpen with prebuilt properties, which the
+// native submission copies before it returns.
+func (io *ManifestIOContext) submitOpenWithProperties(ctx context.Context, manifest ManifestJSON, properties *C.LoonProperties, resolver C.int32_t, complete func(manifestOpenResult)) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	cBase := C.CString(manifest.BasePath)
 	defer C.free(unsafe.Pointer(cBase))
 
@@ -335,6 +344,41 @@ func (io *ManifestIOContext) open(ctx context.Context, manifest ManifestJSON, co
 // rejected read returns an error without calling complete. The callback must not
 // block, submit more work, or close its own IO context. Close drains callbacks.
 func SubmitManifestIndexInfos(ctx context.Context, io *ManifestIOContext, manifestPath string, config *indexpb.StorageConfig, complete func([]ManifestIndexInfo, error)) error {
+	return submitManifestIndexInfos(ctx, io, manifestPath, config, nil, complete)
+}
+
+// ManifestReadProperties are the loon properties of one StorageConfig, built
+// once for a series of reads with that config instead of once per read. Each
+// read copies them while it is submitted, so Close may follow the last
+// submission without waiting for its callback.
+type ManifestReadProperties struct {
+	properties *C.LoonProperties
+}
+
+// NewManifestReadProperties builds the properties SubmitManifestIndexInfos
+// builds for every read with config.
+func NewManifestReadProperties(config *indexpb.StorageConfig) (*ManifestReadProperties, error) {
+	properties, err := MakePropertiesFromStorageConfig(config, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &ManifestReadProperties{properties: properties}, nil
+}
+
+// Close frees the properties; no read may be submitted with them afterwards.
+func (p *ManifestReadProperties) Close() {
+	FreeProperties(p.properties)
+}
+
+// SubmitManifestIndexInfosWithProperties is SubmitManifestIndexInfos with the
+// properties of its storage config prebuilt.
+func SubmitManifestIndexInfosWithProperties(ctx context.Context, io *ManifestIOContext, manifestPath string, properties *ManifestReadProperties, complete func([]ManifestIndexInfo, error)) error {
+	return submitManifestIndexInfos(ctx, io, manifestPath, nil, properties, complete)
+}
+
+// submitManifestIndexInfos opens with properties when they are given and
+// otherwise builds them from config for this read alone.
+func submitManifestIndexInfos(ctx context.Context, io *ManifestIOContext, manifestPath string, config *indexpb.StorageConfig, properties *ManifestReadProperties, complete func([]ManifestIndexInfo, error)) error {
 	manifest, err := ParseManifestPath(manifestPath)
 	if err != nil {
 		return err
@@ -342,7 +386,7 @@ func SubmitManifestIndexInfos(ctx context.Context, io *ManifestIOContext, manife
 	if err := io.acquire(ctx); err != nil {
 		return err
 	}
-	err = io.submitOpen(ctx, manifest, config, C.LOON_TRANSACTION_RESOLVE_FAIL, func(result manifestOpenResult) {
+	opened := func(result manifestOpenResult) {
 		defer io.release()
 		if result.err != nil {
 			complete(nil, result.err)
@@ -351,7 +395,12 @@ func SubmitManifestIndexInfos(ctx context.Context, io *ManifestIOContext, manife
 		defer C.loon_transaction_destroy(result.transaction)
 		entries, err := transactionIndexInfos(result.transaction, manifestPath)
 		complete(entries, err)
-	})
+	}
+	if properties != nil {
+		err = io.submitOpenWithProperties(ctx, manifest, properties.properties, C.LOON_TRANSACTION_RESOLVE_FAIL, opened)
+	} else {
+		err = io.submitOpen(ctx, manifest, config, C.LOON_TRANSACTION_RESOLVE_FAIL, opened)
+	}
 	if err != nil {
 		io.release()
 	}
