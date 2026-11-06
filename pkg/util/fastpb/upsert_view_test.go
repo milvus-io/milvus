@@ -198,3 +198,66 @@ func BenchmarkUpsertPartitionSizing(b *testing.B) {
 		}
 	}
 }
+
+func TestUpsertBulkPrefixFillsExactChunkBoundary(t *testing.T) {
+	const count = 40
+	source := &msgpb.InsertRequest{NumRows: count, RowIDs: make([]int64, count), Timestamps: make([]uint64, count), FieldsData: []*schemapb.FieldData{{FieldId: 101, Type: schemapb.DataType_FloatVector, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, count*2)}}}}}}}
+	rows := make([]int, count)
+	prefix := make([]int, count+1)
+	for row := range rows {
+		rows[row] = row
+		source.RowIDs[row] = int64(row + 1)
+		prefix[row+1] = prefix[row] + 30 + row%7
+	}
+	for _, limit := range []int{1, 64, 512, 1024, 2048} {
+		cursor, err := NewUpsertViewCursor(source)
+		require.NoError(t, err)
+		remaining, budget := rows, prefix
+		chunks := 0
+		for len(remaining) > 0 {
+			want := 1
+			for candidate := 1; candidate <= len(remaining); candidate++ {
+				reference, err := NewUpsertViewEncoder(&messagespb.UpsertMessageBody{}, source, remaining[:candidate])
+				require.NoError(t, err)
+				size, err := reference.EncodedSize()
+				require.NoError(t, err)
+				if size+19+budget[candidate]-budget[0] > limit {
+					break
+				}
+				want = candidate
+			}
+			encoder, consumed, err := cursor.NextEncoder(remaining, limit, budget, 19)
+			require.NoError(t, err)
+			require.Equal(t, want, consumed)
+			metadata := &messagespb.UpsertMessageBody{RowIds: source.RowIDs[remaining[0] : remaining[consumed-1]+1]}
+			require.NoError(t, encoder.SetMetadata(metadata))
+			size, err := encoder.EncodedSize()
+			require.NoError(t, err)
+			actual := make([]byte, size)
+			_, err = encoder.MarshalTo(actual)
+			require.NoError(t, err)
+			reference, err := NewUpsertViewEncoder(metadata, source, remaining[:consumed])
+			require.NoError(t, err)
+			expected := make([]byte, size)
+			_, err = reference.MarshalTo(expected)
+			require.NoError(t, err)
+			require.Equal(t, expected, actual)
+			remaining = remaining[consumed:]
+			budget = budget[consumed:]
+			chunks++
+		}
+		if limit <= 1024 {
+			require.Greater(t, chunks, 1)
+		}
+	}
+}
+
+func TestUpsertMetadataRejectsInvalidUTF8BeforeMarshal(t *testing.T) {
+	source := &msgpb.InsertRequest{NumRows: 1, RowIDs: []int64{1}, Timestamps: []uint64{1}}
+	cursor, err := NewUpsertViewCursor(source)
+	require.NoError(t, err)
+	encoder, _, err := cursor.NextEncoder([]int{0}, 0, []int{0, 0}, 0)
+	require.NoError(t, err)
+	err = encoder.SetMetadata(&messagespb.UpsertMessageBody{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{string([]byte{0xff})}}}}})
+	require.Error(t, err)
+}

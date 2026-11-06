@@ -21,7 +21,6 @@ import (
 	"sort"
 
 	"google.golang.org/protobuf/encoding/protowire"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -51,16 +50,16 @@ func repackUpsertMessages(ctx context.Context, cache Cache, channels []string, s
 	if err != nil {
 		return nil, err
 	}
-	partitions := make([]int64, source.GetNumRows())
+	var partitions []int64
+	var fixedPartition int64
 	if partitionKeys == nil {
 		id, err := cache.GetPartitionID(ctx, source.GetDbName(), source.CollectionName, source.PartitionName)
 		if err != nil {
 			return nil, err
 		}
-		for i := range partitions {
-			partitions[i] = id
-		}
+		fixedPartition = id
 	} else {
+		partitions = make([]int64, source.GetNumRows())
 		names, err := getDefaultPartitionsInPartitionKeyMode(ctx, cache, source.GetDbName(), source.CollectionName)
 		if err != nil {
 			return nil, err
@@ -127,29 +126,19 @@ func repackUpsertMessages(ctx context.Context, cache Cache, channels []string, s
 			if !bounded {
 				continue
 			}
-			if len(deleteRows[row]) == 0 {
-				size, err := upsertPlainRowMetadataSize(ids, row, source.RowIDs[row], uint32(len(rows)), uint32(row))
-				if err != nil {
-					return nil, err
-				}
-				prefix[index+1] = prefix[index] + size + 64
-				continue
-			}
-			keys, err := idsByOffsets(ids, []int{row})
+			size, err := upsertPlainRowMetadataSize(ids, row, source.RowIDs[row], uint32(len(rows)), uint32(row))
 			if err != nil {
 				return nil, err
 			}
-			// Per-row protobuf wrappers overestimate shared packed wrappers. Each
-			// row also reserves a complete partition descriptor and its base64.
-			metadata := &message.UpsertMessageBody{PrimaryKeys: keys, RowIds: []int64{source.RowIDs[row]}, PartitionIndexes: []uint32{uint32(len(rows))}, RequestRowMapping: &messagespb.UpsertRequestRowMapping{RowOffsets: []uint32{uint32(row)}}}
-			if len(deleteRows[row]) > 0 {
-				keys, err := idsByOffsets(deleted, deleteRows[row])
+			if deleteRows != nil {
+				effectsSize, err := upsertDeleteMetadataSize(deleted, deleteRows[row], deletePartition)
 				if err != nil {
 					return nil, err
 				}
-				metadata.DeleteEffects = []*messagespb.UpsertDeleteEffect{{PrimaryKeys: keys, Scope: &messagespb.UpsertDeleteEffect_PartitionId{PartitionId: deletePartition}}}
+				size += effectsSize
 			}
-			prefix[index+1] = prefix[index] + proto.Size(metadata) + 64
+			// Keep the original row framing and partition/envelope reserve.
+			prefix[index+1] = prefix[index] + size + 64
 		}
 		for len(rows) > 0 {
 			limit := paramtable.Get().PulsarCfg.MaxMessageSize.GetAsInt()
@@ -168,25 +157,36 @@ func repackUpsertMessages(ctx context.Context, cache Cache, channels []string, s
 			body := &message.UpsertMessageBody{PrimaryKeys: keys, RowIds: make([]int64, count)}
 			header := &message.UpsertMessageHeader{CollectionId: source.GetCollectionID(), SchemaVersion: &version}
 			table := map[int64]uint32{}
-			offsets := make([]uint32, count)
+			if idempotency.enabled() {
+				body.RequestRowMapping = &messagespb.UpsertRequestRowMapping{RowOffsets: make([]uint32, count)}
+			}
+			if partitions == nil {
+				header.Partitions = []*message.PartitionSegmentAssignment{{PartitionId: fixedPartition, Rows: uint64(count)}}
+			}
 			for i, row := range selected {
 				body.RowIds[i] = source.GetRowIDs()[row]
-				offsets[i] = uint32(row)
+				if body.RequestRowMapping != nil {
+					body.RequestRowMapping.RowOffsets[i] = uint32(row)
+				}
+				if partitions == nil {
+					continue
+				}
 				part := partitions[row]
 				index, ok := table[part]
 				if !ok {
 					index = uint32(len(header.Partitions))
 					table[part] = index
 					header.Partitions = append(header.Partitions, &message.PartitionSegmentAssignment{PartitionId: part})
+					// Earlier rows all use index zero. Allocate only when a
+					// second partition makes per-row indexes necessary.
+					if index == 1 {
+						body.PartitionIndexes = make([]uint32, count)
+					}
 				}
 				header.Partitions[index].Rows++
-				body.PartitionIndexes = append(body.PartitionIndexes, index)
-			}
-			if len(header.Partitions) == 1 {
-				body.PartitionIndexes = nil
-			}
-			if idempotency.enabled() {
-				body.RequestRowMapping = &messagespb.UpsertRequestRowMapping{RowOffsets: offsets}
+				if body.PartitionIndexes != nil {
+					body.PartitionIndexes[i] = index
+				}
 			}
 			if cas != nil {
 				proof, ok := cas[channel]
@@ -196,8 +196,10 @@ func repackUpsertMessages(ctx context.Context, cache Cache, channels []string, s
 				body.PartialUpdateCas = proof
 			}
 			var deleteOffsets []int
-			for _, row := range selected {
-				deleteOffsets = append(deleteOffsets, deleteRows[row]...)
+			if deleteRows != nil {
+				for _, row := range selected {
+					deleteOffsets = append(deleteOffsets, deleteRows[row]...)
+				}
 			}
 			sort.Ints(deleteOffsets)
 			if len(deleteOffsets) > 0 {
@@ -243,10 +245,10 @@ func repackUpsertMessages(ctx context.Context, cache Cache, channels []string, s
 // matchUpsertDeletes visits each inserted key and each delete occurrence once.
 // Original delete offsets preserve occurrences and ordering across size chunks.
 func matchUpsertDeletes(inserted, deleted *schemapb.IDs) ([][]int, error) {
-	rows := make([][]int, typeutil.GetSizeOfIDs(inserted))
 	if typeutil.GetSizeOfIDs(deleted) == 0 {
-		return rows, nil
+		return nil, nil
 	}
+	rows := make([][]int, typeutil.GetSizeOfIDs(inserted))
 	byInt := make(map[int64]int)
 	byString := make(map[string]int)
 	for row, key := range inserted.GetIntId().GetData() {
@@ -288,28 +290,56 @@ func upsertWireSize(msg message.MutableMessage) int {
 // upsertPlainRowMetadataSize equals proto.Size of the existing conservative
 // one-row metadata object. It keeps its framing and budget unchanged.
 func upsertPlainRowMetadataSize(ids *schemapb.IDs, row int, rowID int64, partitionIndex, requestOffset uint32) (int, error) {
-	if ids == nil {
-		return 0, merr.WrapErrServiceInternalMsg("missing mutation result ids")
-	}
-	var keysSize int
-	if values := ids.GetIntId(); values != nil {
-		if row < 0 || row >= len(values.GetData()) {
-			return 0, merr.WrapErrServiceInternalMsg("row offset %d out of int id range %d", row, len(values.GetData()))
-		}
-		arraySize := protowire.SizeTag(1) + protowire.SizeBytes(protowire.SizeVarint(uint64(values.GetData()[row])))
-		keysSize = protowire.SizeTag(1) + protowire.SizeBytes(arraySize)
-	} else if values := ids.GetStrId(); values != nil {
-		if row < 0 || row >= len(values.GetData()) {
-			return 0, merr.WrapErrServiceInternalMsg("row offset %d out of string id range %d", row, len(values.GetData()))
-		}
-		arraySize := protowire.SizeTag(1) + protowire.SizeBytes(len(values.GetData()[row]))
-		keysSize = protowire.SizeTag(2) + protowire.SizeBytes(arraySize)
-	} else {
-		return 0, merr.WrapErrServiceInternalMsg("unsupported mutation result ids type")
+	keysSize, err := upsertKeysSize(ids, []int{row})
+	if err != nil {
+		return 0, err
 	}
 	mappingSize := protowire.SizeTag(1) + protowire.SizeBytes(protowire.SizeVarint(uint64(requestOffset)))
 	return protowire.SizeTag(1) + protowire.SizeBytes(keysSize) +
 		protowire.SizeTag(2) + protowire.SizeBytes(protowire.SizeVarint(uint64(rowID))) +
 		protowire.SizeTag(3) + protowire.SizeBytes(protowire.SizeVarint(uint64(partitionIndex))) +
 		protowire.SizeTag(7) + protowire.SizeBytes(mappingSize), nil
+}
+
+// upsertKeysSize computes IDs framing without copying a nonempty selection.
+func upsertKeysSize(ids *schemapb.IDs, offsets []int) (int, error) {
+	if ids == nil {
+		return 0, merr.WrapErrServiceInternalMsg("missing mutation result ids")
+	}
+	if values := ids.GetIntId(); values != nil {
+		payload := 0
+		for _, offset := range offsets {
+			if offset < 0 || offset >= len(values.GetData()) {
+				return 0, merr.WrapErrServiceInternalMsg("row offset %d out of int id range %d", offset, len(values.GetData()))
+			}
+			payload += protowire.SizeVarint(uint64(values.GetData()[offset]))
+		}
+		arraySize := protowire.SizeTag(1) + protowire.SizeBytes(payload)
+		return protowire.SizeTag(1) + protowire.SizeBytes(arraySize), nil
+	}
+	if values := ids.GetStrId(); values != nil {
+		arraySize := 0
+		for _, offset := range offsets {
+			if offset < 0 || offset >= len(values.GetData()) {
+				return 0, merr.WrapErrServiceInternalMsg("row offset %d out of string id range %d", offset, len(values.GetData()))
+			}
+			arraySize += protowire.SizeTag(1) + protowire.SizeBytes(len(values.GetData()[offset]))
+		}
+		return protowire.SizeTag(2) + protowire.SizeBytes(arraySize), nil
+	}
+	return 0, merr.WrapErrServiceInternalMsg("unsupported mutation result ids type")
+}
+
+// upsertDeleteMetadataSize preserves the original sizing object's partition_id
+// oneof, including -1. The actual message uses all_partitions for that scope.
+func upsertDeleteMetadataSize(ids *schemapb.IDs, offsets []int, partitionID int64) (int, error) {
+	if len(offsets) == 0 {
+		return 0, nil
+	}
+	keysSize, err := upsertKeysSize(ids, offsets)
+	if err != nil {
+		return 0, err
+	}
+	effectSize := protowire.SizeTag(2) + protowire.SizeVarint(uint64(partitionID)) + protowire.SizeTag(3) + protowire.SizeBytes(keysSize)
+	return protowire.SizeTag(5) + protowire.SizeBytes(effectSize), nil
 }
