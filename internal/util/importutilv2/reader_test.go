@@ -1601,3 +1601,50 @@ func TestSnapshotV2FactoryPreparesMixedDeletes(t *testing.T) {
 	require.Same(t, want, got)
 	require.Equal(t, 1, avro.Times())
 }
+
+func TestSnapshotSourceVersionCapabilities(t *testing.T) {
+	// Explicit wire fixtures prevent an encoder/decoder pair from agreeing on
+	// a new numbering scheme that would break persisted jobs.
+	cases := []struct {
+		legacy, v2   uint32
+		capabilities SnapshotSourceCapabilities
+	}{
+		{1, 10, SnapshotSourceCapabilities{}},
+		{2, 11, SnapshotSourceCapabilities{ExternalStorage: true}},
+		{3, 12, SnapshotSourceCapabilities{PartitionMapping: true}},
+		{4, 13, SnapshotSourceCapabilities{ExternalStorage: true, PartitionMapping: true}},
+		{5, 14, SnapshotSourceCapabilities{SharedL0: true}},
+		{6, 15, SnapshotSourceCapabilities{ExternalStorage: true, SharedL0: true}},
+		{7, 16, SnapshotSourceCapabilities{PartitionMapping: true, SharedL0: true}},
+		{8, 17, SnapshotSourceCapabilities{ExternalStorage: true, PartitionMapping: true, SharedL0: true}},
+	}
+	for _, tc := range cases {
+		for _, version := range []uint32{tc.legacy, tc.v2} {
+			t.Run(fmt.Sprint(version), func(t *testing.T) {
+				want := tc.capabilities
+				want.V2Reference = version == tc.v2
+				got, valid := DecodeSnapshotSourceVersion(version)
+				require.True(t, valid)
+				require.Equal(t, want, got)
+				require.Equal(t, version, EncodeSnapshotSourceVersion(want))
+				source := &internalpb.SnapshotImportSource{Version: version}
+				require.Equal(t, want.SharedL0, SnapshotSourceUsesSharedL0(source))
+				readerCapabilities, valid := DecodeSnapshotSourceVersion(SnapshotSourceContractVersion(source))
+				require.True(t, valid)
+				want.SharedL0, want.V2Reference = false, false
+				require.Equal(t, want, readerCapabilities)
+				require.Equal(t, version, source.GetVersion())
+			})
+		}
+	}
+	for _, version := range []uint32{0, SnapshotPreparationVersion, 18, ^uint32(0)} {
+		got, valid := DecodeSnapshotSourceVersion(version)
+		require.False(t, valid)
+		require.Equal(t, SnapshotSourceCapabilities{}, got)
+		source := &internalpb.SnapshotImportSource{Version: version}
+		require.False(t, SnapshotSourceUsesSharedL0(source))
+		require.Equal(t, version, SnapshotSourceContractVersion(source))
+	}
+	require.False(t, SnapshotSourceUsesSharedL0(nil))
+	require.Zero(t, SnapshotSourceContractVersion(nil))
+}

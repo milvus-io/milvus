@@ -128,7 +128,8 @@ func ValidateSnapshotImportFiles(files []*internalpb.ImportFile, options Options
 	_, mappingErr := funcutil.GetAttrByKeyFromRepeatedKV(PartitionMapping, options)
 	for _, file := range files {
 		source := file.GetSnapshotSource()
-		if source != nil && (source.GetVersion() < 1 || source.GetVersion() > 17 || source.GetVersion() == SnapshotPreparationVersion) {
+		capabilities, valid := DecodeSnapshotSourceVersion(source.GetVersion())
+		if source != nil && !valid {
 			return merr.Wrapf(merr.ErrServiceUnimplemented, "unsupported snapshot import source version %d", source.GetVersion())
 		}
 		// Development versions persisted L0 paths in every segment descriptor.
@@ -138,15 +139,14 @@ func ValidateSnapshotImportFiles(files []*internalpb.ImportFile, options Options
 		if len(source.GetLegacyL0Deltalogs())+len(source.GetManifestL0Deltalogs()) != 0 {
 			return merr.Wrapf(merr.ErrServiceUnimplemented, "snapshot import tasks with inline L0 are no longer supported; resubmit the snapshot import")
 		}
-		contractVersion := SnapshotSourceContractVersion(source)
-		if SnapshotSourceUsesSharedL0(source) {
+		if capabilities.SharedL0 {
 			if source.GetSourceChannel() == "" || source.GetSourcePartitionId() <= 0 {
 				return merr.WrapErrServiceInternalMsg("invalid task-shared snapshot source descriptor")
 			}
 		} else if source.GetSourceChannel() != "" || source.GetSourcePartitionId() != 0 {
 			return merr.WrapErrServiceInternalMsg("legacy snapshot descriptor contains shared source scope")
 		}
-		external := contractVersion == 2 || contractVersion == 4
+		external := capabilities.ExternalStorage
 		if HasExternalSource(options) {
 			uri, err := funcutil.GetAttrByKeyFromRepeatedKV(SnapshotSourceURI, options)
 			if err != nil || strings.TrimSpace(uri) == "" || !external {
@@ -155,7 +155,7 @@ func ValidateSnapshotImportFiles(files []*internalpb.ImportFile, options Options
 		} else if external {
 			return merr.WrapErrServiceInternalMsg("external snapshot descriptor lost its credentials")
 		}
-		mapped := contractVersion == 3 || contractVersion == 4
+		mapped := capabilities.PartitionMapping
 		if (mappingErr == nil) != mapped || (mapped && source.GetTargetPartitionId() <= 0) || (!mapped && source.GetTargetPartitionId() != 0) {
 			return merr.WrapErrServiceInternalMsg("snapshot import lost its partition mapping descriptor")
 		}
@@ -169,7 +169,7 @@ func ValidateSnapshotImportFiles(files []*internalpb.ImportFile, options Options
 			return merr.WrapErrServiceInternalMsg("mixed snapshot import source representations")
 		}
 		if ref := source.GetV2Reference(); ref != nil {
-			if source.GetVersion() < 10 || source.GetManifestPath() != "" || ref.GetSegmentId() <= 0 ||
+			if !capabilities.V2Reference || source.GetManifestPath() != "" || ref.GetSegmentId() <= 0 ||
 				strings.TrimSpace(ref.GetSnapshotManifestPath()) == "" || ref.GetSnapshotFormatVersion() < 0 {
 				return merr.WrapErrServiceInternalMsg("invalid snapshot V2 reference")
 			}
@@ -191,25 +191,65 @@ func ValidateSnapshotImportFiles(files []*internalpb.ImportFile, options Options
 	return nil
 }
 
-// Versions 5-8 preserve the local/external and mapped/unmapped contracts of
-// versions 1-4, but require a separate L0 inventory. Older workers reject the
-// version rather than silently ignoring deletes they do not know how to bind.
-func SnapshotSourceUsesSharedL0(source *internalpb.SnapshotImportSource) bool {
-	v := source.GetVersion()
-	return (v >= 5 && v <= 8) || (v >= 14 && v <= 17)
+// SnapshotSourceCapabilities describes requirements, not the segment's storage
+// format. Mixed jobs require V2Reference even on their V3 descriptors.
+type SnapshotSourceCapabilities struct {
+	ExternalStorage  bool
+	PartitionMapping bool
+	SharedL0         bool
+	V2Reference      bool
 }
 
-// SnapshotSourceContractVersion returns the reader's local/external and routing
-// capabilities without changing the durable descriptor or its source payload.
+// EncodeSnapshotSourceVersion preserves the persisted 1-8 and 10-17 contracts.
+// Version 9 belongs exclusively to Pending preparation.
+func EncodeSnapshotSourceVersion(c SnapshotSourceCapabilities) uint32 {
+	version := uint32(1)
+	if c.ExternalStorage {
+		version++
+	}
+	if c.PartitionMapping {
+		version += 2
+	}
+	if c.SharedL0 {
+		version += 4
+	}
+	if c.V2Reference {
+		version += 9
+	}
+	return version
+}
+
+// DecodeSnapshotSourceVersion rejects Pending and unknown worker contracts.
+func DecodeSnapshotSourceVersion(version uint32) (SnapshotSourceCapabilities, bool) {
+	c := SnapshotSourceCapabilities{}
+	if version < 1 || version > 17 || version == SnapshotPreparationVersion {
+		return c, false
+	}
+	if version >= 10 {
+		c.V2Reference = true
+		version -= 9
+	}
+	flags := version - 1
+	c.ExternalStorage = flags&1 != 0
+	c.PartitionMapping = flags&2 != 0
+	c.SharedL0 = flags&4 != 0
+	return c, true
+}
+
+func SnapshotSourceUsesSharedL0(source *internalpb.SnapshotImportSource) bool {
+	c, _ := DecodeSnapshotSourceVersion(source.GetVersion())
+	return c.SharedL0
+}
+
+// SnapshotSourceContractVersion adapts a validated descriptor to the legacy
+// reader contract without changing the durable descriptor.
 func SnapshotSourceContractVersion(source *internalpb.SnapshotImportSource) uint32 {
-	v := source.GetVersion()
-	if v >= 10 && v <= 17 {
-		v -= 9
+	c, valid := DecodeSnapshotSourceVersion(source.GetVersion())
+	if !valid {
+		return source.GetVersion()
 	}
-	if v >= 5 && v <= 8 {
-		v -= 4
-	}
-	return v
+	c.SharedL0, c.V2Reference = false, false
+	return EncodeSnapshotSourceVersion(c)
 }
 
 type snapshotSourceScope struct {

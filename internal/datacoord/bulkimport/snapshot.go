@@ -452,22 +452,12 @@ func expandSnapshotImportFiles(
 	}
 	external := importutilv2.HasExternalSource(options)
 	if hasV2 || external || partitionMapping != nil {
-		// Select the complete contract once: external storage adds 1, target
-		// routing adds 2, and shared L0 adds 4 to the base version. Older workers
-		// must reject capabilities they cannot preserve, never ignore them.
-		version := uint32(1)
-		if external {
-			version++
-		}
-		if partitionMapping != nil {
-			version += 2
-		}
-		if len(l0Sources) != 0 {
-			version += 4
-		}
-		if hasV2 {
-			version += 9
-		}
+		version := importutilv2.EncodeSnapshotSourceVersion(importutilv2.SnapshotSourceCapabilities{
+			ExternalStorage:  external,
+			PartitionMapping: partitionMapping != nil,
+			SharedL0:         len(l0Sources) != 0,
+			V2Reference:      hasV2,
+		})
 		for i, file := range result {
 			if file.SnapshotSource == nil {
 				file.SnapshotSource = &internalpb.SnapshotImportSource{ManifestPath: file.GetPaths()[0]}
@@ -589,10 +579,9 @@ func attachSnapshotImportSources(ctx context.Context, cm milvusstorage.ChunkMana
 		if source == nil {
 			source = &internalpb.SnapshotImportSource{ManifestPath: segment.GetManifestPath()}
 		}
-		source.Version = 1
+		source.Version = importutilv2.EncodeSnapshotSourceVersion(importutilv2.SnapshotSourceCapabilities{SharedL0: len(deltas) != 0})
 		source.SourceCommitTimestamp = segment.GetCommitTimestamp()
 		if len(deltas) != 0 {
-			source.Version = 5
 			source.SourceChannel = segment.GetChannelName()
 			source.SourcePartitionId = segment.GetPartitionId()
 			groupFor(source.SourceChannel, source.SourcePartitionId)
