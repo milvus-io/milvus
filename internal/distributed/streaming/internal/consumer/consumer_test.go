@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/client/handler/mock_consumer"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
+	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
@@ -78,6 +79,37 @@ func TestResumableConsumer(t *testing.T) {
 
 	rc.Close()
 	<-rc.Done()
+}
+
+func TestResumableConsumerStopsOnUnrecoverableError(t *testing.T) {
+	consumerErr := status.NewUnrecoverableError("historical WAL is unavailable")
+	done := make(chan struct{})
+	close(done)
+
+	c := mock_consumer.NewMockConsumer(t)
+	c.EXPECT().Done().Return(done)
+	c.EXPECT().Error().Return(consumerErr)
+	c.EXPECT().Close().Return(nil)
+
+	factoryCalls := 0
+	rc := NewResumableConsumer(func(context.Context, *handler.ConsumerOptions) (consumer.Consumer, error) {
+		factoryCalls++
+		return c, nil
+	}, &ConsumerOptions{
+		PChannel:      "test",
+		DeliverPolicy: options.DeliverPolicyAll(),
+		MessageHandler: adaptor.ChanMessageHandler(
+			make(chan message.ImmutableMessage),
+		),
+	})
+
+	select {
+	case <-rc.Done():
+	case <-time.After(time.Second):
+		t.Fatal("resumable consumer did not stop on unrecoverable error")
+	}
+	assert.Equal(t, 1, factoryCalls)
+	assert.True(t, status.AsStreamingError(rc.Error()).IsUnrecoverable())
 }
 
 func TestHandler(t *testing.T) {

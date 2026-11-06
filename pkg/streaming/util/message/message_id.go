@@ -2,6 +2,7 @@ package message
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/cockroachdb/errors"
 
@@ -94,4 +95,10 @@ type MessageID interface {
 
 	// Convert into string for logging.
 	String() string
+}
+
+// MessageIDKeyWithWALName returns an in-memory identity key that includes the WAL backend.
+// It is not a wire or persistence format.
+func MessageIDKeyWithWALName(msgID MessageID) string {
+	return strconv.Itoa(int(msgID.WALName())) + "\x00" + msgID.Marshal()
 }

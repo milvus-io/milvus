@@ -113,7 +113,7 @@ func TestRecoveryScannerPreservesPartialTransaction(t *testing.T) {
 			buffer := wab.NewWriteAheadBuffer(l.Channel().Name, mlog.With(), capacity, time.Hour, barrier)
 			t.Cleanup(buffer.Close)
 			liveReady := make(chan struct{})
-			ro := adaptImplsToROWAL(l, func() {})
+			ro := adaptImplsToROWAL(l, func() {}, nil)
 			t.Cleanup(ro.Close)
 			stream := newRecoveryStreamBuilder(ro, buffer, liveReady).Build(recovery.BuildRecoveryStreamParam{
 				StartCheckpoint: historical.MessageID(), RecoveryBarrier: barrier,
@@ -198,7 +198,7 @@ func TestRecoveryScannerCloseWhilePaused(t *testing.T) {
 			}
 			buffer := wab.NewWriteAheadBuffer(l.Channel().Name, mlog.With(), 1024, time.Hour, barrier)
 			t.Cleanup(buffer.Close)
-			ro := adaptImplsToROWAL(l, func() {})
+			ro := adaptImplsToROWAL(l, func() {}, nil)
 			t.Cleanup(ro.Close)
 			ready := make(chan struct{})
 			stream := newRecoveryStreamBuilder(ro, buffer, ready).Build(recovery.BuildRecoveryStreamParam{
@@ -228,7 +228,7 @@ func TestRecoveryScannerDeliversQueuedVolatileMVCCBarriers(t *testing.T) {
 	// Cached barriers are delivered individually, including repeated scopes.
 	buffer := wab.NewWriteAheadBuffer(l.Channel().Name, mlog.With(), 1, 0, barrier)
 	t.Cleanup(buffer.Close)
-	ro := adaptImplsToROWAL(l, func() {})
+	ro := adaptImplsToROWAL(l, func() {}, nil)
 	t.Cleanup(ro.Close)
 	ready := make(chan struct{})
 	stream := newRecoveryStreamBuilder(ro, buffer, ready).Build(recovery.BuildRecoveryStreamParam{
@@ -275,7 +275,7 @@ func TestOrdinaryCatchupReturnsToIdleWABAfterRecoveryConsumption(t *testing.T) {
 	buffer.ReleaseThrough(120)
 	messages := make(chan message.ImmutableMessage, 8)
 	scanner := newSwithableScanner("idle-catchup", mlog.With(), l, buffer,
-		options.DeliverPolicyStartFrom(durable.MessageID()), messages, nil)
+		options.DeliverPolicyStartFrom(durable.MessageID()), messages, nil, nil, nil)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	next, err := scanner.Do(ctx)

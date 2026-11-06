@@ -49,6 +49,16 @@ func (m *delegatorMsgstreamAdaptor) Close() {
 	}
 }
 
+// Error returns the terminal scanner error after the message channel is closed.
+// msgdispatcher uses this optional capability to distinguish an unexpected
+// scanner failure from a normal dispatcher shutdown.
+func (m *delegatorMsgstreamAdaptor) Error() error {
+	if m.scanner == nil {
+		return nil
+	}
+	return m.scanner.Error()
+}
+
 func (m *delegatorMsgstreamAdaptor) AsProducer(ctx context.Context, channels []string) {
 	panic("should never be called")
 }
