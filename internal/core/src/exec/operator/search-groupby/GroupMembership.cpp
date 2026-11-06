@@ -104,8 +104,16 @@ ScanRawField(milvus::OpContext* op_ctx,
 
     int64_t chunk_id = 0;
     int64_t chunk_pos = 0;
-    auto accessor = reader.GetMultipleChunkDataAccessor(
-        segment.GetFieldDataType(field_id), field_id, chunk_id, chunk_pos);
+    // This accessor consumes the whole column continuously, so retain each
+    // source Cell until advancing past it, as the legacy Raw reader did.
+    segcore::ColumnScanState scan_state(ScanPinPolicy::CursorOwned);
+    auto accessor =
+        reader.GetMultipleChunkDataAccessor(segment.GetFieldDataType(field_id),
+                                            field_id,
+                                            chunk_id,
+                                            chunk_pos,
+                                            1024,
+                                            &scan_state);
     for (size_t offset = 0; offset < row_count; ++offset) {
         if ((offset & 1023) == 0) {
             segcore::CheckCancellation(op_ctx,

@@ -201,8 +201,9 @@ TEST(SegmentChunkReader, GrowingConjunctSkipKeepsNextBatchCorrect) {
 }
 
 namespace {
-struct StringReadStats {
+struct ReaderStats {
     int64_t legacy_view_rows = 0;
+    int64_t legacy_spans = 0;
     int64_t scanned_rows = 0;
     int64_t largest_scan = 0;
     int64_t takes = 0;
@@ -212,10 +213,9 @@ struct StringReadStats {
     bool fail_pin = false;
 };
 
-class CountingStringScan final : public ScanCursor {
+class CountingReaderScan final : public ScanCursor {
  public:
-    CountingStringScan(ScanResult cursor,
-                       std::shared_ptr<StringReadStats> stats)
+    CountingReaderScan(ScanResult cursor, std::shared_ptr<ReaderStats> stats)
         : cursor_(std::move(cursor)), stats_(std::move(stats)) {
     }
     int64_t
@@ -239,27 +239,32 @@ class CountingStringScan final : public ScanCursor {
 
  private:
     ScanResult cursor_;
-    std::shared_ptr<StringReadStats> stats_;
+    std::shared_ptr<ReaderStats> stats_;
 };
 
-class ReaderStringColumn : public ChunkedVariableColumn<std::string> {
+template <typename Base>
+class ReaderColumn : public Base {
  public:
-    ReaderStringColumn(std::shared_ptr<CacheSlot<Chunk>> slot,
-                       const FieldMeta& meta,
-                       std::shared_ptr<StringReadStats> stats)
-        : ChunkedVariableColumn(std::move(slot), meta),
-          stats_(std::move(stats)) {
+    ReaderColumn(std::shared_ptr<CacheSlot<Chunk>> slot,
+                 const FieldMeta& meta,
+                 std::shared_ptr<ReaderStats> stats)
+        : Base(std::move(slot), meta), stats_(std::move(stats)) {
     }
     ScanResult
     Scan(milvus::OpContext* ctx, const ScanOptions& options) const override {
         ++stats_->scans;
-        return std::make_unique<CountingStringScan>(
-            ChunkedVariableColumn::Scan(ctx, options), stats_);
+        return std::make_unique<CountingReaderScan>(Base::Scan(ctx, options),
+                                                    stats_);
     }
     TakeResultPtr
     Take(milvus::OpContext* ctx, TakeOptions options) const override {
         ++stats_->takes;
-        return ChunkedVariableColumn::Take(ctx, std::move(options));
+        return Base::Take(ctx, std::move(options));
+    }
+    PinWrapper<SpanBase>
+    Span(milvus::OpContext* ctx, int64_t chunk) const override {
+        ++stats_->legacy_spans;
+        return Base::Span(ctx, chunk);
     }
     PinWrapper<std::pair<std::vector<std::string_view>, ValidityView>>
     StringViews(
@@ -267,20 +272,22 @@ class ReaderStringColumn : public ChunkedVariableColumn<std::string> {
         int64_t chunk,
         std::optional<std::pair<int64_t, int64_t>> range) const override {
         stats_->legacy_view_rows +=
-            range ? range->second : chunk_row_nums(chunk);
-        return ChunkedVariableColumn::StringViews(ctx, chunk, range);
+            range ? range->second : this->chunk_row_nums(chunk);
+        return Base::StringViews(ctx, chunk, range);
     }
     PinWrapper<Chunk*>
     GetChunk(milvus::OpContext* ctx, int64_t chunk) const override {
         if (stats_->fail_pin) {
             ThrowInfo(ErrorCode::FileReadFailed,
-                      "injected string scan failure");
+                      "injected reader scan failure");
         }
         ++stats_->pins;
-        return ChunkedVariableColumn::GetChunk(ctx, chunk);
+        return Base::GetChunk(ctx, chunk);
     }
 
  protected:
+    using TakeCellAccess = typename Base::TakeCellAccess;
+    using TakeCellPin = typename Base::TakeCellPin;
     TakeCellAccess
     MakeTakeCellAccess(
         milvus::OpContext* ctx,
@@ -289,20 +296,18 @@ class ReaderStringColumn : public ChunkedVariableColumn<std::string> {
             if (!batch_cell_ids->empty()) {
                 if (stats_->fail_pin) {
                     ThrowInfo(ErrorCode::FileReadFailed,
-                              "injected string Take failure");
+                              "injected reader Take failure");
                 }
                 ++stats_->pins;
             }
-            return ChunkedVariableColumn::MakeTakeCellAccess(ctx,
-                                                             batch_cell_ids);
+            return Base::MakeTakeCellAccess(ctx, batch_cell_ids);
         }
-        auto access =
-            ChunkedVariableColumn::MakeTakeCellAccess(ctx, batch_cell_ids);
+        auto access = Base::MakeTakeCellAccess(ctx, batch_cell_ids);
         return TakeCellPin([pin = std::move(std::get<TakeCellPin>(access)),
                             stats = stats_](int64_t chunk) {
             if (stats->fail_pin) {
                 ThrowInfo(ErrorCode::FileReadFailed,
-                          "injected string Take failure");
+                          "injected reader Take failure");
             }
             ++stats->pins;
             return pin(chunk);
@@ -310,13 +315,16 @@ class ReaderStringColumn : public ChunkedVariableColumn<std::string> {
     }
 
  private:
-    std::shared_ptr<StringReadStats> stats_;
+    std::shared_ptr<ReaderStats> stats_;
 };
 
-class ReaderStringSegment : public ChunkedSegmentSealedImpl {
+using ReaderStringColumn = ReaderColumn<ChunkedVariableColumn<std::string>>;
+using ReaderFixedColumn = ReaderColumn<ChunkedColumn>;
+
+class ReaderSegment : public ChunkedSegmentSealedImpl {
  public:
-    ReaderStringSegment(SchemaPtr schema,
-                        std::shared_ptr<ChunkedColumnInterface> column)
+    ReaderSegment(SchemaPtr schema,
+                  std::shared_ptr<ChunkedColumnInterface> column)
         : ChunkedSegmentSealedImpl(
               schema, empty_index_meta, SegcoreConfig::default_config(), 101),
           column_(std::move(column)) {
@@ -381,10 +389,9 @@ class ReaderStringSegment : public ChunkedSegmentSealedImpl {
     std::shared_ptr<ChunkedColumnInterface> column_;
 };
 
-class ReaderStringSnapshot : public SegmentReadSnapshot {
+class ReaderSnapshot : public SegmentReadSnapshot {
  public:
-    explicit ReaderStringSnapshot(
-        std::shared_ptr<ChunkedColumnInterface> column)
+    explicit ReaderSnapshot(std::shared_ptr<ChunkedColumnInterface> column)
         : column_(std::move(column)) {
     }
     int64_t
@@ -446,10 +453,10 @@ class SegmentChunkReaderStringTest
         other_field_ =
             schema->AddDebugField("other", DataType::VARCHAR, nullable);
         schema_ = schema;
-        stats_ = std::make_shared<StringReadStats>();
+        stats_ = std::make_shared<ReaderStats>();
         column_ = MakeColumn({8192, 7, 20}, stats_, expected_);
         ASSERT_NE(column_, nullptr);
-        segment_ = std::make_unique<ReaderStringSegment>(schema, column_);
+        segment_ = std::make_unique<ReaderSegment>(schema, column_);
     }
     void
     TearDown() override {
@@ -458,7 +465,7 @@ class SegmentChunkReaderStringTest
     }
     std::shared_ptr<ReaderStringColumn>
     MakeColumn(const std::vector<int64_t>& rows_per_chunk,
-               const std::shared_ptr<StringReadStats>& stats,
+               const std::shared_ptr<ReaderStats>& stats,
                std::vector<std::optional<std::string>>& expected,
                bool other = false) {
         const auto nullable = std::get<0>(GetParam());
@@ -535,15 +542,195 @@ class SegmentChunkReaderStringTest
     FieldId field_{0};
     FieldId other_field_{0};
     SchemaPtr schema_;
-    std::shared_ptr<StringReadStats> stats_;
+    std::shared_ptr<ReaderStats> stats_;
     std::shared_ptr<ReaderStringColumn> column_;
-    std::unique_ptr<ReaderStringSegment> segment_;
+    std::unique_ptr<ReaderSegment> segment_;
     std::vector<std::optional<std::string>> expected_;
     std::vector<std::weak_ptr<ChunkMmapGuard>> lifetimes_;
     const bool saved_cursor_owns_pin_ =
         SegcoreConfig::default_config().get_scan_cursor_owns_pin();
 };
+
+template <typename Traits>
+class SegmentChunkReaderScalarTest : public ::testing::Test {
+ protected:
+    using T = typename Traits::NativeType;
+
+    void
+    TearDown() override {
+        SegcoreConfig::default_config().set_scan_cursor_owns_pin(
+            saved_cursor_owns_pin_);
+    }
+
+    static T
+    Value(int64_t row) {
+        if constexpr (Traits::TypeKind == DataType::TIMESTAMPTZ) {
+            return 1700000000000000LL + row;
+        }
+        return static_cast<T>(row % 7);
+    }
+
+    std::shared_ptr<ReaderFixedColumn>
+    MakeColumn(const FieldMeta& meta,
+               const std::vector<int64_t>& rows,
+               const std::shared_ptr<ReaderStats>& stats) {
+        std::vector<std::unique_ptr<Chunk>> chunks;
+        chunks.reserve(rows.size());
+        lifetimes_.clear();
+        int64_t start = 0;
+        for (const auto count : rows) {
+            const auto bitmap = meta.is_nullable() ? (count + 7) / 8 : 0;
+            const auto bytes = bitmap + count * sizeof(T);
+            const auto mapped = std::max<size_t>(bytes, 1);
+            auto* data = static_cast<char*>(mmap(nullptr,
+                                                 mapped,
+                                                 PROT_READ | PROT_WRITE,
+                                                 MAP_PRIVATE | MAP_ANONYMOUS,
+                                                 -1,
+                                                 0));
+            if (data == MAP_FAILED) {
+                ADD_FAILURE() << "cannot allocate scalar fixture";
+                return nullptr;
+            }
+            auto guard = std::make_shared<ChunkMmapGuard>(data, mapped, "");
+            lifetimes_.push_back(guard);
+            for (int64_t i = 0; i < count; ++i) {
+                const auto row = start + i;
+                const auto value = Value(row);
+                std::memcpy(data + bitmap + i * sizeof(T), &value, sizeof(T));
+                if (meta.is_nullable() && row != 6 && row != 14) {
+                    data[i / 8] |= 1 << (i % 8);
+                }
+            }
+            chunks.push_back(std::make_unique<FixedWidthChunk>(
+                count, 1, data, bytes, sizeof(T), meta.is_nullable(), guard));
+            start += count;
+        }
+        auto translator = std::make_unique<TestChunkTranslator>(
+            rows, "segment_reader_scalars", std::move(chunks));
+        auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
+            std::move(translator), nullptr);
+        return std::make_shared<ReaderFixedColumn>(slot, meta, stats);
+    }
+
+    void
+    Check(const data_access_type& value, int64_t row, bool nullable) {
+        const auto valid = !nullable || (row != 6 && row != 14);
+        ASSERT_EQ(value.has_value(), valid) << row;
+        if (valid) {
+            EXPECT_EQ(get_from_variant<T>(value), Value(row)) << row;
+        }
+    }
+
+    std::vector<std::weak_ptr<ChunkMmapGuard>> lifetimes_;
+    const bool saved_cursor_owns_pin_ =
+        SegcoreConfig::default_config().get_scan_cursor_owns_pin();
+};
+
+using ReaderScalarTypes = ::testing::Types<TypeTraits<DataType::BOOL>,
+                                           TypeTraits<DataType::INT8>,
+                                           TypeTraits<DataType::INT16>,
+                                           TypeTraits<DataType::INT32>,
+                                           TypeTraits<DataType::INT64>,
+                                           TypeTraits<DataType::FLOAT>,
+                                           TypeTraits<DataType::DOUBLE>,
+                                           TypeTraits<DataType::TIMESTAMPTZ>>;
+TYPED_TEST_SUITE(SegmentChunkReaderScalarTest, ReaderScalarTypes);
 }  // namespace
+
+TYPED_TEST(SegmentChunkReaderScalarTest,
+           ScanAndTakeKeepSnapshotWindowsOffsetsAndNulls) {
+    for (const bool nullable : {false, true}) {
+        for (const bool cursor_owns_pin : {false, true}) {
+            SegcoreConfig::default_config().set_scan_cursor_owns_pin(
+                cursor_owns_pin);
+            auto schema = std::make_shared<Schema>();
+            auto pk = schema->AddDebugField("pk", DataType::INT64);
+            schema->set_primary_field_id(pk);
+            auto field =
+                schema->AddDebugField("value", TypeParam::TypeKind, nullable);
+            auto stats = std::make_shared<ReaderStats>();
+            auto column =
+                this->MakeColumn((*schema)[field], {5, 0, 3, 9}, stats);
+            ASSERT_NE(column, nullptr);
+            ReaderSegment segment(schema, column);
+            ReaderSnapshot snapshot(column);
+            segment.forbid_live_column_read = true;
+            SegmentChunkReader reader(nullptr, &segment, 17);
+            reader.SetSnapshot(&snapshot);
+            ColumnScanState scan_state;
+            int64_t chunk = 0, pos = 0;
+            for (int64_t start = 0; start < 17; start += 4) {
+                if (start == 4) {
+                    reader.MoveCursorForMultipleChunk(chunk, pos, field, 4, 4);
+                    continue;
+                }
+                auto accessor = reader.GetMultipleChunkDataAccessor(
+                    TypeParam::TypeKind, field, chunk, pos, 4, &scan_state);
+                for (int64_t row = start;
+                     row < std::min<int64_t>(start + 4, 17);
+                     ++row) {
+                    this->Check(accessor(), row, nullable);
+                }
+                if (start == 8) {
+                    const int32_t offsets[]{16, 6, 0, 16, 5, 14};
+                    auto take = reader.GetDataAccessorByOffsets(
+                        TypeParam::TypeKind,
+                        field,
+                        OffsetView::From(offsets, 6));
+                    ASSERT_TRUE(take);
+                    const auto pins_before = stats->pins;
+                    for (int i = 0; i < 6; ++i) {
+                        this->Check(take(i), offsets[i], nullable);
+                    }
+                    // CurrentCell preserves the legacy consecutive-chunk pin
+                    // pattern, rather than eagerly pinning every input Cell.
+                    EXPECT_EQ(stats->pins - pins_before, 6);
+                }
+            }
+            EXPECT_EQ(stats->scans, 1);
+            EXPECT_EQ(stats->takes, 1);
+            EXPECT_EQ(stats->seeks, 1);
+            EXPECT_EQ(stats->scanned_rows, 13);
+            EXPECT_LE(stats->largest_scan, 4);
+            EXPECT_EQ(stats->legacy_spans, 0);
+            EXPECT_EQ(stats->pins, cursor_owns_pin ? 8 : 10);
+            EXPECT_EQ(snapshot.column_reads, 2);
+        }
+    }
+}
+
+TYPED_TEST(SegmentChunkReaderScalarTest,
+           ContinuousScanRetainsOnlyCurrentCellWithExplicitPolicy) {
+    SegcoreConfig::default_config().set_scan_cursor_owns_pin(false);
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto field = schema->AddDebugField("value", TypeParam::TypeKind, true);
+    auto stats = std::make_shared<ReaderStats>();
+    auto column = this->MakeColumn((*schema)[field], {5, 0, 3, 9}, stats);
+    ASSERT_NE(column, nullptr);
+    ReaderSegment segment(schema, column);
+    SegmentChunkReader reader(nullptr, &segment, 17);
+    ColumnScanState scan_state(ScanPinPolicy::CursorOwned);
+    int64_t chunk = 0, pos = 0;
+    auto accessor = reader.GetMultipleChunkDataAccessor(
+        TypeParam::TypeKind, field, chunk, pos, 2, &scan_state);
+    for (int64_t row = 0; row < 17; ++row) {
+        this->Check(accessor(), row, true);
+    }
+    EXPECT_EQ(stats->scans, 1);
+    EXPECT_EQ(stats->pins, 3);
+    EXPECT_EQ(stats->legacy_spans, 0);
+    column->ManualEvictCache();
+    EXPECT_TRUE(this->lifetimes_[0].expired());
+    EXPECT_TRUE(this->lifetimes_[2].expired());
+    EXPECT_FALSE(this->lifetimes_[3].expired());
+    accessor = {};
+    scan_state = {};
+    column->ManualEvictCache();
+    EXPECT_TRUE(this->lifetimes_[3].expired());
+}
 
 TEST_P(SegmentChunkReaderStringTest, SmallWindowsDoNotRebuildWholeChunkViews) {
     SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
@@ -571,7 +758,7 @@ TEST_P(SegmentChunkReaderStringTest, SmallWindowsDoNotRebuildWholeChunkViews) {
 }
 
 TEST_P(SegmentChunkReaderStringTest, StringAccessorsUseBoundSnapshot) {
-    ReaderStringSnapshot snapshot(column_);
+    ReaderSnapshot snapshot(column_);
     segment_->forbid_live_column_read = true;
     SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
     reader.SetSnapshot(&snapshot);
@@ -607,7 +794,7 @@ TEST_P(SegmentChunkReaderStringTest, ApplyFieldValidDataUsesBoundSnapshot) {
         // Non-nullable columns short-circuit inside ApplyValidDataInChunk.
         return;
     }
-    ReaderStringSnapshot snapshot(column_);
+    ReaderSnapshot snapshot(column_);
     segment_->forbid_live_column_read = true;
     SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
     reader.SetSnapshot(&snapshot);
@@ -626,7 +813,7 @@ TEST_P(SegmentChunkReaderStringTest, ApplyFieldValidDataUsesBoundSnapshot) {
 
 TEST_P(SegmentChunkReaderStringTest,
        StringExpressionsKeepIndependentScansAcrossWindowsAndOffsets) {
-    auto other_stats = std::make_shared<StringReadStats>();
+    auto other_stats = std::make_shared<ReaderStats>();
     std::vector<std::optional<std::string>> other_expected;
     auto other_column =
         MakeColumn({8187, 11, 21}, other_stats, other_expected, true);
