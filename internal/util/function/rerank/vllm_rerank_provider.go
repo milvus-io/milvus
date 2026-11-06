@@ -86,7 +86,7 @@ func newVllmProvider(params []*commonpb.KeyValuePair, conf map[string]string, cr
 }
 
 func (provider *vllmProvider) Rerank(ctx context.Context, query string, docs []string) ([]float32, error) {
-	rerankResp, err := provider.client.Rerank(query, docs, provider.truncateParams, provider.timeoutMs)
+	rerankResp, err := provider.client.Rerank(ctx, query, docs, provider.truncateParams, provider.timeoutMs)
 	if err != nil {
 		return nil, err
 	}
