@@ -105,6 +105,20 @@ The rewriter can be configured via the following parameter (refreshable at runti
     - Disjoint intervals remain separate: `(10 < x < 20) OR (30 < x < 40)` → remains as OR
   - Inclusivity handling: AND prefers exclusive on equal bounds (stronger), OR prefers inclusive (weaker)
 
+5) Common-factor extraction (`common_factor.go`)
+- OR of AND branches that all share predicates:
+  - `(t == 7 AND p > 100) OR (t == 7 AND r > 4)` → `t == 7 AND (p > 100 OR r > 4)`
+  - Absorption: a branch made only of the shared predicates absorbs the OR: `t == 7 OR (t == 7 AND p > 100)` → `t == 7`
+  - Only predicates present in every branch are extracted; nothing is distributed into other branches. A single non-AND operand is a branch with one conjunct.
+- Factor candidates: `==`, `!=`, `<`, `<=`, `>`, `>=` (`UnaryRangeExpr`), `BinaryRangeExpr` and `IN` (`TermExpr`) on ordinary top-level scalar fields (bool, integer, float/double, string/varchar) with concrete scalar literals.
+  - Never factors: JSON paths, dynamic fields, array elements, element-level struct fields, `IN` against a field, LIKE/regex/text match, `IS NULL`, `NOT`, `MATCH`, `element_filter`, arithmetic, column comparisons and all other expressions. These stay in their branches and do not block factoring of other conjuncts.
+- Structural equality: the whole `ColumnInfo` (field ID, data type, element type, nullable and key flags), the operator, inclusivity flags and every literal with its kind. `int64 7` and `float 7.0` are different; float literals compare by bit pattern. IN value lists are compared after sorting and deduplication. Template variable names are ignored: after binding, the bound literal decides.
+- Runs after the OR same-column merges of the chain, on operands whose AND branches were already merged. A predicate repeated in one branch counts once and is emitted once. Factors keep their first-branch order.
+- The residual OR and the new AND are passed through the OR and AND rules again (as a second rewrite would), and a visited AND/OR operand that became a same-operator chain is spliced into its parent, so the rewrite stays idempotent and the factors meet the parent's AND rules.
+- Constant `false` operands are dropped and a constant `true` operand decides the OR before factoring.
+- Budgets (constants): at most 64 OR operands, 1024 visited AND nodes and conjuncts across the branches, and 16384 key-encoding units (one per candidate plus one per IN value). Over a budget, the OR is kept as produced by the same-column merges.
+- NULL semantics: `(A AND B) OR (A AND C) = A AND (B OR C)` and `A OR (A AND B) = A` hold in three-valued (Kleene) logic, which segcore uses for AND/OR/NOT, so TRUE/FALSE/UNKNOWN is preserved for every row, including under an outer `NOT`.
+
 ### General Notes
 - All merges require operands to target the same column (same `ColumnInfo`, including nested path/element type).
 - Rewrite runs after template value filling; template placeholders do not appear here.
@@ -115,7 +129,7 @@ The rewriter can be configured via the following parameter (refreshable at runti
 
 ### Pass Ordering (current)
 - OR branch:
-  1. Flatten
+  1. Flatten, visit operands, splice operands that became OR chains
   2. ARRAY `Contains` / `ContainsAny` → `ContainsAny`
   3. OR `==` → IN
   4. TEXT_MATCH merge (no options)
@@ -124,9 +138,10 @@ The rewriter can be configured via the following parameter (refreshable at runti
   7. IN ∪ IN union
   8. IN vs NotEqual simplification
   9. IN vs Equal redundancy elimination
-  10. Fold back to BinaryExpr
+  10. Common-factor extraction (drop constant `false` operands first)
+  11. Fold back to BinaryExpr
 - AND branch:
-  1. Flatten
+  1. Flatten, visit operands, splice operands that became AND chains
   2. ARRAY `Contains` / `ContainsAll` → `ContainsAll`
   3. Range tighten / interval construction
   4. BinaryRangeExpr merge (intersection, also with UnaryRangeExpr)
@@ -147,6 +162,7 @@ Multiple `!=` predicates not consumed by the cross-rule may still combine into N
 - `in_not_equal.go` — typed-set IN/NotEqual cross-rewrites
 - `text_match.go` — TEXT_MATCH OR merge (no options)
 - `range.go`      — range tightening/weakening and interval construction
+- `common_factor.go` — common-factor extraction from OR branches
 
 ### Future Extensions
 - More IN-range algebra (e.g., `IN` vs exact equality propagation across subtrees).
@@ -154,7 +170,6 @@ Multiple `!=` predicates not consumed by the cross-rule may still combine into N
 - More algebraic simplifications around equality and null checks:
   - Contradiction detection: `(a == 1) AND (a == 2)` → `false`; `(a > 10) AND (a == 5)` → `false`
   - Tautology detection: `(a > 10) OR (a <= 10)` → `true` (for non-NULL values)
-  - Absorption laws: `(a > 10) OR ((a > 10) AND (b > 20))` → `a > 10`
 - Advanced BinaryRangeExpr merging:
   - OR with 3+ intervals: Currently limited to 2 intervals. Full interval merging algorithm needed for `(10 < x < 20) OR (15 < x < 25) OR (22 < x < 30)` → `(10 < x < 30)`.
   - OR with unbounded + bounded: Currently skipped. Could optimize `(x > 10) OR (5 < x < 15)` → `x > 5`.
