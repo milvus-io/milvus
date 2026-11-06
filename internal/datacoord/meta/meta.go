@@ -386,7 +386,15 @@ func getBinlogFileCount(s *datapb.SegmentInfo) int {
 	return cnt
 }
 
+// dbSegmentStateKey identifies an aggregate-mode series that GetQuotaInfo
+// publishes per database and segment state.
+type dbSegmentStateKey struct {
+	dbName string
+	state  commonpb.SegmentState
+}
+
 func (m *Meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
+	aggregateCollectionMetrics := metrics.IsCollectionLevelMetricsAggregateMode()
 	info := &metricsinfo.DataCoordQuotaMetrics{}
 	m.SegMu.RLock()
 	defer m.SegMu.RUnlock()
@@ -402,6 +410,12 @@ func (m *Meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 	binlogFileCount := make(map[string]int64)             // map[collectionID]count
 	deltalogAggregates := make(map[string]*deltalogAggregate)
 	coll2DbName := make(map[string]string)
+	// Aggregate-mode metrics, per database and segment state or as one total.
+	storedBinlogSizeByDB := make(map[dbSegmentStateKey]int64)
+	storedRowsByDB := make(map[dbSegmentStateKey]int64)
+	l0DeleteEntriesByDB := make(map[string]int64)
+	l0DeltalogFilesByDB := make(map[string]int64)
+	var totalBinlogFileCount int64
 
 	for _, segment := range segments {
 		segmentSize := segment.GetSegmentSize()
@@ -417,6 +431,23 @@ func (m *Meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 			partBinlogSize[segment.GetPartitionID()] += segmentSize
 
 			coll, ok := m.MetaStore.GetCollection(segment.GetCollectionID())
+			if segment.GetLevel() == datapb.SegmentLevel_L0 {
+				deltas := segment.getDeltaCount()
+				collectionL0RowCounts[segment.GetCollectionID()] += deltas
+				if aggregateCollectionMetrics && ok {
+					l0DeleteEntriesByDB[coll.DatabaseName] += deltas
+					l0DeltalogFilesByDB[coll.DatabaseName] += segment.EnsureStats().GetDeltaBinlogCount()
+				}
+			}
+			if aggregateCollectionMetrics {
+				if ok {
+					key := dbSegmentStateKey{dbName: coll.DatabaseName, state: segment.GetState()}
+					storedBinlogSizeByDB[key] += segmentSize
+					storedRowsByDB[key] += segment.GetNumOfRows()
+					totalBinlogFileCount += int64(getBinlogFileCount(segment.SegmentInfo))
+				}
+				continue
+			}
 			if ok {
 				collIDStr := strconv.FormatInt(segment.GetCollectionID(), 10)
 				coll2DbName[collIDStr] = coll.DatabaseName
@@ -439,45 +470,69 @@ func (m *Meta) GetQuotaInfo() *metricsinfo.DataCoordQuotaMetrics {
 				collectionRowsNum[segment.GetCollectionID()] = make(map[commonpb.SegmentState]int64)
 			}
 			collectionRowsNum[segment.GetCollectionID()][segment.GetState()] += segment.GetNumOfRows()
-
-			if segment.GetLevel() == datapb.SegmentLevel_L0 {
-				collectionL0RowCounts[segment.GetCollectionID()] += segment.getDeltaCount()
-			}
 		}
 	}
 
 	// Reset to remove dropped collection
 	metrics.DataCoordStoredBinlogSize.Reset()
-	for collectionID, state2Size := range storedBinlogSize {
-		for state, size := range state2Size {
-			metrics.DataCoordStoredBinlogSize.WithLabelValues(coll2DbName[collectionID], collectionID, state).Set(float64(size))
+	if aggregateCollectionMetrics {
+		for key, size := range storedBinlogSizeByDB {
+			metrics.DataCoordStoredBinlogSize.WithLabelValues(key.dbName, metrics.AllLabel, key.state.String()).Set(float64(size))
+		}
+	} else {
+		for collectionID, state2Size := range storedBinlogSize {
+			for state, size := range state2Size {
+				metrics.DataCoordStoredBinlogSize.WithLabelValues(coll2DbName[collectionID], collectionID, state).Set(float64(size))
+			}
 		}
 	}
 	// Reset to remove dropped collection
 	metrics.DataCoordSegmentBinLogFileCount.Reset()
-	for collectionID, size := range binlogFileCount {
-		metrics.DataCoordSegmentBinLogFileCount.WithLabelValues(collectionID).Set(float64(size))
+	if aggregateCollectionMetrics {
+		metrics.DataCoordSegmentBinLogFileCount.WithLabelValues(metrics.AllLabel).Set(float64(totalBinlogFileCount))
+	} else {
+		for collectionID, size := range binlogFileCount {
+			metrics.DataCoordSegmentBinLogFileCount.WithLabelValues(collectionID).Set(float64(size))
+		}
 	}
 
 	metrics.DataCoordNumStoredRows.Reset()
-	for collectionID, statesRows := range collectionRowsNum {
-		coll, ok := m.MetaStore.GetCollection(collectionID)
-		if ok {
-			for state, rows := range statesRows {
-				metrics.DataCoordNumStoredRows.WithLabelValues(coll.DatabaseName, strconv.FormatInt(collectionID, 10), coll.Schema.GetName(), state.String()).Set(float64(rows))
+	if aggregateCollectionMetrics {
+		for key, rows := range storedRowsByDB {
+			metrics.DataCoordNumStoredRows.WithLabelValues(
+				key.dbName, metrics.AllLabel, metrics.AllLabel, key.state.String()).Set(float64(rows))
+		}
+	} else {
+		for collectionID, statesRows := range collectionRowsNum {
+			coll, ok := m.MetaStore.GetCollection(collectionID)
+			if ok {
+				for state, rows := range statesRows {
+					metrics.DataCoordNumStoredRows.WithLabelValues(coll.DatabaseName, strconv.FormatInt(collectionID, 10), coll.Schema.GetName(), state.String()).Set(float64(rows))
+				}
 			}
 		}
 	}
 
 	metrics.DataCoordL0DeleteEntriesNum.Reset()
-	for collectionID, entriesNum := range collectionL0RowCounts {
-		coll, ok := m.MetaStore.GetCollection(collectionID)
-		if ok {
-			metrics.DataCoordL0DeleteEntriesNum.WithLabelValues(coll.DatabaseName, strconv.FormatInt(collectionID, 10)).Set(float64(entriesNum))
+	if aggregateCollectionMetrics {
+		for dbName, entriesNum := range l0DeleteEntriesByDB {
+			metrics.DataCoordL0DeleteEntriesNum.WithLabelValues(dbName, metrics.AllLabel).Set(float64(entriesNum))
 		}
+		// Of the deltalog gauges only the L0 file count adds up across
+		// collections; aggregate mode suppresses the quantile gauges.
+		metrics.DataCoordL0DeltalogFileNum.Reset()
+		for dbName, fileNum := range l0DeltalogFilesByDB {
+			metrics.DataCoordL0DeltalogFileNum.WithLabelValues(dbName, metrics.AllLabel).Set(float64(fileNum))
+		}
+	} else {
+		for collectionID, entriesNum := range collectionL0RowCounts {
+			coll, ok := m.MetaStore.GetCollection(collectionID)
+			if ok {
+				metrics.DataCoordL0DeleteEntriesNum.WithLabelValues(coll.DatabaseName, strconv.FormatInt(collectionID, 10)).Set(float64(entriesNum))
+			}
+		}
+		reportDeltalogMetrics(deltalogAggregates)
 	}
-
-	reportDeltalogMetrics(deltalogAggregates)
 
 	info.TotalBinlogSize = total
 	info.CollectionBinlogSize = collectionBinlogSize
