@@ -42,12 +42,14 @@ const int DEFAULT_CPU_NUM = 1;
 
 const int64_t DEFAULT_HIGH_PRIORITY_THREAD_CORE_COEFFICIENT = 10;
 const int64_t DEFAULT_MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT = 5;
+const int64_t DEFAULT_SEARCH_FANOUT_THREAD_CORE_COEFFICIENT = 2;
 const int64_t DEFAULT_LOW_PRIORITY_THREAD_CORE_COEFFICIENT = 1;
 
 const int DEFAULT_THREAD_POOL_MAX_THREADS_SIZE = 16;
 
 extern std::atomic<float> HIGH_PRIORITY_THREAD_CORE_COEFFICIENT;
 extern std::atomic<float> MIDDLE_PRIORITY_THREAD_CORE_COEFFICIENT;
+extern std::atomic<float> SEARCH_FANOUT_THREAD_CORE_COEFFICIENT;
 extern std::atomic<float> LOW_PRIORITY_THREAD_CORE_COEFFICIENT;
 
 extern int CPU_NUM;
@@ -58,6 +60,9 @@ SetHighPriorityThreadCoreCoefficient(const float coefficient);
 
 void
 SetMiddlePriorityThreadCoreCoefficient(const float coefficient);
+
+void
+SetSearchFanoutThreadCoreCoefficient(const float coefficient);
 
 void
 SetLowPriorityThreadCoreCoefficient(const float coefficient);
@@ -79,14 +84,18 @@ ClampThreadPoolMaxThreads(int size) {
 }
 
 inline int
-ComputeThreadPoolMaxThreads(float thread_core_coefficient) {
-    return ClampThreadPoolMaxThreads(
-        static_cast<int>(std::round(CPU_NUM * thread_core_coefficient)));
+ComputeThreadPoolMaxThreads(float thread_core_coefficient,
+                            bool apply_global_limit = true) {
+    const auto size = std::max(
+        1, static_cast<int>(std::round(CPU_NUM * thread_core_coefficient)));
+    return apply_global_limit ? ClampThreadPoolMaxThreads(size) : size;
 }
 
 class ThreadPool {
  public:
-    explicit ThreadPool(const float thread_core_coefficient, std::string name);
+    explicit ThreadPool(const float thread_core_coefficient,
+                        std::string name,
+                        bool apply_global_limit = true);
     ~ThreadPool();
 
     ThreadPool(const ThreadPool&) = delete;
@@ -202,6 +211,7 @@ class ThreadPool {
 
     std::unique_ptr<folly::CPUThreadPoolExecutor> executor_;
     std::string name_;
+    const bool apply_global_limit_;
     std::atomic<int> max_threads_size_;
 
     std::thread metrics_sampler_thread_;

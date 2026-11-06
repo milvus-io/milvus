@@ -72,6 +72,10 @@ func UpdateMiddlePriorityThreadCoreCoefficient(coefficient float64) {
 	C.SetMiddlePriorityThreadCoreCoefficient(C.float(coefficient))
 }
 
+func UpdateSearchFanoutThreadCoreCoefficient(coefficient float64) {
+	C.ResizeTheadPool(C.int64_t(3), C.float(coefficient))
+}
+
 func UpdateLowPriorityThreadCoreCoefficient(coefficient float64) {
 	C.SetLowPriorityThreadCoreCoefficient(C.float(coefficient))
 }
