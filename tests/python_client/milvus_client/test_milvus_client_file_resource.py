@@ -325,7 +325,7 @@ class TestMilvusClientFileResourceAdd(FileResourceTestBase):
         """
         client = self._client()
         # 1. add file resource with empty path
-        error = {ct.err_code: 1001, ct.err_msg: "Object name cannot be empty"}
+        error = {ct.err_code: 1101, ct.err_msg: "missing_param=file resource path"}
         self.add_file_resource(
             client,
             cf.gen_unique_str(prefix),
