@@ -2676,7 +2676,7 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
         milvus_storage::api::Reader::create(column_groups,
                                             /*arrow_schema=*/nullptr,
                                             needed_columns,
-                                            *properties));
+                                            properties));
     // QueryNode registers the collection's cipher context before loading.
     // Resolve encrypted Parquet keys through that context when opening files.
     if (storage::PluginLoader::GetInstance().getCipherPlugin()) {
@@ -8226,7 +8226,7 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
             }
             auto reader = std::shared_ptr<milvus_storage::api::Reader>(
                 milvus_storage::api::Reader::create(
-                    column_groups, arrow_schema, needed_columns, *properties)
+                    column_groups, arrow_schema, needed_columns, properties)
                     .release());
             if (storage::PluginLoader::GetInstance().getCipherPlugin()) {
                 reader->set_keyretriever([](const std::string& key_metadata) {

@@ -14,7 +14,7 @@
 # Update milvus-storage_VERSION for the first occurrence
 milvus_add_pkg_config("milvus-storage")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-set( milvus-storage_VERSION e9cb668)
+set( milvus-storage_VERSION 5c2ea329889e30d94b4e65209c0bc782256e7a95)
 set( GIT_REPOSITORY  "https://github.com/milvus-io/milvus-storage.git")
 message(STATUS "milvus-storage repo: ${GIT_REPOSITORY}")
 message(STATUS "milvus-storage version: ${milvus-storage_VERSION}")
@@ -66,15 +66,6 @@ FetchContent_GetProperties( milvus-storage )
 if ( NOT milvus-storage_POPULATED )
     FetchContent_Populate( milvus-storage )
 
-    if(WITH_CRT)
-        # The pinned storage revision caches the SDK header used by its native
-        # handle extension. Refresh it from Conan when upgrading the SDK in an
-        # existing build directory, before storage generates the overlay.
-        unset(STORAGE_S3_CRT_INCLUDE_DIR CACHE)
-        find_path(STORAGE_S3_CRT_INCLUDE_DIR aws/s3-crt/S3CrtClient.h
-            HINTS ${AWSSDK_INCLUDE_DIRS} NO_DEFAULT_PATH REQUIRED)
-    endif()
-
     # Adding the following target:
     # milvus-storage
     add_subdirectory( ${milvus-storage_SOURCE_DIR}/cpp
@@ -116,11 +107,6 @@ if ( NOT milvus-storage_POPULATED )
     # Native CRT calls need explicit links when the AWS runtime is shared.
     find_package(aws-c-io REQUIRED CONFIG)
     target_link_libraries(milvus-storage PUBLIC AWS::aws-c-io)
-    if(WITH_CRT)
-        find_package(aws-c-auth REQUIRED CONFIG)
-        find_package(aws-c-http REQUIRED CONFIG)
-        target_link_libraries(milvus-storage PUBLIC AWS::aws-c-auth AWS::aws-c-http)
-    endif()
 
     # On macOS, aws-c-io uses Apple's Network.framework for socket operations
     if(APPLE)

@@ -18,6 +18,7 @@ package paramtable
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"os"
@@ -34,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/fips"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
@@ -431,6 +433,8 @@ type commonConfig struct {
 	UseLoonFFI                           ParamItem `refreshable:"true"`
 	EnableGrowingSourceFlush             ParamItem `refreshable:"false"`
 
+	CredentialBrokerAllowedEndpoints    ParamItem `refreshable:"false"`
+	credentialBrokerPolicy              *specutil.BrokerPolicy
 	StoragePathPrefix                   ParamItem `refreshable:"false"`
 	StorageZstdConcurrency              ParamItem `refreshable:"false"`
 	StorageReadRetryAttempts            ParamItem `refreshable:"true"`
@@ -1156,6 +1160,32 @@ For example, if the rate limit is 100KB/s, and the high priority ratio is 2, the
 		Export:       true,
 	}
 	p.BuildIndexThreadPoolRatio.Init(base.mgr)
+
+	p.CredentialBrokerAllowedEndpoints = ParamItem{
+		Key:          "common.security.credentialBrokerAllowedEndpoints",
+		Sensitivity:  Sensitive,
+		Version:      "3.0.0",
+		DefaultValue: "[]",
+		Export:       true,
+		// Keep file/env changes effective after restart; do not persist this in etcd.
+		Doc: "Configured initial Broker URLs for External Tables, including legacy Azure Brokers.\n" +
+			"Redirects follow storage SDK defaults; redirect targets are not checked.\n" +
+			"JSON array string, not a YAML list or comma-separated URLs.\n" +
+			"Example: '[\"https://broker.example.com/token?scope=a,b\"]'\n" +
+			"Empty or [] denies all Brokers. Restart all components after changing this value.",
+	}
+	p.CredentialBrokerAllowedEndpoints.Init(base.mgr)
+	var brokerEndpoints []string
+	if raw := strings.TrimSpace(p.CredentialBrokerAllowedEndpoints.GetValue()); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &brokerEndpoints); err != nil || brokerEndpoints == nil {
+			panic("common.security.credentialBrokerAllowedEndpoints must be a JSON array of URL strings")
+		}
+	}
+	var brokerErr error
+	p.credentialBrokerPolicy, brokerErr = specutil.NewBrokerPolicy(brokerEndpoints)
+	if brokerErr != nil {
+		panic(brokerErr)
+	}
 
 	p.AuthorizationEnabled = ParamItem{
 		Key:          "common.security.authorizationEnabled",
@@ -10488,4 +10518,9 @@ func (params *ComponentParam) Reset(key string) error {
 
 func (params *ComponentParam) GetWithDefault(key string, dft string) string {
 	return params.baseTable.GetWithDefault(key, dft)
+}
+
+// CredentialBrokerPolicy returns the immutable policy captured during initialization.
+func (p *commonConfig) CredentialBrokerPolicy() *specutil.BrokerPolicy {
+	return p.credentialBrokerPolicy
 }
