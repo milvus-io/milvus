@@ -7,7 +7,6 @@ import (
 	shards "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	utils "github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 	mlog "github.com/milvus-io/milvus/pkg/v3/mlog"
-	streamingpb "github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	types "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	mock "github.com/stretchr/testify/mock"
@@ -80,52 +79,6 @@ func (_c *MockShardManager_AlterCollection_Call) Return(_a0 []int64, _a1 error) 
 }
 
 func (_c *MockShardManager_AlterCollection_Call) RunAndReturn(run func(message.MutableAlterCollectionMessageV2) ([]int64, error)) *MockShardManager_AlterCollection_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// ApplyDelete provides a mock function with given fields: msg
-func (_m *MockShardManager) ApplyDelete(msg message.MutableDeleteMessageV1) error {
-	ret := _m.Called(msg)
-
-	if len(ret) == 0 {
-		panic("no return value specified for ApplyDelete")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(message.MutableDeleteMessageV1) error); ok {
-		r0 = rf(msg)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockShardManager_ApplyDelete_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ApplyDelete'
-type MockShardManager_ApplyDelete_Call struct {
-	*mock.Call
-}
-
-// ApplyDelete is a helper method to define mock.On call
-//   - msg message.MutableDeleteMessageV1
-func (_e *MockShardManager_Expecter) ApplyDelete(msg interface{}) *MockShardManager_ApplyDelete_Call {
-	return &MockShardManager_ApplyDelete_Call{Call: _e.mock.On("ApplyDelete", msg)}
-}
-
-func (_c *MockShardManager_ApplyDelete_Call) Run(run func(msg message.MutableDeleteMessageV1)) *MockShardManager_ApplyDelete_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(message.MutableDeleteMessageV1))
-	})
-	return _c
-}
-
-func (_c *MockShardManager_ApplyDelete_Call) Return(_a0 error) *MockShardManager_ApplyDelete_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockShardManager_ApplyDelete_Call) RunAndReturn(run func(message.MutableDeleteMessageV1) error) *MockShardManager_ApplyDelete_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1054,23 +1007,23 @@ func (_c *MockShardManager_GetCollectionSchemaSnapshot_Call) RunAndReturn(run fu
 }
 
 // GetWriteSchema provides a mock function with given fields: collectionID, vchannel
-func (_m *MockShardManager) GetWriteSchema(collectionID int64, vchannel string) (*streamingpb.CollectionSchemaOfVChannel, error) {
+func (_m *MockShardManager) GetWriteSchema(collectionID int64, vchannel string) (*schemapb.CollectionSchema, error) {
 	ret := _m.Called(collectionID, vchannel)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetWriteSchema")
 	}
 
-	var r0 *streamingpb.CollectionSchemaOfVChannel
+	var r0 *schemapb.CollectionSchema
 	var r1 error
-	if rf, ok := ret.Get(0).(func(int64, string) (*streamingpb.CollectionSchemaOfVChannel, error)); ok {
+	if rf, ok := ret.Get(0).(func(int64, string) (*schemapb.CollectionSchema, error)); ok {
 		return rf(collectionID, vchannel)
 	}
-	if rf, ok := ret.Get(0).(func(int64, string) *streamingpb.CollectionSchemaOfVChannel); ok {
+	if rf, ok := ret.Get(0).(func(int64, string) *schemapb.CollectionSchema); ok {
 		r0 = rf(collectionID, vchannel)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*streamingpb.CollectionSchemaOfVChannel)
+			r0 = ret.Get(0).(*schemapb.CollectionSchema)
 		}
 	}
 
@@ -1102,12 +1055,12 @@ func (_c *MockShardManager_GetWriteSchema_Call) Run(run func(collectionID int64,
 	return _c
 }
 
-func (_c *MockShardManager_GetWriteSchema_Call) Return(_a0 *streamingpb.CollectionSchemaOfVChannel, _a1 error) *MockShardManager_GetWriteSchema_Call {
+func (_c *MockShardManager_GetWriteSchema_Call) Return(_a0 *schemapb.CollectionSchema, _a1 error) *MockShardManager_GetWriteSchema_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockShardManager_GetWriteSchema_Call) RunAndReturn(run func(int64, string) (*streamingpb.CollectionSchemaOfVChannel, error)) *MockShardManager_GetWriteSchema_Call {
+func (_c *MockShardManager_GetWriteSchema_Call) RunAndReturn(run func(int64, string) (*schemapb.CollectionSchema, error)) *MockShardManager_GetWriteSchema_Call {
 	_c.Call.Return(run)
 	return _c
 }

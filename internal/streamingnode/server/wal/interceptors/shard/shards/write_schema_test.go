@@ -18,12 +18,12 @@ func TestRecoveredWriteSchemaSnapshot(t *testing.T) {
 	})}
 	snapshot, err := manager.GetWriteSchema(1, "p_1v0")
 	require.NoError(t, err)
-	require.EqualValues(t, 3, snapshot.Schema.Version)
-	require.EqualValues(t, 42, snapshot.CheckpointTimeTick)
-	snapshot.Schema.Name = "after"
+	require.EqualValues(t, 3, snapshot.Version)
+	require.EqualValues(t, 42, manager.collections[1].Schema.CheckpointTimeTick)
+	snapshot.Name = "after"
 	again, err := manager.GetWriteSchema(1, "p_1v0")
 	require.NoError(t, err)
-	require.Equal(t, "before", again.Schema.Name)
+	require.Equal(t, "before", again.Name)
 	_, err = manager.GetWriteSchema(1, "p_1v1")
 	require.True(t, status.AsStreamingError(err).IsUnrecoverable())
 	_, err = manager.GetWriteSchema(2, "p_1v0")

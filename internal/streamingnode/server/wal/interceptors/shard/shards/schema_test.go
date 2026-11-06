@@ -29,17 +29,16 @@ func TestWriteSchemaAdmissionAndRecovery(t *testing.T) {
 		shared := m.GetCollectionSchemaSnapshot(1)
 		require.Same(t, m.collections[1].Schema.GetSchema(), shared)
 		require.Same(t, shared, m.GetAllCollectionSchemaInfos()[1].Schema)
-		require.Equal(t, version, got.Schema.Version)
-		require.Equal(t, uint64(10+version*5), got.CheckpointTimeTick)
+		require.Equal(t, version, got.Version)
+		require.Equal(t, uint64(10+version*5), m.collections[1].Schema.CheckpointTimeTick)
 		admitted, err := m.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{CollectionId: 1, SchemaVersion: proto.Int32(version)})
 		require.NoError(t, err)
-		require.Equal(t, got.Schema.Version, admitted)
-		got.Schema.Name = "caller mutation"
-		got.CheckpointTimeTick = 99
+		require.Equal(t, got.Version, admitted)
+		got.Name = "caller mutation"
 		again, err := m.GetWriteSchema(1, "p_1v0")
 		require.NoError(t, err)
-		require.Equal(t, "original", again.Schema.Name)
-		require.NotEqualValues(t, 99, again.CheckpointTimeTick)
+		require.Equal(t, "original", again.Name)
+		require.Equal(t, uint64(10+version*5), m.collections[1].Schema.CheckpointTimeTick)
 	}
 	require.Zero(t, initialSchema.GetVersion())
 	for _, identity := range []struct {
@@ -78,9 +77,9 @@ func TestAlterCollectionMetadataUpdatesWriteSchemaWithoutFencing(t *testing.T) {
 	require.Empty(t, flushed)
 	got, err := m.GetWriteSchema(1, "p_1v0")
 	require.NoError(t, err)
-	require.Equal(t, "renamed", got.Schema.Name)
-	require.EqualValues(t, 2, got.Schema.Version)
-	require.EqualValues(t, 20, got.CheckpointTimeTick)
+	require.Equal(t, "renamed", got.Name)
+	require.EqualValues(t, 2, got.Version)
+	require.EqualValues(t, 20, m.collections[1].Schema.CheckpointTimeTick)
 	require.Equal(t, "old", previous.Schema.Name)
 	require.True(t, proto.Equal(before, previous))
 	require.NotSame(t, previous, m.collections[1].Schema)
