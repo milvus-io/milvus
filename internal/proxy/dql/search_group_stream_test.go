@@ -193,8 +193,8 @@ func TestSearchGroupByStreamingPreservesBatchLocalPruning(t *testing.T) {
 }
 
 func TestSearchGroupByStreamingOrderByAppliesOffsetAfterSorting(t *testing.T) {
-	legacy := &fakeLegacyQueryClient{reduceStreamEnabled: true}
-	task := newQueryViewSearchTask(legacy, 3)
+	legacy := &fakeLegacyQueryClient{}
+	task := newQueryViewSearchTask(t, legacy, 3)
 	task.IsIterator = false
 	task.Offset, task.GroupSize = 1, 2
 	task.GroupByFieldIds = []int64{101}

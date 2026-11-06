@@ -53,18 +53,17 @@ func (c *fakeLegacyViewQueryClient) Legacy() queryclient.LegacyClient {
 
 type fakeLegacyQueryClient struct {
 	queryclient.LegacyClient
-	searchCalled        int
-	queryCalled         int
-	maxRetries          int
-	reduceStreamEnabled bool
-	searchResult        *queryclient.LegacySearchResult
-	lastSearchRequest   *queryclient.LegacySearchRequest
-	queryResult         *queryclient.LegacyQueryResult
-	lastQuery           *queryclient.LegacyQueryRequest
-	lastQueryRequest    *queryclient.LegacyQueryRequest
-	err                 error
-	search              func(int) (*queryclient.LegacySearchResult, error)
-	query               func(int) (*queryclient.LegacyQueryResult, error)
+	searchCalled      int
+	queryCalled       int
+	maxRetries        int
+	searchResult      *queryclient.LegacySearchResult
+	lastSearchRequest *queryclient.LegacySearchRequest
+	queryResult       *queryclient.LegacyQueryResult
+	lastQuery         *queryclient.LegacyQueryRequest
+	lastQueryRequest  *queryclient.LegacyQueryRequest
+	err               error
+	search            func(int) (*queryclient.LegacySearchResult, error)
+	query             func(int) (*queryclient.LegacyQueryResult, error)
 }
 
 func (c *fakeLegacyQueryClient) Search(_ context.Context, request *queryclient.LegacySearchRequest) (*queryclient.LegacySearchResult, error) {
@@ -88,10 +87,6 @@ func (c *fakeLegacyQueryClient) Query(_ context.Context, request *queryclient.Le
 
 func (c *fakeLegacyQueryClient) MaxRetries() int {
 	return max(1, c.maxRetries)
-}
-
-func (c *fakeLegacyQueryClient) ReduceStreamEnabled() bool {
-	return c.reduceStreamEnabled
 }
 
 type fakeLegacySearchRecv struct {
@@ -155,7 +150,12 @@ func (*fakeLegacyQueryStream) Interrupt() (*internalpb.RetrieveResults, error) {
 var _ searchutil.ReduceStream = (*fakeLegacySearchStream)(nil)
 var _ queryutil.ReduceStream = (*fakeLegacyQueryStream)(nil)
 
-func newQueryViewSearchTask(legacy queryclient.LegacyClient, topK int64) *SearchTask {
+func newQueryViewSearchTask(t *testing.T, legacy queryclient.LegacyClient, topK int64) *SearchTask {
+	t.Helper()
+	params := paramtable.Get()
+	key, old := params.ProxyCfg.EnableReduceStream.Key, params.ProxyCfg.EnableReduceStream.GetValue()
+	require.NoError(t, params.Save(key, "true"))
+	t.Cleanup(func() { require.NoError(t, params.Save(key, old)) })
 	return &SearchTask{
 		schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{}},
 		SearchRequest: &internalpb.SearchRequest{
@@ -172,7 +172,12 @@ func newQueryViewSearchTask(legacy queryclient.LegacyClient, topK int64) *Search
 	}
 }
 
-func newQueryViewQueryTask(legacy queryclient.LegacyClient, limit int64) *QueryTask {
+func newQueryViewQueryTask(t *testing.T, legacy queryclient.LegacyClient, limit int64) *QueryTask {
+	t.Helper()
+	params := paramtable.Get()
+	key, old := params.ProxyCfg.EnableReduceStream.Key, params.ProxyCfg.EnableReduceStream.GetValue()
+	require.NoError(t, params.Save(key, "true"))
+	t.Cleanup(func() { require.NoError(t, params.Save(key, old)) })
 	return &QueryTask{
 		schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{}},
 		RetrieveRequest: &internalpb.RetrieveRequest{
@@ -231,7 +236,7 @@ func TestQueryTaskExecuteUsesQueryViewLegacyClient(t *testing.T) {
 			Status: merr.Success(),
 		}}},
 	}
-	task := newQueryViewQueryTask(legacy, 0)
+	task := newQueryViewQueryTask(t, legacy, 0)
 
 	require.NoError(t, task.Execute(context.Background()))
 	require.Equal(t, 1, legacy.queryCalled)
@@ -252,7 +257,7 @@ func TestSearchTaskExecuteUsesQueryViewLegacyClient(t *testing.T) {
 			Status: merr.Success(),
 		}}},
 	}
-	task := newQueryViewSearchTask(legacy, 1)
+	task := newQueryViewSearchTask(t, legacy, 1)
 
 	require.NoError(t, task.Execute(context.Background()))
 	require.Equal(t, 1, legacy.searchCalled)
@@ -295,10 +300,9 @@ func TestSearchTaskExecuteConsumesReduceStream(t *testing.T) {
 		chunk: newFinalSearchChunk([]int64{10}, []float32{0.9}, "replacement"),
 	}}}
 	legacy := &fakeLegacyQueryClient{
-		reduceStreamEnabled: true,
-		searchResult:        &queryclient.LegacySearchResult{Stream: stream},
+		searchResult: &queryclient.LegacySearchResult{Stream: stream},
 	}
-	task := newQueryViewSearchTask(legacy, 1)
+	task := newQueryViewSearchTask(t, legacy, 1)
 
 	require.NoError(t, task.Execute(context.Background()))
 	require.Equal(t, 1, stream.closeCalls)
@@ -322,14 +326,14 @@ func TestSearchTaskRetriesCompleteStreamAttempt(t *testing.T) {
 			replacement := &fakeLegacySearchStream{recv: []fakeLegacySearchRecv{{
 				chunk: newFinalSearchChunk([]int64{2, 3}, []float32{0.9, 0.8}, "replacement"),
 			}}}
-			legacy := &fakeLegacyQueryClient{maxRetries: 2, reduceStreamEnabled: true}
+			legacy := &fakeLegacyQueryClient{maxRetries: 2}
 			legacy.search = func(attempt int) (*queryclient.LegacySearchResult, error) {
 				if attempt == 1 {
 					return &queryclient.LegacySearchResult{Stream: failed}, nil
 				}
 				return &queryclient.LegacySearchResult{Stream: replacement}, nil
 			}
-			task := newQueryViewSearchTask(legacy, 2)
+			task := newQueryViewSearchTask(t, legacy, 2)
 
 			require.NoError(t, task.Execute(context.Background()))
 			require.Equal(t, 2, legacy.searchCalled)
@@ -345,14 +349,14 @@ func TestSearchTaskRetriesStreamCreation(t *testing.T) {
 	replacement := &fakeLegacySearchStream{recv: []fakeLegacySearchRecv{{
 		chunk: newFinalSearchChunk([]int64{2}, []float32{0.9}, "replacement"),
 	}}}
-	legacy := &fakeLegacyQueryClient{maxRetries: 2, reduceStreamEnabled: true}
+	legacy := &fakeLegacyQueryClient{maxRetries: 2}
 	legacy.search = func(attempt int) (*queryclient.LegacySearchResult, error) {
 		if attempt == 1 {
 			return nil, streamViewError(viewpb.ViewCode_VIEW_CODE_VIEW_NOT_FOUND, "re-plan")
 		}
 		return &queryclient.LegacySearchResult{Stream: replacement}, nil
 	}
-	task := newQueryViewSearchTask(legacy, 1)
+	task := newQueryViewSearchTask(t, legacy, 1)
 
 	require.NoError(t, task.Execute(context.Background()))
 	require.Equal(t, 2, legacy.searchCalled)
@@ -366,14 +370,14 @@ func TestSearchTaskRetriesRecvErrorBeforeFirstChunk(t *testing.T) {
 	replacement := &fakeLegacySearchStream{recv: []fakeLegacySearchRecv{{
 		chunk: newFinalSearchChunk([]int64{2}, []float32{0.9}, "replacement"),
 	}}}
-	legacy := &fakeLegacyQueryClient{maxRetries: 2, reduceStreamEnabled: true}
+	legacy := &fakeLegacyQueryClient{maxRetries: 2}
 	legacy.search = func(attempt int) (*queryclient.LegacySearchResult, error) {
 		if attempt == 1 {
 			return &queryclient.LegacySearchResult{Stream: failed}, nil
 		}
 		return &queryclient.LegacySearchResult{Stream: replacement}, nil
 	}
-	task := newQueryViewSearchTask(legacy, 1)
+	task := newQueryViewSearchTask(t, legacy, 1)
 
 	require.NoError(t, task.Execute(context.Background()))
 	require.Equal(t, 2, legacy.searchCalled)
@@ -401,11 +405,10 @@ func TestSearchTaskDoesNotRetryNonRetryableStreamError(t *testing.T) {
 			recv = append(recv, fakeLegacySearchRecv{err: tc.err})
 			stream := &fakeLegacySearchStream{recv: recv}
 			legacy := &fakeLegacyQueryClient{
-				maxRetries:          3,
-				reduceStreamEnabled: true,
-				searchResult:        &queryclient.LegacySearchResult{Stream: stream},
+				maxRetries:   3,
+				searchResult: &queryclient.LegacySearchResult{Stream: stream},
 			}
-			task := newQueryViewSearchTask(legacy, 2)
+			task := newQueryViewSearchTask(t, legacy, 2)
 
 			require.Error(t, task.Execute(context.Background()))
 			require.Equal(t, 1, legacy.searchCalled)
@@ -417,7 +420,7 @@ func TestSearchTaskDoesNotRetryNonRetryableStreamError(t *testing.T) {
 
 func TestSearchTaskRetryExhaustionReturnsLastFailure(t *testing.T) {
 	streams := make([]*fakeLegacySearchStream, 3)
-	legacy := &fakeLegacyQueryClient{maxRetries: len(streams), reduceStreamEnabled: true}
+	legacy := &fakeLegacyQueryClient{maxRetries: len(streams)}
 	legacy.search = func(attempt int) (*queryclient.LegacySearchResult, error) {
 		stream := &fakeLegacySearchStream{recv: []fakeLegacySearchRecv{{
 			err: streamViewError(viewpb.ViewCode_VIEW_CODE_VIEW_INVALIDATED, "attempt %d", attempt),
@@ -425,7 +428,7 @@ func TestSearchTaskRetryExhaustionReturnsLastFailure(t *testing.T) {
 		streams[attempt-1] = stream
 		return &queryclient.LegacySearchResult{Stream: stream}, nil
 	}
-	task := newQueryViewSearchTask(legacy, 1)
+	task := newQueryViewSearchTask(t, legacy, 1)
 
 	err := task.Execute(context.Background())
 	require.Equal(t, "attempt 3", viewerror.AsViewError(err).Cause)
@@ -440,7 +443,8 @@ func TestSearchTaskDoesNotAddRequestRetryToBatchPath(t *testing.T) {
 		maxRetries: 3,
 		err:        merr.WrapErrServiceInternalMsg("batch failed after its own retries"),
 	}
-	task := newQueryViewSearchTask(legacy, 1)
+	task := newQueryViewSearchTask(t, legacy, 1)
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().ProxyCfg.EnableReduceStream.Key, "false"))
 
 	require.Error(t, task.Execute(context.Background()))
 	require.Equal(t, 1, legacy.searchCalled)
@@ -457,8 +461,8 @@ func TestQueryTaskStopsAtRequestedWindow(t *testing.T) {
 		first := newFinalQueryChunk([]int64{1, 2}, 10)
 		last := newFinalQueryChunk([]int64{3, 4, 5, 6}, 20)
 		stream := &fakeLegacyQueryStream{recv: []fakeLegacyQueryRecv{{chunk: first}, {chunk: last}, end}}
-		task := newQueryViewQueryTask(&fakeLegacyQueryClient{
-			reduceStreamEnabled: true, queryResult: &queryclient.LegacyQueryResult{Stream: stream},
+		task := newQueryViewQueryTask(t, &fakeLegacyQueryClient{
+			queryResult: &queryclient.LegacyQueryResult{Stream: stream},
 		}, offset+limit)
 		require.NoError(t, task.Execute(t.Context()))
 		require.Equal(t, 1, stream.closeCalls)
@@ -490,7 +494,7 @@ func TestQueryTaskUnlimitedStreamEnforcesMaxOutputSize(t *testing.T) {
 	t.Cleanup(func() { params.Save(key, old) })
 	params.Save(key, "1")
 	stream := &fakeLegacyQueryStream{recv: []fakeLegacyQueryRecv{{chunk: newFinalQueryChunk([]int64{1}, 10)}}}
-	task := newQueryViewQueryTask(&fakeLegacyQueryClient{queryResult: &queryclient.LegacyQueryResult{Stream: stream}}, typeutil.Unlimited)
+	task := newQueryViewQueryTask(t, &fakeLegacyQueryClient{queryResult: &queryclient.LegacyQueryResult{Stream: stream}}, typeutil.Unlimited)
 	require.ErrorContains(t, task.Execute(t.Context()), "maxOutputSize")
 	require.Equal(t, 1, stream.closeCalls)
 	require.Empty(t, task.resultBuf.Collect())
@@ -503,7 +507,7 @@ func TestQueryTaskConsumesElementChunks(t *testing.T) {
 	second := newFinalQueryChunk([]int64{2}, 10)
 	second.ElementLevel = true
 	second.ElementIndices = []*internalpb.ElementIndices{{Indices: []int32{1, 3}}}
-	task := newQueryViewQueryTask(nil, 4)
+	task := newQueryViewQueryTask(t, nil, 4)
 	output, err := task.consumeQueryResultStream(&fakeLegacyQueryStream{recv: []fakeLegacyQueryRecv{
 		{chunk: &internalpb.RetrieveResults{Status: merr.Success(), ElementLevel: true}},
 		{chunk: first}, {chunk: second}, {err: io.ErrUnexpectedEOF},
@@ -549,14 +553,14 @@ func TestQueryTaskRetriesCompleteStreamAttempt(t *testing.T) {
 				{chunk: newFinalQueryChunk([]int64{2, 3}, 2)},
 				{err: io.EOF},
 			}}
-			legacy := &fakeLegacyQueryClient{maxRetries: 2, reduceStreamEnabled: true}
+			legacy := &fakeLegacyQueryClient{maxRetries: 2}
 			legacy.query = func(attempt int) (*queryclient.LegacyQueryResult, error) {
 				if attempt == 1 {
 					return &queryclient.LegacyQueryResult{Stream: failed}, nil
 				}
 				return &queryclient.LegacyQueryResult{Stream: replacement}, nil
 			}
-			task := newQueryViewQueryTask(legacy, 2)
+			task := newQueryViewQueryTask(t, legacy, 2)
 
 			require.NoError(t, task.Execute(context.Background()))
 			require.Equal(t, 2, legacy.queryCalled)
@@ -590,11 +594,10 @@ func TestQueryTaskDoesNotRetryNonRetryableStreamError(t *testing.T) {
 			recv = append(recv, fakeLegacyQueryRecv{err: tc.err})
 			stream := &fakeLegacyQueryStream{recv: recv}
 			legacy := &fakeLegacyQueryClient{
-				maxRetries:          3,
-				reduceStreamEnabled: true,
-				queryResult:         &queryclient.LegacyQueryResult{Stream: stream},
+				maxRetries:  3,
+				queryResult: &queryclient.LegacyQueryResult{Stream: stream},
 			}
-			task := newQueryViewQueryTask(legacy, 2)
+			task := newQueryViewQueryTask(t, legacy, 2)
 
 			require.Error(t, task.Execute(context.Background()))
 			require.Equal(t, 1, legacy.queryCalled)
