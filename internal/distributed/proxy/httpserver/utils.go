@@ -4447,9 +4447,15 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 	return buildQueryRespWithEncoding(rowsNum, needFields, fieldDataList, ids, scores, enableInt64, collectionSchema, "")
 }
 
-//nolint:gosec // G602: slice indices are bounded by rowsNum which is derived from the data length
 func buildQueryRespWithEncoding(rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs,
 	scores []float32, enableInt64 bool, collectionSchema *schemapb.CollectionSchema, vectorEncoding floatVectorEncoding,
+) ([]map[string]interface{}, error) {
+	return buildQueryRespWithFormat(rowsNum, needFields, fieldDataList, ids, scores, enableInt64, collectionSchema, false, nil, vectorEncoding)
+}
+
+//nolint:gosec // G602: slice indices are bounded by rowsNum which is derived from the data length
+func buildQueryRespWithFormat(rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs,
+	scores []float32, enableInt64 bool, collectionSchema *schemapb.CollectionSchema, namespaced bool, requestedFields []string, vectorEncoding floatVectorEncoding,
 ) ([]map[string]interface{}, error) {
 	nativeJSON := paramtable.Get().HTTPCfg.NativeJSONResponse.GetAsBool()
 	jsonFieldNames := make(map[string]struct{})
@@ -4504,7 +4510,30 @@ func buildQueryRespWithEncoding(rowsNum int64, needFields []string, fieldDataLis
 		}
 	}
 	queryResp := make([]map[string]interface{}, 0, rowsNum)
-	dynamicOutputFields := genDynamicFields(needFields, fieldDataList)
+	var dynamicOutputFields []string
+	var allDynamicFields bool
+	if namespaced {
+		var err error
+		dynamicOutputFields, allDynamicFields, err = namespacedDynamicFields(requestedFields, needFields, fieldDataList, collectionSchema)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		dynamicOutputFields = genDynamicFields(needFields, fieldDataList)
+	}
+	// Resolve output selection once per column, never through a per-field callback.
+	// The row loop retains the same full-versus-selected dynamic write operation.
+	var dynamicOutputs []dynamicFieldOutput
+	if len(dynamicOutputFields) > 0 || allDynamicFields {
+		dynamicOutputs = make([]dynamicFieldOutput, columnNum)
+		for j, field := range fieldDataList {
+			if allDynamicFields {
+				dynamicOutputs[j] = dynamicFieldNamespace
+			} else if !namespaced && containsString(dynamicOutputFields, field.GetFieldName()) {
+				dynamicOutputs[j] = dynamicFieldFlatten
+			}
+		}
+	}
 	legacyArrayResponse := paramtable.Get().HTTPCfg.LegacyArrayResponse.GetAsBool()
 
 	pkFieldName := DefaultPrimaryFieldName
@@ -4518,7 +4547,8 @@ func buildQueryRespWithEncoding(rowsNum int64, needFields []string, fieldDataLis
 		}
 	}
 	for i := int64(0); i < rowsNum; i++ {
-		row := map[string]interface{}{}
+		result := newResultRow(namespaced)
+		row := result.fields
 		if columnNum > 0 {
 			for j := 0; j < columnNum; j++ {
 				fieldData := fieldDataList[j]
@@ -4658,14 +4688,26 @@ func buildQueryRespWithEncoding(rowsNum int64, needFields []string, fieldDataLis
 								"dynamic field does not hold a single JSON document"))
 						}
 
-						if containsString(dynamicOutputFields, fieldDataList[j].GetFieldName()) {
+						output := dynamicFieldSelect
+						if len(dynamicOutputs) > 0 {
+							output = dynamicOutputs[j]
+						}
+						switch output {
+						case dynamicFieldFlatten:
 							for key, value := range dataMap {
-								row[key] = value
+								result.dynamicFields[key] = value
 							}
-						} else {
+						case dynamicFieldNamespace:
+							if dataMap != nil {
+								// This response row takes ownership of the decoded map.
+								// Do not mutate it after the dynamic column; later ID and
+								// score writes must stay in fields and system.
+								result.output["dynamicFields"] = dataMap
+							}
+						default:
 							for _, dynamicField := range dynamicOutputFields {
 								if _, ok := dataMap[dynamicField]; ok {
-									row[dynamicField] = dataMap[dynamicField]
+									result.dynamicFields[dynamicField] = dataMap[dynamicField]
 								}
 							}
 						}
@@ -4704,9 +4746,9 @@ func buildQueryRespWithEncoding(rowsNum int64, needFields []string, fieldDataLis
 			}
 		}
 		if scores != nil && int64(len(scores)) > i {
-			row[HTTPReturnDistance] = scores[i] // only 8 decimal places
+			result.system[HTTPReturnDistance] = scores[i] // only 8 decimal places
 		}
-		queryResp = append(queryResp, row)
+		queryResp = append(queryResp, result.output)
 	}
 
 	if nativeJSON && !jsonAllValid {
@@ -4719,7 +4761,11 @@ func buildQueryRespWithEncoding(rowsNum int64, needFields []string, fieldDataLis
 		mlog.Warn(context.TODO(),
 			"a JSON field holds bytes that are not a JSON document, returning JSON fields as strings for this response",
 			mlog.Int("rows", len(queryResp)))
-		jsonFieldsToStrings(queryResp, jsonFieldNames)
+		if namespaced {
+			namespacedJSONFieldsToStrings(queryResp, jsonFieldNames)
+		} else {
+			jsonFieldsToStrings(queryResp, jsonFieldNames)
+		}
 	}
 
 	return queryResp, nil
