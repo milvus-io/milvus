@@ -37,9 +37,8 @@ add_subdirectory(rdkafka)
 add_subdirectory(simdjson)
 add_subdirectory(tantivy)
 
-if (LINUX)
+if (LINUX AND NOT USE_TSAN)
     add_subdirectory(jemalloc)
 endif()
 
 add_subdirectory(milvus-storage)
-
