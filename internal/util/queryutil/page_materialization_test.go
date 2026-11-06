@@ -500,7 +500,7 @@ type legacyPageSliceOperator struct{ limit, offset int64 }
 
 // applySlice applies doc-level offset and limit to the result.
 func (op *legacyPageSliceOperator) applySlice(result *internalpb.RetrieveResults) (*internalpb.RetrieveResults, error) {
-	size := getRowCount(result)
+	size := GetRowCount(result)
 	if size == 0 {
 		return result, nil
 	}
@@ -526,7 +526,7 @@ func (op *legacyPageSliceOperator) applySlice(result *internalpb.RetrieveResults
 // Offset and limit count individual array elements, not documents.
 // When a boundary falls mid-document, the document's ElementIndices are trimmed.
 func (op *legacyPageSliceOperator) applyElementLevelSlice(result *internalpb.RetrieveResults) (*internalpb.RetrieveResults, error) {
-	docCount := getRowCount(result)
+	docCount := GetRowCount(result)
 	elemIndices := result.GetElementIndices()
 	if docCount == 0 || len(elemIndices) == 0 {
 		return result, nil

@@ -1,0 +1,646 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package viewquery
+
+import (
+	"context"
+	"errors"
+	"io"
+	"net"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
+	"google.golang.org/grpc/test/bufconn"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/queryutil"
+	"github.com/milvus-io/milvus/internal/util/searchutil"
+	serviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
+	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+)
+
+func TestSearchOnViewStreamSendsChunksAndEOF(t *testing.T) {
+	tasks := &streamTestSearchTasks{tasks: []SearchSegmentTask{struct{}{}}}
+	provider := &streamTestProvider{searchTasks: tasks}
+	scheduler := &streamTestScheduler{result: streamTestResult()}
+	server := NewServer(provider, scheduler)
+
+	client, cleanup := startSearchStreamTestServer(t, server)
+	defer cleanup()
+	request := streamTestRequest()
+	request.StreamChunkBytes = 20
+	request.SegmentSelection = &viewpb.SegmentSelection{SegmentIds: []int64{123}, Mode: viewpb.SegmentSelection_Include}
+	stream, err := searchutil.NewGRPCReduceStream(context.Background(), client, request)
+	require.NoError(t, err)
+
+	first := recvSearchStreamChunk(t, stream)
+	assertStreamChunk(t, first, []int64{1, 2}, []int64{2, 0})
+	require.Equal(t, int64(100), first.GetCostAggregation().GetTotalRelatedDataSize())
+	require.Equal(t, map[string]uint64{"channel-a": 1000}, first.GetChannelsMvcc())
+	require.Equal(t, int64(30), first.GetScannedRemoteBytes())
+	require.Equal(t, int64(40), first.GetScannedTotalBytes())
+	require.Equal(t, int64(50), first.GetResultData().GetAllSearchCount())
+
+	second := recvSearchStreamChunk(t, stream)
+	assertStreamChunk(t, second, []int64{3, 10}, []int64{1, 1})
+	require.Nil(t, second.GetCostAggregation())
+	require.Empty(t, second.GetChannelsMvcc())
+	require.Zero(t, second.GetScannedRemoteBytes())
+	require.Zero(t, second.GetScannedTotalBytes())
+	require.Zero(t, second.GetResultData().GetAllSearchCount())
+	assertStreamChunk(t, recvSearchStreamChunk(t, stream), []int64{11}, []int64{0, 1})
+
+	chunk, err := stream.Recv()
+	require.Nil(t, chunk)
+	require.ErrorIs(t, err, io.EOF)
+	require.NoError(t, stream.Close())
+	require.Equal(t, 1, tasks.releaseCount)
+	require.Equal(t, int64(10), provider.request.GetCollectionID())
+	require.Equal(t, []int64{123}, provider.selection.GetSegmentIds())
+}
+
+func TestSearchOnViewStreamSendsEmptyChunkWithMetadata(t *testing.T) {
+	result := &internalpb.SearchResults{
+		Status:             merr.Success(),
+		MetricType:         "IP",
+		NumQueries:         2,
+		TopK:               3,
+		CostAggregation:    &internalpb.CostAggregation{TotalRelatedDataSize: 100},
+		ChannelsMvcc:       map[string]uint64{"channel-a": 1000},
+		ScannedRemoteBytes: 30,
+		ScannedTotalBytes:  40,
+		ResultData: &schemapb.SearchResultData{
+			NumQueries:     2,
+			TopK:           3,
+			Topks:          []int64{0, 0},
+			Ids:            &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{}}},
+			AllSearchCount: 50,
+		},
+	}
+	server := NewServer(
+		&streamTestProvider{searchTasks: &streamTestSearchTasks{tasks: []SearchSegmentTask{struct{}{}}}},
+		&streamTestScheduler{result: result},
+	)
+	client, cleanup := startSearchStreamTestServer(t, server)
+	defer cleanup()
+	stream, err := searchutil.NewGRPCReduceStream(context.Background(), client, streamTestRequest())
+	require.NoError(t, err)
+
+	chunk := recvSearchStreamChunk(t, stream)
+	require.Empty(t, chunk.GetResultData().GetIds().GetIntId().GetData())
+	require.Equal(t, []int64{0, 0}, chunk.GetResultData().GetTopks())
+	require.Equal(t, int64(100), chunk.GetCostAggregation().GetTotalRelatedDataSize())
+	require.Equal(t, map[string]uint64{"channel-a": 1000}, chunk.GetChannelsMvcc())
+	require.Equal(t, int64(30), chunk.GetScannedRemoteBytes())
+	require.Equal(t, int64(40), chunk.GetScannedTotalBytes())
+	require.Equal(t, int64(50), chunk.GetResultData().GetAllSearchCount())
+
+	chunk, err = stream.Recv()
+	require.Nil(t, chunk)
+	require.ErrorIs(t, err, io.EOF)
+	require.NoError(t, stream.Close())
+}
+
+func TestSearchOnViewStreamReturnsServerError(t *testing.T) {
+	server := NewServer(&streamTestProvider{
+		searchErr: viewerror.NewViewNotFound("missing view"),
+	}, &streamTestScheduler{})
+	client, cleanup := startSearchStreamTestServer(t, server)
+	defer cleanup()
+	stream, err := searchutil.NewGRPCReduceStream(context.Background(), client, streamTestRequest())
+	require.NoError(t, err)
+
+	chunk, err := stream.Recv()
+	require.Nil(t, chunk)
+	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
+func TestSearchOnViewStreamAcceptsPlainANNRequest(t *testing.T) {
+	server := NewServer(
+		&streamTestProvider{searchTasks: &streamTestSearchTasks{tasks: []SearchSegmentTask{struct{}{}}}},
+		&streamTestScheduler{result: streamTestResult()},
+	)
+	client, cleanup := startSearchStreamTestServer(t, server)
+	defer cleanup()
+
+	request := streamTestRequest()
+	request.LegacyReq.IsIterator = false
+	stream, err := searchutil.NewGRPCReduceStream(context.Background(), client, request)
+	require.NoError(t, err)
+
+	chunk := recvSearchStreamChunk(t, stream)
+	assertStreamChunk(t, chunk, []int64{1, 2, 3, 10, 11}, []int64{3, 2})
+	chunk, err = stream.Recv()
+	require.Nil(t, chunk)
+	require.ErrorIs(t, err, io.EOF)
+	require.NoError(t, stream.Close())
+}
+
+func TestSearchOnViewStreamRejectsUnsupportedSearch(t *testing.T) {
+	server := NewServer(&streamTestProvider{}, &streamTestScheduler{})
+	client, cleanup := startSearchStreamTestServer(t, server)
+	defer cleanup()
+
+	request := streamTestRequest()
+	request.LegacyReq.IsAdvanced = true
+	stream, err := searchutil.NewGRPCReduceStream(context.Background(), client, request)
+	require.NoError(t, err)
+
+	chunk, err := stream.Recv()
+	require.Nil(t, chunk)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+func TestSearchOnViewStreamSendsGroupByColumns(t *testing.T) {
+	result := streamTestResult()
+	result.ResultData.GroupByFieldValues = []*schemapb.FieldData{{
+		FieldId: 100, Type: schemapb.DataType_Int64,
+		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 1, 2, 1, 2}}},
+		}},
+	}}
+	server := NewServer(
+		&streamTestProvider{searchTasks: &streamTestSearchTasks{tasks: []SearchSegmentTask{struct{}{}}}},
+		&streamTestScheduler{result: result},
+	)
+	client, cleanup := startSearchStreamTestServer(t, server)
+	defer cleanup()
+	request := streamTestRequest()
+	request.LegacyReq.IsIterator = false
+	request.LegacyReq.GroupByFieldIds = []int64{100}
+	request.LegacyReq.GroupSize = 2
+	request.StreamChunkBytes = 1
+	stream, err := searchutil.NewGRPCReduceStream(context.Background(), client, request)
+	require.NoError(t, err)
+	defer stream.Close()
+	var ids, groups []int64
+	for {
+		chunk, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		require.NoError(t, err)
+		ids = append(ids, chunk.GetResultData().GetIds().GetIntId().GetData()...)
+		groups = append(groups, chunk.GetResultData().GetGroupByFieldValues()[0].GetScalars().GetLongData().GetData()...)
+	}
+	require.Equal(t, []int64{1, 2, 3, 10, 11}, ids)
+	require.Equal(t, []int64{1, 1, 2, 1, 2}, groups)
+}
+
+func TestSearchOnViewStreamCloseCancelsServer(t *testing.T) {
+	started := make(chan struct{})
+	stopped := make(chan struct{})
+	server := NewServer(
+		&streamTestProvider{searchTasks: &streamTestSearchTasks{tasks: []SearchSegmentTask{struct{}{}}}},
+		&streamBlockingScheduler{started: started, stopped: stopped},
+	)
+	client, cleanup := startSearchStreamTestServer(t, server)
+	defer cleanup()
+	stream, err := searchutil.NewGRPCReduceStream(context.Background(), client, streamTestRequest())
+	require.NoError(t, err)
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("SearchOnViewStream server did not start")
+	}
+	require.NoError(t, stream.Close())
+
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("SearchOnViewStream server was not canceled")
+	}
+}
+
+func TestQueryOnViewStreamSendsChunksAndEOF(t *testing.T) {
+	tasks := &streamTestQueryTasks{tasks: []QuerySegmentTask{struct{}{}}}
+	provider := &streamTestProvider{queryTasks: tasks}
+	scheduler := &streamTestScheduler{queryResult: &internalpb.RetrieveResults{
+		Status: merr.Success(),
+		Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3}}},
+		},
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type:    schemapb.DataType_Int64,
+				FieldId: 101,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10, 20, 30}}},
+					},
+				},
+			},
+		},
+		AllRetrieveCount: 3,
+		HasMoreResult:    true,
+	}}
+	server := NewServer(provider, scheduler)
+	client, cleanup := startSearchStreamTestServer(t, server)
+	defer cleanup()
+	request := &viewpb.QueryOnViewRequest{
+		LegacyReq: &internalpb.RetrieveRequest{
+			CollectionID: 10,
+			IsIterator:   true,
+			Limit:        3,
+		},
+		ShardId: &viewpb.ShardID{ReplicaId: 1, Vchannel: "by-dev-rootcoord-dml_0_100v0"},
+		Version: &viewpb.QueryViewVersion{
+			DataVersion:  &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 2},
+			QueryVersion: 3,
+		},
+		Mvcc:             &viewpb.QueryPlanMVCC{GrowingTimetick: 10},
+		StreamChunkBytes: 32,
+		SegmentSelection: &viewpb.SegmentSelection{SegmentIds: []int64{456}, Mode: viewpb.SegmentSelection_Include},
+	}
+	stream, err := queryutil.NewGRPCReduceStream(context.Background(), client, request)
+	require.NoError(t, err)
+
+	first, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{1, 2}, first.GetIds().GetIntId().GetData())
+	require.Equal(t, []int64{10, 20}, first.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	require.Equal(t, int64(3), first.GetAllRetrieveCount())
+	require.True(t, first.GetHasMoreResult())
+
+	second, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{3}, second.GetIds().GetIntId().GetData())
+	require.Equal(t, []int64{30}, second.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	require.Zero(t, second.GetAllRetrieveCount())
+	require.False(t, second.GetHasMoreResult())
+
+	chunk, err := stream.Recv()
+	require.Nil(t, chunk)
+	require.ErrorIs(t, err, io.EOF)
+	require.NoError(t, stream.Close())
+	require.Equal(t, 1, tasks.releaseCount)
+	require.Equal(t, int64(10), provider.queryRequest.GetCollectionID())
+	require.Equal(t, []int64{456}, provider.selection.GetSegmentIds())
+
+	request.LegacyReq.IsIterator = false
+	request.LegacyReq.Limit = typeutil.Unlimited
+	stream, err = queryutil.NewGRPCReduceStream(t.Context(), client, request)
+	require.NoError(t, err)
+	var ids []int64
+	for {
+		chunk, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		require.NoError(t, err)
+		ids = append(ids, chunk.GetIds().GetIntId().GetData()...)
+	}
+	require.Equal(t, []int64{1, 2, 3}, ids)
+	require.Equal(t, typeutil.Unlimited, provider.queryRequest.GetLimit())
+	require.NoError(t, stream.Close())
+
+	request.LegacyReq.IsIterator = true
+	stream, err = queryutil.NewGRPCReduceStream(t.Context(), client, request)
+	require.NoError(t, err)
+	first, err = stream.Recv()
+	require.NoError(t, err)
+	require.True(t, first.GetHasMoreResult())
+	require.NoError(t, stream.Close())
+}
+
+func TestQueryOnViewStreamPreservesElementIndices(t *testing.T) {
+	result := &internalpb.RetrieveResults{
+		Status: merr.Success(), ElementLevel: true, HasMoreResult: true,
+		Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2}}}},
+		FieldsData: []*schemapb.FieldData{{
+			FieldId: 101, Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10, 20}}},
+			}},
+		}},
+		ElementIndices: []*internalpb.ElementIndices{{Indices: []int32{0, 2, 4}}, {Indices: []int32{1, 3}}},
+	}
+	tasks := &streamTestQueryTasks{tasks: []QuerySegmentTask{struct{}{}}}
+	server := NewServer(&streamTestProvider{queryTasks: tasks}, &streamTestScheduler{queryResult: result})
+	client, cleanup := startSearchStreamTestServer(t, server)
+	defer cleanup()
+	stream, err := queryutil.NewGRPCReduceStream(context.Background(), client, &viewpb.QueryOnViewRequest{
+		LegacyReq: &internalpb.RetrieveRequest{CollectionID: 10, Limit: 4},
+		ShardId:   &viewpb.ShardID{ReplicaId: 1, Vchannel: "by-dev-rootcoord-dml_0_100v0"},
+		Version: &viewpb.QueryViewVersion{
+			DataVersion: &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 2}, QueryVersion: 3,
+		},
+		Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 10}, StreamChunkBytes: 1,
+	})
+	require.NoError(t, err)
+	for i := range 2 {
+		chunk, err := stream.Recv()
+		require.NoError(t, err)
+		require.True(t, chunk.GetElementLevel())
+		require.Equal(t, i == 0, chunk.GetHasMoreResult())
+		require.Equal(t, []int64{int64(i + 1)}, chunk.GetIds().GetIntId().GetData())
+		require.Equal(t, result.ElementIndices[i].GetIndices(), chunk.ElementIndices[0].GetIndices())
+	}
+	_, err = stream.Recv()
+	require.ErrorIs(t, err, io.EOF)
+	require.NoError(t, stream.Close())
+	require.Equal(t, 1, tasks.releaseCount)
+}
+
+func TestQueryOnViewStreamAcceptsOrderByQuery(t *testing.T) {
+	tasks := &streamTestQueryTasks{tasks: []QuerySegmentTask{struct{}{}}}
+	provider := &streamTestProvider{queryTasks: tasks}
+	server := NewServer(
+		provider,
+		&streamTestScheduler{queryResult: &internalpb.RetrieveResults{
+			Status: merr.Success(),
+			Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{Data: []int64{1}},
+			}},
+		}},
+	)
+	client, cleanup := startSearchStreamTestServer(t, server)
+	defer cleanup()
+
+	stream, err := queryutil.NewGRPCReduceStream(context.Background(), client, &viewpb.QueryOnViewRequest{
+		LegacyReq: &internalpb.RetrieveRequest{
+			CollectionID: 10,
+			Limit:        1,
+			OrderByFields: []*planpb.OrderByField{
+				{FieldId: 101, Ascending: true},
+			},
+		},
+		ShardId: &viewpb.ShardID{ReplicaId: 1, Vchannel: "by-dev-rootcoord-dml_0_100v0"},
+		Version: &viewpb.QueryViewVersion{
+			DataVersion:  &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 2},
+			QueryVersion: 3,
+		},
+		Mvcc:             &viewpb.QueryPlanMVCC{GrowingTimetick: 10},
+		StreamChunkBytes: 32,
+	})
+	require.NoError(t, err)
+
+	chunk, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{1}, chunk.GetIds().GetIntId().GetData())
+	require.NoError(t, stream.Close())
+	require.Equal(t, 1, tasks.releaseCount)
+	require.Equal(t, int64(101), provider.queryRequest.GetOrderByFields()[0].GetFieldId())
+}
+
+func TestQueryOnViewStreamAcceptsGroupByQuery(t *testing.T) {
+	tasks := &streamTestQueryTasks{tasks: []QuerySegmentTask{struct{}{}}}
+	provider := &streamTestProvider{queryTasks: tasks}
+	server := NewServer(
+		provider,
+		&streamTestScheduler{queryResult: &internalpb.RetrieveResults{
+			Status: merr.Success(),
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:    schemapb.DataType_Int64,
+					FieldId: 100,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}},
+					}},
+				},
+				{
+					Type:    schemapb.DataType_Int64,
+					FieldId: 101,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{3, 4}}},
+					}},
+				},
+			},
+		}},
+	)
+	client, cleanup := startSearchStreamTestServer(t, server)
+	defer cleanup()
+
+	stream, err := queryutil.NewGRPCReduceStream(context.Background(), client, &viewpb.QueryOnViewRequest{
+		LegacyReq: &internalpb.RetrieveRequest{
+			CollectionID:    10,
+			GroupByFieldIds: []int64{100},
+			Aggregates: []*planpb.Aggregate{
+				{Op: planpb.AggregateOp_count, FieldId: 101},
+			},
+		},
+		ShardId: &viewpb.ShardID{ReplicaId: 1, Vchannel: "by-dev-rootcoord-dml_0_100v0"},
+		Version: &viewpb.QueryViewVersion{
+			DataVersion:  &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 2},
+			QueryVersion: 3,
+		},
+		Mvcc:             &viewpb.QueryPlanMVCC{GrowingTimetick: 10},
+		StreamChunkBytes: 32,
+	})
+	require.NoError(t, err)
+
+	var groups []int64
+	for {
+		chunk, recvErr := stream.Recv()
+		if errors.Is(recvErr, io.EOF) {
+			break
+		}
+		require.NoError(t, recvErr)
+		groups = append(groups, chunk.GetFieldsData()[0].GetScalars().GetLongData().GetData()...)
+	}
+	require.Equal(t, []int64{1, 2}, groups)
+	require.NoError(t, stream.Close())
+	require.Equal(t, 1, tasks.releaseCount)
+}
+
+func startSearchStreamTestServer(t *testing.T, service viewpb.ViewQueryServiceServer) (viewpb.ViewQueryServiceClient, func()) {
+	t.Helper()
+	listener := bufconn.Listen(1024 * 1024)
+	grpcServer := grpc.NewServer(grpc.StreamInterceptor(serviceinterceptor.NewServiceStreamServerInterceptor()))
+	viewpb.RegisterViewQueryServiceServer(grpcServer, service)
+	go func() {
+		_ = grpcServer.Serve(listener)
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	connection, err := grpc.DialContext(ctx, "bufnet",
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+			return listener.Dial()
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	cancel()
+	require.NoError(t, err)
+
+	return viewpb.NewViewQueryServiceClient(connection), func() {
+		_ = connection.Close()
+		grpcServer.Stop()
+		_ = listener.Close()
+	}
+}
+
+func recvSearchStreamChunk(t *testing.T, stream searchutil.ReduceStream) *internalpb.SearchResults {
+	t.Helper()
+	chunk, err := stream.Recv()
+	require.NoError(t, err)
+	return chunk
+}
+
+func assertStreamChunk(t *testing.T, chunk *internalpb.SearchResults, ids, topks []int64) {
+	t.Helper()
+	require.True(t, merr.Ok(chunk.GetStatus()))
+	require.Equal(t, ids, chunk.GetResultData().GetIds().GetIntId().GetData())
+	require.Equal(t, topks, chunk.GetResultData().GetTopks())
+}
+
+func streamTestRequest() *viewpb.SearchOnViewRequest {
+	return &viewpb.SearchOnViewRequest{
+		LegacyReq: &internalpb.SearchRequest{
+			CollectionID: 10,
+			Nq:           2,
+			Topk:         3,
+			MetricType:   "IP",
+			IsIterator:   true,
+		},
+		ShardId: &viewpb.ShardID{ReplicaId: 1, Vchannel: "by-dev-rootcoord-dml_0_100v0"},
+		Version: &viewpb.QueryViewVersion{
+			DataVersion:  &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 2},
+			QueryVersion: 3,
+		},
+		Mvcc:             &viewpb.QueryPlanMVCC{GrowingTimetick: 10, TransformingTimetick: 9},
+		StreamChunkBytes: 1024,
+	}
+}
+
+func streamTestResult() *internalpb.SearchResults {
+	return &internalpb.SearchResults{
+		Status:             merr.Success(),
+		MetricType:         "IP",
+		NumQueries:         2,
+		TopK:               3,
+		CostAggregation:    &internalpb.CostAggregation{TotalRelatedDataSize: 100},
+		ChannelsMvcc:       map[string]uint64{"channel-a": 1000},
+		ScannedRemoteBytes: 30,
+		ScannedTotalBytes:  40,
+		ResultData: &schemapb.SearchResultData{
+			NumQueries:     2,
+			TopK:           3,
+			Topks:          []int64{3, 2},
+			AllSearchCount: 50,
+			Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 10, 11}},
+			}},
+			Scores: []float32{0.9, 0.8, 0.7, 0.95, 0.85},
+		},
+	}
+}
+
+type streamTestProvider struct {
+	TaskProvider
+	searchTasks  SearchSegmentTasks
+	searchErr    error
+	request      *internalpb.SearchRequest
+	queryTasks   QuerySegmentTasks
+	queryRequest *internalpb.RetrieveRequest
+	selection    *viewpb.SegmentSelection
+}
+
+func (p *streamTestProvider) AcquireSearchSegmentTasks(
+	_ context.Context,
+	_ qviews.ShardID,
+	_ qviews.QueryViewVersion,
+	_ *viewpb.QueryPlanMVCC,
+	request *internalpb.SearchRequest,
+	selection *viewpb.SegmentSelection,
+) (SearchSegmentTasks, error) {
+	p.request = request
+	p.selection = selection
+	if p.searchErr != nil {
+		return nil, p.searchErr
+	}
+	return p.searchTasks, nil
+}
+
+func (p *streamTestProvider) AcquireQuerySegmentTasks(
+	_ context.Context,
+	_ qviews.ShardID,
+	_ qviews.QueryViewVersion,
+	_ *viewpb.QueryPlanMVCC,
+	request *internalpb.RetrieveRequest,
+	selection *viewpb.SegmentSelection,
+) (QuerySegmentTasks, error) {
+	p.queryRequest = request
+	p.selection = selection
+	return p.queryTasks, nil
+}
+
+type streamTestSearchTasks struct {
+	tasks        []SearchSegmentTask
+	releaseCount int
+}
+
+type streamTestQueryTasks struct {
+	tasks        []QuerySegmentTask
+	releaseCount int
+}
+
+func (t *streamTestQueryTasks) Tasks() []QuerySegmentTask {
+	return t.tasks
+}
+
+func (t *streamTestQueryTasks) Release() {
+	t.releaseCount++
+}
+
+func (t *streamTestSearchTasks) Tasks() []SearchSegmentTask {
+	return t.tasks
+}
+
+func (t *streamTestSearchTasks) Release() {
+	t.releaseCount++
+}
+
+type streamTestScheduler struct {
+	result      *internalpb.SearchResults
+	queryResult *internalpb.RetrieveResults
+}
+
+func (s *streamTestScheduler) Search(context.Context, SearchSegmentTasks) (*internalpb.SearchResults, error) {
+	return s.result, nil
+}
+
+func (s *streamTestScheduler) Query(context.Context, QuerySegmentTasks) (*internalpb.RetrieveResults, error) {
+	return s.queryResult, nil
+}
+
+type streamBlockingScheduler struct {
+	started chan struct{}
+	stopped chan struct{}
+}
+
+func (s *streamBlockingScheduler) Search(ctx context.Context, _ SearchSegmentTasks) (*internalpb.SearchResults, error) {
+	close(s.started)
+	<-ctx.Done()
+	close(s.stopped)
+	return nil, ctx.Err()
+}
+
+func (s *streamBlockingScheduler) Query(context.Context, QuerySegmentTasks) (*internalpb.RetrieveResults, error) {
+	return nil, nil
+}

@@ -101,7 +101,7 @@ func (op *OrderByLimitOperator) Run(ctx context.Context, span trace.Span, inputs
 		}
 	}
 
-	rowCount := getRowCount(result)
+	rowCount := GetRowCount(result)
 	if rowCount <= 1 {
 		return []any{result}, nil
 	}
@@ -228,31 +228,35 @@ func (op *OrderByLimitOperator) compareRowsAt(result *internalpb.RetrieveResults
 
 // compareFieldValuesAt compares two values in the same field at different indices.
 func (op *OrderByLimitOperator) compareFieldValuesAt(fd *schemapb.FieldData, idx1, idx2 int, field *orderby.OrderByField) int {
-	val1, null1 := getFieldValue(fd, idx1)
-	val2, null2 := getFieldValue(fd, idx2)
+	return compareFieldDataRows(fd, idx1, fd, idx2, field.DataType, field.Ascending, field.NullsFirst)
+}
+
+func compareFieldDataRows(left *schemapb.FieldData, leftIndex int, right *schemapb.FieldData, rightIndex int, dataType schemapb.DataType, ascending, nullsFirst bool) int {
+	leftValue, leftNull := getFieldValue(left, leftIndex)
+	rightValue, rightNull := getFieldValue(right, rightIndex)
 
 	// Handle nulls
-	if null1 && null2 {
+	if leftNull && rightNull {
 		return 0
 	}
-	if null1 {
-		if field.NullsFirst {
+	if leftNull {
+		if nullsFirst {
 			return -1
 		}
 		return 1
 	}
-	if null2 {
-		if field.NullsFirst {
+	if rightNull {
+		if nullsFirst {
 			return 1
 		}
 		return -1
 	}
 
 	// Compare actual values
-	cmp := compareValues(val1, val2, field.DataType)
+	cmp := compareValues(leftValue, rightValue, dataType)
 
 	// Apply ascending/descending
-	if !field.Ascending {
+	if !ascending {
 		cmp = -cmp
 	}
 

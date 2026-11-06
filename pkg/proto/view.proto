@@ -402,8 +402,14 @@ message QueryPlan {
 service ViewQueryService {
     // SearchOnView executes a vector search on segments belonging to the given view version.
     rpc SearchOnView(SearchOnViewRequest) returns (SearchOnViewResponse) {}
+    // SearchOnViewStream executes the same search over a bidirectional stream.
+    // The client sends SearchOnViewRequest first. The server returns result Chunks;
+    // interrupt and metadata are reserved for the stream lifecycle implementation.
+    rpc SearchOnViewStream(stream SearchOnViewStreamRequest) returns (stream SearchOnViewStreamResponse) {}
     // QueryOnView executes a query (retrieve by expression) on segments belonging to the given view version.
     rpc QueryOnView(QueryOnViewRequest) returns (QueryOnViewResponse) {}
+    // QueryOnViewStream executes the same query over a bidirectional stream.
+    rpc QueryOnViewStream(stream QueryOnViewStreamRequest) returns (stream QueryOnViewStreamResponse) {}
     rpc StatisticsOnView(StatisticsOnViewRequest) returns (StatisticsOnViewResponse) {}
 }
 
@@ -433,11 +439,29 @@ message SearchOnViewRequest {
     SegmentSelection segment_selection = 5;
     repeated SegmentSelection sub_selections = 6;
     SearchExecutionOptions execution_options = 7;
+    int64 stream_chunk_bytes = 8;
 }
 
 message SearchOnViewResponse {
     // TODO: replace with native view result types once legacy internal protos are removed.
     internal.SearchResults legacy_results = 1;
+}
+
+message SearchOnViewStreamRequest {
+    oneof payload {
+        SearchOnViewRequest request = 1;
+        SearchOnViewInterrupt interrupt = 2;
+    }
+}
+
+message SearchOnViewInterrupt {
+}
+
+message SearchOnViewStreamResponse {
+    oneof payload {
+        internal.SearchResults chunk = 1;
+        internal.SearchResults metadata = 2;
+    }
 }
 
 message QueryOnViewRequest {
@@ -447,6 +471,7 @@ message QueryOnViewRequest {
     QueryViewVersion version = 3;
     QueryPlanMVCC mvcc = 4;
     SegmentSelection segment_selection = 5;
+    int64 stream_chunk_bytes = 6;
 }
 
 message QueryOnViewResponse {
@@ -514,4 +539,20 @@ message QueryNodeRequestContext {
 message StreamingNodeRequestContext {
     // Node selected for this attempt; does not imply the server received it.
     int64 node_id = 1;
+}
+message QueryOnViewStreamRequest {
+    oneof payload {
+        QueryOnViewRequest request = 1;
+        QueryOnViewInterrupt interrupt = 2;
+    }
+}
+
+message QueryOnViewInterrupt {
+}
+
+message QueryOnViewStreamResponse {
+    oneof payload {
+        internal.RetrieveResults chunk = 1;
+        internal.RetrieveResults metadata = 2;
+    }
 }

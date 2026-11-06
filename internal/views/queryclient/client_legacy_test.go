@@ -2,6 +2,9 @@ package queryclient
 
 import (
 	"context"
+	"errors"
+	"io"
+	"sync"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -10,14 +13,19 @@ import (
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/util/queryutil"
+	"github.com/milvus-io/milvus/internal/util/searchutil"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func TestLegacyClientSearchReturnsRawResults(t *testing.T) {
+func TestLegacyClientPlainSearchUsesBatchWhenStreamingDisabled(t *testing.T) {
 	setupTestReplicaRouting(t)
 	collectionID := int64(100)
 	shardA := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
@@ -35,6 +43,9 @@ func TestLegacyClientSearchReturnsRawResults(t *testing.T) {
 				shardA.VChannel: {Status: merr.Success(), Base: &commonpb.MsgBase{SourceID: 101}},
 				shardB.VChannel: {Status: merr.Success(), Base: &commonpb.MsgBase{SourceID: 102}},
 			},
+			searchOnViewStream: func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
+				return nil, errors.New("stream path should not be used")
+			},
 		},
 		&legacyResolver{
 			vchannels: []string{shardA.VChannel, shardB.VChannel},
@@ -45,6 +56,9 @@ func TestLegacyClientSearchReturnsRawResults(t *testing.T) {
 		Req: &internalpb.SearchRequest{
 			CollectionID:     collectionID,
 			ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+			Nq:               1,
+			Topk:             1,
+			MetricType:       "IP",
 		},
 	})
 	require.NoError(t, err)
@@ -55,6 +69,267 @@ func TestLegacyClientSearchReturnsRawResults(t *testing.T) {
 		result.Results[1].GetBase().GetSourceID(),
 	})
 	require.Len(t, result.Plans, 2)
+}
+
+func TestLegacyClientSearchReducesIteratorVChannelStreams(t *testing.T) {
+	setupTestReplicaRouting(t)
+	collectionID := int64(100)
+	shardA := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
+	shardB := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_1_100v1"}
+	queryNode := qviews.NewQueryNode(11)
+
+	client := NewLegacyViewQueryClient(
+		ViewQueryClientConfig{MaxRetries: 1},
+		&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
+			shardA.VChannel: legacySearchPlan(shardA, queryNode),
+			shardB.VChannel: legacySearchPlan(shardB, queryNode),
+		}},
+		&legacyServiceClient{searchResults: map[string]*internalpb.SearchResults{
+			shardA.VChannel: newTestSearchChunk(3, []int64{1, 4}, []float32{0.9, 0.6}),
+			shardB.VChannel: newTestSearchChunk(3, []int64{2, 3}, []float32{0.8, 0.7}),
+		}},
+		&legacyResolver{
+			vchannels: []string{shardA.VChannel, shardB.VChannel},
+		},
+	)
+
+	result, err := client.Legacy().Search(context.Background(), &LegacySearchRequest{
+		AllowStreaming: true, ReduceStreamChunkBytes: 20,
+		Req: &internalpb.SearchRequest{
+			CollectionID:     collectionID,
+			ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+			Nq:               1,
+			Topk:             3,
+			MetricType:       "IP",
+			IsIterator:       true,
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result.Stream)
+	chunk, err := result.Stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{1, 2}, chunk.GetResultData().GetIds().GetIntId().GetData())
+	require.Equal(t, []float32{0.9, 0.8}, chunk.GetResultData().GetScores())
+	chunk, err = result.Stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{3}, chunk.GetResultData().GetIds().GetIntId().GetData())
+	require.Equal(t, []float32{0.7}, chunk.GetResultData().GetScores())
+	chunk, err = result.Stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{4}, chunk.GetResultData().GetIds().GetIntId().GetData())
+	_, err = result.Stream.Recv()
+	require.ErrorIs(t, err, io.EOF)
+	require.NoError(t, result.Stream.Close())
+	require.Len(t, result.Plans, 2)
+}
+
+func TestLegacyClientPlainANNUsesStreamingWhenEnabled(t *testing.T) {
+	setupTestReplicaRouting(t)
+	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
+	queryNode := qviews.NewQueryNode(11)
+	client := NewLegacyViewQueryClient(
+		ViewQueryClientConfig{MaxRetries: 1},
+		&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
+			shardID.VChannel: legacySearchPlan(shardID, queryNode),
+		}},
+		&legacyServiceClient{searchResults: map[string]*internalpb.SearchResults{
+			shardID.VChannel: newTestSearchChunk(2, []int64{10, 20}, []float32{0.9, 0.8}),
+		}},
+		&legacyResolver{
+			vchannels: []string{shardID.VChannel},
+		},
+	)
+
+	result, err := client.Legacy().Search(context.Background(), &LegacySearchRequest{AllowStreaming: true, ReduceStreamChunkBytes: 20, Req: &internalpb.SearchRequest{
+		CollectionID:     100,
+		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+		Nq:               1,
+		Topk:             2,
+		MetricType:       "IP",
+		SearchType:       internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER,
+	}})
+	require.NoError(t, err)
+	require.NotNil(t, result.Stream)
+	chunk, err := result.Stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{10, 20}, chunk.GetResultData().GetIds().GetIntId().GetData())
+	_, err = result.Stream.Recv()
+	require.ErrorIs(t, err, io.EOF)
+	require.NoError(t, result.Stream.Close())
+}
+
+func TestLegacyClientGroupedSearchStreamingSwitch(t *testing.T) {
+	setupTestReplicaRouting(t)
+	for _, enabled := range []bool{false, true} {
+		t.Run(map[bool]string{false: "Batch", true: "Streaming"}[enabled], func(t *testing.T) {
+			shard := qviews.ShardID{ReplicaID: 1, VChannel: "grouped-search-vchannel"}
+			node := qviews.NewQueryNode(11)
+			input := newTestSearchChunk(2, []int64{1, 2, 3}, []float32{.9, .8, .7})
+			input.ResultData.GroupByFieldValues = []*schemapb.FieldData{{
+				FieldId: 101, Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10, 20, 10}}},
+				}},
+			}}
+			streamCalls := 0
+			service := &legacyServiceClient{searchResults: map[string]*internalpb.SearchResults{shard.VChannel: input}}
+			service.searchOnViewStream = func(ctx context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
+				streamCalls++
+				chunks, err := searchutil.SplitSearchResult(proto.Clone(input).(*internalpb.SearchResults), int(req.GetStreamChunkBytes()))
+				if err != nil {
+					return nil, err
+				}
+				stream := &fakeSearchStream{ctx: ctx}
+				for _, chunk := range chunks {
+					stream.recv = append(stream.recv, fakeSearchStreamRecv{chunk: chunk})
+				}
+				return stream, nil
+			}
+			client := NewLegacyViewQueryClient(
+				ViewQueryClientConfig{MaxRetries: 1},
+				&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{shard.VChannel: legacySearchPlan(shard, node)}},
+				service, &legacyResolver{vchannels: []string{shard.VChannel}},
+			)
+			result, err := client.Legacy().Search(context.Background(), &LegacySearchRequest{
+				AllowStreaming: enabled, ReduceStreamChunkBytes: 1,
+				Req: &internalpb.SearchRequest{CollectionID: 100, ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+					Nq: 1, Topk: 2, GroupSize: 2, GroupByFieldIds: []int64{101}, MetricType: "IP"},
+			})
+			require.NoError(t, err)
+			if !enabled {
+				require.Zero(t, streamCalls)
+				require.Nil(t, result.Stream)
+				require.Len(t, result.Results, 1)
+				return
+			}
+			require.Equal(t, 1, streamCalls)
+			require.NotNil(t, result.Stream)
+			defer result.Stream.Close()
+			var ids, groups []int64
+			for {
+				chunk, err := result.Stream.Recv()
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				require.NoError(t, err)
+				ids = append(ids, chunk.GetResultData().GetIds().GetIntId().GetData()...)
+				groups = append(groups, chunk.GetResultData().GetGroupByFieldValues()[0].GetScalars().GetLongData().GetData()...)
+			}
+			require.Equal(t, []int64{1, 2, 3}, ids)
+			require.Equal(t, []int64{10, 20, 10}, groups)
+		})
+	}
+}
+
+func TestLegacyClientIteratorSearchUsesBatchWhenStreamingDisabled(t *testing.T) {
+	setupTestReplicaRouting(t)
+	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
+	queryNode := qviews.NewQueryNode(11)
+	batchResult := newTestSearchChunk(1, []int64{10}, []float32{0.9})
+	client := NewLegacyViewQueryClient(
+		ViewQueryClientConfig{MaxRetries: 1},
+		&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
+			shardID.VChannel: legacySearchPlan(shardID, queryNode),
+		}},
+		&legacyServiceClient{
+			searchResults: map[string]*internalpb.SearchResults{shardID.VChannel: batchResult},
+			searchOnViewStream: func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
+				return nil, errors.New("stream path should not be used")
+			},
+		},
+		&legacyResolver{
+			vchannels: []string{shardID.VChannel},
+		},
+	)
+
+	result, err := client.Legacy().Search(context.Background(), &LegacySearchRequest{Req: &internalpb.SearchRequest{
+		CollectionID:     100,
+		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+		Nq:               1,
+		Topk:             1,
+		MetricType:       "IP",
+		IsIterator:       true,
+	}})
+	require.NoError(t, err)
+	require.Nil(t, result.Stream)
+	require.Len(t, result.Results, 1)
+	require.Same(t, batchResult, result.Results[0])
+}
+
+func TestLegacyClientSearchUsesBatchForUnsupportedIterator(t *testing.T) {
+	setupTestReplicaRouting(t)
+	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
+	queryNode := qviews.NewQueryNode(11)
+	batchResult := newTestSearchChunk(1, []int64{10}, []float32{0.9})
+	client := NewLegacyViewQueryClient(
+		ViewQueryClientConfig{MaxRetries: 1},
+		&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
+			shardID.VChannel: legacySearchPlan(shardID, queryNode),
+		}},
+		&legacyServiceClient{
+			searchResults: map[string]*internalpb.SearchResults{shardID.VChannel: batchResult},
+			searchOnViewStream: func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
+				return nil, errors.New("stream path should not be used")
+			},
+		},
+		&legacyResolver{
+			vchannels: []string{shardID.VChannel},
+		},
+	)
+
+	result, err := client.Legacy().Search(context.Background(), &LegacySearchRequest{Req: &internalpb.SearchRequest{
+		CollectionID:     100,
+		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+		Nq:               1,
+		Topk:             1,
+		MetricType:       "IP",
+		IsIterator:       true,
+		GroupByFieldId:   100,
+	}})
+	require.NoError(t, err)
+	require.Len(t, result.Results, 1)
+	require.Same(t, batchResult, result.Results[0])
+}
+
+func TestLegacyClientSearchReturnsUnconsumedStream(t *testing.T) {
+	setupTestReplicaRouting(t)
+	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
+	queryNode := qviews.NewQueryNode(11)
+	childStream := &fakeSearchStream{recv: []fakeSearchStreamRecv{{err: errors.New("first receive failed")}}}
+	openCount := 0
+
+	client := NewLegacyViewQueryClient(
+		ViewQueryClientConfig{MaxRetries: 2},
+		&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
+			shardID.VChannel: legacySearchPlan(shardID, queryNode),
+		}},
+		&legacyServiceClient{
+			searchOnViewStream: func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
+				openCount++
+				return childStream, nil
+			},
+		},
+		&legacyResolver{
+			vchannels: []string{shardID.VChannel},
+		},
+	)
+
+	result, err := client.Legacy().Search(context.Background(), &LegacySearchRequest{AllowStreaming: true, ReduceStreamChunkBytes: 32, Req: &internalpb.SearchRequest{
+		CollectionID:     100,
+		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+		Nq:               1,
+		Topk:             1,
+		MetricType:       "IP",
+		IsIterator:       true,
+	}})
+	require.NoError(t, err)
+	require.Equal(t, 1, openCount)
+	require.Equal(t, 2, client.Legacy().MaxRetries())
+	require.NotNil(t, result.Stream)
+	_, err = result.Stream.Recv()
+	require.ErrorContains(t, err, "first receive failed")
+	require.NoError(t, result.Stream.Close())
+	require.Equal(t, 1, childStream.closeCount())
 }
 
 func TestLegacyClientQueryReturnsRawResults(t *testing.T) {
@@ -88,13 +363,285 @@ func TestLegacyClientQueryReturnsRawResults(t *testing.T) {
 		Req: &internalpb.RetrieveRequest{
 			CollectionID:     collectionID,
 			ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+			Limit:            1,
 		},
 	})
 	require.NoError(t, err)
 
+	require.Nil(t, result.Stream)
 	require.Len(t, result.Results, 1)
 	require.Equal(t, int64(201), result.Results[0].GetBase().GetSourceID())
 	require.Len(t, result.Plans, 1)
+}
+
+func TestLegacyClientQueryReducesIteratorVChannelStreams(t *testing.T) {
+	setupTestReplicaRouting(t)
+	collectionID := int64(100)
+	shardA := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
+	shardB := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_1_100v1"}
+	queryNode := qviews.NewQueryNode(11)
+
+	client := NewLegacyViewQueryClient(
+		ViewQueryClientConfig{MaxRetries: 1},
+		&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
+			shardA.VChannel: legacyQueryPlan(shardA, queryNode),
+			shardB.VChannel: legacyQueryPlan(shardB, queryNode),
+		}},
+		&legacyServiceClient{queryResults: map[string]*internalpb.RetrieveResults{
+			shardA.VChannel: newTestQueryChunk([]int64{1, 3}),
+			shardB.VChannel: newTestQueryChunk([]int64{2, 4}),
+		}},
+		&legacyResolver{vchannels: []string{shardA.VChannel, shardB.VChannel}},
+	)
+
+	result, err := client.Legacy().Query(context.Background(), &LegacyQueryRequest{
+		AllowStreaming: true, ReduceStreamChunkBytes: 32,
+		Req: &internalpb.RetrieveRequest{
+			CollectionID:     collectionID,
+			ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+			IsIterator:       true,
+			Limit:            3,
+		},
+	})
+
+	require.NoError(t, err)
+	require.Empty(t, result.Results)
+	require.Len(t, result.Plans, 2)
+	first, err := result.Stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{1, 2}, first.GetIds().GetIntId().GetData())
+	second, err := result.Stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{3, 4}, second.GetIds().GetIntId().GetData())
+	chunk, err := result.Stream.Recv()
+	require.Nil(t, chunk)
+	require.ErrorIs(t, err, io.EOF)
+}
+
+func TestLegacyClientQueryReducesUnlimitedOrdinaryVChannelStreams(t *testing.T) {
+	setupTestReplicaRouting(t)
+	collectionID := int64(100)
+	shardA := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
+	shardB := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_1_100v1"}
+	queryNode := qviews.NewQueryNode(11)
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+	}}
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	filter, err := planparserv2.CreateRetrievePlan(helper, "id > 0", nil)
+	require.NoError(t, err)
+	expr, err := proto.Marshal(filter)
+	require.NoError(t, err)
+	req := &internalpb.RetrieveRequest{
+		CollectionID: collectionID, ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+		Limit: typeutil.Unlimited, SerializedExprPlan: expr,
+	}
+
+	client := NewLegacyViewQueryClient(
+		ViewQueryClientConfig{MaxRetries: 1},
+		&legacyPlanClient{getQueryPlan: func(_ context.Context, shard qviews.ShardID, input *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+			plan := legacyQueryPlan(shard, queryNode)
+			plan.Request = &viewpb.QueryPlan_LegacyRetrieveRequest{LegacyRetrieveRequest: proto.Clone(input.GetLegacyRetrieveRequest()).(*internalpb.RetrieveRequest)}
+			return &viewpb.GetQueryPlanResponse{Plan: plan}, nil
+		}},
+		&legacyServiceClient{queryResults: map[string]*internalpb.RetrieveResults{
+			shardA.VChannel: newTestQueryChunk([]int64{1, 3}),
+			shardB.VChannel: newTestQueryChunk([]int64{2, 4}),
+		}},
+		&legacyResolver{vchannels: []string{shardA.VChannel, shardB.VChannel}},
+	)
+
+	request := &LegacyQueryRequest{Req: req, Schema: schema, AllowStreaming: SupportsQueryStream(req), ReduceStreamChunkBytes: 32}
+	result, err := client.Legacy().Query(t.Context(), request)
+	require.NoError(t, err)
+	require.NotNil(t, result.Stream)
+	defer result.Stream.Close()
+	require.Empty(t, result.Results)
+	require.Len(t, result.Plans, 2)
+	first, err := result.Stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{1, 2}, first.GetIds().GetIntId().GetData())
+	second, err := result.Stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{3, 4}, second.GetIds().GetIntId().GetData())
+	_, err = result.Stream.Recv()
+	require.ErrorIs(t, err, io.EOF)
+
+	request.AllowStreaming = false
+	batch, err := client.Legacy().Query(t.Context(), request)
+	require.NoError(t, err)
+	require.Nil(t, batch.Stream)
+	op := queryutil.NewSortAndCheckPKPageOperator(0, schema, typeutil.Unlimited, 0)
+	want, err := op.Run(t.Context(), nil, batch.Results)
+	require.NoError(t, err)
+	got, err := op.Run(t.Context(), nil, []*internalpb.RetrieveResults{first, second})
+	require.NoError(t, err)
+	require.True(t, proto.Equal(want[0].(*internalpb.RetrieveResults), got[0].(*internalpb.RetrieveResults)))
+}
+
+func TestLegacyClientElementFilterQueryStreamingParity(t *testing.T) {
+	setupTestReplicaRouting(t)
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: 102, Name: "items", Fields: []*schemapb.FieldSchema{{
+				FieldID: 103, Name: "items[score]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+			}},
+		}},
+	}
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	plan, err := planparserv2.CreateRetrievePlan(helper, "element_filter(items, $[score] > 10)", nil)
+	require.NoError(t, err)
+	planBytes, err := proto.Marshal(plan)
+	require.NoError(t, err)
+	shardA := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
+	shardB := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_1_100v1"}
+	for _, streaming := range []bool{false, true} {
+		for _, iterator := range []bool{false, true} {
+			left, right := newTestQueryChunk([]int64{1, 3}), newTestQueryChunk([]int64{2, 4})
+			left.ElementLevel, right.ElementLevel = true, true
+			left.ElementIndices = []*internalpb.ElementIndices{{Indices: []int32{0, 2, 4}}, {Indices: []int32{1}}}
+			right.ElementIndices = []*internalpb.ElementIndices{{Indices: []int32{1, 3}}, {Indices: []int32{0}}}
+			client := NewLegacyViewQueryClient(
+				ViewQueryClientConfig{MaxRetries: 1},
+				&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
+					shardA.VChannel: legacyQueryPlan(shardA, qviews.NewQueryNode(11)),
+					shardB.VChannel: legacyQueryPlan(shardB, qviews.NewQueryNode(12)),
+				}},
+				&legacyServiceClient{queryResults: map[string]*internalpb.RetrieveResults{shardA.VChannel: left, shardB.VChannel: right}},
+				&legacyResolver{vchannels: []string{shardA.VChannel, shardB.VChannel}},
+			)
+			request := &internalpb.RetrieveRequest{CollectionID: 100, Limit: 4, IsIterator: iterator, SerializedExprPlan: planBytes}
+			require.True(t, SupportsQueryStream(request))
+			result, err := client.Legacy().Query(context.Background(), &LegacyQueryRequest{
+				Req: request, Schema: schema, AllowStreaming: streaming && SupportsQueryStream(request), ReduceStreamChunkBytes: 1,
+			})
+			require.NoError(t, err)
+			results := result.Results
+			if streaming {
+				require.NotNil(t, result.Stream)
+				for {
+					chunk, err := result.Stream.Recv()
+					if err == io.EOF {
+						break
+					}
+					require.NoError(t, err)
+					results = append(results, chunk)
+				}
+				require.NoError(t, result.Stream.Close())
+			} else {
+				require.Nil(t, result.Stream)
+			}
+			op := queryutil.NewSortAndCheckPKPageOperator(0, nil, 3, 1)
+			got, err := op.Run(context.Background(), nil, results)
+			require.NoError(t, err)
+			batch, err := op.Run(context.Background(), nil, []*internalpb.RetrieveResults{left, right})
+			require.NoError(t, err)
+			require.True(t, proto.Equal(batch[0].(*internalpb.RetrieveResults), got[0].(*internalpb.RetrieveResults)))
+		}
+	}
+}
+
+func TestLegacyClientQueryReducesGroupedVChannelStreams(t *testing.T) {
+	setupTestReplicaRouting(t)
+	shardA := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
+	shardB := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_1_100v1"}
+	queryNode := qviews.NewQueryNode(11)
+	groupChunk := func(groups, counts []int64) *internalpb.RetrieveResults {
+		return &internalpb.RetrieveResults{
+			Status: merr.Success(),
+			FieldsData: []*schemapb.FieldData{
+				{
+					Type:    schemapb.DataType_Int64,
+					FieldId: 100,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: groups}},
+					}},
+				},
+				{
+					Type:    schemapb.DataType_Int64,
+					FieldId: 101,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: counts}},
+					}},
+				},
+			},
+		}
+	}
+
+	client := NewLegacyViewQueryClient(
+		ViewQueryClientConfig{MaxRetries: 1},
+		&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
+			shardA.VChannel: legacyQueryPlan(shardA, queryNode),
+			shardB.VChannel: legacyQueryPlan(shardB, queryNode),
+		}},
+		&legacyServiceClient{queryResults: map[string]*internalpb.RetrieveResults{
+			shardA.VChannel: groupChunk([]int64{1, 2}, []int64{2, 3}),
+			shardB.VChannel: groupChunk([]int64{1, 3}, []int64{5, 6}),
+		}},
+		&legacyResolver{vchannels: []string{shardA.VChannel, shardB.VChannel}},
+	)
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "group", DataType: schemapb.DataType_Int64},
+		{FieldID: 101, Name: "count", DataType: schemapb.DataType_Int64},
+	}}
+
+	result, err := client.Legacy().Query(context.Background(), &LegacyQueryRequest{
+		AllowStreaming: true, ReduceStreamChunkBytes: 1 << 20,
+		Schema: schema,
+		Req: &internalpb.RetrieveRequest{
+			CollectionID:    100,
+			GroupByFieldIds: []int64{100},
+			Aggregates: []*planpb.Aggregate{
+				{Op: planpb.AggregateOp_count, FieldId: 101},
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Empty(t, result.Results)
+	require.Len(t, result.Plans, 2)
+	chunk, err := result.Stream.Recv()
+	require.NoError(t, err)
+	groups := chunk.GetFieldsData()[0].GetScalars().GetLongData().GetData()
+	counts := chunk.GetFieldsData()[1].GetScalars().GetLongData().GetData()
+	actual := make(map[int64]int64, len(groups))
+	for i, group := range groups {
+		actual[group] = counts[i]
+	}
+	require.Equal(t, map[int64]int64{1: 7, 2: 3, 3: 6}, actual)
+	_, err = result.Stream.Recv()
+	require.ErrorIs(t, err, io.EOF)
+}
+
+func TestSupportsQueryStream(t *testing.T) {
+	setupTestReplicaRouting(t)
+	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{}))
+	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{Limit: -2}))
+	require.True(t, SupportsQueryStream(&internalpb.RetrieveRequest{IsIterator: true, Limit: typeutil.Unlimited}))
+	require.True(t, SupportsQueryStream(&internalpb.RetrieveRequest{Limit: typeutil.Unlimited}))
+	require.True(t, SupportsQueryStream(&internalpb.RetrieveRequest{Limit: 1}))
+	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{
+		Limit:         1,
+		OrderByFields: []*planpb.OrderByField{{FieldId: 101, Ascending: true}},
+	}))
+	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{
+		GroupByFieldIds: []int64{100},
+		OrderByFields:   []*planpb.OrderByField{{FieldId: 100, Ascending: true}},
+	}))
+	require.True(t, SupportsQueryStream(&internalpb.RetrieveRequest{
+		GroupByFieldIds: []int64{100},
+		Aggregates: []*planpb.Aggregate{
+			{Op: planpb.AggregateOp_count, FieldId: 101},
+		},
+	}))
+	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{
+		Aggregates: []*planpb.Aggregate{
+			{Op: planpb.AggregateOp_sum, FieldId: 101},
+		},
+	}))
 }
 
 func TestLegacyClientQueryPreservesEmptyDownstreamSnapshot(t *testing.T) {
@@ -195,6 +742,9 @@ func TestLegacyClientSearchReturnsStatusError(t *testing.T) {
 		Req: &internalpb.SearchRequest{
 			CollectionID:     collectionID,
 			ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+			Nq:               1,
+			Topk:             1,
+			MetricType:       "IP",
 		},
 	})
 	require.Error(t, err)
@@ -210,10 +760,14 @@ func (r *legacyResolver) ResolveVChannels(context.Context, int64) ([]string, err
 
 type legacyPlanClient struct {
 	QueryPlanClient
-	plans map[string]*viewpb.QueryPlan
+	plans        map[string]*viewpb.QueryPlan
+	getQueryPlan func(context.Context, qviews.ShardID, *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error)
 }
 
-func (c *legacyPlanClient) GetQueryPlan(_ context.Context, shardID qviews.ShardID, _ *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+func (c *legacyPlanClient) GetQueryPlan(ctx context.Context, shardID qviews.ShardID, request *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+	if c.getQueryPlan != nil {
+		return c.getQueryPlan(ctx, shardID, request)
+	}
 	return &viewpb.GetQueryPlanResponse{Plan: c.plans[shardID.VChannel]}, nil
 }
 
@@ -223,24 +777,56 @@ func (c *legacyPlanClient) GetMVCCTimestamp(context.Context, qviews.ShardID, *vi
 
 type legacyServiceClient struct {
 	ViewQueryServiceClient
-	searchResults  map[string]*internalpb.SearchResults
-	queryResults   map[string]*internalpb.RetrieveResults
-	queryCallCount int
+	searchResults      map[string]*internalpb.SearchResults
+	searchOnView       func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error)
+	searchOnViewStream func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error)
+	queryResults       map[string]*internalpb.RetrieveResults
+	queryOnView        func(context.Context, qviews.WorkNode, *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error)
+	queryOnViewStream  func(context.Context, qviews.WorkNode, *viewpb.QueryOnViewRequest) (queryutil.ReduceStream, error)
+	queryMu            sync.Mutex
+	queryCallCount     int
 }
 
-func (c *legacyServiceClient) SearchOnView(_ context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
+func (c *legacyServiceClient) SearchOnView(ctx context.Context, node qviews.WorkNode, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
+	if c.searchOnView != nil {
+		return c.searchOnView(ctx, node, req)
+	}
 	return &viewpb.SearchOnViewResponse{
 		LegacyResults: c.searchResults[req.GetShardId().GetVchannel()],
 	}, nil
 }
 
-func (c *legacyServiceClient) QueryOnView(_ context.Context, _ qviews.WorkNode, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
+func (c *legacyServiceClient) SearchOnViewStream(ctx context.Context, node qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
+	if c.searchOnViewStream != nil {
+		return c.searchOnViewStream(ctx, node, req)
+	}
+	return &fakeSearchStream{
+		ctx:  ctx,
+		recv: []fakeSearchStreamRecv{{chunk: c.searchResults[req.GetShardId().GetVchannel()]}},
+	}, nil
+}
+
+func (c *legacyServiceClient) QueryOnView(ctx context.Context, node qviews.WorkNode, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
+	c.queryMu.Lock()
 	c.queryCallCount++
+	c.queryMu.Unlock()
+	if c.queryOnView != nil {
+		return c.queryOnView(ctx, node, req)
+	}
 	return &viewpb.QueryOnViewResponse{
 		LegacyResults: c.queryResults[req.GetShardId().GetVchannel()],
 	}, nil
 }
 
+func (c *legacyServiceClient) QueryOnViewStream(ctx context.Context, node qviews.WorkNode, req *viewpb.QueryOnViewRequest) (queryutil.ReduceStream, error) {
+	if c.queryOnViewStream != nil {
+		return c.queryOnViewStream(ctx, node, req)
+	}
+	return &fakeQueryStream{
+		ctx:  ctx,
+		recv: []fakeQueryStreamRecv{{chunk: c.queryResults[req.GetShardId().GetVchannel()]}},
+	}, nil
+}
 func legacySearchPlan(shardID qviews.ShardID, node qviews.QueryNode) *viewpb.QueryPlan {
 	return &viewpb.QueryPlan{
 		ShardId: shardID.IntoProto(),

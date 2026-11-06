@@ -2,13 +2,20 @@ package viewquery
 
 import (
 	"context"
+	"errors"
+	"io"
 
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
+	"github.com/milvus-io/milvus/internal/util/queryutil"
+	"github.com/milvus-io/milvus/internal/util/searchutil"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // Server implements ViewQueryService as a thin provider+scheduler adapter.
@@ -120,7 +127,52 @@ func (s *Server) executeSearch(ctx context.Context, req *viewpb.SearchOnViewRequ
 	return result, nil
 }
 
+func (s *Server) SearchOnViewStream(stream viewpb.ViewQueryService_SearchOnViewStreamServer) error {
+	initial, err := stream.Recv()
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return status.Error(codes.InvalidArgument, "SearchOnViewStream requires an initial request")
+		}
+		return err
+	}
+	request := initial.GetRequest()
+	if request == nil {
+		if initial.GetInterrupt() != nil {
+			return status.Error(codes.Unimplemented, "SearchOnViewStream interrupt is not implemented")
+		}
+		return status.Error(codes.InvalidArgument, "SearchOnViewStream first message must contain a request")
+	}
+	legacyRequest := request.GetLegacyReq()
+	if legacyRequest == nil ||
+		legacyRequest.GetIsAdvanced() ||
+		len(legacyRequest.GetSubReqs()) > 0 {
+		return status.Error(codes.InvalidArgument, "SearchOnViewStream supports Plain ANN Search and Search Group By only")
+	}
+
+	response, err := s.SearchOnView(stream.Context(), request)
+	if err != nil {
+		return err
+	}
+	chunkBytes := int(request.GetStreamChunkBytes())
+	chunks, err := searchutil.SplitSearchResult(response.GetLegacyResults(), chunkBytes)
+	if err != nil {
+		return status.Errorf(codes.Internal, "split SearchOnView result: %v", err)
+	}
+	for _, chunk := range chunks {
+		if err := stream.Send(&viewpb.SearchOnViewStreamResponse{
+			Payload: &viewpb.SearchOnViewStreamResponse_Chunk{Chunk: chunk},
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Server) QueryOnView(ctx context.Context, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
+	return s.queryOnView(ctx, req)
+}
+
+func (s *Server) queryOnView(ctx context.Context, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
 	if err := validateQueryRequest(req); err != nil {
 		return nil, err
 	}
@@ -152,4 +204,46 @@ func subSelection(req *viewpb.SearchOnViewRequest, index int) *viewpb.SegmentSel
 		return req.GetSubSelections()[index]
 	}
 	return req.GetSegmentSelection()
+}
+
+func (s *Server) QueryOnViewStream(stream viewpb.ViewQueryService_QueryOnViewStreamServer) error {
+	initial, err := stream.Recv()
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return status.Error(codes.InvalidArgument, "QueryOnViewStream requires an initial request")
+		}
+		return err
+	}
+	request := initial.GetRequest()
+	if request == nil {
+		if initial.GetInterrupt() != nil {
+			return status.Error(codes.Unimplemented, "QueryOnViewStream interrupt is not implemented")
+		}
+		return status.Error(codes.InvalidArgument, "QueryOnViewStream first message must contain a request")
+	}
+	legacyRequest := request.GetLegacyReq()
+	hasGroupBy := legacyRequest != nil && len(legacyRequest.GetGroupByFieldIds()) > 0
+	unlimited := legacyRequest.GetLimit() == typeutil.Unlimited && len(legacyRequest.GetOrderByFields()) == 0
+	if legacyRequest == nil || legacyRequest.GetIsCount() ||
+		(!hasGroupBy && ((legacyRequest.GetLimit() <= 0 && !unlimited) || len(legacyRequest.GetAggregates()) > 0)) {
+		return status.Error(codes.InvalidArgument, "unsupported QueryOnViewStream request or limit")
+	}
+
+	response, err := s.queryOnView(stream.Context(), request)
+	if err != nil {
+		return err
+	}
+	chunkBytes := int(request.GetStreamChunkBytes())
+	chunks, err := queryutil.SplitRetrieveResult(response.GetLegacyResults(), chunkBytes)
+	if err != nil {
+		return status.Errorf(codes.Internal, "split QueryOnView result: %v", err)
+	}
+	for _, chunk := range chunks {
+		if err := stream.Send(&viewpb.QueryOnViewStreamResponse{
+			Payload: &viewpb.QueryOnViewStreamResponse_Chunk{Chunk: chunk},
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

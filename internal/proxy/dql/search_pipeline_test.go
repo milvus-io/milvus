@@ -88,6 +88,49 @@ func (s *SearchPipelineSuite) TearDownTest() {
 	s.span.End()
 }
 
+func (s *SearchPipelineSuite) TestRunFromReducedSkipsReduceNode() {
+	reduceCalled := false
+	reduced := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       1,
+			Topks:      []int64{1},
+			Ids:        testSearchResultIDs(10),
+			Scores:     []float32{0.5},
+		},
+	}
+	pipeline := &pipeline{
+		name: "from-reduced",
+		nodes: []*Node{
+			{
+				name:   "reduce",
+				opName: searchReduceOp,
+				op: searchPipelineTestOperator(func(context.Context, trace.Span, ...any) ([]any, error) {
+					reduceCalled = true
+					return nil, fmt.Errorf("reduce node must be skipped")
+				}),
+			},
+			{
+				name:    "finish",
+				inputs:  []string{reducedMsgKey, "metrics"},
+				outputs: []string{pipelineOutput},
+				op: searchPipelineTestOperator(func(_ context.Context, _ trace.Span, inputs ...any) ([]any, error) {
+					s.Require().Equal([]string{"L2"}, inputs[1].([]string))
+					return []any{inputs[0].([]*milvuspb.SearchResults)[0]}, nil
+				}),
+			},
+		},
+	}
+
+	storageCost := segcore.StorageCost{ScannedRemoteBytes: 10, ScannedTotalBytes: 20}
+	result, actualStorageCost, err := pipeline.RunFromReduced(context.Background(), s.span, []*milvuspb.SearchResults{reduced}, []string{"L2"}, storageCost)
+	s.Require().NoError(err)
+	s.False(reduceCalled)
+	s.Same(reduced, result)
+	s.Equal(storageCost, actualStorageCost)
+}
+
 func (s *SearchPipelineSuite) TestBuildChainFromFunctionChainRerankMeta() {
 	repr, err := chain.ProtoChainToRepr(l2LimitFunctionChain(10))
 	s.Require().NoError(err)

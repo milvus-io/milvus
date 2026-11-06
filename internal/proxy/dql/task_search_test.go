@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"strconv"
 	"strings"
@@ -62,6 +63,123 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+type searchTaskReduceStream struct {
+	chunks []*internalpb.SearchResults
+}
+
+func (s *searchTaskReduceStream) Recv() (*internalpb.SearchResults, error) {
+	if len(s.chunks) == 0 {
+		return nil, io.EOF
+	}
+	chunk := s.chunks[0]
+	s.chunks = s.chunks[1:]
+	return chunk, nil
+}
+
+func (*searchTaskReduceStream) Close() error {
+	return nil
+}
+
+func (*searchTaskReduceStream) Interrupt() (*internalpb.SearchResults, error) {
+	return nil, errors.New("not implemented")
+}
+
+func TestAppendFinalSearchChunkPreservesOrderAndAppliesOffset(t *testing.T) {
+	output := &schemapb.SearchResultData{
+		NumQueries: 2,
+		TopK:       2,
+		Ids:        &schemapb.IDs{},
+		Topks:      make([]int64, 2),
+	}
+	seenPerQuery := make([]int64, 2)
+	chunks := []*schemapb.SearchResultData{
+		{
+			NumQueries: 2,
+			TopK:       3,
+			Topks:      []int64{3, 1},
+			Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{Data: []int64{10, 11, 12, 20}},
+			}},
+			Scores: []float32{-0.1, -0.2, -0.3, -1.0},
+		},
+		{
+			NumQueries: 2,
+			TopK:       3,
+			Topks:      []int64{0, 2},
+			Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{Data: []int64{21, 22}},
+			}},
+			Scores: []float32{-1.1, -1.2},
+		},
+	}
+
+	for _, chunk := range chunks {
+		_, err := appendFinalSearchChunk(output, chunk, seenPerQuery, 1, 2, metric.L2)
+		require.NoError(t, err)
+	}
+
+	require.Equal(t, []int64{11, 12, 21, 22}, output.GetIds().GetIntId().GetData())
+	require.Equal(t, []float32{0.2, 0.3, 1.1, 1.2}, output.GetScores())
+	require.Equal(t, []int64{2, 2}, output.GetTopks())
+}
+
+func TestConsumeResultStreamStopsAtLastVectorWindow(t *testing.T) {
+	request := &internalpb.SearchRequest{Nq: 2, Topk: 3, Offset: 1}
+	first := newFinalSearchChunk([]int64{10, 11, 20}, []float32{9, 8, 7}, "v1")
+	first.ResultData.NumQueries, first.ResultData.Topks = 2, []int64{2, 1}
+	last := newFinalSearchChunk([]int64{21, 22}, []float32{6, 5}, "v1")
+	last.ResultData.NumQueries, last.ResultData.Topks = 2, []int64{0, 2}
+	stream := &searchTaskReduceStream{chunks: []*internalpb.SearchResults{first, last, nil}}
+
+	result, _, err := (&SearchTask{}).consumeResultStream(stream, request, metric.IP, func(*internalpb.SearchResults) {})
+	require.NoError(t, err)
+	require.Equal(t, []int64{1, 2}, result.Results.Topks)
+	require.Equal(t, []int64{11, 21, 22}, result.Results.Ids.GetIntId().GetData())
+	require.Len(t, stream.chunks, 1, "Proxy must not pull again to fill the exhausted first vector")
+}
+
+func TestConsumeResultStreamPreservesOrderByCandidateWindow(t *testing.T) {
+	task := &SearchTask{
+		SearchRequest: &internalpb.SearchRequest{Nq: 1, Topk: 3, Offset: 1},
+		orderByFields: []OrderByField{{FieldName: "price"}},
+	}
+	stream := &searchTaskReduceStream{chunks: []*internalpb.SearchResults{
+		{
+			Status:     merr.Success(),
+			MetricType: metric.L2,
+			ResultData: &schemapb.SearchResultData{
+				NumQueries: 1,
+				TopK:       2,
+				Topks:      []int64{2},
+				Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{10, 11}},
+				}},
+				Scores: []float32{-0.1, -0.2},
+			},
+		},
+		{
+			Status:     merr.Success(),
+			MetricType: metric.L2,
+			ResultData: &schemapb.SearchResultData{
+				NumQueries: 1,
+				TopK:       1,
+				Topks:      []int64{1},
+				Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{Data: []int64{12}},
+				}},
+				Scores: []float32{-0.3},
+			},
+		},
+	}}
+
+	result, metricType, err := task.consumeResultStream(stream, task.SearchRequest, metric.L2, func(*internalpb.SearchResults) {})
+	require.NoError(t, err)
+	require.Equal(t, metric.L2, metricType)
+	require.Equal(t, []int64{10, 11, 12}, result.GetResults().GetIds().GetIntId().GetData())
+	require.Equal(t, []float32{0.1, 0.2, 0.3}, result.GetResults().GetScores())
+	require.Equal(t, []int64{3}, result.GetResults().GetTopks())
+}
 
 func TestSearchTaskFillResultSkipsTopksInsufficientForSearchAggregation(t *testing.T) {
 	aggCtx, err := search_agg.NewContext(1, []search_agg.LevelContext{{OwnFieldIDs: []int64{101}, Size: 1}}, nil, nil)

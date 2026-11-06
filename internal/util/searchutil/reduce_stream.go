@@ -1,0 +1,954 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package searchutil
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"sync"
+
+	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
+
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/fastpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+)
+
+// ReduceStream is the common parent-side contract for reduced streams and
+// transport-backed child streams. Recv calls must be serial; Close may run
+// concurrently with Recv to cancel it.
+type ReduceStream interface {
+	Recv() (*internalpb.SearchResults, error)
+	Close() error
+	Interrupt() (*internalpb.SearchResults, error)
+}
+
+type orderedUnit struct {
+	result             *internalpb.SearchResults
+	data               *schemapb.SearchResultData
+	queryIndex         int64
+	rowIndex           int64
+	byteSize           int
+	fieldIndexComputer *typeutil.FieldDataIdxComputer
+}
+
+func (u orderedUnit) score() float32 {
+	return u.data.GetScores()[u.rowIndex]
+}
+
+func (u orderedUnit) pk() any {
+	return typeutil.GetPK(u.data.GetIds(), u.rowIndex)
+}
+
+type orderedOutputBuffer struct {
+	units    []orderedUnit
+	byteSize int
+}
+
+func (b *orderedOutputBuffer) isEmpty() bool {
+	return len(b.units) == 0
+}
+
+func (u orderedUnit) reducibleByteSize() (int, error) {
+	data, row := u.data, u.rowIndex
+	if data == nil || row < 0 || row >= int64(len(data.GetScores())) {
+		return 0, merr.WrapErrServiceInternalMsg("Search Unit row %d is out of range", row)
+	}
+	idsSize, err := reduce.IDsRowSize(data.GetIds(), row)
+	if err != nil {
+		return 0, err
+	}
+	size := protowire.SizeTag(4) + protowire.SizeBytes(4) +
+		protowire.SizeTag(5) + protowire.SizeBytes(idsSize)
+	computer := u.fieldIndexComputer
+	if computer == nil {
+		computer = typeutil.NewFieldDataIdxComputer(data.GetFieldsData())
+	}
+	fieldIndexes := computer.Compute(row)
+	for i, field := range data.GetFieldsData() {
+		dataRow := row
+		if fieldIndexes != nil {
+			dataRow = fieldIndexes[i]
+		}
+		fieldSize, err := reduce.FieldDataRowSize(field, row, dataRow, true)
+		if err != nil {
+			return 0, err
+		}
+		size += protowire.SizeTag(3) + protowire.SizeBytes(fieldSize)
+	}
+	if indices := data.GetElementIndices(); indices != nil {
+		if row >= int64(len(indices.GetData())) {
+			return 0, merr.WrapErrServiceInternalMsg("Search Unit element index %d is out of range", row)
+		}
+		payload := protowire.SizeTag(1) + protowire.SizeBytes(protowire.SizeVarint(uint64(indices.Data[row])))
+		size += protowire.SizeTag(15) + protowire.SizeBytes(payload)
+	}
+	groupFields := data.GetGroupByFieldValues()
+	groupTag := protowire.Number(17)
+	if len(groupFields) == 0 && data.GetGroupByFieldValue() != nil {
+		groupFields = []*schemapb.FieldData{data.GetGroupByFieldValue()}
+		groupTag = 8
+	}
+	for _, field := range groupFields {
+		fieldSize, err := reduce.GroupByFieldRowSize(field, row)
+		if err != nil {
+			return 0, err
+		}
+		size += protowire.SizeTag(groupTag) + protowire.SizeBytes(fieldSize)
+	}
+	return size, nil
+}
+
+type orderedChildBuffer struct {
+	units    []orderedUnit
+	cursor   int
+	groupKey func(int) (uint64, []any)
+}
+
+func (b *orderedChildBuffer) hasUnit() bool {
+	return b.cursor < len(b.units)
+}
+
+func (b *orderedChildBuffer) front() orderedUnit {
+	return b.units[b.cursor]
+}
+
+func (b *orderedChildBuffer) pop() orderedUnit {
+	unit := b.front()
+	b.cursor++
+	if !b.hasUnit() {
+		b.units = nil
+		b.cursor = 0
+		b.groupKey = nil
+	}
+	return unit
+}
+
+func (b *orderedChildBuffer) accept(chunk *internalpb.SearchResults, nq, topK int64) (*schemapb.SearchResultData, error) {
+	data, err := decodeChunk(chunk, nq, topK)
+	if err != nil {
+		return nil, err
+	}
+
+	hitCount := typeutil.GetSizeOfIDs(data.GetIds())
+	if len(data.GetScores()) != hitCount {
+		return nil, fmt.Errorf("Search Chunk score count %d does not match hit count %d", len(data.GetScores()), hitCount)
+	}
+
+	totalTopK := int64(0)
+	for _, count := range data.GetTopks() {
+		if count < 0 {
+			return nil, fmt.Errorf("Search Chunk contains a negative per-query hit count %d", count)
+		}
+		totalTopK += count
+	}
+	if totalTopK != int64(hitCount) {
+		return nil, fmt.Errorf("Search Chunk Topks total %d does not match hit count %d", totalTopK, hitCount)
+	}
+
+	b.units = make([]orderedUnit, 0, hitCount)
+	b.cursor = 0
+	rowIndex := int64(0)
+	fieldIndexComputer := typeutil.NewFieldDataIdxComputer(data.GetFieldsData())
+	for queryIndex, count := range data.GetTopks() {
+		for i := int64(0); i < count; i++ {
+			b.units = append(b.units, orderedUnit{
+				result:             chunk,
+				data:               data,
+				queryIndex:         int64(queryIndex),
+				rowIndex:           rowIndex,
+				fieldIndexComputer: fieldIndexComputer,
+			})
+			rowIndex++
+		}
+	}
+	return data, nil
+}
+
+func decodeChunk(chunk *internalpb.SearchResults, nq, topK int64) (*schemapb.SearchResultData, error) {
+	if chunk.GetNumQueries() != 0 && chunk.GetNumQueries() != nq {
+		return nil, fmt.Errorf("Search Chunk nq %d does not match request nq %d", chunk.GetNumQueries(), nq)
+	}
+	if chunk.GetTopK() != 0 && chunk.GetTopK() != topK {
+		return nil, fmt.Errorf("Search Chunk topK %d does not match request topK %d", chunk.GetTopK(), topK)
+	}
+
+	data := chunk.GetResultData()
+	if data == nil && len(chunk.GetSlicedBlob()) > 0 {
+		data = &schemapb.SearchResultData{}
+		if err := fastpb.UnmarshalSearchResultData(chunk.GetSlicedBlob(), data); err != nil {
+			return nil, fmt.Errorf("decode Search Chunk: %w", err)
+		}
+	}
+	if data == nil {
+		data = &schemapb.SearchResultData{
+			NumQueries: nq,
+			TopK:       topK,
+			Topks:      make([]int64, nq),
+		}
+	}
+
+	if data.GetNumQueries() != nq {
+		return nil, fmt.Errorf("Search Chunk data nq %d does not match request nq %d", data.GetNumQueries(), nq)
+	}
+	if data.GetTopK() != topK {
+		return nil, fmt.Errorf("Search Chunk data topK %d does not match request topK %d", data.GetTopK(), topK)
+	}
+	if len(data.GetTopks()) != int(nq) {
+		return nil, fmt.Errorf("Search Chunk has %d per-query hit counts, expected %d", len(data.GetTopks()), nq)
+	}
+	return data, nil
+}
+
+// SplitSearchResult splits one complete Search result into query-major Chunks.
+func SplitSearchResult(result *internalpb.SearchResults, chunkBytes int) ([]*internalpb.SearchResults, error) {
+	if result == nil {
+		return nil, errors.New("SplitSearchResult requires a Search result")
+	}
+	if !merr.Ok(result.GetStatus()) {
+		return nil, merr.Error(result.GetStatus())
+	}
+	if result.GetNumQueries() <= 0 {
+		return nil, fmt.Errorf("SplitSearchResult requires a positive nq, got %d", result.GetNumQueries())
+	}
+	if result.GetTopK() <= 0 {
+		return nil, fmt.Errorf("SplitSearchResult requires a positive topK, got %d", result.GetTopK())
+	}
+	if chunkBytes <= 0 {
+		return nil, fmt.Errorf("SplitSearchResult requires positive Chunk bytes, got %d", chunkBytes)
+	}
+
+	buffer := &orderedChildBuffer{}
+	data, err := buffer.accept(result, result.GetNumQueries(), result.GetTopK())
+	if err != nil {
+		return nil, err
+	}
+	if !buffer.hasUnit() {
+		chunk := proto.Clone(result).(*internalpb.SearchResults)
+		chunk.SlicedBlob = nil
+		chunk.SlicedNumCount = 0
+		chunk.SlicedOffset = 0
+		chunk.ResultData = proto.Clone(data).(*schemapb.SearchResultData)
+		return []*internalpb.SearchResults{chunk}, nil
+	}
+
+	chunks := make([]*internalpb.SearchResults, 0)
+	start := 0
+	accumulatedBytes := 0
+	for end, unit := range buffer.units {
+		unitBytes, err := unit.reducibleByteSize()
+		if err != nil {
+			return nil, err
+		}
+		if unitBytes > chunkBytes && accumulatedBytes > 0 {
+			chunk, err := buildSearchChunk(
+				buffer.units[start:end],
+				result.GetNumQueries(),
+				result.GetTopK(),
+				result.GetMetricType(),
+				result.GetIsTopkReduce(),
+				result.GetIsRecallEvaluation(),
+			)
+			if err != nil {
+				return nil, err
+			}
+			chunks = append(chunks, chunk)
+			start = end
+			accumulatedBytes = 0
+		}
+		accumulatedBytes += unitBytes
+		if accumulatedBytes < chunkBytes {
+			continue
+		}
+		chunk, err := buildSearchChunk(
+			buffer.units[start:end+1],
+			result.GetNumQueries(),
+			result.GetTopK(),
+			result.GetMetricType(),
+			result.GetIsTopkReduce(),
+			result.GetIsRecallEvaluation(),
+		)
+		if err != nil {
+			return nil, err
+		}
+		chunks = append(chunks, chunk)
+		start = end + 1
+		accumulatedBytes = 0
+	}
+	if start < len(buffer.units) {
+		chunk, err := buildSearchChunk(
+			buffer.units[start:],
+			result.GetNumQueries(),
+			result.GetTopK(),
+			result.GetMetricType(),
+			result.GetIsTopkReduce(),
+			result.GetIsRecallEvaluation(),
+		)
+		if err != nil {
+			return nil, err
+		}
+		chunks = append(chunks, chunk)
+	}
+
+	first := chunks[0]
+	first.SealedSegmentIDsSearched = append([]int64(nil), result.GetSealedSegmentIDsSearched()...)
+	first.ChannelIDsSearched = append([]string(nil), result.GetChannelIDsSearched()...)
+	first.GlobalSealedSegmentIDs = append([]int64(nil), result.GetGlobalSealedSegmentIDs()...)
+	if result.GetCostAggregation() != nil {
+		first.CostAggregation = proto.Clone(result.GetCostAggregation()).(*internalpb.CostAggregation)
+	}
+	if len(result.GetChannelsMvcc()) > 0 {
+		first.ChannelsMvcc = make(map[string]uint64, len(result.GetChannelsMvcc()))
+		for channel, timestamp := range result.GetChannelsMvcc() {
+			first.ChannelsMvcc[channel] = timestamp
+		}
+	}
+	first.ScannedRemoteBytes = result.GetScannedRemoteBytes()
+	first.ScannedTotalBytes = result.GetScannedTotalBytes()
+	first.FeatureBits = result.GetFeatureBits()
+	first.FilterValidCounts = append([]int64(nil), result.GetFilterValidCounts()...)
+	first.ResultData.AllSearchCount = data.GetAllSearchCount()
+	return chunks, nil
+}
+
+type searchGroup struct {
+	values  []any
+	count   int64
+	skipped bool
+}
+
+// OrderedReduceStream merges ANN Search child Chunks by score, with optional group limits.
+type OrderedReduceStream struct {
+	recvMu       sync.Mutex
+	childStreams *reduce.ChildStreams[*internalpb.SearchResults]
+	childBuffers []orderedChildBuffer
+
+	nq              int64
+	topK            int64
+	chunkBytes      int
+	metricType      string
+	currentQuery    int64
+	emittedPerQuery []int64
+	seenPKs         map[any]struct{}
+	groupByFieldIDs []int64
+	groupSize       int64
+	groupOffset     int64
+	groups          map[uint64][]*searchGroup
+	groupCount      int64
+	isTopKReduce    bool
+	isRecallEval    bool
+	metadata        *internalpb.SearchResults
+	metadataEmitted bool
+
+	closed   bool
+	finished bool
+	closeErr error
+}
+
+// NewReduceStream creates the ANN Search or Search Group By OrderedReduceStream implementation.
+func NewReduceStream(request *internalpb.SearchRequest, childStreams []ReduceStream, chunkBytes int) (ReduceStream, error) {
+	if request == nil {
+		return nil, errors.New("NewReduceStream requires a Search request")
+	}
+	if request.GetNq() <= 0 {
+		return nil, fmt.Errorf("NewReduceStream requires a positive nq, got %d", request.GetNq())
+	}
+	if request.GetTopk() <= 0 {
+		return nil, fmt.Errorf("NewReduceStream requires a positive topK, got %d", request.GetTopk())
+	}
+	if request.GetIsAdvanced() || len(request.GetSubReqs()) > 0 {
+		return nil, errors.New("NewReduceStream supports Plain ANN Search and Search Group By only")
+	}
+	if chunkBytes <= 0 {
+		return nil, fmt.Errorf("NewReduceStream requires positive Chunk bytes, got %d", chunkBytes)
+	}
+	for i, childStream := range childStreams {
+		if childStream == nil {
+			return nil, fmt.Errorf("NewReduceStream child stream %d is nil", i)
+		}
+	}
+
+	stream := &OrderedReduceStream{
+		childStreams:    reduce.NewChildStreams[*internalpb.SearchResults](childStreams),
+		childBuffers:    make([]orderedChildBuffer, len(childStreams)),
+		nq:              request.GetNq(),
+		topK:            request.GetTopk(),
+		chunkBytes:      chunkBytes,
+		metricType:      request.GetMetricType(),
+		emittedPerQuery: make([]int64, request.GetNq()),
+		groupByFieldIDs: append([]int64(nil), request.GetGroupByFieldIds()...),
+		groupSize:       1,
+	}
+	if len(stream.groupByFieldIDs) == 0 && request.GetGroupByFieldId() > 0 {
+		stream.groupByFieldIDs = []int64{request.GetGroupByFieldId()}
+	}
+	if len(stream.groupByFieldIDs) > 0 {
+		if request.GetOffset() < 0 || request.GetOffset() >= request.GetTopk() {
+			return nil, merr.WrapErrServiceInternalMsg("Search Group By requires offset in [0, topK)")
+		}
+		stream.groupSize = max(1, request.GetGroupSize())
+		stream.groupOffset = request.GetOffset()
+		stream.groups = make(map[uint64][]*searchGroup)
+	}
+	return stream, nil
+}
+
+// NewShardReduceStream merges worker results within one vchannel, deduplicating hits per query.
+func NewShardReduceStream(request *internalpb.SearchRequest, childStreams []ReduceStream, chunkBytes int) (ReduceStream, error) {
+	stream, err := NewReduceStream(request, childStreams, chunkBytes)
+	if err != nil {
+		return nil, err
+	}
+	stream.(*OrderedReduceStream).seenPKs = make(map[any]struct{})
+	stream.(*OrderedReduceStream).groupOffset = 0
+	return stream, nil
+}
+
+// Recv returns the next ordered Search Chunk.
+func (s *OrderedReduceStream) Recv() (*internalpb.SearchResults, error) {
+	s.recvMu.Lock()
+	defer s.recvMu.Unlock()
+
+	if s.finished {
+		return nil, io.EOF
+	}
+	if s.closed {
+		return nil, io.ErrClosedPipe
+	}
+
+	outputBuffer := s.allocBuffer()
+
+	for !s.isChunkReady(outputBuffer) {
+		readyBuffers, err := s.getReadyBuffers()
+		if err != nil {
+			return nil, s.fail(err)
+		}
+
+		oneReduceResult, chunkReady, err := s.produceNextUnits(readyBuffers, outputBuffer.byteSize)
+		if err != nil {
+			return nil, s.fail(err)
+		}
+		s.merge(outputBuffer, oneReduceResult)
+		if chunkReady {
+			break
+		}
+	}
+
+	if outputBuffer.isEmpty() {
+		s.finished = true
+		if s.metadata != nil && !s.metadataEmitted {
+			chunk, err := s.createOutputChunk(outputBuffer)
+			if err != nil {
+				return nil, s.fail(err)
+			}
+			s.attachMetadata(chunk)
+			if err := s.closeChildren(); err != nil {
+				return nil, err
+			}
+			return chunk, nil
+		}
+		if err := s.closeChildren(); err != nil {
+			return nil, err
+		}
+		return nil, io.EOF
+	}
+
+	chunk, err := s.createOutputChunk(outputBuffer)
+	if err != nil {
+		return nil, s.fail(err)
+	}
+	s.attachMetadata(chunk)
+	return chunk, nil
+}
+
+func (s *OrderedReduceStream) allocBuffer() *orderedOutputBuffer {
+	return &orderedOutputBuffer{}
+}
+
+func (s *OrderedReduceStream) isChunkReady(outputBuffer *orderedOutputBuffer) bool {
+	return outputBuffer.byteSize >= s.chunkBytes || s.currentQuery >= s.nq
+}
+
+func (s *OrderedReduceStream) getReadyBuffers() ([]*orderedChildBuffer, error) {
+	err := s.childStreams.ReceiveUntilReady(
+		func(childIndex int) bool {
+			return s.childBuffers[childIndex].hasUnit()
+		},
+		func(childIndex int, chunk *internalpb.SearchResults) error {
+			if chunk == nil {
+				return merr.WrapErrServiceInternalMsg("child stream %d returned a nil Chunk", childIndex)
+			}
+			if !merr.Ok(chunk.GetStatus()) {
+				return merr.Wrapf(merr.Error(chunk.GetStatus()), "child stream %d returned a failed Chunk", childIndex)
+			}
+			if s.metricType == "" {
+				s.metricType = chunk.GetMetricType()
+			}
+			if chunk.GetMetricType() != "" && s.metricType != chunk.GetMetricType() {
+				return merr.WrapErrServiceInternalMsg("child stream %d metric %q does not match %q", childIndex, chunk.GetMetricType(), s.metricType)
+			}
+			s.isTopKReduce = s.isTopKReduce || chunk.GetIsTopkReduce()
+			s.isRecallEval = s.isRecallEval || chunk.GetIsRecallEvaluation()
+			data, err := s.childBuffers[childIndex].accept(chunk, s.nq, s.topK)
+			if err != nil {
+				return merr.Wrapf(err, "child stream %d returned an invalid Chunk", childIndex)
+			}
+			if len(s.groupByFieldIDs) > 0 && s.childBuffers[childIndex].hasUnit() {
+				iters := make([]func(int) any, len(s.groupByFieldIDs))
+				fields := make([]*schemapb.FieldData, len(s.groupByFieldIDs))
+				for i, fieldID := range s.groupByFieldIDs {
+					field := reduce.FindGroupByFieldData(data, fieldID, len(s.groupByFieldIDs) == 1)
+					if field == nil {
+						return merr.WrapErrServiceInternalMsg("child stream %d is missing group-by field %d", childIndex, fieldID)
+					}
+					if field.GetFieldId() != fieldID {
+						field = proto.Clone(field).(*schemapb.FieldData)
+						field.FieldId = fieldID
+					}
+					fields[i] = field
+					iters[i] = typeutil.GetDataIterator(field)
+				}
+				data.GroupByFieldValues = fields
+				data.GroupByFieldValue = nil
+				s.childBuffers[childIndex].groupKey = reduce.MakeCompositeKeyExtractor(iters)
+			}
+			s.acceptMetadata(chunk, data)
+			return nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	readyBuffers := make([]*orderedChildBuffer, 0, len(s.childBuffers))
+	for i := range s.childBuffers {
+		if s.childBuffers[i].hasUnit() {
+			readyBuffers = append(readyBuffers, &s.childBuffers[i])
+		}
+	}
+	return readyBuffers, nil
+}
+
+func (s *OrderedReduceStream) acceptMetadata(chunk *internalpb.SearchResults, data *schemapb.SearchResultData) {
+	if s.metadataEmitted {
+		return
+	}
+	if s.metadata == nil {
+		emptyData := proto.Clone(data).(*schemapb.SearchResultData)
+		emptyData.Scores = nil
+		emptyData.Topks = make([]int64, s.nq)
+		emptyData.FieldsData = typeutil.PrepareResultFieldData(data.GetFieldsData(), 0)
+		emptyData.AllSearchCount = 0
+		emptyData.Distances = nil
+		emptyData.SearchIteratorV2Results = nil
+		emptyData.Recalls = nil
+		emptyData.HighlightResults = nil
+		emptyData.GroupByFieldValue = nil
+		emptyData.GroupByFieldValues = nil
+		emptyData.AggBuckets = nil
+		emptyData.AggTopks = nil
+		if data.GetElementIndices() != nil {
+			emptyData.ElementIndices = &schemapb.LongArray{}
+		}
+		switch data.GetIds().GetIdField().(type) {
+		case *schemapb.IDs_IntId:
+			emptyData.Ids = &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{}}}
+		case *schemapb.IDs_StrId:
+			emptyData.Ids = &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{}}}
+		default:
+			emptyData.Ids = &schemapb.IDs{}
+		}
+
+		s.metadata = &internalpb.SearchResults{
+			Status:     merr.Success(),
+			ReqID:      chunk.GetReqID(),
+			MetricType: s.metricType,
+			NumQueries: s.nq,
+			TopK:       s.topK,
+			ResultData: emptyData,
+		}
+		if chunk.GetBase() != nil {
+			s.metadata.Base = proto.Clone(chunk.GetBase()).(*commonpb.MsgBase)
+		}
+	}
+
+	s.metadata.SealedSegmentIDsSearched = append(s.metadata.SealedSegmentIDsSearched, chunk.GetSealedSegmentIDsSearched()...)
+	s.metadata.ChannelIDsSearched = append(s.metadata.ChannelIDsSearched, chunk.GetChannelIDsSearched()...)
+	s.metadata.GlobalSealedSegmentIDs = append(s.metadata.GlobalSealedSegmentIDs, chunk.GetGlobalSealedSegmentIDs()...)
+	s.metadata.FilterValidCounts = append(s.metadata.FilterValidCounts, chunk.GetFilterValidCounts()...)
+
+	if cost := chunk.GetCostAggregation(); cost != nil {
+		totalRelatedDataSize := s.metadata.GetCostAggregation().GetTotalRelatedDataSize() + cost.GetTotalRelatedDataSize()
+		if s.metadata.GetCostAggregation() == nil || s.metadata.GetCostAggregation().GetResponseTime() < cost.GetResponseTime() {
+			s.metadata.CostAggregation = proto.Clone(cost).(*internalpb.CostAggregation)
+		}
+		s.metadata.CostAggregation.TotalRelatedDataSize = totalRelatedDataSize
+	}
+
+	if len(chunk.GetChannelsMvcc()) > 0 {
+		if s.metadata.ChannelsMvcc == nil {
+			s.metadata.ChannelsMvcc = make(map[string]uint64)
+		}
+		for channel, timestamp := range chunk.GetChannelsMvcc() {
+			s.metadata.ChannelsMvcc[channel] = timestamp
+		}
+	}
+	s.metadata.ScannedRemoteBytes += chunk.GetScannedRemoteBytes()
+	s.metadata.ScannedTotalBytes += chunk.GetScannedTotalBytes()
+	s.metadata.FeatureBits |= chunk.GetFeatureBits()
+	s.metadata.ResultData.AllSearchCount += data.GetAllSearchCount()
+}
+
+func (s *OrderedReduceStream) produceNextUnits(readyBuffers []*orderedChildBuffer, outputBytes int) (*orderedUnit, bool, error) {
+	hitLimit := (s.topK - s.groupOffset) * s.groupSize
+	for s.currentQuery < s.nq {
+		if s.currentQuery < s.nq-1 && s.emittedPerQuery[s.currentQuery] >= hitLimit {
+			for _, buffer := range readyBuffers {
+				s.discardQuery(buffer, s.currentQuery)
+			}
+			for i := range s.childBuffers {
+				if !s.childStreams.IsDrained(i) && !s.childBuffers[i].hasUnit() {
+					return nil, false, nil
+				}
+			}
+			s.currentQuery++
+			clear(s.seenPKs)
+			clear(s.groups)
+			s.groupCount = 0
+			continue
+		}
+
+		winner := -1
+		for i, buffer := range readyBuffers {
+			if !buffer.hasUnit() {
+				continue
+			}
+			candidate := buffer.front()
+			if candidate.queryIndex < s.currentQuery {
+				return nil, false, fmt.Errorf("child buffer returned query %d after query %d started", candidate.queryIndex, s.currentQuery)
+			}
+			if candidate.queryIndex > s.currentQuery {
+				continue
+			}
+			if winner == -1 {
+				winner = i
+				continue
+			}
+
+			selected := readyBuffers[winner].front()
+			if candidate.score() > selected.score() ||
+				(candidate.score() == selected.score() && typeutil.ComparePK(candidate.pk(), selected.pk())) {
+				winner = i
+			}
+		}
+
+		if winner == -1 {
+			s.currentQuery++
+			clear(s.seenPKs)
+			clear(s.groups)
+			s.groupCount = 0
+			continue
+		}
+
+		selected := readyBuffers[winner].front()
+		key := selected.pk()
+		if s.seenPKs != nil {
+			if elements := selected.data.GetElementIndices(); elements != nil {
+				if selected.rowIndex >= int64(len(elements.GetData())) {
+					return nil, false, merr.WrapErrServiceInternalMsg("Search hit is missing its element index")
+				}
+				key = struct {
+					pk           any
+					elementIndex int64
+				}{key, elements.GetData()[selected.rowIndex]}
+			}
+			if _, exists := s.seenPKs[key]; exists {
+				s.pop(readyBuffers[winner])
+				// Refill an emptied child before selecting another merge candidate.
+				return nil, false, nil
+			}
+		}
+		var group *searchGroup
+		var groupHash uint64
+		if len(s.groupByFieldIDs) > 0 {
+			var values []any
+			groupHash, values = readyBuffers[winner].groupKey(int(selected.rowIndex))
+			for _, candidate := range s.groups[groupHash] {
+				if reduce.EqualGroupValues(candidate.values, values) {
+					group = candidate
+					break
+				}
+			}
+			if group == nil {
+				if s.groupCount >= s.topK {
+					s.pop(readyBuffers[winner])
+					return nil, false, nil
+				}
+				group = &searchGroup{values: values, skipped: s.groupCount < s.groupOffset}
+			}
+			if group.skipped || group.count >= s.groupSize {
+				if group.skipped && group.count == 0 {
+					group.count = 1
+					s.groups[groupHash] = append(s.groups[groupHash], group)
+					s.groupCount++
+				}
+				s.pop(readyBuffers[winner])
+				return nil, false, nil
+			}
+		}
+		unitBytes, err := selected.reducibleByteSize()
+		if err != nil {
+			return nil, false, err
+		}
+		if unitBytes > s.chunkBytes && outputBytes > 0 {
+			return nil, true, nil
+		}
+
+		oneReduceResult := s.pop(readyBuffers[winner])
+		oneReduceResult.byteSize = unitBytes
+		if s.seenPKs != nil {
+			s.seenPKs[key] = struct{}{}
+		}
+		if group != nil {
+			if group.count == 0 {
+				s.groups[groupHash] = append(s.groups[groupHash], group)
+				s.groupCount++
+			}
+			group.count++
+		}
+		s.emittedPerQuery[s.currentQuery]++
+		// Yield the last vector's window before fetching more input. Only the caller ends the pull.
+		chunkReady := s.currentQuery == s.nq-1 && s.emittedPerQuery[s.currentQuery] == hitLimit
+		return &oneReduceResult, chunkReady, nil
+	}
+	return nil, false, nil
+}
+
+func (s *OrderedReduceStream) merge(outputBuffer *orderedOutputBuffer, oneReduceResult *orderedUnit) {
+	if oneReduceResult != nil {
+		outputBuffer.units = append(outputBuffer.units, *oneReduceResult)
+		outputBuffer.byteSize += oneReduceResult.byteSize
+	}
+}
+
+func (s *OrderedReduceStream) pop(buffer *orderedChildBuffer) orderedUnit {
+	return buffer.pop()
+}
+
+func (s *OrderedReduceStream) discardQuery(buffer *orderedChildBuffer, queryIndex int64) {
+	for buffer.hasUnit() && buffer.front().queryIndex == queryIndex {
+		s.pop(buffer)
+	}
+}
+
+func (s *OrderedReduceStream) createOutputChunk(outputBuffer *orderedOutputBuffer) (*internalpb.SearchResults, error) {
+	if outputBuffer.isEmpty() {
+		data := &schemapb.SearchResultData{
+			NumQueries: s.nq,
+			TopK:       s.topK,
+			Topks:      make([]int64, s.nq),
+			Ids:        &schemapb.IDs{},
+		}
+		if s.metadata != nil && s.metadata.GetResultData() != nil {
+			data = proto.Clone(s.metadata.GetResultData()).(*schemapb.SearchResultData)
+		}
+		return &internalpb.SearchResults{
+			Status:             merr.Success(),
+			MetricType:         s.metricType,
+			NumQueries:         s.nq,
+			TopK:               s.topK,
+			ResultData:         data,
+			IsTopkReduce:       s.isTopKReduce,
+			IsRecallEvaluation: s.isRecallEval,
+		}, nil
+	}
+	return buildSearchChunk(
+		outputBuffer.units,
+		s.nq,
+		s.topK,
+		s.metricType,
+		s.isTopKReduce,
+		s.isRecallEval,
+	)
+}
+
+func (s *OrderedReduceStream) attachMetadata(chunk *internalpb.SearchResults) {
+	if s.metadata == nil || s.metadataEmitted {
+		return
+	}
+
+	if s.metadata.GetBase() != nil {
+		chunk.Base = proto.Clone(s.metadata.GetBase()).(*commonpb.MsgBase)
+	}
+	chunk.ReqID = s.metadata.GetReqID()
+	chunk.SealedSegmentIDsSearched = append([]int64(nil), s.metadata.GetSealedSegmentIDsSearched()...)
+	chunk.ChannelIDsSearched = append([]string(nil), s.metadata.GetChannelIDsSearched()...)
+	chunk.GlobalSealedSegmentIDs = append([]int64(nil), s.metadata.GetGlobalSealedSegmentIDs()...)
+	if s.metadata.GetCostAggregation() != nil {
+		chunk.CostAggregation = proto.Clone(s.metadata.GetCostAggregation()).(*internalpb.CostAggregation)
+	}
+	if len(s.metadata.GetChannelsMvcc()) > 0 {
+		chunk.ChannelsMvcc = make(map[string]uint64, len(s.metadata.GetChannelsMvcc()))
+		for channel, timestamp := range s.metadata.GetChannelsMvcc() {
+			chunk.ChannelsMvcc[channel] = timestamp
+		}
+	}
+	chunk.ScannedRemoteBytes = s.metadata.GetScannedRemoteBytes()
+	chunk.ScannedTotalBytes = s.metadata.GetScannedTotalBytes()
+	chunk.FeatureBits = s.metadata.GetFeatureBits()
+	chunk.FilterValidCounts = append([]int64(nil), s.metadata.GetFilterValidCounts()...)
+	chunk.ResultData.AllSearchCount = s.metadata.GetResultData().GetAllSearchCount()
+	s.metadataEmitted = true
+	s.metadata = nil
+}
+
+func buildSearchChunk(
+	units []orderedUnit,
+	nq int64,
+	topK int64,
+	metricType string,
+	isTopKReduce bool,
+	isRecallEvaluation bool,
+) (*internalpb.SearchResults, error) {
+	first := units[0]
+	templateFields := first.data.GetFieldsData()
+	for _, unit := range units {
+		if len(unit.data.GetFieldsData()) > 0 {
+			templateFields = unit.data.GetFieldsData()
+			break
+		}
+	}
+
+	data := &schemapb.SearchResultData{
+		NumQueries:       nq,
+		TopK:             topK,
+		FieldsData:       typeutil.PrepareResultFieldData(templateFields, int64(len(units))),
+		Scores:           make([]float32, 0, len(units)),
+		Ids:              &schemapb.IDs{},
+		Topks:            make([]int64, nq),
+		OutputFields:     append([]string(nil), first.data.GetOutputFields()...),
+		PrimaryFieldName: first.data.GetPrimaryFieldName(),
+	}
+	fieldIndexComputers := make(map[*schemapb.SearchResultData]*typeutil.FieldDataIdxComputer)
+	groupFields := first.data.GetGroupByFieldValues()
+	legacyGroupField := len(groupFields) == 0 && first.data.GetGroupByFieldValue() != nil
+	if legacyGroupField {
+		groupFields = []*schemapb.FieldData{first.data.GetGroupByFieldValue()}
+	}
+	groupFieldIDs := make([]int64, len(groupFields))
+	for i, field := range groupFields {
+		groupFieldIDs[i] = field.GetFieldId()
+	}
+	var groupRows []reduce.RowRef
+	var groupSources []*schemapb.SearchResultData
+	groupSourceIndexes := make(map[*schemapb.SearchResultData]int)
+
+	for _, unit := range units {
+		if len(groupFieldIDs) > 0 {
+			index, exists := groupSourceIndexes[unit.data]
+			if !exists {
+				index = len(groupSources)
+				groupSourceIndexes[unit.data] = index
+				groupSources = append(groupSources, unit.data)
+			}
+			groupRows = append(groupRows, reduce.RowRef{ResultIdx: index, RowIdx: unit.rowIndex})
+		}
+		if len(data.FieldsData) > 0 {
+			if len(unit.data.GetFieldsData()) != len(data.FieldsData) {
+				return nil, fmt.Errorf("Search Chunk field count %d does not match output field count %d", len(unit.data.GetFieldsData()), len(data.FieldsData))
+			}
+			computer := fieldIndexComputers[unit.data]
+			if computer == nil {
+				computer = typeutil.NewFieldDataIdxComputer(unit.data.GetFieldsData())
+				fieldIndexComputers[unit.data] = computer
+			}
+			fieldIndexes := computer.Compute(unit.rowIndex)
+			typeutil.AppendFieldData(data.FieldsData, unit.data.GetFieldsData(), unit.rowIndex, fieldIndexes...)
+		}
+
+		typeutil.AppendPKs(data.Ids, unit.pk())
+		data.Scores = append(data.Scores, unit.score())
+		data.Topks[unit.queryIndex]++
+		if unit.data.GetElementIndices() != nil {
+			if data.ElementIndices == nil {
+				data.ElementIndices = &schemapb.LongArray{Data: make([]int64, 0, len(units))}
+			}
+			data.ElementIndices.Data = append(data.ElementIndices.Data, unit.data.GetElementIndices().GetData()[unit.rowIndex])
+		}
+	}
+	if err := reduce.WriteGroupByFieldValues(data, groupRows, groupSources, groupFieldIDs); err != nil {
+		return nil, merr.Wrap(err, "copy Search Chunk group-by fields")
+	}
+	if legacyGroupField {
+		data.GroupByFieldValue = data.GroupByFieldValues[0]
+		data.GroupByFieldValues = nil
+	}
+
+	return &internalpb.SearchResults{
+		Base:               first.result.GetBase(),
+		Status:             merr.Success(),
+		ReqID:              first.result.GetReqID(),
+		MetricType:         metricType,
+		NumQueries:         nq,
+		TopK:               topK,
+		ResultData:         data,
+		IsTopkReduce:       isTopKReduce,
+		IsRecallEvaluation: isRecallEvaluation,
+	}, nil
+}
+
+func (s *OrderedReduceStream) fail(err error) error {
+	return errors.Join(err, s.closeChildren())
+}
+
+// Close idempotently closes every child stream and releases retained Chunks.
+func (s *OrderedReduceStream) Close() error {
+	// Wake a Recv waiting for child input before acquiring its state lock.
+	s.childStreams.Cancel()
+	s.recvMu.Lock()
+	defer s.recvMu.Unlock()
+	return s.closeChildren()
+}
+
+// closeChildren runs with recvMu held, including on the Recv error path.
+func (s *OrderedReduceStream) closeChildren() error {
+	if s.closed {
+		return s.closeErr
+	}
+	s.closed = true
+	s.closeErr = s.childStreams.Close()
+	for i := range s.childBuffers {
+		s.childBuffers[i].units = nil
+		s.childBuffers[i].cursor = 0
+		s.childBuffers[i].groupKey = nil
+	}
+	s.metadata = nil
+	s.seenPKs = nil
+	s.groups = nil
+	return s.closeErr
+}
+
+// Interrupt is reserved for the bidirectional gRPC integration.
+func (s *OrderedReduceStream) Interrupt() (*internalpb.SearchResults, error) {
+	return nil, errors.New("OrderedReduceStream Interrupt is not implemented")
+}
