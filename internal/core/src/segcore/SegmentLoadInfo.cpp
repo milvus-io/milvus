@@ -190,7 +190,11 @@ SegmentLoadInfo::ComputeDiffBinlogs(LoadDiff& diff, SegmentLoadInfo& new_info) {
         }
         for (auto child_id : child_fields) {
             new_binlog_fields[child_id] = new_field_binlog.fieldid();
-            auto iter = current_fields.find(new_field_binlog.fieldid());
+            // current_fields is keyed by child field id. Looking it up by the
+            // group id is wrong for multi-field column groups: group 1 hits
+            // the system Timestamp field (id 1, which lives in group 0), so an
+            // unchanged group 1 is always reported as moved and reloaded.
+            auto iter = current_fields.find(child_id);
             // Find binlogs to load: fields in new_info match current
             if (iter == current_fields.end() ||
                 iter->second != new_field_binlog.fieldid()) {

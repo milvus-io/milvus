@@ -22,6 +22,7 @@
 #include "knowhere/comp/index_param.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/Util.h"
+#include "segcore/SegmentLoadInfo.h"
 #include "common/VectorArray.h"
 #include "test_utils/Constants.h"
 #include "test_utils/cachinglayer_test_utils.h"
@@ -2707,3 +2708,97 @@ INSTANTIATE_TEST_SUITE_P(
     [](const ::testing::TestParamInfo<VectorArrayTestParam>& info) {
         return std::get<3>(info.param);
     });
+
+namespace {
+// Storage v2 layout as written by 2.6: group 0 = system fields + pk,
+// group 1 = multi-field group of the remaining scalars, one group per vector.
+milvus::proto::segcore::SegmentLoadInfo
+MakeStorageV2LoadInfo(
+    const std::vector<std::pair<int64_t, std::vector<int64_t>>>& groups) {
+    milvus::proto::segcore::SegmentLoadInfo info;
+    info.set_segmentid(1);
+    info.set_num_of_rows(10);
+    info.set_storageversion(2);
+    for (const auto& [group_id, children] : groups) {
+        auto* fb = info.add_binlog_paths();
+        fb->set_fieldid(group_id);
+        for (auto c : children) {
+            fb->add_child_fields(c);
+        }
+        auto* binlog = fb->add_binlogs();
+        binlog->set_entries_num(10);
+        binlog->set_logid(1000 + group_id);
+        binlog->set_log_path("bucket/root/insert_log/1/2/1/" +
+                             std::to_string(group_id) + "/" +
+                             std::to_string(1000 + group_id));
+    }
+    return info;
+}
+}  // namespace
+
+TEST(SegmentLoadInfoDiff, UnchangedMultiFieldGroupOneIsNotReloaded) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);  // 100
+    schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);  // 101
+    schema->AddDebugField("a", DataType::INT64);                  // 102
+    schema->AddDebugField("j", DataType::JSON);                   // 103
+    schema->set_primary_field_id(pk);
+
+    auto proto =
+        MakeStorageV2LoadInfo({{0, {0, 1, 100}}, {1, {102, 103}}, {101, {}}});
+    SegmentLoadInfo current(proto, schema);
+    SegmentLoadInfo next(proto, schema);
+    auto diff = current.ComputeDiff(next);
+    EXPECT_TRUE(diff.binlogs_to_load.empty()) << diff.ToString();
+    EXPECT_TRUE(diff.field_data_to_drop.empty()) << diff.ToString();
+}
+
+TEST(SegmentLoadInfoDiff, NewChildInGroupOneIsLoaded) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);  // 100
+    schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);  // 101
+    schema->AddDebugField("a", DataType::INT64);                  // 102
+    schema->AddDebugField("j", DataType::JSON);                   // 103
+    schema->AddDebugField("b", DataType::INT64);                  // 104
+    schema->set_primary_field_id(pk);
+
+    SegmentLoadInfo current(
+        MakeStorageV2LoadInfo({{0, {0, 1, 100}}, {1, {102, 103}}, {101, {}}}),
+        schema);
+    SegmentLoadInfo next(
+        MakeStorageV2LoadInfo(
+            {{0, {0, 1, 100}}, {1, {102, 103, 104}}, {101, {}}}),
+        schema);
+    auto diff = current.ComputeDiff(next);
+    ASSERT_EQ(diff.binlogs_to_load.size(), 1) << diff.ToString();
+    const auto& ids = diff.binlogs_to_load[0].first;
+    ASSERT_EQ(ids.size(), 1) << diff.ToString();
+    EXPECT_EQ(ids[0].get(), 104);
+    EXPECT_TRUE(diff.field_data_to_drop.empty()) << diff.ToString();
+}
+
+TEST(SegmentLoadInfoDiff, ChildMovedToAnotherGroupIsReloaded) {
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);  // 100
+    schema->AddDebugField(
+        "vec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);  // 101
+    schema->AddDebugField("a", DataType::INT64);                  // 102
+    schema->AddDebugField("j", DataType::JSON);                   // 103
+    schema->set_primary_field_id(pk);
+
+    SegmentLoadInfo current(
+        MakeStorageV2LoadInfo({{0, {0, 1, 100}}, {1, {102, 103}}, {101, {}}}),
+        schema);
+    // field 103 moves out of group 1 into its own group
+    SegmentLoadInfo next(
+        MakeStorageV2LoadInfo(
+            {{0, {0, 1, 100}}, {1, {102}}, {103, {}}, {101, {}}}),
+        schema);
+    auto diff = current.ComputeDiff(next);
+    ASSERT_EQ(diff.binlogs_to_load.size(), 1) << diff.ToString();
+    const auto& ids = diff.binlogs_to_load[0].first;
+    ASSERT_EQ(ids.size(), 1) << diff.ToString();
+    EXPECT_EQ(ids[0].get(), 103);
+}
