@@ -263,14 +263,13 @@ pull_request_rules:
         add:
           - ci-passed
 
-  # The 3.0 Jenkins file router runs E2E and Go SDK, but not build-ut-cov,
+  # The 3.0 Jenkins file router runs only Go SDK, not Python E2E or build-ut-cov,
   # when only Go SDK tests (and optional Markdown) change.
   - name: Test passed for Go SDK tests changed on 3.0
     conditions:
       - *3X_BRANCH
-      - files~=^tests\/go_client\/
+      - files~=^tests\/go_client\/(?!.*\.md$).+
       - -files~=^(?!tests\/go_client\/|.*\.md$).+
-      - status-success=ci-v2/e2e-amd
       - status-success=ci-v2/go-sdk
     actions:
       label:
@@ -436,13 +435,11 @@ pull_request_rules:
   - name: Remove ci-passed when Go SDK test checks are not success on 3.0
     conditions:
       - *3X_BRANCH
-      - files~=^tests\/go_client\/
+      - files~=^tests\/go_client\/(?!.*\.md$).+
       - -files~=^(?!tests\/go_client\/|.*\.md$).+
       - label!=manual-pass
       - label=ci-passed
-      - or:
-          - -status-success=ci-v2/e2e-amd
-          - -status-success=ci-v2/go-sdk
+      - -status-success=ci-v2/go-sdk
     actions:
       label:
         remove:
@@ -590,6 +587,8 @@ pull_request_rules:
       - *3X_BRANCH
       - label!=manual-pass
       - *source_code_files
+      # SDK-only changes are governed by the dedicated SDK rule above.
+      - files~=^(?!tests\/go_client\/|.*\.md$).+
       - or:
           - and:
               - -status-success = ci-v2/build-ut-cov
