@@ -1585,7 +1585,7 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 	req.ExprTemplateValues = templateValues
 	c.Set(ContextRequest, req)
 	if httpReq.Offset < 0 {
-		err := merr.WrapErrParameterInvalidMsg("offset [%d] is invalid, should be gte than 0", httpReq.Offset)
+		err := merr.WrapErrParameterInvalidMsg("offset [%d] is invalid, should be greater than or equal to 0", httpReq.Offset)
 		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(err),
 			HTTPReturnMessage: err.Error(),

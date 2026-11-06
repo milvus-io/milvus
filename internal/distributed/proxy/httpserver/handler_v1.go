@@ -526,12 +526,12 @@ func (h *HandlersV1) query(c *gin.Context) {
 	}
 	c.Set(ContextRequest, req)
 	if httpReq.Offset < 0 {
-		err := merr.WrapErrParameterInvalidMsg("offset [%d] is invalid, should be gte than 0", httpReq.Offset)
+		err := merr.WrapErrParameterInvalidMsg("offset [%d] is invalid, should be greater than or equal to 0", httpReq.Offset)
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(err),
 			HTTPReturnMessage: err.Error(),
 		})
-		return nil, err
+		return
 	}
 	if httpReq.Limit < 0 {
 		err := merr.WrapErrParameterInvalidMsg("limit [%d] is invalid, should be greater than 0", httpReq.Limit)
@@ -539,7 +539,7 @@ func (h *HandlersV1) query(c *gin.Context) {
 			HTTPReturnCode:    merr.Code(err),
 			HTTPReturnMessage: err.Error(),
 		})
-		return nil, err
+		return
 	}
 	if httpReq.Offset > 0 {
 		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: proxy.OffsetKey, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})

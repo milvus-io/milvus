@@ -4772,7 +4772,7 @@ func TestQueryNegativeLimitOrOffset(t *testing.T) {
 			path:        QueryAction,
 			requestBody: []byte(`{"collectionName": "book", "filter": "book_id > 0", "offset": -1}`),
 			errCode:     merr.Code(merr.ErrParameterInvalid),
-			errMsg:      "offset [-1] is invalid, should be gte than 0",
+			errMsg:      "offset [-1] is invalid, should be greater than or equal to 0",
 		},
 	}, false)
 }
