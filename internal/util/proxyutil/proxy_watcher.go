@@ -125,19 +125,26 @@ func (p *ProxyWatcher) listAndWatch(ctx context.Context) (clientv3.WatchChan, er
 		sessions, rev, err := p.getSessionsOnEtcd(requestCtx)
 		cancel()
 		if err == nil {
-			mlog.Info(ctx, "succeed to init sessions on etcd", mlog.Any("sessions", sessions), mlog.Int64("revision", rev))
-			// Replace the local snapshot before consuming subsequent changes.
-			for _, f := range p.initSessionsFunc {
-				f(sessions)
-			}
-			return p.etcdCli.Watch(
+			eventCh := p.etcdCli.Watch(
 				ctx,
 				path.Join(paramtable.Get().EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
 				clientv3.WithPrefix(),
 				clientv3.WithCreatedNotify(),
 				clientv3.WithPrevKV(),
 				clientv3.WithRev(rev+1),
-			), nil
+			)
+			// Watch returns once the stream is created or rejected. A rejection, e.g.
+			// by a learner, must fail this attempt: the list above keeps succeeding,
+			// so without this backoff the watch loop would spin and replay the snapshot.
+			created := <-eventCh
+			if err = created.Err(); err == nil && ctx.Err() == nil {
+				mlog.Info(ctx, "succeed to init sessions on etcd", mlog.Any("sessions", sessions), mlog.Int64("revision", rev))
+				// Replace the local snapshot before consuming subsequent changes.
+				for _, f := range p.initSessionsFunc {
+					f(sessions)
+				}
+				return eventCh, nil
+			}
 		}
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -146,7 +153,7 @@ func (p *ProxyWatcher) listAndWatch(ctx context.Context) (clientv3.WatchChan, er
 		if !etcd.IsRetriableWatchErr(err) {
 			return nil, err
 		}
-		mlog.Warn(ctx, "failed to list proxy sessions, retry", mlog.Err(err))
+		mlog.Warn(ctx, "failed to list and watch proxy sessions, retry", mlog.Err(err))
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()

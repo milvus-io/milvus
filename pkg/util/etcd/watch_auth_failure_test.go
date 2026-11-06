@@ -49,8 +49,9 @@ func (s *authFailingServer) Authenticate(context.Context, *etcdserverpb.Authenti
 
 // With auth enabled, clientv3 authenticates before opening a watch stream and
 // cancels the watch when that fails with a server error, instead of
-// reconnecting. Transient errors must remain retriable; FailedPrecondition
-// errors must remain permanent after passing through the watch client.
+// reconnecting. Transient errors, a learner's rejection included, must remain
+// retriable; other FailedPrecondition errors must remain permanent after passing
+// through the watch client.
 func TestIsRetriableWatchErr_WatchCanceledByAuthFailure(t *testing.T) {
 	cases := []struct {
 		name string
@@ -66,6 +67,7 @@ func TestIsRetriableWatchErr_WatchCanceledByAuthFailure(t *testing.T) {
 		{"not capable", rpctypes.ErrGRPCNotCapable, false},
 		{"unhealthy", rpctypes.ErrGRPCUnhealthy, true},
 		{"too many requests", rpctypes.ErrGRPCRequestTooManyRequests, true},
+		{"not supported for learner", rpctypes.ErrGRPCNotSupportedForLearner, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

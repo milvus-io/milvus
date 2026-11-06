@@ -83,6 +83,10 @@ func IsRetriableWatchErr(err error) bool {
 		IsRetriableEtcdErr(err)
 }
 
+// errNotSupportedForLearner is a learner's rejection in the form clientv3
+// returns it. rpctypes exports only the gRPC form.
+var errNotSupportedForLearner = rpctypes.Error(rpctypes.ErrGRPCNotSupportedForLearner)
+
 // IsRetriableEtcdErr reports whether an etcd error is transient and safe to
 // retry the same request against.
 //
@@ -93,10 +97,12 @@ func IsRetriableWatchErr(err error) bool {
 // status or, once clientv3 has converted it, as an rpctypes.EtcdError carrying
 // that code, so both forms are classified by code rather than by enumerating
 // sentinels. A generic gRPC Unavailable (no connection established yet) is
-// covered by the same rule. Two transient errors use other codes and are
-// matched explicitly: ErrNotLeader (FailedPrecondition) and ErrTooManyRequests
-// (ResourceExhausted, which etcd also uses for the non-transient
-// "database space exceeded").
+// covered by the same rule. Three transient errors use other codes and are
+// matched explicitly: ErrNotLeader (FailedPrecondition), a learner's rejection
+// (FailedPrecondition; clientv3 retries it only for unary requests with several
+// endpoints, and a later attempt can reach a voter or the promoted member) and
+// ErrTooManyRequests (ResourceExhausted, which etcd also uses for the
+// non-transient "database space exceeded").
 //
 // Genuine authorization failures, permission denials, data loss (corrupt
 // cluster), quota exhaustion and other non-transient errors carry different
@@ -109,7 +115,7 @@ func IsRetriableEtcdErr(err error) bool {
 	if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) {
 		return false
 	}
-	if errors.Is(err, rpctypes.ErrNotLeader) || errors.Is(err, rpctypes.ErrTooManyRequests) {
+	if errors.IsAny(err, rpctypes.ErrNotLeader, rpctypes.ErrTooManyRequests, errNotSupportedForLearner) {
 		return true
 	}
 	var etcdErr rpctypes.EtcdError

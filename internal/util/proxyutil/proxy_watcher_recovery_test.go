@@ -187,6 +187,8 @@ type proxyRecoveryEtcdServer struct {
 	rangeFn       func(context.Context, int32) (*etcdserverpb.RangeResponse, error)
 	watchRequests chan *etcdserverpb.WatchCreateRequest
 	watchCanceled chan int64
+	// watchErr, when set, rejects every watch stream.
+	watchErr error
 }
 
 func (s *proxyRecoveryEtcdServer) Range(ctx context.Context, _ *etcdserverpb.RangeRequest) (*etcdserverpb.RangeResponse, error) {
@@ -194,6 +196,9 @@ func (s *proxyRecoveryEtcdServer) Range(ctx context.Context, _ *etcdserverpb.Ran
 }
 
 func (s *proxyRecoveryEtcdServer) Watch(stream etcdserverpb.Watch_WatchServer) error {
+	if s.watchErr != nil {
+		return s.watchErr
+	}
 	var active int64
 	defer func() {
 		if active != 0 {
@@ -273,6 +278,27 @@ func proxySnapshot() *etcdserverpb.RangeResponse {
 		Header: &etcdserverpb.ResponseHeader{Revision: 20},
 		Kvs:    []*mvccpb.KeyValue{{Key: []byte("proxy-200"), Value: []byte(`{"ServerID":200}`)}},
 	}
+}
+
+// A learner rejects every watch stream while the read before it succeeds. The
+// watcher must keep trying with backoff and must not replay the snapshot.
+func TestProxyWatcher_RejectedWatchBacksOff(t *testing.T) {
+	paramtable.Init()
+	cli, service := newProxyRecoveryClient(t, func(context.Context, int32) (*etcdserverpb.RangeResponse, error) {
+		return proxySnapshot(), nil
+	})
+	service.watchErr = rpctypes.ErrGRPCNotSupportedForLearner
+
+	var replays atomic.Int32
+	p := NewProxyWatcher(cli, func([]*sessionutil.Session) { replays.Add(1) })
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, p.WatchProxy(ctx), context.DeadlineExceeded)
+
+	reads := service.rangeCalls.Load()
+	require.GreaterOrEqual(t, reads, int32(2), "the rejected watch must be retried")
+	require.LessOrEqual(t, reads, int32(6), "retries must back off")
+	require.Zero(t, replays.Load(), "a rejected watch must not replay the snapshot")
 }
 
 func TestProxyWatcher_StopDuringRecovery(t *testing.T) {
