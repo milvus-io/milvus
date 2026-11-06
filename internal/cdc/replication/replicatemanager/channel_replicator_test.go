@@ -181,3 +181,83 @@ func TestChannelReplicatorInitMetricFromInitializedCheckpoint(t *testing.T) {
 	got := testutil.ToFloat64(metrics.CDCLastReplicatedTimeTick.WithLabelValues(source, target))
 	assert.InDelta(t, tsoutil.PhysicalTimeSeconds(checkpoint), got, 1)
 }
+
+// TestChannelReplicatorConsumeLoopSkipsStaleTopologyChange covers the case where
+// the replicator resumes from a checkpoint that predates its own creation — the
+// position a `restore secondary` leaves on the target. The replay then walks
+// over a topology change that removed this edge before it was re-created. That
+// message must neither be forwarded to the secondary, where a configuration
+// without the secondary turns it back into a standalone primary, nor end the
+// consume loop.
+func TestChannelReplicatorConsumeLoopSkipsStaleTopologyChange(t *testing.T) {
+	paramtable.Get().Save(paramtable.Get().CommonCfg.ClusterPrefix.Key, "current-cluster")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.ClusterPrefix.Key)
+
+	source, target := "TestStale-source", "TestStale-target"
+	// The task was created by the configuration appended at time tick 100.
+	replicateInfo := &streamingpb.ReplicatePChannelMeta{
+		SourceChannelName: source,
+		TargetChannelName: target,
+		TargetCluster:     &commonpb.MilvusCluster{ClusterId: "removed-target-cluster"},
+		InitializedCheckpoint: &commonpb.ReplicateCheckpoint{
+			ClusterId: "current-cluster",
+			Pchannel:  source,
+			TimeTick:  100,
+		},
+	}
+
+	// A detach broadcast from before the task existed.
+	staleMsg := message.NewAlterReplicateConfigMessageBuilderV2().
+		WithHeader(&message.AlterReplicateConfigMessageHeader{
+			ReplicateConfiguration: &commonpb.ReplicateConfiguration{
+				Clusters: []*commonpb.MilvusCluster{
+					{
+						ClusterId:       "current-cluster",
+						ConnectionParam: &commonpb.ConnectionParam{Uri: "localhost:19530"},
+						Pchannels:       []string{source},
+					},
+				},
+			},
+		}).
+		WithBody(&message.AlterReplicateConfigMessageBody{}).
+		WithAllVChannel().
+		MustBuildMutable().
+		WithLastConfirmedUseMessageID().
+		WithTimeTick(50).
+		IntoImmutableMessage(pulsar2.NewPulsarID(pulsar.EarliestMessageID()))
+
+	rs := replicatestream.NewMockReplicateStreamClient(t)
+	// No Replicate and no BlockUntilFinish expectation: the message is dropped
+	// before either is reached, and the mock fails the test on any other call.
+
+	replicator := &channelReplicator{
+		channel: &meta.ReplicateChannel{
+			Key:         "stale-key",
+			ModRevision: 1,
+			Value:       replicateInfo,
+		},
+		streamClient:  rs,
+		msgChan:       make(adaptor.ChanMessageHandler),
+		asyncNotifier: syncutil.NewAsyncTaskNotifier[struct{}](),
+	}
+
+	done := make(chan struct{})
+	go func() {
+		replicator.startConsumeLoop()
+		close(done)
+	}()
+	replicator.msgChan <- staleMsg
+
+	// The loop must still be running: give it a moment, then stop it ourselves.
+	select {
+	case <-done:
+		t.Fatal("consume loop stopped on a topology change that predates the task")
+	case <-time.After(200 * time.Millisecond):
+	}
+	replicator.asyncNotifier.Cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("consume loop did not stop after cancel")
+	}
+}
