@@ -408,16 +408,10 @@ PhyCompareFilterExpr::ExecCompareWithValueLookup(OpType op, EvalCtx& context) {
                                              real_batch_size,
                                              right_values);
 
-    const auto vortex_raw_by_offsets =
+    const auto column_by_offsets =
         [&](bool gathered, FieldId field_id, DataType data_type) {
             if (gathered ||
                 segment_chunk_reader_.segment_->type() != SegmentType::Sealed) {
-                return segcore::ChunkDataAccessor{};
-            }
-            auto column = CaptureDataColumn(field_id);
-            if (column == nullptr ||
-                column->GetLocalFormat() !=
-                    ChunkedColumnInterface::LocalFormat::Vortex) {
                 return segcore::ChunkDataAccessor{};
             }
             return segment_chunk_reader_.GetDataAccessorByOffsets(
@@ -425,38 +419,25 @@ PhyCompareFilterExpr::ExecCompareWithValueLookup(OpType op, EvalCtx& context) {
                 field_id,
                 OffsetView::From(offsets.data(), real_batch_size));
         };
-    auto left_by_offsets = vortex_raw_by_offsets(
-        left_gathered, left_field_, expr_->left_data_type_);
-    auto right_by_offsets = vortex_raw_by_offsets(
+    auto left_by_offsets =
+        column_by_offsets(left_gathered, left_field_, expr_->left_data_type_);
+    auto right_by_offsets = column_by_offsets(
         right_gathered, right_field_, expr_->right_data_type_);
 
-    const auto left_raw_chunk_count =
-        segment_chunk_reader_.NumChunkData(left_field_);
-    const auto right_raw_chunk_count =
-        segment_chunk_reader_.NumChunkData(right_field_);
     int64_t cached_left_chunk_id = -1;
     int64_t cached_right_chunk_id = -1;
     segcore::ChunkDataAccessor left_accessor;
     segcore::ChunkDataAccessor right_accessor;
+    // Sealed raw operands already use Take; only Growing needs this fallback.
     const auto read_raw =
         [&](FieldId field_id,
             DataType data_type,
-            int64_t raw_chunk_count,
             int64_t offset,
             int64_t& cached_chunk_id,
             segcore::ChunkDataAccessor& accessor) -> segcore::data_access_type {
-        const auto [chunk_id, chunk_offset] = [&]() {
-            if (segment_chunk_reader_.segment_->type() ==
-                SegmentType::Growing) {
-                const auto chunk_size = segment_chunk_reader_.SizePerChunk();
-                return std::pair{offset / chunk_size, offset % chunk_size};
-            }
-            if (segment_chunk_reader_.segment_->is_chunked() &&
-                raw_chunk_count > 0) {
-                return segment_chunk_reader_.GetChunkByOffset(field_id, offset);
-            }
-            return std::pair<int64_t, int64_t>{0, offset};
-        }();
+        const auto chunk_size = segment_chunk_reader_.SizePerChunk();
+        const auto chunk_id = offset / chunk_size;
+        const auto chunk_offset = offset % chunk_size;
         if (chunk_id != cached_chunk_id) {
             accessor = segment_chunk_reader_.GetChunkDataAccessor(
                 data_type, field_id, chunk_id);
@@ -482,7 +463,6 @@ PhyCompareFilterExpr::ExecCompareWithValueLookup(OpType op, EvalCtx& context) {
             left_raw = left_by_offsets ? left_by_offsets(i)
                                        : read_raw(left_field_,
                                                   expr_->left_data_type_,
-                                                  left_raw_chunk_count,
                                                   offset,
                                                   cached_left_chunk_id,
                                                   left_accessor);
@@ -494,7 +474,6 @@ PhyCompareFilterExpr::ExecCompareWithValueLookup(OpType op, EvalCtx& context) {
             right_raw = right_by_offsets ? right_by_offsets(i)
                                          : read_raw(right_field_,
                                                     expr_->right_data_type_,
-                                                    right_raw_chunk_count,
                                                     offset,
                                                     cached_right_chunk_id,
                                                     right_accessor);
