@@ -1,6 +1,10 @@
 package rewriter
 
 import (
+	"math"
+
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -79,6 +83,7 @@ func (v *visitor) visitBinaryExpr(expr *planpb.BinaryExpr) interface{} {
 				parts[i] = res
 			}
 		}
+		parts = v.deduplicateIdenticalExprs(parts)
 		parts = combineArrayContains(parts, planpb.JSONContainsExpr_ContainsAny)
 		parts = v.combineOrEqualsToIn(parts)
 		parts = v.combineOrTextMatchToMerged(parts)
@@ -87,6 +92,7 @@ func (v *visitor) visitBinaryExpr(expr *planpb.BinaryExpr) interface{} {
 		parts = v.combineOrInWithIn(parts)
 		parts = v.combineOrInWithNotEqual(parts)
 		parts = v.combineOrInWithEqual(parts)
+		parts = v.deduplicateIdenticalExprs(parts)
 		return foldBinary(planpb.BinaryExpr_LogicalOr, parts)
 	case planpb.BinaryExpr_LogicalAnd:
 		parts := flattenLogicalExpr(expr)
@@ -113,6 +119,7 @@ func (v *visitor) visitBinaryExpr(expr *planpb.BinaryExpr) interface{} {
 
 // mergeAndParts applies AND rules to operands that have already been visited.
 func (v *visitor) mergeAndParts(parts []*planpb.Expr) *planpb.Expr {
+	parts = v.deduplicateIdenticalExprs(parts)
 	parts = combineArrayContains(parts, planpb.JSONContainsExpr_ContainsAll)
 	parts = v.combineAndRangePredicates(parts)
 	parts = v.combineAndBinaryRanges(parts)
@@ -121,7 +128,132 @@ func (v *visitor) mergeAndParts(parts []*planpb.Expr) *planpb.Expr {
 	parts = v.combineAndInWithRange(parts)
 	parts = v.combineAndInWithEqual(parts)
 	parts = v.combineAndNotEqualsToNotIn(parts)
+	parts = v.deduplicateIdenticalExprs(parts)
 	return foldBinary(planpb.BinaryExpr_LogicalAnd, parts)
+}
+
+func genericValueHasNaN(v *planpb.GenericValue) bool {
+	if v == nil {
+		return false
+	}
+	if f, ok := v.GetVal().(*planpb.GenericValue_FloatVal); ok {
+		return math.IsNaN(f.FloatVal)
+	}
+	if arr, ok := v.GetVal().(*planpb.GenericValue_ArrayVal); ok && arr.ArrayVal != nil {
+		for _, item := range arr.ArrayVal.GetArray() {
+			if genericValueHasNaN(item) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func exprHasNaN(e *planpb.Expr) bool {
+	if e == nil {
+		return false
+	}
+	switch real := e.GetExpr().(type) {
+	case *planpb.Expr_TermExpr:
+		for _, v := range real.TermExpr.GetValues() {
+			if genericValueHasNaN(v) {
+				return true
+			}
+		}
+	case *planpb.Expr_UnaryRangeExpr:
+		return genericValueHasNaN(real.UnaryRangeExpr.GetValue())
+	case *planpb.Expr_BinaryRangeExpr:
+		return genericValueHasNaN(real.BinaryRangeExpr.GetLowerValue()) || genericValueHasNaN(real.BinaryRangeExpr.GetUpperValue())
+	case *planpb.Expr_ValueExpr:
+		return genericValueHasNaN(real.ValueExpr.GetValue())
+	case *planpb.Expr_JsonContainsExpr:
+		for _, v := range real.JsonContainsExpr.GetElements() {
+			if genericValueHasNaN(v) {
+				return true
+			}
+		}
+	case *planpb.Expr_UnaryExpr:
+		return exprHasNaN(real.UnaryExpr.GetChild())
+	case *planpb.Expr_BinaryExpr:
+		return exprHasNaN(real.BinaryExpr.GetLeft()) || exprHasNaN(real.BinaryExpr.GetRight())
+	case *planpb.Expr_BinaryArithExpr:
+		return exprHasNaN(real.BinaryArithExpr.GetLeft()) || exprHasNaN(real.BinaryArithExpr.GetRight())
+	case *planpb.Expr_CallExpr:
+		for _, param := range real.CallExpr.GetFunctionParameters() {
+			if exprHasNaN(param) {
+				return true
+			}
+		}
+	case *planpb.Expr_BinaryArithOpEvalRangeExpr:
+		return genericValueHasNaN(real.BinaryArithOpEvalRangeExpr.GetRightOperand()) || genericValueHasNaN(real.BinaryArithOpEvalRangeExpr.GetValue())
+	case *planpb.Expr_TimestamptzArithCompareExpr:
+		return genericValueHasNaN(real.TimestamptzArithCompareExpr.GetCompareValue())
+	case *planpb.Expr_MatchExpr:
+		return exprHasNaN(real.MatchExpr.GetPredicate())
+	}
+	return false
+}
+
+func canDeduplicate(e *planpb.Expr) bool {
+	if e == nil {
+		return false
+	}
+	switch e.GetExpr().(type) {
+	case *planpb.Expr_RandomSampleExpr, *planpb.Expr_ElementFilterExpr, *planpb.Expr_RoaringFilterExpr:
+		return false
+	}
+	return !exprHasNaN(e)
+}
+
+var deterministicMarshal = proto.MarshalOptions{Deterministic: true}
+
+func fnv1a64(b []byte) uint64 {
+	const (
+		offset64 = 14695981039346656037
+		prime64  = 1099511628211
+	)
+	var h uint64 = offset64
+	for _, c := range b {
+		h ^= uint64(c)
+		h *= prime64
+	}
+	return h
+}
+
+func (v *visitor) deduplicateIdenticalExprs(parts []*planpb.Expr) []*planpb.Expr {
+	if len(parts) <= 1 {
+		return parts
+	}
+	buckets := make(map[uint64][]*planpb.Expr, len(parts))
+	out := make([]*planpb.Expr, 0, len(parts))
+	buf := make([]byte, 0, 128)
+
+	for _, e := range parts {
+		if !canDeduplicate(e) {
+			out = append(out, e)
+			continue
+		}
+		var err error
+		buf, err = deterministicMarshal.MarshalAppend(buf[:0], e)
+		if err != nil {
+			out = append(out, e)
+			continue
+		}
+		h := fnv1a64(buf)
+		candidates := buckets[h]
+		found := false
+		for _, cand := range candidates {
+			if proto.Equal(cand, e) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			buckets[h] = append(candidates, e)
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // BalanceLogicalExpr balances the same-op AND/OR chain rooted at expr, leaving
