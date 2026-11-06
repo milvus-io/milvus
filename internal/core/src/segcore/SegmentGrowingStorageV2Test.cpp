@@ -273,8 +273,8 @@ TEST_F(TestGrowingStorageV2, ProducerReadFailurePreservesErrorWithoutHanging) {
         {
             sigset_t signals;
             if (std::signal(SIGALRM, SIG_DFL) == SIG_ERR ||
-                ::sigemptyset(&signals) != 0 ||
-                ::sigaddset(&signals, SIGALRM) != 0 ||
+                sigemptyset(&signals) != 0 ||
+                sigaddset(&signals, SIGALRM) != 0 ||
                 ::sigprocmask(SIG_UNBLOCK, &signals, nullptr) != 0) {
                 std::_Exit(2);
             }

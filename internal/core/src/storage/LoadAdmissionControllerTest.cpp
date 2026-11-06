@@ -523,11 +523,16 @@ TEST_F(LoadAdmissionControllerAsyncTest, MetricsCountBlockingQueueOutcomes) {
 TEST_F(LoadAdmissionControllerAsyncTest,
        ConcurrentMetricScrapesKeepResourceSnapshotConsistent) {
     budget_.SetCapacitySlots(1);
-    std::jthread worker([&](std::stop_token stop) {
-        while (!stop.stop_requested()) {
+    folly::CancellationSource stop;
+    std::thread worker([&, token = stop.getToken()] {
+        while (!token.isCancellationRequested()) {
             budget_.Acquire({7, 1}, LoadAdmissionPriority::High);
             budget_.Release({7, 1});
         }
+    });
+    auto stop_worker = folly::makeGuard([&] {
+        stop.requestCancellation();
+        worker.join();
     });
     std::vector<std::future<bool>> scrapers;
     scrapers.reserve(4);
