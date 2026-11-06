@@ -1,9 +1,11 @@
 package segments
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,6 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -22,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
@@ -1048,4 +1053,83 @@ func TestBaseSegment_SkipGrowingBF(t *testing.T) {
 	blc := storage.NewBatchLocationsCache(pks)
 	results := bs.BatchPkExist(blc)
 	assert.Equal(t, []bool{true, true, true}, results)
+}
+
+type searchLoggingCountingCore struct {
+	zapcore.Core
+	withCalls *int
+}
+
+func (c searchLoggingCountingCore) With(fields []zapcore.Field) zapcore.Core {
+	(*c.withCalls)++
+	return searchLoggingCountingCore{Core: c.Core.With(fields), withCalls: c.withCalls}
+}
+
+func TestSearchWithSegmentLogging(t *testing.T) {
+	paramtable.Init()
+	previousLogger, previousLevel := mlog.L(), mlog.GetLevel()
+	var output bytes.Buffer
+	withCalls := 0
+	logger, _, err := mlog.InitLoggerWithWriteSyncer(
+		&mlog.Config{Level: "debug", DisableTimestamp: true}, zapcore.AddSync(&output),
+		zap.WrapCore(func(core zapcore.Core) zapcore.Core {
+			return searchLoggingCountingCore{Core: core, withCalls: &withCalls}
+		}))
+	require.NoError(t, err)
+	mlog.ReplaceGlobals(logger, nil)
+	t.Cleanup(func() {
+		mlog.ReplaceGlobals(previousLogger, nil)
+		mlog.SetLevel(previousLevel)
+	})
+
+	segment := &LocalSegment{
+		baseSegment: baseSegment{
+			loadInfo:    atomic.NewPointer(&querypb.SegmentLoadInfo{CollectionID: 10, SegmentID: 20}),
+			segmentType: SegmentTypeSealed,
+		},
+		ptrLock:      state.NewLoadStateLock(state.LoadStateDataLoaded),
+		fieldIndexes: typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
+	}
+	segment.fieldIndexes.Insert(1, &IndexedFieldInfo{IndexInfo: &querypb.FieldIndexInfo{FieldID: 0}})
+
+	for _, test := range []struct {
+		name     string
+		level    mlog.Level
+		err      error
+		messages []string
+	}{
+		{name: "debug_disabled", level: mlog.InfoLevel},
+		{name: "debug_enabled", level: mlog.DebugLevel, messages: []string{"search segment...", "search segment done"}},
+		{name: "warn_preserves_fields", level: mlog.InfoLevel, err: merr.ErrServiceInternal, messages: []string{"Search failed"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			mlog.SetLevel(test.level)
+			output.Reset()
+			withCalls = 0
+			expected := &segcore.SearchResult{}
+			native := mock_segcore.NewMockCSegment(t)
+			native.EXPECT().Search(mock.Anything, mock.Anything).Return(expected, test.err).Once()
+			result, err := segment.searchWithSegment(context.Background(), &segcore.SearchRequest{}, native)
+			if test.err != nil {
+				require.ErrorIs(t, err, test.err)
+				require.Nil(t, result)
+			} else {
+				require.NoError(t, err)
+				require.Same(t, expected, result)
+			}
+			if len(test.messages) == 0 {
+				require.Empty(t, output.String())
+				require.Zero(t, withCalls, "disabled Debug must not encode bound logger fields")
+				return
+			}
+			lines := strings.Split(strings.TrimSpace(output.String()), "\n")
+			require.Len(t, lines, len(test.messages))
+			for i, line := range lines {
+				require.Contains(t, line, test.messages[i])
+				for _, field := range []string{"mvcc=0", "collectionID=10", "segmentID=20", "segmentType=Sealed", "filterOnly=false", "withIndex=true"} {
+					require.Contains(t, line, field)
+				}
+			}
+		})
+	}
 }
