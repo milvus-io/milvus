@@ -62,8 +62,8 @@ func TestSearchAggregationStreamingMatchesBatch(t *testing.T) {
 				t.Run(fmt.Sprintf("%s/%s/bytes_%d", tc.name, metric, chunkBytes), func(t *testing.T) {
 					ctx := context.Background()
 					span := trace.SpanFromContext(ctx)
-					legacy := &fakeLegacyQueryClient{reduceStreamEnabled: true}
-					task := newQueryViewSearchTask(legacy, 1)
+					legacy := &fakeLegacyQueryClient{}
+					task := newQueryViewSearchTask(t, legacy, 1)
 					task.ctx = ctx
 					task.Nq, task.IsIterator, task.MetricType = 2, false, metric
 					task.OutputFieldsId = []int64{104}
@@ -228,8 +228,8 @@ func TestSearchAggregationStreamingFailures(t *testing.T) {
 	for _, receiveFailure := range []bool{true, false} {
 		t.Run(map[bool]string{true: "receive error", false: "missing metric field"}[receiveFailure], func(t *testing.T) {
 			ctx := context.Background()
-			legacy := &fakeLegacyQueryClient{reduceStreamEnabled: true}
-			task := newQueryViewSearchTask(legacy, 1)
+			legacy := &fakeLegacyQueryClient{}
+			task := newQueryViewSearchTask(t, legacy, 1)
 			task.ctx, task.IsIterator = ctx, false
 			task.schema = &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},

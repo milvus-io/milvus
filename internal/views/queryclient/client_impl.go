@@ -21,10 +21,8 @@ type ViewQueryClientConfig struct {
 	// QueryHook is initialized and owned by the hosting process.
 	QueryHook optimizers.QueryHook
 	// LoadInfoClient confirms current load state when an initialized directory is empty.
-	LoadInfoClient         LoadInfoClient
-	MaxRetries             int  // Maximum per-shard attempts; zero defaults to 3. At least one full candidate pass is allowed.
-	EnableReduceStream     bool // Route supported requests through Streaming Reduce.
-	ReduceStreamChunkBytes int  // Chunk reducible-payload byte threshold; must be positive when enabled.
+	LoadInfoClient LoadInfoClient
+	MaxRetries     int // Maximum per-shard attempts; zero defaults to 3. At least one full candidate pass is allowed.
 }
 
 // viewQueryClientImpl implements ViewQueryClient.

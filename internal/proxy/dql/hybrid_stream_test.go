@@ -24,7 +24,7 @@ import (
 )
 
 func TestHybridStreamingEligibility(t *testing.T) {
-	task := newQueryViewSearchTask(nil, 1)
+	task := newQueryViewSearchTask(t, nil, 1)
 	task.IsIterator, task.IsAdvanced = false, true
 	task.rerankMeta = &legacyRerankMeta{}
 	task.SubReqs = []*internalpb.SubSearchRequest{{Nq: 1, Topk: 4, SearchType: internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER}}
@@ -62,10 +62,9 @@ func TestSearchTaskConsumesHybridStreamsWithIndependentWindows(t *testing.T) {
 	first := &fakeLegacySearchStream{recv: []fakeLegacySearchRecv{{chunk: firstChunk}}}
 	second := &fakeLegacySearchStream{recv: []fakeLegacySearchRecv{{chunk: secondChunk}}}
 	legacy := &fakeLegacyQueryClient{
-		reduceStreamEnabled: true,
-		searchResult:        &queryclient.LegacySearchResult{SubStreams: []searchutil.ReduceStream{first, second}},
+		searchResult: &queryclient.LegacySearchResult{SubStreams: []searchutil.ReduceStream{first, second}},
 	}
-	task := newQueryViewSearchTask(legacy, 1)
+	task := newQueryViewSearchTask(t, legacy, 1)
 	task.IsIterator, task.IsAdvanced = false, true
 	task.rerankMeta = &legacyRerankMeta{}
 	task.SubReqs = []*internalpb.SubSearchRequest{
@@ -108,7 +107,7 @@ func TestHybridStreamFailureUnblocksSibling(t *testing.T) {
 	failure := errors.New("failed sub-search")
 	failed := &fakeLegacySearchStream{recv: []fakeLegacySearchRecv{{err: failure}}}
 	blocked := &blockedHybridSearchStream{closed: make(chan struct{})}
-	task := newQueryViewSearchTask(nil, 1)
+	task := newQueryViewSearchTask(t, nil, 1)
 	task.IsAdvanced = true
 	task.SubReqs = []*internalpb.SubSearchRequest{{Nq: 1, Topk: 2}, {Nq: 1, Topk: 2}}
 	done := make(chan error, 1)

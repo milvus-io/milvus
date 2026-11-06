@@ -1567,28 +1567,10 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 	}
 
 	legacy := t.viewQueryClient.Legacy()
-	allowStreaming := t.supportsStreamingReduce()
-	enableReduceStream := legacy.ReduceStreamEnabled()
-	var enableReduceStreamOverride *bool
-	// Benchmark-only Search parameters; never mutate the shared QueryView client.
-	if value, err := funcutil.GetAttrByKeyFromRepeatedKV("enableReduceStream", t.request.GetSearchParams()); err == nil {
-		enabled, err := strconv.ParseBool(value)
-		if err != nil {
-			return merr.WrapErrParameterInvalidMsg("enableReduceStream must be a boolean, got %q", value)
-		}
-		if enabled && !allowStreaming {
-			return merr.WrapErrParameterInvalidMsg("enableReduceStream=true is not supported for this Search request")
-		}
-		enableReduceStream, enableReduceStreamOverride = enabled, &enabled
-	}
-	chunkBytes := 0
-	if value, err := funcutil.GetAttrByKeyFromRepeatedKV("reduceStreamChunkBytes", t.request.GetSearchParams()); err == nil {
-		chunkBytes, err = strconv.Atoi(value)
-		if err != nil || chunkBytes <= 0 {
-			return merr.WrapErrParameterInvalidMsg("reduceStreamChunkBytes must be a positive integer, got %q", value)
-		}
-	}
-	retryStreaming := allowStreaming && enableReduceStream
+	// Refresh applies to new requests, not retries or Hybrid sub-searches.
+	allowStreaming := paramtable.Get().ProxyCfg.EnableReduceStream.GetAsBool() && t.supportsStreamingReduce()
+	chunkBytes := paramtable.Get().ProxyCfg.ReduceStreamChunkBytes.GetAsInt()
+	retryStreaming := allowStreaming
 	searchRequest := t.SearchRequest
 	if retryStreaming && len(t.orderByFields) > 0 &&
 		(t.GetGroupByFieldId() > 0 || len(t.GetGroupByFieldIds()) > 0) {
@@ -1606,7 +1588,6 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 			Req:                    searchRequest,
 			BarrierMVCC:            t.MvccTimestamp,
 			AllowStreaming:         allowStreaming,
-			EnableReduceStream:     enableReduceStreamOverride,
 			ReduceStreamChunkBytes: chunkBytes,
 		})
 		if err != nil {

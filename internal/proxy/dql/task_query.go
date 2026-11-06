@@ -1166,36 +1166,17 @@ func (t *QueryTask) executeWorkload(ctx context.Context, exec shardclient.Execut
 
 func (t *QueryTask) executeByQueryView(ctx context.Context) error {
 	legacy := t.viewQueryClient.Legacy()
-	allowStreaming := queryclient.SupportsQueryStream(t.RetrieveRequest)
+	// Refresh applies to new requests, not retries. Retained-plan requery stays on Batch.
+	allowStreaming := t.queryViewPlans == nil && paramtable.Get().ProxyCfg.EnableReduceStream.GetAsBool() &&
+		queryclient.SupportsQueryStream(t.RetrieveRequest)
 	// Query chains return computed columns that streaming assembly does not retain.
 	allowStreaming = allowStreaming && len(t.request.GetFunctionChains()) == 0
 	request := &queryclient.LegacyQueryRequest{
 		Req: t.RetrieveRequest, Plans: t.queryViewPlans, Schema: t.schema.CollectionSchema,
 		BarrierMVCC: t.MvccTimestamp, AllowStreaming: allowStreaming,
+		ReduceStreamChunkBytes: paramtable.Get().ProxyCfg.ReduceStreamChunkBytes.GetAsInt(),
 	}
-
-	enableReduceStream := legacy.ReduceStreamEnabled()
-	// Benchmark-only Query parameters; retained-plan requery stays on Batch.
-	if request.Plans == nil {
-		if value, err := funcutil.GetAttrByKeyFromRepeatedKV("enableReduceStream", t.request.GetQueryParams()); err == nil {
-			enabled, err := strconv.ParseBool(value)
-			if err != nil {
-				return merr.WrapErrParameterInvalidMsg("enableReduceStream must be a boolean, got %q", value)
-			}
-			if enabled && !allowStreaming {
-				return merr.WrapErrParameterInvalidMsg("enableReduceStream=true is not supported for this Query request")
-			}
-			enableReduceStream, request.EnableReduceStream = enabled, &enabled
-		}
-		if value, err := funcutil.GetAttrByKeyFromRepeatedKV("reduceStreamChunkBytes", t.request.GetQueryParams()); err == nil {
-			chunkBytes, err := strconv.Atoi(value)
-			if err != nil || chunkBytes <= 0 {
-				return merr.WrapErrParameterInvalidMsg("reduceStreamChunkBytes must be a positive integer, got %q", value)
-			}
-			request.ReduceStreamChunkBytes = chunkBytes
-		}
-	}
-	retryStreaming := request.Plans == nil && allowStreaming && enableReduceStream
+	retryStreaming := allowStreaming
 	maxAttempts := 1
 	if retryStreaming {
 		maxAttempts = max(1, legacy.MaxRetries())

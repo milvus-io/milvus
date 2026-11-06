@@ -2821,8 +2821,8 @@ type proxyConfig struct {
 
 	SlowQuerySpanInSeconds ParamItem `refreshable:"true"`
 	QueryNodePoolingSize   ParamItem `refreshable:"false"`
-	EnableReduceStream     ParamItem `refreshable:"false"`
-	ReduceStreamChunkBytes ParamItem `refreshable:"false"`
+	EnableReduceStream     ParamItem `refreshable:"true"`
+	ReduceStreamChunkBytes ParamItem `refreshable:"true"`
 
 	HybridSearchRequeryPolicy     ParamItem `refreshable:"true"`
 	SearchPlaceholderLogRateLimit ParamItem `refreshable:"true"`

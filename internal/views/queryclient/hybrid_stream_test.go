@@ -218,8 +218,8 @@ func TestLegacyHybridStreamsReduceEachSubSearchAcrossVChannels(t *testing.T) {
 		}
 		return stream, nil
 	}}
-	client := NewLegacyViewQueryClient(ViewQueryClientConfig{EnableReduceStream: true, ReduceStreamChunkBytes: 20}, &legacyPlanClient{plans: plans}, service, &legacyResolver{vchannels: channels})
-	result, err := client.Legacy().Search(context.Background(), &LegacySearchRequest{Req: request, AllowStreaming: true})
+	client := NewLegacyViewQueryClient(ViewQueryClientConfig{}, &legacyPlanClient{plans: plans}, service, &legacyResolver{vchannels: channels})
+	result, err := client.Legacy().Search(context.Background(), &LegacySearchRequest{Req: request, AllowStreaming: true, ReduceStreamChunkBytes: 20})
 	require.NoError(t, err)
 	require.Nil(t, result.Stream)
 	require.Empty(t, result.Results)
