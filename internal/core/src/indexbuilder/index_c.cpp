@@ -1068,6 +1068,9 @@ SerializeIndexAndUpLoad(CIndex index, ProtoLayoutInterface result) {
             reinterpret_cast<milvus::ProtoLayout*>(result));
         status.error_code = Success;
         status.error_msg = "";
+    } catch (const SegcoreError& e) {
+        status.error_code = e.get_error_code();
+        status.error_msg = strdup(e.what());
     } catch (std::exception& e) {
         status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
