@@ -201,7 +201,21 @@ func (m *StatsManager) registerNewGrowingSegment(belongs SegmentBelongs, stats *
 	m.metricHelper.ObservePChannelBytesUpdate(belongs.PChannel, m.pchannelStats[belongs.PChannel])
 }
 
-// AllocRows alloc number of rows on current segment.
+// CanAllocRows checks the soft assignment target without charging rows or bytes.
+// It preserves the asynchronous capacity hint for a segment that is already full.
+// The result is not a reservation; AllocRowsBatch revalidates under the same mutex.
+func (m *StatsManager) CanAllocRows(segmentID int64) bool {
+	m.mu.Lock()
+	stat := m.segmentStats[segmentID]
+	sealed := stat != nil && stat.ShouldBeSealed()
+	available := stat != nil && !sealed
+	m.mu.Unlock()
+	if sealed {
+		m.worker.NotifySealSegment(segmentID, policy.PolicyCapacity())
+	}
+	return available
+}
+
 // AllocRows treats the segment limits as soft sealing targets: every segment
 // may accept one allocation that crosses a target and is sealed afterwards;
 // later allocations are rejected so the caller can move to another segment.

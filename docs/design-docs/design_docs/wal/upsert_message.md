@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Insert, Upsert, and partial update requests use one Upsert WAL format. A logical message has one MessageID and one final visibility TimeTick. Backend chunking does not create separately acknowledged Insert and Delete messages.
+When enabled, Insert, Upsert, and partial update requests use one Upsert WAL format. A logical message has one MessageID and one final visibility TimeTick. Backend chunking does not create separately acknowledged Insert and Delete messages.
 
 An ordinary Insert records rows without delete effects. An Upsert records the delete effects that the primary producer has already decided. Consumers execute these explicit effects. They do not query a local PK index to infer replacement behavior.
 
@@ -63,7 +63,7 @@ The normal transaction contract remains:
 2. The producer sends bodies and waits for every successful response.
 3. The producer sends Commit.
 
-StreamingNode validates the Upsert envelope before shard business effects. TimeTick validates session scope before body admission. Transactions containing Upsert validate Begin, all successful bodies, Commit, collection identity, and exact nonzero body count. Recovery rebuilds and validates the same successful prefix. Rollback, expiry, rejection, and completion retain the existing cleanup ownership.
+The common WAL Append entry validates each Upsert envelope before the interceptor chain, including idempotency duplicates and replicated duplicate/ignore paths. TimeTick validates session scope before body admission. Transactions containing Upsert validate Begin, all successful bodies, Commit, collection identity, and exact nonzero body count. Recovery rebuilds and validates the same successful prefix. Rollback, expiry, rejection, and completion retain the existing cleanup ownership.
 
 All inserted target partitions must be ready. Batch assignment selects eligible Growing segments and holds Ack references before accounting. It validates the complete allocation set before charging rows or bytes. A later partition that requires redo cannot leave a charged successful prefix. Each partition accounts for its own PK, RowID, and selected ordinary columns. Delete effects and the outer envelope are excluded from insert pressure. Existing transaction cleanup releases segment transaction references.
 
@@ -85,7 +85,7 @@ L1 persistence, growing runtime, function-output handling, local flush replay, a
 
 Compound protobuf decoding precedes native mutation. A decode or apply failure cannot be hidden by a later message that advances completion. L0 projection errors poison the retained position and stop further scheduling. Query replay uses receiving-cluster segment assignments and final transaction visibility.
 
-No support is added to the legacy MsgPack pipeline or msgdispatcher. Production activation requires the native query path from #52977, which is included in the upstream base. Deployment must still verify compatible native readers before enabling generation.
+No support is added to the legacy MsgPack pipeline or msgdispatcher. Production activation requires the native query path from #52977, which is included in the upstream base. Deployment must still verify compatible native readers before enabling Upsert messages.
 
 ## CDC and activation
 
@@ -93,7 +93,11 @@ CDC forwards the primary's logical rows, placement partitions, CAS metadata, map
 
 Deployment uses reader-first activation. streaming.wal.enableUpsertMessage defaults to false. auto remains false because the new format has no assigned release capability. The old draft 3.0.7 threshold does not describe this format. The old draft switch cannot enable this new capability. Explicit enablement requires operators to verify all readers, CDC targets, and the native query-path dependency first.
 
-Gate-off rejects new Insert, Upsert, and partial-update requests before the first send. New producers do not fall back to Insert WAL. Gate-off does not disable historical decoding or Commit/Rollback for existing durable bodies. It does not remove retained WAL records.
+When the switch is false, Proxy selects the existing WAL format before packing. Insert requests produce Insert messages. Upsert and partial-update requests produce the existing Insert/Delete transaction with the same CAS metadata. This path retains partition splitting, size splitting, and Insert-header retry results. When true, Proxy selects Upsert messages and uses the format described above.
+
+The selection covers the complete packing attempt. An append error does not trigger a second append with another format. Requests already packed retain their format through producer retries. StreamingNode still rejects new Upsert appends while its switch is false. Configuration propagation or disabling the switch during an append can therefore fail that append. Operators must drain new-format writes before disabling it. Retained decoding and Commit/Rollback for durable bodies remain available. Disabling the switch does not remove retained WAL history or make older readers safe.
+
+Client retries use the same per-VChannel idempotency key and original row offsets through either format. The existing bounded window and unknown-outcome contract still apply. Unkeyed requests do not gain an exactly-once guarantee from format selection.
 
 Unknown-message skipping is not a compatibility strategy. Mixed-version operation and downgrade across retained new-format history are unsupported until the required reader capability is deployed. The operator-managed switch does not provide automatic mixed-version safety or a downgrade guarantee.
 

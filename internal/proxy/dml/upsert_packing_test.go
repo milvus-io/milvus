@@ -115,16 +115,6 @@ func TestUpsertPackingSplitRetryAndExplicitEffects(t *testing.T) {
 	require.Equal(t, []int64{1, 3}, deleted)
 }
 
-func TestUpsertPackingGenerationGateRejectsBeforeCacheOrSend(t *testing.T) {
-	item := &paramtable.Get().StreamingCfg.EnableUpsertMessage
-	old := item.SwapTempValue("false")
-	defer item.SwapTempValue(old)
-	source, result := newIdempotentRepackInsertMsg(1)
-	rows, err := repackUpsertMessages(context.Background(), NewMockCache(t), []string{"p_100v0"}, source, result.IDs, nil, upsertPackingSchema(), 1, nil, nil, nil, nil, 0)
-	require.Error(t, err)
-	require.Nil(t, rows)
-}
-
 func TestUpsertPackingCASAndNullableVector(t *testing.T) {
 	source, result := newIdempotentRepackInsertMsg(3)
 	source.FieldsData = append(source.FieldsData, &schemapb.FieldData{FieldId: 103, Type: schemapb.DataType_FloatVector, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, ValidData: []bool{true, false, true}, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 5, 6}}}}}})

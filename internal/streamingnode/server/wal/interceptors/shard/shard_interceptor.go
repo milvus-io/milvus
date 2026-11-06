@@ -509,9 +509,6 @@ func (impl *shardInterceptor) writeSchema(collectionID int64, vchannel string) (
 }
 
 func (impl *shardInterceptor) handleUpsert(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
-	if err := message.ValidateUpsertEnvelope(msg); err != nil {
-		return nil, status.NewUnrecoverableError("invalid Upsert envelope: %v", err)
-	}
 	upsert, err := message.AsMutableUpsertMessageV2(msg)
 	if err != nil {
 		return nil, status.NewUnrecoverableError("invalid Upsert envelope: %v", err)

@@ -215,7 +215,7 @@ func TestPartitionManager(t *testing.T) {
 	// There's no waiting growing segment
 	<-m.WaitPendingGrowingSegmentReady()
 
-	result, err := m.AssignSegment(&AssignSegmentRequest{
+	result, err := assignPartitionForTest(m, &AssignSegmentRequest{
 		TimeTick: 125,
 		ModifiedMetrics: stats.ModifiedMetrics{
 			Rows:       100,
@@ -225,7 +225,7 @@ func TestPartitionManager(t *testing.T) {
 	assert.Nil(t, result)
 	assert.ErrorIs(t, err, ErrFencedAssign)
 
-	result, err = m.AssignSegment(&AssignSegmentRequest{
+	result, err = assignPartitionForTest(m, &AssignSegmentRequest{
 		TimeTick: 135,
 		ModifiedMetrics: stats.ModifiedMetrics{
 			Rows:       100,
@@ -243,33 +243,33 @@ func TestPartitionManager(t *testing.T) {
 		},
 	}
 
-	result, err = m.AssignSegment(req)
+	result, err = assignPartitionForTest(m, req)
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	result.Ack()
 
 	// Each existing segment accepts the allocation that crosses its soft
 	// assignment target, then rejects later allocations.
-	result, err = m.AssignSegment(req)
+	result, err = assignPartitionForTest(m, req)
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	result.Ack()
-	result, err = m.AssignSegment(req)
+	result, err = assignPartitionForTest(m, req)
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	result.Ack()
 
-	_, err = m.AssignSegment(req)
+	_, err = assignPartitionForTest(m, req)
 	assert.ErrorIs(t, err, ErrWaitForNewSegment)
 
 	<-createSegmentDone
 	// should ready
 	<-m.WaitPendingGrowingSegmentReady()
 
-	_, err = m.AssignSegment(req)
+	_, err = assignPartitionForTest(m, req)
 	assert.ErrorIs(t, err, ErrTimeTickTooOld)
 	req.TimeTick = 210
-	result, err = m.AssignSegment(req)
+	result, err = assignPartitionForTest(m, req)
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	result.Ack()
@@ -287,12 +287,12 @@ func TestPartitionManager(t *testing.T) {
 	segmentIDs := m.FlushAndFenceSegmentUntil(250)
 	assert.Len(t, segmentIDs, 2)
 
-	_, err = m.AssignSegment(req)
+	_, err = assignPartitionForTest(m, req)
 	assert.ErrorIs(t, err, ErrFencedAssign)
 
 	req.TimeTick = 260
 	msgTimeTick = 300
-	_, err = m.AssignSegment(req)
+	_, err = assignPartitionForTest(m, req)
 	assert.ErrorIs(t, err, ErrWaitForNewSegment)
 
 	<-createSegmentDone
@@ -360,4 +360,11 @@ func TestPartitionFlushMetricsRecordedOnce(t *testing.T) {
 			}
 		})
 	}
+}
+
+// assignPartitionForTest exercises partition fixtures through the public path.
+func assignPartitionForTest(pm *partitionManager, req *AssignSegmentRequest) (*AssignSegmentResult, error) {
+	req.CollectionID, req.PartitionID = pm.collectionID, pm.partitionID
+	manager := &shardManagerImpl{partitionManagers: map[PartitionUniqueKey]*partitionManager{{CollectionID: pm.collectionID, PartitionID: pm.partitionID}: pm}, metrics: pm.metrics}
+	return manager.AssignSegment(req)
 }

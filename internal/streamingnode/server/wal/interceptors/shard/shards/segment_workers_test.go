@@ -632,7 +632,7 @@ func TestSegmentFlushWorker_CheckIfReady(t *testing.T) {
 		}, 100)
 
 		// Allocate rows to increase ackSem
-		result, err := segment.AllocRows(&AssignSegmentRequest{
+		result, err := assignSegmentForTest(t, segment, &AssignSegmentRequest{
 			TimeTick: 120,
 			ModifiedMetrics: stats.ModifiedMetrics{
 				Rows:       10,
@@ -664,7 +664,7 @@ func TestSegmentFlushWorker_CheckIfReady(t *testing.T) {
 		}, 100)
 
 		// Allocate rows with a txn session to increase txnSem
-		result, err := segment.AllocRows(&AssignSegmentRequest{
+		result, err := assignSegmentForTest(t, segment, &AssignSegmentRequest{
 			TimeTick: 120,
 			ModifiedMetrics: stats.ModifiedMetrics{
 				Rows:       10,
@@ -711,7 +711,7 @@ func TestSegmentFlushWorker_DoOnceDelayFlush(t *testing.T) {
 	}, 100)
 
 	// Allocate to make ackSem > 0
-	result, _ := segment.AllocRows(&AssignSegmentRequest{
+	result, _ := assignSegmentForTest(t, segment, &AssignSegmentRequest{
 		TimeTick: 120,
 		ModifiedMetrics: stats.ModifiedMetrics{
 			Rows:       10,

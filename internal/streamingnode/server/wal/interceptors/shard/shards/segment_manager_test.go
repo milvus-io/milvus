@@ -13,6 +13,8 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
@@ -66,14 +68,14 @@ func TestSegmentAllocManager(t *testing.T) {
 	assert.Equal(t, m.TxnSem(), int32(0))
 	assert.False(t, m.IsFlushed())
 
-	result, err := m.AllocRows(&AssignSegmentRequest{
+	result, err := assignSegmentForTest(t, m, &AssignSegmentRequest{
 		TimeTick: 110,
 	})
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, ErrTimeTickTooOld)
 	assert.Nil(t, result)
 
-	result, err = m.AllocRows(&AssignSegmentRequest{
+	result, err = assignSegmentForTest(t, m, &AssignSegmentRequest{
 		TimeTick: 120,
 		ModifiedMetrics: stats.ModifiedMetrics{
 			Rows:       100,
@@ -87,7 +89,7 @@ func TestSegmentAllocManager(t *testing.T) {
 	assert.Equal(t, m.AckSem(), int32(1))
 	assert.Equal(t, m.TxnSem(), int32(0))
 
-	result, err = m.AllocRows(&AssignSegmentRequest{
+	result, err = assignSegmentForTest(t, m, &AssignSegmentRequest{
 		TimeTick: 120,
 		ModifiedMetrics: stats.ModifiedMetrics{
 			Rows:       100,
@@ -100,7 +102,7 @@ func TestSegmentAllocManager(t *testing.T) {
 	assert.Equal(t, m.TxnSem(), int32(1))
 	assert.Equal(t, m.AckSem(), int32(2))
 
-	result, err = m.AllocRows(&AssignSegmentRequest{
+	result, err = assignSegmentForTest(t, m, &AssignSegmentRequest{
 		TimeTick: 120,
 		ModifiedMetrics: stats.ModifiedMetrics{
 			Rows:       100,
@@ -115,14 +117,14 @@ func TestSegmentAllocManager(t *testing.T) {
 	assert.Equal(t, stats.ModifiedMetrics{Rows: 300, BinarySize: 110}, stat.Modified)
 	assert.True(t, stat.ShouldBeSealed())
 
-	result, err = m.AllocRows(&AssignSegmentRequest{
+	result, err = assignSegmentForTest(t, m, &AssignSegmentRequest{
 		TimeTick: 120,
 		ModifiedMetrics: stats.ModifiedMetrics{
 			Rows:       1,
 			BinarySize: 1,
 		},
 	})
-	assert.ErrorIs(t, err, ErrNotEnoughSpace)
+	assert.ErrorIs(t, err, ErrWaitForNewSegment)
 	assert.Nil(t, result)
 	assert.Equal(t, m.TxnSem(), int32(1))
 	assert.Equal(t, m.AckSem(), int32(3))
@@ -143,11 +145,11 @@ func TestSegmentAllocManager(t *testing.T) {
 		m.GetStatFromRecovery()
 	})
 
-	_, err = m.AllocRows(&AssignSegmentRequest{
+	_, err = assignSegmentForTest(t, m, &AssignSegmentRequest{
 		TimeTick: 120,
 	})
 	assert.Error(t, err)
-	assert.ErrorIs(t, err, ErrNotGrowing)
+	assert.ErrorIs(t, err, ErrWaitForNewSegment)
 }
 
 func TestSegmentAllocManagerAcceptsOversizedFirstAllocation(t *testing.T) {
@@ -175,7 +177,7 @@ func TestSegmentAllocManagerAcceptsOversizedFirstAllocation(t *testing.T) {
 		StorageVersion: 2,
 	}, 110)
 
-	result, err := m.AllocRows(&AssignSegmentRequest{
+	result, err := assignSegmentForTest(t, m, &AssignSegmentRequest{
 		TimeTick: 120,
 		ModifiedMetrics: stats.ModifiedMetrics{
 			Rows:       100,
@@ -204,4 +206,17 @@ func TestSegmentAllocManagerAcceptsOversizedFirstAllocation(t *testing.T) {
 type mockedSession struct{}
 
 func (m *mockedSession) RegisterCleanup(cleanup func(), timetick uint64) {
+}
+
+// assignSegmentForTest keeps segment/flush-worker fixtures on production assignment.
+func assignSegmentForTest(t *testing.T, segment *segmentAllocManager, req *AssignSegmentRequest) (*AssignSegmentResult, error) {
+	t.Helper()
+	metrics := metricsutil.NewSegmentAssignMetrics(segment.pchannel.Name)
+	t.Cleanup(metrics.Close)
+	pm := &partitionManager{
+		ctx: t.Context(), pchannel: segment.pchannel, collectionID: segment.GetCollectionID(), partitionID: segment.GetPartitionID(), segments: map[int64]*segmentAllocManager{segment.GetSegmentID(): segment}, metrics: metrics,
+		onAllocating: make(chan struct{}), // These fixtures do not run an allocation worker.
+	}
+	pm.SetLogger(mlog.With())
+	return assignPartitionForTest(pm, req)
 }

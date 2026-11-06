@@ -79,12 +79,6 @@ func TestUpsertBoundedRetryReturnsOriginalResult(t *testing.T) {
 		require.Equal(t, []int64{7}, extra.Extra.(*messagespb.IdempotentInsertResult).Ids.GetIntId().Data)
 	}
 	require.Equal(t, 1, calls)
-	for _, marker := range []string{"_np", "_pcl", "_bh", "_ur"} {
-		msg := build()
-		msg.Properties().ToRawMap()[marker] = ""
-		_, err := interceptor.DoAppend(context.Background(), msg, appendOp)
-		require.Error(t, err, marker)
-	}
 	invalid := build()
 	mapUpsert(invalid, 0, 1)
 	_, err := interceptor.DoAppend(context.Background(), invalid, appendOp)
@@ -127,7 +121,7 @@ func TestSequentialKeyedUpsertTransactionUsesBufferedOriginalResult(t *testing.T
 			require.NoError(t, err)
 			count := uint64(1)
 			if mixed {
-				result, err := message.UpsertRetryResult(context.Background(), body)
+				result, err := message.BuildUpsertResult(context.Background(), body)
 				require.NoError(t, err)
 				result = proto.Clone(result).(*messagespb.IdempotentInsertResult)
 				result.RowOffsets = []uint32{1}

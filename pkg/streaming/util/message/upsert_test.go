@@ -87,7 +87,7 @@ func TestUpsertMetadataSkipsColumnsAndSharesDecode(t *testing.T) {
 	require.NoError(t, err)
 	require.Same(t, first, second)
 	require.Nil(t, first.Columns[0].Field)
-	result, err := message.UpsertRetryResult(t.Context(), raw)
+	result, err := message.BuildUpsertResult(t.Context(), raw)
 	require.NoError(t, err)
 	require.Equal(t, []int64{4, 5, 4}, result.Ids.GetIntId().GetData())
 	_, err = message.MustAsImmutableUpsertMessageV2(raw).Body(t.Context())

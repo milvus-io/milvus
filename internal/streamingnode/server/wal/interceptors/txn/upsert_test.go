@@ -202,46 +202,80 @@ func upsertForTest(vc string) message.MutableMessage {
 	return message.NewUpsertMessageBuilderV2().WithVChannel(vc).WithHeader(&message.UpsertMessageHeader{CollectionId: 1, SchemaVersion: &version, Partitions: []*message.PartitionSegmentAssignment{{PartitionId: 2, Rows: 1}}, DeleteRows: 1}).WithBody(upsertfixture.Body(&msgpb.InsertRequest{Version: msgpb.InsertDataVersion_ColumnBased, CollectionID: 1, PartitionID: 2, NumRows: 1, RowIDs: []int64{7}, FieldsData: []*schemapb.FieldData{{FieldId: 100, Type: schemapb.DataType_Int64, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{7}}}}}}}}, &msgpb.DeleteRequest{CollectionID: 1, PartitionID: -1, NumRows: 1, PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7}}}}})).MustBuildMutable().WithTimeTick(10)
 }
 
-func TestRecoveredUpsertCommitRejectsForbiddenEnvelopes(t *testing.T) {
-	for _, marker := range []string{"_ur", "_np", "_pcl", "_bh"} {
-		for _, component := range []string{"Begin", "Upsert", "legacy body", "Commit"} {
-			t.Run(marker+"_"+component, func(t *testing.T) {
-				resource.InitForTest(t)
-				txnCtx := message.TxnContext{TxnID: 10, Keepalive: message.TxnKeepaliveInfinite}
-				begin := message.NewBeginTxnMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&message.BeginTxnMessageHeader{}).
-					WithBody(&message.BeginTxnMessageBody{}).MustBuildMutable().WithTxnContext(txnCtx).WithTimeTick(1).WithLastConfirmedUseMessageID()
-				if component == "Begin" {
-					begin.Properties().ToRawMap()[marker] = ""
+func TestUpsertCommitRejectsForbiddenEnvelopes(t *testing.T) {
+	for _, recovered := range []bool{false, true} {
+		for _, marker := range []string{"", "_ur", "_np", "_pcl", "_bh"} {
+			for _, component := range []string{"Begin", "Upsert", "legacy Insert", "legacy Delete", "Commit"} {
+				origin := "live"
+				if recovered {
+					origin = "recovered"
 				}
-				builder := message.NewImmutableTxnMessageBuilder(message.MustAsImmutableBeginTxnMessageV2(begin.IntoImmutableMessage(walimplstest.NewTestMessageID(1))))
-				upsert := upsertForTest("p_1v0").WithTxnContext(txnCtx).WithLastConfirmedUseMessageID()
-				if component == "Upsert" {
-					upsert.Properties().ToRawMap()[marker] = ""
-				}
-				builder.Add(upsert.IntoImmutableMessage(walimplstest.NewTestMessageID(2)))
-				count := uint64(1)
-				if component == "legacy body" {
-					legacy := message.NewDeleteMessageBuilderV1().WithVChannel("p_1v0").WithProperty(marker, "").
-						WithHeader(&message.DeleteMessageHeader{CollectionId: 1}).WithBody(&msgpb.DeleteRequest{}).MustBuildMutable().
-						WithTxnContext(txnCtx).WithTimeTick(3).WithLastConfirmedUseMessageID().IntoImmutableMessage(walimplstest.NewTestMessageID(3))
-					builder.Add(legacy)
-					count++
-				}
-				manager := NewTxnManager(types.PChannelInfo{Name: "p"}, map[message.TxnID]*message.ImmutableTxnMessageBuilder{10: builder})
-				session, err := manager.GetSessionOfTxn(10)
-				require.NoError(t, err)
-				require.NoError(t, session.RequestCommitAndWait(context.Background(), 20, count))
-				commit := message.NewCommitTxnMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&message.CommitTxnMessageHeader{BodyCnt: count}).
-					WithBody(&message.CommitTxnMessageBody{}).MustBuildMutable().WithTxnContext(txnCtx).WithTimeTick(20)
-				if component == "Commit" {
-					commit.Properties().ToRawMap()[marker] = ""
-				}
-				err = session.ValidateCommit(context.Background(), commit)
-				require.Error(t, err)
-				session.RejectCommit()
-				require.Empty(t, session.SuccessfulBodies())
-				manager.Close()
-			})
+				t.Run(origin+"/"+marker+"/"+component, func(t *testing.T) {
+					resource.InitForTest(t)
+					txnCtx := message.TxnContext{TxnID: 10, Keepalive: message.TxnKeepaliveInfinite}
+					begin := message.NewBeginTxnMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&message.BeginTxnMessageHeader{}).
+						WithBody(&message.BeginTxnMessageBody{}).MustBuildMutable().WithTxnContext(txnCtx).WithTimeTick(1).WithLastConfirmedUseMessageID()
+					if marker != "" && component == "Begin" {
+						begin.Properties().ToRawMap()[marker] = ""
+					}
+					builder := message.NewImmutableTxnMessageBuilder(message.MustAsImmutableBeginTxnMessageV2(begin.IntoImmutableMessage(walimplstest.NewTestMessageID(1))))
+					upsert := upsertForTest("p_1v0").WithTxnContext(txnCtx).WithLastConfirmedUseMessageID()
+					if marker != "" && component == "Upsert" {
+						upsert.Properties().ToRawMap()[marker] = ""
+					}
+					builder.Add(upsert.IntoImmutableMessage(walimplstest.NewTestMessageID(2)))
+					count := uint64(1)
+					if component == "legacy Insert" || component == "legacy Delete" {
+						var legacy message.MutableMessage
+						if component == "legacy Insert" {
+							legacy = message.NewInsertMessageBuilderV1().WithVChannel("p_1v0").WithHeader(&message.InsertMessageHeader{CollectionId: 1}).WithBody(&msgpb.InsertRequest{CollectionID: 1}).MustBuildMutable()
+						} else {
+							legacy = message.NewDeleteMessageBuilderV1().WithVChannel("p_1v0").WithHeader(&message.DeleteMessageHeader{CollectionId: 1}).WithBody(&msgpb.DeleteRequest{CollectionID: 1}).MustBuildMutable()
+						}
+						if marker != "" {
+							legacy.Properties().ToRawMap()[marker] = ""
+						}
+						builder.Add(legacy.WithTxnContext(txnCtx).WithTimeTick(3).WithLastConfirmedUseMessageID().IntoImmutableMessage(walimplstest.NewTestMessageID(3)))
+						count++
+					}
+					var session *TxnSession
+					if recovered {
+						manager := NewTxnManager(types.PChannelInfo{Name: "p"}, map[message.TxnID]*message.ImmutableTxnMessageBuilder{10: builder})
+						defer manager.Close()
+						var err error
+						session, err = manager.GetSessionOfTxn(10)
+						require.NoError(t, err)
+					} else {
+						metrics := metricsutil.NewTxnMetrics("upsert-envelope-test")
+						defer metrics.Close()
+						session = newTxnSession("p_1v0", txnCtx, 1, metrics.BeginTxn())
+						retainedBegin, bodies := builder.Messages()
+						session.RecordBegin(retainedBegin)
+						for _, body := range bodies {
+							require.NoError(t, session.AddNewMessage(t.Context(), body.TimeTick()))
+							session.RecordSuccessfulBody(body)
+							session.AddNewMessageDoneAndKeepalive(body.TimeTick(), body.MessageType())
+						}
+					}
+					require.NoError(t, session.RequestCommitAndWait(t.Context(), 20, count))
+					commit := message.NewCommitTxnMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&message.CommitTxnMessageHeader{BodyCnt: count}).
+						WithBody(&message.CommitTxnMessageBody{}).MustBuildMutable().WithTxnContext(txnCtx).WithTimeTick(20)
+					if marker != "" && component == "Commit" {
+						commit.Properties().ToRawMap()[marker] = ""
+					}
+					err := session.ValidateCommit(t.Context(), commit)
+					if marker == "" {
+						require.NoError(t, err, "the same members must pass with valid envelopes")
+						session.CommitDone()
+					} else {
+						require.Error(t, err)
+						require.True(t, status.AsStreamingError(err).IsUnrecoverable())
+						session.RejectCommit()
+					}
+					require.Empty(t, session.SuccessfulBodies())
+					require.Nil(t, session.BeginMessage())
+				})
+			}
 		}
 	}
 }

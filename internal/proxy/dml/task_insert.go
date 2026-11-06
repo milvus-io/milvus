@@ -178,9 +178,6 @@ func checkMaxInsertSize(ctx context.Context, op string, size int) error {
 }
 
 func (it *InsertTask) PreExecute(ctx context.Context) error {
-	if err := requireUpsertWALGeneration(); err != nil {
-		return err
-	}
 	if it.insertMsg.Namespace != nil {
 		return merr.WrapErrParameterInvalidMsg("Upsert WAL does not support namespace requests")
 	}

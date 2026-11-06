@@ -211,11 +211,94 @@ func (ut *UpsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 		mlog.FieldTaskID(ut.ID()),
 		mlog.Duration("get msgStream duration", getMsgStreamDur))
 
+	// Select the complete write format before packing either effect.
+	if !paramtable.Get().StreamingCfg.EnableUpsertMessage.GetAsBool() {
+		var inserts []message.MutableMessage
+		if ut.partitionKeys == nil {
+			inserts, err = repackInsertDataForStreamingService(ctx, ut.GetMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ez, ut.schemaVersion, ut.partialUpdateCASGroups, nil)
+		} else {
+			inserts, err = repackInsertDataWithPartitionKeyForStreamingService(ctx, ut.GetMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ut.partitionKeys, ez, ut.schema.CollectionSchema, ut.schemaVersion, ut.partialUpdateCASGroups, nil)
+		}
+		if err != nil {
+			return nil, err
+		}
+		deletes, err := ut.packDeleteMessage(ctx, ez)
+		if err != nil {
+			return nil, err
+		}
+		return append(inserts, deletes...), nil
+	}
+
 	deleteKeys := ut.upsertMsg.DeleteMsg.PrimaryKeys
 	if deleteKeys == nil {
 		deleteKeys = ut.oldIDs
 	}
 	return repackUpsertMessages(ctx, ut.GetMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result.GetIDs(), ut.partitionKeys, ut.schema.CollectionSchema, ut.schemaVersion, ez, ut.partialUpdateCASGroups, nil, deleteKeys, ut.upsertMsg.DeleteMsg.PartitionID)
+}
+
+func (ut *UpsertTask) packDeleteMessage(ctx context.Context, ez *message.CipherConfig) ([]message.MutableMessage, error) {
+	if ut.upsertMsg.DeleteMsg.PrimaryKeys == nil {
+		// Fall back only when no delete subset was prepared; an empty subset
+		// means no lookup IDs should be deleted.
+		ut.upsertMsg.DeleteMsg.PrimaryKeys = ut.oldIDs
+	}
+	if typeutil.GetSizeOfIDs(ut.upsertMsg.DeleteMsg.PrimaryKeys) == 0 {
+		return nil, nil
+	}
+	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy deleteExecute upsert %d", ut.ID()))
+	collID := ut.upsertMsg.DeleteMsg.CollectionID
+	log := mlog.With(
+		mlog.FieldCollectionID(collID))
+	// hash primary keys to channels
+	vChannels, err := ut.chMgr.GetVChannels(collID)
+	if err != nil {
+		log.Warn(ctx, "get vChannels failed when deleteExecute", mlog.Err(err))
+		ut.result.Status = merr.Status(err)
+		return nil, err
+	}
+	result, numRows, err := repackDeleteMsgByHash(
+		ctx,
+		ut.upsertMsg.DeleteMsg.PrimaryKeys,
+		vChannels, ut.idAllocator,
+		ut.BeginTs(),
+		ut.upsertMsg.DeleteMsg.CollectionID, ut.upsertMsg.DeleteMsg.CollectionName,
+		ut.upsertMsg.DeleteMsg.PartitionID, ut.upsertMsg.DeleteMsg.PartitionName,
+		ut.upsertMsg.DeleteMsg.GetDbName(),
+		ut.req.Namespace,
+		ut.schema.CollectionSchema,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	var msgs []message.MutableMessage
+	for hashKey, deleteMsgs := range result {
+		vchannel := vChannels[hashKey]
+		for _, deleteMsg := range deleteMsgs {
+			msg, err := message.NewDeleteMessageBuilderV1().
+				WithHeader(&message.DeleteMessageHeader{
+					CollectionId: ut.upsertMsg.DeleteMsg.CollectionID,
+					Rows:         uint64(deleteMsg.NumRows),
+				}).
+				WithBody(deleteMsg.DeleteRequest).
+				WithVChannel(vchannel).
+				WithCipher(ez).
+				BuildMutable()
+			if err != nil {
+				return nil, err
+			}
+			msgs = append(msgs, msg)
+		}
+	}
+
+	log.Debug(ctx, "Proxy Upsert deleteExecute done",
+		mlog.FieldCollectionID(collID),
+		mlog.Strings("virtual_channels", vChannels),
+		mlog.FieldTaskID(ut.ID()),
+		mlog.Int64("numRows", numRows),
+		mlog.Duration("prepare duration", tr.ElapseSpan()))
+
+	return msgs, nil
 }
 
 func (ut *UpsertTask) attachPartialUpdateCAS(messages []message.MutableMessage) error {
@@ -226,7 +309,7 @@ func (ut *UpsertTask) attachPartialUpdateCAS(messages []message.MutableMessage) 
 
 	attached := make(map[string]struct{}, len(groups))
 	for _, msg := range messages {
-		if msg.MessageType() != message.MessageTypeUpsert {
+		if msg.MessageType() != message.MessageTypeUpsert && msg.MessageType() != message.MessageTypeInsert {
 			continue
 		}
 		vchannel := msg.VChannel()

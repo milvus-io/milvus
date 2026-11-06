@@ -123,23 +123,6 @@ func TestMalformedUpsertContractIsTerminal(t *testing.T) {
 	require.ErrorIs(t, upsertBodyDecodeError(context.DeadlineExceeded), context.DeadlineExceeded)
 }
 
-func TestUpsertEnvelopeRejectedBeforeShardEffects(t *testing.T) {
-	for _, marker := range []string{"_np", "_pcl", "_bh", "_ur"} {
-		t.Run(marker, func(t *testing.T) {
-			interceptor := &shardInterceptor{shardManager: mock_shards.NewMockShardManager(t)}
-			interceptor.initOpTable()
-			msg := upsertForTest("p_1v0")
-			msg.Properties().ToRawMap()[marker] = ""
-			_, err := interceptor.DoAppend(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
-				t.Fatal("invalid envelope reached backend")
-				return nil, nil
-			})
-			require.Error(t, err)
-			require.True(t, status.AsStreamingError(err).IsUnrecoverable())
-		})
-	}
-}
-
 func TestCommitWithoutUpsertPassesThroughOnEveryChannel(t *testing.T) {
 	for _, channel := range []string{"p_1v0", "p_vcchan", ""} {
 		for _, withSession := range []bool{false, true} {

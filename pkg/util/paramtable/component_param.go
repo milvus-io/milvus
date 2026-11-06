@@ -9987,7 +9987,7 @@ Zero disables this key-length bound; requests that carry no key are accepted at 
 	// txn
 	p.EnableUpsertMessage = ParamItem{
 		Key: "streaming.wal.enableUpsertMessage", DefaultValue: "false", Export: true,
-		Doc: "Enable the Upsert WAL format only after all readers and CDC targets support it and the QueryView dependency is deployed. The release version is not assigned; auto remains disabled. Retained decoding and transaction resolution do not use this generation gate.",
+		Doc: "Enable the Upsert WAL format only after all readers and CDC targets support it and the QueryView dependency is deployed. The release version is not assigned; auto remains disabled. When false, Proxy uses legacy Insert/Delete messages. Retained decoding and transaction resolution remain available.",
 		Formatter: func(value string) string {
 			if value == "auto" {
 				return "false"

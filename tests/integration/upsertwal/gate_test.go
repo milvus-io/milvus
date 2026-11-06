@@ -18,13 +18,17 @@ package upsertwal
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
+
+	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	upsertfixture "github.com/milvus-io/milvus/pkg/v3/streaming/util/message/testutils"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -45,7 +49,7 @@ func (s *UpsertWALSuite) TestRawProduceRejectsForbiddenEnvelopeMarkers() {
 	}
 }
 
-func (s *UpsertWALSuite) TestGateOffAllowsDurableCommitAndRejectsNewProducer() {
+func (s *UpsertWALSuite) TestGateOffAllowsDurableCommitAndLegacyProducer() {
 	for _, mode := range []string{"false", "auto"} {
 		s.Run(mode, func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
@@ -71,17 +75,53 @@ func (s *UpsertWALSuite) TestGateOffAllowsDurableCommitAndRejectsNewProducer() {
 			s.Require().NoError(err)
 			s.assertRows(ctx, c, 11, 1, 0)
 			s.assertRows(ctx, c, 11, 2, 1)
-			// New API writes fail before sending any WAL message.
+			// API writes use legacy messages while new raw Upsert is rejected.
 			request := upsertfixture.Insert(message.MustAsMutableUpsertMessageV2(c.upsert(13, 5)).MustBody())
+
+			for _, column := range request.GetFieldsData() {
+				for _, field := range c.schema.GetFields() {
+					if column.GetFieldId() == field.GetFieldID() {
+						column.FieldName = field.GetName()
+					}
+				}
+			}
+			inserted, err := s.Cluster.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{CollectionName: c.name, NumRows: 1, FieldsData: request.GetFieldsData()})
+			s.Require().NoError(merr.CheckRPCCall(inserted, err))
+			s.flush(ctx, c)
+			s.assertRows(ctx, c, 13, 5, 1)
+			request = upsertfixture.Insert(message.MustAsMutableUpsertMessageV2(c.upsert(13, 6)).MustBody())
+			for _, column := range request.GetFieldsData() {
+				for _, field := range c.schema.GetFields() {
+					if column.GetFieldId() == field.GetFieldID() {
+						column.FieldName = field.GetName()
+					}
+				}
+			}
 			result, err := s.Cluster.MilvusClient.Upsert(ctx, &milvuspb.UpsertRequest{CollectionName: c.name, NumRows: 1, FieldsData: request.GetFieldsData()})
-			s.Require().Error(merr.CheckRPCCall(result, err))
+			s.Require().NoError(merr.CheckRPCCall(result, err))
 			s.assertRows(ctx, c, 13, 5, 0)
+			s.assertRows(ctx, c, 13, 6, 1)
+
+			request = upsertfixture.Insert(message.MustAsMutableUpsertMessageV2(c.upsert(13, 7)).MustBody())
+			for _, column := range request.GetFieldsData() {
+				for _, field := range c.schema.GetFields() {
+					if column.GetFieldId() == field.GetFieldID() {
+						column.FieldName = field.GetName()
+					}
+				}
+			}
+			result, err = s.Cluster.MilvusClient.Upsert(ctx, &milvuspb.UpsertRequest{CollectionName: c.name, NumRows: 1, FieldsData: request.GetFieldsData(), PartialUpdate: true})
+			s.Require().NoError(merr.CheckRPCCall(result, err))
+			s.assertRows(ctx, c, 13, 6, 0)
+			s.assertRows(ctx, c, 13, 7, 1)
 			// Gate-off also leaves retained Upsert history readable after reopening WAL.
 			producer.Close()
 			s.restartStreamingNode(c)
 			s.assertRows(ctx, c, 11, 1, 0)
 			s.assertRows(ctx, c, 11, 2, 1)
 			s.assertRows(ctx, c, 13, 5, 0)
+			s.assertRows(ctx, c, 13, 6, 0)
+			s.assertRows(ctx, c, 13, 7, 1)
 		})
 	}
 }
@@ -105,4 +145,60 @@ func (s *UpsertWALSuite) TestNamespaceRejectedBeforeUpsertAppend() {
 	_, err = ordinaryProducer.Append(ctx, ordinary.upsert(11, 1))
 	s.Require().NoError(err)
 	s.flush(ctx, ordinary)
+}
+
+func (s *UpsertWALSuite) TestKeyedInsertRetryAcrossWALFormats() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	for _, firstMode := range []string{"false", "true"} {
+		s.Run(firstMode, func() {
+			c := s.createWithPK(ctx, schemapb.DataType_Int64, true)
+			producer := rawProducer(s.T(), ctx, s.Cluster, c.vchannel)
+			defer producer.Close()
+			setMode := func(mode string) {
+				restore := s.Cluster.MustModifyMilvusConfig(map[string]string{"streaming.wal.enableUpsertMessage": mode})
+				s.T().Cleanup(restore)
+				s.Require().Eventually(func() bool {
+					// Gate-off attempts cannot mutate this separate probe key.
+					_, err := producer.Append(ctx, c.upsert(99, 99))
+					return (err == nil) == (mode == "true")
+				}, 10*time.Second, 100*time.Millisecond)
+			}
+			setMode(firstMode)
+			fields := upsertfixture.Insert(message.MustAsMutableUpsertMessageV2(c.upsert(11, 1)).MustBody()).GetFieldsData()
+			for _, column := range fields {
+				for _, field := range c.schema.GetFields() {
+					if column.GetFieldId() == field.GetFieldID() {
+						column.FieldName = field.GetName()
+					}
+				}
+			}
+			userFields := make([]*schemapb.FieldData, 0, len(fields)-1)
+			for _, field := range fields {
+				if field.GetFieldName() != "pk" {
+					userFields = append(userFields, field)
+				}
+			}
+			request := &milvuspb.InsertRequest{CollectionName: c.name, NumRows: 1, FieldsData: userFields}
+			keyed := metadata.AppendToOutgoingContext(ctx, util.HeaderIdempotencyKey, fmt.Sprintf("format-%s-%d", firstMode, c.id))
+			original, err := s.Cluster.MilvusClient.Insert(keyed, request)
+			s.Require().NoError(merr.CheckRPCCall(original, err))
+			otherMode := "true"
+			if firstMode == "true" {
+				otherMode = "false"
+			}
+			setMode(otherMode)
+			checkRetry := func() {
+				retried, err := s.Cluster.MilvusClient.Insert(keyed, request)
+				s.Require().NoError(merr.CheckRPCCall(retried, err))
+				s.Require().Equal(original.GetIDs().GetIntId().GetData(), retried.GetIDs().GetIntId().GetData())
+				s.Require().Equal(original.GetTimestamp(), retried.GetTimestamp())
+				s.assertRows(ctx, c, original.GetIDs().GetIntId().GetData()[0], 1, 1)
+			}
+			checkRetry()
+			producer.Close()
+			s.restartStreamingNode(c)
+			checkRetry()
+		})
+	}
 }

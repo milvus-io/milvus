@@ -7365,3 +7365,44 @@ func TestUpdateTaskPreExecuteStopsRejectedRequestsBeforeWriting(t *testing.T) {
 		})
 	}
 }
+
+func TestUpsertLegacyPackingPreservesCAS(t *testing.T) {
+	gate := &paramtable.Get().StreamingCfg.EnableUpsertMessage
+	previous := gate.SwapTempValue("false")
+	defer gate.SwapTempValue(previous)
+	for _, partial := range []bool{false, true} {
+		t.Run(fmt.Sprint(partial), func(t *testing.T) {
+			task := partialUpdateCASRealPackTestTask(t, []int64{10, 20}, []int64{10, 20}, []int64{10})
+			task.req.PartialUpdate = partial
+			partition := mockey.Mock((*metacache.MetaCache).GetPartitionID).Return(int64(200), nil).Build()
+			defer partition.UnPatch()
+			if partial {
+				task.partialUpdateCASGroups = map[string]*messagespb.PartialUpdateCAS{partialUpdateCASTestVChannels[0]: {ReadTs: 100, ObservedPchannelTerm: 1}}
+			}
+			alloc := mockey.Mock((*allocator.IDAllocator).Alloc).Return(int64(1000), int64(1001), nil).Build()
+			defer alloc.UnPatch()
+			msgs, err := task.packInsertMessage(t.Context(), nil)
+			require.NoError(t, err)
+			var insertRows, deleteRows uint64
+			for _, msg := range msgs {
+				switch msg.MessageType() {
+				case streamingmessage.MessageTypeInsert:
+					insert := streamingmessage.MustAsMutableInsertMessageV1(msg)
+					insertRows += insert.MustBody().NumRows
+					require.Equal(t, partial, streamingmessage.HasPartialUpdateCAS(msg))
+				case streamingmessage.MessageTypeDelete:
+					deleted := streamingmessage.MustAsMutableDeleteMessageV1(msg)
+					deleteRows += deleted.Header().Rows
+					require.Equal(t, []int64{10}, deleted.MustBody().PrimaryKeys.GetIntId().Data)
+				default:
+					t.Fatalf("unexpected message type: %s", msg.MessageType())
+				}
+			}
+			require.EqualValues(t, 2, insertRows)
+			require.EqualValues(t, 1, deleteRows)
+			if partial {
+				require.NoError(t, task.attachPartialUpdateCAS(msgs))
+			}
+		})
+	}
+}

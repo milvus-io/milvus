@@ -161,8 +161,9 @@ func ValidateUpsert(header *UpsertMessageHeader, body *UpsertMessageBody, primar
 	return nil
 }
 
-// UpsertRetryResult reads original keys and row offsets without decoding columns.
-func UpsertRetryResult(ctx context.Context, msg BasicMessage) (*messagespb.IdempotentInsertResult, error) {
+// BuildUpsertResult constructs the insert result from original keys and row offsets
+// without decoding columns. Append, transaction buffering, recovery, and retry share it.
+func BuildUpsertResult(ctx context.Context, msg BasicMessage) (*messagespb.IdempotentInsertResult, error) {
 	body, err := ReadUpsertMetadata(ctx, msg)
 	if err != nil {
 		return nil, err

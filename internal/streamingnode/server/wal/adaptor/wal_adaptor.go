@@ -184,6 +184,12 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 			return nil, status.NewUnrecoverableError("native Upsert WAL append is disabled. Upgrade all readers and CDC targets before enabling streaming.wal.enableUpsertMessage")
 		}
 	}
+	// Validate before interceptors can return a duplicate or ignored result.
+	if msg.MessageType() == message.MessageTypeUpsert {
+		if err := message.ValidateUpsertEnvelope(msg); err != nil {
+			return nil, status.NewUnrecoverableError("invalid Upsert envelope: %v", err)
+		}
+	}
 
 	if msg.MessageType().IsDMLMessageType() && w.IsRejected() {
 		// if the wal is rate limit rejected, we reject all the DML operation to protect the wal from being overloaded.

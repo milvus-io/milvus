@@ -20,6 +20,7 @@ import (
 	"context"
 	"sort"
 
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -33,19 +34,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func requireUpsertWALGeneration() error {
-	if !paramtable.Get().StreamingCfg.EnableUpsertMessage.GetAsBool() {
-		return merr.WrapErrServiceUnavailableMsg("Upsert WAL generation is disabled; upgrade all readers before enabling it")
-	}
-	return nil
-}
-
 // repackUpsertMessages groups only by VChannel and encoded size. Partition IDs
 // remain per-row placement, independent of explicit deletion scope.
 func repackUpsertMessages(ctx context.Context, cache Cache, channels []string, source *msgstream.InsertMsg, ids *schemapb.IDs, partitionKeys *schemapb.FieldData, schema *schemapb.CollectionSchema, version int32, cipher *message.CipherConfig, cas map[string]*messagespb.PartialUpdateCAS, idempotency *insertIdempotencyDecoration, deleted *schemapb.IDs, deletePartition int64) ([]message.MutableMessage, error) {
-	if err := requireUpsertWALGeneration(); err != nil {
-		return nil, err
-	}
 	if source.Namespace != nil {
 		return nil, merr.WrapErrParameterInvalidMsg("Upsert WAL does not support namespace requests")
 	}
@@ -134,6 +125,14 @@ func repackUpsertMessages(ctx context.Context, cache Cache, channels []string, s
 		prefix := make([]int, len(rows)+1)
 		for index, row := range rows {
 			if !bounded {
+				continue
+			}
+			if len(deleteRows[row]) == 0 {
+				size, err := upsertPlainRowMetadataSize(ids, row, source.RowIDs[row], uint32(len(rows)), uint32(row))
+				if err != nil {
+					return nil, err
+				}
+				prefix[index+1] = prefix[index] + size + 64
 				continue
 			}
 			keys, err := idsByOffsets(ids, []int{row})
@@ -245,6 +244,9 @@ func repackUpsertMessages(ctx context.Context, cache Cache, channels []string, s
 // Original delete offsets preserve occurrences and ordering across size chunks.
 func matchUpsertDeletes(inserted, deleted *schemapb.IDs) ([][]int, error) {
 	rows := make([][]int, typeutil.GetSizeOfIDs(inserted))
+	if typeutil.GetSizeOfIDs(deleted) == 0 {
+		return rows, nil
+	}
 	byInt := make(map[int64]int)
 	byString := make(map[string]int)
 	for row, key := range inserted.GetIntId().GetData() {
@@ -281,4 +283,33 @@ func upsertWireSize(msg message.MutableMessage) int {
 		size += len(key) + len(value)
 	}
 	return size
+}
+
+// upsertPlainRowMetadataSize equals proto.Size of the existing conservative
+// one-row metadata object. It keeps its framing and budget unchanged.
+func upsertPlainRowMetadataSize(ids *schemapb.IDs, row int, rowID int64, partitionIndex, requestOffset uint32) (int, error) {
+	if ids == nil {
+		return 0, merr.WrapErrServiceInternalMsg("missing mutation result ids")
+	}
+	var keysSize int
+	if values := ids.GetIntId(); values != nil {
+		if row < 0 || row >= len(values.GetData()) {
+			return 0, merr.WrapErrServiceInternalMsg("row offset %d out of int id range %d", row, len(values.GetData()))
+		}
+		arraySize := protowire.SizeTag(1) + protowire.SizeBytes(protowire.SizeVarint(uint64(values.GetData()[row])))
+		keysSize = protowire.SizeTag(1) + protowire.SizeBytes(arraySize)
+	} else if values := ids.GetStrId(); values != nil {
+		if row < 0 || row >= len(values.GetData()) {
+			return 0, merr.WrapErrServiceInternalMsg("row offset %d out of string id range %d", row, len(values.GetData()))
+		}
+		arraySize := protowire.SizeTag(1) + protowire.SizeBytes(len(values.GetData()[row]))
+		keysSize = protowire.SizeTag(2) + protowire.SizeBytes(arraySize)
+	} else {
+		return 0, merr.WrapErrServiceInternalMsg("unsupported mutation result ids type")
+	}
+	mappingSize := protowire.SizeTag(1) + protowire.SizeBytes(protowire.SizeVarint(uint64(requestOffset)))
+	return protowire.SizeTag(1) + protowire.SizeBytes(keysSize) +
+		protowire.SizeTag(2) + protowire.SizeBytes(protowire.SizeVarint(uint64(rowID))) +
+		protowire.SizeTag(3) + protowire.SizeBytes(protowire.SizeVarint(uint64(partitionIndex))) +
+		protowire.SizeTag(7) + protowire.SizeBytes(mappingSize), nil
 }
