@@ -268,16 +268,6 @@ func TestDiskIndexParams(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, fmt.Sprintf("%f", float32(getRowDataSizeOfFloatVector(100, 128))*float32(searchCacheBudgetRatio)/(1<<30)), searchCacheBudget)
 
-		numLoadThread, ok := indexParams[NumLoadThreadKey]
-		assert.True(t, ok)
-		numLoadThreadRatio, err := strconv.ParseFloat(params.CommonCfg.LoadNumThreadRatio.GetValue(), 64)
-		assert.NoError(t, err)
-		expectedNumLoadThread := int(float32(hardware.GetCPUNum()) * float32(numLoadThreadRatio))
-		if expectedNumLoadThread > MaxLoadThread {
-			expectedNumLoadThread = MaxLoadThread
-		}
-		assert.Equal(t, strconv.Itoa(expectedNumLoadThread), numLoadThread)
-
 		beamWidth, ok := indexParams[BeamWidthKey]
 		assert.True(t, ok)
 		beamWidthRatio, err := strconv.ParseFloat(params.CommonCfg.BeamWidthRatio.GetValue(), 64)
@@ -293,11 +283,6 @@ func TestDiskIndexParams(t *testing.T) {
 		assert.Error(t, err)
 
 		params.Save(params.CommonCfg.SearchCacheBudgetGBRatio.Key, "0.1")
-		params.Save(params.CommonCfg.LoadNumThreadRatio.Key, "w1")
-		err = SetDiskIndexLoadParams(&params, indexParams, 100)
-		assert.Error(t, err)
-
-		params.Save(params.CommonCfg.LoadNumThreadRatio.Key, "8.0")
 		params.Save(params.CommonCfg.BeamWidthRatio.Key, "w1")
 		err = SetDiskIndexLoadParams(&params, indexParams, 100)
 		assert.Error(t, err)
@@ -328,14 +313,6 @@ func TestDiskIndexParams(t *testing.T) {
 		searchCacheBudget, ok := indexParams[SearchCacheBudgetKey]
 		assert.True(t, ok)
 		assert.Equal(t, fmt.Sprintf("%f", float32(getRowDataSizeOfFloatVector(100, 128))*float32(extraParams.SearchCacheBudgetGBRatio)/(1<<30)), searchCacheBudget)
-
-		numLoadThread, ok := indexParams[NumLoadThreadKey]
-		assert.True(t, ok)
-		expectedNumLoadThread := int(float32(hardware.GetCPUNum()) * float32(extraParams.LoadNumThreadRatio))
-		if expectedNumLoadThread > MaxLoadThread {
-			expectedNumLoadThread = MaxLoadThread
-		}
-		assert.Equal(t, strconv.Itoa(expectedNumLoadThread), numLoadThread)
 
 		beamWidth, ok := indexParams[BeamWidthKey]
 		assert.True(t, ok)
@@ -399,7 +376,6 @@ func TestBigDataIndex_parse(t *testing.T) {
 		extraParams, err := NewBigDataExtraParamsFromMap(mapString)
 		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
-		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
 		assert.Equal(t, 0.125, extraParams.PQCodeBudgetGBRatio)
 		assert.Equal(t, 0.225, extraParams.SearchCacheBudgetGBRatio)
 
@@ -409,7 +385,6 @@ func TestBigDataIndex_parse(t *testing.T) {
 		extraParams, err = NewBigDataExtraParamsFromMap(mapString)
 		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
-		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
 		assert.Equal(t, 0.125, extraParams.PQCodeBudgetGBRatio)
 		assert.Equal(t, 0.20, extraParams.SearchCacheBudgetGBRatio)
 	})
@@ -421,7 +396,6 @@ func TestBigDataIndex_parse(t *testing.T) {
 		extraParams, err := NewBigDataExtraParamsFromMap(mapString)
 		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
-		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
 		assert.Equal(t, 0.15, extraParams.PQCodeBudgetGBRatio)
 		assert.Equal(t, 0.225, extraParams.SearchCacheBudgetGBRatio)
 
@@ -431,7 +405,6 @@ func TestBigDataIndex_parse(t *testing.T) {
 		extraParams, err = NewBigDataExtraParamsFromMap(mapString)
 		assert.NoError(t, err)
 		assert.Equal(t, 2.0, extraParams.BuildNumThreadsRatio)
-		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
 		assert.Equal(t, 0.125, extraParams.PQCodeBudgetGBRatio)
 		assert.Equal(t, 0.225, extraParams.SearchCacheBudgetGBRatio)
 
@@ -456,7 +429,6 @@ func TestBigDataIndex_parse(t *testing.T) {
 		extraParams, err := NewBigDataExtraParamsFromMap(mapString)
 		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
-		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
 		assert.Equal(t, 0.125, extraParams.PQCodeBudgetGBRatio)
 		assert.Equal(t, 0.25, extraParams.SearchCacheBudgetGBRatio)
 
@@ -466,7 +438,6 @@ func TestBigDataIndex_parse(t *testing.T) {
 		extraParams, err = NewBigDataExtraParamsFromMap(mapString)
 		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
-		assert.Equal(t, 4.0, extraParams.LoadNumThreadRatio)
 		assert.Equal(t, 0.125, extraParams.PQCodeBudgetGBRatio)
 		assert.Equal(t, 0.10, extraParams.SearchCacheBudgetGBRatio)
 
@@ -483,7 +454,6 @@ func TestBigDataIndex_parse(t *testing.T) {
 		extraParams, err := NewBigDataExtraParamsFromMap(mapString)
 		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
-		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
 		assert.Equal(t, 0.125, extraParams.PQCodeBudgetGBRatio)
 		assert.Equal(t, 0.10, extraParams.SearchCacheBudgetGBRatio)
 	})
@@ -494,7 +464,6 @@ func TestBigDataIndex_parse(t *testing.T) {
 		extraParams, err := NewBigDataExtraParamsFromMap(mapString)
 		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
-		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
 		assert.Equal(t, 0.125, extraParams.PQCodeBudgetGBRatio)
 		assert.Equal(t, 0.225, extraParams.SearchCacheBudgetGBRatio)
 	})
@@ -504,7 +473,6 @@ func TestBigDataIndex_parse(t *testing.T) {
 		extraParams, err := NewBigDataExtraParamsFromMap(mapString)
 		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
-		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
 		assert.Equal(t, 0.125, extraParams.PQCodeBudgetGBRatio)
 		assert.Equal(t, 0.10, extraParams.SearchCacheBudgetGBRatio)
 	})
@@ -513,7 +481,6 @@ func TestBigDataIndex_parse(t *testing.T) {
 		extraParams, err := NewBigDataExtraParamsFromMap(nil)
 		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
-		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
 		assert.Equal(t, 0.125, extraParams.PQCodeBudgetGBRatio)
 		assert.Equal(t, 0.10, extraParams.SearchCacheBudgetGBRatio)
 	})
@@ -529,7 +496,6 @@ func TestBigDataIndex_parse(t *testing.T) {
 		extraParams, err := NewBigDataExtraParamsFromJSON(jsonStr)
 		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
-		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
 		assert.Equal(t, 0.125, extraParams.PQCodeBudgetGBRatio)
 		assert.Equal(t, 0.225, extraParams.SearchCacheBudgetGBRatio)
 		assert.Equal(t, 8.0, extraParams.BeamWidthRatio)
@@ -544,7 +510,6 @@ func TestBigDataIndex_parse(t *testing.T) {
 		extraParams, err := NewBigDataExtraParamsFromJSON(jsonStr)
 		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
-		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
 		assert.Equal(t, 0.125, extraParams.PQCodeBudgetGBRatio)
 		assert.Equal(t, 0.10, extraParams.SearchCacheBudgetGBRatio)
 		assert.Equal(t, 4.0, extraParams.BeamWidthRatio)
@@ -558,7 +523,6 @@ func TestBigDataIndex_parse(t *testing.T) {
 		extraParams, err := NewBigDataExtraParamsFromJSON(jsonStr)
 		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
-		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
 		assert.Equal(t, 0.125, extraParams.PQCodeBudgetGBRatio)
 		assert.Equal(t, 0.10, extraParams.SearchCacheBudgetGBRatio)
 		assert.Equal(t, 4.0, extraParams.BeamWidthRatio)
