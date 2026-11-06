@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"maps"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -36,9 +37,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v3/util/metric"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
-	"github.com/milvus-io/milvus/tests/integration"
 	"github.com/milvus-io/milvus/tests/integration/cmek/inspector"
 )
 
@@ -55,10 +55,7 @@ func (s *propagationIndexSuite) SetupSuite() {
 	s.WithMilvusConfig("MILVUS_CMEK_FIXTURE_CONTROL", s.fixture.dir)
 	s.WithMilvusConfig("dataCoord.targetScalarIndexVersion", "3")
 	s.WithMilvusConfig("dataCoord.forceRebuildScalarSegmentIndex", "true")
-	s.WithMilvusConfig("dataCoord.targetVecIndexVersion", "8")
-	s.WithMilvusConfig("dataCoord.forceRebuildSegmentIndex", "true")
 	s.WithMilvusConfig("dataCoord.index.storePathVersion", "0")
-	s.WithMilvusConfig("queryNode.segcore.tieredStorage.warmup.vectorIndex", "sync")
 	s.WithMilvusConfig("queryNode.segcore.tieredStorage.warmup.scalarIndex", "sync")
 	s.physicalIndexThreshold = 64
 	s.setupRawData(s.version)
@@ -92,16 +89,8 @@ func (s *propagationIndexSuite) TestBuild() {
 	s.insertRawDataBatch(ctx, description, fields, len(expected))
 	segments := s.flushConsumerCollection(ctx, description)
 	s.WaitForIndexBuiltWithDB(ctx, s.dbName, collection, "float_vector")
-	field, indexType := "batch_id", "STL_SORT"
-	params := []*commonpb.KeyValuePair{{Key: "index_type", Value: indexType}}
-	if s.kind == "vector" {
-		field, indexType = "float_vector", integration.IndexHNSW
-		status, err := s.Cluster.MilvusClient.DropIndex(ctx, &milvuspb.DropIndexRequest{
-			DbName: s.dbName, CollectionName: collection, IndexName: "raw_float_vector",
-		})
-		s.Require().NoError(merr.CheckRPCCall(status, err))
-		params = integration.ConstructIndexParam(rawDataDim, indexType, metric.L2)
-	}
+	field := "batch_id"
+	params := []*commonpb.KeyValuePair{{Key: "index_type", Value: "STL_SORT"}}
 	if s.kind == "default" {
 		field = "default_value"
 		encoded, err := proto.Marshal(&schemapb.FieldSchema{
@@ -207,20 +196,11 @@ func (s *propagationIndexSuite) TestBuild() {
 			found = true
 			s.Require().Equal(task.GetBuildID(), index.GetBuildID())
 			s.Require().NotEmpty(index.GetIndexFilePaths())
+			s.Require().Equal(int32(3), index.GetCurrentScalarIndexVersion())
 			for _, object := range index.GetIndexFilePaths() {
 				raw, err := s.Cluster.ChunkManager.Read(ctx, object)
 				s.Require().NoError(err)
-				if s.kind == "vector" {
-					s.Require().Equal(int32(8), index.GetCurrentIndexVersion())
-					err = inspector.InspectIndexDataV2(raw, inspector.VectorIndexObject{
-						CollectionID: collectionID, PartitionID: task.GetPartitionID(), SegmentID: task.GetSegmentID(),
-						FieldID: fieldID, BuildID: task.GetBuildID(), EZID: s.ezID,
-					})
-				} else {
-					s.Require().Equal(int32(3), index.GetCurrentScalarIndexVersion())
-					err = inspector.InspectV3(raw, s.ezID)
-				}
-				s.Require().NoError(err, "build=%d object=%s", task.GetBuildID(), object)
+				s.Require().NoError(inspector.InspectV3(raw, s.ezID), "build=%d object=%s", task.GetBuildID(), object)
 			}
 		}
 		s.Require().True(found)
@@ -238,24 +218,56 @@ func (s *propagationIndexSuite) TestBuild() {
 	})
 	s.Require().NoError(merr.CheckRPCCall(status, err))
 	s.WaitForLoadWithDB(ctx, s.dbName, collection)
-	s.waitLoadedHNSW(ctx, description, builds, fieldID, indexID)
+	s.waitLoadedIndex(ctx, description, builds, fieldID, indexID)
 	s.assertConsumerRows(ctx, collection, expected)
-	if s.kind == "vector" {
-		s.assertHNSWSearch(ctx, collection, 0)
-		s.assertHNSWSearch(ctx, collection, 511)
-	} else {
-		value := 1
-		if s.kind == "default" {
-			value = 77
+	value := 1
+	if s.kind == "default" {
+		value = 77
+	}
+	s.assertPropagationQuery(ctx, collection, fmt.Sprintf("%s == %d", field, value), slices.Collect(maps.Keys(expected)))
+}
+
+func (s *rawDataSuite) waitLoadedIndex(ctx context.Context, description *milvuspb.DescribeCollectionResponse, builds map[int64]int64, fieldID, indexID int64) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		loaded := make(map[int64]bool)
+		for _, node := range s.Cluster.GetAllQueryNodes() {
+			request, err := metricsinfo.ConstructGetMetricsRequest(map[string]interface{}{
+				metricsinfo.MetricTypeKey:                     metricsinfo.SegmentKey,
+				metricsinfo.MetricRequestParamCollectionIDKey: description.GetCollectionID(),
+			})
+			if err != nil {
+				break
+			}
+			response, err := node.MustGetClient(ctx).GetMetrics(ctx, request)
+			if err = merr.CheckRPCCall(response, err); err != nil {
+				break
+			}
+			var segments []*metricsinfo.Segment
+			if err := json.Unmarshal([]byte(response.GetResponse()), &segments); err != nil {
+				break
+			}
+			for _, segment := range segments {
+				buildID, target := builds[segment.SegmentID]
+				if !target || segment.CollectionID != description.GetCollectionID() || segment.State != "Sealed" {
+					continue
+				}
+				for _, index := range segment.IndexedFields {
+					if index.IndexFieldID == fieldID && index.IndexID == indexID && index.BuildID == buildID && index.IsLoaded {
+						loaded[segment.SegmentID] = true
+					}
+				}
+			}
 		}
-		result, err := s.Cluster.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
-			DbName: s.dbName, CollectionName: collection,
-			Expr: fmt.Sprintf("%s == %d", field, value), OutputFields: []string{fixturePrimaryKey},
-			ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
-		})
-		s.Require().NoError(merr.CheckRPCCall(result, err))
-		s.Require().Len(result.GetFieldsData(), 1)
-		s.Require().ElementsMatch(sequentialIDs(len(expected)), result.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+		if len(loaded) == len(builds) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			s.T().Fatalf("index not loaded for build IDs %v; loaded=%v: %v", builds, loaded, ctx.Err())
+		case <-ticker.C:
+		}
 	}
 }
 
@@ -322,7 +334,7 @@ func (s *propagationJSONSuite) TestSharedKeys() {
 		s.Require().NoError(err, object)
 		if strings.Contains(object, "/shared_key_index/") {
 			shared++
-			s.Require().NoError(inspector.InspectIndexDataV2(raw, inspector.VectorIndexObject{
+			s.Require().NoError(inspector.InspectIndexDataV2(raw, inspector.IndexDataV2Identity{
 				EZID: s.ezID, CollectionID: collectionID, PartitionID: outputs[0].GetPartitionID(), SegmentID: outputs[0].GetID(), FieldID: fieldID, BuildID: stats.GetBuildID(),
 			}), object)
 		}

@@ -199,7 +199,12 @@ func (s *propagationImportSuite) SetupSuite() {
 	s.WithMilvusConfig("dataCoord.import.enableIDRangeMsg", "true")
 	// Leave time to replace DN between independently dispatched stages. The
 	// test checks task metadata, so an unexpected early dispatch fails it.
-	s.WithMilvusConfig("dataCoord.import.checkIntervalHigh", "20")
+	checkInterval := "15"
+	if s.faultStage == "preimport" {
+		// The fault is terminal, so there is no next stage to isolate.
+		checkInterval = "2"
+	}
+	s.WithMilvusConfig("dataCoord.import.checkIntervalHigh", checkInterval)
 	s.WithMilvusConfig("dataCoord.import.scheduleInterval", "0.1")
 	s.WithMilvusConfig("dataCoord.taskCheckInterval", "1")
 	s.setupRawData(2) // backup input is a real packed-binlog collection

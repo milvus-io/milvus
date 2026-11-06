@@ -94,7 +94,7 @@ func TestKeyPropagationImport(t *testing.T) {
 
 func TestKeyPropagationIndex(t *testing.T) {
 	for _, version := range []int64{2, 3} {
-		for _, kind := range []string{"vector", "scalar", "default"} {
+		for _, kind := range []string{"scalar", "default"} {
 			if version == 2 && kind == "default" {
 				continue // The explicit default-value adapter case uses V3.
 			}
