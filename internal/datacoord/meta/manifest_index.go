@@ -318,6 +318,29 @@ func manifestIndexParams(manifestIndex packed.ManifestIndexInfo) []*commonpb.Key
 	return params
 }
 
+// BeginManifestIndexRecovery starts collecting the collections whose DataView
+// projection found an unfinished index on a segment whose manifest records
+// indexes. Until the manifest scan ends that may only mean the scan has not
+// installed the record yet.
+func (m *Meta) BeginManifestIndexRecovery() {
+	m.manifestIndexRecheck.Store(typeutil.NewConcurrentSet[int64]())
+}
+
+// EndManifestIndexRecovery stops collecting and returns the collections to
+// project again now that every manifest index is installed.
+func (m *Meta) EndManifestIndexRecovery() []int64 {
+	if collections := m.manifestIndexRecheck.Swap(nil); collections != nil {
+		return collections.Collect()
+	}
+	return nil
+}
+
+func (m *Meta) recheckAfterManifestIndexRecovery(collectionID int64) {
+	if collections := m.manifestIndexRecheck.Load(); collections != nil {
+		collections.Insert(collectionID)
+	}
+}
+
 // ReloadSegmentIndexesFromManifests rebuilds completed index records from
 // retained StorageV3 manifests marked manifest_has_index. Dropped compaction
 // parents still need their indexes for query fallback and orphan-GC protection.

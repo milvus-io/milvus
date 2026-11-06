@@ -21,6 +21,10 @@
 #include "index/scalar/sort/SortedIndexLoader.h"
 #include "index/PackedIndexLoad.h"
 #include "index/LegacyIndexLoad.h"
+#include "index/LegacyIndexLoad-inl.h"
+#include "index/PackedIndexLoad-inl.h"
+#include "index/SingleCellIndexStorageTranslator.h"
+#include "cachinglayer/Manager.h"
 
 #include <cerrno>
 #include <cstring>
@@ -489,7 +493,7 @@ RebuildNumericAux(const IndexStructure<T>* data,
 // Load heap or mmap numeric data and rebuild the auxiliary state omitted by
 // legacy artifacts.
 template <typename T>
-folly::coro::Task<typename SortedIndexReader<T>::OpenArgs>
+folly::coro::Task<typename SortedIndexStorage<T>::OpenArgs>
 LoadNumericState(bool use_async,
                  storage::FileSource& source,
                  const storage::LoadOptions& opts,
@@ -507,7 +511,7 @@ LoadNumericState(bool use_async,
     const auto data_bytes = CheckedMultiply(
         meta.index_length, sizeof(IndexStructure<T>), "numeric data");
 
-    typename SortedIndexReader<T>::OpenArgs args;
+    typename SortedIndexStorage<T>::OpenArgs args;
     args.storage.size = meta.index_length;
     if (opts.enable_mmap && data_bytes != 0) {
         auto owner = (co_await MapEntry(use_async,
@@ -703,12 +707,12 @@ MapSortedTarget(const storage::IndexFileTarget& file) {
 // Attach persisted auxiliary arrays directly; only missing arrays need a
 // payload scan to rebuild them before publication.
 template <typename T>
-IIndexReaderBasePtr
+std::unique_ptr<SortedIndexStorage<T>>
 FinishPackedSortedState(PackedSortedState& state,
                         std::shared_ptr<SortedMmapOwner> data_mapping,
                         std::shared_ptr<SortedMmapOwner> offsets_mapping) {
     constexpr bool string = std::is_same_v<T, std::string_view>;
-    typename SortedIndexReader<T>::OpenArgs args;
+    typename SortedIndexStorage<T>::OpenArgs args;
     if constexpr (string) {
         if (state.data_file) {
             args.storage.layout =
@@ -773,7 +777,7 @@ FinishPackedSortedState(PackedSortedState& state,
     args.state.value_type = state.params.value_type;
     args.state.nested = state.meta.nested;
     args.state.value_lookup = state.params.value_lookup;
-    return std::make_unique<SortedIndexReader<T>>(std::move(args));
+    return std::make_unique<SortedIndexStorage<T>>(std::move(args));
 }
 
 }  // namespace
@@ -828,11 +832,12 @@ SortedIndexLoader::Create(OpenedIndexSource source,
     auto loader = std::unique_ptr<SortedIndexLoader>(
         new SortedIndexLoader(std::move(source), std::move(options)));
     auto state = std::make_unique<PreparedState>();
-    if (const auto* packed = std::get_if<PackedIndexSource>(&loader->source_)) {
+    if (const auto* packed =
+            std::get_if<PackedIndexSource>(&*loader->source_)) {
         *state = PreparePackedState(
             packed->Directory(), packed->Metadata(), loader->options_);
     } else {
-        const auto& legacy = std::get<LegacyIndexSource>(loader->source_);
+        const auto& legacy = std::get<LegacyIndexSource>(*loader->source_);
         state->params = ParseRuntimeParams(loader->options_.params);
         if (IsStringDataType(state->params.value_type)) {
             static_cast<CommonMeta&>(state->meta) =
@@ -849,27 +854,107 @@ SortedIndexLoader::Create(OpenedIndexSource source,
     co_return loader;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
-SortedIndexLoader::Load(milvus::OpContext* context) {
-    if (auto* packed = std::get_if<PackedIndexSource>(&source_)) {
-        return RunPackedIndexLoad(
+template <typename T>
+IndexPtr
+SortedIndexLoader::LoadTyped(milvus::OpContext* context,
+                             const IndexCacheConfig& cache) {
+    auto caps = DeriveCaps(options_.params);
+    caps.json_paths = false;
+    const IndexMetadata metadata{
+        caps,
+        state_->meta.nested ? Domain::Element : Domain::Row,
+        state_->params.value_type,
+        static_cast<int64_t>(state_->meta.count)};
+    const auto* legacy = std::get_if<LegacyIndexSource>(&*source_);
+    const bool use_async =
+        legacy ? legacy->use_async
+               : std::holds_alternative<
+                     std::shared_ptr<storage::AsyncIndexEntryReader>>(
+                     std::get<PackedIndexSource>(*source_).reader);
+    auto source = std::move(*source_);
+    source_.reset();
+    auto load = [source = std::move(source),
+                 options = options_,
+                 prepared = *state_](OpContext* ctx) mutable {
+        return LoadStorage<T>(source, options, prepared, ctx);
+    };
+    auto slot =
+        cachinglayer::Manager::GetInstance()
+            .CreateCacheSlot<SortedIndexStorage<T>>(
+                std::make_unique<
+                    SingleCellIndexStorageTranslator<SortedIndexStorage<T>>>(
+                    cache, use_async, std::move(load)),
+                context);
+    auto index = std::make_shared<SortedIndex<T>>(std::move(slot), metadata);
+    if (auto spec = JsonProjectedSpec(options_.params, metadata.count)) {
+        return JsonPathIndex::FromStorage(std::move(index), std::move(*spec));
+    }
+    return index;
+}
+
+template <typename T>
+folly::coro::Task<std::unique_ptr<SortedIndexStorage<T>>>
+SortedIndexLoader::LoadStorage(OpenedIndexSource& source,
+                               const storage::LoadOptions& options,
+                               const PreparedState& prepared,
+                               milvus::OpContext* context) {
+    if (auto* packed = std::get_if<PackedIndexSource>(&source)) {
+        return RunPackedIndexLoad<std::unique_ptr<SortedIndexStorage<T>>>(
             *packed,
-            options_,
-            [this](const auto& directory,
-                   const auto& metadata,
-                   const auto& options) {
-                return PlanPacked(directory, metadata, options, state_.get());
+            options,
+            [&prepared](
+                const auto& directory, const auto& metadata, const auto& opts) {
+                return PlanPacked(directory, metadata, opts, &prepared);
             },
-            &FinishPacked,
+            &FinishPackedStorage<T>,
             context);
     }
-    return RunLegacyLoad(
-        std::get<LegacyIndexSource>(source_),
-        options_,
-        [this](auto& source, const auto& options, bool use_async) {
-            return LoadLegacy(source, options, use_async);
+    return RunLegacyLoad<std::unique_ptr<SortedIndexStorage<T>>>(
+        std::get<LegacyIndexSource>(source),
+        options,
+        [&prepared](storage::FileSource& files,
+                    const storage::LoadOptions& opts,
+                    bool use_async)
+            -> folly::coro::Task<std::unique_ptr<SortedIndexStorage<T>>> {
+            auto projection =
+                PrepareJsonProjectedOpen(families::kSort, files, opts);
+            std::unique_ptr<SortedIndexStorage<T>> storage;
+            if constexpr (std::is_same_v<T, std::string_view>) {
+                storage = std::make_unique<SortedIndexStorage<T>>(
+                    co_await LoadStringState(use_async,
+                                             files,
+                                             opts,
+                                             prepared.meta,
+                                             prepared.params));
+            } else {
+                storage = std::make_unique<SortedIndexStorage<T>>(
+                    co_await LoadNumericState<T>(use_async,
+                                                 files,
+                                                 opts,
+                                                 prepared.meta,
+                                                 prepared.params));
+            }
+            storage->json_exists =
+                co_await LoadJsonExists(use_async,
+                                        std::move(projection),
+                                        files,
+                                        storage->state.total_num_rows);
+            co_return storage;
         },
         context);
+}
+
+IndexPtr
+SortedIndexLoader::Load(milvus::OpContext* context,
+                        const IndexCacheConfig& cache) {
+    AssertInfo(source_.has_value(),
+               "cached sorted construction consumed this loader");
+    if (IsStringDataType(state_->params.value_type)) {
+        return LoadTyped<std::string_view>(context, cache);
+    }
+    return DispatchPackedNumeric(state_->params.value_type, [&]<typename T>() {
+        return LoadTyped<T>(context, cache);
+    });
 }
 
 ReaderCaps
@@ -889,75 +974,6 @@ SortedIndexLoader::DeriveCaps(const Config& index_meta) {
                    .value_lookup = params.value_lookup,
                    .cheap_value_lookup = params.value_lookup,
                    .exact = !params.nested});
-}
-
-folly::coro::Task<IIndexReaderBasePtr>
-SortedIndexLoader::LoadLegacy(storage::FileSource& source,
-                              const storage::LoadOptions& opts,
-                              bool use_async) {
-    auto projection = PrepareJsonProjectedOpen(families::kSort, source, opts);
-    const auto& params = state_->params;
-    if (params.value_type == DataType::NONE ||
-        params.value_type == DataType::ARRAY) {
-        ThrowInfo(DataTypeInvalid,
-                  "sorted loader requires value_type or array_element_type");
-    }
-    if (IsStringDataType(params.value_type)) {
-        const auto& meta = state_->meta;
-        auto state =
-            co_await LoadStringState(use_async, source, opts, meta, params);
-        auto inner = std::make_unique<SortedIndexReader<std::string_view>>(
-            std::move(state));
-        co_return co_await FinishJsonProjectedOpenAsync(
-            use_async, std::move(projection), source, std::move(inner));
-    }
-
-    const auto& meta = state_->meta;
-    std::unique_ptr<IIndexReaderBase> inner;
-    switch (params.value_type) {
-        case DataType::BOOL:
-            inner = std::make_unique<SortedIndexReader<bool>>(
-                (co_await LoadNumericState<bool>(
-                    use_async, source, opts, meta, params)));
-            break;
-        case DataType::INT8:
-            inner = std::make_unique<SortedIndexReader<int8_t>>(
-                (co_await LoadNumericState<int8_t>(
-                    use_async, source, opts, meta, params)));
-            break;
-        case DataType::INT16:
-            inner = std::make_unique<SortedIndexReader<int16_t>>(
-                (co_await LoadNumericState<int16_t>(
-                    use_async, source, opts, meta, params)));
-            break;
-        case DataType::INT32:
-            inner = std::make_unique<SortedIndexReader<int32_t>>(
-                (co_await LoadNumericState<int32_t>(
-                    use_async, source, opts, meta, params)));
-            break;
-        case DataType::INT64:
-        case DataType::TIMESTAMPTZ:
-            inner = std::make_unique<SortedIndexReader<int64_t>>(
-                (co_await LoadNumericState<int64_t>(
-                    use_async, source, opts, meta, params)));
-            break;
-        case DataType::FLOAT:
-            inner = std::make_unique<SortedIndexReader<float>>(
-                (co_await LoadNumericState<float>(
-                    use_async, source, opts, meta, params)));
-            break;
-        case DataType::DOUBLE:
-            inner = std::make_unique<SortedIndexReader<double>>(
-                (co_await LoadNumericState<double>(
-                    use_async, source, opts, meta, params)));
-            break;
-        default:
-            ThrowInfo(DataTypeInvalid,
-                      "unsupported sorted value type {}",
-                      static_cast<int>(params.value_type));
-    }
-    co_return (co_await FinishJsonProjectedOpenAsync(
-        use_async, std::move(projection), source, std::move(inner)));
 }
 
 IndexLoadPlan
@@ -1065,10 +1081,11 @@ SortedIndexLoader::PlanPacked(const storage::IndexEntryDirectory& directory,
     return plan;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
-SortedIndexLoader::FinishPacked(IndexLoadPlan& plan,
-                                const storage::LoadOptions& opts,
-                                bool use_async) {
+template <typename T>
+folly::coro::Task<std::unique_ptr<SortedIndexStorage<T>>>
+SortedIndexLoader::FinishPackedStorage(IndexLoadPlan& plan,
+                                       const storage::LoadOptions& opts,
+                                       bool use_async) {
     const auto state =
         std::any_cast<std::shared_ptr<PackedSortedState>>(plan.load_context);
     const auto priority =
@@ -1090,24 +1107,18 @@ SortedIndexLoader::FinishPacked(IndexLoadPlan& plan,
             local_io();
         }
     }
-    IIndexReaderBasePtr inner;
-    if (IsStringDataType(state->params.value_type)) {
+    if constexpr (std::is_same_v<T, std::string_view>) {
         if (state->meta.count % 8 != 0) {
             auto* bytes = reinterpret_cast<uint8_t*>(state->validity->data());
             bytes[state->meta.count / 8] &=
                 static_cast<uint8_t>((1u << (state->meta.count % 8)) - 1u);
         }
-        inner = FinishPackedSortedState<std::string_view>(
-            *state, data_mapping, offsets_mapping);
-    } else {
-        inner =
-            DispatchPackedNumeric(state->params.value_type, [&]<typename T>() {
-                return FinishPackedSortedState<T>(
-                    *state, data_mapping, offsets_mapping);
-            });
     }
-    co_return FinishPackedJsonProjectedOpen(std::move(state->projection),
-                                            std::move(inner));
+    auto storage = FinishPackedSortedState<T>(
+        *state, std::move(data_mapping), std::move(offsets_mapping));
+    storage->json_exists = FinishPackedJsonExists(
+        std::move(state->projection), storage->state.total_num_rows);
+    co_return storage;
 }
 
 namespace {

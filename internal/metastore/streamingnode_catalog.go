@@ -16,6 +16,10 @@ type StreamingNodeCataLog interface {
 	// ListVChannel list all vchannels on current pchannel.
 	ListVChannel(ctx context.Context, pchannelName string) ([]*streamingpb.VChannelMeta, error)
 
+	// GetVChannelBase reads one durable VChannel record without its historical
+	// schemas. Returns nil when the record does not exist.
+	GetVChannelBase(ctx context.Context, pchannelName, vchannelName string) (*streamingpb.VChannelMeta, error)
+
 	// ListSegmentAssignment list all segment assignments for the wal.
 	ListSegmentAssignment(ctx context.Context, pChannelName string) ([]*streamingpb.SegmentAssignmentMeta, error)
 

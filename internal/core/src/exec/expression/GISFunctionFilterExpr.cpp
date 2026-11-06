@@ -279,7 +279,7 @@ PhyGISFunctionFilterExpr::DetermineExecPath() {
     }
     auto req = MakeIndexRequirement(RequiredReader::Spatial);
     req.value_type = DataType::GEOMETRY;
-    SelectAndPinIndex(req);
+    SelectAndCreateIndexReader(req);
 }
 
 void

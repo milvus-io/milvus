@@ -53,8 +53,7 @@ class CachedSearchIterator {
     CachedSearchIterator(const milvus::index::IVectorReader& reader,
                          const knowhere::DataSetPtr& dataset,
                          const SearchInfo& search_info,
-                         const BitsetView& bitset,
-                         milvus::OpContext* op_context = nullptr);
+                         const BitsetView& bitset);
 
     // For growing segment with chunked data, BF.
     //

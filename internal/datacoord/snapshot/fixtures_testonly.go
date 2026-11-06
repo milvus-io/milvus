@@ -22,7 +22,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/datacoord/analyze"
@@ -30,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/copysegment"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	kvdatacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -112,14 +111,26 @@ type restoreBrokerTarget struct {
 	broker.Broker
 }
 
-// newRestoreAbsentTargetBroker supplies admission metadata for tests focused on
-// later restore phases. Concurrency tests exercise the changing target state.
-func NewRestoreAbsentTargetBroker(t *testing.T) broker.Broker {
-	t.Helper()
-	m := mockey.Mock((*restoreBrokerTarget).DescribeCollectionByName).
-		Return(nil, merr.WrapErrCollectionNotFound("target")).Build()
-	t.Cleanup(func() { m.UnPatch() })
+// NewRestoreBrokerTarget returns a broker for restore tests that patch its
+// methods with mockey.
+func NewRestoreBrokerTarget() broker.Broker {
 	return &restoreBrokerTarget{}
+}
+
+// NewRestoreAbsentTargetMeta supplies admission metadata for tests focused on
+// later restore phases: every target database exists and no target
+// collection does. Concurrency tests exercise the changing target state.
+func NewRestoreAbsentTargetMeta() *meta.Meta {
+	store := metacache.NewMetaStore(nil)
+	store.SetCollectionSource(anyDatabaseSource{metacache.NewCollections()})
+	return &meta.Meta{MetaStore: store}
+}
+
+// anyDatabaseSource serves every database name as an existing database.
+type anyDatabaseSource struct{ *metacache.Collections }
+
+func (anyDatabaseSource) GetDatabase(dbName string) (*metacache.DatabaseInfo, bool) {
+	return &metacache.DatabaseInfo{Name: dbName}, true
 }
 
 func CreateTestSnapshotMeta(t *testing.T) *SnapshotMeta {
@@ -180,3 +191,5 @@ func InsertTestSnapshot(sm *SnapshotMeta, info *datapb.SnapshotInfo, segmentIDs,
 	sm.SnapshotID2RefIndex.Insert(info.GetId(), NewLoadedSnapshotRefIndex(segmentIDs, buildIDs))
 	sm.addToSecondaryIndexes(info)
 }
+
+func (m *SnapshotExportManager) ContextForTest() context.Context { return m.ctx }

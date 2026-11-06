@@ -5,6 +5,7 @@ package mockrootcoord
 import (
 	context "context"
 
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	featureusage "github.com/milvus-io/milvus/internal/featureusage"
 	model "github.com/milvus-io/milvus/internal/metastore/model"
@@ -1320,6 +1321,53 @@ func (_c *IMetaTable_CheckIfUpdateCredential_Call) RunAndReturn(run func(context
 	return _c
 }
 
+// CompleteRestoreCollection provides a mock function with given fields: ctx, collectionID
+func (_m *IMetaTable) CompleteRestoreCollection(ctx context.Context, collectionID int64) error {
+	ret := _m.Called(ctx, collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CompleteRestoreCollection")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) error); ok {
+		r0 = rf(ctx, collectionID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_CompleteRestoreCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CompleteRestoreCollection'
+type IMetaTable_CompleteRestoreCollection_Call struct {
+	*mock.Call
+}
+
+// CompleteRestoreCollection is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+func (_e *IMetaTable_Expecter) CompleteRestoreCollection(ctx interface{}, collectionID interface{}) *IMetaTable_CompleteRestoreCollection_Call {
+	return &IMetaTable_CompleteRestoreCollection_Call{Call: _e.mock.On("CompleteRestoreCollection", ctx, collectionID)}
+}
+
+func (_c *IMetaTable_CompleteRestoreCollection_Call) Run(run func(ctx context.Context, collectionID int64)) *IMetaTable_CompleteRestoreCollection_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_CompleteRestoreCollection_Call) Return(_a0 error) *IMetaTable_CompleteRestoreCollection_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_CompleteRestoreCollection_Call) RunAndReturn(run func(context.Context, int64) error) *IMetaTable_CompleteRestoreCollection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateDatabase provides a mock function with given fields: ctx, db, ts
 func (_m *IMetaTable) CreateDatabase(ctx context.Context, db *model.Database, ts uint64) error {
 	ret := _m.Called(ctx, db, ts)
@@ -2323,6 +2371,65 @@ func (_c *IMetaTable_GetCollectionID_Call) Return(_a0 int64) *IMetaTable_GetColl
 }
 
 func (_c *IMetaTable_GetCollectionID_Call) RunAndReturn(run func(context.Context, string, string) int64) *IMetaTable_GetCollectionID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetCollectionProperties provides a mock function with given fields: ctx, collectionID
+func (_m *IMetaTable) GetCollectionProperties(ctx context.Context, collectionID int64) ([]*commonpb.KeyValuePair, error) {
+	ret := _m.Called(ctx, collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetCollectionProperties")
+	}
+
+	var r0 []*commonpb.KeyValuePair
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) ([]*commonpb.KeyValuePair, error)); ok {
+		return rf(ctx, collectionID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64) []*commonpb.KeyValuePair); ok {
+		r0 = rf(ctx, collectionID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*commonpb.KeyValuePair)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64) error); ok {
+		r1 = rf(ctx, collectionID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// IMetaTable_GetCollectionProperties_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCollectionProperties'
+type IMetaTable_GetCollectionProperties_Call struct {
+	*mock.Call
+}
+
+// GetCollectionProperties is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+func (_e *IMetaTable_Expecter) GetCollectionProperties(ctx interface{}, collectionID interface{}) *IMetaTable_GetCollectionProperties_Call {
+	return &IMetaTable_GetCollectionProperties_Call{Call: _e.mock.On("GetCollectionProperties", ctx, collectionID)}
+}
+
+func (_c *IMetaTable_GetCollectionProperties_Call) Run(run func(ctx context.Context, collectionID int64)) *IMetaTable_GetCollectionProperties_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_GetCollectionProperties_Call) Return(_a0 []*commonpb.KeyValuePair, _a1 error) *IMetaTable_GetCollectionProperties_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *IMetaTable_GetCollectionProperties_Call) RunAndReturn(run func(context.Context, int64) ([]*commonpb.KeyValuePair, error)) *IMetaTable_GetCollectionProperties_Call {
 	_c.Call.Return(run)
 	return _c
 }

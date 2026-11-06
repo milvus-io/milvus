@@ -6,9 +6,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer"
-	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
-	"github.com/milvus-io/milvus/internal/views/coord/loadstatus"
-	"github.com/milvus-io/milvus/internal/views/coord/readiness"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -80,81 +77,4 @@ func (r *Resources) Replicas(ctx context.Context, collectionID int64, withShardN
 		return nil, merr.WrapErrServiceUnavailableMsg("load configuration changed while reading replicas")
 	}
 	return result, nil
-}
-
-// Balance preserves the synchronous LoadBalance contract. Configuration locks
-// cover only acceptance, never the wait for node preparation/handoff.
-func (r *Resources) Balance(ctx context.Context, collectionID, source int64, destinations, segments []int64) error {
-	if err := r.checkActive(ctx); err != nil {
-		return err
-	}
-	manager, err := r.placementManagement()
-	if err != nil {
-		return err
-	}
-	channels, err := r.VChannels(ctx, collectionID)
-	if err != nil {
-		return err
-	}
-	progress := loadstatus.Get(r.LoadConfigs, r.ShardViews, collectionID, channels)
-	if !progress.Ready() {
-		return merr.WrapErrCollectionNotFullyLoaded(collectionID)
-	}
-	subscription := r.Readiness.Subscribe(collectionID)
-	defer subscription.Close()
-	var moves map[qviews.ShardID]*balancer.SegmentMove
-	err = r.LoadConfigs.WithCurrentConfig(progress.Config, func() error {
-		var err error
-		moves, err = manager.MoveSegments(ctx, progress.Config, source, destinations, segments)
-		return err
-	})
-	if err != nil {
-		return err
-	}
-	return r.waitMoves(ctx, progress.Config, subscription, moves)
-}
-
-func (r *Resources) waitMoves(ctx context.Context, cfg *loadmgr.LoadConfig, subscription *readiness.Subscription, moves map[qviews.ShardID]*balancer.SegmentMove) error {
-	for {
-		if err := r.checkActive(ctx); err != nil {
-			return err
-		}
-		changed, released := subscription.Observe()
-		if released || r.LoadConfigs.GetConfig(cfg.CollectionID) != cfg {
-			return merr.WrapErrServiceUnavailableMsg("collection was released or reconfigured during manual balance")
-		}
-		complete := true
-		for id, move := range moves {
-			manager := r.ShardViews.Get(id)
-			if manager == nil {
-				return merr.WrapErrServiceUnavailableMsg("shard was released during manual balance")
-			}
-			stat := manager.Stats()
-			if stat.UpVersion == nil || !stat.UpVersion.GTE(move.Version) {
-				if stat.PreparingVersion == nil {
-					return merr.WrapErrServiceUnavailableMsg("manual balance preparation failed or was superseded")
-				}
-				complete = false
-				continue
-			}
-			for segment, node := range move.Destinations {
-				if stat.UpPlacement == nil || stat.UpPlacement.Assignments[segment] != node {
-					return merr.WrapErrServiceUnavailableMsg("manual balance placement was superseded for segment %d", segment)
-				}
-			}
-		}
-		if _, released := subscription.Observe(); released || r.LoadConfigs.GetConfig(cfg.CollectionID) != cfg {
-			return merr.WrapErrServiceUnavailableMsg("collection was released or reconfigured during manual balance")
-		}
-		if complete {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return context.Cause(ctx)
-		case <-r.Readiness.Done():
-			return merr.WrapErrServiceUnavailableMsg("QueryView coordinator stopped during manual balance")
-		case <-changed:
-		}
-	}
 }

@@ -33,11 +33,11 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/analyze"
-	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/copysegment"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
@@ -65,9 +65,9 @@ type GcOption struct {
 	DropTolerance    time.Duration        // dropped segment related key tolerance time
 	ScanInterval     time.Duration        // interval for scan residue for interupted log wrttien
 
-	Broker           broker.Broker
-	RemoveObjectPool *conc.Pool[struct{}]
-	DataViewGC       DataViewGarbageCollector
+	StreamingNodeCatalog metastore.StreamingNodeCataLog
+	RemoveObjectPool     *conc.Pool[struct{}]
+	DataViewGC           DataViewGarbageCollector
 
 	// importJobAlive reports whether an ImportJob still exists for jobID. It is
 	// wired by the server from ImportMeta so the orphan scan never deletes an
@@ -84,7 +84,7 @@ type DataViewGarbageCollector interface {
 	GarbageCollect(ctx context.Context, collectionID int64, retainLatest int) error
 }
 
-// garbageCollector handles garbage files in object storage
+// GarbageCollector handles garbage files in object storage
 // which could be dropped collection remanent or data node failure traces
 type GarbageCollector struct {
 	ctx    context.Context
@@ -443,7 +443,7 @@ func (gc *GarbageCollector) ackSignal(signal <-chan gcCmd) {
 	}
 }
 
-// startControlLoop start a control loop for garbageCollector.
+// startControlLoop start a control loop for GarbageCollector.
 func (gc *GarbageCollector) startControlLoop(_ context.Context) {
 	hardware.RegisterSystemMetricsListener(gc.systemMetricsListener)
 	defer hardware.UnregisterSystemMetricsListener(gc.systemMetricsListener)
@@ -997,7 +997,7 @@ func (gc *GarbageCollector) recycleDataViews(ctx context.Context, signal <-chan 
 	logger.Info(ctx, "start recycleDataViews")
 	defer func() { logger.Info(ctx, "recycleDataViews done", mlog.Duration("timeCost", time.Since(start))) }()
 
-	for _, collection := range gc.Meta.GetCollections() {
+	for _, collection := range gc.Meta.GetAllCollections() {
 		if ctx.Err() != nil {
 			return
 		}
@@ -1021,6 +1021,11 @@ func (gc *GarbageCollector) checkDroppedSegmentGC(segment *meta.SegmentInfo,
 	cpTimestamp Timestamp,
 ) bool {
 	log := mlog.With(mlog.Int64("segmentID", segment.ID))
+	if segment.GetIsImporting() && segment.GetCompacted() {
+		// Restore owns retired L0 inputs until its publication finishes. They
+		// also prove an applied mutation after a crash before task-state save.
+		return false
+	}
 
 	if !gc.isExpire(segment.GetDroppedAt()) {
 		return false
@@ -1042,23 +1047,9 @@ func (gc *GarbageCollector) checkDroppedSegmentGC(segment *meta.SegmentInfo,
 		return true
 	}
 
-	// A removed channel no longer needs checkpoint protection. Its checkpoint
-	// may stop advancing, while collection cleanup waits for segment GC.
-	segInsertChannel := segment.GetInsertChannel()
-	channelExists, err := gc.Meta.MetaStore.ChannelExists(gc.ctx, segInsertChannel)
-	if err != nil {
-		log.RatedWarn(gc.ctx, rate.Limit(60), "failed to check channel existence, skip dropped segment GC",
-			mlog.FieldVChannel(segInsertChannel), mlog.Err(err))
-		return false
-	}
-	if channelExists {
-		log.RatedInfo(gc.ctx, rate.Limit(60), "dropped segment dml position after channel cp, skip meta gc",
-			mlog.Uint64("dmlPosTs", dmlTs),
-			mlog.Uint64("channelCpTs", cpTimestamp),
-		)
-		return false
-	}
-	return true
+	log.RatedInfo(gc.ctx, rate.Limit(60), "dropped segment dml position after physical checkpoint, skip meta gc",
+		mlog.Uint64("dmlPosTs", dmlTs), mlog.Uint64("checkpointTs", cpTimestamp))
+	return false
 }
 
 // recycleDroppedSegments scans all segments and remove those dropped segments from meta and oss.
@@ -1077,7 +1068,7 @@ func (gc *GarbageCollector) RecycleDroppedSegments(ctx context.Context, signal <
 	for _, segment := range all {
 		if segment.GetState() == commonpb.SegmentState_Dropped {
 			drops[segment.GetID()] = segment
-			channels.Insert(segment.GetInsertChannel())
+			channels.Insert(funcutil.ToPhysicalChannel(segment.GetInsertChannel()))
 			// continue
 			// A(indexed), B(indexed) -> C(no indexed), D(no indexed) -> E(no indexed), A, B can not be GC
 		}
@@ -1085,6 +1076,11 @@ func (gc *GarbageCollector) RecycleDroppedSegments(ctx context.Context, signal <
 			compactTo[from] = segment
 		}
 	}
+
+	// A Dropped parent can still be the published QueryView frontier. Keep
+	// its descendants too: intermediate lineage is needed to flatten a later
+	// sort/merge before replacing that frontier. Snapshot once per sweep.
+	protected := gc.dataViewCompactionProtection(all)
 
 	droppedCompactTo := make(map[int64]*meta.SegmentInfo)
 	for id := range drops {
@@ -1101,10 +1097,25 @@ func (gc *GarbageCollector) RecycleDroppedSegments(ctx context.Context, signal <
 		indexedSet.Insert(segment.GetID())
 	}
 
-	channelCPs := make(map[string]uint64)
+	// Capture each PChannel's durable replay frontier once per sweep, shared by
+	// every VChannel/segment on it. Never fall back to historical DataCoord
+	// checkpoints or the potentially newer control checkpoint.
+	channelCPs := make(map[string]uint64, len(channels))
 	for channel := range channels {
-		pos := gc.Meta.GetChannelCheckpoint(channel)
-		channelCPs[channel] = pos.GetTimestamp()
+		if ctx.Err() != nil {
+			return
+		}
+		checkpoint, err := gc.Option.StreamingNodeCatalog.GetConsumeCheckpoint(ctx, channel)
+		if err != nil {
+			log.Warn(ctx, "failed to read physical checkpoint, skip channel GC",
+				mlog.String("pchannel", channel), mlog.Err(err))
+			continue
+		}
+		if checkpoint == nil {
+			log.Info(ctx, "physical checkpoint is missing, skip channel GC", mlog.String("pchannel", channel))
+			continue
+		}
+		channelCPs[channel] = checkpoint.GetTimeTick()
 	}
 
 	// try to get loaded segments
@@ -1128,6 +1139,10 @@ func (gc *GarbageCollector) RecycleDroppedSegments(ctx context.Context, signal <
 		}
 
 		gc.ackSignal(signal)
+
+		if _, referenced := protected[segmentID]; referenced {
+			continue
+		}
 
 		if gc.collectionGCPaused(segment.GetCollectionID()) {
 			log.Info(ctx, "skip GC segment since collection is paused", mlog.Int64("segmentID", segmentID), mlog.Int64("collectionID", segment.GetCollectionID()))
@@ -1155,12 +1170,45 @@ func (gc *GarbageCollector) RecycleDroppedSegments(ctx context.Context, signal <
 			}
 		}
 
-		if !gc.checkDroppedSegmentGC(segment, compactTo[segment.GetID()], indexedSet, channelCPs[segInsertChannel]) {
+		checkpoint, ok := channelCPs[funcutil.ToPhysicalChannel(segInsertChannel)]
+		if !ok || !gc.checkDroppedSegmentGC(segment, compactTo[segment.GetID()], indexedSet, checkpoint) {
 			continue
 		}
 
 		gc.RecycleDroppedSegment(ctx, io, segmentID, segment)
 	}
+}
+
+// dataViewCompactionProtection retains both the published bases and the
+// intermediate metadata needed to relate current leaves to those bases. Once
+// the latest and all retained Views move past a base, its old ancestry is no
+// longer protected. This is O(segments + lineage edges), once per GC sweep.
+func (gc *GarbageCollector) dataViewCompactionProtection(segments []*meta.SegmentInfo) map[int64]struct{} {
+	if gc.Meta.DataViewManager == nil {
+		return nil
+	}
+	protected := gc.Meta.DataViewManager.ReferencedSegments()
+	children := make(map[int64][]int64)
+	for _, segment := range segments {
+		for _, parent := range segment.GetCompactionFrom() {
+			children[parent] = append(children[parent], segment.GetID())
+		}
+	}
+	queue := make([]int64, 0, len(protected))
+	for id := range protected {
+		queue = append(queue, id)
+	}
+	for len(queue) > 0 {
+		id := queue[0]
+		queue = queue[1:]
+		for _, child := range children[id] {
+			if _, seen := protected[child]; !seen {
+				protected[child] = struct{}{}
+				queue = append(queue, child)
+			}
+		}
+	}
+	return protected
 }
 
 // recycleDroppedSegment marks its index tasks deleted before removing a
@@ -1525,7 +1573,6 @@ func (gc *GarbageCollector) RecycleChannelCPMeta(ctx context.Context, signal <-c
 		return
 	}
 
-	availability, _ := gc.Option.Broker.(broker.CollectionAvailability)
 	skippedCnt := 0
 	// The checkpoints of collections that may be dropped, by collection: a
 	// dropped collection's checkpoints go together, after the rest of its meta.
@@ -1550,9 +1597,9 @@ func (gc *GarbageCollector) RecycleChannelCPMeta(ctx context.Context, signal <-c
 		if ctx.Err() != nil {
 			return
 		}
-		// A positive resident lookup avoids schema conversion, task scheduling,
-		// per-collection timeouts and retaining live IDs for the entire sweep.
-		if availability != nil && availability.IsCollectionAvailable(collectionID) {
+		// A Dropping collection counts as dropped here: its checkpoints go as
+		// soon as GcConfirm sees its segment meta removed.
+		if gc.Meta.GetCollection(collectionID).IsCreated() {
 			skippedCnt++
 			continue
 		}
@@ -1580,34 +1627,23 @@ func (gc *GarbageCollector) RecycleChannelCPMeta(ctx context.Context, signal <-c
 	mlog.Info(ctx, "GC channel cp done", mlog.Int("skippedChannelCP", skippedCnt))
 }
 
-// collectionRecyclable reports whether RootCoord has dropped the collection and
-// all its segments are recycled, the condition RootCoord uses to remove the
+// collectionRecyclable reports whether all segments of a collection that is
+// no longer Created are recycled, the condition RootCoord uses to remove the
 // collection meta.
 func (gc *GarbageCollector) collectionRecyclable(ctx context.Context, collectionID int64) bool {
-	timeoutCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	has, err := gc.Option.Broker.HasCollection(timeoutCtx, collectionID)
-	cancel()
-	if err != nil || has {
-		// skip checkpoints GC of this cycle if describe collection fails or the collection state is available.
-		mlog.Debug(ctx, "skip channel cp GC, the collection state is available",
-			mlog.Int64("collectionID", collectionID),
-			mlog.Bool("exists", has), mlog.Err(err))
-		return false
-	}
-	// Skip to GC if all segments meta of the corresponding collection are not removed
 	return gc.Meta.MetaStore.GcConfirm(ctx, collectionID, -1)
 }
 
 // recycleDroppedCollection drops what DataCoord still keeps for a collection
 // that RootCoord has dropped and whose segments are all recycled: its segment
-// change groups, its cached collection info and metrics, and the checkpoints
-// of its vChannels. The checkpoints go last: they are what brings GC back to
-// the collection if an earlier step fails.
+// change groups and the checkpoints of its vChannels. The checkpoints go last:
+// they are what brings GC back to the collection if an earlier step fails.
+// RootCoord removes the collection itself, and DataCoord cleans up its
+// metrics on OnCollectionRemoved.
 func (gc *GarbageCollector) recycleDroppedCollection(ctx context.Context, collectionID int64, vChannels []string) error {
 	if err := gc.Meta.DropSegmentChangeGroupsOfCollection(ctx, collectionID); err != nil {
 		return err
 	}
-	gc.Meta.DropCollection(collectionID)
 	var errs []error
 	for _, vChannel := range vChannels {
 		if err := gc.Meta.DropChannelCheckpoint(vChannel); err != nil {
@@ -2972,17 +3008,9 @@ func (gc *GarbageCollector) recycleSnapshots(ctx context.Context, signal <-chan 
 				copysegment.SetSnapshotActivePinsGauge(r.CollectionID, r.SnapshotName, r.ActivePins)
 			}
 
-			// Step 2: if the collection was dropped, cascade-delete orphan snapshots.
-			timeoutCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-			has, err := gc.Option.Broker.HasCollection(timeoutCtx, collectionID)
-			cancel()
-			if err != nil {
-				log.Warn(ctx, "failed to check collection existence for orphan snapshot cleanup",
-					mlog.Int64("collectionID", collectionID),
-					mlog.Err(err))
-				continue
-			}
-			if has {
+			// Step 2: if the collection was dropped, cascade-delete orphan
+			// snapshots. A Dropping collection counts as dropped.
+			if gc.Meta.GetCollection(collectionID).IsCreated() {
 				// Collection still exists, not an orphan — expired pins already reaped above.
 				continue
 			}

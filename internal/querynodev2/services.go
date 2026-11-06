@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/materialize"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/internal/util/textmatch"
@@ -1615,6 +1616,10 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 		}
 		segmentVersionInfos = append(segmentVersionInfos, buildSegmentVersionInfo(s))
 	}
+	var labels map[string]string
+	if node.session != nil {
+		labels = node.session.ServerLabels
+	}
 
 	buildLeaderView := func(key string, delegator delegator.ShardDelegator, sealedSegments map[int64]*querypb.SegmentDist, growing []delegator.SegmentEntry) *querypb.LeaderView {
 		numOfGrowingRows := int64(0)
@@ -1633,7 +1638,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 		queryView := delegator.GetChannelQueryView()
 		leaderViewStatus := &querypb.LeaderViewStatus{
 			Serviceable:             queryView.Serviceable(),
-			CatchingUpStreamingData: delegator.CatchingUpStreamingData(),
+			CatchingUpStreamingData: leaderViewCatchingUpStreamingData(labels, delegator.CatchingUpStreamingData()),
 		}
 		return &querypb.LeaderView{
 			Collection:             delegator.Collection(),
@@ -1688,6 +1693,14 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 		TotalChannelCount:   int64(totalChannelCount),
 	}
 	return resp, nil
+}
+
+func leaderViewCatchingUpStreamingData(labels map[string]string, catchingUp bool) bool {
+	if labels[sessionutil.LabelStreamingNodeEmbeddedQueryNode] == "1" ||
+		labels[sessionutil.LegacyLabelStreamingNodeEmbeddedQueryNode] == "1" {
+		return false
+	}
+	return catchingUp
 }
 
 func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDistributionRequest) (*commonpb.Status, error) {

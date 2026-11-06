@@ -54,65 +54,109 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func TestCollectionAvailability(t *testing.T) {
+func TestGetCollectionProperties(t *testing.T) {
+	ctx := context.Background()
+	properties := []*commonpb.KeyValuePair{{Key: common.CollectionAutoReleaseIdleTTLKey, Value: "20"}}
 	mt := &MetaTable{collID2Meta: map[int64]*model.Collection{
-		1: {CollectionID: 1, State: pb.CollectionState_CollectionCreated},
-		2: {CollectionID: 2, State: pb.CollectionState_CollectionCreating},
-		3: {CollectionID: 3, State: pb.CollectionState_CollectionDropping},
+		1: {CollectionID: 1, DBID: 42, State: pb.CollectionState_CollectionCreated, Properties: properties},
+		2: {CollectionID: 2, State: pb.CollectionState_CollectionCreating, Properties: properties},
+		3: {CollectionID: 3, State: pb.CollectionState_CollectionDropping, Properties: properties},
 		4: nil,
+		5: {CollectionID: 5, State: pb.CollectionState_CollectionCreated},
 	}}
-	core := &Core{ctx: context.Background(), meta: mt}
+	core := &Core{ctx: ctx, meta: mt}
 	core.UpdateStateCode(commonpb.StateCode_Healthy)
-	require.True(t, core.IsCollectionAvailable(1))
-	for _, id := range []int64{2, 3, 4, 5} {
-		require.False(t, core.IsCollectionAvailable(id))
+	got, err := core.GetCollectionProperties(ctx, 1)
+	require.NoError(t, err)
+	require.Equal(t, properties, got)
+	// No scheduler, schema conversion, partition filtering or catalog is needed.
+	require.Same(t, properties[0], got[0])
+	for _, id := range []int64{2, 3, 4, 6} {
+		got, err := core.GetCollectionProperties(ctx, id)
+		require.ErrorIs(t, err, merr.ErrCollectionNotFound)
+		require.Nil(t, got)
 	}
-	// No scheduler, catalog or schema is needed on either cache outcome.
+	got, err = core.GetCollectionProperties(ctx, 5)
+	require.NoError(t, err)
+	require.Nil(t, got, "an absent property is distinct from unavailable metadata")
+
+	allocs := testing.AllocsPerRun(100, func() {
+		got, err = core.GetCollectionProperties(ctx, 1)
+	})
+	require.NoError(t, err)
+	require.Equal(t, properties, got)
+	require.Zero(t, allocs)
+
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	got, err = core.GetCollectionProperties(canceled, 1)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Nil(t, got)
 	core.UpdateStateCode(commonpb.StateCode_Abnormal)
-	require.False(t, core.IsCollectionAvailable(1))
-	core.UpdateStateCode(commonpb.StateCode_Healthy)
-	mt.ddLock.Lock()
-	mt.collID2Meta[1] = &model.Collection{CollectionID: 1, State: pb.CollectionState_CollectionDropping}
-	mt.ddLock.Unlock()
-	require.False(t, core.IsCollectionAvailable(1))
-	core.meta = nil
-	require.False(t, core.IsCollectionAvailable(1))
-
-	require.Zero(t, testing.AllocsPerRun(100, func() { mt.IsCollectionAvailable(1) }))
+	got, err = core.GetCollectionProperties(ctx, 1)
+	require.ErrorIs(t, err, merr.ErrServiceNotReady)
+	require.Nil(t, got)
 }
 
-func BenchmarkCollectionAvailability(b *testing.B) {
-	mt := &MetaTable{collID2Meta: map[int64]*model.Collection{
-		1: {CollectionID: 1, State: pb.CollectionState_CollectionCreated},
-	}}
-	b.ReportAllocs()
-	for b.Loop() {
-		if !mt.IsCollectionAvailable(1) {
-			b.Fatal("available collection not found")
-		}
-	}
-}
-
-func TestCollectionAvailabilityConcurrent(t *testing.T) {
-	mt := &MetaTable{collID2Meta: make(map[int64]*model.Collection)}
+func TestGetCollectionPropertiesConcurrentUpdates(t *testing.T) {
+	mt := &MetaTable{collID2Meta: map[int64]*model.Collection{}}
 	var wg sync.WaitGroup
 	wg.Go(func() {
 		for i := 0; i < 100; i++ {
 			mt.ddLock.Lock()
-			mt.collID2Meta[1] = &model.Collection{CollectionID: 1, State: pb.CollectionState_CollectionCreated}
-			mt.ddLock.Unlock()
-			mt.ddLock.Lock()
-			delete(mt.collID2Meta, 1)
+			mt.collID2Meta[1] = &model.Collection{
+				CollectionID: 1,
+				State:        pb.CollectionState_CollectionCreated,
+				Properties:   []*commonpb.KeyValuePair{{Key: common.CollectionAutoReleaseIdleTTLKey, Value: "20"}},
+			}
 			mt.ddLock.Unlock()
 		}
 	})
 	wg.Go(func() {
 		for i := 0; i < 100; i++ {
-			mt.IsCollectionAvailable(1)
+			properties, err := mt.GetCollectionProperties(context.Background(), 1)
+			if err != nil {
+				assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
+				continue
+			}
+			assert.Equal(t, "20", properties[0].GetValue())
 		}
 	})
 	wg.Wait()
-	require.False(t, mt.IsCollectionAvailable(1))
+}
+
+func BenchmarkCollectionProperties(b *testing.B) {
+	ctx := context.Background()
+	coll := &model.Collection{
+		CollectionID: 1,
+		State:        pb.CollectionState_CollectionCreated,
+		Properties:   []*commonpb.KeyValuePair{{Key: common.CollectionAutoReleaseIdleTTLKey, Value: "20"}},
+	}
+	for id := int64(100); id < 110; id++ {
+		coll.Fields = append(coll.Fields, &model.Field{FieldID: id, Name: "field", DataType: schemapb.DataType_Int64})
+	}
+	mt := &MetaTable{collID2Meta: map[int64]*model.Collection{1: coll}}
+	b.Run("Properties", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			properties, err := mt.GetCollectionProperties(ctx, 1)
+			if err != nil || len(properties) != 1 {
+				b.Fatal("properties unavailable", err)
+			}
+		}
+	})
+	b.Run("DescribeMaterialization", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			collection, err := mt.GetCollectionByIDWithMaxTs(ctx, 1)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(convertModelToDesc(collection, nil, "default").GetSchema().GetFields()) != 10 {
+				b.Fatal("schema unavailable")
+			}
+		}
+	})
 }
 
 func TestMetaTable_DescribeAliasAllowsConcurrentReaders(t *testing.T) {

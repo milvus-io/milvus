@@ -2370,7 +2370,7 @@ class TestSearchByPkIndependent(TestMilvusClientV2Base):
         # 3. insert data again
         data = cf.gen_row_data_by_schema(nb=ct.default_nb, schema=schema, start=ct.default_nb * 5)
         self.insert(client, collection_name, data)
-        self.flush(client, collection_name)
+        # Keep this batch growing: a flushed batch may already be handed off.
 
         # 4. search with param ignore_growing=True
         search_params = {}

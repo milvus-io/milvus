@@ -11,6 +11,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
@@ -347,4 +349,94 @@ func TestSegmentResourceGetDoesNotLoseRetiredReads(t *testing.T) {
 		require.Equal(t, 1, f.prepares)
 		require.Equal(t, 2, released, "both obsolete scopes must be released after the new binding is ready")
 	})
+}
+
+func TestSegmentResourceZeroManifestRefreshBeforeReuse(t *testing.T) {
+	runResourceSchedulingTest(t, "each zero-manifest binding validates current metadata before reuse", func(t *testing.T, f *resourceSchedulingFixture) {
+		calls := 0
+		rows := int64(10)
+		indexed := false
+		f.getMock.UnPatch()
+		mockey.Mock((*resourceTestMetadata).GetQueryViewSegmentLoadInfo).To(func(_ *resourceTestMetadata, _ context.Context, _, _ int64) (SegmentLoadInfoSnapshot, error) {
+			calls++
+			snapshot := f.snapshot(1)
+			snapshot.LoadInfo.ManifestPath = ""
+			snapshot.LoadInfo.StorageVersion = storage.StorageV2
+			snapshot.LoadInfo.NumOfRows = rows
+			if indexed {
+				snapshot.LoadInfo.IndexInfos = []*querypb.FieldIndexInfo{{IndexID: 42, IndexFilePaths: []string{"index/file"}}}
+			}
+			return snapshot, nil
+		}).Build()
+		f.wake()
+		f.runNext()
+		require.Equal(t, 1, calls)
+		require.Equal(t, 1, f.prepares)
+		same := f.addBinding(1)
+		f.wake()
+		f.runNext()
+		require.Equal(t, 2, calls)
+		require.Equal(t, 1, f.prepares, "unchanged metadata reuses the read")
+		require.True(t, same.reported)
+		rows++
+		changed := f.addBinding(1)
+		f.wake()
+		f.runNext()
+		require.Equal(t, 3, calls)
+		require.Equal(t, 2, f.prepares, "changed metadata must prepare a successor")
+		require.True(t, changed.reported)
+		indexed = true
+		withIndex := f.addBinding(1)
+		f.wake()
+		f.runNext()
+		require.Equal(t, 4, calls)
+		require.Equal(t, 3, f.prepares, "new index files require a successor despite identical row count")
+		require.True(t, withIndex.reported)
+		f.wake()
+		f.runNext()
+		require.Equal(t, 4, calls, "ready views do not poll metadata")
+	})
+}
+
+func TestSegmentResourceZeroManifestRefreshAfterPreparationFailure(t *testing.T) {
+	runResourceSchedulingTest(t, "retry obtains artifacts published after a failed preparation", func(t *testing.T, f *resourceSchedulingFixture) {
+		calls := 0
+		f.getMock.UnPatch()
+		mockey.Mock((*resourceTestMetadata).GetQueryViewSegmentLoadInfo).To(func(_ *resourceTestMetadata, _ context.Context, _, _ int64) (SegmentLoadInfoSnapshot, error) {
+			calls++
+			snapshot := f.snapshot(1)
+			snapshot.LoadInfo.ManifestPath = ""
+			snapshot.LoadInfo.StorageVersion = storage.StorageV2
+			return snapshot, nil
+		}).Build()
+		f.onPrepare = func(*segmentBinding) error {
+			if f.prepares == 1 {
+				return merr.WrapErrServiceNotReadyMsg("artifact not published")
+			}
+			return nil
+		}
+		f.wake()
+		f.runNext()
+		require.Equal(t, 1, calls)
+		require.False(t, f.r.bindings[0].reported)
+		time.Sleep(10 * time.Second)
+		f.wake()
+		f.runNext()
+		require.Equal(t, 2, calls)
+		require.True(t, f.r.bindings[0].reported)
+	})
+}
+
+func TestSegmentResourceStorageValidation(t *testing.T) {
+	r := &segmentResource{id: 1000, collectionID: 1}
+	snapshot := resourceSnapshot(1, 1000, 1)
+	require.NoError(t, r.validateSnapshot(snapshot))
+	snapshot.LoadInfo.ManifestPath = ""
+	require.Error(t, r.validateSnapshot(snapshot), "V3 still requires a committed manifest")
+	snapshot.LoadInfo.StorageVersion = storage.StorageV2
+	require.NoError(t, r.validateSnapshot(snapshot))
+	snapshot.LoadInfo.TransformStartAfterTimetick = 0
+	require.Error(t, r.validateSnapshot(snapshot), "V2 still requires a certified replay cursor")
+	snapshot.LoadInfo = &querypb.SegmentLoadInfo{}
+	require.Error(t, r.validateSnapshot(snapshot))
 }

@@ -484,10 +484,10 @@ func (m *Manager) dispatchTransformMessageLocked(msg message.ImmutableMessage, e
 		return
 	}
 	if msg.MessageType() == message.MessageTypeTxn {
-		// The current query planner advances Transform MVCC for every commit,
-		// including insert-only transactions. Preserve that progress until the
-		// parent's ordered query-frontier publication is extracted as well.
-		// Use the original outer timestamp for the complete transaction.
+		if messageutil.ClassifyTransformLogMessage(msg) == messageutil.TransformLogKindNone {
+			return
+		}
+		// Classify the assembled transaction, but use the original outer timestamp.
 		if messageutil.AdvancesQueryTransformMVCC(message.AsImmutableTxnMessage(msg).Commit()) {
 			m.dispatchTransformLocked(msg.VChannel(), entry, msg.TimeTick())
 		}

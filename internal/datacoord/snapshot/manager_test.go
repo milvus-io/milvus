@@ -58,8 +58,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util"
@@ -69,6 +69,10 @@ import (
 
 type restoreAllocatorTarget struct {
 	allocator.Allocator
+}
+
+func (*restoreAllocatorTarget) AllocN(int64) (int64, int64, error) {
+	panic("AllocN must be patched in tests")
 }
 
 type restoreWALAccesserTarget struct {
@@ -1349,7 +1353,8 @@ func TestRestoreSnapshot_ValidationFailsCloseBroadcasterBeforeRollback(t *testin
 	defer mAlloc.UnPatch()
 
 	sm := &Manager{
-		Broker:          NewRestoreAbsentTargetBroker(t),
+		Broker:          &restoreBrokerTarget{},
+		meta:            NewRestoreAbsentTargetMeta(),
 		Allocator:       mockAlloc,
 		snapshotMeta:    &SnapshotMeta{},
 		copySegmentMeta: &copysegment.Meta{},
@@ -1436,7 +1441,8 @@ func TestRestoreSnapshot_ValidationFailsRollbackAlsoFails(t *testing.T) {
 	defer mAlloc.UnPatch()
 
 	sm := &Manager{
-		Broker:          NewRestoreAbsentTargetBroker(t),
+		Broker:          &restoreBrokerTarget{},
+		meta:            NewRestoreAbsentTargetMeta(),
 		Allocator:       mockAlloc,
 		snapshotMeta:    &SnapshotMeta{},
 		copySegmentMeta: &copysegment.Meta{},
@@ -1504,7 +1510,8 @@ func TestRestoreSnapshot_ValidationPassesThenBroadcastSucceeds(t *testing.T) {
 	defer mAlloc.UnPatch()
 
 	sm := &Manager{
-		Broker:          NewRestoreAbsentTargetBroker(t),
+		Broker:          &restoreBrokerTarget{},
+		meta:            NewRestoreAbsentTargetMeta(),
 		Allocator:       mockAlloc,
 		snapshotMeta:    &SnapshotMeta{},
 		copySegmentMeta: &copysegment.Meta{},
@@ -1577,7 +1584,8 @@ func TestRestoreSnapshot_PinTTLReadFromParamtable(t *testing.T) {
 	defer mRead.UnPatch()
 
 	sm := &Manager{
-		Broker:          NewRestoreAbsentTargetBroker(t),
+		Broker:          &restoreBrokerTarget{},
+		meta:            NewRestoreAbsentTargetMeta(),
 		Allocator:       &restoreAllocatorTarget{},
 		snapshotMeta:    &SnapshotMeta{},
 		copySegmentMeta: &copysegment.Meta{},
@@ -1626,7 +1634,8 @@ func TestRestoreSnapshot_FailurePathUnpinsWithCorrectPinID(t *testing.T) {
 	defer m1.UnPatch()
 
 	sm := &Manager{
-		Broker:          NewRestoreAbsentTargetBroker(t),
+		Broker:          &restoreBrokerTarget{},
+		meta:            NewRestoreAbsentTargetMeta(),
 		Allocator:       &restoreAllocatorTarget{},
 		snapshotMeta:    &SnapshotMeta{},
 		copySegmentMeta: &copysegment.Meta{},
@@ -1720,7 +1729,8 @@ func TestRestoreSnapshot_PostPhase2FailurePathsUnpinAndRollback(t *testing.T) {
 			}()
 
 			sm := &Manager{
-				Broker:          NewRestoreAbsentTargetBroker(t),
+				Broker:          &restoreBrokerTarget{},
+				meta:            NewRestoreAbsentTargetMeta(),
 				Allocator:       &restoreAllocatorTarget{},
 				snapshotMeta:    &SnapshotMeta{},
 				copySegmentMeta: &copysegment.Meta{},
@@ -1787,7 +1797,8 @@ func TestRestoreSnapshot_AllocIDFailureUnpinsAndRollsBack(t *testing.T) {
 	defer mAlloc.UnPatch()
 
 	sm := &Manager{
-		Broker:          NewRestoreAbsentTargetBroker(t),
+		Broker:          &restoreBrokerTarget{},
+		meta:            NewRestoreAbsentTargetMeta(),
 		Allocator:       mockAlloc,
 		snapshotMeta:    &SnapshotMeta{},
 		copySegmentMeta: &copysegment.Meta{},
@@ -1832,7 +1843,6 @@ func TestCreateRestoreJob_PropagatesPinID(t *testing.T) {
 	}
 
 	mockAlloc := allocator.NewMockAllocator(t)
-	mockAlloc.EXPECT().AllocN(int64(0)).Return(int64(0), int64(0), nil)
 
 	mockHandler := meta.NewNMockHandler(t)
 	mockHandler.EXPECT().GetCollection(mock.Anything, int64(200)).Return(&meta.CollectionInfo{
@@ -2008,11 +2018,15 @@ func TestCreateRestoreJob_AllocNFailurePropagates(t *testing.T) {
 	ctx := context.Background()
 	snapshotData := &snapshotstorage.SnapshotData{
 		SnapshotInfo: &datapb.SnapshotInfo{Name: "snap1", CollectionId: 100},
-		Segments:     []*datapb.SegmentDescription{},
+		Segments:     []*datapb.SegmentDescription{{SegmentId: 11}},
 	}
 
-	mockAlloc := allocator.NewMockAllocator(t)
-	mockAlloc.EXPECT().AllocN(int64(0)).Return(int64(0), int64(0), errors.New("alloc segment IDs failed"))
+	mockAlloc := &restoreAllocatorTarget{}
+	alloc := mockey.Mock((*restoreAllocatorTarget).AllocN).To(func(_ *restoreAllocatorTarget, count int64) (int64, int64, error) {
+		require.EqualValues(t, 1, count)
+		return 0, 0, errors.New("alloc segment IDs failed")
+	}).Build()
+	defer alloc.UnPatch()
 
 	addJobCalled := false
 	mAddJob := mockey.Mock((*copysegment.Meta).AddJob).To(
@@ -2028,7 +2042,7 @@ func TestCreateRestoreJob_AllocNFailurePropagates(t *testing.T) {
 		copySegmentMeta: &copysegment.Meta{},
 	}
 
-	err := sm.createRestoreJob(ctx, int64(200), nil, nil, snapshotData, int64(42), int64(7), false, "", "", "")
+	err := sm.createRestoreJob(ctx, int64(200), nil, nil, snapshotData, int64(42), int64(7), true, "", "", "")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "alloc segment IDs failed")
 	assert.False(t, addJobCalled, "AddJob must not be called when segment-ID allocation fails")
@@ -2067,7 +2081,8 @@ func TestRestoreSnapshot_StartBroadcasterFailureUnpinsAndRollsBack(t *testing.T)
 	defer mAlloc.UnPatch()
 
 	sm := &Manager{
-		Broker:          NewRestoreAbsentTargetBroker(t),
+		Broker:          &restoreBrokerTarget{},
+		meta:            NewRestoreAbsentTargetMeta(),
 		Allocator:       mockAlloc,
 		snapshotMeta:    &SnapshotMeta{},
 		copySegmentMeta: &copysegment.Meta{},
@@ -2231,12 +2246,9 @@ func TestSnapshotManager_RestoreIndexes_FMINDEXNilVersionManager(t *testing.T) {
 	mockAllocator.EXPECT().AllocID(mock.Anything).Return(int64(1001), nil).Once()
 
 	mockBroker := broker.NewMockBroker(t)
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(
-		&milvuspb.DescribeCollectionResponse{DbName: "default"}, nil,
-	).Once()
 
 	sm := NewSnapshotManager(
-		nil,
+		meta.NewMetaWithCollections(&meta.CollectionInfo{ID: collectionID, DatabaseName: "default"}),
 		nil,
 		nil,
 		mockAllocator,
@@ -2406,6 +2418,7 @@ func TestSnapshotManager_RestoreData_Success(t *testing.T) {
 		snapshotS3Location string,
 		externalSpec string,
 		snapshotFingerprint string,
+		publication ...*restorePublication,
 	) error {
 		assert.Equal(t, int64(200), collectionID)
 		assert.Equal(t, int64(12345), jobID)
@@ -2656,6 +2669,7 @@ func TestSnapshotManager_RestoreData_CreateJobError(t *testing.T) {
 		snapshotS3Location string,
 		externalSpec string,
 		snapshotFingerprint string,
+		publication ...*restorePublication,
 	) error {
 		assert.False(t, external)
 		assert.Empty(t, snapshotS3Location)
@@ -2729,21 +2743,12 @@ func TestSnapshotManager_BuildPartitionMapping_Success(t *testing.T) {
 		},
 	}
 
-	// Mock broker.ShowPartitions
-	mockShowPartitions := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "ShowPartitions")).To(func(
-		b *broker.MockBroker,
-		ctx context.Context,
-		collectionID int64,
-	) (*milvuspb.ShowPartitionsResponse, error) {
-		return &milvuspb.ShowPartitionsResponse{
-			PartitionNames: []string{"_default", "part1", "part2"},
-			PartitionIDs:   []int64{10, 20, 30},
-		}, nil
-	}).Build()
-	defer mockShowPartitions.UnPatch()
-
 	sm := &Manager{
-		Broker: broker.NewMockBroker(t),
+		meta: meta.NewMetaWithCollections(&meta.CollectionInfo{
+			ID:                 200,
+			Partitions:         []int64{10, 20, 30},
+			PartitionIDsByName: map[string]int64{"_default": 10, "part1": 20, "part2": 30},
+		}),
 	}
 
 	result, err := sm.buildPartitionMapping(ctx, snapshotData, 200)
@@ -2755,7 +2760,7 @@ func TestSnapshotManager_BuildPartitionMapping_Success(t *testing.T) {
 	assert.Equal(t, int64(30), result[3]) // part2: 3 -> 30
 }
 
-func TestSnapshotManager_BuildPartitionMapping_ShowPartitionsError(t *testing.T) {
+func TestSnapshotManager_BuildPartitionMapping_CollectionNotFound(t *testing.T) {
 	ctx := context.Background()
 
 	snapshotData := &snapshotstorage.SnapshotData{
@@ -2764,27 +2769,38 @@ func TestSnapshotManager_BuildPartitionMapping_ShowPartitionsError(t *testing.T)
 		},
 	}
 
-	expectedErr := errors.New("show partitions error")
+	sm := &Manager{meta: meta.NewMetaWithCollections()}
 
-	// Mock broker.ShowPartitions to return error
-	mockShowPartitions := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "ShowPartitions")).To(func(
-		b *broker.MockBroker,
-		ctx context.Context,
-		collectionID int64,
-	) (*milvuspb.ShowPartitionsResponse, error) {
-		return nil, expectedErr
-	}).Build()
-	defer mockShowPartitions.UnPatch()
+	result, err := sm.buildPartitionMapping(ctx, snapshotData, 200)
+
+	assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
+	assert.Nil(t, result)
+}
+
+// A snapshot partition must not map onto a Dropping partition that still
+// holds its name.
+func TestSnapshotManager_BuildPartitionMapping_DroppingPartition(t *testing.T) {
+	ctx := context.Background()
+
+	snapshotData := &snapshotstorage.SnapshotData{
+		Collection: &datapb.CollectionDescription{
+			Partitions: map[string]int64{"_default": 1, "part1": 2},
+		},
+	}
 
 	sm := &Manager{
-		Broker: broker.NewMockBroker(t),
+		meta: meta.NewMetaWithCollections(&meta.CollectionInfo{
+			ID:                 200,
+			Partitions:         []int64{10},
+			DroppingPartitions: []int64{20},
+			PartitionIDsByName: map[string]int64{"_default": 10, "part1": 20},
+		}),
 	}
 
 	result, err := sm.buildPartitionMapping(ctx, snapshotData, 200)
 
-	assert.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrDataIntegrity)
 	assert.Nil(t, result)
-	assert.Equal(t, expectedErr, err)
 }
 
 // --- Test validateCMEKCompatibility ---
@@ -2803,21 +2819,12 @@ func TestSnapshotManager_ValidateCMEKCompatibility_NonEncryptedSnapshot(t *testi
 		},
 	}
 
-	// Mock DescribeDatabase to return non-encrypted database
-	mockDescribeDB := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "DescribeDatabase")).To(func(
-		b *broker.MockBroker,
-		ctx context.Context,
-		dbName string,
-	) (*rootcoordpb.DescribeDatabaseResponse, error) {
-		return &rootcoordpb.DescribeDatabaseResponse{
-			DbName:     dbName,
-			Properties: []*commonpb.KeyValuePair{},
-		}, nil
-	}).Build()
-	defer mockDescribeDB.UnPatch()
-
+	// Target database: non-encrypted database
 	sm := &Manager{
-		Broker: broker.NewMockBroker(t),
+		meta: meta.NewMetaWithDatabases(&metacache.DatabaseInfo{
+			Name:       "target_db",
+			Properties: []*commonpb.KeyValuePair{},
+		}),
 	}
 
 	// Should pass - non-encrypted snapshot to non-encrypted database
@@ -2840,24 +2847,15 @@ func TestSnapshotManager_ValidateCMEKCompatibility_SameEZDatabase(t *testing.T) 
 		},
 	}
 
-	// Mock DescribeDatabase to return same ezID
-	mockDescribeDB := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "DescribeDatabase")).To(func(
-		b *broker.MockBroker,
-		ctx context.Context,
-		dbName string,
-	) (*rootcoordpb.DescribeDatabaseResponse, error) {
-		return &rootcoordpb.DescribeDatabaseResponse{
-			DbName: dbName,
+	// Target database: same ezID
+	sm := &Manager{
+		meta: meta.NewMetaWithDatabases(&metacache.DatabaseInfo{
+			Name: "target_db",
 			Properties: []*commonpb.KeyValuePair{
 				{Key: "cipher.ezID", Value: "12345"},
 				{Key: "cipher.key", Value: "encrypted_root_key"},
 			},
-		}, nil
-	}).Build()
-	defer mockDescribeDB.UnPatch()
-
-	sm := &Manager{
-		Broker: broker.NewMockBroker(t),
+		}),
 	}
 
 	// Should pass - same encryption zone
@@ -2880,23 +2878,14 @@ func TestSnapshotManager_ValidateCMEKCompatibility_NonEncryptedDatabase(t *testi
 		},
 	}
 
-	// Mock DescribeDatabase to return non-encrypted database
-	mockDescribeDB := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "DescribeDatabase")).To(func(
-		b *broker.MockBroker,
-		ctx context.Context,
-		dbName string,
-	) (*rootcoordpb.DescribeDatabaseResponse, error) {
-		return &rootcoordpb.DescribeDatabaseResponse{
-			DbName:     dbName,
+	// Target database: non-encrypted database
+	sm := &Manager{
+		meta: meta.NewMetaWithDatabases(&metacache.DatabaseInfo{
+			Name:       "target_db",
 			Properties: []*commonpb.KeyValuePair{
 				// No cipher.enabled property or set to false
 			},
-		}, nil
-	}).Build()
-	defer mockDescribeDB.UnPatch()
-
-	sm := &Manager{
-		Broker: broker.NewMockBroker(t),
+		}),
 	}
 
 	// Should fail - cannot restore encrypted snapshot to non-encrypted database
@@ -2921,25 +2910,16 @@ func TestSnapshotManager_ValidateCMEKCompatibility_DifferentEZDatabase(t *testin
 		},
 	}
 
-	// Mock DescribeDatabase to return different ezID (67890)
-	mockDescribeDB := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "DescribeDatabase")).To(func(
-		b *broker.MockBroker,
-		ctx context.Context,
-		dbName string,
-	) (*rootcoordpb.DescribeDatabaseResponse, error) {
-		return &rootcoordpb.DescribeDatabaseResponse{
-			DbName: dbName,
+	// Target database: different ezID (67890)
+	sm := &Manager{
+		meta: meta.NewMetaWithDatabases(&metacache.DatabaseInfo{
+			Name: "target_db",
 			Properties: []*commonpb.KeyValuePair{
 				{Key: "cipher.enabled", Value: "true"},
 				{Key: "cipher.ezID", Value: "67890"},
 				{Key: "cipher.key", Value: "test-root-key"},
 			},
-		}, nil
-	}).Build()
-	defer mockDescribeDB.UnPatch()
-
-	sm := &Manager{
-		Broker: broker.NewMockBroker(t),
+		}),
 	}
 
 	// Should fail - different encryption zone
@@ -2952,7 +2932,7 @@ func TestSnapshotManager_ValidateCMEKCompatibility_DifferentEZDatabase(t *testin
 	assert.Contains(t, err.Error(), "67890")
 }
 
-func TestSnapshotManager_ValidateCMEKCompatibility_DescribeDatabaseError(t *testing.T) {
+func TestSnapshotManager_ValidateCMEKCompatibility_DatabaseNotFound(t *testing.T) {
 	ctx := context.Background()
 
 	// Encrypted snapshot with ezID = 12345
@@ -2966,26 +2946,12 @@ func TestSnapshotManager_ValidateCMEKCompatibility_DescribeDatabaseError(t *test
 		},
 	}
 
-	expectedErr := errors.New("describe database error")
+	// The target database does not exist.
+	sm := &Manager{meta: meta.NewMetaWithDatabases()}
 
-	// Mock DescribeDatabase to return error
-	mockDescribeDB := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "DescribeDatabase")).To(func(
-		b *broker.MockBroker,
-		ctx context.Context,
-		dbName string,
-	) (*rootcoordpb.DescribeDatabaseResponse, error) {
-		return nil, expectedErr
-	}).Build()
-	defer mockDescribeDB.UnPatch()
-
-	sm := &Manager{
-		Broker: broker.NewMockBroker(t),
-	}
-
-	// Should return error from DescribeDatabase
 	err := sm.validateCMEKCompatibility(ctx, snapshotData, "target_db")
 
-	assert.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrDatabaseNotFound)
 	assert.Contains(t, err.Error(), "failed to describe target database")
 }
 
@@ -3003,25 +2969,16 @@ func TestSnapshotManager_ValidateCMEKCompatibility_NonEncryptedToEncrypted(t *te
 		},
 	}
 
-	// Mock DescribeDatabase to return encrypted database
-	mockDescribeDB := mockey.Mock(mockey.GetMethod(&broker.MockBroker{}, "DescribeDatabase")).To(func(
-		b *broker.MockBroker,
-		ctx context.Context,
-		dbName string,
-	) (*rootcoordpb.DescribeDatabaseResponse, error) {
-		return &rootcoordpb.DescribeDatabaseResponse{
-			DbName: dbName,
+	// Target database: encrypted database
+	sm := &Manager{
+		meta: meta.NewMetaWithDatabases(&metacache.DatabaseInfo{
+			Name: "target_db",
 			Properties: []*commonpb.KeyValuePair{
 				{Key: "cipher.enabled", Value: "true"},
 				{Key: "cipher.ezID", Value: "12345"},
 				{Key: "cipher.key", Value: "test-root-key"},
 			},
-		}, nil
-	}).Build()
-	defer mockDescribeDB.UnPatch()
-
-	sm := &Manager{
-		Broker: broker.NewMockBroker(t),
+		}),
 	}
 
 	// Should fail - cannot restore non-encrypted collection to CMEK-encrypted database
@@ -3059,18 +3016,19 @@ func TestSnapshotManager_RestoreCollection_SchemaNameAndDbName(t *testing.T) {
 	// Capture the CreateCollectionRequest to verify schema modifications
 	var capturedReq *milvuspb.CreateCollectionRequest
 
+	m := meta.NewMetaWithCollections()
 	mockBroker := broker.NewMockBroker(t)
 	mockBroker.EXPECT().CreateCollection(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *milvuspb.CreateCollectionRequest) {
 		capturedReq = req
+		// RootCoord publishes the new collection before CreateCollection returns.
+		m.AddCollection(&meta.CollectionInfo{
+			ID: 12345, DatabaseName: req.GetDbName(), Schema: &schemapb.CollectionSchema{Name: req.GetCollectionName()},
+		})
 	}).Return(nil)
-
-	mockBroker.EXPECT().DescribeCollectionByName(mock.Anything, targetDbName, targetCollectionName).Return(&milvuspb.DescribeCollectionResponse{
-		Status:       merr.Success(),
-		CollectionID: 12345,
-	}, nil)
 
 	sm := &Manager{
 		Broker: mockBroker,
+		meta:   m,
 	}
 
 	collectionID, err := sm.RestoreCollection(ctx, snapshotData, targetCollectionName, targetDbName)
@@ -3130,23 +3088,19 @@ func TestSnapshotManager_RestoreCollection_PreservesMetadata(t *testing.T) {
 			originalSchemaProperties := common.CloneKeyValuePairs(collection.GetSchema().GetProperties())
 
 			var capturedReq *milvuspb.CreateCollectionRequest
+			m := meta.NewMetaWithCollections()
 			fakeBroker := &meta.EmbeddedBroker{}
 			mockCreateCollection := mockey.Mock((*meta.EmbeddedBroker).CreateCollection).To(
 				func(_ *meta.EmbeddedBroker, _ context.Context, req *milvuspb.CreateCollectionRequest) error {
 					capturedReq = proto.Clone(req).(*milvuspb.CreateCollectionRequest)
+					m.AddCollection(&meta.CollectionInfo{
+						ID: 12345, DatabaseName: req.GetDbName(), Schema: &schemapb.CollectionSchema{Name: req.GetCollectionName()},
+					})
 					return nil
 				}).Build()
 			defer mockCreateCollection.UnPatch()
 
-			mockDescribeCollection := mockey.Mock((*meta.EmbeddedBroker).DescribeCollectionByName).
-				Return(&milvuspb.DescribeCollectionResponse{
-					Status:       merr.Success(),
-					CollectionID: 12345,
-				}, nil).
-				Build()
-			defer mockDescribeCollection.UnPatch()
-
-			sm := &Manager{Broker: fakeBroker}
+			sm := &Manager{Broker: fakeBroker, meta: m}
 			collectionID, err := sm.RestoreCollection(
 				context.Background(),
 				&snapshotstorage.SnapshotData{Collection: collection},
@@ -5398,7 +5352,7 @@ func TestSnapshotManager_RestoreExternalData_DeterministicMappingErrorsCreateFai
 	tests := []struct {
 		name             string
 		snapshotData     *snapshotstorage.SnapshotData
-		targetPartitions *milvuspb.ShowPartitionsResponse
+		targetPartitions map[string]int64
 		targetChannels   []meta.RWChannel
 		reason           string
 	}{
@@ -5416,12 +5370,9 @@ func TestSnapshotManager_RestoreExternalData_DeterministicMappingErrorsCreateFai
 					ChannelName: "source-channel",
 				}},
 			},
-			targetPartitions: &milvuspb.ShowPartitionsResponse{
-				PartitionNames: []string{"other-partition"},
-				PartitionIDs:   []int64{20},
-			},
-			targetChannels: []meta.RWChannel{&meta.ChannelMeta{Name: "target-channel"}},
-			reason:         "partition mapping failed",
+			targetPartitions: map[string]int64{"other-partition": 20},
+			targetChannels:   []meta.RWChannel{&meta.ChannelMeta{Name: "target-channel"}},
+			reason:           "partition mapping failed",
 		},
 		{
 			name: "channel count mismatch",
@@ -5437,12 +5388,9 @@ func TestSnapshotManager_RestoreExternalData_DeterministicMappingErrorsCreateFai
 					ChannelName: "source-channel-1",
 				}},
 			},
-			targetPartitions: &milvuspb.ShowPartitionsResponse{
-				PartitionNames: []string{"source-partition"},
-				PartitionIDs:   []int64{20},
-			},
-			targetChannels: []meta.RWChannel{&meta.ChannelMeta{Name: "target-channel"}},
-			reason:         "channel mapping failed",
+			targetPartitions: map[string]int64{"source-partition": 20},
+			targetChannels:   []meta.RWChannel{&meta.ChannelMeta{Name: "target-channel"}},
+			reason:           "channel mapping failed",
 		},
 		{
 			name: "segment channel missing from mapping",
@@ -5458,12 +5406,9 @@ func TestSnapshotManager_RestoreExternalData_DeterministicMappingErrorsCreateFai
 					ChannelName: "missing-channel",
 				}},
 			},
-			targetPartitions: &milvuspb.ShowPartitionsResponse{
-				PartitionNames: []string{"source-partition"},
-				PartitionIDs:   []int64{20},
-			},
-			targetChannels: []meta.RWChannel{&meta.ChannelMeta{Name: "target-channel"}},
-			reason:         "restore job creation failed",
+			targetPartitions: map[string]int64{"source-partition": 20},
+			targetChannels:   []meta.RWChannel{&meta.ChannelMeta{Name: "target-channel"}},
+			reason:           "restore job creation failed",
 		},
 	}
 
@@ -5481,10 +5426,10 @@ func TestSnapshotManager_RestoreExternalData_DeterministicMappingErrorsCreateFai
 			defer mockRead.UnPatch()
 
 			fakeBroker := &restoreBrokerTarget{}
-			mockShowPartitions := mockey.Mock((*restoreBrokerTarget).ShowPartitions).
-				Return(test.targetPartitions, nil).
-				Build()
-			defer mockShowPartitions.UnPatch()
+			target := &meta.CollectionInfo{ID: 200, PartitionIDsByName: test.targetPartitions}
+			for _, id := range test.targetPartitions {
+				target.Partitions = append(target.Partitions, id)
+			}
 
 			alloc := &restoreAllocatorTarget{}
 			mockAllocN := mockey.Mock((*restoreAllocatorTarget).AllocN).
@@ -5504,6 +5449,7 @@ func TestSnapshotManager_RestoreExternalData_DeterministicMappingErrorsCreateFai
 			defer mockAddJob.UnPatch()
 
 			sm := &Manager{
+				meta:            meta.NewMetaWithCollections(target),
 				snapshotMeta:    &SnapshotMeta{},
 				copySegmentMeta: copyMeta,
 				Allocator:       alloc,
@@ -5673,10 +5619,8 @@ func TestRestoreExternalSnapshot_BroadcastCarriesExternalSpec(t *testing.T) {
 
 	capture := &meta.CaptureBroadcastAPI{}
 	targetBroker := &restoreBrokerTarget{}
-	mockDescribeTarget := mockey.Mock((*restoreBrokerTarget).DescribeCollectionByName).
-		Return(nil, merr.WrapErrCollectionNotFound("target_collection")).Build()
-	defer mockDescribeTarget.UnPatch()
 	sm := &Manager{
+		meta:         NewRestoreAbsentTargetMeta(),
 		snapshotMeta: &SnapshotMeta{},
 		Allocator:    alloc,
 		Broker:       targetBroker,
@@ -5741,14 +5685,14 @@ func TestRestoreExternalSnapshot_RejectsExistingTargetUnderNameLock(t *testing.T
 	defer mockResolve.UnPatch()
 
 	targetBroker := &restoreBrokerTarget{}
-	mockDescribeTarget := mockey.Mock((*restoreBrokerTarget).DescribeCollectionByName).To(
-		func(_ *restoreBrokerTarget, _ context.Context, dbName, collectionName string) (*milvuspb.DescribeCollectionResponse, error) {
+	mockLookupTarget := mockey.Mock((*meta.Meta).GetCollectionByName).To(
+		func(_ *meta.Meta, dbName, collectionName string) *meta.CollectionInfo {
 			assert.Equal(t, "target_db", dbName)
 			assert.Equal(t, "target_collection", collectionName)
 			assert.False(t, phase0Lock.CloseCalled.Load())
-			return &milvuspb.DescribeCollectionResponse{CollectionID: 200}, nil
+			return &meta.CollectionInfo{ID: 200}
 		}).Build()
-	defer mockDescribeTarget.UnPatch()
+	defer mockLookupTarget.UnPatch()
 
 	readCalled := false
 	mockReadExternal := mockey.Mock((*SnapshotMeta).ReadAndValidateExternalSnapshotDataWithChunkManager).To(
@@ -5766,6 +5710,7 @@ func TestRestoreExternalSnapshot_RejectsExistingTargetUnderNameLock(t *testing.T
 	defer mockReadExternal.UnPatch()
 
 	sm := &Manager{
+		meta:         NewRestoreAbsentTargetMeta(),
 		snapshotMeta: &SnapshotMeta{},
 		Broker:       targetBroker,
 	}
@@ -5807,28 +5752,35 @@ func TestRestoreTargetLock_KeyScope(t *testing.T) {
 func TestRestoreSnapshot_AdmissionFailureReleasesLocks(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
-		lookupErr error
+		absent    bool
+		dbMissing bool
 		lockErr   error
 		pinErr    error
 		want      error
 	}{
 		{name: "existing target", want: merr.ErrParameterInvalid},
-		{name: "lookup failure", lookupErr: merr.ErrServiceUnavailable, want: merr.ErrServiceUnavailable},
-		{name: "database missing", lookupErr: merr.ErrDatabaseNotFound, want: merr.ErrDatabaseNotFound},
+		{name: "database missing", dbMissing: true, want: merr.ErrDatabaseNotFound},
 		{name: "phase zero lock failure", lockErr: merr.ErrServiceUnavailable, want: merr.ErrServiceUnavailable},
-		{name: "pin failure", lookupErr: merr.ErrCollectionNotFound, pinErr: merr.ErrSnapshotNotFound, want: merr.ErrSnapshotNotFound},
+		{name: "pin failure", absent: true, pinErr: merr.ErrSnapshotNotFound, want: merr.ErrSnapshotNotFound},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			closed := 0
-			mDescribe := mockey.Mock((*restoreBrokerTarget).DescribeCollectionByName).To(
-				func(*restoreBrokerTarget, context.Context, string, string) (*milvuspb.DescribeCollectionResponse, error) {
+			m := meta.NewMetaWithDatabases()
+			if !tc.dbMissing {
+				m = meta.NewMetaWithDatabases(&metacache.DatabaseInfo{Name: "default"})
+			}
+			mLookup := mockey.Mock((*meta.Meta).GetCollectionByName).To(
+				func(*meta.Meta, string, string) *meta.CollectionInfo {
 					assert.Zero(t, closed, "admission must hold the phase zero lock")
-					return &milvuspb.DescribeCollectionResponse{CollectionID: 200}, tc.lookupErr
+					if tc.absent {
+						return nil
+					}
+					return &meta.CollectionInfo{ID: 200}
 				}).Build()
-			defer mDescribe.UnPatch()
+			defer mLookup.UnPatch()
 			mPin := mockey.Mock((*SnapshotMeta).PinSnapshot).Return(int64(0), 0, tc.pinErr).Build()
 			defer mPin.UnPatch()
-			sm := &Manager{Broker: &restoreBrokerTarget{}, snapshotMeta: &SnapshotMeta{}}
+			sm := &Manager{Broker: &restoreBrokerTarget{}, meta: m, snapshotMeta: &SnapshotMeta{}}
 			jobID, err := sm.RestoreSnapshot(context.Background(), 100, "snap", "target", "default",
 				func(context.Context, int64, string, string, string) (broadcaster.BroadcastAPI, error) {
 					if tc.lockErr != nil {
@@ -5892,16 +5844,16 @@ func TestRestoreSnapshot_ConcurrentTargetAdmission(t *testing.T) {
 				case <-ctx.Done():
 				}
 			}
-			mDescribe := mockey.Mock((*restoreBrokerTarget).DescribeCollectionByName).To(
-				func(_ *restoreBrokerTarget, _ context.Context, db, coll string) (*milvuspb.DescribeCollectionResponse, error) {
+			mLookup := mockey.Mock((*meta.Meta).GetCollectionByName).To(
+				func(_ *meta.Meta, db, coll string) *meta.CollectionInfo {
 					mu.Lock()
 					defer mu.Unlock()
 					if id, ok := targets[restoreTarget{dbName: db, collectionName: coll}]; ok {
-						return &milvuspb.DescribeCollectionResponse{CollectionID: id}, nil
+						return &meta.CollectionInfo{ID: id}
 					}
-					return nil, merr.WrapErrCollectionNotFound(coll)
+					return nil
 				}).Build()
-			defer mDescribe.UnPatch()
+			defer mLookup.UnPatch()
 			mCreate := mockey.Mock((*Manager).RestoreCollection).To(
 				func(_ *Manager, _ context.Context, _ *snapshotstorage.SnapshotData, coll, db string) (int64, error) {
 					id := int64(creates.Add(1))
@@ -5946,7 +5898,10 @@ func TestRestoreSnapshot_ConcurrentTargetAdmission(t *testing.T) {
 			defer mControl.UnPatch()
 			streaming.SetWALForTest(&restoreWALAccesserTarget{})
 			defer streaming.SetWALForTest(oldWAL)
-			sm := &Manager{Broker: &restoreBrokerTarget{}, Allocator: &restoreAllocatorTarget{}, snapshotMeta: &SnapshotMeta{}}
+			sm := &Manager{
+				Broker: &restoreBrokerTarget{}, meta: NewRestoreAbsentTargetMeta(),
+				Allocator: &restoreAllocatorTarget{}, snapshotMeta: &SnapshotMeta{},
+			}
 			startPhase0 := func() (broadcaster.BroadcastAPI, error) {
 				phase0Calls.Add(1)
 				return &mockBroadcastAPI{closeFn: func() {}}, nil
@@ -6304,7 +6259,7 @@ func TestRestoreSnapshot_PinOwnershipOnFailure(t *testing.T) {
 			// dependency reports a job ID alongside an error.
 			mFinish := mockey.Mock((*Manager).finishRestoreSnapshot).Return(tc.jobID, merr.ErrServiceInternal).Build()
 			defer mFinish.UnPatch()
-			sm := &Manager{Broker: NewRestoreAbsentTargetBroker(t), snapshotMeta: &SnapshotMeta{}}
+			sm := &Manager{Broker: &restoreBrokerTarget{}, meta: NewRestoreAbsentTargetMeta(), snapshotMeta: &SnapshotMeta{}}
 			_, err := sm.RestoreSnapshot(context.Background(), 100, "snap", "target", "default",
 				func(context.Context, int64, string, string, string) (broadcaster.BroadcastAPI, error) {
 					return &mockBroadcastAPI{closeFn: func() {}}, nil
@@ -6362,7 +6317,7 @@ func TestRestoreExternalSnapshot_PreparationFailuresReleaseLocks(t *testing.T) {
 					return 77, nil
 				}).Build()
 			defer mFinish.UnPatch()
-			sm := &Manager{Broker: NewRestoreAbsentTargetBroker(t), snapshotMeta: &SnapshotMeta{}}
+			sm := &Manager{Broker: &restoreBrokerTarget{}, meta: NewRestoreAbsentTargetMeta(), snapshotMeta: &SnapshotMeta{}}
 			id, err := sm.RestoreExternalSnapshot(context.Background(), uri, "target", "default", "",
 				func(context.Context, string, string) (broadcaster.BroadcastAPI, error) {
 					if stage == "phase zero lock" {
@@ -6388,6 +6343,38 @@ func TestRestoreExternalSnapshot_PreparationFailuresReleaseLocks(t *testing.T) {
 			}
 			if stage != "empty URI" && stage != "phase zero lock" {
 				assert.Equal(t, 1, closed)
+			}
+		})
+	}
+}
+
+func TestSnapshotManager_ValidateRestoreTargetAbsent(t *testing.T) {
+	tests := []struct {
+		name    string
+		db      string
+		coll    string
+		wantErr error
+	}{
+		{"absent", "db1", "new", nil},
+		{"existing name", "db1", "taken", merr.ErrParameterInvalid},
+		{"database missing", "db2", "new", merr.ErrDatabaseNotFound},
+		// RootCoord accepts the name of a collection that is being dropped.
+		{"dropping collection's name", "db1", "dropping", nil},
+	}
+	m := meta.NewMetaWithDatabases(&metacache.DatabaseInfo{Name: "db1"})
+	m.AddCollection(&meta.CollectionInfo{ID: 1, DatabaseName: "db1", Schema: &schemapb.CollectionSchema{Name: "taken"}})
+	m.AddCollection(&meta.CollectionInfo{
+		ID: 2, DatabaseName: "db1", Schema: &schemapb.CollectionSchema{Name: "dropping"},
+		State: etcdpb.CollectionState_CollectionDropping,
+	})
+	sm := &Manager{meta: m}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := sm.validateRestoreTargetAbsent(context.Background(), tc.db, tc.coll)
+			if tc.wantErr == nil {
+				assert.NoError(t, err)
+			} else {
+				assert.ErrorIs(t, err, tc.wantErr)
 			}
 		})
 	}

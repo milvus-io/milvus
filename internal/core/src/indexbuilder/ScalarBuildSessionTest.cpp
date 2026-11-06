@@ -9,6 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <arrow/builder.h>
 #include <gtest/gtest.h>
 
@@ -129,7 +131,9 @@ class ScalarBuildSessionTest : public ::testing::Test {
         return index::LoaderRegistry::Instance()
             .Lookup(resolved_family)
             .Load({index::OpenedIndexSource{std::move(source)},
-                   std::move(options)});
+                   std::move(options),
+                   milvus::index::test::TestIndexCacheConfig()})
+            ->CreateReader(nullptr);
     }
 
     std::shared_ptr<storage::LocalDirectory> root_;

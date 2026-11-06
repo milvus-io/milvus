@@ -41,7 +41,7 @@ func TestServer(t *testing.T) {
 		Build()
 
 	ctx := context.Background()
-	err = newServer.Start(ctx, nil)
+	err = newServer.Start(ctx)
 	assert.NoError(t, err)
 	newServer.Stop()
 }

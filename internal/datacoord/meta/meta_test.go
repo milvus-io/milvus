@@ -34,7 +34,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
@@ -55,7 +54,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -159,7 +157,6 @@ func TestMeta_Basic(t *testing.T) {
 		metakv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(nil, nil, nil).Maybe()
 		catalog := datacoord.NewCatalog(metakv, "", "")
 		broker := broker.NewMockBroker(t)
-		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 		meta, err := NewMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker, NoDomainMetas)
 		assert.NoError(t, err)
 
@@ -1204,7 +1201,6 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		metakv.EXPECT().Has(mock.Anything, mock.Anything).Return(false, nil).Maybe()
 		catalog := datacoord.NewCatalog(metakv, "", "")
 		broker := broker.NewMockBroker(t)
-		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 		meta, err := NewMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker, NoDomainMetas)
 		assert.NoError(t, err)
 
@@ -2384,254 +2380,6 @@ func Test_meta_GcConfirm(t *testing.T) {
 	assert.False(t, m.GcConfirm(context.TODO(), 100, 10000))
 }
 
-func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
-	ms := metacache.NewMetaStore(nil)
-	t.Run("fail to list database", func(t *testing.T) {
-		m := &Meta{
-			MetaStore: ms,
-		}
-		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(nil, errors.New("list database failed, mocked"))
-		err := m.ReloadCollectionsFromRootcoord(context.TODO(), mockBroker)
-		assert.Error(t, err)
-	})
-
-	t.Run("fail to show collections", func(t *testing.T) {
-		m := &Meta{
-			MetaStore: ms,
-		}
-		mockBroker := broker.NewMockBroker(t)
-
-		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			DbNames: []string{"db1"},
-		}, nil)
-		mockBroker.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(nil, errors.New("show collections failed, mocked"))
-		err := m.ReloadCollectionsFromRootcoord(context.TODO(), mockBroker)
-		assert.Error(t, err)
-	})
-
-	t.Run("fail to describe collection", func(t *testing.T) {
-		m := &Meta{
-			MetaStore: ms,
-		}
-		mockBroker := broker.NewMockBroker(t)
-
-		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			DbNames: []string{"db1"},
-		}, nil)
-		mockBroker.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
-			CollectionNames: []string{"coll1"},
-			CollectionIds:   []int64{1000},
-		}, nil)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(nil, errors.New("describe collection failed, mocked"))
-		err := m.ReloadCollectionsFromRootcoord(context.TODO(), mockBroker)
-		assert.Error(t, err)
-	})
-
-	t.Run("fail to show partitions", func(t *testing.T) {
-		m := &Meta{
-			MetaStore: ms,
-		}
-		mockBroker := broker.NewMockBroker(t)
-
-		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			DbNames: []string{"db1"},
-		}, nil)
-		mockBroker.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
-			CollectionNames: []string{"coll1"},
-			CollectionIds:   []int64{1000},
-		}, nil)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{}, nil)
-		mockBroker.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return(nil, errors.New("show partitions failed, mocked"))
-		err := m.ReloadCollectionsFromRootcoord(context.TODO(), mockBroker)
-		assert.Error(t, err)
-	})
-
-	t.Run("success", func(t *testing.T) {
-		m := &Meta{
-			MetaStore: ms,
-		}
-		mockBroker := broker.NewMockBroker(t)
-
-		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			DbNames: []string{"db1"},
-		}, nil)
-		mockBroker.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
-			CollectionNames: []string{"coll1"},
-			CollectionIds:   []int64{1000},
-		}, nil)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-			CollectionID: 1000,
-		}, nil)
-		mockBroker.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return([]int64{2000}, nil)
-		err := m.ReloadCollectionsFromRootcoord(context.TODO(), mockBroker)
-		assert.NoError(t, err)
-		c := m.GetCollection(UniqueID(1000))
-		assert.NotNil(t, c)
-	})
-}
-
-// expectCollectionList makes b list ids as the collections of dbName.
-func expectCollectionList(b *broker.MockBroker, dbName string, ids []int64) *broker.MockBroker_ShowCollections_Call {
-	return b.EXPECT().ShowCollections(mock.Anything, dbName).Return(&milvuspb.ShowCollectionsResponse{CollectionIds: ids}, nil)
-}
-
-func TestMeta_ReloadCollectionsFromRootcoordConcurrently(t *testing.T) {
-	ids := lo.RangeFrom[int64](1, 2000)
-	responses := make(map[int64]*milvuspb.DescribeCollectionResponse, len(ids))
-	for _, id := range ids {
-		responses[id] = &milvuspb.DescribeCollectionResponse{
-			CollectionID:        id,
-			Schema:              &schemapb.CollectionSchema{Name: fmt.Sprint(id)},
-			StartPositions:      []*commonpb.KeyDataPair{{Key: fmt.Sprint(id)}},
-			Properties:          []*commonpb.KeyValuePair{{Key: "k", Value: fmt.Sprint(id)}},
-			CreatedTimestamp:    uint64(id),
-			DbName:              fmt.Sprint("db", id%3),
-			DbId:                id % 3,
-			VirtualChannelNames: []string{fmt.Sprint("ch", id)},
-		}
-	}
-	b := broker.NewMockBroker(t)
-	b.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{DbNames: []string{"default"}}, nil).Once()
-	expectCollectionList(b, "default", ids).Once()
-
-	// The first collectionCacheRecoveryConcurrency lookups wait for one
-	// another, so they can only finish by running at once.
-	var (
-		mu                    sync.Mutex
-		inFlight, maxInFlight int
-		started               atomic.Int64
-	)
-	allStarted := make(chan struct{})
-	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, id int64) (*milvuspb.DescribeCollectionResponse, error) {
-			mu.Lock()
-			inFlight++
-			maxInFlight = max(maxInFlight, inFlight)
-			mu.Unlock()
-			defer func() {
-				mu.Lock()
-				inFlight--
-				mu.Unlock()
-			}()
-			if s := started.Add(1); s <= collectionCacheRecoveryConcurrency {
-				if s == collectionCacheRecoveryConcurrency {
-					close(allStarted)
-				}
-				select {
-				case <-allStarted:
-				case <-time.After(10 * time.Second):
-					return nil, merr.WrapErrServiceInternalMsg("the collection lookups did not run concurrently")
-				}
-			}
-			return responses[id], nil
-		}).Times(len(ids))
-	b.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, id int64) ([]int64, error) {
-			return []int64{id * 10}, nil
-		}).Times(len(ids))
-
-	m := &Meta{MetaStore: metacache.NewMetaStore(nil)}
-	require.NoError(t, m.ReloadCollectionsFromRootcoord(t.Context(), b))
-
-	assert.Equal(t, collectionCacheRecoveryConcurrency, maxInFlight,
-		"the lookups run concurrently, never more than the bound at once")
-	require.Len(t, m.GetCollections(), len(ids))
-	for _, id := range ids {
-		resp := responses[id]
-		require.Equal(t, &CollectionInfo{
-			ID:             id,
-			Schema:         resp.GetSchema(),
-			Partitions:     []int64{id * 10},
-			StartPositions: resp.GetStartPositions(),
-			Properties:     map[string]string{"k": fmt.Sprint(id)},
-			CreatedAt:      uint64(id),
-			DatabaseName:   resp.GetDbName(),
-			DatabaseID:     resp.GetDbId(),
-			VChannelNames:  resp.GetVirtualChannelNames(),
-		}, m.GetCollection(id))
-	}
-}
-
-// A collection dropped after it was listed fails its lookup with
-// ErrCollectionNotFound, which fails the attempt instead of skipping the
-// collection. The attempt installs nothing and the error stays a SystemError,
-// which initMeta's retry.Do runs again on a fresh list.
-func TestMeta_ReloadCollectionsFromRootcoordDroppedCollection(t *testing.T) {
-	ids := lo.RangeFrom[int64](1, 2000)
-	dropped := ids[1000]
-	remaining := lo.Without(ids, dropped)
-	// As coordinatorBroker returns it: through the RootCoord status.
-	notFound := merr.Error(merr.Status(merr.WrapErrCollectionNotFound(dropped)))
-	b := broker.NewMockBroker(t)
-	b.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{DbNames: []string{"default"}}, nil).Times(2)
-	expectCollectionList(b, "default", ids).Once()
-	expectCollectionList(b, "default", remaining).Once()
-	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, id int64) (*milvuspb.DescribeCollectionResponse, error) {
-			if id == dropped {
-				return nil, notFound
-			}
-			return &milvuspb.DescribeCollectionResponse{CollectionID: id}, nil
-		})
-	b.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, id int64) ([]int64, error) {
-			assert.NotEqual(t, dropped, id, "a failed describe skips the partition listing")
-			return []int64{id * 10}, nil
-		})
-
-	m := &Meta{MetaStore: metacache.NewMetaStore(nil)}
-	err := m.ReloadCollectionsFromRootcoord(t.Context(), b)
-	require.Equal(t, notFound, err)
-	assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
-	assert.Empty(t, m.GetCollections(), "a failed attempt installs nothing")
-
-	require.NoError(t, m.ReloadCollectionsFromRootcoord(t.Context(), b))
-	assert.Len(t, m.GetCollections(), len(remaining))
-	assert.Nil(t, m.GetCollection(dropped))
-}
-
-// A failed lookup aborts the attempt. When several fail, the attempt returns
-// the failure of the first failed collection in list order, even when a later
-// collection failed first.
-func TestMeta_ReloadCollectionsFromRootcoordReturnsFirstFailureInListOrder(t *testing.T) {
-	ids := lo.RangeFrom[int64](1, 5000)
-	early, late := ids[100], ids[200]
-	earlyErr := merr.WrapErrServiceUnavailable("injected show partitions failure")
-	lateFailed := make(chan struct{})
-	var describeCalls atomic.Int64
-	b := broker.NewMockBroker(t)
-	b.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{DbNames: []string{"default"}}, nil).Once()
-	expectCollectionList(b, "default", ids).Once()
-	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, id int64) (*milvuspb.DescribeCollectionResponse, error) {
-			describeCalls.Add(1)
-			if id == late {
-				close(lateFailed)
-				return nil, merr.WrapErrServiceInternalMsg("injected describe failure")
-			}
-			return &milvuspb.DescribeCollectionResponse{CollectionID: id}, nil
-		})
-	b.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, id int64) ([]int64, error) {
-			if id == early {
-				select {
-				case <-lateFailed:
-				case <-time.After(10 * time.Second):
-					t.Error("the later collection was never looked up")
-				}
-				return nil, earlyErr
-			}
-			return []int64{id * 10}, nil
-		})
-
-	m := &Meta{MetaStore: metacache.NewMetaStore(nil)}
-	err := m.ReloadCollectionsFromRootcoord(t.Context(), b)
-	require.Equal(t, earlyErr, err)
-	assert.Empty(t, m.GetCollections())
-	assert.Less(t, describeCalls.Load(), int64(len(ids)), "no lookups start after a failure")
-}
-
 func TestMeta_GetSegmentsJSON(t *testing.T) {
 	ms := metacache.NewMetaStore(nil)
 	// Create a mock meta object
@@ -2914,7 +2662,9 @@ func TestCompleteCompactionMutationPublishesOnlyFinalDataViewSegments(t *testing
 	ctx := context.Background()
 	newMetaWithDataView := func(t *testing.T) (*Meta, dataviewpkg.Manager) {
 		catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
-		segments := NewSegmentsInfo(metacache.NewMetaStore(nil))
+		metaStore := metacache.NewMetaStore(nil)
+		metaStore.PutCollection(&CollectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Version: 1}})
+		segments := NewSegmentsInfo(metaStore)
 		for _, segmentID := range []int64{1, 2} {
 			segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
 				ID:            segmentID,
@@ -2932,18 +2682,19 @@ func TestCompleteCompactionMutationPublishesOnlyFinalDataViewSegments(t *testing
 		}
 		manager := dataviewpkg.NewManager(catalog, nil)
 		_, err := manager.OnCreateCollection(ctx, dataviewpkg.CreateCollectionDataViewEvent{
-			CollectionID: 100,
-			VChannels:    []string{"ch-1"},
+			CollectionID:  100,
+			SchemaVersion: 1,
+			VChannels:     []string{"ch-1"},
 		})
 		require.NoError(t, err)
-		_, err = manager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64) ([]dataviewpkg.LoadableSegment, error) {
+		_, err = manager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64, _ *viewpb.DataViewOfCollection) ([]dataviewpkg.LoadableSegment, error) {
 			return []dataviewpkg.LoadableSegment{
 				{SegmentID: 1, VChannel: "ch-1", PartitionID: 10},
 				{SegmentID: 2, VChannel: "ch-1", PartitionID: 10},
 			}, nil
 		})
 		require.NoError(t, err)
-		return &Meta{Ctx: ctx, Catalog: catalog, Segments: segments, DataViewManager: manager}, manager
+		return &Meta{Ctx: ctx, Catalog: catalog, MetaStore: metaStore, Segments: segments, DataViewManager: manager}, manager
 	}
 	dataViewSegmentIDs := func(t *testing.T, manager dataviewpkg.Manager) []int64 {
 		ref, err := manager.Latest(ctx, 100)
@@ -2959,15 +2710,12 @@ func TestCompleteCompactionMutationPublishesOnlyFinalDataViewSegments(t *testing
 	// reconcile drives the same loadable projection the async recompute queue
 	// worker would run after the SegmentMeta mutation commits.
 	reconcile := func(t *testing.T, meta *Meta, manager dataviewpkg.Manager) {
-		segments, err := meta.LoadableProjection(ctx, 100)
-		require.NoError(t, err)
-		_, err = manager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64) ([]dataviewpkg.LoadableSegment, error) {
-			return segments, nil
-		})
+		_, err := manager.RecomputeNow(ctx, 100, meta.LoadableProjection)
 		require.NoError(t, err)
 	}
 	result := &datapb.CompactionPlanResult{Segments: []*datapb.CompactionSegment{{
 		SegmentID: 3,
+		IsSorted:  true,
 		NumOfRows: 100,
 		InsertLogs: []*datapb.FieldBinlog{{
 			FieldID: 100,
@@ -3060,8 +2808,8 @@ func TestCompleteCompactionMutationPublishesOnlyFinalDataViewSegments(t *testing
 		}
 		result := &datapb.CompactionPlanResult{Segments: []*datapb.CompactionSegment{{
 			SegmentID: 3,
-			NumOfRows: 100,
 			IsSorted:  true,
+			NumOfRows: 100,
 			InsertLogs: []*datapb.FieldBinlog{{
 				FieldID: 100,
 				Binlogs: []*datapb.Binlog{{LogID: 3}},
@@ -3092,7 +2840,9 @@ func TestCompleteCompactionMutationPublishesOnlyFinalDataViewSegments(t *testing
 func TestCompleteCompactionMutationKeepsDataViewOrder(t *testing.T) {
 	ctx := context.Background()
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
-	segments := NewSegmentsInfo(metacache.NewMetaStore(nil))
+	metaStore := metacache.NewMetaStore(nil)
+	metaStore.PutCollection(&CollectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Version: 1}})
+	segments := NewSegmentsInfo(metaStore)
 	segments.SetSegment(1, NewSegmentInfo(&datapb.SegmentInfo{
 		ID:            1,
 		CollectionID:  100,
@@ -3107,13 +2857,13 @@ func TestCompleteCompactionMutationKeepsDataViewOrder(t *testing.T) {
 		}},
 	}))
 	manager := dataviewpkg.NewManager(catalog, nil)
-	_, err := manager.OnCreateCollection(ctx, dataviewpkg.CreateCollectionDataViewEvent{CollectionID: 100, VChannels: []string{"ch-1"}})
+	_, err := manager.OnCreateCollection(ctx, dataviewpkg.CreateCollectionDataViewEvent{CollectionID: 100, SchemaVersion: 1, VChannels: []string{"ch-1"}})
 	require.NoError(t, err)
-	_, err = manager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64) ([]dataviewpkg.LoadableSegment, error) {
+	_, err = manager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64, _ *viewpb.DataViewOfCollection) ([]dataviewpkg.LoadableSegment, error) {
 		return []dataviewpkg.LoadableSegment{{SegmentID: 1, VChannel: "ch-1", PartitionID: 10}}, nil
 	})
 	require.NoError(t, err)
-	meta := &Meta{Ctx: ctx, Catalog: catalog, Segments: segments, DataViewManager: manager}
+	meta := &Meta{Ctx: ctx, Catalog: catalog, MetaStore: metaStore, Segments: segments, DataViewManager: manager}
 	compact := func(from, to int64) error {
 		_, err := meta.CompleteCompactionMutation(ctx, &datapb.CompactionTask{
 			CollectionID:  100,
@@ -3124,6 +2874,7 @@ func TestCompleteCompactionMutationKeepsDataViewOrder(t *testing.T) {
 			Schema:        &schemapb.CollectionSchema{Version: 1},
 		}, &datapb.CompactionPlanResult{Segments: []*datapb.CompactionSegment{{
 			SegmentID: to,
+			IsSorted:  true,
 			NumOfRows: 100,
 			InsertLogs: []*datapb.FieldBinlog{{
 				FieldID: 100,
@@ -3139,11 +2890,7 @@ func TestCompleteCompactionMutationKeepsDataViewOrder(t *testing.T) {
 	require.NoError(t, compact(1, 2))
 	require.NoError(t, compact(2, 3))
 
-	segmentsProjection, err := meta.LoadableProjection(ctx, 100)
-	require.NoError(t, err)
-	_, err = manager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64) ([]dataviewpkg.LoadableSegment, error) {
-		return segmentsProjection, nil
-	})
+	_, err = manager.RecomputeNow(ctx, 100, meta.LoadableProjection)
 	require.NoError(t, err)
 
 	ref, err := manager.Latest(ctx, 100)

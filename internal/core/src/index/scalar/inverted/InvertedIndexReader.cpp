@@ -86,7 +86,7 @@ AddUsageBytes(size_t& total, size_t bytes) {
 }  // namespace
 
 template <typename T>
-InvertedIndexReader<T>::InvertedIndexReader(
+InvertedIndexStorage<T>::InvertedIndexStorage(
     std::shared_ptr<storage::LocalDirectory> directory,
     std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine,
     std::shared_ptr<const std::vector<size_t>> null_offsets,
@@ -137,44 +137,143 @@ InvertedIndexReader<T>::InvertedIndexReader(
 }
 
 template <typename T>
-InvertedIndexReader<T>::~InvertedIndexReader() = default;
-
-template <typename T>
-ReaderCaps
-InvertedIndexReader<T>::Caps() const {
-    return ReaderCaps{
-        .predicate = true,
-        .pattern_match = std::is_same_v<T, std::string_view>,
-        .nested = nested_,
-        .exact = !nested_,
-    };
+InvertedIndex<T>::InvertedIndex(
+    std::shared_ptr<storage::LocalDirectory> directory,
+    std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine,
+    std::shared_ptr<const std::vector<size_t>> null_offsets,
+    DataType value_type,
+    bool nested,
+    bool mmap,
+    size_t engine_bytes,
+    size_t engine_path_bytes)
+    : InvertedIndex(
+          std::make_shared<InvertedIndexStorage<T>>(std::move(directory),
+                                                    std::move(engine),
+                                                    std::move(null_offsets),
+                                                    value_type,
+                                                    nested,
+                                                    mmap,
+                                                    engine_bytes,
+                                                    engine_path_bytes)) {
 }
 
 template <typename T>
-Domain
-InvertedIndexReader<T>::CoordDomain() const {
-    return nested_ ? Domain::Element : Domain::Row;
+InvertedIndex<T>::InvertedIndex(
+    std::shared_ptr<const InvertedIndexStorage<T>> storage)
+    : storage_(std::move(storage)) {
+    AssertInfo(std::get<std::shared_ptr<const InvertedIndexStorage<T>>>(
+                   storage_) != nullptr,
+               "inverted index requires storage");
+}
+
+template <typename T>
+InvertedIndex<T>::InvertedIndex(
+    std::shared_ptr<cachinglayer::CacheSlot<InvertedIndexStorage<T>>> slot,
+    IndexMetadata metadata)
+    : storage_(CachedStorage{std::move(slot), metadata}) {
+    AssertInfo(std::get<CachedStorage>(storage_).slot != nullptr,
+               "inverted index requires a cache slot");
+    AssertInfo(!metadata.count || *metadata.count >= 0,
+               "inverted index count must not be negative");
+}
+
+template <typename T>
+std::shared_ptr<const InvertedIndexStorage<T>>
+InvertedIndex<T>::PinStorage(milvus::OpContext* op_ctx) const {
+    if (const auto* resident =
+            std::get_if<std::shared_ptr<const InvertedIndexStorage<T>>>(
+                &storage_)) {
+        return *resident;
+    }
+    const auto& cached = std::get<CachedStorage>(storage_);
+    std::shared_ptr<const InvertedIndexStorage<T>> storage;
+    if (const auto* resident = cached.slot->TryBorrowCell(0)) {
+        storage = {cached.slot, resident};
+    } else {
+        auto pin =
+            cachinglayer::SemiInlineGet(cached.slot->PinCells(op_ctx, {0}));
+        const auto* cell = pin->get_ith_cell(0);
+        storage = {std::move(pin), cell};
+    }
+    AssertInfo(storage != nullptr &&
+                   (!cached.metadata.count ||
+                    storage->count_ == *cached.metadata.count) &&
+                   storage->value_type_ == cached.metadata.value_type &&
+                   storage->nested_ == cached.metadata.caps.nested,
+               "inverted storage disagrees with index metadata");
+    return storage;
+}
+
+template <typename T>
+void
+InvertedIndex<T>::CancelWarmup() const {
+    if (const auto* cached = std::get_if<CachedStorage>(&storage_)) {
+        cached->slot->CancelWarmup();
+    }
+}
+
+template <typename T>
+IndexMetadata
+InvertedIndex<T>::Metadata() const {
+    if (const auto* cached = std::get_if<CachedStorage>(&storage_))
+        return cached->metadata;
+    const auto& storage =
+        *std::get<std::shared_ptr<const InvertedIndexStorage<T>>>(storage_);
+    return {ReaderCaps{.predicate = true,
+                       .pattern_match = std::is_same_v<T, std::string_view>,
+                       .nested = storage.nested_,
+                       .exact = !storage.nested_},
+            storage.nested_ ? Domain::Element : Domain::Row,
+            storage.value_type_,
+            static_cast<int64_t>(storage.count_)};
+}
+
+template <typename T>
+IIndexReaderBasePtr
+InvertedIndex<T>::CreateReader(milvus::OpContext* op_ctx) const {
+    return IIndexReaderBasePtr(
+        new InvertedIndexReader<T>(this->shared_from_this(), op_ctx));
+}
+
+template <typename T>
+InvertedIndexReader<T>::InvertedIndexReader(
+    std::shared_ptr<storage::LocalDirectory> directory,
+    std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine,
+    std::shared_ptr<const std::vector<size_t>> null_offsets,
+    DataType value_type,
+    bool nested,
+    bool mmap,
+    size_t engine_bytes,
+    size_t engine_path_bytes)
+    : InvertedIndexReader(
+          std::make_shared<InvertedIndex<T>>(std::move(directory),
+                                             std::move(engine),
+                                             std::move(null_offsets),
+                                             value_type,
+                                             nested,
+                                             mmap,
+                                             engine_bytes,
+                                             engine_path_bytes),
+          nullptr) {
+}
+
+template <typename T>
+InvertedIndexReader<T>::InvertedIndexReader(
+    std::shared_ptr<const InvertedIndex<T>> index, milvus::OpContext* op_ctx)
+    : index_(std::move(index)), op_ctx_(op_ctx) {
 }
 
 template <typename T>
 int64_t
-InvertedIndexReader<T>::Count() const {
-    return static_cast<int64_t>(count_);
-}
-
-template <typename T>
-DataType
-InvertedIndexReader<T>::ValueType() const {
-    return value_type_;
-}
-
-template <typename T>
-int64_t
-InvertedIndexReader<T>::MemoryUsage() const {
-    size_t total = sizeof(InvertedIndexReader<T>);
+InvertedIndexStorage<T>::MemoryUsage() const {
+    size_t total = sizeof(InvertedIndexStorage<T>);
     AddUsageBytes(total, sizeof(milvus::tantivy::TantivyIndexWrapper));
     AddUsageBytes(total, engine_path_bytes_);
     AddUsageBytes(total, valid_bitmap_.size_in_bytes());
+    if (json_exists) {
+        AddUsageBytes(total, sizeof(TargetBitmap));
+        AddUsageBytes(total, json_exists->size_in_bytes());
+    }
     if (directory_ != nullptr) {
         AddUsageBytes(total, directory_->HeapBytes());
     }
@@ -186,16 +285,62 @@ InvertedIndexReader<T>::MemoryUsage() const {
 
 template <typename T>
 cachinglayer::ResourceUsage
-InvertedIndexReader<T>::CellByteSize() const {
+InvertedIndexStorage<T>::CellByteSize() const {
     return {MemoryUsage(), mmap_ ? ToUsageBytes(engine_bytes_) : 0};
+}
+
+template <typename T>
+const std::shared_ptr<const InvertedIndexStorage<T>>&
+InvertedIndexReader<T>::GetStorage() const {
+    std::call_once(storage_once_,
+                   [this] { storage_ = index_->PinStorage(op_ctx_); });
+    return storage_;
+}
+
+template <typename T>
+InvertedIndexReader<T>::~InvertedIndexReader() = default;
+
+template <typename T>
+ReaderCaps
+InvertedIndexReader<T>::Caps() const {
+    return index_->Metadata().caps;
+}
+
+template <typename T>
+Domain
+InvertedIndexReader<T>::CoordDomain() const {
+    return index_->Metadata().domain;
+}
+
+template <typename T>
+int64_t
+InvertedIndexReader<T>::Count() const {
+    if (const auto count = index_->Metadata().count)
+        return *count;
+    return GetStorage()->count_;
+}
+
+template <typename T>
+DataType
+InvertedIndexReader<T>::ValueType() const {
+    return index_->Metadata().value_type;
 }
 
 template <typename T>
 TargetBitmap
 InvertedIndexReader<T>::In(size_t n, const T* values) const {
+    const auto& pin = GetStorage();
+    return InStorage(*pin, n, values);
+}
+
+template <typename T>
+TargetBitmap
+InvertedIndexReader<T>::InStorage(const InvertedIndexStorage<T>& storage,
+                                  size_t n,
+                                  const T* values) const {
     AssertInfo(n == 0 || values != nullptr,
                "inverted In received null values with non-zero count");
-    TargetBitmap result(count_);
+    TargetBitmap result(storage.count_);
     if (n == 0) {
         return result;
     }
@@ -205,61 +350,69 @@ InvertedIndexReader<T>::In(size_t n, const T* values) const {
         for (size_t i = 0; i < n; ++i) {
             owned.push_back(OwnString(values[i]));
         }
-        engine_->terms_query(owned.data(), owned.size(), &result);
+        storage.engine_->terms_query(owned.data(), owned.size(), &result);
     } else {
-        engine_->terms_query(values, n, &result);
+        storage.engine_->terms_query(values, n, &result);
     }
     return result;
 }
 
 template <typename T>
 void
-InvertedIndexReader<T>::ApplyValidityMask(TargetBitmap& bitset) const {
-    if (all_valid_) {
+InvertedIndexReader<T>::ApplyValidityMask(
+    const InvertedIndexStorage<T>& storage, TargetBitmap& bitset) const {
+    if (storage.all_valid_) {
         return;
     }
-    AssertInfo(valid_bitmap_.size() == bitset.size(),
+    AssertInfo(storage.valid_bitmap_.size() == bitset.size(),
                "inverted validity bitmap size {} does not match result size "
                "{}",
-               valid_bitmap_.size(),
+               storage.valid_bitmap_.size(),
                bitset.size());
-    bitset &= valid_bitmap_;
+    bitset &= storage.valid_bitmap_;
 }
 
 template <typename T>
 TargetBitmap
 InvertedIndexReader<T>::NotIn(size_t n, const T* values) const {
-    auto result = In(n, values);
+    const auto& pin = GetStorage();
+    const auto& storage = *pin;
+    auto result = InStorage(storage, n, values);
     result.flip();
-    ApplyValidityMask(result);
+    ApplyValidityMask(storage, result);
     return result;
 }
 
 template <typename T>
 TargetBitmap
 InvertedIndexReader<T>::Range(const T& value, CompareOp op) const {
+    const auto& pin = GetStorage();
+    const auto& storage = *pin;
     if (op == CompareOp::Equal) {
-        return In(1, &value);
+        return InStorage(storage, 1, &value);
     }
     if (op == CompareOp::NotEqual) {
-        return NotIn(1, &value);
+        auto result = InStorage(storage, 1, &value);
+        result.flip();
+        ApplyValidityMask(storage, result);
+        return result;
     }
 
-    TargetBitmap result(count_);
+    TargetBitmap result(storage.count_);
     if constexpr (std::is_same_v<T, std::string_view>) {
         const auto owned = OwnString(value);
         switch (op) {
             case CompareOp::GreaterThan:
-                engine_->lower_bound_range_query(owned, false, &result);
+                storage.engine_->lower_bound_range_query(owned, false, &result);
                 break;
             case CompareOp::GreaterEqual:
-                engine_->lower_bound_range_query(owned, true, &result);
+                storage.engine_->lower_bound_range_query(owned, true, &result);
                 break;
             case CompareOp::LessThan:
-                engine_->upper_bound_range_query(owned, false, &result);
+                storage.engine_->upper_bound_range_query(owned, false, &result);
                 break;
             case CompareOp::LessEqual:
-                engine_->upper_bound_range_query(owned, true, &result);
+                storage.engine_->upper_bound_range_query(owned, true, &result);
                 break;
             default:
                 ThrowInfo(OpTypeInvalid,
@@ -269,16 +422,16 @@ InvertedIndexReader<T>::Range(const T& value, CompareOp op) const {
     } else {
         switch (op) {
             case CompareOp::GreaterThan:
-                engine_->lower_bound_range_query(value, false, &result);
+                storage.engine_->lower_bound_range_query(value, false, &result);
                 break;
             case CompareOp::GreaterEqual:
-                engine_->lower_bound_range_query(value, true, &result);
+                storage.engine_->lower_bound_range_query(value, true, &result);
                 break;
             case CompareOp::LessThan:
-                engine_->upper_bound_range_query(value, false, &result);
+                storage.engine_->upper_bound_range_query(value, false, &result);
                 break;
             case CompareOp::LessEqual:
-                engine_->upper_bound_range_query(value, true, &result);
+                storage.engine_->upper_bound_range_query(value, true, &result);
                 break;
             default:
                 ThrowInfo(OpTypeInvalid,
@@ -295,13 +448,16 @@ InvertedIndexReader<T>::Range(const T& lo,
                               bool lo_inc,
                               const T& hi,
                               bool hi_inc) const {
-    TargetBitmap result(count_);
+    const auto& pin = GetStorage();
+    const auto& storage = *pin;
+    TargetBitmap result(storage.count_);
     if constexpr (std::is_same_v<T, std::string_view>) {
         const auto owned_lo = OwnString(lo);
         const auto owned_hi = OwnString(hi);
-        engine_->range_query(owned_lo, owned_hi, lo_inc, hi_inc, &result);
+        storage.engine_->range_query(
+            owned_lo, owned_hi, lo_inc, hi_inc, &result);
     } else {
-        engine_->range_query(lo, hi, lo_inc, hi_inc, &result);
+        storage.engine_->range_query(lo, hi, lo_inc, hi_inc, &result);
     }
     return result;
 }
@@ -326,23 +482,26 @@ template <typename T>
 TargetBitmap
 InvertedIndexReader<T>::PatternMatchImpl(std::string_view pattern,
                                          PatternOp op) const {
+    const auto& pin = GetStorage();
+    const auto& storage = *pin;
     const auto owned = OwnString(pattern);
     switch (op) {
         case PatternOp::PrefixMatch: {
-            TargetBitmap result(count_);
-            engine_->prefix_query(owned, &result);
+            TargetBitmap result(storage.count_);
+            storage.engine_->prefix_query(owned, &result);
             return result;
         }
         case PatternOp::PostfixMatch:
-            return PatternQuery("%" + EscapeLikePattern(owned));
+            return PatternQuery(storage, "%" + EscapeLikePattern(owned));
         case PatternOp::InnerMatch:
-            return PatternQuery("%" + EscapeLikePattern(owned) + "%");
+            return PatternQuery(storage, "%" + EscapeLikePattern(owned) + "%");
         case PatternOp::Match:
-            return PatternQuery(owned);
+            return PatternQuery(storage, owned);
         case PatternOp::RegexMatch: {
-            TargetBitmap result(count_);
+            TargetBitmap result(storage.count_);
             PartialRegexMatcher matcher(owned);
-            engine_->regex_match_query(&matcher, RegexCallback, &result);
+            storage.engine_->regex_match_query(
+                &matcher, RegexCallback, &result);
             return result;
         }
     }
@@ -353,21 +512,24 @@ InvertedIndexReader<T>::PatternMatchImpl(std::string_view pattern,
 
 template <typename T>
 TargetBitmap
-InvertedIndexReader<T>::PatternQuery(std::string_view pattern) const {
+InvertedIndexReader<T>::PatternQuery(const InvertedIndexStorage<T>& storage,
+                                     std::string_view pattern) const {
     PatternMatchTranslator translator;
     const auto regex = translator(OwnString(pattern));
-    TargetBitmap result(count_);
-    engine_->regex_query(regex, &result);
+    TargetBitmap result(storage.count_);
+    storage.engine_->regex_query(regex, &result);
     return result;
 }
 
 template <typename T>
 TargetBitmap
 InvertedIndexReader<T>::IsNull() const {
-    if (all_valid_) {
-        return TargetBitmap(count_);
+    const auto& pin = GetStorage();
+    const auto& storage = *pin;
+    if (storage.all_valid_) {
+        return TargetBitmap(storage.count_);
     }
-    auto result = valid_bitmap_.clone();
+    auto result = storage.valid_bitmap_.clone();
     result.flip();
     return result;
 }
@@ -375,13 +537,18 @@ InvertedIndexReader<T>::IsNull() const {
 template <typename T>
 TargetBitmap
 InvertedIndexReader<T>::IsNotNull() const {
-    if (all_valid_) {
-        return TargetBitmap(count_, true);
+    const auto& pin = GetStorage();
+    const auto& storage = *pin;
+    if (storage.all_valid_) {
+        return TargetBitmap(storage.count_, true);
     }
-    return valid_bitmap_.clone();
+    return storage.valid_bitmap_.clone();
 }
 
-#define INSTANTIATE_INVERTED_READER(T) template class InvertedIndexReader<T>;
+#define INSTANTIATE_INVERTED_READER(T)      \
+    template class InvertedIndexStorage<T>; \
+    template class InvertedIndex<T>;        \
+    template class InvertedIndexReader<T>;
 INSTANTIATE_INVERTED_READER(bool)
 INSTANTIATE_INVERTED_READER(int8_t)
 INSTANTIATE_INVERTED_READER(int16_t)

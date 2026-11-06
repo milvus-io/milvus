@@ -17,6 +17,9 @@
 #include <gtest/gtest.h>
 #include "tantivy-wrapper.h"
 #include "index/Utils.h"
+#include "index/Meta.h"
+#include "index/SingleCellIndexStorageTranslator.h"
+#include "index/test_utils/ArtifactTestUtils.h"
 #include "storage/artifact/LocalDirectory.h"
 #include "test_utils/Constants.h"
 
@@ -30,6 +33,7 @@
 #include "common/RegexQuery.h"
 #include "index/contracts/query/INgramReader.h"
 #include "index/scalar/ngram/NgramRegex.h"
+#include "index/scalar/ngram/NgramIndexReader.h"
 #include "index/test_utils/AssertHelpers.h"
 #include "index/test_utils/CaseTestDriver.h"
 
@@ -37,6 +41,181 @@ namespace milvus::index::test {
 namespace {
 
 constexpr auto kBackend = "NgramVarcharMin2Max4Heap";
+
+void
+CheckCachedNgram() {
+    const auto& backend =
+        ScalarReaderBackends().Get<std::string_view>(kBackend);
+    ScalarTestData<std::string_view> data(
+        {"apple", "banana", "banana", "pear"});
+    data.validity.reset(3);
+    const ScalarTestInput<std::string_view> input(data);
+    auto artifact =
+        backend.Build(input.View(), {.row_count = data.values.size()});
+    for (const bool known_count : {false, true}) {
+        for (const bool mmap : {false, true}) {
+            for (const bool packed : {false, true}) {
+                for (const bool async : {false, true}) {
+                    SCOPED_TRACE(::testing::Message()
+                                 << packed << async << mmap << known_count);
+                    auto staging = storage::LocalDirectory::CreateOwned(
+                        std::filesystem::temp_directory_path().string(),
+                        "ngram-cache-XXXXXX",
+                        "Ngram cache test");
+                    const auto persisted = packed ? SerializeV3(*artifact)
+                                                  : SerializeV1V2(*artifact);
+                    auto source = [&]() -> OpenedIndexSource {
+                        if (!packed) {
+                            return LegacyIndexSource{
+                                std::make_shared<TestArtifactSource>(
+                                    persisted, storage::Generation::V1V2),
+                                async};
+                        }
+                        auto input =
+                            std::make_shared<storage::RemoteInputStream>(
+                                std::make_shared<arrow::io::BufferReader>(
+                                    MakePackedArtifactBuffer(persisted)));
+                        if (async) {
+                            return PackedIndexSource{std::shared_ptr<
+                                storage::AsyncIndexEntryReader>(
+                                folly::coro::blockingWait(
+                                    folly::coro::co_withExecutor(
+                                        storage::ResolveAsyncLoadExecutor(
+                                            {},
+                                            proto::common::LoadPriority::HIGH),
+                                        storage::AsyncIndexEntryReader::Open(
+                                            input,
+                                            0,
+                                            proto::common::LoadPriority::
+                                                HIGH))))};
+                        }
+                        return PackedIndexSource{
+                            std::shared_ptr<storage::IndexEntryReader>(
+                                storage::IndexEntryReader::Open(
+                                    input, input->Size()))};
+                    }();
+                    storage::LoadOptions options;
+                    options.params = backend.LoadParams({.row_count = 4});
+                    options.enable_mmap = mmap;
+                    if (known_count)
+                        options.params[INDEX_NUM_ROWS_KEY] = 4;
+                    else
+                        options.params.erase(INDEX_NUM_ROWS_KEY);
+                    options.mmap_dir_path = staging->Path();
+                    IndexCacheConfig cache{
+                        staging->Path(),
+                        cachinglayer::Meta{
+                            mmap ? cachinglayer::StorageType::DISK
+                                 : cachinglayer::StorageType::MEMORY,
+                            cachinglayer::CellIdMappingMode::IDENTICAL,
+                            cachinglayer::CellDataType::OTHER,
+                            CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                            true},
+                        {1024 * 1024, 1024 * 1024},
+                        {},
+                        4096};
+                    auto index = LoaderRegistry::Instance()
+                                     .Lookup(backend.Family())
+                                     .Load({std::move(source), options, cache});
+                    EXPECT_EQ(index->Metadata().count.has_value(), known_count);
+                    folly::CancellationSource cancellation;
+                    cancellation.requestCancellation();
+                    OpContext cancelled(cancellation.getToken());
+                    auto reader = index->CreateReader(&cancelled);
+                    if (known_count)
+                        EXPECT_EQ(reader->Count(), 4);
+                    else
+                        ExpectSegcoreError(ErrorCode::FollyCancel,
+                                           [&] { (void)reader->Count(); });
+                    EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+                    const auto* nulls =
+                        dynamic_cast<const INullReader*>(reader.get());
+                    ASSERT_NE(nulls, nullptr);
+                    ExpectSegcoreError(ErrorCode::FollyCancel,
+                                       [&] { (void)nulls->IsNull(); });
+                    index->CancelWarmup();
+                    OpContext retry;
+                    reader = index->CreateReader(&retry);
+                    index.reset();
+                    EXPECT_EQ(reader->Count(), 4);
+                    nulls = dynamic_cast<const INullReader*>(reader.get());
+                    ASSERT_NE(nulls, nullptr);
+                    const auto result = nulls->IsNull();
+                    EXPECT_EQ(result.count(), 1);
+                    EXPECT_TRUE(result[3]);
+                    const auto* ngram =
+                        dynamic_cast<const INgramReader*>(reader.get());
+                    ASSERT_NE(ngram, nullptr);
+                    EXPECT_TRUE(ngram->CanHandle("ban", PatternOp::InnerMatch));
+                    EXPECT_TRUE(ngram->CandidatesAreExact(
+                        "ban", PatternOp::InnerMatch));
+                    for (const auto op :
+                         {PatternOp::InnerMatch, PatternOp::RegexMatch}) {
+                        TargetBitmap candidates(4, true);
+                        ngram->Candidates("ban", op, candidates);
+                        ExpectBitmap(candidates, Hits(4, {1, 2}));
+                    }
+                }
+            }
+        }
+    }
+}
+
+TEST(NgramIndexArtifactTest, CachedStorageLoadsWithRequestContext) {
+    CheckCachedNgram();
+}
+
+TEST(NgramIndexArtifactTest, WarmupRejectsCountMismatchBeforePublication) {
+    const auto& backend =
+        ScalarReaderBackends().Get<std::string_view>(kBackend);
+    ScalarTestData<std::string_view> data(
+        {"apple", "banana", "banana", "pear"});
+    data.validity.reset(3);
+    const ScalarTestInput<std::string_view> input(data);
+    auto artifact = backend.Build(input.View(), {.row_count = 4});
+    for (const bool packed : {false, true}) {
+        SCOPED_TRACE(packed);
+        auto staging = storage::LocalDirectory::CreateOwned(
+            std::filesystem::temp_directory_path().string(),
+            "ngram-bad-count-XXXXXX",
+            "ngram count test");
+        const auto persisted =
+            packed ? SerializeV3(*artifact) : SerializeV1V2(*artifact);
+        auto source = [&]() -> OpenedIndexSource {
+            if (!packed)
+                return LegacyIndexSource{
+                    std::make_shared<TestArtifactSource>(
+                        persisted, storage::Generation::V1V2),
+                    false};
+            auto input = std::make_shared<storage::RemoteInputStream>(
+                std::make_shared<arrow::io::BufferReader>(
+                    MakePackedArtifactBuffer(persisted)));
+            return PackedIndexSource{std::shared_ptr<storage::IndexEntryReader>(
+                storage::IndexEntryReader::Open(input, input->Size()))};
+        }();
+        storage::LoadOptions options;
+        options.params = backend.LoadParams({.row_count = 4});
+        options.params[INDEX_NUM_ROWS_KEY] = 3;
+        options.enable_mmap = true;
+        options.mmap_dir_path = staging->Path();
+        IndexCacheConfig cache{
+            staging->Path(),
+            cachinglayer::Meta{cachinglayer::StorageType::DISK,
+                               cachinglayer::CellIdMappingMode::IDENTICAL,
+                               cachinglayer::CellDataType::OTHER,
+                               CacheWarmupPolicy::CacheWarmupPolicy_Sync,
+                               true},
+            {1024 * 1024, 1024 * 1024},
+            {},
+            4096};
+        ExpectSegcoreError(ErrorCode::DataFormatBroken, [&] {
+            (void)LoaderRegistry::Instance()
+                .Lookup(backend.Family())
+                .Load({std::move(source), options, cache});
+        });
+        EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+    }
+}
 
 struct ConcreteCandidateCase {
     std::string name;
@@ -262,6 +441,149 @@ TEST(NgramRegexPlanTest, AppliesBranchesAsUnionOfIntersections) {
                  Hits(rows.size(), {0, 4}));
     ExpectBitmap(run("foo|qux", std::vector<size_t>{}),
                  TargetBitmap(rows.size()));
+}
+
+TEST(NgramIndexCacheTest, FreshSlotUsesEachReadersContext) {
+    const cachinglayer::ResourceUsage limit{16 * 1024 * 1024, 0};
+    auto dlist = std::make_shared<cachinglayer::internal::DList>(
+        false, limit, limit, limit, cachinglayer::EvictionConfig{});
+    std::vector<int32_t> priorities;
+    auto load = [&](OpContext* ctx)
+        -> folly::coro::Task<std::unique_ptr<NgramIndexStorage>> {
+        priorities.push_back(ctx->runtime_load_priority.value_or(-1));
+        auto directory = storage::LocalDirectory::CreateOwned(
+            std::filesystem::temp_directory_path().string(),
+            "ngram-pin-XXXXXX",
+            "ngram pin test");
+        auto engine = std::make_shared<milvus::tantivy::TantivyIndexWrapper>(
+            "values", directory->Path().c_str(), uintptr_t{2}, uintptr_t{4});
+        const std::string docs[] = {"apple", "banana"};
+        engine->add_data<std::string>(docs, 2, 0);
+        engine->finish();
+        engine->create_reader(SetBitsetSealed);
+        co_return std::make_unique<NgramIndexStorage>(
+            std::move(directory),
+            std::move(engine),
+            std::make_shared<const std::vector<size_t>>(),
+            DataType::VARCHAR,
+            2,
+            4,
+            5,
+            true,
+            0);
+    };
+    IndexCacheConfig cache{
+        "ngram-storage-test",
+        cachinglayer::Meta{cachinglayer::StorageType::MEMORY,
+                           cachinglayer::CellIdMappingMode::IDENTICAL,
+                           cachinglayer::CellDataType::OTHER,
+                           CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                           true},
+        {1024 * 1024, 0},
+        {},
+        4096};
+    std::weak_ptr<cachinglayer::CacheSlot<NgramIndexStorage>> slot_lifetime;
+    auto make_index = [&] {
+        auto slot =
+            std::make_shared<cachinglayer::CacheSlot<NgramIndexStorage>>(
+                std::make_unique<
+                    SingleCellIndexStorageTranslator<NgramIndexStorage>>(
+                    cache, false, load),
+                dlist.get(),
+                true,
+                true,
+                true,
+                std::chrono::seconds(5),
+                std::chrono::seconds(5));
+        slot_lifetime = slot;
+        return std::make_shared<NgramIndex>(
+            slot,
+            IndexMetadata{ReaderCaps{.ngram_candidates = true, .exact = false},
+                          Domain::Row,
+                          DataType::VARCHAR,
+                          2},
+            2,
+            4);
+    };
+    auto index = make_index();
+    OpContext first_ctx;
+    first_ctx.runtime_load_priority = 0;
+    OpContext second_ctx;
+    second_ctx.runtime_load_priority = 1;
+    auto first = index->CreateReader(&first_ctx);
+    EXPECT_EQ(first->Count(), 2);
+    EXPECT_TRUE(priorities.empty());
+    const auto* ngram = dynamic_cast<const INgramReader*>(first.get());
+    ASSERT_NE(ngram, nullptr);
+    EXPECT_FALSE(ngram->CanHandle("%", PatternOp::Match));
+    EXPECT_TRUE(ngram->CandidatesAreExact("app", PatternOp::InnerMatch));
+    EXPECT_TRUE(priorities.empty());
+    TargetBitmap candidates(2, true);
+    ngram->Candidates("app", PatternOp::InnerMatch, candidates);
+    ExpectBitmap(candidates, Hits(2, {0}));
+    const auto scanned = first_ctx.storage_usage.scanned_total_bytes.load();
+    ASSERT_GT(scanned, 0);
+    ngram->Candidates("app", PatternOp::InnerMatch, candidates);
+    ExpectBitmap(candidates, Hits(2, {0}));
+    EXPECT_EQ(dynamic_cast<const INullReader*>(first.get())->IsNull().count(),
+              0);
+    EXPECT_EQ(first_ctx.storage_usage.scanned_total_bytes.load(), scanned);
+    EXPECT_EQ(priorities, (std::vector<int32_t>{0}));
+    index.reset();
+    EXPECT_FALSE(slot_lifetime.expired());
+    first.reset();
+    EXPECT_TRUE(slot_lifetime.expired());
+    index = make_index();
+    auto second = index->CreateReader(&second_ctx);
+    EXPECT_EQ(priorities, (std::vector<int32_t>{0}));
+    const auto* nulls = dynamic_cast<const INullReader*>(second.get());
+    ASSERT_NE(nulls, nullptr);
+    EXPECT_EQ(nulls->IsNull().count(), 0);
+    EXPECT_EQ(priorities, (std::vector<int32_t>{0, 1}));
+    EXPECT_GT(second_ctx.storage_usage.scanned_total_bytes.load(), 0);
+    index.reset();
+    second.reset();
+    EXPECT_TRUE(slot_lifetime.expired());
+}
+
+TEST(NgramIndexOwnershipTest, ReadersRetainEngineAndBackingDirectory) {
+    auto directory = storage::LocalDirectory::CreateOwned(
+        TestLocalPath, "ngram-owner-XXXXXX", "ngram ownership test");
+    std::weak_ptr<storage::LocalDirectory> directory_lifetime = directory;
+    auto engine = std::make_shared<milvus::tantivy::TantivyIndexWrapper>(
+        "ngram", directory->Path().c_str(), uintptr_t{2}, uintptr_t{4});
+    std::weak_ptr<milvus::tantivy::TantivyIndexWrapper> engine_lifetime =
+        engine;
+    const std::vector<std::string> values{"apple", "banana"};
+    engine->add_data<std::string>(values.data(), values.size(), 0);
+    engine->finish();
+    engine->create_reader(SetBitsetSealed);
+    auto index = std::make_shared<NgramIndex>(
+        std::move(directory),
+        std::move(engine),
+        std::make_shared<const std::vector<size_t>>(),
+        DataType::VARCHAR,
+        2,
+        4,
+        5,
+        true,
+        0);
+    auto first = index->CreateReader(nullptr);
+    auto second = index->CreateReader(nullptr);
+    EXPECT_NE(first.get(), second.get());
+    index.reset();
+    first.reset();
+    EXPECT_FALSE(directory_lifetime.expired());
+    EXPECT_FALSE(engine_lifetime.expired());
+    const auto* ngram = dynamic_cast<const INgramReader*>(second.get());
+    ASSERT_NE(ngram, nullptr);
+    TargetBitmap candidates(values.size(), true);
+    ngram->Candidates("app", PatternOp::InnerMatch, candidates);
+    EXPECT_TRUE(candidates[0]);
+    EXPECT_FALSE(candidates[1]);
+    second.reset();
+    EXPECT_TRUE(engine_lifetime.expired());
+    EXPECT_TRUE(directory_lifetime.expired());
 }
 
 TEST(NgramFfiBoundaryTest, EmbeddedNulCrossesFfiIntact) {

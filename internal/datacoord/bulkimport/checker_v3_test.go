@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2/reshardmem"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	importv3pb "github.com/milvus-io/milvus/pkg/v3/proto/importv3pb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -898,4 +899,36 @@ func TestBM25OutputFieldCount(t *testing.T) {
 	}}
 	require.Equal(t, 3, bm25OutputFieldCount(schema))
 	require.Equal(t, 0, bm25OutputFieldCount(&schemapb.CollectionSchema{}))
+}
+
+func TestImportCheckerV3CheckCollection(t *testing.T) {
+	tests := []struct {
+		name     string
+		coll     *meta.CollectionInfo
+		state    internalpb.ImportJobState
+		wantFail bool
+	}{
+		{"created", &meta.CollectionInfo{ID: 2}, internalpb.ImportJobState_Importing, false},
+		{"dropping", &meta.CollectionInfo{ID: 2, State: etcdpb.CollectionState_CollectionDropping}, internalpb.ImportJobState_Importing, true},
+		{"missing", nil, internalpb.ImportJobState_Importing, true},
+		{"missing keeps committing", nil, internalpb.ImportJobState_Committing, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			importMeta := NewMockImportMeta(t)
+			m := meta.NewMetaWithCollections()
+			if tc.coll != nil {
+				m.AddCollection(tc.coll)
+			}
+			checker := &importCheckerV3{ctx: context.Background(), meta: m, importMeta: importMeta}
+			job := &Job{ImportJob: &datapb.ImportJob{JobID: 1, CollectionID: 2, State: tc.state}}
+			if tc.wantFail {
+				importMeta.EXPECT().UpdateJob(mock.Anything, int64(1), mock.Anything, mock.Anything).
+					Run(func(_ context.Context, _ int64, actions ...UpdateJobAction) {
+						require.Equal(t, internalpb.ImportJobState_Failed, applyJobActions(actions...).GetState())
+					}).Return(nil).Once()
+			}
+			checker.CheckCollection(2, []ImportJob{job})
+		})
+	}
 }

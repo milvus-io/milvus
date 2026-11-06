@@ -16,18 +16,20 @@
 
 #pragma once
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <arrow/io/memory.h>
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "cachinglayer/Manager.h"
-#include "cachinglayer/Translator.h"
+#include "test_utils/index_test_utils.h"
 #include "common/FieldData.h"
 #include "common/Json.h"
 #include "common/LoadInfo.h"
@@ -154,15 +156,56 @@ JsonField(const std::vector<std::string>& rows,
 }
 
 struct OpenedIndex {
+    index::IndexPtr index;
     index::IIndexReaderBasePtr reader;
     std::string family;
     Config params;
     index::ReaderCaps caps;
 };
 
+// Test instrumentation must wrap every request, including readers created after installation.
+class ReaderDecoratingIndex final : public index::IIndex {
+ public:
+    using Decorator =
+        std::function<index::IIndexReaderBasePtr(index::IIndexReaderBasePtr)>;
+    ReaderDecoratingIndex(index::IndexPtr owner,
+                          index::ReaderCaps caps,
+                          Decorator decorate)
+        : owner_(std::move(owner)),
+          caps_(caps),
+          decorate_(std::move(decorate)) {
+    }
+    index::IndexMetadata
+    Metadata() const override {
+        auto metadata = owner_->Metadata();
+        metadata.caps = caps_;
+        return metadata;
+    }
+    index::IIndexReaderBasePtr
+    CreateReader(OpContext* ctx) const override {
+        return decorate_(owner_->CreateReader(ctx));
+    }
+    void
+    CancelWarmup() const override {
+        owner_->CancelWarmup();
+    }
+
+ private:
+    index::IndexPtr owner_;
+    index::ReaderCaps caps_;
+    Decorator decorate_;
+};
+
+inline void
+DecorateIndex(OpenedIndex& opened, ReaderDecoratingIndex::Decorator decorate) {
+    opened.reader = decorate(std::move(opened.reader));
+    opened.caps = opened.reader->Caps();
+    opened.index = std::make_shared<ReaderDecoratingIndex>(
+        std::move(opened.index), opened.caps, std::move(decorate));
+}
+
 // The consumer fixture enters the same adapter/materializer/builder and packed
-// loader interfaces as production. Its cache translator only owns the finished
-// production reader; it does not substitute query behavior.
+// loader interfaces as production, retaining the resulting Index for installation.
 inline OpenedIndex
 BuildIndex(FieldId field_id,
            DataType field_type,
@@ -217,80 +260,19 @@ BuildIndex(FieldId field_id,
     options.mmap_dir_path = "/tmp";
     options.params = load_params;
     const auto caps = loader.derive_caps(load_params);
-    auto reader = loader.Load(
+    auto owner = loader.Load(
         {index::OpenedIndexSource{index::PackedIndexSource{
              std::shared_ptr<storage::IndexEntryReader>(std::move(source))}},
-         options});
+         options,
+         milvus::index::test::TestIndexCacheConfig()});
+    auto reader = owner->CreateReader(nullptr);
     AssertInfo(reader != nullptr, "consumer fixture loader returned no reader");
-    return {std::move(reader), family, std::move(load_params), caps};
+    return {std::move(owner),
+            std::move(reader),
+            family,
+            std::move(load_params),
+            caps};
 }
-
-class ReaderTranslator final
-    : public cachinglayer::Translator<index::IIndexReaderBase> {
- public:
-    ReaderTranslator(index::IIndexReaderBasePtr reader, OpContext** observed)
-        : reader_(std::move(reader)),
-          usage_(reader_->CellByteSize()),
-          key_("expr-reader-" + std::to_string(NextFixtureId())),
-          observed_(observed),
-          meta_(usage_.file_bytes > 0 ? cachinglayer::StorageType::DISK
-                                      : cachinglayer::StorageType::MEMORY,
-                cachinglayer::CellIdMappingMode::ALWAYS_ZERO,
-                cachinglayer::CellDataType::SCALAR_INDEX,
-                CacheWarmupPolicy::CacheWarmupPolicy_Disable,
-                false) {
-    }
-
-    size_t
-    num_cells() const override {
-        return 1;
-    }
-    cachinglayer::cid_t
-    cell_id_of(cachinglayer::uid_t) const override {
-        return 0;
-    }
-    cachinglayer::LoadingResourceUsage
-    estimated_loading_usage(
-        const std::vector<cachinglayer::cid_t>& cids) const override {
-        if (cids.empty()) {
-            return {};
-        }
-        return {usage_, {0, 0}};
-    }
-    int64_t
-    cells_storage_bytes(
-        const std::vector<cachinglayer::cid_t>&) const override {
-        return usage_.file_bytes;
-    }
-    const std::string&
-    key() const override {
-        return key_;
-    }
-    cachinglayer::Meta*
-    meta() override {
-        return &meta_;
-    }
-    std::vector<std::pair<cachinglayer::cid_t, index::IIndexReaderBasePtr>>
-    get_cells(OpContext* context,
-              const std::vector<cachinglayer::cid_t>& cells) override {
-        AssertInfo(cells.size() == 1 && cells[0] == 0 && reader_ != nullptr,
-                   "consumer reader fixture assumes one non-evictable cell");
-        if (observed_ != nullptr) {
-            *observed_ = context;
-        }
-        std::vector<std::pair<cachinglayer::cid_t, index::IIndexReaderBasePtr>>
-            result;
-        result.emplace_back(0, std::move(reader_));
-        return result;
-    }
-
- private:
-    index::IIndexReaderBasePtr reader_;
-    cachinglayer::ResourceUsage usage_;
-    std::string key_;
-    OpContext** observed_;
-    cachinglayer::Meta meta_;
-};
 
 inline void
 InstallIndex(segcore::SegmentSealed& segment,
@@ -313,11 +295,9 @@ InstallIndex(segcore::SegmentSealed& segment,
         info.index_params.emplace(
             key, value.is_string() ? value.get<std::string>() : value.dump());
     }
-    std::unique_ptr<cachinglayer::Translator<index::IIndexReaderBase>>
-        translator = std::make_unique<ReaderTranslator>(
-            std::move(opened.reader), observed);
-    info.cache_index = cachinglayer::Manager::GetInstance().CreateCacheSlot(
-        std::move(translator));
+    info.index = observed != nullptr ? std::make_shared<ContextObservingIndex>(
+                                           std::move(opened.index), observed)
+                                     : std::move(opened.index);
     // Consumer tests retain a raw column for refinement/fallback. The fixture
     // supplies the load estimate explicitly, as the production boundary does.
     info.load_resource_request = LoadResourceRequest{};

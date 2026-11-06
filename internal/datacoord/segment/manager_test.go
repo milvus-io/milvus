@@ -42,10 +42,8 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -238,16 +236,7 @@ func TestLastExpireReset(t *testing.T) {
 	collID, err := mockAllocator.AllocID(ctx)
 	assert.Nil(t, err)
 	broker := broker.NewMockBroker(t)
-	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{
-		Status: merr.Success(),
-		DbCollections: []*rootcoordpb.DBCollections{
-			{
-				DbName:        "db_1",
-				CollectionIDs: []int64{collID},
-			},
-		},
-	}, nil)
-	mt, err := meta.NewMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker, meta.NoDomainMetas)
+	mt, err := meta.NewMeta(context.TODO(), catalog, nil, meta.NewMetaStoreWithCollections(catalog, collID), broker, meta.NoDomainMetas)
 	assert.Nil(t, err)
 	// add collection
 	channelName := "c1"
@@ -301,7 +290,7 @@ func TestLastExpireReset(t *testing.T) {
 	newMetaKV := etcdkv.NewEtcdKV(newEtcdCli, rootPath)
 	defer newMetaKV.RemoveWithPrefix(ctx, "")
 	newCatalog := datacoord.NewCatalog(newMetaKV, "", "")
-	restartedMeta, err := meta.NewMeta(context.TODO(), newCatalog, nil, metacache.NewMetaStore(newCatalog), broker, meta.NoDomainMetas)
+	restartedMeta, err := meta.NewMeta(context.TODO(), newCatalog, nil, meta.NewMetaStoreWithCollections(newCatalog, collID), broker, meta.NoDomainMetas)
 	restartedMeta.AddCollection(&meta.CollectionInfo{ID: collID, Schema: schema})
 	assert.Nil(t, err)
 	newSegmentManager, _ := NewSegmentManager(restartedMeta, mockAllocator)
@@ -746,7 +735,6 @@ func TestTryToSealSegment(t *testing.T) {
 		memoryKV := meta.NewMetaMemoryKV()
 		catalog := datacoord.NewCatalog(memoryKV, "", "")
 		broker := broker.NewMockBroker(t)
-		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 		mt, err := meta.NewMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker, meta.NoDomainMetas)
 		assert.NoError(t, err)
 
@@ -777,7 +765,6 @@ func TestTryToSealSegment(t *testing.T) {
 		memoryKV := meta.NewMetaMemoryKV()
 		catalog := datacoord.NewCatalog(memoryKV, "", "")
 		broker := broker.NewMockBroker(t)
-		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 		mt, err := meta.NewMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker, meta.NoDomainMetas)
 		assert.NoError(t, err)
 

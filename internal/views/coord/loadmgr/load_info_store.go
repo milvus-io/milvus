@@ -158,16 +158,6 @@ func (s *LoadConfigStore) collectCollectionLoadInfo(ctx context.Context, id int6
 
 func (s *LoadConfigStore) normalize(ctx context.Context, cfg *LoadConfig) (*LoadConfig, error) {
 	cfg = cfg.Clone()
-	if len(cfg.RequiredFields) == 0 && s.schema != nil {
-		schema, err := s.schema(ctx, cfg.CollectionID)
-		if err != nil {
-			return nil, err
-		}
-		cfg.RequiredFields = RequiredFieldsForSchema(schema)
-	}
-	if len(cfg.RequiredFields) == 0 {
-		return nil, merr.WrapErrServiceInternalMsg("collection %d has no required query fields", cfg.CollectionID)
-	}
 	fields := make(map[int64][]int64, len(cfg.RequiredFields))
 	for _, field := range cfg.RequiredFields {
 		fields[field.GetFieldId()] = nil

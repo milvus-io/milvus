@@ -21,6 +21,8 @@
 #include "index/scalar/ngram/NgramIndexLoader.h"
 #include "index/PackedIndexLoad.h"
 #include "index/LegacyIndexLoad.h"
+#include "index/SingleCellIndexStorageTranslator.h"
+#include "cachinglayer/Manager.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -438,14 +440,14 @@ LoadState(bool use_async,
 
 // Share initialized state with the reader; retain the directory only for
 // file-backed use.
-std::unique_ptr<IIndexReaderBase>
-MakeReader(const NgramLoadState& state) {
+std::unique_ptr<NgramIndexStorage>
+MakeStorage(const NgramLoadState& state, const storage::LoadOptions& opts) {
     AssertInfo(state.directory != nullptr,
                "NGRAM load state requires a directory owner");
     AssertInfo(state.engine != nullptr, "NGRAM load state requires an engine");
     AssertInfo(state.null_offsets != nullptr,
                "NGRAM load state requires immutable null offsets");
-    return std::make_unique<NgramIndexReader>(
+    auto storage = std::make_unique<NgramIndexStorage>(
         state.mmap ? state.directory : nullptr,
         state.engine,
         state.null_offsets,
@@ -455,6 +457,15 @@ MakeReader(const NgramLoadState& state) {
         state.avg_row_size,
         state.mmap,
         state.engine_bytes);
+    const auto rows =
+        GetValueFromConfig<int64_t>(opts.params, INDEX_NUM_ROWS_KEY);
+    if (rows && *rows > 0 && *rows != storage->count_) {
+        ThrowInfo(DataFormatBroken,
+                  "ngram index count {} disagrees with metadata count {}",
+                  storage->count_,
+                  *rows);
+    }
+    return storage;
 }
 
 /**
@@ -476,20 +487,79 @@ NgramIndexLoader::Create(OpenedIndexSource source,
     auto loader = std::unique_ptr<NgramIndexLoader>(
         new NgramIndexLoader(std::move(source), std::move(options)));
     (void)DeriveCaps(loader->options_.params);
-    if (const auto* legacy = std::get_if<LegacyIndexSource>(&loader->source_)) {
+    if (const auto* legacy =
+            std::get_if<LegacyIndexSource>(&*loader->source_)) {
         (void)ReadPersistedEntries(*legacy->source);
     }
     co_return loader;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
-NgramIndexLoader::Load(milvus::OpContext* context) {
-    if (auto* packed = std::get_if<PackedIndexSource>(&source_)) {
-        return RunPackedIndexLoad(
-            *packed, options_, &PlanPacked, &FinishPacked, context);
+IndexPtr
+NgramIndexLoader::Load(milvus::OpContext* context,
+                       const IndexCacheConfig& cache) {
+    AssertInfo(source_.has_value(),
+               "cached ngram construction consumed this loader");
+    std::optional<int64_t> count;
+    const auto rows =
+        GetValueFromConfig<int64_t>(options_.params, INDEX_NUM_ROWS_KEY);
+    if (rows && *rows > 0)
+        count = *rows;
+    const auto runtime = ParseRuntimeParams(options_.params);
+    auto caps = DeriveCaps(options_.params);
+    caps.json_paths = false;
+    const IndexMetadata metadata{caps, Domain::Row, runtime.value_type, count};
+    const auto* legacy = std::get_if<LegacyIndexSource>(&*source_);
+    const bool use_async =
+        legacy ? legacy->use_async
+               : std::holds_alternative<
+                     std::shared_ptr<storage::AsyncIndexEntryReader>>(
+                     std::get<PackedIndexSource>(*source_).reader);
+    auto source = std::move(*source_);
+    source_.reset();
+    auto load = [source = std::move(source),
+                 options = options_](OpContext* ctx) mutable {
+        return LoadStorage(source, options, ctx);
+    };
+    auto slot =
+        cachinglayer::Manager::GetInstance().CreateCacheSlot<NgramIndexStorage>(
+            std::make_unique<
+                SingleCellIndexStorageTranslator<NgramIndexStorage>>(
+                cache, use_async, std::move(load)),
+            context);
+    auto index = std::make_shared<NgramIndex>(
+        std::move(slot), metadata, runtime.min_gram, runtime.max_gram);
+    if (auto spec = JsonProjectedSpec(options_.params, count)) {
+        return JsonPathIndex::FromStorage(std::move(index), std::move(*spec));
     }
-    return RunLegacyLoad(
-        std::get<LegacyIndexSource>(source_), options_, &LoadLegacy, context);
+    return index;
+}
+
+folly::coro::Task<std::unique_ptr<NgramIndexStorage>>
+NgramIndexLoader::LoadStorage(OpenedIndexSource& source,
+                              const storage::LoadOptions& options,
+                              milvus::OpContext* context) {
+    if (auto* packed = std::get_if<PackedIndexSource>(&source)) {
+        return RunPackedIndexLoad<std::unique_ptr<NgramIndexStorage>>(
+            *packed, options, &PlanPacked, &FinishPackedStorage, context);
+    }
+    return RunLegacyLoad<std::unique_ptr<NgramIndexStorage>>(
+        std::get<LegacyIndexSource>(source),
+        options,
+        [](storage::FileSource& files,
+           const storage::LoadOptions& opts,
+           bool use_async)
+            -> folly::coro::Task<std::unique_ptr<NgramIndexStorage>> {
+            auto projection =
+                PrepareJsonProjectedOpen(families::kNgram, files, opts);
+            auto storage = MakeStorage(
+                co_await LoadState(
+                    use_async, files, opts, ParseRuntimeParams(opts.params)),
+                opts);
+            storage->json_exists = co_await LoadJsonExists(
+                use_async, std::move(projection), files, storage->count_);
+            co_return storage;
+        },
+        context);
 }
 
 ReaderCaps
@@ -499,18 +569,6 @@ NgramIndexLoader::DeriveCaps(const Config& index_meta) {
         families::kNgram,
         index_meta,
         ReaderCaps{.ngram_candidates = true, .exact = false});
-}
-
-folly::coro::Task<IIndexReaderBasePtr>
-NgramIndexLoader::LoadLegacy(storage::FileSource& source,
-                             const storage::LoadOptions& opts,
-                             bool use_async) {
-    auto projection = PrepareJsonProjectedOpen(families::kNgram, source, opts);
-    auto state = (co_await LoadState(
-        use_async, source, opts, ParseRuntimeParams(opts.params)));
-    auto reader = MakeReader(state);
-    co_return (co_await FinishJsonProjectedOpenAsync(
-        use_async, std::move(projection), source, std::move(reader)));
 }
 
 IndexLoadPlan
@@ -550,10 +608,10 @@ NgramIndexLoader::PlanPacked(const storage::IndexEntryDirectory& directory,
     return plan;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
-NgramIndexLoader::FinishPacked(IndexLoadPlan& plan,
-                               const storage::LoadOptions& opts,
-                               bool use_async) {
+folly::coro::Task<std::unique_ptr<NgramIndexStorage>>
+NgramIndexLoader::FinishPackedStorage(IndexLoadPlan& plan,
+                                      const storage::LoadOptions& opts,
+                                      bool use_async) {
     const auto& state = std::any_cast<const std::shared_ptr<PackedNgramState>&>(
         plan.load_context);
     AssertInfo(state != nullptr, "Ngram packed load context is null");
@@ -590,8 +648,10 @@ NgramIndexLoader::FinishPacked(IndexLoadPlan& plan,
     loaded.mmap = state->effective.mmap;
     loaded.engine_bytes = materialized_bytes;
     loaded.avg_row_size = *state->avg_row_size;
-    co_return FinishPackedJsonProjectedOpen(std::move(state->projection),
-                                            MakeReader(loaded));
+    auto storage = MakeStorage(loaded, opts);
+    storage->json_exists =
+        FinishPackedJsonExists(std::move(state->projection), storage->count_);
+    co_return storage;
 }
 
 namespace {

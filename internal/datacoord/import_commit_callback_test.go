@@ -27,11 +27,14 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metacache"
 	datacoordkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -48,7 +51,9 @@ func newImportCommitCallbackTest(t *testing.T) (*Server, *datacoordkv.Catalog, m
 		ImportJob: &datapb.ImportJob{JobID: 1, CollectionID: 100, Vchannels: []string{"v1", "v2"}, State: internalpb.ImportJobState_Uncommitted, CommitByCoordinator: true},
 		Tr:        timerecord.NewTimeRecorder("import-commit"),
 	}))
-	segments := meta.NewSegmentsInfo(metacache.NewMetaStore(nil))
+	metaStore := metacache.NewMetaStore(nil)
+	metaStore.PutCollection(&meta.CollectionInfo{ID: 100})
+	segments := meta.NewSegmentsInfo(metaStore)
 	for id, channel := range map[int64]string{10: "v1", 11: "v1", 20: "v2"} {
 		segments.SetSegment(id, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: id, CollectionID: 100, PartitionID: 1, InsertChannel: channel,
@@ -56,7 +61,19 @@ func newImportCommitCallbackTest(t *testing.T) (*Server, *datacoordkv.Catalog, m
 			Binlogs: []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: id, TimestampTo: 100}}}},
 		}})
 	}
-	server := &Server{importMeta: imports, meta: &meta.Meta{Catalog: catalog, Segments: segments}}
+	server := &Server{importMeta: imports, meta: &meta.Meta{Catalog: catalog, Segments: segments, MetaStore: metaStore}}
+	manager, err := dataview.RecoverManager(t.Context(), catalog, func(context.Context, int64) (bool, error) { return true, nil }, nil, nil, nil,
+		dataview.WithPendingTransformProjector(func(ctx context.Context, view *viewpb.DataViewOfCollection) (map[string]uint64, error) {
+			return pendingTransformBounds(ctx, server.meta, server.importMeta, view)
+		}))
+	require.NoError(t, err)
+	_, err = manager.OnCreateCollection(ctx, dataview.CreateCollectionDataViewEvent{
+		CollectionID: 100, VChannels: []string{"v1", "v2"}, TransformStarts: map[string]uint64{"v1": 50, "v2": 60},
+	})
+	require.NoError(t, err)
+	server.dataViewManager = manager
+	server.meta.DataViewManager = manager
+	server.UpdateStateCode(commonpb.StateCode_Healthy)
 	server.ddl = newDDLCallbacks(server)
 	patch := mockey.Mock(bulkimport.GetImportSegmentIDsByVchannel).To(func(_ context.Context, _ bulkimport.ImportMeta, _ *meta.Meta, jobID int64, vchannel string) []int64 {
 		require.Equal(t, int64(1), jobID)
@@ -86,6 +103,7 @@ func TestImportCommitCallbackPublishesPerChannelVisibility(t *testing.T) {
 		segment := server.meta.GetSegment(ctx, id)
 		require.False(t, segment.GetIsImporting())
 		require.Equal(t, tick, segment.GetCommitTimestamp())
+		require.Equal(t, tick, segment.GetTransformStartAfterTimetick())
 	}
 	// Completion is durable and no per-vchannel RPC/counter is needed.
 	restored, err := bulkimport.NewImportMeta(ctx, catalog, nil, nil)
@@ -113,35 +131,107 @@ func TestImportCommitCallbackRetriesSegmentPersistence(t *testing.T) {
 	require.Equal(t, internalpb.ImportJobState_Completed, server.importMeta.GetJob(ctx, 1).GetState())
 }
 
-func TestImportCommitCallbackRecomputesDataView(t *testing.T) {
-	server, _, result := newImportCommitCallbackTest(t)
-	ctx := context.Background()
-	server.meta.DataViewManager = &recordingDataViewManager{}
-	recompute := mockey.Mock((*recordingDataViewManager).Recompute).To(func(_ *recordingDataViewManager, ctx context.Context, collectionID int64) error {
-		require.EqualValues(t, 100, collectionID)
-		// Reading ImportMeta here also checks that reconciliation is requested
-		// outside its write lock. Segment visibility must already be persisted.
-		require.NotNil(t, server.importMeta.GetJob(ctx, 1))
-		projection, err := server.meta.LoadableProjection(ctx, collectionID)
-		require.NoError(t, err)
-		require.Len(t, projection, 3)
-		for _, id := range []int64{10, 11, 20} {
-			require.False(t, server.meta.GetSegment(ctx, id).GetIsImporting())
+func TestImportCommitCallbackAfterCollectionDrop(t *testing.T) {
+	for _, recovered := range []bool{false, true} {
+		for _, state := range []internalpb.ImportJobState{
+			internalpb.ImportJobState_Uncommitted,
+			internalpb.ImportJobState_Committing,
+			internalpb.ImportJobState_Completed,
+		} {
+			name := "runtime/" + state.String()
+			if recovered {
+				name = "recovered/" + state.String()
+			}
+			t.Run(name, func(t *testing.T) {
+				server, catalog, result := newImportCommitCallbackTest(t)
+				ctx := t.Context()
+				require.NoError(t, server.importMeta.UpdateJob(ctx, 1, bulkimport.UpdateJobState(state)))
+				_, err := server.dataViewManager.OnDropCollection(ctx, 100)
+				require.NoError(t, err)
+				if recovered {
+					server.importMeta, err = bulkimport.NewImportMeta(ctx, catalog, nil, nil)
+					server.ddl = newDDLCallbacks(server)
+					require.NoError(t, err)
+					// No snapshots or in-memory drop markers survive this restart.
+					// Production requires Create/Bootstrap before ordinary recompute.
+					server.dataViewManager, err = dataview.RecoverManager(ctx, catalog,
+						func(context.Context, int64) (bool, error) { return false, nil }, nil, nil, nil,
+						dataview.WithFrontierProjector(func(context.Context, int64) (map[string]uint64, error) {
+							return nil, nil
+						}))
+					require.NoError(t, err)
+					server.meta.DataViewManager = server.dataViewManager
+				}
+				lookupErr := context.DeadlineExceeded
+				server.SetCollectionDroppedChecker(func(ctx context.Context, id int64) (bool, error) {
+					require.Equal(t, int64(100), id)
+					return lookupErr == nil, lookupErr
+				})
+				// A failed metadata query must not be mistaken for deletion.
+				require.ErrorIs(t, server.ddl.CommitImportV2AckCallback(ctx, result), context.DeadlineExceeded)
+				if state != internalpb.ImportJobState_Completed {
+					require.Equal(t, internalpb.ImportJobState_Committing, server.importMeta.GetJob(ctx, 1).GetState())
+				}
+				lookupErr = nil
+				require.NoError(t, server.ddl.CommitImportV2AckCallback(ctx, result))
+				require.NoError(t, server.ddl.CommitImportV2AckCallback(ctx, result), "completed replay must also finish after drop")
+				imports, err := bulkimport.NewImportMeta(ctx, catalog, nil, nil)
+				require.NoError(t, err)
+				require.Equal(t, internalpb.ImportJobState_Completed, imports.GetJob(ctx, 1).GetState())
+				views, err := catalog.ListAllDataViews(ctx)
+				require.NoError(t, err)
+				require.Empty(t, views, "commit must not resurrect the deleted collection")
+			})
 		}
-		return nil
-	}).Build()
-	defer recompute.UnPatch()
-	failSave := mockey.Mock((*meta.Meta).UpdateSegmentsInfo).Return(context.DeadlineExceeded).Build()
-	defer failSave.UnPatch()
+	}
+}
+
+func TestImportCommitCallbackPublishesBeforeCompleted(t *testing.T) {
+	server, catalog, result := newImportCommitCallbackTest(t)
+	ctx := t.Context()
+	// Another import is still being prepared. It must not be visible or block
+	// this commit while the collection's broadcast lock excludes its commit.
+	require.NoError(t, server.importMeta.AddJob(ctx, &bulkimport.Job{
+		ImportJob: &datapb.ImportJob{JobID: 2, CollectionID: 100, Vchannels: []string{"v1", "v2"}, State: internalpb.ImportJobState_Importing, CommitByCoordinator: true},
+	}))
+	server.meta.Segments.SetSegment(30, meta.NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 30, CollectionID: 100, PartitionID: 1, InsertChannel: "v1", State: commonpb.SegmentState_Flushed, IsImporting: true,
+		Binlogs: []*datapb.FieldBinlog{{FieldID: 100}},
+	}))
+	failure := mockey.Mock((*datacoordkv.Catalog).SaveDataView).Return(context.DeadlineExceeded).Build()
 	require.ErrorIs(t, server.ddl.CommitImportV2AckCallback(ctx, result), context.DeadlineExceeded)
-	require.Zero(t, recompute.Times())
-	failSave.UnPatch()
+	failure.UnPatch()
+	require.Equal(t, internalpb.ImportJobState_Committing, server.importMeta.GetJob(ctx, 1).GetState())
+	ref, err := server.dataViewManager.Latest(ctx, 100)
+	require.NoError(t, err)
+	for _, shard := range ref.DataView().Shards {
+		require.Empty(t, shard.Partitions, "failed publication must retain the old view")
+	}
+	ref.Deref()
+	// The durable callback can resume after a coordinator restart. No QueryView
+	// infrastructure is installed: import completion does not wait for QNs.
+	server.importMeta, err = bulkimport.NewImportMeta(ctx, catalog, nil, nil)
+	server.ddl = newDDLCallbacks(server)
+	require.NoError(t, err)
 	require.NoError(t, server.ddl.CommitImportV2AckCallback(ctx, result))
-	requests := recompute.Times()
-	require.Positive(t, requests, "metadata publication and callback may both request a coalesced recompute")
-	// A replay of an already-completed job can retry a lost reconciliation.
+	require.Equal(t, internalpb.ImportJobState_Completed, server.importMeta.GetJob(ctx, 1).GetState())
+	require.Equal(t, internalpb.ImportJobState_Importing, server.importMeta.GetJob(ctx, 2).GetState())
+	ref, err = server.dataViewManager.Latest(ctx, 100)
+	require.NoError(t, err)
+	defer ref.Deref()
+	ids := []int64{}
+	for _, shard := range ref.DataView().Shards {
+		for _, partition := range shard.Partitions {
+			ids = append(ids, partition.SegmentIds...)
+		}
+	}
+	require.ElementsMatch(t, []int64{10, 11, 20}, ids)
+	version := ref.DataView().GetDataVersion()
 	require.NoError(t, server.ddl.CommitImportV2AckCallback(ctx, result))
-	require.Greater(t, recompute.Times(), requests, "completed replay must retry a lost reconciliation")
+	replay, err := server.dataViewManager.Latest(ctx, 100)
+	require.NoError(t, err)
+	defer replay.Deref()
+	require.Equal(t, version, replay.DataView().GetDataVersion(), "completed replay is idempotent")
 }
 
 func TestImportCommitCallbackRetriesCompletionAfterRestart(t *testing.T) {
@@ -214,14 +304,14 @@ func TestImportCallbackExcludesControlFromJobChannels(t *testing.T) {
 		allocator: &ackAllocator{}, handler: &ackHandler{}, importMeta: imports,
 	}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
-	callbacks := newDDLCallbacks(server)
+	server.ddl = newDDLCallbacks(server)
 
 	control := funcutil.GetControlChannel("test")
 	msg := message.NewImportMessageBuilderV1().WithHeader(&message.ImportMessageHeader{}).
 		WithBody(&message.ImportMsg{JobID: 1, CollectionID: 100}).
 		WithBroadcast([]string{"v1", control}).MustBuildBroadcast()
 	// Routing belongs to job creation; do not mock away the ACK-to-job path.
-	err = callbacks.ImportV1AckCallback(ctx, message.BroadcastResultImportMessageV1{
+	err = server.ddl.ImportV1AckCallback(ctx, message.BroadcastResultImportMessageV1{
 		Message: message.MustAsSpecializedBroadcastMessage[*message.ImportMessageHeader, *message.ImportMsg](msg),
 		Results: map[string]*message.AppendResult{"v1": {TimeTick: 100}, control: {TimeTick: 900}},
 	})
@@ -316,7 +406,9 @@ func TestImportCommitCallbackV3JobPublishesVisibility(t *testing.T) {
 		},
 		Tr: timerecord.NewTimeRecorder("import-commit"),
 	}))
-	segments := meta.NewSegmentsInfo(metacache.NewMetaStore(nil))
+	metaStore := metacache.NewMetaStore(nil)
+	metaStore.PutCollection(&meta.CollectionInfo{ID: 100})
+	segments := meta.NewSegmentsInfo(metaStore)
 	segments.SetSegment(10, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 		ID: 10, CollectionID: 100, PartitionID: 1, InsertChannel: "v1",
 		State: commonpb.SegmentState_Flushed, IsImporting: true, NumOfRows: 10,
@@ -330,16 +422,73 @@ func TestImportCommitCallbackV3JobPublishesVisibility(t *testing.T) {
 	}, imports, nil, nil)
 	require.NoError(t, imports.AddTask(ctx, v3task))
 
-	callbacks := newDDLCallbacks(&Server{importMeta: imports, meta: &meta.Meta{Catalog: catalog, Segments: segments}})
+	server := &Server{importMeta: imports, meta: &meta.Meta{Catalog: catalog, Segments: segments, MetaStore: metaStore}}
+	manager, err := dataview.RecoverManager(ctx, catalog, func(context.Context, int64) (bool, error) { return true, nil }, nil, nil, nil,
+		dataview.WithPendingTransformProjector(func(ctx context.Context, view *viewpb.DataViewOfCollection) (map[string]uint64, error) {
+			return pendingTransformBounds(ctx, server.meta, server.importMeta, view)
+		}))
+	require.NoError(t, err)
+	_, err = manager.OnCreateCollection(ctx, dataview.CreateCollectionDataViewEvent{
+		CollectionID: 100, VChannels: []string{"v1"}, TransformStarts: map[string]uint64{"v1": 50},
+	})
+	require.NoError(t, err)
+	server.dataViewManager = manager
+	server.meta.DataViewManager = manager
+	server.UpdateStateCode(commonpb.StateCode_Healthy)
+	server.ddl = newDDLCallbacks(server)
 	result := buildCommitImportBroadcastResult(1)
 	result.Results = map[string]*message.AppendResult{"v1": {TimeTick: 200}}
 
-	require.NoError(t, callbacks.CommitImportV2AckCallback(ctx, result))
+	require.NoError(t, server.ddl.CommitImportV2AckCallback(ctx, result))
 
-	seg := callbacks.Meta.GetSegment(ctx, 10)
+	seg := server.meta.GetSegment(ctx, 10)
 	require.False(t, seg.GetIsImporting(), "the commit fence must clear is_importing")
 	require.Equal(t, uint64(200), seg.GetCommitTimestamp(), "the visibility fence must stamp the channel's timetick")
 	job := imports.GetJob(ctx, 1)
 	require.Equal(t, internalpb.ImportJobState_Completed, job.GetState())
 	require.NotEmpty(t, job.GetCompleteTime())
+}
+
+func TestImportCommitTransformFenceSurvivesRecovery(t *testing.T) {
+	server, catalog, _ := newImportCommitCallbackTest(t)
+	ctx := context.Background()
+	raw := message.NewCommitImportMessageBuilderV2().WithVChannel("v1").
+		WithHeader(&message.CommitImportMessageHeader{CollectionId: 100, JobId: 1, CommitByCoordinator: true}).
+		WithBody(&message.CommitImportMessageBody{}).MustBuildMutable().WithTimeTick(200).
+		IntoImmutableMessage(walimplstest.NewTestMessageID(1))
+	result := message.AckResultCommitImportMessageV2{Message: message.MustAsImmutableCommitImportMessageV2(raw)}
+	failure := mockey.Mock((*datacoordkv.Catalog).SaveImportJob).Return(context.DeadlineExceeded).Build()
+	require.ErrorIs(t, server.ddl.CommitImportV2AckOnceCallback(ctx, result), context.DeadlineExceeded)
+	failure.UnPatch()
+	require.Empty(t, server.importMeta.GetJob(ctx, 1).(*bulkimport.Job).GetTransformCommitTimeticks())
+	require.NoError(t, server.ddl.CommitImportV2AckOnceCallback(ctx, result))
+	require.NoError(t, server.ddl.CommitImportV2AckOnceCallback(ctx, result), "ack retry is idempotent")
+	recovered, err := bulkimport.NewImportMeta(ctx, catalog, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, map[string]uint64{"v1": 200}, recovered.GetJob(ctx, 1).(*bulkimport.Job).GetTransformCommitTimeticks())
+	require.Equal(t, internalpb.ImportJobState_Uncommitted, recovered.GetJob(ctx, 1).GetState(), "registration alone must not publish imported rows")
+}
+
+func TestImportPendingJobCapsFlushCertificate(t *testing.T) {
+	server, _, _ := newImportCommitCallbackTest(t)
+	ctx := t.Context()
+	check := func(expected map[string]uint64) {
+		view, _, abort, err := server.dataViewManager.PrepareFlush(ctx, dataview.FlushDataViewEvent{
+			CollectionID:           100,
+			GrowingTransformStarts: map[string]uint64{"v1": 1000, "v2": 1000},
+			Segments:               []dataview.LoadableSegment{{SegmentID: 40, VChannel: "v1", PartitionID: 1, TransformStartAfterTimetick: 70}},
+		})
+		require.NoError(t, err)
+		defer abort()
+		for _, shard := range view.GetShards() {
+			require.Equal(t, expected[shard.GetVchannel()], shard.GetGrowingTransformStartAfterTimetick())
+		}
+	}
+	// A certificate observed past a not-yet-acknowledged CommitImport may
+	// publish its L1, but must not advance W across that unknown commit.
+	check(map[string]uint64{"v1": 50, "v2": 60})
+	require.NoError(t, server.importMeta.UpdateJob(ctx, 1, func(job bulkimport.ImportJob) {
+		job.(*bulkimport.Job).TransformCommitTimeticks = map[string]uint64{"v1": 200, "v2": 300}
+	}))
+	check(map[string]uint64{"v1": 200, "v2": 300})
 }

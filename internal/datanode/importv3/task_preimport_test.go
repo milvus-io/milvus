@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // TestPreImportV3TaskProducesImportV3FileStats pins the count-only preimport
@@ -130,7 +132,7 @@ func TestPreImportCheapRowCountDispatchesByFileType(t *testing.T) {
 
 	var parquetCalls, numpyCalls int
 	parquetMock := mockey.Mock(parquet.NumRowsAndBytes).To(
-		func(context.Context, storage.ChunkManager, string) (int64, int64, int64, error) {
+		func(context.Context, storage.ChunkManager, *schemapb.CollectionSchema, string) (int64, int64, int64, error) {
 			parquetCalls++
 			return 11, 22, 33, nil
 		}).Build()
@@ -183,4 +185,25 @@ func TestPreImportCheapRowCountDispatchesByFileType(t *testing.T) {
 
 	require.Equal(t, 1, parquetCalls, "only the parquet case may touch the parquet footer")
 	require.Equal(t, 1, numpyCalls, "only the numpy case may touch the numpy header")
+}
+
+// TestPreImportV3RejectsNumpyNamingNoField pins that a file set naming no
+// required field fails the preimport instead of finishing a zero-row job.
+func TestPreImportV3RejectsNumpyNamingNoField(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+	}}
+	// No expectation: the rejection must not open any object.
+	cm := mocks.NewChunkManager(t)
+	req := &datapb.PreImportRequest{
+		JobID: 1, TaskID: 2, CollectionID: 3,
+		Schema:        schema,
+		ImportFiles:   []*internalpb.ImportFile{{Id: 7, Paths: []string{"id.npy"}}},
+		StorageConfig: &indexpb.StorageConfig{},
+	}
+
+	_, err := NewPreImportTask(req, cm).Execute(context.Background())
+	require.Error(t, err)
+	require.True(t, errors.Is(err, merr.ErrImportFailed),
+		"a file set naming no field must be a terminal input error: %v", err)
 }

@@ -237,7 +237,7 @@ func (f *recoveryFixture) validate(_ context.Context, collectionID int64) (bool,
 	return true, nil
 }
 
-func (f *recoveryFixture) project(_ context.Context, id int64) ([]LoadableSegment, error) {
+func (f *recoveryFixture) project(_ context.Context, id int64, _ *viewpb.DataViewOfCollection) ([]LoadableSegment, error) {
 	a, b := fixtureBases(id)
 	switch id % recoveryCases {
 	case caseStale:
@@ -449,6 +449,60 @@ func TestRecoverManagerParallelFailuresMatchSerial(t *testing.T) {
 	}
 }
 
+// The barrier stands for the manifest index scan: projections after it select
+// the compaction output whose index the scan installed.
+func TestRecoverManagerReconcilesBarrierCollectionsAgain(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var (
+		mu          sync.Mutex
+		projections = make(map[int64]int)
+		scanned     atomic.Bool
+	)
+	project := func(_ context.Context, id int64, _ *viewpb.DataViewOfCollection) ([]LoadableSegment, error) {
+		mu.Lock()
+		projections[id]++
+		mu.Unlock()
+		a, b := fixtureBases(id)
+		if scanned.Load() {
+			return []LoadableSegment{a, fixtureSegment(id, 3, 1)}, nil
+		}
+		return []LoadableSegment{a, b}, nil
+	}
+	newCatalog := func() *recoveryTestCatalog {
+		catalog := &recoveryTestCatalog{saveErrs: make(map[int64]error), dropErrs: make(map[int64]error)}
+		// Collection 2 has no snapshot yet and is bootstrapped.
+		catalog.views = []*viewpb.DataViewOfCollection{fixtureUpToDateView(1), fixtureUpToDateView(3)}
+		return catalog
+	}
+	live := []int64{1, 2, 3}
+	vchannels := map[int64][]string{1: {"c1-v0"}, 2: {"c2-v0"}, 3: {"c3-v0"}}
+
+	manager, err := RecoverManager(ctx, newCatalog(), recoverAllCollections, project, live, vchannels,
+		WithRecoveryConcurrency(4),
+		WithReconcileBarrier(func(context.Context) ([]int64, error) {
+			mu.Lock()
+			require.Equal(t, map[int64]int{1: 1, 2: 1, 3: 1}, projections, "the barrier runs after the first pass")
+			mu.Unlock()
+			scanned.Store(true)
+			// Duplicates and Collections that are not live are ignored.
+			return []int64{2, 1, 1, 99}, nil
+		}))
+	require.NoError(t, err)
+	require.Equal(t, map[int64]int{1: 2, 2: 2, 3: 1}, projections)
+	segments := func(id int64) []int64 {
+		return latestViewState(manager, id).GetShards()[0].GetPartitions()[0].GetSegmentIds()
+	}
+	require.Equal(t, []int64{101, 103}, segments(1), "a recovered snapshot is rebuilt")
+	require.Equal(t, []int64{201, 203}, segments(2), "a bootstrapped snapshot is rebuilt")
+	require.Equal(t, []int64{301, 302}, segments(3), "a Collection the barrier did not return keeps the first pass")
+
+	errBarrier := errors.New("barrier failure")
+	_, err = RecoverManager(ctx, newCatalog(), recoverAllCollections, project, live, vchannels,
+		WithReconcileBarrier(func(context.Context) ([]int64, error) { return nil, errBarrier }))
+	require.ErrorIs(t, err, errBarrier)
+}
+
 func TestRunRecoveryTasks(t *testing.T) {
 	failAt := func(i int) error { return fmt.Errorf("task %d failed", i) }
 	for _, workers := range []int{0, 1, 2, 3, 64} {
@@ -540,8 +594,12 @@ func TestDataViewMembershipEqualMatchesCanonicalClones(t *testing.T) {
 	// checks every per-Segment array: a new field must update both.
 	for message, want := range map[proto.Message][]protoreflect.Name{
 		&viewpb.DataViewOfCollection{}: {"collection_id", "shards", "data_version", "schema_version"},
-		&viewpb.DataViewOfShard{}:      {"vchannel", "partitions", "transform_start_after_timetick"},
-		&viewpb.DataViewOfPartition{}:  {"partition_id", "segment_ids", "segment_manifest_versions"},
+		&viewpb.DataViewOfShard{}: {
+			"vchannel", "partitions", "growing_transform_start_after_timetick", "compacted_transform_start_after_timetick",
+		},
+		&viewpb.DataViewOfPartition{}: {
+			"partition_id", "segment_ids", "segment_manifest_versions", "segment_transform_start_after_timeticks", "partition_stats_version",
+		},
 	} {
 		fields := message.ProtoReflect().Descriptor().Fields()
 		names := make([]protoreflect.Name, 0, fields.Len())
@@ -566,25 +624,37 @@ func TestDataViewMembershipEqualMatchesCanonicalClones(t *testing.T) {
 		"no-version": func(v *viewpb.DataViewOfCollection) { v.DataVersion = nil },
 		"collection": func(v *viewpb.DataViewOfCollection) { v.CollectionId++ },
 		"schema":     func(v *viewpb.DataViewOfCollection) { v.SchemaVersion++ },
-		"transform":  func(v *viewpb.DataViewOfCollection) { v.Shards[0].TransformStartAfterTimetick++ },
+		"growing":    func(v *viewpb.DataViewOfCollection) { v.Shards[0].GrowingTransformStartAfterTimetick++ },
+		"compacted":  func(v *viewpb.DataViewOfCollection) { v.Shards[0].CompactedTransformStartAfterTimetick++ },
+		"stats":      func(v *viewpb.DataViewOfCollection) { partition(v).PartitionStatsVersion++ },
 		"manifest":   func(v *viewpb.DataViewOfCollection) { partition(v).SegmentManifestVersions[1]++ },
+		"segment-transform": func(v *viewpb.DataViewOfCollection) {
+			partition(v).SegmentTransformStartAfterTimeticks[1]++
+		},
+		"no-segment-transforms": func(v *viewpb.DataViewOfCollection) {
+			partition(v).SegmentTransformStartAfterTimeticks = nil
+		},
 		"extra-segment": func(v *viewpb.DataViewOfCollection) {
 			p := partition(v)
 			p.SegmentIds = append(p.SegmentIds, 999)
 			p.SegmentManifestVersions = append(p.SegmentManifestVersions, 1)
+			p.SegmentTransformStartAfterTimeticks = append(p.SegmentTransformStartAfterTimeticks, 0)
 		},
 		"unsorted-segments": func(v *viewpb.DataViewOfCollection) {
 			p := partition(v)
 			p.SegmentIds[0], p.SegmentIds[1] = p.SegmentIds[1], p.SegmentIds[0]
 			p.SegmentManifestVersions[0], p.SegmentManifestVersions[1] = p.SegmentManifestVersions[1], p.SegmentManifestVersions[0]
+			p.SegmentTransformStartAfterTimeticks[0], p.SegmentTransformStartAfterTimeticks[1] = p.SegmentTransformStartAfterTimeticks[1], p.SegmentTransformStartAfterTimeticks[0]
 		},
 		"duplicate-segment": func(v *viewpb.DataViewOfCollection) {
 			p := partition(v)
 			p.SegmentIds = append(p.SegmentIds, p.SegmentIds[0])
 			p.SegmentManifestVersions = append(p.SegmentManifestVersions, 1)
+			p.SegmentTransformStartAfterTimeticks = append(p.SegmentTransformStartAfterTimeticks, 0)
 		},
 		"zero-arrays": func(v *viewpb.DataViewOfCollection) {
 			partition(v).SegmentManifestVersions = make([]int64, len(partition(v).SegmentIds))
+			partition(v).SegmentTransformStartAfterTimeticks = make([]uint64, len(partition(v).SegmentIds))
 		},
 		"empty-shard": func(v *viewpb.DataViewOfCollection) {
 			v.Shards = append(v.Shards, &viewpb.DataViewOfShard{Vchannel: "z"})
@@ -630,4 +700,5 @@ func TestDataViewMembershipEqualMatchesCanonicalClones(t *testing.T) {
 	}
 	require.True(t, isCanonicalDataView(base))
 	require.False(t, isCanonicalDataView(build("unsorted-segments")))
+	require.False(t, isCanonicalDataView(build("no-segment-transforms")))
 }

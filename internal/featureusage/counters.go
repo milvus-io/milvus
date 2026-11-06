@@ -533,7 +533,7 @@ func CompactionTypeFeature(t datapb.CompactionType) Feature {
 	switch t {
 	case datapb.CompactionType_MixCompaction:
 		return FeatureCompactionMix
-	case datapb.CompactionType_Level0DeleteCompaction:
+	case datapb.CompactionType_Level0DeleteCompaction, datapb.CompactionType_RestoreLevel0DeleteCompaction:
 		return FeatureCompactionL0Delete
 	case datapb.CompactionType_ClusteringCompaction:
 		return FeatureCompactionClustering

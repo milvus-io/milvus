@@ -1147,7 +1147,7 @@ TEST(Growing, LoadedVectorReclaimedByInterimIndexIsNotBackfilled) {
 
     // Fixture guard: the load must leave the raw column reclaimed by an index
     // that covers every loaded row.
-    const auto pin = growing->PinGrowingIndex(vec);
+    const auto pin = growing->PinGrowingIndex(nullptr, vec);
     ASSERT_TRUE(pin);
     ASSERT_EQ(pin.CoveredRowEnd(), rows);
     ASSERT_TRUE(growing->CanReadRawVectorFromIndex(vec));
@@ -3358,7 +3358,7 @@ TEST(Growing, NullableVectorInsertBuildsMonotonicOffsetMapping) {
                     second.timestamps_.data(),
                     std::make_shared<InsertRecordProto>(*second.raw_));
     EXPECT_EQ(segment->get_row_count(), total_rows);
-    const auto index_pin = segment_impl->PinGrowingIndex(vec);
+    const auto index_pin = segment_impl->PinGrowingIndex(nullptr, vec);
     ASSERT_TRUE(index_pin);
     EXPECT_EQ(index_pin.CoveredRowEnd(), total_rows);
     EXPECT_EQ(index_pin.Reader().Count(), valid_per_batch * 2);
@@ -3444,7 +3444,7 @@ TEST(Growing, ChunkReclamationKeepsSharedStorageAlive) {
 
     // Fixture guard: the first batch must stay below the build threshold so
     // the raw chunks still exist when the reference is taken.
-    ASSERT_FALSE(segment_impl->PinGrowingIndex(vec));
+    ASSERT_FALSE(segment_impl->PinGrowingIndex(nullptr, vec));
     auto* vec_base = segment_impl->get_insert_record().get_data_base(vec);
     ASSERT_GT(vec_base->num_chunk(), 0);
 
@@ -3468,7 +3468,7 @@ TEST(Growing, ChunkReclamationKeepsSharedStorageAlive) {
                     second.row_ids_.data(),
                     second.timestamps_.data(),
                     std::make_shared<InsertRecordProto>(*second.raw_));
-    const auto index_pin = segment_impl->PinGrowingIndex(vec);
+    const auto index_pin = segment_impl->PinGrowingIndex(nullptr, vec);
     ASSERT_TRUE(index_pin);
     EXPECT_EQ(index_pin.CoveredRowEnd(), total_rows);
     EXPECT_EQ(index_pin.Reader().Count(), total_rows);

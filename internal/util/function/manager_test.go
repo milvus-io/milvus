@@ -337,8 +337,9 @@ func TestFunctionRunnerManagerUpdateRetainsSchemaWhenEmbeddingFunctionsDisappear
 func TestBuildEmbeddingRunnerPreservesSchemaSnapshot(t *testing.T) {
 	schema := newBM25SignatureTestSchema()
 	expected := cloneCollectionSchema(schema)
+	expectedSchema := schema
 	constructor := mockey.Mock(NewFunctionRunner).To(func(schema *schemapb.CollectionSchema, fn *schemapb.FunctionSchema, _ ...string) (FunctionRunner, error) {
-		schema.Fields[1].Name = "constructor_changed"
+		require.Same(t, expectedSchema, schema, "borrow the immutable collection schema")
 		fn.Params = []*commonpb.KeyValuePair{{Key: "constructor_changed", Value: "true"}}
 		return nil, context.Canceled
 	}).Build()

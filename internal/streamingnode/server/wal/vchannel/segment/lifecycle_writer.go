@@ -56,10 +56,16 @@ func (w *segmentLifecycleWriter) EnsureGrowingSegment(ctx context.Context, meta 
 }
 
 func (w *segmentLifecycleWriter) CommitL1Segment(ctx context.Context, meta *streamingpb.SegmentAssignmentMeta) (*viewpb.DataVersion, error) {
+	return w.CommitL1SegmentWithTransformStart(ctx, meta, 0)
+}
+
+func (w *segmentLifecycleWriter) CommitL1SegmentWithTransformStart(ctx context.Context, meta *streamingpb.SegmentAssignmentMeta, startAfter uint64) (*viewpb.DataVersion, error) {
 	// All data packs have already published their positions. Preserve them on
 	// final commit, including retries recovered from SN metadata.
 	ctx = retry.WithMaxAttemptsContext(ctx, maxRPCAttempts)
-	resp, err := w.coord.SaveBinlogPaths(ctx, buildCommitL1SegmentRequest(w.serverID, meta))
+	req := buildCommitL1SegmentRequest(w.serverID, meta)
+	req.GrowingTransformStartAfterTimetick = startAfter
+	resp, err := w.coord.SaveBinlogPaths(ctx, req)
 	if err = merr.CheckRPCCall(resp, err); err != nil {
 		if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrChannelNotFound) {
 			// A retired segment/channel does not need a fabricated publication version.
@@ -73,8 +79,10 @@ func (w *segmentLifecycleWriter) CommitL1Segment(ctx context.Context, meta *stre
 	return dataview.ParseFlushResult(resp)
 }
 
-// TODO: Remove after enabling queryview. Existing query recovery loads growing
-// binlogs through DataCoord, so publication must precede Insert completion.
+// Existing query recovery loads growing binlogs through DataCoord. QueryView
+// also relies on the first StartPosition being durable before Insert completion
+// lets the reported checkpoint advance. Retiring the binlog publication bridge
+// must preserve that registration barrier for Transform coverage.
 func (w *segmentLifecycleWriter) PersistGrowingSegment(ctx context.Context, meta *streamingpb.SegmentAssignmentMeta, start, checkpoint *msgpb.MsgPosition) error {
 	req := buildSaveBinlogPathsRequest(w.serverID, meta)
 	if start != nil {

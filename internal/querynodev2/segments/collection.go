@@ -725,6 +725,7 @@ func newCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		refCount:      atomic.NewUint32(0),
 		isGpuIndex:    isGpuIndex,
 		loadFields:    loadFieldIDs,
+		fieldHints:    loadFieldIDs.Collect(), // Legacy loading is eager; View wrappers supply their own explicit subset.
 	}
 	for _, partitionID := range loadMetaInfo.GetPartitionIDs() {
 		coll.partitions.Insert(partitionID)
