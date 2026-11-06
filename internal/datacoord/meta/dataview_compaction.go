@@ -32,7 +32,7 @@ import (
 // previous immutable snapshot is borrowed under the DataView collection lock;
 // it establishes admission, so later index DDL cannot roll a published segment
 // back to its ancestors. Neither this function nor its predicates reenter the
-// DataView manager. SegmentMeta is snapshotted under segMu before index reads.
+// DataView manager. SegmentMeta is snapshotted before index reads.
 func (m *Meta) LoadableProjection(ctx context.Context, collectionID int64, previous *viewpb.DataViewOfCollection) ([]dataview.LoadableSegment, error) {
 	admitted := typeutil.NewUniqueSet()
 	for _, shard := range previous.GetShards() {
@@ -40,12 +40,16 @@ func (m *Meta) LoadableProjection(ctx context.Context, collectionID int64, previ
 			admitted.Insert(partition.GetSegmentIds()...)
 		}
 	}
-	m.SegMu.RLock()
+	// The collection snapshot is point-in-time. Read the staged members after it:
+	// a group committing in between then leaves its members invisible and its
+	// parents live in this snapshot, while the reverse order could exclude the
+	// members of a snapshot whose parents are already retired.
 	segments := m.Segments.GetSegmentsBySelector(WithCollection(collectionID))
+	staged := m.AliveStagedMembers(ctx, collectionID)
 	valid := make(map[int64]*SegmentInfo, len(segments))
 	flushed, dropped := typeutil.NewUniqueSet(), typeutil.NewUniqueSet()
 	for _, segment := range segments {
-		if _, staged := m.stagedSegmentToGroup[segment.GetID()]; staged {
+		if staged.Contain(segment.GetID()) {
 			continue
 		}
 		if segment.GetLevel() == datapb.SegmentLevel_L0 || segment.GetIsImporting() || segment.GetIsFake() ||
@@ -72,7 +76,6 @@ func (m *Meta) LoadableProjection(ctx context.Context, collectionID int64, previ
 			flushed.Insert(segment.GetID())
 		}
 	}
-	m.SegMu.RUnlock()
 
 	var indexes []*model.Index
 	if m.IndexCatalog != nil {

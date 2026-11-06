@@ -435,7 +435,7 @@ func TestCommitSegmentManifestFailsStaleWhenPointerAdvancesDuringManifestIO(t *t
 	require.False(t, updated.GetIsImporting())
 }
 
-func TestCommitSegmentManifestSerializesCatalogWritesForDifferentSegments(t *testing.T) {
+func TestCommitSegmentManifestWritesDifferentSegmentsInParallel(t *testing.T) {
 	meta, err := NewMemoryMeta(t)
 	require.NoError(t, err)
 	basePaths := map[int64]string{
@@ -472,15 +472,14 @@ func TestCommitSegmentManifestSerializesCatalogWritesForDifferentSegments(t *tes
 		}(segmentID, basePath)
 	}
 
-	select {
-	case <-entered:
-	case <-time.After(time.Second):
-		require.FailNow(t, "first catalog write did not start")
-	}
-	select {
-	case <-entered:
-		require.FailNow(t, "different segment entered catalog write while segMu was held")
-	case <-time.After(200 * time.Millisecond):
+	// Each commit holds only its own segment's writer lock, so the catalog
+	// write of one segment does not wait for another's.
+	for range basePaths {
+		select {
+		case <-entered:
+		case <-time.After(time.Second):
+			require.FailNow(t, "a catalog write waited for the write of a different segment")
+		}
 	}
 	close(release)
 	for range basePaths {

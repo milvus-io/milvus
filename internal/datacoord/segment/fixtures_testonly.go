@@ -28,7 +28,6 @@ import (
 // simulate a growing segment filling up still need the poke, so it lives here
 // rather than widening the production surface again.
 func SetTestRowCount(m *meta.Meta, segmentID UniqueID, rowCount int64) {
-	m.SegMu.Lock()
-	defer m.SegMu.Unlock()
+	defer m.LockSegments(segmentID)()
 	m.Segments.ModifyProto(segmentID, func(seg *datapb.SegmentInfo) { seg.NumOfRows = rowCount })
 }
