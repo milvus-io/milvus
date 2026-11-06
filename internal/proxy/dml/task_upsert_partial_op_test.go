@@ -681,7 +681,7 @@ func TestCheckAndFlattenStructFieldDataRejectsInvalidVectorWidth(t *testing.T) {
 			require.ErrorIs(t, err, merr.ErrParameterInvalid)
 			assert.Equal(t, merr.InputError, merr.GetErrorType(err))
 			assert.ErrorContains(t, err, test.wantError)
-			assert.ErrorContains(t, err, "sub-field 'field2' in struct 'test_struct'")
+			assert.ErrorContains(t, err, `sub-field "field2" in struct "test_struct"`)
 		})
 	}
 }
@@ -1138,6 +1138,84 @@ func TestResolveFieldPartialUpdateOps_PathReplaceElementType(t *testing.T) {
 	}
 }
 
+func TestPathReplaceSynthesizesOmittedNullableStructChild(t *testing.T) {
+	structSchema := pathReplaceStructSchema()
+	structSchema.Fields = append(structSchema.Fields, &schemapb.FieldSchema{
+		FieldID: 104, Name: "profile[new]", DataType: schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Int64, ElementNullable: true,
+	})
+	operand := &schemapb.FieldData{
+		FieldName: "profile", Type: schemapb.DataType_ArrayOfStruct,
+		Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: []*schemapb.FieldData{
+			structScalarChildFieldData("age", &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{18}}}}),
+			structStringChildFieldData("city", &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"Paris"}}}}),
+			structVectorChildFieldData("embedding", &schemapb.VectorField{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2}}}}),
+		}}},
+	}
+	request := &milvuspb.UpsertRequest{NumRows: 1, FieldsData: []*schemapb.FieldData{operand}, FieldOps: []*schemapb.FieldPartialUpdateOp{pathOp("profile", "[1]")}}
+	plans, _, err := resolveFieldPartialUpdateOps(request, &schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{structSchema}})
+	require.NoError(t, err)
+	require.Len(t, plans["profile"].operandChildren, 4)
+	missing := findStructChildFieldData(operand.GetStructArrays().GetFields(), structSchema.GetFields()[3])
+	require.NotNil(t, missing)
+	assert.Equal(t, []bool{false}, missing.GetScalars().GetArrayData().GetData()[0].GetValidData())
+
+	destination := &schemapb.FieldData{
+		FieldName: "profile", Type: schemapb.DataType_ArrayOfStruct,
+		Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: []*schemapb.FieldData{
+			structScalarChildFieldData("age", &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10, 20}}}}),
+			structStringChildFieldData("city", &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"A", "B"}}}}),
+			structVectorChildFieldData("embedding", &schemapb.VectorField{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}}}),
+			structScalarChildFieldData("new", &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{7, 8}}}, ValidData: []bool{true, true}}),
+		}}},
+	}
+	require.NoError(t, validateExistingStructPathRows(destination, plans["profile"], []int64{0}))
+	require.NoError(t, applyStructPathReplace(destination, operand, plans["profile"], []int64{0}, []int64{0}))
+	newRow := findStructChildFieldData(destination.GetStructArrays().GetFields(), structSchema.GetFields()[3]).GetScalars().GetArrayData().GetData()[0]
+	assert.Equal(t, []bool{true, false}, newRow.GetValidData())
+	assert.Equal(t, []int64{7}, newRow.GetLongData().GetData())
+
+	stale := proto.Clone(operand).(*schemapb.FieldData)
+	stale.GetStructArrays().Fields = append(stale.GetStructArrays().Fields,
+		structScalarChildFieldData("removed", &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1}}}}))
+	_, _, err = resolveFieldPartialUpdateOps(&milvuspb.UpsertRequest{
+		NumRows: 1, FieldsData: []*schemapb.FieldData{stale}, FieldOps: []*schemapb.FieldPartialUpdateOp{pathOp("profile", "[1]")},
+	}, &schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{structSchema}})
+	require.ErrorContains(t, err, "sub-field \"removed\" does not exist in struct field \"profile\"")
+}
+
+func TestPathReplaceNullableStructVectorElement(t *testing.T) {
+	schema := &schemapb.FieldSchema{DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, ElementNullable: true}
+	base := &schemapb.VectorField{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}}, ValidData: []bool{true, true}}
+	update := &schemapb.VectorField{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{}}, ValidData: []bool{false}}
+	out, err := replaceNullableStructVectorElement(base, update, schema, 1, 2)
+	require.NoError(t, err)
+	assert.Equal(t, []bool{true, false}, out.GetValidData())
+	assert.Equal(t, []float32{1, 2}, out.GetFloatVector().GetData())
+}
+
+func TestPathReplaceNullableStructScalarElementCompactAndDense(t *testing.T) {
+	schema := &schemapb.FieldSchema{DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ElementNullable: true}
+	malformed := structScalarChildFieldData("new", &schemapb.ScalarField{
+		Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1}}}, ValidData: []bool{false},
+	})
+	require.ErrorContains(t, validatePathReplaceStructChildRows(malformed, schema, 1), "malformed compact element payload")
+
+	updateNull := &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{}}, ValidData: []bool{false}}
+	compact := &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 3}}}, ValidData: []bool{true, false, true}}
+	out, err := replaceNullableStructScalarElement(compact, updateNull, schema, 0)
+	require.NoError(t, err)
+	assert.Equal(t, []bool{false, false, true}, out.GetValidData())
+	assert.Equal(t, []int64{3}, out.GetLongData().GetData())
+
+	updateValue := &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{9}}}, ValidData: []bool{true}}
+	dense := &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 0, 3}}}, ValidData: []bool{true, false, true}}
+	out, err = replaceNullableStructScalarElement(dense, updateValue, schema, 1)
+	require.NoError(t, err)
+	assert.Equal(t, []bool{true, true, true}, out.GetValidData())
+	assert.Equal(t, []int64{1, 9, 3}, out.GetLongData().GetData())
+}
+
 func TestResolveFieldPartialUpdateOps_StructWholeElementAndExplicitChild(t *testing.T) {
 	structSchema := pathReplaceStructSchema()
 	age := structScalarChildFieldData("age",
@@ -1152,7 +1230,7 @@ func TestResolveFieldPartialUpdateOps_StructWholeElementAndExplicitChild(t *test
 	schema := &schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{structSchema}}
 
 	_, _, err := resolveFieldPartialUpdateOps(&milvuspb.UpsertRequest{NumRows: 2, FieldsData: []*schemapb.FieldData{fd}, FieldOps: []*schemapb.FieldPartialUpdateOp{pathOp("profile", "[1]")}}, schema)
-	require.ErrorContains(t, err, "requires all struct children")
+	require.ErrorContains(t, err, "is required")
 
 	_, _, err = resolveFieldPartialUpdateOps(&milvuspb.UpsertRequest{NumRows: 2, FieldsData: []*schemapb.FieldData{fd}, FieldOps: []*schemapb.FieldPartialUpdateOp{pathOp("profile", "[1][age]")}}, schema)
 	require.Error(t, err)
@@ -1163,7 +1241,7 @@ func TestResolveFieldPartialUpdateOps_StructWholeElementAndExplicitChild(t *test
 	require.NoError(t, err)
 	assert.Equal(t, "age", structChildRawName(plans["profile"].explicitChild))
 	_, _, err = resolveFieldPartialUpdateOps(&milvuspb.UpsertRequest{NumRows: 2, FieldsData: []*schemapb.FieldData{oneChild}, FieldOps: []*schemapb.FieldPartialUpdateOp{pathOp("profile", "[1]")}}, schema)
-	require.ErrorContains(t, err, "requires all struct children")
+	require.ErrorContains(t, err, "is required")
 	embedding := structVectorChildFieldData("embedding",
 		&schemapb.VectorField{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2}}}},
 		&schemapb.VectorField{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{3, 4}}}},
@@ -1214,7 +1292,7 @@ func TestResolveFieldPartialUpdateOps_ValidatesStructOperandChildName(t *testing
 				return
 			}
 			require.Error(t, err)
-			assert.ErrorContains(t, err, "not found in struct field")
+			assert.ErrorContains(t, err, "does not exist in struct field")
 		})
 	}
 }
@@ -2120,4 +2198,219 @@ func TestItoa(t *testing.T) {
 	for _, tc := range cases {
 		assert.Equal(t, tc.want, itoa(tc.in))
 	}
+}
+
+// nestedPathReplaceStructSchema returns a struct whose nested Array sub-fields
+// are not element_nullable: tags has a nullable VarChar leaf, ids a
+// non-nullable Int64 leaf.
+func nestedPathReplaceStructSchema() *schemapb.StructArrayFieldSchema {
+	nested := func(leaf schemapb.DataType, leafNullable bool) *schemapb.TypeSchema {
+		return &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_ArrayElement{
+			ArrayElement: &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_ArrayElement{
+				ArrayElement: &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_LeafType{LeafType: leaf}, Nullable: leafNullable},
+			}},
+		}}
+	}
+	return &schemapb.StructArrayFieldSchema{
+		FieldID: 200,
+		Name:    "doc",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 201, Name: "doc[score]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+			{FieldID: 202, Name: "doc[tags]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Array, TypeSchema: nested(schemapb.DataType_VarChar, true)},
+			{FieldID: 203, Name: "doc[ids]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Array, TypeSchema: nested(schemapb.DataType_Int64, false)},
+		},
+	}
+}
+
+func nestedStrings(values []string, validData ...bool) *schemapb.ScalarField {
+	return &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: values}}, ValidData: validData}
+}
+
+func nestedLongs(values ...int64) *schemapb.ScalarField {
+	return &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: values}}}
+}
+
+// nestedRow is one row of a nested Array sub-field: one inner Array per
+// struct element.
+func nestedRow(leaf schemapb.DataType, elements ...*schemapb.ScalarField) *schemapb.ScalarField {
+	return &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{ElementType: leaf, Data: elements}}}
+}
+
+func nestedChildFieldData(name string, rows ...*schemapb.ScalarField) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		FieldName: name,
+		Type:      schemapb.DataType_Array,
+		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{Data: rows, ElementType: schemapb.DataType_Array}},
+		}},
+	}
+}
+
+func structFieldData(name string, children ...*schemapb.FieldData) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		FieldName: name, Type: schemapb.DataType_ArrayOfStruct,
+		Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: children}},
+	}
+}
+
+func TestPathReplaceNestedArrayStructSubField(t *testing.T) {
+	structSchema := nestedPathReplaceStructSchema()
+	schema := &schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{structSchema}}
+	scoreSchema, tagsSchema, idsSchema := structSchema.GetFields()[0], structSchema.GetFields()[1], structSchema.GetFields()[2]
+	// One stored row with three struct elements.
+	stored := func() *schemapb.FieldData {
+		return structFieldData("doc",
+			structScalarChildFieldData("score", pathReplaceScalarRow([]int64{1, 2, 3})),
+			nestedChildFieldData("tags", nestedRow(schemapb.DataType_VarChar,
+				nestedStrings([]string{"a"}), nestedStrings([]string{"b", "c"}), nestedStrings(nil))),
+			nestedChildFieldData("ids", nestedRow(schemapb.DataType_Int64,
+				nestedLongs(10), nestedLongs(20, 21), nestedLongs(30))),
+		)
+	}
+	resolve := func(operand *schemapb.FieldData, path string) (*fieldPartialUpdatePlan, error) {
+		plans, _, err := resolveFieldPartialUpdateOps(&milvuspb.UpsertRequest{
+			NumRows: 1, FieldsData: []*schemapb.FieldData{operand},
+			FieldOps: []*schemapb.FieldPartialUpdateOp{pathOp("doc", path)},
+		}, schema)
+		if err != nil {
+			return nil, err
+		}
+		return plans["doc"], nil
+	}
+	childRow := func(field *schemapb.FieldData, childSchema *schemapb.FieldSchema) *schemapb.ScalarField {
+		return findStructChildFieldData(field.GetStructArrays().GetFields(), childSchema).GetScalars().GetArrayData().GetData()[0]
+	}
+
+	t.Run("replace only the nested sub-field", func(t *testing.T) {
+		// The new inner Array has a null leaf; its leaf validity moves with it.
+		operandField := structFieldData("doc", nestedChildFieldData("tags",
+			nestedRow(schemapb.DataType_VarChar, nestedStrings([]string{"x"}, true, false))))
+		plan, err := resolve(operandField, "[1][tags]")
+		require.NoError(t, err)
+		assert.Equal(t, []*schemapb.FieldSchema{tagsSchema}, plan.operandChildren)
+
+		old := stored()
+		require.NoError(t, validateExistingStructPathRows(old, plan, []int64{0}))
+		dst := proto.Clone(old).(*schemapb.FieldData)
+		operandBefore := proto.Clone(operandField)
+		require.NoError(t, applyStructPathReplace(dst, operandField, plan, []int64{0}, []int64{0}))
+
+		tags := childRow(dst, tagsSchema).GetArrayData().GetData()
+		require.Len(t, tags, 3)
+		assert.Equal(t, []string{"a"}, tags[0].GetStringData().GetData())
+		assert.Equal(t, []string{"x"}, tags[1].GetStringData().GetData())
+		assert.Equal(t, []bool{true, false}, tags[1].GetValidData())
+		assert.Empty(t, tags[2].GetStringData().GetData())
+		assert.True(t, proto.Equal(childRow(old, idsSchema), childRow(dst, idsSchema)))
+		assert.True(t, proto.Equal(childRow(old, scoreSchema), childRow(dst, scoreSchema)))
+		assert.True(t, proto.Equal(stored(), old), "the retrieved rows must not change")
+		assert.True(t, proto.Equal(operandBefore, operandField), "the operand must not change")
+	})
+
+	t.Run("replace the whole element", func(t *testing.T) {
+		operand := structFieldData("doc",
+			structScalarChildFieldData("score", pathReplaceScalarRow([]int64{99})),
+			nestedChildFieldData("tags", nestedRow(schemapb.DataType_VarChar, nestedStrings([]string{"y", "z"}))),
+			nestedChildFieldData("ids", nestedRow(schemapb.DataType_Int64, nestedLongs(7, 8, 9))),
+		)
+		plan, err := resolve(operand, "[2]")
+		require.NoError(t, err)
+		assert.Equal(t, structSchema.GetFields(), plan.operandChildren)
+
+		dst := stored()
+		require.NoError(t, validateExistingStructPathRows(dst, plan, []int64{0}))
+		require.NoError(t, applyStructPathReplace(dst, operand, plan, []int64{0}, []int64{0}))
+		assert.Equal(t, []int64{1, 2, 99}, childRow(dst, scoreSchema).GetLongData().GetData())
+		tags := childRow(dst, tagsSchema).GetArrayData().GetData()
+		assert.Equal(t, []string{"b", "c"}, tags[1].GetStringData().GetData())
+		assert.Equal(t, []string{"y", "z"}, tags[2].GetStringData().GetData())
+		ids := childRow(dst, idsSchema).GetArrayData().GetData()
+		assert.Equal(t, []int64{10}, ids[0].GetLongData().GetData())
+		assert.Equal(t, []int64{7, 8, 9}, ids[2].GetLongData().GetData())
+
+		// A sub-field that is not element_nullable stays required.
+		_, err = resolve(structFieldData("doc",
+			structScalarChildFieldData("score", pathReplaceScalarRow([]int64{99})),
+			nestedChildFieldData("tags", nestedRow(schemapb.DataType_VarChar, nestedStrings([]string{"y"}))),
+		), "[2]")
+		require.ErrorContains(t, err, `sub-field "doc[ids]" of struct field "doc" is required`)
+	})
+
+	t.Run("index out of range", func(t *testing.T) {
+		operand := structFieldData("doc", nestedChildFieldData("ids", nestedRow(schemapb.DataType_Int64, nestedLongs(1))))
+		plan, err := resolve(operand, "[3][ids]")
+		require.NoError(t, err)
+		err = validateExistingStructPathRows(stored(), plan, []int64{0})
+		require.ErrorContains(t, err, "PATH_REPLACE index 3 is out of range for field \"doc\" row 0 with length 3")
+		assert.Equal(t, merr.InputError, merr.GetErrorType(err))
+	})
+
+	for _, test := range []struct {
+		name    string
+		operand *schemapb.FieldData
+		path    string
+		want    string
+	}{
+		{
+			name:    "leaf type mismatch",
+			operand: nestedChildFieldData("ids", nestedRow(schemapb.DataType_Int64, nestedStrings([]string{"1"}))),
+			path:    "[0][ids]",
+			want:    "nested Array level 1 payload does not match leaf type Int64",
+		},
+		{
+			name: "validity on a leaf that is not nullable",
+			operand: nestedChildFieldData("ids", nestedRow(schemapb.DataType_Int64,
+				&schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1}}}, ValidData: []bool{true, false}})),
+			path: "[0][ids]",
+			want: "nested Array level 1 carries element valid_data, but its elements are not nullable",
+		},
+		{
+			name: "element validity on a sub-field that is not element_nullable",
+			operand: nestedChildFieldData("tags", &schemapb.ScalarField{
+				Data:      &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{ElementType: schemapb.DataType_VarChar, Data: []*schemapb.ScalarField{nestedStrings([]string{"x"})}}},
+				ValidData: []bool{true},
+			}),
+			path: "[0][tags]",
+			want: "PATH_REPLACE does not support Array element valid_data",
+		},
+		{
+			name:    "inner element type mismatch",
+			operand: nestedChildFieldData("tags", nestedRow(schemapb.DataType_Int64, nestedStrings([]string{"x"}))),
+			path:    "[0][tags]",
+			want:    "nested Array level 0 expects element type VarChar, got Int64",
+		},
+		{
+			name:    "more than one element",
+			operand: nestedChildFieldData("ids", nestedRow(schemapb.DataType_Int64, nestedLongs(1), nestedLongs(2))),
+			path:    "[0][ids]",
+			want:    "PATH_REPLACE child \"ids\" row 0 must contain exactly one element",
+		},
+		{
+			name:    "row is not a nested Array",
+			operand: nestedChildFieldData("ids", nestedLongs(1)),
+			path:    "[0][ids]",
+			want:    "PATH_REPLACE requires a nested Array row",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := resolve(structFieldData("doc", test.operand), test.path)
+			require.ErrorContains(t, err, test.want)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Equal(t, merr.InputError, merr.GetErrorType(err))
+		})
+	}
+
+	t.Run("top-level nested Array stays rejected", func(t *testing.T) {
+		_, err := scalarArrayRowElementCount(nestedRow(schemapb.DataType_Int64, nestedLongs(1)), schemapb.DataType_Array)
+		require.ErrorContains(t, err, "PATH_REPLACE does not support Array element type Array")
+		_, _, err = resolveFieldPartialUpdateOps(&milvuspb.UpsertRequest{
+			NumRows:    1,
+			FieldsData: []*schemapb.FieldData{recursiveArrayLongFieldData("nested")},
+			FieldOps:   []*schemapb.FieldPartialUpdateOp{pathOp("nested", "[0]")},
+		}, &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+			FieldID: 100, Name: "nested", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Array,
+			TypeSchema: idsSchema.GetTypeSchema(),
+		}}})
+		require.ErrorContains(t, err, "PATH_REPLACE requires a non-recursive Array or ArrayOfStruct field")
+	})
 }

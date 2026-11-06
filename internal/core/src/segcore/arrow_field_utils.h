@@ -61,6 +61,7 @@ arrow::Result<
 FieldDataToArrow(const std::string& field_name,
                  const milvus::DataArray& field_data,
                  size_t total_valid,
-                 bool preserve_integer_width = false);
+                 bool preserve_integer_width = false,
+                 const milvus::FieldMeta* field_meta = nullptr);
 
 }  // namespace milvus::segcore

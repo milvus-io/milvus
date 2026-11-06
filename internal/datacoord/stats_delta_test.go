@@ -169,3 +169,23 @@ func TestAddStatsDeltaDoesNotAliasBaseNilDelta(t *testing.T) {
 	assert.EqualValues(t, 100, base.GetInsertBinlogSize())
 	assert.EqualValues(t, 1, base.GetNullCounts()[100])
 }
+
+func TestAddStatsDeltaValidElementCounts(t *testing.T) {
+	ctx := context.Background()
+	base := &datapb.Statistics{
+		NullCounts:         map[int64]int64{100: 0, 101: 0, 102: 0},
+		ValidElementCounts: map[int64]int64{101: 5},
+	}
+	delta := &datapb.Statistics{
+		NullCounts:         map[int64]int64{103: 0},
+		ValidElementCounts: map[int64]int64{101: 2, 102: 3, 103: 4},
+	}
+	got := addStatsDelta(ctx, 1, base, delta)
+	// 101 had a count: summed. 102 has data but no count: stays unknown.
+	// 103 is a new column: its whole count.
+	assert.Equal(t, map[int64]int64{101: 7, 103: 4}, got.GetValidElementCounts())
+	assert.Equal(t, map[int64]int64{101: 5}, base.GetValidElementCounts())
+
+	got = addStatsDelta(ctx, 1, nil, &datapb.Statistics{ValidElementCounts: map[int64]int64{103: 4}})
+	assert.Equal(t, map[int64]int64{103: 4}, got.GetValidElementCounts())
+}

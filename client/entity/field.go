@@ -241,6 +241,9 @@ type Field struct {
 	ElementType     FieldType
 	DefaultValue    *schemapb.ValueField
 	Nullable        bool
+	// ElementNullable marks the leaf values of an Array<T> struct sub-field as nullable.
+	// For other fields it maps to FieldSchema.element_nullable as is.
+	ElementNullable bool
 	StructSchema    *StructSchema
 	ExternalField   string // external field name - maps to column name in external source
 }
@@ -261,6 +264,7 @@ func (f *Field) ProtoMessage() *schemapb.FieldSchema {
 		IsClusteringKey: f.IsClusteringKey,
 		ElementType:     schemapb.DataType(f.ElementType),
 		Nullable:        f.Nullable,
+		ElementNullable: f.ElementNullable,
 		DefaultValue:    f.DefaultValue,
 		ExternalField:   f.ExternalField,
 	}
@@ -316,6 +320,12 @@ func (f *Field) WithIsClusteringKey(isClusteringKey bool) *Field {
 
 func (f *Field) WithNullable(nullable bool) *Field {
 	f.Nullable = nullable
+	return f
+}
+
+// WithElementNullable sets whether the leaf values of an Array<T> struct sub-field may be null.
+func (f *Field) WithElementNullable(elementNullable bool) *Field {
+	f.ElementNullable = elementNullable
 	return f
 }
 
@@ -492,6 +502,7 @@ func (f *Field) ReadProto(p *schemapb.FieldSchema) *Field {
 	f.ElementType = FieldType(p.GetElementType())
 	f.DefaultValue = p.GetDefaultValue()
 	f.Nullable = p.GetNullable()
+	f.ElementNullable = p.GetElementNullable()
 	f.ExternalField = p.GetExternalField()
 
 	return f
@@ -512,8 +523,10 @@ func (f *StructSchema) WithField(field *Field) *StructSchema {
 }
 
 // Validate checks struct-array sub-field rules aligned with pymilvus StructFieldSchema._check_fields.
-// A sub-field MUST NOT be Array / Struct itself, and MUST NOT carry top-level-only flags such as
-// primary/partition/clustering key, nullable, autoID, default value, or be dynamic.
+// A sub-field describes one struct element: Nullable makes the element value nullable, and an
+// Array<T> sub-field (DataType Array with a scalar ElementType) may also set ElementNullable for
+// its leaf values. A sub-field MUST NOT be Struct, a nested Array, or carry top-level-only flags
+// such as primary/partition/clustering key, autoID, default value, or be dynamic.
 // `parentName` is used to contextualize the error message.
 func (f *StructSchema) Validate(parentName string) error {
 	if f == nil {
@@ -534,36 +547,58 @@ func (f *StructSchema) Validate(parentName string) error {
 			return errors.Newf("struct array field %q contains duplicate sub-field %q", parentName, sub.Name)
 		}
 		seen[sub.Name] = struct{}{}
-		switch sub.DataType {
-		case FieldTypeArray, FieldTypeStruct:
-			return errors.Newf("struct array field %q sub-field %q: nested array/struct sub-field is not allowed", parentName, sub.Name)
-		case FieldTypeSparseVector:
-			return errors.Newf("struct array field %q sub-field %q: sparse vector sub-field is not supported", parentName, sub.Name)
-		}
-		if sub.PrimaryKey {
-			return errors.Newf("struct array field %q sub-field %q must not be primary key", parentName, sub.Name)
-		}
-		if sub.AutoID {
-			return errors.Newf("struct array field %q sub-field %q must not be auto id", parentName, sub.Name)
-		}
-		if sub.IsPartitionKey {
-			return errors.Newf("struct array field %q sub-field %q must not be partition key", parentName, sub.Name)
-		}
-		if sub.IsClusteringKey {
-			return errors.Newf("struct array field %q sub-field %q must not be clustering key", parentName, sub.Name)
-		}
-		if sub.IsDynamic {
-			return errors.Newf("struct array field %q sub-field %q must not be dynamic", parentName, sub.Name)
-		}
-		if sub.Nullable {
-			return errors.Newf("struct array field %q sub-field %q must not be nullable", parentName, sub.Name)
-		}
-		if sub.DefaultValue != nil {
-			return errors.Newf("struct array field %q sub-field %q must not carry default value", parentName, sub.Name)
-		}
-		if sub.StructSchema != nil {
-			return errors.Newf("struct array field %q sub-field %q must not nest a struct schema", parentName, sub.Name)
+		if err := validateStructSubField(parentName, sub); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func validateStructSubField(parentName string, sub *Field) error {
+	switch sub.DataType {
+	case FieldTypeArray:
+		if !isArraySubFieldLeafType(sub.ElementType) {
+			return errors.Newf("struct array field %q sub-field %q: array sub-field element type %s is not supported", parentName, sub.Name, sub.ElementType.Name())
+		}
+	case FieldTypeStruct:
+		return errors.Newf("struct array field %q sub-field %q: nested struct sub-field is not allowed", parentName, sub.Name)
+	case FieldTypeSparseVector:
+		return errors.Newf("struct array field %q sub-field %q: sparse vector sub-field is not supported", parentName, sub.Name)
+	}
+	if sub.ElementNullable && sub.DataType != FieldTypeArray {
+		return errors.Newf("struct array field %q sub-field %q: element nullable is only valid for an array sub-field", parentName, sub.Name)
+	}
+	if sub.PrimaryKey {
+		return errors.Newf("struct array field %q sub-field %q must not be primary key", parentName, sub.Name)
+	}
+	if sub.AutoID {
+		return errors.Newf("struct array field %q sub-field %q must not be auto id", parentName, sub.Name)
+	}
+	if sub.IsPartitionKey {
+		return errors.Newf("struct array field %q sub-field %q must not be partition key", parentName, sub.Name)
+	}
+	if sub.IsClusteringKey {
+		return errors.Newf("struct array field %q sub-field %q must not be clustering key", parentName, sub.Name)
+	}
+	if sub.IsDynamic {
+		return errors.Newf("struct array field %q sub-field %q must not be dynamic", parentName, sub.Name)
+	}
+	if sub.DefaultValue != nil {
+		return errors.Newf("struct array field %q sub-field %q must not carry default value", parentName, sub.Name)
+	}
+	if sub.StructSchema != nil {
+		return errors.Newf("struct array field %q sub-field %q must not nest a struct schema", parentName, sub.Name)
+	}
+	return nil
+}
+
+// isArraySubFieldLeafType reports whether t can be the leaf type of an Array<T> struct sub-field.
+func isArraySubFieldLeafType(t FieldType) bool {
+	switch t {
+	case FieldTypeBool, FieldTypeInt8, FieldTypeInt16, FieldTypeInt32, FieldTypeInt64,
+		FieldTypeFloat, FieldTypeDouble, FieldTypeVarChar, FieldTypeString:
+		return true
+	default:
+		return false
+	}
 }

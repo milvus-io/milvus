@@ -66,7 +66,10 @@ func CheckStrByValues(params map[string]string, key string, container []string) 
 
 // ValidateArrayOfVectorMetricType validates both element-level and EmbList metrics
 // against the ArrayOfVector element type.
-func ValidateArrayOfVectorMetricType(elementType schemapb.DataType, metricType string) error {
+func ValidateArrayOfVectorMetricType(elementType schemapb.DataType, elementNullable bool, metricType string) error {
+	if elementNullable && funcutil.SliceContain(EmbListMetrics, metricType) {
+		return merr.WrapErrParameterInvalidMsg("element-nullable vector array fields only support element-level metrics, metric type: %s", metricType)
+	}
 	if typeutil.IsDenseFloatVectorType(elementType) {
 		if !funcutil.SliceContain(ArrayOfVectorFloatMetrics, metricType) {
 			return merr.WrapErrParameterInvalidMsg("array of vector with float element type does not support metric type: %s, supported: %v", metricType, ArrayOfVectorFloatMetrics)

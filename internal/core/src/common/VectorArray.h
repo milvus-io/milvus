@@ -30,6 +30,15 @@
 namespace milvus {
 // Internal representation of one VECTOR_ARRAY row. length_ is the logical
 // element count; data_ stores valid vectors only in compact order.
+//
+// Segments do not keep VectorArrays: growing chunks hold one VectorArrayView
+// per row into per-batch blocks and sealed segments hold VectorArrayChunks, so
+// stored rows are read as VectorArrayView. A VectorArray exists only for one
+// conversion: an insert payload on its way into a block, an element of
+// FieldData<VectorArray> while binlogs are read or written, a growing segment
+// is loaded or a vector index is built, and a sealed row output as protobuf.
+// ConcurrentVector<VectorArray> and VariableLengthChunk<VectorArray> use the
+// type only as a tag and store VectorArrayViews.
 class VectorArray : public milvus::VectorTrait {
  public:
     VectorArray() = default;
@@ -40,16 +49,39 @@ class VectorArray : public milvus::VectorTrait {
                 int num_vectors,
                 int64_t dim,
                 DataType element_type)
+        : VectorArray(std::move(data),
+                      num_vectors,
+                      dim,
+                      element_type,
+                      TargetBitmapView(),
+                      false) {
+    }
+
+    // Takes ownership of data. num_vectors is the logical count. For an
+    // element-nullable row, data holds only the vectors selected by
+    // element_valid_data, in compact order, and may be null when none is
+    // valid.
+    VectorArray(std::unique_ptr<char[]> data,
+                int num_vectors,
+                int64_t dim,
+                DataType element_type,
+                const TargetBitmapView& element_valid_data,
+                bool element_nullable)
         : dim_(dim),
           data_(std::move(data)),
           length_(num_vectors),
-          physical_length_(num_vectors),
-          size_(num_vectors *
-                milvus::vector_bytes_per_element(element_type, dim)),
-          element_type_(element_type) {
-        assert(data_ != nullptr || num_vectors == 0);
+          element_type_(element_type),
+          element_nullable_(element_nullable) {
         assert(num_vectors >= 0);
         assert(dim > 0);
+
+        init_element_valid_data(element_valid_data);
+        physical_length_ = element_nullable_
+                               ? static_cast<int>(element_valid_data_.count())
+                               : length_;
+        size_ = physical_length_ *
+                milvus::vector_bytes_per_element(element_type, dim);
+        assert(data_ != nullptr || size_ == 0);
     }
 
     VectorArray(const void* data,
@@ -294,6 +326,26 @@ class VectorArray : public milvus::VectorTrait {
         return physical_length_;
     }
 
+    int
+    length() const {
+        return length_;
+    }
+
+    bool
+    is_element_nullable() const {
+        return element_nullable_;
+    }
+
+    TargetBitmapView
+    element_validity_view() const {
+        return element_nullable_
+                   ? TargetBitmapView(
+                         const_cast<void*>(static_cast<const void*>(
+                             element_valid_data_.data())),
+                         length_)
+                   : TargetBitmapView();
+    }
+
     size_t
     byte_size() const {
         return size_;
@@ -491,6 +543,37 @@ class VectorArrayView {
     int
     physical_length() const {
         return physical_length_;
+    }
+
+    bool
+    is_element_nullable() const {
+        return element_nullable_;
+    }
+
+    // Validity of the logical elements; empty unless element-nullable.
+    const TargetBitmapView&
+    element_validity_view() const {
+        return element_valid_data_;
+    }
+
+    const char*
+    data() const {
+        return data_;
+    }
+
+    size_t
+    byte_size() const {
+        return size_;
+    }
+
+    int64_t
+    dim() const {
+        return dim_;
+    }
+
+    DataType
+    get_element_type() const {
+        return element_type_;
     }
 
  private:

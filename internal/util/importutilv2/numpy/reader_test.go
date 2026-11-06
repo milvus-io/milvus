@@ -632,3 +632,150 @@ func TestNumpyCreateReadersError(t *testing.T) {
 func TestNumpyReader(t *testing.T) {
 	suite.Run(t, new(ReaderSuite))
 }
+
+// numpyStructSchema has a pk, a vector and a struct with an element-nullable
+// scalar, a nested Array and an element-nullable vector sub-field.
+func numpyStructSchema(nullable bool) *schemapb.CollectionSchema {
+	capacity := &commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "4"}
+	return &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: fmt.Sprintf("%d", dim)}},
+			},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: 102, Name: "s", Nullable: nullable,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID: 103, Name: "s[arr]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+					Nullable: nullable, ElementNullable: true, TypeParams: []*commonpb.KeyValuePair{capacity},
+				},
+				{
+					FieldID: 104, Name: "s[tags]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Array,
+					Nullable: nullable, ElementNullable: true, TypeParams: []*commonpb.KeyValuePair{capacity},
+					TypeSchema: &schemapb.TypeSchema{
+						Nullable:   true,
+						TypeParams: []*commonpb.KeyValuePair{capacity},
+						Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+							Nullable:   true,
+							TypeParams: []*commonpb.KeyValuePair{capacity},
+							Kind:       &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64}}},
+						}},
+					},
+				},
+				{
+					FieldID: 105, Name: "s[nvec]", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector,
+					Nullable: nullable, ElementNullable: true,
+					TypeParams: []*commonpb.KeyValuePair{capacity, {Key: common.DimKey, Value: fmt.Sprintf("%d", dim)}},
+				},
+			},
+		}},
+	}
+}
+
+func TestNumpyRejectsNonNullableStruct(t *testing.T) {
+	ctx := context.Background()
+	// The mock has no expectations: the schema check must fail before any file
+	// is opened.
+	cm := mocks.NewChunkManager(t)
+	schema := numpyStructSchema(false)
+	paths := []string{"pk.npy", "vec.npy"}
+	wantMsg := "numpy import cannot fill struct field 's', which is not nullable"
+
+	err := ValidateSchema(schema, paths)
+	assert.ErrorIs(t, err, merr.ErrImportFailed)
+	assert.Equal(t, merr.InputError, merr.GetErrorType(err))
+	assert.Contains(t, err.Error(), wantMsg)
+
+	_, err = NewReader(ctx, cm, schema, paths, 100)
+	assert.ErrorIs(t, err, merr.ErrImportFailed)
+	assert.Contains(t, err.Error(), wantMsg)
+
+	_, _, _, err = NumRowsAndBytes(ctx, cm, schema, paths)
+	assert.ErrorIs(t, err, merr.ErrImportFailed)
+	assert.Contains(t, err.Error(), wantMsg)
+
+	assert.NoError(t, ValidateSchema(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+	}, paths))
+}
+
+func TestNumpyRejectsStructFileNames(t *testing.T) {
+	ctx := context.Background()
+	schema := numpyStructSchema(true)
+	// The stored sub-field name, the sub-field's own name and the struct name
+	// all name struct data, with or without a directory.
+	for _, path := range []string{"s.npy", "dir/s[arr].npy", "arr.npy", "s[nvec].npy", "dir/tags.npy"} {
+		t.Run(path, func(t *testing.T) {
+			cm := mocks.NewChunkManager(t)
+			paths := []string{"pk.npy", "vec.npy", path}
+			wantMsg := fmt.Sprintf("numpy import does not support struct data: file '%s' names struct field 's'", path)
+
+			err := ValidateSchema(schema, paths)
+			assert.ErrorIs(t, err, merr.ErrImportFailed)
+			assert.Equal(t, merr.InputError, merr.GetErrorType(err))
+			assert.Contains(t, err.Error(), wantMsg)
+
+			_, err = NewReader(ctx, cm, schema, paths, 100)
+			assert.ErrorIs(t, err, merr.ErrImportFailed)
+			assert.Contains(t, err.Error(), wantMsg)
+
+			_, _, _, err = NumRowsAndBytes(ctx, cm, schema, paths)
+			assert.ErrorIs(t, err, merr.ErrImportFailed)
+			assert.Contains(t, err.Error(), wantMsg)
+		})
+	}
+
+	// A sub-field's own name that is also a top-level field belongs to that
+	// field.
+	shadowed := numpyStructSchema(true)
+	shadowed.Fields = append(shadowed.Fields, &schemapb.FieldSchema{FieldID: 106, Name: "arr", DataType: schemapb.DataType_Int64, Nullable: true})
+	assert.NoError(t, ValidateSchema(shadowed, []string{"pk.npy", "vec.npy", "arr.npy"}))
+}
+
+// TestNumpyNullableStructImport reads NumPy files into a collection with a
+// nullable struct: the top-level fields are read and the struct sub-fields are
+// left without rows, for the DataNode to fill with null struct rows
+// (AppendNullableDefaultFieldsData).
+func TestNumpyNullableStructImport(t *testing.T) {
+	ctx := context.Background()
+	schema := numpyStructSchema(true)
+	const rows = 5
+	pks := make([]int64, rows)
+	vecs := make([]float32, rows*dim)
+	for i := range pks {
+		pks[i] = int64(i + 1)
+		for d := 0; d < dim; d++ {
+			vecs[i*dim+d] = float32(i*dim + d)
+		}
+	}
+	pkData := &storage.Int64FieldData{Data: pks}
+	vecData := &storage.FloatVectorFieldData{Data: vecs, Dim: dim}
+
+	cm := mocks.NewChunkManager(t)
+	files := map[string]storage.FieldData{"pk.npy": pkData, "vec.npy": vecData}
+	types := map[string]schemapb.DataType{"pk.npy": schemapb.DataType_Int64, "vec.npy": schemapb.DataType_FloatVector}
+	for path, fieldData := range files {
+		r, err := createReader(fieldData, types[path])
+		assert.NoError(t, err)
+		cm.EXPECT().Reader(mock.Anything, path).Return(importcommon.CustomMockReader(r), nil)
+		cm.EXPECT().Size(mock.Anything, path).Return(128, nil).Maybe()
+	}
+
+	assert.NoError(t, ValidateSchema(schema, lo.Keys(files)))
+	reader, err := NewReader(ctx, cm, schema, lo.Keys(files), math.MaxInt)
+	assert.NoError(t, err)
+	defer reader.Close()
+
+	data, err := reader.Read()
+	assert.NoError(t, err)
+	assert.Equal(t, pks, data.Data[100].GetDataRows())
+	assert.Equal(t, vecs, data.Data[101].GetDataRows())
+	for _, id := range []int64{103, 104, 105} {
+		assert.Equal(t, 0, data.Data[id].RowNum(), "sub-field %d", id)
+	}
+	_, err = reader.Read()
+	assert.ErrorIs(t, err, io.EOF)
+}

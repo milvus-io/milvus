@@ -128,7 +128,7 @@ class VectorDiskAnnIndex : public VectorIndex {
  private:
     bool
     IsEmptyEmbListIndex() const {
-        return elem_type_ != DataType::NONE && !empty_emb_list_offsets_.empty();
+        return !empty_emb_list_offsets_.empty();
     }
 
     knowhere::Json

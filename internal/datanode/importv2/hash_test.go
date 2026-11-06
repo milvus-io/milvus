@@ -874,6 +874,53 @@ func TestHashDataBySchemaStructSubfieldsAndFunctionOutput(t *testing.T) {
 	assertHashRows(t, schema, []string{"v2", "v1", "v0"}, []int64{10}, input)
 }
 
+func TestHashDataBySchemaElementNullableAndNestedStructSubfields(t *testing.T) {
+	scalar := &schemapb.ScalarField{
+		Data:      &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{11, 0, 22}}},
+		ValidData: []bool{true, false, true},
+	}
+	nested := &schemapb.ScalarField{
+		Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+			ElementType: schemapb.DataType_Int64,
+			Data: []*schemapb.ScalarField{
+				scalar, nil, {Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{}}},
+			},
+		}},
+		ValidData: []bool{true, false, true},
+	}
+	vector := &schemapb.VectorField{
+		Dim:       2,
+		Data:      &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}},
+		ValidData: []bool{true, false, true},
+	}
+	schema := typeutil.AppendSystemFields(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "part", DataType: schemapb.DataType_Int64, IsPartitionKey: true},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: 110, Name: "items", Nullable: true,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 111, Name: "items.scalar", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: true, ElementNullable: true},
+				{FieldID: 112, Name: "items.nested", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Array, Nullable: true, ElementNullable: true},
+				{FieldID: 113, Name: "items.vector", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, Nullable: true, ElementNullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}}},
+			},
+		}},
+	})
+	var input []map[int64]any
+	for i := 0; i < 18; i++ {
+		row := map[int64]any{
+			common.RowIDField: int64(i), common.TimeStampField: int64(100 + i),
+			100: int64(i % 5), 101: int64(i % 3), 111: nil, 112: nil, 113: nil,
+		}
+		if i%3 != 0 {
+			row[111], row[112], row[113] = scalar, nested, vector
+		}
+		input = append(input, row)
+	}
+	assertHashRows(t, schema, []string{"v2", "v1", "v0"}, []int64{20, 10}, input)
+}
+
 func TestHashDataBySchemaOwnsDenseVectorBuffers(t *testing.T) {
 	schema := hashSchemaWithVector()
 	source, err := storage.NewInsertData(schema)

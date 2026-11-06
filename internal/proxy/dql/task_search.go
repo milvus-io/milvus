@@ -652,6 +652,9 @@ func (t *SearchTask) initAdvancedSearchRequest(ctx context.Context) error {
 
 		subSearchInfo := classifyHybridSubSearch(t.schema.CollectionSchema, queryInfo.GetQueryFieldId(), placeholderType)
 		annsField := typeutil.GetField(t.schema.CollectionSchema, queryInfo.GetQueryFieldId())
+		if err := validateElementNullableVectorArraySearch(annsField, placeholderType); err != nil {
+			return err
+		}
 		collapseConfig, elementScopeProvided, sanitizedSearchParams, err := parseAndRemoveElementScope(queryInfo.GetSearchParams())
 		if err != nil {
 			return err
@@ -1159,6 +1162,9 @@ func (t *SearchTask) initSearchRequest(ctx context.Context) error {
 	//   iterator, or group by (other than the PK case above).
 	annsField := typeutil.GetField(t.schema.CollectionSchema, t.FieldId)
 	if annsField != nil && annsField.GetDataType() == schemapb.DataType_ArrayOfVector {
+		if err := validateElementNullableVectorArraySearch(annsField, placeholderType); err != nil {
+			return err
+		}
 		isEmbList := isEmbeddingListPlaceholderType(placeholderType)
 
 		if isEmbList {
@@ -1447,6 +1453,16 @@ func isEmbeddingListPlaceholderType(pt commonpb.PlaceholderType) bool {
 	default:
 		return false
 	}
+}
+
+func validateElementNullableVectorArraySearch(field *schemapb.FieldSchema, placeholderType commonpb.PlaceholderType) error {
+	if field == nil || field.GetDataType() != schemapb.DataType_ArrayOfVector || !field.GetElementNullable() {
+		return nil
+	}
+	if isEmbeddingListPlaceholderType(placeholderType) {
+		return merr.WrapErrParameterInvalidMsg("embedding-list search is not supported for element-nullable vector array field %s", field.GetName())
+	}
+	return nil
 }
 
 func validateElementFilterVectorSearch(plan *planpb.PlanNode, schema *schemapb.CollectionSchema, fieldID int64, placeholderType commonpb.PlaceholderType) error {

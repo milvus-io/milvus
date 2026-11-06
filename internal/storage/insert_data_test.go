@@ -1226,7 +1226,10 @@ func TestArrayFieldDataTrackedAppend(t *testing.T) {
 		payload int
 	}{
 		schemapb.DataType_Array,
-		nestedArrayData(schemapb.DataType_Array, nestedArrayData(schemapb.DataType_Int16, nestedArrayIntData(1, 2), nestedArrayIntData(3))), 6,
+		nestedArrayData(schemapb.DataType_Array, nestedArrayData(schemapb.DataType_Int16, nestedArrayIntData(1, 2), nestedArrayIntData(3))),
+		// Six bytes of Int16 leaves plus the fixed cost of three inner arrays:
+		// the one at the outer level and the two below it.
+		6 + 3*nestedArrayElementOverhead,
 	})
 
 	for _, tt := range tests {
@@ -2281,5 +2284,60 @@ func TestFieldDataCopyFromTracksMemory(t *testing.T) {
 				require.Equal(t, scannedMemorySize(dst), dst.GetMemorySize())
 			})
 		}
+	}
+}
+
+func TestFieldDataCopyFromElementNullableAndNested(t *testing.T) {
+	leaf := &schemapb.ScalarField{
+		Data:      &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{11, 0, 22}}},
+		ValidData: []bool{true, false, true},
+	}
+	inner := &schemapb.ScalarField{
+		Data:      &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{11, 0}}},
+		ValidData: []bool{true, false},
+	}
+	nested := nestedArrayData(schemapb.DataType_Int64, inner, nil, &schemapb.ScalarField{
+		Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{}},
+	})
+	nested.ValidData = []bool{true, false, true}
+	vector := &schemapb.VectorField{
+		Dim:       2,
+		Data:      &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}},
+		ValidData: []bool{true, false, true},
+	}
+	for _, tc := range []struct {
+		name     string
+		field    *schemapb.FieldSchema
+		row      any
+		rowSize  int
+		nullSize int
+	}{
+		{"array", &schemapb.FieldSchema{DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}, leaf, 24 + 3, 0},
+		{"nested", &schemapb.FieldSchema{DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Array}, nested, 3*nestedArrayElementOverhead + 16 + 2 + 3, 0},
+		{"vector_array", &schemapb.FieldSchema{DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "2"}}}, vector, 16 + 4 + 3, 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.field.Nullable, tc.field.ElementNullable = true, true
+			src, err := NewFieldData(tc.field.GetDataType(), tc.field, 0)
+			require.NoError(t, err)
+			require.NoError(t, src.AppendRow(tc.row))
+			require.NoError(t, src.AppendRow(nil))
+			for _, tracked := range []bool{false, true} {
+				t.Run(fmt.Sprintf("tracked=%t", tracked), func(t *testing.T) {
+					dst, err := newFieldData(tc.field.GetDataType(), tc.field, 0, tracked)
+					require.NoError(t, err)
+					require.NoError(t, dst.AppendRow(tc.row))
+					require.NoError(t, dst.CopyFrom(src, nil))
+					require.NoError(t, dst.CopyFrom(src, []int{1, 0, 1, 0}))
+					require.Equal(t, []bool{true, false, true, false, true}, dst.GetValidData())
+					for i, want := range []any{tc.row, nil, tc.row, nil, tc.row} {
+						require.Equal(t, want, dst.GetRow(i), "row %d", i)
+					}
+					require.Equal(t, 2+5+3*tc.rowSize+2*tc.nullSize, checkedMemorySize(t, dst))
+					require.Equal(t, []bool{true, false}, src.GetValidData())
+					require.Equal(t, tc.row, src.GetRow(0))
+				})
+			}
+		})
 	}
 }

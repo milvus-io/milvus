@@ -43,6 +43,7 @@
 #include "index/Meta.h"
 #include "index/Utils.h"
 #include "index/VectorIndexValidDataUtils.h"
+#include "knowhere/emb_list_utils.h"
 #include "knowhere/binaryset.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
@@ -350,8 +351,15 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
             GetValueFromConfig<milvus::proto::common::LoadPriority>(
                 config, milvus::LOAD_PRIORITY)
                 .value_or(milvus::proto::common::LoadPriority::HIGH);
+        const bool empty_index = std::any_of(
+            index_files->begin(), index_files->end(), [](const auto& file) {
+                return GetIndexFileName(file).starts_with(
+                    std::string(EMPTY_EMB_LIST_OFFSET_KEY) + "_");
+            });
+        // Even streaming backends need the local empty-index marker before
+        // deciding whether any backend payload should be loaded.
         auto cache_files = GetCacheFilesForDiskIndexLoad(
-            index_files.value(), index_.LoadIndexWithStream());
+            index_files.value(), index_.LoadIndexWithStream() && !empty_index);
         if (!cache_files.empty()) {
             file_manager_->CacheIndexToDisk(cache_files, load_priority);
         }
@@ -365,11 +373,16 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
     auto valid_data_path = local_index_path_prefix + "/" + VALID_DATA_KEY;
     auto disk_valid_data =
         ReadDiskValidData(local_chunk_manager, valid_data_path);
-    const auto load_options =
-        MakeNullableLoadInput(disk_valid_data.View(),
-                              load_config,
-                              local_index_path_prefix,
-                              elem_type_ != DataType::NONE);
+    const bool element_nullable =
+        GetValueFromConfig<bool>(config, ELEMENT_NULLABLE).value_or(false);
+    // Preserve logical-element validity for element-nullable fields. Other
+    // VECTOR_ARRAY validity describes rows, which #54899 restores over the
+    // vector count when loading an old element-level index.
+    const auto load_options = MakeNullableLoadInput(
+        disk_valid_data.View(),
+        load_config,
+        local_index_path_prefix,
+        elem_type_ != DataType::NONE && !element_nullable);
     const auto full_bytes = disk_valid_data.count / 8;
     const auto tail_bits = disk_valid_data.count % 8;
     const bool all_null_nullable =
@@ -442,9 +455,21 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
     knowhere::Json build_config;
     build_config.update(config);
 
-    auto is_embedding_list = (elem_type_ != DataType::NONE);
+    auto is_embedding_list =
+        elem_type_ != DataType::NONE &&
+        knowhere::get_el_metric_type(GetMetricType()).has_value();
     Config config_with_emb_list = config;
     config_with_emb_list[EMB_LIST] = is_embedding_list;
+    if (elem_type_ != DataType::NONE) {
+        config_with_emb_list[DATA_TYPE_KEY] = DataType::VECTOR_ARRAY;
+        config_with_emb_list[ELEMENT_TYPE_KEY] = elem_type_;
+        if (is_embedding_list &&
+            file_manager_->GetFieldDataMeta().field_schema.element_nullable()) {
+            ThrowInfo(ErrorCode::Unsupported,
+                      "element-nullable VECTOR_ARRAY does not support "
+                      "embedding-list metrics");
+        }
+    }
     auto local_raw_data_prefix = file_manager_->GetLocalRawDataObjectPrefix();
     auto raw_data_lease =
         file_manager_->AcquireLocalDirWriteLease(local_raw_data_prefix);
@@ -508,6 +533,18 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
         std::none_of(disk_valid_data.bitmap.begin(),
                      disk_valid_data.bitmap.end(),
                      [](uint8_t byte) { return byte != 0; });
+
+    if (elem_type_ != DataType::NONE && !is_embedding_list &&
+        raw_data_rows == 0 && !disk_valid_data.found) {
+        AssertInfo(dim.has_value() && dim.value() > 0,
+                   "dim is missing when build empty element-level disk index");
+        SetDim(dim.value());
+        // No validity file means there are no logical elements. All-null
+        // elements have a validity file and retain the id-map-only path below.
+        write_empty_emb_list_metadata({0});
+        file_manager_->RemoveRawDataFiles();
+        return;
+    }
 
     if (id_map_dataset != nullptr) {
         if (!is_embedding_list && raw_data_rows == 0) {
@@ -609,7 +646,9 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     knowhere::Json build_config;
     build_config.update(config);
 
-    auto is_embedding_list = (elem_type_ != DataType::NONE);
+    auto is_embedding_list =
+        elem_type_ != DataType::NONE &&
+        knowhere::get_el_metric_type(GetMetricType()).has_value();
     build_config[EMB_LIST] = is_embedding_list;
 
     // set data path
@@ -675,8 +714,8 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     auto raw_data = const_cast<void*>(milvus::GetDatasetTensor(dataset));
     local_chunk_manager->Write(local_data_path, offset, raw_data, data_size);
 
-    // For VECTOR_ARRAY, write offsets to a separate file and pass the path to knowhere
-    if (elem_type_ != DataType::NONE) {
+    // Embedding-list metrics require offsets; element-level metrics use the IdMap.
+    if (is_embedding_list) {
         auto offsets =
             dataset->Get<const size_t*>(knowhere::meta::EMB_LIST_OFFSET);
         if (offsets == nullptr) {

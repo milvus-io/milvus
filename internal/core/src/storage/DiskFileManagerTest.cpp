@@ -2177,13 +2177,14 @@ TEST_F(DiskAnnFileManagerTest, BuildAllValidEmptyEmbListDiskIndexFromBinlog) {
     milvus::index::VectorDiskAnnIndex<float> index(
         DataType::VECTOR_FLOAT,
         knowhere::IndexEnum::INDEX_DISKANN,
-        knowhere::metric::L2,
+        knowhere::metric::MAX_SIM_L2,
         knowhere::Version::GetCurrentVersion().VersionNumber(),
         file_manager_context);
 
     milvus::Config config;
     config[INSERT_FILES_KEY] = std::vector<std::string>{insert_file_path};
     config[DIM_KEY] = dim;
+    config[milvus::index::METRIC_TYPE] = knowhere::metric::MAX_SIM_L2;
     config[milvus::index::DISK_ANN_BUILD_THREAD_NUM] = "1";
 
     index.Build(config);
@@ -2201,7 +2202,7 @@ TEST_F(DiskAnnFileManagerTest, BuildAllValidEmptyEmbListDiskIndexFromBinlog) {
     query_dataset->Set(knowhere::meta::NQ, num_rows);
 
     SearchInfo search_info;
-    search_info.metric_type_ = knowhere::metric::L2;
+    search_info.metric_type_ = knowhere::metric::MAX_SIM_L2;
     search_info.topk_ = 2;
 
     SearchResult search_result;
@@ -2220,6 +2221,44 @@ TEST_F(DiskAnnFileManagerTest, BuildAllValidEmptyEmbListDiskIndexFromBinlog) {
     auto files = stats->GetIndexFiles();
     ASSERT_EQ(files.size(), 1);
     EXPECT_NE(files[0].find("empty_emb_list_offsets"), std::string::npos);
+
+    // Existing empty-list artifacts carry no metric. A reader opened with
+    // an ordinary element metric must still return no hits.
+    for (const auto* metric : {knowhere::metric::L2,
+                               knowhere::metric::IP,
+                               knowhere::metric::COSINE}) {
+        SCOPED_TRACE(metric);
+        milvus::index::VectorDiskAnnIndex<float> legacy(
+            DataType::VECTOR_FLOAT,
+            knowhere::IndexEnum::INDEX_DISKANN,
+            metric,
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+            file_manager_context);
+        auto load_config = config;
+        load_config[milvus::index::INDEX_FILES] = files;
+        load_config[milvus::index::METRIC_TYPE] = metric;
+        load_config[milvus::index::DISK_ANN_LOAD_THREAD_NUM] = "1";
+        legacy.Load(milvus::BinarySet{}, load_config);
+        EXPECT_EQ(legacy.Count(), 0);
+        EXPECT_EQ(legacy.GetDim(), dim);
+        auto element_query = knowhere::GenDataSet(1, dim, vec_data.data());
+        SearchInfo element_search;
+        element_search.search_params_ = {
+            {milvus::index::DISK_ANN_QUERY_LIST, 8}};
+        element_search.metric_type_ = metric;
+        element_search.topk_ = 2;
+        SearchResult element_result;
+        legacy.Query(element_query,
+                     element_search,
+                     milvus::BitsetView{},
+                     nullptr,
+                     element_result);
+        EXPECT_EQ(element_result.total_nq_, 1);
+        ASSERT_EQ(element_result.seg_offsets_.size(), element_search.topk_);
+        for (auto offset : element_result.seg_offsets_) {
+            EXPECT_EQ(offset, INVALID_SEG_OFFSET);
+        }
+    }
 
     for (const auto& file : files) {
         cm_->Remove(file);
