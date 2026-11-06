@@ -28,6 +28,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
@@ -250,6 +251,78 @@ func TestExplainPlan_UnknownNodesAreRepresented(t *testing.T) {
 		// A caller bug, not request content, so it is a system error.
 		_, err := ExplainPlan(nil, helper, nil)
 		require.ErrorIs(t, err, merr.ErrServiceInternal)
+	})
+
+	// A plan written by a newer planpb carries its new kinds under field
+	// numbers this build does not know. The decoder keeps them as unknown
+	// fields on a union it reads as empty, so such a node is unknown, not
+	// empty; a union with no fields at all stays empty.
+	fromNewer := func(t *testing.T, m proto.Message, num protowire.Number) {
+		raw := protowire.AppendVarint(protowire.AppendTag(nil, num, protowire.VarintType), 1)
+		require.NoError(t, proto.Unmarshal(raw, m))
+	}
+
+	t.Run("value from a newer planpb", func(t *testing.T) {
+		newer := &planpb.GenericValue{}
+		fromNewer(t, newer, 7)
+		call := &planpb.Expr{Expr: &planpb.Expr_CallExpr{CallExpr: &planpb.CallExpr{
+			FunctionName: "f",
+			FunctionParameters: []*planpb.Expr{
+				{Expr: &planpb.Expr_ValueExpr{ValueExpr: &planpb.ValueExpr{Value: &planpb.GenericValue{}}}},
+				{Expr: &planpb.Expr_ValueExpr{ValueExpr: &planpb.ValueExpr{Value: newer}}},
+			},
+		}}}
+		got, err := ExplainPlan(&planpb.PlanNode{Node: &planpb.PlanNode_Predicates{Predicates: call}}, helper, nil)
+		require.NoError(t, err)
+		require.Len(t, got.Predicates.Children, 2)
+		assert.Nil(t, got.Predicates.Children[0].Value, "a GenericValue with no fields at all explains as null")
+		assert.Equal(t, &UnknownValue{Detail: "unknown field 7"}, got.Predicates.Children[1].Value)
+		assert.Equal(t, 1, got.UnknownNodeCount)
+		js, err := got.JSON()
+		require.NoError(t, err)
+		assert.Contains(t, string(js), `{"node":"value"},{"node":"value","value":{"unknown_value":"unknown field 7"}}`)
+		assert.Contains(t, got.Text(), "    value\n    value <unknown value: unknown field 7>\n")
+	})
+
+	t.Run("expression from a newer planpb", func(t *testing.T) {
+		newer := &planpb.Expr{}
+		fromNewer(t, newer, 99)
+		plan := &planpb.PlanNode{Node: &planpb.PlanNode_Query{Query: &planpb.QueryPlanNode{
+			Predicates: &planpb.Expr{Expr: &planpb.Expr_BinaryExpr{BinaryExpr: &planpb.BinaryExpr{
+				Op:    planpb.BinaryExpr_LogicalAnd,
+				Left:  known,
+				Right: newer,
+			}}},
+		}}}
+		got, err := ExplainPlan(plan, helper, nil)
+		require.NoError(t, err)
+		assert.Equal(t, NodeUnknown, got.Predicates.Right.Node)
+		assert.Equal(t, "unknown field 99", got.Predicates.Right.Detail)
+		assert.Equal(t, 1, got.UnknownNodeCount)
+	})
+
+	t.Run("plan node from a newer planpb", func(t *testing.T) {
+		newer := &planpb.PlanNode{}
+		fromNewer(t, newer, 99)
+		got, err := ExplainPlan(newer, helper, nil)
+		require.NoError(t, err)
+		assert.Equal(t, PlanTypeUnknown, got.PlanType)
+		assert.Equal(t, "unknown field 99", got.Detail)
+		assert.Equal(t, 1, got.UnknownNodeCount)
+		assert.True(t, strings.HasPrefix(got.Text(), "plan: unknown (unknown field 99)\n"), got.Text())
+	})
+
+	t.Run("unknown field numbers", func(t *testing.T) {
+		v := &planpb.GenericValue{}
+		assert.Equal(t, "", unknownFieldsDetail(v.ProtoReflect()))
+		raw := protowire.AppendVarint(protowire.AppendTag(nil, 7, protowire.VarintType), 1)
+		raw = protowire.AppendBytes(protowire.AppendTag(raw, 9, protowire.BytesType), []byte("x"))
+		raw = protowire.AppendVarint(protowire.AppendTag(raw, 7, protowire.VarintType), 2)
+		v.ProtoReflect().SetUnknown(raw)
+		assert.Equal(t, "unknown fields 7, 9", unknownFieldsDetail(v.ProtoReflect()), "each number once, in order")
+		// Only SetUnknown can store bytes the decoder did not validate.
+		v.ProtoReflect().SetUnknown([]byte{0x38, 0x80}) // field 7, truncated varint
+		assert.Equal(t, "2 bytes of unknown fields", unknownFieldsDetail(v.ProtoReflect()))
 	})
 }
 
@@ -830,6 +903,7 @@ func TestExplainPlan_IntermediateNodesAndValueKinds(t *testing.T) {
 			value(&planpb.GenericValue{Val: &planpb.GenericValue_ArrayVal{ArrayVal: &planpb.Array{Array: []*planpb.GenericValue{
 				{Val: &planpb.GenericValue_StringVal{StringVal: "a"}},
 				{Val: &planpb.GenericValue_Int64Val{Int64Val: 2}},
+				nil,
 			}}}}),
 			value(&planpb.GenericValue{}),
 		},
@@ -850,7 +924,7 @@ func TestExplainPlan_IntermediateNodesAndValueKinds(t *testing.T) {
 	assert.Equal(t, &BlobSummary{Bytes: 3}, root.Children[2].Value)
 	assert.Equal(t, Float64(1.5), root.Children[3].Value)
 	assert.Equal(t, true, root.Children[4].Value)
-	assert.Equal(t, []any{"a", int64(2)}, root.Children[5].Value)
+	assert.Equal(t, &ArrayValue{Elements: []any{"a", int64(2), nil}}, root.Children[5].Value, "a hand-built array carries no same_type; a nil element is null")
 	assert.Equal(t, NodeValue, root.Children[6].Node)
 	assert.Nil(t, root.Children[6].Value, "a GenericValue with no val explains as null")
 	assert.Equal(t, 0, got.UnknownNodeCount)
@@ -860,6 +934,75 @@ func TestExplainPlan_IntermediateNodesAndValueKinds(t *testing.T) {
 	assert.Contains(t, text, "    column Int64Field\n")
 	assert.Contains(t, text, "    value template=ids\n")
 	assert.Contains(t, text, "    value <3 bytes>\n")
+	assert.Contains(t, text, `    value ["a", 2, null](same_type=false)`+"\n")
+}
+
+// A plan array is more than its elements. segcore reads same_type: a stored
+// array never equals a non-empty literal marked mixed, and an array index is
+// consulted only for a literal that is not. The elements do not determine the
+// flag. A template array arrives as typed data (same_type true) or as JSON
+// data (same_type false) with the same elements, and `ArrayField == {a}`
+// returns rows on the first encoding and none on the second, so the two must
+// not explain alike.
+func TestExplainPlan_ArrayValuesKeepSameType(t *testing.T) {
+	helper := newTestSchemaHelper(t)
+	explainTemplate := func(t *testing.T, expr string, value *schemapb.TemplateValue) (*PlanExplanation, string) {
+		t.Helper()
+		plan, err := CreateRetrievePlan(helper, expr, map[string]*schemapb.TemplateValue{"a": value})
+		require.NoError(t, err)
+		got, err := ExplainPlan(plan, helper, nil)
+		require.NoError(t, err)
+		js, err := got.JSON()
+		require.NoError(t, err)
+		assert.Equal(t, 0, got.UnknownNodeCount)
+		return got, string(js)
+	}
+
+	t.Run("template encodings", func(t *testing.T) {
+		typed := generateTemplateValue(schemapb.DataType_Array, generateTemplateArrayValue(schemapb.DataType_Int64, []int64{1, 2}))
+		asJSON := generateTemplateValue(schemapb.DataType_Array, generateTemplateArrayValue(schemapb.DataType_JSON, [][]byte{generateJSONData(int64(1)), generateJSONData(int64(2))}))
+		gotTyped, jsTyped := explainTemplate(t, `ArrayField == {a}`, typed)
+		gotJSON, jsJSON := explainTemplate(t, `ArrayField == {a}`, asJSON)
+
+		assert.Equal(t, &ArrayValue{Elements: []any{int64(1), int64(2)}, SameType: true, ElementType: "Int64"}, gotTyped.Predicates.Value)
+		assert.Equal(t, &ArrayValue{Elements: []any{int64(1), int64(2)}, SameType: false, ElementType: "JSON"}, gotJSON.Predicates.Value)
+		assert.Contains(t, jsTyped, `"value":{"elements":[1,2],"same_type":true,"element_type":"Int64"}`)
+		assert.Contains(t, jsJSON, `"value":{"elements":[1,2],"same_type":false,"element_type":"JSON"}`)
+		assert.Contains(t, gotTyped.Text(), "  unary_range Equal ArrayField [1, 2] template=a\n")
+		assert.Contains(t, gotJSON.Text(), "  unary_range Equal ArrayField [1, 2](same_type=false) template=a\n")
+
+		// A mixed array inside JSON template data keeps the type of its first
+		// element (parseJSONValue), unlike one written in the expression.
+		nested := generateTemplateValue(schemapb.DataType_Array, generateTemplateArrayValue(schemapb.DataType_JSON, [][]byte{generateJSONData([]any{int64(1), "x"})}))
+		_, jsNested := explainTemplate(t, `JSONField["a"] == {a}`, nested)
+		assert.Contains(t, jsNested, `"value":{"elements":[{"elements":[1,"x"],"same_type":false,"element_type":"Int64"}],"same_type":false,"element_type":"JSON"}`)
+	})
+
+	t.Run("parsed literals", func(t *testing.T) {
+		cases := []struct {
+			expr string
+			json string
+			text string
+		}{
+			{`ArrayField == [1, 2]`, `"value":{"elements":[1,2],"same_type":true,"element_type":"Int64"}`, "  unary_range Equal ArrayField [1, 2]\n"},
+			{`JSONField["a"] == [1, "x"]`, `"value":{"elements":[1,"x"],"same_type":false}`, `  unary_range Equal JSONField["a"] [1, "x"](same_type=false)` + "\n"},
+			// An empty list has no element to take a type from, so element_type
+			// is absent. On a JSON path the list survives; `ArrayField == []`
+			// is rewritten to array_length(ArrayField) == 0 before explain.
+			{`JSONField["a"] == []`, `"value":{"elements":[],"same_type":true}`, `  unary_range Equal JSONField["a"] []` + "\n"},
+			// json_contains carries its own flag over the element list.
+			{`json_contains_any(JSONField["a"], [1, 2])`, `"values":[1,2],"elements_same_type":true}`, `  json_contains ContainsAny JSONField["a"] [1, 2]` + "\n"},
+			{`json_contains_any(JSONField["a"], [1, "x"])`, `"values":[1,"x"],"elements_same_type":false}`, `  json_contains ContainsAny JSONField["a"] [1, "x"] elements_same_type=false` + "\n"},
+		}
+		for _, tc := range cases {
+			got := explainRetrieve(t, helper, tc.expr)
+			js, err := got.JSON()
+			require.NoError(t, err)
+			assert.Contains(t, string(js), tc.json, tc.expr)
+			assert.Contains(t, got.Text(), tc.text, tc.expr)
+			assert.Equal(t, 0, got.UnknownNodeCount, tc.expr)
+		}
+	})
 }
 
 func TestExplainPlan_SearchOptions(t *testing.T) {
@@ -1504,7 +1647,7 @@ func TestExplainPlan_EmptyListsStayVisible(t *testing.T) {
 		{`Int64Field in []`, `"values":[]}`, "  term Int64Field []\n"},
 		{`Int64Field not in []`, `"values":[]}`, "    term Int64Field []\n"},
 		{`JSONField["a"] in []`, `"values":[]}`, `  term JSONField["a"] []` + "\n"},
-		{`json_contains_all(ArrayField, [])`, `"values":[]}`, "  json_contains ContainsAll ArrayField []\n"},
+		{`json_contains_all(ArrayField, [])`, `"values":[],"elements_same_type":true}`, "  json_contains ContainsAll ArrayField []\n"},
 		{`f()`, `{"node":"call","children":[],"function":"f"}`, "  call f\n"},
 	}
 	for _, tc := range cases {
@@ -1603,6 +1746,9 @@ func TestExplainPlan_ContractKeys(t *testing.T) {
 	want := strings.Fields(`
 AggregateExplanation.field
 AggregateExplanation.op
+ArrayValue.element_type,omitempty
+ArrayValue.elements
+ArrayValue.same_type
 BlobSummary.bytes
 FieldRef.auto_id,omitempty
 FieldRef.candidate_indexes,omitempty
@@ -1665,6 +1811,7 @@ PredicateNode.count,omitempty
 PredicateNode.detail,omitempty
 PredicateNode.distance,omitempty
 PredicateNode.element,omitempty
+PredicateNode.elements_same_type,omitempty
 PredicateNode.extra_values,omitempty
 PredicateNode.field,omitempty
 PredicateNode.function,omitempty
@@ -1703,6 +1850,7 @@ ScorerExplanation.filter
 ScorerExplanation.params,omitempty
 ScorerExplanation.type
 ScorerExplanation.weight
+UnknownValue.unknown_value
 VectorSearchExplanation.field
 VectorSearchExplanation.group_by
 VectorSearchExplanation.hints,omitempty
@@ -1715,7 +1863,8 @@ VectorSearchExplanation.topk
 VectorSearchExplanation.vector_type
 `)
 	slices.Sort(want)
-	got := contractKeys(reflect.TypeOf(PlanExplanation{}), reflect.TypeOf(BlobSummary{}), reflect.TypeOf(NonFinite{}))
+	// The value types hide behind `any` fields, so they are roots of their own.
+	got := contractKeys(reflect.TypeOf(PlanExplanation{}), reflect.TypeOf(ArrayValue{}), reflect.TypeOf(BlobSummary{}), reflect.TypeOf(NonFinite{}), reflect.TypeOf(UnknownValue{}))
 	assert.Equal(t, want, got, "the JSON contract changed; renaming or removing a key needs an ExplainVersion bump")
 }
 

@@ -72,11 +72,19 @@ pinned by `TestExplainPlan_ContractKeys`; the shape is:
   every other key applies to some kinds only: `op` (proto enum name), `field`,
   `right_field`, `value`, `values`, `extra_values`, `lower`, `upper`,
   `operand`, `arith_op`, `left`, `right`, `child`, `children`, `element`,
-  `function`, `struct_name`, `in_field`, `template`, `operand_template`,
-  `wkt`, `distance`, `count`, `sample_factor`, `interval`, `blob`, `detail`.
+  `function`, `struct_name`, `in_field`, `elements_same_type`, `template`,
+  `operand_template`, `wkt`, `distance`, `count`, `sample_factor`,
+  `interval`, `blob`, `detail`.
 - Field reference: `id`; `name`, `type`, `element_type`, `nested_path`,
   `primary_key`, `auto_id`, `partition_key`, `clustering_key`, `nullable`,
   `element_level`, `candidate_indexes` when they apply.
+- Value (`value`, `values[]`, `extra_values[]`, `operand`, a bound's
+  `value`): a JSON bool, integer, float, or string; an array literal as the
+  object `{"elements": [...], "same_type": bool}` plus `element_type` when
+  the plan carries one; a binary payload as `{"bytes": N}`; a non-finite
+  float as `{"non_finite": ...}`; a value of a kind this version cannot
+  describe as `{"unknown_value": detail}`; `null` for a value the plan left
+  empty (an unfilled template bound).
 
 Rules:
 
@@ -103,7 +111,12 @@ Rules:
   `TestExplainPlan_CoversEveryExprType` until the explainer covers it.
   Anything unrecognized (an unset `Expr`, a missing child, an unknown plan
   node kind, an unknown `GenericValue` kind) becomes an `unknown` node with a
-  `detail` and increments `unknown_node_count`. The three children the parser
+  `detail` and increments `unknown_node_count`. A kind added by a newer
+  `planpb` reaches this build as unknown fields on a union it decodes as
+  empty, so an empty `Expr`, `PlanNode` or `GenericValue` is checked for
+  unknown fields first: with any, it is unknown and the `detail` names the
+  field numbers; with none, it is what it looks like (an unfilled template
+  bound explains as `null`, not as unknown). The three children the parser
   leaves nil on purpose (the predicate of a bare `random_sample` or
   `element_filter`, the right operand of `array_length`) are not unknown.
 - Fidelity to what segcore evaluates: fields resolve through the supplied
@@ -113,7 +126,20 @@ Rules:
   plan carries one (an empty string included); the JSON grouping options are
   reported whenever the plan carries a path, a type, or `strict_cast`; zero
   thresholds and empty lists stay visible; numeric kinds and float widths are
-  preserved.
+  preserved. An array literal keeps its `same_type` and `element_type`, not
+  just its elements: segcore never matches a stored array against a
+  non-empty literal marked mixed (`common/Array.h`, `is_same_array`) and
+  consults an array index only for one that is not
+  (`exec/expression/UnaryExpr.cpp`), and the elements do not determine the
+  flag. A template array arrives with `same_type` true when the client sent
+  typed data and false when it sent JSON data (`convertArrayValue`), same
+  elements either way, and `ArrayField == {a}` returns rows on the first and
+  none on the second. The `elements_same_type` flag of `json_contains`, which
+  picks the typed or the generic contains on a JSON column, is reported for
+  the same reason. Under `RedactTemplateValues` a template value is elided
+  whole, its `same_type` and `element_type` with it; the node's
+  `elements_same_type` stays, as `RedactPlanForLog` leaves it in the plan it
+  logs.
 - Candidate indexes: the plan carries no index metadata, so the caller
   supplies `FieldIndexes` (the proxy has the collection's index descriptions).
   They attach to the vector field and to predicate columns, not output fields.
@@ -143,10 +169,8 @@ Rules:
   expressions inside operations are out of scope for version 1. Scalars
   outside the contract (`materialized_view_involved`, `bm25_avgdl`,
   `query_field_id`, `search_topk_ratio`, `refine_topk_ratio`,
-  `search_iterator_v2_info.token`, `placeholder_tag`, and the
-  `elements_same_type` hint of `json_contains`, derived from the values the
-  node already reports) are listed in the `PlanExplanation` doc comment;
-  `unknown_node_count` does not cover them.
+  `search_iterator_v2_info.token`, `placeholder_tag`) are listed in the
+  `PlanExplanation` doc comment; `unknown_node_count` does not cover them.
 - Failure cases: a nil plan returns an error; `JSON()` cannot fail on
   non-finite floats; the plan is never mutated (`proto.Equal` before and after
   is asserted).
@@ -163,10 +187,14 @@ the same rule.
 Unit tests in `explain_test.go`, run with `-tags dynamic,test`: a byte-exact
 pin of one search plan (key order included); the reflective key pin; the
 protoreflect walk of the `Expr` oneof; one parser-produced plan per node kind;
-nil-by-design children; zero thresholds; non-finite floats as a predicate
-value, scorer weight, sample factor, GIS distance and iterator bound; integer
-versus float kinds; empty lists; filled,
-unfilled and redacted templates, GIS and binary range included; redaction
+nil-by-design children; unknown nodes, including an `Expr`, `PlanNode` and
+`GenericValue` decoded from a newer `planpb` with an unknown field, against
+a `GenericValue` with no fields at all; zero thresholds; non-finite floats as
+a predicate value, scorer weight, sample factor, GIS distance and iterator
+bound; integer versus float kinds; array literals as typed and as JSON
+template data, as parsed literals, and the `json_contains` flag; empty
+lists; filled, unfilled and redacted templates, GIS and binary range
+included; redaction
 parity with `RedactPlanForLog` across eight rewriter shapes with the optimizer
 on and off; candidate indexes including JSON path scoping and copy semantics;
 column flags; search and query options in JSON and text; function chains;
