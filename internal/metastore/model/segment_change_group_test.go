@@ -81,7 +81,9 @@ func TestSegmentChangeGroup_CanTransitionTo(t *testing.T) {
 		{"ready to committed", SegmentChangeStateReady, SegmentChangeStateCommitted, true},
 		{"ready to failed", SegmentChangeStateReady, SegmentChangeStateFailed, true},
 		{"ready to ready (idempotent)", SegmentChangeStateReady, SegmentChangeStateReady, true},
-		{"ready back to staged is illegal", SegmentChangeStateReady, SegmentChangeStateStaged, false},
+		// D2 (R5): a READY group whose member readiness regressed before publish
+		// goes back to STAGED for re-evaluation ("abort back to STAGED").
+		{"ready back to staged (R5 regression)", SegmentChangeStateReady, SegmentChangeStateStaged, true},
 		{"committed replay", SegmentChangeStateCommitted, SegmentChangeStateCommitted, true},
 		{"committed to staged is illegal", SegmentChangeStateCommitted, SegmentChangeStateStaged, false},
 		{"failed replay", SegmentChangeStateFailed, SegmentChangeStateFailed, true},

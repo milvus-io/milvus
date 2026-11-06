@@ -158,6 +158,7 @@ type Server struct {
 	statsInspector                   *statsInspector
 	indexInspector                   *indexInspector
 	analyzeInspector                 *analyzeInspector
+	segmentChangeInspector           *segmentChangeInspector
 	externalCollectionRefreshManager ExternalCollectionRefreshManager
 	globalScheduler                  task.GlobalScheduler
 
@@ -331,6 +332,9 @@ func (s *Server) initDataCoord() error {
 
 	s.initStatsInspector()
 	mlog.Info(s.ctx, "init statsJobManager done")
+
+	s.initSegmentChangeInspector()
+	mlog.Info(s.ctx, "init segment change inspector done")
 
 	s.initExternalCollectionInspector(storageCli)
 	mlog.Info(s.ctx, "init external collection inspector done")
@@ -687,6 +691,12 @@ func (s *Server) initStatsInspector() {
 	}
 }
 
+func (s *Server) initSegmentChangeInspector() {
+	if s.segmentChangeInspector == nil {
+		s.segmentChangeInspector = newSegmentChangeInspector(s.ctx, s.meta, s.allocator)
+	}
+}
+
 func (s *Server) initExternalCollectionInspector(storageCli storage.ChunkManager) {
 	// Initialize Manager (handles job submission, query, and internal inspector/checker)
 	if s.externalCollectionRefreshManager == nil {
@@ -783,6 +793,7 @@ func (s *Server) startTaskScheduler() {
 	s.statsInspector.Start()
 	s.indexInspector.Start()
 	s.analyzeInspector.Start()
+	s.segmentChangeInspector.Start()
 	// Note: externalCollectionInspector.Start() is called in startServerLoop as a goroutine
 	s.startCollectMetaMetrics(s.serverLoopCtx)
 }
@@ -1099,6 +1110,9 @@ func (s *Server) Stop() error {
 
 	s.statsInspector.Stop()
 	mlog.Info(s.ctx, "datacoord stats inspector stopped")
+
+	s.segmentChangeInspector.Stop()
+	mlog.Info(s.ctx, "datacoord segment change inspector stopped")
 
 	s.indexInspector.Stop()
 	mlog.Info(s.ctx, "datacoord index inspector stopped")

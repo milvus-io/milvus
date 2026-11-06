@@ -6006,6 +6006,10 @@ type dataCoordConfig struct {
 	MinSegmentNumRowsToEnableIndex ParamItem `refreshable:"true"`
 	BrokerTimeout                  ParamItem `refreshable:"false"`
 
+	// segment change staging
+	SegmentChangeStagingTimeout  ParamItem `refreshable:"true"`
+	SegmentChangeGroupMaxMembers ParamItem `refreshable:"true"`
+
 	// auto balance channel on datanode
 	AutoBalance                    ParamItem `refreshable:"true"`
 	CheckAutoBalanceConfigInterval ParamItem `refreshable:"false"`
@@ -7111,6 +7115,24 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 		Export:       true,
 	}
 	p.MinSegmentNumRowsToEnableIndex.Init(base.mgr)
+
+	p.SegmentChangeStagingTimeout = ParamItem{
+		Key:          "dataCoord.segmentChange.stagingTimeout",
+		Version:      "3.0.4",
+		DefaultValue: "3600",
+		Doc:          "The maximum duration in seconds a segment change group may stay staged before the batch is aborted (STAGED -> ABORTED), bounding unconvergeable or externally-dropped batches.",
+		Export:       true,
+	}
+	p.SegmentChangeStagingTimeout.Init(base.mgr)
+
+	p.SegmentChangeGroupMaxMembers = ParamItem{
+		Key:          "dataCoord.segmentChange.maxMembersPerGroup",
+		Version:      "3.0.4",
+		DefaultValue: "512",
+		Doc:          "The maximum number of output segments one segment change group may carry before oversized task outputs are split into sequentially published subgroups.",
+		Export:       true,
+	}
+	p.SegmentChangeGroupMaxMembers.Init(base.mgr)
 
 	p.BindIndexNodeMode = ParamItem{
 		Key:          "indexCoord.bindIndexNodeMode.enable",
