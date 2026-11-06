@@ -61,9 +61,12 @@ func (c *ColumnJSONBytes) FieldData() *schemapb.FieldData {
 }
 
 // AppendValue append value into column.
+// A nil value is appended as null, which returns an error for non-nullable columns.
 func (c *ColumnJSONBytes) AppendValue(i interface{}) error {
 	var v []byte
 	switch raw := i.(type) {
+	case nil:
+		return c.AppendNull()
 	case []byte:
 		v = raw
 	default:
@@ -84,7 +87,5 @@ func (c *ColumnJSONBytes) AppendValue(i interface{}) error {
 			return fmt.Errorf("expect json compatible type([]byte, struct, map), got %T", i)
 		}
 	}
-	c.values = append(c.values, v)
-
-	return nil
+	return c.genericColumnBase.AppendValue(v)
 }
