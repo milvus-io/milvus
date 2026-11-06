@@ -211,11 +211,14 @@ func TestQueryTaskPreExecuteUsesStrongVisibility(t *testing.T) {
 
 	for _, tc := range []struct {
 		name          string
+		consistency   commonpb.ConsistencyLevel
 		updateTime    time.Time
 		guaranteeTime time.Time
 	}{
-		{name: "query timestamp", updateTime: queryUpdateTime, guaranteeTime: schedulerTime},
-		{name: "newer schema", updateTime: schedulerTime.Add(time.Second), guaranteeTime: schedulerTime.Add(time.Second)},
+		{name: "query timestamp", consistency: commonpb.ConsistencyLevel_Strong, updateTime: queryUpdateTime, guaranteeTime: schedulerTime},
+		{name: "newer schema", consistency: commonpb.ConsistencyLevel_Strong, updateTime: schedulerTime.Add(time.Second), guaranteeTime: schedulerTime.Add(time.Second)},
+		// Eventually raises the guarantee only to the last DDL, which can be far in the past.
+		{name: "eventually", consistency: commonpb.ConsistencyLevel_Eventually, updateTime: queryUpdateTime, guaranteeTime: queryUpdateTime},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			collectionInfo.UpdateTimestamp = tsoutil.ComposeTSByTime(tc.updateTime)
@@ -233,21 +236,24 @@ func TestQueryTaskPreExecuteUsesStrongVisibility(t *testing.T) {
 					CollectionName:     "test_collection",
 					Expr:               "id in [1]",
 					OutputFields:       []string{"id"},
-					ConsistencyLevel:   commonpb.ConsistencyLevel_Strong,
+					ConsistencyLevel:   tc.consistency,
 					GuaranteeTimestamp: 0,
 				},
 			}
 			require.NoError(t, task.OnEnqueue())
-			require.False(t, task.CanSkipAllocTimestamp())
+			require.Equal(t, tc.consistency != commonpb.ConsistencyLevel_Strong, task.CanSkipAllocTimestamp())
 			task.SetTs(schedulerTS)
 
 			require.NoError(t, task.PreExecute(ctx))
-			require.Equal(t, commonpb.ConsistencyLevel_Strong, task.GetConsistencyLevel())
+			require.Equal(t, tc.consistency, task.GetConsistencyLevel())
 			require.Equal(t, tsoutil.ComposeTSByTime(tc.guaranteeTime), task.GetGuaranteeTimestamp())
-			// Strong Query uses its own timestamp plus the metadata fence, leaving
-			// MVCC selection to QueryNode. TTL clocks follow normal preprocessing.
-			require.Zero(t, task.GetMvccTimestamp())
-			require.Equal(t, uint64(tc.guaranteeTime.UnixMilli()*1000), task.GetEntityTtlPhysicalTime())
+			if tc.consistency == commonpb.ConsistencyLevel_Strong {
+				// Strong Query uses its own timestamp plus the metadata fence, leaving
+				// MVCC selection to QueryNode.
+				require.Zero(t, task.GetMvccTimestamp())
+			}
+			// Both TTL cutoffs follow the query's own timestamp, not the guarantee.
+			require.Equal(t, uint64(schedulerTime.UnixMilli()*1000), task.GetEntityTtlPhysicalTime())
 			require.Equal(t, tsoutil.ComposeTSByTime(schedulerTime.Add(-collectionTTL)), task.GetCollectionTtlTimestamps())
 		})
 	}
