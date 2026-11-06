@@ -28,8 +28,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -53,6 +55,12 @@ func TestBackupPlaintextDoesNotBorrowTargetKey(t *testing.T) {
 	t.Cleanup(func() { plugin.UnPatch() })
 	list := mockey.Mock(listInsertLogs).Return(map[int64][]string{0: {genBinlogPath(0)}}, nil).Build()
 	t.Cleanup(func() { list.UnPatch() })
+	footer := mockey.Mock(packed.GetPackedFileFieldIDs).To(
+		func(_ []string, _ *indexpb.StorageConfig, pluginContext *indexcgopb.StoragePluginContext) ([][]int64, error) {
+			require.Nil(t, pluginContext)
+			return [][]int64{{100}}, nil
+		}).Build()
+	t.Cleanup(func() { footer.UnPatch() })
 	target := &schemapb.CollectionSchema{
 		Properties: []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "37"}},
 		Fields:     []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
@@ -64,5 +72,6 @@ func TestBackupPlaintextDoesNotBorrowTargetKey(t *testing.T) {
 		storage.StorageV2, []string{"backup/segment"}, 0, math.MaxUint64, 1024, "", nil)
 	require.NoError(t, err)
 	defer reader.Close()
+	require.Equal(t, 1, footer.Times())
 	require.Zero(t, cipher.lookups, "a plaintext source must not resolve the destination's key")
 }
