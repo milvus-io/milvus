@@ -60,10 +60,16 @@ func (c *Client) CreateDatabase(ctx context.Context, option CreateDatabaseOption
 func (c *Client) DropDatabase(ctx context.Context, option DropDatabaseOption, callOptions ...grpc.CallOption) error {
 	req := option.Request()
 
-	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.DropDatabase(ctx, req, callOptions...)
 		return merr.CheckRPCCall(resp, err)
 	})
+	if err != nil {
+		return err
+	}
+	// the database no longer exists, drop all its cached schemas and write timestamps
+	c.collCache.InvalidateDb(req.GetDbName())
+	return nil
 }
 
 func (c *Client) DescribeDatabase(ctx context.Context, option DescribeDatabaseOption, callOptions ...grpc.CallOption) (*entity.Database, error) {

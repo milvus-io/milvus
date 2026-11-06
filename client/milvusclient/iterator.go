@@ -204,6 +204,13 @@ func newSearchIteratorV1(_ *Client) (*searchIteratorV1, error) {
 // SearchIterator creates a search iterator from a collection.
 //
 // If the server supports search iterator V2, it creates a search iterator V2.
+//
+// Note: iterators build their requests directly and do not consult the
+// write-timestamp cache, so a Session-consistency (or Session-default)
+// collection does not get the cached last-write guarantee_timestamp during
+// iteration - this matches the pymilvus/java SDKs, which also skip the session
+// cache on iterators. Callers that need read-your-writes during iteration can
+// pass an explicit timestamp via WithGuaranteeTimestamp.
 func (c *Client) SearchIterator(ctx context.Context, option SearchIteratorOption, callOptions ...grpc.CallOption) (SearchIterator, error) {
 	if err := option.ValidateParams(); err != nil {
 		return nil, err
@@ -430,6 +437,13 @@ func newQueryIterator(ctx context.Context, client *Client, option QueryIteratorO
 }
 
 // QueryIterator creates a query iterator from a collection.
+//
+// Note: iterators build their requests directly and do not consult the
+// write-timestamp cache, so a Session-consistency (or Session-default)
+// collection does not get the cached last-write guarantee_timestamp during
+// iteration - this matches the pymilvus/java SDKs, which also skip the session
+// cache on iterators. Callers that need read-your-writes during iteration can
+// pass an explicit timestamp via WithGuaranteeTimestamp.
 func (c *Client) QueryIterator(ctx context.Context, option QueryIteratorOption, callOptions ...grpc.CallOption) (QueryIterator, error) {
 	if err := option.ValidateParams(); err != nil {
 		return nil, err
