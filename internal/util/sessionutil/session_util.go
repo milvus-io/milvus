@@ -952,36 +952,37 @@ func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) {
 			eventType = SessionDelEvent
 		}
 		log.Debug("WatchService", zap.Any("event type", eventType))
-		w.eventCh <- &SessionEvent{
+		select {
+		case <-w.ctx.Done():
+			return
+		case w.eventCh <- &SessionEvent{
 			EventType: eventType,
 			Session:   session,
+		}:
 		}
 	}
 }
 
 func (w *sessionWatcher) handleWatchErr(err error) error {
-	// Only recoverable errors are re-watched. ErrCompacted needs a fresh
-	// revision; auth-token errors (etcd auth enabled) need the watch
-	// re-established because clientv3 won't refresh the token on a live watch
-	// stream. Any other error closes the channel. See etcd.IsRetriableWatchErr.
-	if !etcd.IsRetriableWatchErr(err) {
-		// close event channel
-		log.Ctx(w.ctx).Warn("Watch service found error", zap.Error(err))
-		w.closeEventCh()
-		return err
+	// Like the proxy and streaming discovery loops, keep recovering transient
+	// failures until this watcher is stopped. Setup errors arrive on the new
+	// channel and are consumed by the same start loop as runtime errors.
+	for etcd.IsRetriableWatchErr(err) {
+		log.Ctx(w.ctx).Warn("session watch interrupted, retrying discovery", zap.String("prefix", w.prefix), zap.Error(err))
+		timer := time.NewTimer(time.Second)
+		select {
+		case <-w.ctx.Done():
+			timer.Stop()
+			w.closeEventCh()
+			return w.ctx.Err()
+		case <-timer.C:
+		}
+		if err = w.handleReWatch(); err == nil {
+			return nil
+		}
 	}
-
-	// Re-establish the watch with a bounded retry. handleReWatch issues a unary
-	// request first, which refreshes the etcd auth token via clientv3's unary
-	// retry interceptor. Only keep retrying transient errors (e.g. a still-stale
-	// auth token); a non-transient failure aborts immediately. The retry runs on
-	// the watcher ctx so Stop() interrupts it.
-	if reErr := retry.Do(w.ctx, w.handleReWatch, retry.RetryErr(etcd.IsRetriableWatchErr)); reErr != nil {
-		log.Ctx(w.ctx).Warn("re-watch session service failed", zap.String("prefix", w.prefix), zap.Error(reErr))
-		w.closeEventCh()
-		return reErr
-	}
-	return nil
+	w.closeEventCh()
+	return err
 }
 
 // handleReWatch re-establishes the session watch: it re-reads the current
