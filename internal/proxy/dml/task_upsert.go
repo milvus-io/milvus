@@ -1982,11 +1982,11 @@ func (it *UpsertTask) deletePreExecute(ctx context.Context) error {
 }
 
 func (it *UpsertTask) PreExecute(ctx context.Context) error {
-	if err := requireUnifiedUpsertGeneration(); err != nil {
+	if err := requireUpsertWALGeneration(); err != nil {
 		return err
 	}
 	if it.req.Namespace != nil {
-		return merr.WrapErrParameterInvalidMsg("unified Upsert WAL does not support namespace requests")
+		return merr.WrapErrParameterInvalidMsg("Upsert WAL does not support namespace requests")
 	}
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-PreExecute")
 	defer sp.End()

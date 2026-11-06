@@ -100,7 +100,7 @@ func TestCompoundPredecodeValidatesDeleteCountsAndLegacySiblings(t *testing.T) {
 	}
 }
 
-func TestUnifiedUpsertAppliesNativeRowsAndDeletes(t *testing.T) {
+func TestUpsertAppliesNativeRowsAndDeletes(t *testing.T) {
 	initSegcoreForRuntimeTest(t)
 	schema := &schemapb.CollectionSchema{Version: 1, Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}, {FieldID: 101, Name: "marker", DataType: schemapb.DataType_Int64}, {FieldID: 102, Name: "vector", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "2"}}}}}
 	runtime := newRuntime()

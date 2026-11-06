@@ -54,7 +54,7 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 	var msgs []message.MutableMessage
 	var err error
 	idempotency := it.idempotentInsertDecoration()
-	msgs, err = repackUnifiedUpsert(ctx, it.GetMetaCache(), channelNames, it.insertMsg, it.result.GetIDs(), it.partitionKeys, it.schema, it.schemaVersion, ez, nil, idempotency, nil, 0)
+	msgs, err = repackUpsertMessages(ctx, it.GetMetaCache(), channelNames, it.insertMsg, it.result.GetIDs(), it.partitionKeys, it.schema, it.schemaVersion, ez, nil, idempotency, nil, 0)
 	if err != nil {
 		mlog.Warn(ctx, "assign segmentID and repack insert data failed", mlog.Err(err))
 		it.result.Status = merr.Status(err)

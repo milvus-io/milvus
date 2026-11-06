@@ -60,7 +60,7 @@ func (s *UpsertWALSuite) TestGateOffAllowsDurableCommitAndRejectsNewProducer() {
 			s.Require().NotNil(begin.TxnCtx)
 			_, err = producer.Append(ctx, c.upsert(11, 2).WithTxnContext(*begin.TxnCtx))
 			s.Require().NoError(err)
-			restore := s.Cluster.MustModifyMilvusConfig(map[string]string{"streaming.wal.upsert.unifiedEnabled": mode})
+			restore := s.Cluster.MustModifyMilvusConfig(map[string]string{"streaming.wal.enableUpsertMessage": mode})
 			defer restore()
 			s.Require().Eventually(func() bool {
 				_, err := producer.Append(ctx, c.upsert(12, 4))
@@ -86,7 +86,7 @@ func (s *UpsertWALSuite) TestGateOffAllowsDurableCommitAndRejectsNewProducer() {
 	}
 }
 
-func (s *UpsertWALSuite) TestNamespaceRejectedBeforeUnifiedAppend() {
+func (s *UpsertWALSuite) TestNamespaceRejectedBeforeUpsertAppend() {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	c := s.createWithPK(ctx, schemapb.DataType_Int64, false, func(schema *schemapb.CollectionSchema) { schema.EnableNamespace = true })

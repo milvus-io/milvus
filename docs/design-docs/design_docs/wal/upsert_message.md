@@ -1,4 +1,4 @@
-# Unified Upsert WAL messages
+# Upsert WAL format
 
 ## Purpose
 
@@ -91,7 +91,7 @@ No support is added to the legacy MsgPack pipeline or msgdispatcher. Production 
 
 CDC forwards the primary's logical rows, placement partitions, CAS metadata, mapping, and explicit delete effects. The secondary preserves these logical effects and allocates its own segment IDs. It does not repeat PK-index decisions. Replicated messages bypass the local client idempotency window. Transaction replay uses the final Commit TimeTick.
 
-Deployment uses reader-first activation. streaming.wal.upsert.unifiedEnabled defaults to false. auto remains false because the new format has no assigned release capability. The old draft 3.0.7 threshold does not describe this format. The old draft switch cannot enable this new capability. Explicit enablement requires operators to verify all readers, CDC targets, and the native query-path dependency first.
+Deployment uses reader-first activation. streaming.wal.enableUpsertMessage defaults to false. auto remains false because the new format has no assigned release capability. The old draft 3.0.7 threshold does not describe this format. The old draft switch cannot enable this new capability. Explicit enablement requires operators to verify all readers, CDC targets, and the native query-path dependency first.
 
 Gate-off rejects new Insert, Upsert, and partial-update requests before the first send. New producers do not fall back to Insert WAL. Gate-off does not disable historical decoding or Commit/Rollback for existing durable bodies. It does not remove retained WAL records.
 

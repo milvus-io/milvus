@@ -62,7 +62,7 @@ func TestMaterializeInsertPreservesWALAndExistingOutputs(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestUnifiedUpsertMinHashMaterializationAcrossPartitions(t *testing.T) {
+func TestUpsertMinHashMaterializationAcrossPartitions(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Version: 1, Fields: []*schemapb.FieldSchema{
 		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 		{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "max_length", Value: "256"}, {Key: "enable_analyzer", Value: "true"}}},
@@ -93,7 +93,7 @@ func TestUnifiedUpsertMinHashMaterializationAcrossPartitions(t *testing.T) {
 	require.True(t, proto.Equal(before, message.MustAsImmutableUpsertMessageV2(raw).MustBody()))
 }
 
-func BenchmarkUnifiedUpsertBM25Materialization(b *testing.B) {
+func BenchmarkUpsertBM25Materialization(b *testing.B) {
 	const rows = 128
 	schema := &schemapb.CollectionSchema{Version: 1, Fields: []*schemapb.FieldSchema{
 		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},

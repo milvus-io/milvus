@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package testutils builds unified WAL fixtures from existing test row data.
+// Package testutils builds Upsert WAL fixtures from existing test row data.
 // It is not used by production producers or consumers.
 package testutils
 

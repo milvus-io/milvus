@@ -215,7 +215,7 @@ func (ut *UpsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 	if deleteKeys == nil {
 		deleteKeys = ut.oldIDs
 	}
-	return repackUnifiedUpsert(ctx, ut.GetMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result.GetIDs(), ut.partitionKeys, ut.schema.CollectionSchema, ut.schemaVersion, ez, ut.partialUpdateCASGroups, nil, deleteKeys, ut.upsertMsg.DeleteMsg.PartitionID)
+	return repackUpsertMessages(ctx, ut.GetMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result.GetIDs(), ut.partitionKeys, ut.schema.CollectionSchema, ut.schemaVersion, ez, ut.partialUpdateCASGroups, nil, deleteKeys, ut.upsertMsg.DeleteMsg.PartitionID)
 }
 
 func (ut *UpsertTask) attachPartialUpdateCAS(messages []message.MutableMessage) error {

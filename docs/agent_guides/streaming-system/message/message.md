@@ -60,7 +60,7 @@ Use these rules to choose where a new field goes:
 
 If rule 1 and rule 2 or rule 3 point to different places, rules 2 and 3 win. Put a small handle (an ID or a fingerprint) in the header and put the full content in the body.
 
-Historical Insert idempotent_result remains a plaintext header exception. Unified Upsert stores inserted PK and request_row_mapping in the encrypted body. Idempotency and Summary use a metadata projection that skips ordinary columns. New Upsert has no result copy in its header.
+Historical Insert idempotent_result remains a plaintext header exception. Upsert stores inserted PK and request_row_mapping in the encrypted body. Idempotency and Summary use a metadata projection that skips ordinary columns. New Upsert has no result copy in its header.
 
 ## Immutable Body Cache
 

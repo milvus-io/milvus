@@ -25,8 +25,8 @@ import (
 func TestUpsertWALGenerationDefaultsOffAndRefreshes(t *testing.T) {
 	p := &ComponentParam{}
 	p.Init(NewBaseTable(SkipRemote(true)))
-	item := &p.StreamingCfg.UpsertWALWriteEnabled
-	require.Equal(t, "streaming.wal.upsert.unifiedEnabled", item.Key)
+	item := &p.StreamingCfg.EnableUpsertMessage
+	require.Equal(t, "streaming.wal.enableUpsertMessage", item.Key)
 	require.False(t, item.GetAsBool())
 	require.NoError(t, p.Save(item.Key, "true"))
 	require.True(t, item.GetAsBool())
@@ -34,16 +34,25 @@ func TestUpsertWALGenerationDefaultsOffAndRefreshes(t *testing.T) {
 	require.False(t, item.GetAsBool())
 }
 
-func TestUnifiedUpsertDoesNotUseDraftVersionGate(t *testing.T) {
+func TestUpsertDoesNotUseDraftVersionGate(t *testing.T) {
 	p := &ComponentParam{}
 	p.Init(NewBaseTable(SkipRemote(true)))
-	item := &p.StreamingCfg.UpsertWALWriteEnabled
+	item := &p.StreamingCfg.EnableUpsertMessage
 	require.NotContains(t, p.versionGateItems(), item)
 	require.Nil(t, item.VersionGateSwitcher, "the new capability has no approved release threshold")
+	require.NoError(t, p.Save("streaming.wal.upsert.unifiedEnabled", "true"))
+	require.False(t, item.GetAsBool(), "the previous key must not activate message generation")
 	require.NoError(t, p.Save("streaming.wal.upsert.enabled", "true"))
 	require.False(t, item.GetAsBool(), "the draft switch cannot activate the new format")
 	require.NoError(t, p.Save(item.Key, "auto"))
 	require.False(t, item.GetAsBool())
 	require.NoError(t, p.Save(item.Key, "true"))
 	require.True(t, item.GetAsBool(), "explicit enablement requires reader-first deployment")
+}
+
+func TestEnableUpsertMessageFromEnvironment(t *testing.T) {
+	t.Setenv("STREAMING_WAL_ENABLEUPSERTMESSAGE", "true")
+	p := &ComponentParam{}
+	p.Init(NewBaseTable(SkipRemote(true), Files(nil)))
+	require.True(t, p.StreamingCfg.EnableUpsertMessage.GetAsBool())
 }

@@ -1762,8 +1762,7 @@ queryView:
 # Any configuration related to the streaming service.
 streaming:
   wal:
-    upsert:
-      unifiedEnabled: false # Enable unified Upsert WAL generation after all readers support the new format and the native query path is deployed. Default false; auto remains false until a release capability is assigned. Explicit true requires operator-managed reader-first deployment, including CDC targets. Retained decoding and durable transaction resolution remain available when false.
+    enableUpsertMessage: false # Enable Upsert WAL generation after all readers support the new format and the native query path is deployed. Default false; auto remains false until a release capability is assigned. Explicit true requires operator-managed reader-first deployment, including CDC targets. Retained decoding and durable transaction resolution remain available when false.
   schemaCacheTTL: 900 # Idle lifetime in seconds of cached schema bodies. Non-positive values disable schema body retention.
   queryView:
     liveEventDispatchConcurrencyRatioPerPChannel: 0.25 # QueryRuntime live-event worker count per PChannel is max(1, floor(CPU count * ratio)). Updates existing worker pools dynamically.

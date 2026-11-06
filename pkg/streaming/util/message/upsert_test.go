@@ -144,7 +144,7 @@ func TestUpsertProjectionConcurrentReadersAndBodyReplacement(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 }
 
-func TestUnifiedUpsertRejectsIncompleteContract(t *testing.T) {
+func TestUpsertRejectsIncompleteContract(t *testing.T) {
 	tests := map[string]func(*message.UpsertMessageHeader, *message.UpsertMessageBody){
 		"missing schema": func(h *message.UpsertMessageHeader, _ *message.UpsertMessageBody) { h.SchemaVersion = nil },
 		"missing RowID":  func(_ *message.UpsertMessageHeader, b *message.UpsertMessageBody) { b.RowIds = b.RowIds[:1] },

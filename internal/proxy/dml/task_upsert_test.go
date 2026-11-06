@@ -1067,7 +1067,7 @@ func partialUpdateCASRealPackTestTask(
 func TestInsertTaskExecuteSelectsPartitionRouting(t *testing.T) {
 	for _, partitionKey := range []bool{false, true} {
 		t.Run(map[bool]string{false: "primary key", true: "partition key"}[partitionKey], func(t *testing.T) {
-			packPatch := mockey.Mock(repackUnifiedUpsert).Return([]streamingmessage.MutableMessage{}, nil).Build()
+			packPatch := mockey.Mock(repackUpsertMessages).Return([]streamingmessage.MutableMessage{}, nil).Build()
 			defer packPatch.UnPatch()
 
 			fakeWAL := newPartialUpdateCASTestWAL(t, 1)
@@ -1110,7 +1110,7 @@ func TestPackInsertMessageUsesPartitionKeyRouting(t *testing.T) {
 	task.partitionKeys = partialUpdateCASPKFieldData([]int64{20, 10})
 	collectionPatch := mockey.Mock((*metacache.MetaCache).GetCollectionID).Return(task.collectionID, nil).Build()
 	defer collectionPatch.UnPatch()
-	partitionPatch := mockey.Mock(repackUnifiedUpsert).To(
+	partitionPatch := mockey.Mock(repackUpsertMessages).To(
 		func(_ context.Context, _ Cache, _ []string, _ *msgstream.InsertMsg, ids *schemapb.IDs, partitionKeys *schemapb.FieldData, _ *schemapb.CollectionSchema, _ int32, _ *streamingmessage.CipherConfig, _ map[string]*messagespb.PartialUpdateCAS, _ *insertIdempotencyDecoration, _ *schemapb.IDs, _ int64) ([]streamingmessage.MutableMessage, error) {
 			require.Same(t, task.result.IDs, ids)
 			require.Same(t, task.partitionKeys, partitionKeys)
@@ -1134,7 +1134,7 @@ func TestPackInsertMessageUsesFinalInsertIDsForRouting(t *testing.T) {
 	task.upsertMsg.InsertMsg.CollectionID = task.collectionID + 1
 
 	var routingIDs *schemapb.IDs
-	repackPatch := mockey.Mock(repackUnifiedUpsert).To(
+	repackPatch := mockey.Mock(repackUpsertMessages).To(
 		func(_ context.Context, _ Cache, _ []string, insertMsg *msgstream.InsertMsg, ids *schemapb.IDs, _ *schemapb.FieldData, _ *schemapb.CollectionSchema, _ int32, _ *streamingmessage.CipherConfig, _ map[string]*messagespb.PartialUpdateCAS, _ *insertIdempotencyDecoration, _ *schemapb.IDs, _ int64) ([]streamingmessage.MutableMessage, error) {
 			require.Equal(t, task.collectionID, insertMsg.GetCollectionID())
 			routingIDs = ids

@@ -116,8 +116,8 @@ func (s *UpsertWALCDCSuite) TestReplicationAndSwitchover() {
 		return map[string]string{"GO_FAILPOINTS": walpoint.AfterBackendAppend + `=return("` + targetControl + `")`}
 	}), cluster.WithExtraEnv(map[string]string{
 		"PROXY_PORT": strconv.Itoa(port), "PROXY_INTERNALPORT": strconv.Itoa(funcutil.GetAvailablePort()),
-		"ROOTCOORD_PORT":                      strconv.Itoa(funcutil.GetAvailablePort()),
-		"STREAMING_WAL_UPSERT_UNIFIEDENABLED": "true", "METRICS_PORT": "0",
+		"ROOTCOORD_PORT":                    strconv.Itoa(funcutil.GetAvailablePort()),
+		"STREAMING_WAL_ENABLEUPSERTMESSAGE": "true", "METRICS_PORT": "0",
 		"COMMON_SESSION_TTL": "10",
 		"STREAMING_WALBALANCER_BALANCEPOLICY_MINREBALANCEINTERVALTHRESHOLD": "1ms",
 	}))
