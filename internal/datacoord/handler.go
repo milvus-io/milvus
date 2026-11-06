@@ -934,6 +934,9 @@ func uncompressIndexFiles(h *ServerHandler, collectionID int64, segID int64) []*
 			indexFilePaths := builder.BuildFilePaths(segIdx.IndexFileKeys)
 			indexParams := h.s.meta.indexMeta.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
 			indexParams = append(indexParams, h.s.meta.indexMeta.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)...)
+			if segIdx.IndexType != "" {
+				setIndexParam(indexParams, common.IndexTypeKey, segIdx.IndexType)
+			}
 
 			indexesFiles = append(indexesFiles, &indexpb.IndexFilePathInfo{
 				SegmentID:                 segID,
@@ -941,6 +944,7 @@ func uncompressIndexFiles(h *ServerHandler, collectionID int64, segID int64) []*
 				IndexID:                   segIdx.IndexID,
 				BuildID:                   segIdx.BuildID,
 				IndexName:                 indexName,
+				IndexType:                 segIdx.IndexType,
 				IndexParams:               indexParams,
 				IndexFilePaths:            indexFilePaths,
 				SerializedSize:            segIdx.IndexSerializedSize,

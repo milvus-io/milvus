@@ -541,3 +541,73 @@ func TestUpstreamManifestSkipsIndexMarker(t *testing.T) {
 		assert.True(t, proto.Equal(binarySegment, restored))
 	}
 }
+
+func TestSegmentIndexTypeCompatibility(t *testing.T) {
+	segment := &datapb.SegmentDescription{SegmentId: 101, IndexFiles: []*indexpb.IndexFilePathInfo{
+		{IndexID: 10, BuildID: 20, IndexName: "custom_vector", IndexType: "HNSW_SQ", IndexParams: []*commonpb.KeyValuePair{{Key: "index_type", Value: "HNSW"}}},
+		{IndexID: 11, BuildID: 21, IndexName: "custom_scalar", IndexType: "INVERTED"},
+	}}
+	data, err := MarshalSegmentManifest(segment)
+	require.NoError(t, err)
+	restored, err := ParseSegmentManifest(data, SnapshotFormatVersion)
+	require.NoError(t, err)
+	require.Len(t, restored.GetIndexFiles(), 2)
+	assert.True(t, proto.Equal(segment.IndexFiles[0], restored.IndexFiles[0]))
+	assert.True(t, proto.Equal(segment.IndexFiles[1], restored.IndexFiles[1]))
+	assert.Equal(t, 6, SnapshotFormatVersion)
+
+	// An old OCF reader has no explicit index_type field.
+	decoder, err := ocf.NewDecoder(bytes.NewReader(data))
+	require.NoError(t, err)
+	require.True(t, decoder.HasNext())
+	var legacy struct {
+		IndexFiles []struct {
+			IndexName   string             `avro:"index_name"`
+			IndexParams []AvroKeyValuePair `avro:"index_params"`
+		} `avro:"index_files"`
+	}
+	require.NoError(t, decoder.Decode(&legacy))
+	require.Len(t, legacy.IndexFiles, 2)
+	assert.Equal(t, "custom_vector", legacy.IndexFiles[0].IndexName)
+	assert.Equal(t, "HNSW", legacy.IndexFiles[0].IndexParams[0].Value)
+
+	for _, tc := range []struct {
+		name          string
+		formatVersion int
+		writerVersion int
+	}{
+		{"v0", 0, 0},
+		{"v1", 1, 1},
+		{"v2", 2, 2},
+		{"v3", 3, 3},
+		{"v4", 4, 4},
+		{"v5", 5, 5},
+		{"v6_3_0", 6, 4},
+		{"v6_master", 6, 5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema, err := ManifestSchemaByVersion(tc.writerVersion)
+			require.NoError(t, err)
+			require.NotContains(t, schema.String(), `"index_type"`)
+			record := SegmentToManifestEntry(segment)
+			var data []byte
+			if tc.formatVersion == 6 {
+				var buf bytes.Buffer
+				encoder, err := ocf.NewEncoderWithSchema(schema, &buf)
+				require.NoError(t, err)
+				require.NoError(t, encoder.Encode(record))
+				require.NoError(t, encoder.Close())
+				data = buf.Bytes()
+			} else {
+				data, err = avro.Marshal(schema, record)
+				require.NoError(t, err)
+			}
+			restored, err := ParseSegmentManifest(data, tc.formatVersion)
+			require.NoError(t, err)
+			require.Len(t, restored.IndexFiles, 2)
+			assert.Empty(t, restored.IndexFiles[0].GetIndexType())
+			assert.Empty(t, restored.IndexFiles[1].GetIndexType())
+			assert.Equal(t, "HNSW", restored.IndexFiles[0].IndexParams[0].Value)
+		})
+	}
+}

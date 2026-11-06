@@ -1069,6 +1069,7 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 			PartitionID:               partitionID,
 			IndexID:                   targetIndexID,
 			BuildID:                   indexInfo.GetBuildId(),
+			IndexType:                 indexInfo.GetIndexType(),
 			IndexState:                commonpb.IndexState_Finished,
 			IndexFileKeys:             indexInfo.GetIndexFilePaths(),
 			IndexSerializedSize:       uint64(indexInfo.GetIndexSize()),
