@@ -193,7 +193,7 @@ type CopySegmentTask interface {
 	Clone() CopySegmentTask
 }
 
-// copySegmentTask implements CopySegmentTask with atomic state updates.
+// Task implements CopySegmentTask with atomic state updates.
 type Task struct {
 	Task atomic.Pointer[datapb.CopySegmentTask] // Atomic pointer for concurrent access
 	// Keep a failed task in the scheduler until completed-output cleanup is durable.
@@ -828,54 +828,7 @@ func AssembleCopySegmentRequest(task CopySegmentTask, job CopySegmentJob) (*data
 		)
 	}
 
-	// Read complete snapshot data from S3 to retrieve source segment binlogs
-	var (
-		snapshotData *snapshotstorage.SnapshotData
-		err          error
-	)
-	concreteJob, ok := job.(*Job)
-	if !ok || concreteJob.SnapshotCache == nil {
-		return nil, merr.WrapErrServiceInternalMsg(
-			"copy segment job %d has no snapshot cache",
-			job.GetJobId(),
-		)
-	}
-	snapshotData, err = concreteJob.SnapshotCache.load(func() (*snapshotstorage.SnapshotData, error) {
-		var loaded *snapshotstorage.SnapshotData
-		if job.GetExternal() {
-			resolved, resolveErr := snapshotstorage.ResolveForeignStorage(
-				ctx,
-				snapshotstorage.InstanceConfigFromParamtable(Params),
-				snapshotstorage.DirectionRestore,
-				job.GetSnapshotS3Location(),
-				job.GetExternalSpec(),
-			)
-			if resolveErr != nil {
-				return nil, resolveErr
-			}
-			loaded, err = t.SnapshotMeta.ReadExternalSnapshotDataWithChunkManager(
-				ctx,
-				resolved.ForeignCM,
-				job.GetSnapshotS3Location(),
-				true,
-			)
-		} else {
-			loaded, err = t.SnapshotMeta.ReadSnapshotData(ctx, job.GetSourceCollectionId(), job.GetSnapshotName(), true)
-		}
-		if err != nil {
-			return nil, err
-		}
-		if expected := job.GetSnapshotFingerprint(); expected != "" {
-			actual, fingerprintErr := snapshotstorage.SnapshotFingerprint(loaded)
-			if fingerprintErr != nil {
-				return nil, fingerprintErr
-			}
-			if actual != expected {
-				return nil, merr.WrapErrDataIntegrityMsg("external snapshot changed after restore job creation")
-			}
-		}
-		return loaded, nil
-	})
+	snapshotData, err := loadCopySnapshot(ctx, job, t.SnapshotMeta)
 	if err != nil {
 		mlog.Error(context.TODO(), "failed to read snapshot data for copy segment task",
 			append(WrapCopySegmentTaskLog(task), mlog.Err(err))...)
@@ -1129,7 +1082,8 @@ func deriveSnapshotSourceRootURI(snapshotS3Location string, layout datapb.Snapsh
 //     c. Sync vector/scalar indexes to indexMeta
 //     d. Sync text indexes to segment metadata
 //     e. Sync JSON key indexes to segment metadata
-//     f. Publish the manifest and mark the segment Flushed/non-importing
+//     f. Publish the manifest and mark the segment Flushed; collection restores
+//     retain import protection until delete materialization completes.
 //  2. Record task execution metrics (executing duration, total duration)
 //  3. Mark task as completed with completion timestamp
 //
@@ -1170,17 +1124,13 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 			return nil
 		}
 		defer locks.Unlock(task.GetTaskId())
-		if meta.ManifestIndexRollbackEnabled() {
-			// Rollback may already have advanced a completed target's manifest.
-			// A duplicate worker result must not reinstall its old pointer or
-			// mark the restored catalog records manifest-resident again.
-			current := copyMeta.GetTask(ctx, task.GetTaskId())
-			if current == nil || current.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskCompleted {
+		if current := copyMeta.GetTask(ctx, task.GetTaskId()); current != nil {
+			if current.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskCompleted {
 				return nil
 			}
-			// The failed-task guard below must also observe completed cleanup,
-			// even when this result carries an older in-progress task snapshot.
 			task = current
+		} else if meta.ManifestIndexRollbackEnabled() {
+			return nil
 		}
 		// Even a late result rejected below owns files that need durable cleanup.
 		// Re-arming an already cleaned task is safe because prefix deletion is idempotent.
@@ -1252,8 +1202,9 @@ func SyncCopySegmentTask(task CopySegmentTask, resp *datapb.QueryCopySegmentResp
 
 // copySegmentResultInstalled uses the target's durable finalization state rather
 // than the task state, which is persisted only after all targets finish.
+// Collection restore retains IsImporting until delete materialization completes.
 func copySegmentResultInstalled(segment *meta.SegmentInfo) bool {
-	return segment != nil && segment.GetState() == commonpb.SegmentState_Flushed && !segment.GetIsImporting()
+	return segment != nil && segment.GetState() == commonpb.SegmentState_Flushed
 }
 
 func installCopySegmentResult(ctx context.Context, result *datapb.CopySegmentResult, task CopySegmentTask,
@@ -1277,6 +1228,9 @@ func installCopySegmentResult(ctx context.Context, result *datapb.CopySegmentRes
 		result.GetStatslogs(), result.GetDeltalogs(), result.GetBm25Logs())
 	op2 := meta.UpdateStatusOperator(result.GetSegmentId(), commonpb.SegmentState_Flushed)
 	op3 := meta.UpdateIsImporting(result.GetSegmentId(), false)
+	if job := copyMeta.GetJob(ctx, task.GetJobId()); job != nil && job.(*Job).GetCreatesCollection() {
+		op3 = meta.UpdateIsImporting(result.GetSegmentId(), true)
+	}
 	operators := []meta.UpdateOperator{func(pack *meta.UpdateSegmentPack) bool {
 		// Recheck under segMu: segment retirement and external manifest
 		// adoption can bypass the manifest lock while indexes are installed.
@@ -1328,8 +1282,8 @@ func installCopySegmentResult(ctx context.Context, result *datapb.CopySegmentRes
 	if err := syncJSONKeyIndexes(ctx, result, task, mt, copyMeta); err != nil {
 		return err
 	}
-	// Publish the manifest and release import protection only after every
-	// index is installed. This durable transition is the per-target replay
+	// Publish the manifest and Flushed state only after every index is
+	// installed. This durable transition is the per-target replay
 	// fence, even if persisting the task's Completed state later fails.
 	var err error
 	manifestUpdates, err = mt.UpdateSegmentsInfoWithoutNotify(ctx, operators...)
@@ -1447,7 +1401,12 @@ func verifyCopiedManifestIndexOwnership(result *datapb.CopySegmentResult, task C
 				"copied manifest of segment %d carries index %d foreign to the current target definition; retry the restore",
 				result.GetSegmentId(), entry.IndexID)
 		}
-		if entry.IndexType != meta.GetIndexType(definition.IndexParams) {
+		info := copied[entry.BuildID]
+		expectedType := meta.GetIndexType(definition.IndexParams)
+		if info.GetIndexType() != "" {
+			expectedType = info.GetIndexType()
+		}
+		if entry.IndexType != expectedType {
 			return nil, merr.WrapErrServiceInternalMsg(
 				"copied manifest index %d has changed target index type; retry the restore", entry.IndexID)
 		}
@@ -1455,7 +1414,6 @@ func verifyCopiedManifestIndexOwnership(result *datapb.CopySegmentResult, task C
 			return nil, merr.Wrapf(merr.ErrDataIntegrity,
 				"copied manifest of segment %d has an invalid artifact path for build %d", result.GetSegmentId(), entry.BuildID)
 		}
-		info := copied[entry.BuildID]
 		if info == nil || info.GetIndexName() != entry.IndexName || info.GetFieldId() != entry.FieldID ||
 			info.GetVersion() != entry.IndexVersion || info.GetIndexStorePathVersion() != entry.IndexStorePathVersion ||
 			!slices.Equal(slices.Sorted(slices.Values(info.GetIndexFilePaths())), slices.Sorted(slices.Values(entry.IndexFileKeys))) {
@@ -1703,6 +1661,7 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 			PartitionID:               partitionID,
 			IndexID:                   targetIndexID,
 			BuildID:                   indexInfo.GetBuildId(),
+			IndexType:                 indexInfo.GetIndexType(),
 			IndexState:                commonpb.IndexState_Finished,
 			IndexFileKeys:             indexInfo.GetIndexFilePaths(),
 			IndexSerializedSize:       uint64(indexInfo.GetIndexSize()),
@@ -1891,4 +1850,51 @@ func syncJSONKeyIndexes(ctx context.Context, result *datapb.CopySegmentResult,
 			mlog.FieldSegmentID(result.GetSegmentId()),
 			mlog.Int("count", len(result.GetJsonKeyIndexInfos())))...)
 	return nil
+}
+
+func loadCopySnapshot(ctx context.Context, job CopySegmentJob, snapshots SnapshotSource) (*snapshotstorage.SnapshotData, error) {
+	concreteJob, ok := job.(*Job)
+	if !ok || concreteJob.SnapshotCache == nil {
+		return nil, merr.WrapErrServiceInternalMsg(
+			"copy segment job %d has no snapshot cache",
+			job.GetJobId(),
+		)
+	}
+	return concreteJob.SnapshotCache.load(func() (*snapshotstorage.SnapshotData, error) {
+		var loaded *snapshotstorage.SnapshotData
+		var err error
+		if job.GetExternal() {
+			resolved, resolveErr := snapshotstorage.ResolveForeignStorage(
+				ctx,
+				snapshotstorage.InstanceConfigFromParamtable(Params),
+				snapshotstorage.DirectionRestore,
+				job.GetSnapshotS3Location(),
+				job.GetExternalSpec(),
+			)
+			if resolveErr != nil {
+				return nil, resolveErr
+			}
+			loaded, err = snapshots.ReadExternalSnapshotDataWithChunkManager(
+				ctx,
+				resolved.ForeignCM,
+				job.GetSnapshotS3Location(),
+				true,
+			)
+		} else {
+			loaded, err = snapshots.ReadSnapshotData(ctx, job.GetSourceCollectionId(), job.GetSnapshotName(), true)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if expected := job.GetSnapshotFingerprint(); expected != "" {
+			actual, fingerprintErr := snapshotstorage.SnapshotFingerprint(loaded)
+			if fingerprintErr != nil {
+				return nil, fingerprintErr
+			}
+			if actual != expected {
+				return nil, merr.WrapErrDataIntegrityMsg("external snapshot changed after restore job creation")
+			}
+		}
+		return loaded, nil
+	})
 }

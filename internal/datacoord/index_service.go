@@ -74,11 +74,11 @@ func (s *Server) defaultIndexNameByID(schema *schemapb.CollectionSchema, fieldID
 }
 
 func (s *Server) getSchema(ctx context.Context, collID int64) (*schemapb.CollectionSchema, error) {
-	resp, err := s.broker.DescribeCollectionInternal(ctx, collID)
-	if err := merr.CheckRPCCall(resp, err); err != nil {
+	coll, err := s.meta.GetCollectionOrNotFound(collID)
+	if err != nil {
 		return nil, err
 	}
-	return resp.GetSchema(), nil
+	return coll.Schema, nil
 }
 
 func FieldExists(schema *schemapb.CollectionSchema, fieldID int64) bool {
@@ -139,11 +139,11 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	}
 	defer broadcaster.Close()
 
-	coll, err := s.broker.DescribeCollectionInternal(ctx, req.GetCollectionID())
-	if err := merr.CheckRPCCall(coll, err); err != nil {
+	coll, err := s.meta.GetCollectionOrNotFound(req.GetCollectionID())
+	if err != nil {
 		return merr.Status(err), nil
 	}
-	schema := coll.GetSchema()
+	schema := coll.Schema
 
 	if !FieldExists(schema, req.GetFieldID()) {
 		return merr.Status(merr.WrapErrFieldNotFound(req.GetFieldID())), nil
@@ -329,7 +329,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 
 	if _, err = broadcaster.Broadcast(ctx, message.NewCreateIndexMessageBuilderV2().
 		WithHeader(&message.CreateIndexMessageHeader{
-			DbId:         coll.GetDbId(),
+			DbId:         coll.DatabaseID,
 			CollectionId: req.GetCollectionID(),
 			FieldId:      req.GetFieldID(),
 			IndexId:      indexID,
@@ -657,7 +657,7 @@ func (s *Server) queryServingSegments(ctx context.Context, segments map[int64]*i
 					// An ancestor must reference committed data before it
 					// can establish index coverage, even if query admission
 					// permits its growing placeholder with positions/binlogs.
-					committed, err := hasCommittedManifest(info)
+					committed, err := meta.HasCommittedManifest(info)
 					segment.isRecoverable = err == nil && committed
 				}
 			}
@@ -1304,6 +1304,7 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 							IndexID:                   segIdx.IndexID,
 							BuildID:                   segIdx.BuildID,
 							IndexName:                 indexName,
+							IndexType:                 segIdx.IndexType,
 							IndexParams:               indexParams,
 							IndexFilePaths:            indexFilePaths,
 							SerializedSize:            segIdx.IndexSerializedSize,

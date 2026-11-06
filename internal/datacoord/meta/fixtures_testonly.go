@@ -51,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/metacache"
+	"github.com/milvus-io/milvus/internal/metacache/metacachetest"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
@@ -358,9 +359,7 @@ func NoDomainMetas(context.Context, []int64) (SegmentIndexCatalog, CompactionPro
 
 // newMetaWithLoader builds a meta over catalog and cm and loads the domain metas with the loader that newLoader returns for them.
 func newMetaWithLoader(t *testing.T, catalog metastore.DataCoordCatalog, cm storage.ChunkManager, newLoader func(metastore.DataCoordCatalog, storage.ChunkManager) DomainMetaLoader) (*Meta, error) {
-	broker := broker.NewMockBroker(t)
-	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	m, err := NewMeta(context.TODO(), catalog, cm, metacache.NewMetaStore(catalog), broker, newLoader(catalog, cm))
+	m, err := NewMeta(context.TODO(), catalog, cm, metacache.NewMetaStore(catalog), broker.NewMockBroker(t), newLoader(catalog, cm))
 	if m != nil {
 		t.Cleanup(m.CloseManifestCommitExecutor)
 	}
@@ -386,13 +385,8 @@ func NewMemoryMeta(t *testing.T) (*Meta, error) {
 // so two calls with the same catalog model a DataCoord restart. newLoader returns the loader of the domain metas.
 func BootMetaWithLoader(t *testing.T, catalog metastore.DataCoordCatalog, collectionID int64, newLoader func(metastore.DataCoordCatalog, storage.ChunkManager) DomainMetaLoader) *Meta {
 	t.Helper()
-	b := broker.NewMockBroker(t)
-	b.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{
-		Status:        merr.Success(),
-		DbCollections: []*rootcoordpb.DBCollections{{DbName: "default", CollectionIDs: []int64{collectionID}}},
-	}, nil)
 	cm := MetadataOnlyCopyManager{storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-restart"))}
-	m, err := NewMeta(context.TODO(), catalog, cm, metacache.NewMetaStore(catalog), b, newLoader(catalog, cm))
+	m, err := NewMeta(context.TODO(), catalog, cm, NewMetaStoreWithCollections(catalog, collectionID), broker.NewMockBroker(t), newLoader(catalog, cm))
 	require.NoError(t, err)
 	t.Cleanup(m.CloseManifestCommitExecutor)
 	return m
@@ -1862,4 +1856,48 @@ func (s *fakeManifestStore) ResumeReads() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.failReads = false
+}
+
+func (s *MockMixCoord) EnsureCollectionReady(context.Context, *querypb.EnsureCollectionReadyRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
+// AddCollection seeds a collection into the store's in-memory
+// CollectionSource. Production DataCoord reads collections from RootCoord
+// and never writes them.
+func (m *Meta) AddCollection(collection *CollectionInfo) {
+	m.MetaStore.PutCollection(collection)
+}
+
+// DropCollection removes a collection seeded by AddCollection.
+func (m *Meta) DropCollection(collectionID int64) {
+	m.MetaStore.RemoveCollection(collectionID)
+}
+
+// NewMetaWithCollections returns a meta whose only content is colls.
+func NewMetaWithCollections(colls ...*CollectionInfo) *Meta {
+	m := &Meta{MetaStore: metacache.NewMetaStore(nil)}
+	for _, coll := range colls {
+		m.AddCollection(coll)
+	}
+	return m
+}
+
+// NewMetaStoreWithCollections returns a MetaStore over catalog whose
+// collection view holds ids, as NewMeta would find it after RootCoord loads.
+func NewMetaStoreWithCollections(catalog metastore.DataCoordCatalog, ids ...int64) metacache.MetaStore {
+	store := metacache.NewMetaStore(catalog)
+	for _, id := range ids {
+		store.PutCollection(&CollectionInfo{ID: id})
+	}
+	return store
+}
+
+// NewMetaWithDatabases returns a meta whose view holds dbs.
+func NewMetaWithDatabases(dbs ...*metacache.DatabaseInfo) *Meta {
+	m := NewMetaWithCollections()
+	for _, db := range dbs {
+		metacachetest.Collections(m.MetaStore).PutDatabase(db)
+	}
+	return m
 }

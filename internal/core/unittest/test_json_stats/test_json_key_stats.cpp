@@ -65,7 +65,7 @@
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
 #include "segcore/storagev2translator/JsonStatsTranslator.h"
-#include "segcore/storagev1translator/BsonInvertedIndexTranslator.h"
+#include "segcore/json_stats/BsonInvertedIndexTranslator.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "simdjson/padded_string.h"
 #include "storage/ChunkManager.h"
@@ -2162,7 +2162,7 @@ TEST_P(BsonAsyncLoadTest, PreservesPostingsAcrossCancellationAndReload) {
     storage::FileManagerContext context(
         field_meta_, index_meta_, chunk_manager_, fs);
     context.use_async_load = use_async;
-    segcore::storagev1translator::BsonInvertedIndexLoadInfo info{
+    segcore::BsonInvertedIndexLoadInfo info{
         .enable_mmap = enable_mmap,
         .segment_id = segment_id_,
         .field_id = field_id_,
@@ -2176,8 +2176,7 @@ TEST_P(BsonAsyncLoadTest, PreservesPostingsAcrossCancellationAndReload) {
         for (const auto* policy : {"disable", "sync"}) {
             auto probe_info = info;
             probe_info.warmup_policy = policy;
-            segcore::storagev1translator::BsonInvertedIndexTranslator probe(
-                probe_info, context);
+            segcore::BsonInvertedIndexTranslator probe(probe_info, context);
             const auto before = fs->async_opens.load();
             auto cells = probe.get_cells(nullptr, {0});
             const auto opened = fs->async_opens.load() - before;
@@ -2190,8 +2189,7 @@ TEST_P(BsonAsyncLoadTest, PreservesPostingsAcrossCancellationAndReload) {
         // Cold indexes reopen metadata; warmup reuses the inspected source.
         EXPECT_GT(cold_opens, warm_opens);
     }
-    segcore::storagev1translator::BsonInvertedIndexTranslator translator(
-        info, context);
+    segcore::BsonInvertedIndexTranslator translator(info, context);
     const auto before_cancel = fs->async_opens.load();
     folly::CancellationSource cancelled;
     cancelled.requestCancellation();

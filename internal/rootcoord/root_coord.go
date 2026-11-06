@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/featureusage"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	kvmetastore "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -218,6 +219,27 @@ func (c *Core) SetFileResourceObserver(observer FileResourceObserver) {
 	c.fileResourceObserver = observer
 }
 
+// IsCollectionDropped checks authoritative lifecycle metadata, including during
+// recovery. Creating/Restoring collections are unavailable to public Describe
+// but still own pending publication obligations.
+func (c *Core) IsCollectionDropped(ctx context.Context, collectionID int64) (bool, error) {
+	collection, err := c.meta.GetCollectionByID(ctx, "", collectionID, typeutil.MaxTimestamp, true)
+	if errors.Is(err, merr.ErrCollectionNotFound) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	switch collection.State {
+	case pb.CollectionState_CollectionDropping, pb.CollectionState_CollectionDropped:
+		return true, nil
+	case pb.CollectionState_CollectionCreating, pb.CollectionState_CollectionCreated, pb.CollectionState_CollectionRestoring:
+		return false, nil
+	default:
+		return false, merr.WrapErrDataIntegrityMsg("collection %d has unknown state %d", collectionID, collection.State)
+	}
+}
+
 func (c *Core) ValidateDataViewCollectionForRecovery(ctx context.Context, collectionID int64) (bool, error) {
 	collection, err := c.meta.GetCollectionByID(ctx, "", collectionID, typeutil.MaxTimestamp, true)
 	if errors.Is(err, merr.ErrCollectionNotFound) {
@@ -227,7 +249,7 @@ func (c *Core) ValidateDataViewCollectionForRecovery(ctx context.Context, collec
 		return false, err
 	}
 	switch collection.State {
-	case pb.CollectionState_CollectionCreated:
+	case pb.CollectionState_CollectionCreated, pb.CollectionState_CollectionRestoring:
 		return true, nil
 	case pb.CollectionState_CollectionCreating,
 		pb.CollectionState_CollectionDropping,
@@ -256,6 +278,16 @@ func (c *Core) GetQuotaCenter() *QuotaCenter {
 
 func (c *Core) GetProxyClientManager() proxyutil.ProxyClientManagerInterface {
 	return c.proxyClientManager
+}
+
+// CollectionSource returns the collection view that DataCoord and QueryCoord
+// read from. Call it after Init, which loads the MetaTable.
+func (c *Core) CollectionSource() (metacache.CollectionSource, error) {
+	mt, ok := c.meta.(*MetaTable)
+	if !ok {
+		return nil, merr.WrapErrServiceInternalMsg("rootcoord meta %T is not a MetaTable", c.meta)
+	}
+	return mt.CollectionSource(), nil
 }
 
 func (c *Core) ServerExist(serverID int64) bool {
@@ -1185,14 +1217,11 @@ func (c *Core) TruncateCollection(ctx context.Context, in *milvuspb.TruncateColl
 	}, nil
 }
 
-// IsCollectionAvailable lets in-process GC skip live collections without
-// materializing their schemas. False means unknown, not safe to delete.
-func (c *Core) IsCollectionAvailable(collectionID int64) bool {
-	if c.GetStateCode() != commonpb.StateCode_Healthy {
-		return false
+func (c *Core) GetCollectionProperties(ctx context.Context, collectionID int64) ([]*commonpb.KeyValuePair, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return nil, err
 	}
-	checker, ok := c.meta.(interface{ IsCollectionAvailable(int64) bool })
-	return ok && checker.IsCollectionAvailable(collectionID)
+	return c.meta.GetCollectionProperties(ctx, collectionID)
 }
 
 // HasCollection check collection existence
@@ -1264,10 +1293,9 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 		DbName: dbName,
 	}
 
-	resp.Schema = collInfo.ToCollectionSchemaPB()
 	// Use the dbName parameter (resolved from the request) for consistency
 	// with resp.DbName; the model's DBName may not always be in sync.
-	resp.Schema.DbName = dbName
+	resp.Schema = collectionSchemaPB(collInfo, dbName)
 	resp.CollectionID = collInfo.CollectionID
 	resp.VirtualChannelNames = collInfo.VirtualChannelNames
 	resp.PhysicalChannelNames = collInfo.PhysicalChannelNames
@@ -3142,64 +3170,11 @@ func (c *Core) AddFileResource(ctx context.Context, req *milvuspb.AddFileResourc
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	if req.GetName() == "" {
-		return merr.Status(merr.WrapErrParameterMissing("file resource name")), nil
-	}
-
-	if exist, err := c.storage.Exist(ctx, req.GetPath()); err != nil {
+	if err := c.broadcastAddFileResource(ctx, req); err != nil {
 		return merr.Status(err), nil
-	} else if !exist {
-		return merr.Status(merr.WrapErrParameterInvalidMsg("file resource path not exist")), nil
 	}
-
-	alreadyExists := false
-	if maxFileSize := Params.CommonCfg.FileResourceMaxFileSize.GetAsSize(); maxFileSize > 0 {
-		resources, _ := c.meta.ListFileResource(ctx)
-		for _, resource := range resources {
-			if resource.GetName() != req.GetName() {
-				continue
-			}
-			if resource.GetPath() != req.GetPath() {
-				return merr.Status(merr.WrapErrParameterInvalidMsg("file resource %s already exists", req.GetName())), nil
-			}
-			alreadyExists = true
-			break
-		}
-
-		if !alreadyExists {
-			size, err := c.storage.Size(ctx, req.GetPath())
-			if err != nil {
-				return merr.Status(err), nil
-			}
-			if size < 0 {
-				return merr.Status(merr.WrapErrIoFailedMsg("file resource %s reports negative size %d", req.GetPath(), size)), nil
-			}
-			if size > maxFileSize {
-				return merr.Status(merr.WrapErrParameterTooLarge("file resource", fmt.Sprintf(
-					"size %d exceeds common.fileResource.maxFileSize %d", size, maxFileSize))), nil
-			}
-		}
-	}
-
-	if !alreadyExists {
-		id, err := c.tsoAllocator.GenerateTSO(1)
-		if err != nil {
-			return merr.Status(err), nil
-		}
-		resource := &internalpb.FileResourceInfo{
-			Id:   int64(id),
-			Name: req.GetName(),
-			Path: req.GetPath(),
-		}
-		err = c.meta.AddFileResource(ctx, resource)
-		if err != nil {
-			return merr.Status(err), nil
-		}
-	}
-
 	if c.fileResourceObserver != nil {
-		err := c.fileResourceObserver.Sync()
-		if err != nil {
+		if err := c.fileResourceObserver.Sync(); err != nil {
 			c.fileResourceObserver.Notify()
 			return merr.Status(merr.Wrap(err, "add file resource success but some node sync failed")), nil
 		}
@@ -3222,14 +3197,12 @@ func (c *Core) RemoveFileResource(ctx context.Context, req *milvuspb.RemoveFileR
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	err, exist := c.meta.RemoveFileResource(ctx, req.GetName())
+	removed, err := c.broadcastRemoveFileResource(ctx, req)
 	if err != nil {
 		return merr.Status(err), nil
 	}
-
-	if exist && c.fileResourceObserver != nil {
-		err = c.fileResourceObserver.Sync()
-		if err != nil {
+	if removed && c.fileResourceObserver != nil {
+		if err := c.fileResourceObserver.Sync(); err != nil {
 			c.fileResourceObserver.Notify()
 			return merr.Status(merr.Wrap(err, "remove file resource success but some node sync failed")), nil
 		}

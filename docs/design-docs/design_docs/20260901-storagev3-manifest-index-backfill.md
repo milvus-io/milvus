@@ -325,6 +325,8 @@ empty scans. An inspector that has been idle longer than the interval wakes
 immediately. While work remains, retries and later batches follow the configured
 interval. Copy finalization sends another notification after clearing import
 protection, so an earlier scan that skipped the importing target cannot lose it.
+Collection restore sends that notification when job publication clears import
+protection after delete materialization.
 
 On restart, the immediate scan derives work from the recovered records and
 `ManifestPublished` provenance. Atomic catalog-row deletion remains the durable
@@ -504,16 +506,18 @@ manifest entries.
 Copy tasks retain their dispatch-time placement. The inspector does not depend
 on `CopySegmentMeta` or wait for tasks to complete. Result installation holds the
 segment manifest lock, installs all indexes while the target remains importing,
-and only then publishes its manifest and Flushed/non-importing state. Rollback
-can migrate the finalized target before the enclosing task completes. Legacy
+and only then publishes its manifest and Flushed state. Ordinary copies clear
+import protection at this point; collection restore retains it until delete
+materialization completes. Rollback can migrate an unprotected finalized target
+before the enclosing task completes. Legacy
 partially installed results still contribute only their installed records to
 rollback; untracked entries remain untouched. Each later record installation
 wakes rollback, including after an empty scan. New tasks use the effective etcd mode.
 
 Result synchronization checks the current persisted task state under the copy
 result lock. Repeated results for a completed task cannot reinstall a manifest
-pointer that rollback has already advanced. Each target's durable Flushed and
-non-importing state also fences replays while the enclosing task is still
+pointer that rollback has already advanced. Each target's durable Flushed
+state also fences replays while the enclosing task is still
 InProgress, including after a failed completion write or coordinator restart.
 Already finalized targets are skipped before reading the worker's old manifest;
 other targets can still finish. Failed tasks are also rejected in

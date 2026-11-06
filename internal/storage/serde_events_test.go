@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -784,6 +785,68 @@ func (fakeUnsafeKeyCipher) GetDecryptor(ezID, collectionID int64, safeKey []byte
 
 func (fakeUnsafeKeyCipher) GetUnsafeKey(ezID, collectionID int64) []byte {
 	return []byte("unsafe-key")
+}
+
+// Both the field-presence probe and the data reader must use the resolved
+// source context, including explicit plaintext, instead of the target's key.
+func TestPackedBinlogReadersUseSourceContext(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields:     []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64}},
+		Properties: []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "7"}},
+	}
+	source := &indexcgopb.StoragePluginContext{EncryptionZoneId: 11, CollectionId: 0, EncryptionKey: "source-key"}
+	target := &indexcgopb.StoragePluginContext{
+		EncryptionZoneId: 7, CollectionId: 23,
+		EncryptionKey: base64.StdEncoding.EncodeToString([]byte("unsafe-key")),
+	}
+	for _, tc := range []struct {
+		name    string
+		options []RwOption
+		want    *indexcgopb.StoragePluginContext
+	}{
+		{name: "plaintext_source", options: []RwOption{WithPluginContext(nil)}},
+		{name: "encrypted_source", options: []RwOption{WithPluginContext(source)}, want: source},
+		{name: "collection_fallback", want: target},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			enabled := mockey.Mock(hookutil.IsClusterEncryptionEnabled).Return(true).Build()
+			defer enabled.UnPatch()
+			cipher := mockey.Mock(hookutil.GetCipher).Return(fakeUnsafeKeyCipher{}).Build()
+			defer cipher.UnPatch()
+			footers := mockey.Mock(packed.GetPackedFileFieldIDs).To(
+				func(_ []string, _ *indexpb.StorageConfig, got *indexcgopb.StoragePluginContext) ([][]int64, error) {
+					require.Equal(t, tc.want, got)
+					return [][]int64{{100}}, nil
+				}).Build()
+			defer footers.UnPatch()
+			open := mockey.Mock(newPackedRecordReader).To(
+				func(_ []string, _ *schemapb.CollectionSchema, _ int64, _ *indexpb.StorageConfig,
+					got *indexcgopb.StoragePluginContext, _ packed.ExternalReaderContext, _ ...packed.ReaderOption,
+				) (*packedRecordReader, error) {
+					require.Equal(t, tc.want, got)
+					return &packedRecordReader{reader: &packed.PackedReader{}}, nil
+				}).Build()
+			defer open.UnPatch()
+			options := append([]RwOption{
+				WithVersion(StorageV2), WithCollectionID(23),
+				WithStorageConfig(&indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}),
+			}, tc.options...)
+			binlogs := []*datapb.FieldBinlog{{FieldID: 0, Binlogs: []*datapb.Binlog{{LogPath: "backup/0/1"}}}}
+			present, err := PackedBinlogPresentFields(context.Background(), binlogs, schema, options...)
+			require.NoError(t, err)
+			require.Contains(t, present, int64(100))
+			reader, err := NewBinlogRecordReader(context.Background(), binlogs, schema, options...)
+			require.NoError(t, err)
+			defer reader.Close()
+			_, err = reader.Next()
+			require.ErrorIs(t, err, io.EOF)
+			require.Equal(t, 2, footers.Times())
+			require.Equal(t, 1, open.Times())
+			if len(tc.options) > 0 {
+				require.Zero(t, cipher.Times(), "resolved sources must not look up the target key")
+			}
+		})
+	}
 }
 
 func TestNewManifestRecordReaderDependencyErrors(t *testing.T) {

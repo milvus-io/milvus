@@ -78,9 +78,9 @@ knowhere	internal/core/src/segcore/segcore_init_c.cpp
 knowhere	internal/core/src/segcore/segment_c.cpp
 knowhere	internal/core/src/segcore/SegmentGrowingImpl.cpp
 knowhere	internal/core/src/segcore/SegmentInterface.h
-knowhere	internal/core/src/segcore/storagev1translator/InterimSealedIndexTranslator.cpp
-knowhere	internal/core/src/segcore/storagev1translator/InterimSealedIndexTranslator.h
-knowhere	internal/core/src/segcore/storagev1translator/SealedIndexTranslator.cpp
+knowhere	internal/core/src/segcore/indexing/InterimSealedIndexTranslator.cpp
+knowhere	internal/core/src/segcore/indexing/InterimSealedIndexTranslator.h
+knowhere	internal/core/src/segcore/indexing/SealedIndexLoader.cpp
 knowhere	internal/core/src/segcore/Utils.cpp
 knowhere	internal/core/src/segcore/vector_index_c.cpp
 knowhere	internal/core/src/storage/artifact/FileSink.cpp
@@ -149,6 +149,7 @@ arrow	internal/core/src/storage/ArrowFileSystemChunkManager.cpp
 arrow	internal/core/src/storage/artifact/FileSink.cpp
 arrow	internal/core/src/storage/artifact/FileSink.h
 arrow	internal/core/src/storage/loon_ffi/ffi_reader_c.cpp
+arrow	internal/core/src/storage/loon_ffi/ffi_writer_c.cpp
 arrow	internal/core/src/storage/loon_ffi/util.cpp
 arrow	internal/core/src/storage/PayloadReader.cpp
 arrow	internal/core/src/storage/PayloadReader.h

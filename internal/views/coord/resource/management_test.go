@@ -74,7 +74,7 @@ func TestQueryViewReplicas(t *testing.T) {
 	replicas, err = r.Replicas(t.Context(), 1, false)
 	require.NoError(t, err)
 	require.Empty(t, replicas[0].ShardReplicas[0].NodeIds)
-	// Identical content has the same config version but a new lifecycle identity.
+	// Release/reload creates a new version and lifecycle even for identical content.
 	r.VChannels = func(ctx context.Context, _ int64) ([]string, error) {
 		r.LoadConfigs.StopPlanning(1)
 		require.NoError(t, r.LoadConfigs.Remove(ctx, 1))
@@ -83,45 +83,6 @@ func TestQueryViewReplicas(t *testing.T) {
 	}
 	_, err = r.Replicas(t.Context(), 1, true)
 	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
-}
-
-func TestManualBalanceCompletion(t *testing.T) {
-	r := managementResources(t)
-	cfg := r.LoadConfigs.GetConfig(1)
-	id := qviews.ShardID{ReplicaID: 10, VChannel: "v0"}
-	version := qviews.QueryViewVersion{DataVersion: qviews.DataVersion{StreamingVersion: 1}, QueryVersion: 2}
-	moves := map[qviews.ShardID]*balancer.SegmentMove{id: {Version: version, Destinations: map[int64]int64{101: 2}}}
-	manager := &coordview.ShardViewManager{}
-	stats := &coordview.ShardStats{UpVersion: &qviews.QueryViewVersion{DataVersion: version.DataVersion, QueryVersion: 1}, PreparingVersion: &version}
-	var duringRead func()
-	for _, patch := range []*mockey.Mocker{
-		mockey.Mock((*coordview.ShardViewRegistry).Get).Return(manager).Build(),
-		mockey.Mock((*coordview.ShardViewManager).Stats).To(func(*coordview.ShardViewManager) *coordview.ShardStats {
-			result := stats
-			if duringRead != nil {
-				duringRead()
-			}
-			return result
-		}).Build(),
-	} {
-		t.Cleanup(func() { patch.UnPatch() })
-	}
-	sub := r.Readiness.Subscribe(1)
-	defer sub.Close()
-	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
-	defer cancel()
-	require.ErrorIs(t, r.waitMoves(ctx, cfg, sub, moves), context.DeadlineExceeded)
-	stats = &coordview.ShardStats{UpVersion: &version, UpPlacement: &coordview.ViewPlacement{Assignments: map[int64]int64{101: 2}}}
-	require.NoError(t, r.waitMoves(t.Context(), cfg, sub, moves))
-	stats = &coordview.ShardStats{UpVersion: &version, UpPlacement: &coordview.ViewPlacement{Assignments: map[int64]int64{101: 1}}}
-	require.ErrorIs(t, r.waitMoves(t.Context(), cfg, sub, moves), merr.ErrServiceUnavailable)
-	stats = &coordview.ShardStats{UpVersion: &version, UpPlacement: &coordview.ViewPlacement{Assignments: map[int64]int64{101: 2}}}
-	duringRead = func() {
-		r.LoadConfigs.StopPlanning(1)
-		require.NoError(t, r.LoadConfigs.Remove(t.Context(), 1))
-		require.NoError(t, r.LoadConfigs.Put(t.Context(), cfg))
-	}
-	require.ErrorIs(t, r.waitMoves(t.Context(), cfg, sub, moves), merr.ErrServiceUnavailable)
 }
 
 func TestManualBalanceAcceptanceConfigFence(t *testing.T) {

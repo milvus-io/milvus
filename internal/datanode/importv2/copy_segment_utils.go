@@ -742,12 +742,14 @@ func buildTargetManifestIndexes(
 		if err != nil {
 			return nil, err
 		}
-		// Ignore legacy collection parameters supplied by older coordinators.
-		// They do not describe how the copied artifact was built.
+		indexType := info.GetIndexType()
+		if indexType == "" {
+			indexType = definition.GetIndexType()
+		}
 		entries = append(entries, packed.ManifestIndexInfo{
 			ColumnName:                definition.GetColumnName(),
 			IndexName:                 info.GetIndexName(),
-			IndexType:                 definition.GetIndexType(),
+			IndexType:                 indexType,
 			Path:                      relativePath,
 			FieldID:                   definition.GetFieldId(),
 			IndexID:                   definition.GetIndexId(),
@@ -1146,6 +1148,7 @@ func buildIndexInfoFromSource(
 			CurrentIndexVersion:       srcIndex.GetCurrentIndexVersion(),
 			CurrentScalarIndexVersion: srcIndex.GetCurrentScalarIndexVersion(),
 			IndexName:                 srcIndex.GetIndexName(),
+			IndexType:                 srcIndex.GetIndexType(),
 			IndexStorePathVersion:     srcIndex.GetIndexStorePathVersion(),
 		}
 		if target.IndexStorePathVersion != nil {

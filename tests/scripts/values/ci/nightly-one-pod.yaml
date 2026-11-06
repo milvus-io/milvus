@@ -32,9 +32,6 @@ standalone:
     value: /milvus/configs/advanced/etcd.yaml
 extraConfigFiles:
   user.yaml: |+
-    proxy:
-      # Temporary preview switch; removed together with the element-null / nested Array gate.
-      enableElementNullAndNestedArray: true
     etcd:
       use:
         embed: true

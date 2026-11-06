@@ -116,7 +116,7 @@ func TestManifestIndexGCNotifiesAfterBatchUnlock(t *testing.T) {
 }
 
 func TestCopyResultNotifiesAfterUnlockDespiteTaskCompletionFailure(t *testing.T) {
-	m, catalog, copies, task, result := copyPublicationFixture(t)
+	m, catalog, copies, task, result, _ := copyPublicationFixture(t)
 	paths := captureUnlockedManifestNotifications(t, m)
 	catalog.failCompletion = true
 	require.ErrorContains(t, copysegment.SyncCopySegmentTask(task, result, copies, m, m.IndexCatalog.(*index.IndexMeta)), "injected task completion")

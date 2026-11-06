@@ -183,7 +183,8 @@ func TestQueryTaskPreExecuteUsesStrongVisibility(t *testing.T) {
 	collectionTTL := time.Hour
 
 	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
-		Name: "test_collection",
+		Name:       "test_collection",
+		Properties: []*commonpb.KeyValuePair{{Key: common.CollectionTTLConfigKey, Value: "3600"}},
 		Fields: []*schemapb.FieldSchema{{
 			FieldID:      100,
 			Name:         "id",
@@ -433,16 +434,24 @@ func TestQueryTask_all(t *testing.T) {
 		}, nil)
 		assert.Error(t, task.Execute(ctx))
 
+		// A failed Execute records no path, so PostExecute observes nothing.
+		assert.Empty(t, task.executePath)
+
 		qn.ExpectedCalls = nil
 		qn.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 		qn.EXPECT().Query(mock.Anything, mock.Anything).Return(result1, nil)
+		executed := executeLatencyCount(t, task.getQueryLabel(), executePathQuery)
 		assert.NoError(t, task.Execute(ctx))
+		assert.Equal(t, executePathQuery, task.executePath)
+		// Observed after the reduce, in PostExecute.
+		assert.Equal(t, executed, executeLatencyCount(t, task.getQueryLabel(), executePathQuery))
 
 		task.queryParams = &queryParams{
 			limit:  100,
 			offset: 100,
 		}
 		assert.NoError(t, task.PostExecute(ctx))
+		assert.Equal(t, executed+1, executeLatencyCount(t, task.getQueryLabel(), executePathQuery))
 
 		for i := 0; i < len(task.result.FieldsData); i++ {
 			assert.NotEqual(t, task.result.FieldsData[i].FieldId, common.TimeStampField)

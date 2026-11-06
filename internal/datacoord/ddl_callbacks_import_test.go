@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -31,11 +32,9 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
-	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
 	"github.com/milvus-io/milvus/internal/datacoord/ddl"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
@@ -55,6 +54,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -75,27 +75,27 @@ func patchSnapshotImportWAL(t *testing.T) {
 
 func TestSnapshotPartitionTargetsValidation(t *testing.T) {
 	ctx := context.Background()
-	type mappingBroker struct{ broker.Broker }
-	s := &Server{broker: &mappingBroker{}}
+	s := seedCollections(&Server{})
 	opts := append(bulkimport.SnapshotImportTestOptions(), &commonpb.KeyValuePair{Key: importutilv2.PartitionMapping, Value: `{"A":"X","B":"Y"}`})
 	require.NoError(t, newDDLCallbacks(s).ValidateSnapshotPartitionTargets(ctx, 1, nil, bulkimport.SnapshotImportTestOptions()))
 	for _, tc := range []struct {
-		name      string
-		names     []string
-		ids, want []int64
-		readErr   error
-		wantErr   error
+		name    string
+		coll    *meta.CollectionInfo
+		want    []int64
+		wantErr error
 	}{
-		{"valid", []string{"Y", "X"}, []int64{100, 200}, []int64{200, 100}, nil, nil},
-		{"recreated", []string{"Y", "X"}, []int64{100, 201}, []int64{200, 100}, nil, merr.ErrServiceUnavailable},
-		{"dropped", []string{"Y"}, []int64{100}, []int64{200, 100}, nil, merr.ErrServiceUnavailable},
-		{"bad_metadata", []string{"Y"}, nil, []int64{200, 100}, nil, merr.ErrServiceInternal},
-		{"bad_count", []string{"Y", "X"}, []int64{100, 200}, []int64{200}, nil, merr.ErrServiceInternal},
-		{"metadata_error", nil, nil, nil, merr.ErrServiceNotReady, merr.ErrServiceNotReady},
+		{"valid", &meta.CollectionInfo{ID: 1, Partitions: []int64{100, 200}, PartitionIDsByName: map[string]int64{"Y": 100, "X": 200}}, []int64{200, 100}, nil},
+		{"recreated", &meta.CollectionInfo{ID: 1, Partitions: []int64{100, 201}, PartitionIDsByName: map[string]int64{"Y": 100, "X": 201}}, []int64{200, 100}, merr.ErrServiceUnavailable},
+		{"dropped", &meta.CollectionInfo{ID: 1, Partitions: []int64{100}, PartitionIDsByName: map[string]int64{"Y": 100}}, []int64{200, 100}, merr.ErrServiceUnavailable},
+		{"dropping", &meta.CollectionInfo{ID: 1, Partitions: []int64{100}, DroppingPartitions: []int64{200}, PartitionIDsByName: map[string]int64{"Y": 100, "X": 200}}, []int64{200, 100}, merr.ErrServiceUnavailable},
+		{"bad_count", &meta.CollectionInfo{ID: 1, Partitions: []int64{100, 200}, PartitionIDsByName: map[string]int64{"Y": 100, "X": 200}}, []int64{200}, merr.ErrServiceInternal},
+		{"collection_missing", nil, nil, merr.ErrCollectionNotFound},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			show := mockey.Mock((*mappingBroker).ShowPartitions).Return(&milvuspb.ShowPartitionsResponse{PartitionNames: tc.names, PartitionIDs: tc.ids}, tc.readErr).Build()
-			defer show.UnPatch()
+			s.meta.DropCollection(1)
+			if tc.coll != nil {
+				s.meta.AddCollection(tc.coll)
+			}
 			err := newDDLCallbacks(s).ValidateSnapshotPartitionTargets(ctx, 1, tc.want, opts)
 			if tc.wantErr != nil {
 				require.ErrorIs(t, err, tc.wantErr)
@@ -132,21 +132,17 @@ func TestBroadcastSnapshotImportMappedPartitions(t *testing.T) {
 	fileValidation := mockey.Mock(snapshotstorage.ValidateExternalSnapshotDataFiles).Return(nil).Build()
 	defer fileValidation.UnPatch()
 	api := meta.NewMockBroadcastAPIImpl()
-	locked := false
+	// The target partitions appear only once the broadcast lock is held, so
+	// the import must revalidate them under the lock.
+	var s *Server
 	start := mockey.Mock((*ddl.Callbacks).StartBroadcastWithCollectionID).To(func(_ *ddl.Callbacks, _ context.Context, _ int64) (broadcaster.BroadcastAPI, error) {
-		locked = true
+		s.meta.AddCollection(&meta.CollectionInfo{
+			ID: 100, DatabaseName: "default", Schema: bulkimport.SnapshotImportTestSchema(),
+			Partitions: []int64{200, 100}, PartitionIDsByName: map[string]int64{"X": 200, "Y": 100},
+		})
 		return api, nil
 	}).Build()
 	defer start.UnPatch()
-	type mappingBroker struct{ broker.Broker }
-	fake := &mappingBroker{}
-	describe := mockey.Mock((*mappingBroker).DescribeCollectionInternal).Return(&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default", Schema: bulkimport.SnapshotImportTestSchema()}, nil).Build()
-	defer describe.UnPatch()
-	show := mockey.Mock((*mappingBroker).ShowPartitions).To(func(_ *mappingBroker, _ context.Context, _ int64) (*milvuspb.ShowPartitionsResponse, error) {
-		require.True(t, locked, "target IDs must be revalidated under the broadcast lock")
-		return &milvuspb.ShowPartitionsResponse{PartitionNames: []string{"X", "Y"}, PartitionIDs: []int64{200, 100}}, nil
-	}).Build()
-	defer show.UnPatch()
 	called := false
 	transport := mockey.Mock((*meta.MockBroadcastAPIImpl).Broadcast).To(func(_ *meta.MockBroadcastAPIImpl, _ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
 		called = true
@@ -164,7 +160,8 @@ func TestBroadcastSnapshotImportMappedPartitions(t *testing.T) {
 		return &types.BroadcastAppendResult{}, nil
 	}).Build()
 	defer transport.UnPatch()
-	s := &Server{broker: fake, meta: &meta.Meta{ChunkManager: storage.NewLocalChunkManager()}}
+	s = seedCollections(&Server{meta: &meta.Meta{ChunkManager: storage.NewLocalChunkManager()}},
+		&meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: bulkimport.SnapshotImportTestSchema()})
 	opts := append(bulkimport.SnapshotImportTestOptions(), &commonpb.KeyValuePair{Key: importutilv2.PartitionMapping, Value: `{"A":"X","B":"Y"}`})
 	_, _, err := newDDLCallbacks(s).BroadcastImport(ctx, 100, []int64{200, 100},
 		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}}, opts, 1000, []string{"target_v1"}, "",
@@ -189,11 +186,6 @@ func TestBroadcastSnapshotImportMultipleTargetPartitions(t *testing.T) {
 	api := meta.NewMockBroadcastAPIImpl()
 	start := mockey.Mock((*ddl.Callbacks).StartBroadcastWithCollectionID).Return(api, nil).Build()
 	defer start.UnPatch()
-	type testBroker struct{ broker.Broker }
-	fakeBroker := &testBroker{}
-	describe := mockey.Mock((*testBroker).DescribeCollectionInternal).Return(
-		&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default", Schema: bulkimport.SnapshotImportTestSchema()}, nil).Build()
-	defer describe.UnPatch()
 	var received []int64
 	transport := mockey.Mock((*meta.MockBroadcastAPIImpl).Broadcast).To(
 		func(_ *meta.MockBroadcastAPIImpl, _ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
@@ -203,7 +195,8 @@ func TestBroadcastSnapshotImportMultipleTargetPartitions(t *testing.T) {
 			return &types.BroadcastAppendResult{}, nil
 		}).Build()
 	defer transport.UnPatch()
-	server := &Server{broker: fakeBroker}
+	server := seedCollections(&Server{},
+		&meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: bulkimport.SnapshotImportTestSchema()})
 	partitionIDs := []int64{20, 10}
 	_, duplicated, err := newDDLCallbacks(server).BroadcastImport(ctx, 100, partitionIDs,
 		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}},
@@ -228,7 +221,6 @@ func TestBroadcastSnapshotImportMultipleTargetPartitions(t *testing.T) {
 }
 
 func TestBroadcastImportBoundaryFailures(t *testing.T) {
-	type boundaryBroker struct{ broker.Broker }
 	for _, stage := range []string{"public_options", "prepare", "replication", "partition_targets", "message_size", "auto_id"} {
 		t.Run(stage, func(t *testing.T) {
 			cause := merr.ErrServiceNotReady
@@ -263,9 +255,6 @@ func TestBroadcastImportBoundaryFailures(t *testing.T) {
 			api := meta.NewMockBroadcastAPIImpl()
 			start := mockey.Mock((*ddl.Callbacks).StartBroadcastWithCollectionID).Return(api, nil).Build()
 			defer start.UnPatch()
-			describe := mockey.Mock((*boundaryBroker).DescribeCollectionInternal).Return(
-				&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default", Schema: schema}, nil).Build()
-			defer describe.UnPatch()
 			transport := mockey.Mock((*meta.MockBroadcastAPIImpl).Broadcast).To(
 				func(_ *meta.MockBroadcastAPIImpl, _ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
 					decoded := message.MustAsBroadcastImportMessageV1(msg)
@@ -282,7 +271,8 @@ func TestBroadcastImportBoundaryFailures(t *testing.T) {
 				opts = append(opts, &commonpb.KeyValuePair{Key: importutilv2.SnapshotSourceURI, Value: "s3://source/metadata"})
 			}
 			type boundaryAllocator struct{ allocator.Allocator }
-			s := &Server{meta: &meta.Meta{}, broker: &boundaryBroker{}, allocator: &boundaryAllocator{}}
+			s := seedCollections(&Server{meta: &meta.Meta{}, allocator: &boundaryAllocator{}},
+				&meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: schema})
 			_, _, err := newDDLCallbacks(s).BroadcastImport(context.Background(), 100, []int64{10}, files,
 				opts, 1, []string{"v1"}, "",
 				internalpb.ImportVersion_ImportVersionV2)
@@ -314,12 +304,8 @@ func TestBroadcastSnapshotImportNormalizesEZK(t *testing.T) {
 	api := meta.NewMockBroadcastAPIImpl()
 	start := mockey.Mock((*ddl.Callbacks).StartBroadcastWithCollectionID).Return(api, nil).Build()
 	defer start.UnPatch()
-	type testBroker struct{ broker.Broker }
-	fakeBroker := &testBroker{}
-	describe := mockey.Mock((*testBroker).DescribeCollectionInternal).Return(
-		&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default", Schema: bulkimport.SnapshotImportTestSchema()}, nil).Build()
-	defer describe.UnPatch()
-	server := &Server{broker: fakeBroker, meta: &meta.Meta{ChunkManager: storage.NewLocalChunkManager()}}
+	server := seedCollections(&Server{meta: &meta.Meta{ChunkManager: storage.NewLocalChunkManager()}},
+		&meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: bulkimport.SnapshotImportTestSchema()})
 	for _, encrypted := range []bool{false, true} {
 		name, suppliedEZK := "plaintext", "not-base64"
 		if encrypted {
@@ -658,15 +644,11 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_DescribeCollectionFailsReturn
 		}).Build()
 	defer mockAssignment.UnPatch()
 
-	// Mock broker.DescribeCollectionInternal to fail (called in StartBroadcastWithCollectionID)
-	mockBroker := broker.NewMockBroker(s.T())
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(nil, errors.New("collection not found"))
-
-	server := &Server{
+	// Collection 100 is not in the view, so StartBroadcastWithCollectionID fails.
+	server := seedCollections(&Server{
 		importMeta: &bulkimport.Meta{},
-		broker:     mockBroker,
 		meta:       newTestMetaWithChunkManager(s.T()),
-	}
+	})
 
 	_, _, err := newDDLCallbacks(server).BroadcastImport(
 		ctx,
@@ -707,13 +689,6 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 		}).Build()
 	defer mockAssignment.UnPatch()
 
-	// Mock broker.DescribeCollectionInternal to return dbName (called in StartBroadcastWithCollectionID)
-	mockBroker := broker.NewMockBroker(s.T())
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-	}, nil)
-
 	// Mock StartBroadcastWithResourceKeys to fail
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
@@ -721,11 +696,10 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	server := &Server{
+	server := seedCollections(&Server{
 		importMeta: &bulkimport.Meta{},
-		broker:     mockBroker,
 		meta:       newTestMetaWithChunkManager(s.T()),
-	}
+	}, &meta.CollectionInfo{ID: 100, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
 
 	_, _, err := newDDLCallbacks(server).BroadcastImport(
 		ctx,
@@ -743,7 +717,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 	s.Contains(err.Error(), "failed to start broadcast with collection id")
 }
 
-func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFailsReturnsError() {
+func (s *ImportCallbacksSuite) TestBroadcastImport_CollectionDroppedUnderLockReturnsError() {
 	ctx := context.Background()
 
 	// Setup validation to pass
@@ -768,28 +742,19 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFails
 
 	// Mock StartBroadcastWithResourceKeys to succeed
 	mockBroadcastAPI := meta.NewMockBroadcastAPIImpl()
+	// The collection is dropped while the broadcast lock is acquired.
+	var server *Server
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+			server.meta.DropCollection(100)
 			return mockBroadcastAPI, nil
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	// Mock broker: first DescribeCollectionInternal succeeds (in StartBroadcastWithCollectionID),
-	// second call returns error status (in BroadcastImport after getting broadcaster)
-	mockBroker := broker.NewMockBroker(s.T())
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-	}, nil).Once()
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		Status: merr.Status(merr.ErrCollectionNotFound),
-	}, nil).Once()
-
-	server := &Server{
+	server = seedCollections(&Server{
 		importMeta: &bulkimport.Meta{},
-		broker:     mockBroker,
 		meta:       newTestMetaWithChunkManager(s.T()),
-	}
+	}, &meta.CollectionInfo{ID: 100, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
 
 	_, _, err := newDDLCallbacks(server).BroadcastImport(
 		ctx,
@@ -839,20 +804,10 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	// Mock broker: DescribeCollectionInternal is called twice
-	// First call in StartBroadcastWithCollectionID, second call in BroadcastImport
-	mockBroker := broker.NewMockBroker(s.T())
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-		Schema:         &schemapb.CollectionSchema{Name: "test_collection"},
-	}, nil).Times(2)
-
-	server := &Server{
+	server := seedCollections(&Server{
 		importMeta: &bulkimport.Meta{},
-		broker:     mockBroker,
 		meta:       newTestMetaWithChunkManager(s.T()),
-	}
+	}, &meta.CollectionInfo{ID: 100, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
 
 	_, _, err := newDDLCallbacks(server).BroadcastImport(
 		ctx,
@@ -901,27 +856,17 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	// Mock broker: DescribeCollectionInternal is called twice
-	// First call in StartBroadcastWithCollectionID, second call in BroadcastImport
-	mockBroker := broker.NewMockBroker(s.T())
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "canonical_collection",
-		Schema: &schemapb.CollectionSchema{
-			Name:    "canonical_collection",
-			Version: 2,
-			Fields: []*schemapb.FieldSchema{
-				{FieldID: int64(common.RowIDField), Name: common.RowIDFieldName},
-				{FieldID: common.StartOfUserFieldID, Name: "id"},
-			},
-		},
-	}, nil).Times(2)
-
-	server := &Server{
+	server := seedCollections(&Server{
 		importMeta: &bulkimport.Meta{},
-		broker:     mockBroker,
 		meta:       newTestMetaWithChunkManager(s.T()),
-	}
+	}, &meta.CollectionInfo{ID: 100, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{
+		Name:    "canonical_collection",
+		Version: 2,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: int64(common.RowIDField), Name: common.RowIDFieldName},
+			{FieldID: common.StartOfUserFieldID, Name: "id"},
+		},
+	}})
 
 	_, _, err := newDDLCallbacks(server).BroadcastImport(
 		ctx,
@@ -970,6 +915,8 @@ func (m *mockBalancerImpl) GetLatestChannelAssignment() (*channel.WatchChannelAs
 }
 
 func newTestImportMeta(t *testing.T) (bulkimport.ImportMeta, *mocks.DataCoordCatalog) {
+	publication := mockey.Mock((*Server).RefreshDataView).Return(&viewpb.DataVersion{StreamingVersion: 1}, nil).Build()
+	t.Cleanup(func() { publication.UnPatch() })
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
@@ -1260,46 +1207,48 @@ func TestRollbackImportCallback_AfterCommit_NoOp(t *testing.T) {
 // `-race` to detect any unsynchronized access.
 func TestImportAckCallbacks_CommitVsAbort_Race(t *testing.T) {
 	for iter := 0; iter < 32; iter++ {
-		ctx := context.Background()
-		importMeta, _ := newTestImportMeta(t)
+		t.Run(fmt.Sprintf("iteration-%d", iter), func(t *testing.T) {
+			ctx := context.Background()
+			importMeta, _ := newTestImportMeta(t)
 
-		const jobID int64 = 5
-		err := importMeta.AddJob(ctx, &bulkimport.Job{
-			ImportJob: &datapb.ImportJob{
-				JobID:      jobID,
-				State:      internalpb.ImportJobState_Uncommitted,
-				AutoCommit: false,
-			},
-			Tr: timerecord.NewTimeRecorder("race"),
+			const jobID int64 = 5
+			err := importMeta.AddJob(ctx, &bulkimport.Job{
+				ImportJob: &datapb.ImportJob{
+					JobID:      jobID,
+					State:      internalpb.ImportJobState_Uncommitted,
+					AutoCommit: false,
+				},
+				Tr: timerecord.NewTimeRecorder("race"),
+			})
+			assert.NoError(t, err)
+
+			callbacks := newDDLCallbacks(&Server{importMeta: importMeta})
+
+			start := make(chan struct{})
+			var commitErr, rollbackErr error
+			var wg sync.WaitGroup
+			wg.Add(2)
+			go func() {
+				defer wg.Done()
+				<-start
+				commitErr = callbacks.CommitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(jobID))
+			}()
+			go func() {
+				defer wg.Done()
+				<-start
+				rollbackErr = callbacks.RollbackImportV2AckCallback(ctx, buildRollbackImportBroadcastResult(jobID))
+			}()
+			close(start)
+			wg.Wait()
+
+			assert.NoError(t, commitErr)
+			assert.NoError(t, rollbackErr)
+
+			final := importMeta.GetJob(ctx, jobID).GetState()
+			assert.Contains(t,
+				[]internalpb.ImportJobState{internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed},
+				final, "iter %d: terminal state must be Completed or Failed, got %s", iter, final)
 		})
-		assert.NoError(t, err)
-
-		callbacks := newDDLCallbacks(&Server{importMeta: importMeta})
-
-		start := make(chan struct{})
-		var commitErr, rollbackErr error
-		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			<-start
-			commitErr = callbacks.CommitImportV2AckCallback(ctx, buildCommitImportBroadcastResult(jobID))
-		}()
-		go func() {
-			defer wg.Done()
-			<-start
-			rollbackErr = callbacks.RollbackImportV2AckCallback(ctx, buildRollbackImportBroadcastResult(jobID))
-		}()
-		close(start)
-		wg.Wait()
-
-		assert.NoError(t, commitErr)
-		assert.NoError(t, rollbackErr)
-
-		final := importMeta.GetJob(ctx, jobID).GetState()
-		assert.Contains(t,
-			[]internalpb.ImportJobState{internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed},
-			final, "iter %d: terminal state must be Completed or Failed, got %s", iter, final)
 	}
 }
 
@@ -1312,11 +1261,6 @@ func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, c
 
 	// Import messages target the job's data vchannels; the broadcaster adds the
 	// control-channel copy that anchors the ack-callback order.
-	mockBroker := broker.NewMockBroker(t)
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(7)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-	}, nil)
 
 	capture := &meta.CaptureBroadcastAPI{}
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
@@ -1325,7 +1269,8 @@ func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, c
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	server := &Server{broker: mockBroker}
+	server := seedCollections(&Server{},
+		&meta.CollectionInfo{ID: 7, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
 	server.ddl = newDDLCallbacks(server)
 	job := &bulkimport.Job{
 		ImportJob: &datapb.ImportJob{
@@ -1362,6 +1307,8 @@ func TestBroadcastCommitImportMessagePreservesJobProtocol(t *testing.T) {
 		assert.NoError(t, err)
 		msg := message.MustAsSpecializedBroadcastMessage[*message.CommitImportMessageHeader, *message.CommitImportMessageBody](capture.Captured)
 		assert.Equal(t, coordinator, msg.Header().GetCommitByCoordinator())
+		assert.Equal(t, coordinator, msg.BroadcastHeader().AckSyncUp,
+			"coordinator commits wait for query MVCC publication; legacy commits retain FastAck")
 	}
 }
 
@@ -1666,12 +1613,6 @@ func TestAssignAndBroadcastUpdateImport_MessageShape(t *testing.T) {
 	ctx := context.Background()
 	wantVchannels := []string{"by-dev-rootcoord-dml_0_v0", "by-dev-rootcoord-dml_1_v0"}
 
-	mockBroker := broker.NewMockBroker(t)
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(7)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-	}, nil)
-
 	capture := &meta.CaptureBroadcastAPI{}
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 		func(_ context.Context, _ ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
@@ -1684,7 +1625,8 @@ func TestAssignAndBroadcastUpdateImport_MessageShape(t *testing.T) {
 		return 1000, 1000 + n, nil
 	})
 
-	server := &Server{broker: mockBroker, allocator: alloc}
+	server := seedCollections(&Server{allocator: alloc},
+		&meta.CollectionInfo{ID: 7, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
 	server.ddl = newDDLCallbacks(server)
 	job := &bulkimport.Job{
 		ImportJob: &datapb.ImportJob{

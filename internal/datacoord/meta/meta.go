@@ -36,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
-	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
@@ -50,9 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -85,6 +82,9 @@ type Meta struct {
 	// metaStore is the shared MetaStore — the backbone for segments, collections,
 	// channel checkpoints, file resources, and catalog persistence.
 	MetaStore metacache.MetaStore
+	// Installed by Coordinator before background planning starts. Standalone
+	// metadata users can continue using their supplied collection snapshots.
+	PreparationSchema func(context.Context, int64, *schemapb.CollectionSchema) (*schemapb.CollectionSchema, error)
 
 	SegMu    lock.RWMutex
 	Segments *SegmentsInfo // segment id to segment info
@@ -101,6 +101,7 @@ type Meta struct {
 	manifestReadOnce       sync.Once
 	manifestReadSlots      *semaphore.Weighted
 	DataViewManager        DataViewManager
+	StreamingNodeCatalog   metastore.StreamingNodeCataLog
 
 	ChannelSync  *channelSync
 	ChunkManager storage.ChunkManager
@@ -144,30 +145,6 @@ type dbInfo struct {
 	Properties []*commonpb.KeyValuePair
 }
 
-// showCollectionIDs retrieves all collection IDs from RootCoord with retry on ErrServiceUnimplemented.
-func showCollectionIDs(ctx context.Context, broker broker.Broker) ([]int64, error) {
-	var (
-		err  error
-		resp *rootcoordpb.ShowCollectionIDsResponse
-	)
-	retryErr := retry.Handle(ctx, func() (bool, error) {
-		resp, err = broker.ShowCollectionIDs(ctx)
-		if errors.Is(err, merr.ErrServiceUnimplemented) {
-			return true, err
-		}
-		return false, err
-	})
-	if retryErr != nil {
-		return nil, retryErr
-	}
-
-	collectionIDs := make([]int64, 0, 4096)
-	for _, collections := range resp.GetDbCollections() {
-		collectionIDs = append(collectionIDs, collections.GetCollectionIDs()...)
-	}
-	return collectionIDs, nil
-}
-
 func (m *Meta) CloseManifestCommitExecutor() {
 	if m.ManifestCommitExecutor != nil {
 		m.ManifestCommitExecutor.Close()
@@ -176,11 +153,10 @@ func (m *Meta) CloseManifestCommitExecutor() {
 
 // NewMeta creates meta from provided `kv.TxnKV`
 func NewMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager, metaStore metacache.MetaStore, broker broker.Broker, loadDomainMetas DomainMetaLoader) (*Meta, error) {
-	// Fetch collection IDs first so both MetaStore.LoadFromCatalog and indexMeta can use them for per-collection loading.
-	collectionIDs, err := showCollectionIDs(ctx, broker)
-	if err != nil {
-		return nil, err
-	}
+	// RootCoord has loaded the collection view before DataCoord starts, so
+	// its IDs (Dropping included) drive per-collection loading in both
+	// MetaStore.LoadFromCatalog and indexMeta.
+	collectionIDs := metaStore.GetCollectionIDs()
 
 	var (
 		indexCatalog SegmentIndexCatalog
@@ -316,58 +292,9 @@ func (m *Meta) segmentLoadNormalizer() metacache.SegmentNormalizer {
 	}
 }
 
-func (m *Meta) ReloadCollectionsFromRootcoord(ctx context.Context, broker broker.Broker) error {
-	resp, err := broker.ListDatabases(ctx)
-	if err != nil {
-		return err
-	}
-	for _, dbName := range resp.GetDbNames() {
-		collectionsResp, err := broker.ShowCollections(ctx, dbName)
-		if err != nil {
-			return err
-		}
-		for _, collectionID := range collectionsResp.GetCollectionIds() {
-			descResp, err := broker.DescribeCollectionInternal(ctx, collectionID)
-			if err != nil {
-				return err
-			}
-			partitionIDs, err := broker.ShowPartitionsInternal(ctx, collectionID)
-			if err != nil {
-				return err
-			}
-			m.AddCollection(&CollectionInfo{
-				ID:             collectionID,
-				Schema:         descResp.GetSchema(),
-				Partitions:     partitionIDs,
-				StartPositions: descResp.GetStartPositions(),
-				Properties:     funcutil.KeyValuePair2Map(descResp.GetProperties()),
-				CreatedAt:      descResp.GetCreatedTimestamp(),
-				DatabaseName:   descResp.GetDbName(),
-				DatabaseID:     descResp.GetDbId(),
-				VChannelNames:  descResp.GetVirtualChannelNames(),
-			})
-		}
-	}
-	return nil
-}
-
-// AddCollection adds a collection into MetaStore.
-func (m *Meta) AddCollection(collection *CollectionInfo) {
-	mlog.Info(m.Ctx, "meta update: add collection", mlog.Int64("collectionID", collection.ID))
-	// PutCollection emits the collection-count metric itself.
-	m.MetaStore.PutCollection(collection)
-	mlog.Info(m.Ctx, "meta update: add collection - complete", mlog.Int64("collectionID", collection.ID))
-}
-
-// DropCollection removes a collection from MetaStore.
-func (m *Meta) DropCollection(collectionID int64) {
-	mlog.Info(m.Ctx, "meta update: drop collection", mlog.Int64("collectionID", collectionID))
-	// RemoveCollection emits the collection metric cleanup itself.
-	m.MetaStore.RemoveCollection(collectionID)
-	mlog.Info(m.Ctx, "meta update: drop collection - complete", mlog.Int64("collectionID", collectionID))
-}
-
-// GetCollection returns collection info from MetaStore.
+// GetCollection returns the collection from the shared CollectionSource,
+// including a Dropping one (check IsCreated). nil means the source has no
+// such collection.
 func (m *Meta) GetCollection(collectionID UniqueID) *CollectionInfo {
 	coll, ok := m.MetaStore.GetCollection(collectionID)
 	if !ok {
@@ -376,8 +303,36 @@ func (m *Meta) GetCollection(collectionID UniqueID) *CollectionInfo {
 	return coll
 }
 
-// GetCollections returns all collections from MetaStore.
+// GetCollectionByName resolves a collection name or alias in dbName.
+func (m *Meta) GetCollectionByName(dbName, name string) *CollectionInfo {
+	coll, ok := m.MetaStore.GetCollectionByName(dbName, name)
+	if !ok {
+		return nil
+	}
+	return coll
+}
+
+// GetCollectionOrNotFound is GetCollection with a miss reported as
+// ErrCollectionNotFound, as RootCoord's internal describe does. A Dropping
+// collection is returned with its State.
+func (m *Meta) GetCollectionOrNotFound(collectionID UniqueID) (*CollectionInfo, error) {
+	coll := m.GetCollection(collectionID)
+	if coll == nil {
+		return nil, merr.WrapErrCollectionNotFound(collectionID)
+	}
+	return coll, nil
+}
+
+// GetCollections returns the Created collections, the ones DataCoord serves.
 func (m *Meta) GetCollections() []*CollectionInfo {
+	return lo.Filter(m.MetaStore.GetCollections(), func(c *CollectionInfo, _ int) bool {
+		return c.IsCreated()
+	})
+}
+
+// GetAllCollections returns every published collection, Dropping ones
+// included until RootCoord removes them.
+func (m *Meta) GetAllCollections() []*CollectionInfo {
 	return m.MetaStore.GetCollections()
 }
 
@@ -1558,6 +1513,9 @@ func UpdateStartPosition(startPositions []*datapb.SegmentStartPosition) UpdateOp
 			}
 
 			s.StartPosition = startPosition
+			if s.GetLevel() != datapb.SegmentLevel_L0 && !s.GetIsImporting() && s.GetTransformStartAfterTimetick() == 0 {
+				s.TransformStartAfterTimetick = startPosition.GetTimestamp()
+			}
 		}
 		return true
 	}
@@ -1717,7 +1675,12 @@ func ClearEmptyManifestIndexMarker(segmentID int64, expectedManifest string) Upd
 
 func UpdateManifestVersion(segmentID int64, manifestVersion int64) UpdateOperator {
 	return func(modPack *UpdateSegmentPack) bool {
-		segment := modPack.Get(segmentID)
+		// Inspect the pending value without registering a write for a stale/no-op
+		// manifest. Other operators in this batch may already have changed it.
+		segment := modPack.Segments[segmentID]
+		if segment == nil {
+			segment = modPack.Meta.Segments.GetSegment(segmentID)
+		}
 		if segment == nil {
 			mlog.Warn(modPack.Meta.Ctx, "meta update: update manifest version failed - segment not found",
 				mlog.Int64("segmentID", segmentID))
@@ -1748,7 +1711,7 @@ func UpdateManifestVersion(segmentID int64, manifestVersion int64) UpdateOperato
 			}
 			return false
 		}
-		segment.ManifestPath = packed.MarshalManifestPath(basePath, manifestVersion)
+		modPack.Get(segmentID).ManifestPath = packed.MarshalManifestPath(basePath, manifestVersion)
 		return true
 	}
 }
@@ -1877,6 +1840,9 @@ func UpdateCommitTimestamp(segmentID int64, ts uint64) UpdateOperator {
 			}
 		}
 		segment.CommitTimestamp = ts
+		if ts != 0 {
+			segment.TransformStartAfterTimetick = ts
+		}
 		return true
 	}
 }
@@ -2583,22 +2549,23 @@ func (m *Meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 	for _, seg := range result.GetSegments() {
 		startPos, dmlPos := RecalculateSegmentPosition(seg.GetInsertLogs(), t.GetChannel(), fallbackStart, fallbackDml)
 		segmentInfo := &datapb.SegmentInfo{
-			ID:                  seg.GetSegmentID(),
-			CollectionID:        compactFromSegInfos[0].CollectionID,
-			PartitionID:         compactFromSegInfos[0].PartitionID,
-			InsertChannel:       t.GetChannel(),
-			NumOfRows:           seg.NumOfRows,
-			State:               commonpb.SegmentState_Flushed,
-			MaxRowNum:           compactFromSegInfos[0].MaxRowNum,
-			Binlogs:             seg.GetInsertLogs(),
-			Statslogs:           seg.GetField2StatslogPaths(),
-			CreatedByCompaction: true,
-			CompactionFrom:      compactFromSegIDs,
-			LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0)),
-			CreateTs:            compactionTaskCreateTS(t),
-			Level:               datapb.SegmentLevel_L2,
-			StartPosition:       startPos,
-			DmlPosition:         dmlPos,
+			ID:                          seg.GetSegmentID(),
+			CollectionID:                compactFromSegInfos[0].CollectionID,
+			PartitionID:                 compactFromSegInfos[0].PartitionID,
+			InsertChannel:               t.GetChannel(),
+			NumOfRows:                   seg.NumOfRows,
+			State:                       commonpb.SegmentState_Flushed,
+			MaxRowNum:                   compactFromSegInfos[0].MaxRowNum,
+			Binlogs:                     seg.GetInsertLogs(),
+			Statslogs:                   seg.GetField2StatslogPaths(),
+			CreatedByCompaction:         true,
+			CompactionFrom:              compactFromSegIDs,
+			TransformStartAfterTimetick: MinSegmentTransformStart(compactFromSegInfos),
+			LastExpireTime:              tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0)),
+			CreateTs:                    compactionTaskCreateTS(t),
+			Level:                       datapb.SegmentLevel_L2,
+			StartPosition:               startPos,
+			DmlPosition:                 dmlPos,
 			// visible after stats and index
 			IsInvisible:     true,
 			StorageVersion:  seg.GetStorageVersion(),
@@ -2687,32 +2654,33 @@ func (m *Meta) completeMixCompactionMutation(
 	for _, compactToSegment := range result.GetSegments() {
 		startPos, dmlPos := RecalculateSegmentPosition(compactToSegment.GetInsertLogs(), t.GetChannel(), fallbackStart, fallbackDml)
 		compactToProto := &datapb.SegmentInfo{
-			ID:                  compactToSegment.GetSegmentID(),
-			CollectionID:        compactFromSegInfos[0].CollectionID,
-			PartitionID:         compactFromSegInfos[0].PartitionID,
-			InsertChannel:       t.GetChannel(),
-			NumOfRows:           compactToSegment.NumOfRows,
-			State:               commonpb.SegmentState_Flushed,
-			MaxRowNum:           compactFromSegInfos[0].MaxRowNum,
-			Binlogs:             compactToSegment.GetInsertLogs(),
-			Statslogs:           compactToSegment.GetField2StatslogPaths(),
-			Deltalogs:           compactToSegment.GetDeltalogs(),
-			Bm25Statslogs:       compactToSegment.GetBm25Logs(),
-			TextStatsLogs:       compactToSegment.GetTextStatsLogs(),
-			CreatedByCompaction: true,
-			CompactionFrom:      compactFromSegIDs,
-			LastExpireTime:      tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0)),
-			CreateTs:            compactionTaskCreateTS(t),
-			Level:               datapb.SegmentLevel_L1,
-			StorageVersion:      compactToSegment.GetStorageVersion(),
-			StartPosition:       startPos,
-			DmlPosition:         dmlPos,
-			IsSorted:            compactToSegment.GetIsSorted(),
-			ManifestPath:        compactToSegment.GetManifest(),
-			IsSortedByNamespace: compactToSegment.GetIsSortedByNamespace(),
-			ExpirQuantiles:      compactToSegment.GetExpirQuantiles(),
-			SchemaVersion:       outputSchemaVersion,
-			CommitTimestamp:     0, // Normalized: row timestamps already rewritten
+			ID:                          compactToSegment.GetSegmentID(),
+			CollectionID:                compactFromSegInfos[0].CollectionID,
+			PartitionID:                 compactFromSegInfos[0].PartitionID,
+			InsertChannel:               t.GetChannel(),
+			NumOfRows:                   compactToSegment.NumOfRows,
+			State:                       commonpb.SegmentState_Flushed,
+			MaxRowNum:                   compactFromSegInfos[0].MaxRowNum,
+			Binlogs:                     compactToSegment.GetInsertLogs(),
+			Statslogs:                   compactToSegment.GetField2StatslogPaths(),
+			Deltalogs:                   compactToSegment.GetDeltalogs(),
+			Bm25Statslogs:               compactToSegment.GetBm25Logs(),
+			TextStatsLogs:               compactToSegment.GetTextStatsLogs(),
+			CreatedByCompaction:         true,
+			CompactionFrom:              compactFromSegIDs,
+			TransformStartAfterTimetick: MinSegmentTransformStart(compactFromSegInfos),
+			LastExpireTime:              tsoutil.ComposeTSByTime(time.Unix(t.GetStartTime(), 0)),
+			CreateTs:                    compactionTaskCreateTS(t),
+			Level:                       datapb.SegmentLevel_L1,
+			StorageVersion:              compactToSegment.GetStorageVersion(),
+			StartPosition:               startPos,
+			DmlPosition:                 dmlPos,
+			IsSorted:                    compactToSegment.GetIsSorted(),
+			ManifestPath:                compactToSegment.GetManifest(),
+			IsSortedByNamespace:         compactToSegment.GetIsSortedByNamespace(),
+			ExpirQuantiles:              compactToSegment.GetExpirQuantiles(),
+			SchemaVersion:               outputSchemaVersion,
+			CommitTimestamp:             0, // Normalized: row timestamps already rewritten
 		}
 		// Statistics is computed at the compactor and shipped on the
 		// CompactionSegment. V3 outputs whose stats live in the manifest
@@ -2787,7 +2755,7 @@ func (m *Meta) ValidateSegmentStateBeforeCompleteCompactionMutation(t *datapb.Co
 	// L0 segments are transient delete-log carriers, not part of that stable list, and
 	// L0 compaction only appends deltalogs to L1/L2 targets without touching L1/L2 binlogs.
 	// So L0 delete compaction is outside the protection's concern and must not be blocked.
-	if t.GetType() != datapb.CompactionType_Level0DeleteCompaction {
+	if t.GetType() != datapb.CompactionType_Level0DeleteCompaction && t.GetType() != datapb.CompactionType_RestoreLevel0DeleteCompaction {
 		// Check if compaction is blocked for this collection (snapshot pending or RefIndex not loaded).
 		if m.IsCollectionCompactionBlocked(t.GetCollectionID()) {
 			mlog.Info(m.Ctx, "compaction rejected: collection has pending snapshot or unloaded RefIndex",
@@ -2900,6 +2868,14 @@ func (m *Meta) appliedCompactionResultLocked(
 }
 
 func (m *Meta) CompleteCompactionMutation(ctx context.Context, t *datapb.CompactionTask, result *datapb.CompactionPlanResult) (newSegments []*SegmentInfo, retErr error) {
+	if err := m.checkCompactionSchemaPublication(ctx, t.GetCollectionID(), t.GetSchema()); err != nil {
+		return nil, err
+	}
+	defer func() {
+		if retErr == nil && t.GetType() == datapb.CompactionType_BumpSchemaVersionCompaction {
+			m.NotifyQueryViewSegmentUpdates(ctx, newSegments)
+		}
+	}()
 	m.SegMu.Lock()
 	defer m.SegMu.Unlock()
 	if appliedSegments, applied, appliedErr := m.appliedCompactionResultLocked(t, result); applied {
@@ -2925,53 +2901,6 @@ func (m *Meta) CompleteCompactionMutation(ctx context.Context, t *datapb.Compact
 	return newSegments, nil
 }
 
-// loadableProjection computes the loadable Segment projection of a Collection
-// from SegmentMeta, the single loadable criterion shared by Recompute,
-// recovery rebuild and bootstrap. A segment is loadable iff it is flushed
-// (Flushing or Flushed - growing/sealed segments stay on the streaming side,
-// matching handler.go's GetQueryVChanPositions classification), healthy (not
-// Dropped/NotExist), not invisible, not importing, and not an L0 delta
-// segment, and has a data footprint (a non-empty binlog set or a StorageV3
-// manifest path). The Manifest version is parsed from the segment's manifest
-// path (0 when absent). The SegmentMeta snapshot is taken under segMu.RLock;
-// manifest path parsing runs outside the lock (pure string ops on the
-// snapshot). Callers must hold the DataView Collection lock (lock order:
-// DataView -> segMu).
-func (m *Meta) LoadableProjection(ctx context.Context, collectionID int64) ([]dataview.LoadableSegment, error) {
-	segments := m.SelectSegments(ctx, WithCollection(collectionID))
-	loadable := make([]dataview.LoadableSegment, 0, len(segments))
-	for _, segment := range segments {
-		if segment.GetLevel() == datapb.SegmentLevel_L0 ||
-			segment.GetIsImporting() ||
-			segment.GetIsInvisible() ||
-			!IsSegmentHealthy(segment) ||
-			!IsFlushState(segment.GetState()) {
-			continue
-		}
-		if len(segment.GetBinlogs()) == 0 && segment.GetManifestPath() == "" {
-			// No data footprint: not loadable (matches GetQueryVChanPositions).
-			continue
-		}
-		manifestVersion := int64(0)
-		if segment.GetManifestPath() != "" {
-			var err error
-			_, manifestVersion, err = packed.UnmarshalManifestPath(segment.GetManifestPath())
-			if err != nil {
-				return nil, merr.WrapErrStorage(err, "failed to parse Manifest path for Segment %d", segment.GetID())
-			}
-		}
-		loadable = append(loadable, dataview.LoadableSegment{
-			SegmentID:       segment.GetID(),
-			VChannel:        segment.GetInsertChannel(),
-			PartitionID:     segment.GetPartitionID(),
-			ManifestVersion: manifestVersion,
-			RowNum:          segment.GetNumOfRows(),
-			Size:            segment.GetStats().GetInsertBinlogSize(),
-		})
-	}
-	return loadable, nil
-}
-
 // recomputeDataView requests an asynchronous DataView snapshot reconciliation
 // for collectionID after a Flushed->Flushed SegmentMeta mutation committed.
 // All reconciliation logic lives inside the DataView manager (deduplicated
@@ -2981,7 +2910,7 @@ func (m *Meta) RecomputeDataView(ctx context.Context, collectionID int64) {
 	// collectionID == 0 (e.g. a 2PC import job without import tasks) would
 	// persist an orphan DataView key that recovery never reclaims; refuse it
 	// at the entry point so no caller can create one.
-	if m.DataViewManager == nil || collectionID == 0 {
+	if m.DataViewManager == nil || collectionID <= 0 {
 		return
 	}
 	_ = m.DataViewManager.Recompute(ctx, collectionID)
@@ -3249,37 +3178,38 @@ func (m *Meta) CompleteSortCompactionMutation(
 	outputSchemaVersion := t.GetSchema().GetVersion()
 
 	segmentInfo := &datapb.SegmentInfo{
-		CollectionID:              oldSegment.GetCollectionID(),
-		PartitionID:               oldSegment.GetPartitionID(),
-		InsertChannel:             oldSegment.GetInsertChannel(),
-		MaxRowNum:                 oldSegment.GetMaxRowNum(),
-		LastExpireTime:            oldSegment.GetLastExpireTime(),
-		StartPosition:             startPos,
-		DmlPosition:               dmlPos,
-		IsImporting:               oldSegment.GetIsImporting(),
-		State:                     commonpb.SegmentState_Flushed,
-		Level:                     oldSegment.GetLevel(),
-		LastLevel:                 oldSegment.GetLastLevel(),
-		PartitionStatsVersion:     oldSegment.GetPartitionStatsVersion(),
-		LastPartitionStatsVersion: oldSegment.GetLastPartitionStatsVersion(),
-		CreatedByCompaction:       oldSegment.GetCreatedByCompaction(),
-		IsInvisible:               resultInvisible,
-		StorageVersion:            resultSegment.GetStorageVersion(),
-		ID:                        resultSegment.GetSegmentID(),
-		NumOfRows:                 resultSegment.GetNumOfRows(),
-		Binlogs:                   resultSegment.GetInsertLogs(),
-		Statslogs:                 resultSegment.GetField2StatslogPaths(),
-		TextStatsLogs:             resultSegment.GetTextStatsLogs(),
-		Bm25Statslogs:             resultSegment.GetBm25Logs(),
-		Deltalogs:                 resultSegment.GetDeltalogs(),
-		CompactionFrom:            []int64{compactFromSegID},
-		CreateTs:                  compactionTaskCreateTS(t),
-		IsSorted:                  resultSegment.GetIsSorted(),
-		ManifestPath:              resultSegment.GetManifest(),
-		ExpirQuantiles:            resultSegment.GetExpirQuantiles(),
-		IsSortedByNamespace:       resultSegment.GetIsSortedByNamespace(),
-		SchemaVersion:             outputSchemaVersion,
-		CommitTimestamp:           0, // Normalized: row timestamps already rewritten
+		CollectionID:                oldSegment.GetCollectionID(),
+		PartitionID:                 oldSegment.GetPartitionID(),
+		InsertChannel:               oldSegment.GetInsertChannel(),
+		MaxRowNum:                   oldSegment.GetMaxRowNum(),
+		LastExpireTime:              oldSegment.GetLastExpireTime(),
+		StartPosition:               startPos,
+		DmlPosition:                 dmlPos,
+		IsImporting:                 oldSegment.GetIsImporting(),
+		State:                       commonpb.SegmentState_Flushed,
+		Level:                       oldSegment.GetLevel(),
+		LastLevel:                   oldSegment.GetLastLevel(),
+		PartitionStatsVersion:       oldSegment.GetPartitionStatsVersion(),
+		LastPartitionStatsVersion:   oldSegment.GetLastPartitionStatsVersion(),
+		CreatedByCompaction:         oldSegment.GetCreatedByCompaction(),
+		IsInvisible:                 resultInvisible,
+		StorageVersion:              resultSegment.GetStorageVersion(),
+		ID:                          resultSegment.GetSegmentID(),
+		NumOfRows:                   resultSegment.GetNumOfRows(),
+		Binlogs:                     resultSegment.GetInsertLogs(),
+		Statslogs:                   resultSegment.GetField2StatslogPaths(),
+		TextStatsLogs:               resultSegment.GetTextStatsLogs(),
+		Bm25Statslogs:               resultSegment.GetBm25Logs(),
+		Deltalogs:                   resultSegment.GetDeltalogs(),
+		CompactionFrom:              []int64{compactFromSegID},
+		TransformStartAfterTimetick: SegmentTransformStart(oldSegment),
+		CreateTs:                    compactionTaskCreateTS(t),
+		IsSorted:                    resultSegment.GetIsSorted(),
+		ManifestPath:                resultSegment.GetManifest(),
+		ExpirQuantiles:              resultSegment.GetExpirQuantiles(),
+		IsSortedByNamespace:         resultSegment.GetIsSortedByNamespace(),
+		SchemaVersion:               outputSchemaVersion,
+		CommitTimestamp:             0, // Normalized: row timestamps already rewritten
 	}
 	// Statistics is computed at the compactor and shipped on the
 	// CompactionSegment. V3 outputs whose stats live in the manifest are
@@ -3509,36 +3439,37 @@ func (m *Meta) completeBumpSchemaVersionReplacementMutation(
 
 	startPos, dmlPos := RecalculateSegmentPosition(resultSegment.GetInsertLogs(), oldSegment.GetInsertChannel(), oldSegment.GetStartPosition(), oldSegment.GetDmlPosition())
 	newSegment := NewSegmentInfo(&datapb.SegmentInfo{
-		ID:                        resultSegment.GetSegmentID(),
-		CollectionID:              oldSegment.GetCollectionID(),
-		PartitionID:               oldSegment.GetPartitionID(),
-		InsertChannel:             oldSegment.GetInsertChannel(),
-		MaxRowNum:                 oldSegment.GetMaxRowNum(),
-		LastExpireTime:            oldSegment.GetLastExpireTime(),
-		StartPosition:             startPos,
-		DmlPosition:               dmlPos,
-		IsImporting:               oldSegment.GetIsImporting(),
-		State:                     commonpb.SegmentState_Flushed,
-		Level:                     oldSegment.GetLevel(),
-		LastLevel:                 oldSegment.GetLastLevel(),
-		PartitionStatsVersion:     oldSegment.GetPartitionStatsVersion(),
-		LastPartitionStatsVersion: oldSegment.GetLastPartitionStatsVersion(),
-		CreatedByCompaction:       true,
-		IsInvisible:               false,
-		StorageVersion:            resultSegment.GetStorageVersion(),
-		NumOfRows:                 resultSegment.GetNumOfRows(),
-		Binlogs:                   resultSegment.GetInsertLogs(),
-		Statslogs:                 resultSegment.GetField2StatslogPaths(),
-		TextStatsLogs:             resultSegment.GetTextStatsLogs(),
-		Bm25Statslogs:             resultSegment.GetBm25Logs(),
-		Deltalogs:                 resultSegment.GetDeltalogs(),
-		CompactionFrom:            []int64{oldSegment.GetID()},
-		CreateTs:                  compactionTaskCreateTS(t),
-		IsSorted:                  oldSegment.GetIsSorted(),
-		ManifestPath:              resultSegment.GetManifest(),
-		ExpirQuantiles:            resultSegment.GetExpirQuantiles(),
-		IsSortedByNamespace:       oldSegment.GetIsSortedByNamespace(),
-		SchemaVersion:             schemaVersion,
+		ID:                          resultSegment.GetSegmentID(),
+		CollectionID:                oldSegment.GetCollectionID(),
+		PartitionID:                 oldSegment.GetPartitionID(),
+		InsertChannel:               oldSegment.GetInsertChannel(),
+		MaxRowNum:                   oldSegment.GetMaxRowNum(),
+		LastExpireTime:              oldSegment.GetLastExpireTime(),
+		StartPosition:               startPos,
+		DmlPosition:                 dmlPos,
+		IsImporting:                 oldSegment.GetIsImporting(),
+		State:                       commonpb.SegmentState_Flushed,
+		Level:                       oldSegment.GetLevel(),
+		LastLevel:                   oldSegment.GetLastLevel(),
+		PartitionStatsVersion:       oldSegment.GetPartitionStatsVersion(),
+		LastPartitionStatsVersion:   oldSegment.GetLastPartitionStatsVersion(),
+		CreatedByCompaction:         true,
+		IsInvisible:                 false,
+		StorageVersion:              resultSegment.GetStorageVersion(),
+		NumOfRows:                   resultSegment.GetNumOfRows(),
+		Binlogs:                     resultSegment.GetInsertLogs(),
+		Statslogs:                   resultSegment.GetField2StatslogPaths(),
+		TextStatsLogs:               resultSegment.GetTextStatsLogs(),
+		Bm25Statslogs:               resultSegment.GetBm25Logs(),
+		Deltalogs:                   resultSegment.GetDeltalogs(),
+		CompactionFrom:              []int64{oldSegment.GetID()},
+		TransformStartAfterTimetick: SegmentTransformStart(oldSegment),
+		CreateTs:                    compactionTaskCreateTS(t),
+		IsSorted:                    oldSegment.GetIsSorted(),
+		ManifestPath:                resultSegment.GetManifest(),
+		ExpirQuantiles:              resultSegment.GetExpirQuantiles(),
+		IsSortedByNamespace:         oldSegment.GetIsSortedByNamespace(),
+		SchemaVersion:               schemaVersion,
 		// Statistics is computed at the compactor and shipped on the
 		// CompactionSegment; the receiver copies it verbatim.
 		Stats: resultSegment.GetStats(),

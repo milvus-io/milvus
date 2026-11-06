@@ -8,7 +8,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 func schemaGCTestMeta() *streamingpb.VChannelMeta {
@@ -64,9 +66,9 @@ func TestSchemaGCRetainsReplayAndSegmentDependencies(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			view := NewVChannelViewFromMeta(schemaGCTestMeta())
-			var segments []*streamingpb.SegmentAssignmentMeta
+			var segments []segment.SchemaReference
 			if tc.segment != nil {
-				segments = append(segments, tc.segment)
+				segments = append(segments, segment.NewSegmentViewFromMetaWithConfig(tc.segment, nil, segment.ViewConfig{}).SchemaReference())
 			}
 			deletion, changed := view.SchemaCleanupPlan(tc.floor, segments)
 			require.Nil(t, deletion)
@@ -195,4 +197,33 @@ func TestSchemaGCAllowsBusyBaseMetaAndPreservesConcurrentSchema(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A vchannel with schema history stays a cleanup candidate, and every persist
+// pass rescans the segments it retains (here, until their data version floor is
+// persisted). The rescan must not copy their assignments.
+func TestSchemaGCRescanDoesNotCopySegments(t *testing.T) {
+	const segmentCount = 64
+	segments := make(map[int64]*streamingpb.SegmentAssignmentMeta, segmentCount)
+	for id := int64(1); id <= segmentCount; id++ {
+		segments[id] = &streamingpb.SegmentAssignmentMeta{
+			SegmentId: id, CollectionId: 1, PartitionId: 10, Vchannel: "v1",
+			State:              streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED,
+			CheckpointTimeTick: 25, SealedAtDataVersion: &viewpb.DataVersion{StreamingVersion: 2},
+			Stat: &streamingpb.SegmentAssignmentStat{CreateSegmentTimeTick: 15},
+		}
+	}
+	manager, err := NewPChannelRecoveryManager(PChannelManagerConfig{
+		PChannel: "p1", VChannelMetas: map[string]*streamingpb.VChannelMeta{"v1": schemaGCTestMeta()}, Segments: segments,
+	})
+	require.NoError(t, err)
+	t.Cleanup(manager.Close)
+	module := manager.Module("v1")
+	cleanup := moduleapi.CleanupContext{PhysicalTimeTick: 35}
+	allocs := testing.AllocsPerRun(10, func() { module.ConsumeCleanupSnapshots(cleanup) })
+	require.Less(t, allocs, float64(segmentCount))
+	require.Len(t, module.cleanupSegments, segmentCount)
+	schemas := module.vchannelView.AssignmentMeta().GetCollectionInfo().GetSchemas()
+	require.Equal(t, streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL, schemas[0].GetState(), "the segments pin the first version")
+	require.Equal(t, streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_DROPPED, schemas[1].GetState())
 }

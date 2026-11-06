@@ -26,7 +26,6 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
@@ -37,14 +36,12 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
-	"github.com/milvus-io/milvus/internal/metacache"
 	metastorekv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -64,10 +61,7 @@ func TestManifestIndexRollbackRealManifestBatchesAndRestart(t *testing.T) {
 			catalog := metastorekv.NewCatalog(kv, "", "")
 			boot := func() *meta.Meta {
 				b := broker.NewMockBroker(t)
-				b.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{
-					Status: merr.Success(), DbCollections: []*rootcoordpb.DBCollections{{DbName: "default", CollectionIDs: []int64{meta.RestartCollID}}},
-				}, nil)
-				m, err := meta.NewMeta(ctx, catalog, index.MigrationServerCopyFixture(t, root), metacache.NewMetaStore(catalog), b, index.LoadIndexTestMetas(catalog, &index.IndexTestMetas{}))
+				m, err := meta.NewMeta(ctx, catalog, index.MigrationServerCopyFixture(t, root), meta.NewMetaStoreWithCollections(catalog, meta.RestartCollID), b, index.LoadIndexTestMetas(catalog, &index.IndexTestMetas{}))
 				require.NoError(t, err)
 				t.Cleanup(m.CloseManifestCommitExecutor)
 				return m

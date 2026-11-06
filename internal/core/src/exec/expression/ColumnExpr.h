@@ -181,7 +181,7 @@ class PhyColumnExpr : public Expr {
     const segcore::SegmentChunkReader segment_chunk_reader_;
     int64_t batch_size_;
     std::shared_ptr<const milvus::expr::ColumnExpr> expr_;
-    PinnedValueLookup value_lookup_;
+    ValueLookupSource value_lookup_;
 };
 
 }  //namespace exec

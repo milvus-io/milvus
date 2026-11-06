@@ -18,7 +18,6 @@ package snapshot
 
 import (
 	"context"
-	"math"
 	"slices"
 	"sort"
 	"strconv"
@@ -38,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/copysegment"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
@@ -357,8 +357,10 @@ type SnapshotManager interface {
 // Implementation: Struct and Constructor
 // ============================================================================
 
-// snapshotManager implements the SnapshotManager interface.
+// Manager implements the SnapshotManager interface.
 type Manager struct {
+	CollectionRestorer RestoreCollectionManager
+	IndexMeta          *index.IndexMeta
 	// Core dependencies
 	meta            *meta.Meta                  // Segment metadata management
 	snapshotMeta    *SnapshotMeta               // Snapshot metadata management
@@ -369,7 +371,7 @@ type Manager struct {
 
 	// External services
 	handler meta.Handler  // For generating snapshot data
-	Broker  broker.Broker // For querying partition information
+	Broker  broker.Broker // For creating collections and partitions via RootCoord
 
 	// Index engine version manager for compatibility checks during restore
 	IndexEngineVersionManager index.IndexEngineVersionManager
@@ -405,7 +407,7 @@ type snapshotExportTarget struct {
 //   - copySegmentMeta: Copy segment job/task metadata manager
 //   - allocator: Allocator for all ID allocations (snapshot, job, segment)
 //   - handler: Handler for generating snapshot data
-//   - broker: Broker for coordinator communication
+//   - broker: Broker for creating collections and partitions via RootCoord
 //   - getChannelsFunc: Function to get channels by collection ID
 //
 // Returns:
@@ -624,11 +626,11 @@ func (sm *Manager) validateCMEKCompatibility(
 	sourceEzID, hasSourceEz := hookutil.ParseEzIDFromProperties(snapshotData.Collection.Schema.Properties)
 
 	// Get target database properties first (needed for both encrypted and non-encrypted snapshots)
-	dbResp, err := sm.Broker.DescribeDatabase(ctx, targetDbName)
+	db, err := metacache.GetDatabaseOrNotFound(sm.meta.MetaStore, targetDbName)
 	if err != nil {
 		return merr.Wrapf(err, "failed to describe target database %s", targetDbName)
 	}
-	targetIsEncrypted := hookutil.IsDBEncrypted(dbResp.GetProperties())
+	targetIsEncrypted := hookutil.IsDBEncrypted(db.Properties)
 
 	// Case 1: Non-encrypted snapshot
 	if !hasSourceEz {
@@ -646,7 +648,7 @@ func (sm *Manager) validateCMEKCompatibility(
 	}
 
 	// Extract target EZ ID and validate match
-	targetEzID, hasTargetEz := hookutil.ParseEzIDFromProperties(dbResp.GetProperties())
+	targetEzID, hasTargetEz := hookutil.ParseEzIDFromProperties(db.Properties)
 	if !hasTargetEz {
 		return merr.WrapErrParameterInvalidMsg(
 			"target database %s is marked as encrypted but has no encryption zone ID", targetDbName)
@@ -921,6 +923,9 @@ func (sm *Manager) finishRestoreSnapshot(
 	rollback RollbackFunc,
 	validateResources ValidateResourcesFunc,
 ) (jobID int64, err error) {
+	if sm.CollectionRestorer != nil {
+		return sm.broadcastRestoreCollection(ctx, snapshotData, snapshotName, sourceCollectionID, targetCollectionName, targetDbName, pinID, external, snapshotS3Location, externalSpec)
+	}
 	snapshotFingerprint := ""
 	if external {
 		snapshotFingerprint, err = snapshotstorage.SnapshotFingerprint(snapshotData)
@@ -1047,18 +1052,17 @@ func (sm *Manager) validateRestoreTargetAbsent(
 	targetDbName string,
 	targetCollectionName string,
 ) error {
-	_, err := sm.Broker.DescribeCollectionByName(ctx, targetDbName, targetCollectionName)
-	if err == nil {
+	if _, err := metacache.GetDatabaseOrNotFound(sm.meta.MetaStore, targetDbName); err != nil {
+		return merr.Wrap(err, "failed to validate restore target collection")
+	}
+	if sm.meta.GetCollectionByName(targetDbName, targetCollectionName) != nil {
 		return merr.WrapErrParameterInvalidMsg(
 			"target collection %s already exists in database %s",
 			targetCollectionName,
 			targetDbName,
 		)
 	}
-	if errors.Is(err, merr.ErrCollectionNotFound) {
-		return nil
-	}
-	return merr.Wrap(err, "failed to validate restore target collection")
+	return nil
 }
 
 func (sm *Manager) ExportSnapshot(
@@ -1152,12 +1156,13 @@ func (sm *Manager) RestoreCollection(
 		return 0, err
 	}
 
-	// Get the new collection ID by querying with collection name
-	resp, err := sm.Broker.DescribeCollectionByName(ctx, targetDbName, targetCollectionName)
-	if err := merr.CheckRPCCall(resp, err); err != nil {
-		return 0, err
+	// Get the new collection ID by its name. CreateCollection returns once
+	// RootCoord has applied it, so the view already holds the collection.
+	coll := sm.meta.GetCollectionByName(targetDbName, targetCollectionName)
+	if coll == nil {
+		return 0, merr.WrapErrCollectionNotFoundWithDB(targetDbName, targetCollectionName)
 	}
-	collectionID := resp.GetCollectionID()
+	collectionID := coll.ID
 
 	// Create user partitions
 	if err := sm.restoreUserPartitions(ctx, snapshotData, targetCollectionName, targetDbName); err != nil {
@@ -1181,9 +1186,9 @@ func (sm *Manager) RestoreIndexes(
 	snapshotName string,
 ) error {
 	// Get collection info for dbId
-	coll, err := sm.Broker.DescribeCollectionInternal(ctx, collectionID)
+	coll, err := sm.meta.GetCollectionOrNotFound(collectionID)
 	if err != nil {
-		return merr.Wrapf(err, "failed to describe collection %d", collectionID)
+		return merr.Wrapf(err, "failed to get collection %d", collectionID)
 	}
 
 	for _, indexInfo := range snapshotData.Indexes {
@@ -1212,7 +1217,7 @@ func (sm *Manager) RestoreIndexes(
 			return merr.Wrapf(err, "failed to validate index %s", indexInfo.GetIndexName())
 		}
 
-		if err := index.CheckOrdinaryArraySortIndex(typeutil.GetField(coll.GetSchema(), idx.FieldID), meta.GetIndexType(idx.IndexParams), sm.IndexEngineVersionManager); err != nil {
+		if err := index.CheckOrdinaryArraySortIndex(typeutil.GetField(coll.Schema, idx.FieldID), meta.GetIndexType(idx.IndexParams), sm.IndexEngineVersionManager); err != nil {
 			return merr.Wrapf(err, "failed to validate index %s", indexInfo.GetIndexName())
 		}
 
@@ -1243,7 +1248,7 @@ func (sm *Manager) RestoreIndexes(
 		// Broadcast CreateIndex message directly to DDL WAL
 		_, err = b.Broadcast(ctx, message.NewCreateIndexMessageBuilderV2().
 			WithHeader(&message.CreateIndexMessageHeader{
-				DbId:         coll.GetDbId(),
+				DbId:         coll.DatabaseID,
 				CollectionId: collectionID,
 				FieldId:      indexInfo.GetFieldID(),
 				IndexId:      indexID,
@@ -1312,6 +1317,7 @@ func (sm *Manager) restoreData(
 	external bool,
 	externalSpec string,
 	expectedSnapshotFingerprint string,
+	publication ...*restorePublication,
 ) (int64, error) {
 	mlog.Info(ctx, "restore data started",
 		mlog.String("snapshot", snapshotName),
@@ -1421,6 +1427,7 @@ func (sm *Manager) restoreData(
 		snapshotS3Location,
 		externalSpec,
 		actualSnapshotFingerprint,
+		publication...,
 	); err != nil {
 		mlog.Error(context.TODO(), "failed to create restore job", mlog.Err(err))
 		if external {
@@ -1532,21 +1539,15 @@ func (sm *Manager) buildPartitionMapping(
 	collectionID int64,
 ) (map[int64]int64, error) {
 	// Get current partitions
-	currentPartitions, err := sm.Broker.ShowPartitions(ctx, collectionID)
+	coll, err := sm.meta.GetCollectionOrNotFound(collectionID)
 	if err != nil {
 		return nil, err
-	}
-
-	// Build partition name to ID mapping for target collection
-	currrentPartitionMap := make(map[string]int64)
-	for i, name := range currentPartitions.GetPartitionNames() {
-		currrentPartitionMap[name] = currentPartitions.GetPartitionIDs()[i]
 	}
 
 	// Build snapshot partition ID to target partition ID mapping with same name
 	partitionMapping := make(map[int64]int64)
 	for partitionName, partitionID := range snapshotData.Collection.GetPartitions() {
-		targetPartID, ok := currrentPartitionMap[partitionName]
+		targetPartID, ok := coll.LivePartitionID(partitionName)
 		if !ok {
 			return nil, merr.WrapErrDataIntegrityMsg(
 				"partition %s from snapshot not found in target collection", partitionName)
@@ -1616,14 +1617,21 @@ func (sm *Manager) createRestoreJob(
 	snapshotS3Location string,
 	externalSpec string,
 	snapshotFingerprint string,
+	publication ...*restorePublication,
 ) error {
+	var starts map[string]uint64
+	createsCollection := false
+	if len(publication) > 0 {
+		starts = publication[0].starts
+		createsCollection = publication[0].createsCollection
+	}
 	// Validate which segments exist in local meta for same-cluster restore.
 	// External restore reads source metadata from object storage; source
 	// segments do not exist in the target cluster's DataCoord meta.
 	validSegments := make([]*datapb.SegmentDescription, 0, len(snapshotData.Segments))
 	for _, segDesc := range snapshotData.Segments {
 		sourceSegmentID := segDesc.GetSegmentId()
-		if !external {
+		if !external && !createsCollection {
 			segInfo := sm.meta.GetSegment(ctx, sourceSegmentID)
 			if segInfo == nil {
 				mlog.Warn(ctx, "source segment not found in meta, skipping",
@@ -1634,12 +1642,15 @@ func (sm *Manager) createRestoreJob(
 		validSegments = append(validSegments, segDesc)
 	}
 
-	// Allocate target segment IDs
-	// AllocN returns (start, end, error), where end = start + count
-	targetSegmentIDStart, _, err := sm.Allocator.AllocN(int64(len(validSegments)))
-	if err != nil {
-		mlog.Error(context.TODO(), "failed to allocate segment IDs", mlog.Err(err))
-		return err
+	// The callback allocates IDs once and persists them in the Job before any
+	// native target segment is registered. Retries find that Job by WAL JobID.
+	var targetSegmentIDStart int64
+	if len(validSegments) > 0 {
+		var err error
+		targetSegmentIDStart, _, err = sm.Allocator.AllocN(int64(len(validSegments)))
+		if err != nil {
+			return err
+		}
 	}
 
 	// Create ID mappings and pre-register target segments
@@ -1682,38 +1693,9 @@ func (sm *Manager) createRestoreJob(
 			return err
 		}
 
-		// Prepare positions with correct channel names
-		startPos := segDesc.GetStartPosition()
-		dmlPos := segDesc.GetDmlPosition()
-		if startPos != nil {
-			startPos.ChannelName = targetChannelName
+		if !createsCollection {
+			targetSegments[targetSegmentID] = copysegment.RestoredSegmentInfo(segDesc, targetCollection, targetPartitionID, targetSegmentID, targetChannelName, starts[targetChannelName])
 		}
-		if dmlPos != nil {
-			dmlPos.ChannelName = targetChannelName
-		}
-
-		// Pre-register target segment in meta. NewSegmentInfo eagerly
-		// populates Stats so concurrent RLock readers don't race on a
-		// lazy init.
-		newSegment := meta.NewSegmentInfo(&datapb.SegmentInfo{
-			ID:                  targetSegmentID,
-			CollectionID:        targetCollection,
-			PartitionID:         targetPartitionID,
-			InsertChannel:       targetChannelName,
-			NumOfRows:           segDesc.GetNumOfRows(),
-			State:               commonpb.SegmentState_Importing,
-			MaxRowNum:           Params.DataCoordCfg.SegmentMaxSize.GetAsInt64(),
-			Level:               segDesc.GetSegmentLevel(),
-			CreatedByCompaction: false,
-			LastExpireTime:      math.MaxUint64,
-			StartPosition:       startPos,
-			DmlPosition:         dmlPos,
-			StorageVersion:      segDesc.GetStorageVersion(),
-			IsSorted:            segDesc.GetIsSorted(),
-			CommitTimestamp:     segDesc.GetCommitTimestamp(),
-			IsImporting:         true,
-		})
-		targetSegments[targetSegmentID] = newSegment
 	}
 
 	// Pre-register all target segments in meta to ensure they exist when copy tasks run
@@ -1752,15 +1734,18 @@ func (sm *Manager) createRestoreJob(
 				{Key: "copy_index", Value: "true"},
 				{Key: "source_type", Value: "snapshot"},
 			},
-			TotalSegments:       int64(len(idMappings)),
-			TotalRows:           totalRows,
-			SnapshotName:        snapshotData.SnapshotInfo.GetName(),
-			SourceCollectionId:  snapshotData.SnapshotInfo.GetCollectionId(),
-			PinId:               pinID,
-			External:            external,
-			SnapshotS3Location:  snapshotS3Location,
-			ExternalSpec:        externalSpec,
-			SnapshotFingerprint: snapshotFingerprint,
+			TotalSegments:                int64(len(idMappings)),
+			TotalRows:                    totalRows,
+			SnapshotName:                 snapshotData.SnapshotInfo.GetName(),
+			SourceCollectionId:           snapshotData.SnapshotInfo.GetCollectionId(),
+			PinId:                        pinID,
+			External:                     external,
+			SnapshotS3Location:           snapshotS3Location,
+			ExternalSpec:                 externalSpec,
+			SnapshotFingerprint:          snapshotFingerprint,
+			TransformStartAfterTimeticks: starts,
+			CreatesCollection:            createsCollection,
+			ChannelMapping:               channelMapping,
 		},
 		Tr:            timerecord.NewTimeRecorder("copy segment job"),
 		SnapshotCache: &copysegment.CopySegmentSnapshotCache{},
@@ -1897,7 +1882,7 @@ func (sm *Manager) HasActivePins(ctx context.Context, collectionID int64, name s
 // Used by ListSnapshots and ListRestoreJobs for database-level filtering.
 func (sm *Manager) getDBCollectionIDs(dbID int64) map[int64]struct{} {
 	result := make(map[int64]struct{})
-	for _, coll := range sm.meta.GetCollections() {
+	for _, coll := range sm.meta.GetAllCollections() {
 		if coll.DatabaseID == dbID {
 			result[coll.ID] = struct{}{}
 		}

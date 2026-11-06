@@ -44,7 +44,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -1086,6 +1085,53 @@ func TestMeta_MarkIndexAsDeleted(t *testing.T) {
 	})
 }
 
+// Index DDL holds fieldIndexLock only to install definitions, never across
+// its catalog write, so readers and DDL of other collections are not blocked
+// by an etcd round trip.
+func TestIndexDDLDoesNotHoldFieldIndexLockAcrossCatalogIO(t *testing.T) {
+	ctx := context.Background()
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	m := NewSegmentIndexMeta(catalog)
+	m.updateCollectionIndex(&model.Index{CollectionID: 1, IndexID: 10})
+	m.updateCollectionIndex(&model.Index{CollectionID: 2, IndexID: 20})
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	catalog.EXPECT().AlterIndexes(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, indexes []*model.Index) error {
+			if indexes[0].CollectionID == 1 {
+				close(entered)
+				<-release
+			}
+			return nil
+		}).Twice()
+
+	blocked := make(chan error, 1)
+	go func() { blocked <- m.MarkIndexAsDeleted(ctx, 1, nil) }()
+	<-entered
+
+	done := make(chan error, 1)
+	go func() {
+		if len(m.GetIndexesForCollection(1, "")) != 1 {
+			done <- errors.New("collection 1 must keep its index until its catalog write returns")
+			return
+		}
+		done <- m.MarkIndexAsDeleted(ctx, 2, nil)
+	}()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		close(release)
+		t.Fatal("a reader or another collection's DDL waited for a catalog write")
+	}
+	assert.False(t, m.IsIndexExist(2, 20))
+
+	close(release)
+	require.NoError(t, <-blocked)
+	assert.False(t, m.IsIndexExist(1, 10))
+}
+
 func TestMeta_GetSegmentIndexes(t *testing.T) {
 	catalog := &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}
 	im := createIndexMeta(catalog)
@@ -1152,6 +1198,100 @@ func TestMeta_GetSegmentIndexes(t *testing.T) {
 		assert.True(t, ok)
 		assert.NotNil(t, segIdx)
 	})
+}
+
+func TestIndexMeta_QueryViewIndexSnapshotDoesNotObservePartialSegmentIndexBatch(t *testing.T) {
+	const (
+		collectionID = UniqueID(100)
+		indexID      = UniqueID(200)
+		segment1ID   = UniqueID(1000)
+		segment2ID   = UniqueID(1001)
+	)
+
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Once()
+
+	meta := NewSegmentIndexMeta(catalog)
+	meta.Indexes[collectionID] = map[UniqueID]*model.Index{
+		indexID: {
+			CollectionID: collectionID,
+			IndexID:      indexID,
+		},
+	}
+	meta.updateSegmentIndex(&model.SegmentIndex{
+		CollectionID: collectionID,
+		SegmentID:    segment1ID,
+		IndexID:      indexID,
+		BuildID:      300,
+		IndexVersion: 1,
+	})
+	meta.updateSegmentIndex(&model.SegmentIndex{
+		CollectionID: collectionID,
+		SegmentID:    segment2ID,
+		IndexID:      indexID,
+		BuildID:      301,
+		IndexVersion: 1,
+	})
+
+	firstSegmentRead := make(chan struct{})
+	continueSnapshot := make(chan struct{})
+	var getSegmentIndexesOrigin func(*IndexMeta, UniqueID, UniqueID) map[UniqueID]*model.SegmentIndex
+	getSegmentIndexesMock := mockey.Mock((*IndexMeta).GetSegmentIndexesUnsafe).To(
+		func(meta *IndexMeta, collectionID, segmentID UniqueID) map[UniqueID]*model.SegmentIndex {
+			indexes := getSegmentIndexesOrigin(meta, collectionID, segmentID)
+			if segmentID == segment1ID {
+				close(firstSegmentRead)
+				<-continueSnapshot
+			}
+			return indexes
+		},
+	).Origin(&getSegmentIndexesOrigin).Build()
+	defer getSegmentIndexesMock.UnPatch()
+
+	snapshotDone := make(chan map[int64]map[UniqueID]*model.SegmentIndex, 1)
+	go func() {
+		_, segmentIndexes := meta.GetQueryViewIndexSnapshot(collectionID, []UniqueID{segment1ID, segment2ID})
+		snapshotDone <- segmentIndexes
+	}()
+	<-firstSegmentRead
+
+	updateDone := make(chan error, 1)
+	go func() {
+		updateDone <- meta.alterSegmentIndexes([]*model.SegmentIndex{
+			{
+				CollectionID: collectionID,
+				SegmentID:    segment1ID,
+				IndexID:      indexID,
+				BuildID:      300,
+				IndexVersion: 2,
+			},
+			{
+				CollectionID: collectionID,
+				SegmentID:    segment2ID,
+				IndexID:      indexID,
+				BuildID:      301,
+				IndexVersion: 2,
+			},
+		})
+	}()
+
+	updateCompletedBeforeSnapshot := false
+	select {
+	case err := <-updateDone:
+		require.NoError(t, err)
+		updateCompletedBeforeSnapshot = true
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(continueSnapshot)
+
+	snapshot := <-snapshotDone
+	if !updateCompletedBeforeSnapshot {
+		require.NoError(t, <-updateDone)
+	}
+	require.Contains(t, snapshot[segment1ID], indexID)
+	require.Contains(t, snapshot[segment2ID], indexID)
+	assert.Equal(t, int64(1), snapshot[segment1ID][indexID].IndexVersion)
+	assert.Equal(t, int64(1), snapshot[segment2ID][indexID].IndexVersion)
 }
 
 func TestMeta_GetAllSegmentIndexes(t *testing.T) {
@@ -2437,16 +2577,20 @@ func TestStoredIndexFilesSizeMetric(t *testing.T) {
 	collIDLabel := fmt.Sprintf("%d", collID)
 	var serializedSize uint64 = 4096
 
-	// helper: builds a fresh indexMeta with one segment index (size=0, InProgress).
-	setup := func(t *testing.T) *IndexMeta {
+	// newMeta registers the field index through updateCollectionIndex, as
+	// CreateIndex and reload do, so the stored-size aggregate tracks it.
+	newMeta := func(t *testing.T) (*IndexMeta, *catalogmocks.DataCoordCatalog) {
 		metrics.DataCoordStoredIndexFilesSize.Reset()
-
 		catalog := catalogmocks.NewDataCoordCatalog(t)
+		m := NewSegmentIndexMeta(catalog)
+		m.updateCollectionIndex(&model.Index{CollectionID: collID, IndexID: indexID})
+		return m, catalog
+	}
+	// setup adds one in-progress segment index (size=0).
+	setup := func(t *testing.T) (*IndexMeta, *catalogmocks.DataCoordCatalog) {
+		m, catalog := newMeta(t)
 		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
-		catalog.EXPECT().DropSegmentIndex(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
-
-		indexBuildInfo := NewSegmentIndexBuildInfo()
-		indexBuildInfo.Add(&model.SegmentIndex{
+		m.updateSegmentIndex(&model.SegmentIndex{
 			SegmentID:           segID,
 			CollectionID:        collID,
 			PartitionID:         partID,
@@ -2456,288 +2600,131 @@ func TestStoredIndexFilesSizeMetric(t *testing.T) {
 			IndexState:          commonpb.IndexState_InProgress,
 			IndexSerializedSize: 0,
 		})
-
-		m := &IndexMeta{
-			ctx:              context.Background(),
-			Catalog:          catalog,
-			KeyLock:          lock.NewKeyLock[UniqueID](),
-			SegmentBuildInfo: indexBuildInfo,
-			Indexes: map[UniqueID]map[UniqueID]*model.Index{
-				collID: {indexID: {CollectionID: collID, IndexID: indexID}},
-			},
-			SegmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
-		}
-		segIdxes := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
-		segIdxes.Insert(indexID, &model.SegmentIndex{
-			SegmentID:    segID,
-			CollectionID: collID,
-			IndexID:      indexID,
-			BuildID:      buildID,
-		})
-		m.SegmentIndexes.Insert(segID, segIdxes)
-		return m
+		return m, catalog
+	}
+	finish := func(t *testing.T, m *IndexMeta, size uint64) {
+		require.NoError(t, m.FinishTask(&workerpb.IndexTaskInfo{
+			BuildID:        buildID,
+			State:          commonpb.IndexState_Finished,
+			IndexFileKeys:  []string{"file1", "file2"},
+			SerializedSize: size,
+		}))
+	}
+	// gauge reads the series without creating it; an absent series reads 0.
+	gauge := func(t *testing.T) float64 {
+		return float64(storedIndexSizeSeries(t)[collID])
 	}
 
 	// FinishTask must add the real serialized size (not 0 from stale pointer).
 	t.Run("FinishTask adds real serialized size", func(t *testing.T) {
-		m := setup(t)
-
-		err := m.FinishTask(&workerpb.IndexTaskInfo{
-			BuildID:        buildID,
-			State:          commonpb.IndexState_Finished,
-			IndexFileKeys:  []string{"file1", "file2"},
-			SerializedSize: serializedSize,
-		})
-		assert.NoError(t, err)
-
-		val := testutil.ToFloat64(metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "", collIDLabel))
-		assert.Equal(t, float64(serializedSize), val,
+		m, _ := setup(t)
+		finish(t, m, serializedSize)
+		assert.Equal(t, float64(serializedSize), gauge(t),
 			"metric should equal serialized size after FinishTask")
 	})
 
 	// Segment dropped (e.g. compaction) while the index definition is still
 	// alive. RemoveSegmentIndex is the only place the size gets reclaimed.
 	t.Run("RemoveSegmentIndex subtracts when index alive (segment drop)", func(t *testing.T) {
-		m := setup(t)
-
-		err := m.FinishTask(&workerpb.IndexTaskInfo{
-			BuildID:        buildID,
-			State:          commonpb.IndexState_Finished,
-			IndexFileKeys:  []string{"file1", "file2"},
-			SerializedSize: serializedSize,
-		})
-		assert.NoError(t, err)
-
-		err = m.RemoveSegmentIndex(context.TODO(), buildID)
-		assert.NoError(t, err)
-
-		val := testutil.ToFloat64(metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "", collIDLabel))
-		assert.Equal(t, float64(0), val,
+		m, catalog := setup(t)
+		catalog.EXPECT().DropSegmentIndex(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		finish(t, m, serializedSize)
+		assert.NoError(t, m.RemoveSegmentIndex(context.TODO(), buildID))
+		assert.Equal(t, float64(0), gauge(t),
 			"RemoveSegmentIndex must subtract when index definition is still alive")
 	})
 
 	// Retry idempotency: calling FinishTask twice with the same size must not
 	// double-count the metric.
 	t.Run("FinishTask retry is idempotent", func(t *testing.T) {
-		m := setup(t)
-
+		m, _ := setup(t)
 		for i := 0; i < 2; i++ {
-			err := m.FinishTask(&workerpb.IndexTaskInfo{
-				BuildID:        buildID,
-				State:          commonpb.IndexState_Finished,
-				IndexFileKeys:  []string{"file1", "file2"},
-				SerializedSize: serializedSize,
-			})
-			assert.NoError(t, err)
+			finish(t, m, serializedSize)
 		}
-
-		val := testutil.ToFloat64(metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "", collIDLabel))
-		assert.Equal(t, float64(serializedSize), val,
+		assert.Equal(t, float64(serializedSize), gauge(t),
 			"metric must equal serialized size exactly once, not doubled")
 	})
 
 	// Index version upgrade: FinishTask called again with a different size
 	// should adjust the metric by the delta.
 	t.Run("FinishTask with new size adjusts metric by delta", func(t *testing.T) {
-		m := setup(t)
-
-		err := m.FinishTask(&workerpb.IndexTaskInfo{
-			BuildID:        buildID,
-			State:          commonpb.IndexState_Finished,
-			IndexFileKeys:  []string{"file1", "file2"},
-			SerializedSize: serializedSize,
-		})
-		assert.NoError(t, err)
-
+		m, _ := setup(t)
+		finish(t, m, serializedSize)
 		var newSize uint64 = 8192
-		err = m.FinishTask(&workerpb.IndexTaskInfo{
-			BuildID:        buildID,
-			State:          commonpb.IndexState_Finished,
-			IndexFileKeys:  []string{"file1", "file2", "file3"},
-			SerializedSize: newSize,
-		})
-		assert.NoError(t, err)
-
-		val := testutil.ToFloat64(metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "", collIDLabel))
-		assert.Equal(t, float64(newSize), val,
+		finish(t, m, newSize)
+		assert.Equal(t, float64(newSize), gauge(t),
 			"metric should reflect the updated size after version upgrade")
 	})
 
-	// Index rebuild with a smaller size: the delta is negative, Gauge.Add
-	// accepts negative values so this must decrease the metric, not panic.
+	// Index rebuild with a smaller size must decrease the metric.
 	t.Run("FinishTask with smaller size decreases metric", func(t *testing.T) {
-		m := setup(t)
-
+		m, _ := setup(t)
 		var largeSize uint64 = 8192
-		err := m.FinishTask(&workerpb.IndexTaskInfo{
-			BuildID:        buildID,
-			State:          commonpb.IndexState_Finished,
-			IndexFileKeys:  []string{"file1", "file2", "file3"},
-			SerializedSize: largeSize,
-		})
-		assert.NoError(t, err)
-
-		val := testutil.ToFloat64(metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "", collIDLabel))
-		assert.Equal(t, float64(largeSize), val)
-
+		finish(t, m, largeSize)
+		assert.Equal(t, float64(largeSize), gauge(t))
 		var smallerSize uint64 = 2048
-		err = m.FinishTask(&workerpb.IndexTaskInfo{
-			BuildID:        buildID,
-			State:          commonpb.IndexState_Finished,
-			IndexFileKeys:  []string{"file1"},
-			SerializedSize: smallerSize,
-		})
-		assert.NoError(t, err)
-
-		val = testutil.ToFloat64(metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "", collIDLabel))
-		assert.Equal(t, float64(smallerSize), val,
+		finish(t, m, smallerSize)
+		assert.Equal(t, float64(smallerSize), gauge(t),
 			"metric should decrease when new index is smaller")
 	})
 
-	// DropCollection followed by GC RemoveSegmentIndex must not recreate a
-	// negative metric. CleanupDataCoordWithCollectionID deletes the time
-	// series, and the collection is removed from m.indexes, so
-	// RemoveSegmentIndex skips the gauge subtraction.
+	// Collection drop: the series can be deleted by
+	// CleanupDataCoordWithCollectionID before the DropIndex callback marks the
+	// indexes deleted, and GC removes the segment indexes and definitions
+	// afterwards. The gauge is written as an absolute value, so none of these
+	// steps can leave it negative.
 	t.Run("DropCollection then GC Remove must not go negative", func(t *testing.T) {
-		m := setup(t)
+		m, catalog := setup(t)
+		catalog.EXPECT().AlterIndexes(mock.Anything, mock.Anything).Return(nil)
+		catalog.EXPECT().DropSegmentIndex(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		catalog.EXPECT().DropIndex(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		finish(t, m, serializedSize)
+		assert.Equal(t, float64(serializedSize), gauge(t))
 
-		err := m.FinishTask(&workerpb.IndexTaskInfo{
-			BuildID:        buildID,
-			State:          commonpb.IndexState_Finished,
-			IndexFileKeys:  []string{"file1", "file2"},
-			SerializedSize: serializedSize,
-		})
-		assert.NoError(t, err)
-
-		val := testutil.ToFloat64(metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "", collIDLabel))
-		assert.Equal(t, float64(serializedSize), val)
-
-		// Simulate DropCollection: metric time series is deleted entirely,
-		// and collection index meta is removed.
 		metrics.CleanupDataCoordWithCollectionID(collID)
-		delete(m.Indexes, collID)
+		require.NoError(t, m.MarkIndexAsDeleted(context.TODO(), collID, nil))
+		assert.Equal(t, float64(0), gauge(t), "metric must not go negative after the series was cleaned up")
 
-		val = testutil.ToFloat64(metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "", collIDLabel))
-		assert.Equal(t, float64(0), val)
-
-		// GC removes the segment index. RemoveSegmentIndex sees the
-		// collection is gone from m.indexes, so it skips gauge subtraction.
-		err = m.RemoveSegmentIndex(context.TODO(), buildID)
-		assert.NoError(t, err)
-
-		val = testutil.ToFloat64(metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "", collIDLabel))
-		assert.Equal(t, float64(0), val,
+		require.NoError(t, m.RemoveSegmentIndex(context.TODO(), buildID))
+		assert.Equal(t, float64(0), gauge(t),
 			"metric must not go negative after GC on a dropped collection")
+		require.NoError(t, m.RemoveIndex(context.TODO(), collID, indexID))
+		assert.False(t, metrics.DataCoordStoredIndexFilesSize.DeleteLabelValues("", "", collIDLabel),
+			"removing the last index definition must delete the series")
 	})
 
 	// MarkIndexAsDeleted subtracts gauge immediately — alive index only.
 	t.Run("MarkIndexAsDeleted subtracts gauge immediately", func(t *testing.T) {
-		metrics.DataCoordStoredIndexFilesSize.Reset()
-
-		catalog := catalogmocks.NewDataCoordCatalog(t)
-		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
+		m, catalog := setup(t)
 		catalog.EXPECT().AlterIndexes(mock.Anything, mock.Anything).Return(nil)
 
-		m := &IndexMeta{
-			ctx:              context.Background(),
-			Catalog:          catalog,
-			KeyLock:          lock.NewKeyLock[UniqueID](),
-			SegmentBuildInfo: NewSegmentIndexBuildInfo(),
-			Indexes: map[UniqueID]map[UniqueID]*model.Index{
-				collID: {indexID: {CollectionID: collID, IndexID: indexID}},
-			},
-			SegmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
-		}
-
-		segIdx := &model.SegmentIndex{
-			SegmentID:    segID,
-			CollectionID: collID,
-			PartitionID:  partID,
-			IndexID:      indexID,
-			BuildID:      buildID,
-			IndexState:   commonpb.IndexState_InProgress,
-		}
-		m.SegmentBuildInfo.Add(segIdx)
-		segIdxes := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
-		segIdxes.Insert(indexID, segIdx)
-		m.SegmentIndexes.Insert(segID, segIdxes)
-
 		// Build finishes — gauge goes up.
-		err := m.FinishTask(&workerpb.IndexTaskInfo{
-			BuildID:        buildID,
-			State:          commonpb.IndexState_Finished,
-			IndexFileKeys:  []string{"file1"},
-			SerializedSize: serializedSize,
-		})
-		assert.NoError(t, err)
+		finish(t, m, serializedSize)
+		assert.Equal(t, float64(serializedSize), gauge(t))
 
-		val := testutil.ToFloat64(metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "", collIDLabel))
-		assert.Equal(t, float64(serializedSize), val)
-
-		// Drop the index — gauge goes to 0 immediately.
-		err = m.MarkIndexAsDeleted(context.TODO(), collID, []UniqueID{indexID})
-		assert.NoError(t, err)
-
-		val = testutil.ToFloat64(metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "", collIDLabel))
-		assert.Equal(t, float64(0), val,
+		// Drop the index — gauge goes to 0 immediately. segmentIndexes is
+		// cleared to guard against reintroducing a full segment-index scan.
+		m.SegmentIndexes = nil
+		require.NoError(t, m.MarkIndexAsDeleted(context.TODO(), collID, []UniqueID{indexID}))
+		assert.Equal(t, float64(0), gauge(t),
 			"gauge must be 0 immediately after MarkIndexAsDeleted")
 	})
 
 	// After MarkIndexAsDeleted subtracts, GC's RemoveSegmentIndex must not
 	// change the gauge (GC never touches it).
 	t.Run("GC after MarkIndexAsDeleted is gauge-neutral", func(t *testing.T) {
-		metrics.DataCoordStoredIndexFilesSize.Reset()
-
-		catalog := catalogmocks.NewDataCoordCatalog(t)
-		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
+		m, catalog := setup(t)
 		catalog.EXPECT().AlterIndexes(mock.Anything, mock.Anything).Return(nil)
 		catalog.EXPECT().DropSegmentIndex(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
-		m := &IndexMeta{
-			ctx:              context.Background(),
-			Catalog:          catalog,
-			KeyLock:          lock.NewKeyLock[UniqueID](),
-			SegmentBuildInfo: NewSegmentIndexBuildInfo(),
-			Indexes: map[UniqueID]map[UniqueID]*model.Index{
-				collID: {indexID: {CollectionID: collID, IndexID: indexID}},
-			},
-			SegmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
-		}
-
-		segIdx := &model.SegmentIndex{
-			SegmentID:    segID,
-			CollectionID: collID,
-			PartitionID:  partID,
-			IndexID:      indexID,
-			BuildID:      buildID,
-			IndexState:   commonpb.IndexState_InProgress,
-		}
-		m.SegmentBuildInfo.Add(segIdx)
-		segIdxes := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
-		segIdxes.Insert(indexID, segIdx)
-		m.SegmentIndexes.Insert(segID, segIdxes)
-
-		err := m.FinishTask(&workerpb.IndexTaskInfo{
-			BuildID:        buildID,
-			State:          commonpb.IndexState_Finished,
-			IndexFileKeys:  []string{"file1"},
-			SerializedSize: serializedSize,
-		})
-		assert.NoError(t, err)
-
+		finish(t, m, serializedSize)
 		// Drop the index — gauge goes to 0.
-		err = m.MarkIndexAsDeleted(context.TODO(), collID, []UniqueID{indexID})
-		assert.NoError(t, err)
-
-		val := testutil.ToFloat64(metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "", collIDLabel))
-		assert.Equal(t, float64(0), val)
+		require.NoError(t, m.MarkIndexAsDeleted(context.TODO(), collID, []UniqueID{indexID}))
+		assert.Equal(t, float64(0), gauge(t))
 
 		// GC removes the segment index — gauge must stay at 0, not go negative.
-		err = m.RemoveSegmentIndex(context.TODO(), buildID)
-		assert.NoError(t, err)
-
-		val = testutil.ToFloat64(metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "", collIDLabel))
-		assert.Equal(t, float64(0), val,
+		require.NoError(t, m.RemoveSegmentIndex(context.TODO(), buildID))
+		assert.Equal(t, float64(0), gauge(t),
 			"gauge must remain 0 after GC removes segment index post-drop")
 	})
 
@@ -2745,23 +2732,10 @@ func TestStoredIndexFilesSizeMetric(t *testing.T) {
 	// state with non-zero IndexSerializedSize. FinishTask will not be called for
 	// them, so AddSegmentIndex must count them into the gauge itself.
 	t.Run("AddSegmentIndex in Finished state counts preloaded size", func(t *testing.T) {
-		metrics.DataCoordStoredIndexFilesSize.Reset()
-
-		catalog := catalogmocks.NewDataCoordCatalog(t)
+		m, catalog := newMeta(t)
 		catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
 
-		m := &IndexMeta{
-			ctx:              context.Background(),
-			Catalog:          catalog,
-			KeyLock:          lock.NewKeyLock[UniqueID](),
-			SegmentBuildInfo: NewSegmentIndexBuildInfo(),
-			Indexes: map[UniqueID]map[UniqueID]*model.Index{
-				collID: {indexID: {CollectionID: collID, IndexID: indexID}},
-			},
-			SegmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
-		}
-
-		err := m.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+		require.NoError(t, m.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID:           segID,
 			CollectionID:        collID,
 			PartitionID:         partID,
@@ -2769,35 +2743,19 @@ func TestStoredIndexFilesSizeMetric(t *testing.T) {
 			BuildID:             buildID,
 			IndexState:          commonpb.IndexState_Finished,
 			IndexSerializedSize: serializedSize,
-		})
-		assert.NoError(t, err)
-
-		val := testutil.ToFloat64(metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "", collIDLabel))
-		assert.Equal(t, float64(serializedSize), val,
+		}))
+		assert.Equal(t, float64(serializedSize), gauge(t),
 			"AddSegmentIndex must count preloaded Finished indexes")
 	})
 
 	// Preloaded Finished index dropped via index deletion — AddSegmentIndex adds
 	// the size, MarkIndexAsDeleted subtracts it, net zero.
 	t.Run("AddSegmentIndex preloaded then MarkIndexAsDeleted nets zero", func(t *testing.T) {
-		metrics.DataCoordStoredIndexFilesSize.Reset()
-
-		catalog := catalogmocks.NewDataCoordCatalog(t)
+		m, catalog := newMeta(t)
 		catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
 		catalog.EXPECT().AlterIndexes(mock.Anything, mock.Anything).Return(nil)
 
-		m := &IndexMeta{
-			ctx:              context.Background(),
-			Catalog:          catalog,
-			KeyLock:          lock.NewKeyLock[UniqueID](),
-			SegmentBuildInfo: NewSegmentIndexBuildInfo(),
-			Indexes: map[UniqueID]map[UniqueID]*model.Index{
-				collID: {indexID: {CollectionID: collID, IndexID: indexID}},
-			},
-			SegmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
-		}
-
-		err := m.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+		require.NoError(t, m.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID:           segID,
 			CollectionID:        collID,
 			PartitionID:         partID,
@@ -2805,69 +2763,26 @@ func TestStoredIndexFilesSizeMetric(t *testing.T) {
 			BuildID:             buildID,
 			IndexState:          commonpb.IndexState_Finished,
 			IndexSerializedSize: serializedSize,
-		})
-		assert.NoError(t, err)
-
-		err = m.MarkIndexAsDeleted(context.TODO(), collID, []UniqueID{indexID})
-		assert.NoError(t, err)
-
-		val := testutil.ToFloat64(metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "", collIDLabel))
-		assert.Equal(t, float64(0), val,
+		}))
+		require.NoError(t, m.MarkIndexAsDeleted(context.TODO(), collID, []UniqueID{indexID}))
+		assert.Equal(t, float64(0), gauge(t),
 			"MarkIndexAsDeleted must subtract preloaded Finished bytes")
 	})
 
-	// FinishTask after MarkIndexAsDeleted must not re-add bytes for a dropped index.
-	// Regression: FinishTask and MarkIndexAsDeleted use different locks (keyLock vs
-	// fieldIndexLock), so a late FinishTask could race and add delta for a deleted index.
+	// FinishTask after MarkIndexAsDeleted must not re-add bytes for a dropped
+	// index. The task counts that hold the size see the index deactivated, so a
+	// late FinishTask only changes the inactive raw size.
 	t.Run("FinishTask after MarkIndexAsDeleted does not re-add gauge", func(t *testing.T) {
-		metrics.DataCoordStoredIndexFilesSize.Reset()
-
-		catalog := catalogmocks.NewDataCoordCatalog(t)
-		catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
+		m, catalog := setup(t)
 		catalog.EXPECT().AlterIndexes(mock.Anything, mock.Anything).Return(nil)
 
-		m := &IndexMeta{
-			ctx:              context.Background(),
-			Catalog:          catalog,
-			KeyLock:          lock.NewKeyLock[UniqueID](),
-			SegmentBuildInfo: NewSegmentIndexBuildInfo(),
-			Indexes: map[UniqueID]map[UniqueID]*model.Index{
-				collID: {indexID: {CollectionID: collID, IndexID: indexID}},
-			},
-			SegmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
-		}
-
-		segIdx := &model.SegmentIndex{
-			SegmentID:    segID,
-			CollectionID: collID,
-			PartitionID:  partID,
-			IndexID:      indexID,
-			BuildID:      buildID,
-			IndexState:   commonpb.IndexState_InProgress,
-		}
-		m.SegmentBuildInfo.Add(segIdx)
-		segIdxes := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
-		segIdxes.Insert(indexID, segIdx)
-		m.SegmentIndexes.Insert(segID, segIdxes)
-
 		// Drop the index BEFORE the build finishes — gauge stays 0.
-		err := m.MarkIndexAsDeleted(context.TODO(), collID, []UniqueID{indexID})
-		assert.NoError(t, err)
-
-		val := testutil.ToFloat64(metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "", collIDLabel))
-		assert.Equal(t, float64(0), val)
+		require.NoError(t, m.MarkIndexAsDeleted(context.TODO(), collID, []UniqueID{indexID}))
+		assert.Equal(t, float64(0), gauge(t))
 
 		// Late FinishTask arrives — must NOT add to gauge because the index is deleted.
-		err = m.FinishTask(&workerpb.IndexTaskInfo{
-			BuildID:        buildID,
-			State:          commonpb.IndexState_Finished,
-			IndexFileKeys:  []string{"file1", "file2"},
-			SerializedSize: serializedSize,
-		})
-		assert.NoError(t, err)
-
-		val = testutil.ToFloat64(metrics.DataCoordStoredIndexFilesSize.WithLabelValues("", "", collIDLabel))
-		assert.Equal(t, float64(0), val,
+		finish(t, m, serializedSize)
+		assert.Equal(t, float64(0), gauge(t),
 			"FinishTask after index drop must not re-add bytes to gauge")
 	})
 }
@@ -2875,8 +2790,6 @@ func TestStoredIndexFilesSizeMetric(t *testing.T) {
 // The feature switch controls completed-artifact publication only. Task
 // lifecycle states remain durable in etcd in both modes.
 func TestSegmentIndexTaskStatesAlwaysPersistToEtcd(t *testing.T) {
-	assert.False(t, paramtable.Get().DataCoordCfg.WriteSegmentIndexToManifest.GetAsBool())
-
 	for _, enabled := range []bool{false, true} {
 		t.Run(fmt.Sprintf("manifest=%t", enabled), func(t *testing.T) {
 			meta.WithSegmentIndexManifestWrites(t, enabled)

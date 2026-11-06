@@ -283,7 +283,6 @@ TEST_F(StorageV2BuildSessionOrderTest, VectorAndOptionalFieldKeepRowIds) {
                         .metric_type_ = "L2",
                         .topk_ = topk},
                     BitsetView(excluded.data(), rows),
-                    nullptr,
                     result);
     ASSERT_EQ(result.seg_offsets_.size(), expected_rows.size());
     ASSERT_EQ(result.distances_.size(), expected_rows.size());

@@ -132,8 +132,7 @@ TEST(GroupBY, SealedIndex) {
     SetTestIndexMetadata(
         load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index = CreateTestIndex("test", std::move(indexing));
     load_index_info.index_params[METRICS_TYPE] = knowhere::metric::L2;
     segment->LoadIndex(load_index_info);
     int topK = 15;
@@ -936,7 +935,7 @@ TEST(GroupBY, SealedIndexOnlyNullableGroupBy) {
     SetTestIndexMetadata(
         vec_info, *indexing, milvus::index::families::kVectorMem);
     vec_info.index_params = GenIndexParams(indexing.get());
-    vec_info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
+    vec_info.index = CreateTestIndex("test", std::move(indexing));
     vec_info.index_params[METRICS_TYPE] = knowhere::metric::L2;
     segment->LoadIndex(vec_info);
 
@@ -952,8 +951,7 @@ TEST(GroupBY, SealedIndexOnlyNullableGroupBy) {
         scalar_info, *scalar_index, milvus::index::families::kSort);
     scalar_info.index_params =
         GenIndexParams(scalar_index.get(), milvus::index::families::kSort);
-    scalar_info.cache_index =
-        CreateTestCacheIndex("test", std::move(scalar_index));
+    scalar_info.index = CreateTestIndex("test", std::move(scalar_index));
     segment->LoadIndex(scalar_info);
 
     ScopedSchemaHandle handle(*schema);

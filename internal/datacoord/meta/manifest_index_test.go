@@ -71,3 +71,16 @@ func TestManifestIndexFilePathInfoIgnoresLegacyProperties(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "FLAT"}}, info.IndexParams)
 }
+
+func TestManifestIndexFilePathInfoPreservesIndexType(t *testing.T) {
+	info, ok := manifestIndexFilePathInfo(3, packed.ManifestIndexInfo{
+		IndexName: "custom_vector", IndexType: "HNSW_SQ",
+		Path: "index_v1/1/2/3/102/4", IndexFileKeys: []string{"index.bin"},
+		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+		Properties:            map[string]string{common.IndexTypeKey: "HNSW"},
+	})
+	require.True(t, ok)
+	require.Equal(t, "HNSW_SQ", info.GetIndexType())
+	require.Equal(t, "HNSW_SQ", GetIndexType(info.GetIndexParams()))
+	require.Equal(t, "custom_vector", info.GetIndexName())
+}

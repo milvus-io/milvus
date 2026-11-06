@@ -52,6 +52,7 @@ func (v *VersionedStreamingNodeAssignments) PChannelOfCChannel() string {
 // StreamingNodeAssignment is the relation between server and channels.
 type StreamingNodeAssignment struct {
 	NodeInfo StreamingNodeInfo
+	// Channels contains only primary read-write WAL assignments.
 	Channels map[string]PChannelInfo
 }
 

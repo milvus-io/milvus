@@ -15,17 +15,19 @@ storage of variable-length values such as strings must stay alive until `Build` 
 may iterate the input repeatedly within the synchronous call, but neither the builder nor the
 Artifact may retain the borrowed input.
 
-The Artifact owns the build result and emits it through `Serialize`; the Loader opens a Reader
-independently from the persisted artifact; the Reader owns the engine, mappings, backing files and
-accounting state that queries need. `hybrid/` probes cardinality within the same `Build`, selects a
+The Artifact owns the build result and emits it through `Serialize`; the Loader opens an Index
+independently from the persisted artifact. The Index owns resident storage or a cache slot and
+creates request Readers. A single-cell Reader acquires storage on first use and retains it until
+destruction; all query methods reuse that storage. Mappings, backing files, and accounting remain
+owned by the storage and cache slot. `hybrid/` probes cardinality within the same `Build`, selects a
 concrete family by field shape, nested state, version and the low/high-cardinality configuration,
 and then hands the same complete input to that family; the Hybrid Artifact records the selector. The
 platform AUTOINDEX configuration is not part of the Hybrid policy here.
 
-`TextIndexArtifact` implements the optional consuming Reader conversion, handing the completed
-Tantivy engine, the null state and the directory owner, when needed, to `TextIndexReader`. The
-conversion consumes the Artifact; Hybrid and JSON projected Artifacts only wrap the serialized state
-of the selection or projection and do not pass this capability through.
+`TextIndexArtifact::IntoStorage() &&` transfers the completed Tantivy engine, null state and
+directory owner into `TextIndexStorage`. The caller places that storage in a cache slot or
+constructs a resident `TextIndex`. Hybrid and JSON projected Artifacts only wrap the serialized
+state of the selection or projection.
 
 Numeric and string readers of the same family may share a query flow templated on the value type,
 and all of them inherit `PatternMatchReaderAdapter<Derived, T>`. The adapter's primary template is
@@ -39,16 +41,21 @@ of string dictionary/postings are each encapsulated in a type-specific storage v
 keys use `owned_t<T>`, and string lookups use transparent comparison; `Lookup` returns owned values,
 and the `string_view` from `Gather` is valid only during the synchronous callback.
 
+Persisted loads require `IndexCacheConfig` and construct an Index owning a typed cache slot.
+The slot invokes the storage loader for warmup or demand loading, including format validation and
+JSON existence data. Tests use the same path, with synchronous warmup when they need Load to
+finish storage I/O before returning; no uncached persisted-load branch exists.
+
 ## V3 loading
 
 V3 Artifacts write directly to `IndexEntryWriter`. Reads use `IndexEntryReader` or
 `AsyncIndexEntryReader` directly; `FileSink` / `FileSource` handle only legacy files.
 Each Loader's `PlanPacked` validates the directory and metadata and assigns the final memory/file
-targets, and `FinishPacked` creates the Reader from the completed targets. The synchronous and
+targets, and `FinishPackedStorage` creates storage from the completed targets. The synchronous and
 asynchronous entry points share these two steps. `PackedIndexLoad` handles reads, CRC, draining
 after cancellation, target commit and failure cleanup; asynchronous file preparation and file-backed
 engine initialization run on LocalFileIOPool. Before file targets are committed, the plan is
-responsible for cleaning them up; after success, the Reader's mapping/directory owner keeps them
+responsible for cleaning them up; after success, the storage's mapping/directory owner keeps them
 alive. Initialization without file targets stays on the async executor.
 
 ## Family boundaries

@@ -1,7 +1,6 @@
 package loadmgr
 
 import (
-	"context"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -9,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
@@ -18,9 +16,7 @@ func newTestStore(t *testing.T) (*LoadConfigStore, *versionedTestHooks) {
 	t.Helper()
 	hooks := new(versionedTestHooks)
 	deps := versionedTestDependencies(t, hooks)
-	deps.Schema = func(context.Context, int64) (*schemapb.CollectionSchema, error) {
-		return &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100}, {FieldID: 200}}}, nil
-	}
+
 	store, err := RecoverLoadConfigStore(t.Context(), deps)
 	require.NoError(t, err)
 	return store, hooks

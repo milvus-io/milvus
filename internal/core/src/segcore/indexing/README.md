@@ -1,7 +1,11 @@
 # Segment index architecture
 
-Segcore exposes a single "capability selection + pin + borrowed reader" model, but sealed and
-growing indexes use different ownership and publication mechanisms:
+This document covers segment registration, publication, and query selection. For the Index/Reader
+contracts, context lifetime, and storage accounting, see
+[Index contracts](../../index/contracts/README.md#index-and-request-reader-boundary).
+
+Queries select an index capability, create a request reader, and execute through that reader.
+Sealed and growing indexes use different ownership and publication mechanisms:
 
 - sealed indexes are stored in `IndexInventory` and published atomically with `PublishedSegmentState`;
 - growing indexes are held long-term by `GrowingIndexSet`, which publishes pinnable reader snapshots.
@@ -23,21 +27,33 @@ growing indexes use different ownership and publication mechanisms:
 `IndexInventory`
 : The index inventory of a sealed segment, grouped by field and then keyed by `IndexKey`.
   Runtime snapshots share entries through `shared_ptr`. An eager entry holds resolved metadata
-  and a `CacheSlot<IIndexReaderBase>`; warmup may already have loaded its reader. A lazy entry
-  retains a factory that resolves metadata and creates its slot on first use.
+  and an `IIndex`. A lazy entry retains a factory that resolves metadata and creates its Index
+  on first use. Each concrete Index owns its storage or engine cache.
 
-`IndexPin`
-: The move-only lifetime handle for sealed queries. It holds the cache accessor and exposes only the
-  borrowed `IIndexReaderBase*` to consumers.
+`IIndexReaderBasePtr`
+: The unique pointer owning a request reader. Deferred operations can transfer it to a shared
+  lifetime owner in the query result; ordinary queries do not allocate shared ownership state.
 
 `GrowingIndexSet`
 : Solely holds one `IGrowingIndex` publisher per field. Writes reach the owner through a separate
   `IAppendable<Batch>` capability.
 
 `GrowingIndexSnapshotPin`
-: Pins one published snapshot record. The record solely owns the reader and also records the
-  contiguous coverage bound `CoveredRowEnd`; the pin shares the record's lifetime but not ownership
-  of the reader.
+: Retains a published Index version and a request reader, together with the contiguous coverage
+  bound `CoveredRowEnd`.
+
+## Loading code ownership
+
+`SealedIndexLoader` and `TextMatchIndexLoader` live in this directory. They prepare
+segment metadata and cache policy, then delegate artifact loading to the family
+loaders under `index/`. `IndexLoadUtils` supplies their local staging root.
+`InterimSealedIndexTranslator` also lives here because it builds an engine from
+segment columns rather than reading a particular index-file format.
+
+The JSON stats shared-key loader, `BsonInvertedIndexTranslator`, lives under
+`segcore/json_stats/`. The version-independent single-cell cache adapter remains
+at `index/SingleCellIndexStorageTranslator.h`. `segcore/storagev1translator/`
+contains the field-data `ChunkTranslator` and `DefaultValueChunkTranslator`.
 
 ## Sealed: loading and publication
 
@@ -46,9 +62,10 @@ effective index `warmup=disable`. It applies to persisted scalar indexes (includ
 typed JSON projections), vector indexes, and text indexes. The flag defaults to false and affects
 future loads; already registered entries keep their initialization policy.
 
-Outer slot warmup follows the configured policy even when the vector engine supports internal
-lazy loading. That engine capability still disables eviction of the outer slot. This warmup rule
-applies independently of the lazy-slot configuration flag.
+Storage cache warmup follows the configured policy independently of lazy Index creation.
+A vector engine with native lazy loading manages its own data cache. Its non-evictable engine
+slot preserves loading admission and resident resource accounting. Engine initialization follows
+slot warmup or the first operation that needs it; Reader creation alone does not load it.
 
 During loading, `IndexInventory::Register` installs one entry into a new runtime generation. An
 eager entry resolves its family, value type, and capability before registration. A lazy entry
@@ -56,14 +73,14 @@ registers its `IndexRegistration` and factory. Queries see the complete entry se
 `PublishedSegmentState` is atomically published.
 
 Runtime clones share each `Entry`, including its immutable registration and resolved state:
-family, value type, capabilities, and slot. Replacement installs a new entry in the new inventory;
+family, value type, capabilities, and Index. Replacement installs a new entry in the new inventory;
 existing snapshots retain their original entry.
 
 Both eager and lazy entries keep their result in `resolved_`. An eager entry is ready at construction.
 A lazy entry serializes initialization with a small mutex. Waiters check their own cancellation token
 between timed lock attempts, at 10 ms intervals; cancelling a waiter does not cancel the initializer.
 Successful initialization releases its factory and captured load metadata, then publishes the result
-with a release store to atomic `ready_`. `Resolve()` and `Peek()` use acquire
+with a sequentially consistent store to atomic `ready_`. `Resolve()` and `Peek()` use acquire
 loads before reading a ready result, which is never modified after publication. `Peek()` returns empty
 while initialization is pending, without triggering or waiting for the factory. Factory failures leave
 the entry unready and its factory available for retry.
@@ -71,7 +88,7 @@ the entry unready and its factory available for retry.
 ```mermaid
 flowchart LR
     load["Load plan"] --> eager["Eager: resolve family / value type / caps"]
-    eager --> slot["Create CacheSlot<br/>warmup follows configured policy"]
+    eager --> slot["Create Index<br/>storage warmup follows configured policy"]
     eager --> meta["IndexCapabilityEntry"]
     slot --> register["IndexInventory::Register"]
     meta --> register
@@ -80,56 +97,49 @@ flowchart LR
     register --> staged["staged RuntimeResourceState"]
     staged --> publish["Atomically publish PublishedSegmentState"]
     publish --> visible["New generation visible to queries"]
-    publish --> retire["Retire replaced slots after publication"]
+    publish --> retire["Cancel replaced Index warmup after publication"]
 ```
 
 `ResolveCapability(op_ctx, field)` looks up the field's map and assembles a fresh immutable
 `FieldIndexCapability` on each call, copying and sorting its entries without caching the list.
 It resolves every lazy entry in that field before returning; successfully resolved entries are
-reused if another entry fails. Resolution may inspect index artifacts, but disabled warmup leaves
-new reader cells unloaded. `Entries(field)` copies registrations without resolving them.
+reused if another entry fails. Resolution may inspect index artifacts. With disabled warmup,
+ordinary storage cells remain cold; native lazy engines may initialize their own backend.
+`Entries(field)` copies registrations without resolving them.
 
-`PinIndex` resolves the selected entry and pins its cell through `CacheSlot::PinCells`, loading the
-reader if needed. The inventory checks that the reader's `Caps()` exactly match the resolved metadata.
+`CreateIndexReader(op_ctx, key)` resolves the selected entry and calls `Index::CreateReader(op_ctx)`.
+The inventory checks that the reader's `Caps()` exactly match the resolved metadata. Creating the
+request reader does not pin storage. Readers retain their Index version, so replacing an inventory
+entry does not invalidate an existing request reader.
 
-Slots are held by `shared_ptr`, so the published state, the old state during replacement, and the
-cache accessor can jointly keep a slot alive; the slot's cell still solely owns the reader.
-Replacing or removing an entry does not invalidate pins that have already been obtained.
+## Query: selection and execution
 
-## Query: selection, pin, and execution
-
-Expression consumers resolve the field capability, then select one entry according to the query's
-requirements. Vector search can identify its unique vector registration directly and resolve that
-entry through `PinIndex`. Sealed and growing indexes take their own pin paths, and both provide the
-executor with only a borrowed query interface.
+Expression consumers resolve a field's capabilities and select one complete entry. Vector search
+looks up the unique vector registration directly. Both paths create a request reader with the query
+context. Query methods such as `In()`, `Range()`, and `Search()` use that bound context internally.
 
 ```mermaid
 flowchart TB
-    query["Expression"] --> caps["Segment::ResolveIndexCapability(op_ctx, field)"]
-    caps --> select["Select one entry that meets the requirements"]
-
-    select -->|sealed| spin["Segment::PinIndex(key)"]
-    vector["Vector search: unique registered key"] --> spin
-    spin --> cells["CacheSlot::PinCells"]
-    cells --> indexpin["IndexPin + borrowed reader"]
-
-    select -->|growing| gpin["Segment::PinGrowingIndex(field)"]
-    gpin --> commit["CommitIfNeeded + PinSnapshot"]
-    commit --> snapshot["GrowingIndexSnapshotPin<br/>reader + CoveredRowEnd"]
-
-    indexpin --> cast["Obtain the required query interface"]
-    snapshot --> cast
-    cast --> execute["Execute within the pin lifetime"]
-    execute --> result["bitmap / top-k / iterator"]
-
+    query["Expression"] --> caps["ResolveIndexCapability(op_ctx, field)"]
+    caps --> select["Select one complete entry"]
+    select --> sealed["CreateIndexReader(op_ctx, key)"]
+    vector["Vector search"] --> vectorreader["CreateIndexReader(op_ctx, runtime, field)"]
+    vectorreader --> reader
+    sealed --> reader["Index::CreateReader(op_ctx)"]
+    reader --> execute["Reader::In / Range / Search"]
+    execute --> storage["Concrete reader pins Storage or Engine"]
+    storage --> result["bitmap / top-k / iterator"]
+    select --> growing["PinGrowingIndex(op_ctx, field)"]
+    growing --> snapshot["Index version + request reader + CoveredRowEnd"]
+    snapshot --> execute
     select -->|no usable entry| fallback["column scan / brute force"]
-    cast -->|interface not supported| fallback
 ```
 
-When the entry or the required interface does not exist, the consumer may take its own raw fallback.
-Cache load errors or capability consistency errors raised after entering the pin propagate directly
-and are not treated as "index does not exist". A deferred iterator must keep the sealed accessor
-lifetime or the growing snapshot pin until its results have been fully consumed.
+An absent entry or unsupported query interface can allow raw-data fallback. Initialization,
+capability consistency, and storage-load errors propagate instead of masquerading as absence.
+A deferred iterator retains its exact engine cell; consumer callbacks also retain the request reader
+when they use reader-owned interfaces or views. Releasing a request reader does not evict the Index's
+storage, and creating another reader does not duplicate that storage.
 
 ## Growing snapshot bounds
 
@@ -157,10 +167,9 @@ prefix; it does not guarantee that an older pin's ANN hit set stays unchanged.
 1. `IndexKey` contains both `FieldId` and an identity; different fields or different identity kinds
    are never confused.
 2. Capability selection works on a single entry; capabilities cannot be combined across entries.
-3. A reader is always solely owned by a sealed cache cell or a growing snapshot record; consumers
-   only borrow it.
-4. A borrowed reader, query interface, and their views must not outlive the corresponding pin.
-5. Sealed indexes are published with a complete runtime generation; a replaced slot is retired only
+3. A request reader binds one context and retains its Index version. The Index owns persistent resources.
+4. Borrowed query interfaces and views must not outlive their request reader or retained storage pin.
+5. Sealed indexes are published with a complete runtime generation; a replaced Index is retired only
    after the new state is published. Registration and retirement never resolve a lazy entry.
 6. Field capability assembly returns only a complete, immutable list. Lazy resolution failures
    remain retryable; entries already resolved successfully are reused.

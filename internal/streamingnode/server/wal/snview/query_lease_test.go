@@ -188,7 +188,7 @@ func TestServingLeaseForcedDropCancelsTimer(t *testing.T) {
 func TestServingLeaseConfigurationIsCaptured(t *testing.T) {
 	params := paramtable.Get()
 	key := params.QueryViewCfg.LeaseDuration.Key
-	require.Equal(t, "60s", params.QueryViewCfg.LeaseDuration.DefaultValue)
+	require.Equal(t, "5s", params.QueryViewCfg.LeaseDuration.DefaultValue)
 	original := params.QueryViewCfg.LeaseDuration.GetValue()
 	t.Cleanup(func() { require.NoError(t, params.Save(key, original)) })
 	require.NoError(t, params.Save(key, "3s"))

@@ -724,14 +724,12 @@ class BloomFilterExprEvalTest : public ::testing::Test {
         LoadIndexInfo index_info{};
         index_info.field_id = i64_fid_.get();
         index_info.field_type = DataType::INT64;
-        auto scalar_index = std::make_unique<CountingScalarReader<int64_t>>(
-            BuildTestScalarIndex<int64_t>(
-                "sort", N, i64_col_.data(), i64_valid_.data()),
-            g_bloom_reverse_lookup_calls);
+        auto scalar_index = BuildTestScalarIndex<int64_t>(
+            "sort", N, i64_col_.data(), i64_valid_.data());
         index_info.index_params = GenIndexParams(scalar_index.get(), "sort");
         SetTestIndexMetadata(index_info, *scalar_index, "sort");
-        index_info.cache_index = CreateTestCacheIndex("bloom-counting-index",
-                                                      std::move(scalar_index));
+        index_info.index = std::make_shared<CountingScalarIndex<int64_t>>(
+            std::move(scalar_index.index), g_bloom_reverse_lookup_calls);
         segment->LoadIndex(index_info);
         EXPECT_TRUE(segment->HasIndex(i64_fid_));
         return segment;
@@ -1644,7 +1642,7 @@ TEST_F(BloomFilterExprEvalTest, Int64SealedScalarIndexOnly) {
         "sort", N, i64_col_.data(), i64_valid_.data());
     idx.index_params = GenIndexParams(index.get(), "sort");
     SetTestIndexMetadata(idx, *index, "sort");
-    idx.cache_index = CreateTestCacheIndex("test", std::move(index));
+    idx.index = CreateTestIndex("test", std::move(index));
     sealed->LoadIndex(idx);
     ASSERT_FALSE(sealed->HasFieldData(i64_fid_));
     ASSERT_TRUE(sealed->HasIndex(i64_fid_));
@@ -1749,7 +1747,7 @@ TEST_F(BloomFilterExprEvalTest,
         "sort", N, i64_col_.data(), i64_valid_.data());
     idx.index_params = GenIndexParams(index.get(), "sort");
     SetTestIndexMetadata(idx, *index, "sort");
-    idx.cache_index = CreateTestCacheIndex("snapshot-race", std::move(index));
+    idx.index = CreateTestIndex("snapshot-race", std::move(index));
     sealed->LoadIndex(idx);
     ASSERT_FALSE(sealed->HasFieldData(i64_fid_));
     ASSERT_TRUE(sealed->HasIndex(i64_fid_));
@@ -1905,7 +1903,7 @@ TEST_F(BloomFilterExprEvalTest, Int64SealedBitmapIndexOnlyRejected) {
     // Retain bitmap family metadata and its disabled offset cache.
     idx.index_params = GenIndexParams(index.get(), "bitmap");
     SetTestIndexMetadata(idx, *index, "bitmap");
-    idx.cache_index = CreateTestCacheIndex("test", std::move(index));
+    idx.index = CreateTestIndex("test", std::move(index));
     sealed->LoadIndex(idx);
     ASSERT_FALSE(sealed->HasFieldData(i64_fid_));
     ASSERT_TRUE(sealed->HasIndex(i64_fid_));

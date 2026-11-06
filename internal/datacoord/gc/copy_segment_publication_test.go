@@ -50,7 +50,7 @@ func (c *copyCompletionFailCatalog) SaveCopySegmentTask(ctx context.Context, tas
 	return c.DataCoordCatalog.SaveCopySegmentTask(ctx, task)
 }
 
-func copyPublicationFixture(t *testing.T) (*meta.Meta, *copyCompletionFailCatalog, copysegment.CopySegmentMeta, copysegment.CopySegmentTask, *datapb.QueryCopySegmentResponse) {
+func copyPublicationFixture(t *testing.T) (*meta.Meta, *copyCompletionFailCatalog, copysegment.CopySegmentMeta, copysegment.CopySegmentTask, *datapb.QueryCopySegmentResponse, *meta.FakeManifestStore) {
 	t.Helper()
 	meta.WithSegmentIndexManifestWrites(t, true)
 	index.WithManifestIndexRollback(t, false)
@@ -95,12 +95,12 @@ func copyPublicationFixture(t *testing.T) (*meta.Meta, *copyCompletionFailCatalo
 			}},
 		}},
 	}
-	return m, catalog, copies, task, result
+	return m, catalog, copies, task, result, store
 }
 
 func TestCopyResultReplayAfterRollbackAndRestart(t *testing.T) {
 	ctx := context.Background()
-	m, catalog, copies, task, result := copyPublicationFixture(t)
+	m, catalog, copies, task, result, _ := copyPublicationFixture(t)
 	catalog.failCompletion = true
 	require.ErrorContains(t, copysegment.SyncCopySegmentTask(task, result, copies, m, m.IndexCatalog.(*index.IndexMeta)), "injected task completion")
 	require.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskInProgress, copies.GetTask(ctx, task.GetTaskId()).GetState())
@@ -133,9 +133,34 @@ func TestCopyResultReplayAfterRollbackAndRestart(t *testing.T) {
 	require.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskCompleted, recoveredCopies.GetTask(ctx, task.GetTaskId()).GetState())
 }
 
+func TestCopyResultRestoreReplayKeepsImportProtection(t *testing.T) {
+	ctx := t.Context()
+	m, catalog, copies, task, result, store := copyPublicationFixture(t)
+	job := copysegment.NewTestCopyJob(task.GetJobId(), datapb.CopySegmentJobState_CopySegmentJobExecuting).(*copysegment.Job)
+	job.CreatesCollection = true
+	job.CollectionId = meta.RestartCollID
+	job.IdMappings = task.GetIdMappings()
+	require.NoError(t, copies.AddJob(ctx, job))
+	catalog.failCompletion = true
+	require.ErrorContains(t, copysegment.SyncCopySegmentTask(task, result, copies, m, m.IndexCatalog.(*index.IndexMeta)), "injected task completion")
+	segment := m.GetSegment(ctx, meta.RestartSegID)
+	require.Equal(t, commonpb.SegmentState_Flushed, segment.GetState())
+	require.True(t, segment.GetIsImporting())
+
+	restarted := index.BootMigrationMeta(t, catalog, meta.RestartCollID)
+	recovered, err := copysegment.NewCopySegmentMeta(ctx, catalog, restarted, restarted.IndexCatalog.(*index.IndexMeta), nil, nil)
+	require.NoError(t, err)
+	catalog.failCompletion = false
+	store.FailReadsFrom()
+	require.NoError(t, copysegment.SyncCopySegmentTask(recovered.GetTask(ctx, task.GetTaskId()), result, recovered, restarted, restarted.IndexCatalog.(*index.IndexMeta)))
+	require.True(t, restarted.GetSegment(ctx, meta.RestartSegID).GetIsImporting())
+	require.Equal(t, segment.GetManifestPath(), restarted.GetSegment(ctx, meta.RestartSegID).GetManifestPath())
+	require.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskCompleted, recovered.GetTask(ctx, task.GetTaskId()).GetState())
+}
+
 func TestCopyResultKeepsImportProtectionThroughIndexInstall(t *testing.T) {
 	ctx := context.Background()
-	m, _, copies, task, result := copyPublicationFixture(t)
+	m, _, copies, task, result, _ := copyPublicationFixture(t)
 	gc := &GarbageCollector{Meta: m, Option: GcOption{Cli: m.ChunkManager, IndexMeta: m.IndexCatalog.(*index.IndexMeta)}}
 	var original func(context.Context, *datapb.CopySegmentResult, copysegment.CopySegmentTask, *meta.Meta, *index.IndexMeta, copysegment.CopySegmentMeta, map[int64]int64) error
 	patch := mockey.Mock(copysegment.SyncVectorScalarIndexesForTest).Origin(&original).To(func(ctx context.Context, result *datapb.CopySegmentResult,
@@ -161,7 +186,7 @@ func TestCopyResultKeepsImportProtectionThroughIndexInstall(t *testing.T) {
 
 func TestCopyResultGCFinalizationReadOrdering(t *testing.T) {
 	ctx := context.Background()
-	m, _, copies, task, result := copyPublicationFixture(t)
+	m, _, copies, task, result, _ := copyPublicationFixture(t)
 	gc := &GarbageCollector{Meta: m, Option: GcOption{Cli: m.ChunkManager, IndexMeta: m.IndexCatalog.(*index.IndexMeta)}}
 	var original func(*meta.Meta, context.Context, int64) *meta.SegmentInfo
 	finalized := false
@@ -182,7 +207,7 @@ func TestCopyResultGCFinalizationReadOrdering(t *testing.T) {
 
 func TestCopyResultEtcdFinalizationWakesBackfill(t *testing.T) {
 	ctx := context.Background()
-	m, _, copies, task, result := copyPublicationFixture(t)
+	m, _, copies, task, result, _ := copyPublicationFixture(t)
 	task.(*copysegment.Task).Task.Load().IndexWriteToManifest = proto.Bool(false)
 	result.SegmentResults[0].ManifestIndexBuildIds = nil
 	result.SegmentResults[0].IndexInfos[meta.RestartBuildID].IndexStorePathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED
@@ -221,7 +246,7 @@ func TestCopyResultRevalidatesTargetBeforeFinalization(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			m, _, copies, task, result := copyPublicationFixture(t)
+			m, _, copies, task, result, _ := copyPublicationFixture(t)
 			changedPath := packed.MarshalManifestPath("/tmp/test-restart/insert_log/300/30/8001", 2)
 			patch := mockey.Mock(copysegment.SyncJSONKeyIndexesForTest).To(func(context.Context, *datapb.CopySegmentResult, copysegment.CopySegmentTask, *meta.Meta, copysegment.CopySegmentMeta) error {
 				if dropped {
