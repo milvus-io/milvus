@@ -1167,6 +1167,8 @@ func (t *QueryTask) executeWorkload(ctx context.Context, exec shardclient.Execut
 func (t *QueryTask) executeByQueryView(ctx context.Context) error {
 	legacy := t.viewQueryClient.Legacy()
 	allowStreaming := queryclient.SupportsQueryStream(t.RetrieveRequest)
+	// Query chains return computed columns that streaming assembly does not retain.
+	allowStreaming = allowStreaming && len(t.request.GetFunctionChains()) == 0
 	request := &queryclient.LegacyQueryRequest{
 		Req: t.RetrieveRequest, Plans: t.queryViewPlans, Schema: t.schema.CollectionSchema,
 		BarrierMVCC: t.MvccTimestamp, AllowStreaming: allowStreaming,
