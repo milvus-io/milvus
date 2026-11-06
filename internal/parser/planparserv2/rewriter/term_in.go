@@ -24,7 +24,7 @@ func (v *visitor) combineOrEqualsToIn(parts []*planpb.Expr) []*planpb.Expr {
 			continue
 		}
 		col := u.GetColumnInfo()
-		if col == nil {
+		if col == nil || isFixedFloatArray(col) {
 			others = append(others, e)
 			continue
 		}
@@ -72,7 +72,7 @@ func (v *visitor) combineAndNotEqualsToNotIn(parts []*planpb.Expr) []*planpb.Exp
 			continue
 		}
 		col := u.GetColumnInfo()
-		if col == nil {
+		if col == nil || isFixedFloatArray(col) {
 			others = append(others, e)
 			continue
 		}
@@ -146,6 +146,10 @@ func (v *visitor) combineAndInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 	others := []int{}
 	for idx, e := range parts {
 		if te := e.GetTermExpr(); te != nil {
+			if isFixedFloatArray(te.GetColumnInfo()) {
+				others = append(others, idx)
+				continue
+			}
 			k, ok := termGroupKey(te)
 			if !ok {
 				others = append(others, idx)
@@ -161,6 +165,10 @@ func (v *visitor) combineAndInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 			continue
 		}
 		if ue := e.GetUnaryRangeExpr(); ue != nil && ue.GetOp() == planpb.OpType_Equal && ue.GetValue() != nil && ue.GetColumnInfo() != nil {
+			if isFixedFloatArray(ue.GetColumnInfo()) {
+				others = append(others, idx)
+				continue
+			}
 			k, ok := valueGroupKey(ue.GetColumnInfo(), ue.GetValue())
 			if !ok {
 				others = append(others, idx)
@@ -199,7 +207,7 @@ func (v *visitor) combineAndInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 		for _, ev := range g.eqValues {
 			dup := false
 			for _, u := range eqUnique {
-				if equalsGeneric(u, ev) {
+				if equalsGenericForColumn(g.col, u, ev) {
 					dup = true
 					break
 				}
@@ -227,7 +235,7 @@ func (v *visitor) combineAndInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 		ev := eqUnique[0]
 		inSet := false
 		for _, tv := range termVals {
-			if equalsGeneric(tv, ev) {
+			if equalsGenericForColumn(g.col, tv, ev) {
 				inSet = true
 				break
 			}
@@ -271,6 +279,10 @@ func (v *visitor) combineOrInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 	others := []int{}
 	for idx, e := range parts {
 		if te := e.GetTermExpr(); te != nil {
+			if isFixedFloatArray(te.GetColumnInfo()) {
+				others = append(others, idx)
+				continue
+			}
 			k, ok := termGroupKey(te)
 			if !ok {
 				others = append(others, idx)
@@ -286,6 +298,10 @@ func (v *visitor) combineOrInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 			continue
 		}
 		if ue := e.GetUnaryRangeExpr(); ue != nil && ue.GetOp() == planpb.OpType_Equal && ue.GetValue() != nil && ue.GetColumnInfo() != nil {
+			if isFixedFloatArray(ue.GetColumnInfo()) {
+				others = append(others, idx)
+				continue
+			}
 			k, ok := valueGroupKey(ue.GetColumnInfo(), ue.GetValue())
 			if !ok {
 				others = append(others, idx)
@@ -378,6 +394,10 @@ func (v *visitor) combineAndInWithRange(parts []*planpb.Expr) []*planpb.Expr {
 	}
 	for idx, e := range parts {
 		if te := e.GetTermExpr(); te != nil {
+			if isFixedFloatArray(te.GetColumnInfo()) {
+				others = append(others, idx)
+				continue
+			}
 			k, ok := termGroupKey(te)
 			if !ok {
 				others = append(others, idx)
@@ -407,6 +427,10 @@ func (v *visitor) combineAndInWithRange(parts []*planpb.Expr) []*planpb.Expr {
 			continue
 		}
 		if ue := e.GetUnaryRangeExpr(); ue != nil && isRange(ue.GetOp()) && ue.GetValue() != nil && ue.GetColumnInfo() != nil {
+			if isFixedFloatArray(ue.GetColumnInfo()) {
+				others = append(others, idx)
+				continue
+			}
 			k, ok := valueGroupKey(ue.GetColumnInfo(), ue.GetValue())
 			if !ok {
 				others = append(others, idx)
@@ -566,7 +590,7 @@ func (v *visitor) combineAndInWithIn(parts []*planpb.Expr) []*planpb.Expr {
 		if len(g.idxs) <= 1 {
 			continue
 		}
-		inter, ok := intersectSortedTermValues(g.values)
+		inter, ok := intersectSortedTermValues(g.col, g.values)
 		if !ok {
 			continue
 		}
@@ -592,7 +616,7 @@ func (v *visitor) combineAndInWithIn(parts []*planpb.Expr) []*planpb.Expr {
 
 // intersectSortedTermValues intersects normalized TermExpr value lists without
 // mutating them. Unsupported values fall back to the original conjunction.
-func intersectSortedTermValues(valueSets [][]*planpb.GenericValue) ([]*planpb.GenericValue, bool) {
+func intersectSortedTermValues(col *planpb.ColumnInfo, valueSets [][]*planpb.GenericValue) ([]*planpb.GenericValue, bool) {
 	if len(valueSets) == 0 || len(valueSets[0]) == 0 {
 		return nil, false
 	}
@@ -620,7 +644,11 @@ func intersectSortedTermValues(valueSets [][]*planpb.GenericValue) ([]*planpb.Ge
 	for _, values := range valueSets[1:] {
 		result := make([]*planpb.GenericValue, 0, min(len(intersection), len(values)))
 		for i, j := 0, 0; i < len(intersection) && j < len(values); {
-			switch compareSortedTermValue(kind, intersection[i], values[j]) {
+			comparison := compareSortedTermValue(kind, intersection[i], values[j])
+			if kind == "float" && usesFloat32Comparisons(col) {
+				comparison = cmp.Compare(float32Literal(intersection[i]), float32Literal(values[j]))
+			}
+			switch comparison {
 			case -1:
 				i++
 			case 1:

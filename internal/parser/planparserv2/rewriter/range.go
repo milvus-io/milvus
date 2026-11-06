@@ -1,6 +1,7 @@
 package rewriter
 
 import (
+	"cmp"
 	"fmt"
 	"math"
 	"sort"
@@ -34,8 +35,9 @@ func isSupportedScalarForRange(dt schemapb.DataType) bool {
 // resolveEffectiveType returns (dt, ok) where ok indicates this column is eligible for range optimization.
 // Eligible when the column is a supported scalar, or an array whose element type is a supported scalar,
 // or a JSON field with a nested path (type will be determined from literal values).
+// Fixed FLOAT array indices are excluded because precision depends on the operator.
 func resolveEffectiveType(col *planpb.ColumnInfo) (schemapb.DataType, bool) {
-	if col == nil {
+	if col == nil || isFixedFloatArray(col) {
 		return schemapb.DataType_None, false
 	}
 	dt := col.GetDataType()
@@ -470,7 +472,9 @@ func cmpGeneric(dt schemapb.DataType, a, b *planpb.GenericValue) int {
 			return 1
 		}
 		return 0
-	case schemapb.DataType_Float, schemapb.DataType_Double:
+	case schemapb.DataType_Float:
+		return cmp.Compare(float32Literal(a), float32Literal(b))
+	case schemapb.DataType_Double:
 		switch a.GetVal().(type) {
 		case *planpb.GenericValue_Int64Val:
 			switch b.GetVal().(type) {

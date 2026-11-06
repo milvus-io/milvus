@@ -264,7 +264,9 @@ func (v *visitor) visitTermExpr(expr *planpb.TermExpr) interface{} {
 	}
 
 	// Single-value IN → == (avoids SIMD setup overhead for trivial case)
-	if len(expr.GetValues()) == 1 {
+	// Fixed ARRAY<FLOAT> must retain Term's double precision rather than
+	// switching to UnaryRange's float32 literal conversion.
+	if len(expr.GetValues()) == 1 && !isFixedFloatArray(expr.GetColumnInfo()) {
 		return newUnaryRangeExpr(expr.GetColumnInfo(), planpb.OpType_Equal, expr.GetValues()[0])
 	}
 
