@@ -20,8 +20,8 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	sharedsnapshot "github.com/milvus-io/milvus/pkg/v3/snapshotio"
 )
 
 // Handler handles some channel method for ChannelManager
@@ -33,7 +33,7 @@ type Handler interface {
 	GetCollection(ctx context.Context, collectionID UniqueID) (*CollectionInfo, error)
 	GetCurrentSegmentsView(ctx context.Context, channel RWChannel, partitionIDs ...UniqueID) *SegmentsView
 	ListLoadedSegments(ctx context.Context) ([]int64, error)
-	GenSnapshot(ctx context.Context, collectionID UniqueID, channelSeekPositions []*msgpb.MsgPosition) (*snapshotstorage.SnapshotData, error)
+	GenSnapshot(ctx context.Context, collectionID UniqueID, channelSeekPositions []*msgpb.MsgPosition) (*sharedsnapshot.SnapshotData, error)
 	GetDeltaLogFromCompactTo(ctx context.Context, segmentID UniqueID) ([]*datapb.FieldBinlog, error)
 }
 

@@ -40,7 +40,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/internal/snapshotio"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	milvusstorage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
@@ -50,6 +49,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	sharedsnapshot "github.com/milvus-io/milvus/pkg/v3/snapshotio"
+	snapshotio "github.com/milvus-io/milvus/pkg/v3/snapshotio/format"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -161,7 +162,7 @@ func TestPrepareSnapshotImportAdmissionErrors(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			snapshot := SnapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
 			metadata := &datapb.SnapshotMetadata{
-				FormatVersion: int32(snapshotstorage.SnapshotFormatVersion),
+				FormatVersion: int32(sharedsnapshot.SnapshotFormatVersion),
 				SnapshotInfo:  snapshot.SnapshotInfo, Collection: snapshot.Collection, Layout: snapshot.Layout,
 			}
 			options := SnapshotImportTestOptions()
@@ -220,7 +221,7 @@ func TestPrepareSnapshotImportAdmissionErrors(t *testing.T) {
 			defer instance.UnPatch()
 			resolve := mockey.Mock(importutilv2.ResolveSnapshotImportStorage).Return(cm, nil, resolveErr).Build()
 			defer resolve.UnPatch()
-			read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadMetadata).Return(metadata, readErr).Build()
+			read := mockey.Mock((*sharedsnapshot.SnapshotReader).ReadMetadata).Return(metadata, readErr).Build()
 			defer read.UnPatch()
 			got, normalized, err := PrepareSnapshotImportFiles(context.Background(), nil, cm, target, files, options)
 			if mode == "ordinary" || mode == "legacy_backup" {
@@ -261,7 +262,7 @@ func TestSnapshotPreparationPersistence(t *testing.T) {
 				})
 			}
 			metadata := &datapb.SnapshotMetadata{
-				FormatVersion: int32(snapshotstorage.SnapshotFormatVersion),
+				FormatVersion: int32(sharedsnapshot.SnapshotFormatVersion),
 				SnapshotInfo:  snapshot.SnapshotInfo, Collection: snapshot.Collection, Layout: snapshot.Layout,
 			}
 			objects := map[string][]byte{}
@@ -423,7 +424,7 @@ func TestSnapshotPreparationFinalPlanLimit(t *testing.T) {
 	type alloc struct{ allocator.Allocator }
 	instance := mockey.Mock(snapshotstorage.ValidateInstanceSnapshotImportURI).Return(nil).Build()
 	defer instance.UnPatch()
-	resolve := mockey.Mock(snapshotstorage.ResolveSnapshotReadStorage).Return(&snapshotstorage.ResolvedForeignStorage{
+	resolve := mockey.Mock(snapshotstorage.ResolveSnapshotReadStorage).Return(&sharedsnapshot.ResolvedForeignStorage{
 		ForeignCM: &sourceCM{}, ForeignStorageConfig: &indexpb.StorageConfig{BucketName: "source"},
 	}, nil).Build()
 	defer resolve.UnPatch()
@@ -439,7 +440,7 @@ func TestSnapshotPreparationFinalPlanLimit(t *testing.T) {
 			newRoot := strings.Repeat("r", 700)
 			uri := "s3://source/" + newRoot + "/snapshots/1/metadata/2.json"
 			metadata := &datapb.SnapshotMetadata{
-				FormatVersion: int32(snapshotstorage.SnapshotFormatVersion),
+				FormatVersion: int32(sharedsnapshot.SnapshotFormatVersion),
 				SnapshotInfo:  snapshot.SnapshotInfo, Collection: snapshot.Collection, Layout: snapshot.Layout,
 			}
 			objects := make(map[string][]byte)
@@ -765,19 +766,19 @@ func TestExpandSnapshotImportExternalStorage(t *testing.T) {
 			})
 			foreignCM := milvusstorage.NewRemoteChunkManagerForTesting(nil, "source", "root")
 			foreignCfg := &indexpb.StorageConfig{BucketName: "source"}
-			resolve := mockey.Mock(snapshotstorage.ResolveSnapshotReadStorage).Return(&snapshotstorage.ResolvedForeignStorage{
+			resolve := mockey.Mock(snapshotstorage.ResolveSnapshotReadStorage).Return(&sharedsnapshot.ResolvedForeignStorage{
 				ForeignCM: foreignCM, ForeignStorageConfig: foreignCfg,
 			}, nil).Build()
 			defer resolve.UnPatch()
-			read := mockey.Mock(snapshotstorage.NewSnapshotReader).When(func(cm milvusstorage.ChunkManager, _ ...snapshotstorage.SnapshotReaderOption) bool {
+			read := mockey.Mock(sharedsnapshot.NewSnapshotReader).When(func(cm sharedsnapshot.ChunkManager, _ ...sharedsnapshot.SnapshotReaderOption) bool {
 				require.Same(t, foreignCM, cm)
 				return true
-			}).Return(&snapshotstorage.SnapshotReader{}).Build()
+			}).Return(&sharedsnapshot.SnapshotReader{}).Build()
 			defer read.UnPatch()
-			readSnapshot := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
+			readSnapshot := mockey.Mock((*sharedsnapshot.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
 			defer readSnapshot.UnPatch()
-			validate := mockey.Mock(snapshotstorage.ValidateExternalSnapshotDataFiles).To(func(ctx context.Context,
-				uri string, data *snapshotstorage.SnapshotData,
+			validate := mockey.Mock(sharedsnapshot.ValidateExternalSnapshotDataFiles).To(func(ctx context.Context,
+				uri string, data *sharedsnapshot.SnapshotData,
 			) error {
 				require.Equal(t, "s3://source/root/snapshots/1/metadata/2.json", uri)
 				require.Same(t, snapshot, data)
@@ -874,7 +875,7 @@ func TestSnapshotImportExternalOptionsLifecycle(t *testing.T) {
 func TestExpandSnapshotImportMetadataAdmission(t *testing.T) {
 	PatchSnapshotImportInstance(t)
 	readCalls := 0
-	patch := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).To(func(*snapshotstorage.SnapshotReader, context.Context, string, *datapb.SnapshotMetadata, bool) (*snapshotstorage.SnapshotData, error) {
+	patch := mockey.Mock((*sharedsnapshot.SnapshotReader).ReadSnapshotFromMetadata).To(func(*sharedsnapshot.SnapshotReader, context.Context, string, *datapb.SnapshotMetadata, bool) (*sharedsnapshot.SnapshotData, error) {
 		readCalls++
 		return nil, merr.ErrIoKeyNotFound
 	}).Build()
@@ -977,9 +978,9 @@ func TestExpandSnapshotImportPartitionMapping(t *testing.T) {
 						})
 					}
 				}
-				read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
+				read := mockey.Mock((*sharedsnapshot.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
 				defer read.UnPatch()
-				validate := mockey.Mock(snapshotstorage.ValidateExternalSnapshotDataFiles).Return(nil).Build()
+				validate := mockey.Mock(sharedsnapshot.ValidateExternalSnapshotDataFiles).Return(nil).Build()
 				defer validate.UnPatch()
 				opts := append(SnapshotImportTestOptions(), &commonpb.KeyValuePair{Key: importutilv2.PartitionMapping, Value: `{"A":"X","B":"Y","empty":"Z"}`})
 				files, normalized, l0Sources, err := expandSnapshotImportFiles(context.Background(), []int64{200, 100, 300}, milvusstorage.NewLocalChunkManager(), SnapshotImportTestSchema(),
@@ -1039,9 +1040,9 @@ func TestExpandSnapshotImportMultiplePartitionsL0(t *testing.T) {
 					Deltalogs:      []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: delta.path}}}},
 				})
 			}
-			read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
+			read := mockey.Mock((*sharedsnapshot.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
 			defer read.UnPatch()
-			validate := mockey.Mock(snapshotstorage.ValidateExternalSnapshotDataFiles).Return(nil).Build()
+			validate := mockey.Mock(sharedsnapshot.ValidateExternalSnapshotDataFiles).Return(nil).Build()
 			defer validate.UnPatch()
 			files, _, l0Sources, err := expandSnapshotImportFiles(context.Background(), nil, milvusstorage.NewLocalChunkManager(), SnapshotImportTestSchema(),
 				"s3://source/root/snapshots/1/metadata/2.json", SnapshotImportTestOptions(), &datapb.SnapshotMetadata{})
@@ -1097,9 +1098,9 @@ func TestExpandSnapshotImportL0(t *testing.T) {
 					}
 				}
 				snapshot.Segments = append(snapshot.Segments, delta)
-				readPatch := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
+				readPatch := mockey.Mock((*sharedsnapshot.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
 				defer readPatch.UnPatch()
-				validationPatch := mockey.Mock(snapshotstorage.ValidateExternalSnapshotDataFiles).Return(nil).Build()
+				validationPatch := mockey.Mock(sharedsnapshot.ValidateExternalSnapshotDataFiles).Return(nil).Build()
 				defer validationPatch.UnPatch()
 				paths := []string{deltaPath, deltaPath}
 				var readErr error
@@ -1171,11 +1172,11 @@ func TestExpandSnapshotImportPathValidationLinear(t *testing.T) {
 						Deltalogs:      []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: fmt.Sprintf("root/files/l0/%d", i)}}}},
 					})
 				}
-				read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
+				read := mockey.Mock((*sharedsnapshot.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
 				defer read.UnPatch()
-				var original func(string, *snapshotstorage.SnapshotData, []snapshotstorage.SnapshotFileRef) error
+				var original func(string, *sharedsnapshot.SnapshotData, []sharedsnapshot.SnapshotFileRef) error
 				manifestVisits, refVisits := 0, 0
-				validate := mockey.Mock(snapshotstorage.ValidateExternalSnapshotPaths).Origin(&original).To(func(uri string, data *snapshotstorage.SnapshotData, refs []snapshotstorage.SnapshotFileRef) error {
+				validate := mockey.Mock(sharedsnapshot.ValidateExternalSnapshotPaths).Origin(&original).To(func(uri string, data *sharedsnapshot.SnapshotData, refs []sharedsnapshot.SnapshotFileRef) error {
 					manifestVisits += len(data.ManifestPaths)
 					refVisits += len(refs)
 					return original(uri, data, refs)
@@ -1284,7 +1285,7 @@ func TestSnapshotImportL0PlanErrors(t *testing.T) {
 func TestExpandSnapshotImportSourcePlanErrors(t *testing.T) {
 	PatchSnapshotImportInstance(t)
 	snapshot := SnapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
-	read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
+	read := mockey.Mock((*sharedsnapshot.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
 	defer read.UnPatch()
 	for _, mode := range []string{"missing_target_schema", "unresolved_mapping"} {
 		t.Run(mode, func(t *testing.T) {
@@ -1651,7 +1652,7 @@ func TestExpandSnapshotImportParsedMetadata(t *testing.T) {
 			uri := "s3://source/root/snapshots/1/metadata/2.json"
 			snapshot := SnapshotImportTestData(layout)
 			metadata := &datapb.SnapshotMetadata{
-				FormatVersion: int32(snapshotstorage.SnapshotFormatVersion),
+				FormatVersion: int32(sharedsnapshot.SnapshotFormatVersion),
 				SnapshotInfo:  snapshot.SnapshotInfo,
 				Collection:    snapshot.Collection,
 				Layout:        layout,
@@ -1716,10 +1717,10 @@ func TestExpandSnapshotImportFiles(t *testing.T) {
 	} {
 		t.Run(layout.String(), func(t *testing.T) {
 			snapshot := SnapshotImportTestData(layout)
-			readPatch := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).
+			readPatch := mockey.Mock((*sharedsnapshot.SnapshotReader).ReadSnapshotFromMetadata).
 				Return(snapshot, nil).Build()
 			defer readPatch.UnPatch()
-			validatePatch := mockey.Mock(snapshotstorage.ValidateExternalSnapshotDataFiles).
+			validatePatch := mockey.Mock(sharedsnapshot.ValidateExternalSnapshotDataFiles).
 				Return(nil).Build()
 			defer validatePatch.UnPatch()
 
@@ -1741,10 +1742,10 @@ func TestExpandSnapshotImportFiles(t *testing.T) {
 
 	t.Run("implicit unique partition", func(t *testing.T) {
 		snapshot := SnapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
-		readPatch := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).
+		readPatch := mockey.Mock((*sharedsnapshot.SnapshotReader).ReadSnapshotFromMetadata).
 			Return(snapshot, nil).Build()
 		defer readPatch.UnPatch()
-		validatePatch := mockey.Mock(snapshotstorage.ValidateExternalSnapshotDataFiles).
+		validatePatch := mockey.Mock(sharedsnapshot.ValidateExternalSnapshotDataFiles).
 			Return(nil).Build()
 		defer validatePatch.UnPatch()
 
@@ -1771,11 +1772,11 @@ func TestExpandSnapshotImportFiles(t *testing.T) {
 			StorageVersion: milvusstorage.StorageV3,
 			ManifestPath:   packed.MarshalManifestPath("root/files/segment/30", 9),
 		})
-		readPatch := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).
+		readPatch := mockey.Mock((*sharedsnapshot.SnapshotReader).ReadSnapshotFromMetadata).
 			Return(snapshot, nil).Build()
 		defer readPatch.UnPatch()
 
-		validatePatch := mockey.Mock(snapshotstorage.ValidateExternalSnapshotDataFiles).Return(nil).Build()
+		validatePatch := mockey.Mock(sharedsnapshot.ValidateExternalSnapshotDataFiles).Return(nil).Build()
 		defer validatePatch.UnPatch()
 		files, _, _, err := expandSnapshotImportFiles(
 			ctx,
@@ -1796,10 +1797,10 @@ func TestExpandSnapshotImportFiles(t *testing.T) {
 		snapshot.Collection.Schema.Properties = []*commonpb.KeyValuePair{
 			{Key: common.EncryptionEzIDKey, Value: "10"},
 		}
-		readPatch := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).
+		readPatch := mockey.Mock((*sharedsnapshot.SnapshotReader).ReadSnapshotFromMetadata).
 			Return(snapshot, nil).Build()
 		defer readPatch.UnPatch()
-		validatePatch := mockey.Mock(snapshotstorage.ValidateExternalSnapshotDataFiles).
+		validatePatch := mockey.Mock(sharedsnapshot.ValidateExternalSnapshotDataFiles).
 			Return(nil).Build()
 		defer validatePatch.UnPatch()
 
@@ -1825,7 +1826,7 @@ func TestExpandSnapshotImportFiles(t *testing.T) {
 		snapshot.Collection.Schema.Properties = []*commonpb.KeyValuePair{
 			{Key: common.EncryptionEzIDKey, Value: "10"},
 		}
-		readPatch := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).
+		readPatch := mockey.Mock((*sharedsnapshot.SnapshotReader).ReadSnapshotFromMetadata).
 			Return(snapshot, nil).Build()
 		defer readPatch.UnPatch()
 
@@ -1862,10 +1863,10 @@ func TestExpandSnapshotImportFiles(t *testing.T) {
 		snapshot.Collection.Schema.Fields = append(snapshot.Collection.Schema.Fields, &schemapb.FieldSchema{
 			FieldID: 102, Name: "body", DataType: schemapb.DataType_Text,
 		})
-		readPatch := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).
+		readPatch := mockey.Mock((*sharedsnapshot.SnapshotReader).ReadSnapshotFromMetadata).
 			Return(snapshot, nil).Build()
 		defer readPatch.UnPatch()
-		validatePatch := mockey.Mock(snapshotstorage.ValidateExternalSnapshotDataFiles).Return(nil).Build()
+		validatePatch := mockey.Mock(sharedsnapshot.ValidateExternalSnapshotDataFiles).Return(nil).Build()
 		defer validatePatch.UnPatch()
 
 		options := append(SnapshotImportTestOptions(), &commonpb.KeyValuePair{
@@ -1897,7 +1898,7 @@ func TestExpandSnapshotImportFiles(t *testing.T) {
 		snapshot.Collection.Schema.Properties = []*commonpb.KeyValuePair{
 			{Key: common.EncryptionEzIDKey, Value: "10"},
 		}
-		readPatch := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).
+		readPatch := mockey.Mock((*sharedsnapshot.SnapshotReader).ReadSnapshotFromMetadata).
 			Return(snapshot, nil).Build()
 		defer readPatch.UnPatch()
 
@@ -1921,13 +1922,13 @@ func TestExpandSnapshotImportFiles(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		mutate   func(*snapshotstorage.SnapshotData)
+		mutate   func(*sharedsnapshot.SnapshotData)
 		expected error
 		message  string
 	}{
 		{
 			name: "empty snapshot",
-			mutate: func(snapshot *snapshotstorage.SnapshotData) {
+			mutate: func(snapshot *sharedsnapshot.SnapshotData) {
 				snapshot.Segments = nil
 			},
 			expected: merr.ErrImportFailed,
@@ -1935,7 +1936,7 @@ func TestExpandSnapshotImportFiles(t *testing.T) {
 		},
 		{
 			name: "invalid data in another source partition is not skipped",
-			mutate: func(snapshot *snapshotstorage.SnapshotData) {
+			mutate: func(snapshot *sharedsnapshot.SnapshotData) {
 				snapshot.Collection.Partitions["second"] = 20
 				snapshot.Segments = append(snapshot.Segments, &datapb.SegmentDescription{
 					SegmentId: 30, PartitionId: 20, SegmentLevel: datapb.SegmentLevel_L1, StorageVersion: milvusstorage.StorageV2,
@@ -1946,7 +1947,7 @@ func TestExpandSnapshotImportFiles(t *testing.T) {
 		},
 		{
 			name: "reject l0 without channel identity",
-			mutate: func(snapshot *snapshotstorage.SnapshotData) {
+			mutate: func(snapshot *sharedsnapshot.SnapshotData) {
 				snapshot.Segments[0].SegmentLevel = datapb.SegmentLevel_L0
 			},
 			expected: merr.ErrImportFailed,
@@ -1954,7 +1955,7 @@ func TestExpandSnapshotImportFiles(t *testing.T) {
 		},
 		{
 			name: "reject non v3",
-			mutate: func(snapshot *snapshotstorage.SnapshotData) {
+			mutate: func(snapshot *sharedsnapshot.SnapshotData) {
 				snapshot.Segments[0].StorageVersion = milvusstorage.StorageV2
 			},
 			expected: merr.ErrOperationNotSupported,
@@ -1962,7 +1963,7 @@ func TestExpandSnapshotImportFiles(t *testing.T) {
 		},
 		{
 			name: "reject latest manifest",
-			mutate: func(snapshot *snapshotstorage.SnapshotData) {
+			mutate: func(snapshot *sharedsnapshot.SnapshotData) {
 				snapshot.Segments[0].ManifestPath = packed.MarshalManifestPath("root/files/segment/20", packed.ManifestLatest)
 			},
 			expected: merr.ErrImportFailed,
@@ -1970,7 +1971,7 @@ func TestExpandSnapshotImportFiles(t *testing.T) {
 		},
 		{
 			name: "reject external collection",
-			mutate: func(snapshot *snapshotstorage.SnapshotData) {
+			mutate: func(snapshot *sharedsnapshot.SnapshotData) {
 				snapshot.Collection.Schema.Fields[0].ExternalField = "pk"
 			},
 			expected: merr.ErrOperationNotSupported,
@@ -1981,7 +1982,7 @@ func TestExpandSnapshotImportFiles(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			snapshot := SnapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
 			test.mutate(snapshot)
-			readPatch := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).
+			readPatch := mockey.Mock((*sharedsnapshot.SnapshotReader).ReadSnapshotFromMetadata).
 				Return(snapshot, nil).Build()
 			defer readPatch.UnPatch()
 
@@ -2126,7 +2127,7 @@ func TestExpandSnapshotImportFiles_AdmissionFailures(t *testing.T) {
 			case "empty_uri":
 				metadataURI, wantErr = "  ", merr.ErrParameterInvalid
 			case "bad_object_path":
-				patch := mockey.Mock(snapshotstorage.ValidateSnapshotObjectPathForBucket).Return(merr.ErrDataIntegrity).Build()
+				patch := mockey.Mock(sharedsnapshot.ValidateSnapshotObjectPathForBucket).Return(merr.ErrDataIntegrity).Build()
 				defer patch.UnPatch()
 				wantErr = merr.ErrDataIntegrity
 			case "nil_snapshot":
@@ -2153,9 +2154,9 @@ func TestExpandSnapshotImportFiles_AdmissionFailures(t *testing.T) {
 			case "invalid_files":
 				validationErr, wantErr = merr.ErrIoPermissionDenied, merr.ErrIoPermissionDenied
 			}
-			read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
+			read := mockey.Mock((*sharedsnapshot.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
 			defer read.UnPatch()
-			validate := mockey.Mock(snapshotstorage.ValidateExternalSnapshotDataFiles).Return(validationErr).Build()
+			validate := mockey.Mock(sharedsnapshot.ValidateExternalSnapshotDataFiles).Return(validationErr).Build()
 			defer validate.UnPatch()
 			result, _, _, err := expandSnapshotImportFiles(context.Background(), nil, cm, SnapshotImportTestSchema(), metadataURI, options, &datapb.SnapshotMetadata{})
 			if mode == "invalid_files" {
@@ -2204,7 +2205,7 @@ func TestExpandSnapshotImportCommitTimestamps(t *testing.T) {
 				var targetPartitions []int64
 				if tc.name == "external_source" {
 					options = append(options, &commonpb.KeyValuePair{Key: importutilv2.ExternalSpec, Value: `{"extfs":{"region":"us-east-1"}}`})
-					resolve := mockey.Mock(snapshotstorage.ResolveSnapshotReadStorage).Return(&snapshotstorage.ResolvedForeignStorage{
+					resolve := mockey.Mock(snapshotstorage.ResolveSnapshotReadStorage).Return(&sharedsnapshot.ResolvedForeignStorage{
 						ForeignCM:            milvusstorage.NewRemoteChunkManagerForTesting(nil, "source", "root"),
 						ForeignStorageConfig: &indexpb.StorageConfig{BucketName: "source"},
 					}, nil).Build()
@@ -2214,10 +2215,10 @@ func TestExpandSnapshotImportCommitTimestamps(t *testing.T) {
 					options = append(options, &commonpb.KeyValuePair{Key: importutilv2.PartitionMapping, Value: `{"source_partition":"target"}`})
 					targetPartitions = []int64{200}
 				}
-				read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
+				read := mockey.Mock((*sharedsnapshot.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
 				defer read.UnPatch()
 				fileChecks, manifestChecks := 0, 0
-				validate := mockey.Mock(snapshotstorage.ValidateExternalSnapshotDataFiles).To(func(context.Context, string, *snapshotstorage.SnapshotData) error {
+				validate := mockey.Mock(sharedsnapshot.ValidateExternalSnapshotDataFiles).To(func(context.Context, string, *sharedsnapshot.SnapshotData) error {
 					fileChecks++
 					return nil
 				}).Build()
@@ -2307,7 +2308,7 @@ func TestSnapshotImportManifestDeleteTimestamps(t *testing.T) {
 	// real. The snapshot has no L0: all deletes already belong to the manifest.
 	resolve := mockey.Mock(importutilv2.ResolveSnapshotImportStorage).Return(cm, cfg, nil).Build()
 	defer resolve.UnPatch()
-	validate := mockey.Mock(snapshotstorage.ValidateExternalSnapshotPaths).Return(nil).Build()
+	validate := mockey.Mock(sharedsnapshot.ValidateExternalSnapshotPaths).Return(nil).Build()
 	defer validate.UnPatch()
 	for _, layout := range []datapb.SnapshotLayout{datapb.SnapshotLayout_SnapshotLayoutReferenced, datapb.SnapshotLayout_SnapshotLayoutSelfContained} {
 		for _, external := range []bool{false, true} {
@@ -2325,7 +2326,7 @@ func TestSnapshotImportManifestDeleteTimestamps(t *testing.T) {
 						SegmentId: 20, PartitionId: 10, SegmentLevel: datapb.SegmentLevel_L1,
 						StorageVersion: milvusstorage.StorageV3, ManifestPath: manifest, CommitTimestamp: tc.commit,
 					}}
-					read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
+					read := mockey.Mock((*sharedsnapshot.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
 					defer read.UnPatch()
 					uri := "s3://source/root/snapshots/1/metadata/2.json"
 					options := SnapshotImportTestOptions()

@@ -42,7 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/segment"
 	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
-	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
+	snapshotadapter "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
@@ -60,6 +60,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	snapshotstorage "github.com/milvus-io/milvus/pkg/v3/snapshotio"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
@@ -2751,7 +2752,7 @@ func (s *Server) DescribeSnapshot(ctx context.Context, req *datapb.DescribeSnaps
 	}
 	snapshotInfo := proto.Clone(snapshotData.SnapshotInfo).(*datapb.SnapshotInfo)
 	snapshotInfo.S3Location, err = snapshotstorage.BuildInstanceSnapshotURI(
-		snapshotstorage.InstanceConfigFromParamtable(Params),
+		snapshotadapter.InstanceConfigFromParamtable(Params),
 		snapshotInfo.GetS3Location(),
 	)
 	if err != nil {

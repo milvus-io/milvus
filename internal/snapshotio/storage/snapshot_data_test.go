@@ -43,14 +43,15 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/snapshotio"
-	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	objectstore "github.com/milvus-io/milvus/pkg/v3/objectstorage/store"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	snapshotstorage "github.com/milvus-io/milvus/pkg/v3/snapshotio"
+	snapshotio "github.com/milvus-io/milvus/pkg/v3/snapshotio/format"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -962,86 +963,6 @@ func TestSnapshotReader_ReadSnapshot_FileNotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to read metadata file")
 }
 
-func TestSnapshotReader_ListSnapshots_Success(t *testing.T) {
-	tempDir := t.TempDir()
-	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
-	reader := snapshotstorage.NewSnapshotReader(cm)
-
-	metadata1 := &datapb.SnapshotMetadata{
-		SnapshotInfo: &datapb.SnapshotInfo{
-			Id:          1,
-			CreateTs:    1234567890,
-			Name:        "snapshot1",
-			Description: "first snapshot",
-		},
-		Collection:   &datapb.CollectionDescription{},
-		Indexes:      []*indexpb.IndexInfo{},
-		ManifestList: []string{},
-	}
-	marshalOpts := protojson.MarshalOptions{UseProtoNames: true}
-	metadata1JSON, _ := marshalOpts.Marshal(metadata1)
-
-	metadata2 := &datapb.SnapshotMetadata{
-		SnapshotInfo: &datapb.SnapshotInfo{
-			Id:          2,
-			CreateTs:    1234567900,
-			Name:        "snapshot2",
-			Description: "second snapshot",
-		},
-		Collection:   &datapb.CollectionDescription{},
-		Indexes:      []*indexpb.IndexInfo{},
-		ManifestList: []string{},
-	}
-	metadata2JSON, _ := marshalOpts.Marshal(metadata2)
-
-	mockList := mockey.Mock(storage.ListAllChunkWithPrefix).Return(
-		[]string{
-			"snapshots/100/metadata/00001-uuid1.json",
-			"snapshots/100/metadata/00002-uuid2.json",
-			"snapshots/100/metadata/version-hint.txt",
-		},
-		[]time.Time{},
-		nil,
-	).Build()
-	defer mockList.UnPatch()
-
-	mockRead := mockey.Mock((*storage.LocalChunkManager).Read).To(func(ctx context.Context, filePath string) ([]byte, error) {
-		if filePath == "snapshots/100/metadata/00001-uuid1.json" {
-			return metadata1JSON, nil
-		}
-		if filePath == "snapshots/100/metadata/00002-uuid2.json" {
-			return metadata2JSON, nil
-		}
-		return []byte("mock-data"), nil
-	}).Build()
-	defer mockRead.UnPatch()
-
-	snapshots, err := reader.ListSnapshots(context.Background(), 100)
-
-	assert.NoError(t, err)
-	assert.Len(t, snapshots, 2)
-	assert.Equal(t, "snapshot1", snapshots[0].GetName())
-	assert.Equal(t, "snapshot2", snapshots[1].GetName())
-}
-
-func TestSnapshotReader_ListSnapshots_ListFailurePreservesIoError(t *testing.T) {
-	tempDir := t.TempDir()
-	cm := storage.NewLocalChunkManager(objectstorage.RootPath(tempDir))
-	reader := snapshotstorage.NewSnapshotReader(cm)
-
-	mockList := mockey.Mock(storage.ListAllChunkWithPrefix).Return(
-		nil,
-		nil,
-		fmt.Errorf("list failed"),
-	).Build()
-	defer mockList.UnPatch()
-
-	_, err := reader.ListSnapshots(context.Background(), 100)
-
-	require.Error(t, err)
-	assert.ErrorIs(t, err, merr.ErrIoFailed)
-}
-
 // =========================== Data Conversion Tests ===========================
 
 func TestFieldBinlog_RoundtripConversion(t *testing.T) {
@@ -1508,7 +1429,7 @@ func TestValidateSnapshotDataFiles_StorageV3MetadataOnly(t *testing.T) {
 		t.Error("job validation must not query native LOBs")
 		return nil, merr.ErrServiceInternal
 	}).Build().UnPatch()
-	defer mockey.Mock(packed.ReadManifestFiles).To(func(string, *indexpb.StorageConfig) (*packed.ManifestFiles, error) {
+	defer mockey.Mock(snapshotstorage.ReadNativeManifestFiles).To(func(string, *indexpb.StorageConfig) (*snapshotio.NativeManifestFiles, error) {
 		t.Error("job validation must not read native manifests")
 		return nil, merr.ErrServiceInternal
 	}).Build().UnPatch()
@@ -2356,7 +2277,7 @@ func TestSnapshotReader_ReadSnapshot_ClassifiesInvalidManifestAsDataIntegrity(t 
 	metadataPath := "snapshots/100/metadata/1.json"
 	manifestPath := "snapshots/100/manifests/1/1001.avro"
 	metadata := &datapb.SnapshotMetadata{
-		FormatVersion: int32(snapshotstorage.SnapshotFormatVersion),
+		FormatVersion: int32(snapshotio.SnapshotFormatVersion),
 		SnapshotInfo: &datapb.SnapshotInfo{
 			Id:           1,
 			CollectionId: 100,
@@ -2970,6 +2891,29 @@ func TestSnapshotMetadata_FormatVersion(t *testing.T) {
 	assert.Equal(t, int32(snapshotstorage.SnapshotFormatVersion), restored.GetFormatVersion())
 }
 
+// These assertions bound test-driver waits without changing the cancellation
+// behavior of the mocked I/O operations.
+func awaitSnapshotEvent[T any](t *testing.T, events <-chan T) T {
+	t.Helper()
+	select {
+	case value := <-events:
+		return value
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for snapshot operation")
+		var zero T
+		return zero
+	}
+}
+
+func assertSnapshotBlocked[T any](t *testing.T, events <-chan T) {
+	t.Helper()
+	select {
+	case value := <-events:
+		t.Errorf("snapshot operation advanced before release: %v", value)
+	case <-time.After(20 * time.Millisecond):
+	}
+}
+
 func TestSnapshotExportWholePlan_ErrorRedaction(t *testing.T) {
 	req := &datapb.SnapshotExportCopyRequest{ExternalSpec: `{"extfs":{"access_key_id":"target-key","access_key_value":"target-secret","source_sas_token":"sig=a+b"}}`, SourceStorageConfig: &indexpb.StorageConfig{SecretAccessKey: "source-secret"}}
 	reason := snapshotstorage.SanitizeSnapshotExportReason(fmt.Errorf("source-secret target-key target-secret sig=a+b sig%%3Da%%2Bb"), req)
@@ -2990,21 +2934,18 @@ func TestSnapshotExportWholePlan_ErrorRedaction(t *testing.T) {
 	}
 }
 
-type snapshotWholePlanCopier struct{}
+type snapshotPlanStore struct{ objectstore.ObjectStore }
 
-func (*snapshotWholePlanCopier) CopyCrossBucketAndGetSize(context.Context, string, string, string, string) (int64, error) {
+func (*snapshotPlanStore) Copy(context.Context, objectstore.CopyRequest) (int64, error) {
 	return 0, merr.ErrServiceInternal
-}
-
-func (c *snapshotWholePlanCopier) CopyCrossBucket(ctx context.Context, sourceBucket, sourcePath, targetBucket, targetPath string) error {
-	_, err := c.CopyCrossBucketAndGetSize(ctx, sourceBucket, sourcePath, targetBucket, targetPath)
-	return err
 }
 
 func mockSnapshotLocalCopy(t *testing.T, source, target storage.ChunkManager) *atomic.Int64 {
 	t.Helper()
 	copies := &atomic.Int64{}
-	patch := mockey.Mock((*snapshotWholePlanCopier).CopyCrossBucketAndGetSize).To(func(ctx context.Context, _, src, _, dst string) (int64, error) {
+	patch := mockey.Mock((*snapshotPlanStore).Copy).To(func(ctx context.Context, req objectstore.CopyRequest) (int64, error) {
+		src := req.Source.Key
+		dst := req.Destination.Key
 		copies.Add(1)
 		data, err := source.Read(ctx, src)
 		if err != nil {
@@ -3027,7 +2968,7 @@ func snapshotExportFixture(t *testing.T, ctx context.Context, source, target sto
 		SnapshotId: snapshot.SnapshotInfo.GetId(), CollectionId: snapshot.SnapshotInfo.GetCollectionId(), SegmentEnd: int64(len(snapshot.Segments)),
 		SnapshotMetadataPath: metadata, TargetUri: target.RootPath(), SourceStorageConfig: cfg,
 	}
-	return req, &snapshotstorage.ResolvedForeignStorage{ForeignCM: target, ForeignBucket: cfg.GetBucketName(), ForeignStorageConfig: cfg, Copier: &snapshotWholePlanCopier{}}
+	return req, &snapshotstorage.ResolvedForeignStorage{ForeignCM: target, ForeignBucket: cfg.GetBucketName(), ForeignStorageConfig: cfg, TargetStore: &snapshotPlanStore{}}
 }
 
 func TestSnapshotExportPreparation(t *testing.T) {
@@ -3056,9 +2997,9 @@ func TestSnapshotExportPreparation(t *testing.T) {
 				require.NoError(t, target.Write(ctx, path.Join(req.GetTargetUri(), "files/data"), []byte("payload")))
 			}
 			var copies atomic.Int64
-			defer mockey.Mock((*snapshotWholePlanCopier).CopyCrossBucketAndGetSize).To(func(ctx context.Context, srcBucket, srcObject, dstBucket, dstObject string) (int64, error) {
-				src := srcObject
-				dst := dstObject
+			defer mockey.Mock((*snapshotPlanStore).Copy).To(func(ctx context.Context, req objectstore.CopyRequest) (int64, error) {
+				src := req.Source.Key
+				dst := req.Destination.Key
 				copies.Add(1)
 				if mode == "copy failure" || mode == "partial failure" && path.Base(src) == "data2" {
 					return 0, merr.ErrIoTooManyRequests
@@ -3137,6 +3078,37 @@ func TestSnapshotExportPreparation(t *testing.T) {
 	}
 }
 
+func TestSnapshotExportCopyErrorContext(t *testing.T) {
+	const secret = "source-secret"
+	sizeErr := &objectstore.CopySizeError{Err: merr.Wrapf(merr.ErrIoPermissionDenied, "credential %s", secret)}
+	for _, cause := range []error{context.DeadlineExceeded, merr.ErrIoKeyNotFound, sizeErr} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			item := snapshotstorage.FileCopy{SourcePath: "files/source\nobject", DestinationPath: "snapshots/target-object"}
+			defer mockey.Mock((*snapshotPlanStore).Copy).Return(int64(0), cause).Build().UnPatch()
+			err := snapshotstorage.CopySnapshotExportPlan(context.Background(), []snapshotstorage.FileCopy{item},
+				"source-bucket", "target-bucket", &snapshotPlanStore{}, make(chan struct{}, 1),
+				func(int64) { t.Error("failed copy must not report completion") })
+			require.ErrorIs(t, err, cause)
+			require.Equal(t, merr.Code(cause), merr.Code(err))
+			if cause == sizeErr {
+				var got *objectstore.CopySizeError
+				require.ErrorAs(t, err, &got)
+				require.Same(t, sizeErr, got)
+			}
+			reason := snapshotstorage.SanitizeSnapshotExportReason(err, &datapb.SnapshotExportCopyRequest{
+				SourceStorageConfig: &indexpb.StorageConfig{SecretAccessKey: secret},
+			})
+			for _, value := range []string{"source-bucket", item.SourcePath, "target-bucket", item.DestinationPath} {
+				require.Contains(t, reason, fmt.Sprintf("%q", value))
+			}
+			require.NotContains(t, reason, secret)
+			if cause == sizeErr {
+				require.Contains(t, reason, "<redacted>")
+			}
+		})
+	}
+}
+
 func TestSnapshotExportCopyTimeSizes(t *testing.T) {
 	for _, mode := range []string{"success", "data failure", "metadata failure", "negative size", "size overflow"} {
 		t.Run(mode, func(t *testing.T) {
@@ -3162,21 +3134,19 @@ func TestSnapshotExportCopyTimeSizes(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, items, 3)
 			var copied, completed int64
-			defer mockey.Mock((*snapshotWholePlanCopier).CopyCrossBucket).To(func(_ *snapshotWholePlanCopier, _ context.Context, srcBucket, src, dstBucket, dst string) error {
-				require.Equal(t, snapshot.ManifestPaths[0], src)
+			copy := mockey.Mock((*snapshotPlanStore).Copy).To(func(_ *snapshotPlanStore, _ context.Context, req objectstore.CopyRequest) (int64, error) {
+				srcBucket := req.Source.Bucket
+				src := req.Source.Key
+				dstBucket := req.Destination.Bucket
+				dst := req.Destination.Key
 				require.Equal(t, "source", srcBucket)
 				require.Equal(t, "target", dstBucket)
-				if mode == "metadata failure" {
-					return merr.ErrIoPermissionDenied
+				if src == snapshot.ManifestPaths[0] {
+					if mode == "metadata failure" {
+						return 13, merr.ErrIoPermissionDenied
+					}
+					return 13, nil // Metadata is copied but excluded from data-byte statistics.
 				}
-				return nil
-			}).Build().UnPatch()
-			copy := mockey.Mock((*snapshotWholePlanCopier).CopyCrossBucketAndGetSize).To(func(_ *snapshotWholePlanCopier, _ context.Context, srcBucket, srcObject, dstBucket, dstObject string) (int64, error) {
-				src := srcObject
-				dst := dstObject
-				require.Equal(t, "source", srcBucket)
-				require.Equal(t, "target", dstBucket)
-				require.NotEqual(t, snapshot.ManifestPaths[0], src, "metadata uses unsized copy")
 				require.Contains(t, dst, "export/files/")
 				if mode == "negative size" {
 					return -1, nil
@@ -3195,7 +3165,7 @@ func TestSnapshotExportCopyTimeSizes(t *testing.T) {
 				return 0, nil // Empty objects count as successfully copied files.
 			}).Build()
 			defer copy.UnPatch()
-			err = snapshotstorage.CopySnapshotExportPlan(ctx, items, "source", "target", &snapshotWholePlanCopier{}, make(chan struct{}, 1), func(size int64) { copied += size; completed++ })
+			err = snapshotstorage.CopySnapshotExportPlan(ctx, items, "source", "target", &snapshotPlanStore{}, make(chan struct{}, 1), func(size int64) { copied += size; completed++ })
 			if mode == "negative size" || mode == "size overflow" {
 				require.ErrorIs(t, err, merr.ErrDataIntegrity)
 				return
@@ -3270,7 +3240,7 @@ func TestSnapshotExportRewrittenV6Manifests(t *testing.T) {
 					// The decoded records are sufficient; source Avro is not reread/copied.
 					require.NoError(t, source.Remove(ctx, snapshot.ManifestPaths[0]))
 					var copiedBytes atomic.Int64
-					require.NoError(t, snapshotstorage.CopySnapshotExportPlanForTest(ctx, plan, "bucket", "bucket", &snapshotWholePlanCopier{}, target, make(chan struct{}, 2), func(size int64) { copiedBytes.Add(size) }))
+					require.NoError(t, snapshotstorage.CopySnapshotExportPlanForTest(ctx, plan, "bucket", "bucket", &snapshotPlanStore{}, target, make(chan struct{}, 2), func(size int64) { copiedBytes.Add(size) }))
 					require.EqualValues(t, len("payload"), copiedBytes.Load())
 					err = snapshotstorage.PrepareSnapshotExportMetadataForTest(ctx, target, snapshot, plan.SnapshotExportPlan)
 					require.NoError(t, err)
@@ -3351,7 +3321,7 @@ func TestSnapshotReader_ManifestReadsShareCopyPermits(t *testing.T) {
 		for old := maximum.Load(); n > old && !maximum.CompareAndSwap(old, n); old = maximum.Load() {
 		}
 	}
-	defer mockey.Mock((*snapshotWholePlanCopier).CopyCrossBucketAndGetSize).To(func(ctx context.Context, srcBucket, srcObject, dstBucket, dstObject string) (int64, error) {
+	defer mockey.Mock((*snapshotPlanStore).Copy).To(func(ctx context.Context, req objectstore.CopyRequest) (int64, error) {
 		enter()
 		defer active.Add(-1)
 		close(copyStarted)
@@ -3377,7 +3347,7 @@ func TestSnapshotReader_ManifestReadsShareCopyPermits(t *testing.T) {
 	}).Build().UnPatch()
 	copyDone := make(chan error, 1)
 	go func() {
-		copyDone <- snapshotstorage.CopySnapshotExportPlan(ctx, []snapshotstorage.FileCopy{{SourcePath: "source", DestinationPath: "target"}}, "source", "target", &snapshotWholePlanCopier{}, permits, nil)
+		copyDone <- snapshotstorage.CopySnapshotExportPlan(ctx, []snapshotstorage.FileCopy{{SourcePath: "source", DestinationPath: "target"}}, "source", "target", &snapshotPlanStore{}, permits, nil)
 	}()
 	awaitSnapshotEvent(t, copyStarted)
 	reader := snapshotstorage.NewSnapshotReader(cm, snapshotstorage.WithManifestReadPermits(permits))
@@ -3497,6 +3467,98 @@ func TestSnapshotReader_CancellationWaitsForManifestDecode(t *testing.T) {
 	require.Empty(t, permits)
 }
 
+func TestSnapshotReader_ManifestReadModes(t *testing.T) {
+	for _, tc := range []struct {
+		name                                                    string
+		count                                                   int
+		permits                                                 chan struct{}
+		configured, metadataOnly, canceled, parallel, wantError bool
+	}{
+		{name: "default serial", count: 3},
+		{name: "serial canceled", count: 3, canceled: true, wantError: true},
+		{name: "nil permits", count: 3, configured: true},
+		{name: "single", count: 1, configured: true, permits: make(chan struct{}, 2)},
+		{name: "empty", configured: true, permits: make(chan struct{}, 2)},
+		{name: "metadata only", count: 3, configured: true, permits: make(chan struct{}, 2), metadataOnly: true},
+		{name: "unbuffered", count: 3, configured: true, permits: make(chan struct{}), wantError: true},
+		{name: "parallel ordered", count: 8, configured: true, permits: make(chan struct{}, 2), parallel: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cm, metadata, paths := manifestReadFixture(t, tc.count)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			var options []snapshotstorage.SnapshotReaderOption
+			if tc.configured {
+				options = []snapshotstorage.SnapshotReaderOption{snapshotstorage.WithManifestReadPermits(tc.permits)}
+			}
+			started, release := make(chan struct{}), make(chan struct{})
+			var mu sync.Mutex
+			var reads []string
+			var active, maximum, others atomic.Int64
+			defer mockey.Mock((*storage.LocalChunkManager).Read).To(func(ctx context.Context, key string) ([]byte, error) {
+				if strings.HasSuffix(key, ".avro") {
+					n := active.Add(1)
+					defer active.Add(-1)
+					for old := maximum.Load(); n > old && !maximum.CompareAndSwap(old, n); old = maximum.Load() {
+					}
+					mu.Lock()
+					reads = append(reads, key)
+					mu.Unlock()
+					if tc.parallel && key == paths[0] {
+						close(started)
+						select {
+						case <-release:
+						case <-ctx.Done():
+							return nil, ctx.Err()
+						}
+					} else {
+						others.Add(1)
+					}
+				}
+				return os.ReadFile(key)
+			}).Build().UnPatch()
+			if tc.canceled {
+				cancel()
+			}
+			done := make(chan manifestReadResult, 1)
+			go func() {
+				got, err := snapshotstorage.NewSnapshotReader(cm, options...).ReadSnapshot(ctx, metadata, !tc.metadataOnly)
+				done <- manifestReadResult{got, err}
+			}()
+			if tc.parallel {
+				awaitSnapshotEvent(t, started)
+				require.Eventually(t, func() bool { return others.Load() == 7 }, time.Second, time.Millisecond)
+				close(release)
+			}
+			got := awaitSnapshotEvent(t, done)
+			if tc.wantError {
+				require.Error(t, got.err)
+				if tc.canceled {
+					require.ErrorIs(t, got.err, context.Canceled)
+				}
+				require.Nil(t, got.snapshot)
+				require.Empty(t, reads)
+				return
+			}
+			require.NoError(t, got.err)
+			if tc.metadataOnly || tc.count == 0 {
+				require.Empty(t, reads)
+				require.Empty(t, got.snapshot.Segments)
+			} else if tc.parallel {
+				require.EqualValues(t, 2, maximum.Load())
+				require.Equal(t, paths, got.snapshot.ManifestPaths)
+				for i, segment := range got.snapshot.Segments {
+					require.EqualValues(t, i+1, segment.GetSegmentId())
+				}
+			} else {
+				require.Equal(t, paths, reads)
+				require.EqualValues(t, 1, maximum.Load())
+			}
+			require.Empty(t, tc.permits)
+		})
+	}
+}
+
 // Exercise native manifest serialization and LOB production, then read the
 // unchanged manifest after copying and relocating two generations of bundles.
 func TestSnapshotExportNativeManifestInventory(t *testing.T) {
@@ -3534,17 +3596,25 @@ func TestSnapshotExportNativeManifestInventory(t *testing.T) {
 			output, err := writer.Close()
 			require.NoError(t, err)
 			defer output.Destroy()
-			stat := path.Join(base, "_stats/text.100/first")
+			stat := path.Join(base, "_stats/text_index.100/first")
 			delta := path.Join(base, "_delta/first")
+			bloom := path.Join(base, "_stats/pk.100/bloom")
+			bm25 := path.Join(base, "_stats/bm25.100/stats")
+			jsonIndex := path.Join(base, "_stats/json_stats.100/index")
 			indexRoot := path.Join(base, "_index/500/1")
 			indexRelative, err := packed.ManifestIndexRelativePath(base, indexRoot)
 			require.NoError(t, err)
-			for _, file := range []string{stat, delta, path.Join(indexRoot, "index.bin"), path.Join(base, "unreferenced")} {
+			for _, file := range []string{stat, bloom, bm25, jsonIndex, delta, path.Join(indexRoot, "index.bin"), path.Join(base, "unreferenced")} {
 				require.NoError(t, cm.Write(ctx, file, []byte(file)))
 			}
 			manifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(base, 0), cfg, &packed.ManifestUpdates{
 				NewFiles: output, DeltaLogs: []packed.DeltaLogEntry{{Path: delta, NumEntries: 1}},
-				Stats: []packed.StatEntry{{Key: "text.100", Files: []string{stat}}},
+				Stats: []packed.StatEntry{
+					{Key: "text_index.100", Files: []string{stat}},
+					{Key: "json_stats.100", Files: []string{jsonIndex}},
+					{Key: "pk.100", Files: []string{bloom}, Metadata: map[string]string{"kind": "bloom"}},
+					{Key: "bm25.100", Files: []string{bm25}},
+				},
 				Indexes: []packed.ManifestIndexInfo{{
 					Path: indexRelative, ColumnName: "100", IndexName: "idx", IndexType: "INVERTED",
 					FieldID: 100, IndexID: 10, BuildID: 500, IndexVersion: 1, NumRows: 1,
@@ -3556,15 +3626,20 @@ func TestSnapshotExportNativeManifestInventory(t *testing.T) {
 			_, version, err := packed.UnmarshalManifestPath(manifest)
 			require.NoError(t, err)
 			_, err = packed.CommitManifestUpdates(packed.MarshalManifestPath(base, version), cfg, &packed.ManifestUpdates{
-				Stats: []packed.StatEntry{{Key: "text.100", Files: []string{path.Join(base, "unreferenced")}}},
+				Stats: []packed.StatEntry{{Key: "text_index.100", Files: []string{path.Join(base, "unreferenced")}}},
 			})
 			require.NoError(t, err)
-			original, err := packed.ReadManifestFiles(manifest, cfg)
+			original, err := snapshotstorage.ReadNativeManifestFiles(manifest, cfg)
 			require.NoError(t, err)
 			require.NotEmpty(t, original.ColumnFiles)
 			require.NotEmpty(t, original.LobFiles)
 			manifestBytes, err := cm.Read(ctx, original.ManifestFile)
 			require.NoError(t, err)
+			decoded, err := snapshotstorage.DecodeManifest(manifestBytes, base)
+			require.NoError(t, err)
+			decoded.ManifestFile = original.ManifestFile
+			require.Equal(t, original, decoded)
+
 			legacyStat := path.Join(cm.RootPath(), "stats_log/100/1/1001/100/10")
 			avroIndex := path.Join(cm.RootPath(), "index_files/600/1/100/1001/legacy.idx")
 			for _, file := range []string{legacyStat, avroIndex} {
@@ -3590,6 +3665,7 @@ func TestSnapshotExportNativeManifestInventory(t *testing.T) {
 			mockSnapshotLocalCopy(t, cm, cm)
 			walk := mockey.Mock((*storage.LocalChunkManager).WalkWithPrefix).Return(merr.ErrServiceInternal).Build()
 			defer walk.UnPatch()
+			verifyPublicSnapshotCopy(t, cm, cfg, metadata, schema, text)
 			for generation := 0; generation < 2; generation++ {
 				source, err := snapshotstorage.NewSnapshotReader(cm).ReadSnapshot(ctx, metadata, true)
 				require.NoError(t, err)
@@ -3607,7 +3683,7 @@ func TestSnapshotExportNativeManifestInventory(t *testing.T) {
 				}
 				require.True(t, hasLegacyStat)
 				require.Equal(t, avroWins, hasAvroIndex)
-				require.NoError(t, snapshotstorage.CopySnapshotExportPlanForTest(ctx, plan, "bucket", "bucket", &snapshotWholePlanCopier{}, cm, make(chan struct{}, 2), nil))
+				require.NoError(t, snapshotstorage.CopySnapshotExportPlanForTest(ctx, plan, "bucket", "bucket", &snapshotPlanStore{}, cm, make(chan struct{}, 2), nil))
 				err = snapshotstorage.PrepareSnapshotExportMetadataForTest(ctx, cm, source, plan.SnapshotExportPlan)
 				require.NoError(t, err)
 				_, err = snapshotstorage.NewSnapshotWriter(cm).CommitStagedMetadata(ctx, snapshotstorage.GetSnapshotStagingMetadataPath(bundle), plan.MetadataURI, plan.MetadataURI)
@@ -3637,7 +3713,7 @@ func TestSnapshotExportNativeManifestInventory(t *testing.T) {
 				require.NoError(t, err)
 				require.Len(t, infos, 1)
 				require.Equal(t, segment.GetManifestPath(), infos[0].FilePath, "Restore and milvus-table resolve the same native entry point")
-				files, err := packed.ReadManifestFiles(got.Segments[0].GetManifestPath(), cfg)
+				files, err := snapshotstorage.ReadNativeManifestFiles(got.Segments[0].GetManifestPath(), cfg)
 				require.NoError(t, err)
 				copiedManifest, err := cm.Read(ctx, files.ManifestFile)
 				require.NoError(t, err)
@@ -3679,7 +3755,7 @@ func TestSnapshotExportNativeManifestInventory(t *testing.T) {
 						SourceStorageConfig: cfg, TargetUri: path.Join(root, "missing-object"),
 					}
 					result, err := snapshotstorage.ExecuteSnapshotExport(ctx, req, cm,
-						&snapshotstorage.ResolvedForeignStorage{ForeignCM: cm, ForeignStorageConfig: cfg, Copier: &snapshotWholePlanCopier{}}, make(chan struct{}, 2), nil)
+						&snapshotstorage.ResolvedForeignStorage{ForeignCM: cm, ForeignStorageConfig: cfg, TargetStore: &snapshotPlanStore{}}, make(chan struct{}, 2), nil)
 					require.Error(t, err)
 					require.Nil(t, result)
 					exists, err := cm.Exist(ctx, snapshotstorage.GetSnapshotStagingMetadataPath(req.GetTargetUri()))
@@ -3706,11 +3782,11 @@ func TestSnapshotExportManifestInventoryValidation(t *testing.T) {
 			}
 			metadata, _, err := snapshotstorage.NewSnapshotWriter(cm).SaveToRootWithSize(ctx, snapshot, cm.RootPath(), datapb.SnapshotLayout_SnapshotLayoutReferenced)
 			require.NoError(t, err)
-			files := &packed.ManifestFiles{ManifestFile: path.Join(base, "_metadata/manifest-1.avro")}
+			files := &snapshotio.NativeManifestFiles{ManifestFile: path.Join(base, "_metadata/manifest-1.avro")}
 			var readErr error
 			switch mode {
 			case "frozen empty inventory":
-				files = &packed.ManifestFiles{}
+				files = &snapshotio.NativeManifestFiles{}
 			case "native":
 				readErr = merr.ErrServiceUnavailable
 			case "empty-nonempty-segment":
@@ -3722,18 +3798,18 @@ func TestSnapshotExportManifestInventoryValidation(t *testing.T) {
 			}
 			cfg := &indexpb.StorageConfig{BucketName: "source", RootPath: "frozen-root", AccessKeyID: "frozen-key"}
 			calls := 0
-			defer mockey.Mock(packed.ReadManifestFiles).To(func(_ string, config *indexpb.StorageConfig) (*packed.ManifestFiles, error) {
+			defer mockey.Mock(snapshotstorage.ReadNativeManifestFiles).To(func(_ string, config *indexpb.StorageConfig) (*snapshotio.NativeManifestFiles, error) {
 				require.Same(t, cfg, config, "worker must use the frozen source configuration")
 				calls++
 				return files, readErr
 			}).Build().UnPatch()
 			var copies atomic.Int64
-			defer mockey.Mock((*snapshotWholePlanCopier).CopyCrossBucketAndGetSize).To(func(_ context.Context, srcBucket, srcObject, dstBucket, dstObject string) (int64, error) {
+			defer mockey.Mock((*snapshotPlanStore).Copy).To(func(_ context.Context, req objectstore.CopyRequest) (int64, error) {
 				copies.Add(1)
 				return int64(1), nil
 			}).Build().UnPatch()
 			req := &datapb.SnapshotExportCopyRequest{TaskId: 2, SegmentEnd: 1, SnapshotId: 1, CollectionId: 100, SnapshotMetadataPath: metadata, SourceStorageConfig: cfg, TargetUri: path.Join(cm.RootPath(), "target")}
-			result, err := snapshotstorage.ExecuteSnapshotExport(ctx, req, cm, &snapshotstorage.ResolvedForeignStorage{ForeignCM: cm, ForeignStorageConfig: &indexpb.StorageConfig{}, Copier: &snapshotWholePlanCopier{}}, make(chan struct{}, 2), nil)
+			result, err := snapshotstorage.ExecuteSnapshotExport(ctx, req, cm, &snapshotstorage.ResolvedForeignStorage{ForeignCM: cm, ForeignStorageConfig: &indexpb.StorageConfig{}, TargetStore: &snapshotPlanStore{}}, make(chan struct{}, 2), nil)
 			require.Equal(t, 1, calls, "reuse the pinned native inventory for LOB validation")
 			if mode == "frozen empty inventory" {
 				require.NoError(t, err)
@@ -3767,18 +3843,18 @@ func TestSnapshotExportManifestInventoryConcurrency(t *testing.T) {
 			unblock := func() { releaseOnce.Do(func() { close(release) }) }
 			defer unblock()
 			var calls atomic.Int64
-			read := mockey.Mock(packed.ReadManifestFiles).To(func(string, *indexpb.StorageConfig) (*packed.ManifestFiles, error) {
+			read := mockey.Mock(snapshotstorage.ReadNativeManifestFiles).To(func(string, *indexpb.StorageConfig) (*snapshotio.NativeManifestFiles, error) {
 				n := calls.Add(1)
 				started <- struct{}{}
 				if mode == "failure" && n == 2 {
 					return nil, merr.ErrServiceUnavailable
 				}
 				<-release
-				return &packed.ManifestFiles{}, nil
+				return &snapshotio.NativeManifestFiles{}, nil
 			}).Build()
 			defer read.UnPatch()
 			var copies atomic.Int64
-			defer mockey.Mock((*snapshotWholePlanCopier).CopyCrossBucketAndGetSize).To(func(_ context.Context, srcBucket, srcObject, dstBucket, dstObject string) (int64, error) {
+			defer mockey.Mock((*snapshotPlanStore).Copy).To(func(_ context.Context, req objectstore.CopyRequest) (int64, error) {
 				copies.Add(1)
 				return int64(1), nil
 			}).Build().UnPatch()
@@ -3789,7 +3865,7 @@ func TestSnapshotExportManifestInventoryConcurrency(t *testing.T) {
 			done := make(chan error, 1)
 			go func() {
 				req := &datapb.SnapshotExportCopyRequest{TaskId: 2, SegmentEnd: 2, SnapshotId: 1, CollectionId: 100, SnapshotMetadataPath: metadata, SourceStorageConfig: &indexpb.StorageConfig{}, TargetUri: path.Join(cm.RootPath(), "target")}
-				_, err := snapshotstorage.ExecuteSnapshotExport(ctx, req, cm, &snapshotstorage.ResolvedForeignStorage{ForeignCM: cm, ForeignStorageConfig: &indexpb.StorageConfig{}, Copier: &snapshotWholePlanCopier{}}, permits, nil)
+				_, err := snapshotstorage.ExecuteSnapshotExport(ctx, req, cm, &snapshotstorage.ResolvedForeignStorage{ForeignCM: cm, ForeignStorageConfig: &indexpb.StorageConfig{}, TargetStore: &snapshotPlanStore{}}, permits, nil)
 				done <- err
 			}()
 			awaitSnapshotEvent(t, started)
@@ -3820,7 +3896,7 @@ func TestSnapshotExportManifestInventoryConcurrency(t *testing.T) {
 	}
 }
 
-func TestCollectStorageV3DataFiles(t *testing.T) {
+func TestEnumerateSegmentFiles(t *testing.T) {
 	cfg := &indexpb.StorageConfig{BucketName: "source-bucket"}
 	manifest := packed.MarshalManifestPath("root/insert_log/1/2/3", 7)
 	logs := func(paths ...string) []*datapb.FieldBinlog {
@@ -3831,7 +3907,7 @@ func TestCollectStorageV3DataFiles(t *testing.T) {
 		return []*datapb.FieldBinlog{logs}
 	}
 	ctx := context.Background()
-	native := &packed.ManifestFiles{
+	native := &snapshotio.NativeManifestFiles{
 		ManifestFile: "root/insert_log/1/2/3/_metadata/manifest-7.avro",
 		ColumnFiles:  []string{"root/insert_log/1/2/3/_data/1"}, DeltaFiles: []string{"root/insert_log/1/2/3/_delta/2"},
 		StatsFiles: []string{"root/insert_log/1/2/3/_stats/text_index.100/a", "root/insert_log/1/2/3/_stats/json_stats.101/b"},
@@ -3839,19 +3915,21 @@ func TestCollectStorageV3DataFiles(t *testing.T) {
 		Indexes:    []packed.ManifestIndexInfo{{Path: "unselected-index-metadata"}},
 	}
 	segment := &datapb.SegmentDescription{
-		SegmentId: 3, StorageVersion: storage.StorageV3, NumOfRows: 1, ManifestPath: manifest,
+		SegmentId: 3, StorageVersion: snapshotstorage.StorageV3, NumOfRows: 1, ManifestPath: manifest,
 		Binlogs: logs("not-a-physical-v3-insert"), Deltalogs: logs("", native.DeltaFiles[0], "root/delta_log/1/2/3/3"),
 		Statslogs: logs("root/stats_log/1/2/3/100/4"), Bm25Statslogs: logs("root/bm25_stats/1/2/3/100/5"),
 		TextIndexFiles: map[int64]*datapb.TextIndexStats{100: {Files: []string{"stale-text-index"}}},
 		IndexFiles:     []*indexpb.IndexFilePathInfo{{IndexFilePaths: []string{"selected-index"}}},
 	}
 	before := proto.Clone(segment)
-	defer mockey.Mock(packed.ReadManifestFiles).To(func(got string, gotCfg *indexpb.StorageConfig) (*packed.ManifestFiles, error) {
+	defer mockey.Mock(snapshotstorage.ReadNativeManifestFiles).To(func(got string, gotCfg *indexpb.StorageConfig) (*snapshotio.NativeManifestFiles, error) {
 		require.Equal(t, manifest, got)
 		require.Same(t, cfg, gotCfg)
 		return native, nil
 	}).Build().UnPatch()
-	got, err := snapshotstorage.CollectStorageV3DataFiles(ctx, segment, cfg)
+	got, err := snapshotstorage.EnumerateSegmentFiles(ctx, segment, func(_ context.Context, p string) (*snapshotio.NativeManifestFiles, error) {
+		return snapshotstorage.ReadNativeManifestFiles(p, cfg)
+	})
 	require.True(t, proto.Equal(before, segment))
 	require.NoError(t, err)
 	require.Same(t, native, got.Manifest)
@@ -3862,26 +3940,29 @@ func TestCollectStorageV3DataFiles(t *testing.T) {
 	}
 	require.ElementsMatch(t, []string{
 		native.ManifestFile, native.ColumnFiles[0], native.DeltaFiles[0], native.StatsFiles[0], native.StatsFiles[1], native.LobFiles[0].Path,
-		"root/delta_log/1/2/3/3", "root/stats_log/1/2/3/100/4", "root/bm25_stats/1/2/3/100/5",
+		native.DeltaFiles[0], "root/delta_log/1/2/3/3", "root/stats_log/1/2/3/100/4", "root/bm25_stats/1/2/3/100/5", "selected-index",
 	}, paths)
 }
 
-func TestCollectStorageV3DataFiles_EmptyPinnedManifest(t *testing.T) {
+func TestEnumerateSegmentFiles_EmptyPinnedManifest(t *testing.T) {
 	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
-	segment := &datapb.SegmentDescription{ManifestPath: packed.MarshalManifestPath(path.Join(cfg.RootPath, "insert_log/1/2/3"), 0)}
-	got, err := snapshotstorage.CollectStorageV3DataFiles(context.Background(), segment, cfg)
+	segment := &datapb.SegmentDescription{StorageVersion: snapshotstorage.StorageV3, ManifestPath: packed.MarshalManifestPath(path.Join(cfg.RootPath, "insert_log/1/2/3"), 0)}
+	got, err := snapshotstorage.EnumerateSegmentFiles(context.Background(), segment, func(_ context.Context, p string) (*snapshotio.NativeManifestFiles, error) {
+		return snapshotstorage.ReadNativeManifestFiles(p, cfg)
+	})
 	require.NoError(t, err)
 	require.Empty(t, got.Files)
 	segment.NumOfRows = 1
-	got, err = snapshotstorage.CollectStorageV3DataFiles(context.Background(), segment, cfg)
+	got, err = snapshotstorage.EnumerateSegmentFiles(context.Background(), segment, func(_ context.Context, p string) (*snapshotio.NativeManifestFiles, error) {
+		return snapshotstorage.ReadNativeManifestFiles(p, cfg)
+	})
 	require.Error(t, err)
 	require.Nil(t, got)
 }
 
-func TestSnapshotExportCopyRejectsUnsizedCopier(t *testing.T) {
+func TestSnapshotExportCopyRejectsMissingStore(t *testing.T) {
 	permits := make(chan struct{}, 1)
 	require.Error(t, snapshotstorage.CopySnapshotExportPlan(context.Background(), nil, "", "", nil, permits, nil))
-	require.Error(t, snapshotstorage.CopySnapshotExportPlan(context.Background(), nil, "", "", &struct{ storage.CrossBucketCopier }{}, permits, nil))
 }
 
 // snapshotShardChunkManager keeps object keys relative, like a remote bucket.
@@ -3936,7 +4017,7 @@ func TestSnapshotExportShards_CopyAndFinalize(t *testing.T) {
 	snapshot.Segments[1].ManifestPath = packed.MarshalManifestPath(base, 1)
 	snapshot.Segments[1].Deltalogs = snapshot.Segments[1].Binlogs
 	snapshot.Segments[1].Binlogs = nil
-	defer mockey.Mock(packed.ReadManifestFiles).Return(&packed.ManifestFiles{ManifestFile: native}, nil).Build().UnPatch()
+	defer mockey.Mock(snapshotstorage.ReadNativeManifestFiles).Return(&snapshotio.NativeManifestFiles{ManifestFile: native}, nil).Build().UnPatch()
 
 	cfg := &indexpb.StorageConfig{Address: "s3.us-west-2.amazonaws.com", BucketName: "source", CloudProvider: objectstorage.CloudProviderAWS, Region: "us-west-2", UseSSL: true}
 	req, resolved := snapshotExportFixture(t, ctx, source, target, snapshot, cfg)
@@ -4209,11 +4290,11 @@ func TestSnapshotExportShards_MetadataOnlyFinalization(t *testing.T) {
 			source := &snapshotShardChunkManager{objects: make(map[string][]byte)}
 			target := &snapshotShardChunkManager{objects: make(map[string][]byte)}
 			data := &snapshotstorage.SnapshotData{
-				SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 100}, Collection: &datapb.CollectionDescription{}, SegmentIDs: []int64{2, 1}, ManifestPaths: []string{"source/1.avro", "source/2.avro"}, ManifestFormatVersion: 5,
+				MetadataPath: "source/snapshots/100/metadata/1.json", SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 100}, Collection: &datapb.CollectionDescription{}, SegmentIDs: []int64{2, 1}, ManifestPaths: []string{"source/1.avro", "source/2.avro"}, ManifestFormatVersion: 5,
 				StorageManifests: []*datapb.StorageV2SegmentManifest{{SegmentId: 1, Manifest: "source/native"}},
 			}
 			cfg := &indexpb.StorageConfig{}
-			req := &datapb.SnapshotExportCopyRequest{SnapshotId: 1, CollectionId: 100, TargetUri: "destination"}
+			req := &datapb.SnapshotExportCopyRequest{SnapshotId: 1, CollectionId: 100, TargetUri: path.Join(t.TempDir(), "destination")}
 			var readErr error
 			switch mode {
 			case "reexport", "missing bundle root":
@@ -4257,6 +4338,7 @@ func TestSnapshotExportShards_MetadataOnlyFinalization(t *testing.T) {
 				}).Build().UnPatch()
 			}
 
+			req.SnapshotMetadataPath = data.MetadataPath
 			tasks := []*datapb.SnapshotExportCopyTask{{TaskId: 1, SegmentEnd: 2, Result: &datapb.SnapshotExportCopyResponse{TaskId: 1, State: datapb.ImportTaskStateV2_Completed, TotalFiles: 2, CopiedFiles: 2}}}
 			result, err := snapshotstorage.FinalizeSnapshotExport(ctx, req, tasks, source, &snapshotstorage.ResolvedForeignStorage{ForeignCM: target, ForeignStorageConfig: cfg})
 			if mode != "plain native" && mode != "reexport" && mode != "legacy IDs" {
@@ -4271,14 +4353,14 @@ func TestSnapshotExportShards_MetadataOnlyFinalization(t *testing.T) {
 			require.Len(t, top.ManifestList, 2)
 			require.Zero(t, result.TotalBytes)
 			if mode == "reexport" {
-				require.Equal(t, packed.MarshalManifestPath("destination/files/native", 7), top.Storagev2ManifestList[0].Manifest)
+				require.Equal(t, packed.MarshalManifestPath(path.Join(req.TargetUri, "files/native"), 7), top.Storagev2ManifestList[0].Manifest)
 			}
 		})
 	}
 }
 
 func TestSnapshotExportShards_BindAvroToMetadata(t *testing.T) {
-	for _, mode := range []string{"wrong identity", "missing native mapping", "invalid identity path", "duplicate Avro identity"} {
+	for _, mode := range []string{"wrong identity", "missing native mapping", "invalid identity path", "duplicate Avro identity", "missing target config"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := context.Background()
 			cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
@@ -4308,8 +4390,15 @@ func TestSnapshotExportShards_BindAvroToMetadata(t *testing.T) {
 			bytes, err = protojson.Marshal(&top)
 			require.NoError(t, err)
 			require.NoError(t, cm.Write(ctx, metadata, bytes))
+			if mode == "missing target config" {
+				resolved.ForeignStorageConfig = nil
+			}
 			_, err = snapshotstorage.ExecuteSnapshotExport(ctx, req, cm, resolved, make(chan struct{}, 1), nil)
-			require.ErrorIs(t, err, merr.ErrDataIntegrity)
+			if mode == "missing target config" {
+				require.ErrorIs(t, err, merr.ErrServiceInternal)
+			} else {
+				require.ErrorIs(t, err, merr.ErrDataIntegrity)
+			}
 		})
 	}
 }
@@ -4361,7 +4450,7 @@ func TestSnapshotExportAvroWrites_ConcurrencyAndDrain(t *testing.T) {
 			done := make(chan outcome, 1)
 			go func() {
 				result, err := snapshotstorage.ExecuteSnapshotExport(ctx, req, source, &snapshotstorage.ResolvedForeignStorage{
-					ForeignCM: writer, ForeignStorageConfig: &indexpb.StorageConfig{}, Copier: &snapshotWholePlanCopier{},
+					ForeignCM: writer, ForeignStorageConfig: &indexpb.StorageConfig{}, TargetStore: &snapshotPlanStore{},
 				}, permits, nil)
 				done <- outcome{result, err}
 			}()
@@ -4536,15 +4625,15 @@ func TestSnapshotExportSegmentStatisticsOverflow(t *testing.T) {
 	}
 	metadata, err := snapshotstorage.NewSnapshotWriter(source).Save(ctx, snapshot)
 	require.NoError(t, err)
-	copier := &snapshotWholePlanCopier{}
-	defer mockey.Mock((*snapshotWholePlanCopier).CopyCrossBucketAndGetSize).Return(int64(math.MaxInt64), nil).Build().UnPatch()
+	targetStore := &snapshotPlanStore{}
+	defer mockey.Mock((*snapshotPlanStore).Copy).Return(int64(math.MaxInt64), nil).Build().UnPatch()
 	result, err := snapshotstorage.ExecuteSnapshotExport(ctx, &datapb.SnapshotExportCopyRequest{
 		TaskId: 1, SnapshotId: 1, CollectionId: 100, SegmentEnd: 2,
 		SnapshotMetadataPath: metadata, TargetUri: target.RootPath(),
-		SourceStorageConfig: &indexpb.StorageConfig{BucketName: "source"},
+		SourceStorageConfig: &indexpb.StorageConfig{StorageType: "local"},
 	}, source, &snapshotstorage.ResolvedForeignStorage{
-		ForeignCM: target, ForeignBucket: "target", Copier: copier,
-		ForeignStorageConfig: &indexpb.StorageConfig{StorageType: "remote", CloudProvider: "aws", BucketName: "target", Address: "s3.us-west-2.amazonaws.com", Region: "us-west-2", UseSSL: true},
+		ForeignCM: target, TargetStore: targetStore,
+		ForeignStorageConfig: &indexpb.StorageConfig{StorageType: "local"},
 	}, make(chan struct{}, 1), nil)
 	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 	require.ErrorContains(t, err, "statistics overflow")
@@ -4566,117 +4655,216 @@ func TestSnapshotTaskCopyPermits(t *testing.T) {
 	}
 }
 
-func TestSnapshotReader_ManifestReadModes(t *testing.T) {
-	for _, tc := range []struct {
-		name                                                    string
-		count                                                   int
-		permits                                                 chan struct{}
-		configured, metadataOnly, canceled, parallel, wantError bool
+// localObjectStore exercises the public bucket/key API against actual files.
+type localObjectStore struct {
+	cm   storage.ChunkManager
+	copy func(context.Context, objectstore.CopyRequest) (int64, error)
+}
+
+func (s localObjectStore) Copy(ctx context.Context, req objectstore.CopyRequest) (int64, error) {
+	return s.copy(ctx, req)
+}
+
+func (s localObjectStore) Read(ctx context.Context, object objectstore.Object) ([]byte, error) {
+	return s.cm.Read(ctx, object.Key)
+}
+
+func (s localObjectStore) Write(ctx context.Context, object objectstore.Object, data []byte) error {
+	return s.cm.Write(ctx, object.Key, data)
+}
+
+func verifyPublicSnapshotCopy(t *testing.T, cm storage.ChunkManager, cfg *indexpb.StorageConfig, metadata string, schema *arrow.Schema, text string) {
+	t.Helper()
+	ctx := context.Background()
+	io := localObjectStore{cm: cm}
+	copyObject := func(ctx context.Context, req objectstore.CopyRequest) (int64, error) {
+		data, err := cm.Read(ctx, req.Source.Key)
+		if err != nil {
+			return 0, err
+		}
+		err = cm.Write(ctx, req.Destination.Key, data)
+		return int64(len(data)), err
+	}
+	io.copy = copyObject
+	t.Run("public", func(t *testing.T) {
+		req := &datapb.SnapshotExportCopyRequest{
+			JobId: 1, TaskId: 1, SnapshotId: 1, CollectionId: 100, SegmentEnd: 1,
+			SnapshotMetadataPath: metadata, SourceStorageConfig: cfg, TargetUri: path.Join(t.TempDir(), "worker"),
+		}
+		resolved := &snapshotstorage.ResolvedForeignStorage{ForeignCM: cm, ForeignStorageConfig: cfg, TargetStore: &snapshotPlanStore{}}
+		worker, err := snapshotstorage.ExecuteSnapshotExport(ctx, req, cm, resolved, make(chan struct{}, 2), nil)
+		require.NoError(t, err)
+		prepared, err := snapshotstorage.FinalizeSnapshotExport(ctx, req, []*datapb.SnapshotExportCopyTask{{TaskId: 1, SegmentEnd: 1, Result: worker}}, cm, resolved)
+		require.NoError(t, err)
+		workerRoot := req.GetTargetUri()
+		_, err = snapshotstorage.NewSnapshotWriter(cm).CommitStagedMetadata(ctx, snapshotstorage.GetSnapshotStagingMetadataPath(workerRoot), prepared.MetadataURI, prepared.MetadataURI)
+		require.NoError(t, err)
+
+		target := path.Join(t.TempDir(), "public")
+		result, err := snapshotstorage.CopySnapshot(ctx, io, io, snapshotstorage.CopyRequest{SourceMetadataURI: metadata, TargetRoot: target}, snapshotstorage.Options{Concurrency: 2})
+		require.NoError(t, err)
+		require.Equal(t, prepared.TotalFiles, result.TotalFiles)
+		require.Equal(t, prepared.TotalBytes, result.TotalBytes)
+		workerData, err := snapshotstorage.NewSnapshotReader(cm).ReadSnapshot(ctx, prepared.MetadataURI, true)
+		require.NoError(t, err)
+		publicData, err := snapshotstorage.NewSnapshotReader(cm).ReadSnapshot(ctx, result.MetadataURI, true)
+		require.NoError(t, err)
+		workerMetadata, err := cm.Read(ctx, prepared.MetadataURI)
+		require.NoError(t, err)
+		publicMetadata, err := cm.Read(ctx, result.MetadataURI)
+		require.NoError(t, err)
+		require.JSONEq(t, strings.ReplaceAll(string(workerMetadata), workerRoot, "TARGET"), strings.ReplaceAll(string(publicMetadata), target, "TARGET"))
+		for i, segment := range publicData.Segments {
+			a, err := protojson.Marshal(workerData.Segments[i])
+			require.NoError(t, err)
+			b, err := protojson.Marshal(segment)
+			require.NoError(t, err)
+			require.JSONEq(t, strings.ReplaceAll(string(a), workerRoot, "TARGET"), strings.ReplaceAll(string(b), target, "TARGET"))
+			files, err := snapshotstorage.ReadNativeManifestFiles(segment.ManifestPath, cfg)
+			require.NoError(t, err)
+			require.NotEmpty(t, files.ColumnFiles)
+			require.NotEmpty(t, files.DeltaFiles)
+			require.NotEmpty(t, files.StatsFiles)
+			require.NotEmpty(t, files.LobFiles)
+			for _, file := range append(append(files.ColumnFiles, files.DeltaFiles...), files.StatsFiles...) {
+				_, err := cm.Read(ctx, file)
+				require.NoError(t, err, file)
+			}
+			for _, lob := range files.LobFiles {
+				_, err := cm.Read(ctx, lob.Path)
+				require.NoError(t, err, lob.Path)
+			}
+		}
+		// Read actual column and LOB data through the copied target manifest.
+		reader, err := packed.NewFFISegmentReader(publicData.Segments[0].ManifestPath, schema, []string{"100"}, 1024, cfg,
+			[]packed.TextColumnConfig{{FieldID: 100, LobBasePath: path.Join(target, "files/insert_log/100/1/lobs/100")}})
+		require.NoError(t, err)
+		record, err := reader.ReadNext()
+		require.NoError(t, err)
+		require.Equal(t, text, record.Column(0).(*array.String).Value(0))
+		require.NoError(t, reader.Close())
+	})
+}
+
+func TestPublicSnapshotCopy(t *testing.T) {
+	for _, provider := range []struct {
+		name, targetPrefix string
 	}{
-		{name: "default serial", count: 3},
-		{name: "serial canceled", count: 3, canceled: true, wantError: true},
-		{name: "nil permits", count: 3, configured: true},
-		{name: "single", count: 1, configured: true, permits: make(chan struct{}, 2)},
-		{name: "empty", configured: true, permits: make(chan struct{}, 2)},
-		{name: "metadata only", count: 3, configured: true, permits: make(chan struct{}, 2), metadataOnly: true},
-		{name: "unbuffered", count: 3, configured: true, permits: make(chan struct{}), wantError: true},
-		{name: "parallel ordered", count: 8, configured: true, permits: make(chan struct{}, 2), parallel: true},
+		{"s3", "s3://target-bucket/"},
+		{"endpoint", "https://s3.us-west-2.amazonaws.com/target-bucket/"},
+		{"minio", "minio://localhost:9000/target-bucket/"},
+		{"gcs", "gs://target-bucket/"},
+		{"azure", "azure://account.blob.core.windows.net/target-bucket/"},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			cm, metadata, paths := manifestReadFixture(t, tc.count)
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			var options []snapshotstorage.SnapshotReaderOption
-			if tc.configured {
-				options = []snapshotstorage.SnapshotReaderOption{snapshotstorage.WithManifestReadPermits(tc.permits)}
-			}
-			started, release := make(chan struct{}), make(chan struct{})
-			var mu sync.Mutex
-			var reads []string
-			var active, maximum, others atomic.Int64
-			defer mockey.Mock((*storage.LocalChunkManager).Read).To(func(ctx context.Context, key string) ([]byte, error) {
-				if strings.HasSuffix(key, ".avro") {
-					n := active.Add(1)
-					defer active.Add(-1)
-					for old := maximum.Load(); n > old && !maximum.CompareAndSwap(old, n); old = maximum.Load() {
+		for _, mode := range []string{"copy", "empty", "bucket root", "copy failure", "size failure", "publish failure", "overlap"} {
+			t.Run(provider.name+"/"+mode, func(t *testing.T) {
+				ctx := context.Background()
+				source := &snapshotShardChunkManager{objects: make(map[string][]byte)}
+				target := &snapshotShardChunkManager{objects: make(map[string][]byte)}
+				data := &snapshotstorage.SnapshotData{SnapshotInfo: &datapb.SnapshotInfo{Id: 1, CollectionId: 100}, Collection: &datapb.CollectionDescription{}, Indexes: []*indexpb.IndexInfo{{IndexID: 5}}, BuildIDs: []int64{8}}
+				if mode != "empty" {
+					data.Segments = []*datapb.SegmentDescription{{
+						SegmentId: 10, PartitionId: 1, StorageVersion: 2,
+						Binlogs:    []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: "export/data"}}}},
+						IndexFiles: []*indexpb.IndexFilePathInfo{{IndexID: 5, BuildID: 8, IndexFilePaths: []string{"export/index"}}},
+					}}
+					source.objects["export/data"] = []byte("rows")
+					source.objects["export/index"] = []byte("index")
+				}
+				metadata, _, err := snapshotstorage.NewSnapshotWriter(source).SaveToRootWithSize(ctx, data, "export", datapb.SnapshotLayout_SnapshotLayoutReferenced)
+				require.NoError(t, err)
+				sourceURI := strings.Replace(provider.targetPrefix, "target-bucket", "source-bucket", 1) + metadata
+				var copied atomic.Int64
+				copyObject := func(ctx context.Context, req objectstore.CopyRequest) (int64, error) {
+					require.Equal(t, "source-bucket", req.Source.Bucket)
+					require.Equal(t, "target-bucket", req.Destination.Bucket)
+					if mode == "copy failure" {
+						return 0, merr.ErrIoPermissionDenied
 					}
-					mu.Lock()
-					reads = append(reads, key)
-					mu.Unlock()
-					if tc.parallel && key == paths[0] {
-						close(started)
-						select {
-						case <-release:
-						case <-ctx.Done():
-							return nil, ctx.Err()
+					b, err := source.Read(ctx, req.Source.Key)
+					if err != nil {
+						return 0, err
+					}
+					err = target.Write(ctx, req.Destination.Key, b)
+					copied.Add(1)
+					if mode == "size failure" {
+						return 0, merr.ErrServiceUnavailable
+					}
+					return int64(len(b)), err
+				}
+				targetRoot := provider.targetPrefix + "export/"
+				targetMetadata := metadata
+				if mode == "bucket root" {
+					targetRoot = provider.targetPrefix
+					targetMetadata = strings.TrimPrefix(metadata, "export/")
+				}
+				if mode == "overlap" {
+					targetRoot = strings.Replace(targetRoot, "target-bucket", "source-bucket", 1)
+				}
+				if mode == "publish failure" {
+					defer mockey.Mock(localObjectStore.Write).To(func(store localObjectStore, ctx context.Context, object objectstore.Object, b []byte) error {
+						if store.cm == target && strings.Contains(object.Key, "/metadata/") {
+							return merr.ErrServiceUnavailable
 						}
-					} else {
-						others.Add(1)
-					}
+						return store.cm.Write(ctx, object.Key, b)
+					}).Build().UnPatch()
 				}
-				return os.ReadFile(key)
-			}).Build().UnPatch()
-			if tc.canceled {
-				cancel()
-			}
-			done := make(chan manifestReadResult, 1)
-			go func() {
-				got, err := snapshotstorage.NewSnapshotReader(cm, options...).ReadSnapshot(ctx, metadata, !tc.metadataOnly)
-				done <- manifestReadResult{got, err}
-			}()
-			if tc.parallel {
-				awaitSnapshotEvent(t, started)
-				require.Eventually(t, func() bool { return others.Load() == 7 }, time.Second, time.Millisecond)
-				close(release)
-			}
-			got := awaitSnapshotEvent(t, done)
-			if tc.wantError {
-				require.Error(t, got.err)
-				if tc.canceled {
-					require.ErrorIs(t, got.err, context.Canceled)
+				result, err := snapshotstorage.CopySnapshot(ctx, localObjectStore{cm: source}, localObjectStore{cm: target, copy: copyObject}, snapshotstorage.CopyRequest{SourceMetadataURI: sourceURI, TargetRoot: targetRoot}, snapshotstorage.Options{Concurrency: 2})
+				if mode == "bucket root" {
+					require.ErrorContains(t, err, "target_s3_path")
 				}
-				require.Nil(t, got.snapshot)
-				require.Empty(t, reads)
-				return
-			}
-			require.NoError(t, got.err)
-			if tc.metadataOnly || tc.count == 0 {
-				require.Empty(t, reads)
-				require.Empty(t, got.snapshot.Segments)
-			} else if tc.parallel {
-				require.EqualValues(t, 2, maximum.Load())
-				require.Equal(t, paths, got.snapshot.ManifestPaths)
-				for i, segment := range got.snapshot.Segments {
-					require.EqualValues(t, i+1, segment.GetSegmentId())
+				if strings.Contains(mode, "failure") || mode == "overlap" || mode == "bucket root" {
+					require.Error(t, err)
+					require.Nil(t, result)
+					require.NotContains(t, target.objects, targetMetadata)
+					return
 				}
-			} else {
-				require.Equal(t, paths, reads)
-				require.EqualValues(t, 1, maximum.Load())
-			}
-			require.Empty(t, tc.permits)
-		})
+				require.NoError(t, err)
+				require.Equal(t, provider.targetPrefix+targetMetadata, result.MetadataURI)
+				read, err := snapshotstorage.NewSnapshotReader(target).ReadSnapshot(ctx, result.MetadataURI, true)
+				require.NoError(t, err)
+				switch mode {
+				case "empty":
+					require.Zero(t, copied.Load())
+					require.Empty(t, read.Segments)
+				default:
+					require.EqualValues(t, 2, copied.Load())
+					require.Len(t, read.Indexes, 1)
+				}
+			})
+		}
 	}
+	t.Run("validation", func(t *testing.T) {
+		ctx := context.Background()
+		_, err := snapshotstorage.CopySnapshot(ctx, nil, nil, snapshotstorage.CopyRequest{}, snapshotstorage.Options{})
+		require.Error(t, err)
+		_, err = snapshotstorage.CopySnapshot(ctx, nil, nil, snapshotstorage.CopyRequest{}, snapshotstorage.Options{Concurrency: 1})
+		require.Error(t, err)
+	})
 }
 
-func assertSnapshotBlocked[T any](t *testing.T, events <-chan T) {
-	t.Helper()
-	select {
-	case value := <-events:
-		t.Errorf("snapshot operation advanced before release: %v", value)
-	case <-time.After(20 * time.Millisecond):
-	}
-}
-
-func awaitSnapshotEvent[T any](t *testing.T, events <-chan T) T {
-	t.Helper()
-	select {
-	case value := <-events:
-		return value
-	case <-time.After(10 * time.Second):
-		t.Fatal("timed out waiting for snapshot operation")
-		var zero T
-		return zero
-	}
+// The byte decoder must match transaction reads without doing storage I/O.
+func TestManifestSerdePathParity(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	base := path.Join(t.TempDir(), "segment")
+	cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: path.Dir(base)}
+	refs := []string{path.Join(base, "_stats/owned"), "s3://lake/data/file", "/external/data/file", "../shared/file", "nested/../directory/", "s3://bucket", "file:relative"}
+	manifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(base, 0), cfg, &packed.ManifestUpdates{
+		Stats: []packed.StatEntry{{Key: "rows", Files: refs}},
+	})
+	require.NoError(t, err)
+	original, err := snapshotstorage.ReadNativeManifestFiles(manifest, cfg)
+	require.NoError(t, err)
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(cfg.RootPath))
+	data, err := cm.Read(ctx, original.ManifestFile)
+	require.NoError(t, err)
+	decoded, err := snapshotstorage.DecodeManifest(data, base)
+	require.NoError(t, err)
+	decoded.ManifestFile = original.ManifestFile
+	require.Equal(t, original, decoded)
+	require.Contains(t, decoded.StatsFiles, "s3://lake/data/file")
+	require.Contains(t, decoded.StatsFiles, "/external/data/file")
 }
 
 func TestSnapshotReader_ReadSnapshot_LegacyVersion(t *testing.T) {
@@ -4775,22 +4963,4 @@ func TestSnapshotReader_FutureManifest(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, snapshot.Segments, 1)
 	assert.Equal(t, int64(123), snapshot.Segments[0].GetSegmentId())
-}
-
-func TestSnapshotExportCopyErrorContext(t *testing.T) {
-	const secret = "source-secret"
-	for _, cause := range []error{context.DeadlineExceeded, merr.ErrIoKeyNotFound, merr.Wrapf(merr.ErrIoPermissionDenied, "credential %s", secret)} {
-		t.Run(cause.Error(), func(t *testing.T) {
-			item := snapshotstorage.FileCopy{SourcePath: "files/source\nobject", DestinationPath: "snapshots/target-object"}
-			defer mockey.Mock((*snapshotWholePlanCopier).CopyCrossBucketAndGetSize).Return(int64(0), cause).Build().UnPatch()
-			err := snapshotstorage.CopySnapshotExportPlan(context.Background(), []snapshotstorage.FileCopy{item}, "source-bucket", "target-bucket", &snapshotWholePlanCopier{}, make(chan struct{}, 1), func(int64) { t.Error("failed copy must not report completion") })
-			require.ErrorIs(t, err, cause)
-			require.Equal(t, merr.Code(cause), merr.Code(err))
-			reason := snapshotstorage.SanitizeSnapshotExportReason(err, &datapb.SnapshotExportCopyRequest{SourceStorageConfig: &indexpb.StorageConfig{SecretAccessKey: secret}})
-			for _, value := range []string{"source-bucket", item.SourcePath, "target-bucket", item.DestinationPath} {
-				require.Contains(t, reason, fmt.Sprintf("%q", value))
-			}
-			require.NotContains(t, reason, secret)
-		})
-	}
 }

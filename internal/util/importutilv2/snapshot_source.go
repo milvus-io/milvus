@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	sharedsnapshot "github.com/milvus-io/milvus/pkg/v3/snapshotio"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -60,16 +61,16 @@ func SnapshotPathValidator(options Options, cm storage.ChunkManager) (func(strin
 		return nil, err
 	}
 	uri, _ := funcutil.GetAttrByKeyFromRepeatedKV(SnapshotSourceURI, options)
-	snapshot := &snapshotstorage.SnapshotData{Layout: datapb.SnapshotLayout_SnapshotLayoutReferenced}
+	snapshot := &sharedsnapshot.SnapshotData{Layout: datapb.SnapshotLayout_SnapshotLayoutReferenced}
 	if layout == "self-contained" {
 		snapshot.Layout = datapb.SnapshotLayout_SnapshotLayoutSelfContained
 	}
 	return func(path string) error {
-		if err := snapshotstorage.ValidateSnapshotObjectPathForBucket(cm, "snapshot reference", path, ""); err != nil {
+		if err := sharedsnapshot.ValidateSnapshotObjectPathForBucket(cm, "snapshot reference", path, ""); err != nil {
 			return err
 		}
-		return snapshotstorage.ValidateExternalSnapshotPaths(uri, snapshot, []snapshotstorage.SnapshotFileRef{{
-			Path: path, NormalizedPath: snapshotstorage.NormalizeSnapshotObjectPath(path),
+		return sharedsnapshot.ValidateExternalSnapshotPaths(uri, snapshot, []sharedsnapshot.SnapshotFileRef{{
+			Path: path, NormalizedPath: sharedsnapshot.NormalizeSnapshotObjectPath(path),
 		}})
 	}, nil
 }
@@ -89,7 +90,11 @@ func ResolveSnapshotImportStorage(ctx context.Context, cm storage.ChunkManager,
 	if err != nil {
 		return nil, nil, merr.Wrap(err, "failed to resolve snapshot import storage")
 	}
-	return resolved.ForeignCM, resolved.ForeignStorageConfig, nil
+	sourceCM, ok := resolved.ForeignCM.(storage.ChunkManager)
+	if !ok {
+		return nil, nil, merr.WrapErrServiceInternalMsg("snapshot import requires a full chunk manager")
+	}
+	return sourceCM, resolved.ForeignStorageConfig, nil
 }
 
 // ValidateSnapshotImportFiles runs on expanded/persisted input, not on the
