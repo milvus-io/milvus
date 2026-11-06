@@ -79,7 +79,7 @@ Local CAS writes retain the existing transaction wrapper even when only one body
 2. Send bodies and wait for every body to succeed.
 3. Send Commit.
 
-An Upsert is one successful logical body regardless of its partition count, effects, or backend chunks. Before admission, TimeTick checks that an Upsert body's VChannel matches its session. Collection ownership and body identity are checked during shard admission. Commit does not retain and revalidate complete Begin/body messages.
+An Upsert is one successful logical body regardless of its partition count, effects, or backend chunks. The producer guarantees that Begin, bodies, and Commit use the same VChannel. TimeTick relies on this contract without an Upsert-specific membership check. Collection ownership and body identity are checked during shard admission. Commit does not retain and revalidate complete Begin/body messages.
 
 A nonzero `body_cnt` must equal successful logical body appends. Zero keeps the existing compatibility behavior for all message types, including Upsert. A new empty transaction is still rejected. Sessions retain counts, state, in-flight admission, and a lightweight effects classification. Upsert without deletes is insert-only. Upsert with explicit deletes requires Transform consumption. Recovery rebuilds the same counts and classification from durable bodies.
 
@@ -134,7 +134,7 @@ Format selection occurs before packing. Append failure does not trigger a second
 
 Validation must inspect old and new field values and physical rows where query deduplication could hide stale versions. Cover ordinary Insert, Upsert, partial update, AutoID, CAS, duplicates, independent delete scope, and single/multiple partitions. Exercise specified-partition and partition-key routing through actual producers.
 
-Trace redo, accounting failure, cancellation, unknown append outcomes, duplicate requests, and bounded retry recovery. Verify original results after WAL reopen. Cover Commit, Rollback, expiry, body-count mismatch, VChannel membership, and cleanup. Preserve independent L1/L0 recovery and test flush, restart, reload, compaction, and local flush replay.
+Trace redo, accounting failure, cancellation, unknown append outcomes, duplicate requests, and bounded retry recovery. Verify original results after WAL reopen. Cover Commit, Rollback, expiry, body-count mismatch, producer VChannel grouping, and cleanup. Preserve independent L1/L0 recovery and test flush, restart, reload, compaction, and local flush replay.
 
 Check decode/decrypt/conversion/apply failures at actual consumers and prove that later work cannot advance past a failed completion. Verify row-only versus delete-bearing frontier classification. Test CDC receiving-prefix replay, receiver restart, and switchover separately from local persistence.
 

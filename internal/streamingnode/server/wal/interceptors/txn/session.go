@@ -62,14 +62,6 @@ func (s *TxnSession) TxnContext() message.TxnContext {
 	return s.txnContext
 }
 
-// ValidateVChannelMembership checks transaction membership before body admission.
-func (s *TxnSession) ValidateVChannelMembership(vchannel string) error {
-	if vchannel != s.vchannel {
-		return status.NewUnrecoverableError("Upsert transaction body has an invalid vchannel scope")
-	}
-	return nil
-}
-
 // AddNewMessage adds a new message to the session.
 func (s *TxnSession) AddNewMessage(ctx context.Context, timetick uint64) error {
 	s.mu.Lock()

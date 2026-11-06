@@ -16,7 +16,7 @@ Messages managing transactions on a single VChannel.
 
 ## Key Invariants
 
-- Upsert is one logical body, even with several insert partitions and explicit delete effects. Before admission, its VChannel must match the transaction session. Shard admission checks collection ownership and the body contract. Commit does not retain and revalidate complete Begin/body messages.
+- Upsert is one logical body, even with several insert partitions and explicit delete effects. The producer guarantees that Begin, bodies, and Commit use the same VChannel. Shard admission checks collection ownership and the body contract. Commit does not retain and revalidate complete Begin/body messages.
 - The common body-count contract applies to Upsert: a nonzero count must match successful logical body appends. Zero keeps the existing compatibility behavior. Sessions retain counts and a lightweight effects classification. Row-only Upsert is insert-only; Upsert with deletes requires Transform consumption. Recovery reconstructs the same counts and classification from durable bodies, without retaining members for Commit revalidation.
 - Repeated PKs and overlapping transaction bodies retain existing equal-TimeTick semantics, without a last-write-wins guarantee. See [Unified Insert and Upsert WAL format](../../../design-docs/design_docs/wal/upsert_message.md).
 

@@ -203,11 +203,6 @@ func (impl *timeTickAppendInterceptor) handleTxnMessage(ctx context.Context, msg
 	if err != nil {
 		return nil, err
 	}
-	if msg.MessageType() == message.MessageTypeUpsert {
-		if err := session.ValidateVChannelMembership(msg.VChannel()); err != nil {
-			return nil, err
-		}
-	}
 	// Add the message to the transaction.
 	if err = session.AddNewMessage(ctx, msg.TimeTick()); err != nil {
 		return nil, err
