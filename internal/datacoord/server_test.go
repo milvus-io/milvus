@@ -3392,14 +3392,12 @@ func TestServer_CollectionLabelsForTask(t *testing.T) {
 		assert.False(t, ok)
 	})
 
-	ms := metacache.NewMetaStore(nil)
-	s := &Server{meta: &meta{ctx: context.Background(), metaStore: ms}}
-	s.meta.AddCollection(&collectionInfo{
+	s := &Server{meta: meta.NewMetaWithCollections(&meta.CollectionInfo{
 		ID:           1,
 		Schema:       &schemapb.CollectionSchema{Name: "docs"},
 		DatabaseID:   7,
 		DatabaseName: "analytics",
-	})
+	})}
 
 	t.Run("cached collection", func(t *testing.T) {
 		got, ok := s.collectionLabelsForTask(1)
