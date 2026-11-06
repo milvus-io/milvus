@@ -26,6 +26,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/bytedance/mockey"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
@@ -37,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_MilvusTableL0RefreshUpdatesExistingSegmentManifest() {
@@ -212,14 +214,14 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_MilvusTableChe
 	corruptErr := merr.WrapErrDataIntegrityMsg("malformed manifest")
 	buildErr := merr.WrapErrFunctionFailedMsg("replacement output failed")
 	for _, tc := range []struct {
-		name       string
-		changed    bool
-		hasOutputs bool
-		sourceErr  error
-		readErr    error
-		refreshErr error
-		patchErr   error
-		buildErr   error
+		name          string
+		changed       bool
+		hasOutputs    bool
+		sourceErr     error
+		readErr       error
+		refreshErr    error
+		missingColumn bool
+		buildErr      error
 	}{
 		{name: "complete outputs are retained", changed: true, hasOutputs: true},
 		{name: "missing outputs rebuild only their segment", changed: true},
@@ -230,7 +232,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_MilvusTableChe
 		{name: "replacement failure publishes no result", changed: true, buildErr: buildErr},
 		{name: "delete discovery failure does not rebuild", changed: true, sourceErr: readErr},
 		{name: "refresh failure does not rebuild", changed: true, hasOutputs: true, refreshErr: corruptErr},
-		{name: "column append failure does not rebuild", changed: true, hasOutputs: true, patchErr: readErr},
+		{name: "source column repair failure does not rebuild", changed: true, hasOutputs: true, missingColumn: true, refreshErr: readErr},
 	} {
 		s.Run(tc.name, func() {
 			ctx := context.Background()
@@ -264,7 +266,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_MilvusTableChe
 				CurrentSegments:        []*datapb.SegmentInfo{seg, healthy},
 				PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 200},
 			}
-			if tc.patchErr != nil {
+			if tc.missingColumn {
 				req.Schema.Fields = append(req.Schema.Fields, &schemapb.FieldSchema{
 					FieldID: 103, Name: "price", DataType: schemapb.DataType_Int64, ExternalField: "price",
 				})
@@ -294,7 +296,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_MilvusTableChe
 			refreshPatch := mockey.Mock(packed.RefreshMilvusTableManifest).
 				Return(packed.MilvusTableRefreshResult{ManifestPath: patchedManifest}, tc.refreshErr).Build()
 			defer refreshPatch.UnPatch()
-			appendPatch := mockey.Mock((*RefreshExternalCollectionTask).patchSegmentForMissingColumns).Return(nil, tc.patchErr).Build()
+			appendPatch := mockey.Mock((*RefreshExternalCollectionTask).patchSegmentForMissingColumns).Return(nil, merr.WrapErrServiceInternalMsg("unexpected generic column patch")).Build()
 			defer appendPatch.UnPatch()
 			var rebuiltFragments []packed.Fragment
 			// These fragments come from the real balancing path's heap-owned work
@@ -310,6 +312,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_MilvusTableChe
 
 			result, err := task.organizeSegments(ctx, current, []packed.Fragment{latest, second})
 			s.Equal(oldManifest, seg.GetManifestPath(), "never mutate the published input segment")
+			s.Zero(appendPatch.Times(), "milvus-table must import source column groups")
 			checks, refreshes, rebuilds := 0, 0, 0
 			if tc.changed && tc.sourceErr == nil {
 				checks = 1
@@ -326,7 +329,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_MilvusTableChe
 			s.Equal(refreshes, refreshPatch.Times())
 			s.Equal(rebuilds, buildPatch.Times())
 			var expected error
-			for _, failure := range []error{tc.sourceErr, tc.readErr, tc.refreshErr, tc.patchErr, tc.buildErr} {
+			for _, failure := range []error{tc.sourceErr, tc.readErr, tc.refreshErr, tc.buildErr} {
 				if failure != nil {
 					expected = failure
 					break
@@ -799,7 +802,6 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_MilvusTableL0R
 	partitionID := int64(2000)
 	oldManifest := packed.MarshalManifestPath("files/insert_log/1000/2000/1", 1)
 	refreshedManifest := packed.MarshalManifestPath("files/insert_log/1000/2000/1", 2)
-	finalManifest := packed.MarshalManifestPath("files/insert_log/1000/2000/1", 3)
 	req := &datapb.RefreshExternalCollectionTaskRequest{
 		CollectionID:  s.collectionID,
 		PartitionID:   partitionID,
@@ -807,7 +809,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_MilvusTableL0R
 		ExternalSpec:  `{"format":"milvus-table"}`,
 		StorageConfig: &indexpb.StorageConfig{RootPath: "files", StorageType: "local"},
 		Schema: &schemapb.CollectionSchema{
-			Version: 7,
+			Version: 7, ExternalSpec: `{"format":"milvus-table"}`,
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, ExternalField: "pk"},
 				{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, ExternalField: "vec"},
@@ -833,6 +835,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_MilvusTableL0R
 	}
 	task := NewRefreshExternalCollectionTask(ctx, req)
 	task.parsedSpec = &externalspec.ExternalSpec{Format: externalspec.FormatMilvusTable}
+	task.columns = typeutil.NewStorageColumnResolver(req.GetSchema()).SourceDataColumnNames()
 	task.nextAllocID = req.GetPreAllocatedSegmentIds().GetBegin()
 	task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
 	missingColumns := mockey.Mock(packed.ManifestMissingColumns).Return([]string{"101"}, nil).Build()
@@ -870,37 +873,25 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_MilvusTableL0R
 		Return(nil, nil).Build()
 	defer mockSourceDeltas.UnPatch()
 
-	var patchedBaseManifest string
-	var patchedFragments []packed.Fragment
-	var patchedColumns []string
-	mockPatch := mockey.Mock(mockey.GetMethod(task, "patchSegmentForMissingColumns")).
-		To(func(ctx context.Context, seg *datapb.SegmentInfo, fragments []packed.Fragment, missingColumns []string) (*datapb.SegmentInfo, error) {
-			patchedBaseManifest = seg.GetManifestPath()
-			patchedFragments = append([]packed.Fragment(nil), fragments...)
-			patchedColumns = append([]string(nil), missingColumns...)
-			return &datapb.SegmentInfo{
-				ID:             seg.GetID(),
-				CollectionID:   seg.GetCollectionID(),
-				PartitionID:    seg.GetPartitionID(),
-				NumOfRows:      seg.GetNumOfRows(),
-				ManifestPath:   finalManifest,
-				SchemaVersion:  req.GetSchema().GetVersion(),
-				StorageVersion: seg.GetStorageVersion(),
-				Binlogs:        buildFakeBinlogs(seg.GetID(), seg.GetNumOfRows(), 10000, req.GetSchema(), externalspec.FormatMilvusTable),
-			}, nil
-		}).Build()
-	defer mockPatch.UnPatch()
+	appendColumns := mockey.Mock(packed.AppendSegmentManifestColumns).
+		Return("", merr.WrapErrServiceInternalMsg("generic append cannot import source manifests")).Build()
+	defer appendColumns.UnPatch()
+	sample := mockey.Mock(packed.SampleExternalFieldSizes).
+		Return(map[string]int64{"100": 8, "101": 32}, nil).Build()
+	defer sample.UnPatch()
 
 	result, err := task.organizeSegments(ctx, currentSegmentFragments, newFragments)
 	s.NoError(err)
 	s.Empty(task.GetKeptSegmentIDs())
 	updated := task.GetUpdatedSegments()
 	s.Require().Len(updated, 1)
-	s.Equal(finalManifest, updated[0].GetManifestPath())
+	s.Equal(refreshedManifest, updated[0].GetManifestPath())
 	s.Equal(updated, result)
-	s.Equal(refreshedManifest, patchedBaseManifest)
-	s.Equal(newFragments, patchedFragments)
-	s.Equal([]string{"vec"}, patchedColumns)
+	s.Equal(1, mockRefresh.Times(), "deletes and missing columns must be repaired in one commit")
+	s.Zero(appendColumns.Times())
+	s.Equal(1, sample.Times())
+	s.ElementsMatch([]int64{100, 101}, updated[0].GetBinlogs()[0].GetChildFields())
+	s.Equal(int64(40000), updated[0].GetBinlogs()[0].GetBinlogs()[0].GetMemorySize())
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestShouldRefreshMilvusTableDeltalogs_SameL0KeepsSegment() {
@@ -1253,4 +1244,131 @@ func (s *RefreshExternalCollectionTaskSuite) TestPopulateDeltalogIDsFromPath_Inv
 	err := populateDeltalogIDsFromPath(binlogs)
 	s.Error(err)
 	s.Contains(err.Error(), "must end with a positive numeric log ID")
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_MilvusTableRepairsMissingPhysicalColumns() {
+	paramtable.Init()
+	for _, format := range []string{"parquet", "vortex"} {
+		for _, scenario := range []string{"real_pk", "virtual_pk", "source_missing_leaf"} {
+			s.Run(format+"/"+scenario, func() {
+				ctx := context.Background()
+				cfg := &indexpb.StorageConfig{StorageType: "local", RootPath: s.T().TempDir()}
+				fields := []arrow.Field{
+					{Name: "100", Type: arrow.PrimitiveTypes.Int64},
+					{Name: "1", Type: arrow.PrimitiveTypes.Int64},
+					{Name: "101", Type: arrow.BinaryTypes.String},
+				}
+				if scenario != "source_missing_leaf" {
+					fields = append(fields, arrow.Field{Name: "103", Type: arrow.ListOf(arrow.PrimitiveTypes.Int64)})
+				}
+				// A source-only Struct child shares the column group with selected fields.
+				fields = append(fields, arrow.Field{Name: "104", Type: arrow.ListOf(arrow.PrimitiveTypes.Int64)})
+				arrowSchema := arrow.NewSchema(fields, nil)
+				builder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
+				defer builder.Release()
+				builder.Field(0).(*array.Int64Builder).AppendValues([]int64{10, 20}, nil)
+				builder.Field(1).(*array.Int64Builder).AppendValues([]int64{100, 200}, nil)
+				builder.Field(2).(*array.StringBuilder).AppendValues([]string{`{"tag":"a"}`, `{"tag":"b"}`}, nil)
+				if scenario != "source_missing_leaf" {
+					list := builder.Field(3).(*array.ListBuilder)
+					list.Append(true)
+					list.ValueBuilder().(*array.Int64Builder).AppendValues([]int64{1, 2}, nil)
+					list.Append(true)
+					list.ValueBuilder().(*array.Int64Builder).Append(3)
+				}
+				ignored := builder.Field(len(fields) - 1).(*array.ListBuilder)
+				ignored.Append(true)
+				ignored.ValueBuilder().(*array.Int64Builder).AppendValues([]int64{4, 5}, nil)
+				ignored.Append(true)
+				ignored.ValueBuilder().(*array.Int64Builder).Append(6)
+				record := builder.NewRecord()
+				defer record.Release()
+				indices := make([]int, len(fields))
+				for i := range indices {
+					indices[i] = i
+				}
+				sourceBase := path.Join(cfg.RootPath, "source")
+				writer, err := packed.NewFFIPackedWriter(sourceBase, arrowSchema,
+					[]storagecommon.ColumnGroup{{Columns: indices, GroupID: storagecommon.DefaultShortColumnGroupID}}, cfg, nil,
+					map[string]string{packed.PropertyWriterFormat: format})
+				s.Require().NoError(err)
+				s.Require().NoError(writer.WriteRecordBatch(record))
+				output, err := writer.Close()
+				s.Require().NoError(err)
+				defer output.Destroy()
+				sourceManifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(sourceBase, packed.ManifestEarliest), cfg,
+					&packed.ManifestUpdates{NewFiles: output})
+				s.Require().NoError(err)
+				fragments := []packed.Fragment{{FilePath: sourceManifest, EndRow: 2, RowCount: 2}}
+				// Deliberately omit dynamic and Struct leaf columns from the target
+				// manifest while the source still contains the complete row data.
+				targetManifest, err := packed.CreateMilvusTableManifestFromSegmentManifests(path.Join(cfg.RootPath, "target"),
+					[]string{"100", "1"}, fragments, cfg, packed.ExternalSpecContext{})
+				s.Require().NoError(err)
+				schema := &schemapb.CollectionSchema{
+					Version: 7, ExternalSpec: `{"format":"milvus-table"}`, EnableDynamicField: true,
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 100, Name: "id", ExternalField: "pk", IsPrimaryKey: scenario != "virtual_pk", DataType: schemapb.DataType_Int64},
+						{FieldID: 101, Name: common.MetaFieldName, ExternalField: common.MetaFieldName, IsDynamic: true, DataType: schemapb.DataType_JSON},
+					},
+					StructArrayFields: []*schemapb.StructArrayFieldSchema{{FieldID: 102, Name: "items", Fields: []*schemapb.FieldSchema{{
+						FieldID: 103, Name: "items[value]", ExternalField: "items[value]", DataType: schemapb.DataType_Array,
+						ElementType: schemapb.DataType_Int64, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "4"}},
+					}}}},
+				}
+				seg := &datapb.SegmentInfo{ID: 1, CollectionID: s.collectionID, PartitionID: 2000,
+					NumOfRows: 2, ManifestPath: targetManifest, StorageVersion: storage.StorageV3,
+					Binlogs: []*datapb.FieldBinlog{{ChildFields: []int64{100}, Binlogs: []*datapb.Binlog{{EntriesNum: 2, MemorySize: 16}}}},
+				}
+				task := s.newTask(ctx, &datapb.RefreshExternalCollectionTaskRequest{
+					CollectionID: s.collectionID, Schema: schema, ExternalSpec: schema.ExternalSpec, StorageConfig: cfg,
+					CurrentSegments: []*datapb.SegmentInfo{seg},
+				})
+				task.parsedSpec = &externalspec.ExternalSpec{Format: externalspec.FormatMilvusTable}
+				task.columns = typeutil.NewStorageColumnResolver(schema).SourceDataColumnNames()
+				result, err := task.organizeSegments(ctx, packed.SegmentFragments{1: fragments}, fragments)
+				s.Equal(targetManifest, seg.GetManifestPath(), "never mutate dispatched metadata")
+				if scenario == "source_missing_leaf" {
+					s.Require().Error(err)
+					s.ErrorContains(err, "103")
+					s.Empty(result)
+					s.Empty(task.GetUpdatedSegments(), "missing source data must not be published with zero memory")
+					return
+				}
+				s.Require().NoError(err)
+				s.Require().Len(result, 1)
+				s.Require().Len(task.GetUpdatedSegments(), 1)
+				s.Empty(task.GetKeptSegmentIDs())
+				s.Equal(seg.ID, result[0].GetID(), "repair must preserve virtual PK segment identity")
+				s.Equal(int32(7), result[0].GetSchemaVersion())
+				s.ElementsMatch([]int64{100, 101, 103}, result[0].GetBinlogs()[0].GetChildFields())
+				s.Greater(result[0].GetBinlogs()[0].GetBinlogs()[0].GetMemorySize(), int64(16))
+				hasColumns, err := packed.ManifestHasColumns(result[0].GetManifestPath(), cfg, []string{"100", "101", "103"})
+				s.Require().NoError(err)
+				s.True(hasColumns)
+				hasIgnored, err := packed.ManifestHasColumns(result[0].GetManifestPath(), cfg, []string{"104"})
+				s.Require().NoError(err)
+				s.False(hasIgnored, "source-only Struct child must not be published in target manifest")
+				// Read repaired columns from the real files, not only manifest metadata.
+				reader, err := packed.NewFFIPackedReader(result[0].GetManifestPath(), arrowSchema,
+					[]string{"100", "101", "103"}, 8192, cfg, nil, packed.ExternalReaderContext{})
+				s.Require().NoError(err)
+				defer reader.Close()
+				got, err := reader.ReadNext()
+				s.Require().NoError(err)
+				defer got.Release()
+				for i, name := range []string{"100", "101", "103"} {
+					s.True(array.Equal(record.Column(arrowSchema.FieldIndices(name)[0]), got.Column(i)), "column %s", name)
+				}
+				// A second refresh of the repaired manifest must be a no-op.
+				task.req.CurrentSegments = result
+				again, err := task.organizeSegments(ctx, packed.SegmentFragments{1: fragments}, fragments)
+				s.Require().NoError(err)
+				s.Require().Len(again, 1)
+				s.Equal(result[0].GetManifestPath(), again[0].GetManifestPath())
+				s.Empty(task.GetUpdatedSegments())
+				s.Equal([]int64{1}, task.GetKeptSegmentIDs())
+			})
+		}
+	}
 }

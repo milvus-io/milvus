@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/snapshotio"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -1237,6 +1238,85 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsRejectsMissing
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "without persisted refresh result")
 	assert.Equal(t, 0, updateCalls)
+}
+
+func TestRefreshMilvusTableStructMismatchPreservesSegments(t *testing.T) {
+	ctx := context.Background()
+	refreshMeta := createTestRefreshMeta(t)
+	scheduler := newStubScheduler()
+	schema := testMilvusTableTargetRefreshSchema()
+	schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{{Name: "items", FieldID: 110, Fields: []*schemapb.FieldSchema{{Name: "items[renamed]", ExternalField: "items[value]", FieldID: 111, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}}}}
+	source := testMilvusTableRefreshSchema(false)
+	source.StructArrayFields = []*schemapb.StructArrayFieldSchema{proto.Clone(schema.StructArrayFields[0]).(*schemapb.StructArrayFieldSchema)}
+	source.StructArrayFields[0].Fields[0].Name = "items[value]"
+	source.StructArrayFields[0].Fields[0].ExternalField = ""
+	data, err := protojson.Marshal(&datapb.SnapshotMetadata{Collection: &datapb.CollectionDescription{Schema: source}})
+	require.NoError(t, err)
+	mockRefreshSnapshotReads(t, func() ([]byte, error) { return data, nil })
+	previousSchema := proto.Clone(schema)
+	ms := metacache.NewMetaStore(nil)
+	mt := &meta.Meta{MetaStore: ms, Segments: meta.NewSegmentsInfo(ms)}
+	mt.AddCollection(&meta.CollectionInfo{ID: 100, Schema: schema})
+	segment := meta.NewSegmentInfo(&datapb.SegmentInfo{ID: 10, CollectionID: 100, NumOfRows: 32, State: commonpb.SegmentState_Flushed})
+	previousSegment := proto.Clone(segment.SegmentInfo)
+	mt.Segments.SetSegment(10, segment)
+	var schemaUpdates atomic.Int32
+	manager := NewExternalCollectionRefreshManager(ctx, mt, nil, scheduler, &stubAllocator{nextID: 1000}, refreshMeta, nil, testCollectionGetter(mt), func(context.Context, int64, string, string) error { schemaUpdates.Add(1); return nil }, nil, nil).(*Manager)
+	defer manager.Stop()
+	jobID, err := manager.SubmitRefreshJobWithID(ctx, 1, 100, schema.GetName(), "s3://bucket/snapshots/2/metadata/20.json", schema.GetExternalSpec())
+	require.NoError(t, err)
+	manager.wg.Wait()
+	job, err := manager.GetJobProgress(ctx, jobID)
+	require.NoError(t, err)
+	require.Equal(t, indexpb.JobState_JobStateFailed, job.GetState())
+	require.Contains(t, job.GetFailReason(), "struct")
+	require.Empty(t, job.GetTaskIds())
+	require.Empty(t, refreshMeta.GetTasksByJobID(jobID))
+	require.Zero(t, scheduler.GetEnqueueCount())
+	require.True(t, proto.Equal(previousSchema, mt.GetCollection(100).Schema))
+	require.True(t, proto.Equal(previousSegment, mt.Segments.GetSegment(10).SegmentInfo))
+	require.Zero(t, schemaUpdates.Load())
+}
+
+func TestValidateMilvusTableRefreshStructIdentity(t *testing.T) {
+	for _, change := range []string{"none", "rename", "type", "missing", "added", "unselected_changed", "unselected_removed", "nullable", "field_id"} {
+		t.Run(change, func(t *testing.T) {
+			source := testMilvusTableRefreshSchema(false)
+			source.StructArrayFields = []*schemapb.StructArrayFieldSchema{{Name: "items", FieldID: 110, Fields: []*schemapb.FieldSchema{{Name: "items[value]", FieldID: 111, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}}}}
+			target := testMilvusTableTargetRefreshSchema()
+			target.StructArrayFields = []*schemapb.StructArrayFieldSchema{proto.Clone(source.StructArrayFields[0]).(*schemapb.StructArrayFieldSchema)}
+			target.StructArrayFields[0].Fields[0].ExternalField = "items[value]"
+			source.StructArrayFields[0].Fields = append(source.StructArrayFields[0].Fields, &schemapb.FieldSchema{Name: "items[ignored]", FieldID: 113, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64})
+			// Snapshot metadata retains provenance that the public target schema omits.
+			source.StructArrayFields[0].Fields[0].TypeParams = []*commonpb.KeyValuePair{{Key: common.StructSubFieldAddedKey, Value: "true"}}
+			switch change {
+			case "rename":
+				target.StructArrayFields[0].Fields[0].Name = "items[renamed]"
+			case "type":
+				source.StructArrayFields[0].Fields[0].ElementType = schemapb.DataType_Double
+			case "missing":
+				source.StructArrayFields[0].Fields = nil
+			case "added":
+				source.StructArrayFields[0].Fields = append(source.StructArrayFields[0].Fields, &schemapb.FieldSchema{Name: "items[extra]", FieldID: 112, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64})
+			case "unselected_changed":
+				source.StructArrayFields[0].Fields[1].ElementType = schemapb.DataType_Double
+			case "unselected_removed":
+				source.StructArrayFields[0].Fields = source.StructArrayFields[0].Fields[:1]
+			case "nullable":
+				source.StructArrayFields[0].Nullable = true
+			case "field_id":
+				source.StructArrayFields[0].Fields[0].FieldID++
+			}
+			read := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).Return(&datapb.SnapshotMetadata{Collection: &datapb.CollectionDescription{Schema: source}}, nil).Build()
+			defer read.UnPatch()
+			err := validateMilvusTableRefreshSchema(&datapb.ExternalCollectionRefreshJob{ExternalSource: "s3://bucket/snapshot.json", ExternalSpec: target.ExternalSpec}, target)
+			if change == "none" || change == "added" || change == "unselected_changed" || change == "unselected_removed" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, errMilvusTableRefreshSchemaInvalid)
+			}
+		})
+	}
 }
 
 func TestValidateMilvusTableRefreshSchemaErrorClass(t *testing.T) {

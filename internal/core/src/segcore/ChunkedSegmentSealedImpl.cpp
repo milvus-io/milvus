@@ -9397,7 +9397,9 @@ ShouldProjectInternalTakeDynamicField(
     const Schema& schema,
     FieldId field_id,
     const std::vector<std::string>& target_dynamic_fields) {
-    if (schema.is_external_collection() || target_dynamic_fields.empty()) {
+    if ((schema.is_external_collection() &&
+         !schema.is_milvus_table_external_collection()) ||
+        target_dynamic_fields.empty()) {
         return false;
     }
     auto dynamic_field_id = schema.get_dynamic_field_id();
@@ -9602,6 +9604,11 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
             auto obj = data_array->mutable_scalars()->mutable_json_data();
             auto typed = std::static_pointer_cast<arrow::BinaryArray>(arr);
             for (int64_t i = 0; i < size; i++) {
+                // Preserve the row placeholder; null JSON must not be parsed.
+                if (typed->IsNull(result_mapping[i])) {
+                    obj->add_data();
+                    continue;
+                }
                 auto val = typed->Value(result_mapping[i]);
                 if (dynamic_field_names != nullptr &&
                     !dynamic_field_names->empty()) {

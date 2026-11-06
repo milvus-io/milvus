@@ -912,8 +912,8 @@ func (s *RefreshExternalCollectionTaskSuite) TestMissingExternalColumnsManifestF
 		},
 		{name: "only truly missing parquet column returned", missing: []string{"price"}, want: []string{"price"}, wantColumns: "doc,price"},
 		{
-			name: "physical IDs map back to external names", spec: `{"format":"milvus-table"}`,
-			missing: []string{"101"}, want: []string{"price"}, wantColumns: "100,101",
+			name: "milvus-table retains physical IDs", spec: `{"format":"milvus-table"}`,
+			missing: []string{"101"}, want: []string{"101"}, wantColumns: "100,101",
 		},
 		{name: "read error is preserved", readErr: readErr, wantColumns: "doc,price"},
 		{name: "cancellation is preserved", readErr: context.Canceled, wantColumns: "doc,price"},

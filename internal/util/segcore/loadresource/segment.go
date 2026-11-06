@@ -513,8 +513,8 @@ func EstimateSegmentLoadingResource(ctx context.Context, schema *schemapb.Collec
 	//      because their binlogs are already in Arrow IPC format). When tiered
 	//      eviction is enabled, the caching layer reserves this loading
 	//      overhead, so Go must not reserve the same raw-data margin again.
-	//   2. Full-lazy path (all external fields warmup=disable): no eager
-	//      load, so subtract the raw data size that PART 2 added.
+	//   2. When raw-data loading can be skipped: subtract the raw data size
+	//      that PART 2 added.
 	// Also propagate EstimatedBytesPerRow to the C++ ManifestGroupTranslator
 	// so the tiered-cache layer sizes chunks correctly.
 	if typeutil.IsExternalCollection(schema) && loadInfo.GetNumOfRows() > 0 {
@@ -524,8 +524,8 @@ func EstimateSegmentLoadingResource(ctx context.Context, schema *schemapb.Collec
 		}
 		loadInfo.EstimatedBytesPerRow = fakeBinlogMemSize / loadInfo.GetNumOfRows()
 
-		if isExternalCollectionLazyLoadForLoading(schema) {
-			// Full-lazy -> zero eager load. Undo PART 2's rawSize addition.
+		if canSkipExternalRawDataLoading(schema, indexedFields, loadInfo.GetTextStatsLogs(), options) {
+			// No raw-data loading is budgeted. Undo PART 2's rawSize addition.
 			// Safety factor does not apply: no peak to cover.
 			if segMemoryLoadingSize >= uint64(fakeBinlogMemSize) {
 				segMemoryLoadingSize -= uint64(fakeBinlogMemSize)
@@ -670,11 +670,30 @@ func supportInterimIndexDataTypeForLoading(dataType schemapb.DataType) bool {
 		dataType == schemapb.DataType_BFloat16Vector
 }
 
-func isExternalCollectionLazyLoadForLoading(schema *schemapb.CollectionSchema) bool {
+// canSkipExternalRawDataLoading reports whether the loading estimate can omit
+// source raw-data memory. It accounts for warmup and mandatory load-time reads.
+// Keep this conservative check aligned with ChunkedSegmentSealedImpl's
+// resolve_field_data_warmup_policy, CanUseLazyManifestField, Struct offset loading,
+// and generate_interim_index. Unlike segcore, this estimate does not have the full
+// runtime index state: it retains the budget when interim preparation is possible,
+// even if segcore's additional index metadata checks ultimately skip that work.
+func canSkipExternalRawDataLoading(schema *schemapb.CollectionSchema, indexedFields map[int64]struct{}, textStats map[int64]*datapb.TextIndexStats, options SegmentLoadingEstimateOptions) bool {
+	// Struct offsets read a child column before segment publication, even with warmup disabled.
+	if len(schema.GetStructArrayFields()) > 0 {
+		return false
+	}
 	resolver := typeutil.NewStorageColumnResolver(schema)
 	for _, field := range schema.GetFields() {
 		if !resolver.IsSourceDataField(field) {
 			continue
+		}
+		// Local text-index creation reads the source column regardless of warmup.
+		if _, hasTextIndex := textStats[field.GetFieldID()]; !hasTextIndex && typeutil.CreateFieldSchemaHelper(field).EnableMatch() {
+			return false
+		}
+		// Geometry cache construction reads the source column regardless of warmup.
+		if field.GetDataType() == schemapb.DataType_Geometry && paramtable.Get().QueryNodeCfg.EnableGeometryCache.GetAsBool() {
+			return false
 		}
 		if resolver.IsMilvusTable() && field.GetIsPrimaryKey() {
 			// Real-PK milvus-table segments always load the source PK column and
@@ -683,6 +702,18 @@ func isExternalCollectionLazyLoadForLoading(schema *schemapb.CollectionSchema) b
 			return false
 		}
 		policy := getFieldWarmupPolicyForLoading(field)
+		if _, hasIndex := indexedFields[field.GetFieldID()]; typeutil.IsVectorType(field.GetDataType()) && !hasIndex {
+			// Interim preparation can read raw vectors even when warmup is disabled.
+			if options.EnableInterimSegmentIndex && !options.GrowingMmapEnabled && supportInterimIndexDataTypeForLoading(field.GetDataType()) {
+				return false
+			}
+			// Without a usable index, segcore warms raw vectors as the search index.
+			var exist bool
+			policy, exist = common.GetWarmupPolicyByKey(common.WarmupVectorIndexKey, schema.GetProperties()...)
+			if !exist {
+				policy = paramtable.Get().QueryNodeCfg.TieredWarmupVectorIndex.GetValue()
+			}
+		}
 		if policy != common.WarmupDisable {
 			return false
 		}

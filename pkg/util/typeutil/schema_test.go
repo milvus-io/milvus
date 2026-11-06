@@ -6161,13 +6161,13 @@ func TestValidateMilvusTableSchemaIdentity(t *testing.T) {
 		assert.Contains(t, err.Error(), "mapped by multiple target fields")
 	})
 
-	t.Run("unmapped source field rejected", func(t *testing.T) {
+	t.Run("duplicate target field names rejected", func(t *testing.T) {
 		target := validTarget()
 		target.Fields[0].Name = "same_name"
 		target.Fields[1].Name = "same_name"
 		err := ValidateMilvusTableSchemaIdentity(target, source, false)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "is not mapped by target schema")
+		assert.Contains(t, err.Error(), "duplicate target field names")
 	})
 
 	t.Run("source function output field is not required to be mapped", func(t *testing.T) {
@@ -7472,4 +7472,260 @@ func TestMergeDynamicJSONKeepsUntouchedValues(t *testing.T) {
 	assert.Contains(t, string(merged), `"untouched":9007199254740993`)
 	assert.Contains(t, string(merged), `"big":12345678901234567890`)
 	assert.Contains(t, string(merged), `"tag":"new"`)
+}
+
+func TestMilvusTableStructFieldIdentity(t *testing.T) {
+	source := &schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "items", FieldID: 101, Fields: []*schemapb.FieldSchema{{Name: "items[price]", FieldID: 102, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float}}}}}
+	for _, requireID := range []bool{false, true} {
+		t.Run(fmt.Sprintf("require_id=%t", requireID), func(t *testing.T) {
+			for _, tc := range []struct {
+				name    string
+				mutate  func(*schemapb.CollectionSchema)
+				invalid bool
+			}{
+				{"same_definition", func(s *schemapb.CollectionSchema) {}, false},
+				{"renamed_child", func(s *schemapb.CollectionSchema) { s.StructArrayFields[0].Fields[0].Name = "items[cost]" }, true},
+				{"renamed_parent", func(s *schemapb.CollectionSchema) { s.StructArrayFields[0].Name = "products" }, true},
+				{"missing_child", func(s *schemapb.CollectionSchema) { s.StructArrayFields[0].Fields = nil }, true},
+				{"extra_child", func(s *schemapb.CollectionSchema) {
+					f := proto.Clone(s.StructArrayFields[0].Fields[0]).(*schemapb.FieldSchema)
+					f.Name = "items[extra]"
+					f.ExternalField = f.Name
+					s.StructArrayFields[0].Fields = append(s.StructArrayFields[0].Fields, f)
+				}, true},
+				{"element_type", func(s *schemapb.CollectionSchema) {
+					s.StructArrayFields[0].Fields[0].ElementType = schemapb.DataType_Double
+				}, true},
+				{"element_nullable", func(s *schemapb.CollectionSchema) { s.StructArrayFields[0].Fields[0].ElementNullable = true }, true},
+				{"parent_nullable", func(s *schemapb.CollectionSchema) { s.StructArrayFields[0].Nullable = true }, true},
+				{"child_nullable", func(s *schemapb.CollectionSchema) { s.StructArrayFields[0].Fields[0].Nullable = true }, true},
+				{"type_params", func(s *schemapb.CollectionSchema) {
+					s.StructArrayFields[0].Fields[0].TypeParams = []*commonpb.KeyValuePair{{Key: "max_capacity", Value: "16"}}
+				}, true},
+				{"child_id", func(s *schemapb.CollectionSchema) { s.StructArrayFields[0].Fields[0].FieldID++ }, requireID},
+				{"parent_id", func(s *schemapb.CollectionSchema) { s.StructArrayFields[0].FieldID++ }, requireID},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					target := proto.Clone(source).(*schemapb.CollectionSchema)
+					target.StructArrayFields[0].Fields[0].ExternalField = "items[price]"
+					tc.mutate(target)
+					original := proto.Clone(target)
+					err := ValidateMilvusTableSchemaIdentity(target, source, requireID)
+					if tc.invalid {
+						require.Error(t, err)
+					} else {
+						require.NoError(t, err)
+					}
+					require.True(t, proto.Equal(original, target), "validation must not mutate target")
+				})
+			}
+		})
+	}
+}
+
+// Struct projection keeps the selected fields' definitions and physical identities.
+func TestMilvusTableStructSubsetIdentity(t *testing.T) {
+	for _, requireID := range []bool{false, true} {
+		t.Run(fmt.Sprintf("require_id=%t", requireID), func(t *testing.T) {
+			for _, change := range []string{"none", "unselected_added", "unselected_removed", "unselected_changed", "selected_missing", "selected_type", "selected_id", "missing_top_level", "duplicate_mapping", "empty_struct"} {
+				t.Run(change, func(t *testing.T) {
+					source := &schemapb.CollectionSchema{
+						Fields: []*schemapb.FieldSchema{{Name: "id", FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+						StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "items", FieldID: 101, Fields: []*schemapb.FieldSchema{
+							{Name: "items[price]", FieldID: 102, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float},
+							{Name: "items[ignored]", FieldID: 103, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+							{Name: "items[tag]", FieldID: 104, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar},
+						}}},
+					}
+					target := proto.Clone(source).(*schemapb.CollectionSchema)
+					// Select non-contiguous children in a different order from the source.
+					children := target.StructArrayFields[0].Fields
+					target.StructArrayFields[0].Fields = []*schemapb.FieldSchema{children[2], children[0]}
+					for _, field := range GetAllFieldSchemas(target) {
+						field.ExternalField = field.Name
+						if !requireID {
+							field.FieldID = 0
+						}
+					}
+					switch change {
+					case "unselected_added":
+						source.StructArrayFields[0].Fields = append(source.StructArrayFields[0].Fields, &schemapb.FieldSchema{Name: "items[new]", FieldID: 105, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Bool})
+					case "unselected_removed":
+						source.StructArrayFields[0].Fields = []*schemapb.FieldSchema{source.StructArrayFields[0].Fields[0], source.StructArrayFields[0].Fields[2]}
+					case "unselected_changed":
+						source.StructArrayFields[0].Fields[1].ElementType = schemapb.DataType_Double
+					case "selected_missing":
+						source.StructArrayFields[0].Fields = source.StructArrayFields[0].Fields[1:]
+					case "selected_type":
+						source.StructArrayFields[0].Fields[0].ElementType = schemapb.DataType_Double
+					case "selected_id":
+						source.StructArrayFields[0].Fields[0].FieldID = 110
+					case "missing_top_level":
+						target.Fields = nil
+					case "duplicate_mapping":
+						target.StructArrayFields[0].Fields = append(target.StructArrayFields[0].Fields, proto.Clone(children[0]).(*schemapb.FieldSchema))
+					case "empty_struct":
+						target.StructArrayFields[0].Fields = nil
+					}
+					beforeSource, beforeTarget := proto.Clone(source), proto.Clone(target)
+					err := ValidateMilvusTableSchemaIdentity(target, source, requireID)
+					switch change {
+					case "none", "unselected_added", "unselected_removed", "unselected_changed":
+						require.NoError(t, err)
+					case "selected_id":
+						if requireID {
+							require.ErrorContains(t, err, "field_id mismatch")
+						} else {
+							require.NoError(t, err)
+						}
+					default:
+						require.Error(t, err)
+					}
+					require.True(t, proto.Equal(beforeSource, source))
+					require.True(t, proto.Equal(beforeTarget, target))
+				})
+			}
+		})
+	}
+}
+
+func TestMilvusTableStructOriginMarkerIdentity(t *testing.T) {
+	for _, requireID := range []bool{false, true} {
+		for _, change := range []string{"marker_only", "type", "nullable", "dim", "capacity", "field_id", "other_param", "index_param", "top_level_param"} {
+			t.Run(fmt.Sprintf("require_id=%t/%s", requireID, change), func(t *testing.T) {
+				source := &schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+					Name: "items", FieldID: 100, Fields: []*schemapb.FieldSchema{{
+						Name: "items[vec]", FieldID: 101, DataType: schemapb.DataType_ArrayOfVector,
+						ElementType: schemapb.DataType_FloatVector, ElementNullable: true,
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}, {Key: common.MaxCapacityKey, Value: "4"}},
+					}},
+				}}}
+				target := proto.Clone(source).(*schemapb.CollectionSchema)
+				original := source.StructArrayFields[0].Fields[0]
+				selected := target.StructArrayFields[0].Fields[0]
+				selected.ExternalField = selected.Name
+				original.TypeParams = append(original.TypeParams, &commonpb.KeyValuePair{Key: common.StructSubFieldAddedKey, Value: "true"})
+				switch change {
+				case "type":
+					selected.ElementType = schemapb.DataType_Float16Vector
+				case "nullable":
+					selected.ElementNullable = false
+				case "dim":
+					selected.TypeParams[0].Value = "16"
+				case "capacity":
+					selected.TypeParams[1].Value = "8"
+				case "field_id":
+					selected.FieldID++
+				case "other_param":
+					selected.TypeParams = append(selected.TypeParams, &commonpb.KeyValuePair{Key: common.StructSubFieldAddedKey + "_other", Value: "true"})
+				case "index_param":
+					original.IndexParams = []*commonpb.KeyValuePair{{Key: common.StructSubFieldAddedKey, Value: "true"}}
+				case "top_level_param":
+					source.Fields = []*schemapb.FieldSchema{{Name: "id", FieldID: 102, DataType: schemapb.DataType_Int64, TypeParams: []*commonpb.KeyValuePair{{Key: common.StructSubFieldAddedKey, Value: "true"}}}}
+					target.Fields = []*schemapb.FieldSchema{{Name: "id", ExternalField: "id", FieldID: 102, DataType: schemapb.DataType_Int64}}
+				}
+				beforeSource, beforeTarget := proto.Clone(source), proto.Clone(target)
+				err := ValidateMilvusTableSchemaIdentity(target, source, requireID)
+				if change == "marker_only" || (change == "field_id" && !requireID) {
+					require.NoError(t, err)
+				} else {
+					require.Error(t, err)
+				}
+				require.True(t, proto.Equal(beforeSource, source))
+				require.True(t, proto.Equal(beforeTarget, target))
+			})
+		}
+	}
+}
+
+func TestMilvusTableStructAutomaticMapping(t *testing.T) {
+	for _, storedNames := range []bool{false, true} {
+		for _, explicit := range []string{"", "items[price]", "items[other]"} {
+			t.Run(fmt.Sprintf("stored=%t/mapping=%s", storedNames, explicit), func(t *testing.T) {
+				name := "price"
+				if storedNames {
+					name = "items[price]"
+				}
+				child := &schemapb.FieldSchema{Name: name, FieldID: 102, ExternalField: explicit, DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float}
+				schema := &schemapb.CollectionSchema{ExternalSource: "s3://bucket/snapshot.json", ExternalSpec: `{"format":"milvus-table"}`, StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "items", FieldID: 101, Fields: []*schemapb.FieldSchema{child}}}}
+				original := proto.Clone(schema)
+				err := NormalizeAndValidateExternalCollectionSchema(schema)
+				if explicit == "items[other]" {
+					require.Error(t, err)
+					require.True(t, proto.Equal(original, schema))
+					return
+				}
+				require.NoError(t, err)
+				require.Equal(t, "items[price]", child.ExternalField)
+				require.Equal(t, name, child.Name)
+				require.NoError(t, NormalizeAndValidateExternalCollectionSchema(schema))
+				require.NoError(t, ValidateExternalCollectionResolvedSchema(schema))
+				require.Equal(t, []string{"102"}, NewStorageColumnResolver(schema).SourceDataColumnNames())
+			})
+		}
+	}
+	t.Run("failure_leaves_implicit_mapping_unchanged", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{ExternalSource: "s3://bucket/snapshot.json", ExternalSpec: `{"format":"milvus-table"}`, StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "items", Fields: []*schemapb.FieldSchema{
+			{Name: "value", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+			{Name: "bad", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, AutoID: true},
+		}}}}
+		original := proto.Clone(schema)
+		require.Error(t, NormalizeAndValidateExternalCollectionSchema(schema))
+		require.True(t, proto.Equal(original, schema))
+	})
+
+}
+
+func TestMilvusTableNativeListFieldValidation(t *testing.T) {
+	for _, dataType := range []schemapb.DataType{schemapb.DataType_Array, schemapb.DataType_ArrayOfVector} {
+		for _, format := range []string{"milvus-table", "parquet"} {
+			t.Run(fmt.Sprintf("%s/%s", format, dataType), func(t *testing.T) {
+				elementType := schemapb.DataType_Int64
+				if dataType == schemapb.DataType_ArrayOfVector {
+					elementType = schemapb.DataType_FloatVector
+				}
+				schema := &schemapb.CollectionSchema{
+					Name: "target", ExternalSource: "s3://bucket/snapshot.json",
+					ExternalSpec: fmt.Sprintf(`{"format":%q}`, format),
+					StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+						Name: "items", FieldID: 100,
+						Fields: []*schemapb.FieldSchema{{
+							Name: "items[value]", FieldID: 101, ExternalField: "items[value]",
+							DataType: dataType, ElementType: elementType, ElementNullable: true,
+						}},
+					}},
+				}
+				for _, validate := range []func(*schemapb.CollectionSchema) error{
+					NormalizeAndValidateExternalCollectionSchema, ValidateExternalCollectionResolvedSchema,
+				} {
+					err := validate(proto.Clone(schema).(*schemapb.CollectionSchema))
+					if format == "milvus-table" {
+						require.NoError(t, err)
+					} else {
+						require.ErrorContains(t, err, "does not support struct fields")
+					}
+				}
+			})
+		}
+	}
+
+	t.Run("invalid native type schema", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{ExternalSpec: `{"format":"milvus-table"}`}
+		field := &schemapb.FieldSchema{
+			Name: "items[value]", DataType: schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Array, ElementNullable: true,
+		}
+		require.ErrorContains(t, validateExternalFieldTypeForSchema(schema, field), "must specify type_schema")
+	})
+}
+
+func TestMilvusTableDynamicFieldValidation(t *testing.T) {
+	schema := &schemapb.CollectionSchema{EnableDynamicField: true, ExternalSource: "s3://bucket/snapshot.json", ExternalSpec: `{"format":"milvus-table"}`, Fields: []*schemapb.FieldSchema{{Name: "id", DataType: schemapb.DataType_Int64, ExternalField: "id"}}}
+	require.NoError(t, NormalizeAndValidateExternalCollectionSchema(schema))
+	require.NoError(t, ValidateExternalCollectionResolvedSchema(schema))
+	source := proto.Clone(schema).(*schemapb.CollectionSchema)
+	source.EnableDynamicField = false
+	require.Error(t, ValidateMilvusTableSchemaIdentity(schema, source, false))
+	schema.ExternalSpec = `{"format":"parquet"}`
+	require.Error(t, NormalizeAndValidateExternalCollectionSchema(schema))
 }
