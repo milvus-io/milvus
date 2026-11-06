@@ -782,7 +782,7 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 		importV2Used                     = node.importScheduler.Slots()
 		importV3Used                     = node.importV3Scheduler.Slots()
 		queueUsed                        = node.importV3Scheduler.QueuedSlots()
-		pkindexCompactUsed = node.pkindexCompactionSlots()
+		pkindexCompactUsed               = node.pkindexCompactionSlots()
 	)
 	importUsed := importV2Used + importV3Used
 

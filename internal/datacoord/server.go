@@ -139,20 +139,20 @@ type Server struct {
 	segmentManager                      segment.Manager
 	allocator                           allocator.Allocator
 	// self host id allocator, to avoid get unique id from rootcoord
-	idAllocator      *globalIDAllocator.GlobalIDAllocator
-	nodeManager      session.NodeManager
-	cluster2         session.Cluster
-	mixCoord         types.MixCoord
-	garbageCollector *gc.GarbageCollector
-	gcOpt            gc.GcOption
-	pkindexService   *pkindexservice.Service
-	pkindexGC        *pkindexgc.GC
-	handler          meta.Handler
-	importMeta       bulkimport.ImportMeta
-	importInspector  bulkimport.ImportInspector
-	importChecker    bulkimport.ImportChecker
-	importCheckerV3  bulkimport.ImportChecker
-	importJobLock    *lock.KeyLock[int64]
+	idAllocator       *globalIDAllocator.GlobalIDAllocator
+	nodeManager       session.NodeManager
+	cluster2          session.Cluster
+	mixCoord          types.MixCoord
+	garbageCollector  *gc.GarbageCollector
+	gcOpt             gc.GcOption
+	pkindexService    *pkindexservice.Service
+	pkindexGC         *pkindexgc.GC
+	handler           meta.Handler
+	importMeta        bulkimport.ImportMeta
+	importInspector   bulkimport.ImportInspector
+	importChecker     bulkimport.ImportChecker
+	importCheckerV3   bulkimport.ImportChecker
+	importJobLock     *lock.KeyLock[int64]
 	pkindexCompaction *pkcompaction.Inspector
 
 	domainMetas
