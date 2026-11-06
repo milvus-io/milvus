@@ -196,8 +196,6 @@ func (node *QueryNode) composeIndexMeta(ctx context.Context, indexInfos []*index
 
 // WatchDmChannels create consumers on dmChannels to receive Incremental data，which is the important part of real-time query
 func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (status *commonpb.Status, e error) {
-	defer node.updateDistributionModifyTS()
-
 	channel := req.GetInfos()[0]
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
@@ -221,27 +219,34 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		return merr.Status(err), nil
 	}
 
-	if !node.subscribingChannels.Insert(channel.GetChannelName()) {
-		msg := "channel subscribing..."
-		log.Warn(msg)
-		return merr.Success(), nil
+	release, err := node.channelOperations.acquire(ctx, channel.GetChannelName())
+	if err != nil {
+		return merr.Status(err), nil
 	}
-	defer node.subscribingChannels.Remove(channel.GetChannelName())
+	defer release()
 
-	// to avoid concurrent watch/unwatch
-	if node.unsubscribingChannels.Contain(channel.GetChannelName()) {
-		err := merr.WrapErrChannelReduplicate(channel.GetChannelName(), "the other same channel is unsubscribing")
-		log.Warn("failed to unsubscribe channel", zap.Error(err))
+	// Publish the distribution change before releasing the shared channel gate.
+	defer node.updateDistributionModifyTS()
+	if err := ctx.Err(); err != nil {
 		return merr.Status(err), nil
 	}
 
-	_, exist := node.delegators.Get(channel.GetChannelName())
+	existing, exist := node.delegators.Get(channel.GetChannelName())
 	if exist {
+		if existing.Collection() != req.GetCollectionID() {
+			return merr.Status(merr.WrapErrChannelReduplicate(channel.GetChannelName(), "channel belongs to another collection")), nil
+		}
+		// Replica membership can change while the same collection's channel
+		// stays subscribed. A new watch must still publish its generation so
+		// QueryCoord can promote this delegator before releasing the old one.
+		if existing.UpdateVersion(req.GetVersion()) {
+			node.distDeltaTracker.markChannelUpsert(channel.GetChannelName())
+		}
 		log.Info("channel already subscribed")
 		return merr.Success(), nil
 	}
 
-	err := node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
+	err = node.manager.Collection.PutOrRef(req.GetCollectionID(), req.GetSchema(),
 		node.composeIndexMeta(ctx, req.GetIndexInfoList(), req.Schema), req.GetLoadMeta())
 	if err != nil {
 		log.Warn("failed to ref collection", zap.Error(err))
@@ -381,7 +386,6 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 }
 
 func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmChannelRequest) (*commonpb.Status, error) {
-	defer node.updateDistributionModifyTS()
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.String("channel", req.GetChannelName()),
@@ -396,8 +400,16 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 	}
 	defer node.lifetime.Done()
 
-	node.unsubscribingChannels.Insert(req.GetChannelName())
-	defer node.unsubscribingChannels.Remove(req.GetChannelName())
+	release, err := node.channelOperations.acquire(ctx, req.GetChannelName())
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	defer release()
+	defer node.updateDistributionModifyTS()
+	if err := ctx.Err(); err != nil {
+		return merr.Status(err), nil
+	}
+
 	delegator, ok := node.delegators.GetAndRemove(req.GetChannelName())
 	if ok {
 		node.pipelineManager.Remove(req.GetChannelName())
