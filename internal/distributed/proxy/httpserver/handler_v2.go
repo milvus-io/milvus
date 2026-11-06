@@ -1601,6 +1601,11 @@ func matchCountRule(outputs []string) bool {
 
 func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*QueryReqV2)
+	namespaced, formatErr := useNamespacedResponse(httpReq.ResponseFormat)
+	if formatErr != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(formatErr), HTTPReturnMessage: formatErr.Error()})
+		return nil, formatErr
+	}
 	req := &milvuspb.QueryRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
@@ -1656,9 +1661,16 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 	if err == nil {
 		queryResp := resp.(*milvuspb.QueryResults)
 		allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-		outputData, err := buildQueryResp(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema)
-		if err == nil {
-			err = setQueryElementOffsets(outputData, queryResp.GetElementIndices())
+		var outputData []map[string]interface{}
+		var err error
+		if namespaced {
+			outputData, err = buildNamespacedQueryResp(0, queryResp.OutputFields, queryResp.FieldsData,
+				queryResultMetadata{queryOffsets: queryResp.GetElementIndices()}, allowJS, collSchema, httpReq.OutputFields)
+		} else {
+			outputData, err = buildQueryResp(0, queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema)
+			if err == nil {
+				err = setQueryElementOffsets(outputData, queryResp.GetElementIndices())
+			}
 		}
 		if err != nil {
 			mlog.Warn(ctx, "high level restful api, fail to deal with query result", mlog.Any("response", resp), mlog.Err(err))
@@ -1691,6 +1703,11 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 
 func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*CollectionIDReq)
+	namespaced, formatErr := useNamespacedResponse(httpReq.ResponseFormat)
+	if formatErr != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(formatErr), HTTPReturnMessage: formatErr.Error()})
+		return nil, formatErr
+	}
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
 	if err != nil {
 		return nil, err
@@ -1728,7 +1745,14 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 	if err == nil {
 		queryResp := resp.(*milvuspb.QueryResults)
 		allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-		outputData, err := buildQueryResp(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema)
+		var outputData []map[string]interface{}
+		var err error
+		if namespaced {
+			outputData, err = buildNamespacedQueryResp(0, queryResp.OutputFields, queryResp.FieldsData,
+				queryResultMetadata{}, allowJS, collSchema, httpReq.OutputFields)
+		} else {
+			outputData, err = buildQueryResp(0, queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema)
+		}
 		if err != nil {
 			mlog.Warn(ctx, "high level restful api, fail to deal with get result", mlog.Any("response", resp), mlog.Err(err))
 			HTTPReturn(c, http.StatusOK, gin.H{
@@ -2123,6 +2147,11 @@ func appendGroupParams(params []*commonpb.KeyValuePair, groupByField string, gro
 
 func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*SearchReqV2)
+	namespaced, formatErr := useNamespacedResponse(httpReq.ResponseFormat)
+	if formatErr != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(formatErr), HTTPReturnMessage: formatErr.Error()})
+		return nil, formatErr
+	}
 	req := &milvuspb.SearchRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
@@ -2369,7 +2398,13 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		scannedRemoteBytes, scannedTotalBytes, cacheHitRatio, isValid := proxy.GetStorageCost(searchResp.GetStatus())
 		if hasSearchAggregationResult(searchResp.Results) {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-			outputData, err := buildSearchAggregationResp(searchResp.Results, allowJS, collSchema)
+			var outputData []gin.H
+			var err error
+			if namespaced {
+				outputData, err = buildNamespacedSearchAggregationResp(searchResp.Results, allowJS, collSchema)
+			} else {
+				outputData, err = buildSearchAggregationResp(searchResp.Results, allowJS, collSchema)
+			}
 			if err != nil {
 				mlog.Warn(ctx, "high level restful api, fail to deal with search aggregation result", mlog.Any("result", searchResp.Results), mlog.Err(err))
 				HTTPReturn(c, http.StatusOK, gin.H{
@@ -2397,9 +2432,18 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-			outputData, err := buildQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema)
-			if err == nil {
-				err = setSearchElementOffsets(outputData, searchResp.Results.GetElementIndices())
+			var outputData []map[string]interface{}
+			var err error
+			if namespaced {
+				outputData, err = buildNamespacedQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData,
+					queryResultMetadata{ids: searchResp.Results.Ids, scores: searchResp.Results.Scores, searchOffsets: searchResp.Results.GetElementIndices()},
+					allowJS, collSchema, httpReq.OutputFields)
+			} else {
+				outputData, err = buildQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData,
+					searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema)
+				if err == nil {
+					err = setSearchElementOffsets(outputData, searchResp.Results.GetElementIndices())
+				}
 			}
 			if err != nil {
 				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Any("result", searchResp.Results), mlog.Err(err))
@@ -2457,6 +2501,11 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 
 func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*HybridSearchReq)
+	namespaced, formatErr := useNamespacedResponse(httpReq.ResponseFormat)
+	if formatErr != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(formatErr), HTTPReturnMessage: formatErr.Error()})
+		return nil, formatErr
+	}
 	req := &milvuspb.HybridSearchRequest{
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
@@ -2589,9 +2638,18 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-			outputData, err := buildQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema)
-			if err == nil {
-				err = setSearchElementOffsets(outputData, searchResp.Results.GetElementIndices())
+			var outputData []map[string]interface{}
+			var err error
+			if namespaced {
+				outputData, err = buildNamespacedQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData,
+					queryResultMetadata{ids: searchResp.Results.Ids, scores: searchResp.Results.Scores, searchOffsets: searchResp.Results.GetElementIndices()},
+					allowJS, collSchema, httpReq.OutputFields)
+			} else {
+				outputData, err = buildQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData,
+					searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema)
+				if err == nil {
+					err = setSearchElementOffsets(outputData, searchResp.Results.GetElementIndices())
+				}
 			}
 			if err != nil {
 				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Any("result", searchResp.Results), mlog.Err(err))

@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -30,6 +31,7 @@ import (
 	"testing"
 
 	"github.com/bytedance/mockey"
+	"github.com/bytedance/sonic"
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -4852,6 +4854,42 @@ func TestConvertSearchAggregationReq(t *testing.T) {
 	}
 }
 
+func TestBuildAggHitsRespDynamicFieldRouting(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, Name: "document", DataType: schemapb.DataType_JSON},
+		{FieldID: 102, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
+	}}
+	payload := []byte(`{"clash":"dynamic-old"}`)
+	for _, tc := range []struct {
+		name  string
+		field *schemapb.AggHitField
+		key   string
+		value interface{}
+	}{
+		{"null", &schemapb.AggHitField{FieldId: 102, FieldName: "$meta"}, "$meta", nil},
+		{"opaque payload", &schemapb.AggHitField{FieldId: 102, FieldName: "$meta", Value: &schemapb.AggHitField_BytesVal{BytesVal: payload}}, "$meta", payload},
+		{"unnamed column", &schemapb.AggHitField{FieldId: 102, Value: &schemapb.AggHitField_BytesVal{BytesVal: payload}}, "102", payload},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hits := []*schemapb.AggHit{{
+				Pk: &schemapb.AggHit_IntPk{IntPk: 1}, Score: 0.5,
+				Fields: []*schemapb.AggHitField{
+					{FieldId: 101, FieldName: "document", Value: &schemapb.AggHitField_BytesVal{BytesVal: payload}},
+					tc.field,
+				},
+			}}
+			require.Equal(t, []gin.H{{"id": int64(1), "distance": float32(0.5), "document": payload, tc.key: tc.value}},
+				buildAggHitsResp(hits, true, schema))
+			require.Equal(t, []gin.H{{
+				"fields":        map[string]interface{}{"id": int64(1), "document": payload},
+				"dynamicFields": map[string]interface{}{tc.key: tc.value},
+				"meta":          map[string]interface{}{"distance": float32(0.5)},
+			}}, buildNamespacedAggHitsResp(hits, true, schema))
+		})
+	}
+}
+
 func TestBuildSearchAggregationResp(t *testing.T) {
 	results := &schemapb.SearchResultData{
 		NumQueries: 1,
@@ -4913,6 +4951,32 @@ func TestBuildSearchAggregationResp(t *testing.T) {
 
 	subGroups := bucket["subGroups"].([]gin.H)
 	require.Equal(t, "1", subGroups[0]["count"])
+
+	// A nested hit can have a user field named distance alongside its score.
+	child := results.AggBuckets[0].SubGroups[0]
+	child.Hits = []*schemapb.AggHit{{Score: 0.8, Fields: []*schemapb.AggHitField{{
+		FieldName: "distance", Value: &schemapb.AggHitField_StringVal{StringVal: "user-distance"},
+	}}}, nil}
+	for _, namespaced := range []bool{false, true} {
+		build := buildSearchAggregationResp
+		if namespaced {
+			build = buildNamespacedSearchAggregationResp
+		}
+		rows, err := build(results, true, nil)
+		require.NoError(t, err)
+		childBucket := rows[0]["buckets"].([]gin.H)[0]["subGroups"].([]gin.H)[0]
+		hits := childBucket["hits"].([]gin.H)
+		require.Len(t, hits, 2)
+		hit := hits[0]
+		if namespaced {
+			require.Equal(t, "user-distance", hit["fields"].(map[string]interface{})["distance"])
+			require.Equal(t, float32(0.8), hit["meta"].(map[string]interface{})["distance"])
+			require.Equal(t, gin.H{"fields": map[string]interface{}{}, "dynamicFields": map[string]interface{}{}, "meta": map[string]interface{}{}}, hits[1])
+		} else {
+			require.Equal(t, "user-distance", hit["distance"])
+			require.Empty(t, hits[1])
+		}
+	}
 
 	_, err = buildSearchAggregationResp(&schemapb.SearchResultData{NumQueries: 1, AggBuckets: results.GetAggBuckets()}, true, nil)
 	require.Error(t, err)
@@ -8609,6 +8673,114 @@ func TestCheckAndSetDataDynamicExplicitNull(t *testing.T) {
 	})
 }
 
+type dynamicMapCapturingDecoder struct {
+	sonic.Decoder
+	maps *[]map[string]interface{}
+}
+
+func (d *dynamicMapCapturingDecoder) Decode(value interface{}) error {
+	err := d.Decoder.Decode(value)
+	if data, ok := value.(*map[string]interface{}); ok && err == nil {
+		*d.maps = append(*d.maps, *data)
+	}
+	return err
+}
+
+func TestNamespacedDynamicMapReuse(t *testing.T) {
+	paramtable.Init()
+	dynamic := jsonRespFieldData(`{"keep":9223372036854775807,"distance":"dynamic"}`, `{}`, `null`)
+	dynamic.FieldName, dynamic.IsDynamic, dynamic.FieldId = common.MetaFieldName, true, 100
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: common.MetaFieldName, DataType: schemapb.DataType_JSON, IsDynamic: true},
+	}}
+	for _, tc := range []struct {
+		name       string
+		namespaced bool
+		selector   string
+		all        bool
+	}{
+		{"namespaced wildcard", true, "*", true},
+		{"namespaced meta", true, common.MetaFieldName, true},
+		{"namespaced selection", true, "keep", false},
+		{"legacy full", false, common.MetaFieldName, true},
+		{"legacy selection", false, "keep", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var decoded []map[string]interface{}
+			newDecoder := json.NewDecoder
+			json.NewDecoder = func(reader io.Reader) sonic.Decoder {
+				return &dynamicMapCapturingDecoder{Decoder: newDecoder(reader), maps: &decoded}
+			}
+			defer func() { json.NewDecoder = newDecoder }()
+
+			resolved := []string{tc.selector}
+			if tc.all {
+				resolved = []string{common.MetaFieldName}
+			}
+			var rows []map[string]interface{}
+			var err error
+			if tc.namespaced {
+				rows, err = buildNamespacedQueryResp(0, resolved, []*schemapb.FieldData{dynamic},
+					queryResultMetadata{scores: []float32{0.5, 0.5, 0.5}}, true, schema, []string{tc.selector})
+			} else {
+				rows, err = buildQueryResp(0, resolved, []*schemapb.FieldData{dynamic}, nil, []float32{0.5, 0.5, 0.5}, true, schema)
+			}
+			require.NoError(t, err)
+			require.Len(t, rows, 3)
+			require.Len(t, decoded, 3)
+			for i, row := range rows {
+				expected := map[string]interface{}{}
+				if i == 0 {
+					expected["keep"] = json.Number("9223372036854775807")
+					if tc.all {
+						expected["distance"] = "dynamic"
+					}
+				}
+				if tc.namespaced {
+					require.Equal(t, map[string]interface{}{
+						"fields": map[string]interface{}{}, "dynamicFields": expected,
+						"meta": map[string]interface{}{"distance": float32(0.5)},
+					}, row)
+				} else {
+					expected["distance"] = float32(0.5)
+					require.Equal(t, expected, row)
+				}
+			}
+
+			// Observe ownership through the real decoder: only full namespaced
+			// output should reference its map, and no other row may share it.
+			decoded[0]["probe"] = true
+			for i, row := range rows {
+				output := row
+				if tc.namespaced {
+					output = row["dynamicFields"].(map[string]interface{})
+				}
+				require.Equal(t, tc.namespaced && tc.all && i == 0, output["probe"] == true)
+			}
+		})
+	}
+}
+
+func TestNamespacedJSONFallback(t *testing.T) {
+	paramtable.Init()
+	cfg := paramtable.Get().HTTPCfg.NativeJSONResponse
+	previous := cfg.GetValue()
+	require.NoError(t, paramtable.Get().Save(cfg.Key, "true"))
+	t.Cleanup(func() { require.NoError(t, paramtable.Get().Save(cfg.Key, previous)) })
+
+	// Invalid historical JSON forces static values to strings across the response.
+	static := jsonRespFieldData(`{"n":1}`, "legacy-text")
+	dynamic := jsonRespFieldData(`{"meta":"dynamic"}`, `{}`)
+	dynamic.FieldName, dynamic.IsDynamic = common.MetaFieldName, true
+	rows, err := buildNamespacedQueryResp(0, []string{"*"}, []*schemapb.FieldData{static, dynamic}, queryResultMetadata{scores: []float32{0, 1}},
+		true, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, `{"n":1}`, rows[0]["fields"].(map[string]interface{})["meta"])
+	require.Equal(t, "legacy-text", rows[1]["fields"].(map[string]interface{})["meta"])
+	require.Equal(t, map[string]interface{}{"meta": "dynamic"}, rows[0]["dynamicFields"])
+	require.Equal(t, map[string]interface{}{"distance": float32(0)}, rows[0]["meta"])
+}
+
 func jsonRespFieldData(docs ...string) *schemapb.FieldData {
 	data := make([][]byte, 0, len(docs))
 	for _, d := range docs {
@@ -10645,6 +10817,39 @@ func TestSetElementOffsets(t *testing.T) {
 	assert.Equal(t, []int64{0, 2}, rows[0][HTTPReturnOffset])
 	assert.Equal(t, []int64{}, rows[1][HTTPReturnOffset])
 	err = setQueryElementOffsets(rows, []*milvuspb.ElementIndices{{}})
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+}
+
+func TestNamespacedElementOffsets(t *testing.T) {
+	paramtable.Init()
+	ids := &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"first", "second"}}}}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{Name: HTTPReturnOffset, IsPrimaryKey: true}}}
+	build := func(metadata queryResultMetadata) ([]map[string]interface{}, error) {
+		metadata.ids = ids
+		return buildNamespacedQueryResp(0, nil, nil, metadata, true, schema, nil)
+	}
+	for _, tc := range []struct {
+		metadata queryResultMetadata
+		want     []interface{}
+	}{
+		{queryResultMetadata{searchOffsets: &schemapb.LongArray{Data: []int64{4, 0}}}, []interface{}{int64(4), int64(0)}},
+		{queryResultMetadata{queryOffsets: []*milvuspb.ElementIndices{{Indices: &schemapb.LongArray{Data: []int64{0, 2}}}, nil}}, []interface{}{[]int64{0, 2}, []int64{}}},
+	} {
+		rows, err := build(tc.metadata)
+		require.NoError(t, err)
+		for i, row := range rows {
+			assert.Equal(t, ids.GetStrId().Data[i], row["fields"].(map[string]interface{})[HTTPReturnOffset])
+			row = row["meta"].(map[string]interface{})
+			assert.Equal(t, tc.want[i], row[HTTPReturnOffset])
+		}
+	}
+	rows, err := build(queryResultMetadata{})
+	require.NoError(t, err)
+	assert.Equal(t, "first", rows[0]["fields"].(map[string]interface{})[HTTPReturnOffset])
+	_, err = build(queryResultMetadata{searchOffsets: &schemapb.LongArray{Data: []int64{4}}})
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+	assert.Equal(t, merr.ErrInvalidSearchResult.Error()+", error: failed to build search element offsets", resultErrMessage(err))
+	_, err = build(queryResultMetadata{queryOffsets: []*milvuspb.ElementIndices{{}}})
 	assert.ErrorIs(t, err, merr.ErrServiceInternal)
 }
 
