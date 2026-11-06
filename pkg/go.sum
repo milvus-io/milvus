@@ -873,6 +873,8 @@ github.com/yusufpapurcu/wmi v1.2.4 h1:zFUKzehAFReQwLys1b/iSMl+JQGSCSjtVqQn9bBrPo
 github.com/yusufpapurcu/wmi v1.2.4/go.mod h1:SBZ9tNy3G9/m5Oi98Zks0QjeHVDvuK0qfxQmPyzfmi0=
 github.com/zilliztech/woodpecker v0.1.46 h1:Rmivs4GA6yj3zpNI1aXyEr8AweeQcgoW0ftINSUE27c=
 github.com/zilliztech/woodpecker v0.1.46/go.mod h1:VJ9NgTpLId/mnVyFrOKXlpHmptmTbQBvXZUMncZ6b2k=
+github.com/zilliztech/woodpecker v0.1.48-0.20261027025505-685bea18c19c h1:/KgX0YX4iO1Kw1Dz5kMbLH42+Dg/q4XKHIX0mu2RMH8=
+github.com/zilliztech/woodpecker v0.1.48-0.20261027025505-685bea18c19c/go.mod h1:RVxCdyqeWCKZF5c1luPhjpBazgKgF9BiXegYcLV0wDE=
 go.etcd.io/bbolt v1.5.0 h1:S7GAl7Fxv12yohbwFfIbQCGDWbQbtDGPET4P/bD4lxU=
 go.etcd.io/bbolt v1.5.0/go.mod h1:mkltfYE5aUHQxUct9N9V+Kp7aSjFqjgrhcXIS70Lrdk=
 go.etcd.io/etcd/api/v3 v3.7.1 h1:KJG0/DcWGfe3Y1otDf/fsBf0TSSgpxZ5RO/L8SFt73E=
