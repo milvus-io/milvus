@@ -39,6 +39,8 @@ if [[ -d "$PWD/internal/core/output/lib/tsan-symbolizer" ]]; then
     cp -r "$PWD/internal/core/output/lib/tsan-symbolizer" "$LIBRARY_PATH/"
     cp "$PWD/internal/core/output/lib/llvm-symbolizer" "$LIBRARY_PATH/"
 fi
+cp -a $PWD"/internal/core/thirdparty/cuobj/lib/"libcufile*.so* "$LIBRARY_PATH" 2>/dev/null || true
+cp -a $PWD"/internal/core/thirdparty/cuobj/lib/"libcuobj*.so* "$LIBRARY_PATH" 2>/dev/null || true
 
 PYUDF_WHEEL_DIR="$PWD/cmake_build/runtime/pyudf/wheels"
 PYUDF_RUNTIME_DIR="$LIBRARY_PATH/pyudf"

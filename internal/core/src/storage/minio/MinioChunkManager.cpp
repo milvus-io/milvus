@@ -26,7 +26,11 @@
 #include <aws/s3/model/HeadBucketRequest.h>
 #include <aws/s3/model/HeadObjectRequest.h>
 #include <aws/s3/model/ListObjectsRequest.h>
+#ifdef __linux__
+#include <aws/s3/model/PutObjectRDMARequest.h>
+#else
 #include <aws/s3/model/PutObjectRequest.h>
+#endif
 #include <string.h>
 #include <unistd.h>
 #include <algorithm>
@@ -897,21 +901,31 @@ MinioChunkManager::PutObjectBuffer(const std::string& bucket_name,
                                    const std::string& object_name,
                                    void* buf,
                                    uint64_t size) {
+#ifdef __linux__
+    Aws::S3::Model::PutObjectRDMARequest request;
+#else
     Aws::S3::Model::PutObjectRequest request;
+#endif
     request.SetBucket(bucket_name.c_str());
     request.SetKey(object_name.c_str());
     if (use_crc32c_checksum_) {
         request.SetChecksumAlgorithm(Aws::S3::Model::ChecksumAlgorithm::CRC32C);
     }
 
+#ifndef __linux__
     const std::shared_ptr<Aws::IOStream> input_data =
         Aws::MakeShared<Aws::StringStream>("");
 
     input_data->write(reinterpret_cast<char*>(buf), size);
     request.SetBody(input_data);
+#endif
 
     auto start = std::chrono::system_clock::now();
+#ifdef __linux__
+    auto outcome = client_->PutObjectRDMA(request, buf, static_cast<size_t>(size));
+#else
     auto outcome = client_->PutObject(request);
+#endif
     milvus::monitor::internal_storage_request_latency_put.Observe(
         std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now() - start)
@@ -979,20 +993,20 @@ MinioChunkManager::GetObjectBuffer(const std::string& bucket_name,
     request.SetBucket(bucket_name.c_str());
     request.SetKey(object_name.c_str());
 
+#ifndef __linux__
     request.SetResponseStreamFactory([buf, size]() {
     // For macOs, pubsetbuf interface not implemented
-#ifdef __linux__
-        std::unique_ptr<Aws::StringStream> stream(
-            Aws::New<Aws::StringStream>(""));
-        stream->rdbuf()->pubsetbuf(static_cast<char*>(buf), size);
-#else
         std::unique_ptr<Aws::IOStream> stream(Aws::New<AwsResponseStream>(
             "AwsResponseStream", static_cast<char*>(buf), size));
-#endif
         return stream.release();
     });
+#endif
     auto start = std::chrono::system_clock::now();
+#ifdef __linux__
+    auto outcome = client_->GetObjectRDMA(request, buf, static_cast<size_t>(size));
+#else
     auto outcome = client_->GetObject(request);
+#endif
     milvus::monitor::internal_storage_request_latency_get.Observe(
         std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now() - start)
