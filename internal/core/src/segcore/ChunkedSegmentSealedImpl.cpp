@@ -728,6 +728,9 @@ make_persisted_index_entry(LoadIndexInfo& info) {
 // this translator cannot recreate the generation.
 class CompletedTextStorageTranslator final
     : public cachinglayer::Translator<index::TextIndexStorage> {
+    using CellResults = std::vector<
+        std::pair<cachinglayer::cid_t, std::unique_ptr<value_type>>>;
+
  public:
     CompletedTextStorageTranslator(
         std::unique_ptr<index::TextIndexStorage> storage,
@@ -782,10 +785,26 @@ class CompletedTextStorageTranslator final
         return key_;
     }
 
-    std::vector<std::pair<cachinglayer::cid_t,
-                          std::unique_ptr<index::TextIndexStorage>>>
+    CellResults
     get_cells(milvus::OpContext* ctx,
               const std::vector<cachinglayer::cid_t>&) override {
+        return TakeStorage(ctx);
+    }
+
+    folly::coro::Task<CellResults>
+    get_cells_async(milvus::OpContext* ctx,
+                    const std::vector<cachinglayer::cid_t>&) override {
+        co_return TakeStorage(ctx);
+    }
+
+    cachinglayer::Meta*
+    meta() override {
+        return &meta_;
+    }
+
+ private:
+    CellResults
+    TakeStorage(milvus::OpContext* ctx) {
         CheckCancellation(ctx, segment_id_, "CompletedTextStorageTranslator");
         AssertInfo(storage_ != nullptr,
                    "completed text storage was already transferred");
@@ -796,12 +815,6 @@ class CompletedTextStorageTranslator final
         return result;
     }
 
-    cachinglayer::Meta*
-    meta() override {
-        return &meta_;
-    }
-
- private:
     std::unique_ptr<index::TextIndexStorage> storage_;
     std::string key_;
     int64_t segment_id_;
