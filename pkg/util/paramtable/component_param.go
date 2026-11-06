@@ -222,6 +222,7 @@ func (p *ComponentParam) versionGateItems() []*ParamItem {
 		&p.FunctionCfg.EnableWriteBeforeMaterialization,
 		&p.DataCoordCfg.ImportEnableIDRangeMsg,
 		&p.DataCoordCfg.EnableArraySortIndex,
+		&p.StreamingCfg.EnableUpsertMessage,
 	}
 }
 
@@ -9984,20 +9985,23 @@ Zero disables this key-length bound; requests that carry no key are accepted at 
 	}
 	p.IdempotencyMaxKeyLength.Init(base.mgr)
 
-	// txn
 	p.EnableUpsertMessage = ParamItem{
-		Key: "streaming.wal.enableUpsertMessage", DefaultValue: "false", Export: true,
-		Doc: "Enable the Upsert WAL format only after all readers and CDC targets support it and the QueryView dependency is deployed. The release version is not assigned; auto remains disabled. When false, Proxy uses legacy Insert/Delete messages. Retained decoding and transaction resolution remain available.",
-		Formatter: func(value string) string {
-			if value == "auto" {
-				return "false"
-			}
-			return value
+		Key:          "streaming.wal.enableUpsertMessage",
+		Version:      "3.1.0",
+		DefaultValue: "auto",
+		Export:       true,
+		Doc:          "Select the Upsert WAL format. auto: enable after all registered online components in this cluster reach 3.1.0 and the one-minute stability window elapses; false: use legacy Insert/Delete messages; true: force enable and bypass the version gate. This gate does not check CDC target versions or provide a downgrade guarantee. Retained decoding and durable transaction resolution remain available.",
+		VersionGateSwitcher: &VersionGateSwitcher{
+			EnableAutoSwitchValue: "auto",
+			PreSwitchValue:        "false",
+			GateVersion:           "3.1.0",
+			TargetValue:           "true",
+			SwitchDelay:           time.Minute,
 		},
 	}
-
 	p.EnableUpsertMessage.Init(base.mgr)
 
+	// txn
 	p.TxnDefaultKeepaliveTimeout = ParamItem{
 		Key:          "streaming.txn.defaultKeepaliveTimeout",
 		Version:      "2.5.0",
