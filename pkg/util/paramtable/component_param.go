@@ -9639,9 +9639,12 @@ type streamingConfig struct {
 	WALRecoveryTailHighWatermark         ParamItem `refreshable:"true"`
 
 	// idempotent write configuration.
-	IdempotencyMaxBytesPerWindow  ParamItem `refreshable:"false"`
-	IdempotencyChunkMaxBytes      ParamItem `refreshable:"false"`
-	IdempotencyMaxStagingInterval ParamItem `refreshable:"false"`
+	IdempotencyTTLPerPChannel                ParamItem `refreshable:"false"`
+	IdempotencyMaxSizePerPChannel            ParamItem `refreshable:"false"`
+	IdempotencyBestEffortMinCountPerVChannel ParamItem `refreshable:"false"`
+	IdempotencyMaxBytesPerWindow             ParamItem `refreshable:"false"`
+	IdempotencyChunkMaxBytes                 ParamItem `refreshable:"false"`
+	IdempotencyMaxStagingInterval            ParamItem `refreshable:"false"`
 
 	TransformLogCatchupConcurrencyPerPChannel ParamItem `refreshable:"true"`
 
@@ -10186,10 +10189,34 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 	}
 	p.WALRecoverySchemaExpirationTolerance.Init(base.mgr)
 
+	p.IdempotencyTTLPerPChannel = ParamItem{
+		Key:          "streaming.idempotency.ttlPerPChannel",
+		Version:      "3.1.0",
+		DefaultValue: "1h",
+		Doc:          "Idle lifetime of committed Insert idempotency records per PChannel. Duplicate access refreshes the in-memory lifetime; recovery uses the original WAL commit time. Applied when the WAL opens.",
+		Export:       true,
+	}
+	p.IdempotencyTTLPerPChannel.Init(base.mgr)
+	p.IdempotencyMaxSizePerPChannel = ParamItem{
+		Key:          "streaming.idempotency.maxSizePerPChannel",
+		Version:      "3.1.0",
+		DefaultValue: "256MB",
+		Doc:          "PChannel-wide estimated byte budget for committed Insert idempotency records. Eviction follows last access order. Recovery preselects a newest chunk suffix using encoded Insert and Idempotency section lengths and ttl, including one whole boundary chunk. This is not a process RSS limit. Applied when the WAL opens.",
+		Export:       true,
+	}
+	p.IdempotencyMaxSizePerPChannel.Init(base.mgr)
+	p.IdempotencyBestEffortMinCountPerVChannel = ParamItem{
+		Key:          "streaming.idempotency.bestEffortMinCountPerVChannel",
+		Version:      "3.1.0",
+		DefaultValue: "16",
+		Doc:          "Best-effort minimum retained-record count per VChannel. Capacity eviction prefers channels above this count; ttl and the PChannel maxSize take precedence. Recovery does not reserve this count. Zero disables the preference. Applied when the WAL opens.",
+		Export:       true,
+	}
+	p.IdempotencyBestEffortMinCountPerVChannel.Init(base.mgr)
 	p.IdempotencyMaxBytesPerWindow = ParamItem{
 		Key:          "streaming.idempotency.maxBytesPerWindow",
 		Version:      "3.0.0",
-		Doc:          `The maximum total serialized bytes of retained idempotency entries per vchannel window (each entry carries the per-row primary keys of its insert). Nothing is evicted until this is reached; then the oldest entries by commit order are replaced. There is deliberately no TTL: any horizon expressed in time is invalidated by time passing, which would leave the window empty after an outage -- exactly when a resuming client needs it.`,
+		Doc:          "Deprecated. Insert idempotency retention is controlled by streaming.idempotency.ttlPerPChannel, streaming.idempotency.maxSizePerPChannel and streaming.idempotency.bestEffortMinCountPerVChannel. This per-VChannel byte limit is no longer used.",
 		DefaultValue: "16777216",
 		FallbackKeys: []string{"idempotency.maxBytesPerWindow"},
 		Export:       false,

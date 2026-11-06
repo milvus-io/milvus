@@ -30,6 +30,9 @@ type RecoverySnapshot struct {
 	// SummarySnapshots restores the interceptor windows from retained summary
 	// history and startup replay before the WAL accepts writes.
 	SummarySnapshots map[string]*idempotencyview.Snapshot
+	// SummaryRecovery preserves ordered chunk boundaries for the startup fast path.
+	// SummarySnapshots remains the compatibility view of the same Records.
+	SummaryRecovery *idempotencyview.RecoverySnapshot
 }
 
 type dirtyPersistSnapshot struct {
