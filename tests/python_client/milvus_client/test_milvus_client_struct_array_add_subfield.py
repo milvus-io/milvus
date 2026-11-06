@@ -30,7 +30,9 @@ from common.struct_array_nullable_helpers import (
     _record,
     _vector,
 )
+from common.struct_array_schema_errors import REFRESH_INDEX_ISSUE, RefreshIndexNotLoaded
 from pymilvus import DataType
+from pymilvus.exceptions import MilvusException
 from utils.util_log import test_log as log
 
 
@@ -176,6 +178,7 @@ class TestMilvusClientStructArrayAddSubfield(StructArrayNullableBase):
         self._predicates(client, name, model)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(strict=True, raises=RefreshIndexNotLoaded, reason=REFRESH_INDEX_ISSUE)
     def test_new_vector_child_search_ready_after_refresh(self):
         """
         target: make a newly indexed vector child searchable when refresh reports completion
@@ -204,11 +207,30 @@ class TestMilvusClientStructArrayAddSubfield(StructArrayNullableBase):
         indexes.add_index("clips[new_vector]", index_type="FLAT", metric_type="L2")
         self.create_index(client, name, indexes)
         self.refresh_load(client, name)
-        result, _ = self.search(
-            client, name, [[7.0, 0.0]], anns_field="clips[new_vector]", limit=10, search_params={"metric_type": "L2"}
-        )
-        assert result == [[]]
+        known_error = None
+        try:
+            result = client.search(
+                name,
+                [[7.0, 0.0]],
+                anns_field="clips[new_vector]",
+                limit=10,
+                search_params={"metric_type": "L2"},
+                timeout=30,
+            )
+        except MilvusException as exc:
+            if not (
+                exc.code in (2000, 2027)
+                and "field index of the field: clips[new_vector] is not loaded, please reload the collection"
+                in exc.message
+                and "segcoreCode=2027" in exc.message
+            ):
+                raise
+            known_error = exc
+        else:
+            assert result == [[]]
         for row in model.values():
             for element in row["clips"] or []:
                 element["new_vector"] = None
         self._check(client, name, model)
+        if known_error is not None:
+            raise RefreshIndexNotLoaded(f"{REFRESH_INDEX_ISSUE}: {known_error}") from known_error

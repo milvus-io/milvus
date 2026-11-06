@@ -24,23 +24,17 @@ import allure
 import pytest
 from common.common_type import CaseLabel
 from common.struct_array_nullable_helpers import StructArrayNullableBase, _child, _record
-from common.struct_array_schema_errors import (
-    SUBFIELD_DROP_ISSUE,
-    ConcurrentSubfieldDropRejection,
-    is_subfield_drop_rejection,
-)
 from pymilvus import DataType
-from pymilvus.exceptions import MilvusException
+from pymilvus.exceptions import MilvusException, SchemaMismatchRetryableException
 
 
 class TestMilvusClientStructArrayConcurrentSubfieldDrop(StructArrayNullableBase):
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(strict=True, raises=ConcurrentSubfieldDropRejection, reason=SUBFIELD_DROP_ISSUE)
     def test_concurrent_drop_preserves_inserts_that_omit_removed_child(self):
         """
         target: keep inserts valid when they omit a concurrently removed nullable child
         method: warm SDK schema, race four disjoint-key writers against child removal
-        expected: all inserts succeed and exact retained fields survive the schema change
+        expected: retriable schema rejections remain unwritten and succeed after DDL; retained fields stay exact
         """
         client = self._client()
         name = self._create(client, {"anchor": _child(DataType.INT64, False), "added": _child(DataType.INT64)})
@@ -49,7 +43,7 @@ class TestMilvusClientStructArrayConcurrentSubfieldDrop(StructArrayNullableBase)
         barrier = threading.Barrier(5)
 
         def writer(worker):
-            rows, errors = [], []
+            rows, errors, pending = [], [], []
             barrier.wait(timeout=30)
             for step in range(12):
                 row = _record(1 + worker * 100 + step, [{"anchor": step}])
@@ -57,9 +51,11 @@ class TestMilvusClientStructArrayConcurrentSubfieldDrop(StructArrayNullableBase)
                     result = client.insert(name, [row], timeout=30)
                     assert result["insert_count"] == 1, result
                     rows.append(row)
+                except SchemaMismatchRetryableException:
+                    pending.append(row)
                 except MilvusException as exc:
                     errors.append({"row": row, "code": exc.code, "message": exc.message})
-            return rows, errors
+            return rows, errors, pending
 
         def drop():
             barrier.wait(timeout=30)
@@ -70,15 +66,24 @@ class TestMilvusClientStructArrayConcurrentSubfieldDrop(StructArrayNullableBase)
             ddl = pool.submit(drop)
             results = [future.result(timeout=180) for future in writers]
             ddl.result(timeout=90)
-        acknowledged = [seed] + [row for rows, _ in results for row in rows]
-        errors = [error for _, failures in results for error in failures]
+        acknowledged = [seed] + [row for rows, _, _ in results for row in rows]
+        errors = [error for _, failures, _ in results for error in failures]
+        pending = [row for _, _, deferred in results for row in deferred]
+        # Retry only explicitly retriable schema errors, after proving non-mutation.
+        # The completed DDL bounds each deferred write to one additional attempt.
+        for row in pending:
+            assert client.get(name, [row["id"]], consistency_level="Strong", timeout=30) == []
+            result = client.insert(name, [row], timeout=30)
+            assert result["insert_count"] == 1, result
+            acknowledged.append(row)
         model = {row["id"]: copy.deepcopy(row) for row in acknowledged}
         self._check(client, name, model)
         self._reload(client, name)
         self._check(client, name, model)
         allure.attach(
-            str(errors), name="insert rejections during child drop", attachment_type=allure.attachment_type.TEXT
+            str({"errors": errors, "retried_ids": [row["id"] for row in pending]}),
+            name="insert rejections during child drop",
+            attachment_type=allure.attachment_type.TEXT,
         )
-        if errors:
-            assert all(is_subfield_drop_rejection(e["code"], e["message"]) for e in errors), errors
-            raise ConcurrentSubfieldDropRejection(f"{SUBFIELD_DROP_ISSUE}: {errors}")
+        assert not errors, errors
+        assert len(acknowledged) == 49

@@ -25,18 +25,12 @@ from common import common_func as cf
 from common.common_type import CaseLabel
 from common.struct_array_concurrent_workload import MixedHistory, WorkloadConfig
 from common.struct_array_nullable_helpers import StructArrayNullableBase
-from common.struct_array_schema_errors import (
-    SUBFIELD_DROP_ISSUE,
-    ConcurrentSubfieldDropRejection,
-    is_verified_subfield_drop_failure,
-)
 
 
 class TestMilvusClientStructArrayConcurrentReadWrite(StructArrayNullableBase):
     skip_global_role_cleanup = True
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(strict=True, raises=ConcurrentSubfieldDropRejection, reason=SUBFIELD_DROP_ISSUE)
     @pytest.mark.parametrize("seed,smoke", [(7, True), (41, False), (109, False)], ids=["smoke", "seed41", "seed109"])
     def test_concurrent_reads_upserts_deletes_preserve_acknowledged_rows(self, seed, smoke, request, tmp_path):
         """
@@ -53,10 +47,6 @@ class TestMilvusClientStructArrayConcurrentReadWrite(StructArrayNullableBase):
         history = MixedHistory(client, name, seed, smoke, evidence, config=WorkloadConfig(**options))
         try:
             history.run()
-        except AssertionError as error:
-            if is_verified_subfield_drop_failure(error, history.events, history.errors):
-                raise ConcurrentSubfieldDropRejection(f"{SUBFIELD_DROP_ISSUE}: {history.errors}") from error
-            raise
         finally:
             # Preserve the journal even if failure reconciliation itself raises.
             history.journal.close()

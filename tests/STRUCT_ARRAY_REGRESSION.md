@@ -43,7 +43,7 @@ fields; full lifecycle coverage remains in the Python functional cases.
 Use Python 3.12 and the selected suite's requirements in an isolated uv environment.
 This backport pairs Milvus 3.0 with PyMilvus 3.0. The current published client
 is 3.0.3rc13 (upstream commit `165ee24aac325b65392e67f96965133ac67bf5e5`).
-Python enhancement cases require the 3.0 backport of PyMilvus #3882; they are
+Python enhancement cases require PyMilvus #3927 (the 3.0 backport of #3882); they are
 blocked until that client is available. Validation of an unpublished backport
 must record its source commit and wheel hash separately. Go uses this repository's
 3.0 SDK; REST fixtures use the matching PyMilvus branch. Prereleases are available
@@ -151,12 +151,16 @@ These attachments supplement pytest's unchanged failure outcome.
 
 - All-null partial upserts use normal success assertions. The historical
   conditional xfail was removed after all twelve seeded histories passed.
-- Concurrent nullable-child removal is linked to
-  `https://github.com/milvus-io/milvus/issues/55234` with strict, exception-scoped
-  xfails. Only the exact code-1100 removed-child signature qualifies, after
-  acknowledged-row and rejected-write reconciliation succeeds. Other failures
-  remain failures; a fully successful history is a strict XPASS.
-- Refresh search readiness remains a strict assertion (Milvus issue #54594).
+- Concurrent nullable-child removal uses normal success assertions on 3.0.
+  Unlike the non-retryable error in master issue #55234, the tested 3.0 server
+  returns a retriable schema rejection. The minimal case verifies the rejected
+  row was not written, retries once after DDL completes, and checks all 49 rows
+  before and after reload. Non-retryable failures remain failures. The three
+  mixed histories retain their bounded retries and exact row/overlap oracles.
+- Refresh search readiness has a strict, exception-scoped xfail linked to
+  `https://github.com/milvus-io/milvus/issues/54594`. Only the new child index's
+  field-not-loaded error with segcore code 2027 qualifies, after exact row
+  validation. Other errors and incorrect search results fail normally.
 - Three typed DISKANN score profiles have strict, exception-scoped xfails linked
   to `https://github.com/zilliztech/knowhere/issues/1956`. The original tolerance
   remains unchanged and all mutation, reload, row and coordinate checks run.
