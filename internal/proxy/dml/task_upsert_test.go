@@ -8198,6 +8198,24 @@ func TestPartialUpsertWALErrorProjection(t *testing.T) {
 				defer pack.UnPatch()
 				deletePack := mockey.Mock((*UpsertTask).packDeleteMessage).Return(nil, nil).Build()
 				defer deletePack.UnPatch()
+				invalidations := 0
+				if tc.name == "schema" {
+					invalidate := mockey.Mock((*metacache.MetaCache).RemoveCollectionsByID).To(func(_ *metacache.MetaCache, _ context.Context, collectionID int64) []string {
+						require.Equal(t, task.collectionID, collectionID)
+						invalidations++
+						return nil
+					}).Build()
+					defer invalidate.UnPatch()
+					channels := task.chMgr
+					task.chMgr = channelmgr.NewChannelsMgr(func(collectionID typeutil.UniqueID) (channelmgr.ChannelInfo, error) {
+						require.Zero(t, invalidations, "append accounting must precede cache invalidation")
+						vchannels, err := channels.GetVChannels(collectionID)
+						require.NoError(t, err)
+						pchannels, err := channels.GetChannels(collectionID)
+						require.NoError(t, err)
+						return channelmgr.ChannelInfo{VChans: vchannels, PChans: pchannels}, nil
+					})
+				}
 				wal.appendHook = func(_ context.Context, messages ...streamingmessage.MutableMessage) streaming.AppendResponses {
 					require.True(t, task.partialState.appendAttempted, "mark the WAL attempt before calling AppendMessages")
 					responses := streamingtypes.NewAppendResponseN(len(messages))
@@ -8206,6 +8224,9 @@ func TestPartialUpsertWALErrorProjection(t *testing.T) {
 				}
 				err := task.Execute(context.Background())
 				require.Error(t, err)
+				if tc.name == "schema" {
+					require.Equal(t, 1, invalidations)
+				}
 				result := merr.Status(err)
 				if conditional {
 					require.ErrorIs(t, err, merr.ErrCollectionConditionalUpsertExecution)
