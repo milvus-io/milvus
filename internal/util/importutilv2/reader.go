@@ -191,7 +191,8 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	encryption binlog.SourceEncryption,
 ) (Reader, error) {
 	source := importFile.GetSnapshotSource()
-	if source != nil && (shared != nil || source.GetVersion() >= 10) {
+	capabilities, _ := DecodeSnapshotSourceVersion(source.GetVersion())
+	if source != nil && (shared != nil || capabilities.V2Reference) {
 		// Adapt only the validated reader view. Never expand L0 paths back
 		// into a segment or mutate the persisted descriptor: the reader must
 		// borrow the task's prepared bitmap instead of opening L0 again.
