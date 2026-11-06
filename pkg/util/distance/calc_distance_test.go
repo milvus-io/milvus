@@ -216,3 +216,32 @@ func Test_CalcFloatDistance(t *testing.T) {
 		}
 	}
 }
+
+// Test_CalcCosine_TinyNorm is a regression test for milvus-io/milvus#53903.
+// Cosine similarity must stay scale-invariant for tiny-but-finite vectors:
+// float32 accumulation of squared norms underflows below ~1e-19, which used
+// to make self-similarity of [1e-25, 0] return NaN instead of 1.
+func Test_CalcCosine_TinyNorm(t *testing.T) {
+	cases := []struct {
+		name     string
+		left     []float32
+		right    []float32
+		expected float32
+	}{
+		{"tiny self-similarity", []float32{1e-25, 0}, []float32{1e-25, 0}, 1},
+		{"tiny cross-scale", []float32{1e-1, 0}, []float32{1e-25, 0}, 1},
+		{"tiny antiparallel", []float32{1e-25, 0}, []float32{-1e-25, 0}, -1},
+		{"subnormal self-similarity", []float32{1e-30, 1e-30}, []float32{1e-30, 1e-30}, 1},
+		{"normal self-similarity", []float32{3, 4}, []float32{3, 4}, 1},
+	}
+
+	for name, fn := range map[string]func(a, b []float32) float32{
+		"CosineImpl":     CosineImpl,
+		"CosineImplPure": CosineImplPure,
+	} {
+		for _, c := range cases {
+			got := fn(c.left, c.right)
+			assert.InEpsilon(t, c.expected, got, PRECISION, "%s/%s", c.name, name)
+		}
+	}
+}
