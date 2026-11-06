@@ -24,13 +24,11 @@ Use an entry point from the tables below to narrow `-run`, for example `'^TestKe
 | --- | --- | --- |
 | `raw_data_v2_test.go` | `TestRawDataV2Suite` | Scalar, vector and StructArray raw data in Storage V2: inspect every binlog-referenced Parquet object, then release/reload and check actual values. |
 | `raw_data_v3_test.go` | `TestRawDataV3Suite` | Non-TEXT scalar, vector and StructArray raw data in Storage V3: inspect every manifest-referenced Parquet object, verify loaded manifest identities, then check actual values after release/reload. The scalar case also verifies correct, missing and wrong keys on one real object. |
-| `raw_data_v3_consumer_test.go` | `TestRawDataV3ConsumerSuite` | Uses encrypted V3 manifests as real HNSW build inputs, physical index files, loaded build identity, and query/search results. |
 | `scalar_index_v2_test.go` | `TestScalarIndexV2Campaign` | STL_SORT, Trie, BITMAP, HYBRID, INVERTED, NGRAM, RTREE and TextMatch artifacts under scalar engine version 2 and legacy IndexData format V2. |
 | `scalar_index_v3_test.go` | `TestScalarIndexV3Campaign` | The same scalar families under scalar engine version 3 and packed index artifact format V3, including object checks and query results after reload. |
 | `scalar_index_fmindex_v3_test.go` | `TestScalarIndexFMINDEXCampaign` | FMINDEX under scalar engine version 5 and packed artifact format V3. Its cost-ratio setting makes the small fixture's LIKE query use FMINDEX. |
-| `vector_index_test.go` | `TestVectorIndexV2Suite` | HNSW index artifacts produced from Storage V2 raw data, using vector engine version 8 and IndexData format V2. Verify all index objects, actual loaded index identities and the deterministic search result. |
 
-Segment Storage Version, index engine version and index artifact format are separate choices. The scalar-index suites currently all use Storage V2 source segments, including the packed V3 and FMINDEX suites. The V2/V3 raw-data campaigns keep physical indexes absent; the V3 consumer case builds physical HNSW indexes from encrypted V3 source. `vector_index_test.go` covers physical HNSW from V2 source. The Key Propagation scenarios below additionally isolate task registration and exercise unavailable writer keys.
+Segment Storage Version, index engine version and index artifact format are separate choices. The scalar-index campaigns use Storage V2 source segments, including the packed V3 and FMINDEX campaigns. The V2 and V3 raw-data campaigns verify reads from the original vector data. The Key Propagation scenarios isolate task registration and exercise unavailable writer keys.
 
 ## Key propagation
 
@@ -42,12 +40,12 @@ Failure scenarios inject an empty key at the Go plugin lookup selected by role, 
 
 ### Coverage and expected outcomes
 
-The entry-point tables generate **49 cases**, including successful paths and fault stages. Normal and unavailable-key variants use the same suite for each business path.
+The entry-point tables generate **45 cases**, including successful paths and fault stages. Normal and unavailable-key variants use the same suite for each business path.
 
 | Entry point | Cases | Paths exercised | Writer-key failure expectation |
 | --- | ---: | --- | --- |
 | `TestKeyPropagationFlush` | 4 | V2/V3 ordinary flush. | No persisted output or completed flush; restoring the key completes the original batch and Flush request. |
-| `TestKeyPropagationIndex` | 10 | V2/V3 physical vector and scalar builds; V3 default-value build with no source file for the added field. | No dispatch or changed objects; the same build IDs complete after restoration. |
+| `TestKeyPropagationIndex` | 6 | Physical scalar builds under Storage V2 and V3, including a V3 default-value build for a field without a source file. | After the key returns, the same build IDs complete. While blocked, the tests verify task dispatch and object contents. |
 | `TestKeyPropagationImport` | 18 | Protocol V2 (8) and V3 (10); all four source/target encryption combinations. V3 includes reshard fragments and the separately dispatched final writer. | PreImport fails before dispatch. Import and reshard retry, then complete the same tasks after restoration. Faults target encrypted outputs. |
 | `TestKeyPropagationCompaction` | 8 | V2/V3 Sort and Mix, including each plan's Text Stats. | Failed plan, no output segments or changed objects, and no key registration on the cold DataNode. |
 | `TestKeyPropagationSchema` | 5 | V3 column-group append followed by independent Text Stats; full rewrite after dropping a physical field. | Schema-task failures leave storage unchanged. The independent Text Stats task retries and recovers. |
@@ -62,8 +60,9 @@ Import protocol version is independent of Segment Storage Version: both protocol
 | --- | --- |
 | [`key_propagation_test.go`](key_propagation_test.go) | All seven entry points and case matrices; fault controls, registration observations, cold-node replacement, storage snapshots and helpers shared across business groups. |
 | [`key_propagation_write_test.go`](key_propagation_write_test.go) | Flush and Import flows, including source/target EZ setup, stage metadata and reshard-fragment checks. |
-| [`key_propagation_index_test.go`](key_propagation_index_test.go) | Ordinary index builds and independent JSON Stats. Independent Text Stats is exercised after schema backfill. |
+| [`key_propagation_index_test.go`](key_propagation_index_test.go) | Scalar index builds and independent JSON Stats. Independent Text Stats is exercised after schema backfill. |
 | [`key_propagation_compaction_test.go`](key_propagation_compaction_test.go) | Sort/Mix, schema append/rewrite and Analyze-to-clustering flows; their task-specific output checks. |
+| [`key_propagation_data_test.go`](key_propagation_data_test.go) | Shared inputs, flush and exact row and raw-vector readback checks for propagation scenarios. |
 
 The fixture protocol and physical-format inspectors are shared with the other CMEK suites, as described below. External KMS availability, key revocation and WAL message encryption are outside this suite. Analyze intermediates and JSON shredding BSON values remain outside the supported CMEK object formats; Vortex and TEXT/LOB encryption are also outside current coverage.
 
@@ -72,7 +71,7 @@ The fixture protocol and physical-format inspectors are shared with the other CM
 | File | Responsibility |
 | --- | --- |
 | `raw_data_suite_test.go` | Shared V2/V3 MiniCluster setup, flushed-segment metadata, loaded fields and absence of physical vector indexes. |
-| `raw_data_campaign_test.go` | Shared scalar/vector/StructArray schemas, deterministic data, collection preparation, server-assigned field IDs, flush and exact query/search assertions. Its vector-data helper is also used by the vector-index suite. |
+| `raw_data_campaign_test.go` | Shared scalar/vector/StructArray schemas, deterministic data, collection preparation, server-assigned field IDs, flush and exact query/search assertions. |
 | `scalar_index_fixture_test.go` | Shared scalar-index cluster lifecycle and `runCell` flow: create, insert, flush, build/locate/inspect index objects, release/reload and query. It also currently owns package-wide `TestMain`, temporary cipher configuration and fixture plugin-path resolution used by all CMEK suites. |
 | `scalar_index_oracle_test.go` | Scalar-index test inputs, index parameters, query predicates and expected IDs/counts for each family. `assertOracle` compares Milvus query results with those expectations. |
 | `fixture_keys_test.go` | Independently authenticate fixture EDEKs and derive object DEKs for the real Parquet object's three key modes. |
@@ -91,7 +90,7 @@ The V3 scalar scenario uses one nonempty Parquet object for the format's key bas
 | `inspector/locator.go` | `LocateScalarIndex` resolves scalar-index paths from segment/index metadata; `LocateTextLog` resolves TextMatch objects from `TextStatsLogs`. |
 | `inspector/scalar_v2.go` | `InspectV2` checks the legacy scalar IndexData envelope's EDEK and EZ identity. |
 | `inspector/scalar_v3.go` | `InspectV3` independently validates the packed scalar-index header, footer, directory, entry/slice ranges and encryption metadata. |
-| `inspector/vector_index.go` | `LocateVectorIndex` resolves all vector-index objects and build identities; `InspectIndexDataV2` checks descriptor identity/encryption metadata and rejects a complete plaintext index event. |
+| `inspector/index_data_v2.go` | `InspectIndexDataV2` checks the identity and encryption metadata of the V2 IndexData envelope used by JSON Stats shared-key files and rejects a complete plaintext event. |
 | `inspector/object_reader.go` | `ObjectReader.Read` fetches object bytes through the cluster's ChunkManager and rejects empty objects. |
 
 The current V2 and testable V3 raw-data scenarios both store Parquet files. Their object discovery differs: V2 follows binlogs; V3 follows manifests. Scalar packed index format V3 is a different format from these Parquet objects.

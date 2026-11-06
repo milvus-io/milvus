@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"maps"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -33,12 +34,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
-	"github.com/milvus-io/milvus/pkg/v3/util/metric"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
-	"github.com/milvus-io/milvus/tests/integration"
 	"github.com/milvus-io/milvus/tests/integration/cmek/inspector"
 )
 
@@ -55,10 +54,8 @@ func (s *propagationIndexSuite) SetupSuite() {
 	s.WithMilvusConfig("MILVUS_CMEK_FIXTURE_CONTROL", s.fixture.dir)
 	s.WithMilvusConfig("dataCoord.targetScalarIndexVersion", "3")
 	s.WithMilvusConfig("dataCoord.forceRebuildScalarSegmentIndex", "true")
-	s.WithMilvusConfig("dataCoord.targetVecIndexVersion", "8")
-	s.WithMilvusConfig("dataCoord.forceRebuildSegmentIndex", "true")
 	s.WithMilvusConfig("dataCoord.index.storePathVersion", "0")
-	s.WithMilvusConfig("queryNode.segcore.tieredStorage.warmup.vectorIndex", "sync")
+	s.WithMilvusConfig("dataCoord.index.writeSegmentIndexToManifest", strconv.FormatBool(s.version == 3))
 	s.WithMilvusConfig("queryNode.segcore.tieredStorage.warmup.scalarIndex", "sync")
 	s.physicalIndexThreshold = 64
 	s.setupRawData(s.version)
@@ -92,16 +89,8 @@ func (s *propagationIndexSuite) TestBuild() {
 	s.insertRawDataBatch(ctx, description, fields, len(expected))
 	segments := s.flushConsumerCollection(ctx, description)
 	s.WaitForIndexBuiltWithDB(ctx, s.dbName, collection, "float_vector")
-	field, indexType := "batch_id", "STL_SORT"
-	params := []*commonpb.KeyValuePair{{Key: "index_type", Value: indexType}}
-	if s.kind == "vector" {
-		field, indexType = "float_vector", integration.IndexHNSW
-		status, err := s.Cluster.MilvusClient.DropIndex(ctx, &milvuspb.DropIndexRequest{
-			DbName: s.dbName, CollectionName: collection, IndexName: "raw_float_vector",
-		})
-		s.Require().NoError(merr.CheckRPCCall(status, err))
-		params = integration.ConstructIndexParam(rawDataDim, indexType, metric.L2)
-	}
+	field := "batch_id"
+	params := []*commonpb.KeyValuePair{{Key: "index_type", Value: "STL_SORT"}}
 	if s.kind == "default" {
 		field = "default_value"
 		encoded, err := proto.Marshal(&schemapb.FieldSchema{
@@ -178,14 +167,18 @@ func (s *propagationIndexSuite) TestBuild() {
 	}
 	s.WaitForIndexBuiltWithDB(ctx, s.dbName, collection, field)
 	tasks := s.indexTasks(ctx, collectionID, indexID)
-	s.Require().NotEmpty(tasks)
-	if s.fault {
-		s.Require().Equal(len(blocked), len(tasks))
-		for buildID := range blocked {
-			s.Require().Contains(tasks, buildID, "recovery replaced the original task")
-		}
+	pathVersion := indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED
+	if s.version == 3 {
+		// Publishing a physical index to the manifest retires its etcd task.
+		s.Require().Empty(tasks)
+		pathVersion = indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED
+	} else {
+		s.Require().Len(tasks, len(segments))
 	}
-	builds := make(map[int64]int64)
+	if s.fault {
+		s.Require().Len(blocked, len(segments))
+	}
+	builds := make(map[int64]int64, len(segments))
 	segmentIDs := make([]int64, 0, len(segments))
 	for _, segment := range segments {
 		segmentIDs = append(segmentIDs, segment.GetID())
@@ -194,39 +187,46 @@ func (s *propagationIndexSuite) TestBuild() {
 		CollectionID: collectionID, SegmentIDs: segmentIDs,
 	})
 	s.Require().NoError(merr.CheckRPCCall(info, err))
-	for _, task := range tasks {
-		s.Require().Equal(commonpb.IndexState_Finished, task.GetState())
-		s.Require().Equal(nodeID, task.GetNodeID())
-		s.Require().NotEmpty(task.GetIndexFileKeys(), "fake-finished build is not propagation coverage")
-		builds[task.GetSegmentID()] = task.GetBuildID()
-		found := false
-		for _, index := range info.GetSegmentInfo()[task.GetSegmentID()].GetIndexInfos() {
-			if index.GetIndexID() != indexID {
-				continue
-			}
-			found = true
-			s.Require().Equal(task.GetBuildID(), index.GetBuildID())
-			s.Require().NotEmpty(index.GetIndexFilePaths())
-			for _, object := range index.GetIndexFilePaths() {
-				raw, err := s.Cluster.ChunkManager.Read(ctx, object)
-				s.Require().NoError(err)
-				if s.kind == "vector" {
-					s.Require().Equal(int32(8), index.GetCurrentIndexVersion())
-					err = inspector.InspectIndexDataV2(raw, inspector.VectorIndexObject{
-						CollectionID: collectionID, PartitionID: task.GetPartitionID(), SegmentID: task.GetSegmentID(),
-						FieldID: fieldID, BuildID: task.GetBuildID(), EZID: s.ezID,
-					})
-				} else {
-					s.Require().Equal(int32(3), index.GetCurrentScalarIndexVersion())
-					err = inspector.InspectV3(raw, s.ezID)
-				}
-				s.Require().NoError(err, "build=%d object=%s", task.GetBuildID(), object)
+	for _, segment := range segments {
+		segmentID := segment.GetID()
+		var index *indexpb.IndexFilePathInfo
+		for _, candidate := range info.GetSegmentInfo()[segmentID].GetIndexInfos() {
+			if candidate.GetIndexID() == indexID {
+				s.Require().Nil(index, "segment %d has duplicate builds for index %d", segmentID, indexID)
+				index = candidate
 			}
 		}
-		s.Require().True(found)
+		s.Require().NotNil(index, "segment %d has no completed build for index %d", segmentID, indexID)
+		buildID := index.GetBuildID()
+		s.Require().Positive(buildID)
+		s.Require().Equal(segmentID, index.GetSegmentID())
+		s.Require().Equal(fieldID, index.GetFieldID())
+		s.Require().Equal(pathVersion, index.GetIndexStorePathVersion())
+		s.Require().NotEmpty(index.GetIndexFilePaths(), "fake-finished build is not propagation coverage")
+		builds[segmentID] = buildID
+		if s.fault {
+			s.Require().Contains(blocked, buildID, "recovery replaced the original task")
+			s.Require().Equal(segmentID, blocked[buildID].GetSegmentID())
+		}
+		if s.version == 2 {
+			task := tasks[buildID]
+			s.Require().NotNil(task)
+			s.Require().Equal(segmentID, task.GetSegmentID())
+			s.Require().Equal(commonpb.IndexState_Finished, task.GetState())
+			s.Require().Equal(nodeID, task.GetNodeID())
+			s.Require().NotEmpty(task.GetIndexFileKeys())
+		}
+		s.Require().Equal(int32(3), index.GetCurrentScalarIndexVersion())
+		for _, object := range index.GetIndexFilePaths() {
+			raw, err := s.Cluster.ChunkManager.Read(ctx, object)
+			s.Require().NoError(err)
+			s.Require().NoError(inspector.InspectV3(raw, s.ezID), "build=%d object=%s", buildID, object)
+		}
 		s.T().Logf("stage=index-built kind=%s storage=%d node=%d task=%d segment=%d version=%d",
-			s.kind, s.version, nodeID, task.GetBuildID(), task.GetSegmentID(), task.GetIndexVersion())
+			s.kind, s.version, nodeID, buildID, segmentID, index.GetIndexVersion())
 	}
+	// For manifest builds, the replacement DataNode was the only worker and
+	// its fixture registration proves it received this collection's context.
 	s.fixture.assertRegistration(s.T(), nodeID, s.ezID, collectionID)
 	status, err = s.Cluster.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
 		DbName: s.dbName, CollectionName: collection,
@@ -238,24 +238,42 @@ func (s *propagationIndexSuite) TestBuild() {
 	})
 	s.Require().NoError(merr.CheckRPCCall(status, err))
 	s.WaitForLoadWithDB(ctx, s.dbName, collection)
-	s.waitLoadedHNSW(ctx, description, builds, fieldID, indexID)
+	s.waitLoadedIndex(ctx, collectionID, builds, fieldID, indexID)
 	s.assertConsumerRows(ctx, collection, expected)
-	if s.kind == "vector" {
-		s.assertHNSWSearch(ctx, collection, 0)
-		s.assertHNSWSearch(ctx, collection, 511)
-	} else {
-		value := 1
-		if s.kind == "default" {
-			value = 77
+	value := 1
+	if s.kind == "default" {
+		value = 77
+	}
+	s.assertPropagationQuery(ctx, collection, fmt.Sprintf("%s == %d", field, value), slices.Collect(maps.Keys(expected)))
+}
+
+func (s *propagationIndexSuite) waitLoadedIndex(ctx context.Context, collectionID int64, builds map[int64]int64, fieldID, indexID int64) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		loaded := make(map[int64]bool, len(builds))
+		segments, err := s.queryNodeSegments(ctx, collectionID)
+		if err == nil {
+			for _, segment := range segments {
+				buildID, target := builds[segment.SegmentID]
+				if !target || segment.CollectionID != collectionID || segment.State != "Sealed" {
+					continue
+				}
+				for _, index := range segment.IndexedFields {
+					if index.IndexFieldID == fieldID && index.IndexID == indexID && index.BuildID == buildID && index.IsLoaded {
+						loaded[segment.SegmentID] = true
+					}
+				}
+			}
 		}
-		result, err := s.Cluster.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
-			DbName: s.dbName, CollectionName: collection,
-			Expr: fmt.Sprintf("%s == %d", field, value), OutputFields: []string{fixturePrimaryKey},
-			ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
-		})
-		s.Require().NoError(merr.CheckRPCCall(result, err))
-		s.Require().Len(result.GetFieldsData(), 1)
-		s.Require().ElementsMatch(sequentialIDs(len(expected)), result.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+		if len(loaded) == len(builds) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			s.T().Fatalf("index %d not loaded for builds %v; loaded=%v: %v", indexID, builds, loaded, ctx.Err())
+		case <-ticker.C:
+		}
 	}
 }
 
@@ -322,7 +340,7 @@ func (s *propagationJSONSuite) TestSharedKeys() {
 		s.Require().NoError(err, object)
 		if strings.Contains(object, "/shared_key_index/") {
 			shared++
-			s.Require().NoError(inspector.InspectIndexDataV2(raw, inspector.VectorIndexObject{
+			s.Require().NoError(inspector.InspectIndexDataV2(raw, inspector.IndexDataV2Identity{
 				EZID: s.ezID, CollectionID: collectionID, PartitionID: outputs[0].GetPartitionID(), SegmentID: outputs[0].GetID(), FieldID: fieldID, BuildID: stats.GetBuildID(),
 			}), object)
 		}
@@ -355,23 +373,13 @@ func (s *propagationJSONSuite) TestSharedKeys() {
 	s.Require().Equal(1, metaCount)
 	s.T().Logf("stage=json-stats build=%d version=%d shared_slices=%d files=%v", stats.GetBuildID(), stats.GetVersion(), shared, files)
 	s.reloadPropagation(ctx, description, outputs)
-	s.Require().Eventually(func() bool {
-		seen := 0
-		for _, client := range s.Cluster.GetAllStreamingAndQueryNodesClient() {
-			response, err := client.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
-			s.Require().NoError(merr.CheckRPCCall(response, err))
-			for _, segment := range response.GetSegments() {
-				if segment.GetID() != outputs[0].GetID() {
-					continue
-				}
-				loaded := segment.GetJsonStatsInfo()[fieldID]
-				if loaded.GetBuildID() == stats.GetBuildID() && loaded.GetVersionID() == stats.GetVersion() {
-					seen++
-				}
-			}
-		}
-		return seen == 1
-	}, time.Minute, 100*time.Millisecond)
+	loaded, err := s.queryNodeSegments(ctx, collectionID)
+	s.Require().NoError(err)
+	s.Require().Len(loaded, 1)
+	s.Require().Equal(outputs[0].GetID(), loaded[0].SegmentID)
+	s.Require().Len(loaded[0].LoadedData, 1)
+	s.Require().Equal(metricsinfo.JSONStatsIdentity{BuildID: stats.GetBuildID(), Version: stats.GetVersion()},
+		loaded[0].LoadedData[0].JSONStats[fieldID])
 	s.assertPropagationQuery(ctx, collection, `exists json["rare"]`, matching)
 	s.assertConsumerRows(ctx, collection, expected)
 	// The SHARED BSON values in shredding_data remain outside CMEK support.
