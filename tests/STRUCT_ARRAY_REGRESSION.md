@@ -100,6 +100,26 @@ not passes. Each option describes an independently verified deployment:
 | `--struct-storage-mode v3-gsf` | Storage V3, growing-source flush enabled |
 | `--struct-max-array-capacity N` | Effective `proxy.maxArrayCapacity=N` |
 
+To execute every retained case, run the regular selection, the three RBAC cases,
+and all specialized selections. The 490 unique Python cases expand to 508
+executions when the nine storage cases run in all three configurations:
+
+| Selection | Executions | Required configuration |
+| --- | --- | --- |
+| `--tags L0 L1 L2` | 474 | Default functional deployment |
+| `--tags RBAC` | 3 | Authorization enabled, administrator client |
+| Storage file, `--tags L3 --struct-storage-mode v3` | 9 | `common.storage.useLoonFFI=true`, growing-source flush disabled |
+| Storage file, `--tags L3 --struct-storage-mode v3-gsf` | 9 | `common.storage.useLoonFFI=true`, `common.storage.enableGrowingSourceFlush=true` |
+| Storage file, `--tags L3 --struct-storage-mode v2` | 9 | `common.storage.useLoonFFI=false`, growing-source flush disabled, `dataNode.storage.format=parquet` |
+| `growing_sealed_search` file, `--tags L3` | 2 | Management API reachable on port 9091; index row threshold above 500 and at most 3000 |
+| `schema_validation` file, `-k test_struct_capacity_respects_configured_proxy_limit --tags L3 --struct-max-array-capacity 5000` | 2 | `proxy.maxArrayCapacity=5000` |
+
+Use independent deployments for incompatible settings and read back effective
+configuration before execution. The `v2` profile names the default storage
+configuration, not a guarantee that every tested schema writes V2 segments:
+3.0 promotes schemas requiring Storage V3 even when `useLoonFFI=false`.
+Skipped prerequisites and collection-only runs do not complete a selection.
+
 Parent mmap and warmup parameters are covered separately from proof of internal
 mmap or warmup completion.
 
