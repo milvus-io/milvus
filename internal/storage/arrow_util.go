@@ -500,7 +500,9 @@ func (b *RecordBuilder) prepareAppendDefaults() error {
 
 func (b *RecordBuilder) Append(rec Record, start, end int) error {
 	if start >= end {
-		return b.appendColumns(nil, start, end)
+		// Empty ranges still validate defaults, but must not read columns or
+		// change the row count.
+		return b.prepareAppendDefaults()
 	}
 	if b.columns == nil {
 		b.columns = make([]arrow.Array, len(b.fields))

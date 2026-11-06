@@ -379,7 +379,7 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 	t.schema = &schemapb.CollectionSchema{}
 	err := proto.Unmarshal(t.Schema, t.schema)
 	if err != nil {
-		return err
+		return merr.WrapErrParameterInvalidErr(err, "failed to parse schema for collection %s", t.GetCollectionName())
 	}
 	t.schema.AutoID = false
 	t.schema.DbName = t.GetDbName()
@@ -647,7 +647,7 @@ func (t *AddCollectionFieldTask) PreExecute(ctx context.Context) error {
 
 	t.fieldSchema = &schemapb.FieldSchema{}
 	if err := proto.Unmarshal(t.GetSchema(), t.fieldSchema); err != nil {
-		return err
+		return merr.WrapErrParameterInvalidErr(err, "failed to parse field schema for collection %s", t.GetCollectionName())
 	}
 	if err := validateAddFieldRequest(t.oldSchema, t.fieldSchema); err != nil {
 		return err
@@ -2523,7 +2523,7 @@ func (t *AlterCollectionFieldTask) PreExecute(ctx context.Context) error {
 			}
 			value, err := strconv.Atoi(prop.Value)
 			if err != nil {
-				return merr.WrapErrParameterInvalidMsg("%s should be an integer, but got %T", prop.Key, prop.Value)
+				return merr.WrapErrParameterInvalidErr(err, "the value for %s of field %s must be an integer", prop.Key, fieldName)
 			}
 
 			defaultMaxVarCharLength := paramtable.Get().ProxyCfg.MaxVarCharLength.GetAsInt64()
@@ -2546,7 +2546,7 @@ func (t *AlterCollectionFieldTask) PreExecute(ctx context.Context) error {
 
 			maxCapacityPerRow, err := strconv.ParseInt(prop.Value, 10, 64)
 			if err != nil {
-				return merr.WrapErrParameterInvalidMsg("the value for %s of field %s must be an integer", common.MaxCapacityKey, fieldName)
+				return merr.WrapErrParameterInvalidErr(err, "the value for %s of field %s must be an integer", common.MaxCapacityKey, fieldName)
 			}
 			maxArrayCapacity := paramtable.Get().ProxyCfg.MaxArrayCapacity.GetAsInt64()
 			if maxCapacityPerRow > maxArrayCapacity || maxCapacityPerRow <= 0 {
