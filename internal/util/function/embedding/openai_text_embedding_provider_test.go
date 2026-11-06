@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/credentials"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/function/models/openai"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestOpenAITextEmbeddingProvider(t *testing.T) {
@@ -194,4 +195,100 @@ func (s *OpenAITextEmbeddingProviderSuite) TestCreateAzureOpenAIEmbeddingClient(
 
 	_, err = createAzureOpenAIEmbeddingClient("mock", "", "")
 	s.NoError(err)
+}
+
+func (s *OpenAITextEmbeddingProviderSuite) TestSGLangEmbeddingsContract() {
+	const modelName = "Qwen/Qwen3-Embedding-0.6B"
+	const dim = 1024
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.Equal(http.MethodPost, r.Method)
+		s.Equal("/v1/embeddings", r.URL.Path)
+		s.Equal("application/json", r.Header.Get("Content-Type"))
+		s.Equal("Bearer sglang-local", r.Header.Get("Authorization"))
+
+		var req openai.EmbeddingRequest
+		s.NoError(json.NewDecoder(r.Body).Decode(&req))
+		s.Equal(modelName, req.Model)
+		s.Equal([]string{"Milvus is a vector database."}, req.Input)
+		s.Equal("float", req.EncodingFormat)
+		s.Zero(req.Dimensions)
+
+		res := openai.EmbeddingResponse{
+			Object: "list",
+			Model:  modelName,
+			Data: []openai.EmbeddingData{{
+				Object:    "embedding",
+				Embedding: make([]float32, dim),
+				Index:     0,
+			}},
+		}
+		s.NoError(json.NewEncoder(w).Encode(res))
+	}))
+	defer ts.Close()
+
+	field := &schemapb.FieldSchema{
+		Name:     "vector",
+		DataType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: "dim", Value: "1024"},
+		},
+	}
+	function := &schemapb.FunctionSchema{
+		Name:             "sglang_embedding",
+		InputFieldNames:  []string{"text"},
+		OutputFieldNames: []string{"vector"},
+		Params: []*commonpb.KeyValuePair{
+			{Key: models.ModelNameParamKey, Value: modelName},
+			{Key: models.CredentialParamKey, Value: "sglang"},
+		},
+	}
+	provider, err := NewOpenAIEmbeddingProvider(
+		field,
+		function,
+		map[string]string{models.URLParamKey: ts.URL + "/v1/embeddings"},
+		credentials.NewCredentials(map[string]string{"sglang.apikey": "sglang-local"}),
+		&models.ModelExtraInfo{ClusterID: "test-cluster", DBName: "test-db"},
+	)
+	s.NoError(err)
+
+	result, err := provider.CallEmbedding(context.Background(), []string{"Milvus is a vector database."}, models.InsertMode)
+	s.NoError(err)
+	s.Len(result.([][]float32), 1)
+	s.Len(result.([][]float32)[0], dim)
+}
+
+func (s *OpenAITextEmbeddingProviderSuite) TestSGLangFailures() {
+	s.Run("dimension mismatch", func() {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			res := openai.EmbeddingResponse{
+				Object: "list",
+				Data: []openai.EmbeddingData{{
+					Object:    "embedding",
+					Embedding: []float32{1, 2, 3},
+					Index:     0,
+				}},
+			}
+			s.NoError(json.NewEncoder(w).Encode(res))
+		}))
+		defer ts.Close()
+
+		provider, err := createOpenAIProvider(ts.URL, s.schema.Fields[2], openAIProvider)
+		s.NoError(err)
+		_, err = provider.CallEmbedding(context.Background(), []string{"sentence"}, models.InsertMode)
+		s.ErrorContains(err, "the required embedding dim is [4], but the embedding obtained from the model is [3]")
+	})
+
+	s.Run("service unavailable", func() {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}))
+		defer ts.Close()
+
+		provider, err := createOpenAIProvider(ts.URL, s.schema.Fields[2], openAIProvider)
+		s.NoError(err)
+		_, err = provider.CallEmbedding(context.Background(), []string{"sentence"}, models.InsertMode)
+		s.ErrorIs(err, merr.ErrServiceUnavailable)
+		s.Contains(err.Error(), "503 Service Unavailable")
+	})
 }

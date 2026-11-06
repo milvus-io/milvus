@@ -1,0 +1,12 @@
+credential:
+  sglang:
+    # SGLang does not require an API key unless it is started with --api-key.
+    # Milvus requires a non-empty OpenAI-compatible credential in either case.
+    apikey: local-sglang
+
+function:
+  textEmbedding:
+    providers:
+      openai:
+        credential: sglang
+        url: http://sglang:30000/v1/embeddings
