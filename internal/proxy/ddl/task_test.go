@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -6126,6 +6127,96 @@ func TestCreateCollectionTaskRejectsStructSubFieldTextMatch(t *testing.T) {
 			err = task.PreExecute(ctx)
 			require.ErrorIs(t, err, merr.ErrParameterInvalid)
 			require.ErrorContains(t, err, key+" is not supported on struct sub-field sub_text_array")
+		})
+	}
+}
+
+// TestCreateCollectionTaskPreserveFieldIDs pins the proxy side of the
+// preserve_field_ids contract: the dynamic and namespace fields may be sent
+// for their source field IDs only with the property, sub-fields use bare
+// names, and text match on stored sub-fields is accepted for a restore.
+func TestCreateCollectionTaskPreserveFieldIDs(t *testing.T) {
+	ctx := context.Background()
+	preserve := []*commonpb.KeyValuePair{{Key: util.PreserveFieldIdsKey, Value: "true"}}
+	newTask := func(t *testing.T, schema *schemapb.CollectionSchema, properties []*commonpb.KeyValuePair) *CreateCollectionTask {
+		mockCache := NewMockCache(t)
+		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{}, nil).Maybe()
+		marshaledSchema, err := proto.Marshal(schema)
+		require.NoError(t, err)
+		task := &CreateCollectionTask{
+			Condition: NewTaskCondition(ctx),
+			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+				CollectionName: schema.GetName(),
+				Schema:         marshaledSchema,
+				ShardsNum:      common.DefaultShardsNum,
+				Properties:     properties,
+			},
+			ctx:      ctx,
+			mixCoord: NewMixCoordMock(),
+		}
+		task.MetaCache = mockCache
+		require.NoError(t, task.OnEnqueue())
+		return task
+	}
+	baseSchema := func() *schemapb.CollectionSchema {
+		schema := constructCollectionSchemaWithStructArrayField("TestCreateCollectionTaskPreserveFieldIDs"+funcutil.GenRandomStr(), testStructArrayField, false)
+		schema.EnableDynamicField = true
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			FieldID: 900, Name: common.MetaFieldName, DataType: schemapb.DataType_JSON, IsDynamic: true,
+		})
+		return schema
+	}
+
+	t.Run("dynamic field id is forwarded", func(t *testing.T) {
+		schema := baseSchema()
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			FieldID: 901, Name: common.NamespaceFieldName, DataType: schemapb.DataType_VarChar,
+		})
+		task := newTask(t, schema, preserve)
+		require.NoError(t, task.PreExecute(ctx))
+		forwarded := &schemapb.CollectionSchema{}
+		require.NoError(t, proto.Unmarshal(task.Schema, forwarded))
+		ids := make(map[string]int64)
+		for _, field := range forwarded.GetFields() {
+			ids[field.GetName()] = field.GetFieldID()
+		}
+		require.Equal(t, int64(900), ids[common.MetaFieldName])
+		require.Equal(t, int64(901), ids[common.NamespaceFieldName])
+		for i, sub := range forwarded.GetStructArrayFields()[0].GetFields() {
+			source := schema.GetStructArrayFields()[0].GetFields()[i]
+			require.Equal(t, typeutil.ConcatStructFieldName(testStructArrayField, source.GetName()), sub.GetName())
+			require.Equal(t, source.GetFieldID(), sub.GetFieldID())
+		}
+	})
+
+	t.Run("dynamic field rejected without the property", func(t *testing.T) {
+		err := newTask(t, baseSchema(), nil).PreExecute(ctx)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, "cannot explicitly set a field as a dynamic field")
+	})
+
+	t.Run("dynamic field must be dynamic JSON", func(t *testing.T) {
+		schema := baseSchema()
+		schema.Fields[len(schema.Fields)-1].DataType = schemapb.DataType_VarChar
+		err := newTask(t, schema, preserve).PreExecute(ctx)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.ErrorContains(t, err, "must have is_dynamic=true and data type JSON; only its field ID is used")
+	})
+
+	t.Run("stored sub-field name is rejected", func(t *testing.T) {
+		schema := baseSchema()
+		sub := schema.GetStructArrayFields()[0].GetFields()[0]
+		sub.Name = typeutil.ConcatStructFieldName(testStructArrayField, sub.GetName())
+		err := newTask(t, schema, preserve).PreExecute(ctx)
+		require.ErrorIs(t, err, merr.ErrFieldInvalidName)
+	})
+
+	for _, key := range []string{common.EnableMatchKey, common.EnableAnalyzerKey} {
+		t.Run(key+" on a stored sub-field", func(t *testing.T) {
+			schema := baseSchema()
+			sub := schema.GetStructArrayFields()[0].GetFields()[0]
+			sub.TypeParams = append(sub.TypeParams, &commonpb.KeyValuePair{Key: key, Value: "true"})
+			require.NoError(t, newTask(t, schema, preserve).PreExecute(ctx))
 		})
 	}
 }
