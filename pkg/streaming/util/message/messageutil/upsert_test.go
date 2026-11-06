@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util/fastpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -272,4 +273,98 @@ func TestInsertRowsReaderPreservesSparseDimensions(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestInsertRowsReaderAllNullSparsePayload(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, Name: "vector", DataType: schemapb.DataType_SparseFloatVector, Nullable: true},
+	}}
+	body := &message.UpsertMessageBody{
+		PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2}}}},
+		RowIds:      []int64{10, 20},
+		Columns:     []*schemapb.FieldData{{FieldId: 101, Type: schemapb.DataType_SparseFloatVector, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 32, ValidData: []bool{false, false}}}}},
+	}
+	raw := message.NewUpsertMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&message.UpsertMessageHeader{CollectionId: 1, Partitions: []*message.PartitionSegmentAssignment{{PartitionId: 10, Rows: 2}}}).WithBody(body).MustBuildMutable().WithTimeTick(42).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(42))
+	source := message.MustAsImmutableUpsertMessageV2(raw).MustBody()
+	require.Nil(t, source.Columns[0].GetVectors().Data)
+	before := proto.Clone(source)
+	payload := append([]byte(nil), raw.Payload()...)
+	reader, _, ok := AsInsertRowsReader(raw)
+	require.True(t, ok)
+	for _, selection := range [][]int64{nil, {1}} {
+		result, err := reader.ReadRows(t.Context(), schema, selection)
+		require.NoError(t, err)
+		vectors := result.FieldsData[0].GetVectors()
+		require.NotNil(t, vectors.GetSparseFloatVector())
+		require.Equal(t, int64(32), vectors.GetDim())
+		require.Zero(t, vectors.GetSparseFloatVector().GetDim())
+		require.Empty(t, vectors.GetSparseFloatVector().GetContents())
+		require.Equal(t, make([]bool, result.GetNumRows()), vectors.GetValidData())
+		require.True(t, proto.Equal(before, source))
+		require.Equal(t, payload, raw.Payload())
+	}
+}
+
+func TestInsertRowsReaderAllNullSparseEncodedChunk(t *testing.T) {
+	row := typeutil.CreateSparseFloatRow([]uint32{0, 1, 2, 3, 4, 5, 6, 7}, []float32{1, 1, 1, 1, 1, 1, 1, 1})
+	source := &msgpb.InsertRequest{NumRows: 4, RowIDs: []int64{10, 20, 30, 40}, Timestamps: []uint64{1, 1, 1, 1}, FieldsData: []*schemapb.FieldData{{FieldId: 101, Type: schemapb.DataType_SparseFloatVector, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 32, ValidData: []bool{true, false, false, true}, Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{Dim: 16, Contents: [][]byte{row, row}}}}}}}}
+	before := proto.Clone(source)
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, Name: "vector", DataType: schemapb.DataType_SparseFloatVector, Nullable: true},
+	}}
+	cursor, err := fastpb.NewUpsertViewCursor(source)
+	require.NoError(t, err)
+	remaining := []int{0, 1, 2, 3}
+	prefix := make([]int, len(remaining)+1)
+	var chunks []int
+	var allValidity []bool
+	nullChunks := 0
+	for len(remaining) > 0 {
+		// Sparse rows exceed the limit; the middle null rows fit in one chunk.
+		encoder, count, err := cursor.NextEncoder(remaining, 40, prefix, 0)
+		require.NoError(t, err)
+		require.Positive(t, count)
+		selected := remaining[:count]
+		keys := make([]int64, count)
+		rowIDs := make([]int64, count)
+		for i, index := range selected {
+			keys[i] = int64(index + 1)
+			rowIDs[i] = source.RowIDs[index]
+		}
+		require.NoError(t, encoder.SetNonColumnFields(&message.UpsertMessageBody{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: keys}}}, RowIds: rowIDs}))
+		raw := message.NewUpsertMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&message.UpsertMessageHeader{CollectionId: 1, Partitions: []*message.PartitionSegmentAssignment{{PartitionId: 10, Rows: uint64(count)}}}).WithBodyEncoder(encoder).MustBuildMutable().WithTimeTick(42).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(int64(len(chunks) + 1)))
+		decoded := message.MustAsImmutableUpsertMessageV2(raw).MustBody()
+		decodedBefore := proto.Clone(decoded)
+		payload := append([]byte(nil), raw.Payload()...)
+		inputVector := decoded.Columns[0].GetVectors()
+		if inputVector.GetSparseFloatVector() == nil {
+			require.Equal(t, []bool{false, false}, inputVector.GetValidData())
+			require.Nil(t, inputVector.Data, "encoder must omit the sparse payload for an all-null chunk")
+			nullChunks++
+		}
+		reader, _, ok := AsInsertRowsReader(raw)
+		require.True(t, ok)
+		selections, err := InsertSelections(t.Context(), raw)
+		require.NoError(t, err)
+		result, err := reader.ReadRows(t.Context(), schema, selections[0])
+		require.NoError(t, err)
+		outputVector := result.FieldsData[0].GetVectors()
+		require.NotNil(t, outputVector.GetSparseFloatVector())
+		require.Equal(t, inputVector.GetDim(), outputVector.GetDim())
+		require.Equal(t, inputVector.GetSparseFloatVector().GetDim(), outputVector.GetSparseFloatVector().GetDim())
+		require.Equal(t, inputVector.GetValidData(), outputVector.GetValidData())
+		require.Equal(t, inputVector.GetSparseFloatVector().GetContents(), outputVector.GetSparseFloatVector().GetContents())
+		require.Equal(t, rowIDs, result.GetRowIDs())
+		allValidity = append(allValidity, outputVector.GetValidData()...)
+		require.True(t, proto.Equal(decodedBefore, decoded))
+		require.Equal(t, payload, raw.Payload())
+		chunks = append(chunks, count)
+		remaining, prefix = remaining[count:], prefix[count:]
+	}
+	require.Equal(t, []int{1, 2, 1}, chunks)
+	require.Equal(t, 1, nullChunks)
+	require.Equal(t, []bool{true, false, false, true}, allValidity)
+	require.True(t, proto.Equal(before, source))
 }
