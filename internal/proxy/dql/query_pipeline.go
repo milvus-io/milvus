@@ -310,6 +310,15 @@ func newReduceByGroupsOperator(
 				}
 				avgFieldData.FieldName = outputMap.NameAt(i)
 				reOrganizedFieldDatas[i] = avgFieldData
+			} else if len(indices) == 3 {
+				_, op, _ := agg.MatchAggregationExpression(outputMap.NameAt(i))
+				varFieldData, err := agg.ComputeVarianceFromCountAndM2(op, reducedFieldDatas[indices[1]],
+					reducedFieldDatas[indices[2]])
+				if err != nil {
+					return nil, err
+				}
+				varFieldData.FieldName = outputMap.NameAt(i)
+				reOrganizedFieldDatas[i] = varFieldData
 			}
 		}
 
@@ -352,7 +361,8 @@ func newRawReduceByGroupsOperator(
 }
 
 // newAggRemapOperator reorganizes fields from the GroupAggReducer's raw layout
-// to the user's output_fields order, computing avg from sum+count where needed.
+// to the user's output_fields order, computing avg from sum+count and variance
+// from count+m2 where needed.
 // Used after ORDER BY + slice in the GROUP BY + ORDER BY pipeline.
 func newAggRemapOperator(outputMap *agg.AggregationFieldMap) queryutil.Operator {
 	return queryutil.NewLambdaOperator(queryutil.OpRemap, func(ctx context.Context, span trace.Span, inputs ...any) ([]any, error) {
@@ -379,6 +389,14 @@ func newAggRemapOperator(outputMap *agg.AggregationFieldMap) queryutil.Operator 
 				}
 				avgFieldData.FieldName = outputMap.NameAt(i)
 				remapped[i] = avgFieldData
+			} else if len(indices) == 3 {
+				_, op, _ := agg.MatchAggregationExpression(outputMap.NameAt(i))
+				varFieldData, err := agg.ComputeVarianceFromCountAndM2(op, rawFields[indices[1]], rawFields[indices[2]])
+				if err != nil {
+					return nil, err
+				}
+				varFieldData.FieldName = outputMap.NameAt(i)
+				remapped[i] = varFieldData
 			}
 		}
 
