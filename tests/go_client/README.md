@@ -88,12 +88,7 @@ insertOption := hp.TNewDataOption().
 ```go
 indexParams := hp.TNewIndexParams(schema).
     TWithFieldIndex(map[string]index.Index{
-        common.DefaultVectorFieldName: index.NewIVFSQIndex(
-            &index.IVFSQConfig{
-                MetricType: entity.L2,
-                NList:     128,
-            },
-        ),
+        common.DefaultVectorFieldName: index.NewIvfSQ8Index(entity.L2, 128),
     })
 ```
 
@@ -101,14 +96,10 @@ indexParams := hp.TNewIndexParams(schema).
 ```go
 searchOpt := client.NewSearchOption(schema.CollectionName, 100, vectors).
     WithOffset(0).
-    WithLimit(100).
     WithConsistencyLevel(entity.ClStrong).
     WithFilter("int64 >= 100").
-    WithOutputFields([]string{"*"}).
-    WithSearchParams(map[string]any{
-        "nprobe": 16,
-        "ef":     64,
-    })
+    WithOutputFields("*").
+    WithAnnParam(index.NewIvfAnnParam(16))
 ```
 
 ## Adding New Parameters
