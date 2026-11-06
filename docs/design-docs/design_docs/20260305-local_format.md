@@ -269,7 +269,8 @@ settings. Mmap files are local ephemeral cache artifacts:
 - punched or zeroed when cache eviction releases a Cell range.
 
 They are not durable segment state and are not part of backup, replication, or
-CDC.
+CDC. Removing the cache pathname does not close a reader's open descriptor or
+unmap borrowed buffers; those remain alive until their last owner releases them.
 
 ### Predicate pushdown
 
@@ -373,7 +374,7 @@ Neither backend exposes Cell ids, chunk ids, or file-local offsets to callers.
 | field type parameter `local_format` | `raw` | schema metadata; applied when a sealed segment generation loads | Requests Raw or Vortex local representation. It does not select the writer format. |
 | field/collection property `mmap.enabled` | unset | schema property; applied at load | Overrides the global scalar mmap setting for the affected physical group. If any field in a group explicitly enables mmap, the group uses mmap. |
 | `queryNode.mmap.scalarField` | `false` | QueryNode configuration | Selects mmap rather than memory backing when no field/collection override exists. Disabling it does not disable Vortex; it selects memory backing. |
-| `queryNode.mmap.populate` | `true` | QueryNode startup configuration | Controls `MAP_POPULATE` for the Vortex sparse mmap backing. No effect when mmap backing is not selected. |
+| `queryNode.mmap.populate` | `true` | QueryNode startup configuration | Prefaults pages only for ranges filled into the Vortex sparse mmap backing, leaving unmaterialized holes untouched. No effect when mmap backing is not selected. |
 | `queryNode.segcore.tieredStorage.warmup.scalarField` | `sync` | QueryNode/collection warmup policy | `sync`, `async`, or `disable` controls proactive Cell loading. `disable` keeps on-demand loading. |
 | `queryNode.segcore.enableVortexScanPushdown` | `true` | refreshable QueryNode setting | When false, Vortex filters use data Scan and normal expression evaluation. |
 | `queryNode.segcore.scanCursorOwnsPin` | `false` | non-refreshable QueryNode setting | When false use `ResultOwned`; when true use experimental `CursorOwned` Scan pin lifetime. |
