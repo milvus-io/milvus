@@ -1076,3 +1076,8 @@ func (s *Server) GetLeakedResourcesByCollectionPerRG(ctx context.Context, collec
 	}
 	return leaked
 }
+
+// GetResourceGroupNames returns current groups without invoking the logging RPC path.
+func (s *Server) GetResourceGroupNames(ctx context.Context) []string {
+	return s.meta.ListResourceGroups(ctx)
+}
