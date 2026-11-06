@@ -42,10 +42,10 @@ fields; full lifecycle coverage remains in the Python functional cases.
 
 Use Python 3.12 and the selected suite's requirements in an isolated uv environment.
 This backport pairs Milvus 3.0 with PyMilvus 3.0. The current published client
-is 3.0.3rc13 (upstream commit `165ee24aac325b65392e67f96965133ac67bf5e5`).
-Python enhancement cases require PyMilvus #3927 (the 3.0 backport of #3882); they are
-blocked until that client is available. Validation of an unpublished backport
-must record its source commit and wheel hash separately. Go uses this repository's
+is 3.0.3rc14 (upstream commit `c7e1850531370b73256b94c4ce762a9ed1e27ce1`),
+published after PyMilvus #3927 backported #3882 to 3.0. Both suites pin this
+Test PyPI release. Validation of an unpublished backport must record its source
+commit and wheel hash separately. Go uses this repository's
 3.0 SDK; REST fixtures use the matching PyMilvus branch. Prereleases are available
 on Test PyPI. From the Milvus repository root:
 
