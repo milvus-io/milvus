@@ -3015,7 +3015,7 @@ func TestGarbageCollector_recycleDroppedSegments_LoadedSegments(t *testing.T) {
 
 			var recycled []int64
 			mockRecycle := mockey.Mock((*GarbageCollector).RecycleDroppedSegment).
-				To(func(_ *GarbageCollector, _ context.Context, _ *packed.ManifestIOContext, segmentID int64, _ *meta.SegmentInfo) {
+				To(func(_ *GarbageCollector, _ context.Context, _ *packed.ManifestIOContext, segmentID int64) {
 					recycled = append(recycled, segmentID)
 				}).Build()
 			defer mockRecycle.UnPatch()
