@@ -21,12 +21,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/datacoord/meta"
-
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/datacoord/partitionstats"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -63,7 +64,11 @@ func TestSegmentChangeLegacyViewsAndSeek(t *testing.T) {
 				group.State = state
 				require.NoError(t, m.UpdateSegmentChangeGroup(ctx, group))
 			}
-			h := &ServerHandler{s: &Server{ctx: ctx, meta: m}}
+			ps, err := partitionstats.NewPartitionStatsMeta(ctx, m.Catalog)
+			require.NoError(t, err)
+			im, err := index.NewIndexMeta(ctx, m.Catalog, []int64{10})
+			require.NoError(t, err)
+			h := &ServerHandler{s: &Server{ctx: ctx, meta: m, domainMetas: domainMetas{partitionStatsMeta: ps, indexMeta: im}}}
 			channel := &meta.ChannelMeta{Name: "ch-1", CollectionID: 10}
 			query := h.GetQueryVChanPositions(channel)
 			require.NotContains(t, query.GetFlushedSegmentIds(), int64(1001))

@@ -20,11 +20,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/datacoord/meta"
-
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )

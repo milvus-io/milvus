@@ -74,7 +74,7 @@ func (s *indexTaskSuite) SetupSuite() {
 		Segments: &meta.SegmentsInfo{
 			Segments: map[int64]*meta.SegmentInfo{
 				s.segID: {
-					meta.SegmentInfo: &datapb.SegmentInfo{
+					SegmentInfo: &datapb.SegmentInfo{
 						ID:            s.segID,
 						CollectionID:  s.collID,
 						PartitionID:   s.partID,
@@ -329,7 +329,7 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayMaxSimRequiresEnoughVe
 				Segments: &meta.SegmentsInfo{
 					Segments: map[int64]*meta.SegmentInfo{
 						s.segID: {
-							meta.SegmentInfo: &datapb.SegmentInfo{
+							SegmentInfo: &datapb.SegmentInfo{
 								ID:            s.segID,
 								CollectionID:  s.collID,
 								PartitionID:   s.partID,
@@ -410,7 +410,7 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayEstimateFailureMarksFa
 		Segments: &meta.SegmentsInfo{
 			Segments: map[int64]*meta.SegmentInfo{
 				s.segID: {
-					meta.SegmentInfo: &datapb.SegmentInfo{
+					SegmentInfo: &datapb.SegmentInfo{
 						ID:            s.segID,
 						CollectionID:  s.collID,
 						PartitionID:   s.partID,
@@ -476,7 +476,7 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayMissingBinlogOnStaleSc
 		Segments: &meta.SegmentsInfo{
 			Segments: map[int64]*meta.SegmentInfo{
 				s.segID: {
-					meta.SegmentInfo: &datapb.SegmentInfo{
+					SegmentInfo: &datapb.SegmentInfo{
 						ID:            s.segID,
 						CollectionID:  s.collID,
 						PartitionID:   s.partID,
@@ -543,7 +543,7 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayManifestBackedProceeds
 		Segments: &meta.SegmentsInfo{
 			Segments: map[int64]*meta.SegmentInfo{
 				s.segID: {
-					meta.SegmentInfo: &datapb.SegmentInfo{
+					SegmentInfo: &datapb.SegmentInfo{
 						ID:            s.segID,
 						CollectionID:  s.collID,
 						PartitionID:   s.partID,
@@ -804,7 +804,7 @@ func (s *indexTaskSuite) TestPrepareJobRequestUsesNullableStructArrayParentForSu
 	it := newIndexBuildTask(segIndex, 1, mt, im, handler, cm, NewIndexEngineVersionManager())
 	req, err := it.prepareJobRequest(
 		context.Background(),
-		&meta.SegmentInfo{meta.SegmentInfo: &datapb.SegmentInfo{
+		&meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID:           s.segID,
 			CollectionID: s.collID,
 			PartitionID:  s.partID,
@@ -936,7 +936,7 @@ func (s *indexTaskSuite) newInProgressTaskWithMeta(catalog *catalogmocks.DataCoo
 		Segments: &meta.SegmentsInfo{
 			Segments: map[int64]*meta.SegmentInfo{
 				s.segID: {
-					meta.SegmentInfo: &datapb.SegmentInfo{
+					SegmentInfo: &datapb.SegmentInfo{
 						ID:           s.segID,
 						CollectionID: s.collID,
 						PartitionID:  s.partID,
@@ -1313,7 +1313,7 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayUsesValidElementCount(
 			}
 			im := createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID)
 			mt := &meta.Meta{Segments: meta.NewSegmentsInfo(), IndexCatalog: im}
-			mt.Segments.SetSegment(s.segID, &meta.SegmentInfo{meta.SegmentInfo: info})
+			mt.Segments.SetSegment(s.segID, &meta.SegmentInfo{SegmentInfo: info})
 			im.Indexes[s.collID][s.indexID].IndexParams = []*commonpb.KeyValuePair{
 				{Key: common.IndexTypeKey, Value: "HNSW"},
 				{Key: common.MetricTypeKey, Value: "COSINE"},
