@@ -18,20 +18,28 @@ package querycoordv2
 
 import (
 	"context"
+	"fmt"
+	"slices"
+	"sync"
 	"testing"
 
 	"github.com/bytedance/mockey"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	metastoremocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	qnmanager "github.com/milvus-io/milvus/internal/querynodev2/client/manager"
+	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer/api"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
+	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview/syncer"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
@@ -273,4 +281,132 @@ func (c *fakeRuntimeQueryNodeClient) RegisterQueryNodeListener(context.Context, 
 
 func (m *fakeRuntimeResourceGroupManager) RegisterResourceGroupListener(func(string, []int64)) func() {
 	return func() {}
+}
+
+// countingQueryViewCatalog lists copies of its views and counts the listings.
+type countingQueryViewCatalog struct {
+	mu    sync.Mutex
+	views []*viewpb.QueryViewOfShard
+	lists int
+	fail  error // returned by the next listing
+}
+
+func (c *countingQueryViewCatalog) ListQueryViews(context.Context) ([]*viewpb.QueryViewOfShard, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lists++
+	if err := c.fail; err != nil {
+		c.fail = nil
+		return nil, err
+	}
+	return slices.Clone(c.views), nil
+}
+
+func (c *countingQueryViewCatalog) SaveQueryViews(_ context.Context, views []*viewpb.QueryViewOfShard) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.views = append(c.views, views...)
+	return nil
+}
+
+func (c *countingQueryViewCatalog) listCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lists
+}
+
+func TestPrefetchedQueryViewCatalogServesEarlyListingOnce(t *testing.T) {
+	ctx := context.Background()
+	view := testPersistedQueryView(100, qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"})
+	underlying := &countingQueryViewCatalog{views: []*viewpb.QueryViewOfShard{view}}
+	catalog := newPrefetchedQueryViewCatalog(ctx, underlying)
+
+	views, err := catalog.ListQueryViews(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []*viewpb.QueryViewOfShard{view}, views)
+	require.Equal(t, 1, underlying.listCount(), "the first listing is the early one")
+	_, err = catalog.ListQueryViews(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 2, underlying.listCount(), "later listings read the store")
+}
+
+func TestPrefetchedQueryViewCatalogDiscardsListingAfterWrite(t *testing.T) {
+	ctx := context.Background()
+	old := testPersistedQueryView(100, qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"})
+	underlying := &countingQueryViewCatalog{views: []*viewpb.QueryViewOfShard{old}}
+	catalog := newPrefetchedQueryViewCatalog(ctx, underlying)
+	<-catalog.prefetch.Inner()
+
+	written := testPersistedQueryView(101, qviews.ShardID{ReplicaID: 2, VChannel: "by-dev-rootcoord-dml_0_101v0"})
+	require.NoError(t, catalog.SaveQueryViews(ctx, []*viewpb.QueryViewOfShard{written}))
+	views, err := catalog.ListQueryViews(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []*viewpb.QueryViewOfShard{old, written}, views, "a listing older than a write is not served")
+	require.Equal(t, 2, underlying.listCount())
+}
+
+func TestPrefetchedQueryViewCatalogRereadsAfterFailedListing(t *testing.T) {
+	ctx := context.Background()
+	view := testPersistedQueryView(100, qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"})
+	underlying := &countingQueryViewCatalog{views: []*viewpb.QueryViewOfShard{view}, fail: merr.WrapErrServiceUnavailableMsg("etcd unavailable")}
+	catalog := newPrefetchedQueryViewCatalog(ctx, underlying)
+
+	views, err := catalog.ListQueryViews(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []*viewpb.QueryViewOfShard{view}, views)
+	require.Equal(t, 2, underlying.listCount())
+
+	// While the store keeps failing, the error is the one of the new listing.
+	broken := &countingQueryViewCatalog{fail: merr.WrapErrServiceUnavailableMsg("first attempt")}
+	failing := newPrefetchedQueryViewCatalog(ctx, broken)
+	<-failing.prefetch.Inner()
+	broken.mu.Lock()
+	broken.fail = merr.WrapErrServiceUnavailableMsg("second attempt")
+	broken.mu.Unlock()
+	_, err = failing.ListQueryViews(ctx)
+	require.ErrorContains(t, err, "second attempt")
+}
+
+// The registry recovered from the early listing equals the one recovered from
+// a listing at registry recovery.
+func TestPrefetchedQueryViewsRecoverSameRegistry(t *testing.T) {
+	ctx := context.Background()
+	client, _ := kvfactory.GetEtcdAndPath()
+	states := []viewpb.QueryViewState{viewpb.QueryViewState_QueryViewStateUp, viewpb.QueryViewState_QueryViewStatePreparing, viewpb.QueryViewState_QueryViewStateDown}
+	views := make([]*viewpb.QueryViewOfShard, 0, 96)
+	for i := int64(0); i < 96; i++ {
+		collection := 100 + i%32
+		view := testPersistedQueryView(collection, qviews.ShardID{ReplicaID: 1000 + collection, VChannel: fmt.Sprintf("by-dev-rootcoord-dml_%d_%dv0", i%4, collection)})
+		view.Meta.State = states[i/32]
+		view.Meta.Version.QueryVersion = 1 + i/32
+		view.QueryNode = []*viewpb.QueryViewOfQueryNode{{NodeId: 1 + i%3, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 10, SegmentIds: []int64{i}}}}}
+		views = append(views, view)
+	}
+	provider := newRuntimeDataViewProvider(t)
+	recover := func(prefetch bool) *coordview.ShardViewRegistry {
+		// Recovery may persist, so each registry recovers from its own copy.
+		catalog := queryview.NewQueryViewCatalog(etcdkv.NewEtcdKV(client, "prefetched-query-views-"+uuid.New().String()), "coord")
+		require.NoError(t, catalog.SaveQueryViews(ctx, views))
+		if prefetch {
+			catalog = newPrefetchedQueryViewCatalog(ctx, catalog)
+		}
+		reliableSyncer := syncer.NewReliableSyncer(&fakeRuntimeViewSyncClient{})
+		registry, err := coordview.RecoverShardViewRegistryWithDataViews(ctx, catalog, reliableSyncer, provider)
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			registry.Close()
+			_ = reliableSyncer.Close()
+		})
+		return registry
+	}
+	direct, prefetched := recover(false), recover(true)
+	ids := direct.ShardIDs()
+	require.Len(t, ids, 32)
+	require.ElementsMatch(t, ids, prefetched.ShardIDs())
+	stats := direct.Snapshot().StatsMap()
+	for _, id := range ids {
+		require.NotNil(t, stats[id].UpVersion, "shard %v recovered its Up view", id)
+		require.NotEmpty(t, stats[id].Segments)
+	}
+	require.Equal(t, stats, prefetched.Snapshot().StatsMap())
 }
