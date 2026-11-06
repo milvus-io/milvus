@@ -7,7 +7,7 @@ PyYAML==6.0.2
 numpy==2.2.6
 allure-pytest>=2.8.18
 Faker==19.2.0
-pymilvus
+pymilvus==3.0.3rc13
 scikit-learn>=1.5.2
 pytest-xdist==2.5.0
 # Required by pytest-xdist 2.5.0 for parallel execution.
