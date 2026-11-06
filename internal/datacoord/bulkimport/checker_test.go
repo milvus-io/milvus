@@ -39,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -77,7 +76,6 @@ func TestImportCheckerCompaction(t *testing.T) {
 	alloc := allocator.NewMockAllocator(t)
 
 	broker := broker2.NewMockBroker(t)
-	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{}, nil)
 
 	dm := &index.IndexTestMetas{}
 	mt, err := meta.NewMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker, index.LoadIndexTestMetas(catalog, dm))
@@ -89,7 +87,7 @@ func TestImportCheckerCompaction(t *testing.T) {
 	cim := compaction.NewMockCompactionInspector(t)
 	handler := meta.NewNMockHandler(t)
 
-	checker := NewImportChecker(context.TODO(), mt, dm.IndexMeta, broker, alloc, importMeta, cim, handler, nil, nil, ImportCheckerHooks{
+	checker := NewImportChecker(context.TODO(), mt, dm.IndexMeta, alloc, importMeta, cim, handler, nil, nil, ImportCheckerHooks{
 		GetReplicationRole: func(context.Context) (replicateutil.Role, bool, error) {
 			return replicateutil.RolePrimary, false, nil
 		},

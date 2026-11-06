@@ -25,7 +25,6 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -42,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
@@ -298,12 +296,8 @@ func TestUnreadableManifestAbortsMetaBoot(t *testing.T) {
 	store.FailReadsFrom()
 
 	b := broker.NewMockBroker(t)
-	b.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{
-		Status:        merr.Success(),
-		DbCollections: []*rootcoordpb.DBCollections{{DbName: "default", CollectionIDs: []int64{meta.RestartCollID}}},
-	}, nil).Maybe()
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-restart"))
-	_, err := meta.NewMeta(context.TODO(), catalog, cm, metacache.NewMetaStore(catalog), b, LoadIndexTestMetas(catalog, &IndexTestMetas{}))
+	_, err := meta.NewMeta(context.TODO(), catalog, cm, meta.NewMetaStoreWithCollections(catalog, meta.RestartCollID), b, LoadIndexTestMetas(catalog, &IndexTestMetas{}))
 	require.Error(t, err, "startup must fail rather than come up with an incomplete indexMeta")
 }
 

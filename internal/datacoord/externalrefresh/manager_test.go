@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -1536,6 +1537,27 @@ func TestExternalCollectionRefreshManager_SubmitRefreshJobWithID(t *testing.T) {
 		_, err := manager.SubmitRefreshJobWithID(ctx, 1, 999, "test_collection", "", "")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "not found")
+	})
+
+	t.Run("collection_dropping", func(t *testing.T) {
+		refreshMeta := createTestRefreshMeta(t)
+		ms := metacache.NewMetaStore(nil)
+		ms.PutCollection(&meta.CollectionInfo{
+			ID:    100,
+			State: etcdpb.CollectionState_CollectionDropping,
+			Schema: &schemapb.CollectionSchema{
+				Name:           "test_collection",
+				ExternalSource: "s3://bucket/path",
+				ExternalSpec:   `{"format":"parquet"}`,
+			},
+		})
+		mt := &meta.Meta{MetaStore: ms}
+
+		manager := NewExternalCollectionRefreshManager(ctx, mt, nil, newStubScheduler(), &stubAllocator{}, refreshMeta, nil, testCollectionGetter(mt), nil, nil, nil)
+
+		_, err := manager.SubmitRefreshJobWithID(ctx, 1, 100, "test_collection", "", "")
+		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
+		assert.Nil(t, refreshMeta.GetJob(1))
 	})
 
 	t.Run("not_external_collection", func(t *testing.T) {
