@@ -892,6 +892,13 @@ func TestInsertTask_Namespace(t *testing.T) {
 		assert.ErrorContains(t, err, "namespace")
 		assert.Empty(t, it.insertMsg.FieldsData)
 
+		gate := &paramtable.Get().StreamingCfg.EnableUpsertMessage
+		previous := gate.SwapTempValue("false")
+		defer gate.SwapTempValue(previous)
+		require.NoError(t, it.PreExecute(context.Background()))
+		require.NotEmpty(t, it.insertMsg.FieldsData)
+		gate.SwapTempValue(previous)
+
 		// namespace data is not set
 		it = InsertTask{
 			ctx: context.Background(),

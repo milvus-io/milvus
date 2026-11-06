@@ -70,8 +70,8 @@ func upsertForTest(vc string) message.MutableMessage {
 	return message.NewUpsertMessageBuilderV2().WithVChannel(vc).WithHeader(&message.UpsertMessageHeader{CollectionId: 1, SchemaVersion: &version, Partitions: []*message.PartitionSegmentAssignment{{PartitionId: 2, Rows: 1}}, DeleteRows: 1}).WithBody(upsertfixture.Body(&msgpb.InsertRequest{Version: msgpb.InsertDataVersion_ColumnBased, CollectionID: 1, PartitionID: 2, NumRows: 1, RowIDs: []int64{7}, FieldsData: []*schemapb.FieldData{{FieldId: 100, Type: schemapb.DataType_Int64, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{7}}}}}}}}, &msgpb.DeleteRequest{CollectionID: 1, PartitionID: -1, NumRows: 1, PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7}}}}})).MustBuildMutable().WithTimeTick(10)
 }
 
-func TestUpsertRejectsInvalidScopeBeforeDispatch(t *testing.T) {
-	for _, vc := range []string{"", "p_vcchan", "p_01v0", "p_2v0"} {
+func TestUpsertRejectsInvalidBusinessScope(t *testing.T) {
+	for _, vc := range []string{"", "p_01v0", "p_2v0"} {
 		t.Run(vc, func(t *testing.T) {
 			i := &shardInterceptor{shardManager: mock_shards.NewMockShardManager(t)}
 			i.initOpTable()
@@ -183,4 +183,53 @@ func TestUpsertRejectsNamespaceCollectionBeforeAssignment(t *testing.T) {
 		})
 		require.ErrorContains(t, err, "namespace")
 	}
+}
+
+func TestControlChannelUpsertSkipsShardEffects(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(map[bool]string{false: "success", true: "failure"}[fail], func(t *testing.T) {
+			interceptor := &shardInterceptor{shardManager: mock_shards.NewMockShardManager(t)}
+			interceptor.initOpTable()
+			msg := upsertForTest("p_vcchan")
+			expectedID := walimplstest.NewTestMessageID(12)
+			var expectedError error
+			if fail {
+				expectedError = context.Canceled
+			}
+			ctx := context.Background()
+			calls := 0
+			id, err := interceptor.DoAppend(ctx, msg, func(actualCtx context.Context, actual message.MutableMessage) (message.MessageID, error) {
+				calls++
+				require.Equal(t, ctx, actualCtx)
+				require.Same(t, msg, actual)
+				return expectedID, expectedError
+			})
+			require.Equal(t, 1, calls)
+			require.Equal(t, expectedID, id)
+			require.ErrorIs(t, err, expectedError)
+		})
+	}
+}
+
+func TestControlChannelPChannelLevelMessageRunsShardHandler(t *testing.T) {
+	manager := mock_shards.NewMockShardManager(t)
+	manager.EXPECT().FlushAllAndFenceSegmentAllocUntil(uint64(10)).Return([]int64{2}, nil).Once()
+	interceptor := &shardInterceptor{shardManager: manager}
+	interceptor.initOpTable()
+	broadcast := message.NewFlushAllMessageBuilderV2().WithHeader(&message.FlushAllMessageHeader{}).WithBody(&message.FlushAllMessageBody{}).WithClusterLevelBroadcast(message.ClusterChannels{Channels: []string{"p"}, ControlChannel: "p_vcchan"}).MustBuildBroadcast()
+	broadcast.WithBroadcastID(1)
+	messages := broadcast.SplitIntoMutableMessage()
+	require.Len(t, messages, 1)
+	msg := messages[0].WithTimeTick(10)
+	require.Equal(t, "p_vcchan", msg.VChannel())
+	require.True(t, msg.IsPChannelLevel())
+	expectedID := walimplstest.NewTestMessageID(12)
+	calls := 0
+	id, err := interceptor.DoAppend(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		calls++
+		return expectedID, nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, expectedID, id)
+	require.Equal(t, 1, calls)
 }

@@ -183,9 +183,7 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 		if !paramtable.Get().StreamingCfg.EnableUpsertMessage.GetAsBool() {
 			return nil, status.NewUnrecoverableError("native Upsert WAL append is disabled. Upgrade all readers and CDC targets before enabling streaming.wal.enableUpsertMessage")
 		}
-	}
-	// Validate before interceptors can return a duplicate or ignored result.
-	if msg.MessageType() == message.MessageTypeUpsert {
+		// Validate before interceptors can return a duplicate or ignored result.
 		if err := message.ValidateUpsertEnvelope(msg); err != nil {
 			return nil, status.NewUnrecoverableError("invalid Upsert envelope: %v", err)
 		}
