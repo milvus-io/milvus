@@ -114,6 +114,7 @@ func (m *Meta) ReconcileSegmentChangeDataViews(ctx context.Context, manager data
 func (m *Meta) reconcileAliveSegmentChangeGroup(ctx context.Context, g *model.SegmentChangeGroup, alloc allocator.Allocator) error {
 	visible, incomplete, allEmpty := false, false, true
 	commitTS := g.CommitTS
+	var registrationOps []UpdateOperator
 	for _, id := range g.NewSegmentIDs {
 		seg := m.GetSegment(ctx, id)
 		if seg == nil {
@@ -123,6 +124,20 @@ func (m *Meta) reconcileAliveSegmentChangeGroup(ctx context.Context, g *model.Se
 		}
 		if seg.GetCollectionID() != g.CollectionID || seg.GetLevel() == datapb.SegmentLevel_L0 {
 			return merr.WrapErrDataIntegrityMsg("segment change group %d has invalid member %d during recovery", g.GroupID, id)
+		}
+		// A chunked registration persists the STAGED group first. Import and
+		// copy members not yet updated remain private through IsImporting.
+		// Complete those flips before exposing any recovered metadata.
+		if seg.GetIsImporting() && g.State == model.SegmentChangeStateStaged &&
+			(g.Source == model.SegmentChangeSourceImportJob || g.Source == model.SegmentChangeSourceCDCReplicated || g.Source == model.SegmentChangeSourceCopySegment) {
+			registrationOps = append(registrationOps, SetSegmentIsInvisible(id, true), UpdateIsImporting(id, false))
+			if !isEmptySegmentChangeOutput(seg) {
+				allEmpty = false
+			}
+			if seg.GetState() == commonpb.SegmentState_Dropped && !isEmptySegmentChangeOutput(seg) {
+				incomplete = true
+			}
+			continue
 		}
 		if isEmptySegmentChangeOutput(seg) {
 			continue
@@ -146,6 +161,14 @@ func (m *Meta) reconcileAliveSegmentChangeGroup(ctx context.Context, g *model.Se
 				return merr.WrapErrDataIntegrityMsg("segment change group %d has inconsistent publish timestamps during recovery", g.GroupID)
 			}
 			commitTS = seg.GetCommitTimestamp()
+		}
+	}
+	if len(registrationOps) > 0 {
+		if visible {
+			return merr.WrapErrDataIntegrityMsg("segment change group %d has both visible and incompletely registered members", g.GroupID)
+		}
+		if err := m.UpdateSegmentsInfo(ctx, registrationOps...); err != nil {
+			return err
 		}
 	}
 	if visible && g.AwaitCommitFence && g.CommitTS == 0 {
@@ -182,10 +205,28 @@ func (m *Meta) reconcileAliveSegmentChangeGroup(ctx context.Context, g *model.Se
 				return err
 			}
 		}
+		// An empty READY compaction can have no evidence that publication has
+		// started. Preserve snapshot protection in that case; the inspector
+		// will retry once workers start. A retired parent proves the write began
+		// and must instead be completed before projecting recovered metadata.
+		if allEmpty && !visible && m.IsCollectionCompactionBlocked(g.CollectionID) &&
+			(g.Source == model.SegmentChangeSourceMixCompaction || g.Source == model.SegmentChangeSourceSortCompaction ||
+				g.Source == model.SegmentChangeSourceClustering || g.Source == model.SegmentChangeSourceBumpSchema) {
+			started := false
+			for _, id := range g.SupersededSegmentIDs {
+				if parent := m.GetSegment(ctx, id); parent == nil || parent.GetState() == commonpb.SegmentState_Dropped {
+					started = true
+					break
+				}
+			}
+			if !started {
+				return nil
+			}
+		}
 		// No readiness re-evaluation here: this is completion of a persisted
 		// READY intent, not a new publication. Incomplete/corrupt batches fail
 		// startup above; they must never be reclaimed as though unpublished.
-		return m.commitSegmentChangeGroup(ctx, g, commitTS, nil)
+		return m.commitSegmentChangeGroupInternal(ctx, g, commitTS, nil, true)
 	}
 	if incomplete {
 		if groupHasCommittedImportFence(g) {

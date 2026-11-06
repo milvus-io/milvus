@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/compaction/policy"
 	ctask "github.com/milvus-io/milvus/internal/datacoord/compaction/task"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
 	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -71,6 +72,19 @@ type segmentChangeCrashKV struct {
 	loseResponse bool
 }
 
+type segmentChangeRegistrationCrashKV struct {
+	*segmentChangeCrashKV
+	cancel context.CancelFunc
+}
+
+func (s *segmentChangeRegistrationCrashKV) MultiSave(ctx context.Context, values map[string]string) error {
+	if s.chunk+1 == s.failChunk {
+		s.cancel()
+		return context.Canceled
+	}
+	return s.segmentChangeCrashKV.MultiSave(ctx, values)
+}
+
 func (s *segmentChangeCrashKV) MaxTxnOps() int { return 2 }
 
 func (s *segmentChangeCrashKV) MultiSave(ctx context.Context, values map[string]string) error {
@@ -95,6 +109,112 @@ func (s *segmentChangeCrashKV) MultiSaveAndRemove(ctx context.Context, values ma
 }
 
 func liveSegmentChangeCollection(context.Context, int64) (bool, error) { return true, nil }
+
+func TestSegmentChangeRecovery_PartialImportRegistration(t *testing.T) {
+	for _, source := range []model.SegmentChangeSource{model.SegmentChangeSourceImportJob, model.SegmentChangeSourceCopySegment, model.SegmentChangeSourceCDCReplicated} {
+		t.Run(source.String(), func(t *testing.T) {
+			ctx := t.Context()
+			m, err := meta.NewMemoryMeta(t)
+			require.NoError(t, err)
+			for _, id := range []int64{1001, 1002} {
+				require.NoError(t, m.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
+					ID: id, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+					State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
+					IsInvisible: id == 1001, IsImporting: id == 1002, NumOfRows: 42,
+					Binlogs: []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: id}}}},
+				})))
+			}
+			g := meta.NewTestGroup()
+			g.Source, g.NewSegmentIDs, g.SupersededSegmentIDs = source, []int64{1001, 1002}, nil
+			require.NoError(t, m.Catalog.Update(ctx, metastore.SaveSegmentChangeGroup(g)))
+			recovered := reloadSegmentChangeMeta(t, m)
+			require.NoError(t, recovered.ReconcileSegmentChangeGroups(ctx, nil, liveSegmentChangeCollection))
+			for _, id := range g.NewSegmentIDs {
+				seg := recovered.GetSegment(ctx, id)
+				require.True(t, seg.GetIsInvisible())
+				require.False(t, seg.GetIsImporting())
+			}
+			require.NoError(t, recovered.ReconcileSegmentChangeGroups(ctx, nil, liveSegmentChangeCollection))
+		})
+	}
+}
+
+func TestSegmentChangeRecovery_InterruptedRegistrationChunk(t *testing.T) {
+	ctx := t.Context()
+	m, err := meta.NewMemoryMeta(t)
+	require.NoError(t, err)
+	for _, id := range []int64{1001, 1002, 1003} {
+		require.NoError(t, m.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
+			ID: id, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, IsImporting: true, NumOfRows: 42,
+			Binlogs: []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: id}}}},
+		})))
+	}
+	g := meta.NewTestGroup()
+	g.Source, g.NewSegmentIDs, g.SupersededSegmentIDs = model.SegmentChangeSourceImportJob, []int64{1001, 1002, 1003}, nil
+	catalog := m.Catalog.(*kvcatalog.Catalog)
+	registrationCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	store := &segmentChangeRegistrationCrashKV{segmentChangeCrashKV: &segmentChangeCrashKV{MetaKv: catalog.MetaKv, failChunk: 2}, cancel: cancel}
+	catalog.MetaKv = store
+	_, _, err = m.StageAdmittedChange(registrationCtx, g, true)
+	require.Error(t, err)
+	catalog.MetaKv = store.MetaKv
+	recovered := reloadSegmentChangeMeta(t, m)
+	require.NotNil(t, recovered.GetSegmentChangeGroup(ctx, 10, g.GroupID))
+	remaining := 0
+	for _, id := range g.NewSegmentIDs {
+		if recovered.GetSegment(ctx, id).GetIsImporting() {
+			remaining++
+		}
+	}
+	require.Greater(t, remaining, 0, "the injected interruption must leave members unregistered")
+	require.NoError(t, recovered.ReconcileSegmentChangeGroups(ctx, nil, liveSegmentChangeCollection))
+	for _, id := range g.NewSegmentIDs {
+		require.True(t, recovered.GetSegment(ctx, id).GetIsInvisible())
+		require.False(t, recovered.GetSegment(ctx, id).GetIsImporting())
+	}
+}
+
+func TestSegmentChangeRecovery_RejectsVisibleAndImportingMembers(t *testing.T) {
+	ctx := t.Context()
+	m, err := meta.NewMemoryMeta(t)
+	require.NoError(t, err)
+	for _, id := range []int64{1001, 1002} {
+		require.NoError(t, m.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
+			ID: id, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1", State: commonpb.SegmentState_Flushed,
+			Level: datapb.SegmentLevel_L1, IsImporting: id == 1002, CommitTimestamp: 500, NumOfRows: 42,
+			Binlogs: []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: id}}}},
+		})))
+	}
+	g := meta.NewTestGroup()
+	g.Source, g.NewSegmentIDs, g.SupersededSegmentIDs = model.SegmentChangeSourceImportJob, []int64{1001, 1002}, nil
+	require.NoError(t, m.Catalog.Update(ctx, metastore.SaveSegmentChangeGroup(g)))
+	recovered := reloadSegmentChangeMeta(t, m)
+	require.ErrorIs(t, recovered.ReconcileSegmentChangeGroups(ctx, nil, liveSegmentChangeCollection), merr.ErrDataIntegrity)
+	require.False(t, recovered.GetSegment(ctx, 1001).GetIsInvisible())
+	require.True(t, recovered.GetSegment(ctx, 1002).GetIsImporting())
+}
+
+func TestSegmentChangeRecovery_PublishIgnoresStartupSnapshotBlock(t *testing.T) {
+	ctx := t.Context()
+	m, err := meta.NewMemoryMeta(t)
+	require.NoError(t, err)
+	g := seedPublishMeta(t, m, model.SegmentChangeSourceMixCompaction)
+	member := m.GetSegment(ctx, 1001).Clone()
+	member.IsInvisible = false
+	parent := m.GetSegment(ctx, 2001).Clone()
+	parent.State = commonpb.SegmentState_Dropped
+	require.NoError(t, m.Catalog.Update(ctx, metastore.AlterSegment(member.SegmentInfo), metastore.AlterSegment(parent.SegmentInfo)))
+	recovered := reloadSegmentChangeMeta(t, m)
+	protection := snapshot.CreateTestSnapshotMetaLoaded(t)
+	protection.SetSnapshotPending(10)
+	recovered.CompactionProtection = protection
+	alloc := allocator.NewMockAllocator(t)
+	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(500), nil).Once()
+	require.NoError(t, recovered.ReconcileSegmentChangeGroups(ctx, alloc, liveSegmentChangeCollection))
+	require.Equal(t, model.SegmentChangeStateCommitted, recovered.GetSegmentChangeGroup(ctx, 10, g.GroupID).State)
+}
 
 func reloadSegmentChangeMeta(t *testing.T, old *meta.Meta) *meta.Meta {
 	t.Helper()

@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -58,7 +59,18 @@ func (s *Server) prepareImportPublication(ctx context.Context, job bulkimport.Im
 		for _, id := range ids {
 			seg := s.meta.GetSegment(ctx, id)
 			if seg != nil && meta.IsSegmentHealthy(seg) && !meta.IsEmptySegmentChangeOutput(seg) && seg.GetSchemaVersion() < coll.Schema.GetVersion() {
-				return merr.WrapErrServiceUnavailableMsg("import segment %d schema %d is behind collection schema %d; replan the import before committing", id, seg.GetSchemaVersion(), coll.Schema.GetVersion())
+				err := merr.WrapErrImportSysFailedMsg("import segment %d schema %d is behind collection schema %d; retry the import", id, seg.GetSchemaVersion(), coll.Schema.GetVersion())
+				// The state and broadcast marker are checked under importMeta's
+				// lock. Once a commit may be durable the job must never be failed.
+				if updateErr := s.importMeta.UpdateJob(ctx, job.GetJobID(), func(current bulkimport.ImportJob) {
+					if current.GetState() == internalpb.ImportJobState_Uncommitted && !current.GetCommitBroadcastStarted() {
+						bulkimport.UpdateJobState(internalpb.ImportJobState_Failed)(current)
+						bulkimport.UpdateJobReason(err.Error())(current)
+					}
+				}); updateErr != nil {
+					return merr.Wrap(updateErr, "fail import with stale schema")
+				}
+				return err
 			}
 		}
 		inspector := newSegmentChangeInspector(ctx, s.meta, nil)

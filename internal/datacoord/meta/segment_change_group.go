@@ -279,6 +279,10 @@ func (m *Meta) PublishGroup(ctx context.Context, g *model.SegmentChangeGroup, al
 // startup barrier, before DataView reconstruction. An already-started publish
 // must finish even when readiness has regressed: its parents may be retired.
 func (m *Meta) commitSegmentChangeGroup(ctx context.Context, g *model.SegmentChangeGroup, commitTs uint64, view *viewpb.DataViewOfCollection, extraOperators ...UpdateOperator) error {
+	return m.commitSegmentChangeGroupInternal(ctx, g, commitTs, view, false, extraOperators...)
+}
+
+func (m *Meta) commitSegmentChangeGroupInternal(ctx context.Context, g *model.SegmentChangeGroup, commitTs uint64, view *viewpb.DataViewOfCollection, recovery bool, extraOperators ...UpdateOperator) error {
 	operators := make([]UpdateOperator, 0, len(g.NewSegmentIDs)*2+len(g.SupersededSegmentIDs)+len(extraOperators))
 	for _, id := range g.NewSegmentIDs {
 		if isEmptySegmentChangeOutput(m.GetSegment(ctx, id)) {
@@ -316,7 +320,9 @@ func (m *Meta) commitSegmentChangeGroup(ctx context.Context, g *model.SegmentCha
 	committed.CommitTime = time.Now().Unix()
 	groupActions := []metastore.UpdateAction{metastore.SaveSegmentChangeGroup(committed)}
 
-	return m.UpdateSegmentsInfoAndChangeGroupsAndDataView(ctx, view, groupActions, operators...)
+	m.SegMu.Lock()
+	defer m.SegMu.Unlock()
+	return m.updateSegmentChangesLocked(ctx, view, groupActions, nil, recovery, operators...)
 }
 
 // loadableSegmentOf converts a segment into the DataView loadable projection,

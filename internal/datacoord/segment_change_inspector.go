@@ -311,6 +311,13 @@ func (i *segmentChangeInspector) stagingTimedOut(g *model.SegmentChangeGroup) bo
 	if g.AwaitCommitFence {
 		return false
 	}
+	// These producers already own their job lifecycle. Slow index builds do
+	// not make their outputs invalid and must not introduce a new one-hour
+	// failure where the producer previously waited for completion.
+	switch g.Source {
+	case model.SegmentChangeSourceClustering, model.SegmentChangeSourceCopySegment, model.SegmentChangeSourceExternalRefresh:
+		return false
+	}
 	if g.CreateTS <= 0 {
 		return false
 	}

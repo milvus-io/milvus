@@ -1257,12 +1257,19 @@ func SyncCopySegmentTask(ctx context.Context, task CopySegmentTask, resp *datapb
 			}
 		}
 		for i, result := range results {
+			segment := mt.GetSegment(ctx, result.GetSegmentId())
+			if segment == nil {
+				return failCopySegmentSync(ctx, task, copyMeta, merr.WrapErrSegmentNotFound(result.GetSegmentId()))
+			}
+			// L0 segments carry deletes and are not valid change-group members.
+			// Retain their existing copy publication path.
+			stageMember := staging && segment.GetLevel() != datapb.SegmentLevel_L0
 			// Update binlog info and segment state to Flushed
 			// For StorageV3+ segments, also update manifest_path
 			op1 := meta.UpdateBinlogsOperator(result.GetSegmentId(), result.GetBinlogs(),
 				result.GetStatslogs(), result.GetDeltalogs(), result.GetBm25Logs())
 			op2 := meta.UpdateStatusOperator(result.GetSegmentId(), commonpb.SegmentState_Flushed)
-			op3 := meta.UpdateIsImporting(result.GetSegmentId(), staging)
+			op3 := meta.UpdateIsImporting(result.GetSegmentId(), stageMember)
 			operators := []meta.UpdateOperator{op1, op2, op3}
 			// A copy target is a freshly created, exclusively owned segment and the
 			// worker returns a complete manifest pointer - including the copied
@@ -1311,7 +1318,7 @@ func SyncCopySegmentTask(ctx context.Context, task CopySegmentTask, resp *datapb
 			// The SegmentMeta mutation is committed; schedule an asynchronous
 			// DataView snapshot reconciliation instead of a synchronous event
 			// publish (materialized-view model).
-			if !staging && mt.DataViewManager != nil {
+			if !stageMember && mt.DataViewManager != nil {
 				mt.RecomputeDataView(context.TODO(), task.GetCollectionId())
 			}
 			// The segment is Flushed and carries every index the snapshot had.
@@ -1328,14 +1335,18 @@ func SyncCopySegmentTask(ctx context.Context, task CopySegmentTask, resp *datapb
 		if staging {
 			ids := make([]int64, 0, len(results))
 			for _, result := range results {
-				ids = append(ids, result.GetSegmentId())
+				if segment := mt.GetSegment(ctx, result.GetSegmentId()); segment != nil && segment.GetLevel() != datapb.SegmentLevel_L0 {
+					ids = append(ids, result.GetSegmentId())
+				}
 			}
-			_, _, err := mt.StageAdmittedChange(ctx, &model.SegmentChangeGroup{
-				GroupID: task.GetTaskId(), SourceJobID: task.GetTaskId(),
-				Source: model.SegmentChangeSourceCopySegment, CollectionID: task.GetCollectionId(), NewSegmentIDs: ids, PreserveMemberTimestamps: true,
-			}, true)
-			if err != nil {
-				return err
+			if len(ids) > 0 {
+				_, _, err := mt.StageAdmittedChange(ctx, &model.SegmentChangeGroup{
+					GroupID: task.GetTaskId(), SourceJobID: task.GetTaskId(),
+					Source: model.SegmentChangeSourceCopySegment, CollectionID: task.GetCollectionId(), NewSegmentIDs: ids, PreserveMemberTimestamps: true,
+				}, true)
+				if err != nil {
+					return err
+				}
 			}
 		}
 
