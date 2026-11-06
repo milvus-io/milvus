@@ -38,8 +38,11 @@ func NewSegmentChangeTestInspector(t *testing.T, m *meta.Meta, alloc allocator.A
 	return NewCompactionInspector(m, tasks, nil, nil, nil, nil, nil, alloc, nil, nil, nil, index.NewTestVersionManager())
 }
 
-func (c *Inspector) CreateCompactTaskForTest(t *datapb.CompactionTask) (ctask.CompactionTask, error) {
-	return c.createCompactTask(t)
+func (c *Inspector) AdmitCompactionTaskForTest(t *datapb.CompactionTask) (ctask.CompactionTask, error) {
+	return c.admitCompactionTask(t)
+}
+func (c *Inspector) RecoverCompactionTaskForTest(t *datapb.CompactionTask) (ctask.CompactionTask, error) {
+	return c.recoverCompactionTask(t)
 }
 func (c *Inspector) EnqueueForTest(t ctask.CompactionTask) error { return c.queueTasks.Enqueue(t) }
 func (c *Inspector) ScheduleForTest() []ctask.CompactionTask     { return c.schedule() }

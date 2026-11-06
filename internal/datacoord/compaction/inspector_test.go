@@ -1435,7 +1435,7 @@ func TestGetCompactionTasksNum(t *testing.T) {
 	})
 }
 
-func (s *CompactionPlanHandlerSuite) TestCreateCompactTask_BumpSchemaVersionCompaction() {
+func (s *CompactionPlanHandlerSuite) TestAdmitCompactionTask_BumpSchemaVersionCompaction() {
 	s.SetupTest()
 	s.mockMeta.EXPECT().CheckAndSetSegmentsCompacting(mock.Anything, mock.Anything).Return(true, true).Maybe()
 	s.mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Once()
@@ -1451,13 +1451,13 @@ func (s *CompactionPlanHandlerSuite) TestCreateCompactTask_BumpSchemaVersionComp
 		Type:      datapb.CompactionType_BumpSchemaVersionCompaction,
 	}
 
-	compactTask, err := handler.createCompactTask(t)
+	compactTask, err := handler.admitCompactionTask(t)
 	s.NoError(err)
 	s.NotNil(compactTask)
 	s.Equal(datapb.CompactionType_BumpSchemaVersionCompaction, compactTask.GetTaskProto().GetType())
 }
 
-func (s *CompactionPlanHandlerSuite) TestCreateCompactTaskRejectsSnapshotProtectedInputs() {
+func (s *CompactionPlanHandlerSuite) TestAdmitCompactionTaskRejectsSnapshotProtectedInputs() {
 	tests := []struct {
 		name  string
 		block func(*snapshot.SnapshotMeta)
@@ -1494,7 +1494,7 @@ func (s *CompactionPlanHandlerSuite) TestCreateCompactTaskRejectsSnapshotProtect
 			}})
 			inspector := NewCompactionInspector(mt, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, index.NewTestVersionManager())
 
-			compactTask, err := inspector.createCompactTask(&datapb.CompactionTask{
+			compactTask, err := inspector.admitCompactionTask(&datapb.CompactionTask{
 				PlanID:        10,
 				CollectionID:  100,
 				Type:          datapb.CompactionType_MixCompaction,
@@ -1508,7 +1508,7 @@ func (s *CompactionPlanHandlerSuite) TestCreateCompactTaskRejectsSnapshotProtect
 	}
 }
 
-func (s *CompactionPlanHandlerSuite) TestCreateCompactTask_UnknownType() {
+func (s *CompactionPlanHandlerSuite) TestAdmitCompactionTask_UnknownType() {
 	s.SetupTest()
 
 	mockScheduler := task.NewMockGlobalScheduler(s.T())
@@ -1521,7 +1521,7 @@ func (s *CompactionPlanHandlerSuite) TestCreateCompactTask_UnknownType() {
 		Type:      datapb.CompactionType(9999),
 	}
 
-	compactTask, err := handler.createCompactTask(t)
+	compactTask, err := handler.admitCompactionTask(t)
 	s.Nil(compactTask)
 	s.Error(err)
 	s.True(errors.Is(err, merr.ErrIllegalCompactionPlan))
