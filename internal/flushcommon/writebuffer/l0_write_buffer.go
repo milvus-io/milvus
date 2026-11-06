@@ -62,18 +62,6 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 	wb.mut.Lock()
 
 	for _, inData := range insertData {
-		if wb.allowGrowingSourceFlush {
-			targetOffset := wb.growingSourceTargetOffset(inData.segmentID, inData.rowNum)
-			decision := wb.decideGrowingFlushSource(inData.segmentID, targetOffset, endPos)
-			if decision.sourceType == metacache.FlushSourceGrowing {
-				if err := wb.recordGrowingSourceProgress(inData, startPos, endPos, schemaVersion, targetOffset); err != nil {
-					wb.mut.Unlock()
-					return err
-				}
-				continue
-			}
-		}
-
 		err := wb.bufferInsert(inData, startPos, endPos, schemaVersion)
 		if err != nil {
 			wb.mut.Unlock()
@@ -87,7 +75,6 @@ func (wb *l0WriteBuffer) BufferData(insertData []*InsertData, deleteMsgs []*msgs
 	wb.dispatchDeleteMsgsWithoutFilter(deleteMsgs, startPos, endPos)
 	// update buffer last checkpoint
 	wb.checkpoint = endPos
-	wb.updateProcessedTsLocked(endPos.GetTimestamp())
 
 	segmentsSync := wb.triggerSync()
 	for _, segment := range segmentsSync {

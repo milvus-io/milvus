@@ -50,7 +50,7 @@ func TestRetainedMVCCPipelineWait(t *testing.T) {
 				manager := segments.NewManager()
 				require.NoError(t, manager.Collection.PutOrRef(collectionID, schema, &segcorepb.CollectionIndexMeta{}, &querypb.LoadMetaInfo{LoadType: querypb.LoadType_LoadCollection, PartitionIDs: []int64{1}}))
 				defer manager.Collection.Unref(collectionID, 1)
-				sd, err := delegator.NewShardDelegator(context.Background(), collectionID, 1, channel, 1, nil, manager, nil, ts(99), nil, nil, delegator.NewChannelQueryView(nil, nil, nil, -1), nil)
+				sd, err := delegator.NewShardDelegator(context.Background(), collectionID, 1, channel, 1, nil, manager, nil, ts(99), nil, nil, delegator.NewChannelQueryView(nil, nil, nil, -1))
 				require.NoError(t, err)
 				sd.Start()
 				defer sd.Close()

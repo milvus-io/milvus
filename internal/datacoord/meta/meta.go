@@ -1581,7 +1581,7 @@ func UpdateCheckPointOperator(segmentID int64, checkpoints []*datapb.CheckPoint,
 		// V3 segments carry the authoritative cumulative row count on the
 		// checkpoint (FlushedRows + batchRows maintained on the writer). Their
 		// in-memory binlog arrays are a pass-through cache that may be empty
-		// (V3 recovery) or delta-only (growing source flush), so the
+		// (V3 recovery) or contain only an incremental update, so the
 		// array-derived count must never override the checkpoint.
 		if segment.GetStorageVersion() == storage.StorageV3 {
 			if cpNumRows > 0 {

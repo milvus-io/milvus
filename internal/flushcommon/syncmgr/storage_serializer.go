@@ -197,40 +197,6 @@ func (s *storageV1Serializer) serializeMergedPkStatsList(
 	return s.inCodec.SerializePkStatsList(stats, numRows)
 }
 
-// serializeMergedPkStatsWith is like serializeMergedPkStats but includes an
-// explicitly provided current-batch PrimaryKeyStats in the merged result,
-// without requiring the metaCache to have been updated via RollStats. Used by
-// the growing-source flush path so RollStats can be deferred until after a
-// successful Write while still emitting a correct merged stats blob on flush.
-func (s *storageV1Serializer) serializeMergedPkStatsWith(
-	pack *SyncPack, extra *storage.PrimaryKeyStats,
-) (*storage.Blob, error) {
-	segment, ok := s.metacache.GetSegmentByID(pack.segmentID)
-	if !ok {
-		return nil, merr.WrapErrSegmentNotFound(pack.segmentID)
-	}
-
-	stats := lo.Map(segment.GetHistory(), func(pks *storage.PkStatistics, _ int) *storage.PrimaryKeyStats {
-		return &storage.PrimaryKeyStats{
-			FieldID: s.pkField.GetFieldID(),
-			MaxPk:   pks.MaxPK,
-			MinPk:   pks.MinPK,
-			BFType:  pks.PkFilter.Type(),
-			BF:      pks.PkFilter,
-			PkType:  int64(s.pkField.GetDataType()),
-		}
-	})
-	if extra != nil {
-		stats = append(stats, extra)
-	}
-	if len(stats) == 0 {
-		return nil, nil
-	}
-	// segment.NumOfRows() already includes flushed + syncing + buffered rows,
-	// independent of whether RollStats has been applied for this batch.
-	return s.inCodec.SerializePkStatsList(stats, segment.NumOfRows())
-}
-
 // serializeMergedBM25StatsFrom serializes an already-assembled combined
 // SegmentBM25Stats into per-field merged blobs. Like serializeMergedPkStatsList
 // it reads nothing from the metaCache; the V3 flush path builds combined from

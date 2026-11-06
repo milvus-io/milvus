@@ -40,9 +40,7 @@ import (
 func (s *L0WriteBufferSuite) TestTextCheckpointSyncLifecycle() {
 	params := paramtable.Get()
 	s.Require().NoError(params.Save(params.CommonCfg.UseLoonFFI.Key, "true"))
-	s.Require().NoError(params.Save(params.CommonCfg.EnableGrowingSourceFlush.Key, "false"))
 	defer params.Reset(params.CommonCfg.UseLoonFFI.Key)
-	defer params.Reset(params.CommonCfg.EnableGrowingSourceFlush.Key)
 
 	for _, failure := range []string{"none", "storage", "metadata"} {
 		s.Run(failure, func() {
@@ -57,7 +55,6 @@ func (s *L0WriteBufferSuite) TestTextCheckpointSyncLifecycle() {
 				metaWriter:  syncmgr.BrokerMetaWriter(coord, 1, retry.Attempts(1)),
 			})
 			s.Require().NoError(err)
-			s.False(wb.AllowGrowingSourceFlush())
 			buffer := wb.(*l0WriteBuffer)
 
 			failStorage, failMetadata := failure == "storage", failure == "metadata"
@@ -124,7 +121,7 @@ func (s *L0WriteBufferSuite) TestTextCheckpointSyncLifecycle() {
 			s.EqualValues(100, wb.GetCheckpoint().GetTimestamp(), "buffered inserts pin the safe point")
 			futures = buffer.syncSegments(ctx, []int64{segmentID})
 			s.Require().Len(futures, 1)
-			s.False(buffer.hasWriteBufferInsertPayload(segmentID))
+			s.NotContains(buffer.buffers, segmentID)
 			s.Require().NoError(wb.BufferData(nil, nil, position(200), position(500), 100))
 			s.EqualValues(100, wb.GetCheckpoint().GetTimestamp(), "in-flight sync still pins it")
 			release()

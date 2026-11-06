@@ -327,7 +327,7 @@ func (s *SegmentsInfo) DropSegment(segmentID UniqueID) {
 // store — carrying the stale count until the next reload.
 //
 // V3 segments are exempt: their binlog arrays are a pass-through cache that can
-// be empty after recovery or delta-only during a growing-source flush, so an
+// be empty after recovery or contain only an incremental update, so an
 // array-derived count would be wrong.
 func normalizeSegmentRowCount(segProto *datapb.SegmentInfo) {
 	if segProto.GetStorageVersion() == storage.StorageV3 || segProto.GetManifestPath() != "" {

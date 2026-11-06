@@ -439,25 +439,6 @@ func validateArrayFieldSchema(collectionName string, field *schemapb.FieldSchema
 	return nil
 }
 
-// validateNativeListArrayGrowingSourceFlush rejects element-nullable and nested
-// Array fields while growing-source flush is enabled: that flush path does not
-// write their storage formats.
-func validateNativeListArrayGrowingSourceFlush(schema *schemapb.CollectionSchema, fields ...*schemapb.FieldSchema) error {
-	if !typeutil.AllowGrowingSourceFlush(schema,
-		paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool(),
-		paramtable.Get().CommonCfg.EnableGrowingSourceFlush.GetAsBool()) {
-		return nil
-	}
-	for _, field := range fields {
-		if typeutil.IsNativeListArrayField(field) {
-			return merr.WrapErrParameterInvalidMsg(
-				"element-nullable or nested Array field %s is not supported while growing-source flush is enabled (%s)",
-				field.GetName(), paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key)
-		}
-	}
-	return nil
-}
-
 func validateElementNullable(field *schemapb.FieldSchema, inStruct bool) error {
 	if !field.GetElementNullable() {
 		return nil
