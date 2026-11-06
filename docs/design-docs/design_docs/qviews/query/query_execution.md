@@ -651,3 +651,13 @@ search. QN returns filter counts and segment identities through the existing
 SearchResults envelope. The client alone orchestrates the two rounds; workers
 do not call other workers, replan or select another View. See the
 [filter-first client flow](query_client.md#filter-first-ann-search).
+
+## Execution ownership during explicit release
+
+SN ReadRuntime execution handles retain a View resource operation guard in
+addition to their concrete segment and exact read schema. The last handle
+releases this guard after physical/schema pins; View release waits for it
+before reporting OnDropped. Closing the serving lease does not cancel already admitted calls; acquired
+tasks retain their resources through
+actual native future completion and result conversion. QN retains its existing
+View/base operation-reference and closing-incarnation completion contract.

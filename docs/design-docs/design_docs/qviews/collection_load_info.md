@@ -225,3 +225,14 @@ Key source packages: `internal/views/coord/loadmgr/`,
 `internal/views/coord/coordview/`, `internal/metastore/kv/queryview/`, `internal/querycoordv2/ddl_callbacks_drop_load_info.go`,
 `internal/datacoord/ddl/{create_index,alter_index,drop_index}.go`,
 `internal/querynodev2/qvresource/`, and the parent SN resource runtime.
+
+### Serving-lease preemption on explicit release
+
+StopPlanning publishes the absence of collection load intent and triggers the
+Balancer. Its release plan carries QueryViewControl.preempt_serving_lease for
+all residual shards of unloaded collections. This includes
+old Views already waiting in Down. The ordinary balancer RequestRelease entry
+retains its lease semantics for replica retirement. Balancer applies the controlled release through the shard manager, including
+already-Down Views. DDL callbacks only withdraw intent and wait; they never
+modify View state directly. DropCollection shares the DropLoadConfig callback. Final registry removal and LoadConfig deletion remain
+the release completion fence.
