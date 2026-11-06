@@ -52,22 +52,6 @@ func TestUpsertContract(t *testing.T) {
 	require.Error(t, message.ValidateUpsert(h, b, pk))
 }
 
-func TestUpsertEnvelope(t *testing.T) {
-	for _, marker := range []string{"", "_np", "_pcl", "_bh", "_ur"} {
-		h, b, _ := upsertFixture()
-		builder := message.NewUpsertMessageBuilderV2().WithVChannel("p_1v0").WithHeader(h).WithBody(b)
-		if marker != "" {
-			builder.WithProperty(marker, "")
-		}
-		err := message.ValidateUpsertEnvelope(builder.MustBuildMutable())
-		if marker == "" {
-			require.NoError(t, err)
-		} else {
-			require.Error(t, err)
-		}
-	}
-}
-
 func TestUpsertProjectionSkipsColumnsAndSharesDecode(t *testing.T) {
 	h, b, _ := upsertFixture()
 	b.RequestRowMapping = &messagespb.UpsertRequestRowMapping{RowOffsets: []uint32{0, 1, 2}}

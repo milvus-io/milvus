@@ -24,14 +24,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// ValidateUpsertEnvelope checks scope markers for a persisted single-channel write.
-func ValidateUpsertEnvelope(msg BasicMessage) error {
-	if msg == nil || !msg.IsPersisted() || msg.IsPChannelLevel() || msg.Properties().Exist(messageBroadcastHeader) || msg.IsUnreplicable() {
-		return merr.WrapErrServiceInternalMsg("Upsert requires a persisted, replicable single-VChannel envelope")
-	}
-	return nil
-}
-
 // UpsertRowCount returns the number of inserted logical rows.
 func UpsertRowCount(header *UpsertMessageHeader) uint64 {
 	var rows uint64
