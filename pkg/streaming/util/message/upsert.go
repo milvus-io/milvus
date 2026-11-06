@@ -180,9 +180,6 @@ func BuildUpsertResult(ctx context.Context, msg BasicMessage) (*messagespb.Idemp
 		return nil, nil
 	}
 	result := &messagespb.IdempotentInsertResult{Ids: body.GetPrimaryKeys(), RowOffsets: body.GetRequestRowMapping().GetRowOffsets()}
-	if len(result.GetRowOffsets()) != UpsertPrimaryKeyCount(result.GetIds()) {
-		return nil, merr.WrapErrServiceInternalMsg("incomplete Upsert retry mapping")
-	}
 	if err := ValidateIdempotentInsertResult(result); err != nil {
 		return nil, err
 	}

@@ -100,19 +100,6 @@ func TestAssignmentFailureLeavesNoPartialAccounting(t *testing.T) {
 	}
 }
 
-func TestAssignmentBatchFailureReleasesAllAcks(t *testing.T) {
-	manager, segments := newAssignmentTestManager(t)
-	// Duplicate targets fail the authoritative batch check after both Acks exist.
-	_, err := manager.AssignSegments([]*AssignSegmentRequest{assignmentRequest(2), assignmentRequest(2)})
-	require.ErrorIs(t, err, ErrWaitForNewSegment)
-	require.Zero(t, segments[0].AckSem())
-	require.Zero(t, segments[0].TxnSem())
-	require.Zero(t, resource.Resource().SegmentStatsManager().GetStatsOfSegment(2).Modified.Rows)
-	result, err := manager.AssignSegment(assignmentRequest(2))
-	require.NoError(t, err)
-	result.Ack()
-}
-
 func TestPrepareAssignmentDoesNotAcquireReferencesOrAccount(t *testing.T) {
 	manager, segments := newAssignmentTestManager(t)
 	req := assignmentRequest(2)

@@ -487,10 +487,7 @@ func (impl *shardInterceptor) handleUpsert(ctx context.Context, msg message.Muta
 		return nil, status.NewUnrecoverableError("invalid Upsert envelope: %v", err)
 	}
 	header := upsert.Header()
-	_, collectionID, _, parseErr := funcutil.ParseVChannel(msg.VChannel())
-	if parseErr != nil || collectionID <= 0 || collectionID != header.GetCollectionId() || funcutil.IsControlChannel(msg.VChannel()) {
-		return nil, status.NewUnrecoverableError("Upsert has an invalid collection or vchannel scope")
-	}
+	collectionID := header.GetCollectionId()
 
 	version, err := impl.shardManager.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{CollectionId: collectionID, SchemaVersion: header.SchemaVersion})
 	if errors.Is(err, shards.ErrCollectionSchemaVersionNotMatch) {

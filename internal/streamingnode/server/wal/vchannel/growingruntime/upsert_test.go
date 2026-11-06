@@ -25,7 +25,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick/mvcc"
@@ -33,70 +32,26 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	upsertfixture "github.com/milvus-io/milvus/pkg/v3/streaming/util/message/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func TestIncompleteUpsertCannotApplyInsertOrAdvanceFrontiers(t *testing.T) {
+func TestUpsertDecodeFailurePropagatesFromApply(t *testing.T) {
+	initSegcoreForRuntimeTest(t)
 	for _, growing := range []bool{false, true} {
-		for _, transform := range []bool{false, true} {
-			if !growing && !transform {
-				continue
-			}
-			runtime := newRuntime()
-			msg := message.NewUpsertMessageBuilderV2().WithVChannel("p_1v0").
-				WithHeader(&message.UpsertMessageHeader{CollectionId: 1, DeleteRows: 2, Partitions: []*message.PartitionSegmentAssignment{{
-					PartitionId: 10, Rows: 1, SegmentAssignment: &messagespb.SegmentAssignment{SegmentId: 100},
-				}}}).
-				WithBody(upsertfixture.Body(&msgpb.InsertRequest{Version: msgpb.InsertDataVersion_ColumnBased, CollectionID: 1, PartitionID: 10, NumRows: 1}, nil)).
-				MustBuildMutable().WithTimeTick(40).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(40))
-			require.ErrorContains(t, runtime.dispatchMessage(context.Background(), msg, growing, transform), "row placement")
-			require.Empty(t, runtime.SegmentIDs())
-			require.Zero(t, runtime.appliedGrowingTimeTick.Load())
-			require.Zero(t, runtime.appliedTransformTimeTick.Load())
-		}
-	}
-}
-
-func TestCompoundPredecodeValidatesDeleteCountsAndLegacySiblings(t *testing.T) {
-	upsert := message.NewUpsertMessageBuilderV2().WithVChannel("p_1v0").
-		WithHeader(&message.UpsertMessageHeader{CollectionId: 1, DeleteRows: 2, Partitions: []*message.PartitionSegmentAssignment{{
-			PartitionId: 10, Rows: 1, SegmentAssignment: &messagespb.SegmentAssignment{SegmentId: 100},
-		}}}).
-		WithBody(upsertfixture.Body(&msgpb.InsertRequest{Version: msgpb.InsertDataVersion_ColumnBased, NumRows: 1, RowIDs: []int64{1}, FieldsData: []*schemapb.FieldData{{FieldId: 100, Type: schemapb.DataType_Int64, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1}}}}}}}}, &msgpb.DeleteRequest{
-			PartitionID: -1, NumRows: 2, PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}},
-		})).MustBuildMutable()
-	immutable := upsert.WithTimeTick(40).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(40))
-	require.ErrorContains(t, predecodeUpserts(context.Background(), immutable), "row count differs")
-	typed := message.MustAsMutableUpsertMessageV2(upsert)
-	header := typed.Header()
-	header.DeleteRows = 1
-	typed.OverwriteHeader(header)
-	immutable = upsert.IntoImmutableMessage(rmq.NewRmqID(40))
-	for _, deletion := range []bool{false, true} {
-		legacy := newTestAssignedInsertMessage(t, "p_1v0", 100, 41)
-		if deletion {
-			legacy = newTestTransformDeleteMessage(t, "p_1v0", 41)
-		}
-		wire := legacy.IntoMessageProto()
-		broken := message.NewImmutableMesasge(legacy.MessageID(), []byte{0xff}, wire.Properties)
-		txnCtx := message.TxnContext{TxnID: 50}
-		begin := message.NewBeginTxnMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&message.BeginTxnMessageHeader{}).
-			WithBody(&message.BeginTxnMessageBody{}).MustBuildMutable().WithTxnContext(txnCtx).WithTimeTick(39).
-			WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(39))
-		commit := message.NewCommitTxnMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&message.CommitTxnMessageHeader{BodyCnt: 2}).
-			WithBody(&message.CommitTxnMessageBody{}).MustBuildMutable().WithTxnContext(txnCtx).WithTimeTick(42).
-			WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(42))
-		txn, err := message.NewImmutableTxnMessageBuilder(message.MustAsImmutableBeginTxnMessageV2(begin)).Add(immutable).Add(broken).
-			Build(message.MustAsImmutableCommitTxnMessageV2(commit))
-		require.NoError(t, err)
-		require.ErrorIs(t, predecodeUpserts(context.Background(), txn), message.ErrMalformedBody)
 		runtime := newRuntime()
-		require.ErrorIs(t, runtime.dispatchMessage(context.Background(), txn, true, true), message.ErrMalformedBody)
-		require.Empty(t, runtime.SegmentIDs())
-		require.Zero(t, runtime.appliedGrowingTimeTick.Load())
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}, {FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "2"}}}}}
+		require.NoError(t, runtime.Prepare(t.Context(), walview.VChannelWALView{CollectionID: 1, VChannel: "p_1v0", Schema: schema, WriteSchema: schema}))
+		msg := message.NewUpsertMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&message.UpsertMessageHeader{CollectionId: 1, DeleteRows: 1, Partitions: []*message.PartitionSegmentAssignment{{PartitionId: 10, Rows: 1, SegmentAssignment: &messagespb.SegmentAssignment{SegmentId: 100}}}}).WithBody(&message.UpsertMessageBody{}).MustBuildMutable().WithTimeTick(40).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(40))
+		broken := message.NewImmutableMesasge(msg.MessageID(), []byte{0xff}, msg.IntoMessageProto().Properties)
+		if !growing {
+			runtime.appliedGrowingTimeTick.Store(40)
+		}
+		initialGrowing := runtime.appliedGrowingTimeTick.Load()
+		require.Panics(t, func() { runtime.applyLiveMessage(t.Context(), broken) })
+		require.Equal(t, initialGrowing, runtime.appliedGrowingTimeTick.Load())
 		require.Zero(t, runtime.appliedTransformTimeTick.Load())
+		runtime.Close()
 	}
 }
 

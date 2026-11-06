@@ -68,9 +68,6 @@ func (r *insertRows) ReadRows(ctx context.Context, schema *schemapb.CollectionSc
 		if err != nil {
 			return nil, err
 		}
-		if err := message.ValidateUpsertMessage(ctx, r.msg, pk); err != nil {
-			return nil, err
-		}
 		fields := append([]*schemapb.FieldData(nil), body.GetColumns()...)
 		field := message.UpsertPrimaryKeyColumn(pk, body.GetPrimaryKeys())
 		fields = append(fields, field)

@@ -121,3 +121,27 @@ func TestRepeatedUpsertKeysRemainOrdinaryWritesWithCASEnabled(t *testing.T) {
 	requirePartialUpdateRetryable(t, interceptor.state.pkVersions.Verify("v1", []any{int64(10)}, 119, 121))
 	require.NoError(t, interceptor.state.pkVersions.Verify("v1", []any{int64(20)}, 119, 121))
 }
+
+func TestUpsertPKExtractionOnlyChecksTrackingKeys(t *testing.T) {
+	getter := &staticPrimaryKeyDescriptorGetter{descriptor: shards.PrimaryKeyDescriptor{FieldID: 100, DataType: schemapb.DataType_Int64}}
+	msg := trackingUpsert()
+	typed := message.MustAsMutableUpsertMessageV2(msg)
+	body := typed.MustBody()
+	body.PartitionIndexes = []uint32{99}
+	body.RequestRowMapping = nil
+	body.Columns = append(body.Columns, &schemapb.FieldData{FieldId: 100})
+	typed.OverwriteBody(body)
+	keys, err := extractPKsFromUpsert(t.Context(), msg, getter)
+	require.NoError(t, err)
+	require.Equal(t, []int64{10, 20, 20, 10}, keys.Int64Values)
+	strings := &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"foreign"}}}}
+	body.PrimaryKeys = strings
+	typed.OverwriteBody(body)
+	_, err = extractPKsFromUpsert(t.Context(), msg, getter)
+	require.ErrorContains(t, err, "primary key type")
+	body.PrimaryKeys = &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{10, 20}}}}
+	body.DeleteEffects[0].PrimaryKeys = strings
+	typed.OverwriteBody(body)
+	_, err = extractPKsFromUpsert(t.Context(), msg, getter)
+	require.ErrorContains(t, err, "primary key type")
+}

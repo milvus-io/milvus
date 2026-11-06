@@ -70,18 +70,19 @@ func upsertForTest(vc string) message.MutableMessage {
 	return message.NewUpsertMessageBuilderV2().WithVChannel(vc).WithHeader(&message.UpsertMessageHeader{CollectionId: 1, SchemaVersion: &version, Partitions: []*message.PartitionSegmentAssignment{{PartitionId: 2, Rows: 1}}, DeleteRows: 1}).WithBody(upsertfixture.Body(&msgpb.InsertRequest{Version: msgpb.InsertDataVersion_ColumnBased, CollectionID: 1, PartitionID: 2, NumRows: 1, RowIDs: []int64{7}, FieldsData: []*schemapb.FieldData{{FieldId: 100, Type: schemapb.DataType_Int64, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{7}}}}}}}}, &msgpb.DeleteRequest{CollectionID: 1, PartitionID: -1, NumRows: 1, PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7}}}}})).MustBuildMutable().WithTimeTick(10)
 }
 
-func TestUpsertRejectsInvalidBusinessScope(t *testing.T) {
+func TestUpsertRejectsForeignOwnershipBeforeAppend(t *testing.T) {
 	for _, vc := range []string{"", "p_01v0", "p_2v0"} {
 		t.Run(vc, func(t *testing.T) {
-			i := &shardInterceptor{shardManager: mock_shards.NewMockShardManager(t)}
-			i.initOpTable()
-			appended := false
-			_, err := i.DoAppend(context.Background(), upsertForTest(vc), func(context.Context, message.MutableMessage) (message.MessageID, error) {
-				appended = true
+			manager := mock_shards.NewMockShardManager(t)
+			manager.EXPECT().CheckIfCollectionSchemaVersionMatch(mock.Anything).Return(int32(1), nil).Once()
+			manager.EXPECT().GetWriteSchema(int64(1), vc).Return(nil, status.NewUnrecoverableError("collection is not present on vchannel")).Once()
+			interceptor := &shardInterceptor{shardManager: manager}
+			interceptor.initOpTable()
+			_, err := interceptor.DoAppend(t.Context(), upsertForTest(vc), func(context.Context, message.MutableMessage) (message.MessageID, error) {
+				t.Fatal("foreign ownership reached append")
 				return nil, nil
 			})
 			require.Error(t, err)
-			require.False(t, appended)
 		})
 	}
 }

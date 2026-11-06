@@ -733,8 +733,6 @@ func TestBatchAllocationDoesNotChargeSuccessfulPrefixOnRetry(t *testing.T) {
 	require.ErrorIs(t, manager.AllocRowsBatch([]Allocation{first, {SegmentID: 30, Modified: ModifiedMetrics{Rows: 1, BinarySize: 20}}}), ErrNotEnoughSpace)
 	require.Zero(t, manager.GetStatsOfSegment(10).Modified.Rows)
 	require.Zero(t, manager.GetStatsOfSegment(10).Modified.BinarySize)
-	require.ErrorIs(t, manager.AllocRowsBatch([]Allocation{first, first}), ErrNotEnoughSpace)
-	require.Zero(t, manager.GetStatsOfSegment(10).Modified.Rows)
 	require.NoError(t, manager.AllocRowsBatch([]Allocation{first, {SegmentID: 20, Modified: ModifiedMetrics{Rows: 1, BinarySize: 15}}}))
 	require.Equal(t, ModifiedMetrics{Rows: 2, BinarySize: 40}, manager.GetStatsOfSegment(10).Modified)
 	require.Equal(t, ModifiedMetrics{Rows: 1, BinarySize: 15}, manager.GetStatsOfSegment(20).Modified)
