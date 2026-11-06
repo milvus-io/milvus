@@ -20,7 +20,7 @@ loguru==0.7.3
 bm25s==0.2.13
 # rjieba 0.1.11 wraps jieba-rs 0.6.x, closest to Milvus' pinned jieba-rs 0.6.8.
 rjieba==0.1.11
-pyarrow==21.0.0
+pyarrow==23.0.1
 # for external collection formats
 pylance==6.0.0
 vortex-data==0.56.0; python_version >= "3.11"
