@@ -152,6 +152,13 @@ func TestOption_SkipDiskQuotaCheck(t *testing.T) {
 	}
 	assert.True(t, SkipDiskQuotaCheck(options))
 
+	// surrounding whitespace and casing should not change boolean parsing
+	options = []*commonpb.KeyValuePair{
+		{Key: BackupFlag, Value: " TRUE "},
+		{Key: SkipDQC, Value: "\ttrue\n"},
+	}
+	assert.True(t, SkipDiskQuotaCheck(options))
+
 	// backup = true, skip_disk_quota_check = false
 	options = []*commonpb.KeyValuePair{
 		{Key: BackupFlag, Value: "true"},
@@ -194,6 +201,14 @@ func TestOption_SkipDiskQuotaCheck(t *testing.T) {
 		{Key: BackupFlag, Value: "false"},
 		{Key: L0Import, Value: "false"},
 		{Key: SkipDQC, Value: "true"},
+	}
+	assert.False(t, SkipDiskQuotaCheck(options))
+
+	// surrounding whitespace should still preserve explicit false values
+	options = []*commonpb.KeyValuePair{
+		{Key: BackupFlag, Value: " false "},
+		{Key: L0Import, Value: "\tfalse\n"},
+		{Key: SkipDQC, Value: " true "},
 	}
 	assert.False(t, SkipDiskQuotaCheck(options))
 
@@ -362,6 +377,10 @@ func TestIsAutoCommit(t *testing.T) {
 
 	// explicit false
 	opts = []*commonpb.KeyValuePair{{Key: AutoCommitKey, Value: "false"}}
+	assert.False(t, IsAutoCommit(opts))
+
+	// surrounding whitespace and casing should not change boolean parsing
+	opts = []*commonpb.KeyValuePair{{Key: AutoCommitKey, Value: " FALSE "}}
 	assert.False(t, IsAutoCommit(opts))
 }
 
