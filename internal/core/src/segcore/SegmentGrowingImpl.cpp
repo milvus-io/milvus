@@ -11,6 +11,9 @@
 
 #include <boost/iterator/counting_iterator.hpp>
 #include <folly/ScopeGuard.h>
+#include "folly/coro/BlockingWait.h"
+#include "folly/coro/WithCancellation.h"
+#include "storage/AsyncLoadExecutor.h"
 #include "common/FastMem.h"
 #include <cxxabi.h>
 #include <algorithm>
@@ -4221,7 +4224,10 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
         }
         auto future =
             pool.Submit([this, column_groups, properties, i, num_rows] {
-                return LoadColumnGroup(column_groups, properties, i, num_rows);
+                return folly::coro::blockingWait(folly::coro::co_withExecutor(
+                    storage::ResolveAsyncLoadExecutor(
+                        {}, proto::common::LoadPriority::HIGH),
+                    LoadColumnGroup(column_groups, properties, i, num_rows)));
             });
         load_group_futures.emplace_back(std::move(future));
     }
@@ -4295,7 +4301,7 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
                             /*require_index_flush=*/true);
 }
 
-std::unordered_map<FieldId, std::vector<FieldDataPtr>>
+folly::coro::Task<std::unordered_map<FieldId, std::vector<FieldDataPtr>>>
 SegmentGrowingImpl::LoadColumnGroup(
     const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
     const std::shared_ptr<milvus_storage::api::Properties>& properties,
@@ -4306,7 +4312,7 @@ SegmentGrowingImpl::LoadColumnGroup(
     auto column_group = column_groups->at(index);
     LOG_INFO("Loading segment {} column group {}", id_, index);
 
-    auto chunk_reader_result = reader_->get_chunk_reader(index);
+    auto chunk_reader_result = co_await reader_->get_chunk_reader_async(index);
     if (!chunk_reader_result.ok()) {
         auto error =
             milvus_storage::ToSegcoreError(chunk_reader_result.status());
@@ -4355,41 +4361,26 @@ SegmentGrowingImpl::LoadColumnGroup(
                rows_to_read,
                row_limit);
 
-    // create parallel degree split strategy
-    auto strategy =
-        std::make_unique<ParallelDegreeSplitStrategy>(parallel_degree);
-    auto split_result = strategy->split(row_groups_to_load);
-
-    auto& thread_pool =
-        ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
-
-    auto part_futures = std::vector<
-        std::future<std::vector<std::shared_ptr<arrow::RecordBatch>>>>();
-    for (const auto& part : split_result) {
-        part_futures.emplace_back(
-            thread_pool.Submit([chunk_reader = chunk_reader.get(), part]() {
-                std::vector<int64_t> chunk_ids(part.count);
-                std::iota(chunk_ids.begin(), chunk_ids.end(), part.offset);
-
-                auto result = chunk_reader->get_chunks(chunk_ids, 1);
-                if (!result.ok()) {
-                    auto error =
-                        milvus_storage::ToSegcoreError(result.status());
-                    ThrowInfo(error.get_error_code(),
-                              "get chunks failed: {}",
-                              error.what());
-                }
-                return result.ValueOrDie();
-            }));
-    }
-
     std::unordered_map<FieldId, std::vector<FieldDataPtr>> field_data_map;
     // Growing recovery may reuse a manifest that already contains rows past the
     // segment checkpoint. Only load rows covered by SegmentLoadInfo so WAL
     // replay can append the remaining rows at the expected offsets.
     int64_t loaded_rows = 0;
-    storage::ProcessFuturesInOrder(part_futures, [&](auto part_result) {
-        for (auto& record_batch : part_result) {
+    // Bound outstanding row groups instead of relying on HIGH/LOW worker count.
+    const auto window_size = std::max<uint64_t>(1, parallel_degree);
+    for (size_t begin = 0; begin < row_groups_to_load.size();) {
+        const auto count =
+            std::min<size_t>(window_size, row_groups_to_load.size() - begin);
+        const std::vector<int64_t> window(
+            row_groups_to_load.begin() + begin,
+            row_groups_to_load.begin() + begin + count);
+        auto batches_result =
+            co_await chunk_reader->get_chunks_async(window, window_size);
+        if (!batches_result.ok()) {
+            throw milvus_storage::ToSegcoreError(batches_result.status());
+        }
+        auto batches = std::move(batches_result).ValueOrDie();
+        for (auto& record_batch : batches) {
             if (loaded_rows >= row_limit) {
                 break;
             }
@@ -4424,11 +4415,14 @@ SegmentGrowingImpl::LoadColumnGroup(
                 field_data_map[field_id].push_back(field_data);
             }
             loaded_rows += rows_to_load;
+            record_batch.reset();
         }
-    });
+
+        begin += count;
+    }
 
     LOG_INFO("Finished loading segment {} column group {}", id_, index);
-    return field_data_map;
+    co_return field_data_map;
 }
 
 void

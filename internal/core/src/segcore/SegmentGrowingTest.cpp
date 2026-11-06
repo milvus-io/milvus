@@ -11,6 +11,7 @@
 
 #include <folly/FBVector.h>
 #include <gtest/gtest.h>
+#include "monitor/Monitor.h"
 #include <nlohmann/json.hpp>
 #include <stddef.h>
 #include <algorithm>
@@ -220,7 +221,23 @@ TEST(Growing, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
         CreateGrowingSegment(schema, empty_index_meta, load_info.segmentid());
     segment->SetLoadInfo(load_info);
     milvus::tracer::TraceContext trace_ctx;
+    // Force multiple read windows, with the checkpoint inside the final one.
+    const auto slice_size =
+        FILE_SLICE_SIZE.exchange(DEFAULT_FIELD_MAX_MEMORY_LIMIT);
+    auto restore_slice_size =
+        folly::makeGuard([&] { FILE_SLICE_SIZE.store(slice_size); });
+    const auto high_tasks =
+        milvus::monitor::internal_storage_pool_task_submitted_total_high
+            .Value();
+    const auto low_tasks =
+        milvus::monitor::internal_storage_pool_task_submitted_total_low.Value();
     segment->Load(trace_ctx, nullptr);
+    EXPECT_EQ(milvus::monitor::internal_storage_pool_task_submitted_total_high
+                  .Value(),
+              high_tasks);
+    EXPECT_EQ(
+        milvus::monitor::internal_storage_pool_task_submitted_total_low.Value(),
+        low_tasks);
     ASSERT_EQ(segment->get_row_count(), checkpoint_rows);
     EXPECT_EQ(segment->get_real_count(), checkpoint_rows);
 
@@ -279,6 +296,43 @@ TEST(Growing, LoadStorageV3ManifestRejectsShortRequiredRows) {
     segment->SetLoadInfo(load_info);
     milvus::tracer::TraceContext trace_ctx;
     ASSERT_ANY_THROW(segment->Load(trace_ctx, nullptr));
+    EXPECT_EQ(segment->get_row_count(), 0);
+
+    std::filesystem::remove_all(base_path);
+}
+
+TEST(Growing, LoadStorageV3ManifestRejectsMissingDataFile) {
+    auto schema = std::make_shared<Schema>();
+    AddStorageV3SystemFields(schema);
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+
+    auto base_path = (std::filesystem::path(TestLocalPath) /
+                      "growing_recovery_missing_data_file")
+                         .string();
+    std::filesystem::remove_all(base_path);
+    milvus::test::V3SegmentTestData test_data(
+        schema, 1, 2, 1, TestLocalPath, base_path);
+    ASSERT_TRUE(ManifestHasField(test_data, RowFieldID));
+    ASSERT_TRUE(ManifestHasField(test_data, TimestampFieldID));
+
+    milvus::proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_collectionid(1);
+    load_info.set_partitionid(2);
+    load_info.set_segmentid(4);
+    load_info.set_storageversion(STORAGE_V3);
+    load_info.set_num_of_rows(test_data.TotalRows());
+    const auto& files = test_data.GetColumnGroups()->at(0)->files;
+    ASSERT_FALSE(files.empty());
+    ASSERT_TRUE(std::filesystem::remove(files.front().path));
+    load_info.set_manifest_path(test_data.ManifestPathJson());
+    load_info.set_insert_channel("by-dev-rootcoord-dml_0_1v0");
+
+    auto segment =
+        CreateGrowingSegment(schema, empty_index_meta, load_info.segmentid());
+    segment->SetLoadInfo(load_info);
+    milvus::tracer::TraceContext trace_ctx;
+    ASSERT_THROW(segment->Load(trace_ctx, nullptr), SegcoreError);
     EXPECT_EQ(segment->get_row_count(), 0);
 
     std::filesystem::remove_all(base_path);

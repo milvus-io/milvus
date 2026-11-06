@@ -39,7 +39,10 @@
 #include "nlohmann/json.hpp"
 #include "storage/EntryStreamUtils.h"
 #include "storage/LoadAdmissionController.h"
-#include "storage/MemFileManagerImpl.h"
+#include "storage/artifact/FileSource.h"
+#include "storage/AsyncLoadExecutor.h"
+#include "folly/coro/BlockingWait.h"
+#include "folly/coro/WithCancellation.h"
 #include "storage/PluginLoader.h"
 
 #include "index/IndexLoadUtils.h"
@@ -262,18 +265,27 @@ ResolveLegacyHybridIndexType(const std::vector<std::string>& index_files,
         return {};
     }
     try {
-        storage::MemFileManagerImpl manager(context);
         const auto priority =
             op_ctx && op_ctx->runtime_load_priority.value_or(0) != 0
                 ? proto::common::LoadPriority::LOW
                 : proto::common::LoadPriority::HIGH;
-        auto data = manager.LoadIndexToMemory({*file}, priority, token);
+        auto read_type = [&]() -> folly::coro::Task<std::vector<uint8_t>> {
+            storage::LoadOptions options;
+            options.op_ctx = op_ctx;
+            std::vector<std::string> selector_files{*file};
+            auto source = co_await storage::V1RemoteSource::OpenAsync(
+                context,
+                std::move(selector_files),
+                options,
+                storage::ArtifactStorageNamespace::Index,
+                storage::V1SourceLayout::DiskFiles);
+            co_return co_await source->ReadEntryAsync(INDEX_TYPE);
+        };
+        const auto type =
+            folly::coro::blockingWait(folly::coro::co_withExecutor(
+                storage::ResolveAsyncLoadExecutor({}, priority), read_type()));
         storage::ThrowIfCancelled(token, "inspect legacy hybrid metadata");
-        BinarySet binary_set;
-        AssembleIndexDatas(data, binary_set);
-        const auto type = binary_set.GetByName(INDEX_TYPE);
-        if (type == nullptr || type->data == nullptr ||
-            type->size != sizeof(uint8_t)) {
+        if (type.size() != sizeof(uint8_t)) {
             LOG_WARN(
                 "invalid legacy hybrid index_type file {}, fallback to hybrid "
                 "estimate",
@@ -281,7 +293,7 @@ ResolveLegacyHybridIndexType(const std::vector<std::string>& index_files,
             return {};
         }
         return HybridInternalIndexTypeToIndexType(
-            static_cast<ScalarIndexType>(type->data[0]));
+            static_cast<ScalarIndexType>(type[0]));
     } catch (const std::exception& e) {
         storage::ThrowIfCancelled(token, "inspect legacy hybrid metadata");
         LOG_WARN(
