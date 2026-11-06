@@ -113,18 +113,25 @@ pressure, and node-memory/append-rate controls remain independent.
 
 ## Transaction
 
-The TxnManager coordinates multi-message transactions within a single VChannel. Each sub-message gets its own TimeTick during allocation; at the consumer side, the assembled transaction uses CommitTxn's TimeTick as its overall TimeTick, making it one logical WAL entry.
+The TxnManager coordinates multi-message transactions within a single VChannel. Each sub-message gets its own TimeTick during allocation; at the consumer side, the assembled transaction uses CommitTxn's TimeTick as the visibility boundary for all bodies.
 
 See [Transaction Messages](../message/message-semantic-txn.md) for message types and invariants.
 
 ### Transaction Lifecycle
 
 1. **Begin**: Allocate a TxnID and a TimeTick. Create a `TxnSession` tracking in-flight and successful logical body counts.
-2. **Append**: Each message in the transaction increments the in-flight counter and refreshes the session TTL.
-3. **Commit**: Close body admission and wait for in-flight appends. Check a nonzero Commit `body_cnt` against successful appends; zero skips validation for legacy transactions. A mismatch rolls back the session and releases references, causing a whole-transaction retry. After successful Commit append, mark the transaction as committed. The transaction's messages become visible to consumers as a single atomic group at the assigned TimeTick.
+2. **Append**: Admission increments the in-flight counter. Successful appends increment the logical body count and renew the session lease.
+3. **Commit**: Close body admission and wait for in-flight appends. Check a nonzero Commit `body_cnt` against successful appends; zero keeps the compatibility behavior for all body types, including Upsert. A mismatch rolls back the session and releases references, causing a whole-transaction retry. After successful Commit append, mark the transaction as committed. The transaction's messages become visible to consumers as a committed group at CommitTxn's TimeTick. Native execution does not add rollback.
 4. **Rollback**: Mark the transaction as rolled back. All messages in the transaction are discarded.
 5. **Expire**: Expiration TimeTick = `lastTimetick + keepalive`. Each successful body append refreshes `lastTimetick` (lease renewal). Once current TimeTick ≥ expiration, the transaction is unrecoverably failed (`STREAMING_CODE_TRANSACTION_EXPIRED`).
 6. **Force-fail**: The [Lock](lock.md) interceptor aborts all active transactions in the affected scope after an exclusive operation is successfully appended. Failed, deduplicated and explicitly ignored operations do not abort.
+
+The normal producer waits for all body responses before Commit. Upsert admission
+checks VChannel membership against the session. A session retains successful
+logical body counts and effects classification, not complete members for Commit
+revalidation. Row-only Upsert remains insert-only; explicit deletes require
+Transform consumption. Recovery restores these counts and classification.
+See [Transaction Messages](../message/message-semantic-txn.md).
 
 A Commit of either origin interrupted by WAL cancellation/fencing stays unresolved until
 recovery; it is neither marked committed nor reset for retry on the old writer.
