@@ -1123,10 +1123,10 @@ func passwordVerify(ctx context.Context, username, rawPwd string, privilegeCache
 	}
 
 	// Miss cache: verify against the encrypted password from etcd. Shared with
-	// the management-plane verifier rather than calling bcrypt here, so the
+	// the management-plane verifier rather than hashing here, so the
 	// stored-credential format, the cost parameter and the "wrong password"
 	// versus "unusable hash" split cannot drift between the two.
-	if err := crypto.VerifyStoredPassword(credInfo.EncryptedPassword, rawPwd); err != nil {
+	if err := crypto.VerifyStoredPassword(ctx, credInfo.EncryptedPassword, rawPwd); err != nil {
 		mlog.Error(ctx, "Verify password failed", mlog.Err(err))
 		return false
 	}

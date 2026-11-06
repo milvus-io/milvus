@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
@@ -1085,4 +1086,29 @@ func TestSaturationRendersAsServiceUnavailable(t *testing.T) {
 	assert.False(t, isNotPermitted(errComparisonSaturated()))
 	assert.True(t, errors.Is(errComparisonSaturated(), merr.ErrServiceUnavailable),
 		"shedding must reach the boundary as an unavailable dependency, which renders 503")
+}
+
+// The verifier must not assume bcrypt: common.security.passwordHashAlgorithm
+// can make root's stored hash PBKDF2, and the oversized-candidate rejection
+// must still happen before any lookup.
+func TestCachedRootVerifier_PBKDF2Hash(t *testing.T) {
+	const key = "common.security.passwordHashAlgorithm"
+	assert.NoError(t, paramtable.Get().Save(key, crypto.PasswordHashPBKDF2SHA512))
+	defer paramtable.Get().Reset(key)
+	hash, err := crypto.PasswordEncrypt(testPassword)
+	assert.NoError(t, err)
+	assert.True(t, strings.HasPrefix(hash, "$pbkdf2-sha512$"))
+
+	var lookups atomic.Int32
+	verifier := NewCachedRootVerifier(func(context.Context) (string, error) {
+		lookups.Add(1)
+		return hash, nil
+	})
+
+	assert.True(t, isMismatch(verifier.Verify(context.Background(), "root",
+		strings.Repeat("x", crypto.BcryptMaxPasswordBytes+1))))
+	assert.Zero(t, lookups.Load())
+
+	assert.NoError(t, verifier.Verify(context.Background(), "root", testPassword))
+	assert.True(t, isMismatch(verifier.Verify(context.Background(), "root", "wrong-password")))
 }
