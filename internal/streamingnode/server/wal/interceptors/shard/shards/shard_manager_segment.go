@@ -136,12 +136,6 @@ func (m *shardManagerImpl) AssignSegment(req *AssignSegmentRequest) (*AssignSegm
 	return results[0], nil
 }
 
-// ApplyDelete: TODO move the L0 flush operation here.
-func (m *shardManagerImpl) ApplyDelete(msg message.MutableDeleteMessageV1) error {
-	m.RecordDelete(msg.VChannel(), msg.TimeTick(), msg.Header().GetRows(), uint64(msg.EstimateSize()))
-	return nil
-}
-
 // RecordDelete accounts only the delete portion of a logical write.
 func (m *shardManagerImpl) RecordDelete(vchannel string, timeTick, rows, binarySize uint64) {
 	m.mu.Lock()

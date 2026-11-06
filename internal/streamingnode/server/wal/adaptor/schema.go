@@ -3,6 +3,7 @@ package adaptor
 import (
 	"context"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -11,7 +12,7 @@ import (
 )
 
 type writeSchemaProvider interface {
-	GetWriteSchema(int64, string) (*streamingpb.CollectionSchemaOfVChannel, error)
+	GetWriteSchema(int64, string) (*schemapb.CollectionSchema, error)
 }
 
 func (w *walAdaptorImpl) GetCollectionSchema(ctx context.Context, req *streamingpb.StreamingNodeGetCollectionSchemaRequest) (*streamingpb.StreamingNodeGetCollectionSchemaResponse, error) {
@@ -27,8 +28,8 @@ func (w *walAdaptorImpl) GetCollectionSchema(ctx context.Context, req *streaming
 	}
 	// The handler validates the canonical vchannel before entering the WAL.
 	collectionID := funcutil.GetCollectionIDFromVChannel(req.GetVchannel())
-	snapshot, err := w.getWriteSchema(collectionID, req.GetVchannel())
-	if !req.GetCurrentWrite() && (err != nil || snapshot.GetSchema().GetVersion() != req.GetSchemaVersion()) {
+	schema, err := w.getWriteSchema(collectionID, req.GetVchannel())
+	if !req.GetCurrentWrite() && (err != nil || schema.GetVersion() != req.GetSchemaVersion()) {
 		// Write admission can lead the observer. Serve matching versions directly;
 		// only historical versions need the recovery module.
 		module := w.viewResourceManager.Module(req.GetVchannel())
@@ -38,17 +39,18 @@ func (w *walAdaptorImpl) GetCollectionSchema(ctx context.Context, req *streaming
 			}
 			return nil, status.NewInner("schema history for vchannel %s is not ready", req.GetVchannel())
 		}
-		snapshot, err = module.GetSchemaVersion(collectionID, req.GetSchemaVersion())
+		snapshot, historyErr := module.GetSchemaVersion(collectionID, req.GetSchemaVersion())
+		schema, err = snapshot.GetSchema(), historyErr
 	}
 	if err != nil {
 		return nil, err
 	}
 	return &streamingpb.StreamingNodeGetCollectionSchemaResponse{
-		Schema: snapshot.GetSchema(),
+		Schema: schema,
 	}, nil
 }
 
-func (w *walAdaptorImpl) getWriteSchema(collectionID int64, vchannel string) (*streamingpb.CollectionSchemaOfVChannel, error) {
+func (w *walAdaptorImpl) getWriteSchema(collectionID int64, vchannel string) (*schemapb.CollectionSchema, error) {
 	provider, ok := w.param.ShardManager.(writeSchemaProvider)
 	if !ok {
 		return nil, status.NewUnrecoverableError("WAL does not provide its write schema")

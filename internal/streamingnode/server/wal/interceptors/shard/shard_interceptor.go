@@ -298,7 +298,7 @@ func (impl *shardInterceptor) handleDeleteMessage(ctx context.Context, msg messa
 		return nil, status.NewUnrecoverableError(err.Error())
 	}
 
-	impl.shardManager.ApplyDelete(deleteMessage)
+	impl.shardManager.RecordDelete(msg.VChannel(), msg.TimeTick(), header.GetRows(), uint64(msg.EstimateSize()))
 	return appendOp(ctx, msg)
 }
 
@@ -497,12 +497,11 @@ func (impl *shardInterceptor) handleUpsert(ctx context.Context, msg message.Muta
 	if err != nil {
 		return nil, err
 	}
-	writeSchema, err := impl.shardManager.GetWriteSchema(collectionID, msg.VChannel())
+	schema, err := impl.shardManager.GetWriteSchema(collectionID, msg.VChannel())
 	if err != nil {
 		return nil, err
 	}
 
-	schema := writeSchema.GetSchema()
 	if err := message.ValidateUpsertSchema(schema); err != nil {
 		return nil, status.NewInvalidArgument("%v", err)
 	}

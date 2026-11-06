@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/shard/mock_shards"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
-	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	upsertfixture "github.com/milvus-io/milvus/pkg/v3/streaming/util/message/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
@@ -40,8 +39,8 @@ type upsertSchemaManager struct {
 	deleteRows, deleteBytes uint64
 }
 
-func (m *upsertSchemaManager) GetWriteSchema(id int64, vc string) (*streamingpb.CollectionSchemaOfVChannel, error) {
-	return &streamingpb.CollectionSchemaOfVChannel{Schema: m.schema}, nil
+func (m *upsertSchemaManager) GetWriteSchema(id int64, vc string) (*schemapb.CollectionSchema, error) {
+	return m.schema, nil
 }
 
 func (m *upsertSchemaManager) RecordDelete(vchannel string, tick, rows, size uint64) {

@@ -480,9 +480,7 @@ func TestShardInterceptorDeleteAppliesBeforeAppend(t *testing.T) {
 		MustBuildMutable().WithTimeTick(1)
 
 	shardManager.EXPECT().CheckIfCollectionExists(int64(1)).Return(nil)
-	shardManager.EXPECT().ApplyDelete(mock.MatchedBy(func(deleteMsg message.MutableDeleteMessageV1) bool {
-		return deleteMsg.Header().GetCollectionId() == int64(1) && deleteMsg.Header().GetRows() == uint64(10)
-	})).Return(nil)
+	shardManager.EXPECT().RecordDelete("vchannel", uint64(1), uint64(10), uint64(msg.EstimateSize())).Once()
 
 	msgID, err := i.DoAppend(context.Background(), msg, func(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
 		return nil, errors.New("append failed")
@@ -886,7 +884,7 @@ func TestShardInterceptor(t *testing.T) {
 
 	shardManager.EXPECT().CheckIfCollectionExists(mock.Anything).Unset()
 	shardManager.EXPECT().CheckIfCollectionExists(mock.Anything).Return(nil)
-	shardManager.EXPECT().ApplyDelete(mock.Anything).Return(nil)
+	shardManager.EXPECT().RecordDelete(vchannel, uint64(1), uint64(0), uint64(msg.EstimateSize())).Once()
 	msgID, err = i.DoAppend(ctx, msg, appender)
 	assert.NoError(t, err)
 	assert.NotNil(t, msgID)
