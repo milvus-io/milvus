@@ -45,7 +45,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -2550,21 +2549,4 @@ func getBM25FunctionOfAnnsField(fieldID int64, functions []*schemapb.FunctionSch
 	return lo.Find(functions, func(function *schemapb.FunctionSchema) bool {
 		return function.GetType() == schemapb.FunctionType_BM25 && function.OutputFieldIds[0] == fieldID
 	})
-}
-
-// failMetricLabel classifies a request failure for the ProxyFunctionCall
-// metric, returning the same (status, cause) pair that
-// requestutil.ParseMetricLabel emits at the gRPC interceptor. The status stays
-// the coarse "fail" so that a query written against it counts every hard
-// failure regardless of who caused it.
-func failMetricLabel(err error) (status string, cause string) {
-	// Client and operator cancellation are neither party's failure; cause is
-	// what lets a consumer exclude them (parity with ParseMetricLabel).
-	if errors.Is(err, context.Canceled) || errors.Is(err, merr.ErrRequestCanceled) {
-		return metrics.FailLabel, metrics.CauseCancel
-	}
-	if merr.GetErrorType(err) == merr.InputError {
-		return metrics.FailLabel, metrics.CauseUser
-	}
-	return metrics.FailLabel, metrics.CauseSystem
 }
