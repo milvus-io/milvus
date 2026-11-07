@@ -173,6 +173,10 @@ func (t *QueryTask) execute(selected []segments.Segment) error {
 			return err
 		}
 	}
+	// record the calc_distance flag once from the already-parsed plan so the
+	// segments layer picks the right transport without re-unmarshalling the
+	// serialized expr plan (see segments.shouldUseArrowTransport).
+	retrievePlan.SetReturnDistance(t.plan.GetQuery().GetCalcDistance().GetReturnDistance())
 	resultCount := retrieveTakeForOutputResultCount(t.req.GetReq(), t.plan)
 	takeAllowed := requestAllowsTakeForOutput(resultCount)
 	retrievePlan.SetTakeForOutputAllowed(takeAllowed)
@@ -267,6 +271,12 @@ func (t *QueryTask) execute(selected []segments.Segment) error {
 		return err
 	}
 	cost.ServiceTime = tr.ElapseSpan().Milliseconds()
+
+	// calc_distance: compute the per-row distance column on the reduced result
+	// and append it as a synthetic field. No-op unless the plan requests it.
+	if err := applyCalcDistanceToResult(reducedResult, t.plan.GetQuery(), t.collection.Schema(), t.req.GetReq().GetOutputFieldsId()); err != nil {
+		return err
+	}
 
 	t.result = &internalpb.RetrieveResults{
 		Base: &commonpb.MsgBase{
