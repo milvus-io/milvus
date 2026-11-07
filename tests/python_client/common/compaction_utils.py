@@ -323,11 +323,19 @@ def wait_for_compaction_eligible_segments(
     timeout=30,
     poll_interval=2,
     context=None,
+    index_name=None,
 ):
+    """Wait for stable sorted sources, optionally including their index readiness.
+
+    A manual compaction may skip sorted sources while their vector index is still
+    building. The opt-in index check shares this waiter's deadline and requires
+    row coverage for the latest source snapshot before counting a stable poll.
+    """
     deadline = time.monotonic() + timeout
     previous_snapshot = None
     stable_observations = 0
     latest_segments = []
+    latest_index = None
     retry_backoff = INITIAL_RETRY_BACKOFF
 
     while time.monotonic() < deadline:
@@ -336,6 +344,55 @@ def wait_for_compaction_eligible_segments(
             latest_segments = list_persistent_segments_once(
                 handler, collection_name, timeout=remaining, context=context
             )
+            snapshot = tuple(
+                sorted(
+                    (
+                        segment.segment_id,
+                        segment.num_rows,
+                        segment.state_name,
+                        segment.level_name,
+                        segment.is_sorted,
+                    )
+                    for segment in latest_segments
+                )
+            )
+            all_segments_eligible = len(snapshot) >= minimum_segment_count and all(
+                segment.state_name == "Flushed" and segment.level_name == "L1" and segment.is_sorted
+                for segment in latest_segments
+            )
+            if all_segments_eligible and index_name is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                response = handler._stub.DescribeIndex(
+                    Prepare.describe_index_request(collection_name, index_name),
+                    timeout=remaining,
+                    metadata=_api_level_md(context),
+                )
+                check_status(response.status)
+                descriptions = [index for index in response.index_descriptions if index.index_name == index_name]
+                latest_index = None
+                all_segments_eligible = False
+                if len(descriptions) == 1:
+                    index = descriptions[0]
+                    latest_index = {
+                        "state": common_pb2.IndexState.Name(index.state),
+                        "indexed_rows": index.indexed_rows,
+                        "total_rows": index.total_rows,
+                        "pending_index_rows": index.pending_index_rows,
+                    }
+                    if index.state == common_pb2.Failed:
+                        raise AssertionError(
+                            f"Index {index_name} for {collection_name} failed: {index.index_state_fail_reason}"
+                        )
+                    required_rows = sum(segment.num_rows for segment in latest_segments)
+                    all_segments_eligible = (
+                        index.state == common_pb2.Finished
+                        and required_rows > 0
+                        and index.total_rows == required_rows
+                        and index.indexed_rows >= required_rows
+                        and index.pending_index_rows == 0
+                    )
         except grpc.RpcError as error:
             if error.code() in IGNORE_RETRY_CODES:
                 raise
@@ -384,22 +441,6 @@ def wait_for_compaction_eligible_segments(
         if time.monotonic() >= deadline:
             break
         retry_backoff = INITIAL_RETRY_BACKOFF
-        snapshot = tuple(
-            sorted(
-                (
-                    segment.segment_id,
-                    segment.num_rows,
-                    segment.state_name,
-                    segment.level_name,
-                    segment.is_sorted,
-                )
-                for segment in latest_segments
-            )
-        )
-        all_segments_eligible = len(snapshot) >= minimum_segment_count and all(
-            segment.state_name == "Flushed" and segment.level_name == "L1" and segment.is_sorted
-            for segment in latest_segments
-        )
         if all_segments_eligible and snapshot == previous_snapshot:
             stable_observations += 1
             if stable_observations >= 2:
@@ -416,4 +457,5 @@ def wait_for_compaction_eligible_segments(
         f"Segments for {collection_name} did not become stable compaction candidates "
         f"(Flushed, L1, sorted) within {timeout} seconds; "
         f"last snapshot: {previous_snapshot}"
+        + (f"; index {index_name}: {latest_index}" if index_name is not None else "")
     )
