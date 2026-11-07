@@ -51,6 +51,9 @@ using MultipleChunkDataAccessor = std::function<const data_access_type()>;
 class ColumnScanState {
  public:
     ColumnScanState() = default;
+    explicit ColumnScanState(ScanPinPolicy pin_policy)
+        : pin_policy_(pin_policy) {
+    }
     ColumnScanState(const ColumnScanState&) = delete;
     ColumnScanState&
     operator=(const ColumnScanState&) = delete;
@@ -62,6 +65,9 @@ class ColumnScanState {
     friend class SegmentChunkReader;
     struct State;
     std::shared_ptr<State> state_;
+    // Continuous consumers can retain the current Cell; expression windows
+    // otherwise capture the configured policy when their Scan is created.
+    std::optional<ScanPinPolicy> pin_policy_;
 };
 
 // Helper to extract a value of type T from data_access_type.
@@ -136,9 +142,8 @@ class SegmentChunkReader {
                                  int64_t scan_batch_size = 1024,
                                  ColumnScanState* scan_state = nullptr) const;
 
-    // Sealed access over one expression's finite offset input. Vortex uses one
-    // Take result; Raw fixed-width data keeps the existing Chunk path. Offsets
-    // must outlive the accessor.
+    // Sealed access over one expression's finite offset input. Both backends
+    // use one Take result; offsets must outlive the accessor.
     ChunkDataAccessor
     GetDataAccessorByOffsets(DataType data_type,
                              FieldId field_id,
@@ -390,10 +395,7 @@ class SegmentChunkReader {
 
     template <typename T>
     ChunkDataAccessor
-    GetVortexDataAccessorByOffsets(FieldId field_id, OffsetView offsets) const;
-
-    ChunkDataAccessor
-    GetStringDataAccessorByOffsets(FieldId field_id, OffsetView offsets) const;
+    GetDataAccessorByOffsets(FieldId field_id, OffsetView offsets) const;
 
     const int64_t size_per_chunk_;
     milvus::OpContext* op_ctx_;

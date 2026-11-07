@@ -58,10 +58,13 @@ SegmentChunkReader::GetMultipleChunkScanDataAccessor(
         scan = std::make_shared<ColumnScanState::State>();
         scan->column = std::move(column);
         scan->target_type = target_type;
-        const auto pin_policy =
+        auto pin_policy =
             SegcoreConfig::default_config().get_scan_cursor_owns_pin()
                 ? ScanPinPolicy::CursorOwned
                 : ScanPinPolicy::ResultOwned;
+        if (scan_state && scan_state->pin_policy_) {
+            pin_policy = *scan_state->pin_policy_;
+        }
         scan->cursor = scan->column->Scan(
             op_ctx_, ScanOptions::ForData(start, target_type, pin_policy));
         AssertInfo(scan->cursor != nullptr,
@@ -108,6 +111,8 @@ SegmentChunkReader::GetMultipleChunkScanDataAccessor(
                        "column scan exhausted before accessor consumption");
             state->batch_pos = 0;
             state->values = state->batch.values.template data_as<T>();
+            // This budget is observed only when requesting the next batch.
+            window_remaining -= state->batch.size;
         }
         while (current_chunk_pos >= current_chunk_size) {
             ++current_chunk_id;
@@ -120,7 +125,6 @@ SegmentChunkReader::GetMultipleChunkScanDataAccessor(
             current_chunk_size = ChunkSize(field_id, current_chunk_id);
         }
         ++current_chunk_pos;
-        --window_remaining;
         const auto pos = state->batch_pos++;
         if (state->batch.validity && !state->batch.validity[pos]) {
             return std::nullopt;
@@ -137,26 +141,14 @@ SegmentChunkReader::GetMultipleChunkDataAccessor(
     int64_t& current_chunk_pos,
     int64_t scan_batch_size,
     ColumnScanState* scan_state) const {
-    if (scan_state != nullptr && scan_state->state_ != nullptr) {
-        return GetMultipleChunkScanDataAccessor<T>(field_id,
-                                                   current_chunk_id,
-                                                   current_chunk_pos,
-                                                   scan_batch_size,
-                                                   scan_state,
-                                                   nullptr);
-    }
     if (segment_->type() == SegmentType::Sealed) {
-        auto column = GetColumn(field_id);
-        if (column != nullptr &&
-            column->GetLocalFormat() ==
-                ChunkedColumnInterface::LocalFormat::Vortex) {
-            return GetMultipleChunkScanDataAccessor<T>(field_id,
-                                                       current_chunk_id,
-                                                       current_chunk_pos,
-                                                       scan_batch_size,
-                                                       scan_state,
-                                                       std::move(column));
-        }
+        return GetMultipleChunkScanDataAccessor<T>(
+            field_id,
+            current_chunk_id,
+            current_chunk_pos,
+            scan_batch_size,
+            scan_state,
+            scan_state && scan_state->state_ ? nullptr : GetColumn(field_id));
     }
     auto num_chunks = NumChunkData(field_id);
     AssertInfo(current_chunk_id < num_chunks,
@@ -430,35 +422,16 @@ SegmentChunkReader::GetChunkDataAccessor<std::string>(FieldId field_id,
     }
 }
 
-ChunkDataAccessor
-SegmentChunkReader::GetStringDataAccessorByOffsets(FieldId field_id,
-                                                   OffsetView offsets) const {
-    AssertInfo(segment_->type() == SegmentType::Sealed,
-               "string Take accessor requires a sealed segment");
-    auto column = GetColumn(field_id);
-    AssertInfo(column != nullptr, "string field has no column");
-    std::shared_ptr<TakeResult> take =
-        column->Take(op_ctx_, TakeOptions{offsets, TargetType::StringView});
-    AssertInfo(take != nullptr, "string field does not support Take");
-    auto values = take->Access<std::string_view>();
-    return [take = std::move(take), values](int i) -> const data_access_type {
-        auto item = values[i];
-        return item.is_valid ? data_access_type(*item.value) : std::nullopt;
-    };
-}
-
 template <typename T>
 ChunkDataAccessor
-SegmentChunkReader::GetVortexDataAccessorByOffsets(FieldId field_id,
-                                                   OffsetView offsets) const {
+SegmentChunkReader::GetDataAccessorByOffsets(FieldId field_id,
+                                             OffsetView offsets) const {
     auto column = GetColumn(field_id);
-    if (column == nullptr || column->GetLocalFormat() !=
-                                 ChunkedColumnInterface::LocalFormat::Vortex) {
-        return {};
-    }
+    AssertInfo(column != nullptr, "field {} has no column", field_id.get());
     std::shared_ptr<TakeResult> take =
         column->Take(op_ctx_, TakeOptions{offsets, TargetTypeOf<T>()});
-    AssertInfo(take != nullptr, "Vortex field does not support Take");
+    AssertInfo(
+        take != nullptr, "field {} does not support Take", field_id.get());
     auto values = take->Access<T>();
     return [take = std::move(take), values](int i) -> const data_access_type {
         auto item = values[i];
@@ -472,26 +445,27 @@ SegmentChunkReader::GetDataAccessorByOffsets(DataType data_type,
                                              OffsetView offsets) const {
     AssertInfo(segment_->type() == SegmentType::Sealed,
                "Take accessor requires a sealed segment");
-    if (data_type == DataType::VARCHAR || data_type == DataType::STRING ||
-        data_type == DataType::TEXT) {
-        return GetStringDataAccessorByOffsets(field_id, offsets);
-    }
     switch (data_type) {
         case DataType::BOOL:
-            return GetVortexDataAccessorByOffsets<bool>(field_id, offsets);
+            return GetDataAccessorByOffsets<bool>(field_id, offsets);
         case DataType::INT8:
-            return GetVortexDataAccessorByOffsets<int8_t>(field_id, offsets);
+            return GetDataAccessorByOffsets<int8_t>(field_id, offsets);
         case DataType::INT16:
-            return GetVortexDataAccessorByOffsets<int16_t>(field_id, offsets);
+            return GetDataAccessorByOffsets<int16_t>(field_id, offsets);
         case DataType::INT32:
-            return GetVortexDataAccessorByOffsets<int32_t>(field_id, offsets);
+            return GetDataAccessorByOffsets<int32_t>(field_id, offsets);
         case DataType::TIMESTAMPTZ:
         case DataType::INT64:
-            return GetVortexDataAccessorByOffsets<int64_t>(field_id, offsets);
+            return GetDataAccessorByOffsets<int64_t>(field_id, offsets);
         case DataType::FLOAT:
-            return GetVortexDataAccessorByOffsets<float>(field_id, offsets);
+            return GetDataAccessorByOffsets<float>(field_id, offsets);
         case DataType::DOUBLE:
-            return GetVortexDataAccessorByOffsets<double>(field_id, offsets);
+            return GetDataAccessorByOffsets<double>(field_id, offsets);
+        case DataType::STRING:
+        case DataType::VARCHAR:
+        case DataType::TEXT:
+            return GetDataAccessorByOffsets<std::string_view>(field_id,
+                                                              offsets);
         default:
             return {};
     }
