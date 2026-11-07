@@ -42,6 +42,9 @@ constexpr const char* BITMAP_INDEX_VALID_BITSET = "valid_bitset";
 constexpr const char* INDEX_TYPE = "index_type";
 constexpr const char* METRIC_TYPE = "metric_type";
 constexpr const char* EMB_LIST = "embedding_list";
+// Vector load parameter: the VECTOR_ARRAY field is element-nullable, so a
+// persisted validity bitmap is in the logical element domain.
+constexpr const char* ELEMENT_NULLABLE = "element_nullable";
 
 // scalar index type
 constexpr const char* ASCENDING_SORT = "STL_SORT";

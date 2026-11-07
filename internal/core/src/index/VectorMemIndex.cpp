@@ -493,8 +493,10 @@ VectorMemIndex<T>::BuildWithDataset(const DatasetPtr& dataset,
     index_config.update(config);
 
     SetDim(dataset->GetDim());
-    const auto id_map_only_build =
-        GetIdMapOnlyBuildPlan(dataset, elem_type_ != DataType::NONE);
+    const auto id_map_only_build = GetIdMapOnlyBuildPlan(
+        dataset,
+        elem_type_ != DataType::NONE &&
+            knowhere::get_el_metric_type(GetMetricType()).has_value());
     if (id_map_only_build.empty_embedding_list) {
         empty_emb_list_offsets_ = {0};
     }
@@ -540,6 +542,115 @@ VectorMemIndex<T>::Build(const Config& config) {
     build_config.update(config);
     build_config.erase(INSERT_FILES_KEY);
     build_config.erase(VEC_OPT_FIELDS);
+
+    const bool vector_array = elem_type_ != DataType::NONE;
+    const bool embedding_list =
+        vector_array &&
+        knowhere::get_el_metric_type(GetMetricType()).has_value();
+    const bool element_nullable =
+        vector_array &&
+        file_manager_->GetFieldDataMeta().field_schema.element_nullable();
+    if (element_nullable && embedding_list) {
+        ThrowInfo(ErrorCode::Unsupported,
+                  "element-nullable VECTOR_ARRAY does not support "
+                  "embedding-list metrics");
+    }
+    if (vector_array && !embedding_list) {
+        AssertInfo(scalar_info.empty(),
+                   "VECTOR_ARRAY optional scalar input is unsupported");
+        int64_t dim = 0;
+        size_t logical_elements = 0;
+        size_t physical_elements = 0;
+        size_t bytes = 0;
+        std::vector<uint8_t> validity;
+        for (const auto& data : field_datas) {
+            AssertInfo(dim == 0 || dim == data->get_dim(),
+                       "inconsistent vector array dimensions");
+            dim = data->get_dim();
+            const auto* rows =
+                dynamic_cast<const FieldData<VectorArray>*>(data.get());
+            AssertInfo(rows != nullptr, "expected VECTOR_ARRAY field data");
+            for (size_t row = 0; row < data->get_valid_rows(); ++row) {
+                const auto* value = rows->value_at(row);
+                const auto logical = static_cast<size_t>(value->length());
+                AssertInfo(
+                    value->length() >= value->physical_length(),
+                    "VECTOR_ARRAY logical length is smaller than its payload");
+                AssertInfo(logical <= std::numeric_limits<size_t>::max() - 7 -
+                                          logical_elements,
+                           "VECTOR_ARRAY logical element count overflows");
+                const auto next = logical_elements + logical;
+                if (element_nullable) {
+                    validity.resize((next + 7) / 8, 0);
+                    const auto bits = value->element_validity_view();
+                    size_t valid = 0;
+                    for (size_t i = 0; i < logical; ++i) {
+                        if (!value->is_element_nullable() || bits[i]) {
+                            const auto bit = logical_elements + i;
+                            validity[bit >> 3] |= uint8_t{1} << (bit & 7);
+                            ++valid;
+                        }
+                    }
+                    AssertInfo(
+                        valid == static_cast<size_t>(value->physical_length()),
+                        "VECTOR_ARRAY element validity disagrees with payload");
+                } else {
+                    AssertInfo(!value->is_element_nullable() &&
+                                   value->length() == value->physical_length(),
+                               "non-element-nullable VECTOR_ARRAY contains "
+                               "null elements");
+                }
+                AssertInfo(static_cast<size_t>(value->byte_size()) <=
+                               std::numeric_limits<size_t>::max() - bytes,
+                           "VECTOR_ARRAY payload byte count overflows");
+                bytes += value->byte_size();
+                physical_elements += value->physical_length();
+                logical_elements = next;
+            }
+        }
+        if (logical_elements == 0) {
+            // Reuse the persisted empty-index marker, with no logical rows.
+            empty_emb_list_offsets_ = {0};
+            if (dim == 0) {
+                dim = GetValueFromConfig<int64_t>(build_config, DIM_KEY)
+                          .value_or(0);
+            }
+            AssertInfo(dim > 0,
+                       "dim is missing when build empty element-level index");
+            SetDim(dim);
+            return;
+        }
+        auto payload = bytes > 0 ? std::make_unique<uint8_t[]>(bytes) : nullptr;
+        size_t offset = 0;
+        for (auto& data : field_datas) {
+            const auto* rows =
+                static_cast<const FieldData<VectorArray>*>(data.get());
+            for (size_t row = 0; row < data->get_valid_rows(); ++row) {
+                const auto* value = rows->value_at(row);
+                if (value->byte_size() > 0) {
+                    milvus::fastmem::FastMemcpy(payload.get() + offset,
+                                                value->data(),
+                                                value->byte_size());
+                    offset += value->byte_size();
+                }
+            }
+            data.reset();
+        }
+        field_datas.clear();
+        AssertInfo(
+            logical_elements <=
+                    static_cast<size_t>(std::numeric_limits<int64_t>::max()) &&
+                physical_elements <=
+                    static_cast<size_t>(std::numeric_limits<int64_t>::max()),
+            "VECTOR_ARRAY element count exceeds int64");
+        auto dataset = GenDataset(physical_elements, dim, payload.get());
+        if (element_nullable) {
+            dataset->SetIdMapData(knowhere::IdMapData::FromValidBitmap(
+                validity.data(), logical_elements));
+        }
+        BuildWithDataset(dataset, build_config);
+        return;
+    }
 
     bool nullable = false;
     int64_t total_valid_rows = 0;
@@ -958,7 +1069,9 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
         GetValueFromConfig<milvus::proto::common::LoadPriority>(
             config, milvus::LOAD_PRIORITY)
             .value_or(milvus::proto::common::LoadPriority::HIGH);
-    auto is_embedding_list = (elem_type_ != DataType::NONE);
+    auto is_embedding_list =
+        elem_type_ != DataType::NONE &&
+        knowhere::get_el_metric_type(GetMetricType()).has_value();
     std::unique_ptr<storage::FileWriter> embedding_list_meta_writer_ptr =
         nullptr;
     std::unique_ptr<storage::FileWriter> embedding_list_raw_index_writer_ptr =

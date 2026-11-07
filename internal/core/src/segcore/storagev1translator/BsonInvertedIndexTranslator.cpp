@@ -31,6 +31,7 @@
 #include "segcore/CacheMetricAttribution.h"
 #include "segcore/Utils.h"
 #include "storage/DiskFileManagerImpl.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::segcore::storagev1translator {
 
@@ -65,10 +66,12 @@ BsonInvertedIndexTranslator::cell_id_of(milvus::cachinglayer::uid_t) const {
     return 0;
 }
 
-std::pair<milvus::cachinglayer::ResourceUsage,
-          milvus::cachinglayer::ResourceUsage>
-BsonInvertedIndexTranslator::estimated_byte_size_of_cell(
-    milvus::cachinglayer::cid_t) const {
+milvus::cachinglayer::LoadingResourceUsage
+BsonInvertedIndexTranslator::estimated_loading_usage(
+    const std::vector<milvus::cachinglayer::cid_t>& cids) const {
+    if (cids.empty()) {
+        return {};
+    }
     // ignore the cid checking, because there is only one cell
     if (load_info_.enable_mmap) {
         // loaded: on disk; overhead: temp memory for download buffer
@@ -118,8 +121,10 @@ BsonInvertedIndexTranslator::get_cells(
         // Load the index using the files from load_info_
         // Files are absolute remote paths (basePath already prepended by caller)
         index->LoadIndex(load_info_.index_files,
-                         static_cast<milvus::proto::common::LoadPriority>(
-                             load_info_.load_priority),
+                         ResolveLoadPriority(
+                             ctx,
+                             static_cast<milvus::proto::common::LoadPriority>(
+                                 load_info_.load_priority)),
                          load_info_.enable_mmap);
     }
 

@@ -170,8 +170,10 @@ BuildRetrieveFieldsBatch(
         }
         auto& field_meta = plan->schema_->operator[](field_id);
         auto name = std::string(field_meta.get_name().get());
-        ARROW_ASSIGN_OR_RAISE(auto converted,
-                              FieldDataToArrow(name, *it->second, total_rows));
+        ARROW_ASSIGN_OR_RAISE(
+            auto converted,
+            FieldDataToArrow(
+                name, *it->second, total_rows, false, &field_meta));
         auto array = converted.second;
         fields.push_back(MilvusField(name,
                                      array->type(),
@@ -262,6 +264,8 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                 }
                 milvus::futures::throwIfCancelled(cancel_token);
                 milvus::OpContext op_ctx(cancel_token);
+                op_ctx.runtime_load_priority =
+                    milvus::proto::common::LoadPriority::HIGH;
                 auto read_lease =
                     AcquireSegmentReadLease(materialized.segment, cancel_token);
                 // Capture the request-scoped read snapshot once per segment so

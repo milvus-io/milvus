@@ -820,10 +820,11 @@ TYPED_TEST_P(HybridIndexTestV1,
         std::move(config));
 
     EXPECT_FALSE(translator.meta()->loading_overhead_config.has_value());
-    auto [loaded_resource, loading_overhead] =
-        translator.estimated_byte_size_of_cell(0);
+    auto [loaded_resource, loading_overhead, shared_overhead] =
+        translator.estimated_loading_usage({0});
     EXPECT_GT(loaded_resource.memory_bytes, 0);
     EXPECT_GT(loading_overhead.memory_bytes, 0);
+    EXPECT_EQ(shared_overhead, milvus::cachinglayer::ResourceUsage{});
 }
 
 TYPED_TEST_P(HybridIndexTestV1, INFuncTest) {
@@ -1028,12 +1029,6 @@ TYPED_TEST_P(HybridIndexTestInverted,
     load_info.index_size = 1024;
     load_info.num_rows = this->nb_;
     load_info.dim = 0;
-    load_info.load_resource_request =
-        LoadResourceRequest{/*max_memory_cost=*/2048,
-                            /*max_disk_cost=*/512,
-                            /*final_memory_cost=*/1024,
-                            /*final_disk_cost=*/128,
-                            /*has_raw_data=*/true};
 
     index::CreateIndexInfo index_info{};
     index_info.index_type = milvus::index::HYBRID_INDEX_TYPE;
@@ -1069,12 +1064,11 @@ TYPED_TEST_P(HybridIndexTestInverted,
         *translator.meta()->loading_overhead_config->memory->max_runtime_unit,
         max_task_overhead);
     EXPECT_FALSE(translator.meta()->loading_overhead_config->file.has_value());
-    auto [loaded_resource, loading_overhead] =
-        translator.estimated_byte_size_of_cell(0);
-    EXPECT_EQ(loaded_resource,
-              (milvus::cachinglayer::ResourceUsage{1024, 128}));
-    EXPECT_EQ(loading_overhead,
-              (milvus::cachinglayer::ResourceUsage{1024, 896}));
+    const auto usage = translator.estimated_loading_usage({0});
+    EXPECT_GT(usage.resident.memory_bytes, 0);
+    EXPECT_EQ(usage.private_overhead.memory_bytes, 0);
+    EXPECT_GT(usage.shared_overhead.memory_bytes, 0);
+    EXPECT_EQ(usage.shared_overhead.file_bytes, 0);
 
     budget.SetCapacityBytes(storage::kTailMergeGrace);
     Config budgeted_config = index_params;
@@ -1124,6 +1118,32 @@ TYPED_TEST_P(HybridIndexTestInverted,
         memory_group);
     EXPECT_FALSE(plugin_loaded_translator.meta()
                      ->loading_overhead_config->file.has_value());
+    // Legacy overrides do not separate admitted scratch from request-local buffers.
+    load_info.load_resource_request =
+        LoadResourceRequest{/*max_memory_cost=*/2048,
+                            /*max_disk_cost=*/512,
+                            /*final_memory_cost=*/1024,
+                            /*final_disk_cost=*/128,
+                            /*has_raw_data=*/true};
+    Config override_config = index_params;
+    milvus::segcore::storagev1translator::SealedIndexTranslator overridden(
+        index_info,
+        &load_info,
+        milvus::tracer::TraceContext{},
+        ctx,
+        std::move(override_config));
+    EXPECT_FALSE(overridden.meta()->loading_overhead_config.has_value());
+    const auto overridden_usage = overridden.estimated_loading_usage({0});
+    EXPECT_EQ(overridden_usage.resident,
+              (milvus::cachinglayer::ResourceUsage{1024, 128}));
+    EXPECT_EQ(overridden_usage.private_overhead,
+              (milvus::cachinglayer::ResourceUsage{1024, 896}));
+    EXPECT_EQ(overridden_usage.shared_overhead,
+              milvus::cachinglayer::ResourceUsage{});
+    const auto empty = overridden.estimated_loading_usage({});
+    EXPECT_EQ(empty.resident, milvus::cachinglayer::ResourceUsage{});
+    EXPECT_EQ(empty.private_overhead, milvus::cachinglayer::ResourceUsage{});
+    EXPECT_EQ(empty.shared_overhead, milvus::cachinglayer::ResourceUsage{});
 }
 
 TYPED_TEST_P(HybridIndexTestInverted,

@@ -59,9 +59,9 @@ class GroupChunkTranslator
     milvus::cachinglayer::cid_t
     cell_id_of(milvus::cachinglayer::uid_t uid) const override;
 
-    std::pair<milvus::cachinglayer::ResourceUsage,
-              milvus::cachinglayer::ResourceUsage>
-    estimated_byte_size_of_cell(milvus::cachinglayer::cid_t cid) const override;
+    milvus::cachinglayer::LoadingResourceUsage
+    estimated_loading_usage(
+        const std::vector<milvus::cachinglayer::cid_t>& cids) const override;
 
     const std::string&
     key() const override;
@@ -98,7 +98,8 @@ class GroupChunkTranslator
     // Load a single cell which may contain multiple row groups
     std::unique_ptr<milvus::GroupChunk>
     load_group_chunk(const std::vector<std::shared_ptr<arrow::Table>>& tables,
-                     const milvus::cachinglayer::cid_t cid);
+                     const milvus::cachinglayer::cid_t cid,
+                     milvus::proto::common::LoadPriority priority);
 
     int64_t
     loading_overhead_bytes(int64_t cell_size) const;

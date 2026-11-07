@@ -25,6 +25,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -47,14 +49,15 @@ const (
 // indexed segment and one segment whose index task is still in progress.
 func newDroppedSegmentRaceServer(t *testing.T) *Server {
 	s := &Server{
-		meta: &meta{
-			catalog:   &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)},
-			indexMeta: newSegmentIndexMeta(&datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}),
-			segments:  NewSegmentsInfo(),
+		meta: &meta.Meta{
+			Catalog:      &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)},
+			IndexCatalog: index.NewSegmentIndexMeta(&datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}),
+			Segments:     meta.NewSegmentsInfo(),
 		},
 	}
+	s.indexMeta = s.meta.IndexCatalog.(*index.IndexMeta)
 	s.stateCode.Store(commonpb.StateCode_Healthy)
-	s.meta.indexMeta.indexes[droppedRaceCollID] = map[UniqueID]*model.Index{
+	s.indexMeta.Indexes[droppedRaceCollID] = map[UniqueID]*model.Index{
 		droppedRaceIndexID: {
 			CollectionID: droppedRaceCollID,
 			FieldID:      droppedRaceFieldID,
@@ -67,7 +70,7 @@ func newDroppedSegmentRaceServer(t *testing.T) *Server {
 		droppedRaceLiveSeg: commonpb.IndexState_Finished,
 		droppedRaceDropSeg: commonpb.IndexState_InProgress,
 	} {
-		s.meta.segments.SetSegment(segID, NewSegmentInfo(&datapb.SegmentInfo{
+		s.meta.Segments.SetSegment(segID, meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID:             segID,
 			CollectionID:   droppedRaceCollID,
 			PartitionID:    droppedRacePartID,
@@ -85,7 +88,7 @@ func newDroppedSegmentRaceServer(t *testing.T) *Server {
 			BuildID:      segID + 10000,
 			IndexState:   state,
 		})
-		s.meta.indexMeta.segmentIndexes.Insert(segID, segIdx)
+		s.indexMeta.SegmentIndexes.Insert(segID, segIdx)
 	}
 	return s
 }
@@ -95,14 +98,14 @@ func newDroppedSegmentRaceServer(t *testing.T) *Server {
 // dropped and its index task is aborted as failed, so the index states read
 // next carry the abort while the snapshot still says Flushed.
 func failIndexAfterSnapshot(segID UniqueID, dropSegment func()) *mockey.Mocker {
-	var origin func(m *indexMeta, collectionID UniqueID, segmentIDs []UniqueID) map[int64]map[int64]*indexpb.SegmentIndexState
-	return mockey.Mock((*indexMeta).getSegmentsIndexStates).To(
-		func(m *indexMeta, collectionID UniqueID, segmentIDs []UniqueID) map[int64]map[int64]*indexpb.SegmentIndexState {
+	var origin func(m *index.IndexMeta, collectionID UniqueID, segmentIDs []UniqueID) map[int64]map[int64]*indexpb.SegmentIndexState
+	return mockey.Mock((*index.IndexMeta).GetSegmentsIndexStates).To(
+		func(m *index.IndexMeta, collectionID UniqueID, segmentIDs []UniqueID) map[int64]map[int64]*indexpb.SegmentIndexState {
 			dropSegment()
-			segIdx, _ := m.segmentIndexes.Get(segID)
+			segIdx, _ := m.SegmentIndexes.Get(segID)
 			idx, _ := segIdx.Get(droppedRaceIndexID)
 			idx.IndexState = commonpb.IndexState_Failed
-			idx.FailReason = indexTaskAbortReasonSegmentDropped
+			idx.FailReason = index.IndexTaskAbortReasonSegmentDropped
 			return origin(m, collectionID, segmentIDs)
 		}).Origin(&origin).Build()
 }
@@ -111,7 +114,7 @@ func dropSegmentInMeta(s *Server, segID UniqueID) func() {
 	return func() {
 		dropped := s.meta.GetSegment(context.Background(), segID).Clone()
 		dropped.State = commonpb.SegmentState_Dropped
-		s.meta.segments.SetSegment(segID, dropped)
+		s.meta.Segments.SetSegment(segID, dropped)
 	}
 }
 
@@ -146,7 +149,7 @@ func TestIndexState_SegmentDroppedAfterSnapshot(t *testing.T) {
 	t.Run("segment removed from meta after snapshot is ignored", func(t *testing.T) {
 		s := newDroppedSegmentRaceServer(t)
 		mocker := failIndexAfterSnapshot(droppedRaceDropSeg, func() {
-			s.meta.segments.DropSegment(droppedRaceDropSeg)
+			s.meta.Segments.DropSegment(droppedRaceDropSeg)
 		})
 		defer mocker.UnPatch()
 
@@ -160,7 +163,7 @@ func TestIndexState_SegmentDroppedAfterSnapshot(t *testing.T) {
 		const outputSeg = UniqueID(1002)
 		mocker := failIndexAfterSnapshot(droppedRaceDropSeg, func() {
 			dropSegmentInMeta(s, droppedRaceDropSeg)()
-			s.meta.segments.SetSegment(outputSeg, NewSegmentInfo(&datapb.SegmentInfo{
+			s.meta.Segments.SetSegment(outputSeg, meta.NewSegmentInfo(&datapb.SegmentInfo{
 				ID:             outputSeg,
 				CollectionID:   droppedRaceCollID,
 				PartitionID:    droppedRacePartID,
@@ -182,7 +185,7 @@ func TestIndexState_SegmentDroppedAfterSnapshot(t *testing.T) {
 		dropSegmentInMeta(s, droppedRaceDropSeg)()
 		mocker := failIndexAfterSnapshot(droppedRaceDropSeg, func() {})
 		defer mocker.UnPatch()
-		getSegment := mockey.Mock((*meta).GetSegment).Return(nil).Build()
+		getSegment := mockey.Mock((*meta.Meta).GetSegment).Return(nil).Build()
 		defer getSegment.UnPatch()
 
 		resp, err := s.GetIndexState(ctx, &indexpb.GetIndexStateRequest{CollectionID: droppedRaceCollID})
@@ -199,6 +202,6 @@ func TestIndexState_SegmentDroppedAfterSnapshot(t *testing.T) {
 		resp, err := s.GetIndexState(ctx, &indexpb.GetIndexStateRequest{CollectionID: droppedRaceCollID})
 		require.NoError(t, err)
 		assert.Equal(t, commonpb.IndexState_Failed, resp.GetState())
-		assert.Contains(t, resp.GetFailReason(), indexTaskAbortReasonSegmentDropped)
+		assert.Contains(t, resp.GetFailReason(), index.IndexTaskAbortReasonSegmentDropped)
 	})
 }

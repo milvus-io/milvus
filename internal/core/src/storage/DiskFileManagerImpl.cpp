@@ -26,6 +26,7 @@
 #include <future>
 #include <iosfwd>
 #include <memory>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <tuple>
@@ -73,7 +74,58 @@ namespace milvus::storage {
 
 namespace {
 std::atomic<uint64_t> g_file_path_generation{0};
+
+// The index ID domain of an element-level VectorArray is its logical
+// elements, excluding null parent rows; the staged payload stays compact.
+void
+AppendVectorArrayElementValidity(const FieldDataPtr& data,
+                                 bool element_nullable,
+                                 std::vector<uint8_t>& bitmap,
+                                 uint64_t& logical_elements) {
+    const auto* rows = dynamic_cast<const FieldData<VectorArray>*>(data.get());
+    AssertInfo(rows != nullptr, "expected VECTOR_ARRAY field data");
+    for (size_t row = 0; row < data->get_valid_rows(); ++row) {
+        const auto* value = rows->value_at(row);
+        if (value->length() < value->physical_length()) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "VECTOR_ARRAY logical length is smaller than payload");
+        }
+        const auto logical = static_cast<uint64_t>(value->length());
+        if (logical >
+            std::numeric_limits<size_t>::max() - 7 - logical_elements) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "VECTOR_ARRAY element validity byte count overflows");
+        }
+        const auto next = logical_elements + logical;
+        if (!element_nullable) {
+            if (value->is_element_nullable() ||
+                value->length() != value->physical_length()) {
+                ThrowInfo(
+                    ErrorCode::DataFormatBroken,
+                    "non-element-nullable VECTOR_ARRAY contains null elements");
+            }
+        } else {
+            bitmap.resize((next + 7) / 8, 0);
+            const auto validity = value->element_validity_view();
+            size_t valid = 0;
+            for (size_t i = 0; i < logical; ++i) {
+                if (!value->is_element_nullable() || validity[i]) {
+                    const auto bit = logical_elements + i;
+                    bitmap[bit >> 3] |= uint8_t{1} << (bit & 7);
+                    ++valid;
+                }
+            }
+            if (valid != static_cast<size_t>(value->physical_length())) {
+                ThrowInfo(
+                    ErrorCode::DataFormatBroken,
+                    "VECTOR_ARRAY element validity disagrees with payload");
+            }
+        }
+        logical_elements = next;
+    }
 }
+
+}  // namespace
 
 struct DiskFileManagerImpl::LocalDirState {
     explicit LocalDirState(std::string dir) : dir(std::move(dir)) {
@@ -682,7 +734,15 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
     // Check if we're dealing with embedding list (VECTOR_ARRAY)
     auto is_embedding_list =
         index::GetValueFromConfig<bool>(config, index::EMB_LIST);
-    bool is_vector_array = is_embedding_list.value_or(false);
+    const bool embedding_list = is_embedding_list.value_or(false);
+    const bool is_vector_array =
+        embedding_list ||
+        index::GetValueFromConfig<milvus::DataType>(config, DATA_TYPE_KEY)
+                .value_or(milvus::DataType::NONE) ==
+            milvus::DataType::VECTOR_ARRAY;
+    const bool element_level = is_vector_array && !embedding_list;
+    const bool element_nullable =
+        element_level && field_meta_.field_schema.element_nullable();
     std::vector<size_t> offsets;
     if (is_vector_array) {
         offsets.push_back(0);  // Initialize with 0 for cumulative offsets
@@ -711,7 +771,14 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
                 auto field_data = codec->GetFieldData();
                 num_rows += uint32_t(field_data->get_valid_rows());
 
-                if (valid_data_path.has_value() && field_data->IsNullable()) {
+                if (element_level) {
+                    nullable = element_nullable;
+                    AppendVectorArrayElementValidity(field_data,
+                                                     element_nullable,
+                                                     valid_bitmap,
+                                                     total_num_rows);
+                } else if (valid_data_path.has_value() &&
+                           field_data->IsNullable()) {
                     nullable = true;
                     auto rows = field_data->get_num_rows();
                     if (rows > 0) {
@@ -758,6 +825,9 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
     // For vector arrays, num_rows should be the total flattened vector count,
     // not the number of emb_lists, because DiskANN reads this from the data file header.
     if (is_vector_array) {
+        AssertInfo(
+            offsets.back() <= std::numeric_limits<uint32_t>::max(),
+            "VECTOR_ARRAY physical element count exceeds disk wire format");
         num_rows = static_cast<uint32_t>(offsets.back());
     }
 
@@ -769,8 +839,8 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
     local_chunk_manager->Write(
         local_data_path, write_offset, &dim, sizeof(dim));
 
-    // Write offsets file for VECTOR_ARRAY
-    if (is_vector_array) {
+    // Persist list offsets only for embedding-list metrics.
+    if (embedding_list) {
         AssertInfo(
             !offsets.empty() && offsets.front() == 0,
             "invalid emb_list offsets: size {}, front {}",
@@ -962,7 +1032,15 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
     // Check if we're dealing with embedding list (VECTOR_ARRAY)
     auto is_embedding_list =
         index::GetValueFromConfig<bool>(config, index::EMB_LIST);
-    bool is_vector_array = is_embedding_list.value_or(false);
+    const bool embedding_list = is_embedding_list.value_or(false);
+    const bool is_vector_array =
+        embedding_list ||
+        index::GetValueFromConfig<milvus::DataType>(config, DATA_TYPE_KEY)
+                .value_or(milvus::DataType::NONE) ==
+            milvus::DataType::VECTOR_ARRAY;
+    const bool element_level = is_vector_array && !embedding_list;
+    const bool element_nullable =
+        element_level && field_meta_.field_schema.element_nullable();
     std::vector<size_t> offsets;
     if (is_vector_array) {
         offsets.push_back(0);  // Initialize with 0 for cumulative offsets
@@ -990,7 +1068,11 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
     // the field schema), so growth from the first batch covers all rows.
     auto consume_field_data = [&](const FieldDataPtr& field_data) {
         num_rows += uint32_t(field_data->get_valid_rows());
-        if (valid_data_path.has_value()) {
+        if (element_level) {
+            nullable = element_nullable;
+            AppendVectorArrayElementValidity(
+                field_data, element_nullable, valid_bitmap, total_num_rows);
+        } else if (valid_data_path.has_value()) {
             auto rows = field_data->get_num_rows();
             if (field_data->IsNullable()) {
                 nullable = true;
@@ -1055,6 +1137,9 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
     // For vector arrays, num_rows should be the total flattened vector count,
     // not the number of emb_lists, because DiskANN reads this from the data file header.
     if (is_vector_array) {
+        AssertInfo(
+            offsets.back() <= std::numeric_limits<uint32_t>::max(),
+            "VECTOR_ARRAY physical element count exceeds disk wire format");
         num_rows = static_cast<uint32_t>(offsets.back());
     }
 
@@ -1066,8 +1151,8 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
     local_chunk_manager->Write(
         local_data_path, write_offset, &var_dim, sizeof(var_dim));
 
-    // Write offsets file for VECTOR_ARRAY
-    if (is_vector_array) {
+    // Persist list offsets only for embedding-list metrics.
+    if (embedding_list) {
         AssertInfo(
             !offsets.empty() && offsets.front() == 0,
             "invalid emb_list offsets: size {}, front {}",

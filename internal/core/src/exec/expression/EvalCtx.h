@@ -19,6 +19,7 @@
 #include <cassert>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "common/Vector.h"
@@ -61,6 +62,11 @@ class EvalCtx {
     inline void
     set_bitmap_input(TargetBitmap&& bitmap_input) {
         bitmap_input_ = std::move(bitmap_input);
+    }
+
+    inline TargetBitmap
+    take_bitmap_input() {
+        return std::exchange(bitmap_input_, TargetBitmap{});
     }
 
     inline const TargetBitmap&

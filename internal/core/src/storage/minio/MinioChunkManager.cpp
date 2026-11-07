@@ -18,7 +18,6 @@
 
 #include <aws/core/auth/AWSCredentials.h>
 #include <aws/core/auth/AWSCredentialsProvider.h>
-#include <aws/core/auth/AWSCredentialsProviderChain.h>
 #include <aws/s3/model/CreateBucketRequest.h>
 #include <aws/s3/model/DeleteBucketRequest.h>
 #include <aws/s3/model/DeleteObjectRequest.h>
@@ -32,6 +31,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstdlib>
 #include <exception>
 #include <functional>
 #include <mutex>
@@ -60,6 +60,7 @@
 #include "milvus-storage/common/extend_status.h"
 #include "milvus-storage/filesystem/gcp/gcp_credential_registry.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/filesystem/s3/s3_filesystem_producer.h"
 #include "monitor/Monitor.h"
 #include "prometheus/counter.h"
 #include "prometheus/histogram.h"
@@ -73,6 +74,11 @@ std::atomic<size_t> MinioChunkManager::init_count_(0);
 std::mutex MinioChunkManager::client_mutex_;
 
 namespace {
+
+// The options the SDK was last initialized with: Aws::ShutdownAPI undoes what
+// Aws::InitAPI set up from them.
+Aws::SDKOptions sdk_options_at_init;
+std::once_flag release_sdk_at_exit;
 
 std::mutex&
 GcsEndpointsMutex() {
@@ -309,7 +315,7 @@ MinioChunkManager::InitSDKAPI(RemoteStorageType type,
         sdk_options_.loggingOptions.logger_create_fn = [log_level]() {
             return std::make_shared<AwsLogger>(log_level);
         };
-        Aws::InitAPI(sdk_options_);
+        InitSDKAPIUntilExit(sdk_options_);
     }
 }
 
@@ -362,7 +368,7 @@ MinioChunkManager::InitSDKAPIDefault(const std::string& log_level_str,
         sdk_options_.loggingOptions.logger_create_fn = [log_level]() {
             return std::make_shared<AwsLogger>(log_level);
         };
-        Aws::InitAPI(sdk_options_);
+        InitSDKAPIUntilExit(sdk_options_);
     }
 }
 
@@ -375,20 +381,46 @@ MinioChunkManager::ShutdownSDKAPI() {
     }
 }
 
+// MinioChunkManagers share one reference to the AWS SDK. The first manager
+// takes it, and managers coming and going do not release it, since the SDK
+// would then have to be initialized again for the next one (#42459). It is
+// released when the process exits instead. A Go process ends with exit_group
+// and runs no exit handlers, but a host process that runs them would
+// otherwise destroy the SDK's static objects while the SDK is still
+// initialized: the default client bootstrap then shuts down from its static
+// destructor, and the cleanup thread that starts races the destruction of the
+// SDK's log redirection (a SIGSEGV in s_aws_logger_redirect_get_log_level).
+// Aws::ShutdownAPI counts references, so whichever holder releases the SDK
+// last shuts it down, this one or milvus-storage's own release at exit.
+void
+MinioChunkManager::InitSDKAPIUntilExit(const Aws::SDKOptions& options) {
+    Aws::InitAPI(options);
+    sdk_options_at_init = options;
+    std::call_once(release_sdk_at_exit,
+                   [] { std::atexit(MinioChunkManager::ReleaseSDKAPIAtExit); });
+}
+
+void
+MinioChunkManager::ReleaseSDKAPIAtExit() {
+    std::scoped_lock lock{client_mutex_};
+    // ShutdownSDKAPI may have released the reference already.
+    if (init_count_.exchange(0) > 0) {
+        Aws::ShutdownAPI(sdk_options_at_init);
+    }
+}
+
 void
 MinioChunkManager::BuildS3Client(
     const StorageConfig& storage_config,
     const Aws::Client::ClientConfiguration& config) {
     if (storage_config.useIAM) {
         auto provider =
-            std::make_shared<Aws::Auth::DefaultAWSCredentialsProviderChain>();
+            std::make_shared<milvus_storage::AwsCredentialsProviderChain>();
         auto aws_credentials = provider->GetAWSCredentials();
         AssertInfo(!aws_credentials.GetAWSAccessKeyId().empty(),
                    "if use iam, access key id should not be empty");
         AssertInfo(!aws_credentials.GetAWSSecretKey().empty(),
                    "if use iam, secret key should not be empty");
-        AssertInfo(!aws_credentials.GetSessionToken().empty(),
-                   "if use iam, token should not be empty");
 
         client_ = std::make_shared<Aws::S3::S3Client>(
             provider,
@@ -513,7 +545,15 @@ MinioChunkManager::BuildGoogleCloudClient(
                 MilvusGcpProviders().emplace(key, provider).first->second;
         }
     }
-    milvus_storage::GcpCredentialRegistry::Instance().Register(key, provider);
+    // Milvus's primary storage endpoint comes from operator configuration.
+    auto registered =
+        milvus_storage::GcpCredentialRegistry::Instance().Register(
+            key, provider, /*trusted_endpoint=*/true);
+    if (!registered.ok()) {
+        ThrowInfo(ErrorCode::ConfigInvalid,
+                  "failed to register GCP credentials: {}",
+                  registered.message());
+    }
     AddGcsEndpointForCredentials(storage_config.address, storage_config.useSSL);
 
     if (storage_config.useIAM) {
@@ -638,7 +678,7 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
 
 MinioChunkManager::~MinioChunkManager() {
     client_.reset();
-    // ShutdownSDKAPI();
+    // The SDK reference outlives the manager: see InitSDKAPIUntilExit.
 }
 
 uint64_t

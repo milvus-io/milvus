@@ -2366,9 +2366,6 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	metrics.ProxyMutationLatency.
 		WithLabelValues(nodeID, metrics.InsertLabel, dbName, collectionName).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.ProxyCollectionMutationLatency.
-		WithLabelValues(nodeID, metrics.InsertLabel, dbName, collectionName).
-		Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return it.Result(), nil
 }
 
@@ -2463,7 +2460,6 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	metrics.ProxyMutationLatency.
 		WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.ProxyCollectionMutationLatency.WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return dr.Result(), nil
 }
 
@@ -2585,7 +2581,6 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	metrics.ProxyMutationLatency.
 		WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.ProxyCollectionMutationLatency.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	mlog.Debug(context.TODO(), "Finish processing upsert request in Proxy")
 	return it.Result(), nil
@@ -2809,14 +2804,8 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		collectionName,
 	).Observe(float64(searchDur))
 
-	metrics.ProxyCollectionSQLatency.WithLabelValues(
-		nodeID,
-		metrics.SearchLabel,
-		dbName,
-		collectionName,
-	).Observe(float64(searchDur))
-
 	observeResourceGroupSQLatency(ctx, metrics.SearchLabel, dbName, collectionName, searchDur)
+	observeResourceGroupSearchVectors(ctx, dbName, collectionName, qt.Result().GetResults().GetNumQueries())
 
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
 		metrics.ProxyScannedRemoteMB.WithLabelValues(
@@ -3025,14 +3014,8 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		collectionName,
 	).Observe(float64(searchDur))
 
-	metrics.ProxyCollectionSQLatency.WithLabelValues(
-		nodeID,
-		metrics.HybridSearchLabel,
-		dbName,
-		collectionName,
-	).Observe(float64(searchDur))
-
 	observeResourceGroupSQLatency(ctx, metrics.HybridSearchLabel, dbName, collectionName, searchDur)
+	observeResourceGroupSearchVectors(ctx, dbName, collectionName, int64(len(request.GetRequests())*int(qt.GetNq())))
 
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
 		metrics.ProxyScannedRemoteMB.WithLabelValues(
@@ -3620,13 +3603,6 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 			queryLabel,
 			request.GetDbName(),
 			request.GetCollectionName(),
-		).Observe(float64(tr.ElapseSpan().Milliseconds()))
-
-		metrics.ProxyCollectionSQLatency.WithLabelValues(
-			strconv.FormatInt(paramtable.GetNodeID(), 10),
-			queryLabel,
-			request.DbName,
-			request.CollectionName,
 		).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 		observeResourceGroupSQLatency(ctx, queryLabel, request.GetDbName(), request.GetCollectionName(),
@@ -5636,10 +5612,10 @@ func (node *Proxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Refr
 
 	priCache := privilege.GetPrivilegeCache()
 	if priCache != nil {
-		err := priCache.RefreshPolicyInfo(typeutil.CacheOp{
+		err := priCache.RefreshPolicyInfoWithVisibility(typeutil.CacheOp{
 			OpType: typeutil.CacheOpType(req.OpType),
 			OpKey:  req.OpKey,
-		})
+		}, req.GetCollectionVisibility())
 		if err != nil {
 			mlog.Warn(ctx, "fail to refresh policy info",
 				mlog.Err(err))

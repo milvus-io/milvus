@@ -23,10 +23,12 @@
 #include <vector>
 
 #include "common/EasyAssert.h"
+#include "common/ArrayValue.h"
 #include "common/OpContext.h"
 #include "common/Schema.h"
 #include "common/Types.h"
 #include "common/Utils.h"
+#include "common/VectorArray.h"
 #include "common/protobuf_utils.h"
 #include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
@@ -38,6 +40,168 @@
 #include "segcore/InsertRecord.h"
 #include "segcore/Record.h"
 #include "segcore/Utils.h"
+
+// A sub-field missing from a segment reads as one dense row per output row:
+// a null struct row is an empty placeholder with row validity false, and a
+// valid row holds its element count of null elements, in the format a stored
+// column of the sub-field returns.
+TEST(Util_Segcore, DenseNullStructSubFieldRows) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+    // Rows: 3 elements, empty, NULL struct row, 2 elements.
+    const int32_t lengths[] = {3, 0, 0, 2};
+    constexpr int64_t kRows = 4;
+    auto valid = [](int64_t row) { return row != 2; };
+    auto expect_row_validity = [&](const DataArray& data) {
+        const auto& validity = GetFieldDataRowValidData(data);
+        ASSERT_EQ(validity.size(), kRows);
+        for (int64_t i = 0; i < kRows; ++i) {
+            EXPECT_EQ(validity.Get(i), valid(i)) << "row " << i;
+        }
+        // The boundary sync writes the same mask to FieldData.valid_data.
+        DataArray synced = data;
+        SyncFieldDataRowValidData(&synced);
+        ASSERT_EQ(synced.valid_data_size(), kRows);
+        for (int64_t i = 0; i < kRows; ++i) {
+            EXPECT_EQ(synced.valid_data(i), valid(i)) << "row " << i;
+        }
+    };
+    auto expect_all_null = [](const google::protobuf::RepeatedField<bool>& v,
+                              int32_t length,
+                              int64_t row) {
+        ASSERT_EQ(v.size(), length) << "row " << row;
+        for (bool element_valid : v) {
+            EXPECT_FALSE(element_valid) << "row " << row;
+        }
+    };
+
+    FieldMeta scalar(FieldName("items[scalar]"),
+                     FieldId(1501),
+                     DataType::ARRAY,
+                     DataType::INT64,
+                     true,
+                     true,
+                     std::nullopt);
+    auto scalar_data =
+        CreateNullStructSubFieldDataArray(scalar, lengths, kRows, valid);
+    expect_row_validity(*scalar_data);
+    ASSERT_EQ(scalar_data->scalars().array_data().data_size(), kRows);
+    EXPECT_EQ(scalar_data->scalars().array_data().element_type(),
+              proto::schema::DataType::Int64);
+    for (int64_t i = 0; i < kRows; ++i) {
+        const auto& row = scalar_data->scalars().array_data().data(i);
+        if (!valid(i)) {
+            EXPECT_EQ(row.data_case(),
+                      proto::schema::ScalarField::DATA_NOT_SET);
+            EXPECT_EQ(row.valid_data_size(), 0);
+            continue;
+        }
+        ASSERT_TRUE(row.has_long_data()) << "row " << i;
+        ASSERT_EQ(row.long_data().data_size(), lengths[i]) << "row " << i;
+        for (auto value : row.long_data().data()) {
+            EXPECT_EQ(value, 0);
+        }
+        expect_all_null(row.valid_data(), lengths[i], i);
+        auto value = ArrayValue::FromProto(row, scalar.get_array_type_schema());
+        EXPECT_EQ(value.size(), lengths[i]);
+    }
+
+    FieldMeta varchar(FieldName("items[varchar]"),
+                      FieldId(1504),
+                      DataType::ARRAY,
+                      DataType::VARCHAR,
+                      true,
+                      true,
+                      std::nullopt);
+    auto varchar_data =
+        CreateNullStructSubFieldDataArray(varchar, lengths, kRows, valid);
+    expect_row_validity(*varchar_data);
+    ASSERT_EQ(varchar_data->scalars().array_data().data_size(), kRows);
+    for (int64_t i = 0; i < kRows; ++i) {
+        const auto& row = varchar_data->scalars().array_data().data(i);
+        if (!valid(i)) {
+            EXPECT_EQ(row.data_case(),
+                      proto::schema::ScalarField::DATA_NOT_SET);
+            continue;
+        }
+        ASSERT_TRUE(row.has_string_data()) << "row " << i;
+        ASSERT_EQ(row.string_data().data_size(), lengths[i]) << "row " << i;
+        for (const auto& value : row.string_data().data()) {
+            EXPECT_TRUE(value.empty());
+        }
+        expect_all_null(row.valid_data(), lengths[i], i);
+    }
+
+    proto::schema::TypeSchema nested_type;
+    nested_type.set_nullable(true);
+    auto* inner = nested_type.mutable_array_element();
+    inner->set_nullable(true);
+    inner->mutable_array_element()->set_leaf_type(
+        proto::schema::DataType::Int32);
+    FieldMeta nested(FieldName("items[nested]"),
+                     FieldId(1502),
+                     DataType::ARRAY,
+                     DataType::ARRAY,
+                     true,
+                     true,
+                     std::nullopt,
+                     "",
+                     nested_type);
+    auto nested_data =
+        CreateNullStructSubFieldDataArray(nested, lengths, kRows, valid);
+    expect_row_validity(*nested_data);
+    ASSERT_EQ(nested_data->scalars().array_data().data_size(), kRows);
+    EXPECT_EQ(nested_data->scalars().array_data().element_type(),
+              proto::schema::DataType::Array);
+    for (int64_t i = 0; i < kRows; ++i) {
+        const auto& row = nested_data->scalars().array_data().data(i);
+        if (!valid(i)) {
+            EXPECT_EQ(row.data_case(),
+                      proto::schema::ScalarField::DATA_NOT_SET);
+            continue;
+        }
+        ASSERT_TRUE(row.has_array_data()) << "row " << i;
+        EXPECT_EQ(row.array_data().element_type(),
+                  proto::schema::DataType::Int32);
+        ASSERT_EQ(row.array_data().data_size(), lengths[i]) << "row " << i;
+        // Each null inner Array is an empty Int32 ScalarField.
+        for (const auto& inner_array : row.array_data().data()) {
+            EXPECT_TRUE(inner_array.has_int_data());
+            EXPECT_EQ(inner_array.int_data().data_size(), 0);
+            EXPECT_EQ(inner_array.valid_data_size(), 0);
+        }
+        expect_all_null(row.valid_data(), lengths[i], i);
+        auto value = ArrayValue::FromProto(row, nested_type);
+        EXPECT_EQ(value.size(), lengths[i]);
+    }
+
+    FieldMeta vectors(FieldName("items[vectors]"),
+                      FieldId(1503),
+                      DataType::VECTOR_ARRAY,
+                      DataType::VECTOR_FLOAT,
+                      4,
+                      std::nullopt,
+                      true,
+                      true);
+    auto vector_data =
+        CreateNullStructSubFieldDataArray(vectors, lengths, kRows, valid);
+    expect_row_validity(*vector_data);
+    ASSERT_EQ(vector_data->vectors().vector_array().data_size(), kRows);
+    for (int64_t i = 0; i < kRows; ++i) {
+        const auto& row = vector_data->vectors().vector_array().data(i);
+        EXPECT_EQ(row.dim(), 4);
+        ASSERT_TRUE(row.has_float_vector()) << "row " << i;
+        EXPECT_EQ(row.float_vector().data_size(), 0);
+        if (!valid(i)) {
+            EXPECT_EQ(row.valid_data_size(), 0);
+            continue;
+        }
+        expect_all_null(row.valid_data(), lengths[i], i);
+        milvus::VectorArray value(row, true);
+        EXPECT_EQ(value.length(), lengths[i]);
+        EXPECT_EQ(value.physical_length(), 0);
+    }
+}
 
 TEST(Util_Segcore, UpperBound) {
     using milvus::Timestamp;

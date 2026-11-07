@@ -203,11 +203,13 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
     // step 1.2: get which vector field to search
     auto vecfield_id = info.field_id_;
     auto& field = (*schema)[vecfield_id];
+    // Element-nullable VECTOR_ARRAY supports element-level search only.
     if (field.get_data_type() == DataType::VECTOR_ARRAY &&
-        field.is_element_nullable()) {
+        field.is_element_nullable() &&
+        info.struct_element_offsets_ == nullptr) {
         ThrowInfo(NotImplemented,
-                  "search on element-nullable VECTOR_ARRAY fields is not "
-                  "supported");
+                  "embedding list search on element-nullable VECTOR_ARRAY "
+                  "fields is not supported");
     }
     CheckBruteForceSearchParam(field, info);
 
@@ -326,8 +328,20 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
             data_type == DataType::VECTOR_ARRAY &&
             info.struct_element_offsets_ != nullptr;
         search_result.element_level_ = is_element_level_search;
+        const bool has_element_id_mapping =
+            is_element_level_search && field.is_element_nullable();
         const auto has_offset_mapping =
             offset_mapping.IsEnabled() && !is_element_level_search;
+
+        const auto* vector_array_column =
+            data_type == DataType::VECTOR_ARRAY
+                ? dynamic_cast<const segcore::ConcurrentVector<VectorArray>*>(
+                      vec_ptr)
+                : nullptr;
+        AssertInfo(
+            data_type != DataType::VECTOR_ARRAY ||
+                vector_array_column != nullptr,
+            "VECTOR_ARRAY growing column has an unexpected storage type");
 
         BitsetView search_bitset = bitset;
 
@@ -394,7 +408,8 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                                              info,
                                              index_info,
                                              search_bitset,
-                                             iter_data_type);
+                                             iter_data_type,
+                                             has_element_id_mapping);
             cached_iter.NextBatch(info, search_result);
             FinalizeVectorSearchOffsets(search_result,
                                         info.struct_element_offsets_.get());
@@ -412,8 +427,9 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
 
         // Track cumulative element offset for element-level search.
         // begin_id must be the cumulative element count (not row offset),
-        // because StructElementOffsets maps global element IDs to row IDs.
+        // because ArrayOffsets maps global element IDs to row IDs.
         int64_t cumulative_element_offset = 0;
+        int64_t cumulative_logical_element_offset = 0;
         int bf_chunk_count = 0;
 
         std::vector<size_t> offsets;
@@ -435,58 +451,68 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                     AssertInfo(!id_view.empty(),
                                "empty id map view for non-empty BF range");
                     size_per_chunk = id_view.count;
-                    range_data = AdvanceVectorDataPointer(
-                        chunk_data, data_type, dim, range_begin - row_begin);
+                    if (data_type == DataType::VECTOR_ARRAY) {
+                        range_data =
+                            static_cast<const VectorArrayView*>(chunk_data) +
+                            (range_begin - row_begin);
+                    } else {
+                        range_data =
+                            AdvanceVectorDataPointer(chunk_data,
+                                                     data_type,
+                                                     dim,
+                                                     range_begin - row_begin);
+                    }
                 }
                 auto chunk_bitset =
                     AttachOffsetMappingIds(search_bitset, id_view);
 
                 query::dataset::RawDataset sub_data;
                 std::unique_ptr<uint8_t[]> buf = nullptr;
+                std::shared_ptr<std::vector<int32_t>> element_ids;
                 if (data_type != DataType::VECTOR_ARRAY) {
                     sub_data = query::dataset::RawDataset{
                         range_begin, dim, size_per_chunk, range_data};
                 } else {
-                    // TODO(SpadeA): For VectorArray(Embedding List), data is
-                    // discreted stored in FixedVector which means we will copy the
-                    // data to a contiguous memory buffer. This is inefficient and
-                    // will be optimized in the future.
-                    auto vec_ptr =
-                        reinterpret_cast<const VectorArray*>(range_data);
-                    auto size = 0;
-                    for (int i = 0; i < size_per_chunk; ++i) {
-                        size += vec_ptr[i].byte_size();
-                    }
-
-                    buf = std::make_unique<uint8_t[]>(size);
-
+                    auto flat = FlattenVectorArrayRows(
+                        static_cast<const VectorArrayView*>(range_data),
+                        size_per_chunk,
+                        !is_element_level_search);
+                    buf = std::move(flat.payload);
                     if (is_element_level_search) {
-                        auto count = 0;
-                        auto ptr = buf.get();
-                        for (int i = 0; i < size_per_chunk; ++i) {
-                            milvus::fastmem::FastMemcpy(
-                                ptr, vec_ptr[i].data(), vec_ptr[i].byte_size());
-                            ptr += vec_ptr[i].byte_size();
-                            count += vec_ptr[i].physical_length();
-                        }
                         sub_data = query::dataset::RawDataset{
-                            cumulative_element_offset, dim, count, buf.get()};
-                        cumulative_element_offset += count;
-                    } else {
-                        offsets.clear();
-                        offsets.reserve(size_per_chunk + 1);
-                        offsets.push_back(0);
-
-                        auto offset = 0;
-                        auto ptr = buf.get();
-                        for (int i = 0; i < size_per_chunk; ++i) {
-                            milvus::fastmem::FastMemcpy(
-                                ptr, vec_ptr[i].data(), vec_ptr[i].byte_size());
-                            ptr += vec_ptr[i].byte_size();
-
-                            offset += vec_ptr[i].physical_length();
-                            offsets.push_back(offset);
+                            cumulative_element_offset,
+                            dim,
+                            flat.element_count,
+                            buf.get()};
+                        cumulative_element_offset += flat.element_count;
+                        if (has_element_id_mapping) {
+                            auto ids = std::make_shared<std::vector<int32_t>>();
+                            ids->reserve(flat.element_count);
+                            cumulative_logical_element_offset +=
+                                AppendVectorArrayElementIds(
+                                    static_cast<const VectorArrayView*>(
+                                        range_data),
+                                    size_per_chunk,
+                                    cumulative_logical_element_offset,
+                                    *ids);
+                            AssertInfo(static_cast<int64_t>(ids->size()) ==
+                                           flat.element_count,
+                                       "element id map has {} ids, expected {}",
+                                       ids->size(),
+                                       flat.element_count);
+                            chunk_bitset = AttachOffsetMappingIds(
+                                search_bitset,
+                                OffsetMappingIdView{
+                                    ids->data(),
+                                    static_cast<int64_t>(ids->size())});
+                            // Vector iterators read the ids after this call.
+                            if (use_vector_iterator) {
+                                search_result.resource_pins_.emplace_back(ids);
+                            }
+                            element_ids = std::move(ids);
                         }
+                    } else {
+                        offsets = std::move(flat.row_offsets);
                         sub_data = query::dataset::RawDataset{range_begin,
                                                               dim,
                                                               size_per_chunk,

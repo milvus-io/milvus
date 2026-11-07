@@ -18,8 +18,10 @@
 
 #include <algorithm>
 #include <bit>
+#include <charconv>
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -79,6 +81,81 @@ PinIndex(milvus::OpContext* op_ctx,
         return segment->PinIndex(op_ctx, field_meta.get_id());
     }
 }
+
+// Logical element count of one ARRAY row, null elements included.
+template <typename ArrayType>
+inline size_t
+ArrayRowLength(const ArrayType& row) {
+    if constexpr (std::is_same_v<ArrayType, ArrayValueView>) {
+        return row.size();
+    } else {
+        return static_cast<size_t>(row.length());
+    }
+}
+
+// Subscript of an ARRAY operand (`a[i]`, `s[i][x]`), parsed from
+// nested_path[0]. kWholeArrayOperand: no subscript, the operand is the whole
+// row.
+inline constexpr int kWholeArrayOperand = -1;
+// A subscript that names no element: above INT_MAX or negative. It is never
+// kWholeArrayOperand, and HasArrayElementAt / NestedArrayElementAt treat it as
+// out of bounds, so the operand is UNKNOWN.
+inline constexpr int kArraySubscriptOutOfRange =
+    std::numeric_limits<int>::max();
+
+inline int
+ParseArraySubscript(const std::vector<std::string>& nested_path) {
+    if (nested_path.empty()) {
+        return kWholeArrayOperand;
+    }
+    const auto& text = nested_path[0];
+    const char* last = text.data() + text.size();
+    int index = 0;
+    const auto [end, ec] = std::from_chars(text.data(), last, index);
+    // The plan parser emits only decimal digits here.
+    AssertInfo(ec != std::errc::invalid_argument && end == last,
+               "invalid array subscript '{}'",
+               text);
+    if (ec == std::errc::result_out_of_range || index < 0) {
+        return kArraySubscriptOutOfRange;
+    }
+    return index;
+}
+
+// Whether row[index] is a non-null element. A subscript that misses (out of
+// bounds or a null element) evaluates to UNKNOWN.
+template <typename ArrayType>
+inline bool
+HasArrayElementAt(const ArrayType& row, int index) {
+    if (index < 0 || index == kArraySubscriptOutOfRange ||
+        static_cast<size_t>(index) >= ArrayRowLength(row)) {
+        return false;
+    }
+    if constexpr (std::is_same_v<ArrayType, ArrayValueView>) {
+        return row.is_valid(index);
+    } else {
+        return true;
+    }
+}
+
+// `s[i][tags]` on a nested Array field: the inner Array of struct element i,
+// or nullopt (NULL) when element i is missing or null.
+inline std::optional<ArrayValueView>
+NestedArrayElementAt(const ArrayValueView& row, int index) {
+    if (index < 0 || index == kArraySubscriptOutOfRange ||
+        static_cast<size_t>(index) >= row.size()) {
+        return std::nullopt;
+    }
+    auto inner = row.array_at(index);
+    if (inner.is_null()) {
+        return std::nullopt;
+    }
+    return inner;
+}
+
+// ElementType of an element-level visit that reads element validity only.
+// Its batches carry a placeholder data pointer that must not be read.
+struct ElementValidityOnly {};
 
 // Mask null rows out of a filter result: wherever valid_data marks a row null
 // (false), clear both the result bit and the validity bit. No-op when
@@ -348,6 +425,10 @@ class SegmentExpr : public Expr {
         auto schema = segment_->get_schema_snapshot();
         auto& field_meta = (*schema)[field_id_];
         field_type_ = field_meta.get_data_type();
+        is_native_list_array_ = field_meta.get_data_type() == DataType::ARRAY &&
+                                field_meta.is_native_list_array();
+        is_nested_array_field_ = field_meta.is_nested_array();
+        is_element_nullable_ = field_meta.is_element_nullable();
 
         if (schema->get_primary_field_id().has_value() &&
             schema->get_primary_field_id().value() == field_id_ &&
@@ -382,9 +463,11 @@ class SegmentExpr : public Expr {
 
     // Pin the scalar index cell. Called by DetermineExecPath() only after the
     // expression has committed to ExprExecPath::ScalarIndex, so the pin's
-    // lifetime matches real usage: short-circuit paths
-    // (TextIndex/PkIndex/JsonStats) and the RawData path never call it and
-    // the scalar index cell stays cold in tiered storage. Idempotent.
+    // lifetime matches real usage: the short-circuit paths (TextIndex/PkIndex)
+    // and a RawData outcome decided before the pin never call it, and the
+    // scalar index cell stays cold in tiered storage. A JsonStats outcome is
+    // the fallback for RawData, so it can follow a pin whose index an
+    // expression then rejected. Idempotent.
     void
     EnsurePinnedIndex() {
         if (pinned_index_initialized_) {
@@ -968,7 +1051,8 @@ class SegmentExpr : public Expr {
         const bool has_candidate_mask = !candidate_mask.empty();
         AssertInfo(!has_candidate_mask ||
                        candidate_mask.size() == static_cast<size_t>(batch_size),
-                   "candidate mask size {} does not match offset batch size {}",
+                   "candidate mask size {} does not match offset batch size "
+                   "{}",
                    candidate_mask.size(),
                    batch_size);
 
@@ -1033,7 +1117,8 @@ class SegmentExpr : public Expr {
         const bool has_candidate_mask =
             candidate_mask != nullptr && !candidate_mask->empty();
         AssertInfo(!has_candidate_mask || candidate_mask->size() == batch_size,
-                   "candidate mask size {} does not match offset batch size {}",
+                   "candidate mask size {} does not match offset batch size "
+                   "{}",
                    candidate_mask == nullptr ? 0 : candidate_mask->size(),
                    batch_size);
 
@@ -1242,9 +1327,9 @@ class SegmentExpr : public Expr {
                 int64_t offset = (*input)[i];
                 auto [chunk_id, chunk_offset] =
                     GetChunkByOffset(field_id_, offset);
-                // chunk_data<VectorArrayView> would read the wrong layout:
-                // storage holds VectorArray, and nullable rows may be compacted.
-                // Use chunk_view to build logical VectorArrayView rows.
+                // chunk_data<VectorArrayView> would address physical rows, and
+                // nullable rows may be compacted. Use chunk_view to build
+                // logical VectorArrayView rows.
                 auto pw = GetChunkView<VectorArrayView>(
                     field_id_,
                     chunk_id,
@@ -1414,18 +1499,27 @@ class SegmentExpr : public Expr {
         }
     }
 
+    // std::vector<bool> has no data(), so bool elements use FixedVector.
+    template <typename ElementType>
+    using ElementValueBuffer =
+        std::conditional_t<std::is_same_v<ElementType, bool>,
+                           FixedVector<bool>,
+                           std::vector<ElementType>>;
+
     // Normalize one physical ARRAY row into batches of logical ElementType.
     // Scalar ARRAY rows expose their leaf payload, while recursive ARRAY rows
     // expose their child ArrayValueView values. The caller only sees the
-    // uniform (data, valid_data, size) batch contract.
+    // uniform (data, valid_data, size) batch contract. A null element is
+    // reported through valid_data; its value slot is a default value.
     template <typename ElementType, typename RowType, typename Consumer>
     static void
     VisitArrayElementRun(const RowType& row,
                          int32_t first_element,
                          int32_t length,
-                         std::vector<ElementType>& value_buffer,
+                         ElementValueBuffer<ElementType>& value_buffer,
                          FixedVector<bool>& valid_buffer,
                          Consumer&& consume) {
+        using Row = std::remove_cvref_t<RowType>;
         const auto row_size = GetArrayRowSize(row);
         const auto range_end = static_cast<int64_t>(first_element) + length;
         AssertInfo(first_element >= 0 && length >= 0 &&
@@ -1438,25 +1532,67 @@ class SegmentExpr : public Expr {
             return;
         }
 
-        if constexpr (std::is_same_v<std::remove_cvref_t<RowType>,
-                                     ArrayValueView>) {
-            value_buffer.clear();
+        // Collect the run's element validity; returns false when it has no
+        // null element.
+        [[maybe_unused]] auto collect_validity = [&](auto&& is_valid) {
             valid_buffer.clear();
-            value_buffer.reserve(static_cast<size_t>(length));
             valid_buffer.reserve(static_cast<size_t>(length));
-
             bool has_null = false;
             for (int32_t i = 0; i < length; ++i) {
-                auto child = row.array_at(first_element + i);
-                const bool valid = !child.is_null();
+                const bool valid = is_valid(first_element + i);
                 has_null = has_null || !valid;
                 valid_buffer.push_back(valid);
-                value_buffer.push_back(std::move(child));
             }
-            consume(value_buffer.data(),
-                    has_null ? ValidityView::FromExpanded(valid_buffer.data())
-                             : ValidityView{},
-                    length);
+            return has_null;
+        };
+        [[maybe_unused]] auto validity = [&](bool has_null) {
+            return has_null ? ValidityView::FromExpanded(valid_buffer.data())
+                            : ValidityView{};
+        };
+
+        if constexpr (std::is_same_v<ElementType, ElementValidityOnly>) {
+            static constexpr ElementValidityOnly kPlaceholder{};
+            bool has_null = false;
+            if constexpr (std::is_same_v<Row, ArrayValueView>) {
+                has_null = collect_validity(
+                    [&](int32_t j) { return row.is_valid(j); });
+            } else if constexpr (std::is_same_v<Row, VectorArrayView>) {
+                if (row.is_element_nullable()) {
+                    const auto& element_valid = row.element_validity_view();
+                    has_null = collect_validity(
+                        [&](int32_t j) { return bool(element_valid[j]); });
+                }
+            }
+            // Legacy ArrayView rows cannot hold a null element.
+            consume(&kPlaceholder, validity(has_null), length);
+        } else if constexpr (std::is_same_v<Row, ArrayValueView> &&
+                             std::is_same_v<ElementType, ArrayValueView>) {
+            // Recursive ARRAY: each element is an inner Array, null when the
+            // inner Array itself is NULL.
+            value_buffer.clear();
+            value_buffer.reserve(static_cast<size_t>(length));
+            for (int32_t i = 0; i < length; ++i) {
+                value_buffer.push_back(row.array_at(first_element + i));
+            }
+            const bool has_null = collect_validity([&](int32_t j) {
+                return !value_buffer[j - first_element].is_null();
+            });
+            consume(value_buffer.data(), validity(has_null), length);
+        } else if constexpr (std::is_same_v<Row, ArrayValueView>) {
+            // Element-nullable scalar ARRAY: null leaves keep their logical
+            // slot and are reported invalid.
+            value_buffer.clear();
+            value_buffer.reserve(static_cast<size_t>(length));
+            const bool has_null =
+                collect_validity([&](int32_t j) { return row.is_valid(j); });
+            for (int32_t i = 0; i < length; ++i) {
+                value_buffer.push_back(
+                    valid_buffer[i]
+                        ? row.template get_data_unchecked<ElementType>(
+                              first_element + i)
+                        : ElementType{});
+            }
+            consume(value_buffer.data(), validity(has_null), length);
         } else if constexpr (std::is_same_v<ElementType, std::string_view> ||
                              std::is_same_v<ElementType, std::string> ||
                              std::is_same_v<ElementType, int8_t> ||
@@ -1491,47 +1627,49 @@ class SegmentExpr : public Expr {
         BatchEvaluator& evaluate_batch,
         TargetBitmapView res,
         TargetBitmapView valid_res,
-        std::vector<ElementType>& value_buffer,
+        ElementValueBuffer<ElementType>& value_buffer,
         FixedVector<bool>& valid_buffer,
         const ValTypes&... values) {
         size_t batch_pos = 0;
-        auto emit_rows = [&](const auto* rows,
-                             ValidityView valid_data,
-                             auto&& index_at) {
-            for (size_t i = 0; i < row_offsets.size(); ++i) {
-                const auto index = index_at(i);
-                AssertInfo(!valid_data || valid_data[index],
-                           "StructElementOffsets references an element in null "
-                           "ARRAY row {}",
-                           row_offsets[i]);
-                VisitArrayElementRun<ElementType>(
-                    rows[index],
-                    first_elem_indices[i],
-                    run_lengths[i],
-                    value_buffer,
-                    valid_buffer,
-                    [&](const ElementType* data,
-                        ValidityView valid_data,
-                        int size) {
-                        evaluate_batch.template operator()<FilterType::random>(
-                            data,
-                            valid_data,
-                            nullptr,
-                            size,
-                            res + batch_pos,
-                            valid_res + batch_pos,
-                            values...);
-                        batch_pos += static_cast<size_t>(size);
-                    });
-            }
+        auto emit_row = [&](const auto& row, bool row_valid, size_t i) {
+            AssertInfo(row_valid,
+                       "StructElementOffsets references an element in null "
+                       "ARRAY row {}",
+                       row_offsets[i]);
+            VisitArrayElementRun<ElementType>(
+                row,
+                first_elem_indices[i],
+                run_lengths[i],
+                value_buffer,
+                valid_buffer,
+                [&](const ElementType* data,
+                    ValidityView valid_data,
+                    int size) {
+                    evaluate_batch.template operator()<FilterType::random>(
+                        data,
+                        valid_data,
+                        nullptr,
+                        size,
+                        res + batch_pos,
+                        valid_res + batch_pos,
+                        values...);
+                    batch_pos += static_cast<size_t>(size);
+                });
         };
-
-        if constexpr (std::is_same_v<ElementType, ArrayValueView>) {
+        auto emit_rows =
+            [&](const auto* rows, ValidityView valid_data, auto&& index_at) {
+                for (size_t i = 0; i < row_offsets.size(); ++i) {
+                    const auto index = index_at(i);
+                    emit_row(rows[index], !valid_data || valid_data[index], i);
+                }
+            };
+        // Element-nullable and nested ARRAY rows, Growing and Sealed.
+        auto emit_array_value_rows = [&]() {
             auto pw = GetChunkViewsByOffsets<ArrayValueView>(
                 field_id_, chunk_id, row_offsets);
             const auto& [rows, valid_data] = pw.get();
             AssertInfo(rows.size() == row_offsets.size(),
-                       "recursive ARRAY row count mismatch: {} vs {}",
+                       "native list ARRAY row count mismatch: {} vs {}",
                        rows.size(),
                        row_offsets.size());
             emit_rows(rows.data(),
@@ -1539,6 +1677,31 @@ class SegmentExpr : public Expr {
                           ? ValidityView{}
                           : ValidityView::FromExpanded(valid_data.data()),
                       [](size_t i) { return i; });
+        };
+
+        if constexpr (std::is_same_v<ElementType, ArrayValueView>) {
+            emit_array_value_rows();
+        } else if (field_type_ == DataType::VECTOR_ARRAY) {
+            if constexpr (std::is_same_v<ElementType, ElementValidityOnly>) {
+                for (size_t i = 0; i < row_offsets.size(); ++i) {
+                    auto pw = GetChunkView<VectorArrayView>(
+                        field_id_,
+                        chunk_id,
+                        std::make_pair(int64_t{row_offsets[i]}, int64_t{1}));
+                    const auto& [rows, valid_data] = pw.get();
+                    AssertInfo(rows.size() == 1,
+                               "VECTOR_ARRAY row count mismatch: {} vs 1",
+                               rows.size());
+                    emit_row(rows[0], !valid_data || valid_data[0], i);
+                }
+            } else {
+                ThrowInfo(UnexpectedError,
+                          "element values of VECTOR_ARRAY field {} cannot be "
+                          "read as scalars",
+                          field_id_.get());
+            }
+        } else if (is_native_list_array_) {
+            emit_array_value_rows();
         } else if (segment_->type() == SegmentType::Sealed) {
             auto pw = GetChunkViewsByOffsets<ArrayView>(
                 field_id_, chunk_id, row_offsets);
@@ -1553,7 +1716,7 @@ class SegmentExpr : public Expr {
                           : ValidityView::FromExpanded(valid_data.data()),
                       [](size_t i) { return i; });
         } else {
-            auto pw = GetChunkData<Array>(field_id_, chunk_id);
+            auto pw = GetChunkData<ArrayView>(field_id_, chunk_id);
             auto chunk = pw.get();
             emit_rows(chunk.data(), chunk.validity(), [&](size_t i) {
                 return static_cast<size_t>(row_offsets[i]);
@@ -1572,10 +1735,11 @@ class SegmentExpr : public Expr {
                                   BatchEvaluator& evaluate_batch,
                                   TargetBitmapView res,
                                   TargetBitmapView valid_res,
-                                  std::vector<ElementType>& value_buffer,
+                                  ElementValueBuffer<ElementType>& value_buffer,
                                   FixedVector<bool>& valid_buffer,
                                   const ValTypes&... values) {
         int64_t processed_elems = 0;
+        // A null row contributes no elements, matching StructElementOffsets.
         auto emit_rows = [&](const auto* rows, ValidityView valid_data) {
             for (int64_t i = 0; i < length; ++i) {
                 if (valid_data && !valid_data[i]) {
@@ -1604,16 +1768,38 @@ class SegmentExpr : public Expr {
             }
         };
 
-        if constexpr (std::is_same_v<ElementType, ArrayValueView>) {
-            // Recursive ARRAY rows for both Growing and Sealed segments.
+        // Element-nullable and nested ARRAY rows, Growing and Sealed.
+        auto emit_array_value_rows = [&]() {
             auto pw = GetChunkView<ArrayValueView>(
                 field_id_, chunk_id, std::make_pair(start_offset, length));
             const auto& [rows, valid_data] = pw.get();
             AssertInfo(rows.size() == static_cast<size_t>(length),
-                       "recursive ARRAY row count mismatch: {} vs {}",
+                       "native list ARRAY row count mismatch: {} vs {}",
                        rows.size(),
                        length);
             emit_rows(rows.data(), valid_data);
+        };
+
+        if constexpr (std::is_same_v<ElementType, ArrayValueView>) {
+            emit_array_value_rows();
+        } else if (field_type_ == DataType::VECTOR_ARRAY) {
+            if constexpr (std::is_same_v<ElementType, ElementValidityOnly>) {
+                auto pw = GetChunkView<VectorArrayView>(
+                    field_id_, chunk_id, std::make_pair(start_offset, length));
+                const auto& [rows, valid_data] = pw.get();
+                AssertInfo(rows.size() == static_cast<size_t>(length),
+                           "VECTOR_ARRAY row count mismatch: {} vs {}",
+                           rows.size(),
+                           length);
+                emit_rows(rows.data(), valid_data);
+            } else {
+                ThrowInfo(UnexpectedError,
+                          "element values of VECTOR_ARRAY field {} cannot be "
+                          "read as scalars",
+                          field_id_.get());
+            }
+        } else if (is_native_list_array_) {
+            emit_array_value_rows();
         } else if (segment_->type() == SegmentType::Sealed) {
             // Legacy ARRAY rows from a Sealed segment's chunked storage.
             auto pw = GetChunkView<ArrayView>(
@@ -1625,13 +1811,104 @@ class SegmentExpr : public Expr {
                        length);
             emit_rows(rows.data(), valid_data);
         } else {
-            // Legacy ARRAY rows from a Growing segment's in-memory storage.
-            auto pw = GetChunkData<Array>(field_id_, chunk_id);
+            // Legacy ARRAY rows from a Growing segment, stored as views.
+            auto pw = GetChunkData<ArrayView>(field_id_, chunk_id);
             auto chunk = pw.get();
             emit_rows(chunk.data() + start_offset,
                       chunk.validity().Subview(start_offset));
         }
         return processed_elems;
+    }
+
+    // `s[i][tags]` used as an Array: each row of the nested Array field
+    // yields the inner Array of struct element i (see NestedArrayElementAt).
+    bool
+    IsNestedArrayElementOperand() const {
+        return is_nested_array_field_ && nested_path_.size() == 1;
+    }
+
+    // Evaluate a row-level ARRAY predicate over the batch rows or the offset
+    // input. make_func.template operator()<RowType>() returns the batch
+    // evaluator for rows read as RowType.
+    template <typename MakeFunc, typename... ValTypes>
+    int64_t
+    ProcessArrayRows(MakeFunc make_func,
+                     OffsetVector* input,
+                     TargetBitmapView res,
+                     TargetBitmapView valid_res,
+                     const ValTypes&... values) {
+        auto process = [&]<typename RowType>() -> int64_t {
+            auto func = make_func.template operator()<RowType>();
+            if (has_offset_input_) {
+                return ProcessDataByOffsets<RowType>(
+                    func, nullptr, input, res, valid_res, values...);
+            }
+            return ProcessDataChunks<RowType>(
+                func, nullptr, res, valid_res, values...);
+        };
+        if (is_native_list_array_) {
+            return process.template operator()<ArrayValueView>();
+        }
+        return process.template operator()<ArrayView>();
+    }
+
+    // Whether element-level evaluation may report a chunk pruned by skip
+    // metrics without reading it. A pruned chunk yields FALSE for all of its
+    // elements, which would turn a null element's UNKNOWN into FALSE.
+    bool
+    CanSkipElementLevelChunks(
+        const std::function<bool(const milvus::SkipIndex&, FieldId, int)>&
+            skip_func) const {
+        return static_cast<bool>(skip_func) && !is_element_nullable_;
+    }
+
+    // Element validity (1 = the element is not null) of the next element
+    // batch, or of the element ids in input. Without input it consumes the
+    // batch like an evaluation. Fields without null elements are not read.
+    TargetBitmap
+    ProcessElementValidity(OffsetVector* input, int64_t elem_count) {
+        TargetBitmap valid(elem_count, true);
+        if (!is_element_nullable_) {
+            if (input == nullptr) {
+                MoveCursor();
+            }
+            return valid;
+        }
+        TargetBitmap unused(elem_count, true);
+        auto mark_nulls = []<FilterType filter_type = FilterType::sequential>(
+            const ElementValidityOnly* data,
+            ValidityView valid_data,
+            const int32_t* offsets,
+            const int size,
+            TargetBitmapView res,
+            TargetBitmapView valid_res) {
+            if (data == nullptr || !valid_data) {
+                return;
+            }
+            for (int i = 0; i < size; ++i) {
+                if (!valid_data[i]) {
+                    res[i] = false;
+                }
+            }
+        };
+        const auto processed =
+            input != nullptr
+                ? ProcessElementLevelByOffsets<ElementValidityOnly>(
+                      mark_nulls,
+                      nullptr,
+                      input,
+                      TargetBitmapView(valid),
+                      TargetBitmapView(unused))
+                : ProcessDataChunksForElementLevel<ElementValidityOnly>(
+                      mark_nulls,
+                      nullptr,
+                      TargetBitmapView(valid),
+                      TargetBitmapView(unused));
+        AssertInfo(processed == elem_count,
+                   "element validity covers {} elements, expected {}",
+                   processed,
+                   elem_count);
+        return valid;
     }
 
     // Process element-level data by element IDs. Consecutive element IDs from
@@ -1679,8 +1956,9 @@ class SegmentExpr : public Expr {
         FixedVector<int32_t> offsets;
         FixedVector<int32_t> first_elem_indices;
         FixedVector<int32_t> run_lengths;
-        std::vector<ElementType> value_buffer;
+        ElementValueBuffer<ElementType> value_buffer;
         FixedVector<bool> valid_buffer;
+        const bool use_skip = CanSkipElementLevelChunks(skip_func);
 
         struct RunInfo {
             int32_t row_id;
@@ -1740,7 +2018,7 @@ class SegmentExpr : public Expr {
             const auto batch_size = i - batch_start;
             const auto eval_size = static_cast<int>(batch_size);
             const bool chunk_active =
-                !skip_func || !skip_func(*skip_index, field_id_, chunk_id);
+                !use_skip || !skip_func(*skip_index, field_id_, chunk_id);
 
             if (!chunk_active) {
                 // Keep cursor-tracking evaluators aligned with offset input
@@ -1807,8 +2085,9 @@ class SegmentExpr : public Expr {
 
         int64_t processed_rows = 0;
         int64_t processed_elems = 0;
-        std::vector<ElementType> value_buffer;
+        ElementValueBuffer<ElementType> value_buffer;
         FixedVector<bool> valid_buffer;
+        const bool use_skip = CanSkipElementLevelChunks(skip_func);
 
         EnsureRawDataPrefetched();
 
@@ -1838,7 +2117,7 @@ class SegmentExpr : public Expr {
 
             auto skip_index = segment_->GetSkipIndex();
             const bool chunk_active =
-                !skip_func || !skip_func(*skip_index, field_id_, i);
+                !use_skip || !skip_func(*skip_index, field_id_, i);
             if (!chunk_active) {
                 // StructElementOffsets defines the logical flattened address space:
                 // null ARRAY rows contribute zero elements even if storage
@@ -2017,7 +2296,8 @@ class SegmentExpr : public Expr {
         TargetBitmapView valid_res,
         const ValTypes&... values) {
         AssertInfo(segment_->type() == SegmentType::Sealed,
-                   "chunked segment data processing requires a sealed segment");
+                   "chunked segment data processing requires a sealed "
+                   "segment");
         int64_t processed_size = 0;
 
         // prefetch chunks to reduce cache miss latency
@@ -2390,7 +2670,8 @@ class SegmentExpr : public Expr {
                         const auto family =
                             static_cast<unsigned int>(json_value_type.value());
                         const auto signature = fmt::format(
-                            "json-flat-validity:v1:field={}:path-length={}:"
+                            "json-flat-validity:v1:field={}:path-"
+                            "length={}:"
                             "path={}:family={}",
                             field_id_.get(),
                             json_pointer.size(),
@@ -2490,17 +2771,18 @@ class SegmentExpr : public Expr {
             auto size = std::min(active_count_ - data_pos, batch_size_);
             AssertInfo(
                 int64_t(cached_index_chunk_res_->size()) >= data_pos + size,
-                "index bitmap covers {} rows, batch needs rows [{}, {})",
+                "index bitmap covers {} rows, batch needs rows "
+                "[{}, {})",
                 cached_index_chunk_res_->size(),
                 data_pos,
                 data_pos + size);
-            AssertInfo(
-                int64_t(cached_index_chunk_valid_res_->size()) >=
-                    data_pos + size,
-                "index valid bitmap covers {} rows, batch needs rows [{}, {})",
-                cached_index_chunk_valid_res_->size(),
-                data_pos,
-                data_pos + size);
+            AssertInfo(int64_t(cached_index_chunk_valid_res_->size()) >=
+                           data_pos + size,
+                       "index valid bitmap covers {} rows, batch needs "
+                       "rows [{}, {})",
+                       cached_index_chunk_valid_res_->size(),
+                       data_pos,
+                       data_pos + size);
 
             result.append(*cached_index_chunk_res_, data_pos, size);
             valid_result.append(*cached_index_chunk_valid_res_, data_pos, size);
@@ -2755,7 +3037,8 @@ class SegmentExpr : public Expr {
         auto size = std::min(active_count_ - data_pos, batch_size_);
         AssertInfo(
             int64_t(cached_index_chunk_valid_res_->size()) >= data_pos + size,
-            "index valid bitmap covers {} rows, batch needs rows [{}, {})",
+            "index valid bitmap covers {} rows, batch needs "
+            "rows [{}, {})",
             cached_index_chunk_valid_res_->size(),
             data_pos,
             data_pos + size);
@@ -2965,6 +3248,29 @@ class SegmentExpr : public Expr {
                !nested_path_.empty() && !PathContainsInteger(nested_path_);
     }
 
+    // Whether Eval() implements ExprExecPath::JsonStats for this expression.
+    // Only the expressions that override this may be switched to JsonStats by
+    // FallbackToJsonStatsIfEligible().
+    virtual bool
+    SupportsJsonStatsExecPath() const {
+        return false;
+    }
+
+    // JSON shredding is a typed column scan, not an index lookup: it still
+    // visits every row of the segment on every query. A JSON path index that
+    // serves this expression is preferred; the shredded columns are the
+    // fallback for JSON paths without a usable index. Subclasses therefore
+    // decide index paths in DetermineExecPath() and leave RawData for the
+    // paths they could not serve; this hook upgrades that RawData to
+    // JsonStats when the segment has stats for the field.
+    void
+    FallbackToJsonStatsIfEligible() {
+        if (exec_path_ == ExprExecPath::RawData &&
+            SupportsJsonStatsExecPath() && CanUseJsonStatsAtInit()) {
+            exec_path_ = ExprExecPath::JsonStats;
+        }
+    }
+
     virtual bool
     CanUseNgramIndex() const {
         return false;
@@ -2995,7 +3301,9 @@ class SegmentExpr : public Expr {
     void
     EnsureExecPathDetermined() const {
         std::call_once(determine_exec_path_once_, [this]() {
-            const_cast<SegmentExpr*>(this)->DetermineExecPath();
+            auto self = const_cast<SegmentExpr*>(this);
+            self->DetermineExecPath();
+            self->FallbackToJsonStatsIfEligible();
         });
     }
 
@@ -3007,8 +3315,9 @@ class SegmentExpr : public Expr {
     // path. JSON path compatibility is checked via segment-level metadata
     // (GetJsonFlatIndexNestedPath) before any pin, so an incompatible
     // nested path falls back to RawData without ever touching the cache
-    // slot. Short-circuit subclass paths (TextIndex/PkIndex/JsonStats)
-    // bypass this method entirely and never pin either.
+    // slot. The short-circuit subclass paths (TextIndex/PkIndex) bypass this
+    // method entirely and never pin either; JsonStats is applied afterwards,
+    // by FallbackToJsonStatsIfEligible(), to a RawData outcome.
     virtual void
     DetermineExecPath() {
         if (!HasCompatibleScalarIndex() || !IsJsonPathCompatible()) {
@@ -3247,6 +3556,9 @@ class SegmentExpr : public Expr {
     const segcore::SegmentReadSnapshot* snapshot_{nullptr};
     const FieldId field_id_;
     bool is_pk_field_{false};
+    bool is_native_list_array_{false};
+    bool is_nested_array_field_{false};
+    bool is_element_nullable_{false};
     DataType pk_type_;
     int64_t batch_size_;
 

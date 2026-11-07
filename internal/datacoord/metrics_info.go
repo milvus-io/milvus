@@ -121,9 +121,9 @@ func (s *Server) getSegmentsJSON(ctx context.Context, req *milvuspb.GetMetricsRe
 
 	if in == metricsinfo.MetricsRequestParamsInDC {
 		collectionID := metricsinfo.GetCollectionIDFromRequest(jsonReq)
-		segments := s.meta.getSegmentsMetrics(collectionID)
+		segments := s.meta.GetSegmentsMetrics(collectionID)
 		for _, seg := range segments {
-			isIndexed, indexedFields := s.meta.indexMeta.GetSegmentIndexedFields(seg.CollectionID, seg.SegmentID)
+			isIndexed, indexedFields := s.indexMeta.GetSegmentIndexedFields(seg.CollectionID, seg.SegmentID)
 			seg.IndexedFields = indexedFields
 			seg.IsIndexed = isIndexed
 		}
@@ -139,7 +139,7 @@ func (s *Server) getSegmentsJSON(ctx context.Context, req *milvuspb.GetMetricsRe
 }
 
 func (s *Server) getDistJSON(ctx context.Context, req *milvuspb.GetMetricsRequest) string {
-	segments := s.meta.getSegmentsMetrics(-1)
+	segments := s.meta.GetSegmentsMetrics(-1)
 	dist := &metricsinfo.DataCoordDist{
 		Segments: segments,
 	}
@@ -248,8 +248,10 @@ func (s *Server) getDataCoordMetrics(ctx context.Context) metricsinfo.DataCoordI
 			ID:          paramtable.GetNodeID(),
 		},
 		SystemConfigurations: metricsinfo.DataCoordConfiguration{
-			SegmentMaxSize:             Params.DataCoordCfg.SegmentMaxSize.GetAsFloat(),
-			ResolvedScalarIndexVersion: s.indexEngineVersionManager.ResolveScalarIndexVersion(),
+			SegmentMaxSize:                  Params.DataCoordCfg.SegmentMaxSize.GetAsFloat(),
+			ForceMergeDataNodeMemoryFactor:  Params.DataCoordCfg.CompactionForceMergeDataNodeMemoryFactor.GetAsFloat(),
+			ForceMergeQueryNodeMemoryFactor: Params.DataCoordCfg.CompactionForceMergeQueryNodeMemoryFactor.GetAsFloat(),
+			ResolvedScalarIndexVersion:      s.indexEngineVersionManager.ResolveScalarIndexVersion(),
 		},
 		QuotaMetrics:      s.getQuotaMetrics(),
 		CollectionMetrics: s.getCollectionMetrics(ctx),

@@ -178,6 +178,89 @@ func IsNestedArrayTypeSchema(typeSchema *schemapb.TypeSchema) bool {
 	return ok
 }
 
+// GetArrayLeaf walks the type chain of one Array column: from typeSchema down,
+// every node is an array_element until a leaf_type node. It returns the leaf
+// type, whether the leaf (the innermost element) is nullable, and the number
+// of Array levels above the leaf: 1 for Array<T>, 2 for Array<Array<T>>.
+//
+// It is defined on a single column only. Any other node kind, such as a
+// future struct node, is rejected: a type that describes several columns has
+// to be projected into its columns first.
+func GetArrayLeaf(typeSchema *schemapb.TypeSchema) (schemapb.DataType, bool, int, error) {
+	if typeSchema == nil {
+		return schemapb.DataType_None, false, 0, merr.WrapErrParameterInvalidMsg("array type_schema is nil")
+	}
+	depth := 0
+	node := typeSchema
+	for {
+		switch kind := node.GetKind().(type) {
+		case *schemapb.TypeSchema_ArrayElement:
+			if kind.ArrayElement == nil {
+				return schemapb.DataType_None, false, 0, merr.WrapErrParameterInvalidMsg(
+					"array type_schema has a nil array_element at level %d", depth+1)
+			}
+			depth++
+			node = kind.ArrayElement
+		case *schemapb.TypeSchema_LeafType:
+			if depth == 0 {
+				return schemapb.DataType_None, false, 0, merr.WrapErrParameterInvalidMsg(
+					"type_schema with leaf type %s is not an Array", kind.LeafType)
+			}
+			return kind.LeafType, node.GetNullable(), depth, nil
+		default:
+			return schemapb.DataType_None, false, 0, merr.WrapErrParameterInvalidMsg(
+				"array type_schema has unsupported kind %T at level %d", node.GetKind(), depth)
+		}
+	}
+}
+
+// GetFieldArrayLeaf returns GetArrayLeaf for an Array or ArrayOfVector column.
+// A nested Array carries its chain in FieldSchema.type_schema. A single-level
+// Array carries none on the wire; its chain is Array -> leaf(element_type,
+// element_nullable), the same one segcore FieldMeta synthesizes, and it is
+// evaluated here without being materialized because storage calls this per
+// row. This fallback goes away once every Array carries a type_schema.
+func GetFieldArrayLeaf(field *schemapb.FieldSchema) (schemapb.DataType, bool, int, error) {
+	if typeSchema := field.GetTypeSchema(); typeSchema != nil {
+		return GetArrayLeaf(typeSchema)
+	}
+	switch field.GetDataType() {
+	case schemapb.DataType_Array, schemapb.DataType_ArrayOfVector:
+		if field.GetElementType() == schemapb.DataType_Array {
+			return schemapb.DataType_None, false, 0, merr.WrapErrParameterInvalidMsg(
+				"nested array field %s must specify type_schema", field.GetName())
+		}
+		return field.GetElementType(), field.GetElementNullable(), 1, nil
+	default:
+		return schemapb.DataType_None, false, 0, merr.WrapErrParameterInvalidMsg(
+			"field %s of type %s is not an Array", field.GetName(), field.GetDataType())
+	}
+}
+
+// IsNativeListArrayField reports whether an Array / ArrayOfVector field is
+// persisted in the native Arrow list format instead of the legacy format.
+//
+// Legacy formats are kept only for the field kinds that exist in released
+// 2.6/3.0 clusters: a single-level element-non-nullable scalar Array (one
+// proto-encoded ScalarField per row in an Arrow Binary column) and a
+// single-level element-non-nullable ArrayOfVector (list<FixedSizeBinary>).
+//
+// Every other Array kind uses the native format, regardless of row-level
+// nullability:
+//   - element-nullable scalar Array: list<T>
+//   - element-nullable ArrayOfVector: list<Binary>
+//   - nested scalar Array (type_schema with Array<Array<T>>): list<list<T>>
+func IsNativeListArrayField(field *schemapb.FieldSchema) bool {
+	switch field.GetDataType() {
+	case schemapb.DataType_Array:
+		return field.GetElementNullable() || IsNestedArrayTypeSchema(field.GetTypeSchema())
+	case schemapb.DataType_ArrayOfVector:
+		return field.GetElementNullable()
+	default:
+		return false
+	}
+}
+
 // ValidateFieldTypeSchema validates the wire representation of nested Arrays.
 // Non-nested fields use only data_type/element_type. Nested Arrays use
 // data_type=Array, element_type=Array, and a recursive type_schema.

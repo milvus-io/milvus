@@ -104,7 +104,8 @@ SealedIndexTranslator::SealedIndexTranslator(
     if (scalar_version >= 3 && !IsVectorDataType(index_load_info_.field_type)) {
         AssertInfo(stream_load_info.has_value(),
                    "missing stream load info for packed scalar V3 index");
-        if (use_shared_memory_overhead_group) {
+        if (use_shared_memory_overhead_group &&
+            !index_load_info_.load_resource_request.has_value()) {
             const auto max_task_overhead =
                 stream_load_info->positioned_max_task_transient_bytes;
             auto memory_group =
@@ -156,10 +157,16 @@ SealedIndexTranslator::cell_id_of(milvus::cachinglayer::uid_t uid) const {
     return 0;
 }
 
-std::pair<milvus::cachinglayer::ResourceUsage,
-          milvus::cachinglayer::ResourceUsage>
-SealedIndexTranslator::estimated_byte_size_of_cell(
-    milvus::cachinglayer::cid_t cid) const {
+milvus::cachinglayer::LoadingResourceUsage
+SealedIndexTranslator::estimated_loading_usage(
+    const std::vector<milvus::cachinglayer::cid_t>& cids) const {
+    if (cids.empty()) {
+        return {};
+    }
+    const auto memory_overhead = load_resource_request_.max_memory_cost -
+                                 load_resource_request_.final_memory_cost;
+    const auto shared_memory =
+        meta_.loading_overhead_config ? memory_overhead : 0;
     // this is an estimation, error could be up to 20%.
     // Preserve the historical 2x disk safety margin for temporary file growth
     // during writes. final_disk_cost is already counted as loaded resource, so
@@ -168,10 +175,10 @@ SealedIndexTranslator::estimated_byte_size_of_cell(
                 load_resource_request_.final_memory_cost,
                 load_resource_request_.final_disk_cost),
             milvus::cachinglayer::ResourceUsage(
-                load_resource_request_.max_memory_cost -
-                    load_resource_request_.final_memory_cost,
+                memory_overhead - shared_memory,
                 load_resource_request_.max_disk_cost * 2 -
-                    load_resource_request_.final_disk_cost)};
+                    load_resource_request_.final_disk_cost),
+            milvus::cachinglayer::ResourceUsage(shared_memory, 0)};
 }
 
 const std::string&
@@ -183,6 +190,11 @@ std::vector<std::pair<milvus::cachinglayer::cid_t,
                       std::unique_ptr<milvus::index::IndexBase>>>
 SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
                                  const std::vector<cid_t>& cids) {
+    auto config = config_;
+    if (ctx != nullptr && ctx->runtime_load_priority.has_value()) {
+        config[milvus::LOAD_PRIORITY] = *ctx->runtime_load_priority;
+    }
+
     int64_t segment_id = std::stoll(index_load_info_.segment_id);
 
     std::unique_ptr<milvus::index::IndexBase> index =
@@ -198,14 +210,14 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
                          "index_files" / index_load_info_.index_id /
                          index_load_info_.segment_id /
                          index_load_info_.field_id;
-        config_[milvus::index::ENABLE_MMAP] = "true";
-        config_[milvus::index::MMAP_FILE_PATH] = (base_path / "index").string();
-        config_[milvus::index::EMB_LIST_META_PATH] =
+        config[milvus::index::ENABLE_MMAP] = "true";
+        config[milvus::index::MMAP_FILE_PATH] = (base_path / "index").string();
+        config[milvus::index::EMB_LIST_META_PATH] =
             (base_path / index::EMB_LIST_META_FILE_NAME).string();
-        config_[milvus::index::EMB_LIST_RAW_INDEX_PATH] =
+        config[milvus::index::EMB_LIST_RAW_INDEX_PATH] =
             (base_path / index::EMB_LIST_RAW_INDEX_FILE_NAME).string();
     } else {
-        config_[milvus::index::ENABLE_MMAP] = "false";
+        config[milvus::index::ENABLE_MMAP] = "false";
     }
 
     // Check for cancellation before loading index data
@@ -214,16 +226,16 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
     // Check scalar index engine version for V3 routing
     auto scalar_version =
         milvus::index::GetValueFromConfig<int32_t>(
-            config_, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
+            config, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
             .value_or(1);
     if (scalar_version >= 3 && !IsVectorDataType(index_info_.field_type)) {
-        config_[milvus::index::COLLECTION_ID] =
+        config[milvus::index::COLLECTION_ID] =
             file_manager_context_.fieldDataMeta.collection_id;
-        LOG_DEBUG("load V3 scalar index with configs: {}", config_.dump());
-        index->LoadUnified(config_, ctx);
+        LOG_DEBUG("load V3 scalar index with configs: {}", config.dump());
+        index->LoadUnified(config, ctx);
     } else {
-        LOG_DEBUG("load index with configs: {}", config_.dump());
-        index->Load(ctx_, config_);
+        LOG_DEBUG("load index with configs: {}", config.dump());
+        index->Load(ctx_, config);
     }
 
     std::vector<std::pair<cid_t, std::unique_ptr<milvus::index::IndexBase>>>
