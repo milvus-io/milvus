@@ -227,7 +227,8 @@ Rejections, each checked for its error code: a missing entry (each of the
 five of the sample); an entry one byte short or one byte long (each of the
 five); an unknown version with the current header size, with a larger
 header, and a header too short to hold a version; a 64-bit value width; an
-unknown value kind; 33 slices; bounds outside `int32_t`; `min > max`; one
+unknown value kind; 33 slices; bounds outside `int32_t` in either direction,
+including ones that would wrap back into range under the cast; `min > max`; one
 slice too many with an entry to match; a well-formed slice entry the header
 does not declare; `max` looser than any row reaches
 while the slice count still fits; a row count larger than the payload; with

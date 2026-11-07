@@ -218,8 +218,15 @@ ReadHeader(Entries& entries) {
                   header.slice_count,
                   BitSlicedIndex<T>::kMaxSlices);
     }
-    if (header.min < std::numeric_limits<T>::min() ||
-        header.max > std::numeric_limits<T>::max()) {
+    // Both bounds must fit T in both directions: LoadFromEntries casts them
+    // to T, and a bound past T's range in the other direction would wrap to
+    // a value the payload is consistent with, so FromState could not catch
+    // it.
+    const auto fits = [](int64_t bound) {
+        return bound >= std::numeric_limits<T>::min() &&
+               bound <= std::numeric_limits<T>::max();
+    };
+    if (!fits(header.min) || !fits(header.max)) {
         ThrowInfo(DataFormatBroken,
                   "bit-sliced index bounds [{}, {}] exceed the {}-bit range",
                   header.min,

@@ -444,6 +444,15 @@ TEST(BitSlicedIndexArtifactTest, InconsistentHeaderIsRejected) {
     reject([](TestArtifactData&, bsi_format::Header& h) {
         h.max = int64_t{kMax} + 1;
     });
+    // Bounds past the int32 range in the other direction. Each wraps back to
+    // the original bound under static_cast<int32_t>, so the payload stays
+    // self-consistent and only the range check can reject the header.
+    reject([](TestArtifactData&, bsi_format::Header& h) {
+        h.min += int64_t{1} << 32;
+    });
+    reject([](TestArtifactData&, bsi_format::Header& h) {
+        h.max -= int64_t{1} << 32;
+    });
     reject([](TestArtifactData&, bsi_format::Header& h) {
         std::swap(h.min, h.max);
     });
