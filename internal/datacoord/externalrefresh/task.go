@@ -208,17 +208,18 @@ func (t *refreshExternalCollectionTask) UpdateResultWithMeta(
 	return nil
 }
 
-// applyExternalCollectionSegmentUpdateForBaseline applies a caller-supplied
+// applyExternalCollectionSegmentUpdateAtFence applies a caller-supplied
 // immutable baseline: baseline IDs may be kept, patched, or removed, while IDs
 // outside the baseline may only be added as new segments. The job-level path
 // passes the published ownership baseline.
-func applyExternalCollectionSegmentUpdateForBaseline(
+func applyExternalCollectionSegmentUpdateAtFence(
 	ctx context.Context,
 	mt *meta.Meta,
 	collectionID int64,
 	baselineSegmentIDs []int64,
 	keptSegmentIDs []int64,
 	updatedSegments []*datapb.SegmentInfo,
+	starts map[string]uint64,
 	logFields ...mlog.Field,
 ) error {
 	if mt == nil {
@@ -327,6 +328,11 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 	if collInfo == nil {
 		return merr.WrapErrServiceInternalMsg("collection %d not found in meta", collectionID)
 	}
+	// DropVirtualChannel has already dropped a Dropping collection's
+	// segments; new ones would never be dropped and would stall its GC.
+	if !collInfo.IsCreated() {
+		return merr.WrapErrCollectionNotFound(collectionID)
+	}
 	// External collections are single-shard, single-partition (enforced at creation).
 	// Assert exactly-one here to catch any invariant violation from data corruption or legacy data.
 	if len(collInfo.VChannelNames) != 1 {
@@ -337,10 +343,23 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 	}
 	insertChannel := collInfo.VChannelNames[0]
 	partitionID := collInfo.Partitions[0]
+	transformStart := starts[insertChannel]
+	if len(starts) != 0 && transformStart == 0 {
+		return merr.WrapErrServiceInternalMsg("refresh WAL fence is missing for channel %s", insertChannel)
+	}
+	if len(starts) == 0 {
+		// Legacy control-only messages have no target-shard WAL fence.
+		var err error
+		transformStart, err = externalRefreshTransformStart(ctx, mt, collectionID, insertChannel)
+		if err != nil {
+			return err
+		}
+	}
 	normalizedUpdatedSegments := make([]*datapb.SegmentInfo, 0, len(validUpdatedSegments))
 	normalizedUpsertSegmentMap := make(map[int64]*datapb.SegmentInfo, len(upsertSegmentMap))
 	for _, seg := range validUpdatedSegments {
 		normalized := normalizeExternalRefreshUpdatedSegment(seg, collectionID, partitionID, insertChannel)
+		normalized.TransformStartAfterTimetick = transformStart
 		normalizedUpdatedSegments = append(normalizedUpdatedSegments, normalized)
 		normalizedUpsertSegmentMap[normalized.GetID()] = normalized
 	}
@@ -385,11 +404,11 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 				continue
 			}
 			if externalRefreshManifestAlreadyApplied(existing, incoming) {
-				// Replaying a patch is NOT harmless: applyExternalRefreshPatch
-				// clears TextStatsLogs and JsonKeyStats, so a second write
-				// would discard a text index or JSON key stats built since the
-				// first one, orphaning their files. A genuine patch always
-				// installs a strictly newer manifest, so it still applies.
+				// Replaying a patch is NOT harmless: replacing placeholders
+				// from the same incoming result could discard text or JSON stats
+				// built since the first apply, orphaning their files. A genuine
+				// patch always installs a strictly newer manifest, so it still
+				// applies.
 				alreadyAppliedSegments[segmentID] = struct{}{}
 				mlog.Info(ctx, "external refresh segment patch already applied, skipping replay",
 					mlog.FieldSegmentID(segmentID))
@@ -531,6 +550,30 @@ func normalizeExternalRefreshUpdatedSegment(
 	return normalized
 }
 
+// External collections reject WAL writes. Their W never advances through an
+// L1 Flush, so it retains the business VChannel's CreateCollection TimeTick,
+// including after refresh and recovery. Source-side deletes belong to the
+// refreshed base, not this VChannel's TransformLog.
+func externalRefreshTransformStart(ctx context.Context, mt *meta.Meta, collectionID int64, vchannel string) (uint64, error) {
+	if mt.DataViewManager == nil {
+		// Legacy loading without DataViews does not consume Transform cursors.
+		return 0, nil
+	}
+	ref, err := mt.DataViewManager.Latest(ctx, collectionID)
+	if err != nil {
+		return 0, merr.Wrap(err, "read external collection DataView")
+	}
+	if ref != nil {
+		defer ref.Deref()
+		for _, shard := range ref.DataView().GetShards() {
+			if shard.GetVchannel() == vchannel && shard.GetGrowingTransformStartAfterTimetick() != 0 {
+				return shard.GetGrowingTransformStartAfterTimetick(), nil
+			}
+		}
+	}
+	return 0, merr.WrapErrServiceNotReadyMsg("external collection %d CreateCollection Transform origin for %s is not available", collectionID, vchannel)
+}
+
 // externalRefreshManifestAlreadyApplied recognizes an idempotent replay by the
 // manifest a result would install. A manifest base path belongs to one segment,
 // and its versions move forward as that segment gains later manifest updates.
@@ -634,11 +677,15 @@ func validateExternalRefreshBinlogRowCount(segment *datapb.SegmentInfo, expected
 
 func applyExternalRefreshPatch(oldSeg *meta.SegmentInfo, incoming *datapb.SegmentInfo) *meta.SegmentInfo {
 	cloned := oldSeg.Clone()
+	cloned.TransformStartAfterTimetick = incoming.GetTransformStartAfterTimetick()
 	cloned.ManifestPath = incoming.GetManifestPath()
 	cloned.SchemaVersion = incoming.GetSchemaVersion()
 	cloned.Binlogs = incoming.GetBinlogs()
-	cloned.TextStatsLogs = nil
-	cloned.JsonKeyStats = nil
+	// The incoming placeholders describe the stats carried by the incoming
+	// manifest. Apply both atomically so deltalog-only refreshes do not trigger
+	// redundant text or JSON stats rebuilds.
+	cloned.TextStatsLogs = incoming.GetTextStatsLogs()
+	cloned.JsonKeyStats = incoming.GetJsonKeyStats()
 	if incoming.GetStorageVersion() != 0 {
 		cloned.StorageVersion = incoming.GetStorageVersion()
 	}
@@ -777,6 +824,10 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 	collInfo := t.mt.GetCollection(t.GetCollectionId())
 	if collInfo == nil {
 		err = merr.WrapErrServiceInternalMsg("collection %d not found in meta", t.GetCollectionId())
+		return
+	}
+	if !collInfo.IsCreated() {
+		err = merr.WrapErrCollectionNotFound(t.GetCollectionId())
 		return
 	}
 	if len(collInfo.Partitions) != 1 {

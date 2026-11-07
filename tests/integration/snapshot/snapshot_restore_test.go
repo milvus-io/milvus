@@ -41,20 +41,16 @@ import (
 
 type SnapshotRestoreSuite struct {
 	integration.MiniClusterSuite
-	useLoonFFI bool
 }
 
 func (s *SnapshotRestoreSuite) SetupSuite() {
-	s.WithMilvusConfig("common.storage.useLoonFFI", strconv.FormatBool(s.useLoonFFI))
+	s.WithMilvusConfig("common.storage.useLoonFFI", "true")
 	s.MiniClusterSuite.SetupSuite()
 }
 
 func TestSnapshotRestore(t *testing.T) {
-	t.Run("StorageV2", func(t *testing.T) {
-		suite.Run(t, &SnapshotRestoreSuite{})
-	})
 	t.Run("StorageV3", func(t *testing.T) {
-		suite.Run(t, &SnapshotRestoreSuite{useLoonFFI: true})
+		suite.Run(t, &SnapshotRestoreSuite{})
 	})
 }
 
@@ -245,18 +241,12 @@ func (s *SnapshotRestoreSuite) TestSnapshotRestoreWithDynamicField() {
 	mlog.Info(context.TODO(), "Verified initial data", mlog.Int64("count", initialCount))
 	segments, err := c.ShowSegments(collectionName)
 	s.Require().NoError(err)
-	expectedStorageVersion := storage.StorageV2
-	if s.useLoonFFI {
-		expectedStorageVersion = storage.StorageV3
-	}
 	flushedSegments := 0
 	for _, segment := range segments {
 		if segment.GetState() == commonpb.SegmentState_Flushed && segment.GetNumOfRows() > 0 {
 			flushedSegments++
-			s.Require().EqualValues(expectedStorageVersion, segment.GetStorageVersion())
-			if s.useLoonFFI {
-				s.Require().NotEmpty(segment.GetManifestPath())
-			}
+			s.Require().EqualValues(storage.StorageV3, segment.GetStorageVersion())
+			s.Require().NotEmpty(segment.GetManifestPath())
 		}
 	}
 	s.Require().Positive(flushedSegments)

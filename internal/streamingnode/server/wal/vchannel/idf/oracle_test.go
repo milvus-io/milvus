@@ -16,7 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
@@ -30,7 +30,7 @@ func newTestOracle(t *testing.T) (*oracleRuntime, func(int64, ...float32) *datap
 	cm := storage.NewLocalChunkManager()
 	provider := NewProvider(nil, WithChunkManager(cm))
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar}, {FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector}}, Functions: []*schemapb.FunctionSchema{{Type: schemapb.FunctionType_BM25, InputFieldIds: []int64{101}, OutputFieldIds: []int64{102}}}}
-	r, err := newOracleRuntime(context.Background(), provider, walview.VChannelWALView{Schema: schema, CollectionID: 1, VChannel: "v1", SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: qviews.DataVersion{StreamingVersion: 10}}}, nil, false)
+	r, err := newOracleRuntime(context.Background(), provider, walview.VChannelWALView{Schema: schema, RequiredFields: testRequiredFields(schema), CollectionID: 1, VChannel: "v1", SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: qviews.DataVersion{StreamingVersion: 10}}}, nil, false)
 	require.NoError(t, err)
 	t.Cleanup(r.Close)
 	return r, func(id int64, values ...float32) *datapb.StreamingNodeBM25Resource {
@@ -185,8 +185,9 @@ func TestOracleRefreshOnlyFetchesRequestedView(t *testing.T) {
 
 func TestOracleOnlyLoadsRequestedBM25Fields(t *testing.T) {
 	r, resource := newTestOracle(t)
-	view := walview.VChannelWALView{Schema: proto.Clone(r.schema).(*schemapb.CollectionSchema), LoadFields: []*messagespb.LoadFieldConfig{{FieldId: 103}}, RequiredFields: []*messagespb.LoadFieldConfig{{FieldId: 102}}}
-	view.Schema.Functions = append(view.Schema.Functions, &schemapb.FunctionSchema{Type: schemapb.FunctionType_BM25, OutputFieldIds: []int64{103}})
+	view := walview.VChannelWALView{Schema: proto.Clone(r.schema).(*schemapb.CollectionSchema), LoadFields: []*viewpb.LoadFieldConfig{{FieldId: 103}}, RequiredFields: []*viewpb.LoadFieldConfig{{FieldId: 102}}}
+	view.Schema.Fields = append(view.Schema.Fields, &schemapb.FieldSchema{FieldID: 103, Name: "other_sparse", DataType: schemapb.DataType_SparseFloatVector})
+	view.Schema.Functions = append(view.Schema.Functions, &schemapb.FunctionSchema{Type: schemapb.FunctionType_BM25, InputFieldIds: []int64{101}, OutputFieldIds: []int64{103}})
 	res := resource(20, 2)
 	res.Bm25Binlogs = append(res.Bm25Binlogs, &datapb.FieldBinlog{FieldID: 103, Binlogs: []*datapb.Binlog{{LogPath: "must-not-read"}}})
 	oracle, err := newOracleRuntime(context.Background(), r.provider, view, []*datapb.StreamingNodeBM25Resource{res}, false)
@@ -277,7 +278,7 @@ func TestOraclePreservesResolvedEmptyPartitionScope(t *testing.T) {
 	excluded := resource(20, 2)
 	excluded.PartitionId = 10
 	for _, partitions := range [][]int64{{}, {10}, {30}} {
-		r, err := newOracleRuntime(context.Background(), base.provider, walview.VChannelWALView{Schema: base.schema, CollectionID: 1, VChannel: "v1", PartitionIDs: partitions, SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: qviews.DataVersion{StreamingVersion: 10}}}, []*datapb.StreamingNodeBM25Resource{excluded}, false)
+		r, err := newOracleRuntime(context.Background(), base.provider, walview.VChannelWALView{Schema: base.schema, RequiredFields: testRequiredFields(base.schema), CollectionID: 1, VChannel: "v1", PartitionIDs: partitions, SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: qviews.DataVersion{StreamingVersion: 10}}}, []*datapb.StreamingNodeBM25Resource{excluded}, false)
 		require.NoError(t, err)
 		expected := int64(0)
 		if r.includesPartition(10) {
@@ -302,7 +303,7 @@ func TestLazyOracleWaitsForCompactedGrowingFinalCommit(t *testing.T) {
 	ctx := context.Background()
 	version := qviews.DataVersion{StreamingVersion: 11, CompactVersion: 1}
 	r, err := newOracleRuntime(ctx, base.provider, walview.VChannelWALView{
-		Schema: base.schema, CollectionID: 1, VChannel: "v1",
+		Schema: base.schema, RequiredFields: testRequiredFields(base.schema), CollectionID: 1, VChannel: "v1",
 		SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: version},
 	}, nil, true)
 	require.NoError(t, err)

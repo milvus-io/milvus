@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <arrow/api.h>
 #include <arrow/array/array_base.h>
 #include <arrow/array/builder_base.h>
@@ -361,7 +363,8 @@ class TestVectorArrayStorageV2 : public testing::Test {
     index::IIndexReaderBasePtr
     OpenIndex(const PublishedIndex& published,
               bool mmap = false,
-              const std::string& mmap_name = "") {
+              const std::string& mmap_name = "",
+              OpContext* op_ctx = nullptr) {
         std::vector<std::string> paths;
         for (const auto& file : published.stats.Files()) {
             paths.push_back(file.file_name);
@@ -379,7 +382,9 @@ class TestVectorArrayStorageV2 : public testing::Test {
                                    std::move(paths),
                                    index::LegacyIndexStorageConfig{
                                        storage::V1SourceLayout::MemoryEntries}},
-                 std::move(options)});
+                 std::move(options),
+                 milvus::index::test::TestIndexCacheConfig()})
+            ->CreateReader(op_ctx);
     }
 
     SchemaPtr schema_;
@@ -411,7 +416,8 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndex) {
                      4000,
                      knowhere::Version::GetCurrentVersion().VersionNumber(),
                      std::move(config));
-    auto owner = OpenIndex(published);
+    milvus::OpContext op_context;
+    auto owner = OpenIndex(published, false, "", &op_context);
     auto vec_index = dynamic_cast<const index::IVectorReader*>(owner.get());
     ASSERT_NE(vec_index, nullptr);
 
@@ -441,9 +447,7 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndex) {
         searchInfo.metric_type_ = knowhere::metric::MAX_SIM_IP;
         searchInfo.search_params_ = search_conf;
         SearchResult result;
-        milvus::OpContext op_context;
-        vec_index->Search(
-            query_dataset, searchInfo, nullptr, &op_context, result);
+        vec_index->Search(query_dataset, searchInfo, nullptr, result);
         auto ref_result = SearchResultToJson(result);
         std::cout << ref_result.dump(1) << std::endl;
         EXPECT_EQ(result.total_nq_, 2);
@@ -490,7 +494,8 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndexWithMmap) {
         [](int64_t size, const auto& file) { return size + file.file_size; });
     ASSERT_GT(serialized_size, 0);
 
-    auto owner = OpenIndex(published, true, "test_emb_list");
+    milvus::OpContext op_context;
+    auto owner = OpenIndex(published, true, "test_emb_list", &op_context);
     auto vec_index = dynamic_cast<const index::IVectorReader*>(owner.get());
     ASSERT_NE(vec_index, nullptr);
     // search
@@ -519,9 +524,7 @@ TEST_F(TestVectorArrayStorageV2, BuildEmbListHNSWIndexWithMmap) {
         searchInfo.metric_type_ = knowhere::metric::MAX_SIM_IP;
         searchInfo.search_params_ = search_conf;
         SearchResult result;
-        milvus::OpContext op_context;
-        vec_index->Search(
-            query_dataset, searchInfo, nullptr, &op_context, result);
+        vec_index->Search(query_dataset, searchInfo, nullptr, result);
         auto ref_result = SearchResultToJson(result);
         std::cout << ref_result.dump(1) << std::endl;
         EXPECT_EQ(result.total_nq_, 2);
@@ -606,7 +609,9 @@ TEST_F(TestVectorArrayStorageV2, BuildEncodedEmbListHNSWIndexWithMmap) {
                 SegcoreError);
         }
 
-        auto owner = OpenIndex(published, true, "test_emb_list_" + strategy);
+        milvus::OpContext op_context;
+        auto owner = OpenIndex(
+            published, true, "test_emb_list_" + strategy, &op_context);
         auto vec_index = dynamic_cast<const index::IVectorReader*>(owner.get());
         ASSERT_NE(vec_index, nullptr);
         EXPECT_GT(owner->Count(), 0);
@@ -641,9 +646,7 @@ TEST_F(TestVectorArrayStorageV2, BuildEncodedEmbListHNSWIndexWithMmap) {
         searchInfo.metric_type_ = knowhere::metric::MAX_SIM_COSINE;
         searchInfo.search_params_ = search_conf;
         SearchResult result;
-        milvus::OpContext op_context;
-        vec_index->Search(
-            query_dataset, searchInfo, nullptr, &op_context, result);
+        vec_index->Search(query_dataset, searchInfo, nullptr, result);
 
         EXPECT_EQ(result.total_nq_, 2);
         EXPECT_EQ(result.distances_.size(), 2 * searchInfo.topk_);

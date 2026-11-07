@@ -34,7 +34,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
@@ -158,7 +157,6 @@ func TestMeta_Basic(t *testing.T) {
 		metakv.EXPECT().LoadWithPrefix(mock.Anything, mock.Anything).Return(nil, nil, nil).Maybe()
 		catalog := datacoord.NewCatalog(metakv, "", "")
 		broker := broker.NewMockBroker(t)
-		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 		meta, err := NewMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker, NoDomainMetas)
 		assert.NoError(t, err)
 
@@ -1203,7 +1201,6 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		metakv.EXPECT().Has(mock.Anything, mock.Anything).Return(false, nil).Maybe()
 		catalog := datacoord.NewCatalog(metakv, "", "")
 		broker := broker.NewMockBroker(t)
-		broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 		meta, err := NewMeta(context.TODO(), catalog, nil, metacache.NewMetaStore(catalog), broker, NoDomainMetas)
 		assert.NoError(t, err)
 
@@ -2383,93 +2380,6 @@ func Test_meta_GcConfirm(t *testing.T) {
 	assert.False(t, m.GcConfirm(context.TODO(), 100, 10000))
 }
 
-func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
-	ms := metacache.NewMetaStore(nil)
-	t.Run("fail to list database", func(t *testing.T) {
-		m := &Meta{
-			MetaStore: ms,
-		}
-		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(nil, errors.New("list database failed, mocked"))
-		err := m.ReloadCollectionsFromRootcoord(context.TODO(), mockBroker)
-		assert.Error(t, err)
-	})
-
-	t.Run("fail to show collections", func(t *testing.T) {
-		m := &Meta{
-			MetaStore: ms,
-		}
-		mockBroker := broker.NewMockBroker(t)
-
-		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			DbNames: []string{"db1"},
-		}, nil)
-		mockBroker.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(nil, errors.New("show collections failed, mocked"))
-		err := m.ReloadCollectionsFromRootcoord(context.TODO(), mockBroker)
-		assert.Error(t, err)
-	})
-
-	t.Run("fail to describe collection", func(t *testing.T) {
-		m := &Meta{
-			MetaStore: ms,
-		}
-		mockBroker := broker.NewMockBroker(t)
-
-		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			DbNames: []string{"db1"},
-		}, nil)
-		mockBroker.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
-			CollectionNames: []string{"coll1"},
-			CollectionIds:   []int64{1000},
-		}, nil)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(nil, errors.New("describe collection failed, mocked"))
-		err := m.ReloadCollectionsFromRootcoord(context.TODO(), mockBroker)
-		assert.Error(t, err)
-	})
-
-	t.Run("fail to show partitions", func(t *testing.T) {
-		m := &Meta{
-			MetaStore: ms,
-		}
-		mockBroker := broker.NewMockBroker(t)
-
-		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			DbNames: []string{"db1"},
-		}, nil)
-		mockBroker.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
-			CollectionNames: []string{"coll1"},
-			CollectionIds:   []int64{1000},
-		}, nil)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{}, nil)
-		mockBroker.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return(nil, errors.New("show partitions failed, mocked"))
-		err := m.ReloadCollectionsFromRootcoord(context.TODO(), mockBroker)
-		assert.Error(t, err)
-	})
-
-	t.Run("success", func(t *testing.T) {
-		m := &Meta{
-			MetaStore: ms,
-		}
-		mockBroker := broker.NewMockBroker(t)
-
-		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{
-			DbNames: []string{"db1"},
-		}, nil)
-		mockBroker.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
-			CollectionNames: []string{"coll1"},
-			CollectionIds:   []int64{1000},
-		}, nil)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-			CollectionID: 1000,
-		}, nil)
-		mockBroker.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return([]int64{2000}, nil)
-		err := m.ReloadCollectionsFromRootcoord(context.TODO(), mockBroker)
-		assert.NoError(t, err)
-		c := m.GetCollection(UniqueID(1000))
-		assert.NotNil(t, c)
-	})
-}
-
 func TestMeta_GetSegmentsJSON(t *testing.T) {
 	ms := metacache.NewMetaStore(nil)
 	// Create a mock meta object
@@ -2752,7 +2662,9 @@ func TestCompleteCompactionMutationPublishesOnlyFinalDataViewSegments(t *testing
 	ctx := context.Background()
 	newMetaWithDataView := func(t *testing.T) (*Meta, dataviewpkg.Manager) {
 		catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
-		segments := NewSegmentsInfo(metacache.NewMetaStore(nil))
+		metaStore := metacache.NewMetaStore(nil)
+		metaStore.PutCollection(&CollectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Version: 1}})
+		segments := NewSegmentsInfo(metaStore)
 		for _, segmentID := range []int64{1, 2} {
 			segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
 				ID:            segmentID,
@@ -2770,18 +2682,19 @@ func TestCompleteCompactionMutationPublishesOnlyFinalDataViewSegments(t *testing
 		}
 		manager := dataviewpkg.NewManager(catalog, nil)
 		_, err := manager.OnCreateCollection(ctx, dataviewpkg.CreateCollectionDataViewEvent{
-			CollectionID: 100,
-			VChannels:    []string{"ch-1"},
+			CollectionID:  100,
+			SchemaVersion: 1,
+			VChannels:     []string{"ch-1"},
 		})
 		require.NoError(t, err)
-		_, err = manager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64) ([]dataviewpkg.LoadableSegment, error) {
+		_, err = manager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64, _ *viewpb.DataViewOfCollection) ([]dataviewpkg.LoadableSegment, error) {
 			return []dataviewpkg.LoadableSegment{
 				{SegmentID: 1, VChannel: "ch-1", PartitionID: 10},
 				{SegmentID: 2, VChannel: "ch-1", PartitionID: 10},
 			}, nil
 		})
 		require.NoError(t, err)
-		return &Meta{Ctx: ctx, Catalog: catalog, Segments: segments, DataViewManager: manager}, manager
+		return &Meta{Ctx: ctx, Catalog: catalog, MetaStore: metaStore, Segments: segments, DataViewManager: manager}, manager
 	}
 	dataViewSegmentIDs := func(t *testing.T, manager dataviewpkg.Manager) []int64 {
 		ref, err := manager.Latest(ctx, 100)
@@ -2797,15 +2710,12 @@ func TestCompleteCompactionMutationPublishesOnlyFinalDataViewSegments(t *testing
 	// reconcile drives the same loadable projection the async recompute queue
 	// worker would run after the SegmentMeta mutation commits.
 	reconcile := func(t *testing.T, meta *Meta, manager dataviewpkg.Manager) {
-		segments, err := meta.LoadableProjection(ctx, 100)
-		require.NoError(t, err)
-		_, err = manager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64) ([]dataviewpkg.LoadableSegment, error) {
-			return segments, nil
-		})
+		_, err := manager.RecomputeNow(ctx, 100, meta.LoadableProjection)
 		require.NoError(t, err)
 	}
 	result := &datapb.CompactionPlanResult{Segments: []*datapb.CompactionSegment{{
 		SegmentID: 3,
+		IsSorted:  true,
 		NumOfRows: 100,
 		InsertLogs: []*datapb.FieldBinlog{{
 			FieldID: 100,
@@ -2898,8 +2808,8 @@ func TestCompleteCompactionMutationPublishesOnlyFinalDataViewSegments(t *testing
 		}
 		result := &datapb.CompactionPlanResult{Segments: []*datapb.CompactionSegment{{
 			SegmentID: 3,
-			NumOfRows: 100,
 			IsSorted:  true,
+			NumOfRows: 100,
 			InsertLogs: []*datapb.FieldBinlog{{
 				FieldID: 100,
 				Binlogs: []*datapb.Binlog{{LogID: 3}},
@@ -2930,7 +2840,9 @@ func TestCompleteCompactionMutationPublishesOnlyFinalDataViewSegments(t *testing
 func TestCompleteCompactionMutationKeepsDataViewOrder(t *testing.T) {
 	ctx := context.Background()
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
-	segments := NewSegmentsInfo(metacache.NewMetaStore(nil))
+	metaStore := metacache.NewMetaStore(nil)
+	metaStore.PutCollection(&CollectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Version: 1}})
+	segments := NewSegmentsInfo(metaStore)
 	segments.SetSegment(1, NewSegmentInfo(&datapb.SegmentInfo{
 		ID:            1,
 		CollectionID:  100,
@@ -2945,13 +2857,13 @@ func TestCompleteCompactionMutationKeepsDataViewOrder(t *testing.T) {
 		}},
 	}))
 	manager := dataviewpkg.NewManager(catalog, nil)
-	_, err := manager.OnCreateCollection(ctx, dataviewpkg.CreateCollectionDataViewEvent{CollectionID: 100, VChannels: []string{"ch-1"}})
+	_, err := manager.OnCreateCollection(ctx, dataviewpkg.CreateCollectionDataViewEvent{CollectionID: 100, SchemaVersion: 1, VChannels: []string{"ch-1"}})
 	require.NoError(t, err)
-	_, err = manager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64) ([]dataviewpkg.LoadableSegment, error) {
+	_, err = manager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64, _ *viewpb.DataViewOfCollection) ([]dataviewpkg.LoadableSegment, error) {
 		return []dataviewpkg.LoadableSegment{{SegmentID: 1, VChannel: "ch-1", PartitionID: 10}}, nil
 	})
 	require.NoError(t, err)
-	meta := &Meta{Ctx: ctx, Catalog: catalog, Segments: segments, DataViewManager: manager}
+	meta := &Meta{Ctx: ctx, Catalog: catalog, MetaStore: metaStore, Segments: segments, DataViewManager: manager}
 	compact := func(from, to int64) error {
 		_, err := meta.CompleteCompactionMutation(ctx, &datapb.CompactionTask{
 			CollectionID:  100,
@@ -2962,6 +2874,7 @@ func TestCompleteCompactionMutationKeepsDataViewOrder(t *testing.T) {
 			Schema:        &schemapb.CollectionSchema{Version: 1},
 		}, &datapb.CompactionPlanResult{Segments: []*datapb.CompactionSegment{{
 			SegmentID: to,
+			IsSorted:  true,
 			NumOfRows: 100,
 			InsertLogs: []*datapb.FieldBinlog{{
 				FieldID: 100,
@@ -2977,11 +2890,7 @@ func TestCompleteCompactionMutationKeepsDataViewOrder(t *testing.T) {
 	require.NoError(t, compact(1, 2))
 	require.NoError(t, compact(2, 3))
 
-	segmentsProjection, err := meta.LoadableProjection(ctx, 100)
-	require.NoError(t, err)
-	_, err = manager.RecomputeNow(ctx, 100, func(_ context.Context, _ int64) ([]dataviewpkg.LoadableSegment, error) {
-		return segmentsProjection, nil
-	})
+	_, err = manager.RecomputeNow(ctx, 100, meta.LoadableProjection)
 	require.NoError(t, err)
 
 	ref, err := manager.Latest(ctx, 100)

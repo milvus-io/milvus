@@ -54,6 +54,10 @@ func (m *GrpcQueryCoordClient) GetStatisticsChannel(ctx context.Context, in *int
 	return &milvuspb.StringResponse{}, m.Err
 }
 
+func (m *GrpcQueryCoordClient) EnsureCollectionReady(ctx context.Context, req *querypb.EnsureCollectionReadyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
 func (m *GrpcQueryCoordClient) ShowLoadCollections(ctx context.Context, in *querypb.ShowCollectionsRequest, opts ...grpc.CallOption) (*querypb.ShowCollectionsResponse, error) {
 	return &querypb.ShowCollectionsResponse{}, m.Err
 }

@@ -21,11 +21,110 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestFixtureBackupImportsReceivedSourceKey(t *testing.T) {
+	var sender fixtureCipher
+	require.NoError(t, sender.Init(map[string]string{"cipher.milvusRoleName": "mixcoord"}))
+	provider, ok := any(&sender).(interface{ Backup(int64) (string, error) })
+	require.True(t, ok, "fixture must implement the host's backup interface")
+	backup, err := provider.Backup(17)
+	require.NoError(t, err)
+	decoded, err := base64.StdEncoding.DecodeString(backup)
+	require.NoError(t, err)
+	var payload struct {
+		EZID int64  `json:"ez_id"`
+		Key  []byte `json:"key"`
+	}
+	require.NoError(t, json.Unmarshal(decoded, &payload))
+	require.Equal(t, int64(17), payload.EZID)
+	require.Equal(t, sender.GetUnsafeKey(17, 0), payload.Key)
+
+	var receiver fixtureCipher
+	require.NoError(t, receiver.Init(map[string]string{"cipher.milvusRoleName": "datanode"}))
+	require.Empty(t, receiver.GetUnsafeKey(17, 0))
+	require.NoError(t, receiver.Init(map[string]string{"cipher.ez.import": backup}))
+	require.Equal(t, payload.Key, receiver.GetUnsafeKey(17, 0))
+	require.Empty(t, receiver.GetUnsafeKey(18, 0))
+	payload.Key[0] ^= 1
+	invalid, err := json.Marshal(payload)
+	require.NoError(t, err)
+	require.Error(t, receiver.Init(map[string]string{"cipher.ez.import": base64.StdEncoding.EncodeToString(invalid)}))
+}
+
+func TestFixtureDataNodeRequiresReceivedKey(t *testing.T) {
+	var receiver fixtureCipher
+	require.NoError(t, receiver.Init(map[string]string{"cipher.milvusRoleName": "datanode"}))
+	require.Empty(t, receiver.GetUnsafeKey(17, 23))
+	_, _, err := receiver.GetEncryptor(17, 23)
+	require.Error(t, err)
+
+	var sender fixtureCipher
+	require.NoError(t, sender.Init(map[string]string{"cipher.milvusRoleName": "mixcoord"}))
+	encryptor, edek, err := sender.GetEncryptor(17, 23)
+	require.NoError(t, err)
+	_, err = receiver.GetDecryptor(17, 23, edek)
+	require.Error(t, err)
+
+	require.NoError(t, receiver.Init(map[string]string{
+		createEZKey: "17",
+		unsafeEZK:   base64.StdEncoding.EncodeToString(sender.GetUnsafeKey(17, 23)),
+	}))
+	require.Equal(t, sender.GetUnsafeKey(17, 23), receiver.GetUnsafeKey(17, 23))
+	decryptor, err := receiver.GetDecryptor(17, 23, edek)
+	require.NoError(t, err)
+	ciphertext, err := encryptor.Encrypt([]byte("received task key"))
+	require.NoError(t, err)
+	plain, err := decryptor.Decrypt(ciphertext)
+	require.NoError(t, err)
+	require.Equal(t, []byte("received task key"), plain)
+
+	var restarted fixtureCipher
+	require.NoError(t, restarted.Init(map[string]string{"cipher.milvusRoleName": "datanode"}))
+	require.Empty(t, restarted.GetUnsafeKey(17, 23))
+}
+
+func TestFixtureWriterKeyFaultRecovery(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("MILVUS_CMEK_FIXTURE_CONTROL", dir)
+	var writer, otherRole fixtureCipher
+	require.NoError(t, writer.Init(map[string]string{"cipher.milvusRoleName": "streamingnode"}))
+	require.NoError(t, otherRole.Init(map[string]string{"cipher.milvusRoleName": "proxy"}))
+	key := writer.GetUnsafeKey(17, 23)
+	require.NotEmpty(t, key)
+
+	// Only the writer-key lookup is unavailable. WAL encryption/decryption and
+	// other roles, collections and zones retain their own key access.
+	fault := []byte(`{"role":"streamingnode","ez_id":17,"collection_id":23,"operation":"unsafe"}`)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "fault.json"), fault, 0o600))
+	for range 2 {
+		require.Empty(t, writer.GetUnsafeKey(17, 23))
+	}
+	require.Equal(t, key, otherRole.GetUnsafeKey(17, 23))
+	require.NotEmpty(t, writer.GetUnsafeKey(18, 23))
+	require.NotEmpty(t, writer.GetUnsafeKey(17, 24))
+	encryptor, edek, err := writer.GetEncryptor(17, 23)
+	require.NoError(t, err)
+	require.NotNil(t, encryptor)
+	_, err = writer.GetDecryptor(17, 23, edek)
+	require.NoError(t, err)
+
+	require.NoError(t, os.Remove(filepath.Join(dir, "fault.json")))
+	require.Equal(t, key, writer.GetUnsafeKey(17, 23))
+	records, err := filepath.Glob(filepath.Join(dir, "go-*.jsonl"))
+	require.NoError(t, err)
+	require.NotEmpty(t, records)
+	contents, err := os.ReadFile(records[0])
+	require.NoError(t, err)
+	require.Contains(t, string(contents), `"outcome":"unavailable"`)
+	require.NotContains(t, string(contents), base64.StdEncoding.EncodeToString(key))
+}
 
 func TestFixtureCipherDerivesDistinctEZKeysWithoutState(t *testing.T) {
 	cipher := fixtureCipher{}
@@ -55,7 +154,7 @@ func TestFixtureCipherRejectsUnexpectedRootKey(t *testing.T) {
 	require.ErrorContains(t, err, "unexpected root key")
 }
 
-func TestFixtureCipherValidatesImportedEZKeyWithoutCaching(t *testing.T) {
+func TestFixtureCipherValidatesImportedEZKey(t *testing.T) {
 	cipher := fixtureCipher{}
 	encoded := base64.StdEncoding.EncodeToString(deriveEZKey(17))
 

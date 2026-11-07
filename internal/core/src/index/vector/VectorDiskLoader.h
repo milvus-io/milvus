@@ -17,24 +17,28 @@
 #pragma once
 
 #include <string_view>
+#include <optional>
 #include <utility>
 
 #include "index/Families.h"
 #include "index/IndexLoader.h"
 #include "index/IndexLoadInput.h"
-#include "index/contracts/query/IIndexReaderBase.h"
+#include "index/contracts/IIndex.h"
 #include "storage/artifact/FileSource.h"
 #include "storage/artifact/LoadOptions.h"
 
 namespace milvus::index {
 
+class KnowhereEngine;
+
 /**
- * @brief Loads disk Knowhere readers from legacy artifacts.
+ * @brief Loads disk Knowhere engines from legacy artifacts.
  *
  * Non-streaming backends materialize a unique DiskFileManager generation.
  * Streaming backends open exact raw, unsliced inventory objects; legacy
- * sidecars still use FileSource. Owns the opened source and fixed load options;
- * each Load creates a new reader.
+ * sidecars still use FileSource. Cached loads transfer the source and fixed
+ * options to a typed engine slot. Native lazy backends use a non-evictable
+ * slot for admission/accounting while keeping their internal data cache.
  */
 class VectorDiskLoader final : public IndexLoader {
  public:
@@ -49,14 +53,14 @@ class VectorDiskLoader final : public IndexLoader {
      * options.
      * @param source Opened storage source owned by the resulting loader.
      * @param options Fixed load options without a retained operation context.
-     * @return A ready loader with reusable family metadata.
+     * @return A ready loader with prepared family metadata.
      */
     static folly::coro::Task<std::unique_ptr<IndexLoader>>
     Create(OpenedIndexSource source, storage::LoadOptions options);
 
     /** @copydoc IndexLoader::Load */
-    folly::coro::Task<IIndexReaderBasePtr>
-    Load(milvus::OpContext* context = nullptr) override;
+    IndexPtr
+    Load(milvus::OpContext* context, const IndexCacheConfig& cache) override;
 
     /**
      * @brief Select entries that need eager async reads for the disk backend.
@@ -69,7 +73,7 @@ class VectorDiskLoader final : public IndexLoader {
                     const storage::LoadOptions& opts);
 
  private:
-    LegacyIndexSource source_;
+    std::optional<LegacyIndexSource> source_;
     // Retained options never keep the Create caller's op_ctx.
     storage::LoadOptions options_;
 
@@ -82,8 +86,8 @@ class VectorDiskLoader final : public IndexLoader {
      * sidecars.
      * @note Runs inside RunLegacyLoad; use_async controls source I/O only.
      */
-    static folly::coro::Task<IIndexReaderBasePtr>
-    LoadLegacy(storage::FileSource& source,
+    static folly::coro::Task<std::unique_ptr<KnowhereEngine>>
+    LoadEngine(storage::FileSource& source,
                const storage::LoadOptions& opts,
                bool use_async);
 };

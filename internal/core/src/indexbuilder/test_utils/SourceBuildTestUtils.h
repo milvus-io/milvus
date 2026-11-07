@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <gtest/gtest.h>
 
 #include <cstdint>
@@ -155,13 +157,15 @@ class SourceBuildTest : public ::testing::Test {
             index::LoaderRegistry::Instance().Lookup(prepared.request.family);
         AssertInfo(static_cast<bool>(loader), "fixture family has no loader");
         if (prepared.request.output.generation == storage::Generation::V3) {
-            return loader.Load(
-                {index::IndexFiles{
-                     std::move(context),
-                     std::move(paths),
-                     index::PackedIndexStorageConfig{
-                         prepared.request.output.storage_namespace}},
-                 std::move(options)});
+            return loader
+                .Load({index::IndexFiles{
+                           std::move(context),
+                           std::move(paths),
+                           index::PackedIndexStorageConfig{
+                               prepared.request.output.storage_namespace}},
+                       std::move(options),
+                       milvus::index::test::TestIndexCacheConfig()})
+                ->CreateReader(nullptr);
         }
         // Same V1 layout choice as the sealed index translator.
         const auto& family = prepared.request.family;
@@ -171,15 +175,17 @@ class SourceBuildTest : public ::testing::Test {
                                  family == index::families::kRTree ||
                                  family == index::families::kJsonFlat ||
                                  family == index::families::kHybrid;
-        return loader.Load(
-            {index::IndexFiles{
-                 std::move(context),
-                 std::move(paths),
-                 index::LegacyIndexStorageConfig{
-                     disk_layout ? storage::V1SourceLayout::DiskFiles
-                                 : storage::V1SourceLayout::MemoryEntries,
-                     prepared.request.output.storage_namespace}},
-             std::move(options)});
+        return loader
+            .Load({index::IndexFiles{
+                       std::move(context),
+                       std::move(paths),
+                       index::LegacyIndexStorageConfig{
+                           disk_layout ? storage::V1SourceLayout::DiskFiles
+                                       : storage::V1SourceLayout::MemoryEntries,
+                           prepared.request.output.storage_namespace}},
+                   std::move(options),
+                   milvus::index::test::TestIndexCacheConfig()})
+            ->CreateReader(nullptr);
     }
 
     std::shared_ptr<storage::LocalDirectory> directory_;

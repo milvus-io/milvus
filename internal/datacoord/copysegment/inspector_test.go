@@ -72,7 +72,6 @@ func (s *CopySegmentInspectorSuite) SetupTest() {
 	s.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil).Maybe()
 
 	s.broker = broker.NewMockBroker(s.T())
-	s.broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
 	dm := &index.IndexTestMetas{}
 	s.meta, err = meta.NewMeta(context.TODO(), s.catalog, nil, metacache.NewMetaStore(s.catalog), s.broker, index.LoadIndexTestMetas(s.catalog, dm))

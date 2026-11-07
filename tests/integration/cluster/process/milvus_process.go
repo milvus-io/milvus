@@ -276,6 +276,7 @@ func (mp *MilvusProcess) notifyBySignal() {
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
 	for {
 		select {
 		case <-mp.notifier.Context().Done():
@@ -298,6 +299,16 @@ func (mp *MilvusProcess) asyncWait(f *syncutil.Future[error]) {
 // GetNodeID returns the node ID of the Milvus process
 func (mp *MilvusProcess) GetNodeID() int64 {
 	return mp.nodeID
+}
+
+// GetMetricsAddr returns the host:port of the process's metrics/HTTP server,
+// or "" when the process was not given a METRICS_PORT.
+func (mp *MilvusProcess) GetMetricsAddr() string {
+	port := mp.env["METRICS_PORT"]
+	if port == "" {
+		return ""
+	}
+	return "127.0.0.1:" + port
 }
 
 // IsWorking returns true if the Milvus process is working
@@ -366,8 +377,8 @@ func (mp *MilvusProcess) ForceStop() error {
 
 // waitForReady waits for the Milvus process to be ready.
 func (mp *MilvusProcess) waitForReady(ctx context.Context) error {
-	mp.GetClient(ctx)
-	return nil
+	_, err := mp.GetClient(ctx)
+	return err
 }
 
 // GetClient gets the client for the Milvus process.
@@ -394,6 +405,7 @@ func (mp *MilvusProcess) asyncGetClient(ctx context.Context) {
 	now = time.Now()
 
 	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
 	for {
 		resp, err := c.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 		if err == nil && resp.State.GetStateCode() == commonpb.StateCode_Healthy {
@@ -439,7 +451,7 @@ func (mp *MilvusProcess) getClient(ctx context.Context) (nodeClient, error) {
 	case "querynode":
 		return newQueryNodeClient(conn), nil
 	case "streamingnode":
-		return newQueryNodeClient(conn), nil
+		return newStreamingNodeClient(conn), nil
 	default:
 		return nil, fmt.Errorf("unknown role: %s", mp.role)
 	}
@@ -451,8 +463,6 @@ func (mp *MilvusProcess) GetAddress(ctx context.Context) (string, error) {
 	switch mp.role {
 	case typeutil.MixCoordRole:
 		key = path.Join(mp.rootPath, "meta/session", mp.role)
-	case typeutil.StreamingNodeRole:
-		key = path.Join(mp.rootPath, "meta/session", typeutil.QueryNodeRole) + "-" + strconv.FormatInt(mp.nodeID, 10)
 	default:
 		key = path.Join(mp.rootPath, "meta/session", mp.role) + "-" + strconv.FormatInt(mp.nodeID, 10)
 	}
@@ -466,7 +476,9 @@ func (mp *MilvusProcess) GetAddress(ctx context.Context) (string, error) {
 		case <-ctx.Done():
 			return "", ctx.Err()
 		case <-mp.notifier.Context().Done():
-			return "", mp.notifier.BlockAndGetResult()
+			// background joins asyncGetClient before publishing its final result.
+			// Address discovery runs inside that worker and must not wait for the join.
+			return "", context.Cause(mp.notifier.Context())
 		case <-ticker.C:
 			val, err := mp.etcdCli.Get(ctx, key)
 			if err != nil {

@@ -139,6 +139,7 @@ func (ut *UpsertTask) appendUpsertAttempt(ctx context.Context, ez *message.Ciphe
 		}
 	}
 	resp := streaming.WAL().AppendMessages(ctx, messages...)
+	invalidateMismatchedWriteSchema(ctx, ut.GetMetaCache(), ut.collectionID, resp)
 	appendErr := resp.UnwrapFirstError()
 	if ut.req.GetPartialUpdate() {
 		appendErr = unwrapPartialUpdateAppendError(resp)

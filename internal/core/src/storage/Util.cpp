@@ -83,6 +83,7 @@
 #include "storage/MemFileManagerImpl.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/KeyRetriever.h"
+#include "storage/PluginLoader.h"
 #include "segcore/memory_planner.h"
 #include "mmap/Types.h"
 #include "storage/loon_ffi/ffi_reader_c.h"
@@ -1880,12 +1881,19 @@ detail::VisitFieldDataFromStorageV2Paged(
 
     for (const auto& column_group_file : remote_chunk_files) {
         // get all row groups for each file
-        auto result = milvus_storage::FileRowGroupReader::Make(
-            fs,
-            column_group_file,
-            milvus_storage::DEFAULT_READ_BUFFER_SIZE,
-            GetReaderProperties(),
-            GetArrowReaderProperties());
+        auto prepared_result = milvus_storage::PreparedParquetFile::Open(
+            fs, column_group_file, GetReaderProperties());
+        if (!prepared_result.ok()) {
+            ThrowInfo(ArrowStatusToErrorCode(prepared_result.status()),
+                      "[StorageV2] Failed to prepare file {}: {}",
+                      column_group_file,
+                      prepared_result.status().ToString());
+        }
+        auto prepared = std::move(prepared_result).ValueOrDie();
+        auto result =
+            prepared->MakeReader(nullptr,
+                                 milvus_storage::DEFAULT_READ_BUFFER_SIZE,
+                                 GetArrowReaderProperties());
         if (!result.ok()) {
             ThrowInfo(ArrowStatusToErrorCode(result.status()),
                       "[StorageV2] Failed to create file row group reader: " +
@@ -1997,6 +2005,7 @@ detail::VisitFieldDataFromStorageV2Paged(
                 pool.Submit([channel,
                              column_group_file,
                              fs,
+                             prepared,
                              parallel_degree,
                              row_groups = std::move(row_groups)]() mutable {
                     auto strategy =
@@ -2012,7 +2021,8 @@ detail::VisitFieldDataFromStorageV2Paged(
                         row_group_lists,
                         fs,
                         nullptr,
-                        milvus::proto::common::LoadPriority::HIGH);
+                        milvus::proto::common::LoadPriority::HIGH,
+                        {prepared});
                 });
 
             bool channel_exhausted = false;
@@ -2175,9 +2185,10 @@ ReadFieldDataFromManifestInto(const std::string& manifest_path,
         auto read = [&]() -> arrow::Result<size_t> {
             auto columns = std::make_shared<std::vector<std::string>>(
                 std::vector<std::string>{column});
-            auto reader_properties = *properties;
+            auto reader_properties =
+                std::make_shared<milvus_storage::api::Properties>(*properties);
             const auto error = milvus_storage::api::SetValue(
-                reader_properties,
+                *reader_properties,
                 PROPERTY_READER_ASYNC_TASK_SPLIT_STRATEGY,
                 "bytes");
             if (error.has_value()) {
@@ -2186,6 +2197,11 @@ ReadFieldDataFromManifestInto(const std::string& manifest_path,
             }
             auto reader = milvus_storage::api::Reader::create(
                 column_groups, nullptr, columns, reader_properties);
+            if (PluginLoader::GetInstance().getCipherPlugin()) {
+                reader->set_keyretriever([](const std::string& key_metadata) {
+                    return KeyRetriever().GetKey(key_metadata);
+                });
+            }
             const auto parallelism =
                 milvus_storage::ThreadPoolHolder::GetParallelism();
             auto pool =
@@ -2410,10 +2426,15 @@ VisitFieldDataFromManifestPaged(
     auto needed_cols_ptr =
         std::make_shared<std::vector<std::string>>(needed_columns);
     auto reader = milvus_storage::api::Reader::create(
-        column_groups, reader_schema, needed_cols_ptr, *loon_ffi_properties);
+        column_groups, reader_schema, needed_cols_ptr, loon_ffi_properties);
 
     if (!(reader != nullptr)) {
         ThrowInfo(ErrorCode::FileReadFailed, "Failed to create reader");
+    }
+    if (PluginLoader::GetInstance().getCipherPlugin()) {
+        reader->set_keyretriever([](const std::string& key_metadata) {
+            return KeyRetriever().GetKey(key_metadata);
+        });
     }
     std::shared_ptr<arrow::RecordBatch> batch;
 
@@ -2978,13 +2999,14 @@ BuildTextSegmentReaderConfig(const milvus_storage::api::Properties& properties,
                              int64_t field_id,
                              const std::string& lob_base_path) {
     milvus_storage::segment::SegmentReaderConfig config;
-    config.properties = properties;
+    config.properties =
+        std::make_shared<const milvus_storage::api::Properties>(properties);
 
     milvus_storage::lob_column::LobColumnConfig lob_config;
     lob_config.data_type = milvus_storage::lob_column::LobDataType::kText;
     lob_config.field_id = field_id;
     lob_config.lob_base_path = lob_base_path;
-    lob_config.properties = properties;
+    lob_config.properties = config.properties;
     config.lob_columns[field_id] = std::move(lob_config);
     return config;
 }
@@ -3002,7 +3024,7 @@ OpenTextFieldSegmentReader(
         BuildTextLobBasePath(segment_base_path, field_meta.field_id);
 
     auto fs_result = milvus_storage::FilesystemCache::getInstance().get(
-        *loon_ffi_properties, segment_base_path);
+        loon_ffi_properties, segment_base_path);
     if (!fs_result.ok()) {
         auto error = milvus_storage::ToSegcoreError(fs_result.status());
         ThrowInfo(error.get_error_code(),

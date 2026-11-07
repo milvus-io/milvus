@@ -2,7 +2,7 @@
 
 This branch combines the StreamingNode query path, the injectable
 [query client](query_client.md), and QueryNode query/resource preparation.
-Production Proxy switching remains separate work. Scoped WAL
+Production Proxy routing and Coordinator runtime activation are wired. Scoped WAL
 barrier production and ordered delivery are provided by master. The plan's QN
 workers use the existing ViewQueryService protocol through the client's injected
 ViewQueryServiceClient.
@@ -65,7 +65,7 @@ QN loaders, ReadState management and native preparation are described below.
   producer normalizes the user-facing skip-dynamic-field option into those
   hints, so the response needs no separate boolean. Skipping dynamic-field
   preloading does not remove that field from the logical query scope.
-  Producers are supplied by the separate control-plane implementation.
+  The integrated coordinator supplies this metadata.
 
 Retained requery uses QueryOnView with the original plan, workers, Schema and
 MVCC. It does not select new resources through Phase 1 or use a separate requery
@@ -633,3 +633,21 @@ The first node-side Phase 2 milestone is:
 7. Implement `SearchOnView` and `QueryOnView` RPC paths using provider plus
    scheduler.
 8. Reuse QueryOnView for requery with the original View, Schema and MVCC.
+
+## Partition statistics and pruning
+
+[Global segment pruning](../query/segment_pruning.md) defines immutable DataView
+statistics references, SN resource readiness and shared ownership, and per-worker
+Plan selections. Scalar and vector clustering pruning run on SN during Phase 1;
+QN applies the recorded selection before acquiring execution handles.
+
+## Filter-only execution
+
+SearchOnView optionally carries SearchExecutionOptions (FilterOnly and
+EnableExprCache). The server attaches these request-local controls to the
+provider's task owner; SN/QN schedulers pass them to the native search adapters.
+Acquisition, exact-instance Transform waits and release are identical to normal
+search. QN returns filter counts and segment identities through the existing
+SearchResults envelope. The client alone orchestrates the two rounds; workers
+do not call other workers, replan or select another View. See the
+[filter-first client flow](query_client.md#filter-first-ann-search).

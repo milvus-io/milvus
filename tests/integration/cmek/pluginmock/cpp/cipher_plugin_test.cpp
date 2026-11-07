@@ -16,6 +16,7 @@
 
 #include "storage/plugin/PluginInterface.h"
 
+#include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -69,8 +70,19 @@ main() {
             "d9cb9e34022d55b0e61b0c37e4561ad255400a285b27f74cbe31c2574dd10e4d";
         const std::string expected_dek =
             "bcdbeac6f09eb42ea81144b43a0ccc75cba5455134dda7ff6dcc5790da012327";
+        const std::string expected_ezk =
+            "quQBfSKoD9W+tUibjbO/ei3OZsOejiHyC8d0M6BU04c=";
 
         auto first = newPlugin();
+        bool unregistered_reader_rejected = false;
+        try {
+            static_cast<void>(first->GetDecryptor(17, 23, edek));
+        } catch (const std::exception&) {
+            unregistered_reader_rejected = true;
+        }
+        require(unregistered_reader_rejected,
+                "reader accepted an unregistered collection context");
+        first->Update(17, 23, expected_ezk);
         auto decryptor = first->GetDecryptor(17, 23, edek);
         require(hexEncode(decryptor->GetKey()) == expected_dek,
                 "C++ fixture does not match the Go derivation vector");
@@ -108,8 +120,16 @@ main() {
         }
         require(wrong_key_rejected, "wrong imported EZK was accepted");
 
-        const std::string expected_ezk =
-            "quQBfSKoD9W+tUibjbO/ei3OZsOejiHyC8d0M6BU04c=";
+        first->Update(17, 23, "");
+        bool missing_context_rejected = false;
+        try {
+            static_cast<void>(first->GetEncryptor(17, 23));
+        } catch (const std::exception&) {
+            missing_context_rejected = true;
+        }
+        require(missing_context_rejected,
+                "writer accepted a missing collection context");
+
         first->Update(17, 23, expected_ezk);
         auto second = newPlugin();
         second->Update(17, 23, expected_ezk);
@@ -117,6 +137,46 @@ main() {
         auto second_edek = second->GetEncryptor(17, 23).second;
         require(first_edek != second_edek,
                 "independent plugin instances reused an EDEK");
+
+        first->Update(17, 23, "");
+        bool released_context_rejected = false;
+        try {
+            static_cast<void>(first->GetEncryptor(17, 23));
+        } catch (const std::exception&) {
+            released_context_rejected = true;
+        }
+        require(released_context_rejected,
+                "writer accepted a released collection context");
+
+        bool missing_reader_context_rejected = false;
+        try {
+            static_cast<void>(first->GetDecryptor(17, 23, edek));
+        } catch (const std::exception&) {
+            missing_reader_context_rejected = true;
+        }
+        require(missing_reader_context_rejected,
+                "strict reader accepted a released collection context");
+        require(hexEncode(second->GetDecryptor(17, 23, edek)->GetKey()) ==
+                    expected_dek,
+                "strict reader rejected another instance's registered context");
+        first->Update(17, 23, expected_ezk);
+        require(hexEncode(first->GetDecryptor(17, 23, edek)->GetKey()) ==
+                    expected_dek,
+                "strict reader rejected a newly registered context");
+        first->Update(17, 23, "");
+        auto source = newPlugin();
+        source->Update(17, 0, expected_ezk);
+        require(hexEncode(source->GetDecryptor(17, 23, edek)->GetKey()) ==
+                    expected_dek,
+                "registered import source context could not read the backup");
+        bool source_writer_rejected = false;
+        try {
+            static_cast<void>(source->GetEncryptor(17, 23));
+        } catch (const std::exception&) {
+            source_writer_rejected = true;
+        }
+        require(source_writer_rejected,
+                "import source context authorized a target writer");
     } catch (const std::exception& error) {
         std::cerr << error.what() << std::endl;
         return 1;

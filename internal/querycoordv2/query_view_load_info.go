@@ -30,9 +30,7 @@ func (s *queryViewLoadInfoReader) GetLoadInfo(ctx context.Context, collectionID 
 	if cfg == nil {
 		return nil, merr.WrapErrServiceNotReadyMsg("load requirements %d for collection %d are unavailable", version, collectionID)
 	}
-	if len(cfg.RequiredFields) == 0 {
-		return nil, merr.WrapErrDataIntegrityMsg("load requirements %d for collection %d have no required fields", version, collectionID)
-	}
+
 	// Definitions stay owned by index metadata. Resolve only this version's
 	// selected IDs; neither new indexes nor current field selections may leak in.
 	selected := make(map[int64]int64)

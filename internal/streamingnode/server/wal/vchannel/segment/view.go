@@ -426,8 +426,9 @@ func (s *SegmentView) FlushInsertChunk(ctx context.Context, targetTimeTick uint6
 		s.pendingFlushChunkLocked(targetTimeTick).persisted = result
 		s.mu.Unlock()
 	}
-	// TODO: Remove after enabling queryview. Publish exactly this stable pack
-	// before exposing its recovery snapshot or releasing the Insert handles.
+	// Publish exactly this stable pack before exposing its recovery snapshot
+	// or releasing the Insert handles. QueryView's W/A Transform coverage
+	// requires the first StartPosition registration in this ordering.
 	appendPersistedStorage(result.PersistedStorage, pack.Meta)
 	var start *msgpb.MsgPosition
 	if pack.Meta.GetStat().GetModifiedRows() == pack.Rows {
@@ -478,6 +479,22 @@ func (info *SegmentView) AssignmentMeta() *streamingpb.SegmentAssignmentMeta {
 	info.mu.Lock()
 	defer info.mu.Unlock()
 	return proto.Clone(info.meta).(*streamingpb.SegmentAssignmentMeta)
+}
+
+// SchemaReference is what keeps a retained segment's schema versions alive.
+// Schema GC reads it on every cleanup pass, so it avoids cloning the assignment.
+type SchemaReference struct {
+	CreateTimeTick uint64
+	SchemaVersion  int32
+}
+
+func (info *SegmentView) SchemaReference() SchemaReference {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	return SchemaReference{
+		CreateTimeTick: info.createSegmentTimeTick,
+		SchemaVersion:  info.meta.GetSchemaVersion(),
+	}
 }
 
 func (info *SegmentView) WritePathRecoveryState() (moduleapi.SegmentWritePathRecoveryState, bool) {

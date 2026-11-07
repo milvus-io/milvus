@@ -343,10 +343,10 @@ MakeNullableIndexLoadInfo(test::consumer::OpenedIndex opened,
             key, value.is_string() ? value.get<std::string>() : value.dump());
     }
     info.load_resource_request = LoadResourceRequest{};
-    info.cache_index =
-        CreateTestCacheIndex("nullable-vector-" + std::to_string(info.index_id),
-                             std::move(opened.reader),
-                             observed_ctx);
+    info.index = observed_ctx != nullptr
+                     ? std::make_shared<ContextObservingIndex>(
+                           std::move(opened.index), observed_ctx)
+                     : std::move(opened.index);
     return info;
 }
 
@@ -600,15 +600,8 @@ TEST(StrictGroupHnswSearch, PreservesParametersForIndependentPhaseTwo) {
                                             : knowhere::Json(ef);
         const auto original_params = info.search_params_;
         SearchResult result;
-        SearchOnSealedIndex(*schema,
-                            entry,
-                            info,
-                            vectors.data(),
-                            nullptr,
-                            1,
-                            {},
-                            nullptr,
-                            result);
+        SearchOnSealedIndex(
+            *schema, entry, info, vectors.data(), nullptr, 1, {}, result);
         // VectorSearchNode normally supplies the segment row count.
         result.total_data_cnt_ = n;
         ASSERT_TRUE(result.CanSearchFilteredVectors());
@@ -653,16 +646,10 @@ TEST(StrictGroupHnswSearch, PreservesParametersForIndependentPhaseTwo) {
         info.search_params_ = {{"ef", ef}};
         SearchResult result;
         result.total_data_cnt_ = n;
-        EXPECT_THROW(SearchOnSealedIndex(*schema,
-                                         entry,
-                                         info,
-                                         vectors.data(),
-                                         nullptr,
-                                         1,
-                                         {},
-                                         nullptr,
-                                         result),
-                     SegcoreError);
+        EXPECT_THROW(
+            SearchOnSealedIndex(
+                *schema, entry, info, vectors.data(), nullptr, 1, {}, result),
+            SegcoreError);
     }
 }
 
@@ -686,7 +673,7 @@ TEST(StrictGroupIvfSearch, IndependentPhaseTwoPreservesSearchParameters) {
     SearchResult result;
     result.total_data_cnt_ = n;
     SearchOnSealedIndex(
-        *schema, entry, info, vectors.data(), nullptr, 1, {}, nullptr, result);
+        *schema, entry, info, vectors.data(), nullptr, 1, {}, result);
     ASSERT_TRUE(result.CanSearchFilteredVectors());
     auto filter = std::make_shared<TargetBitmap>(n, false);
     (*filter)[0] = true;
@@ -739,7 +726,6 @@ TEST(SearchOnSealedIndexBitsetLifetime,
                         nullptr,
                         1,
                         logical_bitset,
-                        nullptr,
                         search_result);
 
     // Indexed nullable search now passes the caller's logical bitset directly
@@ -762,7 +748,6 @@ TEST(SearchOnSealedIndexBitsetLifetime,
                         nullptr,
                         1,
                         logical_bitset,
-                        nullptr,
                         non_strict_result);
     EXPECT_FALSE(non_strict_result.CanSearchFilteredVectors());
 
@@ -776,7 +761,6 @@ TEST(SearchOnSealedIndexBitsetLifetime,
                         nullptr,
                         1,
                         logical_bitset,
-                        nullptr,
                         single_group_result);
     EXPECT_FALSE(single_group_result.CanSearchFilteredVectors());
 
@@ -790,13 +774,12 @@ TEST(SearchOnSealedIndexBitsetLifetime,
                         nullptr,
                         2,
                         logical_bitset,
-                        nullptr,
                         multiple_query_result);
     EXPECT_FALSE(multiple_query_result.CanSearchFilteredVectors());
 }
 
 TEST(SearchOnSealedIndexCachePinLifetime,
-     GroupByIteratorKeepsVectorIndexPinnedUntilSearchResultDestruction) {
+     GroupByIteratorKeepsReaderAliveAfterSegmentDestruction) {
     constexpr int64_t total_count = 10000;
 
     int64_t valid_count = 0;
@@ -820,7 +803,7 @@ TEST(SearchOnSealedIndexCachePinLifetime,
 
     auto load_info = MakeNullableIndexLoadInfo(
         std::move(index_base), vector_field, total_count);
-    auto cache_index = load_info.cache_index;
+    std::weak_ptr<index::IIndex> owner = load_info.index;
     auto segment =
         BuildIndexSearchSegment(schema, vector_field, total_count, load_info);
 
@@ -830,8 +813,8 @@ TEST(SearchOnSealedIndexCachePinLifetime,
 
     {
         SearchResult search_result;
-        // The segment is the consumer responsible for retaining the reader
-        // cache pin after SearchOnSealedIndex returns borrowed iterators.
+        // Deferred iteration must retain the request reader and engine after
+        // the segment releases its inventory.
         segment->vector_search(search_info,
                                query.data(),
                                nullptr,
@@ -843,16 +826,17 @@ TEST(SearchOnSealedIndexCachePinLifetime,
 
         ASSERT_TRUE(search_result.vector_iterators_.has_value());
         ASSERT_FALSE(search_result.vector_iterators_->empty());
-        ASSERT_FALSE(cache_index->ManualEvictAll())
-            << "the vector index must stay pinned while SearchResult owns "
-               "iterators";
+        load_info.index.reset();
+        segment.reset();
+        EXPECT_FALSE(owner.expired());
+        AssertVectorIteratorUsableAfterSearchReturns(
+            search_result, 10, search_result.pinned_bitsets_.size());
     }
 
-    EXPECT_TRUE(cache_index->ManualEvictAll())
-        << "the vector index pin must be released with SearchResult";
+    EXPECT_TRUE(owner.expired());
 }
 
-TEST(SearchOnSealedIndexCancellation, PinVectorIndexUsesCallerOpContext) {
+TEST(SearchOnSealedIndexCancellation, CreateIndexReaderUsesCallerOpContext) {
     constexpr int64_t total_count = 1000;
     constexpr int64_t topk = 10;
 
@@ -939,7 +923,6 @@ TEST(SearchOnSealedIndexNullableNoFilter,
                         nullptr,
                         1,
                         BitsetView{},
-                        nullptr,
                         search_result);
 
     ASSERT_EQ(search_result.seg_offsets_.size(), topk);
@@ -992,7 +975,6 @@ TEST(SearchOnSealedIndexNullableIteratorNoFilter,
                         nullptr,
                         1,
                         BitsetView{},
-                        nullptr,
                         search_result);
 
     ASSERT_EQ(search_result.seg_offsets_.size(), batch_size);
@@ -1497,7 +1479,7 @@ AssertGrowingIndexEmptyBitsetHonorsPlannedPrefix(bool nullable) {
         dynamic_cast<segcore::SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing_segment, nullptr);
     const auto planned_index_pin =
-        growing_segment->PinGrowingIndex(vector_field);
+        growing_segment->PinGrowingIndex(nullptr, vector_field);
     ASSERT_TRUE(planned_index_pin);
     ASSERT_NE(
         dynamic_cast<const index::IVectorReader*>(&planned_index_pin.Reader()),
@@ -1544,7 +1526,7 @@ AssertGrowingIndexEmptyBitsetHonorsPlannedPrefix(bool nullable) {
                     std::make_shared<InsertRecordProto>(*appended.raw_));
     ASSERT_EQ(growing_segment->get_row_count(), initial_count + appended_count);
     const auto appended_index_pin =
-        growing_segment->PinGrowingIndex(vector_field);
+        growing_segment->PinGrowingIndex(nullptr, vector_field);
     ASSERT_TRUE(appended_index_pin);
     ASSERT_EQ(appended_index_pin.CoveredRowEnd(),
               initial_count + appended_count);
@@ -1862,7 +1844,6 @@ TEST(ElementNullableVectorArraySearch, RejectsEmbeddingListSearch) {
                                          nullptr,
                                          1,
                                          BitsetView{},
-                                         nullptr,
                                          sealed_index_result));
 
     SearchResult sealed_column_result;

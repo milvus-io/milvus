@@ -17,7 +17,6 @@
 package meta
 
 import (
-	"context"
 	"fmt"
 	"math"
 	"strconv"
@@ -25,7 +24,6 @@ import (
 	"time"
 
 	"github.com/samber/lo"
-	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -34,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
@@ -42,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 func GetZeroTime() time.Time {
@@ -152,26 +148,6 @@ func GetTotalBinlogRows(segment *SegmentInfo, fieldID int64) int64 {
 		}
 	}
 	return total
-}
-
-func CheckCheckPointsHealth(meta *Meta) error {
-	for channel, cp := range meta.GetChannelCheckpoints() {
-		collectionID := funcutil.GetCollectionIDFromVChannel(channel)
-		if collectionID == -1 {
-			mlog.RatedWarn(context.TODO(), rate.Limit(60), "can't parse collection id from vchannel, skip check cp lag", mlog.FieldVChannel(channel))
-			continue
-		}
-		if meta.GetCollection(collectionID) == nil {
-			mlog.RatedWarn(context.TODO(), rate.Limit(60), "corresponding the collection doesn't exists, skip check cp lag", mlog.FieldVChannel(channel))
-			continue
-		}
-		ts, _ := tsoutil.ParseTS(cp.Timestamp)
-		lag := time.Since(ts)
-		if lag > paramtable.Get().DataCoordCfg.ChannelCheckpointMaxLag.GetAsDuration(time.Second) {
-			return merr.WrapErrChannelCPExceededMaxLag(channel, fmt.Sprintf("checkpoint lag: %f(min)", lag.Minutes()))
-		}
-	}
-	return nil
 }
 
 func CreateStorageConfig() *indexpb.StorageConfig {
@@ -297,10 +273,13 @@ func GetReadPluginContext(options importutilv2.Options) []*commonpb.KeyValuePair
 	return hookutil.GetReadStoragePluginContext(importEzk)
 }
 
-func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, msg proto.Message) {
-	pluginContext := hookutil.GetStoragePluginContext(properties, collectionID)
+func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, msg proto.Message) error {
+	pluginContext, err := hookutil.GetStoragePluginContext(properties, collectionID)
+	if err != nil {
+		return err
+	}
 	if pluginContext == nil {
-		return
+		return nil
 	}
 
 	switch msg := msg.(type) {
@@ -329,8 +308,9 @@ func WrapPluginContext(collectionID int64, properties []*commonpb.KeyValuePair, 
 		job := msg
 		job.PluginContext = append(job.PluginContext, pluginContext...)
 	default:
-		return
+		return nil
 	}
+	return nil
 }
 
 func BuildL0V3DeltaLogEntries(segmentID int64, deltalogs []*datapb.FieldBinlog) ([]packed.DeltaLogEntry, error) {

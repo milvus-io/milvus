@@ -2,6 +2,7 @@ package qnview
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"sync"
 	"time"
@@ -41,6 +42,9 @@ type SegmentResourceManager struct {
 	closeOnce   sync.Once
 	// Tracks owners through actual cleanup, including views removed from the map.
 	drain sync.WaitGroup
+
+	// viewsByCollection counts the views of each collection for quota metrics.
+	viewsByCollection map[int64]int
 }
 
 type viewResources struct {
@@ -59,10 +63,12 @@ type viewResources struct {
 }
 
 type segmentBinding struct {
-	view         *viewResources
-	resource     *segmentResource
-	partitionID  int64
-	manifest     int64
+	view        *viewResources
+	resource    *segmentResource
+	partitionID int64
+	manifest    int64
+	// Zero-manifest requirements validate fresh metadata before reusing a read.
+	snapshot     *SegmentLoadInfoSnapshot
 	prepared     *preparedSegmentRead
 	reported     bool
 	retryAfter   time.Time
@@ -73,6 +79,7 @@ type preparedSegmentRead struct {
 	schema   int32
 	load     uint64
 	manifest int64
+	snapshot *querypb.SegmentLoadInfo
 	base     *segmentBase
 	read     segments.ReadState
 }
@@ -115,7 +122,7 @@ type segmentResource struct {
 }
 
 func NewSegmentResourceManager(ctx context.Context, scheduler nodescheduler.Scheduler, loader PhysicalSegmentLoader, estimator SegmentResourceEstimator, metadata SegmentLoadInfoProvider, buffer TransformLogBuffer, collections QueryViewCollectionRuntimeManager) *SegmentResourceManager {
-	return &SegmentResourceManager{ctx: ctx, scheduler: scheduler, loader: loader, estimator: estimator, metadata: metadata, buffer: buffer, collections: collections, views: make(map[qviews.QueryViewKey]*viewResources), resources: make(map[int64]*segmentResource)}
+	return &SegmentResourceManager{ctx: ctx, scheduler: scheduler, loader: loader, estimator: estimator, metadata: metadata, buffer: buffer, collections: collections, views: make(map[qviews.QueryViewKey]*viewResources), viewsByCollection: make(map[int64]int), resources: make(map[int64]*segmentResource)}
 }
 
 func (m *SegmentResourceManager) Acquire(req AcquireSegments) {
@@ -138,6 +145,7 @@ func (m *SegmentResourceManager) Acquire(req AcquireSegments) {
 	v.buffer, bindErr = m.buffer.Bind(qviews.NewQueryViewAtQueryNode(req.Meta, req.View).(*qviews.QueryViewAtQueryNode))
 	m.drain.Add(1)
 	m.views[req.Key] = v
+	m.viewsByCollection[req.Meta.GetCollectionId()]++
 	for _, partition := range req.View.GetPartitions() {
 		for i, id := range partition.GetSegmentIds() {
 			r := m.resources[id]
@@ -290,13 +298,20 @@ func (r *segmentResource) retryAtLocked(at time.Time) {
 func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 	m := r.manager
 	m.mu.Lock()
+	if r.closing {
+		// Close has already started; a closing resource takes no new work.
+		r.scheduled = false
+		m.mu.Unlock()
+		return nil
+	}
+	// close() waits for a running reconcile, like catch-ups.
+	r.operations.Add(1)
+	defer r.operations.Done()
 	// Every return holds mu. Events arriving during I/O either get consumed
 	// by the next iteration or transfer to a successor under this same lock.
 	defer func() {
 		r.scheduled = false
-		if r.dirty {
-			// Release can set closing during I/O. Its successor must still run
-			// to close the resource after the physical operation finishes.
+		if r.dirty && !r.closing {
 			r.submitLocked()
 		}
 		m.mu.Unlock()
@@ -306,9 +321,7 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 	for {
 		r.dirty = false
 		if r.closing || len(r.bindings) == 0 {
-			r.closing = true
-			r.cancel()
-			go r.close()
+			r.closeLocked()
 			return nil
 		}
 		cursor := r.cursor
@@ -320,7 +333,7 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 			r.dirty = true
 			b = nil
 		}
-		if b != nil && (r.snapshot == nil || snapshotManifestVersion(*r.snapshot) < b.manifest) {
+		if b != nil && (r.snapshot == nil || snapshotManifestVersion(*r.snapshot) < b.manifest || (b.manifest == 0 && b.snapshot == nil)) {
 			m.mu.Unlock()
 			ctx, cancel := mergeTaskContext(schedulerCtx, r.ctx)
 			snapshot, err := m.metadata.GetQueryViewSegmentLoadInfo(ctx, r.collectionID, r.id)
@@ -335,6 +348,9 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 			if err == nil {
 				snapshot.LoadInfo = proto.Clone(snapshot.LoadInfo).(*querypb.SegmentLoadInfo)
 				r.snapshot = &snapshot
+				if b.manifest == 0 {
+					b.snapshot = r.snapshot
+				}
 				if snapshotManifestVersion(snapshot) < b.manifest {
 					err = merr.WrapErrServiceNotReadyMsg("segment %d manifest is behind required version %d", r.id, b.manifest)
 				}
@@ -366,6 +382,9 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 			return nil
 		}
 		snapshot := *r.snapshot
+		if b.manifest == 0 {
+			snapshot = *b.snapshot
+		}
 		collection := b.view.collection
 		b.view.operationRefs++
 		m.mu.Unlock()
@@ -386,8 +405,13 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 		m.mu.Lock()
 		b.view.operationRefs--
 		if err != nil {
+			// A missing V2 artifact may have appeared since this attempt.
+			b.snapshot = nil
 			b.backoffLocked()
 		} else {
+			if b.manifest == 0 {
+				result.snapshot = snapshot.LoadInfo
+			}
 			b.resetRetryLocked()
 			r.reads = append(r.reads, result)
 		}
@@ -467,6 +491,9 @@ func (r *segmentResource) nextBindingLocked() (*segmentBinding, time.Time) {
 }
 
 func readMatchesBinding(read *preparedSegmentRead, b *segmentBinding) bool {
+	if b.manifest == 0 && (b.snapshot == nil || !proto.Equal(read.snapshot, b.snapshot.LoadInfo)) {
+		return false
+	}
 	return read.schema == b.view.req.Meta.GetSchemaVersion() && read.load == b.view.req.Meta.GetLoadInfoVersion() &&
 		read.manifest >= b.manifest && (!typeutil.IsExternalCollection(b.view.collection.Schema()) || b.manifest == 0 || read.manifest == b.manifest)
 }
@@ -477,7 +504,8 @@ func (r *segmentResource) validateSnapshot(snapshot SegmentLoadInfoSnapshot) err
 		return merr.WrapErrServiceInternalMsg("segment %d received mismatched loading metadata", r.id)
 	}
 	_, version, err := packed.UnmarshalManifestPath(info.GetManifestPath())
-	if err != nil || version <= 0 || info.GetStorageVersion() != storage.StorageV3 {
+	legacyV2 := info.GetStorageVersion() == storage.StorageV2 && info.GetManifestPath() == ""
+	if !legacyV2 && (err != nil || version <= 0 || info.GetStorageVersion() != storage.StorageV3) {
 		return merr.WrapErrServiceInternalMsg("segment %d requires a committed StorageV3 manifest", r.id)
 	}
 	if info.GetTransformStartAfterTimetick() == 0 {
@@ -514,7 +542,7 @@ func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collec
 	// snapshots may replace it, so they require an identical manifest to share.
 	m.mu.Lock()
 	for _, candidate := range r.bases {
-		sameManifest := candidate.snapshot.LoadInfo.GetManifestPath() == info.GetManifestPath()
+		sameManifest := info.GetManifestPath() != "" && candidate.snapshot.LoadInfo.GetManifestPath() == info.GetManifestPath()
 		if candidate.segment.TransformStartAfterTimeTick() <= info.GetTransformStartAfterTimetick() && (sameManifest || (!typeutil.IsExternalCollection(collection.Schema()) && candidate.snapshot.LoadInfo.GetNumOfRows() == info.GetNumOfRows())) {
 			base = candidate
 			break
@@ -574,12 +602,25 @@ func (r *segmentResource) catchup(base *segmentBase) {
 	}
 }
 
+// closeLocked closes a resource nothing binds or queries any more. It does not
+// wait for a scheduler worker: loads waiting for the memory this close frees
+// may hold all of them. close() itself waits for a running reconcile.
+func (r *segmentResource) closeLocked() {
+	if r.closing {
+		return
+	}
+	r.closing = true
+	r.stopRetryLocked()
+	r.cancel()
+	go r.close()
+}
+
 func (r *segmentResource) close() {
 	m := r.manager
 	defer m.drain.Done()
-	// Closing fences query/metrics admission under mu. Reconcile has finished
-	// synchronous preparation, including admission of any catch-up goroutine,
-	// before starting close, so no operation can be added after Wait begins.
+	// Closing fences query/metrics admission and new reconciles under mu. A
+	// running reconcile holds an operation while it admits catch-up goroutines,
+	// so no operation can be added once Wait has seen zero.
 	r.operations.Wait()
 	for _, base := range r.bases {
 		if base.registration != nil {
@@ -617,11 +658,15 @@ func (r *segmentResource) closeIfUnusedLocked() bool {
 	if len(r.bindings) != 0 {
 		return false
 	}
-	r.wakeLocked()
-	r.closing = true
-	r.stopRetryLocked()
-	r.cancel()
+	r.closeLocked()
 	return true
+}
+
+// CollectionIDs returns the collections this node holds QueryViews for.
+func (m *SegmentResourceManager) CollectionIDs() []int64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Collect(maps.Keys(m.viewsByCollection))
 }
 
 func (m *SegmentResourceManager) Release(req ReleaseSegments) {
@@ -631,6 +676,11 @@ func (m *SegmentResourceManager) Release(req ReleaseSegments) {
 	var resources []*segmentResource
 	if v != nil {
 		m.drain.Add(1) // Join the release callback as well as the resource owners.
+		if id := v.req.Meta.GetCollectionId(); m.viewsByCollection[id] > 1 {
+			m.viewsByCollection[id]--
+		} else {
+			delete(m.viewsByCollection, id)
+		}
 		v.released = true
 		v.cancel()
 		for _, b := range v.bindings {

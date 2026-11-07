@@ -57,7 +57,7 @@ func TestQueryViewLoadInfoRejectsInvalidHistory(t *testing.T) {
 		err  error
 		want error
 	}{
-		{name: "missing scope", info: &viewpb.CollectionLoadConfig{CollectionID: 1, Version: 9}, want: merr.ErrDataIntegrity},
+		{name: "empty scope is literal", info: &viewpb.CollectionLoadConfig{CollectionID: 1, Version: 9}},
 		{name: "missing snapshot", want: merr.ErrServiceNotReady},
 		{name: "catalog failure", err: merr.WrapErrServiceUnavailableMsg("catalog busy"), want: merr.ErrServiceUnavailable},
 	} {

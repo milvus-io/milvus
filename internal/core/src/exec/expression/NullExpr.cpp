@@ -145,8 +145,8 @@ PhyNullExpr::DetermineExecPath() {
 
     auto req = MakeIndexRequirement(RequiredReader::Null);
     req.value_type = expr_->column_.data_type_;
-    SelectAndPinIndex(req);
-    if (PinnedIndexIsNested()) {
+    SelectAndCreateIndexReader(req);
+    if (SelectedIndexIsNested()) {
         ClearSelectedIndex();
         exec_path_ = ExprExecPath::RawData;
     }

@@ -34,6 +34,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -54,6 +55,11 @@ import (
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/views/coord/coordview"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr/loadmgrtest"
+	"github.com/milvus-io/milvus/internal/views/coord/readiness"
+	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
@@ -79,6 +85,46 @@ func TestMain(m *testing.M) {
 	rand.Seed(time.Now().UnixNano())
 	code := m.Run()
 	os.Exit(code)
+}
+
+func TestIsCollectionDropped(t *testing.T) {
+	mockey.PatchConvey("only definitive lifecycle deletion releases publication obligations", t, func() {
+		var collection *model.Collection
+		var lookupErr error
+		mockey.Mock((*MetaTable).GetCollectionByID).To(func(_ *MetaTable, _ context.Context, _ string, id UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
+			require.Equal(t, int64(100), id)
+			require.Equal(t, typeutil.MaxTimestamp, ts)
+			require.True(t, allowUnavailable, "Creating/Restoring must not be mistaken for deleted")
+			return collection, lookupErr
+		}).Build()
+		core := &Core{meta: &MetaTable{}}
+		for state, want := range map[etcdpb.CollectionState]bool{
+			etcdpb.CollectionState_CollectionCreating:  false,
+			etcdpb.CollectionState_CollectionCreated:   false,
+			etcdpb.CollectionState_CollectionRestoring: false,
+			etcdpb.CollectionState_CollectionDropping:  true,
+			etcdpb.CollectionState_CollectionDropped:   true,
+		} {
+			collection = &model.Collection{CollectionID: 100, State: state}
+			dropped, err := core.IsCollectionDropped(t.Context(), 100)
+			require.NoError(t, err)
+			require.Equal(t, want, dropped, state.String())
+		}
+		collection = nil
+		lookupErr = merr.WrapErrCollectionNotFound(int64(100))
+		dropped, err := core.IsCollectionDropped(t.Context(), 100)
+		require.NoError(t, err)
+		require.True(t, dropped)
+		lookupErr = context.DeadlineExceeded
+		dropped, err = core.IsCollectionDropped(t.Context(), 100)
+		require.ErrorIs(t, err, lookupErr)
+		require.False(t, dropped)
+		lookupErr = nil
+		collection = &model.Collection{CollectionID: 100, State: etcdpb.CollectionState(100)}
+		dropped, err = core.IsCollectionDropped(t.Context(), 100)
+		require.ErrorIs(t, err, merr.ErrDataIntegrity)
+		require.False(t, dropped)
+	})
 }
 
 func TestDataViewCollectionRecoveryValidator(t *testing.T) {
@@ -158,6 +204,20 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	kv, _ := kvfactory.GetEtcdAndPath()
 	path := funcutil.RandomString(10) + "/meta"
 	catalogKV := etcdkv.NewEtcdKV(kv, path)
+	// DDL-only tests have no loaded collections. Use a recovered empty config
+	// store so schema publication still executes its real release/no-load path.
+	configs, err := loadmgr.RecoverLoadConfigStore(t.Context(), loadmgrtest.Dependencies(t))
+	require.NoError(t, err)
+	previous := qvresource.Resource()
+	notifications := readiness.NewNotifications()
+	schemaPreparation := mockey.Mock((*testSchemaDataViews).PrepareDataViewSchema).Return(nil).Build()
+	t.Cleanup(func() { schemaPreparation.UnPatch() })
+	qvresource.Init(&qvresource.Resources{
+		Reconciler:  &testSchemaDataViews{},
+		LoadConfigs: configs, LoadManager: loadmgr.NewCollectionLoadManager(configs, nil, nil),
+		ShardViews: &coordview.ShardViewRegistry{}, Readiness: notifications,
+	})
+	t.Cleanup(func() { notifications.Close(); qvresource.Init(previous) })
 
 	testDB := newNameDb()
 	collID2Meta := make(map[typeutil.UniqueID]*model.Collection)
@@ -202,6 +262,7 @@ func initStreamingSystemAndCore(t *testing.T) *Core {
 	wal.EXPECT().ControlChannel().Return(funcutil.GetControlChannel("by-dev-rootcoord-dml_0")).Maybe()
 	streaming.SetWALForTest(wal)
 
+	core.session = sessionutil.NewSessionWithEtcd(t.Context(), path, kv)
 	bapi := mock_broadcaster.NewMockBroadcastAPI(t)
 	bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
 		if msg.MessageType() == message.MessageTypeAlterCollection {
@@ -400,6 +461,7 @@ func TestRootCoord_DropCollection(t *testing.T) {
 }
 
 func TestRootCoord_TruncateCollection(t *testing.T) {
+	mockQueryViewDDLResource(t)
 	t.Run("not healthy", func(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
 		ctx := context.Background()
@@ -410,6 +472,7 @@ func TestRootCoord_TruncateCollection(t *testing.T) {
 }
 
 func TestRootCoord_CreatePartition(t *testing.T) {
+	mockQueryViewDDLResource(t)
 	t.Run("not healthy", func(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
 		ctx := context.Background()
@@ -1970,6 +2033,7 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 	t.Run("not healthy", func(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
 		ctx := context.Background()
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.AddFileResource(ctx, &milvuspb.AddFileResourceRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
@@ -1977,6 +2041,7 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 
 	t.Run("empty name", func(t *testing.T) {
 		c := newTestCore(withHealthyCode())
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.AddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{
 			Path: "/path/to/file",
 		})
@@ -1990,6 +2055,7 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock))
 		ctx := context.Background()
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.AddFileResource(ctx, &milvuspb.AddFileResourceRequest{
 			Name: "test_resource",
 			Path: "/path/to/file",
@@ -2004,6 +2070,7 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock))
 		ctx := context.Background()
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.AddFileResource(ctx, &milvuspb.AddFileResourceRequest{
 			Name: "test_resource",
 			Path: "/path/to/file",
@@ -2028,6 +2095,7 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		meta.EXPECT().AddFileResource(mock.Anything, mock.Anything).Return(nil)
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock), withTsoAllocator(tsoAllocator), withMeta(meta))
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.AddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{
 			Name: "test_resource",
 			Path: "/path/to/file",
@@ -2050,10 +2118,11 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		}
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(0))
+		meta.EXPECT().FindFileResource(mock.Anything, mock.Anything).Return(nil)
 		meta.EXPECT().AddFileResource(mock.Anything, mock.Anything).Return(nil)
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock), withTsoAllocator(tsoAllocator), withMeta(meta))
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.AddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{
 			Name: "test_resource",
 			Path: "/path/to/file",
@@ -2071,9 +2140,10 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		storageMock.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(101), nil)
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(0))
+		meta.EXPECT().FindFileResource(mock.Anything, mock.Anything).Return(nil)
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock), withMeta(meta))
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.AddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{
 			Name: "test_resource",
 			Path: "/path/to/file",
@@ -2096,13 +2166,16 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		storageMock.EXPECT().Exist(mock.Anything, request.GetPath()).Return(true, nil)
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{{
+		meta.EXPECT().FindFileResource(mock.Anything, mock.Anything).Return(&internalpb.FileResourceInfo{
 			Id:   99,
 			Name: request.GetName(),
 			Path: request.GetPath(),
-		}}, uint64(1))
+		})
+
+		meta.EXPECT().AddFileResource(mock.Anything, mock.MatchedBy(func(r *internalpb.FileResourceInfo) bool { return r.GetId() == 99 })).Return(nil)
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock), withMeta(meta))
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.AddFileResource(context.Background(), request)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
@@ -2120,13 +2193,14 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		storageMock.EXPECT().Exist(mock.Anything, request.GetPath()).Return(true, nil)
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().ListFileResource(mock.Anything).Return([]*internalpb.FileResourceInfo{{
+		meta.EXPECT().FindFileResource(mock.Anything, mock.Anything).Return(&internalpb.FileResourceInfo{
 			Id:   99,
 			Name: request.GetName(),
 			Path: "/path/to/old-file",
-		}}, uint64(1))
+		})
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock), withMeta(meta))
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.AddFileResource(context.Background(), request)
 		assert.NoError(t, err)
 		assert.ErrorIs(t, merr.Error(resp), merr.ErrParameterInvalid)
@@ -2142,9 +2216,10 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		storageMock.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(0), sizeErr)
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(0))
+		meta.EXPECT().FindFileResource(mock.Anything, mock.Anything).Return(nil)
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock), withMeta(meta))
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.AddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{
 			Name: "test_resource",
 			Path: "/path/to/file",
@@ -2162,9 +2237,10 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		storageMock.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(-1), nil)
 
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().ListFileResource(mock.Anything).Return(nil, uint64(0))
+		meta.EXPECT().FindFileResource(mock.Anything, mock.Anything).Return(nil)
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock), withMeta(meta))
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.AddFileResource(context.Background(), &milvuspb.AddFileResourceRequest{
 			Name: "test_resource",
 			Path: "/path/to/file",
@@ -2184,6 +2260,7 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock), withTsoAllocator(tsoAllocator))
 		ctx := context.Background()
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.AddFileResource(ctx, &milvuspb.AddFileResourceRequest{
 			Name: "test_resource",
 			Path: "/path/to/file",
@@ -2206,6 +2283,7 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 
 		c := newTestCore(withHealthyCode(), withStorage(storageMock), withTsoAllocator(tsoAllocator), withMeta(meta))
 		ctx := context.Background()
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.AddFileResource(ctx, &milvuspb.AddFileResourceRequest{
 			Name: "test_resource",
 			Path: "/path/to/file",
@@ -2233,6 +2311,7 @@ func TestRootCoord_AddFileResource(t *testing.T) {
 		c := newTestCore(withHealthyCode(), withStorage(storageMock), withTsoAllocator(tsoAllocator), withMeta(meta), withMixCoord(mixc))
 		c.SetFileResourceObserver(observer)
 		ctx := context.Background()
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.AddFileResource(ctx, &milvuspb.AddFileResourceRequest{
 			Name: "test_resource",
 			Path: "/path/to/file",
@@ -2246,6 +2325,7 @@ func TestRootCoord_RemoveFileResource(t *testing.T) {
 	t.Run("not healthy", func(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
 		ctx := context.Background()
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.RemoveFileResource(ctx, &milvuspb.RemoveFileResourceRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
@@ -2253,13 +2333,14 @@ func TestRootCoord_RemoveFileResource(t *testing.T) {
 
 	t.Run("remove legacy empty name", func(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().RemoveFileResource(mock.Anything, "").Return(nil, true)
+		meta.EXPECT().RemoveFileResource(mock.Anything, "", int64(100)).Return(nil, true)
 
 		observer := NewMockFileResourceObserver(t)
 		observer.EXPECT().Sync().Return(nil)
 
 		c := newTestCore(withHealthyCode(), withMeta(meta))
 		c.SetFileResourceObserver(observer)
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.RemoveFileResource(context.Background(), &milvuspb.RemoveFileResourceRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
@@ -2267,10 +2348,11 @@ func TestRootCoord_RemoveFileResource(t *testing.T) {
 
 	t.Run("meta remove file resource error", func(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().RemoveFileResource(mock.Anything, mock.Anything).Return(errors.New("meta error"), false)
+		meta.EXPECT().RemoveFileResource(mock.Anything, mock.Anything, int64(100)).Return(errors.New("meta error"), false)
 
 		c := newTestCore(withHealthyCode(), withMeta(meta))
 		ctx := context.Background()
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.RemoveFileResource(ctx, &milvuspb.RemoveFileResourceRequest{
 			Name: "test_resource",
 		})
@@ -2280,13 +2362,14 @@ func TestRootCoord_RemoveFileResource(t *testing.T) {
 
 	t.Run("success with resource not exist", func(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().RemoveFileResource(mock.Anything, mock.Anything).Return(nil, false)
+		meta.EXPECT().PrepareRemoveFileResource(mock.Anything, mock.Anything).Return(nil, nil)
 
 		observer := NewMockFileResourceObserver(t)
 
 		c := newTestCore(withHealthyCode(), withMeta(meta))
 		c.SetFileResourceObserver(observer)
 		ctx := context.Background()
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.RemoveFileResource(ctx, &milvuspb.RemoveFileResourceRequest{
 			Name: "test_resource",
 		})
@@ -2296,7 +2379,7 @@ func TestRootCoord_RemoveFileResource(t *testing.T) {
 
 	t.Run("success with resource exist", func(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().RemoveFileResource(mock.Anything, mock.Anything).Return(nil, true)
+		meta.EXPECT().RemoveFileResource(mock.Anything, mock.Anything, int64(100)).Return(nil, true)
 
 		observer := NewMockFileResourceObserver(t)
 		observer.EXPECT().Sync().Return(nil)
@@ -2305,6 +2388,7 @@ func TestRootCoord_RemoveFileResource(t *testing.T) {
 		c := newTestCore(withHealthyCode(), withMeta(meta), withMixCoord(mixc))
 		c.SetFileResourceObserver(observer)
 		ctx := context.Background()
+		mockFileResourceBroadcast(t, c)
 		resp, err := c.RemoveFileResource(ctx, &milvuspb.RemoveFileResourceRequest{
 			Name: "test_resource",
 		})
@@ -2424,4 +2508,11 @@ func TestRootCoord_GetFileResources(t *testing.T) {
 
 func TestRootCoordSuite(t *testing.T) {
 	suite.Run(t, new(RootCoordSuite))
+}
+
+// Boundary stub: ordinary DDL unit tests do not run the DataCoord materializer.
+type testSchemaDataViews struct{ qvresource.DataViewReconciler }
+
+func (*testSchemaDataViews) PrepareDataViewSchema(context.Context, int64, *schemapb.CollectionSchema, *schemapb.CollectionSchema) error {
+	panic("mock with mockey")
 }

@@ -82,14 +82,25 @@ CountInvalidRows(const BitsetView& invalid) {
     return prepared.count();
 }
 
+struct ScalarReadCounts {
+    size_t in_calls = 0;
+    size_t in_values = 0;
+    size_t null_calls = 0;
+    size_t gather_calls = 0;
+    size_t gather_values = 0;
+    size_t gather_nulls = 0;
+};
+
 class CountingScalarReader final
     : public index::IIndexReaderBase,
       public index::IScalarPredicateReader<int64_t>,
       public index::INullReader,
       public index::IScalarValueReader<int64_t> {
  public:
-    explicit CountingScalarReader(index::IIndexReaderBasePtr reader)
-        : reader_(std::move(reader)),
+    CountingScalarReader(index::IIndexReaderBasePtr reader,
+                         std::shared_ptr<ScalarReadCounts> counts)
+        : counts_(std::move(counts)),
+          reader_(std::move(reader)),
           predicates_(
               dynamic_cast<const index::IScalarPredicateReader<int64_t>*>(
                   reader_.get())),
@@ -102,12 +113,10 @@ class CountingScalarReader final
             "readers");
     }
 
-    mutable size_t in_calls = 0;
-    mutable size_t in_values = 0;
-    mutable size_t null_calls = 0;
-    mutable size_t gather_calls = 0;
-    mutable size_t gather_values = 0;
-    mutable size_t gather_nulls = 0;
+    void
+    Prefetch() const override {
+        reader_->Prefetch();
+    }
 
     index::ReaderCaps
     Caps() const override {
@@ -125,19 +134,11 @@ class CountingScalarReader final
     ValueType() const override {
         return reader_->ValueType();
     }
-    int64_t
-    MemoryUsage() const override {
-        return reader_->MemoryUsage();
-    }
-    cachinglayer::ResourceUsage
-    CellByteSize() const override {
-        return reader_->CellByteSize();
-    }
 
     TargetBitmap
     In(size_t n, const int64_t* values) const override {
-        ++in_calls;
-        in_values += n;
+        ++counts_->in_calls;
+        counts_->in_values += n;
         return predicates_->In(n, values);
     }
 
@@ -161,7 +162,7 @@ class CountingScalarReader final
 
     TargetBitmap
     IsNull() const override {
-        ++null_calls;
+        ++counts_->null_calls;
         return nulls_->IsNull();
     }
 
@@ -180,16 +181,17 @@ class CountingScalarReader final
            int64_t count,
            const std::function<void(int64_t, const int64_t*, bool)>& out)
         const override {
-        ++gather_calls;
-        gather_values += count;
+        ++counts_->gather_calls;
+        counts_->gather_values += count;
         values_->Gather(
             offsets, count, [&](int64_t i, const int64_t* value, bool valid) {
-                gather_nulls += !valid;
+                counts_->gather_nulls += !valid;
                 out(i, value, valid);
             });
     }
 
  private:
+    std::shared_ptr<ScalarReadCounts> counts_;
     index::IIndexReaderBasePtr reader_;
     const index::IScalarPredicateReader<int64_t>* predicates_;
     const index::INullReader* nulls_;
@@ -213,16 +215,14 @@ class FailingIteratorReader final : public index::IVectorReader {
     Search(const DatasetPtr& dataset,
            const index::VectorSearchParams& params,
            const BitsetView& filter,
-           milvus::OpContext* ctx,
            SearchResult& result) const override {
-        reader_->Search(dataset, params, filter, ctx, result);
+        reader_->Search(dataset, params, filter, result);
     }
 
     knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
     Iterators(const DatasetPtr&,
               const knowhere::Json& params,
-              const BitsetView&,
-              milvus::OpContext*) const override {
+              const BitsetView&) const override {
         received = params;
         if (unsupported_status) {
             return knowhere::
@@ -294,10 +294,8 @@ class FailingIteratorReader final : public index::IVectorReader {
                   const BitsetView& filter,
                   const int64_t* labels,
                   size_t count,
-                  bool cosine,
-                  milvus::OpContext* ctx) const override {
-        return reader_->CalcDistByIDs(
-            dataset, filter, labels, count, cosine, ctx);
+                  bool cosine) const override {
+        return reader_->CalcDistByIDs(dataset, filter, labels, count, cosine);
     }
     std::pair<std::vector<uint8_t>, std::vector<size_t>>
     GetEmbListByIds(const DatasetPtr& dataset,
@@ -1395,11 +1393,12 @@ TEST(GroupMembershipTest, RawClassificationAndIndexOnlyFallback) {
                                                    kRowCount,
                                                    values.data(),
                                                    valid.data());
-    auto scalar_reader =
-        std::make_unique<CountingScalarReader>(std::move(opened.reader));
-    auto* counters = scalar_reader.get();
-    opened.reader = std::move(scalar_reader);
-    opened.caps = opened.reader->Caps();
+    auto counters = std::make_shared<ScalarReadCounts>();
+    test::expr_index::DecorateIndex(
+        opened, [counters](index::IIndexReaderBasePtr reader) {
+            return std::make_unique<CountingScalarReader>(std::move(reader),
+                                                          counters);
+        });
     auto load_info = test::consumer::MakeLoadIndexInfo(
         std::move(opened), DataType::INT64, group_field.get());
     index_segment->LoadIndex(load_info);

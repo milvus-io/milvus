@@ -156,9 +156,9 @@ TextIndexArtifact::TextIndexArtifact(
 
 TextIndexArtifact::~TextIndexArtifact() = default;
 
-IIndexReaderBasePtr
-TextIndexArtifact::IntoReader() && {
-    return std::make_unique<TextIndexReader>(
+std::unique_ptr<TextIndexStorage>
+TextIndexArtifact::IntoStorage() && {
+    return std::make_unique<TextIndexStorage>(
         std::move(directory_),
         std::move(engine_),
         std::make_shared<const std::vector<size_t>>(std::move(null_offsets_)),

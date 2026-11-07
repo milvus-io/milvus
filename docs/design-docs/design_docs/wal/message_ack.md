@@ -137,9 +137,10 @@ the incomplete positions and cannot advance through them.
 The current materializer buffers retained Delete/Txn messages and explicit
 Flush/lifecycle requests. It writes and registers all output before installing
 dirty VChannel materialization metadata and releasing covered handles. Size,
-age, Flush and recovery-tail requests drive batches. Earlier L1 registration
-must complete, but L1 and L0 Flush tasks otherwise run independently and join
-through their handles. Retries/cancellation cannot complete unfinished work.
+age, Flush and recovery-tail requests drive batches. All L1 created before
+the batch boundary must complete final publication across every partition.
+L1 tasks do not wait for L0; L0 returns scheduler delay while L1 is outstanding,
+and their handles join before request completion. Retries/cancellation cannot complete unfinished work.
 
 This pins ordinary Deletes as well as Flush requests in the global WAL replay
 range. The retained Summary-reader implementation instead holds only explicit

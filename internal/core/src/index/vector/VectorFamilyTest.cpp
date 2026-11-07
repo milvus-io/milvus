@@ -14,7 +14,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <gtest/gtest.h>
+#include <filesystem>
+#include "common/OpContext.h"
+#include "storage/artifact/LocalDirectory.h"
 
 #include <array>
 #include <cmath>
@@ -174,7 +179,10 @@ BuildAndLoad(const AdaptedIndexType& adapted,
     options.mmap_dir_path = "/tmp";
     return LoaderRegistry::Instance()
         .Lookup(adapted.family)
-        .Load({OpenedIndexSource{LegacyIndexSource{source, false}}, options});
+        .Load({OpenedIndexSource{LegacyIndexSource{source, false}},
+               options,
+               milvus::index::test::TestIndexCacheConfig()})
+        ->CreateReader(nullptr);
 }
 
 using SparseRow = VectorBuildInput<sparse_u32_f32>::value_type;
@@ -244,8 +252,7 @@ CheckQuery(const Profile& profile,
     EXPECT_EQ(reader.Metric(), profile.metric);
     EXPECT_EQ(reader.KnowhereIndexType(), profile.type);
     SearchResult result;
-    reader.Search(
-        query, SearchParams(profile, range), BitsetView{}, nullptr, result);
+    reader.Search(query, SearchParams(profile, range), BitsetView{}, result);
     EXPECT_EQ(result.total_nq_, 1);
     EXPECT_EQ(result.unity_topK_, 4);
     ASSERT_EQ(result.seg_offsets_.size(), 4);
@@ -307,6 +314,68 @@ TEST_P(VectorFamilyTest, QueryAndRangeAfterArtifactLoad) {
     CheckQuery(profile, *base, *reader, query, false);
     if (profile.field != DataType::VECTOR_SPARSE_U32_F32) {
         CheckQuery(profile, *base, *reader, query, true);
+    }
+    for (const bool async : {false, true}) {
+        auto staging = storage::LocalDirectory::CreateOwned(
+            std::filesystem::temp_directory_path().string(),
+            "vector-cache-XXXXXX",
+            "vector cache test");
+        storage::LoadOptions options;
+        options.params = adapted.params;
+        // Old load records may not contain a row count.
+        options.params.erase(INDEX_NUM_ROWS_KEY);
+        options.mmap_dir_path = staging->Path();
+        IndexCacheConfig cache{
+            staging->Path(),
+            cachinglayer::Meta{cachinglayer::StorageType::MEMORY,
+                               cachinglayer::CellIdMappingMode::IDENTICAL,
+                               cachinglayer::CellDataType::OTHER,
+                               CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                               true},
+            {1024 * 1024, 0},
+            {},
+            4096};
+        auto source = std::make_shared<TestArtifactSource>(
+            persisted, storage::Generation::V1V2);
+        auto index =
+            LoaderRegistry::Instance()
+                .Lookup(adapted.family)
+                .Load({OpenedIndexSource{LegacyIndexSource{source, async}},
+                       options,
+                       cache});
+        EXPECT_FALSE(index->Metadata().count.has_value());
+        folly::CancellationSource cancellation;
+        cancellation.requestCancellation();
+        OpContext cancelled(cancellation.getToken());
+        auto cold = index->CreateReader(&cancelled);
+        EXPECT_EQ(cold->ValueType(), base->ValueType());
+        const auto* cold_vector =
+            dynamic_cast<const IVectorReader*>(cold.get());
+        ASSERT_NE(cold_vector, nullptr);
+        EXPECT_EQ(cold_vector->Metric(), profile.metric);
+        EXPECT_EQ(cold_vector->KnowhereIndexType(), profile.type);
+        EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+        try {
+            (void)cold->Count();
+            FAIL() << "cancelled cold load unexpectedly succeeded";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), FollyCancel);
+        }
+        try {
+            SearchResult rejected;
+            cold_vector->Search(
+                query, SearchParams(profile, false), BitsetView{}, rejected);
+            FAIL() << "query ignored its reader's cancelled context";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), FollyCancel);
+        }
+        index->CancelWarmup();
+        OpContext ctx;
+        cold = index->CreateReader(&ctx);
+        index.reset();
+        const auto* cached = dynamic_cast<const IVectorReader*>(cold.get());
+        ASSERT_NE(cached, nullptr);
+        CheckQuery(profile, *cold, *cached, query, false);
     }
 }
 
@@ -483,6 +552,75 @@ TEST(VectorFamilyEdgeTest, EmptyEmbeddingListsReturnDefaultReservation) {
     EXPECT_TRUE(scheduler.TryReserve());
 }
 
+TEST(VectorFamilyEdgeTest, CachedEmbeddingListsKeepEngineCountAndOffsets) {
+    auto adapted = AdaptIndexType({
+        .index_type = knowhere::IndexEnum::INDEX_HNSW_SQ,
+        .field_type = DataType::VECTOR_ARRAY,
+        .element_type = DataType::VECTOR_FLOAT,
+        .index_engine_version =
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+        .params = {{METRIC_TYPE, knowhere::metric::MAX_SIM},
+                   {DIM_KEY, kDim},
+                   {knowhere::indexparam::M, 16},
+                   {knowhere::indexparam::REFINE, true},
+                   {knowhere::indexparam::REFINE_TYPE, "FLAT"}},
+    });
+    adapted.params[INDEX_NUM_ROWS_KEY] = 3;
+    const std::array<size_t, 4> offsets{0, 2, 2, 2};
+    const auto values = FloatData(2);
+    TestArtifactData persisted;
+    auto resident =
+        BuildAndLoad(adapted,
+                     VectorBuildInput<float>{
+                         .physical_values = values,
+                         .logical_rows = 3,
+                         .physical_rows = 2,
+                         .dim = kDim,
+                         .embedding_offsets = std::span<const size_t>(offsets)},
+                     persisted);
+    ASSERT_NE(resident, nullptr);
+    for (const bool async : {false, true}) {
+        auto staging = storage::LocalDirectory::CreateOwned(
+            std::filesystem::temp_directory_path().string(),
+            "vector-array-cache-XXXXXX",
+            "vector array cache test");
+        storage::LoadOptions options;
+        options.params = adapted.params;
+        options.mmap_dir_path = staging->Path();
+        IndexCacheConfig cache{
+            staging->Path(),
+            cachinglayer::Meta{cachinglayer::StorageType::MEMORY,
+                               cachinglayer::CellIdMappingMode::IDENTICAL,
+                               cachinglayer::CellDataType::OTHER,
+                               CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                               true},
+            {1024 * 1024, 0},
+            {},
+            4096};
+        auto source = std::make_shared<TestArtifactSource>(
+            persisted, storage::Generation::V1V2);
+        auto index =
+            LoaderRegistry::Instance()
+                .Lookup(adapted.family)
+                .Load({OpenedIndexSource{LegacyIndexSource{source, async}},
+                       options,
+                       cache});
+        EXPECT_FALSE(index->Metadata().count.has_value());
+        OpContext ctx;
+        auto reader = index->CreateReader(&ctx);
+        EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+        EXPECT_EQ(reader->Count(), resident->Count());
+        const auto* vectors = dynamic_cast<const IVectorReader*>(reader.get());
+        ASSERT_NE(vectors, nullptr);
+        const std::array<int64_t, 2> ids{0, 2};
+        const auto [bytes, result_offsets] = vectors->GetEmbListByIds(
+            GenIdsDataset(ids.size(), ids.data()), vectors->Metric());
+        EXPECT_EQ(result_offsets, (std::vector<size_t>{0, 2, 2}));
+        ASSERT_EQ(bytes.size(), values.size() * sizeof(float));
+        EXPECT_EQ(std::memcmp(bytes.data(), values.data(), bytes.size()), 0);
+    }
+}
+
 TEST(VectorFamilyEdgeTest, SparseExplicitAndImplicitEmptyRows) {
     for (const auto& type : {knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
                              knowhere::IndexEnum::INDEX_SPARSE_WAND}) {
@@ -570,7 +708,9 @@ TEST(VectorFamilyEdgeTest, InterimIVFPQChunksBuildAddAndFilteredSearch) {
     auto base = LoaderRegistry::Instance()
                     .Lookup(adapted.family)
                     .Load({OpenedIndexSource{LegacyIndexSource{source, false}},
-                           options});
+                           options,
+                           milvus::index::test::TestIndexCacheConfig()})
+                    ->CreateReader(nullptr);
     ASSERT_NE(base, nullptr);
     const auto* reader = dynamic_cast<const IVectorReader*>(base.get());
     ASSERT_NE(reader, nullptr);
@@ -583,7 +723,6 @@ TEST(VectorFamilyEdgeTest, InterimIVFPQChunksBuildAddAndFilteredSearch) {
     reader->Search(GenDataset(1, kDim, values.data()),
                    SearchParams(profile),
                    BitsetView(filter),
-                   nullptr,
                    result);
     ASSERT_EQ(result.seg_offsets_.size(), 4);
     for (auto row : result.seg_offsets_) {
@@ -614,7 +753,7 @@ TEST(VectorFamilyEdgeTest, IVFFlatCCIteratorYieldsOffsetsAndDistances) {
     ASSERT_NE(reader, nullptr);
     auto query = GenDataset(1, kDim, values.data() + 100 * kDim);
     auto prepared = reader->PrepareSearchParams(SearchParams(profile));
-    auto iterators = reader->Iterators(query, prepared, BitsetView{}, nullptr);
+    auto iterators = reader->Iterators(query, prepared, BitsetView{});
     ASSERT_TRUE(iterators.has_value()) << iterators.what();
     ASSERT_EQ(iterators.value().size(), 1);
     auto& iterator = iterators.value()[0];

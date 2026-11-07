@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <nlohmann/json.hpp>
+#include "milvus-storage/filesystem/fs.h"
 #include <arrow/array.h>
 #include <arrow/builder.h>
 #include <arrow/compute/api.h>
@@ -39,6 +41,7 @@
 #include "milvus-storage/lob_column/lob_reference.h"
 #include "milvus-storage/properties.h"
 #include "milvus-storage/reader.h"
+#include "segcore/arrow_field_utils.h"
 #include "query/PlanImpl.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "segcore/SegmentSealed.h"
@@ -1429,6 +1432,95 @@ TEST(ExternalTakeTest, TryTakeForRetrieve_NullableVectorUsesCompactData) {
     EXPECT_FLOAT_EQ(fv.data(5), 9.0f);
     EXPECT_FLOAT_EQ(fv.data(6), 10.0f);
     EXPECT_FLOAT_EQ(fv.data(7), 11.0f);
+}
+
+// The Arrow retrieve path (AsyncRetrieveAsArrow) converts what take produced
+// with FieldDataToArrow, which is how an external collection reaches Materialize.
+TEST(ExternalTakeTest, TryTakeForRetrieve_ExportsToArrow) {
+    auto info = BuildExternalSchema();
+    auto table = BuildTestArrowTable();
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, info.schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::RetrievePlan>(info.schema);
+    plan->field_ids_ = {info.bool_id,
+                        info.int8_id,
+                        info.int64_id,
+                        info.varchar_id,
+                        info.vec_id};
+
+    auto results = std::make_unique<proto::segcore::RetrieveResults>();
+    std::vector<int64_t> offsets = {0, 2, 4};
+    int64_t size = offsets.size();
+    ASSERT_TRUE(segment->TryTakeForRetrieve(
+        plan.get(), results, offsets.data(), size, false, false));
+    ASSERT_EQ(results->fields_data_size(), 5);
+
+    std::vector<std::shared_ptr<arrow::Array>> arrays;
+    for (int i = 0; i < results->fields_data_size(); ++i) {
+        const auto& fd = results->fields_data(i);
+        const auto& meta = (*info.schema)[FieldId(fd.field_id())];
+        auto converted = FieldDataToArrow(std::string(meta.get_name().get()),
+                                          fd,
+                                          size,
+                                          false,
+                                          nullptr,
+                                          &meta);
+        ASSERT_TRUE(converted.ok()) << converted.status().ToString();
+        ASSERT_EQ(converted->second->length(), size);
+        ASSERT_EQ(converted->second->null_count(), 0);
+        arrays.push_back(converted->second);
+    }
+
+    auto bools = std::static_pointer_cast<arrow::BooleanArray>(arrays[0]);
+    EXPECT_TRUE(bools->Value(1));
+    // INT8 stays widened to int32, as a Query reply has it.
+    auto int8s = std::static_pointer_cast<arrow::Int32Array>(arrays[1]);
+    EXPECT_EQ(int8s->Value(1), 20);
+    auto int64s = std::static_pointer_cast<arrow::Int64Array>(arrays[2]);
+    EXPECT_EQ(int64s->Value(1), 20000);
+    auto strs = std::static_pointer_cast<arrow::StringArray>(arrays[3]);
+    EXPECT_EQ(strs->GetString(1), "row_2");
+    auto vecs =
+        std::static_pointer_cast<arrow::FixedSizeBinaryArray>(arrays[4]);
+    ASSERT_EQ(vecs->byte_width(), kVecDim * sizeof(float));
+    EXPECT_FLOAT_EQ(reinterpret_cast<const float*>(vecs->GetValue(1))[0], 8.0f);
+}
+
+TEST(ExternalTakeTest, TryTakeForRetrieve_NullableVectorExportsToArrow) {
+    auto info = BuildExternalSchema();
+    auto table = BuildNullableVectorArrowTable();
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, info.schema);
+    segment->SetReaderForTesting(std::make_unique<MockTakeReader>(table));
+    segment->SetUseTakeForOutputForTesting(true);
+
+    auto plan = std::make_unique<query::RetrievePlan>(info.schema);
+    plan->field_ids_ = {info.vec_id};
+
+    auto results = std::make_unique<proto::segcore::RetrieveResults>();
+    std::vector<int64_t> offsets = {0, 1, 2};
+    ASSERT_TRUE(segment->TryTakeForRetrieve(
+        plan.get(), results, offsets.data(), offsets.size(), false, false));
+    ASSERT_EQ(results->fields_data_size(), 1);
+
+    const auto& meta = (*info.schema)[info.vec_id];
+    auto converted = FieldDataToArrow(std::string(meta.get_name().get()),
+                                      results->fields_data(0),
+                                      offsets.size(),
+                                      false,
+                                      nullptr,
+                                      &meta);
+    ASSERT_TRUE(converted.ok()) << converted.status().ToString();
+    auto vecs = std::static_pointer_cast<arrow::FixedSizeBinaryArray>(
+        converted->second);
+    ASSERT_EQ(vecs->length(), 3);
+    EXPECT_FALSE(vecs->IsNull(0));
+    EXPECT_TRUE(vecs->IsNull(1));
+    EXPECT_FALSE(vecs->IsNull(2));
+    EXPECT_FLOAT_EQ(reinterpret_cast<const float*>(vecs->GetValue(2))[0], 8.0f);
 }
 
 TEST(ExternalTakeTest, TryTakeForRetrieve_AdditionalVectorTypes) {
@@ -3585,6 +3677,12 @@ TEST(InjectExtfsAllowlist, AzurePublicCloudWithExplicitRegion) {
 }
 
 TEST(InjectExtfsAllowlist, AzureCredentialBrokerProperties) {
+    ASSERT_TRUE(
+        InitCredentialBrokerPolicy(
+            std::string(
+                R"(["https://broker.example.com/v1/credentials/assume-role","https://broker.example.com/v1/credentials/assume-role?api-version=1&scope=a%2Fb+x"])"))
+            .ok());
+
     milvus_storage::api::Properties props;
     const int64_t coll_id = 42;
     std::string spec = R"({
@@ -3603,7 +3701,8 @@ TEST(InjectExtfsAllowlist, AzureCredentialBrokerProperties) {
         props, coll_id, "azure://core.windows.net/container/path", spec);
 
     auto config = milvus_storage::FilesystemCache::resolve_config(
-        props, "azure://core.windows.net/container/path");
+        std::make_shared<const milvus_storage::api::Properties>(props),
+        "azure://core.windows.net/container/path");
     ASSERT_TRUE(config.ok()) << config.status().ToString();
     EXPECT_EQ(config->credential_endpoint,
               "https://broker.example.com/v1/credentials/assume-role");
@@ -3624,6 +3723,38 @@ TEST(InjectExtfsAllowlist, AzureCredentialBrokerProperties) {
     EXPECT_EQ(props.count("extfs.42.azure_credential_endpoint"), 0u);
     EXPECT_EQ(props.count("extfs.42.access_key_value"), 0u);
     EXPECT_EQ(props.count("extfs.42.request_timeout_ms"), 0u);
+}
+
+TEST(InjectExtfsAllowlist, AzureLegacyBrokerQuery) {
+    ASSERT_TRUE(
+        InitCredentialBrokerPolicy(
+            std::string(
+                R"(["https://broker.example.com/v1/credentials/assume-role","https://broker.example.com/v1/credentials/assume-role?api-version=1&scope=a%2Fb+x"])"))
+            .ok());
+    const std::string endpoint =
+        "https://broker.example.com/v1/credentials/"
+        "assume-role?api-version=1&scope=a%2Fb+x";
+    auto inject = [&](const std::string& url) {
+        milvus_storage::api::Properties props;
+        const std::string spec =
+            R"({"format":"parquet","extfs":{"cloud_provider":"azure","access_key_id":"account","region":"westus3","azure_client_id":"client","azure_tenant_id":"tenant","azure_credential_endpoint":")" +
+            url + R"("}})";
+        ::InjectExternalSpecProperties(
+            props, 42, "azure://core.windows.net/container/path", spec);
+        return props;
+    };
+    auto props = inject(endpoint);
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.credential_endpoint")),
+              endpoint);
+    EXPECT_EQ(props.count("extfs.42.azure_credential_endpoint"), 0u);
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.talon.mode")), "0");
+    EXPECT_ANY_THROW(inject(endpoint + "&extra=1"));
+    EXPECT_ANY_THROW(
+        inject("https://broker.example.com/v1/credentials/"
+               "assume-role?api-version=2&scope=a%2Fb+x"));
+    EXPECT_ANY_THROW(
+        inject("https://broker.example.com/v1/credentials/"
+               "assume-role?scope=a%2Fb+x&api-version=1"));
 }
 
 TEST(InjectExtfsAllowlist, AzureSovereignCloudEndpoints) {
@@ -3823,7 +3954,8 @@ TEST(InjectExtfsAllowlist, IcebergSnapshotID) {
         // Read the same typed property as IcebergFormat::explore so a stale
         // property key cannot silently fall back to the latest snapshot.
         const auto snapshot_id = milvus_storage::api::GetValue<int64_t>(
-            props, PROPERTY_READER_EXTTABLE_SNAPSHOT_ID);
+            std::make_shared<const milvus_storage::api::Properties>(props),
+            PROPERTY_READER_EXTTABLE_SNAPSHOT_ID);
         ASSERT_TRUE(snapshot_id.ok()) << snapshot_id.status().ToString();
         EXPECT_EQ(*snapshot_id, 5320540205222981137LL);
     }
@@ -3854,7 +3986,7 @@ TEST(InjectExtfsAllowlist, IcebergSnapshotIDCAbiRoundTrip) {
         EXPECT_STREQ(loon_properties_get(&properties,
                                          PROPERTY_READER_EXTTABLE_SNAPSHOT_ID),
                      "5320540205222981137");
-        milvus_storage::api::Properties round_tripped;
+        std::shared_ptr<const milvus_storage::api::Properties> round_tripped;
         const auto conversion_error = milvus_storage::api::ConvertFFIProperties(
             round_tripped, &properties);
         loon_properties_free(&properties);
@@ -4068,4 +4200,138 @@ TEST(NormalizeExternalArrow, NonMatchingTypePassthrough) {
 
     EXPECT_EQ(result->type_id(), arrow::Type::INT64);
     EXPECT_EQ(result.get(), arr.get());
+}
+
+TEST(InjectExtfsAllowlist, BrokerIamPolicyAndLegacyAliases) {
+    const std::string endpoint =
+        "https://broker.example.com/v1/credentials/assume-role";
+    const auto policy = std::string(
+        R"(["https://broker.example.com/v1/credentials/assume-role","https://broker.example.com/v1/credentials/assume-role?api-version=1&scope=a%2Fb+x"])");
+    ASSERT_TRUE(InitCredentialBrokerPolicy(policy).ok());
+    EXPECT_FALSE(InitCredentialBrokerPolicy(std::string("[]")).ok());
+    EXPECT_FALSE(InitCredentialBrokerPolicy(std::string("invalid")).ok());
+    EXPECT_FALSE(
+        InitCredentialBrokerPolicy(std::string(R"(["file:///tmp/broker"])"))
+            .ok());
+    for (const auto& cloud : {"aws", "aliyun", "tencent"}) {
+        for (const auto* format : {"parquet", "milvus-table"}) {
+            for (uint32_t mode : {0u, 1u, 2u}) {
+                milvus_storage::api::Properties props;
+                props["milvus.talon.external_mode"] = mode;
+                props[PROPERTY_FS_TALON_MODE] = uint32_t{1};
+                props[PROPERTY_FS_TALON_COORDINATOR] =
+                    std::string("talon:1234");
+                auto spec =
+                    nlohmann::json{{"format", format},
+                                   {"extfs",
+                                    {{"cloud_provider", cloud},
+                                     {"region", "us-west-2"},
+                                     {"use_iam", "true"},
+                                     {"credential_endpoint", endpoint}}}};
+                InjectExternalSpecProperties(
+                    props, 42, "s3://bucket/path", spec.dump());
+                EXPECT_EQ(std::get<std::string>(
+                              props.at("extfs.42.credential_endpoint")),
+                          endpoint);
+                EXPECT_EQ(props.count("extfs.42.role_arn"), 0u);
+                auto address =
+                    std::get<std::string>(props.at("extfs.42.address"));
+                auto scheme_end = address.find("://");
+                if (scheme_end != std::string::npos)
+                    address = address.substr(scheme_end + 3);
+                auto config = milvus_storage::FilesystemCache::resolve_config(
+                    std::make_shared<const milvus_storage::api::Properties>(
+                        props),
+                    "s3://" + address + "/bucket/path");
+                ASSERT_TRUE(config.ok()) << config.status();
+                EXPECT_TRUE(config->use_iam);
+                EXPECT_TRUE(config->IsAwsCredentialBrokerEnabled());
+                EXPECT_EQ(config->credential_endpoint, endpoint);
+                EXPECT_FALSE(config->s3_use_crt);
+                EXPECT_EQ(config->talon_mode,
+                          milvus_storage::TalonMode::Disabled);
+                EXPECT_EQ(props.count("extfs.42.talon.coordinator"), 0u);
+                spec["extfs"]["credential_endpoint"] = endpoint + "/other";
+                EXPECT_ANY_THROW(InjectExternalSpecProperties(
+                    props, 42, "s3://bucket/path", spec.dump()));
+            }
+        }
+    }
+    auto spec = nlohmann::json{
+        {"format", "parquet"},
+        {"extfs",
+         {{"cloud_provider", "azure"},
+          {"region", "westus3"},
+          {"azure_client_id", "client"},
+          {"azure_tenant_id", "tenant"},
+          {"access_key_id", "account"},
+          {"credential_endpoint", endpoint},
+          {"azure_credential_endpoint",
+           "HTTPS://BROKER.example.com:443/v1/credentials/assume-role"}}}};
+    milvus_storage::api::Properties props;
+    props["milvus.talon.external_mode"] = uint32_t{2};
+    props[PROPERTY_FS_TALON_COORDINATOR] = std::string("talon:1234");
+    InjectExternalSpecProperties(
+        props, 42, "azure://core.windows.net/container/path", spec.dump());
+    EXPECT_EQ(props.count("extfs.42.azure_credential_endpoint"), 0u);
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.talon.mode")), "0");
+    EXPECT_EQ(props.count("extfs.42.talon.coordinator"), 0u);
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.credential_endpoint")),
+              endpoint);
+    spec["extfs"]["azure_credential_endpoint"] = endpoint + "/other";
+    EXPECT_ANY_THROW(InjectExternalSpecProperties(
+        props, 42, "azure://core.windows.net/container/path", spec.dump()));
+}
+
+TEST(InjectExtfsAllowlist, NonBrokerRetainsTalonMode) {
+    for (uint32_t mode : {0u, 1u, 2u}) {
+        milvus_storage::api::Properties props;
+        props["milvus.talon.external_mode"] = mode;
+        props[PROPERTY_FS_TALON_COORDINATOR] = std::string("talon:1234");
+        const auto spec = nlohmann::json{{"format", "parquet"},
+                                         {"extfs",
+                                          {{"cloud_provider", "aws"},
+                                           {"region", "us-west-2"},
+                                           {"use_iam", "true"}}}};
+        InjectExternalSpecProperties(
+            props, 42, "s3://bucket/path", spec.dump());
+        EXPECT_EQ(std::get<std::string>(props.at("extfs.42.talon.mode")),
+                  std::to_string(mode));
+        EXPECT_EQ(std::get<std::string>(props.at("extfs.42.talon.coordinator")),
+                  "talon:1234");
+        EXPECT_EQ(props.count("extfs.42.credential_endpoint"), 0u);
+        EXPECT_EQ(std::get<std::string>(props.at("extfs.42.s3.use_crt")),
+                  "false");
+    }
+}
+
+TEST(InjectExtfsAllowlist, BrokerEndpointNormalization) {
+    for (const auto& entry : std::vector<std::pair<std::string, std::string>>{
+             {"HTTPS://BROKER.example.com:443/path",
+              "https://broker.example.com/path"},
+             {"http://broker:080/path", "http://broker/path"},
+             {"HTTPS://BROKER:443/path?api-version=1&scope=a%2Fb+x&scope=y",
+              "https://broker/path?api-version=1&scope=a%2Fb+x&scope=y"},
+             {"https://broker?", "https://broker/?"},
+             {"http://[::1]:80/path", "http://[::1]/path"},
+             {"https://broker:8443/a_b/", "https://broker:8443/a_b/"}}) {
+        auto result = NormalizeBrokerEndpoint(entry.first);
+        ASSERT_TRUE(result.ok()) << result.status();
+        EXPECT_EQ(*result, entry.second);
+    }
+    for (const auto& raw : {"",
+                            "ftp://broker/path",
+                            "https:///path",
+                            "https://user@broker/path",
+                            "https://broker/path#",
+                            "https://broker:",
+                            "https://broker:0/path",
+                            "https://broker:65536/path",
+                            "https://*.broker/path",
+                            "https://broker/a%2Fb/",
+                            "https://broker/allowed//admin",
+                            "https://broker/a/../admin",
+                            "https://broker/a:b"}) {
+        EXPECT_FALSE(NormalizeBrokerEndpoint(raw).ok()) << raw;
+    }
 }
