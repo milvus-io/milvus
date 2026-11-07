@@ -199,6 +199,99 @@ class TestRestValueFidelity(TestBase):
         row.update(extra)
         return row
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_namespaced_result_collisions(self):
+        """A search score, a static field, and an older dynamic key can all be named distance."""
+        name = self._create_load(
+            [
+                {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                {"fieldName": "vec", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}},
+            ]
+        )
+        self._insert(name, [{"id": 1, "vec": VECTOR, "distance": "old"}])
+        field = {
+            "fieldName": "distance",
+            "dataType": "VarChar",
+            "nullable": True,
+            "elementTypeParams": {"max_length": "32"},
+        }
+        rsp = self.collection_client.add_field(name, field)
+        assert rsp["code"] == 0, rsp
+        rsp = self.vector_client.vector_upsert(
+            {
+                "collectionName": name,
+                "partialUpdate": True,
+                "data": [{"id": 1, "distance": "new"}],
+            }
+        )
+        assert rsp["code"] == 0, rsp
+
+        read = {"collectionName": name, "consistencyLevel": "Strong"}
+        search = {**read, "annsField": "vec", "data": [VECTOR], "limit": 1, "outputFields": ["*"]}
+        for options in ({}, {"responseFormat": "legacy"}):
+            rsp = self.vector_client.vector_search({**search, **options})
+            assert rsp["code"] == 0, rsp
+            assert rsp["data"][0]["distance"] == 0
+        rsp = self.vector_client.vector_search({**search, "responseFormat": "namespaced"})
+        assert rsp["code"] == 0, rsp
+        hit = rsp["data"][0]
+        assert hit["fields"]["distance"] == "new"
+        assert hit["dynamicFields"] == {"distance": "old"}
+        assert hit["meta"] == {"distance": 0}
+
+        for outputs, dynamic in ((["distance"], {}), (["distance", ' $meta["distance"] '], {"distance": "old"})):
+            rsp = self.vector_client.vector_query(
+                {
+                    **read,
+                    "filter": "id == 1",
+                    "outputFields": outputs,
+                    "responseFormat": "namespaced",
+                }
+            )
+            assert rsp["code"] == 0, rsp
+            assert rsp["data"][0]["fields"]["distance"] == "new"
+            assert rsp["data"][0]["dynamicFields"] == dynamic
+            assert rsp["data"][0]["meta"] == {}
+
+        rsp = self.vector_client.vector_search({**search, "responseFormat": "unknown"})
+        assert rsp["code"] == 1100, rsp
+
+        # Aggregation keeps its existing opaque dynamic column, including an
+        # upstream null. Only its namespace changes, at every bucket depth.
+        aggregate = {
+            **search,
+            "outputFields": ["distance", '$meta["distance"]'],
+            "searchAggregation": {
+                "fields": ["distance"],
+                "size": 1,
+                "topHits": {"size": 1},
+                "subAggregation": {"fields": ["id"], "size": 1, "topHits": {"size": 1}},
+            },
+        }
+        default = self.vector_client.vector_search(aggregate)
+        legacy = self.vector_client.vector_search({**aggregate, "responseFormat": "legacy"})
+        namespaced = self.vector_client.vector_search({**aggregate, "responseFormat": "namespaced"})
+        for response in (default, legacy, namespaced):
+            assert response["code"] == 0, response
+            assert response["aggTopks"] == [1], response
+        assert default["data"] == legacy["data"]
+        old_bucket = legacy["data"][0]["buckets"][0]
+        bucket = namespaced["data"][0]["buckets"][0]
+        for depth in range(2):
+            for key in ("key", "count", "metrics"):
+                assert bucket[key] == old_bucket[key]
+            assert len(bucket["hits"]) == len(old_bucket["hits"]) == 1
+            old_hit, hit = old_bucket["hits"][0], bucket["hits"][0]
+            assert old_hit == {"id": old_hit["id"], "distance": "new", "$meta": old_hit["$meta"]}
+            assert hit == {
+                "fields": {"id": old_hit["id"], "distance": "new"},
+                "dynamicFields": {"$meta": old_hit["$meta"]},
+                "meta": {"distance": 0},
+            }
+            if depth == 0:
+                assert len(bucket["subGroups"]) == len(old_bucket["subGroups"]) == 1
+                old_bucket, bucket = old_bucket["subGroups"][0], bucket["subGroups"][0]
+
     # ================= L0: A. Value fidelity =================
 
     @pytest.mark.tags(CaseLabel.L0)

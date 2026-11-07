@@ -4432,9 +4432,15 @@ func scalarFieldToRESTAny(field *schemapb.ScalarField, enableInt64 bool) (any, e
 	}
 }
 
-//nolint:gosec // G602: slice indices are bounded by rowsNum which is derived from the data length
 func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs,
 	scores []float32, enableInt64 bool, collectionSchema *schemapb.CollectionSchema,
+) ([]map[string]interface{}, error) {
+	return buildQueryRespWithFormat(rowsNum, needFields, fieldDataList, ids, scores, enableInt64, collectionSchema, false, nil)
+}
+
+//nolint:gosec // G602: slice indices are bounded by rowsNum which is derived from the data length
+func buildQueryRespWithFormat(rowsNum int64, needFields []string, fieldDataList []*schemapb.FieldData, ids *schemapb.IDs,
+	scores []float32, enableInt64 bool, collectionSchema *schemapb.CollectionSchema, namespaced bool, requestedFields []string,
 ) ([]map[string]interface{}, error) {
 	nativeJSON := paramtable.Get().HTTPCfg.NativeJSONResponse.GetAsBool()
 	jsonFieldNames := make(map[string]struct{})
@@ -4483,7 +4489,30 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 		}
 	}
 	queryResp := make([]map[string]interface{}, 0, rowsNum)
-	dynamicOutputFields := genDynamicFields(needFields, fieldDataList)
+	var dynamicOutputFields []string
+	var allDynamicFields bool
+	if namespaced {
+		var err error
+		dynamicOutputFields, allDynamicFields, err = namespacedDynamicFields(requestedFields, needFields, fieldDataList, collectionSchema)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		dynamicOutputFields = genDynamicFields(needFields, fieldDataList)
+	}
+	// Resolve output selection once per column, never through a per-field callback.
+	// The row loop retains the same full-versus-selected dynamic write operation.
+	var dynamicOutputs []dynamicFieldOutput
+	if len(dynamicOutputFields) > 0 || allDynamicFields {
+		dynamicOutputs = make([]dynamicFieldOutput, columnNum)
+		for j, field := range fieldDataList {
+			if allDynamicFields {
+				dynamicOutputs[j] = dynamicFieldNamespace
+			} else if !namespaced && containsString(dynamicOutputFields, field.GetFieldName()) {
+				dynamicOutputs[j] = dynamicFieldFlatten
+			}
+		}
+	}
 	legacyArrayResponse := paramtable.Get().HTTPCfg.LegacyArrayResponse.GetAsBool()
 
 	pkFieldName := DefaultPrimaryFieldName
@@ -4497,7 +4526,8 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 		}
 	}
 	for i := int64(0); i < rowsNum; i++ {
-		row := map[string]interface{}{}
+		result := newResultRow(namespaced)
+		row := result.fields
 		if columnNum > 0 {
 			for j := 0; j < columnNum; j++ {
 				fieldData := fieldDataList[j]
@@ -4636,14 +4666,23 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 								"dynamic field does not hold a single JSON document"))
 						}
 
-						if containsString(dynamicOutputFields, fieldDataList[j].GetFieldName()) {
+						output := dynamicFieldSelect
+						if len(dynamicOutputs) > 0 {
+							output = dynamicOutputs[j]
+						}
+						switch output {
+						case dynamicFieldFlatten:
 							for key, value := range dataMap {
-								row[key] = value
+								result.dynamicFields[key] = value
 							}
-						} else {
+						case dynamicFieldNamespace:
+							if dataMap != nil {
+								result.output["dynamicFields"] = dataMap
+							}
+						default:
 							for _, dynamicField := range dynamicOutputFields {
 								if _, ok := dataMap[dynamicField]; ok {
-									row[dynamicField] = dataMap[dynamicField]
+									result.dynamicFields[dynamicField] = dataMap[dynamicField]
 								}
 							}
 						}
@@ -4682,9 +4721,9 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 			}
 		}
 		if scores != nil && int64(len(scores)) > i {
-			row[HTTPReturnDistance] = scores[i] // only 8 decimal places
+			result.meta[HTTPReturnDistance] = scores[i] // only 8 decimal places
 		}
-		queryResp = append(queryResp, row)
+		queryResp = append(queryResp, result.output)
 	}
 
 	if nativeJSON && !jsonAllValid {
@@ -4697,7 +4736,11 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 		mlog.Warn(context.TODO(),
 			"a JSON field holds bytes that are not a JSON document, returning JSON fields as strings for this response",
 			mlog.Int("rows", len(queryResp)))
-		jsonFieldsToStrings(queryResp, jsonFieldNames)
+		if namespaced {
+			namespacedJSONFieldsToStrings(queryResp, jsonFieldNames)
+		} else {
+			jsonFieldsToStrings(queryResp, jsonFieldNames)
+		}
 	}
 
 	return queryResp, nil
@@ -4762,7 +4805,11 @@ func hasSearchAggregationResult(results *schemapb.SearchResultData) bool {
 // Naming the stage keeps the response actionable enough to report while the
 // contract detail stays in the log.
 func buildSearchAggregationResp(results *schemapb.SearchResultData, enableInt64 bool, collectionSchema *schemapb.CollectionSchema) ([]gin.H, error) {
-	output, err := buildSearchAggregationRespData(results, enableInt64, collectionSchema)
+	return buildSearchAggregationRespWithFormat(results, enableInt64, collectionSchema, false)
+}
+
+func buildSearchAggregationRespWithFormat(results *schemapb.SearchResultData, enableInt64 bool, collectionSchema *schemapb.CollectionSchema, namespaced bool) ([]gin.H, error) {
+	output, err := buildSearchAggregationRespDataWithFormat(results, enableInt64, collectionSchema, namespaced)
 	if err != nil {
 		return nil, wrapResultStageErr("search aggregation result", err)
 	}
@@ -4770,6 +4817,10 @@ func buildSearchAggregationResp(results *schemapb.SearchResultData, enableInt64 
 }
 
 func buildSearchAggregationRespData(results *schemapb.SearchResultData, enableInt64 bool, collectionSchema *schemapb.CollectionSchema) ([]gin.H, error) {
+	return buildSearchAggregationRespDataWithFormat(results, enableInt64, collectionSchema, false)
+}
+
+func buildSearchAggregationRespDataWithFormat(results *schemapb.SearchResultData, enableInt64 bool, collectionSchema *schemapb.CollectionSchema, namespaced bool) ([]gin.H, error) {
 	if results == nil {
 		// The aggregation payload is produced by the server-side reduce, never
 		// by the request: a malformed shape is an internal contract violation.
@@ -4803,7 +4854,7 @@ func buildSearchAggregationRespData(results *schemapb.SearchResultData, enableIn
 	for _, topk := range aggTopks {
 		buckets := make([]gin.H, 0, int(topk))
 		for i := int64(0); i < topk; i++ {
-			bucket, err := buildAggBucketResp(pbBuckets[offset], enableInt64, collectionSchema)
+			bucket, err := buildAggBucketRespWithFormat(pbBuckets[offset], enableInt64, collectionSchema, namespaced)
 			if err != nil {
 				return nil, err
 			}
@@ -4816,19 +4867,29 @@ func buildSearchAggregationRespData(results *schemapb.SearchResultData, enableIn
 }
 
 func buildAggBucketResp(pb *schemapb.AggBucket, enableInt64 bool, collectionSchema *schemapb.CollectionSchema) (gin.H, error) {
+	return buildAggBucketRespWithFormat(pb, enableInt64, collectionSchema, false)
+}
+
+func buildAggBucketRespWithFormat(pb *schemapb.AggBucket, enableInt64 bool, collectionSchema *schemapb.CollectionSchema, namespaced bool) (gin.H, error) {
 	if pb == nil {
 		return nil, merr.WrapErrServiceInternalMsg("search_aggregation bucket is nil")
+	}
+	var hits []gin.H
+	if namespaced {
+		hits = buildNamespacedAggHitsResp(pb.GetHits(), enableInt64, collectionSchema)
+	} else {
+		hits = buildAggHitsResp(pb.GetHits(), enableInt64, collectionSchema)
 	}
 	bucket := gin.H{
 		"key":       buildAggBucketKeyResp(pb.GetKey(), enableInt64),
 		"count":     formatRESTInt64(pb.GetCount(), enableInt64),
 		"metrics":   buildAggMetricsResp(pb.GetMetrics(), enableInt64),
-		"hits":      buildAggHitsResp(pb.GetHits(), enableInt64, collectionSchema),
+		"hits":      hits,
 		"subGroups": []gin.H{},
 	}
 	subGroups := make([]gin.H, 0, len(pb.GetSubGroups()))
 	for _, sub := range pb.GetSubGroups() {
-		subGroup, err := buildAggBucketResp(sub, enableInt64, collectionSchema)
+		subGroup, err := buildAggBucketRespWithFormat(sub, enableInt64, collectionSchema, namespaced)
 		if err != nil {
 			return nil, err
 		}
