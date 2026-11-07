@@ -67,10 +67,10 @@ Milvus 基于 [Apache 2.0 License](https://github.com/milvus-io/milvus/blob/mast
 
 ### 源码编译 Milvus
 
-请先安装相关依赖。
+请先安装相关依赖。Go 最低版本以 [go.mod](go.mod) 的 `go` 指令为准。
 
 ```
-go: 1.21
+go: 见 go.mod
 cmake: >=3.18
 gcc: >= 11
 protobuf: >=3.7

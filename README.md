@@ -167,11 +167,11 @@ The Milvus open-source project accepts contributions from everyone. See [Guideli
 
 ### Build Milvus from Source Code
 
-Requirements:
+Requirements (the minimum Go version is specified in [go.mod](go.mod)):
 
 * Linux systems (Ubuntu 20.04 or later recommended):
   ```bash
-  Go: >= 1.21
+  Go: see go.mod
   CMake: >= 3.26.4 && CMake < 4
   GCC: >= 11
   Python: > 3.8 and  <= 3.11
@@ -179,7 +179,7 @@ Requirements:
 
 * MacOS systems with x86_64 (Big Sur 11.5 or later recommended):
   ```bash
-  Go: >= 1.21
+  Go: see go.mod
   CMake: >= 3.26.4 && CMake < 4
   llvm: >= 15
   Python: > 3.8 and  <= 3.11
@@ -187,7 +187,7 @@ Requirements:
 
 * MacOS systems with Apple Silicon (Monterey 12.0.1 or later recommended):
   ```bash
-  Go: >= 1.21 (Arch=ARM64)
+  Go: see go.mod (Arch=ARM64)
   CMake: >= 3.26.4 && CMake < 4
   llvm: >= 15
   Python: > 3.8 and  <= 3.11
