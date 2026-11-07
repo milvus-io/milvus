@@ -31,6 +31,10 @@ const (
 
 var BaseFormatterKey = "base"
 
+// lineBreakEscaper keeps one access log record on one line when field values
+// carry CR or LF from the request.
+var lineBreakEscaper = strings.NewReplacer("\r", "\\r", "\n", "\\n")
+
 // Formaater manager not concurrent safe
 // make sure init with Add and SetMethod before use Get
 type FormatterManger struct {
@@ -121,6 +125,11 @@ func (f *Formatter) build() {
 
 func (f *Formatter) Format(i info.AccessInfo) string {
 	fieldValues := info.Get(i, f.fields...)
+	for idx, v := range fieldValues {
+		if s, ok := v.(string); ok && strings.ContainsAny(s, "\r\n") {
+			fieldValues[idx] = lineBreakEscaper.Replace(s)
+		}
+	}
 	return fmt.Sprintf(f.fmt, fieldValues...)
 }
 
