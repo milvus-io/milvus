@@ -267,7 +267,7 @@ func (kc *Catalog) loadCollectionFromDb(ctx context.Context, dbID int64, collect
 	collKey := BuildCollectionKey(dbID, collectionID)
 	collVal, err := kc.Txn.Load(ctx, collKey)
 	if err != nil {
-		return nil, merr.WrapErrCollectionNotFound(collectionID, err.Error())
+		return nil, err
 	}
 
 	// Legacy SuffixSnapshot deletion with ts!=0 overwrote the plain key with a
@@ -283,11 +283,25 @@ func (kc *Catalog) loadCollectionFromDb(ctx context.Context, dbID int64, collect
 }
 
 func (kc *Catalog) loadCollectionFromDefaultDb(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) (*pb.CollectionInfo, error) {
-	if info, err := kc.loadCollectionFromDb(ctx, util.DefaultDBID, collectionID, ts); err == nil {
+	info, err := kc.loadCollectionFromDb(ctx, util.DefaultDBID, collectionID, ts)
+	if err == nil {
 		return info, nil
 	}
+	// The legacy NonDBID key is only a compatibility fallback for metadata
+	// written before databases existed. Fall back only when the default-db key
+	// is explicitly absent; a tombstone or a storage error must surface as-is.
+	if !errors.Is(err, merr.ErrIoKeyNotFound) {
+		return nil, err
+	}
 	// get collection from older version.
-	return kc.loadCollectionFromDb(ctx, util.NonDBID, collectionID, ts)
+	info, err = kc.loadCollectionFromDb(ctx, util.NonDBID, collectionID, ts)
+	if err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return nil, merr.WrapErrCollectionNotFound(collectionID, err.Error())
+		}
+		return nil, err
+	}
+	return info, nil
 }
 
 func (kc *Catalog) loadCollection(ctx context.Context, dbID int64, collectionID typeutil.UniqueID, ts typeutil.Timestamp) (*pb.CollectionInfo, error) {
@@ -299,7 +313,14 @@ func (kc *Catalog) loadCollection(ctx context.Context, dbID int64, collectionID 
 		kc.fixDefaultDBIDConsistency(ctx, info, ts)
 		return info, nil
 	}
-	return kc.loadCollectionFromDb(ctx, dbID, collectionID, ts)
+	info, err := kc.loadCollectionFromDb(ctx, dbID, collectionID, ts)
+	if err != nil {
+		if errors.Is(err, merr.ErrIoKeyNotFound) {
+			return nil, merr.WrapErrCollectionNotFound(collectionID, err.Error())
+		}
+		return nil, err
+	}
+	return info, nil
 }
 
 func partitionVersionAfter210(collMeta *pb.CollectionInfo) bool {
