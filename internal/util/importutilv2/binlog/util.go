@@ -201,8 +201,12 @@ func verify(schema *schemapb.CollectionSchema, storageVersion int64, insertLogs 
 				if _, ok := insertLogs[field.GetFieldID()]; !ok {
 					// A nullable vector field has no column group in segments flushed
 					// before it was added via AddCollectionField; the packed reader
-					// fills the absent column with nulls. Other vector fields must be provided.
-					if field.GetNullable() {
+					// fills the absent column with nulls. An element-nullable struct
+					// sub-field has none in segments flushed before it was added to
+					// its struct; the reader gives each row the element count of a
+					// stored sibling, all elements null, or rejects the segment when
+					// no stored sibling exists. Other vector fields must be provided.
+					if field.GetNullable() || field.GetElementNullable() {
 						continue
 					}
 					return nil, nil, merr.WrapErrImportFailedMsg("no binlog for field:%s", field.GetName())
@@ -221,7 +225,10 @@ func verify(schema *schemapb.CollectionSchema, storageVersion int64, insertLogs 
 	}
 	validInsertLogs := make(map[int64][]string)
 	for _, field := range typeutil.GetAllFieldSchemas(readSchema) {
-		validInsertLogs[field.GetFieldID()] = insertLogs[field.GetFieldID()]
+		// A kept struct may miss element-nullable sub-fields; the reader fills them.
+		if logs, ok := insertLogs[field.GetFieldID()]; ok {
+			validInsertLogs[field.GetFieldID()] = logs
+		}
 	}
 	return validInsertLogs, readSchema, nil
 }
@@ -280,20 +287,35 @@ func selectImportFields(schema *schemapb.CollectionSchema, hasField func(int64) 
 		}
 	}
 
+	// A struct is read when at least one of its sub-fields is stored. A missing
+	// sub-field must be element-nullable: one added to the struct after the
+	// segment was written, which the reader fills with the element counts of a
+	// stored sibling, all elements null. Stored columns of dropped sub-fields
+	// are not in the schema and are ignored.
 	for _, structArrayField := range schema.GetStructArrayFields() {
-		missingFields := make([]string, 0)
+		var firstMissing, firstRequiredMissing string
+		missing := 0
 		for _, field := range structArrayField.GetFields() {
-			id := field.GetFieldID()
-			if !hasField(id) {
-				missingFields = append(missingFields, field.GetName())
+			if hasField(field.GetFieldID()) {
+				continue
+			}
+			missing++
+			if firstMissing == "" {
+				firstMissing = field.GetName()
+			}
+			if firstRequiredMissing == "" && !field.GetElementNullable() {
+				firstRequiredMissing = field.GetName()
 			}
 		}
 
-		if len(missingFields) == len(structArrayField.GetFields()) && structArrayField.GetNullable() {
-			continue
+		if missing == len(structArrayField.GetFields()) {
+			if structArrayField.GetNullable() {
+				continue
+			}
+			return nil, merr.WrapErrImportFailedMsg("no binlog for struct field:%s", firstMissing)
 		}
-		if len(missingFields) > 0 {
-			return nil, merr.WrapErrImportFailedMsg("no binlog for struct field:%s", missingFields[0])
+		if firstRequiredMissing != "" {
+			return nil, merr.WrapErrImportFailedMsg("no binlog for struct field:%s", firstRequiredMissing)
 		}
 		cloneSchema.StructArrayFields = append(cloneSchema.StructArrayFields, structArrayField)
 	}

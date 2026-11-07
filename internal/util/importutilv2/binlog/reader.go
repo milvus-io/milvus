@@ -292,6 +292,17 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 		}),
 		storage.WithStorageConfig(r.storageConfig),
 	}
+	if r.storageVersion == storage.StorageV1 {
+		// V1 binlogs were filtered to the read schema above. The V1 reader
+		// needs every stored field ID, dropped sub-fields included, to tell
+		// whether a struct whose sub-fields are all absent from the read
+		// predates the struct or lost its stored sub-fields to a drop.
+		stored := make(map[int64]struct{}, len(insertLogs))
+		for fieldID := range insertLogs {
+			stored[fieldID] = struct{}{}
+		}
+		rwOptions = append(rwOptions, storage.WithPresentFields(stored))
+	}
 
 	// A caller-resolved plugin context takes precedence over deriving one from
 	// the EZK: the Import V3 reshard source resolves encryption once per task.

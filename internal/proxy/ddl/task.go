@@ -326,6 +326,17 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 	t.schema.AutoID = false
 	t.schema.DbName = t.GetDbName()
 
+	// With preserve_field_ids the schema may carry the dynamic and namespace
+	// fields, only for their source field IDs. They are not user fields.
+	preserveFieldIDs := isPreserveFieldIDs(t.GetProperties())
+	var preservedSystemFields []*schemapb.FieldSchema
+	if preserveFieldIDs {
+		preservedSystemFields, err = takePreservedSystemFields(t.schema)
+		if err != nil {
+			return err
+		}
+	}
+
 	disableCheck, err := common.IsDisableFuncRuntimeCheck(t.GetProperties()...)
 	if err != nil {
 		return err
@@ -489,10 +500,13 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 	}
-	// RootCoord skips this check when preserve_field_ids is set, as for a
-	// snapshot restore, which does not go through proxy.
-	if err := schemautil.RejectStructSubFieldsTextMatch(t.schema.GetStructArrayFields()); err != nil {
-		return err
+	// A schema with preserved field IDs restores an existing collection, whose
+	// stored sub-fields may carry enable_match or enable_analyzer from an
+	// earlier version; RootCoord skips this check for it too.
+	if !preserveFieldIDs {
+		if err := schemautil.RejectStructSubFieldsTextMatch(t.schema.GetStructArrayFields()); err != nil {
+			return err
+		}
 	}
 	if err := validateNativeListArrayGrowingSourceFlush(t.schema, typeutil.GetAllFieldSchemas(t.schema)...); err != nil {
 		return err
@@ -522,6 +536,7 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	t.schema.Fields = append(t.schema.Fields, preservedSystemFields...)
 	t.Schema, err = proto.Marshal(t.schema)
 	if err != nil {
 		return err

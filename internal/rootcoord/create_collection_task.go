@@ -54,6 +54,13 @@ type createCollectionTask struct {
 	header          *message.CreateCollectionMessageHeader
 	body            *message.CreateCollectionRequest
 	preserveFieldID bool
+	// allowStructSubFieldOriginMarker accepts the internal origin marker on
+	// struct sub-fields. Only restore from a snapshot sets it: that restore
+	// copies segments as they are, so the sub-fields added after their struct
+	// still lack columns in old segments and must keep the marker. Every
+	// CreateCollection request, with or without preserve_field_ids, is rejected
+	// when it carries the marker.
+	allowStructSubFieldOriginMarker bool
 
 	// heldFileResourceIds tracks file resources whose refCnt was incremented
 	// during validation, to be released if the task fails before Broadcast.
@@ -186,8 +193,10 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		return err
 	}
 
-	if err := rejectStructSubFieldOriginMarkers(schema.GetStructArrayFields()); err != nil {
-		return err
+	if !t.allowStructSubFieldOriginMarker {
+		if err := rejectStructSubFieldOriginMarkers(schema.GetStructArrayFields()); err != nil {
+			return err
+		}
 	}
 	// A restored collection (preserveFieldID) keeps its stored schema, whose
 	// sub-fields may carry enable_match or enable_analyzer from an earlier
@@ -664,14 +673,15 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 	preservedNamespaceFieldID := int64(-1)
 	if t.preserveFieldID {
 		mlog.Info(ctx, "preserve field IDs from schema during create collection", mlog.String("collection", t.Req.CollectionName))
+		if err := validatePreservedFieldIDs(t.body.CollectionSchema); err != nil {
+			return err
+		}
+		if err := validatePreservedMaxFieldID(t.Req.GetProperties()); err != nil {
+			return err
+		}
 		fields := make([]*schemapb.FieldSchema, 0)
 		// filter out system fields
 		for _, field := range t.body.CollectionSchema.Fields {
-			if field.Name != RowIDFieldName && field.GetFieldID() == 0 {
-				mlog.Info(context.TODO(), "field id 0 is not allowed when preserve field ids", mlog.String("field", field.Name))
-				return merr.WrapErrParameterInvalidMsg("field id 0 is not allowed when preserve field ids, field: %s", field.Name)
-			}
-
 			if field.GetName() == MetaFieldName {
 				preservedDynamicFieldID = field.GetFieldID()
 				continue
@@ -707,14 +717,22 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 	if t.preserveFieldID {
 		// cause dynamic field is system field without internal id allocation
 		// we need to restore its field id here
+		namespaceCreated := false
 		for _, field := range t.body.CollectionSchema.Fields {
 			if field.GetName() == MetaFieldName {
 				field.FieldID = preservedDynamicFieldID
 			}
 
 			if field.GetName() == NamespaceFieldName {
+				namespaceCreated = true
 				field.FieldID = preservedNamespaceFieldID
 			}
+		}
+		if err := checkPreservedNamespaceFieldID(namespaceCreated, preservedNamespaceFieldID); err != nil {
+			return err
+		}
+		if err := resolvePreservedFunctionFieldIDs(t.body.CollectionSchema); err != nil {
+			return err
 		}
 	} else {
 		if err := t.assignFieldAndFunctionID(t.body.CollectionSchema); err != nil {
