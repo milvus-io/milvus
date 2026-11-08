@@ -127,7 +127,7 @@ extraConfigFiles:
     quotaAndLimits:
       flushRate:
         collection:
-          max: 4
+          max: 1
     function:
       pyUDF:
         enabled: true
