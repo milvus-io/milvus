@@ -124,6 +124,10 @@ extraConfigFiles:
         exprEvalBatchSize: 512
     queryCoord:
       checkNodeInReplicaInterval: 3
+    quotaAndLimits:
+      flushRate:
+        collection:
+          max: 4
     function:
       pyUDF:
         enabled: true
