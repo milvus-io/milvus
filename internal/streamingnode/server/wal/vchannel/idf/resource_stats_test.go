@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -113,7 +114,7 @@ func TestRecoverGrowingBM25FromStorageV3Manifest(t *testing.T) {
 	defer patch.UnPatch()
 	paths := mockey.Mock((*packed.StatsResolver).BM25StatsPaths).Return(map[int64][]string{102: {path}}, nil).Build()
 	defer paths.UnPatch()
-	runtime := &oracleRuntime{schema: &schemapb.CollectionSchema{Functions: []*schemapb.FunctionSchema{{Type: schemapb.FunctionType_BM25, OutputFieldIds: []int64{102}}}}, provider: NewProvider(nil, WithChunkManager(cm)), currentStats: bm25Stats{102: storage.NewBM25Stats()}, growingStore: newGrowingStatsStore(nil, nil)}
+	runtime := &oracleRuntime{fieldIDs: []int64{102}, schema: &schemapb.CollectionSchema{Functions: []*schemapb.FunctionSchema{{Type: schemapb.FunctionType_BM25, OutputFieldIds: []int64{102}}}}, provider: NewProvider(nil, WithChunkManager(cm)), currentStats: bm25Stats{102: storage.NewBM25Stats()}, growingStore: newGrowingStatsStore(nil, nil)}
 	require.NoError(t, runtime.collectPersistedGrowingStats(ctx, walview.VisibleSegment{SegmentID: 20, PartitionID: 10, Data: walview.SegmentSnapshotData{PersistedStorage: &streamingpb.L1SegmentPersistedStorage{ManifestPath: manifest}}}))
 	require.Equal(t, float64(2), runtime.growingStore.segments[20].stats[102].GetAvgdl())
 	require.Equal(t, int64(1), runtime.growingStore.segments[20].stats[102].NumRow())
@@ -135,7 +136,7 @@ func TestFailedOracleInitializationRejectsPartialResources(t *testing.T) {
 	_, err = newOracleRuntime(ctx, provider, walview.VChannelWALView{Schema: &schemapb.CollectionSchema{}}, []*datapb.StreamingNodeBM25Resource{good, bad}, false)
 	require.Error(t, err)
 	missing := walview.VisibleSegment{SegmentID: 22, Data: walview.SegmentSnapshotData{PersistedStorage: &streamingpb.L1SegmentPersistedStorage{Binlogs: []*streamingpb.L1SegmentBinLogs{{Bm25Binlog: []*datapb.FieldBinlog{{FieldID: 102, Binlogs: []*datapb.Binlog{{LogPath: path + "-missing"}}}}}}}}}
-	_, err = newOracleRuntime(ctx, provider, walview.VChannelWALView{Schema: &schemapb.CollectionSchema{Functions: []*schemapb.FunctionSchema{{Type: schemapb.FunctionType_BM25, OutputFieldIds: []int64{102}}}}, SegmentSnapshot: walview.VisibleSegmentSnapshot{Segments: []walview.VisibleSegment{missing}}}, []*datapb.StreamingNodeBM25Resource{good}, false)
+	_, err = newOracleRuntime(ctx, provider, walview.VChannelWALView{RequiredFields: []*viewpb.LoadFieldConfig{{FieldId: 102}}, Schema: &schemapb.CollectionSchema{Functions: []*schemapb.FunctionSchema{{Type: schemapb.FunctionType_BM25, OutputFieldIds: []int64{102}}}}, SegmentSnapshot: walview.VisibleSegmentSnapshot{Segments: []walview.VisibleSegment{missing}}}, []*datapb.StreamingNodeBM25Resource{good}, false)
 	require.Error(t, err)
 	require.NoError(t, cm.Write(ctx, path, []byte("invalid statistics")))
 	_, err = loadSealedSegmentStats(ctx, cm, good)

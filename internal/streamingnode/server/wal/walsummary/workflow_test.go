@@ -266,12 +266,12 @@ func TestGCWaitsForPublicationAndReaders(t *testing.T) {
 	require.NoError(t, stageChunk(t, m, 100).Execute(ctx))
 	require.NoError(t, drainSummary(ctx, m))
 	entered, release := make(chan struct{}), make(chan struct{})
-	var original func(*Store, context.Context, *streamingpb.PChannelSummaryChunkIndexEntry) (*chunkPayload, error)
-	patch := mockey.Mock((*Store).readChunkPayload).Origin(&original).To(func(s *Store, ctx context.Context, index *streamingpb.PChannelSummaryChunkIndexEntry) (*chunkPayload, error) {
+	var original func(*Store, context.Context, *streamingpb.PChannelSummaryChunkIndexEntry, *chunkValidation) (*chunkPayload, error)
+	patch := mockey.Mock((*Store).readChunkPayload).Origin(&original).To(func(s *Store, ctx context.Context, index *streamingpb.PChannelSummaryChunkIndexEntry, verified *chunkValidation) (*chunkPayload, error) {
 		copiedIndex := proto.Clone(index).(*streamingpb.PChannelSummaryChunkIndexEntry)
 		close(entered)
 		<-release
-		return original(s, ctx, copiedIndex)
+		return original(s, ctx, copiedIndex, verified)
 	}).Build()
 	defer patch.UnPatch()
 	readDone := make(chan error, 1)

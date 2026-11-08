@@ -11,6 +11,50 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
+func TestNodeReportProgressUsesPerNodeReadiness(t *testing.T) {
+	view := buildTestView(2)
+	sm := NewCoordQueryViewStateMachineWithRef(view, nil)
+	check := func(report qviews.QueryViewAtWorkNode, want bool) {
+		t.Helper()
+		require.Equal(t, want, sm.reportMakesProgress(report))
+		sm.OnNodeStateReported(report)
+	}
+	check(qnReport(view, 1, qviews.QueryViewStatePreparing), false)
+	check(qnReport(view, 1, qviews.QueryViewStatePreparing, 1000), true)
+	check(qnReport(view, 1, qviews.QueryViewStatePreparing, 1000), false)
+	// The second node's first ready segment is progress even with the same count.
+	check(qnReport(view, 2, qviews.QueryViewStatePreparing, 1001), true)
+	check(qnReport(view, 2, qviews.QueryViewStatePreparing, 1001), false)
+	check(snReport(view, qviews.QueryViewStatePreparing), false)
+	check(snReport(view, qviews.QueryViewStateReady), true)
+	check(snReport(view, qviews.QueryViewStateReady), false)
+	check(qnReport(view, 1, qviews.QueryViewStateReady, 1000), true)
+	check(qnReport(view, 1, qviews.QueryViewStateReady, 1000), false)
+	require.Equal(t, qviews.QueryViewStatePreparing, sm.State())
+	check(qnReport(view, 2, qviews.QueryViewStateReady, 1001), true)
+	require.Equal(t, qviews.QueryViewStateReady, sm.State())
+	check(snReport(view, qviews.QueryViewStateReady), false)
+}
+
+func TestNodeReportProgressTracksPartialCleanup(t *testing.T) {
+	view := buildTestView(2)
+	sm := NewCoordQueryViewStateMachineWithRef(view, nil)
+	sm.EnterUnrecoverable()
+	sm.EnterDropping()
+	for _, report := range []qviews.QueryViewAtWorkNode{
+		qnReport(view, 1, qviews.QueryViewStateDropped),
+		snReport(view, qviews.QueryViewStateDropped),
+	} {
+		require.True(t, sm.reportMakesProgress(report))
+		sm.OnNodeStateReported(report)
+		require.False(t, sm.reportMakesProgress(report))
+		sm.OnNodeStateReported(report)
+		require.Equal(t, qviews.QueryViewStateDropping, sm.State())
+	}
+	// A live but not yet released node does not advance cleanup.
+	require.False(t, sm.reportMakesProgress(qnReport(view, 2, qviews.QueryViewStateReady)))
+}
+
 func TestDownKeepsQueryNodesUntilSNLeaseDrains(t *testing.T) {
 	view := buildTestView(2)
 	view.Meta.State = viewpb.QueryViewState_QueryViewStateUp

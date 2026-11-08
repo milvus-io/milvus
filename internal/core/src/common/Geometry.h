@@ -11,6 +11,8 @@
 #pragma once
 
 #include <geos_c.h>
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <memory>
@@ -540,6 +542,22 @@ class Geometry {
             return false;
         }
 
+        // An empty operand is never within any distance of anything (PostGIS
+        // ST_DWithin semantics). GEOS reports a distance of 0 to an empty
+        // geometry, so without this check every empty row (POINT EMPTY,
+        // POLYGON EMPTY, ...) would match at any distance -- and it would do
+        // so only on the un-indexed path, because the R-Tree stores a
+        // placeholder MBR for empty rows that no query envelope away from the
+        // origin ever reaches (issue #54138). Returning false here is what
+        // lets the index coarse pass and the exact predicate agree for empty
+        // rows regardless of which placeholder an index builder recorded.
+        // GEOSisEmpty_r is tri-state (1/0/2 = exception); 2 maps to "not a
+        // match" like every other predicate here.
+        if (GEOSisEmpty_r(ctx, geometry_) != 0 ||
+            GEOSisEmpty_r(ctx, other.geometry_) != 0) {
+            return false;
+        }
+
         // Get geometry types
         int thisType = GEOSGeomTypeId_r(ctx, geometry_);
         int otherType = GEOSGeomTypeId_r(ctx, other.geometry_);
@@ -591,6 +609,178 @@ class Geometry {
         return false;
     }
 
+    // Axis-aligned lon/lat box, the unit the R-Tree coarse pass works in.
+    struct Envelope {
+        double min_x;  // longitude
+        double min_y;  // latitude
+        double max_x;
+        double max_y;
+    };
+
+    // The coarse search region of one ST_DWITHIN query: the union of `count`
+    // boxes (one, or two when the spherical cap wraps around the
+    // antimeridian). The R-Tree reader takes one box per lookup, so the
+    // caller looks up each box and ORs the candidate bitmaps.
+    struct DWithinSearchBoxes {
+        static constexpr size_t kMaxBoxes = 2;
+        std::array<Envelope, kMaxBoxes> boxes{};
+        size_t count = 0;
+
+        const Envelope*
+        begin() const {
+            return boxes.data();
+        }
+        const Envelope*
+        end() const {
+            return boxes.data() + count;
+        }
+    };
+
+    /**
+     * The lon/lat envelope that contains EVERY geometry dwithin() can accept
+     * for `query_point` and `distance_meters` -- the coarse pre-filter the
+     * R-Tree index runs before exact refinement.
+     *
+     * dwithin() measures distance two different ways (see above): point rows
+     * by great-circle haversine on a sphere of radius kEarthRadiusMeters,
+     * every other row by planar GEOS distance in degrees scaled by
+     * degrees_to_meters_at_location at the query latitude. A coarse box is
+     * only correct if it is a superset of BOTH acceptance regions, so this is
+     * the one place that derives it, from the same constants the predicate
+     * uses. The historical box (111320 m/deg, longitude / cos(lat)) was
+     * sized for neither metric and silently dropped rows near the distance
+     * boundary on the indexed path (issue #54138).
+     *
+     *  - Point rows: the spherical cap of angular radius d/R. Its latitude
+     *    extent is exactly +-d/R; its longitude extent is
+     *    asin(sin(d/R) / cos(lat)) unless the cap contains a pole, in which
+     *    case every longitude is reachable.
+     *  - Other rows: a planar disc of radius d / (111320 * f(lat)) degrees in
+     *    lon/lat space. Any geometry within that planar distance has a vertex
+     *    inside the +-r box, so its envelope intersects the box.
+     *
+     * The primary box is the union of the two extents plus a tiny margin
+     * that absorbs rounding on the boundary. Its longitude range is not
+     * clamped to [-180, 180], so it stays a superset of the planar disc.
+     *
+     * Antimeridian: haversine measures longitude modulo 360, so a spherical
+     * cap that crosses +-180 continues on the other side, while the planar
+     * GEOS metric does not wrap. Only the cap's overflow is mapped back, as a
+     * second box at the opposite edge -- e.g. POINT (179.999 0) with 1000 m
+     * yields a sliver on each side of the antimeridian instead of every
+     * longitude in the latitude band. A cap that contains a pole is widened
+     * to the full [-180, 180] range in one box, as is a query whose own
+     * longitude lies outside [-180, 180]. Row coordinates stored outside the
+     * valid lon/lat range are not covered (haversine wraps them, an
+     * axis-aligned box cannot).
+     *
+     * Returns false only when the query point has no coordinates (empty
+     * geometry); dwithin() then accepts nothing, so the caller should treat
+     * the candidate set as empty.
+     */
+    static bool
+    DWithinSearchEnvelope(GEOSContextHandle_t ctx,
+                          const GEOSGeometry* query_point,
+                          double distance_meters,
+                          DWithinSearchBoxes& out) {
+        AssertInfo(query_point != nullptr, "query point is null");
+        double query_lon = 0, query_lat = 0;
+        if (GEOSGeomGetX_r(ctx, query_point, &query_lon) != 1 ||
+            GEOSGeomGetY_r(ctx, query_point, &query_lat) != 1) {
+            return false;
+        }
+        const double d = std::max(distance_meters, 0.0);
+
+        // Rounding margin: the exact predicate compares `distance <= d` in
+        // meters while the box is in degrees; a row sitting exactly on the
+        // boundary must not fall off the box through conversion error.
+        constexpr double kRelativeMargin = 1e-9;
+        constexpr double kAbsoluteMarginDeg = 1e-9;  // ~0.1 mm
+
+        // (1) point rows: spherical cap under the haversine metric.
+        const double angular = d / kEarthRadiusMeters;  // radians
+        const double cap_lat_deg = angular * 180.0 / kPi;
+        double cap_lon_deg;
+        bool full_longitude = false;
+        const double lat_rad = query_lat * kPi / 180.0;
+        // Both pole tests are made with the margin already applied. When d is
+        // the pole distance to the ulp, cap_lat_deg and the sin/cos ratio
+        // each land a few ulp below their exact values; asin has infinite
+        // slope at 1, so a 1-ulp deficit in the ratio already costs ~1e-6 deg
+        // of longitude, far more than a margin added after asin can give
+        // back. Padding the inputs instead keeps the box a superset.
+        if (std::fabs(query_lat) + cap_lat_deg * (1.0 + kRelativeMargin) +
+                    kAbsoluteMarginDeg >=
+                90.0 ||
+            std::cos(lat_rad) <= 0.0) {
+            full_longitude = true;  // cap contains or touches a pole
+            cap_lon_deg = 180.0;
+        } else {
+            const double ratio = std::sin(angular) / std::cos(lat_rad);
+            const double padded =
+                ratio * (1.0 + kRelativeMargin) + kRelativeMargin;
+            if (padded >= 1.0) {
+                full_longitude = true;
+                cap_lon_deg = 180.0;
+            } else {
+                cap_lon_deg = std::asin(padded) * 180.0 / kPi;
+            }
+        }
+
+        // (2) other rows: planar disc in degree space under the scaled GEOS
+        // metric. degrees_to_meters_at_location is monotonic in the degree
+        // distance, so inverting it at `d` gives the acceptance radius.
+        const double meters_per_degree =
+            degrees_to_meters_at_location(1.0, query_lat);
+        const double planar_deg = d / meters_per_degree;
+
+        auto pad = [](double half_deg) {
+            return half_deg * (1.0 + kRelativeMargin) + kAbsoluteMarginDeg;
+        };
+        const double lat_half = pad(std::max(cap_lat_deg, planar_deg));
+        const double lon_half = pad(std::max(cap_lon_deg, planar_deg));
+
+        out = DWithinSearchBoxes{};
+        Envelope& primary = out.boxes[out.count++];
+        primary.min_y = query_lat - lat_half;
+        primary.max_y = query_lat + lat_half;
+        primary.min_x = query_lon - lon_half;
+        primary.max_x = query_lon + lon_half;
+        if (full_longitude || query_lon < -180.0 || query_lon > 180.0) {
+            // The cap contains a pole, or the query longitude itself is out
+            // of range (haversine still wraps it): every longitude may hold
+            // a matching point. Keep any overflow rather than clamping so the
+            // box stays a superset of the planar disc as well.
+            primary.min_x = std::min(primary.min_x, -180.0);
+            primary.max_x = std::max(primary.max_x, 180.0);
+            return true;
+        }
+
+        // The spherical cap's longitude span [query_lon -+ cap_lon_half] is
+        // below 180 deg wide here (asin < 90 deg) and query_lon is in range,
+        // so it overflows at most one edge; map that overflow to the other
+        // edge. Only point rows are measured by haversine, so the wrapped box
+        // takes the cap's own latitude extent, not the planar one.
+        const double cap_lon_half = pad(cap_lon_deg);
+        const double cap_lat_half = pad(cap_lat_deg);
+        double wrapped_min_x = 0, wrapped_max_x = 0;
+        if (query_lon + cap_lon_half > 180.0) {
+            wrapped_min_x = -180.0;
+            wrapped_max_x = query_lon + cap_lon_half - 360.0;
+        } else if (query_lon - cap_lon_half < -180.0) {
+            wrapped_min_x = query_lon - cap_lon_half + 360.0;
+            wrapped_max_x = 180.0;
+        } else {
+            return true;
+        }
+        Envelope& wrapped = out.boxes[out.count++];
+        wrapped.min_x = wrapped_min_x;
+        wrapped.max_x = wrapped_max_x;
+        wrapped.min_y = query_lat - cap_lat_half;
+        wrapped.max_y = query_lat + cap_lat_half;
+        return true;
+    }
+
     bool
     is_valid() const {
         return is_valid(ctx_);
@@ -605,28 +795,36 @@ class Geometry {
     }
 
  private:
+    // Constants shared by the exact dwithin() metrics and the coarse
+    // DWithinSearchEnvelope(). Keep them together: the envelope is only a
+    // superset of the predicate while both are derived from the same numbers.
+    static constexpr double kPi = 3.14159265358979323846;
+    static constexpr double kEarthRadiusMeters = 6371000.0;
+    static constexpr double kMetersPerDegreeLat = 111320.0;
+
     // Convert degrees distance to meters using approximate location
     static double
     degrees_to_meters_at_location(double degrees_distance, double center_lat) {
-        const double metersPerDegreeLat = 111320.0;
-
         // For small distances, approximate using latitude-adjusted conversion
-        double latRad = center_lat * 3.14159265358979323846 / 180.0;
+        double latRad = center_lat * kPi / 180.0;
         double avgMetersPerDegree =
-            metersPerDegreeLat *
+            kMetersPerDegreeLat *
             std::sqrt((1.0 + std::cos(latRad) * std::cos(latRad)) / 2.0);
 
         return degrees_distance * avgMetersPerDegree;
     }
 
-    // Haversine formula to calculate great-circle distance between two points on Earth
+ public:
+    // Haversine formula to calculate great-circle distance between two points
+    // on Earth. This is the exact metric dwithin() applies to point rows; it
+    // is public so tests can place rows exactly on the distance boundary.
     static double
     haversine_distance_meters(double lat1,
                               double lon1,
                               double lat2,
                               double lon2) {
-        const double R = 6371000.0;  // Earth's radius in meters
-        const double PI = 3.14159265358979323846;
+        const double R = kEarthRadiusMeters;
+        const double PI = kPi;
 
         // Convert degrees to radians
         double lat1_rad = lat1 * PI / 180.0;
@@ -646,7 +844,6 @@ class Geometry {
         return R * c;  // Distance in meters
     }
 
- public:
     // Export to WKT string
     std::string
     to_wkt_string() const {

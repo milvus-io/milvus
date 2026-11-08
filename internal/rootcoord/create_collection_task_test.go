@@ -1591,10 +1591,10 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 
 	t.Run("normal with analyzer", func(t *testing.T) {
 		mixcoord := mocks.NewMixCoord(t)
-		mixcoord.EXPECT().ValidateAnalyzer(mock.Anything, mock.Anything).Return(&querypb.ValidateAnalyzerResponse{
-			Status:      merr.Status(nil),
-			ResourceIds: []int64{1, 2, 3},
-		}, nil)
+		setValidateAnalyzer := mockAnalyzerValidation(t)
+		setValidateAnalyzer(func(_ context.Context, infos []*querypb.AnalyzerInfo) ([]int64, error) {
+			return []int64{1, 2, 3}, nil
+		})
 
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().IncFileResourceRefCnt(mock.Anything).Return(nil)
@@ -1647,10 +1647,10 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 
 	t.Run("normal with file resource observer", func(t *testing.T) {
 		mixcoord := mocks.NewMixCoord(t)
-		mixcoord.EXPECT().ValidateAnalyzer(mock.Anything, mock.Anything).Return(&querypb.ValidateAnalyzerResponse{
-			Status:      merr.Status(nil),
-			ResourceIds: []int64{1, 2, 3},
-		}, nil)
+		setValidateAnalyzer := mockAnalyzerValidation(t)
+		setValidateAnalyzer(func(_ context.Context, infos []*querypb.AnalyzerInfo) ([]int64, error) {
+			return []int64{1, 2, 3}, nil
+		})
 
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.EXPECT().IncFileResourceRefCnt(mock.Anything).Return(nil)
@@ -1699,7 +1699,6 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 
 		// with file resource observer
 		fileResourceObserver := NewMockFileResourceObserver(t)
-		fileResourceObserver.EXPECT().CheckAllQnReady().Return(nil)
 
 		task.fileResourceObserver = fileResourceObserver
 		err = task.prepareSchema(context.TODO())
@@ -2120,11 +2119,10 @@ func TestPrepareMilvusTableSnapshotSchemaErrors(t *testing.T) {
 		wantErr error
 	}{
 		{"corrupt metadata", `{`, nil, merr.ErrDataIntegrity},
-		{"unsupported snapshot version", `{"format_version":99999}`, nil, merr.ErrOperationNotSupported},
 		{"metadata read timeout", "", context.DeadlineExceeded, context.DeadlineExceeded},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, parseErr := snapshotio.ParseSnapshotMetadataWithVersionCheck([]byte(tc.data))
+			_, parseErr := snapshotio.ParseSnapshotMetadata([]byte(tc.data))
 			if tc.readErr != nil {
 				parseErr = tc.readErr
 			}
@@ -2392,50 +2390,6 @@ func TestCreateCollectionTask_Prepare_WithProperty(t *testing.T) {
 		err := task.Prepare(context.Background())
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid namespace.mode")
-	})
-
-	t.Run("reject invalid rls enabled property", func(t *testing.T) {
-		meta := mockrootcoord.NewIMetaTable(t)
-		meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).Return(&model.Database{
-			Name: "foo",
-			ID:   1,
-		}, nil).Twice()
-		meta.EXPECT().GetAvailableCollectionCount(mock.Anything, util.DefaultDBID).Return(2, 2, true).Once()
-		meta.EXPECT().GetGeneralCount(mock.Anything).Return(0).Once()
-		defer cleanTestEnv()
-
-		collectionName := funcutil.GenRandomStr()
-		field1 := funcutil.GenRandomStr()
-
-		ticker := newRocksMqTtSynchronizer()
-		core := newTestCore(withValidIDAllocator(), withTtSynchronizer(ticker), withMeta(meta))
-
-		schema := &schemapb.CollectionSchema{
-			Name: collectionName,
-			Fields: []*schemapb.FieldSchema{
-				{Name: field1, DataType: schemapb.DataType_Int64},
-			},
-		}
-
-		task := createCollectionTask{
-			Core: core,
-			Req: &milvuspb.CreateCollectionRequest{
-				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
-				CollectionName: collectionName,
-				ShardsNum:      common.DefaultShardsNum,
-				Properties: []*commonpb.KeyValuePair{
-					{Key: common.RLSEnabledKey, Value: "yes"},
-				},
-			},
-			header: &message.CreateCollectionMessageHeader{},
-			body: &message.CreateCollectionRequest{
-				CollectionSchema: schema,
-			},
-		}
-
-		err := task.Prepare(context.Background())
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "invalid rls.enabled")
 	})
 
 	t.Run("persist valid namespace mode", func(t *testing.T) {
@@ -3339,4 +3293,57 @@ func Test_createCollectionTask_prepareSchema_validatesExternalFunctions(t *testi
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 		assert.ErrorContains(t, err, "does not match expected dim")
 	})
+}
+
+// A stored struct sub-field may carry enable_match or enable_analyzer: earlier
+// versions accepted them. Restoring such a collection from a snapshot
+// (preserveFieldID) must succeed; a new collection is still rejected.
+func Test_createCollectionTask_prepareSchema_structSubFieldTextMatch(t *testing.T) {
+	buildTask := func(key string, preserveFieldID bool) createCollectionTask {
+		collectionName := funcutil.GenRandomStr()
+		schema := &schemapb.CollectionSchema{
+			Name: collectionName,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
+					{Key: common.DimKey, Value: "4"},
+				}},
+			},
+			StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+				FieldID: 102, Name: "s",
+				Fields: []*schemapb.FieldSchema{{
+					FieldID: 103, Name: "s[tag]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.MaxCapacityKey, Value: "4"},
+						{Key: common.MaxLengthKey, Value: "16"},
+						{Key: key, Value: "true"},
+					},
+				}},
+			}},
+		}
+		return createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+			body: &message.CreateCollectionRequest{
+				CollectionName:   collectionName,
+				CollectionSchema: schema,
+			},
+			preserveFieldID: preserveFieldID,
+		}
+	}
+
+	for _, key := range []string{common.EnableMatchKey, common.EnableAnalyzerKey} {
+		t.Run(key+" restored from snapshot", func(t *testing.T) {
+			task := buildTask(key, true)
+			require.NoError(t, task.prepareSchema(context.TODO()))
+		})
+		t.Run(key+" new collection", func(t *testing.T) {
+			task := buildTask(key, false)
+			err := task.prepareSchema(context.TODO())
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.ErrorContains(t, err, key+" is not supported on struct sub-field s[tag]")
+		})
+	}
 }

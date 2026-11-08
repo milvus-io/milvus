@@ -244,6 +244,12 @@ func (c *Client) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMe
 	})
 }
 
+func (c *Client) GetFeatureUsage(ctx context.Context, req *internalpb.GetFeatureUsageRequest, opts ...grpc.CallOption) (*internalpb.GetFeatureUsageResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*internalpb.GetFeatureUsageResponse, error) {
+		return client.GetFeatureUsage(ctx, req)
+	})
+}
+
 func (c *Client) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest, opts ...grpc.CallOption) (*internalpb.ClearReadTaskQueueResponse, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
@@ -252,6 +258,28 @@ func (c *Client) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearRe
 	)
 	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*internalpb.ClearReadTaskQueueResponse, error) {
 		return client.ClearReadTaskQueue(ctx, req)
+	})
+}
+
+func (c *Client) ListLocalRunningRequests(ctx context.Context, req *milvuspb.ListRunningRequestsRequest, opts ...grpc.CallOption) (*milvuspb.ListRunningRequestsResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*milvuspb.ListRunningRequestsResponse, error) {
+		return client.ListLocalRunningRequests(ctx, req)
+	})
+}
+
+func (c *Client) CancelLocalRequests(ctx context.Context, req *milvuspb.CancelRequestsRequest, opts ...grpc.CallOption) (*milvuspb.CancelRequestsResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*milvuspb.CancelRequestsResponse, error) {
+		return client.CancelLocalRequests(ctx, req)
 	})
 }
 

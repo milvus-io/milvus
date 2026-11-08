@@ -27,7 +27,6 @@ import (
 
 	internalhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
@@ -156,11 +155,10 @@ func TestProxyInitPyUDF(t *testing.T) {
 			}
 
 			// Let Init reach its PyUDF hook without etcd, storage I/O, Python,
-			// or changes to process-wide file managers, RLS state, and management verifiers.
+			// or changes to process-wide file managers and management verifiers.
 			defer mockey.Mock((*Proxy).initSession).Return(nil).Build().UnPatch()
 			defer mockey.Mock((*Proxy).initRateCollector).Return(nil).Build().UnPatch()
 			defer mockey.Mock(initMetaCache).Return(NewMockCache(t), nil).Build().UnPatch()
-			defer mockey.Mock(rls.Init).Return(nil).Build().UnPatch()
 			defer mockey.Mock(internalhttp.RegisterManagementVerifier).Return().Build().UnPatch()
 			var events []string
 			defer mockey.Mock(fileresource.InitManager).To(func(manager storage.ChunkManager, mode fileresource.Mode) {

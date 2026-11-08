@@ -28,6 +28,7 @@
 #include "fmt/format.h"
 #include "index/Meta.h"
 #include "index/ParamUtils.h"
+#include "index/scalar/json/JsonPathIndexReader.h"
 #include "index/scalar/sort/SortedIndexFormat.h"
 #include "index/vector/VectorLoadResource.h"
 #include "log/Log.h"
@@ -339,11 +340,10 @@ AdaptIndexType(const IndexTypeAdapterRequest& request) {
                 result.params[INDEX_TYPE] = index_type;
             }
             if (index_type == ASCENDING_SORT) {
-                if (cast_type != JsonCastType::DataType::DOUBLE &&
-                    cast_type != JsonCastType::DataType::VARCHAR) {
+                if (!IsJsonSortCast(cast)) {
                     ThrowInfo(Unsupported,
-                              "JSON sort index requires DOUBLE or VARCHAR "
-                              "cast, got {}",
+                              "JSON sort index requires DOUBLE, VARCHAR or "
+                              "typed ARRAY cast, got {}",
                               cast);
                 }
             } else if (index_type == BITMAP_INDEX_TYPE) {
@@ -376,7 +376,8 @@ AdaptIndexType(const IndexTypeAdapterRequest& request) {
         } else {
             if (request.index_type != HYBRID_INDEX_TYPE &&
                 request.index_type != BITMAP_INDEX_TYPE &&
-                request.index_type != INVERTED_INDEX_TYPE) {
+                request.index_type != INVERTED_INDEX_TYPE &&
+                request.index_type != ASCENDING_SORT) {
                 ThrowInfo(Unsupported,
                           "unsupported ARRAY index type: {}",
                           request.index_type);

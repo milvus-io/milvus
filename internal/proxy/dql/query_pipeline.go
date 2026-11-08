@@ -215,6 +215,15 @@ func (p *QueryPipeline) Execute(ctx context.Context, results []*internalpb.Retri
 		return nil, err
 	}
 
+	// Computed columns have already followed the same row selection and pagination
+	// as stored fields. Publish them as ordinary output columns only after all
+	// schema/FieldID-based pipeline processing and empty-field completion.
+	if computed := output.GetComputedResults(); len(computed) > 0 {
+		fields := make([]*schemapb.FieldData, 0, len(result.FieldsData)+len(computed))
+		fields = append(fields, result.FieldsData...)
+		result.FieldsData = append(fields, computed...)
+	}
+
 	return result, nil
 }
 
@@ -268,7 +277,15 @@ func newReduceByGroupsOperator(
 		results := inputs[0].([]*internalpb.RetrieveResults)
 
 		reducer := agg.NewGroupAggReducer(groupByFieldIDs, aggregates, -1, schema)
-		reducedRes, err := reducer.Reduce(ctx, agg.InternalResult2AggResult(results))
+		partials, err := reducer.DecodeInternalResults(results)
+		if err != nil {
+			return nil, err
+		}
+		merged, err := reducer.Merge(ctx, partials)
+		if err != nil {
+			return nil, err
+		}
+		reducedRes, err := reducer.Finalize(merged)
 		if err != nil {
 			return nil, err
 		}
@@ -315,7 +332,15 @@ func newRawReduceByGroupsOperator(
 		results := inputs[0].([]*internalpb.RetrieveResults)
 
 		reducer := agg.NewGroupAggReducer(groupByFieldIDs, aggregates, -1, schema)
-		reducedRes, err := reducer.Reduce(ctx, agg.InternalResult2AggResult(results))
+		partials, err := reducer.DecodeInternalResults(results)
+		if err != nil {
+			return nil, err
+		}
+		merged, err := reducer.Merge(ctx, partials)
+		if err != nil {
+			return nil, err
+		}
+		reducedRes, err := reducer.Finalize(merged)
 		if err != nil {
 			return nil, err
 		}

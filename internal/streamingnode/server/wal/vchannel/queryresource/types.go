@@ -6,7 +6,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 // QueryRuntimeModule is a concrete vchannel resource module managed by
@@ -20,10 +20,16 @@ type QueryRuntimeModule interface {
 	Close()
 }
 
-// QueryRuntimePrepareModule prepares shared resources before a QueryView is ready.
-// It does not retain a separate aggregate per version.
-type QueryRuntimePrepareModule interface {
-	PrepareDataVersion(context.Context, qviews.DataVersion) error
+// QueryRuntimeWriteSchemaModule reports progress on the ordered WAL write path.
+// Read resources instead prepare each view's exact schema and load identity.
+type QueryRuntimeWriteSchemaModule interface {
+	WriteSchemaVersion() int32
+}
+
+// QueryRuntimeGrowingIndexModule prepares construction metadata for new growing
+// vector fields. View-specific read metadata belongs to readSchemaBinding.
+type QueryRuntimeGrowingIndexModule interface {
+	PrepareGrowingIndexes(context.Context, []*indexpb.IndexInfo) error
 }
 
 // QueryRuntimeModuleBuilder creates an unprepared module owned by QueryRuntime.
@@ -36,9 +42,10 @@ type LoadInfoProvider interface {
 }
 
 type QueryViewLoadInfo struct {
-	PartitionIDs []int64
-	LoadFields   []*messagespb.LoadFieldConfig
-	IndexInfos   []*indexpb.IndexInfo
+	PartitionIDs   []int64
+	LoadFields     []*viewpb.LoadFieldConfig
+	RequiredFields []*viewpb.LoadFieldConfig
+	IndexInfos     []*indexpb.IndexInfo
 }
 
 // QueryRuntimeReleaseModule completes resource transitions before a DataView may Drop.

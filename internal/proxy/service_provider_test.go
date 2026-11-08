@@ -17,6 +17,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/metacache"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -301,6 +303,7 @@ func TestCachedProxyServiceProvider_DescribeCollection_NameOnlyDoesNotMutateRequ
 }
 
 func TestCachedProxyServiceProvider_DescribeCollection_IDOnlyOldRootCoordUsesOneDescribeAndKeepsUnknownDB(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	const collectionID = int64(101)
 	var describeCount atomic.Int32
@@ -404,6 +407,38 @@ func TestProjectDescribeCollectionSchema_CopyOnWriteAndFinalization(t *testing.T
 	assert.NotContains(t, projected.GetExternalSpec(), "SECRET")
 	assert.Equal(t, int32(7), projected.GetVersion())
 	assert.Equal(t, "db", projected.GetDbName())
+}
+
+// The struct sub-field origin marker is internal and never reaches users.
+func TestProjectDescribeCollectionSchemaStripsStructSubFieldOriginMarker(t *testing.T) {
+	added := &schemapb.FieldSchema{
+		FieldID:    common.StartOfUserFieldID + 2,
+		Name:       "profile[added]",
+		DataType:   schemapb.DataType_Array,
+		TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+	}
+	schemautil.MarkAddedStructSubField(added)
+	source := &schemapb.CollectionSchema{
+		Name: "collection",
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: common.StartOfUserFieldID,
+			Name:    "profile",
+			Fields: []*schemapb.FieldSchema{{
+				FieldID:    common.StartOfUserFieldID + 1,
+				Name:       "profile[original]",
+				DataType:   schemapb.DataType_Array,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}},
+			}, added},
+		}},
+	}
+
+	projected, err := ProjectDescribeCollectionSchema(source, true)
+	assert.NoError(t, err)
+	for _, field := range projected.GetStructArrayFields()[0].GetFields() {
+		assert.False(t, schemautil.IsAddedStructSubField(field), field.GetName())
+		assert.Equal(t, []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}}, field.GetTypeParams())
+	}
+	assert.True(t, schemautil.IsAddedStructSubField(added), "the cached schema keeps the marker")
 }
 
 func TestDescribeCollectionCachedAndRemoteProjectionEquivalent(t *testing.T) {
@@ -564,7 +599,13 @@ func TestDescribeCollectionCachedAndRemoteDatabaseNotFoundStatusEquivalent(t *te
 	assert.False(t, cachedResp.GetStatus().GetRetriable())
 }
 
-func TestInterceptorImpl_RecordsOutcomeFromErrorAndResponseStatus(t *testing.T) {
+// TestInterceptorImpl_DoesNotCountRequestAtServiceLayer guards against the
+// proxy counting the same request twice in milvus_proxy_req_count. The
+// boundary counters own that metric -- UnaryRequestStatsInterceptor for gRPC,
+// wrapperPost for REST v2 -- so the service layer must leave both the total
+// and the outcome series untouched while still recording its latency series
+// and preserving the onError/onResponse response mapping.
+func TestInterceptorImpl_DoesNotCountRequestAtServiceLayer(t *testing.T) {
 	paramtable.Init()
 	node := &Proxy{}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
@@ -572,62 +613,56 @@ func TestInterceptorImpl_RecordsOutcomeFromErrorAndResponseStatus(t *testing.T) 
 	nodeID := paramtable.GetStringNodeID()
 
 	tests := []struct {
-		name         string
-		onCall       func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
-		expectStatus string
-		expectCause  string
+		name       string
+		onCall     func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
+		onResponse func(resp *milvuspb.DescribeCollectionResponse) error
 	}{
 		{
-			name: "response input error",
-			onCall: func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-				return &milvuspb.DescribeCollectionResponse{Status: merr.Status(merr.WrapErrParameterInvalidMsg("bad request"))}, nil
-			},
-			expectStatus: metrics.FailLabel,
-			expectCause:  metrics.CauseUser,
-		},
-		{
-			name: "go system error",
-			onCall: func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-				return nil, merr.WrapErrServiceInternalMsg("internal failure")
-			},
-			expectStatus: metrics.FailLabel,
-			expectCause:  metrics.CauseSystem,
-		},
-		{
-			name: "provider abandon",
-			onCall: func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-				return nil, withServiceProviderMetric(
-					merr.WrapErrServiceInternalMsg("enqueue failed"), metrics.AbandonLabel, metrics.CauseNA)
-			},
-			expectStatus: metrics.AbandonLabel,
-			expectCause:  metrics.CauseNA,
-		},
-		{
-			name: "success",
+			name: "success response",
 			onCall: func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 				return &milvuspb.DescribeCollectionResponse{Status: merr.Success()}, nil
 			},
-			expectStatus: metrics.SuccessLabel,
-			expectCause:  metrics.CauseNA,
+		},
+		{
+			name: "non-ok status response",
+			onCall: func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+				return &milvuspb.DescribeCollectionResponse{Status: merr.Status(merr.WrapErrParameterInvalidMsg("bad request"))}, nil
+			},
+		},
+		{
+			name: "go error",
+			onCall: func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+				return nil, merr.WrapErrServiceInternalMsg("internal failure")
+			},
+		},
+		{
+			name: "onResponse failure",
+			onCall: func(context.Context, *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+				return &milvuspb.DescribeCollectionResponse{Status: merr.Success()}, nil
+			},
+			onResponse: func(resp *milvuspb.DescribeCollectionResponse) error {
+				return merr.WrapErrServiceInternalMsg("finalize failed")
+			},
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			method := "DescribeCollectionMetric_" + tc.name
-			outcomeCounter := metrics.ProxyFunctionCall.WithLabelValues(
-				nodeID, method, tc.expectStatus, tc.expectCause, request.GetDbName(), request.GetCollectionName())
 			totalCounter := metrics.ProxyFunctionCall.WithLabelValues(
 				nodeID, method, metrics.TotalLabel, metrics.CauseNA, request.GetDbName(), request.GetCollectionName())
+			outcomeCounter := metrics.ProxyFunctionCall.WithLabelValues(
+				nodeID, method, metrics.FailLabel, metrics.CauseSystem, request.GetDbName(), request.GetCollectionName())
 			latency := metrics.ProxyReqLatency.WithLabelValues(nodeID, method)
 			beforeOutcome := testutil.ToFloat64(outcomeCounter)
 			beforeTotal := testutil.ToFloat64(totalCounter)
 			beforeLatency := proxyHistogramSampleCount(t, latency)
 
 			interceptor := &InterceptorImpl[*milvuspb.DescribeCollectionRequest, *milvuspb.DescribeCollectionResponse]{
-				proxy:  node,
-				method: method,
-				onCall: tc.onCall,
+				proxy:      node,
+				method:     method,
+				onCall:     tc.onCall,
+				onResponse: tc.onResponse,
 				onError: func(err error) (*milvuspb.DescribeCollectionResponse, error) {
 					return &milvuspb.DescribeCollectionResponse{Status: merr.Status(err)}, nil
 				},
@@ -635,8 +670,8 @@ func TestInterceptorImpl_RecordsOutcomeFromErrorAndResponseStatus(t *testing.T) 
 			resp, err := interceptor.Call(context.Background(), request)
 			assert.NoError(t, err)
 			assert.NotNil(t, resp)
-			assert.Equal(t, beforeOutcome+1, testutil.ToFloat64(outcomeCounter))
-			assert.Equal(t, beforeTotal+1, testutil.ToFloat64(totalCounter))
+			assert.Equal(t, beforeOutcome, testutil.ToFloat64(outcomeCounter))
+			assert.Equal(t, beforeTotal, testutil.ToFloat64(totalCounter))
 			assert.Equal(t, beforeLatency+1, proxyHistogramSampleCount(t, latency))
 		})
 	}

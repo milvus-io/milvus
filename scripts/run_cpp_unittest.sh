@@ -29,6 +29,8 @@ SCRIPTS_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 MILVUS_CORE_DIR="${SCRIPTS_DIR}/../internal/core"
 CORE_INSTALL_PREFIX="${MILVUS_CORE_DIR}/output"
 UNITTEST_DIRS=("${CORE_INSTALL_PREFIX}/unittest")
+source "${SCRIPTS_DIR}/sanitizer_env.sh"
+milvus_sanitizer_env "${CORE_INSTALL_PREFIX}" || exit 1
 
 # currently core will install target lib to "internal/core/output/lib"
 if [ -d "${CORE_INSTALL_PREFIX}/lib" ]; then
@@ -60,6 +62,14 @@ for UNITTEST_DIR in "${UNITTEST_DIRS[@]}"; do
 	  ${UNITTEST_DIR}/all_tests --gtest_filter=$filter_value
 	  exit 0
     fi
+  fi
+
+  if [[ "$(uname -s)" == "Linux" ]]; then
+    echo "Running AWS runtime link checker self-test"
+    (
+      cd "${MILVUS_CMAKE_BUILD_DIR:-${SCRIPTS_DIR}/../cmake_build}/unittest" &&
+      ctest -R '^aws_runtime_link_check$' --output-on-failure --no-tests=error
+    ) || exit 1
   fi
 
   echo "Running all unittest ..."

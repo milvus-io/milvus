@@ -19,7 +19,6 @@ package datanode
 import (
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
-	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 )
@@ -31,7 +30,6 @@ import (
 // is safe to call once at startup.
 func initPools() {
 	compactor.GetExecPool()
-	index.GetVecIndexBuildPool()
 	importv2.GetExecPool()
 	io.GetOrCreateIOPool()
 	io.GetOrCreateStatsPool()
@@ -52,7 +50,6 @@ func collectPoolStats() []metrics.PoolStats {
 
 	refs := []poolRef{
 		{"CompactionExecPool", compactor.GetExecPool()},
-		{"IndexBuildPool", index.GetVecIndexBuildPool()},
 		{"ImportExecPool", importv2.GetExecPool()},
 		{"IOPool", io.GetOrCreateIOPool()},
 		{"StatsPool", io.GetOrCreateStatsPool()},

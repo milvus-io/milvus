@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 )
 
@@ -121,4 +122,22 @@ func newQueryNodeClient(conn *grpc.ClientConn) types.QueryNodeClient {
 
 func (c *queryNodeClient) Close() error {
 	return c.conn.Close()
+}
+
+// The test harness still exposes QueryNode RPCs to legacy integration cases,
+// but an SN's lifecycle is owned by its independent state service.
+type streamingNodeClient struct {
+	*queryNodeClient
+	state streamingpb.StreamingNodeStateServiceClient
+}
+
+func newStreamingNodeClient(conn *grpc.ClientConn) types.QueryNodeClient {
+	return &streamingNodeClient{
+		queryNodeClient: &queryNodeClient{conn: conn, QueryNodeClient: querypb.NewQueryNodeClient(conn)},
+		state:           streamingpb.NewStreamingNodeStateServiceClient(conn),
+	}
+}
+
+func (c *streamingNodeClient) GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error) {
+	return c.state.GetComponentStates(ctx, in, opts...)
 }

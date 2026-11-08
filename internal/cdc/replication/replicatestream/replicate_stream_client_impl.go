@@ -36,7 +36,9 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 var ErrReplicationRemoved = errors.New("replication removed")
@@ -284,21 +286,16 @@ func (r *replicateStreamClient) sendMessage(msg message.ImmutableMessage) (err e
 }
 
 func (r *replicateStreamClient) sendTxnMessage(txnMsg message.ImmutableTxnMessage) (err error) {
-	// send txn begin message
 	if err = r.sendMessage(txnMsg.Begin()); err != nil {
 		return err
 	}
-
-	// send txn body messages
-	if err = txnMsg.RangeOver(func(msg message.ImmutableMessage) error {
-		return r.sendMessage(msg)
-	}); err != nil {
+	// Preserve the assembled source order on every replay.
+	if err = txnMsg.RangeOver(r.sendMessage); err != nil {
 		return err
 	}
-
-	// send txn commit message
-	err = r.sendMessage(txnMsg.Commit())
-	return
+	// Preserve the source body count, including zero. Historical transactions
+	// intentionally skip count validation; CDC does not backfill it.
+	return r.sendMessage(txnMsg.Commit())
 }
 
 func (r *replicateStreamClient) recvLoop(ctx context.Context) (err error) {
@@ -364,7 +361,16 @@ func (r *replicateStreamClient) handleAlterReplicateConfigMessage(msg message.Im
 		// Cannot find the target channel, it means that the `current->target` topology edge is removed,
 		// so we need to remove the replicate pchannel and stop replicate.
 		etcdCli := resource.Resource().ETCD()
-		ok, err := meta.RemoveReplicatePChannelWithRevision(r.ctx, etcdCli, r.channel.Key, r.channel.ModRevision)
+		// Retry transient etcd errors (e.g. leader changed during an etcd restart).
+		// The delete is guarded by the channel's revision, so retrying after an
+		// attempt that was applied despite the error just finds the revision
+		// changed; the replication is removed either way.
+		var ok bool
+		err := retry.Do(r.ctx, func() error {
+			var err error
+			ok, err = meta.RemoveReplicatePChannelWithRevision(r.ctx, etcdCli, r.channel.Key, r.channel.ModRevision)
+			return err
+		}, retry.Attempts(0), retry.RetryErr(etcd.IsRetriableEtcdErr))
 		if err != nil {
 			logger.Warn(r.ctx, "failed to remove replicate pchannel", mlog.Err(err))
 			// When performing delete operation on etcd, the context may be canceled by the delete event
@@ -372,7 +378,7 @@ func (r *replicateStreamClient) handleAlterReplicateConfigMessage(msg message.Im
 			// Since the delete event is generated after the delete operation is committed in etcd,
 			// the delete is guaranteed to have succeeded on the server side.
 			// So we can ignore the context canceled error here.
-			if !errors.Is(err, context.Canceled) {
+			if !errors.Is(err, context.Canceled) && r.ctx.Err() == nil {
 				panic(fmt.Sprintf("failed to remove replicate pchannel: %v", err))
 			}
 		}

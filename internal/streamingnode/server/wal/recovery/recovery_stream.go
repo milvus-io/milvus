@@ -33,6 +33,7 @@ func (r *recoveryStorageImpl) runBoundedRecovery(
 	))
 
 	r.Logger().Info(context.TODO(), "recover from wal stream...")
+	recoveryTimeTick := r.checkpoint.TimeTick
 	rs := recoveryStreamBuilder.Build(BuildRecoveryStreamParam{
 		StartCheckpoint: r.checkpoint.MessageID,
 		RecoveryBarrier: lastTimeTickMessage,
@@ -55,7 +56,12 @@ L:
 				}
 				return nil, merr.WrapErrServiceUnavailableMsg("recovery stream ended before the startup barrier")
 			}
-			r.observeMessage(ctx, msg)
+			// LastConfirmedMessageID can replay an already completed prefix.
+			// Filter after scanner ordering and transaction assembly so older txn
+			// fragments can still contribute to a commit beyond the checkpoint.
+			if msg.TimeTick() > recoveryTimeTick {
+				r.observeMessage(ctx, msg)
+			}
 			if msg.MessageType() == message.MessageTypeRecoveryBarrier &&
 				msg.TimeTick() == lastTimeTickMessage.TimeTick() && msg.MessageID().EQ(lastTimeTickMessage.MessageID()) {
 				break L
@@ -109,7 +115,8 @@ func (r *recoveryStorageImpl) buildInitialRecoverySnapshot() *RecoverySnapshot {
 // summary applies its retention policy to the chunk set -- and the window
 // applies its own byte cap when it loads them.
 //
-// A read failure fails the WAL open rather than yielding a partial window. A
+// Transient object reads retry in the shared load until recovery or cancellation.
+// A permanent read failure or cancellation fails WAL open, never yielding a partial window. A
 // window missing entries answers a retry of a write that DID land by appending
 // it again, which is a way to duplicate writes on a channel whose clients were
 // told they had idempotency.

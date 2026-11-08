@@ -150,8 +150,6 @@ const int64_t DEFAULT_SHORT_COLUMN_GROUP_ID = 0;
 
 // VectorArray related, used for fetch metadata from Arrow schema
 const std::string ELEMENT_TYPE_KEY_FOR_ARROW = "elementType";
-// EPSILON value for comparing float numbers
-const float EPSILON = 0.0000000119;
 const std::string NAMESPACE_FIELD_NAME = "$namespace_id";
 const std::string MMAP_ENABLED_KEY = "mmap.enabled";
 constexpr const char* LOCAL_FORMAT_KEY = "local_format";
@@ -179,3 +177,6 @@ constexpr int32_t kLastVersionWithoutHybridIndexConfig = 2;
 // an older reader's ScalarIndexSort predates nested-index support and cannot
 // load a nested STL_SORT physical index.
 constexpr int32_t kNestedHybridStlSortMinVersion = 4;
+// Ordinary ARRAY HYBRID indexes select STL_SORT at the existing version 5.
+// Earlier build targets retain their previous INVERTED selection.
+constexpr int32_t kArrayHybridStlSortMinVersion = 5;

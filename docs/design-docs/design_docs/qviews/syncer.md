@@ -73,6 +73,16 @@ Provides service discovery and gRPC stream creation for all work node types. Int
 - **OpenSyncStream(ctx, node)**: Opens a `SyncQueryView` bidirectional stream.
 - **Close()**: Releases resources.
 
+### RPC error boundary
+
+Both SN and QN register the shared service-path server interceptor; sync clients
+register its matching client interceptor. SyncQueryView uses ViewError even when
+its SN handler fails while locating the local WAL. Missing ownership or a stale
+term maps to NotPrimary and triggers assignment refresh; manager shutdown maps
+to OnShutdown. Handlers return domain errors, and the server interceptor owns
+the wire conversion. Native stream transport errors and graceful close responses
+keep their existing behavior.
+
 ## 3. Per-Node Pending Views
 
 Each `resumableSyncer` owns a `pendingSyncQueryViews` instance that tracks views dispatched to its node.

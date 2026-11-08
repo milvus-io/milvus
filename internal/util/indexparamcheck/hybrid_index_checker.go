@@ -21,7 +21,7 @@ func (c *HYBRIDChecker) CheckTrain(dataType schemapb.DataType, elementType schem
 		if !exist {
 			return merr.WrapErrParameterMissing(common.JSONCastTypeKey, "json index must specify cast type")
 		}
-		if !lo.Contains(validHYBRIDJSONCastTypes, castType) {
+		if !lo.Contains(validHYBRIDJSONCastTypes, castType) && !IsJSONArrayCastType(castType) {
 			return merr.WrapErrParameterInvalidMsg("json_cast_type %v is not supported for HYBRID index", castType)
 		}
 		if err := checkJSONCastFunction(castType, params); err != nil {

@@ -65,9 +65,11 @@ func toWriterRecord(r Record, schema *schemapb.CollectionSchema, arrowSchema *ar
 			return nil, nil, merr.WrapErrServiceInternalMsg("missing or short writer column for field %s", field.GetName())
 		}
 		if !arrow.TypeEqual(column.DataType(), expected) {
-			// Absent TEXT fields are filled with binary nulls, including for
-			// decoded UTF8 writers. Nulls have no LOB/string payload to convert;
+			// Absent TEXT fields may use a different null representation than
+			// the writer expects. Nulls have no LOB/string payload to convert;
 			// normalize them to the writer's fixed schema on every batch.
+			// Non-null TEXT must already use the representation agreed by the
+			// task's reader/writer schemas; this is not a LOB decoding boundary.
 			sourceType, targetType := column.DataType().ID(), expected.ID()
 			if field.GetDataType() == schemapb.DataType_Text && column.NullN() == column.Len() &&
 				(sourceType == arrow.STRING || sourceType == arrow.BINARY) &&

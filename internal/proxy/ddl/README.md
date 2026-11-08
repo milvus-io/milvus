@@ -14,8 +14,7 @@ results are read through `Result()` getters. The only root-owned seams are:
 
 - `CheckVecIndexWithDataTypeExist` (cgo) is injected as a field on
   `CreateIndexTask` / `AlterCollectionSchemaTask`.
-- Content-driven privilege checks (`CheckManageRLSPrivilege`,
-  `CheckClusterPrivilege`) and RLS enforcement route through the host node's
+- Content-driven privilege checks (`CheckClusterPrivilege`) route through the host node's
   `taskmodel.TaskNode`, keeping the authorization machinery in root.
 
 ## Overview

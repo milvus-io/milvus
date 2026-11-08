@@ -17,6 +17,8 @@ import (
 
 var _ balancer.Picker = &serverIDPicker{}
 
+var ErrSubConnNotReady = status.New(codes.Unavailable, "subConn not ready").Err()
+
 var ErrSubConnNotExist = status.New(codes.Unavailable, "subConn not exist").Err()
 
 type subConnInfo struct {
@@ -27,6 +29,7 @@ type subConnInfo struct {
 
 // serverIDPicker is a force address picker.
 type serverIDPicker struct {
+	fallback           balancer.Picker
 	next               *atomic.Int64         // index of the next subConn to pick.
 	readySubConsList   []subConnInfo         // ready resolver ordered list.
 	readySubConnsMap   map[int64]subConnInfo // map the server id to ready subConnInfo.
@@ -53,6 +56,10 @@ type serverIDPicker struct {
 //     ready RPCs will be terminated with this error's Error() string and
 //     status code Unavailable.
 func (p *serverIDPicker) Pick(pickInfo balancer.PickInfo) (balancer.PickResult, error) {
+	contextutil.SetPickedServerID(pickInfo.Ctx, contextutil.UnspecifiedServerID)
+	if p.fallback != nil && !contextutil.IsFailFastPick(pickInfo.Ctx) {
+		return p.fallback.Pick(pickInfo)
+	}
 	var conn *subConnInfo
 	var err error
 
@@ -69,6 +76,7 @@ func (p *serverIDPicker) Pick(pickInfo balancer.PickInfo) (balancer.PickResult, 
 		}
 	}
 
+	contextutil.SetPickedServerID(pickInfo.Ctx, conn.serverID)
 	return balancer.PickResult{
 		SubConn: conn.subConn,
 		Done:    nil, // TODO: add a done function to handle the rpc finished.
@@ -92,7 +100,7 @@ func (p *serverIDPicker) roundRobin() (*subConnInfo, error) {
 }
 
 // useGivenAddr returns whether given subConn.
-func (p *serverIDPicker) useGivenAddr(_ balancer.PickInfo, serverID int64) (*subConnInfo, error) {
+func (p *serverIDPicker) useGivenAddr(info balancer.PickInfo, serverID int64) (*subConnInfo, error) {
 	sc, ok := p.readySubConnsMap[serverID]
 	if ok {
 		return &sc, nil
@@ -100,6 +108,9 @@ func (p *serverIDPicker) useGivenAddr(_ balancer.PickInfo, serverID int64) (*sub
 
 	// subConn is not ready, return ErrNoSubConnAvailable to wait the connection ready.
 	if _, ok := p.unreadySubConnsMap[serverID]; ok {
+		if contextutil.IsFailFastPick(info.Ctx) {
+			return nil, ErrSubConnNotReady
+		}
 		return nil, balancer.ErrNoSubConnAvailable
 	}
 

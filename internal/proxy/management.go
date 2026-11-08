@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // this file contains proxy management restful API handler
@@ -64,6 +65,16 @@ func RegisterMgrRoute(proxy *Proxy) {
 			{management.RouteClearReadTaskQueue, proxy.ClearReadTaskQueueManagement},
 			{management.RouteQueryCoordBalanceStatus, proxy.CheckQueryCoordBalanceStatus},
 			{management.RouteBackupEZ, proxy.BackupEZ},
+		}
+		// Off by default: the report is opt-in, so the route is not even
+		// registered unless the operator turns it on. The handler additionally
+		// verifies root Basic Auth on its own, independent of
+		// common.security.adminAuthEnabled.
+		if paramtable.Get().CommonCfg.FeatureUsageEnabled.GetAsBool() {
+			routes = append(routes, struct {
+				path    string
+				handler http.HandlerFunc
+			}{management.RouteFeatureUsage, proxy.FeatureUsage})
 		}
 		for _, r := range routes {
 			management.Register(&management.Handler{
@@ -402,26 +413,11 @@ func (node *Proxy) CheckQueryCoordBalanceStatus(w http.ResponseWriter, req *http
 	fmt.Fprintf(w, `{"msg": "OK", "status": "%v"}`, balanceStatus)
 }
 
+// Deprecated: retained as a successful no-op for legacy management clients.
 func (node *Proxy) ClearReadTaskQueueManagement(w http.ResponseWriter, req *http.Request) {
-	resp, err := node.mixCoord.ClearReadTaskQueue(req.Context(), &internalpb.ClearReadTaskQueueRequest{
-		Base:     commonpbutil.NewMsgBase(),
-		TaskType: req.URL.Query().Get("task_type"),
-		Reason:   req.URL.Query().Get("reason"),
-	})
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to clear read task queue, %s"}`, err.Error())
-		return
-	}
-	if !merr.Ok(resp.GetStatus()) {
-		w.WriteHeader(http.StatusInternalServerError)
-		bs, _ := json.Marshal(resp)
-		w.Write(bs)
-		return
-	}
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	bs, _ := json.Marshal(resp)
-	w.Write(bs)
+	w.Write([]byte(`{"msg": "deprecated: ClearReadTaskQueue is unsupported; no queues were cleared"}`))
 }
 
 func (node *Proxy) SuspendQueryNode(w http.ResponseWriter, req *http.Request) {
@@ -536,18 +532,7 @@ func (node *Proxy) TransferSegment(w http.ResponseWriter, req *http.Request) {
 		request.SegmentID = value
 	}
 
-	copyMode := req.FormValue("copy_mode") //nolint:gosec // internal admin endpoint
-	if len(copyMode) == 0 {
-		request.CopyMode = true
-	} else {
-		value, err := strconv.ParseBool(copyMode)
-		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, `{"msg": "failed to transfer segment, %s"}`, err.Error()) //nolint:gosec // internal admin endpoint
-			return
-		}
-		request.CopyMode = value
-	}
+	// Legacy copy_mode parameters are ignored; all transfers are moves.
 
 	resp, err := node.mixCoord.TransferSegment(req.Context(), request)
 	if err != nil {
@@ -565,114 +550,19 @@ func (node *Proxy) TransferSegment(w http.ResponseWriter, req *http.Request) {
 	w.Write([]byte(`{"msg": "OK"}`))
 }
 
+// Deprecated: channel migration is managed by the Streaming REST API.
+// Keep the legacy endpoint as a successful no-op for existing automation.
 func (node *Proxy) TransferChannel(w http.ResponseWriter, req *http.Request) {
-	err := req.ParseForm() //nolint:gosec // internal admin endpoint
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": "failed to transfer channel, %s"}`, err.Error()) //nolint:gosec // internal admin endpoint
-		return
-	}
-
-	request := &querypb.TransferChannelRequest{
-		Base: commonpbutil.NewMsgBase(),
-	}
-
-	source, err := strconv.ParseInt(req.FormValue("source_node_id"), 10, 64) //nolint:gosec // internal admin endpoint
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": failed to transfer channel", %s"}`, err.Error())
-		return
-	}
-	request.SourceNodeID = source
-
-	target := req.FormValue("target_node_id") //nolint:gosec // internal admin endpoint
-	if len(target) == 0 {
-		request.ToAllNodes = true
-	} else {
-		value, err := strconv.ParseInt(target, 10, 64)
-		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, `{"msg": "failed to transfer channel, %s"}`, err.Error())
-			return
-		}
-		request.TargetNodeID = value
-	}
-
-	channel := req.FormValue("channel_name") //nolint:gosec // internal admin endpoint
-	if len(channel) == 0 {
-		request.TransferAll = true
-	} else {
-		request.ChannelName = channel
-	}
-
-	copyMode := req.FormValue("copy_mode") //nolint:gosec // internal admin endpoint
-	if len(copyMode) == 0 {
-		request.CopyMode = false
-	} else {
-		value, err := strconv.ParseBool(copyMode)
-		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, `{"msg": "failed to transfer channel, %s"}`, err.Error()) //nolint:gosec // internal admin endpoint
-			return
-		}
-		request.CopyMode = value
-	}
-
-	resp, err := node.mixCoord.TransferChannel(req.Context(), request)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to transfer channel, %s"}`, err.Error())
-		return
-	}
-
-	if !merr.Ok(resp) {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to transfer channel, %s"}`, resp.GetReason())
-		return
-	}
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"msg": "OK"}`))
+	w.Write([]byte(`{"msg": "deprecated: no migration performed; use /management/streaming/transfer on Coordinator"}`))
 }
 
+// Deprecated: retained as a successful no-op for legacy management clients.
 func (node *Proxy) CheckQueryNodeDistribution(w http.ResponseWriter, req *http.Request) {
-	err := req.ParseForm() //nolint:gosec // internal admin endpoint
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": "failed to check whether query node has same distribution, %s"}`, err.Error()) //nolint:gosec // internal admin endpoint
-		return
-	}
-
-	source, err := strconv.ParseInt(req.FormValue("source_node_id"), 10, 64) //nolint:gosec // internal admin endpoint
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": failed to check whether query node has same distribution", %s"}`, err.Error())
-		return
-	}
-
-	target, err := strconv.ParseInt(req.FormValue("target_node_id"), 10, 64) //nolint:gosec // internal admin endpoint
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": "failed to check whether query node has same distribution, %s"}`, err.Error())
-		return
-	}
-	resp, err := node.mixCoord.CheckQueryNodeDistribution(req.Context(), &querypb.CheckQueryNodeDistributionRequest{
-		Base:         commonpbutil.NewMsgBase(),
-		SourceNodeID: source,
-		TargetNodeID: target,
-	})
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to check whether query node has same distribution, %s"}`, err.Error())
-		return
-	}
-
-	if !merr.Ok(resp) {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to check whether query node has same distribution, %s"}`, resp.GetReason())
-		return
-	}
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"msg": "OK"}`))
+	w.Write([]byte(`{"msg": "deprecated: no distribution check performed; use migration APIs to wait for completion"}`))
 }
 
 func (node *Proxy) BackupEZ(w http.ResponseWriter, req *http.Request) {
@@ -701,4 +591,55 @@ func (node *Proxy) BackupEZ(w http.ResponseWriter, req *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, `{"msg": "OK", "ezk": "%s"}`, resp.Ezk)
+}
+
+// FeatureUsage serves GET /management/feature_usage: the merged feature usage
+// report collected by MixCoord. It requires HTTP Basic Auth as the root user
+// even when common.security.adminAuthEnabled is off, verified by CheckRootAuth
+// so it shares the root credential cache of the other management routes.
+func (node *Proxy) FeatureUsage(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		fmt.Fprint(w, `{"msg": "method not allowed"}`)
+		return
+	}
+	// With adminAuthEnabled the route wrapper has already verified root; do
+	// not run a second bcrypt comparison.
+	if _, ok := management.AuthenticatedAdminFromContext(req.Context()); !ok {
+		if err := management.CheckRootAuth(req.Context(), req, management.RouteFeatureUsage); err != nil {
+			status := management.HTTPStatusFromPrivilegeError(err)
+			if status == http.StatusUnauthorized {
+				management.WriteBasicAuthChallenge(w)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			msg, _ := json.Marshal(err.Error())
+			fmt.Fprintf(w, `{"msg": %s}`, msg)
+			return
+		}
+	}
+
+	resp, err := node.mixCoord.GetFeatureUsage(req.Context(), &internalpb.GetFeatureUsageRequest{
+		Base: commonpbutil.NewMsgBase(),
+	})
+	if err == nil {
+		err = merr.Error(resp.GetStatus())
+	}
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(w, `{"msg": "failed to get feature usage, %s"}`, err.Error())
+		return
+	}
+
+	// skip marshal status to output
+	resp.Status = nil
+	bytes, err := json.Marshal(resp)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(w, `{"msg": "failed to marshal feature usage, %s"}`, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(bytes)
 }

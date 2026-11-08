@@ -28,6 +28,7 @@
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/FileManager.h"
 #include "storage/artifact/ArtifactStats.h"
+#include "storage/artifact/FileSource.h"
 #include "tantivy-wrapper.h"
 
 namespace milvus::index {
@@ -64,10 +65,12 @@ class BsonInvertedIndex {
     void
     BuildIndex();
 
-    void
-    LoadIndex(const std::vector<std::string>& index_files,
-              milvus::proto::common::LoadPriority priority,
-              bool load_in_mmap);
+    // Borrow the source/context until loading drains; mmap keeps the manager's
+    // private directory alive with this index, while RAM loading removes it.
+    folly::coro::Task<void>
+    LoadIndex(storage::FileSource& source,
+              const storage::LoadOptions& options,
+              bool use_async);
 
     storage::ArtifactStats
     UploadIndex();

@@ -18,6 +18,9 @@
 #include "storage/LocalFileIOPool.h"
 #include "index/vector/VectorDiskLoader.h"
 #include "index/LegacyIndexLoad.h"
+#include "index/SingleCellIndexStorageTranslator.h"
+#include "cachinglayer/Manager.h"
+#include "knowhere/index/index_factory.h"
 #include "index/vector/VectorLoadUtils.h"
 
 #include <cstdint>
@@ -183,8 +186,8 @@ PlanEntries(storage::FileSource& source, const RuntimeParams& params) {
 }
 
 // Disk artifacts store the count header and the bitmap in one entry. The
-// decoded bytes stay owned by the caller: knowhere's IdMapData only views the
-// bitmap until AddFromData consumes it.
+// decoded bytes stay owned by the caller until Deserialize or ImportValidity
+// consumes the bitmap.
 ValidDataView
 DecodeValidityBytes(const std::vector<uint8_t>& bytes) {
     if (bytes.size() < sizeof(uint64_t)) {
@@ -202,17 +205,14 @@ DecodeValidityBytes(const std::vector<uint8_t>& bytes) {
     return {true, count, bytes.data() + sizeof(uint64_t)};
 }
 
-// Publish the persisted validity into the engine's knowhere IdMap (#50524).
-// Must run before Deserialize, which is what derives the dense id arrays.
-folly::coro::Task<RestoredIdMap>
-RestoreValidity(bool use_async,
-                const storage::LoadOptions& opts,
-                storage::FileSource& source,
-                const EntryPlan& plan,
-                const RuntimeParams& params,
-                KnowhereEngine& engine,
-                const std::string& local_prefix,
-                std::vector<uint8_t>& owned_bytes) {
+// Read the sidecar without publishing it before the engine load.
+folly::coro::Task<knowhere::LoadOptions>
+ReadValidity(bool use_async,
+             storage::FileSource& source,
+             const EntryPlan& plan,
+             const RuntimeParams& params,
+             const std::string& local_prefix,
+             std::vector<uint8_t>& owned_bytes) {
     if (!plan.has_validity) {
         co_return {};
     }
@@ -225,23 +225,17 @@ RestoreValidity(bool use_async,
         CountValidDataBitmap(valid_data.count, valid_data.bitmap) == 0) {
         mmap_flags = {};
     }
-    const auto priority =
-        opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
-            ? proto::common::LoadPriority::LOW
-            : proto::common::LoadPriority::HIGH;
-    RestoredIdMap result;
-    auto local_io = [&] {
-        result = RestoreIdMapFromValidData(engine.native_index.GetIdMap(),
-                                           valid_data,
-                                           mmap_flags,
-                                           local_prefix);
-    };
-    if (use_async && mmap_flags.Any()) {
-        co_await storage::RunLocalFileIOAsync(local_io, priority);
-    } else {
-        local_io();
-    }
-    co_return result;
+    // An element-level VECTOR_ARRAY build persists validity only for an
+    // element-nullable field, over its logical elements, and the IdMap uses
+    // it as is. Other VECTOR_ARRAY validity describes rows: under an
+    // embedding-list metric knowhere keeps it, and on an element-level index
+    // built with embedding offsets before, knowhere replaces it with element
+    // validity over the vector count (#54899).
+    co_return MakeNullableLoadInput(
+        valid_data,
+        mmap_flags,
+        local_prefix,
+        params.elem_type != DataType::NONE && !params.element_nullable);
 }
 
 using detail::EmptyEmbeddingListState;
@@ -338,13 +332,13 @@ MakeEngine(const RuntimeParams& params,
 
 // Select streaming or materialized engine input, restore sidecars and
 // deserialize one reader.
-folly::coro::Task<std::unique_ptr<IIndexReaderBase>>
-OpenIndex(bool use_async,
-          storage::FileSource& source,
-          const RuntimeParams& params,
-          const DiskOpenOptions& open_options,
-          const EntryPlan& plan,
-          const storage::LoadOptions& opts) {
+folly::coro::Task<std::unique_ptr<KnowhereEngine>>
+OpenEngine(bool use_async,
+           storage::FileSource& source,
+           const RuntimeParams& params,
+           const DiskOpenOptions& open_options,
+           const EntryPlan& plan,
+           const storage::LoadOptions& opts) {
     const auto priority =
         opts.op_ctx && opts.op_ctx->runtime_load_priority.value_or(0) != 0
             ? proto::common::LoadPriority::LOW
@@ -384,21 +378,23 @@ OpenIndex(bool use_async,
     }
     auto& engine = *owned_engine;
     const auto prefix = selected_handle->LocalPrefix();
-    // Keep the decoded payload alive until AddFromData has copied it.
+    // Keep the decoded payload alive until Knowhere consumes the load input.
     std::vector<uint8_t> validity_bytes;
-    const auto restored_id_map = co_await RestoreValidity(
-        use_async, opts, source, plan, params, engine, prefix, validity_bytes);
+    const auto input = co_await ReadValidity(
+        use_async, source, plan, params, prefix, validity_bytes);
 
     if (plan.state == ArtifactState::EmptyEmbeddingList) {
         auto empty = co_await DecodeEmptyEmbeddingList(use_async, source);
         engine.SetDim(empty.dim);
         engine.SetEmptyEmbListOffsets(std::move(empty.offsets));
-        if (restored_id_map.has_valid_data) {
+        if (input.validity.has_value()) {
             {
                 auto local_io = [&] {
-                    FinalizeRestoredIdMap(
-                        engine.native_index.Node(),
-                        "empty embedding-list disk vector load");
+                    const auto status = engine.native_index.ImportValidity(
+                        *input.validity, input.mmap);
+                    if (status != knowhere::Status::success) {
+                        ThrowDeserializeError(status);
+                    }
                 };
                 if (use_async && params.id_map_mmap.Any()) {
                     co_await storage::RunLocalFileIOAsync(local_io, priority);
@@ -418,11 +414,14 @@ OpenIndex(bool use_async,
                       "dim");
         }
         engine.SetDim(*params.runtime_dim);
-        if (restored_id_map.has_valid_data) {
+        if (input.validity.has_value()) {
             {
                 auto local_io = [&] {
-                    FinalizeRestoredIdMap(engine.native_index.Node(),
-                                          "all-null nullable disk vector load");
+                    const auto status = engine.native_index.ImportValidity(
+                        *input.validity, input.mmap);
+                    if (status != knowhere::Status::success) {
+                        ThrowDeserializeError(status);
+                    }
                 };
                 if (use_async && params.id_map_mmap.Any()) {
                     co_await storage::RunLocalFileIOAsync(local_io, priority);
@@ -477,7 +476,7 @@ OpenIndex(bool use_async,
         {
             auto local_io = [&] {
                 const auto status = engine.native_index.Deserialize(
-                    knowhere::BinarySet{}, config);
+                    knowhere::BinarySet{}, config, input);
                 selected_handle->RethrowFirstFailure();
                 // The knowhere deserialize API has no OpContext entrance. FileSource
                 // observes its captured cancellation/priority while materializing
@@ -502,8 +501,7 @@ OpenIndex(bool use_async,
     }
 
     ValidateLoadedShape(params, plan.state, engine, LoadBackend::Disk);
-    co_return std::make_unique<VectorIndexReader>(open_options.beamwidth,
-                                                  std::move(engine));
+    co_return std::make_unique<KnowhereEngine>(std::move(engine));
 }
 
 }  // namespace
@@ -519,13 +517,42 @@ VectorDiskLoader::Create(OpenedIndexSource source,
         std::get<LegacyIndexSource>(std::move(source)), std::move(options)));
     const auto runtime = ParseRuntimeParams(loader->options_.params);
     (void)ParseOpenOptions(loader->options_.params, runtime);
-    (void)PlanEntries(*loader->source_.source, runtime);
+    (void)PlanEntries(*loader->source_->source, runtime);
     co_return loader;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
-VectorDiskLoader::Load(milvus::OpContext* context) {
-    return RunLegacyLoad(source_, options_, &LoadLegacy, context);
+IndexPtr
+VectorDiskLoader::Load(milvus::OpContext* context,
+                       const IndexCacheConfig& cache) {
+    AssertInfo(source_.has_value(),
+               "cached vector construction consumed this loader");
+    const auto params = ParseRuntimeParams(options_.params);
+
+    auto cache_config = cache;
+    // Native lazy engines still need admission and resident metadata accounting.
+    if (knowhere::IndexFactory::Instance().FeatureCheck(
+            params.index_type, knowhere::feature::LAZY_LOAD)) {
+        cache_config.meta.support_eviction = false;
+    }
+    const auto open_options = ParseOpenOptions(options_.params, params);
+    const bool use_async = source_->use_async;
+    auto source = std::move(*source_);
+    source_.reset();
+    auto load = [source = std::move(source),
+                 options = options_](OpContext* ctx) mutable {
+        return RunLegacyLoad<std::unique_ptr<KnowhereEngine>>(
+            source, options, &LoadEngine, ctx);
+    };
+    auto slot =
+        cachinglayer::Manager::GetInstance().CreateCacheSlot<KnowhereEngine>(
+            std::make_unique<SingleCellIndexStorageTranslator<KnowhereEngine>>(
+                std::move(cache_config), use_async, std::move(load)),
+            context);
+    return std::make_shared<VectorIndex>(std::move(slot),
+                                         params.physical_type,
+                                         params.index_type,
+                                         params.metric_type,
+                                         open_options.beamwidth);
 }
 
 ReaderCaps
@@ -536,8 +563,8 @@ VectorDiskLoader::DeriveCaps(const Config& index_meta) {
     return {};
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
-VectorDiskLoader::LoadLegacy(storage::FileSource& source,
+folly::coro::Task<std::unique_ptr<KnowhereEngine>>
+VectorDiskLoader::LoadEngine(storage::FileSource& source,
                              const storage::LoadOptions& opts,
                              bool use_async) {
     auto params = ParseDiskLoadMetadata(opts.params);
@@ -548,7 +575,7 @@ VectorDiskLoader::LoadLegacy(storage::FileSource& source,
                   "disk vector indexes have no V3 persisted format");
     }
     const auto plan = PlanEntries(source, params);
-    co_return co_await OpenIndex(
+    co_return co_await OpenEngine(
         use_async, source, params, open_options, plan, opts);
 }
 

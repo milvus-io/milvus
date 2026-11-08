@@ -13,6 +13,18 @@ does not solve object fragmentation.
 handles for legacy query recovery. The [Summary consumer](summary_l0_materializer.md)
 is retained for future QueryView wiring; the two implementations are not run together.
 
+WAB cache occupancy is a separate pressure source, including unconsumed records
+and the retained consumed cache. Its live slowdownRatio (minimum 1) scales the
+WAB instance capacity; rate and rejection-ratio settings are configured under `streaming.walRateLimit.writeAheadBuffer`, with a rate determined
+directly by the current excess percentage (see [WAB delivery](../../../agent_guides/streaming-system/wal/timetick_and_txn.md#wab-delivery-and-producer-backpressure)).
+It does not use this controller's timed slowdown/recovery ramp or its
+`recoveryStorage.adaptiveRateLimit` settings; those settings still control the
+observed-to-published recovery tail. The unused `flusher.adaptiveRateLimit`
+settings and scanner catchup/tailing rate-control wiring have been removed. Both sources
+publish through the existing multi-source WAL limiter; clearing one source
+cannot clear the other's pressure. WAB's consumed-through boundary makes records eligible for capacity/TTL
+eviction, while retaining the durable handoff anchor separately from the queue; it authorizes in-memory release only and never advances any durable frontier below.
+
 ## 1. Byte Frontiers
 
 RecoveryStorage tracks three runtime byte offsets:

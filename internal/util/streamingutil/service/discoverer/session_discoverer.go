@@ -52,6 +52,7 @@ type sessionDiscoverer struct {
 	revision        int64
 	peerSessions    map[string]*sessionutil.SessionRaw // map[Key]SessionRaw, map the key path of session to session.
 	forcePort       int                                // force the port to use when resolving.
+	sessionFilter   func(*sessionutil.SessionRaw) bool
 }
 
 // OptSDForcePort forces the port to use when resolving.
@@ -80,6 +81,13 @@ func OptSDVersionRange(versionRange string) SessionDiscovererOption {
 	return func(sw *sessionDiscoverer) {
 		sw.versionRange = semver.MustParseRange(versionRange)
 		sw.versionRangeStr = versionRange
+	}
+}
+
+// OptSDSessionFilter filters sessions before building the resolver state.
+func OptSDSessionFilter(filter func(*sessionutil.SessionRaw) bool) SessionDiscovererOption {
+	return func(sw *sessionDiscoverer) {
+		sw.sessionFilter = filter
 	}
 }
 
@@ -214,6 +222,10 @@ func (sw *sessionDiscoverer) parseState() VersionedState {
 		// !!! important, stopping nodes should not be removed here.
 		if !sw.versionRange(v) {
 			sw.Logger().Info(context.TODO(), "skip low version node", mlog.Int64("serverID", session.ServerID), mlog.String("version", session.Version))
+			continue
+		}
+		if sw.sessionFilter != nil && !sw.sessionFilter(session) {
+			sw.Logger().Info(context.TODO(), "skip filtered session", mlog.Int64("serverID", session.ServerID))
 			continue
 		}
 		address := session.Address

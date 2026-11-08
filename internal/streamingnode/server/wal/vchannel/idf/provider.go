@@ -9,11 +9,11 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/config"
-	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -104,57 +104,33 @@ func (p *Provider) NewRuntime() (queryresource.QueryRuntimeModule, error) {
 }
 
 type Runtime struct {
-	mu       sync.RWMutex
-	provider *Provider
-	future   *FutureProvider
-	oracle   *oracleRuntime
-	disabled bool
-	closed   bool
+	mu             sync.RWMutex
+	provider       *Provider
+	future         *FutureProvider
+	prepareMu      sync.Mutex
+	cond           *sync.Cond
+	refresh        *schemaRefresh
+	fields         map[fieldKey]*fieldResource
+	minDataVersion qviews.DataVersion
+	view           walview.VChannelWALView
+	closed         bool
 }
 
-func (r *Runtime) Prepare(ctx context.Context, walView walview.VChannelWALView) error {
-	r.mu.Lock()
-	if r.closed {
-		r.mu.Unlock()
-		return context.Canceled
-	}
-	if r.oracle != nil {
-		r.mu.Unlock()
-		return nil
-	}
-	r.mu.Unlock()
-
-	if !hasLoadedBM25Function(walView.Schema, loadFieldIDs(walView.LoadFields)) {
-		r.mu.Lock()
-		closed := r.closed
-		if !closed {
-			r.disabled = true
-		}
-		r.mu.Unlock()
-		if closed {
-			return context.Canceled
-		}
-		return nil
-	}
-	provider, err := r.resolveProvider(ctx)
-	if err != nil {
+// Bootstrap only installs the WAL capture/ordering context. All schema-dependent
+// statistics belong to explicit View bindings, including the initial View.
+func (r *Runtime) Prepare(ctx context.Context, view walview.VChannelWALView) error {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	lazyLoadSealedStats := paramtable.Get().QueryViewCfg.IDFLazyLoadSealedStats.GetAsBool()
-	oracle, err := provider.buildOracle(ctx, walView, lazyLoadSealedStats)
-	if err != nil {
-		return err
-	}
-
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
-		if oracle != nil {
-			oracle.Close()
-		}
 		return context.Canceled
 	}
-	r.oracle = oracle
+	r.cond = sync.NewCond(&r.mu)
+	r.view = walview.VChannelWALView{CaptureQueryView: view.CaptureQueryView, RuntimeContext: view.RuntimeContext, ResourceEventBarrier: view.ResourceEventBarrier}
+	r.minDataVersion = view.SegmentSnapshot.DataVersion
+	r.fields = make(map[fieldKey]*fieldResource)
 	return nil
 }
 
@@ -198,7 +174,7 @@ func (p *Provider) buildOracle(
 	return newOracleRuntime(ctx, p, walView, resources, false)
 }
 
-func loadFieldIDs(fields []*messagespb.LoadFieldConfig) []int64 {
+func loadFieldIDs(fields []*viewpb.LoadFieldConfig) []int64 {
 	ids := make([]int64, 0, len(fields))
 	for _, field := range fields {
 		ids = append(ids, field.GetFieldId())
@@ -206,52 +182,68 @@ func loadFieldIDs(fields []*messagespb.LoadFieldConfig) []int64 {
 	return ids
 }
 
-func (r *Runtime) BuildIDF(ctx context.Context, dataVersion qviews.DataVersion, fieldID int64, tfs *schemapb.SparseFloatArray) ([][]byte, float64, error) {
-	oracle := r.currentOracle()
-	if oracle == nil {
-		return nil, 0, merr.WrapErrServiceNotReadyMsg("BM25 IDF oracle is not initialized")
+// BeforeRelease advances every still-owned field before old DataView files can
+// be collected. Unowned fields have already canceled/drained in binding.Release.
+func (r *Runtime) BeforeRelease(ctx context.Context, target qviews.DataVersion) error {
+	if !r.prepareMu.TryLock() {
+		return merr.WrapErrServiceNotReadyMsg("BM25 field preparation is in progress")
 	}
-	return oracle.BuildIDF(ctx, dataVersion, fieldID, tfs)
-}
-
-func (r *Runtime) PrepareDataVersion(ctx context.Context, dataVersion qviews.DataVersion) error {
-	r.mu.RLock()
-	disabled := r.disabled
-	r.mu.RUnlock()
-	if disabled {
+	defer r.prepareMu.Unlock()
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
 		return nil
 	}
-	oracle := r.currentOracle()
-	if oracle == nil {
-		return merr.WrapErrServiceNotReadyMsg("BM25 IDF oracle is not initialized")
+	if target.GT(r.minDataVersion) {
+		r.minDataVersion = target
 	}
-	return oracle.PrepareDataVersion(ctx, dataVersion)
-}
-
-func (r *Runtime) BeforeRelease(ctx context.Context, target qviews.DataVersion) error {
-	if oracle := r.currentOracle(); oracle != nil {
-		return oracle.PrepareDataVersion(ctx, target)
+	target = r.minDataVersion
+	fields := make([]*fieldResource, 0, len(r.fields))
+	for _, field := range r.fields {
+		fields = append(fields, field)
+	}
+	r.mu.Unlock()
+	for _, field := range fields {
+		if field.oracle != nil {
+			if err := field.oracle.PrepareDataVersion(ctx, target); err != nil {
+				return err
+			}
+			// Advancing a lazy target cancels its old materialization, but the
+			// reader can still be unwinding. Its files remain pinned until it exits.
+			field.oracle.mu.RLock()
+			call := field.oracle.materialization
+			field.oracle.mu.RUnlock()
+			if call != nil && target.GT(call.target) {
+				select {
+				case <-call.done:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+		}
 	}
 	return nil
 }
 
-func (r *Runtime) BuildIDFBatch(ctx context.Context, requests []queryresource.IDFRequest) ([]queryresource.IDFResult, error) {
-	oracle := r.currentOracle()
-	if oracle == nil {
-		return nil, merr.WrapErrServiceNotReadyMsg("BM25 IDF oracle is not initialized")
-	}
-	return oracle.BuildIDFBatch(ctx, requests)
-}
-
 func (r *Runtime) ApplyLiveEvent(ctx context.Context, event walview.VChannelResourceEvent) {
-	if oracle := r.currentOracle(); oracle != nil {
-		oracle.ApplyLiveEvent(ctx, event)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for r.refresh != nil && r.refresh.err == nil && len(r.refresh.pending) >= 1024 && !r.closed {
+		r.cond.Wait()
+	}
+	if r.closed {
+		return
+	}
+	if stage := r.refresh; stage != nil && stage.err == nil && stage.includes(event) {
+		stage.pending = append(stage.pending, event)
+	}
+	for _, field := range r.fields {
+		if field.oracle != nil && field.coverage.includes(event) {
+			field.oracle.ApplyLiveEvent(ctx, event)
+		}
 	}
 }
-
-// BM25 stats advance during PrepareDataVersion, before QueryView readiness.
 func (*Runtime) Advance(qviews.DataVersion) {}
-
 func (r *Runtime) Close() {
 	r.mu.Lock()
 	if r.closed {
@@ -259,35 +251,59 @@ func (r *Runtime) Close() {
 		return
 	}
 	r.closed = true
-	oracle := r.oracle
-	r.oracle = nil
+	if r.cond != nil {
+		r.cond.Broadcast()
+	}
+	fields := r.fields
+	r.fields = nil
 	r.mu.Unlock()
-	if oracle != nil {
-		oracle.Close()
+	for _, field := range fields {
+		if field.oracle != nil {
+			field.oracle.Close()
+		}
 	}
 }
 
-func (r *Runtime) currentOracle() *oracleRuntime {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.oracle
-}
-
-func collectGrowingInsertStats(stats bm25Stats, schema *schemapb.CollectionSchema, insert walview.SegmentInsertMessage) error {
-	request, err := walview.MaterializeInsertRequest(schema, insert)
-	if err != nil {
-		return err
+func (r *oracleRuntime) collectGrowingInsertStats(ctx context.Context, stats bm25Stats, insert walview.SegmentInsertMessage) error {
+	if len(stats) == 0 {
+		return nil
 	}
-	insertData, err := storage.ColumnBasedInsertMsgToInsertData(&msgstream.InsertMsg{InsertRequest: request}, schema)
-	if err != nil {
-		return err
+	request := insert.Message.MustBody()
+	missing := false
+	for fieldID := range stats {
+		if !function.HasFieldData(request.GetFieldsData(), fieldID) {
+			missing = true
+			break
+		}
+	}
+	if missing {
+		request = storage.CopyInsertRequestMetadata(request)
+		// Only fill outputs required by this oracle. Retained read schemas can
+		// contain removed or unrelated functions whose inputs are no longer written.
+		for fieldID := range stats {
+			if function.HasFieldData(request.GetFieldsData(), fieldID) {
+				continue
+			}
+			if _, err := function.GetManager().RunWithRunner(ctx, r.collectionID, r.functionKey, fieldID, func(runner function.FunctionRunner) error {
+				_, err := function.FillFunctionFields([]function.FunctionRunner{runner}, request)
+				return err
+			}); err != nil {
+				return err
+			}
+		}
 	}
 	for fieldID, fieldStats := range stats {
-		fieldData, ok := insertData.Data[fieldID].(*storage.SparseFloatVectorFieldData)
-		if !ok {
-			continue
+		var sparse *schemapb.SparseFloatArray
+		for _, data := range request.GetFieldsData() {
+			if data.GetFieldId() == fieldID {
+				sparse = data.GetVectors().GetSparseFloatVector()
+				break
+			}
 		}
-		fieldStats.AppendFieldData(fieldData)
+		if sparse == nil || len(sparse.GetContents()) != int(request.GetNumRows()) {
+			return merr.WrapErrDataIntegrityMsg("BM25 insert field %d does not contain all %d rows", fieldID, request.GetNumRows())
+		}
+		fieldStats.AppendBytes(sparse.GetContents()...)
 	}
 	return nil
 }

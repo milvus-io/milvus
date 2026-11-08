@@ -6,6 +6,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
 // NewTxnBuffer creates a new txn buffer.
@@ -58,13 +59,19 @@ func (b *TxnBuffer) Snapshot() *TxnBuffer {
 func (b *TxnBuffer) HandleImmutableMessages(msgs []message.ImmutableMessage, ts uint64) []message.ImmutableMessage {
 	result := make([]message.ImmutableMessage, 0, len(msgs))
 	for _, msg := range msgs {
-		// Check for force promote AlterReplicateConfig message
-		// If force promote (and not ignored), rollback all uncommitted transactions
+		// Every durable exclusive operation ends transactions in its WAL lock scope.
+		abort := msg.MessageType().IsExclusiveRequired()
 		if msg.MessageType() == message.MessageTypeAlterReplicateConfig {
-			alterMsg := message.MustAsImmutableAlterReplicateConfigMessageV2(msg)
-			header := alterMsg.Header()
-			if header.ForcePromote && !header.Ignore {
-				b.rollbackAllUncommittedTxn()
+			abort = !message.MustAsImmutableAlterReplicateConfigMessageV2(msg).Header().Ignore
+		}
+		if abort {
+			for id, builder := range b.builders {
+				begin, _ := builder.Messages()
+				if msg.MessageType() == message.MessageTypeFlushAll || msg.IsPChannelLevel() || msg.VChannel() == "" ||
+					msg.MessageType() == message.MessageTypeAlterReplicateConfig ||
+					(!funcutil.IsControlChannel(msg.VChannel()) && begin.VChannel() == msg.VChannel()) {
+					b.rollbackTxn(id)
+				}
 			}
 		}
 
@@ -209,23 +216,4 @@ func (b *TxnBuffer) clearExpiredTxn(ts uint64) {
 			}
 		}
 	}
-}
-
-// rollbackAllUncommittedTxn rolls back all uncommitted transactions in the buffer.
-// This is used during force promote to ensure no in-flight transactions from the
-// old replication topology are left pending.
-func (b *TxnBuffer) rollbackAllUncommittedTxn() {
-	if len(b.builders) == 0 {
-		return
-	}
-
-	txnIDs := make([]int64, 0, len(b.builders))
-	for txnID := range b.builders {
-		txnIDs = append(txnIDs, int64(txnID))
-		b.rollbackTxn(txnID)
-	}
-
-	b.logger.Info(context.TODO(), "Rolled back all uncommitted transactions in TxnBuffer due to force promote",
-		mlog.Int64s("txnIDs", txnIDs),
-		mlog.Int("count", len(txnIDs)))
 }

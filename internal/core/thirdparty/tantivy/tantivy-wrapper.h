@@ -249,9 +249,9 @@ struct TantivyIndexWrapper {
         auto snapshot = std::make_shared<TantivyIndexWrapper>();
         auto res = RustResultWrapper(
             tantivy_create_snapshot_reader_from_writer(writer_, set_bitset));
-        AssertInfo(res.result_->success,
-                   "failed to create snapshot reader from writer: {}",
-                   res.result_->error);
+        AssertTantivyOk(res,
+                        "failed to create snapshot reader from writer: {}",
+                        res.result_->error);
         snapshot->reader_ = res.result_->value.ptr._0;
         AssertInfo(snapshot->reader_ != nullptr,
                    "snapshot reader creation returned a null reader");
@@ -709,9 +709,8 @@ struct TantivyIndexWrapper {
         AssertInfo(writer_ != nullptr,
                    "cannot rollback an index without a writer");
         auto res = RustResultWrapper(tantivy_rollback_index(writer_));
-        AssertInfo(res.result_->success,
-                   "failed to rollback index: {}",
-                   res.result_->error);
+        AssertTantivyOk(
+            res, "failed to rollback index: {}", res.result_->error);
     }
 
     inline void

@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -52,12 +53,11 @@ type MaterializeRequest struct {
 	VChannel       string
 	TargetTimeTick uint64
 	Entries        []*streamingpb.TransformLogEntry
-	// WAL consumers supply complete positions. The retained Summary consumer
-	// has only timestamps and leaves these runtime-only fields empty.
-	StartPositions map[uint64]*msgpb.MsgPosition
-	Checkpoint     *msgpb.MsgPosition
-	MaxRows        uint64
-	MaxBytes       uint64
+	// WAL consumers supply each Delete's complete position, used for both
+	// endpoints of an output L0. Summary consumers only supply timestamps.
+	DeletePositions map[uint64]*msgpb.MsgPosition
+	MaxRows         uint64
+	MaxBytes        uint64
 }
 
 type SyncMaterializer struct {
@@ -115,12 +115,12 @@ func (m *SyncMaterializer) materializeGroup(
 	}
 	vchannel := req.VChannel
 	startPosition := &msgpb.MsgPosition{ChannelName: vchannel, Timestamp: group.fromTimeTick}
-	if pos := req.StartPositions[group.fromTimeTick]; pos != nil {
+	if pos := req.DeletePositions[group.fromTimeTick]; pos != nil {
 		startPosition = proto.Clone(pos).(*msgpb.MsgPosition)
 	}
-	checkpoint := &msgpb.MsgPosition{ChannelName: vchannel, Timestamp: req.TargetTimeTick}
-	if req.Checkpoint != nil {
-		checkpoint = proto.Clone(req.Checkpoint).(*msgpb.MsgPosition)
+	checkpoint := &msgpb.MsgPosition{ChannelName: vchannel, Timestamp: group.toTimeTick}
+	if pos := req.DeletePositions[group.toTimeTick]; pos != nil {
+		checkpoint = proto.Clone(pos).(*msgpb.MsgPosition)
 	}
 	schema := materializeSchema(group.pkType)
 	metaCache := newMaterializeMetaCache(collectionID, vchannel, schema)
@@ -194,6 +194,9 @@ func splitMaterializeGroups(req MaterializeRequest) []materializeGroup {
 	}
 	groups := make([]materializeGroup, 0)
 	currentByPartition := make(map[int64]*materializeGroup)
+	// Reuse this map across TimeTicks. A transaction can have many blocks for
+	// the same partition; account for all of them before choosing an L0.
+	tickSizes := make(map[int64]struct{ rows, bytes uint64 })
 	flushCurrent := func(partitionID int64) {
 		group := currentByPartition[partitionID]
 		if group == nil || len(group.pks) == 0 {
@@ -202,39 +205,61 @@ func splitMaterializeGroups(req MaterializeRequest) []materializeGroup {
 		groups = append(groups, *group)
 		delete(currentByPartition, partitionID)
 	}
-	for _, entry := range req.Entries {
-		for _, block := range entry.GetDelete().GetBlocks() {
-			pks := storage.ParseIDs2PrimaryKeys(block.GetPrimaryKeys())
-			if len(pks) == 0 {
-				continue
+	for begin := 0; begin < len(req.Entries); {
+		timeTick := req.Entries[begin].GetTimeTick()
+		end := begin + 1
+		for end < len(req.Entries) && req.Entries[end].GetTimeTick() == timeTick {
+			end++
+		}
+		clear(tickSizes)
+		for _, entry := range req.Entries[begin:end] {
+			for _, block := range entry.GetDelete().GetBlocks() {
+				rows := uint64(typeutil.GetSizeOfIDs(block.GetPrimaryKeys()))
+				if rows == 0 {
+					continue
+				}
+				size := tickSizes[block.GetPartitionId()]
+				size.rows += rows
+				size.bytes += uint64(proto.Size(block))
+				tickSizes[block.GetPartitionId()] = size
 			}
-			// A transaction may contain many blocks. Charge each block's size
-			// once rather than charging the entire transaction for every block.
-			pkBytes := uint64(proto.Size(block)) / uint64(len(pks))
-			if pkBytes == 0 {
-				pkBytes = 1
-			}
-			partitionID := block.GetPartitionId()
-			for _, pk := range pks {
+		}
+		for _, entry := range req.Entries[begin:end] {
+			for _, block := range entry.GetDelete().GetBlocks() {
+				pks := storage.ParseIDs2PrimaryKeys(block.GetPrimaryKeys())
+				if len(pks) == 0 {
+					continue
+				}
+				partitionID := block.GetPartitionId()
 				group := currentByPartition[partitionID]
-				if group != nil && (group.pkType != pk.Type() || exceedsMaterializeLimit(group, 1, pkBytes, maxRows, maxBytes)) {
+				size := tickSizes[partitionID]
+				startsTimeTick := group == nil || group.toTimeTick != timeTick
+				// Size limits are soft for one (partition, TimeTick). Never
+				// publish only part of a transaction at its commit TimeTick.
+				if group != nil && startsTimeTick &&
+					(group.pkType != pks[0].Type() || exceedsMaterializeLimit(group, size.rows, size.bytes, maxRows, maxBytes)) {
 					flushCurrent(partitionID)
 					group = nil
 				}
 				if group == nil {
 					group = &materializeGroup{
 						partitionID:  partitionID,
-						pkType:       pk.Type(),
-						fromTimeTick: entry.GetTimeTick(),
+						pkType:       pks[0].Type(),
+						fromTimeTick: timeTick,
 					}
 					currentByPartition[partitionID] = group
 				}
-				group.pks = append(group.pks, pk)
-				group.timestamps = append(group.timestamps, entry.GetTimeTick())
-				group.toTimeTick = entry.GetTimeTick()
-				group.bytes += pkBytes
+				if startsTimeTick {
+					group.bytes += size.bytes
+				}
+				group.pks = append(group.pks, pks...)
+				for range pks {
+					group.timestamps = append(group.timestamps, timeTick)
+				}
+				group.toTimeTick = timeTick
 			}
 		}
+		begin = end
 	}
 	for partitionID := range currentByPartition {
 		flushCurrent(partitionID)

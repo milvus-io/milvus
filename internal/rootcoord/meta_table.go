@@ -19,33 +19,28 @@ package rootcoord
 import (
 	"context"
 	"fmt"
-	"slices"
-	"sort"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"golang.org/x/exp/maps"
-	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/featureusage"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util"
@@ -70,8 +65,6 @@ var (
 	errAlterCollectionNotFound = errors.New("alter collection not found") // alter collection not found, so it can be ignored.
 )
 
-const rlsRecoveryConcurrency = 32
-
 type MetaTableChecker interface {
 	RBACChecker
 
@@ -95,6 +88,7 @@ type IMetaTable interface {
 	AlterDatabase(ctx context.Context, newDB *model.Database, ts typeutil.Timestamp) error
 
 	AddCollection(ctx context.Context, coll *model.Collection) error
+	CompleteRestoreCollection(ctx context.Context, collectionID UniqueID) error
 	DropCollection(ctx context.Context, collectionID UniqueID, ts Timestamp) error
 	RemoveCollection(ctx context.Context, collectionID UniqueID, ts Timestamp) error
 	// GetCollectionID retrieves the corresponding collectionID based on the collectionName.
@@ -104,6 +98,7 @@ type IMetaTable interface {
 	GetCollectionByName(ctx context.Context, dbName string, collectionName string, ts Timestamp, allowUnavailable bool) (*model.Collection, error)
 	GetCollectionByID(ctx context.Context, dbName string, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error)
 	GetCollectionByIDWithMaxTs(ctx context.Context, collectionID UniqueID) (*model.Collection, error)
+	GetCollectionProperties(ctx context.Context, collectionID UniqueID) ([]*commonpb.KeyValuePair, error)
 	ListCollections(ctx context.Context, dbName string, ts Timestamp, onlyAvail bool) ([]*model.Collection, error)
 	ListAllAvailCollections(ctx context.Context) map[int64][]int64
 	// ListAllAvailPartitions returns the partition ids of all available collections.
@@ -136,6 +131,7 @@ type IMetaTable interface {
 	// TODO: it'll be a big cost if we handle the time travel logic, since we should always list all aliases in catalog.
 	IsAlias(ctx context.Context, db, name string) bool
 	ListAliasesByID(ctx context.Context, collID UniqueID) []string
+	FeatureUsageSnapshot(ctx context.Context) featureusage.CollectionInput
 
 	GetCredential(ctx context.Context, username string) (*internalpb.CredentialInfo, error)
 	InitCredential(ctx context.Context) error
@@ -163,24 +159,13 @@ type IMetaTable interface {
 	OperatePrivilegeGroup(ctx context.Context, groupName string, privileges []*milvuspb.PrivilegeEntity, operateType milvuspb.OperatePrivilegeGroupType) error
 	GetPrivilegeGroupRoles(ctx context.Context, groupName string) ([]*milvuspb.RoleEntity, error)
 
-	PrepareCreateRLSPolicy(ctx context.Context, req *rlsutil.CreateRowPolicyRequest, policyID int64) (*model.RLSPolicy, error)
-	PrepareUpdateRLSPolicy(ctx context.Context, req *rlsutil.UpdateRowPolicyRequest) (*model.RLSPolicy, error)
-	PrepareDropRLSPolicy(ctx context.Context, req *rlsutil.DropRowPolicyRequest) (*model.RLSPolicy, error)
-	ApplyAlterRLSPolicy(ctx context.Context, policy *model.RLSPolicy) error
-	ApplyDropRLSPolicy(ctx context.Context, collectionID int64, policyName string) error
-	ListRLSPolicies(ctx context.Context, req *rlsutil.ListRowPoliciesRequest) ([]*rlsutil.RowPolicy, error)
-	PrepareSetRLSPrincipalTags(ctx context.Context, req *rlsutil.SetRLSPrincipalTagsRequest) (*model.RLSPrincipal, error)
-	PrepareDeleteRLSPrincipalTags(ctx context.Context, req *rlsutil.DeleteRLSPrincipalTagsRequest) (*model.RLSPrincipal, bool, error)
-	ApplyAlterRLSPrincipal(ctx context.Context, principal *model.RLSPrincipal) error
-	ApplyDropRLSPrincipal(ctx context.Context, collectionID int64, principalName string) error
-	GetRLSPrincipalTags(ctx context.Context, req *rlsutil.GetRLSPrincipalTagsRequest) (map[string]rlsutil.TagValue, error)
-	ListRLSPrincipals(ctx context.Context, req *rlsutil.ListRLSPrincipalsRequest) ([]string, error)
-	GetRLSMetadata(ctx context.Context, collectionID int64, kind rootcoordpb.RLSMetadataKind, principalName string) (*model.RLSMetadata, error)
-
 	AddFileResource(ctx context.Context, resource *internalpb.FileResourceInfo) error
-	RemoveFileResource(ctx context.Context, name string) (error, bool)
+	PrepareRemoveFileResource(ctx context.Context, name string) (*internalpb.FileResourceInfo, error)
+	RemoveFileResource(ctx context.Context, name string, resourceID int64) (error, bool)
 	HasFileResource(ctx context.Context) bool
 	ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64)
+	FindFileResource(ctx context.Context, name string) *internalpb.FileResourceInfo
+	GetFileResourcesByNames(ctx context.Context, names ...string) ([]*internalpb.FileResourceInfo, error)
 	GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error)
 	IncFileResourceRefCnt(ids []int64) error
 	DecFileResourceRefCnt(ids []int64)
@@ -195,7 +180,16 @@ type MetaTable struct {
 	tsoAllocator tso.Allocator
 
 	dbName2Meta map[string]*model.Database              // database name ->  db meta
+	dbID2Name   map[int64]string                        // database id -> name, kept by setDatabaseLocked
 	collID2Meta map[typeutil.UniqueID]*model.Collection // collection id -> collection meta
+
+	// collViews holds the CollectionInfo published for each collID2Meta
+	// entry. Writers update it under ddLock; CollectionSource reads it
+	// without ddLock.
+	collViews typeutil.ConcurrentMap[typeutil.UniqueID, *metacache.CollectionInfo]
+	collHooks metacache.CollectionHooks
+	// dbViews does the same for dbName2Meta.
+	dbViews typeutil.ConcurrentMap[string, *metacache.DatabaseInfo]
 
 	// partition name index: collectionID -> partitionName -> partitionID
 	partitionName2ID map[int64]map[string]int64
@@ -237,7 +231,14 @@ func (mt *MetaTable) reload() error {
 
 	record := timerecord.NewTimeRecorder("rootcoord")
 	mt.dbName2Meta = make(map[string]*model.Database)
+	mt.dbID2Name = make(map[int64]string)
 	mt.collID2Meta = make(map[UniqueID]*model.Collection)
+	for _, id := range mt.collViews.Keys() {
+		mt.collViews.Remove(id)
+	}
+	for _, name := range mt.dbViews.Keys() {
+		mt.dbViews.Remove(name)
+	}
 	mt.partitionName2ID = make(map[int64]map[string]int64)
 	mt.fileResourceRefCnt = make(map[int64]int)
 	mt.fileResourceRefHolds = make(map[int64]map[int64]int)
@@ -256,7 +257,7 @@ func (mt *MetaTable) reload() error {
 
 	mlog.Info(mt.ctx, "recover databases", mlog.Int("num of dbs", len(dbs)))
 	for _, db := range dbs {
-		mt.dbName2Meta[db.Name] = db
+		mt.setDatabaseLocked(db)
 	}
 	dbNames := maps.Keys(mt.dbName2Meta)
 	// create default database.
@@ -269,9 +270,20 @@ func (mt *MetaTable) reload() error {
 		mt.aliases.createDbIfNotExist(util.DefaultDBName)
 	}
 
+	// Collections stored without a database are listed under util.NonDBID.
+	dbIDs := make([]int64, 0, len(mt.dbName2Meta)+1)
+	dbIDs = append(dbIDs, util.NonDBID)
+	for _, db := range mt.dbName2Meta {
+		dbIDs = append(dbIDs, db.ID)
+	}
+	collectionsByDB, err := mt.catalog.ListCollectionsForRecovery(mt.ctx, dbIDs, typeutil.MaxTimestamp)
+	if err != nil {
+		return err
+	}
+
 	// in order to support backward compatibility with meta of the old version, it also
 	// needs to reload collections that have no database
-	if err := mt.reloadWithNonDatabase(); err != nil {
+	if err := mt.reloadWithNonDatabase(collectionsByDB[util.NonDBID]); err != nil {
 		return err
 	}
 
@@ -283,14 +295,7 @@ func (mt *MetaTable) reload() error {
 		mt.names.createDbIfNotExist(dbName)
 
 		start := time.Now()
-		// TODO: async list collections to accelerate cases with multiple databases.
-		collections, err := mt.catalog.ListCollections(mt.ctx, db.ID, typeutil.MaxTimestamp)
-		if err != nil {
-			return err
-		}
-		if err := mt.reloadCollectionsRLSMetadata(mt.ctx, collections); err != nil {
-			return err
-		}
+		collections := collectionsByDB[db.ID]
 		for _, collection := range collections {
 			if collection.DBName != "" && collection.DBName != dbName {
 				mlog.Warn(mt.ctx,
@@ -303,7 +308,7 @@ func (mt *MetaTable) reload() error {
 			}
 			collection.DBName = dbName // some collections may not have db name or its dbname is not correct, we should fix it here.
 			ensureCollectionMaxFieldIDProperty(collection)
-			mt.collID2Meta[collection.CollectionID] = collection
+			mt.setCollectionLocked(collection)
 			// Build partition name index
 			mt.partitionName2ID[collection.CollectionID] = make(map[string]int64)
 			for _, partition := range collection.Partitions {
@@ -311,7 +316,7 @@ func (mt *MetaTable) reload() error {
 					mt.partitionName2ID[collection.CollectionID][partition.PartitionName] = partition.PartitionID
 				}
 			}
-			if collection.Available() {
+			if collection.Available() || collection.State == pb.CollectionState_CollectionRestoring {
 				mt.names.insert(dbName, collection.Name, collection.CollectionID)
 				for _, fileResourceID := range collection.FileResourceIds {
 					mt.fileResourceRefCnt[fileResourceID]++
@@ -349,7 +354,7 @@ func (mt *MetaTable) reload() error {
 	mlog.Info(mt.ctx, "rootcoord start to recover the channel stats for streaming coord balancer")
 	vchannels := make([]string, 0, len(mt.collID2Meta)*2)
 	for _, coll := range mt.collID2Meta {
-		if coll.Available() {
+		if coll.Available() || coll.State == pb.CollectionState_CollectionRestoring {
 			vchannels = append(vchannels, coll.VirtualChannelNames...)
 		}
 	}
@@ -373,20 +378,12 @@ func (mt *MetaTable) reload() error {
 }
 
 // insert into default database if the collections doesn't inside some database
-func (mt *MetaTable) reloadWithNonDatabase() error {
+func (mt *MetaTable) reloadWithNonDatabase(oldCollections []*model.Collection) error {
 	collectionNum := int64(0)
 	partitionNum := int64(0)
-	oldCollections, err := mt.catalog.ListCollections(mt.ctx, util.NonDBID, typeutil.MaxTimestamp)
-	if err != nil {
-		return err
-	}
-	if err := mt.reloadCollectionsRLSMetadata(mt.ctx, oldCollections); err != nil {
-		return err
-	}
-
 	for _, collection := range oldCollections {
 		ensureCollectionMaxFieldIDProperty(collection)
-		mt.collID2Meta[collection.CollectionID] = collection
+		mt.setCollectionLocked(collection)
 		if collection.Available() {
 			mt.names.insert(util.DefaultDBName, collection.Name, collection.CollectionID)
 			for _, fileResourceID := range collection.FileResourceIds {
@@ -482,7 +479,7 @@ func (mt *MetaTable) createDatabasePrivate(ctx context.Context, db *model.Databa
 
 	mt.names.createDbIfNotExist(dbName)
 	mt.aliases.createDbIfNotExist(dbName)
-	mt.dbName2Meta[dbName] = db
+	mt.setDatabaseLocked(db)
 	if mt.availableCollectionCountByDB == nil {
 		mt.availableCollectionCountByDB = make(map[int64]int)
 	}
@@ -500,7 +497,7 @@ func (mt *MetaTable) AlterDatabase(ctx context.Context, newDB *model.Database, t
 	if err := mt.catalog.AlterDatabase(ctx1, newDB, ts); err != nil {
 		return err
 	}
-	mt.dbName2Meta[newDB.Name] = newDB
+	mt.setDatabaseLocked(newDB)
 	mlog.Info(ctx, "alter database finished", mlog.String("dbName", newDB.Name), mlog.Uint64("ts", ts))
 	return nil
 }
@@ -519,6 +516,11 @@ func (mt *MetaTable) CheckIfDatabaseDroppable(ctx context.Context, req *milvuspb
 		return err
 	}
 
+	for _, collection := range mt.collID2Meta {
+		if collection.DBName == dbName && collection.State == pb.CollectionState_CollectionRestoring {
+			return merr.WrapErrParameterInvalidMsg("database:%s contains a restoring collection", dbName)
+		}
+	}
 	colls, err := mt.listCollectionFromCache(ctx, dbName, true)
 	if err != nil {
 		return err
@@ -544,7 +546,7 @@ func (mt *MetaTable) DropDatabase(ctx context.Context, dbName string, ts typeuti
 
 	mt.names.dropDb(dbName)
 	mt.aliases.dropDb(dbName)
-	delete(mt.dbName2Meta, dbName)
+	mt.deleteDatabaseLocked(dbName)
 	delete(mt.availableCollectionCountByDB, db.ID)
 
 	metrics.RootCoordNumOfDatabases.Dec()
@@ -565,8 +567,15 @@ func (mt *MetaTable) GetDatabaseByID(ctx context.Context, dbID int64, ts Timesta
 	return mt.getDatabaseByIDInternal(ctx, dbID, ts)
 }
 
+// getDatabaseByIDInternal resolves dbID through dbID2Name, since it runs for
+// every collection view RootCoord builds. A miss falls back to a scan: the
+// database may be gone (a Dropping collection outliving DropDatabase), or
+// dbName2Meta may have been filled directly.
 func (mt *MetaTable) getDatabaseByIDInternal(ctx context.Context, dbID int64, ts Timestamp) (*model.Database, error) {
-	for _, db := range maps.Values(mt.dbName2Meta) {
+	if db, ok := mt.dbName2Meta[mt.dbID2Name[dbID]]; ok && db.ID == dbID {
+		return db, nil
+	}
+	for _, db := range mt.dbName2Meta {
 		if db.ID == dbID {
 			return db, nil
 		}
@@ -599,7 +608,7 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 	// Note:
 	// 1, idempotency check was already done outside;
 	// 2, no need to check time travel logic, since ts should always be the latest;
-	if coll.State != pb.CollectionState_CollectionCreated {
+	if coll.State != pb.CollectionState_CollectionCreated && coll.State != pb.CollectionState_CollectionRestoring {
 		return merr.WrapErrServiceInternalMsg("collection state should be created, collection name: %s, collection id: %d, state: %s", coll.Name, coll.CollectionID, coll.State)
 	}
 
@@ -621,6 +630,13 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 		return err
 	}
 
+	added := false
+	defer func() {
+		// After ddLock is released.
+		if added {
+			mt.collHooks.NotifyAdded(coll.CollectionID)
+		}
+	}()
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -631,9 +647,12 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 		return nil
 	}
 
-	mt.collID2Meta[coll.CollectionID] = coll.Clone()
+	mt.setCollectionLocked(coll.Clone())
+	added = true
 	mt.names.insert(coll.DBName, coll.Name, coll.CollectionID)
-	mt.increaseAvailableCollectionCountLocked(coll.DBID)
+	if coll.Available() {
+		mt.increaseAvailableCollectionCountLocked(coll.DBID)
+	}
 	// Build partition name index for the new collection
 	mt.partitionName2ID[coll.CollectionID] = make(map[string]int64)
 	for _, partition := range coll.Partitions {
@@ -657,11 +676,38 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 	return nil
 }
 
+// CompleteRestoreCollection makes an already-published snapshot accessible.
+func (mt *MetaTable) CompleteRestoreCollection(ctx context.Context, collectionID UniqueID) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+	coll := mt.collID2Meta[collectionID]
+	if coll == nil {
+		return merr.WrapErrCollectionNotFound(collectionID)
+	}
+	if coll.Available() {
+		return nil
+	}
+	if coll.State != pb.CollectionState_CollectionRestoring {
+		return merr.WrapErrServiceNotReadyMsg("collection %d is no longer restoring", collectionID)
+	}
+	clone := coll.Clone()
+	clone.State = pb.CollectionState_CollectionCreated
+	ctx = contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	if err := mt.catalog.AlterCollection(ctx, coll, clone, metastore.MODIFY, clone.UpdateTimestamp, false); err != nil {
+		return err
+	}
+	mt.setCollectionLocked(clone)
+	mt.increaseAvailableCollectionCountLocked(clone.DBID)
+	return nil
+}
+
 func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, ts Timestamp) error {
 	dbName, collectionName, dropped, err := mt.markCollectionDropping(ctx, collectionID, ts)
 	if err != nil || !dropped {
 		return err
 	}
+	// After ddLock is released.
+	mt.collHooks.NotifyDropping(collectionID)
 
 	// Grant cleanup scans the catalog by prefix and can be much slower than the
 	// metadata update above. Keep it synchronous so the caller's collection
@@ -695,7 +741,7 @@ func (mt *MetaTable) markCollectionDropping(ctx context.Context, collectionID Un
 	clone.State = pb.CollectionState_CollectionDropping
 	clone.UpdateTimestamp = ts
 
-	mt.collID2Meta[collectionID] = clone
+	mt.setCollectionLocked(clone)
 	for _, fileResourceID := range coll.FileResourceIds {
 		if mt.fileResourceRefCnt[fileResourceID] > 0 {
 			mt.fileResourceRefCnt[fileResourceID]--
@@ -772,8 +818,51 @@ func (mt *MetaTable) removeAllNamesIfMatchedInternal(ctx context.Context, dbName
 	}
 }
 
-func (mt *MetaTable) removeCollectionByIDInternal(ctx context.Context, collectionID UniqueID) {
+// setCollectionLocked stores coll as the current model of its collection
+// and publishes its CollectionInfo view. Every write to collID2Meta goes
+// through this helper or deleteCollectionLocked, so the view always matches
+// the model once ddLock is released. The caller must hold ddLock for
+// writing.
+func (mt *MetaTable) setCollectionLocked(coll *model.Collection) {
+	mt.collID2Meta[coll.CollectionID] = coll
+	mt.collViews.Insert(coll.CollectionID, mt.buildCollectionViewLocked(coll))
+}
+
+// setDatabaseLocked stores db and publishes its DatabaseInfo view. Every
+// write to dbName2Meta goes through this helper or deleteDatabaseLocked.
+// The caller must hold ddLock for writing.
+func (mt *MetaTable) setDatabaseLocked(db *model.Database) {
+	mt.dbName2Meta[db.Name] = db
+	if mt.dbID2Name == nil {
+		mt.dbID2Name = make(map[int64]string)
+	}
+	mt.dbID2Name[db.ID] = db.Name
+	mt.dbViews.Insert(db.Name, &metacache.DatabaseInfo{
+		ID:         db.ID,
+		Name:       db.Name,
+		Properties: common.CloneKeyValuePairs(db.Properties),
+	})
+}
+
+// deleteDatabaseLocked removes a database's model and view. The caller must
+// hold ddLock for writing.
+func (mt *MetaTable) deleteDatabaseLocked(dbName string) {
+	if db, ok := mt.dbName2Meta[dbName]; ok {
+		delete(mt.dbID2Name, db.ID)
+	}
+	delete(mt.dbName2Meta, dbName)
+	mt.dbViews.Remove(dbName)
+}
+
+// deleteCollectionLocked removes a collection's model and view. The caller
+// must hold ddLock for writing.
+func (mt *MetaTable) deleteCollectionLocked(collectionID UniqueID) {
 	delete(mt.collID2Meta, collectionID)
+	mt.collViews.Remove(collectionID)
+}
+
+func (mt *MetaTable) removeCollectionByIDInternal(ctx context.Context, collectionID UniqueID) {
+	mt.deleteCollectionLocked(collectionID)
 	delete(mt.partitionName2ID, collectionID)
 	mlog.Info(ctx, "delete from collID2Meta",
 		mlog.Int64("collectionID", collectionID),
@@ -781,6 +870,13 @@ func (mt *MetaTable) removeCollectionByIDInternal(ctx context.Context, collectio
 }
 
 func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID, ts Timestamp) error {
+	removed := false
+	defer func() {
+		// After ddLock is released.
+		if removed {
+			mt.collHooks.NotifyRemoved(collectionID)
+		}
+	}()
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -803,7 +899,6 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 		Fields:            model.CloneFields(coll.Fields),
 		StructArrayFields: model.CloneStructArrayFields(coll.StructArrayFields),
 		Functions:         model.CloneFunctions(coll.Functions),
-		RLSPolicies:       model.CloneRLSPolicyMap(coll.RLSPolicies),
 		Aliases:           aliases,
 		DBID:              coll.DBID,
 	}
@@ -826,6 +921,7 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 	}
 	mt.removeAllNamesIfMatchedInternal(ctx, dbName, collectionID, allNames)
 	mt.removeCollectionByIDInternal(ctx, collectionID)
+	removed = true
 
 	mlog.Info(ctx, "remove collection",
 		mlog.Int64("dbID", coll.DBID),
@@ -995,15 +1091,6 @@ func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, dbName str
 	return filterUnavailablePartition(coll), nil
 }
 
-// IsCollectionAvailable is a positive-only check of current resident metadata.
-// A miss does not prove absence: callers must use the normal lookup before GC.
-func (mt *MetaTable) IsCollectionAvailable(collectionID int64) bool {
-	mt.ddLock.RLock()
-	defer mt.ddLock.RUnlock()
-	collection := mt.collID2Meta[collectionID]
-	return collection != nil && collection.Available()
-}
-
 func (mt *MetaTable) GetCollectionByID(ctx context.Context, dbName string, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
@@ -1014,6 +1101,19 @@ func (mt *MetaTable) GetCollectionByID(ctx context.Context, dbName string, colle
 // GetCollectionByIDWithMaxTs get collection, dbName can be ignored if ts is max timestamps
 func (mt *MetaTable) GetCollectionByIDWithMaxTs(ctx context.Context, collectionID UniqueID) (*model.Collection, error) {
 	return mt.GetCollectionByID(ctx, "", collectionID, typeutil.MaxTimestamp, false)
+}
+
+func (mt *MetaTable) GetCollectionProperties(ctx context.Context, collectionID UniqueID) ([]*commonpb.KeyValuePair, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+	collection := mt.collID2Meta[collectionID]
+	if collection == nil || !collection.Available() {
+		return nil, merr.WrapErrCollectionNotFound(collectionID)
+	}
+	return collection.Properties, nil
 }
 
 // ListAllAvailCollections returns available collection IDs grouped by database.
@@ -1141,6 +1241,13 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 	header := result.Message.Header()
 	body := result.Message.MustBody()
 
+	var oldView, newView *metacache.CollectionInfo
+	defer func() {
+		// After ddLock is released.
+		if oldView.IsCreated() && newView.IsCreated() {
+			mt.collHooks.NotifyAltered(oldView, newView)
+		}
+	}()
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -1200,7 +1307,9 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 	if dbChanged && oldColl.Available() && newColl.Available() {
 		mt.moveAvailableCollectionCountLocked(oldColl.DBID, newColl.DBID)
 	}
-	mt.collID2Meta[header.CollectionId] = newColl
+	oldView, _ = mt.collViews.Get(newColl.CollectionID)
+	mt.setCollectionLocked(newColl)
+	newView, _ = mt.collViews.Get(newColl.CollectionID)
 	mlog.Info(ctx, "alter collection finished",
 		mlog.String("oldDBName", oldColl.DBName),
 		mlog.String("newDBName", newColl.DBName),
@@ -1240,7 +1349,7 @@ func (mt *MetaTable) BeginTruncateCollection(ctx context.Context, collectionID U
 	if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, newColl.UpdateTimestamp, false); err != nil {
 		return err
 	}
-	mt.collID2Meta[coll.CollectionID] = newColl
+	mt.setCollectionLocked(newColl)
 	mlog.Info(ctx, "update collID2Meta for begin truncate collection",
 		mlog.Int64("collectionID", coll.CollectionID),
 	)
@@ -1271,7 +1380,7 @@ func (mt *MetaTable) TruncateCollection(ctx context.Context, result message.Broa
 	if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, newColl.UpdateTimestamp, false); err != nil {
 		return err
 	}
-	mt.collID2Meta[coll.CollectionID] = newColl
+	mt.setCollectionLocked(newColl)
 	mlog.Info(ctx, "update collID2Meta for truncate collection",
 		mlog.Int64("collectionID", coll.CollectionID),
 	)
@@ -1404,6 +1513,7 @@ func (mt *MetaTable) AddPartition(ctx context.Context, partition *model.Partitio
 	copy(newPartitions, oldPartitions)
 	newPartitions[len(oldPartitions)] = partition.Clone()
 	coll.Partitions = newPartitions
+	mt.setCollectionLocked(coll)
 
 	// Update partition name index
 	if mt.partitionName2ID[partition.CollectionID] == nil {
@@ -1460,7 +1570,8 @@ func (mt *MetaTable) DropPartition(ctx context.Context, collectionID UniqueID, p
 			newPartitions := make([]*model.Partition, len(coll.Partitions))
 			copy(newPartitions, coll.Partitions)
 			newPartitions[idx] = clone
-			mt.collID2Meta[collectionID].Partitions = newPartitions
+			coll.Partitions = newPartitions
+			mt.setCollectionLocked(coll)
 
 			// Remove from partition name index when dropping
 			if mt.partitionName2ID[collectionID] != nil {
@@ -1515,6 +1626,7 @@ func (mt *MetaTable) RemovePartition(ctx context.Context, collectionID UniqueID,
 	copy(newPartitions[:loc], oldPartitions[:loc])
 	copy(newPartitions[loc:], oldPartitions[loc+1:])
 	coll.Partitions = newPartitions
+	mt.setCollectionLocked(coll)
 
 	// Remove from partition name index
 	if mt.partitionName2ID[collectionID] != nil {
@@ -1766,6 +1878,35 @@ func (mt *MetaTable) listAliasesByID(collID UniqueID) []string {
 		return true
 	})
 	return ret
+}
+
+// FeatureUsageSnapshot takes everything the feature usage report needs under a
+// single read lock and in one pass over each index: the databases, the
+// available collections of every database, and the alias total. Listing
+// collections per database instead walks the whole collection map once per
+// database and takes the lock once per database, and the three reads would not
+// describe the same instant.
+//
+// The collection models are shallow clones: the report reads them after the
+// lock is released, and AddPartition / RemovePartition reassign Partitions on
+// the cached object under the write lock.
+func (mt *MetaTable) FeatureUsageSnapshot(ctx context.Context) featureusage.CollectionInput {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	snap := featureusage.CollectionInput{
+		Databases:   maps.Values(mt.dbName2Meta),
+		Collections: make([]*model.Collection, 0, len(mt.collID2Meta)),
+	}
+	for _, coll := range mt.collID2Meta {
+		if coll.Available() {
+			snap.Collections = append(snap.Collections, coll.ShallowClone())
+		}
+	}
+	for _, db := range mt.aliases.listDB() {
+		snap.AliasCount += len(mt.aliases.listCollections(db))
+	}
+	return snap
 }
 
 func (mt *MetaTable) ListAliasesByID(ctx context.Context, collID UniqueID) []string {
@@ -2581,813 +2722,18 @@ func (mt *MetaTable) GetPrivilegeGroupRoles(ctx context.Context, groupName strin
 	return lo.Keys(rolesMap), nil
 }
 
-func (mt *MetaTable) resolveRLSCollection(ctx context.Context, dbName string, collectionName string) (*model.Collection, error) {
-	if funcutil.IsEmptyString(collectionName) {
-		return nil, merr.WrapErrParameterInvalidMsg("collection name is empty")
-	}
-	if funcutil.IsEmptyString(dbName) {
-		dbName = util.DefaultDBName
-	}
-	collection, err := mt.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := common.IsRLSEnabled(collection.Properties...); err != nil {
-		return nil, merr.WrapErrDataIntegrity(err, "invalid RLS properties for collection %d", collection.CollectionID)
-	}
-	return collection, nil
-}
-
-func (mt *MetaTable) reloadCollectionRLSMetadata(ctx context.Context, collection *model.Collection) error {
-	policies, err := mt.catalog.ListRLSPolicies(ctx, collection.CollectionID)
-	if err != nil {
-		return merr.Wrapf(err, "failed to reload RLS policies for collection %d", collection.CollectionID)
-	}
-	var recovered map[string]*model.RLSPolicy
-	if policies != nil {
-		recovered = make(map[string]*model.RLSPolicy, len(policies))
-	}
-	for _, policy := range policies {
-		if policy == nil {
-			continue
-		}
-		if _, duplicate := recovered[policy.PolicyName]; duplicate {
-			return merr.WrapErrDataIntegrityMsg("duplicate RLS policy name %q in collection %d", policy.PolicyName, collection.CollectionID)
-		}
-		cloned := model.CloneRLSPolicy(policy)
-		// Records are keyed by global collection ID. A cross-database rename
-		// can leave the persisted DB ID stale; the owning collection is authoritative.
-		cloned.DBID = collection.DBID
-		recovered[cloned.PolicyName] = cloned
-	}
-	collection.RLSPolicies = recovered
-	return nil
-}
-
-func (mt *MetaTable) reloadCollectionsRLSMetadata(ctx context.Context, collections []*model.Collection) error {
-	for _, collection := range collections {
-		if collection == nil {
-			continue
-		}
-		if _, err := common.IsRLSEnabled(collection.Properties...); err != nil {
-			return merr.WrapErrDataIntegrity(err, "invalid RLS properties for collection %d", collection.CollectionID)
-		}
-	}
-
-	group, groupCtx := errgroup.WithContext(ctx)
-	group.SetLimit(rlsRecoveryConcurrency)
-	// Policies are metadata even while enforcement is disabled.
-	for _, collection := range collections {
-		if collection == nil {
-			continue
-		}
-		group.Go(func() error {
-			return mt.reloadCollectionRLSMetadata(groupCtx, collection)
-		})
-	}
-	return group.Wait()
-}
-
-func upsertCollectionRLSPolicy(collection *model.Collection, policy *model.RLSPolicy) {
-	if collection == nil || policy == nil {
-		return
-	}
-	if collection.RLSPolicies == nil {
-		collection.RLSPolicies = make(map[string]*model.RLSPolicy)
-	}
-	collection.RLSPolicies[policy.PolicyName] = model.CloneRLSPolicy(policy)
-}
-
-func removeCollectionRLSPolicy(collection *model.Collection, policy *model.RLSPolicy) {
-	if collection == nil {
-		return
-	}
-	if cached := collection.RLSPolicies[policy.PolicyName]; cached != nil && cached.PolicyID == policy.PolicyID {
-		delete(collection.RLSPolicies, policy.PolicyName)
-	}
-}
-
-func validateRLSCombinedExpressionLength(policies []*model.RLSPolicy) error {
-	maxExpressionLength := Params.ProxyCfg.RLSMaxCombinedExpressionLength.GetAsInt()
-	rowPolicies := make([]*rlsutil.RowPolicy, 0, len(policies))
-	for _, policy := range policies {
-		if policy != nil {
-			rowPolicies = append(rowPolicies, policy.ToRowPolicy())
-		}
-	}
-	actionSet := make(map[rlsutil.PolicyAction]struct{})
-	for _, policy := range policies {
-		if policy == nil {
-			continue
-		}
-		for _, action := range policy.Actions {
-			actionSet[action] = struct{}{}
-		}
-	}
-	actions := make([]rlsutil.PolicyAction, 0, len(actionSet))
-	for action := range actionSet {
-		actions = append(actions, action)
-	}
-	sort.Slice(actions, func(i, j int) bool {
-		return actions[i] < actions[j]
-	})
-
-	for _, action := range actions {
-		for _, expression := range []struct {
-			kind    string
-			check   bool
-			applies func(rlsutil.PolicyAction) bool
-		}{
-			{
-				kind:    "using",
-				check:   false,
-				applies: rlsActionUsesUsingExpression,
-			},
-			{
-				kind:    "check",
-				check:   true,
-				applies: rlsActionUsesCheckExpression,
-			},
-		} {
-			if !expression.applies(action) {
-				continue
-			}
-			length := rlsutil.CombinedExpressionLength(rowPolicies, action, expression.check)
-			if length > maxExpressionLength {
-				return merr.WrapErrServiceQuotaExceededMsg(
-					"combined RLS %s expression for action %s exceeds max length %d",
-					expression.kind,
-					action.String(),
-					maxExpressionLength,
-				)
-			}
-		}
-	}
-	return nil
-}
-
-func rlsActionUsesUsingExpression(action rlsutil.PolicyAction) bool {
-	switch action {
-	case rlsutil.PolicyActionQuery,
-		rlsutil.PolicyActionQueryIterator,
-		rlsutil.PolicyActionSearch,
-		rlsutil.PolicyActionSearchIterator,
-		rlsutil.PolicyActionHybridSearch,
-		rlsutil.PolicyActionDelete,
-		rlsutil.PolicyActionUpsert:
-		return true
-	default:
-		return false
-	}
-}
-
-func rlsActionUsesCheckExpression(action rlsutil.PolicyAction) bool {
-	return action == rlsutil.PolicyActionInsert || action == rlsutil.PolicyActionUpsert
-}
-
-func upsertRLSPolicyList(policies map[string]*model.RLSPolicy, replacement *model.RLSPolicy) []*model.RLSPolicy {
-	prospective := model.RLSPolicyMapToSlice(policies)
-	for index, policy := range prospective {
-		if policy.PolicyName == replacement.PolicyName {
-			prospective[index] = model.CloneRLSPolicy(replacement)
-			return prospective
-		}
-	}
-	return append(prospective, model.CloneRLSPolicy(replacement))
-}
-
-func validateRLSPolicyExpressions(coll *model.Collection, usingExpr string, checkExpr string) error {
-	for _, expr := range []string{usingExpr, checkExpr} {
-		_, _, tagVariables := funcutil.ConvertRLSTemplateVariables(expr)
-		for tagKey := range tagVariables {
-			if err := rlsutil.ValidateTagKeyWithLimit(tagKey); err != nil {
-				return err
-			}
-		}
-	}
-	return validateRLSPolicyExpressionsWithSchema(coll.ToCollectionSchemaPB(), usingExpr, checkExpr)
-}
-
-func validateRLSPolicyExpressionsWithSchema(schema *schemapb.CollectionSchema, usingExpr string, checkExpr string) error {
-	return validateRLSPolicyExpressionsWithSchemaOptions(schema, usingExpr, checkExpr, true)
-}
-
-func validateRLSPolicyExpressionsWithSchemaOptions(schema *schemapb.CollectionSchema, usingExpr string, checkExpr string, enforceArrayLiteralLimit bool) error {
-	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
-	if err != nil {
-		return merr.Wrap(err, "failed to build schema helper for RLS policy")
-	}
-	return validateRLSPolicyExpressionsWithSchemaHelper(schemaHelper, usingExpr, checkExpr, enforceArrayLiteralLimit)
-}
-
-func validateRLSPolicyExpressionsWithSchemaHelper(schemaHelper *typeutil.SchemaHelper, usingExpr string, checkExpr string, enforceArrayLiteralLimit bool) error {
-	if err := validateRLSPolicyExpression(schemaHelper, "using", usingExpr, enforceArrayLiteralLimit); err != nil {
-		return err
-	}
-	return validateRLSPolicyExpression(schemaHelper, "check", checkExpr, enforceArrayLiteralLimit)
-}
-
-func validateRLSPoliciesWithSchema(policies map[string]*model.RLSPolicy, schema *schemapb.CollectionSchema) error {
-	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
-	if err != nil {
-		return merr.Wrap(err, "failed to build schema helper for RLS policy")
-	}
-	for _, policy := range model.RLSPolicyMapToSlice(policies) {
-		// Existing policies are grandfathered when refreshable creation quotas
-		// are lowered. Schema DDL only checks whether their fields and expression
-		// shapes remain compatible with the proposed schema.
-		if err := validateRLSPolicyExpressionsWithSchemaHelper(schemaHelper, policy.UsingExpr, policy.CheckExpr, false); err != nil {
-			return merr.Wrapf(err, "RLS policy %q is incompatible with schema change", policy.PolicyName)
-		}
-	}
-	return nil
-}
-
-func collectRLSPolicyFieldRefs(coll *model.Collection) (map[int64][]string, error) {
-	fieldRefs := make(map[int64][]string)
-	schemaHelper, err := typeutil.CreateSchemaHelper(coll.ToCollectionSchemaPB())
-	if err != nil {
-		return nil, merr.Wrap(err, "failed to build schema helper for RLS policy dependency check")
-	}
-	for _, policy := range model.RLSPolicyMapToSlice(coll.RLSPolicies) {
-		for _, expr := range []string{policy.UsingExpr, policy.CheckExpr} {
-			refs, err := collectRLSPolicyExprFieldRefs(schemaHelper, expr)
-			if err != nil {
-				return nil, merr.Wrapf(err, "failed to inspect RLS policy %q dependencies", policy.PolicyName)
-			}
-			for _, fieldID := range refs {
-				fieldRefs[fieldID] = append(fieldRefs[fieldID], policy.PolicyName)
-			}
-		}
-	}
-	return fieldRefs, nil
-}
-
-func collectRLSPolicyExprFieldRefs(schemaHelper *typeutil.SchemaHelper, expr string) ([]int64, error) {
-	expr = strings.TrimSpace(expr)
-	if expr == "" {
-		return nil, nil
-	}
-	templateExpr, _, err := toRLSPolicyTemplateExpr(expr)
-	if err != nil {
-		return nil, err
-	}
-	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: schemaHelper.GetTimezone()}
-	parsedExpr, err := planparserv2.ParseExprTemplate(schemaHelper, templateExpr, visitorArgs)
-	if err != nil {
-		return nil, err
-	}
-	return rlsutil.ReferencedFieldIDs(parsedExpr), nil
-}
-
-func validateRLSNoReferencedFieldDropped(coll *model.Collection, droppedFieldIDs []int64) error {
-	if len(droppedFieldIDs) == 0 {
-		return nil
-	}
-	fieldRefs, err := collectRLSPolicyFieldRefs(coll)
-	if err != nil {
-		return err
-	}
-	for _, fieldID := range droppedFieldIDs {
-		if policies := fieldRefs[fieldID]; len(policies) > 0 {
-			sort.Strings(policies)
-			return merr.WrapErrParameterInvalidMsg("field %d is referenced by RLS policies %v and cannot be dropped", fieldID, policies)
-		}
-	}
-	return nil
-}
-
-func validateRLSPolicyExpression(schemaHelper *typeutil.SchemaHelper, exprKind string, expr string, enforceArrayLiteralLimit bool) error {
-	expr = strings.TrimSpace(expr)
-	if expr == "" {
-		return nil
-	}
-	templateExpr, allowedTemplateVariables, err := toRLSPolicyTemplateExpr(expr)
-	if err != nil {
-		return err
-	}
-	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: schemaHelper.GetTimezone()}
-	parsedExpr, err := planparserv2.ParseExprTemplate(schemaHelper, templateExpr, visitorArgs)
-	if err != nil {
-		return merr.WrapErrParameterInvalidErr(err, "invalid RLS %s expression", exprKind)
-	}
-	if err := rlsutil.ValidateParsedExpression(parsedExpr, allowedTemplateVariables); err != nil {
-		return merr.Wrapf(err, "invalid RLS %s expression", exprKind)
-	}
-	if exprKind == "using" {
-		if err := rlsutil.ValidateUsingExpressionSchema(schemaHelper, parsedExpr); err != nil {
-			return merr.Wrapf(err, "invalid RLS %s expression", exprKind)
-		}
-	}
-	if enforceArrayLiteralLimit {
-		if err := validateRLSArrayLiteralLimit(parsedExpr); err != nil {
-			return merr.Wrapf(err, "invalid RLS %s expression", exprKind)
-		}
-	}
-	return nil
-}
-
-func toRLSPolicyTemplateExpr(expr string) (string, map[string]struct{}, error) {
-	if err := rejectRawRLSTemplatePlaceholders(expr); err != nil {
-		return "", nil, err
-	}
-	templateExpr, needsPrincipal, tagVariables := funcutil.ConvertRLSTemplateVariables(expr)
-	allowedTemplateVariables := make(map[string]struct{}, len(tagVariables)+1)
-	if needsPrincipal {
-		allowedTemplateVariables[funcutil.RLSPrincipalTemplateName] = struct{}{}
-	}
-	for tagKey, templateVariable := range tagVariables {
-		if err := rlsutil.ValidateTagKey(tagKey); err != nil {
-			return "", nil, err
-		}
-		allowedTemplateVariables[templateVariable] = struct{}{}
-	}
-	return templateExpr, allowedTemplateVariables, nil
-}
-
-func rejectRawRLSTemplatePlaceholders(expr string) error {
-	// RLS adds its generated template variables after this check. Braces in
-	// string literals are data; braces outside literals are user-supplied raw
-	// template syntax that Proxy cannot populate at runtime.
-	var quote byte
-	escaped := false
-	for i := 0; i < len(expr); i++ {
-		ch := expr[i]
-		if quote != 0 {
-			if escaped {
-				escaped = false
-				continue
-			}
-			if ch == '\\' {
-				escaped = true
-				continue
-			}
-			if ch == quote {
-				quote = 0
-			}
-			continue
-		}
-
-		switch ch {
-		case '\'', '"':
-			quote = ch
-		case '{', '}':
-			return merr.WrapErrParameterInvalidMsg("RLS policy expressions do not support raw template placeholders; use $current_principal or $current_principal_tags['key']")
-		}
-	}
-	return nil
-}
-
-func validateRLSArrayLiteralLimit(expr *planpb.Expr) error {
-	maxElements := Params.ProxyCfg.RLSMaxArrayLiteralElements.GetAsInt()
-	var elements int
-	switch node := expr.GetExpr().(type) {
-	case *planpb.Expr_UnaryExpr:
-		return validateRLSArrayLiteralLimit(node.UnaryExpr.GetChild())
-	case *planpb.Expr_TermExpr:
-		elements = len(node.TermExpr.GetValues())
-	case *planpb.Expr_JsonContainsExpr:
-		elements = len(node.JsonContainsExpr.GetElements())
-	}
-	if elements > maxElements {
-		return merr.WrapErrParameterInvalidMsg("RLS policy expression exceeds max array literal elements %d", maxElements)
-	}
-	return nil
-}
-
-func (mt *MetaTable) PrepareCreateRLSPolicy(ctx context.Context, req *rlsutil.CreateRowPolicyRequest, policyID int64) (*model.RLSPolicy, error) {
-	if req == nil {
-		return nil, merr.WrapErrParameterInvalidMsg("create RLS policy request is nil")
-	}
-	if err := rlsutil.ValidateRequestTarget(req.GetDbName(), req.GetCollectionName()); err != nil {
-		return nil, err
-	}
-	// Validate only the stable lookup bound before checking uniqueness. A
-	// duplicate name is rejected regardless of whether its definition matches
-	// or refreshable creation limits have changed since the original create.
-	if err := rlsutil.ValidatePolicyName(req.GetPolicyName()); err != nil {
-		return nil, err
-	}
-
-	coll, err := mt.resolveRLSCollection(ctx, req.GetDbName(), req.GetCollectionName())
-	if err != nil {
-		return nil, err
-	}
-
-	if _, ok := coll.RLSPolicies[req.GetPolicyName()]; ok {
-		return nil, merr.WrapErrParameterInvalidMsg("RLS policy [%s] already exists", req.GetPolicyName())
-	}
-
-	if err := rlsutil.ValidatePolicy(req.GetPolicyName(), req.GetPolicyType(), req.GetActions(), req.GetUsingExpr(), req.GetCheckExpr()); err != nil {
-		return nil, err
-	}
-	if err := rlsutil.ValidatePolicyDescription(req.GetDescription()); err != nil {
-		return nil, err
-	}
-	if err := validateRLSPolicyExpressions(coll, req.GetUsingExpr(), req.GetCheckExpr()); err != nil {
-		return nil, err
-	}
-
-	policies := coll.RLSPolicies
-	if len(policies) >= Params.ProxyCfg.RLSMaxPoliciesPerCollection.GetAsInt() {
-		return nil, merr.WrapErrServiceQuotaExceeded("unable to create RLS policy because the number of policies has reached the limit")
-	}
-
-	policy := &model.RLSPolicy{
-		DBID:         coll.DBID,
-		CollectionID: coll.CollectionID,
-		PolicyID:     policyID,
-		PolicyName:   req.GetPolicyName(),
-		PolicyType:   req.GetPolicyType(),
-		Actions:      slices.Clone(req.GetActions()),
-		UsingExpr:    req.GetUsingExpr(),
-		CheckExpr:    req.GetCheckExpr(),
-		Description:  req.GetDescription(),
-	}
-	if err := validateRLSCombinedExpressionLength(upsertRLSPolicyList(policies, policy)); err != nil {
-		return nil, err
-	}
-	return policy, nil
-}
-
-func (mt *MetaTable) PrepareUpdateRLSPolicy(ctx context.Context, req *rlsutil.UpdateRowPolicyRequest) (*model.RLSPolicy, error) {
-	if req == nil {
-		return nil, merr.WrapErrParameterInvalidMsg("update RLS policy request is nil")
-	}
-	if err := rlsutil.ValidatePolicyForUpdate(req.GetPolicyName(), req.GetPolicyType(), req.GetActions(), req.GetUsingExpr(), req.GetCheckExpr()); err != nil {
-		return nil, err
-	}
-	if err := rlsutil.ValidatePolicyDescription(req.GetDescription()); err != nil {
-		return nil, err
-	}
-
-	coll, err := mt.resolveRLSCollection(ctx, req.GetDbName(), req.GetCollectionName())
-	if err != nil {
-		return nil, err
-	}
-	if err := validateRLSPolicyExpressions(coll, req.GetUsingExpr(), req.GetCheckExpr()); err != nil {
-		return nil, err
-	}
-
-	oldPolicy, ok := coll.RLSPolicies[req.GetPolicyName()]
-	if !ok {
-		return nil, merr.WrapErrParameterInvalidMsg("RLS policy [%s] does not exist", req.GetPolicyName())
-	}
-
-	policy := &model.RLSPolicy{
-		DBID:         coll.DBID,
-		CollectionID: coll.CollectionID,
-		PolicyID:     oldPolicy.PolicyID,
-		PolicyName:   req.GetPolicyName(),
-		PolicyType:   req.GetPolicyType(),
-		Actions:      slices.Clone(req.GetActions()),
-		UsingExpr:    req.GetUsingExpr(),
-		CheckExpr:    req.GetCheckExpr(),
-		Description:  req.GetDescription(),
-	}
-	return policy, nil
-}
-
-func (mt *MetaTable) PrepareDropRLSPolicy(ctx context.Context, req *rlsutil.DropRowPolicyRequest) (*model.RLSPolicy, error) {
-	if req == nil {
-		return nil, merr.WrapErrParameterInvalidMsg("drop RLS policy request is nil")
-	}
-	if err := rlsutil.ValidatePolicyName(req.GetPolicyName()); err != nil {
-		return nil, err
-	}
-
-	coll, err := mt.resolveRLSCollection(ctx, req.GetDbName(), req.GetCollectionName())
-	if err != nil {
-		return nil, err
-	}
-
-	policy, ok := coll.RLSPolicies[req.GetPolicyName()]
-	if !ok {
-		return &model.RLSPolicy{
-			DBID:         coll.DBID,
-			CollectionID: coll.CollectionID,
-			PolicyName:   req.GetPolicyName(),
-		}, nil
-	}
-	policy = model.CloneRLSPolicy(policy)
-	policy.DBID = coll.DBID
-	policy.CollectionID = coll.CollectionID
-	return policy, nil
-}
-
-func (mt *MetaTable) ApplyAlterRLSPolicy(ctx context.Context, policy *model.RLSPolicy) error {
-	if policy == nil {
-		return merr.WrapErrServiceInternalMsg("RLS policy is nil")
-	}
-	if err := mt.catalog.SaveRLSPolicy(ctx, policy); err != nil {
-		return merr.Wrap(err, "failed to save RLS policy")
-	}
-	mt.ddLock.Lock()
-	defer mt.ddLock.Unlock()
-	upsertCollectionRLSPolicy(mt.collID2Meta[policy.CollectionID], policy)
-	return nil
-}
-
-func (mt *MetaTable) ApplyDropRLSPolicy(ctx context.Context, collectionID int64, policyName string) error {
-	mt.ddLock.RLock()
-	collection := mt.collID2Meta[collectionID]
-	var policy *model.RLSPolicy
-	if collection != nil {
-		policy = model.CloneRLSPolicy(collection.RLSPolicies[policyName])
-	}
-	mt.ddLock.RUnlock()
-	if policy == nil {
-		return nil
-	}
-
-	if err := mt.catalog.DropRLSPolicy(ctx, collectionID, policy.PolicyID); err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
-		return merr.Wrap(err, "failed to drop RLS policy")
-	}
-	mt.ddLock.Lock()
-	defer mt.ddLock.Unlock()
-	removeCollectionRLSPolicy(mt.collID2Meta[collectionID], policy)
-	return nil
-}
-
-func (mt *MetaTable) ListRLSPolicies(ctx context.Context, req *rlsutil.ListRowPoliciesRequest) ([]*rlsutil.RowPolicy, error) {
-	if req == nil {
-		return nil, merr.WrapErrParameterInvalidMsg("list RLS policies request is nil")
-	}
-	coll, err := mt.resolveRLSCollection(ctx, req.GetDbName(), req.GetCollectionName())
-	if err != nil {
-		return nil, err
-	}
-
-	policyModels := model.RLSPolicyMapToSlice(coll.RLSPolicies)
-	policies := make([]*rlsutil.RowPolicy, 0, len(policyModels))
-	for _, policy := range policyModels {
-		policies = append(policies, policy.ToRowPolicy())
-	}
-	return policies, nil
-}
-
-func (mt *MetaTable) GetRLSMetadata(ctx context.Context, collectionID int64, kind rootcoordpb.RLSMetadataKind, principalName string) (*model.RLSMetadata, error) {
-	if collectionID == 0 {
-		return nil, merr.WrapErrServiceInternalMsg("failed to get RLS metadata with empty collection id")
-	}
-	if principalName != "" && kind != rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_PRINCIPALS {
-		return nil, merr.WrapErrServiceInternalMsg("RLS principal filter is only supported for principal metadata")
-	}
-
-	mt.ddLock.RLock()
-	coll := mt.collID2Meta[collectionID]
-	if coll == nil || !coll.Available() {
-		mt.ddLock.RUnlock()
-		return nil, merr.WrapErrCollectionNotFound(collectionID)
-	}
-
-	metadata := &model.RLSMetadata{
-		CollectionID: coll.CollectionID,
-	}
-	loadPrincipals := false
-	switch kind {
-	case rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_ALL, rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_POLICIES:
-		metadata.Policies = model.RLSPolicyMapToSlice(coll.RLSPolicies)
-		loadPrincipals = kind == rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_ALL
-	case rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_PRINCIPALS:
-		loadPrincipals = true
-	default:
-		mt.ddLock.RUnlock()
-		return nil, merr.WrapErrServiceInternalMsg("unsupported RLS metadata kind %s", kind.String())
-	}
-	mt.ddLock.RUnlock()
-
-	var principals []*model.RLSPrincipal
-	if loadPrincipals && principalName == "" {
-		var err error
-		principals, err = mt.catalog.ListRLSPrincipals(ctx, collectionID)
-		if err != nil {
-			return nil, merr.Wrap(err, "failed to list RLS principal metadata")
-		}
-	} else if loadPrincipals {
-		// TODO: Add a bounded Coord-side principal cache for point reads;
-		// never restore startup full loading.
-		principal, err := mt.catalog.GetRLSPrincipal(ctx, collectionID, principalName)
-		missing := errors.Is(err, merr.ErrIoKeyNotFound)
-		if err != nil && !missing {
-			return nil, merr.Wrap(err, "failed to get RLS principal metadata")
-		}
-		if !missing && principal == nil {
-			return nil, merr.WrapErrDataIntegrityMsg("RLS principal metadata is nil for collection %d principal %q", collectionID, principalName)
-		}
-		if !missing {
-			principals = []*model.RLSPrincipal{principal}
-		}
-	}
-
-	mt.ddLock.RLock()
-	coll = mt.collID2Meta[collectionID]
-	if coll == nil || !coll.Available() {
-		mt.ddLock.RUnlock()
-		return nil, merr.WrapErrCollectionNotFound(collectionID)
-	}
-	dbID := coll.DBID
-	mt.ddLock.RUnlock()
-
-	for _, policy := range metadata.Policies {
-		policy.DBID = dbID
-		policy.CollectionID = collectionID
-	}
-	for _, principal := range principals {
-		if principal == nil {
-			return nil, merr.WrapErrDataIntegrityMsg("RLS principal metadata is nil for collection %d", collectionID)
-		}
-		principal.DBID = dbID
-		principal.CollectionID = collectionID
-	}
-	metadata.Principals = principals
-	return metadata, nil
-}
-
-func (mt *MetaTable) PrepareSetRLSPrincipalTags(ctx context.Context, req *rlsutil.SetRLSPrincipalTagsRequest) (*model.RLSPrincipal, error) {
-	if req == nil {
-		return nil, merr.WrapErrParameterInvalidMsg("set RLS principal tags request is nil")
-	}
-	if err := rlsutil.ValidatePrincipalName(req.GetPrincipalName()); err != nil {
-		return nil, err
-	}
-	if err := rlsutil.ValidateTags(req.GetTags()); err != nil {
-		return nil, err
-	}
-
-	coll, err := mt.resolveRLSCollection(ctx, req.GetDbName(), req.GetCollectionName())
-	if err != nil {
-		return nil, err
-	}
-
-	existingPrincipal, err := mt.catalog.GetRLSPrincipal(ctx, coll.CollectionID, req.GetPrincipalName())
-	isNew := false
-	if errors.Is(err, merr.ErrIoKeyNotFound) {
-		isNew = true
-		if err := rlsutil.ValidatePrincipalNameWithLimit(req.GetPrincipalName()); err != nil {
-			return nil, err
-		}
-	} else if err != nil {
-		return nil, merr.Wrap(err, "failed to get RLS principal")
-	}
-
-	mergedTags := maps.Clone(req.GetTags())
-	if !isNew {
-		mergedTags = maps.Clone(existingPrincipal.Tags)
-		if mergedTags == nil {
-			mergedTags = make(map[string]rlsutil.TagValue, len(req.GetTags()))
-		}
-		for key, value := range req.GetTags() {
-			mergedTags[key] = value
-		}
-		if len(mergedTags) > Params.ProxyCfg.RLSMaxTagsPerPrincipal.GetAsInt() {
-			return nil, merr.WrapErrServiceQuotaExceeded("unable to set RLS principal tags because the number of tags has reached the limit")
-		}
-	}
-
-	principal := &model.RLSPrincipal{
-		DBID:          coll.DBID,
-		CollectionID:  coll.CollectionID,
-		PrincipalName: req.GetPrincipalName(),
-		Tags:          mergedTags,
-	}
-	if err := rlsutil.ValidatePrincipalTagsRecordSize(principal.PrincipalName, principal.Tags); err != nil {
-		return nil, err
-	}
-	return principal, nil
-}
-
-func (mt *MetaTable) GetRLSPrincipalTags(ctx context.Context, req *rlsutil.GetRLSPrincipalTagsRequest) (map[string]rlsutil.TagValue, error) {
-	if req == nil {
-		return nil, merr.WrapErrParameterInvalidMsg("get RLS principal tags request is nil")
-	}
-	if err := rlsutil.ValidatePrincipalName(req.GetPrincipalName()); err != nil {
-		return nil, err
-	}
-	coll, err := mt.resolveRLSCollection(ctx, req.GetDbName(), req.GetCollectionName())
-	if err != nil {
-		return nil, err
-	}
-
-	principal, err := mt.catalog.GetRLSPrincipal(ctx, coll.CollectionID, req.GetPrincipalName())
-	if err != nil {
-		if errors.Is(err, merr.ErrIoKeyNotFound) {
-			return nil, merr.WrapErrParameterInvalidMsg("RLS principal [%s] does not exist", req.GetPrincipalName())
-		}
-		return nil, merr.Wrap(err, "failed to get RLS principal")
-	}
-	return maps.Clone(principal.Tags), nil
-}
-
-func (mt *MetaTable) ListRLSPrincipals(ctx context.Context, req *rlsutil.ListRLSPrincipalsRequest) ([]string, error) {
-	if req == nil {
-		return nil, merr.WrapErrParameterInvalidMsg("list RLS principals request is nil")
-	}
-	coll, err := mt.resolveRLSCollection(ctx, req.GetDbName(), req.GetCollectionName())
-	if err != nil {
-		return nil, err
-	}
-
-	principals, err := mt.catalog.ListRLSPrincipals(ctx, coll.CollectionID)
-	if err != nil {
-		return nil, merr.Wrap(err, "failed to list RLS principals")
-	}
-	mt.ddLock.RLock()
-	current := mt.collID2Meta[coll.CollectionID]
-	available := current != nil && current.Available()
-	mt.ddLock.RUnlock()
-	if !available {
-		return nil, merr.WrapErrCollectionNotFound(coll.CollectionID)
-	}
-	names := make([]string, len(principals))
-	for i, principal := range principals {
-		if principal == nil {
-			return nil, merr.WrapErrDataIntegrityMsg("RLS principal metadata is nil for collection %d", coll.CollectionID)
-		}
-		names[i] = principal.PrincipalName
-	}
-	sort.Strings(names)
-	return names, nil
-}
-
-func (mt *MetaTable) PrepareDeleteRLSPrincipalTags(ctx context.Context, req *rlsutil.DeleteRLSPrincipalTagsRequest) (*model.RLSPrincipal, bool, error) {
-	if req == nil {
-		return nil, false, merr.WrapErrParameterInvalidMsg("delete RLS principal tags request is nil")
-	}
-	if err := rlsutil.ValidatePrincipalName(req.GetPrincipalName()); err != nil {
-		return nil, false, err
-	}
-	tagKeys, err := rlsutil.ValidateAndDeduplicateTagKeys(req.GetTagKeys())
-	if err != nil {
-		return nil, false, err
-	}
-
-	coll, err := mt.resolveRLSCollection(ctx, req.GetDbName(), req.GetCollectionName())
-	if err != nil {
-		return nil, false, err
-	}
-
-	principal, err := mt.catalog.GetRLSPrincipal(ctx, coll.CollectionID, req.GetPrincipalName())
-	if err != nil {
-		if errors.Is(err, merr.ErrIoKeyNotFound) {
-			return &model.RLSPrincipal{
-				DBID:          coll.DBID,
-				CollectionID:  coll.CollectionID,
-				PrincipalName: req.GetPrincipalName(),
-			}, true, nil
-		}
-		return nil, false, merr.Wrap(err, "failed to get RLS principal")
-	}
-	if len(tagKeys) == 0 {
-		principal = model.CloneRLSPrincipal(principal)
-		principal.DBID = coll.DBID
-		principal.CollectionID = coll.CollectionID
-		return principal, true, nil
-	}
-
-	tags := maps.Clone(principal.Tags)
-	for _, key := range tagKeys {
-		delete(tags, key)
-	}
-	if len(tags) == 0 {
-		principal = model.CloneRLSPrincipal(principal)
-		principal.DBID = coll.DBID
-		principal.CollectionID = coll.CollectionID
-		return principal, true, nil
-	}
-	principal = model.CloneRLSPrincipal(principal)
-	principal.DBID = coll.DBID
-	principal.CollectionID = coll.CollectionID
-	principal.Tags = tags
-	return principal, false, nil
-}
-
-func (mt *MetaTable) ApplyAlterRLSPrincipal(ctx context.Context, principal *model.RLSPrincipal) error {
-	if principal == nil {
-		return merr.WrapErrServiceInternalMsg("RLS principal is nil")
-	}
-	if err := mt.catalog.SaveRLSPrincipal(ctx, principal); err != nil {
-		return merr.Wrap(err, "failed to save RLS principal")
-	}
-	return nil
-}
-
-func (mt *MetaTable) ApplyDropRLSPrincipal(ctx context.Context, collectionID int64, principalName string) error {
-	if err := mt.catalog.DropRLSPrincipal(ctx, collectionID, principalName); err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
-		return merr.Wrap(err, "failed to drop RLS principal")
-	}
-	return nil
-}
-
 func (mt *MetaTable) AddFileResource(ctx context.Context, resource *internalpb.FileResourceInfo) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
 	if old, ok := mt.fileResourceName2Meta[resource.Name]; ok {
-		if old.Path == resource.Path {
+		if old.Path == resource.Path && old.Id == resource.Id {
 			return nil
 		}
-		return merr.WrapErrParameterInvalidMsg("file resource %s already exists", resource.Name)
+		return merr.WrapErrServiceInternalMsg("file resource %s conflicts with persisted resource %d", resource.Name, old.Id)
+	}
+	if old, ok := mt.fileResourceID2Meta[resource.Id]; ok {
+		return merr.WrapErrServiceInternalMsg("file resource ID %d is already used by %s", resource.Id, old.Name)
 	}
 
 	err := mt.catalog.SaveFileResource(ctx, resource, mt.fileResourceVersion+1)
@@ -3401,13 +2747,26 @@ func (mt *MetaTable) AddFileResource(ctx context.Context, resource *internalpb.F
 	return nil
 }
 
-func (mt *MetaTable) RemoveFileResource(ctx context.Context, name string) (error, bool) {
+func (mt *MetaTable) PrepareRemoveFileResource(ctx context.Context, name string) (*internalpb.FileResourceInfo, error) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+	resource, ok := mt.fileResourceName2Meta[name]
+	if !ok {
+		return nil, nil
+	}
+	if mt.fileResourceRefCnt[resource.Id] > 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("file resource %s is still in use: %d", resource.Name, mt.fileResourceRefCnt[resource.Id])
+	}
+	return proto.Clone(resource).(*internalpb.FileResourceInfo), nil
+}
+
+func (mt *MetaTable) RemoveFileResource(ctx context.Context, name string, resourceID int64) (error, bool) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
-	if resource, ok := mt.fileResourceName2Meta[name]; ok {
+	if resource, ok := mt.fileResourceName2Meta[name]; ok && resource.Id == resourceID {
 		if mt.fileResourceRefCnt[resource.Id] > 0 {
-			return merr.WrapErrParameterInvalidMsg("file resource %s is still in use: %d", resource.Name, mt.fileResourceRefCnt[resource.Id]), false
+			return merr.WrapErrServiceUnavailableMsg("file resource %s is still in use: %d", resource.Name, mt.fileResourceRefCnt[resource.Id]), false
 		}
 
 		err := mt.catalog.RemoveFileResource(ctx, resource.Id, mt.fileResourceVersion+1)
@@ -3429,6 +2788,31 @@ func (mt *MetaTable) ListFileResource(ctx context.Context) ([]*internalpb.FileRe
 	defer mt.ddLock.RUnlock()
 
 	return lo.Values(mt.fileResourceID2Meta), mt.fileResourceVersion
+}
+
+// FindFileResource returns a copy of the named resource, or nil if it is absent.
+func (mt *MetaTable) FindFileResource(ctx context.Context, name string) *internalpb.FileResourceInfo {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+	if resource := mt.fileResourceName2Meta[name]; resource != nil {
+		return proto.Clone(resource).(*internalpb.FileResourceInfo)
+	}
+	return nil
+}
+
+// GetFileResourcesByNames resolves unbound names together under the metadata lock.
+func (mt *MetaTable) GetFileResourcesByNames(ctx context.Context, names ...string) ([]*internalpb.FileResourceInfo, error) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+	resources := make([]*internalpb.FileResourceInfo, 0, len(names))
+	for _, name := range names {
+		resource, ok := mt.fileResourceName2Meta[name]
+		if !ok {
+			return nil, merr.WrapErrParameterInvalidMsg("file resource %s not found", name)
+		}
+		resources = append(resources, proto.Clone(resource).(*internalpb.FileResourceInfo))
+	}
+	return resources, nil
 }
 
 func (mt *MetaTable) HasFileResource(ctx context.Context) bool {

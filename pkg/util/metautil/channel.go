@@ -100,6 +100,14 @@ func (c Channel) PhysicalName() string {
 	return c.ChannelName(c.channelIdx)
 }
 
+func (c Channel) CollectionID() int64 {
+	return c.collectionID
+}
+
+func (c Channel) ShardIdx() int64 {
+	return c.shardIdx
+}
+
 func (c Channel) VirtualName() string {
 	return funcutil.GetVirtualChannel(c.PhysicalName(), c.collectionID, int(c.shardIdx))
 }

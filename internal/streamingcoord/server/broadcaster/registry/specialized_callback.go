@@ -30,8 +30,6 @@ var (
 	RegisterTruncateCollectionV2AckCallback = registerMessageAckCallback[*message.TruncateCollectionMessageHeader, *message.TruncateCollectionMessageBody]
 	RegisterAlterLoadConfigV2AckCallback    = registerMessageAckCallback[*message.AlterLoadConfigMessageHeader, *message.AlterLoadConfigMessageBody]
 	RegisterDropLoadConfigV2AckCallback     = registerMessageAckCallback[*message.DropLoadConfigMessageHeader, *message.DropLoadConfigMessageBody]
-	RegisterAlterRLSMetadataV2AckCallback   = registerMessageAckCallback[*message.AlterRLSMetadataMessageHeader, *message.AlterRLSMetadataMessageBody]
-	RegisterDropRLSMetadataV2AckCallback    = registerMessageAckCallback[*message.DropRLSMetadataMessageHeader, *message.DropRLSMetadataMessageBody]
 
 	// Partition
 	RegisterCreatePartitionV1AckCallback = registerMessageAckCallback[*message.CreatePartitionMessageHeader, *message.CreatePartitionRequest]
@@ -67,6 +65,10 @@ var (
 	// Resource Group
 	RegisterAlterResourceGroupV2AckCallback = registerMessageAckCallback[*message.AlterResourceGroupMessageHeader, *message.AlterResourceGroupMessageBody]
 	RegisterDropResourceGroupV2AckCallback  = registerMessageAckCallback[*message.DropResourceGroupMessageHeader, *message.DropResourceGroupMessageBody]
+
+	// File resources
+	RegisterAddFileResourceV2AckCallback    = registerMessageAckCallback[*message.AddFileResourceMessageHeader, *message.AddFileResourceMessageBody]
+	RegisterRemoveFileResourceV2AckCallback = registerMessageAckCallback[*message.RemoveFileResourceMessageHeader, *message.RemoveFileResourceMessageBody]
 
 	// Snapshot
 	RegisterCreateSnapshotV2AckCallback            = registerMessageAckCallback[*message.CreateSnapshotMessageHeader, *message.CreateSnapshotMessageBody]
@@ -105,8 +107,6 @@ func resetMessageAckCallbacks() {
 		message.MessageTypeTruncateCollectionV2: syncutil.NewFuture[messageInnerAckCallback](),
 		message.MessageTypeAlterLoadConfigV2:    syncutil.NewFuture[messageInnerAckCallback](),
 		message.MessageTypeDropLoadConfigV2:     syncutil.NewFuture[messageInnerAckCallback](),
-		message.MessageTypeAlterRLSMetadataV2:   syncutil.NewFuture[messageInnerAckCallback](),
-		message.MessageTypeDropRLSMetadataV2:    syncutil.NewFuture[messageInnerAckCallback](),
 
 		// Partition
 		message.MessageTypeCreatePartitionV1: syncutil.NewFuture[messageInnerAckCallback](),
@@ -142,6 +142,10 @@ func resetMessageAckCallbacks() {
 		// Resource Group
 		message.MessageTypeAlterResourceGroupV2: syncutil.NewFuture[messageInnerAckCallback](),
 		message.MessageTypeDropResourceGroupV2:  syncutil.NewFuture[messageInnerAckCallback](),
+
+		// File resources
+		message.MessageTypeAddFileResourceV2:    syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeRemoveFileResourceV2: syncutil.NewFuture[messageInnerAckCallback](),
 
 		// Snapshot
 		message.MessageTypeCreateSnapshotV2:            syncutil.NewFuture[messageInnerAckCallback](),

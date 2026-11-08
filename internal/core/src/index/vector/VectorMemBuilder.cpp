@@ -98,6 +98,7 @@ struct PreparedInput {
     // views it, so it has to outlive every Build/Add call it is attached to.
     std::vector<uint8_t> validity_bitmap;
     bool nullable{false};
+    knowhere::BuildOptions options;
 
     // Publishes the whole public row domain on the first knowhere call. Every
     // later batch of the same sealed build must still carry id-map input (an
@@ -117,6 +118,7 @@ PrepareInput(int64_t logical_rows,
              ValidityView parent_validity,
              std::optional<std::span<const size_t>> embedding_offsets,
              bool has_scalar_fields,
+             DataType elem_type,
              const std::optional<int64_t>& expected_rows,
              const knowhere::Json& build_params,
              KnowhereEngine& engine) {
@@ -126,7 +128,11 @@ PrepareInput(int64_t logical_rows,
     AssertInfo(logical_rows > 0, "memory vector logical row count is negative");
     AssertInfo(physical_rows >= 0,
                "memory vector physical row count is negative");
-    if (expected_rows.has_value()) {
+    const bool embedding_list = engine.IsEmbeddingList();
+    // The expected count is the segment row count; an element-level
+    // VECTOR_ARRAY input counts logical elements instead.
+    const bool element_level = elem_type != DataType::NONE && !embedding_list;
+    if (expected_rows.has_value() && !element_level) {
         AssertInfo(logical_rows == *expected_rows,
                    "memory vector input row count {} disagrees with expected "
                    "{}",
@@ -135,7 +141,6 @@ PrepareInput(int64_t logical_rows,
     }
 
     const auto valid_parents = CountValidParents(logical_rows, parent_validity);
-    const bool embedding_list = engine.IsEmbeddingList();
     if (embedding_list) {
         AssertInfo(!has_scalar_fields,
                    "embedding-list vector input cannot carry scalar fields");
@@ -164,21 +169,13 @@ PrepareInput(int64_t logical_rows,
 
     PreparedInput result;
     if (parent_validity) {
-        // The engine owns the nullable mapping through knowhere's IdMap
-        // (#50524). Arm it before any Build/Add so knowhere derives both
-        // mapping directions from the bitmap attached to the dataset.
-        auto& id_map = engine.native_index.GetIdMap();
-        AssertInfo(!id_map.IsEnabled(),
-                   "memory vector builder received an engine whose id map is "
-                   "already armed");
-        id_map.SetType(knowhere::IdMap::Type::SEALED);
         const auto mmap_flags = GetIdMapMmapFlags(build_params);
         if (mmap_flags.Any()) {
             const auto local_dir =
                 GetValueFromConfig<std::string>(build_params, "local_dir");
             AssertInfo(local_dir.has_value() && !local_dir->empty(),
                        "nullable memory vector mmap requires local_dir");
-            ConfigureIdMapMmap(id_map, mmap_flags, *local_dir);
+            result.options.mmap = NullableMmapOptions(mmap_flags, *local_dir);
         }
         result.validity_bitmap =
             PackValidityBitmap(parent_validity, logical_rows);
@@ -213,8 +210,8 @@ BuildIdMapOnly(KnowhereEngine& engine,
     }
     dataset->SetIdMapData(prepared.IdMapDataFor(logical_rows, true));
     auto config = PrepareBuildConfig(build_params);
-    const auto status =
-        engine.native_index.Build(dataset, config, engine.UseBuildPool());
+    const auto status = engine.native_index.Build(
+        dataset, config, engine.UseBuildPool(), prepared.options);
     if (status != knowhere::Status::success) {
         ThrowInfo(KnowhereBuildStatusToErrorCode(status),
                   "failed to publish the nullable memory vector id map: "
@@ -222,9 +219,15 @@ BuildIdMapOnly(KnowhereEngine& engine,
                   static_cast<int>(status),
                   knowhere::Status2String(status));
     }
-    AssertInfo(static_cast<int64_t>(engine.native_index.GetIdMap().InCount()) ==
-                   prepared.valid_parents,
-               "memory vector validity count changed during build");
+    const auto valid_count = engine.native_index.ValidCount();
+    if (!valid_count.has_value()) {
+        ThrowInfo(KnowhereStatusToErrorCode(valid_count.error()),
+                  "failed to read built validity count: {}",
+                  valid_count.what());
+    }
+    AssertInfo(
+        static_cast<int64_t>(valid_count.value()) == prepared.valid_parents,
+        "memory vector validity count changed during build");
 }
 
 template <typename T>
@@ -383,7 +386,8 @@ VectorMemBuilder<T>::VectorMemBuilder(
                                    std::move(metric_type),
                                    version,
                                    use_knowhere_build_pool)),
-      build_params_(std::move(build_params)) {
+      build_params_(std::move(build_params)),
+      elem_type_(elem_type) {
     constexpr auto physical_type = PhysicalVectorDataType<T>();
     AssertInfo(dim >= 0 && (dim != 0 ||
                             physical_type == DataType::VECTOR_SPARSE_U32_F32),
@@ -419,6 +423,14 @@ VectorMemBuilder<T>::InputSpec() const {
 }
 
 template <typename T>
+bool
+VectorMemBuilder<T>::TryReserveBuild(const BuildInputShape& shape) {
+    EnsureOpen("reserve");
+    return vector_builder::TryReserveBuild(
+        engine_.native_index, build_params_, shape);
+}
+
+template <typename T>
 storage::ArtifactPtr
 VectorMemBuilder<T>::Build(const VectorBuildInput<T>& input) && {
     EnsureOpen("build");
@@ -436,6 +448,7 @@ VectorMemBuilder<T>::Build(const VectorBuildInput<T>& input) && {
                                            input.parent_validity,
                                            input.embedding_offsets,
                                            !input.scalar_fields.empty(),
+                                           elem_type_,
                                            expected_rows_,
                                            build_params_,
                                            engine);
@@ -456,6 +469,8 @@ VectorMemBuilder<T>::Build(const VectorBuildInput<T>& input) && {
                                build_params_,
                                is_sparse);
             }
+            // Empty lists bypass Knowhere Build but still produce an artifact.
+            engine.native_index.Node()->ReleaseBuildReservation();
             auto offsets = std::vector<size_t>(input.embedding_offsets->begin(),
                                                input.embedding_offsets->end());
             return std::make_unique<VectorMemArtifact>(std::move(engine),
@@ -491,8 +506,11 @@ VectorMemBuilder<T>::Build(const VectorBuildInput<T>& input) && {
         }
 
         auto config = PrepareBuildConfig(build_params_);
-        const auto status =
-            engine.native_index.Build(dataset, config, engine.UseBuildPool());
+        const auto status = engine.native_index.Build(dataset,
+                                                      config,
+                                                      engine.UseBuildPool(),
+                                                      prepared.options,
+                                                      input.op_context);
         if (status != knowhere::Status::success) {
             ThrowInfo(KnowhereBuildStatusToErrorCode(status),
                       "failed to build memory vector index: status {} ({})",
@@ -503,13 +521,14 @@ VectorMemBuilder<T>::Build(const VectorBuildInput<T>& input) && {
         // queries and raw-vector retrieval still use the input dimension.
         engine.SetDim(prepared.embedding_list ? input.dim
                                               : engine.native_index.Dim());
-        // An embedding-list dataset searched with an ordinary metric builds a
-        // flat vector index, and knowhere then materializes an element-domain
-        // identity map instead of consuming the list validity, so the row
-        // count check only holds for row-domain builds.
         if (prepared.nullable && !prepared.embedding_list) {
-            AssertInfo(static_cast<int64_t>(
-                           engine.native_index.GetIdMap().InCount()) ==
+            const auto valid_count = engine.native_index.ValidCount();
+            if (!valid_count.has_value()) {
+                ThrowInfo(KnowhereStatusToErrorCode(valid_count.error()),
+                          "failed to read built validity count: {}",
+                          valid_count.what());
+            }
+            AssertInfo(static_cast<int64_t>(valid_count.value()) ==
                            prepared.valid_parents,
                        "memory vector validity count changed during build");
         }
@@ -521,7 +540,7 @@ VectorMemBuilder<T>::Build(const VectorBuildInput<T>& input) && {
 }
 
 template <typename T>
-storage::ArtifactPtr
+std::unique_ptr<VectorMemArtifact>
 VectorMemBuilder<T>::Build(const InterimVectorBuildInput<T>& input) && {
     EnsureOpen("build interim index");
     sealed_ = true;
@@ -535,6 +554,7 @@ VectorMemBuilder<T>::Build(const InterimVectorBuildInput<T>& input) && {
                                            input.parent_validity,
                                            std::nullopt,
                                            false,
+                                           elem_type_,
                                            expected_rows_,
                                            build_params_,
                                            engine);
@@ -572,8 +592,10 @@ VectorMemBuilder<T>::Build(const InterimVectorBuildInput<T>& input) && {
             const auto status =
                 built ? engine.native_index.Add(
                             dataset, config, engine.UseBuildPool())
-                      : engine.native_index.Build(
-                            dataset, config, engine.UseBuildPool());
+                      : engine.native_index.Build(dataset,
+                                                  config,
+                                                  engine.UseBuildPool(),
+                                                  prepared.options);
             if (status != knowhere::Status::success) {
                 ThrowInfo(KnowhereBuildStatusToErrorCode(status),
                           "failed to {} interim memory vector index: status "
@@ -588,8 +610,13 @@ VectorMemBuilder<T>::Build(const InterimVectorBuildInput<T>& input) && {
                    "non-empty interim vector input contains no build chunk");
         engine.SetDim(engine.native_index.Dim());
         if (prepared.nullable) {
-            AssertInfo(static_cast<int64_t>(
-                           engine.native_index.GetIdMap().InCount()) ==
+            const auto valid_count = engine.native_index.ValidCount();
+            if (!valid_count.has_value()) {
+                ThrowInfo(KnowhereStatusToErrorCode(valid_count.error()),
+                          "failed to read built validity count: {}",
+                          valid_count.what());
+            }
+            AssertInfo(static_cast<int64_t>(valid_count.value()) ==
                            prepared.valid_parents,
                        "interim vector validity count changed during build");
         }

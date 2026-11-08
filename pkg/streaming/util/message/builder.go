@@ -154,8 +154,8 @@ func (b *mutableMesasgeBuilder[H, B]) WithHeader(h H) *mutableMesasgeBuilder[H, 
 // WithNotPersist creates a new builder with not persisted property.
 func (b *mutableMesasgeBuilder[H, B]) WithNotPersisted() *mutableMesasgeBuilder[H, B] {
 	messageType := MustGetMessageTypeWithVersion[H, B]()
-	if messageType.MessageType != MessageTypeTimeTick {
-		panic("only time tick message can be not persisted")
+	if messageType.MessageType != MessageTypeTimeTick && messageType.MessageType != MessageTypeMVCCBarrier {
+		panic("only sync confirmation messages can be not persisted")
 	}
 	b.WithProperty(messageNotPersisteted, "")
 	return b

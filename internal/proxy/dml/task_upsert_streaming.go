@@ -139,6 +139,7 @@ func (ut *UpsertTask) appendUpsertAttempt(ctx context.Context, ez *message.Ciphe
 		}
 	}
 	resp := streaming.WAL().AppendMessages(ctx, messages...)
+	invalidateMismatchedWriteSchema(ctx, ut.GetMetaCache(), ut.collectionID, resp)
 	appendErr := resp.UnwrapFirstError()
 	if ut.req.GetPartialUpdate() {
 		appendErr = unwrapPartialUpdateAppendError(resp)
@@ -261,6 +262,7 @@ func (ut *UpsertTask) packDeleteMessage(ctx context.Context, ez *message.CipherC
 				}).
 				WithBody(deleteMsg.DeleteRequest).
 				WithVChannel(vchannel).
+				WithCipher(ez).
 				BuildMutable()
 			if err != nil {
 				return nil, err

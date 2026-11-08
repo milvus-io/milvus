@@ -70,8 +70,16 @@ class RestImportTestBase(TestBase):
         t0 = time.time()
         last_count = None
         last_refresh_rsp = None
+        # refresh_load answers ErrCollectionNotLoaded (101) / ErrCollectionNotFullyLoaded (103)
+        # while the load triggered by collection creation is still in progress. That is a
+        # transient server state, not an import failure, so keep polling instead of asserting
+        # on the first response; the timeout error below still reports the last response.
+        pending_load_codes = {101, 103}
         while time.time() - t0 < timeout:
             last_refresh_rsp = self.collection_client.refresh_load(collection_name, db_name=db_name)
+            if last_refresh_rsp.get("code") in pending_load_codes:
+                time.sleep(2)
+                continue
             assert last_refresh_rsp.get("code") == 0, last_refresh_rsp
             last_count = self._query_count(
                 collection_name,
@@ -3011,7 +3019,7 @@ class TestCreateImportJob(RestImportTestBase):
                 assert False, "Import job timeout"
 
     def test_import_parquet_vector_dim_mismatch(self):
-        """Test Parquet import with wrong vector dimension - should fail"""
+        """Wrong Parquet vector dimensions must fail in V2/V3 without publishing rows."""
         name = gen_collection_name()
         dim = 128
         num_entities = 3000
@@ -3056,14 +3064,33 @@ class TestCreateImportJob(RestImportTestBase):
         while not finished:
             rsp = self.import_job_client.get_import_job_progress(job_id)
             if rsp["data"]["state"] == "Failed":
-                reason = rsp["data"].get("reason", "").lower()
-                assert "dim" in reason or "dimension" in reason or "mismatch" in reason
+                actual_reason = rsp["data"].get("reason", "").lower()
+                # IV3-FN-21: V2/V3 readers may report either diagnostic; filenames alone must never match.
+                assert (
+                    f"length of vector is not aligned: expected {dim} but got {wrong_dim}:" in actual_reason
+                    and "data type: floatvector" in actual_reason
+                ) or (
+                    f"expected dim '{dim}' for field 'vector' with type 'floatvector', got dim '{wrong_dim}'"
+                    in actual_reason
+                ), actual_reason
                 finished = True
             elif rsp["data"]["state"] == "Completed":
                 assert False, "Import should have failed due to vector dimension mismatch in Parquet"
             time.sleep(5)
             if time.time() - t0 > IMPORT_TIMEOUT:
                 assert False, "Import job timeout"
+
+        # Reload to inspect the current persisted view, not an older loaded empty view.
+        rsp = self.collection_client.collection_release(collection_name=name)
+        assert rsp["code"] == 0, rsp
+        rsp = self.collection_client.collection_load(collection_name=name)
+        assert rsp["code"] == 0, rsp
+        self.wait_load_completed(name)
+        assert self._query_count(name) == 0
+        rsp = self.vector_client.vector_query(
+            {"collectionName": name, "filter": "id >= 0", "outputFields": ["id"], "limit": 1}, timeout=1
+        )
+        assert rsp["code"] == 0 and rsp.get("data") == [], rsp
 
     def test_import_parquet_with_nullable_and_default_fields(self):
         """Test Parquet import with nullable and default fields missing - should auto-fill"""

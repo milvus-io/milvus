@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
@@ -507,6 +508,7 @@ func collectIdempotentRepackOffsets(t *testing.T, msgs []message.MutableMessage,
 }
 
 func TestInsertTaskPreExecuteTextRequiresStorageV3(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
 	t.Cleanup(func() {
 		paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
@@ -817,6 +819,7 @@ func TestInsertTask(t *testing.T) {
 }
 
 func TestMaxInsertSize(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	newIDAllocator := func(t *testing.T) *allocator.IDAllocator {
 		ctx, cancel := context.WithCancel(context.Background())
 		t.Cleanup(cancel)
@@ -961,6 +964,7 @@ func TestMaxInsertSize(t *testing.T) {
 }
 
 func TestInsertTask_KeepUserPK_WhenAllowInsertAutoIDTrue(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	paramtable.Init()
 	// run auto-id path with field count check; allow user to pass PK
 	paramtable.Get().Save(paramtable.Get().ProxyCfg.SkipAutoIDCheck.Key, "false")
@@ -1057,6 +1061,7 @@ func TestInsertTask_KeepUserPK_WhenAllowInsertAutoIDTrue(t *testing.T) {
 }
 
 func TestInsertTask_Function(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	paramtable.Init()
 	paramtable.Get().CredentialCfg.Credential.GetFunc = func() map[string]string {
 		return map[string]string{
@@ -1192,6 +1197,7 @@ func TestInsertTask_Function(t *testing.T) {
 }
 
 func TestInsertTaskForSchemaMismatch(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	mockCache := NewMockCache(t)
 	ctx := context.Background()
 
@@ -1224,6 +1230,7 @@ func TestInsertTaskForSchemaMismatch(t *testing.T) {
 }
 
 func TestInsertTask_Namespace(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	paramtable.Init()
 	cache := NewMockCache(t)
 	cache.On(

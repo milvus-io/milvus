@@ -598,6 +598,14 @@ AddProjectedProfileVariants(BackendCatalog& catalog,
             spec.load_params = {{INDEX_TYPE, ProjectedIndexType(family)}};
             spec.enable_mmap = mmap;
             spec.load_families = ProjectedLoadFamilies(family, value_type);
+            if (std::string_view(family) == families::kHybrid &&
+                build_field_type == DataType::ARRAY) {
+                spec.build_params[SCALAR_INDEX_ENGINE_VERSION] =
+                    kArrayHybridStlSortMinVersion;
+                spec.build_params[ENABLE_ARRAY_SORT_INDEX] = true;
+                spec.load_families = {
+                    families::kBitmap, families::kSort, families::kInverted};
+            }
             spec.input_shape = BackendInputShape::JsonProjected;
             spec.field_type = DataType::JSON;
             spec.build_field_type = build_field_type;
@@ -676,6 +684,48 @@ AddProjectedProfiles(BackendCatalog& catalog) {
                                       "BOOL",
                                       DataType::BOOL);
 
+    AddProjectedProfileVariants<ArrayView>(catalog,
+                                           "JsonProjectedHybridArrayBool",
+                                           families::kHybrid,
+                                           DataType::BOOL,
+                                           "ARRAY_BOOL",
+                                           DataType::ARRAY,
+                                           DataType::BOOL);
+    AddProjectedProfileVariants<ArrayView>(catalog,
+                                           "JsonProjectedHybridArrayDouble",
+                                           families::kHybrid,
+                                           DataType::DOUBLE,
+                                           "ARRAY_DOUBLE",
+                                           DataType::ARRAY,
+                                           DataType::DOUBLE);
+    AddProjectedProfileVariants<ArrayView>(catalog,
+                                           "JsonProjectedHybridArrayVarchar",
+                                           families::kHybrid,
+                                           DataType::VARCHAR,
+                                           "ARRAY_VARCHAR",
+                                           DataType::ARRAY,
+                                           DataType::VARCHAR);
+    AddProjectedProfileVariants<ArrayView>(catalog,
+                                           "JsonProjectedSortedArrayBool",
+                                           families::kSort,
+                                           DataType::BOOL,
+                                           "ARRAY_BOOL",
+                                           DataType::ARRAY,
+                                           DataType::BOOL);
+    AddProjectedProfileVariants<ArrayView>(catalog,
+                                           "JsonProjectedSortedArrayDouble",
+                                           families::kSort,
+                                           DataType::DOUBLE,
+                                           "ARRAY_DOUBLE",
+                                           DataType::ARRAY,
+                                           DataType::DOUBLE);
+    AddProjectedProfileVariants<ArrayView>(catalog,
+                                           "JsonProjectedSortedArrayVarchar",
+                                           families::kSort,
+                                           DataType::VARCHAR,
+                                           "ARRAY_VARCHAR",
+                                           DataType::ARRAY,
+                                           DataType::VARCHAR);
     AddProjectedProfileVariants<ArrayView>(catalog,
                                            "JsonProjectedInvertedArrayBool",
                                            families::kInverted,

@@ -27,6 +27,7 @@
 #include "common/Types.h"
 #include "index/contracts/growing/IGrowingIndex.h"
 #include "index/growing/GrowingCommitPolicy.h"
+#include "index/scalar/text/TextIndexReader.h"
 #include "tantivy-wrapper.h"
 
 // A serialized writer publishes independent manual-reload reader generations.
@@ -88,9 +89,7 @@ class TantivyGrowingTextIndex final : public IGrowingIndex,
     DataType value_type_{DataType::NONE};
 
     std::vector<OwnedBatch> uncommitted_;
-    // Cumulative accepted row offsets. Published readers receive an immutable
-    // copy of the prefix belonging to their committed generation.
-    std::vector<size_t> null_offsets_;
+    SharedValidityBitmap validity_;
     int64_t accepted_end_{0};
     int64_t committed_end_{0};
     int64_t published_end_{0};

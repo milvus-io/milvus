@@ -4,6 +4,7 @@ package packed
 #cgo pkg-config: milvus_core milvus-storage
 #include <stdlib.h>
 #include "milvus-storage/ffi_c.h"
+#include "storage/storage_c.h"
 #include "storage/loon_ffi/ffi_writer_c.h"
 #include "storage/loon_ffi/external_spec_c.h"
 #include "arrow/c/abi.h"
@@ -15,6 +16,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
@@ -65,6 +67,7 @@ var (
 	PropertyFSGCPCredentialJSON   = C.GoString(C.loon_properties_fs_gcp_credential_json)
 	PropertyFSUseCustomPartUpload = C.GoString(C.loon_properties_fs_use_custom_part_upload)
 	PropertyFSMaxConnections      = C.GoString(C.loon_properties_fs_max_connections)
+	PropertyFSS3UseCRT            = C.GoString(C.loon_properties_fs_s3_use_crt)
 	PropertyFSTLSMinVersion       = C.GoString(C.loon_properties_fs_tls_min_version)
 	PropertyFSUseCRC32CChecksum   = C.GoString(C.loon_properties_fs_use_crc32c_checksum)
 
@@ -75,7 +78,7 @@ var (
 
 	// CMEK (Customer Managed Encryption Keys) writer properties
 	PropertyWriterEncEnable = C.GoString(C.loon_properties_writer_enc_enable)    // Enable encryption for written data
-	PropertyWriterEncKey    = C.GoString(C.loon_properties_writer_enc_key)       // Encryption key for data encryption
+	PropertyWriterEncKey    = C.GoString(C.loon_properties_writer_enc_key)       // Base64-encoded encryption key for the FFI writer
 	PropertyWriterEncMeta   = C.GoString(C.loon_properties_writer_enc_meta)      // Encoded metadata containing zone ID, collection ID, and key version
 	PropertyWriterEncAlgo   = C.GoString(C.loon_properties_writer_enc_algorithm) // Encryption algorithm (e.g., "AES_GCM_V1")
 )
@@ -113,6 +116,22 @@ func writerEncryptionProperties(storagePluginContext *indexcgopb.StoragePluginCo
 // ExtfsPrefixForCollection returns the per-collection extfs property prefix.
 func ExtfsPrefixForCollection(collectionID int64) string {
 	return fmt.Sprintf("extfs.%d.", collectionID)
+}
+
+// Publish the server-owned policy for Go FFI readers.
+func initCredentialBrokerPolicy(params *paramtable.ComponentParam) error {
+	policyJSON, err := json.Marshal(params.CommonCfg.CredentialBrokerPolicy().Endpoints())
+	if err != nil {
+		return merr.WrapErrServiceInternalErr(err, "encode credential broker policy")
+	}
+	cPolicy := C.CString(string(policyJSON))
+	defer C.free(unsafe.Pointer(cPolicy))
+	policyStatus := C.InitCredentialBrokerPolicy(cPolicy)
+	if policyStatus.error_code != 0 {
+		defer C.free(unsafe.Pointer(policyStatus.error_msg))
+		return merr.WrapErrServiceInternalMsg("credential broker policy initialization failed")
+	}
+	return nil
 }
 
 // MakePropertiesFromStorageConfig creates a Properties object from StorageConfig.
@@ -200,6 +219,9 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 
 	keys = append(keys, PropertyFSUseCustomPartUpload)
 	values = append(values, "true") // hardcoded to true as in the original code
+	// Preserve SDK I/O and its TLS minimum enforcement across the SDK upgrade.
+	keys = append(keys, PropertyFSS3UseCRT)
+	values = append(values, "false")
 
 	// Add integer fields
 	keys = append(keys, PropertyFSRequestTimeoutMS)
@@ -379,6 +401,9 @@ func injectExternalSpecProperties(properties *C.LoonProperties, collectionID int
 		return nil
 	}
 	params := paramtable.Get()
+	if err := initCredentialBrokerPolicy(params); err != nil {
+		return err
+	}
 	cSource := C.CString(externalSource)
 	defer C.free(unsafe.Pointer(cSource))
 	var cSpec *C.char
@@ -426,27 +451,85 @@ func HandleLoonFFIResult(ffiResult C.LoonFFIResult) error {
 type ManifestJSON struct {
 	ManifestVersion int64  `json:"ver"`
 	BasePath        string `json:"base_path"`
+	// Size is the byte size of the manifest object of this revision, recorded
+	// when the revision was committed, or 0 when unknown. It lets a read skip
+	// asking storage for the size and is not part of the revision identity.
+	Size int64 `json:"size,omitempty"`
 }
 
 func MarshalManifestPath(basePath string, version int64) string {
-	bs, err := json.Marshal(ManifestJSON{
-		ManifestVersion: version,
-		BasePath:        basePath,
-	})
-	if err != nil {
-		// json.Marshal on string+int64 struct should never fail, but log if it does
-		return fmt.Sprintf(`{"ver":%d,"base_path":"%s"}`, version, basePath)
-	}
+	return marshalManifestPath(ManifestJSON{ManifestVersion: version, BasePath: basePath})
+}
+
+func marshalManifestPath(manifest ManifestJSON) string {
+	// Marshaling a struct of a string and integers cannot fail.
+	bs, _ := json.Marshal(manifest)
 	return string(bs)
 }
 
 func UnmarshalManifestPath(manifestPath string) (string, int64, error) {
-	var manifestJSON ManifestJSON
-	err := json.Unmarshal([]byte(manifestPath), &manifestJSON)
+	manifest, err := ParseManifestPath(manifestPath)
 	if err != nil {
 		return "", 0, err
 	}
-	return manifestJSON.BasePath, manifestJSON.ManifestVersion, nil
+	return manifest.BasePath, manifest.ManifestVersion, nil
+}
+
+// ParseManifestPath decodes a manifest path together with the manifest size it
+// may record.
+func ParseManifestPath(manifestPath string) (ManifestJSON, error) {
+	var manifest ManifestJSON
+	err := json.Unmarshal([]byte(manifestPath), &manifest)
+	return manifest, err
+}
+
+// CommittedManifestPath returns the manifest path of a committed revision,
+// recording size, the byte size of its manifest object, so later reads can skip
+// asking storage for it. Local storage records no size: a local read learns it
+// at no cost.
+func CommittedManifestPath(basePath string, version, size int64, storageType string) string {
+	manifest := ManifestJSON{ManifestVersion: version, BasePath: basePath}
+	if size > 0 && storageType != "local" {
+		manifest.Size = size
+	}
+	return marshalManifestPath(manifest)
+}
+
+// openTransaction opens a loon transaction on the revision manifest names. A
+// recorded manifest size lets loon read the manifest without first asking
+// storage for its size. loon reads exactly that many bytes, so a size that does
+// not match the manifest object fails the read.
+func openTransaction(manifest ManifestJSON, cProperties *C.LoonProperties, resolveID C.int32_t, retryLimit C.uint32_t) (C.LoonTransactionHandle, error) {
+	cBasePath := C.CString(manifest.BasePath)
+	defer C.free(unsafe.Pointer(cBasePath))
+	var handle C.LoonTransactionHandle
+	result := C.loon_transaction_open(cBasePath, cProperties, C.int64_t(manifest.ManifestVersion),
+		C.int64_t(manifest.Size), resolveID, retryLimit, &handle)
+	return handle, HandleLoonFFIResult(result)
+}
+
+// openManifest reads the manifest of the revision manifest names.
+func openManifest(manifest ManifestJSON, cProperties *C.LoonProperties) (*C.LoonManifest, error) {
+	handle, err := openTransaction(manifest, cProperties, C.LOON_TRANSACTION_RESOLVE_FAIL, C.uint32_t(1) /* retry_limit */)
+	if err != nil {
+		return nil, err
+	}
+	defer C.loon_transaction_destroy(handle)
+	var cManifest *C.LoonManifest
+	if err := HandleLoonFFIResult(C.loon_transaction_get_manifest(handle, &cManifest)); err != nil {
+		return nil, err
+	}
+	return cManifest, nil
+}
+
+// commitTransaction commits handle and returns the manifest path of the
+// revision it wrote on basePath, recording the size of the manifest object.
+func commitTransaction(handle C.LoonTransactionHandle, basePath string, storageConfig *indexpb.StorageConfig) (string, error) {
+	var version, size C.int64_t
+	if err := HandleLoonFFIResult(C.loon_transaction_commit(handle, &version, &size)); err != nil {
+		return "", err
+	}
+	return CommittedManifestPath(basePath, int64(version), int64(size), storageConfig.GetStorageType()), nil
 }
 
 // CompareManifestPath compares two manifest paths by their version.
@@ -479,6 +562,28 @@ func CompareManifestPath(a, b string) (int, error) {
 	}
 }
 
+// ManifestPathKey returns the identity of a manifest path: its base path and
+// version. Spellings of the same revision (JSON key order, optional fields)
+// share one key, so compare and index manifest paths by this key rather than
+// by their text. A value that is not a manifest path, such as an external
+// table file path, is returned unchanged.
+func ManifestPathKey(path string) string {
+	// UnmarshalManifestPath accepts leading whitespace too.
+	if !strings.HasPrefix(strings.TrimSpace(path), "{") {
+		return path
+	}
+	basePath, version, err := UnmarshalManifestPath(path)
+	if err != nil || basePath == "" {
+		return path
+	}
+	return MarshalManifestPath(basePath, version)
+}
+
+// SameManifestPath reports whether two manifest paths name the same revision.
+func SameManifestPath(a, b string) bool {
+	return a == b || ManifestPathKey(a) == ManifestPathKey(b)
+}
+
 // LobFileInfo represents metadata for a LOB (Large Object) file.
 // used for TEXT column compaction strategy decision (hole ratio calculation)
 type LobFileInfo struct {
@@ -489,28 +594,28 @@ type LobFileInfo struct {
 	FileSizeBytes int64  // size of the LOB file in bytes
 }
 
-// AddLobFilesToTransaction adds multiple LOB files to a transaction in a single commit.
-// this is used during compaction REUSE_ALL mode to merge LOB file references.
-// returns the new committed version after the transaction.
-func AddLobFilesToTransaction(basePath string, version int64, storageConfig *indexpb.StorageConfig, lobFiles []LobFileInfo) (int64, error) {
+// AddLobFilesToTransaction adds multiple LOB files to the manifest at
+// manifestPath in a single commit and returns the manifest path of the new
+// revision. This is used during compaction REUSE_ALL mode to merge LOB file
+// references.
+func AddLobFilesToTransaction(manifestPath string, storageConfig *indexpb.StorageConfig, lobFiles []LobFileInfo) (string, error) {
 	if len(lobFiles) == 0 {
-		return version, nil
+		return manifestPath, nil
+	}
+	manifest, err := ParseManifestPath(manifestPath)
+	if err != nil {
+		return "", merr.WrapErrStorage(err, "failed to parse manifest path")
 	}
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
 	if err != nil {
-		return 0, merr.Wrap(err, "failed to make properties")
+		return "", merr.Wrap(err, "failed to make properties")
 	}
 	defer C.loon_properties_free(cProperties)
 
-	cBasePath := C.CString(basePath)
-	defer C.free(unsafe.Pointer(cBasePath))
-
-	// open transaction
-	var cTransactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_open(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
-	if err := HandleLoonFFIResult(result); err != nil {
-		return 0, merr.WrapErrStorage(err, "failed to begin transaction")
+	cTransactionHandle, err := openTransaction(manifest, cProperties, C.LOON_TRANSACTION_RESOLVE_FAIL, C.uint32_t(1) /* retry_limit */)
+	if err != nil {
+		return "", merr.WrapErrStorage(err, "failed to begin transaction")
 	}
 	defer C.loon_transaction_destroy(cTransactionHandle)
 
@@ -526,54 +631,27 @@ func AddLobFilesToTransaction(basePath string, version int64, storageConfig *ind
 			file_size_bytes: C.int64_t(lobFile.FileSizeBytes),
 		}
 
-		result = C.loon_transaction_add_lob_file(cTransactionHandle, &cLobFile)
+		result := C.loon_transaction_add_lob_file(cTransactionHandle, &cLobFile)
 		C.free(unsafe.Pointer(cPath))
 
 		if err := HandleLoonFFIResult(result); err != nil {
-			return 0, merr.WrapErrStorage(err, "failed to add LOB file %s", lobFile.Path)
+			return "", merr.WrapErrStorage(err, "failed to add LOB file %s", lobFile.Path)
 		}
 	}
 
-	// commit transaction
-	var committedVersion C.int64_t
-	result = C.loon_transaction_commit(cTransactionHandle, &committedVersion)
-	if err := HandleLoonFFIResult(result); err != nil {
-		return 0, merr.WrapErrStorage(err, "failed to commit transaction")
+	newManifestPath, err := commitTransaction(cTransactionHandle, manifest.BasePath, storageConfig)
+	if err != nil {
+		return "", merr.WrapErrStorage(err, "failed to commit transaction")
 	}
-
-	return int64(committedVersion), nil
+	return newManifestPath, nil
 }
 
 // GetManifestLobFiles retrieves LOB file information from a manifest.
 // this is used by compaction to calculate hole ratios for TEXT columns.
 func GetManifestLobFiles(manifestPath string, storageConfig *indexpb.StorageConfig) ([]LobFileInfo, error) {
-	basePath, version, err := UnmarshalManifestPath(manifestPath)
+	cManifest, err := GetManifestHandle(manifestPath, storageConfig)
 	if err != nil {
-		return nil, merr.WrapErrStorage(err, "failed to unmarshal manifest path")
-	}
-
-	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
-	if err != nil {
-		return nil, merr.Wrap(err, "failed to make properties")
-	}
-	defer C.loon_properties_free(cProperties)
-
-	cBasePath := C.CString(basePath)
-	defer C.free(unsafe.Pointer(cBasePath))
-
-	// open transaction to get manifest
-	var cTransactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_open(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
-	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, merr.WrapErrStorage(err, "failed to begin transaction")
-	}
-	defer C.loon_transaction_destroy(cTransactionHandle)
-
-	// get manifest
-	var cManifest *C.LoonManifest
-	result = C.loon_transaction_get_manifest(cTransactionHandle, &cManifest)
-	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, merr.WrapErrStorage(err, "failed to get manifest")
+		return nil, merr.WrapErrStorage(err, "failed to read manifest")
 	}
 	defer C.loon_manifest_destroy(cManifest)
 

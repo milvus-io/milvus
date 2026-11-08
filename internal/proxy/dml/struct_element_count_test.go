@@ -601,3 +601,80 @@ func TestCheckAndFlattenStructFieldDataAllowsNullableNullRowAndPresentRow(t *tes
 	require.NoError(t, err)
 	assert.Len(t, insertMsg.FieldsData, 2)
 }
+
+func TestCheckAndFlattenStructFieldData_NestedArrayLogicalCount(t *testing.T) {
+	arrayTypeSchema := func(element *schemapb.TypeSchema) *schemapb.TypeSchema {
+		return &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: element}}
+	}
+	for _, tc := range []struct {
+		name            string
+		innerNullable   bool
+		innerValid      []bool
+		innerPayloadLen int
+		peerLen         int
+		peerRowValid    []bool
+		wantError       string
+	}{
+		{"nullable inner uses logical count", true, []bool{true, false, true}, 2, 3, []bool{false, true}, ""},
+		{"nonnullable inner uses payload count", false, nil, 3, 3, []bool{false, true}, ""},
+		{"nullable inner count mismatch", true, []bool{true, false, true}, 2, 2, []bool{false, true}, "inconsistent struct element count"},
+		{"row validity mismatch", true, []bool{true, false, true}, 2, 3, []bool{true, false}, "sub-field ValidData mismatch"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			leaf := &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64}}
+			inner := arrayTypeSchema(leaf)
+			inner.Nullable = tc.innerNullable
+			root := arrayTypeSchema(inner)
+			root.Nullable = true
+			schema := &schemapb.CollectionSchema{StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+				Name: "s", Nullable: true, Fields: []*schemapb.FieldSchema{
+					{
+						Name: "nested", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Array,
+						Nullable: true, ElementNullable: tc.innerNullable, TypeSchema: root,
+					},
+					{Name: "peer", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, Nullable: true},
+				},
+			}}}
+			innerRows := make([]*schemapb.ScalarField, tc.innerPayloadLen)
+			for i := range innerRows {
+				innerRows[i] = &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{int64(i)}}}}
+			}
+			nested := &schemapb.FieldData{
+				FieldName: "nested", Type: schemapb.DataType_Array,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{Data: []*schemapb.ScalarField{{
+						Data:      &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{Data: innerRows}},
+						ValidData: tc.innerValid,
+					}}},
+				}}},
+			}
+			typeutil.SetFieldDataValidData(nested, []bool{false, true})
+			peerValues := make([]int64, tc.peerLen)
+			peer := &schemapb.FieldData{
+				FieldName: "peer", Type: schemapb.DataType_Array,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{Data: []*schemapb.ScalarField{{
+						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: peerValues}},
+					}}},
+				}}},
+			}
+			typeutil.SetFieldDataValidData(peer, tc.peerRowValid)
+			insertMsg := &msgstream.InsertMsg{InsertRequest: &msgpb.InsertRequest{FieldsData: []*schemapb.FieldData{{
+				FieldName: "s", Type: schemapb.DataType_ArrayOfStruct,
+				Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: []*schemapb.FieldData{nested, peer}}},
+			}}}}
+			err := checkAndFlattenStructFieldData(schema, insertMsg)
+			if tc.wantError != "" {
+				require.ErrorContains(t, err, tc.wantError)
+				if tc.wantError == "inconsistent struct element count" {
+					assert.Contains(t, err.Error(), "row 1")
+				}
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, insertMsg.FieldsData, 2)
+			assert.Equal(t, "s[nested]", insertMsg.FieldsData[0].GetFieldName())
+			assert.Equal(t, []bool{false, true}, typeutil.GetFieldDataValidData(insertMsg.FieldsData[0]))
+		})
+	}
+}

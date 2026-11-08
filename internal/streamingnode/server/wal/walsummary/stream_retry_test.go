@@ -45,8 +45,8 @@ func TestQueryStreamRetriesTransientReads(t *testing.T) {
 				}
 				var attempts, firstChunkReads atomic.Int64
 				blocked, resume := make(chan struct{}), make(chan struct{})
-				var original func(*Store, context.Context, *streamingpb.PChannelSummaryChunkIndexEntry) (*chunkPayload, error)
-				patch := mockey.Mock((*Store).readChunkPayload).Origin(&original).To(func(store *Store, ctx context.Context, index *streamingpb.PChannelSummaryChunkIndexEntry) (*chunkPayload, error) {
+				var original func(*Store, context.Context, *streamingpb.PChannelSummaryChunkIndexEntry, *chunkValidation) (*chunkPayload, error)
+				patch := mockey.Mock((*Store).readChunkPayload).Origin(&original).To(func(store *Store, ctx context.Context, index *streamingpb.PChannelSummaryChunkIndexEntry, verified *chunkValidation) (*chunkPayload, error) {
 					index = proto.Clone(index).(*streamingpb.PChannelSummaryChunkIndexEntry)
 					if index.GetGeneration() == firstGeneration {
 						firstChunkReads.Add(1)
@@ -63,7 +63,7 @@ func TestQueryStreamRetriesTransientReads(t *testing.T) {
 							return nil, ctx.Err()
 						}
 					}
-					return original(store, ctx, index)
+					return original(store, ctx, index, verified)
 				}).Build()
 				defer patch.UnPatch()
 				stream := NewStream(m)
@@ -96,17 +96,13 @@ func TestQueryStreamRetriesTransientReads(t *testing.T) {
 				}
 				for _, tt := range []uint64{20, 30} {
 					event := nextTransformEvent(t, handler)
-					require.NoError(t, event.Err)
 					require.Equal(t, tt, event.Entry.GetTimeTick())
 					require.Equal(t, []int64{int64(tt)}, event.Entry.GetDelete().GetBlocks()[0].GetPrimaryKeys().GetIntId().GetData())
 				}
 				event := nextTransformEvent(t, handler)
-				require.NoError(t, event.Err)
 				require.NotNil(t, event.SyncUp)
 				require.Equal(t, uint64(40), event.SyncUp.TimeTick)
-				if firstRows == 4096 {
-					require.Equal(t, int64(1), firstChunkReads.Load(), "retry must retain the accepted page cursor")
-				}
+				require.Equal(t, int64(1), firstChunkReads.Load(), "retry must not reread earlier chunks, even within the same page")
 				require.Equal(t, int64(len(failures)+1), attempts.Load())
 			})
 		}
@@ -124,7 +120,7 @@ func TestQueryStreamReadFailureCancellation(t *testing.T) {
 				require.NoError(t, persistSummary(ctx, m))
 				waitingCh := make(chan struct{})
 				var attempts atomic.Int64
-				readPatch := mockey.Mock((*Store).readChunkPayload).To(func(_ *Store, ctx context.Context, _ *streamingpb.PChannelSummaryChunkIndexEntry) (*chunkPayload, error) {
+				readPatch := mockey.Mock((*Store).readChunkPayload).To(func(_ *Store, ctx context.Context, _ *streamingpb.PChannelSummaryChunkIndexEntry, _ *chunkValidation) (*chunkPayload, error) {
 					attempts.Add(1)
 					if waiting == "object read" {
 						close(waitingCh)
@@ -153,8 +149,7 @@ func TestQueryStreamReadFailureCancellation(t *testing.T) {
 					t.Fatal("read did not enter the wait")
 				}
 				if waiting == "backoff" {
-					require.True(t, m.readMu.TryLock(), "backoff must not hold the read/GC pin")
-					m.readMu.Unlock()
+					require.False(t, m.readMu.TryLock(), "shared retry must retain its object snapshot")
 				}
 				closed := make(chan error, 1)
 				go func() {
@@ -175,8 +170,10 @@ func TestQueryStreamReadFailureCancellation(t *testing.T) {
 				case <-time.After(time.Second):
 					t.Fatal("cancellation did not interrupt the read/retry")
 				}
-				require.ErrorIs(t, nextTransformEvent(t, handler).Err, context.Canceled)
+				require.Empty(t, handler.events, "cancellation is not a data event")
 				require.Equal(t, int64(1), attempts.Load(), "canceled subscription must not retry")
+				require.True(t, m.readMu.TryLock(), "last subscriber must join the load before releasing its snapshot")
+				m.readMu.Unlock()
 				m.mu.Lock()
 				require.Empty(t, m.transformNotifiers, "subscription must release its watcher")
 				m.mu.Unlock()
@@ -216,10 +213,12 @@ func TestQueryStreamTerminalReadFailures(t *testing.T) {
 			sub, err := stream.Subscribe(ctx, wal.TransformLogSubscriptionOption{VChannel: "v1", EndTimeTick: 10, Handler: handler})
 			require.NoError(t, err)
 			defer sub.Close()
-			event := nextTransformEvent(t, handler)
-			require.ErrorIs(t, event.Err, want)
-			require.Nil(t, event.Entry)
-			require.Nil(t, event.SyncUp)
+			select {
+			case <-stream.Done():
+			case <-time.After(time.Second):
+				t.Fatal("read failure did not end the physical stream")
+			}
+			require.ErrorIs(t, stream.Error(), want)
 			select {
 			case <-handler.done:
 			case <-time.After(time.Second):
@@ -228,29 +227,4 @@ func TestQueryStreamTerminalReadFailures(t *testing.T) {
 			require.Empty(t, handler.events)
 		})
 	}
-}
-
-func TestQueryStreamDoesNotRetryHandlerFailure(t *testing.T) {
-	m := NewManager(ManagerConfig{})
-	m.ObserveMessage(context.Background(), newTestDeleteMessage(t, "v1", 10, 1, 10))
-	var calls atomic.Int64
-	var original func(*recordingTransformHandler, wal.TransformLogStreamEvent) error
-	patch := mockey.Mock((*recordingTransformHandler).Handle).Origin(&original).To(func(h *recordingTransformHandler, event wal.TransformLogStreamEvent) error {
-		if event.Entry != nil {
-			calls.Add(1)
-			return merr.ErrIoFailed
-		}
-		return original(h, event)
-	}).Build()
-	defer patch.UnPatch()
-	stream := NewStream(m)
-	defer stream.Close()
-	handler := newRecordingTransformHandler()
-	sub, err := stream.Subscribe(context.Background(), wal.TransformLogSubscriptionOption{VChannel: "v1", EndTimeTick: 10, Handler: handler})
-	require.NoError(t, err)
-	defer sub.Close()
-	require.ErrorIs(t, nextTransformEvent(t, handler).Err, merr.ErrIoFailed)
-	require.NoError(t, sub.Close())
-	require.Equal(t, int64(1), calls.Load())
-	require.Empty(t, handler.events, "failed delivery must not emit SyncUp")
 }

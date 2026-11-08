@@ -227,6 +227,13 @@ func PrivilegeInterceptorWithMetaCache(GetMetaCache func() Cache) PrivilegeFunc 
 			}
 		}
 
+		if isRunningRequestCall(req) {
+			// Any user may list and cancel the requests they issued; the
+			// privilege is what reaches other users' requests. Without it the
+			// call goes through, held to the caller's own requests.
+			return withOwnRequestsOnly(ctx), nil
+		}
+
 		log.Info(ctx, "permission deny", mlog.Strings("roles", roleNames))
 
 		if replicas, ok := req.(*milvuspb.GetReplicasRequest); ok && replicas.GetCollectionName() == "" {
@@ -252,6 +259,16 @@ func isCurUserObject(objectType string, curUser string, object string) bool {
 	return curUser == object
 }
 
+// isRunningRequestCall reports whether req lists or cancels running requests,
+// which a caller without the privilege may still do for their own requests.
+func isRunningRequestCall(req interface{}) bool {
+	switch req.(type) {
+	case *milvuspb.ListRunningRequestsRequest, *milvuspb.CancelRequestsRequest:
+		return true
+	}
+	return false
+}
+
 func isSelectMyRoleGrants(req interface{}, roleNames []string) bool {
 	selectGrantReq, ok := req.(*milvuspb.SelectGrantRequest)
 	if !ok {
@@ -260,48 +277,6 @@ func isSelectMyRoleGrants(req interface{}, roleNames []string) bool {
 	filterGrantEntity := selectGrantReq.GetEntity()
 	roleName := filterGrantEntity.GetRole().GetName()
 	return funcutil.SliceContain(roleNames, roleName)
-}
-
-func checkSkipRLSPrivilege(ctx context.Context, metaCache Cache, dbName, collectionName, operation string) error {
-	permitted, err := isCurrentUserPermitted(ctx, metaCache, dbName, commonpb.ObjectType_Collection.String(), collectionName, commonpb.ObjectPrivilege_PrivilegeSkipRLS.String())
-	if err != nil {
-		return err
-	}
-	if permitted {
-		return nil
-	}
-	return merr.WrapErrPrivilegeNotPermitted("%s operation denied by RLS: skip_rls requires SkipRLS privilege on collection %s", operation, collectionName)
-}
-
-func checkManageRLSPrivilege(ctx context.Context, metaCache Cache, req *milvuspb.AlterCollectionRequest, dbName, collectionName string) error {
-	privilegeName := commonpb.ObjectPrivilege_PrivilegeManageRLS.String()
-	permitted, err := isCurrentUserPermitted(ctx, metaCache, dbName, commonpb.ObjectType_Collection.String(), collectionName, privilegeName)
-	if err != nil || permitted {
-		return err
-	}
-	err = merr.WrapErrPrivilegeNotPermitted("%s is required", privilegeName)
-	hookutil.GetExtension().ReportAction(ctx, req, &milvuspb.BoolResponse{
-		Status: merr.Status(err),
-	}, err, milvuspb.MilvusService_AlterCollection_FullMethodName, hookutil.ActionAuthorize)
-	return err
-}
-
-// resolveRLSEnforcement returns whether RLS remains enabled after processing a
-// request-scoped bypass. rls.force takes precedence over both authorization
-// configuration and SkipRLS privileges.
-func resolveRLSEnforcement(ctx context.Context, metaCache Cache, rlsEnabled, rlsForce, skipRLS bool, dbName, collectionName, operation string) (bool, error) {
-	if !rlsEnabled || !skipRLS {
-		return rlsEnabled, nil
-	}
-	if rlsForce {
-		return false, merr.WrapErrPrivilegeNotPermitted(
-			"%s operation denied by RLS: skip_rls is not allowed when rls.force is enabled on collection %s",
-			operation, collectionName)
-	}
-	if err := checkSkipRLSPrivilege(ctx, metaCache, dbName, collectionName, operation); err != nil {
-		return false, err
-	}
-	return false, nil
 }
 
 func resolveRBACObjectName(ctx context.Context, metaCache Cache, dbName, objectType, objectName string) string {
@@ -329,33 +304,6 @@ func isRolePermitted(roleName, dbName, objectType, objectName, objectPrivilege s
 	}
 	privilege.SetResultCache(roleName, object, objectPrivilege, isPermit, version)
 	return isPermit, nil
-}
-
-func isCurrentUserPermitted(ctx context.Context, metaCache Cache, dbName, objectType, objectName, objectPrivilege string) (bool, error) {
-	if authorizationDisabled() {
-		return true, nil
-	}
-	subject, err := getCurrentUserRBACSubject(ctx)
-	if err != nil {
-		return false, err
-	}
-	if subject.bypass {
-		return true, nil
-	}
-	if dbName == "" {
-		dbName = GetCurDBNameFromContextOrDefault(ctx)
-	}
-	objectName = resolveRBACObjectName(ctx, metaCache, dbName, objectType, objectName)
-	for _, roleName := range subject.roleNames {
-		isPermit, err := isRolePermitted(roleName, dbName, objectType, objectName, objectPrivilege)
-		if err != nil {
-			return false, err
-		}
-		if isPermit {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 // resolveCollectionAlias resolves an alias to its actual collection name

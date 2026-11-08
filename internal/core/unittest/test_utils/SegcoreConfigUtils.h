@@ -55,6 +55,8 @@ class ScopedSegcoreConfigRestore {
           refine_ratio_(config.get_refine_ratio()),
           dense_vector_interim_index_type_(
               config.get_dense_vector_intermin_index_type()),
+          sparse_ip_index_algo_(config.get_sparse_ip_interim_index_algo()),
+          sparse_bm25_index_algo_(config.get_sparse_bm25_interim_index_algo()),
           refine_quant_type_(
               RefineTypeToConfigStringForTest(config.get_refine_quant_type())),
           refine_with_quant_flag_(config.get_refine_with_quant_flag()),
@@ -68,6 +70,8 @@ class ScopedSegcoreConfigRestore {
         config_.set_nprobe(nprobe_);
         config_.set_enable_interim_segment_index(enable_interim_segment_index_);
         config_.set_interim_index_target_version(interim_index_target_version_);
+        config_.set_sparse_interim_index_algos(sparse_ip_index_algo_,
+                                               sparse_bm25_index_algo_);
         config_.set_storage_v3_enabled(storage_v3_enabled_);
         config_.set_enable_growing_source_flush(enable_growing_source_flush_);
         config_.set_sub_dim(sub_dim_);
@@ -96,6 +100,8 @@ class ScopedSegcoreConfigRestore {
     int64_t sub_dim_;
     float refine_ratio_;
     std::string dense_vector_interim_index_type_;
+    std::string sparse_ip_index_algo_;
+    std::string sparse_bm25_index_algo_;
     std::string refine_quant_type_;
     bool refine_with_quant_flag_;
     float growing_index_build_thread_rate_;

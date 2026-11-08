@@ -20,6 +20,11 @@ type RootCoordCatalog interface {
 	GetCollectionByID(ctx context.Context, dbID int64, ts typeutil.Timestamp, collectionID typeutil.UniqueID) (*model.Collection, error)
 	GetCollectionByName(ctx context.Context, dbID int64, dbName string, collectionName string, ts typeutil.Timestamp) (*model.Collection, error)
 	ListCollections(ctx context.Context, dbID int64, ts typeutil.Timestamp) ([]*model.Collection, error)
+	// ListCollectionsForRecovery returns, for every database ID in dbIDs, the
+	// collections ListCollections returns for it, read in one pass over the
+	// metadata store. util.NonDBID selects the collections stored without a
+	// database.
+	ListCollectionsForRecovery(ctx context.Context, dbIDs []int64, ts typeutil.Timestamp) (map[int64][]*model.Collection, error)
 	CollectionExists(ctx context.Context, dbID int64, collectionID typeutil.UniqueID, ts typeutil.Timestamp) bool
 	DropCollection(ctx context.Context, collectionInfo *model.Collection, ts typeutil.Timestamp) error
 	AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, alterType AlterType, ts typeutil.Timestamp, fieldModify bool) error
@@ -96,16 +101,6 @@ type RootCoordCatalog interface {
 	DropPrivilegeGroup(ctx context.Context, groupName string) error
 	SavePrivilegeGroup(ctx context.Context, data *milvuspb.PrivilegeGroupInfo) error
 	ListPrivilegeGroups(ctx context.Context) ([]*milvuspb.PrivilegeGroupInfo, error)
-
-	SaveRLSPolicy(ctx context.Context, policy *model.RLSPolicy) error
-	DropRLSPolicy(ctx context.Context, collectionID int64, policyID int64) error
-	ListRLSPolicies(ctx context.Context, collectionID int64) ([]*model.RLSPolicy, error)
-	SaveRLSPrincipal(ctx context.Context, principal *model.RLSPrincipal) error
-	// GetRLSPrincipal and ListRLSPrincipals return caller-owned results,
-	// including nested tag maps.
-	GetRLSPrincipal(ctx context.Context, collectionID int64, principalName string) (*model.RLSPrincipal, error)
-	DropRLSPrincipal(ctx context.Context, collectionID int64, principalName string) error
-	ListRLSPrincipals(ctx context.Context, collectionID int64) ([]*model.RLSPrincipal, error)
 
 	// File resource related
 	SaveFileResource(ctx context.Context, resource *internalpb.FileResourceInfo, version uint64) error

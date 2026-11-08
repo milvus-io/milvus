@@ -389,6 +389,7 @@ func TestCommitTxnReturnsMarkerError(t *testing.T) {
 		"test-v",
 		&message.TxnContext{TxnID: 1},
 		true,
+		1,
 	)
 	require.Nil(t, result)
 	require.ErrorIs(t, err, expected)

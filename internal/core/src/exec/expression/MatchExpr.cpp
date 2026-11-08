@@ -38,10 +38,9 @@ using MatchType = milvus::expr::MatchType;
 // Returns true if the row matches the condition
 //
 // Word-wise implementation: the row's element bits are consumed in 64-bit
-// chunks (bitmap word width) instead of bit by bit. Invalid elements are
-// masked out with the valid bitmap, which preserves the per-bit semantics:
-// only valid elements are counted, and MatchAll requires every *valid*
-// element to match (vacuously true when the row has no valid elements).
+// chunks (bitmap word width) instead of bit by bit. An UNKNOWN element (valid
+// bit 0) counts as a miss: it adds no hit, and MatchAll requires every element
+// to be a hit (vacuously true for an empty row).
 template <MatchType match_type, bool all_valid>
 bool
 MatchSingleRow(int64_t bitset_start,
@@ -59,26 +58,17 @@ MatchSingleRow(int64_t bitset_start,
             static_cast<size_t>(std::min(kWordBits, row_elem_count - done));
         const size_t pos = static_cast<size_t>(bitset_start + done);
         word_t m = match_bitset.read(pos, n);
-        if constexpr (all_valid) {
-            if constexpr (match_type == MatchType::MatchAll) {
-                const word_t full = (n == static_cast<size_t>(kWordBits))
-                                        ? ~word_t(0)
-                                        : ((word_t(1) << n) - 1);
-                if (m != full) {
-                    return false;
-                }
-                continue;
+        if constexpr (!all_valid) {
+            m &= valid_bitset.read(pos, n);
+        }
+        if constexpr (match_type == MatchType::MatchAll) {
+            const word_t full = (n == static_cast<size_t>(kWordBits))
+                                    ? ~word_t(0)
+                                    : ((word_t(1) << n) - 1);
+            if (m != full) {
+                return false;
             }
-        } else {
-            const word_t v = valid_bitset.read(pos, n);
-            m &= v;
-            if constexpr (match_type == MatchType::MatchAll) {
-                // Some valid element unmatched?
-                if (m != v) {
-                    return false;
-                }
-                continue;
-            }
+            continue;
         }
         if constexpr (match_type == MatchType::MatchAny) {
             if (m != 0) {
@@ -102,7 +92,7 @@ MatchSingleRow(int64_t bitset_start,
     if constexpr (match_type == MatchType::MatchAny) {
         return false;
     } else if constexpr (match_type == MatchType::MatchAll) {
-        // Every (valid) element matched; empty array returns true
+        // Every element matched; empty array returns true
         // (vacuous truth).
         return true;
     } else if constexpr (match_type == MatchType::MatchLeast) {
@@ -247,12 +237,16 @@ PhyMatchFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     auto input = context.get_offset_input();
     SetHasOffsetInput(input != nullptr);
 
-    auto schema = segment_->get_schema_snapshot();
+    auto schema = segment_->type() == SegmentType::Growing
+                      ? segment_->get_schema_snapshot()
+                      : context.get_exec_context()
+                            ->get_query_context()
+                            ->get_read_schema();
     const auto& field_meta =
         schema->GetFirstArrayFieldInStruct(expr_->get_struct_name());
 
     auto struct_element_offsets =
-        segment_->GetStructElementOffsets(field_meta.get_id());
+        segment_chunk_reader_.GetStructElementOffsets(field_meta.get_id());
     AssertInfo(struct_element_offsets != nullptr,
                "Struct element offsets not available");
 
@@ -433,6 +427,19 @@ PhyMatchFilterExpr::ApplyStructRowValidity(ColumnVector* col_vec,
                    "offset input size {} does not match batch row count {}",
                    input->size(),
                    batch_rows);
+    }
+    auto offsets = segment_chunk_reader_.GetStructElementOffsets(field_id);
+    if (offsets && offsets->HasRowValidity()) {
+        for (int64_t i = 0; i < batch_rows; ++i) {
+            const auto row_id = input ? (*input)[i] : current_pos_ + i;
+            if (!offsets->IsRowValid(row_id)) {
+                value_view[i] = false;
+                valid_view[i] = false;
+            }
+        }
+        return;
+    }
+    if (input != nullptr) {
         std::vector<int64_t> row_offsets(batch_rows);
         for (int64_t i = 0; i < batch_rows; ++i) {
             row_offsets[i] = static_cast<int64_t>((*input)[i]);

@@ -28,21 +28,6 @@ import (
 
 type HashedData [][]*storage.InsertData // [vchannelIndex][partitionIndex]*storage.InsertData
 
-func newHashedData(schema *schemapb.CollectionSchema, channelNum, partitionNum, rowsHint int) (HashedData, error) {
-	var err error
-	res := make(HashedData, channelNum)
-	for i := 0; i < channelNum; i++ {
-		res[i] = make([]*storage.InsertData, partitionNum)
-		for j := 0; j < partitionNum; j++ {
-			res[i][j], err = storage.NewInsertDataWithCap(schema, rowsHint, true)
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-	return res, nil
-}
-
 func HashData(task Task, rows *storage.InsertData) (HashedData, error) {
 	return HashDataBySchema(typeutil.AppendSystemFields(task.GetSchema()), task.GetVchannels(), task.GetPartitionIDs(), rows)
 }
@@ -66,30 +51,62 @@ func HashDataBySchema(schema *schemapb.CollectionSchema, vchannels []string, par
 	}
 	partKeyField, _ := typeutil.GetPartitionKeyFieldSchema(schema)
 
-	id1 := pkField.GetFieldID()
-	id2 := partKeyField.GetFieldID()
+	pkColumn := rows.Data[pkField.GetFieldID()]
+	partColumn := rows.Data[partKeyField.GetFieldID()]
+	hashPK := hashByVChannel(int64(channelNum), pkField)
+	hashPartition := hashByPartition(int64(partitionNum), partKeyField)
 
-	f1 := hashByVChannel(int64(channelNum), pkField)
-	f2 := hashByPartition(int64(partitionNum), partKeyField)
+	rowNum := rows.GetRowNum()
+	rowsHint := rowNum / (channelNum * partitionNum)
+	selections := buildRowSelections(pkColumn, partColumn, hashPK, hashPartition, rowNum, channelNum, partitionNum, rowsHint)
+	return gatherHashRows(schema, rows, selections)
+}
 
-	// Floor, not ceil: when buckets outnumber rows, ceiling forces one full row
-	// of capacity into every bucket and reserves numBuckets x rowSize per batch
-	// regardless of the batch size — an OOM hazard for high-dim vectors on
-	// partition-key collections with many partitions. Floor keeps the total
-	// reservation bounded by the batch row count and lets sparse buckets grow
-	// on demand.
-	rowsHint := rows.GetRowNum() / (channelNum * partitionNum)
-	res, err := newHashedData(schema, channelNum, partitionNum, rowsHint)
-	if err != nil {
-		return nil, err
+// buildRowSelections groups source row indices by vchannel and partition,
+// preserving source order within each bucket. Missing columns pass nil to
+// their hash functions. rowsHint only controls initial bucket capacity;
+// no source data is copied or modified.
+func buildRowSelections(pkColumn, partColumn storage.FieldData,
+	hashPK, hashPartition func(any) int64,
+	rowNum, channelNum, partitionNum, rowsHint int,
+) [][][]int {
+	// make space for selections
+	selections := make([][][]int, channelNum)
+	for c := range selections {
+		selections[c] = make([][]int, partitionNum)
+		for p := range selections[c] {
+			selections[c][p] = make([]int, 0, rowsHint)
+		}
 	}
+	// hash data and record line number
+	for i := 0; i < rowNum; i++ {
+		var pk, partKey any
+		if pkColumn != nil {
+			pk = pkColumn.GetRow(i)
+		}
+		if partColumn != nil {
+			partKey = partColumn.GetRow(i)
+		}
+		c, p := hashPK(pk), hashPartition(partKey)
+		selections[c][p] = append(selections[c][p], i)
+	}
+	return selections
+}
 
-	for i := 0; i < rows.GetRowNum(); i++ {
-		row := rows.GetRow(i)
-		p1, p2 := f1(row[id1]), f2(row[id2])
-		err = res[p1][p2].Append(row)
-		if err != nil {
-			return nil, err
+// gatherHashRows allocates each bucket using its routed row count and copies the selected rows using InsertData.CopyFrom.
+func gatherHashRows(schema *schemapb.CollectionSchema, src *storage.InsertData, selections [][][]int) (HashedData, error) {
+	res := make(HashedData, len(selections))
+	for c, partitions := range selections {
+		res[c] = make([]*storage.InsertData, len(partitions))
+		for p, indices := range partitions {
+			data, err := storage.NewInsertDataWithCap(schema, len(indices), true)
+			if err != nil {
+				return nil, err
+			}
+			if err := data.CopyFrom(src, indices); err != nil {
+				return nil, err
+			}
+			res[c][p] = data
 		}
 	}
 	return res, nil

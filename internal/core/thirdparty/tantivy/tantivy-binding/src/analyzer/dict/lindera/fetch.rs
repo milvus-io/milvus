@@ -1,12 +1,22 @@
-use std::env;
-use std::error::Error;
 use std::fs;
+use std::path::PathBuf;
+
+#[cfg(feature = "analyzer-remote-tls")]
+use std::env;
+#[cfg(feature = "analyzer-remote-tls")]
+use std::error::Error;
+#[cfg(feature = "analyzer-remote-tls")]
 use std::io::{self, Cursor, Read, Write};
-use std::path::{Path, PathBuf};
+#[cfg(feature = "analyzer-remote-tls")]
+use std::path::Path;
+#[cfg(feature = "analyzer-remote-tls")]
 use std::time::Instant;
 
+#[cfg(feature = "analyzer-remote-tls")]
 use flate2::read::GzDecoder;
+#[cfg(feature = "analyzer-remote-tls")]
 use fs2::FileExt;
+#[cfg(feature = "analyzer-remote-tls")]
 use tar::Archive;
 
 use lindera::dictionary::Dictionary;
@@ -14,25 +24,36 @@ use lindera_dictionary::dictionary::character_definition::CharacterDefinition;
 use lindera_dictionary::dictionary::connection_cost_matrix::ConnectionCostMatrix;
 use lindera_dictionary::dictionary::prefix_dictionary::PrefixDictionary;
 use lindera_dictionary::dictionary::unknown_dictionary::UnknownDictionary;
+#[cfg(feature = "analyzer-remote-tls")]
 use lindera_dictionary::dictionary_builder::DictionaryBuilder;
+#[cfg(feature = "analyzer-remote-tls")]
 use log::{error, info, warn};
+#[cfg(feature = "analyzer-remote-tls")]
 use md5::Context;
+#[cfg(feature = "analyzer-remote-tls")]
 use rand::{rngs::SmallRng, seq::SliceRandom, SeedableRng};
+#[cfg(feature = "analyzer-remote-tls")]
 use reqwest::Client;
+#[cfg(feature = "analyzer-remote-tls")]
 use tokio::runtime::Runtime;
+#[cfg(feature = "analyzer-remote-tls")]
 use tokio::time::sleep;
+#[cfg(feature = "analyzer-remote-tls")]
 use tokio::time::Duration;
 
 use super::common;
 use crate::error::TantivyBindingError;
 
+#[cfg(feature = "analyzer-remote-tls")]
 const MAX_ROUND: usize = 3;
 
+#[cfg(feature = "analyzer-remote-tls")]
 pub struct FileMutexGuard {
     file: Option<fs::File>,
     path: PathBuf,
 }
 
+#[cfg(feature = "analyzer-remote-tls")]
 impl FileMutexGuard {
     fn build(path: PathBuf) -> io::Result<FileMutexGuard> {
         let flock = fs::File::create(&path)?;
@@ -44,6 +65,7 @@ impl FileMutexGuard {
     }
 }
 
+#[cfg(feature = "analyzer-remote-tls")]
 impl Drop for FileMutexGuard {
     fn drop(&mut self) {
         if let Some(file) = self.file.take() {
@@ -54,6 +76,8 @@ impl Drop for FileMutexGuard {
     }
 }
 
+// Only lindera_dir/output_dir are read when online download is compiled out.
+#[cfg_attr(not(feature = "analyzer-remote-tls"), allow(dead_code))]
 pub struct FetchParams {
     pub lindera_dir: String,
 
@@ -76,7 +100,7 @@ pub struct FetchParams {
     pub md5_hash: String,
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(all(feature = "analyzer-remote-tls", not(target_os = "windows")))]
 fn empty_directory(dir: &Path) -> Result<(), Box<dyn Error>> {
     if dir.is_dir() {
         for entry in std::fs::read_dir(dir)? {
@@ -92,7 +116,7 @@ fn empty_directory(dir: &Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(all(feature = "analyzer-remote-tls", target_os = "windows"))]
 fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), Box<dyn Error>> {
     if !dst.exists() {
         std::fs::create_dir(dst)?;
@@ -112,6 +136,7 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+#[cfg(feature = "analyzer-remote-tls")]
 async fn download_with_retry(
     client: &Client,
     download_urls: Vec<&str>,
@@ -172,6 +197,7 @@ async fn download_with_retry(
     Err("Failed to download a valid file from all sources".into())
 }
 
+#[cfg(feature = "analyzer-remote-tls")]
 pub fn build(
     params: &FetchParams,
     builder: impl DictionaryBuilder,
@@ -293,6 +319,7 @@ pub fn build(
 }
 
 /// Fetch the necessary assets and then build the dictionary using `builder`
+#[cfg(feature = "analyzer-remote-tls")]
 pub fn fetch(params: &FetchParams, builder: impl DictionaryBuilder) -> Result<(), Box<dyn Error>> {
     let build_dir = PathBuf::from(params.lindera_dir.as_str());
     std::fs::create_dir_all(&build_dir)?;
@@ -328,6 +355,18 @@ pub fn fetch(params: &FetchParams, builder: impl DictionaryBuilder) -> Result<()
     let _ = std::fs::remove_dir_all(&input_dir);
 
     build_result
+}
+
+/// Used when online download is compiled out: succeed only if the dictionary
+/// was already built under `lindera_dir` (e.g. baked into the image).
+#[cfg(not(feature = "analyzer-remote-tls"))]
+pub fn ensure_prebuilt(params: &FetchParams, dict: &str) -> Result<(), TantivyBindingError> {
+    let dict_dir = PathBuf::from(&params.lindera_dir).join(&params.output_dir);
+    if dict_dir.is_dir() {
+        Ok(())
+    } else {
+        Err(common::download_disabled_error(dict))
+    }
 }
 
 pub fn load(params: &FetchParams) -> Result<lindera::dictionary::Dictionary, TantivyBindingError> {

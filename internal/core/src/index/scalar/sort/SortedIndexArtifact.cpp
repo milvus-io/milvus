@@ -216,7 +216,7 @@ SortedIndexArtifact<T>::SerializeImpl(Output& sink) const {
 
 SortedStringIndexArtifact::SortedStringIndexArtifact(
     std::vector<std::string> unique_values,
-    std::vector<std::vector<uint32_t>> posting_lists,
+    std::vector<SortedStringPostingList> posting_lists,
     TargetBitmap valid_bitset,
     std::vector<int32_t> idx_to_offsets,
     size_t total_num_rows,

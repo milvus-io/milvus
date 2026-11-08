@@ -69,41 +69,12 @@ impl SystemFilter {
 fn get_length_filter(params: &json::Map<String, json::Value>) -> Result<SystemFilter> {
     let limit_str = params.get("max");
     if limit_str.is_none() || !limit_str.unwrap().is_u64() {
-        return Err(TantivyBindingError::InternalError(
+        return Err(TantivyBindingError::InvalidArgument(
             "lenth max param was none or not uint".to_string(),
         ));
     }
     let limit = limit_str.unwrap().as_u64().unwrap() as usize;
     Ok(SystemFilter::Length(RemoveLongFilter::limit(limit + 1)))
-}
-
-fn get_decompounder_filter(params: &json::Map<String, json::Value>) -> Result<SystemFilter> {
-    let value = params.get("word_list");
-    if value.is_none() || !value.unwrap().is_array() {
-        return Err(TantivyBindingError::InternalError(
-            "decompounder word list should be array".to_string(),
-        ));
-    }
-
-    let stop_words = value.unwrap().as_array().unwrap();
-    let mut str_list = Vec::<String>::new();
-    for element in stop_words {
-        if let Some(word) = element.as_str() {
-            str_list.push(word.to_string());
-        } else {
-            return Err(TantivyBindingError::InternalError(
-                "decompounder word list item should be string".to_string(),
-            ));
-        }
-    }
-
-    match SplitCompoundWords::from_dictionary(str_list) {
-        Ok(f) => Ok(SystemFilter::Decompounder(f)),
-        Err(e) => Err(TantivyBindingError::InternalError(format!(
-            "create decompounder failed: {}",
-            e.to_string()
-        ))),
-    }
 }
 
 // fetch build-in filter from string
@@ -131,7 +102,7 @@ pub fn create_filter(
     match params.get(&"type".to_string()) {
         Some(value) => {
             if !value.is_string() {
-                return Err(TantivyBindingError::InternalError(
+                return Err(TantivyBindingError::InvalidArgument(
                     "filter type should be string".to_string(),
                 ));
             };
@@ -147,13 +118,13 @@ pub fn create_filter(
                     SynonymFilter::from_json(params, helper).map(|f| SystemFilter::Synonym(f))
                 }
                 "pinyin" => PinyinFilter::from_json(params).map(|f| SystemFilter::Pinyin(f)),
-                other => Err(TantivyBindingError::InternalError(format!(
+                other => Err(TantivyBindingError::InvalidArgument(format!(
                     "unsupport filter type: {}",
                     other
                 ))),
             }
         }
-        None => Err(TantivyBindingError::InternalError(
+        None => Err(TantivyBindingError::InvalidArgument(
             "no type field in filter params".to_string(),
         )),
     }

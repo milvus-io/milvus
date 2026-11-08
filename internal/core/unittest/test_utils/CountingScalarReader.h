@@ -19,6 +19,7 @@
 #include <atomic>
 #include <utility>
 
+#include "index/contracts/IIndex.h"
 #include "index/contracts/query/IIndexReaderBase.h"
 #include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
@@ -44,6 +45,11 @@ class CountingScalarReader final : public index::IIndexReaderBase,
           lookup_calls_(lookup_calls) {
     }
 
+    void
+    Prefetch() const override {
+        reader_->Prefetch();
+    }
+
     index::ReaderCaps
     Caps() const override {
         return reader_->Caps();
@@ -62,16 +68,6 @@ class CountingScalarReader final : public index::IIndexReaderBase,
     DataType
     ValueType() const override {
         return reader_->ValueType();
-    }
-
-    int64_t
-    MemoryUsage() const override {
-        return reader_->MemoryUsage();
-    }
-
-    cachinglayer::ResourceUsage
-    CellByteSize() const override {
-        return reader_->CellByteSize();
     }
 
     TargetBitmap
@@ -125,6 +121,32 @@ class CountingScalarReader final : public index::IIndexReaderBase,
     const index::IScalarValueReader<T>& values_;
     const index::INullReader& nulls_;
     std::atomic<int64_t>& lookup_calls_;
+};
+
+// Instrument every request reader without changing the underlying Index lifetime.
+template <typename T>
+class CountingScalarIndex final : public index::IIndex {
+ public:
+    CountingScalarIndex(index::IndexPtr index, std::atomic<int64_t>& calls)
+        : index_(std::move(index)), calls_(calls) {
+    }
+    index::IndexMetadata
+    Metadata() const override {
+        return index_->Metadata();
+    }
+    index::IIndexReaderBasePtr
+    CreateReader(OpContext* ctx) const override {
+        return std::make_unique<CountingScalarReader<T>>(
+            index_->CreateReader(ctx), calls_);
+    }
+    void
+    CancelWarmup() const override {
+        index_->CancelWarmup();
+    }
+
+ private:
+    index::IndexPtr index_;
+    std::atomic<int64_t>& calls_;
 };
 
 }  // namespace milvus

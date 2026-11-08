@@ -20,6 +20,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "common/Types.h"
 #include "common/Utils.h"
@@ -35,8 +36,9 @@
 //
 // Prefer a usable index; otherwise scan the raw or shredded column. This does
 // not compare cold-index fetch cost with an already-resident column scan.
-// TODO: add such cost modeling separately if needed. Literal-dependent guards
-// are queried on the chosen pinned interface after metadata selection.
+// TODO: add such cost modeling separately if needed. Metadata-only literal/type
+// constraints live in ExprIndexRequirement; reader-specific guards are queried
+// on the chosen reader interface after metadata selection.
 
 namespace milvus::exec {
 
@@ -48,7 +50,7 @@ namespace milvus::exec {
 // to include the expression kernels.
 enum class ExprExecPath {
     RawData,      // brute-force scan of the raw column
-    ScalarIndex,  // a pinned index reader interface
+    ScalarIndex,  // a selected index reader interface
     PkIndex,      // segment_->pk_range / search_ids
     TextIndex,    // the text-match interface
     // Shredded JSON column scan, not an index lookup. Kept distinct while execution
@@ -64,9 +66,9 @@ enum class RequiredReader {
     TextMatch,     // ITextMatchReader
     Ngram,         // INgramReader     — candidate family, caps.exact == false
     Spatial,       // ISpatialReader   — candidate family, caps.exact == false
-    Null,          // INullReader      — unconditional, carries no caps bit
-    ValueLookup,   // IScalarValueReader<T>
-    JsonPath,      // IJsonIndexReader
+    Null,  // INullReader      — checked after family-capability selection
+    ValueLookup,  // IScalarValueReader<T>
+    JsonPath,     // IJsonIndexReader
 };
 
 // Everything the decision needs from the EXPRESSION side. All of it is known at
@@ -92,13 +94,18 @@ struct ExprIndexRequirement {
     // even when both expose the same scalar value type.
     bool json_array_cast{false};
 
+    // Int64 JSON literals at or beyond +/-2^53 can alias in DOUBLE projections.
+    // Require a field-level JSON router (flat) that keeps integer precision.
+    bool requires_flat_json_index{false};
+
     // Whether execution can refine a candidate superset. If false, an entry with
     // caps.exact == false is unusable and selection must fall back to RawData.
     bool accepts_candidates{true};
 
-    // Short-circuit paths bypass the inventory; do not pin unrelated scalar cells.
+    // Short-circuit path that bypasses the inventory; do not pin unrelated
+    // scalar cells. JSON shredding is not selected here: it is the fallback
+    // SegmentExpr applies when this selector returns RawData for a JSON path.
     bool is_pk_compare{false};
-    bool json_stats_eligible{false};
 
     // The upstream operator already handed down candidate offsets
     // (`has_offset_input_`). Some paths are unavailable then — e.g. today's
@@ -109,9 +116,9 @@ struct ExprIndexRequirement {
 struct ExecPathDecision {
     ExprExecPath path{ExprExecPath::RawData};
 
-    // Which inventory entry to pin. Present exactly when the selected path is
+    // Which inventory entry to create a reader from. Present exactly when the selected path is
     // index-backed. The caller passes this straight to
-    // `segcore::SegmentInterface::PinIndex` — ONCE, for the whole expression node.
+    // `segcore::SegmentInterface::CreateIndexReader` — ONCE, for the whole expression node.
     std::optional<segcore::IndexKey> key;
 };
 
@@ -120,8 +127,13 @@ struct ExecPathDecision {
 // UnaryExpr, TermExpr, BinaryRangeExpr, NullExpr, ExistsExpr, JsonContainsExpr,
 // GIS expressions, BloomFilterExpr, and RoaringFilterExpr. Family support is a
 // caps read; expression literal/type checks populate ExprIndexRequirement.
-// Runtime literal-dependent guards still belong on the selected pinned reader.
+// Runtime literal-dependent guards still belong on the selected reader.
 namespace index_path_detail {
+
+inline bool
+IsFlatJsonIndex(const segcore::IndexCapabilityEntry& entry) {
+    return entry.caps.json_paths && entry.value_type == DataType::JSON;
+}
 
 inline DataType
 NormalizeJsonValueType(DataType type) {
@@ -169,9 +181,14 @@ inline bool
 ReaderMatches(const ExprIndexRequirement& req,
               const segcore::IndexCapabilityEntry& entry) {
     const auto& caps = entry.caps;
-    const bool multi_path_router = req.is_json_field && caps.json_paths &&
-                                   entry.value_type == DataType::JSON;
+    const bool multi_path_router = req.is_json_field && IsFlatJsonIndex(entry);
     if (multi_path_router) {
+        // Field-level JSON null checks cannot use a typed path view. The
+        // selector resolves views after reader creation, and Resolve(JSON) is absent.
+        if (req.reader == RequiredReader::Null &&
+            req.value_type == DataType::JSON) {
+            return false;
+        }
         return req.reader == RequiredReader::Predicate ||
                req.reader == RequiredReader::PatternMatch ||
                req.reader == RequiredReader::Null ||
@@ -189,8 +206,8 @@ ReaderMatches(const ExprIndexRequirement& req,
         case RequiredReader::Spatial:
             return caps.spatial;
         case RequiredReader::Null:
-            return caps.predicate || caps.ngram_candidates || caps.spatial ||
-                   caps.json_paths;
+            return caps.predicate || caps.pattern_match ||
+                   caps.ngram_candidates || caps.spatial || caps.json_paths;
         case RequiredReader::ValueLookup:
             return caps.value_lookup;
         case RequiredReader::JsonPath:
@@ -199,22 +216,21 @@ ReaderMatches(const ExprIndexRequirement& req,
     return false;
 }
 
-inline int
+inline std::pair<int, size_t>
 PathMatchScore(const ExprIndexRequirement& req,
                const segcore::IndexCapabilityEntry& entry) {
     if (!req.is_json_field) {
-        return entry.json_path.empty() ? 1 : -1;
+        return {entry.json_path.empty() ? 1 : -1, 0};
     }
     if (entry.json_path == req.json_path) {
-        return 2;
+        return {2, entry.json_path.size()};
     }
-    const bool multi_path_router =
-        entry.caps.json_paths && entry.value_type == DataType::JSON;
+    const bool multi_path_router = IsFlatJsonIndex(entry);
     if (!multi_path_router || !IsPathPrefix(entry.json_path, req.json_path) ||
         RelativePathContainsInteger(entry.json_path, req.json_path)) {
-        return -1;
+        return {-1, 0};
     }
-    return 1;
+    return {1, entry.json_path.size()};
 }
 
 // AdaptIndexType builds a TIMESTAMPTZ index over its INT64 storage, so the
@@ -231,8 +247,7 @@ ValueTypeMatches(const ExprIndexRequirement& req,
     if (req.value_type == DataType::NONE) {
         return true;
     }
-    const bool multi_path_router = req.is_json_field && entry.caps.json_paths &&
-                                   entry.value_type == DataType::JSON;
+    const bool multi_path_router = req.is_json_field && IsFlatJsonIndex(entry);
     if (multi_path_router) {
         return true;
     }
@@ -272,23 +287,24 @@ DetermineExecPath(const ExprIndexRequirement& req,
     if (req.is_pk_compare) {
         return {.path = ExprExecPath::PkIndex};
     }
-    if (req.json_stats_eligible) {
-        return {.path = ExprExecPath::JsonStats};
-    }
 
     const segcore::IndexCapabilityEntry* selected = nullptr;
     int selected_score = -1;
+    size_t selected_root_length = 0;
     for (const auto& entry : capabilities.entries()) {
         const bool needs_refine =
             index_path_detail::NeedsCandidateRefine(req.reader, entry.caps);
         if (entry.key.field_id != req.field_id ||
+            (req.requires_flat_json_index &&
+             !index_path_detail::IsFlatJsonIndex(entry)) ||
             !index_path_detail::ReaderMatches(req, entry) ||
             (needs_refine && !req.accepts_candidates) ||
             (req.has_offset_input && req.reader == RequiredReader::Ngram) ||
             !index_path_detail::ValueTypeMatches(req, entry)) {
             continue;
         }
-        const auto path_score = index_path_detail::PathMatchScore(req, entry);
+        const auto [path_score, root_length] =
+            index_path_detail::PathMatchScore(req, entry);
         if (path_score < 0) {
             continue;
         }
@@ -297,9 +313,13 @@ DetermineExecPath(const ExprIndexRequirement& req,
                                    entry.caps.cheap_value_lookup
                                ? 1
                                : 0);
-        if (selected == nullptr || score > selected_score) {
+        // Preserve exact/prefix and refine/cheap scoring. Among equal scores,
+        // prefer the most specific JSON root before the stable identity order.
+        if (selected == nullptr || score > selected_score ||
+            (score == selected_score && root_length > selected_root_length)) {
             selected = &entry;
             selected_score = score;
+            selected_root_length = root_length;
         }
     }
     if (selected == nullptr) {
@@ -316,7 +336,7 @@ DetermineExecPath(const ExprIndexRequirement& req,
 
 // Per-call eligibility cannot live in ReaderCaps. Ngram min-length checks and
 // FM count-first cost guards depend on the concrete literal, so ask the chosen
-// pinned query interface after metadata-only selection. A false answer requests
+// selected query interface after metadata-only selection. A false answer requests
 // a fallback; it is not an unsupported-operation exception.
 
 }  // namespace milvus::exec

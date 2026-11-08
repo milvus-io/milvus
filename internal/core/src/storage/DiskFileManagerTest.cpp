@@ -9,6 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <arrow/result.h>
 #include <boost/filesystem/operations.hpp>
 #include <boost/filesystem/path.hpp>
@@ -66,6 +68,7 @@
 #include "indexbuilder/BuildSession.h"
 #include "indexbuilder/VectorDiskBuildMaterializer.h"
 #include "knowhere/binaryset.h"
+#include "knowhere/index/index_factory.h"
 #include "knowhere/operands.h"
 #include "knowhere/sparse_utils.h"
 #include "knowhere/version.h"
@@ -154,21 +157,25 @@ struct PublishedConsumerIndex {
             index::LoaderRegistry::Instance().Lookup(type.family);
         AssertInfo(static_cast<bool>(loader), "storage consumer has no loader");
         if (packed) {
-            return loader.Load(
-                {index::IndexFiles{std::move(context),
-                                   Files(),
-                                   index::PackedIndexStorageConfig{}},
-                 std::move(options)});
+            return loader
+                .Load({index::IndexFiles{std::move(context),
+                                         Files(),
+                                         index::PackedIndexStorageConfig{}},
+                       std::move(options),
+                       milvus::index::test::TestIndexCacheConfig()})
+                ->CreateReader(nullptr);
         }
-        return loader.Load(
-            {index::IndexFiles{
-                 std::move(context),
-                 Files(),
-                 index::LegacyIndexStorageConfig{
-                     type.family == index::families::kVectorDisk
-                         ? storage::V1SourceLayout::DiskFiles
-                         : storage::V1SourceLayout::MemoryEntries}},
-             std::move(options)});
+        return loader
+            .Load({index::IndexFiles{
+                       std::move(context),
+                       Files(),
+                       index::LegacyIndexStorageConfig{
+                           type.family == index::families::kVectorDisk
+                               ? storage::V1SourceLayout::DiskFiles
+                               : storage::V1SourceLayout::MemoryEntries}},
+                   std::move(options),
+                   milvus::index::test::TestIndexCacheConfig()})
+            ->CreateReader(nullptr);
     }
 };
 
@@ -259,6 +266,7 @@ PublishDiskResident(const storage::FileManagerContext& context,
         adapted.value_type,
         context.indexMeta.dim,
         data->IsNullable(),
+        context.fieldDataMeta.field_schema.element_nullable(),
         data->get_num_rows(),
         adapted.family,
         adapted.params);
@@ -298,12 +306,12 @@ GeneratedIndexIdentifierPrefixForTest(const IndexMeta& index_meta) {
 }
 
 std::vector<std::string>
-CollectIdMapMmapFiles(const std::string& root_path,
-                      const IndexMeta& index_meta) {
-    std::vector<std::string> files;
+CollectIdMapMmapDirectories(const std::string& root_path,
+                            const IndexMeta& index_meta) {
+    std::vector<std::string> directories;
     boost::filesystem::path root(root_path);
     if (!boost::filesystem::exists(root)) {
-        return files;
+        return directories;
     }
 
     const auto index_identifier =
@@ -312,41 +320,18 @@ CollectIdMapMmapFiles(const std::string& root_path,
          it != end;
          ++it) {
         const auto& path = it->path();
-        if (!boost::filesystem::is_regular_file(path)) {
+        if (!boost::filesystem::is_directory(path)) {
             continue;
         }
         if (path.string().find(index_identifier) == std::string::npos) {
             continue;
         }
-        if (path.parent_path().filename().string() ==
-            milvus::index::ID_MAP_MMAP_DIR) {
-            files.emplace_back(path.string());
+        if (path.filename().string() == milvus::index::ID_MAP_MMAP_DIR) {
+            directories.emplace_back(path.string());
         }
     }
-    std::sort(files.begin(), files.end());
-    return files;
-}
-
-bool
-HasIdMapMmapFilePrefix(const std::vector<std::string>& files,
-                       const std::string& prefix) {
-    const auto prefix_with_generation = prefix + ".";
-    return std::any_of(files.begin(), files.end(), [&](const auto& file) {
-        return boost::filesystem::path(file).filename().string().rfind(
-                   prefix_with_generation, 0) == 0;
-    });
-}
-
-std::vector<std::string>
-NewFilesAfter(const std::vector<std::string>& before,
-              const std::vector<std::string>& after) {
-    std::vector<std::string> files;
-    for (const auto& file : after) {
-        if (!std::binary_search(before.begin(), before.end(), file)) {
-            files.emplace_back(file);
-        }
-    }
-    return files;
+    std::sort(directories.begin(), directories.end());
+    return directories;
 }
 
 }  // namespace
@@ -543,15 +528,21 @@ TEST_F(DiskAnnFileManagerTest, OpenInputStreamUsesBasenameForIndexPath) {
 
     const std::string local_path =
         fm->GetLocalIndexObjectPrefix() + "index_data";
-    auto output = fm->OpenOutputStream(local_path);
     const uint64_t expected = 0x1020304050607080ULL;
-    output->Write(expected);
-    output->Close();
+    for (bool use_memory : {false, true}) {
+        SCOPED_TRACE(use_memory);
+        milvus::FileManager& manager = *fm;
+        auto output = manager.OpenOutputStream(
+            local_path, {.expected_size = 1, .use_memory = use_memory});
+        output->Write(expected);
+        output->Close();
 
-    auto input = fm->OpenInputStream("index_v1/100/20/30/1000/1/index_data");
-    uint64_t actual = 0;
-    input->Read(actual);
-    EXPECT_EQ(actual, expected);
+        auto input =
+            fm->OpenInputStream("index_v1/100/20/30/1000/1/index_data");
+        uint64_t actual = 0;
+        input->Read(actual);
+        EXPECT_EQ(actual, expected);
+    }
 
     boost::filesystem::remove_all(conf.root_path);
 }
@@ -647,6 +638,40 @@ TEST_F(DiskAnnFileManagerTest, GetRemoteIndexObjectPrefix_V1CollectionRooted) {
     auto composed = prefix + "/" + key;
     EXPECT_TRUE(composed.find("/index_v1/100/20/30/1000/1/") !=
                 std::string::npos);
+}
+
+TEST_F(DiskAnnFileManagerTest, SegmentRootedIndexUploadAndRead) {
+    auto conf = milvus_storage::ArrowFileSystemConfig();
+    conf.storage_type = "local";
+    conf.root_path = TestLocalPath + "segment_rooted_index";
+    auto result = milvus_storage::CreateArrowFileSystem(conf);
+    ASSERT_TRUE(result.ok());
+    auto fs = result.ValueOrDie();
+    FieldDataMeta field_meta{100, 20, 30, 5};
+    IndexMeta index_meta{30, 5, 1000, 1};
+    index_meta.index_store_path_version = milvus::proto::index::
+        IndexStorePathVersion::INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED;
+    // An existing legacy local manifest must retain its actual base.
+    index_meta.index_file_prefix =
+        conf.root_path + "/legacy/insert_log/100/20/30/_index/1000/1";
+    auto fm = std::make_shared<DiskFileManagerImpl>(
+        FileManagerContext(field_meta, index_meta, cm_, fs));
+    EXPECT_EQ(fm->GetRemoteIndexObjectPrefix(), index_meta.index_file_prefix);
+    const std::string local_path =
+        fm->GetLocalIndexObjectPrefix() + "index_data";
+    auto output = fm->OpenOutputStream(local_path);
+    const uint64_t expected = 42;
+    output->Write(expected);
+    output->Close();
+    auto input =
+        fm->OpenInputStream(index_meta.index_file_prefix + "/index_data");
+    uint64_t actual = 0;
+    input->Read(actual);
+    EXPECT_EQ(actual, expected);
+    auto info = fs->GetFileInfo(index_meta.index_file_prefix + "/index_data");
+    ASSERT_TRUE(info.ok());
+    EXPECT_EQ(info->type(), arrow::fs::FileType::File);
+    boost::filesystem::remove_all(conf.root_path);
 }
 
 TEST_F(DiskAnnFileManagerTest, V3PackedIndexPathMismatch) {
@@ -1116,18 +1141,21 @@ TEST_F(DiskAnnFileManagerTest, LoadStreamIndexCachesOnlyValidDataSidecar) {
     std::memcpy(&cached_wire_count, cached_valid_data.data(), sizeof(uint64_t));
     ASSERT_EQ(milvus::index::FromValidDataCount(cached_wire_count),
               total_count);
-    knowhere::IdMap loaded_id_map;
-    const auto restored = index::RestoreIdMapFromValidData(
-        loaded_id_map,
+    auto created = knowhere::IndexFactory::Instance().Create<float>(
+        knowhere::IndexEnum::INDEX_FAISS_IDMAP,
+        knowhere::Version::GetCurrentVersion().VersionNumber());
+    ASSERT_TRUE(created.has_value());
+    auto loaded = std::move(created.value());
+    const auto input = index::MakeNullableLoadInput(
         index::ValidDataView{true,
                              static_cast<size_t>(total_count),
                              cached_valid_data.data() + sizeof(uint64_t)});
-    loaded_id_map.FinalizeVectorIds();
-
-    ASSERT_TRUE(restored.has_valid_data);
-    EXPECT_FALSE(loaded_id_map.ValidBitmap().empty());
-    EXPECT_EQ(loaded_id_map.OutCount(), total_count);
-    EXPECT_EQ(loaded_id_map.InCount(), valid_count);
+    ASSERT_TRUE(input.validity.has_value());
+    ASSERT_EQ(loaded.ImportValidity(*input.validity),
+              knowhere::Status::success);
+    EXPECT_TRUE(loaded.HasValidity().value());
+    EXPECT_EQ(loaded.LogicalCount().value(), total_count);
+    EXPECT_EQ(loaded.ValidCount().value(), valid_count);
     EXPECT_EQ(file_manager_context.indexMeta.dim, 128);
 
     local_chunk_manager->Remove(valid_data_path);
@@ -1893,8 +1921,7 @@ TEST_F(DiskAnnFileManagerTest, BuildAllNullNullableDiskVectorIndexFromDataset) {
     }
 }
 
-TEST_F(DiskAnnFileManagerTest,
-       BuildNullableDiskVectorIndexCreatesIdMapMmapFilesInCompatibleDir) {
+TEST_F(DiskAnnFileManagerTest, NullableDiskVectorLoadsIsolateMmapDirectories) {
     const int64_t collection_id = 1;
     const int64_t partition_id = 2;
     const int64_t segment_id = 3003;
@@ -1947,15 +1974,16 @@ TEST_F(DiskAnnFileManagerTest,
 
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    const auto mmap_files_before_build =
-        CollectIdMapMmapFiles(local_chunk_manager->GetRootPath(), index_meta)
+    const auto mmap_directory_count_before_build =
+        CollectIdMapMmapDirectories(local_chunk_manager->GetRootPath(),
+                                    index_meta)
             .size();
 
     auto published = PublishDiskResident(file_manager_context, data, config);
     EXPECT_EQ(PersistedVectorRowCount(published, file_manager_context),
               num_rows);
-    // Artifacts contain persisted files. The first consumer open owns the
-    // derived id-map mmap files, as does each subsequent independent load.
+    // Each consumer owns an independent staging directory. Backends may
+    // consume and release temporary mapping arrays during load.
     auto reader = published.Open(file_manager_context);
     const auto& vector = dynamic_cast<const index::IVectorReader&>(*reader);
     ASSERT_TRUE(vector.HasValidData());
@@ -1965,13 +1993,10 @@ TEST_F(DiskAnnFileManagerTest,
         EXPECT_EQ(vector.IsRowValid(row), valid_data[row]);
     }
 
-    const auto mmap_files_after_build =
-        CollectIdMapMmapFiles(local_chunk_manager->GetRootPath(), index_meta);
-    EXPECT_GT(mmap_files_after_build.size(), mmap_files_before_build);
-    EXPECT_TRUE(
-        HasIdMapMmapFilePrefix(mmap_files_after_build, "in_to_out_ids"));
-    EXPECT_TRUE(
-        HasIdMapMmapFilePrefix(mmap_files_after_build, "out_to_in_ids"));
+    const auto mmap_directories_after_build = CollectIdMapMmapDirectories(
+        local_chunk_manager->GetRootPath(), index_meta);
+    EXPECT_EQ(mmap_directories_after_build.size(),
+              mmap_directory_count_before_build + 1);
 
     auto files = published.Files();
     ASSERT_GT(files.size(), 1);
@@ -1983,8 +2008,8 @@ TEST_F(DiskAnnFileManagerTest,
     load_config[milvus::index::ENABLE_MMAP_I2O_MAP] = true;
     load_config[milvus::index::ENABLE_MMAP_O2I_MAP] = true;
 
-    const auto mmap_files_before_load =
-        CollectIdMapMmapFiles(local_chunk_manager->GetRootPath(), index_meta);
+    const auto mmap_directories_before_load = CollectIdMapMmapDirectories(
+        local_chunk_manager->GetRootPath(), index_meta);
 
     auto loaded_reader = published.Open(file_manager_context, load_config);
     const auto& loaded_vector =
@@ -1996,12 +2021,24 @@ TEST_F(DiskAnnFileManagerTest,
         EXPECT_EQ(loaded_vector.IsRowValid(row), valid_data[row]);
     }
 
-    const auto mmap_files_after_load =
-        CollectIdMapMmapFiles(local_chunk_manager->GetRootPath(), index_meta);
-    const auto loaded_mmap_files =
-        NewFilesAfter(mmap_files_before_load, mmap_files_after_load);
-    EXPECT_TRUE(HasIdMapMmapFilePrefix(loaded_mmap_files, "in_to_out_ids"));
-    EXPECT_TRUE(HasIdMapMmapFilePrefix(loaded_mmap_files, "out_to_in_ids"));
+    const auto mmap_directories_after_load = CollectIdMapMmapDirectories(
+        local_chunk_manager->GetRootPath(), index_meta);
+    EXPECT_EQ(mmap_directories_after_load.size(),
+              mmap_directories_before_load.size() + 1);
+    EXPECT_TRUE(std::includes(mmap_directories_after_load.begin(),
+                              mmap_directories_after_load.end(),
+                              mmap_directories_before_load.begin(),
+                              mmap_directories_before_load.end()));
+    reader.reset();
+    EXPECT_EQ(CollectIdMapMmapDirectories(local_chunk_manager->GetRootPath(),
+                                          index_meta)
+                  .size(),
+              mmap_directory_count_before_build + 1);
+    loaded_reader.reset();
+    EXPECT_EQ(CollectIdMapMmapDirectories(local_chunk_manager->GetRootPath(),
+                                          index_meta)
+                  .size(),
+              mmap_directory_count_before_build);
 
     for (const auto& file : files) {
         cm_->Remove(file);
@@ -2056,8 +2093,9 @@ TEST_F(DiskAnnFileManagerTest, LoadAllNullNullableDiskVectorIndexFromDataset) {
 
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    const auto mmap_file_count_before_load =
-        CollectIdMapMmapFiles(local_chunk_manager->GetRootPath(), index_meta)
+    const auto mmap_directory_count_before_load =
+        CollectIdMapMmapDirectories(local_chunk_manager->GetRootPath(),
+                                    index_meta)
             .size();
 
     {
@@ -2077,10 +2115,10 @@ TEST_F(DiskAnnFileManagerTest, LoadAllNullNullableDiskVectorIndexFromDataset) {
         }
     }
 
-    EXPECT_EQ(
-        CollectIdMapMmapFiles(local_chunk_manager->GetRootPath(), index_meta)
-            .size(),
-        mmap_file_count_before_load);
+    EXPECT_EQ(CollectIdMapMmapDirectories(local_chunk_manager->GetRootPath(),
+                                          index_meta)
+                  .size(),
+              mmap_directory_count_before_load);
 
     auto id_map_mmap_load_config = load_config;
     id_map_mmap_load_config[milvus::index::ENABLE_MMAP_I2O_MAP] = true;
@@ -2097,10 +2135,10 @@ TEST_F(DiskAnnFileManagerTest, LoadAllNullNullableDiskVectorIndexFromDataset) {
     for (int64_t row = 0; row < num_rows; ++row) {
         EXPECT_FALSE(vector.IsRowValid(row));
     }
-    EXPECT_EQ(
-        CollectIdMapMmapFiles(local_chunk_manager->GetRootPath(), index_meta)
-            .size(),
-        mmap_file_count_before_load);
+    EXPECT_EQ(CollectIdMapMmapDirectories(local_chunk_manager->GetRootPath(),
+                                          index_meta)
+                  .size(),
+              mmap_directory_count_before_load);
 
     for (const auto& file : files) {
         cm_->Remove(file);
@@ -2168,6 +2206,9 @@ TEST_F(DiskAnnFileManagerTest, BuildAllValidEmptyEmbListDiskIndexFromBinlog) {
     config[milvus::index::DISK_ANN_BUILD_THREAD_NUM] = "1";
 
     auto adapted = DiskConsumerType(file_manager_context, num_rows, config);
+    // Only an embedding-list metric keeps the list layout; an element-level
+    // metric would see no element at all and skip the build.
+    adapted.params[index::METRIC_TYPE] = knowhere::metric::MAX_SIM_L2;
     indexbuilder::BuildRequest request;
     request.family = adapted.family;
     request.params = adapted.params;
@@ -2200,19 +2241,48 @@ TEST_F(DiskAnnFileManagerTest, BuildAllValidEmptyEmbListDiskIndexFromBinlog) {
 
     index::VectorSearchParams search_info;
     search_info.search_params_ = milvus::Config::object();
-    search_info.metric_type_ = knowhere::metric::L2;
+    search_info.metric_type_ = knowhere::metric::MAX_SIM_L2;
     search_info.topk_ = 2;
 
     SearchResult search_result;
-    vector.Search(query_dataset,
-                  search_info,
-                  milvus::BitsetView{},
-                  nullptr,
-                  search_result);
+    vector.Search(
+        query_dataset, search_info, milvus::BitsetView{}, search_result);
     EXPECT_EQ(search_result.total_nq_, num_rows);
     ASSERT_EQ(search_result.seg_offsets_.size(), num_rows * search_info.topk_);
     for (auto offset : search_result.seg_offsets_) {
         EXPECT_EQ(offset, INVALID_SEG_OFFSET);
+    }
+
+    // Before element-level metrics became ordinary vector input, an
+    // element-level (L2, IP, COSINE) build of these lists took the same
+    // embedding-list path and persisted the same empty-list offsets, which
+    // carry no metric. Such an index must load and answer element-level
+    // searches with no hits.
+    for (const auto* metric : {knowhere::metric::L2,
+                               knowhere::metric::IP,
+                               knowhere::metric::COSINE}) {
+        SCOPED_TRACE(metric);
+        auto legacy_reader = published.Open(file_manager_context,
+                                            {{index::METRIC_TYPE, metric}});
+        const auto& legacy =
+            dynamic_cast<const index::IVectorReader&>(*legacy_reader);
+        EXPECT_EQ(legacy_reader->Count(), 0);
+        EXPECT_EQ(legacy.Dim(), dim);
+        auto element_query = knowhere::GenDataSet(1, dim, vec_data.data());
+        index::VectorSearchParams element_search;
+        element_search.search_params_ = {{index::DISK_ANN_QUERY_LIST, 8}};
+        element_search.metric_type_ = metric;
+        element_search.topk_ = 2;
+        SearchResult element_result;
+        legacy.Search(element_query,
+                      element_search,
+                      milvus::BitsetView{},
+                      element_result);
+        EXPECT_EQ(element_result.total_nq_, 1);
+        ASSERT_EQ(element_result.seg_offsets_.size(), element_search.topk_);
+        for (auto offset : element_result.seg_offsets_) {
+            EXPECT_EQ(offset, INVALID_SEG_OFFSET);
+        }
     }
 
     auto files = published.Files();

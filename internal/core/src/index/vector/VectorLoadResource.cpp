@@ -23,7 +23,6 @@
 #include "common/Utils.h"
 #include "index/LoadResource.h"
 #include "index/ParamUtils.h"
-#include "index/ResourceUsageUtils.h"
 #include "index/Meta.h"
 #include "index/vector/VectorIndexValidDataUtils.h"
 #include "index/vector/VectorLoadParamUtils.h"
@@ -40,9 +39,6 @@ namespace milvus::index {
 
 namespace {
 
-using detail::SaturatingAdd;
-using detail::SaturatingMul;
-
 uint64_t
 IdMapMmapDiskCost(const Config& config, int64_t num_rows) {
     if (num_rows <= 0) {
@@ -54,7 +50,8 @@ IdMapMmapDiskCost(const Config& config, int64_t num_rows) {
     mmap_flags.enable_i2o = vector_load_params::ReadLenientIdMapMmapFlag(
         config, ENABLE_MMAP_I2O_MAP);
     return mmap_flags.Any()
-               ? SaturatingMul(static_cast<uint64_t>(num_rows), sizeof(int32_t))
+               ? SaturatingMultiply(static_cast<uint64_t>(num_rows),
+                                    sizeof(int32_t))
                : 0;
 }
 
@@ -171,7 +168,8 @@ VecIndexLoadResource(DataType field_type,
         request.max_memory_cost = std::max<uint64_t>(
             estimated.memoryCost, DEFAULT_FIELD_MAX_MEMORY_LIMIT);
     } else {
-        request.max_memory_cost = SaturatingMul(2, estimated.memoryCost);
+        request.max_memory_cost =
+            SaturatingMultiply(uint64_t{2}, estimated.memoryCost);
     }
     if (VectorUsesDiskLoad(index_type, index_version)) {
         auto offset_cost = IdMapMmapDiskCost(config, num_rows);

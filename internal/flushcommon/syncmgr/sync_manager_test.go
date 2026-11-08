@@ -254,7 +254,7 @@ func (s *SyncManagerSuite) TestSyncManager_TaskStatsJSON() {
 	syncMgr.taskStats.Add("12345-1000", task1)
 	syncMgr.taskStats.Add("67890-3000", task2)
 
-	expectedTasks := []SyncTask{*task1, *task2}
+	expectedTasks := []*SyncTask{task1, task2}
 	expectedJSON, err := json.Marshal(expectedTasks)
 	s.NoError(err)
 

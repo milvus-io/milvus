@@ -62,6 +62,7 @@ const (
 	ExtfsKeyUseSSL                  = specutil.ExtfsKeyUseSSL
 	ExtfsKeyUseVirtualHost          = specutil.ExtfsKeyUseVirtualHost
 	ExtfsKeyLoadFrequency           = specutil.ExtfsKeyLoadFrequency
+	ExtfsKeyCredentialEndpoint      = specutil.ExtfsKeyCredentialEndpoint
 	ExtfsKeyAzureClientID           = specutil.ExtfsKeyAzureClientID
 	ExtfsKeyAzureTenantID           = specutil.ExtfsKeyAzureTenantID
 	ExtfsKeyAzureCredentialEndpoint = specutil.ExtfsKeyAzureCredentialEndpoint
@@ -282,7 +283,8 @@ func validateEndpointURL(sourceURL *url.URL, extfs map[string]string) (bool, err
 // ValidateSourceAndSpec validates URL + JSON shape + ValidateExtfsComplete.
 // Errors retain their typed validation code while adding field context.
 // Called from Proxy and RootCoord (defense in depth) on create-collection.
-func ValidateSourceAndSpec(externalSource, externalSpec string) error {
+// Omitting the server-owned policy denies every credential Broker.
+func ValidateSourceAndSpec(externalSource, externalSpec string, policies ...*specutil.BrokerPolicy) error {
 	if err := ValidateExternalSource(externalSource); err != nil {
 		return merr.Wrap(err, "external_source is invalid")
 	}
@@ -293,7 +295,11 @@ func ValidateSourceAndSpec(externalSource, externalSpec string) error {
 	if err := ValidateExtfsComplete(externalSource, spec.Extfs); err != nil {
 		return merr.Wrap(err, "external_spec is invalid")
 	}
-	return nil
+	var policy *specutil.BrokerPolicy
+	if len(policies) > 0 {
+		policy = policies[0]
+	}
+	return policy.Validate(spec.Extfs)
 }
 
 // RedactExternalSource returns a log-safe external source. Normal storage URIs
@@ -400,7 +406,20 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 		return merr.WrapErrParameterInvalidMsg("scheme=minio requires extfs.cloud_provider=%q, got %q", CloudProviderMinIO, cp)
 	}
 
-	hasAzureBroker := extfs[ExtfsKeyAzureClientID] != "" ||
+	brokerEndpoint, err := specutil.ResolveBrokerEndpoint(extfs)
+	if err != nil {
+		return err
+	}
+	hasS3Broker := brokerEndpoint != "" && cp != CloudProviderAzure
+	if hasS3Broker {
+		if rawCP == "" {
+			return merr.WrapErrParameterMissingMsg("extfs.cloud_provider is required for credential broker")
+		}
+		if err := validateS3Broker(cp, extfs); err != nil {
+			return err
+		}
+	}
+	hasAzureBroker := cp == CloudProviderAzure && brokerEndpoint != "" || extfs[ExtfsKeyAzureClientID] != "" ||
 		extfs[ExtfsKeyAzureTenantID] != "" ||
 		extfs[ExtfsKeyAzureCredentialEndpoint] != ""
 	if hasAzureBroker {
@@ -415,7 +434,7 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 		}{
 			{ExtfsKeyAzureClientID, extfs[ExtfsKeyAzureClientID]},
 			{ExtfsKeyAzureTenantID, extfs[ExtfsKeyAzureTenantID]},
-			{ExtfsKeyAzureCredentialEndpoint, extfs[ExtfsKeyAzureCredentialEndpoint]},
+			{ExtfsKeyCredentialEndpoint, brokerEndpoint},
 			{ExtfsKeyAccessKeyID, extfs[ExtfsKeyAccessKeyID]},
 			{ExtfsKeyRegion, extfs[ExtfsKeyRegion]},
 		} {
@@ -423,13 +442,6 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 				return merr.WrapErrParameterMissingMsg(
 					"extfs.%s is required for Azure credential broker mode", required.key)
 			}
-		}
-
-		brokerEndpoint, err := url.Parse(extfs[ExtfsKeyAzureCredentialEndpoint])
-		if err != nil || brokerEndpoint.Host == "" ||
-			(brokerEndpoint.Scheme != "http" && brokerEndpoint.Scheme != "https") {
-			return merr.WrapErrParameterInvalidMsg(
-				"extfs.%s must be a valid HTTP(S) URL", ExtfsKeyAzureCredentialEndpoint)
 		}
 	}
 
@@ -683,5 +695,37 @@ func redactExtfsSecrets(spec map[string]json.RawMessage) error {
 		return err
 	}
 	spec["extfs"] = redactedExtfs
+	return nil
+}
+
+// validateS3Broker validates the effective mode before ordinary credential counting.
+func validateS3Broker(cp string, extfs map[string]string) error {
+	if cp != CloudProviderAWS && cp != CloudProviderAliyun && cp != CloudProviderTencent {
+		return merr.WrapErrParameterInvalidMsg("credential broker requires cloud_provider=aws, aliyun, tencent or azure")
+	}
+	if extfs[ExtfsKeyRegion] == "" {
+		return merr.WrapErrParameterMissingMsg("extfs.region is required for credential broker")
+	}
+	if extfs[ExtfsKeyUseIAM] != "true" && extfs[ExtfsKeyRoleARN] == "" {
+		return merr.WrapErrParameterMissingMsg("extfs.role_arn is required for credential broker AssumeRole")
+	}
+	forbidden := []string{ExtfsKeyAccessKeyID, ExtfsKeyAccessKeyValue, ExtfsKeyGCPTargetServiceAccount, ExtfsKeyAzureClientID, ExtfsKeyAzureTenantID}
+	if extfs[ExtfsKeyUseIAM] == "true" {
+		forbidden = append(forbidden, ExtfsKeyRoleARN, ExtfsKeyExternalID, ExtfsKeySessionName)
+	}
+	for _, key := range forbidden {
+		if extfs[key] != "" {
+			return merr.WrapErrParameterInvalidMsg("extfs.%s conflicts with credential broker mode", key)
+		}
+	}
+	if extfs[ExtfsKeyAnonymous] == "true" {
+		return merr.WrapErrParameterInvalidMsg("anonymous conflicts with credential broker mode")
+	}
+	if value := extfs[ExtfsKeyLoadFrequency]; value != "" {
+		duration, err := strconv.ParseInt(value, 10, 32)
+		if err != nil || duration < 900 || duration > 3600 {
+			return merr.WrapErrParameterInvalidMsg("extfs.load_frequency must be an integer in [900, 3600] for credential broker")
+		}
+	}
 	return nil
 }

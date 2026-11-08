@@ -200,12 +200,12 @@ class PhyCompareFilterExpr : public Expr {
                 segment->type() == SegmentType::Growing
                     ? upper_div(segment_chunk_reader_.active_count_,
                                 segment_chunk_reader_.SizePerChunk())
-                    : segment->num_chunk_data(left_field_);
+                    : segment_chunk_reader_.NumChunkData(left_field_);
             right_num_chunk_ =
                 segment->type() == SegmentType::Growing
                     ? upper_div(segment_chunk_reader_.active_count_,
                                 segment_chunk_reader_.SizePerChunk())
-                    : segment->num_chunk_data(right_field_);
+                    : segment_chunk_reader_.NumChunkData(right_field_);
             num_chunk_ = left_num_chunk_;
         } else {
             num_chunk_ = upper_div(segment_chunk_reader_.active_count_,
@@ -916,7 +916,7 @@ class PhyCompareFilterExpr : public Expr {
     ExecCompareWithValueLookup(OpType op, EvalCtx& context);
 
     bool
-    GatherValues(const PinnedValueLookup& source,
+    GatherValues(const ValueLookupSource& source,
                  DataType data_type,
                  const int64_t* offsets,
                  int64_t count,
@@ -959,8 +959,8 @@ class PhyCompareFilterExpr : public Expr {
     const segcore::SegmentChunkReader segment_chunk_reader_;
     int64_t batch_size_;
     std::shared_ptr<const milvus::expr::CompareExpr> expr_;
-    PinnedValueLookup left_value_lookup_;
-    PinnedValueLookup right_value_lookup_;
+    ValueLookupSource left_value_lookup_;
+    ValueLookupSource right_value_lookup_;
     std::optional<bool> can_use_both_data_compare_;
     bool data_scan_initialized_{false};
     // Keep both published column generations and their forward-only cursors

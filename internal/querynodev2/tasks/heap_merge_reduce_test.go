@@ -524,6 +524,48 @@ func TestHeapMergeReduce_EqualScoreDeterminism(t *testing.T) {
 	assert.Equal(t, int64(7), ids.Value(3))
 }
 
+func TestHeapMergeReduce_CloseScores(t *testing.T) {
+	pool := memory.NewGoAllocator()
+	low := float32(0.042794593)
+	high := math.Nextafter32(low, float32(math.Inf(1)))
+
+	for _, stringPK := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stringPK=%v", stringPK), func(t *testing.T) {
+			var dfs []*chain.DataFrame
+			if stringPK {
+				dfs = []*chain.DataFrame{
+					buildTestDFWithStringPK(pool, [][]string{{"5989"}, {"7175"}}, [][]float32{{low}, {high}}),
+					buildTestDFWithStringPK(pool, [][]string{{"7175"}, {"5989"}}, [][]float32{{high}, {low}}),
+				}
+			} else {
+				dfs = []*chain.DataFrame{
+					buildTestDF(pool, [][]int64{{5989}, {7175}}, [][]float32{{low}, {high}}),
+					buildTestDF(pool, [][]int64{{7175}, {5989}}, [][]float32{{high}, {low}}),
+				}
+			}
+			defer func() {
+				for _, df := range dfs {
+					df.Release()
+				}
+			}()
+			// Top-1 must retain the higher score even when its PK is larger.
+			result, err := heapMergeReduce(pool, dfs, 1, nil)
+			require.NoError(t, err)
+			defer result.DF.Release()
+			for nq := 0; nq < 2; nq++ {
+				scores := result.DF.Column(scoreFieldName).Chunk(nq).(*array.Float32)
+				require.Equal(t, []float32{high}, scores.Float32Values())
+				ids := result.DF.Column(idFieldName).Chunk(nq)
+				if stringPK {
+					require.Equal(t, "7175", ids.(*array.String).Value(0))
+				} else {
+					require.Equal(t, int64(7175), ids.(*array.Int64).Value(0))
+				}
+			}
+		})
+	}
+}
+
 // TestHeapMergeReduce_SamePKEqualScore verifies that when the same PK appears
 // in multiple segments with equal scores, dedup deterministically keeps one
 // entry. With PK ASC tie-breaking, the "first seen" pop picks the sole row,

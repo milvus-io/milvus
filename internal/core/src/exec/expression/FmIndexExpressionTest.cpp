@@ -1097,3 +1097,39 @@ TEST(FmIndexExpressionTest, DISABLED_RegexEndToEndBenchmark) {
                        std::to_string(measure(indexed, true)));
     }
 }
+
+TEST(FmIndexExpressionTest, NullableFieldNullPredicatesUseScalarIndex) {
+    const std::vector<std::string> rows{"abc", "ignored", "", "zzz"};
+    const uint8_t validity[] = {0x0D};
+    auto fixture = LoadSealedFMMatch(rows, {}, true, validity);
+    for (const auto op : {proto::plan::NullExpr_NullOp_IsNull,
+                          proto::plan::NullExpr_NullOp_IsNotNull}) {
+        auto filter = std::make_shared<expr::NullExpr>(
+            expr::ColumnInfo(fixture.varchar_id, DataType::VARCHAR, {}, true),
+            op);
+        auto query_context =
+            std::make_shared<exec::QueryContext>(DEAFULT_QUERY_ID,
+                                                 fixture.segment.get(),
+                                                 rows.size(),
+                                                 MAX_TIMESTAMP);
+        exec::ExecContext exec_context(query_context.get());
+        auto compiled =
+            exec::CompileExpressions({filter}, &exec_context, {}, false);
+        ASSERT_EQ(compiled.size(), 1);
+        auto* segment_expr =
+            dynamic_cast<exec::SegmentExpr*>(compiled[0].get());
+        ASSERT_NE(segment_expr, nullptr);
+        EXPECT_EQ(segment_expr->GetExecPath(), exec::ExprExecPath::ScalarIndex);
+        auto evaluation =
+            test::EvalExprInBatches(filter, fixture.segment.get(), rows.size());
+        const auto& result = evaluation.result;
+        TargetBitmapView bits(result->GetRawData(), result->size());
+        TargetBitmapView valid(result->GetValidRawData(), result->size());
+        for (size_t row = 0; row < rows.size(); ++row) {
+            EXPECT_TRUE(valid[row]);
+            EXPECT_EQ(bits[row],
+                      op == proto::plan::NullExpr_NullOp_IsNull ? row == 1
+                                                                : row != 1);
+        }
+    }
+}

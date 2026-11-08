@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -192,9 +193,12 @@ func teardown() {
 	}
 }
 
-// managementBaseURL returns the Milvus management API base URL (port 9091)
-// derived from the configured URI (e.g. http://host:19530 -> http://host:9091).
+// managementBaseURL uses an explicit endpoint for isolated local clusters, or
+// derives the standard management port from the configured Milvus address.
 func managementBaseURL() string {
+	if endpoint := strings.TrimSpace(os.Getenv("MILVUS_MANAGEMENT_URL")); endpoint != "" {
+		return strings.TrimRight(endpoint, "/")
+	}
 	host := ""
 	rawAddr := strings.TrimSpace(GetURI())
 	if rawAddr != "" {

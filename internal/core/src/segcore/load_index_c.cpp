@@ -132,7 +132,7 @@ EstimateLoadIndexResourceFromLoadInfo(
     }
 
     // Keep admission estimation metadata-only: exact scalar V3 directory
-    // inspection belongs to SealedIndexTranslator, where the result is used
+    // inspection belongs to SealedIndexLoader, where the result is used
     // for the actual MCL loading reservation.
     return milvus::index::IndexLoadResource(
         field_type,
@@ -306,7 +306,11 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
             milvus::tracer::CloseRootSpan();
         });
 
-        LoadIndexData(ctx, load_index_info);
+        if (milvus::segcore::CanLazyCreateSealedIndexSlot(*load_index_info)) {
+            milvus::segcore::PrepareLazySealedIndexSlot(*load_index_info);
+        } else {
+            LoadIndexData(ctx, load_index_info);
+        }
 
         LOG_INFO(
             "[collection={}][segment={}][field={}][enable_mmap={}] load index "
@@ -331,7 +335,8 @@ CleanLoadedIndex(CLoadIndexInfo c_load_index_info) {
         auto load_index_info =
             (milvus::segcore::LoadIndexInfo*)c_load_index_info;
         AssertInfo(load_index_info != nullptr, "load index info is null");
-        load_index_info->cache_index.reset();
+        load_index_info->index = nullptr;
+        load_index_info->lazy_index_factory = nullptr;
         return milvus::SuccessCStatus();
     }
     CGO_CATCH_AND_RETURN_CSTATUS

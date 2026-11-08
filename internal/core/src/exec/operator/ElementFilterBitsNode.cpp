@@ -89,11 +89,11 @@ PhyElementFilterBitsNode::GetOutput() {
         std::chrono::high_resolution_clock::now();
 
     // Step 1: Get struct element offsets
-    auto segment = query_context_->get_segment();
-    auto schema = segment->get_schema_snapshot();
+    auto schema = query_context_->get_schema_snapshot();
     auto& field_meta = schema->GetFirstArrayFieldInStruct(struct_name_);
     auto field_id = field_meta.get_id();
-    auto struct_element_offsets = segment->GetStructElementOffsets(field_id);
+    auto struct_element_offsets =
+        query_context_->get_struct_element_offsets(field_id);
     if (struct_element_offsets == nullptr) {
         ThrowInfo(ErrorCode::UnexpectedError,
                   "IStructElementOffsets not found for field {}",
@@ -307,10 +307,9 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
                         total_elements,
                         total_elements));
 
-        // Element filter targets individual elements within arrays.
-        // While the array field itself can be nullable (handled by doc_bitset_valid),
-        // individual elements inside an array do not support null values.
-        // Therefore, the element-level valid_bitset is always all true.
+        // Only TRUE elements are selected: an UNKNOWN element (e.g. a null
+        // sub-field value) has its data bit cleared and is filtered out like
+        // FALSE, so the element-level valid_bitset is all true.
         TargetBitmap valid_bitset(total_elements, true);
         return std::make_pair(std::move(eval_bitset), std::move(valid_bitset));
     }

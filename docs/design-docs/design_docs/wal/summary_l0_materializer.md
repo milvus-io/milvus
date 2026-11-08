@@ -224,8 +224,12 @@ unchanged and retries without skipping data.
 An Entry, including a committed Txn's Delete children, is the smallest cursor
 unit. A batch may exceed its soft row/byte limit for one oversized Entry; it
 must not commit an Entry's TimeTick after processing only part of that Entry.
-Physical L0 output may be split, but the batch frontier advances only after all
-required outputs are registered.
+Physical L0 output may be split only between complete (partition, TimeTick)
+units. Multiple blocks for the same partition at one TimeTick remain in one L0,
+even beyond the soft row/byte limits; different partitions have separate L0s.
+Each L0's DmlPosition is its own last Delete's TimeTick, not the Summary batch
+coverage boundary. The batch frontier advances only after all required outputs
+are registered.
 
 A proven empty interval can advance M without producing an empty L0. Coalesce
 this metadata work with required boundaries or normal snapshot handling rather

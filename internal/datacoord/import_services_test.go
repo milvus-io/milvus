@@ -31,11 +31,12 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
-	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
+	"github.com/milvus-io/milvus/internal/datacoord/ddl"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
@@ -43,12 +44,10 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
-	componenttypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
-	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util"
@@ -57,19 +56,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// ================================
-// Import Services Test Suite
-// ================================
-
 type ImportServicesSuite struct {
 	suite.Suite
 }
 
 func (s *ImportServicesSuite) SetupTest() {
 	paramtable.Init()
-	gate := &paramtable.Get().ProxyCfg.RLSImportEnforcementEnabled
-	oldGate := gate.SwapTempValue("true")
-	s.T().Cleanup(func() { gate.SwapTempValue(oldGate) })
 	previous := streaming.WAL()
 	streaming.SetupNoopWALForTest()
 	s.T().Cleanup(func() { streaming.SetWALForTest(previous) })
@@ -78,10 +70,6 @@ func (s *ImportServicesSuite) SetupTest() {
 func TestImportServicesSuite(t *testing.T) {
 	suite.Run(t, new(ImportServicesSuite))
 }
-
-// --------------------------------
-// ImportV2 Tests
-// --------------------------------
 
 func (s *ImportServicesSuite) TestImportV2_ServerNotHealthyReturnsError() {
 	ctx := context.Background()
@@ -99,6 +87,7 @@ func (s *ImportServicesSuite) TestImportV2_InvalidTimeoutReturnsError() {
 	ctx := context.Background()
 	server := &Server{}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
+	server.ddl = newDDLCallbacks(server)
 
 	req := &internalpb.ImportRequestInternal{
 		Options: []*commonpb.KeyValuePair{
@@ -125,8 +114,9 @@ func (s *ImportServicesSuite) TestImportV2_InvalidBinlogPathsAreNotRetryable() {
 			{"invalid_last", []*internalpb.ImportFile{{Paths: []string{"valid"}}, {Paths: paths}}},
 		} {
 			s.Run(fmt.Sprintf("paths_%d/%s", len(paths), test.name), func() {
-				server := &Server{meta: &meta{}}
+				server := &Server{meta: &meta.Meta{}}
 				server.stateCode.Store(commonpb.StateCode_Healthy)
+				server.ddl = newDDLCallbacks(server)
 				// A supplied job ID skips allocation; a nil chunk manager proves
 				// invalid path counts are rejected before accessing object storage.
 				resp, err := server.ImportV2(context.Background(), &internalpb.ImportRequestInternal{
@@ -151,6 +141,7 @@ func (s *ImportServicesSuite) TestImportV2_UnsupportedTaskVersionReturnsError() 
 	paramtable.Init()
 	server := &Server{}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
+	server.ddl = newDDLCallbacks(server)
 
 	resp, err := server.ImportV2(ctx, &internalpb.ImportRequestInternal{
 		Options: []*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
@@ -167,6 +158,7 @@ func (s *ImportServicesSuite) TestImportV2_L0ImportDisabledReturnsError() {
 	ctx := context.Background()
 	server := &Server{}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
+	server.ddl = newDDLCallbacks(server)
 
 	// enableL0Import defaults to false, so an l0_import request must be rejected
 	// before reaching allocation (allocator is nil here, proving the early reject).
@@ -190,6 +182,7 @@ func (s *ImportServicesSuite) TestImportV2_L0ImportEnabledPassesGate() {
 	ctx := context.Background()
 	server := &Server{}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
+	server.ddl = newDDLCallbacks(server)
 
 	params := paramtable.Get()
 	params.Save(params.DataCoordCfg.EnableL0Import.Key, "true")
@@ -217,6 +210,7 @@ func (s *ImportServicesSuite) TestImportV2_AllocatorNilReturnsError() {
 	paramtable.Init()
 	server := &Server{}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
+	server.ddl = newDDLCallbacks(server)
 	server.allocator = nil
 
 	req := &internalpb.ImportRequestInternal{
@@ -233,11 +227,54 @@ func (s *ImportServicesSuite) TestImportV2_AllocatorNilReturnsError() {
 	s.Contains(resp.GetStatus().GetReason(), "allocator not initialized")
 }
 
+func (s *ImportServicesSuite) TestImportV2_RejectsNativeListArrayBeforeAllocation() {
+	paramtable.Init()
+	for _, tc := range []struct {
+		name    string
+		options []*commonpb.KeyValuePair
+		// kind is the import kind named in the rejection of a native-list
+		// target; empty means the import reads native-list sub-fields.
+		kind string
+	}{
+		{"file", nil, ""},
+		{"backup", []*commonpb.KeyValuePair{{Key: "backup", Value: "true"}}, "binlog import (backup restore)"},
+		{"snapshot", []*commonpb.KeyValuePair{{Key: "backup", Value: "true"}, {Key: "source_type", Value: "snapshot"}}, "snapshot-source import"},
+	} {
+		for _, elementNullable := range []bool{false, true} {
+			s.Run(fmt.Sprintf("%s/element_nullable=%t", tc.name, elementNullable), func() {
+				server := &Server{}
+				server.stateCode.Store(commonpb.StateCode_Healthy)
+				options := append([]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}}, tc.options...)
+				resp, err := server.ImportV2(context.Background(), &internalpb.ImportRequestInternal{
+					Schema: &schemapb.CollectionSchema{
+						Fields: []*schemapb.FieldSchema{{Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+						StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "s", Fields: []*schemapb.FieldSchema{{
+							Name: "arr", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+							ElementNullable: elementNullable,
+						}}}},
+					},
+					Options: options,
+				})
+				s.Require().NoError(err)
+				if !elementNullable || tc.kind == "" {
+					s.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrServiceUnavailable)
+					s.Contains(resp.GetStatus().GetReason(), "allocator not initialized")
+					return
+				}
+				s.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
+				s.Contains(resp.GetStatus().GetReason(),
+					tc.kind+" into a collection with element-nullable or nested Array field s.arr is not supported")
+			})
+		}
+	}
+}
+
 func (s *ImportServicesSuite) TestImportV2_AllocatorFailsReturnsError() {
 	ctx := context.Background()
 	paramtable.Init()
 	server := &Server{}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
+	server.ddl = newDDLCallbacks(server)
 
 	mockAllocator := allocator.NewMockAllocator(s.T())
 	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(0), int64(0), merr.WrapErrServiceUnavailable("allocation failed"))
@@ -262,7 +299,7 @@ func (s *ImportServicesSuite) TestImportV2_BroadcastFailsReturnsError() {
 	paramtable.Init()
 
 	// Mock validation to pass but broadcast to fail
-	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+	mockCount := mockey.Mock((*bulkimport.Meta).CountJobBy).To(func(_ *bulkimport.Meta, _ context.Context, _ ...bulkimport.ImportJobFilter) int {
 		return 1
 	}).Build()
 	defer mockCount.UnPatch()
@@ -281,12 +318,7 @@ func (s *ImportServicesSuite) TestImportV2_BroadcastFailsReturnsError() {
 		}).Build()
 	defer mockAssignment.UnPatch()
 
-	// Mock broker.DescribeCollectionInternal (called once in startBroadcastWithCollectionID, which will fail at StartBroadcastWithResourceKeys)
-	mockBroker := broker.NewMockBroker(s.T())
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-	}, nil)
+	coll := &meta.CollectionInfo{ID: 100, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{Name: "test_collection"}}
 
 	// Mock StartBroadcastWithResourceKeys to fail
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
@@ -295,12 +327,12 @@ func (s *ImportServicesSuite) TestImportV2_BroadcastFailsReturnsError() {
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	server := &Server{
-		importMeta: &importMeta{},
-		broker:     mockBroker,
+	server := seedCollections(&Server{
+		importMeta: &bulkimport.Meta{},
 		meta:       newTestMetaWithChunkManager(s.T()),
-	}
+	}, coll)
 	server.stateCode.Store(commonpb.StateCode_Healthy)
+	server.ddl = newDDLCallbacks(server)
 
 	mockAllocator := allocator.NewMockAllocator(s.T())
 	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1001), nil)
@@ -336,7 +368,7 @@ func (s *ImportServicesSuite) TestImportV2_SuccessReturnsJobID() {
 	paramtable.Init()
 
 	// Mock validation to pass
-	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+	mockCount := mockey.Mock((*bulkimport.Meta).CountJobBy).To(func(_ *bulkimport.Meta, _ context.Context, _ ...bulkimport.ImportJobFilter) int {
 		return 1
 	}).Build()
 	defer mockCount.UnPatch()
@@ -356,31 +388,24 @@ func (s *ImportServicesSuite) TestImportV2_SuccessReturnsJobID() {
 	defer mockAssignment.UnPatch()
 
 	// Mock StartBroadcastWithResourceKeys to succeed
-	mockBroadcastAPI := newMockBroadcastAPIImpl()
+	mockBroadcastAPI := meta.NewMockBroadcastAPIImpl()
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			return mockBroadcastAPI, nil
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	// Mock broker: DescribeCollectionInternal is called twice
-	// First call in startBroadcastWithCollectionID, second call in broadcastImport
-	mockBroker := broker.NewMockBroker(s.T())
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-		Schema: &schemapb.CollectionSchema{
-			Name:   "test_collection",
-			DbName: "test_db",
-		},
-	}, nil).Times(2)
+	coll := &meta.CollectionInfo{ID: 100, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{
+		Name:   "test_collection",
+		DbName: "test_db",
+	}}
 
-	server := &Server{
-		importMeta: &importMeta{},
-		broker:     mockBroker,
+	server := seedCollections(&Server{
+		importMeta: &bulkimport.Meta{},
 		meta:       newTestMetaWithChunkManager(s.T()),
-	}
+	}, coll)
 	server.stateCode.Store(commonpb.StateCode_Healthy)
+	server.ddl = newDDLCallbacks(server)
 
 	mockAllocator := allocator.NewMockAllocator(s.T())
 	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1001), nil)
@@ -451,7 +476,7 @@ func newDuplicatedImportBroadcastResultForCollection(originalJobID int64, origin
 // broadcast mock, so a caller can inspect the message that was actually broadcast.
 // importMeta is supplied by the caller so it can decide whether the original job still
 // exists.
-func (s *ImportServicesSuite) setupImportV2DuplicateBroadcast(importMeta ImportMeta, originalJobID int64, originalPaths ...string) (*Server, *mockBroadcastAPIImpl) {
+func (s *ImportServicesSuite) setupImportV2DuplicateBroadcast(importMeta bulkimport.ImportMeta, originalJobID int64, originalPaths ...string) (*Server, *meta.MockBroadcastAPIImpl) {
 	mockBalancerInst := &mockBalancerImpl{}
 	mockBalance := mockey.Mock(balance.GetWithContext).To(func(ctx context.Context) (balancer.Balancer, error) {
 		return mockBalancerInst, nil
@@ -466,32 +491,25 @@ func (s *ImportServicesSuite) setupImportV2DuplicateBroadcast(importMeta ImportM
 		}).Build()
 	s.T().Cleanup(func() { mockAssignment.UnPatch() })
 
-	mockBroadcastAPI := newMockBroadcastAPIImpl()
-	mockBroadcastAPI.broadcastResult = newDuplicatedImportBroadcastResult(originalJobID, originalPaths...)
+	mockBroadcastAPI := meta.NewMockBroadcastAPIImpl()
+	mockBroadcastAPI.BroadcastResult = newDuplicatedImportBroadcastResult(originalJobID, originalPaths...)
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			return mockBroadcastAPI, nil
 		}).Build()
 	s.T().Cleanup(func() { mockBroadcast.UnPatch() })
 
-	mockBroker := broker.NewMockBroker(s.T())
-	// Maybe rather than Times(2): a request rejected by validateImportRequest -- the
-	// job-count limit, say -- returns before either describe call.
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-		Schema: &schemapb.CollectionSchema{
-			Name:   "test_collection",
-			DbName: "test_db",
-		},
-	}, nil).Maybe()
+	coll := &meta.CollectionInfo{ID: 100, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{
+		Name:   "test_collection",
+		DbName: "test_db",
+	}}
 
-	server := &Server{
+	server := seedCollections(&Server{
 		importMeta: importMeta,
-		broker:     mockBroker,
 		meta:       newTestMetaWithChunkManager(s.T()),
-	}
+	}, coll)
 	server.stateCode.Store(commonpb.StateCode_Healthy)
+	server.ddl = newDDLCallbacks(server)
 
 	mockAllocator := allocator.NewMockAllocator(s.T())
 	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1001), nil)
@@ -530,9 +548,9 @@ func newImportV2IdempotentContext(key string) context.Context {
 func (s *ImportServicesSuite) TestImportV2_DuplicateReturnsOriginalJobID() {
 	ctx := newImportV2IdempotentContext("run-1")
 
-	importMeta := NewMockImportMeta(s.T())
+	importMeta := bulkimport.NewMockImportMeta(s.T())
 
-	// validateImportRequest runs before the broadcaster's idempotency lookup, so even a
+	// ValidateImportRequest runs before the broadcaster's idempotency lookup, so even a
 	// request that will deduplicate is counted against the job limit first.
 	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(0)
 	// The duplicate branch logs the original job's state, so it looks the job up.
@@ -557,9 +575,9 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateReturnsOriginalJobID() {
 func (s *ImportServicesSuite) TestImportV2_DuplicateLooksUpAFailedOriginal() {
 	ctx := newImportV2IdempotentContext("run-1")
 
-	importMeta := NewMockImportMeta(s.T())
+	importMeta := bulkimport.NewMockImportMeta(s.T())
 	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(0)
-	importMeta.EXPECT().GetJob(mock.Anything, int64(4242)).Return(&importJob{
+	importMeta.EXPECT().GetJob(mock.Anything, int64(4242)).Return(&bulkimport.Job{
 		ImportJob: &datapb.ImportJob{JobID: 4242, State: internalpb.ImportJobState_Failed},
 	}).Once()
 
@@ -580,9 +598,9 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateLooksUpAFailedOriginal() {
 func (s *ImportServicesSuite) TestImportV2_DuplicateWithZeroJobIDStaysDuplicate() {
 	ctx := newImportV2IdempotentContext("run-1")
 
-	importMeta := NewMockImportMeta(s.T())
+	importMeta := bulkimport.NewMockImportMeta(s.T())
 
-	// validateImportRequest runs before the broadcaster's idempotency lookup, so even a
+	// ValidateImportRequest runs before the broadcaster's idempotency lookup, so even a
 	// request that will deduplicate is counted against the job limit first.
 	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(0)
 	// The duplicate branch logs the original job's state, so it looks the job up.
@@ -601,9 +619,9 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateWithZeroJobIDStaysDuplicate(
 }
 
 func (s *ImportServicesSuite) TestImportV2_ForwardsIdempotencyKeyUnmodifiedAtTheLimit() {
-	importMeta := NewMockImportMeta(s.T())
+	importMeta := bulkimport.NewMockImportMeta(s.T())
 
-	// validateImportRequest runs before the broadcaster's idempotency lookup, so even a
+	// ValidateImportRequest runs before the broadcaster's idempotency lookup, so even a
 	// request that will deduplicate is counted against the job limit first.
 	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(0)
 	// The duplicate branch logs the original job's state, so it looks the job up.
@@ -622,8 +640,8 @@ func (s *ImportServicesSuite) TestImportV2_ForwardsIdempotencyKeyUnmodifiedAtThe
 	s.NoError(err)
 	s.Equal(int32(0), resp.GetStatus().GetCode())
 
-	s.Require().NotNil(broadcastAPI.capturedMsg)
-	forwarded := message.IdempotencyKeyOf(broadcastAPI.capturedMsg)
+	s.Require().NotNil(broadcastAPI.CapturedMsg)
+	forwarded := message.IdempotencyKeyOf(broadcastAPI.CapturedMsg)
 	// DataCoord must hand the client key through untouched. It is scoped on the way --
 	// that is the mechanism, and the broadcaster bounds the client portion, not the
 	// encoded value -- but nothing may alter, truncate or re-prefix the bytes the
@@ -637,7 +655,7 @@ func (s *ImportServicesSuite) TestImportV2_UsesDefaultDbNameWhenEmpty() {
 	paramtable.Init()
 
 	// Mock validation to pass
-	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+	mockCount := mockey.Mock((*bulkimport.Meta).CountJobBy).To(func(_ *bulkimport.Meta, _ context.Context, _ ...bulkimport.ImportJobFilter) int {
 		return 1
 	}).Build()
 	defer mockCount.UnPatch()
@@ -656,7 +674,7 @@ func (s *ImportServicesSuite) TestImportV2_UsesDefaultDbNameWhenEmpty() {
 		}).Build()
 	defer mockAssignment.UnPatch()
 
-	// Capture the dbName passed to broadcastImport
+	// Capture the dbName passed to BroadcastImport
 	var capturedDbName string
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
@@ -670,19 +688,15 @@ func (s *ImportServicesSuite) TestImportV2_UsesDefaultDbNameWhenEmpty() {
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	// Mock broker.DescribeCollectionInternal to return empty dbName (called in startBroadcastWithCollectionID)
-	mockBroker := broker.NewMockBroker(s.T())
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "", // Empty - should use default
-		CollectionName: "test_collection",
-	}, nil)
+	// Empty database name in the view - should use default
+	coll := &meta.CollectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "test_collection"}}
 
-	server := &Server{
-		importMeta: &importMeta{},
-		broker:     mockBroker,
+	server := seedCollections(&Server{
+		importMeta: &bulkimport.Meta{},
 		meta:       newTestMetaWithChunkManager(s.T()),
-	}
+	}, coll)
 	server.stateCode.Store(commonpb.StateCode_Healthy)
+	server.ddl = newDDLCallbacks(server)
 
 	mockAllocator := allocator.NewMockAllocator(s.T())
 	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1001), nil)
@@ -712,16 +726,11 @@ func (s *ImportServicesSuite) TestImportV2_UsesDefaultDbNameWhenEmpty() {
 	s.Equal("default", capturedDbName)
 }
 
-// --------------------------------
-// createImportJobFromAck Tests
-// --------------------------------
-
 func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 	paramtable.Init()
 	type ackAllocator struct{ allocator.Allocator }
-	type ackHandler struct{ Handler }
+	type ackHandler struct{ meta.Handler }
 	type ackCatalog struct{ metastore.DataCoordCatalog }
-	type ackMixCoord struct{ componenttypes.MixCoord }
 
 	for _, tc := range []struct {
 		name    string
@@ -732,6 +741,7 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 		{"allocator_failure", merr.ErrServiceUnavailable},
 		{"collection_not_found", merr.ErrCollectionNotFound},
 		{"collection_nil", merr.ErrCollectionNotFound},
+		{"collection_dropping", merr.ErrCollectionNotFound},
 		{"collection_unavailable", merr.ErrServiceNotReady},
 		{"save_job_failure", merr.ErrServiceUnavailable},
 		{"provided_job_id", nil},
@@ -740,12 +750,11 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 		{"nil_schema", nil},
 		{"l0_disabled", nil},
 		{"l0_enabled", nil},
-		{"rls_denied", nil},
-		{"rls_gate_disabled", nil},
-		{"rls_metadata_unavailable", nil},
-		{"rls_predicate", nil},
 		{"unsupported_version", nil},
 		{"unsupported_version_no_job_id", merr.ErrDataIntegrity},
+		{"native_list_array", nil},
+		{"native_list_array_backup", nil},
+		{"native_list_array_snapshot", nil},
 	} {
 		s.Run(tc.name, func() {
 			ctx := context.Background()
@@ -756,7 +765,7 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 				Files:   []*msgpb.ImportFile{{Id: 99, Paths: []string{"/test/file.json"}}},
 				Options: map[string]string{"timeout": "300s", "auto_commit": "false"},
 			}
-			coll := &collectionInfo{ID: 100, VChannelNames: []string{"v1", "v2"}}
+			coll := &meta.CollectionInfo{ID: 100, VChannelNames: []string{"v1", "v2"}}
 			var allocErr, collectionErr, saveErr error
 			switch tc.name {
 			case "invalid_timeout":
@@ -767,6 +776,8 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 				coll, collectionErr = nil, tc.wantErr
 			case "collection_nil":
 				coll = nil
+			case "collection_dropping":
+				coll.State = etcdpb.CollectionState_CollectionDropping
 			case "save_job_failure":
 				saveErr = tc.wantErr
 			case "allocated_job_id":
@@ -783,37 +794,24 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 				body.Version = 99
 			case "unsupported_version_no_job_id":
 				body.Version, body.JobID = 99, 0
+			case "native_list_array", "native_list_array_backup", "native_list_array_snapshot":
+				body.Schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{{
+					Name: "s", Fields: []*schemapb.FieldSchema{{
+						Name: "arr", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+						ElementNullable: true,
+					}},
+				}}
+				switch tc.name {
+				case "native_list_array_backup":
+					// The job fails before binlog listing: server.meta is nil here.
+					body.Options["backup"] = "true"
+				case "native_list_array_snapshot":
+					body.Options["backup"] = "true"
+					body.Options["source_type"] = "snapshot"
+					body.Files[0].Paths = []string{"s3://source/root/snapshots/1/metadata/2.json"}
+				}
 			}
 			params := paramtable.Get()
-			gate := &params.ProxyCfg.RLSImportEnforcementEnabled
-			oldGate := gate.SwapTempValue(fmt.Sprint(tc.name != "rls_gate_disabled"))
-			defer gate.SwapTempValue(oldGate)
-			metadataResponse := &rootcoordpb.GetRLSMetadataResponse{
-				Status: merr.Success(), CollectionId: body.CollectionID,
-			}
-			var metadataErr error
-			if strings.HasPrefix(tc.name, "rls_") {
-				body.Schema.Properties = []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}}
-				body.Schema.Fields = []*schemapb.FieldSchema{{FieldID: 100, Name: "tenant", DataType: schemapb.DataType_VarChar}}
-				body.Options[importutilv2.RLSPrincipal] = "alice"
-				if tc.name == "rls_metadata_unavailable" {
-					metadataErr = merr.ErrNodeNotFound
-				}
-				if tc.name == "rls_predicate" {
-					metadataResponse.Policies = []*rootcoordpb.RLSPolicyInfo{{
-						CollectionId: body.CollectionID, PolicyId: 1, PolicyName: "tenant_check",
-						PolicyType: milvuspb.RowPolicyType_RowPolicyTypePermissive,
-						Actions:    []milvuspb.RowPolicyAction{milvuspb.RowPolicyAction_Insert},
-						CheckExpr:  `tenant == "acme"`,
-					}}
-				}
-			}
-			getMetadata := mockey.Mock((*ackMixCoord).GetRLSMetadata).To(func(_ *ackMixCoord, _ context.Context, req *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error) {
-				s.Equal(body.CollectionID, req.GetCollectionId())
-				s.Equal(rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_POLICIES, req.GetKind())
-				return metadataResponse, metadataErr
-			}).Build()
-			defer getMetadata.UnPatch()
 			s.Require().NoError(params.Save(params.DataCoordCfg.EnableL0Import.Key, fmt.Sprint(tc.name == "l0_enabled")))
 			defer params.Reset(params.DataCoordCfg.EnableL0Import.Key)
 
@@ -822,7 +820,7 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 				return 1000, 1000 + n, allocErr
 			}).Build()
 			defer allocate.UnPatch()
-			get := mockey.Mock((*ackHandler).GetCollection).To(func(_ *ackHandler, _ context.Context, id int64) (*collectionInfo, error) {
+			get := mockey.Mock((*ackHandler).GetCollection).To(func(_ *ackHandler, _ context.Context, id int64) (*meta.CollectionInfo, error) {
 				s.Equal(body.CollectionID, id)
 				return coll, collectionErr
 			}).Build()
@@ -837,16 +835,16 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 			defer save.UnPatch()
 			server := &Server{
 				allocator: &ackAllocator{}, handler: &ackHandler{},
-				importMeta: &importMeta{jobs: make(map[int64]ImportJob), catalog: &ackCatalog{}},
-				mixCoord:   &ackMixCoord{},
+				importMeta: &bulkimport.Meta{Jobs: make(map[int64]bulkimport.ImportJob), Catalog: &ackCatalog{}},
 			}
 			server.stateCode.Store(commonpb.StateCode_Healthy)
+			server.ddl = newDDLCallbacks(server)
 
 			control := funcutil.GetControlChannel("import-test")
 			wal := message.NewImportMessageBuilderV1().WithHeader(&message.ImportMessageHeader{
 				CommitByCoordinator: tc.name == "provided_job_id",
 			}).
-				WithBody(body).WithProperty(importRLSContextVersionProperty, importRLSContextVersion).
+				WithBody(body).
 				WithBroadcast([]string{"v1", "v2", control}).MustBuildBroadcast()
 			result := message.BroadcastResultImportMessageV1{
 				Message: message.MustAsBroadcastImportMessageV1(wal),
@@ -900,8 +898,7 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 			s.Equal(uint64(300), saved.DataTs, "the control channel still contributes to the maximum tick")
 			s.False(saved.AutoCommit)
 			s.Equal(tc.name == "provided_job_id", saved.CommitByCoordinator)
-			expectedOptions := lo.OmitByKeys(body.Options, []string{importutilv2.RLSPrincipal, importutilv2.SkipRLS})
-			s.Equal(expectedOptions, funcutil.KeyValuePair2Map(saved.Options))
+			s.Equal(body.Options, funcutil.KeyValuePair2Map(saved.Options))
 			if body.Schema == nil {
 				s.Nil(saved.Schema)
 			} else {
@@ -913,32 +910,28 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 				s.Equal(int64(1001+i), file.Id)
 				s.Equal(body.Files[i].Paths, file.Paths)
 			}
-			if tc.name == "l0_disabled" {
+			switch tc.name {
+			case "l0_disabled":
 				s.Equal(internalpb.ImportJobState_Failed, saved.State)
 				s.Contains(saved.Reason, "l0 import is disabled")
 				s.NotEqual(uint64(math.MaxUint64), saved.CleanupTs)
-			} else if strings.HasPrefix(tc.name, "rls_") && tc.name != "rls_predicate" {
-				s.Equal(internalpb.ImportJobState_Failed, saved.State)
-				switch tc.name {
-				case "rls_denied":
-					s.Contains(saved.Reason, "no applicable check policies")
-				case "rls_gate_disabled":
-					s.Contains(saved.Reason, "cluster upgrade completes")
-					s.Zero(getMetadata.Times())
-				case "rls_metadata_unavailable":
-					s.Contains(saved.Reason, "failed to get RLS policies")
+			case "native_list_array_backup", "native_list_array_snapshot":
+				// Only binlog-sourced imports reject a native-list target; the
+				// rejection is persisted as a terminal job because ACK callbacks
+				// retry forever.
+				kind := "binlog import (backup restore)"
+				if tc.name == "native_list_array_snapshot" {
+					kind = "snapshot-source import"
 				}
-			} else {
+				s.Equal(internalpb.ImportJobState_Failed, saved.State)
+				s.Contains(saved.Reason, kind+" into a collection with element-nullable or nested Array field s.arr is not supported")
+				s.NotEqual(uint64(math.MaxUint64), saved.CleanupTs)
+			default:
 				s.Equal(internalpb.ImportJobState_Pending, saved.State)
-			}
-			if tc.name == "rls_predicate" {
-				s.NotNil(saved.GetRlsCheckPredicate())
 			}
 		})
 	}
 }
-
-// Helper types are defined in import_callbacks_test.go (mockBalancerImpl, mockBroadcastAPIImpl, newMockBroadcastAPIImpl)
 
 // The dedup scope carries the collection's ID, so a duplicate resolving to another
 // collection is unreachable through the normal path: dropping db1.c1 and recreating a
@@ -951,12 +944,12 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 // the client would poll that jobID and read Completed while the new collection stays
 // empty.
 func (s *ImportServicesSuite) TestImportV2_DuplicateFromAnotherCollectionIsRejected() {
-	importMeta := NewMockImportMeta(s.T())
+	importMeta := bulkimport.NewMockImportMeta(s.T())
 	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(0)
 
 	server, broadcastAPI := s.setupImportV2DuplicateBroadcast(importMeta, 4242, importV2RequestFilePath)
 	// The original broadcast targeted collection 99; the request targets 100.
-	broadcastAPI.broadcastResult = newDuplicatedImportBroadcastResultForCollection(4242, 99, importV2RequestFilePath)
+	broadcastAPI.BroadcastResult = newDuplicatedImportBroadcastResultForCollection(4242, 99, importV2RequestFilePath)
 
 	ctx := newImportV2IdempotentContext("run-1")
 	resp, err := server.ImportV2(ctx, newImportV2IdempotentRequest())
@@ -978,7 +971,7 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateIsRejectedWhileJobLimitIsRea
 	old := paramtable.Get().DataCoordCfg.MaxImportJobNum.SwapTempValue("1")
 	defer paramtable.Get().DataCoordCfg.MaxImportJobNum.SwapTempValue(old)
 
-	importMeta := NewMockImportMeta(s.T())
+	importMeta := bulkimport.NewMockImportMeta(s.T())
 	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(1)
 
 	server, broadcastAPI := s.setupImportV2DuplicateBroadcast(importMeta, 4242, importV2RequestFilePath)
@@ -989,7 +982,7 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateIsRejectedWhileJobLimitIsRea
 	s.NoError(err)
 	s.NotEqual(int32(0), resp.GetStatus().GetCode())
 	s.Contains(resp.GetStatus().GetReason(), "number of jobs has reached the limit")
-	s.Nil(broadcastAPI.capturedMsg, "the request must be rejected before it reaches the broadcaster")
+	s.Nil(broadcastAPI.CapturedMsg, "the request must be rejected before it reaches the broadcaster")
 }
 
 // The other half: the limit still applies to a request that actually creates a job.
@@ -997,12 +990,12 @@ func (s *ImportServicesSuite) TestImportV2_JobLimitStillRejectsANewJob() {
 	old := paramtable.Get().DataCoordCfg.MaxImportJobNum.SwapTempValue("1")
 	defer paramtable.Get().DataCoordCfg.MaxImportJobNum.SwapTempValue(old)
 
-	importMeta := NewMockImportMeta(s.T())
+	importMeta := bulkimport.NewMockImportMeta(s.T())
 	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(1)
 
 	server, broadcastAPI := s.setupImportV2DuplicateBroadcast(importMeta, 4242, importV2RequestFilePath)
 	// This key resolves to nothing, so the broadcast would create a new task.
-	broadcastAPI.broadcastResult = &types.BroadcastAppendResult{BroadcastID: 12345}
+	broadcastAPI.BroadcastResult = &types.BroadcastAppendResult{BroadcastID: 12345}
 
 	ctx := newImportV2IdempotentContext("run-2")
 	resp, err := server.ImportV2(ctx, newImportV2IdempotentRequest())
@@ -1017,18 +1010,19 @@ func (s *ImportServicesSuite) TestImportV2_MessageVersionIsAuthoritative() {
 	ctx := context.Background()
 
 	var capturedVersion internalpb.ImportVersion
-	mockBroadcast := mockey.Mock((*Server).broadcastImport).To(func(
-		_ *Server, _ context.Context, _ int64, _ []int64, _ []*internalpb.ImportFile,
+	mockBroadcast := mockey.Mock((*ddl.Callbacks).BroadcastImport).To(func(
+		_ *ddl.Callbacks, _ context.Context, _ int64, _ []int64, _ []*internalpb.ImportFile,
 		_ []*commonpb.KeyValuePair, _ int64, _ []string,
-		_ string, _ string, _ bool, version internalpb.ImportVersion,
+		_ string, version internalpb.ImportVersion,
 	) (int64, bool, error) {
 		capturedVersion = version
 		return 0, false, nil
 	}).Build()
 	defer mockBroadcast.UnPatch()
 
-	server := &Server{importMeta: &importMeta{}}
+	server := &Server{importMeta: &bulkimport.Meta{}}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
+	server.ddl = newDDLCallbacks(server)
 	mockAllocator := allocator.NewMockAllocator(s.T())
 	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1001), nil).Times(5)
 	server.allocator = mockAllocator

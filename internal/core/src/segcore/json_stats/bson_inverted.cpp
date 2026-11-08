@@ -23,6 +23,7 @@
 #include "boost/filesystem/path.hpp"
 #include "boost/iterator/iterator_facade.hpp"
 #include "common/EasyAssert.h"
+#include "common/OpContext.h"
 #include "glog/logging.h"
 #include "index/Utils.h"
 #include "segcore/json_stats/bson_inverted.h"
@@ -30,6 +31,8 @@
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
+#include "storage/LocalFileIOPool.h"
+#include "storage/EntryStreamUtils.h"
 #include "storage/Types.h"
 
 namespace milvus::index {
@@ -127,31 +130,49 @@ BsonInvertedIndex::BuildIndex() {
                                                keys.size());
 }
 
-void
-BsonInvertedIndex::LoadIndex(const std::vector<std::string>& index_files,
-                             milvus::proto::common::LoadPriority priority,
-                             bool load_in_mmap) {
+folly::coro::Task<void>
+BsonInvertedIndex::LoadIndex(storage::FileSource& source,
+                             const storage::LoadOptions& options,
+                             bool use_async) {
     if (is_load_) {
-        // index_files are absolute remote paths (basePath already prepended by caller)
-        disk_file_manager_->CacheJsonStatsSharedIndexToDisk(index_files,
-                                                            priority);
-        if (!(tantivy_index_exist(path_.c_str()))) {
-            ThrowInfo(
-                ErrorCode::DataFormatBroken, "index dir not exist: {}", path_);
+        const auto priority =
+            options.op_ctx &&
+                    options.op_ctx->runtime_load_priority.value_or(0) != 0
+                ? proto::common::LoadPriority::LOW
+                : proto::common::LoadPriority::HIGH;
+        const auto token = options.op_ctx ? options.op_ctx->cancellation_token
+                                          : folly::CancellationToken{};
+        storage::ThrowIfCancelled(token, "load BSON index");
+        co_await source.ReadEntriesToLocalDirAsync(
+            source.EntryNames(), path_, use_async);
+        storage::ThrowIfCancelled(token, "open BSON index");
+        auto open = [&] {
+            if (!tantivy_index_exist(path_.c_str())) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "index dir not exist: {}",
+                          path_);
+            }
+            wrapper_ = std::make_shared<milvus::tantivy::TantivyIndexWrapper>(
+                path_.c_str(),
+                options.enable_mmap,
+                milvus::index::SetBitsetUnused);
+            if (!options.enable_mmap) {
+                disk_file_manager_->RemoveJsonStatsSharedIndexFiles();
+            }
+        };
+        if (use_async) {
+            co_await storage::RunLocalFileIOAsync(open, priority);
+        } else {
+            open();
         }
-        wrapper_ = std::make_shared<milvus::tantivy::TantivyIndexWrapper>(
-            path_.c_str(), load_in_mmap, milvus::index::SetBitsetUnused);
-        if (!load_in_mmap) {
-            // the index is loaded in ram, so we can remove files in advance
-            disk_file_manager_->RemoveJsonStatsSharedIndexFiles();
-        }
-        load_in_mmap_ = load_in_mmap;
+        storage::ThrowIfCancelled(token, "publish BSON index");
+        load_in_mmap_ = options.enable_mmap;
         LOG_INFO(
             "load json shared key index done for field id:{} with dir:{}, "
             "load_in_mmap:{}",
             field_id_,
             path_,
-            load_in_mmap);
+            load_in_mmap_);
     }
 }
 

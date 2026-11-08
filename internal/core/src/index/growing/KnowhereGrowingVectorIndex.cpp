@@ -260,9 +260,10 @@ KnowhereGrowingVectorIndex<T>::BuildFromSource(int64_t physical_count,
     std::vector<uint8_t> validity_bitmap;
     if (nullable) {
         validity_bitmap = MaterializeValidity(0, logical_count);
-        next.native_index.SetIdMapType(knowhere::IdMap::Type::GROWING);
     }
     const auto build_config = BuildConfig();
+    knowhere::BuildOptions options;
+    options.growing = nullable;
 
     WithSourceRows<T>(
         source_,
@@ -284,7 +285,7 @@ KnowhereGrowingVectorIndex<T>::BuildFromSource(int64_t physical_count,
                     static_cast<size_t>(logical_count)));
             }
             const auto status = next.native_index.Build(
-                dataset, build_config, next.UseBuildPool());
+                dataset, build_config, next.UseBuildPool(), options);
             if (status != knowhere::Status::success) {
                 ThrowInfo(
                     KnowhereBuildStatusToErrorCode(status),
@@ -324,7 +325,6 @@ KnowhereGrowingVectorIndex<T>::AddBatch(
         dataset->SetIsSparse(true);
     }
     if (nullable) {
-        engine_->native_index.SetIdMapType(knowhere::IdMap::Type::GROWING);
         dataset->SetIdMapData(knowhere::IdMapData::FromValidBitmap(
             validity_bitmap, static_cast<size_t>(logical_count)));
     }
@@ -432,7 +432,7 @@ KnowhereGrowingVectorIndex<T>::TryBuildAccepted() {
                       build_logical_count,
                       accepted_row_end_ - build_logical_count);
     } catch (...) {
-        poison_ = std::current_exception();
+        PublishPoison(std::current_exception());
         throw;
     }
     if (!retain_source_as_data_view_) {
@@ -448,22 +448,21 @@ KnowhereGrowingVectorIndex<T>::PublishAccepted() {
                "cannot publish an unbuilt growing vector engine");
     // The reader shares the live engine -- including its append-only IdMap --
     // but freezes this generation's public row prefix and vector count.
-    auto reader = std::make_unique<VectorIndexReader>(*engine_,
-                                                      accepted_row_end_,
-                                                      accepted_physical_count_,
-                                                      search_defaults_);
-    PublishSnapshot(std::move(reader), accepted_row_end_);
+    auto index = std::make_shared<VectorIndex>(*engine_,
+                                               accepted_row_end_,
+                                               accepted_physical_count_,
+                                               search_defaults_);
+    PublishSnapshot(std::move(index), accepted_row_end_);
     publication_pending_ = false;
 }
 
 template <typename T>
 void
 KnowhereGrowingVectorIndex<T>::CommitIfNeeded() {
-    std::lock_guard<std::mutex> lock(writer_mutex_);
+    // Append/Flush publish before the Segment advances its visibility ACK.
+    // A query can pin the previous published prefix while Build/Add is in
+    // flight. Only an already published terminal failure must be observed.
     RethrowIfPoisoned();
-    if (publication_pending_) {
-        PublishAccepted();
-    }
 }
 
 template <typename T>
@@ -596,7 +595,7 @@ KnowhereGrowingVectorIndex<T>::Append(
                          logical_rows);
             }
         } catch (...) {
-            poison_ = std::current_exception();
+            PublishPoison(std::current_exception());
             throw;
         }
         accepted_row_end_ = row_end;
@@ -609,9 +608,21 @@ KnowhereGrowingVectorIndex<T>::Append(
 
 template <typename T>
 void
+KnowhereGrowingVectorIndex<T>::PublishPoison(std::exception_ptr error) {
+    std::lock_guard lock(poison_mutex_);
+    poison_ = std::move(error);
+}
+
+template <typename T>
+void
 KnowhereGrowingVectorIndex<T>::RethrowIfPoisoned() const {
-    if (poison_ != nullptr) {
-        std::rethrow_exception(poison_);
+    std::exception_ptr error;
+    {
+        std::lock_guard lock(poison_mutex_);
+        error = poison_;
+    }
+    if (error != nullptr) {
+        std::rethrow_exception(error);
     }
 }
 

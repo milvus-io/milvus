@@ -5,6 +5,7 @@ package milvus.proto.query;
 option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/querypb";
 
 import "common.proto";
+import "view.proto";
 import "messages.proto";
 import "milvus.proto";
 import "rg.proto";
@@ -36,9 +37,12 @@ service QueryCoord {
 
     rpc GetPartitionStates(GetPartitionStatesRequest)
         returns (GetPartitionStatesResponse) {
+        option deprecated = true;
     }
     rpc GetLoadSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {
     }
+    rpc GetQueryViewSegmentLoadInfo(GetQueryViewSegmentLoadInfoRequest)
+        returns (GetQueryViewSegmentLoadInfoResponse) {}
     rpc LoadBalance(LoadBalanceRequest) returns (common.Status) {
     }
 
@@ -56,6 +60,7 @@ service QueryCoord {
     }
     rpc GetShardLeaders(GetShardLeadersRequest)
         returns (GetShardLeadersResponse) {
+        option deprecated = true;
     }
 
     rpc CheckHealth(milvus.CheckHealthRequest)
@@ -103,9 +108,12 @@ service QueryCoord {
   rpc ClearReadTaskQueue(internal.ClearReadTaskQueueRequest) returns (internal.ClearReadTaskQueueResponse) {}
 
   rpc UpdateLoadConfig(UpdateLoadConfigRequest) returns (common.Status) {}
-  rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){}
+  rpc RunAnalyzer(RunAnalyzerRequest) returns(milvus.RunAnalyzerResponse){
+    option deprecated = true;
+  }
   rpc ComputePhraseMatchSlop(ComputePhraseMatchSlopRequest) returns(ComputePhraseMatchSlopResponse){}
   rpc ValidateAnalyzer(ValidateAnalyzerRequest) returns(ValidateAnalyzerResponse){}
+  rpc EnsureCollectionReady(EnsureCollectionReadyRequest) returns (common.Status) {}
 }
 
 service QueryNode {
@@ -152,6 +160,10 @@ service QueryNode {
     }
     rpc QuerySegments(QueryRequest) returns (internal.RetrieveResults) {
     }
+    rpc Materialize(QueryRequest) returns (internal.MaterializeResults) {
+    }
+    rpc MaterializeSegments(QueryRequest) returns (internal.MaterializeResults) {
+    }
     rpc QueryStreamSegments(QueryRequest)
         returns (stream internal.RetrieveResults) {
     }
@@ -162,6 +174,9 @@ service QueryNode {
     // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
     rpc GetMetrics(milvus.GetMetricsRequest)
         returns (milvus.GetMetricsResponse) {
+    }
+    rpc GetFeatureUsage(internal.GetFeatureUsageRequest)
+        returns (internal.GetFeatureUsageResponse) {
     }
 
     rpc GetDataDistribution(GetDataDistributionRequest)
@@ -255,6 +270,7 @@ message LoadCollectionRequest {
     bool refresh = 7;
     // resource group names
     repeated string resource_groups = 8;
+    // Preload hints: empty follows the bound schema; nonempty is explicit.
     repeated int64 load_fields = 9;
     common.LoadPriority priority = 10;
 }
@@ -287,6 +303,7 @@ message LoadPartitionsRequest {
     // resource group names
     repeated string resource_groups = 9;
     repeated index.IndexInfo index_info_list = 10;
+    // Preload hints: empty follows the bound schema; nonempty is explicit.
     repeated int64 load_fields = 11;
     common.LoadPriority priority = 12;
 }
@@ -320,6 +337,28 @@ message GetSegmentInfoRequest {
 message GetSegmentInfoResponse {
     common.Status status = 1;
     repeated SegmentInfo infos = 2;
+}
+
+// Current complete loading snapshots for segments in one collection. Consumers
+// validate each manifest against their View requirement; this is not a history API.
+message GetQueryViewSegmentLoadInfoRequest {
+    common.MsgBase base = 1;
+    int64 collectionID = 2;
+    repeated int64 segmentIDs = 3;
+}
+
+message GetQueryViewSegmentLoadInfoResponse {
+    // Request-wide errors only. Segment-specific failures belong in results.
+    common.Status status = 1;
+    // One result per distinct requested ID, including failed segments.
+    repeated QueryViewSegmentLoadInfoResult results = 2;
+    repeated index.IndexInfo index_info_list = 3;
+}
+
+message QueryViewSegmentLoadInfoResult {
+    int64 segmentID = 1;
+    common.Status status = 2;
+    SegmentLoadInfo load_info = 3;
 }
 
 message GetShardLeadersRequest {
@@ -375,6 +414,10 @@ message SyncNewCreatedPartitionRequest {
     common.MsgBase base = 1;
     int64 collectionID = 2;
     int64 partitionID = 3;
+    // When true, the request returns after the partition joins the load meta
+    // and its target update is triggered, without waiting until the partition
+    // is queryable.
+    bool skip_wait_ready = 4;
 }
 
 // -----------------query node grpc request and response proto----------------
@@ -456,6 +499,9 @@ message SegmentLoadInfo {
     repeated string child_manifest_paths = 29;
     // stats carries the durable segment aggregates used for resource estimation.
     data.Statistics stats = 30;
+    // Replay cursor of this exact physical base, fetched atomically with its
+    // manifest/binlogs. QueryView carries only the shard buffer retention floor.
+    uint64 transform_start_after_timetick = 31;
 }
 
 message FieldIndexInfo {
@@ -544,6 +590,8 @@ message QueryRequest {
     repeated int64 segmentIDs = 3;
     bool from_shard_leader = 4;
     DataScope scope = 5;  // All, Streaming, Historical
+    uint64 materialize_schema_fingerprint = 6; // schema the caller already holds; 0 = none
+    int32 materialize_format_version = 7; // Materialize reply encoding the caller can read
 }
 
 message SyncReplicaSegmentsRequest {
@@ -790,6 +838,7 @@ message CollectionLoadInfo {
     repeated int64 load_fields = 8;
     int64 dbID= 9;
     bool user_specified_replica_mode = 10;
+    repeated messages.LoadFieldConfig required_fields = 11; // Materialized internal scope; empty only in legacy persisted records.
 }
 
 message PartitionLoadInfo {
@@ -1197,7 +1246,6 @@ message ListLoadedSegmentsResponse {
     repeated int64 segmentIDs = 2;
 }
 
-
 message GetQueryViewLoadInfoRequest {
     common.MsgBase base = 1;
     int64 collectionID = 2;
@@ -1209,6 +1257,13 @@ message GetQueryViewLoadInfoResponse {
     int64 collectionID = 2;
     uint64 version = 3;
     repeated int64 partitionIDs = 4;
-    repeated messages.LoadFieldConfig load_fields = 5;
+    repeated view.LoadFieldConfig load_fields = 5; // Explicit preload set within required_fields; empty means none.
     repeated index.IndexInfo index_info_list = 6;
+    repeated view.LoadFieldConfig required_fields = 7; // Explicit allowed query field scope; empty means none, never all fields.
+}
+
+message EnsureCollectionReadyRequest {
+    common.MsgBase base = 1;
+    int64 collectionID = 2;
+    repeated string expected_vchannels = 3;
 }

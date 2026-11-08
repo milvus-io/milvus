@@ -8,8 +8,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
@@ -54,7 +52,7 @@ func TestServerSearchOnViewReturnsProviderErrorWithoutScheduling(t *testing.T) {
 	_, err := server.SearchOnView(context.Background(), validSearchRequest())
 
 	require.Error(t, err)
-	assert.Equal(t, codes.NotFound, status.Code(err))
+	assert.Same(t, provider.searchErr, err)
 	assert.Nil(t, scheduler.searchTasks)
 }
 
@@ -67,7 +65,7 @@ func TestServerSearchOnViewReleasesTasksOnSchedulerError(t *testing.T) {
 	_, err := server.SearchOnView(context.Background(), validSearchRequest())
 
 	require.Error(t, err)
-	assert.Equal(t, codes.Unknown, status.Code(err))
+	assert.Same(t, scheduler.searchErr, err)
 	assert.Equal(t, 1, tasks.releaseCount)
 }
 
@@ -142,16 +140,7 @@ func TestServerRejectsInvalidRequestShape(t *testing.T) {
 	_, err := server.SearchOnView(context.Background(), &viewpb.SearchOnViewRequest{})
 
 	require.Error(t, err)
-	assert.Equal(t, codes.InvalidArgument, status.Code(err))
-}
-
-func TestServerRequeryOnViewIsUnimplemented(t *testing.T) {
-	server := NewServer(&fakeTaskProvider{}, &fakeScheduler{})
-
-	_, err := server.RequeryOnView(context.Background(), &viewpb.RequeryOnViewRequest{})
-
-	require.Error(t, err)
-	assert.Equal(t, codes.Unimplemented, status.Code(err))
+	assert.Equal(t, viewpb.ViewCode_VIEW_CODE_UNKNOWN, viewerror.AsViewError(err).Code)
 }
 
 func validSearchRequest() *viewpb.SearchOnViewRequest {
@@ -184,6 +173,7 @@ func testVersion() qviews.QueryViewVersion {
 }
 
 type fakeTaskProvider struct {
+	TaskProvider
 	searchTasks   *fakeSearchSegmentTasks
 	searchErr     error
 	searchShardID qviews.ShardID
@@ -205,6 +195,7 @@ func (p *fakeTaskProvider) AcquireSearchSegmentTasks(
 	version qviews.QueryViewVersion,
 	mvcc *viewpb.QueryPlanMVCC,
 	req *internalpb.SearchRequest,
+	_ *viewpb.SegmentSelection,
 ) (SearchSegmentTasks, error) {
 	p.searchShardID = shardID
 	p.searchVersion = version
@@ -222,6 +213,7 @@ func (p *fakeTaskProvider) AcquireQuerySegmentTasks(
 	version qviews.QueryViewVersion,
 	mvcc *viewpb.QueryPlanMVCC,
 	req *internalpb.RetrieveRequest,
+	_ *viewpb.SegmentSelection,
 ) (QuerySegmentTasks, error) {
 	p.queryShardID = shardID
 	p.queryVersion = version
@@ -277,4 +269,15 @@ func (t *fakeQuerySegmentTasks) Tasks() []QuerySegmentTask {
 
 func (t *fakeQuerySegmentTasks) Release() {
 	t.releaseCount++
+}
+
+func TestServerSearchPassesExecutionOptionsAndReleasesOwner(t *testing.T) {
+	provider := &fakeTaskProvider{searchTasks: &fakeSearchSegmentTasks{tasks: []SearchSegmentTask{struct{}{}}}}
+	scheduler := &fakeScheduler{searchResult: &internalpb.SearchResults{}}
+	req := validSearchRequest()
+	req.ExecutionOptions = &viewpb.SearchExecutionOptions{FilterOnly: true, EnableExprCache: true}
+	_, err := NewServer(provider, scheduler).SearchOnView(t.Context(), req)
+	require.NoError(t, err)
+	require.Same(t, req.ExecutionOptions, SearchOptions(scheduler.searchTasks))
+	require.Equal(t, 1, provider.searchTasks.releaseCount)
 }

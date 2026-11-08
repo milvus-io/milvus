@@ -43,12 +43,14 @@ std::string
 BuildExprCacheKey(const plan::FilterBitsNode& filter,
                   QueryContext* query_context) {
     auto key = filter.ToString();
-    auto* segment =
-        query_context != nullptr ? query_context->get_segment() : nullptr;
-    if (segment != nullptr &&
-        segment->get_schema_snapshot()->get_ttl_field_id().has_value()) {
-        key += fmt::format("|entity_ttl_physical_time_us:{}",
-                           query_context->get_entity_ttl_physical_time_us());
+    if (query_context != nullptr) {
+        auto schema = query_context->get_read_schema();
+        if (schema->get_ttl_field_id().has_value()) {
+            key += fmt::format(
+                "|entity_ttl_field:{}|entity_ttl_physical_time_us:{}",
+                schema->get_ttl_field_id()->get(),
+                query_context->get_entity_ttl_physical_time_us());
+        }
     }
     return key;
 }
@@ -178,6 +180,9 @@ PhyFilterBitsNode::GetOutput() {
             num_processed_rows_ = need_process_rows_;
         });
         if (cached_output != nullptr) {
+            MarkFeature(
+                query_context_->get_plan_options().feature_recorder.get(),
+                FeatureBit::ExprCacheHit);
             return cached_output;
         }
     }

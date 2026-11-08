@@ -23,6 +23,7 @@
 
 #include "common/CheckedInputArithmetic.h"
 #include "common/EasyAssert.h"
+#include "common/Utils.h"
 #include "index/vector/KnowhereEngine.h"
 #include "index/vector/VectorReaderValidation.h"
 
@@ -70,15 +71,25 @@ RetrieveEmbeddingLists(const KnowhereEngine& engine,
         if (engine.IsEmptyEmbListIndex()) {
             const auto& offsets = engine.EmptyEmbListOffsets();
             const auto emb_list_count = offsets.size() - 1;
-            const auto& id_map = engine.native_index.GetIdMap();
+            const auto has_validity = engine.native_index.HasValidity();
+            if (!has_validity.has_value()) {
+                ThrowInfo(KnowhereStatusToErrorCode(has_validity.error()),
+                          "failed to inspect embedding-list validity: {}",
+                          has_validity.what());
+            }
             for (size_t i = 0; i < request.rows_size; ++i) {
-                // Empty-list offsets are in compact valid-parent order, while
-                // callers supply public logical row ids. The native retrieval
-                // path applies this map itself; this metadata-only path must
-                // perform the same translation before checking its bounds.
-                const auto compact_id = id_map.MapOutToIn(request.ids[i]);
-                if (compact_id < 0 ||
-                    static_cast<uint64_t>(compact_id) >= emb_list_count) {
+                // Loaded/built empty-list metadata has one offset per valid
+                // parent. Validate logical ids without exposing the mapping.
+                const auto valid =
+                    engine.native_index.IsRowValid(request.ids[i]);
+                if (!valid.has_value()) {
+                    ThrowInfo(KnowhereStatusToErrorCode(valid.error()),
+                              "failed to read embedding-list validity: {}",
+                              valid.what());
+                }
+                if (!valid.value() ||
+                    (!has_validity.value() &&
+                     static_cast<uint64_t>(request.ids[i]) >= emb_list_count)) {
                     ThrowInfo(ConfigInvalid,
                               "embedding-list id {} is invalid for {} valid "
                               "parents",

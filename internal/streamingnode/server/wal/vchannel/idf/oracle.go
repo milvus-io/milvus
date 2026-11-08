@@ -3,7 +3,9 @@ package idf
 import (
 	"context"
 	"slices"
+	"strconv"
 	"sync"
+	"sync/atomic"
 
 	"google.golang.org/protobuf/proto"
 
@@ -11,12 +13,16 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
+	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
+
+var oracleRunnerGeneration atomic.Uint64
 
 type bm25Stats map[int64]*storage.BM25Stats
 
@@ -30,7 +36,7 @@ func newBM25StatsFromSchema(schema *schemapb.CollectionSchema, loadedFields []in
 			continue
 		}
 		fieldID := function.GetOutputFieldIds()[0]
-		if len(loadedFields) > 0 && !slices.Contains(loadedFields, fieldID) {
+		if !slices.Contains(loadedFields, fieldID) {
 			continue
 		}
 		stats.getOrCreate(fieldID)
@@ -116,16 +122,6 @@ func (s *growingStatsStore) appendStats(segmentID int64, partitionID int64, stat
 		segment.partitionID = partitionID
 	}
 	segment.stats.merge(stats)
-}
-
-// collectInsertStats only reads immutable schema metadata and builds a private
-// delta. Keep materialization and column conversion outside the oracle lock.
-func (s *growingStatsStore) collectInsertStats(insert walview.SegmentInsertMessage) (bm25Stats, error) {
-	stats := newBM25StatsFromSchema(s.schema, s.fieldIDs)
-	if err := collectGrowingInsertStats(stats, s.schema, insert); err != nil {
-		return nil, err
-	}
-	return stats, nil
 }
 
 func (s *growingStatsStore) appendInsert(insert walview.SegmentInsertMessage, stats bm25Stats) error {
@@ -229,6 +225,7 @@ type oracleRuntime struct {
 	partitionIDs    []int64
 	loadInfoVersion uint64
 	schema          *schemapb.CollectionSchema
+	writeSchema     *schemapb.CollectionSchema // WAL frontier; read schema remains immutable.
 	fieldIDs        []int64
 	barrier         func(context.Context) error
 	ctx             context.Context
@@ -245,7 +242,8 @@ type oracleRuntime struct {
 	materialization *materializationCall
 	growingStore    *growingStatsStore
 
-	closeOnce sync.Once
+	functionKey string // Owns the exact immutable schema and managed BM25 runners.
+	closeOnce   sync.Once
 }
 
 func newOracleRuntime(
@@ -268,14 +266,36 @@ func newOracleRuntime(
 		collectionID:    walView.CollectionID,
 		vchannel:        walView.VChannel,
 		partitionIDs:    slices.Clone(walView.PartitionIDs),
-		fieldIDs:        loadFieldIDs(walView.LoadFields),
+		fieldIDs:        loadFieldIDs(walView.RequiredFields),
 		barrier:         walView.ResourceEventBarrier,
 		ctx:             lifetime,
 		cancel:          cancel,
 		loadInfoVersion: walView.LoadInfoVersion,
-		schema:          proto.Clone(walView.Schema).(*schemapb.CollectionSchema),
+		schema:          walView.Schema,
 		currentVersion:  walView.SegmentSnapshot.DataVersion,
-		growingStore:    newGrowingStatsStore(walView.Schema, loadFieldIDs(walView.LoadFields)),
+		growingStore:    newGrowingStatsStore(walView.Schema, loadFieldIDs(walView.RequiredFields)),
+	}
+	defer func() {
+		if !keep && r.functionKey != "" {
+			function.GetManager().Release(r.collectionID, r.functionKey)
+		}
+	}()
+	// Prepare before snapshot replay or live publication, including empty shards.
+	// The oracle owns its registration independently of any individual View.
+	if fields := newBM25StatsFromSchema(r.schema, r.fieldIDs); len(fields) > 0 {
+		r.functionKey = "query-idf/" + strconv.FormatUint(oracleRunnerGeneration.Add(1), 10)
+		if err := function.GetManager().Alloc(r.collectionID, r.functionKey, r.schema); err != nil {
+			return nil, err
+		}
+		for fieldID := range fields {
+			if _, err := function.GetManager().RunWithRunner(ctx, r.collectionID, r.functionKey, fieldID, func(function.FunctionRunner) error { return nil }); err != nil {
+				return nil, err
+			}
+		}
+	}
+	r.writeSchema = walView.WriteSchema
+	if r.writeSchema == nil {
+		r.writeSchema = r.schema
 	}
 	if lazy {
 		if err := r.loadInitialGrowing(ctx, walView); err != nil {
@@ -329,7 +349,7 @@ func (r *oracleRuntime) loadInitialGrowing(ctx context.Context, walView walview.
 		}
 		for _, raw := range segment.Data.InsertMessages {
 			if err := walview.ForEachSegmentInsertMessage(raw, segment.SegmentID, func(insert walview.SegmentInsertMessage) error {
-				stats, err := r.growingStore.collectInsertStats(insert)
+				stats, err := r.collectInsertStatsForWriteSchema(segment.Schema, insert)
 				if err != nil {
 					return err
 				}
@@ -557,11 +577,46 @@ func (r *oracleRuntime) ApplyLiveEvent(ctx context.Context, event walview.VChann
 	}
 }
 
+// The old oracle keeps its historical contributions after a function is
+// dropped, but must not require new writes to contain the removed input/output.
+// The resource dispatcher orders schema changes and inserts on each VChannel.
+func (r *oracleRuntime) collectLiveInsertStats(insert walview.SegmentInsertMessage) (bm25Stats, error) {
+	r.mu.RLock()
+	writeSchema := r.writeSchema
+	r.mu.RUnlock()
+	return r.collectInsertStatsForWriteSchema(writeSchema, insert)
+}
+
+func (r *oracleRuntime) collectInsertStatsForWriteSchema(writeSchema *schemapb.CollectionSchema, insert walview.SegmentInsertMessage) (bm25Stats, error) {
+	stats := newBM25StatsFromSchema(r.schema, r.fieldIDs)
+	// Older inserts may need newly added derived outputs materialized. Only a
+	// later encoding schema proves that an old function has been removed.
+	if writeSchema != nil && writeSchema.GetVersion() > r.schema.GetVersion() {
+		active := newBM25StatsFromSchema(writeSchema, r.fieldIDs)
+		for fieldID := range stats {
+			if _, exists := active[fieldID]; !exists {
+				delete(stats, fieldID)
+			}
+		}
+	}
+	if err := r.collectGrowingInsertStats(r.ctx, stats, insert); err != nil {
+		return nil, err
+	}
+	return stats, nil
+}
+
 func (r *oracleRuntime) applyLiveMessage(_ context.Context, msg message.ImmutableMessage) error {
 	if msg == nil {
 		return nil
 	}
 	switch msg.MessageType() {
+	case message.MessageTypeAlterCollection:
+		altered := message.MustAsImmutableAlterCollectionMessageV2(msg)
+		if messageutil.IsSchemaChange(altered.Header()) {
+			r.mu.Lock()
+			r.writeSchema = altered.MustBody().GetUpdates().GetSchema()
+			r.mu.Unlock()
+		}
 	case message.MessageTypeCreateSegment:
 		created := message.MustAsImmutableCreateSegmentMessageV2(msg)
 		segmentID := created.Header().GetSegmentId()
@@ -585,7 +640,7 @@ func (r *oracleRuntime) applyLiveMessage(_ context.Context, msg message.Immutabl
 			if !r.includesPartition(insert.Assignment.GetPartitionId()) {
 				return nil
 			}
-			stats, err := r.growingStore.collectInsertStats(insert)
+			stats, err := r.collectLiveInsertStats(insert)
 			if err != nil {
 				return err
 			}
@@ -630,6 +685,11 @@ func (r *oracleRuntime) applySegmentSealed(segmentID int64, sealedAt qviews.Data
 
 func (r *oracleRuntime) Close() {
 	r.closeOnce.Do(func() {
+		defer func() {
+			if r.functionKey != "" {
+				function.GetManager().Release(r.collectionID, r.functionKey)
+			}
+		}()
 		r.mu.Lock()
 		r.closed = true
 		r.cancel()

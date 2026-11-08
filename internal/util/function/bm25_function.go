@@ -119,9 +119,9 @@ func getAnalyzerParams(field *schemapb.FieldSchema) string {
 	return "{}"
 }
 
-func NewAnalyzerRunner(field *schemapb.FieldSchema) (Analyzer, error) {
+func NewAnalyzerRunner(field *schemapb.FieldSchema, extraInfo ...string) (Analyzer, error) {
 	params := getAnalyzerParams(field)
-	tokenizer, err := analyzer.NewAnalyzer(params, "")
+	tokenizer, err := analyzer.NewAnalyzer(params, analyzerExtraInfo(extraInfo))
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +132,7 @@ func NewAnalyzerRunner(field *schemapb.FieldSchema) (Analyzer, error) {
 	}, nil
 }
 
-func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema) (FunctionRunner, error) {
+func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.FunctionSchema, extraInfo ...string) (FunctionRunner, error) {
 	if len(schema.GetOutputFieldIds()) != 1 {
 		return nil, merr.WrapErrParameterInvalidMsg("bm25 function should only have one output field, but now %d", len(schema.GetOutputFieldIds()))
 	}
@@ -154,11 +154,11 @@ func NewBM25FunctionRunner(coll *schemapb.CollectionSchema, schema *schemapb.Fun
 	}
 
 	if params, ok := getMultiAnalyzerParams(inputField); ok {
-		return NewMultiAnalyzerBM25FunctionRunner(coll, schema, inputField, outputField, params)
+		return NewMultiAnalyzerBM25FunctionRunner(coll, schema, inputField, outputField, params, extraInfo...)
 	}
 
 	params = getAnalyzerParams(inputField)
-	tokenizer, err := analyzer.NewAnalyzer(params, "")
+	tokenizer, err := analyzer.NewAnalyzer(params, analyzerExtraInfo(extraInfo))
 	if err != nil {
 		return nil, err
 	}

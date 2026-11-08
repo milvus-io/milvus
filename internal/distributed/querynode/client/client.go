@@ -248,6 +248,18 @@ func (c *Client) QuerySegments(ctx context.Context, req *querypb.QueryRequest, _
 	})
 }
 
+func (c *Client) Materialize(ctx context.Context, req *querypb.QueryRequest, opts ...grpc.CallOption) (*internalpb.MaterializeResults, error) {
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*internalpb.MaterializeResults, error) {
+		return client.Materialize(ctx, req, opts...)
+	})
+}
+
+func (c *Client) MaterializeSegments(ctx context.Context, req *querypb.QueryRequest, opts ...grpc.CallOption) (*internalpb.MaterializeResults, error) {
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*internalpb.MaterializeResults, error) {
+		return client.MaterializeSegments(ctx, req, opts...)
+	})
+}
+
 func (c *Client) QueryStreamSegments(ctx context.Context, req *querypb.QueryRequest, _ ...grpc.CallOption) (querypb.QueryNode_QueryStreamSegmentsClient, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
@@ -303,6 +315,17 @@ func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 		commonpbutil.FillMsgBaseFromClient(c.nodeID))
 	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*milvuspb.GetMetricsResponse, error) {
 		return client.GetMetrics(ctx, req)
+	})
+}
+
+// GetFeatureUsage returns the node's feature usage view.
+func (c *Client) GetFeatureUsage(ctx context.Context, req *internalpb.GetFeatureUsageRequest, _ ...grpc.CallOption) (*internalpb.GetFeatureUsageResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(c.nodeID))
+	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*internalpb.GetFeatureUsageResponse, error) {
+		return client.GetFeatureUsage(ctx, req)
 	})
 }
 

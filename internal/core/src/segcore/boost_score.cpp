@@ -194,9 +194,15 @@ ComputeScorerScoresOnPreparedChunks(
         std::unordered_map<std::string,
                            std::shared_ptr<milvus::exec::BaseConfig>>(),
         entity_ttl_physical_time_us);
+    // The operation pins the plan's schema, independently of the shared
+    // physical segment. Both synchronous and asynchronous scoring use it.
+    query_context->set_read_schema(plan->schema_);
+    query_context->set_read_snapshot(segment->CaptureReadSnapshot());
     query_context->set_search_info(plan->plan_node_->search_info_);
 
     auto op_context = milvus::OpContext(cancel_token);
+    op_context.runtime_load_priority =
+        milvus::proto::common::LoadPriority::HIGH;
     query_context->set_op_context(&op_context);
     auto exec_context = milvus::exec::ExecContext(query_context.get());
 

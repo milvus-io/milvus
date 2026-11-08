@@ -405,7 +405,7 @@ func (s *CommonSuite) createBaseManifest(basePath string, storageConfig *indexpb
 	require.NoError(t, err)
 	defer out.Destroy()
 
-	manifestPath, err := packed.CommitManifestUpdates(basePath, packed.ManifestEarliest, storageConfig,
+	manifestPath, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(basePath, packed.ManifestEarliest), storageConfig,
 		&packed.ManifestUpdates{NewFiles: out})
 	require.NoError(t, err)
 

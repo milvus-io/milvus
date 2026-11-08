@@ -296,6 +296,21 @@ class QueryContext : public Context {
         return struct_element_offsets_;
     }
 
+    std::shared_ptr<const IStructElementOffsets>
+    get_struct_element_offsets(FieldId field_id) const {
+        return read_snapshot_
+                   ? read_snapshot_->GetStructElementOffsets(field_id)
+                   : segment_->GetStructElementOffsets(field_id);
+    }
+
+    SchemaPtr
+    get_schema_snapshot() const {
+        if (segment_->type() == SegmentType::Sealed) {
+            return get_read_schema();
+        }
+        return segment_->get_schema_snapshot();
+    }
+
     void
     set_active_element_count(int64_t count) {
         active_element_count_ = count;
@@ -347,6 +362,20 @@ class QueryContext : public Context {
     bool
     get_enable_sub_expr_cache_write() const {
         return enable_sub_expr_cache_write_;
+    }
+
+    // Logical read semantics belong to the plan's schema, independently of
+    // the schema used to encode/load the shared physical segment.
+    void
+    set_read_schema(SchemaPtr schema) {
+        read_schema_ = std::move(schema);
+    }
+
+    SchemaPtr
+    get_read_schema() const {
+        AssertInfo(read_schema_ || !segment_->RequiresExplicitReadSchema(),
+                   "sealed View query requires an explicit read schema");
+        return read_schema_ ? read_schema_ : segment_->get_schema_snapshot();
     }
 
     void
@@ -403,6 +432,7 @@ class QueryContext : public Context {
     // Expressions borrow the raw pointer at construction; the shared_ptr here
     // is the single owner for the whole ExecuteTask.
     std::shared_ptr<const segcore::SegmentReadSnapshot> read_snapshot_{nullptr};
+    SchemaPtr read_schema_;
 
     // MVCC fast path: set true when sealed + no-filter + no-delete + no-TTL
     bool all_rows_visible_{false};

@@ -8,17 +8,26 @@ import (
 )
 
 // Run creates a request-local analyzer and releases all native resources.
-func Run(ctx context.Context, params string, texts [][]byte, withDetail, withHash bool) ([]*milvuspb.AnalyzerResult, error) {
+func Run(ctx context.Context, params string, texts [][]byte, withDetail, withHash bool, extraInfo ...string) ([]*milvuspb.AnalyzerResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	tokenizer, err := NewAnalyzer(params, "")
+	binding := ""
+	if len(extraInfo) > 0 {
+		binding = extraInfo[0]
+	}
+	tokenizer, err := NewAnalyzer(params, binding)
 	if err != nil {
 		return nil, err
 	}
 
 	defer tokenizer.Destroy()
 
+	return RunWithAnalyzer(ctx, tokenizer, texts, withDetail, withHash)
+}
+
+// RunWithAnalyzer leaves the caller-owned analyzer alive for subsequent batches.
+func RunWithAnalyzer(ctx context.Context, tokenizer Analyzer, texts [][]byte, withDetail, withHash bool) ([]*milvuspb.AnalyzerResult, error) {
 	results := make([]*milvuspb.AnalyzerResult, len(texts))
 	for i, text := range texts {
 		if err := ctx.Err(); err != nil {

@@ -51,6 +51,9 @@ constexpr const char* BITMAP_INDEX_VALID_BITSET = "valid_bitset";
 constexpr const char* INDEX_TYPE = "index_type";
 constexpr const char* METRIC_TYPE = "metric_type";
 constexpr const char* EMB_LIST = "embedding_list";
+// Vector load parameter: the VECTOR_ARRAY field is element-nullable, so a
+// persisted validity bitmap is in the logical element domain.
+constexpr const char* ELEMENT_NULLABLE = "element_nullable";
 constexpr const char* FILE_NAMES = "file_names";
 constexpr const char* HAS_NULL = "has_null";
 constexpr const char* INDEX_NULL_OFFSET = "index_null_offset";
@@ -65,6 +68,7 @@ constexpr const char* HYBRID_INDEX_TYPE = "HYBRID";
 constexpr const char* RTREE_INDEX_TYPE = "RTREE";
 constexpr const char* SCALAR_INDEX_ENGINE_VERSION =
     "scalar_index_engine_version";
+constexpr const char* ENABLE_ARRAY_SORT_INDEX = "enable_array_sort_index";
 constexpr const char* TANTIVY_INDEX_VERSION = "tantivy_index_version";
 constexpr uint32_t TANTIVY_INDEX_LATEST_VERSION = 7;
 constexpr uint32_t TANTIVY_INDEX_MINIMUM_VERSION = 5;

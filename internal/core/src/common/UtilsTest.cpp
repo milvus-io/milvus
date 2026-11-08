@@ -125,6 +125,70 @@ TEST(Util_Common, MutableFieldDataRowValidData) {
     EXPECT_TRUE(vector_field.vectors().valid_data(0));
 }
 
+TEST(Util_Common, FieldDataRowValidDataPrefersLegacy) {
+    // An older component rewrote the legacy location and forwarded a stale
+    // field-specific copy.
+    milvus::DataArray field_data;
+    field_data.add_valid_data(true);
+    field_data.add_valid_data(true);
+    auto* scalar_valid_data =
+        field_data.mutable_scalars()->mutable_valid_data();
+    scalar_valid_data->Add(true);
+    scalar_valid_data->Add(false);
+
+    const auto& valid_data = milvus::GetFieldDataRowValidData(field_data);
+    ASSERT_EQ(valid_data.size(), 2);
+    EXPECT_TRUE(valid_data[0]);
+    EXPECT_TRUE(valid_data[1]);
+}
+
+TEST(Util_Common, SyncFieldDataRowValidData) {
+    // Field-specific only: mirrored to the legacy location.
+    milvus::DataArray scalar_field;
+    scalar_field.set_type(milvus::proto::schema::DataType::Int64);
+    auto* scalar_valid_data =
+        milvus::MutableFieldDataRowValidData(&scalar_field);
+    scalar_valid_data->Add(true);
+    scalar_valid_data->Add(false);
+    milvus::SyncFieldDataRowValidData(&scalar_field);
+    ASSERT_EQ(scalar_field.valid_data_size(), 2);
+    EXPECT_TRUE(scalar_field.valid_data(0));
+    EXPECT_FALSE(scalar_field.valid_data(1));
+    ASSERT_EQ(scalar_field.scalars().valid_data_size(), 2);
+
+    // Conflicting locations: the legacy value is written to both.
+    milvus::DataArray vector_field;
+    vector_field.add_valid_data(false);
+    vector_field.add_valid_data(true);
+    auto* vector_valid_data =
+        vector_field.mutable_vectors()->mutable_valid_data();
+    vector_valid_data->Add(true);
+    vector_valid_data->Add(true);
+    milvus::SyncFieldDataRowValidData(&vector_field);
+    ASSERT_EQ(vector_field.vectors().valid_data_size(), 2);
+    EXPECT_FALSE(vector_field.vectors().valid_data(0));
+    EXPECT_TRUE(vector_field.vectors().valid_data(1));
+    ASSERT_EQ(vector_field.valid_data_size(), 2);
+    EXPECT_FALSE(vector_field.valid_data(0));
+
+    // No validity at all: both locations stay empty.
+    milvus::DataArray non_nullable_field;
+    non_nullable_field.mutable_scalars();
+    milvus::SyncFieldDataRowValidData(&non_nullable_field);
+    EXPECT_TRUE(non_nullable_field.valid_data().empty());
+    EXPECT_TRUE(non_nullable_field.scalars().valid_data().empty());
+
+    // Struct arrays: every sub-field is synced.
+    milvus::DataArray struct_field;
+    auto* sub_field =
+        struct_field.mutable_struct_arrays()->mutable_fields()->Add();
+    sub_field->mutable_scalars()->mutable_valid_data()->Add(false);
+    milvus::SyncFieldDataRowValidData(&struct_field);
+    EXPECT_TRUE(struct_field.valid_data().empty());
+    ASSERT_EQ(sub_field->valid_data_size(), 1);
+    EXPECT_FALSE(sub_field->valid_data(0));
+}
+
 TEST(Util_Common, SaturatingAddReturnsExactSum) {
     EXPECT_EQ(milvus::SaturatingAdd(uint32_t{40}, uint32_t{2}), uint32_t{42});
 }

@@ -11,6 +11,5 @@ type interceptorBuilder struct{}
 func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) interceptors.Interceptor {
 	return &replicateInterceptor{
 		replicateManager: param.ReplicateManager,
-		txnManager:       param.TxnManager,
 	}
 }

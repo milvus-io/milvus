@@ -15,9 +15,26 @@
 // limitations under the License.
 
 #include "storage/EntryStreamUtils.h"
+#include "folly/OperationCancelled.h"
 #include "folly/coro/WithCancellation.h"
 
 namespace milvus::storage {
+folly::coro::Task<LoadAdmissionLease>
+AcquireMetadataLoadSlotAsync(proto::common::LoadPriority priority,
+                             folly::CancellationToken token) {
+    token = folly::cancellation_token_merge(
+        token, co_await folly::coro::co_current_cancellation_token);
+    try {
+        co_return co_await LoadAdmissionController::GetInstance().AcquireAsync(
+            {0, 1},
+            LoadAdmissionPriorityForThreadPool(
+                milvus::PriorityForLoad(priority)),
+            token);
+    } catch (const folly::OperationCancelled&) {
+        ThrowInfo(ErrorCode::FollyCancel, "Metadata load admission cancelled");
+    }
+}
+
 folly::coro::Task<void>
 ReadInputStreamExactlyAsync(milvus::InputStream& input,
                             uint64_t offset,

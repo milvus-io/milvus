@@ -65,7 +65,7 @@ func TestCurrentSplitForGrowingPackAllowsNewScalarFields(t *testing.T) {
 				},
 			}
 
-			groups, err := currentSplitForGrowingPack(schema, nil, meta)
+			groups, err := currentSplitForGrowingPack(context.Background(), schema, nil, meta, nil)
 
 			require.NoError(t, err)
 			require.Len(t, groups, 2)

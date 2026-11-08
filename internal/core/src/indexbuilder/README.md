@@ -110,15 +110,16 @@ so the primary field, optional scalar fields, and text/JSON stats readers use
 the same row order. Manifest inputs use the order recorded in their manifest
 and do not apply the binlog filename rule.
 
-The prefix must reach the materializer before any source row. The row count of V1 binlogs is known
-only after decoding: the first pass streams the rows assuming no prefix and counts the decoded
-rows; if the count is short, that materializer is discarded, a new materializer is filled with the
-prefix first, and the binlogs are streamed again. If the two passes decode different row counts,
-the build reports `DataFormatBroken`. Only binlogs that lack leading rows pay for the second read; a
-field without binlogs needs no re-read. Column-group and manifest sources first retain the decoded
-batches, then fill the prefix once the row count is known and deliver the batches; disk vectors are
-the exception and stream directly without filling a prefix, so `FinishPrimary` rejects a short row
-count.
+The prefix must reach the materializer before any source row. V1 binlogs and disk-vector sources
+first stream the rows assuming no prefix and count the decoded rows; if the count is short after
+successful exhaustion, that materializer is discarded, a new materializer is filled with the prefix
+first, and the source is streamed again. If the two passes decode different row counts, the build
+reports `DataFormatBroken`. Only sources that lack leading rows pay for a second read; a missing
+field has no rows to re-read. A listed file's read/decode failure propagates and cannot become a
+missing prefix. Other column-group and manifest builds first retain the decoded batches, then fill
+the prefix once the row count is known and deliver the batches. Disk-vector materialization keeps
+its streaming decode window and never retains the whole decoded column; `FinishPrimary` still
+rejects incomplete direct input.
 
 - Plain scalars retain the original `FieldData` and its stable views; the transitive backing data
   of strings, arrays, and validity must stay alive until Build returns or throws. A projected input

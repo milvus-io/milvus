@@ -138,6 +138,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestCallAlterCollection_Su
 
 	// Create a test core with proper meta setup
 	core := newTestCore(withHealthyCode())
+	core.session = suite.core.session
 	mockMeta := mockrootcoord.NewIMetaTable(suite.T())
 	core.meta = mockMeta
 
@@ -163,6 +164,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestCallAlterCollection_Ge
 
 	// Create a test core with proper meta setup
 	core := newTestCore(withHealthyCode())
+	core.session = suite.core.session
 	mockMeta := mockrootcoord.NewIMetaTable(suite.T())
 	core.meta = mockMeta
 
@@ -182,6 +184,7 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestCallAlterCollection_Br
 
 	// Create a test core with proper meta setup
 	core := newTestCore(withHealthyCode())
+	core.session = suite.core.session
 	mockMeta := mockrootcoord.NewIMetaTable(suite.T())
 	core.meta = mockMeta
 
@@ -385,7 +388,6 @@ func (suite *DDLCallbacksCollectionFunctionTestSuite) TestBroadcastAlterCollecti
 
 		err := suite.core.broadcastAlterCollectionForAlterFunction(context.Background(), req)
 		suite.NoError(err)
-		mockMeta.AssertNotCalled(suite.T(), "GetRLSMetadata", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 	})
 
 	suite.Run("altering non-whitelisted param rejected", func() {

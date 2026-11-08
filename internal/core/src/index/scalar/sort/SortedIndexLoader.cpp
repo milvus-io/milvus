@@ -21,6 +21,10 @@
 #include "index/scalar/sort/SortedIndexLoader.h"
 #include "index/PackedIndexLoad.h"
 #include "index/LegacyIndexLoad.h"
+#include "index/LegacyIndexLoad-inl.h"
+#include "index/PackedIndexLoad-inl.h"
+#include "index/SingleCellIndexStorageTranslator.h"
+#include "cachinglayer/Manager.h"
 
 #include <cerrno>
 #include <cstring>
@@ -143,8 +147,9 @@ ParseRuntimeParams(const Config& params) {
         ThrowInfo(DataTypeInvalid,
                   "sorted loader requires a concrete value type");
     }
-    result.one_value_per_coordinate =
-        result.field_type != DataType::ARRAY || result.nested;
+    result.one_value_per_coordinate = (result.field_type != DataType::ARRAY &&
+                                       !IsJsonArrayProjection(params)) ||
+                                      result.nested;
     result.value_lookup = result.one_value_per_coordinate;
     return result;
 }
@@ -451,24 +456,6 @@ DecodePackedValidity(const std::vector<uint8_t>& bytes, size_t count) {
     return result;
 }
 
-// Check sort order and coordinate bounds before auxiliary arrays index those
-// coordinates.
-template <typename T>
-void
-ValidateNumericData(const IndexStructure<T>* data, size_t size, size_t count) {
-    for (size_t i = 0; i < size; ++i) {
-        if (i != 0 && data[i] < data[i - 1]) {
-            ThrowInfo(DataFormatBroken, "sorted numeric data is not ordered");
-        }
-        if (data[i].idx_ < 0 || static_cast<size_t>(data[i].idx_) >= count) {
-            ThrowInfo(DataFormatBroken,
-                      "sorted numeric row {} exceeds count {}",
-                      data[i].idx_,
-                      count);
-        }
-    }
-}
-
 // Rebuild validity and reverse offsets; require unique coordinates where the
 // domain demands it.
 template <typename T>
@@ -480,6 +467,12 @@ RebuildNumericAux(const IndexStructure<T>* data,
     TargetBitmap validity(count, false);
     auto offsets = std::make_shared<std::vector<int32_t>>(count, -1);
     for (size_t i = 0; i < size; ++i) {
+        if (data[i].idx_ < 0 || static_cast<size_t>(data[i].idx_) >= count) {
+            ThrowInfo(DataFormatBroken,
+                      "sorted numeric row {} exceeds count {}",
+                      data[i].idx_,
+                      count);
+        }
         const auto row = static_cast<size_t>(data[i].idx_);
         if (params.one_value_per_coordinate && validity[row]) {
             ThrowInfo(DataFormatBroken,
@@ -497,76 +490,10 @@ RebuildNumericAux(const IndexStructure<T>* data,
     return {std::move(validity), std::move(offsets)};
 }
 
-// Cross-check supplied validity and reverse offsets against already
-// range-checked postings.
-template <typename T>
-void
-ValidateNumericAux(const IndexStructure<T>* data,
-                   size_t size,
-                   const TargetBitmap& validity,
-                   const int32_t* offsets,
-                   size_t count,
-                   const RuntimeParams& params) {
-    TargetBitmap seen(count, false);
-    for (size_t i = 0; i < size; ++i) {
-        const auto row = static_cast<size_t>(data[i].idx_);
-        if (!validity[row]) {
-            ThrowInfo(DataFormatBroken,
-                      "sorted numeric posting references null row {}",
-                      row);
-        }
-        if (params.one_value_per_coordinate && seen[row]) {
-            ThrowInfo(DataFormatBroken,
-                      "sorted scalar row {} has multiple values",
-                      row);
-        }
-        seen.set(row);
-    }
-    for (size_t row = 0; row < count; ++row) {
-        if (!validity[row]) {
-            if (params.nested) {
-                ThrowInfo(DataFormatBroken,
-                          "sorted nested data does not cover element "
-                          "coordinate {}",
-                          row);
-            }
-            // Legacy JSON numeric V3 writers did not define reverse offsets
-            // for null rows, so those unused slots can contain stale values.
-            continue;
-        }
-        const auto offset = offsets[row];
-        if (offset < -1 ||
-            (offset >= 0 && static_cast<size_t>(offset) >= size)) {
-            ThrowInfo(DataFormatBroken,
-                      "invalid sorted numeric offset {} for row {}",
-                      offset,
-                      row);
-        }
-        if (offset >= 0 && data[static_cast<size_t>(offset)].idx_ !=
-                               static_cast<int32_t>(row)) {
-            ThrowInfo(DataFormatBroken,
-                      "sorted numeric offset {} does not map row {}",
-                      offset,
-                      row);
-        }
-        if (params.value_lookup && validity[row] && offset < 0) {
-            ThrowInfo(DataFormatBroken,
-                      "sorted scalar valid row {} has no reverse offset",
-                      row);
-        }
-        if (params.nested && (!validity[row] || !seen[row])) {
-            ThrowInfo(DataFormatBroken,
-                      "sorted nested data does not cover element coordinate "
-                      "{}",
-                      row);
-        }
-    }
-}
-
 // Load heap or mmap numeric data and rebuild the auxiliary state omitted by
 // legacy artifacts.
 template <typename T>
-folly::coro::Task<typename SortedIndexReader<T>::OpenArgs>
+folly::coro::Task<typename SortedIndexStorage<T>::OpenArgs>
 LoadNumericState(bool use_async,
                  storage::FileSource& source,
                  const storage::LoadOptions& opts,
@@ -584,7 +511,7 @@ LoadNumericState(bool use_async,
     const auto data_bytes = CheckedMultiply(
         meta.index_length, sizeof(IndexStructure<T>), "numeric data");
 
-    typename SortedIndexReader<T>::OpenArgs args;
+    typename SortedIndexStorage<T>::OpenArgs args;
     args.storage.size = meta.index_length;
     if (opts.enable_mmap && data_bytes != 0) {
         auto owner = (co_await MapEntry(use_async,
@@ -610,8 +537,6 @@ LoadNumericState(bool use_async,
         args.storage.data_heap_bytes =
             owner->capacity() * sizeof(IndexStructure<T>);
     }
-    ValidateNumericData(args.storage.data, args.storage.size, meta.count);
-
     auto rebuilt = RebuildNumericAux(
         args.storage.data, args.storage.size, meta.count, params);
     args.state.valid_bitset =
@@ -629,63 +554,7 @@ LoadNumericState(bool use_async,
     co_return args;
 }
 
-// Cross-check validity and reverse lookup against the validated string
-// layout.
-void
-ValidateStringAux(const SortedStringLayout& layout,
-                  const TargetBitmap& validity,
-                  const int32_t* offsets,
-                  size_t count,
-                  const RuntimeParams& params) {
-    TargetBitmap seen(count, false);
-    for (size_t value = 0; value < layout.UniqueCount(); ++value) {
-        const auto posting = layout.Posting(value);
-        for (size_t i = 0; i < posting.size; ++i) {
-            const auto row = posting.At(i);
-            if (!validity[row]) {
-                ThrowInfo(DataFormatBroken,
-                          "sorted string posting references null row {}",
-                          row);
-            }
-            if (params.one_value_per_coordinate && seen[row]) {
-                ThrowInfo(DataFormatBroken,
-                          "sorted string row {} has multiple values",
-                          row);
-            }
-            seen.set(row);
-            if (params.one_value_per_coordinate &&
-                offsets[row] != static_cast<int32_t>(value)) {
-                ThrowInfo(DataFormatBroken,
-                          "sorted string reverse offset disagrees for row {}",
-                          row);
-            }
-        }
-    }
-    for (size_t row = 0; row < count; ++row) {
-        const auto value = offsets[row];
-        if (value < -1 || (value >= 0 && static_cast<size_t>(value) >=
-                                             layout.UniqueCount())) {
-            ThrowInfo(DataFormatBroken,
-                      "invalid sorted string offset {} for row {}",
-                      value,
-                      row);
-        }
-        if (params.value_lookup && validity[row] && value < 0) {
-            ThrowInfo(DataFormatBroken,
-                      "sorted string valid row {} has no reverse offset",
-                      row);
-        }
-        if (params.nested && (!validity[row] || !seen[row])) {
-            ThrowInfo(DataFormatBroken,
-                      "sorted nested string data does not cover element "
-                      "coordinate {}",
-                      row);
-        }
-    }
-}
-
-// Load the string layout and validity, then rebuild and validate reverse
-// offsets.
+// Load the legacy string layout and validity, then rebuild reverse offsets.
 folly::coro::Task<SortedIndexReader<std::string_view>::OpenArgs>
 LoadStringState(bool use_async,
                 storage::FileSource& source,
@@ -712,12 +581,12 @@ LoadStringState(bool use_async,
             ThrowInfo(DataFormatBroken, "sorted string index_data is empty");
         }
         args.storage.layout =
-            SortedStringLayout::FromPackedMmap(std::move(owner), meta.count);
+            SortedStringLayout::FromPackedMmap(std::move(owner));
     } else {
         auto packed =
             co_await source.ReadEntryAsync(sort_format::kIndexData, use_async);
         args.storage.layout =
-            SortedStringLayout::FromPackedHeap(std::move(packed), meta.count);
+            SortedStringLayout::FromPackedHeap(std::move(packed));
     }
     const auto validity =
         co_await source.ReadEntryAsync(sort_format::kValidBitset, use_async);
@@ -731,11 +600,6 @@ LoadStringState(bool use_async,
     args.state.idx_to_offsets_heap_bytes =
         offsets->capacity() * sizeof(int32_t);
     args.state.idx_to_offsets_owner = std::move(offsets);
-    ValidateStringAux(*args.storage.layout,
-                      *args.state.valid_bitset,
-                      args.state.idx_to_offsets,
-                      meta.count,
-                      params);
 
     args.state.total_num_rows = meta.count;
     args.state.value_type = params.value_type;
@@ -840,22 +704,22 @@ MapSortedTarget(const storage::IndexFileTarget& file) {
     return owner;
 }
 
-// Attach loaded payload owners and validate or rebuild auxiliary arrays
-// before publication.
+// Attach persisted auxiliary arrays directly; only missing arrays need a
+// payload scan to rebuild them before publication.
 template <typename T>
-IIndexReaderBasePtr
+std::unique_ptr<SortedIndexStorage<T>>
 FinishPackedSortedState(PackedSortedState& state,
                         std::shared_ptr<SortedMmapOwner> data_mapping,
                         std::shared_ptr<SortedMmapOwner> offsets_mapping) {
     constexpr bool string = std::is_same_v<T, std::string_view>;
-    typename SortedIndexReader<T>::OpenArgs args;
+    typename SortedIndexStorage<T>::OpenArgs args;
     if constexpr (string) {
         if (state.data_file) {
-            args.storage.layout = SortedStringLayout::FromPackedMmap(
-                std::move(data_mapping), state.meta.count);
+            args.storage.layout =
+                SortedStringLayout::FromPackedMmap(std::move(data_mapping));
         } else {
             args.storage.layout = SortedStringLayout::FromPackedHeap(
-                std::move(*state.string_data), state.meta.count);
+                std::move(*state.string_data));
         }
     } else {
         args.storage.size = state.meta.index_length;
@@ -871,8 +735,6 @@ FinishPackedSortedState(PackedSortedState& state,
             args.storage.data_owner = state.data_owner;
             args.storage.data_heap_bytes = state.data_heap_bytes;
         }
-        ValidateNumericData(
-            args.storage.data, args.storage.size, state.meta.count);
     }
     if (state.has_offsets) {
         if (state.offsets_file) {
@@ -911,25 +773,11 @@ FinishPackedSortedState(PackedSortedState& state,
             rebuilt.second->capacity() * sizeof(int32_t);
         args.state.idx_to_offsets_owner = std::move(rebuilt.second);
     }
-    if constexpr (string) {
-        ValidateStringAux(*args.storage.layout,
-                          *args.state.valid_bitset,
-                          args.state.idx_to_offsets,
-                          state.meta.count,
-                          state.params);
-    } else {
-        ValidateNumericAux(args.storage.data,
-                           args.storage.size,
-                           *args.state.valid_bitset,
-                           args.state.idx_to_offsets,
-                           state.meta.count,
-                           state.params);
-    }
     args.state.total_num_rows = state.meta.count;
     args.state.value_type = state.params.value_type;
     args.state.nested = state.meta.nested;
     args.state.value_lookup = state.params.value_lookup;
-    return std::make_unique<SortedIndexReader<T>>(std::move(args));
+    return std::make_unique<SortedIndexStorage<T>>(std::move(args));
 }
 
 }  // namespace
@@ -984,11 +832,12 @@ SortedIndexLoader::Create(OpenedIndexSource source,
     auto loader = std::unique_ptr<SortedIndexLoader>(
         new SortedIndexLoader(std::move(source), std::move(options)));
     auto state = std::make_unique<PreparedState>();
-    if (const auto* packed = std::get_if<PackedIndexSource>(&loader->source_)) {
+    if (const auto* packed =
+            std::get_if<PackedIndexSource>(&*loader->source_)) {
         *state = PreparePackedState(
             packed->Directory(), packed->Metadata(), loader->options_);
     } else {
-        const auto& legacy = std::get<LegacyIndexSource>(loader->source_);
+        const auto& legacy = std::get<LegacyIndexSource>(*loader->source_);
         state->params = ParseRuntimeParams(loader->options_.params);
         if (IsStringDataType(state->params.value_type)) {
             static_cast<CommonMeta&>(state->meta) =
@@ -1005,27 +854,107 @@ SortedIndexLoader::Create(OpenedIndexSource source,
     co_return loader;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
-SortedIndexLoader::Load(milvus::OpContext* context) {
-    if (auto* packed = std::get_if<PackedIndexSource>(&source_)) {
-        return RunPackedIndexLoad(
+template <typename T>
+IndexPtr
+SortedIndexLoader::LoadTyped(milvus::OpContext* context,
+                             const IndexCacheConfig& cache) {
+    auto caps = DeriveCaps(options_.params);
+    caps.json_paths = false;
+    const IndexMetadata metadata{
+        caps,
+        state_->meta.nested ? Domain::Element : Domain::Row,
+        state_->params.value_type,
+        static_cast<int64_t>(state_->meta.count)};
+    const auto* legacy = std::get_if<LegacyIndexSource>(&*source_);
+    const bool use_async =
+        legacy ? legacy->use_async
+               : std::holds_alternative<
+                     std::shared_ptr<storage::AsyncIndexEntryReader>>(
+                     std::get<PackedIndexSource>(*source_).reader);
+    auto source = std::move(*source_);
+    source_.reset();
+    auto load = [source = std::move(source),
+                 options = options_,
+                 prepared = *state_](OpContext* ctx) mutable {
+        return LoadStorage<T>(source, options, prepared, ctx);
+    };
+    auto slot =
+        cachinglayer::Manager::GetInstance()
+            .CreateCacheSlot<SortedIndexStorage<T>>(
+                std::make_unique<
+                    SingleCellIndexStorageTranslator<SortedIndexStorage<T>>>(
+                    cache, use_async, std::move(load)),
+                context);
+    auto index = std::make_shared<SortedIndex<T>>(std::move(slot), metadata);
+    if (auto spec = JsonProjectedSpec(options_.params, metadata.count)) {
+        return JsonPathIndex::FromStorage(std::move(index), std::move(*spec));
+    }
+    return index;
+}
+
+template <typename T>
+folly::coro::Task<std::unique_ptr<SortedIndexStorage<T>>>
+SortedIndexLoader::LoadStorage(OpenedIndexSource& source,
+                               const storage::LoadOptions& options,
+                               const PreparedState& prepared,
+                               milvus::OpContext* context) {
+    if (auto* packed = std::get_if<PackedIndexSource>(&source)) {
+        return RunPackedIndexLoad<std::unique_ptr<SortedIndexStorage<T>>>(
             *packed,
-            options_,
-            [this](const auto& directory,
-                   const auto& metadata,
-                   const auto& options) {
-                return PlanPacked(directory, metadata, options, state_.get());
+            options,
+            [&prepared](
+                const auto& directory, const auto& metadata, const auto& opts) {
+                return PlanPacked(directory, metadata, opts, &prepared);
             },
-            &FinishPacked,
+            &FinishPackedStorage<T>,
             context);
     }
-    return RunLegacyLoad(
-        std::get<LegacyIndexSource>(source_),
-        options_,
-        [this](auto& source, const auto& options, bool use_async) {
-            return LoadLegacy(source, options, use_async);
+    return RunLegacyLoad<std::unique_ptr<SortedIndexStorage<T>>>(
+        std::get<LegacyIndexSource>(source),
+        options,
+        [&prepared](storage::FileSource& files,
+                    const storage::LoadOptions& opts,
+                    bool use_async)
+            -> folly::coro::Task<std::unique_ptr<SortedIndexStorage<T>>> {
+            auto projection =
+                PrepareJsonProjectedOpen(families::kSort, files, opts);
+            std::unique_ptr<SortedIndexStorage<T>> storage;
+            if constexpr (std::is_same_v<T, std::string_view>) {
+                storage = std::make_unique<SortedIndexStorage<T>>(
+                    co_await LoadStringState(use_async,
+                                             files,
+                                             opts,
+                                             prepared.meta,
+                                             prepared.params));
+            } else {
+                storage = std::make_unique<SortedIndexStorage<T>>(
+                    co_await LoadNumericState<T>(use_async,
+                                                 files,
+                                                 opts,
+                                                 prepared.meta,
+                                                 prepared.params));
+            }
+            storage->json_exists =
+                co_await LoadJsonExists(use_async,
+                                        std::move(projection),
+                                        files,
+                                        storage->state.total_num_rows);
+            co_return storage;
         },
         context);
+}
+
+IndexPtr
+SortedIndexLoader::Load(milvus::OpContext* context,
+                        const IndexCacheConfig& cache) {
+    AssertInfo(source_.has_value(),
+               "cached sorted construction consumed this loader");
+    if (IsStringDataType(state_->params.value_type)) {
+        return LoadTyped<std::string_view>(context, cache);
+    }
+    return DispatchPackedNumeric(state_->params.value_type, [&]<typename T>() {
+        return LoadTyped<T>(context, cache);
+    });
 }
 
 ReaderCaps
@@ -1045,75 +974,6 @@ SortedIndexLoader::DeriveCaps(const Config& index_meta) {
                    .value_lookup = params.value_lookup,
                    .cheap_value_lookup = params.value_lookup,
                    .exact = !params.nested});
-}
-
-folly::coro::Task<IIndexReaderBasePtr>
-SortedIndexLoader::LoadLegacy(storage::FileSource& source,
-                              const storage::LoadOptions& opts,
-                              bool use_async) {
-    auto projection = PrepareJsonProjectedOpen(families::kSort, source, opts);
-    const auto& params = state_->params;
-    if (params.value_type == DataType::NONE ||
-        params.value_type == DataType::ARRAY) {
-        ThrowInfo(DataTypeInvalid,
-                  "sorted loader requires value_type or array_element_type");
-    }
-    if (IsStringDataType(params.value_type)) {
-        const auto& meta = state_->meta;
-        auto state =
-            co_await LoadStringState(use_async, source, opts, meta, params);
-        auto inner = std::make_unique<SortedIndexReader<std::string_view>>(
-            std::move(state));
-        co_return co_await FinishJsonProjectedOpenAsync(
-            use_async, std::move(projection), source, std::move(inner));
-    }
-
-    const auto& meta = state_->meta;
-    std::unique_ptr<IIndexReaderBase> inner;
-    switch (params.value_type) {
-        case DataType::BOOL:
-            inner = std::make_unique<SortedIndexReader<bool>>(
-                (co_await LoadNumericState<bool>(
-                    use_async, source, opts, meta, params)));
-            break;
-        case DataType::INT8:
-            inner = std::make_unique<SortedIndexReader<int8_t>>(
-                (co_await LoadNumericState<int8_t>(
-                    use_async, source, opts, meta, params)));
-            break;
-        case DataType::INT16:
-            inner = std::make_unique<SortedIndexReader<int16_t>>(
-                (co_await LoadNumericState<int16_t>(
-                    use_async, source, opts, meta, params)));
-            break;
-        case DataType::INT32:
-            inner = std::make_unique<SortedIndexReader<int32_t>>(
-                (co_await LoadNumericState<int32_t>(
-                    use_async, source, opts, meta, params)));
-            break;
-        case DataType::INT64:
-        case DataType::TIMESTAMPTZ:
-            inner = std::make_unique<SortedIndexReader<int64_t>>(
-                (co_await LoadNumericState<int64_t>(
-                    use_async, source, opts, meta, params)));
-            break;
-        case DataType::FLOAT:
-            inner = std::make_unique<SortedIndexReader<float>>(
-                (co_await LoadNumericState<float>(
-                    use_async, source, opts, meta, params)));
-            break;
-        case DataType::DOUBLE:
-            inner = std::make_unique<SortedIndexReader<double>>(
-                (co_await LoadNumericState<double>(
-                    use_async, source, opts, meta, params)));
-            break;
-        default:
-            ThrowInfo(DataTypeInvalid,
-                      "unsupported sorted value type {}",
-                      static_cast<int>(params.value_type));
-    }
-    co_return (co_await FinishJsonProjectedOpenAsync(
-        use_async, std::move(projection), source, std::move(inner)));
 }
 
 IndexLoadPlan
@@ -1221,10 +1081,11 @@ SortedIndexLoader::PlanPacked(const storage::IndexEntryDirectory& directory,
     return plan;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
-SortedIndexLoader::FinishPacked(IndexLoadPlan& plan,
-                                const storage::LoadOptions& opts,
-                                bool use_async) {
+template <typename T>
+folly::coro::Task<std::unique_ptr<SortedIndexStorage<T>>>
+SortedIndexLoader::FinishPackedStorage(IndexLoadPlan& plan,
+                                       const storage::LoadOptions& opts,
+                                       bool use_async) {
     const auto state =
         std::any_cast<std::shared_ptr<PackedSortedState>>(plan.load_context);
     const auto priority =
@@ -1246,24 +1107,18 @@ SortedIndexLoader::FinishPacked(IndexLoadPlan& plan,
             local_io();
         }
     }
-    IIndexReaderBasePtr inner;
-    if (IsStringDataType(state->params.value_type)) {
+    if constexpr (std::is_same_v<T, std::string_view>) {
         if (state->meta.count % 8 != 0) {
             auto* bytes = reinterpret_cast<uint8_t*>(state->validity->data());
             bytes[state->meta.count / 8] &=
                 static_cast<uint8_t>((1u << (state->meta.count % 8)) - 1u);
         }
-        inner = FinishPackedSortedState<std::string_view>(
-            *state, data_mapping, offsets_mapping);
-    } else {
-        inner =
-            DispatchPackedNumeric(state->params.value_type, [&]<typename T>() {
-                return FinishPackedSortedState<T>(
-                    *state, data_mapping, offsets_mapping);
-            });
     }
-    co_return FinishPackedJsonProjectedOpen(std::move(state->projection),
-                                            std::move(inner));
+    auto storage = FinishPackedSortedState<T>(
+        *state, std::move(data_mapping), std::move(offsets_mapping));
+    storage->json_exists = FinishPackedJsonExists(
+        std::move(state->projection), storage->state.total_num_rows);
+    co_return storage;
 }
 
 namespace {

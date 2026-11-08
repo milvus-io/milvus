@@ -120,3 +120,61 @@ func TestDeduplicate_AND_MixedDifferentPredicates(t *testing.T) {
 	require.Equal(t, 1, andCount, "should have exactly one AND connecting the two distinct predicates")
 	require.Equal(t, 2, urCount, "should retain exactly two distinct unary range exprs")
 }
+
+func TestDeduplicate_WithCommonFactorExtraction(t *testing.T) {
+	helper := buildSchemaHelperForDedupTest(t)
+
+	t.Run("or_of_identical_and_branches_128x", func(t *testing.T) {
+		// (A AND B) OR (A AND B) repeated 128 times (exceeds maxCommonFactorBranches = 64)
+		branches := make([]string, 128)
+		for i := range branches {
+			branches[i] = "(category == 1 and age <= 500)"
+		}
+		expr, err := parser.ParseExpr(helper, strings.Join(branches, " or "), nil)
+		require.NoError(t, err)
+		require.NotNil(t, expr)
+
+		andCount, orCount, urCount, _, _ := countASTNodes(expr)
+		require.Equal(t, 1, andCount, "should collapse to a single AND node (A AND B)")
+		require.Equal(t, 0, orCount, "all duplicate OR branches should be eliminated")
+		require.Equal(t, 2, urCount, "should retain exactly two leaf predicates")
+	})
+
+	t.Run("or_common_factor_after_deduplication_128_branches", func(t *testing.T) {
+		// 64x (A AND B) OR 64x (A AND C) = 128 branches (> maxCommonFactorBranches = 64).
+		// Deduplication reduces 128 branches to 2 branches: (A AND B) OR (A AND C),
+		// allowing common-factor extraction to produce A AND (B OR C).
+		branches := make([]string, 0, 128)
+		for i := 0; i < 64; i++ {
+			branches = append(branches, "(category == 1 and age < 100)")
+			branches = append(branches, "(category == 1 and name == 'alice')")
+		}
+		expr, err := parser.ParseExpr(helper, strings.Join(branches, " or "), nil)
+		require.NoError(t, err)
+		require.NotNil(t, expr)
+
+		andCount, orCount, urCount, _, _ := countASTNodes(expr)
+		require.Equal(t, 1, andCount, "common factor should be extracted into a single top-level AND")
+		require.Equal(t, 1, orCount, "residual predicates should form a single OR")
+		require.Equal(t, 3, urCount, "should contain A, B, and C")
+	})
+
+	t.Run("and_common_factor_after_deduplication_128_clauses", func(t *testing.T) {
+		// 64x (A OR B) AND 64x (A OR C) = 128 clauses (> maxCommonFactorBranches = 64).
+		// Deduplication reduces 128 clauses to 2 clauses: (A OR B) AND (A OR C),
+		// allowing CNF common-factor extraction to produce A OR (B AND C).
+		clauses := make([]string, 0, 128)
+		for i := 0; i < 64; i++ {
+			clauses = append(clauses, "(category == 1 or age < 100)")
+			clauses = append(clauses, "(category == 1 or name == 'alice')")
+		}
+		expr, err := parser.ParseExpr(helper, strings.Join(clauses, " and "), nil)
+		require.NoError(t, err)
+		require.NotNil(t, expr)
+
+		andCount, orCount, urCount, _, _ := countASTNodes(expr)
+		require.Equal(t, 1, orCount, "common factor should be extracted into a single top-level OR")
+		require.Equal(t, 1, andCount, "residual predicates should form a single AND")
+		require.Equal(t, 3, urCount, "should contain A, B, and C")
+	})
+}

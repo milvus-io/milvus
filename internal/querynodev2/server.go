@@ -34,11 +34,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -47,9 +46,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/pipeline"
+	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/registry"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -58,8 +59,8 @@ import (
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
-	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/materialize"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/util/searchutil/scheduler"
@@ -68,7 +69,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/config"
-	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
@@ -79,7 +79,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -109,6 +108,8 @@ type QueryNode struct {
 	stopOnce  sync.Once
 
 	// internal components
+	queryViewSegments     atomic.Pointer[qnview.SegmentResourceManager]
+	queryViewHandler      atomic.Pointer[qnview.QNQueryViewHandler]
 	manager               *segments.Manager
 	clusterManager        cluster.Manager
 	pipelineManager       pipeline.Manager
@@ -330,6 +331,7 @@ func (node *QueryNode) registerMetricsRequest() {
 func (node *QueryNode) Init() error {
 	var initError error
 	node.initOnce.Do(func() {
+		captureStartConfig()
 		node.registerMetricsRequest()
 		// ctx := context.Background()
 		mlog.Info(node.ctx, "QueryNode session info", mlog.String("metaPath", paramtable.Get().EtcdCfg.MetaRootPath.GetValue()))
@@ -342,12 +344,8 @@ func (node *QueryNode) Init() error {
 
 		err = node.initHook()
 		if err != nil {
-			// A hook configured both ways is a contradiction in the
-			// deployment, not an optional plug-in that is absent: refuse to
-			// start whatever autoIndex.enable says. Any other failure keeps
-			// the old rule - auto index cannot work without a hook, so it is
-			// fatal only when auto index is on.
-			if hookInitIsFatal(err) {
+			// auto index cannot work if hook init failed
+			if paramtable.Get().AutoIndexConfig.Enable.GetAsBool() {
 				mlog.Error(node.ctx, "QueryNode init hook failed", mlog.Err(err))
 				initError = err
 				return
@@ -444,6 +442,22 @@ func (node *QueryNode) Start() error {
 
 		paramtable.SetCreateTime(time.Now())
 		paramtable.SetUpdateTime(time.Now())
+
+		// Materialize does not follow grpc.client.*: without its own codec it
+		// sends raw what Query would compress. Only worth saying when the
+		// proxies route requests to it.
+		if paramtable.Get().ProxyCfg.MaterializeEnabled.GetAsBool() {
+			if bad := materialize.InvalidSettings(); len(bad) > 0 {
+				mlog.Warn(node.ctx, "unrecognized Materialize settings, using the defaults", mlog.Strings("settings", bad))
+			}
+			if paramtable.Get().QueryNodeGrpcClientCfg.CompressionEnabled.GetAsBool() &&
+				materialize.ResolveCodec() == materialize.CodecNone {
+				mlog.Warn(node.ctx, "grpc compression is on but queryNode.materialize.codec is none, Materialize replies will be sent uncompressed")
+			}
+		}
+
+		// execution-path feature counters (see internal/featureusage)
+		featureusage.SetEnabled(paramtable.Get().CommonCfg.FeatureUsageCountersEnabled.GetAsBool())
 		mmapEnabled := paramtable.Get().QueryNodeCfg.MmapEnabled.GetAsBool()
 		growingmmapEnable := paramtable.Get().QueryNodeCfg.GrowingMmapEnabled.GetAsBool()
 		mmapVectorIndex := paramtable.Get().QueryNodeCfg.MmapVectorIndex.GetAsBool()
@@ -475,18 +489,13 @@ func (node *QueryNode) Start() error {
 }
 
 // hasOtherActiveQueryNode checks via session whether there is any other
-// non-stopping query node that can accept migrated data.
+// non-stopping query node, including one embedded in a streaming node. While one
+// exists the cluster is still serving, and the data can be migrated to it or to
+// a replacement node. An error means the answer is unknown.
 func (node *QueryNode) hasOtherActiveQueryNode() (bool, error) {
-	var sessions map[string]*sessionutil.Session
-	err := retry.Do(node.ctx, func() error {
-		var err error
-		sessions, _, err = node.session.GetSessions(node.ctx, typeutil.QueryNodeRole)
-		return err
-	},
-		retry.AttemptAlways(),
-		retry.Sleep(time.Second),
-		retry.RetryErr(func(error) bool { return true }),
-	)
+	ctx, cancel := context.WithTimeout(node.ctx, paramtable.Get().EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond))
+	defer cancel()
+	sessions, _, err := node.session.GetSessions(ctx, typeutil.QueryNodeRole)
 	if err != nil {
 		return false, err
 	}
@@ -503,17 +512,39 @@ func (node *QueryNode) hasOtherActiveQueryNode() (bool, error) {
 func (node *QueryNode) Stop() error {
 	node.stopOnce.Do(func() {
 		mlog.Info(node.ctx, "Query node stop...")
+		migrationCtx, cancelMigration := context.WithTimeout(context.WithoutCancel(node.ctx),
+			paramtable.Get().QueryNodeCfg.GracefulStopTimeout.GetAsDuration(time.Second))
+		defer cancelMigration()
 		err := node.session.GoingStop()
+		canMigrate := err == nil && util.MustSelectWALName() != message.WALNameRocksmq
+		if !canMigrate {
+			cancelMigration()
+		}
+		handler := node.queryViewHandler.Load()
+		queryViewClosed := make(chan struct{})
+		if handler == nil {
+			close(queryViewClosed)
+		} else {
+			// Share the migration deadline with the legacy path. The handler owns
+			// preparation rejection, migration waiting, and physical resource drain.
+			go func() {
+				defer close(queryViewClosed)
+				if err := handler.Close(migrationCtx); err != nil {
+					mlog.Info(node.ctx, "query view graceful close interrupted, waiting for local cleanup", mlog.Err(err))
+					// Cancellation ends migration, not native ownership. Join the
+					// same cleanup before allowing segcore to be destroyed.
+					_ = handler.Close(context.WithoutCancel(node.ctx))
+				}
+			}()
+		}
 		if err != nil {
 			mlog.Warn(node.ctx, "session fail to go stopping state", mlog.Err(err))
-		} else if util.MustSelectWALName() != message.WALNameRocksmq { // rocksmq cannot support querynode graceful stop because of using local storage.
+		} else if canMigrate { // rocksmq cannot migrate because it uses local storage.
 			metrics.StoppingBalanceNodeNum.WithLabelValues().Set(1)
 			// TODO: Redundant timeout control, graceful stop timeout is controlled by outside by `component`.
 			// Integration test is still using it, Remove it in future.
-			timeoutCh := time.After(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.GetAsDuration(time.Second))
-			isStandalone := paramtable.GetRole() == typeutil.StandaloneRole
-			standaloneMigrateTimeout := paramtable.Get().QueryNodeCfg.StandaloneMigrateDataTimeout.GetAsDurationByParse()
-			standaloneMigrateDeadline := time.Now().Add(standaloneMigrateTimeout)
+			migrateTimeout := paramtable.Get().QueryNodeCfg.MigrateDataTimeout.GetAsDurationByParse()
+			migrateDeadline := time.Now().Add(migrateTimeout)
 
 		outer:
 			for (node.manager != nil && !node.manager.Segment.Empty()) ||
@@ -534,17 +565,18 @@ func (node *QueryNode) Stop() error {
 					break outer
 				}
 
-				// In standalone mode, after the migrate timeout, check if there is any other
-				// active query node (e.g. a new standalone starting up for rolling upgrade).
-				if isStandalone && time.Now().After(standaloneMigrateDeadline) {
+				// After the migrate timeout, stop waiting once every other query node is
+				// stopping too, e.g. the whole cluster is stopping, since no node is left
+				// to take the data. A failed lookup keeps waiting, so a transient etcd
+				// error never skips migration.
+				if time.Now().After(migrateDeadline) {
 					hasOther, err := node.hasOtherActiveQueryNode()
 					if err != nil {
-						break outer
-					}
-					if !hasOther {
-						mlog.Warn(node.ctx, "standalone migrate data stopped due to no active query node available to accept data",
+						mlog.Warn(node.ctx, "failed to check other active query node, keep migrating data", mlog.Err(err))
+					} else if !hasOther {
+						mlog.Warn(node.ctx, "migrate data stopped due to no active query node available to accept data",
 							mlog.FieldNodeID(node.GetNodeID()),
-							mlog.Duration("standaloneMigrateTimeout", standaloneMigrateTimeout),
+							mlog.Duration("migrateTimeout", migrateTimeout),
 							mlog.Int64s("sealedSegments", lo.Map(sealedSegments, func(s segments.Segment, i int) int64 {
 								return s.ID()
 							})),
@@ -553,12 +585,13 @@ func (node *QueryNode) Stop() error {
 							})),
 							mlog.Int("channelNum", channelNum),
 						)
+						cancelMigration()
 						break outer
 					}
 				}
 
 				select {
-				case <-timeoutCh:
+				case <-migrationCtx.Done():
 					mlog.Warn(node.ctx, "migrate data timed out", mlog.Int64("ServerID", node.GetNodeID()),
 						mlog.Int64s("sealedSegments", lo.Map(sealedSegments, func(s segments.Segment, i int) int64 {
 							return s.ID()
@@ -589,6 +622,9 @@ func (node *QueryNode) Stop() error {
 			metrics.StoppingBalanceChannelNum.WithLabelValues(fmt.Sprint(node.GetNodeID())).Set(0)
 		}
 
+		// Legacy resources may be empty while QueryViews are still migrating.
+		// Let Close finish with the original deadline before stopping queries.
+		<-queryViewClosed
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		node.lifetime.Wait()
 		if node.scheduler != nil {
@@ -639,48 +675,15 @@ func (node *QueryNode) SetAddress(address string) {
 	node.address = address
 }
 
-// errQueryHookConflict is returned when a compiled-in query hook and
-// queryNode.soPath are both configured. A hook that fails to load is an
-// optional plug-in that may be absent, but this is a contradiction in the
-// deployment, so Init refuses to start on it whatever autoIndex.enable says.
-var errQueryHookConflict = errors.New("queryNode.soPath and a compiled-in query hook are both configured")
-
-// hookInitIsFatal reports whether an initHook error must stop the QueryNode.
-// A queryNode.soPath configured beside a compiled-in hook is a contradiction
-// and is always fatal; any other failure - no path at all, a plug-in that
-// does not load - is fatal only when auto index is on, because that is the
-// only feature that needs a hook.
-func hookInitIsFatal(err error) bool {
-	return errors.Is(err, errQueryHookConflict) || paramtable.Get().AutoIndexConfig.Enable.GetAsBool()
-}
-
 // initHook installs the parameter tuning hook: the one compiled into this
 // binary if a distribution installed one, otherwise the plug-in at
 // queryNode.soPath.
 //
-// A compiled-in hook is used in preference to the plug-in, and a deployment
-// that configures both is refused (errQueryHookConflict): both would tune
-// every search, and picking silently would make which one wins depend on
-// start-up order rather than on the deployment. It is otherwise treated
-// exactly as the plug-in is: the same two Init calls with the autoIndex
-// configuration, the same watchers.
+// A compiled-in hook is used and queryNode.soPath is ignored. The compiled-in
+// hook is otherwise treated exactly as the plug-in is: the same two Init calls
+// with the autoIndex configuration, the same watchers.
 func (node *QueryNode) initHook() error {
-	path := paramtable.Get().QueryNodeCfg.SoPath.GetValue()
-
-	if compiled := extension.InstalledQueryHook(); compiled != nil {
-		if path != "" {
-			return merr.Wrapf(errQueryHookConflict,
-				"queryNode.soPath is set to %q and a query hook is also compiled in; "+
-					"both tune every search, and only one can", path)
-		}
-		return node.useQueryHook(compiled)
-	}
-
-	if path == "" {
-		return merr.WrapErrServiceInternalMsg("fail to set the plugin path")
-	}
-
-	hoo, err := hookutil.LoadPlugin[optimizers.QueryHook](path, "QueryNodePlugin")
+	hoo, err := optimizers.LoadQueryHook()
 	if err != nil {
 		return err
 	}
@@ -692,11 +695,8 @@ func (node *QueryNode) initHook() error {
 // for a plug-in and a compiled-in hook, which is the point: a hook a
 // distribution compiled in must not be a second-class one.
 func (node *QueryNode) useQueryHook(hoo optimizers.QueryHook) error {
-	if err := hoo.Init(paramtable.Get().AutoIndexConfig.AutoIndexSearchConfig.GetValue()); err != nil {
-		return merr.Wrap(err, "fail to init configs for the hook")
-	}
-	if err := hoo.InitTuningConfig(paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.GetValue()); err != nil {
-		return merr.Wrap(err, "fail to init tuning configs for the hook")
+	if err := optimizers.InitQueryHook(hoo); err != nil {
+		return err
 	}
 
 	node.queryHook = hoo
@@ -705,31 +705,7 @@ func (node *QueryNode) useQueryHook(hoo optimizers.QueryHook) error {
 }
 
 func (node *QueryNode) handleQueryHookEvent() {
-	onEvent := func(event *config.Event) {
-		if node.queryHook != nil {
-			if err := node.queryHook.Init(event.Value); err != nil {
-				mlog.Error(node.ctx, "failed to refresh hook config", mlog.Err(err))
-			}
-		}
-	}
-	onEvent2 := func(event *config.Event) {
-		if node.queryHook != nil && strings.HasPrefix(event.Key, paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.KeyPrefix) {
-			realKey := strings.TrimPrefix(event.Key, paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.KeyPrefix)
-			switch event.EventType {
-			case config.CreateType, config.UpdateType:
-				if err := node.queryHook.InitTuningConfig(map[string]string{realKey: event.Value}); err != nil {
-					mlog.Warn(node.ctx, "failed to refresh hook tuning config", mlog.Err(err))
-				}
-			case config.DeleteType:
-				if err := node.queryHook.DeleteTuningConfig(realKey); err != nil {
-					mlog.Warn(node.ctx, "failed to delete hook tuning config", mlog.Err(err))
-				}
-			}
-		}
-	}
-	paramtable.Get().Watch(paramtable.Get().AutoIndexConfig.AutoIndexSearchConfig.Key, config.NewHandler("queryHook", onEvent))
-
-	paramtable.Get().WatchKeyPrefix(paramtable.Get().AutoIndexConfig.AutoIndexTuningConfig.KeyPrefix, config.NewHandler("queryHook2", onEvent2))
+	optimizers.WatchQueryHook(node.ctx, node.queryHook, "queryHook")
 }
 
 // cleanupOrphanedSpilloverFiles removes leftover TEXT LOB spillover files

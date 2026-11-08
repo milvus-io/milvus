@@ -105,7 +105,7 @@ func validateCollectionNameOrAlias(entity, entityType string) error {
 		return merr.WrapErrParameterInvalidMsg("collection %s should not be empty", entityType)
 	}
 
-	invalidMsg := fmt.Sprintf("Invalid collection %s: %s. ", entityType, entity)
+	invalidMsg := fmt.Sprintf("Invalid collection %s: %s.", entityType, entity)
 	if len(entity) > paramtable.Get().ProxyCfg.MaxNameLength.GetAsInt() {
 		return merr.WrapErrParameterInvalidMsg("%s the length of a collection %s must be less than %s characters", invalidMsg, entityType,
 			paramtable.Get().ProxyCfg.MaxNameLength.GetValue())
@@ -244,7 +244,7 @@ func validateDimension(field *schemapb.FieldSchema) error {
 			exist = true
 			tmp, err := strconv.ParseInt(param.Value, 10, 64)
 			if err != nil {
-				return err
+				return merr.WrapErrParameterInvalidErr(err, "the value for %s of field %s must be an integer", param.Key, field.GetName())
 			}
 			dim = tmp
 			break
@@ -292,7 +292,7 @@ func validateMaxLengthPerRow(collectionName string, fieldName string, dataType s
 
 		maxLengthPerRow, err := strconv.ParseInt(param.Value, 10, 64)
 		if err != nil {
-			return err
+			return merr.WrapErrParameterInvalidErr(err, "the value for %s of field %s must be an integer", common.MaxLengthKey, fieldName)
 		}
 
 		var defaultMaxLength int64
@@ -327,7 +327,7 @@ func getMaxCapacityPerRow(collectionName string, fieldName string, typeParams []
 		var err error
 		maxCapacityPerRow, err = strconv.ParseInt(param.Value, 10, 64)
 		if err != nil {
-			return 0, merr.WrapErrParameterInvalidMsg("the value for %s of field %s must be an integer", common.MaxCapacityKey, fieldName)
+			return 0, merr.WrapErrParameterInvalidErr(err, "the value for %s of field %s must be an integer", common.MaxCapacityKey, fieldName)
 		}
 		if maxCapacityPerRow > maxArrayCapacity || maxCapacityPerRow <= 0 {
 			return 0, merr.WrapErrParameterInvalidMsg("the maximum capacity specified for a Array should be in (0, %d]", maxArrayCapacity)
@@ -353,10 +353,6 @@ func validateNestedArrayTypeParams(collectionName string, fieldName string, type
 	if typeSchema == nil {
 		return 0, merr.WrapErrParameterMissingMsg("type_schema should be specified for nested array field %s", fieldName)
 	}
-	if typeSchema.GetNullable() {
-		return 0, merr.WrapErrParameterInvalidMsg("nullable nested array elements are not supported for field %s", fieldName)
-	}
-
 	switch kind := typeSchema.GetKind().(type) {
 	case *schemapb.TypeSchema_ArrayElement:
 		if kind.ArrayElement == nil {
@@ -443,18 +439,36 @@ func validateArrayFieldSchema(collectionName string, field *schemapb.FieldSchema
 	return nil
 }
 
-func validateElementNullable(field *schemapb.FieldSchema) error {
+// validateNativeListArrayGrowingSourceFlush rejects element-nullable and nested
+// Array fields while growing-source flush is enabled: that flush path does not
+// write their storage formats.
+func validateNativeListArrayGrowingSourceFlush(schema *schemapb.CollectionSchema, fields ...*schemapb.FieldSchema) error {
+	if !typeutil.AllowGrowingSourceFlush(schema,
+		paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool(),
+		paramtable.Get().CommonCfg.EnableGrowingSourceFlush.GetAsBool()) {
+		return nil
+	}
+	for _, field := range fields {
+		if typeutil.IsNativeListArrayField(field) {
+			return merr.WrapErrParameterInvalidMsg(
+				"element-nullable or nested Array field %s is not supported while growing-source flush is enabled (%s)",
+				field.GetName(), paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key)
+		}
+	}
+	return nil
+}
+
+func validateElementNullable(field *schemapb.FieldSchema, inStruct bool) error {
 	if !field.GetElementNullable() {
 		return nil
 	}
 	if field.GetDataType() != schemapb.DataType_Array && field.GetDataType() != schemapb.DataType_ArrayOfVector {
 		return merr.WrapErrParameterInvalidMsg("element_nullable is only valid for Array and ArrayOfVector fields, field name = %s", field.GetName())
 	}
-	if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
-		return merr.WrapErrParameterInvalidMsg("element_nullable is not supported for nested Array field %s", field.GetName())
+	if !inStruct {
+		return merr.WrapErrParameterInvalidMsg("element_nullable is only supported for Array and ArrayOfVector sub-fields of a struct array field, field name = %s", field.GetName())
 	}
-	// TODO: temporarily disable element nullable until all parts ready
-	return merr.WrapErrParameterInvalidMsg("element_nullable is not supported yet, field name = %s", field.GetName())
+	return nil
 }
 
 func validateFieldType(schema *schemapb.CollectionSchema) error {
@@ -555,7 +569,7 @@ func ValidateField(field *schemapb.FieldSchema, schema *schemapb.CollectionSchem
 	if err := validateFieldName(field.Name); err != nil {
 		return err
 	}
-	if err := validateElementNullable(field); err != nil {
+	if err := validateElementNullable(field, false); err != nil {
 		return err
 	}
 	if err := typeutil.ValidateFieldTypeSchema(field); err != nil {
@@ -616,18 +630,25 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 	if err := validateFieldName(field.Name); err != nil {
 		return err
 	}
-	if err := validateElementNullable(field); err != nil {
+	if err := validateElementNullable(field, true); err != nil {
 		return err
 	}
 	if err := typeutil.ValidateFieldTypeSchema(field); err != nil {
 		return err
 	}
 	if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
-		leafSchema := field.GetTypeSchema().GetArrayElement().GetArrayElement()
-		if _, ok := leafSchema.GetKind().(*schemapb.TypeSchema_LeafType); !ok {
+		_, _, depth, err := typeutil.GetArrayLeaf(field.GetTypeSchema())
+		if err != nil {
+			return err
+		}
+		if depth != 2 {
 			return merr.WrapErrParameterInvalidMsg(
 				"nested array field %s supports exactly one nested array level",
 				field.GetName())
+		}
+		if field.GetTypeSchema().GetArrayElement().GetNullable() != field.GetElementNullable() {
+			return merr.WrapErrParameterInvalidMsg("nested array field %s type_schema inner nullable=%t must match element_nullable=%t",
+				field.GetName(), field.GetTypeSchema().GetArrayElement().GetNullable(), field.GetElementNullable())
 		}
 	}
 
@@ -730,6 +751,11 @@ func validateStructArrayField(structArrayField *schemapb.StructArrayFieldSchema,
 				return merr.WrapErrParameterInvalidMsg("sub-field in non-nullable struct cannot be nullable individually, set nullable on the struct instead: structName=%s, subFieldName=%s",
 					structArrayField.Name, subField.Name)
 			}
+		}
+	}
+	for _, subField := range structArrayField.Fields {
+		if typeutil.IsNestedArrayTypeSchema(subField.GetTypeSchema()) {
+			subField.TypeSchema.Nullable = subField.GetNullable()
 		}
 	}
 
@@ -872,7 +898,7 @@ func validateLoadFieldsList(schema *schemapb.CollectionSchema) error {
 	for _, field := range schema.Fields {
 		shouldLoad, err := common.ShouldFieldBeLoaded(field.GetTypeParams())
 		if err != nil {
-			return err
+			return merr.WrapErrParameterInvalidErr(err, "the value for %s of field %s must be a boolean", common.FieldSkipLoadKey, field.GetName())
 		}
 		// shoud load field, skip other check
 		if shouldLoad {
@@ -899,7 +925,7 @@ func validateLoadFieldsList(schema *schemapb.CollectionSchema) error {
 		for _, field := range structArrayField.Fields {
 			shouldLoad, err := common.ShouldFieldBeLoaded(field.GetTypeParams())
 			if err != nil {
-				return err
+				return merr.WrapErrParameterInvalidErr(err, "the value for %s of field %s must be a boolean", common.FieldSkipLoadKey, field.GetName())
 			}
 			if shouldLoad {
 				if typeutil.IsVectorType(field.ElementType) {

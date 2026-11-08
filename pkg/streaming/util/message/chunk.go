@@ -145,7 +145,7 @@ type chunkRun struct {
 func (a *ChunkAssembler) Push(msg ImmutableMessage) (ImmutableMessage, bool, error) {
 	idx, total, tt, chunked, err := parseChunkMetadata(msg)
 	if !chunked {
-		if msg.MessageType() == MessageTypeTimeTick {
+		if msg.MessageType() == MessageTypeTimeTick || msg.MessageType() == MessageTypeMVCCBarrier {
 			a.discardRunsAtOrBefore(msg.TimeTick())
 		}
 		return nil, false, nil

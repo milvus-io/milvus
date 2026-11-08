@@ -66,7 +66,8 @@ func selectionTestFrame(t *testing.T, pool memory.Allocator) *DataFrame {
 	require.NoError(t, b.addColumn("keep", selectionTestColumn(t, pool, arrow.FixedWidthTypes.Boolean, "[true,null,false,true]", "[]", "[false,true]")))
 	require.NoError(t, b.addColumn("detail", selectionTestColumn(t, pool, arrow.BinaryTypes.String,
 		`["a",null,"","d"]`, `[]`, `["e","f"]`)))
-	b.SetFieldType("$id", schemapb.DataType_Int64).SetFieldID("$id", 100)
+	require.NoError(t, b.SetFieldType("$id", schemapb.DataType_Int64))
+	b.SetFieldID("$id", 100)
 	b.SetFieldNullable("keep", true).SetFieldNullable("detail", true)
 	df := b.Build()
 	fields := df.schema.Fields()
@@ -153,7 +154,9 @@ func TestSelectionSequentialOperators(t *testing.T) {
 			require.True(t, schema.Metadata().Equal(out.schema.Metadata()))
 			require.True(t, schema.Field(3).Equal(out.schema.Field(out.nameIndex["detail"])))
 			require.Equal(t, "test", out.metadata["query"])
-			require.Equal(t, int64(100), out.fieldIDs["$id"])
+			id, ok := out.FieldID("$id")
+			require.True(t, ok)
+			require.Equal(t, int64(100), id)
 			require.False(t, out.HasColumn("$row_id"))
 			out.Release()
 		})
@@ -354,8 +357,10 @@ func TestSelectionReplacementMetadataAndEmptySelection(t *testing.T) {
 	require.NoError(t, err)
 	r.Release()
 	require.Equal(t, input.ColumnNames(), output.ColumnNames())
-	require.Equal(t, schemapb.DataType_VarChar, output.fieldTypes["$id"])
-	_, hasID := output.fieldIDs["$id"]
+	typ, ok := output.FieldType("$id")
+	require.True(t, ok)
+	require.Equal(t, schemapb.DataType_VarChar, typ)
+	_, hasID := output.FieldID("$id")
 	require.False(t, hasID)
 	require.True(t, metadata.Equal(output.schema.Field(0).Metadata))
 	empty := &OperatorResult{Selection: &RowSelection{Chunks: []ChunkSelection{RowIndices(nil), RowIndices(nil), RowIndices(nil)}}}
@@ -519,7 +524,6 @@ func TestSelectionUnsupportedTypesAndCleanup(t *testing.T) {
 		dt     arrow.DataType
 		values string
 	}{
-		{"binary", arrow.BinaryTypes.Binary, `["YQ==","Yg=="]`},
 		{"list", arrow.ListOf(arrow.PrimitiveTypes.Int64), `[[1],[2]]`},
 		{"struct", arrow.StructOf(arrow.Field{Name: "value", Type: arrow.BinaryTypes.String}), `[{"value":"a"},{"value":"b"}]`},
 	} {

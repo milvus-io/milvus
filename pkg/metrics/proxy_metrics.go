@@ -113,16 +113,28 @@ var (
 			Buckets:   buckets,
 		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName, ResourceGroupLabelName})
 
-	// ProxyCollectionSQLatency record the latency of search successfully, per collection
-	// Deprecated, ProxySQLatency instead of it
-	ProxyCollectionSQLatency = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
+	// ProxyResourceGroupFunctionCall counts the requests scoped to a resource
+	// group, by the group, with the labels ProxyFunctionCall carries. A family of
+	// its own for the reason ProxyResourceGroupSQLatency is one; only requests a
+	// hook scoped to a resource group are counted.
+	ProxyResourceGroupFunctionCall = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
-			Name:      "collection_sq_latency",
-			Help:      "latency of search or query successfully, per collection",
-			Buckets:   buckets,
-		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
+			Name:      "resource_group_req_count",
+			Help:      "count of operation executed, per resource group",
+		}, []string{nodeIDLabelName, functionLabelName, statusLabelName, causeLabelName, databaseLabelName, collectionName, ResourceGroupLabelName})
+
+	// ProxyResourceGroupSearchVectors counts the vectors searched by requests
+	// scoped to a resource group, by the group: ProxySearchVectors per resource
+	// group, for the same reason as the two families above.
+	ProxyResourceGroupSearchVectors = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "resource_group_search_vectors_count",
+			Help:      "counter of vectors successfully searched, per resource group",
+		}, []string{nodeIDLabelName, databaseLabelName, collectionName, ResourceGroupLabelName})
 
 	// ProxyMutationLatency record the latency that mutate successfully.
 	ProxyMutationLatency = prometheus.NewHistogramVec(
@@ -132,17 +144,6 @@ var (
 			Name:      "mutation_latency",
 			Help:      "latency of insert or delete successfully",
 			Buckets:   buckets, // unit: ms
-		}, []string{nodeIDLabelName, msgTypeLabelName, databaseLabelName, collectionName})
-
-	// ProxyCollectionMutationLatency record the latency that mutate successfully, per collection
-	// Deprecated, ProxyMutationLatency instead of it
-	ProxyCollectionMutationLatency = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.ProxyRole,
-			Name:      "collection_mutation_latency",
-			Help:      "latency of insert or delete successfully, per collection",
-			Buckets:   buckets,
 		}, []string{nodeIDLabelName, msgTypeLabelName, databaseLabelName, collectionName})
 
 	// ProxyWaitForSearchResultLatency record the time that the proxy waits for the search result.
@@ -446,6 +447,38 @@ var (
 			Help:      "counter of retry search",
 		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
 
+	// ProxyMaterializeFallbackTotal counts requests that went back to Query
+	// because a node could not serve Materialize.
+	ProxyMaterializeFallbackTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "materialize_fallback_total",
+			Help:      "counter of Materialize requests rerun with Query",
+		}, []string{nodeIDLabelName, "reason"})
+
+	// ProxyMaterializeShardTotal counts shard replies the proxy reduced from
+	// Materialize. Replies a whole-request fallback discarded are not counted.
+	ProxyMaterializeShardTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "materialize_shard_total",
+			Help:      "counter of shard results reduced from Materialize replies",
+		}, []string{nodeIDLabelName})
+
+	// ProxyQueryExecuteLatency is the latency of a query task's fan-out by the
+	// path that served it, so that Materialize and Query can be compared.
+	ProxyQueryExecuteLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "query_execute_latency",
+			Help: "latency of a query task from its fan-out to the delegators to its reduced result in ms, " +
+				"by the path that served it; compare paths with query_type=\"requery\", path=\"query\" covers every query",
+			Buckets: subMsBuckets, // unit: ms
+		}, []string{nodeIDLabelName, queryTypeLabelName, "path"})
+
 	// ProxyRetrySearchResultInsufficientCount records the retry search without reducing topk that still not meet result limit
 	// there are more likely some non-index-related reasons like we do not have enough entities for very big k, duplicate pks, etc
 	ProxyRetrySearchResultInsufficientCount = prometheus.NewCounterVec(
@@ -464,6 +497,18 @@ var (
 			Name:      "recall_search_cnt",
 			Help:      "counter of recall search",
 		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
+
+	// ProxyRequestCanceledTotal counts requests actually canceled by an
+	// operator through CancelRequests, by request type. This is not the number
+	// of CancelRequests calls: one call may name several ids, or none that
+	// this proxy holds.
+	ProxyRequestCanceledTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "request_canceled_total",
+			Help:      "count of requests canceled by an operator",
+		}, []string{nodeIDLabelName, queryTypeLabelName})
 
 	// ProxySearchSparseNumNonZeros records the estimated number of non-zeros in each sparse search task
 	ProxySearchSparseNumNonZeros = prometheus.NewHistogramVec(
@@ -531,9 +576,9 @@ func RegisterProxy(registry *prometheus.Registry) {
 
 	registry.MustRegister(ProxySQLatency)
 	registry.MustRegister(ProxyResourceGroupSQLatency)
-	registry.MustRegister(ProxyCollectionSQLatency)
+	registry.MustRegister(ProxyResourceGroupFunctionCall)
+	registry.MustRegister(ProxyResourceGroupSearchVectors)
 	registry.MustRegister(ProxyMutationLatency)
-	registry.MustRegister(ProxyCollectionMutationLatency)
 
 	registry.MustRegister(ProxyWaitForSearchResultLatency)
 	registry.MustRegister(ProxyReduceResultLatency)
@@ -579,8 +624,12 @@ func RegisterProxy(registry *prometheus.Registry) {
 
 	registry.MustRegister(MaxInsertRate)
 	registry.MustRegister(ProxyRetrySearchCount)
+	registry.MustRegister(ProxyMaterializeFallbackTotal)
+	registry.MustRegister(ProxyMaterializeShardTotal)
+	registry.MustRegister(ProxyQueryExecuteLatency)
 	registry.MustRegister(ProxyRetrySearchResultInsufficientCount)
 	registry.MustRegister(ProxyRecallSearchCount)
+	registry.MustRegister(ProxyRequestCanceledTotal)
 
 	registry.MustRegister(ProxySearchSparseNumNonZeros)
 	registry.MustRegister(ProxyQueueTaskNum)
@@ -620,9 +669,7 @@ func proxyCollectionScopedMetrics() []partialMatchDeleter {
 		ProxyPathReplaceParentOperations,
 		ProxyPathReplaceMergeLatency,
 		ProxySQLatency,
-		ProxyCollectionSQLatency,
 		ProxyMutationLatency,
-		ProxyCollectionMutationLatency,
 		ProxyFunctionCall,
 		ProxyFunctionlatency,
 		ProxyReceivedNQ,
@@ -634,6 +681,8 @@ func proxyCollectionScopedMetrics() []partialMatchDeleter {
 		ProxyScannedRemoteMB,
 		ProxyScannedTotalMB,
 		ProxyResourceGroupSQLatency,
+		ProxyResourceGroupFunctionCall,
+		ProxyResourceGroupSearchVectors,
 	}
 }
 

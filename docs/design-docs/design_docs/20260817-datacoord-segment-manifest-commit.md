@@ -364,8 +364,8 @@ costs a retry rather than an unreclaimable leak.
 
 The manifest becomes the only durable record of a completed StorageV3 index
 artifact, but `SegmentIndex` remains the durable build-task record until that
-point. `dataCoord.index.writeSegmentIndexToManifest` (default off) controls
-only the terminal artifact placement:
+point. `dataCoord.index.writeSegmentIndexToManifest` (default off) selects
+terminal artifact placement when the build task is created:
 
 - Off: every state, including Finished, persists to etcd and no manifest index
   entry is created.
@@ -376,10 +376,10 @@ only the terminal artifact placement:
 
 This makes publication the sole retirement point instead of spreading an etcd
 write gate through `CreateSegmentIndex`, `AlterSegmentIndexes`, and every state
-transition. It also handles an in-flight build across false-to-true activation:
-the row created before activation is deleted atomically when its artifact is
-published, so restart cannot resurrect an old InProgress state over a Finished
-manifest entry.
+transition. A task's persisted path version pins this choice across activation
+and deactivation: version 0/1 finishes in etcd, while version 2 publishes to the
+manifest and atomically deletes its etcd task row. Restart therefore cannot
+resurrect an old InProgress state over a Finished manifest entry.
 
 Reload follows durable placement rather than the switch's current value. It
 first loads etcd task records, then reads each retained healthy or Dropped,
@@ -398,10 +398,11 @@ manifests that still exist fail startup. Startup logs scanned, read, and recover
 object-storage fan-out is bounded by
 `dataCoord.index.segmentIndexManifestLoadConcurrency`.
 
-The switch may be changed in either direction. Turning it off sends new
-completions to etcd but does not move or hide records already resident in
-manifests; their marker keeps reload and GC on those manifests. Turning
-it on again resumes manifest publication. No inverse feature switch and no
+The switch may be changed in either direction. Turning it off selects etcd
+for newly created builds but does not redirect in-flight tasks or hide records
+already resident in manifests; their marker keeps reload and GC on those
+manifests. Turning it on again selects manifest publication for newly created
+builds. No inverse feature switch and no
 eager manifest-to-etcd backfill are required, so mixed historical placement is
 supported without dual-writing an individual result.
 
@@ -453,7 +454,7 @@ off-by-default rather than removed:
 - A `SegmentIndex` is also the build task record. Because task-only states have
   no manifest representation, they continue to persist in etcd. A recovered
   manifest record is `Finished` by construction.
-- Mode changes affect new terminal results only. Historical etcd and manifest
+- Mode changes affect newly created tasks only. Historical etcd and manifest
   records may coexist; the per-segment marker makes both recoverable.
 
 A version-skew guard protects the one cross-binary interaction: with the

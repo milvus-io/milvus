@@ -20,8 +20,10 @@
 #include <cmath>
 #include <exception>
 #include <filesystem>
+#include <functional>
 #include <future>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 #include <unistd.h>
@@ -32,6 +34,7 @@
 #include "common/FieldMeta.h"
 #include "common/Geometry.h"
 #include "common/OpContext.h"
+#include "common/StructElementOffsets.h"
 #include "gtest/gtest.h"
 #include "mmap/ChunkedColumnFilter.h"
 #include "mmap/SparseVortexFileSystem.h"
@@ -147,7 +150,10 @@ WriteVortexFile(const std::string& path,
                 int64_t begin = 0) {
     auto fs = std::make_shared<arrow::fs::LocalFileSystem>();
     auto writer_result = milvus_storage::vortex::VortexFileWriter::Open(
-        fs, schema, path, properties);
+        fs,
+        schema,
+        path,
+        std::make_shared<const milvus_storage::api::Properties>(properties));
     EXPECT_TRUE(writer_result.ok()) << writer_result.status().ToString();
     if (!writer_result.ok()) {
         return {};
@@ -179,7 +185,10 @@ WriteVortexBatches(
     const std::vector<std::shared_ptr<arrow::RecordBatch>>& batches) {
     auto fs = std::make_shared<arrow::fs::LocalFileSystem>();
     auto writer_result = milvus_storage::vortex::VortexFileWriter::Open(
-        fs, schema, path, properties);
+        fs,
+        schema,
+        path,
+        std::make_shared<const milvus_storage::api::Properties>(properties));
     EXPECT_TRUE(writer_result.ok()) << writer_result.status().ToString();
     if (!writer_result.ok()) {
         return {};
@@ -632,7 +641,10 @@ WriteNullableVortexFile(const std::string& path,
                         int64_t begin = 0) {
     auto fs = std::make_shared<arrow::fs::LocalFileSystem>();
     auto writer_result = milvus_storage::vortex::VortexFileWriter::Open(
-        fs, schema, path, properties);
+        fs,
+        schema,
+        path,
+        std::make_shared<const milvus_storage::api::Properties>(properties));
     EXPECT_TRUE(writer_result.ok()) << writer_result.status().ToString();
     if (!writer_result.ok()) {
         return {};
@@ -937,7 +949,7 @@ CheckDataScan(VortexColumn& column, DataType type) {
 }
 
 void
-CheckOrderedTake(VortexColumn& column, DataType type) {
+CheckOrderedTake(VortexColumn& column, DataType type, TakePinPolicy policy) {
     std::vector<int64_t> offsets{15, 1, 8, 1, 0};
     // Exercise packed validity and skip masks across multiple bitmap words.
     while (offsets.size() < 129) {
@@ -947,7 +959,9 @@ CheckOrderedTake(VortexColumn& column, DataType type) {
                             ChunkedColumnInterface::TakeOptions{
                                 ChunkedColumnInterface::OffsetView::From(
                                     offsets.data(), offsets.size()),
-                                TargetTypeForDataType(type)});
+                                TargetTypeForDataType(type),
+                                nullptr,
+                                policy});
     ASSERT_NE(take, nullptr);
     ASSERT_EQ(take->Size(), static_cast<int64_t>(offsets.size()));
     EXPECT_TRUE(take->IsOwned());
@@ -1053,35 +1067,44 @@ CheckOrderedTake(VortexColumn& column, DataType type) {
 
     if (type == DataType::JSON) {
         size_t visited_rows = 0;
-        column.BulkRawJsonAt(
-            nullptr,
-            [&](Json value, size_t row, bool valid) {
+        auto json_scan =
+            column.Scan(nullptr,
+                        ChunkedColumnInterface::ScanOptions::ForData(
+                            0, ChunkedColumnInterface::TargetType::Json));
+        ASSERT_NE(json_scan, nullptr);
+        ChunkedColumnInterface::ScanBatch batch;
+        while (json_scan->Next(
+            3, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch)) {
+            const auto* values = batch.values.data_as<Json>();
+            for (int64_t i = 0; i < batch.size; ++i) {
+                const auto row = batch.row_id_start + i;
                 EXPECT_EQ(row, visited_rows++);
+                const auto valid = !batch.validity || batch.validity[i];
                 EXPECT_EQ(valid, ExpectedValid(row));
                 if (valid) {
-                    EXPECT_EQ(std::string_view(value),
+                    EXPECT_EQ(std::string_view(values[i]),
                               ExpectedString(type, row));
-                    EXPECT_NO_THROW((void)value.doc());
+                    EXPECT_NO_THROW((void)values[i].doc());
                 }
-            },
-            nullptr,
-            kNullableRows);
+            }
+        }
         EXPECT_EQ(visited_rows, kNullableRows);
-        std::vector<Json> bulk_values(offsets.size());
-        std::vector<bool> bulk_valid(offsets.size());
-        column.BulkRawJsonAt(
-            nullptr,
-            [&](Json value, size_t index, bool valid) {
-                bulk_valid[index] = valid;
-                if (valid) {
-                    bulk_values[index] = std::move(value);
-                }
-            },
-            offsets.data(),
-            offsets.size());
+        auto json_take =
+            column.Take(nullptr,
+                        ChunkedColumnInterface::TakeOptions{
+                            ChunkedColumnInterface::OffsetView::From(
+                                offsets.data(), offsets.size()),
+                            ChunkedColumnInterface::TargetType::Json,
+                            nullptr,
+                            policy});
+        ASSERT_NE(json_take, nullptr);
+        const auto owned_json = json_take->GetOwn();
+        json_take.reset();
+        const auto* bulk_values = owned_json.values.data_as<Json>();
         for (size_t i = 0; i < offsets.size(); ++i) {
-            EXPECT_EQ(bulk_valid[i], ExpectedValid(offsets[i]));
-            if (bulk_valid[i]) {
+            const auto valid = !owned_json.validity || owned_json.validity[i];
+            EXPECT_EQ(valid, ExpectedValid(offsets[i]));
+            if (valid) {
                 EXPECT_NO_THROW((void)bulk_values[i].doc());
                 EXPECT_EQ(std::string_view(bulk_values[i]),
                           ExpectedString(type, offsets[i]));
@@ -1112,7 +1135,8 @@ CheckOrderedTake(VortexColumn& column, DataType type) {
                             ChunkedColumnInterface::OffsetView::From(
                                 offsets.data(), offsets.size()),
                             TargetTypeForDataType(type),
-                            std::move(skip_file)});
+                            std::move(skip_file),
+                            policy});
         ASSERT_NE(filtered, nullptr);
         const auto filtered_owned = filtered->GetOwn();
         ASSERT_TRUE(filtered_owned.data_skipped);
@@ -1124,6 +1148,131 @@ CheckOrderedTake(VortexColumn& column, DataType type) {
             EXPECT_TRUE(item.data_skipped);
             EXPECT_FALSE(item.value.has_value());
         }
+    }
+}
+
+template <typename T>
+void
+CheckCandidateTake(VortexColumn& column,
+                   TakePinPolicy policy,
+                   std::vector<int64_t> offsets) {
+    auto reference =
+        column.Take(nullptr,
+                    {OffsetView::From(offsets.data(), offsets.size()),
+                     TargetTypeOf<T>(),
+                     nullptr,
+                     policy});
+    ASSERT_NE(reference, nullptr);
+    const auto expected = reference->GetOwn();
+    reference.reset();
+    auto check_value = [](const T& value, const T& reference) {
+        if constexpr (std::is_same_v<T, Json>) {
+            EXPECT_EQ(value.data(), reference.data());
+            EXPECT_NO_THROW((void)value.doc());
+        } else if constexpr (std::is_same_v<T, ArrayView>) {
+            ASSERT_EQ(value.length(), reference.length());
+            for (int i = 0; i < value.length(); ++i) {
+                EXPECT_EQ(value.template get_data_unchecked<int64_t>(i),
+                          reference.template get_data_unchecked<int64_t>(i));
+            }
+        } else {
+            EXPECT_EQ(value, reference);
+        }
+    };
+
+    TargetBitmap mask(offsets.size(), false);
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        if (i % 3 == 0) {
+            mask.set(i);
+        } else {
+            // Excluded offsets must not reach planning or decoding.
+            offsets[i] = -1;
+        }
+    }
+    for (bool skip : {false, true}) {
+        auto filter =
+            skip ? std::make_shared<const detail::ColumnFilter>(
+                       detail::ColumnFilter::MetricsSource::PreloadedStatistics,
+                       [](int64_t) { return true; })
+                 : nullptr;
+        auto take =
+            column.Take(nullptr,
+                        {OffsetView::From(offsets.data(), offsets.size()),
+                         TargetTypeOf<T>(),
+                         std::move(filter),
+                         policy,
+                         &mask});
+        ASSERT_NE(take, nullptr);
+        EXPECT_FALSE(take->IsOwned());
+        EXPECT_EQ(take->Size(), offsets.size());
+        EXPECT_ANY_THROW((void)take->template Get<T>(1));
+        EXPECT_ANY_THROW((void)take->IsValid(1));
+        for (size_t i = 0; i < offsets.size(); i += 3) {
+            const auto valid = !expected.validity || expected.validity[i];
+            EXPECT_EQ(take->IsValid(i), valid);
+            const auto item = take->template Get<T>(i);
+            EXPECT_EQ(item.is_valid, valid);
+            EXPECT_EQ(item.data_skipped, skip);
+            if (valid && !skip) {
+                ASSERT_TRUE(item.value);
+                check_value(*item.value,
+                            expected.values.template data_as<T>()[i]);
+            } else {
+                EXPECT_FALSE(item.value);
+            }
+        }
+        EXPECT_FALSE(take->IsOwned());
+        const auto owned = take->GetOwn();
+        EXPECT_TRUE(take->IsOwned());
+        EXPECT_EQ(take->GetOwn().values.data, owned.values.data);
+        EXPECT_EQ(take->GetOwn().owner, owned.owner);
+        // Get keeps original logical indexing even after dense materialization.
+        const auto after = take->template Get<T>(6);
+        EXPECT_EQ(after.is_valid, !expected.validity || expected.validity[6]);
+        if (after.value) {
+            check_value(*after.value, expected.values.template data_as<T>()[6]);
+        }
+        if constexpr (std::is_same_v<T, Json>) {
+            if (after.value) {
+                const auto& value = owned.values.template data_as<Json>()[6];
+                const Json copy(value);
+                EXPECT_NE(copy.c_str(), value.c_str());
+                EXPECT_EQ(copy.data(), value.data());
+            }
+        }
+        take.reset();
+        column.ManualEvictCache();
+        ASSERT_EQ(owned.size, offsets.size());
+        ASSERT_TRUE(owned.owner);
+        ASSERT_TRUE(owned.data_skipped);
+        for (size_t i = 0; i < offsets.size(); ++i) {
+            EXPECT_EQ(owned.data_skipped[i], skip || i % 3 != 0);
+            if (i % 3 != 0) {
+                continue;
+            }
+            const auto valid = !expected.validity || expected.validity[i];
+            EXPECT_EQ(!owned.validity || owned.validity[i], valid);
+            if (valid && !skip) {
+                check_value(owned.values.template data_as<T>()[i],
+                            expected.values.template data_as<T>()[i]);
+            }
+        }
+    }
+
+    mask = TargetBitmap(offsets.size(), false);
+    auto empty = column.Take(nullptr,
+                             {OffsetView::From(offsets.data(), offsets.size()),
+                              TargetTypeOf<T>(),
+                              nullptr,
+                              policy,
+                              &mask});
+    ASSERT_NE(empty, nullptr);
+    EXPECT_FALSE(empty->IsOwned());
+    const auto owned = empty->GetOwn();
+    EXPECT_EQ(owned.size, offsets.size());
+    ASSERT_TRUE(owned.data_skipped);
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        EXPECT_TRUE(owned.data_skipped[i]);
     }
 }
 
@@ -1163,10 +1312,6 @@ TEST(VortexColumnTest, ScanAndTake) {
     EXPECT_EQ(int_column.DataByteSize(), file_info.file_size);
 
     std::vector<int64_t> offsets{7, 1, 7, 15};
-    std::vector<int32_t> values(offsets.size());
-    int_column.BulkPrimitiveValueAt(
-        nullptr, values.data(), offsets.data(), offsets.size(), false);
-    EXPECT_EQ(values, (std::vector<int32_t>{70, 10, 70, 150}));
 
     column_group->ManualEvictCache();
     EXPECT_FALSE(int_column.CellsLoaded(offsets.data(), offsets.size()));
@@ -1313,10 +1458,13 @@ TEST(VortexColumnTest, MultiFileTakeAndScan) {
     EXPECT_FALSE(int_column.CellsLoaded(first_file_offset, 1));
     EXPECT_FALSE(int_column.CellsLoaded(second_file_offset, 1));
 
-    int32_t first_value = 0;
-    int_column.BulkPrimitiveValueAt(
-        nullptr, &first_value, first_file_offset, 1, false);
-    EXPECT_EQ(first_value, 0);
+    auto first_take = int_column.Take(
+        nullptr,
+        ChunkedColumnInterface::TakeOptions{
+            ChunkedColumnInterface::OffsetView::From(first_file_offset, 1),
+            ChunkedColumnInterface::TargetType::Int32});
+    ASSERT_NE(first_take, nullptr);
+    EXPECT_EQ(*first_take->Get<int32_t>(0).value, 0);
     EXPECT_TRUE(int_column.CellsLoaded(first_file_offset, 1));
     EXPECT_FALSE(int_column.CellsLoaded(second_file_offset, 1));
     EXPECT_FALSE(int_column.CellsLoaded(cross_file_offsets, 2));
@@ -1325,10 +1473,6 @@ TEST(VortexColumnTest, MultiFileTakeAndScan) {
     EXPECT_FALSE(int_column.CellsLoaded(first_file_offset, 1));
 
     std::vector<int64_t> offsets{0, 15, 16, 17, 31, 16};
-    std::vector<int32_t> values(offsets.size());
-    int_column.BulkPrimitiveValueAt(
-        nullptr, values.data(), offsets.data(), offsets.size(), false);
-    EXPECT_EQ(values, (std::vector<int32_t>{0, 150, 160, 170, 310, 160}));
 
     auto take_result =
         int_column.Take(nullptr,
@@ -1347,20 +1491,27 @@ TEST(VortexColumnTest, MultiFileTakeAndScan) {
     auto skip_second_file = std::make_shared<const detail::ColumnFilter>(
         detail::ColumnFilter::MetricsSource::PreloadedStatistics,
         [](int64_t cell_id) { return cell_id == 1; });
-    auto filtered_take =
-        int_column.Take(nullptr,
-                        ChunkedColumnInterface::TakeOptions{
-                            ChunkedColumnInterface::OffsetView::From(
-                                offsets.data(), offsets.size()),
-                            ChunkedColumnInterface::TargetType::Int32,
-                            skip_second_file});
-    ASSERT_NE(filtered_take, nullptr);
-    for (int64_t i = 0; i < filtered_take->Size(); ++i) {
-        const auto item = filtered_take->Get<int32_t>(i);
-        EXPECT_TRUE(item.is_valid);
-        const auto expected_skip = offsets[i] >= 16;
-        EXPECT_EQ(item.data_skipped, expected_skip);
-        EXPECT_EQ(item.value.has_value(), !expected_skip);
+    for (const auto policy :
+         {TakePinPolicy::CurrentCell, TakePinPolicy::Batch}) {
+        int_column.ManualEvictCache();
+        auto filtered_take =
+            int_column.Take(nullptr,
+                            ChunkedColumnInterface::TakeOptions{
+                                ChunkedColumnInterface::OffsetView::From(
+                                    offsets.data(), offsets.size()),
+                                ChunkedColumnInterface::TargetType::Int32,
+                                skip_second_file,
+                                policy});
+        ASSERT_NE(filtered_take, nullptr);
+        for (int64_t i = 0; i < filtered_take->Size(); ++i) {
+            const auto item = filtered_take->Get<int32_t>(i);
+            EXPECT_TRUE(item.is_valid);
+            const auto expected_skip = offsets[i] >= 16;
+            EXPECT_EQ(item.data_skipped, expected_skip);
+            EXPECT_EQ(item.value.has_value(), !expected_skip);
+        }
+        EXPECT_TRUE(int_column.CellsLoaded(first_file_offset, 1));
+        EXPECT_FALSE(int_column.CellsLoaded(second_file_offset, 1));
     }
 
     auto scan_values = CollectIntScanValues(int_column, 18, 4);
@@ -1453,6 +1604,120 @@ TEST(VortexColumnTest, RejectsNonContiguousFileRanges) {
         MakeColumnGroup(
             std::move(files), properties, {std::to_string(kIntFieldId)}),
         std::exception);
+}
+
+TEST(VortexColumnTest, TakePinPoliciesControlSourceLifetime) {
+    auto properties =
+        std::make_shared<milvus_storage::api::Properties>(MakeProperties());
+    auto dir =
+        std::filesystem::temp_directory_path() /
+        ("milvus_vortex_take_pin_policy_" + std::to_string(::getpid()) + "_" +
+         std::to_string(reinterpret_cast<uintptr_t>(properties.get())));
+    std::filesystem::create_directories(dir);
+    const auto field_name = std::to_string(kStringFieldId);
+    auto schema =
+        arrow::schema({arrow::field(field_name, arrow::utf8(), true)});
+    std::vector<VortexColumn::FileInfo> files;
+    for (int64_t file_id = 0; file_id < 3; ++file_id) {
+        arrow::StringBuilder builder;
+        ASSERT_TRUE(
+            builder.Append(file_id == 0 ? "invalid WKT" : "POINT(1 2)").ok());
+        ASSERT_TRUE(builder.AppendNull().ok());
+        std::shared_ptr<arrow::Array> array;
+        ASSERT_TRUE(builder.Finish(&array).ok());
+        auto file = WriteVortexBatches(
+            (dir / ("cg" + std::to_string(file_id) + ".vx")).string(),
+            schema,
+            *properties,
+            {arrow::RecordBatch::Make(schema, 2, {std::move(array)})});
+        file.start_index += 2 * file_id;
+        file.end_index += 2 * file_id;
+        files.push_back(std::move(file));
+    }
+    auto group = MakeColumnGroup(files, properties, {field_name});
+    FieldMeta meta(FieldName("geometry"),
+                   FieldId(kStringFieldId),
+                   DataType::GEOMETRY,
+                   true,
+                   std::nullopt);
+    VortexColumn column(
+        FieldId(kStringFieldId), meta, field_name, properties, group);
+    const int64_t first[]{0};
+    const int64_t second[]{2};
+    const int64_t unrelated[]{4};
+    const int64_t offsets[]{2, 0, 3, 2, 1};
+    ScopedGeosResources geos("Take pin policy test");
+    const auto expected = Geometry(geos.ctx, "POINT(1 2)").to_wkb_string();
+    for (const auto policy :
+         {TakePinPolicy::CurrentCell, TakePinPolicy::Batch}) {
+        SCOPED_TRACE(static_cast<int>(policy));
+        group->ManualEvictCache();
+        // Failure after the first file is decoded reveals whether the second
+        // file was pre-pinned, without adding a test hook to the reader.
+        EXPECT_THROW(column.Take(nullptr,
+                                 {OffsetView::From(offsets, std::size(offsets)),
+                                  TargetType::StringView,
+                                  nullptr,
+                                  policy}),
+                     SegcoreError);
+        EXPECT_TRUE(column.CellsLoaded(first, 1));
+        EXPECT_EQ(column.CellsLoaded(second, 1),
+                  policy == TakePinPolicy::Batch);
+        EXPECT_FALSE(column.CellsLoaded(unrelated, 1));
+        group->ManualEvictCache();
+        EXPECT_FALSE(column.CellsLoaded(first, 1));
+        EXPECT_FALSE(column.CellsLoaded(second, 1));
+
+        auto skip_first = std::make_shared<const detail::ColumnFilter>(
+            detail::ColumnFilter::MetricsSource::PreloadedStatistics,
+            [](int64_t cell_id) { return cell_id == 0; });
+        auto take = column.Take(nullptr,
+                                {OffsetView::From(offsets, std::size(offsets)),
+                                 TargetType::StringView,
+                                 skip_first,
+                                 policy});
+        ASSERT_NE(take, nullptr);
+        EXPECT_TRUE(take->IsOwned());
+        EXPECT_TRUE(column.CellsLoaded(first, 1));
+        EXPECT_TRUE(column.CellsLoaded(second, 1));
+        EXPECT_FALSE(column.CellsLoaded(unrelated, 1));
+        group->ManualEvictCache();
+        EXPECT_FALSE(column.CellsLoaded(first, 1));
+        EXPECT_FALSE(column.CellsLoaded(second, 1));
+        EXPECT_TRUE(take->Get<std::string_view>(1).is_valid);
+        EXPECT_TRUE(take->Get<std::string_view>(1).data_skipped);
+        EXPECT_FALSE(take->IsValid(4));
+        EXPECT_TRUE(take->Get<std::string_view>(4).data_skipped);
+        EXPECT_FALSE(take->IsValid(2));
+        EXPECT_EQ(*take->Get<std::string_view>(0).value,
+                  *take->Get<std::string_view>(3).value);
+        auto owned = take->GetOwn();
+        take.reset();
+        EXPECT_FALSE(owned.validity[2]);
+        EXPECT_FALSE(owned.validity[4]);
+        EXPECT_EQ(owned.values.data_as<std::string_view>()[0], expected);
+        EXPECT_FALSE(column.CellsLoaded(second, 1));
+
+        const int64_t masked_offsets[]{2, -1, 3, 2};
+        TargetBitmap mask(std::size(masked_offsets), true);
+        mask.set(1, false);
+        auto selected = column.Take(
+            nullptr,
+            {OffsetView::From(masked_offsets, std::size(masked_offsets)),
+             TargetType::StringView,
+             nullptr,
+             policy,
+             &mask});
+        ASSERT_NE(selected, nullptr);
+        EXPECT_FALSE(column.CellsLoaded(first, 1));
+        EXPECT_TRUE(column.CellsLoaded(second, 1));
+        EXPECT_FALSE(column.CellsLoaded(unrelated, 1));
+        group->ManualEvictCache();
+        EXPECT_EQ(*selected->Get<std::string_view>(0).value, expected);
+        EXPECT_FALSE(selected->IsValid(2));
+        EXPECT_FALSE(column.CellsLoaded(second, 1));
+    }
+    std::filesystem::remove_all(dir);
 }
 
 TEST(VortexColumnTest, CursorOwnedScanReleasesOldFileBeforePinningNextFile) {
@@ -1660,10 +1925,12 @@ TEST(VortexColumnTest, RejectsNullRowsForNonNullableField) {
                         column_group);
 
     std::vector<int64_t> offsets{0, 1, 2, 3};
-    std::vector<int64_t> values(offsets.size());
     try {
-        column.BulkPrimitiveValueAt(
-            nullptr, values.data(), offsets.data(), offsets.size(), true);
+        column.Take(nullptr,
+                    ChunkedColumnInterface::TakeOptions{
+                        ChunkedColumnInterface::OffsetView::From(
+                            offsets.data(), offsets.size()),
+                        ChunkedColumnInterface::TargetType::Int64});
         FAIL() << "expected take to reject physical nulls";
     } catch (const SegcoreError& error) {
         EXPECT_EQ(error.get_error_code(), ErrorCode::DataFormatBroken);
@@ -1758,15 +2025,6 @@ TEST(VortexColumnTest, PreservesNormalizationForDataScan) {
         ChunkedColumnInterface::ScanReadMode::DataAndValidity,
         &timestamp_batch));
     const std::vector<int64_t> timestamp_offsets{1, 0};
-    std::vector<int64_t> taken_timestamps(timestamp_offsets.size());
-    timestamp_column.BulkPrimitiveValueAt(nullptr,
-                                          taken_timestamps.data(),
-                                          timestamp_offsets.data(),
-                                          timestamp_offsets.size(),
-                                          true);
-    EXPECT_EQ(taken_timestamps,
-              (std::vector<int64_t>{timestamp_millis[1] * 1000,
-                                    timestamp_millis[0] * 1000}));
     auto timestamp_take = timestamp_column.Take(
         nullptr,
         ChunkedColumnInterface::TakeOptions{
@@ -1857,145 +2115,566 @@ TEST(VortexColumnTest, PreservesNormalizationForDataScan) {
     std::filesystem::remove_all(dir);
 }
 
+namespace {
+
+std::filesystem::path
+MakeVortexTestDir(const std::string& name,
+                  const std::shared_ptr<milvus_storage::api::Properties>& p) {
+    auto dir = std::filesystem::temp_directory_path() /
+               (name + "_" + std::to_string(::getpid()) + "_" +
+                std::to_string(reinterpret_cast<uintptr_t>(p.get())));
+    std::filesystem::create_directories(dir);
+    return dir;
+}
+
+// One row of a single-level element-nullable Array<Int64>: nullopt is a NULL
+// row, a nullopt element is a NULL element.
+using Int64ListRow = std::optional<std::vector<std::optional<int64_t>>>;
+
+std::shared_ptr<arrow::Array>
+BuildInt64ListArray(const std::vector<Int64ListRow>& rows) {
+    auto values = std::make_shared<arrow::Int64Builder>();
+    arrow::ListBuilder builder(arrow::default_memory_pool(), values);
+    for (const auto& row : rows) {
+        if (!row.has_value()) {
+            EXPECT_TRUE(builder.AppendNull().ok());
+            continue;
+        }
+        EXPECT_TRUE(builder.Append().ok());
+        for (const auto& value : *row) {
+            if (value.has_value()) {
+                EXPECT_TRUE(values->Append(*value).ok());
+            } else {
+                EXPECT_TRUE(values->AppendNull().ok());
+            }
+        }
+    }
+    std::shared_ptr<arrow::Array> array;
+    EXPECT_TRUE(builder.Finish(&array).ok());
+    return array;
+}
+
+// One row of a nested Array<Array<Int64>> with nullable inner arrays and
+// leaves.
+using Int64NestedRow = std::optional<
+    std::vector<std::optional<std::vector<std::optional<int64_t>>>>>;
+
+std::shared_ptr<arrow::Array>
+BuildInt64NestedArray(const std::vector<Int64NestedRow>& rows) {
+    auto values = std::make_shared<arrow::Int64Builder>();
+    auto inner = std::make_shared<arrow::ListBuilder>(
+        arrow::default_memory_pool(), values);
+    arrow::ListBuilder outer(arrow::default_memory_pool(), inner);
+    for (const auto& row : rows) {
+        if (!row.has_value()) {
+            EXPECT_TRUE(outer.AppendNull().ok());
+            continue;
+        }
+        EXPECT_TRUE(outer.Append().ok());
+        for (const auto& element : *row) {
+            if (!element.has_value()) {
+                EXPECT_TRUE(inner->AppendNull().ok());
+                continue;
+            }
+            EXPECT_TRUE(inner->Append().ok());
+            for (const auto& value : *element) {
+                if (value.has_value()) {
+                    EXPECT_TRUE(values->Append(*value).ok());
+                } else {
+                    EXPECT_TRUE(values->AppendNull().ok());
+                }
+            }
+        }
+    }
+    std::shared_ptr<arrow::Array> array;
+    EXPECT_TRUE(outer.Finish(&array).ok());
+    return array;
+}
+
+VortexColumn::FileInfo
+WriteSingleColumnVortexFile(const std::filesystem::path& path,
+                            int64_t field_id,
+                            const std::shared_ptr<arrow::Array>& array,
+                            const milvus_storage::api::Properties& properties) {
+    auto schema = arrow::schema(
+        {arrow::field(std::to_string(field_id), array->type(), true)});
+    auto batch = arrow::RecordBatch::Make(schema, array->length(), {array});
+    return WriteVortexBatches(path.string(), schema, properties, {batch});
+}
+
+template <typename Fn>
+void
+ExpectNotImplemented(Fn&& fn, const std::string& what) {
+    try {
+        fn();
+        ADD_FAILURE() << what << " did not throw";
+    } catch (const SegcoreError& e) {
+        EXPECT_EQ(e.get_error_code(), ErrorCode::NotImplemented)
+            << what << ": " << e.what();
+    }
+}
+
+// ArrayValueView rows read back from an ArrayValue built from the output
+// proto of BulkArrayValueAt.
+std::vector<ArrayValue>
+BulkArrayValues(const VortexColumn& column,
+                const FieldMeta& field_meta,
+                const std::vector<int64_t>& offsets) {
+    std::vector<ArrayValue> values;
+    column.BulkArrayValueAt(
+        nullptr,
+        [&](ScalarFieldProto&& value, size_t i) {
+            EXPECT_EQ(i, values.size());
+            values.emplace_back(value, field_meta.get_array_type_schema());
+        },
+        offsets.data(),
+        offsets.size());
+    EXPECT_EQ(values.size(), offsets.size());
+    return values;
+}
+
+// Every ArrayValueView read path of a native-list column: a full data scan,
+// a take with repeated and unordered offsets, per-chunk views (whole chunk and
+// a sub-range) and per-chunk views by offsets. check_row(view, row) asserts a
+// valid row. NULL rows must come back invalid; scans and chunk views also
+// return a NULL view for them, while take results carry no value.
+template <typename CheckRow>
+void
+CheckArrayValueViewReads(const VortexColumn& column,
+                         const std::vector<int64_t>& take_offsets,
+                         const std::function<bool(int64_t)>& row_valid,
+                         CheckRow&& check_row) {
+    using TargetType = ChunkedColumnInterface::TargetType;
+    const auto rows = static_cast<int64_t>(column.NumRows());
+    const auto check = [&](const ArrayValueView& view,
+                           bool valid,
+                           int64_t row,
+                           const std::string& path,
+                           bool null_view = true) {
+        SCOPED_TRACE(path + " row " + std::to_string(row));
+        EXPECT_EQ(valid, row_valid(row));
+        if (row_valid(row)) {
+            check_row(view, row);
+        } else if (null_view) {
+            EXPECT_TRUE(view.is_null());
+        }
+    };
+
+    auto cursor = column.Scan(nullptr,
+                              ChunkedColumnInterface::ScanOptions::ForData(
+                                  0, TargetType::ArrayValueView));
+    ASSERT_NE(cursor, nullptr);
+    int64_t scanned = 0;
+    while (scanned < rows) {
+        ChunkedColumnInterface::ScanBatch batch;
+        ASSERT_TRUE(
+            cursor->Next(rows - scanned,
+                         ChunkedColumnInterface::ScanReadMode::DataAndValidity,
+                         &batch));
+        ASSERT_GT(batch.size, 0);
+        ASSERT_EQ(batch.row_id_start, scanned);
+        ASSERT_EQ(batch.values.target_type, TargetType::ArrayValueView);
+        const auto* values = batch.values.data_as<ArrayValueView>();
+        for (int64_t i = 0; i < batch.size; ++i) {
+            const auto valid = !batch.validity || batch.validity[i];
+            check(values[i], valid, batch.row_id_start + i, "scan");
+        }
+        scanned += batch.size;
+    }
+    EXPECT_EQ(scanned, rows);
+
+    auto take = column.Take(nullptr,
+                            ChunkedColumnInterface::TakeOptions{
+                                ChunkedColumnInterface::OffsetView::From(
+                                    take_offsets.data(), take_offsets.size()),
+                                TargetType::ArrayValueView});
+    ASSERT_NE(take, nullptr);
+    ASSERT_EQ(take->Size(), static_cast<int64_t>(take_offsets.size()));
+    for (int64_t i = 0; i < take->Size(); ++i) {
+        const auto valid = take->IsValid(i);
+        const auto item = take->Get<ArrayValueView>(i);
+        EXPECT_EQ(item.value.has_value(), valid);
+        check(valid ? *item.value : ArrayValueView{},
+              valid,
+              take_offsets[i],
+              "take",
+              false);
+    }
+
+    int64_t chunk_start = 0;
+    for (int64_t chunk = 0; chunk < column.num_chunks(); ++chunk) {
+        const auto chunk_rows = column.chunk_row_nums(chunk);
+        auto views = column.ArrayValueViews(nullptr, chunk, std::nullopt);
+        ASSERT_EQ(views.get().first.size(), chunk_rows);
+        for (int64_t i = 0; i < chunk_rows; ++i) {
+            const auto valid = !views.get().second || views.get().second[i];
+            check(views.get().first[i], valid, chunk_start + i, "chunk views");
+        }
+        if (chunk_rows > 1) {
+            auto sub = column.ArrayValueViews(
+                nullptr,
+                chunk,
+                std::make_pair<int64_t, int64_t>(1, chunk_rows - 1));
+            ASSERT_EQ(sub.get().first.size(), chunk_rows - 1);
+            for (int64_t i = 0; i < chunk_rows - 1; ++i) {
+                const auto valid = !sub.get().second || sub.get().second[i];
+                check(sub.get().first[i],
+                      valid,
+                      chunk_start + 1 + i,
+                      "chunk sub-range views");
+            }
+        }
+        FixedVector<int32_t> local;
+        for (int64_t i = chunk_rows - 1; i >= 0; --i) {
+            local.push_back(static_cast<int32_t>(i));
+        }
+        local.push_back(0);
+        auto by_offsets =
+            column.ArrayValueViewsByOffsets(nullptr, chunk, local);
+        ASSERT_EQ(by_offsets.get().first.size(), local.size());
+        for (size_t i = 0; i < local.size(); ++i) {
+            check(by_offsets.get().first[i],
+                  by_offsets.get().second[i],
+                  chunk_start + local[i],
+                  "views by offsets",
+                  false);
+        }
+        chunk_start += chunk_rows;
+    }
+    EXPECT_EQ(chunk_start, rows);
+}
+
+}  // namespace
+
+// Single-level element-nullable Array<Int64> stored as a native Arrow list,
+// split over two Vortex files.
+//   0 [10, NULL, 30]   1 [NULL]   2 NULL row
+//   3 [50, NULL]       4 []       5 [60]
 TEST(VortexColumnTest, ElementNullableArrayScanAndTake) {
     constexpr int64_t field_id = kNormalizedFieldIdBase + 11;
     auto properties =
         std::make_shared<milvus_storage::api::Properties>(MakeProperties());
-    auto dir = std::filesystem::temp_directory_path() /
-               ("milvus_vortex_element_nullable_array_test_" +
-                std::to_string(::getpid()) + "_" +
-                std::to_string(reinterpret_cast<uintptr_t>(properties.get())));
-    std::filesystem::create_directories(dir);
+    auto dir = MakeVortexTestDir("milvus_vortex_element_nullable_array_test",
+                                 properties);
 
-    arrow::BinaryBuilder binary_builder;
-    for (const auto& [values, validity] :
-         std::vector<std::pair<std::vector<int64_t>, std::vector<bool>>>{
-             {{10, 0, 30}, {true, false, true}}, {{0}, {false}}}) {
-        ScalarFieldProto proto;
-        for (const auto value : values) {
-            proto.mutable_long_data()->add_data(value);
-        }
-        for (const auto valid : validity) {
-            proto.add_valid_data(valid);
-        }
-        std::string serialized;
-        ASSERT_TRUE(proto.SerializeToString(&serialized));
-        ASSERT_TRUE(binary_builder.Append(serialized).ok());
-    }
-    std::shared_ptr<arrow::Array> binary_array;
-    ASSERT_TRUE(binary_builder.Finish(&binary_array).ok());
-    auto binary_schema = arrow::schema(
-        {arrow::field(std::to_string(field_id), arrow::binary(), false)});
-    auto binary_batch =
-        arrow::RecordBatch::Make(binary_schema, 2, {binary_array});
-    auto binary_file = WriteVortexBatches((dir / "binary.vx").string(),
-                                          binary_schema,
-                                          *properties,
-                                          {binary_batch});
-
-    auto value_builder = std::make_shared<arrow::Int64Builder>();
-    arrow::ListBuilder list_builder(arrow::default_memory_pool(),
-                                    value_builder);
-    auto& list_values =
-        dynamic_cast<arrow::Int64Builder&>(*list_builder.value_builder());
-    ASSERT_TRUE(list_builder.Append().ok());
-    ASSERT_TRUE(list_values.Append(50).ok());
-    ASSERT_TRUE(list_values.AppendNull().ok());
-    ASSERT_TRUE(list_builder.Append().ok());
-    std::shared_ptr<arrow::Array> list_array;
-    ASSERT_TRUE(list_builder.Finish(&list_array).ok());
-    auto list_schema = arrow::schema({arrow::field(
-        std::to_string(field_id), arrow::list(arrow::int64()), false)});
-    auto list_batch = arrow::RecordBatch::Make(list_schema, 2, {list_array});
-    auto list_file = WriteVortexBatches(
-        (dir / "list.vx").string(), list_schema, *properties, {list_batch});
-    list_file.start_index = 2;
-    list_file.end_index = 4;
+    auto first = WriteSingleColumnVortexFile(
+        dir / "first.vx",
+        field_id,
+        BuildInt64ListArray(
+            {std::vector<std::optional<int64_t>>{10, std::nullopt, 30},
+             std::vector<std::optional<int64_t>>{std::nullopt},
+             std::nullopt}),
+        *properties);
+    auto second = WriteSingleColumnVortexFile(
+        dir / "second.vx",
+        field_id,
+        BuildInt64ListArray(
+            {std::vector<std::optional<int64_t>>{50, std::nullopt},
+             std::vector<std::optional<int64_t>>{},
+             std::vector<std::optional<int64_t>>{60}}),
+        *properties);
+    second.start_index = 3;
+    second.end_index = 6;
 
     auto column_group = MakeColumnGroup(
-        {binary_file, list_file}, properties, {std::to_string(field_id)});
+        {first, second}, properties, {std::to_string(field_id)});
     FieldMeta field_meta(FieldName("element_nullable_array"),
                          FieldId(field_id),
                          DataType::ARRAY,
                          DataType::INT64,
-                         false,
+                         true,
                          true,
                          std::nullopt);
+    ASSERT_TRUE(field_meta.is_native_list_array());
+    ASSERT_TRUE(field_meta.has_nullable_array_element());
+    VortexColumn column(FieldId(field_id),
+                        field_meta,
+                        std::to_string(field_id),
+                        properties,
+                        column_group);
+    ASSERT_EQ(column.NumRows(), 6);
 
-    auto raw_value_builder = std::make_shared<arrow::Int64Builder>();
-    arrow::ListBuilder raw_list_builder(arrow::default_memory_pool(),
-                                        raw_value_builder);
-    ASSERT_TRUE(raw_list_builder.Append().ok());
-    ASSERT_TRUE(raw_value_builder->AppendValues({1, 2}).ok());
-    std::shared_ptr<arrow::Array> raw_list;
-    ASSERT_TRUE(raw_list_builder.Finish(&raw_list).ok());
-    auto raw_normalized = storage::NormalizeExternalArrow(raw_list, field_meta);
-    auto raw_binary =
-        std::static_pointer_cast<arrow::BinaryArray>(raw_normalized);
-    ScalarFieldProto raw_proto;
-    const auto raw_row = raw_binary->GetView(0);
-    ASSERT_TRUE(raw_proto.ParseFromArray(raw_row.data(),
-                                         static_cast<int>(raw_row.size())));
-    EXPECT_TRUE(raw_proto.valid_data().empty());
+    const auto check_row = [](const ArrayValueView& value, int64_t row) {
+        ASSERT_FALSE(value.is_nested_array());
+        if (row == 2) {
+            EXPECT_TRUE(value.is_null());
+            return;
+        }
+        ASSERT_FALSE(value.is_null());
+        if (row == 0) {
+            ASSERT_EQ(value.size(), 3);
+            EXPECT_TRUE(value.is_valid(0));
+            EXPECT_FALSE(value.is_valid(1));
+            EXPECT_TRUE(value.is_valid(2));
+            EXPECT_EQ(value.get_data_unchecked<int64_t>(0), 10);
+            EXPECT_EQ(value.get_data_unchecked<int64_t>(2), 30);
+        } else if (row == 1) {
+            ASSERT_EQ(value.size(), 1);
+            EXPECT_FALSE(value.is_valid(0));
+        } else if (row == 3) {
+            ASSERT_EQ(value.size(), 2);
+            EXPECT_TRUE(value.is_valid(0));
+            EXPECT_FALSE(value.is_valid(1));
+            EXPECT_EQ(value.get_data_unchecked<int64_t>(0), 50);
+        } else if (row == 4) {
+            EXPECT_TRUE(value.empty());
+        } else {
+            ASSERT_EQ(row, 5);
+            ASSERT_EQ(value.size(), 1);
+            EXPECT_TRUE(value.is_valid(0));
+            EXPECT_EQ(value.get_data_unchecked<int64_t>(0), 60);
+        }
+    };
 
+    for (int64_t row = 0; row < 6; ++row) {
+        EXPECT_EQ(column.IsValid(nullptr, row), row != 2) << row;
+    }
+
+    // Output path: served for fields with null elements, as by
+    // ChunkedArrayColumn::BulkArrayValueAt. Repeated and cross-file offsets.
+    const std::vector<int64_t> offsets{5, 0, 2, 3, 1, 4, 0};
+    auto values = BulkArrayValues(column, field_meta, offsets);
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        check_row(values[i].View(), offsets[i]);
+    }
+
+    CheckArrayValueViewReads(
+        column, offsets, [](int64_t row) { return row != 2; }, check_row);
+
+    // The legacy ArrayView cannot carry element validity: rejected with the
+    // same error ChunkedArrayColumn raises.
+    const auto take = [&](ChunkedColumnInterface::TargetType target) {
+        column.Take(nullptr,
+                    ChunkedColumnInterface::TakeOptions{
+                        ChunkedColumnInterface::OffsetView::From(
+                            offsets.data(), offsets.size()),
+                        target});
+    };
+    ExpectNotImplemented(
+        [&] {
+            column.Scan(nullptr,
+                        ChunkedColumnInterface::ScanOptions::ForData(
+                            0, ChunkedColumnInterface::TargetType::ArrayView));
+        },
+        "ArrayView scan");
+    ExpectNotImplemented(
+        [&] { take(ChunkedColumnInterface::TargetType::ArrayView); },
+        "ArrayView take");
+    ExpectNotImplemented([&] { column.ArrayViews(nullptr, 0, std::nullopt); },
+                         "ArrayViews");
+    ExpectNotImplemented(
+        [&] {
+            column.ArrayViewsByOffsets(nullptr, 0, FixedVector<int32_t>{0});
+        },
+        "ArrayViewsByOffsets");
+
+    std::filesystem::remove_all(dir);
+}
+
+// Nested Array<Array<Int64>> with validity at every level: NULL row, NULL
+// inner array, empty inner array, NULL leaf.
+//   0 [[1, NULL], NULL, []]   1 NULL row   2 []   3 [[NULL], [4, 5]]
+TEST(VortexColumnTest, NestedArrayValidityAtEveryLevel) {
+    constexpr int64_t field_id = kNormalizedFieldIdBase + 12;
+    auto properties =
+        std::make_shared<milvus_storage::api::Properties>(MakeProperties());
+    auto dir =
+        MakeVortexTestDir("milvus_vortex_nested_validity_test", properties);
+    using Leaf = std::vector<std::optional<int64_t>>;
+    using Row = std::vector<std::optional<Leaf>>;
+    auto file = WriteSingleColumnVortexFile(
+        dir / "nested.vx",
+        field_id,
+        BuildInt64NestedArray({Row{Leaf{1, std::nullopt}, std::nullopt, Leaf{}},
+                               std::nullopt,
+                               Row{},
+                               Row{Leaf{std::nullopt}, Leaf{4, 5}}}),
+        *properties);
+    auto column_group =
+        MakeColumnGroup({file}, properties, {std::to_string(field_id)});
+
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_name("nested_validity");
+    field_schema.set_fieldid(field_id);
+    field_schema.set_data_type(proto::schema::DataType::Array);
+    field_schema.set_element_type(proto::schema::DataType::Array);
+    field_schema.set_nullable(true);
+    field_schema.set_element_nullable(true);
+    auto* root = field_schema.mutable_type_schema();
+    root->set_nullable(true);
+    auto* inner = root->mutable_array_element();
+    inner->set_nullable(true);
+    auto* leaf = inner->mutable_array_element();
+    leaf->set_nullable(true);
+    leaf->set_leaf_type(proto::schema::DataType::Int64);
+    auto field_meta = FieldMeta::ParseFrom(field_schema);
+    ASSERT_TRUE(field_meta.is_nested_array());
+    ASSERT_TRUE(field_meta.has_nullable_array_element());
     VortexColumn column(FieldId(field_id),
                         field_meta,
                         std::to_string(field_id),
                         properties,
                         column_group);
 
-    const auto check_row = [](const ArrayView& value, int64_t row) {
-        if (row == 0) {
-            ASSERT_EQ(value.length(), 3);
-            EXPECT_TRUE(value.is_element_valid(0));
-            EXPECT_FALSE(value.is_element_valid(1));
-            EXPECT_TRUE(value.is_element_valid(2));
-            EXPECT_EQ(value.get_data_unchecked<int64_t>(0), 10);
-            EXPECT_EQ(value.get_data_unchecked<int64_t>(2), 30);
-        } else if (row == 1) {
-            ASSERT_EQ(value.length(), 1);
-            EXPECT_FALSE(value.is_element_valid(0));
-        } else if (row == 2) {
-            ASSERT_EQ(value.length(), 2);
-            EXPECT_TRUE(value.is_element_valid(0));
-            EXPECT_FALSE(value.is_element_valid(1));
-            EXPECT_EQ(value.get_data_unchecked<int64_t>(0), 50);
+    const auto check_row = [](const ArrayValueView& value, int64_t row) {
+        if (row == 1) {
+            EXPECT_TRUE(value.is_null());
+            return;
+        }
+        ASSERT_FALSE(value.is_null());
+        ASSERT_TRUE(value.is_nested_array());
+        if (row == 2) {
+            EXPECT_TRUE(value.empty());
+        } else if (row == 0) {
+            ASSERT_EQ(value.size(), 3);
+            EXPECT_TRUE(value.is_valid(0));
+            auto first = value.array_at(0);
+            ASSERT_EQ(first.size(), 2);
+            EXPECT_TRUE(first.is_valid(0));
+            EXPECT_FALSE(first.is_valid(1));
+            EXPECT_EQ(first.get_data_unchecked<int64_t>(0), 1);
+            EXPECT_FALSE(value.is_valid(1));
+            EXPECT_TRUE(value.array_at(1).is_null());
+            EXPECT_TRUE(value.is_valid(2));
+            EXPECT_FALSE(value.array_at(2).is_null());
+            EXPECT_TRUE(value.array_at(2).empty());
         } else {
             ASSERT_EQ(row, 3);
-            EXPECT_EQ(value.length(), 0);
+            ASSERT_EQ(value.size(), 2);
+            auto first = value.array_at(0);
+            ASSERT_EQ(first.size(), 1);
+            EXPECT_FALSE(first.is_valid(0));
+            auto second = value.array_at(1);
+            ASSERT_EQ(second.size(), 2);
+            EXPECT_TRUE(second.is_valid(0));
+            EXPECT_TRUE(second.is_valid(1));
+            EXPECT_EQ(second.get_data_unchecked<int64_t>(0), 4);
+            EXPECT_EQ(second.get_data_unchecked<int64_t>(1), 5);
         }
     };
 
-    auto cursor =
-        column.Scan(nullptr,
-                    ChunkedColumnInterface::ScanOptions::ForData(
-                        0, ChunkedColumnInterface::TargetType::ArrayView));
-    ASSERT_NE(cursor, nullptr);
-    int64_t scanned = 0;
-    while (scanned < 4) {
-        ChunkedColumnInterface::ScanBatch batch;
-        ASSERT_TRUE(
-            cursor->Next(4 - scanned,
-                         ChunkedColumnInterface::ScanReadMode::DataAndValidity,
-                         &batch));
-        const auto* values = batch.values.data_as<ArrayView>();
-        for (int64_t i = 0; i < batch.size; ++i) {
-            check_row(values[i], batch.row_id_start + i);
-        }
-        scanned += batch.size;
+    const std::vector<int64_t> offsets{3, 1, 0, 2, 3};
+    auto values = BulkArrayValues(column, field_meta, offsets);
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        check_row(values[i].View(), offsets[i]);
     }
 
-    const std::vector<int64_t> offsets{3, 0, 2, 1, 0};
-    auto take = column.Take(nullptr,
-                            ChunkedColumnInterface::TakeOptions{
-                                ChunkedColumnInterface::OffsetView::From(
-                                    offsets.data(), offsets.size()),
-                                ChunkedColumnInterface::TargetType::ArrayView});
-    ASSERT_NE(take, nullptr);
-    ASSERT_EQ(take->Size(), static_cast<int64_t>(offsets.size()));
-    for (int64_t i = 0; i < take->Size(); ++i) {
-        ASSERT_TRUE(take->IsValid(i));
-        check_row(*take->Get<ArrayView>(i).value, offsets[i]);
+    CheckArrayValueViewReads(
+        column, offsets, [](int64_t row) { return row != 1; }, check_row);
+    ExpectNotImplemented(
+        [&] {
+            column.Scan(nullptr,
+                        ChunkedColumnInterface::ScanOptions::ForData(
+                            0, ChunkedColumnInterface::TargetType::ArrayView));
+        },
+        "ArrayView scan");
+
+    std::filesystem::remove_all(dir);
+}
+
+// Struct element offsets are built from a native-list sub-field on a Vortex
+// column, which has no Chunk access.
+TEST(VortexColumnTest, NativeListStructElementOffsets) {
+    constexpr int64_t field_id = kNormalizedFieldIdBase + 13;
+    auto properties =
+        std::make_shared<milvus_storage::api::Properties>(MakeProperties());
+    auto dir =
+        MakeVortexTestDir("milvus_vortex_struct_offsets_test", properties);
+    using Leaf = std::vector<std::optional<int64_t>>;
+    using Row = std::vector<std::optional<Leaf>>;
+    auto first = WriteSingleColumnVortexFile(
+        dir / "first.vx",
+        field_id,
+        BuildInt64NestedArray({Row{Leaf{1}, Leaf{2, 3}}, std::nullopt, Row{}}),
+        *properties);
+    auto second = WriteSingleColumnVortexFile(
+        dir / "second.vx",
+        field_id,
+        BuildInt64NestedArray({Row{Leaf{}, Leaf{4}, Leaf{5}}}),
+        *properties);
+    second.start_index = 3;
+    second.end_index = 4;
+    auto column_group = MakeColumnGroup(
+        {first, second}, properties, {std::to_string(field_id)});
+
+    proto::schema::FieldSchema field_schema;
+    field_schema.set_name("s[nested]");
+    field_schema.set_fieldid(field_id);
+    field_schema.set_data_type(proto::schema::DataType::Array);
+    field_schema.set_element_type(proto::schema::DataType::Array);
+    field_schema.set_nullable(true);
+    field_schema.mutable_type_schema()->set_nullable(true);
+    field_schema.mutable_type_schema()
+        ->mutable_array_element()
+        ->mutable_array_element()
+        ->set_leaf_type(proto::schema::DataType::Int64);
+    auto field_meta = FieldMeta::ParseFrom(field_schema);
+    ASSERT_TRUE(field_meta.is_native_list_array());
+    VortexColumn column(FieldId(field_id),
+                        field_meta,
+                        std::to_string(field_id),
+                        properties,
+                        column_group);
+
+    auto offsets =
+        StructElementOffsetsSealed::BuildFromColumn(column, field_meta, 4);
+    ASSERT_EQ(offsets->GetRowCount(), 4);
+    EXPECT_EQ(offsets->GetTotalElementCount(), 5);
+    const std::vector<std::pair<int32_t, int32_t>> expected{
+        {0, 2}, {2, 2}, {2, 2}, {2, 5}};
+    for (int32_t row = 0; row < 4; ++row) {
+        auto range = offsets->ElementIDRangeOfRow(row);
+        EXPECT_EQ(range.first, expected[row].first) << row;
+        EXPECT_EQ(range.second, expected[row].second) << row;
+    }
+
+    std::filesystem::remove_all(dir);
+}
+
+// Struct element offsets from an element-nullable sub-field on a Vortex
+// column: a NULL element keeps its slot, a NULL row has no element.
+//   0 [7, NULL]   1 NULL row   2 [NULL]   3 []   4 [8, 9, NULL]
+TEST(VortexColumnTest, ElementNullableStructElementOffsets) {
+    constexpr int64_t field_id = kNormalizedFieldIdBase + 14;
+    auto properties =
+        std::make_shared<milvus_storage::api::Properties>(MakeProperties());
+    auto dir = MakeVortexTestDir("milvus_vortex_element_nullable_offsets_test",
+                                 properties);
+    using Elements = std::vector<std::optional<int64_t>>;
+    auto file = WriteSingleColumnVortexFile(
+        dir / "values.vx",
+        field_id,
+        BuildInt64ListArray({Elements{7, std::nullopt},
+                             std::nullopt,
+                             Elements{std::nullopt},
+                             Elements{},
+                             Elements{8, 9, std::nullopt}}),
+        *properties);
+    auto column_group =
+        MakeColumnGroup({file}, properties, {std::to_string(field_id)});
+    FieldMeta field_meta(FieldName("s[values]"),
+                         FieldId(field_id),
+                         DataType::ARRAY,
+                         DataType::INT64,
+                         true,
+                         true,
+                         std::nullopt);
+    VortexColumn column(FieldId(field_id),
+                        field_meta,
+                        std::to_string(field_id),
+                        properties,
+                        column_group);
+
+    auto offsets =
+        StructElementOffsetsSealed::BuildFromColumn(column, field_meta, 5);
+    ASSERT_EQ(offsets->GetRowCount(), 5);
+    EXPECT_EQ(offsets->GetTotalElementCount(), 6);
+    const std::vector<std::pair<int32_t, int32_t>> expected{
+        {0, 2}, {2, 2}, {2, 3}, {3, 3}, {3, 6}};
+    for (int32_t row = 0; row < 5; ++row) {
+        auto range = offsets->ElementIDRangeOfRow(row);
+        EXPECT_EQ(range.first, expected[row].first) << row;
+        EXPECT_EQ(range.second, expected[row].second) << row;
     }
 
     std::filesystem::remove_all(dir);
@@ -2055,6 +2734,8 @@ TEST(VortexColumnTest, RecursiveArrayUsesExactTargetType) {
     field_schema.set_data_type(proto::schema::DataType::Array);
     field_schema.set_element_type(proto::schema::DataType::Array);
     field_schema.set_nullable(true);
+    // The TypeSchema root mirrors FieldSchema.nullable.
+    field_schema.mutable_type_schema()->set_nullable(true);
     field_schema.mutable_type_schema()
         ->mutable_array_element()
         ->mutable_array_element()
@@ -2151,20 +2832,14 @@ TEST(VortexColumnTest, RecursiveArrayUsesExactTargetType) {
         }
     }
 
-    std::vector<ArrayValue> bulk_values;
-    column.BulkArrayValueAt(
-        nullptr,
-        [&](ScalarFieldProto&& value, size_t) {
-            bulk_values.emplace_back(value, field_meta.get_array_type_schema());
-        },
-        offsets.data(),
-        offsets.size());
-    ASSERT_EQ(bulk_values.size(), offsets.size());
+    auto owned = take->GetOwn();
+    const auto* owned_values = owned.values.data_as<ArrayValueView>();
+    ASSERT_EQ(owned.size, offsets.size());
     for (size_t i = 0; i < offsets.size(); ++i) {
         if (offsets[i] == 3) {
-            EXPECT_TRUE(bulk_values[i].is_null());
+            EXPECT_FALSE(owned.validity[i]);
         } else {
-            check_row(bulk_values[i].View(), offsets[i]);
+            check_row(owned_values[i], offsets[i]);
         }
     }
 
@@ -2664,6 +3339,86 @@ TEST(VortexColumnTest, PlannerSkipCellIdsRemainFileScopedAcrossFiles) {
     std::filesystem::remove_all(dir);
 }
 
+TEST(VortexColumnTest, CandidateTakePreservesLogicalPositions) {
+    auto properties =
+        std::make_shared<milvus_storage::api::Properties>(MakeProperties());
+    const auto dir =
+        std::filesystem::temp_directory_path() /
+        ("milvus_vortex_candidate_take_" + std::to_string(::getpid()));
+    std::filesystem::create_directories(dir);
+    auto schema = MakeNullableSchema();
+    auto first = WriteNullableVortexFile(
+        (dir / "first.vx").string(), schema, *properties);
+    auto second = WriteNullableVortexFile(
+        (dir / "second.vx").string(), schema, *properties, kNullableRows);
+    const auto types = NullableLocalVortexTypes();
+    for (int file_count : {1, 2}) {
+        const auto rows = file_count * kNullableRows;
+        std::vector<int64_t> offsets{rows - 1, 1, 8, 1, 0};
+        while (offsets.size() < 129) {
+            offsets.push_back(offsets.size() * 7 % rows);
+        }
+        for (size_t i = 0; i < types.size(); ++i) {
+            const auto type = types[i];
+            SCOPED_TRACE(std::to_string(file_count) + ":" +
+                         std::to_string(static_cast<int>(type)));
+            const FieldId field_id(kNullableFieldIdBase + i);
+            std::vector<VortexColumn::FileInfo> files{first};
+            if (file_count == 2) {
+                files.push_back(second);
+            }
+            auto group = MakeColumnGroup(
+                std::move(files), properties, {std::to_string(field_id.get())});
+            VortexColumn column(field_id,
+                                MakeNullableFieldMeta(field_id, type),
+                                std::to_string(field_id.get()),
+                                properties,
+                                std::move(group));
+            auto check = [&]<typename T>() {
+                for (auto policy :
+                     {TakePinPolicy::CurrentCell, TakePinPolicy::Batch}) {
+                    CheckCandidateTake<T>(column, policy, offsets);
+                }
+            };
+            switch (TargetTypeForDataType(type)) {
+                case TargetType::Bool:
+                    check.template operator()<bool>();
+                    break;
+                case TargetType::Int8:
+                    check.template operator()<int8_t>();
+                    break;
+                case TargetType::Int16:
+                    check.template operator()<int16_t>();
+                    break;
+                case TargetType::Int32:
+                    check.template operator()<int32_t>();
+                    break;
+                case TargetType::Int64:
+                    check.template operator()<int64_t>();
+                    break;
+                case TargetType::Float:
+                    check.template operator()<float>();
+                    break;
+                case TargetType::Double:
+                    check.template operator()<double>();
+                    break;
+                case TargetType::StringView:
+                    check.template operator()<std::string_view>();
+                    break;
+                case TargetType::Json:
+                    check.template operator()<Json>();
+                    break;
+                case TargetType::ArrayView:
+                    check.template operator()<ArrayView>();
+                    break;
+                default:
+                    FAIL() << "unexpected candidate Take target";
+            }
+        }
+    }
+    std::filesystem::remove_all(dir);
+}
+
 TEST(VortexColumnTest, NullableAllScalarTypesScanCorrectness) {
     auto schema = MakeNullableSchema();
     auto properties =
@@ -2689,7 +3444,10 @@ TEST(VortexColumnTest, NullableAllScalarTypesScanCorrectness) {
         CheckNoDataScan(column);
         CheckApplyValidDataInChunk(column);
         CheckDataScan(column, type);
-        CheckOrderedTake(column, type);
+        for (const auto policy :
+             {TakePinPolicy::CurrentCell, TakePinPolicy::Batch}) {
+            CheckOrderedTake(column, type, policy);
+        }
         if (type == DataType::JSON) {
             auto pinned = column.StringViews(nullptr, 0);
             const auto& [views, validity] = pinned.get();

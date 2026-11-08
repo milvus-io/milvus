@@ -19,13 +19,12 @@
 #include <cstdint>
 #include <memory>
 
-#include "cachinglayer/Utils.h"
 #include "common/Types.h"
 #include "index/contracts/query/ReaderCaps.h"
 
 // Type-erased ownership and metadata base for an opened index. Scalar and
 // vector query interfaces are independent pure mixins. Concrete readers inherit
-// this base together with the mixins they expose. Pin once, then cross-cast to
+// this base together with the mixins they expose. Create a reader, then cross-cast to
 // the required query contract; queries do not need the concrete implementation
 // type.
 //
@@ -45,8 +44,15 @@ class IIndexReaderBase {
  public:
     virtual ~IIndexReaderBase() = default;
 
+    // Explicitly prepare query storage using the bound context. Synchronous;
+    // callers schedule overlap. Single-cell readers retain the loaded cell for
+    // subsequent operations. Already-resident views need no preparation.
+    virtual void
+    Prefetch() const {
+    }
+
     // Reader self-description for consistency checks. Execution-path selection
-    // uses the inventory's metadata-derived copy before pinning the reader.
+    // uses the inventory's metadata-derived copy before creating the reader.
     virtual ReaderCaps
     Caps() const = 0;
 
@@ -62,25 +68,6 @@ class IIndexReaderBase {
 
     virtual DataType
     ValueType() const = 0;
-
-    // Heap-resident bytes owned by this reader. File-backed ownership is
-    // reported separately by CellByteSize(). A documented zero may mean native
-    // accounting is unavailable, not that the resident footprint was measured
-    // as empty. A documented legacy loader may attach a post-load cache
-    // estimate to CellByteSize; it remains an estimate and is charged once with
-    // the loaded cell, never once per reader pin.
-    virtual int64_t
-    MemoryUsage() const = 0;
-
-    // Report resources owned by the opened reader. Heap-resident structures go
-    // in the memory half; owned mmap/file-backed bytes go in the file half.
-    // When native accounting is unavailable, an implementation may return an
-    // explicitly documented all-zero sentinel. A documented legacy path may
-    // instead return a post-load cache charge estimate; that estimate is not
-    // measured native ownership and must remain separate from pre-load
-    // admission. All other non-sentinel values are actual owned resources.
-    virtual cachinglayer::ResourceUsage
-    CellByteSize() const = 0;
 };
 
 using IIndexReaderBasePtr = std::unique_ptr<IIndexReaderBase>;

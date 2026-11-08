@@ -1,7 +1,6 @@
 package rewriter_test
 
 import (
-	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -480,29 +479,6 @@ func TestRewrite_And_In_IntersectionScalarKinds(t *testing.T) {
 	require.Equal(t, []int64{3, 4}, []int64{
 		threeTerm.GetValues()[0].GetInt64Val(), threeTerm.GetValues()[1].GetInt64Val(),
 	})
-}
-
-func TestMergeNormalizedAnd_NaNTermFallsBack(t *testing.T) {
-	column := &planpb.ColumnInfo{FieldId: 104, DataType: schemapb.DataType_Double}
-	term := func(values ...float64) *planpb.Expr {
-		genericValues := make([]*planpb.GenericValue, 0, len(values))
-		for _, value := range values {
-			genericValues = append(genericValues, &planpb.GenericValue{
-				Val: &planpb.GenericValue_FloatVal{FloatVal: value},
-			})
-		}
-		return &planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: &planpb.TermExpr{
-			ColumnInfo: column,
-			Values:     genericValues,
-		}}}
-	}
-
-	left := term(1, math.NaN())
-	right := term(1, math.NaN())
-	merged := rewriter.MergeNormalizedAnd(left, right).GetBinaryExpr()
-	require.NotNil(t, merged)
-	require.Same(t, left, merged.GetLeft())
-	require.Same(t, right, merged.GetRight())
 }
 
 func TestRewrite_NormalizesWrappedPredicates(t *testing.T) {

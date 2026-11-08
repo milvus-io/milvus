@@ -18,7 +18,7 @@ func newLazyOracle(t *testing.T) *oracleRuntime {
 	t.Helper()
 	base, _ := newTestOracle(t)
 	r, err := newOracleRuntime(context.Background(), base.provider, walview.VChannelWALView{
-		CollectionID: 1, VChannel: "v1", Schema: base.schema, SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: qviews.DataVersion{StreamingVersion: 10}},
+		CollectionID: 1, VChannel: "v1", Schema: base.schema, RequiredFields: testRequiredFields(base.schema), SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: qviews.DataVersion{StreamingVersion: 10}},
 	}, nil, true)
 	require.NoError(t, err)
 	t.Cleanup(r.Close)

@@ -15,7 +15,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates && \
     sed -i 's/http:/https:/g' /etc/apt/sources.list && \
     apt-get update && \
-    apt-get upgrade -y openssl libssl3 curl libcurl4 tar zlib1g libc6 libc-bin && \
+    apt-get upgrade -y apt openssl libssl3 curl libcurl4 tar zlib1g libc6 libc-bin && \
     apt-get install -y --no-install-recommends curl libaio-dev libgomp1 && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata && \
         ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime && \
@@ -25,8 +25,9 @@ RUN apt-get update && \
 
 RUN uv --no-cache python install 3.12.13 && \
     ln -s /usr/local/bin/python3.12 /usr/local/bin/python3 && \
+    rm -rf /opt/uv/python/*/lib/python3.12/site-packages/pip* && \
     uv --no-cache pip install --python python3.12 --system --break-system-packages \
-        --upgrade setuptools msgpack urllib3
+        "setuptools>=78.1.1" "msgpack>=1.2.1" "urllib3>=2.8.0"
 
 # Add Tini
 RUN curl -L -o /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TARGETARCH && \

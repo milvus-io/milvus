@@ -21,6 +21,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -32,13 +33,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord"
-	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/querycoordv2"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -46,18 +47,24 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tikv"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func TestMixCoordCollectionAvailability(t *testing.T) {
-	mockey.PatchConvey("broker uses the in-process rootcoord availability check", t, func() {
+func TestMixCoordGetCollectionProperties(t *testing.T) {
+	mockey.PatchConvey("collection properties use the in-process metadata reader", t, func() {
 		core := &rootcoord.Core{}
-		mockey.Mock((*rootcoord.Core).IsCollectionAvailable).To(func(receiver *rootcoord.Core, id int64) bool {
-			assert.Same(t, core, receiver)
-			return id == 123
+		ctx := context.Background()
+		properties := []*commonpb.KeyValuePair{{Key: "collection.autorelease.ttl.seconds", Value: "20"}}
+		mockey.Mock((*rootcoord.Core).GetCollectionProperties).To(func(receiver *rootcoord.Core, actualCtx context.Context, id int64) ([]*commonpb.KeyValuePair, error) {
+			require.Same(t, core, receiver)
+			require.Equal(t, ctx, actualCtx)
+			require.Equal(t, int64(123), id)
+			return properties, nil
 		}).Build()
-		b := broker.NewCoordinatorBroker(&mixCoordImpl{rootcoordServer: core})
-		assert.True(t, b.IsCollectionAvailable(123))
-		assert.False(t, b.IsCollectionAvailable(124))
+		mix := &mixCoordImpl{rootcoordServer: core}
+		got, err := mix.GetCollectionProperties(ctx, 123)
+		require.NoError(t, err)
+		require.Equal(t, properties, got)
 	})
 }
 
@@ -120,6 +127,78 @@ func TestMixcoord_EnableActiveStandby(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// A mixcoord that is still STANDBY when it is stopped never ran initInternal,
+// and its standby goroutine sees context.Canceled from the session. Stop must
+// neither touch the missing file resource observer nor leave that goroutine
+// to mistake the cancellation for an activation failure and panic.
+func TestMixcoord_StopWhileStandby(t *testing.T) {
+	randVal := rand.Int()
+	paramtable.Init()
+	testutil.ResetEnvironment()
+	Params.Save("etcd.rootPath", fmt.Sprintf("/%d", randVal))
+	kvfactory.CloseEtcdClient()
+	paramtable.Get().Save(Params.MixCoordCfg.EnableActiveStandby.Key, "true")
+	defer paramtable.Get().Reset(Params.MixCoordCfg.EnableActiveStandby.Key)
+
+	// Allocate both server IDs from the fresh rootPath, so a node ID left over
+	// from an earlier test cannot collide with the other session's.
+	oldNodeID := paramtable.GetNodeID()
+	paramtable.SetNodeID(0)
+	defer paramtable.SetNodeID(oldNodeID)
+
+	ctx := context.Background()
+	etcdCli, _ := kvfactory.GetEtcdAndPath()
+
+	core, err := NewMixCoordServer(ctx, dependency.NewDefaultFactory(true))
+	assert.NoError(t, err)
+	core.SetEtcdClient(etcdCli)
+	core.SetTiKVClient(tikv.SetupLocalTxn())
+	assert.NoError(t, core.Init())
+
+	// Another mixcoord session holds the ACTIVE key, so the one under test
+	// stays in STANDBY.
+	active := sessionutil.NewSession(ctx, sessionutil.WithResueNodeID(false))
+	active.Init(typeutil.MixCoordRole, "localhost:1", true)
+	active.SetEnableActiveStandBy(true)
+	active.Register()
+	assert.NoError(t, active.ProcessActiveStandBy(nil))
+	defer active.Stop()
+
+	type standbyResult struct {
+		err    error
+		ctxErr error
+	}
+	entered := make(chan struct{})
+	result := make(chan standbyResult, 1)
+	var origin func(*sessionutil.Session, func() error) error
+	mocker := mockey.Mock((*sessionutil.Session).ProcessActiveStandBy).To(
+		func(s *sessionutil.Session, activateFunc func() error) error {
+			close(entered)
+			err := origin(s, activateFunc)
+			// The Register goroutine decides between "shutdown" and panic on
+			// core.ctx right after this returns.
+			result <- standbyResult{err: err, ctxErr: core.ctx.Err()}
+			return err
+		}).Origin(&origin).Build()
+	defer mocker.UnPatch()
+
+	assert.NoError(t, core.Register())
+	<-entered
+	assert.Equal(t, commonpb.StateCode_StandBy, core.GetStateCode())
+
+	assert.NotPanics(t, func() {
+		assert.NoError(t, core.Stop())
+	})
+
+	select {
+	case r := <-result:
+		assert.Error(t, r.err)
+		assert.ErrorIs(t, r.ctxErr, context.Canceled)
+	case <-time.After(10 * time.Second):
+		t.Fatal("standby process did not exit after Stop")
+	}
+}
+
 func TestMixCoord_FlushAll(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		mockey.PatchConvey("test flush all success", t, func() {
@@ -153,6 +232,59 @@ func TestMixCoord_FlushAll(t *testing.T) {
 			assert.Equal(t, expectedErr, err)
 			assert.Nil(t, resp)
 		})
+	})
+}
+
+func TestMixCoordDropCollectionDataView(t *testing.T) {
+	mockey.PatchConvey("delegate collection data view deletion to datacoord", t, func() {
+		dataCoord := &datacoord.Server{}
+		coord := &mixCoordImpl{datacoordServer: dataCoord}
+		mockey.Mock((*datacoord.Server).DropCollectionDataView).
+			To(func(ctx context.Context, collectionID int64) error {
+				assert.Equal(t, int64(100), collectionID)
+				return nil
+			}).Build()
+
+		assert.NoError(t, coord.DropCollectionDataView(context.Background(), 100))
+	})
+}
+
+func TestMixCoordInitializesBeforeStartingDataAndQueryCoord(t *testing.T) {
+	mockey.PatchConvey("initialize both coordinators before starting background workers", t, func() {
+		dataCoord := &datacoord.Server{}
+		queryCoord := &querycoordv2.Server{}
+		coord := &mixCoordImpl{
+			ctx:              context.Background(),
+			datacoordServer:  dataCoord,
+			queryCoordServer: queryCoord,
+		}
+		var initialized atomic.Int32
+		var startedTooEarly atomic.Bool
+
+		mockey.Mock((*datacoord.Server).Init).To(func() error {
+			initialized.Add(1)
+			return nil
+		}).Build()
+		mockey.Mock((*querycoordv2.Server).Init).To(func() error {
+			initialized.Add(1)
+			return nil
+		}).Build()
+		mockey.Mock((*datacoord.Server).Start).To(func() error {
+			if initialized.Load() != 2 {
+				startedTooEarly.Store(true)
+			}
+			return nil
+		}).Build()
+		mockey.Mock((*querycoordv2.Server).Start).To(func() error {
+			if initialized.Load() != 2 {
+				startedTooEarly.Store(true)
+			}
+			return nil
+		}).Build()
+
+		assert.NoError(t, coord.initDataAndQueryCoord())
+		assert.Equal(t, int32(2), initialized.Load())
+		assert.False(t, startedTooEarly.Load())
 	})
 }
 

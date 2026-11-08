@@ -77,6 +77,15 @@ TimestampIndex::get_active_range(Timestamp query_timestamp) const {
     return {start_locs_[block_id], start_locs_[block_id + 1]};
 }
 
+TimestampIndex
+BuildTimestampIndex(const Timestamp* data, size_t num_rows) {
+    TimestampIndex index;
+    auto meta = GenerateFakeSlices(data, num_rows, kTimestampIndexSliceRows);
+    index.set_length_meta(std::move(meta));
+    index.build_with(data, num_rows);
+    return index;
+}
+
 std::vector<int64_t>
 GenerateFakeSlices(const Timestamp* timestamps,
                    int64_t size,

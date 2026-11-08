@@ -18,9 +18,11 @@
 
 #include <algorithm>
 #include <bit>
+#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <exception>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -30,6 +32,7 @@
 
 #include "common/Array.h"
 #include "common/StructElementOffsets.h"
+#include "common/FeatureBits.h"
 #include "common/FieldDataInterface.h"
 #include "common/Json.h"
 #include "common/OpContext.h"
@@ -40,6 +43,7 @@
 #include "exec/expression/ExprCacheHelper.h"
 #include "exec/QueryContext.h"
 #include "expr/ITypeExpr.h"
+#include "index/Families.h"
 #include "index/contracts/query/IJsonIndexReader.h"
 #include "index/contracts/query/INgramReader.h"
 #include "index/contracts/query/INullReader.h"
@@ -84,8 +88,83 @@ CanUseSkipFilter(bool is_nullable, bool null_rejecting) {
 using SkipChunkFn =
     std::function<bool(const FieldSkipMetricsView&, int64_t chunk_id)>;
 
+// Logical element count of one ARRAY row, null elements included.
+template <typename ArrayType>
+inline size_t
+ArrayRowLength(const ArrayType& row) {
+    if constexpr (std::is_same_v<ArrayType, ArrayValueView>) {
+        return row.size();
+    } else {
+        return static_cast<size_t>(row.length());
+    }
+}
+
+// Subscript of an ARRAY operand (`a[i]`, `s[i][x]`), parsed from
+// nested_path[0]. kWholeArrayOperand: no subscript, the operand is the whole
+// row.
+inline constexpr int kWholeArrayOperand = -1;
+// A subscript that names no element: above INT_MAX or negative. It is never
+// kWholeArrayOperand, and HasArrayElementAt / NestedArrayElementAt treat it as
+// out of bounds, so the operand is UNKNOWN.
+inline constexpr int kArraySubscriptOutOfRange =
+    std::numeric_limits<int>::max();
+
+inline int
+ParseArraySubscript(const std::vector<std::string>& nested_path) {
+    if (nested_path.empty()) {
+        return kWholeArrayOperand;
+    }
+    const auto& text = nested_path[0];
+    const char* last = text.data() + text.size();
+    int index = 0;
+    const auto [end, ec] = std::from_chars(text.data(), last, index);
+    // The plan parser emits only decimal digits here.
+    AssertInfo(ec != std::errc::invalid_argument && end == last,
+               "invalid array subscript '{}'",
+               text);
+    if (ec == std::errc::result_out_of_range || index < 0) {
+        return kArraySubscriptOutOfRange;
+    }
+    return index;
+}
+
+// Whether row[index] is a non-null element. A subscript that misses (out of
+// bounds or a null element) evaluates to UNKNOWN.
+template <typename ArrayType>
+inline bool
+HasArrayElementAt(const ArrayType& row, int index) {
+    if (index < 0 || index == kArraySubscriptOutOfRange ||
+        static_cast<size_t>(index) >= ArrayRowLength(row)) {
+        return false;
+    }
+    if constexpr (std::is_same_v<ArrayType, ArrayValueView>) {
+        return row.is_valid(index);
+    } else {
+        return true;
+    }
+}
+
+// `s[i][tags]` on a nested Array field: the inner Array of struct element i,
+// or nullopt (NULL) when element i is missing or null.
+inline std::optional<ArrayValueView>
+NestedArrayElementAt(const ArrayValueView& row, int index) {
+    if (index < 0 || index == kArraySubscriptOutOfRange ||
+        static_cast<size_t>(index) >= row.size()) {
+        return std::nullopt;
+    }
+    auto inner = row.array_at(index);
+    if (inner.is_null()) {
+        return std::nullopt;
+    }
+    return inner;
+}
+
+// ElementType of an element-level visit that reads element validity only.
+// Its batches carry a placeholder data pointer that must not be read.
+struct ElementValidityOnly {};
+
 // IndexPathSelection.h owns ExprExecPath and metadata-only path selection.
-// Capability inspection must not pin a cold reader to choose an execution path.
+// Path selection uses index metadata before creating a request reader.
 
 inline bool
 IsCompareOp(proto::plan::OpType op) {
@@ -451,6 +530,14 @@ class Expr : public std::enable_shared_from_this<Expr> {
     SetSnapshot(const segcore::SegmentReadSnapshot* snapshot) {
     }
 
+    // Bind the request's execution feature recorder, null unless the plan
+    // collects feature bits. Called by the expression compiler next to
+    // SetSnapshot; the recorder is owned by the plan and outlives the task.
+    // Default no-op for expressions that do not choose an execution path.
+    virtual void
+    SetFeatureRecorder(FeatureRecorder* recorder, const Schema& schema) {
+    }
+
  protected:
     DataType type_;
     std::vector<std::shared_ptr<Expr>> inputs_;
@@ -505,13 +592,15 @@ class SegmentExpr : public Expr {
 
     void
     InitSegmentExpr() {
-        auto schema = segment_->get_schema_snapshot();
-        auto& field_meta = (*schema)[field_id_];
+        auto field_meta = segment_->get_field_meta(field_id_);
         field_type_ = field_meta.get_data_type();
         is_nullable_ = field_meta.is_nullable();
+        is_native_list_array_ = field_meta.get_data_type() == DataType::ARRAY &&
+                                field_meta.is_native_list_array();
+        is_nested_array_field_ = field_meta.is_nested_array();
+        is_element_nullable_ = field_meta.is_element_nullable();
 
-        if (schema->get_primary_field_id().has_value() &&
-            schema->get_primary_field_id().value() == field_id_ &&
+        if (segment_->is_primary_field(field_id_) &&
             IsPrimaryKeyDataType(field_meta.get_data_type())) {
             is_pk_field_ = true;
             pk_type_ = field_meta.get_data_type();
@@ -561,6 +650,33 @@ class SegmentExpr : public Expr {
         return true;
     }
 
+    // The recorder bound to this expression, or null. A wrapper that serves
+    // this expression's result from a cache (RawExprCacheAdapter) records
+    // through it, so request gating and the internal-filter exclusion apply.
+    FeatureRecorder*
+    feature_recorder() const {
+        return feature_recorder_;
+    }
+
+    // The TTL filter the compiler adds on its own and the namespace
+    // predicate the plan parser merges in (MergeExprWithNamespace) are not
+    // user filters, so an expression on either field records nothing.
+    void
+    SetFeatureRecorder(FeatureRecorder* recorder,
+                       const Schema& schema) override {
+        if (recorder == nullptr) {
+            feature_recorder_ = nullptr;
+            return;
+        }
+        auto ttl_field = schema.get_ttl_field_id();
+        auto namespace_field = schema.get_namespace_field_id();
+        const bool internal =
+            (ttl_field.has_value() && ttl_field.value() == field_id_) ||
+            (namespace_field.has_value() &&
+             namespace_field.value() == field_id_);
+        feature_recorder_ = internal ? nullptr : recorder;
+    }
+
     void
     SetSnapshot(const segcore::SegmentReadSnapshot* snapshot) override {
         snapshot_ = snapshot;
@@ -574,26 +690,35 @@ class SegmentExpr : public Expr {
     // keeps every call identical to the pre-pin behavior.
     int64_t
     ChunkSize(FieldId field_id, int64_t chunk_id) const {
-        return snapshot_ ? snapshot_->chunk_size(field_id, chunk_id)
-                         : segment_->chunk_size(field_id, chunk_id);
+        return snapshot_ ? snapshot_->chunk_size(field_id, chunk_id, op_ctx_)
+                         : segment_->chunk_size(field_id, chunk_id, op_ctx_);
     }
 
     int64_t
     NumRowsUntilChunk(FieldId field_id, int64_t chunk_id) const {
-        return snapshot_ ? snapshot_->num_rows_until_chunk(field_id, chunk_id)
-                         : segment_->num_rows_until_chunk(field_id, chunk_id);
+        return snapshot_ ? snapshot_->num_rows_until_chunk(
+                               field_id, chunk_id, op_ctx_)
+                         : segment_->num_rows_until_chunk(
+                               field_id, chunk_id, op_ctx_);
     }
 
     std::pair<int64_t, int64_t>
     GetChunkByOffset(FieldId field_id, int64_t offset) const {
-        return snapshot_ ? snapshot_->get_chunk_by_offset(field_id, offset)
-                         : segment_->get_chunk_by_offset(field_id, offset);
+        return snapshot_
+                   ? snapshot_->get_chunk_by_offset(field_id, offset, op_ctx_)
+                   : segment_->get_chunk_by_offset(field_id, offset, op_ctx_);
     }
 
     int64_t
     NumChunkData(FieldId field_id) const {
-        return snapshot_ ? snapshot_->num_chunk_data(field_id)
-                         : segment_->num_chunk_data(field_id);
+        return snapshot_ ? snapshot_->num_chunk_data(field_id, op_ctx_)
+                         : segment_->num_chunk_data(field_id, op_ctx_);
+    }
+
+    std::shared_ptr<const IStructElementOffsets>
+    GetStructElementOffsets(FieldId field_id) const {
+        return snapshot_ ? snapshot_->GetStructElementOffsets(field_id)
+                         : segment_->GetStructElementOffsets(field_id);
     }
 
     // Pinned sealed chunk data view. When a request-scoped snapshot is bound,
@@ -1076,6 +1201,9 @@ class SegmentExpr : public Expr {
                 cache_hit = true;
             }
         });
+        if (cache_hit) {
+            MarkFeature(feature_recorder_, FeatureBit::ExprCacheHit);
+        }
         return cache_hit;
     }
 
@@ -1189,8 +1317,7 @@ class SegmentExpr : public Expr {
     // and elem_count is the total number of elements in those rows
     std::pair<int64_t, int64_t>
     GetNextBatchSizeForElementLevel() {
-        auto struct_element_offsets =
-            segment_->GetStructElementOffsets(field_id_);
+        auto struct_element_offsets = GetStructElementOffsets(field_id_);
         AssertInfo(struct_element_offsets != nullptr,
                    "StructElementOffsets not found for field {}",
                    field_id_.get());
@@ -1267,8 +1394,7 @@ class SegmentExpr : public Expr {
         TargetBitmap result;
         TargetBitmap valid;
         if (element_level_result) {
-            auto struct_element_offsets =
-                segment_->GetStructElementOffsets(field_id_);
+            auto struct_element_offsets = GetStructElementOffsets(field_id_);
             AssertInfo(struct_element_offsets != nullptr,
                        "array offsets are required for element-level index");
             const auto data_pos = current_index_chunk_pos_;
@@ -1338,7 +1464,7 @@ class SegmentExpr : public Expr {
                    "selected index does not expose typed value lookup");
         if (cached_index_chunk_id_ != 0) {
             AssertInfo(selected_reader_ != nullptr,
-                       "selected value index has no root reader");
+                       "selected value index has no request reader");
             const auto value_count = selected_reader_->Count();
             AssertInfo(value_count >= 0,
                        "selected value index has negative coordinate count");
@@ -1690,9 +1816,9 @@ class SegmentExpr : public Expr {
                 int64_t offset = (*input)[i];
                 auto [chunk_id, chunk_offset] =
                     GetChunkByOffset(field_id_, offset);
-                // chunk_data<VectorArrayView> would read the wrong layout:
-                // storage holds VectorArray, and nullable rows may be compacted.
-                // Use chunk_view to build logical VectorArrayView rows.
+                // chunk_data<VectorArrayView> would address physical rows, and
+                // nullable rows may be compacted. Use chunk_view to build
+                // logical VectorArrayView rows.
                 auto pw = GetChunkView<VectorArrayView>(
                     field_id_,
                     chunk_id,
@@ -1895,23 +2021,7 @@ class SegmentExpr : public Expr {
             "candidate mask size {} does not match Take input {}",
             candidate_mask == nullptr ? 0 : candidate_mask->size(),
             input->size());
-        EnsureDataTakeResources(skip_func);
-        if (data_take_column_ == nullptr) {
-            return -1;
-        }
-        const auto nullable = data_take_column_->IsNullable();
-        OffsetVector selected_offsets;
-        const OffsetVector* take_offsets = input;
-        if (has_candidate_mask) {
-            selected_offsets.reserve(input->size());
-            for (size_t i = 0; i < input->size(); ++i) {
-                if ((*candidate_mask)[i]) {
-                    selected_offsets.push_back((*input)[i]);
-                }
-            }
-            take_offsets = &selected_offsets;
-        }
-        if (take_offsets->empty()) {
+        if (has_candidate_mask && candidate_mask->none()) {
             for (size_t i = 0; i < input->size(); ++i) {
                 func.template operator()<FilterType::random>(nullptr,
                                                              ValidityView{},
@@ -1923,12 +2033,21 @@ class SegmentExpr : public Expr {
             }
             return input->size();
         }
+        EnsureDataTakeResources(skip_func);
+        if (data_take_column_ == nullptr) {
+            return -1;
+        }
+        const auto nullable = data_take_column_->IsNullable();
         const auto input_view = ChunkedColumnInterface::OffsetView::From(
-            take_offsets->data(), static_cast<int64_t>(take_offsets->size()));
+            input->data(), static_cast<int64_t>(input->size()));
         auto take = data_take_column_->Take(
             op_ctx_,
             ChunkedColumnInterface::TakeOptions{
-                input_view, DataTargetType<T>(), data_take_filter_});
+                input_view,
+                DataTargetType<T>(),
+                data_take_filter_,
+                TakePinPolicy::CurrentCell,
+                has_candidate_mask ? candidate_mask : nullptr});
         if (take == nullptr) {
             return -1;
         }
@@ -1960,7 +2079,6 @@ class SegmentExpr : public Expr {
                    items.Size(),
                    input_view.size);
         const T invalid_value{};
-        int64_t take_pos = 0;
         for (int64_t logical_pos = 0;
              logical_pos < static_cast<int64_t>(input->size());
              ++logical_pos) {
@@ -1977,7 +2095,7 @@ class SegmentExpr : public Expr {
                     values...);
                 continue;
             }
-            auto item = items[take_pos++];
+            auto item = items[logical_pos];
             const auto valid = item.is_valid;
             if (item.data_skipped) {
                 const auto validity = nullable
@@ -2027,10 +2145,6 @@ class SegmentExpr : public Expr {
                 valid_res + logical_pos,
                 values...);
         }
-        AssertInfo(take_pos == items.Size(),
-                   "consumed {} Take rows, expected {}",
-                   take_pos,
-                   items.Size());
         return input->size();
     }
 
@@ -2045,18 +2159,27 @@ class SegmentExpr : public Expr {
         }
     }
 
+    // std::vector<bool> has no data(), so bool elements use FixedVector.
+    template <typename ElementType>
+    using ElementValueBuffer =
+        std::conditional_t<std::is_same_v<ElementType, bool>,
+                           FixedVector<bool>,
+                           std::vector<ElementType>>;
+
     // Normalize one physical ARRAY row into batches of logical ElementType.
     // Scalar ARRAY rows expose their leaf payload, while recursive ARRAY rows
     // expose their child ArrayValueView values. The caller only sees the
-    // uniform (data, valid_data, size) batch contract.
+    // uniform (data, valid_data, size) batch contract. A null element is
+    // reported through valid_data; its value slot is a default value.
     template <typename ElementType, typename RowType, typename Consumer>
     static void
     VisitArrayElementRun(const RowType& row,
                          int32_t first_element,
                          int32_t length,
-                         std::vector<ElementType>& value_buffer,
+                         ElementValueBuffer<ElementType>& value_buffer,
                          FixedVector<bool>& valid_buffer,
                          Consumer&& consume) {
+        using Row = std::remove_cvref_t<RowType>;
         const auto row_size = GetArrayRowSize(row);
         const auto range_end = static_cast<int64_t>(first_element) + length;
         AssertInfo(first_element >= 0 && length >= 0 &&
@@ -2069,25 +2192,67 @@ class SegmentExpr : public Expr {
             return;
         }
 
-        if constexpr (std::is_same_v<std::remove_cvref_t<RowType>,
-                                     ArrayValueView>) {
-            value_buffer.clear();
+        // Collect the run's element validity; returns false when it has no
+        // null element.
+        [[maybe_unused]] auto collect_validity = [&](auto&& is_valid) {
             valid_buffer.clear();
-            value_buffer.reserve(static_cast<size_t>(length));
             valid_buffer.reserve(static_cast<size_t>(length));
-
             bool has_null = false;
             for (int32_t i = 0; i < length; ++i) {
-                auto child = row.array_at(first_element + i);
-                const bool valid = !child.is_null();
+                const bool valid = is_valid(first_element + i);
                 has_null = has_null || !valid;
                 valid_buffer.push_back(valid);
-                value_buffer.push_back(std::move(child));
             }
-            consume(value_buffer.data(),
-                    has_null ? ValidityView::FromExpanded(valid_buffer.data())
-                             : ValidityView{},
-                    length);
+            return has_null;
+        };
+        [[maybe_unused]] auto validity = [&](bool has_null) {
+            return has_null ? ValidityView::FromExpanded(valid_buffer.data())
+                            : ValidityView{};
+        };
+
+        if constexpr (std::is_same_v<ElementType, ElementValidityOnly>) {
+            static constexpr ElementValidityOnly kPlaceholder{};
+            bool has_null = false;
+            if constexpr (std::is_same_v<Row, ArrayValueView>) {
+                has_null = collect_validity(
+                    [&](int32_t j) { return row.is_valid(j); });
+            } else if constexpr (std::is_same_v<Row, VectorArrayView>) {
+                if (row.is_element_nullable()) {
+                    const auto& element_valid = row.element_validity_view();
+                    has_null = collect_validity(
+                        [&](int32_t j) { return bool(element_valid[j]); });
+                }
+            }
+            // Legacy ArrayView rows cannot hold a null element.
+            consume(&kPlaceholder, validity(has_null), length);
+        } else if constexpr (std::is_same_v<Row, ArrayValueView> &&
+                             std::is_same_v<ElementType, ArrayValueView>) {
+            // Recursive ARRAY: each element is an inner Array, null when the
+            // inner Array itself is NULL.
+            value_buffer.clear();
+            value_buffer.reserve(static_cast<size_t>(length));
+            for (int32_t i = 0; i < length; ++i) {
+                value_buffer.push_back(row.array_at(first_element + i));
+            }
+            const bool has_null = collect_validity([&](int32_t j) {
+                return !value_buffer[j - first_element].is_null();
+            });
+            consume(value_buffer.data(), validity(has_null), length);
+        } else if constexpr (std::is_same_v<Row, ArrayValueView>) {
+            // Element-nullable scalar ARRAY: null leaves keep their logical
+            // slot and are reported invalid.
+            value_buffer.clear();
+            value_buffer.reserve(static_cast<size_t>(length));
+            const bool has_null =
+                collect_validity([&](int32_t j) { return row.is_valid(j); });
+            for (int32_t i = 0; i < length; ++i) {
+                value_buffer.push_back(
+                    valid_buffer[i]
+                        ? row.template get_data_unchecked<ElementType>(
+                              first_element + i)
+                        : ElementType{});
+            }
+            consume(value_buffer.data(), validity(has_null), length);
         } else if constexpr (std::is_same_v<ElementType, std::string_view> ||
                              std::is_same_v<ElementType, std::string> ||
                              std::is_same_v<ElementType, int8_t> ||
@@ -2122,47 +2287,49 @@ class SegmentExpr : public Expr {
         BatchEvaluator& evaluate_batch,
         TargetBitmapView res,
         TargetBitmapView valid_res,
-        std::vector<ElementType>& value_buffer,
+        ElementValueBuffer<ElementType>& value_buffer,
         FixedVector<bool>& valid_buffer,
         const ValTypes&... values) {
         size_t batch_pos = 0;
-        auto emit_rows = [&](const auto* rows,
-                             ValidityView valid_data,
-                             auto&& index_at) {
-            for (size_t i = 0; i < row_offsets.size(); ++i) {
-                const auto index = index_at(i);
-                AssertInfo(!valid_data || valid_data[index],
-                           "StructElementOffsets references an element in null "
-                           "ARRAY row {}",
-                           row_offsets[i]);
-                VisitArrayElementRun<ElementType>(
-                    rows[index],
-                    first_elem_indices[i],
-                    run_lengths[i],
-                    value_buffer,
-                    valid_buffer,
-                    [&](const ElementType* data,
-                        ValidityView valid_data,
-                        int size) {
-                        evaluate_batch.template operator()<FilterType::random>(
-                            data,
-                            valid_data,
-                            nullptr,
-                            size,
-                            res + batch_pos,
-                            valid_res + batch_pos,
-                            values...);
-                        batch_pos += static_cast<size_t>(size);
-                    });
-            }
+        auto emit_row = [&](const auto& row, bool row_valid, size_t i) {
+            AssertInfo(row_valid,
+                       "StructElementOffsets references an element in null "
+                       "ARRAY row {}",
+                       row_offsets[i]);
+            VisitArrayElementRun<ElementType>(
+                row,
+                first_elem_indices[i],
+                run_lengths[i],
+                value_buffer,
+                valid_buffer,
+                [&](const ElementType* data,
+                    ValidityView valid_data,
+                    int size) {
+                    evaluate_batch.template operator()<FilterType::random>(
+                        data,
+                        valid_data,
+                        nullptr,
+                        size,
+                        res + batch_pos,
+                        valid_res + batch_pos,
+                        values...);
+                    batch_pos += static_cast<size_t>(size);
+                });
         };
-
-        if constexpr (std::is_same_v<ElementType, ArrayValueView>) {
+        auto emit_rows =
+            [&](const auto* rows, ValidityView valid_data, auto&& index_at) {
+                for (size_t i = 0; i < row_offsets.size(); ++i) {
+                    const auto index = index_at(i);
+                    emit_row(rows[index], !valid_data || valid_data[index], i);
+                }
+            };
+        // Element-nullable and nested ARRAY rows, Growing and Sealed.
+        auto emit_array_value_rows = [&]() {
             auto pw = GetChunkViewsByOffsets<ArrayValueView>(
                 field_id_, chunk_id, row_offsets);
             const auto& [rows, valid_data] = pw.get();
             AssertInfo(rows.size() == row_offsets.size(),
-                       "recursive ARRAY row count mismatch: {} vs {}",
+                       "native list ARRAY row count mismatch: {} vs {}",
                        rows.size(),
                        row_offsets.size());
             emit_rows(rows.data(),
@@ -2170,6 +2337,31 @@ class SegmentExpr : public Expr {
                           ? ValidityView{}
                           : ValidityView::FromExpanded(valid_data.data()),
                       [](size_t i) { return i; });
+        };
+
+        if constexpr (std::is_same_v<ElementType, ArrayValueView>) {
+            emit_array_value_rows();
+        } else if (field_type_ == DataType::VECTOR_ARRAY) {
+            if constexpr (std::is_same_v<ElementType, ElementValidityOnly>) {
+                for (size_t i = 0; i < row_offsets.size(); ++i) {
+                    auto pw = GetChunkView<VectorArrayView>(
+                        field_id_,
+                        chunk_id,
+                        std::make_pair(int64_t{row_offsets[i]}, int64_t{1}));
+                    const auto& [rows, valid_data] = pw.get();
+                    AssertInfo(rows.size() == 1,
+                               "VECTOR_ARRAY row count mismatch: {} vs 1",
+                               rows.size());
+                    emit_row(rows[0], !valid_data || valid_data[0], i);
+                }
+            } else {
+                ThrowInfo(UnexpectedError,
+                          "element values of VECTOR_ARRAY field {} cannot be "
+                          "read as scalars",
+                          field_id_.get());
+            }
+        } else if (is_native_list_array_) {
+            emit_array_value_rows();
         } else if (segment_->type() == SegmentType::Sealed) {
             auto pw = GetChunkViewsByOffsets<ArrayView>(
                 field_id_, chunk_id, row_offsets);
@@ -2184,7 +2376,7 @@ class SegmentExpr : public Expr {
                           : ValidityView::FromExpanded(valid_data.data()),
                       [](size_t i) { return i; });
         } else {
-            auto pw = GetChunkData<Array>(field_id_, chunk_id);
+            auto pw = GetChunkData<ArrayView>(field_id_, chunk_id);
             auto chunk = pw.get();
             emit_rows(chunk.data(), chunk.validity(), [&](size_t i) {
                 return static_cast<size_t>(row_offsets[i]);
@@ -2203,10 +2395,11 @@ class SegmentExpr : public Expr {
                                   BatchEvaluator& evaluate_batch,
                                   TargetBitmapView res,
                                   TargetBitmapView valid_res,
-                                  std::vector<ElementType>& value_buffer,
+                                  ElementValueBuffer<ElementType>& value_buffer,
                                   FixedVector<bool>& valid_buffer,
                                   const ValTypes&... values) {
         int64_t processed_elems = 0;
+        // A null row contributes no elements, matching StructElementOffsets.
         auto emit_rows = [&](const auto* rows, ValidityView valid_data) {
             for (int64_t i = 0; i < length; ++i) {
                 if (valid_data && !valid_data[i]) {
@@ -2235,16 +2428,38 @@ class SegmentExpr : public Expr {
             }
         };
 
-        if constexpr (std::is_same_v<ElementType, ArrayValueView>) {
-            // Recursive ARRAY rows for both Growing and Sealed segments.
+        // Element-nullable and nested ARRAY rows, Growing and Sealed.
+        auto emit_array_value_rows = [&]() {
             auto pw = GetChunkView<ArrayValueView>(
                 field_id_, chunk_id, std::make_pair(start_offset, length));
             const auto& [rows, valid_data] = pw.get();
             AssertInfo(rows.size() == static_cast<size_t>(length),
-                       "recursive ARRAY row count mismatch: {} vs {}",
+                       "native list ARRAY row count mismatch: {} vs {}",
                        rows.size(),
                        length);
             emit_rows(rows.data(), valid_data);
+        };
+
+        if constexpr (std::is_same_v<ElementType, ArrayValueView>) {
+            emit_array_value_rows();
+        } else if (field_type_ == DataType::VECTOR_ARRAY) {
+            if constexpr (std::is_same_v<ElementType, ElementValidityOnly>) {
+                auto pw = GetChunkView<VectorArrayView>(
+                    field_id_, chunk_id, std::make_pair(start_offset, length));
+                const auto& [rows, valid_data] = pw.get();
+                AssertInfo(rows.size() == static_cast<size_t>(length),
+                           "VECTOR_ARRAY row count mismatch: {} vs {}",
+                           rows.size(),
+                           length);
+                emit_rows(rows.data(), valid_data);
+            } else {
+                ThrowInfo(UnexpectedError,
+                          "element values of VECTOR_ARRAY field {} cannot be "
+                          "read as scalars",
+                          field_id_.get());
+            }
+        } else if (is_native_list_array_) {
+            emit_array_value_rows();
         } else if (segment_->type() == SegmentType::Sealed) {
             // Legacy ARRAY rows from a Sealed segment's chunked storage.
             auto pw = GetChunkView<ArrayView>(
@@ -2256,8 +2471,8 @@ class SegmentExpr : public Expr {
                        length);
             emit_rows(rows.data(), valid_data);
         } else {
-            // Legacy ARRAY rows from a Growing segment's in-memory storage.
-            auto pw = GetChunkData<Array>(field_id_, chunk_id);
+            // Legacy ARRAY rows from a Growing segment, stored as views.
+            auto pw = GetChunkData<ArrayView>(field_id_, chunk_id);
             auto chunk = pw.get();
             emit_rows(chunk.data() + start_offset,
                       chunk.validity().Subview(start_offset));
@@ -2293,6 +2508,96 @@ class SegmentExpr : public Expr {
             func, skip_func, input, res, valid_res, values...);
     }
 
+    // `s[i][tags]` used as an Array: each row of the nested Array field
+    // yields the inner Array of struct element i (see NestedArrayElementAt).
+    bool
+    IsNestedArrayElementOperand() const {
+        return is_nested_array_field_ && nested_path_.size() == 1;
+    }
+
+    // Evaluate a row-level ARRAY predicate over the batch rows or the offset
+    // input. make_func.template operator()<RowType>() returns the batch
+    // evaluator for rows read as RowType.
+    template <typename MakeFunc, typename... ValTypes>
+    int64_t
+    ProcessArrayRows(MakeFunc make_func,
+                     OffsetVector* input,
+                     TargetBitmapView res,
+                     TargetBitmapView valid_res,
+                     const ValTypes&... values) {
+        auto process = [&]<typename RowType>() -> int64_t {
+            auto func = make_func.template operator()<RowType>();
+            if (has_offset_input_) {
+                return ProcessDataByOffsets<RowType>(
+                    func, nullptr, input, res, valid_res, values...);
+            }
+            return ProcessDataChunks<RowType>(
+                func, nullptr, res, valid_res, values...);
+        };
+        if (is_native_list_array_) {
+            return process.template operator()<ArrayValueView>();
+        }
+        return process.template operator()<ArrayView>();
+    }
+
+    // Whether element-level evaluation may report a chunk pruned by skip
+    // metrics without reading it. A pruned chunk yields FALSE for all of its
+    // elements, which would turn a null element's UNKNOWN into FALSE.
+    bool
+    CanSkipElementLevelChunks(const SkipChunkFn& skip_func) const {
+        return static_cast<bool>(skip_func) &&
+               CanUseSkipFilter(is_element_nullable_, null_rejecting_);
+    }
+
+    // Element validity (1 = the element is not null) of the next element
+    // batch, or of the element ids in input. Without input it consumes the
+    // batch like an evaluation. Fields without null elements are not read.
+    TargetBitmap
+    ProcessElementValidity(OffsetVector* input, int64_t elem_count) {
+        TargetBitmap valid(elem_count, true);
+        if (!is_element_nullable_) {
+            if (input == nullptr) {
+                MoveCursor();
+            }
+            return valid;
+        }
+        TargetBitmap unused(elem_count, true);
+        auto mark_nulls = []<FilterType filter_type = FilterType::sequential>(
+            const ElementValidityOnly* data,
+            ValidityView valid_data,
+            const int32_t* offsets,
+            const int size,
+            TargetBitmapView res,
+            TargetBitmapView valid_res) {
+            if (data == nullptr || !valid_data) {
+                return;
+            }
+            for (int i = 0; i < size; ++i) {
+                if (!valid_data[i]) {
+                    res[i] = false;
+                }
+            }
+        };
+        const auto processed =
+            input != nullptr
+                ? ProcessElementLevelByOffsets<ElementValidityOnly>(
+                      mark_nulls,
+                      nullptr,
+                      input,
+                      TargetBitmapView(valid),
+                      TargetBitmapView(unused))
+                : ProcessDataChunksForElementLevel<ElementValidityOnly>(
+                      mark_nulls,
+                      nullptr,
+                      TargetBitmapView(valid),
+                      TargetBitmapView(unused));
+        AssertInfo(processed == elem_count,
+                   "element validity covers {} elements, expected {}",
+                   processed,
+                   elem_count);
+        return valid;
+    }
+
     // Process element-level data by element IDs. Consecutive element IDs from
     // the same row are grouped into runs, and consecutive runs in the same
     // chunk share one row fetch.
@@ -2313,8 +2618,7 @@ class SegmentExpr : public Expr {
             EnsureRawDataPrefetched();
         }
 
-        auto struct_element_offsets =
-            segment_->GetStructElementOffsets(field_id_);
+        auto struct_element_offsets = GetStructElementOffsets(field_id_);
         AssertInfo(struct_element_offsets != nullptr,
                    "StructElementOffsets not found for field {}",
                    field_id_.get());
@@ -2336,8 +2640,9 @@ class SegmentExpr : public Expr {
         FixedVector<int32_t> offsets;
         FixedVector<int32_t> first_elem_indices;
         FixedVector<int32_t> run_lengths;
-        std::vector<ElementType> value_buffer;
+        ElementValueBuffer<ElementType> value_buffer;
         FixedVector<bool> valid_buffer;
+        const bool use_skip = CanSkipElementLevelChunks(skip_func);
 
         struct RunInfo {
             int32_t row_id;
@@ -2397,7 +2702,7 @@ class SegmentExpr : public Expr {
             const auto batch_size = i - batch_start;
             const auto eval_size = static_cast<int>(batch_size);
             const bool chunk_active =
-                !skip_func || !skip_func(skip_view_, chunk_id);
+                !use_skip || !skip_func(skip_view_, chunk_id);
 
             if (!chunk_active) {
                 // Keep cursor-tracking evaluators aligned with offset input
@@ -2456,8 +2761,7 @@ class SegmentExpr : public Expr {
                       "Json element type is not supported for "
                       "element-level filtering");
 
-        auto struct_element_offsets =
-            segment_->GetStructElementOffsets(field_id_);
+        auto struct_element_offsets = GetStructElementOffsets(field_id_);
         AssertInfo(struct_element_offsets != nullptr,
                    "StructElementOffsets not found for field {}",
                    field_id_.get());
@@ -2465,8 +2769,9 @@ class SegmentExpr : public Expr {
         const auto expected_rows = GetNextBatchSize();
         int64_t processed_rows = 0;
         int64_t processed_elems = 0;
-        std::vector<ElementType> value_buffer;
+        ElementValueBuffer<ElementType> value_buffer;
         FixedVector<bool> valid_buffer;
+        const bool use_skip = CanSkipElementLevelChunks(skip_func);
 
         auto column = CaptureDataScanResources().first;
         if (UsesLegacyChunkPrefetch(column.get())) {
@@ -2497,7 +2802,7 @@ class SegmentExpr : public Expr {
                 return int64_t{end_range.first - start_range.first};
             };
 
-            const bool chunk_active = !skip_func || !skip_func(skip_view_, i);
+            const bool chunk_active = !use_skip || !skip_func(skip_view_, i);
             if (!chunk_active) {
                 // StructElementOffsets defines the logical flattened address space:
                 // null ARRAY rows contribute zero elements even if storage
@@ -2966,6 +3271,18 @@ class SegmentExpr : public Expr {
             return valid_result;
         }
 
+        auto offsets = GetStructElementOffsets(field_id_);
+        if (offsets && offsets->HasRowValidity()) {
+            AssertInfo(row_count <= offsets->GetRowCount(),
+                       "struct validity row count {} exceeds mapping rows {}",
+                       row_count,
+                       offsets->GetRowCount());
+            for (int64_t i = 0; i < row_count; ++i) {
+                valid_result[i] = offsets->IsRowValid(i);
+            }
+            return valid_result;
+        }
+
         int64_t processed_size = 0;
         for (int64_t chunk_id = 0;
              chunk_id < num_data_chunk_ && processed_size < row_count;
@@ -3097,7 +3414,9 @@ class SegmentExpr : public Expr {
                         valid_res = null_reader_->IsNotNull();
                     }
                     return {std::move(res), std::move(valid_res)};
-                });
+                },
+                /*enable_cache_write=*/true,
+                feature_recorder_);
             cached_index_chunk_res_ = cached.result;
             cached_index_chunk_valid_res_ = cached.valid;
             cached_index_chunk_id_ = 0;
@@ -3132,9 +3451,9 @@ class SegmentExpr : public Expr {
             if (use_index) {
                 // when T is ArrayView, the ScalarIndex<T> shall be ScalarIndex<ElementType>
                 // NOT ScalarIndex<ArrayView>
-                if (std::is_same_v<T, ArrayView>) {
-                    auto schema = segment_->get_schema_snapshot();
-                    auto element_type = (*schema)[field_id_].get_element_type();
+                if constexpr (std::is_same_v<T, ArrayView>) {
+                    auto element_type =
+                        segment_->get_field_meta(field_id_).get_element_type();
                     switch (element_type) {
                         case DataType::BOOL: {
                             return ProcessIndexChunksForValid<bool>();
@@ -3169,8 +3488,9 @@ class SegmentExpr : public Expr {
                                       "unsupported element type: {}",
                                       element_type);
                     }
+                } else {
+                    return ProcessIndexChunksForValid<T>();
                 }
-                return ProcessIndexChunksForValid<T>();
             } else {
                 return ProcessDataChunksForValid<T>();
             }
@@ -3199,9 +3519,9 @@ class SegmentExpr : public Expr {
             if (use_index) {
                 // when T is ArrayView, the ScalarIndex<T> shall be ScalarIndex<ElementType>
                 // NOT ScalarIndex<ArrayView>
-                if (std::is_same_v<T, ArrayView>) {
-                    auto schema = segment_->get_schema_snapshot();
-                    auto element_type = (*schema)[field_id_].get_element_type();
+                if constexpr (std::is_same_v<T, ArrayView>) {
+                    auto element_type =
+                        segment_->get_field_meta(field_id_).get_element_type();
                     switch (element_type) {
                         case DataType::BOOL: {
                             return ProcessChunksForValidByOffsets<bool>(
@@ -3241,13 +3561,14 @@ class SegmentExpr : public Expr {
                                       "unsupported element type: {}",
                                       element_type);
                     }
+                } else {
+                    const auto& res = GetCachedIndexValidBitmap();
+                    if (!cached_index_all_valid_) {
+                        for (auto i = 0; i < batch_size; ++i) {
+                            valid_result[i] = res[input[i]];
+                        }
+                    }  // else: valid_result is already all-set
                 }
-                const auto& res = GetCachedIndexValidBitmap();
-                if (!cached_index_all_valid_) {
-                    for (auto i = 0; i < batch_size; ++i) {
-                        valid_result[i] = res[input[i]];
-                    }
-                }  // else: valid_result is already all-set
             } else {
                 apply_field_valid_data();
             }
@@ -3537,7 +3858,7 @@ class SegmentExpr : public Expr {
         ngram_reader_ = nullptr;
         spatial_reader_ = nullptr;
         growing_index_pin_ = {};
-        selected_root_pin_ = {};
+        selected_index_reader_ = {};
         selected_index_entry_.reset();
         selected_element_level_result_ = false;
         selected_covered_row_end_ = 0;
@@ -3545,8 +3866,9 @@ class SegmentExpr : public Expr {
     }
 
     bool
-    SelectAndPinIndex(const ExprIndexRequirement& req) {
-        auto capabilities = segment_->IndexCapability(field_id_);
+    SelectAndCreateIndexReader(const ExprIndexRequirement& req) {
+        auto capabilities =
+            segment_->ResolveIndexCapability(op_ctx_, field_id_);
         auto decision = exec::DetermineExecPath(req, capabilities);
         exec_path_ = decision.path;
         if (!decision.key.has_value()) {
@@ -3558,7 +3880,7 @@ class SegmentExpr : public Expr {
                    "selected index key is absent from field {} metadata",
                    field_id_.get());
         if (segment_->type() == SegmentType::Growing) {
-            growing_index_pin_ = segment_->PinGrowingIndex(field_id_);
+            growing_index_pin_ = segment_->PinGrowingIndex(op_ctx_, field_id_);
             if (!growing_index_pin_) {
                 ClearSelectedIndex();
                 exec_path_ = ExprExecPath::RawData;
@@ -3570,13 +3892,14 @@ class SegmentExpr : public Expr {
             AssertInfo(segcore::SameCaps(entry->caps, selected_reader_->Caps()),
                        "growing index metadata does not match reader caps");
         } else {
-            selected_root_pin_ = segment_->PinIndex(op_ctx_, *decision.key);
-            if (!selected_root_pin_) {
+            selected_index_reader_ =
+                segment_->CreateIndexReader(op_ctx_, *decision.key);
+            if (!selected_index_reader_) {
                 ClearSelectedIndex();
                 exec_path_ = ExprExecPath::RawData;
                 return false;
             }
-            selected_reader_ = selected_root_pin_.get();
+            selected_reader_ = selected_index_reader_.get();
             selected_covered_row_end_ = active_count_;
         }
         selected_index_entry_ = *entry;
@@ -3596,6 +3919,11 @@ class SegmentExpr : public Expr {
                     exec_path_ = ExprExecPath::RawData;
                     return false;
                 }
+                // By design, JsonFlat indexes array elements at the same path
+                // as scalar values, so scalar predicates may match array
+                // elements (e.g. a == 1 matches {"a": [1, 2]}). Preserve this
+                // index behavior rather than forcing raw JSON evaluation to
+                // distinguish scalar and array shapes.
                 selected_json_view_ =
                     json_reader_->Resolve(req.json_path, *cast);
                 if (!selected_json_view_) {
@@ -3722,14 +4050,13 @@ class SegmentExpr : public Expr {
     }
 
     bool
-    PinnedJsonIndexIsFlat() const {
+    SelectedJsonIndexIsFlat() const {
         // Typed projections also route paths, but retain their scalar value
         // type. Only a field-level JSON reader exposes JsonFlat's numeric
         // predicates for both int64 and double.
         return field_type_ == DataType::JSON &&
                selected_index_entry_.has_value() &&
-               selected_index_entry_->caps.json_paths &&
-               selected_index_entry_->value_type == DataType::JSON;
+               index_path_detail::IsFlatJsonIndex(*selected_index_entry_);
     }
 
     static bool
@@ -3765,13 +4092,13 @@ class SegmentExpr : public Expr {
     bool
     CanUseNestedIndex() const override {
         EnsureExecPathDetermined();
-        return PinnedIndexIsNested();
+        return SelectedIndexIsNested();
     }
 
-    // Ask whether this pinned index should serve the concrete operator/literal.
+    // Ask whether this selected reader should serve the concrete operator/literal.
     // FM's count-first guard can decline costly high-hit patterns.
-    // TODO: separate metadata-only family support, checked before pinning through
-    // ReaderCaps, from literal-dependent checks on the pinned query interface.
+    // TODO: separate metadata-only family support, checked before reader creation through
+    // ReaderCaps, from literal-dependent checks on the selected query interface.
     // INgramReader::CanHandle and IPatternMatchReader::ShouldUseForOp express the
     // latter; neither requires casting to a concrete index implementation.
     template <typename T>
@@ -3819,6 +4146,29 @@ class SegmentExpr : public Expr {
                !nested_path_.empty() && !PathContainsInteger(nested_path_);
     }
 
+    // Whether Eval() implements ExprExecPath::JsonStats for this expression.
+    // Only the expressions that override this may be switched to JsonStats by
+    // FallbackToJsonStatsIfEligible().
+    virtual bool
+    SupportsJsonStatsExecPath() const {
+        return false;
+    }
+
+    // JSON shredding is a typed column scan, not an index lookup: it still
+    // visits every row of the segment on every query. A JSON path index that
+    // serves this expression is preferred; the shredded columns are the
+    // fallback for JSON paths without a usable index. Subclasses therefore
+    // decide index paths in DetermineExecPath() and leave RawData for the
+    // paths they could not serve; this hook upgrades that RawData to
+    // JsonStats when the segment has stats for the field.
+    void
+    FallbackToJsonStatsIfEligible() {
+        if (exec_path_ == ExprExecPath::RawData &&
+            SupportsJsonStatsExecPath() && CanUseJsonStatsAtInit()) {
+            exec_path_ = ExprExecPath::JsonStats;
+        }
+    }
+
     virtual bool
     CanUseNgramIndex() const {
         return false;
@@ -3853,7 +4203,10 @@ class SegmentExpr : public Expr {
             // an exception escape can leave pthread_once active on this runtime,
             // so cleanup's second call would wait forever after prefetch fails.
             try {
-                const_cast<SegmentExpr*>(this)->DetermineExecPath();
+                auto self = const_cast<SegmentExpr*>(this);
+                self->DetermineExecPath();
+                self->FallbackToJsonStatsIfEligible();
+                self->RecordExecPath();
             } catch (...) {
                 determine_exec_path_error_ = std::current_exception();
             }
@@ -3863,15 +4216,134 @@ class SegmentExpr : public Expr {
         }
     }
 
+    // Whether this expression's execution path is a user-visible feature
+    // (filter_exec_path=*). False for internal nodes, such as the GIS refine
+    // pass that always re-checks the coarse candidates on raw data.
+    virtual bool
+    ReportsExecPath() const {
+        return true;
+    }
+
+    // Whether falling back to raw data despite an index on the field means
+    // the index was declined. False where raw data is the designed path
+    // whenever it exists (membership filters, timestamptz arithmetic) or
+    // where the index is a different kind the expression cannot use.
+    virtual bool
+    ReportsIndexDecline() const {
+        return true;
+    }
+
+    // Record the execution path DetermineExecPath() chose, once per
+    // expression per segment. Determined is not always executed: a later
+    // whole-filter cache hit or a conjunction that runs out of rows can skip
+    // the evaluation. The report counts feature use, so that only affects
+    // how often, never whether.
+    void
+    RecordExecPath() {
+        auto* recorder = feature_recorder_;
+        if (recorder == nullptr || !ReportsExecPath()) {
+            return;
+        }
+        switch (exec_path_) {
+            case ExprExecPath::ScalarIndex:
+                // An NGRAM candidate reader is selected on this path; the
+                // NGRAM hooks record it when its candidates are used.
+                if (CanUseNgramIndex()) {
+                    return;
+                }
+                recorder->Mark(FeatureBit::FilterPathScalarIndex);
+                RecordScalarIndexFamily(recorder);
+                return;
+            case ExprExecPath::PkIndex:
+                recorder->Mark(FeatureBit::FilterPathPkIndex);
+                return;
+            case ExprExecPath::TextIndex:
+                recorder->Mark(FeatureBit::FilterPathTextMatchIndex);
+                return;
+            case ExprExecPath::JsonStats:
+                recorder->Mark(FeatureBit::FilterPathJsonShredding);
+                return;
+            case ExprExecPath::RawData:
+                recorder->Mark(FeatureBit::FilterPathBruteForce);
+                // The field has an index this expression could have used:
+                // selection created a reader and the operator or literal refined
+                // it away, or no reader interface fit the expression.
+                if (ReportsIndexDecline() && HasIndexForThisPath()) {
+                    recorder->Mark(FeatureBit::FilterIndexDeclined);
+                }
+                return;
+        }
+    }
+
+    // Checks scalar/NGRAM registrations for index-declined reporting without
+    // resolving lazy metadata. JSON indexes must cover this expression's path.
+    bool
+    HasIndexForThisPath() const {
+        const auto registrations = segment_->IndexRegistrations(field_id_);
+        const auto path = field_type_ == DataType::JSON
+                              ? milvus::Json::pointer(nested_path_)
+                              : std::string{};
+        for (const auto& registration : registrations) {
+            if (registration.kind != segcore::IndexKind::Scalar &&
+                registration.kind != segcore::IndexKind::Ngram) {
+                continue;
+            }
+            if (field_type_ != DataType::JSON) {
+                return true;
+            }
+            if (registration.json_cast_type.data_type() ==
+                    JsonCastType::DataType::JSON &&
+                index_path_detail::IsPathPrefix(registration.json_path, path)) {
+                return true;
+            }
+            if (!registration.json_path.empty() &&
+                registration.json_path == path) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // The family of the selected scalar index, from the segment's index
+    // metadata rather than anything the user wrote. The family is the
+    // canonical registry key (index/Families.h): a JSON flat index is an
+    // INVERTED index underneath but registers as its own family, and the
+    // HYBRID selector has none, having resolved to bitmap or inverted at
+    // load.
+    void
+    RecordScalarIndexFamily(FeatureRecorder* recorder) const {
+        if (!selected_index_entry_.has_value()) {
+            return;
+        }
+        const auto& family = selected_index_entry_->family;
+        if (family == index::families::kJsonFlat) {
+            recorder->Mark(FeatureBit::ScalarIndexJsonFlat);
+        } else if (family == index::families::kBitmap) {
+            recorder->Mark(FeatureBit::ScalarIndexBitmap);
+        } else if (family == index::families::kSort) {
+            recorder->Mark(FeatureBit::ScalarIndexStlSort);
+        } else if (family == index::families::kMarisa) {
+            recorder->Mark(FeatureBit::ScalarIndexTrie);
+        } else if (family == index::families::kInverted) {
+            recorder->Mark(FeatureBit::ScalarIndexInverted);
+        } else if (family == index::families::kRTree) {
+            recorder->Mark(FeatureBit::ScalarIndexRtree);
+        } else if (family == index::families::kNgram) {
+            recorder->Mark(FeatureBit::ScalarIndexNgram);
+        } else if (family == index::families::kFmIndex) {
+            recorder->Mark(FeatureBit::ScalarIndexFmindex);
+        }
+    }
+
     // Determine the path during prefetch or lazily before evaluation. Metadata-only
     // JSON path checks and short-circuit paths must leave unused index cells cold.
     // TODO: consolidate family-support decisions in exec::DetermineExecPath using
-    // ExprIndexRequirement and FieldIndexCapability, then pin the selected interface.
-    // Literal-dependent cost/eligibility guards remain on the pinned interface;
+    // ExprIndexRequirement and FieldIndexCapability, then create the selected reader.
+    // Literal-dependent cost/eligibility guards remain on the selected interface;
     // they cannot be replaced by load-time capability bits.
     virtual void
     DetermineExecPath() {
-        SelectAndPinIndex(MakeIndexRequirement());
+        SelectAndCreateIndexReader(MakeIndexRequirement());
     }
 
     // Slice cached result bitmap for the current batch.
@@ -3976,6 +4448,10 @@ class SegmentExpr : public Expr {
             return;
         }
         EnsureExecPathDetermined();
+        if (exec_path_ != ExprExecPath::RawData &&
+            selected_reader_ != nullptr) {
+            selected_reader_->Prefetch();
+        }
         if (exec_path_ == ExprExecPath::RawData) {
             auto column = CaptureDataScanResources().first;
             if (!UsesLegacyChunkPrefetch(column.get())) {
@@ -4002,8 +4478,7 @@ class SegmentExpr : public Expr {
         // The prefetch worker can race with compound-expression cursor moves,
         // so inspect immutable initial-batch geometry rather than live cursor
         // state. A leading zero-element batch must not touch ARRAY payloads.
-        auto struct_element_offsets =
-            segment_->GetStructElementOffsets(field_id_);
+        auto struct_element_offsets = GetStructElementOffsets(field_id_);
         AssertInfo(struct_element_offsets != nullptr,
                    "StructElementOffsets not found for field {}",
                    field_id_.get());
@@ -4095,7 +4570,7 @@ class SegmentExpr : public Expr {
     // DetermineExecPath(). Do not call CanUseNestedIndex() from there because
     // it re-enters EnsureExecPathDetermined()'s std::call_once.
     bool
-    PinnedIndexIsNested() const {
+    SelectedIndexIsNested() const {
         return exec_path_ == ExprExecPath::ScalarIndex &&
                selected_element_level_result_;
     }
@@ -4110,6 +4585,13 @@ class SegmentExpr : public Expr {
     // skipped by SkipIndex needs no per-row validity work, so the multi-chunk
     // scan can avoid pinning/materializing it (see ProcessDataChunksForMultipleChunk).
     bool is_nullable_{false};
+    // Element-nullable and nested ARRAY rows are readable only as
+    // ArrayValueView.
+    bool is_native_list_array_{false};
+    bool is_nested_array_field_{false};
+    // The field's elements (ARRAY leaves, nested inner Arrays, VECTOR_ARRAY
+    // vectors) may be null.
+    bool is_element_nullable_{false};
     // Set when a null-rejecting parent (top-level filter / AND / OR) consumes
     // this expr's output, so result validity (valid_res) is never observed and
     // even a nullable skipped chunk needs no validity fetch. See MarkNullRejecting.
@@ -4125,6 +4607,9 @@ class SegmentExpr : public Expr {
     bool is_json_contains_{false};
     bool is_data_mode_{false};
     query::PlanOptions plan_options_;
+    // Execution feature recorder of the request, or null; see
+    // SetFeatureRecorder.
+    FeatureRecorder* feature_recorder_{nullptr};
     // Execution path determined once, preferably by PrefetchAsync() on the
     // prefetch pool. Direct callers that do not prefetch determine it lazily.
     ExprExecPath exec_path_{ExprExecPath::RawData};
@@ -4139,11 +4624,11 @@ class SegmentExpr : public Expr {
     // request; iterative readers that never requested prefetch stay lazy.
     bool raw_data_prefetch_deferred_{false};
     size_t raw_data_prefetch_start_chunk_{0};
-    // Owning pins are declared before the optional JSON view so the view is
+    // Reader and snapshot owners precede the optional JSON view so the view is
     // destroyed first. Every pointer below borrows from selected_reader_ after
-    // the exact metadata-selected entry is pinned and validated.
+    // the exact metadata-selected reader is created and validated.
     index::GrowingIndexSnapshotPin growing_index_pin_;
-    segcore::IndexPin selected_root_pin_;
+    index::IIndexReaderBasePtr selected_index_reader_;
     index::JsonResolvedReader selected_json_view_;
     const index::IIndexReaderBase* selected_reader_{nullptr};
     std::optional<segcore::IndexCapabilityEntry> selected_index_entry_;

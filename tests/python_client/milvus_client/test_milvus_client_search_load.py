@@ -14,8 +14,8 @@ field_name = ct.default_float_vec_field_name
 # Sentinel values for expected search results
 NOT_LOADED = "not_loaded"
 NOT_FOUND = "not_found"
-# Special sentinel: search on [p1, p2] with a specific error code/msg
-NOT_LOADED_999 = "not_loaded_999"
+# Explicit collection-not-loaded and dropped-partition expectations.
+COLLECTION_NOT_LOADED = "collection_not_loaded"
 NOT_FOUND_999 = "not_found_999"
 
 
@@ -103,8 +103,8 @@ class TestSearchLoadIndependent(TestMilvusClientV2Base):
                 check_task=CheckTasks.err_res,
                 check_items={ct.err_code: 1, ct.err_msg: "not found", "enable_milvus_client_api": True},
             )
-        elif expected == NOT_LOADED_999:
-            self.search(
+        elif expected == COLLECTION_NOT_LOADED:
+            response, _ = self.search(
                 client,
                 collection_name,
                 data=cf.gen_vectors(1, default_dim),
@@ -114,11 +114,13 @@ class TestSearchLoadIndependent(TestMilvusClientV2Base):
                 partition_names=partition_names,
                 check_task=CheckTasks.err_res,
                 check_items={
-                    ct.err_code: 999,
-                    ct.err_msg: "failed to search: collection not loaded",
+                    ct.err_code: 101,
+                    ct.err_msg: "collection not loaded",
                     "enable_milvus_client_api": True,
                 },
             )
+            # err_res checks the message only; also enforce the public business code.
+            assert response.code == 101, response
         elif expected == NOT_FOUND_999:
             # partition not found with error code 999, msg includes partition name
             p2_name = partition_names[-1] if partition_names else ""
@@ -424,7 +426,7 @@ class TestSearchLoadIndependent(TestMilvusClientV2Base):
         # search on [p1, p2]
         self._do_search(client, collection_name, [p1_name, p2_name], 10, NOT_FOUND_999)
         # search on p1
-        self._do_search(client, collection_name, [p1_name], 10, NOT_LOADED_999)
+        self._do_search(client, collection_name, [p1_name], 10, COLLECTION_NOT_LOADED)
         # search on p2
         self._do_search(client, collection_name, [p2_name], 10, NOT_FOUND_999)
 

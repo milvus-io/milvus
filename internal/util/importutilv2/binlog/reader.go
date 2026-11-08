@@ -307,6 +307,10 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 			return err
 		}
 		rwOptions = append(rwOptions, storage.WithPluginContext(pluginContext))
+	} else {
+		// schema describes the target collection. A plaintext backup must
+		// not inherit its encryption context.
+		rwOptions = append(rwOptions, storage.WithPluginContext(nil))
 	}
 
 	rr, err := storage.NewBinlogRecordReader(r.ctx, binlogs, r.schema, rwOptions...)
@@ -719,7 +723,7 @@ func (r *reader) Read() (*storage.InsertData, error) {
 	if r.readErr != nil {
 		return nil, r.readErr
 	}
-	insertData, err := storage.NewInsertDataWithFunctionOutputField(r.schema)
+	insertData, err := storage.NewInsertDataWithMemoryTracking(r.schema)
 	if err != nil {
 		return nil, err
 	}
@@ -768,12 +772,15 @@ func (r *reader) Read() (*storage.InsertData, error) {
 			}
 		}
 		row := (*v).Value.(map[int64]any)
+		if !r.filter(row) {
+			continue
+		}
 		allFields := typeutil.GetAllFieldSchemas(r.schema)
 		// convert record to fieldData
 		for _, field := range allFields {
 			fieldData := insertData.Data[field.GetFieldID()]
 			if fieldData == nil {
-				fieldData, err = storage.NewFieldData(field.GetDataType(), field, 1024)
+				fieldData, err = storage.NewFieldDataWithMemoryTracking(field.GetDataType(), field, 1024)
 				if err != nil {
 					return nil, err
 				}
@@ -786,51 +793,21 @@ func (r *reader) Read() (*storage.InsertData, error) {
 			}
 			rowNum++
 		}
-		if rowNum%100 == 0 && // Prevent frequent memory check
+		if rowNum%100 == 0 && // Prevent frequent memory check.
 			insertData.GetMemorySize() >= r.bufferSize {
 			break
 		}
 	}
-	insertData, err = r.filter(insertData)
-	if err != nil {
-		return nil, err
-	}
 	return insertData, nil
 }
 
-func (r *reader) filter(insertData *storage.InsertData) (*storage.InsertData, error) {
-	if len(r.filters) == 0 {
-		return insertData, nil
-	}
-	masks := make(map[int]struct{}, 0)
-OUTER:
-	for i := 0; i < insertData.GetRowNum(); i++ {
-		row := insertData.GetRow(i)
-		for _, f := range r.filters {
-			if !f(row) {
-				masks[i] = struct{}{}
-				continue OUTER
-			}
+func (r *reader) filter(row map[int64]interface{}) bool {
+	for _, f := range r.filters {
+		if !f(row) {
+			return false
 		}
 	}
-	if len(masks) == 0 { // no data will undergo filtration, return directly
-		return insertData, nil
-	}
-	result, err := storage.NewInsertDataWithFunctionOutputField(r.schema)
-	if err != nil {
-		return nil, err
-	}
-	for i := 0; i < insertData.GetRowNum(); i++ {
-		if _, ok := masks[i]; ok {
-			continue
-		}
-		row := insertData.GetRow(i)
-		err = result.Append(row)
-		if err != nil {
-			return nil, merr.WrapErrImportFailedMsg("failed to append row, err=%s", err.Error())
-		}
-	}
-	return result, nil
+	return true
 }
 
 func (r *reader) Size() (int64, error) {

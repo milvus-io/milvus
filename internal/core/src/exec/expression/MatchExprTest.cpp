@@ -34,6 +34,7 @@
 #include <string>
 #include <thread>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -68,12 +69,12 @@
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
 #include "segcore/Utils.h"
-#include "segcore/segment_c.h"
 #include "storage/MmapManager.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/storage_test_utils.h"
 #include "test_utils/GenExprProto.h"
+#include "test_utils/ManifestTestUtil.h"
 #include "test_utils/SegcoreConfigUtils.h"
 
 using namespace milvus;
@@ -538,10 +539,8 @@ MatchSingleRowReference(int64_t bitset_start,
     int64_t hit_count = 0;
     for (int64_t i = 0; i < row_elem_count; ++i) {
         const auto bit = bitset_start + i;
-        if (!valid_bitmap[bit]) {
-            continue;
-        }
-        if (match_bitmap[bit]) {
+        // An UNKNOWN element is a miss.
+        if (match_bitmap[bit] && valid_bitmap[bit]) {
             ++hit_count;
         } else if (match_type == expr::MatchType::MatchAll) {
             return false;
@@ -730,6 +729,171 @@ TEST(MatchExprWordFoldTest, OffsetRowsMatchPerBitReference) {
     }
 }
 
+// C18: element predicates are three-valued; an UNKNOWN element is a miss and
+// MATCH_* yields only TRUE/FALSE. Element-level predicates on element-nullable
+// sub-fields are still rejected, so the element results are injected as
+// bitmaps that encode the three-valued outcome of each predicate.
+TEST(MatchExprUnknownElements, UnknownElementIsMiss) {
+    // Per row: element (match, valid). U is valid=0; its match bit is set on
+    // some elements to check that it is ignored.
+    struct Elem {
+        bool match;
+        bool valid;
+    };
+    constexpr Elem T{true, true};
+    constexpr Elem F{false, true};
+    constexpr Elem U0{false, false};
+    constexpr Elem U1{true, false};
+    struct Row {
+        std::string name;
+        std::vector<Elem> elems;
+        expr::MatchType type;
+        int64_t threshold;
+        bool expected;
+    };
+    using MT = expr::MatchType;
+    const std::vector<Row> rows = {
+        // b = [3, NULL], $[b] > 0
+        {"ALL [3,NULL]", {T, U0}, MT::MatchAll, 0, false},
+        {"ALL [3,NULL] (U bit set)", {T, U1}, MT::MatchAll, 0, false},
+        // b = [NULL, NULL]
+        {"ALL [NULL,NULL]", {U0, U1}, MT::MatchAll, 0, false},
+        {"ANY [NULL,NULL]", {U1, U0}, MT::MatchAny, 0, false},
+        // b = []
+        {"ALL []", {}, MT::MatchAll, 0, true},
+        {"ANY []", {}, MT::MatchAny, 0, false},
+        // b = [NULL, NULL, 5], $[b] > 0
+        {"LEAST(2) [NULL,NULL,5]", {U1, U0, T}, MT::MatchLeast, 2, false},
+        {"MOST(1) [NULL,NULL,5]", {U1, U0, T}, MT::MatchMost, 1, true},
+        {"EXACT(1) [NULL,NULL,5]", {U1, U0, T}, MT::MatchExact, 1, true},
+        // s = [{a:1, b:NULL}, {a:2, b:3}]
+        // $[b] != 1 -> (U, T)
+        {"ALL $[b] != 1", {U0, T}, MT::MatchAll, 0, false},
+        // !($[b] == 3) -> !(U, T) = (U, F)
+        {"ANY !($[b] == 3)", {U1, F}, MT::MatchAny, 0, false},
+        // $[a] == 1 && $[b] == 3 -> (T && U, F && T) = (U, F)
+        {"ANY $[a]==1 && $[b]==3", {U0, F}, MT::MatchAny, 0, false},
+        // $[a] == 1 || $[b] == 3 -> (T || U, F || T) = (T, T)
+        {"ANY $[a]==1 || $[b]==3", {T, T}, MT::MatchAny, 0, true},
+        // A whole row of UNKNOWN elements on the word path.
+        {"ALL 70 x U", std::vector<Elem>(70, U1), MT::MatchAll, 0, false},
+        {"ALL 70 x T", std::vector<Elem>(70, T), MT::MatchAll, 0, true},
+    };
+
+    auto schema = std::make_shared<Schema>();
+    auto int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+    auto sub_int_fid = schema->AddDebugArrayField(
+        "struct_array[sub_int]", DataType::INT32, false);
+
+    const int64_t row_count = rows.size();
+    auto insert_data = std::make_unique<InsertRecordProto>();
+    std::vector<int64_t> ids(row_count);
+    std::vector<idx_t> row_ids(row_count);
+    std::vector<Timestamp> timestamps(row_count);
+    std::vector<milvus::proto::schema::ScalarField> sub_int_data(row_count);
+    int64_t elem_count = 0;
+    for (int64_t row = 0; row < row_count; ++row) {
+        ids[row] = row;
+        row_ids[row] = row;
+        timestamps[row] = row;
+        for (size_t i = 0; i < rows[row].elems.size(); ++i) {
+            sub_int_data[row].mutable_int_data()->add_data(i);
+        }
+        elem_count += rows[row].elems.size();
+    }
+    auto id_array = CreateDataArrayFrom(
+        ids.data(), nullptr, row_count, schema->operator[](int64_fid));
+    insert_data->mutable_fields_data()->AddAllocated(id_array.release());
+    auto sub_int_array = CreateDataArrayFrom(sub_int_data.data(),
+                                             nullptr,
+                                             row_count,
+                                             schema->operator[](sub_int_fid));
+    insert_data->mutable_fields_data()->AddAllocated(sub_int_array.release());
+    insert_data->set_num_rows(row_count);
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    const auto reserved_offset = segment->PreInsert(row_count);
+    segment->Insert(reserved_offset,
+                    row_count,
+                    row_ids.data(),
+                    timestamps.data(),
+                    std::make_shared<InsertRecordProto>(*insert_data));
+
+    exec::QueryContext query_context(
+        "match_unknown_elements", segment.get(), row_count, MAX_TIMESTAMP);
+    exec::ExecContext exec_context(&query_context);
+    // Evaluate each row on its own (one batch of all rows, one match type
+    // per row), sequentially and through offset input.
+    int64_t elem_start = 0;
+    for (int64_t row = 0; row < row_count; ++row) {
+        const auto& r = rows[row];
+        SCOPED_TRACE(r.name);
+        TargetBitmap matches(elem_count, false);
+        TargetBitmap valid(elem_count, true);
+        for (size_t i = 0; i < r.elems.size(); ++i) {
+            matches[elem_start + i] = r.elems[i].match;
+            valid[elem_start + i] = r.elems[i].valid;
+        }
+        auto logical_expr = std::make_shared<expr::MatchExpr>(
+            "struct_array", r.type, r.threshold, expr::TypedExprPtr{});
+
+        std::vector<std::shared_ptr<exec::Expr>> inputs = {
+            std::make_shared<FixedBitmapExpr>(matches.clone(), valid.clone())};
+        exec::PhyMatchFilterExpr batch_expr(inputs,
+                                            logical_expr,
+                                            "PhyMatchFilterExpr",
+                                            nullptr,
+                                            segment.get(),
+                                            row_count,
+                                            row_count);
+        exec::EvalCtx batch_context(&exec_context);
+        VectorPtr batch_result;
+        batch_expr.Eval(batch_context, batch_result);
+        auto batch_output =
+            std::dynamic_pointer_cast<ColumnVector>(batch_result);
+        ASSERT_NE(batch_output, nullptr);
+        ASSERT_EQ(batch_output->size(), row_count);
+        TargetBitmapView batch_bits(batch_output->GetRawData(), row_count);
+        TargetBitmapView batch_valid(batch_output->GetValidRawData(),
+                                     row_count);
+        EXPECT_EQ(batch_bits[row], r.expected) << "batch";
+        EXPECT_TRUE(batch_valid[row]) << "batch";
+
+        // Offset input: only this row, so its elements start at bit 0.
+        TargetBitmap row_matches(r.elems.size(), false);
+        TargetBitmap row_valid(r.elems.size(), true);
+        for (size_t i = 0; i < r.elems.size(); ++i) {
+            row_matches[i] = r.elems[i].match;
+            row_valid[i] = r.elems[i].valid;
+        }
+        std::vector<std::shared_ptr<exec::Expr>> offset_inputs = {
+            std::make_shared<FixedBitmapExpr>(std::move(row_matches),
+                                              std::move(row_valid))};
+        exec::PhyMatchFilterExpr offset_expr(offset_inputs,
+                                             logical_expr,
+                                             "PhyMatchFilterExpr",
+                                             nullptr,
+                                             segment.get(),
+                                             row_count,
+                                             row_count);
+        exec::OffsetVector offsets = {static_cast<int32_t>(row)};
+        exec::EvalCtx offset_context(&exec_context);
+        offset_context.set_offset_input(&offsets);
+        VectorPtr offset_result;
+        offset_expr.Eval(offset_context, offset_result);
+        auto offset_output =
+            std::dynamic_pointer_cast<ColumnVector>(offset_result);
+        ASSERT_NE(offset_output, nullptr);
+        ASSERT_EQ(offset_output->size(), 1);
+        TargetBitmapView offset_bits(offset_output->GetRawData(), 1);
+        TargetBitmapView offset_valid(offset_output->GetValidRawData(), 1);
+        EXPECT_EQ(offset_bits[0], r.expected) << "offsets";
+        EXPECT_TRUE(offset_valid[0]) << "offsets";
+
+        elem_start += r.elems.size();
+    }
+}
+
 TEST(MatchExprZeroElementBatch,
      NullableNestedRowsAcrossConsecutiveEmptyBatches) {
     struct BatchSizeGuard {
@@ -745,6 +909,7 @@ TEST(MatchExprZeroElementBatch,
     schema->set_primary_field_id(int64_fid);
     const auto nested_int_fid = FieldId(int64_fid.get() + 1);
     proto::schema::TypeSchema nested_int_type;
+    nested_int_type.set_nullable(true);
     nested_int_type.mutable_array_element()
         ->mutable_array_element()
         ->set_leaf_type(proto::schema::DataType::Int32);
@@ -1161,15 +1326,6 @@ TEST(MatchExprNestedArrayExpressions, MatchFamilyGrowingAndSealed) {
     }
     auto storage_schema = Schema::ParseFrom(storage_schema_proto);
 
-    auto storage_growing =
-        CreateGrowingSegment(storage_schema, empty_index_meta, 2);
-    const auto storage_offset = storage_growing->PreInsert(row_count);
-    storage_growing->Insert(storage_offset,
-                            row_count,
-                            row_ids.data(),
-                            timestamps.data(),
-                            std::make_shared<InsertRecordProto>(*insert_data));
-
     const auto unique =
         std::chrono::steady_clock::now().time_since_epoch().count();
     const auto segment_path =
@@ -1180,30 +1336,88 @@ TEST(MatchExprNestedArrayExpressions, MatchFamilyGrowingAndSealed) {
     auto directory_guard = folly::makeGuard(
         [&segment_path] { std::filesystem::remove_all(segment_path); });
 
-    auto schema_blob = storage_schema_proto.SerializeAsString();
-    const auto column_group_pattern =
-        "0|1|" + std::to_string(int64_fid.get()) + "," +
-        std::to_string(nested_int_fid.get()) + "," +
-        std::to_string(nested_string_fid.get());
-    CFlushConfig flush_config{};
-    flush_config.segment_path = segment_path.c_str();
-    flush_config.read_version = -1;
-    flush_config.retry_limit = 3;
-    flush_config.schema_blob = schema_blob.data();
-    flush_config.schema_length = static_cast<int64_t>(schema_blob.size());
-    flush_config.schema_based_pattern = column_group_pattern.c_str();
+    auto build_int64 = [](const auto& values) {
+        arrow::Int64Builder builder;
+        for (const auto value : values) {
+            AssertInfo(builder.Append(static_cast<int64_t>(value)).ok(),
+                       "failed to append nested expression test int64");
+        }
+        std::shared_ptr<arrow::Array> output;
+        AssertInfo(builder.Finish(&output).ok(),
+                   "failed to finish nested expression test int64");
+        return output;
+    };
+    auto int_values = std::make_shared<arrow::Int32Builder>();
+    auto int_inner = std::make_shared<arrow::ListBuilder>(
+        arrow::default_memory_pool(),
+        int_values,
+        arrow::list(arrow::field("item", arrow::int32(), false)));
+    arrow::ListBuilder int_outer(
+        arrow::default_memory_pool(),
+        int_inner,
+        GetArrowDataType((*storage_schema)[nested_int_fid]));
+    for (const auto& row : nested_int_rows->data()) {
+        ASSERT_TRUE(int_outer.Append().ok());
+        for (const auto& child : row.array_data().data()) {
+            ASSERT_TRUE(int_inner->Append().ok());
+            for (const auto value : child.int_data().data()) {
+                ASSERT_TRUE(int_values->Append(value).ok());
+            }
+        }
+    }
+    std::shared_ptr<arrow::Array> nested_int_array;
+    ASSERT_TRUE(int_outer.Finish(&nested_int_array).ok());
 
-    CFlushResult flush_result{};
-    auto flush_guard =
-        folly::makeGuard([&flush_result] { FreeFlushResult(&flush_result); });
-    const auto flush_status = FlushGrowingSegmentData(
-        storage_growing.get(), 0, row_count, &flush_config, &flush_result);
-    ASSERT_EQ(flush_status.error_code, Success) << flush_status.error_msg;
-    ASSERT_EQ(flush_result.num_rows, row_count);
+    auto string_values = std::make_shared<arrow::StringBuilder>();
+    auto string_inner = std::make_shared<arrow::ListBuilder>(
+        arrow::default_memory_pool(),
+        string_values,
+        arrow::list(arrow::field("item", arrow::utf8(), false)));
+    arrow::ListBuilder string_outer(
+        arrow::default_memory_pool(),
+        string_inner,
+        GetArrowDataType((*storage_schema)[nested_string_fid]));
+    for (const auto& row : nested_string_rows->data()) {
+        ASSERT_TRUE(string_outer.Append().ok());
+        for (const auto& child : row.array_data().data()) {
+            ASSERT_TRUE(string_inner->Append().ok());
+            for (const auto& value : child.string_data().data()) {
+                ASSERT_TRUE(string_values->Append(value).ok());
+            }
+        }
+    }
+    std::shared_ptr<arrow::Array> nested_string_array;
+    ASSERT_TRUE(string_outer.Finish(&nested_string_array).ok());
+
+    auto loon_schema = storage_schema->ConvertToLoonArrowSchema();
+    std::unordered_map<FieldId, std::shared_ptr<arrow::Array>> columns = {
+        {RowFieldID, build_int64(row_ids)},
+        {TimestampFieldID, build_int64(timestamps)},
+        {int64_fid, build_int64(ids)},
+        {nested_int_fid, nested_int_array},
+        {nested_string_fid, nested_string_array},
+    };
+    arrow::ArrayVector ordered_columns;
+    for (const auto& id : storage_schema->get_field_ids()) {
+        ordered_columns.push_back(columns.at(id));
+    }
+    std::vector<std::shared_ptr<arrow::RecordBatch>> batches;
+    for (int64_t offset = 0; offset < row_count; offset += 2) {
+        arrow::ArrayVector sliced;
+        for (const auto& column : ordered_columns) {
+            sliced.push_back(column->Slice(offset, 2));
+        }
+        batches.push_back(arrow::RecordBatch::Make(loon_schema, 2, sliced));
+    }
+    const auto committed_version = test::WriteRecordBatchesToV3(
+        storage_schema,
+        segment_path,
+        batches,
+        test::GenerateColumnGroupPattern(storage_schema));
 
     const auto manifest_path =
         "{\"base_path\":\"" + segment_path +
-        "\",\"ver\":" + std::to_string(flush_result.committed_version) + "}";
+        "\",\"ver\":" + std::to_string(committed_version) + "}";
     proto::segcore::SegmentLoadInfo load_info;
     load_info.set_collectionid(1);
     load_info.set_partitionid(2);
@@ -1383,6 +1597,67 @@ TEST(MatchExprNullableStruct, SealedPropagatesStructRowValidity) {
     CheckNullableStructExpressions(segment.get(), schema);
 }
 
+TEST(MatchExprNullableStruct, PinnedSchemaBuildsOldMappingAfterStructReadded) {
+    FieldId pk;
+    FieldId sub;
+    auto schema = BuildNullableStructSchema(pk, sub);
+    schema->set_schema_version(1);
+    auto insert_data = BuildNullableStructInsertData(schema, pk, sub);
+    GeneratedData data;
+    data.schema_ = schema;
+    data.raw_ = insert_data.release();
+    data.row_ids_ = {0, 1, 2, 3, 4};
+    data.timestamps_ = {0, 1, 2, 3, 4};
+    auto segment = CreateSealedWithFieldDataLoaded(schema, data);
+    auto read = segment->CaptureReadSnapshot();
+
+    auto new_schema = std::make_shared<Schema>();
+    new_schema->set_schema_version(2);
+    new_schema->AddField(
+        FieldName("id"), pk, DataType::INT64, false, std::nullopt);
+    new_schema->set_primary_field_id(pk);
+    new_schema->AddField(FieldName("struct_array[sub_int]"),
+                         FieldId(sub.get() + 1),
+                         DataType::ARRAY,
+                         DataType::INT32,
+                         true,
+                         false);
+    segment->Reopen(new_schema);
+
+    auto child = std::make_shared<FixedBitmapExpr>(TargetBitmap(3, true),
+                                                   TargetBitmap(3, true));
+    auto logical = std::make_shared<expr::MatchExpr>(
+        "struct_array", expr::MatchType::MatchAll, 0, expr::TypedExprPtr{});
+    exec::PhyMatchFilterExpr physical(
+        {child}, logical, "pinned_match", nullptr, segment.get(), 5, 5);
+    physical.SetSnapshot(read.get());
+    exec::QueryContext query_context(
+        "pinned_match", segment.get(), 5, MAX_TIMESTAMP);
+    query_context.set_read_schema(schema);
+    query_context.set_read_snapshot(read);
+    exec::ExecContext exec_context(&query_context);
+    exec::EvalCtx eval_context(&exec_context);
+    VectorPtr result;
+    physical.Eval(eval_context, result);
+    auto pinned_field = query_context.get_schema_snapshot()
+                            ->GetFirstArrayFieldInStruct("struct_array")
+                            .get_id();
+    EXPECT_EQ(pinned_field, sub);
+    EXPECT_EQ(query_context.get_struct_element_offsets(pinned_field)
+                  ->GetTotalElementCount(),
+              3);
+    auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+    ASSERT_NE(output, nullptr);
+    ASSERT_EQ(output->size(), 5);
+    TargetBitmapView values(output->GetRawData(), output->size());
+    TargetBitmapView validity(output->GetValidRawData(), output->size());
+    for (int64_t i = 0; i < 5; ++i) {
+        const bool valid = i == 0 || i == 2 || i == 3;
+        EXPECT_EQ(values[i], valid);
+        EXPECT_EQ(validity[i], valid);
+    }
+}
+
 TEST(MatchExprNullableStruct, GrowingPropagatesStructRowValidity) {
     FieldId int64_fid;
     FieldId sub_int_fid;
@@ -1423,6 +1698,15 @@ TEST(MatchExprNullableStruct, NestedIndexUsesPhysicalRowValidity) {
         {1, 2}, {}, {}, {9001}, {}};
     InstallNestedInvertedIndex(*segment, sub_int_fid, arrays, DataType::INT32);
 
+    auto offsets = segment->GetStructElementOffsets(sub_int_fid);
+    ASSERT_TRUE(offsets->HasRowValidity());
+    auto snapshot = segment->CaptureReadSnapshot();
+    auto column = snapshot->GetColumn(sub_int_fid);
+    ASSERT_NE(column, nullptr);
+    column->ManualEvictCache();
+    const int64_t first_row = 0;
+    ASSERT_FALSE(column->CellsLoaded(&first_row, 1));
+
     EXPECT_EQ(RetrieveOffsets(segment.get(),
                               schema,
                               "match_all(struct_array, "
@@ -1433,6 +1717,8 @@ TEST(MatchExprNullableStruct, NestedIndexUsesPhysicalRowValidity) {
                         schema,
                         "not array_contains(struct_array[sub_int], 9001)"),
         (std::set<int64_t>{0, 2}));
+    EXPECT_FALSE(column->CellsLoaded(&first_row, 1))
+        << "indexed MATCH must use cached parent validity without raw reads";
 }
 
 TEST(StructElementOffsetsReopen, ConcurrentReadersAreSynchronized) {

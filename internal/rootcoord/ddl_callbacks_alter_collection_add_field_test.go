@@ -20,14 +20,12 @@ import (
 	"context"
 	"testing"
 
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -132,16 +130,13 @@ func TestDDLCallbacksAlterCollectionAddFieldAnalyzerFileResourceRefs(t *testing.
 	}
 	meta.fileResourceRefCnt = map[int64]int{}
 
-	mixCoord := core.mixCoord.(*mocks.MixCoord)
-	mixCoord.EXPECT().ValidateAnalyzer(mock.Anything, mock.MatchedBy(func(req *querypb.ValidateAnalyzerRequest) bool {
-		infos := req.GetAnalyzerInfos()
-		return len(infos) == 1 &&
+	setValidateAnalyzer := mockAnalyzerValidation(t)
+	setValidateAnalyzer(func(_ context.Context, infos []*querypb.AnalyzerInfo) ([]int64, error) {
+		require.True(t, len(infos) == 1 &&
 			infos[0].GetField() == fieldName &&
-			infos[0].GetParams() == `{"tokenizer":"standard"}`
-	})).Return(&querypb.ValidateAnalyzerResponse{
-		Status:      merr.Success(),
-		ResourceIds: []int64{resourceID},
-	}, nil).Once()
+			infos[0].GetParams() == `{"tokenizer":"standard"}`)
+		return []int64{resourceID}, nil
+	})
 
 	fieldSchema := &schemapb.FieldSchema{
 		Name:     fieldName,

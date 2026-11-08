@@ -13,14 +13,131 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "segcore/indexing/FieldIndexCapability.h"
+#include "segcore/indexing/IndexInventory.h"
 
+#include <atomic>
+#include <chrono>
 #include <cstdint>
+#include <cstdlib>
+#include <future>
+#include <memory>
+#include <stdexcept>
+#include <string>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
+#include <folly/executors/CPUThreadPoolExecutor.h>
+#include <folly/synchronization/Latch.h>
 #include <gtest/gtest.h>
 
+#include "futures/Future.h"
+#include "test_utils/cachinglayer_test_utils.h"
+
 namespace milvus::segcore {
+namespace {
+
+class InventoryTestReader final : public index::IIndexReaderBase {
+ public:
+    explicit InventoryTestReader(
+        index::ReaderCaps caps,
+        int64_t count = 1,
+        std::shared_ptr<const index::IIndex> owner = {})
+        : owner_(std::move(owner)), caps_(caps), count_(count) {
+    }
+
+    index::ReaderCaps
+    Caps() const override {
+        return caps_;
+    }
+
+    index::Domain
+    CoordDomain() const override {
+        return index::Domain::Row;
+    }
+
+    int64_t
+    Count() const override {
+        return count_;
+    }
+
+    DataType
+    ValueType() const override {
+        return DataType::INT64;
+    }
+
+ private:
+    std::shared_ptr<const index::IIndex> owner_;
+    index::ReaderCaps caps_;
+    int64_t count_;
+};
+
+class InventoryTestIndex final
+    : public index::IIndex,
+      public std::enable_shared_from_this<InventoryTestIndex> {
+ public:
+    explicit InventoryTestIndex(index::ReaderCaps caps = {.predicate = true},
+                                int64_t count = 1)
+        : caps_(caps), count_(count) {
+    }
+    index::IndexMetadata
+    Metadata() const override {
+        return {caps_, index::Domain::Row, DataType::INT64, count_};
+    }
+    index::IIndexReaderBasePtr
+    CreateReader(OpContext* ctx) const override {
+        std::lock_guard lock(context_mutex_);
+        contexts.push_back(ctx);
+        return std::make_unique<InventoryTestReader>(
+            Metadata().caps, count_, shared_from_this());
+    }
+    void
+    CancelWarmup() const override {
+        ++cancellations;
+    }
+    index::ReaderCaps caps_;
+    int64_t count_;
+    mutable std::mutex context_mutex_;
+    mutable std::vector<OpContext*> contexts;
+    mutable std::atomic<int> cancellations{0};
+};
+
+IndexCapabilityEntry
+TestEntry(FieldId field_id = FieldId(10),
+          int64_t index_id = 1,
+          index::ReaderCaps caps = {.predicate = true}) {
+    IndexCapabilityEntry entry{
+        IndexKey{field_id, IndexIdentity::PreBuiltIndex(index_id)}};
+    entry.family = "inventory-test";
+    entry.value_type = DataType::INT64;
+    entry.caps = caps;
+    return entry;
+}
+
+index::IndexPtr
+TestSlot(std::string key,
+         index::ReaderCaps caps = {.predicate = true},
+         int64_t count = 1) {
+    return std::make_shared<InventoryTestIndex>(caps, count);
+}
+
+std::vector<index::IndexPtr>
+ResolvedIndexes(const IndexInventory& inventory) {
+    std::vector<index::IndexPtr> result;
+    for (const auto& entry : inventory.SnapshotEntries()) {
+        if (auto index = entry->Peek())
+            result.push_back(std::move(index));
+    }
+    return result;
+}
+
+std::shared_ptr<IndexInventory::Entry>
+LazyEntry(IndexCapabilityEntry meta, IndexInventory::Factory factory) {
+    return std::make_shared<IndexInventory::Entry>(
+        RegistrationFromCapability(meta), std::move(factory));
+}
+
+}  // namespace
 
 TEST(IndexIdentityTest, ClassifiesPreBuiltAndSegmentLocalIndexes) {
     EXPECT_EQ(IndexIdentity::PreBuiltIndex(-1).kind(),
@@ -45,6 +162,556 @@ TEST(IndexIdentityTest, IndexKeyIncludesKindAndField) {
     keys.insert(same_number_local);
     keys.insert(same_identity_other_field);
     EXPECT_EQ(keys.size(), 3);
+}
+
+TEST(IndexInventoryTest, LifecycleReadsDoNotResolveLazyEntry) {
+    IndexInventory inventory;
+    const auto entry = TestEntry();
+    std::atomic<int> calls{0};
+    inventory.Register(LazyEntry(entry, [&](OpContext*) {
+        ++calls;
+        return IndexInventory::ResolvedData{entry.family,
+                                            entry.value_type,
+                                            entry.caps,
+                                            TestSlot("inventory-metadata")};
+    }));
+
+    EXPECT_EQ(calls.load(), 0);
+    EXPECT_EQ(inventory.Entries().size(), 1);
+    EXPECT_TRUE(ResolvedIndexes(inventory).empty());
+    EXPECT_EQ(calls.load(), 0);
+
+    auto dropped_snapshot = inventory;
+    EXPECT_NE(dropped_snapshot.Drop(entry.key), nullptr);
+    EXPECT_TRUE(dropped_snapshot.Entries().empty());
+    EXPECT_EQ(calls.load(), 0);
+
+    const auto capability =
+        inventory.ResolveCapability(nullptr, entry.key.field_id);
+    ASSERT_EQ(capability.entries().size(), 1);
+    EXPECT_EQ(capability.entries().front().family, entry.family);
+    EXPECT_EQ(calls.load(), 1);
+
+    auto reader = inventory.CreateIndexReader(nullptr, entry.key);
+    EXPECT_TRUE(reader);
+    EXPECT_EQ(calls.load(), 1);
+    ASSERT_EQ(ResolvedIndexes(inventory).size(), 1);
+}
+
+TEST(IndexInventoryTest,
+     RetiredLazyIndexStillCreatesIndependentRequestReaders) {
+    IndexInventory snapshot;
+    const auto meta = TestEntry();
+    auto index = std::make_shared<InventoryTestIndex>();
+    int calls = 0;
+    snapshot.Register(LazyEntry(meta, [&](OpContext*) {
+        ++calls;
+        return IndexInventory::ResolvedData{
+            meta.family, meta.value_type, meta.caps, index};
+    }));
+    auto live = snapshot;
+    auto retired = live.Drop(meta.key);
+    ASSERT_NE(retired, nullptr);
+    retired->CancelWarmup();
+    EXPECT_EQ(calls, 0);
+    EXPECT_EQ(index->cancellations, 0);
+    OpContext first_context;
+    OpContext second_context;
+    auto first = snapshot.CreateIndexReader(&first_context, meta.key);
+    auto second = snapshot.CreateIndexReader(&second_context, meta.key);
+    ASSERT_TRUE(first);
+    ASSERT_TRUE(second);
+    EXPECT_NE(first.get(), second.get());
+    EXPECT_EQ(calls, 1);
+    EXPECT_EQ(index->cancellations, 1);
+    EXPECT_EQ(index->contexts,
+              (std::vector<OpContext*>{&first_context, &second_context}));
+    const auto* reader = first.get();
+    std::shared_ptr<void> lifetime = std::move(first);
+    EXPECT_FALSE(first);
+    std::weak_ptr<index::IIndex> owner = index;
+    index.reset();
+    second.reset();
+    snapshot = {};
+    retired.reset();
+    EXPECT_FALSE(owner.expired());
+    EXPECT_EQ(reader->Count(), 1);
+    lifetime.reset();
+    EXPECT_TRUE(owner.expired());
+}
+
+TEST(IndexInventoryTest, FieldLookupResolvesOnlyRequestedField) {
+    IndexInventory inventory;
+    const std::vector<IndexCapabilityEntry> entries{TestEntry(FieldId(10), 1),
+                                                    TestEntry(FieldId(10), 2),
+                                                    TestEntry(FieldId(11), 1)};
+    int calls[3] = {0, 0, 0};
+    for (size_t i = 0; i < entries.size(); ++i) {
+        inventory.Register(
+            LazyEntry(entries[i], [&, meta = entries[i], i](OpContext*) {
+                ++calls[i];
+                return IndexInventory::ResolvedData{
+                    meta.family,
+                    meta.value_type,
+                    meta.caps,
+                    TestSlot("inventory-field-lookup-" + std::to_string(i),
+                             meta.caps,
+                             i + 1)};
+            }));
+    }
+
+    EXPECT_EQ(inventory.Entries().size(), 3);
+    EXPECT_EQ(inventory.Entries(FieldId(10)).size(), 2);
+    EXPECT_EQ(inventory.Entries(FieldId(11)).size(), 1);
+    EXPECT_TRUE(inventory.Entries(FieldId(12)).empty());
+    EXPECT_TRUE(inventory.ResolveCapability(nullptr, FieldId(12)).empty());
+    EXPECT_TRUE(ResolvedIndexes(inventory).empty());
+
+    const auto capability = inventory.ResolveCapability(nullptr, FieldId(10));
+    ASSERT_EQ(capability.entries().size(), 2);
+    EXPECT_EQ(capability.entries()[0].key, entries[0].key);
+    EXPECT_EQ(capability.entries()[1].key, entries[1].key);
+    EXPECT_EQ(calls[0], 1);
+    EXPECT_EQ(calls[1], 1);
+    EXPECT_EQ(calls[2], 0);
+
+    auto reader = inventory.CreateIndexReader(nullptr, entries[2].key);
+    ASSERT_TRUE(reader);
+    EXPECT_EQ(reader->Count(), 3);
+    EXPECT_EQ(calls[2], 1);
+    EXPECT_EQ(ResolvedIndexes(inventory).size(), 3);
+    EXPECT_TRUE(inventory.CreateIndexReader(
+                    nullptr, TestEntry(FieldId(10), 3).key) == nullptr);
+    EXPECT_TRUE(inventory.CreateIndexReader(
+                    nullptr, TestEntry(FieldId(12), 1).key) == nullptr);
+}
+
+TEST(IndexInventoryTest, FieldMutationsPreserveOtherFieldsAndSnapshots) {
+    IndexInventory inventory;
+    const auto first = TestEntry(FieldId(10), 1);
+    const auto second = TestEntry(FieldId(10), 2);
+    const auto other = TestEntry(FieldId(11), 1);
+    const auto first_slot = TestSlot("inventory-field-mutation-first");
+    const auto second_slot = TestSlot("inventory-field-mutation-second");
+    const auto other_slot = TestSlot("inventory-field-mutation-other");
+    inventory.Register(
+        std::make_shared<IndexInventory::Entry>(first, first_slot));
+    inventory.Register(
+        std::make_shared<IndexInventory::Entry>(second, second_slot));
+    inventory.Register(
+        std::make_shared<IndexInventory::Entry>(other, other_slot));
+    auto snapshot = inventory;
+
+    EXPECT_EQ(inventory.Drop(TestEntry(FieldId(10), 3).key), nullptr);
+    const auto replacement = TestSlot("inventory-field-mutation-replacement");
+    EXPECT_EQ(inventory
+                  .Register(std::make_shared<IndexInventory::Entry>(
+                      first, replacement))
+                  ->Peek(),
+              first_slot);
+    EXPECT_EQ(inventory.Drop(second.key)->Peek(), second_slot);
+    const auto remaining = inventory.Entries(first.key.field_id);
+    ASSERT_EQ(remaining.size(), 1);
+    EXPECT_EQ(remaining.front().key, first.key);
+
+    EXPECT_EQ(inventory.Drop(first.key)->Peek(), replacement);
+    EXPECT_TRUE(inventory.Entries(first.key.field_id).empty());
+    EXPECT_TRUE(
+        inventory.ResolveCapability(nullptr, first.key.field_id).empty());
+    EXPECT_TRUE(inventory.CreateIndexReader(nullptr, first.key) == nullptr);
+    EXPECT_EQ(inventory.Drop(first.key), nullptr);
+    ASSERT_EQ(inventory.Entries().size(), 1);
+    EXPECT_EQ(inventory.Entries().front().key, other.key);
+    ASSERT_EQ(ResolvedIndexes(inventory).size(), 1);
+    EXPECT_EQ(ResolvedIndexes(inventory).front(), other_slot);
+
+    EXPECT_EQ(inventory.Register(
+                  std::make_shared<IndexInventory::Entry>(first, replacement)),
+              nullptr);
+    EXPECT_EQ(inventory.Entries(first.key.field_id).size(), 1);
+    EXPECT_EQ(inventory.Entries().size(), 2);
+    EXPECT_EQ(snapshot.Entries(first.key.field_id).size(), 2);
+    EXPECT_EQ(snapshot.Entries().size(), 3);
+    EXPECT_EQ(ResolvedIndexes(snapshot).size(), 3);
+    EXPECT_EQ(snapshot.Drop(first.key)->Peek(), first_slot);
+    EXPECT_EQ(snapshot.Drop(second.key)->Peek(), second_slot);
+    EXPECT_EQ(snapshot.Drop(other.key)->Peek(), other_slot);
+    EXPECT_TRUE(snapshot.Entries().empty());
+    EXPECT_TRUE(ResolvedIndexes(snapshot).empty());
+    EXPECT_EQ(inventory.Entries().size(), 2);
+}
+
+TEST(IndexInventoryTest, LazyEntryResolvesOnceAcrossConcurrentSnapshots) {
+    IndexInventory inventory;
+    const auto entry = TestEntry();
+    std::atomic<int> calls{0};
+    inventory.Register(LazyEntry(entry, [&](OpContext*) {
+        ++calls;
+        return IndexInventory::ResolvedData{entry.family,
+                                            entry.value_type,
+                                            entry.caps,
+                                            TestSlot("inventory-concurrent")};
+    }));
+
+    constexpr int kWorkers = 8;
+    folly::Latch start(kWorkers);
+    std::vector<std::future<FieldIndexCapability>> capabilities;
+    for (int i = 0; i != kWorkers; ++i) {
+        capabilities.emplace_back(
+            std::async(std::launch::async, [&, snapshot = inventory] {
+                start.arrive_and_wait();
+                return snapshot.ResolveCapability(nullptr, entry.key.field_id);
+            }));
+    }
+    for (auto& future : capabilities) {
+        const auto capability = future.get();
+        ASSERT_EQ(capability.entries().size(), 1);
+        EXPECT_EQ(capability.entries().front().key, entry.key);
+    }
+    EXPECT_EQ(calls.load(), 1);
+
+    EXPECT_TRUE(inventory.CreateIndexReader(nullptr, entry.key));
+    EXPECT_EQ(calls.load(), 1);
+}
+
+TEST(IndexInventoryTest, LazyEntryRetriesAfterFactoryFailure) {
+    IndexInventory inventory;
+    const auto entry = TestEntry();
+    std::atomic<int> calls{0};
+    inventory.Register(LazyEntry(entry, [&](OpContext*) {
+        if (++calls == 1) {
+            throw std::runtime_error("expected lazy load failure");
+        }
+        return IndexInventory::ResolvedData{entry.family,
+                                            entry.value_type,
+                                            entry.caps,
+                                            TestSlot("inventory-retry")};
+    }));
+
+    EXPECT_THROW(inventory.ResolveCapability(nullptr, entry.key.field_id),
+                 std::runtime_error);
+    EXPECT_TRUE(ResolvedIndexes(inventory).empty());
+    const auto capability =
+        inventory.ResolveCapability(nullptr, entry.key.field_id);
+    EXPECT_EQ(capability.entries().size(), 1);
+    EXPECT_EQ(calls.load(), 2);
+}
+
+TEST(IndexInventoryTest, CancelledWaiterDoesNotCancelSharedInitialization) {
+    using namespace std::chrono_literals;
+    IndexInventory inventory;
+    const auto entry = TestEntry();
+    const auto slot = TestSlot("inventory-cancelled-waiter");
+    std::promise<void> entered;
+    std::promise<void> release;
+    auto released = release.get_future().share();
+    std::atomic<int> calls{0};
+    inventory.Register(LazyEntry(entry, [&](OpContext*) {
+        ++calls;
+        entered.set_value();
+        released.wait();
+        return IndexInventory::ResolvedData{
+            entry.family, entry.value_type, entry.caps, slot};
+    }));
+    auto initializing = std::async(std::launch::async, [&] {
+        return inventory.ResolveCapability(nullptr, entry.key.field_id);
+    });
+    if (entered.get_future().wait_for(5s) != std::future_status::ready) {
+        release.set_value();
+        initializing.wait();
+        FAIL() << "lazy factory did not start";
+    }
+
+    folly::CPUThreadPoolExecutor executor(1);
+    std::promise<void> waiter_started;
+    std::promise<void> waiter_done;
+    auto done = waiter_done.get_future();
+    auto waiter = futures::Future<FieldIndexCapability>::async(
+        &executor,
+        0,
+        [&, snapshot = inventory](folly::CancellationToken token) {
+            OpContext op_ctx(token);
+            waiter_started.set_value();
+            return new FieldIndexCapability(
+                snapshot.ResolveCapability(&op_ctx, entry.key.field_id));
+        });
+    waiter->registerReadyCallback(
+        [](CLockedGoMutex* state) {
+            reinterpret_cast<std::promise<void>*>(state)->set_value();
+        },
+        reinterpret_cast<CLockedGoMutex*>(&waiter_done));
+    EXPECT_EQ(waiter_started.get_future().wait_for(5s),
+              std::future_status::ready);
+    EXPECT_EQ(done.wait_for(30ms), std::future_status::timeout);
+    waiter->cancel();
+
+    // The CGO future must become ready while the other query still owns the factory.
+    EXPECT_EQ(done.wait_for(5s), std::future_status::ready);
+    EXPECT_EQ(initializing.wait_for(0s), std::future_status::timeout);
+    EXPECT_TRUE(ResolvedIndexes(inventory).empty());
+    EXPECT_EQ(calls.load(), 1);
+    release.set_value();
+    EXPECT_EQ(initializing.get().entries().size(), 1);
+    done.wait();
+    auto [result, status] = waiter->leakyGet();
+    EXPECT_EQ(result, nullptr);
+    EXPECT_EQ(status.error_code, ErrorCode::FollyCancel);
+    delete static_cast<FieldIndexCapability*>(result);
+    free(const_cast<char*>(status.error_msg));
+
+    auto snapshot = inventory;
+    EXPECT_EQ(snapshot.ResolveCapability(nullptr, entry.key.field_id)
+                  .entries()
+                  .size(),
+              1);
+    EXPECT_EQ(ResolvedIndexes(snapshot).front(), slot);
+    EXPECT_EQ(calls.load(), 1);
+}
+
+TEST(IndexInventoryTest, WaitingQueryRetriesAfterInitializerCancellation) {
+    using namespace std::chrono_literals;
+    IndexInventory inventory;
+    const auto entry = TestEntry();
+    const auto slot = TestSlot("inventory-cancelled-initializer");
+    folly::CancellationSource source;
+    OpContext op_ctx(source.getToken());
+    std::promise<void> entered;
+    std::promise<void> release;
+    auto released = release.get_future().share();
+    std::atomic<int> calls{0};
+    inventory.Register(LazyEntry(entry, [&](OpContext* ctx) {
+        if (++calls == 1) {
+            entered.set_value();
+            released.wait();
+            if (ctx->cancellation_token.isCancellationRequested()) {
+                throw SegcoreError(ErrorCode::FollyCancel,
+                                   "expected initializer cancellation");
+            }
+        }
+        return IndexInventory::ResolvedData{
+            entry.family, entry.value_type, entry.caps, slot};
+    }));
+    auto initializing = std::async(std::launch::async, [&] {
+        return inventory.ResolveCapability(&op_ctx, entry.key.field_id);
+    });
+    if (entered.get_future().wait_for(5s) != std::future_status::ready) {
+        release.set_value();
+        initializing.wait();
+        FAIL() << "lazy factory did not start";
+    }
+
+    std::promise<void> waiter_started;
+    auto waiter = std::async(std::launch::async, [&, snapshot = inventory] {
+        OpContext waiter_ctx;
+        waiter_started.set_value();
+        return snapshot.ResolveCapability(&waiter_ctx, entry.key.field_id);
+    });
+    EXPECT_EQ(waiter_started.get_future().wait_for(5s),
+              std::future_status::ready);
+    EXPECT_EQ(waiter.wait_for(30ms), std::future_status::timeout);
+    source.requestCancellation();
+    release.set_value();
+
+    EXPECT_THROW(initializing.get(), SegcoreError);
+    EXPECT_EQ(waiter.wait_for(5s), std::future_status::ready);
+    EXPECT_EQ(waiter.get().entries().size(), 1);
+    EXPECT_EQ(calls.load(), 2);
+    ASSERT_EQ(ResolvedIndexes(inventory).size(), 1);
+    EXPECT_EQ(ResolvedIndexes(inventory).front(), slot);
+}
+
+TEST(IndexInventoryTest, MultiEntryCapabilityRetriesWithoutRepeatingSuccess) {
+    IndexInventory inventory;
+    const auto first = TestEntry(FieldId(10), 1);
+    const auto second = TestEntry(FieldId(10), 2);
+    int total_calls = 0;
+    int calls[2] = {0, 0};
+    int failed_factory = -1;
+    auto make_factory = [&](IndexCapabilityEntry entry, int id) {
+        return [&, entry, id](OpContext*) -> IndexInventory::ResolvedData {
+            ++calls[id];
+            if (++total_calls == 2) {
+                failed_factory = id;
+                throw std::runtime_error("expected second factory failure");
+            }
+            return {entry.family,
+                    entry.value_type,
+                    entry.caps,
+                    TestSlot("inventory-multi-" + std::to_string(id))};
+        };
+    };
+    inventory.Register(LazyEntry(first, make_factory(first, 0)));
+    inventory.Register(LazyEntry(second, make_factory(second, 1)));
+
+    EXPECT_THROW(inventory.ResolveCapability(nullptr, first.key.field_id),
+                 std::runtime_error);
+    ASSERT_GE(failed_factory, 0);
+    EXPECT_EQ(total_calls, 2);
+    EXPECT_EQ(ResolvedIndexes(inventory).size(), 1);
+
+    const auto capability =
+        inventory.ResolveCapability(nullptr, first.key.field_id);
+    ASSERT_EQ(capability.entries().size(), 2);
+    std::unordered_set<IndexKey, IndexKeyHash> keys;
+    for (const auto& entry : capability.entries()) {
+        keys.insert(entry.key);
+    }
+    EXPECT_EQ(keys.count(first.key), 1);
+    EXPECT_EQ(keys.count(second.key), 1);
+    EXPECT_EQ(calls[failed_factory], 2);
+    EXPECT_EQ(calls[1 - failed_factory], 1);
+    EXPECT_EQ(ResolvedIndexes(inventory).size(), 2);
+    EXPECT_EQ(inventory.ResolveCapability(nullptr, first.key.field_id)
+                  .entries()
+                  .size(),
+              2);
+    EXPECT_EQ(total_calls, 3);
+}
+
+TEST(IndexInventoryTest, LazyEntryReleasesFactoryAfterResolution) {
+    IndexInventory inventory;
+    const auto entry = TestEntry();
+    auto metadata = std::make_shared<int>(42);
+    std::weak_ptr<int> retained_metadata = metadata;
+    inventory.Register(LazyEntry(entry, [metadata, entry](OpContext*) {
+        return IndexInventory::ResolvedData{entry.family,
+                                            entry.value_type,
+                                            entry.caps,
+                                            TestSlot("inventory-release")};
+    }));
+    metadata.reset();
+    ASSERT_FALSE(retained_metadata.expired());
+
+    EXPECT_EQ(inventory.ResolveCapability(nullptr, entry.key.field_id)
+                  .entries()
+                  .size(),
+              1);
+    EXPECT_TRUE(retained_metadata.expired());
+}
+
+TEST(IndexInventoryTest, SnapshotsKeepEntriesAfterDropAndReplace) {
+    IndexInventory old_snapshot;
+    const auto entry = TestEntry();
+    std::atomic<int> old_factory_calls{0};
+    old_snapshot.Register(LazyEntry(entry, [&](OpContext*) {
+        ++old_factory_calls;
+        return IndexInventory::ResolvedData{
+            entry.family,
+            entry.value_type,
+            entry.caps,
+            TestSlot("inventory-old", {.predicate = true}, 7)};
+    }));
+
+    auto dropped_snapshot = old_snapshot;
+    EXPECT_NE(dropped_snapshot.Drop(entry.key), nullptr);
+    EXPECT_TRUE(dropped_snapshot.CreateIndexReader(nullptr, entry.key) ==
+                nullptr);
+    auto old_reader = old_snapshot.CreateIndexReader(nullptr, entry.key);
+    ASSERT_TRUE(old_reader);
+    EXPECT_EQ(old_reader->Count(), 7);
+    EXPECT_EQ(old_factory_calls.load(), 1);
+
+    auto replaced_snapshot = old_snapshot;
+    replaced_snapshot.Register(std::make_shared<IndexInventory::Entry>(
+        entry, TestSlot("inventory-new", {.predicate = true}, 11)));
+    auto new_reader = replaced_snapshot.CreateIndexReader(nullptr, entry.key);
+    ASSERT_TRUE(new_reader);
+    EXPECT_EQ(new_reader->Count(), 11);
+    EXPECT_EQ(old_reader->Count(), 7);
+    EXPECT_EQ(old_factory_calls.load(), 1);
+}
+
+TEST(IndexInventoryTest, LifecycleOperationsDoNotWaitForLazyFactory) {
+    using namespace std::chrono_literals;
+    IndexInventory inventory;
+    const auto entry = TestEntry();
+    const auto slot = TestSlot("inventory-blocked-factory");
+    std::promise<void> entered;
+    std::promise<void> release;
+    auto released = release.get_future().share();
+    std::atomic<int> calls{0};
+    inventory.Register(LazyEntry(entry, [&](OpContext*) {
+        ++calls;
+        entered.set_value();
+        released.wait();
+        return IndexInventory::ResolvedData{
+            entry.family, entry.value_type, entry.caps, slot};
+    }));
+
+    auto resolving = std::async(std::launch::async, [&] {
+        return inventory.ResolveCapability(nullptr, entry.key.field_id);
+    });
+    const auto started = entered.get_future().wait_for(5s);
+    if (started != std::future_status::ready) {
+        release.set_value();
+        resolving.wait();
+        FAIL() << "lazy factory did not start";
+    }
+
+    auto lifecycle = std::async(std::launch::async, [&] {
+        const auto slots = ResolvedIndexes(inventory);
+        auto dropped = inventory;
+        const auto retired_drop = dropped.Drop(entry.key);
+        auto replaced = inventory;
+        const auto retired_replace =
+            replaced.Register(std::make_shared<IndexInventory::Entry>(
+                entry, TestSlot("inventory-blocked-replacement")));
+        retired_drop->CancelWarmup();
+        retired_replace->CancelWarmup();
+        return slots.empty() && retired_drop != nullptr &&
+               retired_replace != nullptr;
+    });
+    const auto status = lifecycle.wait_for(5s);
+    release.set_value();
+    EXPECT_EQ(status, std::future_status::ready);
+    EXPECT_TRUE(lifecycle.get());
+    EXPECT_EQ(resolving.get().entries().size(), 1);
+    EXPECT_EQ(calls.load(), 1);
+    ASSERT_EQ(ResolvedIndexes(inventory).size(), 1);
+    EXPECT_EQ(ResolvedIndexes(inventory).front(), slot);
+}
+
+TEST(IndexInventoryTest, EagerAndLazyProjectionMetadataMatchesAcrossClones) {
+    auto entry = TestEntry();
+    entry.json_path = "/doc/value";
+    entry.json_cast_type = JsonCastType::FromString("DOUBLE");
+    IndexInventory eager;
+    eager.Register(std::make_shared<IndexInventory::Entry>(
+        entry, TestSlot("inventory-projection-eager")));
+    IndexInventory lazy;
+    int calls = 0;
+    lazy.Register(LazyEntry(entry, [&](OpContext*) {
+        ++calls;
+        return IndexInventory::ResolvedData{
+            entry.family,
+            entry.value_type,
+            entry.caps,
+            TestSlot("inventory-projection-lazy")};
+    }));
+    auto clone = lazy;
+    const auto eager_caps =
+        eager.ResolveCapability(nullptr, entry.key.field_id);
+    const auto lazy_caps = lazy.ResolveCapability(nullptr, entry.key.field_id);
+    const auto clone_caps =
+        clone.ResolveCapability(nullptr, entry.key.field_id);
+    ASSERT_EQ(eager_caps.entries().size(), 1);
+    ASSERT_EQ(lazy_caps.entries().size(), 1);
+    ASSERT_EQ(clone_caps.entries().size(), 1);
+    const auto& expected = eager_caps.entries().front();
+    for (const auto* actual :
+         {&lazy_caps.entries().front(), &clone_caps.entries().front()}) {
+        EXPECT_EQ(actual->key, expected.key);
+        EXPECT_EQ(actual->json_path, expected.json_path);
+        EXPECT_EQ(actual->json_cast_type.ToString(),
+                  expected.json_cast_type.ToString());
+        EXPECT_EQ(actual->family, expected.family);
+        EXPECT_EQ(actual->value_type, expected.value_type);
+        EXPECT_TRUE(SameCaps(actual->caps, expected.caps));
+    }
+    EXPECT_EQ(calls, 1);
+    ASSERT_EQ(ResolvedIndexes(lazy).size(), 1);
+    ASSERT_EQ(ResolvedIndexes(clone).size(), 1);
+    EXPECT_EQ(ResolvedIndexes(lazy).front(), ResolvedIndexes(clone).front());
 }
 
 }  // namespace milvus::segcore

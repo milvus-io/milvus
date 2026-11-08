@@ -20,6 +20,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <unordered_map>
 #include <variant>
 #include <vector>
@@ -30,6 +31,7 @@
 #include "index/contracts/Registry.h"
 #include "index/contracts/build/IArtifactBuilder.h"
 #include "index/contracts/build/VectorBuildInput.h"
+#include "indexbuilder/BuildInputMaterializer.h"
 #include "storage/artifact/Artifact.h"
 
 namespace milvus::indexbuilder {
@@ -99,6 +101,12 @@ class VectorPrimaryLayout {
 bool
 IsSupportedVectorScalarInfoType(DataType type);
 
+// A VECTOR_ARRAY field builds an embedding-list index only under an
+// embedding-list metric. Any other metric indexes each element as an ordinary
+// vector in the logical element domain.
+bool
+IsEmbeddingListBuild(DataType field_type, const index::BuildParams& params);
+
 class VectorScalarInfoAccumulator {
  public:
     struct Impl;
@@ -128,15 +136,17 @@ class VectorScalarInfoAccumulator {
 
 // Owns one complete compact resident tensor and every side view consumed by one
 // typed vector builder. FieldData batches are released after Add.
-class VectorBuildMaterializer final {
+class VectorBuildMaterializer final : public BuildInputMaterializer {
  public:
     VectorBuildMaterializer(DataType field_type,
                             DataType value_type,
                             int64_t dim,
+                            bool element_nullable,
                             int64_t expected_rows,
                             const index::IndexFamily& family,
-                            const index::BuildParams& params);
-    ~VectorBuildMaterializer();
+                            const index::BuildParams& params,
+                            milvus::OpContext* op_context = nullptr);
+    ~VectorBuildMaterializer() override;
 
     VectorBuildMaterializer(VectorBuildMaterializer&&) noexcept;
     VectorBuildMaterializer&
@@ -147,10 +157,10 @@ class VectorBuildMaterializer final {
     operator=(const VectorBuildMaterializer&) = delete;
 
     const index::BuilderInputSpec&
-    InputSpec() const;
+    InputSpec() const override;
 
     void
-    Add(const FieldDataPtr& batch);
+    Add(const FieldDataPtr& batch) override;
 
     const VectorPrimaryLayout&
     PrimaryLayout() const;
@@ -158,8 +168,19 @@ class VectorBuildMaterializer final {
     void
     SetScalarInfo(VectorScalarInfo scalar_info);
 
+    bool
+    TryReserveBuild() override;
+
+    // The caller fills the complete non-null dense tensor before FinishInput.
+    uint8_t*
+    AllocateInput();
+
+    void
+    FinishInput(size_t rows);
+
     storage::ArtifactPtr
-    Build() &&;
+        Build() &&
+        override;
 
  private:
     template <typename T>
@@ -201,6 +222,9 @@ class VectorBuildMaterializer final {
     void
     AppendBatch(TypedState<T>& state, const FieldDataPtr& batch);
 
+    void
+    AppendElementValidity(const VectorArray& value, size_t row);
+
     template <typename T>
     storage::ArtifactPtr
     BuildTyped(TypedState<T>& state,
@@ -213,10 +237,20 @@ class VectorBuildMaterializer final {
     int64_t expected_rows_{0};
     index::BuilderInputSpec spec_;
     VectorPrimaryLayout layout_;
+    // VECTOR_ARRAY only: offsets for an embedding-list build; otherwise the
+    // logical element count, the physical (non-null) element count and, for
+    // an element-nullable field, the element-domain validity bitmap.
+    bool embedding_list_{false};
+    bool element_nullable_{false};
     std::vector<size_t> embedding_offsets_;
+    size_t logical_elements_{0};
+    size_t physical_elements_{0};
+    std::vector<uint8_t> element_validity_;
     std::optional<VectorScalarInfo> scalar_info_;
     bool consumed_{false};
     State state_;
+    milvus::OpContext* op_context_{nullptr};
+    std::unique_ptr<uint8_t[]> input_;
 };
 
 }  // namespace milvus::indexbuilder

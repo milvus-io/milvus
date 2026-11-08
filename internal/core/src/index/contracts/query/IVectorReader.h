@@ -32,10 +32,6 @@
 #include "knowhere/expected.h"
 #include "knowhere/index/index_node.h"
 
-namespace milvus {
-struct OpContext;
-}  // namespace milvus
-
 // Unified vector query contract. Knowhere types stay in vector interfaces and
 // implementations, not shared or scalar contracts. Construction, persistence,
 // and loading use separate objects.
@@ -52,6 +48,7 @@ struct VectorSearchParams {
     tracer::TraceContext trace_ctx_;
 };
 
+/** @brief Vector operations use the context bound by IIndex::CreateReader. */
 class IVectorReader {
  public:
     virtual ~IVectorReader() = default;
@@ -60,20 +57,14 @@ class IVectorReader {
     Search(const DatasetPtr& dataset,
            const VectorSearchParams& params,
            const BitsetView& bitset,
-           milvus::OpContext* op_ctx,
            SearchResult& result) const = 0;
 
-    // Returned iterators do not carry a reader pin. Consumers may retain them in
-    // SearchResult::vector_iterators_, and knowhere iterators borrow the index's
-    // IdMap to map their result ids back to logical rows. The consumer must keep
-    // all borrowed state alive for iterator use. TODO: audit and wire that
-    // lifetime anchor across deferred consumption; this return type alone does
-    // not establish it.
+    // Iterators retain their exact engine pin, including the IdMap and file
+    // owner. Query buffers, bitsets and operation context remain caller-owned.
     virtual knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
     Iterators(const DatasetPtr& dataset,
               const knowhere::Json& json,
-              const BitsetView& bitset,
-              milvus::OpContext* op_ctx) const = 0;
+              const BitsetView& bitset) const = 0;
 
     virtual bool
     RefineEnabled() const = 0;
@@ -137,8 +128,7 @@ class IVectorReader {
                   const BitsetView& bitset,
                   const int64_t* labels,
                   size_t labels_len,
-                  bool is_cosine,
-                  milvus::OpContext* op_ctx) const = 0;
+                  bool is_cosine) const = 0;
 
     // VECTOR_ARRAY retrieval returns concatenated vectors and one terminal
     // offset after the requested lists.

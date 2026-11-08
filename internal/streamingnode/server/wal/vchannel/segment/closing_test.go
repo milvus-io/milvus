@@ -19,7 +19,7 @@ func TestClosingSegmentReplaysFlushAfterIntermediatePackSnapshot(t *testing.T) {
 	ctx := context.Background()
 	publish := mockey.Mock((*segmentLifecycleWriter).PersistGrowingSegment).Return(nil).Build()
 	defer publish.UnPatch()
-	commit := mockey.Mock((*segmentLifecycleWriter).CommitL1Segment).Return(nil, context.DeadlineExceeded).Build()
+	commit := mockey.Mock((*segmentLifecycleWriter).CommitL1SegmentWithTransformStart).Return(nil, context.DeadlineExceeded).Build()
 	defer commit.UnPatch()
 	scheduler := &recordingSegmentScheduler{}
 	config := runtimeConfig{packWriter: &durableSnapshotTestPackWriter{}, lifecycle: &segmentLifecycleWriter{}, owner: testSegmentOwner{}, runtime: moduleapi.Runtime{Scheduler: scheduler}}
@@ -58,7 +58,7 @@ func TestClosingSegmentReplaysFlushAfterIntermediatePackSnapshot(t *testing.T) {
 	require.True(t, recovered.IsGrowing())
 	observeFlush(recovered)
 	commit.UnPatch()
-	success := mockey.Mock((*segmentLifecycleWriter).CommitL1Segment).Return(&viewpb.DataVersion{StreamingVersion: 7}, nil).Build()
+	success := mockey.Mock((*segmentLifecycleWriter).CommitL1SegmentWithTransformStart).Return(&viewpb.DataVersion{StreamingVersion: 7}, nil).Build()
 	defer success.UnPatch()
 	require.NoError(t, scheduler.tasks[1].Execute(ctx))
 	final := recovered.ConsumeDirtyAndGetSnapshot()

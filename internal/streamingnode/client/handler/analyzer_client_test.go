@@ -99,7 +99,7 @@ func TestAnalyzerAssignmentRetry(t *testing.T) {
 				return &streamingpb.StreamingNodeRunAnalyzerResponse{}, nil
 			}).Build()
 			client := &handlerClientImpl{lifetime: typeutil.NewLifetime(), watcher: &analyzerWatcher{}, service: &analyzerService{}, rebalanceTrigger: &analyzerTrigger{}}
-			req := &streamingpb.StreamingNodeRunAnalyzerRequest{Source: &streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer{FieldAnalyzer: &streamingpb.StreamingFieldAnalyzer{Vchannel: "p_1v0"}}}
+			req := &streamingpb.StreamingNodeRunAnalyzerRequest{Source: &streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer{FieldAnalyzer: &streamingpb.StreamingFieldAnalyzer{Vchannel: "p_1v0"}}, Operation: &streamingpb.StreamingNodeRunAnalyzerRequest_Tokenize{Tokenize: &streamingpb.TokenizeOptions{}}}
 			resp, err := client.RunAnalyzer(context.Background(), req)
 			require.Nil(t, req.GetFieldAnalyzer().GetPchannel(), "retry must not mutate caller request")
 			switch scenario {
@@ -128,6 +128,43 @@ func TestAnalyzerAssignmentRetry(t *testing.T) {
 	}
 }
 
+func TestAnalyzerAssignmentRetryPreservesExactReadSchema(t *testing.T) {
+	for _, version := range []int32{0, 7} {
+		mockey.PatchConvey("read schema presence and version survive owner replacement", t, func() {
+			term := int64(1)
+			mockey.Mock((*analyzerWatcher).Get).To(func(*analyzerWatcher, context.Context, string) *types.PChannelInfoAssigned {
+				return &types.PChannelInfoAssigned{Channel: types.PChannelInfo{Name: "p", Term: term, AccessMode: types.AccessModeRW}, Node: types.StreamingNodeInfo{ServerID: 10 + term}}
+			}).Build()
+			mockey.Mock((*analyzerService).GetService).Return(&analyzerRPC{}, nil).Build()
+			mockey.Mock((*analyzerTrigger).ReportAssignmentError).Return(nil).Build()
+			mockey.Mock((*analyzerWatcher).Watch).To(func(*analyzerWatcher, context.Context, string, *types.PChannelInfoAssigned) error {
+				term++
+				return nil
+			}).Build()
+			calls := 0
+			mockey.Mock((*analyzerRPC).RunAnalyzer).To(func(_ *analyzerRPC, _ context.Context, req *streamingpb.StreamingNodeRunAnalyzerRequest, _ ...grpc.CallOption) (*streamingpb.StreamingNodeRunAnalyzerResponse, error) {
+				calls++
+				require.NotNil(t, req.GetFieldAnalyzer().ReadSchemaVersion)
+				require.Equal(t, version, req.GetFieldAnalyzer().GetReadSchemaVersion())
+				require.Equal(t, term, req.GetFieldAnalyzer().GetPchannel().GetTerm())
+				if calls == 1 {
+					return nil, status.NewChannelNotExist("owner replaced")
+				}
+				return &streamingpb.StreamingNodeRunAnalyzerResponse{Status: merr.Success()}, nil
+			}).Build()
+			client := &handlerClientImpl{lifetime: typeutil.NewLifetime(), watcher: &analyzerWatcher{}, service: &analyzerService{}, rebalanceTrigger: &analyzerTrigger{}}
+			req := &streamingpb.StreamingNodeRunAnalyzerRequest{Source: &streamingpb.StreamingNodeRunAnalyzerRequest_FieldAnalyzer{FieldAnalyzer: &streamingpb.StreamingFieldAnalyzer{Vchannel: "p_1v0", ReadSchemaVersion: &version}}}
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			_, err := client.RunAnalyzer(ctx, req)
+			require.NoError(t, err)
+			require.Equal(t, 2, calls)
+			require.Nil(t, req.GetFieldAnalyzer().GetPchannel())
+			require.Equal(t, version, req.GetFieldAnalyzer().GetReadSchemaVersion())
+		})
+	}
+}
+
 func TestAnalyzerInlineUsesExistingPicker(t *testing.T) {
 	mockey.PatchConvey("inline analyzer needs no channel assignment", t, func() {
 		mockey.Mock((*analyzerService).GetService).Return(&analyzerRPC{}, nil).Build()
@@ -143,7 +180,7 @@ func TestAnalyzerInlineUsesExistingPicker(t *testing.T) {
 			return &streamingpb.StreamingNodeRunAnalyzerResponse{}, nil
 		}).Build()
 		owner := &handlerClientImpl{lifetime: typeutil.NewLifetime(), service: &analyzerService{}}
-		req := &streamingpb.StreamingNodeRunAnalyzerRequest{Source: &streamingpb.StreamingNodeRunAnalyzerRequest_InlineAnalyzer{InlineAnalyzer: &streamingpb.StreamingInlineAnalyzer{AnalyzerParams: "{}"}}}
+		req := &streamingpb.StreamingNodeRunAnalyzerRequest{Source: &streamingpb.StreamingNodeRunAnalyzerRequest_InlineAnalyzer{InlineAnalyzer: &streamingpb.StreamingInlineAnalyzer{AnalyzerParams: "{}"}}, Operation: &streamingpb.StreamingNodeRunAnalyzerRequest_Tokenize{Tokenize: &streamingpb.TokenizeOptions{}}}
 		_, err := owner.RunAnalyzer(context.Background(), req)
 		require.NoError(t, err)
 		require.Equal(t, 2, calls)
@@ -213,7 +250,7 @@ func TestAnalyzerInlineUnimplementedAndCancellation(t *testing.T) {
 				return nil, status.NewOnShutdownError("closing")
 			}).Build()
 			owner := &handlerClientImpl{lifetime: typeutil.NewLifetime(), service: &analyzerService{}}
-			req := &streamingpb.StreamingNodeRunAnalyzerRequest{Source: &streamingpb.StreamingNodeRunAnalyzerRequest_InlineAnalyzer{InlineAnalyzer: &streamingpb.StreamingInlineAnalyzer{}}}
+			req := &streamingpb.StreamingNodeRunAnalyzerRequest{Source: &streamingpb.StreamingNodeRunAnalyzerRequest_InlineAnalyzer{InlineAnalyzer: &streamingpb.StreamingInlineAnalyzer{}}, Operation: &streamingpb.StreamingNodeRunAnalyzerRequest_Tokenize{Tokenize: &streamingpb.TokenizeOptions{}}}
 			_, err := owner.RunAnalyzer(ctx, req)
 			if scenario == "unimplemented" {
 				require.Equal(t, codes.Unimplemented, grpcstatus.Code(err))
@@ -246,4 +283,168 @@ func TestAnalyzerUsesSharedGRPCRetryPolicy(t *testing.T) {
 		require.Equal(t, conn.GetMethodConfig(streamingpb.StreamingNodeHandlerService_GetReplicateCheckpoint_FullMethodName).RetryPolicy,
 			conn.GetMethodConfig(streamingpb.StreamingNodeHandlerService_RunAnalyzer_FullMethodName).RetryPolicy)
 	})
+}
+
+func (*analyzerRPC) ValidateAnalyzer(context.Context, *streamingpb.StreamingNodeValidateAnalyzerRequest, ...grpc.CallOption) (*streamingpb.StreamingNodeValidateAnalyzerResponse, error) {
+	panic("unpatched")
+}
+
+func TestValidateAnalyzerDiscovery(t *testing.T) {
+	for _, scenario := range []string{"retry", "invalid", "terminal system error", "unimplemented", "cancel"} {
+		mockey.PatchConvey(scenario, t, func() {
+			mockey.Mock((*analyzerService).GetService).Return(&analyzerRPC{}, nil).Build()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			calls := 0
+			mockey.Mock((*analyzerRPC).ValidateAnalyzer).To(func(_ *analyzerRPC, ctx context.Context, _ *streamingpb.StreamingNodeValidateAnalyzerRequest, _ ...grpc.CallOption) (*streamingpb.StreamingNodeValidateAnalyzerResponse, error) {
+				_, targeted := contextutil.GetPickServerID(ctx)
+				require.False(t, targeted)
+				calls++
+				switch scenario {
+				case "retry":
+					if calls == 1 {
+						return nil, status.NewInner("inventory not ready")
+					}
+				case "invalid":
+					return nil, status.NewInvalidArgument("invalid tokenizer")
+				case "terminal system error":
+					return nil, status.NewUnrecoverableError("native internal failure")
+				case "unimplemented":
+					return nil, grpcstatus.Error(codes.Unimplemented, "older SN")
+				case "cancel":
+					cancel()
+					return nil, status.NewInner("not ready")
+				}
+				return &streamingpb.StreamingNodeValidateAnalyzerResponse{ResourceIds: []int64{42}}, nil
+			}).Build()
+			client := &handlerClientImpl{lifetime: typeutil.NewLifetime(), service: &analyzerService{}, watcher: &analyzerWatcher{}}
+			resp, err := client.ValidateAnalyzer(ctx, &streamingpb.StreamingNodeValidateAnalyzerRequest{})
+			switch scenario {
+			case "retry":
+				require.NoError(t, err)
+				require.Equal(t, []int64{42}, resp.ResourceIds)
+				require.Equal(t, 2, calls)
+			case "invalid":
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				require.Equal(t, 1, calls)
+			case "terminal system error":
+				require.True(t, status.AsStreamingError(err).IsUnrecoverable())
+				require.False(t, status.AsStreamingError(err).IsInvalidArgument())
+				require.Equal(t, 1, calls)
+			case "unimplemented":
+				require.Equal(t, codes.Unimplemented, grpcstatus.Code(err))
+				require.Equal(t, 1, calls)
+			case "cancel":
+				require.ErrorIs(t, err, context.Canceled)
+			}
+			client.lifetime.SetState(typeutil.LifetimeStateStopped)
+			_, err = client.ValidateAnalyzer(context.Background(), &streamingpb.StreamingNodeValidateAnalyzerRequest{})
+			require.True(t, status.AsStreamingError(err).IsOnShutdown())
+		})
+	}
+}
+
+func TestValidateAnalyzerBusinessFailuresDoNotRetry(t *testing.T) {
+	for _, failure := range []error{
+		merr.WrapErrParameterInvalidMsg("file resource never_added_resource not found"),
+		merr.SegcoreError(int32(merr.CodePathNotExist), "dictionary file not found"),
+		merr.SegcoreError(int32(merr.CodeFileReadFailed), "dictionary file access denied"),
+		merr.ErrServiceUnavailable,
+		merr.ErrServiceInternal,
+		merr.SegcoreError(int32(merr.CodeInvalidParameter), "invalid analyzer"),
+	} {
+		mockey.PatchConvey(failure.Error(), t, func() {
+			mockey.Mock((*analyzerService).GetService).Return(&analyzerRPC{}, nil).Build()
+			call := mockey.Mock((*analyzerRPC).ValidateAnalyzer).Return(&streamingpb.StreamingNodeValidateAnalyzerResponse{Status: merr.Status(failure)}, nil).Build()
+			client := &handlerClientImpl{lifetime: typeutil.NewLifetime(), service: &analyzerService{}}
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			resp, err := client.ValidateAnalyzer(ctx, &streamingpb.StreamingNodeValidateAnalyzerRequest{})
+			require.Nil(t, resp)
+			require.Error(t, err)
+			require.Equal(t, 1, call.Times(), "even retriable business failures must not enter readiness backoff")
+			if merr.Code(failure) == merr.Code(merr.ErrParameterInvalid) {
+				require.EqualError(t, err, failure.Error(), "parameter errors must pass through without extra context")
+			}
+			require.Equal(t, merr.GetErrorType(failure), merr.GetErrorType(err))
+			require.Equal(t, merr.IsRetryableErr(failure), merr.IsRetryableErr(err))
+			if merr.GetErrorType(failure) == merr.InputError {
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			} else {
+				require.Equal(t, merr.Code(failure), merr.Code(err))
+			}
+			client.lifetime.SetState(typeutil.LifetimeStateStopped)
+			client.lifetime.Wait()
+		})
+	}
+}
+
+func TestAnalyzerRequestsRespectCallerDeadline(t *testing.T) {
+	for _, validate := range []bool{false, true} {
+		mockey.PatchConvey("persistent preparation failure respects the caller deadline", t, func() {
+			mockey.Mock((*analyzerService).GetService).Return(&analyzerRPC{}, nil).Build()
+			calls := 0
+			mockey.Mock((*analyzerRPC).RunAnalyzer).To(func(_ *analyzerRPC, _ context.Context, _ *streamingpb.StreamingNodeRunAnalyzerRequest, _ ...grpc.CallOption) (*streamingpb.StreamingNodeRunAnalyzerResponse, error) {
+				calls++
+				return nil, status.NewUnknownError("resource download failed")
+			}).Build()
+			mockey.Mock((*analyzerRPC).ValidateAnalyzer).To(func(_ *analyzerRPC, _ context.Context, _ *streamingpb.StreamingNodeValidateAnalyzerRequest, _ ...grpc.CallOption) (*streamingpb.StreamingNodeValidateAnalyzerResponse, error) {
+				calls++
+				return nil, status.NewUnknownError("resource download failed")
+			}).Build()
+			client := &handlerClientImpl{lifetime: typeutil.NewLifetime(), service: &analyzerService{}}
+			// Persistent readiness errors must stop at the caller deadline.
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			defer cancel()
+			done := make(chan error, 1)
+			go func() {
+				var err error
+				if validate {
+					_, err = client.ValidateAnalyzer(ctx, &streamingpb.StreamingNodeValidateAnalyzerRequest{})
+				} else {
+					_, err = client.RunAnalyzer(ctx, &streamingpb.StreamingNodeRunAnalyzerRequest{Source: &streamingpb.StreamingNodeRunAnalyzerRequest_InlineAnalyzer{InlineAnalyzer: &streamingpb.StreamingInlineAnalyzer{}}, Operation: &streamingpb.StreamingNodeRunAnalyzerRequest_Tokenize{Tokenize: &streamingpb.TokenizeOptions{}}})
+				}
+				done <- err
+			}()
+			select {
+			case err := <-done:
+				require.ErrorIs(t, err, context.DeadlineExceeded)
+			case <-time.After(5 * time.Second):
+				cancel()
+				<-done
+				t.Fatal("analyzer request did not respect the caller deadline")
+			}
+			require.Positive(t, calls)
+			client.lifetime.SetState(typeutil.LifetimeStateStopped)
+			client.lifetime.Wait()
+		})
+	}
+}
+
+func TestAnalyzerRequestsPreserveCallerContext(t *testing.T) {
+	for _, withDeadline := range []bool{false, true} {
+		mockey.PatchConvey("analyzer requests preserve the caller context", t, func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if withDeadline {
+				var deadlineCancel context.CancelFunc
+				ctx, deadlineCancel = context.WithTimeout(ctx, 30*time.Minute)
+				defer deadlineCancel()
+			}
+			mockey.Mock((*analyzerService).GetService).Return(&analyzerRPC{}, nil).Build()
+			mockey.Mock((*analyzerRPC).RunAnalyzer).To(func(_ *analyzerRPC, got context.Context, _ *streamingpb.StreamingNodeRunAnalyzerRequest, _ ...grpc.CallOption) (*streamingpb.StreamingNodeRunAnalyzerResponse, error) {
+				require.Same(t, ctx, got)
+				return &streamingpb.StreamingNodeRunAnalyzerResponse{}, nil
+			}).Build()
+			mockey.Mock((*analyzerRPC).ValidateAnalyzer).To(func(_ *analyzerRPC, got context.Context, _ *streamingpb.StreamingNodeValidateAnalyzerRequest, _ ...grpc.CallOption) (*streamingpb.StreamingNodeValidateAnalyzerResponse, error) {
+				require.Same(t, ctx, got)
+				return &streamingpb.StreamingNodeValidateAnalyzerResponse{}, nil
+			}).Build()
+			client := &handlerClientImpl{lifetime: typeutil.NewLifetime(), service: &analyzerService{}}
+			_, err := client.RunAnalyzer(ctx, &streamingpb.StreamingNodeRunAnalyzerRequest{Source: &streamingpb.StreamingNodeRunAnalyzerRequest_InlineAnalyzer{InlineAnalyzer: &streamingpb.StreamingInlineAnalyzer{}}, Operation: &streamingpb.StreamingNodeRunAnalyzerRequest_Tokenize{Tokenize: &streamingpb.TokenizeOptions{}}})
+			require.NoError(t, err)
+			_, err = client.ValidateAnalyzer(ctx, &streamingpb.StreamingNodeValidateAnalyzerRequest{})
+			require.NoError(t, err)
+		})
+	}
 }
