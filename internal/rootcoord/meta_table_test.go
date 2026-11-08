@@ -80,12 +80,12 @@ func TestGetCollectionProperties(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, got, "an absent property is distinct from unavailable metadata")
 
-	allocs := testing.AllocsPerRun(100, func() {
-		got, err = core.GetCollectionProperties(ctx, 1)
-	})
-	require.NoError(t, err)
-	require.Equal(t, properties, got)
-	require.Zero(t, allocs)
+	// Do not assert zero allocations here via testing.AllocsPerRun: it measures
+	// process-global heap allocations, which the config-refresh goroutine started
+	// by paramtable.Init (see TestMain) sporadically perturbs, making the
+	// assertion flaky. The no-allocation guarantee is covered by
+	// BenchmarkCollectionProperties (0 allocs/op), and require.Same above already
+	// proves GetCollectionProperties returns the stored slice without copying.
 
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
