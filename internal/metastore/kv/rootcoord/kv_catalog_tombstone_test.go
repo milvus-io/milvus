@@ -72,11 +72,77 @@ func TestCatalog_ListCollections_SkipsTombstone(t *testing.T) {
 func TestCatalog_GetCollectionByID_TombstoneIsNotFound(t *testing.T) {
 	ctx := context.Background()
 	kv := mocks.NewTxnKV(t)
-	// Both default-db attempt and legacy-path attempt return the tombstone.
-	kv.EXPECT().Load(mock.Anything, mock.Anything).Return(tombstone(), nil)
+	defaultKey := BuildCollectionKey(util.DefaultDBID, 99999)
+	// A tombstone is a logical deletion, not evidence that the modern key is
+	// absent. The legacy key must not be read.
+	kv.EXPECT().Load(mock.Anything, defaultKey).Return(tombstone(), nil).Once()
 
 	kc := NewCatalog(kv)
 	got, err := kc.GetCollectionByID(ctx, util.DefaultDBID, 1, 99999)
+	assert.Error(t, err)
+	assert.True(t, merr.ErrCollectionNotFound.Is(err))
+	assert.Nil(t, got)
+}
+
+func TestCatalog_GetCollectionByID_DefaultLoadErrorDoesNotFallback(t *testing.T) {
+	ctx := context.Background()
+	defaultKey := BuildCollectionKey(util.DefaultDBID, 42)
+	kv := mocks.NewTxnKV(t)
+	kv.EXPECT().Load(mock.Anything, defaultKey).
+		Return("", merr.WrapErrIoFailed(defaultKey, context.DeadlineExceeded)).Once()
+
+	kc := NewCatalog(kv)
+	got, err := kc.GetCollectionByID(ctx, util.DefaultDBID, 1, 42)
+	assert.Error(t, err)
+	assert.True(t, merr.ErrIoFailed.Is(err))
+	assert.False(t, merr.ErrCollectionNotFound.Is(err))
+	assert.Nil(t, got)
+}
+
+func TestCatalog_GetCollectionByID_DefaultKeyNotFoundFallsBackToLegacy(t *testing.T) {
+	ctx := context.Background()
+	defaultKey := BuildCollectionKey(util.DefaultDBID, 42)
+	legacyKey := BuildCollectionKey(util.NonDBID, 42)
+	legacy := &pb.CollectionInfo{
+		ID:    42,
+		DbId:  util.DefaultDBID,
+		State: pb.CollectionState_CollectionCreated,
+		Schema: &schemapb.CollectionSchema{
+			Name:   "legacy-collection",
+			Fields: []*schemapb.FieldSchema{{FieldID: 1, Name: "field"}},
+		},
+		PartitionIDs:               []int64{43},
+		PartitionNames:             []string{"_default"},
+		PartitionCreatedTimestamps: []uint64{1},
+	}
+	legacyValue, err := proto.Marshal(legacy)
+	require.NoError(t, err)
+
+	kv := mocks.NewTxnKV(t)
+	kv.EXPECT().Load(mock.Anything, defaultKey).
+		Return("", merr.WrapErrIoKeyNotFound(defaultKey)).Once()
+	kv.EXPECT().Load(mock.Anything, legacyKey).
+		Return(string(legacyValue), nil).Once()
+
+	kc := NewCatalog(kv)
+	got, err := kc.GetCollectionByID(ctx, util.DefaultDBID, 1, 42)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, "legacy-collection", got.Name)
+}
+
+func TestCatalog_GetCollectionByID_DefaultAndLegacyKeysNotFound(t *testing.T) {
+	ctx := context.Background()
+	defaultKey := BuildCollectionKey(util.DefaultDBID, 42)
+	legacyKey := BuildCollectionKey(util.NonDBID, 42)
+	kv := mocks.NewTxnKV(t)
+	kv.EXPECT().Load(mock.Anything, defaultKey).
+		Return("", merr.WrapErrIoKeyNotFound(defaultKey)).Once()
+	kv.EXPECT().Load(mock.Anything, legacyKey).
+		Return("", merr.WrapErrIoKeyNotFound(legacyKey)).Once()
+
+	kc := NewCatalog(kv)
+	got, err := kc.GetCollectionByID(ctx, util.DefaultDBID, 1, 42)
 	assert.Error(t, err)
 	assert.True(t, merr.ErrCollectionNotFound.Is(err))
 	assert.Nil(t, got)
