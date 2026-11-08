@@ -583,7 +583,6 @@ KmeansClustering::Run(const milvus::proto::clustering::AnalyzeInfo& config) {
                               KnowhereStatusString(centroids_res.error()),
                               centroids_res.what()));
     }
-    centroids_res.value()->SetIsOwner(false);
     auto centroids =
         reinterpret_cast<const T*>(centroids_res.value()->GetTensor());
     auto centroid_stats = CentroidsToPB<T>(centroids, num_clusters, dim);
