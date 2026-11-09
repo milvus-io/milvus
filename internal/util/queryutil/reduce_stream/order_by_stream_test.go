@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package queryutil
+package reducestream
 
 import (
 	"fmt"
@@ -25,6 +25,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -75,9 +76,9 @@ func TestShardOrderByStreamMatchesBatch(t *testing.T) {
 							{FieldID: 101, DataType: schemapb.DataType_Int64, Ascending: ascending, NullsFirst: nullsFirst},
 							{FieldID: 1, DataType: schemapb.DataType_Int64, Ascending: false},
 						}
-						batch, err := NewDeduplicatePKOperator(0, nil).Run(t.Context(), nil, inputs)
+						batch, err := queryutil.NewDeduplicatePKOperator(0, nil).Run(t.Context(), nil, inputs)
 						require.NoError(t, err)
-						batch, err = NewOrderByLimitOperator(batchFields, 3).Run(t.Context(), nil, batch[0])
+						batch, err = queryutil.NewOrderByLimitOperator(batchFields, 3).Run(t.Context(), nil, batch[0])
 						require.NoError(t, err)
 						var children []ReduceStream
 						for _, input := range inputs {
@@ -102,7 +103,7 @@ func TestShardOrderByStreamMatchesBatch(t *testing.T) {
 							for i := range children {
 								require.True(t, stream.(*OrderedReduceStream).childStreams.IsDrained(i))
 							}
-							for row := 0; row < GetRowCount(chunk); row++ {
+							for row := 0; row < queryutil.GetRowCount(chunk); row++ {
 								got = append(got, retrieveUnit{result: chunk, rowIndex: int64(row)})
 							}
 						}
@@ -202,7 +203,7 @@ func TestShardOrderByStreamEmptyMetadata(t *testing.T) {
 	require.NoError(t, err)
 	chunk, err := stream.Recv()
 	require.NoError(t, err)
-	require.Zero(t, GetRowCount(chunk))
+	require.Zero(t, queryutil.GetRowCount(chunk))
 	require.EqualValues(t, 7, chunk.GetAllRetrieveCount())
 	_, err = stream.Recv()
 	require.ErrorIs(t, err, io.EOF)

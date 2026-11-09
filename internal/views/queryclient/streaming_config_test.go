@@ -25,8 +25,8 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/internal/util/queryutil"
-	"github.com/milvus-io/milvus/internal/util/searchutil"
+	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
+	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -41,11 +41,11 @@ func TestLegacySearchStreamingSettings(t *testing.T) {
 		searchOnView: func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error) {
 			return &viewpb.SearchOnViewResponse{LegacyResults: proto.Clone(input).(*internalpb.SearchResults)}, nil
 		},
-		searchOnViewStream: func(ctx context.Context, _ qviews.WorkNode, request *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
+		searchOnViewStream: func(ctx context.Context, _ qviews.WorkNode, request *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
 			if request.GetStreamChunkBytes() != request.GetLegacyReq().GetReqID() {
 				return nil, fmt.Errorf("received Chunk bytes %d, expected %d", request.GetStreamChunkBytes(), request.GetLegacyReq().GetReqID())
 			}
-			chunks, err := searchutil.SplitSearchResult(proto.Clone(input).(*internalpb.SearchResults), int(request.GetStreamChunkBytes()))
+			chunks, err := searchreducestream.SplitSearchResult(proto.Clone(input).(*internalpb.SearchResults), int(request.GetStreamChunkBytes()))
 			if err != nil {
 				return nil, err
 			}
@@ -108,12 +108,12 @@ func TestHybridStreamingChunkBytes(t *testing.T) {
 	request := hybridStreamRequest()
 	shard := qviews.ShardID{ReplicaID: 1, VChannel: "hybrid-settings"}
 	var calls int
-	service := &legacyServiceClient{searchOnViewStream: func(ctx context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
+	service := &legacyServiceClient{searchOnViewStream: func(ctx context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
 		require.EqualValues(t, 1, req.GetStreamChunkBytes())
 		calls++
 		chunk := newTestSearchChunk(req.GetLegacyReq().GetTopk(), []int64{1, 2}, []float32{.9, .8})
 		chunk.MetricType = req.GetLegacyReq().GetMetricType()
-		chunks, err := searchutil.SplitSearchResult(chunk, 1)
+		chunks, err := searchreducestream.SplitSearchResult(chunk, 1)
 		require.NoError(t, err)
 		stream := &fakeSearchStream{ctx: ctx}
 		for _, part := range chunks {
@@ -149,11 +149,11 @@ func TestLegacyQueryStreamingSettings(t *testing.T) {
 		queryOnView: func(_ context.Context, _ qviews.WorkNode, request *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error) {
 			return &viewpb.QueryOnViewResponse{LegacyResults: proto.Clone(inputs[request.GetShardId().GetVchannel()]).(*internalpb.RetrieveResults)}, nil
 		},
-		queryOnViewStream: func(ctx context.Context, _ qviews.WorkNode, request *viewpb.QueryOnViewRequest) (queryutil.ReduceStream, error) {
+		queryOnViewStream: func(ctx context.Context, _ qviews.WorkNode, request *viewpb.QueryOnViewRequest) (queryreducestream.ReduceStream, error) {
 			if request.GetStreamChunkBytes() != request.GetLegacyReq().GetBase().GetMsgID() {
 				return nil, fmt.Errorf("received Chunk bytes %d, expected %d", request.GetStreamChunkBytes(), request.GetLegacyReq().GetBase().GetMsgID())
 			}
-			chunks, err := queryutil.SplitRetrieveResult(proto.Clone(inputs[request.GetShardId().GetVchannel()]).(*internalpb.RetrieveResults), int(request.GetStreamChunkBytes()))
+			chunks, err := queryreducestream.SplitRetrieveResult(proto.Clone(inputs[request.GetShardId().GetVchannel()]).(*internalpb.RetrieveResults), int(request.GetStreamChunkBytes()))
 			if err != nil {
 				return nil, err
 			}

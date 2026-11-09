@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package queryutil
+package reducestream
 
 import (
 	"fmt"
@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -104,7 +105,7 @@ func TestShardReduceStreamResolvesTimestampsAcrossChunks(t *testing.T) {
 					}
 					ids = append(ids, queryTestIDs(chunk)...)
 					values = append(values, chunk.GetFieldsData()[0].GetScalars().GetLongData().GetData()...)
-					timestamps = append(timestamps, extractTimestamps(chunk)...)
+					timestamps = append(timestamps, queryutil.ExtractTimestamps(chunk)...)
 				}
 				require.Equal(t, []int64{1, 2, 3}, ids)
 				require.Equal(t, []int64{1 << 56, 222, 333}, values)

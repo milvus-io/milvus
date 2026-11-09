@@ -1,5 +1,5 @@
 // Verify exact Query protobuf sizing without copying Units.
-package queryutil
+package reducestream
 
 import (
 	"math"

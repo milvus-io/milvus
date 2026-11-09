@@ -29,7 +29,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
-	"github.com/milvus-io/milvus/internal/util/searchutil"
+	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
+	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
@@ -148,8 +149,8 @@ func (*fakeLegacyQueryStream) Interrupt() (*internalpb.RetrieveResults, error) {
 	return nil, nil
 }
 
-var _ searchutil.ReduceStream = (*fakeLegacySearchStream)(nil)
-var _ queryutil.ReduceStream = (*fakeLegacyQueryStream)(nil)
+var _ searchreducestream.ReduceStream = (*fakeLegacySearchStream)(nil)
+var _ queryreducestream.ReduceStream = (*fakeLegacyQueryStream)(nil)
 
 func newQueryViewSearchTask(t *testing.T, legacy queryclient.LegacyClient, topK int64) *SearchTask {
 	t.Helper()

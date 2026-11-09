@@ -30,7 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/reduce"
-	"github.com/milvus-io/milvus/internal/util/searchutil"
+	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -159,24 +159,24 @@ func TestSearchAggregationStreamingMatchesBatch(t *testing.T) {
 					}
 
 					var batchShards []*internalpb.SearchResults
-					var vchannels []searchutil.ReduceStream
+					var vchannels []searchreducestream.ReduceStream
 					for _, workers := range [][]*internalpb.SearchResults{nodes[:2], nodes[2:]} {
 						var batchInputs []*internalpb.SearchResults
-						var children []searchutil.ReduceStream
+						var children []searchreducestream.ReduceStream
 						for _, node := range workers {
 							batchInputs = append(batchInputs, proto.Clone(node).(*internalpb.SearchResults))
-							chunks, err := searchutil.SplitSearchResult(proto.Clone(node).(*internalpb.SearchResults), chunkBytes)
+							chunks, err := searchreducestream.SplitSearchResult(proto.Clone(node).(*internalpb.SearchResults), chunkBytes)
 							require.NoError(t, err)
 							children = append(children, &searchTaskReduceStream{chunks: chunks})
 						}
 						batch, err := segments.ReduceSearchOnQueryNode(ctx, batchInputs, info)
 						require.NoError(t, err)
 						batchShards = append(batchShards, batch)
-						stream, err := searchutil.NewShardReduceStream(task.SearchRequest, children, chunkBytes)
+						stream, err := searchreducestream.NewShardReduceStream(task.SearchRequest, children, chunkBytes)
 						require.NoError(t, err)
 						vchannels = append(vchannels, stream)
 					}
-					stream, err := searchutil.NewReduceStream(task.SearchRequest, vchannels, chunkBytes)
+					stream, err := searchreducestream.NewReduceStream(task.SearchRequest, vchannels, chunkBytes)
 					require.NoError(t, err)
 					t.Cleanup(func() { require.NoError(t, stream.Close()) })
 					legacy.searchResult = &queryclient.LegacySearchResult{Stream: stream}

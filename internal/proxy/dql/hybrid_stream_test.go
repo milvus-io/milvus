@@ -15,7 +15,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/util/searchutil"
+	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/internal/views/viewquery"
@@ -62,7 +62,7 @@ func TestSearchTaskConsumesHybridStreamsWithIndependentWindows(t *testing.T) {
 	first := &fakeLegacySearchStream{recv: []fakeLegacySearchRecv{{chunk: firstChunk}}}
 	second := &fakeLegacySearchStream{recv: []fakeLegacySearchRecv{{chunk: secondChunk}}}
 	legacy := &fakeLegacyQueryClient{
-		searchResult: &queryclient.LegacySearchResult{SubStreams: []searchutil.ReduceStream{first, second}},
+		searchResult: &queryclient.LegacySearchResult{SubStreams: []searchreducestream.ReduceStream{first, second}},
 	}
 	task := newQueryViewSearchTask(t, legacy, 1)
 	task.IsIterator, task.IsAdvanced = false, true
@@ -112,7 +112,7 @@ func TestHybridStreamFailureUnblocksSibling(t *testing.T) {
 	task.SubReqs = []*internalpb.SubSearchRequest{{Nq: 1, Topk: 2}, {Nq: 1, Topk: 2}}
 	done := make(chan error, 1)
 	go func() {
-		_, _, err := task.consumeHybridResultStreams([]searchutil.ReduceStream{failed, blocked}, func(*internalpb.SearchResults) {})
+		_, _, err := task.consumeHybridResultStreams([]searchreducestream.ReduceStream{failed, blocked}, func(*internalpb.SearchResults) {})
 		done <- err
 	}()
 	select {
@@ -189,7 +189,7 @@ func (s *SearchPipelineSuite) TestHybridElementStreamingMatchesBatch() {
 							task.rankParams.limit, task.rankParams.offset, task.rankParams.roundDecimal = 2, 1, -1
 							task.hybridSubSearchInfos = make([]hybridSubSearchInfo, 2)
 							batch := make([]*milvuspb.SearchResults, 2)
-							streams := make([]searchutil.ReduceStream, 2)
+							streams := make([]searchreducestream.ReduceStream, 2)
 							for index, kind := range tc.kinds {
 								task.SubReqs[index].Nq, task.SubReqs[index].Topk = nq, 4
 								task.SubReqs[index].Offset = int64(index)
@@ -198,7 +198,7 @@ func (s *SearchPipelineSuite) TestHybridElementStreamingMatchesBatch() {
 								request, err := viewquery.BuildSubSearchRequest(task.SearchRequest, task.SubReqs[index])
 								s.Require().NoError(err)
 								data := make([]*schemapb.SearchResultData, 2)
-								children := make([]searchutil.ReduceStream, 2)
+								children := make([]searchreducestream.ReduceStream, 2)
 								for channel := range children {
 									chunk := &internalpb.SearchResults{NumQueries: nq, TopK: 4, MetricType: metric, ResultData: &schemapb.SearchResultData{NumQueries: nq, TopK: 4, Ids: &schemapb.IDs{}}}
 									for query := int64(0); query < nq; query++ {
@@ -227,10 +227,10 @@ func (s *SearchPipelineSuite) TestHybridElementStreamingMatchesBatch() {
 										}
 									}
 									data[channel] = proto.Clone(chunk.ResultData).(*schemapb.SearchResultData)
-									chunks, err := searchutil.SplitSearchResult(chunk, 20)
+									chunks, err := searchreducestream.SplitSearchResult(chunk, 20)
 									s.Require().NoError(err)
 									// Duplicate worker replies must retain distinct elements of the same PK.
-									workers := make([]searchutil.ReduceStream, 2)
+									workers := make([]searchreducestream.ReduceStream, 2)
 									for worker := range workers {
 										leaf := &fakeLegacySearchStream{}
 										for _, part := range chunks {
@@ -238,12 +238,12 @@ func (s *SearchPipelineSuite) TestHybridElementStreamingMatchesBatch() {
 										}
 										workers[worker] = leaf
 									}
-									children[channel], err = searchutil.NewShardReduceStream(request, workers, 20)
+									children[channel], err = searchreducestream.NewShardReduceStream(request, workers, 20)
 									s.Require().NoError(err)
 								}
 								batch[index], err = reduceSearchResultDataNoGroupBy(context.Background(), data, nq, 4, metric, schemapb.DataType_Int64, request.GetOffset())
 								s.Require().NoError(err)
-								streams[index], err = searchutil.NewReduceStream(request, children, 20)
+								streams[index], err = searchreducestream.NewReduceStream(request, children, 20)
 								s.Require().NoError(err)
 							}
 							s.Require().True(task.supportsStreamingReduce())

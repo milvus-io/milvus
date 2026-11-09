@@ -35,7 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/reduce"
-	"github.com/milvus-io/milvus/internal/util/searchutil"
+	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
@@ -1885,7 +1885,7 @@ func appendFinalSearchChunk(
 }
 
 func (t *SearchTask) consumeResultStream(
-	stream searchutil.ReduceStream,
+	stream searchreducestream.ReduceStream,
 	request *internalpb.SearchRequest,
 	metricType string,
 	collectMetadata func(*internalpb.SearchResults),
@@ -1975,7 +1975,7 @@ func (t *SearchTask) consumeResultStream(
 }
 
 func (t *SearchTask) consumeHybridResultStreams(
-	streams []searchutil.ReduceStream,
+	streams []searchreducestream.ReduceStream,
 	collectMetadata func(*internalpb.SearchResults),
 ) (results []*milvuspb.SearchResults, metrics []string, err error) {
 	var closeOnce, failOnce sync.Once

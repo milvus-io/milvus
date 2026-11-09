@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package queryutil
+package reducestream
 
 import (
 	"context"
@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -86,7 +87,7 @@ func TestOrderedReduceStreamIteratorDrainParity(t *testing.T) {
 						if incompleteChild >= 0 {
 							inputs[incompleteChild].HasMoreResult = true
 						}
-						batch, err := NewSortAndCheckPKOperator(mode, nil).Run(context.Background(), nil, inputs)
+						batch, err := queryutil.NewSortAndCheckPKOperator(mode, nil).Run(context.Background(), nil, inputs)
 						require.NoError(t, err)
 						children := make([]ReduceStream, len(inputs))
 						for i, input := range inputs {

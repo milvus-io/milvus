@@ -12,8 +12,8 @@ import (
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/util/queryutil"
-	"github.com/milvus-io/milvus/internal/util/searchutil"
+	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
+	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -180,7 +180,7 @@ func TestShardSearchStreamReturnsPerVChannelReduceStream(t *testing.T) {
 		{chunk: newTestSearchChunk(3, []int64{3}, []float32{0.7})},
 	}}
 	queryService := &fakeViewQueryServiceClient{
-		searchOnViewStream: func(_ context.Context, node qviews.WorkNode, _ *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
+		searchOnViewStream: func(_ context.Context, node qviews.WorkNode, _ *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
 			switch node.Key() {
 			case leftNode.Key():
 				return leftStream, nil
@@ -251,7 +251,7 @@ func TestShardQueryStreamReturnsPerVChannelReduceStream(t *testing.T) {
 	leftStream := &fakeQueryStream{recv: []fakeQueryStreamRecv{{chunk: leftChunk}}}
 	rightStream := &fakeQueryStream{recv: []fakeQueryStreamRecv{{chunk: rightChunk}}}
 	queryService := &fakeViewQueryServiceClient{
-		queryOnViewStream: func(_ context.Context, node qviews.WorkNode, _ *viewpb.QueryOnViewRequest) (queryutil.ReduceStream, error) {
+		queryOnViewStream: func(_ context.Context, node qviews.WorkNode, _ *viewpb.QueryOnViewRequest) (queryreducestream.ReduceStream, error) {
 			switch node.Key() {
 			case leftNode.Key():
 				return leftStream, nil
@@ -307,7 +307,7 @@ func TestShardSearchStreamCloseReleasesChildStream(t *testing.T) {
 		1,
 		&fakeQueryPlanClient{plan: plan},
 		&fakeViewQueryServiceClient{
-			searchOnViewStream: func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
+			searchOnViewStream: func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
 				return childStream, nil
 			},
 		},
@@ -335,7 +335,7 @@ func TestShardSearchClosesOpenedStreamsOnSetupFailure(t *testing.T) {
 
 	openedStream := &fakeSearchStream{}
 	queryService := &fakeViewQueryServiceClient{
-		searchOnViewStream: func(_ context.Context, node qviews.WorkNode, _ *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
+		searchOnViewStream: func(_ context.Context, node qviews.WorkNode, _ *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
 			if node.Key() == leftNode.Key() {
 				return openedStream, nil
 			}
@@ -360,7 +360,7 @@ func TestShardSearchUsesBatchPathForUnsupportedSearch(t *testing.T) {
 	batchResult := newTestSearchChunk(1, []int64{10}, []float32{0.9})
 	queryService := &fakeViewQueryServiceClient{
 		searchResponse: &viewpb.SearchOnViewResponse{LegacyResults: batchResult},
-		searchOnViewStream: func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
+		searchOnViewStream: func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
 			return nil, errors.New("stream path should not be used")
 		},
 	}
@@ -412,8 +412,8 @@ type fakeViewQueryServiceClient struct {
 	searchReq          *viewpb.SearchOnViewRequest
 	queryReq           *viewpb.QueryOnViewRequest
 	searchResponse     *viewpb.SearchOnViewResponse
-	searchOnViewStream func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error)
-	queryOnViewStream  func(context.Context, qviews.WorkNode, *viewpb.QueryOnViewRequest) (queryutil.ReduceStream, error)
+	searchOnViewStream func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error)
+	queryOnViewStream  func(context.Context, qviews.WorkNode, *viewpb.QueryOnViewRequest) (queryreducestream.ReduceStream, error)
 	searchCalls        int
 	searchStreamCalls  int
 	queryStreamCalls   int
@@ -431,7 +431,7 @@ func (f *fakeViewQueryServiceClient) SearchOnView(_ context.Context, _ qviews.Wo
 
 }
 
-func (f *fakeViewQueryServiceClient) SearchOnViewStream(ctx context.Context, node qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
+func (f *fakeViewQueryServiceClient) SearchOnViewStream(ctx context.Context, node qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
 	f.mu.Lock()
 	f.searchReq = req
 	f.searchStreamCalls++
@@ -446,7 +446,7 @@ func (f *fakeViewQueryServiceClient) QueryOnView(context.Context, qviews.WorkNod
 	return &viewpb.QueryOnViewResponse{}, nil
 }
 
-func (f *fakeViewQueryServiceClient) QueryOnViewStream(ctx context.Context, node qviews.WorkNode, req *viewpb.QueryOnViewRequest) (queryutil.ReduceStream, error) {
+func (f *fakeViewQueryServiceClient) QueryOnViewStream(ctx context.Context, node qviews.WorkNode, req *viewpb.QueryOnViewRequest) (queryreducestream.ReduceStream, error) {
 	f.mu.Lock()
 	f.queryReq = req
 	f.queryStreamCalls++
