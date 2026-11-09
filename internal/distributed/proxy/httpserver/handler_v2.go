@@ -318,7 +318,7 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 		return &CollectionDataReq{}
 	}, wrapperTraceLog(h.insert))), false))
 	// Upsert
-	router.POST(EntityCategory+UpsertAction, restfulSizeMiddleware(timeoutMiddleware(wrapperPost(func() any {
+	router.POST(EntityCategory+UpsertAction, restfulSizeMiddleware(upsertTimeoutMiddleware(wrapperPost(func() any {
 		return &CollectionDataReq{}
 	}, wrapperTraceLog(h.upsert))), false))
 	// Search

@@ -256,6 +256,15 @@ func requestTimeout(gCtx *gin.Context) (time.Duration, bool) {
 	return timeout, true
 }
 
+func upsertTimeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
+	next := timeoutMiddleware(handler)
+	return func(c *gin.Context) {
+		ctx, _ := requestutil.WithConditionalWriteState(c.Request.Context())
+		c.Request = c.Request.WithContext(ctx)
+		next(c)
+	}
+}
+
 func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 	timeoutHandler := &Timeout{
 		handler: handler,
@@ -268,7 +277,7 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 		}
 		topCtx, cancel := context.WithTimeout(gCtx.Request.Context(), timeout)
 		defer cancel()
-		topCtx, writeState := requestutil.WithConditionalWriteState(topCtx)
+		writeState := requestutil.ConditionalWriteStateFromContext(topCtx)
 		req := gCtx.Request.WithContext(topCtx)
 		gCtx.Request = req
 
@@ -320,7 +329,10 @@ func timeoutMiddleware(handler gin.HandlerFunc) gin.HandlerFunc {
 
 		case <-timer.C:
 			cancel()
-			err := writeState.Cancel(context.DeadlineExceeded)
+			err := context.DeadlineExceeded
+			if writeState != nil {
+				err = writeState.Cancel(err)
+			}
 			code, reason := merr.Code(err), "request timeout"
 			if code != merr.TimeoutCode {
 				reason = err.Error()

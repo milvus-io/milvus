@@ -82,6 +82,11 @@ are rejected. `op` is explicitly `gt` or `gte`; it has no default.
 `on_missing` is `insert` (default), `skip`, or `error`. Text enum values in SDK
 and RESTful are case-insensitive; unknown numeric proto enums are rejected.
 
+This release keeps one integer-revision contract across the server, protobuf API,
+and PyMilvus. Native Timestamptz version columns are deferred to a separate
+extension of that contract. Event-time versions can use an Int64 column with a
+consistent application-defined unit.
+
 Presence of the condition implies `partial_update=true`, even if false was
 provided. Omitted columns keep their old values. Full-row replacement is not
 introduced. Each batch must have unique PKs.

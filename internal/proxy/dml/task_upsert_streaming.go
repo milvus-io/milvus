@@ -182,7 +182,6 @@ func (ut *UpsertTask) appendUpsertAttempt(ctx context.Context, ez *message.Ciphe
 		ut.partialState.appendAttempted = true
 	}
 	resp := streaming.WAL().AppendMessages(ctx, messages...)
-	// Result accounting resolves channels through the collection cache.
 	defer invalidateMismatchedWriteSchema(ctx, ut.GetMetaCache(), ut.collectionID, resp)
 	if ut.partialState != nil {
 		if err := ut.recordPartialAppend(messages, resp); err != nil {
@@ -261,6 +260,20 @@ func (ut *UpsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 		log.Warn(ctx, "assign segmentID and repack insert data failed", mlog.Err(err))
 		ut.result.Status = merr.Status(err)
 		return nil, err
+	}
+	if s := ut.partialState; s != nil {
+		if len(ut.upsertMsg.InsertMsg.HashValues) != len(s.writeRows) || typeutil.GetSizeOfIDs(ut.result.GetIDs()) != len(s.writeRows) {
+			return nil, merr.WrapErrServiceInternalMsg("partial update packed rows are not aligned")
+		}
+		// Preserve the actual packing route; result accounting must not resolve metadata after append.
+		channels := make([]string, len(s.writeRows))
+		for row, index := range ut.upsertMsg.InsertMsg.HashValues {
+			if int(index) >= len(channelNames) {
+				return nil, merr.WrapErrServiceInternalMsg("partial update packed channel index %d is out of range", index)
+			}
+			channels[row] = channelNames[index]
+		}
+		s.writeChannels = channels
 	}
 	return msgs, nil
 }

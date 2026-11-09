@@ -470,32 +470,6 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 	}
 	it.storageCost.ScannedRemoteBytes += storageCost.ScannedRemoteBytes
 	it.storageCost.ScannedTotalBytes += storageCost.ScannedTotalBytes
-	if len(resp.GetFieldsData()) == 0 && partialUpdate && it.req.GetWriteCondition() != nil {
-		templates := cloneFieldDataList(it.upsertMsg.InsertMsg.FieldsData)
-		for _, field := range templates {
-			if structSchema := it.schema.SchemaHelper.GetStructArrayFieldFromName(field.GetFieldName()); structSchema != nil {
-				field.FieldId = structSchema.GetFieldID()
-				for _, child := range field.GetStructArrays().GetFields() {
-					childSchema := findStructChildSchema(structSchema, child.GetFieldName())
-					if childSchema == nil {
-						return nil, merr.WrapErrParameterInvalidMsg("unknown struct child %s", child.GetFieldName())
-					}
-					child.FieldId = childSchema.GetFieldID()
-				}
-			} else {
-				name := field.GetFieldName()
-				if field.GetIsDynamic() {
-					name = "$meta"
-				}
-				fieldSchema, err := it.schema.SchemaHelper.GetFieldFromName(name)
-				if err != nil {
-					return nil, err
-				}
-				field.FieldId = fieldSchema.GetFieldID()
-			}
-		}
-		resp.FieldsData = typeutil.PrepareResultFieldData(templates, 0)
-	}
 	if len(resp.GetFieldsData()) == 0 {
 		if partialUpdate {
 			return nil, merr.WrapErrParameterInvalidMsg("retrieve by primary key failed, no data found")

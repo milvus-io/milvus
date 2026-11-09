@@ -1070,6 +1070,7 @@ func TestTimeoutMiddlewareLateHandlerWritesUseCopiedContext(t *testing.T) {
 		c.Next()
 	})
 	ginHandler.POST(path, timeoutMiddleware(func(c *gin.Context) {
+		assert.Nil(t, requestutil.ConditionalWriteStateFromContext(c.Request.Context()))
 		handlerCtx <- c
 		<-c.Request.Context().Done()
 		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: int32(12345), HTTPReturnMessage: "late write"})
@@ -1185,7 +1186,7 @@ func TestConditionalUpsertTimeoutResponse(t *testing.T) {
 					<-done
 				}()
 				router := gin.New()
-				router.POST("/upsert", timeoutMiddleware(func(c *gin.Context) {
+				router.POST("/upsert", upsertTimeoutMiddleware(func(c *gin.Context) {
 					defer close(done)
 					state := requestutil.ConditionalWriteStateFromContext(c.Request.Context())
 					if submitted {
@@ -1227,6 +1228,7 @@ func TestTimeoutMiddlewarePassesDeadline(t *testing.T) {
 	app := ginHandler.Group("")
 	path := "/middleware/timeout/deadline"
 	app.POST(path, timeoutMiddleware(func(c *gin.Context) {
+		assert.Nil(t, requestutil.ConditionalWriteStateFromContext(c.Request.Context()))
 		deadline, ok := c.Request.Context().Deadline()
 		assert.True(t, ok)
 		assert.LessOrEqual(t, time.Until(deadline), 3*time.Second)

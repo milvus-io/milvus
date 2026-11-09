@@ -32,10 +32,12 @@ import (
 
 // partialUpsertState owns original row identities across channel-local attempts.
 // rows indexes the immutable payload; writeRows indexes this attempt's input.
+// writeChannels follows the packed destination ID order, aligned with writeRows.
 type partialUpsertState struct {
 	resultOrder     []int
 	rows            []int
 	writeRows       []int
+	writeChannels   []string
 	originalCount   uint32
 	written         map[int]any
 	retryRows       []int
@@ -148,31 +150,25 @@ func conditionInt(field *schemapb.FieldData, row int) (int64, bool, error) {
 	if field == nil {
 		return 0, false, merr.WrapErrServiceInternalMsg("version field missing from query or request")
 	}
-	valid := typeutil.GetFieldDataValidData(field)
-	if len(valid) > 0 {
-		if row >= len(valid) {
-			return 0, false, merr.WrapErrServiceInternalMsg("version validity is not row aligned")
-		}
-		if !valid[row] {
-			return 0, false, nil
-		}
-	}
 	values := field.GetScalars()
-	valueCount := len(values.GetIntData().GetData())
-	if field.Type == schemapb.DataType_Int64 {
+	var valueCount int
+	switch field.GetType() {
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		valueCount = len(values.GetIntData().GetData())
+	case schemapb.DataType_Int64:
 		valueCount = len(values.GetLongData().GetData())
+	default:
+		return 0, false, merr.WrapErrServiceInternalMsg("unsupported write_condition version field type %s", field.GetType().String())
 	}
+	valid := typeutil.GetFieldDataValidData(field)
 	if len(valid) > 0 && valueCount != len(valid) {
-		logical := row
-		row = 0
-		for _, present := range valid[:logical] {
-			if present {
-				row++
-			}
-		}
+		return 0, false, merr.WrapErrServiceInternalMsg("version validity is not row aligned")
 	}
 	if row >= valueCount {
 		return 0, false, merr.WrapErrServiceInternalMsg("version values are not row aligned")
+	}
+	if len(valid) > 0 && !valid[row] {
+		return 0, false, nil
 	}
 	if field.Type == schemapb.DataType_Int64 {
 		return values.GetLongData().GetData()[row], true, nil
@@ -359,15 +355,8 @@ func (it *UpsertTask) recordPartialAppend(messages []message.MutableMessage, res
 	if typeutil.GetSizeOfIDs(ids) != len(s.writeRows) {
 		return merr.WrapErrServiceInternalMsg("partial update destination IDs are not aligned")
 	}
-	channels, err := it.chMgr.GetVChannels(it.collectionID)
-	if err != nil {
-		// Append already happened. A transient metadata failure is not a safe
-		// admission rejection and must not authorize replaying the write.
-		return merr.WrapErrServiceInternalErr(err, "resolve channels for partial update append results")
-	}
-	indexes, err := it.partialUpdateCASChannelIndexes(ids, channels)
-	if err != nil {
-		return merr.WrapErrServiceInternalErr(err, "route partial update append results")
+	if len(s.writeChannels) != len(s.writeRows) {
+		return merr.WrapErrServiceInternalMsg("partial update destination channels are not aligned")
 	}
 	deletes := make(map[any]struct{}, typeutil.GetSizeOfIDs(it.deletePKs))
 	for row := 0; row < typeutil.GetSizeOfIDs(it.deletePKs); row++ {
@@ -375,7 +364,7 @@ func (it *UpsertTask) recordPartialAppend(messages []message.MutableMessage, res
 	}
 	s.retryRows = nil
 	for offset, row := range s.writeRows {
-		channel := channels[indexes[offset]]
+		channel := s.writeChannels[offset]
 		outcome, ok := outcomes[channel]
 		if !ok {
 			return merr.WrapErrServiceInternalMsg("missing append result for channel %s", channel)
