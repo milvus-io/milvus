@@ -30,8 +30,10 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/agg"
 	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
 	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	serviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
@@ -470,6 +472,49 @@ func TestQueryOnViewStreamAcceptsGroupByQuery(t *testing.T) {
 		require.Equal(t, []int64{1, 2}, groups)
 		require.NoError(t, stream.Close())
 		require.Equal(t, 1, tasks.releaseCount)
+	}
+}
+
+func TestQueryOnViewStreamAcceptsGlobalAggregation(t *testing.T) {
+	for _, op := range []string{"count", "sum", "avg", "min", "max"} {
+		t.Run(op, func(t *testing.T) {
+			aggregates, err := agg.NewAggregate(op, 101, op+"(value)", schemapb.DataType_Int64)
+			require.NoError(t, err)
+			result := &internalpb.RetrieveResults{Status: merr.Success(), AllRetrieveCount: 7}
+			for range aggregates {
+				result.FieldsData = append(result.FieldsData, &schemapb.FieldData{
+					Type: schemapb.DataType_Int64,
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{7}}},
+					}},
+				})
+			}
+			tasks := &streamTestQueryTasks{tasks: []QuerySegmentTask{struct{}{}}}
+			server := NewServer(&streamTestProvider{queryTasks: tasks}, &streamTestScheduler{queryResult: result})
+			client, cleanup := startSearchStreamTestServer(t, server)
+			defer cleanup()
+			stream, err := queryreducestream.NewGRPCReduceStream(t.Context(), client, &viewpb.QueryOnViewRequest{
+				LegacyReq: &internalpb.RetrieveRequest{CollectionID: 10, Limit: typeutil.Unlimited, Aggregates: agg.AggregatesToPB(aggregates)},
+				ShardId:   &viewpb.ShardID{ReplicaId: 1, Vchannel: "by-dev-rootcoord-dml_0_100v0"},
+				Version: &viewpb.QueryViewVersion{
+					DataVersion: &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 2}, QueryVersion: 3,
+				},
+				Mvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 10}, StreamChunkBytes: 1,
+			})
+			require.NoError(t, err)
+			defer stream.Close()
+			chunk, err := stream.Recv()
+			require.NoError(t, err)
+			require.Len(t, chunk.FieldsData, len(result.FieldsData))
+			for i, field := range chunk.FieldsData {
+				require.True(t, proto.Equal(result.FieldsData[i], field))
+			}
+			require.Equal(t, result.AllRetrieveCount, chunk.AllRetrieveCount)
+			_, err = stream.Recv()
+			require.ErrorIs(t, err, io.EOF)
+			require.NoError(t, stream.Close())
+			require.Equal(t, 1, tasks.releaseCount)
+		})
 	}
 }
 

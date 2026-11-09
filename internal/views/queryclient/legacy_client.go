@@ -297,11 +297,11 @@ func SupportsQueryStream(req *internalpb.RetrieveRequest) bool {
 		// requires an explicit limit for ORDER BY in either reduction mode.
 		return req.GetLimit() > 0 && (len(req.GetGroupByFieldIds()) > 0 || len(req.GetAggregates()) == 0)
 	}
-	if len(req.GetGroupByFieldIds()) > 0 {
+	if len(req.GetGroupByFieldIds()) > 0 || len(req.GetAggregates()) > 0 {
 		return true
 	}
 	validLimit := req.GetLimit() > 0 || req.GetLimit() == typeutil.Unlimited
-	return validLimit && len(req.GetAggregates()) == 0
+	return validLimit
 }
 
 func (c *legacyClient) queryStream(ctx context.Context, req *LegacyQueryRequest, chunkBytes int) (*LegacyQueryResult, error) {
