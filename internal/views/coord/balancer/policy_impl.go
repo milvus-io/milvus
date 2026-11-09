@@ -71,6 +71,15 @@ func (p *DefaultBalancePolicy) Plan(reader balancercache.Reader, dirty []qviews.
 		switch action {
 		case actionRelease:
 			plan.Releases = append(plan.Releases, shardID)
+			// A missing shard config can also mean replica removal. Only
+			// collection-wide load intent withdrawal preempts serving leases.
+			collection := snap.collectionForShard(shardID)
+			if collection == nil || collection.LoadConfig() == nil {
+				if plan.ReleaseControls == nil {
+					plan.ReleaseControls = make(map[qviews.ShardID]*viewpb.QueryViewControl)
+				}
+				plan.ReleaseControls[shardID] = &viewpb.QueryViewControl{PreemptServingLease: true}
+			}
 		case actionMust:
 			mandatory = append(mandatory, balanceCandidate{
 				shardID: shardID,
