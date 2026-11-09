@@ -142,9 +142,8 @@ func PaimonRoutingMeta(properties map[string]string) (readPath string, bucket in
 // file can retain its segment across refreshes. Every other current or future
 // descriptor field remains part of the canonical property hash. DataSplits use
 // the unmodified property hash because their descriptors pin a snapshot.
-func paimonDirectFileIdentity(f Fragment, base string) (string, bool) {
-	raw, metadata, err := parsePaimonRoutingMetadata(f.Properties)
-	if err != nil || metadata.ReadPath != "direct-file" {
+func paimonDirectFileIdentity(f Fragment, base, raw string, metadata paimonRoutingMetadata) (string, bool) {
+	if metadata.ReadPath != "direct-file" {
 		return "", false
 	}
 
@@ -195,10 +194,11 @@ func fragmentIdentityWithProperties(base string, properties map[string]string) s
 // milvus-table refreshes them in-place.
 func FragmentIdentity(f Fragment) string {
 	base := fmt.Sprintf("%s:%d:%d", ManifestPathKey(f.FilePath), f.StartRow, f.EndRow)
-	if _, _, err := parsePaimonRoutingMetadata(f.Properties); err != nil {
+	raw, metadata, err := parsePaimonRoutingMetadata(f.Properties)
+	if err != nil {
 		return base
 	}
-	if identity, ok := paimonDirectFileIdentity(f, base); ok {
+	if identity, ok := paimonDirectFileIdentity(f, base, raw, metadata); ok {
 		return identity
 	}
 	return fragmentIdentityWithProperties(base, f.Properties)
