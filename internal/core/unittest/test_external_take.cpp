@@ -16,6 +16,7 @@
 
 #include <nlohmann/json.hpp>
 #include "milvus-storage/filesystem/fs.h"
+#include <algorithm>
 #include <arrow/array.h>
 #include <arrow/builder.h>
 #include <arrow/compute/api.h>
@@ -4128,6 +4129,71 @@ TEST(InjectExtfsAllowlist, InvalidPaimonScanModeIsRejected) {
         EXPECT_THROW(::InjectExternalSpecProperties(
                          props, 42, "s3://s3.amazonaws.com/bucket/key", spec),
                      milvus::SegcoreError);
+    }
+}
+
+TEST(InjectExtfsAllowlist, PaimonFormatPropertiesIgnoreFieldOrder) {
+    for (const std::string snapshot : {"7", "\"7\"", "null"}) {
+        for (const std::string value : {"\"auto\"",
+                                        "\"direct-file\"",
+                                        "\"data-split\"",
+                                        "\"\"",
+                                        "null",
+                                        "\"invalid\"",
+                                        "true",
+                                        "1",
+                                        "{}",
+                                        "[]"}) {
+            const bool valid =
+                value == "\"auto\"" || value == "\"direct-file\"" ||
+                value == "\"data-split\"" || value == "\"\"" || value == "null";
+            const auto expected = value == "\"\"" || value == "null"
+                                      ? "auto"
+                                      : value.substr(1, value.size() - 2);
+            std::vector<std::string> fields{"\"format\":\"paimon-table\"",
+                                            "\"snapshot_id\":" + snapshot,
+                                            "\"scan_mode\":" + value};
+            std::sort(fields.begin(), fields.end());
+            do {
+                const auto spec =
+                    "{" + fields[0] + "," + fields[1] + "," + fields[2] + "}";
+                SCOPED_TRACE(spec);
+                LoonProperties props{nullptr, 0};
+                auto result = loon_properties_inject_external_spec(
+                    &props, 42, "s3://bucket/table", spec.c_str(), 2000, 5000);
+                if (valid) {
+                    EXPECT_EQ(result.err_code, loon_errcode_success);
+                    EXPECT_STREQ(
+                        loon_properties_get(&props, PROPERTY_PAIMON_SCAN_MODE),
+                        expected.c_str());
+                    if (snapshot != "null") {
+                        EXPECT_STREQ(
+                            loon_properties_get(
+                                &props, PROPERTY_READER_EXTTABLE_SNAPSHOT_ID),
+                            "7");
+                    }
+                } else {
+                    EXPECT_EQ(result.err_code, loon_errcode_invalid_properties);
+                }
+                loon_ffi_free_result(&result);
+                loon_properties_free(&props);
+            } while (std::next_permutation(fields.begin(), fields.end()));
+        }
+    }
+}
+
+TEST(InjectExtfsAllowlist, MissingPaimonScanModePreservesReaderDefault) {
+    for (const std::string spec : {
+             R"({"format":"paimon-table"})",
+             R"({"snapshot_id":7,"format":"paimon-table"})",
+         }) {
+        milvus_storage::api::Properties props;
+        ::InjectExternalSpecProperties(props, 42, "s3://bucket/table", spec);
+        EXPECT_EQ(props.count(PROPERTY_PAIMON_SCAN_MODE), 0u);
+        props[PROPERTY_PAIMON_SCAN_MODE] = std::string("data-split");
+        ::InjectExternalSpecProperties(props, 42, "s3://bucket/table", spec);
+        EXPECT_EQ(std::get<std::string>(props.at(PROPERTY_PAIMON_SCAN_MODE)),
+                  "data-split");
     }
 }
 
