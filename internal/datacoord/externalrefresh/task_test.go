@@ -1596,15 +1596,15 @@ func TestApplyExternalRefreshPatchUsesIncomingStatsPlaceholders(t *testing.T) {
 	assert.Equal(t, newManifest, patched.GetManifestPath())
 	assert.Equal(t, incoming.GetTextStatsLogs(), patched.GetTextStatsLogs())
 	assert.Equal(t, incoming.GetJsonKeyStats(), patched.GetJsonKeyStats())
-	assert.False(t, needDoTextIndex(patched, []UniqueID{500}, true))
-	assert.False(t, needDoJSONKeyIndex(patched, []UniqueID{500}, true))
+	assert.False(t, meta.NeedDoTextIndex(patched, []UniqueID{500}, true))
+	assert.False(t, meta.NeedDoJSONKeyIndex(patched, []UniqueID{500}, true))
 
 	incomingWithoutStats := proto.Clone(incoming).(*datapb.SegmentInfo)
 	incomingWithoutStats.TextStatsLogs = nil
 	incomingWithoutStats.JsonKeyStats = nil
 	patchedWithoutStats := applyExternalRefreshPatch(oldSeg, incomingWithoutStats)
-	assert.True(t, needDoTextIndex(patchedWithoutStats, []UniqueID{500}, true))
-	assert.True(t, needDoJSONKeyIndex(patchedWithoutStats, []UniqueID{500}, true))
+	assert.True(t, meta.NeedDoTextIndex(patchedWithoutStats, []UniqueID{500}, true))
+	assert.True(t, meta.NeedDoJSONKeyIndex(patchedWithoutStats, []UniqueID{500}, true))
 }
 
 func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectPatchRowCountChange(t *testing.T) {
