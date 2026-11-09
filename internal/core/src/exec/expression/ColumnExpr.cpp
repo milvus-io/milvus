@@ -85,8 +85,8 @@ int64_t
 PhyColumnExpr::GetNextBatchSize() {
     auto current_rows = GetCurrentRows();
 
-    return current_rows + batch_size_ >= segment_chunk_reader_.active_count_
-               ? segment_chunk_reader_.active_count_ - current_rows
+    return current_rows + batch_size_ >= active_count_
+               ? active_count_ - current_rows
                : batch_size_;
 }
 
@@ -268,7 +268,7 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
     }
 
     // normal path
-    if (segment_chunk_reader_.segment_->is_chunked()) {
+    if (segment_->is_chunked()) {
         auto real_batch_size = GetNextBatchSize();
         if (real_batch_size == 0) {
             return nullptr;
@@ -310,7 +310,7 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
              ++chunk_id) {
             auto chunk_size =
                 chunk_id == num_chunk_ - 1
-                    ? segment_chunk_reader_.active_count_ -
+                    ? active_count_ -
                           chunk_id * segment_chunk_reader_.SizePerChunk()
                     : segment_chunk_reader_.SizePerChunk();
             auto cda = segment_chunk_reader_.GetChunkDataAccessor(

@@ -167,8 +167,8 @@ int64_t
 PhyCompareFilterExpr::GetNextBatchSize() {
     auto current_rows = GetCurrentRows();
 
-    return current_rows + batch_size_ >= segment_chunk_reader_.active_count_
-               ? segment_chunk_reader_.active_count_ - current_rows
+    return current_rows + batch_size_ >= active_count_
+               ? active_count_ - current_rows
                : batch_size_;
 }
 
@@ -277,7 +277,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
     }
 
     // normal path
-    if (segment_chunk_reader_.segment_->is_chunked()) {
+    if (segment_->is_chunked()) {
         auto real_batch_size = GetNextBatchSize();
         if (real_batch_size == 0) {
             return nullptr;
@@ -329,7 +329,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
              ++chunk_id) {
             auto chunk_size =
                 chunk_id == num_chunk_ - 1
-                    ? segment_chunk_reader_.active_count_ -
+                    ? active_count_ -
                           chunk_id * segment_chunk_reader_.SizePerChunk()
                     : segment_chunk_reader_.SizePerChunk();
             auto left = segment_chunk_reader_.GetChunkDataAccessor(
@@ -403,8 +403,7 @@ PhyCompareFilterExpr::ExecCompareWithValueLookup(OpType op, EvalCtx& context) {
     const auto take_column = [&](bool gathered,
                                  FieldId field_id,
                                  TargetType target) -> TakeResultPtr {
-        if (gathered ||
-            segment_chunk_reader_.segment_->type() != SegmentType::Sealed) {
+        if (gathered || segment_->type() != SegmentType::Sealed) {
             return nullptr;
         }
         const auto column = CaptureDataColumn(field_id);
@@ -800,8 +799,7 @@ PhyCompareFilterExpr::ExecCompareRightType(EvalCtx& context) {
                     right_field_.get());
             } else {
                 AssertInfo(
-                    segment_chunk_reader_.segment_->type() ==
-                        SegmentType::Growing,
+                    segment_->type() == SegmentType::Growing,
                     "sealed compare Column Scan is unavailable for fields {} "
                     "and {}",
                     left_field_.get(),
