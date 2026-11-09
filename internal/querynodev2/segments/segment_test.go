@@ -1,7 +1,6 @@
 package segments
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"path/filepath"
@@ -13,8 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -1055,32 +1052,17 @@ func TestBaseSegment_SkipGrowingBF(t *testing.T) {
 	assert.Equal(t, []bool{true, true, true}, results)
 }
 
-type searchLoggingCountingCore struct {
-	zapcore.Core
-	withCalls *int
+type searchLoggingStringer struct {
+	calls atomic.Int64
 }
 
-func (c searchLoggingCountingCore) With(fields []zapcore.Field) zapcore.Core {
-	(*c.withCalls)++
-	return searchLoggingCountingCore{Core: c.Core.With(fields), withCalls: c.withCalls}
+func (s *searchLoggingStringer) String() string {
+	s.calls.Inc()
+	return "encoded"
 }
 
 func TestSearchWithSegmentLogging(t *testing.T) {
 	paramtable.Init()
-	previousLogger, previousLevel := mlog.L(), mlog.GetLevel()
-	var output bytes.Buffer
-	withCalls := 0
-	logger, _, err := mlog.InitLoggerWithWriteSyncer(
-		&mlog.Config{Level: "debug", DisableTimestamp: true}, zapcore.AddSync(&output),
-		zap.WrapCore(func(core zapcore.Core) zapcore.Core {
-			return searchLoggingCountingCore{Core: core, withCalls: &withCalls}
-		}))
-	require.NoError(t, err)
-	mlog.ReplaceGlobals(logger, nil)
-	t.Cleanup(func() {
-		mlog.ReplaceGlobals(previousLogger, nil)
-		mlog.SetLevel(previousLevel)
-	})
 
 	segment := &LocalSegment{
 		baseSegment: baseSegment{
@@ -1103,9 +1085,13 @@ func TestSearchWithSegmentLogging(t *testing.T) {
 		{name: "warn_preserves_fields", level: mlog.InfoLevel, err: merr.ErrServiceInternal, messages: []string{"Search failed"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			mlog.SetLevel(test.level)
-			output.Reset()
-			withCalls = 0
+			output := mlog.CaptureGlobalLogs(t, &mlog.Config{
+				Level: test.level.String(), DisableTimestamp: true,
+			})
+			probe := &searchLoggingStringer{}
+			// An eager With on the search logger would encode this field even
+			// when Debug is disabled.
+			mlog.ReplaceGlobals(mlog.L().WithLazy(mlog.Stringer("encodingProbe", probe)), nil)
 			expected := &segcore.SearchResult{}
 			native := mock_segcore.NewMockCSegment(t)
 			native.EXPECT().Search(mock.Anything, mock.Anything).Return(expected, test.err).Once()
@@ -1119,9 +1105,10 @@ func TestSearchWithSegmentLogging(t *testing.T) {
 			}
 			if len(test.messages) == 0 {
 				require.Empty(t, output.String())
-				require.Zero(t, withCalls, "disabled Debug must not encode bound logger fields")
+				require.Zero(t, probe.calls.Load(), "disabled Debug must not encode bound logger fields")
 				return
 			}
+			require.Positive(t, probe.calls.Load(), "enabled logs must encode bound logger fields")
 			lines := strings.Split(strings.TrimSpace(output.String()), "\n")
 			require.Len(t, lines, len(test.messages))
 			for i, line := range lines {
