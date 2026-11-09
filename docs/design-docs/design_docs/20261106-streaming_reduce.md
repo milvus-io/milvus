@@ -105,9 +105,9 @@ refreshed values without QN/SN restart; in-flight requests retain their values.
 Existing configuration-source precedence applies. SDK parameters cannot override
 them. Eligibility preserves existing API validation: supported ordinary/iterator
 Query, ANN variants, Search grouping/aggregation and legacy Hybrid fusion can
-stream, including Query Group By + ORDER BY, global aggregates and valid QueryScan
-function chains. Hybrid Group By and unsupported reranking remain Batch, as does
-retained-plan requery. Exact gates:
+stream, including Query Group By + ORDER BY, global aggregates, valid QueryScan
+function chains and ordinary L2-only reranking. Hybrid Group By and unsupported
+reranking remain Batch, as does retained-plan requery. Exact gates:
 [Query](../../../internal/views/queryclient/legacy_client.go#L290),
 [QueryScan validation](../../../internal/proxy/dql/query_function_chain.go#L29),
 [Search/Hybrid](../../../internal/proxy/dql/task_search.go#L1678).
@@ -892,7 +892,8 @@ whereas an invalid request is not made valid by this feature.
 | Search | ORDER BY | Ordered ANN streaming, then Proxy scalar ordering. |
 | Search | Group By, group_size > 1 and supported composite keys | Ordered grouped candidate selection with Batch pruning. |
 | Search | Search aggregation | Ordered candidate reduction, then existing Proxy aggregation. |
-| Search | Ungrouped explicit function/model reranking or L0/L1/L2 chains | Batch. |
+| Search | Ordinary ungrouped Proxy-side function/model reranking and L2-only chains | Ordered ANN streaming, then existing Proxy reranking over the complete candidate window. |
+| Search | Ungrouped L0/L1 chains, including combinations with L2 | Batch. |
 | Hybrid | Legacy RRF/weighted fusion with eligible ANN, range, iterative-filter, element/embedding-list sub-searches | One streaming tree per sub-search, then Proxy fusion/collapse. |
 | Hybrid | Group By | Batch; final fusion needs a candidate-preserving grouping policy. |
 | Hybrid | Top-level model/function reranking beyond legacy fusion; sub-search L0/L1 chains | Batch. |
@@ -903,6 +904,14 @@ stays Batch regardless of enablement. Sources:
 [Query routing](../../../internal/views/queryclient/legacy_client.go#L245),
 [QueryScan validation](../../../internal/proxy/dql/query_function_chain.go#L29),
 [Search/Hybrid gate](../../../internal/proxy/dql/task_search.go#L1678).
+
+For ordinary L2 reranking, Proxy first collects the same ANN candidate window as
+Batch, including Batch's pre-rerank request offset. It then invokes the existing
+reranking pipeline through `RunFromReduced()`. A smaller L2 `limit` does not reduce
+the ANN candidate window. Reranker input fields (including JSON/dynamic roots)
+travel with the candidates; output-field requery and field assembly remain in
+their existing pipeline positions. L2 is not invoked separately for each transport
+Chunk, and its complete candidate list still occupies memory at Proxy.
 
 ### 11. Memory and Backpressure
 

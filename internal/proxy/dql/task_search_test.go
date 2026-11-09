@@ -5510,6 +5510,7 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 
 		require.NoError(t, task.initSearchRequest(ctx))
 		assert.Equal(t, internalpb.SearchType_DEFAULT, task.SearchType)
+		assert.True(t, task.supportsStreamingReduce())
 	})
 
 	t.Run("ordinary search rejects order by with function chains", func(t *testing.T) {
@@ -5540,6 +5541,7 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 
 		require.NoError(t, task.initSearchRequest(ctx))
 		assert.True(t, task.needRequery)
+		assert.True(t, task.supportsStreamingReduce())
 
 		plan := &planpb.PlanNode{}
 		require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
@@ -5554,6 +5556,7 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, []string{"ts"}, meta.GetInputFieldNames())
 		assert.Equal(t, []int64{101}, meta.GetInputFieldIDs())
+		assert.True(t, task.supportsStreamingReduce())
 	})
 
 	t.Run("ordinary search rejects missing function score input field", func(t *testing.T) {
