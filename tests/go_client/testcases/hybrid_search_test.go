@@ -417,7 +417,7 @@ func TestHybridSearchMultiVectorsPagination(t *testing.T) {
 		common.CheckSearchResult(t, searchRes, common.DefaultNq, common.DefaultLimit)
 	}
 
-	// an offset is set on the hybrid search, a sub-request offset is rejected
+	// a sub-request offset is rejected when the hybrid search has no offset
 	annReqOffset := client.NewAnnRequest(common.DefaultFloat16VecFieldName, common.DefaultLimit, queryVec2...).WithOffset(common.MaxTopK + 1)
 	_, errSearch := mc.HybridSearch(ctx, client.NewHybridSearchOption(schema.CollectionName, common.DefaultLimit, annReqDef, annReqOffset))
 	common.CheckErr(t, errSearch, false, "in a hybrid search sub-request is not supported")
