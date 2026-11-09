@@ -1200,7 +1200,7 @@ func TestStructArrayUpsertData(t *testing.T) {
 		WithStructArrayColumn("clips", structSchema, upsertRows))
 	common.CheckErr(t, err, true)
 
-	// Skip second flush: target instance has flush rate limited at 0.1/s. Rely on Strong
+	// Avoid a second flush against deployment-specific collection quotas. Rely on Strong
 	// consistency in the query to see upsert results regardless of segment state.
 	rs, err := mc.Query(ctx, client.NewQueryOption(collName).
 		WithFilter("id < 5").WithOutputFields("id", "clips").
@@ -1391,7 +1391,7 @@ func TestStructArrayDeleteData(t *testing.T) {
 	// delete 5 from flushed (ids 0..4) and 5 from growing (200..204)
 	_, err = mc.Delete(ctx, client.NewDeleteOption(collName).WithExpr("id in [0,1,2,3,4,200,201,202,203,204]"))
 	common.CheckErr(t, err, true)
-	// Skip second flush: target instance has flush rate limited at 0.1/s. Rely on Strong
+	// Avoid a second flush against deployment-specific collection quotas. Rely on Strong
 	// consistency in the subsequent query.
 
 	rs, err := mc.Query(ctx, client.NewQueryOption(collName).
