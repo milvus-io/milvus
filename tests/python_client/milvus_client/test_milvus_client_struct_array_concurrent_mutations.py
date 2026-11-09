@@ -48,10 +48,6 @@ SUBFIELD_DROP_ISSUE = "https://github.com/milvus-io/milvus/issues/55234"
 SUBFIELD_DROP_MESSAGE = 'sub-field "added" does not exist in struct field "clips": invalid parameter'
 
 
-class ConcurrentSubfieldDropRejection(AssertionError):
-    """Insert or full upsert rejected a cached child during schema removal."""
-
-
 def is_subfield_drop_rejection(code, message):
     return code == 1100 and message == SUBFIELD_DROP_MESSAGE
 
@@ -499,7 +495,6 @@ class TestMilvusClientStructArrayConcurrentSchemaUpdates(StructArrayTestBase):
 
 class TestMilvusClientStructArrayConcurrentSubfieldDrop(StructArrayTestBase):
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(strict=True, raises=ConcurrentSubfieldDropRejection, reason=SUBFIELD_DROP_ISSUE)
     def test_concurrent_drop_preserves_inserts_that_omit_removed_child(self):
         """
         target: keep inserts valid when they omit a concurrently removed nullable child
@@ -547,14 +542,14 @@ class TestMilvusClientStructArrayConcurrentSubfieldDrop(StructArrayTestBase):
         )
         if errors:
             assert all(is_subfield_drop_rejection(e["code"], e["message"]) for e in errors), errors
-            raise ConcurrentSubfieldDropRejection(f"{SUBFIELD_DROP_ISSUE}: {errors}")
+            # The race is scheduling-dependent; non-reproducing runs should pass.
+            pytest.xfail(f"{SUBFIELD_DROP_ISSUE}: {errors}")
 
 
 class TestMilvusClientStructArrayConcurrentReadWrite(StructArrayTestBase):
     skip_global_role_cleanup = True
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(strict=True, raises=ConcurrentSubfieldDropRejection, reason=SUBFIELD_DROP_ISSUE)
     @pytest.mark.parametrize("seed,smoke", [(7, True), (41, False), (109, False)], ids=["smoke", "seed41", "seed109"])
     def test_concurrent_reads_upserts_deletes_preserve_acknowledged_rows(self, seed, smoke, request, tmp_path):
         """
@@ -573,7 +568,8 @@ class TestMilvusClientStructArrayConcurrentReadWrite(StructArrayTestBase):
             history.run()
         except AssertionError as error:
             if is_verified_subfield_drop_failure(error, history.events, history.errors):
-                raise ConcurrentSubfieldDropRejection(f"{SUBFIELD_DROP_ISSUE}: {history.errors}") from error
+                # Only a reconciled occurrence of the known race is an expected failure.
+                pytest.xfail(f"{SUBFIELD_DROP_ISSUE}: {history.errors}")
             raise
         finally:
             # Preserve the journal even if failure reconciliation itself raises.
