@@ -410,7 +410,7 @@ func TestIndexInspector_CreateIndexForSegment_OverrideIndexType(t *testing.T) {
 	catalog.EXPECT().CreateSegmentIndex(mock.Anything, mock.Anything).Return(nil)
 	scheduler.EXPECT().Enqueue(mock.Anything).Return()
 
-	err := inspector.createIndexForSegment(ctx, segment, 5)
+	err := inspector.createIndexForSegment(ctx, nil, segment, 5)
 	assert.NoError(t, err)
 
 	segIndexes := im.GetSegmentIndexes(segment.CollectionID, segment.ID)
