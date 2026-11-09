@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package searchutil
+package reducestream
 
 import (
 	"context"
@@ -30,14 +30,14 @@ import (
 )
 
 type shutdownClientStream struct {
-	viewpb.ViewQueryService_SearchOnViewStreamClient
+	viewpb.ViewQueryService_QueryOnViewStreamClient
 	ctx        context.Context
 	started    chan struct{}
 	closeCalls atomic.Int32
 	closeErr   error
 }
 
-func (s *shutdownClientStream) Recv() (*viewpb.SearchOnViewStreamResponse, error) {
+func (s *shutdownClientStream) Recv() (*viewpb.QueryOnViewStreamResponse, error) {
 	close(s.started)
 	<-s.ctx.Done()
 	return nil, s.ctx.Err()

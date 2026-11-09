@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package queryutil
+package reducestream
 
 import (
 	"context"
@@ -28,6 +28,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/agg"
+	"github.com/milvus-io/milvus/internal/util/queryutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -190,9 +192,9 @@ func TestOrderedReduceStreamElementFilter(t *testing.T) {
 			ids = append(ids, queryTestIDs(chunk)...)
 		}
 		require.Equal(t, []int64{1, 2, 3, 4}, ids)
-		got, err := NewSortAndCheckPKPageOperator(0, nil, 3, 1).Run(context.Background(), nil, results)
+		got, err := queryutil.NewSortAndCheckPKPageOperator(0, nil, 3, 1).Run(context.Background(), nil, results)
 		require.NoError(t, err)
-		batch, err := NewSortAndCheckPKPageOperator(0, nil, 3, 1).Run(context.Background(), nil, []*internalpb.RetrieveResults{left, right})
+		batch, err := queryutil.NewSortAndCheckPKPageOperator(0, nil, 3, 1).Run(context.Background(), nil, []*internalpb.RetrieveResults{left, right})
 		require.NoError(t, err)
 		require.True(t, proto.Equal(batch[0].(*internalpb.RetrieveResults), got[0].(*internalpb.RetrieveResults)))
 	}
@@ -635,6 +637,32 @@ func TestUnOrderedReduceStreamRejectsMalformedPartials(t *testing.T) {
 			require.Equal(t, 1, child.closeCount())
 			require.Nil(t, stream.(*UnOrderedReduceStream).outputBuffer)
 		})
+	}
+}
+
+func makeTimestampField(timestamps []int64) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type: schemapb.DataType_Int64, FieldName: "timestamp", FieldId: common.TimeStampField,
+		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: timestamps}},
+		}},
+	}
+}
+
+func makeElementLevelResult(pks, timestamps []int64, elemIndices [][]int32) *internalpb.RetrieveResults {
+	indices := make([]*internalpb.ElementIndices, len(elemIndices))
+	for i, elements := range elemIndices {
+		indices[i] = &internalpb.ElementIndices{Indices: elements}
+	}
+	return &internalpb.RetrieveResults{
+		Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: pks}}},
+		FieldsData: []*schemapb.FieldData{{
+			Type: schemapb.DataType_Int64, FieldId: common.TimeStampField,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: timestamps}},
+			}},
+		}},
+		ElementLevel: true, ElementIndices: indices,
 	}
 }
 

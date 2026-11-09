@@ -25,7 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/featureusage"
-	"github.com/milvus-io/milvus/internal/util/searchutil"
+	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -60,7 +60,7 @@ func TestSearchTaskStreamingConfigRefresh(t *testing.T) {
 				if enabled {
 					stream := &fakeLegacySearchStream{recv: []fakeLegacySearchRecv{{chunk: newFinalSearchChunk([]int64{1}, []float32{.9}, "channel")}}}
 					if hybrid {
-						legacy.searchResult.SubStreams = []searchutil.ReduceStream{stream}
+						legacy.searchResult.SubStreams = []searchreducestream.ReduceStream{stream}
 					} else {
 						legacy.searchResult.Stream = stream
 					}
@@ -136,7 +136,7 @@ func TestStreamingConfigStableAcrossRetries(t *testing.T) {
 					}
 					stream := &fakeLegacySearchStream{recv: []fakeLegacySearchRecv{{chunk: newFinalSearchChunk([]int64{1}, []float32{.9}, "channel")}}}
 					if operation == "Hybrid" {
-						return &queryclient.LegacySearchResult{SubStreams: []searchutil.ReduceStream{stream}}, nil
+						return &queryclient.LegacySearchResult{SubStreams: []searchreducestream.ReduceStream{stream}}, nil
 					}
 					return &queryclient.LegacySearchResult{Stream: stream}, nil
 				}

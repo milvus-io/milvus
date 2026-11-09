@@ -13,9 +13,9 @@ import (
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/util/queryutil"
-	"github.com/milvus-io/milvus/internal/util/searchutil"
+	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
+	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	"github.com/milvus-io/milvus/internal/views/queryclient/reducer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -126,7 +126,7 @@ func (s *shardViewQueryClient) SearchStreams(
 	ctx context.Context,
 	req *ShardSearchRequest,
 	chunkBytes int,
-) ([]searchutil.ReduceStream, *ShardPlan, error) {
+) ([]searchreducestream.ReduceStream, *ShardPlan, error) {
 	if req == nil || req.Req == nil {
 		return nil, nil, merr.WrapErrServiceInternalMsg("SearchStreams requires a Search request")
 	}
@@ -142,7 +142,7 @@ func (s *shardViewQueryClient) SearchStreams(
 			return nil, nil, err
 		}
 	}
-	children := make([][]searchutil.ReduceStream, len(requests))
+	children := make([][]searchreducestream.ReduceStream, len(requests))
 	var mu sync.Mutex
 	var plannedRequests []*internalpb.SearchRequest
 	plan, err := s.executeShard(ctx, req.VChannel, &shardExecParams{
@@ -211,11 +211,11 @@ func (s *shardViewQueryClient) SearchStreams(
 			}
 		},
 	})
-	streams := make([]searchutil.ReduceStream, 0, len(requests))
+	streams := make([]searchreducestream.ReduceStream, 0, len(requests))
 	for index, request := range requests {
-		var reducedStream searchutil.ReduceStream
+		var reducedStream searchreducestream.ReduceStream
 		if err == nil {
-			reducedStream, err = searchutil.NewShardReduceStream(request, children[index], chunkBytes)
+			reducedStream, err = searchreducestream.NewShardReduceStream(request, children[index], chunkBytes)
 		}
 		if err != nil {
 			for _, childStreams := range children {
@@ -279,7 +279,7 @@ func (s *shardViewQueryClient) QueryStream(
 	ctx context.Context,
 	req *ShardQueryRequest,
 	chunkBytes int,
-) (queryutil.ReduceStream, *ShardPlan, error) {
+) (queryreducestream.ReduceStream, *ShardPlan, error) {
 	if req == nil || req.Req == nil {
 		return nil, nil, merr.WrapErrServiceInternalMsg("QueryStream requires a Query request")
 	}
@@ -287,7 +287,7 @@ func (s *shardViewQueryClient) QueryStream(
 	if ctx.Err() != nil {
 		return nil, nil, ctx.Err()
 	}
-	var children []queryutil.ReduceStream
+	var children []queryreducestream.ReduceStream
 	var mu sync.Mutex
 	plan, err := s.executeShard(ctx, req.VChannel, &shardExecParams{
 		collectionID:     req.Req.GetCollectionID(),
@@ -324,9 +324,9 @@ func (s *shardViewQueryClient) QueryStream(
 			children = nil
 		},
 	})
-	var reducedStream queryutil.ReduceStream
+	var reducedStream queryreducestream.ReduceStream
 	if err == nil {
-		reducedStream, err = queryutil.NewShardReduceStream(req.Req, req.Schema, children, chunkBytes)
+		reducedStream, err = queryreducestream.NewShardReduceStream(req.Req, req.Schema, children, chunkBytes)
 	}
 	if err != nil {
 		for _, childStream := range children {

@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
+	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -1385,7 +1386,7 @@ func (t *QueryTask) formatTimeFields(ctx context.Context) error {
 	return nil
 }
 
-func (t *QueryTask) consumeQueryResultStream(stream queryutil.ReduceStream) (*internalpb.RetrieveResults, error) {
+func (t *QueryTask) consumeQueryResultStream(stream queryreducestream.ReduceStream) (*internalpb.RetrieveResults, error) {
 	output := &internalpb.RetrieveResults{
 		Status: merr.Success(),
 		Ids:    &schemapb.IDs{},

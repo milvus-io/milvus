@@ -32,8 +32,8 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/util/queryutil"
-	"github.com/milvus-io/milvus/internal/util/searchutil"
+	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
+	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	serviceinterceptor "github.com/milvus-io/milvus/internal/util/streamingutil/service/interceptor"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
@@ -55,7 +55,7 @@ func TestSearchOnViewStreamSendsChunksAndEOF(t *testing.T) {
 	request := streamTestRequest()
 	request.StreamChunkBytes = 20
 	request.SegmentSelection = &viewpb.SegmentSelection{SegmentIds: []int64{123}, Mode: viewpb.SegmentSelection_Include}
-	stream, err := searchutil.NewGRPCReduceStream(context.Background(), client, request)
+	stream, err := searchreducestream.NewGRPCReduceStream(context.Background(), client, request)
 	require.NoError(t, err)
 
 	first := recvSearchStreamChunk(t, stream)
@@ -108,7 +108,7 @@ func TestSearchOnViewStreamSendsEmptyChunkWithMetadata(t *testing.T) {
 	)
 	client, cleanup := startSearchStreamTestServer(t, server)
 	defer cleanup()
-	stream, err := searchutil.NewGRPCReduceStream(context.Background(), client, streamTestRequest())
+	stream, err := searchreducestream.NewGRPCReduceStream(context.Background(), client, streamTestRequest())
 	require.NoError(t, err)
 
 	chunk := recvSearchStreamChunk(t, stream)
@@ -132,7 +132,7 @@ func TestSearchOnViewStreamReturnsServerError(t *testing.T) {
 	}, &streamTestScheduler{})
 	client, cleanup := startSearchStreamTestServer(t, server)
 	defer cleanup()
-	stream, err := searchutil.NewGRPCReduceStream(context.Background(), client, streamTestRequest())
+	stream, err := searchreducestream.NewGRPCReduceStream(context.Background(), client, streamTestRequest())
 	require.NoError(t, err)
 
 	chunk, err := stream.Recv()
@@ -150,7 +150,7 @@ func TestSearchOnViewStreamAcceptsPlainANNRequest(t *testing.T) {
 
 	request := streamTestRequest()
 	request.LegacyReq.IsIterator = false
-	stream, err := searchutil.NewGRPCReduceStream(context.Background(), client, request)
+	stream, err := searchreducestream.NewGRPCReduceStream(context.Background(), client, request)
 	require.NoError(t, err)
 
 	chunk := recvSearchStreamChunk(t, stream)
@@ -168,7 +168,7 @@ func TestSearchOnViewStreamRejectsUnsupportedSearch(t *testing.T) {
 
 	request := streamTestRequest()
 	request.LegacyReq.IsAdvanced = true
-	stream, err := searchutil.NewGRPCReduceStream(context.Background(), client, request)
+	stream, err := searchreducestream.NewGRPCReduceStream(context.Background(), client, request)
 	require.NoError(t, err)
 
 	chunk, err := stream.Recv()
@@ -195,7 +195,7 @@ func TestSearchOnViewStreamSendsGroupByColumns(t *testing.T) {
 	request.LegacyReq.GroupByFieldIds = []int64{100}
 	request.LegacyReq.GroupSize = 2
 	request.StreamChunkBytes = 1
-	stream, err := searchutil.NewGRPCReduceStream(context.Background(), client, request)
+	stream, err := searchreducestream.NewGRPCReduceStream(context.Background(), client, request)
 	require.NoError(t, err)
 	defer stream.Close()
 	var ids, groups []int64
@@ -221,7 +221,7 @@ func TestSearchOnViewStreamCloseCancelsServer(t *testing.T) {
 	)
 	client, cleanup := startSearchStreamTestServer(t, server)
 	defer cleanup()
-	stream, err := searchutil.NewGRPCReduceStream(context.Background(), client, streamTestRequest())
+	stream, err := searchreducestream.NewGRPCReduceStream(context.Background(), client, streamTestRequest())
 	require.NoError(t, err)
 
 	select {
@@ -278,7 +278,7 @@ func TestQueryOnViewStreamSendsChunksAndEOF(t *testing.T) {
 		StreamChunkBytes: 32,
 		SegmentSelection: &viewpb.SegmentSelection{SegmentIds: []int64{456}, Mode: viewpb.SegmentSelection_Include},
 	}
-	stream, err := queryutil.NewGRPCReduceStream(context.Background(), client, request)
+	stream, err := queryreducestream.NewGRPCReduceStream(context.Background(), client, request)
 	require.NoError(t, err)
 
 	first, err := stream.Recv()
@@ -305,7 +305,7 @@ func TestQueryOnViewStreamSendsChunksAndEOF(t *testing.T) {
 
 	request.LegacyReq.IsIterator = false
 	request.LegacyReq.Limit = typeutil.Unlimited
-	stream, err = queryutil.NewGRPCReduceStream(t.Context(), client, request)
+	stream, err = queryreducestream.NewGRPCReduceStream(t.Context(), client, request)
 	require.NoError(t, err)
 	var ids []int64
 	for {
@@ -321,7 +321,7 @@ func TestQueryOnViewStreamSendsChunksAndEOF(t *testing.T) {
 	require.NoError(t, stream.Close())
 
 	request.LegacyReq.IsIterator = true
-	stream, err = queryutil.NewGRPCReduceStream(t.Context(), client, request)
+	stream, err = queryreducestream.NewGRPCReduceStream(t.Context(), client, request)
 	require.NoError(t, err)
 	first, err = stream.Recv()
 	require.NoError(t, err)
@@ -345,7 +345,7 @@ func TestQueryOnViewStreamPreservesElementIndices(t *testing.T) {
 	server := NewServer(&streamTestProvider{queryTasks: tasks}, &streamTestScheduler{queryResult: result})
 	client, cleanup := startSearchStreamTestServer(t, server)
 	defer cleanup()
-	stream, err := queryutil.NewGRPCReduceStream(context.Background(), client, &viewpb.QueryOnViewRequest{
+	stream, err := queryreducestream.NewGRPCReduceStream(context.Background(), client, &viewpb.QueryOnViewRequest{
 		LegacyReq: &internalpb.RetrieveRequest{CollectionID: 10, Limit: 4},
 		ShardId:   &viewpb.ShardID{ReplicaId: 1, Vchannel: "by-dev-rootcoord-dml_0_100v0"},
 		Version: &viewpb.QueryViewVersion{
@@ -383,7 +383,7 @@ func TestQueryOnViewStreamAcceptsOrderByQuery(t *testing.T) {
 	client, cleanup := startSearchStreamTestServer(t, server)
 	defer cleanup()
 
-	stream, err := queryutil.NewGRPCReduceStream(context.Background(), client, &viewpb.QueryOnViewRequest{
+	stream, err := queryreducestream.NewGRPCReduceStream(context.Background(), client, &viewpb.QueryOnViewRequest{
 		LegacyReq: &internalpb.RetrieveRequest{
 			CollectionID: 10,
 			Limit:        1,
@@ -437,7 +437,7 @@ func TestQueryOnViewStreamAcceptsGroupByQuery(t *testing.T) {
 	client, cleanup := startSearchStreamTestServer(t, server)
 	defer cleanup()
 
-	stream, err := queryutil.NewGRPCReduceStream(context.Background(), client, &viewpb.QueryOnViewRequest{
+	stream, err := queryreducestream.NewGRPCReduceStream(context.Background(), client, &viewpb.QueryOnViewRequest{
 		LegacyReq: &internalpb.RetrieveRequest{
 			CollectionID:    10,
 			GroupByFieldIds: []int64{100},
@@ -495,7 +495,7 @@ func startSearchStreamTestServer(t *testing.T, service viewpb.ViewQueryServiceSe
 	}
 }
 
-func recvSearchStreamChunk(t *testing.T, stream searchutil.ReduceStream) *internalpb.SearchResults {
+func recvSearchStreamChunk(t *testing.T, stream searchreducestream.ReduceStream) *internalpb.SearchResults {
 	t.Helper()
 	chunk, err := stream.Recv()
 	require.NoError(t, err)

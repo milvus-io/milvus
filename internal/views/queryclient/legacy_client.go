@@ -9,8 +9,8 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/util/queryutil"
-	"github.com/milvus-io/milvus/internal/util/searchutil"
+	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
+	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/views/queryclient/resolver"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewquery"
@@ -52,9 +52,9 @@ type LegacySearchRequest struct {
 
 type LegacySearchResult struct {
 	Results []*internalpb.SearchResults
-	Stream  searchutil.ReduceStream
+	Stream  searchreducestream.ReduceStream
 	// SubStreams contains one final stream per Hybrid sub-search, in request order.
-	SubStreams []searchutil.ReduceStream
+	SubStreams []searchreducestream.ReduceStream
 	Plans      []ShardPlan
 }
 
@@ -78,7 +78,7 @@ type LegacyQueryRequest struct {
 
 type LegacyQueryResult struct {
 	Results []*internalpb.RetrieveResults
-	Stream  queryutil.ReduceStream
+	Stream  queryreducestream.ReduceStream
 	Plans   []ShardPlan
 }
 
@@ -188,7 +188,7 @@ func (c *legacyClient) searchStream(ctx context.Context, req *LegacySearchReques
 			return nil, err
 		}
 	}
-	vchannelStreams := make([][]searchutil.ReduceStream, len(vchannels))
+	vchannelStreams := make([][]searchreducestream.ReduceStream, len(vchannels))
 	shardPlans := make([]ShardPlan, len(vchannels))
 	var g errgroup.Group
 	for i := range vchannels {
@@ -218,13 +218,13 @@ func (c *legacyClient) searchStream(ctx context.Context, req *LegacySearchReques
 		return nil, err
 	}
 
-	finalStreams := make([]searchutil.ReduceStream, len(requests))
+	finalStreams := make([]searchreducestream.ReduceStream, len(requests))
 	for index, request := range requests {
-		children := make([]searchutil.ReduceStream, len(vchannels))
+		children := make([]searchreducestream.ReduceStream, len(vchannels))
 		for i := range vchannels {
 			children[i] = vchannelStreams[i][index]
 		}
-		finalStreams[index], err = searchutil.NewReduceStream(request, children, chunkBytes)
+		finalStreams[index], err = searchreducestream.NewReduceStream(request, children, chunkBytes)
 		if err != nil {
 			for _, streams := range vchannelStreams {
 				for _, stream := range streams {
@@ -310,7 +310,7 @@ func (c *legacyClient) queryStream(ctx context.Context, req *LegacyQueryRequest,
 		return nil, err
 	}
 
-	vchannelStreams := make([]queryutil.ReduceStream, len(vchannels))
+	vchannelStreams := make([]queryreducestream.ReduceStream, len(vchannels))
 	shardPlans := make([]ShardPlan, len(vchannels))
 	var group errgroup.Group
 	for i := range vchannels {
@@ -340,7 +340,7 @@ func (c *legacyClient) queryStream(ctx context.Context, req *LegacyQueryRequest,
 		return nil, err
 	}
 
-	finalStream, err := queryutil.NewReduceStream(req.Req, req.Schema, vchannelStreams, chunkBytes)
+	finalStream, err := queryreducestream.NewReduceStream(req.Req, req.Schema, vchannelStreams, chunkBytes)
 	if err != nil {
 		for _, stream := range vchannelStreams {
 			err = errors.Join(err, stream.Close())

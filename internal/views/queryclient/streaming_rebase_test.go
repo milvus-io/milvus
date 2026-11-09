@@ -24,8 +24,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/milvus-io/milvus/internal/util/queryutil"
-	"github.com/milvus-io/milvus/internal/util/searchutil"
+	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
+	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/balancer/picker"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -55,7 +55,7 @@ func TestStreamingPreservesPlanSelectionsAndSummary(t *testing.T) {
 			}}
 			var workerCtx context.Context
 			service := &legacyServiceClient{
-				searchOnViewStream: func(ctx context.Context, _ qviews.WorkNode, request *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
+				searchOnViewStream: func(ctx context.Context, _ qviews.WorkNode, request *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
 					workerCtx = ctx
 					want := selection
 					if kind == "Hybrid" {
@@ -65,7 +65,7 @@ func TestStreamingPreservesPlanSelectionsAndSummary(t *testing.T) {
 					require.EqualValues(t, 128, request.GetStreamChunkBytes())
 					return &fakeSearchStream{ctx: ctx}, nil
 				},
-				queryOnViewStream: func(ctx context.Context, _ qviews.WorkNode, request *viewpb.QueryOnViewRequest) (queryutil.ReduceStream, error) {
+				queryOnViewStream: func(ctx context.Context, _ qviews.WorkNode, request *viewpb.QueryOnViewRequest) (queryreducestream.ReduceStream, error) {
 					workerCtx = ctx
 					require.True(t, proto.Equal(selection, request.GetSegmentSelection()))
 					require.EqualValues(t, 128, request.GetStreamChunkBytes())
@@ -125,13 +125,13 @@ func TestStreamingShardFailsOverDiscoveredReplicas(t *testing.T) {
 				return &viewpb.GetQueryPlanResponse{Plan: plan}, nil
 			}}
 			service := &legacyServiceClient{
-				searchOnViewStream: func(ctx context.Context, node qviews.WorkNode, _ *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
+				searchOnViewStream: func(ctx context.Context, node qviews.WorkNode, _ *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
 					if node.(qviews.QueryNode).ID == 11 {
 						return nil, picker.ErrSubConnNotExist
 					}
 					return &fakeSearchStream{ctx: ctx}, nil
 				},
-				queryOnViewStream: func(ctx context.Context, node qviews.WorkNode, _ *viewpb.QueryOnViewRequest) (queryutil.ReduceStream, error) {
+				queryOnViewStream: func(ctx context.Context, node qviews.WorkNode, _ *viewpb.QueryOnViewRequest) (queryreducestream.ReduceStream, error) {
 					if node.(qviews.QueryNode).ID == 11 {
 						return nil, picker.ErrSubConnNotExist
 					}

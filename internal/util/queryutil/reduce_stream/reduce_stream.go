@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package queryutil
+package reducestream
 
 import (
 	"errors"
@@ -29,6 +29,7 @@ import (
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/agg"
+	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -59,7 +60,7 @@ func (u retrieveUnit) pk() any {
 }
 
 func (u retrieveUnit) timestamp() int64 {
-	timestamps := extractTimestamps(u.result)
+	timestamps := queryutil.ExtractTimestamps(u.result)
 	if u.rowIndex >= int64(len(timestamps)) {
 		return 0
 	}
@@ -90,7 +91,7 @@ func compareRetrieveUnits(left, right retrieveUnit, orderByFields []*planpb.Orde
 				"Query ORDER BY field %d has inconsistent child types %s and %s",
 				orderByField.GetFieldId(), leftField.GetType(), rightField.GetType())
 		}
-		comparison := compareFieldDataRows(
+		comparison := queryutil.CompareFieldDataRows(
 			leftField,
 			int(left.rowIndex),
 			rightField,
@@ -103,12 +104,12 @@ func compareRetrieveUnits(left, right retrieveUnit, orderByFields []*planpb.Orde
 			return comparison, nil
 		}
 	}
-	return comparePK(left.pk(), right.pk()), nil
+	return queryutil.ComparePK(left.pk(), right.pk()), nil
 }
 
 // reducibleByteSize counts the encoded reducible fields of one Unit.
 func (u retrieveUnit) reducibleByteSize() (int, error) {
-	if u.rowIndex < 0 || u.rowIndex >= int64(GetRowCount(u.result)) {
+	if u.rowIndex < 0 || u.rowIndex >= int64(queryutil.GetRowCount(u.result)) {
 		return 0, merr.WrapErrServiceInternalMsg("Query Unit row index %d is out of range", u.rowIndex)
 	}
 	computer := u.fieldIndexComputer
@@ -174,7 +175,7 @@ func (b *orderedChildBuffer) accept(chunk *internalpb.RetrieveResults) error {
 	if b.hasUnit() {
 		return merr.WrapErrServiceInternalMsg("Query child Buffer already contains Units")
 	}
-	if err := validateElementLevelConsistency([]*internalpb.RetrieveResults{chunk}, nil); err != nil {
+	if err := queryutil.ValidateElementLevelConsistency([]*internalpb.RetrieveResults{chunk}, nil); err != nil {
 		return err
 	}
 	b.hasMoreResult = b.hasMoreResult || chunk.GetHasMoreResult()
@@ -325,7 +326,7 @@ func (s *OrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 		selected := winner.front()
 		// Resolve the trailing PK even after the byte threshold is reached.
 		// Returning its Chunk first would make a newer row in the next input Chunk too late.
-		if s.deduplicatePKs && len(outputBuffer) > 0 && comparePK(selected.pk(), s.lastPK) == 0 {
+		if s.deduplicatePKs && len(outputBuffer) > 0 && queryutil.ComparePK(selected.pk(), s.lastPK) == 0 {
 			unit := winner.pop()
 			last := len(outputBuffer) - 1
 			if timestamp := unit.timestamp(); timestamp != 0 && timestamp > outputBuffer[last].timestamp() {
@@ -358,7 +359,7 @@ func (s *OrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 			s.seenPKs[unit.pk()] = struct{}{}
 		}
 		if s.hasLastPK {
-			comparison := comparePK(unit.pk(), s.lastPK)
+			comparison := queryutil.ComparePK(unit.pk(), s.lastPK)
 			if comparison == 0 {
 				return nil, s.fail(merr.WrapErrDataIntegrityMsg("duplicate PK %v found across Query child streams", unit.pk()))
 			}
@@ -495,12 +496,12 @@ func (s *OrderedReduceStream) attachMetadata(chunk *internalpb.RetrieveResults) 
 
 func buildRetrieveChunk(units []retrieveUnit) (*internalpb.RetrieveResults, error) {
 	results := make([]*internalpb.RetrieveResults, len(units))
-	rows := make([]rowRef, len(units))
+	rows := make([]queryutil.RowRef, len(units))
 	for i, unit := range units {
 		results[i] = unit.result
-		rows[i] = rowRef{resultIdx: i, rowIdx: unit.rowIndex}
+		rows[i] = queryutil.NewRowRef(i, unit.rowIndex)
 	}
-	chunk, err := buildMergedRetrieveResults(results, rows, nil)
+	chunk, err := queryutil.BuildMergedRetrieveResults(results, rows, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -729,7 +730,7 @@ func SplitRetrieveResult(result *internalpb.RetrieveResults, chunkBytes int) ([]
 	if chunkBytes <= 0 {
 		return nil, merr.WrapErrServiceInternalMsg("Query Chunk bytes must be positive, got %d", chunkBytes)
 	}
-	rowCount := GetRowCount(result)
+	rowCount := queryutil.GetRowCount(result)
 	if rowCount == 0 {
 		return []*internalpb.RetrieveResults{proto.Clone(result).(*internalpb.RetrieveResults)}, nil
 	}

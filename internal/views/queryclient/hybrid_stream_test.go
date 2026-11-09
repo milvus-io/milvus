@@ -12,7 +12,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/internal/util/searchutil"
+	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -46,7 +46,7 @@ func TestHybridStreamsShareOptimizedShardPlan(t *testing.T) {
 			planClient := &fakeQueryPlanClient{plan: plan}
 			var opened []*fakeSearchStream
 			var mu sync.Mutex
-			service := &fakeViewQueryServiceClient{searchOnViewStream: func(_ context.Context, node qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
+			service := &fakeViewQueryServiceClient{searchOnViewStream: func(_ context.Context, node qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
 				require.False(t, req.GetLegacyReq().GetIsAdvanced())
 				require.Empty(t, req.GetLegacyReq().GetSubReqs())
 				require.True(t, proto.Equal(plan.GetMvcc(), req.GetMvcc()))
@@ -94,7 +94,7 @@ func TestHybridStreamSetupFailureClosesEarlierSubSearches(t *testing.T) {
 	plan.Request = &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: request}
 	child := &fakeSearchStream{}
 	failure := errors.New("second sub-search failed to open")
-	service := &fakeViewQueryServiceClient{searchOnViewStream: func(_ context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
+	service := &fakeViewQueryServiceClient{searchOnViewStream: func(_ context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
 		if req.GetLegacyReq().GetFieldId() == 102 {
 			return nil, failure
 		}
@@ -121,7 +121,7 @@ func TestHybridStreamsPreserveElementAndEmbeddingListRequests(t *testing.T) {
 	plan := legacySearchPlan(shard, qviews.NewQueryNode(11))
 	plan.Request = &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: proto.Clone(request).(*internalpb.SearchRequest)}
 	var opened int
-	service := &fakeViewQueryServiceClient{searchOnViewStream: func(_ context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
+	service := &fakeViewQueryServiceClient{searchOnViewStream: func(_ context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
 		index := int(req.GetLegacyReq().GetFieldId() - 101)
 		require.Equal(t, request.SubReqs[index].GetPlaceholderGroup(), req.GetLegacyReq().GetPlaceholderGroup())
 		require.Equal(t, request.SubReqs[index].GetSerializedExprPlan(), req.GetLegacyReq().GetSerializedExprPlan())
@@ -161,7 +161,7 @@ func TestSearchStreamsPreserveRangeAndIterativeFilterPlans(t *testing.T) {
 			plan := legacySearchPlan(shard, qviews.NewQueryNode(11))
 			plan.Request = &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: request}
 			calls := 0
-			service := &fakeViewQueryServiceClient{searchOnViewStream: func(_ context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
+			service := &fakeViewQueryServiceClient{searchOnViewStream: func(_ context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
 				actual := &planpb.PlanNode{}
 				require.NoError(t, proto.Unmarshal(req.GetLegacyReq().GetSerializedExprPlan(), actual))
 				require.True(t, proto.Equal(infos[calls], actual.GetVectorAnns().GetQueryInfo()))
@@ -191,7 +191,7 @@ func TestLegacyHybridStreamsReduceEachSubSearchAcrossVChannels(t *testing.T) {
 		plans[channel] = plan
 	}
 	var calls atomic.Int64
-	service := &legacyServiceClient{searchOnViewStream: func(ctx context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
+	service := &legacyServiceClient{searchOnViewStream: func(ctx context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
 		calls.Add(1)
 		ids, scores := []int64{1, 3, 5}, []float32{.9, .7, .5}
 		if req.GetShardId().GetVchannel() == channels[1] {
@@ -208,7 +208,7 @@ func TestLegacyHybridStreamsReduceEachSubSearchAcrossVChannels(t *testing.T) {
 		}
 		chunk.MetricType = req.GetLegacyReq().GetMetricType()
 		chunk.FeatureBits = 8
-		chunks, err := searchutil.SplitSearchResult(chunk, 20)
+		chunks, err := searchreducestream.SplitSearchResult(chunk, 20)
 		if err != nil {
 			return nil, err
 		}

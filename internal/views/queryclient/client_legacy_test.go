@@ -15,7 +15,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
-	"github.com/milvus-io/milvus/internal/util/searchutil"
+	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
+	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -43,7 +44,7 @@ func TestLegacyClientPlainSearchUsesBatchWhenStreamingDisabled(t *testing.T) {
 				shardA.VChannel: {Status: merr.Success(), Base: &commonpb.MsgBase{SourceID: 101}},
 				shardB.VChannel: {Status: merr.Success(), Base: &commonpb.MsgBase{SourceID: 102}},
 			},
-			searchOnViewStream: func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
+			searchOnViewStream: func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
 				return nil, errors.New("stream path should not be used")
 			},
 		},
@@ -173,9 +174,9 @@ func TestLegacyClientGroupedSearchStreamingSwitch(t *testing.T) {
 			}}
 			streamCalls := 0
 			service := &legacyServiceClient{searchResults: map[string]*internalpb.SearchResults{shard.VChannel: input}}
-			service.searchOnViewStream = func(ctx context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
+			service.searchOnViewStream = func(ctx context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
 				streamCalls++
-				chunks, err := searchutil.SplitSearchResult(proto.Clone(input).(*internalpb.SearchResults), int(req.GetStreamChunkBytes()))
+				chunks, err := searchreducestream.SplitSearchResult(proto.Clone(input).(*internalpb.SearchResults), int(req.GetStreamChunkBytes()))
 				if err != nil {
 					return nil, err
 				}
@@ -233,7 +234,7 @@ func TestLegacyClientIteratorSearchUsesBatchWhenStreamingDisabled(t *testing.T) 
 		}},
 		&legacyServiceClient{
 			searchResults: map[string]*internalpb.SearchResults{shardID.VChannel: batchResult},
-			searchOnViewStream: func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
+			searchOnViewStream: func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
 				return nil, errors.New("stream path should not be used")
 			},
 		},
@@ -268,7 +269,7 @@ func TestLegacyClientSearchUsesBatchForUnsupportedIterator(t *testing.T) {
 		}},
 		&legacyServiceClient{
 			searchResults: map[string]*internalpb.SearchResults{shardID.VChannel: batchResult},
-			searchOnViewStream: func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
+			searchOnViewStream: func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
 				return nil, errors.New("stream path should not be used")
 			},
 		},
@@ -304,7 +305,7 @@ func TestLegacyClientSearchReturnsUnconsumedStream(t *testing.T) {
 			shardID.VChannel: legacySearchPlan(shardID, queryNode),
 		}},
 		&legacyServiceClient{
-			searchOnViewStream: func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
+			searchOnViewStream: func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
 				openCount++
 				return childStream, nil
 			},
@@ -825,10 +826,10 @@ type legacyServiceClient struct {
 	ViewQueryServiceClient
 	searchResults      map[string]*internalpb.SearchResults
 	searchOnView       func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error)
-	searchOnViewStream func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error)
+	searchOnViewStream func(context.Context, qviews.WorkNode, *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error)
 	queryResults       map[string]*internalpb.RetrieveResults
 	queryOnView        func(context.Context, qviews.WorkNode, *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error)
-	queryOnViewStream  func(context.Context, qviews.WorkNode, *viewpb.QueryOnViewRequest) (queryutil.ReduceStream, error)
+	queryOnViewStream  func(context.Context, qviews.WorkNode, *viewpb.QueryOnViewRequest) (queryreducestream.ReduceStream, error)
 	queryMu            sync.Mutex
 	queryCallCount     int
 }
@@ -842,7 +843,7 @@ func (c *legacyServiceClient) SearchOnView(ctx context.Context, node qviews.Work
 	}, nil
 }
 
-func (c *legacyServiceClient) SearchOnViewStream(ctx context.Context, node qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchutil.ReduceStream, error) {
+func (c *legacyServiceClient) SearchOnViewStream(ctx context.Context, node qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
 	if c.searchOnViewStream != nil {
 		return c.searchOnViewStream(ctx, node, req)
 	}
@@ -864,7 +865,7 @@ func (c *legacyServiceClient) QueryOnView(ctx context.Context, node qviews.WorkN
 	}, nil
 }
 
-func (c *legacyServiceClient) QueryOnViewStream(ctx context.Context, node qviews.WorkNode, req *viewpb.QueryOnViewRequest) (queryutil.ReduceStream, error) {
+func (c *legacyServiceClient) QueryOnViewStream(ctx context.Context, node qviews.WorkNode, req *viewpb.QueryOnViewRequest) (queryreducestream.ReduceStream, error) {
 	if c.queryOnViewStream != nil {
 		return c.queryOnViewStream(ctx, node, req)
 	}

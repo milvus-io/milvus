@@ -30,7 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/reduce"
-	"github.com/milvus-io/milvus/internal/util/searchutil"
+	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -87,20 +87,20 @@ func runGroupedSearchComparison(t *testing.T, request *internalpb.SearchRequest,
 		WithMetricType(request.GetMetricType()).WithGroupSize(request.GetGroupSize()).
 		WithGroupByFieldIdsFromProto(request.GetGroupByFieldId(), request.GetGroupByFieldIds())
 	var batchShards []*internalpb.SearchResults
-	var streams []searchutil.ReduceStream
+	var streams []searchreducestream.ReduceStream
 	for _, nodes := range workers {
 		batchInputs := make([]*internalpb.SearchResults, len(nodes))
-		var children []searchutil.ReduceStream
+		var children []searchreducestream.ReduceStream
 		for i, node := range nodes {
 			batchInputs[i] = proto.Clone(node).(*internalpb.SearchResults)
-			chunks, err := searchutil.SplitSearchResult(proto.Clone(node).(*internalpb.SearchResults), chunkBytes)
+			chunks, err := searchreducestream.SplitSearchResult(proto.Clone(node).(*internalpb.SearchResults), chunkBytes)
 			require.NoError(t, err)
 			children = append(children, &searchTaskReduceStream{chunks: chunks})
 		}
 		batch, err := segments.ReduceSearchOnQueryNode(context.Background(), batchInputs, info)
 		require.NoError(t, err)
 		batchShards = append(batchShards, batch)
-		stream, err := searchutil.NewShardReduceStream(request, children, chunkBytes)
+		stream, err := searchreducestream.NewShardReduceStream(request, children, chunkBytes)
 		require.NoError(t, err)
 		streams = append(streams, stream)
 	}
@@ -109,7 +109,7 @@ func runGroupedSearchComparison(t *testing.T, request *internalpb.SearchRequest,
 			GroupByFieldId: request.GetGroupByFieldId(), GroupByFieldIds: request.GetGroupByFieldIds(), GroupSize: request.GetGroupSize(),
 		}, false, false, 1, nil)
 	require.NoError(t, err)
-	stream, err := searchutil.NewReduceStream(request, streams, chunkBytes)
+	stream, err := searchreducestream.NewReduceStream(request, streams, chunkBytes)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, stream.Close()) })
 	task := &SearchTask{SearchRequest: request}
@@ -211,9 +211,9 @@ func TestSearchGroupByStreamingOrderByAppliesOffsetAfterSorting(t *testing.T) {
 	patch := mockey.Mock((*fakeLegacyQueryClient).Search).To(func(_ *fakeLegacyQueryClient, _ context.Context, req *queryclient.LegacySearchRequest) (*queryclient.LegacySearchResult, error) {
 		require.True(t, req.AllowStreaming)
 		require.Zero(t, req.Req.GetOffset())
-		chunks, err := searchutil.SplitSearchResult(input, 1)
+		chunks, err := searchreducestream.SplitSearchResult(input, 1)
 		require.NoError(t, err)
-		stream, err := searchutil.NewReduceStream(req.Req, []searchutil.ReduceStream{&searchTaskReduceStream{chunks: chunks}}, 1)
+		stream, err := searchreducestream.NewReduceStream(req.Req, []searchreducestream.ReduceStream{&searchTaskReduceStream{chunks: chunks}}, 1)
 		require.NoError(t, err)
 		return &queryclient.LegacySearchResult{Stream: stream}, nil
 	}).Build()

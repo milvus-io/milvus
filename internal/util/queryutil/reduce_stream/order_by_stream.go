@@ -14,12 +14,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package queryutil
+package reducestream
 
 import (
 	"context"
 	"io"
 
+	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -62,7 +63,7 @@ func (s *OrderedReduceStream) prepareOrderBy() error {
 			break
 		}
 		for _, buffer := range readyBuffers {
-			calculator := newRowSizeCalculator(buffer.chunk)
+			calculator := queryutil.NewRowSizeCalculator(buffer.chunk)
 			for buffer.hasUnit() {
 				unit := buffer.pop()
 				position, exists := positions[unit.pk()]
@@ -70,7 +71,7 @@ func (s *OrderedReduceStream) prepareOrderBy() error {
 				if exists && (unit.timestamp() == 0 || unit.timestamp() <= units[position].timestamp()) {
 					continue
 				}
-				rowSize := calculator.rowSize(unit.rowIndex)
+				rowSize := calculator.RowSize(unit.rowIndex)
 				if exists {
 					outputSize -= rowSizes[position]
 					units[position], rowSizes[position] = unit, rowSize
@@ -91,7 +92,7 @@ func (s *OrderedReduceStream) prepareOrderBy() error {
 	// repeated for every selected row from the same Chunk.
 	var results []*internalpb.RetrieveResults
 	resultIndexes := make(map[*internalpb.RetrieveResults]int)
-	rows := make([]rowRef, len(units))
+	rows := make([]queryutil.RowRef, len(units))
 	for i, unit := range units {
 		index, exists := resultIndexes[unit.result]
 		if !exists {
@@ -99,9 +100,9 @@ func (s *OrderedReduceStream) prepareOrderBy() error {
 			resultIndexes[unit.result] = index
 			results = append(results, unit.result)
 		}
-		rows[i] = rowRef{resultIdx: index, rowIdx: unit.rowIndex}
+		rows[i] = queryutil.NewRowRef(index, unit.rowIndex)
 	}
-	result, err := buildMergedRetrieveResults(results, rows, nil)
+	result, err := queryutil.BuildMergedRetrieveResults(results, rows, nil)
 	if err != nil {
 		return err
 	}
@@ -117,7 +118,7 @@ func (s *OrderedReduceStream) prepareOrderBy() error {
 				Ascending: field.GetAscending(), NullsFirst: field.GetNullsFirst(),
 			}
 		}
-		ordered, err := NewOrderByLimitOperator(fields, s.orderByLimit).Run(context.Background(), nil, result)
+		ordered, err := queryutil.NewOrderByLimitOperator(fields, s.orderByLimit).Run(context.Background(), nil, result)
 		if err != nil {
 			return err
 		}

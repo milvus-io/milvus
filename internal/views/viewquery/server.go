@@ -9,8 +9,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/milvus-io/milvus/internal/util/queryutil"
-	"github.com/milvus-io/milvus/internal/util/searchutil"
+	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
+	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -154,7 +154,7 @@ func (s *Server) SearchOnViewStream(stream viewpb.ViewQueryService_SearchOnViewS
 		return err
 	}
 	chunkBytes := int(request.GetStreamChunkBytes())
-	chunks, err := searchutil.SplitSearchResult(response.GetLegacyResults(), chunkBytes)
+	chunks, err := searchreducestream.SplitSearchResult(response.GetLegacyResults(), chunkBytes)
 	if err != nil {
 		return status.Errorf(codes.Internal, "split SearchOnView result: %v", err)
 	}
@@ -234,7 +234,7 @@ func (s *Server) QueryOnViewStream(stream viewpb.ViewQueryService_QueryOnViewStr
 		return err
 	}
 	chunkBytes := int(request.GetStreamChunkBytes())
-	chunks, err := queryutil.SplitRetrieveResult(response.GetLegacyResults(), chunkBytes)
+	chunks, err := queryreducestream.SplitRetrieveResult(response.GetLegacyResults(), chunkBytes)
 	if err != nil {
 		return status.Errorf(codes.Internal, "split QueryOnView result: %v", err)
 	}
