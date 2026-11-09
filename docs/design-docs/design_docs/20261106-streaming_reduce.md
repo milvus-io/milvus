@@ -105,10 +105,11 @@ refreshed values without QN/SN restart; in-flight requests retain their values.
 Existing configuration-source precedence applies. SDK parameters cannot override
 them. Eligibility preserves existing API validation: supported ordinary/iterator
 Query, ANN variants, Search grouping/aggregation and legacy Hybrid fusion can
-stream, including Query Group By + ORDER BY and global aggregates. Query function chains, Hybrid Group By and
-unsupported reranking remain Batch, as does retained-plan requery. Exact gates:
+stream, including Query Group By + ORDER BY, global aggregates and valid QueryScan
+function chains. Hybrid Group By and unsupported reranking remain Batch, as does
+retained-plan requery. Exact gates:
 [Query](../../../internal/views/queryclient/legacy_client.go#L290),
-[Query function chains](../../../internal/proxy/dql/task_query.go#L1172),
+[QueryScan validation](../../../internal/proxy/dql/query_function_chain.go#L29),
 [Search/Hybrid](../../../internal/proxy/dql/task_search.go#L1678).
 
 ### Limits and Verification
@@ -274,7 +275,7 @@ accumulation map itself. Group output is encoded into protobuf columns.
 | Unit | Reducible payload included in its accounted bytes |
 | --- | --- |
 | Search hit | PK, score, returned fields, optional element index and group fields. |
-| Query row | PK when present, returned fields, optional matched-element indexes. |
+| Query row | PK when present, returned fields, computed columns when present, optional matched-element indexes. |
 | Grouped Query partial | Group columns and partial aggregate columns. |
 
 Sizing counts the protobuf encoding of each Unit's reducible fields, including
@@ -459,6 +460,18 @@ Nullable scalar/vector validity and element-level flags must survive splitting,
 merging and output assembly. Sources:
 [element validation](../../../internal/util/queryutil/reduce_stream/reduce_stream.go#L174),
 [Proxy consumption](../../../internal/proxy/dql/task_query.go#L1386).
+
+QueryScan uses the same PK-ordered reduction. Computed columns stay in
+`RetrieveResults.ComputedResults` and follow the selected row, including timestamp
+replacement, Chunk splitting and final pagination. Incoming columns are validated
+once per Chunk and aligned by name/type, not collection field ID or column order.
+Reducers retain empty typed column templates so an all-empty result preserves its
+computed schema; consumed input rows are not retained for this purpose. Computed
+payload contributes to Unit bytes and Proxy's output-size quota. Proxy appends it
+separately from ordinary fields, then the existing Query pipeline publishes it
+after schema-based processing. QueryScan's existing validation exclusions remain
+unchanged. Sources: [computed helpers](../../../internal/util/queryutil/computed_results.go),
+[QueryScan validation](../../../internal/proxy/dql/query_function_chain.go#L29).
 
 The PK-ordered reducer has no request row-limit stopping counter. Proxy stops pulling at its
 row/element window, or reads to EOF for valid unlimited Query. Iterator semantics
@@ -872,7 +885,7 @@ whereas an invalid request is not made valid by this feature.
 | Query | Group By + ORDER BY | Unordered grouped streaming; Proxy collects all merged groups, then orders and paginates. Existing validation requires a limit and ordering by group keys. |
 | Query | ORDER BY without an explicit limit | Rejected by shared Query validation in both Batch and Streaming modes. |
 | Query | Global COUNT/SUM/AVG/MIN/MAX without Group By | Unordered streaming; merge one partial across all children, then finalize at Proxy. |
-| Query | QueryScan function chains | Batch; streaming assembly does not preserve separate computed columns. |
+| Query | Valid QueryScan function chains | Ordered streaming; preserve separately named computed columns, row alignment, validity and empty schema. |
 | Search | Ordinary ANN with/without filters; plain ANN iterator | Ordered streaming. |
 | Search | Element-level and embedding-list variants | Ordered streaming within existing field/metric validation. |
 | Search | Range and iterative-filter | Ordered streaming of worker candidates; range/iterator combinations are not separately qualified. |
@@ -888,7 +901,7 @@ Search Group By/aggregation iterators and Hybrid aggregation/ORDER BY are reject
 by existing API validation, not newly rejected by streaming. Retained-plan requery
 stays Batch regardless of enablement. Sources:
 [Query routing](../../../internal/views/queryclient/legacy_client.go#L245),
-[Query function guard](../../../internal/proxy/dql/task_query.go#L1172),
+[QueryScan validation](../../../internal/proxy/dql/query_function_chain.go#L29),
 [Search/Hybrid gate](../../../internal/proxy/dql/task_search.go#L1678).
 
 ### 11. Memory and Backpressure
@@ -943,6 +956,7 @@ control or low-watermark prefetch is introduced by this feature. Sources:
 | Byte contract | Crossing `B`, exact boundary, oversized Unit alone, timestamp replacement, nullable/nested/element fields and metadata exclusion. |
 | Grouped Query | Multiple Chunks per child, nested vchannel/final accumulation, unequal AVG counts, empty/NULL/zero values and partial-state preservation. Grouped ordering must retain groups beyond the page before ASC/DESC sorting, tie-breaking, offset and limit; verify Batch parity and failure cleanup. |
 | Global Query aggregation | Standalone COUNT and mixed aggregate projections; nested reduction, unequal AVG counts, empty/NULL/zero values, empty shards, late errors and cancellation. Verify one output row, metadata and Batch finalization parity. |
+| QueryScan | Computed JSON/scalar columns across worker splitting, nested reduction and Proxy pagination; timestamp winners, named-column reordering, NULL/empty schema, malformed columns, Chunk bytes and output quota. Verify native Grep output and gRPC round trips. |
 | Search variants | Group pruning parity, aggregation candidate order, range/filter behavior, Hybrid sub-search windows, element identity and downstream assembly. |
 | Lifecycle | Cancellation while blocked, concurrent Close, receive cleanup, error propagation, retry isolation after internal output, and exhausted retry budgets. |
 | Configuration | In-process YAML refresh, stable in-flight/retry settings, unsupported-path fallback and no SDK override. |

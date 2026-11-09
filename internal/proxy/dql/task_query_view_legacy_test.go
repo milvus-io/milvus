@@ -231,6 +231,138 @@ func newFinalQueryChunk(ids []int64, mvcc uint64) *internalpb.RetrieveResults {
 	}
 }
 
+func TestQueryScanStreamComputedResultsMatchBatch(t *testing.T) {
+	for _, chunkBytes := range []int{1, 256, 1 << 20} {
+		for _, empty := range []bool{false, true} {
+			for _, page := range [][2]int64{{2, 0}, {2, 1}, {2, 100}, {typeutil.Unlimited, 0}} {
+				t.Run(fmt.Sprintf("bytes=%d/empty=%t/page=%v", chunkBytes, empty, page), func(t *testing.T) {
+					limit, offset := page[0], page[1]
+					internalLimit := limit
+					if limit > 0 {
+						internalLimit += offset
+					}
+					legacy := &fakeLegacyQueryClient{}
+					task := newQueryViewQueryTask(t, legacy, internalLimit)
+					task.schema = mustNewSchemaInfo(testSchema())
+					task.request.FunctionChains = []*schemapb.FunctionChain{{Stage: schemapb.FunctionChainStage_FunctionChainStageQueryScan}}
+					var shards []queryreducestream.ReduceStream
+					var batches []*internalpb.RetrieveResults
+					for shard := int64(0); shard < 2; shard++ {
+						var children []queryreducestream.ReduceStream
+						var inputs []*internalpb.RetrieveResults
+						for child := int64(0); child < 2; child++ {
+							ids := []int64{1 + shard + 2*child, 5 + shard}
+							if empty {
+								ids = nil
+							}
+							input := computedQueryInput(ids)
+							input.Status = merr.Success()
+							var timestamps []int64
+							var details [][]byte
+							for _, id := range ids {
+								timestamps = append(timestamps, 10+child)
+								details = append(details, []byte(fmt.Sprintf(`[{"content":"pk=%d version=%d","starts":[0],"ends":[2]}]`, id, child)))
+							}
+							input.FieldsData = append(input.FieldsData, makeTestInt64Field(1, "", timestamps))
+							input.ComputedResults[0].FieldId = 300 + child // Computed identities are names, not IDs.
+							jsonField := &schemapb.FieldData{FieldName: "scan.matches", Type: schemapb.DataType_JSON,
+								Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: details}}}},
+							}
+							input.ComputedResults = append(input.ComputedResults, jsonField)
+							if child == 1 {
+								if !empty {
+									typeutil.SetFieldDataValidData(input.ComputedResults[0], []bool{true, false})
+								}
+								input.ComputedResults[0], input.ComputedResults[1] = input.ComputedResults[1], input.ComputedResults[0]
+							}
+							inputs = append(inputs, proto.Clone(input).(*internalpb.RetrieveResults))
+							chunks, err := queryreducestream.SplitRetrieveResult(input, chunkBytes)
+							require.NoError(t, err)
+							worker := &fakeLegacyQueryStream{}
+							for _, chunk := range chunks {
+								worker.recv = append(worker.recv, fakeLegacyQueryRecv{chunk: chunk})
+							}
+							children = append(children, worker)
+						}
+						batch, err := queryutil.NewReduceByPKWithTimestampOperator(0, 1<<20, internalLimit, testSchema()).Run(t.Context(), nil, inputs)
+						require.NoError(t, err)
+						batches = append(batches, batch[0].(*internalpb.RetrieveResults))
+						stream, err := queryreducestream.NewShardReduceStream(task.RetrieveRequest, testSchema(), children, chunkBytes)
+						require.NoError(t, err)
+						shards = append(shards, stream)
+					}
+					stream, err := queryreducestream.NewReduceStream(task.RetrieveRequest, testSchema(), shards, chunkBytes)
+					require.NoError(t, err)
+					t.Cleanup(func() { require.NoError(t, stream.Close()) })
+					legacy.queryResult = &queryclient.LegacyQueryResult{Stream: stream}
+					require.NoError(t, task.Execute(t.Context()))
+					require.True(t, legacy.lastQueryRequest.AllowStreaming)
+					pipeline, err := NewQueryPipeline(testSchema(), limit, offset, 0, nil, nil, nil, nil, []int64{100})
+					require.NoError(t, err)
+					want, err := pipeline.Execute(t.Context(), batches)
+					require.NoError(t, err)
+					got, err := pipeline.Execute(t.Context(), task.resultBuf.Collect())
+					require.NoError(t, err)
+					// Header order/producer-local IDs may differ; names, types and row values must agree.
+					require.Len(t, got.FieldsData, len(want.FieldsData))
+					for _, expected := range want.FieldsData {
+						var actual *schemapb.FieldData
+						for _, field := range got.FieldsData {
+							if field.FieldName == expected.FieldName {
+								actual = field
+							}
+						}
+						require.NotNil(t, actual)
+						require.Equal(t, expected.Type, actual.Type)
+						// An omitted validity mask and an explicit all-valid mask are equivalent.
+						for _, field := range []*schemapb.FieldData{expected, actual} {
+							if len(typeutil.GetFieldDataValidData(field)) == 0 {
+								rows := len(field.GetScalars().GetLongData().GetData())
+								if field.Type == schemapb.DataType_JSON {
+									rows = len(field.GetScalars().GetJsonData().GetData())
+								}
+								valid := make([]bool, rows)
+								for i := range valid {
+									valid[i] = true
+								}
+								typeutil.SetFieldDataValidData(field, valid)
+							}
+						}
+						require.True(t, proto.Equal(expected.GetScalars(), actual.GetScalars()), "batch=%v streaming=%v", expected, actual)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestConsumeQueryStreamComputedValidationAndQuota(t *testing.T) {
+	paramtable.Init()
+	for _, missingFirst := range []bool{false, true} {
+		first, second := computedQueryInput([]int64{1}), computedQueryInput([]int64{2})
+		first.Status, second.Status = merr.Success(), merr.Success()
+		if missingFirst {
+			first.ComputedResults = nil
+		} else {
+			second.ComputedResults = nil
+		}
+		task := &QueryTask{RetrieveRequest: &internalpb.RetrieveRequest{Limit: 2}}
+		_, err := task.consumeQueryResultStream(&fakeLegacyQueryStream{recv: []fakeLegacyQueryRecv{{chunk: first}, {chunk: second}}})
+		require.ErrorContains(t, err, "computed")
+	}
+	input := computedQueryInput([]int64{1})
+	input.Status = merr.Success()
+	input.ComputedResults[0].Type = schemapb.DataType_JSON
+	input.ComputedResults[0].GetScalars().Data = &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: [][]byte{[]byte(`"` + strings.Repeat("x", 4096) + `"`)}}}
+	maxSize := &paramtable.Get().QuotaConfig.MaxOutputSize
+	previous := maxSize.GetValue()
+	t.Cleanup(func() { require.NoError(t, paramtable.Get().Save(maxSize.Key, previous)) })
+	require.NoError(t, paramtable.Get().Save(maxSize.Key, "1024"))
+	task := &QueryTask{RetrieveRequest: &internalpb.RetrieveRequest{Limit: 1}}
+	_, err := task.consumeQueryResultStream(&fakeLegacyQueryStream{recv: []fakeLegacyQueryRecv{{chunk: input}}})
+	require.ErrorContains(t, err, "maxOutputSize")
+}
+
 func streamViewError(code viewpb.ViewCode, format string, args ...interface{}) error {
 	return viewerror.NewGRPCStatusFromViewError(viewerror.New(code, format, args...)).Err()
 }

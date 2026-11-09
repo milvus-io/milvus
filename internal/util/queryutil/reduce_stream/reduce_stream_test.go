@@ -58,6 +58,66 @@ func TestSplitRetrieveResult(t *testing.T) {
 	require.False(t, chunks[1].GetHasMoreResult())
 }
 
+func TestQueryStreamComputedColumnValidation(t *testing.T) {
+	valid := newQueryTestChunk([]int64{1}, []int64{10})
+	valid.ComputedResults = []*schemapb.FieldData{proto.Clone(valid.FieldsData[0]).(*schemapb.FieldData)}
+	valid.ComputedResults[0].FieldName = "matches"
+	for name, mutate := range map[string]func(*internalpb.RetrieveResults){
+		"missing_name": func(r *internalpb.RetrieveResults) { r.ComputedResults[0].FieldName = "" },
+		"duplicate_name": func(r *internalpb.RetrieveResults) {
+			r.ComputedResults = append(r.ComputedResults, r.ComputedResults[0])
+		},
+		"wrong_length":   func(r *internalpb.RetrieveResults) { r.ComputedResults[0].GetScalars().GetLongData().Data = nil },
+		"wrong_type":     func(r *internalpb.RetrieveResults) { r.ComputedResults[0].Type = schemapb.DataType_JSON },
+		"wrong_validity": func(r *internalpb.RetrieveResults) { r.ComputedResults[0].ValidData = []bool{true, false} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			invalid := proto.Clone(valid).(*internalpb.RetrieveResults)
+			mutate(invalid)
+			_, err := SplitRetrieveResult(invalid, 1)
+			require.Error(t, err)
+			// Reject malformed columns even on a row that would lose timestamp deduplication.
+			invalid.FieldsData = append(invalid.FieldsData, makeTimestampField([]int64{1}))
+			winner := proto.Clone(valid).(*internalpb.RetrieveResults)
+			winner.FieldsData = append(winner.FieldsData, makeTimestampField([]int64{10}))
+			child := &queryTestStream{recv: []queryTestRecv{{chunk: winner}, {chunk: invalid}}}
+			stream, err := NewShardReduceStream(&internalpb.RetrieveRequest{Limit: 1}, nil, []ReduceStream{child}, 1)
+			require.NoError(t, err)
+			_, err = stream.Recv()
+			require.Error(t, err)
+			require.Equal(t, 1, child.closeCalls)
+			require.NoError(t, stream.Close())
+		})
+	}
+	for name, mutate := range map[string]func(*internalpb.RetrieveResults){
+		"missing_columns": func(r *internalpb.RetrieveResults) { r.ComputedResults = nil },
+		"different_name":  func(r *internalpb.RetrieveResults) { r.ComputedResults[0].FieldName = "other" },
+		"different_type": func(r *internalpb.RetrieveResults) {
+			r.ComputedResults[0].Type = schemapb.DataType_VarChar
+			r.ComputedResults[0].GetScalars().Data = &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"x"}}}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, reverse := range []bool{false, true} {
+				first, second := proto.Clone(valid).(*internalpb.RetrieveResults), proto.Clone(valid).(*internalpb.RetrieveResults)
+				mutate(second)
+				if reverse {
+					first, second = second, first
+				}
+				second.Ids.GetIntId().Data[0] = 2
+				stream, err := NewReduceStream(&internalpb.RetrieveRequest{Limit: 2}, nil,
+					[]ReduceStream{&queryTestStream{recv: []queryTestRecv{{chunk: first}, {chunk: second}}}}, 1)
+				require.NoError(t, err)
+				_, err = stream.Recv()
+				require.NoError(t, err)
+				_, err = stream.Recv()
+				require.ErrorContains(t, err, "computed")
+				require.NoError(t, stream.Close())
+			}
+		})
+	}
+}
+
 func TestQueryStreamPreservesNullableFields(t *testing.T) {
 	result := newQueryTestChunk([]int64{1, 2, 3}, []int64{10, 20, 30})
 	result.FieldsData = append(result.FieldsData,

@@ -3,6 +3,7 @@ package reducestream
 
 import (
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -17,7 +18,7 @@ func queryUnitReferenceSize(t testing.TB, unit retrieveUnit) int {
 	t.Helper()
 	chunk, err := buildRetrieveChunk([]retrieveUnit{unit})
 	require.NoError(t, err)
-	return proto.Size(&internalpb.RetrieveResults{Ids: chunk.GetIds(), FieldsData: chunk.GetFieldsData(), ElementIndices: chunk.GetElementIndices()})
+	return proto.Size(&internalpb.RetrieveResults{Ids: chunk.GetIds(), FieldsData: chunk.GetFieldsData(), ComputedResults: chunk.GetComputedResults(), ElementIndices: chunk.GetElementIndices()})
 }
 
 func TestRetrieveUnitByteSizeProtobuf(t *testing.T) {
@@ -49,6 +50,33 @@ func TestRetrieveUnitByteSizeProtobuf(t *testing.T) {
 	require.NoError(t, err)
 	require.Greater(t, renamed, got)
 	require.Equal(t, queryUnitReferenceSize(t, unit), renamed)
+}
+
+func TestRetrieveUnitComputedBytes(t *testing.T) {
+	result := newQueryTestChunk([]int64{1, 2, 3}, []int64{10, 20, 30})
+	result.ComputedResults = []*schemapb.FieldData{{FieldName: "scan.matches", Type: schemapb.DataType_JSON,
+		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+			ValidData: []bool{true, false, true},
+			Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: [][]byte{
+				[]byte(`[{"content":"foo","starts":[0],"ends":[3]}]`), nil, []byte(`{"text":"` + strings.Repeat("x", 1024) + `"}`),
+			}}},
+		}},
+	}}
+	for row := int64(0); row < 3; row++ {
+		unit := retrieveUnit{result: result, rowIndex: row, fieldIndexComputer: typeutil.NewFieldDataIdxComputer(result.FieldsData)}
+		got, err := unit.reducibleByteSize()
+		require.NoError(t, err)
+		require.Equal(t, queryUnitReferenceSize(t, unit), got)
+		require.Zero(t, testing.AllocsPerRun(100, func() { _, err = unit.reducibleByteSize() }))
+		require.NoError(t, err)
+	}
+	threshold := queryChunkBytes(t, result, 2) - 1
+	chunks, err := SplitRetrieveResult(result, threshold)
+	require.NoError(t, err)
+	require.Len(t, chunks, 2)
+	require.Equal(t, []int64{1, 2}, queryTestIDs(chunks[0]))
+	require.Equal(t, []int64{3}, queryTestIDs(chunks[1]))
+	require.Greater(t, proto.Size(chunks[1]), threshold)
 }
 
 // TestRetrieveUnitByteSizeMixedFields covers variable fields and compact nullable vectors.
