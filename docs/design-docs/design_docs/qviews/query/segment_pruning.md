@@ -132,6 +132,8 @@ own selection after partition filtering. The worker union remains encoded agains
 full node membership: it must preserve the original candidate set even if a
 retained requery carries a broader partition scope. Retained requery uses the original View/MVCC/workers
 and the union of original search selections, without rerunning vector pruning.
+This also applies to [MaterializeOnView](materialize.md#snapshot-and-pruning):
+its PK refill retains the same worker selection through Query task acquisition.
 Retries discard the failed attempt's plan selections and partial results together.
 
 Phase 1 returns diagnostic facts in

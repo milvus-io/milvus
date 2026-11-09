@@ -226,7 +226,11 @@ requery. It does not resolve a new shard, schema, View or MVCC. It sends the new
 PK retrieve expression through `QueryOnView` to the original workers and retains
 the original schema identity. A retained-plan failure aborts the parent operation;
 replanning only the refill would mix snapshots with the original reduced search.
-There is no separate requery RPC.
+The production `Legacy()` integration can instead use
+[MaterializeOnView](materialize.md) for eligible PK refill, retaining these same
+identities and selections. It acquires the same Query tasks and can fall back to
+retained Query as one refill. This optional IPC path is wired in Proxy's
+`QueryTask` / `LegacyClient`, not the generic `RequeryRunner`.
 
 Requery may select additional output/render/rerank fields without declaring them
 in Phase 1 or adding them to the initial search projection. The new request is
