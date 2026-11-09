@@ -1719,3 +1719,56 @@ func TestCanMergeSortMatchesMergeKey(t *testing.T) {
 		assert.False(t, canMergeSort(plan, params))
 	})
 }
+
+func TestMixCompactionDeferredBloomFilterSelection(t *testing.T) {
+	paramtable.Get().Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+	const key = "dataNode.compaction.enableDeferredBloomFilter"
+	defer paramtable.Get().Reset(key)
+	for _, tc := range []struct {
+		name      string
+		enabled   string
+		inputSize int64
+		outputs   int64
+		want      bool
+	}{
+		{name: "default multi output", inputSize: 1001, outputs: 2},
+		{name: "disabled multi output", enabled: "false", inputSize: 1001, outputs: 2},
+		{name: "enabled unknown output", enabled: "true"},
+		{name: "below segment boundary", enabled: "true", inputSize: 999, outputs: 1},
+		{name: "at segment boundary", enabled: "true", inputSize: 1000, outputs: 1},
+		{name: "above segment boundary", enabled: "true", inputSize: 1001, outputs: 2, want: true},
+		{name: "at second boundary", enabled: "true", inputSize: 2000, outputs: 2, want: true},
+		{name: "above second boundary", enabled: "true", inputSize: 2001, outputs: 3, want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.enabled == "" {
+				paramtable.Get().Reset(key)
+			} else {
+				assert.NoError(t, paramtable.Get().Save(key, tc.enabled))
+			}
+			var got storage.PkStatsConfig
+			patch := mockey.Mock(storage.WithPkStatsConfig).To(func(config storage.PkStatsConfig) storage.RwOption {
+				got = config
+				return nil
+			}).Build()
+			defer patch.UnPatch()
+			task := &mixCompactionTask{
+				ctx: context.Background(),
+				plan: &datapb.CompactionPlan{
+					MaxSize: 1000,
+					Schema:  &schemapb.CollectionSchema{},
+					SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{
+						FieldBinlogs: []*datapb.FieldBinlog{{
+							Binlogs: []*datapb.Binlog{{MemorySize: tc.inputSize, EntriesNum: 1000}},
+						}},
+					}},
+				},
+			}
+			assert.NoError(t, task.preCompact())
+			assert.Equal(t, tc.outputs, task.estimatedOutputSegmentCount)
+			task.buildWriterOptions(context.Background())
+			assert.Equal(t, tc.want, got.UseDeferredBloomFilter)
+			assert.EqualValues(t, 1000, got.Capacity)
+		})
+	}
+}

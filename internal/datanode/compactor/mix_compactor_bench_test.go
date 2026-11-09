@@ -97,46 +97,59 @@ func BenchmarkMixCompactor(b *testing.B) {
 }
 
 // Only Compact is timed; input generation and output validation are excluded.
-// BF_BENCH_ROWS controls rows per input (default 1000000); BF_BENCH_VARCHAR=1
-// selects string PKs. BF_BENCH_MERGE_SORT=0 selects mergeSplit instead of mergeSort.
-// BF_BENCH_BATCH_BYTES overrides the write batch size for small fixtures.
-// For an old-implementation comparison, disable UseDeferredBloomFilter with a
-// Go overlay and set BF_BENCH_EXPECT_DEFERRED=false. Inputs use V2 in both cases.
+// Inputs use V2. Sub-benchmarks select the PK type, merge path, and config value.
 func BenchmarkMixCompactorBloomFilterSizing(b *testing.B) {
-	paramtable.Get().Init(paramtable.NewBaseTable())
-	rows := int64(1000000)
-	if value := os.Getenv("BF_BENCH_ROWS"); value != "" {
-		var err error
-		rows, err = strconv.ParseInt(value, 10, 64)
-		require.NoError(b, err)
-	}
-	require.GreaterOrEqual(b, rows, int64(10000))
+	paramtable.Get().Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+	const rowsPerInput int64 = 1000000
+	const batchBytes uint64 = 64 << 20
 	for _, version := range []int64{storage.StorageV2, storage.StorageV3} {
-		b.Run(fmt.Sprintf("V%d", version), func(b *testing.B) {
-			for _, scenario := range []struct {
-				name          string
-				inputs        int
-				deletePercent int
-			}{
-				{"single", 1, 0}, {"split13", 13, 0}, {"delete50", 1, 50}, {"delete90", 1, 90},
-			} {
-				if os.Getenv("BF_BENCH_VARCHAR") == "1" && scenario.deletePercent != 0 {
-					continue // Delta fixtures below use Int64 PKs.
+		for _, pkType := range []string{"Int64", "VarChar"} {
+			for _, mergeSort := range []bool{false, true} {
+				mergePath := "mergeSplit"
+				if mergeSort {
+					mergePath = "mergeSort"
 				}
-				b.Run(scenario.name, func(b *testing.B) {
-					b.StopTimer()
-					b.ReportAllocs()
-					b.ResetTimer()
-					for i := 0; i < b.N; i++ {
-						benchmarkMixBloomSizing(b, version, rows, scenario.inputs, scenario.deletePercent)
+				for _, enabled := range []bool{false, true} {
+					for _, scenario := range []struct {
+						name          string
+						inputs        int
+						deletePercent int
+					}{
+						{"single", 1, 0}, {"split13", 13, 0}, {"delete50", 1, 50}, {"delete90", 1, 90},
+					} {
+						if pkType == "VarChar" && scenario.deletePercent != 0 {
+							continue // Delta fixtures below use Int64 PKs.
+						}
+						name := fmt.Sprintf("V%d/%s/%s/enabled=%t/%s", version, pkType, mergePath, enabled, scenario.name)
+						b.Run(name, func(b *testing.B) {
+							b.StopTimer()
+							b.ReportAllocs()
+							b.ResetTimer()
+							for i := 0; i < b.N; i++ {
+								benchmarkMixBloomSizing(b, bloomSizingBenchConfig{
+									version: version, rows: rowsPerInput, inputs: scenario.inputs,
+									deletePercent: scenario.deletePercent, batchBytes: batchBytes,
+									mergeSort: mergeSort, varchar: pkType == "VarChar", enabled: enabled,
+								})
+							}
+						})
 					}
-				})
+				}
 			}
-		})
+		}
 	}
 }
 
-func benchmarkMixBloomSizing(b *testing.B, version, rows int64, inputs, deletePercent int) {
+type bloomSizingBenchConfig struct {
+	version, rows               int64
+	inputs, deletePercent       int
+	batchBytes                  uint64
+	mergeSort, varchar, enabled bool
+}
+
+func benchmarkMixBloomSizing(b *testing.B, config bloomSizingBenchConfig) {
+	version, rows := config.version, config.rows
+	inputs, deletePercent := config.inputs, config.deletePercent
 	ctx := context.Background()
 	oldLevel := mlog.GetLevel()
 	mlog.SetLevel(mlog.ErrorLevel)
@@ -145,11 +158,12 @@ func benchmarkMixBloomSizing(b *testing.B, version, rows int64, inputs, deletePe
 	root := b.TempDir()
 	defer os.RemoveAll(root)
 	for key, value := range map[string]string{
-		pt.CommonCfg.StorageType.Key:           "local",
-		pt.CommonCfg.UseLoonFFI.Key:            "false",
-		pt.LocalStorageCfg.Path.Key:            root,
-		pt.CommonCfg.BloomFilterType.Key:       bloomfilter.BlockBFName,
-		pt.CommonCfg.MaxBloomFalsePositive.Key: "0.001",
+		pt.DataNodeCfg.EnableDeferredBloomFilter.Key: strconv.FormatBool(config.enabled),
+		pt.CommonCfg.StorageType.Key:                 "local",
+		pt.CommonCfg.UseLoonFFI.Key:                  "false",
+		pt.LocalStorageCfg.Path.Key:                  root,
+		pt.CommonCfg.BloomFilterType.Key:             bloomfilter.BlockBFName,
+		pt.CommonCfg.MaxBloomFalsePositive.Key:       "0.001",
 	} {
 		require.NoError(b, pt.Save(key, value))
 		defer pt.Reset(key)
@@ -159,12 +173,8 @@ func benchmarkMixBloomSizing(b *testing.B, version, rows int64, inputs, deletePe
 	params := compaction.GenParams()
 	params.StorageVersion = version
 	params.UseLoonFFI = version == storage.StorageV3
-	params.UseMergeSort = os.Getenv("BF_BENCH_MERGE_SORT") != "0"
-	if value := os.Getenv("BF_BENCH_BATCH_BYTES"); value != "" {
-		batchBytes, err := strconv.ParseUint(value, 10, 64)
-		require.NoError(b, err)
-		params.BinLogMaxSize = batchBytes
-	}
+	params.UseMergeSort = config.mergeSort
+	params.BinLogMaxSize = config.batchBytes
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath(root))
 	io := binlogio.NewBinlogIO(cm)
 	schema := &schemapb.CollectionSchema{Name: "bloom_sizing_bench", Fields: []*schemapb.FieldSchema{
@@ -176,7 +186,7 @@ func benchmarkMixBloomSizing(b *testing.B, version, rows int64, inputs, deletePe
 			TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "64"}},
 		},
 	}}
-	varchar := os.Getenv("BF_BENCH_VARCHAR") == "1"
+	varchar := config.varchar
 	if varchar {
 		schema.Fields[2].DataType = schemapb.DataType_VarChar
 		schema.Fields[2].TypeParams = []*commonpb.KeyValuePair{{Key: "max_length", Value: "20"}}
@@ -213,7 +223,7 @@ func benchmarkMixBloomSizing(b *testing.B, version, rows int64, inputs, deletePe
 	} else {
 		require.Greater(b, len(result.GetSegments()), 1, "fixture must exercise output rotation")
 	}
-	deferred := os.Getenv("BF_BENCH_EXPECT_DEFERRED") != "false"
+	deferred := pt.DataNodeCfg.EnableDeferredBloomFilter.GetAsBool() && task.estimatedOutputSegmentCount > 1
 	fp := pt.CommonCfg.MaxBloomFalsePositive.GetAsFloat()
 	var outputRows, bfBytes, idealBytes int64
 	for _, seg := range result.GetSegments() {

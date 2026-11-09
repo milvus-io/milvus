@@ -165,10 +165,11 @@ func (t *mixCompactionTask) ensureLOBCompactionContext(ctx context.Context) erro
 }
 
 func (t *mixCompactionTask) buildWriterOptions(ctx context.Context) []storage.RwOption {
-	// maxRows counts all input rows, but each output segment holds only part of them,
-	// so size each output PK bloom filter by the rows actually written.
+	// Avoid the hash cache cost for estimated single-output compactions.
+	// The estimate only selects a performance trade-off; both paths support any output count.
 	pkStatsConfig := storage.DefaultPkStatsConfig(t.maxRows)
-	pkStatsConfig.UseDeferredBloomFilter = true
+	pkStatsConfig.UseDeferredBloomFilter = paramtable.Get().DataNodeCfg.EnableDeferredBloomFilter.GetAsBool() &&
+		t.estimatedOutputSegmentCount > 1
 	writerOpts := []storage.RwOption{
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 		storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),

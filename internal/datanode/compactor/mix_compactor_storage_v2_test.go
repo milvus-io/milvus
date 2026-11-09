@@ -210,17 +210,28 @@ func (s *MixCompactionTaskStorageV2Suite) TestCompactDupPK_V2ToV2Format() {
 	s.Empty(segment.Deltalogs)
 }
 
-// TestCompactSizesBloomFilterByOutputRows deletes most input rows, so the output segment has far fewer rows than
-// the input. Its PK bloom filter must be sized by the output rows, not by all input rows.
-func (s *MixCompactionTaskStorageV2Suite) TestCompactSizesBloomFilterByOutputRows() {
-	s.testCompactSizesBloomFilterByOutputRows(storage.StorageV2)
+// TestCompactKeepsInputSizedBloomFilterForSingleOutput deletes most input rows, so the output segment has far fewer rows than
+// the input. A single-output estimate must retain the existing BF sizing even when deferred sizing is enabled.
+func (s *MixCompactionTaskStorageV2Suite) TestCompactKeepsInputSizedBloomFilterForSingleOutput() {
+	s.testCompactSingleOutputBloomFilter(storage.StorageV2, false)
 }
 
-func (s *MixCompactionTaskStorageV2Suite) TestCompactSizesBloomFilterByOutputRowsV3() {
-	s.testCompactSizesBloomFilterByOutputRows(storage.StorageV3)
+func (s *MixCompactionTaskStorageV2Suite) TestCompactKeepsInputSizedBloomFilterForSingleOutputV3() {
+	s.testCompactSingleOutputBloomFilter(storage.StorageV3, false)
 }
 
-func (s *MixCompactionTaskStorageV2Suite) testCompactSizesBloomFilterByOutputRows(version int64) {
+func (s *MixCompactionTaskStorageV2Suite) TestCompactOverestimatedBloomFilterOutputs() {
+	s.testCompactSingleOutputBloomFilter(storage.StorageV2, true)
+}
+
+func (s *MixCompactionTaskStorageV2Suite) TestCompactOverestimatedBloomFilterOutputsV3() {
+	s.testCompactSingleOutputBloomFilter(storage.StorageV3, true)
+}
+
+func (s *MixCompactionTaskStorageV2Suite) testCompactSingleOutputBloomFilter(version int64, overestimate bool) {
+	pt := paramtable.Get()
+	s.Require().NoError(pt.Save(pt.DataNodeCfg.EnableDeferredBloomFilter.Key, "true"))
+	defer pt.Reset(pt.DataNodeCfg.EnableDeferredBloomFilter.Key)
 	s.task.compactionParams.StorageVersion = version
 	s.task.compactionParams.UseLoonFFI = version == storage.StorageV3
 	const rowsPerSegment, deletedPerSegment = 100, 90
@@ -270,6 +281,20 @@ func (s *MixCompactionTaskStorageV2Suite) testCompactSizesBloomFilterByOutputRow
 		})
 	}
 
+	if overestimate {
+		var inputSize int64
+		for _, seg := range s.task.plan.GetSegmentBinlogs() {
+			for _, field := range seg.GetFieldBinlogs() {
+				for _, binlog := range field.GetBinlogs() {
+					inputSize += binlog.GetMemorySize()
+				}
+			}
+		}
+		// The estimate predicts two outputs, but 90% deletions leave only one.
+		s.Require().Positive(inputSize)
+		s.task.plan.MaxSize = inputSize / 2
+	}
+
 	result, err := s.task.Compact()
 	s.Require().NoError(err)
 
@@ -282,8 +307,14 @@ func (s *MixCompactionTaskStorageV2Suite) testCompactSizesBloomFilterByOutputRow
 	stats := s.readOutputPkStats(result.GetSegments()[0], statsBlobs, version)
 	fp := paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat()
 	inputRows := int64(len(segments) * rowsPerSegment)
-	s.Equal(bloomfilter.NewBloomFilterWithType(uint(outputRows), fp, bloomfilter.BlockBFName).Cap(), stats.BF.Cap())
-	s.Less(stats.BF.Cap(), bloomfilter.NewBloomFilterWithType(uint(inputRows), fp, bloomfilter.BlockBFName).Cap())
+	expectedRows := inputRows
+	if overestimate {
+		s.Greater(s.task.estimatedOutputSegmentCount, int64(1))
+		expectedRows = outputRows
+	} else {
+		s.LessOrEqual(s.task.estimatedOutputSegmentCount, int64(1))
+	}
+	s.Equal(bloomfilter.NewBloomFilterWithType(uint(expectedRows), fp, bloomfilter.BlockBFName).Cap(), stats.BF.Cap())
 	for _, segID := range segments {
 		for i := int64(deletedPerSegment); i < rowsPerSegment; i++ {
 			var key [8]byte
@@ -294,14 +325,33 @@ func (s *MixCompactionTaskStorageV2Suite) testCompactSizesBloomFilterByOutputRow
 }
 
 func (s *MixCompactionTaskStorageV2Suite) TestCompactSizesBloomFilterPerOutputSegment() {
-	s.testCompactSizesBloomFilterPerOutputSegment(storage.StorageV2)
+	s.testCompactSizesBloomFilterPerOutputSegment(storage.StorageV2, true, false)
 }
 
 func (s *MixCompactionTaskStorageV2Suite) TestCompactSizesBloomFilterPerOutputSegmentV3() {
-	s.testCompactSizesBloomFilterPerOutputSegment(storage.StorageV3)
+	s.testCompactSizesBloomFilterPerOutputSegment(storage.StorageV3, true, false)
 }
 
-func (s *MixCompactionTaskStorageV2Suite) testCompactSizesBloomFilterPerOutputSegment(version int64) {
+func (s *MixCompactionTaskStorageV2Suite) TestCompactDisabledDeferredBloomFilterMultiOutput() {
+	s.testCompactSizesBloomFilterPerOutputSegment(storage.StorageV2, false, false)
+}
+
+func (s *MixCompactionTaskStorageV2Suite) TestCompactDisabledDeferredBloomFilterMultiOutputV3() {
+	s.testCompactSizesBloomFilterPerOutputSegment(storage.StorageV3, false, false)
+}
+
+func (s *MixCompactionTaskStorageV2Suite) TestCompactUnderestimatedBloomFilterOutputs() {
+	s.testCompactSizesBloomFilterPerOutputSegment(storage.StorageV2, true, true)
+}
+
+func (s *MixCompactionTaskStorageV2Suite) TestCompactUnderestimatedBloomFilterOutputsV3() {
+	s.testCompactSizesBloomFilterPerOutputSegment(storage.StorageV3, true, true)
+}
+
+func (s *MixCompactionTaskStorageV2Suite) testCompactSizesBloomFilterPerOutputSegment(version int64, enabled, underestimate bool) {
+	pt := paramtable.Get()
+	s.Require().NoError(pt.Save(pt.DataNodeCfg.EnableDeferredBloomFilter.Key, fmt.Sprint(enabled)))
+	defer pt.Reset(pt.DataNodeCfg.EnableDeferredBloomFilter.Key)
 	s.task.compactionParams.StorageVersion = version
 	s.task.compactionParams.UseLoonFFI = version == storage.StorageV3
 	// Each input fits in one record. A one-byte target forces rotation before
@@ -338,11 +388,28 @@ func (s *MixCompactionTaskStorageV2Suite) testCompactSizesBloomFilterPerOutputSe
 		})
 	}
 
+	if underestimate {
+		// Simulate stale size metadata predicting one output while actual writes rotate.
+		for _, seg := range s.task.plan.SegmentBinlogs {
+			for _, field := range seg.FieldBinlogs {
+				for _, binlog := range field.Binlogs {
+					binlog.MemorySize = 0
+				}
+			}
+		}
+		s.task.plan.SegmentBinlogs[0].FieldBinlogs[0].Binlogs[0].MemorySize = 1
+	}
+
 	result, err := s.task.Compact()
 	s.Require().NoError(err)
 	s.Require().Len(result.GetSegments(), len(rows))
 	if version == storage.StorageV2 {
 		s.Require().Len(statsBlobs, len(rows))
+	}
+	if underestimate {
+		s.Equal(int64(1), s.task.estimatedOutputSegmentCount)
+	} else {
+		s.Greater(s.task.estimatedOutputSegmentCount, int64(1))
 	}
 	fp := paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat()
 	var totalRows int64
@@ -350,8 +417,12 @@ func (s *MixCompactionTaskStorageV2Suite) testCompactSizesBloomFilterPerOutputSe
 		s.Require().Equal(rows[i], segment.GetNumOfRows())
 		totalRows += segment.GetNumOfRows()
 		stats := s.readOutputPkStats(segment, statsBlobs, version)
-		s.Equal(bloomfilter.NewBloomFilterWithType(uint(rows[i]), fp, bloomfilter.BlockBFName).Cap(), stats.BF.Cap())
-		s.Less(stats.BF.Cap(), bloomfilter.NewBloomFilterWithType(inputRows, fp, bloomfilter.BlockBFName).Cap())
+		expectedRows := uint(inputRows)
+		if enabled && !underestimate {
+			expectedRows = uint(rows[i])
+			s.Less(stats.BF.Cap(), bloomfilter.NewBloomFilterWithType(inputRows, fp, bloomfilter.BlockBFName).Cap())
+		}
+		s.Equal(bloomfilter.NewBloomFilterWithType(expectedRows, fp, bloomfilter.BlockBFName).Cap(), stats.BF.Cap())
 		seed := int64(1000 * (i + 1))
 		s.Equal(seed, stats.MinPk.GetValue())
 		s.Equal(seed+rows[i]-1, stats.MaxPk.GetValue())
@@ -633,4 +704,44 @@ func getInsertData(size int, seed int64, schema *schemapb.CollectionSchema) []*s
 		buf.Append(getRowWithoutNil(seed))
 	}
 	return []*storage.InsertData{buf}
+}
+
+func TestMixCompactionBloomFilterTTL(t *testing.T) {
+	paramtable.Get().Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+	pt := paramtable.Get()
+	for _, version := range []int64{storage.StorageV2, storage.StorageV3} {
+		for _, enabled := range []bool{false, true} {
+			for _, mergeSort := range []bool{false, true} {
+				t.Run(fmt.Sprintf("v%d/enabled=%t/mergeSort=%t", version, enabled, mergeSort), func(t *testing.T) {
+					s := &MixCompactionTaskStorageV2Suite{}
+					s.SetT(t)
+					s.SetupTest()
+					defer s.TearDownTest()
+					s.Require().NoError(pt.Save(pt.DataNodeCfg.EnableDeferredBloomFilter.Key, fmt.Sprint(enabled)))
+					defer pt.Reset(pt.DataNodeCfg.EnableDeferredBloomFilter.Key)
+					s.prepareSplitMergeEntityExpired()
+					s.task.compactionParams.StorageVersion = version
+					s.task.compactionParams.UseLoonFFI = version == storage.StorageV3
+					s.task.compactionParams.UseMergeSort = mergeSort
+					s.task.plan.MaxSize = 1
+					for _, seg := range s.task.plan.SegmentBinlogs {
+						seg.IsSorted = mergeSort
+					}
+					s.Require().Equal(mergeSort, canMergeSort(s.task.plan, s.task.compactionParams))
+					result, err := s.task.Compact()
+					s.Require().NoError(err)
+					s.Greater(s.task.estimatedOutputSegmentCount, int64(1))
+					if mergeSort {
+						// MergeSort returns no segments when every row expires.
+						s.Empty(result.GetSegments())
+					} else {
+						// MergeSplit keeps an empty placeholder segment.
+						s.Require().Len(result.GetSegments(), 1)
+						s.Zero(result.GetSegments()[0].GetNumOfRows())
+						s.Empty(result.GetSegments()[0].GetField2StatslogPaths())
+					}
+				})
+			}
+		}
+	}
 }
