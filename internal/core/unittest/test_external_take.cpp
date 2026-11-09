@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <nlohmann/json.hpp>
+#include "milvus-storage/filesystem/fs.h"
 #include <arrow/array.h>
 #include <arrow/builder.h>
 #include <arrow/compute/api.h>
@@ -3529,6 +3531,12 @@ TEST(InjectExtfsAllowlist, AzurePublicCloudWithExplicitRegion) {
 }
 
 TEST(InjectExtfsAllowlist, AzureCredentialBrokerProperties) {
+    ASSERT_TRUE(
+        InitCredentialBrokerPolicy(
+            std::string(
+                R"(["https://broker.example.com/v1/credentials/assume-role","https://broker.example.com/v1/credentials/assume-role?api-version=1&scope=a%2Fb+x"])"))
+            .ok());
+
     milvus_storage::api::Properties props;
     const int64_t coll_id = 42;
     std::string spec = R"({
@@ -3561,6 +3569,56 @@ TEST(InjectExtfsAllowlist, AzureCredentialBrokerProperties) {
         "https://broker.example.com/v1/credentials/assume-role");
     EXPECT_EQ(props.count("extfs.42.access_key_value"), 0u);
     EXPECT_EQ(props.count("extfs.42.request_timeout_ms"), 0u);
+}
+
+TEST(InjectExtfsAllowlist, AzureLegacyBrokerQuery) {
+    ASSERT_TRUE(
+        InitCredentialBrokerPolicy(
+            std::string(
+                R"(["https://broker.example.com/v1/credentials/assume-role","https://broker.example.com/v1/credentials/assume-role?api-version=1&scope=a%2Fb+x"])"))
+            .ok());
+    const std::string endpoint =
+        "https://broker.example.com/v1/credentials/"
+        "assume-role?api-version=1&scope=a%2Fb+x";
+    for (const auto* field :
+         {"azure_credential_endpoint", "credential_endpoint"}) {
+        SCOPED_TRACE(field);
+        auto inject = [&](const std::string& url) {
+            milvus_storage::api::Properties props;
+            const auto spec = nlohmann::json{{"format", "parquet"},
+                                             {"extfs",
+                                              {{"cloud_provider", "azure"},
+                                               {"access_key_id", "account"},
+                                               {"region", "westus3"},
+                                               {"azure_client_id", "client"},
+                                               {"azure_tenant_id", "tenant"},
+                                               {field, url}}}};
+            ::InjectExternalSpecProperties(
+                props,
+                42,
+                "azure://core.windows.net/container/path",
+                spec.dump());
+            return props;
+        };
+        auto props = inject(endpoint);
+        EXPECT_EQ(std::get<std::string>(
+                      props.at("extfs.42.azure_credential_endpoint")),
+                  endpoint);
+        EXPECT_EQ(props.count("extfs.42.credential_endpoint"), 0u);
+        auto config = milvus_storage::FilesystemCache::resolve_config(
+            props, "azure://core.windows.net/container/path");
+        ASSERT_TRUE(config.ok()) << config.status();
+        EXPECT_TRUE(config->IsAzureCredentialBrokerEnabled());
+        EXPECT_EQ(config->azure_credential_endpoint, endpoint);
+        EXPECT_TRUE(config->credential_endpoint.empty());
+        EXPECT_ANY_THROW(inject(endpoint + "&extra=1"));
+        EXPECT_ANY_THROW(
+            inject("https://broker.example.com/v1/credentials/"
+                   "assume-role?api-version=2&scope=a%2Fb+x"));
+        EXPECT_ANY_THROW(
+            inject("https://broker.example.com/v1/credentials/"
+                   "assume-role?scope=a%2Fb+x&api-version=1"));
+    }
 }
 
 TEST(InjectExtfsAllowlist, AzureSovereignCloudEndpoints) {
@@ -4006,3 +4064,341 @@ TEST(NormalizeExternalArrow, NonMatchingTypePassthrough) {
     EXPECT_EQ(result->type_id(), arrow::Type::INT64);
     EXPECT_EQ(result.get(), arr.get());
 }
+
+TEST(InjectExtfsAllowlist, BrokerIamPolicyAndLegacyAliases) {
+    const std::string endpoint =
+        "https://broker.example.com/v1/credentials/assume-role";
+    const auto policy = std::string(
+        R"(["https://broker.example.com/v1/credentials/assume-role","https://broker.example.com/v1/credentials/assume-role?api-version=1&scope=a%2Fb+x"])");
+    ASSERT_TRUE(InitCredentialBrokerPolicy(policy).ok());
+    EXPECT_FALSE(InitCredentialBrokerPolicy(std::string("[]")).ok());
+    EXPECT_FALSE(InitCredentialBrokerPolicy(std::string("invalid")).ok());
+    EXPECT_FALSE(
+        InitCredentialBrokerPolicy(std::string(R"(["file:///tmp/broker"])"))
+            .ok());
+    for (const auto& cloud : {"aws", "aliyun", "tencent"}) {
+        milvus_storage::api::Properties props;
+        auto spec = nlohmann::json{{"format", "parquet"},
+                                   {"extfs",
+                                    {{"cloud_provider", cloud},
+                                     {"region", "us-west-2"},
+                                     {"use_iam", "true"},
+                                     {"credential_endpoint", endpoint}}}};
+        InjectExternalSpecProperties(
+            props, 42, "s3://bucket/path", spec.dump());
+        EXPECT_EQ(
+            std::get<std::string>(props.at("extfs.42.credential_endpoint")),
+            endpoint);
+        EXPECT_EQ(props.count("extfs.42.role_arn"), 0u);
+        auto address = std::get<std::string>(props.at("extfs.42.address"));
+        auto scheme_end = address.find("://");
+        if (scheme_end != std::string::npos)
+            address = address.substr(scheme_end + 3);
+        auto config = milvus_storage::FilesystemCache::resolve_config(
+            props, "s3://" + address + "/bucket/path");
+        ASSERT_TRUE(config.ok()) << config.status();
+        EXPECT_TRUE(config->use_iam);
+        EXPECT_TRUE(config->IsAwsCredentialBrokerEnabled());
+        EXPECT_EQ(config->credential_endpoint, endpoint);
+        spec["extfs"]["credential_endpoint"] = endpoint + "/other";
+        EXPECT_ANY_THROW(InjectExternalSpecProperties(
+            props, 42, "s3://bucket/path", spec.dump()));
+    }
+    auto spec = nlohmann::json{
+        {"format", "parquet"},
+        {"extfs",
+         {{"cloud_provider", "azure"},
+          {"region", "westus3"},
+          {"azure_client_id", "client"},
+          {"azure_tenant_id", "tenant"},
+          {"access_key_id", "account"},
+          {"credential_endpoint", endpoint},
+          {"azure_credential_endpoint",
+           "HTTPS://BROKER.example.com:443/v1/credentials/assume-role"}}}};
+    milvus_storage::api::Properties props;
+    InjectExternalSpecProperties(
+        props, 42, "azure://core.windows.net/container/path", spec.dump());
+    EXPECT_EQ(props.count("extfs.42.credential_endpoint"), 0u);
+    EXPECT_EQ(
+        std::get<std::string>(props.at("extfs.42.azure_credential_endpoint")),
+        endpoint);
+    auto config = milvus_storage::FilesystemCache::resolve_config(
+        props, "azure://core.windows.net/container/path");
+    ASSERT_TRUE(config.ok()) << config.status();
+    EXPECT_TRUE(config->IsAzureCredentialBrokerEnabled());
+    EXPECT_EQ(config->azure_credential_endpoint, endpoint);
+    EXPECT_TRUE(config->credential_endpoint.empty());
+    spec["extfs"]["azure_credential_endpoint"] = endpoint + "/other";
+    EXPECT_ANY_THROW(InjectExternalSpecProperties(
+        props, 42, "azure://core.windows.net/container/path", spec.dump()));
+}
+
+TEST(InjectExtfsAllowlist, BrokerFormatCompatibility) {
+    ASSERT_TRUE(
+        InitCredentialBrokerPolicy(
+            std::string(
+                R"(["https://broker.example.com/v1/credentials/assume-role","https://broker.example.com/v1/credentials/assume-role?api-version=1&scope=a%2Fb+x"])"))
+            .ok());
+    const std::string endpoint =
+        "https://broker.example.com/v1/credentials/assume-role";
+    for (const auto* cloud : {"aws", "aliyun", "tencent"}) {
+        for (bool iam : {true, false}) {
+            for (const auto* format : {"parquet",
+                                       "vortex",
+                                       "lance-table",
+                                       "iceberg-table",
+                                       "milvus-table"}) {
+                SCOPED_TRACE(std::string(cloud) + "/" + format + "/" +
+                             (iam ? "iam" : "role"));
+                auto spec =
+                    nlohmann::json{{"format", format},
+                                   {"extfs",
+                                    {{"cloud_provider", cloud},
+                                     {"region", "us-west-2"},
+                                     {"use_iam", iam ? "true" : "false"},
+                                     {"credential_endpoint", endpoint}}}};
+                if (!iam) {
+                    spec["extfs"]["role_arn"] = "target-role";
+                }
+                nlohmann::ordered_json format_first;
+                format_first["format"] = format;
+                format_first["extfs"] = spec["extfs"];
+                for (const auto& raw : {spec.dump(), format_first.dump()}) {
+                    milvus_storage::api::Properties props;
+                    EXPECT_NO_THROW(InjectExternalSpecProperties(
+                        props, 42, "s3://bucket/path", raw));
+                    EXPECT_EQ(std::get<std::string>(
+                                  props.at("extfs.42.credential_endpoint")),
+                              endpoint);
+                }
+                spec["extfs"].erase("credential_endpoint");
+                milvus_storage::api::Properties props;
+                EXPECT_NO_THROW(InjectExternalSpecProperties(
+                    props, 42, "s3://bucket/path", spec.dump()));
+            }
+        }
+    }
+    for (const auto* field :
+         {"credential_endpoint", "azure_credential_endpoint"}) {
+        for (const auto* format : {"parquet",
+                                   "vortex",
+                                   "lance-table",
+                                   "iceberg-table",
+                                   "milvus-table"}) {
+            SCOPED_TRACE(std::string(field) + "/" + format);
+            const auto spec = nlohmann::json{{"format", format},
+                                             {"extfs",
+                                              {{"cloud_provider", "azure"},
+                                               {"access_key_id", "account"},
+                                               {"region", "westus3"},
+                                               {"azure_client_id", "client"},
+                                               {"azure_tenant_id", "tenant"},
+                                               {field, endpoint}}}};
+            milvus_storage::api::Properties props;
+            EXPECT_NO_THROW(InjectExternalSpecProperties(
+                props,
+                42,
+                "azure://core.windows.net/container/path",
+                spec.dump()));
+            EXPECT_EQ(std::get<std::string>(
+                          props.at("extfs.42.azure_credential_endpoint")),
+                      endpoint);
+        }
+    }
+}
+
+TEST(InjectExtfsAllowlist, BrokerEndpointNormalization) {
+    for (const auto& entry : std::vector<std::pair<std::string, std::string>>{
+             {"HTTPS://BROKER.example.com:443/path",
+              "https://broker.example.com/path"},
+             {"http://broker:080/path", "http://broker/path"},
+             {"HTTPS://BROKER:443/path?api-version=1&scope=a%2Fb+x&scope=y",
+              "https://broker/path?api-version=1&scope=a%2Fb+x&scope=y"},
+             {"https://broker?", "https://broker/?"},
+             {"http://[::1]:80/path", "http://[::1]/path"},
+             {"https://broker:8443/a_b/", "https://broker:8443/a_b/"}}) {
+        auto result = NormalizeBrokerEndpoint(entry.first);
+        ASSERT_TRUE(result.ok()) << result.status();
+        EXPECT_EQ(*result, entry.second);
+    }
+    for (const auto& raw : {"",
+                            "ftp://broker/path",
+                            "https:///path",
+                            "https://user@broker/path",
+                            "https://broker/path#",
+                            "https://broker:",
+                            "https://broker:0/path",
+                            "https://broker:65536/path",
+                            "https://*.broker/path",
+                            "https://broker/a%2Fb/",
+                            "https://broker/allowed//admin",
+                            "https://broker/a/../admin",
+                            "https://broker/a:b"}) {
+        EXPECT_FALSE(NormalizeBrokerEndpoint(raw).ok()) << raw;
+    }
+}
+
+#include <aws/core/Aws.h>
+#include <aws/core/auth/AWSCredentials.h>
+#include <aws/core/auth/AWSCredentialsProvider.h>
+#include <aws/core/http/HttpClient.h>
+#include <aws/core/http/HttpClientFactory.h>
+#include <aws/core/http/standard/StandardHttpRequest.h>
+#include <aws/core/http/standard/StandardHttpResponse.h>
+
+#include <cstdio>
+#include <cstdlib>
+#include <functional>
+#include "milvus-storage/filesystem/s3/s3_filesystem_producer.h"
+
+namespace milvus::storage {
+namespace {
+
+class InstanceProfileHttpClient : public Aws::Http::HttpClient {
+ public:
+    mutable int metadata_requests = 0;
+
+    std::shared_ptr<Aws::Http::HttpResponse>
+    MakeRequest(const std::shared_ptr<Aws::Http::HttpRequest>& request,
+                Aws::Utils::RateLimits::RateLimiterInterface*,
+                Aws::Utils::RateLimits::RateLimiterInterface*) const override {
+        auto response =
+            Aws::MakeShared<Aws::Http::Standard::StandardHttpResponse>(
+                "InstanceProfileHttp", request);
+        response->SetResponseCode(Aws::Http::HttpResponseCode::OK);
+        if (request->GetUri().GetAuthority() != "169.254.169.254") {
+            ADD_FAILURE() << "Unexpected HTTP request: "
+                          << request->GetUri().GetURIString();
+            response->SetResponseCode(Aws::Http::HttpResponseCode::BAD_REQUEST);
+            return response;
+        }
+        ++metadata_requests;
+        const auto& path = request->GetUri().GetPath();
+        if (path == "/latest/api/token") {
+            response->GetResponseBody() << "test-imds-token";
+        } else if (path == "/latest/meta-data/placement/availability-zone") {
+            response->GetResponseBody() << "us-east-1a";
+        } else if (path == "/latest/meta-data/iam/security-credentials") {
+            response->GetResponseBody() << "test-node-role";
+        } else if (path ==
+                   "/latest/meta-data/iam/security-credentials/"
+                   "test-node-role") {
+            response->GetResponseBody()
+                << R"({"Code":"Success","AccessKeyId":"NODE_AK",)"
+                   R"("SecretAccessKey":"NODE_SK","Token":"NODE_TOKEN",)"
+                   R"("Expiration":"2099-01-01T00:00:00Z"})";
+        } else {
+            ADD_FAILURE() << "Unexpected IMDS path: " << path;
+        }
+        return response;
+    }
+};
+
+class InstanceProfileHttpFactory : public Aws::Http::HttpClientFactory {
+ public:
+    std::shared_ptr<InstanceProfileHttpClient> http =
+        std::make_shared<InstanceProfileHttpClient>();
+
+    std::shared_ptr<Aws::Http::HttpClient>
+    CreateHttpClient(
+        const Aws::Client::ClientConfiguration& config) const override {
+        return http;
+    }
+
+    std::shared_ptr<Aws::Http::HttpRequest>
+    CreateHttpRequest(
+        const Aws::String& uri,
+        Aws::Http::HttpMethod method,
+        const Aws::IOStreamFactory& stream_factory) const override {
+        return CreateHttpRequest(Aws::Http::URI(uri), method, stream_factory);
+    }
+
+    std::shared_ptr<Aws::Http::HttpRequest>
+    CreateHttpRequest(
+        const Aws::Http::URI& uri,
+        Aws::Http::HttpMethod method,
+        const Aws::IOStreamFactory& stream_factory) const override {
+        auto request =
+            std::make_shared<Aws::Http::Standard::StandardHttpRequest>(uri,
+                                                                       method);
+        request->SetResponseStreamFactory(stream_factory);
+        return request;
+    }
+};
+
+// Each test runs in a fresh process because SDK initialization and default
+// region configuration are cached globally (also by other Milvus test suites).
+void
+RunWithInstanceProfileSdk(
+    const std::function<void(InstanceProfileHttpClient&)>& test) {
+    setenv("AWS_EC2_METADATA_DISABLED", "true", 1);
+    setenv("AWS_EC2_METADATA_SERVICE_ENDPOINT", "http://169.254.169.254", 1);
+    setenv("AWS_CONFIG_FILE", "/dev/null", 1);
+    setenv("AWS_SHARED_CREDENTIALS_FILE", "/dev/null", 1);
+    unsetenv("AWS_REGION");
+    unsetenv("AWS_DEFAULT_REGION");
+    auto factory = std::make_shared<InstanceProfileHttpFactory>();
+    Aws::SDKOptions options;
+    options.httpOptions.httpClientFactory_create_fn = [factory] {
+        return factory;
+    };
+    Aws::InitAPI(options);
+    test(*factory->http);
+    Aws::ShutdownAPI(options);
+    const auto* result =
+        ::testing::UnitTest::GetInstance()->current_test_info()->result();
+    for (int i = 0; i < result->total_part_count(); ++i) {
+        const auto& part = result->GetTestPartResult(i);
+        if (part.failed()) {
+            std::fprintf(stderr,
+                         "%s:%d: %s\n",
+                         part.file_name(),
+                         part.line_number(),
+                         part.message());
+        }
+    }
+    std::_Exit(result->Failed() ? 1 : 0);
+}
+
+class AwsInstanceProfileDeathTest : public ::testing::Test {
+    void
+    SetUp() override {
+        ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+    }
+};
+
+TEST_F(AwsInstanceProfileDeathTest,
+       NativeAwsIamUsesInstanceProfileCredentialsWhenEnabled) {
+    ASSERT_EXIT(
+        RunWithInstanceProfileSdk([](InstanceProfileHttpClient& http) {
+            for (const auto* key : {"AWS_ACCESS_KEY_ID",
+                                    "AWS_SECRET_ACCESS_KEY",
+                                    "AWS_SESSION_TOKEN",
+                                    "AWS_ROLE_ARN",
+                                    "AWS_WEB_IDENTITY_TOKEN_FILE",
+                                    "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+                                    "AWS_CONTAINER_CREDENTIALS_FULL_URI"}) {
+                unsetenv(key);
+            }
+            setenv("AWS_EC2_METADATA_ENABLE", "true", 1);
+            setenv("AWS_EC2_METADATA_DISABLED", "false", 1);
+            milvus_storage::ArrowFileSystemConfig config;
+            config.cloud_provider = "aws";
+            config.region = "us-west-2";
+            config.use_iam = true;
+            auto options =
+                milvus_storage::S3FileSystemProducer(config).CreateS3Options();
+            ASSERT_TRUE(options.ok()) << options.status();
+            const auto credentials =
+                options->credentials_provider->GetAWSCredentials();
+            EXPECT_EQ(credentials.GetAWSAccessKeyId(), "NODE_AK");
+            EXPECT_EQ(credentials.GetAWSSecretKey(), "NODE_SK");
+            EXPECT_EQ(credentials.GetSessionToken(), "NODE_TOKEN");
+            EXPECT_GT(http.metadata_requests, 0);
+        }),
+        ::testing::ExitedWithCode(0),
+        "");
+}
+
+}  // namespace
+}  // namespace milvus::storage

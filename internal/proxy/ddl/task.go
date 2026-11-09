@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -405,6 +406,11 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 	}
 	if err := typeutil.NormalizeAndValidateExternalCollectionSchema(t.schema); err != nil {
 		return err
+	}
+	if t.schema.GetExternalSource() != "" {
+		if err := externalspec.ValidateSourceAndSpec(t.schema.GetExternalSource(), t.schema.GetExternalSpec(), paramtable.Get().CommonCfg.CredentialBrokerPolicy()); err != nil {
+			return err
+		}
 	}
 	if err := validateTextStorageV3Enabled(t.schema); err != nil {
 		return err

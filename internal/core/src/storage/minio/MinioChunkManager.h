@@ -63,6 +63,10 @@
 #include "storage/huawei/HuaweiCloudCredentialsProvider.h"
 #include "storage/tencent/TencentCloudCredentialsProvider.h"
 
+// Implemented by the immutable native Broker policy.
+bool
+IsCredentialBrokerEndpoint(const std::string& endpoint);
+
 namespace milvus::storage {
 
 enum class RemoteStorageType {
@@ -474,6 +478,7 @@ AddGcsEndpointForCredentials(const std::string& address, bool use_ssl);
 // provider, and any other GCS request with the provider milvus-storage's
 // GcpCredentialRegistry holds for its endpoint and bucket, as milvus-storage's
 // own GCP factory does. Every other request is left alone.
+// Allowed Broker requests carry no GCP credentials.
 class GoogleHttpClientFactory : public Aws::Http::HttpClientFactory {
  public:
     explicit GoogleHttpClientFactory(const std::string& tls_min_version = "")
