@@ -12,6 +12,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/proxy/dql"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -41,7 +42,13 @@ func TestDeleteQuerySnapshotConsistency(t *testing.T) {
 			}).Build()
 			defer patch.UnPatch()
 			runner := &DeleteRunner{
-				req:          &milvuspb.DeleteRequest{ConsistencyLevel: consistency},
+				req: &milvuspb.DeleteRequest{ConsistencyLevel: consistency},
+				schema: mustNewSchemaInfo(&schemapb.CollectionSchema{
+					Version: 7,
+					Fields: []*schemapb.FieldSchema{{
+						FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true,
+					}},
+				}),
 				ts:           tsoutil.ComposeTSByTime(time.Now()),
 				msgID:        10,
 				collectionID: 20,
@@ -62,6 +69,7 @@ func TestDeleteQuerySnapshotConsistency(t *testing.T) {
 				require.Equal(t, dql.ParseGuaranteeTsFromConsistency(runner.ts, runner.ts, consistency), inner.GetGuaranteeTimestamp())
 				require.Zero(t, inner.GetMvccTimestamp())
 				require.Equal(t, runner.collectionID, inner.GetCollectionID())
+				require.Equal(t, runner.schema.GetVersion(), inner.GetSchemaVersion())
 				require.Equal(t, runner.partitionIDs, inner.GetPartitionIDs())
 				require.Equal(t, plan, inner.GetSerializedExprPlan())
 				require.Equal(t, fields, inner.GetOutputFieldsId())
