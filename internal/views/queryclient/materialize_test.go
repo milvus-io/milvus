@@ -98,7 +98,7 @@ func TestMaterializeRetainedFailureAndSizeGuard(t *testing.T) {
 			case "malformed":
 				require.ErrorIs(t, err, merr.ErrServiceInternal)
 			case "oversized":
-				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				require.ErrorIs(t, err, merr.ErrServiceUnimplemented)
 			case "consumer_unsupported":
 				require.ErrorIs(t, err, merr.ErrServiceUnimplemented)
 			}
@@ -159,7 +159,7 @@ func TestMaterializeRetainedEmptySnapshots(t *testing.T) {
 	require.ErrorIs(t, client.Materialize(t.Context(), req, 0, 10, nil), merr.ErrServiceInternal)
 }
 
-func TestMaterializeRetainedSizeBudgetIsSharedByShard(t *testing.T) {
+func TestMaterializeRetainedSizeBudgetRequestsFallback(t *testing.T) {
 	client, req := retainedMaterializeFixture()
 	patch := mockey.Mock((*compositeViewQueryServiceClient).MaterializeOnView).To(func(_ *compositeViewQueryServiceClient, _ context.Context, _ qviews.WorkNode, _ *viewpb.MaterializeOnViewRequest) (*internalpb.MaterializeResults, error) {
 		return &internalpb.MaterializeResults{Header: &internalpb.MaterializeHeader{Status: merr.Success(), ResultSize: 6}}, nil
@@ -171,8 +171,29 @@ func TestMaterializeRetainedSizeBudgetIsSharedByShard(t *testing.T) {
 		resource.ReleaseMaterializeBody(result)
 		return nil
 	})
-	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.ErrorIs(t, err, merr.ErrServiceUnimplemented)
 	require.EqualValues(t, 1, received.Load())
+}
+
+func TestMaterializeRetainedSizeBudgetIsIndependentPerShard(t *testing.T) {
+	client, req := retainedMaterializeFixture()
+	second := req.Plans[0]
+	second.ShardID.VChannel = "p0_100v1"
+	second.WorkNodes = second.WorkNodes[1:]
+	req.Plans[0].WorkNodes = req.Plans[0].WorkNodes[:1]
+	req.Plans = append(req.Plans, second)
+	patch := mockey.Mock((*compositeViewQueryServiceClient).MaterializeOnView).To(func(_ *compositeViewQueryServiceClient, _ context.Context, _ qviews.WorkNode, _ *viewpb.MaterializeOnViewRequest) (*internalpb.MaterializeResults, error) {
+		return &internalpb.MaterializeResults{Header: &internalpb.MaterializeHeader{Status: merr.Success(), ResultSize: 6}}, nil
+	}).Build()
+	defer patch.UnPatch()
+	var received atomic.Int32
+	err := client.Materialize(t.Context(), req, 0, 10, func(_ ShardPlan, _ qviews.WorkNode, result *internalpb.MaterializeResults) error {
+		received.Add(1)
+		resource.ReleaseMaterializeBody(result)
+		return nil
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 2, received.Load())
 }
 
 func TestMaterializeRetainedUnsupportedWinsOverSiblingFailure(t *testing.T) {
