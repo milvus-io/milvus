@@ -682,7 +682,7 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
     @pytest.mark.parametrize("add_field", [True, False])
     def test_milvus_client_search_iterator_default(self, metric_type, add_field):
         """
-        target: test search iterator (high level api) normal case
+        target: test search iterator (high level api) after indexed data is loaded
         method: create connection, collection, insert and search iterator
         expected: search iterator successfully
         """
@@ -708,7 +708,14 @@ class TestMilvusClientSearchIteratorValid(TestMilvusClientV2Base):
                  default_string_field_name: str(i)} for i in range(default_nb)]
         self.insert(client, collection_name, rows)
         self.flush(client, collection_name)
-        self.wait_for_index_ready(client, collection_name, index_name=default_vector_field_name)
+        assert self.wait_for_index_ready(client, collection_name, index_name=default_vector_field_name), (
+            f"Index {default_vector_field_name} was not ready before iteration"
+        )
+        # Index build completion does not mean the serving segments have loaded
+        # it. Reload before this basic iterator test; iteration across segment
+        # or index handoff remains a separate product issue (#45048).
+        self.release_collection(client, collection_name)
+        self.load_collection(client, collection_name)
         # 3. search iterator
         vectors_to_search = cf.gen_vectors(1, default_dim)
         search_params = {"params": {}}
