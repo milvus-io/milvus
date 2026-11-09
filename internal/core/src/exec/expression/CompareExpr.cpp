@@ -230,8 +230,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
         // Consecutive offsets frequently fall in the same left/right chunk;
         // keep each column's data accessor (which pins its chunk) across
         // iterations and rebuild it only when that column's chunk id changes.
-        // Safe on both sealed and growing (data and the chunked validity
-        // storage have stable per-chunk buffers).
+        // Growing data and validity have stable per-chunk buffers.
         int64_t cached_left_chunk_id = -1;
         int64_t cached_right_chunk_id = -1;
         segcore::ChunkDataAccessor left;
