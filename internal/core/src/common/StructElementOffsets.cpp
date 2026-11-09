@@ -40,6 +40,14 @@ namespace milvus {
 
 namespace {
 
+void
+CheckOffsetsCancellation(OpContext* op_ctx) {
+    if (op_ctx && op_ctx->cancellation_token.isCancellationRequested()) {
+        ThrowInfo(ErrorCode::FollyCancel,
+                  "struct element offsets construction cancelled");
+    }
+}
+
 ElementRowInfo
 LocateElement(const std::vector<int32_t>& row_to_element_start,
               int32_t elem_id) {
@@ -377,11 +385,48 @@ StructElementOffsetsSealed::ElementBitsetToRowBitsetAny(
                            row_result);
 }
 
+namespace {
+
+// Number of elements in one native-list ARRAY row as produced by
+// ArrayValueView::output_data: scalar levels are dense (a null element keeps
+// its slot), and a null row has no payload.
+int32_t
+NativeListProtoRowLength(const ScalarFieldProto& row,
+                         const FieldMeta& field_meta) {
+    switch (row.data_case()) {
+        case ScalarFieldProto::DATA_NOT_SET:
+            return 0;
+        case ScalarFieldProto::kArrayData:
+            return row.array_data().data_size();
+        case ScalarFieldProto::kBoolData:
+            return row.bool_data().data_size();
+        case ScalarFieldProto::kIntData:
+            return row.int_data().data_size();
+        case ScalarFieldProto::kLongData:
+            return row.long_data().data_size();
+        case ScalarFieldProto::kFloatData:
+            return row.float_data().data_size();
+        case ScalarFieldProto::kDoubleData:
+            return row.double_data().data_size();
+        case ScalarFieldProto::kStringData:
+            return row.string_data().data_size();
+        default:
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "unexpected proto case {} for native-list ARRAY field {}",
+                      static_cast<int>(row.data_case()),
+                      field_meta.get_name().get());
+    }
+}
+
+}  // namespace
+
 std::shared_ptr<StructElementOffsetsSealed>
 StructElementOffsetsSealed::BuildFromColumn(
     const ChunkedColumnInterface& column,
     const FieldMeta& field_meta,
-    int64_t row_count) {
+    int64_t row_count,
+    OpContext* op_ctx) {
+    CheckOffsetsCancellation(op_ctx);
     if (row_count == 0) {
         LOG_INFO(
             "StructElementOffsetsSealed::BuildFromColumn: empty segment for "
@@ -389,21 +434,23 @@ StructElementOffsetsSealed::BuildFromColumn(
             "'{}'",
             field_meta.get_name().get());
         return std::make_shared<StructElementOffsetsSealed>(
-            std::vector<int32_t>{0});
+            std::vector<int32_t>{0}, TargetBitmap(0));
     }
 
     auto data_type = field_meta.get_data_type();
 
     std::vector<int32_t> row_to_element_start(row_count + 1);
+    TargetBitmap row_validity(row_count, true);
 
-    auto temp_op_ctx = std::make_unique<OpContext>();
-    auto op_ctx_ptr = temp_op_ctx.get();
-
+    column.Prepare(op_ctx);
     int64_t num_chunks = column.num_chunks();
     int64_t current_row_id = 0;
     int64_t total_elements = 0;
 
-    auto append_array_length = [&](uint64_t array_len) {
+    auto append_array_length = [&](uint64_t array_len, bool valid) {
+        if ((current_row_id & 4095) == 0) {
+            CheckOffsetsCancellation(op_ctx);
+        }
         AssertInfo(current_row_id < row_count,
                    "struct element offsets contain more rows than expected {}",
                    row_count);
@@ -416,28 +463,66 @@ StructElementOffsetsSealed::BuildFromColumn(
             array_len);
         row_to_element_start[current_row_id] =
             static_cast<int32_t>(total_elements);
+        row_validity[current_row_id] = valid;
         total_elements += static_cast<int64_t>(array_len);
         ++current_row_id;
     };
 
     if (data_type == DataType::VECTOR_ARRAY) {
         for (int64_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
+            CheckOffsetsCancellation(op_ctx);
             auto pin_wrapper =
-                column.VectorArrayViews(op_ctx_ptr, chunk_id, std::nullopt);
+                column.VectorArrayViews(op_ctx, chunk_id, std::nullopt);
             const auto& [vector_array_views, valid_flags] = pin_wrapper.get();
 
             for (size_t i = 0; i < vector_array_views.size(); ++i) {
                 int32_t array_len = 0;
                 if (!valid_flags || valid_flags[i]) {
-                    array_len = vector_array_views[i].physical_length();
+                    array_len = vector_array_views[i].length();
                 }
 
-                append_array_length(array_len);
+                append_array_length(array_len, !valid_flags || valid_flags[i]);
             }
         }
-    } else if (field_meta.is_nested_array()) {
+    } else if (field_meta.is_native_list_array() &&
+               column.GetLocalFormat() ==
+                   ChunkedColumnInterface::LocalFormat::Vortex) {
+        // VortexColumn has no Chunk access. Read the row lengths through the
+        // output path, which serves every native-list field, in bounded
+        // batches.
+        constexpr int64_t kBatchRows = 8192;
+        std::vector<int64_t> offsets;
+        std::vector<int32_t> lengths;
+        std::vector<uint8_t> valids;
+        for (int64_t start = 0; start < row_count; start += kBatchRows) {
+            CheckOffsetsCancellation(op_ctx);
+            const auto count = std::min(kBatchRows, row_count - start);
+            offsets.resize(count);
+            for (int64_t i = 0; i < count; ++i) {
+                offsets[i] = start + i;
+            }
+            lengths.assign(count, 0);
+            valids.assign(count, 1);
+            column.BulkIsValid(
+                op_ctx,
+                [&](bool is_valid, size_t i) { valids[i] = is_valid; },
+                offsets.data(),
+                count);
+            column.BulkArrayValueAt(
+                op_ctx,
+                [&](ScalarFieldProto&& row, size_t i) {
+                    lengths[i] = NativeListProtoRowLength(row, field_meta);
+                },
+                offsets.data(),
+                count);
+            for (int64_t i = 0; i < count; ++i) {
+                append_array_length(valids[i] ? lengths[i] : 0, valids[i] != 0);
+            }
+        }
+    } else if (field_meta.is_native_list_array()) {
         for (int64_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
-            auto pinned_chunk = column.GetChunk(op_ctx_ptr, chunk_id);
+            CheckOffsetsCancellation(op_ctx);
+            auto pinned_chunk = column.GetChunk(op_ctx, chunk_id);
             auto* array_chunk =
                 dynamic_cast<ColumnarArrayChunk*>(pinned_chunk.get());
             AssertInfo(array_chunk != nullptr,
@@ -446,14 +531,16 @@ StructElementOffsetsSealed::BuildFromColumn(
 
             const auto& offsets = array_chunk->offsets();
             for (size_t i = 0; i < array_chunk->row_count(); ++i) {
-                const auto array_len = offsets[i + 1] - offsets[i];
-                append_array_length(array_len);
+                const bool valid = array_chunk->isValid(i);
+                const auto array_len = valid ? offsets[i + 1] - offsets[i] : 0;
+                append_array_length(array_len, valid);
             }
         }
     } else {
         for (int64_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
+            CheckOffsetsCancellation(op_ctx);
             auto pin_wrapper =
-                column.ArrayViews(op_ctx_ptr, chunk_id, std::nullopt);
+                column.ArrayViews(op_ctx, chunk_id, std::nullopt);
             const auto& [array_views, valid_flags] = pin_wrapper.get();
 
             for (size_t i = 0; i < array_views.size(); ++i) {
@@ -462,7 +549,7 @@ StructElementOffsetsSealed::BuildFromColumn(
                     array_len = array_views[i].length();
                 }
 
-                append_array_length(array_len);
+                append_array_length(array_len, !valid_flags || valid_flags[i]);
             }
         }
     }
@@ -483,8 +570,9 @@ StructElementOffsetsSealed::BuildFromColumn(
         total_elements);
 
     auto result = std::make_shared<StructElementOffsetsSealed>(
-        std::move(row_to_element_start));
-    result->resource_size_ = 4 * (row_count + 1);
+        std::move(row_to_element_start), std::move(row_validity));
+    result->resource_size_ = sizeof(int32_t) * (row_count + 1) +
+                             sizeof(uint64_t) * ((row_count + 63) / 64);
     cachinglayer::Manager::GetInstance().ChargeLoadedResource(
         cachinglayer::ResourceUsage{result->resource_size_, 0});
     return result;

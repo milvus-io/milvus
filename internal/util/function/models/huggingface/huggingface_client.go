@@ -17,6 +17,7 @@
 package huggingface
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -77,7 +78,7 @@ type SentenceSimilarityRequest struct {
 
 type SentenceSimilarityResponse []float32
 
-func (c *Client) FeatureExtraction(hfProvider string, modelName string, texts []string, params map[string]any, timeoutMs int64) (*FeatureExtractionResponse, error) {
+func (c *Client) FeatureExtraction(ctx context.Context, hfProvider string, modelName string, texts []string, params map[string]any, timeoutMs int64) (*FeatureExtractionResponse, error) {
 	url, err := c.buildPipelineURL(hfProvider, modelName, FeatureExtractionTask)
 	if err != nil {
 		return nil, err
@@ -88,10 +89,10 @@ func (c *Client) FeatureExtraction(hfProvider string, modelName string, texts []
 	for k, v := range params {
 		req[k] = v
 	}
-	return models.PostRequest[FeatureExtractionResponse](req, url, c.headers(), timeoutMs)
+	return models.PostRequest[FeatureExtractionResponse](ctx, req, url, c.headers(), timeoutMs)
 }
 
-func (c *Client) SentenceSimilarity(hfProvider string, modelName string, query string, texts []string, timeoutMs int64) (*SentenceSimilarityResponse, error) {
+func (c *Client) SentenceSimilarity(ctx context.Context, hfProvider string, modelName string, query string, texts []string, timeoutMs int64) (*SentenceSimilarityResponse, error) {
 	url, err := c.buildPipelineURL(hfProvider, modelName, SentenceSimilarityTask)
 	if err != nil {
 		return nil, err
@@ -102,7 +103,7 @@ func (c *Client) SentenceSimilarity(hfProvider string, modelName string, query s
 			Sentences:      texts,
 		},
 	}
-	return models.PostRequest[SentenceSimilarityResponse](req, url, c.headers(), timeoutMs)
+	return models.PostRequest[SentenceSimilarityResponse](ctx, req, url, c.headers(), timeoutMs)
 }
 
 func (c *Client) buildPipelineURL(hfProvider string, modelName string, task string) (string, error) {

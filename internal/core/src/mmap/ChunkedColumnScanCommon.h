@@ -20,6 +20,7 @@
 #include <optional>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "common/Array.h"
@@ -28,6 +29,7 @@
 #include "common/Json.h"
 #include "common/Types.h"
 #include "common/ValidityView.h"
+#include "pb/plan.pb.h"
 
 namespace milvus {
 
@@ -198,6 +200,15 @@ struct CellLocation {
     int64_t cell_offset = 0;
 };
 
+enum class OffsetLookupStrategy { PerOffset, BatchBinary, Bucket };
+
+struct OffsetLookupOptions {
+    OffsetLookupStrategy strategy = OffsetLookupStrategy::PerOffset;
+    // Borrow the immutable V1 index rather than rebuilding/copying it per Take.
+    int64_t bucket_order = 0;
+    const std::vector<int64_t>* bucket_cells = nullptr;
+};
+
 // The single Cell-geometry authority for one Column generation. Column
 // backends use it for segment-offset-to-Cell conversion and Take planning;
 // physical Cell details never leave the Column read implementation.
@@ -205,12 +216,20 @@ class ColumnPlanner {
  public:
     // Production Columns borrow their immutable generation metadata. The
     // rvalue overload retains ownership for standalone planners and tests.
-    explicit ColumnPlanner(const std::vector<int64_t>& num_rows_until_cell);
-    explicit ColumnPlanner(std::vector<int64_t>&& num_rows_until_cell);
+    explicit ColumnPlanner(const std::vector<int64_t>& num_rows_until_cell,
+                           OffsetLookupOptions lookup_options = {});
+    explicit ColumnPlanner(std::vector<int64_t>&& num_rows_until_cell,
+                           OffsetLookupOptions lookup_options = {});
     virtual ~ColumnPlanner() = default;
 
     CellLocation
     Locate(int64_t segment_offset) const;
+
+    // Return Cell ids and Cell-local offsets in input order, preserving
+    // duplicates. Backends choose the lookup algorithm independently of pin
+    // policy; pin-set deduplication must not change this positional mapping.
+    std::pair<std::vector<int64_t>, std::vector<int64_t>>
+    LocateBatch(OffsetView offsets) const;
 
     int64_t
     CellStart(int64_t cell_id) const;
@@ -233,6 +252,7 @@ class ColumnPlanner {
 
     std::shared_ptr<const std::vector<int64_t>> owned_num_rows_until_cell_;
     const std::vector<int64_t>* num_rows_until_cell_{nullptr};
+    OffsetLookupOptions lookup_options_;
 };
 
 struct ValueView {
@@ -261,12 +281,15 @@ struct ValueView {
 
 struct ScanBatch {
     // Every batch represents the dense row range
-    // [row_id_start, row_id_start + size). Values are optional based on the
-    // requested projection, while validity remains aligned with this range.
+    // [row_id_start, row_id_start + size) for data scans. Filter pushdown
+    // batches instead carry sparse row_ids.
     ValueView values;
     // Empty means every row in this batch is valid. The view may reference
     // expanded bools or an LSB-first packed bitmap owned by `owner`.
     ValidityView validity;
+    // Filter pushdown batches may carry sparse row ids instead of a dense
+    // segment range; data scans leave this empty.
+    std::vector<int64_t> row_ids;
     std::shared_ptr<void> owner;
     int64_t row_id_start = 0;
     int64_t size = 0;
@@ -301,12 +324,19 @@ struct TakeItemState {
 
 // Ordered positional access over one finite offset set. The input offsets must
 // outlive the result; callers do not manage backend Cell lifetimes.
+// A candidate mask selects which input positions belong to the request. Size()
+// preserves input indexing, but only selected positions may be read, including
+// in GetOwn() output. The immutable mask must also outlive the result.
 // Reader-backed results may already contain one dense owned value array. Raw
-// results pin only the Cell used by the current borrowed access; a borrowed
-// string/JSON/array view remains valid until the next access that switches
-// Cells, GetOwn(), or result destruction. Raw borrowed access and GetOwn() must
-// complete while the OpContext passed to Take() remains alive. TakeResult is
+// CurrentCell results pin only the Cell used by the current borrowed access;
+// a view remains valid until switching Cells, GetOwn(), or result destruction.
+// Batch results retain all requested pins until result destruction, including
+// across GetOwn(). Raw borrowed access and GetOwn() must complete while the
+// OpContext passed to Take() remains alive. TakeResult is
 // not thread-safe.
+// TODO(local-format): Phase 2 will guarantee borrowed values until result
+// destruction on every backend. Reconcile CurrentCell invalidation before
+// promising that lifetime; escaping values require GetOwn and its retained owner.
 class TakeResult {
  public:
     virtual ~TakeResult() = default;
@@ -401,25 +431,40 @@ class TakeResult {
     template <typename T>
     TakeItem<T>
     GetUnchecked(int64_t index) const {
-        auto state = PrepareItem(index, /*read_data=*/true);
-        TakeItem<T> item{std::nullopt, state.is_valid, state.data_skipped};
-        if (!state.is_valid || state.data_skipped) {
-            return item;
-        }
+        TakeItemState state;
+        TakeItem<T> item;
+        const auto set_value = [&](auto&& value) {
+            if (state.is_valid && !state.data_skipped) {
+                if constexpr (std::is_pointer_v<
+                                  std::remove_reference_t<decltype(value)>>) {
+                    item.value.emplace(*static_cast<const T*>(value));
+                } else {
+                    item.value.emplace(std::forward<decltype(value)>(value));
+                }
+            }
+        };
         if constexpr (std::is_same_v<T, std::string_view>) {
-            item.value.emplace(StringViewAt(index));
+            set_value(StringViewAt(index, state));
         } else if constexpr (std::is_same_v<T, Json>) {
-            item.value.emplace(JsonAt(index));
+            set_value(JsonViewAt(index, state));
         } else if constexpr (std::is_same_v<T, ArrayView>) {
-            item.value.emplace(ArrayAt(index));
+            set_value(ArrayAt(index, state));
         } else if constexpr (std::is_same_v<T, ArrayValueView>) {
-            item.value.emplace(ArrayValueAt(index));
+            set_value(ArrayValueAt(index, state));
         } else if constexpr (std::is_same_v<T, VectorArrayView>) {
-            item.value.emplace(VectorArrayAt(index));
+            set_value(VectorArrayAt(index, state));
         } else {
-            item.value.emplace(*static_cast<const T*>(FixedValueAt(index)));
+            set_value(FixedValueAt(index, state));
         }
+        item.is_valid = state.is_valid;
+        item.data_skipped = state.data_skipped;
         return item;
+    }
+
+    bool
+    PrepareValue(int64_t index, TakeItemState& state) const {
+        state = PrepareItem(index, /*read_data=*/true);
+        return state.is_valid && !state.data_skipped;
     }
 
     void
@@ -434,29 +479,38 @@ class TakeResult {
     virtual TakeItemState
     PrepareItem(int64_t index, bool read_data) const = 0;
 
+    // Data reads fill state without accessing null or skipped payloads.
     virtual const void*
-    FixedValueAt(int64_t index) const = 0;
+    FixedValueAt(int64_t index, TakeItemState& state) const = 0;
 
     virtual std::string_view
-    StringViewAt(int64_t index) const = 0;
+    StringViewAt(int64_t index, TakeItemState& state) const = 0;
 
-    virtual Json
-    JsonAt(int64_t index) const = 0;
+    virtual std::string_view
+    JsonViewAt(int64_t index, TakeItemState& state) const = 0;
 
     virtual ArrayView
-    ArrayAt(int64_t index) const = 0;
+    ArrayAt(int64_t index, TakeItemState& state) const = 0;
 
     virtual ArrayValueView
-    ArrayValueAt(int64_t) const {
+    ArrayValueAt(int64_t, TakeItemState&) const {
         ThrowInfo(ErrorCode::Unsupported,
                   "take result does not contain recursive ARRAY values");
     }
 
     virtual VectorArrayView
-    VectorArrayAt(int64_t) const {
+    VectorArrayAt(int64_t, TakeItemState&) const {
         ThrowInfo(ErrorCode::Unsupported,
                   "take result does not contain VECTOR_ARRAY values");
     }
+};
+
+enum class TakePinPolicy {
+    // Raw reuses the current Cell pin; Vortex pins each file's decode working set.
+    CurrentCell,
+    // Pin all requested source Cells before reading. Borrowed results retain
+    // pins until destruction; owned decoding may release them when complete.
+    Batch,
 };
 
 struct TakeOptions {
@@ -465,6 +519,11 @@ struct TakeOptions {
     // Backend-neutral filter binding. Physical Cell/file planning and skip
     // decisions remain inside the Column implementation.
     detail::ColumnFilterPtr filter;
+    // Source pin strategy; owned results are independent of source pins.
+    TakePinPolicy pin_policy = TakePinPolicy::CurrentCell;
+    // Borrow the executor's candidate selection; excluded positions require
+    // neither data nor validity. This is independent of the Cell data filter.
+    const TargetBitmap* candidate_mask = nullptr;
 };
 
 enum class ScanReadMode {
@@ -475,6 +534,9 @@ enum class ScanReadMode {
     ValidityOnly,
 };
 
+// TODO(local-format): Phase 2 will guarantee borrowed views only until the next
+// Next()/Seek() or cursor destruction, regardless of backend/pin policy. Longer
+// use requires owned data, not reliance on incidental pin retention.
 class ScanCursor {
  public:
     virtual ~ScanCursor() = default;
@@ -490,12 +552,18 @@ class ScanCursor {
     virtual void
     Seek(int64_t position) = 0;
 
-    // Return at most one dense batch beginning exactly at Position(). The
-    // returned size may be smaller than length at a Cell, file, reader, or
-    // ownership boundary, but must never exceed length. A zero-length request
-    // returns false. Under CursorOwned, consume the borrowed batch before the
-    // next Next()/Seek(); under ResultOwned, its views remain valid while the
+    // Data scans return at most one dense batch beginning exactly at
+    // Position(). The returned size may be smaller than length at a Cell,
+    // file, reader, or ownership boundary, but must never exceed length.
+    // Under CursorOwned, consume the borrowed data batch before the next
+    // Next()/Seek(); under ResultOwned, its views remain valid while the
     // returned batch owner remains alive.
+    //
+    // Row-id scans consume the complete requested source range in one call and
+    // return one sparse payload. They return true even when no row matches;
+    // ScanBatch::size is then the row_ids count rather than consumed rows.
+    //
+    // A zero-length request returns false.
     virtual bool
     Next(int64_t length, ScanReadMode read_mode, ScanBatch* out) = 0;
 };
@@ -507,6 +575,17 @@ enum class ScanPinPolicy {
     // The cursor owns the physical Cell pin. A returned batch is borrowed and
     // must be consumed before the next Next()/Seek() call.
     CursorOwned,
+};
+
+enum class ScanOutput {
+    RowIds,
+    Data,
+};
+
+enum class ScanPredicate {
+    None,
+    Unary,
+    BinaryRange,
 };
 
 struct ScanOptions {
@@ -530,6 +609,38 @@ struct ScanOptions {
         return ScanOptions(start_offset, target_type, pin_policy, prefetch);
     }
 
+    static ScanOptions
+    ForUnary(int64_t start_offset,
+             proto::plan::OpType op_type,
+             const proto::plan::GenericValue& value,
+             ScanPinPolicy pin_policy = ScanPinPolicy::ResultOwned) {
+        ScanOptions options(start_offset, TargetType::None, pin_policy);
+        options.output = ScanOutput::RowIds;
+        options.predicate = ScanPredicate::Unary;
+        options.op_type = op_type;
+        options.value = value;
+        return options;
+    }
+
+    static ScanOptions
+    ForBinaryRange(int64_t start_offset,
+                   const proto::plan::GenericValue& lower_value,
+                   bool lower_inclusive,
+                   const proto::plan::GenericValue& upper_value,
+                   bool upper_inclusive,
+                   ScanPinPolicy pin_policy = ScanPinPolicy::ResultOwned) {
+        ScanOptions options(start_offset, TargetType::None, pin_policy);
+        options.output = ScanOutput::RowIds;
+        options.predicate = ScanPredicate::BinaryRange;
+        options.lower_value = lower_value;
+        options.upper_value = upper_value;
+        options.lower_inclusive = lower_inclusive;
+        options.upper_inclusive = upper_inclusive;
+        return options;
+    }
+
+    ScanOutput output = ScanOutput::Data;
+    ScanPredicate predicate = ScanPredicate::None;
     int64_t start_offset = 0;
     TargetType target_type = TargetType::None;
     ScanPinPolicy pin_policy = ScanPinPolicy::ResultOwned;
@@ -539,6 +650,12 @@ struct ScanOptions {
     // together so tiered-storage I/O stays parallel.
     bool prefetch = false;
     detail::ColumnFilterPtr filter;
+    proto::plan::OpType op_type = proto::plan::OpType::Invalid;
+    proto::plan::GenericValue value;
+    proto::plan::GenericValue lower_value;
+    proto::plan::GenericValue upper_value;
+    bool lower_inclusive = false;
+    bool upper_inclusive = false;
 };
 
 using ScanResult = std::unique_ptr<ScanCursor>;

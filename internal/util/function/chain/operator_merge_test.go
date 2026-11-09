@@ -1086,7 +1086,7 @@ func (s *MergeHelperTestSuite) TestMergeWithEmptyChunk() {
 	op := NewMergeOp(MergeStrategyRRF, WithNormalize(false))
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
 
-	result, err := op.Execute(ctx, df)
+	result, err := op.ExecuteMulti(ctx, []*DataFrame{df})
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -1133,7 +1133,7 @@ func (s *MergeHelperTestSuite) TestMergeWithEmptyChunkVarCharIDs() {
 	op := NewMergeOp(MergeStrategyRRF, WithNormalize(false))
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
 
-	result, err := op.Execute(ctx, df)
+	result, err := op.ExecuteMulti(ctx, []*DataFrame{df})
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -1182,7 +1182,7 @@ func (s *MergeHelperTestSuite) TestSingleInputRRFProducesRankBasedScores() {
 	op := NewMergeOp(MergeStrategyRRF, WithNormalize(false))
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
 
-	result, err := op.Execute(ctx, df)
+	result, err := op.ExecuteMulti(ctx, []*DataFrame{df})
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -1204,7 +1204,7 @@ func (s *MergeHelperTestSuite) TestSingleInputWeightedAppliesWeight() {
 		WithMetricTypes([]string{"COSINE"}))
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
 
-	result, err := op.Execute(ctx, df)
+	result, err := op.ExecuteMulti(ctx, []*DataFrame{df})
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -1225,7 +1225,7 @@ func (s *MergeHelperTestSuite) TestSingleInputRRFIgnoresOriginalScores() {
 	op := NewMergeOp(MergeStrategyRRF, WithNormalize(true))
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
 
-	result, err := op.Execute(ctx, df)
+	result, err := op.ExecuteMulti(ctx, []*DataFrame{df})
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -1388,7 +1388,7 @@ func (s *MergeHelperTestSuite) TestSingleInputWeightedScoreNotFloat32() {
 		WithMetricTypes([]string{"COSINE"}))
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
 
-	_, err = op.Execute(ctx, df)
+	_, err = op.ExecuteMulti(ctx, []*DataFrame{df})
 	s.Error(err)
 	s.Contains(err.Error(), "not Float32")
 }
@@ -1636,7 +1636,7 @@ func (s *MergeHelperTestSuite) TestMergeRuntimeInputCountMismatch() {
 	op := NewMergeOp(MergeStrategyRRF, withExpectedInputs(2))
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
 
-	_, err := op.Execute(ctx, df)
+	_, err := op.ExecuteMulti(ctx, []*DataFrame{df})
 	s.Error(err)
 	s.Contains(err.Error(), "input count 1 != expected count 2")
 }
@@ -1685,7 +1685,7 @@ func (s *MergeHelperTestSuite) TestMergeRejectsNoQueryChunks() {
 	op := NewMergeOp(MergeStrategyRRF)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
 
-	_, err := op.Execute(ctx, df)
+	_, err := op.ExecuteMulti(ctx, []*DataFrame{df})
 	s.Error(err)
 	s.Contains(err.Error(), "no query chunks")
 }
@@ -1715,7 +1715,7 @@ func (s *MergeHelperTestSuite) TestMergeRejectsNullID() {
 
 	op := NewMergeOp(MergeStrategyRRF)
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	_, err := op.Execute(ctx, df)
+	_, err := op.ExecuteMulti(ctx, []*DataFrame{df})
 	s.Error(err)
 	s.Contains(err.Error(), "$id has null")
 	s.True(errors.Is(err, merr.ErrFunctionFailed))
@@ -1728,7 +1728,7 @@ func (s *MergeHelperTestSuite) TestMergeRejectsMisalignedSystemColumn() {
 
 	op := NewMergeOp(MergeStrategyWeighted, WithWeights([]float64{1}))
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	_, err := op.Execute(ctx, df)
+	_, err := op.ExecuteMulti(ctx, []*DataFrame{df})
 	s.Error(err)
 	s.Contains(err.Error(), "$id has 1 rows, expected 2")
 }
@@ -1895,7 +1895,7 @@ func (s *MergeHelperTestSuite) TestMergeRejectsInvalidElementColumn() {
 		df := builder.Build()
 		defer df.Release()
 
-		_, err := op.Execute(ctx, df)
+		_, err := op.ExecuteMulti(ctx, []*DataFrame{df})
 		s.Error(err)
 		s.Contains(err.Error(), "$element_indices is not Int32")
 	})
@@ -1913,7 +1913,7 @@ func (s *MergeHelperTestSuite) TestMergeRejectsInvalidElementColumn() {
 		df := builder.Build()
 		defer df.Release()
 
-		_, err := op.Execute(ctx, df)
+		_, err := op.ExecuteMulti(ctx, []*DataFrame{df})
 		s.Error(err)
 		s.Contains(err.Error(), "$element_indices has null")
 	})
@@ -1934,7 +1934,7 @@ func (s *MergeHelperTestSuite) TestMergeRejectsNullScore() {
 
 	op := NewMergeOp(MergeStrategyWeighted, WithWeights([]float64{1}))
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	_, err := op.Execute(ctx, df)
+	_, err := op.ExecuteMulti(ctx, []*DataFrame{df})
 	s.Error(err)
 	s.Contains(err.Error(), "$score has null")
 }
@@ -1944,7 +1944,7 @@ func (s *MergeHelperTestSuite) TestMergeRejectsMalformedInputLayouts() {
 		df := s.createDF([]int64{1}, []float32{0.5}, []int64{1})
 		defer df.Release()
 
-		_, err := NewMergeOp(MergeStrategyRRF).Execute(nil, df)
+		_, err := NewMergeOp(MergeStrategyRRF).ExecuteMulti(nil, []*DataFrame{df})
 		s.ErrorContains(err, "function context is nil")
 		s.True(errors.Is(err, merr.ErrServiceInternal))
 	})
@@ -1965,7 +1965,7 @@ func (s *MergeHelperTestSuite) TestMergeRejectsMalformedInputLayouts() {
 		df.chunkSizes = []int64{1, 0}
 		ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
 
-		_, err := NewMergeOp(MergeStrategyRRF).Execute(ctx, df)
+		_, err := NewMergeOp(MergeStrategyRRF).ExecuteMulti(ctx, []*DataFrame{df})
 		s.ErrorContains(err, "column $id has 1 chunks, expected 2")
 	})
 
@@ -1985,7 +1985,7 @@ func (s *MergeHelperTestSuite) TestMergeRejectsMalformedInputLayouts() {
 		defer df.Release()
 		ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
 
-		_, err := NewMergeOp(MergeStrategyWeighted, WithWeights([]float64{1})).Execute(ctx, df)
+		_, err := NewMergeOp(MergeStrategyWeighted, WithWeights([]float64{1})).ExecuteMulti(ctx, []*DataFrame{df})
 		s.ErrorContains(err, "column $score has 1 chunks, expected 2")
 	})
 
@@ -2005,7 +2005,7 @@ func (s *MergeHelperTestSuite) TestMergeRejectsMalformedInputLayouts() {
 		defer df.Release()
 		ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
 
-		_, err := NewMergeOp(MergeStrategyRRF).Execute(ctx, df)
+		_, err := NewMergeOp(MergeStrategyRRF).ExecuteMulti(ctx, []*DataFrame{df})
 		s.ErrorContains(err, "column $element_indices has 1 chunks, expected 2")
 	})
 
@@ -2019,7 +2019,7 @@ func (s *MergeHelperTestSuite) TestMergeRejectsMalformedInputLayouts() {
 		defer df.Release()
 		ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
 
-		_, err := NewMergeOp(MergeStrategyRRF).Execute(ctx, df)
+		_, err := NewMergeOp(MergeStrategyRRF).ExecuteMulti(ctx, []*DataFrame{df})
 		s.ErrorContains(err, "column $id has unsupported type")
 	})
 
@@ -2036,7 +2036,7 @@ func (s *MergeHelperTestSuite) TestMergeRejectsMalformedInputLayouts() {
 		defer df.Release()
 		ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
 
-		_, err := NewMergeOp(MergeStrategyWeighted, WithWeights([]float64{1})).Execute(ctx, df)
+		_, err := NewMergeOp(MergeStrategyWeighted, WithWeights([]float64{1})).ExecuteMulti(ctx, []*DataFrame{df})
 		s.ErrorContains(err, "column $score has 0 rows, expected 1")
 	})
 
@@ -2053,7 +2053,7 @@ func (s *MergeHelperTestSuite) TestMergeRejectsMalformedInputLayouts() {
 		defer df.Release()
 		ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
 
-		_, err := NewMergeOp(MergeStrategyRRF).Execute(ctx, df)
+		_, err := NewMergeOp(MergeStrategyRRF).ExecuteMulti(ctx, []*DataFrame{df})
 		s.ErrorContains(err, "column $element_indices has 0 rows, expected 1")
 	})
 }
@@ -2110,7 +2110,7 @@ func (s *MergeHelperTestSuite) TestMergeRejectsMalformedPassThroughFields() {
 		df := builder.Build()
 		defer df.Release()
 
-		_, err := NewMergeOp(MergeStrategyRRF).Execute(ctx, df)
+		_, err := NewMergeOp(MergeStrategyRRF).ExecuteMulti(ctx, []*DataFrame{df})
 		s.ErrorContains(err, "column payload missing chunk 1")
 		s.True(errors.Is(err, merr.ErrFunctionFailed))
 	})
@@ -2131,7 +2131,7 @@ func (s *MergeHelperTestSuite) TestMergeRejectsMalformedPassThroughFields() {
 		df := builder.Build()
 		defer df.Release()
 
-		_, err := NewMergeOp(MergeStrategyRRF).Execute(ctx, df)
+		_, err := NewMergeOp(MergeStrategyRRF).ExecuteMulti(ctx, []*DataFrame{df})
 		s.ErrorContains(err, "column payload has no row 0")
 		s.True(errors.Is(err, merr.ErrFunctionFailed))
 	})
@@ -2333,7 +2333,7 @@ func (s *MergeHelperTestSuite) TestMergeOpExecuteSingleInput() {
 	op := NewMergeOp(MergeStrategyRRF, WithNormalize(false))
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
 
-	result, err := op.Execute(ctx, df)
+	result, err := op.ExecuteMulti(ctx, []*DataFrame{df})
 	s.Require().NoError(err)
 	defer result.Release()
 

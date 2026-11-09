@@ -12,8 +12,8 @@
 
 #include "common/protobuf_utils.h"
 #include "gtest/gtest.h"
-#include "index/json_stats/parquet_writer.h"
-#include "index/json_stats/utils.h"
+#include "segcore/json_stats/parquet_writer.h"
+#include "segcore/json_stats/utils.h"
 #include "segcore/default_fs.h"
 #include "storage/StatusToErrorCode.h"
 #include "test_utils/Constants.h"

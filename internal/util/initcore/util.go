@@ -23,11 +23,14 @@ package initcore
 #include <stdint.h>
 #include <stdbool.h>
 #include "common/init_c.h"
+#include "storage/storage_c.h"
 */
 import "C"
 
 import (
 	"context"
+	"math"
+	"strconv"
 	"strings"
 	"sync"
 	"unsafe"
@@ -121,79 +124,77 @@ func UpdateExprResCacheConfig() {
 		C.int64_t(params.QueryNodeCfg.ExprResCacheMinEvalDurationUs.GetAsInt64()))
 }
 
-func UpdateArrowIOThreadPoolCapacity(threads int) {
-	C.SetArrowIOThreadPoolCapacity(C.int(threads))
-}
-
-// defaultArrowIOThreadPoolCapacity is the pool size used when
-// common.arrow.ioThreadPoolCoefficient is 0.
 const defaultArrowIOThreadPoolCapacity = 8
 
-// ResolveArrowIOThreadPoolCapacity returns the effective arrow IO thread pool
-// size: coefficient × CPU cores, clamped by MaxCapacity when > 0. A zero
-// coefficient returns defaultArrowIOThreadPoolCapacity. A negative coefficient
-// returns an error.
-func ResolveArrowIOThreadPoolCapacity() (int, error) {
-	cfg := &paramtable.Get().CommonCfg
-	coef := cfg.ArrowIOThreadPoolCoefficient.GetAsFloat()
-	if coef < 0 {
-		return 0, merr.WrapErrParameterInvalidMsg("invalid %s %v: must be >= 0", cfg.ArrowIOThreadPoolCoefficient.Key, coef)
+func resolveArrowThreadPoolCapacity(coefficient, maxCapacity *paramtable.ParamItem, defaultCapacity int) (int, error) {
+	coef, err := strconv.ParseFloat(coefficient.GetValue(), 64)
+	if err != nil || math.IsNaN(coef) || math.IsInf(coef, 0) || coef < 0 {
+		return 0, merr.WrapErrParameterInvalidMsg("%s must be finite and nonnegative, got %q", coefficient.Key, coefficient.GetValue())
+	}
+	maxCap, err := strconv.ParseInt(maxCapacity.GetValue(), 10, 32)
+	if err != nil || maxCap < 0 {
+		return 0, merr.WrapErrParameterInvalidMsg("%s must be a nonnegative int32, got %q", maxCapacity.Key, maxCapacity.GetValue())
 	}
 	if coef == 0 {
-		return defaultArrowIOThreadPoolCapacity, nil
+		return defaultCapacity, nil
 	}
-	threads := int(coef * float64(hardware.GetCPUNum()))
-	if threads < 1 {
-		threads = 1
+	threads := math.Max(1, coef*float64(hardware.GetCPUNum()))
+	if maxCap > 0 {
+		threads = math.Min(threads, float64(maxCap))
 	}
-	if maxCap := cfg.ArrowIOThreadPoolMaxCapacity.GetAsInt(); maxCap > 0 && threads > maxCap {
-		threads = maxCap
+	// Arrow takes int while the storage interface takes uint32. Validate
+	// before either conversion so an oversized config cannot wrap around.
+	if threads > math.MaxInt32 {
+		return 0, merr.WrapErrParameterInvalidMsg("%s resolves to more than %d threads", coefficient.Key, math.MaxInt32)
 	}
-	return threads, nil
+	return int(threads), nil
 }
 
-// ApplyArrowIOThreadPoolCapacity resolves the configured capacity and applies
-// it to arrow's IO thread pool. Invalid config is logged and the pool is left
-// unchanged. `source` and `trigger` are included in the log entry.
-func ApplyArrowIOThreadPoolCapacity(source, trigger string) {
-	threads, err := ResolveArrowIOThreadPoolCapacity()
-	if err != nil {
-		mlog.Warn(context.TODO(), "ignore invalid arrow io thread pool config",
-			mlog.String("source", source),
-			mlog.String("trigger", trigger),
-			mlog.String("error", err.Error()))
-		return
-	}
-	UpdateArrowIOThreadPoolCapacity(threads)
-	mlog.Info(context.TODO(), "arrow io thread pool capacity updated",
-		mlog.String("source", source),
-		mlog.String("trigger", trigger),
-		mlog.Int("threads", threads))
+// ResolveArrowCPUThreadPoolCapacity also determines the storage Tokio worker count.
+func ResolveArrowCPUThreadPoolCapacity() (int, error) {
+	cfg := &paramtable.Get().CommonCfg
+	return resolveArrowThreadPoolCapacity(&cfg.ArrowCPUThreadPoolCoefficient, &cfg.ArrowCPUThreadPoolMaxCapacity, max(1, hardware.GetCPUNum()))
 }
 
-// RegisterArrowIOThreadPoolWatchers wires hot-reload of arrow IO pool capacity
-// to paramtable updates on the two coefficient/maxCapacity keys.
-func RegisterArrowIOThreadPoolWatchers(pt *paramtable.ComponentParam, source string) {
-	handler := func(key string) func(*config.Event) {
-		return func(evt *config.Event) {
-			if !evt.HasUpdated {
-				return
-			}
-			ApplyArrowIOThreadPoolCapacity(source, key)
+// ResolveArrowIOThreadPoolCapacity also determines the storage Tokio blocking-thread limit.
+func ResolveArrowIOThreadPoolCapacity() (int, error) {
+	cfg := &paramtable.Get().CommonCfg
+	return resolveArrowThreadPoolCapacity(&cfg.ArrowIOThreadPoolCoefficient, &cfg.ArrowIOThreadPoolMaxCapacity, defaultArrowIOThreadPoolCapacity)
+}
+
+var (
+	initStorageRuntimeOnce sync.Once
+	initStorageRuntimeErr  error
+)
+
+// InitStorageRuntime configures Arrow and Tokio before any component uses storage.
+// Standalone components share the runtime, including the first initialization error:
+// a failed initialization must never look successful to a later component.
+func InitStorageRuntime() error {
+	initStorageRuntimeOnce.Do(func() {
+		cpuThreads, err := ResolveArrowCPUThreadPoolCapacity()
+		if err != nil {
+			initStorageRuntimeErr = err
+			return
 		}
-	}
-	pt.Watch(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key,
-		config.NewHandler(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key,
-			handler(pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key)))
-	pt.Watch(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key,
-		config.NewHandler(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key,
-			handler(pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key)))
+		ioThreads, err := ResolveArrowIOThreadPoolCapacity()
+		if err != nil {
+			initStorageRuntimeErr = err
+			return
+		}
+		status := C.InitStorageRuntime(C.int(cpuThreads), C.int(ioThreads))
+		initStorageRuntimeErr = HandleCStatus(&status, "configure storage runtime failed")
+		if initStorageRuntimeErr == nil {
+			mlog.Info(context.TODO(), "storage runtime configured",
+				mlog.Int("cpuThreads", cpuThreads), mlog.Int("ioThreads", ioThreads))
+		}
+	})
+	return initStorageRuntimeErr
 }
 
 // RegisterArrowReaderConfigWatchers wires hot-reload of arrow parquet reader
 // range-coalescing limits to paramtable updates on the two hole/range size
-// keys. `source` is included in the log entry for the same reason as in
-// RegisterArrowIOThreadPoolWatchers.
+// keys. `source` identifies the component in the log entry.
 func RegisterArrowReaderConfigWatchers(pt *paramtable.ComponentParam, source string) {
 	handler := func(evt *config.Event) {
 		if !evt.HasUpdated {
@@ -218,7 +219,7 @@ func RegisterArrowReaderConfigWatchers(pt *paramtable.ComponentParam, source str
 // RegisterLoonReaderConfigWatchers wires hot-reload of the milvus-storage
 // reader thread pool size and the index-build read window. `source` is
 // included in the log entry for the same reason as in
-// RegisterArrowIOThreadPoolWatchers. Note the thread pool cannot be
+// RegisterArrowReaderConfigWatchers. Note the thread pool cannot be
 // destroyed once created — updating the size to 0 leaves the current pool
 // unchanged.
 func RegisterLoonReaderConfigWatchers(pt *paramtable.ComponentParam, source string) {

@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // =============================================================================
@@ -551,4 +552,26 @@ func (s *DecayExprTestSuite) TestDecaySymmetric() {
 	r1 = linearDecay(100, 50, 0.5, 0, 150)
 	r2 = linearDecay(100, 50, 0.5, 0, 50)
 	s.InDelta(r1, r2, 0.001)
+}
+
+func (s *DecayExprTestSuite) TestNonFiniteParams() {
+	for _, name := range []string{"origin", "scale", "offset", "decay"} {
+		for _, value := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+			s.Run(name+"/"+doubleParam(value).String(), func() {
+				params := map[string]*schemapb.FunctionParamValue{
+					"function": stringParam("gauss"),
+					"origin":   doubleParam(0), "scale": doubleParam(1),
+					"offset": doubleParam(0), "decay": doubleParam(0.5),
+				}
+				params[name] = doubleParam(value)
+				_, err := NewDecayExprFromParams(types.FunctionBuildContext{}, types.FunctionConfig{Params: params})
+				s.Require().ErrorIs(err, merr.ErrParameterInvalid)
+				status := merr.Status(err)
+				s.Equal(int32(1100), status.Code)
+				s.False(status.Retriable)
+				s.Equal("true", status.ExtraInfo[merr.InputErrorFlagKey])
+				s.Contains(status.Reason, name+" must be finite")
+			})
+		}
+	}
 }

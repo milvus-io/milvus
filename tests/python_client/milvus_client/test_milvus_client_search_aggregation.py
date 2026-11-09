@@ -56,6 +56,14 @@ class TestSearchAggregation(TestMilvusClientV2Base):
     @pytest.fixture(scope="class", autouse=True)
     def prepare_collection(self, request):
         client = self._client(alias=self.shared_alias)
+        self._prepare_aggregation_collection(client, self.collection_name, self._rows(), force_teardown=False)
+
+        def teardown():
+            self.drop_collection(self._client(alias=self.shared_alias), self.collection_name)
+
+        request.addfinalizer(teardown)
+
+    def _prepare_aggregation_collection(self, client, collection_name, rows, force_teardown=True):
         schema = self.create_schema(client, enable_dynamic_field=False)[0]
         schema.add_field(field_name=self.primary_field, datatype=DataType.INT64, is_primary=True)
         schema.add_field(field_name=self.vector_field, datatype=DataType.FLOAT_VECTOR, dim=self.dim, nullable=True)
@@ -69,19 +77,14 @@ class TestSearchAggregation(TestMilvusClientV2Base):
         schema.add_field(field_name=self.rating_field, datatype=DataType.DOUBLE, nullable=True)
         schema.add_field(field_name=self.in_stock_field, datatype=DataType.BOOL, nullable=True)
 
-        self.create_collection(client, self.collection_name, schema=schema, force_teardown=False)
-        self.insert(client, self.collection_name, data=self._rows())
-        self.flush(client, self.collection_name)
+        self.create_collection(client, collection_name, schema=schema, force_teardown=force_teardown)
+        self.insert(client, collection_name, data=rows)
+        self.flush(client, collection_name)
 
         index_params = self.prepare_index_params(client)[0]
         index_params.add_index(field_name=self.vector_field, index_type="FLAT", metric_type=self.metric_type)
-        self.create_index(client, self.collection_name, index_params=index_params)
-        self.load_collection(client, self.collection_name)
-
-        def teardown():
-            self.drop_collection(self._client(alias=self.shared_alias), self.collection_name)
-
-        request.addfinalizer(teardown)
+        self.create_index(client, collection_name, index_params=index_params)
+        self.load_collection(client, collection_name)
 
     def _rows(self):
         brands = ["brand_a", "brand_b", "brand_c", "brand_d"]
@@ -1006,20 +1009,48 @@ class TestSearchAggregation(TestMilvusClientV2Base):
             assert bucket.metrics["doc_count"] == bucket.count
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_search_aggregation_two_level_nested_with_filter(self):
+    @pytest.mark.parametrize(
+        "candidate_categories",
+        [
+            pytest.param(["cat_a", "cat_a", "cat_b", "cat_b"], id="two_parent_buckets"),
+            pytest.param(["cat_c"] * 4, id="one_parent_bucket"),
+        ],
+    )
+    def test_search_aggregation_two_level_nested_with_filter(self, candidate_categories):
         """
         target: verify two-level search_aggregation with filter, parent buckets, child buckets, metrics, and top_hits.
-        method: 1. search with filter in_stock == true and category -> brand nested aggregation
-                2. verify field names, parent/child key consistency, top_hits sort rules, and filter effectiveness
-                3. verify child avg_rating metrics from returned hits when child count equals hit count
+        method: 1. construct vectors whose four nearest composite keys span one or two categories
+                2. search with the in_stock filter and category -> brand nested aggregation
+                3. verify parent count, field names, bucket keys, top_hits sorting, and filter effectiveness
+                4. verify child avg_rating metrics from returned hits when child count equals hit count
         expected: all returned hits satisfy the filter and match their parent/child bucket keys with consistent metrics.
         """
         nq = 2
         client = self._client(alias=self.shared_alias)
+        collection_name = cf.gen_collection_name_by_testcase_name()
+        nearest_groups = list(zip(candidate_categories, ["brand_a", "brand_b", "brand_c", "brand_d"]))
+        rows = self._rows()
+        for row in rows:
+            if row[self.vector_field] is None:
+                continue
+            group = (row[self.category_field], row[self.brand_field])
+            distance = nearest_groups.index(group) + 1 if group in nearest_groups else 10
+            # Out-of-stock rows are closer than every eligible row, so omitting
+            # the filter changes the selected hits. Keep ranks unique within a key.
+            if row[self.in_stock_field] is not True:
+                distance = 0
+            # Similarity ranks rows in reverse price order, exercising the child
+            # top_hits price sort independently of the parent similarity sort.
+            offset = (self.nb - row[self.primary_field]) / self.nb / 10
+            row[self.vector_field] = [distance + offset] + [0.0] * (self.dim - 1)
+        self._prepare_aggregation_collection(client, collection_name, rows)
+
+        # Both queries rank positive first coordinates in the same order. The
+        # four candidate keys are fixed; parent size=2 does not require two parents.
         res, _ = self.search(
             client,
-            self.collection_name,
-            data=self._query_vectors(),
+            collection_name,
+            data=[[0.0] * self.dim, [-1.0] + [0.0] * (self.dim - 1)],
             anns_field=self.vector_field,
             search_params=self._search_params(),
             limit=ct.default_limit,
@@ -1052,15 +1083,19 @@ class TestSearchAggregation(TestMilvusClientV2Base):
 
         assert len(res.agg_buckets) == nq
         for buckets in res.agg_buckets:
-            assert len(buckets) == 2
+            assert len(buckets) == len(set(candidate_categories))
+            assert {self._key_value(bucket, self.category_field) for bucket in buckets} == set(candidate_categories)
             total_prices = [bucket.metrics["total_price"] for bucket in buckets]
             assert total_prices == sorted(total_prices, reverse=True)
             for bucket in buckets:
                 category = self._key_value(bucket, self.category_field)
                 assert [entry["field_name"] for entry in bucket.key] == [self.category_field]
+                assert bucket.count == 2 * candidate_categories.count(category)
                 assert bucket.metrics["item_count"] == bucket.count
                 assert len(bucket.hits) == 2
-                assert 1 <= len(bucket.sub_groups) <= 2
+                assert len(bucket.sub_groups) == 2
+                avg_ratings = [sub_bucket.metrics["avg_rating"] for sub_bucket in bucket.sub_groups]
+                assert avg_ratings == sorted(avg_ratings, reverse=True)
                 self._assert_scores_ascending(bucket.hits)
                 for hit in bucket.hits:
                     assert hit.fields[self.category_field] == category
@@ -1068,6 +1103,7 @@ class TestSearchAggregation(TestMilvusClientV2Base):
 
                 for sub_bucket in bucket.sub_groups:
                     brand = self._key_value(sub_bucket, self.brand_field)
+                    assert (category, brand) in nearest_groups
                     assert [entry["field_name"] for entry in sub_bucket.key] == [self.brand_field]
                     self._assert_hit_prices_ascending(sub_bucket.hits)
                     for hit in sub_bucket.hits:

@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <memory>
 #include <gtest/gtest.h>
 #include "exec/QueryContext.h"
 #include "exec/expression/Expr.h"
@@ -140,7 +141,7 @@ TEST(PhysicalTime, TTLFilterWithPhysicalTime) {
         }
     }
 
-    auto insert_record_proto = std::make_unique<InsertRecordProto>();
+    auto insert_record_proto = std::make_shared<InsertRecordProto>();
     insert_record_proto->set_num_rows(test_data_count);
 
     {
@@ -170,7 +171,7 @@ TEST(PhysicalTime, TTLFilterWithPhysicalTime) {
                     test_data_count,
                     row_ids.data(),
                     ts_data.data(),
-                    insert_record_proto.get());
+                    insert_record_proto);
 
     uint64_t old_query_ts = base_ts + test_data_count;
     int64_t active_count = segment->get_active_count(old_query_ts);
@@ -251,7 +252,7 @@ TEST(PhysicalTime, StrongConsistencyScenario) {
         ttl_data[i] = expire_physical_us;  // All expire at same time
     }
 
-    auto insert_record_proto = std::make_unique<InsertRecordProto>();
+    auto insert_record_proto = std::make_shared<InsertRecordProto>();
     insert_record_proto->set_num_rows(test_data_count);
 
     {
@@ -281,7 +282,7 @@ TEST(PhysicalTime, StrongConsistencyScenario) {
                     test_data_count,
                     row_ids.data(),
                     ts_data.data(),
-                    insert_record_proto.get());
+                    insert_record_proto);
 
     uint64_t query_ts = insert_ts + test_data_count;
     int64_t active_count = segment->get_active_count(query_ts);
@@ -355,5 +356,33 @@ TEST(PhysicalTime, StrongConsistencyScenario) {
         }
         EXPECT_EQ(valid_count, 0)
             << "After expiration, all data should be filtered";
+    }
+}
+
+// Old and target QueryViews share physical columns but must retain independent
+// TTL semantics while an ALTER is preparing or an older query is draining.
+TEST(PhysicalTime, QueryViewReadSchemaControlsTTL) {
+    auto make_schema = [](bool ttl) {
+        auto schema = std::make_shared<Schema>();
+        auto pk = schema->AddDebugField("pk", DataType::INT64);
+        auto expiry = schema->AddDebugField("expiry", DataType::TIMESTAMPTZ);
+        schema->set_primary_field_id(pk);
+        if (ttl) {
+            schema->set_ttl_field_id(expiry);
+        }
+        return schema;
+    };
+    for (bool physical_ttl : {false, true}) {
+        auto physical_schema = make_schema(physical_ttl);
+        auto segment = CreateGrowingSegment(physical_schema, empty_index_meta);
+        auto* internal = dynamic_cast<SegmentInternalInterface*>(segment.get());
+        exec::QueryContext old_view("old", internal, 0, 100);
+        exec::QueryContext target_view("target", internal, 0, 100);
+        old_view.set_read_schema(make_schema(false));
+        target_view.set_read_schema(make_schema(true));
+        EXPECT_EQ(exec::CreateTTLFieldFilterExpression(&old_view), nullptr);
+        EXPECT_NE(exec::CreateTTLFieldFilterExpression(&target_view), nullptr);
+        EXPECT_EQ(physical_schema->get_ttl_field_id().has_value(),
+                  physical_ttl);
     }
 }

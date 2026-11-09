@@ -18,16 +18,21 @@ package httpserver
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -37,7 +42,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/proxy"
+	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
+	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -54,6 +64,130 @@ const (
 )
 
 var DefaultScores = []float32{0.01, 0.04, 0.09}
+
+func TestCheckLimiter_ZeroTokenRequestsBypassLimiter(t *testing.T) {
+	quotaConfig := &paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled
+	originalValue := quotaConfig.GetValue()
+	require.NoError(t, paramtable.Get().Save(quotaConfig.Key, "true"))
+	t.Cleanup(func() { _ = paramtable.Get().Save(quotaConfig.Key, originalValue) })
+
+	pxy := proxyComponentWithMetaCache{ProxyComponent: &proxy.Proxy{}, metaCache: &proxy.MetaCache{}}
+	// Exempt requests must work even when the limiter cannot be obtained.
+	getLimiter := mockey.Mock((*proxy.Proxy).GetRateLimiter).Return(nil, merr.ErrServiceNotReady).Build()
+	defer getLimiter.UnPatch()
+	getDatabase := mockey.Mock((*proxy.MetaCache).GetDatabaseInfo).Return(nil, merr.ErrServiceNotReady).Build()
+	defer getDatabase.UnPatch()
+	getCollection := mockey.Mock((*proxy.MetaCache).GetCollectionID).Return(int64(0), merr.ErrServiceNotReady).Build()
+	defer getCollection.UnPatch()
+
+	testCases := []struct {
+		name    string
+		request proto.Message
+	}{
+		{"create", &milvuspb.CreateSnapshotRequest{DbName: "db1", CollectionName: "source", Name: "snapshot"}},
+		{"drop", &milvuspb.DropSnapshotRequest{DbName: "db1", CollectionName: "source", Name: "snapshot"}},
+		{"pin", &milvuspb.PinSnapshotDataRequest{DbName: "db1", CollectionName: "source", Name: "snapshot"}},
+		{"unpin", &milvuspb.UnpinSnapshotDataRequest{PinId: 1}},
+		{"export", &milvuspb.ExportSnapshotRequest{DbName: "db1", CollectionName: "source", Name: "snapshot", TargetS3Path: "s3://bucket/export-root"}},
+		{"restore", &milvuspb.RestoreSnapshotRequest{DbName: "source_db", CollectionName: "source", Name: "snapshot", TargetDbName: "target_db", TargetCollectionName: "target"}},
+		{"restore without target database", &milvuspb.RestoreSnapshotRequest{DbName: "source_db", CollectionName: "source", Name: "snapshot", TargetCollectionName: "target"}},
+		{"external restore", &milvuspb.RestoreExternalSnapshotRequest{DbName: "target_db", TargetCollectionName: "target", SnapshotMetadataUri: "s3://bucket/export-root/snapshots/100/metadata/1.json"}},
+		{"list file resources", &milvuspb.ListFileResourcesRequest{}},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
+			before := make(map[string]float64)
+			for _, status := range []string{metrics.TotalLabel, metrics.SuccessLabel, metrics.FailLabel} {
+				before[status] = testutil.ToFloat64(metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, internalpb.RateType_DDLCollection.String(), status))
+			}
+
+			resp, err := CheckLimiter(context.Background(), tc.request, pxy)
+			require.NoError(t, err)
+			assert.Nil(t, resp)
+			assert.Zero(t, getLimiter.Times(), "zero-token requests must not obtain a limiter")
+			assert.Zero(t, getDatabase.Times(), "zero-token requests must not resolve database metadata")
+			assert.Zero(t, getCollection.Times(), "zero-token requests must not resolve collection metadata")
+			for status, value := range before {
+				assert.Equal(t, value, testutil.ToFloat64(metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, internalpb.RateType_DDLCollection.String(), status)), status)
+			}
+		})
+	}
+}
+
+func TestCheckLimiter_ChargedRequestsRemainRateLimited(t *testing.T) {
+	quotaConfig := &paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled
+	originalValue := quotaConfig.GetValue()
+	require.NoError(t, paramtable.Get().Save(quotaConfig.Key, "true"))
+	t.Cleanup(func() { _ = paramtable.Get().Save(quotaConfig.Key, originalValue) })
+
+	pxy := proxyComponentWithMetaCache{ProxyComponent: &proxy.Proxy{}, metaCache: &proxy.MetaCache{}}
+	limiter := &proxy.SimpleLimiter{}
+	getLimiter := mockey.Mock((*proxy.Proxy).GetRateLimiter).Return(limiter, nil).Build()
+	defer getLimiter.UnPatch()
+	var databaseName string
+	getDatabase := mockey.Mock((*proxy.MetaCache).GetDatabaseInfo).To(
+		func(_ *proxy.MetaCache, _ context.Context, name string) (*metacache.DatabaseInfo, error) {
+			databaseName = name
+			return &metacache.DatabaseInfo{DBID: 100}, nil
+		}).Build()
+	defer getDatabase.UnPatch()
+	getCollection := mockey.Mock((*proxy.MetaCache).GetCollectionID).Return(int64(10), nil).Build()
+	defer getCollection.UnPatch()
+	getPartition := mockey.Mock((*proxy.MetaCache).GetPartitionInfo).Return(&metacache.PartitionInfo{PartitionID: 20}, nil).Build()
+	defer getPartition.UnPatch()
+
+	insert := &milvuspb.InsertRequest{DbName: "target", CollectionName: "collection", PartitionName: "partition"}
+	testCases := []struct {
+		name     string
+		request  proto.Message
+		rateType internalpb.RateType
+		tokens   int
+	}{
+		{"create collection", &milvuspb.CreateCollectionRequest{DbName: "target", CollectionName: "collection"}, internalpb.RateType_DDLCollection, 1},
+		{"insert", insert, internalpb.RateType_DMLInsert, proto.Size(insert)},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, rejected := range []bool{false, true} {
+				t.Run(strconv.FormatBool(rejected), func(t *testing.T) {
+					check := mockey.Mock((*proxy.SimpleLimiter).Check).To(
+						func(_ *proxy.SimpleLimiter, dbID int64, _ map[int64][]int64, rt internalpb.RateType, n int) error {
+							assert.Equal(t, int64(100), dbID)
+							assert.Equal(t, tc.rateType, rt)
+							assert.Equal(t, tc.tokens, n)
+							if rejected {
+								return merr.ErrServiceQuotaExceeded
+							}
+							return nil
+						}).Build()
+					defer check.UnPatch()
+					nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
+					total := metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, tc.rateType.String(), metrics.TotalLabel)
+					success := metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, tc.rateType.String(), metrics.SuccessLabel)
+					fail := metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, tc.rateType.String(), metrics.FailLabel)
+					totalBefore, successBefore, failBefore := testutil.ToFloat64(total), testutil.ToFloat64(success), testutil.ToFloat64(fail)
+
+					resp, err := CheckLimiter(context.Background(), tc.request, pxy)
+					assert.EqualValues(t, 1, check.Times())
+					assert.Equal(t, "target", databaseName)
+					assert.Equal(t, totalBefore+1, testutil.ToFloat64(total))
+					if rejected {
+						require.ErrorIs(t, err, merr.ErrServiceQuotaExceeded)
+						assert.NotNil(t, resp)
+						assert.Equal(t, successBefore, testutil.ToFloat64(success))
+						assert.Equal(t, failBefore+1, testutil.ToFloat64(fail))
+					} else {
+						require.NoError(t, err)
+						assert.Nil(t, resp)
+						assert.Equal(t, successBefore+1, testutil.ToFloat64(success))
+						assert.Equal(t, failBefore, testutil.ToFloat64(fail))
+					}
+				})
+			}
+		})
+	}
+}
 
 func generatePrimaryField(datatype schemapb.DataType, autoID bool) *schemapb.FieldSchema {
 	return &schemapb.FieldSchema{
@@ -641,6 +775,49 @@ func TestPrimaryField(t *testing.T) {
 		values[primaryKeyTemplateVar].GetArrayVal().GetStringData().GetData())
 }
 
+func TestCheckAndSetDataDoesNotCopyWholeDataArray(t *testing.T) {
+	// One small row surrounded by a large amount of valid JSON whitespace
+	// isolates the cost of extracting data from row conversion allocations.
+	body := []byte(`{"data":[` + strings.Repeat(" ", 8<<20) + `{}]}`)
+	schema := &schemapb.CollectionSchema{}
+	_, _, err := checkAndSetData([]byte(`{"data":[{}]}`), schema, false)
+	require.NoError(t, err)
+
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	rows, _, err := checkAndSetData(body, schema, false)
+	runtime.ReadMemStats(&after)
+	runtime.KeepAlive(body)
+
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20),
+		"extracting one row should not copy the entire data array")
+}
+
+func TestSchemaForPathReplaceDoesNotCopyWholeDataArray(t *testing.T) {
+	body := []byte(`{"data":[` + strings.Repeat(" ", 8<<20) + `{}]}`)
+	schema := &schemapb.CollectionSchema{}
+	ops := []*schemapb.FieldPartialUpdateOp{{
+		FieldName: "metadata",
+		Op:        schemapb.FieldPartialUpdateOp_PATH_REPLACE,
+		Path:      "$.name",
+	}}
+
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	got, err := schemaForPathReplaceOperands(body, schema, ops)
+	runtime.ReadMemStats(&after)
+	runtime.KeepAlive(body)
+
+	require.NoError(t, err)
+	require.True(t, proto.Equal(schema, got))
+	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20),
+		"validating path-replace rows should not copy the entire data array")
+}
+
 func TestAnyToColumns(t *testing.T) {
 	t.Run("insert with dynamic field", func(t *testing.T) {
 		body := []byte("{\"data\": {\"id\": 0, \"book_id\": 1, \"book_intro\": [0.1, 0.2], \"word_count\": 2, \"classified\": false, \"databaseID\": null}}")
@@ -1085,6 +1262,39 @@ func TestAnyToColumns(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "does not has field fn_out")
 	})
+}
+
+func TestCheckAndSetDataRowTypes(t *testing.T) {
+	schema := &schemapb.CollectionSchema{}
+	for _, test := range []struct {
+		name     string
+		body     string
+		wantRows int
+		wantErr  bool
+		wantText string
+	}{
+		{name: "object rows", body: `{"data":[{},{}]}`, wantRows: 2},
+		{name: "singleton object for V1", body: `{"data":{}}`, wantRows: 1},
+		{name: "number row", body: `{"data":[0]}`, wantErr: true, wantText: "data[0] must be a JSON object"},
+		{name: "string row", body: `{"data":["row"]}`, wantErr: true, wantText: "data[0] must be a JSON object"},
+		{name: "null row", body: `{"data":[null]}`, wantErr: true, wantText: "data[0] must be a JSON object"},
+		{name: "nested array row", body: `{"data":[[]]}`, wantErr: true, wantText: "data[0] must be a JSON object"},
+		{name: "mixed rows", body: `{"data":[{},[]]}`, wantErr: true, wantText: "data[1] must be a JSON object"},
+		{name: "empty array", body: `{"data":[]}`, wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			rows, _, err := checkAndSetData([]byte(test.body), schema, false)
+			if test.wantErr {
+				require.Error(t, err)
+				if test.wantText != "" {
+					assert.Contains(t, err.Error(), test.wantText)
+				}
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, rows, test.wantRows)
+		})
+	}
 }
 
 func TestCheckAndSetData(t *testing.T) {
@@ -1988,7 +2198,7 @@ func TestSerialize(t *testing.T) {
 		{schemapb.DataType_Float16Vector, typeutil.Float32ArrayToFloat16Bytes, "\n\f\n\x02$0\x10e\x1a\x04\x1c/\x1c3"},
 		{schemapb.DataType_BFloat16Vector, typeutil.Float32ArrayToBFloat16Bytes, "\n\f\n\x02$0\x10e\x1a\x04\xe3=c>"},
 	} {
-		values, err = serializeFloatOrByteVectors(vectors, testcase.dataType, 2, testcase.serializeFunc)
+		values, err = serializeFloatOrByteVectors(vectors, testcase.dataType, 2, 4, testcase.serializeFunc)
 		assert.Nil(t, err)
 		placeholderValue := &commonpb.PlaceholderValue{
 			Tag:    "$0",
@@ -2392,14 +2602,13 @@ func TestResultErrMessage(t *testing.T) {
 		assert.Contains(t, msg, "geo")
 	})
 
-	// Being an InputError is not enough on its own: most ParameterInvalid errors
-	// on this path describe a server-side shape mismatch.
+	// Being an InputError is not enough on its own: only the mark makes a
+	// message safe to echo.
 	t.Run("unmarked input error is not echoed", func(t *testing.T) {
-		err := merr.WrapErrParameterInvalidMsg("field %s has %d valid rows, but data length is %d", "tags", 2, 1)
+		err := merr.WrapErrParameterInvalidMsg("nullable vector field %s requires valid_data", "tags")
 		msg := resultErrMessage(wrapOutputFieldErr("tags", err))
 		assert.Contains(t, msg, "tags")
-		assert.NotContains(t, msg, "valid rows")
-		assert.NotContains(t, msg, "data length")
+		assert.NotContains(t, msg, "valid_data")
 	})
 
 	t.Run("server fault names the field and nothing else", func(t *testing.T) {
@@ -2626,8 +2835,30 @@ func TestResultErrMessageFromRealProducers(t *testing.T) {
 		assert.Contains(t, resultErrMessage(err), "use other sdk please")
 	})
 
-	t.Run("unsupported primary key type is echoed", func(t *testing.T) {
-		_, err := buildQueryResp(0, nil, nil, &schemapb.IDs{}, nil, true, nil)
+	t.Run("ids without an id field are zero rows", func(t *testing.T) {
+		rows, err := buildQueryResp(0, nil, nil, &schemapb.IDs{}, []float32{}, true, nil)
+		require.NoError(t, err)
+		assert.Empty(t, rows)
+	})
+
+	t.Run("ids without an id field are rejected when rows are present", func(t *testing.T) {
+		_, err := buildQueryResp(0, []string{"ids"}, []*schemapb.FieldData{
+			{
+				Type:      schemapb.DataType_Int64,
+				FieldName: "ids",
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{7}}},
+					},
+				},
+			},
+		}, &schemapb.IDs{}, nil, true, nil)
+		require.Error(t, err)
+		assert.Contains(t, resultErrMessage(err), "use other sdk please")
+	})
+
+	t.Run("ids without an id field are rejected for a caller-supplied row count", func(t *testing.T) {
+		_, err := buildQueryResp(1, nil, nil, &schemapb.IDs{}, nil, true, nil)
 		require.Error(t, err)
 		assert.Contains(t, resultErrMessage(err), "use other sdk please")
 	})
@@ -5192,7 +5423,7 @@ func TestSchemaForPathReplaceOperandsMatchesPathScope(t *testing.T) {
 		name, path, operand, wantErr string
 		children                     int
 	}{
-		{"whole_missing_child", "[1]", `{"sub_int":18}`, "requires all struct children", 0},
+		{"whole_missing_child", "[1]", `{"sub_int":18}`, `PATH_REPLACE field "my_struct" element at [1] is missing sub-field "sub_vec", which is not element nullable`, 0},
 		{"whole_complete", "[1]", `{"sub_int":18,"sub_vec":[0.1,0.2,0.3,0.4]}`, "", 2},
 		{"child_exact", "[1][sub_int]", `{"sub_int":18}`, "", 1},
 		{"child_extra", "[1][sub_int]", `{"sub_int":18,"sub_vec":[0.1,0.2,0.3,0.4]}`, "exactly the selected child", 0},
@@ -5214,6 +5445,160 @@ func TestSchemaForPathReplaceOperandsMatchesPathScope(t *testing.T) {
 	}
 }
 
+// An [index] operand may omit element_nullable children. The request schema
+// leaves them out, so REST sends only the supplied children and Proxy fills a
+// null element for each omitted one, as for gRPC; see
+// TestPathReplaceSynthesizesOmittedNullableStructChild in internal/proxy/dml.
+func TestSchemaForPathReplaceOperandsOmitsElementNullableChildren(t *testing.T) {
+	ops := []*schemapb.FieldPartialUpdateOp{{FieldName: "clips", Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, Path: "[1]"}}
+	for _, tc := range []struct {
+		name, operand string
+		children      []string
+	}{
+		{"only non-nullable child", `{"score":5}`, []string{"score"}},
+		{"some nullable children", `{"score":5,"lang":"en","emb":null}`, []string{"lang", "score", "emb"}},
+		{"every child", `{"score":5,"lang":"en","emb":[0.1,0.2],"tags":["a"]}`, []string{"lang", "score", "emb", "tags"}},
+	} {
+		for _, nullable := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/nullable=%v", tc.name, nullable), func(t *testing.T) {
+				schema := buildElementNullableStructTestSchema(nullable)
+				body := []byte(`{"data":[{"id":1,"clips":[` + tc.operand + `]},{"id":2,"clips":[` + tc.operand + `]}]}`)
+				requestSchema, err := schemaForPathReplaceOperands(body, schema, ops)
+				require.NoError(t, err)
+				require.Len(t, schema.GetStructArrayFields()[0].GetFields(), 4, "collection schema must not be mutated")
+				got := make([]string, 0, len(tc.children))
+				for _, child := range requestSchema.GetStructArrayFields()[0].GetFields() {
+					got = append(got, subShortName(child))
+				}
+				require.Equal(t, tc.children, got)
+
+				rows, validData, err := checkAndSetData(body, requestSchema, true, ops...)
+				require.NoError(t, err)
+				fieldsData, err := anyToColumns(rows, validData, requestSchema, false, true)
+				require.NoError(t, err)
+				var structFD *schemapb.FieldData
+				for _, field := range fieldsData {
+					if field.GetFieldName() == "clips" {
+						structFD = field
+					}
+				}
+				require.NotNil(t, structFD)
+				// Omitted children are absent from the request, which is the shape
+				// Proxy needs to fill them with null elements.
+				require.Len(t, structFD.GetStructArrays().GetFields(), len(tc.children))
+				for _, name := range tc.children {
+					subFieldDataByName(t, structFD, name)
+				}
+				score := subFieldDataByName(t, structFD, "score").GetScalars().GetArrayData().GetData()
+				require.Len(t, score, 2)
+				for _, row := range score {
+					assert.Equal(t, []int64{5}, row.GetLongData().GetData())
+				}
+				if strings.Contains(tc.operand, `"emb":null`) {
+					emb := subFieldDataByName(t, structFD, "emb").GetVectors().GetVectorArray().GetData()
+					require.Len(t, emb, 2)
+					for _, row := range emb {
+						assert.Equal(t, []bool{false}, row.GetValidData())
+					}
+				}
+			})
+		}
+	}
+}
+
+// A nested Array child that is not element_nullable is a PATH_REPLACE operand
+// like any other child: REST encodes one inner Array per row, with the
+// validity of a nullable leaf on that inner Array, in the layout the proxy
+// insert validation accepts.
+func TestSchemaForPathReplaceOperandsNestedArrayChild(t *testing.T) {
+	newSchema := func() *schemapb.CollectionSchema {
+		schema := buildElementNullableStructTestSchema(false)
+		for _, child := range schema.GetStructArrayFields()[0].GetFields() {
+			if subShortName(child) == "tags" {
+				child.ElementNullable = false
+				child.GetTypeSchema().GetArrayElement().Nullable = false
+			}
+		}
+		return schema
+	}
+	for _, tc := range []struct {
+		name, path, operand string
+		children            []string
+	}{
+		{"nested child only", "[1][tags]", `{"tags":["x",null]}`, []string{"tags"}},
+		{"whole element", "[1]", `{"score":5,"tags":["x",null]}`, []string{"score", "tags"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := newSchema()
+			body := []byte(`{"data":[{"id":1,"clips":[` + tc.operand + `]},{"id":2,"clips":[` + tc.operand + `]}]}`)
+			ops := []*schemapb.FieldPartialUpdateOp{{FieldName: "clips", Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, Path: tc.path}}
+			requestSchema, err := schemaForPathReplaceOperands(body, schema, ops)
+			require.NoError(t, err)
+			got := make([]string, 0, len(tc.children))
+			for _, child := range requestSchema.GetStructArrayFields()[0].GetFields() {
+				got = append(got, subShortName(child))
+			}
+			require.ElementsMatch(t, tc.children, got)
+
+			rows, validData, err := checkAndSetData(body, requestSchema, true, ops...)
+			require.NoError(t, err)
+			fieldsData, err := anyToColumns(rows, validData, requestSchema, false, true)
+			require.NoError(t, err)
+			var structFD *schemapb.FieldData
+			for _, field := range fieldsData {
+				if field.GetFieldName() == "clips" {
+					structFD = field
+				}
+			}
+			require.NotNil(t, structFD)
+			tags := subFieldDataByName(t, structFD, "tags")
+			require.Equal(t, schemapb.DataType_Array, tags.GetType())
+			require.Equal(t, schemapb.DataType_Array, tags.GetScalars().GetArrayData().GetElementType())
+			tagRows := tags.GetScalars().GetArrayData().GetData()
+			require.Len(t, tagRows, 2)
+			for _, row := range tagRows {
+				assert.Empty(t, row.GetValidData(), "a sub-field that is not element_nullable has no element validity")
+				require.Len(t, row.GetArrayData().GetData(), 1, "the operand holds exactly one struct element")
+				inner := row.GetArrayData().GetData()[0]
+				assert.Equal(t, []string{"x"}, inner.GetStringData().GetData())
+				assert.Equal(t, []bool{true, false}, inner.GetValidData())
+			}
+			validateStructWithProxy(t, requestSchema, structFD, 2)
+		})
+	}
+}
+
+func TestSchemaForPathReplaceOperandsRejectsMissingOrUnknownChildren(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, operand, want string
+		dropTags                  bool
+	}{
+		{"missing non-nullable child", "[1]", `{"lang":"en","emb":[0.1,0.2],"tags":["a"]}`, `PATH_REPLACE field "clips" element at [1] is missing sub-field "score", which is not element nullable`, false},
+		{"unknown key", "[1]", `{"score":5,"bogus":1}`, `PATH_REPLACE struct field "clips" has no child "bogus"`, false},
+		{"unknown key with every child", "[1]", `{"score":5,"lang":"en","emb":[0.1,0.2],"tags":["a"],"bogus":1}`, `has no child "bogus"`, false},
+		{"unknown key and missing child", "[1]", `{"lang":"en","bogus":1}`, `has no child "bogus"`, false},
+		{"dropped sub-field", "[1]", `{"score":5,"tags":["a"]}`, `has no child "tags"`, true},
+		{"child path unknown", "[1][bogus]", `{"bogus":1}`, `has no child "bogus"`, false},
+		{"child path extra key", "[1][lang]", `{"lang":"en","score":5}`, "exactly the selected child", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := buildElementNullableStructTestSchema(false)
+			if tc.dropTags {
+				schema.GetStructArrayFields()[0].Fields = schema.GetStructArrayFields()[0].Fields[:3]
+			}
+			before := proto.Clone(schema)
+			body := []byte(`{"data":[{"id":1,"clips":[` + tc.operand + `]}]}`)
+			ops := []*schemapb.FieldPartialUpdateOp{{FieldName: "clips", Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, Path: tc.path}}
+			got, err := schemaForPathReplaceOperands(body, schema, ops)
+			require.Nil(t, got)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.Equal(t, merr.InputError, merr.GetErrorType(err))
+			require.ErrorContains(t, err, tc.want)
+			require.True(t, proto.Equal(before, schema))
+		})
+	}
+}
+
 func TestSchemaForPathReplaceOperandsRejectsDifferentMasks(t *testing.T) {
 	schema := buildStructArrayTestSchema()
 	body := []byte(`{"data":[
@@ -5225,6 +5610,49 @@ func TestSchemaForPathReplaceOperandsRejectsDifferentMasks(t *testing.T) {
 	_, err := schemaForPathReplaceOperands(body, schema, ops)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "does not match request mask")
+}
+
+func TestSchemaForPathReplaceOperandsRejectsNonObjectRows(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{Name: "scores", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+	}}
+	ops := []*schemapb.FieldPartialUpdateOp{{
+		FieldName: "scores", Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, Path: "[0]",
+	}}
+	for _, tc := range []struct {
+		name, body, want string
+	}{
+		{"null first", `{"data":[null,{}]}`, "data[0] must be a JSON object"},
+		{"number first", `{"data":[0,{}]}`, "data[0] must be a JSON object"},
+		{"number after object", `{"data":[{"scores":[1]},0]}`, "data[1] must be a JSON object"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := schemaForPathReplaceOperands([]byte(tc.body), schema, ops)
+			require.ErrorContains(t, err, tc.want)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		})
+	}
+}
+
+func TestSchemaForPathReplaceOperandsDoesNotMaterializeInvalidRows(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{Name: "scores", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+	}}
+	ops := []*schemapb.FieldPartialUpdateOp{{
+		FieldName: "scores", Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, Path: "[0]",
+	}}
+	body := []byte(`{"data":[` + strings.Repeat("0,", 200000) + `0]}`)
+
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	_, err := schemaForPathReplaceOperands(body, schema, ops)
+	runtime.ReadMemStats(&after)
+	runtime.KeepAlive(body)
+
+	require.ErrorContains(t, err, "data[0] must be a JSON object")
+	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(4<<20),
+		"rejecting the first invalid row must not allocate a result for every row")
 }
 
 func TestSchemaForPathReplaceOperandsRejectsInvalidStructRows(t *testing.T) {
@@ -5414,7 +5842,8 @@ func TestStructArrayFieldSchemaGetProto(t *testing.T) {
 	}).GetProto(ctx)
 	assert.Error(t, err)
 
-	_, err = (&StructArrayFieldSchema{
+	// forwarded as given; the proxy rejects a nullable sub-field of a non-nullable struct
+	nullableSub, err := (&StructArrayFieldSchema{
 		FieldName: "bad_nullable",
 		Fields: []FieldSchema{
 			{
@@ -5425,7 +5854,8 @@ func TestStructArrayFieldSchemaGetProto(t *testing.T) {
 			},
 		},
 	}).GetProto(ctx)
-	assert.Error(t, err)
+	assert.NoError(t, err)
+	assert.True(t, nullableSub.GetFields()[0].GetNullable())
 
 	_, err = (&StructArrayFieldSchema{
 		FieldName: "bad_default",
@@ -6201,6 +6631,54 @@ func TestGeneratePlaceholderGroupStructArrayField(t *testing.T) {
 	assert.Equal(t, commonpb.PlaceholderType_EmbListFloatVector, group.GetPlaceholders()[0].GetType())
 }
 
+// buildStructVectorOnlyTestSchema keeps the struct of buildStructArrayTestSchema
+// and drops the top-level vector, so the only vector is a struct sub-field.
+func buildStructVectorOnlyTestSchema() *schemapb.CollectionSchema {
+	schema := buildStructArrayTestSchema()
+	schema.Fields = schema.Fields[:1]
+	return schema
+}
+
+func TestGeneratePlaceholderGroupDefaultAnnsField(t *testing.T) {
+	body := `{"data": [[0.1,0.2,0.3,0.4]]}`
+	placeholderType := func(t *testing.T, data []byte) commonpb.PlaceholderType {
+		group := &commonpb.PlaceholderGroup{}
+		require.NoError(t, proto.Unmarshal(data, group))
+		require.Len(t, group.GetPlaceholders(), 1)
+		require.Len(t, group.GetPlaceholders()[0].GetValues(), 1)
+		assert.Len(t, group.GetPlaceholders()[0].GetValues()[0], 16)
+		return group.GetPlaceholders()[0].GetType()
+	}
+
+	t.Run("struct_vector_only", func(t *testing.T) {
+		data, err := generatePlaceholderGroup(context.Background(), body, buildStructVectorOnlyTestSchema(), "")
+		require.NoError(t, err)
+		assert.Equal(t, commonpb.PlaceholderType_FloatVector, placeholderType(t, data))
+	})
+
+	t.Run("top_level_vector_only", func(t *testing.T) {
+		schema := buildStructArrayTestSchema()
+		schema.StructArrayFields[0].Fields = schema.StructArrayFields[0].Fields[:1]
+		data, err := generatePlaceholderGroup(context.Background(), body, schema, "")
+		require.NoError(t, err)
+		assert.Equal(t, commonpb.PlaceholderType_FloatVector, placeholderType(t, data))
+	})
+
+	t.Run("top_level_and_struct_vector", func(t *testing.T) {
+		_, err := generatePlaceholderGroup(context.Background(), body, buildStructArrayTestSchema(), "")
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "search without annsField, but already found multiple vector fields: [vec, sub_vec,,,]")
+	})
+
+	t.Run("no_vector", func(t *testing.T) {
+		schema := buildStructVectorOnlyTestSchema()
+		schema.StructArrayFields[0].Fields = schema.StructArrayFields[0].Fields[:1]
+		_, err := generatePlaceholderGroup(context.Background(), body, schema, "")
+		assert.ErrorIs(t, err, merr.ErrFieldNotFound)
+		assert.ErrorContains(t, err, "cannot find a vector field")
+	})
+}
+
 func TestStructArrayFieldDataErrorPaths(t *testing.T) {
 	schema := buildStructArrayTestSchema().GetStructArrayFields()[0]
 
@@ -6393,20 +6871,13 @@ func TestStructArrayHelperValueConversions(t *testing.T) {
 	}
 	for _, test := range vectorTests {
 		t.Run(test.name, func(t *testing.T) {
-			count, err := vectorFieldElemCount(test.vector, test.elementType, test.dim)
-			require.NoError(t, err)
-			assert.Equal(t, test.count, count)
 			values, err := vectorFieldToInterfaces(test.vector, test.elementType, test.dim)
 			require.NoError(t, err)
 			assert.Len(t, values, test.count)
 		})
 	}
 
-	_, err := vectorFieldElemCount(&schemapb.VectorField{}, schemapb.DataType_FloatVector, 0)
-	assert.Error(t, err)
-	_, err = vectorFieldElemCount(&schemapb.VectorField{}, schemapb.DataType_JSON, 1)
-	assert.Error(t, err)
-	_, err = vectorFieldToInterfaces(&schemapb.VectorField{}, schemapb.DataType_FloatVector, 0)
+	_, err := vectorFieldToInterfaces(&schemapb.VectorField{}, schemapb.DataType_FloatVector, 0)
 	assert.Error(t, err)
 	_, err = vectorFieldToInterfaces(&schemapb.VectorField{}, schemapb.DataType_JSON, 1)
 	assert.Error(t, err)
@@ -6590,7 +7061,7 @@ func TestCheckAndSetDataStructArrayRows(t *testing.T) {
 			"id": 1,
 			"vec": [0.1, 0.2, 0.3, 0.4],
 			"my_struct": [
-				{"sub_int": 10, "sub_vec": [1.1, 1.2, 1.3, 1.4], "ignored": true}
+				{"sub_int": 10, "sub_vec": [1.1, 1.2, 1.3, 1.4]}
 			]
 		}
 	]}`)
@@ -6603,6 +7074,16 @@ func TestCheckAndSetDataStructArrayRows(t *testing.T) {
 	require.True(t, ok)
 	assert.Contains(t, structRow, "sub_int")
 	assert.Contains(t, structRow, "sub_vec")
+
+	// A key that names no sub-field is ignored.
+	ignoredRows, _, err := checkAndSetData([]byte(`{"data": [{"id": 1, "vec": [0.1,0.2,0.3,0.4], "my_struct": [{"sub_int": 10, "sub_vec": [1.1,1.2,1.3,1.4], "ignored": true}]}]}`), schema, false)
+	require.NoError(t, err)
+	require.Len(t, ignoredRows, 1)
+	ignoredStructRow, ok := ignoredRows[0]["my_struct"].(structArrayRow)
+	require.True(t, ok)
+	assert.Len(t, ignoredStructRow, 2)
+	assert.True(t, proto.Equal(structRow["sub_int"].(*schemapb.ScalarField), ignoredStructRow["sub_int"].(*schemapb.ScalarField)))
+	assert.True(t, proto.Equal(structRow["sub_vec"].(*schemapb.VectorField), ignoredStructRow["sub_vec"].(*schemapb.VectorField)))
 
 	int64Schema := buildStructArrayTestSchema()
 	int64Schema.GetStructArrayFields()[0].GetFields()[0].ElementType = schemapb.DataType_Int64
@@ -6662,11 +7143,18 @@ func TestParseStructArrayRowQualifiedSchemaNames(t *testing.T) {
 			},
 		},
 	}
-	row, err := parseStructArrayRow(`[{"sub_int": 1, "sub_vec": [0.1,0.2], "unknown": "ignored"}]`, schema, false)
+	row, err := parseStructArrayRow(`[{"sub_int": 1, "sub_vec": [0.1,0.2]}]`, schema, false)
 	require.NoError(t, err)
 	assert.Contains(t, row, "sub_int")
 	assert.Contains(t, row, "sub_vec")
-	assert.NotContains(t, row, "unknown")
+
+	// A key no sub-field has is ignored, also when it is the qualified
+	// name of a sub-field.
+	ignored, err := parseStructArrayRow(`[{"sub_int": 1, "sub_vec": [0.1,0.2], "unknown": "ignored", "my_struct[sub_int]": 2}]`, schema, false)
+	require.NoError(t, err)
+	assert.Len(t, ignored, 2)
+	assert.True(t, proto.Equal(row["sub_int"].(*schemapb.ScalarField), ignored["sub_int"].(*schemapb.ScalarField)))
+	assert.True(t, proto.Equal(row["sub_vec"].(*schemapb.VectorField), ignored["sub_vec"].(*schemapb.VectorField)))
 
 	unsupported := proto.Clone(schema).(*schemapb.StructArrayFieldSchema)
 	unsupported.Fields = append(unsupported.Fields, &schemapb.FieldSchema{Name: "bad", DataType: schemapb.DataType_Bool})
@@ -8294,9 +8782,11 @@ func TestCheckAndSetDataRejectsStringWrappedVector(t *testing.T) {
 	// Int8Vector was listed as accepting base64 and so skipped the null-literal
 	// check, where "null" decodes to a nil slice without an error; it went in as
 	// an empty vector. No decoder reads base64 for it, so it is not on the list.
+	// FloatVector has a base64 spelling now, and its "null" is refused by the
+	// length check instead; TestCheckAndSetDataBase64FloatVector covers it.
 	t.Run("a null literal is refused for every type without base64", func(t *testing.T) {
 		for _, dataType := range []schemapb.DataType{
-			schemapb.DataType_Int8Vector, schemapb.DataType_FloatVector,
+			schemapb.DataType_Int8Vector,
 		} {
 			t.Run(dataType.String(), func(t *testing.T) {
 				err := insert(t, schemaFor(dataType, "2"), `"null"`)
@@ -8310,6 +8800,7 @@ func TestCheckAndSetDataRejectsStringWrappedVector(t *testing.T) {
 	t.Run("base64 spellings still work", func(t *testing.T) {
 		require.NoError(t, insert(t, schemaFor(schemapb.DataType_BinaryVector, "8"), `"AQ=="`))
 		require.NoError(t, insert(t, schemaFor(schemapb.DataType_Float16Vector, "2"), `[0.1, 0.2]`))
+		require.NoError(t, insert(t, schemaFor(schemapb.DataType_FloatVector, "2"), `"zczMPc3MTD4="`))
 	})
 
 	t.Run("compatibility mode takes the text back", func(t *testing.T) {
@@ -9076,7 +9567,8 @@ func TestBase64NullIsAValidBinaryVector(t *testing.T) {
 	require.Len(t, rows, 1)
 	assert.Equal(t, []byte{0x9e, 0xe9, 0x65}, rows[0]["bv"])
 
-	// a float vector has no base64 spelling, so "null" there is still a null
+	// A float vector's base64 is dim*4 bytes, which the three bytes of "null"
+	// can never be, so there it is still refused.
 	floatField := generateVectorFieldSchema(schemapb.DataType_FloatVector)
 	floatField.Name = "fv"
 	floatSchema := &schemapb.CollectionSchema{
@@ -9089,4 +9581,1092 @@ func TestBase64NullIsAValidBinaryVector(t *testing.T) {
 		[]byte(fmt.Sprintf(`{"data": {"%s": 1, "fv": "null"}}`, FieldBookID)), floatSchema, false)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+}
+
+func TestCheckAndSetDataRowLookup(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		EnableDynamicField: true,
+		Fields: []*schemapb.FieldSchema{
+			{Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{
+				Name: "vec", DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}},
+			},
+			{Name: "note", DataType: schemapb.DataType_VarChar, Nullable: true},
+		},
+	}
+	for _, row := range []string{
+		`{"id":1,"vec":[0.25,-0.5],"tag":"a"}`,
+		`{"tag":"a","vec":[0.25,-0.5],"id":1,"note":null}`,
+		`{"\u0069d":1,"\u0076ec":[0.25,-0.5],"tag":"a"}`,
+		`{"id":1,"id":9,"vec":[0.25,-0.5],"tag":"a"}`,
+	} {
+		t.Run(row, func(t *testing.T) {
+			rows, valid, err := checkAndSetData([]byte(`{"data":[`+row+`]}`), schema, false)
+			require.NoError(t, err)
+			require.Equal(t, []map[string]interface{}{{
+				"id": int64(1), "vec": []float32{0.25, -0.5}, "tag": "a",
+			}}, rows)
+			require.Equal(t, []bool{false}, valid["note"])
+			_, err = anyToColumns(rows, valid, schema, true, false)
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestConvertFloatVectorToArray(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		rows [][]float32
+		dim  int64
+		want []float32
+	}{
+		{name: "rows", rows: [][]float32{{1, 2}, {3, 4}}, dim: 2, want: []float32{1, 2, 3, 4}},
+		{name: "empty", dim: 2, want: []float32{}},
+		{name: "zero width", rows: [][]float32{{}, {}}, want: []float32{}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := convertFloatVectorToArray(test.rows, test.dim)
+			require.NoError(t, err)
+			require.Equal(t, test.want, got)
+		})
+	}
+	for _, rows := range [][][]float32{{{1}}, {{1, 2}, {3}}} {
+		_, err := convertFloatVectorToArray(rows, 2)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	}
+	// Reject an invalid dimension before using it to allocate a buffer.
+	_, err := convertFloatVectorToArray([][]float32{{1}}, math.MaxInt64)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+}
+
+func TestConvertInt8VectorToArray(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		rows [][]int8
+		dim  int64
+		want []byte
+	}{
+		{name: "signed rows", rows: [][]int8{{-128, -1, 0}, {1, 126, 127}}, dim: 3, want: []byte{128, 255, 0, 1, 126, 127}},
+		{name: "empty", dim: 3, want: []byte{}},
+		{name: "zero width", rows: [][]int8{{}, {}}, want: []byte{}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := convertInt8VectorToArray(test.rows, test.dim)
+			require.NoError(t, err)
+			require.Equal(t, test.want, got)
+			require.Equal(t, len(got), cap(got), "preallocate exactly the final column size")
+			if len(got) > 0 {
+				got[0] = 42
+				require.Equal(t, int8(-128), test.rows[0][0])
+			}
+		})
+	}
+	for _, rows := range [][][]int8{{{1}}, {{1, 2}, {3}}} {
+		got, err := convertInt8VectorToArray(rows, 2)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.Nil(t, got)
+	}
+}
+
+func TestConvertBinaryVectorToArray(t *testing.T) {
+	for _, test := range []struct {
+		dataType schemapb.DataType
+		dim      int64
+	}{
+		{schemapb.DataType_BinaryVector, 16},
+		{schemapb.DataType_Float16Vector, 1},
+		{schemapb.DataType_BFloat16Vector, 1},
+	} {
+		t.Run(test.dataType.String(), func(t *testing.T) {
+			rows := [][]byte{{0, 255}, {128, 1}}
+			got, err := convertBinaryVectorToArray(rows, test.dim, test.dataType)
+			require.NoError(t, err)
+			require.Equal(t, []byte{0, 255, 128, 1}, got)
+			got[0] = 42
+			require.Equal(t, byte(0), rows[0][0])
+			for _, invalid := range [][][]byte{{{1}}, {{1, 2}, {3}}} {
+				got, err := convertBinaryVectorToArray(invalid, test.dim, test.dataType)
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				require.Nil(t, got)
+			}
+			got, err = convertBinaryVectorToArray(nil, test.dim, test.dataType)
+			require.NoError(t, err)
+			require.Equal(t, []byte{}, got)
+			got, err = convertBinaryVectorToArray([][]byte{{}, {}}, 0, test.dataType)
+			require.NoError(t, err)
+			require.Equal(t, []byte{}, got)
+		})
+	}
+}
+
+// base64Float32 is the base64 spelling of a FloatVector: its little-endian
+// float32 bytes, as numpy's astype('<f4').tobytes() produces them.
+func base64Float32(v ...float32) string {
+	return base64.StdEncoding.EncodeToString(typeutil.Float32ArrayToBytes(v))
+}
+
+// Compared as bits because -0 == 0, so float equality cannot see a lost sign.
+func float32Bits(v []float32) []uint32 {
+	bits := make([]uint32, len(v))
+	for i, f := range v {
+		bits[i] = math.Float32bits(f)
+	}
+	return bits
+}
+
+// lossyFloat32s are values a decimal spelling of a vector can lose: 0.1 has no
+// exact decimal form, a subnormal is easily flushed, and -0 is often written
+// as 0. The constant -0.0 is +0 in Go, hence Copysign.
+var lossyFloat32s = []float32{0.1, math.SmallestNonzeroFloat32, float32(math.Copysign(0, -1)), 1.0 / 3}
+
+func base64FloatVectorSchema() *schemapb.CollectionSchema {
+	vectorField := generateVectorFieldSchema(schemapb.DataType_FloatVector)
+	vectorField.Name = "vector"
+	vectorField.TypeParams = []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}
+	return &schemapb.CollectionSchema{
+		Name: DefaultCollectionName,
+		Fields: []*schemapb.FieldSchema{
+			generatePrimaryField(schemapb.DataType_Int64, false), vectorField,
+		},
+	}
+}
+
+func floatVectorColumn(t *testing.T, columns []*schemapb.FieldData, name string) []float32 {
+	t.Helper()
+	for _, column := range columns {
+		if column.GetFieldName() == name {
+			return column.GetVectors().GetFloatVector().GetData()
+		}
+	}
+	require.Failf(t, "column not found", "no column %s", name)
+	return nil
+}
+
+func TestCheckAndSetDataBase64FloatVector(t *testing.T) {
+	paramtable.Init()
+	schema := base64FloatVectorSchema()
+	insert := func(t *testing.T, values ...string) ([]map[string]interface{}, error) {
+		t.Helper()
+		rows := make([]string, 0, len(values))
+		for i, value := range values {
+			rows = append(rows, fmt.Sprintf(`{"%s": %d, "vector": %s}`, FieldBookID, i, value))
+		}
+		got, _, err := checkAndSetData([]byte(`{"data": [`+strings.Join(rows, ",")+`]}`), schema, false)
+		return got, err
+	}
+
+	t.Run("round trip is bit-exact", func(t *testing.T) {
+		rows, err := insert(t, strconv.Quote(base64Float32(lossyFloat32s...)))
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		assert.Equal(t, float32Bits(lossyFloat32s), float32Bits(rows[0]["vector"].([]float32)))
+
+		// the column builder is what reaches the proxy, and needs no change
+		// for it: the row already holds a []float32
+		columns, err := anyToColumns(rows, nil, schema, true, false)
+		require.NoError(t, err)
+		assert.Equal(t, float32Bits(lossyFloat32s), float32Bits(floatVectorColumn(t, columns, "vector")))
+	})
+
+	t.Run("array and base64 rows mix in one request", func(t *testing.T) {
+		rows, err := insert(t, `[1, 2, 3, 4]`, strconv.Quote(base64Float32(5, 6, 7, 8)), `[9, 10, 11, 12]`)
+		require.NoError(t, err)
+		columns, err := anyToColumns(rows, nil, schema, true, false)
+		require.NoError(t, err)
+		assert.Equal(t, []float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}, floatVectorColumn(t, columns, "vector"))
+	})
+
+	// A length that is not a whole number of floats would otherwise lose its
+	// tail in BytesToFloat32Vector and reach the column builder as a vector of
+	// the right dimension.
+	t.Run("a decoded length other than dim*4 names the field", func(t *testing.T) {
+		whole := typeutil.Float32ArrayToBytes([]float32{1, 2, 3, 4})
+		for _, tt := range []struct {
+			name string
+			raw  []byte
+		}{
+			{"one byte short", whole[:15]},
+			{"one byte over", append(append([]byte{}, whole...), 0)},
+			{"one float short", whole[:12]},
+			{"one float over", append(append([]byte{}, whole...), whole[:4]...)},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				_, err := insert(t, strconv.Quote(base64.StdEncoding.EncodeToString(tt.raw)))
+				require.Error(t, err)
+				assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+				assert.Contains(t, err.Error(), "field vector")
+				assert.Contains(t, err.Error(), fmt.Sprintf("expect 16 (dim 4), got %d", len(tt.raw)))
+			})
+		}
+	})
+
+	t.Run("malformed base64 names the field", func(t *testing.T) {
+		padded := base64Float32(1, 2, 3, 4)
+		for _, value := range []string{
+			"not base64!",
+			strings.TrimRight(padded, "="),                  // unpadded
+			strings.ReplaceAll(padded, "A", "-"),            // URL-safe alphabet
+			padded + " ",                                    // trailing blank
+			strings.Repeat("=", 4) + padded[:len(padded)-4], // padding up front
+		} {
+			t.Run(value, func(t *testing.T) {
+				_, err := insert(t, strconv.Quote(value))
+				require.Error(t, err)
+				assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+				assert.Contains(t, err.Error(), "field vector")
+			})
+		}
+	})
+
+	t.Run("empty and null strings are parameter errors", func(t *testing.T) {
+		_, err := insert(t, `""`)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "missing vector field: vector")
+
+		// "null" is valid base64 for three bytes, so it fails on length
+		_, err = insert(t, `"null"`)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "field vector")
+		assert.Contains(t, err.Error(), "got 3")
+
+		_, err = insert(t, `null`)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "not nullable")
+	})
+
+	// A quoted array was refused before FloatVector had a base64 spelling,
+	// and still is: base64 has no '[' to be confused with.
+	t.Run("a quoted array is still the text of a vector", func(t *testing.T) {
+		_, err := insert(t, `"[1, 2, 3, 4]"`)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "the text of one")
+	})
+
+	t.Run("compatibility mode reads base64 and the quoted array", func(t *testing.T) {
+		key := paramtable.Get().HTTPCfg.CompatibilityMode.Key
+		paramtable.Get().Save(key, "true")
+		defer paramtable.Get().Reset(key)
+
+		rows, err := insert(t, `"[1, 2, 3, 4]"`, strconv.Quote(base64Float32(lossyFloat32s...)))
+		require.NoError(t, err)
+		require.Len(t, rows, 2)
+		assert.Equal(t, []float32{1, 2, 3, 4}, rows[0]["vector"])
+		assert.Equal(t, float32Bits(lossyFloat32s), float32Bits(rows[1]["vector"].([]float32)))
+
+		_, err = insert(t, `"null"`)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+}
+
+func TestConvertQueries2PlaceholderBase64FloatVector(t *testing.T) {
+	paramtable.Init()
+	query := func(t *testing.T, data string) *commonpb.PlaceholderValue {
+		t.Helper()
+		phv, err := convertQueries2Placeholder(`{"data": `+data+`}`, schemapb.DataType_FloatVector, 4)
+		require.NoError(t, err)
+		assert.Equal(t, commonpb.PlaceholderType_FloatVector, phv.GetType())
+		return phv
+	}
+
+	t.Run("base64 is passed through bit-exact", func(t *testing.T) {
+		phv := query(t, fmt.Sprintf(`[%q, %q]`, base64Float32(lossyFloat32s...), base64Float32(1, 2, 3, 4)))
+		assert.Equal(t, [][]byte{
+			typeutil.Float32ArrayToBytes(lossyFloat32s),
+			typeutil.Float32ArrayToBytes([]float32{1, 2, 3, 4}),
+		}, phv.GetValues())
+	})
+
+	// Only values an array can carry are compared. The array decoder reads -0
+	// as +0, and refuses -3.4028235e+38, the shortest spelling of
+	// -MaxFloat32, as out of float32 range.
+	t.Run("base64 and array give the same placeholder", func(t *testing.T) {
+		values := []float32{0.1, math.SmallestNonzeroFloat32, 1.0 / 3, -123.456}
+		literals := make([]string, len(values))
+		for i, v := range values {
+			literals[i] = strconv.FormatFloat(float64(v), 'g', -1, 32)
+		}
+		fromArray := query(t, `[[`+strings.Join(literals, ", ")+`]]`)
+		fromBase64 := query(t, fmt.Sprintf(`[%q]`, base64Float32(values...)))
+		assert.Equal(t, fromArray.GetValues(), fromBase64.GetValues())
+	})
+
+	t.Run("a decoded length other than dim*4 is a parameter error", func(t *testing.T) {
+		whole := typeutil.Float32ArrayToBytes([]float32{1, 2, 3, 4})
+		for _, raw := range [][]byte{whole[:15], append(append([]byte{}, whole...), 0)} {
+			_, err := convertQueries2Placeholder(
+				fmt.Sprintf(`{"data": [%q]}`, base64.StdEncoding.EncodeToString(raw)), schemapb.DataType_FloatVector, 4)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), fmt.Sprintf("bytesLen: 16, but length of []byte: %d", len(raw)))
+		}
+	})
+
+	t.Run("malformed base64 is a parameter error", func(t *testing.T) {
+		_, err := convertQueries2Placeholder(`{"data": ["not base64!"]}`, schemapb.DataType_FloatVector, 4)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	// The 16-bit floats share serializeFloatOrByteVectors and must still be
+	// measured at two bytes a coordinate.
+	t.Run("16-bit floats keep their byte length", func(t *testing.T) {
+		for _, dataType := range []schemapb.DataType{schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector} {
+			_, err := convertQueries2Placeholder(`{"data": ["AQIDBAUGBwg="]}`, dataType, 4)
+			require.NoError(t, err)
+			_, err = convertQueries2Placeholder(fmt.Sprintf(`{"data": [%q]}`, base64Float32(1, 2, 3, 4)), dataType, 4)
+			require.Error(t, err)
+		}
+	})
+}
+
+func TestEmbeddingListBase64FloatVector(t *testing.T) {
+	first := base64Float32(lossyFloat32s...)
+	body := fmt.Sprintf(`{"data": [[%q, [1, 2, 3, 4]], [[5, 6, 7, 8]]]}`, first)
+	require.True(t, isEmbeddingListData(body))
+
+	phv, err := convertEmbListQueries2Placeholder(body, schemapb.DataType_FloatVector, 4)
+	require.NoError(t, err)
+	assert.Equal(t, commonpb.PlaceholderType_EmbListFloatVector, phv.GetType())
+	require.Len(t, phv.GetValues(), 2)
+	assert.Equal(t,
+		append(typeutil.Float32ArrayToBytes(lossyFloat32s), typeutil.Float32ArrayToBytes([]float32{1, 2, 3, 4})...),
+		phv.GetValues()[0])
+	assert.Equal(t, typeutil.Float32ArrayToBytes([]float32{5, 6, 7, 8}), phv.GetValues()[1])
+
+	t.Run("a base64-only list is recognized", func(t *testing.T) {
+		assert.True(t, isEmbeddingListData(fmt.Sprintf(`{"data": [[%q]]}`, first)))
+	})
+
+	for _, tt := range []struct {
+		name  string
+		value string
+	}{
+		{"wrong length", strconv.Quote(base64.StdEncoding.EncodeToString(make([]byte, 15)))},
+		{"malformed", `"not base64!"`},
+		{"neither array nor string", `4`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := encodeEmbListQuery(gjson.Parse(`[[1, 2, 3, 4], `+tt.value+`]`).Array(), schemapb.DataType_FloatVector, 4, 0)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "search data[0][1]")
+		})
+	}
+}
+
+func TestStructSubVectorBase64FloatVector(t *testing.T) {
+	schema := buildStructArrayTestSchema()
+	insert := func(subVecs string) ([]map[string]interface{}, error) {
+		body := []byte(`{"data":[{"id":1,"vec":[0.1,0.2,0.3,0.4],` +
+			`"my_struct":[` + subVecs + `]}]}`)
+		rows, _, err := checkAndSetData(body, schema, false)
+		return rows, err
+	}
+
+	rows, err := insert(fmt.Sprintf(`{"sub_int":10,"sub_vec":%q},{"sub_int":11,"sub_vec":[1, 2, 3, 4]}`,
+		base64Float32(lossyFloat32s...)))
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	subVec := rows[0]["my_struct"].(structArrayRow)["sub_vec"].(*schemapb.VectorField)
+	assert.Equal(t, int64(4), subVec.GetDim())
+	assert.Equal(t,
+		float32Bits(append(append([]float32{}, lossyFloat32s...), 1, 2, 3, 4)),
+		float32Bits(subVec.GetFloatVector().GetData()))
+
+	for _, tt := range []struct {
+		name  string
+		value string
+	}{
+		{"wrong length", strconv.Quote(base64.StdEncoding.EncodeToString(make([]byte, 17)))},
+		{"malformed", `"not base64!"`},
+		{"neither array nor string", `4`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := insert(`{"sub_int":10,"sub_vec":` + tt.value + `}`)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "sub_vec")
+		})
+	}
+}
+
+// buildElementNullableStructTestSchema is a struct "clips" whose sub-fields
+// cover each element-nullable shape: a scalar (lang), a non-nullable scalar
+// (score), a vector (emb) and an Array<VarChar> whose inner arrays and leaves
+// are both nullable (tags). Sub-field names are stored qualified, as the
+// server stores them.
+func buildElementNullableStructTestSchema(nullable bool) *schemapb.CollectionSchema {
+	capacity := &commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "8"}
+	lang := &schemapb.FieldSchema{
+		FieldID: 201, Name: "clips[lang]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_VarChar,
+		ElementNullable: true, Nullable: nullable,
+		TypeParams: []*commonpb.KeyValuePair{capacity, {Key: common.MaxLengthKey, Value: "16"}},
+	}
+	score := &schemapb.FieldSchema{
+		FieldID: 202, Name: "clips[score]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+		Nullable: nullable, TypeParams: []*commonpb.KeyValuePair{capacity},
+	}
+	emb := &schemapb.FieldSchema{
+		FieldID: 203, Name: "clips[emb]", DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector,
+		ElementNullable: true, Nullable: nullable,
+		TypeParams: []*commonpb.KeyValuePair{capacity, {Key: common.DimKey, Value: "2"}},
+	}
+	tags := &schemapb.FieldSchema{
+		FieldID: 204, Name: "clips[tags]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Array,
+		ElementNullable: true, Nullable: nullable,
+		TypeSchema: &schemapb.TypeSchema{
+			TypeParams: []*commonpb.KeyValuePair{capacity},
+			Nullable:   nullable,
+			Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+				TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "4"}},
+				Nullable:   true,
+				Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "8"}},
+					Nullable:   true,
+					Kind:       &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_VarChar},
+				}},
+			}},
+		},
+	}
+	return &schemapb.CollectionSchema{
+		Name: "c_element_null",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "2"}}},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: 200, Name: "clips", Nullable: nullable,
+			Fields: []*schemapb.FieldSchema{lang, score, emb, tags},
+		}},
+	}
+}
+
+// validateStructWithProxy runs the proxy's insert validation over the struct
+// field data REST builds, after flattening it the way the proxy does, so the
+// wire shape is checked against the reader rather than against a copy of it.
+func validateStructWithProxy(t *testing.T, schema *schemapb.CollectionSchema, structFD *schemapb.FieldData, numRows uint64) {
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	flattened := make([]*schemapb.FieldData, 0, len(structFD.GetStructArrays().GetFields()))
+	for _, sub := range structFD.GetStructArrays().GetFields() {
+		sub = proto.Clone(sub).(*schemapb.FieldData)
+		sub.FieldName = typeutil.ConcatStructFieldName(structFD.GetFieldName(), sub.GetFieldName())
+		flattened = append(flattened, sub)
+	}
+	v := fieldvalidator.NewValidateUtil(fieldvalidator.WithMaxCapCheck(), fieldvalidator.WithMaxLenCheck())
+	require.NoError(t, v.Validate(flattened, helper, numRows))
+}
+
+func subFieldDataByName(t *testing.T, structFD *schemapb.FieldData, name string) *schemapb.FieldData {
+	for _, sub := range structFD.GetStructArrays().GetFields() {
+		if sub.GetFieldName() == name {
+			return sub
+		}
+	}
+	require.Failf(t, "sub-field not found", "%s", name)
+	return nil
+}
+
+func TestParseStructArrayRowElementNull(t *testing.T) {
+	schema := buildElementNullableStructTestSchema(false)
+	structSchema := schema.GetStructArrayFields()[0]
+	// element 0: every value present, a null leaf in tags
+	// element 1: JSON null for every element-nullable sub-field
+	// element 2: element-nullable sub-fields omitted, tags an empty array
+	row, err := parseStructArrayRow(`[
+		{"lang": "en", "score": 1, "emb": [0.1, 0.2], "tags": ["a", null]},
+		{"lang": null, "score": 2, "emb": null, "tags": null},
+		{"score": 3, "tags": []}
+	]`, structSchema, false)
+	require.NoError(t, err)
+
+	assert.True(t, proto.Equal(&schemapb.ScalarField{
+		Data:      &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"en"}}},
+		ValidData: []bool{true, false, false},
+	}, row["lang"].(*schemapb.ScalarField)))
+	assert.True(t, proto.Equal(&schemapb.ScalarField{
+		Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}}},
+	}, row["score"].(*schemapb.ScalarField)))
+	assert.True(t, proto.Equal(&schemapb.VectorField{
+		Dim:       2,
+		Data:      &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{0.1, 0.2}}},
+		ValidData: []bool{true, false, false},
+	}, row["emb"].(*schemapb.VectorField)))
+	assert.True(t, proto.Equal(&schemapb.ScalarField{
+		Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+			ElementType: schemapb.DataType_VarChar,
+			Data: []*schemapb.ScalarField{
+				{
+					Data:      &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a"}}},
+					ValidData: []bool{true, false},
+				},
+				{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{}}},
+			},
+		}},
+		ValidData: []bool{true, false, true},
+	}, row["tags"].(*schemapb.ScalarField)))
+
+	structFD, err := buildStructArrayFieldData(structSchema, []structArrayRow{row})
+	require.NoError(t, err)
+	assert.Equal(t, schemapb.DataType_Array, subFieldDataByName(t, structFD, "tags").GetScalars().GetArrayData().GetElementType())
+	validateStructWithProxy(t, schema, structFD, 1)
+
+	// all-valid element-nullable rows still carry valid_data, which the proxy
+	// requires for a nullable level with elements
+	row, err = parseStructArrayRow(`[{"lang": "en", "score": 1, "emb": [0.1, 0.2], "tags": ["a"]}]`, structSchema, false)
+	require.NoError(t, err)
+	assert.Equal(t, []bool{true}, row["lang"].(*schemapb.ScalarField).GetValidData())
+	assert.Equal(t, []bool{true}, row["emb"].(*schemapb.VectorField).GetValidData())
+	assert.Equal(t, []bool{true}, row["tags"].(*schemapb.ScalarField).GetValidData())
+	assert.Empty(t, row["score"].(*schemapb.ScalarField).GetValidData())
+	structFD, err = buildStructArrayFieldData(structSchema, []structArrayRow{row})
+	require.NoError(t, err)
+	validateStructWithProxy(t, schema, structFD, 1)
+}
+
+// Keys that name no sub-field are ignored, the same as in JSON and CSV
+// import: a key of a dropped sub-field, an unknown key, a null or a
+// repeated one. They do not shift or replace the values of the sub-fields.
+func TestParseStructArrayRowIgnoresUnknownKeys(t *testing.T) {
+	schema := buildElementNullableStructTestSchema(false)
+	structSchema := schema.GetStructArrayFields()[0]
+	// clips[tags] was dropped; clients may still send it.
+	structSchema.Fields = structSchema.Fields[:3]
+
+	row, err := parseStructArrayRow(`[
+		{"lang": "en", "score": 1, "emb": [0.1, 0.2], "tags": ["a"], "extra": {"x": 1}},
+		{"tags": null, "score": 2, "extra": null, "extra": 3},
+		{"tags": [], "lang": "fr", "score": 3}
+	]`, structSchema, false)
+	require.NoError(t, err)
+	assert.Len(t, row, 3)
+	assert.NotContains(t, row, "tags")
+	assert.NotContains(t, row, "extra")
+
+	assert.True(t, proto.Equal(&schemapb.ScalarField{
+		Data:      &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"en", "fr"}}},
+		ValidData: []bool{true, false, true},
+	}, row["lang"].(*schemapb.ScalarField)))
+	assert.True(t, proto.Equal(&schemapb.ScalarField{
+		Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}}},
+	}, row["score"].(*schemapb.ScalarField)))
+	assert.True(t, proto.Equal(&schemapb.VectorField{
+		Dim:       2,
+		Data:      &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{0.1, 0.2}}},
+		ValidData: []bool{true, false, false},
+	}, row["emb"].(*schemapb.VectorField)))
+
+	structFD, err := buildStructArrayFieldData(structSchema, []structArrayRow{row})
+	require.NoError(t, err)
+	require.Len(t, structFD.GetStructArrays().GetFields(), 3)
+	validateStructWithProxy(t, schema, structFD, 1)
+
+	// The rules for the known keys still apply.
+	_, err = parseStructArrayRow(`[{"tags": 1, "score": 1, "score": 2}]`, structSchema, false)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "duplicated sub-field score")
+	_, err = parseStructArrayRow(`[{"tags": 1, "score": null}]`, structSchema, false)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "sub-field score is not element nullable")
+	_, err = parseStructArrayRow(`[{"tags": 1, "lang": "en"}]`, structSchema, false)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "missing sub-field score")
+}
+
+func TestParseStructArrayRowElementNullErrors(t *testing.T) {
+	structSchema := buildElementNullableStructTestSchema(false).GetStructArrayFields()[0]
+	for _, tc := range []struct {
+		name string
+		raw  string
+		msg  string
+	}{
+		{"null for a non-nullable sub-field", `[{"score": null}]`, "sub-field score is not element nullable"},
+		{"missing non-nullable sub-field", `[{"lang": "en"}]`, "missing sub-field score"},
+		{"duplicated key", `[{"score": 1, "score": 2}]`, "duplicated sub-field score"},
+		{"inner array not an array", `[{"score": 1, "tags": "a"}]`, "expect an array"},
+		{"null coordinate", `[{"score": 1, "emb": [0.1, null]}]`, "a vector element cannot be null"},
+		{"wrong leaf type", `[{"score": 1, "tags": [1]}]`, "expect string"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseStructArrayRow(tc.raw, structSchema, false)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), tc.msg)
+		})
+	}
+
+	t.Run("null leaf of a non-nullable leaf", func(t *testing.T) {
+		schema := buildElementNullableStructTestSchema(false)
+		tags := schema.GetStructArrayFields()[0].GetFields()[3]
+		tags.GetTypeSchema().GetArrayElement().GetArrayElement().Nullable = false
+		_, err := parseStructArrayRow(`[{"score": 1, "tags": ["a", null]}]`, schema.GetStructArrayFields()[0], false)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "the inner array element is not nullable")
+	})
+
+	t.Run("null inner array of a non-nullable inner array", func(t *testing.T) {
+		schema := buildElementNullableStructTestSchema(false)
+		tags := schema.GetStructArrayFields()[0].GetFields()[3]
+		tags.ElementNullable = false
+		tags.GetTypeSchema().GetArrayElement().Nullable = false
+		_, err := parseStructArrayRow(`[{"score": 1, "tags": null}]`, schema.GetStructArrayFields()[0], false)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "sub-field tags is not element nullable")
+		_, err = parseStructArrayRow(`[{"score": 1}]`, schema.GetStructArrayFields()[0], false)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "missing sub-field tags")
+	})
+}
+
+// TestAnyToColumnsElementNullWithNullRows: row-level null of a nullable struct
+// and element-level null inside its valid rows combine.
+func TestAnyToColumnsElementNullWithNullRows(t *testing.T) {
+	schema := buildElementNullableStructTestSchema(true)
+	body := []byte(`{"data": [
+		{"id": 1, "vec": [0.1, 0.2], "clips": [{"lang": null, "score": 1, "emb": [0.3, 0.4]}]},
+		{"id": 2, "vec": [0.1, 0.2], "clips": null},
+		{"id": 3, "vec": [0.1, 0.2], "clips": [{"score": 2}, {"lang": "fr", "score": 3, "tags": [null]}]}
+	]}`)
+	rows, validData, err := checkAndSetData(body, schema, false)
+	require.NoError(t, err)
+	assert.Equal(t, []bool{true, false, true}, validData["clips"])
+	fds, err := anyToColumns(rows, validData, schema, true, false)
+	require.NoError(t, err)
+	var structFD *schemapb.FieldData
+	for _, fd := range fds {
+		if fd.GetType() == schemapb.DataType_ArrayOfStruct {
+			structFD = fd
+		}
+	}
+	require.NotNil(t, structFD)
+	for _, sub := range structFD.GetStructArrays().GetFields() {
+		assert.Equal(t, []bool{true, false, true}, typeutil.GetFieldDataValidData(sub), sub.GetFieldName())
+	}
+	lang := subFieldDataByName(t, structFD, "lang").GetScalars().GetArrayData().GetData()
+	require.Len(t, lang, 2)
+	assert.Equal(t, []bool{false}, lang[0].GetValidData())
+	assert.Equal(t, []bool{false, true}, lang[1].GetValidData())
+	assert.Equal(t, []string{"fr"}, lang[1].GetStringData().GetData())
+	tags := subFieldDataByName(t, structFD, "tags").GetScalars().GetArrayData().GetData()
+	assert.Equal(t, []bool{false}, tags[0].GetValidData())
+	assert.Equal(t, []bool{false, true}, tags[1].GetValidData())
+	require.Len(t, tags[1].GetArrayData().GetData(), 1)
+	assert.Equal(t, []bool{false}, tags[1].GetArrayData().GetData()[0].GetValidData())
+	validateStructWithProxy(t, schema, structFD, 3)
+}
+
+// elementNullStructOutput is server-shaped output for one struct row of three
+// elements: scalars dense with a placeholder at each null, vectors compact.
+// emb comes first so the element count cannot come from a dense payload.
+func elementNullStructOutput(langValid []bool) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      schemapb.DataType_ArrayOfStruct,
+		FieldName: "clips",
+		Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{Fields: []*schemapb.FieldData{
+			{
+				Type: schemapb.DataType_ArrayOfVector, FieldName: "clips[emb]",
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_VectorArray{
+					VectorArray: &schemapb.VectorArray{Dim: 2, ElementType: schemapb.DataType_FloatVector, Data: []*schemapb.VectorField{{
+						Dim:       2,
+						Data:      &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{0.5, 0.25}}},
+						ValidData: []bool{false, true, false},
+					}}},
+				}}},
+			},
+			{
+				Type: schemapb.DataType_Array, FieldName: "clips[lang]",
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{ElementType: schemapb.DataType_VarChar, Data: []*schemapb.ScalarField{{
+						Data:      &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"en", "", ""}}},
+						ValidData: langValid,
+					}}},
+				}}},
+			},
+			{
+				Type: schemapb.DataType_Array, FieldName: "clips[score]",
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{ElementType: schemapb.DataType_Int64, Data: []*schemapb.ScalarField{{
+						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}}},
+					}}},
+				}}},
+			},
+			{
+				Type: schemapb.DataType_Array, FieldName: "clips[tags]",
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{ElementType: schemapb.DataType_Array, Data: []*schemapb.ScalarField{{
+						Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+							ElementType: schemapb.DataType_VarChar,
+							Data: []*schemapb.ScalarField{
+								{
+									Data:      &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a", ""}}},
+									ValidData: []bool{true, false},
+								},
+								{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{}}},
+								{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{}}},
+							},
+						}},
+						ValidData: []bool{true, false, true},
+					}}},
+				}}},
+			},
+		}}},
+	}
+}
+
+func TestBuildQueryRespStructElementNull(t *testing.T) {
+	schema := buildElementNullableStructTestSchema(false)
+	resp, err := buildQueryResp(0, []string{"clips"}, []*schemapb.FieldData{elementNullStructOutput([]bool{true, false, false})}, nil, nil, false, schema)
+	require.NoError(t, err)
+	require.Len(t, resp, 1)
+	blob, err := json.Marshal(resp[0]["clips"])
+	require.NoError(t, err)
+	// Int64 follows Accept-Type-Allow-Int64 inside a struct as everywhere else
+	assert.JSONEq(t, `[
+		{"emb": null, "lang": "en", "score": "1", "tags": ["a", null]},
+		{"emb": [0.5, 0.25], "lang": null, "score": "2", "tags": null},
+		{"emb": null, "lang": null, "score": "3", "tags": []}
+	]`, string(blob))
+
+	t.Run("element count mismatch", func(t *testing.T) {
+		// lang reads as two elements, its siblings as three
+		fd := elementNullStructOutput([]bool{true, false})
+		lang := subFieldDataByName(t, fd, "clips[lang]").GetScalars().GetArrayData().GetData()[0]
+		lang.GetStringData().Data = []string{"en"}
+		_, err := buildQueryResp(0, []string{"clips"}, []*schemapb.FieldData{fd}, nil, nil, false, schema)
+		assert.ErrorIs(t, err, merr.ErrServiceInternal)
+		assert.Contains(t, err.Error(), "element count mismatch")
+	})
+	t.Run("payload matches neither dense nor compact", func(t *testing.T) {
+		fd := elementNullStructOutput([]bool{true, false, false, true})
+		_, err := buildQueryResp(0, []string{"clips"}, []*schemapb.FieldData{fd}, nil, nil, false, schema)
+		assert.ErrorIs(t, err, merr.ErrServiceInternal)
+	})
+	t.Run("single sub-field output", func(t *testing.T) {
+		fd := elementNullStructOutput([]bool{true, false, false})
+		fd.GetStructArrays().Fields = fd.GetStructArrays().GetFields()[1:2]
+		resp, err := buildQueryResp(0, []string{"clips[lang]"}, []*schemapb.FieldData{fd}, nil, nil, true, schema)
+		require.NoError(t, err)
+		blob, err := json.Marshal(resp[0]["clips"])
+		require.NoError(t, err)
+		assert.JSONEq(t, `[{"lang": "en"}, {"lang": null}, {"lang": null}]`, string(blob))
+	})
+}
+
+// twoRowStructOutput is elementNullStructOutput with a second, identical row in
+// every sub-field except the named ones, which keep a single row: the shape of a
+// server result whose sub-fields disagree on the row count.
+func twoRowStructOutput(t *testing.T, shortRows ...string) *schemapb.FieldData {
+	fd := elementNullStructOutput([]bool{true, false, false})
+	for _, sub := range fd.GetStructArrays().GetFields() {
+		if slices.Contains(shortRows, sub.GetFieldName()) {
+			continue
+		}
+		switch sub.GetType() {
+		case schemapb.DataType_Array:
+			arr := sub.GetScalars().GetArrayData()
+			arr.Data = append(arr.Data, proto.Clone(arr.GetData()[0]).(*schemapb.ScalarField))
+		case schemapb.DataType_ArrayOfVector:
+			va := sub.GetVectors().GetVectorArray()
+			va.Data = append(va.Data, proto.Clone(va.GetData()[0]).(*schemapb.VectorField))
+		default:
+			require.Failf(t, "unexpected sub-field type", "%s", sub.GetType())
+		}
+	}
+	return fd
+}
+
+// TestBuildQueryRespStructShapeErrorsAreSystem: a struct result whose shape
+// breaks the server's own contract is a server fault. The error is
+// ServiceInternal, never an input error, and the message the client gets names
+// only the output field.
+func TestBuildQueryRespStructShapeErrorsAreSystem(t *testing.T) {
+	schema := buildElementNullableStructTestSchema(false)
+	withSchema := func(edit func(*schemapb.CollectionSchema)) *schemapb.CollectionSchema {
+		s := proto.Clone(schema).(*schemapb.CollectionSchema)
+		edit(s)
+		return s
+	}
+	cases := []struct {
+		name   string
+		fd     func() *schemapb.FieldData
+		schema *schemapb.CollectionSchema
+		detail string
+	}{
+		{
+			name:   "scalar sub-field missing a row",
+			fd:     func() *schemapb.FieldData { return twoRowStructOutput(t, "clips[score]") },
+			detail: "struct sub-field score missing row 1",
+		},
+		{
+			name: "vector sub-field missing a row",
+			fd: func() *schemapb.FieldData {
+				fd := twoRowStructOutput(t, "clips[emb]")
+				subs := fd.GetStructArrays().GetFields()
+				// emb is first and carries the row count; read it from lang instead
+				subs[0], subs[1] = subs[1], subs[0]
+				return fd
+			},
+			detail: "struct sub-field emb missing row 1",
+		},
+		{
+			name: "vector sub-field without a vector array",
+			fd: func() *schemapb.FieldData {
+				fd := elementNullStructOutput([]bool{true, false, false})
+				subs := fd.GetStructArrays().GetFields()
+				// emb is first and carries the row count; read it from lang instead
+				subs[0], subs[1] = subs[1], subs[0]
+				subFieldDataByName(t, fd, "clips[emb]").GetVectors().Data = nil
+				return fd
+			},
+			detail: "struct sub-field emb has no vector array",
+		},
+		{
+			name: "vector sub-field of an unknown element type",
+			fd: func() *schemapb.FieldData {
+				fd := elementNullStructOutput([]bool{true, false, false})
+				subFieldDataByName(t, fd, "clips[emb]").GetVectors().GetVectorArray().ElementType = schemapb.DataType_SparseFloatVector
+				return fd
+			},
+			detail: "unsupported vector element type SparseFloatVector",
+		},
+		{
+			name: "sub-field of an unknown type",
+			fd: func() *schemapb.FieldData {
+				fd := elementNullStructOutput([]bool{true, false, false})
+				subFieldDataByName(t, fd, "clips[score]").Type = schemapb.DataType_Int64
+				return fd
+			},
+			detail: "unsupported struct sub-field type Int64",
+		},
+		{
+			name: "schema without the struct",
+			fd:   func() *schemapb.FieldData { return elementNullStructOutput([]bool{true, false, false}) },
+			schema: withSchema(func(s *schemapb.CollectionSchema) {
+				s.StructArrayFields = nil
+			}),
+			detail: "schema missing dim for struct sub-field emb",
+		},
+		{
+			name: "schema sub-field without a dim",
+			fd:   func() *schemapb.FieldData { return elementNullStructOutput([]bool{true, false, false}) },
+			schema: withSchema(func(s *schemapb.CollectionSchema) {
+				s.GetStructArrayFields()[0].GetFields()[2].TypeParams = nil
+			}),
+			detail: "schema sub-field clips[emb] has no dim",
+		},
+		{
+			name: "nullable struct with a first sub-field of an unknown type",
+			fd: func() *schemapb.FieldData {
+				fd := elementNullStructOutput([]bool{true, false, false})
+				fd.ValidData = []bool{true, false}
+				fd.GetStructArrays().GetFields()[0].Type = schemapb.DataType_Int64
+				return fd
+			},
+			detail: "unsupported struct sub-field type Int64 for field clips",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := tc.schema
+			if s == nil {
+				s = schema
+			}
+			_, err := buildQueryResp(0, []string{"clips"}, []*schemapb.FieldData{tc.fd()}, nil, nil, false, s)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrServiceInternal)
+			assert.Equal(t, merr.Code(merr.ErrServiceInternal), merr.Code(err))
+			assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
+			assert.Contains(t, err.Error(), tc.detail)
+			assert.Equal(t, merr.ErrInvalidSearchResult.Error()+", error: failed to serialize output field clips", resultErrMessage(err))
+		})
+	}
+}
+
+// topLevelShapeErrorFields builds result columns whose shape breaks the
+// server's own contract outside any struct: a vector without a dim, a
+// valid_data bitmap that disagrees with the data, a compact nullable vector
+// with the wrong payload, and a column shorter than the row count.
+func topLevelShapeErrorFields() map[string]func() []*schemapb.FieldData {
+	vector := func(dataType schemapb.DataType, vectors *schemapb.VectorField) func() []*schemapb.FieldData {
+		return func() []*schemapb.FieldData {
+			return []*schemapb.FieldData{{
+				Type: dataType, FieldName: "vec",
+				Field: &schemapb.FieldData_Vectors{Vectors: vectors},
+			}}
+		}
+	}
+	return map[string]func() []*schemapb.FieldData{
+		"invalid binary vector dimension 0 for field vec": vector(schemapb.DataType_BinaryVector,
+			&schemapb.VectorField{Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{1}}}),
+		"invalid float vector dimension 0 for field vec": vector(schemapb.DataType_FloatVector,
+			&schemapb.VectorField{Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{0.1, 0.2}}}}),
+		"invalid float16 vector dimension 0 for field vec": vector(schemapb.DataType_Float16Vector,
+			&schemapb.VectorField{Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{1, 2}}}),
+		"invalid bfloat16 vector dimension 0 for field vec": vector(schemapb.DataType_BFloat16Vector,
+			&schemapb.VectorField{Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{1, 2}}}),
+		"invalid int8 vector dimension 0 for field vec": vector(schemapb.DataType_Int8Vector,
+			&schemapb.VectorField{Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{1, 2}}}),
+		"field vec has 2 valid rows, but data length is 1": func() []*schemapb.FieldData {
+			return []*schemapb.FieldData{{
+				Type: schemapb.DataType_Int64, FieldName: "vec",
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1}}},
+				}},
+				ValidData: []bool{true, true, false},
+			}}
+		},
+		"nullable vector field vec has 2 valid rows, but compact physical payload rows is 1": func() []*schemapb.FieldData {
+			return []*schemapb.FieldData{{
+				Type: schemapb.DataType_FloatVector, FieldName: "vec",
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim:  2,
+					Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{0.1, 0.2}}},
+				}},
+				ValidData: []bool{true, true},
+			}}
+		},
+		"row index 2 out of range for field vec valid data length 2": func() []*schemapb.FieldData {
+			return []*schemapb.FieldData{
+				{
+					Type: schemapb.DataType_Int64, FieldName: "id",
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}}},
+					}},
+				},
+				{
+					Type: schemapb.DataType_Int64, FieldName: "vec",
+					Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}},
+					}},
+					ValidData: []bool{true, true},
+				},
+			}
+		},
+	}
+}
+
+// TestBuildQueryRespTopLevelShapeErrorsAreSystem: the same rule as for struct
+// sub-fields holds for a top-level result column. The error is ServiceInternal,
+// and the message the client gets names only the output field.
+func TestBuildQueryRespTopLevelShapeErrorsAreSystem(t *testing.T) {
+	for detail, fields := range topLevelShapeErrorFields() {
+		t.Run(detail, func(t *testing.T) {
+			_, err := buildQueryResp(0, []string{"vec"}, fields(), nil, nil, false, nil)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrServiceInternal)
+			assert.Equal(t, merr.Code(merr.ErrServiceInternal), merr.Code(err))
+			assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
+			assert.Contains(t, err.Error(), detail)
+			assert.Equal(t, merr.ErrInvalidSearchResult.Error()+", error: failed to serialize output field vec", resultErrMessage(err))
+		})
+	}
+}
+
+// TestStructElementNullInsertQueryRoundTrip: what REST writes, compact at every
+// nullable level, reads back as the elements that were sent.
+func TestStructElementNullInsertQueryRoundTrip(t *testing.T) {
+	schema := buildElementNullableStructTestSchema(true)
+	body := []byte(`{"data": [
+		{"id": 1, "vec": [0.1, 0.2], "clips": [
+			{"lang": "en", "score": 1, "emb": [0.5, 0.25], "tags": ["a", null]},
+			{"lang": null, "score": 2, "emb": null, "tags": null},
+			{"score": 3, "tags": []}
+		]},
+		{"id": 2, "vec": [0.1, 0.2], "clips": null}
+	]}`)
+	rows, validData, err := checkAndSetData(body, schema, false)
+	require.NoError(t, err)
+	fds, err := anyToColumns(rows, validData, schema, true, false)
+	require.NoError(t, err)
+	var structFD *schemapb.FieldData
+	for _, fd := range fds {
+		if fd.GetType() == schemapb.DataType_ArrayOfStruct {
+			structFD = fd
+		}
+	}
+	require.NotNil(t, structFD)
+	resp, err := buildQueryResp(0, []string{"clips"}, []*schemapb.FieldData{structFD}, nil, nil, true, schema)
+	require.NoError(t, err)
+	require.Len(t, resp, 2)
+	blob, err := json.Marshal(resp[0]["clips"])
+	require.NoError(t, err)
+	assert.JSONEq(t, `[
+		{"lang": "en", "score": 1, "emb": [0.5, 0.25], "tags": ["a", null]},
+		{"lang": null, "score": 2, "emb": null, "tags": null},
+		{"lang": null, "score": 3, "emb": null, "tags": []}
+	]`, string(blob))
+	assert.Nil(t, resp[1]["clips"])
+}
+
+func TestExpandElementValidity(t *testing.T) {
+	values, err := expandElementValidity([]interface{}{1, 2}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, []interface{}{1, 2}, values)
+
+	values, err = expandElementValidity([]interface{}{1, 0, 3}, []bool{true, false, true})
+	require.NoError(t, err)
+	assert.Equal(t, []interface{}{1, nil, 3}, values)
+
+	values, err = expandElementValidity([]interface{}{1, 3}, []bool{true, false, true})
+	require.NoError(t, err)
+	assert.Equal(t, []interface{}{1, nil, 3}, values)
+
+	values, err = expandElementValidity([]interface{}{}, []bool{false, false})
+	require.NoError(t, err)
+	assert.Equal(t, []interface{}{nil, nil}, values)
+
+	_, err = expandElementValidity([]interface{}{1}, []bool{true, false, true})
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+}
+
+func TestSetElementOffsets(t *testing.T) {
+	rows := []map[string]interface{}{{"id": 1}, {"id": 2}}
+	require.NoError(t, setSearchElementOffsets(rows, nil))
+	assert.NotContains(t, rows[0], HTTPReturnOffset)
+	require.NoError(t, setSearchElementOffsets(rows, &schemapb.LongArray{Data: []int64{4, 0}}))
+	assert.Equal(t, int64(4), rows[0][HTTPReturnOffset])
+	assert.Equal(t, int64(0), rows[1][HTTPReturnOffset])
+	err := setSearchElementOffsets(rows, &schemapb.LongArray{Data: []int64{4}})
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+	assert.Equal(t, merr.ErrInvalidSearchResult.Error()+", error: failed to build search element offsets", resultErrMessage(err))
+
+	rows = []map[string]interface{}{{"id": 1}, {"id": 2}}
+	require.NoError(t, setQueryElementOffsets(rows, nil))
+	assert.NotContains(t, rows[0], HTTPReturnOffset)
+	require.NoError(t, setQueryElementOffsets(rows, []*milvuspb.ElementIndices{
+		{Indices: &schemapb.LongArray{Data: []int64{0, 2}}},
+		{},
+	}))
+	assert.Equal(t, []int64{0, 2}, rows[0][HTTPReturnOffset])
+	assert.Equal(t, []int64{}, rows[1][HTTPReturnOffset])
+	err = setQueryElementOffsets(rows, []*milvuspb.ElementIndices{{}})
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+}
+
+func TestPrintFieldDetailElementNullable(t *testing.T) {
+	schema := buildElementNullableStructTestSchema(true)
+	printed := printStructArrayFieldsV2(schema.GetStructArrayFields())
+	require.Len(t, printed, 1)
+	subs := printed[0]["fields"].([]gin.H)
+	require.Len(t, subs, 4)
+	assert.Equal(t, "lang", subs[0][HTTPReturnFieldName])
+	assert.Equal(t, true, subs[0][HTTPReturnFieldElementNullable])
+	assert.NotContains(t, subs[1], HTTPReturnFieldElementNullable)
+	assert.Equal(t, true, subs[2][HTTPReturnFieldElementNullable])
+	assert.Equal(t, "Array", subs[3][HTTPReturnFieldElementType])
+	typeSchema, ok := subs[3][HTTPReturnFieldTypeSchema].(*TypeSchemaReq)
+	require.True(t, ok)
+	assert.Equal(t, "8", typeSchema.TypeParams[common.MaxCapacityKey])
+	assert.Equal(t, "VarChar", typeSchema.ArrayElement.ArrayElement.LeafType)
+	assert.True(t, *typeSchema.ArrayElement.Nullable)
+
+	// fields that are not element nullable keep their shape
+	plain := printFieldDetail(buildStructArrayTestSchema().GetStructArrayFields()[0].GetFields()[0], false)
+	assert.NotContains(t, plain, HTTPReturnFieldElementNullable)
+	assert.NotContains(t, plain, HTTPReturnFieldTypeSchema)
 }

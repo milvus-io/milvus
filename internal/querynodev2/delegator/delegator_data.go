@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/function"
+	"github.com/milvus-io/milvus/internal/util/function/highlight"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -1450,48 +1451,11 @@ func (sd *shardDelegator) buildBM25IDF(req *internalpb.SearchRequest, functionRu
 }
 
 func (sd *shardDelegator) parseMinHash(req *internalpb.SearchRequest, functionRunner function.FunctionRunner) error {
-	pb := &commonpb.PlaceholderGroup{}
-	if err := proto.Unmarshal(req.GetPlaceholderGroup(), pb); err != nil {
-		return merr.WrapErrParameterInvalidMsg("failed to unmarshal MinHash placeholder group: %v", err)
-	}
-
-	if len(pb.Placeholders) != 1 || len(pb.Placeholders[0].Values) == 0 {
-		return merr.WrapErrParameterInvalidMsg("please provide varchar/text for MinHash Function based search")
-	}
-
-	holder := pb.Placeholders[0]
-	if holder.Type != commonpb.PlaceholderType_VarChar {
-		return merr.WrapErrParameterInvalidMsg("please provide varchar/text for MinHash Function based search, got %s", holder.Type.String())
-	}
-
-	texts := funcutil.GetVarCharFromPlaceholder(holder)
-	output, err := functionRunner.BatchRun(texts)
+	placeholder, err := function.MinHashSearchPlaceholder(req.GetPlaceholderGroup(), functionRunner)
 	if err != nil {
 		return err
 	}
-	if len(output) == 0 {
-		return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: runner returned empty output")
-	}
-
-	fieldData, ok := output[0].(*schemapb.FieldData)
-	if !ok {
-		return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: MinHash functionRunner return unknown data")
-	}
-
-	vectorField := fieldData.GetVectors()
-	if vectorField == nil {
-		return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: output is not a vector field")
-	}
-
-	binaryVector := vectorField.GetBinaryVector()
-	if binaryVector == nil {
-		return merr.WrapErrFunctionFailedMsg("MinHash embedding failed: output is not a binary vector")
-	}
-
-	req.PlaceholderGroup, err = funcutil.FieldDataToPlaceholderGroupBytes(fieldData)
-	if err != nil {
-		return err
-	}
+	req.PlaceholderGroup = placeholder
 	return nil
 }
 
@@ -1531,58 +1495,11 @@ func (sd *shardDelegator) GetHighlight(ctx context.Context, req *querypb.GetHigh
 			return nil, merr.WrapErrParameterInvalidMsg("get highlight failed, the highlight field not found, %s:%d", task.GetFieldName(), task.GetFieldId())
 		}
 
-		// analyze result of search text
-		searchResults := results[0:task.SearchTextNum]
-		// analyze result of query text
-		queryResults := results[task.SearchTextNum : task.SearchTextNum+int64(len(task.Queries))]
-		// analyze result of corpus text
-		corpusStartOffset := int(task.SearchTextNum) + len(task.Queries)
-		corpusResults := results[corpusStartOffset:]
-
-		// query for all corpus texts
-		// only support text match now
-		// build match set for all analyze result of query text
-		// TODO: support more query types
-		queryTokenSet := typeutil.NewSet[string]()
-		for _, tokens := range queryResults {
-			for _, token := range tokens {
-				queryTokenSet.Insert(token.GetToken())
-			}
+		fragments, err := highlight.BuildFragments(task, topks, results)
+		if err != nil {
+			return nil, err
 		}
-
-		corpusIdx := 0
-		for i := range len(topks) {
-			tokenSet := typeutil.NewSet[string]()
-			if len(searchResults) > i {
-				for _, token := range searchResults[i] {
-					tokenSet.Insert(token.GetToken())
-				}
-			}
-
-			for j := 0; j < int(topks[i]); j++ {
-				spans := SpanList{}
-				for _, token := range corpusResults[corpusIdx] {
-					if tokenSet.Contain(token.GetToken()) || queryTokenSet.Contain(token.GetToken()) {
-						spans = append(spans, Span{token.GetStartOffset(), token.GetEndOffset()})
-					}
-				}
-				spans = mergeOffsets(spans)
-
-				// Convert byte offsets from analyzer to rune (character) offsets
-				corpusText := task.Texts[corpusStartOffset+corpusIdx]
-				err := bytesOffsetToRuneOffset(corpusText, spans)
-				if err != nil {
-					return nil, err
-				}
-
-				frags := fetchFragmentsFromOffsets(corpusText, spans,
-					task.GetOptions().GetFragmentOffset(),
-					task.GetOptions().GetFragmentSize(),
-					task.GetOptions().GetNumOfFragments())
-				result = append(result, &querypb.HighlightResult{Fragments: frags})
-				corpusIdx++
-			}
-		}
+		result = append(result, fragments...)
 	}
 
 	return result, nil

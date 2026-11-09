@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -76,8 +77,8 @@ func (suite *RowCountBasedBalancerTestSuite) SetupTest() {
 	store := querycoord.NewCatalog(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
 	nodeManager := session.NewNodeManager()
-	testMeta := meta.NewMeta(idAllocator, store, nodeManager)
-	testTarget := meta.NewTargetManager(suite.broker, testMeta)
+	testMeta := meta.NewMeta(idAllocator, store, nodeManager, metacache.NewMetaStore(nil))
+	testTarget := meta.NewTargetManager(suite.broker, testMeta, metacache.NewMetaStore(nil))
 
 	distManager := meta.NewDistributionManager(nodeManager)
 	suite.mockScheduler = task.NewMockScheduler(suite.T())
@@ -87,8 +88,6 @@ func (suite *RowCountBasedBalancerTestSuite) SetupTest() {
 
 	suite.meta = testMeta
 	suite.balancer = NewRowCountBasedBalancer(suite.mockScheduler, nodeManager, distManager, testTarget)
-
-	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil).Maybe()
 
 	suite.mockScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	suite.mockScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
@@ -655,7 +654,6 @@ func (suite *RowCountBasedBalancerTestSuite) TestMultiReplicaBalance() {
 			collection := utils.CreateTestCollection(c.collectionID, int32(len(c.replicaWithNodes)))
 			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionID).Return(
 				c.channels, c.segments, nil)
-			suite.broker.EXPECT().GetPartitions(mock.Anything, c.collectionID).Return([]int64{c.collectionID}, nil).Maybe()
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
 			suite.meta.PutCollection(ctx, collection)

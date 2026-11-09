@@ -22,7 +22,7 @@ type recordingVChannelScheduler struct {
 	tasks []nodescheduler.Task
 }
 
-func (s *recordingVChannelScheduler) Submit(task nodescheduler.Task) nodescheduler.TaskHandle {
+func (s *recordingVChannelScheduler) Submit(task nodescheduler.Task, opts ...nodescheduler.Option) nodescheduler.TaskHandle {
 	s.tasks = append(s.tasks, task)
 	return recordingVChannelTaskHandle{}
 }

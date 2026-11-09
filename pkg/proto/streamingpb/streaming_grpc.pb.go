@@ -467,6 +467,11 @@ var StreamingCoordAssignmentService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
+	StreamingNodeHandlerService_GetCollectionSchema_FullMethodName    = "/milvus.proto.streaming.StreamingNodeHandlerService/GetCollectionSchema"
+	StreamingNodeHandlerService_ValidateAnalyzer_FullMethodName       = "/milvus.proto.streaming.StreamingNodeHandlerService/ValidateAnalyzer"
+	StreamingNodeHandlerService_SubscribeTransform_FullMethodName     = "/milvus.proto.streaming.StreamingNodeHandlerService/SubscribeTransform"
+	StreamingNodeHandlerService_SubscribeReplicas_FullMethodName      = "/milvus.proto.streaming.StreamingNodeHandlerService/SubscribeReplicas"
+	StreamingNodeHandlerService_RunAnalyzer_FullMethodName            = "/milvus.proto.streaming.StreamingNodeHandlerService/RunAnalyzer"
 	StreamingNodeHandlerService_GetReplicateCheckpoint_FullMethodName = "/milvus.proto.streaming.StreamingNodeHandlerService/GetReplicateCheckpoint"
 	StreamingNodeHandlerService_GetSalvageCheckpoint_FullMethodName   = "/milvus.proto.streaming.StreamingNodeHandlerService/GetSalvageCheckpoint"
 	StreamingNodeHandlerService_Produce_FullMethodName                = "/milvus.proto.streaming.StreamingNodeHandlerService/Produce"
@@ -477,6 +482,32 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type StreamingNodeHandlerServiceClient interface {
+	// GetCollectionSchema returns the current write schema or an exact historical
+	// schema version for a VChannel, together with its effective TimeTick.
+	// Requires the primary WAL owner and matching PChannel assignment; collection
+	// loading is not required. An unavailable historical version is not replaced
+	// with the current schema. Failures use streaming gRPC errors.
+	GetCollectionSchema(ctx context.Context, in *StreamingNodeGetCollectionSchemaRequest, opts ...grpc.CallOption) (*StreamingNodeGetCollectionSchemaResponse, error)
+	// ValidateAnalyzer prepares referenced file resources and validates analyzer
+	// configurations without requiring a collection or WAL assignment. On success,
+	// returns the resource IDs used by the analyzers for reservation before DDL.
+	// Validation and resource failures are reported in the response Status.
+	ValidateAnalyzer(ctx context.Context, in *StreamingNodeValidateAnalyzerRequest, opts ...grpc.CallOption) (*StreamingNodeValidateAnalyzerResponse, error)
+	// SubscribeTransform multiplexes VChannel TransformLog subscriptions over one
+	// bidirectional stream to a PChannel owner. CreateTransformStreamRequest is
+	// supplied in RPC metadata; stream and subscription creation acknowledgements
+	// precede their events. Each subscription delivers ordered entries after its
+	// exclusive start cursor and SyncUp progress, optionally through an end tick.
+	// Closing one subscription leaves the others active; closing the stream
+	// releases all subscriptions. Reconnection and resubscription are client-owned.
+	SubscribeTransform(ctx context.Context, opts ...grpc.CallOption) (StreamingNodeHandlerService_SubscribeTransformClient, error)
+	// Latest replica snapshots, multiplexed on one validated PChannel owner.
+	SubscribeReplicas(ctx context.Context, opts ...grpc.CallOption) (StreamingNodeHandlerService_SubscribeReplicasClient, error)
+	// RunAnalyzer analyzes text using inline parameters on any ready StreamingNode
+	// or a collection field's current analyzer on its PChannel owner. Neither mode
+	// requires loaded segments. Streaming failures use gRPC errors; analyzer and
+	// resource failures are reported in the response Status.
+	RunAnalyzer(ctx context.Context, in *StreamingNodeRunAnalyzerRequest, opts ...grpc.CallOption) (*StreamingNodeRunAnalyzerResponse, error)
 	// GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner
 	// from the correct position, ensuring no duplicate or missing messages.
 	GetReplicateCheckpoint(ctx context.Context, in *GetReplicateCheckpointRequest, opts ...grpc.CallOption) (*GetReplicateCheckpointResponse, error)
@@ -508,6 +539,95 @@ func NewStreamingNodeHandlerServiceClient(cc grpc.ClientConnInterface) Streaming
 	return &streamingNodeHandlerServiceClient{cc}
 }
 
+func (c *streamingNodeHandlerServiceClient) GetCollectionSchema(ctx context.Context, in *StreamingNodeGetCollectionSchemaRequest, opts ...grpc.CallOption) (*StreamingNodeGetCollectionSchemaResponse, error) {
+	out := new(StreamingNodeGetCollectionSchemaResponse)
+	err := c.cc.Invoke(ctx, StreamingNodeHandlerService_GetCollectionSchema_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *streamingNodeHandlerServiceClient) ValidateAnalyzer(ctx context.Context, in *StreamingNodeValidateAnalyzerRequest, opts ...grpc.CallOption) (*StreamingNodeValidateAnalyzerResponse, error) {
+	out := new(StreamingNodeValidateAnalyzerResponse)
+	err := c.cc.Invoke(ctx, StreamingNodeHandlerService_ValidateAnalyzer_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *streamingNodeHandlerServiceClient) SubscribeTransform(ctx context.Context, opts ...grpc.CallOption) (StreamingNodeHandlerService_SubscribeTransformClient, error) {
+	stream, err := c.cc.NewStream(ctx, &StreamingNodeHandlerService_ServiceDesc.Streams[0], StreamingNodeHandlerService_SubscribeTransform_FullMethodName, opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &streamingNodeHandlerServiceSubscribeTransformClient{stream}
+	return x, nil
+}
+
+type StreamingNodeHandlerService_SubscribeTransformClient interface {
+	Send(*TransformRequest) error
+	Recv() (*TransformResponse, error)
+	grpc.ClientStream
+}
+
+type streamingNodeHandlerServiceSubscribeTransformClient struct {
+	grpc.ClientStream
+}
+
+func (x *streamingNodeHandlerServiceSubscribeTransformClient) Send(m *TransformRequest) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *streamingNodeHandlerServiceSubscribeTransformClient) Recv() (*TransformResponse, error) {
+	m := new(TransformResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func (c *streamingNodeHandlerServiceClient) SubscribeReplicas(ctx context.Context, opts ...grpc.CallOption) (StreamingNodeHandlerService_SubscribeReplicasClient, error) {
+	stream, err := c.cc.NewStream(ctx, &StreamingNodeHandlerService_ServiceDesc.Streams[1], StreamingNodeHandlerService_SubscribeReplicas_FullMethodName, opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &streamingNodeHandlerServiceSubscribeReplicasClient{stream}
+	return x, nil
+}
+
+type StreamingNodeHandlerService_SubscribeReplicasClient interface {
+	Send(*ReplicaWatchRequest) error
+	Recv() (*ReplicaWatchResponse, error)
+	grpc.ClientStream
+}
+
+type streamingNodeHandlerServiceSubscribeReplicasClient struct {
+	grpc.ClientStream
+}
+
+func (x *streamingNodeHandlerServiceSubscribeReplicasClient) Send(m *ReplicaWatchRequest) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *streamingNodeHandlerServiceSubscribeReplicasClient) Recv() (*ReplicaWatchResponse, error) {
+	m := new(ReplicaWatchResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func (c *streamingNodeHandlerServiceClient) RunAnalyzer(ctx context.Context, in *StreamingNodeRunAnalyzerRequest, opts ...grpc.CallOption) (*StreamingNodeRunAnalyzerResponse, error) {
+	out := new(StreamingNodeRunAnalyzerResponse)
+	err := c.cc.Invoke(ctx, StreamingNodeHandlerService_RunAnalyzer_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *streamingNodeHandlerServiceClient) GetReplicateCheckpoint(ctx context.Context, in *GetReplicateCheckpointRequest, opts ...grpc.CallOption) (*GetReplicateCheckpointResponse, error) {
 	out := new(GetReplicateCheckpointResponse)
 	err := c.cc.Invoke(ctx, StreamingNodeHandlerService_GetReplicateCheckpoint_FullMethodName, in, out, opts...)
@@ -527,7 +647,7 @@ func (c *streamingNodeHandlerServiceClient) GetSalvageCheckpoint(ctx context.Con
 }
 
 func (c *streamingNodeHandlerServiceClient) Produce(ctx context.Context, opts ...grpc.CallOption) (StreamingNodeHandlerService_ProduceClient, error) {
-	stream, err := c.cc.NewStream(ctx, &StreamingNodeHandlerService_ServiceDesc.Streams[0], StreamingNodeHandlerService_Produce_FullMethodName, opts...)
+	stream, err := c.cc.NewStream(ctx, &StreamingNodeHandlerService_ServiceDesc.Streams[2], StreamingNodeHandlerService_Produce_FullMethodName, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -558,7 +678,7 @@ func (x *streamingNodeHandlerServiceProduceClient) Recv() (*ProduceResponse, err
 }
 
 func (c *streamingNodeHandlerServiceClient) Consume(ctx context.Context, opts ...grpc.CallOption) (StreamingNodeHandlerService_ConsumeClient, error) {
-	stream, err := c.cc.NewStream(ctx, &StreamingNodeHandlerService_ServiceDesc.Streams[1], StreamingNodeHandlerService_Consume_FullMethodName, opts...)
+	stream, err := c.cc.NewStream(ctx, &StreamingNodeHandlerService_ServiceDesc.Streams[3], StreamingNodeHandlerService_Consume_FullMethodName, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -592,6 +712,32 @@ func (x *streamingNodeHandlerServiceConsumeClient) Recv() (*ConsumeResponse, err
 // All implementations should embed UnimplementedStreamingNodeHandlerServiceServer
 // for forward compatibility
 type StreamingNodeHandlerServiceServer interface {
+	// GetCollectionSchema returns the current write schema or an exact historical
+	// schema version for a VChannel, together with its effective TimeTick.
+	// Requires the primary WAL owner and matching PChannel assignment; collection
+	// loading is not required. An unavailable historical version is not replaced
+	// with the current schema. Failures use streaming gRPC errors.
+	GetCollectionSchema(context.Context, *StreamingNodeGetCollectionSchemaRequest) (*StreamingNodeGetCollectionSchemaResponse, error)
+	// ValidateAnalyzer prepares referenced file resources and validates analyzer
+	// configurations without requiring a collection or WAL assignment. On success,
+	// returns the resource IDs used by the analyzers for reservation before DDL.
+	// Validation and resource failures are reported in the response Status.
+	ValidateAnalyzer(context.Context, *StreamingNodeValidateAnalyzerRequest) (*StreamingNodeValidateAnalyzerResponse, error)
+	// SubscribeTransform multiplexes VChannel TransformLog subscriptions over one
+	// bidirectional stream to a PChannel owner. CreateTransformStreamRequest is
+	// supplied in RPC metadata; stream and subscription creation acknowledgements
+	// precede their events. Each subscription delivers ordered entries after its
+	// exclusive start cursor and SyncUp progress, optionally through an end tick.
+	// Closing one subscription leaves the others active; closing the stream
+	// releases all subscriptions. Reconnection and resubscription are client-owned.
+	SubscribeTransform(StreamingNodeHandlerService_SubscribeTransformServer) error
+	// Latest replica snapshots, multiplexed on one validated PChannel owner.
+	SubscribeReplicas(StreamingNodeHandlerService_SubscribeReplicasServer) error
+	// RunAnalyzer analyzes text using inline parameters on any ready StreamingNode
+	// or a collection field's current analyzer on its PChannel owner. Neither mode
+	// requires loaded segments. Streaming failures use gRPC errors; analyzer and
+	// resource failures are reported in the response Status.
+	RunAnalyzer(context.Context, *StreamingNodeRunAnalyzerRequest) (*StreamingNodeRunAnalyzerResponse, error)
 	// GetReplicateCheckpoint returns the WAL checkpoint that will be used to create scanner
 	// from the correct position, ensuring no duplicate or missing messages.
 	GetReplicateCheckpoint(context.Context, *GetReplicateCheckpointRequest) (*GetReplicateCheckpointResponse, error)
@@ -619,6 +765,21 @@ type StreamingNodeHandlerServiceServer interface {
 type UnimplementedStreamingNodeHandlerServiceServer struct {
 }
 
+func (UnimplementedStreamingNodeHandlerServiceServer) GetCollectionSchema(context.Context, *StreamingNodeGetCollectionSchemaRequest) (*StreamingNodeGetCollectionSchemaResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetCollectionSchema not implemented")
+}
+func (UnimplementedStreamingNodeHandlerServiceServer) ValidateAnalyzer(context.Context, *StreamingNodeValidateAnalyzerRequest) (*StreamingNodeValidateAnalyzerResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ValidateAnalyzer not implemented")
+}
+func (UnimplementedStreamingNodeHandlerServiceServer) SubscribeTransform(StreamingNodeHandlerService_SubscribeTransformServer) error {
+	return status.Errorf(codes.Unimplemented, "method SubscribeTransform not implemented")
+}
+func (UnimplementedStreamingNodeHandlerServiceServer) SubscribeReplicas(StreamingNodeHandlerService_SubscribeReplicasServer) error {
+	return status.Errorf(codes.Unimplemented, "method SubscribeReplicas not implemented")
+}
+func (UnimplementedStreamingNodeHandlerServiceServer) RunAnalyzer(context.Context, *StreamingNodeRunAnalyzerRequest) (*StreamingNodeRunAnalyzerResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RunAnalyzer not implemented")
+}
 func (UnimplementedStreamingNodeHandlerServiceServer) GetReplicateCheckpoint(context.Context, *GetReplicateCheckpointRequest) (*GetReplicateCheckpointResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetReplicateCheckpoint not implemented")
 }
@@ -641,6 +802,112 @@ type UnsafeStreamingNodeHandlerServiceServer interface {
 
 func RegisterStreamingNodeHandlerServiceServer(s grpc.ServiceRegistrar, srv StreamingNodeHandlerServiceServer) {
 	s.RegisterService(&StreamingNodeHandlerService_ServiceDesc, srv)
+}
+
+func _StreamingNodeHandlerService_GetCollectionSchema_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StreamingNodeGetCollectionSchemaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StreamingNodeHandlerServiceServer).GetCollectionSchema(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StreamingNodeHandlerService_GetCollectionSchema_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StreamingNodeHandlerServiceServer).GetCollectionSchema(ctx, req.(*StreamingNodeGetCollectionSchemaRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _StreamingNodeHandlerService_ValidateAnalyzer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StreamingNodeValidateAnalyzerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StreamingNodeHandlerServiceServer).ValidateAnalyzer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StreamingNodeHandlerService_ValidateAnalyzer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StreamingNodeHandlerServiceServer).ValidateAnalyzer(ctx, req.(*StreamingNodeValidateAnalyzerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _StreamingNodeHandlerService_SubscribeTransform_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(StreamingNodeHandlerServiceServer).SubscribeTransform(&streamingNodeHandlerServiceSubscribeTransformServer{stream})
+}
+
+type StreamingNodeHandlerService_SubscribeTransformServer interface {
+	Send(*TransformResponse) error
+	Recv() (*TransformRequest, error)
+	grpc.ServerStream
+}
+
+type streamingNodeHandlerServiceSubscribeTransformServer struct {
+	grpc.ServerStream
+}
+
+func (x *streamingNodeHandlerServiceSubscribeTransformServer) Send(m *TransformResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *streamingNodeHandlerServiceSubscribeTransformServer) Recv() (*TransformRequest, error) {
+	m := new(TransformRequest)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func _StreamingNodeHandlerService_SubscribeReplicas_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(StreamingNodeHandlerServiceServer).SubscribeReplicas(&streamingNodeHandlerServiceSubscribeReplicasServer{stream})
+}
+
+type StreamingNodeHandlerService_SubscribeReplicasServer interface {
+	Send(*ReplicaWatchResponse) error
+	Recv() (*ReplicaWatchRequest, error)
+	grpc.ServerStream
+}
+
+type streamingNodeHandlerServiceSubscribeReplicasServer struct {
+	grpc.ServerStream
+}
+
+func (x *streamingNodeHandlerServiceSubscribeReplicasServer) Send(m *ReplicaWatchResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *streamingNodeHandlerServiceSubscribeReplicasServer) Recv() (*ReplicaWatchRequest, error) {
+	m := new(ReplicaWatchRequest)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func _StreamingNodeHandlerService_RunAnalyzer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StreamingNodeRunAnalyzerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StreamingNodeHandlerServiceServer).RunAnalyzer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StreamingNodeHandlerService_RunAnalyzer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StreamingNodeHandlerServiceServer).RunAnalyzer(ctx, req.(*StreamingNodeRunAnalyzerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _StreamingNodeHandlerService_GetReplicateCheckpoint_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -739,6 +1006,18 @@ var StreamingNodeHandlerService_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*StreamingNodeHandlerServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
+			MethodName: "GetCollectionSchema",
+			Handler:    _StreamingNodeHandlerService_GetCollectionSchema_Handler,
+		},
+		{
+			MethodName: "ValidateAnalyzer",
+			Handler:    _StreamingNodeHandlerService_ValidateAnalyzer_Handler,
+		},
+		{
+			MethodName: "RunAnalyzer",
+			Handler:    _StreamingNodeHandlerService_RunAnalyzer_Handler,
+		},
+		{
 			MethodName: "GetReplicateCheckpoint",
 			Handler:    _StreamingNodeHandlerService_GetReplicateCheckpoint_Handler,
 		},
@@ -748,6 +1027,18 @@ var StreamingNodeHandlerService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "SubscribeTransform",
+			Handler:       _StreamingNodeHandlerService_SubscribeTransform_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "SubscribeReplicas",
+			Handler:       _StreamingNodeHandlerService_SubscribeReplicas_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
 		{
 			StreamName:    "Produce",
 			Handler:       _StreamingNodeHandlerService_Produce_Handler,

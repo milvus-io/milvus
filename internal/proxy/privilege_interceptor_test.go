@@ -356,6 +356,56 @@ func TestPrivilegeInterceptorClusterLevel(t *testing.T) {
 	})
 }
 
+// Any user may list and cancel their own running requests. The privileges
+// reach other users' requests, so a caller without one is let through but
+// held to their own requests, and only for these two calls.
+func TestPrivilegeInterceptorRunningRequests(t *testing.T) {
+	paramtable.Init()
+	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+	defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+
+	client := &MockMixCoordClientInterface{}
+	client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+		return &internalpb.ListPolicyResponse{
+			Status: merr.Success(),
+			PolicyInfos: []string{
+				funcutil.PolicyForPrivilege("role_ops", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeListRunningRequests.String(), util.AnyWord),
+				funcutil.PolicyForPrivilege("role_ops", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeCancelRequests.String(), util.AnyWord),
+				funcutil.PolicyForPrivilege("role_watch", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeListRunningRequests.String(), util.AnyWord),
+			},
+			UserRoles: []string{
+				funcutil.EncodeUserRoleCache("olive", "role_ops"),
+				funcutil.EncodeUserRoleCache("wes", "role_watch"),
+			},
+		}, nil
+	}
+	_, err := initMetaCache(context.Background(), client)
+	assert.NoError(t, err)
+
+	list := &milvuspb.ListRunningRequestsRequest{}
+	cancel := &milvuspb.CancelRequestsRequest{RequestIds: []string{"25-to03zu-1"}}
+	for _, tc := range []struct {
+		user              string
+		req               any
+		heldToOwnRequests bool
+	}{
+		{"olive", list, false},
+		{"olive", cancel, false},
+		{"wes", list, false},
+		{"wes", cancel, true},
+		{"pat", list, true},
+		{"pat", cancel, true},
+	} {
+		ctx, err := PrivilegeInterceptor(GetContext(context.Background(), tc.user+":pwd"), tc.req)
+		require.NoError(t, err, "%s %T", tc.user, tc.req)
+		assert.Equal(t, tc.heldToOwnRequests, ownRequestsOnly(ctx), "%s %T", tc.user, tc.req)
+	}
+
+	// the exemption is for these two calls only
+	_, err = PrivilegeInterceptor(GetContext(context.Background(), "pat:pwd"), &milvuspb.CreateDatabaseRequest{DbName: "x"})
+	assert.Error(t, err)
+}
+
 // TestPrivilegeInterceptorDatabaseLevel covers the database-level half of the
 // #50678 fix using the issue's original reproducer (AlterDatabase). A
 // database-level privilege is scoped to the db the request targets, so a grant
@@ -583,72 +633,6 @@ func TestRootShouldBindRole(t *testing.T) {
 		})
 		assert.NoError(t, err)
 	})
-}
-
-func TestCheckSkipRLSPrivilege(t *testing.T) {
-	paramtable.Init()
-	Params.Save(Params.ProxyCfg.ResolveAliasForPrivilege.Key, "false")
-	defer Params.Reset(Params.ProxyCfg.ResolveAliasForPrivilege.Key)
-	defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
-	defer privilege.CleanPrivilegeCache()
-	var metaCache Cache
-
-	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "false")
-	assert.NoError(t, checkSkipRLSPrivilege(context.Background(), metaCache, "db1", "coll1", "query"))
-
-	enforce, err := resolveRLSEnforcement(context.Background(), metaCache, false, true, true, "db1", "coll1", "query")
-	assert.NoError(t, err)
-	assert.False(t, enforce)
-
-	enforce, err = resolveRLSEnforcement(context.Background(), metaCache, true, true, false, "db1", "coll1", "query")
-	assert.NoError(t, err)
-	assert.True(t, enforce)
-
-	enforce, err = resolveRLSEnforcement(context.Background(), metaCache, true, false, true, "db1", "coll1", "query")
-	assert.NoError(t, err)
-	assert.False(t, enforce)
-
-	_, err = resolveRLSEnforcement(context.Background(), metaCache, true, true, true, "db1", "coll1", "query")
-	assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
-	assert.Contains(t, err.Error(), "rls.force")
-
-	Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
-	ctx := GetContext(context.Background(), "alice:123456")
-	client := &MockMixCoordClientInterface{}
-	client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
-		return &internalpb.ListPolicyResponse{
-			Status:      merr.Success(),
-			PolicyInfos: nil,
-			UserRoles: []string{
-				funcutil.EncodeUserRoleCache("alice", "role1"),
-			},
-		}, nil
-	}
-	metaCache = mustInitMetaCacheForTest(ctx, client)
-	err = checkSkipRLSPrivilege(ctx, metaCache, "db1", "coll1", "query")
-	assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
-	assert.Contains(t, err.Error(), "SkipRLS")
-	_, err = resolveRLSEnforcement(ctx, metaCache, true, false, true, "db1", "coll1", "query")
-	assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
-
-	client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
-		return &internalpb.ListPolicyResponse{
-			Status: merr.Success(),
-			PolicyInfos: []string{
-				funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Collection.String(), "coll1", commonpb.ObjectPrivilege_PrivilegeSkipRLS.String(), "db1"),
-			},
-			UserRoles: []string{
-				funcutil.EncodeUserRoleCache("alice", "role1"),
-			},
-		}, nil
-	}
-	metaCache = mustInitMetaCacheForTest(ctx, client)
-	assert.NoError(t, checkSkipRLSPrivilege(ctx, metaCache, "db1", "coll1", "query"))
-	enforce, err = resolveRLSEnforcement(ctx, metaCache, true, false, true, "db1", "coll1", "query")
-	assert.NoError(t, err)
-	assert.False(t, enforce)
-	_, err = resolveRLSEnforcement(ctx, metaCache, true, true, true, "db1", "coll1", "query")
-	assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
 }
 
 func TestResourceGroupPrivilege(t *testing.T) {

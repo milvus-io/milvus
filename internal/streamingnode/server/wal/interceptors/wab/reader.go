@@ -35,6 +35,7 @@ func (r *WriteAheadBufferReader) nextFromSnapshot() message.ImmutableMessage {
 		return nil
 	}
 	nextMsg := r.snapshot[0]
+	r.snapshot[0] = messageWithOffset{} // Release consumed payloads even in a large snapshot.
 	newNextOffset := nextMsg.Offset + 1
 	if newNextOffset < r.nextOffset {
 		panic("unreachable: next offset should be monotonically increasing")
@@ -42,5 +43,8 @@ func (r *WriteAheadBufferReader) nextFromSnapshot() message.ImmutableMessage {
 	r.nextOffset = newNextOffset
 	r.lastTimeTick = nextMsg.Message.TimeTick()
 	r.snapshot = r.snapshot[1:]
+	if len(r.snapshot) == 0 {
+		r.snapshot = nil
+	}
 	return nextMsg.Message
 }

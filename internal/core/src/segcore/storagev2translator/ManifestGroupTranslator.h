@@ -75,6 +75,8 @@ class ManifestGroupTranslator
      * @param column_group_index Index of the column group within the segment
      * @param chunk_reader Reader for accessing chunks from storage
      * @param field_metas Metadata for all fields in this column group
+     * @param physical_column_field_ids Schema-resolved physical-to-logical
+     * field mapping
      * @param column_group_columns Logical column-group names in estimate order
      * @param projected_columns Physical column names projected by chunk_reader
      * @param use_mmap Whether to use memory mapping for data loading
@@ -96,6 +98,8 @@ class ManifestGroupTranslator
         int64_t column_group_index,
         std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
         const std::unordered_map<FieldId, FieldMeta>& field_metas,
+        std::unordered_map<std::string, std::vector<FieldId>>
+            physical_column_field_ids,
         const std::vector<std::string>& column_group_columns,
         const std::vector<std::string>& projected_columns,
         bool use_mmap,
@@ -143,9 +147,9 @@ class ManifestGroupTranslator
      * @param cid Cell ID to estimate
      * @return Pair of (memory_usage, disk_usage) for loading and storage
      */
-    std::pair<milvus::cachinglayer::ResourceUsage,
-              milvus::cachinglayer::ResourceUsage>
-    estimated_byte_size_of_cell(milvus::cachinglayer::cid_t cid) const override;
+    milvus::cachinglayer::LoadingResourceUsage
+    estimated_loading_usage(
+        const std::vector<milvus::cachinglayer::cid_t>& cids) const override;
 
     /**
      * @brief Get the cache key for this translator
@@ -227,11 +231,13 @@ class ManifestGroupTranslator
      *
      * @param tables Arrow Tables from row groups
      * @param cid Cell ID of the chunk being loaded
+     * @param priority Effective priority for this load, including mmap writes
      * @return GroupChunk containing the loaded field data
      */
     std::unique_ptr<milvus::GroupChunk>
     load_group_chunk(const std::vector<std::shared_ptr<arrow::Table>>& tables,
-                     milvus::cachinglayer::cid_t cid) const;
+                     milvus::cachinglayer::cid_t cid,
+                     milvus::proto::common::LoadPriority priority) const;
 
     // Returns peak transient bytes needed to materialize one cell.
     int64_t
@@ -242,6 +248,8 @@ class ManifestGroupTranslator
     int64_t column_group_index_;
     std::string key_;
     std::unordered_map<FieldId, FieldMeta> field_metas_;
+    std::unordered_map<std::string, std::vector<FieldId>>
+        physical_column_field_ids_;
     std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader_;
 
     GroupCTMeta meta_;

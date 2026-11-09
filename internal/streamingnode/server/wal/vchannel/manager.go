@@ -7,14 +7,19 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/l0materializer"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -22,6 +27,10 @@ import (
 )
 
 type PChannelManagerConfig struct {
+	QueryStatsChunkManager     storage.ChunkManager
+	QueryRuntimeModuleBuilders []queryresource.QueryRuntimeModuleBuilder
+	QueryViewLoadInfoProvider  queryresource.LoadInfoProvider
+
 	PChannel string
 
 	VChannelMetas map[string]*streamingpb.VChannelMeta
@@ -37,19 +46,13 @@ type PChannelManagerConfig struct {
 	L0Materializer     l0materializer.Materializer
 	L0MaterializeRows  uint64
 	L0MaterializeBytes uint64
-
-	// Deprecated: GetRecoveryCheckpoint and CoordinatorBroker wire the
-	// temporary channel-checkpoint reporting (PChannelCheckpointUpdater) that
-	// mirrors the removed flusher's DataCoord.UpdateChannelCheckpoint calls.
-	// When both are non-nil the manager runs the updater; remove them
-	// together with the updater once the new checkpoint-propagation path
-	// lands.
-	GetRecoveryCheckpoint func() *utility.WALCheckpoint
-	CoordinatorBroker     checkpointReporter
 }
 
 // PChannelRecoveryManager owns all vchannel recovery modules on one pchannel.
 type PChannelRecoveryManager struct {
+	queryDispatcher         *queryresource.Dispatcher
+	queryTransformLogStream *walsummary.Stream
+
 	pchannel string
 	modules  *typeutil.ConcurrentMap[string, *VChannelRecoveryModule]
 
@@ -57,10 +60,6 @@ type PChannelRecoveryManager struct {
 	dirtyMu            sync.Mutex
 	dirtyModules       map[string]*VChannelRecoveryModule
 	cleanupModules     map[string]*VChannelRecoveryModule
-
-	// Deprecated: periodic DataCoord channel-checkpoint reporting (see
-	// PChannelCheckpointUpdater). Non-nil only when the config wires it.
-	checkpointUpdater *PChannelCheckpointUpdater
 
 	closeCh   chan struct{}
 	closeOnce sync.Once
@@ -74,20 +73,14 @@ func NewPChannelRecoveryManager(config PChannelManagerConfig) (*PChannelRecovery
 	}
 	segmentsByVChannel := groupSegmentsByVChannel(config.Segments)
 	manager := &PChannelRecoveryManager{
-		pchannel:           config.PChannel,
-		modules:            typeutil.NewConcurrentMap[string, *VChannelRecoveryModule](),
-		segmentsByVChannel: segmentsByVChannel,
-		dirtyModules:       make(map[string]*VChannelRecoveryModule),
-		config:             config,
-		closeCh:            make(chan struct{}),
-	}
-	if config.GetRecoveryCheckpoint != nil && config.CoordinatorBroker != nil {
-		manager.checkpointUpdater = newPChannelCheckpointUpdater(
-			config.PChannel,
-			manager.activeVChannels,
-			config.GetRecoveryCheckpoint,
-			config.CoordinatorBroker,
-		)
+		pchannel:                config.PChannel,
+		queryDispatcher:         queryresource.NewConfiguredDispatcher(),
+		queryTransformLogStream: walsummary.NewStream(config.SummaryManager),
+		modules:                 typeutil.NewConcurrentMap[string, *VChannelRecoveryModule](),
+		segmentsByVChannel:      segmentsByVChannel,
+		dirtyModules:            make(map[string]*VChannelRecoveryModule),
+		config:                  config,
+		closeCh:                 make(chan struct{}),
 	}
 	for _, vchannel := range manager.initialVChannels(config) {
 		module, err := manager.newModule(vchannel)
@@ -102,17 +95,6 @@ func NewPChannelRecoveryManager(config PChannelManagerConfig) (*PChannelRecovery
 	}
 	manager.releaseInitialState()
 	return manager, nil
-}
-
-// activeVChannels returns the currently active vchannels of the pchannel.
-func (m *PChannelRecoveryManager) activeVChannels() []string {
-	vchannels := make([]string, 0, m.modules.Len())
-	m.modules.Range(func(vchannel string, _ *VChannelRecoveryModule) bool {
-		vchannels = append(vchannels, vchannel)
-		return true
-	})
-	sort.Strings(vchannels)
-	return vchannels
 }
 
 func (m *PChannelRecoveryManager) initialVChannels(config PChannelManagerConfig) []string {
@@ -254,12 +236,8 @@ func (m *PChannelRecoveryManager) RequestPersistThrough(vchannel string, targetT
 	module.RequestPersistThrough(targetTimeTick)
 }
 
-// Start runs the legacy checkpoint reporter and one shared L0 age check.
+// Start runs one shared L0 age check.
 func (m *PChannelRecoveryManager) Start() {
-	if m.checkpointUpdater != nil {
-		m.wg.Add(1)
-		go func() { defer m.wg.Done(); m.checkpointUpdater.Start() }()
-	}
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
@@ -281,10 +259,12 @@ func (m *PChannelRecoveryManager) Start() {
 }
 
 func (m *PChannelRecoveryManager) Close() {
-	m.closeOnce.Do(func() { close(m.closeCh) })
-	if m.checkpointUpdater != nil {
-		m.checkpointUpdater.Close()
-	}
+	m.closeOnce.Do(func() {
+		m.modules.Range(func(_ string, module *VChannelRecoveryModule) bool { module.CloseQueryResources(); return true })
+		_ = m.queryTransformLogStream.Close()
+		m.queryDispatcher.Close()
+		close(m.closeCh)
+	})
 	m.wg.Wait()
 }
 
@@ -315,7 +295,9 @@ func (m *PChannelRecoveryManager) moduleForMessage(
 		return nil
 	}
 	module, _ := m.modules.Get(vchannel)
-	if module != nil || msg.MessageType() != message.MessageTypeCreateCollection {
+	createsCollection := msg.MessageType() == message.MessageTypeCreateCollection ||
+		(msg.MessageType() == message.MessageTypeRestoreSnapshot && messageutil.RestoreCollectionMessage(msg) != nil)
+	if module != nil || !createsCollection {
 		return module
 	}
 	module, err := m.newModule(vchannel)
@@ -335,18 +317,24 @@ func (m *PChannelRecoveryManager) newModule(vchannel string) (*VChannelRecoveryM
 		},
 	}
 	module, err := newModuleFromOwnedRecoveryState(ModuleConfig{
-		PChannel:           m.pchannel,
-		VChannel:           vchannel,
-		VChannelMeta:       m.config.VChannelMetas[vchannel],
-		Segments:           m.segmentsByVChannel[vchannel],
-		Runtime:            runtime,
-		Logger:             m.config.Logger,
-		SegmentLifecycle:   m.config.SegmentLifecycle,
-		SegmentPackWriter:  m.config.SegmentPackWriter,
-		L0Materializer:     m.config.L0Materializer,
-		L0MaterializeRows:  m.config.L0MaterializeRows,
-		L0MaterializeBytes: m.config.L0MaterializeBytes,
-		OnCleanup:          m.removeModule,
+		QueryRuntimeModuleBuilders: m.config.QueryRuntimeModuleBuilders,
+		QueryViewLoadInfoProvider:  m.config.QueryViewLoadInfoProvider,
+		QueryStatsChunkManager:     m.config.QueryStatsChunkManager,
+		QueryDispatcher:            m.queryDispatcher,
+		TransformLogStream:         m.queryTransformLogStream,
+		SummaryManager:             m.config.SummaryManager,
+		PChannel:                   m.pchannel,
+		VChannel:                   vchannel,
+		VChannelMeta:               m.config.VChannelMetas[vchannel],
+		Segments:                   m.segmentsByVChannel[vchannel],
+		Runtime:                    runtime,
+		Logger:                     m.config.Logger,
+		SegmentLifecycle:           m.config.SegmentLifecycle,
+		SegmentPackWriter:          m.config.SegmentPackWriter,
+		L0Materializer:             m.config.L0Materializer,
+		L0MaterializeRows:          m.config.L0MaterializeRows,
+		L0MaterializeBytes:         m.config.L0MaterializeBytes,
+		OnCleanup:                  m.removeModule,
 		OnL0Materialized: func(through uint64) {
 			if m.config.SummaryManager != nil {
 				m.config.SummaryManager.ReportMaterialized(vchannel, through)
@@ -426,4 +414,88 @@ func (n *dirtyTrackingNotifier) NotifyModuleUpdated(name moduleapi.ModuleName) {
 	if n.inner != nil {
 		n.inner.NotifyModuleUpdated(name)
 	}
+}
+
+func (m *PChannelRecoveryManager) Acquire(req snview.AcquireResource) {
+	if m == nil || req.Meta == nil {
+		panic("query resource acquire misses meta")
+	}
+	module := m.Module(req.Meta.GetVchannel())
+	if module == nil {
+		go func() {
+			if req.OnUnrecoverable != nil {
+				req.OnUnrecoverable()
+			}
+		}()
+		return
+	}
+	module.AcquireQueryResource(req)
+}
+
+func (m *PChannelRecoveryManager) Release(req snview.ReleaseResource) {
+	if m == nil {
+		return
+	}
+	module := m.Module(req.Key.ShardID.VChannel)
+	if module == nil {
+		go func() {
+			if req.OnDropped != nil {
+				req.OnDropped()
+			}
+		}()
+		return
+	}
+	module.ReleaseQueryResource(req)
+}
+
+func (m *PChannelRecoveryManager) QueryRuntime(key qviews.QueryViewKey) (snview.QueryRuntime, bool) {
+	runtime, ok := m.GetQueryReadRuntime(key)
+	if !ok {
+		return nil, false
+	}
+	return runtime, true
+}
+
+func (m *PChannelRecoveryManager) GetQueryRuntime(key qviews.QueryViewKey) (*queryresource.QueryRuntime, bool) {
+	if m == nil {
+		return nil, false
+	}
+	module := m.Module(key.ShardID.VChannel)
+	if module == nil {
+		return nil, false
+	}
+	return module.QueryRuntime(key)
+}
+
+// AcquireStream gives each consumer an independent subscription lifetime while
+// retaining the recovery manager's single authoritative summary reader.
+func (m *PChannelRecoveryManager) AcquireStream(ctx context.Context, pchannel string) (wal.TransformLogStream, error) {
+	if pchannel != m.pchannel {
+		return nil, wal.ErrTransformLogVChannelUnavailable
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-m.closeCh:
+		return nil, wal.ErrTransformLogVChannelUnavailable
+	default:
+	}
+	stream := walsummary.NewDispatchStream(m.config.SummaryManager)
+	go func() {
+		select {
+		case <-ctx.Done():
+		case <-m.closeCh:
+		case <-stream.Done():
+		}
+		_ = stream.Close()
+	}()
+	return stream, nil
+}
+
+func (m *PChannelRecoveryManager) GetQueryReadRuntime(key qviews.QueryViewKey) (*queryresource.ReadRuntime, bool) {
+	module := m.Module(key.ShardID.VChannel)
+	if module == nil {
+		return nil, false
+	}
+	return module.QueryReadRuntime(key)
 }

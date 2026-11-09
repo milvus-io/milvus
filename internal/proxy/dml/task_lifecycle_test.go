@@ -156,7 +156,6 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 			primaryKeys: &schemapb.IDs{
 				IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{0, 1}}},
 			},
-			chMgr:        chMgr,
 			collectionID: collectionID,
 			vChannels:    []string{"test-ch"},
 		}
@@ -393,7 +392,6 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 			},
 			idAllocator: idAllocator,
 			ctx:         ctx,
-			chMgr:       chMgr,
 			vChannels:   []string{"test-channel"},
 			primaryKeys: &schemapb.IDs{
 				IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"milvus", "test"}}},

@@ -214,7 +214,7 @@ func (s *Server) initGrpcServer() {
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			mlog.UnaryServerInterceptor(typeutil.MixCoordRole),
-			streamingserviceinterceptor.NewStreamingServiceUnaryServerInterceptor(),
+			streamingserviceinterceptor.NewServiceUnaryServerInterceptor(),
 			interceptor.ClusterValidationUnaryServerInterceptor(),
 			interceptor.ServerIDValidationUnaryServerInterceptor(func() int64 {
 				if s.serverID.Load() == 0 {
@@ -225,7 +225,7 @@ func (s *Server) initGrpcServer() {
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
 			mlog.StreamServerInterceptor(typeutil.MixCoordRole),
-			streamingserviceinterceptor.NewStreamingServiceStreamServerInterceptor(),
+			streamingserviceinterceptor.NewServiceStreamServerInterceptor(),
 			interceptor.ClusterValidationStreamServerInterceptor(),
 			interceptor.ServerIDValidationStreamServerInterceptor(func() int64 {
 				if s.serverID.Load() == 0 {
@@ -243,6 +243,7 @@ func (s *Server) initGrpcServer() {
 	querypb.RegisterQueryCoordServer(s.grpcServer, s)
 	datapb.RegisterDataCoordServer(s.grpcServer, s)
 	s.mixCoord.RegisterStreamingCoordGRPCService(s.grpcServer)
+	s.mixCoord.RegisterPKIndexCoordGRPCService(s.grpcServer)
 }
 
 func (s *Server) startGrpc() error {
@@ -770,6 +771,10 @@ func (s *Server) OperatePrivilegeGroup(ctx context.Context, request *milvuspb.Op
 	return s.mixCoord.OperatePrivilegeGroup(ctx, request)
 }
 
+func (s *Server) EnsureCollectionReady(ctx context.Context, req *querypb.EnsureCollectionReadyRequest) (*commonpb.Status, error) {
+	return s.mixCoord.EnsureCollectionReady(ctx, req)
+}
+
 // ShowCollections shows the collections in the QueryCoord.
 func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
 	return s.mixCoord.ShowLoadCollections(ctx, req)
@@ -880,6 +885,14 @@ func (s *Server) GetQueryNodeDistribution(ctx context.Context, req *querypb.GetQ
 
 func (s *Server) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {
 	return s.mixCoord.ClearReadTaskQueue(ctx, req)
+}
+
+func (s *Server) ListRunningRequests(ctx context.Context, req *milvuspb.ListRunningRequestsRequest) (*milvuspb.ListRunningRequestsResponse, error) {
+	return s.mixCoord.ListRunningRequests(ctx, req)
+}
+
+func (s *Server) CancelRequests(ctx context.Context, req *milvuspb.CancelRequestsRequest) (*milvuspb.CancelRequestsResponse, error) {
+	return s.mixCoord.CancelRequests(ctx, req)
 }
 
 func (s *Server) SuspendBalance(ctx context.Context, req *querypb.SuspendBalanceRequest) (*commonpb.Status, error) {
@@ -1029,7 +1042,7 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 	return s.mixCoord.WatchChannels(ctx, req)
 }
 
-// GetFlushState gets the flush state of the collection based on the provided flush ts and segment IDs.
+// GetFlushState gets the flush state based on the provided segment IDs.
 func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
 	return s.mixCoord.GetFlushState(ctx, req)
 }
@@ -1156,6 +1169,10 @@ func (s *Server) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMe
 	return s.mixCoord.GetQuotaMetrics(ctx, req)
 }
 
+func (s *Server) GetFeatureUsage(ctx context.Context, req *internalpb.GetFeatureUsageRequest) (*internalpb.FeatureUsageReport, error) {
+	return s.mixCoord.GetFeatureUsage(ctx, req)
+}
+
 func (s *Server) ListLoadedSegments(ctx context.Context, req *querypb.ListLoadedSegmentsRequest) (*querypb.ListLoadedSegmentsResponse, error) {
 	return s.mixCoord.ListLoadedSegments(ctx, req)
 }
@@ -1273,4 +1290,16 @@ func (s *Server) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteCl
 // ListClientCommands lists the commands currently held for clients
 func (s *Server) ListClientCommands(ctx context.Context, req *rootcoordpb.ListClientCommandsRequest) (*rootcoordpb.ListClientCommandsResponse, error) {
 	return s.mixCoord.ListClientCommands(ctx, req)
+}
+
+func (s *Server) GetQueryViewLoadInfo(ctx context.Context, req *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error) {
+	return s.mixCoord.GetQueryViewLoadInfo(ctx, req)
+}
+
+func (s *Server) GetStreamingNodeQueryViewResources(ctx context.Context, req *datapb.GetStreamingNodeQueryViewResourcesRequest) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {
+	return s.mixCoord.GetStreamingNodeQueryViewResources(ctx, req)
+}
+
+func (s *Server) GetQueryViewSegmentLoadInfo(ctx context.Context, req *querypb.GetQueryViewSegmentLoadInfoRequest) (*querypb.GetQueryViewSegmentLoadInfoResponse, error) {
+	return s.mixCoord.GetQueryViewSegmentLoadInfo(ctx, req)
 }

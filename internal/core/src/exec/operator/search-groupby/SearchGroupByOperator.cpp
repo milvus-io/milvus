@@ -50,9 +50,16 @@ CreateFieldGetter(milvus::OpContext* op_ctx,
                   const segcore::SegmentReadSnapshot* snapshot,
                   std::optional<std::string> json_path = std::nullopt,
                   std::optional<DataType> json_type = std::nullopt,
-                  bool strict_cast = false) {
-    auto getter = GetDataGetter<T, InnerRawType>(
-        op_ctx, segment, field_id, json_path, json_type, strict_cast, snapshot);
+                  bool strict_cast = false,
+                  bool use_json_stats = true) {
+    auto getter = GetDataGetter<T, InnerRawType>(op_ctx,
+                                                 segment,
+                                                 field_id,
+                                                 json_path,
+                                                 json_type,
+                                                 strict_cast,
+                                                 snapshot,
+                                                 use_json_stats);
     return
         [getter](int64_t idx) -> GroupByValueType { return getter->Get(idx); };
 }
@@ -64,7 +71,8 @@ MultiFieldDataGetter::MultiFieldDataGetter(
     const std::optional<std::string>& json_path,
     const std::optional<DataType>& json_type,
     bool strict_cast,
-    const segcore::SegmentReadSnapshot* snapshot)
+    const segcore::SegmentReadSnapshot* snapshot,
+    bool use_json_stats)
     : field_count_(field_ids.size()) {
     getters_.reserve(field_ids.size());
 
@@ -109,7 +117,8 @@ MultiFieldDataGetter::MultiFieldDataGetter(
                                 snapshot,
                                 json_path,
                                 json_type,
-                                strict_cast);
+                                strict_cast,
+                                use_json_stats);
                             break;
                         case DataType::INT8:
                             getter = CreateFieldGetter<int8_t, milvus::Json>(
@@ -119,7 +128,8 @@ MultiFieldDataGetter::MultiFieldDataGetter(
                                 snapshot,
                                 json_path,
                                 json_type,
-                                strict_cast);
+                                strict_cast,
+                                use_json_stats);
                             break;
                         case DataType::INT16:
                             getter = CreateFieldGetter<int16_t, milvus::Json>(
@@ -129,7 +139,8 @@ MultiFieldDataGetter::MultiFieldDataGetter(
                                 snapshot,
                                 json_path,
                                 json_type,
-                                strict_cast);
+                                strict_cast,
+                                use_json_stats);
                             break;
                         case DataType::INT32:
                             getter = CreateFieldGetter<int32_t, milvus::Json>(
@@ -139,7 +150,8 @@ MultiFieldDataGetter::MultiFieldDataGetter(
                                 snapshot,
                                 json_path,
                                 json_type,
-                                strict_cast);
+                                strict_cast,
+                                use_json_stats);
                             break;
                         case DataType::INT64:
                             getter = CreateFieldGetter<int64_t, milvus::Json>(
@@ -149,7 +161,8 @@ MultiFieldDataGetter::MultiFieldDataGetter(
                                 snapshot,
                                 json_path,
                                 json_type,
-                                strict_cast);
+                                strict_cast,
+                                use_json_stats);
                             break;
                         case DataType::VARCHAR:
                             getter =
@@ -160,7 +173,8 @@ MultiFieldDataGetter::MultiFieldDataGetter(
                                     snapshot,
                                     json_path,
                                     json_type,
-                                    strict_cast);
+                                    strict_cast,
+                                    use_json_stats);
                             break;
                         default:
                             ThrowInfo(Unsupported,
@@ -176,7 +190,8 @@ MultiFieldDataGetter::MultiFieldDataGetter(
                         snapshot,
                         json_path,
                         json_type,
-                        strict_cast);
+                        strict_cast,
+                        use_json_stats);
                 }
                 break;
             default:
@@ -283,7 +298,8 @@ SearchGroupBy(milvus::OpContext* op_ctx,
               std::vector<size_t>& topk_per_nq_prefix_sum,
               std::vector<int32_t>* element_indices,
               SearchResult* search_result,
-              const segcore::SegmentReadSnapshot* snapshot) {
+              const segcore::SegmentReadSnapshot* snapshot,
+              bool use_json_stats) {
     if (TryStrictGroupFilteredSearch(op_ctx,
                                      iterators,
                                      search_info,
@@ -319,7 +335,8 @@ SearchGroupBy(milvus::OpContext* op_ctx,
                                                search_info.json_path_,
                                                search_info.json_type_,
                                                search_info.strict_cast_,
-                                               snapshot);
+                                               snapshot,
+                                               use_json_stats);
 
     topk_per_nq_prefix_sum.push_back(0);
     for (const auto& iterator : iterators) {

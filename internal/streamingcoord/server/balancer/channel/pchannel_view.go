@@ -12,9 +12,16 @@ type ChannelID = types.ChannelID
 
 // newPChannelView creates a new pchannel view.
 func newPChannelView(metas map[ChannelID]*PChannelMeta) *PChannelView {
+	view := newPChannelMetaView(metas)
+	view.fillStats()
+	return view
+}
+
+// newPChannelMetaView is newPChannelView without Stats: it copies no vchannel
+// and does not wait for the pchannel stats manager.
+func newPChannelMetaView(metas map[ChannelID]*PChannelMeta) *PChannelView {
 	view := &PChannelView{
 		Channels: make(map[ChannelID]*PChannelMeta, len(metas)),
-		Stats:    make(map[ChannelID]PChannelStatsView, len(metas)),
 	}
 	for _, meta := range metas {
 		id := meta.ChannelInfo().ChannelID()
@@ -22,11 +29,20 @@ func newPChannelView(metas map[ChannelID]*PChannelMeta) *PChannelView {
 			panic(fmt.Sprintf("duplicate rw channel: %s", id.String()))
 		}
 		view.Channels[id] = meta
-		stat := StaticPChannelStatsManager.Get().GetPChannelStats(id).View()
-		stat.LastAssignTimestamp = meta.LastAssignTimestamp()
-		view.Stats[id] = stat
 	}
 	return view
+}
+
+// fillStats copies the stats of every pchannel of the view. The metas are
+// immutable snapshots and the stats have their own locks, so it needs no
+// ChannelManager lock.
+func (v *PChannelView) fillStats() {
+	v.Stats = make(map[ChannelID]PChannelStatsView, len(v.Channels))
+	for id, meta := range v.Channels {
+		stat := StaticPChannelStatsManager.Get().GetPChannelStats(id).View()
+		stat.LastAssignTimestamp = meta.LastAssignTimestamp()
+		v.Stats[id] = stat
+	}
 }
 
 // PChannelView is the view of current pchannels.

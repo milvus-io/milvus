@@ -162,9 +162,8 @@ func (m *shardManagerImpl) AlterCollection(msg message.MutableAlterCollectionMes
 		return nil, err
 	}
 
-	// For schema changes: flush/fence segment allocation and update in-memory schema
-	// atomically within this critical region. Both operations share the same
-	// IsSchemaChange gate so live path and recovery replay stay consistent.
+	// Only encoding/schema changes flush and fence segment allocation. Metadata
+	// updates still replace the current schema snapshot under the same lock.
 	var segmentIDs []int64
 	if messageutil.IsSchemaChange(header) {
 		var err error
@@ -183,16 +182,14 @@ func (m *shardManagerImpl) AlterCollection(msg message.MutableAlterCollectionMes
 				mlog.Int64("collectionID", collectionID))
 			return nil, status.NewInvalidArgument("schema change message has nil schema body")
 		}
-		collectionInfo := m.collections[collectionID]
+	}
+	collectionInfo := m.collections[collectionID]
+	if schema := messageutil.ApplyCollectionSchemaUpdates(collectionInfo.Schema.GetSchema(), header, msg.MustBody()); schema != nil {
 		collectionInfo.setSchema(&streamingpb.CollectionSchemaOfVChannel{
 			Schema:             schema,
 			CheckpointTimeTick: timetick,
 			State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
 		})
-		logger.Info(context.TODO(), "updated collection schema in shard manager",
-			mlog.Int64("collectionID", collectionID),
-			mlog.Int32("schemaVersion", schema.GetVersion()),
-			mlog.Uint64("checkpointTimeTick", timetick))
 	}
 
 	return segmentIDs, nil
@@ -214,8 +211,13 @@ func (m *shardManagerImpl) checkIfCollectionSchemaVersionMatch(header *message.I
 	}
 	// Missing schemaVersion means the proxy did not set it (old proxy or old SDK).
 	// Skip the schema presence and version checks for backward compatibility during
-	// rolling upgrades, where a legacy collection may still have Schema == nil when
-	// an old proxy writes.
+	// rolling upgrades. A collection without a schema is unreachable on supported
+	// paths: CreateCollection carries the schema and vchannel recovery meta
+	// persists it. With partial-update CAS enabled, partialupdate rejects such an
+	// insert before the WAL append: the row-lock hook does so before this check for
+	// a non-transactional insert, and the partialupdate interceptor after it for a
+	// transaction body or a replicated insert (see the 20260601 partial-update
+	// optimistic lock design doc).
 	if header.SchemaVersion == nil {
 		return collectionInfo.SchemaVersion(), nil
 	}
@@ -236,6 +238,15 @@ func (m *shardManagerImpl) checkIfCollectionSchemaVersionMatch(header *message.I
 	return collectionSchemaVersion, nil
 }
 
+func (m *shardManagerImpl) GetCollectionSchemaSnapshot(collectionID int64) *schemapb.CollectionSchema {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if collection := m.collections[collectionID]; collection != nil {
+		return collection.Schema.GetSchema()
+	}
+	return nil
+}
+
 func (m *shardManagerImpl) GetCollectionSchema(collectionID int64, schemaVersion int32) (*schemapb.CollectionSchema, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -253,6 +264,21 @@ func (m *shardManagerImpl) GetCollectionSchema(collectionID int64, schemaVersion
 	}
 
 	return proto.Clone(collectionInfo.Schema.GetSchema()).(*schemapb.CollectionSchema), nil
+}
+
+// GetWriteSchema captures the same schema used by insert admission. Recovery's
+// observer may still be behind this write-path state after an ALTER append.
+func (m *shardManagerImpl) GetWriteSchema(collectionID int64, vchannel string) (*streamingpb.CollectionSchemaOfVChannel, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	collection, ok := m.collections[collectionID]
+	if !ok || collection.VChannel != vchannel {
+		return nil, status.NewUnrecoverableError("collection %d is not present on vchannel %s", collectionID, vchannel)
+	}
+	if collection.Schema.GetSchema() == nil {
+		return nil, status.NewInner("write schema for collection %d is not ready", collectionID)
+	}
+	return proto.Clone(collection.Schema).(*streamingpb.CollectionSchemaOfVChannel), nil
 }
 
 // GetPrimaryKeyDescriptor returns immutable PK schema data without cloning the
@@ -278,6 +304,8 @@ func (m *shardManagerImpl) GetPrimaryKeyDescriptor(collectionID int64, schemaVer
 	return primaryKeyDescriptorFromSchema(collectionInfo.Schema.GetSchema())
 }
 
+// GetAllCollectionSchemaInfos returns a new map containing immutable schema
+// snapshots. Callers must not mutate the schemas or their nested values.
 func (m *shardManagerImpl) GetAllCollectionSchemaInfos() map[int64]CollectionSchemaInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -289,7 +317,7 @@ func (m *shardManagerImpl) GetAllCollectionSchemaInfos() map[int64]CollectionSch
 		}
 		infos[collectionID] = CollectionSchemaInfo{
 			VChannel: collectionInfo.VChannel,
-			Schema:   proto.Clone(collectionInfo.Schema.GetSchema()).(*schemapb.CollectionSchema),
+			Schema:   collectionInfo.Schema.GetSchema(),
 		}
 	}
 	return infos

@@ -18,6 +18,8 @@
 #include "gtest/gtest.h"
 #include "tantivy-binding.h"
 #include "rust-array.h"
+#include "tantivy-error.h"
+#include "tantivy/tokenizer.h"
 
 TEST(RustResultTest, TestResult) {
     auto arr = test_enum_with_array();
@@ -35,6 +37,36 @@ TEST(RustResultTest, TestResult) {
 
 using milvus::tantivy::RustArrayWrapper;
 using milvus::tantivy::RustResultWrapper;
+
+TEST(RustResultTest, AnalyzerMissingPathClassificationIsValidationOnly) {
+    // An empty local path cannot be opened; no shared filesystem fixture needed.
+    const char* params =
+        R"({"tokenizer":"standard","filter":[{"type":"stop","stop_words_file":{"type":"local","path":""}}]})";
+    RustResultWrapper validation(tantivy_validate_analyzer(params, ""));
+    ASSERT_FALSE(validation.result_->success);
+    EXPECT_EQ(validation.result_->error_code,
+              TantivyBindingErrorCode::IoNotFound);
+    EXPECT_EQ(milvus::tantivy::TantivyErrorToErrorCode(
+                  validation.result_->error_code),
+              milvus::ErrorCode::FileReadFailed);
+
+    // Only the C++ validation boundary makes missing paths terminal.
+    try {
+        milvus::tantivy::validate_analyzer(std::string(params), "");
+        FAIL() << "Validation should fail for a missing path";
+    } catch (const milvus::SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), milvus::ErrorCode::PathNotExist);
+    }
+
+    // Runtime construction must retain the retriable I/O classification.
+    RustResultWrapper creation(tantivy_create_analyzer(params, ""));
+    ASSERT_FALSE(creation.result_->success);
+    EXPECT_EQ(creation.result_->error_code,
+              TantivyBindingErrorCode::IoNotFound);
+    EXPECT_EQ(
+        milvus::tantivy::TantivyErrorToErrorCode(creation.result_->error_code),
+        milvus::ErrorCode::FileReadFailed);
+}
 
 static_assert(std::is_nothrow_constructible_v<RustResultWrapper, RustResult>);
 static_assert(std::is_nothrow_move_constructible_v<RustResultWrapper>);

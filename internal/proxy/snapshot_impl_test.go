@@ -52,7 +52,7 @@ func TestProxy_CreateSnapshot_Success(t *testing.T) {
 	mock1 := mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(t taskmodel.Task) error {
 		// Set task result to simulate successful execution
 		if cst, ok := t.(*createSnapshotTask); ok {
-			cst.result = merr.Success()
+			cst.SetResult(merr.Success())
 		}
 		return nil
 	}).Build()
@@ -139,7 +139,7 @@ func TestProxy_DropSnapshot_Success(t *testing.T) {
 	// Mock successful enqueue and task completion
 	mock1 := mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(t taskmodel.Task) error {
 		if dst, ok := t.(*dropSnapshotTask); ok {
-			dst.result = merr.Success()
+			dst.SetResult(merr.Success())
 		}
 		return nil
 	}).Build()
@@ -219,11 +219,11 @@ func TestProxy_DescribeSnapshot_Success(t *testing.T) {
 	// Mock successful enqueue and task completion
 	mock1 := mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(t taskmodel.Task) error {
 		if dst, ok := t.(*describeSnapshotTask); ok {
-			dst.result = &milvuspb.DescribeSnapshotResponse{
+			dst.SetResult(&milvuspb.DescribeSnapshotResponse{
 				Status:         merr.Success(),
 				Name:           "test_snapshot",
 				CollectionName: "test_collection",
-			}
+			})
 		}
 		return nil
 	}).Build()
@@ -305,13 +305,17 @@ func TestProxy_ListSnapshots_Success(t *testing.T) {
 	// Mock successful enqueue and task completion
 	mock1 := mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(t taskmodel.Task) error {
 		if lst, ok := t.(*listSnapshotsTask); ok {
-			lst.result = &milvuspb.ListSnapshotsResponse{
+			lst.SetResult(&milvuspb.ListSnapshotsResponse{
 				Status: merr.Success(),
+				SnapshotSummaries: []*milvuspb.SnapshotSummary{
+					{Name: "snapshot1", CreateTs: 9007199254740993, Description: "daily"},
+					{Name: "snapshot2"},
+				},
 				Snapshots: []string{
 					"snapshot1",
 					"snapshot2",
 				},
-			}
+			})
 		}
 		return nil
 	}).Build()
@@ -328,6 +332,11 @@ func TestProxy_ListSnapshots_Success(t *testing.T) {
 	assert.Len(t, result.GetSnapshots(), 2)
 	assert.Equal(t, "snapshot1", result.GetSnapshots()[0])
 	assert.Equal(t, "snapshot2", result.GetSnapshots()[1])
+	assert.Len(t, result.GetSnapshotSummaries(), 2)
+	assert.Equal(t, "snapshot1", result.GetSnapshotSummaries()[0].GetName())
+	assert.Equal(t, int64(9007199254740993), result.GetSnapshotSummaries()[0].GetCreateTs())
+	assert.Equal(t, "daily", result.GetSnapshotSummaries()[0].GetDescription())
+	assert.Equal(t, "snapshot2", result.GetSnapshotSummaries()[1].GetName())
 }
 
 func TestProxy_ListSnapshots_EnqueueFailure(t *testing.T) {
@@ -396,9 +405,9 @@ func TestProxy_RestoreSnapshot_Success(t *testing.T) {
 	// Mock successful enqueue and task completion
 	mock1 := mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(t taskmodel.Task) error {
 		if rst, ok := t.(*restoreSnapshotTask); ok {
-			rst.result = &milvuspb.RestoreSnapshotResponse{
+			rst.SetResult(&milvuspb.RestoreSnapshotResponse{
 				Status: merr.Success(),
-			}
+			})
 		}
 		return nil
 	}).Build()
@@ -677,7 +686,7 @@ func TestProxy_CreateSnapshot_TaskCreation(t *testing.T) {
 	mock1 := mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(t taskmodel.Task) error {
 		if cst, ok := t.(*createSnapshotTask); ok {
 			enqueuedTask = cst
-			cst.result = merr.Success()
+			cst.SetResult(merr.Success())
 		}
 		return nil
 	}).Build()
@@ -690,9 +699,9 @@ func TestProxy_CreateSnapshot_TaskCreation(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.NotNil(t, enqueuedTask)
-	assert.Equal(t, "test_snapshot", enqueuedTask.req.GetName())
-	assert.Equal(t, "test_collection", enqueuedTask.req.GetCollectionName())
-	assert.Equal(t, "default", enqueuedTask.req.GetDbName())
+	assert.Equal(t, "test_snapshot", enqueuedTask.Request().GetName())
+	assert.Equal(t, "test_collection", enqueuedTask.Request().GetCollectionName())
+	assert.Equal(t, "default", enqueuedTask.Request().GetDbName())
 	assert.Equal(t, CreateSnapshotTaskName, enqueuedTask.Name())
 }
 
@@ -723,7 +732,7 @@ func TestProxy_DropSnapshot_EmptySnapshotName(t *testing.T) {
 
 	mock1 := mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(t taskmodel.Task) error {
 		if dst, ok := t.(*dropSnapshotTask); ok {
-			dst.result = merr.Success()
+			dst.SetResult(merr.Success())
 		}
 		return nil
 	}).Build()
@@ -757,7 +766,7 @@ func TestProxy_CreateSnapshot_MetricsRecording(t *testing.T) {
 	// Mock successful execution
 	mock1 := mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(t taskmodel.Task) error {
 		if cst, ok := t.(*createSnapshotTask); ok {
-			cst.result = merr.Success()
+			cst.SetResult(merr.Success())
 		}
 		return nil
 	}).Build()
@@ -796,7 +805,7 @@ func TestProxy_CreateSnapshot_ContextCancellation(t *testing.T) {
 	// Mock successful enqueue
 	mock1 := mockey.Mock((*scheduler.DdTaskQueue).Enqueue).To(func(t taskmodel.Task) error {
 		if cst, ok := t.(*createSnapshotTask); ok {
-			cst.result = merr.Success()
+			cst.SetResult(merr.Success())
 		}
 		return nil
 	}).Build()

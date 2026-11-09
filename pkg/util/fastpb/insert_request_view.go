@@ -474,6 +474,7 @@ func (e *InsertRequestViewEncoder) appendFieldData(w *insertViewWriter, fieldInd
 		return err
 	}
 
+	hasNestedValue := false
 	switch value := field.Field.(type) {
 	case nil:
 		// Match AppendFieldData: metadata survives even if the source has no
@@ -491,6 +492,7 @@ func (e *InsertRequestViewEncoder) appendFieldData(w *insertViewWriter, fieldInd
 		}); err != nil {
 			return err
 		}
+		hasNestedValue = true
 	case *schemapb.FieldData_Vectors:
 		if value.Vectors == nil {
 			return insertViewInternal("vector field %q (%d) has a nil VectorField", field.GetFieldName(), field.GetFieldId())
@@ -504,6 +506,7 @@ func (e *InsertRequestViewEncoder) appendFieldData(w *insertViewWriter, fieldInd
 		}); err != nil {
 			return err
 		}
+		hasNestedValue = true
 	case *schemapb.FieldData_StructArrays:
 		return insertViewInternal("source field %q (%d) still contains StructArrays; proxy must flatten struct fields before repacking", field.GetFieldName(), field.GetFieldId())
 	default:
@@ -514,13 +517,22 @@ func (e *InsertRequestViewEncoder) appendFieldData(w *insertViewWriter, fieldInd
 	if field.GetIsDynamic() {
 		w.varintField(6, 1)
 	}
+	if hasNestedValue {
+		// Legacy FieldData.valid_data, kept alongside the nested copy so that
+		// components which only understand the legacy location still see
+		// row validity.
+		if err := e.appendFieldValidData(w, fieldIndex, 7); err != nil {
+			return err
+		}
+	}
 	return w.err
 }
 
-// appendFieldValidData writes the row-selected validity mask into the nested
-// ScalarField (field 17) / VectorField (field 9) message, the field-specific
-// location #52203 moved it to. It must run after every oneof value write so
-// the planned-slot consumption order matches appendPlan.
+// appendFieldValidData writes the row-selected validity mask to fieldNumber:
+// the nested ScalarField (17) / VectorField (9) message, or the legacy
+// FieldData (7). The nested copy must run after every oneof value write, and
+// the legacy copy after the nested message, so the planned-slot consumption
+// order matches appendPlan.
 func (e *InsertRequestViewEncoder) appendFieldValidData(w *insertViewWriter, fieldIndex int, fieldNumber protowire.Number) error {
 	if fieldIndex < 0 || fieldIndex >= len(e.fieldSizeStates) {
 		return insertViewInternal("validity payload field index %d is out of range", fieldIndex)

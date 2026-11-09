@@ -30,6 +30,8 @@ import "C"
 import (
 	"runtime"
 	"unsafe"
+
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
 func testManifestFieldIDsFromColumns(columnNames []*string, numColumns int) (map[int64]struct{}, error) {
@@ -59,4 +61,29 @@ func testManifestFieldIDsFromColumns(columnNames []*string, numColumns int) (map
 	fields, err := manifestFieldIDsFromColumnGroups("test-manifest", &groups)
 	runtime.KeepAlive(cColumns)
 	return fields, err
+}
+
+// Construct raw FFI metadata that a serialized manifest cannot represent.
+// None of these Go-owned arrays cross into C; only the strings need C.free.
+func testManifestDeltaLogs(paths []*string, entries []uint32, count uint32) ([]*datapb.FieldBinlog, error) {
+	var manifest C.LoonManifest
+	manifest.delta_logs.num_delta_logs = C.uint32_t(count)
+	var cPaths []*C.char
+	if len(paths) > 0 {
+		cPaths = make([]*C.char, len(paths))
+		for i, p := range paths {
+			if p != nil {
+				cPaths[i] = C.CString(*p)
+				defer C.free(unsafe.Pointer(cPaths[i]))
+			}
+		}
+		manifest.delta_logs.delta_log_paths = (**C.char)(unsafe.Pointer(&cPaths[0]))
+	}
+	if len(entries) > 0 {
+		manifest.delta_logs.delta_log_num_entries = (*C.uint32_t)(unsafe.Pointer(&entries[0]))
+	}
+	logs, err := deltaLogsFromManifest("test-manifest", &manifest)
+	runtime.KeepAlive(cPaths)
+	runtime.KeepAlive(entries)
+	return logs, err
 }

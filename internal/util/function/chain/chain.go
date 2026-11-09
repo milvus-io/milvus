@@ -36,8 +36,9 @@ type Operator interface {
 	// Name returns the operator name.
 	Name() string
 
-	// Execute executes the operator.
-	Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, error)
+	// Execute returns selected input positions and computed columns.
+	// Use ExecuteOperator when a complete DataFrame is needed.
+	Execute(ctx *types.FuncContext, input *DataFrame) (*OperatorResult, error)
 
 	// Inputs returns the input column names.
 	Inputs() []string
@@ -132,9 +133,28 @@ func (fc *FuncChain) Validate() error {
 // validateOperators is an internal helper that validates all operators in a single pass.
 // It checks that operators are not nil, have valid functions, and support the given stage.
 func (fc *FuncChain) validateOperators(stage string) error {
+	if stage == types.StageQueryScan {
+		if len(fc.operators) != 1 {
+			return merr.WrapErrParameterInvalidMsg("QueryScan requires exactly one grep operator")
+		}
+	}
 	for i, op := range fc.operators {
 		if op == nil {
 			return merr.WrapErrServiceInternalMsg("operator[%d] is nil", i)
+		}
+
+		if stage == types.StageQueryScan {
+			if _, ok := op.(*GrepOp); !ok {
+				return merr.WrapErrParameterInvalidMsg("QueryScan requires an independent grep operator")
+			}
+		}
+		if grepOp, ok := op.(*GrepOp); ok {
+			if grepOp == nil {
+				return merr.WrapErrServiceInternalMsg("operator[%d] GrepOp is nil", i)
+			}
+			if !grepOp.IsRunnable(stage) {
+				return merr.WrapErrParameterInvalidMsg("grep supports only QueryScan")
+			}
 		}
 
 		// Validate MapOp
@@ -208,6 +228,10 @@ func (fc *FuncChain) ExecuteWithOptions(ctx context.Context, opts ExecuteOptions
 			if err != nil {
 				return nil, merr.Wrapf(err, "%s failed", mergeOp.Name())
 			}
+			if err := validateFrameLayout(result); err != nil {
+				fc.releaseIfOwned(result, inputs)
+				return nil, merr.Wrapf(err, "%s output", mergeOp.Name())
+			}
 			startIdx = 1
 			if plan != nil {
 				result, err = fc.pruneIfNeeded(result, plan.PruneAfter[0], plan.SystemColumnPolicy, inputs)
@@ -233,14 +257,6 @@ func (fc *FuncChain) ExecuteWithOptions(ctx context.Context, opts ExecuteOptions
 	for i := startIdx; i < len(fc.operators); i++ {
 		op := fc.operators[i]
 
-		// Check for context cancellation before each operator
-		select {
-		case <-ctx.Done():
-			fc.releaseIfOwned(result, inputs)
-			return nil, ctx.Err()
-		default:
-		}
-
 		if plan != nil {
 			var err error
 			result, err = fc.pruneIfNeeded(result, plan.PruneBefore[i], plan.SystemColumnPolicy, inputs)
@@ -250,7 +266,7 @@ func (fc *FuncChain) ExecuteWithOptions(ctx context.Context, opts ExecuteOptions
 			}
 		}
 
-		newResult, err := op.Execute(funcCtx, result)
+		newResult, err := ExecuteOperator(funcCtx, result, op)
 		if err != nil {
 			fc.releaseIfOwned(result, inputs)
 			return nil, merr.Wrapf(err, "%s failed", op.Name())

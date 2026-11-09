@@ -19,7 +19,7 @@ woodpecker:
   enabled: true
   image:
     repository: harbor.milvus.io/woodpecker/woodpecker
-    tag: v0.1.45
+    tag: v0.1.46
     pullPolicy: Always
 streaming:
   enabled: true
@@ -94,6 +94,9 @@ extraConfigFiles:
         compressionEnabled: true
         compressionAlgorithm: s2
     common:
+      fileResource:
+        mode:
+          proxy: sync
       storage:
         enablev2: true
         # enable storage v3
@@ -121,6 +124,9 @@ extraConfigFiles:
         exprEvalBatchSize: 512
     queryCoord:
       checkNodeInReplicaInterval: 3
+    function:
+      pyUDF:
+        enabled: true
 metrics:
   serviceMonitor:
     enabled: true

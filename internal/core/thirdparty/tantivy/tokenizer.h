@@ -84,6 +84,14 @@ validate_analyzer(std::string&& params, std::string&& extra_info) {
     auto shared_extra_info = std::make_shared<std::string>(extra_info);
     auto res = RustResultWrapper(tantivy_validate_analyzer(
         shared_params->c_str(), shared_extra_info->c_str()));
+    if (!res.result_->success &&
+        res.result_->error_code == TantivyBindingErrorCode::IoNotFound) {
+        // Missing paths terminate validation without blaming the caller.
+        // Runtime construction retains the ordinary I/O retry policy.
+        ThrowInfo(ErrorCode::PathNotExist,
+                  "Validate analyzer params failed: {}",
+                  res.result_->error);
+    }
     AssertTantivyOk(
         res, "Validate analyzer params failed: {}", res.result_->error);
     auto array_wrapper =

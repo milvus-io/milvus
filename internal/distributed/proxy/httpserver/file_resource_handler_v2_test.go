@@ -23,6 +23,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -279,17 +280,20 @@ func TestFileResourceHandlerV2ReturnsEmptyList(t *testing.T) {
 
 func TestFileResourceHandlerV2ChecksQuota(t *testing.T) {
 	paramtable.Init()
-	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
-	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+	quotaConfig := &paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled
+	originalValue := quotaConfig.GetValue()
+	require.NoError(t, paramtable.Get().Save(quotaConfig.Key, "true"))
+	t.Cleanup(func() { _ = paramtable.Get().Save(quotaConfig.Key, originalValue) })
 
 	limiter := &rejectingFileResourceLimiter{t: t}
-	mockProxy := mocks.NewMockProxy(t)
-	mockProxy.EXPECT().GetRateLimiter().Return(limiter, nil).Times(3)
-	mockProxy.EXPECT().ListFileResources(mock.Anything, mock.Anything).Return(&milvuspb.ListFileResourcesResponse{
+	getLimiter := mockey.Mock((*proxy.Proxy).GetRateLimiter).Return(limiter, nil).Build()
+	defer getLimiter.UnPatch()
+	list := mockey.Mock((*proxy.Proxy).ListFileResources).Return(&milvuspb.ListFileResourcesResponse{
 		Status: merr.Success(),
-	}, nil).Once()
+	}, nil).Build()
+	defer list.UnPatch()
 	server := initHTTPServerV2(proxyComponentWithMetaCache{
-		ProxyComponent: mockProxy,
+		ProxyComponent: &proxy.Proxy{},
 		metaCache:      proxy.InitEmptyMetaCacheForTest(),
 	}, false)
 
@@ -310,8 +314,9 @@ func TestFileResourceHandlerV2ChecksQuota(t *testing.T) {
 	assert.EqualValues(t, 0, response[HTTPReturnCode])
 	assert.Empty(t, response[HTTPReturnData])
 
-	require.Len(t, limiter.checks, 3)
+	assert.EqualValues(t, 2, getLimiter.Times())
+	assert.EqualValues(t, 1, list.Times())
+	require.Len(t, limiter.checks, 2)
 	assert.Equal(t, fileResourceLimiterCheck{rateType: internalpb.RateType_DDLCollection, n: 1}, limiter.checks[0])
 	assert.Equal(t, fileResourceLimiterCheck{rateType: internalpb.RateType_DDLCollection, n: 1}, limiter.checks[1])
-	assert.Zero(t, limiter.checks[2].n)
 }

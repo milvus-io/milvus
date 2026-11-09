@@ -290,6 +290,11 @@ impl IndexWriterWrapperImpl {
         self.index_writer.commit()?;
         Ok(())
     }
+
+    pub(crate) fn rollback(&mut self) -> Result<()> {
+        self.index_writer.rollback()?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

@@ -26,7 +26,7 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
     [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE" # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
 done
 ROOT_DIR="$(cd -P "$(dirname "$SOURCE")/.." && pwd)"
-source ${ROOT_DIR}/scripts/setenv.sh
+source ${ROOT_DIR}/scripts/setenv.sh || exit 1
 
 MILVUS_CORE_DIR="${ROOT_DIR}/internal/core"
 MILVUS_CORE_UNITTEST_DIR="${MILVUS_CORE_DIR}/output/unittest"
@@ -50,6 +50,14 @@ FILE_INFO_COMBINE="${ROOT_DIR}/lcov_combine.info"
 FILE_INFO_OUTPUT="${ROOT_DIR}/lcov_output.info"
 DIR_LCOV_OUTPUT="${ROOT_DIR}/cpp_coverage"
 DIR_GCNO="${ROOT_DIR}/cmake_build/"
+
+if [[ "$(uname -s)" == "Linux" ]]; then
+    echo "Running AWS runtime link checker self-test"
+    (
+        cd "${MILVUS_CMAKE_BUILD_DIR:-${ROOT_DIR}/cmake_build}/unittest" &&
+        ctest -R '^aws_runtime_link_check$' --output-on-failure --no-tests=error
+    ) || exit 1
+fi
 
 # delete old code coverage info files
 rm -f ${FILE_INFO_BASE}

@@ -124,10 +124,12 @@ func newTimeTickSync(initCtx context.Context, parentLoopCtx context.Context, sou
 	dmlChannels := newDmlChannels(initCtx, factory, Params.CommonCfg.RootCoordDml.GetValue(), int64(chanNum))
 
 	// recover physical channels for all collections
-	for collID, chanNames := range chanMap {
+	for _, chanNames := range chanMap {
 		dmlChannels.addChannels(chanNames...)
-		mlog.Info(initCtx, "recover physical channels", mlog.Int64("collectionID", collID), mlog.Strings("physical channels", chanNames))
 	}
+	mlog.Info(initCtx, "rootcoord physical channels recovered",
+		mlog.Int("numCollections", len(chanMap)),
+		mlog.Int("numPhysicalChannels", dmlChannels.getChannelNum()))
 
 	return &timetickSync{
 		ctx:      parentLoopCtx,

@@ -5,15 +5,19 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/crypto"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -210,6 +214,48 @@ func TestUpdateProxyFunctionCallMetric(t *testing.T) {
 		updateProxyFunctionCallMetric("Flush", merr.WrapErrParameterInvalidMsg("mock input error"))
 		updateProxyFunctionCallMetric("", nil)
 	})
+}
+
+func TestHookInterceptorRedactsImportCredentials(t *testing.T) {
+	for _, stage := range []string{"before", "after"} {
+		t.Run(stage, func(t *testing.T) {
+			logs := captureProxyLogs(t)
+			hoo := errorHook{}
+			if stage == "before" {
+				hoo.beforeErr = errors.New("before hook failed")
+			} else {
+				hoo.afterErr = errors.New("after hook failed")
+			}
+			patch := mockey.Mock(hookutil.GetHook).Return(hoo).Build()
+			defer patch.UnPatch()
+			request := &internalpb.ImportRequest{
+				CollectionName: "import_hook_target",
+				Files:          []*internalpb.ImportFile{{Paths: []string{"s3://bucket/snapshot.json"}}},
+				Options: []*commonpb.KeyValuePair{
+					{Key: "backup", Value: "true"},
+					{Key: "source_type", Value: "snapshot"},
+					{Key: "external_spec", Value: `{"extfs":{"access_key_value":"IMPORT_SECRET_SENTINEL"}}`},
+					{Key: "ezk", Value: "IMPORT_EZK_SENTINEL"},
+				},
+			}
+			before := proto.Clone(request)
+			called := false
+			_, err := HookInterceptor(context.Background(), request, "admin",
+				"/milvus.proto.milvus.MilvusService/Import", func(_ context.Context, req any) (any, error) {
+					called = true
+					assert.Same(t, request, req)
+					assert.True(t, proto.Equal(before, req.(proto.Message)))
+					return &internalpb.ImportResponse{Status: &commonpb.Status{}}, nil
+				})
+			require.ErrorContains(t, err, stage+" hook failed")
+			assert.Equal(t, stage == "after", called)
+			assert.True(t, proto.Equal(before, request))
+			assert.Contains(t, logs.String(), "hook "+stage+" error")
+			assert.Contains(t, logs.String(), "import_hook_target")
+			assert.Contains(t, logs.String(), "redacted")
+			assert.NotContains(t, logs.String(), "SENTINEL")
+		})
+	}
 }
 
 // A refusal returned from Before reaches the client as InvalidArgument, not

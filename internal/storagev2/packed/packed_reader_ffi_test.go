@@ -110,7 +110,7 @@ func TestPackedFFIReader(t *testing.T) {
 	require.NoError(t, err)
 	defer out.Destroy()
 
-	manifest, err := CommitManifestUpdates(basePath, version, storageConfig,
+	manifest, err := CommitManifestUpdates(MarshalManifestPath(basePath, version), storageConfig,
 		&ManifestUpdates{NewFiles: out})
 	require.NoError(t, err)
 	require.NotEmpty(t, manifest)
@@ -260,7 +260,7 @@ func TestPackedFFIReaderPartialColumns(t *testing.T) {
 	require.NoError(t, err)
 	defer out.Destroy()
 
-	manifest, err := CommitManifestUpdates(basePath, version, storageConfig,
+	manifest, err := CommitManifestUpdates(MarshalManifestPath(basePath, version), storageConfig,
 		&ManifestUpdates{NewFiles: out})
 	require.NoError(t, err)
 
@@ -344,13 +344,12 @@ func TestPackedFFIReaderMultipleBatches(t *testing.T) {
 	}, nil)
 
 	basePath := path.Join(dir, "packed_reader_multi_batch_test/1")
-	version := int64(0)
 
 	columnGroups := []storagecommon.ColumnGroup{
 		{Columns: []int{0, 1}, GroupID: storagecommon.DefaultShortColumnGroupID},
 	}
 
-	var manifest string
+	manifest := MarshalManifestPath(basePath, ManifestEarliest)
 	totalWrittenRows := 0
 
 	storageConfig := &indexpb.StorageConfig{
@@ -388,12 +387,8 @@ func TestPackedFFIReaderMultipleBatches(t *testing.T) {
 		out, err := pw.Close()
 		require.NoError(t, err)
 
-		manifest, err = CommitManifestUpdates(basePath, version, storageConfig,
-			&ManifestUpdates{NewFiles: out})
+		manifest, err = CommitManifestUpdates(manifest, storageConfig, &ManifestUpdates{NewFiles: out})
 		out.Destroy()
-		require.NoError(t, err)
-
-		_, version, err = UnmarshalManifestPath(manifest)
 		require.NoError(t, err)
 
 		totalWrittenRows += numRows

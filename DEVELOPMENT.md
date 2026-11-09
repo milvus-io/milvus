@@ -89,7 +89,7 @@ The following specification (either physical or virtual machine resources) is re
 | Go | 1.21 | Required. Install from https://go.dev/dl/ |
 | CMake | 3.26 | Auto-installed by install_deps.sh |
 | Conan | 2.25.1 | Auto-installed by install_deps.sh |
-| Rust | 1.92 | Auto-installed by install_deps.sh |
+| Rust | 1.94 | Auto-installed by install_deps.sh |
 
 ### Compiler Setup
 
@@ -550,7 +550,7 @@ ${CMAKE_EXTRA_ARGS} \
  -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
  -DCMAKE_LIBRARY_ARCHITECTURE=${arch} \
  -DBUILD_COVERAGE=${BUILD_COVERAGE} \
- -DMILVUS_GPU_VERSION=${GPU_VERSION} \
+ -DWITH_GPU=${WITH_GPU} \
  -DMILVUS_CUDA_ARCH=${CUDA_ARCH} \
  -DEMBEDDED_MILVUS=${EMBEDDED_MILVUS} \
  -DBUILD_DISK_ANN=${BUILD_DISK_ANN} \

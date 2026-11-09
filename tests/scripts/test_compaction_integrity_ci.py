@@ -156,11 +156,13 @@ def test_execution_guard_is_scoped_to_integrity_workloads(marked, opt_in, worker
 
 
 @pytest.mark.parametrize("exit_code", [0, 5, 7])
+@pytest.mark.parametrize("custom_diagnostics", [False, True])
 @pytest.mark.parametrize(
-    "script,selection",
+    "script,options,selection",
     [
         (
             "ci_compaction_integrity.sh",
+            ["-p", "common.data_integrity_diagnostics", "--log-cli-level=INFO"],
             [
                 "--tags",
                 "L3",
@@ -173,17 +175,22 @@ def test_execution_guard_is_scoped_to_integrity_workloads(marked, opt_in, worker
         ),
         (
             "ci_compaction_integrity_unit.sh",
+            [],
             [
                 "--tags",
                 "CompactionIntegrityUnit",
                 "--",
                 "milvus_client/compaction_integrity_helper_tests.py",
                 "milvus_client/test_milvus_client_data_integrity.py",
+                "milvus_client/test_milvus_client_continuous_data_integrity.py",
+                "milvus_client/test_data_integrity_diagnostics_unit.py",
             ],
         ),
     ],
 )
-def test_dedicated_entry_preserves_arguments_and_exit_status(tmp_path, exit_code, script, selection):
+def test_dedicated_entry_preserves_arguments_and_exit_status(
+    tmp_path, exit_code, custom_diagnostics, script, options, selection
+):
     capture = tmp_path / "calls.jsonl"
     fake_pytest = tmp_path / "pytest"
     fake_pytest.write_text(
@@ -191,7 +198,9 @@ def test_dedicated_entry_preserves_arguments_and_exit_status(tmp_path, exit_code
         "import json, os, sys\n"
         f"with open({str(capture)!r}, 'a') as stream:\n"
         "    stream.write(json.dumps({'args': sys.argv[1:], 'cwd': os.getcwd(), "
-        "'log_path': os.environ['CI_LOG_PATH']}) + '\\n')\n"
+        "'log_path': os.environ['CI_LOG_PATH'], "
+        "'python_path': os.getenv('PYTHONPATH'), "
+        "'diagnostics_path': os.getenv('DATA_INTEGRITY_DIAGNOSTICS_PATH')}) + '\\n')\n"
         f"sys.exit({exit_code})\n"
     )
     fake_pytest.chmod(0o755)
@@ -211,6 +220,10 @@ def test_dedicated_entry_preserves_arguments_and_exit_status(tmp_path, exit_code
         "6",
     ]
     env = dict(os.environ, PATH=f"{tmp_path}:{os.environ['PATH']}", CI_LOG_PATH=str(tmp_path / "report"))
+    env.pop("DATA_INTEGRITY_DIAGNOSTICS_PATH", None)
+    env["PYTHONPATH"] = str(tmp_path / "caller-modules")
+    if custom_diagnostics:
+        env["DATA_INTEGRITY_DIAGNOSTICS_PATH"] = str(tmp_path / "custom-events.jsonl")
     result = subprocess.run(
         ["bash", str(ROOT / "tests/scripts" / script), *caller_args],
         cwd=tmp_path,
@@ -225,12 +238,25 @@ def test_dedicated_entry_preserves_arguments_and_exit_status(tmp_path, exit_code
         {
             "args": [
                 *caller_args,
+                *options,
                 "-n",
                 "0",
                 *selection,
             ],
             "cwd": str(ROOT / "tests/python_client"),
             "log_path": str(tmp_path / "report"),
+            "python_path": (
+                f"{ROOT / 'tests/python_client'}:{tmp_path / 'caller-modules'}"
+                if options
+                else str(tmp_path / "caller-modules")
+            ),
+            "diagnostics_path": (
+                str(tmp_path / "custom-events.jsonl")
+                if custom_diagnostics
+                else str(tmp_path / "report/case-events.jsonl")
+                if options
+                else None
+            ),
         }
     ]
 

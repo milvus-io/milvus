@@ -9,6 +9,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -41,7 +42,7 @@ func TestCurrentSplitForGrowingPackFillsNewSplitFormats(t *testing.T) {
 	}}
 	meta := &streamingpb.SegmentAssignmentMeta{StorageVersion: storage.StorageV3}
 
-	columnGroups, err := currentSplitForGrowingPack(schema, nil, meta)
+	columnGroups, err := currentSplitForGrowingPack(context.Background(), schema, nil, meta, nil)
 	require.NoError(t, err)
 
 	require.NotEmpty(t, columnGroups)
@@ -173,7 +174,7 @@ func TestCurrentSplitForNewGrowingPackFillsFormats(t *testing.T) {
 		StorageVersion: storage.StorageV3,
 	}
 
-	currentSplit, err := currentSplitForGrowingPack(testGrowingPackSchema(), nil, meta)
+	currentSplit, err := currentSplitForGrowingPack(context.Background(), testGrowingPackSchema(), nil, meta, nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, currentSplit)
 	wantFormat := paramtable.Get().DataNodeCfg.StorageFormat.GetValue()
@@ -201,7 +202,7 @@ func TestCurrentSplitForGrowingPackPreservesPersistedManifestFormat(t *testing.T
 		},
 	}
 
-	currentSplit, err := currentSplitForGrowingPack(testGrowingPackSchema(), nil, meta)
+	currentSplit, err := currentSplitForGrowingPack(context.Background(), testGrowingPackSchema(), nil, meta, nil)
 	require.NoError(t, err)
 	require.Len(t, currentSplit, 2)
 	require.Equal(t, "vortex", currentSplit[0].Format)
@@ -223,7 +224,7 @@ func TestCurrentSplitForGrowingPackDoesNotGuessPersistedV3Format(t *testing.T) {
 		},
 	}
 
-	currentSplit, err := currentSplitForGrowingPack(testGrowingPackSchema(), nil, meta)
+	currentSplit, err := currentSplitForGrowingPack(context.Background(), testGrowingPackSchema(), nil, meta, nil)
 	require.NoError(t, err)
 	require.Len(t, currentSplit, 2)
 	require.Empty(t, currentSplit[0].Format)
@@ -301,7 +302,7 @@ func TestCurrentSplitForGrowingPackHandlesLegacyFieldBinlogs(t *testing.T) {
 				}}},
 			},
 		}
-		groups, err := currentSplitForGrowingPack(testGrowingPackSchema(), nil, meta)
+		groups, err := currentSplitForGrowingPack(context.Background(), testGrowingPackSchema(), nil, meta, nil)
 		require.NoError(t, err)
 		if version == storage.StorageV1 {
 			require.Empty(t, groups, "StorageV1 writes per-field binlogs without column groups")
@@ -519,11 +520,15 @@ func TestFlushInsertBufferMaterializesMissingBM25Output(t *testing.T) {
 			require.Equal(t, 2, req.insertData[0].Data[102].RowNum())
 			return &growingBulkWriteResult{}, nil
 		}}
-		_, err := writer.FlushInsertBuffer(context.Background(), packFor())
+		pack := packFor()
+		cached := message.MustAsImmutableInsertMessageV1(pack.Inserts[0]).MustBody()
+		before := proto.Clone(cached)
+		_, err := writer.FlushInsertBuffer(context.Background(), pack)
 		require.NoError(t, err)
-		_, stats, err := buildGrowingInsertData(schema, packFor())
+		_, stats, err := buildGrowingInsertData(schema, pack)
 		require.NoError(t, err)
 		require.NotNil(t, stats[102])
+		require.True(t, proto.Equal(before, cached), "persistence retries cannot modify the cached raw Body")
 	})
 	t.Run("persist missing output with StorageV3", func(t *testing.T) {
 		storageConfig, cm := setupV3TestEnv(t)

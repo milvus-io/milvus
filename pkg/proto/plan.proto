@@ -423,6 +423,10 @@ message ScoreOption{
 
 message PlanOption {
    bool expr_use_json_stats = 1;
+   // Record which execution features (filter paths, scalar index types,
+   // interim index, ...) the request used, for the feature usage report.
+   // Set by the Proxy only on requests it counts.
+   bool collect_feature_bits = 2;
 };
 
 message PlanNode {
@@ -437,5 +441,8 @@ message PlanNode {
   PlanOption plan_options = 7;
   ScoreOption score_option = 8;
   optional string namespace = 9;
+  // Worker-owned chains: Search L0/L1 or QueryScan-stage chains for a QueryPlanNode.
+  // Query chains retain raw expression arguments and output_columns here; do
+  // not duplicate their configuration in the enclosing RetrieveRequest.
   repeated schema.FunctionChain querynode_function_chains = 10;
 }

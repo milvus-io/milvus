@@ -35,6 +35,7 @@ type shardInterceptor struct {
 func (impl *shardInterceptor) initOpTable() {
 	impl.ops = map[message.MessageType]interceptors.AppendInterceptorCall{
 		message.MessageTypeCreateCollection:   impl.handleCreateCollection,
+		message.MessageTypeRestoreSnapshot:    impl.handleRestoreSnapshot,
 		message.MessageTypeDropCollection:     impl.handleDropCollection,
 		message.MessageTypeCreatePartition:    impl.handleCreatePartition,
 		message.MessageTypeDropPartition:      impl.handleDropPartition,
@@ -49,6 +50,24 @@ func (impl *shardInterceptor) initOpTable() {
 		message.MessageTypeFlushAll:           impl.handleFlushAllMessage,
 		message.MessageTypeTruncateCollection: impl.handleTruncateCollectionMessage,
 	}
+}
+
+func (impl *shardInterceptor) handleRestoreSnapshot(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	body := message.MustAsMutableRestoreSnapshotMessageV2(msg).MustBody()
+	if body.GetCollection() == nil {
+		return appendOp(ctx, msg)
+	}
+	if body.GetCollectionHeader() == nil || body.GetCollection().GetCollectionSchema() == nil {
+		return nil, status.NewUnrecoverableError("restore snapshot creation payload is incomplete")
+	}
+	id, err := appendOp(ctx, msg)
+	if err != nil {
+		return id, err
+	}
+	created := messageutil.RestoreCollectionMessage(msg.IntoImmutableMessage(id))
+	impl.shardManager.CreateCollection(created)
+	impl.allocFunctionRunners(created.Header().GetCollectionId(), created.VChannel(), body.GetCollection().GetCollectionSchema())
+	return id, nil
 }
 
 // Name returns the name of the interceptor.
@@ -75,7 +94,8 @@ func (impl *shardInterceptor) handleCreateCollection(ctx context.Context, msg me
 	if body.GetCollectionSchema() == nil && len(body.GetSchema()) == 0 {
 		return nil, status.NewUnrecoverableError("create collection message does not contain collection schema")
 	}
-	schema := messageutil.MustGetSchemaFromCreateCollectionMessageBody(body)
+	// Validate legacy serialized schemas before appending the creation message.
+	messageutil.MustGetSchemaFromCreateCollectionMessageBody(body)
 	header := createCollectionMsg.Header()
 	if err := impl.shardManager.CheckIfCollectionCanBeCreated(header.GetCollectionId()); err != nil {
 		impl.shardManager.Logger().Warn(ctx, "collection already exists when creating collection", mlog.FieldCollectionID(header.GetCollectionId()))
@@ -89,10 +109,9 @@ func (impl *shardInterceptor) handleCreateCollection(ctx context.Context, msg me
 		return msgID, err
 	}
 	impl.shardManager.CreateCollection(message.MustAsImmutableCreateCollectionMessageV1(msg.IntoImmutableMessage(msgID)))
-	// Legacy CreateCollection messages keep the schema in the serialized Schema
-	// field instead of CollectionSchema. Resolve both formats so Alloc always
-	// registers the WAL lifecycle key before later schema updates.
-	impl.allocFunctionRunners(header.GetCollectionId(), createCollectionMsg.VChannel(), schema)
+	// Register the immutable snapshot retained by the shard manager, including
+	// schemas decoded from legacy CreateCollection messages.
+	impl.allocFunctionRunners(header.GetCollectionId(), createCollectionMsg.VChannel(), impl.shardManager.GetCollectionSchemaSnapshot(header.GetCollectionId()))
 	return msgID, nil
 }
 
@@ -111,7 +130,7 @@ func (impl *shardInterceptor) handleDropCollection(ctx context.Context, msg mess
 		return msgID, err
 	}
 	impl.shardManager.DropCollection(message.MustAsImmutableDropCollectionMessageV1(msg.IntoImmutableMessage(msgID)))
-	function.GetManager().Release(dropCollectionMessage.Header().GetCollectionId(), walFunctionRunnerKey(dropCollectionMessage.VChannel()))
+	function.GetManager().Release(dropCollectionMessage.Header().GetCollectionId(), WALFunctionRunnerKey(dropCollectionMessage.VChannel()))
 	return msgID, nil
 }
 
@@ -196,10 +215,19 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 	// effective value.
 	if paramtable.Get().FunctionCfg.EnableWriteBeforeMaterialization.GetAsBool() {
 		if err := impl.materializeFunctionFields(ctx, insertMsg, header.GetCollectionId(), schemaVersion); err != nil {
+			var preparation *function.PreparationRequiredError
+			if errors.As(err, &preparation) {
+				// Unwind to redo before waiting for initialization. No
+				// fields or segment assignments have changed on this path.
+				return nil, err
+			}
 			impl.shardManager.Logger().Warn(ctx, "failed to materialize function fields before WAL append",
 				mlog.Int64("collectionID", header.GetCollectionId()),
 				mlog.Int32("schemaVersion", schemaVersion),
 				mlog.Err(err))
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			return nil, status.NewUnrecoverableError("failed to materialize function fields before WAL append: %s", err.Error())
 		}
 	}
@@ -270,11 +298,21 @@ func (impl *shardInterceptor) handleDeleteMessage(ctx context.Context, msg messa
 
 // handleManualFlushMessage handles the manual flush message.
 func (impl *shardInterceptor) handleManualFlushMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
-	maunalFlushMsg := message.MustAsMutableManualFlushMessageV2(msg)
-	header := maunalFlushMsg.Header()
+	manualFlushMsg := message.MustAsMutableManualFlushMessageV2(msg)
+	header := manualFlushMsg.Header()
 	segmentIDs, err := impl.shardManager.FlushAndFenceSegmentAllocUntil(header.GetCollectionId(), msg.TimeTick())
 	if err != nil {
-		return nil, status.NewUnrecoverableError(err.Error())
+		if !msg.IsUnreplicable() || msg.ReplicateHeader() != nil || !errors.Is(err, shards.ErrCollectionNotFound) {
+			return nil, status.NewUnrecoverableError(err.Error())
+		}
+		// DataCoord admits a local flush only for an existing collection, after
+		// CreateCollection's business-channel ACKs. Its ID is never reused, so a
+		// missing shard here means Drop overtook the flush (including on retry
+		// after WAL recovery). Append an empty best-effort flush for the dropped
+		// collection. It follows normal consuming ACK/resource-key ordering without
+		// an additional dependency on Drop completion. Never synthesize an ACK or
+		// apply this exception to historical/replicated flushes or other errors.
+		segmentIDs = nil
 	}
 
 	// Modify the extra response for manual flush message.
@@ -282,7 +320,7 @@ func (impl *shardInterceptor) handleManualFlushMessage(ctx context.Context, msg 
 		return &messagespb.ManualFlushExtraResponse{SegmentIds: segmentIDs}
 	})
 	header.SegmentIds = segmentIDs
-	maunalFlushMsg.OverwriteHeader(header)
+	manualFlushMsg.OverwriteHeader(header)
 
 	return appendOp(ctx, msg)
 }
@@ -335,7 +373,7 @@ func (impl *shardInterceptor) handleAlterCollection(ctx context.Context, msg mes
 		return msgID, err
 	}
 	if messageutil.IsSchemaChange(header) {
-		if schema := putCollectionMsg.MustBody().GetUpdates().GetSchema(); schema != nil {
+		if schema := impl.shardManager.GetCollectionSchemaSnapshot(header.GetCollectionId()); schema != nil {
 			impl.updateFunctionRunners(header.GetCollectionId(), putCollectionMsg.VChannel(), schema)
 		}
 	}
@@ -409,7 +447,7 @@ func (impl *shardInterceptor) handleTruncateCollectionMessage(ctx context.Contex
 func (impl *shardInterceptor) Close() {
 	if schemaProvider, ok := impl.shardManager.(collectionSchemaProvider); ok {
 		for collectionID, schemaInfo := range schemaProvider.GetAllCollectionSchemaInfos() {
-			function.GetManager().Release(collectionID, walFunctionRunnerKey(schemaInfo.VChannel))
+			function.GetManager().Release(collectionID, WALFunctionRunnerKey(schemaInfo.VChannel))
 		}
 	}
 }

@@ -47,6 +47,7 @@ type SegmentSuite struct {
 
 func (suite *SegmentSuite) SetupSuite() {
 	paramtable.Init()
+	initcore.InitExecExpressionFunctionFactory()
 }
 
 func (suite *SegmentSuite) SetupTest() {
@@ -284,14 +285,14 @@ func TestCompactLoadInfoForRuntimeCachesResourceUsage(t *testing.T) {
 			101: {FieldID: 101, MemorySize: 200},
 		},
 	}
-	segment := &baseSegment{
+	segment := &LocalSegment{baseSegment: baseSegment{
 		collection:         NewTestCollection(loadInfo.GetCollectionID(), querypb.LoadType_LoadCollection, schema),
 		segmentType:        SegmentTypeSealed,
 		loadInfo:           atomic.NewPointer(loadInfo),
 		resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
-	}
+	}}
 
-	segment.compactLoadInfoForRuntime()
+	FinalizeLoad(segment)
 
 	assert.Empty(t, segment.LoadInfo().GetBinlogPaths())
 	assert.Nil(t, segment.LoadInfo().GetStats())
@@ -533,6 +534,36 @@ func (suite *SegmentSuite) TestLoadDeltaData_UnsortedBatchAllApplied() {
 	suite.EqualValues(97, suite.sealed.RowNum()) // 100 - 3 deletes
 	// Watermark advances to batch max, not last.
 	suite.EqualValues(1500, suite.sealed.(*LocalSegment).LastDeltaTimestamp())
+}
+
+// TestLoadDeltaData_OutOfOrderKeepsEarliestDelete guards against losing a
+// row's earliest delete when deletes arrive out of timestamp order, e.g. the
+// segment's own deltalogs are applied before an older delete of the same row
+// is forwarded from a remaining L0 segment (#52784).
+func (suite *SegmentSuite) TestLoadDeltaData_OutOfOrderKeepsEarliestDelete() {
+	ctx := context.Background()
+	sealed := suite.sealed.(*LocalSegment)
+
+	loadDelete := func(pk int64, ts uint64) {
+		pks := storage.NewInt64PrimaryKeys(1)
+		pks.AppendRaw(pk)
+		dd, err := storage.NewDeltaDataWithData(pks, []uint64{ts})
+		suite.Require().NoError(err)
+		suite.Require().NoError(sealed.LoadDeltaData(ctx, dd))
+	}
+	// retrieves pk in {1, 2, 3} at ts 1000
+	retrieve := func() []int64 {
+		plan, err := mock_segcore.GenSimpleRetrievePlan(suite.collection.GetCCollection())
+		suite.Require().NoError(err)
+		res, err := sealed.Retrieve(ctx, plan)
+		suite.Require().NoError(err)
+		return res.GetIds().GetIntId().GetData()
+	}
+
+	loadDelete(2, 2000)
+	suite.ElementsMatch([]int64{1, 2, 3}, retrieve())
+	loadDelete(2, 500)
+	suite.ElementsMatch([]int64{1, 3}, retrieve())
 }
 
 // TestAdvanceLastDeltaTimestamp_NeverRegresses verifies the watermark is

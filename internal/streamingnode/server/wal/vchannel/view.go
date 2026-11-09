@@ -8,6 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
@@ -41,6 +42,7 @@ func newVChannelView(
 ) *VChannelView {
 	return &VChannelView{
 		meta:                          meta,
+		persistedSegmentDataVersion:   qviews.FromProtoDataVersion(meta.GetSegmentDataVersionSummary()),
 		persistedMetaTimeTick:         persistedMetaTimeTick,
 		persistedMaterializedTimeTick: meta.GetTransformMaterializedTimeTick(),
 		dirty:                         dirty,
@@ -73,13 +75,15 @@ func NewVChannelMetaFromCreateCollectionMessage(msg message.ImmutableCreateColle
 				},
 			},
 		},
-		CheckpointTimeTick: msg.TimeTick(),
+		CheckpointTimeTick:       msg.TimeTick(),
+		CreateCollectionTimeTick: msg.TimeTick(),
 	}
 }
 
 // VChannelView tracks the metadata and durability state of a vchannel.
 type VChannelView struct {
-	mu sync.Mutex
+	persistedSegmentDataVersion qviews.DataVersion
+	mu                          sync.Mutex
 
 	meta                             *streamingpb.VChannelMeta
 	pendingDrops                     []pendingDrop
@@ -111,6 +115,9 @@ func (info *VChannelView) AssignmentMeta() *streamingpb.VChannelMeta {
 	return proto.Clone(info.meta).(*streamingpb.VChannelMeta)
 }
 
+// WritePathRecoveryState captures write-path state with a shared, read-only
+// Schema. Callers may retain it across history updates and cleanup, but must
+// not modify the schema or its nested values.
 func (info *VChannelView) WritePathRecoveryState() (moduleapi.VChannelWritePathRecoveryState, bool) {
 	info.mu.Lock()
 	defer info.mu.Unlock()
@@ -129,7 +136,8 @@ func (info *VChannelView) WritePathRecoveryState() (moduleapi.VChannelWritePathR
 		}
 	}
 	if schemas := collection.GetSchemas(); len(schemas) > 0 && schemas[len(schemas)-1].GetSchema() != nil {
-		state.Schema = proto.Clone(schemas[len(schemas)-1].GetSchema()).(*schemapb.CollectionSchema)
+		state.Schema = schemas[len(schemas)-1].GetSchema()
+		state.SchemaTimeTick = schemas[len(schemas)-1].GetCheckpointTimeTick()
 	}
 	return state, true
 }
@@ -185,6 +193,9 @@ func (info *VChannelView) MarkSnapshotPersisted(snapshot *streamingpb.VChannelMe
 	info.mu.Lock()
 	defer info.mu.Unlock()
 	info.markMetaPersistedLocked(snapshot.GetCheckpointTimeTick())
+	if version := qviews.FromProtoDataVersion(snapshot.GetSegmentDataVersionSummary()); version.GT(info.persistedSegmentDataVersion) {
+		info.persistedSegmentDataVersion = version
+	}
 	if materialized := snapshot.GetTransformMaterializedTimeTick(); materialized > info.persistedMaterializedTimeTick {
 		info.persistedMaterializedTimeTick = materialized
 	}
@@ -346,11 +357,18 @@ func (info *VChannelView) restoreSegmentSchema(partitionID int64, timetick uint6
 	if !info.hasPartitionMetaLocked(partitionID) {
 		return nil
 	}
-	for _, version := range info.meta.GetCollectionInfo().GetSchemas() {
-		if version.GetState() == streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL &&
-			version.GetSchema() != nil && version.GetSchema().GetVersion() == schemaVersion {
-			return version.GetSchema()
+	history := info.meta.GetCollectionInfo().GetSchemas()
+	for i := len(history) - 1; i >= 0; i-- {
+		entry := history[i]
+		if entry.GetState() == streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL &&
+			entry.GetSchema() != nil && entry.GetSchema().GetVersion() == schemaVersion && entry.GetCheckpointTimeTick() <= timetick {
+			return entry.GetSchema()
 		}
+	}
+	// Legacy migration can resolve an encoding version whose allocation
+	// predates retained history. Preserve that exact version's canonical body.
+	if entry := info.canonicalReadSchemaLocked(schemaVersion); entry != nil {
+		return entry.GetSchema()
 	}
 	return nil
 }
@@ -516,9 +534,9 @@ func (info *VChannelView) ObserveAlterCollectionMessageV2(msg message.ImmutableA
 	if info.closingLocked(0) || info.meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL {
 		return false
 	}
-	schemaChange := messageutil.IsSchemaChange(msg.Header())
-	if schemaChange {
-		schema := msg.MustBody().Updates.Schema
+	schemas := info.meta.CollectionInfo.Schemas
+	current := schemas[len(schemas)-1].GetSchema()
+	if schema := messageutil.ApplyCollectionSchemaUpdates(current, msg.Header(), msg.MustBody()); schema != nil {
 		if info.hasSchemaVersionLocked(msg.TimeTick(), schema) {
 			return false
 		}
@@ -698,4 +716,27 @@ func partitionTombstonedCleanupReady(meta *streamingpb.PartitionInfoOfVChannel, 
 	return meta.GetState() == streamingpb.PartitionState_PARTITION_STATE_TOMBSTONED &&
 		checkpointTimeTick > 0 &&
 		physicalTimeTick > checkpointTimeTick
+}
+
+func (info *VChannelView) SegmentDataVersionSummary() qviews.DataVersion {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	return qviews.FromProtoDataVersion(info.meta.GetSegmentDataVersionSummary())
+}
+
+func (info *VChannelView) AdvanceSegmentDataVersionSummary(version qviews.DataVersion) bool {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	if !version.GT(qviews.FromProtoDataVersion(info.meta.GetSegmentDataVersionSummary())) {
+		return false
+	}
+	info.meta.SegmentDataVersionSummary = version.IntoProto()
+	info.dirty = true
+	return true
+}
+
+func (info *VChannelView) SegmentDataVersionSummaryPersisted(version qviews.DataVersion) bool {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	return info.persistedSegmentDataVersion.GTE(version)
 }

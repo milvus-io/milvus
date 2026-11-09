@@ -124,11 +124,14 @@ func (provider *AliEmbeddingProvider) CallEmbedding(ctx context.Context, texts [
 	}
 	data := make([][]float32, 0, numRows)
 	for i := 0; i < numRows; i += provider.maxBatch {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		end := i + provider.maxBatch
 		if end > numRows {
 			end = numRows
 		}
-		resp, err := provider.client.Embedding(provider.modelName, texts[i:end], int(provider.embedDimParam), textType, provider.outputType, provider.timeoutMs)
+		resp, err := provider.client.Embedding(ctx, provider.modelName, texts[i:end], int(provider.embedDimParam), textType, provider.outputType, provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}

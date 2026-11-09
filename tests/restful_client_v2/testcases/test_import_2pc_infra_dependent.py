@@ -209,30 +209,6 @@ class Import2PCInfraBase(TestBase):
         }
         return sorted(complete_segments)[-1]
 
-    def _select_manifest_segment_prefix(self, insert_objects):
-        segment_groups = {}
-        for object_name in insert_objects:
-            parts = object_name.split("/")
-            if "insert_log" not in parts:
-                continue
-            idx = parts.index("insert_log")
-            if len(parts) < idx + 6:
-                continue
-            segment_prefix = "/".join(parts[: idx + 4]) + "/"
-            group_id = parts[idx + 4]
-            segment_groups.setdefault(segment_prefix, set()).add(group_id)
-
-        manifest_segments = [
-            segment_prefix
-            for segment_prefix, groups in segment_groups.items()
-            if "_data" in groups and "_metadata" in groups
-        ]
-        assert manifest_segments, {
-            "reason": "no manifest-layout insert segment found",
-            "segment_groups": {segment: sorted(groups) for segment, groups in segment_groups.items()},
-        }
-        return sorted(manifest_segments)[-1]
-
     def _build_generated_backup_fixture(self, source_collection_name, rows):
         self._create_base_collection(source_collection_name)
         self._insert_rows(source_collection_name, rows)
@@ -1075,10 +1051,7 @@ class Import2PCInfraBase(TestBase):
             source["storage"], "insert_log", source_collection_id
         )
         assert has_insert, {"collection_id": source_collection_id, "checked_prefixes": insert_objects}
-        if storage_version == 3:
-            source_segment_prefix = self._select_manifest_segment_prefix(insert_objects)
-        else:
-            source_segment_prefix = self._select_insert_segment_prefix(insert_objects)
+        source_segment_prefix = self._select_insert_segment_prefix(insert_objects)
         source_segment_id = source_segment_prefix.rstrip("/").split("/")[-1]
         target_partition_prefix = (
             f"{(self.storage_client.root_path or 'file').strip('/')}/"
@@ -2760,59 +2733,39 @@ class TestImport2PCInfraDependent(Import2PCInfraBase):
                     self.import_job_client.abort_import_job(job_id)
             self._delete_storage_prefix(self.storage_client, fixture["copiedPrefix"])
 
-    def test_import_2pc_real_source_backup_storage_v3_manifest_prefix_fails_closed(self, release_name):
+    def test_import_2pc_backup_storage_v3_prefix_rejected(self):
         """
-        target: verify REST backup=true prefix import does not silently misread StorageV3 manifest-layout objects
-        method: generate a real StorageV3 segment in a source instance, copy its _data/_metadata/_stats objects
-                into target MinIO, then submit backup=true with storage_version=3 through the REST import API
-        expected: the job fails with a reader/manifest-layout reason and no imported rows become visible
+        target: reject raw StorageV3 backup prefixes at the REST Import entry point
+        method: submit a placeholder prefix with backup=true and storage_version=3
+        expected: Create rejects the request without creating an import job; snapshot metadata is required
         """
-        storage_version = 3
-        source = self._ensure_storage_fixture_source(storage_version, release_name)
-        rows = self._make_rows(30350, 12, phase=350)
-        fixture = self._build_copied_backup_fixture_from_source(source, storage_version, rows)
-        collection_name = gen_collection_name(prefix="import_2pc_real_backup_v3_guardrail")
+        collection_name = gen_collection_name(prefix="import_2pc_backup_v3_guardrail")
         self._create_base_collection(collection_name)
 
-        expected_ids = set(fixture["expectedIds"])
+        # Options are rejected before reading source objects. No source instance,
+        # insert/flush, or object copy is needed to exercise this API contract.
         job_id = None
         try:
-            job_id = self._create_manual_import_job_with_files(
-                collection_name,
-                fixture["files"],
-                {"backup": "true", "storage_version": "3"},
-                partition_name=fixture["partitionName"],
+            rsp = self.import_job_client.create_import_jobs(
+                {
+                    "collectionName": collection_name,
+                    "partitionName": "_default",
+                    "files": [[f"import_2pc_v3_guardrail_{uuid4().hex}/"]],
+                    "options": {"backup": "true", "storage_version": "3", "auto_commit": "false"},
+                }
             )
-            deadline = time.time() + min(IMPORT_2PC_TIMEOUT, 120)
-            rsp = None
-            failed = False
-            while time.time() < deadline:
-                rsp = self.import_job_client.get_import_job_progress(job_id)
-                assert rsp.get("code") == 0, rsp
-                state = rsp.get("data", {}).get("state")
-                if state == "Failed":
-                    failed = True
-                    break
-                if state in ("Uncommitted", "Committing", "Completed"):
-                    pytest.fail(f"StorageV3 manifest prefix became commit-capable through REST backup reader: {rsp}")
-                time.sleep(2)
-            assert failed, rsp
-            reason = str(rsp.get("data", {}).get("reason", rsp)).lower()
-            assert any(
-                token in reason
-                for token in ("field id", "system fields", "manifest", "failed to create reader", "import failed")
-            ), {"reason": reason, "rsp": rsp}
-
-            seen, absent = self._wait_imported_ids_absent(collection_name, expected_ids, timeout=20)
-            assert absent, {"unexpected_visible_ids": seen, "reason": reason}
+            job_id = (rsp.get("data") or {}).get("jobId")
+            assert rsp["code"] != 0, rsp
+            assert "StorageV3 backup import requires source_type=snapshot" in rsp.get("message", ""), rsp
+            assert job_id is None, rsp
 
         finally:
+            # Clean up an unexpectedly accepted job if the admission guard regresses.
             if job_id is not None:
                 progress_rsp = self.import_job_client.get_import_job_progress(job_id)
                 state = progress_rsp.get("data", {}).get("state") if progress_rsp.get("code") == 0 else None
                 if state in ("Pending", "PreImporting", "Importing", "Sorting", "IndexBuilding", "Uncommitted"):
                     self.import_job_client.abort_import_job(job_id)
-            self._delete_storage_prefix(self.storage_client, fixture["copiedPrefix"])
 
     def test_import_2pc_storage_v3_manifest_snapshot_restore_happy_path(self, release_name):
         """

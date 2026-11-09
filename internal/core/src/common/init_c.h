@@ -107,19 +107,6 @@ SetExprResCacheConfig(const char* mode,            // "memory" or "disk"
                       int64_t disk_max_file_size,
                       int64_t disk_min_eval_duration_us);
 
-// Set the capacity of arrow's internal IO thread pool. This pool runs
-// async range reads (ReadRangeCache) that issue actual S3 GetObject
-// requests, so it's the true ceiling on parallel object-storage reads —
-// independent of the segcore HIGH/MIDDLE pools and aws-sdk-cpp's
-// ClientConfiguration::maxConnections. Arrow's built-in default is a
-// fixed constant (kDefaultNumIoThreads = 8 in arrow 17), which is almost
-// always the hidden bottleneck for retrieve/load workloads. The Go side
-// resolves common.arrow.ioThreadPoolCoefficient (× CPU cores, clamped by
-// common.arrow.ioThreadPoolMaxCapacity) into a final thread count and
-// passes it here. Values <= 0 are ignored (keep the current capacity).
-void
-SetArrowIOThreadPoolCapacity(int threads);
-
 void
 UpdateArrowIOThreadPoolMetrics();
 

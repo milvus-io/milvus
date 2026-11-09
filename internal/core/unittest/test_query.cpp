@@ -95,7 +95,7 @@ TEST(Query, ExecWithPredicateLoader) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    dataset.SharedRaw());
 
     ScopedSchemaHandle handle(*schema);
     auto plan_str =
@@ -160,7 +160,7 @@ TEST(Query, ExecWithPredicateSmallN) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    dataset.SharedRaw());
 
     ScopedSchemaHandle handle(*schema);
     auto plan_str =
@@ -202,7 +202,7 @@ TEST(Query, ExecWithPredicate) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    dataset.SharedRaw());
 
     ScopedSchemaHandle handle(*schema);
     auto plan_str =
@@ -267,7 +267,7 @@ TEST(Query, ExecTerm) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    dataset.SharedRaw());
 
     ScopedSchemaHandle handle(*schema);
     auto plan_str =
@@ -355,7 +355,7 @@ TEST(Query, ExecWithoutPredicateFlat) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    dataset.SharedRaw());
 
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
@@ -394,7 +394,7 @@ TEST(Query, ExecWithoutPredicate) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    dataset.SharedRaw());
 
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
@@ -460,7 +460,7 @@ TEST(Query, InnerProduct) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    dataset.SharedRaw());
     auto col = dataset.get_col<float>(vec_fid);
 
     auto ph_group_raw =
@@ -542,7 +542,7 @@ TEST(Query, DISABLED_FillSegment) {
                         N,
                         dataset.row_ids_.data(),
                         dataset.timestamps_.data(),
-                        dataset.raw_);
+                        dataset.SharedRaw());
         return segment;
     }());
     segments.emplace_back(CreateSealedWithFieldDataLoaded(schema, dataset));
@@ -824,7 +824,7 @@ TEST(Query, ExecWithPredicateBinary) {
                     N,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
-                    dataset.raw_);
+                    dataset.SharedRaw());
     auto vec_ptr = dataset.get_col<uint8_t>(vec_fid);
 
     ScopedSchemaHandle handle(*schema);

@@ -18,7 +18,7 @@ func TestExtractPKsErrorText(t *testing.T) {
 		descriptor: shards.PrimaryKeyDescriptor{FieldID: 100, DataType: schemapb.DataType_VarChar},
 	}
 	fromDelete := func(ids *schemapb.IDs) error {
-		_, _, err := extractPKs(newDeleteMessage(ids))
+		_, _, err := extractPKsFromDelete(newDeleteMessage(ids))
 		return err
 	}
 	fromInsert := func(fields ...*schemapb.FieldData) error {
@@ -34,7 +34,7 @@ func TestExtractPKsErrorText(t *testing.T) {
 		text string
 	}{
 		{"delete corrupt body", func() error {
-			_, _, err := extractPKs(corruptMessageBody(newDeleteMessage(&schemapb.IDs{})))
+			_, _, err := extractPKsFromDelete(corruptMessageBody(newDeleteMessage(&schemapb.IDs{})))
 			return err
 		}(), "decode delete body failed"},
 		{"delete nil ids", fromDelete(nil), "primary keys are nil"},
@@ -62,7 +62,7 @@ func TestExtractPKsErrorText(t *testing.T) {
 		{"ordinary payload type mismatch", func() error {
 			field := int64PKFieldData(1)
 			field.Type = schemapb.DataType_VarChar
-			_, _, err := extractPKsFromOrdinaryInsert(newInsertMessage([]*schemapb.FieldData{field}), varcharDescriptor)
+			_, err := extractPKsFromOrdinaryInsert(newInsertMessage([]*schemapb.FieldData{field}), varcharDescriptor)
 			return err
 		}(), "primary key payload does not match schema type VarChar"},
 	}

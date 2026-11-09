@@ -170,8 +170,10 @@ BuildRetrieveFieldsBatch(
         }
         auto& field_meta = plan->schema_->operator[](field_id);
         auto name = std::string(field_meta.get_name().get());
-        ARROW_ASSIGN_OR_RAISE(auto converted,
-                              FieldDataToArrow(name, *it->second, total_rows));
+        ARROW_ASSIGN_OR_RAISE(
+            auto converted,
+            FieldDataToArrow(
+                name, *it->second, total_rows, false, nullptr, &field_meta));
         auto array = converted.second;
         fields.push_back(MilvusField(name,
                                      array->type(),
@@ -194,6 +196,7 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                           const int32_t* seg_indices,
                           const int64_t* seg_offsets,
                           int64_t total_rows,
+                          int64_t max_output_size,
                           ArrowSchema* out_schema,
                           ArrowArray* out_array,
                           void* cancellation_source) {
@@ -203,6 +206,7 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
         AssertInfo(num_segments > 0, "num_segments must be positive");
         AssertInfo(c_plan != nullptr, "null retrieve plan");
         AssertInfo(total_rows >= 0, "total_rows must not be negative");
+        AssertInfo(max_output_size >= 0, "negative output byte budget");
         AssertInfo(total_rows == 0 || seg_indices != nullptr,
                    "null seg_indices for non-empty rows");
         AssertInfo(total_rows == 0 || seg_offsets != nullptr,
@@ -253,6 +257,26 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                     seg_offsets[pos]);
             }
 
+            // Check the aggregate for all winning segments before reading any
+            // output fields. Reuse ordinary Retrieve's per-field statistics.
+            int64_t estimated_size = 0;
+            for (const auto& selected : segment_fields) {
+                if (selected.segment_offsets.empty()) {
+                    continue;
+                }
+                milvus::futures::throwIfCancelled(cancel_token);
+                estimated_size +=
+                    selected.segment->get_fields_avg_size(plan->field_ids_) *
+                    static_cast<int64_t>(selected.segment_offsets.size());
+            }
+            if (estimated_size > max_output_size) {
+                ThrowInfo(milvus::InvalidParameter,
+                          "estimated query output size {} exceeds remaining "
+                          "output byte budget {}",
+                          estimated_size,
+                          max_output_size);
+            }
+
             auto dynamic_field_id = plan->schema_->get_dynamic_field_id();
 
             // Materialize fields per segment via bulk_subscript.
@@ -262,6 +286,8 @@ FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                 }
                 milvus::futures::throwIfCancelled(cancel_token);
                 milvus::OpContext op_ctx(cancel_token);
+                op_ctx.runtime_load_priority =
+                    milvus::proto::common::LoadPriority::HIGH;
                 auto read_lease =
                     AcquireSegmentReadLease(materialized.segment, cancel_token);
                 // Capture the request-scoped read snapshot once per segment so

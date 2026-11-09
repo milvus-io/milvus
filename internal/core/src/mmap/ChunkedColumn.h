@@ -40,6 +40,7 @@
 #include "segcore/storagev1translator/ChunkTranslator.h"
 #include "cachinglayer/Translator.h"
 #include "mmap/ChunkedColumnInterface.h"
+#include "mmap/ColumnOffsetLookup.h"
 
 namespace milvus {
 
@@ -64,24 +65,7 @@ std::pair<std::vector<milvus::cachinglayer::cid_t>,
                                                     int64_t count,
                                                     const std::vector<int64_t>&
                                                         num_rows_until_chunk) {
-    std::vector<milvus::cachinglayer::cid_t> cids(count, 1);
-    std::vector<int64_t> offsets_in_chunk(count);
-    int64_t len = num_rows_until_chunk.size() - 1;
-    while (len > 1) {
-        const int64_t half = len / 2;
-        len -= half;
-        for (size_t i = 0; i < count; ++i) {
-            const bool cmp =
-                num_rows_until_chunk[cids[i] + half - 1] < offsets[i] + 1;
-            cids[i] += static_cast<int64_t>(cmp) * half;
-        }
-    }
-
-    for (size_t i = 0; i < count; ++i) {
-        offsets_in_chunk[i] = offsets[i] - num_rows_until_chunk[--cids[i]];
-    }
-
-    return std::make_pair(std::move(cids), std::move(offsets_in_chunk));
+    return detail::LocateOffsetsByBinary(offsets, count, num_rows_until_chunk);
 }
 
 std::pair<std::vector<milvus::cachinglayer::cid_t>,
@@ -93,28 +77,11 @@ std::pair<std::vector<milvus::cachinglayer::cid_t>,
                                                     int64_t virt_chunk_order,
                                                     const std::vector<int64_t>&
                                                         vcid_to_cid_arr) {
-    std::vector<milvus::cachinglayer::cid_t> cids(count, 0);
-    std::vector<int64_t> offsets_in_chunk(count);
-    // optimize for single chunk case
-    if (num_rows_until_chunk.size() == 2) {
-        for (int64_t i = 0; i < count; i++) {
-            offsets_in_chunk[i] = offsets[i];
-        }
-        return std::make_pair(std::move(cids), std::move(offsets_in_chunk));
-    }
-    for (int64_t i = 0; i < count; i++) {
-        auto offset = offsets[i];
-        auto vcid = offset >> virt_chunk_order;
-        auto scid = vcid_to_cid_arr[vcid];
-        while (scid < num_rows_until_chunk.size() - 1 &&
-               offset >= num_rows_until_chunk[scid + 1]) {
-            scid++;
-        }
-        auto offset_in_chunk = offset - num_rows_until_chunk[scid];
-        cids[i] = scid;
-        offsets_in_chunk[i] = offset_in_chunk;
-    }
-    return std::make_pair(std::move(cids), std::move(offsets_in_chunk));
+    return detail::LocateOffsetsByBuckets(offsets,
+                                          count,
+                                          num_rows_until_chunk,
+                                          virt_chunk_order,
+                                          vcid_to_cid_arr);
 }
 
 class ChunkedColumnBase : public ChunkedColumnInterface {
@@ -267,16 +234,6 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
     }
 
     void
-    BulkPrimitiveValueAt(milvus::OpContext* op_ctx,
-                         void* dst,
-                         const int64_t* offsets,
-                         int64_t count,
-                         bool small_int_raw_type = false) override {
-        ThrowInfo(ErrorCode::Unsupported,
-                  "BulkPrimitiveValueAt only supported for ChunkedColumn");
-    }
-
-    void
     BulkVectorValueAt(milvus::OpContext* op_ctx,
                       void* dst,
                       const int64_t* offsets,
@@ -389,14 +346,26 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
         return PinWrapper<Chunk*>(std::move(ca), chunk);
     }
 
-    TakeCellPin
-    MakeTakeCellPin(milvus::OpContext* op_ctx) const override {
+    TakeCellAccess
+    MakeTakeCellAccess(
+        milvus::OpContext* op_ctx,
+        const std::vector<int64_t>* batch_cell_ids = nullptr) const override {
         auto slot = slot_;
-        return [slot = std::move(slot), op_ctx](int64_t chunk_id) {
+        if (batch_cell_ids != nullptr) {
+            auto ca =
+                batch_cell_ids->empty()
+                    ? nullptr
+                    : SemiInlineGet(slot->PinCells(op_ctx, *batch_cell_ids));
+            return TakeCellRead(
+                [slot = std::move(slot), ca = std::move(ca)](int64_t id) {
+                    return ca->get_cell_of(id);
+                });
+        }
+        return TakeCellPin([slot = std::move(slot), op_ctx](int64_t chunk_id) {
             auto ca = SemiInlineGet(slot->PinCells(op_ctx, {chunk_id}));
             auto* chunk = ca->get_cell_of(chunk_id);
             return PinWrapper<Chunk*>(std::move(ca), chunk);
-        };
+        });
     }
 
     std::vector<PinWrapper<Chunk*>>
@@ -424,6 +393,17 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
     }
 
  protected:
+    std::unique_ptr<ColumnPlanner>
+    BuildPlanner() const override {
+        auto* meta =
+            static_cast<segcore::storagev1translator::CTMeta*>(slot_->meta());
+        return std::make_unique<ColumnPlanner>(
+            meta->num_rows_until_chunk_,
+            OffsetLookupOptions{OffsetLookupStrategy::Bucket,
+                                num_chunks_ > 1 ? meta->virt_chunk_order_ : 0,
+                                &meta->vcid_to_cid_arr_});
+    }
+
     std::optional<DataType>
     GetDefaultScanDataType() const override {
         return data_type_;
@@ -458,91 +438,6 @@ class ChunkedColumn : public ChunkedColumnBase {
                 offset = chunk->PhysicalOffsetOf(offset);
             }
             fn(chunk->ValueAt(offset), i);
-        }
-    }
-
-    template <typename S, typename T>
-    void
-    BulkPrimitiveValueAtImpl(milvus::OpContext* op_ctx,
-                             void* dst,
-                             const int64_t* offsets,
-                             int64_t count) {
-        static_assert(std::is_fundamental_v<S> && std::is_fundamental_v<T>);
-        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
-        auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
-        auto typed_dst = static_cast<T*>(dst);
-        for (int64_t i = 0; i < count; i++) {
-            auto chunk = ca->get_cell_of(cids[i]);
-            auto value = chunk->ValueAt(offsets_in_chunk[i]);
-            typed_dst[i] =
-                *static_cast<const S*>(static_cast<const void*>(value));
-        }
-    }
-
-    void
-    BulkPrimitiveValueAt(milvus::OpContext* op_ctx,
-                         void* dst,
-                         const int64_t* offsets,
-                         int64_t count,
-                         bool small_int_raw_type) override {
-        switch (data_type_) {
-            case DataType::INT8: {
-                if (small_int_raw_type) {
-                    BulkPrimitiveValueAtImpl<int8_t, int8_t>(
-                        op_ctx, dst, offsets, count);
-                } else {
-                    BulkPrimitiveValueAtImpl<int8_t, int32_t>(
-                        op_ctx, dst, offsets, count);
-                }
-                break;
-            }
-            case DataType::INT16: {
-                if (small_int_raw_type) {
-                    BulkPrimitiveValueAtImpl<int16_t, int16_t>(
-                        op_ctx, dst, offsets, count);
-                } else {
-                    BulkPrimitiveValueAtImpl<int16_t, int32_t>(
-                        op_ctx, dst, offsets, count);
-                }
-                break;
-            }
-            case DataType::INT32: {
-                BulkPrimitiveValueAtImpl<int32_t, int32_t>(
-                    op_ctx, dst, offsets, count);
-                break;
-            }
-            case DataType::INT64: {
-                BulkPrimitiveValueAtImpl<int64_t, int64_t>(
-                    op_ctx, dst, offsets, count);
-                break;
-            }
-            case DataType::TIMESTAMPTZ: {
-                BulkPrimitiveValueAtImpl<int64_t, int64_t>(
-                    op_ctx, dst, offsets, count);
-                break;
-            }
-            case DataType::FLOAT: {
-                BulkPrimitiveValueAtImpl<float, float>(
-                    op_ctx, dst, offsets, count);
-                break;
-            }
-            case DataType::DOUBLE: {
-                BulkPrimitiveValueAtImpl<double, double>(
-                    op_ctx, dst, offsets, count);
-                break;
-            }
-            case DataType::BOOL: {
-                BulkPrimitiveValueAtImpl<bool, bool>(
-                    op_ctx, dst, offsets, count);
-                break;
-            }
-            default: {
-                ThrowInfo(
-                    ErrorCode::Unsupported,
-                    "BulkScalarValueAt is not supported for unknown scalar "
-                    "data type: {}",
-                    data_type_);
-            }
         }
     }
 
@@ -650,30 +545,6 @@ class ChunkedVariableColumn : public ChunkedColumnBase {
     }
 
     void
-    BulkRawJsonAt(milvus::OpContext* op_ctx,
-                  std::function<void(Json, size_t, bool)> fn,
-                  const int64_t* offsets,
-                  int64_t count) const override {
-        if constexpr (!std::is_same_v<T, Json>) {
-            ThrowInfo(
-                ErrorCode::Unsupported,
-                "RawJsonAt only supported for ChunkedVariableColumn<Json>");
-        }
-        if (count == 0) {
-            return;
-        }
-        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
-        auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
-        for (int64_t i = 0; i < count; i++) {
-            auto chunk = ca->get_cell_of(cids[i]);
-            auto valid = nullable_ ? chunk->isValid(offsets_in_chunk[i]) : true;
-            auto str_view = static_cast<StringChunk*>(chunk)->operator[](
-                offsets_in_chunk[i]);
-            fn(Json(str_view.data(), str_view.size()), i, valid);
-        }
-    }
-
-    void
     BulkRawBsonAt(milvus::OpContext* op_ctx,
                   std::function<void(BsonView, uint32_t, uint32_t)> fn,
                   const uint32_t* row_offsets,
@@ -704,25 +575,9 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
     explicit ChunkedArrayColumn(std::shared_ptr<CacheSlot<Chunk>> slot,
                                 const FieldMeta& field_meta)
         : ChunkedColumnBase(std::move(slot), field_meta),
-          is_nested_array_(field_meta.is_nested_array()) {
-    }
-
-    void
-    BulkArrayAt(milvus::OpContext* op_ctx,
-                std::function<void(const ArrayView&, size_t)> fn,
-                const int64_t* offsets,
-                int64_t count) const override {
-        if (is_nested_array_) {
-            ThrowInfo(ErrorCode::Unsupported,
-                      "legacy ArrayView API does not support nested ARRAY");
-        }
-        auto [cids, offsets_in_chunk] = ToChunkIdAndOffset(offsets, count);
-        auto ca = SemiInlineGet(slot_->PinCells(op_ctx, cids));
-        for (int64_t i = 0; i < count; i++) {
-            auto view = static_cast<ArrayChunk*>(ca->get_cell_of(cids[i]))
-                            ->View(offsets_in_chunk[i]);
-            fn(view, i);
-        }
+          is_nested_array_(field_meta.is_native_list_array()),
+          has_nullable_element_(field_meta.has_nullable_array_element()),
+          field_name_(field_meta.get_name().get()) {
     }
 
     void
@@ -747,6 +602,7 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
                std::optional<std::pair<int64_t, int64_t>> offset_len =
                    std::nullopt) const override {
         if (is_nested_array_) {
+            RejectNullableElements();
             ThrowInfo(ErrorCode::Unsupported,
                       "legacy ArrayViews API does not support nested ARRAY");
         }
@@ -781,6 +637,7 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
                         int64_t chunk_id,
                         const FixedVector<int32_t>& offsets) const override {
         if (is_nested_array_) {
+            RejectNullableElements();
             ThrowInfo(
                 ErrorCode::Unsupported,
                 "legacy ArrayViewsByOffsets API does not support nested ARRAY");
@@ -814,7 +671,27 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
     }
 
  private:
+    void
+    // ArrayValueView exposes element validity; the legacy ArrayView cannot.
+    ValidateArrayViewTarget(TargetType target_type) const override {
+        if (target_type == TargetType::ArrayView) {
+            RejectNullableElements();
+        }
+    }
+
+    void
+    RejectNullableElements() const {
+        if (has_nullable_element_) {
+            ThrowInfo(ErrorCode::NotImplemented,
+                      "expressions on element-nullable array field {} are "
+                      "not supported yet",
+                      field_name_);
+        }
+    }
+
     bool is_nested_array_{false};
+    bool has_nullable_element_{false};
+    std::string field_name_;
 };
 
 class ChunkedVectorArrayColumn : public ChunkedColumnBase {

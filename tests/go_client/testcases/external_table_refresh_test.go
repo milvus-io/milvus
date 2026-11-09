@@ -1318,12 +1318,12 @@ func TestExternalCollectionAdditionalVectorTakeOutput(t *testing.T) {
 	assertVectorRows(searchRes[0], "int8 search output")
 }
 
-func TestExternalCollectionSparseVectorCurrentlyRejected(t *testing.T) {
+func TestExternalCollectionSparseVectorSchema(t *testing.T) {
 	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
 	mc := hp.CreateDefaultMilvusClient(ctx, t)
 
 	minioCfg := getMinIOConfig()
-	collName := common.GenRandomString("ext_sparse_reject", 6)
+	collName := common.GenRandomString("ext_sparse", 6)
 	extPath := fmt.Sprintf("external-e2e-test/%s", collName)
 
 	schema := entity.NewSchema().
@@ -1335,8 +1335,16 @@ func TestExternalCollectionSparseVectorCurrentlyRejected(t *testing.T) {
 			WithExternalField("sparse_vec"))
 
 	err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema))
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "does not support field type SparseFloatVector")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, mc.DropCollection(ctx, client.NewDropCollectionOption(collName)))
+	})
+	collection, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(collName))
+	require.NoError(t, err)
+	field := findFieldByName(collection.Schema.Fields, "sparse_vec")
+	require.NotNil(t, field)
+	require.Equal(t, entity.FieldTypeSparseVector, field.DataType)
+	require.Equal(t, "sparse_vec", field.ExternalField)
 }
 
 // TestExternalCollectionIncrementalRefresh tests that refreshing an external collection
@@ -3822,8 +3830,8 @@ func TestRefreshExternalCollectionMilvusTableSnapshot(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(deletedCount), delRes.DeleteCount)
 
-	// Wait for the standalone flush rate limiter to reset before flushing
-	// the delete log. The local default is 0.1 flush requests per second.
+	// Allow time for the deployment's per-collection flush quota to replenish
+	// before flushing the delete log.
 	time.Sleep(10 * time.Second)
 
 	flushTask, err = mc.Flush(ctx, client.NewFlushOption(sourceName))
@@ -3959,8 +3967,8 @@ func TestRefreshExternalCollectionMilvusTableSnapshotVirtualPK(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(deletedCount), delRes.DeleteCount)
 
-	// Wait for the standalone flush rate limiter to reset before flushing
-	// the delete log. The local default is 0.1 flush requests per second.
+	// Allow time for the deployment's per-collection flush quota to replenish
+	// before flushing the delete log.
 	time.Sleep(10 * time.Second)
 
 	flushTask, err = mc.Flush(ctx, client.NewFlushOption(sourceName))

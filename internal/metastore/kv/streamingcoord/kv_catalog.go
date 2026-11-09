@@ -161,7 +161,7 @@ func (c *catalog) ListPChannel(ctx context.Context) ([]*streamingpb.PChannelMeta
 func (c *catalog) SavePChannels(ctx context.Context, infos []*streamingpb.PChannelMeta) error {
 	kvs := make(map[string]string, len(infos))
 	for _, info := range infos {
-		key := buildPChannelInfoPath(info.GetChannel().GetName())
+		key := BuildPChannelInfoPath(info.GetChannel().GetName())
 		v, err := proto.Marshal(info)
 		if err != nil {
 			return errors.Wrapf(err, "marshal pchannel %s failed", info.GetChannel().GetName())
@@ -203,8 +203,22 @@ func (c *catalog) SaveBroadcastTask(ctx context.Context, broadcastID uint64, tas
 	return c.metaKV.Save(ctx, key, string(v))
 }
 
-// buildPChannelInfoPath builds the path for pchannel info.
-func buildPChannelInfoPath(name string) string {
+func (c *catalog) RemoveBroadcastTasks(ctx context.Context, broadcastIDs []uint64) error {
+	keys := make([]string, 0, len(broadcastIDs))
+	for _, id := range broadcastIDs {
+		keys = append(keys, buildBroadcastTaskPath(id))
+	}
+	maxTxnNum := max(1, paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt())
+	return etcd.RemoveByBatchWithLimit(keys, maxTxnNum, func(batch []string) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return c.metaKV.MultiRemove(ctx, batch)
+	})
+}
+
+// BuildPChannelInfoPath builds the meta key of the PChannelMeta of a pchannel.
+func BuildPChannelInfoPath(name string) string {
 	return PChannelMetaPrefix + name
 }
 

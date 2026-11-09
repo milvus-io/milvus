@@ -19,5 +19,6 @@ func (b *interceptorBuilder) Build(param *interceptors.InterceptorBuildParam) in
 		channel:        param.ChannelInfo,
 		vchannelLocker: lock.NewKeyLock[string](),
 		txnManager:     param.TxnManager,
+		buildParam:     param,
 	}
 }

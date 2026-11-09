@@ -19,7 +19,9 @@ package proxy
 import (
 	"fmt"
 	"math"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -82,6 +84,10 @@ func TestSimpleRateLimiter(t *testing.T) {
 	})
 
 	t.Run("test global static limit", func(t *testing.T) {
+		flushQuotaKey := Params.QuotaConfig.MaxFlushRatePerCollection.Key
+		flushQuota := Params.QuotaConfig.MaxFlushRatePerCollection.GetValue()
+		assert.NoError(t, Params.Save(flushQuotaKey, "0.1"))
+		t.Cleanup(func() { assert.NoError(t, Params.Save(flushQuotaKey, flushQuota)) })
 		bak := Params.QuotaConfig.QuotaAndLimitsEnabled.GetValue()
 		paramtable.Get().Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
 		simpleLimiter := NewSimpleLimiter(0, 0)
@@ -118,7 +124,7 @@ func TestSimpleRateLimiter(t *testing.T) {
 
 		for _, rt := range internalpb.RateType_value {
 			if internalpb.RateType_DDLFlush == internalpb.RateType(rt) {
-				// the flush request has 0.1 rate limiter that means only allow to execute one request each 10 seconds.
+				// Explicit fractional quota: consecutive Flush requests must still be limited.
 				err := simpleLimiter.Check(0, collectionIDToPartIDs, internalpb.RateType_DDLFlush, 1)
 				assert.NoError(t, err)
 				err = simpleLimiter.Check(0, collectionIDToPartIDs, internalpb.RateType_DDLFlush, 1)
@@ -401,4 +407,83 @@ func TestRateLimiter(t *testing.T) {
 		err = simpleLimiter.Check(-1, nil, internalpb.RateType_DDLDB, 0)
 		assert.NoError(t, err)
 	})
+}
+
+func TestSimpleLimiterCheckDoesNotWaitForSetRates(t *testing.T) {
+	bak := Params.QuotaConfig.QuotaAndLimitsEnabled.GetValue()
+	Params.Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
+	t.Cleanup(func() {
+		Params.Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, bak)
+	})
+
+	simpleLimiter := NewSimpleLimiter(0, 0)
+	simpleLimiter.setRatesMu.Lock()
+	defer simpleLimiter.setRatesMu.Unlock()
+
+	checked := make(chan error, 1)
+	go func() {
+		checked <- simpleLimiter.Check(util.InvalidDBID, nil, internalpb.RateType_DDLDB, 1)
+	}()
+
+	select {
+	case err := <-checked:
+		assert.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("rate limit check waited for SetRates")
+	}
+}
+
+func TestSimpleLimiterConcurrentCheckAndSetRates(t *testing.T) {
+	bak := Params.QuotaConfig.QuotaAndLimitsEnabled.GetValue()
+	Params.Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
+	t.Cleanup(func() {
+		Params.Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, bak)
+	})
+
+	simpleLimiter := NewSimpleLimiter(0, 0)
+	request := newCollectionLimiterNode(map[int64]*proxypb.LimiterNode{
+		1: {
+			Limiter: &proxypb.Limiter{
+				Rates: []*internalpb.Rate{{
+					Rt: internalpb.RateType_DMLInsert,
+					R:  0,
+				}},
+				States: []milvuspb.QuotaState{milvuspb.QuotaState_DenyToWrite},
+				Codes:  []commonpb.ErrorCode{commonpb.ErrorCode_ForceDeny},
+			},
+			Children: make(map[int64]*proxypb.LimiterNode),
+		},
+	})
+
+	assert.NoError(t, simpleLimiter.SetRates(request))
+
+	const iterations = 1000
+	setRatesErr := make(chan error, 1)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			if err := simpleLimiter.SetRates(request); err != nil {
+				setRatesErr <- err
+				return
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			if !assert.ErrorIs(t, simpleLimiter.Check(0, map[int64][]int64{1: nil}, internalpb.RateType_DMLInsert, 1), merr.ErrServiceQuotaExceeded) {
+				return
+			}
+			states, _ := simpleLimiter.GetQuotaStates()
+			assert.Contains(t, states, milvuspb.QuotaState_DenyToWrite)
+		}
+	}()
+	wg.Wait()
+	select {
+	case err := <-setRatesErr:
+		assert.NoError(t, err)
+	default:
+	}
 }

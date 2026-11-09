@@ -20,28 +20,30 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/util/function/validator"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	util "github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -184,6 +186,17 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		return err
 	}
 
+	if err := rejectStructSubFieldOriginMarkers(schema.GetStructArrayFields()); err != nil {
+		return err
+	}
+	// A restored collection (preserveFieldID) keeps its stored schema, whose
+	// sub-fields may carry enable_match or enable_analyzer from an earlier
+	// version, so only a new schema is checked for them.
+	if !t.preserveFieldID {
+		if err := schemautil.RejectStructSubFieldsTextMatch(schema.GetStructArrayFields()); err != nil {
+			return err
+		}
+	}
 	if err := checkStructArrayFieldSchema(schema.GetStructArrayFields()); err != nil {
 		return err
 	}
@@ -206,7 +219,7 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 	// too. When a source is eventually supplied via alter/refresh, validation
 	// runs there.
 	if typeutil.IsExternalCollection(schema) && schema.GetExternalSource() != "" {
-		if err := externalspec.ValidateSourceAndSpec(schema.GetExternalSource(), schema.GetExternalSpec()); err != nil {
+		if err := externalspec.ValidateSourceAndSpec(schema.GetExternalSource(), schema.GetExternalSpec(), paramtable.Get().CommonCfg.CredentialBrokerPolicy()); err != nil {
 			return err
 		}
 	}
@@ -256,31 +269,15 @@ func (c *Core) validateAnalyzerInfos(ctx context.Context, analyzerInfos []*query
 		return nil, nil
 	}
 
-	// validate analyzer params at any streaming node
-	// and set file resource ids to schema
-	err := retry.Do(ctx, func() error {
-		if c.fileResourceObserver == nil {
-			return nil
-		}
-		if err := c.fileResourceObserver.CheckAllQnReady(); err != nil {
-			return err
-		}
-		return nil
-	}, retry.Attempts(10), retry.Sleep(3*time.Second))
+	infos := make([]*streamingpb.StreamingAnalyzerInfo, 0, len(analyzerInfos))
+	for _, info := range analyzerInfos {
+		infos = append(infos, &streamingpb.StreamingAnalyzerInfo{Params: info.GetParams(), Field: info.GetField(), Name: info.GetName()})
+	}
+	resp, err := streaming.WAL().AnalyzerClient().ValidateAnalyzer(ctx, &streamingpb.StreamingNodeValidateAnalyzerRequest{AnalyzerInfos: infos})
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := c.mixCoord.ValidateAnalyzer(ctx, &querypb.ValidateAnalyzerRequest{
-		AnalyzerInfos: analyzerInfos,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	if err := merr.Error(resp.GetStatus()); err != nil {
-		return nil, err
-	}
 	return resp.GetResourceIds(), nil
 }
 
@@ -482,7 +479,7 @@ func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Cont
 	}
 	// Validate before reading snapshot metadata so RootCoord keeps the same
 	// external source boundary even if a request bypasses Proxy.
-	if err := externalspec.ValidateSourceAndSpec(schema.GetExternalSource(), schema.GetExternalSpec()); err != nil {
+	if err := externalspec.ValidateSourceAndSpec(schema.GetExternalSource(), schema.GetExternalSpec(), paramtable.Get().CommonCfg.CredentialBrokerPolicy()); err != nil {
 		return err
 	}
 	spec, err := externalspec.ParseExternalSpec(schema.GetExternalSpec())
@@ -555,6 +552,11 @@ func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Cont
 	// non-runtime function validation here; DDL replay never reaches this
 	// point (it returns early above) and keeps its historical schema unjudged.
 	if err := validator.ValidateFunction(schema, "", true); err != nil {
+		return err
+	}
+	// The target schema is new input; validateSchema skips this check once
+	// preserveFieldID is set below.
+	if err := schemautil.RejectStructSubFieldsTextMatch(schema.GetStructArrayFields()); err != nil {
 		return err
 	}
 	t.preserveFieldID = true
@@ -692,12 +694,6 @@ func (t *createCollectionTask) prepareSchema(ctx context.Context) error {
 
 	t.appendConsistecyLevel()
 	if err := t.appendNamespaceShardingEnabled(); err != nil {
-		return err
-	}
-	if err := common.ValidateRLSProperties(t.Req.GetProperties()...); err != nil {
-		return err
-	}
-	if err := common.ValidateRLSForceRequiresEnabled(t.Req.GetProperties()...); err != nil {
 		return err
 	}
 	t.appendDynamicField(ctx, t.body.CollectionSchema)
@@ -882,6 +878,11 @@ func (t *createCollectionTask) validateIfCollectionExists(ctx context.Context) e
 		return err2
 	}
 
+	// A restoring target reserves its name even though public metadata reads
+	// hide it until data publication completes.
+	if existing, err := t.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp, true); err == nil && existing.State == etcdpb.CollectionState_CollectionRestoring {
+		return merr.WrapErrParameterInvalidMsg("collection %s is being restored", t.Req.GetCollectionName())
+	}
 	// Check if the collection already exists.
 	existedCollInfo, err := t.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp, false)
 	if err == nil {

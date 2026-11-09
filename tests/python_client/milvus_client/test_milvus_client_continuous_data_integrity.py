@@ -1,17 +1,22 @@
 import json
 import os
 import queue
+import sys
+import tempfile
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
-from contextlib import ExitStack, contextmanager
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from contextlib import ExitStack, contextmanager, nullcontext
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common.common_type import CaseLabel
+from common.data_integrity_diagnostics import emit_data_integrity_event, exception_diagnostics
 from milvus_client import test_milvus_client_data_integrity as integrity
 from pymilvus import BulkInsertState, DataType, utility
 from pymilvus.bulk_writer import BulkFileType, RemoteBulkWriter
@@ -65,12 +70,15 @@ class _ContinuousBudget:
 
 
 @contextmanager
-def _continuous_executor(stop_event, checkpoint_queue):
+def _continuous_executor(stop_event, checkpoint_queue, failure_recorder):
     # Signal cancellation BEFORE ThreadPoolExecutor.__exit__ waits for workers.
     with ThreadPoolExecutor(max_workers=4, thread_name_prefix="continuous-integrity") as executor:
         try:
             yield executor
-        except BaseException:
+        except BaseException as error:
+            # Claim the coordinator failure before cancellation lets a worker
+            # observe a stopped budget and before executor shutdown waits for it.
+            failure_recorder.record(error, "coordinator", phase="await_workers")
             stop_event.set()
             checkpoint_queue.put(None)
             raise
@@ -92,6 +100,26 @@ def _continuous_wait_for_import(task_id, budget):
             BulkInsertState.ImportPersisted,
         }, f"import job {task_id} reached {state.state_name}: {state.failed_reason}"
         budget.wait(min(2, max(0, deadline - time.monotonic())))
+
+
+def _continuous_wait_for_futures(futures, budget, failure_recorder):
+    """Poll worker Futures so an already-recorded first error is surfaced promptly."""
+    pending = set(futures)
+    while pending:
+        if failure_recorder.primary() is not None:
+            failure_recorder.raise_primary(TimeoutError("continuous worker failed"))
+        remaining = budget.deadline - time.monotonic()
+        if remaining <= 0:
+            timeout = TimeoutError("continuous integrity case deadline exceeded while awaiting workers")
+            failure_recorder.record(timeout, "coordinator", phase="deadline")
+            failure_recorder.raise_primary(timeout)
+        done, pending = wait(pending, timeout=min(0.5, remaining), return_when=FIRST_COMPLETED)
+        for future in done:
+            try:
+                future.result()
+            except BaseException as error:
+                failure_recorder.record(error, "coordinator", phase="await_workers")
+                failure_recorder.raise_primary(error)
 
 
 @dataclass(frozen=True)
@@ -187,6 +215,7 @@ class _ContinuousLifecycleObserver:
         checkpoint_queue,
         config_committed_at,
         budget,
+        failure_recorder,
     ):
         self.client = client
         self.collection_name = collection_name
@@ -196,6 +225,7 @@ class _ContinuousLifecycleObserver:
         self.checkpoint_queue = checkpoint_queue
         self.config_committed_at = config_committed_at
         self.budget = budget
+        self.failure_recorder = failure_recorder
         self.segment_history = {}
         self.task_history = {}
         self.mix_closures = {}
@@ -337,7 +367,8 @@ class _ContinuousLifecycleObserver:
                 observer_stop.wait(2)
         except Exception as error:  # The main test re-raises the original observer failure.
             self.error = error
-            self.oracle.poison(f"lifecycle observer failed: {error}")
+            self.failure_recorder.record(error, "observer", phase="lifecycle_observation")
+            self.oracle.poison(f"lifecycle observer failed: {type(error).__name__}")
             self.stop_event.set()
             self.checkpoint_queue.put(None)
 
@@ -383,13 +414,147 @@ def _continuous_row(collection_name, logical_pk, sequence, output_fields):
     return row, integrity._canonical_compaction_integrity_row(expected, output_fields, DataType.VARCHAR)
 
 
-def _continuous_import_row(row):
+def _continuous_import_row(row, raw_expected, output_fields):
+    """Convert physical INT8 input only; preserve all logical values and the oracle.
+
+    Unlike the regular compaction workload, the continuous design requires null
+    equivalence across both ingress paths. Unsupported SDK/import null handling
+    must fail visibly instead of changing nulls into empty or populated values.
+    """
     writer_row = dict(row)
     for field_name in ("int8_vector", "nullable_int8_vector"):
         value = writer_row.get(field_name)
         if isinstance(value, bytes | bytearray):
             writer_row[field_name] = np.frombuffer(value, dtype=np.int8).copy()
-    return writer_row
+    canonical_expected = integrity._canonical_compaction_integrity_row(raw_expected, output_fields, DataType.VARCHAR)
+    return writer_row, canonical_expected
+
+
+class _ContinuousFailureRecorder:
+    """Thread-safe first-error ownership for continuous lanes and their coordinator."""
+
+    def __init__(self, nodeid):
+        self.nodeid = nodeid
+        self._lock = threading.Lock()
+        self._first = None
+        self._recorded_errors = []
+
+    def record(self, error, lane, epoch=None, phase="worker"):
+        with self._lock:
+            if any(error is recorded for recorded in self._recorded_errors):
+                return False
+            primary = self._first is None
+            # Keep at most eight distinct secondary failures and omit expected
+            # cooperative cancellation once the underlying failure is recorded.
+            if not primary and (
+                len(self._recorded_errors) >= 9
+                or (
+                    type(error) is RuntimeError
+                    and len(error.args) == 1
+                    and type(error.args[0]) is str
+                    and error.args[0] == "continuous integrity case stopped"
+                )
+            ):
+                return False
+            self._recorded_errors.append(error)
+            if primary:
+                self._first = (error, error.__traceback__, lane, epoch, phase, time.monotonic())
+        try:
+            emit_data_integrity_event(
+                {
+                    "event": "continuous_primary_failure" if primary else "continuous_secondary_failure",
+                    "nodeid": self.nodeid,
+                    "lane": lane,
+                    "epoch": epoch,
+                    "phase": phase,
+                    **exception_diagnostics(error),
+                },
+                primary_failure=primary,
+            )
+        except BaseException:
+            pass
+        return primary
+
+    def primary(self):
+        with self._lock:
+            return self._first
+
+    def raise_primary(self, fallback):
+        first = self.primary()
+        if first is None:
+            raise fallback
+        error, original_traceback, *_ = first
+        raise error.with_traceback(original_traceback)
+
+
+@contextmanager
+def _continuous_writer_context(writer, failure_recorder, lane, epoch):
+    """Record writer-body errors before RemoteBulkWriter.__exit__ runs."""
+    writer_entered = False
+    try:
+        with writer as active_writer:
+            writer_entered = True
+            try:
+                yield active_writer
+            except BaseException as error:
+                failure_recorder.record(error, lane, epoch, phase="writer_body")
+                raise
+    except BaseException as error:
+        failure_recorder.record(error, lane, epoch, phase="writer_exit" if writer_entered else "writer_setup")
+        raise
+
+
+class _ContinuousProgress:
+    """Bound continuous progress events to one heartbeat per lane per 30 seconds."""
+
+    def __init__(self, nodeid):
+        self.nodeid = nodeid
+        self.started = time.monotonic()
+        self._lock = threading.Lock()
+        self._last_heartbeat = {}
+        self._active = {}
+
+    def set_active(self, lane, epoch, phase, budget, oracle):
+        with self._lock:
+            self._active[lane] = (epoch, phase, budget, oracle)
+
+    def finish(self, lane, epoch, phase, budget, oracle, outcome):
+        self.emit(lane, epoch, phase, budget, oracle, event="continuous_case_completion", outcome=outcome)
+        with self._lock:
+            self._active.pop(lane, None)
+
+    def heartbeat_loop(self, stop_event):
+        while not stop_event.wait(30):
+            with self._lock:
+                active = list(self._active.items())
+            for lane, (epoch, phase, budget, oracle) in active:
+                self.emit(lane, epoch, phase, budget, oracle, event="continuous_heartbeat", force=True)
+
+    def emit(self, lane, epoch, phase, budget, oracle, *, event="continuous_phase", force=False, **details):
+        now = time.monotonic()
+        with self._lock:
+            if event in {"continuous_phase", "continuous_case_start"}:
+                self._active[lane] = (epoch, phase, budget, oracle)
+            last = self._last_heartbeat.get(lane)
+            if event == "continuous_heartbeat" and not force and last is not None and now - last < 30:
+                return
+            if event == "continuous_heartbeat":
+                self._last_heartbeat[lane] = now
+        remaining = max(0.0, budget.deadline - now)
+        emit_data_integrity_event(
+            {
+                "event": event,
+                "nodeid": self.nodeid,
+                "lane": lane,
+                "epoch": epoch,
+                "phase": phase,
+                "timestamp_utc": datetime.now(UTC).isoformat(),
+                "elapsed_seconds": round(now - self.started, 3),
+                "remaining_budget_seconds": round(remaining, 3),
+                "committed_action_count": oracle.action_count,
+                **details,
+            }
+        )
 
 
 def _continuous_wait_for_import_visibility(
@@ -535,10 +700,14 @@ class TestMilvusClientContinuousStreamingDataIntegrity(TestMilvusClientV2Base):
         checkpoint_queue,
         lane_index,
         budget,
+        failure_recorder,
+        progress,
     ):
         lane = f"mutation_{'a' if lane_index == 0 else 'b'}"
+        progress.emit(lane, 0, "started", budget, oracle, event="continuous_case_start")
         try:
             for epoch in range(CONTINUOUS_EPOCHS):
+                progress.emit(lane, epoch + 1, "insert", budget, oracle)
                 if stop_event.is_set():
                     return
                 insert_start = CONTINUOUS_SEED_ROWS if lane_index == 0 and epoch == 0 else 0
@@ -578,6 +747,7 @@ class TestMilvusClientContinuousStreamingDataIntegrity(TestMilvusClientV2Base):
                     ),
                 )
                 for operation, operation_offset, count, pk_offset in operation_specs:
+                    progress.emit(lane, epoch + 1, operation, budget, oracle)
                     for batch_offset in range(0, count, CONTINUOUS_ROWS_PER_REQUEST):
                         if stop_event.is_set():
                             return
@@ -618,10 +788,14 @@ class TestMilvusClientContinuousStreamingDataIntegrity(TestMilvusClientV2Base):
                             )
                         budget.wait(CONTINUOUS_REQUEST_INTERVAL)
                 tracker.complete(lane, epoch)
+                progress.emit(lane, epoch + 1, "epoch_complete", budget, oracle)
+            progress.finish(lane, CONTINUOUS_EPOCHS, "complete", budget, oracle, "passed")
         except Exception as error:
-            oracle.poison(f"{lane} failed: {error}")
+            failure_recorder.record(error, lane, phase="mutation")
+            oracle.poison(f"{lane} failed: {type(error).__name__}")
             stop_event.set()
             checkpoint_queue.put(None)
+            progress.finish(lane, 0, "failed", budget, oracle, "failed")
             raise
 
     def _run_import_lane(
@@ -637,8 +811,11 @@ class TestMilvusClientContinuousStreamingDataIntegrity(TestMilvusClientV2Base):
         minio_host,
         minio_bucket,
         budget,
+        failure_recorder,
+        progress,
     ):
         lane = "import"
+        progress.emit(lane, 0, "started", budget, oracle, event="continuous_case_start")
         try:
             self._ensure_compaction_integrity_utility_connection()
             for epoch in range(CONTINUOUS_EPOCHS):
@@ -647,35 +824,72 @@ class TestMilvusClientContinuousStreamingDataIntegrity(TestMilvusClientV2Base):
                 actions = []
                 sequence_start = _continuous_lane_sequence(epoch, 2, 0)
                 sequence_end = _continuous_lane_sequence(epoch, 2, CONTINUOUS_IMPORT_ROWS_PER_EPOCH - 1)
-                with RemoteBulkWriter(
-                    schema=schema,
-                    remote_path=f"continuous_integrity/{collection_name}/epoch_{epoch + 1}",
-                    connect_param=RemoteBulkWriter.ConnectParam(
-                        bucket_name=minio_bucket,
-                        endpoint=f"{minio_host}:9000",
-                        access_key="minioadmin",
-                        secret_key="minioadmin",
+                progress.emit(lane, epoch + 1, "payload_construction", budget, oracle)
+                with _continuous_writer_context(
+                    RemoteBulkWriter(
+                        local_path=tempfile.mkdtemp(prefix="bulk_writer_"),
+                        schema=schema,
+                        remote_path=f"continuous_integrity/{collection_name}/epoch_{epoch + 1}",
+                        connect_param=RemoteBulkWriter.ConnectParam(
+                            bucket_name=minio_bucket,
+                            endpoint=f"{minio_host}:9000",
+                            access_key="minioadmin",
+                            secret_key="minioadmin",
+                        ),
+                        file_type=BulkFileType.PARQUET,
                     ),
-                    file_type=BulkFileType.PARQUET,
+                    failure_recorder,
+                    lane,
+                    epoch + 1,
                 ) as remote_writer:
                     for row_index in range(CONTINUOUS_IMPORT_ROWS_PER_EPOCH):
                         budget.remaining()
                         sequence = _continuous_lane_sequence(epoch, 2, row_index)
                         logical_pk = _continuous_import_logical_pk(epoch, row_index)
-                        row, expected = _continuous_row(collection_name, logical_pk, sequence, output_fields)
-                        remote_writer.append_row(_continuous_import_row(row))
+                        row, raw_expected = integrity._build_compaction_integrity_row(
+                            collection_name,
+                            logical_pk,
+                            sequence,
+                            DataType.VARCHAR,
+                            include_text=True,
+                            include_struct_array=True,
+                            test_sequence_id=sequence,
+                        )
+                        writer_row, expected = _continuous_import_row(row, raw_expected, output_fields)
+                        remote_writer.append_row(writer_row)
                         actions.append(_ContinuousAction(sequence, lane, epoch + 1, "import", row["id"], expected))
+                    progress.emit(
+                        lane,
+                        epoch + 1,
+                        "append_row_batch",
+                        budget,
+                        oracle,
+                        event="continuous_phase",
+                        batch_rows=len(actions),
+                    )
+                    progress.emit(
+                        lane,
+                        epoch + 1,
+                        "writer_commit",
+                        budget,
+                        oracle,
+                        event="continuous_phase",
+                        batch_rows=len(actions),
+                    )
                     remote_writer.commit()
                     batch_files = remote_writer.batch_files
                 budget.remaining()
                 assert len(batch_files) == 1, f"ImportIngress expected one file group, got {batch_files}"
                 # The generic wrapper performs extra unbounded list/poll calls.
+                progress.emit(lane, epoch + 1, "import_rpc_attempt", budget, oracle)
                 task_id = utility.do_bulk_insert(
                     collection_name=collection_name,
                     files=batch_files[0],
                     timeout=budget.remaining(),
                 )
+                progress.emit(lane, epoch + 1, "import_rpc_acknowledged", budget, oracle, job_id=task_id)
                 state = _continuous_wait_for_import(task_id, budget)
+                progress.emit(lane, epoch + 1, "import_job_completed", budget, oracle, job_id=task_id)
                 assert state.state == BulkInsertState.ImportCompleted, (
                     f"import job {task_id} reached {state.state_name}: {state.failed_reason}"
                 )
@@ -689,6 +903,7 @@ class TestMilvusClientContinuousStreamingDataIntegrity(TestMilvusClientV2Base):
                     CONTINUOUS_IMPORT_ROWS_PER_EPOCH,
                     budget,
                 )
+                progress.emit(lane, epoch + 1, "visibility_confirmed", budget, oracle, job_id=task_id)
                 oracle.commit(actions)
                 integrity._log_compaction_integrity_evidence(
                     "continuous_import_committed",
@@ -703,10 +918,14 @@ class TestMilvusClientContinuousStreamingDataIntegrity(TestMilvusClientV2Base):
                     oracle_action_count=oracle.action_count,
                 )
                 tracker.complete(lane, epoch)
+                progress.emit(lane, epoch + 1, "epoch_complete", budget, oracle)
+            progress.finish(lane, CONTINUOUS_EPOCHS, "complete", budget, oracle, "passed")
         except Exception as error:
-            oracle.poison(f"{lane} failed: {error}")
+            failure_recorder.record(error, lane, phase="import")
+            oracle.poison(f"{lane} failed: {type(error).__name__}")
             stop_event.set()
             checkpoint_queue.put(None)
+            progress.finish(lane, 0, "failed", budget, oracle, "failed")
             raise
 
     def _validate_prefixes(
@@ -778,6 +997,7 @@ class TestMilvusClientContinuousStreamingDataIntegrity(TestMilvusClientV2Base):
         observer,
         stop_event,
         budget,
+        failure_recorder,
     ):
         try:
             return self._validate_prefixes(
@@ -790,7 +1010,8 @@ class TestMilvusClientContinuousStreamingDataIntegrity(TestMilvusClientV2Base):
                 budget,
             )
         except (Exception, pytest.fail.Exception) as error:
-            oracle.poison(f"prefix validator failed: {error}")
+            failure_recorder.record(error, "validator", phase="prefix_validation")
+            oracle.poison(f"prefix validator failed: {type(error).__name__}")
             stop_event.set()
             checkpoint_queue.put(None)
             raise
@@ -863,6 +1084,7 @@ class TestMilvusClientContinuousStreamingDataIntegrity(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L3)
     def test_continuous_mixed_ingress_auto_compaction_preserves_all_rows_and_fields(
         self,
+        request,
         minio_host,
         minio_bucket,
         etcd_host,
@@ -876,6 +1098,15 @@ class TestMilvusClientContinuousStreamingDataIntegrity(TestMilvusClientV2Base):
         oracle = _ContinuousOracle()
         stop_event = threading.Event()
         budget = _ContinuousBudget(CONTINUOUS_CASE_TIMEOUT, stop_event)
+        failure_recorder = _ContinuousFailureRecorder(request.node.nodeid)
+        progress = _ContinuousProgress(request.node.nodeid)
+        heartbeat_stop = threading.Event()
+        heartbeat_thread = threading.Thread(
+            target=progress.heartbeat_loop,
+            args=(heartbeat_stop,),
+            name="continuous-integrity-heartbeats",
+            daemon=True,
+        )
         ingress_done = threading.Event()
         observer_stop = threading.Event()
         checkpoint_queue = queue.Queue()
@@ -945,6 +1176,7 @@ class TestMilvusClientContinuousStreamingDataIntegrity(TestMilvusClientV2Base):
                     checkpoint_queue,
                     config_committed_at,
                     budget,
+                    failure_recorder,
                 )
                 observer_thread = threading.Thread(
                     target=observer.run,
@@ -953,8 +1185,10 @@ class TestMilvusClientContinuousStreamingDataIntegrity(TestMilvusClientV2Base):
                     daemon=True,
                 )
                 observer_thread.start()
+                heartbeat_thread.start()
+                failure_phase = "await_workers"
                 try:
-                    with _continuous_executor(stop_event, checkpoint_queue) as executor:
+                    with _continuous_executor(stop_event, checkpoint_queue, failure_recorder) as executor:
                         producer_futures = [
                             executor.submit(
                                 self._run_mutation_lane,
@@ -967,6 +1201,8 @@ class TestMilvusClientContinuousStreamingDataIntegrity(TestMilvusClientV2Base):
                                 checkpoint_queue,
                                 lane_index,
                                 budget,
+                                failure_recorder,
+                                progress,
                             )
                             for lane_index in (0, 1)
                         ]
@@ -984,6 +1220,8 @@ class TestMilvusClientContinuousStreamingDataIntegrity(TestMilvusClientV2Base):
                                 minio_host,
                                 minio_bucket,
                                 budget,
+                                failure_recorder,
+                                progress,
                             )
                         )
                         validator_future = executor.submit(
@@ -996,11 +1234,13 @@ class TestMilvusClientContinuousStreamingDataIntegrity(TestMilvusClientV2Base):
                             observer,
                             stop_event,
                             budget,
+                            failure_recorder,
                         )
-                        for future in producer_futures:
-                            future.result(timeout=budget.remaining())
+                        _continuous_wait_for_futures(producer_futures, budget, failure_recorder)
                         ingress_done.set()
-                        validated_prefixes = validator_future.result(timeout=budget.remaining())
+                        _continuous_wait_for_futures([validator_future], budget, failure_recorder)
+                        validated_prefixes = validator_future.result()
+                    failure_phase = "final_validation"
                     assert validated_prefixes == [0, 1, 2]
                     assert oracle.action_count == CONTINUOUS_EPOCHS * CONTINUOUS_SEQUENCE_SPAN_PER_EPOCH
 
@@ -1044,6 +1284,7 @@ class TestMilvusClientContinuousStreamingDataIntegrity(TestMilvusClientV2Base):
                     if observer.error is not None:
                         raise observer.error
                     assert not observer_thread.is_alive(), "lifecycle observer did not stop"
+                    failure_phase = "post_ingress_validation"
                     post_checkpoint, post_validation, reload_checkpoint, reload_validation = (
                         self._verify_post_ingress_compaction(
                             client, collection_name, expected_by_pk, output_fields, final_checkpoint, observer, budget
@@ -1069,8 +1310,342 @@ class TestMilvusClientContinuousStreamingDataIntegrity(TestMilvusClientV2Base):
                         post_compaction_checkpoint=integrity._compaction_integrity_checkpoint_audit(post_checkpoint),
                         reload_checkpoint=integrity._compaction_integrity_checkpoint_audit(reload_checkpoint),
                     )
+                except BaseException as error:
+                    # The observer remains active through final validation. A
+                    # stopped budget must not replace its recorded first error.
+                    failure_recorder.record(error, "coordinator", phase=failure_phase)
+                    failure_recorder.raise_primary(error)
                 finally:
+                    heartbeat_stop.set()
+                    heartbeat_thread.join(timeout=2)
                     ingress_done.set()
                     stop_event.set()
                     observer_stop.set()
                     observer_thread.join(timeout=10)
+
+
+def _continuous_import_test_fields():
+    return integrity._compaction_integrity_output_fields(
+        include_struct_array=True,
+        include_text=True,
+        include_bm25_control=False,
+        include_test_sequence_id=True,
+    )
+
+
+@pytest.mark.tags("CompactionIntegrityUnit")
+def test_continuous_integrity_unit_import_adapter_preserves_oracle_boundary():
+    output_fields = _continuous_import_test_fields()
+    samples = {}
+    for logical_pk in range(1, 1000):
+        sequence = logical_pk + 1000
+        row, raw_expected = integrity._build_compaction_integrity_row(
+            "continuous_import_adapter_unit",
+            logical_pk,
+            sequence,
+            DataType.VARCHAR,
+            include_text=True,
+            include_struct_array=True,
+            test_sequence_id=sequence,
+        )
+        struct_value = row[integrity.COMPACTION_INTEGRITY_STRUCT_ARRAY_FIELD]
+        sparse_value = row["nullable_sparse_vector"]
+        if struct_value is None:
+            samples.setdefault("null_struct", (logical_pk, sequence, row, raw_expected))
+        elif struct_value:
+            samples.setdefault("populated_struct", (logical_pk, sequence, row, raw_expected))
+        if sparse_value is None:
+            samples.setdefault("null_sparse", (logical_pk, sequence, row, raw_expected))
+        else:
+            samples.setdefault("populated_sparse", (logical_pk, sequence, row, raw_expected))
+        if len(samples) == 4:
+            break
+
+    assert set(samples) == {"null_struct", "populated_struct", "null_sparse", "populated_sparse"}
+    for logical_pk, sequence, row, raw_expected in samples.values():
+        original_row = integrity._canonical_compaction_integrity_row(row, output_fields, DataType.VARCHAR)
+        original_expected = integrity._canonical_compaction_integrity_row(raw_expected, output_fields, DataType.VARCHAR)
+        writer_row, canonical_expected = _continuous_import_row(row, raw_expected, output_fields)
+        _, mutation_expected = _continuous_row("continuous_import_adapter_unit", logical_pk, sequence, output_fields)
+
+        assert integrity._canonical_compaction_integrity_row(row, output_fields, DataType.VARCHAR) == original_row
+        assert (
+            integrity._canonical_compaction_integrity_row(raw_expected, output_fields, DataType.VARCHAR)
+            == original_expected
+        )
+        assert canonical_expected == mutation_expected == original_expected
+        assert (
+            integrity._canonical_compaction_integrity_row(writer_row, output_fields, DataType.VARCHAR) == original_row
+        )
+        for field_name in (integrity.COMPACTION_INTEGRITY_STRUCT_ARRAY_FIELD, "nullable_sparse_vector"):
+            if row[field_name] is None:
+                assert writer_row[field_name] is None
+        action = _ContinuousAction(1, "import", 1, "import", row["id"], canonical_expected)
+        oracle = _ContinuousOracle()
+        oracle.commit([action])
+        assert oracle.snapshot(1)[0][row["id"]] == canonical_expected
+
+
+@pytest.mark.tags("CompactionIntegrityUnit")
+def test_continuous_integrity_unit_import_adapter_converts_int8_and_keeps_inputs():
+    output_fields = integrity._compaction_integrity_output_fields(
+        include_struct_array=False,
+        include_text=True,
+        include_bm25_control=False,
+        include_test_sequence_id=True,
+    )
+    logical_pk = 3
+    sequence = 1003
+    row, raw_expected = integrity._build_compaction_integrity_row(
+        "continuous_import_int8_unit",
+        logical_pk,
+        sequence,
+        DataType.VARCHAR,
+        include_text=True,
+        include_struct_array=False,
+        test_sequence_id=sequence,
+    )
+    before = integrity._canonical_compaction_integrity_row(row, output_fields, DataType.VARCHAR)
+    writer_row, canonical_expected = _continuous_import_row(row, raw_expected, output_fields)
+    assert isinstance(writer_row["int8_vector"], np.ndarray)
+    expected_vector = np.frombuffer(
+        integrity._compaction_integrity_int8_vector(logical_pk, sequence, 17), dtype=np.int8
+    ).tolist()
+    assert writer_row["int8_vector"].tolist() == expected_vector
+    assert integrity._canonical_compaction_integrity_row(row, output_fields, DataType.VARCHAR) == before
+    assert len(canonical_expected) == len(output_fields)
+
+
+@pytest.mark.tags("CompactionIntegrityUnit")
+def test_continuous_integrity_unit_coordinator_failure_precedes_executor_cancellation():
+    stop_event = threading.Event()
+    checkpoint_queue = queue.Queue()
+    budget = _ContinuousBudget(10, stop_event)
+    recorder = _ContinuousFailureRecorder("coordinator-order-unit")
+    worker_started = threading.Event()
+    cancellation_seen = threading.Event()
+    original = ValueError("safe coordinator failure")
+
+    def worker():
+        worker_started.set()
+        assert stop_event.wait(5)
+        try:
+            budget.remaining()
+        except RuntimeError as error:
+            cancellation_seen.set()
+            recorder.record(error, "mutation_a", phase="mutation")
+
+    with pytest.raises(ValueError) as raised:
+        with _continuous_executor(stop_event, checkpoint_queue, recorder) as executor:
+            future = executor.submit(worker)
+            assert worker_started.wait(5)
+            raise original
+    future.result()
+    assert raised.value is original
+    assert cancellation_seen.is_set()
+    assert recorder.primary()[0] is original
+    assert recorder.primary()[2] == "coordinator"
+
+
+@pytest.mark.tags("CompactionIntegrityUnit")
+@pytest.mark.parametrize("stage", ["checkpoint", "dataset"])
+def test_continuous_integrity_unit_final_validation_preserves_observer_failure(monkeypatch, stage):
+    module = sys.modules[__name__]
+    original = ValueError("safe observer failure during final validation")
+    trigger = threading.Event()
+    observer_ready = threading.Event()
+    observers = []
+    config = SimpleNamespace(
+        endpoint="unit",
+        read_config=lambda _key: SimpleNamespace(value=None),
+        preserve_config=lambda _key: nullcontext(),
+        set_config=lambda *_args: SimpleNamespace(mod_revision=1),
+    )
+    monkeypatch.setattr(module, "MilvusEtcdConfigController", lambda **_kwargs: nullcontext(config))
+    monkeypatch.setattr(_ContinuousBudget, "wait", lambda *_args: None)
+    monkeypatch.setattr(integrity, "_log_compaction_integrity_evidence", lambda *_args, **_kwargs: None)
+    expected = dict.fromkeys(range(CONTINUOUS_EPOCHS * CONTINUOUS_EXPECTED_LIVE_ROWS_PER_EPOCH), {})
+    monkeypatch.setattr(
+        _ContinuousOracle,
+        "action_count",
+        property(lambda _self: CONTINUOUS_EPOCHS * CONTINUOUS_SEQUENCE_SPAN_PER_EPOCH),
+    )
+    monkeypatch.setattr(_ContinuousOracle, "snapshot", lambda *_args: (expected, set()))
+
+    def observe(observer):
+        observers.append(observer)
+        observer_ready.set()
+        assert trigger.wait(5)
+        raise original
+
+    # Exercise the real observer.run: it records, poisons, and cancels the budget.
+    monkeypatch.setattr(_ContinuousLifecycleObserver, "observe_once", observe)
+
+    def final_validation(current_stage, **kwargs):
+        if current_stage == stage:
+            assert observer_ready.wait(5)
+            trigger.set()
+            assert observers[0].stop_event.wait(5)
+            kwargs["remaining_timeout"]()
+            pytest.fail("the final validator must observe cancellation")
+        return {}
+
+    monkeypatch.setattr(
+        integrity,
+        "_wait_for_compaction_integrity_checkpoint",
+        lambda *_args, **kwargs: final_validation("checkpoint", **kwargs),
+    )
+    monkeypatch.setattr(
+        integrity,
+        "_assert_compaction_integrity_fenced_dataset",
+        lambda *_args, **kwargs: final_validation("dataset", **kwargs),
+    )
+    case = TestMilvusClientContinuousStreamingDataIntegrity()
+    monkeypatch.setattr(case, "_client", lambda: object())
+    monkeypatch.setattr(case, "_create_compaction_integrity_collection", lambda *_args, **_kwargs: ([], object()))
+    monkeypatch.setattr(case, "_seed_l0_delete_candidates", lambda *_args: None)
+    monkeypatch.setattr(case, "_run_mutation_lane", lambda *_args: None)
+    monkeypatch.setattr(case, "_run_import_lane", lambda *_args: None)
+    monkeypatch.setattr(case, "_run_prefix_validator", lambda *_args: [0, 1, 2])
+    with pytest.raises(ValueError) as raised:
+        case.test_continuous_mixed_ingress_auto_compaction_preserves_all_rows_and_fields(
+            SimpleNamespace(node=SimpleNamespace(nodeid="observer-final-unit")),
+            "unit-minio",
+            "unit-bucket",
+            "unit-etcd",
+            2379,
+            "unit-root",
+            "",
+            "",
+        )
+    assert raised.value is original
+    assert observers[0].error is original
+    assert observers[0].failure_recorder.primary()[0] is original
+
+
+@pytest.mark.tags("CompactionIntegrityUnit")
+def test_continuous_integrity_unit_first_worker_failure_wins_and_reraises_original():
+    recorder = _ContinuousFailureRecorder("continuous-case-unit")
+    original = RuntimeError("safe client failure detail")
+    secondary = TimeoutError("coordinator observed cancellation")
+
+    assert recorder.record(original, "import", epoch=2, phase="writer_body")
+    assert not recorder.record(secondary, "coordinator", phase="await_workers")
+    with pytest.raises(RuntimeError, match="safe client failure detail") as raised:
+        recorder.raise_primary(secondary)
+    assert raised.value is original
+
+
+@pytest.mark.tags("CompactionIntegrityUnit")
+def test_continuous_integrity_unit_worker_polling_surfaces_recorded_failure_without_waiting():
+    recorder = _ContinuousFailureRecorder("continuous-case-unit")
+    original = RuntimeError("safe worker failure")
+    recorder.record(original, "import", epoch=1, phase="import")
+    pending = Future()
+    budget = _ContinuousBudget(60, threading.Event())
+
+    with pytest.raises(RuntimeError, match="safe worker failure") as raised:
+        _continuous_wait_for_futures([pending], budget, recorder)
+
+    assert raised.value is original
+
+
+@pytest.mark.tags("CompactionIntegrityUnit")
+def test_continuous_integrity_unit_writer_exit_failure_does_not_replace_body_failure(tmp_path, monkeypatch):
+    event_path = tmp_path / "events.jsonl"
+    monkeypatch.setenv("DATA_INTEGRITY_DIAGNOSTICS_PATH", str(event_path))
+    recorder = _ContinuousFailureRecorder("continuous-case-unit")
+    body_error = ValueError("safe append failure detail")
+    exit_error = RuntimeError("safe writer exit failure detail")
+
+    class BrokenWriter:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            # Evidence must exist before SDK cleanup can fail or hang.
+            primary = json.loads(event_path.read_text().splitlines()[0])
+            assert primary["phase"] == "writer_body"
+            assert primary["error_reason"] == "invalid value"
+            assert primary["error_stack"][-1]["function"] == (
+                "test_continuous_integrity_unit_writer_exit_failure_does_not_replace_body_failure"
+            )
+            raise exit_error
+
+    with pytest.raises(RuntimeError) as cleanup:
+        with _continuous_writer_context(BrokenWriter(), recorder, "import", 1):
+            raise body_error
+    assert cleanup.value is exit_error
+    # The outer handler sees the same exception again; do not duplicate it.
+    recorder.record(exit_error, "import", epoch=1, phase="worker")
+    with pytest.raises(ValueError, match="safe append failure detail") as raised:
+        recorder.raise_primary(exit_error)
+    assert raised.value is body_error
+    events = [json.loads(line) for line in event_path.read_text().splitlines()]
+    assert [(event["event"], event["phase"]) for event in events] == [
+        ("continuous_primary_failure", "writer_body"),
+        ("continuous_secondary_failure", "writer_exit"),
+    ]
+
+
+@pytest.mark.tags("CompactionIntegrityUnit")
+def test_continuous_integrity_unit_secondary_errors_are_bounded(tmp_path, monkeypatch):
+    event_path = tmp_path / "events.jsonl"
+    monkeypatch.setenv("DATA_INTEGRITY_DIAGNOSTICS_PATH", str(event_path))
+    recorder = _ContinuousFailureRecorder("continuous-case-unit")
+    primary = ValueError("primary")
+    recorder.record(primary, "import")
+    recorder.record(RuntimeError("continuous integrity case stopped"), "mutation_a")
+    for _ in range(20):
+        recorder.record(RuntimeError("secondary"), "import", phase="writer_exit")
+    events = [json.loads(line) for line in event_path.read_text().splitlines()]
+    assert len(events) == 9
+    assert sum(event["event"] == "continuous_primary_failure" for event in events) == 1
+    assert recorder.primary()[0] is primary
+
+
+@pytest.mark.tags("CompactionIntegrityUnit")
+def test_continuous_integrity_unit_emits_writer_body_error_before_exit():
+    recorder = _ContinuousFailureRecorder("continuous-case-unit")
+
+    class FakeWriter:
+        primary_phase_during_exit = None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, _exc_type, _exc, _traceback):
+            primary = recorder.primary()
+            self.primary_phase_during_exit = primary[4] if primary else None
+            return False
+
+    writer = FakeWriter()
+    original = RuntimeError("safe append failure")
+    with pytest.raises(RuntimeError, match="safe append failure") as raised:
+        with _continuous_writer_context(writer, recorder, "import", 1):
+            raise original
+    assert writer.primary_phase_during_exit == "writer_body"
+    with pytest.raises(RuntimeError, match="safe append failure") as reraised:
+        recorder.raise_primary(RuntimeError("coordinator cancellation"))
+    assert reraised.value is original
+
+
+@pytest.mark.tags("CompactionIntegrityUnit")
+def test_continuous_integrity_unit_heartbeat_is_throttled_and_safe_after_deadline(monkeypatch):
+    events = []
+    monkeypatch.setattr(
+        sys.modules[__name__], "emit_data_integrity_event", lambda event, **kwargs: events.append(event)
+    )
+
+    class ExpiredBudget:
+        deadline = time.monotonic() - 1
+
+        def remaining(self, *_args, **_kwargs):
+            raise RuntimeError("budget method must not be called from diagnostics")
+
+    progress = _ContinuousProgress("continuous-case-unit")
+    oracle = _ContinuousOracle()
+    progress.emit("import", 1, "writer", ExpiredBudget(), oracle, event="continuous_heartbeat")
+    progress.emit("import", 1, "writer", ExpiredBudget(), oracle, event="continuous_heartbeat")
+    assert len(events) == 1
+    assert events[0]["remaining_budget_seconds"] == 0

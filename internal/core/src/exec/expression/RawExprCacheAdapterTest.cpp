@@ -45,8 +45,13 @@
 #include "common/Vector.h"
 #include "exec/QueryContext.h"
 #include "exec/expression/ExprCache.h"
+#include "exec/expression/ConjunctExpr.h"
+#include "exec/expression/ExprIndexIntegrationTestUtils.h"
+#include "exec/expression/LikeConjunctExpr.h"
 #include "exec/expression/UnaryExpr.h"
 #include "expr/ITypeExpr.h"
+#include "index/SingleCellIndexStorageTranslator.h"
+#include "index/scalar/sort/SortedIndexReader.h"
 #include "pb/plan.pb.h"
 #include "segcore/SegmentSealed.h"
 #include "test_utils/DataGen.h"
@@ -781,6 +786,109 @@ TEST_F(RawExprCacheAdapterTest, CacheMissPrefetchUsesSinglePoolTask) {
     EXPECT_EQ(pool->submitted_tasks(), 1);
 }
 
+TEST_F(RawExprCacheAdapterTest, ScalarPrefetchLoadsStorageBeforeEvaluation) {
+    ExprResCacheManager::SetEnabled(false);
+    const cachinglayer::ResourceUsage limit{16 * 1024 * 1024, 0};
+    auto dlist = std::make_shared<cachinglayer::internal::DList>(
+        false, limit, limit, limit, cachinglayer::EvictionConfig{});
+    int load_count = 0;
+    using Storage = index::SortedIndexStorage<std::string_view>;
+    auto load = [&](OpContext*) -> folly::coro::Task<std::unique_ptr<Storage>> {
+        ++load_count;
+        auto offsets = std::make_shared<const std::vector<int32_t>>(
+            std::initializer_list<int32_t>{0, 1, 0});
+        Storage::OpenArgs args;
+        args.state.valid_bitset = std::make_shared<TargetBitmap>(3, true);
+        args.state.idx_to_offsets = offsets->data();
+        args.state.idx_to_offsets_size = offsets->size();
+        args.state.idx_to_offsets_owner = std::move(offsets);
+        args.state.total_num_rows = 3;
+        args.storage.layout = index::SortedStringLayout::FromHeap(
+            {"apple", "banana"}, {{0, 2}, {1}}, 3);
+        co_return std::make_unique<Storage>(std::move(args));
+    };
+    index::IndexCacheConfig cache{
+        "scalar-expression-prefetch",
+        cachinglayer::Meta{cachinglayer::StorageType::MEMORY,
+                           cachinglayer::CellIdMappingMode::IDENTICAL,
+                           cachinglayer::CellDataType::OTHER,
+                           CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                           true},
+        {1024 * 1024, 0},
+        {},
+        128};
+    auto slot = std::make_shared<cachinglayer::CacheSlot<Storage>>(
+        std::make_unique<index::SingleCellIndexStorageTranslator<Storage>>(
+            cache, false, load),
+        dlist.get(),
+        true,
+        true,
+        true,
+        std::chrono::seconds(5),
+        std::chrono::seconds(5));
+    const index::ReaderCaps caps{.predicate = true,
+                                 .pattern_match = true,
+                                 .value_lookup = true,
+                                 .cheap_value_lookup = true};
+    auto owner = std::make_shared<index::SortedIndex<std::string_view>>(
+        slot,
+        index::IndexMetadata{caps, index::Domain::Row, DataType::VARCHAR, 3});
+    auto schema = std::make_shared<Schema>();
+    const auto field_id = schema->AddDebugField("text", DataType::VARCHAR);
+    auto field =
+        milvus::test::expr_index::StringField({"apple", "banana", "apple"});
+    milvus::test::expr_index::RawFieldFiles raw_files;
+    auto segment = segcore::CreateSealedSegment(schema);
+    segment->LoadFieldData(raw_files.Prepare(field_id, {field}));
+    milvus::test::expr_index::InstallIndex(*segment,
+                                           field_id,
+                                           DataType::VARCHAR,
+                                           {owner,
+                                            owner->CreateReader(nullptr),
+                                            std::string(index::families::kSort),
+                                            Config::object(),
+                                            caps});
+
+    proto::plan::GenericValue value;
+    value.set_string_val("apple");
+    auto logical = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(field_id, DataType::VARCHAR),
+        proto::plan::OpType::Equal,
+        value);
+    OpContext op_ctx;
+    QueryContext query_context(
+        "scalar_index_prefetch", segment.get(), 3, MAX_TIMESTAMP);
+    query_context.set_op_context(&op_ctx);
+    ExecContext exec_context(&query_context);
+    auto compiled = CompileExpressions({logical}, &exec_context, {}, false);
+    ASSERT_EQ(compiled.size(), 1);
+    auto expression = std::dynamic_pointer_cast<SegmentExpr>(compiled[0]);
+    ASSERT_NE(expression, nullptr);
+    ASSERT_EQ(load_count, 0);
+    auto pool = std::make_shared<CountingCPUThreadPoolExecutor>(1);
+    compiled[0]->PrefetchAsync(pool);
+    compiled[0]->WaitPrefetch();
+    ASSERT_EQ(expression->GetExecPath(), ExprExecPath::ScalarIndex);
+    ASSERT_EQ(load_count, 1);
+    const auto scanned_bytes = op_ctx.storage_usage.scanned_total_bytes.load();
+    ASSERT_GT(scanned_bytes, 0);
+
+    EvalCtx eval_context(&exec_context);
+    VectorPtr result;
+    compiled[0]->Eval(eval_context, result);
+    auto column = std::dynamic_pointer_cast<ColumnVector>(result);
+    ASSERT_NE(column, nullptr);
+    ASSERT_EQ(column->size(), 3);
+    TargetBitmapView matches(column->GetRawData(), column->size());
+    TargetBitmapView valid(column->GetValidRawData(), column->size());
+    EXPECT_TRUE(valid.all());
+    EXPECT_EQ(matches.count(), 2);
+    EXPECT_TRUE(matches[0]);
+    EXPECT_TRUE(matches[2]);
+    EXPECT_EQ(load_count, 1);
+    EXPECT_EQ(op_ctx.storage_usage.scanned_total_bytes.load(), scanned_bytes);
+}
+
 TEST_F(RawExprCacheAdapterTest, RawPrefetchContributesToLatencyAdmission) {
     auto& manager = ExprResCacheManager::Instance();
     CacheConfig config;
@@ -863,7 +971,7 @@ TEST_F(RawExprCacheAdapterTest, MemoryModeRejectsGrowingByDefault) {
                     kActiveCount,
                     data.row_ids_.data(),
                     data.timestamps_.data(),
-                    data.raw_);
+                    std::make_shared<InsertRecordProto>(*data.raw_));
 
     QueryContext query_context(
         "raw_cache_growing", growing.get(), kActiveCount, MAX_TIMESTAMP);
@@ -918,7 +1026,7 @@ TEST_F(RawExprCacheAdapterTest, MemoryModeCachesGrowingWhenEnabled) {
                     kActiveCount,
                     data.row_ids_.data(),
                     data.timestamps_.data(),
-                    data.raw_);
+                    std::make_shared<InsertRecordProto>(*data.raw_));
 
     QueryContext query_context(
         "raw_cache_growing", growing.get(), kActiveCount, MAX_TIMESTAMP);
@@ -969,7 +1077,7 @@ TEST_F(RawExprCacheAdapterTest, GrowingAdmissionSkipsCaptureForNewSnapshots) {
                         rows,
                         data.row_ids_.data(),
                         data.timestamps_.data(),
-                        data.raw_);
+                        std::make_shared<InsertRecordProto>(*data.raw_));
     };
     const std::string signature = "raw:growing-snapshot-admission";
     auto evaluate = [&](bool expect_capture, bool expect_hit) {
@@ -1080,7 +1188,7 @@ TEST_F(RawExprCacheAdapterTest, DiskModeCachesSealedButRejectsGrowing) {
                     kActiveCount,
                     data.row_ids_.data(),
                     data.timestamps_.data(),
-                    data.raw_);
+                    std::make_shared<InsertRecordProto>(*data.raw_));
     QueryContext growing_query(
         "raw_cache_disk_growing", growing.get(), kActiveCount, MAX_TIMESTAMP);
     ExecContext growing_exec_context(&growing_query);
@@ -1365,6 +1473,70 @@ TEST_P(RawExprCacheNullRejectionTest, SkippedNullsRemainUnknownUnderNot) {
 INSTANTIATE_TEST_SUITE_P(MemoryAndDisk,
                          RawExprCacheNullRejectionTest,
                          ::testing::Values(CacheMode::Memory, CacheMode::Disk));
+
+TEST_F(RawExprCacheAdapterTest, CachedLikeChildrenStillUseBatchNgram) {
+    auto schema = std::make_shared<Schema>();
+    const auto field_id = schema->AddDebugField("text", DataType::VARCHAR);
+    const std::vector<std::string> rows{"alpha beta",
+                                        "alpha only",
+                                        "beta only",
+                                        "alpha middle beta",
+                                        "neither"};
+    auto field = milvus::test::expr_index::StringField(rows);
+    milvus::test::expr_index::RawFieldFiles raw_files;
+    auto segment = segcore::CreateSealedSegment(schema);
+    segment->LoadFieldData(raw_files.Prepare(field_id, {field}));
+    auto opened = milvus::test::expr_index::BuildIndex(
+        field_id,
+        DataType::VARCHAR,
+        index::NGRAM_INDEX_TYPE,
+        {field},
+        {{index::MIN_GRAM, 2}, {index::MAX_GRAM, 4}});
+    milvus::test::expr_index::InstallIndex(
+        *segment, field_id, DataType::VARCHAR, std::move(opened));
+    auto like = [&](const std::string& literal) {
+        proto::plan::GenericValue value;
+        value.set_string_val(literal);
+        return std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(field_id, DataType::VARCHAR),
+            proto::plan::OpType::InnerMatch,
+            value);
+    };
+    auto logical = std::make_shared<expr::LogicalBinaryExpr>(
+        expr::LogicalBinaryExpr::OpType::And, like("alpha"), like("beta"));
+    QueryContext query_context(
+        "cached_like_ngram", segment.get(), rows.size(), MAX_TIMESTAMP);
+    ExecContext exec_context(&query_context);
+    auto compiled = CompileExpressions({logical}, &exec_context, {}, false);
+    ASSERT_EQ(compiled.size(), 1);
+    auto conjunction =
+        std::dynamic_pointer_cast<PhyConjunctFilterExpr>(compiled[0]);
+    ASSERT_NE(conjunction, nullptr);
+    ASSERT_EQ(conjunction->GetInputsRef().size(), 2);
+    for (const auto& child : conjunction->GetInputsRef()) {
+        ASSERT_NE(std::dynamic_pointer_cast<RawExprCacheAdapter>(child),
+                  nullptr);
+    }
+    ASSERT_TRUE(conjunction->CanExecuteAllAtOnce());
+    conjunction->SetExecuteAllAtOnce();
+    EvalCtx eval_context(&exec_context);
+    VectorPtr result;
+    conjunction->Eval(eval_context, result);
+    auto column = std::dynamic_pointer_cast<ColumnVector>(result);
+    ASSERT_NE(column, nullptr);
+    ASSERT_EQ(column->size(), rows.size());
+    TargetBitmapView matches(column->GetRawData(), column->size());
+    TargetBitmapView valid(column->GetValidRawData(), column->size());
+    EXPECT_TRUE(valid.all());
+    EXPECT_EQ(matches.count(), 2);
+    EXPECT_TRUE(matches[0]);
+    EXPECT_TRUE(matches[3]);
+    ASSERT_EQ(conjunction->GetInputsRef().size(), 3);
+    EXPECT_NE(std::dynamic_pointer_cast<PhyLikeConjunctExpr>(
+                  conjunction->GetInputsRef().back()),
+              nullptr);
+    EXPECT_EQ(ExprResCacheManager::Instance().GetEntryCount(), 0);
+}
 
 TEST_F(RawExprCacheAdapterTest, UnaryAllSkipRawResultIsCapturedAndReused) {
     proto::plan::GenericValue value;

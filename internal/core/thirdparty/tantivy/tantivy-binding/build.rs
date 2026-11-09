@@ -1,8 +1,49 @@
-use std::{env, path::Path, path::PathBuf};
+use std::{env, fs, path::Path, path::PathBuf};
+
+fn watch_rust_sources(dir: &Path, generated_dir: &Path) {
+    if dir == generated_dir {
+        return;
+    }
+
+    let mut entries = fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", dir.display()))
+        .map(|entry| {
+            entry.unwrap_or_else(|e| panic!("failed to read an entry in {}: {e}", dir.display()))
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by_key(|entry| entry.path());
+
+    for entry in entries {
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .unwrap_or_else(|e| panic!("failed to inspect {}: {e}", path.display()));
+        if file_type.is_dir() {
+            watch_rust_sources(&path, generated_dir);
+        } else if file_type.is_file() && path.extension().is_some_and(|ext| ext == "rs") {
+            println!("cargo:rerun-if-changed={}", path.display());
+        }
+    }
+}
 
 fn main() {
     let crate_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let package_name = env::var("CARGO_PKG_NAME").unwrap();
+    let crate_path = Path::new(&crate_dir);
+    println!("cargo:rerun-if-env-changed=TOKENIZER_PROTO");
+    println!(
+        "cargo:rerun-if-changed={}",
+        crate_path.join("Cargo.toml").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        crate_path.join("cbindgen.toml").display()
+    );
+    watch_rust_sources(
+        &crate_path.join("src"),
+        &crate_path.join("src/analyzer/gen"),
+    );
+
     let output_file = PathBuf::from(&crate_dir)
         .join("include")
         .join(format!("{}.h", package_name));

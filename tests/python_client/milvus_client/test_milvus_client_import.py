@@ -2,6 +2,7 @@ import csv
 import json
 import os
 import time
+from copy import deepcopy
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -16,7 +17,14 @@ from common.common_type import CaseLabel, CheckTasks
 from minio import Minio
 from minio.commonconfig import CopySource
 from pymilvus import DataType, Function, FunctionType
-from pymilvus.bulk_writer import abort_import, bulk_import, commit_import, get_import_progress
+from pymilvus.bulk_writer import (
+    BulkFileType,
+    LocalBulkWriter,
+    abort_import,
+    bulk_import,
+    commit_import,
+    get_import_progress,
+)
 from utils.util_log import test_log as log
 
 
@@ -96,9 +104,9 @@ class TestMilvusClientImportIndependent(TestMilvusClientV2Base):
     @staticmethod
     def _write_rows(file_path, rows, arrow_schema):
         # Write raw files to exercise reader validation without BulkWriter normalizing the input.
-        if file_path.suffix in {".json", ".jsonl"}:
+        if file_path.suffix in {".json", ".jsonl", ".ndjson"}:
             with file_path.open("w", encoding="utf-8") as stream:
-                if file_path.suffix == ".jsonl":
+                if file_path.suffix in {".jsonl", ".ndjson"}:
                     stream.write("\n".join(json.dumps(row, ensure_ascii=False) for row in rows))
                 else:
                     json.dump(rows, stream, ensure_ascii=False)
@@ -155,12 +163,113 @@ class TestMilvusClientImportIndependent(TestMilvusClientV2Base):
         self.create_collection(client, collection_name, schema=schema, index_params=index_params)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("file_format", ["json", "jsonl", "csv", "parquet"])
-    def test_import_nullable_fields_preserve_values_across_files(self, file_format, upload_import_file, tmp_path):
+    # All-null sparse inserts are tracked separately in milvus-io/milvus#54330.
+    @pytest.mark.parametrize(
+        "all_null, ingress",
+        [
+            pytest.param(False, "insert", id="mixed_values-insert"),
+            pytest.param(False, "bulk_import", id="mixed_values-bulk_import"),
+            pytest.param(True, "bulk_import", id="all_null-bulk_import"),
+        ],
+    )
+    def test_bulk_writer_nullable_struct_and_sparse_match_insert(self, all_null, ingress, upload_import_file, tmp_path):
+        """
+        target: nullable StructArray and sparse-vector equivalence across insert and bulk import
+        method: write explicit nulls, omitted fields, empty arrays and populated values through both paths
+        expected: Parquet nulls and every queried value match the source, including after release/load
+        """
+        client = self._client()
+        schema = self.create_schema(client, auto_id=False, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=4)
+        struct = self.create_struct_field_schema(client)[0]
+        struct.add_field("value", DataType.INT64)
+        struct.add_field("embedding", DataType.FLOAT_VECTOR, dim=4)
+        schema.add_field(
+            "chunks", DataType.ARRAY, element_type=DataType.STRUCT, struct_schema=struct, max_capacity=2, nullable=True
+        )
+        schema.add_field("sparse", DataType.SPARSE_FLOAT_VECTOR, nullable=True)
+        indexes = self.prepare_index_params(client)[0]
+        indexes.add_index("vector", index_type="FLAT", metric_type="L2")
+        indexes.add_index(
+            "chunks[embedding]", index_type="HNSW", metric_type="MAX_SIM_COSINE", params={"M": 8, "efConstruction": 64}
+        )
+        indexes.add_index("sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="IP")
+        collection_name = cf.gen_unique_str(f"nullable_{ingress}")
+        self.create_collection(client, collection_name, schema=schema, index_params=indexes)
+
+        rows = [
+            {"id": 0, "vector": [0.0, 0.25, 0.5, 1.0], "chunks": None, "sparse": None},
+            {"id": 1, "vector": [1.0, 0.25, 0.5, 1.0]},
+        ]
+        if not all_null:
+            rows.extend(
+                [
+                    {"id": 2, "vector": [2.0, 0.25, 0.5, 1.0], "chunks": [], "sparse": {1: 0.5}},
+                    {
+                        "id": 3,
+                        "vector": [3.0, 0.25, 0.5, 1.0],
+                        "chunks": [{"value": 7, "embedding": [1.0, 0.5, 0.25, 0.0]}],
+                        "sparse": None,
+                    },
+                    {"id": 4, "vector": [4.0, 0.25, 0.5, 1.0], "chunks": None, "sparse": {3: 0.25}},
+                    {
+                        "id": 5,
+                        "vector": [5.0, 0.25, 0.5, 1.0],
+                        "chunks": [{"value": 11, "embedding": [0.0, 0.25, 0.5, 1.0]}],
+                        "sparse": {2: 0.125},
+                    },
+                ]
+            )
+        # Freeze the source oracle before either SDK path can normalize its input.
+        expected = [
+            dict(deepcopy(row), chunks=deepcopy(row.get("chunks")), sparse=deepcopy(row.get("sparse"))) for row in rows
+        ]
+        if ingress == "insert":
+            result = self.insert(client, collection_name, deepcopy(rows))[0]
+            assert result["insert_count"] == len(rows), result
+        else:
+            with LocalBulkWriter(schema=schema, local_path=str(tmp_path), file_type=BulkFileType.PARQUET) as writer:
+                for row in deepcopy(rows):
+                    writer.append_row(row)
+                writer.commit()
+                assert len(writer.batch_files) == 1 and len(writer.batch_files[0]) == 1
+                table = pq.read_table(writer.batch_files[0][0])
+                for field_name in ("chunks", "sparse"):
+                    assert table.column(field_name).null_count == sum(row[field_name] is None for row in expected)
+                files = [[upload_import_file(tmp_path / writer.batch_files[0][0])]]
+                progress = self._import_and_wait(collection_name, files)
+                assert progress["importedRows"] == progress["totalRows"] == len(rows), progress
+            self.refresh_load(client, collection_name)
+        self._assert_import_rows(client, collection_name, expected)
+        self.release_collection(client, collection_name)
+        self.load_collection(client, collection_name)
+        self._assert_import_rows(client, collection_name, expected)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize(
+        "file_format,jsonlines_layout",
+        [
+            pytest.param("json", "default", id="json"),
+            pytest.param("jsonl", "default", id="jsonl"),
+            pytest.param("ndjson", "default", id="ndjson"),
+            pytest.param("csv", "default", id="csv"),
+            pytest.param("parquet", "default", id="parquet"),
+            pytest.param("jsonl", "trailing_newline", id="jsonl-trailing-newline"),
+            pytest.param("jsonl", "blank_lines", id="jsonl-blank-lines"),
+            pytest.param("ndjson", "trailing_newline", id="ndjson-trailing-newline"),
+            pytest.param("ndjson", "blank_lines", id="ndjson-blank-lines"),
+        ],
+    )
+    def test_import_nullable_fields_preserve_values_across_files(
+        self, file_format, jsonlines_layout, upload_import_file, tmp_path
+    ):
         """
         target: nullable scalar, array, JSON and vector value alignment
         method: import distinct per-row values and staggered nulls across files and Parquet row groups
         expected: every cell and null-filter PK set is preserved, including after release/load
+        case extension: IV3-FN-01 — adds NDJSON and JSONL/NDJSON trailing-newline and blank-line variants;
+                        the original multi-file flow and assertions are retained.
         """
         client = self._client()
         collection_name = cf.gen_unique_str("import_nullable_values")
@@ -230,6 +339,11 @@ class TestMilvusClientImportIndependent(TestMilvusClientV2Base):
         for part, group in enumerate((rows[:13], rows[13:])):
             path = tmp_path / f"part_{part}.{file_format}"
             self._write_rows(path, group, pa.schema(arrow_fields))
+            if jsonlines_layout == "trailing_newline":
+                path.write_text(path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+            elif jsonlines_layout == "blank_lines":
+                content = path.read_text(encoding="utf-8").replace("\n", "\n\n")
+                path.write_text("\n \t\n" + content + "\n\n", encoding="utf-8")
             if file_format == "parquet":
                 assert pq.read_metadata(path).num_row_groups > 1
             files.append([upload_import_file(path)])
@@ -287,7 +401,8 @@ class TestMilvusClientImportIndependent(TestMilvusClientV2Base):
         """
         target: missing and null default fields versus explicit falsy values
         method: import a file with omitted columns and a file with null, zero and non-default values
-        expected: only missing/null values use defaults; explicit zero, false and empty strings survive
+        expected: only missing/null values use defaults; explicit zero, false and empty strings survive reload
+        case: IV3-FN-21 SC-05 adds reload and full-row rechecks to the existing V2/V3 case
         """
         client = self._client()
         collection_name = cf.gen_unique_str("import_defaults")
@@ -359,6 +474,10 @@ class TestMilvusClientImportIndependent(TestMilvusClientV2Base):
             collection_name, files, {"sep": "|", "nullkey": "__NULL__"} if file_format == "csv" else {}
         )
         self.refresh_load(client, collection_name)
+        self._assert_import_rows(client, collection_name, expected)
+
+        self.release_collection(client, collection_name)
+        self.load_collection(client, collection_name)
         self._assert_import_rows(client, collection_name, expected)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -568,6 +687,7 @@ class TestMilvusClientImportIndependent(TestMilvusClientV2Base):
         target: partition-key routing with explicit PKs and autoID across multiple files
         method: import deterministic rows with four key values and query each key separately
         expected: each key returns exactly its source rows, including scalar and vector values
+        case extension: IV3-FN-13 adds absent-key query/count checks only; original matrix is unchanged
         """
         client = self._client()
         collection_name = cf.gen_unique_str("import_partition_values")
@@ -647,6 +767,13 @@ class TestMilvusClientImportIndependent(TestMilvusClientV2Base):
                     if field != "id" or not auto_id:
                         assert row[field] == source[field], {"field": field, "row": row, "expected": source}
         assert len(all_ids) == len(rows)
+
+        # IV3-FN-13 extension: an absent key must stay empty in both Import V2 and V3.
+        missing_key = "missing_group" if partition_type == DataType.VARCHAR else -1
+        missing_filter = f"group_key == {json.dumps(missing_key)}"
+        assert self.query(client, collection_name, filter=missing_filter, output_fields=["id"], limit=1)[0] == []
+        count = self.query(client, collection_name, filter=missing_filter, output_fields=["count(*)"])[0]
+        assert count[0]["count(*)"] == 0
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("action,terminal_state", [("commit", "Completed"), ("abort", "Failed")])

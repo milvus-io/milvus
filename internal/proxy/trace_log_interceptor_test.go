@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -218,6 +219,100 @@ func TestGetRequestFieldRedactsExternalCollectionCredentials(t *testing.T) {
 			assert.NotContains(t, request, "SPEC_SECRET_GRPC_SENTINEL")
 			assert.NotContains(t, request, "FUTURE_SPEC_GRPC_SENTINEL")
 			assert.Contains(t, request, "<redacted>")
+		})
+	}
+}
+
+func TestGetRequestFieldRedactsImportCredentials(t *testing.T) {
+	for _, request := range []any{
+		(*milvuspb.ImportRequest)(nil), &milvuspb.ImportRequest{},
+		(*internalpb.ImportRequest)(nil), &internalpb.ImportRequest{},
+	} {
+		assert.Same(t, request, GetRequestFieldWithoutSensitiveInfo(request).Interface)
+	}
+
+	for i, spec := range []string{
+		`{"extfs":{"access_key_id":"IMPORT_ACCESS_SENTINEL","access_key_value":"IMPORT_SECRET_SENTINEL"}}`,
+		`{"extfs":{"access_key_value":"IMPORT_SECRET_SENTINEL"`,
+	} {
+		options := []*commonpb.KeyValuePair{
+			{Key: "backup", Value: "true"},
+			{Key: "source_type", Value: "snapshot"},
+			{Key: "external_spec", Value: spec},
+			{Key: "EXTERNAL_SPEC", Value: spec},
+			{Key: "ezk", Value: "IMPORT_EZK_SENTINEL"},
+			{Key: "EzK", Value: "IMPORT_MIXED_EZK_SENTINEL"},
+		}
+		for _, request := range []proto.Message{
+			&milvuspb.ImportRequest{
+				CollectionName: "import_target", Files: []string{"s3://bucket/snapshot.json"}, Options: options,
+			},
+			&internalpb.ImportRequest{
+				CollectionName: "import_target", Files: []*internalpb.ImportFile{{Paths: []string{"s3://bucket/snapshot.json"}}}, Options: options,
+			},
+		} {
+			t.Run(fmt.Sprintf("%T/spec_%d", request, i), func(t *testing.T) {
+				before := proto.Clone(request)
+				field := GetRequestFieldWithoutSensitiveInfo(request)
+				require.Equal(t, "request", field.Key)
+				redacted, ok := field.Interface.(interface {
+					GetOptions() []*commonpb.KeyValuePair
+				})
+				require.True(t, ok)
+				assert.Equal(t, []*commonpb.KeyValuePair{
+					{Key: "backup", Value: "true"},
+					{Key: "source_type", Value: "snapshot"},
+					{Key: "external_spec", Value: "<redacted>"},
+					{Key: "EXTERNAL_SPEC", Value: "<redacted>"},
+					{Key: "ezk", Value: "<redacted>"},
+					{Key: "EzK", Value: "<redacted>"},
+				}, redacted.GetOptions())
+				output := fmt.Sprint(field.Interface)
+				assert.Contains(t, output, "import_target")
+				assert.Contains(t, output, "s3://bucket/snapshot.json")
+				assert.NotContains(t, output, "SENTINEL")
+				assert.True(t, proto.Equal(before, request), "logging must preserve the live request")
+				redacted.GetOptions()[0].Value = "false"
+				assert.True(t, proto.Equal(before, request), "log options must not alias live options")
+			})
+		}
+	}
+}
+
+func TestTraceLogInterceptorRedactsImportCredentials(t *testing.T) {
+	params := paramtable.Get()
+	previousMode := params.CommonCfg.TraceLogMode.GetValue()
+	t.Cleanup(func() { require.NoError(t, params.Save(params.CommonCfg.TraceLogMode.Key, previousMode)) })
+
+	for _, mode := range []string{"2", "3"} {
+		t.Run("mode_"+mode, func(t *testing.T) {
+			require.NoError(t, params.Save(params.CommonCfg.TraceLogMode.Key, mode))
+			logs := captureProxyLogs(t)
+			request := &milvuspb.ImportRequest{
+				CollectionName: "import_trace_target",
+				Files:          []string{"s3://bucket/snapshot.json"},
+				Options: []*commonpb.KeyValuePair{
+					{Key: "backup", Value: "true"},
+					{Key: "source_type", Value: "snapshot"},
+					{Key: "external_spec", Value: `{"extfs":{"access_key_value":"IMPORT_SECRET_SENTINEL"}}`},
+					{Key: "ezk", Value: "IMPORT_EZK_SENTINEL"},
+				},
+			}
+			before := proto.Clone(request)
+			called := false
+			_, err := TraceLogInterceptor(context.Background(), request,
+				&grpc.UnaryServerInfo{FullMethod: "/milvus.proto.milvus.MilvusService/Import"},
+				func(_ context.Context, req any) (any, error) {
+					called = true
+					assert.Same(t, request, req)
+					assert.True(t, proto.Equal(before, req.(proto.Message)))
+					return &milvuspb.ImportResponse{Status: &commonpb.Status{}}, nil
+				})
+			require.NoError(t, err)
+			require.True(t, called)
+			assert.Contains(t, logs.String(), "import_trace_target")
+			assert.Contains(t, logs.String(), "redacted")
+			assert.NotContains(t, logs.String(), "SENTINEL")
 		})
 	}
 }

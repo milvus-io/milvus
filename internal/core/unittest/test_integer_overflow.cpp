@@ -142,7 +142,7 @@ TEST(Expr, IntegerOverflow) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    raw_data.SharedRaw());
     }
 
     ScopedSchemaHandle handle(*schema);

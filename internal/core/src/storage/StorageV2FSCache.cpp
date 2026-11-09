@@ -16,6 +16,7 @@
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/properties.h"
 #include "log/Log.h"
+#include "storage/loon_ffi/property_singleton.h"
 #include "storage/loon_ffi/util.h"
 
 namespace milvus::storage {
@@ -59,6 +60,10 @@ StorageV2FSCache::Get(const Key& key) {
     props[PROPERTY_FS_GCP_CREDENTIAL_JSON] = key.gcp_credential_json;
     props[PROPERTY_FS_USE_CUSTOM_PART_UPLOAD] = key.use_custom_part_upload;
     props[PROPERTY_FS_MAX_CONNECTIONS] = key.max_connections;
+    // Preserve SDK I/O and its configured TLS minimum across the SDK upgrade.
+    props[PROPERTY_FS_S3_USE_CRT] = false;
+    props[PROPERTY_FS_S3_CRT_QUEUE_SIZES] =
+        LoonFFIPropertiesSingleton::GetInstance().GetS3CrtQueueSizes();
     if (!key.tls_min_version.empty() && key.tls_min_version != "default") {
         props[PROPERTY_FS_TLS_MIN_VERSION] = key.tls_min_version;
     }
@@ -88,7 +93,10 @@ StorageV2FSCache::Get(const Key& key) {
         fs_root_path,
         key.storage_type);
 
-    auto result = milvus_storage::FilesystemCache::getInstance().get(props, "");
+    auto result = milvus_storage::FilesystemCache::getInstance().get(
+        std::make_shared<const milvus_storage::api::Properties>(
+            std::move(props)),
+        "");
 
     if (!result.ok()) {
         LOG_WARN("create arrow file system failed, error: {}",

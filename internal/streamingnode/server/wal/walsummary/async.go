@@ -169,7 +169,13 @@ func (m *Manager) setTerminalErrorLocked(err error) bool {
 		return false
 	}
 	m.terminalErr = err
+	for _, subscribers := range m.transformSubscribers {
+		for sub := range subscribers {
+			sub.stream.cancel(err)
+		}
+	}
 	m.notifyReadersLocked()
+	m.notifyAllTransformsLocked()
 	return true
 }
 

@@ -79,10 +79,6 @@ func ExecuteFunctionsForSegment(
 	if err != nil {
 		return "", merr.Wrap(err, "create input manifest")
 	}
-	_, inputVersion, err := packed.UnmarshalManifestPath(inputManifestPath)
-	if err != nil {
-		return "", merr.Wrap(err, "parse input manifest path")
-	}
 
 	outputFields, outputSchema, err := buildOutputSchema(schema)
 	if err != nil {
@@ -130,7 +126,7 @@ func ExecuteFunctionsForSegment(
 	if err := appendBM25Stats(ctx, bm25Acc, storageConfig, basePath, updates); err != nil {
 		return "", err
 	}
-	manifestPath, err := packed.CommitManifestUpdates(basePath, inputVersion, storageConfig, updates)
+	manifestPath, err := packed.CommitManifestUpdates(inputManifestPath, storageConfig, updates)
 	if err != nil {
 		return "", merr.Wrap(err, "commit function output manifest")
 	}
@@ -490,7 +486,7 @@ func finalizeBM25Stats(
 		return manifestPath, nil
 	}
 
-	basePath, version, err := packed.UnmarshalManifestPath(manifestPath)
+	basePath, _, err := packed.UnmarshalManifestPath(manifestPath)
 	if err != nil {
 		return "", merr.Wrap(err, "parse manifest path")
 	}
@@ -499,5 +495,5 @@ func finalizeBM25Stats(
 	if err := appendBM25Stats(ctx, acc, storageConfig, basePath, updates); err != nil {
 		return "", err
 	}
-	return packed.CommitManifestUpdates(basePath, version, storageConfig, updates)
+	return packed.CommitManifestUpdates(manifestPath, storageConfig, updates)
 }

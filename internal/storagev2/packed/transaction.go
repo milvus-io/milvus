@@ -25,6 +25,7 @@ import "C"
 import (
 	"context"
 	"math"
+	"strings"
 	"unsafe"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -89,14 +90,14 @@ func addDeltaLogsToManifest(
 		return manifestPath, nil
 	}
 
-	basePath, version, err := UnmarshalManifestPath(manifestPath)
+	manifest, err := ParseManifestPath(manifestPath)
 	if err != nil {
 		return "", merr.WrapErrStorage(err, "failed to parse manifest path")
 	}
 
 	mlog.Debug(context.TODO(), "AddDeltaLogsToManifest",
-		mlog.String("basePath", basePath),
-		mlog.Int64("version", version),
+		mlog.String("basePath", manifest.BasePath),
+		mlog.Int64("version", manifest.ManifestVersion),
 		mlog.Int("numDeltaLogs", len(deltaLogs)))
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
@@ -105,13 +106,9 @@ func addDeltaLogsToManifest(
 	}
 	defer C.loon_properties_free(cProperties)
 
-	cBasePath := C.CString(basePath)
-	defer C.free(unsafe.Pointer(cBasePath))
-
 	// Start transaction
-	var transactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), resolveID /* resolve_id */, getRetryLimit() /* retry_limit */, &transactionHandle)
-	if err := HandleLoonFFIResult(result); err != nil {
+	transactionHandle, err := openTransaction(manifest, cProperties, resolveID, getRetryLimit())
+	if err != nil {
 		return "", merr.WrapErrStorage(err, "failed to begin transaction")
 	}
 	defer C.loon_transaction_destroy(transactionHandle)
@@ -120,7 +117,7 @@ func addDeltaLogsToManifest(
 	// The C++ loon library converts absolute paths to relative at commit time
 	for _, deltaLog := range deltaLogs {
 		cPath := C.CString(deltaLog.Path)
-		result = C.loon_transaction_add_delta_log(transactionHandle, cPath, C.int64_t(deltaLog.NumEntries))
+		result := C.loon_transaction_add_delta_log(transactionHandle, cPath, C.int64_t(deltaLog.NumEntries))
 		C.free(unsafe.Pointer(cPath))
 
 		if err := HandleLoonFFIResult(result); err != nil {
@@ -132,15 +129,11 @@ func addDeltaLogsToManifest(
 			mlog.Int64("numEntries", deltaLog.NumEntries))
 	}
 
-	// Commit transaction
-	var commitVersion C.int64_t
-	result = C.loon_transaction_commit(transactionHandle, &commitVersion)
-	if err := HandleLoonFFIResult(result); err != nil {
+	newManifestPath, err := commitTransaction(transactionHandle, manifest.BasePath, storageConfig)
+	if err != nil {
 		return "", merr.WrapErrStorage(err, "failed to commit transaction")
 	}
-
-	newManifestPath := MarshalManifestPath(basePath, int64(commitVersion))
-	mlog.Debug(context.TODO(), "Delta logs committed to manifest", mlog.Int64("newVersion", int64(commitVersion)))
+	mlog.Debug(context.TODO(), "Delta logs committed to manifest", mlog.String("newManifestPath", newManifestPath))
 
 	return newManifestPath, nil
 }
@@ -164,7 +157,9 @@ func GetDeltaLogPathsFromManifest(
 	var paths []string
 	for _, deltaLog := range deltaLogs {
 		for _, binlog := range deltaLog.GetBinlogs() {
-			if binlog.GetEntriesNum() <= 0 {
+			// Metadata integrity is checked by the decoder above; this view
+			// only excludes valid zero-entry markers that have no file to read.
+			if binlog.GetEntriesNum() == 0 {
 				continue
 			}
 			paths = append(paths, binlog.GetLogPath())
@@ -176,6 +171,29 @@ func GetDeltaLogPathsFromManifest(
 	return paths, nil
 }
 
+// validateDeltaLogMetadata distinguishes a legitimate zero-entry marker from
+// corrupt persisted metadata. A zero-entry marker is allowed to omit its path
+// because there is no deltalog file to read. Once entries are declared, the
+// path is mandatory; otherwise silently skipping the entry would resurrect
+// rows that the source segment had deleted.
+func validateDeltaLogMetadata(manifestPath, logPath string, entriesNum int64) error {
+	if entriesNum < 0 {
+		return merr.WrapErrDataIntegrityMsg(
+			"manifest %s has a deltalog with negative entries_num %d",
+			manifestPath,
+			entriesNum,
+		)
+	}
+	if entriesNum > 0 && strings.TrimSpace(logPath) == "" {
+		return merr.WrapErrDataIntegrityMsg(
+			"manifest %s has a deltalog with entries_num %d but no path",
+			manifestPath,
+			entriesNum,
+		)
+	}
+	return nil
+}
+
 // GetDeltaLogsFromManifestWithExtfs extracts delta log entries from a StorageV3
 // manifest. When extfs is present, returned paths are normalized to object keys
 // readable by the local chunk manager.
@@ -184,7 +202,7 @@ func GetDeltaLogsFromManifestWithExtfs(
 	storageConfig *indexpb.StorageConfig,
 	extfs ExternalSpecContext,
 ) ([]*datapb.FieldBinlog, error) {
-	basePath, version, err := UnmarshalManifestPath(manifestPath)
+	manifest, err := ParseManifestPath(manifestPath)
 	if err != nil {
 		return nil, merr.WrapErrStorage(err, "failed to parse manifest path")
 	}
@@ -198,20 +216,9 @@ func GetDeltaLogsFromManifestWithExtfs(
 		return nil, merr.Wrap(err, "inject extfs")
 	}
 
-	cBasePath := C.CString(basePath)
-	defer C.free(unsafe.Pointer(cBasePath))
-
-	var cTransactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.int32_t(0) /* resolve_id */, C.uint32_t(1) /* retry_limit */, &cTransactionHandle)
-	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, merr.WrapErrStorage(err, "failed to begin transaction")
-	}
-	defer C.loon_transaction_destroy(cTransactionHandle)
-
-	var cManifest *C.LoonManifest
-	result = C.loon_transaction_get_manifest(cTransactionHandle, &cManifest)
-	if err := HandleLoonFFIResult(result); err != nil {
-		return nil, merr.WrapErrStorage(err, "failed to get manifest")
+	cManifest, err := openManifest(manifest, cProperties)
+	if err != nil {
+		return nil, merr.WrapErrStorage(err, "failed to read manifest")
 	}
 	defer C.loon_manifest_destroy(cManifest)
 
@@ -224,28 +231,40 @@ func GetDeltaLogsFromManifestWithExtfs(
 	// (prepending basePath/_delta/ and normalizing). The returned paths are
 	// already absolute and can be used directly.
 	if cManifest.delta_logs.delta_log_paths == nil || cManifest.delta_logs.delta_log_num_entries == nil {
-		return nil, merr.WrapErrServiceInternalMsg("manifest %s has malformed delta log metadata", manifestPath)
+		return nil, merr.WrapErrDataIntegrityMsg("manifest %s has malformed delta log metadata", manifestPath)
 	}
 	cPaths := unsafe.Slice(cManifest.delta_logs.delta_log_paths, numDeltaLogs)
 	cNumEntries := unsafe.Slice(cManifest.delta_logs.delta_log_num_entries, numDeltaLogs)
 	binlogs := make([]*datapb.Binlog, 0, numDeltaLogs)
 	pathsForLog := make([]string, 0, numDeltaLogs)
 	for i, cPath := range cPaths {
-		if cPath == nil {
+		entriesNum := int64(cNumEntries[i])
+		path := ""
+		if cPath != nil {
+			path = C.GoString(cPath)
+		}
+		if err := validateDeltaLogMetadata(manifestPath, path, entriesNum); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(path) == "" {
+			// Only a zero-entry marker may reach this branch. It has no file
+			// identity to preserve and no deltalog that a caller can open.
 			continue
 		}
-		path := C.GoString(cPath)
 		if extfs.Source != "" {
 			var err error
 			path, err = externalFilesystemFilePath(path, cProperties, extfs)
 			if err != nil {
 				return nil, err
 			}
+			if err := validateDeltaLogMetadata(manifestPath, path, entriesNum); err != nil {
+				return nil, err
+			}
 		}
 		pathsForLog = append(pathsForLog, path)
 		binlogs = append(binlogs, &datapb.Binlog{
 			LogPath:    path,
-			EntriesNum: int64(cNumEntries[i]),
+			EntriesNum: entriesNum,
 		})
 	}
 
@@ -274,14 +293,14 @@ func AddStatsToManifest(
 		return manifestPath, nil
 	}
 
-	basePath, version, err := UnmarshalManifestPath(manifestPath)
+	manifest, err := ParseManifestPath(manifestPath)
 	if err != nil {
 		return "", merr.WrapErrStorage(err, "failed to parse manifest path")
 	}
 
 	mlog.Debug(context.TODO(), "AddStatsToManifest",
-		mlog.String("basePath", basePath),
-		mlog.Int64("version", version),
+		mlog.String("basePath", manifest.BasePath),
+		mlog.Int64("version", manifest.ManifestVersion),
 		mlog.Int("numStats", len(stats)))
 
 	cProperties, err := MakePropertiesFromStorageConfig(storageConfig, nil)
@@ -290,12 +309,8 @@ func AddStatsToManifest(
 	}
 	defer C.loon_properties_free(cProperties)
 
-	cBasePath := C.CString(basePath)
-	defer C.free(unsafe.Pointer(cBasePath))
-
-	var transactionHandle C.LoonTransactionHandle
-	result := C.loon_transaction_begin(cBasePath, cProperties, C.int64_t(version), C.LOON_TRANSACTION_RESOLVE_OVERWRITE /* resolve_id */, getRetryLimit() /* retry_limit */, &transactionHandle)
-	if err := HandleLoonFFIResult(result); err != nil {
+	transactionHandle, err := openTransaction(manifest, cProperties, C.LOON_TRANSACTION_RESOLVE_OVERWRITE, getRetryLimit())
+	if err != nil {
 		return "", merr.WrapErrStorage(err, "failed to begin transaction")
 	}
 	defer C.loon_transaction_destroy(transactionHandle)
@@ -310,14 +325,11 @@ func AddStatsToManifest(
 			mlog.Strings("files", stat.Files))
 	}
 
-	var commitVersion C.int64_t
-	result = C.loon_transaction_commit(transactionHandle, &commitVersion)
-	if err := HandleLoonFFIResult(result); err != nil {
+	newManifestPath, err := commitTransaction(transactionHandle, manifest.BasePath, storageConfig)
+	if err != nil {
 		return "", merr.WrapErrStorage(err, "failed to commit transaction")
 	}
-
-	newManifestPath := MarshalManifestPath(basePath, int64(commitVersion))
-	mlog.Debug(context.TODO(), "Stats committed to manifest", mlog.Int64("newVersion", int64(commitVersion)))
+	mlog.Debug(context.TODO(), "Stats committed to manifest", mlog.String("newManifestPath", newManifestPath))
 
 	return newManifestPath, nil
 }

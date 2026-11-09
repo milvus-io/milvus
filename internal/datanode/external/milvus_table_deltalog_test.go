@@ -560,6 +560,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestCreateManifestForSegment_Milvus
 			storageConfig *indexpb.StorageConfig,
 			storagePluginContext *indexcgopb.StoragePluginContext,
 			extfs packed.ExternalSpecContext,
+			_ ...storage.RwOption,
 		) (*storage.ManifestReader, error) {
 			gotExtfs = extfs
 			return nil, readerErr
@@ -1037,11 +1038,10 @@ func TestGetMilvusTableSourcePKFieldMetadataErrors(t *testing.T) {
 		wantErr error
 	}{
 		{"corrupt_metadata", `{`, nil, merr.ErrDataIntegrity},
-		{"unsupported_version", `{"format_version":99999}`, nil, merr.ErrOperationNotSupported},
 		{"read_timeout", "", context.DeadlineExceeded, context.DeadlineExceeded},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, parseErr := snapshotio.ParseSnapshotMetadataWithVersionCheck([]byte(tc.data))
+			_, parseErr := snapshotio.ParseSnapshotMetadata([]byte(tc.data))
 			if tc.readErr != nil {
 				parseErr = tc.readErr
 			}
@@ -1331,7 +1331,7 @@ func createSourcePKManifest(t *testing.T, basePath string, storageConfig *indexp
 	}
 	defer output.Destroy()
 
-	manifestPath, err := packed.CommitManifestUpdates(basePath, packed.ManifestEarliest, storageConfig, &packed.ManifestUpdates{
+	manifestPath, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(basePath, packed.ManifestEarliest), storageConfig, &packed.ManifestUpdates{
 		NewFiles: output,
 	})
 	if err != nil {

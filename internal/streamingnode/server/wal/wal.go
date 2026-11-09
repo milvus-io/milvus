@@ -17,6 +17,9 @@ type (
 // WAL is the WAL framework interface.
 // !!! Don't implement it directly, implement walimpls.WAL instead.
 type WAL interface {
+	// TransformLog exposes subscription streams backed by the recovery summary.
+	TransformLog() TransformLogAccesser
+
 	ratelimit.RateLimitObserverRegistry
 
 	ROWAL
@@ -66,4 +69,13 @@ type ROWAL interface {
 
 	// Close closes the wal instance.
 	Close()
+}
+
+// Unwrap exposes optional WAL capabilities hidden by a lifecycle wrapper.
+// The caller must leave Close to the WAL manager.
+func Unwrap(w WAL) WAL {
+	if wrapper, ok := w.(interface{ UnwrapWAL() WAL }); ok {
+		return wrapper.UnwrapWAL()
+	}
+	return w
 }

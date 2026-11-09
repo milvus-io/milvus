@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"regexp"
 	"strconv"
 	"testing"
 	"time"
@@ -248,6 +249,28 @@ func TestGetCollectionIDFromVChannel(t *testing.T) {
 	invaildVChannel = "06b84fe16780ed1-rootcoord-dm_3_-1v0"
 	collectionID = GetCollectionIDFromVChannel(invaildVChannel)
 	assert.Equal(t, int64(-1), collectionID)
+}
+
+func BenchmarkGetCollectionIDFromVChannel(b *testing.B) {
+	const channel = "cluster-rootcoord-dm_3_449684528748778322v0"
+	b.Run("compile-per-call", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			matches := regexp.MustCompile(`.*_(\d+)v\d+`).FindStringSubmatch(channel)
+			id, err := strconv.ParseInt(matches[1], 0, 64)
+			if err != nil || id != 449684528748778322 {
+				b.Fatal("unexpected collection ID")
+			}
+		}
+	})
+	b.Run("shared-regexp", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			if GetCollectionIDFromVChannel(channel) != 449684528748778322 {
+				b.Fatal("unexpected collection ID")
+			}
+		}
+	})
 }
 
 func TestParseVChannel(t *testing.T) {

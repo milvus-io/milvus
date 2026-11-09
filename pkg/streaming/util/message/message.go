@@ -301,7 +301,9 @@ type SpecializedImmutableMessage[H proto.Message, B proto.Message] interface {
 	// Modifications to the returned header will be reflected in the message.
 	Header() H
 
-	// Body decrypts and unmarshals the message body on every call.
+	// Body decrypts and unmarshals the message body on a cache miss. The result,
+	// including all nested messages and slices, is shared and must not be modified.
+	// Cache eviction never invalidates returned bodies; pointer identity may change.
 	// An error wrapping ErrMalformedBody means the payload was read but is not a valid body.
 	Body(ctx context.Context) (B, error)
 

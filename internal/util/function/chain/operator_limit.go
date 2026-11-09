@@ -53,49 +53,17 @@ func (o *LimitOp) Name() string { return "Limit" }
 
 // Inputs and Outputs are inherited from BaseOp
 
-func (o *LimitOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, error) {
-	colNames := input.ColumnNames()
-	collector := NewChunkCollector(colNames, input.NumChunks())
-	defer collector.Release()
-
-	newChunkSizes := make([]int64, input.NumChunks())
-
-	// Process each chunk
-	for chunkIdx := range input.NumChunks() {
-		chunkSize := input.chunkSizes[chunkIdx]
-
-		// Calculate actual offset and limit for this chunk
-		start := min(o.offset, chunkSize)
-		end := min(start+o.limit, chunkSize)
-
-		newChunkSizes[chunkIdx] = end - start
-
-		// Slice each column
-		for _, colName := range colNames {
-			col := input.Column(colName)
-			dataChunk := col.Chunk(chunkIdx)
-			sliced, err := sliceArray(dataChunk, int(start), int(end))
-			if err != nil {
-				return nil, merr.WrapErrServiceInternalMsg("limit_op: column %s: %v", colName, err)
-			}
-			collector.Set(colName, chunkIdx, sliced)
-		}
+func (o *LimitOp) Execute(ctx *types.FuncContext, input *DataFrame) (*OperatorResult, error) {
+	if o.offset < 0 || o.limit < 0 {
+		return nil, merr.WrapErrServiceInternalMsg("negative internal limit or offset")
 	}
-
-	// Create new DataFrame with all chunks
-	builder := NewDataFrameBuilder()
-	defer builder.Release()
-
-	builder.SetChunkSizes(newChunkSizes)
-
-	for _, colName := range colNames {
-		if err := builder.AddColumnFromChunks(colName, collector.Consume(colName)); err != nil {
-			return nil, merr.WrapErrServiceInternalMsg("limit_op: %v", err)
-		}
-		builder.CopyFieldMetadata(input, colName)
+	selection := &RowSelection{Chunks: make([]ChunkSelection, input.NumChunks())}
+	for i, size := range input.chunkSizes {
+		start := min(o.offset, size)
+		end := start + min(o.limit, size-start)
+		selection.Chunks[i] = RowRange(start, end)
 	}
-
-	return builder.Build(), nil
+	return &OperatorResult{Selection: selection}, nil
 }
 
 func (o *LimitOp) String() string {

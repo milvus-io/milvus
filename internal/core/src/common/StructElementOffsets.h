@@ -23,6 +23,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -31,6 +32,7 @@
 #include "cachinglayer/Manager.h"
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
+#include "common/OpContext.h"
 #include "common/Types.h"
 #include "folly/FBVector.h"
 
@@ -49,6 +51,8 @@ struct ElementRowInfo {
 // belongs to each struct and is shared by all of its sibling sub-fields;
 // element IDs are contiguous across the entire segment.
 //
+// The mapping counts logical elements for every chunk type: VectorArrayChunk
+// uses logical array lengths, while ColumnarArrayChunk uses its root offsets.
 // Offsets for inner nested arrays stay in each column's own chunk. When nested
 // Array of Struct layers are supported, each layer needs its own mapping from
 // that layer's elements to its parent layer.
@@ -61,6 +65,18 @@ class IStructElementOffsets {
 
     virtual int64_t
     GetTotalElementCount() const = 0;
+
+    // Sealed mappings built from a column also own its parent-row validity.
+    // Growing mappings continue to get validity from their field columns.
+    virtual bool
+    HasRowValidity() const {
+        return false;
+    }
+
+    virtual bool
+    IsRowValid(int64_t row_id) const {
+        return true;
+    }
 
     // Convert element ID to row ID
     // returns pair of <row_id, element_index>
@@ -161,10 +177,14 @@ class StructElementOffsetsSealed : public IStructElementOffsets {
     }
 
     explicit StructElementOffsetsSealed(
-        std::vector<int32_t> row_to_element_start)
-        : row_to_element_start_(std::move(row_to_element_start)) {
+        std::vector<int32_t> row_to_element_start,
+        std::optional<TargetBitmap> row_validity = std::nullopt)
+        : row_to_element_start_(std::move(row_to_element_start)),
+          row_validity_(std::move(row_validity)) {
         AssertInfo(!row_to_element_start_.empty(),
                    "row_to_element_start must have at least one element");
+        AssertInfo(!row_validity_ || row_validity_->size() == GetRowCount(),
+                   "row validity must cover every struct row");
     }
 
     // Build an all-zeros offsets (every row is an empty array) and charge its
@@ -173,10 +193,12 @@ class StructElementOffsetsSealed : public IStructElementOffsets {
     // old sealed rows (schema evolution) without going through the normal
     // offsets-build path.
     static std::shared_ptr<StructElementOffsetsSealed>
-    BuildAllZeros(int64_t row_count) {
+    BuildAllZeros(int64_t row_count, bool rows_valid = true) {
         auto result = std::make_shared<StructElementOffsetsSealed>(
-            std::vector<int32_t>(row_count + 1, 0));
-        result->resource_size_ = 4 * (row_count + 1);
+            std::vector<int32_t>(row_count + 1, 0),
+            TargetBitmap(row_count, rows_valid));
+        result->resource_size_ = sizeof(int32_t) * (row_count + 1) +
+                                 sizeof(uint64_t) * ((row_count + 63) / 64);
         cachinglayer::Manager::GetInstance().ChargeLoadedResource(
             cachinglayer::ResourceUsage{result->resource_size_, 0});
         return result;
@@ -195,6 +217,20 @@ class StructElementOffsetsSealed : public IStructElementOffsets {
     int64_t
     GetTotalElementCount() const override {
         return row_to_element_start_.empty() ? 0 : row_to_element_start_.back();
+    }
+
+    bool
+    HasRowValidity() const override {
+        return row_validity_.has_value();
+    }
+
+    bool
+    IsRowValid(int64_t row_id) const override {
+        AssertInfo(row_id >= 0 && row_id < GetRowCount(),
+                   "struct row {} out of range {}",
+                   row_id,
+                   GetRowCount());
+        return !row_validity_.has_value() || (*row_validity_)[row_id];
     }
 
     std::pair<int32_t, int32_t>
@@ -243,10 +279,12 @@ class StructElementOffsetsSealed : public IStructElementOffsets {
     static std::shared_ptr<StructElementOffsetsSealed>
     BuildFromColumn(const ChunkedColumnInterface& column,
                     const FieldMeta& field_meta,
-                    int64_t row_count);
+                    int64_t row_count,
+                    OpContext* op_ctx = nullptr);
 
  private:
     const std::vector<int32_t> row_to_element_start_;
+    const std::optional<TargetBitmap> row_validity_;
     int64_t resource_size_{0};
 };
 

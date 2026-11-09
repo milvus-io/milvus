@@ -21,7 +21,7 @@
 #include "common/Tracer.h"
 #include "common/EasyAssert.h"
 #include "common/Schema.h"
-#include "index/InvertedIndexTantivy.h"
+#include "index/Utils.h"
 #include "pb/schema.pb.h"
 #include "storage/Util.h"
 #include "storage/InsertData.h"

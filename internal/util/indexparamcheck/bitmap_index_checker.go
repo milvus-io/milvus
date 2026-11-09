@@ -24,6 +24,9 @@ func (c *BITMAPChecker) CheckTrain(dataType schemapb.DataType, elementType schem
 		if !lo.Contains(validBITMAPJSONCastTypes, castType) {
 			return merr.WrapErrParameterInvalidMsg("json_cast_type %v is not supported for BITMAP index", castType)
 		}
+		if err := checkJSONCastFunction(castType, params); err != nil {
+			return err
+		}
 		if _, exist := params[common.JSONPathKey]; !exist {
 			return merr.WrapErrParameterMissing(common.JSONPathKey, "json index must specify json path")
 		}

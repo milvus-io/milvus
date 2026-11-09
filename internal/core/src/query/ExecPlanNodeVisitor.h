@@ -145,6 +145,11 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     }
 
     void
+    SetReadSchema(SchemaPtr schema) {
+        read_schema_ = std::move(schema);
+    }
+
+    void
     SetFilterOnly(bool filter_only) {
         filter_only_ = filter_only;
     }
@@ -152,6 +157,12 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     bool
     GetFilterOnly() {
         return filter_only_;
+    }
+
+    void
+    SetRetrieveCandidateBudget(int64_t max_bytes, int64_t max_rows) {
+        retrieve_candidate_budget_ = max_bytes;
+        retrieve_candidate_max_rows_ = max_rows;
     }
 
     ExecPlanNodeVisitor&
@@ -192,7 +203,10 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
 
     bool expr_use_pk_index_ = false;
     bool filter_only_ = false;
+    std::optional<int64_t> retrieve_candidate_budget_;
+    int64_t retrieve_candidate_max_rows_{0};
     bool enable_expr_cache_ = false;
+    SchemaPtr read_schema_;
     milvus::tracer::SpanPtr trace_span_ = nullptr;
 };
 
@@ -208,7 +222,8 @@ ExecuteQueryExprImpl(std::shared_ptr<milvus::plan::PlanNode> plannode,
                      uint64_t active_count,
                      uint64_t timestamp,
                      int64_t entity_ttl_physical_time_us,
-                     bool pin_snapshot) {
+                     bool pin_snapshot,
+                     SchemaPtr read_schema = nullptr) {
     auto plan_fragment = plan::PlanFragment(plannode);
 
     auto query_context = std::make_shared<milvus::exec::QueryContext>(
@@ -224,6 +239,7 @@ ExecuteQueryExprImpl(std::shared_ptr<milvus::plan::PlanNode> plannode,
         std::unordered_map<std::string,
                            std::shared_ptr<milvus::exec::BaseConfig>>(),
         entity_ttl_physical_time_us);
+    query_context->set_read_schema(std::move(read_schema));
     if (pin_snapshot) {
         query_context->set_read_snapshot(segment->CaptureReadSnapshot());
     }
@@ -242,6 +258,23 @@ ExecuteQueryExprImpl(std::shared_ptr<milvus::plan::PlanNode> plannode,
 }
 
 }  // namespace
+
+// for test use only - logical semantics come from the query's schema, not the
+// physical field layout retained by a sealed segment.
+inline BitsetType
+ExecuteQueryExpr(std::shared_ptr<milvus::plan::PlanNode> plannode,
+                 const milvus::segcore::SegmentInternalInterface* segment,
+                 uint64_t active_count,
+                 uint64_t timestamp,
+                 SchemaPtr read_schema) {
+    return ExecuteQueryExprImpl(std::move(plannode),
+                                segment,
+                                active_count,
+                                timestamp,
+                                0,
+                                false,
+                                std::move(read_schema));
+}
 
 // for test use only
 inline BitsetType

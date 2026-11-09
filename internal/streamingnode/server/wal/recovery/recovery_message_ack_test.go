@@ -14,6 +14,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
@@ -21,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/l0materializer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -81,7 +83,7 @@ func TestDataScannerReleasesOwnerAfterAllModulesObserve(t *testing.T) {
 	t.Cleanup(storage.metrics.Close)
 	module := &retainingRecoveryModule{}
 	installRetainingManager(t, storage, module)
-	msg := newAckTestTimeTickMessage(t, 20, 2)
+	msg := newAckTestRecoveryBarrier(t, 20, 2)
 
 	storage.observeMessage(context.Background(), msg)
 
@@ -149,7 +151,7 @@ func TestReplayDoesNotRegressCheckpoint(t *testing.T) {
 	storage := newTestRecoveryStorage(t, checkpoint)
 	t.Cleanup(storage.metrics.Close)
 
-	storage.observeMessage(context.Background(), newAckTestTimeTickMessage(t, 20, 2))
+	storage.observeMessage(context.Background(), newAckTestRecoveryBarrier(t, 20, 2))
 	completed := storage.ackTracker.CompletedPoint()
 	assert.True(t, checkpoint.MessageID.EQ(completed.MessageID))
 	assert.Equal(t, checkpoint.TimeTick, completed.TimeTick)
@@ -171,7 +173,7 @@ func TestPersistRetryKeepsFrozenCheckpointAndSchedulesAckFollowUp(t *testing.T) 
 	storage.SetLogger(mlog.With())
 	module := &retainingRecoveryModule{}
 	installRetainingManager(t, storage, module)
-	first := newAckTestTimeTickMessage(t, 20, 2)
+	first := newAckTestRecoveryBarrier(t, 20, 2)
 	storage.observeMessage(context.Background(), first)
 	module.handle.Release()
 	assert.Equal(t, uint64(20), storage.ackTracker.CompletedPoint().TimeTick)
@@ -198,7 +200,7 @@ func TestPersistRetryKeepsFrozenCheckpointAndSchedulesAckFollowUp(t *testing.T) 
 	firstEndOffset := uint64(first.EstimateSize())
 	assert.Equal(t, firstEndOffset, storage.pendingPersistSnapshot.LogicalEndOffset)
 
-	second := newAckTestTimeTickMessage(t, 30, 3)
+	second := newAckTestRecoveryBarrier(t, 30, 3)
 	storage.observeMessage(context.Background(), second)
 	module.handle.Release()
 	assert.Equal(t, uint64(30), storage.ackTracker.CompletedPoint().TimeTick)
@@ -391,6 +393,16 @@ func assertCheckpointPointEqual(t *testing.T, expected, actual *WALCheckpoint) {
 	assert.True(t, expected.MessageID.EQ(actual.MessageID))
 }
 
+func newAckTestRecoveryBarrier(t *testing.T, timetick uint64, lastConfirmed int64) message.ImmutableMessage {
+	t.Helper()
+	return message.NewRecoveryBarrierMessageBuilderV2().WithAllVChannel().
+		WithHeader(&message.RecoveryBarrierMessageHeader{}).
+		WithBody(&message.RecoveryBarrierMessageBody{}).
+		MustBuildMutable().WithTimeTick(timetick).
+		WithLastConfirmed(walimplstest.NewTestMessageID(lastConfirmed)).
+		IntoImmutableMessage(walimplstest.NewTestMessageID(lastConfirmed + 1))
+}
+
 func newAckTestTimeTickMessage(t *testing.T, timetick uint64, lastConfirmed int64) message.ImmutableMessage {
 	t.Helper()
 	mutable, err := message.NewTimeTickMessageBuilderV1().
@@ -448,10 +460,11 @@ func TestSummaryCoveragePrecedesVChannelObservation(t *testing.T) {
 		batch, err := storage.summaryManager.ReadTransform(ctx, "v1", 0, retained.Message().TimeTick(), walsummary.ReadLimits{MaxRows: 1})
 		require.NoError(t, err)
 		require.Equal(t, retained.Message().TimeTick(), batch.CoveredThrough, "a VChannel task must already see complete Summary coverage")
+		require.Len(t, batch.Entries, 1)
 		observed = true
 	}).Build()
 	defer patch.UnPatch()
-	storage.observeMessage(context.Background(), newAckTestTimeTickMessage(t, 20, 2))
+	storage.observeMessage(context.Background(), newRecoveryTestDeleteMessage(t, "v1", 20))
 	require.True(t, observed)
 }
 
@@ -461,7 +474,10 @@ func TestFlushAllCheckpointWaitsForEveryL0AndCapturesMaterializedMeta(t *testing
 	storage := newTestRecoveryStorage(t, initial)
 	t.Cleanup(storage.metrics.Close)
 	var tasks []nodescheduler.Task
-	submit := mockey.Mock(mockey.GetMethod(storage.taskScheduler, "Submit")).To(func(task nodescheduler.Task) nodescheduler.TaskHandle { tasks = append(tasks, task); return nil }).Build()
+	submit := mockey.Mock(mockey.GetMethod(storage.taskScheduler, "Submit")).To(func(task nodescheduler.Task, _ ...nodescheduler.Option) nodescheduler.TaskHandle {
+		tasks = append(tasks, task)
+		return nil
+	}).Build()
 	defer submit.UnPatch()
 	summary := walsummary.NewManager(walsummary.ManagerConfig{})
 	manager, err := vchannel.NewPChannelRecoveryManager(vchannel.PChannelManagerConfig{
@@ -504,7 +520,10 @@ func TestBroadcastFlushWaitsForL0AndCloseDoesNotCompleteIt(t *testing.T) {
 			ctx := context.Background()
 			storage := newTestRecoveryStorage(t, &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 10})
 			tasks := make(chan nodescheduler.Task, 4)
-			submit := mockey.Mock(mockey.GetMethod(storage.taskScheduler, "Submit")).To(func(task nodescheduler.Task) nodescheduler.TaskHandle { tasks <- task; return nil }).Build()
+			submit := mockey.Mock(mockey.GetMethod(storage.taskScheduler, "Submit")).To(func(task nodescheduler.Task, _ ...nodescheduler.Option) nodescheduler.TaskHandle {
+				tasks <- task
+				return nil
+			}).Build()
 			defer submit.UnPatch()
 			defer storage.closeRecoveryResources()
 			summary := walsummary.NewManager(walsummary.ManagerConfig{})
@@ -551,7 +570,7 @@ func TestBroadcastFlushAllWaitsForEveryVChannel(t *testing.T) {
 	ctx := context.Background()
 	storage := newTestRecoveryStorage(t, &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 10})
 	tasks := make(chan nodescheduler.Task, 4)
-	submit := mockey.Mock(mockey.GetMethod(storage.taskScheduler, "Submit")).To(func(task nodescheduler.Task) nodescheduler.TaskHandle {
+	submit := mockey.Mock(mockey.GetMethod(storage.taskScheduler, "Submit")).To(func(task nodescheduler.Task, _ ...nodescheduler.Option) nodescheduler.TaskHandle {
 		tasks <- task
 		return nil
 	}).Build()
@@ -611,7 +630,10 @@ func TestDeletePinsGlobalCheckpointEvenAfterSummaryPersistence(t *testing.T) {
 	storage := newTestRecoveryStorage(t, initial)
 	t.Cleanup(storage.metrics.Close)
 	var tasks []nodescheduler.Task
-	submit := mockey.Mock(mockey.GetMethod(storage.taskScheduler, "Submit")).To(func(task nodescheduler.Task) nodescheduler.TaskHandle { tasks = append(tasks, task); return nil }).Build()
+	submit := mockey.Mock(mockey.GetMethod(storage.taskScheduler, "Submit")).To(func(task nodescheduler.Task, _ ...nodescheduler.Option) nodescheduler.TaskHandle {
+		tasks = append(tasks, task)
+		return nil
+	}).Build()
 	defer submit.UnPatch()
 	summary := walsummary.NewManager(walsummary.ManagerConfig{})
 	ack := mockey.Mock((*walsummary.Manager).LastAcked).Return(uint64(30)).Build()
@@ -700,7 +722,8 @@ func TestPersistenceFailureNotifiesWALOwner(t *testing.T) {
 }
 
 func TestSummaryFailureNotifiesWALOwner(t *testing.T) {
-	resource.InitForTest(t)
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	resource.InitForTest(t, resource.OptChunkManager(cm))
 	for _, closing := range []bool{false, true} {
 		name := "terminal_error"
 		if closing {
@@ -709,29 +732,29 @@ func TestSummaryFailureNotifiesWALOwner(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 			checkpoint := &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 10}
-			storage := newTestRecoveryStorage(t, checkpoint)
-			t.Cleanup(storage.metrics.Close)
-			t.Cleanup(storage.taskScheduler.Close)
-			t.Cleanup(storage.backgroundTaskNotifier.Cancel)
+			recovery := newTestRecoveryStorage(t, checkpoint)
+			t.Cleanup(recovery.metrics.Close)
+			t.Cleanup(recovery.taskScheduler.Close)
+			t.Cleanup(recovery.backgroundTaskNotifier.Cancel)
 			reported := make(chan error, 1)
-			WithRecoveryFatalHandler(func(err error) { reported <- err })(storage)
-			storage.summaryManager = storage.newSummaryManager(moduleapi.Runtime{Scheduler: immediateTaskScheduler{}})
-			storage.summaryManager.InitLastAcked(10)
-			patch := mockey.Mock((*walsummary.Store).WriteChunk).Return(nil, uint64(0), walsummary.ErrStoreCorrupted).Build()
+			WithRecoveryFatalHandler(func(err error) { reported <- err })(recovery)
+			recovery.summaryManager = recovery.newSummaryManager(moduleapi.Runtime{Scheduler: immediateTaskScheduler{}})
+			recovery.summaryManager.InitLastAcked(10)
+			patch := mockey.Mock((*storage.LocalChunkManager).Write).Return(walsummary.ErrStoreCorrupted).Build()
 			defer patch.UnPatch()
 			if closing {
-				storage.backgroundTaskNotifier.Cancel()
+				recovery.backgroundTaskNotifier.Cancel()
 			}
-			storage.summaryManager.ObserveMessage(ctx, newRecoveryTestDeleteMessage(t, "v1", 20))
-			storage.summaryManager.RequestFlushThrough(20)
+			recovery.summaryManager.ObserveMessage(ctx, newRecoveryTestDeleteMessage(t, "v1", 20))
+			recovery.summaryManager.RequestFlushThrough(20)
 			if closing {
 				require.Empty(t, reported)
 			} else {
 				require.Len(t, reported, 1)
 				require.ErrorIs(t, <-reported, walsummary.ErrStoreCorrupted)
 			}
-			require.Equal(t, uint64(10), storage.summaryManager.LastAcked())
-			require.Equal(t, uint64(10), storage.GetCheckpoint(ctx).TimeTick)
+			require.Equal(t, uint64(10), recovery.summaryManager.LastAcked())
+			require.Equal(t, uint64(10), recovery.GetCheckpoint(ctx).TimeTick)
 		})
 	}
 }

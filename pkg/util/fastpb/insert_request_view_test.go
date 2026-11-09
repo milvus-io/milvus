@@ -409,12 +409,12 @@ func TestInsertRequestViewEncoder_ArrayCellValidDataFallback(t *testing.T) {
 		"VectorField.ValidData must survive the cell, not be silently dropped")
 }
 
-// TestInsertRequestViewEncoder_TopLevelFieldSpecificValidData covers the
-// field-specific ScalarField.ValidData (field 17) / VectorField.ValidData
-// (field 9) location that #52203 moved top-level row nullability to, with the
-// legacy FieldData.ValidData left empty. The encoder must resolve validity
-// with the same precedence as typeutil.GetFieldDataValidData and re-emit it at
-// the field-specific location the AppendFieldData oracle now writes,
+// TestInsertRequestViewEncoder_TopLevelFieldSpecificValidData covers a source
+// whose row validity is only at the field-specific ScalarField.ValidData
+// (field 17) / VectorField.ValidData (field 9) location. The encoder must
+// resolve validity with the same precedence as typeutil.GetFieldDataValidData
+// and emit it both at the field-specific location and at the legacy
+// FieldData.ValidData (field 7), as the AppendFieldData oracle does,
 // row-selected like every other column. The vector payload is compacted: only
 // non-null rows carry vector data.
 func TestInsertRequestViewEncoder_TopLevelFieldSpecificValidData(t *testing.T) {
@@ -447,8 +447,10 @@ func TestInsertRequestViewEncoder_TopLevelFieldSpecificValidData(t *testing.T) {
 	decoded := &msgpb.InsertRequest{}
 	require.NoError(t, proto.Unmarshal(actualBytes, decoded))
 	assert.True(t, proto.Equal(expected, decoded))
-	assert.Empty(t, decoded.GetFieldsData()[0].GetValidData(),
-		"legacy FieldData.ValidData must stay empty; validity lives at the field-specific location")
+	for _, field := range decoded.GetFieldsData() {
+		assert.Equal(t, []bool{true, false, true}, field.GetValidData(),
+			"legacy FieldData.ValidData must carry row validity for older readers")
+	}
 	assert.Equal(t, []bool{true, false, true},
 		decoded.GetFieldsData()[0].GetScalars().GetValidData(),
 		"ScalarField.ValidData must survive at the field-specific location")
@@ -462,6 +464,28 @@ func TestInsertRequestViewEncoder_TopLevelFieldSpecificValidData(t *testing.T) {
 	subDecoded := encodeAndDecodeInsertView(t, insertViewTemplate(), source, subRows)
 	assert.True(t, proto.Equal(subExpected, subDecoded))
 	assert.Equal(t, []bool{false, true}, subDecoded.GetFieldsData()[1].GetVectors().GetValidData())
+	assert.Equal(t, []bool{false, true}, subDecoded.GetFieldsData()[1].GetValidData())
+}
+
+// TestInsertRequestViewEncoder_ConflictingValidDataUsesLegacy covers a source
+// written by an older proxy that rewrote the legacy FieldData.ValidData but
+// forwarded a stale field-specific copy. The legacy value wins and is emitted
+// at both locations.
+func TestInsertRequestViewEncoder_ConflictingValidDataUsesLegacy(t *testing.T) {
+	source := &msgpb.InsertRequest{
+		NumRows:    3,
+		RowIDs:     []int64{1, 2, 3},
+		Timestamps: []uint64{10, 20, 30},
+		FieldsData: []*schemapb.FieldData{
+			scalarField(1, schemapb.DataType_Int64, &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2, 3}}}),
+		},
+	}
+	source.FieldsData[0].ValidData = []bool{true, true, true}
+	source.FieldsData[0].GetScalars().ValidData = []bool{true, false, true}
+
+	decoded := encodeAndDecodeInsertView(t, insertViewTemplate(), source, []int{1, 2})
+	assert.Equal(t, []bool{true, true}, decoded.GetFieldsData()[0].GetValidData())
+	assert.Equal(t, []bool{true, true}, decoded.GetFieldsData()[0].GetScalars().GetValidData())
 }
 
 func TestInsertRequestViewEncoder_ExtendedScalarOneofs(t *testing.T) {

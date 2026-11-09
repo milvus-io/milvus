@@ -187,7 +187,7 @@ TEST_F(MvccFastPathTest, Level3_GrowingSegment_DefaultPath) {
                     N_,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    raw_data.SharedRaw());
 
     // Build plan manually for growing segment
     auto mvcc_node = std::make_shared<plan::MvccNode>("mvcc_1");

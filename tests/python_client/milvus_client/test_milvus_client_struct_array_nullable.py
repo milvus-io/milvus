@@ -2929,12 +2929,14 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_create_struct_array_field_with_vector_diskann_parent_output(self):
+    @pytest.mark.parametrize("metric_type", ["MAX_SIM_COSINE", "COSINE"])
+    def test_create_struct_array_field_with_vector_diskann_search_and_parent_output(self, metric_type):
         """
-        target: test sealed nullable struct array parent output when vector sub-field uses DISKANN
-        method: create a nullable struct array with a vector sub-field, flush enough rows for DISKANN, then query
-            id-only and id + parent struct array with the same MATCH_ANY filter
-        expected: both queries succeed and parent struct array output matches source rows
+        target: test nullable struct array DISKANN search and parent output across index reload (#54861)
+        method: flush null, empty, and multi-element rows with more elements than rows, verify the disk index is
+            built, query id-only and parent output, then self-search each control element before and after reload
+        expected: queries return the source structs; searches return the correct parent ID, score, and element
+            offset for COSINE, including after reloading the persisted index
         """
         collection_name = cf.gen_unique_str(f"{prefix}_create_struct_vector_diskann_output")
         client = self._client()
@@ -2980,6 +2982,11 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
                 STRUCT_FIELD: gen_profile(3),
             },
         ]
+        # Distinct unit vectors give each probe a unique COSINE match; gen_vector's
+        # nearly collinear values are unsuitable for asserting exact top-1 IDs.
+        for row_index, row in enumerate(non_empty_rows):
+            for offset, element in enumerate(row[STRUCT_FIELD]):
+                element[VECTOR_SUBFIELD] = gen_unit_vector(row_index * 2 + offset, VECTOR_DIM)
         control_rows = [missing_profile_row, empty_profile_row, *non_empty_rows]
         filler_rows = gen_vector_index_filler_rows(
             10000,
@@ -2987,7 +2994,20 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             "sealed_diskann_output_filler",
             vector_dim=VECTOR_DIM,
         )
+        for row in filler_rows:
+            element = row[STRUCT_FIELD][0]
+            row[STRUCT_FIELD].append(
+                {
+                    **element,
+                    TAG_SUBFIELD: f"{element[TAG_SUBFIELD]}_1",
+                    VECTOR_SUBFIELD: gen_vector(row[PK_FIELD] + 1, VECTOR_DIM),
+                }
+            )
         sealed_rows = control_rows + filler_rows
+        # With one filler element per row, the two null/empty rows and two
+        # double-element control rows cancel out, hiding the row/element mismatch.
+        element_count = sum(len(row.get(STRUCT_FIELD) or []) for row in sealed_rows)
+        assert element_count > len(sealed_rows)
         res, _ = self.insert(client, collection_name, sealed_rows)
         assert res["insert_count"] == len(sealed_rows)
 
@@ -3002,11 +3022,15 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
         index_params.add_index(
             field_name=STRUCT_VECTOR_FIELD,
             index_type=STRUCT_VECTOR_DISKANN_INDEX_TYPE,
-            metric_type=STRUCT_VECTOR_DISKANN_METRIC_TYPE,
+            metric_type=metric_type,
             params=STRUCT_VECTOR_DISKANN_INDEX_PARAMS,
         )
         res, _ = self.create_index(client, collection_name, index_params)
         assert self.wait_for_index_ready(client, collection_name, STRUCT_VECTOR_FIELD, timeout=300)
+        index_info, _ = self.describe_index(client, collection_name, STRUCT_VECTOR_FIELD)
+        assert index_info["state"] == "Finished"
+        assert index_info["indexed_rows"] == len(sealed_rows)
+        assert index_info["pending_index_rows"] == 0
 
         res, _ = self.load_collection(client, collection_name)
 
@@ -3034,6 +3058,36 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
             expected = source_by_id[row[PK_FIELD]]
             assert row[TAG_FIELD] == expected[TAG_FIELD]
             assert_profile_equal(row[STRUCT_FIELD], expected[STRUCT_FIELD])
+
+        probes = [(row, offset) for row in non_empty_rows for offset in range(len(row[STRUCT_FIELD]))]
+        query_vectors = [row[STRUCT_FIELD][offset][VECTOR_SUBFIELD] for row, offset in probes]
+        if metric_type == "MAX_SIM_COSINE":
+            query_vectors = [EmbeddingList().add(vector) for vector in query_vectors]
+
+        for phase in ("initial_load", "reload"):
+            if phase == "reload":
+                self.release_collection(client, collection_name)
+                self.load_collection(client, collection_name)
+            search_results, _ = self.search(
+                client,
+                collection_name,
+                data=query_vectors,
+                anns_field=STRUCT_VECTOR_FIELD,
+                search_params={"metric_type": metric_type, "params": {"search_list": 100}},
+                output_fields=[PK_FIELD, TAG_FIELD, STRUCT_FIELD],
+                limit=1,
+            )
+            assert len(search_results) == len(probes), phase
+            for hits, (expected, offset) in zip(search_results, probes):
+                assert len(hits) == 1, phase
+                hit = hits[0]
+                assert hit[PK_FIELD] == expected[PK_FIELD], phase
+                assert abs(hit["distance"] - 1.0) < epsilon, phase
+                if metric_type == "COSINE":
+                    assert hit["offset"] == offset, phase
+                entity = search_entity(hit)
+                assert entity[TAG_FIELD] == expected[TAG_FIELD], phase
+                assert_profile_equal(entity[STRUCT_FIELD], expected[STRUCT_FIELD])
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_struct_array_field_with_vector_single_element_after_empty_sealed_output(self):

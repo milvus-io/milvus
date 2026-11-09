@@ -133,7 +133,7 @@ func (s *FilterOpTestSuite) TestFilterAllFalse() {
 	s.Require().NoError(err)
 
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -149,7 +149,7 @@ func (s *FilterOpTestSuite) TestFilterAllTrue() {
 	s.Require().NoError(err)
 
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	result, err := op.Execute(ctx, df)
+	result, err := ExecuteOperator(ctx, df, op)
 	s.Require().NoError(err)
 	defer result.Release()
 
@@ -171,7 +171,7 @@ func (s *FilterOpTestSuite) TestFilterColumnNotFound() {
 	s.Require().NoError(err)
 
 	ctx := types.NewFuncContextFull(context.TODO(), s.pool, "rerank")
-	_, err = op.Execute(ctx, df)
+	_, err = ExecuteOperator(ctx, df, op)
 	s.Error(err)
 	s.Contains(err.Error(), "not found")
 }

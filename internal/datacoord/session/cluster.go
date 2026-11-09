@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -63,6 +64,26 @@ type Cluster interface {
 	QueryImport(nodeID int64, in *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error)
 	// DropImport drops an import task
 	DropImport(nodeID int64, taskID int64) error
+
+	// CreatePreImportV3 creates an Import V3 count-only pre-import task
+	CreatePreImportV3(nodeID int64, in *datapb.PreImportRequest, taskSlot int64) error
+	// QueryPreImportV3 queries the status of an Import V3 count-only pre-import task
+	QueryPreImportV3(nodeID int64, in *datapb.QueryPreImportV3Request) (*datapb.QueryPreImportV3Response, error)
+	// DropPreImportV3 drops an Import V3 count-only pre-import task
+	DropPreImportV3(nodeID int64, taskID int64) error
+
+	// CreateReshard creates a reshard task
+	CreateReshard(nodeID int64, in *datapb.ReshardTaskRequest, collectionID int64) error
+	// QueryReshard queries the status of a reshard task
+	QueryReshard(nodeID int64, in *datapb.QueryReshardTaskRequest) (*datapb.QueryReshardTaskResponse, error)
+	// DropReshard drops a reshard task
+	DropReshard(nodeID int64, in *datapb.DropReshardTaskRequest) error
+	// CreateImportV3 creates an import v3 task
+	CreateImportV3(nodeID int64, in *datapb.ImportTaskV3Request, collectionID int64) error
+	// QueryImportV3 queries the status of an import v3 task
+	QueryImportV3(nodeID int64, in *datapb.QueryImportTaskV3Request) (*datapb.QueryImportTaskV3Response, error)
+	// DropImportV3 drops an import v3 task
+	DropImportV3(nodeID int64, in *datapb.DropImportTaskV3Request) error
 
 	// CreateIndex creates an index building task
 	CreateIndex(nodeID int64, in *workerpb.CreateJobRequest) error
@@ -356,6 +377,57 @@ func (c *cluster) QueryPreImport(nodeID int64, in *datapb.QueryPreImportRequest)
 	}
 }
 
+func (c *cluster) CreatePreImportV3(nodeID int64, in *datapb.PreImportRequest, taskSlot int64) error {
+	properties := taskcommon.NewProperties(nil)
+	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
+	properties.AppendTaskID(in.GetTaskID())
+	properties.AppendType(taskcommon.PreImportV3)
+	properties.AppendTaskSlot(taskSlot)
+	properties.AppendCollectionID(in.GetCollectionID())
+	return c.createTask(nodeID, in, properties)
+}
+
+func (c *cluster) QueryPreImportV3(nodeID int64, in *datapb.QueryPreImportV3Request) (*datapb.QueryPreImportV3Response, error) {
+	repProperties := taskcommon.NewProperties(nil)
+	repProperties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
+	repProperties.AppendTaskID(in.GetTaskId())
+	repProperties.AppendType(taskcommon.PreImportV3)
+	resp, err := c.queryTask(nodeID, repProperties)
+	if err != nil {
+		return nil, err
+	}
+	resProperties := taskcommon.NewProperties(resp.GetProperties())
+	state, err := resProperties.GetTaskState()
+	if err != nil {
+		return nil, err
+	}
+	reason := resProperties.GetTaskReason()
+	defaultResult := &datapb.QueryPreImportV3Response{State: taskcommon.ToImportState(state), Reason: reason}
+	switch state {
+	case taskcommon.None, taskcommon.Init, taskcommon.Retry:
+		return defaultResult, nil
+	case taskcommon.InProgress, taskcommon.Finished, taskcommon.Failed:
+		if resp.GetPayload() != nil {
+			result := &datapb.QueryPreImportV3Response{}
+			if err := proto.Unmarshal(resp.GetPayload(), result); err != nil {
+				return nil, err
+			}
+			return result, nil
+		}
+		return defaultResult, nil
+	default:
+		panic("should not happen")
+	}
+}
+
+func (c *cluster) DropPreImportV3(nodeID int64, taskID int64) error {
+	properties := taskcommon.NewProperties(nil)
+	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
+	properties.AppendTaskID(taskID)
+	properties.AppendType(taskcommon.PreImportV3)
+	return c.dropTask(nodeID, properties)
+}
+
 func (c *cluster) QueryImport(nodeID int64, in *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error) {
 	reqProperties := taskcommon.NewProperties(nil)
 	reqProperties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
@@ -411,7 +483,160 @@ func (c *cluster) DropImport(nodeID int64, taskID int64) error {
 	return c.dropTask(nodeID, properties)
 }
 
+func (c *cluster) CreateReshard(nodeID int64, in *datapb.ReshardTaskRequest, collectionID int64) error {
+	properties := taskcommon.NewProperties(nil)
+	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
+	properties.AppendTaskID(in.GetTaskId())
+	properties.AppendType(taskcommon.Reshard)
+	properties.AppendTaskSlot(in.GetSlot())
+	properties.AppendTaskVersion(in.GetRunId())
+	properties.AppendCollectionID(collectionID)
+	return c.createTask(nodeID, in, properties)
+}
+
+func (c *cluster) QueryReshard(nodeID int64, in *datapb.QueryReshardTaskRequest) (*datapb.QueryReshardTaskResponse, error) {
+	reqProperties := taskcommon.NewProperties(nil)
+	reqProperties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
+	reqProperties.AppendTaskID(in.GetTaskId())
+	reqProperties.AppendType(taskcommon.Reshard)
+	reqProperties.AppendTaskVersion(in.GetRunId())
+	resp, err := c.queryTask(nodeID, reqProperties)
+	if err != nil {
+		return nil, err
+	}
+
+	resProperties := taskcommon.NewProperties(resp.GetProperties())
+	state, err := resProperties.GetTaskState()
+	if err != nil {
+		return nil, err
+	}
+	reason := resProperties.GetTaskReason()
+
+	defaultResult := &datapb.QueryReshardTaskResponse{State: taskcommon.ToImportState(state), Reason: reason}
+	payloadResultF := func() (*datapb.QueryReshardTaskResponse, error) {
+		result := &datapb.QueryReshardTaskResponse{}
+		err = proto.Unmarshal(resp.GetPayload(), result)
+		if err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
+
+	switch state {
+	case taskcommon.None, taskcommon.Init, taskcommon.Retry:
+		return defaultResult, nil
+	case taskcommon.InProgress:
+		if resp.GetPayload() != nil {
+			return payloadResultF()
+		}
+		return defaultResult, nil
+	case taskcommon.Finished, taskcommon.Failed:
+		if resp.GetPayload() != nil {
+			return payloadResultF()
+		}
+		mlog.Warn(context.TODO(), "the reshard result payload must not be empty",
+			mlog.FieldTaskID(in.GetTaskId()), mlog.String("state", state.String()))
+		panic("the reshard result payload must not be empty with Finished/Failed state")
+	default:
+		panic("should not happen")
+	}
+}
+
+func (c *cluster) DropReshard(nodeID int64, in *datapb.DropReshardTaskRequest) error {
+	properties := taskcommon.NewProperties(nil)
+	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
+	properties.AppendTaskID(in.GetTaskId())
+	properties.AppendType(taskcommon.Reshard)
+	properties.AppendTaskVersion(in.GetRunId())
+	return c.dropTask(nodeID, properties)
+}
+
+func (c *cluster) CreateImportV3(nodeID int64, in *datapb.ImportTaskV3Request, collectionID int64) error {
+	properties := taskcommon.NewProperties(nil)
+	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
+	properties.AppendTaskID(in.GetTaskId())
+	properties.AppendType(taskcommon.ImportV3)
+	properties.AppendTaskSlot(in.GetSlot())
+	properties.AppendTaskVersion(in.GetRunId())
+	properties.AppendCollectionID(collectionID)
+	return c.createTask(nodeID, in, properties)
+}
+
+func (c *cluster) QueryImportV3(nodeID int64, in *datapb.QueryImportTaskV3Request) (*datapb.QueryImportTaskV3Response, error) {
+	reqProperties := taskcommon.NewProperties(nil)
+	reqProperties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
+	reqProperties.AppendTaskID(in.GetTaskId())
+	reqProperties.AppendType(taskcommon.ImportV3)
+	reqProperties.AppendTaskVersion(in.GetRunId())
+	resp, err := c.queryTask(nodeID, reqProperties)
+	if err != nil {
+		return nil, err
+	}
+
+	resProperties := taskcommon.NewProperties(resp.GetProperties())
+	state, err := resProperties.GetTaskState()
+	if err != nil {
+		return nil, err
+	}
+	reason := resProperties.GetTaskReason()
+
+	defaultResult := &datapb.QueryImportTaskV3Response{State: taskcommon.ToImportState(state), Reason: reason}
+	payloadResultF := func() (*datapb.QueryImportTaskV3Response, error) {
+		result := &datapb.QueryImportTaskV3Response{}
+		err = proto.Unmarshal(resp.GetPayload(), result)
+		if err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
+
+	switch state {
+	case taskcommon.None, taskcommon.Init, taskcommon.Retry:
+		return defaultResult, nil
+	case taskcommon.InProgress:
+		if resp.GetPayload() != nil {
+			return payloadResultF()
+		}
+		return defaultResult, nil
+	case taskcommon.Finished, taskcommon.Failed:
+		if resp.GetPayload() != nil {
+			return payloadResultF()
+		}
+		mlog.Warn(context.TODO(), "the import v3 result payload must not be empty",
+			mlog.FieldTaskID(in.GetTaskId()), mlog.String("state", state.String()))
+		panic("the import v3 result payload must not be empty with Finished/Failed state")
+	default:
+		panic("should not happen")
+	}
+}
+
+func (c *cluster) DropImportV3(nodeID int64, in *datapb.DropImportTaskV3Request) error {
+	properties := taskcommon.NewProperties(nil)
+	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
+	properties.AppendTaskID(in.GetTaskId())
+	properties.AppendType(taskcommon.ImportV3)
+	properties.AppendTaskVersion(in.GetRunId())
+	return c.dropTask(nodeID, properties)
+}
+
 func (c *cluster) CreateIndex(nodeID int64, in *workerpb.CreateJobRequest) error {
+	if metautil.IsSegmentRooted(in.GetIndexStorePathVersion()) {
+		timeout := paramtable.Get().DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		cli, err := c.nm.GetClient(nodeID)
+		if err != nil {
+			return err
+		}
+		caps, err := cli.QuerySlot(ctx, &datapb.QuerySlotRequest{})
+		if err := merr.CheckRPCCall(caps.GetStatus(), err); err != nil {
+			return err
+		}
+		if !caps.GetSegmentRootedIndexes() {
+			return merr.Wrapf(merr.ErrServiceUnimplemented,
+				"datanode %d does not support segment-rooted index paths; upgrade all datanodes before enabling writeSegmentIndexToManifest", nodeID)
+		}
+	}
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(in.GetBuildID())
@@ -721,7 +946,11 @@ func (c *cluster) CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest,
 	properties.AppendCollectionID(collectionID)
 	// Query the selected worker, rather than infer capability from a version
 	// string. Unknown workers retain the original wire representation.
-	if len(in.GetTargetIndexes()) > 0 {
+	segmentRooted := false
+	for _, target := range in.GetTargets() {
+		segmentRooted = segmentRooted || metautil.IsSegmentRooted(target.GetIndexStorePathVersion())
+	}
+	if len(in.GetTargetIndexes()) > 0 || segmentRooted {
 		timeout := paramtable.Get().DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second)
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
@@ -732,6 +961,10 @@ func (c *cluster) CreateCopySegment(nodeID int64, in *datapb.CopySegmentRequest,
 		caps, err := cli.QuerySlot(ctx, &datapb.QuerySlotRequest{})
 		if err := merr.CheckRPCCall(caps.GetStatus(), err); err != nil {
 			return err
+		}
+		if segmentRooted && !caps.GetSegmentRootedIndexes() {
+			return merr.Wrapf(merr.ErrServiceUnimplemented,
+				"datanode %d does not support segment-rooted index copy destinations; upgrade all datanodes before enabling writeSegmentIndexToManifest", nodeID)
 		}
 		if !caps.GetCopySegmentSharedIndexes() {
 			in = proto.Clone(in).(*datapb.CopySegmentRequest)

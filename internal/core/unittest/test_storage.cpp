@@ -10,8 +10,10 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <arrow/array/builder_primitive.h>
+#include <arrow/io/type_fwd.h>
 #include <arrow/scalar.h>
 #include <arrow/util/byte_size.h>
+#include <arrow/util/thread_pool.h>
 #include <boost/filesystem/path.hpp>
 #include <gtest/gtest.h>
 #include <algorithm>
@@ -113,6 +115,40 @@ get_azure_storage_config() {
                           "",
                           false,
                           100};
+}
+
+TEST(StorageRuntimeDeathTest, ConfiguresBothPoolsAndPreservesFailure) {
+    // Rust runtime configuration is process-wide and cannot be reset.
+    ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+    ASSERT_EXIT(
+        {
+            const auto invalid = InitStorageRuntime(0, 3);
+            if (invalid.error_code != milvus::ConfigInvalid) {
+                std::_Exit(1);
+            }
+            std::free(const_cast<char*>(invalid.error_msg));
+
+            const auto status = InitStorageRuntime(2, 3);
+            if (status.error_code != 0 ||
+                arrow::GetCpuThreadPoolCapacity() != 2 ||
+                arrow::io::GetIOThreadPoolCapacity() != 3) {
+                std::_Exit(2);
+            }
+
+            const auto repeated = InitStorageRuntime(4, 5);
+            const bool preserved =
+                repeated.error_code == milvus::UnexpectedError &&
+                std::string(repeated.error_msg)
+                        .find("already been configured") != std::string::npos;
+            std::free(const_cast<char*>(repeated.error_msg));
+            if (!preserved || arrow::GetCpuThreadPoolCapacity() != 2 ||
+                arrow::io::GetIOThreadPoolCapacity() != 3) {
+                std::_Exit(3);
+            }
+            std::_Exit(0);
+        },
+        ::testing::ExitedWithCode(0),
+        "");
 }
 
 class StorageTest : public testing::Test {
@@ -314,7 +350,7 @@ TEST_F(StorageTest, TextFieldDataFromManifestResolvesLobRefs) {
         std::string(70 * 1024, 'x') + " searchable-tail-token"};
     bool text_valid[N] = {true, false, true};
 
-    auto insert_data = std::make_unique<InsertRecordProto>();
+    auto insert_data = std::make_shared<InsertRecordProto>();
     insert_data->set_num_rows(N);
     insert_data->mutable_fields_data()->AddAllocated(
         CreateDataArrayFrom(pks.data(), nullptr, N, (*schema)[pk_fid])
@@ -324,7 +360,7 @@ TEST_F(StorageTest, TextFieldDataFromManifestResolvesLobRefs) {
             .release());
 
     segment->PreInsert(N);
-    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data);
 
     CFlushConfig config{};
     std::string segment_path =
@@ -549,7 +585,7 @@ TEST_F(StorageTest, FlushGrowingSegmentSkipsNonMaterializedFunctionOutput) {
     std::vector<Timestamp> timestamps = {10, 11, 12};
     std::vector<int64_t> pks = {100, 101, 102};
 
-    auto insert_data = std::make_unique<InsertRecordProto>();
+    auto insert_data = std::make_shared<InsertRecordProto>();
     insert_data->set_num_rows(N);
     insert_data->mutable_fields_data()->AddAllocated(
         CreateDataArrayFrom(
@@ -557,7 +593,7 @@ TEST_F(StorageTest, FlushGrowingSegmentSkipsNonMaterializedFunctionOutput) {
             .release());
 
     segment->PreInsert(N);
-    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data);
 
     // Flush schema carries a function output field the segment never
     // materialized.
@@ -645,7 +681,7 @@ TEST_F(StorageTest, FlushGrowingSegmentSkipsFieldAbsentFromSegmentSchema) {
     std::vector<Timestamp> timestamps = {10, 11, 12};
     std::vector<int64_t> pks = {100, 101, 102};
 
-    auto insert_data = std::make_unique<InsertRecordProto>();
+    auto insert_data = std::make_shared<InsertRecordProto>();
     insert_data->set_num_rows(N);
     insert_data->mutable_fields_data()->AddAllocated(
         CreateDataArrayFrom(
@@ -653,7 +689,7 @@ TEST_F(StorageTest, FlushGrowingSegmentSkipsFieldAbsentFromSegmentSchema) {
             .release());
 
     segment->PreInsert(N);
-    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data);
 
     // Staler flush schema still carries an ordinary field the segment's own
     // schema never had (dropped before the segment was created).
@@ -740,7 +776,7 @@ TEST_F(StorageTest, FlushGrowingSegmentSkipsEmptyFunctionOutputColumn) {
 
     // Insert carries no data for the function output; the consume path
     // exempts function outputs, leaving field 101 allocated but empty.
-    auto insert_data = std::make_unique<InsertRecordProto>();
+    auto insert_data = std::make_shared<InsertRecordProto>();
     insert_data->set_num_rows(N);
     insert_data->mutable_fields_data()->AddAllocated(
         CreateDataArrayFrom(
@@ -748,7 +784,7 @@ TEST_F(StorageTest, FlushGrowingSegmentSkipsEmptyFunctionOutputColumn) {
             .release());
 
     segment->PreInsert(N);
-    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data);
 
     std::string schema_blob = schema_proto.SerializeAsString();
 
@@ -824,7 +860,7 @@ TEST_F(StorageTest, LoadGrowingSegmentSkipsDroppedFieldColumnGroup) {
     std::vector<int64_t> pks = {100, 101, 102};
     std::vector<int64_t> extras = {200, 201, 202};
 
-    auto insert_data = std::make_unique<InsertRecordProto>();
+    auto insert_data = std::make_shared<InsertRecordProto>();
     insert_data->set_num_rows(N);
     insert_data->mutable_fields_data()->AddAllocated(
         CreateDataArrayFrom(
@@ -836,7 +872,7 @@ TEST_F(StorageTest, LoadGrowingSegmentSkipsDroppedFieldColumnGroup) {
             .release());
 
     segment->PreInsert(N);
-    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
+    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data);
 
     std::string schema_blob = full_proto.SerializeAsString();
 
@@ -972,7 +1008,7 @@ TEST(StorageConfig, PackedWriterPreservesChecksum) {
         milvus_storage::ArrowFileSystemConfig expected;
         ASSERT_TRUE(
             milvus_storage::ArrowFileSystemConfig::create_file_system_config(
-                *properties, expected)
+                properties, expected)
                 .ok());
 
         // Filesystem creation precedes schema import. An invalid schema stops
@@ -1027,7 +1063,7 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
         milvus_storage::ArrowFileSystemConfig config;
         const auto status =
             milvus_storage::ArrowFileSystemConfig::create_file_system_config(
-                *properties, config);
+                properties, config);
         ASSERT_TRUE(status.ok()) << status.ToString();
         EXPECT_EQ(static_cast<uint32_t>(config.talon_mode),
                   expected.talon_mode);
@@ -1050,7 +1086,7 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
                 milvus_storage::ArrowFileSystemConfig internal_config;
                 ASSERT_TRUE(
                     milvus_storage::ArrowFileSystemConfig::
-                        create_file_system_config(*properties, internal_config)
+                        create_file_system_config(properties, internal_config)
                             .ok());
                 EXPECT_EQ(static_cast<uint32_t>(internal_config.talon_mode),
                           input.storage_type == "local" ? 0 : mode);
@@ -1061,7 +1097,7 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
                           std::to_string(external ? mode : 0));
                 const auto resolved =
                     milvus_storage::FilesystemCache::getInstance()
-                        .resolve_config(*properties,
+                        .resolve_config(properties,
                                         "s3://s3.amazonaws.com/bucket/data/");
                 ASSERT_TRUE(resolved.ok()) << resolved.status().ToString();
                 EXPECT_EQ(static_cast<uint32_t>(resolved->talon_mode),
@@ -1093,7 +1129,7 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
     milvus_storage::ArrowFileSystemConfig defaults;
     ASSERT_TRUE(
         milvus_storage::ArrowFileSystemConfig::create_file_system_config(
-            *old_properties, defaults)
+            old_properties, defaults)
             .ok());
     EXPECT_EQ(defaults.talon_mode, milvus_storage::TalonMode::Disabled);
     EXPECT_EQ(defaults.talon_small_read_threshold, 524288);
@@ -1108,14 +1144,14 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
         auto properties = MakeInternalPropertiesFromStorageConfig(config);
         auto internal =
             milvus_storage::FilesystemCache::getInstance().resolve_config(
-                *properties, "");
+                properties, "");
         ASSERT_TRUE(internal.ok()) << internal.status().ToString();
         EXPECT_EQ(internal->talon_small_read_threshold, expected_threshold);
         ::InjectExternalSpecProperties(
             *properties, 42, "s3://s3.amazonaws.com/bucket/data/", "");
         const auto external =
             milvus_storage::FilesystemCache::getInstance().resolve_config(
-                *properties, "s3://s3.amazonaws.com/bucket/data/");
+                properties, "s3://s3.amazonaws.com/bucket/data/");
         ASSERT_TRUE(external.ok()) << external.status().ToString();
         EXPECT_EQ(external->talon_small_read_threshold, expected_threshold);
     }
@@ -1167,12 +1203,12 @@ TEST_F(StorageTest, InitArrowReaderConfig) {
     ASSERT_NE(properties, nullptr);
 
     auto hole_size_limit = milvus_storage::api::GetValue<int64_t>(
-        *properties, PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT);
+        properties, PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT);
     ASSERT_TRUE(hole_size_limit.ok()) << hole_size_limit.status().ToString();
     EXPECT_EQ(hole_size_limit.ValueOrDie(), 32 * 1024);
 
     auto range_size_limit = milvus_storage::api::GetValue<int64_t>(
-        *properties, PROPERTY_READER_PARQUET_PREBUFFER_RANGE_SIZE_LIMIT);
+        properties, PROPERTY_READER_PARQUET_PREBUFFER_RANGE_SIZE_LIMIT);
     ASSERT_TRUE(range_size_limit.ok()) << range_size_limit.status().ToString();
     EXPECT_EQ(range_size_limit.ValueOrDie(), 4 * 1024 * 1024);
 
@@ -1201,12 +1237,12 @@ TEST_F(StorageTest, ArrowReaderConfigAppliesToFreshLoonProperties) {
     ASSERT_NE(properties, nullptr);
 
     auto hole_size_limit = milvus_storage::api::GetValue<int64_t>(
-        *properties, PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT);
+        properties, PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT);
     ASSERT_TRUE(hole_size_limit.ok()) << hole_size_limit.status().ToString();
     EXPECT_EQ(hole_size_limit.ValueOrDie(), 32 * 1024);
 
     auto range_size_limit = milvus_storage::api::GetValue<int64_t>(
-        *properties, PROPERTY_READER_PARQUET_PREBUFFER_RANGE_SIZE_LIMIT);
+        properties, PROPERTY_READER_PARQUET_PREBUFFER_RANGE_SIZE_LIMIT);
     ASSERT_TRUE(range_size_limit.ok()) << range_size_limit.status().ToString();
     EXPECT_EQ(range_size_limit.ValueOrDie(), 4 * 1024 * 1024);
 
@@ -1220,12 +1256,12 @@ TEST_F(StorageTest, ArrowReaderConfigAppliesToFreshLoonProperties) {
     ASSERT_NE(properties, nullptr);
 
     hole_size_limit = milvus_storage::api::GetValue<int64_t>(
-        *properties, PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT);
+        properties, PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT);
     ASSERT_TRUE(hole_size_limit.ok()) << hole_size_limit.status().ToString();
     EXPECT_EQ(hole_size_limit.ValueOrDie(), 0);
 
     range_size_limit = milvus_storage::api::GetValue<int64_t>(
-        *properties, PROPERTY_READER_PARQUET_PREBUFFER_RANGE_SIZE_LIMIT);
+        properties, PROPERTY_READER_PARQUET_PREBUFFER_RANGE_SIZE_LIMIT);
     ASSERT_TRUE(range_size_limit.ok()) << range_size_limit.status().ToString();
     EXPECT_EQ(range_size_limit.ValueOrDie(), 0);
 }
@@ -1276,7 +1312,8 @@ TEST_F(StorageTest, InitIndexBuildReadWindow) {
     milvus_storage::api::Properties props;
     LoonFFIPropertiesSingleton::GetInstance().ApplyIndexBuildReadWindow(props);
     auto window = milvus_storage::api::GetValue<int64_t>(
-        props, PROPERTY_READER_RECORD_BATCH_MAX_SIZE);
+        std::make_shared<const milvus_storage::api::Properties>(props),
+        PROPERTY_READER_RECORD_BATCH_MAX_SIZE);
     ASSERT_TRUE(window.ok()) << window.status().ToString();
     EXPECT_EQ(window.ValueOrDie(), 512LL * 1024 * 1024);
 
@@ -1286,7 +1323,8 @@ TEST_F(StorageTest, InitIndexBuildReadWindow) {
     milvus_storage::api::Properties fresh;
     LoonFFIPropertiesSingleton::GetInstance().ApplyIndexBuildReadWindow(fresh);
     window = milvus_storage::api::GetValue<int64_t>(
-        fresh, PROPERTY_READER_RECORD_BATCH_MAX_SIZE);
+        std::make_shared<const milvus_storage::api::Properties>(fresh),
+        PROPERTY_READER_RECORD_BATCH_MAX_SIZE);
     ASSERT_TRUE(window.ok()) << window.status().ToString();
     EXPECT_EQ(window.ValueOrDie(), 32LL * 1024 * 1024);
 }
@@ -1333,10 +1371,10 @@ TEST_F(StorageTest, ArrowReaderConfigSnapshotIsAtomicUnderHotReload) {
                 auto properties = MakeInternalPropertiesFromStorageConfig(
                     get_azure_storage_config());
                 auto hole = milvus_storage::api::GetValue<int64_t>(
-                    *properties,
+                    properties,
                     PROPERTY_READER_PARQUET_PREBUFFER_HOLE_SIZE_LIMIT);
                 auto range = milvus_storage::api::GetValue<int64_t>(
-                    *properties,
+                    properties,
                     PROPERTY_READER_PARQUET_PREBUFFER_RANGE_SIZE_LIMIT);
                 if (!hole.ok() || !range.ok()) {
                     torn.fetch_add(1);
@@ -1587,8 +1625,16 @@ TEST(MinioChecksumConfig, OverridesAreWhenRequired) {
     // (logger / http client factory) set up by Aws::InitAPI; without it the
     // ctor segfaults. Use MinioChunkManager's idempotent init helper so we
     // share init_count_ with any production code paths in the same binary.
-    TestableMinioChunkManager init_guard;
-    init_guard.InitSDKAPIDefault("info");
+    // Balance this test's initialization after config is destroyed. Leaving
+    // CRT worker threads alive lets them log during shared-library teardown.
+    struct SdkGuard : TestableMinioChunkManager {
+        SdkGuard() {
+            InitSDKAPIDefault("info");
+        }
+        ~SdkGuard() override {
+            ShutdownSDKAPI();
+        }
+    } init_guard;
 
     Aws::Client::ClientConfiguration config;
     // Sanity check: the SDK defaults are WHEN_SUPPORTED for both directions.

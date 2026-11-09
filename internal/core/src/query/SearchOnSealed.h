@@ -22,24 +22,23 @@
 #include "common/QueryResult.h"
 #include "common/Schema.h"
 #include "common/protobuf_utils.h"
+#include "index/contracts/query/IVectorReader.h"
 #include "mmap/ChunkedColumnInterface.h"
-#include "segcore/SealedIndexingRecord.h"
 
 namespace milvus::query {
 
 void
-SearchOnSealedIndex(const Schema& schema,
-                    const segcore::SealedIndexingEntry& entry,
+SearchOnSealedIndex(const FieldMeta& field,
+                    const index::IVectorReader& reader,
                     const SearchInfo& search_info,
                     const void* query_data,
                     const size_t* query_offsets,
                     int64_t num_queries,
                     const BitsetView& view,
-                    milvus::OpContext* op_context,
                     SearchResult& search_result);
 
 void
-SearchOnSealedColumn(const Schema& schema,
+SearchOnSealedColumn(const FieldMeta& field,
                      ChunkedColumnInterface* column,
                      const SearchInfo& search_info,
                      const std::map<std::string, std::string>& index_info,
@@ -50,5 +49,43 @@ SearchOnSealedColumn(const Schema& schema,
                      const BitsetView& bitset,
                      milvus::OpContext* op_context,
                      SearchResult& result);
+
+inline void
+SearchOnSealedIndex(const Schema& schema,
+                    const index::IVectorReader& reader,
+                    const SearchInfo& info,
+                    const void* data,
+                    const size_t* offsets,
+                    int64_t nq,
+                    const BitsetView& bits,
+                    SearchResult& result) {
+    SearchOnSealedIndex(
+        schema[info.field_id_], reader, info, data, offsets, nq, bits, result);
+}
+
+inline void
+SearchOnSealedColumn(const Schema& schema,
+                     ChunkedColumnInterface* column,
+                     const SearchInfo& info,
+                     const std::map<std::string, std::string>& index_info,
+                     const void* data,
+                     const size_t* offsets,
+                     int64_t nq,
+                     int64_t rows,
+                     const BitsetView& bits,
+                     milvus::OpContext* ctx,
+                     SearchResult& result) {
+    SearchOnSealedColumn(schema[info.field_id_],
+                         column,
+                         info,
+                         index_info,
+                         data,
+                         offsets,
+                         nq,
+                         rows,
+                         bits,
+                         ctx,
+                         result);
+}
 
 }  // namespace milvus::query

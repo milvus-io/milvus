@@ -143,6 +143,66 @@ func (_c *MockStreamingNodeCataLog_GetSalvageCheckpoint_Call) RunAndReturn(run f
 	return _c
 }
 
+// GetVChannelBase provides a mock function with given fields: ctx, pchannelName, vchannelName
+func (_m *MockStreamingNodeCataLog) GetVChannelBase(ctx context.Context, pchannelName string, vchannelName string) (*streamingpb.VChannelMeta, error) {
+	ret := _m.Called(ctx, pchannelName, vchannelName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetVChannelBase")
+	}
+
+	var r0 *streamingpb.VChannelMeta
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) (*streamingpb.VChannelMeta, error)); ok {
+		return rf(ctx, pchannelName, vchannelName)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) *streamingpb.VChannelMeta); ok {
+		r0 = rf(ctx, pchannelName, vchannelName)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*streamingpb.VChannelMeta)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = rf(ctx, pchannelName, vchannelName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStreamingNodeCataLog_GetVChannelBase_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetVChannelBase'
+type MockStreamingNodeCataLog_GetVChannelBase_Call struct {
+	*mock.Call
+}
+
+// GetVChannelBase is a helper method to define mock.On call
+//   - ctx context.Context
+//   - pchannelName string
+//   - vchannelName string
+func (_e *MockStreamingNodeCataLog_Expecter) GetVChannelBase(ctx interface{}, pchannelName interface{}, vchannelName interface{}) *MockStreamingNodeCataLog_GetVChannelBase_Call {
+	return &MockStreamingNodeCataLog_GetVChannelBase_Call{Call: _e.mock.On("GetVChannelBase", ctx, pchannelName, vchannelName)}
+}
+
+func (_c *MockStreamingNodeCataLog_GetVChannelBase_Call) Run(run func(ctx context.Context, pchannelName string, vchannelName string)) *MockStreamingNodeCataLog_GetVChannelBase_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *MockStreamingNodeCataLog_GetVChannelBase_Call) Return(_a0 *streamingpb.VChannelMeta, _a1 error) *MockStreamingNodeCataLog_GetVChannelBase_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockStreamingNodeCataLog_GetVChannelBase_Call) RunAndReturn(run func(context.Context, string, string) (*streamingpb.VChannelMeta, error)) *MockStreamingNodeCataLog_GetVChannelBase_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListQueryViews provides a mock function with given fields: ctx, pChannelName
 func (_m *MockStreamingNodeCataLog) ListQueryViews(ctx context.Context, pChannelName string) ([]*viewpb.QueryViewOfShard, error) {
 	ret := _m.Called(ctx, pChannelName)

@@ -30,33 +30,16 @@
 #include <string>
 #include <boost/algorithm/string.hpp>
 
+#include "nlohmann/json.hpp"
+
 #include "common/Common.h"
 #include "common/Types.h"
 #include "common/FieldData.h"
-#include "common/QueryInfo.h"
-#include "common/RangeSearchHelper.h"
-#include "index/IndexInfo.h"
-#include "index/ScalarIndex.h"
 #include "storage/Types.h"
 #include "storage/DataCodec.h"
 #include "log/Log.h"
 
 namespace milvus::index {
-
-size_t
-get_file_size(int fd);
-
-std::vector<std::tuple<IndexType, MetricType>>
-unsupported_index_combinations();
-
-bool
-is_unsupported(const IndexType& index_type, const MetricType& metric_type);
-
-bool
-CheckKeyInConfig(const Config& cfg, const std::string& key);
-
-void
-ParseFromString(google::protobuf::Message& params, const std::string& str);
 
 template <typename T>
 inline std::optional<T>
@@ -110,53 +93,12 @@ GetValueFromConfig(const Config& cfg, const std::string& key) {
 }
 
 template <typename T>
-inline void
-CheckMetricTypeSupport(const MetricType& metric_type) {
-    if constexpr (std::is_same_v<T, bin1>) {
-        if (!(IsBinaryVectorMetricType(metric_type))) {
-            ThrowInfo(
-                ErrorCode::Unsupported,
-                "binary vector does not support metric type: " + metric_type);
-        }
-    } else if constexpr (std::is_same_v<T, int8>) {
-        if (!(IsIntVectorMetricType(metric_type))) {
-            ThrowInfo(
-                ErrorCode::Unsupported,
-                "int vector does not support metric type: " + metric_type);
-        }
-    } else {
-        if (!(IsFloatVectorMetricType(metric_type))) {
-            ThrowInfo(
-                ErrorCode::Unsupported,
-                "float vector does not support metric type: " + metric_type);
-        }
-    }
+inline T
+GetValueFromConfigOrFallback(const Config& cfg,
+                             const std::string& key,
+                             T fallback) {
+    return GetValueFromConfig<T>(cfg, key).value_or(fallback);
 }
-
-int64_t
-GetDimFromConfig(const Config& config);
-
-std::string
-GetMetricTypeFromConfig(const Config& config);
-
-std::string
-GetIndexTypeFromConfig(const Config& config);
-
-IndexVersion
-GetIndexEngineVersionFromConfig(const Config& config);
-
-int32_t
-GetBitmapCardinalityLimitFromConfig(const Config& config);
-
-ScalarIndexType
-GetHybridLowCardinalityIndexTypeFromConfig(const Config& config);
-
-ScalarIndexType
-GetHybridHighCardinalityIndexTypeFromConfig(const Config& config);
-
-Config
-ParseConfigFromIndexParams(
-    const std::map<std::string, std::string>& index_params);
 
 struct IndexDataCodec {
     std::list<std::unique_ptr<storage::DataCodec>> codecs_{};
@@ -167,18 +109,6 @@ std::map<std::string, IndexDataCodec>
 CompactIndexDatas(
     std::map<std::string, std::unique_ptr<storage::DataCodec>>& index_datas);
 
-IndexDataCodec
-CompactIndexDatasByKey(
-    const std::string& key,
-    std::unique_ptr<storage::DataCodec> slice_meta,
-    std::map<std::string, std::unique_ptr<storage::DataCodec>>& index_datas);
-
-std::unique_ptr<storage::DataCodec>
-AssembleIndexDataCodec(const IndexDataCodec& index_slices);
-
-std::unique_ptr<storage::DataCodec>
-AssembleIndexDataCodec(IndexDataCodec&& index_slices);
-
 void
 AssembleIndexDatas(
     std::map<std::string, std::unique_ptr<storage::DataCodec>>& index_datas,
@@ -187,20 +117,6 @@ AssembleIndexDatas(
 void
 AssembleIndexDatas(std::map<std::string, IndexDataCodec>& index_datas,
                    BinarySet& index_binary_set);
-
-void
-AssembleIndexDatas(std::map<std::string, FieldDataChannelPtr>& index_datas,
-                   std::unordered_map<std::string, FieldDataPtr>& result);
-
-// On Linux, read() (and similar system calls) will transfer at most 0x7ffff000 (2,147,479,552) bytes once
-void
-ReadDataFromFD(int fd, void* buf, size_t size, size_t chunk_size = 0x7ffff000);
-
-bool
-CheckAndUpdateKnowhereRangeSearchParam(const SearchInfo& search_info,
-                                       const int64_t topk,
-                                       const MetricType& metric_type,
-                                       knowhere::Json& search_config);
 
 // for unused
 void inline SetBitsetUnused(void* bitset, const uint32_t* doc_id, uintptr_t n) {
@@ -284,14 +200,6 @@ void inline SetBitsetGrowing(void* bitset,
                              uintptr_t n) {
     auto* bitmap = static_cast<TargetBitmap*>(bitset);
     SetDocIdBits<false>(bitmap, doc_id, n);
-}
-
-// Get the SSO (Small String Optimization) threshold for std::string.
-// Strings with capacity <= this threshold store data inline (no heap allocation).
-inline size_t
-GetStringSSOThreshold() {
-    static const size_t threshold = std::string().capacity();
-    return threshold;
 }
 
 }  // namespace milvus::index

@@ -130,9 +130,10 @@ func reduceSearchResultDataWithGroupBy(
 	}
 	ret.GetResults().AllSearchCount = allSearchCount
 
+	rowCap := reduce.PresizeRows(subSearchResultData, nq*groupBound)
 	for _, result := range subSearchResultData {
 		if len(result.GetFieldsData()) > 0 {
-			ret.GetResults().FieldsData = typeutil.PrepareResultFieldData(result.GetFieldsData(), limit)
+			ret.GetResults().FieldsData = typeutil.PrepareResultFieldData(result.GetFieldsData(), rowCap)
 			break
 		}
 	}
@@ -520,7 +521,9 @@ func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.S
 		// for results of each subSearchResultData, storing the start offset of each query of nq queries
 		subSearchNqOffset = make([][]int64, subSearchNum)
 	)
+	idxComputers := make([]*typeutil.FieldDataIdxComputer, subSearchNum)
 	for i := 0; i < subSearchNum; i++ {
+		idxComputers[i] = typeutil.NewFieldDataIdxComputer(subSearchResultData[i].GetFieldsData())
 		subSearchNqOffset[i] = make([]int64, subSearchResultData[i].GetNumQueries())
 		for j := int64(1); j < nq; j++ {
 			subSearchNqOffset[i][j] = subSearchNqOffset[i][j-1] + subSearchResultData[i].Topks[j-1]
@@ -547,6 +550,12 @@ func reduceAdvanceGroupBy(ctx context.Context, subSearchResultData []*schemapb.S
 				acceptedRows = append(acceptedRows, reduce.RowRef{ResultIdx: subIdx, RowIdx: innerIdx})
 				typeutil.AppendPKs(ret.Results.Ids, pk)
 				ret.Results.Scores = append(ret.Results.Scores, score)
+				if len(ret.Results.FieldsData) > 0 {
+					// Keep output fields aligned with the concatenated IDs for
+					// reranking and assembly when hybrid search skips requery.
+					fieldIdxs := idxComputers[subIdx].Compute(innerIdx)
+					typeutil.AppendFieldData(ret.Results.FieldsData, subData.GetFieldsData(), innerIdx, fieldIdxs...)
+				}
 
 				// Handle ElementIndices if present
 				if subData.ElementIndices != nil {
@@ -644,14 +653,6 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 		ret.GetResults().AllSearchCount = allSearchCount
 	}
 
-	// Find the first non-empty FieldsData as template
-	for _, result := range subSearchResultData {
-		if len(result.GetFieldsData()) > 0 {
-			ret.GetResults().FieldsData = typeutil.PrepareResultFieldData(result.GetFieldsData(), limit)
-			break
-		}
-	}
-
 	subSearchNum := len(subSearchResultData)
 	if subSearchNum == 1 && offset == 0 {
 		// sorting is not needed if there is only one shard and no offset, assigning the result directly.
@@ -663,6 +664,15 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 			ret.Results.TopK = topks[len(topks)-1]
 		}
 	} else {
+		// Find the first non-empty FieldsData as template.
+		rowCap := reduce.PresizeRows(subSearchResultData, nq*limit)
+		for _, result := range subSearchResultData {
+			if len(result.GetFieldsData()) > 0 {
+				ret.GetResults().FieldsData = typeutil.PrepareResultFieldData(result.GetFieldsData(), rowCap)
+				break
+			}
+		}
+
 		var realTopK int64 = -1
 		var retSize int64
 

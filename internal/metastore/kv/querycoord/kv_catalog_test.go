@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -107,6 +108,62 @@ func (suite *CatalogTestSuite) TestCollectionWithPartition() {
 	suite.Len(partitions, 1)
 	suite.Len(partitions[int64(3)], 1)
 	suite.Equal(int64(103), partitions[int64(3)][0].GetPartitionID())
+}
+
+func (suite *CatalogTestSuite) TestSaveCollectionInOneTxn() {
+	ctx := context.Background()
+	store := mocks.NewMetaKv(suite.T())
+	catalog := NewCatalog(store)
+
+	store.EXPECT().MaxTxnOps().Return(3)
+	store.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, saves map[string]string, removals []string, _ ...predicates.Predicate) error {
+			suite.ElementsMatch([]string{
+				EncodeCollectionLoadInfoKey(1),
+				EncodePartitionLoadInfoKey(1, 100),
+				EncodePartitionLoadInfoKey(1, 101),
+			}, lo.Keys(saves))
+			suite.Empty(removals)
+			return nil
+		}).Once()
+
+	err := catalog.SaveCollection(ctx, &querypb.CollectionLoadInfo{CollectionID: 1},
+		&querypb.PartitionLoadInfo{CollectionID: 1, PartitionID: 100},
+		&querypb.PartitionLoadInfo{CollectionID: 1, PartitionID: 101},
+	)
+	suite.NoError(err)
+
+	mockErr := errors.New("failed to access etcd")
+	store.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).Return(mockErr).Once()
+	err = catalog.SaveCollection(ctx, &querypb.CollectionLoadInfo{CollectionID: 1})
+	suite.ErrorIs(err, mockErr)
+}
+
+func (suite *CatalogTestSuite) TestSaveCollectionAcrossTxnLimit() {
+	ctx := context.Background()
+	paramtable.Get().Save(paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.Key, "3")
+	defer paramtable.Get().Reset(paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.Key)
+
+	partitionsOf := func(collectionID int64, num int) []*querypb.PartitionLoadInfo {
+		partitions := make([]*querypb.PartitionLoadInfo, 0, num)
+		for i := 0; i < num; i++ {
+			partitions = append(partitions, &querypb.PartitionLoadInfo{CollectionID: collectionID, PartitionID: collectionID*100 + int64(i)})
+		}
+		return partitions
+	}
+	// Collection 1 and its partitions fit in one transaction, collection 2's do not.
+	suite.NoError(suite.catalog.SaveCollection(ctx, &querypb.CollectionLoadInfo{CollectionID: 1}, partitionsOf(1, 2)...))
+	suite.NoError(suite.catalog.SaveCollection(ctx, &querypb.CollectionLoadInfo{CollectionID: 2}, partitionsOf(2, 5)...))
+
+	collections, err := suite.catalog.GetCollections(ctx)
+	suite.NoError(err)
+	suite.ElementsMatch([]int64{1, 2}, lo.Map(collections, func(collection *querypb.CollectionLoadInfo, _ int) int64 {
+		return collection.GetCollectionID()
+	}))
+	partitions, err := suite.catalog.GetPartitions(ctx, []int64{1, 2})
+	suite.NoError(err)
+	suite.Len(partitions[1], 2)
+	suite.Len(partitions[2], 5)
 }
 
 func (suite *CatalogTestSuite) TestPartition() {

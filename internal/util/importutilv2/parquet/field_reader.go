@@ -23,7 +23,6 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/parquet/pqarrow"
-	"github.com/samber/lo"
 	"golang.org/x/exp/constraints"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -85,7 +84,30 @@ func NewFieldReader(ctx context.Context, reader *pqarrow.FileReader, columnIndex
 	return cr, nil
 }
 
+// wrapParquetErr classifies a failure raised while decoding one column's data.
+//
+// A Milvus error keeps its code and retry class: the retryable reader in front
+// of the decoder maps transient object-store faults to typed IO errors, and
+// Arrow wraps them with %w, so a persistent outage must stay retriable. Any
+// other error is a property of the immutable file -- a corrupt data page, a
+// bad dictionary, an invalid JSON/WKT value -- which a retry cannot fix, so it
+// becomes a terminal input error like the header/footer checks.
+func wrapParquetErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	if merr.IsMilvusError(err) {
+		return err
+	}
+	return common.WrapDecodeErr(err, "read parquet column data")
+}
+
 func (c *FieldReader) Next(count int64) (any, any, error) {
+	data, validData, err := c.next(count)
+	return data, validData, wrapParquetErr(err)
+}
+
+func (c *FieldReader) next(count int64) (any, any, error) {
 	// Check if this FieldReader wraps a StructFieldReader
 	if c.structReader != nil {
 		return c.structReader.Next(count)
@@ -211,15 +233,14 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 		if c.field.GetNullable() {
 			return ReadNullableFloatVectorData(c, count)
 		}
-		arrayData, err := ReadIntegerOrFloatArrayData[float32](c, count)
+		data, err := ReadIntegerOrFloatFlatData[float32](c, count)
 		if err != nil {
 			return nil, nil, err
 		}
-		if arrayData == nil {
+		if data == nil {
 			return nil, nil, nil
 		}
-		vectors := lo.Flatten(arrayData.([][]float32))
-		return vectors, nil, typeutil.VerifyFloats32(vectors)
+		return data, nil, typeutil.VerifyFloats32(data)
 	case schemapb.DataType_SparseFloatVector:
 		if c.field.GetNullable() {
 			return ReadNullableSparseFloatVectorData(c, count)
@@ -230,15 +251,14 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 		if c.field.GetNullable() {
 			return ReadNullableInt8VectorData(c, count)
 		}
-		arrayData, err := ReadIntegerOrFloatArrayData[int8](c, count)
+		data, err := ReadIntegerOrFloatFlatData[int8](c, count)
 		if err != nil {
 			return nil, nil, err
 		}
-		if arrayData == nil {
+		if data == nil {
 			return nil, nil, nil
 		}
-		vectors := lo.Flatten(arrayData.([][]int8))
-		return vectors, nil, nil
+		return data, nil, nil
 	case schemapb.DataType_Array:
 		// array has not supported default_value
 		if c.field.GetNullable() {
@@ -1440,6 +1460,39 @@ func ReadIntegerOrFloatArrayData[T constraints.Integer | constraints.Float](pcr 
 	return data, nil
 }
 
+// ReadIntegerOrFloatFlatData reads list-like vector columns directly into one
+// flat slice, avoiding the per-row slices and the flatten pass.
+func ReadIntegerOrFloatFlatData[T constraints.Integer | constraints.Float](pcr *FieldReader, count int64) ([]T, error) {
+	chunked, err := pcr.columnReader.NextBatch(count)
+	if err != nil {
+		return nil, err
+	}
+	data := make([]T, 0, int(count)*pcr.dim)
+
+	for _, chunk := range chunked.Chunks() {
+		if chunk.NullN() > 0 {
+			return nil, WrapNullRowErr(pcr.field)
+		}
+		listReader, err := newListLikeArray(chunk, pcr.field)
+		if err != nil {
+			return nil, err
+		}
+		dataType := pcr.field.GetDataType()
+		if typeutil.IsVectorType(dataType) {
+			if err = checkListLikeVectorAligned(listReader, pcr.dim, dataType); err != nil {
+				return nil, merr.WrapErrImportFailedMsg("length of vector is not aligned: %s, data type: %s", err.Error(), dataType.String())
+			}
+		}
+		if data, err = appendFlatIntegerOrFloatListLike(pcr.field, listReader, data); err != nil {
+			return nil, err
+		}
+	}
+	if len(data) == 0 {
+		return nil, nil
+	}
+	return data, nil
+}
+
 func ReadNullableIntegerOrFloatArrayData[T constraints.Integer | constraints.Float](pcr *FieldReader, count int64) (any, []bool, error) {
 	chunked, err := pcr.columnReader.NextBatch(count)
 	if err != nil {
@@ -1547,30 +1600,6 @@ func isFP16BF16FloatArrowType(dataType arrow.DataType) bool {
 	}
 }
 
-func readFloatListLikeDataAsFloat32(field *schemapb.FieldSchema, listReader *listLikeArray, outputArray func(arr []float32, valid bool)) error {
-	valueReader := listReader.ListValues()
-	switch valueReader.DataType().ID() {
-	case arrow.FLOAT32:
-		float32Reader := valueReader.(*array.Float32)
-		return getListLikeArrayData(listReader, func(i int) (float32, error) {
-			if float32Reader.IsNull(i) {
-				return 0, WrapNullElementErr(field)
-			}
-			return float32Reader.Value(i), nil
-		}, outputArray)
-	case arrow.FLOAT64:
-		float64Reader := valueReader.(*array.Float64)
-		return getListLikeArrayData(listReader, func(i int) (float32, error) {
-			if float64Reader.IsNull(i) {
-				return 0, WrapNullElementErr(field)
-			}
-			return float32(float64Reader.Value(i)), nil
-		}, outputArray)
-	default:
-		return WrapTypeErr(field, valueReader.DataType().Name())
-	}
-}
-
 func ReadFP16BF16FloatVectorData(pcr *FieldReader, count int64) (any, error) {
 	chunked, err := pcr.columnReader.NextBatch(count)
 	if err != nil {
@@ -1588,13 +1617,11 @@ func ReadFP16BF16FloatVectorData(pcr *FieldReader, count int64) (any, error) {
 		if err = checkListLikeVectorAlignedWithExpected(listReader, int32(pcr.dim)); err != nil {
 			return nil, merr.WrapErrImportFailedMsg("length of vector is not aligned: %s, data type: %s", err.Error(), pcr.field.GetDataType().String())
 		}
-		floatRows := make([][]float32, 0, int(count))
-		if err = readFloatListLikeDataAsFloat32(pcr.field, listReader, func(arr []float32, valid bool) {
-			floatRows = append(floatRows, arr)
-		}); err != nil {
+		floatFlat := make([]float32, 0, listReader.Len()*pcr.dim)
+		if floatFlat, err = appendFlatFloatListLikeDataAsFloat32(pcr.field, listReader, floatFlat); err != nil {
 			return nil, err
 		}
-		converted, err := typeutil.ConvertFloat32ToFP16BF16Bytes(lo.Flatten(floatRows), pcr.field.GetDataType())
+		converted, err := typeutil.ConvertFloat32ToFP16BF16Bytes(floatFlat, pcr.field.GetDataType())
 		if err != nil {
 			return nil, err
 		}
@@ -1626,16 +1653,11 @@ func ReadNullableFP16BF16FloatVectorData(pcr *FieldReader, count int64) (any, []
 		if err = checkNullableListLikeVectorAlignedWithExpected(listReader, int32(pcr.dim)); err != nil {
 			return nil, nil, merr.WrapErrImportFailedMsg("length of vector is not aligned: %s, data type: %s", err.Error(), pcr.field.GetDataType().String())
 		}
-		floatRows := make([][]float32, 0, int(count))
-		if err = readFloatListLikeDataAsFloat32(pcr.field, listReader, func(arr []float32, valid bool) {
-			validData = append(validData, valid)
-			if valid {
-				floatRows = append(floatRows, arr)
-			}
-		}); err != nil {
+		floatFlat := make([]float32, 0, listReader.Len()*pcr.dim)
+		if floatFlat, validData, err = appendFlatNullableFloatListLikeDataAsFloat32(pcr.field, listReader, floatFlat, validData); err != nil {
 			return nil, nil, err
 		}
-		converted, err := typeutil.ConvertFloat32ToFP16BF16Bytes(lo.Flatten(floatRows), pcr.field.GetDataType())
+		converted, err := typeutil.ConvertFloat32ToFP16BF16Bytes(floatFlat, pcr.field.GetDataType())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -2399,10 +2421,55 @@ func buildVectorArrayFieldFromFixedSizeBinary(field *schemapb.FieldSchema, dim i
 	}
 }
 
+// buildVectorArrayFieldFromList builds one ArrayOfVector row from the vectors
+// [start, end) of a list<list<T>> column. The payload holds only the non-null
+// vectors. An element-nullable field accepts null vectors and carries element
+// valid_data of the full row length; any other field rejects them.
 func buildVectorArrayFieldFromList(field *schemapb.FieldSchema, dim int64, vectors *array.List, start, end int64) (*schemapb.VectorField, error) {
+	row, validData, err := buildVectorArrayPayloadFromList(field, dim, vectors, start, end)
+	if err != nil {
+		return nil, err
+	}
+	if field.GetElementNullable() {
+		typeutil.SetVectorArrayElementValidData(row, validData)
+	}
+	return row, nil
+}
+
+// vectorArrayElementValid reports whether vector vectorIndex is present. A null
+// vector is an error unless the field is element-nullable.
+func vectorArrayElementValid(field *schemapb.FieldSchema, vectors *array.List, vectorIndex int64) (bool, error) {
+	if !vectors.IsNull(int(vectorIndex)) {
+		return true, nil
+	}
+	if !field.GetElementNullable() {
+		return false, WrapNullElementErr(field)
+	}
+	return false, nil
+}
+
+// presentVectorCount returns how many of the vectors [start, end) are not
+// null. The payload of a row holds only these, so it is the capacity to
+// preallocate: sizing it by the logical element count would keep the backing
+// array of every null vector, memory the batch size accounting never sees.
+func presentVectorCount(vectors *array.List, start, end int64) int {
+	if vectors.NullN() == 0 {
+		return int(end - start)
+	}
+	count := 0
+	for i := start; i < end; i++ {
+		if !vectors.IsNull(int(i)) {
+			count++
+		}
+	}
+	return count
+}
+
+func buildVectorArrayPayloadFromList(field *schemapb.FieldSchema, dim int64, vectors *array.List, start, end int64) (*schemapb.VectorField, []bool, error) {
+	validData := make([]bool, 0, end-start)
 	switch field.GetElementType() {
 	case schemapb.DataType_FloatVector:
-		floatData := make([]float32, 0, int(end-start)*int(dim))
+		floatData := make([]float32, 0, presentVectorCount(vectors, start, end)*int(dim))
 		appendFloat := func(pos int) error {
 			switch values := vectors.ListValues().(type) {
 			case *array.Float32:
@@ -2421,25 +2488,33 @@ func buildVectorArrayFieldFromList(field *schemapb.FieldSchema, dim int64, vecto
 			return nil
 		}
 		for vectorIndex := start; vectorIndex < end; vectorIndex++ {
+			valid, err := vectorArrayElementValid(field, vectors, vectorIndex)
+			if err != nil {
+				return nil, nil, err
+			}
+			validData = append(validData, valid)
+			if !valid {
+				continue
+			}
 			vecStart, vecEnd, err := vectorArrayValueOffsets(field, dim, vectors, vectorIndex, int(dim))
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			for pos := vecStart; pos < vecEnd; pos++ {
 				if err := appendFloat(int(pos)); err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 			}
 		}
 		if err := typeutil.VerifyFloats32(floatData); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		return &schemapb.VectorField{
 			Dim: dim,
 			Data: &schemapb.VectorField_FloatVector{
 				FloatVector: &schemapb.FloatArray{Data: floatData},
 			},
-		}, nil
+		}, validData, nil
 	case schemapb.DataType_BinaryVector:
 		return buildByteVectorArrayFieldFromList(field, dim, vectors, start, end, int((dim+7)/8), func(data []byte) *schemapb.VectorField {
 			return &schemapb.VectorField{
@@ -2464,17 +2539,25 @@ func buildVectorArrayFieldFromList(field *schemapb.FieldSchema, dim int64, vecto
 	case schemapb.DataType_Int8Vector:
 		int8Values, ok := vectors.ListValues().(*array.Int8)
 		if !ok {
-			return nil, WrapTypeErr(field, vectors.ListValues().DataType().Name())
+			return nil, nil, WrapTypeErr(field, vectors.ListValues().DataType().Name())
 		}
-		int8Data := make([]byte, 0, int(end-start)*int(dim))
+		int8Data := make([]byte, 0, presentVectorCount(vectors, start, end)*int(dim))
 		for vectorIndex := start; vectorIndex < end; vectorIndex++ {
+			valid, err := vectorArrayElementValid(field, vectors, vectorIndex)
+			if err != nil {
+				return nil, nil, err
+			}
+			validData = append(validData, valid)
+			if !valid {
+				continue
+			}
 			vecStart, vecEnd, err := vectorArrayValueOffsets(field, dim, vectors, vectorIndex, int(dim))
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			for pos := vecStart; pos < vecEnd; pos++ {
 				if int8Values.IsNull(int(pos)) {
-					return nil, WrapNullElementErr(field)
+					return nil, nil, WrapNullElementErr(field)
 				}
 				int8Data = append(int8Data, byte(int8Values.Value(int(pos))))
 			}
@@ -2482,11 +2565,11 @@ func buildVectorArrayFieldFromList(field *schemapb.FieldSchema, dim int64, vecto
 		return &schemapb.VectorField{
 			Dim:  dim,
 			Data: &schemapb.VectorField_Int8Vector{Int8Vector: int8Data},
-		}, nil
+		}, validData, nil
 	case schemapb.DataType_SparseFloatVector:
-		return nil, merr.WrapErrImportFailed("ArrayOfVector with SparseFloatVector element type is not implemented yet")
+		return nil, nil, merr.WrapErrImportFailed("ArrayOfVector with SparseFloatVector element type is not implemented yet")
 	default:
-		return nil, merr.WrapErrImportFailedMsg("unsupported ArrayOfVector element type: %v", field.GetElementType())
+		return nil, nil, merr.WrapErrImportFailedMsg("unsupported ArrayOfVector element type: %v", field.GetElementType())
 	}
 }
 
@@ -2511,23 +2594,32 @@ func buildByteVectorArrayFieldFromList(
 	end int64,
 	expectedBytes int,
 	build func([]byte) *schemapb.VectorField,
-) (*schemapb.VectorField, error) {
+) (*schemapb.VectorField, []bool, error) {
 	values, ok := vectors.ListValues().(*array.Uint8)
 	if !ok {
-		return nil, WrapTypeErr(field, vectors.ListValues().DataType().Name())
+		return nil, nil, WrapTypeErr(field, vectors.ListValues().DataType().Name())
 	}
-	data := make([]byte, 0, int(end-start)*expectedBytes)
+	validData := make([]bool, 0, end-start)
+	data := make([]byte, 0, presentVectorCount(vectors, start, end)*expectedBytes)
 	for vectorIndex := start; vectorIndex < end; vectorIndex++ {
+		valid, err := vectorArrayElementValid(field, vectors, vectorIndex)
+		if err != nil {
+			return nil, nil, err
+		}
+		validData = append(validData, valid)
+		if !valid {
+			continue
+		}
 		vecStart, vecEnd, err := vectorArrayValueOffsets(field, dim, vectors, vectorIndex, expectedBytes)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for pos := vecStart; pos < vecEnd; pos++ {
 			if values.IsNull(int(pos)) {
-				return nil, WrapNullElementErr(field)
+				return nil, nil, WrapNullElementErr(field)
 			}
 		}
 		data = append(data, values.Uint8Values()[int(vecStart):int(vecEnd)]...)
 	}
-	return build(data), nil
+	return build(data), validData, nil
 }

@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -978,6 +979,7 @@ func (c *MockMixCoordClientInterface) Close() error {
 
 // Simulate the cache path and the
 func TestMetaCache_GetCollection(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
 
@@ -1030,6 +1032,7 @@ func TestMetaCache_GetCollection(t *testing.T) {
 }
 
 func TestMetaCache_GetCollectionByAliasHitsCache(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
 
@@ -1060,6 +1063,7 @@ func TestMetaCache_GetCollectionByAliasHitsCache(t *testing.T) {
 }
 
 func TestMetaCache_GetBasicCollectionInfo(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
 
@@ -1090,31 +1094,8 @@ func TestMetaCache_GetBasicCollectionInfo(t *testing.T) {
 	wg.Wait()
 }
 
-func TestMetaCache_RLSProperties(t *testing.T) {
-	ctx := context.Background()
-	rootCoord := mocks.NewMockMixCoordClient(t)
-	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		Status:       merr.Success(),
-		CollectionID: 100,
-		DbName:       "default",
-		Schema: &schemapb.CollectionSchema{
-			Name: "rls_collection",
-		},
-		Properties: []*commonpb.KeyValuePair{
-			{Key: common.RLSEnabledKey, Value: "true"},
-			{Key: common.RLSForceKey, Value: "true"},
-		},
-	}, nil).Once()
-
-	cache, err := NewMetaCache(rootCoord)
-	assert.NoError(t, err)
-	info, err := cache.GetCollectionInfo(ctx, "default", "rls_collection", 0)
-	assert.NoError(t, err)
-	assert.True(t, info.RlsEnabled)
-	assert.True(t, info.RlsForce)
-}
-
 func TestMetaCacheGetCollectionWithUpdate(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{Status: merr.Success()}, nil)
@@ -1176,6 +1157,7 @@ func TestMetaCacheGetCollectionWithUpdate(t *testing.T) {
 }
 
 func TestMetaCache_InitCache(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	t.Run("success", func(t *testing.T) {
 		ctx := context.Background()
 		rootCoord := mocks.NewMockMixCoordClient(t)
@@ -1210,6 +1192,7 @@ func TestMetaCache_InitCache(t *testing.T) {
 // actual database: same-name collections in different databases no longer
 // evict each other, and a by-id fill is shared with later by-name lookups.
 func TestMetaCache_ByIDIndexRealDBBucket(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	mix := NewMixCoordMock()
 	describeCount := int32(0)
@@ -1289,6 +1272,7 @@ func TestMetaCache_ByIDIndexRealDBBucket(t *testing.T) {
 // db generation). Repeat lookups re-describe until the rootcoords are upgraded
 // -- correctness over an upgrade-window cache hit.
 func TestMetaCache_ByIDEmptyDBNameNotCached(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	mix := NewMixCoordMock()
 	describeCount := int32(0)
@@ -1341,6 +1325,7 @@ func TestMetaCache_ByIDEmptyDBNameNotCached(t *testing.T) {
 // invalidated by database DDL, and a name hint under default.<name> could
 // mis-hit a collection of another database).
 func TestMetaCache_ByIDDefaultedRequestDBNameNotCached(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	mix := NewMixCoordMock()
 	describeCount := int32(0)
@@ -1389,6 +1374,7 @@ func TestMetaCache_ByIDDefaultedRequestDBNameNotCached(t *testing.T) {
 // instead of probing id 0 (an unconditional miss) and routing through
 // UpdateByID with a spurious cache-miss metric.
 func TestMetaCache_GetCollectionInfoByIDCacheHit(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	mix := NewMixCoordMock()
 	describeCount := int32(0)
@@ -1427,6 +1413,7 @@ func TestMetaCache_GetCollectionInfoByIDCacheHit(t *testing.T) {
 }
 
 func TestMetaCache_EmptyDBNameSharesDefaultEntry(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
 	cache, err := initMetaCache(ctx, rootCoord)
@@ -1453,6 +1440,7 @@ func TestMetaCache_EmptyDBNameSharesDefaultEntry(t *testing.T) {
 }
 
 func TestMetaCache_GetCollectionName(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
 	cache, err := initMetaCache(ctx, rootCoord)
@@ -1504,6 +1492,7 @@ func TestMetaCache_GetCollectionName(t *testing.T) {
 }
 
 func TestMetaCache_GetCollectionFailure(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
 	cache, err := initMetaCache(ctx, rootCoord)
@@ -1537,6 +1526,7 @@ func TestMetaCache_GetCollectionFailure(t *testing.T) {
 }
 
 func TestMetaCache_GetNonExistCollection(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
 	cache, err := initMetaCache(ctx, rootCoord)
@@ -1551,6 +1541,7 @@ func TestMetaCache_GetNonExistCollection(t *testing.T) {
 }
 
 func TestMetaCache_GetPartitionID(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
 	cache, err := initMetaCache(ctx, rootCoord)
@@ -1571,6 +1562,7 @@ func TestMetaCache_GetPartitionID(t *testing.T) {
 }
 
 func TestMetaCache_ConcurrentTest1(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
 	cache, err := initMetaCache(ctx, rootCoord)
@@ -1624,6 +1616,7 @@ func TestMetaCache_ConcurrentTest1(t *testing.T) {
 }
 
 func TestMetaCache_GetPartitionError(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
 	cache, err := initMetaCache(ctx, rootCoord)
@@ -1660,6 +1653,7 @@ func TestMetaCache_ClearShards(t *testing.T) {
 }
 
 func TestMetaCache_PolicyInfo(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	client := &MockMixCoordClientInterface{}
 
 	t.Run("initMetaCache", func(t *testing.T) {
@@ -1777,6 +1771,7 @@ func TestMetaCache_PolicyInfo(t *testing.T) {
 }
 
 func TestMetaCache_RemoveCollection(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
 	cache, err := initMetaCache(ctx, rootCoord)
@@ -1828,6 +1823,7 @@ func TestGlobalMetaCache_ShuffleShardLeaders(t *testing.T) {
 }
 
 func TestMetaCache_Database(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := &MockMixCoordClientInterface{}
 	cache, err := initMetaCache(ctx, rootCoord)
@@ -1843,6 +1839,7 @@ func TestMetaCache_Database(t *testing.T) {
 }
 
 func TestGetDatabaseInfo(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	t.Run("success", func(t *testing.T) {
 		ctx := context.Background()
 		rootCoord := mocks.NewMockMixCoordClient(t)
@@ -1882,6 +1879,7 @@ func TestGetDatabaseInfo(t *testing.T) {
 }
 
 func TestMetaCache_RemoveDatabaseInfoKeepsCollectionMetadata(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	var altered atomic.Bool
@@ -1935,6 +1933,7 @@ func TestMetaCache_RemoveDatabaseInfoKeepsCollectionMetadata(t *testing.T) {
 }
 
 func TestMetaCache_RemoveDatabaseInfoBlocksStaleResurrection(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	entered := make(chan struct{})
@@ -2002,6 +2001,7 @@ func TestMetaCache_RemoveDatabaseInfoBlocksStaleResurrection(t *testing.T) {
 }
 
 func TestMetaCache_AllocID(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 
 	t.Run("success", func(t *testing.T) {
@@ -2409,6 +2409,7 @@ func TestSchemaInfo_GetLoadFieldIDs(t *testing.T) {
 // runs, so the eviction cleans it and a stale snapshot can never outlive the
 // DDL that invalidated it.
 func TestMetaCache_FillInvalidateOrdering(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
@@ -2475,6 +2476,7 @@ func TestMetaCache_GetShardLeaderList(t *testing.T) {
 }
 
 func TestMetaCache_GetPartitionInfo_CacheHit(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 
@@ -2482,17 +2484,21 @@ func TestMetaCache_GetPartitionInfo_CacheHit(t *testing.T) {
 		Status: merr.Success(),
 	}, nil).Maybe()
 
-	// the cold fill costs two describes -- one for the collection resolution and
-	// one inside the partition-list filler; the second lookup hits both caches
+	// The cold fill describes once to resolve and cache the collection. The
+	// partition-list filler reuses that cached schema; the second lookup hits
+	// both caches.
 	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		Status:       merr.Success(),
 		CollectionID: 1,
 		DbName:       "db",
 		Schema:       &schemapb.CollectionSchema{Name: "collection", Fields: []*schemapb.FieldSchema{}},
 		RequestTime:  1000,
-	}, nil).Times(2)
+	}, nil).Once()
 
-	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
+	// The partition fill shows partitions by the resolved id, never by name.
+	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.MatchedBy(func(req *milvuspb.ShowPartitionsRequest) bool {
+		return req.GetCollectionName() == "" && req.GetCollectionID() == 1
+	})).Return(&milvuspb.ShowPartitionsResponse{
 		Status:               merr.Success(),
 		PartitionIDs:         []int64{100},
 		PartitionNames:       []string{"par1"},
@@ -2515,6 +2521,7 @@ func TestMetaCache_GetPartitionInfo_CacheHit(t *testing.T) {
 }
 
 func TestMetaCache_GetPartitionInfo_DefaultPartition(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 
@@ -2522,14 +2529,14 @@ func TestMetaCache_GetPartitionInfo_DefaultPartition(t *testing.T) {
 		Status: merr.Success(),
 	}, nil).Maybe()
 
-	// two describes on the cold fill: collection resolution + partition-list filler
+	// One describe resolves the collection; the partition fill reuses its schema.
 	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		Status:       merr.Success(),
 		CollectionID: 1,
 		DbName:       "db",
 		Schema:       &schemapb.CollectionSchema{Name: "collection", Fields: []*schemapb.FieldSchema{}},
 		RequestTime:  1000,
-	}, nil).Times(2)
+	}, nil).Once()
 
 	defaultPartitionName := Params.CommonCfg.DefaultPartitionName.GetValue()
 	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.MatchedBy(func(req *milvuspb.ShowPartitionsRequest) bool {
@@ -2553,6 +2560,7 @@ func TestMetaCache_GetPartitionInfo_DefaultPartition(t *testing.T) {
 }
 
 func TestMetaCache_GetPartitionInfo_Error(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 
@@ -2560,15 +2568,15 @@ func TestMetaCache_GetPartitionInfo_Error(t *testing.T) {
 		Status: merr.Success(),
 	}, nil).Maybe()
 
-	// two describes: collection resolution + the filler's describe, which
-	// precedes the failing ShowPartitions inside the fill
+	// The collection is described once; the failing ShowPartitions follows while
+	// the partition fill reuses the cached schema.
 	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		Status:       merr.Success(),
 		CollectionID: 1,
 		DbName:       "db",
 		Schema:       &schemapb.CollectionSchema{Name: "collection", Fields: []*schemapb.FieldSchema{}},
 		RequestTime:  1000,
-	}, nil).Times(2)
+	}, nil).Once()
 
 	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(nil, errors.New("connection failed")).Once()
 
@@ -2581,6 +2589,7 @@ func TestMetaCache_GetPartitionInfo_Error(t *testing.T) {
 }
 
 func TestMetaCache_GetPartitionInfos_CacheHit(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 
@@ -2588,8 +2597,8 @@ func TestMetaCache_GetPartitionInfos_CacheHit(t *testing.T) {
 		Status: merr.Success(),
 	}, nil).Maybe()
 
-	// one describe for the name resolution (fills the collection cache) and one inside the
-	// collection-level partition fill; the second GetPartitionInfos hits both caches
+	// One describe resolves and fills the collection cache. The partition fill
+	// reuses its schema, and the second GetPartitionInfos hits both caches.
 	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		Status:       merr.Success(),
 		CollectionID: 1,
@@ -2599,7 +2608,7 @@ func TestMetaCache_GetPartitionInfos_CacheHit(t *testing.T) {
 			Fields: []*schemapb.FieldSchema{},
 		},
 		RequestTime: 1000,
-	}, nil).Times(2)
+	}, nil).Once()
 
 	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
 		Status:               merr.Success(),
@@ -2623,6 +2632,7 @@ func TestMetaCache_GetPartitionInfos_CacheHit(t *testing.T) {
 }
 
 func TestMetaCache_RemovePartition(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 
@@ -2630,9 +2640,9 @@ func TestMetaCache_RemovePartition(t *testing.T) {
 		Status: merr.Success(),
 	}, nil).Maybe()
 
-	// Four describes: the initial resolution + the partition-list filler's
-	// describe on the cold fill, then both again after the partition DDL staled
-	// the collection entry and the partition list.
+	// Two describes: one initial collection resolution, then one refetch after
+	// the partition DDL stales both the collection entry and partition list. Each
+	// partition fill reuses the corresponding cached schema.
 	describeCalls := 0
 	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, req *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
@@ -2656,7 +2666,7 @@ func TestMetaCache_RemovePartition(t *testing.T) {
 				Aliases:     []string{"alias"},
 				RequestTime: requestTime,
 			}, nil
-		}).Times(4)
+		}).Times(2)
 
 	// Two fills: the initial one, and the refetch after the partition DDL staled
 	// the exact real-name key. The alias lookups resolve to the real name and hit
@@ -2695,6 +2705,7 @@ func TestMetaCache_RemovePartition(t *testing.T) {
 // id-keyed partition cache this holds because both spellings resolve to the
 // same collection id, no matter how the entry was primed.
 func TestMetaCache_RemovePartitionViaAliasInvalidatesRealNameOnEmptyDBName(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 
@@ -2760,6 +2771,7 @@ func TestMetaCache_RemovePartitionViaAliasInvalidatesRealNameOnEmptyDBName(t *te
 }
 
 func TestMetaCache_RemovePartitionInvalidatesCollectionInfo(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 
@@ -2812,6 +2824,7 @@ func TestMetaCache_RemovePartitionInvalidatesCollectionInfo(t *testing.T) {
 // stale read. (This intentionally replaces the old KeepsCollectionInfoForStale-
 // Version behavior, whose floor was removed together with collectionCacheVersion.)
 func TestMetaCache_RemovePartitionStalesCollectionInfoUnconditionally(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 
@@ -2854,6 +2867,7 @@ func TestMetaCache_RemovePartitionStalesCollectionInfoUnconditionally(t *testing
 }
 
 func TestMetaCache_PartitionCache_Concurrent(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 
@@ -2907,6 +2921,7 @@ func TestMetaCache_PartitionCache_Concurrent(t *testing.T) {
 }
 
 func TestMetaCache_GetPartitionInfos_SingleflightKeyIncludesDatabase(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 
@@ -2932,7 +2947,7 @@ func TestMetaCache_GetPartitionInfos_SingleflightKeyIncludesDatabase(t *testing.
 				},
 				RequestTime: 1000,
 			}, nil
-		}).Times(4) // per db: one name resolution + one inside the partition fill
+		}).Twice() // one name resolution per database; partition fills reuse the schemas
 
 	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, req *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
@@ -2992,6 +3007,7 @@ func TestMetaCache_GetPartitionInfos_SingleflightKeyIncludesDatabase(t *testing.
 // on the canonical "default" bucket never sweeps them, leaving stale entries. The
 // Once() expectations assert both lookups share one normalized cache bucket.
 func TestMetaCache_GetPartitionInfosNormalizesEmptyDB(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 
@@ -2999,9 +3015,9 @@ func TestMetaCache_GetPartitionInfosNormalizesEmptyDB(t *testing.T) {
 		Status: merr.Success(),
 	}, nil).Maybe()
 
-	// two describes on the first call (name resolution + partition fill); the
-	// explicit-default call hits the caches, proving both requests share the
-	// canonical bucket
+	// One describe on the first call resolves the collection; the partition fill
+	// reuses its schema. The explicit-default call hits the caches, proving both
+	// requests share the canonical bucket.
 	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		Status:       merr.Success(),
 		CollectionID: 1,
@@ -3011,7 +3027,7 @@ func TestMetaCache_GetPartitionInfosNormalizesEmptyDB(t *testing.T) {
 			Fields: []*schemapb.FieldSchema{},
 		},
 		RequestTime: 1000,
-	}, nil).Times(2)
+	}, nil).Once()
 
 	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
 		Status:               merr.Success(),
@@ -3041,6 +3057,7 @@ func TestMetaCache_GetPartitionInfosNormalizesEmptyDB(t *testing.T) {
 // counterpart: GetPartitionInfo must key its cache under the canonical database
 // too, so an empty-db and an explicit-default lookup share one entry.
 func TestMetaCache_GetPartitionInfoNormalizesEmptyDB(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 
@@ -3048,15 +3065,16 @@ func TestMetaCache_GetPartitionInfoNormalizesEmptyDB(t *testing.T) {
 		Status: merr.Success(),
 	}, nil).Maybe()
 
-	// two describes on the cold fill (name resolution + partition-list filler);
-	// the explicit-default lookup hits the same cached entries
+	// One describe resolves the collection on the cold fill; the partition-list
+	// filler reuses its schema and the explicit-default lookup hits the same
+	// cached entries.
 	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		Status:       merr.Success(),
 		CollectionID: 1,
 		DbName:       "default",
 		Schema:       &schemapb.CollectionSchema{Name: "collection", Fields: []*schemapb.FieldSchema{}},
 		RequestTime:  1000,
-	}, nil).Times(2)
+	}, nil).Once()
 
 	// ShowPartitions must fire exactly once across both lookups when the cache
 	// key is normalized.
@@ -3229,6 +3247,7 @@ func metaCacheConsistencyViolations(cache *MetaCache) []string {
 // gone (not lingering); a later "foo" lookup misses and re-describes. The
 // rename broadcast then only needs to evict the primary entry by id.
 func TestMetaCache_RenameOldNameStopsResolving(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
@@ -3315,6 +3334,7 @@ func TestMetaCache_RenameOldNameStopsResolving(t *testing.T) {
 // though the collection name did not change. Otherwise a later invalidation of
 // the old db1/foo location could follow the stale hint and evict live db2/foo.
 func TestMetaCache_CrossDBSameNameRenameRemovesOldHint(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
@@ -3378,6 +3398,7 @@ func TestMetaCache_CrossDBSameNameRenameRemovesOldHint(t *testing.T) {
 // return collB, not the stale collA. (Guards the alias-cache correctness the
 // RBAC path depends on for its object-name resolution.)
 func TestMetaCache_AliasRepointResolvesToNewTarget(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
@@ -3426,6 +3447,7 @@ func TestMetaCache_AliasRepointResolvesToNewTarget(t *testing.T) {
 // read, and partition entries are keyed by the (never reused) collection id, so
 // a recreated collection gets a NEW id and refetches everything.
 func TestMetaCache_DropCollectionClearsAllCaches(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
@@ -3510,6 +3532,7 @@ func TestMetaCache_DropCollectionClearsAllCaches(t *testing.T) {
 // concurrently. Run under -race it flags any data race; the final consistency
 // check flags any primary-store/name-hint desync left behind.
 func TestMetaCache_ConcurrentIDPartitionInvalidateConsistency(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
@@ -3589,6 +3612,7 @@ func TestMetaCache_ConcurrentIDPartitionInvalidateConsistency(t *testing.T) {
 // primary entry, name hint, and partition cache of the untouched db must all
 // survive.
 func TestMetaCache_CrossDBSameNameDropIsolation(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
@@ -3660,6 +3684,7 @@ func TestMetaCache_CrossDBSameNameDropIsolation(t *testing.T) {
 // the partition lookup misses and re-fetches — the old id's entries are
 // unreachable regardless of which db-name spelling populated them.
 func TestMetaCache_EmptyDBSharesDefaultForPartitionInvalidation(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
@@ -3718,6 +3743,7 @@ func TestMetaCache_EmptyDBSharesDefaultForPartitionInvalidation(t *testing.T) {
 // flags any data race or map corruption in the alias path, and asserts
 // resolution never returns a garbage value.
 func TestMetaCache_ConcurrentAliasResolveInvalidate(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
@@ -3774,6 +3800,7 @@ func TestMetaCache_ConcurrentAliasResolveInvalidate(t *testing.T) {
 // Describe (via the cluster-wide by-id index) would then serve. The proxy must
 // resolve the alias to its target and evict it.
 func TestMetaCache_DropAliasInvalidatesCanonicalCollectionAndByIDIndex(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
@@ -3840,6 +3867,7 @@ func TestMetaCache_DropAliasInvalidatesCanonicalCollectionAndByIDIndex(t *testin
 // the new target (via the collection id the rootcoord callback now forwards), so
 // neither serves a stale Aliases list afterwards.
 func TestMetaCache_AlterAliasInvalidatesBothOldAndNewTarget(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
@@ -3925,6 +3953,7 @@ func TestMetaCache_AlterAliasInvalidatesBothOldAndNewTarget(t *testing.T) {
 // been evicted but before the explicit alias-hint cleanup. A concurrent fill
 // must not reach RootCoord until the whole batch releases its locks.
 func TestMetaCache_InvalidateCollectionMetaIsAtomic(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rpcEntered := make(chan struct{}, 1)
@@ -3998,6 +4027,7 @@ func TestMetaCache_InvalidateCollectionMetaIsAtomic(t *testing.T) {
 // entry for the brand-new alias (the collection was cached before it existed) --
 // it relies on the collection id forwarded by the rootcoord callback.
 func TestMetaCache_CreateAliasInvalidatesTargetViaForwardedID(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
@@ -4059,6 +4089,7 @@ func TestMetaCache_CreateAliasInvalidatesTargetViaForwardedID(t *testing.T) {
 // removeCollectionByAliasLocked is kept as a one-line defense; seed the
 // impossible state directly to keep it covered.
 func TestMetaCache_DropAliasDefensiveDanglingHintCleanup(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	mockCoord := mocks.NewMockMixCoordClient(t)
 	cache := mustNewMetaCacheForTest(mockCoord)
@@ -4086,6 +4117,7 @@ func TestMetaCache_DropAliasDefensiveDanglingHintCleanup(t *testing.T) {
 // the expiration is RemoveCollection(db, "a") + RemoveCollectionsByID(B) +
 // RemoveCollectionsByID(A).
 func TestMetaCache_ConcurrentAlterAliasRefreshEvictsOldTarget(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
@@ -4188,6 +4220,7 @@ func TestMetaCache_ConcurrentAlterAliasRefreshEvictsOldTarget(t *testing.T) {
 // resurrect an entry of a dropped database — with the id
 // index, such a resurrected entry would even serve id-only lookups cluster-wide.
 func TestMetaCache_RemoveDatabaseBlocksStaleResurrection(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
@@ -4273,6 +4306,7 @@ func TestMetaCache_RemoveDatabaseBlocksStaleResurrection(t *testing.T) {
 // invalidation can finish in the gap and a later caller can join the old flight,
 // receiving pre-DDL metadata directly even though the cache entry was evicted.
 func TestMetaCache_SingleflightResultCannotEscapeInvalidation(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
@@ -4401,6 +4435,7 @@ func TestMetaCache_SingleflightResultCannotEscapeInvalidation(t *testing.T) {
 // the collection name replaces the same name-key with a NEW id. The id index
 // must unlink the old id and serve the new one (invariant I0 holds for both).
 func TestMetaCache_DropRecreateReusingNameRelinksIDIndex(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
@@ -4451,6 +4486,7 @@ func TestMetaCache_DropRecreateReusingNameRelinksIDIndex(t *testing.T) {
 // from the entry in hand: its name hint, its alias hints, and its partition
 // list. Living entries and their satellites must be untouched.
 func TestMetaCache_EvictionCleansEverythingSynchronously(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	cache := mustNewMetaCacheForTest(mocks.NewMockMixCoordClient(t))
 	doomed := seedCollection(cache, "db1", "foo", 1)
 	doomed.Aliases = []string{"a"} // as a real fill would record it
@@ -4485,6 +4521,7 @@ func TestMetaCache_EvictionCleansEverythingSynchronously(t *testing.T) {
 // stale hint would VALIDATE again (alias -> name -> new id) and permanently
 // resurrect the deleted alias for RBAC and routing.
 func TestMetaCache_DroppedCascadeAliasCannotResurrectAfterRecreate(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
@@ -4547,6 +4584,7 @@ func TestMetaCache_DroppedCascadeAliasCannotResurrectAfterRecreate(t *testing.T)
 // re-fills). The id-fingerprinted fallback (CollectionID==0 in the broadcast)
 // scans for cached holders and evicts them.
 func TestMetaCache_OldRootcoordAliasScanFallbackEvictsGhostHolder(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
@@ -4615,6 +4653,7 @@ func TestMetaCache_OldRootcoordAliasScanFallbackEvictsGhostHolder(t *testing.T) 
 // linear scan must evict EVERY cached entry declaring the alias (not stop at the
 // first), and must never touch a same-named alias holder in another database.
 func TestMetaCache_RemoveAliasHoldersEvictsAllHoldersAndRespectsDB(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
@@ -4678,6 +4717,7 @@ func TestMetaCache_RemoveAliasHoldersEvictsAllHoldersAndRespectsDB(t *testing.T)
 // collections: the completeness invariant (the db's nameIdx bucket reaches every
 // live entry) and the batch-boundary loop must evict all of them.
 func TestMetaCache_RemoveDatabaseEvictsAllCollectionsAcrossBatch(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
@@ -4734,6 +4774,7 @@ func TestMetaCache_RemoveDatabaseEvictsAllCollectionsAcrossBatch(t *testing.T) {
 // before a concurrent invalidation. The invalidation must wait until the caller
 // cancels the fill; there is intentionally no MetaCache-specific timeout.
 func TestMetaCache_FillPreservesCallerDeadlineAndOrdersInvalidation(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
 		Status: merr.Success(),
@@ -4809,6 +4850,7 @@ func TestMetaCache_FillPreservesCallerDeadlineAndOrdersInvalidation(t *testing.T
 // hint (alias -> name -> NEW id) would resurrect the cascade-dropped alias for
 // routing and RBAC.
 func TestMetaCache_PartitionDDLThenDropCannotResurrectAlias(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
@@ -4867,6 +4909,7 @@ func TestMetaCache_PartitionDDLThenDropCannotResurrectAlias(t *testing.T) {
 // hints. The walk must evict those rebuilds through the unified routine, so no
 // alias hint dangles afterwards.
 func TestMetaCache_RemoveDatabaseRacingFillLeavesNoDanglingAliases(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
@@ -4919,6 +4962,7 @@ func TestMetaCache_RemoveDatabaseRacingFillLeavesNoDanglingAliases(t *testing.T)
 // the unified routine -- a raw primary delete would strand the fresh hints
 // (red-green verified by negative control).
 func TestMetaCache_RemoveDatabaseWalkEvictsMidWindowFill(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
@@ -4972,6 +5016,7 @@ func TestMetaCache_RemoveDatabaseWalkEvictsMidWindowFill(t *testing.T) {
 // same alias while aliasInfo points at only one of them. Pointing-at-a-live-
 // entry alone would pass; exact ownership must not.
 func TestMetaCache_ConsistencyCheckerCatchesGhostAlias(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	cache := mustNewMetaCacheForTest(mocks.NewMockMixCoordClient(t))
 	a := seedCollection(cache, "db", "A", 1)
 	b := seedCollection(cache, "db", "B", 2)
@@ -4994,47 +5039,30 @@ func TestMetaCache_ConsistencyCheckerCatchesGhostAlias(t *testing.T) {
 	assert.Empty(t, v, "with only B declaring \"a\", the cache is consistent")
 }
 
-// TestMetaCache_PartitionFillDoesNotAttachNewCollectionToOldID: the partition
-// fill resolves the collection id first, then must describe/show BY THAT ID.
-// If a same-name drop+recreate happens between resolve and fill, a by-name
-// describe would return the NEW collection's partitions and cache them under
-// the OLD id (wrong partition context, uncleanable with no GC). By id, the
-// stale old id returns not-found and the fill fails (caller re-resolves)
-// instead of caching a mismatch.
+// TestMetaCache_PartitionFillDoesNotAttachNewCollectionToOldID: even if the
+// collection cache still contains a stale same-name entry, the partition fill
+// must show partitions BY THAT RESOLVED ID. A by-name ShowPartitions could
+// return the recreated collection's list and cache it under the old id; the
+// id-addressed RPC instead fails for the dropped id, so no mismatch is cached.
 func TestMetaCache_PartitionFillDoesNotAttachNewCollectionToOldID(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
 		Status: merr.Success(),
 	}, nil).Maybe()
 
-	// id 1 was dropped and "foo" recreated as id 2; the proxy's collection cache
-	// still holds the stale foo->1 mapping, so the partition fill resolves id 1.
-	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(
-		func(ctx context.Context, req *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
-			id := req.GetCollectionID()
-			if id == 0 { // by-name resolve -> the CURRENT collection (id 2)
-				id = 2
-			}
-			if id == 1 { // by-id describe of the dropped old id -> not found
-				return &milvuspb.DescribeCollectionResponse{Status: merr.Status(merr.WrapErrCollectionNotFound("foo"))}, nil
-			}
-			return &milvuspb.DescribeCollectionResponse{
-				Status:       merr.Success(),
-				CollectionID: id,
-				DbName:       "db",
-				Schema:       &schemapb.CollectionSchema{Name: "foo", Fields: []*schemapb.FieldSchema{}},
-				RequestTime:  100,
-			}, nil
-		})
+	// The stale collection entry below already resolves foo -> id 1, so an
+	// additional DescribeCollection would be the redundant RPC this regression
+	// test is meant to prevent.
 	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).RunAndReturn(
 		func(ctx context.Context, req *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
-			// id 2's partitions -- must NOT be cached under id 1
+			assert.Empty(t, req.GetCollectionName(), "partition fill must not resolve by the reused name")
+			assert.Equal(t, int64(1), req.GetCollectionID())
 			return &milvuspb.ShowPartitionsResponse{
-				Status: merr.Success(), PartitionIDs: []int64{201}, PartitionNames: []string{"p_new"},
-				CreatedTimestamps: []uint64{100}, CreatedUtcTimestamps: []uint64{100},
+				Status: merr.Status(merr.WrapErrCollectionNotFound("foo")),
 			}, nil
-		}).Maybe()
+		}).Once()
 
 	cache, err := NewMetaCache(rootCoord)
 	assert.NoError(t, err)
@@ -5043,7 +5071,7 @@ func TestMetaCache_PartitionFillDoesNotAttachNewCollectionToOldID(t *testing.T) 
 	// seed the stale collection-cache entry foo->id 1 (as if cached before the drop)
 	seedCollection(cache, "db", "foo", 1)
 
-	// partition fill resolves id 1, describes BY id 1 -> not-found -> error;
+	// Partition fill resolves id 1 and shows BY id 1 -> not-found -> error;
 	// NOTHING is cached under id 1.
 	_, err = cache.GetPartitionInfos(ctx, "db", "foo")
 	assert.Error(t, err, "the fill must fail rather than attach id 2's partitions to id 1")
@@ -5052,49 +5080,61 @@ func TestMetaCache_PartitionFillDoesNotAttachNewCollectionToOldID(t *testing.T) 
 	assert.False(t, ok, "no partition entry may be cached under the stale old id")
 }
 
-// TestMetaCache_PartitionFillSkipsWriteWhenPrimaryEvictedMidFill: the partition
-// fill resolves the collection id BEFORE taking fillMu.RLock; an invalidation in
-// that window evicts the primary (and its partition list). The fill still
-// describes/shows the collection successfully, but must NOT cache the list under
-// the now-owner-less id -- otherwise a later Create/DropPartition invalidation
-// (which routes through evictCollectionEntryLocked, a no-op when the primary is
-// absent) cannot clean it, and it would be re-adopted when the primary re-fills.
+// TestMetaCache_PartitionFillSkipsWriteWhenPrimaryEvictedMidFill: the exceptional
+// RemoveDatabase post-drain walk can evict the primary while a partition fill
+// holds fillMu.RLock. The fill may still successfully show partitions by id, but
+// must NOT cache the list under the now-owner-less id -- otherwise a later
+// Create/DropPartition invalidation (whose unified eviction no-ops when the
+// primary is absent) cannot clean it, and a refill could re-adopt stale data.
+// The partition-key order still comes from the resolved schema, which is
+// described only once.
 func TestMetaCache_PartitionFillSkipsWriteWhenPrimaryEvictedMidFill(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	ctx := context.Background()
 	rootCoord := mocks.NewMockMixCoordClient(t)
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
 		Status: merr.Success(),
 	}, nil).Maybe()
 
+	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		Status:       merr.Success(),
+		CollectionID: 1,
+		DbName:       "db",
+		Schema: &schemapb.CollectionSchema{
+			Name: "collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: common.StartOfUserFieldID, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: common.StartOfUserFieldID + 1, Name: "part_key", DataType: schemapb.DataType_Int64, IsPartitionKey: true},
+			},
+		},
+		RequestTime: 1000,
+	}, nil).Once()
+
 	var cache *MetaCache
-	rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(
-		func(ctx context.Context, req *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
-			// The partition fill describes BY ID (empty name). At that exact
-			// moment simulate a concurrent invalidation evicting the primary.
-			if req.GetCollectionName() == "" && req.GetCollectionID() == 1 {
-				cache.DeleteCollectionForTest(1)
-			}
-			return &milvuspb.DescribeCollectionResponse{
-				Status:       merr.Success(),
-				CollectionID: 1,
-				DbName:       "db",
-				Schema:       &schemapb.CollectionSchema{Name: "collection", Fields: []*schemapb.FieldSchema{}},
-				RequestTime:  1000,
+	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
+			assert.Empty(t, req.GetCollectionName())
+			assert.Equal(t, int64(1), req.GetCollectionID())
+			// Simulate the exceptional RemoveDatabase post-drain walk, which can
+			// evict an entry while fills run because it intentionally releases
+			// fillMu before its O(N) primary-store cleanup.
+			cache.DeleteCollectionForTest(1)
+			return &milvuspb.ShowPartitionsResponse{
+				Status: merr.Success(), PartitionIDs: []int64{101, 100}, PartitionNames: []string{"_default_1", "_default_0"},
+				CreatedTimestamps: []uint64{1000, 1000}, CreatedUtcTimestamps: []uint64{1000, 1000},
 			}, nil
-		})
-	rootCoord.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
-		Status: merr.Success(), PartitionIDs: []int64{100}, PartitionNames: []string{"par1"},
-		CreatedTimestamps: []uint64{1000}, CreatedUtcTimestamps: []uint64{1000},
-	}, nil).Maybe()
+		}).Once()
 
 	cache, err := NewMetaCache(rootCoord)
 	assert.NoError(t, err)
 	defer cache.Close()
 
-	// the caller still gets the correct list...
+	// the caller still gets the correct list, ordered by the partition key...
 	info, err := cache.GetPartitionInfos(ctx, "db", "collection")
 	assert.NoError(t, err)
-	assert.NotNil(t, info)
+	if assert.NotNil(t, info) {
+		assert.Equal(t, []string{"_default_0", "_default_1"}, info.IndexedPartitionNames)
+	}
 
 	// ...but it must NOT be cached under the now-owner-less id 1.
 	cached := cache.HasPartitionCacheForTest(1)
@@ -5108,6 +5148,7 @@ func TestMetaCache_PartitionFillSkipsWriteWhenPrimaryEvictedMidFill(t *testing.T
 // already gone -- removeCollectionByID's evictCollectionEntryLocked no-ops on an
 // absent primary, so RemovePartition stales the id's partition key directly.
 func TestMetaCache_RemovePartitionEvictsOwnerlessPartitionList(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	cache := mustNewMetaCacheForTest(mocks.NewMockMixCoordClient(t))
 	// an owner-less partition list: cached under id 1 with NO primary entry.
 	cache.SeedPartitionCacheForTest(1, []*partitionInfo{{Name: "p_old", PartitionID: 11}}, false)
@@ -5119,6 +5160,7 @@ func TestMetaCache_RemovePartitionEvictsOwnerlessPartitionList(t *testing.T) {
 }
 
 func TestMetaCache_Close(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	rootCoord := mocks.NewMockMixCoordClient(t)
 
 	rootCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{

@@ -17,13 +17,244 @@
 package importv2
 
 import (
+	"context"
+	"math"
 	"math/rand"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func TestSnapshotDefaultDeleteBudgetAdmission(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	budget := params.DataNodeCfg.ImportDeleteBufferSize.GetAsInt64()
+	const mib = int64(1024 * 1024)
+	require.EqualValues(t, 128*mib, budget)
+	require.EqualValues(t, 16*mib, (&L0ImportTask{}).GetBufferSize())
+	require.EqualValues(t, 16*mib, (&L0PreImportTask{}).GetBufferSize())
+	old := params.DataNodeCfg.ImportMemoryLimitPercentage.SwapTempValue("10")
+	defer params.DataNodeCfg.ImportMemoryLimitPercentage.SwapTempValue(old)
+	for _, tc := range []struct {
+		name        string
+		memory      int64
+		wantReaders int
+	}{
+		{"2_GiB_cannot_fit_shared_and_private", 2 << 30, 0},
+		{"exact_256_MiB_allowance_cannot_fit_rows", 2560 * mib, 0},
+		{"4_GiB_one_reader", 4 << 30, 1},
+		{"8_GiB_four_readers", 8 << 30, 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ma := NewMemoryAllocator(tc.memory).(*memoryAllocator)
+			row, readers, err := ma.AllocateSnapshotTask(context.Background(), 1, 16*mib, budget, 4)
+			if tc.wantReaders == 0 {
+				require.ErrorIs(t, err, merr.ErrServiceResourceInsufficient)
+				require.Zero(t, ma.usedMemory)
+				// Without shared L0 the same small node needs only one map.
+				row, err := ma.Allocate(context.Background(), 1, 16*mib, budget)
+				require.NoError(t, err)
+				ma.Release(1, row+budget)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, tc.wantReaders, readers)
+				require.Equal(t, 16*mib, row)
+				ma.Release(1, budget+int64(readers)*(row+budget))
+			}
+			require.Zero(t, ma.usedMemory)
+		})
+	}
+}
+
+func TestSnapshotTaskMemoryAdmission(t *testing.T) {
+	paramtable.Init()
+	old := paramtable.Get().DataNodeCfg.ImportMemoryLimitPercentage.SwapTempValue("100")
+	defer paramtable.Get().DataNodeCfg.ImportMemoryLimitPercentage.SwapTempValue(old)
+	for _, tc := range []struct {
+		name               string
+		limit, row, budget int64
+		readers            int
+		wantRow            int64
+		wantReaders        int
+	}{
+		{"parallel", 1024, 128, 128, 8, 128, 3},
+		{"few_files", 1024, 128, 128, 2, 128, 2},
+		{"clamped", 1024, math.MaxInt64, 128, 8, 768, 1},
+		{"exact_fit", 257, 10, 128, 4, 1, 1},
+		{"no_rows_fit", 256, 10, 128, 4, 0, 0},
+		{"zero_limit", 0, 10, 1, 1, 0, 0},
+		{"zero_row", 1024, 0, 128, 1, 0, 0},
+		{"zero_budget", 1024, 128, 0, 1, 0, 0},
+		{"no_readers", 1024, 128, 128, 0, 0, 0},
+		{"overflow", 1024, 128, math.MaxInt64, 1, 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ma := NewMemoryAllocator(tc.limit).(*memoryAllocator)
+			row, readers, err := ma.AllocateSnapshotTask(context.Background(), 1, tc.row, tc.budget, tc.readers)
+			if tc.wantReaders == 0 {
+				require.ErrorIs(t, err, merr.ErrServiceResourceInsufficient)
+				require.Zero(t, ma.usedMemory)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.wantRow, row)
+			require.Equal(t, tc.wantReaders, readers)
+			size := tc.budget + int64(readers)*(row+tc.budget)
+			require.Equal(t, size, ma.usedMemory)
+			ma.Release(1, size)
+			require.Zero(t, ma.usedMemory)
+		})
+	}
+	ma := NewMemoryAllocator(1024).(*memoryAllocator)
+	ma.BlockingAllocate(context.Background(), 1, 512)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := ma.AllocateSnapshotTask(ctx, 2, 128, 128, 3)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("admitted partial task reservation: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+	require.EqualValues(t, 512, ma.usedMemory)
+	ma.Release(1, 512)
+}
+
+func TestSnapshotMemoryAdmission(t *testing.T) {
+	paramtable.Init()
+	old := paramtable.Get().DataNodeCfg.ImportMemoryLimitPercentage.SwapTempValue("100")
+	defer paramtable.Get().DataNodeCfg.ImportMemoryLimitPercentage.SwapTempValue(old)
+	ma := NewMemoryAllocator(1024).(*memoryAllocator)
+	for _, tc := range []struct {
+		name                  string
+		row, delete, admitted int64
+	}{
+		{"unchanged", 32, 16, 32},
+		{"exact_fit", 1008, 16, 1008},
+		{"clamped", 1024, 16, 1008},
+		{"no_overflow", math.MaxInt64, 16, 1008},
+		{"zero_row", 0, 16, 0},
+		{"negative_row", -1, 16, 0},
+		{"zero_delete", 32, 0, 0},
+		{"negative_delete", 32, -1, 0},
+		{"delete_fills_allowance", 32, 1024, 0},
+		{"delete_exceeds_allowance", 32, math.MaxInt64, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			row, err := ma.Allocate(context.Background(), 1, tc.row, tc.delete)
+			if tc.admitted == 0 {
+				require.ErrorIs(t, err, merr.ErrServiceResourceInsufficient)
+				require.Zero(t, row)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, tc.admitted, row)
+				require.Equal(t, row+tc.delete, ma.usedMemory)
+				ma.Release(1, row+tc.delete)
+			}
+			require.Zero(t, ma.usedMemory)
+		})
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	row, err := ma.Allocate(ctx, 1, 1, 1)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Zero(t, row)
+	require.Zero(t, ma.usedMemory)
+
+	// A legacy reader occupies half the allowance. Snapshot readers must wait
+	// for their full reservation, not shrink to the currently free half.
+	ma.BlockingAllocate(context.Background(), 1, 512)
+	ctx, cancel = context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := ma.Allocate(ctx, 2, 1024, 16)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("admission returned while memory was full: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	cancel()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("cancellation did not wake admission")
+	}
+	require.EqualValues(t, 512, ma.usedMemory, "canceled waiters must not reserve memory")
+	waitCtx, stopWait := context.WithCancel(context.Background())
+	defer stopWait()
+	go func() {
+		_, err := ma.Allocate(waitCtx, 3, 1024, 16)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("admission returned before release: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	ma.Release(1, 512)
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("release did not wake admission")
+	}
+	require.EqualValues(t, 1024, ma.usedMemory)
+	ma.Release(3, 1024)
+	require.Zero(t, ma.usedMemory)
+}
+
+func TestSnapshotReaderReservation(t *testing.T) {
+	paramtable.Init()
+	for _, budget := range []string{"0", "1"} {
+		t.Run(budget, func(t *testing.T) {
+			old := paramtable.Get().DataNodeCfg.ImportDeleteBufferSize.SwapTempValue(budget)
+			defer paramtable.Get().DataNodeCfg.ImportDeleteBufferSize.SwapTempValue(old)
+			ma := NewMemoryAllocator(1024 * 1024 * 1024).(*memoryAllocator)
+			patch := mockey.Mock(GetMemoryAllocator).Return(ma).Build()
+			defer patch.UnPatch()
+			if budget == "0" {
+				_, _, release, err := reserveSnapshotRead(context.Background(), 1, 1)
+				require.ErrorIs(t, err, merr.ErrServiceResourceInsufficient)
+				require.Nil(t, release)
+				return
+			}
+			for _, rowSize := range []int64{-1, 0} {
+				_, _, _, err := reserveSnapshotRead(context.Background(), 1, rowSize)
+				require.ErrorIs(t, err, merr.ErrServiceResourceInsufficient)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			_, _, release, err := reserveSnapshotRead(ctx, 1, 1)
+			require.ErrorIs(t, err, context.Canceled)
+			require.Nil(t, release)
+			row, reserved, release, err := reserveSnapshotRead(context.Background(), 1, math.MaxInt64)
+			require.NoError(t, err)
+			require.Positive(t, row)
+			require.Less(t, row, int64(math.MaxInt64))
+			require.EqualValues(t, 1, reserved)
+			require.Equal(t, reserved+row, ma.usedMemory)
+			// A refresh must not affect how much this reservation releases.
+			paramtable.Get().DataNodeCfg.ImportDeleteBufferSize.SwapTempValue("4096")
+			release()
+			require.Zero(t, ma.usedMemory)
+		})
+	}
+}
 
 // TestMemoryAllocatorBasicOperations tests basic memory allocation and release operations
 func TestMemoryAllocatorBasicOperations(t *testing.T) {
@@ -34,11 +265,11 @@ func TestMemoryAllocatorBasicOperations(t *testing.T) {
 	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory)
 
 	// Test memory allocation for task 1 using BlockingAllocate
-	ma.BlockingAllocate(1, 50*1024*1024) // 50MB for task 1
+	ma.BlockingAllocate(context.Background(), 1, 50*1024*1024) // 50MB for task 1
 	assert.Equal(t, int64(50*1024*1024), ma.(*memoryAllocator).usedMemory)
 
 	// Test memory allocation for task 2
-	ma.BlockingAllocate(2, 50*1024*1024) // 50MB for task 2
+	ma.BlockingAllocate(context.Background(), 2, 50*1024*1024) // 50MB for task 2
 	assert.Equal(t, int64(100*1024*1024), ma.(*memoryAllocator).usedMemory)
 
 	// Test memory release for task 1
@@ -61,13 +292,13 @@ func TestMemoryAllocatorMemoryLimit(t *testing.T) {
 	testSize := memoryLimit / 10 // Use 10% of available memory
 
 	// Allocate memory up to the limit
-	ma.BlockingAllocate(1, testSize)
+	ma.BlockingAllocate(context.Background(), 1, testSize)
 	assert.Equal(t, testSize, ma.(*memoryAllocator).usedMemory)
 
 	// Try to allocate more memory than available (this will block, so we test in a goroutine)
 	done := make(chan bool)
 	go func() {
-		ma.BlockingAllocate(2, testSize)
+		ma.BlockingAllocate(context.Background(), 2, testSize)
 		done <- true
 	}()
 
@@ -93,7 +324,7 @@ func TestMemoryAllocatorConcurrentAccess(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		taskID := int64(i + 1)
 		go func() {
-			ma.BlockingAllocate(taskID, 50*1024*1024) // 50MB each
+			ma.BlockingAllocate(context.Background(), taskID, 50*1024*1024) // 50MB each
 			ma.Release(taskID, 50*1024*1024)
 			done <- true
 		}()
@@ -115,7 +346,7 @@ func TestMemoryAllocatorNegativeRelease(t *testing.T) {
 	ma := NewMemoryAllocator(1024 * 1024 * 1024)
 
 	// Allocate some memory
-	ma.BlockingAllocate(1, 100*1024*1024) // 100MB
+	ma.BlockingAllocate(context.Background(), 1, 100*1024*1024) // 100MB
 	assert.Equal(t, int64(100*1024*1024), ma.(*memoryAllocator).usedMemory)
 
 	// Release more than allocated (should not go negative)
@@ -133,7 +364,7 @@ func TestMemoryAllocatorMultipleTasks(t *testing.T) {
 	sizes := []int64{20, 30, 25, 15, 35} // Total: 125MB
 
 	for i, taskID := range taskIDs {
-		ma.BlockingAllocate(taskID, sizes[i]*1024*1024)
+		ma.BlockingAllocate(context.Background(), taskID, sizes[i]*1024*1024)
 	}
 
 	// Verify total used memory
@@ -166,7 +397,7 @@ func TestMemoryAllocatorZeroSize(t *testing.T) {
 	ma := NewMemoryAllocator(1024 * 1024 * 1024)
 
 	// Test zero size allocation
-	ma.BlockingAllocate(1, 0)
+	ma.BlockingAllocate(context.Background(), 1, 0)
 	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory)
 
 	// Test zero size release
@@ -183,7 +414,7 @@ func TestMemoryAllocatorSimple(t *testing.T) {
 	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory)
 
 	// Test memory allocation
-	ma.BlockingAllocate(1, 50*1024*1024) // 50MB
+	ma.BlockingAllocate(context.Background(), 1, 50*1024*1024) // 50MB
 	assert.Equal(t, int64(50*1024*1024), ma.(*memoryAllocator).usedMemory)
 
 	// Test memory release
@@ -215,7 +446,7 @@ func TestMemoryAllocatorMassiveConcurrency(t *testing.T) {
 
 		go func(id int64, size int64) {
 			defer wg.Done()
-			ma.BlockingAllocate(id, size)
+			ma.BlockingAllocate(context.Background(), id, size)
 			time.Sleep(1 * time.Millisecond)
 			ma.Release(id, size)
 		}(taskID, memorySize)
@@ -225,4 +456,159 @@ func TestMemoryAllocatorMassiveConcurrency(t *testing.T) {
 	// Assert that all memory is released
 	finalMemory := ma.(*memoryAllocator).usedMemory
 	assert.Equal(t, int64(0), finalMemory, "All memory should be released")
+}
+
+// TestMemoryAllocatorOversizedRequest tests that a request larger than the whole limit
+// runs alone instead of waiting forever.
+func TestMemoryAllocatorOversizedRequest(t *testing.T) {
+	ma := NewMemoryAllocator(1024 * 1024 * 1024)
+	memoryLimit := int64(float64(ma.(*memoryAllocator).systemTotalMemory) *
+		paramtable.Get().DataNodeCfg.ImportMemoryLimitPercentage.GetAsFloat() / 100.0)
+	oversized := memoryLimit * 2
+	small := memoryLimit / 10
+
+	allocateAsync := func(taskID int64, size int64) chan struct{} {
+		done := make(chan struct{})
+		go func() {
+			ma.BlockingAllocate(context.Background(), taskID, size)
+			close(done)
+		}()
+		return done
+	}
+
+	// The oversized request gets its memory when no other task holds memory.
+	select {
+	case <-allocateAsync(1, oversized):
+	case <-time.After(5 * time.Second):
+		t.Fatal("oversized request blocked on an idle allocator")
+	}
+	assert.Equal(t, oversized, ma.(*memoryAllocator).usedMemory)
+
+	// Other requests wait until the oversized request releases its memory.
+	smallDone := allocateAsync(2, small)
+	select {
+	case <-smallDone:
+		t.Fatal("small request did not wait for the oversized request")
+	case <-time.After(100 * time.Millisecond):
+	}
+	ma.Release(1, oversized)
+	<-smallDone
+	assert.Equal(t, small, ma.(*memoryAllocator).usedMemory)
+
+	// The oversized request waits until the other tasks release their memory.
+	oversizedDone := allocateAsync(3, oversized)
+	select {
+	case <-oversizedDone:
+		t.Fatal("oversized request did not wait for the small request")
+	case <-time.After(100 * time.Millisecond):
+	}
+	ma.Release(2, small)
+	<-oversizedDone
+	assert.Equal(t, oversized, ma.(*memoryAllocator).usedMemory)
+
+	ma.Release(3, oversized)
+	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory)
+}
+
+// TestMemoryAllocatorCancelWhileWaiting tests that a canceled ctx releases a
+// waiter without charging memory and without disturbing other waiters.
+func TestMemoryAllocatorCancelWhileWaiting(t *testing.T) {
+	ma := NewMemoryAllocator(1024 * 1024 * 1024)
+	memoryLimit := int64(float64(ma.(*memoryAllocator).systemTotalMemory) *
+		paramtable.Get().DataNodeCfg.ImportMemoryLimitPercentage.GetAsFloat() / 100.0)
+
+	// Task 1 fills the budget.
+	assert.NoError(t, ma.BlockingAllocate(context.Background(), 1, memoryLimit))
+
+	// Task 2 waits, then is canceled.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() { errCh <- ma.BlockingAllocate(ctx, 2, 1) }()
+	select {
+	case err := <-errCh:
+		t.Fatalf("allocation returned before cancel: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	cancel()
+	select {
+	case err := <-errCh:
+		assert.ErrorIs(t, err, context.Canceled)
+	case <-time.After(5 * time.Second):
+		t.Fatal("canceled waiter did not return")
+	}
+	assert.Equal(t, memoryLimit, ma.(*memoryAllocator).usedMemory, "canceled waiter must not be charged")
+
+	// Task 3 still gets memory when task 1 releases.
+	done := make(chan error, 1)
+	go func() { done <- ma.BlockingAllocate(context.Background(), 3, 1) }()
+	ma.Release(1, memoryLimit)
+	select {
+	case err := <-done:
+		assert.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("live waiter did not wake after release")
+	}
+	assert.Equal(t, int64(1), ma.(*memoryAllocator).usedMemory)
+	ma.Release(3, 1)
+	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory)
+}
+
+// TestMemoryAllocatorPreCanceledRequest tests that a request whose ctx is
+// already canceled returns ctx.Err() without charging memory, even when the
+// allocator is idle or has spare capacity.
+func TestMemoryAllocatorPreCanceledRequest(t *testing.T) {
+	ma := NewMemoryAllocator(1024 * 1024 * 1024)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Idle allocator.
+	err := ma.BlockingAllocate(ctx, 1, 1)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory, "pre-canceled request must not be charged")
+
+	// Spare capacity.
+	assert.NoError(t, ma.BlockingAllocate(context.Background(), 2, 1))
+	err = ma.BlockingAllocate(ctx, 3, 1)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, int64(1), ma.(*memoryAllocator).usedMemory, "pre-canceled request must not be charged")
+	ma.Release(2, 1)
+	assert.Equal(t, int64(0), ma.(*memoryAllocator).usedMemory)
+}
+
+// TestMemoryAllocatorCancelRacesRelease tests that a waiter whose ctx is
+// canceled while memory becomes available, before it reacquires the mutex,
+// still returns ctx.Err() without charging memory.
+func TestMemoryAllocatorCancelRacesRelease(t *testing.T) {
+	ma := NewMemoryAllocator(1024 * 1024 * 1024).(*memoryAllocator)
+	memoryLimit := int64(float64(ma.systemTotalMemory) *
+		paramtable.Get().DataNodeCfg.ImportMemoryLimitPercentage.GetAsFloat() / 100.0)
+
+	// Task 1 fills the budget, task 2 parks in Cond.Wait.
+	assert.NoError(t, ma.BlockingAllocate(context.Background(), 1, memoryLimit))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() { errCh <- ma.BlockingAllocate(ctx, 2, 1) }()
+	select {
+	case err := <-errCh:
+		t.Fatalf("allocation returned before cancel: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// Hold the mutex so the waiter observes the cancellation and the freed
+	// budget in the same wakeup, whichever broadcast reaches it first.
+	ma.mutex.Lock()
+	cancel()
+	ma.usedMemory = 0
+	ma.cond.Broadcast()
+	ma.mutex.Unlock()
+
+	select {
+	case err := <-errCh:
+		assert.ErrorIs(t, err, context.Canceled)
+	case <-time.After(5 * time.Second):
+		t.Fatal("canceled waiter did not return")
+	}
+	assert.Equal(t, int64(0), ma.usedMemory, "canceled waiter must not be charged")
 }

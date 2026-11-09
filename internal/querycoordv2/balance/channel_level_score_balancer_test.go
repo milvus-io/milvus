@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -74,8 +75,8 @@ func (suite *ChannelLevelScoreBalancerTestSuite) SetupTest() {
 	store := querycoord.NewCatalog(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
 	nodeManager := session.NewNodeManager()
-	testMeta := meta.NewMeta(idAllocator, store, nodeManager)
-	testTarget := meta.NewTargetManager(suite.broker, testMeta)
+	testMeta := meta.NewMeta(idAllocator, store, nodeManager, metacache.NewMetaStore(nil))
+	testTarget := meta.NewTargetManager(suite.broker, testMeta, metacache.NewMetaStore(nil))
 
 	distManager := meta.NewDistributionManager(nodeManager)
 	suite.mockScheduler = task.NewMockScheduler(suite.T())
@@ -396,7 +397,6 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestBalanceOneRound() {
 			collection := utils.CreateTestCollection(c.collectionID, int32(c.replicaID))
 			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionID).Return(
 				c.channels, c.segments, nil)
-			suite.broker.EXPECT().GetPartitions(mock.Anything, c.collectionID).Return([]int64{c.collectionID}, nil).Maybe()
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
 			suite.meta.PutCollection(ctx, collection)
@@ -633,7 +633,6 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestMultiReplicaBalance() {
 			collection := utils.CreateTestCollection(c.collectionID, int32(len(c.replicaWithNodes)))
 			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionID).Return(
 				c.channels, c.segments, nil)
-			suite.broker.EXPECT().GetPartitions(mock.Anything, c.collectionID).Return([]int64{c.collectionID}, nil).Maybe()
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
 			suite.meta.PutCollection(ctx, collection)
@@ -727,7 +726,6 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Cha
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
 		channels, segments, nil)
-	suite.broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{collectionID}, nil).Maybe()
 
 	collection := utils.CreateTestCollection(collectionID, int32(1))
 	collection.LoadPercentage = 100
@@ -804,7 +802,6 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Seg
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
 		channels, segments, nil)
-	suite.broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{collectionID}, nil).Maybe()
 
 	collection := utils.CreateTestCollection(collectionID, int32(1))
 	collection.LoadPercentage = 100
@@ -904,7 +901,6 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Seg
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
 		channels, segments, nil)
-	suite.broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{collectionID}, nil).Maybe()
 
 	collection := utils.CreateTestCollection(collectionID, int32(1))
 	collection.LoadPercentage = 100

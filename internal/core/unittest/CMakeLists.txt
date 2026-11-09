@@ -12,6 +12,9 @@
 include_directories(${CMAKE_HOME_DIRECTORY}/src)
 include_directories(${CMAKE_HOME_DIRECTORY}/src/thirdparty)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+if(USE_TSAN)
+    add_subdirectory(tsan)
+endif()
 include_directories(
     ${KNOWHERE_INCLUDE_DIR}
     ${SIMDJSON_INCLUDE_DIR}
@@ -22,6 +25,8 @@ include_directories(
 # Plan parser shared library
 set(PLANPARSER_INCLUDE_DIR ${CMAKE_HOME_DIRECTORY}/output/include)
 set(PLANPARSER_LIB_DIR ${CMAKE_HOME_DIRECTORY}/output/lib)
+# Prefer the linked Conan package over headers left by an earlier installation.
+include_directories(BEFORE SYSTEM ${milvus-common_INCLUDE_DIRS})
 include_directories(${PLANPARSER_INCLUDE_DIR})
 link_directories(${PLANPARSER_LIB_DIR})
 
@@ -48,8 +53,6 @@ set(MILVUS_TEST_FILES
         test_float16.cpp
         test_search_group_by.cpp
         test_iterative_filter.cpp
-        test_indexing.cpp
-        test_index_wrapper.cpp
         test_integer_overflow.cpp
         test_query.cpp
         test_scorer.cpp
@@ -87,6 +90,69 @@ set(MILVUS_TEST_FILES
         test_cabi_exception_containment.cpp
         )
 
+set(INDEX_TEST_FILES
+        ${CMAKE_HOME_DIRECTORY}/src/index/IndexLoadContextTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/segcore/json_stats/BsonInvertedIndexTranslatorTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/segcore/indexing/FieldIndexCapabilityTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/segcore/indexing/SealedIndexLoaderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/segcore/indexing/TextMatchIndexLoaderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/LegacyIndexLoadTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/indexbuilder/BuildInputMaterializerTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/indexbuilder/MaterializerArrayTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/LoadResourceTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/PackedIndexLoadTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/contracts/RegistryTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/contracts/build/ArtifactBuilderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/contracts/growing/GrowingIndexTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/contracts/query/IndexReaderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/contracts/query/JsonIndexReaderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/contracts/query/NgramReaderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/contracts/query/NullReaderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/contracts/query/PatternMatchReaderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/contracts/query/ScalarPredicateReaderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/contracts/query/ScalarValueReaderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/contracts/query/SpatialReaderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/contracts/query/TextMatchReaderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/contracts/query/VectorReaderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/scalar/bitmap/BitmapIndexArtifactTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/scalar/bitmap/BitmapIndexReaderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/scalar/fmindex/FmIndexArtifactTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/scalar/fmindex/FmIndexBuilderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/scalar/fmindex/FmIndexLibraryTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/scalar/fmindex/FmIndexReaderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/scalar/hybrid/HybridIndexBuilderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/scalar/inverted/InvertedIndexArtifactTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/scalar/inverted/InvertedIndexReaderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/scalar/json/JsonProjectedHybridIndexBuilderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/scalar/marisa/MarisaIndexArtifactTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/scalar/marisa/MarisaIndexReaderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/scalar/ngram/NgramIndexReaderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/scalar/sort/SortedIndexArtifactTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/scalar/sort/SortedIndexReaderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/scalar/sort/SortedMembershipTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/scalar/spatial/RTreeIndexArtifactTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/scalar/spatial/RTreeIndexReaderTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/scalar/text/TextIndexArtifactTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/test_utils/CaseTestDriverTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/test_utils/IndexUtilsTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/vector/VectorDiskFamilyTest.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/vector/VectorFamilyTest.cpp
+        )
+set(INDEX_TEST_SUPPORT_FILES
+        ${CMAKE_HOME_DIRECTORY}/src/index/test_utils/JsonDataSets.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/test_utils/ScalarReaderBackends.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/test_utils/ScalarReaderFactory.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/test_utils/ScalarDataSets.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/test_utils/TestArtifactIO.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/test_utils/TextAndCandidateDataSets.cpp
+        )
+list(REMOVE_ITEM MILVUS_TEST_FILES ${INDEX_TEST_FILES})
+
+# This acceptance target exercises only the current index contracts. Keep it
+# out of all_tests so deleted legacy index APIs cannot prevent it from being
+# compiled and run independently.
+list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "index_runtime_acceptance_test\\.cpp$")
+
 if ( NOT (INDEX_ENGINE STREQUAL "cardinal") )
     list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "KmeansClusteringTest\\.cpp$")
 endif()
@@ -102,8 +168,7 @@ endif()
 list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "BitsetTest\\.cpp$")
 
 if (NOT (LINUX OR APPLE))
-    list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "ScalarIndexCreatorTest\\.cpp$")
-    list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "StringIndexTest\\.cpp$")
+    list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "(BuildSession.*|GISIndexRefinement)Test\\.cpp$")
     list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "ArrayTest\\.cpp$")
     list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "ExprArrayTest\\.cpp$")
 endif()
@@ -131,16 +196,6 @@ else()
     list(FILTER MILVUS_TEST_FILES EXCLUDE REGEX "GcpNativeChunkManagerTest\\.cpp$")
 endif()
 
-if (LINUX)
-    message( STATUS "Building Milvus Unit Test on Linux")
-    option(USE_ASAN "Whether to use AddressSanitizer" OFF)
-    if ( USE_ASAN )
-        message( STATUS "Building Milvus using AddressSanitizer")
-        add_compile_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
-        add_link_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
-    endif()
-endif()
-
 add_compile_definitions(
         MILVUS_CPPUT_OUTPUT_DIR="${CMAKE_INSTALL_PREFIX}/cpput_output"
         MILVUS_UNIT_TEST)
@@ -166,17 +221,117 @@ target_link_libraries(all_tests
         milvus_conan_deps
         knowhere
         milvus-storage
+        AWS::aws-crt-cpp
         )
 
 # Link plan parser library using full path and set RPATH
 target_link_options(all_tests PRIVATE "-L${PLANPARSER_LIB_DIR}")
 target_link_libraries(all_tests milvus-planparser-cpp)
+# Load this build's core before any stale installed copy in output/lib.
 set_target_properties(all_tests PROPERTIES
-        BUILD_RPATH "${PLANPARSER_LIB_DIR}"
+        BUILD_RPATH "$<TARGET_FILE_DIR:milvus_core>;${PLANPARSER_LIB_DIR}"
         INSTALL_RPATH "${PLANPARSER_LIB_DIR}"
         )
 
+milvus_check_aws_runtime(all_tests)
+
+if (LINUX)
+    add_test(NAME aws_runtime_link_check
+        COMMAND ${CMAKE_COMMAND}
+            -DCHECK_SCRIPT=${MILVUS_SOURCE_DIR}/cmake/CheckAwsRuntime.cmake
+            -DCXX=${CMAKE_CXX_COMPILER}
+            -DNM=${CMAKE_NM}
+            -DSTRIP=${CMAKE_STRIP}
+            -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/aws-runtime-link-check
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_aws_runtime_test.cmake)
+endif()
+
 install(TARGETS all_tests DESTINATION unittest)
+
+add_executable(index_tests init_gtest.cpp ${INDEX_TEST_FILES} ${INDEX_TEST_SUPPORT_FILES})
+
+# The serialization test constructs an IndexNode subclass in Milvus.
+set_source_files_properties(
+        ${CMAKE_HOME_DIRECTORY}/src/index/vector/VectorDiskFamilyTest.cpp
+        PROPERTIES COMPILE_DEFINITIONS NOT_COMPILE_FOR_SWIG)
+if (CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+    set_property(SOURCE
+            ${CMAKE_HOME_DIRECTORY}/src/index/vector/VectorDiskFamilyTest.cpp
+            APPEND PROPERTY COMPILE_OPTIONS -msse4.2)
+endif()
+
+# milvus_core's legacy public link interface repeats static dependencies that
+# are already linked into its runtime image. Link that image directly so this
+# focused executable does not construct and destroy duplicate global objects;
+# list shared libraries referenced directly by test objects without importing
+# their transitive static interfaces.
+string(TOUPPER "${CMAKE_BUILD_TYPE}" INDEX_TEST_BUILD_TYPE)
+set(INDEX_TEST_FOLLY_DIRS
+        "${folly_Folly_folly_LIB_DIRS_${INDEX_TEST_BUILD_TYPE}}")
+find_library(INDEX_TEST_FOLLY_LIBRARY
+        NAMES folly
+        PATHS ${INDEX_TEST_FOLLY_DIRS}
+        NO_DEFAULT_PATH
+        NO_CACHE
+        REQUIRED)
+set(INDEX_TEST_MILVUS_COMMON_DIRS
+        "${milvus-common_LIB_DIRS_${INDEX_TEST_BUILD_TYPE}}")
+find_library(INDEX_TEST_MILVUS_COMMON_LIBRARY
+        NAMES milvus-common
+        PATHS ${INDEX_TEST_MILVUS_COMMON_DIRS}
+        NO_DEFAULT_PATH
+        NO_CACHE
+        REQUIRED)
+set(INDEX_TEST_FMT_DIRS "${fmt_fmt_fmt_LIB_DIRS_${INDEX_TEST_BUILD_TYPE}}")
+find_library(INDEX_TEST_FMT_LIBRARY
+        NAMES fmt
+        PATHS ${INDEX_TEST_FMT_DIRS}
+        NO_DEFAULT_PATH
+        NO_CACHE
+        REQUIRED)
+target_link_libraries(
+        index_tests
+        PRIVATE
+        GTest::gtest
+        GEOS::geos_c
+        "$<COMPILE_ONLY:milvus_core>"
+        "$<TARGET_FILE:milvus_core>"
+        "$<TARGET_FILE:milvus-storage>"
+        "$<TARGET_FILE:knowhere>"
+        "${INDEX_TEST_MILVUS_COMMON_LIBRARY}"
+        gRPC::grpc++
+        Boost::filesystem
+        glog::glog
+        "${INDEX_TEST_FOLLY_LIBRARY}"
+        "${INDEX_TEST_FMT_LIBRARY}")
+add_dependencies(index_tests milvus_core)
+add_test(NAME index_tests COMMAND index_tests)
+install(TARGETS index_tests DESTINATION unittest)
+
+add_executable(index_runtime_acceptance_test
+        init_gtest.cpp
+        index_runtime_acceptance_test.cpp
+        ${CMAKE_HOME_DIRECTORY}/src/index/test_utils/TestArtifactIO.cpp
+        )
+
+# Use the same shared-runtime boundary as index_tests to avoid duplicate
+# global objects from milvus_core's transitive static dependencies.
+target_link_libraries(index_runtime_acceptance_test
+        PRIVATE
+        GTest::gtest
+        "$<COMPILE_ONLY:milvus_core>"
+        "$<TARGET_FILE:milvus_core>"
+        "$<TARGET_FILE:milvus-storage>"
+        "$<TARGET_FILE:knowhere>"
+        "${INDEX_TEST_MILVUS_COMMON_LIBRARY}"
+        gRPC::grpc++
+        Boost::filesystem
+        glog::glog
+        "${INDEX_TEST_FOLLY_LIBRARY}"
+        "${INDEX_TEST_FMT_LIBRARY}")
+add_dependencies(index_runtime_acceptance_test milvus_core)
+
+install(TARGETS index_runtime_acceptance_test DESTINATION unittest)
 
 add_subdirectory(test_json_stats)
 

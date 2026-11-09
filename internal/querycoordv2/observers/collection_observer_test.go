@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
@@ -46,6 +47,8 @@ import (
 
 type CollectionObserverSuite struct {
 	suite.Suite
+	// metaStore is shared by Meta and TargetManager.
+	metaStore metacache.MetaStore
 
 	// Data
 	collections   []int64
@@ -198,9 +201,10 @@ func (suite *CollectionObserverSuite) SetupTest() {
 	// Dependencies
 	suite.dist = meta.NewDistributionManager(session.NewNodeManager())
 	suite.nodeMgr = session.NewNodeManager()
-	suite.meta = meta.NewMeta(suite.idAllocator, suite.store, suite.nodeMgr)
+	suite.metaStore = metacache.NewMetaStore(nil)
+	suite.meta = meta.NewMeta(suite.idAllocator, suite.store, suite.nodeMgr, suite.metaStore)
 	suite.broker = meta.NewMockBroker(suite.T())
-	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
+	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta, suite.metaStore)
 	suite.cluster = session.NewMockCluster(suite.T())
 	suite.targetObserver = NewTargetObserver(suite.meta,
 		suite.targetMgr,
@@ -224,9 +228,6 @@ func (suite *CollectionObserverSuite) SetupTest() {
 		suite.proxyManager,
 	)
 
-	for _, collection := range suite.collections {
-		suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil).Maybe()
-	}
 	suite.targetObserver.Start()
 	suite.ob.Start()
 	suite.loadAll()
@@ -391,7 +392,9 @@ func (suite *CollectionObserverSuite) TestObserve() {
 	suite.dist.SegmentDistManager.Update(2, segments103Node2...)
 	suite.dist.SegmentDistManager.Update(3, segments103Node3...)
 
-	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	for _, collection := range suite.collections {
+		suite.metaStore.PutCollection(&metacache.CollectionInfo{ID: collection})
+	}
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	suite.cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
 
@@ -613,7 +616,7 @@ func (suite *CollectionObserverSuite) load(collection int64) {
 		})
 	}
 
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection).Return(dmChannels, allSegments, nil)
+	expectRecoveryInfo(suite.broker, suite.metaStore, collection, dmChannels, allSegments, nil)
 	suite.targetMgr.UpdateCollectionNextTarget(ctx, collection)
 
 	suite.ob.LoadCollection(context.Background(), collection)

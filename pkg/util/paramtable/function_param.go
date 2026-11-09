@@ -17,11 +17,17 @@
 package paramtable
 
 import (
+	"strconv"
 	"strings"
 	"time"
 )
 
 type functionConfig struct {
+	GrepMaxArgumentBytes          ParamItem  `refreshable:"true"`
+	GrepMaxRegexBytes             ParamItem  `refreshable:"true"`
+	GrepMaxDFACacheBytes          ParamItem  `refreshable:"true"`
+	GrepBatchSize                 ParamItem  `refreshable:"true"`
+	GrepMaxScanRows               ParamItem  `refreshable:"true"`
 	BatchFactor                   ParamItem  `refreshable:"true"`
 	ModelRequestTimeout           ParamItem  `refreshable:"true"`
 	TextEmbeddingProviders        ParamGroup `refreshable:"true"`
@@ -55,9 +61,99 @@ type functionConfig struct {
 	//     takes effect after a MixCoord restart. Operators can still intervene
 	//     at any time by setting "true" or "false" explicitly.
 	EnableWriteBeforeMaterialization ParamItem `refreshable:"true"`
+
+	PyUDFEnabled            ParamItem `refreshable:"false"`
+	PyUDFAddress            ParamItem `refreshable:"false"`
+	PyUDFRPCTimeout         ParamItem `refreshable:"false"`
+	PyUDFConnectionPoolSize ParamItem `refreshable:"false"`
+	PyUDFMaxMessageBytes    ParamItem `refreshable:"false"`
+	PyUDFWorkerCount        ParamItem `refreshable:"false"`
+	PyUDFGRPCConcurrency    ParamItem `refreshable:"false"`
+	PyUDFMaxConcurrentRPCs  ParamItem `refreshable:"false"`
+	PyUDFShutdownTimeout    ParamItem `refreshable:"false"`
 }
 
 func (p *functionConfig) init(base *BaseTable) {
+	p.GrepMaxArgumentBytes = ParamItem{
+		Key:          "function.grep.maxArgumentBytes",
+		Version:      "3.1.0",
+		DefaultValue: "65536",
+		Export:       true,
+		Doc:          "Maximum byte length of GrepOp arguments. Invalid or non-positive values fall back to 65536. Changes apply to newly prepared operators.",
+		Formatter: func(value string) string {
+			parsed, err := strconv.ParseInt(value, 10, 64)
+			if err != nil || parsed <= 0 {
+				return p.GrepMaxArgumentBytes.DefaultValue
+			}
+			return value
+		},
+	}
+	p.GrepMaxArgumentBytes.Init(base.mgr)
+
+	p.GrepMaxRegexBytes = ParamItem{
+		Key:          "function.grep.maxRegexBytes",
+		Version:      "3.1.0",
+		DefaultValue: "10485760",
+		Export:       true,
+		Doc:          "Regex engine compiled-program size budget in bytes. Invalid or non-positive values fall back to 10485760. Changes apply to newly prepared operators.",
+		Formatter: func(value string) string {
+			parsed, err := strconv.ParseInt(value, 10, 64)
+			if err != nil || parsed <= 0 {
+				return p.GrepMaxRegexBytes.DefaultValue
+			}
+			return value
+		},
+	}
+	p.GrepMaxRegexBytes.Init(base.mgr)
+
+	p.GrepMaxDFACacheBytes = ParamItem{
+		Key:          "function.grep.maxDFACacheBytes",
+		Version:      "3.1.0",
+		DefaultValue: "8388608",
+		Export:       true,
+		Doc:          "Regex engine DFA cache budget in bytes; not an aggregate process memory limit. Invalid or non-positive values fall back to 8388608. Changes apply to newly prepared operators.",
+		Formatter: func(value string) string {
+			parsed, err := strconv.ParseInt(value, 10, 64)
+			if err != nil || parsed <= 0 {
+				return p.GrepMaxDFACacheBytes.DefaultValue
+			}
+			return value
+		},
+	}
+	p.GrepMaxDFACacheBytes.Init(base.mgr)
+
+	p.GrepBatchSize = ParamItem{
+		Key:          "function.grep.batchSize",
+		Version:      "3.1.0",
+		DefaultValue: "128",
+		Export:       true,
+		Doc:          "Candidate text rows per Grep read batch, independent of the matching limit. Invalid or non-positive configuration falls back to 128. Changes apply to newly prepared operators.",
+		Formatter: func(value string) string {
+			parsed, err := strconv.ParseInt(value, 10, 64)
+			if err != nil || parsed <= 0 {
+				return p.GrepBatchSize.DefaultValue
+			}
+			return value
+		},
+	}
+	p.GrepBatchSize.Init(base.mgr)
+
+	p.GrepMaxScanRows = ParamItem{
+		Key:          "function.grep.maxScanRows",
+		Version:      "3.1.0",
+		DefaultValue: "0",
+		Export:       true,
+		Doc:          "Maximum candidate offsets returned per segment for Grep after filter and MVCC. 0 disables the row cap; invalid or negative configuration falls back to 0. A positive cap truncates candidate selection and logs a warning when more candidates may remain; Grep results may be incomplete. Changes apply to newly enabled candidate plans.",
+		Formatter: func(value string) string {
+			parsed, err := strconv.ParseInt(value, 10, 64)
+			if err != nil || parsed < 0 {
+				return p.GrepMaxScanRows.DefaultValue
+			}
+			return value
+		},
+	}
+	p.GrepMaxScanRows.Init(base.mgr)
+
 	p.BatchFactor = ParamItem{
 		Key:          "function.batch_factor.",
 		Version:      "2.6.7",
@@ -268,6 +364,88 @@ func (p *functionConfig) init(base *BaseTable) {
 		},
 	}
 	p.EnableWriteBeforeMaterialization.Init(base.mgr)
+
+	p.PyUDFEnabled = ParamItem{
+		Key:          "function.pyUDF.enabled",
+		Version:      "3.0.3",
+		DefaultValue: "false",
+		Export:       true,
+		Doc:          "Whether to enable PyUDF in processes that use it. Enabling it on Proxy also requires common.fileResource.mode.proxy: sync. Restart is required after changing this value.",
+	}
+	p.PyUDFEnabled.Init(base.mgr)
+
+	p.PyUDFAddress = ParamItem{
+		Key:          "function.pyUDF.address",
+		Sensitivity:  Sensitive,
+		Version:      "3.0.3",
+		DefaultValue: "127.0.0.1:19090",
+		Export:       true,
+		Doc:          "Shared local IPv4 address and port of the PyUDF workers. Keep on loopback or a trusted, access-controlled network; the worker endpoint has no TLS or authentication. Restart is required after changing this value.",
+	}
+	p.PyUDFAddress.Init(base.mgr)
+
+	p.PyUDFRPCTimeout = ParamItem{
+		Key:          "function.pyUDF.rpcTimeout",
+		Version:      "3.0.3",
+		DefaultValue: "30s",
+		Export:       true,
+		Doc:          "Deadline for one PyUDF Execute call, including serialization. Range: 5s to 300s, in whole milliseconds; invalid values log an error and use 30s. Restart is required after changing this value.",
+	}
+	p.PyUDFRPCTimeout.Init(base.mgr)
+
+	p.PyUDFConnectionPoolSize = ParamItem{
+		Key:          "function.pyUDF.connectionPoolSize",
+		Version:      "3.0.3",
+		DefaultValue: "10",
+		Export:       true,
+		Doc:          "Number of reused client connections; this does not limit concurrent RPCs. Restart is required after changing this value.",
+	}
+	p.PyUDFConnectionPoolSize.Init(base.mgr)
+
+	p.PyUDFMaxMessageBytes = ParamItem{
+		Key:          "function.pyUDF.maxMessageBytes",
+		Version:      "3.0.3",
+		DefaultValue: "67108864",
+		Export:       true,
+		Doc:          "Maximum serialized size of one PyUDF gRPC message in bytes. Restart is required after changing this value.",
+	}
+	p.PyUDFMaxMessageBytes.Init(base.mgr)
+
+	p.PyUDFWorkerCount = ParamItem{
+		Key:          "function.pyUDF.server.workerCount",
+		Version:      "3.0.3",
+		DefaultValue: "1",
+		Export:       true,
+		Doc:          "Number of Python worker processes sharing the configured address. Restart is required after changing this value.",
+	}
+	p.PyUDFWorkerCount.Init(base.mgr)
+
+	p.PyUDFGRPCConcurrency = ParamItem{
+		Key:          "function.pyUDF.server.grpcConcurrency",
+		Version:      "3.0.3",
+		DefaultValue: "10",
+		Export:       true,
+		Doc:          "Per-worker gRPC executor threads. Restart is required after changing this value.",
+	}
+	p.PyUDFGRPCConcurrency.Init(base.mgr)
+
+	p.PyUDFMaxConcurrentRPCs = ParamItem{
+		Key:          "function.pyUDF.server.maxConcurrentRPCs",
+		Version:      "3.0.3",
+		DefaultValue: "100",
+		Export:       true,
+		Doc:          "Maximum in-flight RPCs per Python worker, including requests waiting in the gRPC executor. Restart is required after changing this value.",
+	}
+	p.PyUDFMaxConcurrentRPCs.Init(base.mgr)
+
+	p.PyUDFShutdownTimeout = ParamItem{
+		Key:          "function.pyUDF.server.shutdownTimeout",
+		Version:      "3.0.3",
+		DefaultValue: "30s",
+		Export:       true,
+		Doc:          "Python worker termination escalation deadline. Range: 5s to 60s, in whole milliseconds; invalid values log an error and use 30s. Restart is required after changing this value.",
+	}
+	p.PyUDFShutdownTimeout.Init(base.mgr)
 }
 
 func (p *functionConfig) GetTextEmbeddingProviderConfig(providerName string) map[string]string {

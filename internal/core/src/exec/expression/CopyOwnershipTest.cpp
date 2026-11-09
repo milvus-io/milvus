@@ -18,6 +18,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -25,45 +26,56 @@
 #include "exec/expression/Expr.h"
 #include "exec/expression/UnaryExpr.h"
 #include "exec/expression/ValueExpr.h"
-#include "index/StringIndexSort.h"
+#include "index/contracts/query/IPatternMatchReader.h"
+#include "index/contracts/query/IScalarPredicateReader.h"
 
 namespace milvus::exec {
 namespace {
 
-class LiteralRecordingIndex : public index::StringIndexSort {
+class LiteralRecordingReader
+    : public index::IScalarPredicateReader<std::string_view>,
+      public index::IPatternMatchReader {
  public:
-    explicit LiteralRecordingIndex(const std::string& literal)
+    explicit LiteralRecordingReader(const std::string& literal)
         : literal_(literal) {
     }
 
-    const TargetBitmap
-    In(size_t n, const std::string* values) override {
+    TargetBitmap
+    In(size_t n, const std::string_view* values) const override {
         EXPECT_EQ(n, 1);
         return Record(*values);
     }
 
-    const TargetBitmap
-    NotIn(size_t n, const std::string* values) override {
+    TargetBitmap
+    NotIn(size_t n, const std::string_view* values) const override {
         EXPECT_EQ(n, 1);
         return Record(*values);
     }
 
-    using index::StringIndexSort::Range;
-
-    const TargetBitmap
-    Range(const std::string& value, OpType) override {
+    TargetBitmap
+    Range(const std::string_view& value, index::CompareOp) const override {
         return Record(value);
     }
 
-    const TargetBitmap
-    PatternMatch(const std::string& pattern, proto::plan::OpType) override {
+    TargetBitmap
+    Range(const std::string_view& lower,
+          bool,
+          const std::string_view& upper,
+          bool) const override {
+        Record(lower);
+        return Record(upper);
+    }
+
+    TargetBitmap
+    PatternMatch(std::string_view pattern, index::PatternOp) const override {
         return Record(pattern);
     }
 
  private:
     TargetBitmap
-    Record(const std::string& value) {
-        EXPECT_EQ(&value, &literal_);
+    Record(std::string_view value) const {
+        EXPECT_EQ(value.data(), literal_.data());
+        EXPECT_EQ(value.size(), literal_.size());
         EXPECT_EQ(value, literal_);
         return TargetBitmap(1, true);
     }
@@ -73,10 +85,19 @@ class LiteralRecordingIndex : public index::StringIndexSort {
 
 template <typename T, proto::plan::OpType op>
 void
-ExpectOriginalIndexLiteral(LiteralRecordingIndex& index,
-                           const std::string& literal) {
-    UnaryIndexFunc<T, op> function;
-    auto result = function(&index, literal);
+ExpectOriginalIndexLiteral(const LiteralRecordingReader& reader,
+                           const T& literal) {
+    const auto result = [&] {
+        if constexpr (op == proto::plan::PrefixMatch ||
+                      op == proto::plan::Match ||
+                      op == proto::plan::RegexMatch) {
+            UnaryIndexFuncForMatch<T> function;
+            return function(&reader, literal, op);
+        } else {
+            UnaryIndexFunc<std::string_view, op> function;
+            return function(&reader, literal);
+        }
+    }();
     ASSERT_EQ(result.size(), 1);
     EXPECT_TRUE(result[0]);
 }
@@ -85,13 +106,21 @@ template <typename T>
 void
 CheckIndexLiteralBorrowing() {
     const std::string literal(1024, 'x');
-    LiteralRecordingIndex index(literal);
-    ExpectOriginalIndexLiteral<T, proto::plan::Equal>(index, literal);
-    ExpectOriginalIndexLiteral<T, proto::plan::NotEqual>(index, literal);
-    ExpectOriginalIndexLiteral<T, proto::plan::GreaterThan>(index, literal);
-    ExpectOriginalIndexLiteral<T, proto::plan::PrefixMatch>(index, literal);
-    ExpectOriginalIndexLiteral<T, proto::plan::Match>(index, literal);
-    ExpectOriginalIndexLiteral<T, proto::plan::RegexMatch>(index, literal);
+    LiteralRecordingReader reader(literal);
+    const std::string_view view(literal);
+    const auto& input = [&]() -> const T& {
+        if constexpr (std::is_same_v<T, std::string>) {
+            return literal;
+        } else {
+            return view;
+        }
+    }();
+    ExpectOriginalIndexLiteral<T, proto::plan::Equal>(reader, input);
+    ExpectOriginalIndexLiteral<T, proto::plan::NotEqual>(reader, input);
+    ExpectOriginalIndexLiteral<T, proto::plan::GreaterThan>(reader, input);
+    ExpectOriginalIndexLiteral<T, proto::plan::PrefixMatch>(reader, input);
+    ExpectOriginalIndexLiteral<T, proto::plan::Match>(reader, input);
+    ExpectOriginalIndexLiteral<T, proto::plan::RegexMatch>(reader, input);
 }
 
 }  // namespace

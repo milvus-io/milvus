@@ -3,6 +3,7 @@ package vchannel
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -10,10 +11,16 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/messageack"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
 func TestPChannelRecoveryManagerCleansDroppedVChannelInTwoPhases(t *testing.T) {
@@ -202,4 +209,51 @@ func TestDroppedVChannelStillRecordsMaterialization(t *testing.T) {
 	snapshots := module.ConsumeDirtySnapshots()
 	require.Len(t, snapshots, 1)
 	require.Equal(t, uint64(20), snapshots[0].Payload().(*streamingpb.VChannelMeta).GetTransformMaterializedTimeTick())
+}
+
+func TestQueryViewPinsSegmentUntilVersionFloorIsPersisted(t *testing.T) {
+	segmentMeta := &streamingpb.SegmentAssignmentMeta{CollectionId: 1, PartitionId: 10, SegmentId: 100, Vchannel: "v1", State: streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED, CheckpointTimeTick: 10, SealedAtDataVersion: &viewpb.DataVersion{StreamingVersion: 2}}
+	manager := newCleanupTestManager(t, streamingpb.VChannelState_VCHANNEL_STATE_NORMAL, map[int64]*streamingpb.SegmentAssignmentMeta{100: segmentMeta})
+	module := manager.Module("v1")
+	key := qviews.QueryViewKey{ShardID: qviews.ShardID{VChannel: "v1", ReplicaID: 1}, QueryViewVersion: qviews.QueryViewVersion{DataVersion: qviews.DataVersion{StreamingVersion: 1}}}
+	module.queryResources.AcquireLocked(snview.AcquireResource{Key: key, Meta: &viewpb.QueryViewMeta{Vchannel: "v1", Version: key.QueryViewVersion.IntoProto()}}, func(*viewpb.QueryViewMeta) (walview.VChannelWALView, bool) { return walview.VChannelWALView{}, false })
+	cleanup := moduleapi.CleanupContext{PhysicalTimeTick: 11}
+	require.Empty(t, manager.ConsumeCleanupSnapshots(cleanup), "the old Up view retains its growing segment")
+	module.ReleaseQueryResource(snview.ReleaseResource{Key: key})
+	require.Empty(t, manager.ConsumeCleanupSnapshots(cleanup), "persist the version floor before deleting segment metadata")
+	snapshots := manager.ConsumeDirtySnapshots()
+	var persistedFloor bool
+	for _, snapshot := range snapshots {
+		if meta, ok := snapshot.Payload().(*streamingpb.VChannelMeta); ok {
+			require.Equal(t, int64(2), meta.GetSegmentDataVersionSummary().GetStreamingVersion())
+			persistedFloor = true
+		}
+		snapshot.MarkPersisted()
+	}
+	require.True(t, persistedFloor)
+	snapshots = manager.ConsumeCleanupSnapshots(cleanup)
+	require.Len(t, snapshots, 1)
+	require.Equal(t, moduleapi.ModuleNameSegment, snapshots[0].ModuleName())
+	require.Equal(t, moduleapi.SnapshotOpDelete, snapshots[0].Op())
+	snapshots[0].MarkPersisted()
+	require.Empty(t, module.segments)
+}
+
+func TestQueryResourceRejectsDroppedVChannel(t *testing.T) {
+	for _, state := range []streamingpb.VChannelState{streamingpb.VChannelState_VCHANNEL_STATE_DROPPED, streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED} {
+		manager := newCleanupTestManager(t, state, nil)
+		module := manager.Module("v1")
+		scheduler := nodescheduler.New(1)
+		module.queryResources = queryresource.NewManager(queryresource.Config{Scheduler: scheduler})
+		rejected := make(chan struct{})
+		module.AcquireQueryResource(snview.AcquireResource{Meta: &viewpb.QueryViewMeta{Vchannel: "v1", Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 1}}}, OnUnrecoverable: func() { close(rejected) }})
+		select {
+		case <-rejected:
+		case <-time.After(time.Second):
+			t.Fatal("dropped channel preparation stalled")
+		}
+		_, ok := module.queryResources.OldestDataVersion()
+		require.False(t, ok)
+		scheduler.Close()
+	}
 }

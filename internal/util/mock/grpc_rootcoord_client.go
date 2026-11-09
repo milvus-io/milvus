@@ -41,6 +41,14 @@ func (m *GrpcRootCoordClient) ClearReadTaskQueue(ctx context.Context, in *intern
 	return &internalpb.ClearReadTaskQueueResponse{Status: merr.Success()}, m.Err
 }
 
+func (m *GrpcRootCoordClient) ListRunningRequests(ctx context.Context, in *milvuspb.ListRunningRequestsRequest, opts ...grpc.CallOption) (*milvuspb.ListRunningRequestsResponse, error) {
+	return &milvuspb.ListRunningRequestsResponse{Status: merr.Success()}, m.Err
+}
+
+func (m *GrpcRootCoordClient) CancelRequests(ctx context.Context, in *milvuspb.CancelRequestsRequest, opts ...grpc.CallOption) (*milvuspb.CancelRequestsResponse, error) {
+	return &milvuspb.CancelRequestsResponse{Status: merr.Success()}, m.Err
+}
+
 func (m *GrpcRootCoordClient) DescribeDatabase(ctx context.Context, in *rootcoordpb.DescribeDatabaseRequest, opts ...grpc.CallOption) (*rootcoordpb.DescribeDatabaseResponse, error) {
 	return &rootcoordpb.DescribeDatabaseResponse{}, m.Err
 }
@@ -398,6 +406,10 @@ func (m *GrpcRootCoordClient) GetQuotaMetrics(ctx context.Context, in *internalp
 	return &internalpb.GetQuotaMetricsResponse{}, m.Err
 }
 
+func (m *GrpcRootCoordClient) GetFeatureUsage(ctx context.Context, in *internalpb.GetFeatureUsageRequest, opts ...grpc.CallOption) (*internalpb.FeatureUsageReport, error) {
+	return &internalpb.FeatureUsageReport{}, m.Err
+}
+
 func (m *GrpcRootCoordClient) TruncateCollection(ctx context.Context, in *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption) (*milvuspb.TruncateCollectionResponse, error) {
 	return &milvuspb.TruncateCollectionResponse{}, m.Err
 }
@@ -436,4 +448,8 @@ func (m *GrpcRootCoordClient) GetClientTelemetry(ctx context.Context, in *milvus
 
 func (m *GrpcRootCoordClient) PushClientCommand(ctx context.Context, in *milvuspb.PushClientCommandRequest, opts ...grpc.CallOption) (*milvuspb.PushClientCommandResponse, error) {
 	return &milvuspb.PushClientCommandResponse{}, m.Err
+}
+
+func (*GrpcRootCoordClient) FetchFileResources(context.Context, *rootcoordpb.FetchFileResourcesRequest, ...grpc.CallOption) (*rootcoordpb.FetchFileResourcesResponse, error) {
+	panic("mock FetchFileResources with mockey")
 }

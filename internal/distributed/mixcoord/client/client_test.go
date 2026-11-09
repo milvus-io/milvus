@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -49,6 +50,12 @@ func TestMain(m *testing.M) {
 }
 
 func Test_NewClient(t *testing.T) {
+	resourceFetch := mockey.Mock((*mock.GrpcRootCoordClient).FetchFileResources).To(
+		func(c *mock.GrpcRootCoordClient, _ context.Context, _ *rootcoordpb.FetchFileResourcesRequest, _ ...grpc.CallOption) (*rootcoordpb.FetchFileResourcesResponse, error) {
+			return &rootcoordpb.FetchFileResourcesResponse{}, c.Err
+		}).Build()
+	defer resourceFetch.UnPatch()
+
 	ctx := context.Background()
 
 	client, err := NewClient(ctx)
@@ -391,6 +398,11 @@ func Test_NewClient(t *testing.T) {
 
 		r42, err := client.ValidateAnalyzer(ctx, nil)
 		retCheck(retNotNil, r42, err)
+
+		resources, err := client.GetStreamingNodeQueryViewResources(ctx, &datapb.GetStreamingNodeQueryViewResourcesRequest{})
+		retCheck(retNotNil, resources, err)
+		fetched, err := client.FetchFileResources(ctx, &rootcoordpb.FetchFileResourcesRequest{})
+		retCheck(retNotNil, fetched, err)
 	}
 
 	client.(*Client).grpcClient = &mock.GRPCClientBase[MixCoordClient]{
@@ -411,9 +423,14 @@ func Test_NewClient(t *testing.T) {
 		GetGrpcClientErr: nil,
 	}
 
+	mockDCWithErr := mocks.NewMockDataCoordClient(t)
+	mockDCWithErr.EXPECT().
+		GetStreamingNodeQueryViewResources(mock1.Anything, mock1.Anything).
+		Return(nil, mockErr)
 	newFunc2 := func(cc *grpc.ClientConn) MixCoordClient {
 		return MixCoordClient{
 			RootCoordClient:  &mock.GrpcRootCoordClient{Err: errors.New("dummy")},
+			DataCoordClient:  mockDCWithErr,
 			QueryCoordClient: &mock.GrpcQueryCoordClient{Err: errors.New("dummy")},
 		}
 	}
@@ -426,9 +443,14 @@ func Test_NewClient(t *testing.T) {
 		GetGrpcClientErr: nil,
 	}
 
+	mockDC := mocks.NewMockDataCoordClient(t)
+	mockDC.EXPECT().
+		GetStreamingNodeQueryViewResources(mock1.Anything, mock1.Anything).
+		Return(&datapb.GetStreamingNodeQueryViewResourcesResponse{}, nil)
 	newFunc3 := func(cc *grpc.ClientConn) MixCoordClient {
 		return MixCoordClient{
 			RootCoordClient:  &mock.GrpcRootCoordClient{Err: nil},
+			DataCoordClient:  mockDC,
 			QueryCoordClient: &mock.GrpcQueryCoordClient{Err: nil},
 		}
 	}

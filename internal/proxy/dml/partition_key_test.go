@@ -28,6 +28,7 @@ import (
 )
 
 func TestPartitionKey(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	streaming.SetupNoopWALForTest()
 	qc := mocks.NewMockMixCoordClient(t)
 	qc.EXPECT().Close().Return(nil).Maybe()
@@ -64,6 +65,7 @@ func TestPartitionKey(t *testing.T) {
 	schema := constructCollectionSchemaByDataType(collectionName, fieldName2Type, "int64_field", false)
 	partitionKeyField := &schemapb.FieldSchema{
 		Name:           "partition_key_field",
+		FieldID:        1000,
 		DataType:       schemapb.DataType_Int64,
 		IsPartitionKey: true,
 	}
@@ -202,7 +204,6 @@ func TestPartitionKey(t *testing.T) {
 				IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{0, 1}}},
 			},
 			idAllocator:  idAllocator,
-			chMgr:        chMgr,
 			collectionID: collectionID,
 			vChannels:    []string{"test-channel"},
 		}
@@ -215,6 +216,7 @@ func TestPartitionKey(t *testing.T) {
 }
 
 func TestDefaultPartition(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	t.Skip("TODO: rewrite with mockey for non-partition-key default-partition streaming path")
 
 	streaming.SetupNoopWALForTest()
@@ -373,7 +375,6 @@ func TestDefaultPartition(t *testing.T) {
 				IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{0, 1}}},
 			},
 			idAllocator:  idAllocator,
-			chMgr:        chMgr,
 			collectionID: collectionID,
 			vChannels:    []string{"test-channel"},
 		}

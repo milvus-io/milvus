@@ -23,6 +23,7 @@
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -120,7 +121,8 @@ class WriteRateLimiter {
     Acquire(size_t bytes,
             size_t alignment_bytes = 1,
             Priority priority = Priority::MIDDLE) {
-        // if priority ratio is <= 0, no rate limit is applied, return the original bytes
+        // if priority ratio is <= 0, no rate limit is applied, return the original
+        // bytes
         if (priority_ratio_[static_cast<int>(priority)] <= 0) {
             return bytes;
         }
@@ -151,7 +153,8 @@ class WriteRateLimiter {
         } else {
             available_bytes_ += delta_periods * refill_bytes_per_period_;
         }
-        // keep the available bytes in the range of [0, refill_bytes_per_period_ * expire_periods_]
+        // keep the available bytes in the range of [0, refill_bytes_per_period_ *
+        // expire_periods_]
         available_bytes_ = std::min(
             available_bytes_,
             static_cast<size_t>(refill_bytes_per_period_ * expire_periods_));
@@ -160,7 +163,8 @@ class WriteRateLimiter {
         auto ret = std::min(bytes, available_bytes_ * amplification_ratio);
         // align the allowed bytes to the alignment bytes
         ret = (ret / alignment_bytes) * alignment_bytes;
-        // update available_bytes_ by removing the amplification ratio, the updated value is always >= 0
+        // update available_bytes_ by removing the amplification ratio, the updated
+        // value is always >= 0
         available_bytes_ -= ret / amplification_ratio;
 
         // update the last refill time only if delta_periods > 0
@@ -201,11 +205,13 @@ class WriteRateLimiter {
 }  // namespace io
 
 /**
- * FileWriter is a class that sequentially writes data to new files, designed specifically for saving temporary data downloaded from remote storage.
- * It supports both buffered and direct I/O. All methods execute synchronously
- * on the calling thread.
- * FileWriter is not thread-safe, so you should take care of the thread safety when using the same FileWriter object in multiple threads.
- * For now, only QueryNode uses FileWriter to write data to files. If you want to use it in DataNode, you need to add it to the configuration.
+ * FileWriter is a class that sequentially writes data to new files, designed
+ * specifically for saving temporary data downloaded from remote storage. It
+ * supports both buffered and direct I/O. All methods execute synchronously on
+ * the calling thread. FileWriter is not thread-safe, so you should take care of
+ * the thread safety when using the same FileWriter object in multiple threads.
+ * For now, only QueryNode uses FileWriter to write data to files. If you want
+ * to use it in DataNode, you need to add it to the configuration.
  *
  * The basic usage is:
  *
@@ -308,9 +314,13 @@ class FileWriter {
 
 class PositionedFileWriter {
  public:
-    explicit PositionedFileWriter(std::string filename,
-                                  size_t file_size,
-                                  io::Priority priority = io::Priority::MIDDLE);
+    // A specified mode is pinned for this file. Otherwise retain the existing
+    // priority/global policy (HIGH is buffered; other priorities use GetMode()).
+    explicit PositionedFileWriter(
+        std::string filename,
+        size_t file_size,
+        io::Priority priority = io::Priority::MIDDLE,
+        std::optional<FileWriter::WriteMode> mode = std::nullopt);
 
     ~PositionedFileWriter();
 

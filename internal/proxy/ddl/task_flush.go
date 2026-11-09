@@ -1,0 +1,88 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package ddl
+
+import (
+	"context"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+)
+
+type FlushTask struct {
+	baseTask
+	Condition
+	*milvuspb.FlushRequest
+	ctx      context.Context
+	mixCoord types.MixCoordClient
+	result   *milvuspb.FlushResponse
+
+	chMgr channelmgr.ChannelsMgr
+}
+
+func (t *FlushTask) TraceCtx() context.Context {
+	return t.ctx
+}
+
+func (t *FlushTask) ID() UniqueID {
+	return t.Base.MsgID
+}
+
+func (t *FlushTask) SetID(uid UniqueID) {
+	t.Base.MsgID = uid
+}
+
+func (t *FlushTask) Name() string {
+	return FlushTaskName
+}
+
+func (t *FlushTask) Type() commonpb.MsgType {
+	return t.Base.MsgType
+}
+
+func (t *FlushTask) BeginTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *FlushTask) EndTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *FlushTask) SetTs(ts Timestamp) {
+	t.Base.Timestamp = ts
+}
+
+func (t *FlushTask) OnEnqueue() error {
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
+	t.Base.MsgType = commonpb.MsgType_Flush
+	t.Base.SourceID = paramtable.GetNodeID()
+	return nil
+}
+
+func (t *FlushTask) PreExecute(ctx context.Context) error {
+	return nil
+}
+
+func (t *FlushTask) PostExecute(ctx context.Context) error {
+	return nil
+}

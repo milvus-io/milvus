@@ -10,7 +10,7 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License
 
 set(JSON_STATS_TEST_FILES
-    ../init_gtest.cpp
+    json_stats_test_main.cpp
     test_bson_builder.cpp
     test_bson_view.cpp
     test_parquet_writer.cpp

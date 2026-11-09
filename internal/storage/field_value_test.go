@@ -21,7 +21,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestVarCharFieldValue(t *testing.T) {
@@ -350,5 +353,50 @@ func TestFloatVectorFieldValue(t *testing.T) {
 		err = json.Unmarshal(blob, unmarshalledPk)
 		assert.NoError(t, err)
 		assert.Equal(t, pk.Value, unmarshalledPk.Value)
+	})
+}
+
+func TestNewScalarFieldValueFromGenericValue(t *testing.T) {
+	int64Val := &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: 1735689600000000}}
+	floatVal := &planpb.GenericValue{Val: &planpb.GenericValue_FloatVal{FloatVal: 1.5}}
+	strVal := &planpb.GenericValue{Val: &planpb.GenericValue_StringVal{StringVal: "a"}}
+
+	t.Run("timestamptz is int64 microseconds", func(t *testing.T) {
+		v, err := NewScalarFieldValueFromGenericValue(schemapb.DataType_Timestamptz, int64Val)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(1735689600000000), v.GetValue())
+	})
+
+	// A plan literal whose kind does not match the field type is an internal
+	// contract violation (the parser must reject it), so it is reported as a
+	// system error rather than crashing the caller.
+	mismatches := []struct {
+		dtype schemapb.DataType
+		val   *planpb.GenericValue
+	}{
+		{schemapb.DataType_Int8, strVal},
+		{schemapb.DataType_Int16, strVal},
+		{schemapb.DataType_Int32, floatVal},
+		{schemapb.DataType_Int64, strVal},
+		{schemapb.DataType_Timestamptz, strVal},
+		{schemapb.DataType_Timestamptz, floatVal},
+		{schemapb.DataType_Float, strVal},
+		{schemapb.DataType_Double, int64Val},
+		{schemapb.DataType_String, int64Val},
+		{schemapb.DataType_VarChar, floatVal},
+	}
+	for _, m := range mismatches {
+		t.Run(m.dtype.String()+" mismatch", func(t *testing.T) {
+			assert.NotPanics(t, func() {
+				_, err := NewScalarFieldValueFromGenericValue(m.dtype, m.val)
+				assert.ErrorIs(t, err, merr.ErrServiceInternal)
+			})
+		})
+	}
+
+	t.Run("out of range stays a parameter error", func(t *testing.T) {
+		_, err := NewScalarFieldValueFromGenericValue(schemapb.DataType_Int8,
+			&planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: 1000}})
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 }

@@ -49,8 +49,8 @@ func newTestOperator(name string, inputs, outputs []string) *testOperator {
 
 func (op *testOperator) Name() string { return op.name }
 
-func (op *testOperator) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, error) {
-	return input, nil
+func (op *testOperator) Execute(ctx *types.FuncContext, input *DataFrame) (*OperatorResult, error) {
+	return &OperatorResult{}, nil
 }
 
 func (op *testOperator) String() string { return op.name }
@@ -351,7 +351,7 @@ func TestPruneDataFramePreservesMetadata(t *testing.T) {
 	fieldID, ok := pruned.FieldID("keep")
 	require.True(t, ok)
 	require.EqualValues(t, 100, fieldID)
-	require.False(t, pruned.fieldNullables["keep"])
+	require.False(t, pruned.FieldNullable("keep"))
 	metricType, ok := pruned.MetricType()
 	require.True(t, ok)
 	require.Equal(t, "IP", metricType)
@@ -376,11 +376,11 @@ func newAssertColumnsOperator(inputs, outputs, expected []string) *assertColumns
 
 func (op *assertColumnsOperator) Name() string { return "assert_columns" }
 
-func (op *assertColumnsOperator) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, error) {
+func (op *assertColumnsOperator) Execute(ctx *types.FuncContext, input *DataFrame) (*OperatorResult, error) {
 	if !equalStringSet(op.expected, input.ColumnNames()) {
 		return nil, merr.WrapErrServiceInternalMsg("expected columns %v, got %v", op.expected, input.ColumnNames())
 	}
-	return input, nil
+	return &OperatorResult{}, nil
 }
 
 func equalStringSet(left, right []string) bool {

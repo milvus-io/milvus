@@ -18,11 +18,13 @@ package orderby
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // OrderByField defines a single sort key for ORDER BY operations.
@@ -208,6 +210,30 @@ func ConvertFromPlanOrderByFields(planFields []*planpb.OrderByField, schema *sch
 		}
 	}
 	return result, nil
+}
+
+// AppendGroupByTieBreakers gives every group a distinct position in the sort
+// order. All reduction levels must use the same order before applying topK;
+// otherwise a tied group can lose partial aggregate values from one source.
+func AppendGroupByTieBreakers(orderByFields []*OrderByField, groupByFieldIDs []int64, schema *schemapb.CollectionSchema) ([]*OrderByField, error) {
+	if len(orderByFields) == 0 || len(groupByFieldIDs) == 0 {
+		return orderByFields, nil
+	}
+
+	completed := append([]*OrderByField(nil), orderByFields...)
+	for _, id := range groupByFieldIDs {
+		if slices.ContainsFunc(completed, func(field *OrderByField) bool {
+			return field.FieldID == id
+		}) {
+			continue
+		}
+		field := typeutil.GetFieldByID(schema, id)
+		if field == nil {
+			return nil, merr.WrapErrServiceInternalMsg("GROUP BY field with ID %d not found in schema", id)
+		}
+		completed = append(completed, NewOrderByField(id, field.GetName(), field.GetDataType()))
+	}
+	return completed, nil
 }
 
 // IsSortableType checks if a data type can be used in ORDER BY

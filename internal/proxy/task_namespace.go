@@ -33,6 +33,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
+const (
+	CreateNamespaceTaskName   = "CreateNamespaceTask"
+	DescribeNamespaceTaskName = "DescribeNamespaceTask"
+	ListNamespacesTaskName    = "ListNamespacesTask"
+	DropNamespaceTaskName     = "DropNamespaceTask"
+	HasNamespaceTaskName      = "HasNamespaceTask"
+	GetNamespaceStatsTaskName = "GetNamespaceStatsTask"
+)
+
 type createNamespaceTask struct {
 	baseTask
 	Condition

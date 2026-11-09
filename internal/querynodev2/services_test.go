@@ -16,16 +16,19 @@
 package querynodev2
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"math/rand"
 	"path"
+	"sort"
 	"strconv"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow/ipc"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -48,6 +51,8 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/materialize"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
@@ -56,7 +61,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
@@ -66,6 +73,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/resource"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -738,6 +746,7 @@ func (suite *ServiceSuite) genSegmentLoadInfos(schema *schemapb.CollectionSchema
 					1000,
 				)
 				suite.Require().NoError(err)
+				index.NumRows = 1000
 				indexes = append(indexes, index)
 			}
 		}
@@ -1746,6 +1755,261 @@ func (suite *ServiceSuite) TestQuery_Failed() {
 	suite.Equal(commonpb.ErrorCode_NotReadyServe, resp.Status.GetErrorCode())
 }
 
+func (suite *ServiceSuite) TestMaterialize_Failed() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
+	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
+	suite.NoError(err)
+	creq.Limit = typeutil.Unlimited
+	req := &querypb.QueryRequest{
+		Req:                      creq,
+		DmlChannels:              []string{suite.vchannel},
+		MaterializeFormatVersion: materialize.FormatVersion,
+	}
+
+	// collection not loaded
+	resp, err := suite.node.Materialize(ctx, req)
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrCollectionNotLoaded)
+
+	suite.node.manager.Collection.PutOrRef(suite.collectionID, schema, nil, nil)
+	defer suite.node.manager.Collection.Unref(suite.collectionID, 1)
+
+	// delegator not found
+	resp, err = suite.node.Materialize(ctx, req)
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrChannelNotFound)
+
+	// node not healthy
+	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
+	resp, err = suite.node.Materialize(ctx, req)
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
+}
+
+func (suite *ServiceSuite) TestMaterializeSegments_RejectsOutOfScope() {
+	unlimited := func() *internalpb.RetrieveRequest {
+		return &internalpb.RetrieveRequest{CollectionID: suite.collectionID, Limit: typeutil.Unlimited}
+	}
+	cases := []struct {
+		name    string
+		version int32
+		mutate  func(*internalpb.RetrieveRequest)
+	}{
+		{"limited", materialize.FormatVersion, func(r *internalpb.RetrieveRequest) { r.Limit = 10 }},
+		{"aggregate", materialize.FormatVersion, func(r *internalpb.RetrieveRequest) { r.Aggregates = []*planpb.Aggregate{{}} }},
+		{"group by", materialize.FormatVersion, func(r *internalpb.RetrieveRequest) { r.GroupByFieldIds = []int64{101} }},
+		{"order by", materialize.FormatVersion, func(r *internalpb.RetrieveRequest) { r.OrderByFields = []*planpb.OrderByField{{}} }},
+		{"no format version", 0, func(*internalpb.RetrieveRequest) {}},
+		{"newer format version", materialize.FormatVersion + 1, func(*internalpb.RetrieveRequest) {}},
+	}
+	for _, c := range cases {
+		suite.Run(c.name, func() {
+			r := unlimited()
+			c.mutate(r)
+			res, err := suite.node.MaterializeSegments(context.Background(), &querypb.QueryRequest{
+				Req:                      r,
+				DmlChannels:              []string{suite.vchannel},
+				MaterializeFormatVersion: c.version,
+			})
+			suite.NoError(err)
+			// Out of scope, not broken: the proxy falls back to Query.
+			suite.ErrorIs(merr.Error(res.GetStatus()), merr.ErrServiceUnimplemented)
+			// The reply names this node's version, so a mismatch is told apart.
+			suite.Equal(materialize.FormatVersion, res.GetHeader().GetFormatVersion())
+		})
+	}
+}
+
+func (suite *ServiceSuite) TestMaterialize_Normal() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	suite.TestWatchDmChannelsInt64()
+	suite.TestLoadSegments_Int64()
+	suite.syncDistribution(ctx)
+
+	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
+	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
+	suite.Require().NoError(err)
+	creq.MvccTimestamp = typeutil.MaxTimestamp
+	creq.Limit = typeutil.Unlimited
+	creq.OutputFieldsId = []int64{109, 100, common.TimeStampField}
+	planNode := &planpb.PlanNode{}
+	suite.Require().NoError(proto.Unmarshal(creq.SerializedExprPlan, planNode))
+	planNode.OutputFieldIds = []int64{109, 100, common.TimeStampField}
+	creq.SerializedExprPlan, err = proto.Marshal(planNode)
+	suite.Require().NoError(err)
+
+	res, err := suite.node.Materialize(ctx, &querypb.QueryRequest{
+		Req:                      creq,
+		MaterializeFormatVersion: materialize.FormatVersion,
+		DmlChannels:              []string{suite.vchannel},
+	})
+	suite.Require().NoError(err)
+	suite.Require().NoError(merr.Error(res.GetStatus()))
+	suite.Greater(res.GetHeader().GetBodyRawSize(), int64(0))
+	// The delegator relays the body through the side table, not res.Body.
+	body := resource.TakeMaterializeBody(res)
+	defer body.Release()
+	suite.Greater(body.Len(), 0)
+	// The request named no schema, so the reply carries the bytes.
+	suite.NotEmpty(res.GetHeader().GetBodySchema())
+	suite.Equal(materialize.SchemaFingerprint(res.GetHeader().GetBodySchema()), res.GetHeader().GetSchemaFingerprint())
+	suite.Equal(typeutil.MaxTimestamp, res.GetHeader().GetMvccTimestamp())
+}
+
+func (suite *ServiceSuite) TestMaterializeSegments_MatchesQuerySegments() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	suite.TestWatchDmChannelsInt64()
+	suite.TestLoadSegments_Int64()
+
+	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
+	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
+	suite.Require().NoError(err)
+	creq.MvccTimestamp = typeutil.MaxTimestamp
+	creq.Limit = typeutil.Unlimited
+	// Like the real proxy, request the timestamp in both the request and the
+	// serialized plan; otherwise segcore force-retains the pk in the header.
+	creq.OutputFieldsId = []int64{109, 100, common.TimeStampField}
+	planNode := &planpb.PlanNode{}
+	suite.Require().NoError(proto.Unmarshal(creq.SerializedExprPlan, planNode))
+	planNode.OutputFieldIds = []int64{109, 100, common.TimeStampField}
+	// Match every row, so the comparison covers many rows across segments.
+	planNode.Node = &planpb.PlanNode_Predicates{Predicates: &planpb.Expr{Expr: &planpb.Expr_UnaryRangeExpr{UnaryRangeExpr: &planpb.UnaryRangeExpr{
+		ColumnInfo: &planpb.ColumnInfo{FieldId: 109, DataType: schemapb.DataType_Int64},
+		Op:         planpb.OpType_GreaterEqual,
+		Value:      &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: 0}},
+	}}}}
+	creq.SerializedExprPlan, err = proto.Marshal(planNode)
+	suite.Require().NoError(err)
+	req := &querypb.QueryRequest{
+		Req:                      creq,
+		MaterializeFormatVersion: materialize.FormatVersion,
+		DmlChannels:              []string{suite.vchannel},
+		SegmentIDs:               suite.validSegmentIDs,
+		Scope:                    querypb.DataScope_Historical,
+	}
+
+	qres, err := suite.node.QuerySegments(ctx, req)
+	suite.Require().NoError(err)
+	suite.Require().NoError(merr.Error(qres.GetStatus()))
+	wantRows := int64(typeutil.GetSizeOfIDs(qres.GetIds()))
+	suite.Require().Greater(wantRows, int64(0))
+
+	mreq := proto.Clone(req).(*querypb.QueryRequest)
+	mres, err := suite.node.MaterializeSegments(ctx, mreq)
+	suite.Require().NoError(err)
+	suite.Require().NoError(merr.Error(mres.GetStatus()))
+
+	suite.Greater(mres.GetHeader().GetBodyRawSize(), int64(0))
+	// Without a fingerprint in the request the reply carries the schema bytes;
+	// with the matching one it omits them; with another it carries them.
+	schemaMsg := mres.GetHeader().GetBodySchema()
+	fp := mres.GetHeader().GetSchemaFingerprint()
+	suite.Require().NotEmpty(schemaMsg)
+	suite.Equal(materialize.SchemaFingerprint(schemaMsg), fp)
+	for _, c := range []struct {
+		name      string
+		requestFP uint64
+		wantBytes bool
+	}{
+		{"matching fingerprint", fp, false},
+		{"other fingerprint", fp + 1, true},
+	} {
+		freq := proto.Clone(mreq).(*querypb.QueryRequest)
+		freq.MaterializeSchemaFingerprint = c.requestFP
+		fres, err := suite.node.MaterializeSegments(ctx, freq)
+		suite.Require().NoError(err, c.name)
+		suite.Require().NoError(merr.Error(fres.GetStatus()), c.name)
+		suite.NotEmpty(fres.GetBody(), c.name)
+		suite.Equal(fp, fres.GetHeader().GetSchemaFingerprint(), c.name)
+		if c.wantBytes {
+			suite.Equal(schemaMsg, fres.GetHeader().GetBodySchema(), c.name)
+		} else {
+			suite.Empty(fres.GetHeader().GetBodySchema(), c.name)
+		}
+		// arrow-go's stock reader is the oracle.
+		rd, err := ipc.NewReader(io.MultiReader(bytes.NewReader(schemaMsg), bytes.NewReader(bytes.Join(fres.GetBody(), nil))))
+		suite.Require().NoError(err, c.name)
+		n := int64(0)
+		for rd.Next() {
+			n += rd.Record().NumRows()
+		}
+		suite.Require().NoError(rd.Err(), c.name)
+		rd.Release()
+		suite.Equal(wantRows, n, c.name)
+	}
+	// Turn the batches back into FieldData the way the proxy does
+	// (materialize.Schema.ReadEntry, then Gather), then compare pk values and
+	// every column with Query's, both ordered by pk.
+	ms, err := materialize.ParseSchema(mres.GetHeader().GetBodySchema())
+	suite.Require().NoError(err)
+	var (
+		batches []*materialize.Batch
+		rows    []materialize.RowRef
+	)
+	for i, e := range mres.GetBody() {
+		b, err := ms.ReadEntry([][]byte{e}, i, 0)
+		suite.Require().NoError(err)
+		// The timestamp is the batch's system column.
+		suite.Require().Len(b.Sys, 1)
+		suite.Require().Len(b.Timestamps(ms), b.Rows)
+		batches = append(batches, b)
+		for j := 0; j < b.Rows; j++ {
+			rows = append(rows, materialize.RowRef{Batch: int32(i), Row: int32(j)})
+		}
+	}
+	suite.Equal(wantRows, int64(len(rows)))
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	suite.Require().NoError(err)
+	ids, fields, err := ms.Gather(batches, rows, helper)
+	suite.Require().NoError(err)
+	mseg := &segcorepb.RetrieveResults{Ids: ids, FieldsData: fields}
+
+	sortByPK := func(ids []int64, fields []*schemapb.FieldData) ([]int64, map[int64]*schemapb.FieldData) {
+		order := make([]int, len(ids))
+		for i := range order {
+			order[i] = i
+		}
+		sort.Slice(order, func(a, b int) bool { return ids[order[a]] < ids[order[b]] })
+		sortedIDs := make([]int64, len(ids))
+		dst := typeutil.PrepareResultFieldData(fields, int64(len(ids)))
+		for i, o := range order {
+			sortedIDs[i] = ids[o]
+			typeutil.AppendFieldData(dst, fields, int64(o))
+		}
+		byID := make(map[int64]*schemapb.FieldData, len(dst))
+		for _, fd := range dst {
+			byID[fd.GetFieldId()] = fd
+		}
+		return sortedIDs, byID
+	}
+	wantPKs, wantCols := sortByPK(qres.GetIds().GetIntId().GetData(), qres.GetFieldsData())
+	gotPKs, gotCols := sortByPK(mseg.GetIds().GetIntId().GetData(), mseg.GetFieldsData())
+	suite.Equal(wantPKs, gotPKs)
+	suite.Require().NotEmpty(wantCols)
+	suite.Equal(len(wantCols), len(gotCols))
+	for id, want := range wantCols {
+		got, ok := gotCols[id]
+		suite.Require().True(ok, "field %d missing from Materialize", id)
+		suite.Equal(want.GetType(), got.GetType(), "field %d", id)
+		suite.True(proto.Equal(want.GetScalars(), got.GetScalars()), "field %d scalars differ", id)
+		suite.True(proto.Equal(want.GetVectors(), got.GetVectors()), "field %d vectors differ", id)
+		suite.Equal(want.GetValidData(), got.GetValidData(), "field %d valid data", id)
+	}
+
+	// A collection that is not loaded surfaces as a header status, not an error.
+	mreq.Req.CollectionID = -1
+	mres, err = suite.node.MaterializeSegments(ctx, mreq)
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(mres.GetStatus()), merr.ErrCollectionNotLoaded)
+}
+
 func (suite *ServiceSuite) TestQuerySegments_Failed() {
 	ctx := context.Background()
 
@@ -1911,6 +2175,99 @@ func (suite *ServiceSuite) TestQuerySegments_Normal() {
 	rsp, err := suite.node.QuerySegments(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, rsp.GetStatus().GetErrorCode())
+}
+
+// genCountRequest builds count(*) on the collection the suite loaded.
+// legacy=true is the 2.6 Proxy encoding: IsCount on the request, is_count on
+// the plan, no Aggregates. legacy=false is the current encoding: one count
+// aggregate on the request and on the plan.
+func (suite *ServiceSuite) genCountRequest(legacy bool) *querypb.QueryRequest {
+	countAll := []*planpb.Aggregate{{Op: planpb.AggregateOp_count, FieldId: 0}}
+	query := &planpb.QueryPlanNode{}
+	req := &internalpb.RetrieveRequest{
+		QueryLabel: "query",
+		Base: &commonpb.MsgBase{
+			MsgType:  commonpb.MsgType_Retrieve,
+			MsgID:    rand.Int63(),
+			TargetID: suite.node.session.ServerID,
+		},
+		CollectionID:  suite.collectionID,
+		PartitionIDs:  suite.partitionIDs,
+		Limit:         typeutil.Unlimited,
+		MvccTimestamp: typeutil.MaxTimestamp,
+	}
+	if legacy {
+		query.IsCount = true
+		req.IsCount = true
+	} else {
+		query.Aggregates = countAll
+		req.Aggregates = countAll
+	}
+	serialized, err := proto.Marshal(&planpb.PlanNode{Node: &planpb.PlanNode_Query{Query: query}})
+	suite.Require().NoError(err)
+	req.SerializedExprPlan = serialized
+	return &querypb.QueryRequest{
+		Req:         req,
+		DmlChannels: []string{suite.vchannel},
+	}
+}
+
+// countOf reads the single value of a count(*) result in the shape a 2.6
+// Proxy requires: exactly one Int64 column with one row.
+func (suite *ServiceSuite) countOf(rsp *internalpb.RetrieveResults) int64 {
+	suite.Require().NoError(merr.Error(rsp.GetStatus()))
+	suite.Require().Len(rsp.GetFieldsData(), 1)
+	suite.Require().Equal(schemapb.DataType_Int64, rsp.GetFieldsData()[0].GetType())
+	counts := rsp.GetFieldsData()[0].GetScalars().GetLongData().GetData()
+	suite.Require().Len(counts, 1)
+	return counts[0]
+}
+
+// TestQuery_LegacyCount is a 2.6 Proxy that sends count(*) to this node's
+// delegator during a rolling upgrade. The answer must equal the answer to the
+// same count(*) in the current encoding.
+// The two legacy count tests cover the paths that enter this node: a 2.6
+// Proxy that sends to a 3.0 delegator, and a 2.6 delegator that sends to a 3.0
+// worker. The third mixed-version path, a 3.0 delegator that forwards to a 2.6
+// worker, is not run here: it requires a 2.6 worker binary. That path was
+// traced by code: the forwarded plan keeps is_count, the 2.6 worker answers
+// with one Int64 column and no Ids, and the delegator aggregate reduce accepts
+// that shape (TestDelegatorPipelineCountWithEmptyWorkerResult).
+func (suite *ServiceSuite) TestQuery_LegacyCount() {
+	ctx := context.Background()
+	suite.TestWatchDmChannelsInt64()
+	suite.TestLoadSegments_Int64()
+	suite.syncDistribution(ctx)
+
+	current, err := suite.node.Query(ctx, suite.genCountRequest(false))
+	suite.Require().NoError(err)
+	expected := suite.countOf(current)
+	suite.Require().Positive(expected)
+
+	legacy, err := suite.node.Query(ctx, suite.genCountRequest(true))
+	suite.Require().NoError(err)
+	suite.Equal(expected, suite.countOf(legacy))
+}
+
+// TestQuerySegments_LegacyCount is a 2.6 delegator that forwards count(*) to
+// this node as a worker during a rolling upgrade.
+func (suite *ServiceSuite) TestQuerySegments_LegacyCount() {
+	ctx := context.Background()
+	suite.TestWatchDmChannelsInt64()
+	suite.TestLoadSegments_Int64()
+
+	querySegments := func(legacy bool) *internalpb.RetrieveResults {
+		req := suite.genCountRequest(legacy)
+		req.SegmentIDs = suite.validSegmentIDs
+		req.Scope = querypb.DataScope_Historical
+		rsp, err := suite.node.QuerySegments(ctx, req)
+		suite.Require().NoError(err)
+		return rsp
+	}
+
+	expected := suite.countOf(querySegments(false))
+	suite.Require().Positive(expected)
+	suite.Equal(expected, suite.countOf(querySegments(true)))
 }
 
 func (suite *ServiceSuite) TestQueryStreamSegments_Normal() {
@@ -2273,6 +2630,24 @@ func (suite *ServiceSuite) TestGetDataDistribution_DeltaReportsFailedLeaderSegme
 	suite.Require().True(deltaResp.GetIsDelta())
 	suite.Require().Len(deltaResp.GetLeaderViews(), 1)
 	suite.Equal(channel, deltaResp.GetLeaderViews()[0].GetChannel())
+}
+
+func TestLeaderViewCatchingUpStreamingData(t *testing.T) {
+	t.Run("legacy querynode preserves catchup state", func(t *testing.T) {
+		assert.True(t, leaderViewCatchingUpStreamingData(nil, true))
+		assert.False(t, leaderViewCatchingUpStreamingData(nil, false))
+	})
+
+	t.Run("embedded querynode does not report legacy catchup", func(t *testing.T) {
+		labels := map[string]string{sessionutil.LabelStreamingNodeEmbeddedQueryNode: "1"}
+		assert.False(t, leaderViewCatchingUpStreamingData(labels, true))
+		assert.False(t, leaderViewCatchingUpStreamingData(labels, false))
+	})
+
+	t.Run("legacy embedded querynode label is honored", func(t *testing.T) {
+		labels := map[string]string{sessionutil.LegacyLabelStreamingNodeEmbeddedQueryNode: "1"}
+		assert.False(t, leaderViewCatchingUpStreamingData(labels, true))
+	})
 }
 
 func (suite *ServiceSuite) TestSyncDistribution_Normal() {

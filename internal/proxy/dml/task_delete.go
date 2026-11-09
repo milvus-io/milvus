@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"sync"
 	"time"
 
 	"go.uber.org/atomic"
@@ -15,17 +16,16 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
-	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/dql"
-	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
-	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -51,8 +51,6 @@ type DeleteTask struct {
 	req *milvuspb.DeleteRequest
 
 	// channel
-	chMgr     channelmgr.ChannelsMgr
-	pChannels []pChan
 	vChannels []vChan
 
 	idAllocator allocator.Interface
@@ -109,29 +107,19 @@ func (dt *DeleteTask) SetTs(ts Timestamp) {
 }
 
 func (dt *DeleteTask) OnEnqueue() error {
-	if dt.req.Base == nil {
-		dt.req.Base = commonpbutil.NewMsgBase()
-	}
-	dt.req.Base.MsgType = commonpb.MsgType_Delete
-	dt.req.Base.SourceID = paramtable.GetNodeID()
+	// The runner initializes the shared request before enqueueing. IDs and
+	// timestamps belong to each task; repacking creates independent WAL bases.
 	return nil
 }
 
 func (dt *DeleteTask) SetChannels() error {
-	collID, err := dt.GetMetaCache().GetCollectionID(dt.ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
-	if err != nil {
-		return err
-	}
-	channels, err := dt.chMgr.GetChannels(collID)
-	if err != nil {
-		return err
-	}
-	dt.pChannels = channels
+	// delete task routes messages by the vchannels pinned in DeleteRunner.Init and
+	// nothing reads its pchannels, so we don't need to resolve channels here.
 	return nil
 }
 
 func (dt *DeleteTask) GetChannels() []pChan {
-	return dt.pChannels
+	return nil
 }
 
 func (dt *DeleteTask) PreExecute(ctx context.Context) error {
@@ -287,13 +275,15 @@ func repackDeleteMsgByHash(
 }
 
 type DeleteRunner struct {
-	req       *milvuspb.DeleteRequest
-	result    *milvuspb.MutationResult
-	node      taskmodel.TaskNode
-	metaCache Cache
+	initRequestOnce sync.Once
+	req             *milvuspb.DeleteRequest
+	result          *milvuspb.MutationResult
+	// userPlanIsSimple: the user's filter names primary keys only (delete by ids).
+	userPlanIsSimple bool
+	node             taskmodel.TaskNode
+	metaCache        Cache
 
 	// channel
-	chMgr     channelmgr.ChannelsMgr
 	vChannels []vChan
 
 	idAllocator     allocator.Interface
@@ -308,10 +298,11 @@ type DeleteRunner struct {
 	plan         *planpb.PlanNode
 
 	// for query
-	msgID int64
-	ts    uint64
-	lb    shardclient.LBPolicy
-	count atomic.Int64
+	msgID           int64
+	ts              uint64
+	lb              shardclient.LBPolicy
+	count           atomic.Int64
+	viewQueryClient queryclient.Client
 
 	// task queue
 	queue *scheduler.DmTaskQueue
@@ -326,18 +317,22 @@ type DeleteRunner struct {
 // NewDeleteRunner constructs a delete runner. Its dependencies are passed in
 // explicitly because most of them (queue, limiter, allocators) are not part of
 // the taskmodel.TaskNode contract.
-func NewDeleteRunner(node taskmodel.TaskNode, request *milvuspb.DeleteRequest, metaCache Cache, idAllocator allocator.Interface, tsoAllocatorIns tsoAllocator, chMgr channelmgr.ChannelsMgr, queue *scheduler.DmTaskQueue, lb shardclient.LBPolicy, limiter types.Limiter) *DeleteRunner {
+func NewDeleteRunner(node taskmodel.TaskNode, request *milvuspb.DeleteRequest, metaCache Cache, idAllocator allocator.Interface, tsoAllocatorIns tsoAllocator, queue *scheduler.DmTaskQueue, lb shardclient.LBPolicy, limiter types.Limiter) *DeleteRunner {
 	return &DeleteRunner{
 		req:             request,
 		node:            node,
 		metaCache:       metaCache,
 		idAllocator:     idAllocator,
 		tsoAllocatorIns: tsoAllocatorIns,
-		chMgr:           chMgr,
 		queue:           queue,
 		lb:              lb,
 		limiter:         limiter,
 	}
+}
+
+// SetViewQueryClient selects the QueryView execution path for complex deletes.
+func (dr *DeleteRunner) SetViewQueryClient(client queryclient.Client) {
+	dr.viewQueryClient = client
 }
 
 // Result returns the mutation result after execution.
@@ -395,22 +390,6 @@ func (dr *DeleteRunner) Init(ctx context.Context) error {
 	if err != nil {
 		return ErrWithLog(log, "Failed to get collection info", err)
 	}
-	canonicalDBName := colInfo.DBName
-	if canonicalDBName == "" {
-		canonicalDBName = dr.req.GetDbName()
-	}
-	rlsEnabled := colInfo.RlsEnabled
-	if rlsEnabled && dr.req.GetSkipRls() {
-		rlsEnabled, err = dr.node.ResolveRLSEnforcement(ctx, dr.GetMetaCache(), rlsEnabled, colInfo.RlsForce, true,
-			canonicalDBName, colInfo.Schema.GetName(), "delete")
-		if err != nil {
-			return err
-		}
-	}
-	principalName, enforceRLS, err := rlsutil.ResolveRuntimePrincipal(rlsEnabled, dr.req.GetRlsPrincipal(), "delete")
-	if err != nil {
-		return err
-	}
 
 	dr.schema = colInfo.Schema
 	if err := dql.ValidateTextStorageV3Enabled(dr.schema.CollectionSchema); err != nil {
@@ -425,7 +404,9 @@ func (dr *DeleteRunner) Init(ctx context.Context) error {
 	}
 
 	colTimezone := dql.GetColTimezone(colInfo)
-	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: colTimezone}
+	// Count the user's filter before the rewriter changes it.
+	var exprFeatures featureusage.FeatureSet
+	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: colTimezone, OnParsedExpr: dql.ExprFeatureObserver(&exprFeatures)}
 
 	parseDeletePlan := func(expr string) (*planpb.PlanNode, error) {
 		start := time.Now()
@@ -442,19 +423,13 @@ func (dr *DeleteRunner) Init(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	dql.RecordExprTemplateFeatures(&exprFeatures, dr.req.GetExprTemplateValues())
 	if planparserv2.IsAlwaysTruePlan(userPlan) {
 		return merr.WrapErrAsInputError(merr.WrapErrParameterInvalidMsg("delete plan can't be empty or always true : %s", dr.req.GetExpr()))
 	}
 	dr.plan = userPlan
-
-	if enforceRLS {
-		predicate, err := rls.ResolveUsingPredicate(ctx, dr.collectionID, principalName, rlsutil.PolicyActionDelete, dr.schema.SchemaHelper)
-		if err != nil {
-			return err
-		}
-		if err := rls.MergeNormalizedPredicateToPlan(dr.plan, predicate); err != nil {
-			return err
-		}
+	if featureusage.Enabled() {
+		dr.userPlanIsSimple = isSimpleDeletePlan(userPlan)
 	}
 
 	// Approximate membership_match filters carrying an MBF1 blob must not drive
@@ -513,12 +488,8 @@ func (dr *DeleteRunner) Init(ctx context.Context) error {
 		dr.partitionIDs = []UniqueID{partID} // only one partID
 	}
 
-	// set vchannels
-	channelNames, err := dr.chMgr.GetVChannels(dr.collectionID)
-	if err != nil {
-		return ErrWithLog(log, "Failed to get vchannels from collection", err)
-	}
-	dr.vChannels = channelNames
+	// set vchannels from the collection info pinned above
+	dr.vChannels = colInfo.VChannels
 
 	dr.result = &milvuspb.MutationResult{
 		Status: merr.Success(),
@@ -531,6 +502,7 @@ func (dr *DeleteRunner) Init(ctx context.Context) error {
 
 func (dr *DeleteRunner) Run(ctx context.Context) error {
 	isSimple, pk, numRow := getPrimaryKeysFromPlan(dr.schema.CollectionSchema, dr.plan)
+	recordDeleteMode(dr.userPlanIsSimple)
 	if isSimple {
 		// if could get delete.primaryKeys from delete expr
 		err := dr.simpleDelete(ctx, pk, numRow)
@@ -550,13 +522,22 @@ func (dr *DeleteRunner) Run(ctx context.Context) error {
 }
 
 func (dr *DeleteRunner) produce(ctx context.Context, primaryKeys *schemapb.IDs, partitionID UniqueID) (*DeleteTask, error) {
+	// Shard callbacks can produce tasks concurrently from the same request.
+	// Preserve lazy initialization when producing the first task.
+	dr.initRequestOnce.Do(func() {
+		if dr.req.Base == nil {
+			dr.req.Base = commonpbutil.NewMsgBase()
+		}
+		dr.req.Base.MsgType = commonpb.MsgType_Delete
+		dr.req.Base.SourceID = paramtable.GetNodeID()
+	})
+
 	dt := &DeleteTask{
 		baseTask:     baseTask{MetaCache: dr.GetMetaCache()},
 		ctx:          ctx,
 		Condition:    NewTaskCondition(ctx),
 		req:          dr.req,
 		idAllocator:  dr.idAllocator,
-		chMgr:        dr.chMgr,
 		schema:       dr.schema,
 		collectionID: dr.collectionID,
 		partitionID:  partitionID,
@@ -598,6 +579,7 @@ func (dr *DeleteRunner) getStreamingQueryAndDelteFunc(
 				ReqID:              paramtable.GetNodeID(),
 				DbID:               0, // TODO
 				CollectionID:       dr.collectionID,
+				SchemaVersion:      dr.schema.GetVersion(),
 				PartitionIDs:       dr.partitionIDs,
 				SerializedExprPlan: serializedPlan,
 				OutputFieldsId:     outputFieldIDs,
@@ -709,6 +691,10 @@ func (dr *DeleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode
 	_, outputFieldIDs := translatePkOutputFields(dr.schema.CollectionSchema)
 	outputFieldIDs = append(outputFieldIDs, common.TimeStampField)
 	plan.OutputFieldIds = outputFieldIDs
+	if dr.viewQueryClient != nil {
+		// A delete must retrieve every match, without the ordinary query limit.
+		plan.GetQuery().Limit = typeutil.Unlimited
+	}
 
 	// Budget and marshal once before LB fan-out. A roaring plan can be tens of
 	// MiB; marshaling inside each concurrent shard callback would multiply that
@@ -717,8 +703,6 @@ func (dr *DeleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode
 	if err != nil {
 		return err
 	}
-	exec := dr.getStreamingQueryAndDelteFunc(serializedPlan, outputFieldIDs)
-
 	dr.msgID, err = dr.idAllocator.AllocOne()
 	if err != nil {
 		return err
@@ -729,6 +713,11 @@ func (dr *DeleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode
 		return err
 	}
 
+	if dr.viewQueryClient != nil {
+		return dr.complexDeleteByQueryView(ctx, serializedPlan, outputFieldIDs)
+	}
+
+	exec := dr.getStreamingQueryAndDelteFunc(serializedPlan, outputFieldIDs)
 	channelName, useNamespaceChannel, err := dql.NamespaceShardingChannel(dr.schema.CollectionSchema, dr.req.Namespace, dr.vChannels)
 	if err != nil {
 		return err
@@ -761,6 +750,64 @@ func (dr *DeleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode
 	return nil
 }
 
+func (dr *DeleteRunner) complexDeleteByQueryView(ctx context.Context, serializedPlan []byte, outputFieldIDs []int64) error {
+	// TODO: use a streaming QueryView interface when available. Materialize the
+	// complete batch before producing any deletes, so query retries have no
+	// write side effects and failed/oversized reads cannot silently delete a prefix.
+	result, err := dr.viewQueryClient.Legacy().Query(ctx, &queryclient.LegacyQueryRequest{
+		Schema:      dr.schema.CollectionSchema,
+		BarrierMVCC: dr.ts,
+		Req: &internalpb.RetrieveRequest{
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
+				commonpbutil.WithMsgID(dr.msgID),
+				commonpbutil.WithSourceID(paramtable.GetNodeID()),
+			),
+			ReqID:              paramtable.GetNodeID(),
+			DbID:               dr.dbID,
+			CollectionID:       dr.collectionID,
+			PartitionIDs:       dr.partitionIDs,
+			SchemaVersion:      dr.schema.GetVersion(),
+			SerializedExprPlan: serializedPlan,
+			OutputFieldsId:     outputFieldIDs,
+			ConsistencyLevel:   dr.req.GetConsistencyLevel(),
+			GuaranteeTimestamp: dql.ParseGuaranteeTsFromConsistency(dr.ts, dr.ts, dr.req.GetConsistencyLevel()),
+			Limit:              typeutil.Unlimited,
+			QueryLabel:         metrics.DeleteQueryLabel,
+		},
+	})
+	if err != nil {
+		return dql.QueryViewLoadError(ctx, dr.node, dr.collectionID, dr.partitionIDs, err)
+	}
+
+	primaryKeys := &schemapb.IDs{}
+	seen := typeutil.NewSet[any]()
+	for _, batch := range result.Results {
+		if batch.GetHasMoreResult() {
+			return merr.WrapErrServiceInternalMsg("incomplete QueryView batch for complex delete")
+		}
+		dr.allQueryCnt.Add(batch.GetAllRetrieveCount())
+		dr.scannedRemoteBytes.Add(batch.GetScannedRemoteBytes())
+		dr.scannedTotalBytes.Add(batch.GetScannedTotalBytes())
+		for i := 0; i < typeutil.GetSizeOfIDs(batch.GetIds()); i++ {
+			pk := typeutil.GetPK(batch.GetIds(), int64(i))
+			if !seen.Contain(pk) {
+				seen.Insert(pk)
+				typeutil.AppendID(primaryKeys, pk)
+			}
+		}
+	}
+	if seen.Len() == 0 {
+		return nil
+	}
+	if dr.limiter != nil {
+		if err := dr.limiter.Alloc(ctx, dr.dbID, map[int64][]int64{dr.collectionID: dr.partitionIDs}, internalpb.RateType_DMLDelete, proto.Size(primaryKeys)); err != nil {
+			return err
+		}
+	}
+	return dr.simpleDelete(ctx, primaryKeys, int64(seen.Len()))
+}
+
 func (dr *DeleteRunner) simpleDelete(ctx context.Context, pk *schemapb.IDs, numRow int64) error {
 	partitionID := common.AllPartitionsID
 	if len(dr.partitionIDs) == 1 {
@@ -783,6 +830,24 @@ func (dr *DeleteRunner) simpleDelete(ctx context.Context, pk *schemapb.IDs, numR
 		dr.result.Timestamp = task.sessionTS
 	}
 	return err
+}
+
+// isSimpleDeletePlan reports whether getPrimaryKeysFromPlan would take the
+// simple-delete path for plan, from the plan shape alone, without copying
+// the primary keys out.
+func isSimpleDeletePlan(plan *planpb.PlanNode) bool {
+	isPKType := func(t schemapb.DataType) bool {
+		return t == schemapb.DataType_Int64 || t == schemapb.DataType_VarChar
+	}
+	switch expr := plan.GetQuery().GetPredicates().GetExpr().(type) {
+	case *planpb.Expr_TermExpr:
+		info := expr.TermExpr.GetColumnInfo()
+		return info.GetIsPrimaryKey() && isPKType(info.GetDataType())
+	case *planpb.Expr_UnaryRangeExpr:
+		info := expr.UnaryRangeExpr.GetColumnInfo()
+		return expr.UnaryRangeExpr.GetOp() == planpb.OpType_Equal && info.GetIsPrimaryKey() && isPKType(info.GetDataType())
+	}
+	return false
 }
 
 func getPrimaryKeysFromPlan(schema *schemapb.CollectionSchema, plan *planpb.PlanNode) (isSimpleDelete bool, pks *schemapb.IDs, pkCount int64) {

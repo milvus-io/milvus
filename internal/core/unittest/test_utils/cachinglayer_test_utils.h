@@ -25,8 +25,9 @@
 #include "segcore/storagev1translator/ChunkTranslator.h"
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
 #include "cachinglayer/lrucache/DList.h"
-#include "index/Index.h"
-#include "index/VectorIndex.h"
+#include "index/contracts/query/IIndexReaderBase.h"
+#include "index/contracts/query/IVectorReader.h"
+#include "index_test_utils.h"
 namespace milvus {
 
 using namespace cachinglayer;
@@ -74,9 +75,9 @@ class TestChunkTranslator : public Translator<milvus::Chunk> {
         return uid;
     }
 
-    std::pair<ResourceUsage, ResourceUsage>
-    estimated_byte_size_of_cell(cid_t cid) const override {
-        return {{0, 0}, {0, 0}};
+    LoadingResourceUsage
+    estimated_loading_usage(const std::vector<cid_t>& cids) const override {
+        return {};
     }
 
     int64_t
@@ -156,9 +157,9 @@ class TestGroupChunkTranslator : public Translator<milvus::GroupChunk> {
         return uid;
     }
 
-    std::pair<ResourceUsage, ResourceUsage>
-    estimated_byte_size_of_cell(cid_t cid) const override {
-        return {{0, 0}, {0, 0}};
+    LoadingResourceUsage
+    estimated_loading_usage(const std::vector<cid_t>& cids) const override {
+        return {};
     }
 
     int64_t
@@ -195,111 +196,41 @@ class TestGroupChunkTranslator : public Translator<milvus::GroupChunk> {
     segcore::storagev2translator::GroupCTMeta meta_;
 };
 
-class TestIndexTranslator : public Translator<milvus::index::IndexBase> {
- public:
-    TestIndexTranslator(std::string key,
-                        std::unique_ptr<milvus::index::IndexBase>&& index)
-        : TestIndexTranslator(std::move(key), std::move(index), nullptr) {
+inline index::IndexPtr
+CreateTestIndex(std::string,
+                BuiltTestIndex built,
+                OpContext** observed = nullptr) {
+    if (observed != nullptr) {
+        return std::make_shared<ContextObservingIndex>(std::move(built.index),
+                                                       observed);
     }
-
-    TestIndexTranslator(std::string key,
-                        std::unique_ptr<milvus::index::IndexBase>&& index,
-                        milvus::OpContext** observed_ctx)
-        : Translator<milvus::index::IndexBase>(),
-          key_(key),
-          index_(std::move(index)),
-          observed_ctx_(observed_ctx),
-          meta_(milvus::cachinglayer::Meta(
-              StorageType::MEMORY,
-              CellIdMappingMode::IDENTICAL,
-              CellDataType::OTHER,
-              CacheWarmupPolicy::CacheWarmupPolicy_Disable,
-              false)) {
-    }
-    ~TestIndexTranslator() override = default;
-
-    size_t
-    num_cells() const override {
-        return 1;
-    }
-
-    cid_t
-    cell_id_of(uid_t uid) const override {
-        return uid;
-    }
-
-    std::pair<ResourceUsage, ResourceUsage>
-    estimated_byte_size_of_cell(cid_t cid) const override {
-        return {{0, 0}, {0, 0}};
-    }
-
-    int64_t
-    cells_storage_bytes(const std::vector<cid_t>& cids) const override {
-        return 0;
-    }
-
-    const std::string&
-    key() const override {
-        return key_;
-    }
-
-    Meta*
-    meta() override {
-        return &meta_;
-    }
-
-    std::vector<std::pair<cid_t, std::unique_ptr<milvus::index::IndexBase>>>
-    get_cells(milvus::OpContext* ctx, const std::vector<cid_t>& cids) override {
-        if (observed_ctx_ != nullptr) {
-            *observed_ctx_ = ctx;
-        }
-        std::vector<std::pair<cid_t, std::unique_ptr<milvus::index::IndexBase>>>
-            res;
-        res.reserve(cids.size());
-        for (auto cid : cids) {
-            AssertInfo(cid == 0, "TestIndexTranslator assumes only one cell.");
-            res.emplace_back(cid, std::move(index_));
-        }
-        return res;
-    }
-
- private:
-    std::string key_;
-    std::unique_ptr<milvus::index::IndexBase> index_;
-    milvus::OpContext** observed_ctx_{nullptr};
-    milvus::cachinglayer::Meta meta_;
-};
-
-inline index::CacheIndexBasePtr
-CreateTestCacheIndex(std::string key,
-                     std::unique_ptr<milvus::index::IndexBase>&& index) {
-    std::unique_ptr<milvus::cachinglayer::Translator<milvus::index::IndexBase>>
-        translator = std::make_unique<TestIndexTranslator>(std::move(key),
-                                                           std::move(index));
-    return milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
-        std::move(translator));
-}
-
-inline index::CacheIndexBasePtr
-CreateTestCacheIndex(std::string key,
-                     std::unique_ptr<milvus::index::IndexBase>&& index,
-                     milvus::OpContext** observed_ctx) {
-    std::unique_ptr<milvus::cachinglayer::Translator<milvus::index::IndexBase>>
-        translator = std::make_unique<TestIndexTranslator>(
-            std::move(key), std::move(index), observed_ctx);
-    return milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
-        std::move(translator));
+    return std::move(built.index);
 }
 
 inline std::map<std::string, std::string>
-GenIndexParams(const milvus::index::IndexBase* index) {
-    std::map<std::string, std::string> index_params;
-    index_params["index_type"] = index->Type();
-    if (auto vec_index =
-            dynamic_cast<const milvus::index::VectorIndex*>(index)) {
-        index_params["metric_type"] = vec_index->GetMetricType();
+GenIndexParams(const milvus::index::IIndexReaderBase* reader,
+               const std::string& family = index::families::kSort) {
+    std::map<std::string, std::string> params;
+    if (auto vector = dynamic_cast<const index::IVectorReader*>(reader)) {
+        params[index::INDEX_TYPE] = vector->KnowhereIndexType();
+        params[index::METRIC_TYPE] = vector->Metric();
+        return params;
     }
-    return index_params;
+    const std::map<std::string, std::string> scalar_types{
+        {index::families::kSort, index::ASCENDING_SORT},
+        {index::families::kBitmap, index::BITMAP_INDEX_TYPE},
+        {index::families::kInverted, index::INVERTED_INDEX_TYPE},
+        {index::families::kMarisa, index::MARISA_TRIE},
+        {index::families::kFmIndex, index::FMINDEX_INDEX_TYPE},
+        {index::families::kNgram, index::NGRAM_INDEX_TYPE},
+        {index::families::kRTree, index::RTREE_INDEX_TYPE},
+        {index::families::kJsonFlat, "JSON_FLAT"},
+    };
+    const auto found = scalar_types.find(family);
+    AssertInfo(found != scalar_types.end(),
+               "test scalar reader requires an explicit concrete family");
+    params[index::INDEX_TYPE] = found->second;
+    return params;
 }
 
 }  // namespace milvus

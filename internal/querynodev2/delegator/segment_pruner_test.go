@@ -2,7 +2,9 @@ package delegator
 
 import (
 	"context"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
@@ -14,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/clustering"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -1583,6 +1586,105 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsWithoutPartitionStats() {
 		sps.Equal(2, len(testSegments[0].Segments))
 		sps.Equal(2, len(testSegments[1].Segments))
 	}
+}
+
+func (sps *SegmentPrunerSuite) TestPruneSegmentsTimestamptzField() {
+	paramtable.Init()
+	const tsField = "ts"
+	var targetPartition int64 = 1
+	fieldName2DataType := map[string]schemapb.DataType{
+		"pk":    schemapb.DataType_Int64,
+		tsField: schemapb.DataType_Timestamptz,
+		"vec":   schemapb.DataType_FloatVector,
+	}
+	schema := testutil.ConstructCollectionSchemaWithKeys("test_segment_prune",
+		fieldName2DataType, "pk", "", tsField, false, 8)
+	var clusteringKeyFieldID int64
+	for _, field := range schema.GetFields() {
+		if field.IsClusteringKey {
+			clusteringKeyFieldID = field.FieldID
+		}
+	}
+
+	// Timestamptz stats are int64 unix microseconds, one month per segment.
+	micros := func(month time.Month, day int) int64 {
+		return time.Date(2025, month, day, 0, 0, 0, 0, time.UTC).UnixMicro()
+	}
+	segStats := make(map[UniqueID]storage.SegmentStats)
+	for segID, month := range map[UniqueID]time.Month{1: time.January, 2: time.February, 3: time.March, 4: time.April} {
+		segStats[segID] = *storage.NewSegmentStats([]storage.FieldStats{{
+			FieldID: clusteringKeyFieldID,
+			Type:    schemapb.DataType_Timestamptz,
+			Min:     storage.NewInt64FieldValue(micros(month, 1)),
+			Max:     storage.NewInt64FieldValue(micros(month, 28)),
+		}}, 80)
+	}
+	partitionStats := map[UniqueID]*storage.PartitionStatsSnapshot{
+		targetPartition: {SegmentStats: segStats},
+	}
+	sealedSegments := []SnapshotItem{
+		{NodeID: 1, Segments: []SegmentEntry{{NodeID: 1, SegmentID: 1}, {NodeID: 1, SegmentID: 2}}},
+		{NodeID: 2, Segments: []SegmentEntry{{NodeID: 2, SegmentID: 3}, {NodeID: 2, SegmentID: 4}}},
+	}
+
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	sps.Require().NoError(err)
+	parse := func(exprStr string) *planpb.PlanNode {
+		planNode, err := planparserv2.CreateRetrievePlan(schemaHelper, exprStr, nil)
+		sps.Require().NoError(err, exprStr)
+		return planNode
+	}
+	// prune returns the remaining segment count per node.
+	prune := func(planNode *planpb.PlanNode) []int {
+		testSegments := make([]SnapshotItem, len(sealedSegments))
+		copy(testSegments, sealedSegments)
+		serializedPlan, err := proto.Marshal(planNode)
+		sps.Require().NoError(err)
+		queryReq := &internalpb.RetrieveRequest{
+			QueryLabel:         "query",
+			SerializedExprPlan: serializedPlan,
+			PartitionIDs:       []UniqueID{targetPartition},
+		}
+		sps.NotPanics(func() {
+			PruneSegments(context.TODO(), partitionStats, nil, queryReq, schema, testSegments,
+				PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
+		})
+		return []int{len(testSegments[0].Segments), len(testSegments[1].Segments)}
+	}
+
+	sps.Run("iso range", func() {
+		sps.Equal([]int{0, 2}, prune(parse(`ts >= ISO '2025-03-15T00:00:00Z'`)))
+		sps.Equal([]int{2, 0}, prune(parse(`ts < ISO '2025-02-15T00:00:00Z'`)))
+	})
+	sps.Run("iso equality", func() {
+		sps.Equal([]int{1, 0}, prune(parse(`ts == ISO '2025-01-15T00:00:00Z'`)))
+	})
+	sps.Run("raw microsecond term", func() {
+		sps.Equal([]int{0, 1}, prune(parse(fmt.Sprintf(`ts in [%d]`, micros(time.April, 10)))))
+	})
+	sps.Run("interval comparison is not pruned", func() {
+		sps.Equal([]int{2, 2}, prune(parse(`ts + INTERVAL 'P1D' > ISO '2025-04-15T00:00:00Z'`)))
+	})
+
+	// The parser rejects non-int64 Timestamptz literals; these plans are built
+	// by hand to pin the pruner's fallback if one ever reaches the delegator.
+	badLiteral := &planpb.GenericValue{Val: &planpb.GenericValue_StringVal{StringVal: "2025-04-10"}}
+	sps.Run("malformed unary literal falls back to all segments", func() {
+		planNode := parse(`ts > ISO '2025-03-15T00:00:00Z'`)
+		unary := planNode.GetQuery().GetPredicates().GetUnaryRangeExpr()
+		sps.Require().NotNil(unary)
+		unary.Value = badLiteral
+		sps.Equal([]int{2, 2}, prune(planNode))
+	})
+	sps.Run("malformed term value is not dropped", func() {
+		planNode := parse(fmt.Sprintf(`ts in [%d, %d]`, micros(time.January, 15), micros(time.April, 10)))
+		term := planNode.GetQuery().GetPredicates().GetTermExpr()
+		sps.Require().NotNil(term)
+		sps.Require().Len(term.GetValues(), 2)
+		// Dropping the April value would prune segment 4 and lose its rows.
+		term.Values[1] = badLiteral
+		sps.Equal([]int{2, 2}, prune(planNode))
+	})
 }
 
 func TestSegmentPrunerSuite(t *testing.T) {

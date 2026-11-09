@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/options"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -110,6 +111,14 @@ type ReadOption struct {
 	IgnorePauseConsumption bool
 }
 
+// AnalyzerClient exposes analyzer execution through the streaming WAL entry.
+type AnalyzerClient interface {
+	RunAnalyzer(context.Context, *streamingpb.StreamingNodeRunAnalyzerRequest) (*streamingpb.StreamingNodeRunAnalyzerResponse, error)
+
+	// ValidateAnalyzer prepares file resources and validates configs without a collection.
+	ValidateAnalyzer(context.Context, *streamingpb.StreamingNodeValidateAnalyzerRequest) (*streamingpb.StreamingNodeValidateAnalyzerResponse, error)
+}
+
 // Scanner is the interface for reading records from the wal.
 type Scanner interface {
 	// Done returns a channel which will be closed when scanner is finished or closed.
@@ -154,15 +163,6 @@ type Balancer interface {
 	// GetFrozenNodeIDs returns the frozen node ids.
 	GetFrozenNodeIDs(ctx context.Context) ([]int64, error)
 
-	// IsRebalanceSuspended returns whether the rebalance of the wal is suspended.
-	IsRebalanceSuspended(ctx context.Context) (bool, error)
-
-	// SuspendRebalance suspends the rebalance of the wal.
-	SuspendRebalance(ctx context.Context) error
-
-	// ResumeRebalance resumes the rebalance of the wal.
-	ResumeRebalance(ctx context.Context) error
-
 	// FreezeNodeIDs freezes the streaming node.
 	// The wal will not be assigned to the frozen nodes and the wal will be removed from the frozen nodes.
 	FreezeNodeIDs(ctx context.Context, nodeIDs []int64) error
@@ -173,6 +173,16 @@ type Balancer interface {
 
 // WALAccesser is the interfaces to interact with the milvus write ahead log.
 type WALAccesser interface {
+	// TransformLogStreamManager returns independently closeable transform streams.
+	TransformLogStreamManager() wal.TransformLogStreamManager
+	QueryViewClient() QueryViewClient
+
+	// AnalyzerClient returns the analyzer domain client backed by streaming discovery.
+	AnalyzerClient() AnalyzerClient
+
+	// SchemaClient returns schema access backed by streaming discovery.
+	SchemaClient() SchemaClient
+
 	// ForwardService returns the forward service of the wal.
 	ForwardService() ForwardService
 

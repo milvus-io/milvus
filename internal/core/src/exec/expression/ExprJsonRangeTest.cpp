@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include <folly/FBVector.h>
+#include <folly/ScopeGuard.h>
 #include <simdjson.h>
 #include <algorithm>
 #include <chrono>
@@ -29,6 +30,7 @@
 
 #include "ExprTestBase.h"
 #include "bitset/bitset.h"
+#include "common/Common.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "common/Exception.h"
@@ -39,6 +41,7 @@
 #include "common/Vector.h"
 #include "common/protobuf_utils.h"
 #include "exec/expression/EvalCtx.h"
+#include "exec/expression/TermExpr.h"
 #include "expr/ITypeExpr.h"
 #include "gtest/gtest.h"
 #include "pb/plan.pb.h"
@@ -68,7 +71,7 @@ TEST(ExprJsonTermTest, MixedValueTypesReturnError) {
                 1,
                 raw_data.row_ids_.data(),
                 raw_data.timestamps_.data(),
-                raw_data.raw_);
+                std::make_shared<InsertRecordProto>(*raw_data.raw_));
 
     proto::plan::GenericValue int_value;
     int_value.set_int64_val(1);
@@ -81,13 +84,36 @@ TEST(ExprJsonTermTest, MixedValueTypesReturnError) {
     auto plan =
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
 
-    try {
-        ExecuteQueryExpr(plan, seg.get(), 1, MAX_TIMESTAMP);
-        FAIL() << "mixed TermExpr values must be rejected";
-    } catch (const ExecOperatorException& error) {
-        EXPECT_NE(std::string_view(error.what())
-                      .find("TermExpr values must have the same type"),
-                  std::string_view::npos);
+    exec::PhyTermFilterExpr physical_expr(
+        {}, term_expr, "term", nullptr, seg.get(), 1, MAX_TIMESTAMP, 1, 0);
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        SCOPED_TRACE(attempt);
+        try {
+            physical_expr.EnsureExecPathDetermined();
+            FAIL() << "mixed TermExpr values must be rejected on every call";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::DataTypeInvalid);
+            EXPECT_NE(std::string_view(error.what())
+                          .find("TermExpr values must have the same type"),
+                      std::string_view::npos);
+        }
+    }
+
+    const bool saved_prefetch = ENABLE_DRIVER_PREFETCH.load();
+    auto restore_prefetch = folly::makeGuard(
+        [saved_prefetch] { ENABLE_DRIVER_PREFETCH = saved_prefetch; });
+    for (const bool prefetch : {false, true}) {
+        SCOPED_TRACE(prefetch);
+        ENABLE_DRIVER_PREFETCH = prefetch;
+        try {
+            ExecuteQueryExpr(plan, seg.get(), 1, MAX_TIMESTAMP);
+            FAIL() << "mixed TermExpr values must be rejected";
+        } catch (const ExecOperatorException& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::DataTypeInvalid);
+            EXPECT_NE(std::string_view(error.what())
+                          .find("TermExpr values must have the same type"),
+                      std::string_view::npos);
+        }
     }
 }
 
@@ -130,7 +156,7 @@ TEST_P(ExprTest, TestBinaryRangeJSON) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -254,7 +280,7 @@ TEST_P(ExprTest, TestBinaryRangeJSONNullable) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -373,7 +399,7 @@ TEST_P(ExprTest, TestExistsJson) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -450,7 +476,7 @@ TEST_P(ExprTest, TestExistsJsonNullable) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -563,7 +589,7 @@ TEST_P(ExprTest, TestUnaryRangeJson) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -702,7 +728,7 @@ TEST_P(ExprTest, TestUnaryRangeJson) {
                         N,
                         raw_data.row_ids_.data(),
                         raw_data.timestamps_.data(),
-                        raw_data.raw_);
+                        std::make_shared<InsertRecordProto>(*raw_data.raw_));
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
         auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -827,7 +853,7 @@ TEST_P(ExprTest, TestUnaryRangeJson) {
                         N,
                         raw_data.row_ids_.data(),
                         raw_data.timestamps_.data(),
-                        raw_data.raw_);
+                        std::make_shared<InsertRecordProto>(*raw_data.raw_));
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
         auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -1043,7 +1069,7 @@ TEST_P(ExprTest, TestUnaryRangeJsonNullable) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    std::make_shared<InsertRecordProto>(*raw_data.raw_));
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(200) * 2);
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());

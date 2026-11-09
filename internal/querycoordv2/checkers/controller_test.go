@@ -26,6 +26,7 @@ import (
 	"go.uber.org/atomic"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
@@ -43,6 +44,8 @@ import (
 
 type CheckerControllerSuite struct {
 	suite.Suite
+	// metaStore is shared by Meta and TargetManager.
+	metaStore     metacache.MetaStore
 	kv            kv.MetaKv
 	meta          *meta.Meta
 	broker        *meta.MockBroker
@@ -77,10 +80,11 @@ func (suite *CheckerControllerSuite) SetupTest() {
 	store := querycoord.NewCatalog(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
 	suite.nodeMgr = session.NewNodeManager()
-	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr)
+	suite.metaStore = metacache.NewMetaStore(nil)
+	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr, suite.metaStore)
 	suite.dist = meta.NewDistributionManager(suite.nodeMgr)
 	suite.broker = meta.NewMockBroker(suite.T())
-	suite.targetManager = meta.NewTargetManager(suite.broker, suite.meta)
+	suite.targetManager = meta.NewTargetManager(suite.broker, suite.meta, suite.metaStore)
 
 	suite.balancer = balance.NewMockBalancer(suite.T())
 	suite.scheduler = task.NewMockScheduler(suite.T())
@@ -132,8 +136,7 @@ func (suite *CheckerControllerSuite) TestBasic() {
 			InsertChannel: "test-insert-channel2",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	expectRecoveryInfo(suite.broker, suite.metaStore, int64(1), channels, segments, nil)
 	suite.targetManager.UpdateCollectionNextTarget(ctx, int64(1))
 
 	// set dist

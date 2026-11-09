@@ -11,15 +11,23 @@
 
 #pragma once
 
+#include <optional>
+
+#include <functional>
 #include <string>
 #include <string_view>
-#include <optional>
 #include <re2/re2.h>
 #include <utility>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 #include "common/EasyAssert.h"
+#if !defined(RE2_REQUIRED_LITERALS_API_VERSION) || \
+    RE2_REQUIRED_LITERALS_API_VERSION != 1
+#error "Milvus requires the pinned RE2 public necessary-literal API v1"
+#endif
+
 namespace milvus {
 bool
 is_special(char c);
@@ -82,6 +90,67 @@ RegexMatcher::operator()(const std::string_view& operand) {
     return RE2::FullMatch(sp, *re2_);
 }
 
+// A necessary condition for a regex match, never a final answer. TRUE means
+// no pruning. Atoms are case-sensitive byte substrings, 2..64 bytes each.
+// Construction bounds the tree to 127 nodes (at most 126 literal occurrences).
+struct RegexLiteralCondition {
+    enum class Op { True, Literal, And, Or };
+    Op op = Op::True;
+    std::string literal;
+    std::vector<RegexLiteralCondition> children;
+
+    static constexpr size_t kMaxNodes = 127;
+    static constexpr size_t kMaxLiteralBytes = 64;
+
+    static RegexLiteralCondition
+    Literal(const std::string& text);
+
+    static RegexLiteralCondition
+    Combine(Op op, RegexLiteralCondition a, RegexLiteralCondition b);
+
+    size_t
+    NodeCount() const;
+
+    bool
+    IsTrue() const {
+        return op == Op::True;
+    }
+
+    bool
+    operator==(const RegexLiteralCondition&) const = default;
+
+    // Count each distinct atom once on the CURRENT index. An AND chooses its
+    // cheapest child; an OR retains every child. Cost is the sum of selected
+    // occurrence counts (an upper bound on locate work), infinity for TRUE.
+    RegexLiteralCondition
+    Select(const std::function<size_t(const std::string&)>& count,
+           double& cost) const;
+
+    // Used with bitmaps in FMIndex and booleans in differential tests. The
+    // caller supplies the universe for TRUE (all non-null rows in FMIndex).
+    template <typename Lookup, typename Universe>
+    auto
+    Evaluate(const Lookup& lookup, const Universe& universe) const
+        -> decltype(lookup(literal)) {
+        if (IsTrue()) {
+            return universe();
+        }
+        if (op == Op::Literal) {
+            return lookup(literal);
+        }
+        auto result = children.front().Evaluate(lookup, universe);
+        for (size_t i = 1; i < children.size(); ++i) {
+            auto next = children[i].Evaluate(lookup, universe);
+            if (op == Op::And) {
+                result &= next;
+            } else {
+                result |= next;
+            }
+        }
+        return result;
+    }
+};
+
 // PartialRegexMatcher using RE2 for partial regex matching (substring match)
 // Unlike RegexMatcher which uses RE2::FullMatch, this uses RE2::PartialMatch
 struct PartialRegexMatcher {
@@ -105,8 +174,75 @@ struct PartialRegexMatcher {
         }
     }
 
+    // A byte prefix required by every matching substring, not necessarily by
+    // the whole row. After excluding external word-boundary context, RE2's
+    // lexicographic bounds share a prefix required by every match. Extraction in
+    // RE2 handles alternation, optional groups, escapes and Unicode folding
+    // without interpreting regex syntax a second time. Empty means scan.
+    std::string
+    RequiredPrefix() const {
+        if (!CanExtractLiteral()) {
+            return {};
+        }
+        // PossibleMatchRange starts an anchored search at beginning of text.
+        // It can discard branches that PartialMatch accepts using the preceding
+        // row byte: \\Bfoo|bar yields "bar", but matches "afoo". Likewise,
+        // \\b-foo|bar matches "a-foo". Never use those bounds as requirements.
+        // This deliberately also declines escaped/quoted occurrences: a false
+        // positive here only disables pruning and avoids a second regex parser.
+        const auto& pattern = re2_->pattern();
+        if (pattern.find(R"(\b)") != std::string::npos ||
+            pattern.find(R"(\B)") != std::string::npos) {
+            return {};
+        }
+        std::string lower;
+        std::string upper;
+        if (!re2_->PossibleMatchRange(&lower, &upper, kMaxPrefixBytes)) {
+            return {};
+        }
+        size_t length = 0;
+        while (length < lower.size() && length < upper.size() &&
+               lower[length] == upper[length]) {
+            ++length;
+        }
+        return lower.substr(0, length);
+    }
+
+    // A mandatory byte substring from the compiled RE2 AST for raw-scan
+    // prefiltering. May be one byte; empty means no filter.
+    std::string
+    RequiredLiteral() const;
+
+    // Bounded necessary AND/OR condition from RE2's public API, using original
+    // bytes. No second parser, atom remapping or subset enumeration. Both
+    // getters share one lazy analysis, including on concurrent calls.
+    RegexLiteralCondition
+    RequiredIndexCondition() const;
+
+    // One immutable preparation entry per thread; never cache segment counts
+    // or row IDs. Compile before publishing, including invalid-pattern errors.
+    static RegexLiteralCondition
+    PrepareIndexCondition(const std::string& pattern);
+
  private:
+    const RE2::LiteralRequirements&
+    RequiredLiterals() const;
+
+    bool
+    CanExtractLiteral() const {
+        // An empty-input match proves no nonempty byte string is mandatory.
+        // Preserve the existing Milvus size guard before AST extraction.
+        return re2_->pattern().size() <= kMaxProgramSize &&
+               re2_->ProgramSize() <= kMaxProgramSize &&
+               !RE2::FullMatch(re2::StringPiece("", 0), *re2_);
+    }
+
+    static constexpr int kMaxPrefixBytes = 64;
+    static constexpr int kMaxScanLiteralBytes = 4096;
+    static constexpr int kMaxProgramSize = 4096;
     std::unique_ptr<RE2> re2_;
+    mutable std::once_flag requirements_once_;
+    mutable RE2::LiteralRequirements requirements_;
 };
 
 template <>

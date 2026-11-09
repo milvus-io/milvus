@@ -29,6 +29,9 @@ extern "C" {
 typedef void* CSearchResult;
 typedef CProto CRetrieveResult;
 
+struct ArrowSchema;
+struct ArrowArray;
+
 //////////////////////////////    common interfaces    //////////////////////////////
 CStatus
 NewSegment(CCollection collection,
@@ -59,6 +62,20 @@ NewSegmentWithLoadInfo(CCollection collection,
                        bool is_sorted_by_pk,
                        const uint8_t* load_info_blob,
                        const int64_t load_info_length);
+
+// Borrows CCollection for this call. The explicit empty scope loads no user
+// fields except required physical dependencies. Existing constructors retain
+// their legacy all-fields interpretation.
+CStatus
+NewSealedSegmentWithCollection(CCollection collection,
+                               int64_t segment_id,
+                               CSegmentInterface* output,
+                               bool sorted,
+                               const uint8_t* load_blob,
+                               int64_t load_length,
+                               const int64_t* load_fields,
+                               int64_t field_count);
+
 /**
  * @brief Dispatch a segment manage load task.
  * This function make segment itself load index & field data according to load info previously set.
@@ -140,6 +157,27 @@ AsyncReopenSegment(CTraceContext c_trace,
                    const int64_t schema_length,
                    const uint64_t schema_version);
 
+// Borrows collection Schema until this Future actually completes (including
+// cancellation). The caller must pin both collection and segment for that
+// duration. Input blobs/field lists are copied before this function returns.
+CFuture*
+AsyncReopenSealedSegmentWithCollection(CTraceContext trace,
+                                       CSegmentInterface segment,
+                                       CCollection collection,
+                                       const uint8_t* load_blob,
+                                       int64_t load_length,
+                                       const int64_t* load_fields,
+                                       int64_t load_field_count);
+
+// Return a read-only sealed facade. Retain c_segment until deleting the facade.
+CStatus
+AdoptSealedSegmentReadState(CSegmentInterface c_segment,
+                            CSegmentInterface read_segment);
+
+CStatus
+PinSealedSegmentReadState(CSegmentInterface c_segment,
+                          CSegmentInterface* read_segment);
+
 void
 DeleteSegment(CSegmentInterface c_segment);
 
@@ -197,12 +235,93 @@ AsyncRetrieve(CTraceContext c_trace,
               uint64_t collection_ttl,
               uint64_t entity_ttl_physical_time_us);
 
+// In QueryScan candidate mode this carries $seg_offset in Arrow and only
+// scalar statistics in header. Identity reads additionally carry $id and
+// $timestamp. No per-row data is serialized into either header.
+//
+// For ordinary Query, CRetrieveArrowResult splits one retrieve result in two:
+//
+//   header       the protobuf RetrieveResults with the *user* output columns
+//                removed from fields_data. ids, offset, element_indices, the
+//                scalar counters and the system-field columns (RowID,
+//                Timestamp) are left exactly as Retrieve() produced them.
+//   schema/array the user output columns as an Arrow RecordBatch, exported
+//                through the Arrow C Data Interface.
+//
+// The Arrow fields carry NO per-field metadata. Columns are identified
+// positionally instead, from two schema-level keys:
+//
+//   milvus.field_order        the field ids of the original fields_data, in
+//                             their original order, comma separated. Go
+//                             rebuilds fields_data to this order, which is
+//                             what the protobuf path emits. It cannot be
+//                             derived from the plan: FillTargetEntry follows
+//                             plan->field_ids_ while FillOrderByResult follows
+//                             pipeline_field_ids_ and appends system fields
+//                             last.
+//   milvus.valid_data_fields  the ids whose source DataArray carried a
+//                             valid_data bitmap (see segment_c.cpp).
+//
+// The Arrow columns are field_order minus the ids retained in the header, in
+// field_order sequence, so their ids need not be repeated per field. Dropping
+// the per-field `milvus.field_id` / `milvus.data_type` that MilvusField would
+// attach avoids decoding and re-cloning them on the Go side
+// (cdata.decodeCMetadata, then Arrow's StructOf). In a one-off profile of the
+// narrow 4-column shape that was roughly a third of the per-call allocations;
+// it is not a committed benchmark, so treat it as an order of magnitude rather
+// than a figure. MilvusField itself is unchanged, since the search export
+// relies on it.
+//
+// Leaked by AsyncRetrieveAsArrow; free with DeleteRetrieveArrowResult.
+typedef struct CRetrieveArrowResult {
+    CRetrieveResult* header;
+    struct ArrowSchema* schema;
+    struct ArrowArray* array;
+} CRetrieveArrowResult;
+
+// AsyncRetrieveAsArrow mirrors AsyncRetrieve, but splits the result as above
+// instead of serializing all of it to protobuf.
+//
+// QueryScan candidate mode exports offsets regardless of ignore_non_pk.
+// For ordinary Query, preconditions are enforced by the Go caller
+// (shouldUseArrowTransport in querynodev2/segments/retrieve.go):
+//   - no aggregates and no group-by fields: aggregation columns carry
+//     field_id 0 and are identified positionally, so they cannot be matched
+//     by id;
+//   - not ignore_non_pk: that withholds every user column, leaving nothing
+//     for the Arrow batch.
+// count(*) needs no exclusion: it sets no output fields, so the batch is zero
+// columns wide and the header carries the answer unchanged.
+CFuture*  // Future<CRetrieveArrowResult>
+AsyncRetrieveAsArrow(CTraceContext c_trace,
+                     CSegmentInterface c_segment,
+                     CRetrievePlan c_plan,
+                     uint64_t timestamp,
+                     int64_t limit_size,
+                     int32_t consistency_level,
+                     uint64_t collection_ttl,
+                     uint64_t entity_ttl_physical_time_us);
+
+void
+DeleteRetrieveArrowResult(CRetrieveArrowResult* result);
+
 CFuture*  // Future<CRetrieveResult>
 AsyncRetrieveByOffsets(CTraceContext c_trace,
                        CSegmentInterface c_segment,
                        CRetrievePlan c_plan,
                        int64_t* offsets,
                        int64_t len);
+
+// Read PK and timestamp for selected offsets, before reduction.
+// Returns Future<CRetrieveArrowResult>: $seg_offset, $id, $timestamp
+// Arrow columns, with only scalar statistics in the protobuf header.
+CFuture*
+AsyncRetrieveIdentitiesByOffsets(CTraceContext c_trace,
+                                 CSegmentInterface c_segment,
+                                 CRetrievePlan c_plan,
+                                 int64_t* offsets,
+                                 int64_t len,
+                                 bool take_for_output_allowed);
 
 int64_t
 GetMemoryUsageInBytes(CSegmentInterface c_segment);
@@ -273,8 +392,9 @@ typedef struct CFlushConfig {
     const void* schema_blob;  // serialized CollectionSchema for this flush task
     int64_t schema_length;    // length of schema_blob in bytes
     int64_t read_version;     // version to read (-1 = latest)
-    uint32_t retry_limit;     // retry limit for commit
-    const char* writer_format;          // writer.format
+    int64_t read_manifest_size;  // byte size of that manifest, <= 0 = unknown
+    uint32_t retry_limit;        // retry limit for commit
+    const char* writer_format;   // writer.format
     const char* schema_based_pattern;   // writer.split.schema_based.patterns
     const char* schema_based_formats;   // writer.split.schema_based.formats
     int64_t* allowed_field_ids;         // projected field IDs to flush
@@ -307,8 +427,9 @@ typedef struct CFlushConfig {
  */
 typedef struct CFlushResult {
     char* manifest_path;  // path to the committed manifest (caller must free)
-    int64_t committed_version;   // committed version number
-    int64_t num_rows;            // number of rows flushed
+    int64_t committed_version;  // committed version number
+    int64_t manifest_size;  // byte size of the committed manifest, -1 = unknown
+    int64_t num_rows;       // number of rows flushed
     uint64_t timestamp_from;     // minimum row timestamp flushed
     uint64_t timestamp_to;       // maximum row timestamp flushed
     int64_t* field_ids;          // field ids for per-field flush summaries

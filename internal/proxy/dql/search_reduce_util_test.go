@@ -281,6 +281,82 @@ func (struts *SearchReduceUtilTestSuite) TestReduceWithPartialEmptyFieldsData() 
 	struts.Greater(len(results.Results.FieldsData), 0)
 }
 
+func presizeShardResult(topk int64, ids []int64, scores []float32, groups []int64) *schemapb.SearchResultData {
+	const dim = 2
+	vectors := make([]float32, 0, len(ids)*dim)
+	for _, id := range ids {
+		vectors = append(vectors, float32(id), float32(id))
+	}
+	return &schemapb.SearchResultData{
+		NumQueries: 1,
+		TopK:       topk,
+		Topks:      []int64{int64(len(ids))},
+		Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ids}}},
+		Scores:     scores,
+		FieldsData: []*schemapb.FieldData{
+			{
+				Type: schemapb.DataType_Int64, FieldId: 100, FieldName: "pk",
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: ids}},
+				}},
+			},
+			{
+				Type: schemapb.DataType_FloatVector, FieldId: 102, FieldName: "vec",
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim:  dim,
+					Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: vectors}},
+				}},
+			},
+		},
+		GroupByFieldValue: &schemapb.FieldData{
+			Type: schemapb.DataType_Int64, FieldId: 101,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: groups}},
+			}},
+		},
+	}
+}
+
+func (s *SearchReduceUtilTestSuite) TestReduceSizesFieldsDataByHits() {
+	const (
+		topk = 16384
+		dim  = 2
+	)
+	shards := func() []*schemapb.SearchResultData {
+		return []*schemapb.SearchResultData{
+			presizeShardResult(topk, []int64{1, 2}, []float32{9, 7}, []int64{1, 2}),
+			presizeShardResult(topk, []int64{3, 4}, []float32{8, 6}, []int64{3, 4}),
+		}
+	}
+	ctx := context.Background()
+
+	s.Run("no group by", func() {
+		ret, err := reduceSearchResultDataNoGroupBy(ctx, shards(), 1, topk, metric.IP, schemapb.DataType_Int64, 0)
+		s.Require().NoError(err)
+		s.Equal([]int64{1, 3, 2, 4}, ret.GetResults().GetIds().GetIntId().GetData())
+		s.Equal(4, cap(ret.GetResults().GetFieldsData()[0].GetScalars().GetLongData().GetData()))
+		s.Equal([]float32{1, 1, 3, 3, 2, 2, 4, 4}, ret.GetResults().GetFieldsData()[1].GetVectors().GetFloatVector().GetData())
+		s.Equal(4*dim, cap(ret.GetResults().GetFieldsData()[1].GetVectors().GetFloatVector().GetData()))
+	})
+
+	s.Run("group by", func() {
+		ret, err := reduceSearchResultDataWithGroupBy(ctx, shards(), 1, topk, metric.IP, schemapb.DataType_Int64, 0, 2, []int64{101}, false)
+		s.Require().NoError(err)
+		s.Equal([]int64{1, 3, 2, 4}, ret.GetResults().GetIds().GetIntId().GetData())
+		s.Equal(4, cap(ret.GetResults().GetFieldsData()[0].GetScalars().GetLongData().GetData()))
+		s.Equal(4*dim, cap(ret.GetResults().GetFieldsData()[1].GetVectors().GetFloatVector().GetData()))
+	})
+
+	s.Run("group by without hits keeps typed columns", func() {
+		empty := presizeShardResult(topk, nil, nil, nil)
+		empty.Topks = []int64{0}
+		ret, err := reduceSearchResultDataWithGroupBy(ctx, []*schemapb.SearchResultData{empty, empty}, 1, topk, metric.IP, schemapb.DataType_Int64, 0, 2, []int64{101}, false)
+		s.Require().NoError(err)
+		s.Require().Len(ret.GetResults().GetFieldsData(), 2)
+		s.NotNil(ret.GetResults().GetFieldsData()[1].GetVectors().GetFloatVector())
+	})
+}
+
 func (s *SearchReduceUtilTestSuite) TestReduceMaxSimMetricsComparison() {
 	ctx := context.Background()
 	nq := int64(1)

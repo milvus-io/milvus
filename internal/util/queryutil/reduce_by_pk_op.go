@@ -19,6 +19,7 @@ package queryutil
 import (
 	"context"
 
+	"github.com/apache/arrow/go/v17/arrow"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 
@@ -65,20 +66,14 @@ func (op *ReduceByPKOperator) Run(ctx context.Context, span trace.Span, inputs .
 	defer sp.End()
 
 	results := inputs[0].([]*internalpb.RetrieveResults)
-
-	// Filter out empty results and collect valid ones
-	validResults := make([]*internalpb.RetrieveResults, 0, len(results))
-	hasMoreResult := false
-	for _, r := range results {
-		if r == nil || len(r.GetFieldsData()) == 0 || typeutil.GetSizeOfIDs(r.GetIds()) == 0 {
-			continue
-		}
-		validResults = append(validResults, r)
-		hasMoreResult = hasMoreResult || r.GetHasMoreResult()
+	emptyComputed, computedErr := prepareComputedResults(results)
+	if computedErr != nil {
+		return nil, computedErr
 	}
 
+	validResults, hasMoreResult := filterPKResults(results)
 	if len(validResults) == 0 {
-		return []any{&internalpb.RetrieveResults{}}, nil
+		return []any{&internalpb.RetrieveResults{ComputedResults: emptyComputed}}, nil
 	}
 
 	// If only one result, return as-is
@@ -95,8 +90,45 @@ func (op *ReduceByPKOperator) Run(ctx context.Context, span trace.Span, inputs .
 	return []any{merged}, nil
 }
 
+// filterPKResults preserves the proxy reducer's definition of a usable input.
+func filterPKResults(results []*internalpb.RetrieveResults) ([]*internalpb.RetrieveResults, bool) {
+	validResults := make([]*internalpb.RetrieveResults, 0, len(results))
+	hasMoreResult := false
+	for _, r := range results {
+		if r == nil || len(r.GetFieldsData()) == 0 || typeutil.GetSizeOfIDs(r.GetIds()) == 0 {
+			continue
+		}
+		validResults = append(validResults, r)
+		hasMoreResult = hasMoreResult || r.GetHasMoreResult()
+	}
+	return validResults, hasMoreResult
+}
+
 // mergeByPK performs k-way merge by PK order with deduplication.
 func (op *ReduceByPKOperator) mergeByPK(results []*internalpb.RetrieveResults, hasMoreResult bool) (*internalpb.RetrieveResults, error) {
+	selectedRows, err := op.selectRowsByPK(results)
+	if err != nil {
+		return nil, err
+	}
+	if len(selectedRows) == 0 {
+		computed, err := selectComputedResults(results, nil)
+		if err != nil {
+			return nil, err
+		}
+		return &internalpb.RetrieveResults{HasMoreResult: hasMoreResult, ComputedResults: computed}, nil
+	}
+
+	merged, err := buildMergedRetrieveResults(results, selectedRows, op.schema)
+	if err != nil {
+		return nil, err
+	}
+	merged.HasMoreResult = hasMoreResult
+	return merged, nil
+}
+
+// selectRowsByPK completes PK validation before any page is materialized.
+// In particular, duplicate PKs outside the requested page must still fail.
+func (op *ReduceByPKOperator) selectRowsByPK(results []*internalpb.RetrieveResults) ([]rowRef, error) {
 	// Calculate total row count for capacity hint
 	totalRows := 0
 	for _, r := range results {
@@ -128,20 +160,7 @@ func (op *ReduceByPKOperator) mergeByPK(results []*internalpb.RetrieveResults, h
 		cursors[sel]++
 	}
 
-	if len(selectedRows) == 0 {
-		return &internalpb.RetrieveResults{HasMoreResult: hasMoreResult}, nil
-	}
-
-	// Build merged result
-	merged, err := buildMergedRetrieveResults(results, selectedRows, op.schema)
-	if err != nil {
-		return nil, err
-	}
-
-	// Propagate HasMoreResult flag
-	merged.HasMoreResult = hasMoreResult
-
-	return merged, nil
+	return selectedRows, nil
 }
 
 // ReduceByPKWithTimestampOperator merges results with timestamp-based deduplication.
@@ -160,6 +179,21 @@ type ReduceByPKWithTimestampOperator struct {
 	maxOutputSize int64
 	limit         int64
 	schema        *schemapb.CollectionSchema
+
+	// arrowRecords holds the per-result user output columns when the Arrow
+	// transport was used; nil otherwise. It is indexed by the SAME position as
+	// the operator's input results, so whoever builds both must filter them in
+	// lockstep -- a mismatch silently misattributes every column.
+	//
+	// The operator neither owns nor reads these records: the reduce decides
+	// which rows win from PKs and timestamps alone, which live in the protobuf
+	// header. They are passed through into arrowOut so the caller can
+	// materialize the chosen rows later, directly into FieldData.
+	arrowRecords []arrow.Record
+
+	// arrowOut receives the unmaterialized selection. Supplied by the caller
+	// because the pipeline's channels carry the protobuf result only.
+	arrowOut *ArrowSelection
 }
 
 // NewReduceByPKWithTimestampOperator creates an operator with timestamp-based deduplication.
@@ -175,6 +209,16 @@ func NewReduceByPKWithTimestampOperator(reduceType reduce.IReduceType, maxOutput
 	}
 }
 
+// withArrowRecords supplies the per-result Arrow columns, positionally aligned
+// with the operator's input results, and the struct that will receive the
+// selection the reduce makes over them.
+// See ReduceByPKWithTimestampOperator.arrowRecords.
+func (op *ReduceByPKWithTimestampOperator) withArrowRecords(records []arrow.Record, out *ArrowSelection) *ReduceByPKWithTimestampOperator {
+	op.arrowRecords = records
+	op.arrowOut = out
+	return op
+}
+
 func (op *ReduceByPKWithTimestampOperator) Name() string {
 	return OpReduceByPKTS
 }
@@ -187,26 +231,46 @@ func (op *ReduceByPKWithTimestampOperator) Run(ctx context.Context, span trace.S
 	defer sp.End()
 
 	results := inputs[0].([]*internalpb.RetrieveResults)
+	emptyComputed, computedErr := prepareComputedResults(results)
+	if computedErr != nil {
+		return nil, computedErr
+	}
 
-	// Filter and wrap results with timestamp extraction
+	// Positional agreement is a precondition, not something to tolerate. A
+	// short arrowRecords slice would leave later results with a nil record
+	// while they are still selectable, and the failure mode of that is every
+	// column after the gap attributed to the wrong field -- silently.
+	if len(op.arrowRecords) != 0 && len(op.arrowRecords) != len(results) {
+		return nil, merr.WrapErrServiceInternalMsg(
+			"arrow records (%d) are not positionally aligned with results (%d)",
+			len(op.arrowRecords), len(results))
+	}
+
+	// Filter and wrap results with timestamp extraction. The record travels ON
+	// the wrapper, so a filtered-out result takes its record with it and the
+	// two cannot desynchronize -- which matters because selectedRows addresses
+	// rows by index into validResults and a mismatch misattributes every
+	// column after it, with no error.
 	validResults := make([]*timestampedResult, 0, len(results))
 	hasMoreResult := false
-	for _, r := range results {
+	for i, r := range results {
 		if r == nil || len(r.GetFieldsData()) == 0 || typeutil.GetSizeOfIDs(r.GetIds()) == 0 {
 			continue
 		}
 		tr, err := newTimestampedResult(r)
 		if err != nil {
 			// If no timestamp field, skip timestamp handling
-			validResults = append(validResults, &timestampedResult{result: r, timestamps: nil})
-		} else {
-			validResults = append(validResults, tr)
+			tr = &timestampedResult{result: r, timestamps: nil}
 		}
+		if len(op.arrowRecords) != 0 {
+			tr.record = op.arrowRecords[i]
+		}
+		validResults = append(validResults, tr)
 		hasMoreResult = hasMoreResult || r.GetHasMoreResult()
 	}
 
 	if len(validResults) == 0 {
-		return []any{&internalpb.RetrieveResults{}}, nil
+		return []any{&internalpb.RetrieveResults{ComputedResults: emptyComputed}}, nil
 	}
 
 	// No single-result shortcut: even a single result may contain duplicate PKs
@@ -224,16 +288,281 @@ func (op *ReduceByPKWithTimestampOperator) Run(ctx context.Context, span trace.S
 // mergeByPKWithTimestamp merges with timestamp-based deduplication.
 // When duplicate PK found with higher timestamp, replaces the previous entry.
 func (op *ReduceByPKWithTimestampOperator) mergeByPKWithTimestamp(results []*timestampedResult, hasMoreResult bool) (*internalpb.RetrieveResults, error) {
-	cursors := make([]int64, len(results))
-	rowSizeCalculators := make([]*rowSizeCalculator, len(results))
-	for i, result := range results {
-		rowSizeCalculators[i] = newRowSizeCalculator(result.result)
+	selectedRows, err := op.selectRowsByPKWithTimestamp(results)
+	if err != nil {
+		return nil, err
 	}
+
+	// Build merged result from original results
+	origResults := make([]*internalpb.RetrieveResults, len(results))
+	for i, tr := range results {
+		origResults[i] = tr.result
+	}
+
+	if len(selectedRows) == 0 {
+		computed, err := selectComputedResults(origResults, nil)
+		if err != nil {
+			return nil, err
+		}
+		return &internalpb.RetrieveResults{HasMoreResult: hasMoreResult, ComputedResults: computed}, nil
+	}
+
+	// buildMergedRetrieveResults merges whatever FieldsData the inputs carry. On
+	// the Arrow path that is the SYSTEM columns only -- the export leaves them in
+	// the protobuf header and puts user columns in the record -- so the two
+	// halves are merged by the same selectedRows and reassembled by the reader
+	// from milvus.field_order.
+	merged, err := buildMergedRetrieveResults(origResults, selectedRows, op.schema)
+	if err != nil {
+		return nil, err
+	}
+
+	// Hand the selection out unmaterialized. Nothing between here and the
+	// response assembly reads the user columns -- the Arrow-routed pipeline is
+	// this operator and nothing else -- so gathering them into a merged record
+	// here would only copy the whole payload into an intermediate that the
+	// FieldData build then copies out of again.
+	if op.arrowOut != nil {
+		records := make([]arrow.Record, len(results))
+		any := false
+		for i, r := range results {
+			records[i] = r.record
+			any = any || r.record != nil
+		}
+		if any {
+			op.arrowOut.Records = records
+			op.arrowOut.Rows = selectedRows
+		}
+	}
+
+	merged.HasMoreResult = hasMoreResult
+	return merged, nil
+}
+
+// selectRowsByPKWithTimestamp picks the rows the merge keeps, in output order.
+//
+// Every input is normally sorted ascending by PK (segcore and the worker-side
+// reduce both emit PK order), and then the k-way merge emits all copies of a
+// PK back to back, so dedup is a comparison with the last emitted row rather
+// than a map lookup. The fast path reads the PK and timestamp slices directly
+// instead of boxing every candidate into `any`, and it checks sortedness as it
+// consumes each row; the first out-of-order row abandons it for the map path,
+// which is correct for any order. Until that row is consumed the emitted
+// sequence is non-decreasing, so whatever the fast path decided before
+// noticing is exactly what the map path decides -- but the restart is cheaper
+// to reason about than a hand-over, and unsorted input is not a hot case.
+func (op *ReduceByPKWithTimestampOperator) selectRowsByPKWithTimestamp(results []*timestampedResult) ([]rowRef, error) {
+	// Rows are sized only for the maxOutputSize guard.
+	var rowSizeCalculators []*rowSizeCalculator
+	if op.maxOutputSize > 0 {
+		rowSizeCalculators = make([]*rowSizeCalculator, len(results))
+		for i, result := range results {
+			// withArrowRecord is what keeps the maxOutputSize guard honest on the
+			// Arrow path, where the user columns are in the record rather than in
+			// FieldsData. See rowSizeCalculator.
+			rowSizeCalculators[i] = newRowSizeCalculator(result.result).
+				withArrowRecord(result.record)
+		}
+	}
+
+	var (
+		rows []rowRef
+		ok   bool
+		err  error
+	)
+	if intPKs, strPKs := typedPKs(results); intPKs != nil {
+		rows, ok, err = selectSortedByPK(op, results, intPKs, rowSizeCalculators)
+	} else if strPKs != nil {
+		rows, ok, err = selectSortedByPK(op, results, strPKs, rowSizeCalculators)
+	}
+	if ok {
+		return rows, err
+	}
+	return op.selectRowsByPKWithTimestampMap(results, rowSizeCalculators)
+}
+
+// typedPKs returns every result's PK column as a typed slice when all of them
+// share one PK type, and nil, nil otherwise (mixed or unknown ID kinds go to
+// the map path).
+func typedPKs(results []*timestampedResult) ([][]int64, [][]string) {
+	if len(results) == 0 {
+		return nil, nil
+	}
+	switch results[0].result.GetIds().GetIdField().(type) {
+	case *schemapb.IDs_IntId:
+		pks := make([][]int64, len(results))
+		for i, r := range results {
+			ids, ok := r.result.GetIds().GetIdField().(*schemapb.IDs_IntId)
+			if !ok {
+				return nil, nil
+			}
+			pks[i] = ids.IntId.GetData()
+		}
+		return pks, nil
+	case *schemapb.IDs_StrId:
+		pks := make([][]string, len(results))
+		for i, r := range results {
+			ids, ok := r.result.GetIds().GetIdField().(*schemapb.IDs_StrId)
+			if !ok {
+				return nil, nil
+			}
+			pks[i] = ids.StrId.GetData()
+		}
+		return nil, pks
+	default:
+		return nil, nil
+	}
+}
+
+// selectSortedByPK is the fast path of selectRowsByPKWithTimestamp. It returns
+// ok=false, with no rows and no error, as soon as it consumes a row whose PK is
+// below its predecessor in the same input; the caller then reruns the map path
+// from scratch. Everything else -- tie-breaking, replacement, the size guard,
+// the limit, the drain stop and element-level counting -- is the map path's
+// behavior, row for row; TestSelectRowsByPKWithTimestamp_Differential holds the
+// two together.
+func selectSortedByPK[K int64 | string](
+	op *ReduceByPKWithTimestampOperator,
+	results []*timestampedResult,
+	pks [][]K,
+	rowSizeCalculators []*rowSizeCalculator,
+) ([]rowRef, bool, error) {
+	n := len(results)
+	cursors := make([]int, n)
+	hasMore := make([]bool, n)
+	elemIndices := make([][]*internalpb.ElementIndices, n)
+	isElementLevel := results[0].result.GetElementLevel()
+	stopWhenDrained := reduce.ShouldStopWhenDrained(op.reduceType)
+	var drained bool
+	for i, r := range results {
+		hasMore[i] = r.result.GetHasMoreResult()
+		drained = drained || (len(pks[i]) == 0 && hasMore[i])
+		if isElementLevel {
+			elemIndices[i] = r.result.GetElementIndices()
+		}
+	}
+	// getTimestamp's contract: a missing or short timestamp column reads as 0.
+	tsAt := func(i, row int) int64 {
+		if ts := results[i].timestamps; row < len(ts) {
+			return ts[row]
+		}
+		return 0
+	}
+	elemCountAt := func(i, row int) int64 {
+		if !isElementLevel {
+			return 1
+		}
+		if row < len(elemIndices[i]) {
+			return int64(len(elemIndices[i][row].GetIndices()))
+		}
+		return 1
+	}
+
+	var (
+		selectedRows   []rowRef
+		retSize        int64
+		availableCount int64
+		lastPK         K
+		lastTs         int64
+		lastSize       int64
+	)
+	for {
+		// Same choice as selectMinPKWithTimestamp: the smallest PK, a strictly
+		// newer timestamp on an equal PK, and otherwise the lowest input index.
+		sel := -1
+		var minPK K
+		var maxTs int64
+		for i := 0; i < n; i++ {
+			c := cursors[i]
+			if c >= len(pks[i]) {
+				continue
+			}
+			pk := pks[i][c]
+			if sel == -1 || pk < minPK {
+				sel, minPK, maxTs = i, pk, tsAt(i, c)
+			} else if pk == minPK {
+				if ts := tsAt(i, c); ts > maxTs {
+					sel, maxTs = i, ts
+				}
+			}
+		}
+		if sel == -1 {
+			break
+		}
+		// drained mirrors selectMinPKWithTimestamp's drainResult: some input
+		// with more results behind it has run out. Cursors only grow, so it is
+		// tracked where a cursor reaches the end rather than recomputed.
+		if stopWhenDrained && drained {
+			break
+		}
+
+		c := cursors[sel]
+		if c > 0 && minPK < pks[sel][c-1] {
+			return nil, false, nil
+		}
+		ts := maxTs
+		elemCount := elemCountAt(sel, c)
+
+		if len(selectedRows) == 0 || minPK != lastPK {
+			rowSize := measureRowSize(op, rowSizeCalculators, sel, int64(c))
+			selectedRows = append(selectedRows, rowRef{resultIdx: sel, rowIdx: int64(c)})
+			lastPK, lastTs, lastSize = minPK, ts, rowSize
+			retSize += rowSize
+			availableCount += elemCount
+		} else if ts != 0 && ts > lastTs {
+			// Duplicate PK: all copies are adjacent, so the entry to compare
+			// with is the last one emitted.
+			last := len(selectedRows) - 1
+			oldRef := selectedRows[last]
+			rowSize := measureRowSize(op, rowSizeCalculators, sel, int64(c))
+			retSize += rowSize - lastSize
+			lastSize = rowSize
+			if isElementLevel {
+				if old := int(oldRef.rowIdx); old < len(elemIndices[oldRef.resultIdx]) {
+					availableCount -= int64(len(elemIndices[oldRef.resultIdx][old].GetIndices()))
+				}
+				availableCount += elemCount
+			}
+			selectedRows[last] = rowRef{resultIdx: sel, rowIdx: int64(c)}
+			lastTs = ts
+		}
+
+		if op.maxOutputSize > 0 && retSize > op.maxOutputSize {
+			return nil, true, merr.WrapErrParameterInvalidMsg("query results exceed the maxOutputSize Limit %d", op.maxOutputSize)
+		}
+		if op.limit > 0 && availableCount >= op.limit {
+			break
+		}
+
+		cursors[sel]++
+		if cursors[sel] >= len(pks[sel]) && hasMore[sel] {
+			drained = true
+		}
+	}
+	return selectedRows, true, nil
+}
+
+// measureRowSize is a row's size for the maxOutputSize guard, 0 when the
+// guard is off (rowSizeCalculators is then nil).
+func measureRowSize(op *ReduceByPKWithTimestampOperator, rowSizeCalculators []*rowSizeCalculator, result int, row int64) int64 {
+	if op.maxOutputSize <= 0 {
+		return 0
+	}
+	return rowSizeCalculators[result].rowSize(row)
+}
+
+// selectRowsByPKWithTimestampMap is the general selection: it dedups through a
+// map keyed by the boxed PK, so it is correct for inputs in any order. It is
+// the fallback of selectRowsByPKWithTimestamp and the reference the fast path
+// is differentially tested against.
+func (op *ReduceByPKWithTimestampOperator) selectRowsByPKWithTimestampMap(results []*timestampedResult, rowSizeCalculators []*rowSizeCalculator) ([]rowRef, error) {
+	cursors := make([]int64, len(results))
 
 	// Track PK -> (selectedRowIndex, timestamp) for replacement on higher timestamp
 	type pkEntry struct {
 		rowIndex int // index in selectedRows
 		ts       int64
+		size     int64 // Retained row size, reused when a newer version replaces it.
 	}
 	pkTsMap := make(map[any]pkEntry)
 
@@ -256,7 +585,6 @@ func (op *ReduceByPKWithTimestampOperator) mergeByPKWithTimestamp(results []*tim
 
 		pk := typeutil.GetPK(results[sel].result.GetIds(), cursors[sel])
 		ts := results[sel].getTimestamp(cursors[sel])
-		rowSize := rowSizeCalculators[sel].rowSize(cursors[sel])
 
 		// Compute element count for this row
 		var elemCount int64 = 1
@@ -269,7 +597,8 @@ func (op *ReduceByPKWithTimestampOperator) mergeByPKWithTimestamp(results []*tim
 
 		if entry, exists := pkTsMap[pk]; !exists {
 			// New PK - add it
-			pkTsMap[pk] = pkEntry{rowIndex: len(selectedRows), ts: ts}
+			rowSize := measureRowSize(op, rowSizeCalculators, sel, cursors[sel])
+			pkTsMap[pk] = pkEntry{rowIndex: len(selectedRows), ts: ts, size: rowSize}
 			selectedRows = append(selectedRows, rowRef{resultIdx: sel, rowIdx: cursors[sel]})
 			retSize += rowSize
 			availableCount += elemCount
@@ -278,8 +607,8 @@ func (op *ReduceByPKWithTimestampOperator) mergeByPKWithTimestamp(results []*tim
 			if ts != 0 && ts > entry.ts {
 				// Replace existing entry — swap row sizes and element counts
 				oldRef := selectedRows[entry.rowIndex]
-				oldSize := rowSizeCalculators[oldRef.resultIdx].rowSize(oldRef.rowIdx)
-				retSize = retSize - oldSize + rowSize
+				rowSize := measureRowSize(op, rowSizeCalculators, sel, cursors[sel])
+				retSize += rowSize - entry.size
 				// Adjust element count for replacement
 				if isElementLevel {
 					oldElemIndices := results[oldRef.resultIdx].result.GetElementIndices()
@@ -288,7 +617,7 @@ func (op *ReduceByPKWithTimestampOperator) mergeByPKWithTimestamp(results []*tim
 					}
 					availableCount += elemCount
 				}
-				pkTsMap[pk] = pkEntry{rowIndex: entry.rowIndex, ts: ts}
+				pkTsMap[pk] = pkEntry{rowIndex: entry.rowIndex, ts: ts, size: rowSize}
 				selectedRows[entry.rowIndex] = rowRef{resultIdx: sel, rowIdx: cursors[sel]}
 			}
 		}
@@ -305,29 +634,22 @@ func (op *ReduceByPKWithTimestampOperator) mergeByPKWithTimestamp(results []*tim
 		cursors[sel]++
 	}
 
-	if len(selectedRows) == 0 {
-		return &internalpb.RetrieveResults{HasMoreResult: hasMoreResult}, nil
-	}
-
-	// Build merged result from original results
-	origResults := make([]*internalpb.RetrieveResults, len(results))
-	for i, tr := range results {
-		origResults[i] = tr.result
-	}
-
-	merged, err := buildMergedRetrieveResults(origResults, selectedRows, op.schema)
-	if err != nil {
-		return nil, err
-	}
-
-	merged.HasMoreResult = hasMoreResult
-	return merged, nil
+	return selectedRows, nil
 }
 
 // timestampedResult wraps a RetrieveResult with extracted timestamps
 type timestampedResult struct {
 	result     *internalpb.RetrieveResults
 	timestamps []int64
+	// record holds this result's user output columns when the Arrow transport
+	// was used, nil otherwise.
+	//
+	// It lives HERE, on the wrapper that already pairs up everything about one
+	// result, rather than in a parallel slice. A parallel slice has to be
+	// filtered in lockstep with the results wherever either is filtered, and
+	// the failure mode of getting that wrong is not an error -- it is every
+	// column after the mismatch attributed to the wrong field.
+	record arrow.Record
 }
 
 func (r *timestampedResult) GetIds() *schemapb.IDs {

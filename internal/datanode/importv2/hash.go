@@ -22,32 +22,28 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type HashedData [][]*storage.InsertData // [vchannelIndex][partitionIndex]*storage.InsertData
 
-func newHashedData(schema *schemapb.CollectionSchema, channelNum, partitionNum int) (HashedData, error) {
-	var err error
-	res := make(HashedData, channelNum)
-	for i := 0; i < channelNum; i++ {
-		res[i] = make([]*storage.InsertData, partitionNum)
-		for j := 0; j < partitionNum; j++ {
-			res[i][j], err = storage.NewInsertDataWithFunctionOutputField(schema)
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-	return res, nil
+func HashData(task Task, rows *storage.InsertData) (HashedData, error) {
+	return HashDataBySchema(typeutil.AppendSystemFields(task.GetSchema()), task.GetVchannels(), task.GetPartitionIDs(), rows)
 }
 
-func HashData(task Task, rows *storage.InsertData) (HashedData, error) {
+// HashDataBySchema applies the same vchannel/partition hashing used by the
+// legacy ImportTask, but does not require a concrete V2 task object.  V3 uses
+// this adapter while keeping the old hash functions and field semantics as the
+// single source of truth.
+func HashDataBySchema(schema *schemapb.CollectionSchema, vchannels []string, partitionIDs []int64, rows *storage.InsertData) (HashedData, error) {
 	var (
-		schema       = typeutil.AppendSystemFields(task.GetSchema())
-		channelNum   = len(task.GetVchannels())
-		partitionNum = len(task.GetPartitionIDs())
+		channelNum   = len(vchannels)
+		partitionNum = len(partitionIDs)
 	)
+	if schema == nil || rows == nil || channelNum == 0 || partitionNum == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("invalid hash input")
+	}
 
 	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
@@ -55,23 +51,62 @@ func HashData(task Task, rows *storage.InsertData) (HashedData, error) {
 	}
 	partKeyField, _ := typeutil.GetPartitionKeyFieldSchema(schema)
 
-	id1 := pkField.GetFieldID()
-	id2 := partKeyField.GetFieldID()
+	pkColumn := rows.Data[pkField.GetFieldID()]
+	partColumn := rows.Data[partKeyField.GetFieldID()]
+	hashPK := hashByVChannel(int64(channelNum), pkField)
+	hashPartition := hashByPartition(int64(partitionNum), partKeyField)
 
-	f1 := hashByVChannel(int64(channelNum), pkField)
-	f2 := hashByPartition(int64(partitionNum), partKeyField)
+	rowNum := rows.GetRowNum()
+	rowsHint := rowNum / (channelNum * partitionNum)
+	selections := buildRowSelections(pkColumn, partColumn, hashPK, hashPartition, rowNum, channelNum, partitionNum, rowsHint)
+	return gatherHashRows(schema, rows, selections)
+}
 
-	res, err := newHashedData(schema, channelNum, partitionNum)
-	if err != nil {
-		return nil, err
+// buildRowSelections groups source row indices by vchannel and partition,
+// preserving source order within each bucket. Missing columns pass nil to
+// their hash functions. rowsHint only controls initial bucket capacity;
+// no source data is copied or modified.
+func buildRowSelections(pkColumn, partColumn storage.FieldData,
+	hashPK, hashPartition func(any) int64,
+	rowNum, channelNum, partitionNum, rowsHint int,
+) [][][]int {
+	// make space for selections
+	selections := make([][][]int, channelNum)
+	for c := range selections {
+		selections[c] = make([][]int, partitionNum)
+		for p := range selections[c] {
+			selections[c][p] = make([]int, 0, rowsHint)
+		}
 	}
+	// hash data and record line number
+	for i := 0; i < rowNum; i++ {
+		var pk, partKey any
+		if pkColumn != nil {
+			pk = pkColumn.GetRow(i)
+		}
+		if partColumn != nil {
+			partKey = partColumn.GetRow(i)
+		}
+		c, p := hashPK(pk), hashPartition(partKey)
+		selections[c][p] = append(selections[c][p], i)
+	}
+	return selections
+}
 
-	for i := 0; i < rows.GetRowNum(); i++ {
-		row := rows.GetRow(i)
-		p1, p2 := f1(row[id1]), f2(row[id2])
-		err = res[p1][p2].Append(row)
-		if err != nil {
-			return nil, err
+// gatherHashRows allocates each bucket using its routed row count and copies the selected rows using InsertData.CopyFrom.
+func gatherHashRows(schema *schemapb.CollectionSchema, src *storage.InsertData, selections [][][]int) (HashedData, error) {
+	res := make(HashedData, len(selections))
+	for c, partitions := range selections {
+		res[c] = make([]*storage.InsertData, len(partitions))
+		for p, indices := range partitions {
+			data, err := storage.NewInsertDataWithCap(schema, len(indices), true)
+			if err != nil {
+				return nil, err
+			}
+			if err := data.CopyFrom(src, indices); err != nil {
+				return nil, err
+			}
+			res[c][p] = data
 		}
 	}
 	return res, nil
@@ -152,6 +187,16 @@ func GetRowsStats(task Task, rows *storage.InsertData) (map[string]*datapb.Parti
 	}
 
 	rowNum, _ := GetInsertDataRowCount(rows, schema)
+	if partitionNum > 1 && partKeyField.GetDefaultValue() != nil {
+		// Snapshot/backup readers may omit a target-only column with a default.
+		// PreImport needs its partition key before hashing, whereas Import fills
+		// defaults before HashData. Reuse that rule for just the routing column;
+		// single-partition imports and unrelated optional columns stay unchanged.
+		partitionSchema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{partKeyField}}
+		if err := AppendNullableDefaultFieldsData(partitionSchema, rows, rowNum); err != nil {
+			return nil, err
+		}
+	}
 	if pkField.GetAutoID() {
 		fn := hashByPartition(int64(partitionNum), partKeyField)
 		rows.Data = lo.PickBy(rows.Data, func(fieldID int64, _ storage.FieldData) bool {

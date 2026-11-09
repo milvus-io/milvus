@@ -263,26 +263,23 @@ func TestAppendSegmentManifestColumnsUsesCommitManifestUpdates(t *testing.T) {
 	mockRead := mockey.Mock(readColumnGroupsFromManifest).Return(nil, nil).Build()
 	defer mockRead.UnPatch()
 
-	var gotBasePath string
-	var gotVersion int64
+	var gotBaseManifest string
 	var gotAddNewColumnGroups bool
 	mockCommit := mockey.Mock(CommitManifestUpdates).
-		To(func(basePath string, baseVersion int64, storageConfig *indexpb.StorageConfig, updates *ManifestUpdates) (string, error) {
-			gotBasePath = basePath
-			gotVersion = baseVersion
+		To(func(baseManifest string, storageConfig *indexpb.StorageConfig, updates *ManifestUpdates) (string, error) {
+			gotBaseManifest = baseManifest
 			cgs, ok := updates.NewFiles.(*ColumnGroups)
 			require.True(t, ok)
 			require.NotNil(t, cgs.cColumnGroups)
 			gotAddNewColumnGroups = cgs.addNewColumnGroups
-			return MarshalManifestPath(basePath, baseVersion+1), nil
+			return MarshalManifestPath("segment", 4), nil
 		}).Build()
 	defer mockCommit.UnPatch()
 
 	got, err := AppendSegmentManifestColumns(ctx, oldManifestPath, "parquet", []string{"score"}, fragments, config)
 	require.NoError(t, err)
 	assert.Equal(t, MarshalManifestPath("segment", 4), got)
-	assert.Equal(t, "segment", gotBasePath)
-	assert.Equal(t, int64(3), gotVersion)
+	assert.Equal(t, oldManifestPath, gotBaseManifest)
 	assert.True(t, gotAddNewColumnGroups)
 }
 
@@ -331,8 +328,8 @@ func TestAppendSegmentManifestColumnsReadAndNoopPaths(t *testing.T) {
 	mockReadParse := mockey.Mock(readColumnGroupsFromManifest).Return(nil, nil).Build()
 	_, err = AppendSegmentManifestColumns(context.Background(), "not-json", "parquet", []string{"score"}, fragments, config)
 	mockReadParse.UnPatch()
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to parse manifest path")
+	assert.ErrorIs(t, err, merr.ErrDataIntegrity)
+	assert.Contains(t, err.Error(), "parse base manifest path")
 }
 
 func TestFileInfo_Struct(t *testing.T) {
@@ -793,6 +790,45 @@ func TestReadFragmentsFromManifest_FiltersColumns(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to parse manifest path")
 }
 
+func TestManifestMissingColumns(t *testing.T) {
+	readErr := merr.WrapErrServiceUnavailableMsg("manifest read unavailable")
+	for _, tc := range []struct {
+		name    string
+		columns []string
+		groups  []manifestColumnGroup
+		err     error
+		want    []string
+	}{
+		{name: "empty request"},
+		{name: "empty manifest", columns: []string{"101", "text"}, want: []string{"101", "text"}},
+		{
+			name: "columns across groups", columns: []string{"101", "text"},
+			groups: []manifestColumnGroup{{Columns: []string{"text"}}, {Columns: []string{"101"}}},
+		},
+		{
+			name: "missing order and deduplication", columns: []string{"b", "101", "a", "b"},
+			groups: []manifestColumnGroup{{Columns: []string{"101", "unrequested"}}}, want: []string{"b", "a"},
+		},
+		{name: "read error", columns: []string{"101"}, err: readErr},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			read := mockey.Mock(readColumnGroupsFromManifest).Return(tc.groups, tc.err).Build()
+			defer read.UnPatch()
+			missing, err := ManifestMissingColumns("pinned-manifest", nil, tc.columns)
+			require.ErrorIs(t, err, tc.err)
+			require.Equal(t, tc.want, missing)
+			reads := 1
+			if len(tc.columns) == 0 {
+				reads = 0
+			}
+			require.Equal(t, reads, read.Times())
+			has, err := ManifestHasColumns("pinned-manifest", nil, tc.columns)
+			require.ErrorIs(t, err, tc.err)
+			require.Equal(t, tc.err == nil && len(tc.want) == 0, has)
+		})
+	}
+}
+
 func TestMarshalUnmarshalManifestPath(t *testing.T) {
 	original := "/base/path/to/manifest"
 	version := int64(42)
@@ -822,6 +858,52 @@ func TestMarshalManifestPath_EmptyBasePath(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "", basePath)
 	assert.Equal(t, int64(0), ver)
+}
+
+func TestManifestPathKey(t *testing.T) {
+	canonical := MarshalManifestPath("files/insert_log/1/2/3", 7)
+	// Older milvus-table builds wrote nlohmann's sorted keys, and a newer
+	// writer may add optional fields; neither changes the revision.
+	reordered := `{"base_path":"files/insert_log/1/2/3","ver":7}`
+	extended := `{"ver":7,"base_path":"files/insert_log/1/2/3","size":1024}`
+
+	assert.Equal(t, canonical, ManifestPathKey(canonical))
+	assert.Equal(t, canonical, ManifestPathKey(reordered))
+	assert.Equal(t, canonical, ManifestPathKey(extended))
+	assert.Equal(t, canonical, ManifestPathKey(" \n\t"+reordered))
+	assert.True(t, SameManifestPath(reordered, extended))
+
+	assert.False(t, SameManifestPath(canonical, MarshalManifestPath("files/insert_log/1/2/3", 8)))
+	assert.False(t, SameManifestPath(canonical, MarshalManifestPath("files/insert_log/1/2/4", 7)))
+
+	// Values that are not manifest paths, such as external table files, are
+	// their own key.
+	for _, raw := range []string{"", "s3://bucket/data/part-0.parquet", "{not json", `{"ver":1}`} {
+		assert.Equal(t, raw, ManifestPathKey(raw))
+	}
+	assert.False(t, SameManifestPath("s3://bucket/a.parquet", "s3://bucket/b.parquet"))
+}
+
+func TestManifestPathRecordsSize(t *testing.T) {
+	base := "files/insert_log/1/2/3"
+
+	// Without a size, a path is spelled exactly as before sizes were recorded.
+	assert.Equal(t, `{"ver":3,"base_path":"files/insert_log/1/2/3"}`, MarshalManifestPath(base, 3))
+
+	sized := CommittedManifestPath(base, 3, 1024, "remote")
+	assert.Equal(t, `{"ver":3,"base_path":"files/insert_log/1/2/3","size":1024}`, sized)
+	parsed, err := ParseManifestPath(sized)
+	require.NoError(t, err)
+	assert.Equal(t, ManifestJSON{ManifestVersion: 3, BasePath: base, Size: 1024}, parsed)
+
+	// Local storage and unknown sizes record nothing.
+	for _, got := range []string{
+		CommittedManifestPath(base, 3, 1024, "local"),
+		CommittedManifestPath(base, 3, 0, "remote"),
+		CommittedManifestPath(base, 3, -1, "remote"),
+	} {
+		assert.Equal(t, MarshalManifestPath(base, 3), got)
+	}
 }
 
 func TestCreateSegmentManifestWithBasePath_CanceledContext(t *testing.T) {
@@ -1995,6 +2077,15 @@ func TestBuildMilvusTableFileInfosFromSnapshotMetadata_ResolvesManifestBasePath(
 	}, fileInfos)
 }
 
+// Resolving a source base only changes how the manifest object is addressed,
+// so the size recorded for it still holds.
+func TestResolveMilvusTableSourceManifestPathKeepsSize(t *testing.T) {
+	got, err := resolveMilvusTableSourceManifestPath(`{"ver":2,"base_path":"files/insert_log/10","size":2048}`,
+		func(sourcePath string) (string, error) { return "s3://source-bucket/" + sourcePath, nil })
+	require.NoError(t, err)
+	assert.Equal(t, `{"ver":2,"base_path":"s3://source-bucket/files/insert_log/10","size":2048}`, got)
+}
+
 func TestResolveMilvusTableSegmentDeltalogPaths(t *testing.T) {
 	segment := &datapb.SegmentDescription{
 		Deltalogs: []*datapb.FieldBinlog{{
@@ -2090,7 +2181,6 @@ func TestMilvusTableSnapshotMetadataInvalid(t *testing.T) {
 		{"truncated_json", `{"corrupt manifest`, merr.ErrDataIntegrity},
 		{"empty_object", "", merr.ErrDataIntegrity},
 		{"invalid_field_type", `{"format_version":"invalid"}`, merr.ErrDataIntegrity},
-		{"unsupported_version", `{"format_version":99999}`, merr.ErrOperationNotSupported},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			// Exercise both consumers with real parsing. Only object I/O is patched.
@@ -2127,12 +2217,17 @@ func TestReadMilvusTableSnapshotMetadata_ReadFailureIsNotInvalidMetadata(t *test
 }
 
 func TestReadMilvusTableSnapshotMetadata_ValidMetadata(t *testing.T) {
-	read := mockey.Mock(readExternalSourceFile).Return([]byte(`{"format_version":2}`), nil).Build()
-	defer read.UnPatch()
-	metadata, err := ReadMilvusTableSnapshotMetadata("s3://bucket/metadata.json",
-		`{"format":"milvus-table"}`, nil, ExternalSpecContext{})
-	require.NoError(t, err)
-	assert.Equal(t, int32(2), metadata.GetFormatVersion())
+	for _, version := range []int32{2, 99999} {
+		t.Run(fmt.Sprintf("version_%d", version), func(t *testing.T) {
+			data := []byte(fmt.Sprintf(`{"format_version":%d}`, version))
+			read := mockey.Mock(readExternalSourceFile).Return(data, nil).Build()
+			defer read.UnPatch()
+			metadata, err := ReadMilvusTableSnapshotMetadata("s3://bucket/metadata.json",
+				`{"format":"milvus-table"}`, nil, ExternalSpecContext{})
+			require.NoError(t, err)
+			assert.Equal(t, version, metadata.GetFormatVersion())
+		})
+	}
 }
 
 func TestReadMilvusTableSnapshotMetadata_InvalidSource(t *testing.T) {
@@ -2380,12 +2475,16 @@ func TestMakePropertiesFromStorageConfig_AllFields(t *testing.T) {
 		UseVirtualHost:    true,
 		RequestTimeoutMs:  5000,
 		MaxConnections:    237,
+		SslTlsMinVersion:  "1.3",
+		UseCrc32CChecksum: true,
 	}
 	props, err := MakePropertiesFromStorageConfig(config, nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, props)
 	defer FreeProperties(props)
 	assert.Equal(t, "237", loonPropertyString(props, PropertyFSMaxConnections))
+	assert.Equal(t, "1.3", loonPropertyString(props, PropertyFSTLSMinVersion))
+	assert.Equal(t, "true", loonPropertyString(props, PropertyFSUseCRC32CChecksum))
 }
 
 // An unset MaxConnections must leave the key absent, not emit "0".

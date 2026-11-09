@@ -33,6 +33,7 @@ GetAsyncLoadThreadPoolSize();
 
 // Returns a priority-aware keep-alive for the supplied executor, or for the
 // process-wide async-load executor when executor is empty.
+// Default Linux workers use nice 19 independently of their HIGH/LOW task queue.
 [[nodiscard]] folly::Executor::KeepAlive<>
 ResolveAsyncLoadExecutor(folly::Executor::KeepAlive<> executor,
                          milvus::proto::common::LoadPriority load_priority);

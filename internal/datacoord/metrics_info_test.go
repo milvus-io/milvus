@@ -29,8 +29,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/types"
@@ -206,26 +209,26 @@ func TestGetIndexNodeMetrics(t *testing.T) {
 	// success
 	dn = mocks.NewMockDataNodeClient(t)
 	dn.EXPECT().GetMetrics(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.GetMetricsRequest, option ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
-		nodeID = UniqueID(100)
+		meta.NodeID = UniqueID(100)
 
 		nodeInfos := metricsinfo.DataNodeInfos{
 			BaseComponentInfos: metricsinfo.BaseComponentInfos{
-				Name: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, nodeID),
-				ID:   nodeID,
+				Name: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, meta.NodeID),
+				ID:   meta.NodeID,
 			},
 		}
 		resp, err := metricsinfo.MarshalComponentInfos(nodeInfos)
 		if err != nil {
 			return &milvuspb.GetMetricsResponse{
 				Status:        merr.Status(err),
-				ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, nodeID),
+				ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, meta.NodeID),
 			}, nil
 		}
 
 		return &milvuspb.GetMetricsResponse{
 			Status:        merr.Success(),
 			Response:      resp,
-			ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, nodeID),
+			ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, meta.NodeID),
 		}, nil
 	})
 	info, err = svr.getIndexNodeMetrics(ctx, req, dn)
@@ -467,8 +470,9 @@ func TestGetChannelsJSON(t *testing.T) {
 		nodeManager.EXPECT().GetClientIDs().Return([]int64{1})
 		svr.nodeManager = nodeManager
 
-		svr.meta = &meta{channelCPs: newChannelCps()}
-		svr.meta.channelCPs.checkpoints["channel1"] = &msgpb.MsgPosition{Timestamp: 1000}
+		store := metacache.NewMetaStore(nil)
+		store.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{"channel1": {Timestamp: 1000}})
+		svr.meta = &meta.Meta{MetaStore: store}
 
 		actualJSON, err := svr.getChannelsJSON(context.TODO(), req)
 		assert.NoError(t, err)
@@ -500,7 +504,7 @@ func TestGetChannelsJSON(t *testing.T) {
 		nodeManager.EXPECT().GetClientIDs().Return([]int64{1})
 		svr.nodeManager = nodeManager
 
-		svr.meta = &meta{channelCPs: newChannelCps()}
+		svr.meta = meta.NewEmptyTestMeta()
 
 		actualJSON, err := svr.getChannelsJSON(ctx, req)
 		assert.Error(t, err)
@@ -524,7 +528,7 @@ func TestGetChannelsJSON(t *testing.T) {
 		nodeManager.EXPECT().GetClientIDs().Return([]int64{1})
 		svr.nodeManager = nodeManager
 
-		svr.meta = &meta{channelCPs: newChannelCps()}
+		svr.meta = meta.NewEmptyTestMeta()
 
 		actualJSON, err := svr.getChannelsJSON(ctx, req)
 		assert.Error(t, err)
@@ -548,7 +552,7 @@ func TestGetChannelsJSON(t *testing.T) {
 		nodeManager.EXPECT().GetClientIDs().Return([]int64{1})
 		svr.nodeManager = nodeManager
 
-		svr.meta = &meta{channelCPs: newChannelCps()}
+		svr.meta = meta.NewEmptyTestMeta()
 
 		expectedJSON := "null"
 		actualJSON, err := svr.getChannelsJSON(ctx, req)
@@ -567,21 +571,19 @@ func TestGetDistJSON(t *testing.T) {
 		req := &milvuspb.GetMetricsRequest{}
 		ctx := context.Background()
 
-		svr.meta = &meta{
-			segments: &SegmentsInfo{
-				segments: map[int64]*SegmentInfo{
-					1: {
-						SegmentInfo: &datapb.SegmentInfo{
-							ID:            1,
-							CollectionID:  1,
-							PartitionID:   1,
-							InsertChannel: "channel1",
-							Level:         datapb.SegmentLevel_L1,
-							State:         commonpb.SegmentState_Flushed,
-						},
+		svr.meta = &meta.Meta{
+			Segments: meta.NewSegmentsInfoWithSegments(map[int64]*meta.SegmentInfo{
+				1: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:            1,
+						CollectionID:  1,
+						PartitionID:   1,
+						InsertChannel: "channel1",
+						Level:         datapb.SegmentLevel_L1,
+						State:         commonpb.SegmentState_Flushed,
 					},
 				},
-			},
+			}),
 		}
 
 		segments := []*metricsinfo.Segment{
@@ -610,7 +612,8 @@ func TestGetDistJSON(t *testing.T) {
 		req := &milvuspb.GetMetricsRequest{}
 		ctx := context.Background()
 
-		svr.meta = &meta{segments: &SegmentsInfo{segments: map[int64]*SegmentInfo{}}}
+		metricsStore := metacache.NewMetaStore(nil)
+		svr.meta = &meta.Meta{Segments: meta.NewSegmentsInfo(metricsStore), MetaStore: metricsStore}
 		expectedJSON := "{}"
 		actualJSON := svr.getDistJSON(ctx, req)
 		assert.Equal(t, expectedJSON, actualJSON)
@@ -638,22 +641,22 @@ func TestServer_getSegmentsJSON(t *testing.T) {
 	})
 	segIndexes.Insert(1000, segIdx0)
 	s := &Server{
-		meta: &meta{
-			segments: &SegmentsInfo{
-				segments: map[int64]*SegmentInfo{
-					1: {
-						SegmentInfo: &datapb.SegmentInfo{
-							ID:            1,
-							CollectionID:  1,
-							PartitionID:   2,
-							InsertChannel: "channel1",
-						},
+		meta: &meta.Meta{
+			Segments: meta.NewSegmentsInfoWithSegments(map[int64]*meta.SegmentInfo{
+				1: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:            1,
+						CollectionID:  1,
+						PartitionID:   2,
+						InsertChannel: "channel1",
 					},
 				},
-			},
-			indexMeta: &indexMeta{
-				segmentIndexes: segIndexes,
-				indexes: map[UniqueID]map[UniqueID]*model.Index{
+			}),
+		},
+		domainMetas: domainMetas{
+			indexMeta: &index.IndexMeta{
+				SegmentIndexes: segIndexes,
+				Indexes: map[UniqueID]map[UniqueID]*model.Index{
 					1: {
 						10: &model.Index{
 							CollectionID: 1,

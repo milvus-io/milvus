@@ -4,7 +4,6 @@ package indexcgowrapper
 #cgo pkg-config: milvus_core
 
 #include <stdlib.h>	// free
-#include "common/binary_set_c.h"
 #include "storage/storage_c.h"
 */
 import "C"
@@ -17,47 +16,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
-
-func GetBinarySetKeys(cBinarySet C.CBinarySet) ([]string, error) {
-	size := int(C.GetBinarySetSize(cBinarySet))
-	if size == 0 {
-		return nil, merr.WrapErrParameterInvalidMsg("BinarySet size is zero")
-	}
-	datas := make([]unsafe.Pointer, size)
-
-	C.GetBinarySetKeys(cBinarySet, unsafe.Pointer(&datas[0]))
-	ret := make([]string, size)
-	for i := 0; i < size; i++ {
-		ret[i] = C.GoString((*C.char)(datas[i]))
-	}
-
-	return ret, nil
-}
-
-func GetBinarySetValue(cBinarySet C.CBinarySet, key string) ([]byte, error) {
-	cIndexKey := C.CString(key)
-	defer C.free(unsafe.Pointer(cIndexKey))
-	ret := C.GetBinarySetValueSize(cBinarySet, cIndexKey)
-	size := int(ret)
-	if size == 0 {
-		return nil, merr.WrapErrParameterInvalidMsg("GetBinarySetValueSize size is zero")
-	}
-	value := make([]byte, size)
-	status := C.CopyBinarySetValue(unsafe.Pointer(&value[0]), cIndexKey, cBinarySet)
-
-	if err := HandleCStatus(&status, "CopyBinarySetValue failed"); err != nil {
-		return nil, err
-	}
-
-	return value, nil
-}
-
-func GetBinarySetSize(cBinarySet C.CBinarySet, key string) (int64, error) {
-	cIndexKey := C.CString(key)
-	defer C.free(unsafe.Pointer(cIndexKey))
-	ret := C.GetBinarySetValueSize(cBinarySet, cIndexKey)
-	return int64(ret), nil
-}
 
 // HandleCStatus deal with the error returned from CGO
 func HandleCStatus(status *C.CStatus, extraInfo string) error {

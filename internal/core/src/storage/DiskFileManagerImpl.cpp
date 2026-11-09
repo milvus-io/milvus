@@ -943,9 +943,6 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
     AssertInfo(segment_insert_files.has_value(),
                "segment insert files is empty when build index");
     auto& all_remote_files = segment_insert_files.value();
-    for (auto& remote_files : all_remote_files) {
-        SortByPath(remote_files);
-    }
 
     auto local_chunk_manager =
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
@@ -1067,6 +1064,12 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
         }
     } else {
         for (auto& remote_files_group : all_remote_files) {
+            // Dense-vector pagination splits the group into single-file
+            // reads. Order the complete group before that split; the shared
+            // reader can only validate each single-file page afterwards.
+            if (manifest_path_str.empty()) {
+                SortBinlogPaths(remote_files_group);
+            }
             if (dim >
                 0) {  // for vector indices try to use limited RAM when loading
                 cached_already = true;
@@ -1440,9 +1443,6 @@ DiskFileManagerImpl::cache_opt_field_to_disk_v2(const Config& config) {
                "segment insert files is empty when build index while "
                "caching opt fields");
     auto& remote_files_storage_v2 = segment_insert_files.value();
-    for (auto& remote_files : remote_files_storage_v2) {
-        SortByPath(remote_files);
-    }
 
     auto& fields_map = opt_fields.value();
     const uint32_t num_of_fields = fields_map.size();

@@ -30,7 +30,6 @@ import (
 const (
 	SourceRecoveryStorage     = "recoveryStorage"
 	SourceNodeMemory          = "memory"
-	SourceFlusherRecovering   = "flusherRecovering"
 	SourceAppendRate          = "appendRate"
 	appendRateCheckerInterval = 2 * time.Second
 )
@@ -42,12 +41,11 @@ type RateProvider interface {
 
 type WALRateLimitComponent struct {
 	*ratelimit.MuxRateLimitObserverRegistryImpl
-	channel           types.PChannelInfo
-	RecoveryStorage   *ratelimit.AdaptiveRateLimitController
-	FlusherRecovering *ratelimit.AdaptiveRateLimitController
-	NodeMemory        *ratelimit.AdaptiveRateLimitController
-	AppendRate        *ratelimit.AdaptiveRateLimitController
-	handler           *hardware.SystemMetricsListener
+	channel         types.PChannelInfo
+	RecoveryStorage *ratelimit.AdaptiveRateLimitController
+	NodeMemory      *ratelimit.AdaptiveRateLimitController
+	AppendRate      *ratelimit.AdaptiveRateLimitController
+	handler         *hardware.SystemMetricsListener
 
 	appendRateStopCh chan struct{}
 	appendRateWg     sync.WaitGroup
@@ -63,8 +61,6 @@ func NewWALRateLimitComponent(
 		channel:                          channel,
 		RecoveryStorage: ratelimit.NewAdaptiveRateLimitController(channel, SourceRecoveryStorage, rateLimitRegistry,
 			newAdaptiveRateLimitControllerConfigFetcher(channel, SourceRecoveryStorage)),
-		FlusherRecovering: ratelimit.NewAdaptiveRateLimitController(channel, SourceFlusherRecovering, rateLimitRegistry,
-			newAdaptiveRateLimitControllerConfigFetcher(channel, SourceFlusherRecovering)),
 		NodeMemory: ratelimit.NewAdaptiveRateLimitController(channel, SourceNodeMemory, rateLimitRegistry,
 			newAdaptiveRateLimitControllerConfigFetcher(channel, SourceNodeMemory)),
 		AppendRate: ratelimit.NewAdaptiveRateLimitController(channel, SourceAppendRate, rateLimitRegistry,
@@ -275,7 +271,6 @@ func (c *WALRateLimitComponent) Close() {
 		c.appendRateWg.Wait()
 	}
 	c.RecoveryStorage.Close()
-	c.FlusherRecovering.Close()
 	c.NodeMemory.Close()
 	c.AppendRate.Close()
 	c.clearMetrics()

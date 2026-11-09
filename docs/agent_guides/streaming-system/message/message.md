@@ -60,6 +60,15 @@ Use these rules to choose where a new field goes:
 
 If rule 1 and rule 2 or rule 3 point to different places, rules 2 and 3 win. Put a small handle (an ID or a fingerprint) in the header and put the full content in the body.
 
+## Immutable Body Cache
+
+[Immutable Message Body Cache](../../../design-docs/design_docs/wal/message_body_cache.md)
+defines the read-only `Body` contract and process-wide cache reclamation.
+Immutable Body calls share decoded results through an object-local cache slot;
+typed wrappers and transaction property clones reuse that slot. Consumers copy
+the metadata they need to modify. Mutable/broadcast bodies retain independent
+decoding. Function-output materialization remains outside Body decoding.
+
 ## Adding a New Message Type
 
 New message types **MUST** be defined via `codegen/reflect_info.json` and `pkg/streaming/util/message/codegen/`. Do not manually write builder or type-conversion functions.

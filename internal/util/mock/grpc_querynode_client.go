@@ -102,6 +102,14 @@ func (m *GrpcQueryNodeClient) QuerySegments(ctx context.Context, in *querypb.Que
 	return &internalpb.RetrieveResults{}, m.Err
 }
 
+func (m *GrpcQueryNodeClient) Materialize(ctx context.Context, in *querypb.QueryRequest, opts ...grpc.CallOption) (*internalpb.MaterializeResults, error) {
+	return &internalpb.MaterializeResults{}, m.Err
+}
+
+func (m *GrpcQueryNodeClient) MaterializeSegments(ctx context.Context, in *querypb.QueryRequest, opts ...grpc.CallOption) (*internalpb.MaterializeResults, error) {
+	return &internalpb.MaterializeResults{}, m.Err
+}
+
 func (m *GrpcQueryNodeClient) QueryStreamSegments(ctx context.Context, in *querypb.QueryRequest, opts ...grpc.CallOption) (querypb.QueryNode_QueryStreamSegmentsClient, error) {
 	return &streamrpc.LocalQueryClient{}, m.Err
 }
@@ -112,6 +120,10 @@ func (m *GrpcQueryNodeClient) SyncReplicaSegments(ctx context.Context, in *query
 
 func (m *GrpcQueryNodeClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
 	return &milvuspb.GetMetricsResponse{}, m.Err
+}
+
+func (m *GrpcQueryNodeClient) GetFeatureUsage(ctx context.Context, in *internalpb.GetFeatureUsageRequest, opts ...grpc.CallOption) (*internalpb.GetFeatureUsageResponse, error) {
+	return &internalpb.GetFeatureUsageResponse{}, m.Err
 }
 
 func (m *GrpcQueryNodeClient) ShowConfigurations(ctx context.Context, in *internalpb.ShowConfigurationsRequest, opts ...grpc.CallOption) (*internalpb.ShowConfigurationsResponse, error) {

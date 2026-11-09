@@ -17,8 +17,8 @@
 #include <cstdint>
 #include <limits>
 #include <map>
+#include <numeric>
 #include <ratio>
-#include <type_traits>
 #include <unordered_set>
 
 #include "ChunkedSegmentSealedImpl.h"
@@ -38,7 +38,7 @@
 #include "expr/ITypeExpr.h"
 #include "fmt/core.h"
 #include "futures/Future.h"
-#include "index/json_stats/JsonKeyStats.h"
+#include "segcore/json_stats/JsonKeyStats.h"
 #include "monitor/Monitor.h"
 #include "pb/schema.pb.h"
 #include "plan/PlanNode.h"
@@ -69,7 +69,8 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
     Assert(results.primary_keys_.size() == 0);
     results.primary_keys_.resize(size);
 
-    auto schema = get_schema_snapshot();
+    auto schema =
+        type() == SegmentType::Growing ? get_schema_snapshot() : plan->schema_;
     auto pk_field_id_opt = schema->get_primary_field_id();
     AssertInfo(pk_field_id_opt.has_value(),
                "Cannot get primary key offset from schema");
@@ -82,9 +83,12 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
     // segments would make each segment's search_storage_cost_ accumulate
     // every prior segment's bytes.
     milvus::OpContext local_ctx;
+    local_ctx.runtime_load_priority = milvus::proto::common::LoadPriority::HIGH;
     if (op_ctx != nullptr) {
         local_ctx.cancellation_token = op_ctx->cancellation_token;
-        local_ctx.runtime_load_priority = op_ctx->runtime_load_priority;
+        local_ctx.runtime_load_priority =
+            op_ctx->runtime_load_priority.value_or(
+                milvus::proto::common::LoadPriority::HIGH);
     }
     auto field_data = bulk_subscript(
         &local_ctx, pk_field_id, results.seg_offsets_.data(), size);
@@ -111,9 +115,12 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
     // See FillPrimaryKeys: per-call OpContext so storage_usage stays scoped
     // to this segment's fills.
     milvus::OpContext local_ctx;
+    local_ctx.runtime_load_priority = milvus::proto::common::LoadPriority::HIGH;
     if (op_ctx != nullptr) {
         local_ctx.cancellation_token = op_ctx->cancellation_token;
-        local_ctx.runtime_load_priority = op_ctx->runtime_load_priority;
+        local_ctx.runtime_load_priority =
+            op_ctx->runtime_load_priority.value_or(
+                milvus::proto::common::LoadPriority::HIGH);
     }
     // fill other entries except primary key by result_offset
     for (auto field_id : plan->target_entries_) {
@@ -130,7 +137,8 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan,
                                         size,
                                         target_dynamic_fields);
         } else if (!is_field_exist(field_id)) {
-            field_data = bulk_subscript_not_exist_field(field_meta, size);
+            field_data = bulk_subscript_not_exist_field(
+                field_meta, results.seg_offsets_.data(), size);
         } else {
             field_data = bulk_subscript(
                 &local_ctx, field_id, results.seg_offsets_.data(), size);
@@ -167,6 +175,7 @@ SegmentInternalInterface::Search(
                                        collection_ttl,
                                        entity_ttl_physical_time_us,
                                        std::move(trace_span));
+    visitor.SetReadSchema(plan->schema_);
     visitor.SetFilterOnly(filter_only);
     visitor.SetEnableExprCache(enable_expr_cache);
     auto results = std::make_unique<SearchResult>();
@@ -220,6 +229,23 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                    int64_t entity_ttl_physical_time_us) const {
     std::shared_lock lck(mutex_);
     tracer::AutoSpan span("Retrieve", tracer::GetRootSpan(), true);
+    const bool candidates = plan->mode_ == query::RetrieveMode::Candidates;
+    AssertInfo(candidates || plan->mode_ == query::RetrieveMode::Normal,
+               "invalid retrieve mode");
+    if (candidates) {
+        AssertInfo(limit_size > 0, "candidate byte budget must be positive");
+        AssertInfo(plan->max_candidate_rows_ >= 0,
+                   "candidate row cap must be non-negative");
+        AssertInfo(plan->plan_node_ && plan->plan_node_->plannodes_,
+                   "candidate retrieval requires a plan node");
+        if (plan->plan_node_->has_order_by_ ||
+            plan->plan_node_->query_iterator_cursor_.has_value() ||
+            dynamic_cast<const plan::MvccNode*>(
+                plan->plan_node_->plannodes_.get()) == nullptr) {
+            ThrowInfo(NotImplemented,
+                      "candidate retrieval supports only plain document Query");
+        }
+    }
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
     query::ExecPlanNodeVisitor visitor(*this,
                                        timestamp,
@@ -227,6 +253,11 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                        consistency_level,
                                        collection_ttl,
                                        entity_ttl_physical_time_us);
+    visitor.SetReadSchema(plan->schema_);
+    if (candidates) {
+        visitor.SetRetrieveCandidateBudget(limit_size,
+                                           plan->max_candidate_rows_);
+    }
     auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
 
     retrieve_results.segment_ = (void*)this;
@@ -238,7 +269,7 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
 
     auto result_rows = GetResultRowCount(retrieve_results);
     int64_t output_data_size = 0;
-    if (result_rows > 0) {
+    if (!candidates && result_rows > 0) {
         for (auto field_id : plan->field_ids_) {
             output_data_size += get_field_avg_size(field_id) * result_rows;
         }
@@ -252,6 +283,20 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
     results->set_all_retrieve_count(retrieve_results.total_data_cnt_);
     results->mutable_offset()->Add(retrieve_results.result_offsets_.begin(),
                                    retrieve_results.result_offsets_.end());
+
+    if (candidates) {
+        // Grep only needs segment-local offsets; defer all field reads.
+        milvus::futures::throwIfCancelled(cancel_token);
+        if (results->ByteSizeLong() > static_cast<uint64_t>(limit_size)) {
+            ThrowInfo(InvalidParameter,
+                      "grep candidate result exceeds the retrieve byte budget "
+                      "(limit={} bytes); add a more selective filter or "
+                      "configure function.grep.maxScanRows "
+                      "(a row cap may produce incomplete results)",
+                      limit_size);
+        }
+        return results;
+    }
 
     // Element-level query support: serialize element_level flag and element_indices
     if (retrieve_results.element_level_) {
@@ -269,6 +314,8 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
     // Carry the upstream cancel_token down into FillTargetEntry so the
     // take()/Arrow-convert path can short-circuit on abort.
     milvus::OpContext fte_op_ctx;
+    fte_op_ctx.runtime_load_priority =
+        milvus::proto::common::LoadPriority::HIGH;
     fte_op_ctx.cancellation_token = cancel_token;
     if (retrieve_results.field_data_.empty()) {
         FillTargetEntry(trace_ctx,
@@ -400,6 +447,7 @@ SegmentInternalInterface::FillOrderByResult(
     }
 
     milvus::OpContext op_ctx;
+    op_ctx.runtime_load_priority = milvus::proto::common::LoadPriority::HIGH;
 
     // Two-project mode: bulk-fetch deferred fields using segment offsets.
     if (!deferred.empty()) {
@@ -418,7 +466,8 @@ SegmentInternalInterface::FillOrderByResult(
             } else if (!is_field_exist(field_id)) {
                 // Field absent in this segment (schema evolution).
                 auto& field_meta = plan->schema_->operator[](field_id);
-                col = bulk_subscript_not_exist_field(field_meta, topk_count);
+                col = bulk_subscript_not_exist_field(
+                    field_meta, offset_data.data(), topk_count);
             } else {
                 col = bulk_subscript(
                     &op_ctx, field_id, offset_data.data(), topk_count);
@@ -543,9 +592,12 @@ SegmentInternalInterface::FillTargetEntry(
     // bytes. Inherit the caller's cancellation_token and load priority so
     // in-loop cancellation still propagates.
     milvus::OpContext local_ctx;
+    local_ctx.runtime_load_priority = milvus::proto::common::LoadPriority::HIGH;
     if (op_ctx != nullptr) {
         local_ctx.cancellation_token = op_ctx->cancellation_token;
-        local_ctx.runtime_load_priority = op_ctx->runtime_load_priority;
+        local_ctx.runtime_load_priority =
+            op_ctx->runtime_load_priority.value_or(
+                milvus::proto::common::LoadPriority::HIGH);
     }
     for (auto field_id : plan->field_ids_) {
         if (SystemProperty::Instance().IsSystem(field_id)) {
@@ -597,8 +649,8 @@ SegmentInternalInterface::FillTargetEntry(
                 proto::schema::DataType(field_meta.get_element_type()));
         }
         if (fill_ids && is_pk_field(field_id)) {
-            // fill_ids should be true when the first Retrieve was called. The reduce phase depends on the ids to do
-            // merge-sort.
+            // Reduction needs IDs for merge-sort. Candidate scans defer this
+            // materialization until Grep has selected the surviving offsets.
             auto col_data = col.get();
             switch (field_meta.get_data_type()) {
                 case DataType::INT64: {
@@ -657,6 +709,8 @@ SegmentInternalInterface::Retrieve(
     // Carry the upstream cancel_token down into the take() + Arrow-convert
     // path so RetrieveByOffsets on external fields can short-circuit.
     milvus::OpContext fte_op_ctx;
+    fte_op_ctx.runtime_load_priority =
+        milvus::proto::common::LoadPriority::HIGH;
     fte_op_ctx.cancellation_token = cancel_token;
     FillTargetEntry(
         trace_ctx, Plan, results, offsets, size, false, false, &fte_op_ctx);
@@ -667,6 +721,34 @@ SegmentInternalInterface::Retrieve(
                                 .count();
     milvus::monitor::internal_core_retrieve_get_target_entry_latency.Observe(
         get_entry_cost / 1000);
+    return results;
+}
+
+std::unique_ptr<proto::segcore::RetrieveResults>
+SegmentInternalInterface::RetrieveIdentitiesByOffsets(
+    tracer::TraceContext* trace_ctx,
+    const query::RetrievePlan* plan,
+    const int64_t* offsets,
+    int64_t size,
+    bool take_for_output_allowed,
+    const folly::CancellationToken& cancel_token) const {
+    std::shared_lock lck(mutex_);
+    milvus::futures::throwIfCancelled(cancel_token);
+    AssertInfo(size >= 0 && (size == 0 || offsets != nullptr),
+               "invalid identity offsets");
+    const auto pk = plan->schema_->get_primary_field_id();
+    AssertInfo(pk.has_value(), "identity retrieval requires a primary key");
+    query::RetrievePlan projection(plan->schema_);
+    projection.field_ids_ = {*pk, TimestampFieldID};
+    projection.take_for_output_allowed_ = take_for_output_allowed;
+    auto results = std::make_unique<proto::segcore::RetrieveResults>();
+    if (size > 0) {
+        results->mutable_offset()->Add(offsets, offsets + size);
+    }
+    milvus::OpContext op_ctx(cancel_token);
+    FillTargetEntry(
+        trace_ctx, &projection, results, offsets, size, true, true, &op_ctx);
+    milvus::futures::throwIfCancelled(cancel_token);
     return results;
 }
 
@@ -739,6 +821,17 @@ SegmentInternalInterface::get_real_count() const {
 }
 
 int64_t
+SegmentInternalInterface::get_fields_avg_size(
+    const std::vector<FieldId>& field_ids) const {
+    std::shared_lock lock(mutex_);
+    int64_t size = 0;
+    for (auto field_id : field_ids) {
+        size += get_field_avg_size(field_id);
+    }
+    return size;
+}
+
+int64_t
 SegmentInternalInterface::get_field_avg_size(FieldId field_id) const {
     AssertInfo(field_id.get() >= 0,
                "invalid field id, should be greater than or equal to 0");
@@ -750,8 +843,7 @@ SegmentInternalInterface::get_field_avg_size(FieldId field_id) const {
         ThrowInfo(FieldIDInvalid, "unsupported system field id");
     }
 
-    auto schema = get_schema_snapshot();
-    auto& field_meta = (*schema)[field_id];
+    auto field_meta = get_field_meta(field_id);
     auto data_type = field_meta.get_data_type();
 
     // Retrieve already holds mutex_; acquiring it again may deadlock
@@ -774,8 +866,7 @@ SegmentInternalInterface::set_field_avg_size(FieldId field_id,
                                              int64_t field_size) {
     AssertInfo(field_id.get() >= 0,
                "invalid field id, should be greater than or equal to 0");
-    auto schema = get_schema_snapshot();
-    auto& field_meta = (*schema)[field_id];
+    auto field_meta = get_field_meta(field_id);
     set_field_avg_size(field_meta, num_rows, field_size);
 }
 
@@ -812,45 +903,84 @@ SegmentInternalInterface::GetFieldSkipMetrics(FieldId field_id) const {
     return {};
 }
 
-PinWrapper<index::TextMatchIndex*>
-SegmentInternalInterface::GetTextIndex(milvus::OpContext* op_ctx,
-                                       FieldId field_id) const {
-    std::shared_lock lock(mutex_);
-    auto iter = text_indexes_.find(field_id);
-    if (iter == text_indexes_.end()) {
-        ThrowInfo(milvus::ErrorCode::TextIndexNotFound,
-                  "text index not found for field {}",
-                  field_id.get());
+std::unique_ptr<DataArray>
+SegmentInternalInterface::bulk_subscript_not_exist_field(
+    const milvus::FieldMeta& field_meta,
+    int64_t row_begin,
+    int64_t count,
+    const IStructElementOffsets& offsets) const {
+    std::vector<int64_t> row_ids(count);
+    std::iota(row_ids.begin(), row_ids.end(), row_begin);
+    auto schema = get_schema_snapshot();
+    auto struct_name = GetStructNameForArrayField(field_meta);
+    AssertInfo(struct_name.has_value() && field_meta.is_element_nullable(),
+               "field {} is not an element-nullable struct sub-field",
+               field_meta.get_id().get());
+    std::vector<int32_t> starts(count + 1);
+    offsets.CopyRowElementStarts(row_begin, count, starts.data());
+    std::vector<int32_t> lengths(count);
+    for (int64_t i = 0; i < count; ++i) {
+        lengths[i] = starts[i + 1] - starts[i];
     }
-
-    auto make_pin = [&](auto&& alt) -> PinWrapper<index::TextMatchIndex*> {
-        using Alt = std::decay_t<decltype(alt)>;
-
-        if constexpr (std::is_same_v<
-                          Alt,
-                          std::unique_ptr<milvus::index::TextMatchIndex>>) {
-            return PinWrapper<index::TextMatchIndex*>(alt.get());
-        } else if constexpr (std::is_same_v<
-                                 Alt,
-                                 std::shared_ptr<
-                                     milvus::index::TextMatchIndexHolder>>) {
-            return PinWrapper<index::TextMatchIndex*>(alt, alt->get());
-        } else if constexpr (std::is_same_v<
-                                 Alt,
-                                 std::shared_ptr<
-                                     milvus::cachinglayer::CacheSlot<
-                                         milvus::index::TextMatchIndex>>>) {
-            auto ca = SemiInlineGet(alt->PinCells(op_ctx, {0}));
-            auto index = ca->get_cell_of(0);
-            return PinWrapper<index::TextMatchIndex*>(std::move(ca), index);
-        } else {
-            ThrowInfo(milvus::ErrorCode::UnexpectedError,
-                      "text index of segment is not supported for field {}",
-                      field_id.get());
+    for (auto sibling_id : schema->get_field_ids()) {
+        if (sibling_id == field_meta.get_id() ||
+            GetStructNameForArrayField((*schema)[sibling_id]) != struct_name ||
+            !is_field_exist(sibling_id)) {
+            continue;
         }
-    };
+        milvus::OpContext op_ctx;
+        op_ctx.runtime_load_priority =
+            milvus::proto::common::LoadPriority::HIGH;
+        auto sibling =
+            bulk_subscript(&op_ctx, sibling_id, row_ids.data(), count);
+        const auto& validity = GetFieldDataRowValidData(*sibling);
+        return CreateNullStructSubFieldDataArray(
+            field_meta, lengths.data(), count, [&](int64_t i) {
+                return validity.empty() || validity.Get(i);
+            });
+    }
+    return CreateNullStructSubFieldDataArray(
+        field_meta, lengths.data(), count, [&](int64_t) {
+            return !field_meta.is_nullable();
+        });
+}
 
-    return std::visit(make_pin, iter->second);
+std::unique_ptr<DataArray>
+SegmentInternalInterface::bulk_subscript_not_exist_field(
+    const milvus::FieldMeta& field_meta,
+    const int64_t* row_ids,
+    int64_t count) const {
+    auto schema = get_schema_snapshot();
+    auto struct_name = GetStructNameForArrayField(field_meta);
+    if (!struct_name.has_value() || !field_meta.is_element_nullable()) {
+        return bulk_subscript_not_exist_field(field_meta, count);
+    }
+    for (auto sibling_id : schema->get_field_ids()) {
+        if (sibling_id == field_meta.get_id() ||
+            GetStructNameForArrayField((*schema)[sibling_id]) != struct_name ||
+            !is_field_exist(sibling_id)) {
+            continue;
+        }
+        auto offsets = GetStructElementOffsets(sibling_id);
+        if (!offsets) {
+            continue;
+        }
+        std::vector<int32_t> lengths(count);
+        for (int64_t i = 0; i < count; ++i) {
+            auto range = offsets->ElementIDRangeOfRow(row_ids[i]);
+            lengths[i] = range.second - range.first;
+        }
+        milvus::OpContext op_ctx;
+        op_ctx.runtime_load_priority =
+            milvus::proto::common::LoadPriority::HIGH;
+        auto sibling = bulk_subscript(&op_ctx, sibling_id, row_ids, count);
+        const auto& validity = GetFieldDataRowValidData(*sibling);
+        return CreateNullStructSubFieldDataArray(
+            field_meta, lengths.data(), count, [&](int64_t i) {
+                return validity.empty() || validity.Get(i);
+            });
+    }
+    return bulk_subscript_not_exist_field(field_meta, count);
 }
 
 std::unique_ptr<DataArray>
@@ -950,7 +1080,8 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
                 }
                 break;
             }
-            case DataType::VARCHAR: {
+            case DataType::VARCHAR:
+            case DataType::TEXT: {
                 auto data_ptr = result->mutable_scalars()
                                     ->mutable_string_data()
                                     ->mutable_data();
@@ -995,21 +1126,6 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
                "Non-nullable scalar field without default value should not "
                "reach here");
     return result;
-}
-
-// Only sealed segment has ngram index
-PinWrapper<index::NgramInvertedIndex*>
-SegmentInternalInterface::GetNgramIndex(milvus::OpContext* op_ctx,
-                                        FieldId field_id) const {
-    return PinWrapper<index::NgramInvertedIndex*>(nullptr);
-}
-
-PinWrapper<index::NgramInvertedIndex*>
-SegmentInternalInterface::GetNgramIndexForJson(
-    milvus::OpContext* op_ctx,
-    FieldId field_id,
-    const std::string& nested_path) const {
-    return PinWrapper<index::NgramInvertedIndex*>(nullptr);
 }
 
 std::shared_ptr<index::JsonKeyStats>

@@ -45,7 +45,7 @@ func TestTerminalFailureNotifiesOwnerAndStopsObservation(t *testing.T) {
 			require.NoError(t, err)
 			switch source {
 			case "chunk":
-				patch := mockey.Mock((*Store).WriteChunk).Return(nil, uint64(0), storeCorruptedf("chunk conflict")).Build()
+				patch := mockey.Mock((*Store).writeChunk).Return(nil, []byte(nil), storeCorruptedf("chunk conflict")).Build()
 				defer patch.UnPatch()
 				m.RequestFlushThrough(100)
 				require.ErrorIs(t, m.pendingSealed[0].task.Execute(ctx), ErrStoreCorrupted)

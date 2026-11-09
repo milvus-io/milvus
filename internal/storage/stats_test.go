@@ -19,9 +19,14 @@ package storage
 import (
 	"bytes"
 	"encoding/binary"
+	"io"
+	"strconv"
 	"testing"
+	"testing/iotest"
+	"unsafe"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
@@ -269,14 +274,35 @@ func TestMarshalStats(t *testing.T) {
 func TestBM25Stats_MemSize(t *testing.T) {
 	stats := NewBM25Stats()
 	baseSize := stats.MemSize()
-	assert.Equal(t, int64(120), baseSize)
+	assert.Equal(t, int64(unsafe.Sizeof(*stats)), baseSize)
 
 	// Add tokens and verify size grows
 	for i := uint32(0); i < 100; i++ {
 		stats.Append(map[uint32]float32{i: 1})
 	}
 	bytesPerEntry := paramtable.Get().QueryNodeCfg.BM25StatsBytesPerEntry.GetAsInt64()
-	assert.Equal(t, int64(120)+100*bytesPerEntry, stats.MemSize())
+	assert.Equal(t, baseSize+bm25StatsShards*bm25StatsMapOverhead+100*bytesPerEntry, stats.MemSize())
+}
+
+func TestBM25Stats_MinusRemovesZeroEntries(t *testing.T) {
+	stats := NewBM25Stats()
+	stats.Append(
+		map[uint32]float32{1: 1, 2: 1},
+		map[uint32]float32{2: 1},
+	)
+	removed := NewBM25Stats()
+	removed.Append(map[uint32]float32{1: 1})
+
+	stats.Minus(removed)
+
+	assert.NotContains(t, stats.rowsWithToken[shardOf(1)], uint32(1))
+	assert.Equal(t, int32(2), stats.rowsWithToken.get(2))
+	assert.Equal(t, int64(1), stats.NumRow())
+
+	missing := NewBM25Stats()
+	missing.Append(map[uint32]float32{3: 1})
+	stats.Minus(missing)
+	assert.Equal(t, int32(-1), stats.rowsWithToken.get(3))
 }
 
 func TestBM25Stats_DeserializeFromReader(t *testing.T) {
@@ -294,6 +320,35 @@ func TestBM25Stats_DeserializeFromReader(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, original.NumRow(), restored.NumRow())
 		assert.Equal(t, original.GetAvgdl(), restored.GetAvgdl())
+	})
+
+	t.Run("short_reads_across_chunks", func(t *testing.T) {
+		original := NewBM25Stats()
+		for token := uint32(0); token < 520; token++ {
+			original.Append(map[uint32]float32{token: 1})
+		}
+		data, err := original.Serialize()
+		assert.NoError(t, err)
+
+		restored := NewBM25Stats()
+		assert.NoError(t, restored.DeserializeFromReader(iotest.OneByteReader(bytes.NewReader(data))))
+		assert.Equal(t, original.rowsWithToken, restored.rowsWithToken)
+		assert.Equal(t, original.NumRow(), restored.NumRow())
+		assert.Equal(t, original.NumToken(), restored.NumToken())
+		fromBytes, err := NewBM25StatsWithBytes(data)
+		assert.NoError(t, err)
+		assert.Equal(t, original.rowsWithToken, fromBytes.rowsWithToken)
+	})
+
+	t.Run("reader_error", func(t *testing.T) {
+		original := NewBM25Stats()
+		original.Append(map[uint32]float32{1: 1, 2: 1, 3: 1, 4: 1})
+		data, err := original.Serialize()
+		assert.NoError(t, err)
+
+		reader := io.MultiReader(bytes.NewReader(data[:28]), iotest.ErrReader(merr.ErrIoTooManyRequests))
+		restored := NewBM25Stats()
+		assert.ErrorIs(t, restored.DeserializeFromReader(reader), merr.ErrIoTooManyRequests)
 	})
 
 	t.Run("accumulate_multiple", func(t *testing.T) {
@@ -345,4 +400,59 @@ func TestBM25Stats_DeserializeFromReader(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, int64(5), restored.NumRow())
 	})
+}
+
+func TestBM25StatsAtomicDeltaAndVocabularyCleanup(t *testing.T) {
+	aggregate, remove, add := NewBM25Stats(), NewBM25Stats(), NewBM25Stats()
+	for i := uint32(0); i < 2048; i++ {
+		remove.Append(map[uint32]float32{i: 2})
+	}
+	aggregate.Merge(remove)
+	add.Append(map[uint32]float32{9000: 3})
+	require.NoError(t, aggregate.ValidateDelta(add, remove))
+	aggregate.ApplyDelta(add, remove)
+	require.Equal(t, int64(1), aggregate.NumRow())
+	require.Equal(t, float64(3), aggregate.GetAvgdl())
+	require.Equal(t, 1, aggregate.rowsWithToken.len())
+	before := aggregate.Clone()
+	require.Error(t, aggregate.ValidateDelta(NewBM25Stats(), remove))
+	require.Equal(t, before, aggregate)
+	corrupt := NewBM25Stats()
+	corrupt.rowsWithToken.add(9000, 2)
+	require.Error(t, aggregate.ValidateDelta(NewBM25Stats(), corrupt))
+}
+
+// The optimized decoder preserves the original binary.Read field boundaries.
+func TestBM25DeserializeTruncatedBoundaries(t *testing.T) {
+	data := make([]byte, 36)
+	common.Endian.PutUint64(data[4:12], 2)
+	common.Endian.PutUint64(data[12:20], 3)
+	common.Endian.PutUint32(data[20:24], 7)
+	common.Endian.PutUint32(data[24:28], 2)
+	for n := 0; n <= len(data); n++ {
+		t.Run(strconv.Itoa(n), func(t *testing.T) {
+			want := error(nil)
+			if n < 20 {
+				want = io.ErrUnexpectedEOF
+				if n == 0 || n == 4 || n == 12 {
+					want = io.EOF
+				}
+			} else if remainder := (n - 20) % 8; remainder != 0 {
+				want = io.ErrUnexpectedEOF
+				if remainder == 4 {
+					want = io.EOF
+				}
+			}
+			stats := NewBM25Stats()
+			assert.Equal(t, want, stats.DeserializeFromReader(bytes.NewReader(data[:n])))
+			if n >= 28 {
+				assert.Equal(t, int32(2), stats.rowsWithToken.get(7))
+			}
+			// Slice deserialization historically ignores an incomplete tail.
+			if n >= 20 {
+				want = nil
+			}
+			assert.Equal(t, want, NewBM25Stats().Deserialize(data[:n]))
+		})
+	}
 }

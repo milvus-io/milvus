@@ -62,6 +62,21 @@ func TestResizePools(t *testing.T) {
 		assert.Equal(t, expectedCap, GetSQPool().Cap(), "pool shall not be resized when newSize is 0")
 	})
 
+	t.Run("ChainPool", func(t *testing.T) {
+		defer func() {
+			pt.Reset(pt.QueryNodeCfg.ChainPoolSizeFactor.Key)
+			ResizeChainPool(&config.Event{HasUpdated: true})
+		}()
+		sqCap := GetSQPool().Cap()
+		for _, factor := range []int{2, 0, -1, 1} {
+			pt.Save(pt.QueryNodeCfg.ChainPoolSizeFactor.Key, strconv.Itoa(factor))
+			ResizeChainPool(&config.Event{HasUpdated: true})
+			assert.Equal(t, max(1, hardware.GetCPUNum()*max(1, factor)), GetChainPool().Cap())
+			assert.Equal(t, sqCap, GetSQPool().Cap())
+		}
+		assert.NotSame(t, GetSQPool(), GetChainPool())
+	})
+
 	t.Run("LoadPool", func(t *testing.T) {
 		expectedCap := hardware.GetCPUNum() * pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsInt()
 

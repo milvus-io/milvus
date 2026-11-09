@@ -18,6 +18,7 @@ package common
 
 import (
 	"encoding/binary"
+	"math"
 	"math/bits"
 	"strconv"
 	"strings"
@@ -252,6 +253,10 @@ const (
 	// Layout: {rootPath}/walsummary/{pchannel}/{chunk|manifest}/...
 	WalSummaryRootPath = "walsummary"
 
+	// PKIndexPath storage path const for primary key index manifests and SSTs.
+	// Layout: {rootPath}/pk_index/{collectionID}/{vchannel}/{manifest|sst}/...
+	PKIndexPath = "pk_index"
+
 	DefaultResourceGroupName = "__default_resource_group"
 )
 
@@ -295,6 +300,7 @@ var InternalStorageRootSegments = []string{
 	WoodpeckerRootPath,
 	ExternalRefreshResultsRootPath,
 	WalSummaryRootPath,
+	PKIndexPath,
 }
 
 // LocalOnlyStorageRootSegments lists top-level directories that are rooted at
@@ -385,18 +391,20 @@ const (
 const (
 	EnableAnalyzerKey = `enable_analyzer`
 	AnalyzerParamKey  = `analyzer_params`
+	EnableMatchKey    = `enable_match`
 )
 
 //  Collection properties key
 
 const (
-	CollectionTTLConfigKey      = "collection.ttl.seconds"
-	CollectionAutoCompactionKey = "collection.autocompaction.enabled"
-	CollectionDescription       = "collection.description"
-	CollectionExternalSource    = "collection.external_source"
-	CollectionExternalSpec      = "collection.external_spec"
-	CollectionTTLFieldKey       = "ttl_field"
-	MaxTTLSeconds               = 3155760000 // 100 years
+	CollectionTTLConfigKey          = "collection.ttl.seconds"
+	CollectionAutoReleaseIdleTTLKey = "collection.autorelease.ttl.seconds"
+	CollectionAutoCompactionKey     = "collection.autocompaction.enabled"
+	CollectionDescription           = "collection.description"
+	CollectionExternalSource        = "collection.external_source"
+	CollectionExternalSpec          = "collection.external_spec"
+	CollectionTTLFieldKey           = "ttl_field"
+	MaxTTLSeconds                   = 3155760000 // 100 years
 
 	// Deprecated: will be removed in the 3.0 after implementing ack sync up semantic.
 	CollectionOnTruncatingKey = "collection.on.truncating" // when collection is on truncating, forbid the compaction of current collection.
@@ -475,6 +483,13 @@ const (
 	DisableFuncRuntimeCheck = "disable_func_runtime_check"
 	MaxFieldIDKey           = "max_field_id"
 
+	// StructSubFieldAddedKey is an internal type param of a struct sub-field
+	// that was added after its struct appeared (AlterCollectionSchema with a
+	// field named s[b]). Rootcoord writes it; users cannot set or delete
+	// it, and DescribeCollection does not return it. See
+	// internal/util/schemautil/struct_subfield_origin.go.
+	StructSubFieldAddedKey = "__struct_sub_field_added__"
+
 	// query mode
 	QueryModeKey       = "query_mode"
 	QueryModeLargeTopK = "large_topk"
@@ -482,12 +497,6 @@ const (
 
 	// namespace sharding
 	NamespaceShardingEnabledKey = "namespace.sharding.enabled"
-
-	// row level security
-	RLSEnabledKey       = "rls.enabled"
-	RLSForceKey         = "rls.force"
-	RLSPrincipalNameKey = "rls.principal_name"
-	RLSClearAllCacheKey = "rls.clear_all_cache"
 
 	// warmup related
 	WarmupKey            = "warmup"
@@ -793,34 +802,6 @@ func ValidateNamespaceShardingEnabledNotAltered(properties []*commonpb.KeyValueP
 	return nil
 }
 
-// IsRLSEnabled extracts rls.enabled from collection properties.
-// Returns false if not set.
-func IsRLSEnabled(kvs ...*commonpb.KeyValuePair) (bool, error) {
-	value, ok := getProperty(kvs, RLSEnabledKey)
-	if !ok {
-		return false, nil
-	}
-	enabled, err := strconv.ParseBool(value)
-	if err != nil {
-		return false, merr.WrapErrParameterInvalidMsg("invalid %s value %q", RLSEnabledKey, value)
-	}
-	return enabled, nil
-}
-
-// IsRLSForce extracts rls.force from collection properties.
-// Returns false if not set.
-func IsRLSForce(kvs ...*commonpb.KeyValuePair) (bool, error) {
-	value, ok := getProperty(kvs, RLSForceKey)
-	if !ok {
-		return false, nil
-	}
-	force, err := strconv.ParseBool(value)
-	if err != nil {
-		return false, merr.WrapErrParameterInvalidMsg("invalid %s value %q", RLSForceKey, value)
-	}
-	return force, nil
-}
-
 func getProperty(kvs []*commonpb.KeyValuePair, key string) (string, bool) {
 	var value string
 	found := false
@@ -831,57 +812,6 @@ func getProperty(kvs []*commonpb.KeyValuePair, key string) (string, bool) {
 		}
 	}
 	return value, found
-}
-
-// ValidateRLSProperties validates collection-level RLS properties.
-// Returns nil if the values are valid or if RLS properties are not set. Also
-// rejects case-variant keys that would be silently ignored.
-func ValidateRLSProperties(kvs ...*commonpb.KeyValuePair) error {
-	seen := make(map[string]struct{}, 2)
-	for _, kv := range kvs {
-		switch kv.GetKey() {
-		case RLSEnabledKey:
-			if _, ok := seen[RLSEnabledKey]; ok {
-				return merr.WrapErrParameterInvalidMsg("duplicated collection property %q", RLSEnabledKey)
-			}
-			seen[RLSEnabledKey] = struct{}{}
-			if _, err := IsRLSEnabled(kv); err != nil {
-				return err
-			}
-		case RLSForceKey:
-			if _, ok := seen[RLSForceKey]; ok {
-				return merr.WrapErrParameterInvalidMsg("duplicated collection property %q", RLSForceKey)
-			}
-			seen[RLSForceKey] = struct{}{}
-			if _, err := IsRLSForce(kv); err != nil {
-				return err
-			}
-		default:
-			for _, key := range []string{RLSEnabledKey, RLSForceKey} {
-				if strings.EqualFold(kv.GetKey(), key) {
-					return merr.WrapErrParameterInvalidMsg("invalid property key %q, did you mean %q?", kv.GetKey(), key)
-				}
-			}
-		}
-	}
-	return nil
-}
-
-// ValidateRLSForceRequiresEnabled rejects an effective collection property set
-// that enables rls.force without enabling RLS itself.
-func ValidateRLSForceRequiresEnabled(kvs ...*commonpb.KeyValuePair) error {
-	force, err := IsRLSForce(kvs...)
-	if err != nil || !force {
-		return err
-	}
-	enabled, err := IsRLSEnabled(kvs...)
-	if err != nil {
-		return err
-	}
-	if !enabled {
-		return merr.WrapErrParameterInvalidMsg("%s=true requires %s=true", RLSForceKey, RLSEnabledKey)
-	}
-	return nil
 }
 
 func IsDisableFuncRuntimeCheck(kvs ...*commonpb.KeyValuePair) (bool, error) {
@@ -1205,6 +1135,23 @@ func GetStringValue(kvs []*commonpb.KeyValuePair, key string) (result string, ex
 		return "", false
 	}
 	return kv.GetValue(), true
+}
+
+// GetCollectionAutoReleaseIdleTTL returns zero when the property is absent,
+// a positive duration for an override, or -time.Second to disable auto release.
+func GetCollectionAutoReleaseIdleTTL(kvs []*commonpb.KeyValuePair) (time.Duration, error) {
+	var ttl time.Duration
+	for _, kv := range kvs {
+		if kv.GetKey() != CollectionAutoReleaseIdleTTLKey {
+			continue
+		}
+		seconds, err := strconv.ParseInt(kv.GetValue(), 10, 64)
+		if err != nil || seconds < -1 || seconds == 0 || seconds > math.MaxInt64/int64(time.Second) {
+			return 0, merr.WrapErrParameterInvalidMsg("%s must be -1 or an integer between 1 and %d seconds, got %q", CollectionAutoReleaseIdleTTLKey, math.MaxInt64/int64(time.Second), kv.GetValue())
+		}
+		ttl = time.Duration(seconds) * time.Second
+	}
+	return ttl, nil
 }
 
 func GetCollectionTTL(kvs []*commonpb.KeyValuePair) (time.Duration, error) {

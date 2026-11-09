@@ -3,9 +3,11 @@ package channel
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -13,19 +15,45 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	catalogkv "github.com/milvus-io/milvus/internal/metastore/kv/streamingcoord"
 	"github.com/milvus-io/milvus/internal/mocks/mock_metastore"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
+func TestReplicateRoleDoesNotWaitForChannelManagerLock(t *testing.T) {
+	m := &ChannelManager{
+		cond: syncutil.NewContextCond(&sync.Mutex{}),
+	}
+
+	m.cond.L.Lock()
+	defer m.cond.L.Unlock()
+
+	roleCh := make(chan replicateutil.Role, 1)
+	go func() {
+		roleCh <- m.ReplicateRole()
+	}()
+
+	select {
+	case role := <-roleCh:
+		assert.Equal(t, replicateutil.RolePrimary, role)
+	case <-time.After(time.Second):
+		t.Fatal("ReplicateRole blocked on the channel manager lock")
+	}
+}
+
 func TestChannelManager(t *testing.T) {
+	useTestClusterPrefix(t)
+
 	ResetStaticPChannelStatsManager()
 	RecoverPChannelStatsManager([]string{})
 
@@ -423,6 +451,7 @@ func TestChannelManager(t *testing.T) {
 }
 
 func TestAllocVirtualChannels(t *testing.T) {
+	useTestClusterPrefix(t)
 	ResetStaticPChannelStatsManager()
 	RecoverPChannelStatsManager([]string{})
 
@@ -828,6 +857,7 @@ func TestChannelManager_AddPChannels_PersistFailureRollback(t *testing.T) {
 }
 
 func TestAddPChannels_UnavailableInReplication(t *testing.T) {
+	useTestClusterPrefix(t)
 	ResetStaticPChannelStatsManager()
 	RecoverPChannelStatsManager([]string{})
 
@@ -851,7 +881,7 @@ func TestAddPChannels_UnavailableInReplication(t *testing.T) {
 			{ClusterId: "by-dev2", Pchannels: []string{"ch3", "ch4"}},
 		},
 		CrossClusterTopology: []*commonpb.CrossClusterTopology{
-			{SourceClusterId: "by-dev", TargetClusterId: "by-dev2"},
+			{SourceClusterId: "by-dev2", TargetClusterId: "by-dev"},
 		},
 	}
 	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(
@@ -860,6 +890,7 @@ func TestAddPChannels_UnavailableInReplication(t *testing.T) {
 
 	m, err := RecoverChannelManager(ctx, "ch1", "ch2")
 	assert.NoError(t, err)
+	assert.Equal(t, replicateutil.RoleSecondary, m.ReplicateRole())
 
 	// ch1 and ch2 should be available (in replicateConfig)
 	assert.True(t, m.channels[ChannelID{Name: "ch1"}].AvailableInReplication())
@@ -894,6 +925,7 @@ func TestRecovery_NoReplicateConfig_AllAvailable(t *testing.T) {
 }
 
 func TestAllocVirtualChannels_SkipsUnavailableChannels(t *testing.T) {
+	useTestClusterPrefix(t)
 	ResetStaticPChannelStatsManager()
 	RecoverPChannelStatsManager([]string{})
 
@@ -939,6 +971,7 @@ func TestAllocVirtualChannels_SkipsUnavailableChannels(t *testing.T) {
 }
 
 func TestGetClusterChannels_ExcludesUnavailable(t *testing.T) {
+	useTestClusterPrefix(t)
 	ResetStaticPChannelStatsManager()
 	RecoverPChannelStatsManager([]string{})
 
@@ -982,6 +1015,7 @@ func TestGetClusterChannels_ExcludesUnavailable(t *testing.T) {
 }
 
 func TestUpdateReplicateConfiguration_FlipsAvailability(t *testing.T) {
+	useTestClusterPrefix(t)
 	ResetStaticPChannelStatsManager()
 	RecoverPChannelStatsManager([]string{})
 
@@ -1055,6 +1089,7 @@ func TestUpdateReplicateConfiguration_FlipsAvailability(t *testing.T) {
 }
 
 func TestIsChannelAvailableInReplication(t *testing.T) {
+	useTestClusterPrefix(t)
 	// No replicateConfig → always available
 	assert.True(t, isChannelAvailableInReplication("ch1", nil))
 
@@ -1089,4 +1124,98 @@ func newChannelID(name string) ChannelID {
 	return ChannelID{
 		Name: name,
 	}
+}
+
+// An assignment carries no pchannel stats, so it is served before rootcoord
+// recovers them; and the balancer view waits for them outside the manager lock,
+// so it holds up no assignment meanwhile.
+func TestChannelAssignmentDoesNotWaitForPChannelStats(t *testing.T) {
+	ResetStaticPChannelStatsManager()
+	t.Cleanup(func() {
+		if !StaticPChannelStatsManager.Ready() {
+			RecoverPChannelStatsManager([]string{})
+		}
+	})
+
+	s := sessionutil.NewMockSession(t)
+	s.EXPECT().GetRegisteredRevision().Return(int64(1))
+	catalog := mock_metastore.NewMockStreamingCoordCataLog(t)
+	resource.InitForTest(resource.OptStreamingCatalog(catalog), resource.OptSession(s))
+	catalog.EXPECT().GetCChannel(mock.Anything).Return(&streamingpb.CChannelMeta{Pchannel: "test-channel"}, nil)
+	catalog.EXPECT().GetVersion(mock.Anything).Return(&streamingpb.StreamingVersion{Version: 1}, nil)
+	catalog.EXPECT().GetReplicateConfiguration(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPChannel(mock.Anything).Return([]*streamingpb.PChannelMeta{{
+		Channel: &streamingpb.PChannelInfo{Name: "test-channel", Term: 1},
+		Node:    &streamingpb.StreamingNodeInfo{ServerId: 1},
+	}}, nil)
+	m, err := RecoverChannelManager(context.Background())
+	require.NoError(t, err)
+
+	balancerView := make(chan *PChannelView, 1)
+	go func() { balancerView <- m.CurrentPChannelsView() }()
+	// Let the balancer view reach its wait for the stats first.
+	time.Sleep(100 * time.Millisecond)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		param, err := m.GetLatestChannelAssignment()
+		assert.NoError(t, err)
+		assert.Contains(t, param.PChannelView.Channels, newChannelID("test-channel"))
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		RecoverPChannelStatsManager([]string{})
+		<-done
+		t.Fatal("the assignment waited for the pchannel stats")
+	}
+
+	RecoverPChannelStatsManager([]string{})
+	assert.Contains(t, (<-balancerView).Stats, newChannelID("test-channel"))
+}
+
+func TestReplicateRolePublishesOnlyAfterPersistence(t *testing.T) {
+	paramtable.Init()
+	catalog := catalogkv.NewCataLog(nil)
+	resource.InitForTest(resource.OptStreamingCatalog(catalog))
+	m := &ChannelManager{cond: syncutil.NewContextCond(&sync.Mutex{}), metrics: newPChannelMetrics()}
+	m.SetLogger(mlog.With())
+	clusterID := paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
+	cfg := &commonpb.ReplicateConfiguration{
+		Clusters: []*commonpb.MilvusCluster{
+			{ClusterId: "upstream", Pchannels: []string{"upstream-p"}},
+			{ClusterId: clusterID, Pchannels: []string{"local-p"}},
+		},
+		CrossClusterTopology: []*commonpb.CrossClusterTopology{{SourceClusterId: "upstream", TargetClusterId: clusterID}},
+	}
+	msg := message.NewAlterReplicateConfigMessageBuilderV2().
+		WithHeader(&message.AlterReplicateConfigMessageHeader{ReplicateConfiguration: cfg}).
+		WithBody(&message.AlterReplicateConfigMessageBody{}).
+		WithBroadcast([]string{"local-p"}).MustBuildBroadcast()
+	result := message.BroadcastResultAlterReplicateConfigMessageV2{Message: message.MustAsBroadcastAlterReplicateConfigMessageV2(msg)}
+	persistErr := errors.New("injected persistence failure")
+	patch := mockey.Mock(mockey.GetMethod(catalog, "SaveReplicateConfiguration")).To(
+		func(context.Context, *streamingpb.ReplicateConfigurationMeta, []*streamingpb.ReplicatePChannelMeta) error {
+			// Persistence holds the manager lock. Readers must still see the old role.
+			require.Equal(t, replicateutil.RolePrimary, m.ReplicateRole())
+			return persistErr
+		}).Build()
+	defer patch.UnPatch()
+	require.ErrorIs(t, m.UpdateReplicateConfiguration(context.Background(), result), persistErr)
+	require.Equal(t, replicateutil.RolePrimary, m.ReplicateRole())
+	require.Nil(t, m.replicateConfig)
+	persistErr = nil
+	require.NoError(t, m.UpdateReplicateConfiguration(context.Background(), result))
+	require.Equal(t, replicateutil.RoleSecondary, m.ReplicateRole())
+	require.NoError(t, m.UpdateReplicateConfiguration(context.Background(), result))
+	require.Equal(t, replicateutil.RoleSecondary, m.ReplicateRole())
+}
+
+// useTestClusterPrefix matches the replication fixtures without depending on the local environment.
+func useTestClusterPrefix(t *testing.T) {
+	t.Helper()
+	paramtable.Init()
+	prefix := &paramtable.Get().CommonCfg.ClusterPrefix
+	oldPrefix := prefix.SwapTempValue("by-dev")
+	t.Cleanup(func() { prefix.SwapTempValue(oldPrefix) })
 }

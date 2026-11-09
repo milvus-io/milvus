@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -45,6 +46,8 @@ import (
 
 type SegmentCheckerTestSuite struct {
 	suite.Suite
+	// metaStore is shared by Meta and TargetManager.
+	metaStore metacache.MetaStore
 	kv        kv.MetaKv
 	checker   *SegmentChecker
 	meta      *meta.Meta
@@ -78,10 +81,11 @@ func (suite *SegmentCheckerTestSuite) SetupTest() {
 	store := querycoord.NewCatalog(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
 	suite.nodeMgr = session.NewNodeManager()
-	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr)
+	suite.metaStore = metacache.NewMetaStore(nil)
+	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr, suite.metaStore)
 	distManager := meta.NewDistributionManager(suite.nodeMgr)
 	suite.broker = meta.NewMockBroker(suite.T())
-	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
+	targetManager := meta.NewTargetManager(suite.broker, suite.meta, suite.metaStore)
 
 	suite.scheduler = task.NewMockScheduler(suite.T())
 	suite.scheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
@@ -91,8 +95,6 @@ func (suite *SegmentCheckerTestSuite) SetupTest() {
 	assign.InitGlobalAssignPolicyFactory(suite.scheduler, suite.nodeMgr, distManager, suite.meta, targetManager)
 
 	suite.checker = NewSegmentChecker(suite.meta, distManager, targetManager, suite.nodeMgr, suite.scheduler)
-
-	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil).Maybe()
 }
 
 func (suite *SegmentCheckerTestSuite) TearDownTest() {
@@ -136,8 +138,7 @@ func (suite *SegmentCheckerTestSuite) TestLoadSegments() {
 		},
 	}
 
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	expectRecoveryInfo(suite.broker, suite.metaStore, int64(1), channels, segments, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
 
 	// set dist
@@ -221,8 +222,7 @@ func (suite *SegmentCheckerTestSuite) TestSkipLoadSegments() {
 		},
 	}
 
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	expectRecoveryInfo(suite.broker, suite.metaStore, int64(1), channels, segments, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
 
 	// Capture tasks added via scheduler.Add()
@@ -253,8 +253,7 @@ func (suite *SegmentCheckerTestSuite) TestReleaseSegments() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, nil, nil)
+	expectRecoveryInfo(suite.broker, suite.metaStore, int64(1), channels, nil, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
 
 	// set dist
@@ -310,8 +309,7 @@ func (suite *SegmentCheckerTestSuite) TestReleaseRepeatedSegments() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	expectRecoveryInfo(suite.broker, suite.metaStore, int64(1), channels, segments, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
 
 	// set dist
@@ -394,8 +392,7 @@ func (suite *SegmentCheckerTestSuite) TestReleaseDirtySegments() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	expectRecoveryInfo(suite.broker, suite.metaStore, int64(1), channels, segments, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
 
 	// set dist
@@ -449,8 +446,7 @@ func (suite *SegmentCheckerTestSuite) TestReleaseGrowingSegments() {
 			SeekPosition: &msgpb.MsgPosition{Timestamp: 10},
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	expectRecoveryInfo(suite.broker, suite.metaStore, int64(1), channels, segments, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
 	checker.targetMgr.UpdateCollectionCurrentTarget(ctx, int64(1))
 	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
@@ -538,8 +534,7 @@ func (suite *SegmentCheckerTestSuite) TestReleaseCompactedGrowingSegments() {
 			DroppedSegmentIds: []int64{4},
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	expectRecoveryInfo(suite.broker, suite.metaStore, int64(1), channels, segments, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
 	checker.targetMgr.UpdateCollectionCurrentTarget(ctx, int64(1))
 	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
@@ -604,8 +599,7 @@ func (suite *SegmentCheckerTestSuite) TestSkipReleaseGrowingSegments() {
 			SeekPosition: &msgpb.MsgPosition{Timestamp: 10},
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	expectRecoveryInfo(suite.broker, suite.metaStore, int64(1), channels, segments, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
 	checker.targetMgr.UpdateCollectionCurrentTarget(ctx, int64(1))
 	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
@@ -731,26 +725,24 @@ func (suite *SegmentCheckerTestSuite) TestLoadPriority() {
 	}
 
 	// set up current target
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
-		[]*datapb.VchannelInfo{
-			{
-				CollectionID: collectionID,
-				ChannelName:  "channel1",
-			},
+	expectRecoveryInfo(suite.broker, suite.metaStore, collectionID, []*datapb.VchannelInfo{
+		{
+			CollectionID: collectionID,
+			ChannelName:  "channel1",
 		},
+	},
 		[]*datapb.SegmentInfo{segment1},
 		nil,
 	).Once()
 	suite.checker.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
 	suite.checker.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
 	// set up next target with segment1 and segment2
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
-		[]*datapb.VchannelInfo{
-			{
-				CollectionID: collectionID,
-				ChannelName:  "channel1",
-			},
+	expectRecoveryInfo(suite.broker, suite.metaStore, collectionID, []*datapb.VchannelInfo{
+		{
+			CollectionID: collectionID,
+			ChannelName:  "channel1",
 		},
+	},
 		[]*datapb.SegmentInfo{segment1, segment2},
 		nil,
 	).Once()
@@ -831,13 +823,12 @@ func (suite *SegmentCheckerTestSuite) TestLoadPriorityHandoff() {
 	}
 
 	// set up current target with only segment1
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
-		[]*datapb.VchannelInfo{
-			{
-				CollectionID: collectionID,
-				ChannelName:  "channel2",
-			},
+	expectRecoveryInfo(suite.broker, suite.metaStore, collectionID, []*datapb.VchannelInfo{
+		{
+			CollectionID: collectionID,
+			ChannelName:  "channel2",
 		},
+	},
 		[]*datapb.SegmentInfo{segment1},
 		nil,
 	).Once()
@@ -845,13 +836,12 @@ func (suite *SegmentCheckerTestSuite) TestLoadPriorityHandoff() {
 	suite.checker.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
 
 	// set up next target with segment1 and segment2 (segment2 is new from handoff)
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
-		[]*datapb.VchannelInfo{
-			{
-				CollectionID: collectionID,
-				ChannelName:  "channel2",
-			},
+	expectRecoveryInfo(suite.broker, suite.metaStore, collectionID, []*datapb.VchannelInfo{
+		{
+			CollectionID: collectionID,
+			ChannelName:  "channel2",
 		},
+	},
 		[]*datapb.SegmentInfo{segment1, segment2},
 		nil,
 	).Once()
@@ -916,13 +906,12 @@ func (suite *SegmentCheckerTestSuite) TestLoadPriorityUserLoad() {
 
 	// Initial Load scenario: only nextTarget exists, no currentTarget
 	// This simulates the real load_collection flow where currentTarget doesn't exist yet
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
-		[]*datapb.VchannelInfo{
-			{
-				CollectionID: collectionID,
-				ChannelName:  "channel3",
-			},
+	expectRecoveryInfo(suite.broker, suite.metaStore, collectionID, []*datapb.VchannelInfo{
+		{
+			CollectionID: collectionID,
+			ChannelName:  "channel3",
 		},
+	},
 		[]*datapb.SegmentInfo{segment},
 		nil,
 	).Once()
@@ -977,13 +966,12 @@ func (suite *SegmentCheckerTestSuite) TestLoadPriorityRefresh() {
 	}
 
 	// set up empty current target
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
-		[]*datapb.VchannelInfo{
-			{
-				CollectionID: collectionID,
-				ChannelName:  "channel4",
-			},
+	expectRecoveryInfo(suite.broker, suite.metaStore, collectionID, []*datapb.VchannelInfo{
+		{
+			CollectionID: collectionID,
+			ChannelName:  "channel4",
 		},
+	},
 		[]*datapb.SegmentInfo{},
 		nil,
 	).Once()
@@ -991,13 +979,12 @@ func (suite *SegmentCheckerTestSuite) TestLoadPriorityRefresh() {
 	suite.checker.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
 
 	// set up next target with the imported segment
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
-		[]*datapb.VchannelInfo{
-			{
-				CollectionID: collectionID,
-				ChannelName:  "channel4",
-			},
+	expectRecoveryInfo(suite.broker, suite.metaStore, collectionID, []*datapb.VchannelInfo{
+		{
+			CollectionID: collectionID,
+			ChannelName:  "channel4",
 		},
+	},
 		[]*datapb.SegmentInfo{segment},
 		nil,
 	).Once()
@@ -1143,8 +1130,7 @@ func (suite *SegmentCheckerTestSuite) TestFilterOutSegmentInUse() {
 			ChannelName:  channel,
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
-		channels, []*datapb.SegmentInfo{}, nil).Maybe()
+	expectRecoveryInfo(suite.broker, suite.metaStore, collectionID, channels, []*datapb.SegmentInfo{}, nil).Maybe()
 	checker.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID)
 	currentTargetVersion := checker.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.CurrentTarget)
 
@@ -1288,8 +1274,7 @@ func (suite *SegmentCheckerTestSuite) TestReopenOnStaleDataVersion() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	expectRecoveryInfo(suite.broker, suite.metaStore, int64(1), channels, segments, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(ctx, int64(1))
 
 	// dist has the segment loaded with an older DataVersion

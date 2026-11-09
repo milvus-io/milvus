@@ -43,7 +43,13 @@ endmacro()
 #----------------------------------------------------------------------
 set_option_category("Milvus Build Option")
 
-define_option(MILVUS_GPU_VERSION "Build GPU version" OFF)
+if ( INDEX_ENGINE STREQUAL "cardinal" )
+    define_option(WITH_GPU "Build with GPU support" ON)
+else ()
+    define_option(WITH_GPU "Build with GPU support" OFF)
+endif ()
+define_option(USE_ASAN "Build C/C++ code with AddressSanitizer" OFF)
+define_option(USE_TSAN "Build C/C++ code with ThreadSanitizer" OFF)
 
 #----------------------------------------------------------------------
 set_option_category("Thirdparty")
@@ -65,6 +71,9 @@ define_option(MILVUS_UNITY_BUILD "Use CMake unity (jumbo) build to speed up comp
 
 define_option(MILVUS_USE_SPLIT_DWARF
         "Split DWARF debug info into external .dwo files for build trees that preserve them" OFF)
+
+define_option(MILVUS_AUDIT_AWS_RUNTIME
+        "Audit Linux link maps and unstripped binaries for embedded AWS runtimes" "${BUILD_UNIT_TEST}")
 
 define_option(MILVUS_VERBOSE_THIRDPARTY_BUILD
         "Show output from ExternalProjects rather than just logging to files" ON)

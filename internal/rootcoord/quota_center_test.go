@@ -25,9 +25,11 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -35,11 +37,13 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	rlinternal "github.com/milvus-io/milvus/internal/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -1072,6 +1076,141 @@ func TestQuotaCenter(t *testing.T) {
 		assert.Equal(t, getRate(limiters, internalpb.RateType_DQLQuery), float64(4))
 		assert.Equal(t, getRate(limiters, internalpb.RateType_DQLSearch), float64(5))
 	})
+
+	t.Run("test write cool-off persists across rounds", func(t *testing.T) {
+		Params.Save(Params.QuotaConfig.DMLLimitEnabled.Key, "true")
+		defer Params.Reset(Params.QuotaConfig.DMLLimitEnabled.Key)
+		Params.Save(Params.QuotaConfig.DMLMaxInsertRatePerCollection.Key, "100")
+		defer Params.Reset(Params.QuotaConfig.DMLMaxInsertRatePerCollection.Key)
+		Params.Save(Params.QuotaConfig.TtProtectionEnabled.Key, "true")
+		defer Params.Reset(Params.QuotaConfig.TtProtectionEnabled.Key)
+		Params.Save(Params.QuotaConfig.QueryNodeMemoryLowWaterLevel.Key, "0.8")
+		defer Params.Reset(Params.QuotaConfig.QueryNodeMemoryLowWaterLevel.Key)
+		Params.Save(Params.QuotaConfig.QueryNodeMemoryHighWaterLevel.Key, "0.9")
+		defer Params.Reset(Params.QuotaConfig.QueryNodeMemoryHighWaterLevel.Key)
+		Params.Save(Params.QuotaConfig.FactorChangeThreshold.Key, "0.05")
+		defer Params.Reset(Params.QuotaConfig.FactorChangeThreshold.Key)
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().GetCollectionByIDWithMaxTs(mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
+		meta.EXPECT().GetDatabaseByID(mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrDatabaseNotFound).Maybe()
+		meta.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+		meta.EXPECT().ListAllAvailPartitions(mock.Anything).Return(map[int64]map[int64][]int64{0: {1: {}}}).Maybe()
+		quotaCenter := NewQuotaCenter(pcm, dc, core.tsoAllocator, meta)
+		quotaCenter.collectionIDToDBID = collectionIDToDBID
+
+		baseline := Params.QuotaConfig.DMLMaxInsertRatePerCollection.GetAsFloat()
+		rounds := []struct {
+			memoryUsage uint64  // of 1000, water levels at 800 and 900
+			rateRatio   float64 // expected insert rate / baseline
+		}{
+			{850, 0.5},  // factor 0.5
+			{850, 0.5},  // same factor, the throttled rate must survive the limiter reset
+			{852, 0.5},  // factor 0.48 is within the threshold of 0.5, keep 0.5
+			{870, 0.3},  // factor 0.3
+			{804, 0.96}, // factor 0.96
+			{700, 1},    // only the time tick factor 1 is left, lift the throttling
+		}
+		for i, round := range rounds {
+			quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
+				1: {
+					Hms: metricsinfo.HardwareMetrics{MemoryUsage: round.memoryUsage, Memory: 1000},
+					// No time tick delay, so the time tick factor is 1 every round.
+					Fgm:    metricsinfo.FlowGraphMetric{NumFlowGraph: 1, MinFlowGraphChannel: "dml"},
+					Effect: metricsinfo.NodeEffect{NodeID: 1, CollectionIDs: []int64{1}},
+				},
+			}
+			assert.NoError(t, quotaCenter.calculateRates())
+			limiter, ok := quotaCenter.rateLimiter.GetCollectionLimiters(0, 1).GetLimiters().Get(internalpb.RateType_DMLInsert)
+			assert.True(t, ok)
+			assert.InDelta(t, baseline*round.rateRatio, float64(limiter.Limit()), 1, "round %d", i+1)
+		}
+	})
+}
+
+// A collection that is neither loaded nor has a healthy segment is named by no
+// node metric, but the WAL lag check still covers it through its pchannel. Its
+// DB must come from RootCoord meta, or the write deny is never applied to it.
+func TestQuotaCenterDeniesWritingToWALLaggingCollectionWithoutMetrics(t *testing.T) {
+	paramtable.Init()
+	for key, value := range map[string]string{
+		Params.QuotaConfig.DMLLimitEnabled.Key:     "true",
+		Params.QuotaConfig.TtProtectionEnabled.Key: "true",
+		Params.QuotaConfig.MaxTimeTickDelay.Key:    "10.0",
+		Params.QuotaConfig.ForceDenyWriting.Key:    "false",
+	} {
+		paramtable.Get().Save(key, value)
+		defer paramtable.Get().Reset(key)
+	}
+
+	const (
+		dbID         = int64(1)
+		collectionID = int64(100)
+		pchannel     = "quota-dml_0"
+	)
+	channel.ResetStaticPChannelStatsManager()
+	channel.RecoverPChannelStatsManager([]string{fmt.Sprintf("%s_%dv0", pchannel, collectionID)})
+	t.Cleanup(channel.ResetStaticPChannelStatsManager)
+
+	meta := mockrootcoord.NewIMetaTable(t)
+	meta.EXPECT().ListAllAvailPartitions(mock.Anything).Return(map[int64]map[int64][]int64{
+		dbID: {collectionID: {1000}},
+	})
+	meta.EXPECT().GetCollectionByIDWithMaxTs(mock.Anything, collectionID).
+		Return(&model.Collection{CollectionID: collectionID, DBID: dbID}, nil).Maybe()
+	meta.EXPECT().GetDatabaseByID(mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrDatabaseNotFound).Maybe()
+
+	alloc := newMockTsoAllocator()
+	walTimeTick := tsoutil.ComposeTSByTime(time.Now())
+	alloc.GenerateTSOF = func(count uint32) (typeutil.Timestamp, error) {
+		return tsoutil.ComposeTSByTime(time.Now().Add(time.Minute)), nil
+	}
+	quotaCenter := NewQuotaCenter(proxyutil.NewMockProxyClientManager(t), mocks.NewMixCoord(t), alloc, meta)
+	// Only a streaming node reports, and only its WAL lag: no collection IDs.
+	quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
+		1: {StreamingQuota: &metricsinfo.StreamingQuotaMetrics{WALs: []metricsinfo.WALMetrics{
+			{Channel: types.ChannelID{Name: pchannel}, RecoveryTimeTick: walTimeTick},
+		}}},
+	}
+
+	require.NoError(t, quotaCenter.resetAllCurrentRates())
+	gotDBID, ok := quotaCenter.collectionIDToDBID.Get(collectionID)
+	require.True(t, ok)
+	assert.Equal(t, dbID, gotDBID)
+
+	require.NoError(t, quotaCenter.calculateWriteRates())
+	limiter := quotaCenter.rateLimiter.GetCollectionLimiters(dbID, collectionID)
+	require.NotNil(t, limiter)
+	state, ok := limiter.GetQuotaStates().Get(milvuspb.QuotaState_DenyToWrite)
+	require.True(t, ok)
+	assert.Equal(t, commonpb.ErrorCode_TimeTickLongDelay, state.ErrorCode)
+}
+
+func TestQuotaCenterRecordMetricsFallsBackToCollectionID(t *testing.T) {
+	paramtable.Init()
+
+	const (
+		dbID         = int64(1)
+		collectionID = int64(100)
+	)
+	meta := mockrootcoord.NewIMetaTable(t)
+	meta.EXPECT().ListAllAvailPartitions(mock.Anything).Return(map[int64]map[int64][]int64{
+		dbID: {collectionID: nil},
+	})
+	meta.EXPECT().GetCollectionByIDWithMaxTs(mock.Anything, collectionID).
+		Return(&model.Collection{CollectionID: collectionID, DBID: dbID}, nil).Maybe()
+
+	quotaCenter := NewQuotaCenter(proxyutil.NewMockProxyClientManager(t), mocks.NewMixCoord(t), newMockTsoAllocator(), meta)
+	require.NoError(t, quotaCenter.resetAllCurrentRates())
+	limiter := quotaCenter.rateLimiter.GetCollectionLimiters(dbID, collectionID)
+	require.NotNil(t, limiter)
+	limiter.GetQuotaStates().Insert(milvuspb.QuotaState_DenyToWrite, &rlinternal.QuotaStateInfo{
+		ErrorCode: commonpb.ErrorCode_TimeTickLongDelay,
+	})
+
+	quotaCenter.recordMetrics()
+	assert.Equal(t, 1.0, testutil.ToFloat64(metrics.RootCoordQuotaStates.WithLabelValues(
+		commonpb.ErrorCode_TimeTickLongDelay.String(), "collection_id_100")))
 }
 
 type QuotaCenterSuite struct {

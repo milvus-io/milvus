@@ -7,6 +7,7 @@ import (
 	"io"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/samber/lo"
@@ -174,6 +175,10 @@ func (m *YamlMarshaller) writeYamlRecursive(data []DocContent, level int) {
 }
 
 func (m *YamlMarshaller) writeContent(key, value, comment string, level int) {
+	trimmed := strings.TrimSpace(value)
+	if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+		value = strconv.Quote(value)
+	}
 	if strings.Contains(comment, "\n") {
 		multilines := strings.Split(comment, "\n")
 		for _, line := range multilines {
@@ -344,6 +349,11 @@ func WriteYaml(w io.Writer) {
 			name: "streamingNode",
 			header: `
 # Any configuration related to the streaming node server.`,
+		},
+		{
+			name: "queryView",
+			header: `
+# Any configuration related to query views.`,
 		},
 		{
 			name: "streaming",

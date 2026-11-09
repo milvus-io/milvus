@@ -370,9 +370,10 @@ func (op *MergeOp) String() string {
 	return fmt.Sprintf("Merge(%s)", op.strategy)
 }
 
-// Execute delegates to ExecuteMulti with a single input.
-func (op *MergeOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, error) {
-	return op.ExecuteMulti(ctx, []*DataFrame{input})
+// Execute cannot describe multi-input fusion with single-input row selection.
+// FuncChain dispatches MergeOp through ExecuteMulti, including one-input merges.
+func (op *MergeOp) Execute(ctx *types.FuncContext, input *DataFrame) (*OperatorResult, error) {
+	return nil, merr.WrapErrServiceInternalMsg("merge_op: use ExecuteMulti for merge execution")
 }
 
 // ExecuteMulti merges multiple DataFrames into one.

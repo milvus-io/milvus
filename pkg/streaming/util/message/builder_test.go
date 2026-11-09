@@ -222,6 +222,7 @@ func TestImmutableTxnBuilder(t *testing.T) {
 	mutableMsg := msg.WithTimeTick(2).WithTxnContext(txnCtx).WithLastConfirmed(msgID)
 	mlog.Info(context.TODO(), "test", mlog.Object("msg", mutableMsg))
 	immutableMsg := mutableMsg.IntoImmutableMessage(msgID)
+	decodedBody := message.MustAsImmutableInsertMessageV1(immutableMsg).MustBody()
 	b.Add(immutableMsg)
 
 	commit := message.NewCommitTxnMessageBuilderV2().
@@ -250,6 +251,11 @@ func TestImmutableTxnBuilder(t *testing.T) {
 	assert.Equal(t, "v1", immutableTxnMsg.ReplicateHeader().VChannel)
 	assert.Equal(t, msgID, immutableTxnMsg.ReplicateHeader().MessageID)
 	assert.Equal(t, msgID, immutableTxnMsg.ReplicateHeader().LastConfirmedMessageID)
+	assert.NoError(t, immutableTxnMsg.RangeOver(func(msg message.ImmutableMessage) error {
+		assert.Equal(t, uint64(3), msg.TimeTick())
+		assert.Same(t, decodedBody, message.MustAsImmutableInsertMessageV1(msg).MustBody())
+		return nil
+	}))
 	mlog.Info(context.TODO(), "test", mlog.Object("msg", immutableTxnMsg))
 }
 

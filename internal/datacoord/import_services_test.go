@@ -31,33 +31,30 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
-	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
+	"github.com/milvus-io/milvus/internal/datacoord/ddl"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
-	"github.com/milvus-io/milvus/internal/metastore/mocks"
-	internalmocks "github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
-	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
-
-// ================================
-// Import Services Test Suite
-// ================================
 
 type ImportServicesSuite struct {
 	suite.Suite
@@ -65,9 +62,6 @@ type ImportServicesSuite struct {
 
 func (s *ImportServicesSuite) SetupTest() {
 	paramtable.Init()
-	gate := &paramtable.Get().ProxyCfg.RLSImportEnforcementEnabled
-	oldGate := gate.SwapTempValue("true")
-	s.T().Cleanup(func() { gate.SwapTempValue(oldGate) })
 	previous := streaming.WAL()
 	streaming.SetupNoopWALForTest()
 	s.T().Cleanup(func() { streaming.SetWALForTest(previous) })
@@ -76,10 +70,6 @@ func (s *ImportServicesSuite) SetupTest() {
 func TestImportServicesSuite(t *testing.T) {
 	suite.Run(t, new(ImportServicesSuite))
 }
-
-// --------------------------------
-// ImportV2 Tests
-// --------------------------------
 
 func (s *ImportServicesSuite) TestImportV2_ServerNotHealthyReturnsError() {
 	ctx := context.Background()
@@ -97,6 +87,7 @@ func (s *ImportServicesSuite) TestImportV2_InvalidTimeoutReturnsError() {
 	ctx := context.Background()
 	server := &Server{}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
+	server.ddl = newDDLCallbacks(server)
 
 	req := &internalpb.ImportRequestInternal{
 		Options: []*commonpb.KeyValuePair{
@@ -123,8 +114,9 @@ func (s *ImportServicesSuite) TestImportV2_InvalidBinlogPathsAreNotRetryable() {
 			{"invalid_last", []*internalpb.ImportFile{{Paths: []string{"valid"}}, {Paths: paths}}},
 		} {
 			s.Run(fmt.Sprintf("paths_%d/%s", len(paths), test.name), func() {
-				server := &Server{meta: &meta{}}
+				server := &Server{meta: &meta.Meta{}}
 				server.stateCode.Store(commonpb.StateCode_Healthy)
+				server.ddl = newDDLCallbacks(server)
 				// A supplied job ID skips allocation; a nil chunk manager proves
 				// invalid path counts are rejected before accessing object storage.
 				resp, err := server.ImportV2(context.Background(), &internalpb.ImportRequestInternal{
@@ -144,11 +136,29 @@ func (s *ImportServicesSuite) TestImportV2_InvalidBinlogPathsAreNotRetryable() {
 	}
 }
 
+func (s *ImportServicesSuite) TestImportV2_UnsupportedTaskVersionReturnsError() {
+	ctx := context.Background()
+	paramtable.Init()
+	server := &Server{}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+	server.ddl = newDDLCallbacks(server)
+
+	resp, err := server.ImportV2(ctx, &internalpb.ImportRequestInternal{
+		Options: []*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
+		Version: 99,
+	})
+
+	s.NoError(err)
+	s.NotNil(resp)
+	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrServiceInternal))
+}
+
 func (s *ImportServicesSuite) TestImportV2_L0ImportDisabledReturnsError() {
 	paramtable.Init()
 	ctx := context.Background()
 	server := &Server{}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
+	server.ddl = newDDLCallbacks(server)
 
 	// enableL0Import defaults to false, so an l0_import request must be rejected
 	// before reaching allocation (allocator is nil here, proving the early reject).
@@ -172,6 +182,7 @@ func (s *ImportServicesSuite) TestImportV2_L0ImportEnabledPassesGate() {
 	ctx := context.Background()
 	server := &Server{}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
+	server.ddl = newDDLCallbacks(server)
 
 	params := paramtable.Get()
 	params.Save(params.DataCoordCfg.EnableL0Import.Key, "true")
@@ -196,8 +207,10 @@ func (s *ImportServicesSuite) TestImportV2_L0ImportEnabledPassesGate() {
 
 func (s *ImportServicesSuite) TestImportV2_AllocatorNilReturnsError() {
 	ctx := context.Background()
+	paramtable.Init()
 	server := &Server{}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
+	server.ddl = newDDLCallbacks(server)
 	server.allocator = nil
 
 	req := &internalpb.ImportRequestInternal{
@@ -214,10 +227,54 @@ func (s *ImportServicesSuite) TestImportV2_AllocatorNilReturnsError() {
 	s.Contains(resp.GetStatus().GetReason(), "allocator not initialized")
 }
 
+func (s *ImportServicesSuite) TestImportV2_RejectsNativeListArrayBeforeAllocation() {
+	paramtable.Init()
+	for _, tc := range []struct {
+		name    string
+		options []*commonpb.KeyValuePair
+		// kind is the import kind named in the rejection of a native-list
+		// target; empty means the import reads native-list sub-fields.
+		kind string
+	}{
+		{"file", nil, ""},
+		{"backup", []*commonpb.KeyValuePair{{Key: "backup", Value: "true"}}, "binlog import (backup restore)"},
+		{"snapshot", []*commonpb.KeyValuePair{{Key: "backup", Value: "true"}, {Key: "source_type", Value: "snapshot"}}, "snapshot-source import"},
+	} {
+		for _, elementNullable := range []bool{false, true} {
+			s.Run(fmt.Sprintf("%s/element_nullable=%t", tc.name, elementNullable), func() {
+				server := &Server{}
+				server.stateCode.Store(commonpb.StateCode_Healthy)
+				options := append([]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}}, tc.options...)
+				resp, err := server.ImportV2(context.Background(), &internalpb.ImportRequestInternal{
+					Schema: &schemapb.CollectionSchema{
+						Fields: []*schemapb.FieldSchema{{Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+						StructArrayFields: []*schemapb.StructArrayFieldSchema{{Name: "s", Fields: []*schemapb.FieldSchema{{
+							Name: "arr", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+							ElementNullable: elementNullable,
+						}}}},
+					},
+					Options: options,
+				})
+				s.Require().NoError(err)
+				if !elementNullable || tc.kind == "" {
+					s.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrServiceUnavailable)
+					s.Contains(resp.GetStatus().GetReason(), "allocator not initialized")
+					return
+				}
+				s.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
+				s.Contains(resp.GetStatus().GetReason(),
+					tc.kind+" into a collection with element-nullable or nested Array field s.arr is not supported")
+			})
+		}
+	}
+}
+
 func (s *ImportServicesSuite) TestImportV2_AllocatorFailsReturnsError() {
 	ctx := context.Background()
+	paramtable.Init()
 	server := &Server{}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
+	server.ddl = newDDLCallbacks(server)
 
 	mockAllocator := allocator.NewMockAllocator(s.T())
 	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(0), int64(0), merr.WrapErrServiceUnavailable("allocation failed"))
@@ -239,9 +296,10 @@ func (s *ImportServicesSuite) TestImportV2_AllocatorFailsReturnsError() {
 
 func (s *ImportServicesSuite) TestImportV2_BroadcastFailsReturnsError() {
 	ctx := context.Background()
+	paramtable.Init()
 
 	// Mock validation to pass but broadcast to fail
-	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+	mockCount := mockey.Mock((*bulkimport.Meta).CountJobBy).To(func(_ *bulkimport.Meta, _ context.Context, _ ...bulkimport.ImportJobFilter) int {
 		return 1
 	}).Build()
 	defer mockCount.UnPatch()
@@ -260,12 +318,7 @@ func (s *ImportServicesSuite) TestImportV2_BroadcastFailsReturnsError() {
 		}).Build()
 	defer mockAssignment.UnPatch()
 
-	// Mock broker.DescribeCollectionInternal (called once in startBroadcastWithCollectionID, which will fail at StartBroadcastWithResourceKeys)
-	mockBroker := broker.NewMockBroker(s.T())
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-	}, nil)
+	coll := &meta.CollectionInfo{ID: 100, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{Name: "test_collection"}}
 
 	// Mock StartBroadcastWithResourceKeys to fail
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
@@ -274,12 +327,12 @@ func (s *ImportServicesSuite) TestImportV2_BroadcastFailsReturnsError() {
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	server := &Server{
-		importMeta: &importMeta{},
-		broker:     mockBroker,
+	server := seedCollections(&Server{
+		importMeta: &bulkimport.Meta{},
 		meta:       newTestMetaWithChunkManager(s.T()),
-	}
+	}, coll)
 	server.stateCode.Store(commonpb.StateCode_Healthy)
+	server.ddl = newDDLCallbacks(server)
 
 	mockAllocator := allocator.NewMockAllocator(s.T())
 	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1001), nil)
@@ -312,9 +365,10 @@ func (s *ImportServicesSuite) TestImportV2_BroadcastFailsReturnsError() {
 
 func (s *ImportServicesSuite) TestImportV2_SuccessReturnsJobID() {
 	ctx := context.Background()
+	paramtable.Init()
 
 	// Mock validation to pass
-	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+	mockCount := mockey.Mock((*bulkimport.Meta).CountJobBy).To(func(_ *bulkimport.Meta, _ context.Context, _ ...bulkimport.ImportJobFilter) int {
 		return 1
 	}).Build()
 	defer mockCount.UnPatch()
@@ -334,31 +388,24 @@ func (s *ImportServicesSuite) TestImportV2_SuccessReturnsJobID() {
 	defer mockAssignment.UnPatch()
 
 	// Mock StartBroadcastWithResourceKeys to succeed
-	mockBroadcastAPI := newMockBroadcastAPIImpl()
+	mockBroadcastAPI := meta.NewMockBroadcastAPIImpl()
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			return mockBroadcastAPI, nil
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	// Mock broker: DescribeCollectionInternal is called twice
-	// First call in startBroadcastWithCollectionID, second call in broadcastImport
-	mockBroker := broker.NewMockBroker(s.T())
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-		Schema: &schemapb.CollectionSchema{
-			Name:   "test_collection",
-			DbName: "test_db",
-		},
-	}, nil).Times(2)
+	coll := &meta.CollectionInfo{ID: 100, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{
+		Name:   "test_collection",
+		DbName: "test_db",
+	}}
 
-	server := &Server{
-		importMeta: &importMeta{},
-		broker:     mockBroker,
+	server := seedCollections(&Server{
+		importMeta: &bulkimport.Meta{},
 		meta:       newTestMetaWithChunkManager(s.T()),
-	}
+	}, coll)
 	server.stateCode.Store(commonpb.StateCode_Healthy)
+	server.ddl = newDDLCallbacks(server)
 
 	mockAllocator := allocator.NewMockAllocator(s.T())
 	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1001), nil)
@@ -429,7 +476,7 @@ func newDuplicatedImportBroadcastResultForCollection(originalJobID int64, origin
 // broadcast mock, so a caller can inspect the message that was actually broadcast.
 // importMeta is supplied by the caller so it can decide whether the original job still
 // exists.
-func (s *ImportServicesSuite) setupImportV2DuplicateBroadcast(importMeta ImportMeta, originalJobID int64, originalPaths ...string) (*Server, *mockBroadcastAPIImpl) {
+func (s *ImportServicesSuite) setupImportV2DuplicateBroadcast(importMeta bulkimport.ImportMeta, originalJobID int64, originalPaths ...string) (*Server, *meta.MockBroadcastAPIImpl) {
 	mockBalancerInst := &mockBalancerImpl{}
 	mockBalance := mockey.Mock(balance.GetWithContext).To(func(ctx context.Context) (balancer.Balancer, error) {
 		return mockBalancerInst, nil
@@ -444,32 +491,25 @@ func (s *ImportServicesSuite) setupImportV2DuplicateBroadcast(importMeta ImportM
 		}).Build()
 	s.T().Cleanup(func() { mockAssignment.UnPatch() })
 
-	mockBroadcastAPI := newMockBroadcastAPIImpl()
-	mockBroadcastAPI.broadcastResult = newDuplicatedImportBroadcastResult(originalJobID, originalPaths...)
+	mockBroadcastAPI := meta.NewMockBroadcastAPIImpl()
+	mockBroadcastAPI.BroadcastResult = newDuplicatedImportBroadcastResult(originalJobID, originalPaths...)
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			return mockBroadcastAPI, nil
 		}).Build()
 	s.T().Cleanup(func() { mockBroadcast.UnPatch() })
 
-	mockBroker := broker.NewMockBroker(s.T())
-	// Maybe rather than Times(2): a request rejected by validateImportRequest -- the
-	// job-count limit, say -- returns before either describe call.
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-		Schema: &schemapb.CollectionSchema{
-			Name:   "test_collection",
-			DbName: "test_db",
-		},
-	}, nil).Maybe()
+	coll := &meta.CollectionInfo{ID: 100, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{
+		Name:   "test_collection",
+		DbName: "test_db",
+	}}
 
-	server := &Server{
+	server := seedCollections(&Server{
 		importMeta: importMeta,
-		broker:     mockBroker,
 		meta:       newTestMetaWithChunkManager(s.T()),
-	}
+	}, coll)
 	server.stateCode.Store(commonpb.StateCode_Healthy)
+	server.ddl = newDDLCallbacks(server)
 
 	mockAllocator := allocator.NewMockAllocator(s.T())
 	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1001), nil)
@@ -508,9 +548,9 @@ func newImportV2IdempotentContext(key string) context.Context {
 func (s *ImportServicesSuite) TestImportV2_DuplicateReturnsOriginalJobID() {
 	ctx := newImportV2IdempotentContext("run-1")
 
-	importMeta := NewMockImportMeta(s.T())
+	importMeta := bulkimport.NewMockImportMeta(s.T())
 
-	// validateImportRequest runs before the broadcaster's idempotency lookup, so even a
+	// ValidateImportRequest runs before the broadcaster's idempotency lookup, so even a
 	// request that will deduplicate is counted against the job limit first.
 	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(0)
 	// The duplicate branch logs the original job's state, so it looks the job up.
@@ -535,9 +575,9 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateReturnsOriginalJobID() {
 func (s *ImportServicesSuite) TestImportV2_DuplicateLooksUpAFailedOriginal() {
 	ctx := newImportV2IdempotentContext("run-1")
 
-	importMeta := NewMockImportMeta(s.T())
+	importMeta := bulkimport.NewMockImportMeta(s.T())
 	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(0)
-	importMeta.EXPECT().GetJob(mock.Anything, int64(4242)).Return(&importJob{
+	importMeta.EXPECT().GetJob(mock.Anything, int64(4242)).Return(&bulkimport.Job{
 		ImportJob: &datapb.ImportJob{JobID: 4242, State: internalpb.ImportJobState_Failed},
 	}).Once()
 
@@ -558,9 +598,9 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateLooksUpAFailedOriginal() {
 func (s *ImportServicesSuite) TestImportV2_DuplicateWithZeroJobIDStaysDuplicate() {
 	ctx := newImportV2IdempotentContext("run-1")
 
-	importMeta := NewMockImportMeta(s.T())
+	importMeta := bulkimport.NewMockImportMeta(s.T())
 
-	// validateImportRequest runs before the broadcaster's idempotency lookup, so even a
+	// ValidateImportRequest runs before the broadcaster's idempotency lookup, so even a
 	// request that will deduplicate is counted against the job limit first.
 	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(0)
 	// The duplicate branch logs the original job's state, so it looks the job up.
@@ -579,9 +619,9 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateWithZeroJobIDStaysDuplicate(
 }
 
 func (s *ImportServicesSuite) TestImportV2_ForwardsIdempotencyKeyUnmodifiedAtTheLimit() {
-	importMeta := NewMockImportMeta(s.T())
+	importMeta := bulkimport.NewMockImportMeta(s.T())
 
-	// validateImportRequest runs before the broadcaster's idempotency lookup, so even a
+	// ValidateImportRequest runs before the broadcaster's idempotency lookup, so even a
 	// request that will deduplicate is counted against the job limit first.
 	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(0)
 	// The duplicate branch logs the original job's state, so it looks the job up.
@@ -600,8 +640,8 @@ func (s *ImportServicesSuite) TestImportV2_ForwardsIdempotencyKeyUnmodifiedAtThe
 	s.NoError(err)
 	s.Equal(int32(0), resp.GetStatus().GetCode())
 
-	s.Require().NotNil(broadcastAPI.capturedMsg)
-	forwarded := message.IdempotencyKeyOf(broadcastAPI.capturedMsg)
+	s.Require().NotNil(broadcastAPI.CapturedMsg)
+	forwarded := message.IdempotencyKeyOf(broadcastAPI.CapturedMsg)
 	// DataCoord must hand the client key through untouched. It is scoped on the way --
 	// that is the mechanism, and the broadcaster bounds the client portion, not the
 	// encoded value -- but nothing may alter, truncate or re-prefix the bytes the
@@ -612,9 +652,10 @@ func (s *ImportServicesSuite) TestImportV2_ForwardsIdempotencyKeyUnmodifiedAtThe
 
 func (s *ImportServicesSuite) TestImportV2_UsesDefaultDbNameWhenEmpty() {
 	ctx := context.Background()
+	paramtable.Init()
 
 	// Mock validation to pass
-	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+	mockCount := mockey.Mock((*bulkimport.Meta).CountJobBy).To(func(_ *bulkimport.Meta, _ context.Context, _ ...bulkimport.ImportJobFilter) int {
 		return 1
 	}).Build()
 	defer mockCount.UnPatch()
@@ -633,7 +674,7 @@ func (s *ImportServicesSuite) TestImportV2_UsesDefaultDbNameWhenEmpty() {
 		}).Build()
 	defer mockAssignment.UnPatch()
 
-	// Capture the dbName passed to broadcastImport
+	// Capture the dbName passed to BroadcastImport
 	var capturedDbName string
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
@@ -647,19 +688,15 @@ func (s *ImportServicesSuite) TestImportV2_UsesDefaultDbNameWhenEmpty() {
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	// Mock broker.DescribeCollectionInternal to return empty dbName (called in startBroadcastWithCollectionID)
-	mockBroker := broker.NewMockBroker(s.T())
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "", // Empty - should use default
-		CollectionName: "test_collection",
-	}, nil)
+	// Empty database name in the view - should use default
+	coll := &meta.CollectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "test_collection"}}
 
-	server := &Server{
-		importMeta: &importMeta{},
-		broker:     mockBroker,
+	server := seedCollections(&Server{
+		importMeta: &bulkimport.Meta{},
 		meta:       newTestMetaWithChunkManager(s.T()),
-	}
+	}, coll)
 	server.stateCode.Store(commonpb.StateCode_Healthy)
+	server.ddl = newDDLCallbacks(server)
 
 	mockAllocator := allocator.NewMockAllocator(s.T())
 	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1001), nil)
@@ -689,662 +726,212 @@ func (s *ImportServicesSuite) TestImportV2_UsesDefaultDbNameWhenEmpty() {
 	s.Equal("default", capturedDbName)
 }
 
-// --------------------------------
-// createImportJobFromAck Tests
-// --------------------------------
-
-func (s *ImportServicesSuite) TestCreateImportJobFromAck_ServerNotHealthyReturnsError() {
-	ctx := context.Background()
-	server := &Server{}
-	server.stateCode.Store(commonpb.StateCode_Initializing)
-
-	resp, err := server.createImportJobFromAck(ctx, nil, false)
-
-	s.NoError(err)
-	s.NotNil(resp)
-	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrServiceNotReady))
-}
-
-func (s *ImportServicesSuite) TestCreateImportJobFromAck_InvalidTimeoutReturnsError() {
-	ctx := context.Background()
-	server := &Server{}
-	server.stateCode.Store(commonpb.StateCode_Healthy)
-
-	req := &internalpb.ImportRequestInternal{
-		Options: []*commonpb.KeyValuePair{
-			{Key: "timeout", Value: "invalid_format"},
-		},
-	}
-
-	resp, err := server.createImportJobFromAck(ctx, req, false)
-
-	s.NoError(err)
-	s.NotNil(resp)
-	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
-}
-
-func (s *ImportServicesSuite) TestCreateImportJobFromAck_RLSDenialCreatesFailedJob() {
-	ctx := context.Background()
-	mixCoord := internalmocks.NewMixCoord(s.T())
-	mixCoord.EXPECT().GetRLSMetadata(mock.Anything, mock.MatchedBy(func(req *rootcoordpb.GetRLSMetadataRequest) bool {
-		return req.GetKind() == rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_POLICIES
-	})).Return(&rootcoordpb.GetRLSMetadataResponse{
-		Status:       merr.Success(),
-		CollectionId: 100,
-	}, nil).Once()
-	mockHandler := NewNMockHandler(s.T())
-	mockHandler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
-		ID:            100,
-		VChannelNames: []string{"v1"},
-	}, nil)
-	importMeta := NewMockImportMeta(s.T())
-	importMeta.EXPECT().AddJob(mock.Anything, mock.MatchedBy(func(job ImportJob) bool {
-		return job.GetState() == internalpb.ImportJobState_Failed &&
-			strings.Contains(job.GetReason(), "no applicable check policies")
-	})).Return(nil).Once()
-	allocator := allocator.NewMockAllocator(s.T())
-	allocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1002), nil)
-
-	server := &Server{
-		mixCoord:   mixCoord,
-		handler:    mockHandler,
-		importMeta: importMeta,
-		allocator:  allocator,
-	}
-	server.stateCode.Store(commonpb.StateCode_Healthy)
-	resp, err := server.createImportJobFromAck(ctx, &internalpb.ImportRequestInternal{
-		CollectionID:   100,
-		CollectionName: "test_collection",
-		ChannelNames:   []string{"v1"},
-		Schema: &schemapb.CollectionSchema{
-			Name:       "test_collection",
-			Properties: []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}},
-			Fields:     []*schemapb.FieldSchema{{FieldID: 100, Name: "tenant", DataType: schemapb.DataType_VarChar}},
-		},
-		Files:        []*internalpb.ImportFile{{Paths: []string{"/test/file.json"}}},
-		Options:      []*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
-		RlsPrincipal: "alice",
-	}, false)
-
-	s.NoError(err)
-	s.NoError(merr.Error(resp.GetStatus()))
-	s.Equal("1000", resp.GetJobID())
-}
-
-func (s *ImportServicesSuite) TestCreateImportJobFromAck_RLSVersionGateCreatesFailedJob() {
-	gate := &paramtable.Get().ProxyCfg.RLSImportEnforcementEnabled
-	oldGate := gate.SwapTempValue("false")
-	s.T().Cleanup(func() { gate.SwapTempValue(oldGate) })
-
-	mockHandler := NewNMockHandler(s.T())
-	mockHandler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
-		ID:            100,
-		VChannelNames: []string{"v1"},
-	}, nil)
-	importMeta := NewMockImportMeta(s.T())
-	importMeta.EXPECT().AddJob(mock.Anything, mock.MatchedBy(func(job ImportJob) bool {
-		return job.GetState() == internalpb.ImportJobState_Failed &&
-			strings.Contains(job.GetReason(), "cluster upgrade completes")
-	})).Return(nil).Once()
-	allocator := allocator.NewMockAllocator(s.T())
-	allocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1002), nil)
-
-	server := &Server{handler: mockHandler, importMeta: importMeta, allocator: allocator}
-	server.stateCode.Store(commonpb.StateCode_Healthy)
-	resp, err := server.createImportJobFromAck(context.Background(), &internalpb.ImportRequestInternal{
-		CollectionID:   100,
-		CollectionName: "test_collection",
-		ChannelNames:   []string{"v1"},
-		Schema: &schemapb.CollectionSchema{
-			Name:       "test_collection",
-			Properties: []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}},
-		},
-		Files:   []*internalpb.ImportFile{{Paths: []string{"/test/file.json"}}},
-		Options: []*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
-	}, false)
-
-	s.NoError(err)
-	s.NoError(merr.Error(resp.GetStatus()))
-	s.Equal("1000", resp.GetJobID())
-}
-
-func (s *ImportServicesSuite) TestCreateImportJobFromAck_RLSMetadataDiscoveryFailureCreatesFailedJob() {
-	mixCoord := internalmocks.NewMixCoord(s.T())
-	mixCoord.EXPECT().GetRLSMetadata(mock.Anything, mock.Anything).
-		Return(nil, merr.WrapErrNodeNotFound(0, "mixcoord is unavailable")).Once()
-	mockHandler := NewNMockHandler(s.T())
-	mockHandler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
-		ID:            100,
-		VChannelNames: []string{"v1"},
-	}, nil)
-	importMeta := NewMockImportMeta(s.T())
-	importMeta.EXPECT().AddJob(mock.Anything, mock.MatchedBy(func(job ImportJob) bool {
-		return job.GetState() == internalpb.ImportJobState_Failed &&
-			strings.Contains(job.GetReason(), "failed to get RLS policies")
-	})).Return(nil).Once()
-	allocator := allocator.NewMockAllocator(s.T())
-	allocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1002), nil)
-
-	server := &Server{
-		mixCoord:   mixCoord,
-		handler:    mockHandler,
-		importMeta: importMeta,
-		allocator:  allocator,
-	}
-	server.stateCode.Store(commonpb.StateCode_Healthy)
-	resp, err := server.createImportJobFromAck(context.Background(), &internalpb.ImportRequestInternal{
-		CollectionID:   100,
-		CollectionName: "test_collection",
-		ChannelNames:   []string{"v1"},
-		Schema: &schemapb.CollectionSchema{
-			Properties: []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}},
-		},
-		Files:        []*internalpb.ImportFile{{Paths: []string{"/test/file.json"}}},
-		Options:      []*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
-		RlsPrincipal: "alice",
-	}, false)
-
-	s.NoError(err)
-	s.NoError(merr.Error(resp.GetStatus()))
-	s.Equal("1000", resp.GetJobID())
-}
-
-func (s *ImportServicesSuite) TestCreateImportJobFromAck_PersistsRLSPredicate() {
-	ctx := context.Background()
-	mixCoord := internalmocks.NewMixCoord(s.T())
-	mixCoord.EXPECT().GetRLSMetadata(mock.Anything, mock.MatchedBy(func(req *rootcoordpb.GetRLSMetadataRequest) bool {
-		return req.GetKind() == rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_POLICIES
-	})).Return(&rootcoordpb.GetRLSMetadataResponse{
-		Status:       merr.Success(),
-		CollectionId: 100,
-		Policies: []*rootcoordpb.RLSPolicyInfo{{
-			CollectionId: 100,
-			PolicyId:     1,
-			PolicyName:   "tenant_check",
-			PolicyType:   milvuspb.RowPolicyType_RowPolicyTypePermissive,
-			Actions:      []milvuspb.RowPolicyAction{milvuspb.RowPolicyAction_Insert},
-			CheckExpr:    `tenant == "acme"`,
-		}},
-	}, nil).Once()
-	mockHandler := NewNMockHandler(s.T())
-	mockHandler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
-		ID: 100, VChannelNames: []string{"v1"},
-	}, nil)
-	importMeta := NewMockImportMeta(s.T())
-	importMeta.EXPECT().AddJob(mock.Anything, mock.MatchedBy(func(job ImportJob) bool {
-		return job.GetState() == internalpb.ImportJobState_Pending && job.GetRlsCheckPredicate() != nil
-	})).Return(nil).Once()
-	allocator := allocator.NewMockAllocator(s.T())
-	allocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1002), nil)
-
-	server := &Server{mixCoord: mixCoord, handler: mockHandler, importMeta: importMeta, allocator: allocator}
-	server.stateCode.Store(commonpb.StateCode_Healthy)
-	resp, err := server.createImportJobFromAck(ctx, &internalpb.ImportRequestInternal{
-		CollectionID:   100,
-		CollectionName: "test_collection",
-		ChannelNames:   []string{"v1"},
-		Schema: &schemapb.CollectionSchema{
-			Name:       "test_collection",
-			Properties: []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}},
-			Fields:     []*schemapb.FieldSchema{{FieldID: 100, Name: "tenant", DataType: schemapb.DataType_VarChar}},
-		},
-		Files:        []*internalpb.ImportFile{{Paths: []string{"/test/file.json"}}},
-		Options:      []*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
-		RlsPrincipal: "alice",
-	}, false)
-
-	s.NoError(err)
-	s.NoError(merr.Error(resp.GetStatus()))
-	s.Equal("1000", resp.GetJobID())
-}
-
-func (s *ImportServicesSuite) TestCreateImportJobFromAck_AllocatorFailsReturnsError() {
-	ctx := context.Background()
-	server := &Server{}
-	server.stateCode.Store(commonpb.StateCode_Healthy)
-
-	mockAllocator := allocator.NewMockAllocator(s.T())
-	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(0), int64(0), merr.WrapErrServiceUnavailable("allocation failed"))
-	server.allocator = mockAllocator
-
-	req := &internalpb.ImportRequestInternal{
-		CollectionID: 100,
-		Files: []*internalpb.ImportFile{
-			{Id: 1, Paths: []string{"/test/file.json"}},
-		},
-		Options: []*commonpb.KeyValuePair{
-			{Key: "timeout", Value: "300s"},
-		},
-	}
-
-	resp, err := server.createImportJobFromAck(ctx, req, false)
-
-	s.NoError(err)
-	s.NotNil(resp)
-	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrServiceUnavailable))
-	s.Contains(resp.GetStatus().GetReason(), "alloc id failed")
-}
-
-func (s *ImportServicesSuite) TestCreateImportJobFromAck_CollectionNotFoundReturnsError() {
-	ctx := context.Background()
-
-	mockHandler := NewNMockHandler(s.T())
-	mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound)
-
-	server := &Server{
-		handler: mockHandler,
-	}
-	server.stateCode.Store(commonpb.StateCode_Healthy)
-
-	mockAllocator := allocator.NewMockAllocator(s.T())
-	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1002), nil)
-	server.allocator = mockAllocator
-
-	req := &internalpb.ImportRequestInternal{
-		CollectionID: 100,
-		Files: []*internalpb.ImportFile{
-			{Id: 1, Paths: []string{"/test/file.json"}},
-		},
-		Options: []*commonpb.KeyValuePair{
-			{Key: "timeout", Value: "300s"},
-		},
-	}
-
-	resp, err := server.createImportJobFromAck(ctx, req, false)
-
-	s.NoError(err)
-	s.NotNil(resp)
-	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrCollectionNotFound))
-}
-
-func (s *ImportServicesSuite) TestCreateImportJobFromAck_CollectionNilReturnsError() {
-	ctx := context.Background()
-
-	mockHandler := NewNMockHandler(s.T())
-	mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(nil, nil)
-
-	server := &Server{
-		handler: mockHandler,
-	}
-	server.stateCode.Store(commonpb.StateCode_Healthy)
-
-	mockAllocator := allocator.NewMockAllocator(s.T())
-	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1002), nil)
-	server.allocator = mockAllocator
-
-	req := &internalpb.ImportRequestInternal{
-		CollectionID: 100,
-		Files: []*internalpb.ImportFile{
-			{Id: 1, Paths: []string{"/test/file.json"}},
-		},
-		Options: []*commonpb.KeyValuePair{
-			{Key: "timeout", Value: "300s"},
-		},
-	}
-
-	resp, err := server.createImportJobFromAck(ctx, req, false)
-
-	s.NoError(err)
-	s.NotNil(resp)
-	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrCollectionNotFound))
-}
-
-func (s *ImportServicesSuite) TestCreateImportJobFromAck_AddJobFailsReturnsError() {
-	ctx := context.Background()
-
-	mockHandler := NewNMockHandler(s.T())
-	mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
-		ID:            100,
-		VChannelNames: []string{"v1"},
-	}, nil)
-
-	catalog := mocks.NewDataCoordCatalog(s.T())
-	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(merr.WrapErrServiceUnavailable("save job failed"))
-
-	importMeta, err := NewImportMeta(context.TODO(), catalog, nil, nil)
-	s.NoError(err)
-
-	server := &Server{
-		handler:    mockHandler,
-		importMeta: importMeta,
-	}
-	server.stateCode.Store(commonpb.StateCode_Healthy)
-
-	mockAllocator := allocator.NewMockAllocator(s.T())
-	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1002), nil)
-	server.allocator = mockAllocator
-
-	req := &internalpb.ImportRequestInternal{
-		CollectionID:   100,
-		CollectionName: "test_collection",
-		PartitionIDs:   []int64{1},
-		ChannelNames:   []string{"v1"},
-		Schema:         &schemapb.CollectionSchema{Name: "test_collection"},
-		Files: []*internalpb.ImportFile{
-			{Id: 1, Paths: []string{"/test/file.json"}},
-		},
-		Options: []*commonpb.KeyValuePair{
-			{Key: "timeout", Value: "300s"},
-		},
-		DataTimestamp: 123456789,
-		JobID:         2000,
-	}
-
-	resp, err := server.createImportJobFromAck(ctx, req, false)
-
-	s.NoError(err)
-	s.NotNil(resp)
-	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrServiceUnavailable))
-	s.Contains(resp.GetStatus().GetReason(), "add import job failed")
-}
-
-func (s *ImportServicesSuite) TestCreateImportJobFromAck_SuccessWithProvidedJobID() {
-	ctx := context.Background()
-
-	mockHandler := NewNMockHandler(s.T())
-	mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
-		ID:            100,
-		VChannelNames: []string{"v1"},
-	}, nil)
-
-	catalog := mocks.NewDataCoordCatalog(s.T())
-	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
-
-	importMeta, err := NewImportMeta(context.TODO(), catalog, nil, nil)
-	s.NoError(err)
-
-	server := &Server{
-		handler:    mockHandler,
-		importMeta: importMeta,
-	}
-	server.stateCode.Store(commonpb.StateCode_Healthy)
-
-	mockAllocator := allocator.NewMockAllocator(s.T())
-	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1002), nil)
-	server.allocator = mockAllocator
-
-	req := &internalpb.ImportRequestInternal{
-		CollectionID:   100,
-		CollectionName: "test_collection",
-		PartitionIDs:   []int64{1},
-		ChannelNames:   []string{"v1"},
-		Schema:         &schemapb.CollectionSchema{Name: "test_collection"},
-		Files: []*internalpb.ImportFile{
-			{Id: 1, Paths: []string{"/test/file.json"}},
-		},
-		Options: []*commonpb.KeyValuePair{
-			{Key: "timeout", Value: "300s"},
-		},
-		DataTimestamp: 123456789,
-		JobID:         2000, // Provided job ID should be used
-	}
-
-	resp, err := server.createImportJobFromAck(ctx, req, true)
-
-	s.NoError(err)
-	s.NotNil(resp)
-	s.Equal(int32(0), resp.GetStatus().GetCode())
-	s.Equal("2000", resp.GetJobID()) // Should use provided job ID
-	s.True(importMeta.GetJob(ctx, 2000).GetCommitByCoordinator())
-}
-
-func (s *ImportServicesSuite) TestCreateImportJobFromAck_SuccessAllocatesJobIDWhenNotProvided() {
-	ctx := context.Background()
-
-	mockHandler := NewNMockHandler(s.T())
-	mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
-		ID:            100,
-		VChannelNames: []string{"v1"},
-	}, nil)
-
-	catalog := mocks.NewDataCoordCatalog(s.T())
-	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
-
-	importMeta, err := NewImportMeta(context.TODO(), catalog, nil, nil)
-	s.NoError(err)
-
-	server := &Server{
-		handler:    mockHandler,
-		importMeta: importMeta,
-	}
-	server.stateCode.Store(commonpb.StateCode_Healthy)
-
-	mockAllocator := allocator.NewMockAllocator(s.T())
-	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1002), nil)
-	server.allocator = mockAllocator
-
-	req := &internalpb.ImportRequestInternal{
-		CollectionID:   100,
-		CollectionName: "test_collection",
-		PartitionIDs:   []int64{1},
-		ChannelNames:   []string{"v1"},
-		Schema:         &schemapb.CollectionSchema{Name: "test_collection"},
-		Files: []*internalpb.ImportFile{
-			{Id: 1, Paths: []string{"/test/file.json"}},
-		},
-		Options: []*commonpb.KeyValuePair{
-			{Key: "timeout", Value: "300s"},
-		},
-		DataTimestamp: 123456789,
-		JobID:         0, // Not provided - should use idStart (1000)
-	}
-
-	resp, err := server.createImportJobFromAck(ctx, req, false)
-
-	s.NoError(err)
-	s.NotNil(resp)
-	s.Equal(int32(0), resp.GetStatus().GetCode())
-	s.Equal("1000", resp.GetJobID()) // Should use allocated idStart
-}
-
-func (s *ImportServicesSuite) TestCreateImportJobFromAck_AssignsFileIDs() {
-	ctx := context.Background()
-
-	mockHandler := NewNMockHandler(s.T())
-	mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
-		ID:            100,
-		VChannelNames: []string{"v1"},
-	}, nil)
-
-	var savedJob *datapb.ImportJob
-	catalog := mocks.NewDataCoordCatalog(s.T())
-	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, job *datapb.ImportJob) error {
-		savedJob = job
-		return nil
-	})
-
-	importMeta, err := NewImportMeta(context.TODO(), catalog, nil, nil)
-	s.NoError(err)
-
-	server := &Server{
-		handler:    mockHandler,
-		importMeta: importMeta,
-	}
-	server.stateCode.Store(commonpb.StateCode_Healthy)
-
-	mockAllocator := allocator.NewMockAllocator(s.T())
-	// With 3 files, AllocN(4) will be called (files + 1 for job ID)
-	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1004), nil)
-	server.allocator = mockAllocator
-
-	req := &internalpb.ImportRequestInternal{
-		CollectionID:   100,
-		CollectionName: "test_collection",
-		PartitionIDs:   []int64{1},
-		ChannelNames:   []string{"v1"},
-		Schema:         &schemapb.CollectionSchema{Name: "test_collection"},
-		Files: []*internalpb.ImportFile{
-			{Id: 0, Paths: []string{"/test/file1.json"}},
-			{Id: 0, Paths: []string{"/test/file2.json"}},
-			{Id: 0, Paths: []string{"/test/file3.json"}},
-		},
-		Options: []*commonpb.KeyValuePair{
-			{Key: "timeout", Value: "300s"},
-		},
-		DataTimestamp: 123456789,
-		JobID:         2000,
-	}
-
-	resp, err := server.createImportJobFromAck(ctx, req, false)
-
-	s.NoError(err)
-	s.NotNil(resp)
-	s.Equal(int32(0), resp.GetStatus().GetCode())
-
-	// Verify file IDs were assigned correctly
-	s.NotNil(savedJob)
-	files := savedJob.GetFiles()
-	s.Len(files, 3)
-	s.Equal(int64(1001), files[0].GetId()) // idStart + 0 + 1
-	s.Equal(int64(1002), files[1].GetId()) // idStart + 1 + 1
-	s.Equal(int64(1003), files[2].GetId()) // idStart + 2 + 1
-}
-
-func (s *ImportServicesSuite) TestCreateImportJobFromAck_L0ImportDisabledCreatesFailedJob() {
+func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 	paramtable.Init()
-	ctx := context.Background()
+	type ackAllocator struct{ allocator.Allocator }
+	type ackHandler struct{ meta.Handler }
+	type ackCatalog struct{ metastore.DataCoordCatalog }
 
-	mockHandler := NewNMockHandler(s.T())
-	mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
-		ID:            100,
-		VChannelNames: []string{"v1"},
-	}, nil)
+	for _, tc := range []struct {
+		name    string
+		wantErr error
+	}{
+		{"server_not_healthy", merr.ErrServiceNotReady},
+		{"invalid_timeout", merr.ErrImportFailed},
+		{"allocator_failure", merr.ErrServiceUnavailable},
+		{"collection_not_found", merr.ErrCollectionNotFound},
+		{"collection_nil", merr.ErrCollectionNotFound},
+		{"collection_dropping", merr.ErrCollectionNotFound},
+		{"collection_unavailable", merr.ErrServiceNotReady},
+		{"save_job_failure", merr.ErrServiceUnavailable},
+		{"provided_job_id", nil},
+		{"allocated_job_id", nil},
+		{"assign_file_ids", nil},
+		{"nil_schema", nil},
+		{"l0_disabled", nil},
+		{"l0_enabled", nil},
+		{"unsupported_version", nil},
+		{"unsupported_version_no_job_id", merr.ErrDataIntegrity},
+		{"native_list_array", nil},
+		{"native_list_array_backup", nil},
+		{"native_list_array_snapshot", nil},
+	} {
+		s.Run(tc.name, func() {
+			ctx := context.Background()
+			body := &msgpb.ImportMsg{
+				DbName: "test_db", CollectionID: 100, CollectionName: "test_collection",
+				PartitionIDs: []int64{1}, JobID: 2000,
+				Schema:  &schemapb.CollectionSchema{Name: "test_collection", DbName: "stale_db"},
+				Files:   []*msgpb.ImportFile{{Id: 99, Paths: []string{"/test/file.json"}}},
+				Options: map[string]string{"timeout": "300s", "auto_commit": "false"},
+			}
+			coll := &meta.CollectionInfo{ID: 100, VChannelNames: []string{"v1", "v2"}}
+			var allocErr, collectionErr, saveErr error
+			switch tc.name {
+			case "invalid_timeout":
+				body.Options["timeout"] = "invalid_format"
+			case "allocator_failure":
+				allocErr = tc.wantErr
+			case "collection_not_found", "collection_unavailable":
+				coll, collectionErr = nil, tc.wantErr
+			case "collection_nil":
+				coll = nil
+			case "collection_dropping":
+				coll.State = etcdpb.CollectionState_CollectionDropping
+			case "save_job_failure":
+				saveErr = tc.wantErr
+			case "allocated_job_id":
+				body.JobID = 0
+			case "assign_file_ids":
+				body.Files = append(body.Files,
+					&msgpb.ImportFile{Paths: []string{"/test/file2.json"}},
+					&msgpb.ImportFile{Paths: []string{"/test/file3.json"}})
+			case "nil_schema":
+				body.Schema = nil
+			case "l0_disabled", "l0_enabled":
+				body.Options["l0_import"] = "true"
+			case "unsupported_version":
+				body.Version = 99
+			case "unsupported_version_no_job_id":
+				body.Version, body.JobID = 99, 0
+			case "native_list_array", "native_list_array_backup", "native_list_array_snapshot":
+				body.Schema.StructArrayFields = []*schemapb.StructArrayFieldSchema{{
+					Name: "s", Fields: []*schemapb.FieldSchema{{
+						Name: "arr", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+						ElementNullable: true,
+					}},
+				}}
+				switch tc.name {
+				case "native_list_array_backup":
+					// The job fails before binlog listing: server.meta is nil here.
+					body.Options["backup"] = "true"
+				case "native_list_array_snapshot":
+					body.Options["backup"] = "true"
+					body.Options["source_type"] = "snapshot"
+					body.Files[0].Paths = []string{"s3://source/root/snapshots/1/metadata/2.json"}
+				}
+			}
+			params := paramtable.Get()
+			s.Require().NoError(params.Save(params.DataCoordCfg.EnableL0Import.Key, fmt.Sprint(tc.name == "l0_enabled")))
+			defer params.Reset(params.DataCoordCfg.EnableL0Import.Key)
 
-	var savedJob *datapb.ImportJob
-	catalog := mocks.NewDataCoordCatalog(s.T())
-	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, job *datapb.ImportJob) error {
-		savedJob = job
-		return nil
-	})
+			allocate := mockey.Mock((*ackAllocator).AllocN).To(func(_ *ackAllocator, n int64) (int64, int64, error) {
+				s.Equal(int64(len(body.Files)+1), n)
+				return 1000, 1000 + n, allocErr
+			}).Build()
+			defer allocate.UnPatch()
+			get := mockey.Mock((*ackHandler).GetCollection).To(func(_ *ackHandler, _ context.Context, id int64) (*meta.CollectionInfo, error) {
+				s.Equal(body.CollectionID, id)
+				return coll, collectionErr
+			}).Build()
+			defer get.UnPatch()
+			var saved *datapb.ImportJob
+			save := mockey.Mock((*ackCatalog).SaveImportJob).To(func(_ *ackCatalog, _ context.Context, job *datapb.ImportJob) error {
+				if saveErr == nil {
+					saved = job
+				}
+				return saveErr
+			}).Build()
+			defer save.UnPatch()
+			server := &Server{
+				allocator: &ackAllocator{}, handler: &ackHandler{},
+				importMeta: &bulkimport.Meta{Jobs: make(map[int64]bulkimport.ImportJob), Catalog: &ackCatalog{}},
+			}
+			server.stateCode.Store(commonpb.StateCode_Healthy)
+			server.ddl = newDDLCallbacks(server)
 
-	importMeta, err := NewImportMeta(context.TODO(), catalog, nil, nil)
-	s.NoError(err)
-
-	server := &Server{
-		handler:    mockHandler,
-		importMeta: importMeta,
+			control := funcutil.GetControlChannel("import-test")
+			wal := message.NewImportMessageBuilderV1().WithHeader(&message.ImportMessageHeader{
+				CommitByCoordinator: tc.name == "provided_job_id",
+			}).
+				WithBody(body).
+				WithBroadcast([]string{"v1", "v2", control}).MustBuildBroadcast()
+			result := message.BroadcastResultImportMessageV1{
+				Message: message.MustAsBroadcastImportMessageV1(wal),
+				Results: map[string]*message.AppendResult{
+					"v1": {TimeTick: 100}, "v2": {TimeTick: 200}, control: {TimeTick: 300},
+				},
+			}
+			if tc.name == "server_not_healthy" {
+				server.stateCode.Store(commonpb.StateCode_Initializing)
+				result = message.BroadcastResultImportMessageV1{}
+			}
+			resp, err := server.createImportJobFromAck(ctx, result)
+			if tc.wantErr != nil {
+				s.ErrorIs(merr.CheckRPCCall(resp, err), tc.wantErr)
+				s.Empty(resp.GetJobID())
+				s.Nil(saved)
+				if tc.name == "allocator_failure" {
+					s.Contains(resp.GetStatus().GetReason(), "alloc id failed")
+				}
+				if tc.name == "save_job_failure" {
+					s.Contains(resp.GetStatus().GetReason(), "add import job failed")
+				}
+				return
+			}
+			s.Require().NoError(merr.CheckRPCCall(resp, err))
+			s.Require().NotNil(saved)
+			wantID := body.JobID
+			if wantID == 0 {
+				wantID = 1000
+			}
+			s.Equal(fmt.Sprint(wantID), resp.JobID)
+			s.Equal(wantID, saved.JobID)
+			if tc.name == "unsupported_version" {
+				// The minimal terminal envelope keeps only what querying, GC and a
+				// CDC rollback need: no files, no options, no data timestamp. It is
+				// recorded as V2 so no V3 task is ever derived from it.
+				s.Equal(internalpb.ImportJobState_Failed, saved.State)
+				s.Contains(saved.Reason, "unsupported import task version 99")
+				s.Equal(internalpb.ImportVersion_ImportVersionV2, saved.Version)
+				s.Empty(saved.Files)
+				s.Empty(saved.Options)
+				s.Zero(saved.DataTs)
+				s.NotEqual(uint64(math.MaxUint64), saved.CleanupTs)
+				return
+			}
+			s.Equal(body.CollectionID, saved.CollectionID)
+			s.Equal(body.CollectionName, saved.CollectionName)
+			s.Equal(body.PartitionIDs, saved.PartitionIDs)
+			s.ElementsMatch([]string{"v1", "v2"}, saved.Vchannels)
+			s.ElementsMatch([]string{"v1", "v2"}, saved.ReadyVchannels)
+			s.Equal(uint64(300), saved.DataTs, "the control channel still contributes to the maximum tick")
+			s.False(saved.AutoCommit)
+			s.Equal(tc.name == "provided_job_id", saved.CommitByCoordinator)
+			s.Equal(body.Options, funcutil.KeyValuePair2Map(saved.Options))
+			if body.Schema == nil {
+				s.Nil(saved.Schema)
+			} else {
+				s.Equal(body.DbName, saved.Schema.DbName)
+				s.Equal(body.Schema.Name, saved.Schema.Name)
+			}
+			s.Require().Len(saved.Files, len(body.Files))
+			for i, file := range saved.Files {
+				s.Equal(int64(1001+i), file.Id)
+				s.Equal(body.Files[i].Paths, file.Paths)
+			}
+			switch tc.name {
+			case "l0_disabled":
+				s.Equal(internalpb.ImportJobState_Failed, saved.State)
+				s.Contains(saved.Reason, "l0 import is disabled")
+				s.NotEqual(uint64(math.MaxUint64), saved.CleanupTs)
+			case "native_list_array_backup", "native_list_array_snapshot":
+				// Only binlog-sourced imports reject a native-list target; the
+				// rejection is persisted as a terminal job because ACK callbacks
+				// retry forever.
+				kind := "binlog import (backup restore)"
+				if tc.name == "native_list_array_snapshot" {
+					kind = "snapshot-source import"
+				}
+				s.Equal(internalpb.ImportJobState_Failed, saved.State)
+				s.Contains(saved.Reason, kind+" into a collection with element-nullable or nested Array field s.arr is not supported")
+				s.NotEqual(uint64(math.MaxUint64), saved.CleanupTs)
+			default:
+				s.Equal(internalpb.ImportJobState_Pending, saved.State)
+			}
+		})
 	}
-	server.stateCode.Store(commonpb.StateCode_Healthy)
-
-	mockAllocator := allocator.NewMockAllocator(s.T())
-	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1002), nil)
-	server.allocator = mockAllocator
-
-	// enableL0Import defaults to false. A replicated l0_import message reaching
-	// the ack path must NOT create a runnable job, and must NOT return an error
-	// (ack callbacks retry forever); instead the job is created in Failed state
-	// so replicated CommitImport becomes a terminal no-op.
-	req := &internalpb.ImportRequestInternal{
-		CollectionID:   100,
-		CollectionName: "test_collection",
-		PartitionIDs:   []int64{1},
-		ChannelNames:   []string{"v1"},
-		Schema:         &schemapb.CollectionSchema{Name: "test_collection"},
-		Files: []*internalpb.ImportFile{
-			{Id: 1, Paths: []string{"/test/file.json"}},
-		},
-		Options: []*commonpb.KeyValuePair{
-			{Key: "timeout", Value: "300s"},
-			{Key: "l0_import", Value: "true"},
-		},
-		DataTimestamp: 123456789,
-		JobID:         2000,
-	}
-
-	resp, err := server.createImportJobFromAck(ctx, req, false)
-
-	s.NoError(err)
-	s.NotNil(resp)
-	s.Equal(int32(0), resp.GetStatus().GetCode())
-	s.Equal("2000", resp.GetJobID())
-
-	s.NotNil(savedJob)
-	s.Equal(internalpb.ImportJobState_Failed, savedJob.GetState())
-	s.Contains(savedJob.GetReason(), "l0 import is disabled")
-	// Failed at creation must carry a real cleanup ts so GC can reclaim the job.
-	s.NotEqual(uint64(math.MaxUint64), savedJob.GetCleanupTs())
 }
-
-func (s *ImportServicesSuite) TestCreateImportJobFromAck_L0ImportEnabledCreatesPendingJob() {
-	paramtable.Init()
-	ctx := context.Background()
-
-	params := paramtable.Get()
-	params.Save(params.DataCoordCfg.EnableL0Import.Key, "true")
-	defer params.Reset(params.DataCoordCfg.EnableL0Import.Key)
-
-	mockHandler := NewNMockHandler(s.T())
-	mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
-		ID:            100,
-		VChannelNames: []string{"v1"},
-	}, nil)
-
-	var savedJob *datapb.ImportJob
-	catalog := mocks.NewDataCoordCatalog(s.T())
-	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, job *datapb.ImportJob) error {
-		savedJob = job
-		return nil
-	})
-
-	importMeta, err := NewImportMeta(context.TODO(), catalog, nil, nil)
-	s.NoError(err)
-
-	server := &Server{
-		handler:    mockHandler,
-		importMeta: importMeta,
-	}
-	server.stateCode.Store(commonpb.StateCode_Healthy)
-
-	mockAllocator := allocator.NewMockAllocator(s.T())
-	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1002), nil)
-	server.allocator = mockAllocator
-
-	req := &internalpb.ImportRequestInternal{
-		CollectionID:   100,
-		CollectionName: "test_collection",
-		PartitionIDs:   []int64{1},
-		ChannelNames:   []string{"v1"},
-		Schema:         &schemapb.CollectionSchema{Name: "test_collection"},
-		Files: []*internalpb.ImportFile{
-			{Id: 1, Paths: []string{"/test/file.json"}},
-		},
-		Options: []*commonpb.KeyValuePair{
-			{Key: "timeout", Value: "300s"},
-			{Key: "l0_import", Value: "true"},
-		},
-		DataTimestamp: 123456789,
-		JobID:         2000,
-	}
-
-	resp, err := server.createImportJobFromAck(ctx, req, false)
-
-	s.NoError(err)
-	s.NotNil(resp)
-	s.Equal(int32(0), resp.GetStatus().GetCode())
-
-	s.NotNil(savedJob)
-	s.Equal(internalpb.ImportJobState_Pending, savedJob.GetState())
-}
-
-// Helper types are defined in import_callbacks_test.go (mockBalancerImpl, mockBroadcastAPIImpl, newMockBroadcastAPIImpl)
 
 // The dedup scope carries the collection's ID, so a duplicate resolving to another
 // collection is unreachable through the normal path: dropping db1.c1 and recreating a
@@ -1357,12 +944,12 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_L0ImportEnabledCreatesP
 // the client would poll that jobID and read Completed while the new collection stays
 // empty.
 func (s *ImportServicesSuite) TestImportV2_DuplicateFromAnotherCollectionIsRejected() {
-	importMeta := NewMockImportMeta(s.T())
+	importMeta := bulkimport.NewMockImportMeta(s.T())
 	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(0)
 
 	server, broadcastAPI := s.setupImportV2DuplicateBroadcast(importMeta, 4242, importV2RequestFilePath)
 	// The original broadcast targeted collection 99; the request targets 100.
-	broadcastAPI.broadcastResult = newDuplicatedImportBroadcastResultForCollection(4242, 99, importV2RequestFilePath)
+	broadcastAPI.BroadcastResult = newDuplicatedImportBroadcastResultForCollection(4242, 99, importV2RequestFilePath)
 
 	ctx := newImportV2IdempotentContext("run-1")
 	resp, err := server.ImportV2(ctx, newImportV2IdempotentRequest())
@@ -1384,7 +971,7 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateIsRejectedWhileJobLimitIsRea
 	old := paramtable.Get().DataCoordCfg.MaxImportJobNum.SwapTempValue("1")
 	defer paramtable.Get().DataCoordCfg.MaxImportJobNum.SwapTempValue(old)
 
-	importMeta := NewMockImportMeta(s.T())
+	importMeta := bulkimport.NewMockImportMeta(s.T())
 	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(1)
 
 	server, broadcastAPI := s.setupImportV2DuplicateBroadcast(importMeta, 4242, importV2RequestFilePath)
@@ -1395,7 +982,7 @@ func (s *ImportServicesSuite) TestImportV2_DuplicateIsRejectedWhileJobLimitIsRea
 	s.NoError(err)
 	s.NotEqual(int32(0), resp.GetStatus().GetCode())
 	s.Contains(resp.GetStatus().GetReason(), "number of jobs has reached the limit")
-	s.Nil(broadcastAPI.capturedMsg, "the request must be rejected before it reaches the broadcaster")
+	s.Nil(broadcastAPI.CapturedMsg, "the request must be rejected before it reaches the broadcaster")
 }
 
 // The other half: the limit still applies to a request that actually creates a job.
@@ -1403,12 +990,12 @@ func (s *ImportServicesSuite) TestImportV2_JobLimitStillRejectsANewJob() {
 	old := paramtable.Get().DataCoordCfg.MaxImportJobNum.SwapTempValue("1")
 	defer paramtable.Get().DataCoordCfg.MaxImportJobNum.SwapTempValue(old)
 
-	importMeta := NewMockImportMeta(s.T())
+	importMeta := bulkimport.NewMockImportMeta(s.T())
 	importMeta.EXPECT().CountJobBy(mock.Anything, mock.Anything).Return(1)
 
 	server, broadcastAPI := s.setupImportV2DuplicateBroadcast(importMeta, 4242, importV2RequestFilePath)
 	// This key resolves to nothing, so the broadcast would create a new task.
-	broadcastAPI.broadcastResult = &types.BroadcastAppendResult{BroadcastID: 12345}
+	broadcastAPI.BroadcastResult = &types.BroadcastAppendResult{BroadcastID: 12345}
 
 	ctx := newImportV2IdempotentContext("run-2")
 	resp, err := server.ImportV2(ctx, newImportV2IdempotentRequest())
@@ -1416,4 +1003,90 @@ func (s *ImportServicesSuite) TestImportV2_JobLimitStillRejectsANewJob() {
 	s.NoError(err)
 	s.NotEqual(int32(0), resp.GetStatus().GetCode())
 	s.Contains(resp.GetStatus().GetReason(), "number of jobs has reached the limit")
+}
+
+func (s *ImportServicesSuite) TestImportV2_MessageVersionIsAuthoritative() {
+	paramtable.Init()
+	ctx := context.Background()
+
+	var capturedVersion internalpb.ImportVersion
+	mockBroadcast := mockey.Mock((*ddl.Callbacks).BroadcastImport).To(func(
+		_ *ddl.Callbacks, _ context.Context, _ int64, _ []int64, _ []*internalpb.ImportFile,
+		_ []*commonpb.KeyValuePair, _ int64, _ []string,
+		_ string, version internalpb.ImportVersion,
+	) (int64, bool, error) {
+		capturedVersion = version
+		return 0, false, nil
+	}).Build()
+	defer mockBroadcast.UnPatch()
+
+	server := &Server{importMeta: &bulkimport.Meta{}}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+	server.ddl = newDDLCallbacks(server)
+	mockAllocator := allocator.NewMockAllocator(s.T())
+	mockAllocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1001), nil).Times(5)
+	server.allocator = mockAllocator
+
+	newReq := func(version internalpb.ImportVersion) *internalpb.ImportRequestInternal {
+		return &internalpb.ImportRequestInternal{
+			CollectionID:   100,
+			CollectionName: "test",
+			PartitionIDs:   []int64{1},
+			ChannelNames:   []string{"v1"},
+			Schema:         &schemapb.CollectionSchema{Name: "test"},
+			Files:          []*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
+			Options:        []*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
+			Version:        version,
+		}
+	}
+
+	params := paramtable.Get()
+	defer params.Reset(params.DataCoordCfg.EnableImportV3.Key)
+
+	// Gate off: an unversioned request is normalized to V2, but an explicitly
+	// forwarded V3 message is honored anyway -- the message version is
+	// authoritative, the gate only selects the version of new unversioned
+	// requests at the entrance.
+	params.Save(params.DataCoordCfg.EnableImportV3.Key, "false")
+	resp, err := server.ImportV2(ctx, newReq(internalpb.ImportVersion_ImportVersionUnspecified))
+	s.NoError(err)
+	s.Equal(int32(0), resp.GetStatus().GetCode())
+	s.Equal(internalpb.ImportVersion_ImportVersionV2, capturedVersion)
+
+	resp, err = server.ImportV2(ctx, newReq(internalpb.ImportVersion_ImportVersionV3))
+	s.NoError(err)
+	s.Equal(int32(0), resp.GetStatus().GetCode())
+	s.Equal(internalpb.ImportVersion_ImportVersionV3, capturedVersion)
+
+	// Gate on: an unversioned request is normalized to V3, an explicit V2 message
+	// stays V2.
+	params.Save(params.DataCoordCfg.EnableImportV3.Key, "true")
+	resp, err = server.ImportV2(ctx, newReq(internalpb.ImportVersion_ImportVersionUnspecified))
+	s.NoError(err)
+	s.Equal(int32(0), resp.GetStatus().GetCode())
+	s.Equal(internalpb.ImportVersion_ImportVersionV3, capturedVersion)
+
+	// A snapshot-sourced request stays on V2 even with the gate on: the V3
+	// pipeline has no snapshot source support, so routing one there would import
+	// the snapshot's rows without folding its L0 deletes.
+	snapshotReq := newReq(internalpb.ImportVersion_ImportVersionUnspecified)
+	snapshotReq.Options = append(snapshotReq.Options,
+		&commonpb.KeyValuePair{Key: importutilv2.BackupFlag, Value: "true"},
+		&commonpb.KeyValuePair{Key: importutilv2.SourceType, Value: importutilv2.SourceTypeSnapshot})
+	resp, err = server.ImportV2(ctx, snapshotReq)
+	s.NoError(err)
+	s.Equal(int32(0), resp.GetStatus().GetCode())
+	s.Equal(internalpb.ImportVersion_ImportVersionV2, capturedVersion,
+		"snapshot import must never be routed to Import V3")
+
+	resp, err = server.ImportV2(ctx, newReq(internalpb.ImportVersion_ImportVersionV2))
+	s.NoError(err)
+	s.Equal(int32(0), resp.GetStatus().GetCode())
+	s.Equal(internalpb.ImportVersion_ImportVersionV2, capturedVersion)
+
+	// An unknown explicit version is still rejected before broadcast.
+	params.Save(params.DataCoordCfg.EnableImportV3.Key, "false")
+	resp, err = server.ImportV2(ctx, newReq(99))
+	s.NoError(err)
+	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrServiceInternal))
 }

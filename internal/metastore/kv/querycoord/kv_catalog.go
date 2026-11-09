@@ -12,6 +12,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/metastore/kv/txn"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -50,28 +51,34 @@ func NewCatalog(cli kv.MetaKv) Catalog {
 	}
 }
 
+// SaveCollection writes the collection load info and the given partitions in
+// one transaction when they fit within the store's op limit. Otherwise the
+// collection is written first and the partitions follow in chunks.
 func (s Catalog) SaveCollection(ctx context.Context, collection *querypb.CollectionLoadInfo, partitions ...*querypb.PartitionLoadInfo) error {
-	k := EncodeCollectionLoadInfoKey(collection.GetCollectionID())
 	v, err := proto.Marshal(collection)
 	if err != nil {
 		return err
 	}
-	err = s.cli.Save(ctx, k, string(v))
-	if err != nil {
-		return err
+	b := txn.New()
+	b.Save(EncodeCollectionLoadInfoKey(collection.GetCollectionID()), string(v))
+	for _, partition := range partitions {
+		k, v, err := encodePartitionLoadInfo(partition)
+		if err != nil {
+			return err
+		}
+		b.Save(k, v)
 	}
-	return s.SavePartition(ctx, partitions...)
+	return txn.Commit(ctx, s.cli, b)
 }
 
 func (s Catalog) SavePartition(ctx context.Context, info ...*querypb.PartitionLoadInfo) error {
 	kvs := make(map[string]string)
 	for _, partition := range info {
-		k := EncodePartitionLoadInfoKey(partition.GetCollectionID(), partition.GetPartitionID())
-		v, err := proto.Marshal(partition)
+		k, v, err := encodePartitionLoadInfo(partition)
 		if err != nil {
 			return err
 		}
-		kvs[k] = string(v)
+		kvs[k] = v
 		if len(kvs) >= MetaOpsBatchSize {
 			err := s.cli.MultiSave(ctx, kvs)
 			if err != nil {
@@ -84,6 +91,14 @@ func (s Catalog) SavePartition(ctx context.Context, info ...*querypb.PartitionLo
 		return s.cli.MultiSave(ctx, kvs)
 	}
 	return nil
+}
+
+func encodePartitionLoadInfo(partition *querypb.PartitionLoadInfo) (string, string, error) {
+	v, err := proto.Marshal(partition)
+	if err != nil {
+		return "", "", err
+	}
+	return EncodePartitionLoadInfoKey(partition.GetCollectionID(), partition.GetPartitionID()), string(v), nil
 }
 
 func (s Catalog) SaveReplica(ctx context.Context, replicas ...*querypb.Replica) error {

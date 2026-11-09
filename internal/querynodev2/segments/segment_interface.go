@@ -19,6 +19,8 @@ package segments
 import (
 	"context"
 
+	"github.com/apache/arrow/go/v17/arrow"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	pkoracle "github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
@@ -121,6 +123,12 @@ type Segment interface {
 	// If searchReq.FilterOnly() is true, only executes the filter and returns valid_count (Stage 1 of two-stage search).
 	Search(ctx context.Context, searchReq *segcore.SearchRequest) (*segcore.SearchResult, error)
 	Retrieve(ctx context.Context, plan *segcore.RetrievePlan) (*segcorepb.RetrieveResults, error)
+	// RetrieveArrow is Retrieve with the Arrow transport: it returns the
+	// protobuf header and the user output columns as a separate Arrow record,
+	// which the caller owns and must Release after MaterializeArrowSelection
+	// has read it. Only reached when shouldUseArrowTransport says so; see
+	// retrieve.go.
+	RetrieveArrow(ctx context.Context, plan *segcore.RetrievePlan) (*segcorepb.RetrieveResults, arrow.Record, error)
 	RetrieveByOffsets(ctx context.Context, plan *segcore.RetrievePlanWithOffsets) (*segcorepb.RetrieveResults, error)
 
 	// FlushData flushes data from segment memory directly to storage via C++ milvus-storage.
@@ -184,6 +192,9 @@ type FlushConfig struct {
 	// Must be set to the last version acknowledged by DataCoord (via SaveBinlogPaths).
 	// Use ManifestEarliest for the first flush so retries never append to latest.
 	ReadVersion int64
+	// ReadManifestSize is the byte size of the ReadVersion manifest, or 0 when
+	// unknown; it lets the flush read that manifest without a size request.
+	ReadManifestSize int64
 	// WriterFormat is passed as writer.format. For incremental growing flushes,
 	// it may be resolved from the acknowledged manifest to keep appends
 	// compatible with existing column groups.

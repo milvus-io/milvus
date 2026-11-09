@@ -17,6 +17,7 @@
 package huggingface
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -85,7 +86,7 @@ func TestFeatureExtraction(t *testing.T) {
 
 	c, err := NewClient("mock_key", ts.URL)
 	require.NoError(t, err)
-	resp, err := c.FeatureExtraction("hf-inference", "BAAI/bge-m3", []string{"doc1", "doc2"}, map[string]any{
+	resp, err := c.FeatureExtraction(context.Background(), "hf-inference", "BAAI/bge-m3", []string{"doc1", "doc2"}, map[string]any{
 		"normalize":            normalize,
 		"truncate":             truncate,
 		"truncation_direction": "left",
@@ -122,7 +123,7 @@ func TestSentenceSimilarity(t *testing.T) {
 
 	c, err := NewClient("mock_key", ts.URL)
 	require.NoError(t, err)
-	resp, err := c.SentenceSimilarity("hf-inference", "BAAI/bge-m3", "query", []string{"doc1", "doc2", "doc3"}, 0)
+	resp, err := c.SentenceSimilarity(context.Background(), "hf-inference", "BAAI/bge-m3", "query", []string{"doc1", "doc2", "doc3"}, 0)
 	require.NoError(t, err)
 
 	assert.Equal(t, "/hf-inference/models/BAAI/bge-m3/pipeline/sentence-similarity", gotPath)
@@ -142,6 +143,6 @@ func TestFailedResponse(t *testing.T) {
 
 	c, err := NewClient("mock_key", ts.URL)
 	require.NoError(t, err)
-	_, err = c.SentenceSimilarity("hf-inference", "BAAI/bge-m3", "query", []string{"doc1"}, 0)
+	_, err = c.SentenceSimilarity(context.Background(), "hf-inference", "BAAI/bge-m3", "query", []string{"doc1"}, 0)
 	assert.Error(t, err)
 }

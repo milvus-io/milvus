@@ -358,9 +358,9 @@ func TestGrowingSourceFlushResumesLegacyLocalManifest(t *testing.T) {
 	statPath := path.Join(legacyBase, "_stats/bloom_filter.100/1")
 	require.NoError(t, packed.WriteFile(storageConfig, statPath, []byte("original stats")))
 	manifest := packed.MarshalManifestPath(legacyBase, packed.ManifestEarliest)
-	for version := int64(0); version < 7; version++ {
+	for i := 0; i < 7; i++ {
 		var err error
-		manifest, err = packed.CommitManifestUpdates(legacyBase, version, storageConfig, &packed.ManifestUpdates{
+		manifest, err = packed.CommitManifestUpdates(manifest, storageConfig, &packed.ManifestUpdates{
 			Stats: []packed.StatEntry{{Key: "bloom_filter.100", Files: []string{statPath}}},
 		})
 		require.NoError(t, err)
@@ -386,7 +386,7 @@ func TestGrowingSourceFlushResumesLegacyLocalManifest(t *testing.T) {
 	require.Equal(t, []string{statPath}, stats["bloom_filter.100"].Paths)
 	newStatPath := path.Join(config.SegmentBasePath, "_stats/bm25.102/2")
 	require.NoError(t, packed.WriteFile(storageConfig, newStatPath, []byte("new stats")))
-	updatedManifest, err := packed.CommitManifestUpdates(config.SegmentBasePath, config.ReadVersion, storageConfig, &packed.ManifestUpdates{
+	updatedManifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(config.SegmentBasePath, config.ReadVersion), storageConfig, &packed.ManifestUpdates{
 		Stats: []packed.StatEntry{{Key: "bm25.102", Files: []string{newStatPath}}},
 	})
 	require.NoError(t, err)

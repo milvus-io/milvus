@@ -137,11 +137,14 @@ func (provider *VoyageAIEmbeddingProvider) CallEmbedding(ctx context.Context, te
 
 	embRet := models.NewEmbdResult(numRows, provider.embdType)
 	for i := 0; i < numRows; i += provider.maxBatch {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		end := i + provider.maxBatch
 		if end > numRows {
 			end = numRows
 		}
-		r, err := provider.client.Embedding(provider.url, provider.modelName, texts[i:end], int(provider.embedDimParam), textType, provider.outputType, provider.truncate, provider.timeoutMs)
+		r, err := provider.client.Embedding(ctx, provider.url, provider.modelName, texts[i:end], int(provider.embedDimParam), textType, provider.outputType, provider.truncate, provider.timeoutMs)
 		if err != nil {
 			return nil, err
 		}

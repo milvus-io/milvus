@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"testing"
@@ -33,6 +35,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -50,19 +53,25 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
+	querynodehandler "github.com/milvus-io/milvus/internal/querynodev2/client/handler"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/internal/util/testutil"
+	"github.com/milvus-io/milvus/internal/views/queryclient"
+	"github.com/milvus-io/milvus/internal/views/queryclient/resolver"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -87,6 +96,12 @@ const (
 	attempts      = 1000000
 	sleepDuration = time.Millisecond * 200
 )
+
+type fileResourceSyncListenerFunc func(fileresource.SyncEvent) error
+
+func (f fileResourceSyncListenerFunc) OnFileResourceSync(event fileresource.SyncEvent) error {
+	return f(event)
+}
 
 const (
 	// Collection and partition naming
@@ -916,6 +931,10 @@ func TestProxy(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
 	testutil.ResetEnvironment()
+	// QueryView sealed resources require committed StorageV3 manifests.
+	previousLoonFFI := params.CommonCfg.UseLoonFFI.GetValue()
+	require.NoError(t, params.Save(params.CommonCfg.UseLoonFFI.Key, "true"))
+	t.Cleanup(func() { _ = params.Save(params.CommonCfg.UseLoonFFI.Key, previousLoonFFI) })
 	paramtable.SetLocalComponentEnabled(typeutil.StreamingNodeRole)
 	streamingutil.SetStreamingServiceEnabled()
 	defer streamingutil.UnsetStreamingServiceEnabled()
@@ -947,6 +966,10 @@ func TestProxy(t *testing.T) {
 
 	mlog.Info(context.TODO(), "Initialize parameter table of Proxy")
 
+	// Background quota RPCs may arrive as soon as a worker registers.
+	// Install its WAL accessor before starting any server.
+	streaming.Init()
+
 	mix := runMixCoord(ctx, localMsg)
 	mlog.Info(context.TODO(), "running MixCoord ...")
 
@@ -960,8 +983,6 @@ func TestProxy(t *testing.T) {
 	mlog.Info(context.TODO(), "running QueryNode ...")
 
 	time.Sleep(10 * time.Millisecond)
-
-	streaming.Init()
 
 	proxy, err := NewProxy(ctx, factory)
 	assert.NoError(t, err)
@@ -1012,6 +1033,15 @@ func TestProxy(t *testing.T) {
 	err = proxy.Init()
 	assert.NoError(t, err)
 
+	// This test constructs the Proxy component directly, bypassing the gRPC
+	// server bootstrap which normally installs the QueryView client.
+	viewSN := streaming.WAL().QueryViewClient()
+	viewQN := querynodehandler.NewClient(etcdcli)
+	viewResolver := resolver.NewShardResolverImpl(proxy)
+	proxy.SetViewQueryClient(queryclient.NewLegacyViewQueryClient(
+		queryclient.ViewQueryClientConfig{LoadInfoClient: rootCoordClient}, viewSN,
+		queryclient.NewCompositeViewQueryServiceClient(viewSN, viewQN.QueryViewClient()), viewResolver))
+
 	err = proxy.Start()
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.StateCode_Healthy, proxy.GetStateCode())
@@ -1021,6 +1051,9 @@ func TestProxy(t *testing.T) {
 	assert.NoError(t, err)
 	mlog.Info(context.TODO(), "Register proxy done")
 	defer func() {
+		proxy.ViewQueryClient().Close()
+		viewResolver.Close()
+		viewQN.Close()
 		a := []any{mix, qn, dn, sn, proxy}
 		fmt.Println(len(a))
 		// HINT: the order of stopping service refers to the `roles.go` file
@@ -4534,6 +4567,73 @@ func TestProxy_SyncFileResource(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NoError(t, merr.Error(status))
 	})
+
+	t.Run("sync mode downloads and notifies", func(t *testing.T) {
+		paramtable.Init()
+		params := paramtable.Get()
+		localStoragePath := t.TempDir()
+		require.NoError(t, params.Save(params.LocalStorageCfg.Path.Key, localStoragePath))
+		t.Cleanup(func() {
+			require.NoError(t, params.Reset(params.LocalStorageCfg.Path.Key))
+		})
+
+		sourcePath := t.TempDir()
+		remotePath := filepath.Join(sourcePath, "remote", "test.whl")
+		wheelContent := []byte("trusted wheel content")
+		downloader := storage.NewLocalChunkManager(objectstorage.RootPath(sourcePath))
+		require.NoError(t, downloader.Write(context.Background(), remotePath, wheelContent))
+
+		manager := fileresource.NewManager(downloader, fileresource.SyncMode)
+		fileresource.GlobalFileManager = manager
+		t.Cleanup(manager.Close)
+
+		events := make(chan fileresource.SyncEvent, 1)
+		listenerName := "proxy-sync-file-resource-test"
+		fileresource.RegisterListener(listenerName, fileResourceSyncListenerFunc(func(event fileresource.SyncEvent) error {
+			events <- event
+			return nil
+		}))
+		t.Cleanup(func() {
+			fileresource.UnregisterListener(listenerName)
+		})
+		t.Cleanup(func() {
+			require.NoError(t, manager.Sync(context.Background(), 2, nil))
+		})
+
+		proxy := &Proxy{}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+		status, err := proxy.SyncFileResource(context.Background(), &internalpb.SyncFileResourceRequest{
+			Version: 1,
+			Resources: []*internalpb.FileResourceInfo{
+				{
+					Id:   10,
+					Name: "test.whl",
+					Path: remotePath,
+				},
+			},
+		})
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(status))
+		require.Equal(t, fileresource.SyncMode, manager.Mode())
+		require.Equal(t, uint64(1), manager.GetVersion())
+
+		select {
+		case event := <-events:
+			require.Equal(t, uint64(1), event.Version)
+			require.Len(t, event.Resources, 1)
+			resource := event.Resources[0]
+			require.Equal(t, int64(10), resource.ID)
+			require.Equal(t, "test.whl", resource.Name)
+			require.Equal(t, remotePath, resource.Path)
+			require.NotEmpty(t, resource.LocalPath)
+			require.Contains(t, resource.LocalPath, localStoragePath)
+			content, err := os.ReadFile(resource.LocalPath)
+			require.NoError(t, err)
+			require.Equal(t, wheelContent, content)
+		default:
+			t.Fatal("file resource listener was not notified")
+		}
+	})
 }
 
 func TestProxy_GetComponentStates(t *testing.T) {
@@ -4550,6 +4650,7 @@ func TestProxy_GetComponentStates(t *testing.T) {
 }
 
 func TestProxy_Import(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	streaming.SetupNoopWALForTest()
 
 	t.Run("Import failed", func(t *testing.T) {

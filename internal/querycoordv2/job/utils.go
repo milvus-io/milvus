@@ -117,7 +117,7 @@ func WaitCurrentTargetUpdated(ctx context.Context, targetObserver *observers.Tar
 
 func WaitUpdatePartition(ctx context.Context, targetObserver *observers.TargetObserver, collection int64, partition int64) error {
 	// manual trigger update next target
-	ready, err := targetObserver.UpdatePartition(collection, partition)
+	ready, err := targetObserver.UpdatePartition(ctx, collection, partition)
 	if err != nil {
 		return merr.Wrapf(err, "failed to update next target, collection=%d", collection)
 	}

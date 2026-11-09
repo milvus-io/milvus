@@ -603,12 +603,9 @@ func validateColumnBasedNullableVectorFieldData(field *schemapb.FieldSchema, src
 func validateColumnBasedInsertMsgNullableVectors(schema *schemapb.CollectionSchema, msg *msgstream.InsertMsg) error {
 	srcFields := make(map[int64]*schemapb.FieldData, len(msg.GetFieldsData()))
 	for _, fieldData := range msg.GetFieldsData() {
-		if !typeutil.ValidateAndNormalizeFieldDataValidData(fieldData) {
-			return merr.WrapErrParameterInvalidMsg(
-				"field %s has different legacy and field-specific valid_data",
-				fieldData.GetFieldName(),
-			)
-		}
+		// A WAL insert message may come from an older proxy that rewrote only the
+		// legacy validity, so reconcile instead of rejecting a conflict.
+		typeutil.NormalizeFieldDataValidData(fieldData)
 		srcFields[fieldData.GetFieldId()] = fieldData
 	}
 
@@ -631,12 +628,9 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			// unreachable
 			panic("struct is not flattened")
 		}
-		if !typeutil.ValidateAndNormalizeFieldDataValidData(field) {
-			return nil, merr.WrapErrParameterInvalidMsg(
-				"field %s has different legacy and field-specific valid_data",
-				field.GetFieldName(),
-			)
-		}
+		// A WAL insert message may come from an older proxy that rewrote only the
+		// legacy validity, so reconcile instead of rejecting a conflict.
+		typeutil.NormalizeFieldDataValidData(field)
 		srcFields[field.FieldId] = field
 	}
 
@@ -1013,6 +1007,7 @@ func mergeBoolField(data *InsertData, fid FieldID, field *BoolFieldData) {
 		fieldData := &BoolFieldData{
 			Data:      nil,
 			ValidData: nil,
+			Nullable:  field.Nullable,
 		}
 		data.Data[fid] = fieldData
 	}
@@ -1026,6 +1021,7 @@ func mergeInt8Field(data *InsertData, fid FieldID, field *Int8FieldData) {
 		fieldData := &Int8FieldData{
 			Data:      nil,
 			ValidData: nil,
+			Nullable:  field.Nullable,
 		}
 		data.Data[fid] = fieldData
 	}
@@ -1039,6 +1035,7 @@ func mergeInt16Field(data *InsertData, fid FieldID, field *Int16FieldData) {
 		fieldData := &Int16FieldData{
 			Data:      nil,
 			ValidData: nil,
+			Nullable:  field.Nullable,
 		}
 		data.Data[fid] = fieldData
 	}
@@ -1052,6 +1049,7 @@ func mergeInt32Field(data *InsertData, fid FieldID, field *Int32FieldData) {
 		fieldData := &Int32FieldData{
 			Data:      nil,
 			ValidData: nil,
+			Nullable:  field.Nullable,
 		}
 		data.Data[fid] = fieldData
 	}
@@ -1065,6 +1063,7 @@ func mergeInt64Field(data *InsertData, fid FieldID, field *Int64FieldData) {
 		fieldData := &Int64FieldData{
 			Data:      nil,
 			ValidData: nil,
+			Nullable:  field.Nullable,
 		}
 		data.Data[fid] = fieldData
 	}
@@ -1078,6 +1077,7 @@ func mergeFloatField(data *InsertData, fid FieldID, field *FloatFieldData) {
 		fieldData := &FloatFieldData{
 			Data:      nil,
 			ValidData: nil,
+			Nullable:  field.Nullable,
 		}
 		data.Data[fid] = fieldData
 	}
@@ -1091,6 +1091,7 @@ func mergeDoubleField(data *InsertData, fid FieldID, field *DoubleFieldData) {
 		fieldData := &DoubleFieldData{
 			Data:      nil,
 			ValidData: nil,
+			Nullable:  field.Nullable,
 		}
 		data.Data[fid] = fieldData
 	}
@@ -1104,6 +1105,7 @@ func mergeTimestamptzField(data *InsertData, fid FieldID, field *TimestamptzFiel
 		fieldData := &TimestamptzFieldData{
 			Data:      nil,
 			ValidData: nil,
+			Nullable:  field.Nullable,
 		}
 		data.Data[fid] = fieldData
 	}
@@ -1116,7 +1118,9 @@ func mergeStringField(data *InsertData, fid FieldID, field *StringFieldData) {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &StringFieldData{
 			Data:      nil,
+			DataType:  field.DataType,
 			ValidData: nil,
+			Nullable:  field.Nullable,
 		}
 		data.Data[fid] = fieldData
 	}
@@ -1177,10 +1181,22 @@ func mergeJSONField(data *InsertData, fid FieldID, field *JSONFieldData) {
 		fieldData := &JSONFieldData{
 			Data:      nil,
 			ValidData: nil,
+			Nullable:  field.Nullable,
 		}
 		data.Data[fid] = fieldData
 	}
 	fieldData := data.Data[fid].(*JSONFieldData)
+	fieldData.Data = append(fieldData.Data, field.Data...)
+	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
+}
+
+func mergeGeometryField(data *InsertData, fid FieldID, field *GeometryFieldData) {
+	if _, ok := data.Data[fid]; !ok {
+		data.Data[fid] = &GeometryFieldData{
+			Nullable: field.Nullable,
+		}
+	}
+	fieldData := data.Data[fid].(*GeometryFieldData)
 	fieldData.Data = append(fieldData.Data, field.Data...)
 	fieldData.ValidData = append(fieldData.ValidData, field.ValidData...)
 }
@@ -1334,6 +1350,8 @@ func MergeFieldData(data *InsertData, fid FieldID, field FieldData) error {
 		return mergeArrayField(data, fid, field)
 	case *JSONFieldData:
 		mergeJSONField(data, fid, field)
+	case *GeometryFieldData:
+		mergeGeometryField(data, fid, field)
 	case *BinaryVectorFieldData:
 		mergeBinaryVectorField(data, fid, field)
 	case *FloatVectorFieldData:
@@ -1903,6 +1921,16 @@ func GetDefaultValue(fieldSchema *schemapb.FieldSchema) interface{} {
 // fillMissingFields fills default values or null values for missing fields in insertData
 func fillMissingFields(schema *schemapb.CollectionSchema, insertData *InsertData) error {
 	batchRows := int64(insertData.GetRowNum())
+	present := make(map[FieldID]struct{}, len(insertData.Data))
+	for id := range insertData.Data {
+		present[id] = struct{}{}
+	}
+	structByChild := make(map[FieldID]*schemapb.StructArrayFieldSchema)
+	for _, st := range schema.GetStructArrayFields() {
+		for _, child := range st.GetFields() {
+			structByChild[child.GetFieldID()] = st
+		}
+	}
 
 	allFields := typeutil.GetAllFieldSchemas(schema)
 	for _, field := range allFields {
@@ -1914,6 +1942,20 @@ func fillMissingFields(schema *schemapb.CollectionSchema, insertData *InsertData
 		_, exists := insertData.Data[field.GetFieldID()]
 
 		if !exists {
+			if st := structByChild[field.GetFieldID()]; st != nil && field.GetElementNullable() {
+				sibling := pickStructSibling(st, func(id int64) bool {
+					_, ok := present[id]
+					return ok
+				})
+				if sibling != nil {
+					fieldData, err := fillMissingStructChild(field, insertData.Data[sibling.GetFieldID()], sibling, int(batchRows))
+					if err != nil {
+						return err
+					}
+					insertData.Data[field.GetFieldID()] = fieldData
+					continue
+				}
+			}
 			// Create default field data if not found
 			fieldData, err := NewFieldData(field.DataType, field, int(batchRows))
 			if err != nil {
@@ -1941,6 +1983,112 @@ func fillMissingFields(schema *schemapb.CollectionSchema, insertData *InsertData
 		}
 	}
 	return nil
+}
+
+func fillMissingStructChild(field *schemapb.FieldSchema, sibling FieldData, siblingSchema *schemapb.FieldSchema, numRows int) (FieldData, error) {
+	if sibling.RowNum() != numRows {
+		return nil, merr.WrapErrDataIntegrityMsg("struct sibling %s has %d rows, expected %d", siblingSchema.GetName(), sibling.RowNum(), numRows)
+	}
+	if sibling.GetNullable() && len(sibling.GetValidData()) != numRows {
+		return nil, merr.WrapErrDataIntegrityMsg("struct sibling %s has %d validity entries, expected %d", siblingSchema.GetName(), len(sibling.GetValidData()), numRows)
+	}
+	filled, err := NewFieldData(field.GetDataType(), field, numRows)
+	if err != nil {
+		return nil, err
+	}
+	for i := 0; i < numRows; i++ {
+		value := sibling.GetRow(i)
+		if value == nil {
+			if !sibling.GetNullable() || sibling.GetValidData()[i] {
+				return nil, merr.WrapErrDataIntegrityMsg("struct sibling %s row %d is missing despite valid row", siblingSchema.GetName(), i)
+			}
+			if !field.GetNullable() {
+				return nil, merr.WrapErrDataIntegrityMsg("non-nullable struct sub-field %s has null sibling row %d", field.GetName(), i)
+			}
+			if err := filled.AppendRow(nil); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		var n int
+		switch row := value.(type) {
+		case *schemapb.ScalarField:
+			if typeutil.IsNestedArrayTypeSchema(siblingSchema.GetTypeSchema()) && row.GetArrayData() == nil {
+				return nil, merr.WrapErrDataIntegrityMsg("nested struct sibling %s row %d has no ArrayData", siblingSchema.GetName(), i)
+			}
+			if siblingSchema.GetElementNullable() {
+				n = len(typeutil.GetArrayElementValidData(row))
+			} else if typeutil.IsNestedArrayTypeSchema(siblingSchema.GetTypeSchema()) {
+				n = len(row.GetArrayData().GetData())
+			} else {
+				n, err = nativeArrayLength(row, siblingSchema.GetElementType())
+				if err != nil {
+					return nil, err
+				}
+			}
+		case *schemapb.VectorField:
+			if siblingSchema.GetElementNullable() {
+				n = len(typeutil.GetVectorArrayElementValidData(row))
+			} else {
+				width, widthErr := getArrayOfVectorElementByteWidth(siblingSchema.GetElementType(), int(row.GetDim()))
+				if widthErr != nil {
+					return nil, widthErr
+				}
+				var payloadLength int
+				switch siblingSchema.GetElementType() {
+				case schemapb.DataType_FloatVector:
+					payloadLength = len(row.GetFloatVector().GetData()) * 4
+				case schemapb.DataType_BinaryVector:
+					payloadLength = len(row.GetBinaryVector())
+				case schemapb.DataType_Float16Vector:
+					payloadLength = len(row.GetFloat16Vector())
+				case schemapb.DataType_BFloat16Vector:
+					payloadLength = len(row.GetBfloat16Vector())
+				case schemapb.DataType_Int8Vector:
+					payloadLength = len(row.GetInt8Vector())
+				default:
+					return nil, merr.WrapErrDataIntegrityMsg("unsupported vector struct sibling type %s", siblingSchema.GetElementType())
+				}
+				n, err = validateVectorArrayElementCount(payloadLength, width)
+				if err != nil {
+					return nil, err
+				}
+			}
+		default:
+			return nil, merr.WrapErrDataIntegrityMsg("unsupported struct sibling row type %T", value)
+		}
+		if field.GetDataType() == schemapb.DataType_ArrayOfVector {
+			dim, dimErr := typeutil.GetDim(field)
+			if dimErr != nil {
+				return nil, dimErr
+			}
+			row, rowErr := typeutil.NewEmptyArrayOfVectorRow(dim, field.GetElementType())
+			if rowErr != nil {
+				return nil, rowErr
+			}
+			typeutil.SetVectorArrayElementValidData(row, make([]bool, n))
+			err = filled.AppendRow(row)
+		} else {
+			leaf, _, nested, leafErr := nativeArrayLeaf(field)
+			if leafErr != nil {
+				return nil, leafErr
+			}
+			row := emptyNativeScalar(leaf)
+			if nested {
+				children := make([]*schemapb.ScalarField, n)
+				for j := range children {
+					children[j] = emptyNativeScalar(leaf)
+				}
+				row = &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{ElementType: leaf, Data: children}}}
+			}
+			typeutil.SetArrayElementValidData(row, make([]bool, n))
+			err = filled.AppendRow(row)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	return filled, nil
 }
 
 // sort by field binlogs key

@@ -72,6 +72,7 @@ type MinHashFunctionRunner struct {
 func NewMinHashFunctionRunner(
 	collSchema *schemapb.CollectionSchema,
 	funSchema *schemapb.FunctionSchema,
+	extraInfo ...string,
 ) (FunctionRunner, error) {
 	if len(funSchema.GetOutputFieldIds()) != 1 {
 		return nil, merr.WrapErrParameterInvalidMsg("minhash function should only have one output field, but now %d", len(funSchema.GetOutputFieldIds()))
@@ -97,7 +98,7 @@ func NewMinHashFunctionRunner(
 	}
 
 	params := getAnalyzerParams(inputField)
-	tokenizer, err := analyzer.NewAnalyzer(params, "")
+	tokenizer, err := analyzer.NewAnalyzer(params, analyzerExtraInfo(extraInfo))
 	if err != nil {
 		return nil, err
 	}

@@ -31,8 +31,8 @@
 
 #include "bitset/bitset.h"
 #include "bitset/detail/element_wise.h"
-#include "index/IndexStructure.h"
-#include "index/SortedMembership.h"
+#include "index/scalar/sort/IndexStructure.h"
+#include "index/scalar/sort/SortedMembership.h"
 
 namespace {
 

@@ -38,7 +38,7 @@ import (
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
-func (s *BulkInsertSuite) TestImportWithPartitionKey() {
+func (s *importTestBase) runImportWithPartitionKey() {
 	const (
 		rowCount = 100
 	)
@@ -208,7 +208,17 @@ func (s *BulkInsertSuite) TestImportWithPartitionKey() {
 	}
 }
 
+// The V2 suite keeps its original entry points; the bodies live on importTestBase
+// so the V3 suite can reuse them unchanged.
+func (s *BulkInsertSuite) TestImportWithPartitionKey() {
+	s.runImportWithPartitionKey()
+}
+
 func (s *BulkInsertSuite) TestImportWithAFewRows() {
+	s.runImportWithAFewRows()
+}
+
+func (s *importTestBase) runImportWithAFewRows() {
 	const (
 		rowCount = 10
 	)

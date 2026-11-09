@@ -92,18 +92,12 @@ func (c *IndexChecker) Check(ctx context.Context) []task.Task {
 		}
 
 		collection := c.meta.GetCollection(ctx, collectionID)
-		schema := c.meta.GetCollectionSchema(ctx, collectionID)
 		if collection == nil {
 			mlog.Warn(ctx, "collection released during check index", mlog.Int64("collection", collectionID))
 			continue
 		}
-		if schema == nil && paramtable.Get().CommonCfg.EnabledJSONKeyStats.GetAsBool() {
-			collectionSchema, err1 := c.broker.DescribeCollection(ctx, collectionID)
-			if err1 == nil {
-				schema = collectionSchema.GetSchema()
-				c.meta.PutCollectionSchema(ctx, collectionID, collectionSchema.GetSchema())
-			}
-		}
+		// A nil schema means RootCoord no longer has the collection.
+		schema := c.meta.GetCollectionSchema(ctx, collectionID)
 		replicas := c.meta.GetByCollection(ctx, collectionID)
 		for _, replica := range replicas {
 			tasks = append(tasks, c.checkReplica(ctx, collection, replica, indexInfos, schema)...)

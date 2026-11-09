@@ -10,6 +10,8 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
 GO		  ?= go
+PYTHON	  ?= python3
+RUFF	  ?= ruff
 PWD 	  := $(shell pwd)
 GOPATH	:= $(shell $(GO) env GOPATH)
 SHELL 	:= /bin/bash
@@ -53,6 +55,38 @@ ifeq ($(USE_ASAN), ON)
 	MILVUS_GO_BUILD_TAGS := $(MILVUS_GO_BUILD_TAGS),use_asan
 endif
 
+USE_TSAN ?= OFF
+export USE_TSAN
+# Preserve Go's default C++ flags when the caller did not provide an override.
+CGO_CXXFLAGS ?= $(shell $(GO) env CGO_CXXFLAGS)
+ifneq ($(USE_TSAN),ON)
+ifneq ($(USE_TSAN),OFF)
+$(error USE_TSAN must be ON or OFF)
+endif
+endif
+use_tsan = $(USE_TSAN)
+TSAN_GO_LDFLAGS :=
+ifeq ($(USE_TSAN), ON)
+ifneq ($(OS),Linux)
+$(error USE_TSAN currently requires Linux)
+endif
+ifeq ($(USE_ASAN), ON)
+$(error USE_ASAN and USE_TSAN are mutually exclusive)
+endif
+ifneq ($(filter -race -race=true,$(GOFLAGS) $(shell $(GO) env GOFLAGS)),)
+$(error USE_TSAN cannot be combined with Go -race)
+endif
+	override CGO_CFLAGS += -fsanitize=thread -g -fno-omit-frame-pointer
+	override CGO_CXXFLAGS += -fsanitize=thread -g -fno-omit-frame-pointer
+	override CGO_LDFLAGS += -fsanitize=thread -shared-libsan
+	MILVUS_LLVM_ROOT ?= /usr/lib/llvm-20
+	override CC := $(MILVUS_LLVM_ROOT)/bin/clang
+	override CXX := $(MILVUS_LLVM_ROOT)/bin/clang++
+	export CC CXX MILVUS_LLVM_ROOT
+	MILVUS_GO_BUILD_TAGS := dynamic,sonic,$(SONIC_PLUGIN_SYNC_TAG)
+	TSAN_GO_LDFLAGS := -linkmode=external
+endif
+
 use_dynamic_simd = ON
 ifdef USE_DYNAMIC_SIMD
 	use_dynamic_simd = ${USE_DYNAMIC_SIMD}
@@ -61,6 +95,13 @@ endif
 tantivy_features = ""
 ifdef TANTIVY_FEATURES
 	tantivy_features = ${TANTIVY_FEATURES}
+endif
+
+# FIPS: set TANTIVY_ANALYZER_REMOTE_TLS=OFF to compile rustls/ring
+# out of tantivy-binding (Lindera HTTPS fetch + gRPC tokenizer TLS).
+tantivy_analyzer_remote_tls = ON
+ifdef TANTIVY_ANALYZER_REMOTE_TLS
+	tantivy_analyzer_remote_tls = ${TANTIVY_ANALYZER_REMOTE_TLS}
 endif
 
 
@@ -88,7 +129,7 @@ MOCKERY_VERSION := 2.53.3
 MOCKERY_OUTPUT := $(shell $(INSTALL_PATH)/mockery --version 2>/dev/null)
 INSTALL_MOCKERY := $(findstring $(MOCKERY_VERSION),$(MOCKERY_OUTPUT))
 # gci
-GCI_VERSION := 0.13.4
+GCI_VERSION := 0.13.7
 GCI_OUTPUT := $(shell $(INSTALL_PATH)/gci --version 2>/dev/null)
 INSTALL_GCI := $(findstring $(GCI_VERSION),$(GCI_OUTPUT))
 # gofumpt
@@ -109,6 +150,21 @@ PROTOC_GEN_GO_GRPC_OUTPUT := $(shell echo | $(INSTALL_PATH)/protoc-gen-go-grpc  
 INSTALL_PROTOC_GEN_GO_GRPC := $(findstring $(PROTOC_GEN_GO_GRPC_VERSION),$(PROTOC_GEN_GO_GRPC_OUTPUT))
 
 index_engine = knowhere
+ifeq ($(index_engine),cardinal)
+    WITH_GPU ?= ON
+else
+    WITH_GPU ?= OFF
+endif
+unexport WITH_GPU
+
+ifneq ($(filter ON on TRUE True true 1,$(WITH_GPU)),)
+    ifeq ($(USE_TSAN),ON)
+        $(error USE_TSAN does not support GPU builds)
+    endif
+    ifneq ($(index_engine),cardinal)
+        MILVUS_GO_BUILD_TAGS := $(MILVUS_GO_BUILD_TAGS),cuda
+    endif
+endif
 
 # Ensure git works inside containers where .git is owned by a different user.
 # Must use git config --global because git's ownership check runs before
@@ -122,21 +178,14 @@ ifeq (${ENABLE_AZURE}, false)
 	AZURE_OPTION := -Z
 endif
 
-milvus: build-cpp print-build-info build-go
+milvus: build-cpp print-build-info build-go build-pyudf-runtime-wheel
 
 build-go:
 	@echo "Building Milvus ..."
 	@source $(PWD)/scripts/setenv.sh && \
 		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
-		$(GOEXPERIMENT_FLAG) CGO_LDFLAGS="$(CGO_LDFLAGS)" CGO_CFLAGS="$(CGO_CFLAGS)" GO111MODULE=on $(GO) build -pgo=$(PGO_PATH)/default.pgo -ldflags="$(SONIC_PLUGIN_SYNC_LDFLAG) -r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)' -X '$(OBJPREFIX).MilvusVersion=$(MILVUS_VERSION)'" \
+		$(GOEXPERIMENT_FLAG) CGO_LDFLAGS="$(CGO_LDFLAGS)" CGO_CFLAGS="$(CGO_CFLAGS)" CGO_CXXFLAGS="$(CGO_CXXFLAGS)" GO111MODULE=on $(GO) build -pgo=$(PGO_PATH)/default.pgo -ldflags="$(TSAN_GO_LDFLAGS) $(SONIC_PLUGIN_SYNC_LDFLAG) -r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)' -X '$(OBJPREFIX).MilvusVersion=$(MILVUS_VERSION)'" \
 		-tags "$(MILVUS_GO_BUILD_TAGS)" -o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
-
-milvus-gpu: build-cpp-gpu print-gpu-build-info
-	@echo "Building Milvus-gpu ..."
-	@source $(PWD)/scripts/setenv.sh && \
-		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
-		CGO_LDFLAGS="$(CGO_LDFLAGS)" CGO_CFLAGS="$(CGO_CFLAGS)" GO111MODULE=on $(GO) build -pgo=$(PGO_PATH)/default.pgo -ldflags="$(SONIC_PLUGIN_SYNC_LDFLAG) -r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS_GPU)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)' -X '$(OBJPREFIX).MilvusVersion=$(MILVUS_VERSION)'" \
-		-tags "$(MILVUS_GO_BUILD_TAGS),cuda" -o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
 
 get-build-deps:
 	@(env bash $(PWD)/scripts/install_deps.sh)
@@ -266,26 +315,36 @@ meta-migration:
 INTERATION_PATH = $(PWD)/tests/integration
 CMEK_FIXTURE_PATH = $(INSTALL_PATH)/cmek-fixtures
 
-.PHONY: build-cmek-fixtures integration-test integration-test-base integration-test-cmek
+.PHONY: build-cmek-fixtures build-failpoint-fixture integration-test integration-test-base integration-test-cmek integration-test-failpoint
 .NOTPARALLEL: integration-test
+
+FAILPOINT_FIXTURE_PATH ?= $(PWD)/cmake_build/failpoint-fixture
+
+build-failpoint-fixture:
+	@bash $(PWD)/scripts/build_failpoint_fixture.sh "$(FAILPOINT_FIXTURE_PATH)"
+
+integration-test-failpoint: getdeps build-failpoint-fixture
+	@env MILVUS_FAILPOINT_WORK_DIR="$(FAILPOINT_FIXTURE_PATH)" MILVUS_INTEGRATION_COVERAGE_APPEND="$(MILVUS_INTEGRATION_COVERAGE_APPEND)" bash $(PWD)/scripts/run_intergration_test.sh --package ./idempotency "$(INSTALL_PATH)/gotestsum --"
 
 build-cmek-fixtures:
 	@echo "Building CMEK fixture plugins ..."
 	@(env GO="$(GO)" bash $(PWD)/scripts/build_cmek_fixtures.sh "$(CMEK_FIXTURE_PATH)")
 
 integration-test: MILVUS_INTEGRATION_COVERAGE_APPEND = true
-integration-test: integration-test-base integration-test-cmek
+integration-test: integration-test-base integration-test-cmek integration-test-failpoint
 
 integration-test-base: getdeps
-	@echo "Running integration tests excluding CMEK ..."
-	@(bash $(PWD)/scripts/run_intergration_test.sh --exclude-package ./cmek "$(INSTALL_PATH)/gotestsum --")
+	@echo "Running integration tests excluding CMEK and failpoint fixtures ..."
+	@(bash $(PWD)/scripts/run_intergration_test.sh --exclude-package ./cmek --exclude-package ./idempotency "$(INSTALL_PATH)/gotestsum --")
 
 integration-test-cmek: getdeps build-cmek-fixtures
-	@echo "Running CMEK scalar-index integration tests ..."
+	@echo "Running CMEK integration tests ..."
 	@(env MILVUS_CMEK_FIXTURE_DIR="$(CMEK_FIXTURE_PATH)" MILVUS_INTEGRATION_COVERAGE_APPEND="$(MILVUS_INTEGRATION_COVERAGE_APPEND)" bash $(PWD)/scripts/run_intergration_test.sh --package ./cmek "$(INSTALL_PATH)/gotestsum --")
 
 BUILD_TAGS = $(shell git describe --tags --always --dirty="-dev")
-BUILD_TAGS_GPU = ${BUILD_TAGS}-gpu
+ifneq ($(filter ON on TRUE True true 1,$(WITH_GPU)),)
+    BUILD_TAGS := $(BUILD_TAGS)-gpu
+endif
 BUILD_TIME = $(shell date -u)
 GIT_COMMIT = $(shell git rev-parse --short HEAD)
 GO_VERSION = $(shell go version)
@@ -293,13 +352,9 @@ BUILD_DATE = $(shell date -u +%Y%m%d)
 MILVUS_VERSION := $(shell tag=$$(git describe --exact-match --tags --match 'v*' 2>/dev/null) && echo "$$tag" | sed 's/^v//' || echo "$(GIT_BRANCH_SAFE)-$(BUILD_DATE)-$(GIT_COMMIT)")
 
 print-build-info:
+	@echo "Index Engine: $(index_engine)"
+	@echo "WITH_GPU: $(WITH_GPU)"
 	@echo "Build Tag: $(BUILD_TAGS)"
-	@echo "Build Time: $(BUILD_TIME)"
-	@echo "Git Commit: $(GIT_COMMIT)"
-	@echo "Go Version: $(GO_VERSION)"
-
-print-gpu-build-info:
-	@echo "Build Tag: $(BUILD_TAGS_GPU)"
 	@echo "Build Time: $(BUILD_TIME)"
 	@echo "Git Commit: $(GIT_COMMIT)"
 	@echo "Go Version: $(GO_VERSION)"
@@ -338,19 +393,15 @@ check-segcore-codes-product: generate-segcore-codes
 
 build-cpp: generated-proto plan-parser-lib
 	@echo "Building Milvus cpp library ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -f $(tantivy_features) -S ${use_svs} -R ${with_crt})
-
-build-cpp-gpu: generated-proto plan-parser-lib
-	@echo "Building Milvus cpp gpu library ... "
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -g -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -f $(tantivy_features) -S ${use_svs} -R ${with_crt})
+	@(env TANTIVY_ANALYZER_REMOTE_TLS=$(tantivy_analyzer_remote_tls) bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -T ${use_tsan} -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -G ${WITH_GPU} -f $(tantivy_features) -S ${use_svs} -R ${with_crt})
 
 build-cpp-with-unittest: generated-proto plan-parser-lib
 	@echo "Building Milvus cpp library with unittest ... "
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -u -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -f $(tantivy_features) -S ${use_svs} -R ${with_crt})
+	@(env TANTIVY_ANALYZER_REMOTE_TLS=$(tantivy_analyzer_remote_tls) bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -T ${use_tsan} -u -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -G ${WITH_GPU} -f $(tantivy_features) -S ${use_svs} -R ${with_crt})
 
 build-cpp-with-coverage: generated-proto plan-parser-lib
 	@echo "Building Milvus cpp library with coverage and unittest ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -u -c -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -f $(tantivy_features) -S ${use_svs} -R ${with_crt})
+	@(env TANTIVY_ANALYZER_REMOTE_TLS=$(tantivy_analyzer_remote_tls) bash $(PWD)/scripts/core_build.sh -t ${mode} -a ${use_asan} -T ${use_tsan} -u -c -n ${use_disk_index} -y ${use_dynamic_simd} ${AZURE_OPTION} -x ${index_engine} -G ${WITH_GPU} -f $(tantivy_features) -S ${use_svs} -R ${with_crt})
 
 check-proto-product: generated-proto
 	 @(env bash $(PWD)/scripts/check_proto_product.sh)
@@ -366,6 +417,71 @@ generate-message-codegen:
 
 # Run the tests.
 unittest: test-cpp test-go
+
+PYUDF_RUNTIME_PYTHON_DIR := $(PWD)/internal/util/function/pyudf/python
+PYUDF_RUNTIME_WHEEL_DIR := $(PWD)/cmake_build/runtime/pyudf/wheels
+
+# Python codegen uses the matching versions from the runtime wheel's codegen extra.
+# Generated Python modules are checked in; building/installing a wheel needs no compiler.
+generate-pyudf-python-proto:
+	@$(PYTHON) $(PWD)/scripts/generate_pyudf_python_proto.py
+
+generate-pyudf-proto: generated-proto-without-cpp generate-pyudf-python-proto
+
+check-pyudf-proto-product:
+	@$(PYTHON) $(PWD)/scripts/generate_pyudf_python_proto.py --check
+
+.PHONY: generate-pyudf-python-proto generate-pyudf-proto check-pyudf-proto-product
+
+check-pyudf-python:
+	@command -v $(RUFF) >/dev/null 2>&1 || { echo "ERROR: ruff is required; install ruff or set RUFF=/path/to/ruff" >&2; exit 1; }
+	@echo "Checking trusted PyUDF runtime Python code ..."
+	@$(RUFF) check --config $(PYUDF_RUNTIME_PYTHON_DIR)/pyproject.toml $(PYUDF_RUNTIME_PYTHON_DIR)
+	@$(RUFF) format --check --config $(PYUDF_RUNTIME_PYTHON_DIR)/pyproject.toml $(PYUDF_RUNTIME_PYTHON_DIR)
+
+format-pyudf-python:
+	@command -v $(RUFF) >/dev/null 2>&1 || { echo "ERROR: ruff is required; install ruff or set RUFF=/path/to/ruff" >&2; exit 1; }
+	@echo "Formatting trusted PyUDF runtime Python code ..."
+	@$(RUFF) check --fix --config $(PYUDF_RUNTIME_PYTHON_DIR)/pyproject.toml $(PYUDF_RUNTIME_PYTHON_DIR)
+	@$(RUFF) format --config $(PYUDF_RUNTIME_PYTHON_DIR)/pyproject.toml $(PYUDF_RUNTIME_PYTHON_DIR)
+
+.PHONY: build-pyudf-runtime-wheel install-pyudf-runtime-wheel check-pyudf-python
+
+build-pyudf-runtime-wheel:
+	@echo "Building trusted PyUDF runtime wheel ..."
+	@rm -rf $(PYUDF_RUNTIME_WHEEL_DIR) \
+		$(PYUDF_RUNTIME_PYTHON_DIR)/build \
+		$(PYUDF_RUNTIME_PYTHON_DIR)/*.egg-info
+	@mkdir -p $(PYUDF_RUNTIME_WHEEL_DIR)
+	@$(PYTHON) -c 'import setuptools, wheel; major = int(setuptools.__version__.split(".", 1)[0]); assert major >= 61, "setuptools>=61 is required, found " + setuptools.__version__'
+	@$(PYTHON) -m pip wheel \
+		--disable-pip-version-check \
+		--no-index \
+		--no-build-isolation \
+		--no-deps \
+		--wheel-dir $(PYUDF_RUNTIME_WHEEL_DIR) \
+		$(PYUDF_RUNTIME_PYTHON_DIR)
+	@rm -rf $(PYUDF_RUNTIME_PYTHON_DIR)/build \
+		$(PYUDF_RUNTIME_PYTHON_DIR)/*.egg-info
+
+# This explicitly modifies the selected Python environment. Set PYTHON to the
+# Python environment intended for PyUDF workers before running this target.
+install-pyudf-runtime-wheel: build-pyudf-runtime-wheel
+	@echo "Installing trusted PyUDF runtime wheel into $(PYTHON) ..."
+	@set -e; \
+		set -- $(PYUDF_RUNTIME_WHEEL_DIR)/milvus_pyudf_runtime-*.whl; \
+		count=$$#; \
+		[ -f "$$1" ] || count=0; \
+		if [ "$$count" -ne 1 ]; then \
+			echo "ERROR: expected exactly one PyUDF runtime wheel, found $$count" >&2; \
+			exit 1; \
+		fi; \
+		PIP_USER=0 PYTHONNOUSERSITE=1 \
+			$(PYTHON) -m pip install --disable-pip-version-check "$$1"; \
+		PIP_USER=0 PYTHONNOUSERSITE=1 \
+			$(PYTHON) -m pip install --disable-pip-version-check \
+				--no-deps --force-reinstall "$$1"; \
+		$(PYTHON) -I -c 'import milvus_pyudf_runtime, pyarrow; print("Verified trusted PyUDF runtime:", milvus_pyudf_runtime.__file__); print("Verified pyarrow:", pyarrow.__file__)'
 
 test-util:
 	@echo "Running go unittests..."
@@ -478,12 +594,11 @@ codecov-cpp: build-cpp-with-coverage
 	@(env bash $(PWD)/scripts/run_cpp_codecov.sh)
 
 # Build each component and install binary to $GOPATH/bin.
-install: milvus
-	@echo "Installing binary to './bin'"
-	@(env GOPATH=$(GOPATH) LIBRARY_PATH=$(LIBRARY_PATH) bash $(PWD)/scripts/install_milvus.sh)
-	@echo "Installation successful."
+# Package builds audit the AWS runtime even without native unit tests.
+# An explicit environment or command-line value can override this default.
+install: export MILVUS_AUDIT_AWS_RUNTIME ?= ON
 
-gpu-install: milvus-gpu
+install: milvus build-pyudf-runtime-wheel
 	@echo "Installing binary to './bin'"
 	@(env GOPATH=$(GOPATH) LIBRARY_PATH=$(LIBRARY_PATH) bash $(PWD)/scripts/install_milvus.sh)
 	@echo "Installation successful."

@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
@@ -40,6 +41,7 @@ import (
 )
 
 func TestDescribeCollectionCachedVisibility(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	require.NoError(t, Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true"))
 	require.NoError(t, Params.Save(Params.ProxyCfg.EnableCachedServiceProvider.Key, "true"))
 	t.Cleanup(func() {
@@ -200,15 +202,12 @@ func TestDescribeCollectionRemoteForwardsAuthenticatedIdentity(t *testing.T) {
 	})
 	ctx := NewContextWithMetadata(context.Background(), "alice", "tenant_a")
 	ctx = metadata.AppendToOutgoingContext(ctx, util.HeaderAuthorize, crypto.Base64Encode("root:root"))
-	task := &describeCollectionTask{
-		mixCoord: mix,
-		DescribeCollectionRequest: &milvuspb.DescribeCollectionRequest{
-			CollectionID: 77, DbName: "tenant_a",
-		},
-	}
+	task := NewDescribeCollectionTask(ctx, &mockAliasNode{mixCoord: mix}, &milvuspb.DescribeCollectionRequest{
+		CollectionID: 77, DbName: "tenant_a",
+	})
 	require.NoError(t, task.Execute(ctx))
-	require.ErrorIs(t, merr.Error(task.result.GetStatus()), merr.ErrPrivilegeNotPermitted)
-	require.Nil(t, task.result.GetSchema())
+	require.ErrorIs(t, merr.Error(task.Result().GetStatus()), merr.ErrPrivilegeNotPermitted)
+	require.Nil(t, task.Result().GetSchema())
 }
 
 func TestDescribeCollectionRPCContextPreservesRequest(t *testing.T) {
@@ -222,7 +221,7 @@ func TestDescribeCollectionRPCContextPreservesRequest(t *testing.T) {
 		"request-id", "describe-request",
 	))
 
-	rpcCtx := describeCollectionRPCContext(ctx)
+	rpcCtx := DescribeCollectionRPCContext(ctx)
 	md, ok := metadata.FromOutgoingContext(rpcCtx)
 	require.True(t, ok)
 	require.Equal(t, []string{crypto.Base64Encode("alice:alice")}, md.Get(util.HeaderAuthorize))

@@ -67,6 +67,13 @@ class PhyNullExpr : public SegmentExpr {
     void
     PrefetchRawData() override;
 
+    // A nested (JSON path) index cannot answer IS NULL on the column, and the
+    // expression drops it on purpose; that is not a declined index.
+    bool
+    ReportsIndexDecline() const override {
+        return false;
+    }
+
     std::string
     ToString() const override {
         return fmt::format("{}", expr_->ToString());
@@ -82,6 +89,11 @@ class PhyNullExpr : public SegmentExpr {
         return expr_->column_;
     }
 
+    bool
+    IsElementLevelExpression() const override {
+        return expr_->column_.element_level_;
+    }
+
  private:
     ColumnVectorPtr
     PreCheckNullable(OffsetVector* input);
@@ -91,6 +103,9 @@ class PhyNullExpr : public SegmentExpr {
 
     VectorPtr
     ExecVectorNull(OffsetVector* input);
+
+    VectorPtr
+    ExecElementLevelNull(OffsetVector* input);
 
     template <typename T>
     VectorPtr

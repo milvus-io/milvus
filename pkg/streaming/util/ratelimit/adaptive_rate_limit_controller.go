@@ -72,7 +72,7 @@ type modeTransitionRequest struct {
 	slowdownChecker SlowdownChecker // Only used for slowdown mode
 }
 
-// AdaptiveRateLimitController manages rate limiting state transitions for the scanner.
+// AdaptiveRateLimitController manages time-based rate limiting for adaptive pressure sources.
 // It observes the scanner mode and adjusts rate limits accordingly:
 // - When entering slowdown mode: starts at high watermark rate
 // - In slowdown mode: decreases rate by ratio periodically until low watermark

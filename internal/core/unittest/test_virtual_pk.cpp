@@ -143,9 +143,10 @@ class TrackingVirtualPKChunkedColumn : public VirtualPKChunkedColumn {
         return VirtualPKChunkedColumn::GetChunk(op_ctx, chunk_id);
     }
 
-    TakeCellPin
-    MakeTakeCellPin(milvus::OpContext*) const override {
-        ++make_take_pin_calls;
+    TakeCellAccess
+    MakeTakeCellAccess(milvus::OpContext*,
+                       const std::vector<int64_t>* = nullptr) const override {
+        ++make_take_access_calls;
         return {};
     }
 
@@ -158,9 +159,37 @@ class TrackingVirtualPKChunkedColumn : public VirtualPKChunkedColumn {
 
  public:
     mutable int get_chunk_calls{0};
-    mutable int make_take_pin_calls{0};
+    mutable int make_take_access_calls{0};
     mutable int build_planner_calls{0};
 };
+
+TEST_F(VirtualPKChunkedColumnTest, TakeCandidateMaskSkipsUnrequestedOffsets) {
+    TrackingVirtualPKChunkedColumn column(12345, 10);
+    const int32_t offsets[]{3, -1, 3, 100};
+    TargetBitmap candidates(4, false);
+    candidates.set(0);
+    candidates.set(2);
+    for (const auto policy :
+         {TakePinPolicy::CurrentCell, TakePinPolicy::Batch}) {
+        auto options = TakeOptions{OffsetView::From(offsets, 4),
+                                   TargetType::Int64,
+                                   nullptr,
+                                   policy,
+                                   &candidates};
+        auto take = column.Take(nullptr, options);
+        ASSERT_NE(take, nullptr);
+        EXPECT_EQ(*take->Get<int64_t>(0).value, GetVirtualPK(12345, 3));
+        EXPECT_EQ(*take->Get<int64_t>(2).value, GetVirtualPK(12345, 3));
+        EXPECT_THROW(take->IsValid(1), SegcoreError);
+        EXPECT_EQ(take->GetOwn().size, 4);
+        EXPECT_EQ(column.build_planner_calls, 0);
+        EXPECT_EQ(column.make_take_access_calls, 0);
+        EXPECT_EQ(column.get_chunk_calls, 0);
+        TargetBitmap wrong_size(1, true);
+        options.candidate_mask = &wrong_size;
+        EXPECT_THROW(column.Take(nullptr, options), SegcoreError);
+    }
+}
 
 TEST_F(VirtualPKChunkedColumnTest, BasicProperties) {
     int64_t segment_id = 12345;
@@ -190,22 +219,29 @@ TEST_F(VirtualPKChunkedColumnTest, GetVirtualPKAt) {
     }
 }
 
-TEST_F(VirtualPKChunkedColumnTest, BulkPrimitiveValueAt) {
+TEST_F(VirtualPKChunkedColumnTest, BatchTake) {
     int64_t segment_id = 200;
     int64_t num_rows = 100;
 
     VirtualPKChunkedColumn column(segment_id, num_rows);
 
-    // Test with sequential offsets
-    std::vector<int64_t> offsets = {0, 5, 10, 50, 99};
-    std::vector<int64_t> results(offsets.size());
-
-    column.BulkPrimitiveValueAt(
-        nullptr, results.data(), offsets.data(), offsets.size());
+    std::vector<int64_t> offsets = {99, 0, 10, 50, 10};
+    auto take = column.Take(nullptr,
+                            ChunkedColumnInterface::TakeOptions{
+                                ChunkedColumnInterface::OffsetView::From(
+                                    offsets.data(), offsets.size()),
+                                ChunkedColumnInterface::TargetType::Int64,
+                                nullptr,
+                                TakePinPolicy::Batch});
+    ASSERT_NE(take, nullptr);
+    ASSERT_EQ(take->Size(), offsets.size());
 
     for (size_t i = 0; i < offsets.size(); i++) {
         int64_t expected = GetVirtualPK(segment_id, offsets[i]);
-        ASSERT_EQ(results[i], expected);
+        const auto item = take->Get<int64_t>(i);
+        EXPECT_TRUE(item.is_valid);
+        ASSERT_TRUE(item.value.has_value());
+        ASSERT_EQ(*item.value, expected);
     }
 }
 
@@ -302,7 +338,7 @@ TEST_F(VirtualPKChunkedColumnTest,
         std::exception);
 
     EXPECT_EQ(column.get_chunk_calls, 0);
-    EXPECT_EQ(column.make_take_pin_calls, 0);
+    EXPECT_EQ(column.make_take_access_calls, 0);
     EXPECT_EQ(column.build_planner_calls, 0);
 }
 
@@ -386,6 +422,14 @@ TEST_F(VirtualPKChunkedColumnTest,
         cursor->Next(
             1, ChunkedColumnInterface::ScanReadMode::ValidityOnly, &batch),
         std::exception);
+}
+
+TEST_F(VirtualPKChunkedColumnTest, UnsupportedRowIdScanReturnsNoCursor) {
+    VirtualPKChunkedColumn column(/*segment_id=*/200, /*num_rows=*/5);
+    ChunkedColumnInterface::ScanOptions options;
+    options.output = ChunkedColumnInterface::ScanOutput::RowIds;
+    options.predicate = ChunkedColumnInterface::ScanPredicate::Unary;
+    EXPECT_EQ(column.Scan(nullptr, options), nullptr);
 }
 
 TEST_F(VirtualPKChunkedColumnTest, BulkValueAt) {

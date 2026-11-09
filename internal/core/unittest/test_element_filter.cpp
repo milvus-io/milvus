@@ -9,11 +9,17 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <arrow/api.h>
 #include <folly/FBVector.h>
+#include <folly/ScopeGuard.h>
 #include <folly/executors/CPUThreadPoolExecutor.h>
 #include <gtest/gtest.h>
 #include <stddef.h>
+#include <algorithm>
+#include <chrono>
 #include <cstdint>
+#include <filesystem>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -31,6 +37,7 @@
 #include "common/QueryResult.h"
 #include "common/Schema.h"
 #include "common/Utils.h"
+#include "common/VectorArray.h"
 #include "common/TracerBase.h"
 #include "common/Types.h"
 #include "common/VectorTrait.h"
@@ -38,12 +45,14 @@
 #include "exec/expression/ExprBatchTestUtils.h"
 #include "exec/expression/UnaryExpr.h"
 #include "gtest/gtest.h"
-#include "index/Index.h"
+#include "index/Families.h"
+#include "index/contracts/query/IIndexReaderBase.h"
+#include "index/contracts/query/IVectorReader.h"
 #include "index/Meta.h"
-#include "index/ScalarIndexSort.h"
-#include "index/VectorIndex.h"
+#include "indexbuilder/VectorBuildMaterializer.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/operands.h"
+#include "knowhere/version.h"
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
 #include "query/Plan.h"
@@ -54,10 +63,14 @@
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
+#include "segcore/arrow_field_utils.h"
+#include "segcore/storagev2translator/GroupCTMeta.h"
 #include "storage/FileManager.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/index_test_utils.h"
 #include "test_utils/cachinglayer_test_utils.h"
 #include "test_utils/storage_test_utils.h"
+#include "test_utils/ManifestTestUtil.h"
 #include "common/Common.h"
 
 using namespace milvus;
@@ -182,7 +195,7 @@ TEST_P(ElementFilterSealed, RangeExpr) {
     auto array_vec_values = raw_data.get_col<VectorFieldProto>(vec_fid);
 
     // Flatten vector data and build index based on element type
-    std::unique_ptr<milvus::index::VectorIndex> indexing;
+    std::optional<BuiltTestIndex> built_index;
     std::string actual_metric;
 
     if (elem_type == DataType::VECTOR_FLOAT) {
@@ -193,10 +206,10 @@ TEST_P(ElementFilterSealed, RangeExpr) {
                 vector_data[i * array_len * dim + j] = float_vec[j];
             }
         }
-        indexing = GenVecIndexing(N * array_len,
-                                  dim,
-                                  vector_data.data(),
-                                  knowhere::IndexEnum::INDEX_HNSW);
+        built_index = GenVecIndexing(N * array_len,
+                                     dim,
+                                     vector_data.data(),
+                                     knowhere::IndexEnum::INDEX_HNSW);
         actual_metric = knowhere::metric::L2;
     } else if (elem_type == DataType::VECTOR_FLOAT16) {
         std::vector<knowhere::fp16> vector_data(dim * N * array_len);
@@ -208,10 +221,10 @@ TEST_P(ElementFilterSealed, RangeExpr) {
                 vector_data[i * array_len * dim + j] = src[j];
             }
         }
-        indexing = GenVecIndexingFloat16(N * array_len,
-                                         dim,
-                                         vector_data.data(),
-                                         knowhere::IndexEnum::INDEX_HNSW);
+        built_index = GenVecIndexingFloat16(N * array_len,
+                                            dim,
+                                            vector_data.data(),
+                                            knowhere::IndexEnum::INDEX_HNSW);
         actual_metric = knowhere::metric::L2;
     } else if (elem_type == DataType::VECTOR_BFLOAT16) {
         std::vector<knowhere::bf16> vector_data(dim * N * array_len);
@@ -223,10 +236,10 @@ TEST_P(ElementFilterSealed, RangeExpr) {
                 vector_data[i * array_len * dim + j] = src[j];
             }
         }
-        indexing = GenVecIndexingBFloat16(N * array_len,
-                                          dim,
-                                          vector_data.data(),
-                                          knowhere::IndexEnum::INDEX_HNSW);
+        built_index = GenVecIndexingBFloat16(N * array_len,
+                                             dim,
+                                             vector_data.data(),
+                                             knowhere::IndexEnum::INDEX_HNSW);
         actual_metric = knowhere::metric::L2;
     } else if (elem_type == DataType::VECTOR_INT8) {
         std::vector<int8_t> vector_data(dim * N * array_len);
@@ -238,10 +251,10 @@ TEST_P(ElementFilterSealed, RangeExpr) {
                 vector_data[i * array_len * dim + j] = src[j];
             }
         }
-        indexing = GenVecIndexingInt8(N * array_len,
-                                      dim,
-                                      vector_data.data(),
-                                      knowhere::IndexEnum::INDEX_HNSW);
+        built_index = GenVecIndexingInt8(N * array_len,
+                                         dim,
+                                         vector_data.data(),
+                                         knowhere::IndexEnum::INDEX_HNSW);
         actual_metric = knowhere::metric::L2;
     } else if (elem_type == DataType::VECTOR_BINARY) {
         int byte_dim = (dim + 7) / 8;
@@ -254,7 +267,7 @@ TEST_P(ElementFilterSealed, RangeExpr) {
                 vector_data[i * array_len * byte_dim + j] = src[j];
             }
         }
-        indexing =
+        built_index =
             GenVecIndexingBinary(N * array_len,
                                  dim,
                                  vector_data.data(),
@@ -262,11 +275,13 @@ TEST_P(ElementFilterSealed, RangeExpr) {
         actual_metric = knowhere::metric::HAMMING;
     }
 
-    LoadIndexInfo load_index_info;
+    auto& indexing = built_index.value();
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index = CreateTestIndex("test", std::move(indexing));
     load_index_info.index_params["metric_type"] = actual_metric;
     load_index_info.field_type = DataType::VECTOR_ARRAY;
     load_index_info.element_type = elem_type;
@@ -406,7 +421,7 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
     auto array_vec_values = raw_data.get_col<VectorFieldProto>(vec_fid);
 
     // Flatten vector data and build index based on element type
-    std::unique_ptr<milvus::index::VectorIndex> indexing;
+    std::optional<BuiltTestIndex> built_index;
     std::string actual_metric;
 
     if (elem_type == DataType::VECTOR_FLOAT) {
@@ -417,10 +432,10 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
                 vector_data[i * array_len * dim + j] = float_vec[j];
             }
         }
-        indexing = GenVecIndexing(N * array_len,
-                                  dim,
-                                  vector_data.data(),
-                                  knowhere::IndexEnum::INDEX_HNSW);
+        built_index = GenVecIndexing(N * array_len,
+                                     dim,
+                                     vector_data.data(),
+                                     knowhere::IndexEnum::INDEX_HNSW);
         actual_metric = knowhere::metric::L2;
     } else if (elem_type == DataType::VECTOR_FLOAT16) {
         std::vector<knowhere::fp16> vector_data(dim * N * array_len);
@@ -432,10 +447,10 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
                 vector_data[i * array_len * dim + j] = src[j];
             }
         }
-        indexing = GenVecIndexingFloat16(N * array_len,
-                                         dim,
-                                         vector_data.data(),
-                                         knowhere::IndexEnum::INDEX_HNSW);
+        built_index = GenVecIndexingFloat16(N * array_len,
+                                            dim,
+                                            vector_data.data(),
+                                            knowhere::IndexEnum::INDEX_HNSW);
         actual_metric = knowhere::metric::L2;
     } else if (elem_type == DataType::VECTOR_BFLOAT16) {
         std::vector<knowhere::bf16> vector_data(dim * N * array_len);
@@ -447,10 +462,10 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
                 vector_data[i * array_len * dim + j] = src[j];
             }
         }
-        indexing = GenVecIndexingBFloat16(N * array_len,
-                                          dim,
-                                          vector_data.data(),
-                                          knowhere::IndexEnum::INDEX_HNSW);
+        built_index = GenVecIndexingBFloat16(N * array_len,
+                                             dim,
+                                             vector_data.data(),
+                                             knowhere::IndexEnum::INDEX_HNSW);
         actual_metric = knowhere::metric::L2;
     } else if (elem_type == DataType::VECTOR_INT8) {
         std::vector<int8_t> vector_data(dim * N * array_len);
@@ -462,10 +477,10 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
                 vector_data[i * array_len * dim + j] = src[j];
             }
         }
-        indexing = GenVecIndexingInt8(N * array_len,
-                                      dim,
-                                      vector_data.data(),
-                                      knowhere::IndexEnum::INDEX_HNSW);
+        built_index = GenVecIndexingInt8(N * array_len,
+                                         dim,
+                                         vector_data.data(),
+                                         knowhere::IndexEnum::INDEX_HNSW);
         actual_metric = knowhere::metric::L2;
     } else if (elem_type == DataType::VECTOR_BINARY) {
         int byte_dim = (dim + 7) / 8;
@@ -478,7 +493,7 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
                 vector_data[i * array_len * byte_dim + j] = src[j];
             }
         }
-        indexing =
+        built_index =
             GenVecIndexingBinary(N * array_len,
                                  dim,
                                  vector_data.data(),
@@ -486,11 +501,13 @@ TEST_P(ElementFilterSealed, UnaryExpr) {
         actual_metric = knowhere::metric::HAMMING;
     }
 
-    LoadIndexInfo load_index_info;
+    auto& indexing = built_index.value();
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index = CreateTestIndex("test", std::move(indexing));
     load_index_info.index_params["metric_type"] = actual_metric;
     load_index_info.field_type = DataType::VECTOR_ARRAY;
     load_index_info.element_type = elem_type;
@@ -656,7 +673,7 @@ TEST(ElementFilter, GrowingSegmentStructElementOffsets) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    raw_data.SharedRaw());
 
     auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing_impl, nullptr);
@@ -747,20 +764,29 @@ TEST(ElementFilter, GrowingSegmentOutOfOrderInsert) {
     // Insert batch 2 first (docs 10-19) - should be cached
     auto batch2 = gen_batch(10, 10);
     segment->PreInsert(10);
-    segment->Insert(
-        10, 10, batch2.row_ids_.data(), batch2.timestamps_.data(), batch2.raw_);
+    segment->Insert(10,
+                    10,
+                    batch2.row_ids_.data(),
+                    batch2.timestamps_.data(),
+                    batch2.SharedRaw());
 
     // Insert batch 1 (docs 0-9) - should trigger drain of batch 2
     auto batch1 = gen_batch(0, 10);
     segment->PreInsert(10);
-    segment->Insert(
-        0, 10, batch1.row_ids_.data(), batch1.timestamps_.data(), batch1.raw_);
+    segment->Insert(0,
+                    10,
+                    batch1.row_ids_.data(),
+                    batch1.timestamps_.data(),
+                    batch1.SharedRaw());
 
     // Insert batch 3 (docs 25-34) - should be cached (gap at 20-24)
     auto batch3 = gen_batch(25, 10);
     segment->PreInsert(10);
-    segment->Insert(
-        25, 10, batch3.row_ids_.data(), batch3.timestamps_.data(), batch3.raw_);
+    segment->Insert(25,
+                    10,
+                    batch3.row_ids_.data(),
+                    batch3.timestamps_.data(),
+                    batch3.SharedRaw());
 
     // Verify StructElementOffsets
     auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
@@ -850,11 +876,12 @@ TEST(ElementFilter, MultiQueryCollectResults) {
                                    dim,
                                    vector_data.data(),
                                    knowhere::IndexEnum::INDEX_HNSW);
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index = CreateTestIndex("test", std::move(indexing));
     load_index_info.index_params["metric_type"] = knowhere::metric::L2;
     load_index_info.field_type = DataType::VECTOR_ARRAY;
     load_index_info.element_type = DataType::VECTOR_FLOAT;
@@ -927,8 +954,7 @@ TEST(ElementFilter, MultiQueryCollectResults) {
 
 TEST(ElementFilter, CollectResultsWithCosineMetric) {
     // Test CollectResults with large_is_better=true (COSINE metric)
-    auto saved_batch_size = EXEC_EVAL_EXPR_BATCH_SIZE.load();
-    EXEC_EVAL_EXPR_BATCH_SIZE.store(100);
+    milvus::test::ExprBatchSizeGuard batch_size_guard(100);
 
     int dim = 4;
     auto schema = std::make_shared<Schema>();
@@ -980,17 +1006,21 @@ TEST(ElementFilter, CollectResultsWithCosineMetric) {
             vector_data[i * array_len * dim + j] = float_vec[j];
         }
     }
-    auto indexing = GenVecIndexing(N * array_len,
-                                   dim,
-                                   vector_data.data(),
-                                   knowhere::IndexEnum::INDEX_HNSW,
-                                   knowhere::metric::COSINE);
-    LoadIndexInfo load_index_info;
+    auto indexing = BuildTestVectorIndex<float>(N * array_len,
+                                                dim,
+                                                vector_data.data(),
+                                                knowhere::IndexEnum::INDEX_HNSW,
+                                                knowhere::metric::COSINE);
+    const auto* vector_reader =
+        dynamic_cast<const index::IVectorReader*>(indexing.get());
+    ASSERT_NE(vector_reader, nullptr);
+    ASSERT_EQ(vector_reader->Metric(), knowhere::metric::COSINE);
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing));
-    load_index_info.index_params["metric_type"] = knowhere::metric::COSINE;
+    load_index_info.index = CreateTestIndex("test", std::move(indexing));
     load_index_info.field_type = DataType::VECTOR_ARRAY;
     load_index_info.element_type = DataType::VECTOR_FLOAT;
     segment->LoadIndex(load_index_info);
@@ -1041,8 +1071,6 @@ TEST(ElementFilter, CollectResultsWithCosineMetric) {
         ASSERT_GT(element_value, 100);
         ASSERT_LT(element_value, 400);
     }
-
-    EXEC_EVAL_EXPR_BATCH_SIZE.store(saved_batch_size);
 }
 
 // Test parameter for Growing: <use_hints, element_type, metric_type, dim>
@@ -1157,7 +1185,7 @@ TEST_P(ElementFilterGrowing, RangeExpr) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    raw_data.SharedRaw());
 
     // Verify StructElementOffsets was built
     auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
@@ -1384,7 +1412,7 @@ TEST_P(ElementFilterRetrieve, RangeExpr) {
                         N,
                         raw_data.row_ids_.data(),
                         raw_data.timestamps_.data(),
-                        raw_data.raw_);
+                        raw_data.SharedRaw());
         segment = std::move(growing);
     }
 
@@ -1589,7 +1617,7 @@ TEST_P(ElementFilterRetrieve, UnaryExpr) {
                         N,
                         raw_data.row_ids_.data(),
                         raw_data.timestamps_.data(),
-                        raw_data.raw_);
+                        raw_data.SharedRaw());
         segment = std::move(growing);
     }
 
@@ -1831,7 +1859,7 @@ RunElementStrideDiscriminatorCase(DataType elem_type,
                         N,
                         raw_data.row_ids_.data(),
                         raw_data.timestamps_.data(),
-                        raw_data.raw_);
+                        raw_data.SharedRaw());
         segment = std::move(growing);
     }
 
@@ -2308,11 +2336,7 @@ TEST(ElementFilter, RecursiveArrayJsonContainsPlanValidation) {
     array_of_array_of_varchar.mutable_array_element()
         ->mutable_array_element()
         ->set_leaf_type(proto::schema::DataType::VarChar);
-    auto [deeper_schema, deeper_field_id] =
-        make_schema(std::move(array_of_array_of_varchar));
-    auto deeper_contains =
-        make_contains_expr(deeper_field_id, DataType::VARCHAR);
-    ASSERT_ANY_THROW(ProtoParser(deeper_schema).ParseExprs(deeper_contains));
+    ASSERT_ANY_THROW(make_schema(std::move(array_of_array_of_varchar)));
 
     proto::plan::Expr range_expr;
     auto* range = range_expr.mutable_unary_range_expr();
@@ -2444,7 +2468,7 @@ TEST_P(ElementFilterEmptyDocHit, ZeroHitPredicateWithAnd) {
                         N,
                         raw_data.row_ids_.data(),
                         raw_data.timestamps_.data(),
-                        raw_data.raw_);
+                        raw_data.SharedRaw());
         segment = std::move(growing);
     }
 
@@ -2545,7 +2569,7 @@ TEST_P(ElementFilterZeroElementBatch, ActiveDocsWithZeroElements) {
                         N,
                         raw_data.row_ids_.data(),
                         raw_data.timestamps_.data(),
-                        raw_data.raw_);
+                        raw_data.SharedRaw());
         segment = std::move(growing);
     }
 
@@ -2654,7 +2678,7 @@ TEST_P(ElementFilterZeroElementBatch, FullModeAdvancesPastZeroElementBatches) {
                         kRowCount,
                         raw_data.row_ids_.data(),
                         raw_data.timestamps_.data(),
-                        raw_data.raw_);
+                        raw_data.SharedRaw());
         segment = std::move(growing);
     }
     auto* internal_segment =
@@ -2961,18 +2985,23 @@ TEST_P(ElementFilterZeroElementBatch, FullModeAdvancesPastZeroElementBatches) {
     if (with_sealed) {
         std::vector<int32_t> indexed_elements = {7, 9};
         auto nested_index =
-            std::make_unique<milvus::index::ScalarIndexSort<int32_t>>(
-                storage::FileManagerContext(), true /* is_nested */);
-        nested_index->Build(
-            indexed_elements.size(), indexed_elements.data(), nullptr);
+            BuildTestScalarIndex<int32_t>(milvus::index::families::kSort,
+                                          indexed_elements.size(),
+                                          indexed_elements.data(),
+                                          nullptr,
+                                          {{"nested", true},
+                                           {"field_type", DataType::ARRAY},
+                                           {"element_type", DataType::INT32}});
 
-        LoadIndexInfo load_info;
+        LoadIndexInfo load_info{};
         load_info.field_id = int_array_fid.get();
         load_info.field_type = DataType::ARRAY;
         load_info.element_type = DataType::INT32;
         load_info.index_params["index_type"] = milvus::index::ASCENDING_SORT;
-        load_info.cache_index = CreateTestCacheIndex("zero_element_nested",
-                                                     std::move(nested_index));
+        SetTestIndexMetadata(
+            load_info, *nested_index, milvus::index::families::kSort);
+        load_info.index =
+            CreateTestIndex("zero_element_nested", std::move(nested_index));
         auto* sealed_segment = dynamic_cast<SegmentSealed*>(segment.get());
         ASSERT_NE(sealed_segment, nullptr);
         sealed_segment->LoadIndex(load_info);
@@ -3003,7 +3032,7 @@ TEST(ElementFilter, GrowingNullableArrayTailChunkUsesActiveRows) {
     config.set_chunk_rows(1024);
     auto segment = CreateGrowingSegment(schema, empty_index_meta, 1, config);
 
-    auto insert_record_proto = std::make_unique<InsertRecordProto>();
+    auto insert_record_proto = std::make_shared<InsertRecordProto>();
     insert_record_proto->set_num_rows(3);
 
     auto pk_data = insert_record_proto->add_fields_data();
@@ -3033,11 +3062,8 @@ TEST(ElementFilter, GrowingNullableArrayTailChunkUsesActiveRows) {
     std::vector<int64_t> row_ids = {0, 1, 2};
     std::vector<Timestamp> timestamps = {100, 101, 102};
     auto offset = segment->PreInsert(3);
-    segment->Insert(offset,
-                    3,
-                    row_ids.data(),
-                    timestamps.data(),
-                    insert_record_proto.get());
+    segment->Insert(
+        offset, 3, row_ids.data(), timestamps.data(), insert_record_proto);
 
     proto::plan::PlanNode plan_node;
     auto* query = plan_node.mutable_query();
@@ -3115,7 +3141,7 @@ TEST_P(ElementFilterEmptyDocHit, ElementLevelSearchWithZeroElements) {
                         N,
                         raw_data.row_ids_.data(),
                         raw_data.timestamps_.data(),
-                        raw_data.raw_);
+                        raw_data.SharedRaw());
         segment = std::move(growing);
     }
 
@@ -3252,11 +3278,12 @@ TEST_P(ElementFilterNestedIndex, ExecutionMode) {
                                    dim,
                                    vector_data.data(),
                                    knowhere::IndexEnum::INDEX_HNSW);
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index = CreateTestIndex("test", std::move(indexing));
     load_index_info.index_params["metric_type"] = knowhere::metric::L2;
     load_index_info.field_type = DataType::VECTOR_ARRAY;
     load_index_info.element_type = DataType::VECTOR_FLOAT;
@@ -3273,26 +3300,20 @@ TEST_P(ElementFilterNestedIndex, ExecutionMode) {
             }
         }
 
-        milvus::index::IndexBasePtr nested_index;
-        if (index_type == NestedIndexType::STL_SORT) {
-            auto stl_index =
-                std::make_unique<milvus::index::ScalarIndexSort<int32_t>>(
-                    storage::FileManagerContext(), true /* is_nested */);
-            stl_index->Build(all_elements.size(), all_elements.data(), nullptr);
-            nested_index = std::move(stl_index);
-        } else {
-            // INVERTED index - use BuildWithRawDataForUT is not available for int32
-            // So we use ScalarIndexSort for now as a workaround
-            // In real scenario, inverted index would be loaded from disk
-            auto stl_index =
-                std::make_unique<milvus::index::ScalarIndexSort<int32_t>>(
-                    storage::FileManagerContext(), true /* is_nested */);
-            stl_index->Build(all_elements.size(), all_elements.data(), nullptr);
-            nested_index = std::move(stl_index);
-        }
+        const auto family = index_type == NestedIndexType::STL_SORT
+                                ? milvus::index::families::kSort
+                                : milvus::index::families::kInverted;
+        auto nested_index =
+            BuildTestScalarIndex<int32_t>(family,
+                                          all_elements.size(),
+                                          all_elements.data(),
+                                          nullptr,
+                                          {{"nested", true},
+                                           {"field_type", DataType::ARRAY},
+                                           {"element_type", DataType::INT32}});
 
         // Load nested index to segment
-        LoadIndexInfo nested_load_info;
+        LoadIndexInfo nested_load_info{};
         nested_load_info.field_id = int_array_fid.get();
         nested_load_info.field_type = DataType::ARRAY;
         nested_load_info.element_type = DataType::INT32;
@@ -3300,8 +3321,9 @@ TEST_P(ElementFilterNestedIndex, ExecutionMode) {
             index_type == NestedIndexType::STL_SORT
                 ? milvus::index::ASCENDING_SORT
                 : milvus::index::INVERTED_INDEX_TYPE;
-        nested_load_info.cache_index =
-            CreateTestCacheIndex("nested_test", std::move(nested_index));
+        SetTestIndexMetadata(nested_load_info, *nested_index, family);
+        nested_load_info.index =
+            CreateTestIndex("nested_test", std::move(nested_index));
         segment->LoadIndex(nested_load_info);
     }
 
@@ -3484,11 +3506,12 @@ TEST(ElementFilterGroupBy, SealedWithIndex) {
                                    dim,
                                    vector_data.data(),
                                    knowhere::IndexEnum::INDEX_HNSW);
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index = CreateTestIndex("test", std::move(indexing));
     load_index_info.index_params["metric_type"] = knowhere::metric::L2;
     load_index_info.field_type = DataType::VECTOR_ARRAY;
     load_index_info.element_type = DataType::VECTOR_FLOAT;
@@ -3618,7 +3641,7 @@ TEST(ElementFilterGroupBy, GrowingSegment) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    raw_data.SharedRaw());
 
     int topK = 5;
     int group_size = 4;
@@ -3714,11 +3737,12 @@ TEST(ElementFilterGroupBy, NormalGroupBy) {
     auto indexing = GenVecIndexing(
         N, dim, vec_values.data(), knowhere::IndexEnum::INDEX_HNSW);
 
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index = CreateTestIndex("test", std::move(indexing));
     load_index_info.index_params["metric_type"] = knowhere::metric::L2;
     load_index_info.field_type = DataType::VECTOR_FLOAT;
     segment->LoadIndex(load_index_info);
@@ -3863,11 +3887,12 @@ TEST(ElementFilterGroupBy, DeduplicateRowsInGroup) {
                                    dim,
                                    vector_data.data(),
                                    knowhere::IndexEnum::INDEX_HNSW);
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index = CreateTestIndex("test", std::move(indexing));
     load_index_info.index_params["metric_type"] = knowhere::metric::L2;
     load_index_info.field_type = DataType::VECTOR_ARRAY;
     load_index_info.element_type = DataType::VECTOR_FLOAT;
@@ -4005,18 +4030,18 @@ TEST(ElementFilter, SearchWithNestedScalarIndex) {
                                    dim,
                                    vector_data.data(),
                                    knowhere::IndexEnum::INDEX_HNSW);
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index = CreateTestIndex("test", std::move(indexing));
     load_index_info.index_params["metric_type"] = knowhere::metric::L2;
     load_index_info.field_type = DataType::VECTOR_ARRAY;
     load_index_info.element_type = DataType::VECTOR_FLOAT;
     segment->LoadIndex(load_index_info);
 
-    // Build nested scalar index with is_nested=true (the correct behavior
-    // after the fix sets field_name so IndexFactory routes to CreateNestedIndex).
+    // Build an element-domain scalar reader for the flattened array values.
     std::vector<int32_t> all_elements;
     all_elements.reserve(N * array_len);
     for (size_t row = 0; row < N; row++) {
@@ -4025,18 +4050,24 @@ TEST(ElementFilter, SearchWithNestedScalarIndex) {
         }
     }
 
-    auto stl_index = std::make_unique<milvus::index::ScalarIndexSort<int32_t>>(
-        storage::FileManagerContext(),
-        true /* is_nested=true: correct after fix */);
-    stl_index->Build(all_elements.size(), all_elements.data(), nullptr);
+    auto stl_index =
+        BuildTestScalarIndex<int32_t>(milvus::index::families::kSort,
+                                      all_elements.size(),
+                                      all_elements.data(),
+                                      nullptr,
+                                      {{"nested", true},
+                                       {"field_type", DataType::ARRAY},
+                                       {"element_type", DataType::INT32}});
 
-    LoadIndexInfo nested_load_info;
+    LoadIndexInfo nested_load_info{};
     nested_load_info.field_id = int_array_fid.get();
     nested_load_info.field_type = DataType::ARRAY;
     nested_load_info.element_type = DataType::INT32;
     nested_load_info.index_params["index_type"] = milvus::index::ASCENDING_SORT;
-    nested_load_info.cache_index =
-        CreateTestCacheIndex("nested_test", std::move(stl_index));
+    SetTestIndexMetadata(
+        nested_load_info, *stl_index, milvus::index::families::kSort);
+    nested_load_info.index =
+        CreateTestIndex("nested_test", std::move(stl_index));
     segment->LoadIndex(nested_load_info);
 
     // Build query plan: element_filter with nested index in full mode
@@ -4124,7 +4155,7 @@ TEST(ElementFilter, GrowingMultiChunkElementSearch) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    raw_data.SharedRaw());
 
     // Verify StructElementOffsets
     auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
@@ -4471,11 +4502,12 @@ LoadElementHnswIndex(SegmentSealed* segment,
                                    kElemDim,
                                    flat_data.data(),
                                    knowhere::IndexEnum::INDEX_HNSW);
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index = CreateTestIndex("test", std::move(indexing));
     load_index_info.index_params["metric_type"] = knowhere::metric::L2;
     load_index_info.field_type = DataType::VECTOR_ARRAY;
     load_index_info.element_type = DataType::VECTOR_FLOAT;
@@ -4528,11 +4560,12 @@ LoadNullableElementFlatIndex(SegmentSealed* segment,
                                    flat_data.data(),
                                    knowhere::IndexEnum::INDEX_FAISS_IDMAP);
 
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index = CreateTestIndex("test", std::move(indexing));
     load_index_info.index_params["metric_type"] = knowhere::metric::L2;
     load_index_info.field_type = DataType::VECTOR_ARRAY;
     load_index_info.element_type = DataType::VECTOR_FLOAT;
@@ -4549,11 +4582,12 @@ LoadNullableElementFlatIndexWithValidRows(SegmentSealed* segment,
                                    flat_data.data(),
                                    knowhere::IndexEnum::INDEX_FAISS_IDMAP);
 
-    LoadIndexInfo load_index_info;
+    LoadIndexInfo load_index_info{};
     load_index_info.field_id = vec_fid.get();
+    SetTestIndexMetadata(
+        load_index_info, *indexing, milvus::index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index = CreateTestIndex("test", std::move(indexing));
     load_index_info.index_params["metric_type"] = knowhere::metric::L2;
     load_index_info.field_type = DataType::VECTOR_ARRAY;
     load_index_info.element_type = DataType::VECTOR_FLOAT;
@@ -4738,7 +4772,7 @@ TEST(ElementVectorSearch, NullableGrowingBruteForce_ElementBitset) {
                     kNullableElemN,
                     f.raw_data.row_ids_.data(),
                     f.raw_data.timestamps_.data(),
-                    f.raw_data.raw_);
+                    f.raw_data.SharedRaw());
 
     auto sr = RunNullableElementSearch(segment.get(), f);
     ASSERT_NE(sr, nullptr);
@@ -4753,7 +4787,7 @@ TEST(ElementVectorSearch, GrowingBruteForce_RangeSearch) {
                     kElemN,
                     f.raw_data.row_ids_.data(),
                     f.raw_data.timestamps_.data(),
-                    f.raw_data.raw_);
+                    f.raw_data.SharedRaw());
 
     ScopedSchemaHandle handle(*f.schema);
     const float radius = 1e6f;
@@ -4782,7 +4816,7 @@ TEST(ElementVectorSearch, GrowingBruteForce_IteratorV2) {
                     kElemN,
                     f.raw_data.row_ids_.data(),
                     f.raw_data.timestamps_.data(),
-                    f.raw_data.raw_);
+                    f.raw_data.SharedRaw());
 
     ScopedSchemaHandle handle(*f.schema);
     auto plan_bytes =
@@ -4933,7 +4967,7 @@ CreateMultiChunkGrowingSegment(const ElementSearchFixture& f) {
                     kElemN,
                     f.raw_data.row_ids_.data(),
                     f.raw_data.timestamps_.data(),
-                    f.raw_data.raw_);
+                    f.raw_data.SharedRaw());
     static_assert(kElemN > kElemChunkRows,
                   "N must exceed chunk_rows to exercise multi-chunk paths");
     return segment;
@@ -5216,7 +5250,7 @@ TEST(ElementFilterGrowingNullable, SearchAndSubscriptAcrossPhysicalChunks) {
                     N,
                     raw_data.row_ids_.data(),
                     raw_data.timestamps_.data(),
-                    raw_data.raw_);
+                    raw_data.SharedRaw());
 
     auto growing_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
     ASSERT_NE(growing_impl, nullptr);
@@ -5278,4 +5312,1639 @@ TEST(ElementFilterGrowingNullable, SearchAndSubscriptAcrossPhysicalChunks) {
     EXPECT_EQ(out_rows[1].float_vector().data_size(), 0);
     ASSERT_EQ(out_rows[2].float_vector().data_size(), dim);
     EXPECT_FLOAT_EQ(out_rows[2].float_vector().data(0), 1.0f);
+}
+
+// Element-level brute-force search on an element-nullable VECTOR_ARRAY. The
+// column stores only valid vectors; search must filter and report logical
+// element ids (null elements keep their slot) and never return a null
+// element. Results are checked against an exact oracle and against the same
+// data in a non-element-nullable field whose null positions are filtered out.
+namespace {
+
+constexpr int kEnDim = 4;
+constexpr int64_t kEnRows = 48;
+constexpr int64_t kEnTopK = 12;
+constexpr int32_t kEnPriceFloor = 50;
+
+struct ElementNullableLayout {
+    // vectors[row][elem] holds kEnDim floats for every logical element.
+    std::vector<std::vector<std::vector<float>>> vectors;
+    std::vector<std::vector<bool>> element_valid;
+    std::vector<bool> row_valid;
+};
+
+inline int32_t
+EnPrice(int64_t row, int64_t elem) {
+    return static_cast<int32_t>(row * 10 + elem + 1);
+}
+
+// Row r has r % 4 logical elements; every 7th row has three null elements;
+// other rows null every element with (r + j) % 3 == 1. With row nulls
+// enabled, every 11th row is null and contributes no elements.
+inline ElementNullableLayout
+MakeElementNullableLayout(bool with_null_rows) {
+    std::mt19937 rng(20261019);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    ElementNullableLayout layout;
+    layout.vectors.resize(kEnRows);
+    layout.element_valid.resize(kEnRows);
+    layout.row_valid.resize(kEnRows);
+    for (int64_t r = 0; r < kEnRows; ++r) {
+        const bool row_valid = !(with_null_rows && r % 11 == 6);
+        const bool all_null = r % 7 == 3;
+        const int64_t len = !row_valid ? 0 : (all_null ? 3 : r % 4);
+        layout.row_valid[r] = row_valid;
+        for (int64_t j = 0; j < len; ++j) {
+            std::vector<float> v(kEnDim);
+            for (auto& x : v) {
+                x = dist(rng);
+            }
+            layout.vectors[r].push_back(std::move(v));
+            layout.element_valid[r].push_back(!all_null && (r + j) % 3 != 1);
+        }
+    }
+    return layout;
+}
+
+struct ElementNullableSchema {
+    SchemaPtr schema;
+    FieldId vec;
+    FieldId price;
+    FieldId pk;
+};
+
+inline ElementNullableSchema
+MakeElementNullableSchema(bool element_nullable, bool row_nullable) {
+    ElementNullableSchema s;
+    s.schema = std::make_shared<Schema>();
+    s.vec = s.schema->AddDebugVectorArrayField("structA[vec]",
+                                               DataType::VECTOR_FLOAT,
+                                               kEnDim,
+                                               knowhere::metric::L2,
+                                               row_nullable,
+                                               element_nullable);
+    s.price =
+        s.schema->AddDebugArrayField("structA[price]", DataType::INT32, false);
+    s.pk = s.schema->AddDebugField("id", DataType::INT64);
+    s.schema->set_primary_field_id(s.pk);
+    return s;
+}
+
+// element_nullable=true stores null elements as nulls. Otherwise every
+// logical vector is stored and null positions get price -1, so an
+// element_filter on price > kEnPriceFloor drops exactly those positions.
+inline GeneratedData
+BuildElementNullableData(const ElementNullableSchema& s,
+                         const ElementNullableLayout& layout,
+                         int64_t row_begin,
+                         int64_t row_end,
+                         bool element_nullable,
+                         bool row_nullable) {
+    auto insert = std::make_unique<InsertRecordProto>();
+    const auto n = row_end - row_begin;
+    insert->set_num_rows(n);
+
+    auto* pk_data = insert->add_fields_data();
+    pk_data->set_field_id(s.pk.get());
+    pk_data->set_type(proto::schema::DataType::Int64);
+
+    auto* price_data = insert->add_fields_data();
+    price_data->set_field_id(s.price.get());
+    price_data->set_type(proto::schema::DataType::Array);
+    auto* price_rows = price_data->mutable_scalars()->mutable_array_data();
+    price_rows->set_element_type(proto::schema::DataType::Int32);
+
+    auto* vec_data = insert->add_fields_data();
+    vec_data->set_field_id(s.vec.get());
+    vec_data->set_type(proto::schema::DataType::ArrayOfVector);
+    vec_data->mutable_vectors()->set_dim(kEnDim);
+    auto* vec_rows = vec_data->mutable_vectors()->mutable_vector_array();
+    vec_rows->set_dim(kEnDim);
+    vec_rows->set_element_type(proto::schema::DataType::FloatVector);
+
+    for (int64_t r = row_begin; r < row_end; ++r) {
+        pk_data->mutable_scalars()->mutable_long_data()->add_data(r);
+        auto* price_row = price_rows->add_data();
+        price_row->mutable_int_data();
+        auto* vec_row = vec_rows->add_data();
+        vec_row->set_dim(kEnDim);
+        vec_row->mutable_float_vector();
+        if (row_nullable) {
+            vec_data->mutable_vectors()->add_valid_data(layout.row_valid[r]);
+        }
+        for (size_t j = 0; j < layout.vectors[r].size(); ++j) {
+            const bool valid = layout.element_valid[r][j];
+            price_row->mutable_int_data()->add_data(
+                element_nullable || valid ? EnPrice(r, j) : -1);
+            if (element_nullable) {
+                vec_row->add_valid_data(valid);
+                if (!valid) {
+                    continue;
+                }
+            }
+            vec_row->mutable_float_vector()->mutable_data()->Add(
+                layout.vectors[r][j].begin(), layout.vectors[r][j].end());
+        }
+    }
+
+    GeneratedData data(std::move(insert));
+    for (int64_t r = row_begin; r < row_end; ++r) {
+        data.row_ids_.push_back(r);
+        data.timestamps_.push_back(static_cast<Timestamp>(r + 1));
+    }
+    data.schema_ = s.schema;
+    return data;
+}
+
+// Storage V1 binlogs cannot carry element-nullable VECTOR_ARRAY, so the sealed
+// segment is written through storage V3. Rows are written in two batches so
+// more than one chunk is produced and per-chunk logical element starts are
+// exercised.
+inline std::unique_ptr<SegmentSealed>
+CreateElementNullableSealed(const ElementNullableSchema& s,
+                            const ElementNullableLayout& layout,
+                            bool element_nullable) {
+    // Storage V3 segments carry the system columns.
+    s.schema->AddField(
+        FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
+    s.schema->AddField(FieldName("Timestamp"),
+                       TimestampFieldID,
+                       DataType::INT64,
+                       false,
+                       std::nullopt);
+    auto loon_schema = s.schema->ConvertToLoonArrowSchema();
+    const auto& field_ids = s.schema->get_field_ids();
+    auto build_batch = [&](int64_t row_begin, int64_t row_end) {
+        auto data = BuildElementNullableData(
+            s, layout, row_begin, row_end, element_nullable, false);
+        const auto n = row_end - row_begin;
+        arrow::ArrayVector columns;
+        for (size_t i = 0; i < field_ids.size(); ++i) {
+            const auto fid = field_ids[i];
+            std::shared_ptr<arrow::Array> array;
+            if (fid == s.vec && element_nullable) {
+                // list<binary>: null entries are null elements.
+                arrow::ListBuilder list(
+                    arrow::default_memory_pool(),
+                    std::make_shared<arrow::BinaryBuilder>());
+                auto* values =
+                    static_cast<arrow::BinaryBuilder*>(list.value_builder());
+                for (int64_t r = row_begin; r < row_end; ++r) {
+                    AssertInfo(list.Append().ok(), "append row failed");
+                    for (size_t j = 0; j < layout.vectors[r].size(); ++j) {
+                        auto st = layout.element_valid[r][j]
+                                      ? values->Append(
+                                            reinterpret_cast<const uint8_t*>(
+                                                layout.vectors[r][j].data()),
+                                            kEnDim * sizeof(float))
+                                      : values->AppendNull();
+                        AssertInfo(st.ok(), "append element failed");
+                    }
+                }
+                AssertInfo(list.Finish(&array).ok(), "finish failed");
+            } else if (fid == RowFieldID || fid == TimestampFieldID) {
+                arrow::Int64Builder builder;
+                for (int64_t r = row_begin; r < row_end; ++r) {
+                    AssertInfo(
+                        builder.Append(fid == TimestampFieldID ? r + 1 : r)
+                            .ok(),
+                        "append failed");
+                }
+                AssertInfo(builder.Finish(&array).ok(), "finish failed");
+            } else {
+                const DataArray* field_array = nullptr;
+                for (const auto& fd : data.raw_->fields_data()) {
+                    if (fd.field_id() == fid.get()) {
+                        field_array = &fd;
+                    }
+                }
+                AssertInfo(field_array != nullptr, "missing field data");
+                auto field_data = CreateFieldDataFromDataArray(
+                    n, field_array, (*s.schema)[fid]);
+                auto wrapper =
+                    storage::ConvertFieldDataToArrowDataWrapper(field_data);
+                std::shared_ptr<arrow::RecordBatch> batch;
+                AssertInfo(wrapper->reader->ReadNext(&batch).ok() && batch,
+                           "read field data failed");
+                array = batch->column(0);
+            }
+            columns.push_back(std::move(array));
+        }
+        return arrow::RecordBatch::Make(loon_schema, n, columns);
+    };
+
+    const int64_t split = kEnRows / 2 + 1;
+    const auto segment_path =
+        (std::filesystem::temp_directory_path() /
+         ("milvus_element_nullable_vector_v3_" +
+          std::to_string(
+              std::chrono::steady_clock::now().time_since_epoch().count())))
+            .string();
+    // One commit per batch, so each batch lands in its own file and chunk.
+    int64_t version = 0;
+    for (auto [begin, end] : {std::pair<int64_t, int64_t>{0, split},
+                              std::pair<int64_t, int64_t>{split, kEnRows}}) {
+        version = test::WriteRecordBatchesToV3(
+            s.schema,
+            segment_path,
+            {build_batch(begin, end)},
+            test::GenerateColumnGroupPattern(s.schema));
+    }
+
+    proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_collectionid(kCollectionID);
+    load_info.set_partitionid(kPartitionID);
+    load_info.set_segmentid(kSegmentID);
+    load_info.set_storageversion(STORAGE_V3);
+    load_info.set_num_of_rows(kEnRows);
+    load_info.set_manifest_path("{\"base_path\":\"" + segment_path +
+                                "\",\"ver\":" + std::to_string(version) + "}");
+    load_info.set_insert_channel("element-nullable-vector-test");
+    auto segment = CreateSealedSegment(s.schema, empty_index_meta, kSegmentID);
+    segment->SetLoadInfo(load_info);
+    // Keep one file per cell; the default target merges them into one chunk.
+    const auto cell_target =
+        segcore::storagev2translator::GetCellTargetSizeBytes();
+    segcore::storagev2translator::SetCellTargetSizeBytes(1);
+    milvus::tracer::TraceContext trace_ctx;
+    segment->Load(trace_ctx, nullptr);
+    segcore::storagev2translator::SetCellTargetSizeBytes(cell_target);
+    return segment;
+}
+
+inline SegmentGrowingPtr
+CreateElementNullableGrowing(const ElementNullableSchema& s,
+                             const ElementNullableLayout& layout,
+                             bool element_nullable) {
+    auto config = SegcoreConfig::default_config();
+    config.set_chunk_rows(5);
+    config.set_enable_interim_segment_index(false);
+    auto segment = CreateGrowingSegment(s.schema, empty_index_meta, 1, config);
+    auto data =
+        BuildElementNullableData(s, layout, 0, kEnRows, element_nullable, true);
+    segment->PreInsert(kEnRows);
+    segment->Insert(0,
+                    kEnRows,
+                    data.row_ids_.data(),
+                    data.timestamps_.data(),
+                    data.SharedRaw());
+    return segment;
+}
+
+inline const std::vector<float>&
+EnQuery() {
+    static const std::vector<float> query{0.1f, -0.2f, 0.3f, 0.05f};
+    return query;
+}
+
+struct EnHit {
+    int64_t row;
+    int32_t elem;
+    float distance;
+};
+
+// Exact top hits over valid elements accepted by `accept`, ascending L2.
+inline std::vector<EnHit>
+EnOracle(const ElementNullableLayout& layout,
+         const std::function<bool(int64_t, int64_t)>& accept) {
+    std::vector<EnHit> hits;
+    for (int64_t r = 0; r < kEnRows; ++r) {
+        for (size_t j = 0; j < layout.vectors[r].size(); ++j) {
+            if (!layout.element_valid[r][j] || !accept(r, j)) {
+                continue;
+            }
+            float d = 0;
+            for (int k = 0; k < kEnDim; ++k) {
+                const auto diff = layout.vectors[r][j][k] - EnQuery()[k];
+                d += diff * diff;
+            }
+            hits.push_back({r, static_cast<int32_t>(j), d});
+        }
+    }
+    std::sort(hits.begin(), hits.end(), [](const auto& a, const auto& b) {
+        return a.distance < b.distance;
+    });
+    return hits;
+}
+
+inline std::vector<EnHit>
+EnCollect(const SearchResult& sr) {
+    EXPECT_TRUE(sr.element_level_);
+    EXPECT_EQ(sr.element_indices_.size(), sr.seg_offsets_.size());
+    std::vector<EnHit> hits;
+    for (size_t i = 0; i < sr.seg_offsets_.size(); ++i) {
+        if (sr.seg_offsets_[i] == INVALID_SEG_OFFSET) {
+            continue;
+        }
+        hits.push_back(
+            {sr.seg_offsets_[i], sr.element_indices_[i], sr.distances_[i]});
+    }
+    return hits;
+}
+
+inline void
+ExpectEnHits(const std::vector<EnHit>& actual,
+             const std::vector<EnHit>& expected,
+             const ElementNullableLayout& layout,
+             const std::string& context) {
+    for (const auto& hit : actual) {
+        ASSERT_GE(hit.row, 0) << context;
+        ASSERT_LT(hit.row, kEnRows) << context;
+        ASSERT_GE(hit.elem, 0) << context;
+        ASSERT_LT(hit.elem,
+                  static_cast<int32_t>(layout.vectors[hit.row].size()))
+            << context;
+        EXPECT_TRUE(layout.element_valid[hit.row][hit.elem])
+            << context << ": returned null element (row=" << hit.row
+            << ", elem=" << hit.elem << ")";
+    }
+    ASSERT_EQ(actual.size(), expected.size()) << context;
+    for (size_t i = 0; i < actual.size(); ++i) {
+        EXPECT_EQ(actual[i].row, expected[i].row) << context << " at " << i;
+        EXPECT_EQ(actual[i].elem, expected[i].elem) << context << " at " << i;
+        EXPECT_NEAR(actual[i].distance, expected[i].distance, 1e-4f)
+            << context << " at " << i;
+    }
+}
+
+inline std::unique_ptr<SearchResult>
+EnSearch(SegmentInterface* segment,
+         const ElementNullableSchema& s,
+         const std::string& expr,
+         const std::string& search_params) {
+    ScopedSchemaHandle handle(*s.schema);
+    auto plan_bytes = handle.ParseSearch(
+        expr, "structA[vec]", kEnTopK, knowhere::metric::L2, search_params);
+    auto plan =
+        CreateSearchPlanByExpr(s.schema, plan_bytes.data(), plan_bytes.size());
+    auto ph_group_raw = MakeElementLevelPlaceholder(EnQuery());
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    return segment->Search(plan.get(), ph_group.get(), 1L << 63);
+}
+
+inline std::unique_ptr<SearchResult>
+EnSearchIterator(SegmentInterface* segment,
+                 const ElementNullableSchema& s,
+                 const std::string& expr) {
+    ScopedSchemaHandle handle(*s.schema);
+    auto plan_bytes = handle.ParseSearchIterator(
+        expr, "structA[vec]", kEnTopK, knowhere::metric::L2, "{}", kEnTopK);
+    auto plan =
+        CreateSearchPlanByExpr(s.schema, plan_bytes.data(), plan_bytes.size());
+    auto ph_group_raw = MakeElementLevelPlaceholder(EnQuery());
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    return segment->Search(plan.get(), ph_group.get(), 1L << 63);
+}
+
+inline std::vector<EnHit>
+EnTop(std::vector<EnHit> hits, size_t k) {
+    if (hits.size() > k) {
+        hits.resize(k);
+    }
+    return hits;
+}
+
+// Runs every search shape on `nullable_segment` and checks it against the
+// oracle and against `reference_segment` (non-element-nullable, same data).
+inline void
+CheckElementNullableSearches(SegmentInterface* nullable_segment,
+                             const ElementNullableSchema& nullable_schema,
+                             SegmentInterface* reference_segment,
+                             const ElementNullableSchema& reference_schema,
+                             const ElementNullableLayout& layout,
+                             const std::string& tag) {
+    auto price_ok = [](int64_t r, int64_t j) {
+        return EnPrice(r, j) > kEnPriceFloor;
+    };
+
+    // No filter: every valid element is a candidate.
+    {
+        auto sr = EnSearch(nullable_segment, nullable_schema, "", "{}");
+        ASSERT_NE(sr, nullptr);
+        auto expected = EnTop(
+            EnOracle(layout, [](int64_t, int64_t) { return true; }), kEnTopK);
+        ExpectEnHits(EnCollect(*sr), expected, layout, tag + " no filter");
+    }
+
+    // element_filter produces an element-level bitset.
+    const std::string element_expr =
+        "id % 2 == 0 && element_filter(structA, $[price] > " +
+        std::to_string(kEnPriceFloor) + ")";
+    auto element_accept = [&](int64_t r, int64_t j) {
+        return r % 2 == 0 && price_ok(r, j);
+    };
+    {
+        auto sr =
+            EnSearch(nullable_segment, nullable_schema, element_expr, "{}");
+        ASSERT_NE(sr, nullptr);
+        auto actual = EnCollect(*sr);
+        ExpectEnHits(actual,
+                     EnTop(EnOracle(layout, element_accept), kEnTopK),
+                     layout,
+                     tag + " element_filter");
+
+        auto ref =
+            EnSearch(reference_segment, reference_schema, element_expr, "{}");
+        ASSERT_NE(ref, nullptr);
+        ExpectEnHits(actual,
+                     EnCollect(*ref),
+                     layout,
+                     tag + " element_filter vs non-nullable");
+    }
+
+    // MATCH_ANY produces a row-level bitset that search expands to elements.
+    {
+        const std::string expr = "match_any(structA, $[price] > 150)";
+        auto sr = EnSearch(nullable_segment, nullable_schema, expr, "{}");
+        ASSERT_NE(sr, nullptr);
+        auto accept = [&](int64_t r, int64_t) {
+            for (size_t j = 0; j < layout.vectors[r].size(); ++j) {
+                if (EnPrice(r, j) > 150) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        ExpectEnHits(EnCollect(*sr),
+                     EnTop(EnOracle(layout, accept), kEnTopK),
+                     layout,
+                     tag + " match_any");
+    }
+
+    // Range search with an element-level bitset.
+    {
+        auto all = EnOracle(layout, element_accept);
+        ASSERT_GT(all.size(), static_cast<size_t>(4));
+        const size_t cut = all.size() / 2;
+        const float radius = (all[cut - 1].distance + all[cut].distance) / 2.0f;
+        const std::string params = R"({"radius": )" + std::to_string(radius) +
+                                   R"(, "range_filter": 0.0})";
+        auto sr =
+            EnSearch(nullable_segment, nullable_schema, element_expr, params);
+        ASSERT_NE(sr, nullptr);
+        all.resize(cut);
+        ExpectEnHits(EnCollect(*sr),
+                     EnTop(std::move(all), kEnTopK),
+                     layout,
+                     tag + " range search");
+
+        auto ref =
+            EnSearch(reference_segment, reference_schema, element_expr, params);
+        ASSERT_NE(ref, nullptr);
+        ExpectEnHits(EnCollect(*sr),
+                     EnCollect(*ref),
+                     layout,
+                     tag + " range search vs non-nullable");
+    }
+
+    // Search iterator v2 over the brute-force chunk iterators.
+    {
+        auto sr =
+            EnSearchIterator(nullable_segment, nullable_schema, element_expr);
+        ASSERT_NE(sr, nullptr);
+        ExpectEnHits(EnCollect(*sr),
+                     EnTop(EnOracle(layout, element_accept), kEnTopK),
+                     layout,
+                     tag + " iterator v2");
+    }
+}
+
+}  // namespace
+
+TEST(ElementNullableVectorSearch, SealedBruteForceUsesLogicalElementIds) {
+    auto layout = MakeElementNullableLayout(/*with_null_rows=*/false);
+    auto nullable_schema = MakeElementNullableSchema(true, false);
+    auto reference_schema = MakeElementNullableSchema(false, false);
+    auto nullable_segment =
+        CreateElementNullableSealed(nullable_schema, layout, true);
+    auto reference_segment =
+        CreateElementNullableSealed(reference_schema, layout, false);
+    ASSERT_GT(nullable_segment->num_chunk(nullable_schema.vec), 1);
+
+    auto offsets =
+        nullable_segment->GetStructElementOffsets(nullable_schema.vec);
+    ASSERT_NE(offsets, nullptr);
+    int64_t logical_total = 0;
+    for (const auto& row : layout.vectors) {
+        logical_total += row.size();
+    }
+    ASSERT_EQ(offsets->GetTotalElementCount(), logical_total);
+
+    CheckElementNullableSearches(nullable_segment.get(),
+                                 nullable_schema,
+                                 reference_segment.get(),
+                                 reference_schema,
+                                 layout,
+                                 "sealed");
+}
+
+TEST(ElementNullableVectorSearch, GrowingBruteForceUsesLogicalElementIds) {
+    auto layout = MakeElementNullableLayout(/*with_null_rows=*/true);
+    auto nullable_schema = MakeElementNullableSchema(true, true);
+    auto reference_schema = MakeElementNullableSchema(false, true);
+    auto nullable_segment =
+        CreateElementNullableGrowing(nullable_schema, layout, true);
+    auto reference_segment =
+        CreateElementNullableGrowing(reference_schema, layout, false);
+
+    auto* growing = dynamic_cast<SegmentGrowingImpl*>(nullable_segment.get());
+    ASSERT_NE(growing, nullptr);
+    auto offsets = growing->GetStructElementOffsets(nullable_schema.vec);
+    ASSERT_NE(offsets, nullptr);
+    int64_t logical_total = 0;
+    for (const auto& row : layout.vectors) {
+        logical_total += row.size();
+    }
+    ASSERT_EQ(offsets->GetTotalElementCount(), logical_total);
+
+    CheckElementNullableSearches(nullable_segment.get(),
+                                 nullable_schema,
+                                 reference_segment.get(),
+                                 reference_schema,
+                                 layout,
+                                 "growing");
+}
+
+// Element-level ANN on an element-nullable vector sub-field whose
+// element_filter references element-nullable sub-fields: a scalar compare,
+// `$[tag] IS NULL`, and `$[vec] IS NULL`. A null `tag` makes a compare
+// UNKNOWN, so the element is not selected; a null vector is never a hit.
+namespace {
+
+// tag of element (r, j): null when (r + 2j) % 4 == 0, else (10r + j) % 7.
+inline std::optional<int64_t>
+EnTag(int64_t row, int64_t elem) {
+    if ((row + 2 * elem) % 4 == 0) {
+        return std::nullopt;
+    }
+    return (row * 10 + elem) % 7;
+}
+
+struct ElementNullableFilterSchema {
+    SchemaPtr schema;
+    FieldId vec;
+    FieldId price;
+    FieldId tag;
+    FieldId pk;
+};
+
+inline ElementNullableFilterSchema
+MakeElementNullableFilterSchema(bool row_nullable) {
+    ElementNullableFilterSchema s;
+    s.schema = std::make_shared<Schema>();
+    s.vec = s.schema->AddDebugVectorArrayField("structA[vec]",
+                                               DataType::VECTOR_FLOAT,
+                                               kEnDim,
+                                               knowhere::metric::L2,
+                                               row_nullable,
+                                               true);
+    s.price = s.schema->AddDebugArrayField(
+        "structA[price]", DataType::INT32, row_nullable);
+    s.tag = s.schema->AddDebugArrayField(
+        "structA[tag]", DataType::INT64, row_nullable, true);
+    s.pk = s.schema->AddDebugField("id", DataType::INT64);
+    s.schema->set_primary_field_id(s.pk);
+    return s;
+}
+
+inline std::unique_ptr<InsertRecordProto>
+BuildElementNullableFilterData(const ElementNullableFilterSchema& s,
+                               const ElementNullableLayout& layout,
+                               int64_t row_begin,
+                               int64_t row_end,
+                               bool row_nullable) {
+    auto insert = std::make_unique<InsertRecordProto>();
+    insert->set_num_rows(row_end - row_begin);
+    auto* pk_data = insert->add_fields_data();
+    pk_data->set_field_id(s.pk.get());
+    pk_data->set_type(proto::schema::DataType::Int64);
+
+    auto add_array_field = [&](FieldId id, proto::schema::DataType element) {
+        auto* field = insert->add_fields_data();
+        field->set_field_id(id.get());
+        field->set_type(proto::schema::DataType::Array);
+        if (row_nullable) {
+            for (int64_t r = row_begin; r < row_end; ++r) {
+                field->mutable_scalars()->add_valid_data(layout.row_valid[r]);
+            }
+        }
+        auto* rows = field->mutable_scalars()->mutable_array_data();
+        rows->set_element_type(element);
+        return rows;
+    };
+    auto* price_rows = add_array_field(s.price, proto::schema::DataType::Int32);
+    auto* tag_rows = add_array_field(s.tag, proto::schema::DataType::Int64);
+
+    auto* vec_data = insert->add_fields_data();
+    vec_data->set_field_id(s.vec.get());
+    vec_data->set_type(proto::schema::DataType::ArrayOfVector);
+    vec_data->mutable_vectors()->set_dim(kEnDim);
+    auto* vec_rows = vec_data->mutable_vectors()->mutable_vector_array();
+    vec_rows->set_dim(kEnDim);
+    vec_rows->set_element_type(proto::schema::DataType::FloatVector);
+
+    for (int64_t r = row_begin; r < row_end; ++r) {
+        pk_data->mutable_scalars()->mutable_long_data()->add_data(r);
+        auto* price_row = price_rows->add_data();
+        price_row->mutable_int_data();
+        auto* tag_row = tag_rows->add_data();
+        tag_row->mutable_long_data();
+        auto* vec_row = vec_rows->add_data();
+        vec_row->set_dim(kEnDim);
+        vec_row->mutable_float_vector();
+        if (row_nullable) {
+            vec_data->mutable_vectors()->add_valid_data(layout.row_valid[r]);
+        }
+        for (size_t j = 0; j < layout.vectors[r].size(); ++j) {
+            price_row->mutable_int_data()->add_data(EnPrice(r, j));
+            const auto tag = EnTag(r, j);
+            tag_row->mutable_long_data()->add_data(tag.value_or(0));
+            tag_row->add_valid_data(tag.has_value());
+            const bool valid = layout.element_valid[r][j];
+            vec_row->add_valid_data(valid);
+            if (valid) {
+                vec_row->mutable_float_vector()->mutable_data()->Add(
+                    layout.vectors[r][j].begin(), layout.vectors[r][j].end());
+            }
+        }
+    }
+    return insert;
+}
+
+// Storage V3, two batches committed separately so the segment has two
+// chunks. Only the sub-fields of `s.schema` are written, so a schema without
+// `s.vec` writes a segment from before the vector sub-field was added.
+inline std::unique_ptr<SegmentSealed>
+CreateElementNullableFilterSealed(const ElementNullableFilterSchema& s,
+                                  const ElementNullableLayout& layout,
+                                  const std::string& segment_path,
+                                  bool row_nullable = false) {
+    s.schema->AddField(
+        FieldName("RowID"), RowFieldID, DataType::INT64, false, std::nullopt);
+    s.schema->AddField(FieldName("Timestamp"),
+                       TimestampFieldID,
+                       DataType::INT64,
+                       false,
+                       std::nullopt);
+    auto loon_schema = s.schema->ConvertToLoonArrowSchema();
+    auto build_batch = [&](int64_t row_begin, int64_t row_end) {
+        auto insert = BuildElementNullableFilterData(
+            s, layout, row_begin, row_end, row_nullable);
+        const auto n = row_end - row_begin;
+        std::unordered_map<FieldId, std::shared_ptr<arrow::Array>> columns;
+        for (auto id : {RowFieldID, TimestampFieldID}) {
+            arrow::Int64Builder builder;
+            for (int64_t r = row_begin; r < row_end; ++r) {
+                AssertInfo(
+                    builder.Append(id == TimestampFieldID ? r + 1 : r).ok(),
+                    "append failed");
+            }
+            std::shared_ptr<arrow::Array> array;
+            AssertInfo(builder.Finish(&array).ok(), "finish failed");
+            columns[id] = array;
+        }
+        for (const auto& field_data : insert->fields_data()) {
+            const FieldId id(field_data.field_id());
+            if (!s.schema->has_field(id)) {
+                continue;
+            }
+            auto converted = FieldDataToArrow(std::to_string(id.get()),
+                                              field_data,
+                                              n,
+                                              false,
+                                              nullptr,
+                                              &(*s.schema)[id]);
+            AssertInfo(converted.ok(),
+                       "convert field {}: {}",
+                       id.get(),
+                       converted.status().ToString());
+            columns[id] = converted->second;
+        }
+        arrow::ArrayVector ordered;
+        for (const auto& id : s.schema->get_field_ids()) {
+            ordered.push_back(columns.at(id));
+        }
+        return arrow::RecordBatch::Make(loon_schema, n, ordered);
+    };
+
+    const int64_t split = kEnRows / 2 + 1;
+    int64_t version = 0;
+    for (auto [begin, end] : {std::pair<int64_t, int64_t>{0, split},
+                              std::pair<int64_t, int64_t>{split, kEnRows}}) {
+        version = test::WriteRecordBatchesToV3(
+            s.schema,
+            segment_path,
+            {build_batch(begin, end)},
+            test::GenerateColumnGroupPattern(s.schema));
+    }
+
+    proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_collectionid(kCollectionID);
+    load_info.set_partitionid(kPartitionID);
+    load_info.set_segmentid(kSegmentID);
+    load_info.set_storageversion(STORAGE_V3);
+    load_info.set_num_of_rows(kEnRows);
+    load_info.set_manifest_path("{\"base_path\":\"" + segment_path +
+                                "\",\"ver\":" + std::to_string(version) + "}");
+    load_info.set_insert_channel("element-nullable-filter-test");
+    auto segment = CreateSealedSegment(s.schema, empty_index_meta, kSegmentID);
+    segment->SetLoadInfo(load_info);
+    const auto cell_target =
+        segcore::storagev2translator::GetCellTargetSizeBytes();
+    segcore::storagev2translator::SetCellTargetSizeBytes(1);
+    milvus::tracer::TraceContext trace_ctx;
+    segment->Load(trace_ctx, nullptr);
+    segcore::storagev2translator::SetCellTargetSizeBytes(cell_target);
+    return segment;
+}
+
+inline SegmentGrowingPtr
+CreateElementNullableFilterGrowing(const ElementNullableFilterSchema& s,
+                                   const ElementNullableLayout& layout) {
+    auto config = SegcoreConfig::default_config();
+    config.set_chunk_rows(5);
+    config.set_enable_interim_segment_index(false);
+    auto segment = CreateGrowingSegment(s.schema, empty_index_meta, 1, config);
+    std::vector<int64_t> row_ids(kEnRows);
+    std::vector<Timestamp> timestamps(kEnRows);
+    for (int64_t r = 0; r < kEnRows; ++r) {
+        row_ids[r] = r;
+        timestamps[r] = static_cast<Timestamp>(r + 1);
+    }
+    segment->PreInsert(kEnRows);
+    segment->Insert(
+        0,
+        kEnRows,
+        row_ids.data(),
+        timestamps.data(),
+        std::shared_ptr<InsertRecordProto>(
+            BuildElementNullableFilterData(s, layout, 0, kEnRows, true)));
+    return segment;
+}
+
+inline std::unique_ptr<SearchResult>
+EnFilterSearch(SegmentInterface* segment,
+               const ElementNullableFilterSchema& s,
+               const std::string& expr,
+               const std::string& hints = "",
+               const std::string& search_params = "{}") {
+    ScopedSchemaHandle handle(*s.schema);
+    auto plan_bytes = handle.ParseSearch(expr,
+                                         "structA[vec]",
+                                         kEnTopK,
+                                         knowhere::metric::L2,
+                                         search_params,
+                                         -1,
+                                         hints);
+    auto plan =
+        CreateSearchPlanByExpr(s.schema, plan_bytes.data(), plan_bytes.size());
+    auto ph_group_raw = MakeElementLevelPlaceholder(EnQuery());
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    return segment->Search(plan.get(), ph_group.get(), 1L << 63);
+}
+
+// Three-valued element predicates over the layout: 1 TRUE, 0 FALSE,
+// -1 UNKNOWN. Only TRUE elements are selected.
+inline int
+EnTagTv(int64_t row, int64_t elem, const std::function<bool(int64_t)>& pred) {
+    const auto tag = EnTag(row, elem);
+    return tag.has_value() ? int(pred(*tag)) : -1;
+}
+
+// For an approximate index: every hit is an element in `accepted` (all
+// accepted valid elements, ascending) with the distance of the vector at its
+// logical position, hits are unique and sorted, and at most the top-k are
+// returned.
+inline void
+ExpectEnHitsAccepted(const std::vector<EnHit>& actual,
+                     const std::vector<EnHit>& accepted,
+                     const ElementNullableLayout& layout,
+                     const std::string& context) {
+    std::map<std::pair<int64_t, int32_t>, float> distance_of;
+    for (const auto& hit : accepted) {
+        distance_of[{hit.row, hit.elem}] = hit.distance;
+    }
+    std::set<std::pair<int64_t, int32_t>> seen;
+    for (size_t i = 0; i < actual.size(); ++i) {
+        const auto& hit = actual[i];
+        ASSERT_GE(hit.row, 0) << context;
+        ASSERT_LT(hit.row, kEnRows) << context;
+        ASSERT_GE(hit.elem, 0) << context;
+        ASSERT_LT(hit.elem,
+                  static_cast<int32_t>(layout.vectors[hit.row].size()))
+            << context;
+        EXPECT_TRUE(layout.element_valid[hit.row][hit.elem])
+            << context << ": returned null element (row=" << hit.row
+            << ", elem=" << hit.elem << ")";
+        auto it = distance_of.find({hit.row, hit.elem});
+        ASSERT_NE(it, distance_of.end())
+            << context << ": element not accepted (row=" << hit.row
+            << ", elem=" << hit.elem << ")";
+        EXPECT_NEAR(hit.distance, it->second, 1e-4f) << context << " at " << i;
+        EXPECT_TRUE(seen.insert({hit.row, hit.elem}).second)
+            << context << ": duplicate hit at " << i;
+        if (i > 0) {
+            EXPECT_LE(actual[i - 1].distance, hit.distance) << context;
+        }
+    }
+    EXPECT_LE(actual.size(),
+              std::min(accepted.size(), static_cast<size_t>(kEnTopK)))
+        << context;
+    EXPECT_EQ(actual.empty(), accepted.empty()) << context;
+}
+
+// `exact` compares with the exact top-k; otherwise (HNSW) the hits are
+// checked with ExpectEnHitsAccepted.
+inline void
+CheckElementNullableFilteredSearches(SegmentInterface* segment,
+                                     const ElementNullableFilterSchema& s,
+                                     const ElementNullableLayout& layout,
+                                     const std::string& tag,
+                                     const std::string& search_params = "{}",
+                                     bool exact = true) {
+    struct Case {
+        std::string expr;
+        // Whether element (r, j) is selected by the filter.
+        std::function<bool(int64_t, int64_t)> accept;
+    };
+    auto tv_or = [](int x, int y) {
+        if (x == 1 || y == 1) {
+            return 1;
+        }
+        return x == -1 || y == -1 ? -1 : 0;
+    };
+    const std::vector<Case> cases = {
+        {"element_filter(structA, $[tag] > 3)",
+         [](int64_t r, int64_t j) {
+             return EnTagTv(r, j, [](int64_t t) { return t > 3; }) == 1;
+         }},
+        // NOT keeps UNKNOWN: a null tag is selected by neither.
+        {"element_filter(structA, !($[tag] > 3))",
+         [](int64_t r, int64_t j) {
+             return EnTagTv(r, j, [](int64_t t) { return t > 3; }) == 0;
+         }},
+        {"element_filter(structA, $[tag] in [1, 2])",
+         [](int64_t r, int64_t j) {
+             return EnTagTv(r, j, [](int64_t t) { return t == 1 || t == 2; }) ==
+                    1;
+         }},
+        {"element_filter(structA, $[tag] IS NULL)",
+         [](int64_t r, int64_t j) { return !EnTag(r, j).has_value(); }},
+        {"element_filter(structA, $[tag] IS NOT NULL && $[price] > 50)",
+         [](int64_t r, int64_t j) {
+             return EnTag(r, j).has_value() && EnPrice(r, j) > kEnPriceFloor;
+         }},
+        {"element_filter(structA, $[tag] != 1 || $[tag] IS NULL)",
+         [tv_or](int64_t r, int64_t j) {
+             return tv_or(EnTagTv(r, j, [](int64_t t) { return t != 1; }),
+                          EnTag(r, j).has_value() ? 0 : 1) == 1;
+         }},
+        {"id % 2 == 0 && element_filter(structA, $[tag] == 0 || $[price] < 30)",
+         [tv_or](int64_t r, int64_t j) {
+             return r % 2 == 0 &&
+                    tv_or(EnTagTv(r, j, [](int64_t t) { return t == 0; }),
+                          EnPrice(r, j) < 30 ? 1 : 0) == 1;
+         }},
+        // A null vector is never a hit, whatever the filter says.
+        {"element_filter(structA, $[vec] IS NULL)",
+         [](int64_t, int64_t) { return true; }},
+        {"element_filter(structA, $[vec] IS NOT NULL)",
+         [](int64_t, int64_t) { return true; }},
+        {"element_filter(structA, $[vec] IS NOT NULL && $[tag] IS NULL)",
+         [](int64_t r, int64_t j) { return !EnTag(r, j).has_value(); }},
+        // MATCH_ANY selects whole rows: every valid element of a row with a
+        // null tag.
+        {"match_any(structA, $[tag] IS NULL)",
+         [&layout](int64_t r, int64_t) {
+             for (size_t j = 0; j < layout.vectors[r].size(); ++j) {
+                 if (!EnTag(r, j).has_value()) {
+                     return true;
+                 }
+             }
+             return false;
+         }},
+    };
+    for (const auto& c : cases) {
+        for (const auto& hints :
+             {std::string{}, std::string{ITERATIVE_FILTER}}) {
+            const auto label = tag + " " + c.expr +
+                               (hints.empty() ? "" : " [iterative filter]");
+            std::vector<EnHit> accepted;
+            if (c.expr.find("$[vec] IS NULL") == std::string::npos) {
+                accepted = EnOracle(layout, c.accept);
+            }
+            auto sr = EnFilterSearch(segment, s, c.expr, hints, search_params);
+            ASSERT_NE(sr, nullptr) << label;
+            if (exact) {
+                ExpectEnHits(EnCollect(*sr),
+                             EnTop(std::move(accepted), kEnTopK),
+                             layout,
+                             label);
+            } else {
+                ExpectEnHitsAccepted(EnCollect(*sr), accepted, layout, label);
+            }
+        }
+    }
+}
+
+}  // namespace
+
+TEST(ElementNullableVectorSearch, SealedElementFilterOnElementNullableFields) {
+    auto layout = MakeElementNullableLayout(/*with_null_rows=*/false);
+    auto s = MakeElementNullableFilterSchema(false);
+    const auto segment_path =
+        (std::filesystem::temp_directory_path() /
+         ("milvus_element_nullable_filter_v3_" +
+          std::to_string(
+              std::chrono::steady_clock::now().time_since_epoch().count())))
+            .string();
+    auto directory_guard = folly::makeGuard(
+        [&segment_path] { std::filesystem::remove_all(segment_path); });
+    auto segment = CreateElementNullableFilterSealed(s, layout, segment_path);
+    ASSERT_GT(segment->num_chunk(s.vec), 1);
+    CheckElementNullableFilteredSearches(segment.get(), s, layout, "sealed");
+}
+
+TEST(ElementNullableVectorSearch, GrowingElementFilterOnElementNullableFields) {
+    auto layout = MakeElementNullableLayout(/*with_null_rows=*/true);
+    auto s = MakeElementNullableFilterSchema(true);
+    auto segment = CreateElementNullableFilterGrowing(s, layout);
+    CheckElementNullableFilteredSearches(segment.get(), s, layout, "growing");
+}
+
+// Element-level ANN on an element-nullable vector sub-field with a sealed
+// index, group-by primary key, and a vector sub-field added to an existing
+// struct. Indexes are built by the production materializer, so the knowhere
+// IdMap returns logical element ids.
+namespace {
+
+constexpr int64_t kEnGroups = 5;
+
+// Row r has r % 6 logical elements; every 7th row (r % 7 == 3) has four null
+// elements; otherwise element j is null when (r + 2j) % 5 == 1, so nulls also
+// precede valid elements. With null rows enabled, every 11th row is null and
+// contributes no elements. Rows with r % 6 == 0 have an empty struct array.
+inline ElementNullableLayout
+MakeElementNullableGroupLayout(bool with_null_rows) {
+    std::mt19937 rng(20261020);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    ElementNullableLayout layout;
+    layout.vectors.resize(kEnRows);
+    layout.element_valid.resize(kEnRows);
+    layout.row_valid.resize(kEnRows);
+    for (int64_t r = 0; r < kEnRows; ++r) {
+        const bool row_valid = !(with_null_rows && r % 11 == 6);
+        const bool all_null = r % 7 == 3;
+        const int64_t len = !row_valid ? 0 : (all_null ? 4 : r % 6);
+        layout.row_valid[r] = row_valid;
+        for (int64_t j = 0; j < len; ++j) {
+            std::vector<float> v(kEnDim);
+            for (auto& x : v) {
+                x = dist(rng);
+            }
+            layout.vectors[r].push_back(std::move(v));
+            layout.element_valid[r].push_back(!all_null &&
+                                              (r + 2 * j) % 5 != 1);
+        }
+    }
+    return layout;
+}
+
+// `layout` with every vector of rows [0, row_end) null, as an added vector
+// sub-field reads on rows written before it existed.
+inline ElementNullableLayout
+WithAllVectorsNull(ElementNullableLayout layout, int64_t row_end) {
+    for (int64_t r = 0; r < row_end; ++r) {
+        std::fill(layout.element_valid[r].begin(),
+                  layout.element_valid[r].end(),
+                  false);
+    }
+    return layout;
+}
+
+inline std::string
+EnSegmentPath(const std::string& name) {
+    return (std::filesystem::temp_directory_path() /
+            ("milvus_element_nullable_" + name + "_" +
+             std::to_string(
+                 std::chrono::steady_clock::now().time_since_epoch().count())))
+        .string();
+}
+
+// Builds the element-level index of `layout` through the production
+// materializer: it flattens the stored vectors and passes the element-domain
+// validity, so the IdMap maps internal ids to logical element ids.
+inline BuiltTestIndex
+BuildElementNullableIndex(const ElementNullableLayout& layout,
+                          const std::string& index_type,
+                          Config params) {
+    params[index::METRIC_TYPE] = knowhere::metric::L2;
+    params[DIM_KEY] = kEnDim;
+    auto adapted = index::AdaptIndexType(
+        {.index_type = index_type,
+         .field_type = DataType::VECTOR_ARRAY,
+         .element_type = DataType::VECTOR_FLOAT,
+         .index_engine_version =
+             knowhere::Version::GetCurrentVersion().VersionNumber(),
+         .params = std::move(params)});
+    adapted.params[INDEX_NUM_ROWS_KEY] = kEnRows;
+    adapted.params["nullable"] = true;
+    adapted.params["num_rows"] = kEnRows;
+    adapted.params["local_dir"] = TestRemotePath;
+
+    std::vector<milvus::VectorArray> arrays;
+    std::vector<uint8_t> row_validity((kEnRows + 7) / 8, 0);
+    for (int64_t r = 0; r < kEnRows; ++r) {
+        if (!layout.row_valid[r]) {
+            continue;
+        }
+        row_validity[r / 8] |= static_cast<uint8_t>(1u << (r % 8));
+        const auto len = static_cast<int>(layout.vectors[r].size());
+        TargetBitmap bits(len, false);
+        std::vector<float> values;
+        for (int j = 0; j < len; ++j) {
+            if (layout.element_valid[r][j]) {
+                bits.set(j);
+                values.insert(values.end(),
+                              layout.vectors[r][j].begin(),
+                              layout.vectors[r][j].end());
+            }
+        }
+        arrays.emplace_back(values.data(),
+                            len,
+                            kEnDim,
+                            DataType::VECTOR_FLOAT,
+                            TargetBitmapView(bits.data(), len),
+                            true);
+    }
+    auto data = storage::CreateFieldData(
+        DataType::VECTOR_ARRAY, DataType::VECTOR_FLOAT, true, kEnDim);
+    data->FillFieldData(arrays.data(), row_validity.data(), kEnRows, 0);
+
+    indexbuilder::VectorBuildMaterializer materializer(DataType::VECTOR_ARRAY,
+                                                       DataType::VECTOR_FLOAT,
+                                                       kEnDim,
+                                                       true,
+                                                       kEnRows,
+                                                       adapted.family,
+                                                       adapted.params);
+    materializer.Add(data);
+    return test_index_detail::PersistAndLoad(
+        std::move(materializer).Build(), adapted.family, adapted.params);
+}
+
+inline void
+LoadElementNullableIndex(SegmentSealed* segment,
+                         FieldId vec,
+                         BuiltTestIndex built) {
+    LoadIndexInfo info{};
+    info.field_id = vec.get();
+    SetTestIndexMetadata(info, *built, milvus::index::families::kVectorMem);
+    info.index_params = GenIndexParams(built.get());
+    info.index_params["metric_type"] = knowhere::metric::L2;
+    info.index = CreateTestIndex("test", std::move(built));
+    info.field_type = DataType::VECTOR_ARRAY;
+    info.element_type = DataType::VECTOR_FLOAT;
+    segment->LoadIndex(info);
+}
+
+// An index path, its search params, and whether its iterator and search are
+// exact. IVF_FLAT with one list scans every vector in distance order.
+struct EnIndexCase {
+    std::string label;
+    std::string index_type;
+    Config build;
+    std::string search_params;
+    bool exact;
+};
+
+inline std::vector<EnIndexCase>
+EnIndexCases() {
+    return {
+        {"IVF_FLAT",
+         knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+         Config{{knowhere::indexparam::NLIST, 1}},
+         R"({"nprobe": 1})",
+         true},
+        {"HNSW",
+         knowhere::IndexEnum::INDEX_HNSW,
+         Config{{knowhere::indexparam::HNSW_M, 16},
+                {knowhere::indexparam::EFCONSTRUCTION, 200}},
+         R"({"ef": 128})",
+         false},
+    };
+}
+
+inline std::unique_ptr<SegmentSealed>
+CreateIndexedElementNullableSealed(const ElementNullableFilterSchema& s,
+                                   const ElementNullableLayout& layout,
+                                   const std::string& segment_path,
+                                   const EnIndexCase* index) {
+    auto segment =
+        CreateElementNullableFilterSealed(s, layout, segment_path, true);
+    if (index != nullptr) {
+        LoadElementNullableIndex(
+            segment.get(),
+            s.vec,
+            BuildElementNullableIndex(layout, index->index_type, index->build));
+    }
+    return segment;
+}
+
+inline std::unique_ptr<SearchResult>
+EnGroupBySearch(SegmentInterface* segment,
+                const ElementNullableFilterSchema& s,
+                const std::string& expr,
+                const std::string& search_params,
+                int64_t group_size,
+                bool strict) {
+    ScopedSchemaHandle handle(*s.schema);
+    auto plan_bytes =
+        handle.ParseGroupBySearch(expr,
+                                  "structA[vec]",
+                                  kEnGroups,
+                                  knowhere::metric::L2,
+                                  search_params,
+                                  s.pk.get(),
+                                  group_size,
+                                  "",
+                                  milvus::proto::schema::DataType::None,
+                                  strict);
+    auto plan =
+        CreateSearchPlanByExpr(s.schema, plan_bytes.data(), plan_bytes.size());
+    auto ph_group_raw = MakeElementLevelPlaceholder(EnQuery());
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    return segment->Search(plan.get(), ph_group.get(), 1L << 63);
+}
+
+// Group-by over an exact iterator, which yields the accepted valid elements
+// in ascending distance: each new row opens a group until kEnGroups exist,
+// and a group keeps its first group_size elements. Without strict group
+// size, iteration stops as soon as kEnGroups groups exist; with it, until
+// every group is full or the elements run out.
+inline std::vector<EnHit>
+EnGroupByOracle(const std::vector<EnHit>& accepted,
+                int64_t group_size,
+                bool strict) {
+    std::map<int64_t, int64_t> counts;
+    int64_t full = 0;
+    std::vector<EnHit> result;
+    for (const auto& hit : accepted) {
+        const bool groups_full =
+            static_cast<int64_t>(counts.size()) == kEnGroups;
+        if (groups_full && (!strict || full == kEnGroups)) {
+            break;
+        }
+        auto it = counts.find(hit.row);
+        if (it == counts.end()) {
+            if (groups_full) {
+                continue;
+            }
+            it = counts.emplace(hit.row, 0).first;
+        }
+        if (it->second == group_size) {
+            continue;
+        }
+        if (++it->second == group_size) {
+            ++full;
+        }
+        result.push_back(hit);
+    }
+    return result;
+}
+
+inline int64_t
+NullsBefore(const ElementNullableLayout& layout, int64_t row, int32_t elem) {
+    return std::count(layout.element_valid[row].begin(),
+                      layout.element_valid[row].begin() + elem,
+                      false);
+}
+
+// Checks an element-level group-by-pk result against `accepted` (every valid
+// element the filter accepts, ascending): no null element is returned, the
+// element index is the logical position (the distance is that of the vector
+// there), every element of a group comes from the row whose pk is the group
+// key, groups hold at most group_size distinct elements, and with strict
+// group size every group holds min(group_size, accepted elements of its
+// row). An exact path must also match EnGroupByOracle. Returns the number of
+// hits whose logical position is preceded by a null element.
+inline int64_t
+ExpectEnGroupBy(const SearchResult& sr,
+                const ElementNullableLayout& layout,
+                const std::vector<EnHit>& accepted,
+                int64_t group_size,
+                bool strict,
+                bool exact,
+                const std::string& context) {
+    EXPECT_TRUE(sr.element_level_) << context;
+    if (!sr.composite_group_by_values_.has_value()) {
+        // An empty candidate set may skip group-by entirely.
+        EXPECT_TRUE(accepted.empty()) << context << ": no group-by values";
+        EXPECT_TRUE(EnCollect(sr).empty()) << context;
+        return 0;
+    }
+    const auto& groups = sr.composite_group_by_values_.value();
+    EXPECT_EQ(groups.size(), sr.seg_offsets_.size()) << context;
+    EXPECT_EQ(sr.element_indices_.size(), sr.seg_offsets_.size()) << context;
+    if (groups.size() != sr.seg_offsets_.size() ||
+        sr.element_indices_.size() != sr.seg_offsets_.size()) {
+        return 0;
+    }
+
+    std::map<std::pair<int64_t, int32_t>, float> distance_of;
+    std::map<int64_t, int64_t> accepted_per_row;
+    for (const auto& hit : accepted) {
+        distance_of[{hit.row, hit.elem}] = hit.distance;
+        ++accepted_per_row[hit.row];
+    }
+    std::map<int64_t, int64_t> group_count;
+    std::set<std::pair<int64_t, int32_t>> seen;
+    std::vector<EnHit> actual;
+    int64_t shifted = 0;
+    for (size_t i = 0; i < sr.seg_offsets_.size(); ++i) {
+        const auto row = sr.seg_offsets_[i];
+        const auto elem = sr.element_indices_[i];
+        const auto label = context + " at " + std::to_string(i);
+        EXPECT_GE(row, 0) << label;
+        EXPECT_LT(row, kEnRows) << label;
+        if (row < 0 || row >= kEnRows) {
+            return shifted;
+        }
+        EXPECT_GE(elem, 0) << label;
+        EXPECT_LT(elem, static_cast<int32_t>(layout.vectors[row].size()))
+            << label;
+        if (elem < 0 ||
+            elem >= static_cast<int32_t>(layout.vectors[row].size())) {
+            return shifted;
+        }
+        EXPECT_TRUE(layout.element_valid[row][elem])
+            << label << ": returned null element (row=" << row
+            << ", elem=" << elem << ")";
+        auto it = distance_of.find({row, elem});
+        EXPECT_NE(it, distance_of.end())
+            << label << ": element not accepted (row=" << row
+            << ", elem=" << elem << ")";
+        if (it != distance_of.end()) {
+            EXPECT_NEAR(sr.distances_[i], it->second, 1e-4f) << label;
+        }
+        // Group key is the pk, and pk == row, so the group's elements all
+        // come from that row.
+        EXPECT_EQ(groups[i].Size(), 1u) << label;
+        if (groups[i].Size() == 1) {
+            EXPECT_TRUE(groups[i][0].has_value()) << label;
+            if (groups[i][0].has_value()) {
+                EXPECT_EQ(std::get<int64_t>(groups[i][0].value()), row)
+                    << label << ": element of row " << row
+                    << " in another group";
+            }
+        }
+        EXPECT_TRUE(seen.insert({row, elem}).second)
+            << label << ": duplicate element";
+        ++group_count[row];
+        if (i > 0) {
+            EXPECT_LE(sr.distances_[i - 1], sr.distances_[i]) << label;
+        }
+        if (NullsBefore(layout, row, elem) > 0) {
+            ++shifted;
+        }
+        actual.push_back({row, elem, sr.distances_[i]});
+    }
+
+    EXPECT_EQ(group_count.size(),
+              std::min<size_t>(kEnGroups, accepted_per_row.size()))
+        << context;
+    for (const auto& [row, count] : group_count) {
+        EXPECT_LE(count, group_size) << context << " row " << row;
+        if (strict) {
+            EXPECT_EQ(count, std::min(group_size, accepted_per_row[row]))
+                << context << " row " << row;
+        }
+    }
+    if (exact) {
+        const auto expected = EnGroupByOracle(accepted, group_size, strict);
+        EXPECT_EQ(actual.size(), expected.size()) << context;
+        for (size_t i = 0; i < std::min(actual.size(), expected.size()); ++i) {
+            EXPECT_EQ(actual[i].row, expected[i].row) << context << " at " << i;
+            EXPECT_EQ(actual[i].elem, expected[i].elem)
+                << context << " at " << i;
+            EXPECT_NEAR(actual[i].distance, expected[i].distance, 1e-4f)
+                << context << " at " << i;
+        }
+    }
+    return shifted;
+}
+
+// Runs element-level group-by pk with group_size 2 and 3, strict or not,
+// under filters on element-nullable sub-fields. Returns the number of hits
+// whose logical position is preceded by a null element.
+inline int64_t
+CheckElementNullableGroupBy(SegmentInterface* segment,
+                            const ElementNullableFilterSchema& s,
+                            const ElementNullableLayout& layout,
+                            const std::string& tag,
+                            const std::string& search_params,
+                            bool exact) {
+    struct Case {
+        std::string expr;
+        std::function<bool(int64_t, int64_t)> accept;
+    };
+    const std::vector<Case> cases = {
+        {"", [](int64_t, int64_t) { return true; }},
+        {"element_filter(structA, $[tag] > 3)",
+         [](int64_t r, int64_t j) {
+             return EnTagTv(r, j, [](int64_t t) { return t > 3; }) == 1;
+         }},
+        {"element_filter(structA, $[tag] IS NULL)",
+         [](int64_t r, int64_t j) { return !EnTag(r, j).has_value(); }},
+        {"id % 2 == 0 && element_filter(structA, $[tag] IS NOT NULL && "
+         "$[price] > 50)",
+         [](int64_t r, int64_t j) {
+             return r % 2 == 0 && EnTag(r, j).has_value() &&
+                    EnPrice(r, j) > kEnPriceFloor;
+         }},
+        {"element_filter(structA, $[vec] IS NOT NULL)",
+         [](int64_t, int64_t) { return true; }},
+        {"element_filter(structA, $[vec] IS NULL)",
+         [](int64_t, int64_t) { return false; }},
+        {"match_any(structA, $[tag] IS NULL)",
+         [&layout](int64_t r, int64_t) {
+             for (size_t j = 0; j < layout.vectors[r].size(); ++j) {
+                 if (!EnTag(r, j).has_value()) {
+                     return true;
+                 }
+             }
+             return false;
+         }},
+    };
+    int64_t shifted = 0;
+    for (const auto& c : cases) {
+        const auto accepted = EnOracle(layout, c.accept);
+        for (const int64_t group_size : {2, 3}) {
+            for (const bool strict : {false, true}) {
+                const auto label =
+                    tag + " group_by(" + c.expr +
+                    ") group_size=" + std::to_string(group_size) +
+                    (strict ? " strict" : "");
+                auto sr = EnGroupBySearch(
+                    segment, s, c.expr, search_params, group_size, strict);
+                EXPECT_NE(sr, nullptr) << label;
+                if (sr != nullptr) {
+                    shifted += ExpectEnGroupBy(*sr,
+                                               layout,
+                                               accepted,
+                                               group_size,
+                                               strict,
+                                               exact,
+                                               label);
+                }
+            }
+        }
+    }
+    return shifted;
+}
+
+// Schema of `s` without its vector sub-field: the struct before the vector
+// sub-field was added.
+inline SchemaPtr
+WithoutVectorSubField(const ElementNullableFilterSchema& s) {
+    auto proto = s.schema->ToProto();
+    auto* fields = proto.mutable_fields();
+    for (int i = 0; i < fields->size(); ++i) {
+        if (fields->Get(i).fieldid() == s.vec.get()) {
+            fields->DeleteSubrange(i, 1);
+            break;
+        }
+    }
+    auto schema = Schema::ParseFrom(proto);
+    schema->set_schema_version(1);
+    return schema;
+}
+
+// `base` plus the vector sub-field of `s`, one schema version later.
+inline SchemaPtr
+WithVectorSubField(const Schema& base, const ElementNullableFilterSchema& s) {
+    auto next = Schema::ParseFrom(base.ToProto());
+    next->AddField(FieldMeta((*s.schema)[s.vec]));
+    next->set_schema_version(base.get_schema_version() + 1);
+    return next;
+}
+
+}  // namespace
+
+// element_filter on element-nullable sub-fields and $[vec] IS [NOT] NULL,
+// with and without the iterative filter, through a sealed index: the
+// selected elements are intersected with the vector nulls the index skips.
+TEST(ElementNullableVectorSearch,
+     SealedIndexElementFilterOnElementNullableFields) {
+    const auto layout = MakeElementNullableGroupLayout(/*with_null_rows=*/true);
+    for (const auto& index : EnIndexCases()) {
+        SCOPED_TRACE(index.label);
+        auto s = MakeElementNullableFilterSchema(true);
+        const auto segment_path = EnSegmentPath("filter_" + index.label);
+        auto directory_guard = folly::makeGuard(
+            [&segment_path] { std::filesystem::remove_all(segment_path); });
+        auto segment =
+            CreateIndexedElementNullableSealed(s, layout, segment_path, &index);
+        ASSERT_GT(segment->num_chunk(s.vec), 1);
+        ASSERT_TRUE(segment->HasIndex(s.vec));
+        CheckElementNullableFilteredSearches(segment.get(),
+                                             s,
+                                             layout,
+                                             "sealed " + index.label,
+                                             index.search_params,
+                                             index.exact);
+    }
+}
+
+// Element-level ANN grouped by pk on a sealed segment with an index.
+TEST(ElementNullableVectorSearch, SealedIndexGroupByPrimaryKey) {
+    const auto layout = MakeElementNullableGroupLayout(/*with_null_rows=*/true);
+    for (const auto& index : EnIndexCases()) {
+        SCOPED_TRACE(index.label);
+        auto s = MakeElementNullableFilterSchema(true);
+        const auto segment_path = EnSegmentPath("group_" + index.label);
+        auto directory_guard = folly::makeGuard(
+            [&segment_path] { std::filesystem::remove_all(segment_path); });
+        auto segment =
+            CreateIndexedElementNullableSealed(s, layout, segment_path, &index);
+        ASSERT_TRUE(segment->HasIndex(s.vec));
+        EXPECT_GT(CheckElementNullableGroupBy(segment.get(),
+                                              s,
+                                              layout,
+                                              "sealed " + index.label,
+                                              index.search_params,
+                                              index.exact),
+                  0);
+    }
+}
+
+TEST(ElementNullableVectorSearch, SealedBruteForceGroupByPrimaryKey) {
+    const auto layout = MakeElementNullableGroupLayout(/*with_null_rows=*/true);
+    auto s = MakeElementNullableFilterSchema(true);
+    const auto segment_path = EnSegmentPath("group_bf");
+    auto directory_guard = folly::makeGuard(
+        [&segment_path] { std::filesystem::remove_all(segment_path); });
+    auto segment =
+        CreateIndexedElementNullableSealed(s, layout, segment_path, nullptr);
+    ASSERT_GT(segment->num_chunk(s.vec), 1);
+    ASSERT_FALSE(segment->HasIndex(s.vec));
+    EXPECT_GT(CheckElementNullableGroupBy(
+                  segment.get(), s, layout, "sealed brute force", "{}", true),
+              0);
+}
+
+TEST(ElementNullableVectorSearch, GrowingGroupByPrimaryKey) {
+    const auto layout = MakeElementNullableGroupLayout(/*with_null_rows=*/true);
+    auto s = MakeElementNullableFilterSchema(true);
+    auto segment = CreateElementNullableFilterGrowing(s, layout);
+    EXPECT_GT(CheckElementNullableGroupBy(
+                  segment.get(), s, layout, "growing", "{}", true),
+              0);
+    // The filter cases of GrowingElementFilterOnElementNullableFields on
+    // rows with up to five elements.
+    CheckElementNullableFilteredSearches(
+        segment.get(), s, layout, "growing group layout");
+}
+
+// A vector sub-field added to a struct: rows of a sealed segment written
+// before the add read all-null vectors, through the default-value column or
+// an id-map-only index, and never hit; a segment written after the add is
+// searched normally.
+TEST(ElementNullableVectorSearch, SealedAddedVectorSubField) {
+    const auto layout = MakeElementNullableGroupLayout(/*with_null_rows=*/true);
+    const auto history_layout = WithAllVectorsNull(layout, kEnRows);
+    auto s = MakeElementNullableFilterSchema(true);
+
+    ElementNullableFilterSchema old_s = s;
+    old_s.schema = WithoutVectorSubField(s);
+    const auto history_path = EnSegmentPath("added_history");
+    auto history_guard = folly::makeGuard(
+        [&history_path] { std::filesystem::remove_all(history_path); });
+    auto history =
+        CreateElementNullableFilterSealed(old_s, layout, history_path, true);
+    ElementNullableFilterSchema new_s = s;
+    new_s.schema = WithVectorSubField(*history->get_schema_snapshot(), s);
+    history->Reopen(new_s.schema);
+    auto offsets = history->GetStructElementOffsets(s.vec);
+    ASSERT_NE(offsets, nullptr);
+    int64_t logical_total = 0;
+    for (const auto& row : layout.vectors) {
+        logical_total += row.size();
+    }
+    ASSERT_EQ(offsets->GetTotalElementCount(), logical_total);
+
+    {
+        SCOPED_TRACE("history brute force");
+        CheckElementNullableFilteredSearches(
+            history.get(), new_s, history_layout, "history brute force");
+        CheckElementNullableGroupBy(history.get(),
+                                    new_s,
+                                    history_layout,
+                                    "history brute force",
+                                    "{}",
+                                    true);
+    }
+    {
+        SCOPED_TRACE("history id-map-only index");
+        const auto hnsw = EnIndexCases()[1];
+        LoadElementNullableIndex(
+            history.get(),
+            s.vec,
+            BuildElementNullableIndex(
+                history_layout, hnsw.index_type, hnsw.build));
+        ASSERT_TRUE(history->HasIndex(s.vec));
+        CheckElementNullableFilteredSearches(history.get(),
+                                             new_s,
+                                             history_layout,
+                                             "history index",
+                                             hnsw.search_params,
+                                             true);
+        CheckElementNullableGroupBy(history.get(),
+                                    new_s,
+                                    history_layout,
+                                    "history index",
+                                    hnsw.search_params,
+                                    true);
+    }
+    {
+        SCOPED_TRACE("written after the add");
+        const auto ivf = EnIndexCases()[0];
+        auto fresh_s = MakeElementNullableFilterSchema(true);
+        const auto fresh_path = EnSegmentPath("added_fresh");
+        auto fresh_guard = folly::makeGuard(
+            [&fresh_path] { std::filesystem::remove_all(fresh_path); });
+        auto fresh = CreateIndexedElementNullableSealed(
+            fresh_s, layout, fresh_path, &ivf);
+        CheckElementNullableFilteredSearches(
+            fresh.get(), fresh_s, layout, "fresh", ivf.search_params, true);
+        EXPECT_GT(
+            CheckElementNullableGroupBy(
+                fresh.get(), fresh_s, layout, "fresh", ivf.search_params, true),
+            0);
+    }
+}
+
+// Growing counterpart: rows inserted before the add are filled with null
+// vectors on Reopen, rows inserted after it carry vectors; only the latter
+// hit, at their logical element positions.
+TEST(ElementNullableVectorSearch, GrowingAddedVectorSubField) {
+    const auto layout = MakeElementNullableGroupLayout(/*with_null_rows=*/true);
+    const int64_t split = kEnRows / 2;
+    const auto mixed_layout = WithAllVectorsNull(layout, split);
+    auto s = MakeElementNullableFilterSchema(true);
+    auto old_schema = WithoutVectorSubField(s);
+    s.schema->set_schema_version(old_schema->get_schema_version() + 1);
+
+    auto config = SegcoreConfig::default_config();
+    config.set_chunk_rows(5);
+    config.set_enable_interim_segment_index(false);
+    auto segment =
+        CreateGrowingSegment(old_schema, empty_index_meta, 1, config);
+    auto insert = [&](int64_t row_begin, int64_t row_end, bool with_vec) {
+        std::shared_ptr<InsertRecordProto> data(BuildElementNullableFilterData(
+            s, layout, row_begin, row_end, true));
+        if (!with_vec) {
+            auto* fields = data->mutable_fields_data();
+            for (int i = 0; i < fields->size(); ++i) {
+                if (fields->Get(i).field_id() == s.vec.get()) {
+                    fields->DeleteSubrange(i, 1);
+                    break;
+                }
+            }
+        }
+        std::vector<int64_t> row_ids;
+        std::vector<Timestamp> timestamps;
+        for (int64_t r = row_begin; r < row_end; ++r) {
+            row_ids.push_back(r);
+            timestamps.push_back(static_cast<Timestamp>(r + 1));
+        }
+        const auto n = row_end - row_begin;
+        const auto offset = segment->PreInsert(n);
+        ASSERT_EQ(offset, row_begin);
+        segment->Insert(
+            offset, n, row_ids.data(), timestamps.data(), std::move(data));
+    };
+    insert(0, split, false);
+    segment->Reopen(s.schema);
+    insert(split, kEnRows, true);
+
+    auto* growing = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+    ASSERT_NE(growing, nullptr);
+    auto offsets = growing->GetStructElementOffsets(s.vec);
+    ASSERT_NE(offsets, nullptr);
+    int64_t logical_total = 0;
+    for (const auto& row : layout.vectors) {
+        logical_total += row.size();
+    }
+    ASSERT_EQ(offsets->GetTotalElementCount(), logical_total);
+
+    CheckElementNullableFilteredSearches(
+        segment.get(), s, mixed_layout, "growing added");
+    EXPECT_GT(CheckElementNullableGroupBy(
+                  segment.get(), s, mixed_layout, "growing added", "{}", true),
+              0);
 }

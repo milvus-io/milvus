@@ -28,6 +28,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
 
+	"github.com/milvus-io/milvus/internal/proxy/reqregistry"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -43,7 +44,6 @@ type TaskQueue interface {
 	utChan() <-chan int
 	utEmpty() bool
 	utFull() bool
-	addUnissuedTask(t taskmodel.Task) error
 	FrontUnissuedTask() taskmodel.Task
 	PopUnissuedTask() taskmodel.Task
 	AddActiveTask(t taskmodel.Task)
@@ -95,14 +95,14 @@ func (queue *BaseTaskQueue) IsFull() bool {
 	return queue.utFull()
 }
 
-func (queue *BaseTaskQueue) addUnissuedTask(t taskmodel.Task) error {
+func (queue *BaseTaskQueue) addUnissuedTask(t taskmodel.Task) (*list.Element, error) {
 	queue.utLock.Lock()
 	defer queue.utLock.Unlock()
 
 	if queue.utFull() {
-		return merr.WrapErrTooManyRequests(int32(queue.GetMaxTaskNum()))
+		return nil, merr.WrapErrTooManyRequests(int32(queue.GetMaxTaskNum()))
 	}
-	queue.unissuedTasks.PushBack(t)
+	element := queue.unissuedTasks.PushBack(t)
 	// utBufChan is an edge-triggered, capacity-1 notifier: a pending token
 	// means "the unissued list is non-empty, wake the scheduler". Concurrent
 	// sends coalesce; the scheduler drains the list on each wake.
@@ -110,7 +110,7 @@ func (queue *BaseTaskQueue) addUnissuedTask(t taskmodel.Task) error {
 	case queue.utBufChan <- 1:
 	default:
 	}
-	return nil
+	return element, nil
 }
 
 func (queue *BaseTaskQueue) FrontUnissuedTask() taskmodel.Task {
@@ -155,6 +155,18 @@ func (queue *BaseTaskQueue) popUnissuedTasks(filter func(taskmodel.Task) bool) [
 	return removed
 }
 
+// removeUnissuedTask removes element only if it is still waiting in this queue.
+// list.Remove is a no-op if the scheduler has already popped the element.
+func (queue *BaseTaskQueue) removeUnissuedTask(element *list.Element) {
+	if element == nil {
+		return
+	}
+
+	queue.utLock.Lock()
+	defer queue.utLock.Unlock()
+	queue.unissuedTasks.Remove(element)
+}
+
 func (queue *BaseTaskQueue) AddActiveTask(t taskmodel.Task) {
 	queue.atLock.Lock()
 	defer queue.atLock.Unlock()
@@ -166,6 +178,9 @@ func (queue *BaseTaskQueue) AddActiveTask(t taskmodel.Task) {
 
 	queue.activeTasks[tID] = t
 	t.SetExecutingTime()
+	if entry := reqregistry.FromContext(t.TraceCtx()); entry != nil {
+		entry.MarkRunning(t.GetDurationInQueue())
+	}
 }
 
 func (queue *BaseTaskQueue) PopActiveTask(taskID taskmodel.UniqueID) taskmodel.Task {
@@ -199,10 +214,10 @@ func (queue *BaseTaskQueue) getTaskByReqID(reqID taskmodel.UniqueID) taskmodel.T
 	return nil
 }
 
-func (queue *BaseTaskQueue) Enqueue(t taskmodel.Task) error {
+func (queue *BaseTaskQueue) enqueue(t taskmodel.Task) (*list.Element, error) {
 	err := t.OnEnqueue()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Fast-fail when the queue is already full, before any potentially-blocking
@@ -213,7 +228,14 @@ func (queue *BaseTaskQueue) Enqueue(t taskmodel.Task) error {
 	full := queue.utFull()
 	queue.utLock.RUnlock()
 	if full {
-		return merr.WrapErrTooManyRequests(int32(queue.GetMaxTaskNum()))
+		return nil, merr.WrapErrTooManyRequests(int32(queue.GetMaxTaskNum()))
+	}
+
+	// A task whose request is already canceled or timed out must not take a
+	// queue slot or a timestamp: return its ctx error now, the same way the
+	// QueryNode scheduler rejects a canceled task before enqueue.
+	if err := t.TraceCtx().Err(); err != nil {
+		return nil, err
 	}
 
 	var ts taskmodel.Timestamp
@@ -222,21 +244,29 @@ func (queue *BaseTaskQueue) Enqueue(t taskmodel.Task) error {
 		ts = tsoutil.ComposeTS(time.Now().UnixMilli(), 0)
 		id, err = t.GetMetaCache().AllocID(t.TraceCtx())
 		if err != nil {
-			return err
+			return nil, err
 		}
 	} else {
 		ts, err = queue.tsoAllocatorIns.AllocOne(t.TraceCtx())
 		if err != nil {
-			return err
+			return nil, err
 		}
 		// we always use same msg id and ts for now.
 		id = taskmodel.UniqueID(ts)
 	}
 	t.SetTs(ts)
 	t.SetID(id)
+	if entry := reqregistry.FromContext(t.TraceCtx()); entry != nil {
+		entry.AddTask(id)
+	}
 
 	t.SetOnEnqueueTime()
 	return queue.addUnissuedTask(t)
+}
+
+func (queue *BaseTaskQueue) Enqueue(t taskmodel.Task) error {
+	_, err := queue.enqueue(t)
+	return err
 }
 
 func (queue *BaseTaskQueue) SetMaxTaskNum(num int64) {
@@ -283,17 +313,9 @@ func (queue *DdTaskQueue) updateMetrics() {
 	metrics.ProxyQueueTaskNum.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "ddl", metrics.InProgressIndexTaskLabel).Set(float64(activateTaskNum))
 }
 
-type pChanStatInfo struct {
-	taskmodel.PChanStatistics
-	tsSet map[taskmodel.Timestamp]struct{}
-}
-
 // DmTaskQueue represents queue for DML task such as insert/delete/upsert
 type DmTaskQueue struct {
 	*BaseTaskQueue
-
-	statsLock            sync.RWMutex
-	pChanStatisticsInfos map[taskmodel.PChan]*pChanStatInfo
 }
 
 func (queue *DmTaskQueue) updateMetrics() {
@@ -309,11 +331,6 @@ func (queue *DmTaskQueue) updateMetrics() {
 }
 
 func (queue *DmTaskQueue) Enqueue(t taskmodel.Task) error {
-	// This statsLock has two functions:
-	//	1) Protect member pChanStatisticsInfos
-	//	2) Serialize the timestamp allocation for dml tasks
-
-	// 1. set the current pChannels for this dmTask
 	dmt := t.(taskmodel.DMLTask)
 	err := dmt.SetChannels()
 	if err != nil {
@@ -321,111 +338,24 @@ func (queue *DmTaskQueue) Enqueue(t taskmodel.Task) error {
 		return err
 	}
 
-	// 2. enqueue dml task
-	queue.statsLock.Lock()
-	defer queue.statsLock.Unlock()
-	err = queue.BaseTaskQueue.Enqueue(t)
-	if err != nil {
-		return err
-	}
-	// 3. commit will use pChannels got previously when preAdding and will definitely succeed
-	pChannels := dmt.GetChannels()
-	queue.commitPChanStats(dmt, pChannels)
-	// there's indeed a possibility that the collection info cache was expired after preAddPChanStats
-	// but considering root coord knows everything about meta modification, invalid stats appended after the meta changed
-	// will be discarded by root coord and will not lead to inconsistent state
-	return nil
-}
-
-func (queue *DmTaskQueue) PopActiveTask(taskID taskmodel.UniqueID) taskmodel.Task {
-	queue.atLock.Lock()
-	defer queue.atLock.Unlock()
-	t, ok := queue.activeTasks[taskID]
-	if ok {
-		queue.statsLock.Lock()
-		defer queue.statsLock.Unlock()
-
-		delete(queue.activeTasks, taskID)
-		mlog.Debug(t.TraceCtx(), "Proxy DmTaskQueue popPChanStats", mlog.FieldTaskID(t.ID()))
-		queue.popPChanStats(t)
-	} else {
-		mlog.Warn(context.TODO(), "Proxy task not in active task list!", mlog.FieldTaskID(taskID))
-	}
-	return t
-}
-
-func (queue *DmTaskQueue) commitPChanStats(dmt taskmodel.DMLTask, pChannels []taskmodel.PChan) {
-	// 1. prepare new stat for all pChannels
-	newStats := make(map[taskmodel.PChan]taskmodel.PChanStatistics)
-	beginTs := dmt.BeginTs()
-	endTs := dmt.EndTs()
-	for _, channel := range pChannels {
-		newStats[channel] = taskmodel.PChanStatistics{
-			MinTs: beginTs,
-			MaxTs: endTs,
-		}
-	}
-	// 2. update stats for all pChannels
-	for cName, newStat := range newStats {
-		currentStat, ok := queue.pChanStatisticsInfos[cName]
-		if !ok {
-			currentStat = &pChanStatInfo{
-				PChanStatistics: newStat,
-				tsSet: map[taskmodel.Timestamp]struct{}{
-					newStat.MinTs: {},
-				},
-			}
-			queue.pChanStatisticsInfos[cName] = currentStat
-		} else {
-			if currentStat.MinTs > newStat.MinTs {
-				currentStat.MinTs = newStat.MinTs
-			}
-			if currentStat.MaxTs < newStat.MaxTs {
-				currentStat.MaxTs = newStat.MaxTs
-			}
-			currentStat.tsSet[newStat.MinTs] = struct{}{}
-		}
-	}
-}
-
-func (queue *DmTaskQueue) popPChanStats(t taskmodel.Task) {
-	channels := t.(taskmodel.DMLTask).GetChannels()
-	taskTs := t.BeginTs()
-	for _, cName := range channels {
-		info, ok := queue.pChanStatisticsInfos[cName]
-		if ok {
-			delete(info.tsSet, taskTs)
-			if len(info.tsSet) <= 0 {
-				delete(queue.pChanStatisticsInfos, cName)
-			} else {
-				newMinTs := info.MaxTs
-				for ts := range info.tsSet {
-					if newMinTs > ts {
-						newMinTs = ts
-					}
-				}
-				info.MinTs = newMinTs
-			}
-		}
-	}
-}
-
-func (queue *DmTaskQueue) getPChanStatsInfo() (map[taskmodel.PChan]*taskmodel.PChanStatistics, error) {
-	ret := make(map[taskmodel.PChan]*taskmodel.PChanStatistics)
-	queue.statsLock.RLock()
-	defer queue.statsLock.RUnlock()
-	for cName, info := range queue.pChanStatisticsInfos {
-		ret[cName] = &taskmodel.PChanStatistics{
-			MinTs: info.MinTs,
-			MaxTs: info.MaxTs,
-		}
-	}
-	return ret, nil
+	return queue.BaseTaskQueue.Enqueue(t)
 }
 
 // DqTaskQueue represents queue for DQL task such as search/query
 type DqTaskQueue struct {
 	*BaseTaskQueue
+}
+
+func (queue *DqTaskQueue) Enqueue(t taskmodel.Task) error {
+	element, err := queue.enqueue(t)
+	if err != nil {
+		return err
+	}
+
+	t.SetOnContextDone(func() {
+		queue.removeUnissuedTask(element)
+	})
+	return nil
 }
 
 type ClearTaskQueueResult struct {
@@ -495,8 +425,7 @@ func newDdTaskQueue(tsoAllocatorIns taskmodel.TsoAllocator) *DdTaskQueue {
 
 func newDmTaskQueue(tsoAllocatorIns taskmodel.TsoAllocator) *DmTaskQueue {
 	return &DmTaskQueue{
-		BaseTaskQueue:        newBaseTaskQueue(tsoAllocatorIns),
-		pChanStatisticsInfos: make(map[taskmodel.PChan]*pChanStatInfo),
+		BaseTaskQueue: newBaseTaskQueue(tsoAllocatorIns),
 	}
 }
 
@@ -699,6 +628,11 @@ func (sched *TaskScheduler) queryLoop() {
 					p = subTaskPool
 				}
 				p.Submit(func() (struct{}, error) {
+					// Submit may wait for a worker after the task has left the queue.
+					if err := task.TraceCtx().Err(); err != nil {
+						task.Notify(err)
+						return struct{}{}, nil
+					}
 					sched.processTask(task, sched.DqQueue)
 					return struct{}{}, nil
 				})
@@ -727,10 +661,6 @@ func (sched *TaskScheduler) Start() error {
 func (sched *TaskScheduler) Close() {
 	sched.cancel()
 	sched.wg.Wait()
-}
-
-func (sched *TaskScheduler) GetPChanStatistics() (map[taskmodel.PChan]*taskmodel.PChanStatistics, error) {
-	return sched.DmQueue.getPChanStatsInfo()
 }
 
 func (sched *TaskScheduler) getTaskQueueMetrics(queue *BaseTaskQueue, queueType string) metricsinfo.TaskQueueMetrics {

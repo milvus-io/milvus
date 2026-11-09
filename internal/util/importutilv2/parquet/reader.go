@@ -30,11 +30,14 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-const totalReadBufferSize = int64(64 * 1024 * 1024)
+// TotalReadBufferSize is the fixed in-memory buffered-stream budget a parquet
+// reader holds for the whole read phase, split evenly across columns. The
+// import slot estimate charges it once per task because reshard reads its
+// sources sequentially with one reader at a time.
+const TotalReadBufferSize = int64(64 * 1024 * 1024)
 
 type reader struct {
 	ctx    context.Context
@@ -45,11 +48,62 @@ type reader struct {
 	path string
 	r    *file.Reader
 
-	fileSize   *atomic.Int64
-	bufferSize int
-	count      int64
+	fileSize      *atomic.Int64
+	bufferSize    int
+	count         int64
+	rowsPerBuffer int
 
 	frs map[int64]*FieldReader // fieldID -> FieldReader
+
+	structFills []structFill
+}
+
+// structFill names the element-nullable sub-fields of one struct column that
+// the file does not carry, and the present sibling they take their element
+// counts from.
+type structFill struct {
+	structName string
+	refField   *schemapb.FieldSchema
+	missing    []*schemapb.FieldSchema
+}
+
+// newStructFills plans the null-element fill of the struct sub-fields that
+// have no reader. A struct with no reader at all (a nullable struct the file
+// does not carry) is left to the DataNode, which imports its rows as null.
+func newStructFills(schema *schemapb.CollectionSchema, frs map[int64]*FieldReader) []structFill {
+	fills := make([]structFill, 0)
+	for _, structField := range schema.GetStructArrayFields() {
+		fill := structFill{structName: structField.GetName()}
+		for _, subField := range structField.GetFields() {
+			if _, ok := frs[subField.GetFieldID()]; ok {
+				if fill.refField == nil {
+					fill.refField = subField
+				}
+				continue
+			}
+			fill.missing = append(fill.missing, subField)
+		}
+		if fill.refField != nil && len(fill.missing) > 0 {
+			fills = append(fills, fill)
+		}
+	}
+	return fills
+}
+
+// fillMissingStructSubFields extends the columns of the missing sub-fields to
+// the rows read so far, so the batch memory check sees them. CreateFieldReaders
+// only leaves an element-nullable sub-field without a reader.
+func (r *reader) fillMissingStructSubFields(insertData *storage.InsertData) error {
+	for _, fill := range r.structFills {
+		refData := insertData.Data[fill.refField.GetFieldID()]
+		for _, subField := range fill.missing {
+			if err := common.AppendNullElementRows(fill.structName, subField, fill.refField, refData,
+				insertData.Data[subField.GetFieldID()]); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, path string, bufferSize int) (*reader, error) {
@@ -63,7 +117,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	// Each ColumnReader consumes ReaderProperties.BufferSize memory independently.
 	// Therefore, the bufferSize should be divided by the number of columns
 	// to ensure total memory usage stays within the intended limit.
-	columnReaderBufferSize := totalReadBufferSize / int64(len(allFields))
+	columnReaderBufferSize := TotalReadBufferSize / int64(len(allFields))
 
 	r, err := file.NewParquetReader(retryableReader, file.WithReadProps(&parquet.ReaderProperties{
 		BufferSize:            columnReaderBufferSize,
@@ -76,6 +130,11 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	mlog.Info(ctx, "parquet file info", mlog.Int("row group num", r.NumRowGroups()),
 		mlog.Int64("num rows", r.NumRows()))
 
+	sizePerRecord, err := typeutil.EstimateMaxSizePerRecord(schema)
+	if err != nil {
+		r.Close()
+		return nil, err
+	}
 	count, err := common.EstimateReadCountPerBatch(bufferSize, schema)
 	if err != nil {
 		r.Close()
@@ -88,7 +147,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 	fileReader, err := pqarrow.NewFileReader(r, readProps, memory.DefaultAllocator)
 	if err != nil {
 		r.Close()
-		return nil, merr.WrapErrImportSysFailedMsg("new parquet file reader failed, err=%v", err)
+		return nil, common.WrapDecodeErr(err, "new parquet file reader failed")
 	}
 
 	crs, err := CreateFieldReaders(ctx, fileReader, schema)
@@ -97,21 +156,23 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 		return nil, err
 	}
 	return &reader{
-		ctx:        ctx,
-		cm:         cm,
-		cmr:        retryableReader,
-		schema:     schema,
-		fileSize:   atomic.NewInt64(0),
-		path:       path,
-		r:          r,
-		bufferSize: bufferSize,
-		count:      count,
-		frs:        crs,
+		ctx:           ctx,
+		cm:            cm,
+		cmr:           retryableReader,
+		schema:        schema,
+		fileSize:      atomic.NewInt64(0),
+		path:          path,
+		r:             r,
+		bufferSize:    bufferSize,
+		count:         count,
+		rowsPerBuffer: bufferSize / sizePerRecord,
+		frs:           crs,
+		structFills:   newStructFills(schema, crs),
 	}, nil
 }
 
 func (r *reader) Read() (*storage.InsertData, error) {
-	insertData, err := storage.NewInsertDataWithFunctionOutputField(r.schema)
+	insertData, err := storage.NewInsertDataWithCap(r.schema, r.rowsPerBuffer, true)
 	if err != nil {
 		return nil, err
 	}
@@ -129,6 +190,12 @@ OUTER:
 			if err != nil {
 				return nil, err
 			}
+		}
+		// Fill the sub-fields the file omits chunk by chunk, before the
+		// memory check, so a batch stays within bufferSize plus one chunk
+		// with the filled columns counted.
+		if err := r.fillMissingStructSubFields(insertData); err != nil {
+			return nil, err
 		}
 		if insertData.GetMemorySize() >= r.bufferSize {
 			break

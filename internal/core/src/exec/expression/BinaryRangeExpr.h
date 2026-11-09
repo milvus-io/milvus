@@ -42,8 +42,7 @@
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/Expr.h"
 #include "expr/ITypeExpr.h"
-#include "index/ScalarIndex.h"
-#include "index/json_stats/bson_inverted.h"
+#include "segcore/json_stats/bson_inverted.h"
 #include "pb/plan.pb.h"
 #include "segcore/SegmentInterface.h"
 #include "simdjson/error.h"
@@ -191,7 +190,8 @@ struct BinaryRangeElementFuncForJson {
 template <typename ValueType,
           bool lower_inclusive,
           bool upper_inclusive,
-          FilterType filter_type = FilterType::sequential>
+          FilterType filter_type = FilterType::sequential,
+          typename ArrayType = milvus::ArrayView>
 struct BinaryRangeElementFuncForArray {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
@@ -200,7 +200,7 @@ struct BinaryRangeElementFuncForArray {
     operator()(const ValueType& val1,
                const ValueType& val2,
                int index,
-               const milvus::ArrayView* src,
+               const ArrayType* src,
                ValidityView valid_data,
                size_t n,
                TargetBitmapView res,
@@ -223,12 +223,13 @@ struct BinaryRangeElementFuncForArray {
                 res[i] = valid_res[i] = false;
                 continue;
             }
-            if (index >= src[offset].length()) {
+            if (!HasArrayElementAt(src[offset], index)) {
                 res[i] = false;
                 valid_res[i] = false;
                 continue;
             }
-            auto value = src[offset].get_data_unchecked<GetType>(index);
+            auto value =
+                src[offset].template get_data_unchecked<GetType>(index);
             if constexpr (lower_inclusive && upper_inclusive) {
                 res[i] = val1 <= value && value <= val2;
             } else if constexpr (lower_inclusive && !upper_inclusive) {
@@ -247,19 +248,19 @@ struct BinaryRangeIndexFunc {
     typedef std::
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
             IndexInnerType;
-    using Index = index::ScalarIndex<IndexInnerType>;
+    using ReaderType = index_value_t<T>;
     typedef std::conditional_t<std::is_integral_v<IndexInnerType> &&
                                    !std::is_same_v<bool, T>,
                                int64_t,
                                IndexInnerType>
         HighPrecisionType;
     TargetBitmap
-    operator()(Index* index,
+    operator()(const index::IScalarPredicateReader<ReaderType>* reader,
                IndexInnerType val1,
                IndexInnerType val2,
                bool lower_inclusive,
                bool upper_inclusive) {
-        return index->Range(val1, lower_inclusive, val2, upper_inclusive);
+        return reader->Range(val1, lower_inclusive, val2, upper_inclusive);
     }
 };
 
@@ -294,6 +295,11 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
 
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
+
+    bool
+    SupportsJsonStatsExecPath() const override {
+        return true;
+    }
 
     void
     DetermineExecPath() override;

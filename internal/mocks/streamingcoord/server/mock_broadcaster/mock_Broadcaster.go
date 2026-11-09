@@ -149,6 +149,64 @@ func (_c *MockBroadcaster_GetPendingSchemaFileResources_Call) RunAndReturn(run f
 	return _c
 }
 
+// GetPendingSchemaTarget provides a mock function with given fields: collectionID
+func (_m *MockBroadcaster) GetPendingSchemaTarget(collectionID int64) (*broadcaster.SchemaTarget, error) {
+	ret := _m.Called(collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetPendingSchemaTarget")
+	}
+
+	var r0 *broadcaster.SchemaTarget
+	var r1 error
+	if rf, ok := ret.Get(0).(func(int64) (*broadcaster.SchemaTarget, error)); ok {
+		return rf(collectionID)
+	}
+	if rf, ok := ret.Get(0).(func(int64) *broadcaster.SchemaTarget); ok {
+		r0 = rf(collectionID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*broadcaster.SchemaTarget)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(int64) error); ok {
+		r1 = rf(collectionID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockBroadcaster_GetPendingSchemaTarget_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPendingSchemaTarget'
+type MockBroadcaster_GetPendingSchemaTarget_Call struct {
+	*mock.Call
+}
+
+// GetPendingSchemaTarget is a helper method to define mock.On call
+//   - collectionID int64
+func (_e *MockBroadcaster_Expecter) GetPendingSchemaTarget(collectionID interface{}) *MockBroadcaster_GetPendingSchemaTarget_Call {
+	return &MockBroadcaster_GetPendingSchemaTarget_Call{Call: _e.mock.On("GetPendingSchemaTarget", collectionID)}
+}
+
+func (_c *MockBroadcaster_GetPendingSchemaTarget_Call) Run(run func(collectionID int64)) *MockBroadcaster_GetPendingSchemaTarget_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64))
+	})
+	return _c
+}
+
+func (_c *MockBroadcaster_GetPendingSchemaTarget_Call) Return(_a0 *broadcaster.SchemaTarget, _a1 error) *MockBroadcaster_GetPendingSchemaTarget_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockBroadcaster_GetPendingSchemaTarget_Call) RunAndReturn(run func(int64) (*broadcaster.SchemaTarget, error)) *MockBroadcaster_GetPendingSchemaTarget_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // LegacyAck provides a mock function with given fields: ctx, broadcastID, vchannel
 func (_m *MockBroadcaster) LegacyAck(ctx context.Context, broadcastID uint64, vchannel string) error {
 	ret := _m.Called(ctx, broadcastID, vchannel)

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -59,6 +60,11 @@ func TestFencedError(t *testing.T) {
 func TestWAL(t *testing.T) {
 	walimplstest.Reset()
 	initResourceForTest(t)
+	// Exercise eviction with the existing 10 KiB cache without turning this
+	// append/scan test into a producer-admission test: keep slowdown at 64 MiB.
+	pressureKey := paramtable.Get().StreamingCfg.WALRateLimitWABSlowdownRatio.Key
+	require.NoError(t, paramtable.Get().Save(pressureKey, "6553.6")) // 64 MiB / 10 KiB
+	t.Cleanup(func() { _ = paramtable.Get().Reset(pressureKey) })
 	b := registry.MustGetBuilder(message.WALNameTest,
 		redo.NewInterceptorBuilder(),
 		lock.NewInterceptorBuilder(),
@@ -87,6 +93,8 @@ func initResourceForTest(t *testing.T) {
 	rc.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
 
 	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
+	queryViewsPatch := mockey.Mock((*mock_metastore.MockStreamingNodeCataLog).ListQueryViews).Return(nil, nil).Build()
+	t.Cleanup(func() { queryViewsPatch.UnPatch() })
 	catalog.EXPECT().GetConsumeCheckpoint(mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentAssignment(mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListVChannel(mock.Anything, mock.Anything).Return(nil, nil)
@@ -354,7 +362,8 @@ func (f *testOneWALFramework) testAppend(ctx context.Context, w wal.WAL) ([]mess
 				begin := message.MustAsImmutableBeginTxnMessageV2(immutableMsg)
 				b := message.NewImmutableTxnMessageBuilder(begin)
 				txnCtx := appendResult.TxnCtx
-				for i := 0; i < int(rand.Int31n(5)); i++ {
+				bodyCount := 1 + int(rand.Int31n(5))
+				for i := 0; i < bodyCount; i++ {
 					msg = message.CreateTestEmptyInsertMesage(int64(i), map[string]string{})
 					msg.WithTxnContext(*txnCtx)
 					appendResult, err = w.Append(ctx, msg)

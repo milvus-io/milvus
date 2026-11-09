@@ -23,7 +23,7 @@ impl WhatlangIdentifier {
 
     pub fn from_json(params: &json::Map<String, json::Value>) -> Result<WhatlangIdentifier> {
         let confidence = params.get("confidence").map_or(Ok(0.0), |v| {
-            v.as_f64().ok_or(TantivyBindingError::InternalError(
+            v.as_f64().ok_or(TantivyBindingError::InvalidArgument(
                 "confidence must be float".to_string(),
             ))
         })?;

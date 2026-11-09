@@ -47,7 +47,8 @@ func newPartitionSegmentManager(
 		fencedAssignTimeTick: fencedAssignTimeTick,
 		metrics:              metrics,
 	}
-	m.SetLogger(logger.With(mlog.FieldVChannel(vchannel), mlog.FieldCollectionID(collectionID), mlog.FieldPartitionID(paritionID)))
+	// Workers bind partition fields per task; idle partitions share the parent logger.
+	m.SetLogger(logger)
 	return m
 }
 

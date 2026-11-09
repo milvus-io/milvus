@@ -25,6 +25,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -64,6 +65,10 @@ type TargetManagerInterface interface {
 	GetDmChannelsByCollection(ctx context.Context, collectionID int64, scope TargetScope) map[string]*DmChannel
 	GetDmChannel(ctx context.Context, collectionID int64, channel string, scope TargetScope) *DmChannel
 	GetSealedSegment(ctx context.Context, collectionID int64, id int64, scope TargetScope) *datapb.SegmentInfo
+	GetSealedSegmentIDsByCollection(ctx context.Context, collectionID int64, scope TargetScope) typeutil.UniqueSet
+	GetSealedSegmentIDsByChannel(ctx context.Context, collectionID int64, channelName string, scope TargetScope) typeutil.UniqueSet
+	GetSealedSegmentIDsByPartition(ctx context.Context, collectionID int64, partitionID int64, scope TargetScope) typeutil.UniqueSet
+	HasSealedSegment(ctx context.Context, collectionID int64, id int64, scope TargetScope) bool
 	GetCollectionTargetVersion(ctx context.Context, collectionID int64, scope TargetScope) int64
 	IsCurrentTargetExist(ctx context.Context, collectionID int64, partitionID int64) bool
 	IsNextTargetExist(ctx context.Context, collectionID int64) bool
@@ -80,6 +85,10 @@ type TargetManager struct {
 	broker Broker
 	meta   *Meta
 
+	// metaView resolves segment details on demand from the shared metacache
+	// store instead of keeping full proto copies in CollectionTargets.
+	metaView metacache.MetaView
+
 	// all read segment/channel operation happens on current -> only current target are visible to outer
 	// all add segment/channel operation happens on next -> changes can only happen on next target
 	// all remove segment/channel operation happens on Both current and next -> delete status should be consistent
@@ -87,12 +96,13 @@ type TargetManager struct {
 	next    *target
 }
 
-func NewTargetManager(broker Broker, meta *Meta) *TargetManager {
+func NewTargetManager(broker Broker, meta *Meta, metaView metacache.MetaView) *TargetManager {
 	return &TargetManager{
-		broker:  broker,
-		meta:    meta,
-		current: newTarget(),
-		next:    newTarget(),
+		broker:   broker,
+		meta:     meta,
+		metaView: metaView,
+		current:  newTarget(),
+		next:     newTarget(),
 	}
 }
 
@@ -169,13 +179,12 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collec
 	}
 
 	partitionIDs := mgr.meta.GetPartitionIDsByCollection(ctx, collectionID)
-	segments := make(map[int64]*datapb.SegmentInfo, len(segmentInfos))
-	partitionSet := make(map[int64]struct{}, len(partitionIDs))
-	for _, partitionID := range partitionIDs {
-		partitionSet[partitionID] = struct{}{}
-	}
+	// The broker's infos define this target: they carry the corrected row
+	// counts and the channel/partition each segment belongs to.
+	segments := make(map[int64]*datapb.SegmentInfo)
+	partitionSet := typeutil.NewUniqueSet(partitionIDs...)
 	for _, segmentInfo := range segmentInfos {
-		if _, ok := partitionSet[segmentInfo.GetPartitionID()]; ok || segmentInfo.GetPartitionID() == common.AllPartitionsID {
+		if partitionSet.Contain(segmentInfo.GetPartitionID()) || segmentInfo.GetPartitionID() == common.AllPartitionsID {
 			segments[segmentInfo.GetID()] = segmentInfo
 		}
 	}
@@ -190,8 +199,7 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collec
 		return nil
 	}
 
-	allocatedTarget := NewCollectionTarget(segments, dmChannels, partitionIDs)
-
+	allocatedTarget := NewCollectionTarget(segments, dmChannels, partitionIDs, mgr.metaView)
 	mgr.next.updateCollectionTarget(collectionID, allocatedTarget)
 
 	mlog.Debug(ctx, "finish to update next targets for collection",
@@ -311,13 +319,6 @@ func (mgr *TargetManager) RemovePartitionFromNextTarget(ctx context.Context, col
 }
 
 func (mgr *TargetManager) removePartitionFromCollectionTarget(oldTarget *CollectionTarget, partitionSet typeutil.UniqueSet) *CollectionTarget {
-	segments := make(map[int64]*datapb.SegmentInfo)
-	for _, segment := range oldTarget.GetAllSegments() {
-		if !partitionSet.Contain(segment.GetPartitionID()) {
-			segments[segment.GetID()] = segment
-		}
-	}
-
 	// clear partition streaming segment
 	channels := make(map[string]*DmChannel)
 	for _, channel := range oldTarget.GetAllDmChannels() {
@@ -327,7 +328,37 @@ func (mgr *TargetManager) removePartitionFromCollectionTarget(oldTarget *Collect
 		return !partitionSet.Contain(partitionID)
 	})
 
-	return NewCollectionTarget(segments, channels, partitions)
+	// The grouping the old target was built with says which partition each
+	// segment belongs to, so the rebuilt target keeps exactly the segments of
+	// the surviving partitions - no store lookup, and nothing silently lost
+	// when DataCoord no longer holds a segment.
+	segIDs := make(map[int64]struct{})
+	partition2SegmentIDs := make(map[int64]map[int64]struct{}, len(partitions))
+	for partitionID, ids := range oldTarget.partition2SegmentIDs {
+		if partitionSet.Contain(partitionID) {
+			continue
+		}
+		kept := make(map[int64]struct{}, len(ids))
+		for id := range ids {
+			kept[id] = struct{}{}
+			segIDs[id] = struct{}{}
+		}
+		partition2SegmentIDs[partitionID] = kept
+	}
+
+	channel2SegmentIDs := make(map[string]map[int64]struct{}, len(oldTarget.channel2SegmentIDs))
+	for channel, ids := range oldTarget.channel2SegmentIDs {
+		kept := make(map[int64]struct{}, len(ids))
+		for id := range ids {
+			if _, ok := segIDs[id]; ok {
+				kept[id] = struct{}{}
+			}
+		}
+		channel2SegmentIDs[channel] = kept
+	}
+
+	return newCollectionTargetFromGrouping(segIDs, channel2SegmentIDs, partition2SegmentIDs,
+		channels, partitions, oldTarget.lackSegmentInfo, oldTarget.metaView)
 }
 
 func (mgr *TargetManager) getCollectionTarget(scope TargetScope, collectionID int64) []*CollectionTarget {
@@ -417,6 +448,63 @@ func (mgr *TargetManager) GetGrowingSegmentsByChannel(ctx context.Context, colle
 	return nil
 }
 
+// GetSealedSegmentIDsByCollection returns the target's segment IDs. Callers
+// that decide membership — "is this segment still part of the target?" — must
+// use the ID set: the resolved protos only cover the segments the shared store
+// can resolve right now, so a segment DataCoord has dropped would otherwise
+// read as "no longer in the target" and be released.
+func (mgr *TargetManager) GetSealedSegmentIDsByCollection(ctx context.Context, collectionID int64,
+	scope TargetScope,
+) typeutil.UniqueSet {
+	targets := mgr.getCollectionTarget(scope, collectionID)
+	for _, t := range targets {
+		return typeutil.NewUniqueSet(t.GetAllSegmentIDs()...)
+	}
+	return nil
+}
+
+// GetSealedSegmentIDsByChannel returns the IDs of the channel's target segments.
+func (mgr *TargetManager) GetSealedSegmentIDsByChannel(ctx context.Context, collectionID int64,
+	channelName string,
+	scope TargetScope,
+) typeutil.UniqueSet {
+	targets := mgr.getCollectionTarget(scope, collectionID)
+	for _, t := range targets {
+		ids := t.GetChannelSegmentIDs(channelName)
+		if len(ids) > 0 {
+			return typeutil.NewUniqueSet(lo.Keys(ids)...)
+		}
+	}
+	return nil
+}
+
+// GetSealedSegmentIDsByPartition returns the IDs of the partition's target segments.
+func (mgr *TargetManager) GetSealedSegmentIDsByPartition(ctx context.Context, collectionID int64,
+	partitionID int64,
+	scope TargetScope,
+) typeutil.UniqueSet {
+	targets := mgr.getCollectionTarget(scope, collectionID)
+	for _, t := range targets {
+		ids := t.GetPartitionSegmentIDs(partitionID)
+		if len(ids) > 0 {
+			return typeutil.NewUniqueSet(lo.Keys(ids)...)
+		}
+	}
+	return nil
+}
+
+// HasSealedSegment reports whether the segment belongs to the target, whether
+// or not the shared store can resolve it right now.
+func (mgr *TargetManager) HasSealedSegment(ctx context.Context, collectionID int64, id int64, scope TargetScope) bool {
+	targets := mgr.getCollectionTarget(scope, collectionID)
+	for _, t := range targets {
+		if t.ContainSegment(id) {
+			return true
+		}
+	}
+	return false
+}
+
 func (mgr *TargetManager) GetSealedSegmentsByCollection(ctx context.Context, collectionID int64,
 	scope TargetScope,
 ) map[int64]*datapb.SegmentInfo {
@@ -503,7 +591,7 @@ func (mgr *TargetManager) GetDmChannel(ctx context.Context, collectionID int64, 
 func (mgr *TargetManager) GetSealedSegment(ctx context.Context, collectionID int64, id int64, scope TargetScope) *datapb.SegmentInfo {
 	targets := mgr.getCollectionTarget(scope, collectionID)
 	for _, t := range targets {
-		if s, ok := t.GetAllSegments()[id]; ok {
+		if s, ok := t.GetSegment(id); ok {
 			return s
 		}
 	}
@@ -581,7 +669,7 @@ func (mgr *TargetManager) Recover(ctx context.Context, catalog metastore.QueryCo
 	}
 
 	for _, t := range targets {
-		newTarget := FromPbCollectionTarget(t)
+		newTarget := FromPbCollectionTarget(t, mgr.metaView)
 		mgr.current.updateCollectionTarget(t.GetCollectionID(), newTarget)
 		mlog.Info(ctx, "recover current target for collection",
 			mlog.FieldCollectionID(t.GetCollectionID()),
@@ -605,13 +693,17 @@ func (mgr *TargetManager) Recover(ctx context.Context, catalog metastore.QueryCo
 // if segment isn't l0 segment, and exist in current/next target, then it can be moved
 func (mgr *TargetManager) CanSegmentBeMoved(ctx context.Context, collectionID, segmentID int64) bool {
 	current := mgr.current.getCollectionTarget(collectionID)
-	if current != nil && current.segments[segmentID] != nil {
-		return true
+	if current != nil {
+		if _, ok := current.segmentIDs[segmentID]; ok {
+			return true
+		}
 	}
 
 	next := mgr.next.getCollectionTarget(collectionID)
-	if next != nil && next.segments[segmentID] != nil {
-		return true
+	if next != nil {
+		if _, ok := next.segmentIDs[segmentID]; ok {
+			return true
+		}
 	}
 
 	return false

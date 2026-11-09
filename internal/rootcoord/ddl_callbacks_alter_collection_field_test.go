@@ -20,14 +20,12 @@ import (
 	"context"
 	"testing"
 
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -85,6 +83,24 @@ func TestDDLCallbacksAlterCollectionField(t *testing.T) {
 	})
 	require.NoError(t, merr.CheckRPCCall(resp, err))
 	assertFieldProperties(t, ctx, core, dbName, collectionName, "field1", "key1", "value1")
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
+
+	// The struct sub-field origin marker is internal: it can be neither set
+	// nor deleted as a field property.
+	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		FieldName:      fieldName,
+		Properties:     []*commonpb.KeyValuePair{{Key: common.StructSubFieldAddedKey, Value: "true"}},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
+	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		FieldName:      fieldName,
+		DeleteKeys:     []string{common.StructSubFieldAddedKey},
+	})
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrParameterInvalid)
 	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
 
 	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
@@ -154,12 +170,77 @@ func TestDDLCallbacksAlterCollectionField(t *testing.T) {
 	assertFieldProperties(t, ctx, core, dbName, collectionName, fieldName, "key1", "value2")
 }
 
-func TestDDLCallbacksAlterNestedArrayRootCapacity(t *testing.T) {
+func TestDDLCallbacksAlterCollectionFieldOnStruct(t *testing.T) {
 	core := initStreamingSystemAndCore(t)
 	ctx := context.Background()
 	dbName := "testDB" + funcutil.RandomString(10)
 	collectionName := "testCollection" + funcutil.RandomString(10)
-	fieldName := "nested_array"
+	createCollectionForTest(t, ctx, core, dbName, collectionName)
+	resp, err := core.AddCollectionStructField(ctx, &milvuspb.AddCollectionStructFieldRequest{
+		DbName: dbName, CollectionName: collectionName,
+		StructArrayFieldSchema: newRootAddStructFieldSchema("profile"),
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+
+	alter := func(fieldName string, props []*commonpb.KeyValuePair, deleteKeys ...string) error {
+		resp, err := core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
+			DbName: dbName, CollectionName: collectionName, FieldName: fieldName,
+			Properties: props, DeleteKeys: deleteKeys,
+		})
+		return merr.CheckRPCCall(resp, err)
+	}
+	getStruct := func() *schemapb.StructArrayFieldSchema {
+		coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
+		require.NoError(t, err)
+		return coll.ToCollectionSchemaPB().GetStructArrayFields()[0]
+	}
+
+	require.NoError(t, alter("profile", []*commonpb.KeyValuePair{
+		{Key: common.MmapEnabledKey, Value: "true"},
+		{Key: common.FieldDescriptionKey, Value: "struct description"},
+	}))
+	structField := getStruct()
+	value, ok := common.GetStringValue(structField.GetTypeParams(), common.MmapEnabledKey)
+	require.True(t, ok)
+	require.Equal(t, "true", value)
+	require.Equal(t, "struct description", structField.GetDescription())
+
+	require.NoError(t, alter("profile[ints]", []*commonpb.KeyValuePair{
+		{Key: common.MmapEnabledKey, Value: "false"},
+		{Key: common.FieldDescriptionKey, Value: "sub-field description"},
+	}))
+	sub := getStruct().GetFields()[0]
+	require.Equal(t, "profile[ints]", sub.GetName())
+	value, ok = common.GetStringValue(sub.GetTypeParams(), common.MmapEnabledKey)
+	require.True(t, ok)
+	require.Equal(t, "false", value)
+	value, ok = common.GetStringValue(sub.GetTypeParams(), common.MaxCapacityKey)
+	require.True(t, ok)
+	require.Equal(t, "16", value)
+	require.Equal(t, "sub-field description", sub.GetDescription())
+
+	require.NoError(t, alter("profile", nil, common.MmapEnabledKey))
+	_, ok = common.GetStringValue(getStruct().GetTypeParams(), common.MmapEnabledKey)
+	require.False(t, ok)
+
+	for _, key := range []string{common.MaxCapacityKey, common.MaxLengthKey, common.EnableAnalyzerKey} {
+		require.ErrorContains(t, alter("profile[ints]", []*commonpb.KeyValuePair{{Key: key, Value: "32"}}),
+			key+" can not be altered on struct sub-field profile[ints]")
+	}
+	require.ErrorContains(t, alter("profile", []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}}),
+		"max_capacity can not be altered on struct field profile")
+	// A rejected key is reported even when the value would not change.
+	require.ErrorContains(t, alter("profile[ints]", []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}}),
+		"max_capacity can not be altered on struct sub-field profile[ints]")
+	require.ErrorContains(t, alter("profile", nil, common.WarmupScalarFieldKey),
+		"warmup.scalarField can not be altered on struct field profile")
+}
+
+func TestDDLCallbacksRejectTopLevelNestedArray(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+	ctx := context.Background()
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testCollection" + funcutil.RandomString(10)
 
 	resp, err := core.CreateDatabase(ctx, &milvuspb.CreateDatabaseRequest{DbName: dbName})
 	require.NoError(t, merr.CheckRPCCall(resp, err))
@@ -167,7 +248,7 @@ func TestDDLCallbacksAlterNestedArrayRootCapacity(t *testing.T) {
 		Name: collectionName,
 		Fields: []*schemapb.FieldSchema{
 			{
-				Name:        fieldName,
+				Name:        "nested_array",
 				DataType:    schemapb.DataType_Array,
 				ElementType: schemapb.DataType_Array,
 				TypeSchema: &schemapb.TypeSchema{
@@ -188,34 +269,7 @@ func TestDDLCallbacksAlterNestedArrayRootCapacity(t *testing.T) {
 		CollectionName: collectionName,
 		Schema:         schemaBytes,
 	})
-	require.NoError(t, merr.CheckRPCCall(resp, err))
-
-	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
-		DbName:         dbName,
-		CollectionName: collectionName,
-		FieldName:      fieldName,
-		Properties: []*commonpb.KeyValuePair{
-			{Key: common.MaxCapacityKey, Value: "64"},
-		},
-	})
-	require.NoError(t, merr.CheckRPCCall(resp, err))
-
-	coll, err := core.meta.GetCollectionByName(ctx, dbName, collectionName, typeutil.MaxTimestamp, false)
-	require.NoError(t, err)
-	var field *schemapb.FieldSchema
-	for _, candidate := range coll.ToCollectionSchemaPB().GetFields() {
-		if candidate.GetName() == fieldName {
-			field = candidate
-			break
-		}
-	}
-	require.NotNil(t, field)
-	fieldCapacity, err := typeutil.NewKvPairs(field.GetTypeParams()).Get(common.MaxCapacityKey)
-	require.NoError(t, err)
-	rootCapacity, err := typeutil.NewKvPairs(field.GetTypeSchema().GetTypeParams()).Get(common.MaxCapacityKey)
-	require.NoError(t, err)
-	require.Equal(t, "64", fieldCapacity)
-	require.Equal(t, fieldCapacity, rootCapacity)
+	require.ErrorContains(t, merr.CheckRPCCall(resp, err), "nested array can only be in a struct array field")
 }
 
 func TestDDLCallbacksAlterCollectionFieldAnalyzerValidation(t *testing.T) {
@@ -264,7 +318,6 @@ func TestDDLCallbacksAlterCollectionFieldAnalyzerValidation(t *testing.T) {
 	}
 	meta.fileResourceRefCnt = map[int64]int{}
 
-	mixCoord := core.mixCoord.(*mocks.MixCoord)
 	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -277,15 +330,13 @@ func TestDDLCallbacksAlterCollectionFieldAnalyzerValidation(t *testing.T) {
 	assertFieldProperties(t, ctx, core, dbName, collectionName, fieldName, common.AnalyzerParamKey, `{"tokenizer":"standard"}`)
 	require.Equal(t, 0, meta.fileResourceRefCnt[resourceID])
 
-	mixCoord.EXPECT().ValidateAnalyzer(mock.Anything, mock.MatchedBy(func(req *querypb.ValidateAnalyzerRequest) bool {
-		infos := req.GetAnalyzerInfos()
-		return len(infos) == 1 &&
+	setValidateAnalyzer := mockAnalyzerValidation(t)
+	setValidateAnalyzer(func(_ context.Context, infos []*querypb.AnalyzerInfo) ([]int64, error) {
+		require.True(t, len(infos) == 1 &&
 			infos[0].GetField() == fieldName &&
-			infos[0].GetParams() == `{"tokenizer":"standard"}`
-	})).Return(&querypb.ValidateAnalyzerResponse{
-		Status:      merr.Success(),
-		ResourceIds: []int64{resourceID},
-	}, nil).Once()
+			infos[0].GetParams() == `{"tokenizer":"standard"}`)
+		return []int64{resourceID}, nil
+	})
 
 	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
 		DbName:         dbName,
@@ -352,14 +403,12 @@ func TestDDLCallbacksAlterCollectionFieldAnalyzerValidation(t *testing.T) {
 	assertFieldProperties(t, ctx, core, dbName, collectionName, fieldName, common.AnalyzerParamKey, `{"tokenizer":"bad"}`)
 	require.Equal(t, 0, meta.fileResourceRefCnt[resourceID])
 
-	mixCoord.EXPECT().ValidateAnalyzer(mock.Anything, mock.MatchedBy(func(req *querypb.ValidateAnalyzerRequest) bool {
-		infos := req.GetAnalyzerInfos()
-		return len(infos) == 1 &&
+	setValidateAnalyzer(func(_ context.Context, infos []*querypb.AnalyzerInfo) ([]int64, error) {
+		require.True(t, len(infos) == 1 &&
 			infos[0].GetField() == fieldName &&
-			infos[0].GetParams() == `{"tokenizer":"bad"}`
-	})).Return(&querypb.ValidateAnalyzerResponse{
-		Status: merr.Status(merr.WrapErrParameterInvalidMsg("bad analyzer")),
-	}, nil).Once()
+			infos[0].GetParams() == `{"tokenizer":"bad"}`)
+		return nil, merr.WrapErrParameterInvalidMsg("bad analyzer")
+	})
 	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -373,15 +422,12 @@ func TestDDLCallbacksAlterCollectionFieldAnalyzerValidation(t *testing.T) {
 	assertFieldPropertiesNotFound(t, ctx, core, dbName, collectionName, fieldName, common.EnableAnalyzerKey)
 	require.Equal(t, 0, meta.fileResourceRefCnt[resourceID])
 
-	mixCoord.EXPECT().ValidateAnalyzer(mock.Anything, mock.MatchedBy(func(req *querypb.ValidateAnalyzerRequest) bool {
-		infos := req.GetAnalyzerInfos()
-		return len(infos) == 1 &&
+	setValidateAnalyzer(func(_ context.Context, infos []*querypb.AnalyzerInfo) ([]int64, error) {
+		require.True(t, len(infos) == 1 &&
 			infos[0].GetField() == fieldName &&
-			infos[0].GetParams() == `{"tokenizer":"standard"}`
-	})).Return(&querypb.ValidateAnalyzerResponse{
-		Status:      merr.Success(),
-		ResourceIds: []int64{resourceID},
-	}, nil).Once()
+			infos[0].GetParams() == `{"tokenizer":"standard"}`)
+		return []int64{resourceID}, nil
+	})
 	resp, err = core.AlterCollectionField(ctx, &milvuspb.AlterCollectionFieldRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,

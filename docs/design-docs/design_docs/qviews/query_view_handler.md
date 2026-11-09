@@ -75,6 +75,9 @@ Each `ApplyView` carries a coord-pushed `View` and an `OnReport` callback. All s
 
 - **Auto-create**: Unknown QueryViewKey + Preparing state → new SM + resource acquisition.
 - **Auto-destroy**: SM reaches Dropped → entry removed from shard map → `onEmpty` callback removes shard if empty.
+- **Empty batches on SN**: after applying a complete batch, a shard with no
+  entries also detaches through `onEmpty`. Unknown teardown pushes therefore
+  report completion without retaining an empty shard.
 - **Callback replacement**: Re-apply of same QueryViewKey replaces `OnReport`. Old callback is never invoked after replacement.
 - **Operation idempotency**: Duplicate Coord pushes for the same QueryViewKey
   reuse the existing handler entry and replace its callback. The SM consumes
@@ -111,11 +114,33 @@ When a Coord push arrives for a view not in the handler (e.g., node restarted):
    - **Success**: calls `OnReady(readySegments)` (may be called multiple times for incremental progress) → SM advances Preparing → Ready → report Ready to Coord.
    - **Fatal error**: calls `OnUnrecoverable` for the acquire invocation → SM advances Preparing → Unrecoverable → report Unrecoverable to Coord.
 3. Coord pushes Dropped → SM enters Dropping → calls `segMgr.Release(OnDropped)`.
-4. SegmentManager releases segments asynchronously → calls `OnDropped` → SM advances Dropping → Dropped → report Dropped to Coord → entry cleaned up.
+4. SegmentManager waits for this View's segment operations and references to
+   finish, then joins destruction of unshared or already-closing segment owners.
+   Only then does it call `OnDropped` → SM advances Dropping → Dropped → report
+   Dropped to Coord → entry cleaned up. A segment still owned by another View
+   may remain; per-field/index/ReadState pruning inside that shared segment is
+   not part of this whole-segment completion promise.
 
 All callbacks must be asynchronous (not during Acquire/Release) to avoid deadlocking the shard mutex.
 Duplicate QueryViewKey handling is owned by the handler/SM pair, not by
 `SegmentManager`.
+
+**QueryNode shutdown:** `QNQueryViewHandler.Close(ctx)` rejects new Preparing
+Views and turns existing Preparing Views into Unrecoverable, canceling their
+preparation and releasing partial resources early. Ready Views keep serving.
+Close waits on every admitted View's Dropped completion, including
+Unrecoverable and already-Dropping entries; resource cleanup alone does not
+erase an Unrecoverable report before Coord withdraws the View.
+
+The first Close context bounds migration. Its cancellation withdraws remaining
+Views locally and starts final drain; a context error is not proof of completed
+cleanup. Later Close calls join the same shutdown. On normal migration,
+ViewSync stays open through the last Dropped report; final drain closes its
+streams and joins SegmentManager callbacks and shared workers. Only successful
+Close permits the node to destroy segcore. QueryNode's legacy migration loop
+does not wait on or count QueryViews; an empty legacy manager cannot cut short
+the handler's deadline. A QV-only node waits for Coord withdrawal or that deadline,
+without using the legacy no-active-peer shortcut.
 
 ### 4.2 SN: ResourceManager + Catalog Interaction
 
@@ -124,7 +149,7 @@ Duplicate QueryViewKey handling is owned by the handler/SM pair, not by
 1. Coord pushes Preparing → handler creates SM (generates Preparing report immediately) → calls `resMgr.Acquire(OnReady, OnUnrecoverable)`.
 2. ResourceManager prepares resources asynchronously. `OnReady` advances Preparing → Ready; `OnUnrecoverable` advances Preparing → Unrecoverable and reports the failure to Coord.
 3. Coord pushes Up → SM advances Ready → Up → **persist Up** → report Up to Coord.
-4. Coord pushes Down → SM advances Up → Down → **persist Down (= delete recovery info)** → report Down to Coord.
+4. Coord pushes Down → shard records pending Down → waits for the [serving lease](query_view_lease.md) deadline and active query references → SM advances Up → Down → **persist Down (= delete recovery info)** → report Down to Coord. Duplicate Down pushes replace callbacks without renewing or generating an Up/Down report loop.
 5. Coord pushes Dropped → SM enters Dropping → **persist Dropped (= delete recovery info)** → calls `resMgr.Release(OnDropped)`.
 6. ResourceManager releases resources asynchronously → calls `OnDropped` → SM advances Dropping → Dropped → report Dropped to Coord → entry cleaned up.
 
@@ -141,8 +166,9 @@ second persistence retry mechanism above `ReliableWriteMetaKv`.
 **Full-view persistence invariant**: The SN-persisted Up view is the complete
 `QueryViewOfShard` pushed by Coord, not just `QueryViewOfStreamingNode`. The
 StreamingNode-local resource manager only consumes the SN portion. Retaining
-the complete topology keeps recovery metadata self-contained for later
-consumers without importing query execution in this change.
+the complete topology keeps recovery metadata self-contained. Phase 1 planning
+uses this topology; Phase 2 acquisition needs only metadata and a serving
+reference. See [Serving Lease](query_view_lease.md).
 
 SN-local persisted key format:
 
@@ -151,6 +177,13 @@ SN-local persisted key format:
 The pchannel is already present in the parent path, so the compact key stores
 only the canonical vchannel index plus the QueryView/DataView version tuple.
 Recovery validates the reconstructed key identity against the persisted proto.
+
+SN-local persisted key format:
+
+- `streamingnode-meta/wal/{pchannel}/query-view/{collectionID}/{replicaID}/{vchannel}/{streamingVersion}/{compactVersion}/{queryVersion}` — `QueryViewOfShard` proto.
+
+The key keeps the full vchannel name and the QueryView/DataView version tuple so
+multiple in-flight views for the same shard do not overwrite each other.
 
 ### 4.3 SN: Crash Recovery
 
@@ -167,8 +200,14 @@ SN persists only the Up state. On crash recovery:
    reporting to Coord and retains persisted recovery metadata until Coord later
    pushes Dropped.
 
-The resource interface and state-machine failure wiring are part of this change;
-the concrete resource preparation implementation remains outside this scope.
+The concrete SN resource preparation path is wired through
+`PChannelRecoveryManager` and `VChannelRecoveryModule`: it builds or reuses the
+shared QueryRuntime, prepares Growing/BM25 resources, and performs local bounded
+TransformLog Delete replay during bootstrap. Every recovered view must pass the
+final-commit check and applied-event barrier before recovery completes. See
+[SN WAL input view](../wal/streamingnode_vchannel_wal_view.md) for the flow and
+[preparation failure ownership](../wal/streamingnode_vchannel_wal_view.md#preparation-failure-ownership)
+for the intended Worknode/Coord split and current classification limitations.
 
 ### 4.4 SN: handleCoordDropped and Persistence Cleanup
 
@@ -180,7 +219,7 @@ When Coord pushes Dropped, the SM enters Dropping. The persist behavior depends 
 | Unrecoverable | Delete (may have entered from UpRecovering, stale recovery info on disk) |
 | Preparing, Ready, Down | None (no persisted recovery info) |
 
-If future resource wiring drives UpRecovering to Unrecoverable, the state
+If resource preparation drives UpRecovering to Unrecoverable, the state
 machine retains persisted Up metadata until Coord's Dropped push; deletion is
 deferred to that Dropping transition.
 
@@ -192,6 +231,22 @@ subsequent paths only reuse and wait on that channel. Handoff detaches and
 clears the shard under its mutex, then waits without the mutex for every
 existing release callback. This guarantees one Release invocation per view and
 still waits for cleanup already in flight.
+
+WAL opening owns the recovered handler together with the recovery resources.
+All cleanup paths, including AlterWAL's explicit FLUSHING-stage close, drain
+the handler before closing recovery storage and its task scheduler. Successful
+opening transfers both to the serving WAL. A release callback must never be
+submitted after its scheduler has closed, nor invoked synchronously under the
+calling shard lock.
+
+### 4.6 SN: Phase 1 replica lookup
+
+An explicit replica selects only its own shard. Before Phase 1 resolves a
+replica, an UnknownReplicaID request snapshots the matching VChannel shards
+and tries to acquire an Up lease, skipping candidates without an Up view.
+Acquisition happens outside the handler map lock to preserve the shard-to-handler
+lock order used by `onEmpty`. The selected shard still chooses its highest Up
+version; this fallback does not implement cross-replica consistency routing.
 
 ## 5. Liveness Contracts
 
@@ -222,3 +277,37 @@ Violating any contract leaves the corresponding view stuck (Preparing/UpRecoveri
 | `worknode/handler` | `ApplyView`, `QueryViewHandler` interface, `ViewSyncServer`, `pendingReports` |
 | `querynodev2/qnview` | `QNQueryViewHandler`, `QNQueryViewStateMachine`, `SegmentManager` interface |
 | `streamingnode/server/wal/snview` | `SNQueryViewHandler`, `SNQueryViewStateMachine`, `StreamingNodeResourceManager` interface, pchannel-bound `metastore.StreamingNodeCataLog` usage |
+
+## 7. Partial Resource Handover
+
+The [Balancer policy](balancer_scoring.md#51-failure-does-not-erase-partial-success)
+requires reuse of confirmed successful segments even when their Preparing view
+fails. Invalidating a target-load contribution is not a resource Release.
+
+The existing QN state machine retains previously ready segment IDs when it
+reports Unrecoverable; Release starts only after Coord requests teardown.
+ApplyViews processes new Preparing before old teardown within the same batch.
+The resource layer synchronously registers complete View requirements and
+resource references before scheduling preparation. Each SegmentResource owns
+its physical lifecycle and reconciles all live bindings. Unresolved collection
+metadata is a dependency of an existing binding, so shared resources remain
+protected while it resolves. See [QueryNode resource preparation](qnview/querynode_queryview_resource_preparation.md).
+
+That implementation must establish the new view's compatible segment references
+before releasing the old view's references. Acquire must register references
+before returning, or provide an equivalent ordered handover. Loading and
+callbacks remain asynchronous. Calling Acquire first is insufficient if it
+defers reference registration until after Release can unload the resource.
+
+For A with S1/S2 ready and S3 failed, replacement B can retain S1/S2 on the same
+live node and load S3 elsewhere. Shared resources remain held by B when A is
+released; resources exclusive to A follow ordinary cleanup. Node loss,
+incompatibility, missing readiness, or an already-unprotected release path
+prevents guaranteed reuse. A reuse miss must fall back to correct loading.
+
+Verify partial-success failure reports, new-reference-before-old-release
+ordering, actual reference retention, cleanup when there is no replacement,
+and node loss. Handler call-order tests alone do not establish physical reuse.
+No RPC change is required for this handover. Validation blocks replacement
+preparation, releases the old View, then completes the dependency and verifies
+both protected resource reuse and eventual readiness without another push.

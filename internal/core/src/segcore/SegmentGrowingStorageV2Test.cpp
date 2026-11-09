@@ -21,9 +21,11 @@
 #include <arrow/record_batch.h>
 #include <arrow/util/key_value_metadata.h>
 #include <parquet/properties.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <algorithm>
 #include <cstdint>
+#include <csignal>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -44,6 +46,7 @@
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "common/protobuf_utils.h"
+#include "folly/ScopeGuard.h"
 #include "gtest/gtest.h"
 #include "knowhere/comp/index_param.h"
 #include "milvus-storage/common/config.h"
@@ -56,6 +59,7 @@
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "segcore/TextLobSpillover.h"
 #include "segcore/memory_planner.h"
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
@@ -201,6 +205,87 @@ TEST_F(TestGrowingStorageV2, LoadFieldData) {
     segment->LoadFieldData(load_info);
 }
 
+TEST_F(TestGrowingStorageV2, ProducerReadFailurePreservesErrorWithoutHanging) {
+    const auto directory = path_ + "/growing-producer-read-failure";
+    auto cleanup = folly::makeGuard([&] { (void)fs_->DeleteDir(directory); });
+    const auto check_failure = [&] {
+        ASSERT_TRUE(fs_->CreateDir(directory).ok());
+        const auto path = directory + "/1";
+        std::vector<std::string> paths{path};
+        milvus_storage::StorageConfig config{};
+        std::vector<std::vector<int>> column_groups{{0, 1, 2}};
+        auto result = milvus_storage::PackedRecordBatchWriter::Make(
+            fs_, paths, schema_, config, column_groups, 16 * 1024 * 1024);
+        auto writer = result.ValueOrDie();
+        ASSERT_TRUE(writer->Write(record_batch_).ok());
+        ASSERT_TRUE(writer->Close().ok());
+
+        auto reader =
+            milvus_storage::FileRowGroupReader::Make(fs_, path).ValueOrDie();
+        auto metadata = reader->file_metadata()->GetParquetMetadata();
+        const auto column = metadata->RowGroup(0)->ColumnChunk(0);
+        const auto data_offset = column->data_page_offset();
+        const auto chunk_start = column->has_dictionary_page()
+                                     ? column->dictionary_page_offset()
+                                     : data_offset;
+        ASSERT_GE(data_offset, 4);
+        ASSERT_LE(data_offset + 16,
+                  chunk_start + column->total_compressed_size());
+        ASSERT_TRUE(reader->Close().ok());
+        auto input = fs_->OpenInputFile(path).ValueOrDie();
+        const auto size = input->GetSize().ValueOrDie();
+        auto damaged = input->ReadAt(0, size).ValueOrDie()->ToString();
+        ASSERT_LE(data_offset + 16, damaged.size());
+        ASSERT_TRUE(input->Close().ok());
+        std::fill_n(damaged.begin() + data_offset, 16, '\xff');
+        auto output = fs_->OpenOutputStream(path).ValueOrDie();
+        ASSERT_TRUE(output->Write(damaged.data(), damaged.size()).ok());
+        ASSERT_TRUE(output->Close().ok());
+
+        auto schema = std::make_shared<Schema>();
+        schema->AddDebugField("ts", DataType::INT64, true);
+        const auto pk = schema->AddDebugField("pk", DataType::INT64, false);
+        schema->AddDebugField("str", DataType::VARCHAR, true);
+        schema->set_primary_field_id(pk);
+        auto segment = CreateGrowingSegment(schema, empty_index_meta);
+        const auto rows = record_batch_->num_rows();
+        LoadFieldDataInfo info;
+        info.storage_version = 2;
+        info.field_infos = {
+            {0, FieldBinlogInfo{0, rows, {rows}, {rows}, false, "", {path}}}};
+        try {
+            segment->LoadFieldData(info);
+            FAIL() << "expected producer read failure";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), StorageError);
+            const auto prefix =
+                "[StorageV2] Failed to read row group 0 from file " + path;
+            EXPECT_NE(std::string(error.what()).find(prefix),
+                      std::string::npos);
+        }
+    };
+
+    const auto previous_style = ::testing::FLAGS_gtest_death_test_style;
+    auto restore_style = folly::makeGuard(
+        [&] { ::testing::FLAGS_gtest_death_test_style = previous_style; });
+    ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+    ASSERT_EXIT(
+        {
+            sigset_t signals;
+            if (std::signal(SIGALRM, SIG_DFL) == SIG_ERR ||
+                ::sigemptyset(&signals) != 0 ||
+                ::sigaddset(&signals, SIGALRM) != 0 ||
+                ::sigprocmask(SIG_UNBLOCK, &signals, nullptr) != 0) {
+                std::_Exit(2);
+            }
+            ::alarm(15);
+            check_failure();
+            std::_Exit(::testing::Test::HasFailure() ? 1 : 0);
+        },
+        ::testing::ExitedWithCode(0),
+        "");
+}
+
 // Regression for add-field + legacy StorageV2 data: a growing segment written
 // by StorageV2 can have a TEXT field added to its schema afterwards (AddField)
 // while its binlogs carry no TEXT column and it has no StorageV3 manifest. The
@@ -275,8 +360,8 @@ TEST_F(TestGrowingStorageV2, LoadFieldDataWithAddedTextFieldBackfillsEmpty) {
     segment_impl->FillAbsentFields();
 
     // The added TEXT column must be backfilled rather than left uninitialized:
-    // every old row reads back as null (validity false) and the raw column
-    // holds empty values.
+    // every old row reads back as null (validity false). The raw column holds
+    // spillover references whose decoded values are empty.
     auto* text_column = dynamic_cast<const ConcurrentVector<std::string>*>(
         segment_impl->get_insert_record().get_data_base(text_fid));
     ASSERT_NE(text_column, nullptr);
@@ -285,13 +370,12 @@ TEST_F(TestGrowingStorageV2, LoadFieldDataWithAddedTextFieldBackfillsEmpty) {
     ASSERT_NE(valid_data, nullptr);
     for (int64_t i = 0; i < 3000; ++i) {
         EXPECT_FALSE(valid_data->is_valid(i)) << "row " << i << " not null";
-        EXPECT_TRUE(text_column->view_element(i).empty())
-            << "row " << i << " TEXT value is not empty";
+        EXPECT_EQ(TextLobRef::Decode(text_column->view_element(i)).size, 0)
+            << "row " << i << " TEXT payload is not empty";
     }
 
     // Exercise the query read path: backfilled rows must retrieve as null with
-    // an empty value, not be misread as LOB references (the loaded region
-    // [0, text_loaded_row_count_) is normally decoded via the LOB reader).
+    // an empty value after decoding the local spillover reference.
     std::vector<int64_t> offsets(3000);
     std::iota(offsets.begin(), offsets.end(), 0);
     auto out = segment->bulk_subscript(nullptr, text_fid, offsets.data(), 3000);
@@ -447,11 +531,21 @@ TEST_F(TestGrowingStorageV2, TestAllDataTypes) {
     // Write data to storage v2
     auto paths = std::vector<std::string>{path_ + "/19530.parquet",
                                           path_ + "/19531.parquet"};
-    auto column_groups = std::vector<std::vector<int>>{
-        {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}, {15}};
     auto writer_memory = 16 * 1024 * 1024;
     auto storage_config = milvus_storage::StorageConfig();
     auto arrow_schema = schema->ConvertToArrowSchema();
+    // Keep the vector in its own group while including every scalar column,
+    // even when the shared all-types schema gains another type.
+    std::vector<std::vector<int>> column_groups(2);
+    for (int i = 0; i < arrow_schema->num_fields(); ++i) {
+        const auto field_id =
+            std::stoll(arrow_schema->field(i)
+                           ->metadata()
+                           ->Get(milvus_storage::ARROW_FIELD_ID_KEY)
+                           .ValueOrDie());
+        column_groups[field_id == vec.get() ? 1 : 0].push_back(i);
+    }
+    ASSERT_EQ(column_groups[1].size(), 1);
     auto result = milvus_storage::PackedRecordBatchWriter::Make(
         fs_,
         paths,
@@ -463,8 +557,12 @@ TEST_F(TestGrowingStorageV2, TestAllDataTypes) {
     EXPECT_TRUE(result.ok());
     auto writer = result.ValueOrDie();
     int64_t total_rows = 0;
+    std::vector<float> expected_vectors;
     for (int64_t i = 0; i < n_batch; i++) {
         auto dataset = DataGen(schema, per_batch);
+        const auto vectors = dataset.get_col<float>(vec);
+        expected_vectors.insert(
+            expected_vectors.end(), vectors.begin(), vectors.end());
         auto record_batch =
             ConvertToArrowRecordBatch(dataset, dim, arrow_schema);
         total_rows += record_batch->num_rows();
@@ -495,4 +593,16 @@ TEST_F(TestGrowingStorageV2, TestAllDataTypes) {
     };
     load_info.storage_version = 2;
     segment->LoadFieldData(load_info);
+    ASSERT_EQ(segment->get_row_count(), total_rows);
+    for (const auto& [field_id, field_meta] : schema->get_fields()) {
+        EXPECT_TRUE(segment->HasFieldData(field_id)) << field_id.get();
+    }
+    std::vector<int64_t> offsets(total_rows);
+    std::iota(offsets.begin(), offsets.end(), 0);
+    auto vectors =
+        segment->bulk_subscript(nullptr, vec, offsets.data(), total_rows);
+    const auto& values = vectors->vectors().float_vector().data();
+    EXPECT_EQ(vectors->vectors().dim(), dim);
+    EXPECT_EQ(std::vector<float>(values.begin(), values.end()),
+              expected_vectors);
 }

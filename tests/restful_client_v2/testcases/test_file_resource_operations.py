@@ -262,11 +262,13 @@ class TestFileResourceOperations(TestBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_missing_remote_resource_returns_stable_error(self):
         collection_name = gen_collection_name("rest_missing_remote_analyzer")
-        payload = self._remote_analyzer_collection_payload(collection_name, gen_unique_str("missing_resource"))
+        resource_name = gen_unique_str("missing_resource")
+        payload = self._remote_analyzer_collection_payload(collection_name, resource_name)
 
         rsp = self.collection_client.collection_create(payload)
         assert rsp["code"] == 1100, rsp
-        assert "not found in local resource list" in rsp["message"], rsp
+        assert resource_name in rsp["message"], rsp
+        assert "not found" in rsp["message"], rsp
 
     @pytest.mark.tags(CaseLabel.RBAC)
     def test_file_resource_management_requires_authentication(self):

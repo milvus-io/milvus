@@ -23,6 +23,7 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
+	DataCoord_GetStreamingNodeQueryViewResources_FullMethodName   = "/milvus.proto.data.DataCoord/GetStreamingNodeQueryViewResources"
 	DataCoord_Flush_FullMethodName                                = "/milvus.proto.data.DataCoord/Flush"
 	DataCoord_FlushAll_FullMethodName                             = "/milvus.proto.data.DataCoord/FlushAll"
 	DataCoord_AllocSegment_FullMethodName                         = "/milvus.proto.data.DataCoord/AllocSegment"
@@ -95,6 +96,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type DataCoordClient interface {
+	GetStreamingNodeQueryViewResources(ctx context.Context, in *GetStreamingNodeQueryViewResourcesRequest, opts ...grpc.CallOption) (*GetStreamingNodeQueryViewResourcesResponse, error)
 	Flush(ctx context.Context, in *FlushRequest, opts ...grpc.CallOption) (*FlushResponse, error)
 	// FlushAll flushes all data in the cluster.
 	FlushAll(ctx context.Context, in *FlushAllRequest, opts ...grpc.CallOption) (*FlushAllResponse, error)
@@ -184,6 +186,15 @@ type dataCoordClient struct {
 
 func NewDataCoordClient(cc grpc.ClientConnInterface) DataCoordClient {
 	return &dataCoordClient{cc}
+}
+
+func (c *dataCoordClient) GetStreamingNodeQueryViewResources(ctx context.Context, in *GetStreamingNodeQueryViewResourcesRequest, opts ...grpc.CallOption) (*GetStreamingNodeQueryViewResourcesResponse, error) {
+	out := new(GetStreamingNodeQueryViewResourcesResponse)
+	err := c.cc.Invoke(ctx, DataCoord_GetStreamingNodeQueryViewResources_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *dataCoordClient) Flush(ctx context.Context, in *FlushRequest, opts ...grpc.CallOption) (*FlushResponse, error) {
@@ -786,6 +797,7 @@ func (c *dataCoordClient) HandleCommitVchannel(ctx context.Context, in *HandleCo
 // All implementations should embed UnimplementedDataCoordServer
 // for forward compatibility
 type DataCoordServer interface {
+	GetStreamingNodeQueryViewResources(context.Context, *GetStreamingNodeQueryViewResourcesRequest) (*GetStreamingNodeQueryViewResourcesResponse, error)
 	Flush(context.Context, *FlushRequest) (*FlushResponse, error)
 	// FlushAll flushes all data in the cluster.
 	FlushAll(context.Context, *FlushAllRequest) (*FlushAllResponse, error)
@@ -873,6 +885,9 @@ type DataCoordServer interface {
 type UnimplementedDataCoordServer struct {
 }
 
+func (UnimplementedDataCoordServer) GetStreamingNodeQueryViewResources(context.Context, *GetStreamingNodeQueryViewResourcesRequest) (*GetStreamingNodeQueryViewResourcesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetStreamingNodeQueryViewResources not implemented")
+}
 func (UnimplementedDataCoordServer) Flush(context.Context, *FlushRequest) (*FlushResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Flush not implemented")
 }
@@ -1081,6 +1096,24 @@ type UnsafeDataCoordServer interface {
 
 func RegisterDataCoordServer(s grpc.ServiceRegistrar, srv DataCoordServer) {
 	s.RegisterService(&DataCoord_ServiceDesc, srv)
+}
+
+func _DataCoord_GetStreamingNodeQueryViewResources_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetStreamingNodeQueryViewResourcesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DataCoordServer).GetStreamingNodeQueryViewResources(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DataCoord_GetStreamingNodeQueryViewResources_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DataCoordServer).GetStreamingNodeQueryViewResources(ctx, req.(*GetStreamingNodeQueryViewResourcesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _DataCoord_Flush_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -2278,6 +2311,10 @@ var DataCoord_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "milvus.proto.data.DataCoord",
 	HandlerType: (*DataCoordServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetStreamingNodeQueryViewResources",
+			Handler:    _DataCoord_GetStreamingNodeQueryViewResources_Handler,
+		},
 		{
 			MethodName: "Flush",
 			Handler:    _DataCoord_Flush_Handler,

@@ -430,8 +430,9 @@ to sit in this cluster's window — after a demotion, or after the source releas
 and a client legally re-issued it.
 
 The recovery observer applies the same rule: a replicated write becomes a *keyless*
-committed write (checkpoint bookkeeping only), so a foreign key can never materialize a
-local entry.
+committed write in Summary, so a foreign key can never materialize a local dedup
+entry. Its local WAL positions still participate in Summary persistence and
+checkpoint gating.
 
 ## Reader-side physical dedup
 

@@ -70,7 +70,7 @@ TEST(DriverTest, PreservesSegcoreErrorCode) {
                 N,
                 raw_data.row_ids_.data(),
                 raw_data.timestamps_.data(),
-                raw_data.raw_);
+                std::make_shared<InsertRecordProto>(*raw_data.raw_));
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
 
     // A modulus-by-zero arithmetic filter ("counter % 0 == 0") passes plan
@@ -139,7 +139,7 @@ TEST(DriverTest, CancellationMapsToFollyCancel) {
                 N,
                 raw_data.row_ids_.data(),
                 raw_data.timestamps_.data(),
-                raw_data.raw_);
+                std::make_shared<InsertRecordProto>(*raw_data.raw_));
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
 
     // Build a search plan for "counter > 500".
@@ -222,7 +222,7 @@ TEST(DriverTest, AsyncConsumePreservesSegcoreErrorCode) {
                 N,
                 raw_data.row_ids_.data(),
                 raw_data.timestamps_.data(),
-                raw_data.raw_);
+                std::make_shared<InsertRecordProto>(*raw_data.raw_));
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
 
     proto::plan::GenericValue zero;
@@ -282,7 +282,7 @@ TEST(DriverTest, AsyncDriverCancellationCountsDuringMetric) {
                 N,
                 raw_data.row_ids_.data(),
                 raw_data.timestamps_.data(),
-                raw_data.raw_);
+                std::make_shared<InsertRecordProto>(*raw_data.raw_));
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
 
     ScopedSchemaHandle schema_handle(*schema);

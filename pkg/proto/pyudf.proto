@@ -1,0 +1,89 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//	http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+
+package milvus.proto.pyudf;
+option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/pyudfpb";
+
+// A complete Arrow IPC stream is sent in one synchronous unary call.
+service PyUDFWorker {
+  rpc Execute(ExecuteRequest) returns (ExecuteResponse);
+}
+
+message ExecuteRequest {
+  reserved 1;
+  reserved "protocol_version";
+  string resource_name = 2;
+  string udf_path = 3;
+  string stage = 4;
+  FunctionParamObject params = 5;
+  // Unique input columns, one RecordBatch per query, including zero rows.
+  bytes inputs = 6;
+  // UDF argument position -> zero-based IPC column index. Repeated indices
+  // reuse the same decoded array. Empty means IPC columns in their stored order.
+  repeated uint32 input_column_indices = 7;
+}
+
+// Runtime-owned parameter types. Keep these independent of Milvus API protos:
+// user UDFs may import an SDK with different schema/common descriptors.
+message FunctionParamValue {
+  oneof value {
+    bool bool_value = 1;
+    int64 int64_value = 2;
+    double double_value = 3;
+    string string_value = 4;
+    FunctionParamArray array_value = 5;
+    FunctionParamObject object_value = 6;
+    bytes bytes_value = 7;
+  }
+}
+
+message FunctionParamArray {
+  repeated FunctionParamValue values = 1;
+}
+
+message FunctionParamObject {
+  map<string, FunctionParamValue> fields = 1;
+}
+
+message ExecuteResponse {
+  oneof result {
+    // One complete Arrow IPC stream; output layout is independent of inputs.
+    bytes outputs = 1;
+    ExecuteError error = 2;
+  }
+}
+
+// Execution categories, not Milvus wire codes. The Go client owns merr mapping.
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  UDF_FAILED = 1;
+  RESOURCE_NOT_FOUND = 2;
+  RESOURCE_PERMISSION_DENIED = 3;
+  RESOURCE_IO_FAILED = 4;
+  OUT_OF_MEMORY = 5;
+  UNSUPPORTED = 6;
+  INTERNAL = 7;
+  // User-supplied UDF parameters violate the runtime parameter contract.
+  INVALID_ARGUMENT = 8;
+}
+
+message ExecuteError {
+  ErrorCode code = 1;
+  // Include useful operation/query/column context here. Clients never parse it.
+  string message = 2;
+}

@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/datanode/external"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
+	"github.com/milvus-io/milvus/internal/datanode/importv3"
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -508,6 +509,60 @@ func (s *DataNodeServicesSuite) TestResendSegmentStats() {
 	s.Assert().True(merr.Ok(resp.GetStatus()), "empty call, status shall be OK")
 }
 
+// QuerySlot capability advertisement does not require node registration or etcd.
+func TestQuerySlotSegmentRootedIndexCapability(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	node := NewDataNode(ctx)
+	defer node.cancel()
+	node.importScheduler = importv2.NewScheduler(importv2.NewTaskManager())
+	node.importV3Scheduler = importv3.NewScheduler(ctx, func() int64 { return 1 }, importv3.NewMetrics(1))
+	defer node.importV3Scheduler.Close()
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	resp, err := node.QuerySlot(ctx, &datapb.QuerySlotRequest{})
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(resp.GetStatus()))
+	require.True(t, resp.GetSegmentRootedIndexes())
+
+	node.UpdateStateCode(commonpb.StateCode_Abnormal)
+	resp, err = node.QuerySlot(ctx, &datapb.QuerySlotRequest{})
+	require.NoError(t, err)
+	require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
+	require.False(t, resp.GetSegmentRootedIndexes())
+}
+
+func TestQuerySlotIncludesQueueBudget(t *testing.T) {
+	paramtable.Init()
+	slots := mockey.Mock(index.CalculateNodeSlots).Return(int64(128)).Build()
+	defer slots.UnPatch()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	node := NewDataNode(ctx)
+	defer node.cancel()
+	node.importScheduler = importv2.NewScheduler(importv2.NewTaskManager())
+	node.importV3Scheduler = importv3.NewScheduler(ctx, func() int64 { return 1 }, importv3.NewMetrics(1))
+	defer node.importV3Scheduler.Close()
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	for id := int64(1); id <= 3; id++ {
+		task := index.NewIndexBuildTask(ctx, cancel, &workerpb.CreateJobRequest{
+			ClusterID: "queue-budget", BuildID: id, TaskSlot: 64,
+			IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "STL_SORT"}},
+		}, nil, node.taskManager, nil)
+		require.NoError(t, node.taskScheduler.TaskQueue.Enqueue(task))
+		resp, err := node.QuerySlot(ctx, &datapb.QuerySlotRequest{})
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(resp.GetStatus()))
+		if id == 3 {
+			require.Zero(t, resp.GetAvailableSlots())
+		} else {
+			require.EqualValues(t, 64, resp.GetAvailableSlots())
+		}
+		if id == 1 {
+			require.Same(t, task, node.taskScheduler.TaskQueue.PopUnissuedTask(true))
+		}
+	}
+}
+
 func (s *DataNodeServicesSuite) TestQuerySlot() {
 	s.Run("node not healthy", func() {
 		s.SetupTest()
@@ -527,6 +582,7 @@ func (s *DataNodeServicesSuite) TestQuerySlot() {
 		s.NoError(err)
 		s.True(merr.Ok(resp.GetStatus()))
 		s.True(resp.GetCopySegmentSharedIndexes())
+		s.True(resp.GetSegmentRootedIndexes())
 		s.NoError(merr.Error(resp.GetStatus()))
 	})
 }
@@ -619,6 +675,31 @@ func (s *DataNodeServicesSuite) TestCreateTask() {
 		}
 		status, err := s.node.CreateTask(s.ctx, req)
 		s.NoError(merr.CheckRPCCall(status, err))
+	})
+
+	s.Run("malformed payload is a parameter error", func() {
+		req := &workerpb.CreateTaskRequest{
+			Properties: map[string]string{
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      taskcommon.PreImport,
+			},
+			Payload: []byte{0xff, 0xff, 0xff},
+		}
+		status, err := s.node.CreateTask(s.ctx, req)
+		s.NoError(err)
+		s.Equal(merr.Code(merr.ErrParameterInvalid), status.GetCode())
+	})
+
+	s.Run("unrecognized task type is unimplemented", func() {
+		req := &workerpb.CreateTaskRequest{
+			Properties: map[string]string{
+				taskcommon.ClusterIDKey: "cluster-0",
+				taskcommon.TypeKey:      "no-such-task",
+			},
+		}
+		status, err := s.node.CreateTask(s.ctx, req)
+		s.NoError(err)
+		s.Equal(merr.Code(merr.ErrServiceUnimplemented), status.GetCode())
 	})
 
 	s.Run("create stats task", func() {

@@ -48,13 +48,6 @@ import (
 )
 
 const (
-	// codecVersion is the on-disk chunk format version. It is written once, into
-	// the object's fixed binary header, and checked there before anything else
-	// is parsed.
-	codecVersion      = 1
-	chunkHeaderSize   = 16
-	chunkChecksumSize = sha256.Size
-
 	// manifestVersion is the on-disk manifest format version.
 	manifestVersion = 1
 	manifestHeader  = 16
@@ -70,9 +63,7 @@ const (
 )
 
 var (
-	chunkHeaderMagic = []byte("PSCCH001")
-	chunkFooterMagic = []byte("PSCFT001")
-	manifestMagic    = []byte("PSMF0001")
+	manifestMagic = []byte("PSMF0001")
 
 	// marshalOptions pins deterministic output so that a rewrite of the same
 	// generation is usually byte-identical and can be recognized as a retry
@@ -139,27 +130,38 @@ func (s *Store) WriteChunk(
 	sectionsByVChannel map[string]*ChunkSections,
 	coverage TimeTickRange,
 ) (*streamingpb.PChannelSummaryChunkFooter, uint64, error) {
+	footer, payload, err := s.writeChunk(ctx, generation, sectionsByVChannel, coverage)
+	return footer, uint64(len(payload)), err
+}
+
+// writeChunk also returns the actual stored encoding for the write-through cache.
+func (s *Store) writeChunk(
+	ctx context.Context,
+	generation uint64,
+	sectionsByVChannel map[string]*ChunkSections,
+	coverage TimeTickRange,
+) (*streamingpb.PChannelSummaryChunkFooter, []byte, error) {
 	payload, footer, err := marshalChunk(s.pchannel, generation, s.term, sectionsByVChannel, coverage)
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, err
 	}
 	key := s.ChunkKey(generation)
 	exists, err := s.chunkManager.Exist(ctx, key)
 	if err != nil {
-		return nil, 0, merr.Wrapf(err, "failed to probe summary chunk %s", key)
+		return nil, nil, merr.Wrapf(err, "failed to probe summary chunk %s", key)
 	}
 	if !exists {
 		if err := s.chunkManager.Write(ctx, key, payload); err != nil {
-			return nil, 0, merr.Wrapf(err, "failed to write summary chunk %s", key)
+			return nil, nil, merr.Wrapf(err, "failed to write summary chunk %s", key)
 		}
-		return footer, uint64(len(payload)), nil
+		return footer, payload, nil
 	}
 	existingPayload, err := s.chunkManager.Read(ctx, key)
 	if err != nil {
-		return nil, 0, merr.Wrapf(err, "failed to read existing summary chunk %s", key)
+		return nil, nil, merr.Wrapf(err, "failed to read existing summary chunk %s", key)
 	}
 	if bytes.Equal(existingPayload, payload) {
-		return footer, uint64(len(payload)), nil
+		return footer, payload, nil
 	}
 	// Same key, different bytes. The key carries this store's term and the
 	// footer is marshaled from that same term, so a split-brain owner writes a
@@ -183,10 +185,10 @@ func (s *Store) WriteChunk(
 			// every later ranged read slice the wrong range. The object is not
 			// rewritten, so what the manifest describes has to be the object
 			// that is there.
-			return existingFooter, uint64(len(existingPayload)), nil
+			return existingFooter, existingPayload, nil
 		}
 	}
-	return nil, 0, storeCorruptedf("summary chunk already exists with different payload: %s", key)
+	return nil, nil, storeCorruptedf("summary chunk already exists with different payload: %s", key)
 }
 
 // ReadChunk reads and decodes one chunk object. The term of the chunk is
@@ -653,13 +655,10 @@ func marshalChunk(
 	if err := validateChunkIndex(chunkIndexEntryFromFooter(footer, 0)); err != nil {
 		return nil, nil, err
 	}
-	footerPayload, err := marshalOptions.Marshal(footer)
+	footerPayload, err := marshalIntoBuffer(buf, footer)
 	if err != nil {
 		return nil, nil, merr.Wrap(err, "failed to marshal summary chunk footer")
 	}
-	// bytes.Buffer.Write never returns an error, so the trailer writes are
-	// unchecked.
-	buf.Write(footerPayload)
 	// Checksum the footer bytes exactly as written and carry it in the trailer,
 	// so verification never re-marshals the parsed footer — proto marshaling is
 	// not guaranteed byte-stable across library versions.
@@ -685,10 +684,7 @@ func appendIdempotencySections(
 	sections *ChunkSections,
 ) error {
 	inserts := &streamingpb.VChannelSummaryInsertSection{
-		Records: make([]*streamingpb.VChannelSummaryInsertRecord, 0, len(sections.Inserts)),
-	}
-	for _, record := range sections.Inserts {
-		inserts.Records = append(inserts.Records, proto.Clone(record).(*streamingpb.VChannelSummaryInsertRecord))
+		Records: sections.Inserts,
 	}
 	ref, err := appendSection(buf, inserts, len(inserts.Records))
 	if err != nil {
@@ -700,10 +696,7 @@ func appendIdempotencySections(
 		return nil
 	}
 	keys := &streamingpb.VChannelSummaryIdempotencySection{
-		Records: make([]*streamingpb.VChannelSummaryIdempotencyRecord, 0, len(sections.Idempotency)),
-	}
-	for _, record := range sections.Idempotency {
-		keys.Records = append(keys.Records, proto.Clone(record).(*streamingpb.VChannelSummaryIdempotencyRecord))
+		Records: sections.Idempotency,
 	}
 	if ref, err = appendSection(buf, keys, len(keys.Records)); err != nil {
 		return err
@@ -716,17 +709,34 @@ func appendIdempotencySections(
 // offset is absolute within the object so a reader can turn it straight into a
 // ranged read.
 func appendSection(buf *bytes.Buffer, section proto.Message, recordCount int) (*streamingpb.VChannelSummarySectionRef, error) {
-	payload, err := marshalOptions.Marshal(section)
-	if err != nil {
-		return nil, merr.WrapErrServiceInternalMsg("failed to marshal summary section: " + err.Error())
-	}
 	offset := uint64(buf.Len())
-	buf.Write(payload)
+	payload, err := marshalIntoBuffer(buf, section)
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to marshal summary section")
+	}
 	return &streamingpb.VChannelSummarySectionRef{
 		Offset:      offset,
 		Length:      uint64(len(payload)),
 		RecordCount: uint64(recordCount),
 	}, nil
+}
+
+// marshalIntoBuffer encodes immutable messages directly into the chunk buffer.
+// The returned bytes are borrowed and must be consumed before the next write.
+func marshalIntoBuffer(buf *bytes.Buffer, msg proto.Message) ([]byte, error) {
+	options := marshalOptions
+	buf.Grow(options.Size(msg))
+	// Nothing mutates the message between Size and MarshalAppend; reuse the
+	// computed sizes instead of traversing all nested records a second time.
+	options.UseCachedSize = true
+	payload, err := options.MarshalAppend(buf.AvailableBuffer(), msg)
+	if err != nil {
+		return nil, err
+	}
+	// AvailableBuffer points at the write position. Write commits the length;
+	// its source and destination are the same bytes, so no payload copy occurs.
+	buf.Write(payload)
+	return payload, nil
 }
 
 // unmarshalChunk decodes a whole chunk object back into per-vchannel sections.
@@ -833,47 +843,6 @@ func sliceSection(
 		return nil, storeCorruptedf("invalid %s section range for vchannel %s", name, vchannel)
 	}
 	return payload[ref.GetOffset():end], nil
-}
-
-// unmarshalChunkTail decodes the object's trailer and footer and returns where
-// the payload region ends. Every section offset is bounded by that position,
-// which is what keeps a corrupt index from addressing the footer.
-func unmarshalChunkTail(payload []byte) (*streamingpb.PChannelSummaryChunkFooter, uint64, error) {
-	if len(payload) < chunkHeaderSize+chunkChecksumSize+len(chunkFooterMagic)+4 {
-		return nil, 0, storeCorruptedf("summary chunk payload too short")
-	}
-	if !bytes.Equal(payload[:len(chunkHeaderMagic)], chunkHeaderMagic) {
-		return nil, 0, storeCorruptedf("invalid summary chunk header magic")
-	}
-	if version := binary.BigEndian.Uint16(payload[8:10]); version != codecVersion {
-		return nil, 0, storeCorruptedf("unsupported summary chunk version %d", version)
-	}
-	if headerSize := binary.BigEndian.Uint32(payload[12:16]); headerSize != chunkHeaderSize {
-		return nil, 0, storeCorruptedf("invalid summary chunk header size %d", headerSize)
-	}
-	footerMagicStart := len(payload) - len(chunkFooterMagic)
-	if !bytes.Equal(payload[footerMagicStart:], chunkFooterMagic) {
-		return nil, 0, storeCorruptedf("invalid summary chunk footer magic")
-	}
-	footerLenStart := footerMagicStart - 4
-	footerChecksumStart := footerLenStart - chunkChecksumSize
-	if footerChecksumStart < chunkHeaderSize {
-		return nil, 0, storeCorruptedf("invalid summary chunk footer length offset")
-	}
-	footerLen := int(binary.BigEndian.Uint32(payload[footerLenStart:footerMagicStart]))
-	footerStart := footerChecksumStart - footerLen
-	if footerLen <= 0 || footerStart < chunkHeaderSize {
-		return nil, 0, storeCorruptedf("invalid summary chunk footer length")
-	}
-	footerPayload := payload[footerStart:footerChecksumStart]
-	if actual := sha256.Sum256(footerPayload); !bytes.Equal(payload[footerChecksumStart:footerLenStart], actual[:]) {
-		return nil, 0, storeCorruptedf("summary chunk footer checksum mismatch")
-	}
-	footer := &streamingpb.PChannelSummaryChunkFooter{}
-	if err := proto.Unmarshal(footerPayload, footer); err != nil {
-		return nil, 0, markStoreCorrupted(merr.Wrap(err, "failed to decode summary chunk footer"))
-	}
-	return footer, uint64(footerStart), nil
 }
 
 // sortedByInsertTimetick orders a vchannel's idempotency halves by the WAL
@@ -1045,22 +1014,6 @@ func recordChunk(manifest *streamingpb.PChannelSummaryManifest, entry *streaming
 	}
 }
 
-// chunkIndexEntryFromFooter mirrors a written chunk's footer into a manifest
-// entry, so retention and lazy reads work off the manifest alone.
-func chunkIndexEntryFromFooter(footer *streamingpb.PChannelSummaryChunkFooter, objectSize uint64) *streamingpb.PChannelSummaryChunkIndexEntry {
-	if footer == nil {
-		return nil
-	}
-	return &streamingpb.PChannelSummaryChunkIndexEntry{
-		Generation:    footer.GetGeneration(),
-		Term:          footer.GetTerm(),
-		ObjectSize:    objectSize,
-		StartTimeTick: footer.GetStartTimeTick(),
-		EndTimetick:   footer.GetEndTimetick(),
-		Vchannels:     footer.GetChunks(),
-	}
-}
-
 // ReadTransformSection decodes one vchannel's transform records from a chunk.
 func (s *Store) ReadTransformSection(
 	ctx context.Context,
@@ -1102,11 +1055,15 @@ func unmarshalTransformSection(
 	if uint64(len(section.GetRecords())) != ref.GetRecordCount() {
 		return nil, storeCorruptedf("transform section record count mismatch for vchannel %s", vchannel)
 	}
-	records := make([]*streamingpb.VChannelSummaryTransformRecord, 0, len(section.GetRecords()))
-	for _, record := range section.GetRecords() {
-		records = append(records, cloneTransformRecord(record))
+	// Decoded records belong to this reader; neither sorting nor returning them
+	// can mutate the shared encoded chunk cache.
+	records := section.GetRecords()
+	if len(records) > 1 {
+		sort.SliceStable(records, func(i, j int) bool {
+			return records[i].GetTimeTick() < records[j].GetTimeTick()
+		})
 	}
-	return sortedTransformRecords(records), nil
+	return records, nil
 }
 
 func sortedTransformRecords(records []*streamingpb.VChannelSummaryTransformRecord) []*streamingpb.VChannelSummaryTransformRecord {
@@ -1119,13 +1076,6 @@ func sortedTransformRecords(records []*streamingpb.VChannelSummaryTransformRecor
 		return sorted[i].GetTimeTick() < sorted[j].GetTimeTick()
 	})
 	return sorted
-}
-
-func cloneTransformRecord(record *streamingpb.VChannelSummaryTransformRecord) *streamingpb.VChannelSummaryTransformRecord {
-	if record == nil {
-		return nil
-	}
-	return proto.Clone(record).(*streamingpb.VChannelSummaryTransformRecord)
 }
 
 func transformRecordTimetickRange(records []*streamingpb.VChannelSummaryTransformRecord) (uint64, uint64) {
@@ -1171,4 +1121,25 @@ func (s *Store) sweepGarbage(ctx context.Context, term int64, coverage *streamin
 		return deleted, false, merr.Wrap(err, "failed to sweep summary garbage")
 	}
 	return deleted, finished && deleteErr == nil, deleteErr
+}
+
+// readChunkPayload validates a retained object against the captured manifest
+// before making its bytes available to all readers of this index node.
+func (s *Store) readChunkPayload(ctx context.Context, index *streamingpb.PChannelSummaryChunkIndexEntry, verified *chunkValidation) (*chunkPayload, error) {
+	key := buildChunkKey(s.chunkManager, s.pchannel, index.GetGeneration(), index.GetTerm())
+	payload, err := s.chunkManager.Read(ctx, key)
+	if err != nil {
+		return nil, merr.Wrapf(err, "failed to read summary chunk %s", key)
+	}
+	decoded, err := validateChunkPayload(payload, s.pchannel, index, verified)
+	if err != nil {
+		return nil, merr.Wrapf(err, "failed to validate summary chunk %s", key)
+	}
+	return decoded, nil
+}
+
+// chunkFooterOffset is used only with bytes produced or validated by writeChunk.
+func chunkFooterOffset(payload []byte) uint64 {
+	end := len(payload) - len(chunkFooterMagic) - 4
+	return uint64(end - chunkChecksumSize - int(binary.BigEndian.Uint32(payload[end:end+4])))
 }

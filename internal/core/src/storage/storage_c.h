@@ -34,6 +34,9 @@ InitLocalChunkManagerSingleton(const char* path);
 CStatus
 InitRemoteChunkManagerSingleton(CStorageConfig c_storage_config);
 
+CStatus
+InitS3CrtQueueSizes(uint32_t crt_queue_sizes);
+
 // Select the remote ChunkManager backend for this process: when enabled,
 // CreateChunkManager routes remote IO through the milvus-storage
 // ArrowFileSystem instead of the legacy AWS-SDK based chunk managers.
@@ -53,6 +56,11 @@ ResizeTheadPool(int64_t priority, float ratio);
 CStatus
 InitDiskFileWriterConfig(CDiskWriteConfig c_disk_write_config);
 
+// Configure process-wide Arrow CPU/IO pools and the shared storage Tokio
+// runtime. The caller must invoke this once before the first Rust bridge use.
+CStatus
+InitStorageRuntime(int cpu_threads, int io_threads);
+
 CStatus
 InitArrowReaderConfig(CArrowReaderConfig c_arrow_reader_config);
 
@@ -61,6 +69,12 @@ SetExternalVectorPartialNullAsRowNull(bool enabled);
 
 bool
 GetExternalVectorPartialNullAsRowNull();
+
+bool
+SetExternalSparseConversionMemoryLimit(int64_t bytes);
+
+int64_t
+GetExternalSparseConversionMemoryLimit();
 
 CStatus
 InitLoonReaderThreadPool(int32_t num_threads);
@@ -77,6 +91,9 @@ InitIndexBuildReadWindow(int64_t window_bytes);
 
 CStatus
 InitExternalIopsConfig(uint32_t initial_rate, uint32_t max_rate);
+
+CStatus
+InitCredentialBrokerPolicy(const char* endpoints_json);
 
 // Plugin related APIs
 CStatus

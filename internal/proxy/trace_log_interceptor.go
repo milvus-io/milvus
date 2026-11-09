@@ -28,7 +28,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
 )
@@ -118,6 +120,24 @@ func GetRequestFieldWithoutSensitiveInfo(req interface{}) mlog.Field {
 	createCollectionReq, ok := req.(*milvuspb.CreateCollectionRequest)
 	if ok {
 		return mlog.Any("request", redactCreateCollectionRequestForLog(createCollectionReq))
+	}
+	// Public gRPC Import and REST hook logging use different protobuf carriers.
+	// Keep credentials on the live request for the handler and import retries.
+	switch request := req.(type) {
+	case *milvuspb.ImportRequest:
+		if request == nil || len(request.GetOptions()) == 0 {
+			return mlog.Any("request", request)
+		}
+		redactedReq := proto.Clone(request).(*milvuspb.ImportRequest)
+		redactedReq.Options = importutilv2.RedactOptions(request.GetOptions())
+		return mlog.Any("request", redactedReq)
+	case *internalpb.ImportRequest:
+		if request == nil || len(request.GetOptions()) == 0 {
+			return mlog.Any("request", request)
+		}
+		redactedReq := proto.Clone(request).(*internalpb.ImportRequest)
+		redactedReq.Options = importutilv2.RedactOptions(request.GetOptions())
+		return mlog.Any("request", redactedReq)
 	}
 	refreshExternalCollectionReq, ok := req.(*milvuspb.RefreshExternalCollectionRequest)
 	if ok {

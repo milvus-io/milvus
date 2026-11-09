@@ -18,9 +18,14 @@ package index
 
 import (
 	"context"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -29,7 +34,10 @@ import (
 	"github.com/milvus-io/milvus/internal/util/analyzecgowrapper"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/cgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/clusteringpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
@@ -59,15 +67,14 @@ type emptyIndex struct {
 	deleted bool
 }
 
-func (*emptyIndex) Build(*indexcgowrapper.Dataset) error                        { return nil }
-func (*emptyIndex) Serialize() ([]*indexcgowrapper.Blob, error)                 { return nil, nil }
-func (*emptyIndex) GetIndexFileInfo() ([]*indexcgowrapper.IndexFileInfo, error) { return nil, nil }
-func (*emptyIndex) Load([]*indexcgowrapper.Blob) error                          { return nil }
+func (*emptyIndex) LoadData() error                { return nil }
+func (*emptyIndex) TryReserveBuild() (bool, error) { return true, nil }
+func (*emptyIndex) Build() error                   { return nil }
 func (index *emptyIndex) Delete() error {
 	index.deleted = true
 	return nil
 }
-func (*emptyIndex) CleanLocalData() error { return nil }
+
 func (*emptyIndex) UpLoad() (*cgopb.IndexStats, error) {
 	return &cgopb.IndexStats{}, nil
 }
@@ -78,6 +85,7 @@ func (suite *IndexBuildTaskSuite) SetupSuite() {
 	suite.partitionID = 1001
 	suite.segmentID = 1002
 	suite.rootPath = suite.T().TempDir() + "/data"
+	suite.Require().NoError(initcore.InitLocalChunkManager(suite.rootPath))
 	suite.dataPath = suite.rootPath + "/1000/1001/1002/3/1"
 	suite.numRows = 100
 	suite.dim = 128
@@ -141,17 +149,120 @@ func (suite *IndexBuildTaskSuite) TestBuildMemoryIndex() {
 	suite.NoError(err)
 	blobs, err := suite.serializeData()
 	suite.NoError(err)
-	err = cm.Write(ctx, suite.dataPath, blobs[0].Value)
+	var vectorBlob *storage.Blob
+	for _, blob := range blobs {
+		if blob.Key == "102" {
+			vectorBlob = blob
+			break
+		}
+	}
+	suite.Require().NotNil(vectorBlob)
+	err = cm.Write(ctx, suite.dataPath, vectorBlob.Value)
 	suite.NoError(err)
 
 	t := NewIndexBuildTask(ctx, cancel, req, cm, NewTaskManager(context.Background()), nil)
 
 	err = t.PreExecute(context.Background())
 	suite.NoError(err)
+	err = t.LoadData(context.Background())
+	suite.NoError(err)
 	err = t.Execute(context.Background())
 	suite.NoError(err)
 	err = t.PostExecute(context.Background())
 	suite.NoError(err)
+}
+
+func (suite *IndexBuildTaskSuite) TestBuildReturnsNativeErrorAfterCancellation() {
+	for _, when := range []string{"before native call", "while handling native error"} {
+		suite.Run(when, func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			builder, err := indexcgowrapper.CreateIndexBuilder(ctx, &indexcgopb.BuildIndexInfo{
+				CollectionID: 1, PartitionID: 2, SegmentID: 3, BuildID: 4,
+				NumRows: 1, Dim: 4,
+				FieldSchema: &schemapb.FieldSchema{FieldID: 100, DataType: schemapb.DataType_FloatVector},
+				IndexParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "FLAT"},
+					{Key: common.MetricTypeKey, Value: "L2"},
+				},
+				TypeParams:    []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}},
+				StorageConfig: &indexcgopb.StorageConfig{StorageType: "local", RootPath: suite.rootPath},
+			})
+			suite.Require().NoError(err)
+			defer builder.Delete()
+			if when == "before native call" {
+				cancel()
+			} else {
+				// Cancel after C++ has returned its failure but before Build returns.
+				log := mockey.Mock(mlog.Warn).To(func(_ context.Context, message string, _ ...mlog.Field) {
+					if strings.Contains(message, "failed to build index") {
+						cancel()
+					}
+				}).Build()
+				defer log.UnPatch()
+			}
+			// A real native call without LoadData reports its invalid state.
+			err = builder.Build()
+			suite.Require().Error(err)
+			suite.ErrorIs(ctx.Err(), context.Canceled)
+			suite.NotErrorIs(err, context.Canceled)
+			suite.Contains(err.Error(), "requires prepared input")
+		})
+	}
+}
+
+func (suite *IndexBuildTaskSuite) TestBuildLatencyExcludesAdmissionWait() {
+	ctx := context.Background()
+	task := NewIndexBuildTask(ctx, func() {}, &workerpb.CreateJobRequest{
+		BuildID: 901, CollectionID: 1, PartitionID: 2, SegmentID: 3, Dim: 4,
+		Field:         &schemapb.FieldSchema{FieldID: 100, DataType: schemapb.DataType_FloatVector},
+		IndexParams:   []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "FLAT"}},
+		TypeParams:    []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}},
+		StorageConfig: &indexpb.StorageConfig{StorageType: "local", RootPath: suite.rootPath},
+	}, nil, NewTaskManager(ctx), nil)
+	observer := metrics.DataNodeKnowhereBuildIndexLatency.WithLabelValues(paramtable.GetStringNodeID())
+	readMetric := func() *dto.Histogram {
+		value := &dto.Metric{}
+		suite.Require().NoError(observer.(prometheus.Metric).Write(value))
+		return value.GetHistogram()
+	}
+	before := readMetric()
+	var elapsed atomic.Int64
+	clock := mockey.Mock(time.Now).To(func() time.Time {
+		return time.Unix(1000, elapsed.Load())
+	}).Build()
+	defer clock.UnPatch()
+	prepare := mockey.Mock(getCurrentIndexVersion).To(func(version int32) int32 {
+		elapsed.Add(int64(2 * time.Second))
+		return version
+	}).Build()
+	defer prepare.UnPatch()
+	create := mockey.Mock(indexcgowrapper.CreateIndexBuilder).To(func(context.Context, *indexcgopb.BuildIndexInfo) (indexcgowrapper.PreparedIndex, error) {
+		elapsed.Add(int64(time.Second))
+		return &emptyIndex{}, nil
+	}).Build()
+	defer create.UnPatch()
+	load := mockey.Mock((*emptyIndex).LoadData).To(func(*emptyIndex) error {
+		elapsed.Add(int64(3 * time.Second))
+		return nil
+	}).Build()
+	defer load.UnPatch()
+	build := mockey.Mock((*emptyIndex).Build).To(func(*emptyIndex) error {
+		elapsed.Add(int64(5 * time.Second))
+		return nil
+	}).Build()
+	defer build.UnPatch()
+	task.prepareDur = time.Hour
+	suite.Require().NoError(task.OnEnqueue(ctx))
+	elapsed.Add(int64(30 * time.Second)) // Initial queueing.
+	suite.Require().NoError(task.PreExecute(ctx))
+	elapsed.Add(int64(20 * time.Second)) // Dispatch between preparation and loading.
+	suite.Require().NoError(task.LoadData(ctx))
+	elapsed.Add(int64(100 * time.Second)) // Waiting for build admission.
+	suite.Require().NoError(task.Execute(ctx))
+	after := readMetric()
+	suite.Equal(before.GetSampleCount()+1, after.GetSampleCount())
+	suite.InDelta(11.0, after.GetSampleSum()-before.GetSampleSum(), 0.000001)
 }
 
 func (suite *IndexBuildTaskSuite) TestExecuteDoesNotLogStorageCredentials() {
@@ -166,13 +277,13 @@ func (suite *IndexBuildTaskSuite) TestExecuteDoesNotLogStorageCredentials() {
 	externalSpecSecret := statsLogSentinel("INDEX", "EXTERNAL", "SPEC", "SENTINEL")
 	externalSpec := `{"format":"parquet","extfs":{"future_secret":"` + externalSpecSecret + `"}}`
 
-	createIndexPatch := mockey.Mock(indexcgowrapper.CreateIndex).To(func(_ context.Context, params *indexcgopb.BuildIndexInfo) (indexcgowrapper.CodecIndex, error) {
+	createIndexPatch := mockey.Mock(indexcgowrapper.CreateIndexBuilder).To(func(_ context.Context, params *indexcgopb.BuildIndexInfo) (indexcgowrapper.PreparedIndex, error) {
 		suite.Equal(accessKey, params.GetStorageConfig().GetAccessKeyID())
 		suite.Equal(secretKey, params.GetStorageConfig().GetSecretAccessKey())
 		suite.Equal(caCert, params.GetStorageConfig().GetSslCACert())
 		suite.Contains(params.GetStorageConfig().GetGcpCredentialJSON(), gcpCredential)
 		suite.Equal(externalSpec, params.GetExternalSpec())
-		return nil, nil
+		return &emptyIndex{}, nil
 	}).Build()
 	defer createIndexPatch.UnPatch()
 
@@ -211,7 +322,7 @@ func (suite *IndexBuildTaskSuite) TestExecuteDoesNotLogStorageCredentials() {
 	}
 	task.newTypeParams = map[string]string{"dim": "128"}
 
-	err := task.Execute(ctx)
+	err := task.LoadData(ctx)
 	suite.NoError(err)
 	output := logs.String()
 	suite.NotContains(output, accessKey)
@@ -266,10 +377,10 @@ func (suite *IndexBuildTaskSuite) TestMaxConnectionsReachesCreateIndex() {
 	defer cancel()
 
 	var captured *indexcgopb.BuildIndexInfo
-	patch := mockey.Mock(indexcgowrapper.CreateIndex).To(
-		func(_ context.Context, info *indexcgopb.BuildIndexInfo) (indexcgowrapper.CodecIndex, error) {
+	patch := mockey.Mock(indexcgowrapper.CreateIndexBuilder).To(
+		func(_ context.Context, info *indexcgopb.BuildIndexInfo) (indexcgowrapper.PreparedIndex, error) {
 			captured = info
-			return nil, nil
+			return &emptyIndex{}, nil
 		}).Build()
 	defer patch.UnPatch()
 
@@ -299,7 +410,7 @@ func (suite *IndexBuildTaskSuite) TestMaxConnectionsReachesCreateIndex() {
 	task.newTypeParams = map[string]string{"dim": "128"}
 	task.tr = timerecord.NewTimeRecorder("test-max-connections")
 
-	err := task.Execute(ctx)
+	err := task.LoadData(ctx)
 	suite.NoError(err)
 	suite.Require().NotNil(captured)
 	suite.Equal(uint32(237), captured.GetStorageConfig().GetMaxConnections())
