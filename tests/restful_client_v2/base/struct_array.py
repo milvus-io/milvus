@@ -19,26 +19,26 @@
 import time
 
 from base.testbase import TestBase
-from utils.struct_array_data import clips_struct_field, gen_vector
+from utils.struct_array_data import clips_struct_field
 from utils.utils import gen_collection_name
 
 
-class StructArrayHelpersBase(TestBase):
+class StructArrayRestTestBase(TestBase):
     connect_with_pymilvus = False
 
-    def _document_metadata(self):
-        result = self._ok(self.collection_client.collection_describe(self.name))
+    def describe_schema_and_indexes(self):
+        result = self.assert_success(self.collection_client.collection_describe(self.name))
         # Index order is not part of DescribeCollection's contract; field order is.
         result["indexes"] = sorted(result.get("indexes", []), key=lambda item: item["indexName"])
         return result
 
-    def _ok(self, response):
+    def assert_success(self, response):
         assert response["code"] == 0, response
         return response.get("data")
 
-    def _create(self, nullable):
+    def create_struct_collection(self, nullable):
         self.name = gen_collection_name("struct_enhance_rest")
-        self._ok(
+        self.assert_success(
             self.collection_client.collection_create(
                 {
                     "collectionName": self.name,
@@ -65,8 +65,8 @@ class StructArrayHelpersBase(TestBase):
         )
         self.wait_load_completed(self.name, timeout=90)
 
-    def _check(self, model):
-        rows = self._ok(
+    def assert_rows(self, model):
+        rows = self.assert_success(
             self.vector_client.vector_query(
                 {
                     "collectionName": self.name,
@@ -79,36 +79,16 @@ class StructArrayHelpersBase(TestBase):
         assert len(rows) == len(model)
         assert {row["id"]: row for row in rows} == model
 
-    def _reload_after_schema_change(self):
+    def reload_collection(self):
         # Flush has a low default quota. Retry only explicit limiter rejection;
         # all other errors and a sustained rejection still fail this test.
         deadline = time.monotonic() + 45
         while True:
             response = self.collection_client.flush(self.name)
             if response["code"] != 1807 or time.monotonic() >= deadline:
-                self._ok(response)
+                self.assert_success(response)
                 break
             time.sleep(2)
-        self._ok(self.collection_client.collection_release(collection_name=self.name))
-        self._ok(self.collection_client.collection_load(collection_name=self.name))
+        self.assert_success(self.collection_client.collection_release(collection_name=self.name))
+        self.assert_success(self.collection_client.collection_load(collection_name=self.name))
         self.wait_load_completed(self.name, timeout=90)
-
-    def _rows(self, nullable):
-        return [
-            {
-                "id": n,
-                "normal_vector": gen_vector(n),
-                "clips": None
-                if nullable and n % 7 == 0
-                else [
-                    {
-                        "score": n + j,
-                        "lang": None if j % 2 else "雪",
-                        "emb": None if (n + j) % 3 else gen_vector(n + j),
-                        "tags": [None, [], [None], ["a", None, "雪"]][(n + j) % 4],
-                    }
-                    for j in range(n % 5)
-                ],
-            }
-            for n in range(48)
-        ]

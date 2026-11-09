@@ -11,21 +11,27 @@ Files follow the existing `test_milvus_client_struct_array_<behavior>.py` naming
 pattern. Case names describe the operation and observable expectation. The exact
 file selection lives in `tests/scripts/struct_array_regression.json`.
 
-| Behavior | Python SDK file suffixes |
-| --- | --- |
-| NULL values and nested arrays | `nullable_scalar_children`, `nested_array_children`, `nested_array_predicates`, `nullable_predicates` |
-| Add/drop fields and validation | `add_subfield`, `added_subfield_types`, `schema_validation`, `field_properties` |
-| DML and partial updates | `dml`, `partial_update_paths`, `partial_update_rejection` |
-| Vector coordinates, scores and indexes | `nullable_vector_coordinates`, `vector_scores`, `vector_index_metric`, `indexed_query`, `indexed_subfields`, `search_validation` |
-| Concurrency and isolation | `concurrent_mutations`, `concurrent_read_write`, `concurrent_schema_updates`, `concurrent_subfield_drop`, `partition_isolation`, `schema_rbac` |
-| Import and protobuf validation | `bulk_import`, `import_validation`, `protobuf_validity`, `nested_validity` |
-| Load/storage/configuration | `growing_sealed_search`, `query_null_reduction`, `mmap_warmup`, `storage_v3_flush` |
+The Python selection uses six scenario modules. Classes keep related contracts
+readable inside each module; positive, negative and boundary cases stay together.
 
-Shared row models, typed vectors, protobuf helpers and base assertions belong to
-`tests/python_client/common/struct_array_*.py`; testcase modules do not serve as
-shared helper libraries. REST uses behavior-specific `test_struct_array_*.py`
-files and `base/struct_array_helpers.py`. Default CI still selects L0/L1/L2;
-special-deployment cases retain L3 and their explicit prerequisites.
+| Scenario | Python SDK file suffix | Coverage |
+| --- | --- | --- |
+| Schema | `schema` | Definition validation, field evolution, parent properties and schema permissions |
+| DML | `dml` | NULL/nested values, mutations, partitions, wire input validation and storage flush |
+| Query | `query` | Three-valued predicates, indexes and NULL result reduction |
+| Search | `search` | Validation, growing/sealed visibility, coordinates, typed vectors and scores |
+| Import | `bulk_import` | Accepted formats, malformed input and recovery |
+| Concurrency | `concurrent_mutations` | Concurrent DML/schema histories and read/write reconciliation |
+
+Shared collection lifecycle and reusable model assertions live in
+`tests/python_client/base/struct_array.py`. The three common modules contain
+input models/value oracles (`struct_array_data.py`), wire encoding support
+(`struct_array_wire.py`) and the bounded workload (`struct_array_concurrent_workload.py`).
+Helpers used only by one scenario stay with its cases. REST uses three modules
+for DML, schema evolution and import rejection, with shared lifecycle in
+`base/struct_array.py` and input data in `utils/struct_array_data.py`.
+Default CI still selects L0/L1/L2; special-deployment cases retain L3 and their
+explicit prerequisites. This PR contains E2E tests and test support only.
 
 ## Coverage responsibilities
 
@@ -37,6 +43,8 @@ result slicing). REST cases check JSON types and field parameters, mutation
 options, response projections and error codes. Both use real server round trips
 with explicit expected values. Their schema refresh is setup for newly added
 fields; full lifecycle coverage remains in the Python functional cases.
+REST import cases distinguish backup/snapshot rejection before job admission
+from NumPy schema errors reported by a failed job; both assert unchanged rows.
 
 ## Python SDK and REST
 
@@ -112,23 +120,10 @@ milvus-dev-cli gosdk-e2e local . -b master --deploy "$DEPLOYMENT" \
 Use the current repository toolchain and Go SDK module configuration. Run the
 package's CI lint configuration, not only file-level formatting.
 
-## C++ offset controls
-
-The retained structure-level pending-gap control and growing-segment missing-child
-compensation test live in the existing `StructElementOffsetsTest.cpp` and
-`SegmentGrowingTest.cpp` suites. The latter checks sibling-derived offsets and
-NULL validity of the synthesized representative child. The pending-gap control
-does not establish a reachable product failure through normal DML.
-
-```bash
-milvus-dev-cli cpp-ut local . -b master -n 4 -t all_tests \
-  -k 'StructElementOffsetsTest.*:Growing.InsertMissingRepresentativeUsesSiblingLengths'
-```
-
 ## Bounded concurrent CI workload
 
 `common/struct_array_concurrent_workload.py` supplies finite read/write/schema
-histories to `test_milvus_client_struct_array_concurrent_read_write.py`. It retains
+histories to `test_milvus_client_struct_array_concurrent_mutations.py`. It retains
 operation intervals, acknowledged writes, uncertain outcomes and exact final rows.
 Each run records the actual build identity; `expected_product` is an optional
 explicit revision constraint rather than a historical default commit.

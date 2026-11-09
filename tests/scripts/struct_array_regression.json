@@ -14,9 +14,7 @@
     "cwd": "tests/restful_client_v2",
     "files": [
       "testcases/test_struct_array_dml.py",
-      "testcases/test_struct_array_field_properties.py",
       "testcases/test_struct_array_import_rejection.py",
-      "testcases/test_struct_array_partial_update.py",
       "testcases/test_struct_array_subfield_evolution.py"
     ]
   }

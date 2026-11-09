@@ -14,17 +14,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Struct array subfield evolution regression cases."""
+"""Struct Array subfield evolution REST round trips."""
 
 import copy
 
 import pytest
-from base.struct_array_helpers import StructArrayHelpersBase
+from base.struct_array import StructArrayRestTestBase
 from utils.constant import CaseLabel
-from utils.struct_array_data import clips_struct_field, gen_vector
+from utils.struct_array_data import clips_struct_field, gen_vector, make_mutation_rows
 
 
-class TestStructArraySubfieldEvolution(StructArrayHelpersBase):
+class TestStructArraySubfieldEvolution(StructArrayRestTestBase):
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("kind", ["scalar", "vector", "array"])
     @pytest.mark.parametrize("nullable", [False, True])
@@ -34,11 +34,11 @@ class TestStructArraySubfieldEvolution(StructArrayHelpersBase):
         method: add scalar/vector/nested-array JSON schemas, write values and drop the child
         expected: supplied child types and NULL values round trip through REST
         """
-        self._create(nullable)
-        rows = self._rows(nullable)[:12]
-        self._ok(self.vector_client.vector_insert({"collectionName": self.name, "data": rows}))
+        self.create_struct_collection(nullable)
+        rows = make_mutation_rows(nullable)[:12]
+        self.assert_success(self.vector_client.vector_insert({"collectionName": self.name, "data": rows}))
         model = {row["id"]: copy.deepcopy(row) for row in rows}
-        self._check(model)
+        self.assert_rows(model)
         schema = {
             "fieldName": "clips[added]",
             "elementNullable": True,
@@ -65,12 +65,12 @@ class TestStructArraySubfieldEvolution(StructArrayHelpersBase):
                 },
             }[kind],
         }
-        self._ok(self.collection_client.add_field(self.name, schema))
+        self.assert_success(self.collection_client.add_field(self.name, schema))
         for row in model.values():
             for element in row["clips"] or []:
                 element["added"] = None
         if kind == "vector":
-            self._ok(
+            self.assert_success(
                 self.index_client.index_create(
                     {
                         "collectionName": self.name,
@@ -86,8 +86,8 @@ class TestStructArraySubfieldEvolution(StructArrayHelpersBase):
                     }
                 )
             )
-        self._reload_after_schema_change()
-        self._check(model)
+        self.reload_collection()
+        self.assert_rows(model)
 
         changed = []
         for n in [2, 3, 7, 49]:
@@ -99,9 +99,9 @@ class TestStructArraySubfieldEvolution(StructArrayHelpersBase):
             row = {"id": n, "normal_vector": gen_vector(n), "clips": clips}
             changed.append(row)
             model[n] = copy.deepcopy(row)
-        self._ok(self.vector_client.vector_upsert({"collectionName": self.name, "data": changed}))
+        self.assert_success(self.vector_client.vector_upsert({"collectionName": self.name, "data": changed}))
         # The partial update omits the parent struct and must preserve all child validity.
-        self._ok(
+        self.assert_success(
             self.vector_client.vector_upsert(
                 {
                     "collectionName": self.name,
@@ -111,13 +111,13 @@ class TestStructArraySubfieldEvolution(StructArrayHelpersBase):
             )
         )
         model[2]["normal_vector"] = gen_vector(100)
-        self._check(model)
+        self.assert_rows(model)
         # Dropping a sub-field cascades its index through the schema update.
-        self._ok(self.collection_client.drop_field(self.name, field_name="clips[added]"))
+        self.assert_success(self.collection_client.drop_field(self.name, field_name="clips[added]"))
         for row in model.values():
             for element in row["clips"] or []:
                 del element["added"]
-        self._check(model)
+        self.assert_rows(model)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
@@ -129,9 +129,9 @@ class TestStructArraySubfieldEvolution(StructArrayHelpersBase):
         method: put a malformed row between valid rows, compare state, then retry repaired rows
         expected: a parameter error, unchanged full data and successful corrected retry
         """
-        self._create(True)
-        rows = self._rows(True)[:12]
-        self._ok(self.vector_client.vector_insert({"collectionName": self.name, "data": rows}))
+        self.create_struct_collection(True)
+        rows = make_mutation_rows(True)[:12]
+        self.assert_success(self.vector_client.vector_insert({"collectionName": self.name, "data": rows}))
         model = {row["id"]: copy.deepcopy(row) for row in rows}
         good = [
             {
@@ -158,10 +158,10 @@ class TestStructArraySubfieldEvolution(StructArrayHelpersBase):
         response = self.vector_client.vector_insert({"collectionName": self.name, "data": malformed})
         # REST JSON decoding and Proxy validation have separate parameter-error codes.
         assert response["code"] in (1100, 1804), response
-        self._check(model)
-        self._ok(self.vector_client.vector_insert({"collectionName": self.name, "data": good}))
+        self.assert_rows(model)
+        self.assert_success(self.vector_client.vector_insert({"collectionName": self.name, "data": good}))
         model.update({row["id"]: row for row in good})
-        self._check(model)
+        self.assert_rows(model)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_add_required_struct_is_rejected_without_row_changes(self):
@@ -170,15 +170,43 @@ class TestStructArraySubfieldEvolution(StructArrayHelpersBase):
         method: submit a required parent then compare complete metadata and historical data
         expected: nullable-parent validation without schema or row mutation
         """
-        self._create(True)
-        rows = self._rows(True)[:12]
-        self._ok(self.vector_client.vector_insert({"collectionName": self.name, "data": rows}))
+        self.create_struct_collection(True)
+        rows = make_mutation_rows(True)[:12]
+        self.assert_success(self.vector_client.vector_insert({"collectionName": self.name, "data": rows}))
         model = {row["id"]: row for row in rows}
-        before = self._document_metadata()
+        before = self.describe_schema_and_indexes()
         field = clips_struct_field(False)
         field["fieldName"] = "other"
         field["dataType"] = "ArrayOfStruct"
         response = self.collection_client.add_struct_field(self.name, field)
         assert response["code"] == 1100 and "nullable" in response["message"], response
-        assert self._document_metadata() == before
-        self._check(model)
+        assert self.describe_schema_and_indexes() == before
+        self.assert_rows(model)
+
+
+class TestStructArrayFieldProperties(StructArrayRestTestBase):
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("target", ["clips", "clips[lang]"])
+    def test_alter_struct_description_preserves_schema_and_rows(self, target):
+        """
+        target: enforce immutable layout properties and allowed descriptions through REST
+        method: reject capacity changes with metadata/data checks, then change the description
+        expected: failed alteration is non-mutating and the allowed description is decoded by describe
+        """
+        self.create_struct_collection(True)
+        rows = make_mutation_rows(True)[:12]
+        self.assert_success(self.vector_client.vector_insert({"collectionName": self.name, "data": rows}))
+        model = {row["id"]: row for row in rows}
+        before = self.describe_schema_and_indexes()
+        response = self.collection_client.alter_field_properties(self.name, target, {"max_capacity": "16"})
+        assert response["code"] == 1100 and "can not be altered on struct" in response["message"], response
+        assert self.describe_schema_and_indexes() == before
+        self.assert_rows(model)
+        self.assert_success(
+            self.collection_client.alter_field_properties(self.name, target, {"field.description": "REST contract"})
+        )
+        desc = self.assert_success(self.collection_client.collection_describe(self.name))
+        parent = next(f for f in desc["structFields"] if f["name"] == "clips")
+        field = parent if target == "clips" else next(f for f in parent["fields"] if f["name"] in ("lang", target))
+        assert field["description"] == "REST contract", field
+        self.assert_rows(model)

@@ -107,3 +107,24 @@ def gen_rows() -> list[dict]:
             "clips": [{"score": 50}, {"score": 51}],
         },
     ]
+
+
+def make_mutation_rows(nullable):
+    return [
+        {
+            "id": n,
+            "normal_vector": gen_vector(n),
+            "clips": None
+            if nullable and n % 7 == 0
+            else [
+                {
+                    "score": n + j,
+                    "lang": None if j % 2 else "雪",
+                    "emb": None if (n + j) % 3 else gen_vector(n + j),
+                    "tags": [None, [], [None], ["a", None, "雪"]][(n + j) % 4],
+                }
+                for j in range(n % 5)
+            ],
+        }
+        for n in range(48)
+    ]
