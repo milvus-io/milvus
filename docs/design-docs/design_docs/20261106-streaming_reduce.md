@@ -73,11 +73,14 @@ one outstanding receive per child and fills empty child Buffers concurrently.
 | Policy | Input readiness and reduction |
 | --- | --- |
 | Query `OrderedReduceStream` | Each active child has a head or EOF; merge by PK and resolve shard-local duplicate PKs by timestamp. |
+| Plain Query ORDER BY | Each vchannel drains workers into a PK map, resolves versions, sorts and selects candidates before emitting Chunks. Final merge uses scalar ordering and rejects cross-vchannel duplicate PKs. |
 | Search `OrderedReduceStream` | Each active child has a head or EOF; merge by score per vector. Group selection preserves Batch pruning, not exhaustive group membership. |
 | Query Group By `UnOrderedReduceStream` | Consume available Buffers into a stream-owned group map; drain all children before emitting partial aggregates. Finalize at Proxy, preserving AVG sum/count and NULL state between levels. |
 
 Proxy `Execute()` consumes results and stops at the request's row, element, or
-per-vector window, or EOF; unlimited Query drains input. Search skips surplus
+per-vector window, or EOF; unlimited Query drains input. Plain Query ORDER BY
+drains finalized vchannel candidates to validate duplicates, retaining only its
+requested window. Search skips surplus
 hits for earlier vectors to reach later vectors. Search bypasses repeated Batch
 candidate reduction; Query passes its merged result through existing pagination
 and aggregate finalization. `Close()` cancels children, joins receives and releases
@@ -100,7 +103,7 @@ refreshed values without QN/SN restart; in-flight requests retain their values.
 Existing configuration-source precedence applies. SDK parameters cannot override
 them. Eligibility preserves existing API validation: supported ordinary/iterator
 Query, ANN variants, Search grouping/aggregation and legacy Hybrid fusion can
-stream. Query ORDER BY/global aggregation/function chains, Hybrid Group By and
+stream. Query Group By + ORDER BY/global aggregation/function chains, Hybrid Group By and
 unsupported reranking remain Batch, as does retained-plan requery. Exact gates:
 [Query](../../../internal/views/queryclient/legacy_client.go#L290),
 [Query function chains](../../../internal/proxy/dql/task_query.go#L1172),
@@ -388,8 +391,8 @@ specified in Section 9.
 
 ### 5. Ordered Query
 
-Eligible plain Query results are PK-ordered, even when the request has no explicit
-ORDER BY. `NewShardReduceStream` resolves worker duplicates by timestamp.
+Plain Query results without explicit ORDER BY are PK-ordered.
+`NewShardReduceStream` resolves worker duplicates by timestamp.
 The final stream checks the cross-vchannel PK contract rather than applying the
 worker version-resolution policy a second time.
 
@@ -445,7 +448,7 @@ merging and output assembly. Sources:
 [element validation](../../../internal/util/queryutil/reduce_stream.go#L173),
 [Proxy consumption](../../../internal/proxy/dql/task_query.go#L1386).
 
-The reducer has no request row-limit stopping counter. Proxy stops pulling at its
+The PK-ordered reducer has no request row-limit stopping counter. Proxy stops pulling at its
 row/element window, or reads to EOF for valid unlimited Query. Iterator semantics
 add a separate correctness boundary: when `ShouldStopWhenDrained(reduceType)` is
 true and a drained child reported `HasMoreResult`, the reducer ends this page
@@ -453,9 +456,9 @@ rather than skipping that child's unseen later rows. `HasMoreResult` describes
 rows outside the child's current result, not whether another Chunk is in flight.
 See [getReadyBuffers](../../../internal/util/queryutil/reduce_stream.go#L387).
 
-Query ORDER BY comparison code exists, but the production eligibility gate keeps
-all Query ORDER BY requests on Batch. Sorting by another column can separate old
-and new versions of one PK, invalidating rows already emitted. For example:
+Plain Query ORDER BY cannot emit worker heads immediately. Sorting by another
+column can separate old and new versions of one PK, invalidating rows already
+emitted. For example:
 
 ```text
 ORDER BY price ASC LIMIT 2
@@ -464,9 +467,42 @@ worker 1: C(price=25),         A(price=30, ts=200)
 early ordered merge: A, B     correct version-resolved result: B, C
 ```
 
-This is a routing restriction, not proof that arbitrary scalar ordering is safe
-by replacing the PK comparator. Source:
-[eligibility rationale](../../../internal/views/queryclient/legacy_client.go#L290).
+The vchannel's first `Recv()` drains all workers before exposing any row:
+
+```text
+worker Chunks -> PK -> newest timestamp row
+                 |   replace only for a nonzero, strictly newer timestamp
+                 v
+             all workers at EOF
+                 |
+                 v
+             ORDER BY + PK tie-break -> first (offset + limit) rows
+                 |
+                 v
+             byte-sized Chunks -> final scalar-ordered merge
+```
+
+The PK map is updated as each input Buffer is consumed. It retains one selected
+row reference per PK rather than a list of all received Chunks. References may
+keep source Chunks alive. Equal or missing timestamps preserve the first selected
+row, matching Batch; no topK pruning occurs before version resolution completes.
+The existing `OrderByLimitOperator` then applies scalar ordering, NULL placement,
+PK tie-breaking and the per-vchannel candidate limit. Sources:
+[vchannel accumulation](../../../internal/util/queryutil/order_by_stream.go),
+[Batch timestamp rule](../../../internal/util/queryutil/dedup_pk_op.go#L124),
+[sorting](../../../internal/util/queryutil/order_op.go#L76).
+
+The final reducer rejects duplicate PKs across vchannels using a set, since equal
+PKs need not be adjacent under scalar ordering. Proxy drains that final stream
+even after collecting `offset + limit` rows, so duplicates beyond the page still
+fail the request; it does not retain surplus rows. Existing Proxy pagination
+applies the offset once. This qualifies only bounded plain Query ORDER BY.
+Group By + ORDER BY remains on Batch. ORDER BY without a limit is rejected by
+shared Query validation before Batch/Streaming selection: segment-side sorting
+can materialize all matching rows, and Proxy's output quota does not protect that
+stage. Valid unlimited plain Query without ORDER BY remains streaming-eligible.
+Sources: [eligibility](../../../internal/views/queryclient/legacy_client.go#L290),
+[ORDER BY validation](../../../internal/proxy/dql/task_query.go#L905).
 
 ### 6. Ordered Search
 
@@ -609,7 +645,7 @@ merged result and still performs aggregate finalization and pagination. Sources:
 
 Global aggregates without group keys and Group By + ORDER BY remain outside the
 current streaming gate. The former needs a no-group accumulation contract; the
-latter is excluded by the current blanket Query ORDER BY guard. This document
+latter remains explicitly deferred independently of plain Query ORDER BY. This document
 does not enable them by describing their potential algorithms.
 
 ### 8. Worker-to-Proxy Execution
@@ -795,7 +831,9 @@ whereas an invalid request is not made valid by this feature.
 | Query | Valid filtered unlimited Query, including iterator requests with an omitted page limit | Ordered streaming; Proxy reads until EOF, retaining iterator drain rules. |
 | Query | Bounded element-level Query and iterator | Ordered streaming; retain complete rows and matched-element indexes. |
 | Query | Group By and grouped COUNT/SUM/AVG/MIN/MAX, without ORDER BY | Unordered grouped streaming, then Proxy finalization. |
-| Query | ORDER BY, including Group By + ORDER BY | Batch. |
+| Query | Bounded plain ORDER BY | Drain/version-resolve each vchannel, sort and emit Chunks; final merge drains for cross-vchannel integrity checks. |
+| Query | Group By + ORDER BY | Batch, subject to existing validation. |
+| Query | ORDER BY without an explicit limit | Rejected by shared Query validation in both Batch and Streaming modes. |
 | Query | Global COUNT/SUM/AVG/MIN/MAX without Group By | Batch. |
 | Query | QueryScan function chains | Batch; streaming assembly does not preserve separate computed columns. |
 | Search | Ordinary ANN with/without filters; plain ANN iterator | Ordered streaming. |
@@ -834,6 +872,13 @@ Worker retained memory includes:
   Batch segment/results state + complete reduced result + prepared Chunk list
 ```
 
+Plain Query ORDER BY retains selected row references for every distinct PK in a
+vchannel until workers drain, then materializes and sorts them. Referenced source
+Chunks, the sorted result and prepared output Chunks may overlap in memory.
+Its final PK-validation set grows with received vchannel candidates. This path
+does not have a Chunk-bytes-times-child-count memory bound; it trades early output
+for correct timestamp resolution and retains Batch's intermediate output quota.
+
 Group maps grow with distinct keys; their complete encoded output and Chunk list
 are additional materialization. Oversized Units can exceed `B`. Standard output
 quotas and gRPC message limits are independent of the Chunk threshold. Tests of
@@ -855,6 +900,7 @@ control or low-watermark prefetch is introduced by this feature. Sources:
 | Area | Required evidence |
 | --- | --- |
 | Ordered equivalence | Batch parity for PK/score order, ties, deduplication, timestamps, NQ, offsets and partial final Chunks. |
+| Query ORDER BY | Late newer versions changing topK, equal/missing timestamps, ASC/DESC/NULL ordering, nested reduction, non-adjacent cross-vchannel duplicates beyond the page, and errors before worker drain. |
 | Byte contract | Crossing `B`, exact boundary, oversized Unit alone, timestamp replacement, nullable/nested/element fields and metadata exclusion. |
 | Grouped Query | Multiple Chunks per child, nested vchannel/final accumulation, unequal AVG counts, empty/NULL/zero values and partial-state preservation. |
 | Search variants | Group pruning parity, aggregation candidate order, range/filter behavior, Hybrid sub-search windows, element identity and downstream assembly. |
@@ -885,7 +931,7 @@ findings. Documentation-only updates do not upgrade that verification status.
 | Fixed Unit-count Chunks | Byte threshold with complete-Unit crossing and oversized-Unit handling. |
 | `B + y` concurrent prefetch Buffers | Refill empty inputs through one outstanding receive per child; no `y` control. |
 | Query Group By vchannel forwarding or reducer-owned hidden map | Each grouped stream owns `GroupAggBuffer` and emits mergeable partials after draining. |
-| Query ORDER BY is ready for streaming | Production gate retains Batch because timestamp replacement can invalidate early ordered output. |
+| Query ORDER BY only needs a different comparator | Plain ORDER BY first drains and version-resolves each vchannel; Group By + ORDER BY remains deferred. |
 | Proxy consumes in PostExecute, or retry ends at first internal Chunk | Execute owns whole-attempt consumption/retry and publishes only successful output. |
 | Interrupt returns aggregated terminal metadata | Reserved API only; current early termination uses Close. |
 | Per-request SDK streaming overrides | Removed; refreshable server YAML controls only. |
@@ -897,7 +943,7 @@ as implemented features.
 
 Deferred work includes segment-level streaming and stateful SDK iteration;
 terminal metadata through Interrupt; application credit/prefetch coordination;
-Query ORDER BY and global aggregation; candidate-preserving Hybrid Group By;
+Query Group By + ORDER BY and global aggregation; candidate-preserving Hybrid Group By;
 remaining function-chain/reranking paths; Batch's optional two-stage Search
 optimization; and live failure/performance qualification. Each requires its own
 behavior contract and verification before changing the current path.

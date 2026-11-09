@@ -1394,8 +1394,11 @@ func (t *QueryTask) consumeQueryResultStream(stream queryutil.ReduceStream) (*in
 	var outputSize int64
 	// The internal limit already includes the offset; the pipeline slices the page once.
 	limit := t.GetLimit()
+	// ORDER BY can separate duplicate PKs. Drain finalized vchannel candidates
+	// so cross-vchannel integrity checks also cover rows beyond the client page.
+	drainOrderBy := len(t.GetOrderByFields()) > 0 && len(t.GetGroupByFieldIds()) == 0
 	var collected int64
-	for limit <= 0 || collected < limit {
+	for drainOrderBy || limit <= 0 || collected < limit {
 		chunk, err := stream.Recv()
 		if errors.Is(err, io.EOF) {
 			break
@@ -1443,7 +1446,9 @@ func (t *QueryTask) consumeQueryResultStream(stream queryutil.ReduceStream) (*in
 					"final Query Chunk field count %d does not match %d", len(chunk.GetFieldsData()), len(output.GetFieldsData()))
 			}
 			indexComputer := typeutil.NewFieldDataIdxComputer(chunk.GetFieldsData())
-			for row := 0; row < rowCount; row++ {
+			// ORDER BY keeps receiving Chunks for duplicate validation after the
+			// requested window is full, but must not append rows from those Chunks.
+			for row := 0; row < rowCount && (limit <= 0 || collected < limit); row++ {
 				fieldIndexes := indexComputer.Compute(int64(row))
 				outputSize += typeutil.AppendFieldData(output.FieldsData, chunk.GetFieldsData(), int64(row), fieldIndexes...)
 				if idCount > 0 {

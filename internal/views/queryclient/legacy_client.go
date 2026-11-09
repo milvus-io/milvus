@@ -291,14 +291,11 @@ func SupportsQueryStream(req *internalpb.RetrieveRequest) bool {
 	if req == nil || req.GetIsCount() {
 		return false
 	}
-	// Example: ORDER BY price ASC LIMIT 2.
-	// Worker 1: A(price=10, ts=100), B(price=20).
-	// Worker 2: C(price=25), A(price=30, ts=200).
-	// Streaming would emit old A and B before discovering newer A;
-	// timestamp deduplication instead requires returning B and C.
-	// Keep ORDER BY on Batch until streaming handles this correctly.
 	if len(req.GetOrderByFields()) > 0 {
-		return false
+		// Plain ORDER BY drains and resolves worker versions before sorting.
+		// Group By + ORDER BY remains on Batch. Shared Query validation
+		// requires an explicit limit for ORDER BY in either reduction mode.
+		return req.GetLimit() > 0 && len(req.GetGroupByFieldIds()) == 0 && len(req.GetAggregates()) == 0
 	}
 	if len(req.GetGroupByFieldIds()) > 0 {
 		return true

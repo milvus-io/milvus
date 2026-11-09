@@ -178,7 +178,7 @@ func TestStreamingConfigLeavesUnsupportedRequestsOnBatch(t *testing.T) {
 	for _, req := range []*internalpb.RetrieveRequest{
 		{},
 		{Limit: 1, IsCount: true},
-		{Limit: 1, OrderByFields: []*planpb.OrderByField{{FieldId: 101}}},
+		{Limit: 1, GroupByFieldIds: []int64{100}, OrderByFields: []*planpb.OrderByField{{FieldId: 100}}},
 		{Limit: 1, Aggregates: []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}}},
 	} {
 		query := newQueryViewQueryTask(t, legacy, 1)

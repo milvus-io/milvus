@@ -202,16 +202,20 @@ func TestOrderedReduceStreamRejectsCrossVChannelDuplicatesAfterShardReduction(t 
 	require.ErrorContains(t, err, "duplicate PK 1")
 }
 
-func TestShardReduceStreamPreservesOrderByDuplicateCheck(t *testing.T) {
+func TestShardReduceStreamOrderByRetainsFirstRowForMissingTimestamp(t *testing.T) {
 	stream, err := NewShardReduceStream(&internalpb.RetrieveRequest{
 		Limit:         2,
 		OrderByFields: []*planpb.OrderByField{{FieldId: 101, Ascending: true}},
 	}, nil, []ReduceStream{
-		&queryTestStream{recv: []queryTestRecv{{chunk: newQueryTestChunk([]int64{1}, []int64{11})}}},
-		&queryTestStream{recv: []queryTestRecv{{chunk: newQueryTestChunk([]int64{1}, []int64{22})}}},
+		&queryTestStream{recv: []queryTestRecv{
+			{chunk: newQueryTestChunk([]int64{1}, []int64{11})},
+			{chunk: newQueryTestChunk([]int64{1}, []int64{22})},
+		}},
 	}, 1<<20)
 	require.NoError(t, err)
 	defer stream.Close()
-	_, err = stream.Recv()
-	require.ErrorContains(t, err, "duplicate PK 1")
+	chunk, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{1}, queryTestIDs(chunk))
+	require.Equal(t, []int64{11}, chunk.GetFieldsData()[0].GetScalars().GetLongData().GetData())
 }
