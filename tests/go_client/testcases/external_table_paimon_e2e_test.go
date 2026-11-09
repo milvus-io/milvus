@@ -332,7 +332,7 @@ func TestExternalTablePaimonE2E(t *testing.T) {
 	require.Len(t, emptyTable.SnapshotIDs, 2)
 	emptySource := toMilvusS3URIForMinIO(emptyTable.TableLocation, minioAddress)
 	for _, scanMode := range []string{"direct-file", "data-split"} {
-		t.Run("refresh_to_empty_"+scanMode, func(t *testing.T) {
+		t.Run("refresh_to_empty_rejected_"+scanMode, func(t *testing.T) {
 			mc, name := runPaimonSnapshotRead(t, emptySource, emptyTable.SnapshotIDs[0], scanMode, dimension,
 				appendExpected[:3], extfs)
 			ctx := hp.CreateContext(t, 10*time.Minute)
@@ -346,20 +346,27 @@ func TestExternalTablePaimonE2E(t *testing.T) {
 					WithExternalSource(emptySource).
 					WithExternalSpec(string(spec)))
 			require.NoError(t, err)
-			waitPaimonRefresh(t, ctx, mc, refresh.JobID)
+			var progress *entity.RefreshExternalCollectionJobInfo
+			require.Eventually(t, func() bool {
+				progress, err = mc.GetRefreshExternalCollectionProgress(ctx,
+					client.NewGetRefreshExternalCollectionProgressOption(refresh.JobID))
+				return err == nil && (progress.State == entity.RefreshStateFailed || progress.State == entity.RefreshStateCompleted)
+			}, 10*time.Minute, 2*time.Second, "Paimon empty refresh must reach a terminal state")
+			require.Equal(t, entity.RefreshStateFailed, progress.State)
+			require.Contains(t, progress.Reason, "no files found in external source")
 			require.Eventually(t, func() bool {
 				result, err := mc.Query(ctx, client.NewQueryOption(name).WithOutputFields(common.QueryCountFieldName))
 				if err != nil {
 					return false
 				}
 				count, err := result.GetColumn(common.QueryCountFieldName).GetAsInt64(0)
-				return err == nil && count == 0
-			}, time.Minute, time.Second, "the previous snapshot's rows must be removed")
+				return err == nil && count == 3
+			}, time.Minute, time.Second, "the previous snapshot's rows must be preserved")
 			search, err := mc.Search(ctx, client.NewSearchOption(name, 3,
 				[]entity.Vector{entity.FloatVector(make([]float32, dimension))}))
 			require.NoError(t, err)
 			require.Len(t, search, 1)
-			require.Zero(t, search[0].ResultCount)
+			require.Equal(t, 3, search[0].ResultCount)
 		})
 	}
 

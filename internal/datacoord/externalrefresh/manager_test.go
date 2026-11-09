@@ -862,6 +862,15 @@ func TestCreateTasksForJobPaimonFunctionOutputs(t *testing.T) {
 			storageConfig := mockey.Mock(meta.CreateStorageConfig).Return(config).Build()
 			defer storageConfig.UnPatch()
 			tasks, err := manager.createTasksForJob(ctx, job)
+			if test.empty {
+				var terminal *nonRetriableJobError
+				require.ErrorAs(t, err, &terminal)
+				require.Nil(t, tasks)
+				require.Empty(t, refreshMeta.GetJob(job.GetJobId()).GetTaskIds())
+				require.Equal(t, commonpb.SegmentState_Flushed, mt.Segments.GetSegment(10).GetState())
+				require.Equal(t, manifest, mt.Segments.GetSegment(10).GetManifestPath())
+				return
+			}
 			require.NoError(t, err)
 			require.Len(t, tasks, 1)
 			require.Equal(t, []int64{10}, tasks[0].GetOwnedSegmentIds())
@@ -1229,13 +1238,11 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsEmptyPaimonSna
 		multipleTasks bool
 		files         []packed.FileInfo
 		readErr       error
-		wantReads     int
-		allowEmpty    bool
 	}{
-		{name: "direct-file", scanMode: "direct-file", wantReads: 1, allowEmpty: true},
-		{name: "data-split", scanMode: "data-split", wantReads: 1, allowEmpty: true},
-		{name: "nonempty manifest", files: []packed.FileInfo{{FilePath: "data.parquet", NumRows: 3}}, wantReads: 1},
-		{name: "unreadable manifest", readErr: merr.ErrIoKeyNotFound, wantReads: 1},
+		{name: "direct-file", scanMode: "direct-file"},
+		{name: "data-split", scanMode: "data-split"},
+		{name: "nonempty manifest", files: []packed.FileInfo{{FilePath: "data.parquet", NumRows: 3}}},
+		{name: "unreadable manifest", readErr: merr.ErrIoKeyNotFound},
 		{name: "missing manifest path", missingPath: true},
 		{name: "nonempty plan", end: 1},
 		{name: "invalid empty range", begin: 1, end: 1},
@@ -1291,22 +1298,9 @@ func TestExternalCollectionRefreshManager_ApplyFinishedJobSegmentsEmptyPaimonSna
 			}).Build()
 			defer read.UnPatch()
 			err := mgr.applyFinishedJobSegments(ctx, job)
-			require.Equal(t, test.wantReads, readCalls)
-			if test.allowEmpty {
-				require.NoError(t, err)
-				require.Equal(t, commonpb.SegmentState_Dropped, mt.Segments.GetSegment(1).GetState())
-				droppedAt := mt.Segments.GetSegment(1).GetDroppedAt()
-				require.NoError(t, mgr.applyFinishedJobSegments(ctx, job))
-				require.Equal(t, droppedAt, mt.Segments.GetSegment(1).GetDroppedAt())
-			} else {
-				require.Error(t, err)
-				if test.readErr != nil {
-					require.ErrorIs(t, err, test.readErr)
-				} else {
-					require.ErrorContains(t, err, "refusing to drop all")
-				}
-				require.Equal(t, commonpb.SegmentState_Flushed, mt.Segments.GetSegment(1).GetState())
-			}
+			require.Zero(t, readCalls)
+			require.ErrorContains(t, err, "refusing to drop all")
+			require.Equal(t, commonpb.SegmentState_Flushed, mt.Segments.GetSegment(1).GetState())
 			// Segments outside this job's baseline must never be removed.
 			require.Equal(t, commonpb.SegmentState_Flushed, mt.Segments.GetSegment(2).GetState())
 		})
@@ -3220,4 +3214,23 @@ func TestCleanup_DoubleHandleJobFailedDoesNotDouble(t *testing.T) {
 		t.Fatalf("expected exactly 1 prefix cleanup for Failed+GC flow, got %d: %v", len(prefixes), prefixes)
 	}
 	assert.Equal(t, fmt.Sprintf("__explore_temp__/coord_%d/", 111), prefixes[0])
+}
+
+func TestExternalCollectionRefreshManager_RejectsEmptyPaimonExplore(t *testing.T) {
+	for _, mode := range []string{"auto", "direct-file", "data-split"} {
+		t.Run(mode, func(t *testing.T) {
+			explore := mockey.Mock((*Manager).exploreExternalFiles).
+				Return([]packed.FileInfo{}, "pinned-explore-manifest", nil).Build()
+			defer explore.UnPatch()
+			job := &datapb.ExternalCollectionRefreshJob{
+				JobId: 1, CollectionId: 100, ExternalSource: "s3://bucket/table",
+				ExternalSpec: fmt.Sprintf(`{"format":"paimon-table","scan_mode":%q,"snapshot_id":2}`, mode),
+			}
+			tasks, err := (&Manager{}).createTasksForJob(context.Background(), job)
+			var terminal *nonRetriableJobError
+			require.ErrorAs(t, err, &terminal)
+			require.ErrorContains(t, err, "no files found")
+			require.Nil(t, tasks)
+		})
+	}
 }

@@ -514,26 +514,6 @@ func (m *Manager) applyFinishedJobSegments(ctx context.Context, job *datapb.Exte
 		mlog.Int64("refreshedRows", refreshedRows),
 		mlog.Int64("rowDelta", refreshedRows-baselineRows))
 
-	sourceConfirmedEmpty := false
-	if len(baselineSegmentIDs) > 0 && len(keptSegments) == 0 && len(updatedSegments) == 0 && len(tasks) == 1 {
-		task := tasks[0]
-		if task.GetFileIndexBegin() == 0 && task.GetFileIndexEnd() == 0 && task.GetExploreManifestPath() != "" {
-			spec, err := externalspec.ParseExternalSpec(job.GetExternalSpec())
-			if err != nil {
-				return err
-			}
-			if spec.Format == externalspec.FormatPaimonTable {
-				// Confirm the coordinator's pinned explore result, not the worker's
-				// empty response or the source table's potentially newer snapshot.
-				files, err := packed.ReadFileInfosFromManifestPath(task.GetExploreManifestPath(), meta.CreateStorageConfig())
-				if err != nil {
-					return merr.Wrap(err, "verify empty Paimon refresh manifest")
-				}
-				sourceConfirmedEmpty = len(files) == 0
-			}
-		}
-	}
-
 	// Intentionally allow the collection schema to advance while tasks are
 	// running. For the current additive-only scope, an older-schema refresh can
 	// be applied; it may miss newly added external columns, and the next refresh
@@ -548,7 +528,6 @@ func (m *Manager) applyFinishedJobSegments(ctx context.Context, job *datapb.Exte
 		keptSegments,
 		updatedSegments,
 		job.GetTransformStartAfterTimeticks(),
-		sourceConfirmedEmpty,
 		mlog.FieldJobID(job.GetJobId()),
 	); err != nil {
 		return err
@@ -1009,7 +988,7 @@ func (m *Manager) createTasksForJob(
 	if err != nil {
 		return nil, err
 	}
-	if len(allFiles) == 0 && spec.Format != externalspec.FormatPaimonTable {
+	if len(allFiles) == 0 {
 		return nil, newNonRetriableJobError("no files found in external source: %s", job.GetExternalSource())
 	}
 	// NOTE: zero-total-rows cannot be detected here. PlainFormat::explore
