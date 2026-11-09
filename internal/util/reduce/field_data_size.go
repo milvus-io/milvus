@@ -25,6 +25,78 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// RetrieveResults field numbers from internal.proto, checked against its descriptor in tests.
+const (
+	RetrieveIDsFieldNumber             protowire.Number = 4
+	RetrieveFieldsDataFieldNumber      protowire.Number = 5
+	RetrieveElementIndicesFieldNumber  protowire.Number = 19
+	RetrieveComputedResultsFieldNumber protowire.Number = 22
+)
+
+// SearchResultData and LongArray field numbers from schema.proto, checked in tests.
+const (
+	SearchFieldsDataFieldNumber         protowire.Number = 3
+	SearchScoresFieldNumber             protowire.Number = 4
+	SearchIDsFieldNumber                protowire.Number = 5
+	SearchGroupByFieldValueFieldNumber  protowire.Number = 8
+	SearchElementIndicesFieldNumber     protowire.Number = 15
+	SearchGroupByFieldValuesFieldNumber protowire.Number = 17
+	LongArrayDataFieldNumber            protowire.Number = 1
+)
+
+// schema.proto field numbers used by the allocation-free row sizer. Descriptor
+// tests pin their names and numbers independently of their encoded tag widths.
+const (
+	idsIntIDFieldNumber protowire.Number = 1
+	idsStrIDFieldNumber protowire.Number = 2
+
+	// Scalar arrays' data and SparseFloatArray.contents share field number 1.
+	arrayDataFieldNumber        protowire.Number = 1
+	arrayElementTypeFieldNumber protowire.Number = 2
+
+	fieldDataTypeFieldNumber         protowire.Number = 1
+	fieldDataNameFieldNumber         protowire.Number = 2
+	fieldDataScalarsFieldNumber      protowire.Number = 3
+	fieldDataVectorsFieldNumber      protowire.Number = 4
+	fieldDataIDFieldNumber           protowire.Number = 5
+	fieldDataIsDynamicFieldNumber    protowire.Number = 6
+	fieldDataValidDataFieldNumber    protowire.Number = 7
+	fieldDataStructArraysFieldNumber protowire.Number = 8
+	structArrayFieldsFieldNumber     protowire.Number = 1
+
+	scalarBoolDataFieldNumber        protowire.Number = 1
+	scalarIntDataFieldNumber         protowire.Number = 2
+	scalarLongDataFieldNumber        protowire.Number = 3
+	scalarFloatDataFieldNumber       protowire.Number = 4
+	scalarDoubleDataFieldNumber      protowire.Number = 5
+	scalarStringDataFieldNumber      protowire.Number = 6
+	scalarBytesDataFieldNumber       protowire.Number = 7
+	scalarArrayDataFieldNumber       protowire.Number = 8
+	scalarJSONDataFieldNumber        protowire.Number = 9
+	scalarGeometryDataFieldNumber    protowire.Number = 10
+	scalarTimestamptzDataFieldNumber protowire.Number = 11
+	scalarGeometryWktDataFieldNumber protowire.Number = 12
+	scalarMolDataFieldNumber         protowire.Number = 13
+	scalarMolSmilesDataFieldNumber   protowire.Number = 14
+	scalarDateDataFieldNumber        protowire.Number = 15
+	scalarTimeDataFieldNumber        protowire.Number = 16
+	scalarValidDataFieldNumber       protowire.Number = 17
+
+	vectorDimFieldNumber               protowire.Number = 1
+	vectorFloatVectorFieldNumber       protowire.Number = 2
+	vectorBinaryVectorFieldNumber      protowire.Number = 3
+	vectorFloat16VectorFieldNumber     protowire.Number = 4
+	vectorBfloat16VectorFieldNumber    protowire.Number = 5
+	vectorSparseFloatVectorFieldNumber protowire.Number = 6
+	vectorInt8VectorFieldNumber        protowire.Number = 7
+	vectorArrayFieldNumber             protowire.Number = 8
+	vectorValidDataFieldNumber         protowire.Number = 9
+	sparseFloatDimFieldNumber          protowire.Number = 2
+	vectorArrayDimFieldNumber          protowire.Number = 1
+	vectorArrayDataFieldNumber         protowire.Number = 2
+	vectorArrayElementTypeFieldNumber  protowire.Number = 3
+)
+
 func bytesFieldSize(field protowire.Number, size int) int {
 	return protowire.SizeTag(field) + protowire.SizeBytes(size)
 }
@@ -42,10 +114,10 @@ func IDsRowSize(ids *schemapb.IDs, row int64) (int, error) {
 	switch data := ids.GetIdField().(type) {
 	case *schemapb.IDs_IntId:
 		n, err := scalarRowSize(data.IntId.GetData(), row, false, func(v int64) int { return protowire.SizeVarint(uint64(v)) })
-		return bytesFieldSize(1, n), err
+		return bytesFieldSize(idsIntIDFieldNumber, n), err
 	case *schemapb.IDs_StrId:
 		n, err := scalarRowSize(data.StrId.GetData(), row, false, func(v string) int { return len(v) })
-		return bytesFieldSize(2, n), err
+		return bytesFieldSize(idsStrIDFieldNumber, n), err
 	case nil:
 		return 0, nil
 	default:
@@ -62,7 +134,7 @@ func scalarRowSize[T any](data []T, row int64, null bool, size func(T) int) (int
 	} else if !null {
 		return 0, merr.WrapErrServiceInternalMsg("Unit row %d is outside field data length %d", row, len(data))
 	}
-	return bytesFieldSize(1, size(value)), nil
+	return bytesFieldSize(arrayDataFieldNumber, size(value)), nil
 }
 
 // FieldDataRowSize sizes a one-row FieldData with the retained descriptors and
@@ -93,12 +165,12 @@ func fieldDataRowSize(field *schemapb.FieldData, row, dataRow int64, group, sear
 		return 0, merr.WrapErrServiceInternalMsg("Unit row %d is outside validity length %d", row, len(validity))
 	}
 	null := dataRow < 0 || (len(validity) > 0 && !validity[row])
-	size := intFieldSize(1, int64(field.GetType())) + intFieldSize(5, field.GetFieldId())
+	size := intFieldSize(fieldDataTypeFieldNumber, int64(field.GetType())) + intFieldSize(fieldDataIDFieldNumber, field.GetFieldId())
 	if name := field.GetFieldName(); name != "" {
-		size += bytesFieldSize(2, len(name))
+		size += bytesFieldSize(fieldDataNameFieldNumber, len(name))
 	}
 	if field.GetIsDynamic() && !group {
-		size += 2
+		size += intFieldSize(fieldDataIsDynamicFieldNumber, 1)
 	}
 	var payload int
 	var err error
@@ -106,17 +178,17 @@ func fieldDataRowSize(field *schemapb.FieldData, row, dataRow int64, group, sear
 	case *schemapb.FieldData_Scalars:
 		payload, err = scalarFieldRowSize(data.Scalars, dataRow, null)
 		if (!group && len(validity) > 0) || (group && null) {
-			payload += bytesFieldSize(17, 1)
-			size += bytesFieldSize(6, 1)
+			payload += bytesFieldSize(scalarValidDataFieldNumber, 1)
+			size += bytesFieldSize(fieldDataValidDataFieldNumber, 1)
 		}
-		size += bytesFieldSize(3, payload)
+		size += bytesFieldSize(fieldDataScalarsFieldNumber, payload)
 	case *schemapb.FieldData_Vectors:
 		payload, err = vectorFieldRowSize(data.Vectors, dataRow, null, search)
 		if len(validity) > 0 || dataRow < 0 {
-			payload += bytesFieldSize(9, 1)
-			size += bytesFieldSize(6, 1)
+			payload += bytesFieldSize(vectorValidDataFieldNumber, 1)
+			size += bytesFieldSize(fieldDataValidDataFieldNumber, 1)
 		}
-		size += bytesFieldSize(4, payload)
+		size += bytesFieldSize(fieldDataVectorsFieldNumber, payload)
 	case *schemapb.FieldData_StructArrays:
 		for _, child := range data.StructArrays.GetFields() {
 			var childSize int
@@ -124,9 +196,9 @@ func fieldDataRowSize(field *schemapb.FieldData, row, dataRow int64, group, sear
 			if err != nil {
 				return 0, err
 			}
-			payload += bytesFieldSize(1, childSize)
+			payload += bytesFieldSize(structArrayFieldsFieldNumber, childSize)
 		}
-		size += bytesFieldSize(8, payload)
+		size += bytesFieldSize(fieldDataStructArraysFieldNumber, payload)
 	default:
 		return 0, merr.WrapErrServiceInternalMsg("unsupported Unit field representation %T", data)
 	}
@@ -143,53 +215,53 @@ func scalarFieldRowSize(field *schemapb.ScalarField, row int64, null bool) (int,
 	bytesSize := func(v []byte) int { return len(v) }
 	switch data := field.GetData().(type) {
 	case *schemapb.ScalarField_BoolData:
-		tag = 1
+		tag = scalarBoolDataFieldNumber
 		size, err = scalarRowSize(data.BoolData.GetData(), row, null, func(bool) int { return 1 })
 	case *schemapb.ScalarField_IntData:
-		tag = 2
+		tag = scalarIntDataFieldNumber
 		size, err = scalarRowSize(data.IntData.GetData(), row, null, int32Size)
 	case *schemapb.ScalarField_LongData:
-		tag = 3
+		tag = scalarLongDataFieldNumber
 		size, err = scalarRowSize(data.LongData.GetData(), row, null, int64Size)
 	case *schemapb.ScalarField_FloatData:
-		tag = 4
-		size, err = scalarRowSize(data.FloatData.GetData(), row, null, func(float32) int { return 4 })
+		tag = scalarFloatDataFieldNumber
+		size, err = scalarRowSize(data.FloatData.GetData(), row, null, func(float32) int { return protowire.SizeFixed32() })
 	case *schemapb.ScalarField_DoubleData:
-		tag = 5
-		size, err = scalarRowSize(data.DoubleData.GetData(), row, null, func(float64) int { return 8 })
+		tag = scalarDoubleDataFieldNumber
+		size, err = scalarRowSize(data.DoubleData.GetData(), row, null, func(float64) int { return protowire.SizeFixed64() })
 	case *schemapb.ScalarField_StringData:
-		tag = 6
+		tag = scalarStringDataFieldNumber
 		size, err = scalarRowSize(data.StringData.GetData(), row, null, stringSize)
 	case *schemapb.ScalarField_BytesData:
-		tag = 7
+		tag = scalarBytesDataFieldNumber
 		size, err = scalarRowSize(data.BytesData.GetData(), row, null, bytesSize)
 	case *schemapb.ScalarField_ArrayData:
-		tag = 8
+		tag = scalarArrayDataFieldNumber
 		size, err = scalarRowSize(data.ArrayData.GetData(), row, null, func(v *schemapb.ScalarField) int { return proto.Size(v) })
-		size += intFieldSize(2, int64(data.ArrayData.GetElementType()))
+		size += intFieldSize(arrayElementTypeFieldNumber, int64(data.ArrayData.GetElementType()))
 	case *schemapb.ScalarField_JsonData:
-		tag = 9
+		tag = scalarJSONDataFieldNumber
 		size, err = scalarRowSize(data.JsonData.GetData(), row, null, bytesSize)
 	case *schemapb.ScalarField_GeometryData:
-		tag = 10
+		tag = scalarGeometryDataFieldNumber
 		size, err = scalarRowSize(data.GeometryData.GetData(), row, null, bytesSize)
 	case *schemapb.ScalarField_TimestamptzData:
-		tag = 11
+		tag = scalarTimestamptzDataFieldNumber
 		size, err = scalarRowSize(data.TimestamptzData.GetData(), row, null, int64Size)
 	case *schemapb.ScalarField_GeometryWktData:
-		tag = 12
+		tag = scalarGeometryWktDataFieldNumber
 		size, err = scalarRowSize(data.GeometryWktData.GetData(), row, null, stringSize)
 	case *schemapb.ScalarField_MolData:
-		tag = 13
+		tag = scalarMolDataFieldNumber
 		size, err = scalarRowSize(data.MolData.GetData(), row, null, bytesSize)
 	case *schemapb.ScalarField_MolSmilesData:
-		tag = 14
+		tag = scalarMolSmilesDataFieldNumber
 		size, err = scalarRowSize(data.MolSmilesData.GetData(), row, null, stringSize)
 	case *schemapb.ScalarField_DateData:
-		tag = 15
+		tag = scalarDateDataFieldNumber
 		size, err = scalarRowSize(data.DateData.GetData(), row, null, int32Size)
 	case *schemapb.ScalarField_TimeData:
-		tag = 16
+		tag = scalarTimeDataFieldNumber
 		size, err = scalarRowSize(data.TimeData.GetData(), row, null, int64Size)
 	case nil:
 		return 0, nil
@@ -201,20 +273,20 @@ func scalarFieldRowSize(field *schemapb.ScalarField, row int64, null bool) (int,
 
 func vectorFieldRowSize(field *schemapb.VectorField, row int64, null, search bool) (int, error) {
 	dim := field.GetDim()
-	size := intFieldSize(1, dim)
+	size := intFieldSize(vectorDimFieldNumber, dim)
 	var tag protowire.Number
 	var width, length int64
 	switch data := field.GetData().(type) {
 	case *schemapb.VectorField_FloatVector:
-		tag, width, length = 2, dim, int64(len(data.FloatVector.GetData()))
+		tag, width, length = vectorFloatVectorFieldNumber, dim, int64(len(data.FloatVector.GetData()))
 	case *schemapb.VectorField_BinaryVector:
-		tag, width, length = 3, dim/8, int64(len(data.BinaryVector))
+		tag, width, length = vectorBinaryVectorFieldNumber, dim/8, int64(len(data.BinaryVector))
 	case *schemapb.VectorField_Float16Vector:
-		tag, width, length = 4, dim*2, int64(len(data.Float16Vector))
+		tag, width, length = vectorFloat16VectorFieldNumber, dim*2, int64(len(data.Float16Vector))
 	case *schemapb.VectorField_Bfloat16Vector:
-		tag, width, length = 5, dim*2, int64(len(data.Bfloat16Vector))
+		tag, width, length = vectorBfloat16VectorFieldNumber, dim*2, int64(len(data.Bfloat16Vector))
 	case *schemapb.VectorField_Int8Vector:
-		tag, width, length = 7, dim, int64(len(data.Int8Vector))
+		tag, width, length = vectorInt8VectorFieldNumber, dim, int64(len(data.Int8Vector))
 	case *schemapb.VectorField_SparseFloatVector:
 		// Query retains the source sparse dimension; Search derives it from
 		// the selected row and leaves the enclosing vector dimension unset.
@@ -232,31 +304,41 @@ func vectorFieldRowSize(field *schemapb.VectorField, row int64, null, search boo
 		}
 		size = 0
 		if !search {
-			size = intFieldSize(1, sparseDim)
+			size = intFieldSize(vectorDimFieldNumber, sparseDim)
 		}
-		payload += intFieldSize(2, sparseDim)
-		return size + bytesFieldSize(6, payload), nil
+		payload += intFieldSize(sparseFloatDimFieldNumber, sparseDim)
+		return size + bytesFieldSize(vectorSparseFloatVectorFieldNumber, payload), nil
 	case *schemapb.VectorField_VectorArray:
 		array := data.VectorArray
 		arrayDim := array.GetDim()
 		if !search && dim != 0 {
 			arrayDim = dim
 		}
-		payload := intFieldSize(1, arrayDim) + intFieldSize(3, int64(array.GetElementType()))
+		payload := intFieldSize(vectorArrayDimFieldNumber, arrayDim) + intFieldSize(vectorArrayElementTypeFieldNumber, int64(array.GetElementType()))
 		if !search && null {
 			// Query emits a typed empty VectorField for an absent null array row.
 			switch array.GetElementType() {
-			case schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector,
-				schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_Int8Vector:
-				return size + bytesFieldSize(8, payload+bytesFieldSize(2, intFieldSize(1, arrayDim)+2)), nil
+			case schemapb.DataType_FloatVector:
+				tag = vectorFloatVectorFieldNumber
+			case schemapb.DataType_BinaryVector:
+				tag = vectorBinaryVectorFieldNumber
+			case schemapb.DataType_Float16Vector:
+				tag = vectorFloat16VectorFieldNumber
+			case schemapb.DataType_BFloat16Vector:
+				tag = vectorBfloat16VectorFieldNumber
+			case schemapb.DataType_Int8Vector:
+				tag = vectorInt8VectorFieldNumber
 			default:
 				return 0, merr.WrapErrServiceInternalMsg("unsupported null vector-array element type %s", array.GetElementType())
 			}
+			// An empty oneof payload still writes its tag and a zero length prefix.
+			emptyVectorSize := intFieldSize(vectorDimFieldNumber, arrayDim) + bytesFieldSize(tag, 0)
+			return size + bytesFieldSize(vectorArrayFieldNumber, payload+bytesFieldSize(vectorArrayDataFieldNumber, emptyVectorSize)), nil
 		}
 		if row < 0 || row >= int64(len(array.GetData())) {
 			return 0, merr.WrapErrServiceInternalMsg("Unit vector-array row %d is out of range", row)
 		}
-		return size + bytesFieldSize(8, payload+bytesFieldSize(2, proto.Size(array.Data[row]))), nil
+		return size + bytesFieldSize(vectorArrayFieldNumber, payload+bytesFieldSize(vectorArrayDataFieldNumber, proto.Size(array.Data[row]))), nil
 	case nil:
 		return size, nil
 	default:
@@ -269,9 +351,9 @@ func vectorFieldRowSize(field *schemapb.VectorField, row int64, null, search boo
 	if null {
 		payload = 0
 	}
-	if tag == 2 {
+	if tag == vectorFloatVectorFieldNumber {
 		if payload > 0 {
-			payload = bytesFieldSize(1, payload*4)
+			payload = bytesFieldSize(arrayDataFieldNumber, payload*protowire.SizeFixed32())
 		}
 	}
 	return size + bytesFieldSize(tag, payload), nil

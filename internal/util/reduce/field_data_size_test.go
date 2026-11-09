@@ -21,13 +21,134 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/dynamicpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+func TestRetrieveUnitFieldNumbers(t *testing.T) {
+	fields := (&internalpb.RetrieveResults{}).ProtoReflect().Descriptor().Fields()
+	for _, tc := range []struct {
+		name     protoreflect.Name
+		number   protowire.Number
+		repeated bool
+	}{
+		{"ids", RetrieveIDsFieldNumber, false},
+		{"fields_data", RetrieveFieldsDataFieldNumber, true},
+		{"element_indices", RetrieveElementIndicesFieldNumber, true},
+		{"computed_results", RetrieveComputedResultsFieldNumber, true},
+	} {
+		t.Run(string(tc.name), func(t *testing.T) {
+			field := fields.ByName(tc.name)
+			require.NotNil(t, field)
+			require.Equal(t, tc.number, field.Number())
+			require.Equal(t, protoreflect.MessageKind, field.Kind())
+			require.Equal(t, tc.repeated, field.IsList())
+		})
+	}
+}
+
+func TestSearchUnitFieldNumbers(t *testing.T) {
+	fields := (&schemapb.SearchResultData{}).ProtoReflect().Descriptor().Fields()
+	for _, tc := range []struct {
+		name     protoreflect.Name
+		number   protowire.Number
+		kind     protoreflect.Kind
+		repeated bool
+	}{
+		{"fields_data", SearchFieldsDataFieldNumber, protoreflect.MessageKind, true},
+		{"scores", SearchScoresFieldNumber, protoreflect.FloatKind, true},
+		{"ids", SearchIDsFieldNumber, protoreflect.MessageKind, false},
+		{"group_by_field_value", SearchGroupByFieldValueFieldNumber, protoreflect.MessageKind, false},
+		{"element_indices", SearchElementIndicesFieldNumber, protoreflect.MessageKind, false},
+		{"group_by_field_values", SearchGroupByFieldValuesFieldNumber, protoreflect.MessageKind, true},
+	} {
+		t.Run(string(tc.name), func(t *testing.T) {
+			field := fields.ByName(tc.name)
+			require.NotNil(t, field)
+			require.Equal(t, tc.number, field.Number())
+			require.Equal(t, tc.kind, field.Kind())
+			require.Equal(t, tc.repeated, field.IsList())
+		})
+	}
+	field := (&schemapb.LongArray{}).ProtoReflect().Descriptor().Fields().ByName("data")
+	require.NotNil(t, field)
+	require.Equal(t, LongArrayDataFieldNumber, field.Number())
+	require.Equal(t, protoreflect.Int64Kind, field.Kind())
+	require.True(t, field.IsPacked())
+	require.True(t, fields.ByName("scores").IsPacked())
+}
+
+// Size parity alone cannot distinguish incorrect field numbers with equal tag
+// widths. Pin the descriptors separately, including newly added schema fields.
+func TestFieldDataSizeFieldNumbers(t *testing.T) {
+	for _, tc := range []struct {
+		message proto.Message
+		fields  map[protoreflect.Name]protowire.Number
+	}{
+		{&schemapb.IDs{}, map[protoreflect.Name]protowire.Number{
+			"int_id": idsIntIDFieldNumber, "str_id": idsStrIDFieldNumber,
+			"uuid_id": 3, // Known schema alternative; row sizing does not support it yet.
+		}},
+		{&schemapb.FieldData{}, map[protoreflect.Name]protowire.Number{
+			"type": fieldDataTypeFieldNumber, "field_name": fieldDataNameFieldNumber,
+			"scalars": fieldDataScalarsFieldNumber, "vectors": fieldDataVectorsFieldNumber,
+			"field_id": fieldDataIDFieldNumber, "is_dynamic": fieldDataIsDynamicFieldNumber,
+			"valid_data": fieldDataValidDataFieldNumber, "struct_arrays": fieldDataStructArraysFieldNumber,
+		}},
+		{&schemapb.ScalarField{}, map[protoreflect.Name]protowire.Number{
+			"bool_data": scalarBoolDataFieldNumber, "int_data": scalarIntDataFieldNumber,
+			"long_data": scalarLongDataFieldNumber, "float_data": scalarFloatDataFieldNumber,
+			"double_data": scalarDoubleDataFieldNumber, "string_data": scalarStringDataFieldNumber,
+			"bytes_data": scalarBytesDataFieldNumber, "array_data": scalarArrayDataFieldNumber,
+			"json_data": scalarJSONDataFieldNumber, "geometry_data": scalarGeometryDataFieldNumber,
+			"timestamptz_data": scalarTimestamptzDataFieldNumber, "geometry_wkt_data": scalarGeometryWktDataFieldNumber,
+			"mol_data": scalarMolDataFieldNumber, "mol_smiles_data": scalarMolSmilesDataFieldNumber,
+			"date_data": scalarDateDataFieldNumber, "time_data": scalarTimeDataFieldNumber,
+			"valid_data": scalarValidDataFieldNumber,
+		}},
+		{&schemapb.VectorField{}, map[protoreflect.Name]protowire.Number{
+			"dim": vectorDimFieldNumber, "float_vector": vectorFloatVectorFieldNumber,
+			"binary_vector": vectorBinaryVectorFieldNumber, "float16_vector": vectorFloat16VectorFieldNumber,
+			"bfloat16_vector": vectorBfloat16VectorFieldNumber, "sparse_float_vector": vectorSparseFloatVectorFieldNumber,
+			"int8_vector": vectorInt8VectorFieldNumber, "vector_array": vectorArrayFieldNumber,
+			"valid_data": vectorValidDataFieldNumber,
+		}},
+		{&schemapb.ArrayArray{}, map[protoreflect.Name]protowire.Number{
+			"data": arrayDataFieldNumber, "element_type": arrayElementTypeFieldNumber,
+		}},
+		{&schemapb.SparseFloatArray{}, map[protoreflect.Name]protowire.Number{
+			"contents": arrayDataFieldNumber, "dim": sparseFloatDimFieldNumber,
+		}},
+		{&schemapb.VectorArray{}, map[protoreflect.Name]protowire.Number{
+			"dim": vectorArrayDimFieldNumber, "data": vectorArrayDataFieldNumber,
+			"element_type": vectorArrayElementTypeFieldNumber,
+		}},
+		{&schemapb.StructArrayField{}, map[protoreflect.Name]protowire.Number{
+			"fields": structArrayFieldsFieldNumber,
+		}},
+	} {
+		descriptor := tc.message.ProtoReflect().Descriptor()
+		t.Run(string(descriptor.Name()), func(t *testing.T) {
+			fields := descriptor.Fields()
+			require.Equal(t, len(tc.fields), fields.Len(), "schema changed: review Unit sizing")
+			for name, number := range tc.fields {
+				field := fields.ByName(name)
+				require.NotNil(t, field, "missing field %s", name)
+				require.Equal(t, number, field.Number(), "field %s", name)
+				if name == "valid_data" {
+					require.Equal(t, protoreflect.BoolKind, field.Kind())
+					require.True(t, field.IsPacked())
+				}
+			}
+		})
+	}
+}
 
 func TestFieldDataRowSizeScalars(t *testing.T) {
 	variants := (&schemapb.ScalarField{}).ProtoReflect().Descriptor().Oneofs().ByName("data").Fields()
@@ -36,6 +157,7 @@ func TestFieldDataRowSizeScalars(t *testing.T) {
 		t.Run(string(variant.Name()), func(t *testing.T) {
 			array := dynamicpb.NewMessage(variant.Message())
 			dataField := array.Descriptor().Fields().ByName("data")
+			require.Equal(t, arrayDataFieldNumber, dataField.Number())
 			values := array.Mutable(dataField).List()
 			for _, n := range []int64{0, 127, 128, 16384, -1} {
 				var value protoreflect.Value
@@ -137,6 +259,31 @@ func TestFieldDataRowSizeNested(t *testing.T) {
 	got, err = FieldDataRowSize(field, 0, 0, false)
 	require.NoError(t, err)
 	require.Equal(t, proto.Size(field), got)
+}
+
+func TestFieldDataRowSizeNullVectorArrays(t *testing.T) {
+	for _, elementType := range []schemapb.DataType{
+		schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector,
+		schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_Int8Vector,
+	} {
+		t.Run(elementType.String(), func(t *testing.T) {
+			field := &schemapb.FieldData{
+				Type: schemapb.DataType_ArrayOfVector,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim: 128, ValidData: []bool{false},
+					Data: &schemapb.VectorField_VectorArray{VectorArray: &schemapb.VectorArray{Dim: 128, ElementType: elementType}},
+				}},
+			}
+			reference := proto.Clone(field).(*schemapb.FieldData)
+			empty, err := typeutil.NewEmptyArrayOfVectorRow(128, elementType)
+			require.NoError(t, err)
+			reference.GetVectors().GetVectorArray().Data = []*schemapb.VectorField{empty}
+			typeutil.SetFieldDataValidData(reference, []bool{false})
+			got, err := FieldDataRowSize(field, 0, -1, false)
+			require.NoError(t, err)
+			require.Equal(t, proto.Size(reference), got)
+		})
+	}
 }
 
 func TestFieldDataRowSizeInvalidData(t *testing.T) {
