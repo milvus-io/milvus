@@ -1704,14 +1704,24 @@ func (t *SearchTask) supportsStreamingReduce() bool {
 		}
 
 		if hasFunctionRerank(t.request) {
-			// L2 consumes the same ANN candidate window after reduction at Proxy.
-			// L0/L1 can change worker candidates and remain on the Batch path.
-			if t.rerankMeta == nil || req.GetIsIterator() || len(t.orderByFields) > 0 ||
+			if req.GetIsIterator() || len(t.orderByFields) > 0 ||
 				req.GetSearchType() != internalpb.SearchType_DEFAULT {
 				return false
 			}
+			if t.request.GetFunctionScore() != nil && t.rerankMeta == nil {
+				return false
+			}
 			for _, chain := range t.request.GetFunctionChains() {
-				if chain.GetStage() != schemapb.FunctionChainStage_FunctionChainStageL2Rerank {
+				switch chain.GetStage() {
+				case schemapb.FunctionChainStage_FunctionChainStageL0Rerank,
+					schemapb.FunctionChainStage_FunctionChainStageL1Rerank:
+					// Workers execute L0/L1 before splitting results into Chunks.
+				case schemapb.FunctionChainStage_FunctionChainStageL2Rerank:
+					// Only Proxy-side reranking needs rerankMeta.
+					if t.rerankMeta == nil {
+						return false
+					}
+				default:
 					return false
 				}
 			}
