@@ -99,9 +99,8 @@ type SegmentCatalogMutation struct {
 	// each record is re-read and projected under indexMeta's per-buildID lock,
 	// so the persisted value cannot be built from a stale read.
 	//
-	// A normal index task still supplies exactly one upsert. Multiple entries
-	// are accepted only for removals, allowing one GC manifest revision to
-	// retract several indexes and retire their records atomically.
+	// Foreground completion supplies one publication. Historical backfill may
+	// publish several indexes together; removals and rollback may also batch.
 	SegmentIndexes []SegmentIndexMutation
 
 	// manifestHasIndex is framework-owned. A verified presence/emptiness result
@@ -120,6 +119,13 @@ const (
 	// SegmentIndexRemove deletes the record, retiring an artifact the manifest
 	// revision retracts.
 	SegmentIndexRemove
+	// SegmentIndexBackfill copies an existing finished artifact into _index,
+	// publishes its destination layout and retires its historical catalog row.
+	SegmentIndexBackfill
+	// SegmentIndexRollback copies a v2 artifact to index_v1 and persists the
+	// destination record to etcd while retracting its manifest entry. Source
+	// files remain protected until the build is retired.
+	SegmentIndexRollback
 )
 
 // SegmentIndexMutation is one SegmentIndex half of a manifest commit: a record
@@ -132,8 +138,11 @@ type SegmentIndexMutation struct {
 	BuildID int64
 	// FinishedTask is the raw worker result an upsert projects the persisted
 	// record from. Required for SegmentIndexUpsert, rejected for
-	// SegmentIndexRemove.
+	// SegmentIndexRemove, SegmentIndexBackfill and SegmentIndexRollback.
 	FinishedTask *workerpb.IndexTaskInfo
+	// rollbackEntry is prepared only by rollbackSegmentIndexes under the
+	// segment lock from the published manifest, then checked under BuildID lock.
+	rollbackEntry *packed.ManifestIndexInfo
 }
 
 // stagedSegmentIndexMutation carries a SegmentIndex change from its projection
@@ -151,6 +160,7 @@ type SegmentIndexMutation struct {
 // install-then-metric sequence stays ordered against the next writer of the same
 // build.
 type StagedSegmentIndexMutation struct {
+	Source  *model.SegmentIndex
 	Action  *metastore.UpdateAction
 	Record  *model.SegmentIndex
 	Install func() (deferredMetric func())
@@ -160,7 +170,11 @@ type StagedSegmentIndexMutation struct {
 // upsert must be projected from no longer exists. The commit that staged the
 // mutation is abandoned before creating a manifest revision; publishing would
 // strand an index entry that no SegmentIndex record can ever drive GC for.
-var ErrSegmentIndexRecordGone = errors.New("segment index record no longer exists")
+var (
+	ErrSegmentIndexRecordGone      = errors.New("segment index record no longer exists")
+	ErrSegmentIndexBackfillSkipped = errors.New("segment index no longer needs manifest backfill")
+	ErrSegmentIndexRollbackSkipped = errors.New("segment index no longer needs rollback")
+)
 
 // SegmentManifestCommit describes one segment-scoped StorageV3 commit.
 // ExpectedManifest is an optional optimistic CAS condition for Noop mutations,
@@ -208,7 +222,7 @@ type SegmentManifestCommit struct {
 // the fieldIndexLock read side are released (still under keyLock).
 func (m *Meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifestCommit) error {
 	var manifestUpdates []*SegmentInfo
-	defer func() { m.notifyQueryViewSegmentUpdates(ctx, manifestUpdates) }()
+	defer func() { m.NotifyQueryViewSegmentUpdates(ctx, manifestUpdates) }()
 	if commit.SegmentID == 0 {
 		return merr.WrapErrServiceInternalMsg("segment manifest commit requires a segment ID")
 	}
@@ -225,7 +239,23 @@ func (m *Meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	locks.Lock(commit.SegmentID)
 	defer locks.Unlock(commit.SegmentID)
 	lockWait := time.Since(lockStart)
+	var err error
+	manifestUpdates, err = m.commitSegmentManifestLocked(ctx, commit, "", lockWait)
+	return err
+}
+
+// rollbackSource is internal: rollback reads its entries under the segment
+// lock, and only that entry point may retract them into etcd or update a
+// retained Dropped segment. The caller notifies QueryView of returned updates
+// after releasing the segment lock. Public commit semantics remain unchanged.
+func (m *Meta) commitSegmentManifestLocked(ctx context.Context, commit SegmentManifestCommit, rollbackSource string, lockWait time.Duration) ([]*SegmentInfo, error) {
+	var manifestUpdates []*SegmentInfo
 	holdStart := time.Now()
+	for _, mutation := range commit.CatalogMutation.SegmentIndexes {
+		if (mutation.Type == SegmentIndexRollback) != (rollbackSource != "") {
+			return nil, merr.WrapErrServiceInternalMsg("rollback index mutations require the locked rollback entry point")
+		}
+	}
 
 	// Snapshot the manifest input before object-storage I/O.
 	segment := m.Segments.GetSegment(commit.SegmentID)
@@ -254,7 +284,7 @@ func (m *Meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 
 	indexBuildIDs, err := validateSegmentIndexMutations(commit)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() {
 		mlog.Debug(ctx, "segment manifest commit completed",
@@ -276,35 +306,38 @@ func (m *Meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	isNewSegment := segment == nil
 	if isNewSegment {
 		if commit.CatalogMutation.NewSegment == nil {
-			return merr.WrapErrSegmentNotFound(commit.SegmentID)
+			return nil, merr.WrapErrSegmentNotFound(commit.SegmentID)
 		}
 		if commit.ExpectedManifest != "" {
-			return merr.WrapErrServiceInternalMsg("new segment manifest commit cannot set expected manifest, segmentID=%d", commit.SegmentID)
+			return nil, merr.WrapErrServiceInternalMsg("new segment manifest commit cannot set expected manifest, segmentID=%d", commit.SegmentID)
 		}
 		if commit.CatalogMutation.NewSegment.GetID() != commit.SegmentID {
-			return merr.WrapErrServiceInternalMsg("new segment ID %d does not match manifest commit segmentID %d", commit.CatalogMutation.NewSegment.GetID(), commit.SegmentID)
+			return nil, merr.WrapErrServiceInternalMsg("new segment ID %d does not match manifest commit segmentID %d", commit.CatalogMutation.NewSegment.GetID(), commit.SegmentID)
 		}
 		if commit.CatalogMutation.NewSegment.GetManifestPath() != "" {
-			return merr.WrapErrServiceInternalMsg("new segment manifest path must be empty, segmentID=%d", commit.SegmentID)
+			return nil, merr.WrapErrServiceInternalMsg("new segment manifest path must be empty, segmentID=%d", commit.SegmentID)
 		}
 		segment = NewSegmentInfo(proto.Clone(commit.CatalogMutation.NewSegment).(*datapb.SegmentInfo))
 	} else if commit.CatalogMutation.NewSegment != nil {
-		return merr.WrapErrServiceInternalMsg("existing segment manifest commit cannot include a new segment, segmentID=%d", commit.SegmentID)
+		return nil, merr.WrapErrServiceInternalMsg("existing segment manifest commit cannot include a new segment, segmentID=%d", commit.SegmentID)
 	}
 	if segment.GetStorageVersion() != storage.StorageV3 {
-		return merr.WrapErrServiceInternalMsg("segment manifest commit requires StorageV3, segmentID=%d", commit.SegmentID)
+		return nil, merr.WrapErrServiceInternalMsg("segment manifest commit requires StorageV3, segmentID=%d", commit.SegmentID)
 	}
-	if !IsSegmentHealthy(segment) {
+	if rollbackSource != "" && (!IsSegmentIndexRollbackRetained(segment) || segment.GetManifestPath() != rollbackSource) {
+		return nil, StaleSegmentManifestError(commit.SegmentID, rollbackSource, segment.GetManifestPath())
+	}
+	if !IsSegmentHealthy(segment) && rollbackSource == "" {
 		// A segment retired (dropped) after the worker finished is gone for
 		// publication purposes: the pointer must not advance and the caller must
 		// not retry the obsolete result. Report not-found rather than an
 		// unclassified internal error so callers that already treat a missing
 		// segment as a benign, terminal outcome (stats SetJobInfo discards the
 		// result and finishes the task) do not stall re-polling forever.
-		return merr.WrapErrSegmentNotFound(commit.SegmentID, "segment dropped or unhealthy during manifest commit")
+		return nil, merr.WrapErrSegmentNotFound(commit.SegmentID, "segment dropped or unhealthy during manifest commit")
 	}
 	if !matchesExpectedManifest(commit.ExpectedManifest, segment.GetManifestPath()) {
-		return StaleSegmentManifestError(commit.SegmentID, commit.ExpectedManifest, segment.GetManifestPath())
+		return nil, StaleSegmentManifestError(commit.SegmentID, commit.ExpectedManifest, segment.GetManifestPath())
 	}
 	if commit.InspectedManifest != "" && commit.InspectedManifest != segment.GetManifestPath() {
 		// A structured mutation whose caller pre-checked the manifest content
@@ -313,12 +346,16 @@ func (m *Meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 		// immutable per version, so an equal pointer would imply identical column
 		// groups) and the caller must re-classify rather than publish a revision
 		// built from a decision that no longer holds.
-		return StaleSegmentManifestError(commit.SegmentID, commit.InspectedManifest, segment.GetManifestPath())
+		return nil, StaleSegmentManifestError(commit.SegmentID, commit.InspectedManifest, segment.GetManifestPath())
 	}
 
 	var removedBuildIDs map[int64]struct{}
 	for i := range commit.CatalogMutation.SegmentIndexes {
 		indexMutation := &commit.CatalogMutation.SegmentIndexes[i]
+		if indexMutation.Type == SegmentIndexBackfill && (segment.GetLevel() == datapb.SegmentLevel_L0 ||
+			segment.GetIsImporting() || segment.GetState() == commonpb.SegmentState_Importing) {
+			return nil, ErrSegmentIndexBackfillSkipped
+		}
 		if indexMutation.Type == SegmentIndexRemove {
 			if removedBuildIDs == nil {
 				removedBuildIDs = make(map[int64]struct{})
@@ -335,51 +372,75 @@ func (m *Meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 				mlog.Warn(ctx, "index task no longer exists, discarding manifest commit",
 					mlog.Int64("buildID", indexMutation.BuildID),
 					mlog.Int64("segmentID", commit.SegmentID))
-				return nil
+				return nil, nil
 			}
-			return err
+			return nil, err
 		}
 		if staged.Record != nil && staged.Record.SegmentID != commit.SegmentID {
-			return merr.WrapErrServiceInternalMsg(
+			return nil, merr.WrapErrServiceInternalMsg(
 				"segment index mutation buildID=%d belongs to segment %d, not manifest segment %d",
 				indexMutation.BuildID, staged.Record.SegmentID, commit.SegmentID)
 		}
-		if indexMutation.Type == SegmentIndexRemove && staged.Record != nil &&
+		if (indexMutation.Type == SegmentIndexBackfill || indexMutation.Type == SegmentIndexRollback) && staged.Record != nil &&
+			(staged.Record.CollectionID != segment.GetCollectionID() ||
+				staged.Record.PartitionID != segment.GetPartitionID()) {
+			return nil, merr.WrapErrServiceInternalMsg(
+				"segment index mutation for build %d targets collection/partition/segment %d/%d/%d, not committing segment %d/%d/%d",
+				indexMutation.BuildID,
+				staged.Record.CollectionID, staged.Record.PartitionID, staged.Record.SegmentID,
+				segment.GetCollectionID(), segment.GetPartitionID(), commit.SegmentID)
+		}
+		if (indexMutation.Type == SegmentIndexRemove || (indexMutation.Type == SegmentIndexRollback && indexMutation.rollbackEntry != nil)) && staged.Record != nil &&
 			!commitRetractsIndexIdentity(commit, staged.Record.IndexID, indexMutation.BuildID) &&
-			!commitDropsColumnOfIndex(m, staged.Record, commit) {
-			return merr.WrapErrServiceInternalMsg(
+			(indexMutation.Type != SegmentIndexRemove || !commitDropsColumnOfIndex(m, staged.Record, commit)) {
+			return nil, merr.WrapErrServiceInternalMsg(
 				"segment index removal does not match the manifest retraction, segmentID=%d indexID=%d buildID=%d",
 				commit.SegmentID, staged.Record.IndexID, indexMutation.BuildID)
 		}
 		stagedIndexes = append(stagedIndexes, staged)
-		if indexMutation.Type == SegmentIndexUpsert {
+		if indexMutation.Type == SegmentIndexRollback {
+			if err := m.validateRollbackIndex(segment, *indexMutation, staged.Source); err != nil {
+				return nil, err
+			}
+		}
+		if indexMutation.Type == SegmentIndexUpsert || indexMutation.Type == SegmentIndexBackfill {
 			for _, manifestIndex := range commit.Mutation.Updates.Indexes {
 				if manifestIndex.BuildID != indexMutation.BuildID {
 					continue
 				}
 				if err := ValidateManifestIndexPublishable(commit.SegmentID, manifestIndex); err != nil {
-					return err
+					return nil, err
 				}
 				if err := validateManifestIndexTaskProjection(m, segment, manifestIndex, staged.Record); err != nil {
-					return err
+					return nil, err
 				}
 				break
 			}
 		}
 	}
 
+	// Locks retain the source artifacts until every accepted copy completes.
+	// A failed copy cannot publish a manifest pointer or retire its catalog row.
+	if err := m.copyMigratedIndexFiles(ctx, segment, stagedIndexes); err != nil {
+		return nil, err
+	}
+
 	io, releaseIO, err := m.ManifestCommitExecutor.acquire(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer releaseIO()
 	result, err := m.commitManifestMutation(ctx, io, segment.GetManifestPath(), commit)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	manifestPath := result.ManifestPath
-	commit.CatalogMutation.manifestHasIndex = result.HasIndexes
+	// A rollback Noop already proved index presence in its locked source read.
+	// A structured mutation instead supplies the marker of its committed result.
+	if result.HasIndexes != nil {
+		commit.CatalogMutation.manifestHasIndex = result.HasIndexes
+	}
 
 	// Release the executor before publication, which may enter other meta paths.
 	releaseIO()
@@ -433,10 +494,16 @@ func (m *Meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 				return merr.WrapErrSegmentNotFound(commit.SegmentID)
 			}
 			latest = latest.Clone()
+			if rollbackSource != "" && latest.GetManifestPath() != rollbackSource {
+				return StaleSegmentManifestError(commit.SegmentID, rollbackSource, latest.GetManifestPath())
+			}
 			if latest.GetStorageVersion() != storage.StorageV3 {
 				return merr.WrapErrServiceInternalMsg("segment manifest commit requires StorageV3, segmentID=%d", commit.SegmentID)
 			}
-			if !IsSegmentHealthy(latest) {
+			if rollbackSource != "" && !IsSegmentIndexRollbackRetained(latest) {
+				return merr.WrapErrServiceUnavailableMsg("segment %d changed eligibility during index rollback", commit.SegmentID)
+			}
+			if !IsSegmentHealthy(latest) && rollbackSource == "" {
 				// Same as the pre-I/O check above: a segment dropped during manifest
 				// I/O is treated as not-found so callers discard rather than retry.
 				return merr.WrapErrSegmentNotFound(commit.SegmentID, "segment dropped or unhealthy during manifest commit")
@@ -482,6 +549,10 @@ func (m *Meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 		var action metastore.UpdateAction
 		if isNewSegment {
 			action = metastore.AddSegment(updated.SegmentInfo)
+		} else if rollbackSource != "" {
+			// Rollback does not change binlogs, including for Dropped parents.
+			// Keep the atomic write to one segment PUT plus the index PUTs.
+			action = metastore.UpdateSegment(updated.SegmentInfo)
 		} else {
 			action = metastore.AlterSegment(updated.SegmentInfo)
 		}
@@ -526,7 +597,7 @@ func (m *Meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 		if releaseIndexLock != nil {
 			releaseIndexLock()
 		}
-		return err
+		return nil, err
 	}
 	// The writer lock is released. The fieldIndexLock read side held since the
 	// verify-set re-resolution is released before the deferred closures; the
@@ -538,14 +609,15 @@ func (m *Meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	for _, deferredIndexMetric := range deferredIndexMetrics {
 		deferredIndexMetric()
 	}
-	return nil
+	return manifestUpdates, nil
 }
 
 func validateSegmentIndexMutations(commit SegmentManifestCommit) ([]int64, error) {
 	mutations := commit.CatalogMutation.SegmentIndexes
 	buildIDs := make([]int64, 0, len(mutations))
 	seen := make(map[int64]struct{}, len(mutations))
-	upserts := 0
+	publications := 0
+	backfills := 0
 	for _, mutation := range mutations {
 		if mutation.BuildID == 0 {
 			return nil, merr.WrapErrServiceInternalMsg("segment index mutation requires a build ID")
@@ -557,13 +629,21 @@ func validateSegmentIndexMutations(commit SegmentManifestCommit) ([]int64, error
 		seen[mutation.BuildID] = struct{}{}
 		buildIDs = append(buildIDs, mutation.BuildID)
 		switch mutation.Type {
-		case SegmentIndexUpsert:
-			upserts++
+		case SegmentIndexUpsert, SegmentIndexBackfill:
+			publications++
+			if mutation.Type == SegmentIndexBackfill {
+				backfills++
+			}
 			if !commitPublishesIndexEntry(commit, mutation.BuildID) {
 				return nil, merr.WrapErrServiceInternalMsg(
-					"segment index upsert requires a matching manifest entry, segmentID=%d buildID=%d",
+					"segment index publication requires a matching manifest entry, segmentID=%d buildID=%d",
 					commit.SegmentID, mutation.BuildID)
 			}
+		case SegmentIndexRollback:
+			if mutation.rollbackEntry == nil {
+				continue // the locked source read proved no manifest entry exists
+			}
+			fallthrough
 		case SegmentIndexRemove:
 			if !commitRetractsIndexEntry(commit, mutation.BuildID) {
 				return nil, merr.WrapErrServiceInternalMsg(
@@ -572,10 +652,23 @@ func validateSegmentIndexMutations(commit SegmentManifestCommit) ([]int64, error
 			}
 		}
 	}
-	if upserts > 0 && len(mutations) != 1 {
+	if publications > 0 && len(mutations) != 1 && backfills != len(mutations) {
 		return nil, merr.WrapErrServiceInternalMsg(
-			"segment manifest commit cannot combine an index upsert with other index mutations, segmentID=%d",
+			"segment manifest commit cannot combine an index publication with other index mutations, segmentID=%d",
 			commit.SegmentID)
+	}
+	if backfills > 1 {
+		entries := commit.Mutation.Updates.Indexes
+		if len(entries) != backfills || len(commit.Mutation.Updates.DropIndexes) != 0 {
+			return nil, merr.WrapErrServiceInternalMsg("backfill batch requires exactly one manifest entry per mutation and no retractions")
+		}
+		indexIDs := make(map[int64]struct{}, len(entries))
+		for _, entry := range entries {
+			if _, exists := indexIDs[entry.IndexID]; exists {
+				return nil, merr.WrapErrServiceInternalMsg("backfill batch repeats indexID=%d", entry.IndexID)
+			}
+			indexIDs[entry.IndexID] = struct{}{}
+		}
 	}
 	sort.Slice(buildIDs, func(i, j int) bool { return buildIDs[i] < buildIDs[j] })
 	return buildIDs, nil
@@ -855,12 +948,22 @@ func validateManifestIndexTaskProjection(m *Meta, segment *SegmentInfo, entry pa
 	if err != nil {
 		return err
 	}
+	if entry.Path != expectedPath {
+		return merr.WrapErrServiceInternalMsg("segment index path changed before manifest commit, segmentID=%d buildID=%d", segIdx.SegmentID, segIdx.BuildID)
+	}
+	return validateManifestIndexRecordProjection(entry, segIdx)
+}
+
+// Both writer publication and rollback compare artifact fields to the locked
+// source record. Their path validation differs: rollback can read legacy entries
+// outside _index, whereas new entries must obey the segment-rooted contract.
+func validateManifestIndexRecordProjection(entry packed.ManifestIndexInfo, segIdx *model.SegmentIndex) error {
 	if entry.IndexID != segIdx.IndexID || entry.BuildID != segIdx.BuildID ||
 		entry.IndexVersion != segIdx.IndexVersion || entry.NumRows != segIdx.NumRows ||
 		entry.SerializedSize != int64(segIdx.IndexSerializedSize) || entry.MemSize != int64(segIdx.IndexMemSize) ||
 		entry.CurrentIndexVersion != segIdx.CurrentIndexVersion ||
 		entry.CurrentScalarIndexVersion != segIdx.CurrentScalarIndexVersion ||
-		entry.IndexStorePathVersion != segIdx.IndexStorePathVersion || entry.Path != expectedPath ||
+		entry.IndexStorePathVersion != segIdx.IndexStorePathVersion ||
 		!slices.Equal(entry.IndexFileKeys, segIdx.IndexFileKeys) {
 		return merr.WrapErrServiceInternalMsg(
 			"segment index changed before manifest commit, segmentID=%d buildID=%d", segIdx.SegmentID, segIdx.BuildID)
@@ -1155,7 +1258,7 @@ var SegmentManifestLockEscalationThreshold = 30 * time.Second
 // manifest pointer (which would require its own per-segment manifest lock).
 func (m *Meta) CommitSegmentManifests(ctx context.Context, commits []SegmentManifestCommit, extraOperators ...UpdateOperator) error {
 	var manifestUpdates []*SegmentInfo
-	defer func() { m.notifyQueryViewSegmentUpdates(ctx, manifestUpdates) }()
+	defer func() { m.NotifyQueryViewSegmentUpdates(ctx, manifestUpdates) }()
 	idSet := make(map[int64]struct{}, len(commits))
 	for _, commit := range commits {
 		if commit.SegmentID == 0 {
@@ -1239,7 +1342,7 @@ func (m *Meta) CommitSegmentManifests(ctx context.Context, commits []SegmentMani
 		operators = append(operators, m.publishSegmentManifestOperator(prepared[i]))
 	}
 	operators = append(operators, extraOperators...)
-	manifestUpdates, err = m.updateSegmentsInfo(ctx, operators...)
+	manifestUpdates, err = m.UpdateSegmentsInfoWithoutNotify(ctx, operators...)
 	return err
 }
 
@@ -1462,4 +1565,10 @@ func (m *Meta) publishSegmentManifestOperator(prepared preparedSegmentManifest) 
 		segment.ManifestPath = prepared.manifestPath
 		return true
 	}
+}
+
+// CommitSegmentManifestLocked requires the caller to hold the segment manifest
+// lock and notify returned updates only after releasing it.
+func (m *Meta) CommitSegmentManifestLocked(ctx context.Context, commit SegmentManifestCommit, lockWait time.Duration) ([]*SegmentInfo, error) {
+	return m.commitSegmentManifestLocked(ctx, commit, "", lockWait)
 }

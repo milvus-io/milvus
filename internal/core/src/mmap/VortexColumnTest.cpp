@@ -150,7 +150,10 @@ WriteVortexFile(const std::string& path,
                 int64_t begin = 0) {
     auto fs = std::make_shared<arrow::fs::LocalFileSystem>();
     auto writer_result = milvus_storage::vortex::VortexFileWriter::Open(
-        fs, schema, path, properties);
+        fs,
+        schema,
+        path,
+        std::make_shared<const milvus_storage::api::Properties>(properties));
     EXPECT_TRUE(writer_result.ok()) << writer_result.status().ToString();
     if (!writer_result.ok()) {
         return {};
@@ -182,7 +185,10 @@ WriteVortexBatches(
     const std::vector<std::shared_ptr<arrow::RecordBatch>>& batches) {
     auto fs = std::make_shared<arrow::fs::LocalFileSystem>();
     auto writer_result = milvus_storage::vortex::VortexFileWriter::Open(
-        fs, schema, path, properties);
+        fs,
+        schema,
+        path,
+        std::make_shared<const milvus_storage::api::Properties>(properties));
     EXPECT_TRUE(writer_result.ok()) << writer_result.status().ToString();
     if (!writer_result.ok()) {
         return {};
@@ -635,7 +641,10 @@ WriteNullableVortexFile(const std::string& path,
                         int64_t begin = 0) {
     auto fs = std::make_shared<arrow::fs::LocalFileSystem>();
     auto writer_result = milvus_storage::vortex::VortexFileWriter::Open(
-        fs, schema, path, properties);
+        fs,
+        schema,
+        path,
+        std::make_shared<const milvus_storage::api::Properties>(properties));
     EXPECT_TRUE(writer_result.ok()) << writer_result.status().ToString();
     if (!writer_result.ok()) {
         return {};

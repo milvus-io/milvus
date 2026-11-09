@@ -39,6 +39,8 @@ type SegmentIndexCatalog interface {
 
 	// HasBuildInfo reports whether a SegmentIndex record for the build ID is in memory.
 	HasBuildInfo(buildID int64) bool
+	GetIndexJob(buildID UniqueID) (*model.SegmentIndex, bool)
+	NotifyManifestIndexMigration(record *model.SegmentIndex)
 	// LockBuildIDs takes the write lock of each build ID, in ascending order
 	// after removing duplicates, so overlapping callers cannot deadlock.
 	// Callers must not hold a segment writer lock. Lock order: segment manifest
