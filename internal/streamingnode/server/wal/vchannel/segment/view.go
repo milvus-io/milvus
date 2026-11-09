@@ -353,6 +353,7 @@ func (s *SegmentView) ObserveInsert(
 func (s *SegmentView) observeInsertMetaLocked(timetick uint64, assignment *messagespb.PartitionSegmentAssignment) {
 	s.ensureStat()
 	s.meta.Stat.ModifiedBinarySize += assignment.GetBinarySize()
+	s.meta.Stat.ModifiedSealSize += assignment.GetSealSize()
 	s.meta.Stat.ModifiedRows += assignment.GetRows()
 	s.meta.Stat.LastModifiedTimestamp = tsoutil.PhysicalTime(timetick).Unix()
 }

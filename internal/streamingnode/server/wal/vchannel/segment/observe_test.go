@@ -43,6 +43,39 @@ func TestObserveInsertUsesSingleCheckpoint(t *testing.T) {
 	releaseMessages(pending.retainedHandles())
 }
 
+func TestObserveInsertPersistsModifiedSealSize(t *testing.T) {
+	raw := newObserveTestInsert(t, 10, []*messagespb.PartitionSegmentAssignment{
+		{
+			PartitionId: 1,
+			Rows:        1,
+			BinarySize:  10,
+			SealSize:    7,
+			SegmentAssignment: &messagespb.SegmentAssignment{
+				SegmentId: 1,
+			},
+		},
+	})
+	batches, err := BuildInsertBatches(raw)
+	require.NoError(t, err)
+	view := newObserveTestSegment(0)
+	owner := message.NewOwnedImmutableMessage(raw, nil)
+	dispatch := owner.Clone()
+	require.True(t, view.ObserveInsert(context.Background(), dispatch, batches[1]))
+	dispatch.Release()
+	owner.Release()
+
+	// SealSize is carried on the WAL message header and persisted via
+	// modified_seal_size so the main-column budget survives recovery replay.
+	meta := view.AssignmentMeta()
+	assert.Equal(t, uint64(10), meta.GetStat().GetModifiedBinarySize())
+	assert.Equal(t, uint64(7), meta.GetStat().GetModifiedSealSize())
+	view.mu.Lock()
+	assert.Len(t, view.pending.entries, 1)
+	pending := view.pending.takeAll()
+	view.mu.Unlock()
+	releaseMessages(pending.retainedHandles())
+}
+
 func TestObserveInsertSkipsPersistedCheckpoint(t *testing.T) {
 	raw := newObserveTestInsert(t, 10, []*messagespb.PartitionSegmentAssignment{
 		newObserveTestAssignment(1, 3, 4),
