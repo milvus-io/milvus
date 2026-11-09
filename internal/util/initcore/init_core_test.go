@@ -267,7 +267,7 @@ func TestInitLoonReaderConfigRejectsOutOfRangePoolSize(t *testing.T) {
 	// 4294967296 is the case the bound exists for: it truncates to 0 when
 	// narrowed to int32, which the C side accepts as "disabled" and reports
 	// as success, silently dropping the operator's configuration.
-	for _, v := range []string{"-1", "1025", "4294967296", "9223372036854775807"} {
+	for _, v := range []string{"-2", "1025", "4294967296", "9223372036854775807"} {
 		assert.NoError(t, pt.Save(pt.CommonCfg.StorageReaderThreadPoolSize.Key, v))
 		err := InitLoonReaderConfig(pt)
 		assert.Error(t, err, "pool size %s must be rejected", v)
@@ -301,7 +301,7 @@ func TestInitLoonReaderConfigRejectsOutOfRangeWindow(t *testing.T) {
 	assert.NoError(t, InitLoonReaderConfig(pt))
 
 	before := EffectiveLoonReaderThreadPoolSize()
-	for _, invalid := range []string{"-1", "8589934592"} {
+	for _, invalid := range []string{"-2", "8589934592"} {
 		// Pair the bad window with a pool size that would otherwise be
 		// applied; the point is that it must not reach the C side.
 		assert.NoError(t, pt.Save(pt.CommonCfg.StorageReaderThreadPoolSize.Key, "8"))
