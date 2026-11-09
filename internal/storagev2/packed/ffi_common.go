@@ -25,6 +25,7 @@ import (
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -400,6 +401,10 @@ func injectExternalSpecProperties(properties *C.LoonProperties, collectionID int
 	if externalSource == "" {
 		return nil
 	}
+	normalizedSpec, err := specutil.NormalizeExternalSpec(externalSpec)
+	if err != nil {
+		return err
+	}
 	params := paramtable.Get()
 	if err := initCredentialBrokerPolicy(params); err != nil {
 		return err
@@ -408,7 +413,7 @@ func injectExternalSpecProperties(properties *C.LoonProperties, collectionID int
 	defer C.free(unsafe.Pointer(cSource))
 	var cSpec *C.char
 	if externalSpec != "" {
-		cSpec = C.CString(externalSpec)
+		cSpec = C.CString(normalizedSpec)
 		defer C.free(unsafe.Pointer(cSpec))
 	}
 	result := C.loon_properties_inject_external_spec(

@@ -26,11 +26,44 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+func TestMarshalCollectionSchemaNormalizesHistoricalSpec(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "historical", ExternalSource: "s3://bucket/table",
+		ExternalSpec: `{"Format":"paimon-table","SNAPSHOT_ID":5320540205222981137,"SCAN_MODE":"data-split","CUSTOM":{"n":9007199254740993}}`,
+	}
+	original := proto.Clone(schema)
+	blob, err := MarshalCollectionSchema(schema)
+	require.NoError(t, err)
+	var nativeSchema schemapb.CollectionSchema
+	require.NoError(t, proto.Unmarshal(blob, &nativeSchema))
+	require.JSONEq(t, `{"format":"paimon-table","snapshot_id":"5320540205222981137","scan_mode":"data-split","CUSTOM":{"n":9007199254740993}}`, nativeSchema.GetExternalSpec())
+	require.Contains(t, nativeSchema.GetExternalSpec(), `9007199254740993`)
+	require.True(t, proto.Equal(original, schema), "shared schema must remain immutable")
+	nativeSchema.ExternalSpec = schema.ExternalSpec
+	require.True(t, proto.Equal(schema, &nativeSchema))
+
+	schema.ExternalSpec = `{"Scan_Mode":true}`
+	_, err = MarshalCollectionSchema(schema)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+	schema.ExternalSpec = ""
+	blob, err = MarshalCollectionSchema(schema)
+	require.NoError(t, err)
+	require.NoError(t, proto.Unmarshal(blob, &nativeSchema))
+	require.True(t, proto.Equal(schema, &nativeSchema))
+}
+
+func TestValidateSourceAndSpecLegacyKeys(t *testing.T) {
+	require.NoError(t, ValidateSourceAndSpec("s3://bucket/table",
+		`{"Format":"paimon-table","SNAPSHOT_ID":"7","Scan_Mode":"data-split","EXTFS":{"cloud_provider":"aws","region":"us-east-1","anonymous":"true"}}`))
+}
 
 func TestParseExternalSpec_Empty(t *testing.T) {
 	spec, err := ParseExternalSpec("")

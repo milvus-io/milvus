@@ -1704,7 +1704,7 @@ func TestInjectExternalSpecProperties_PaimonScanMode(t *testing.T) {
 	const source = "s3://bucket/table"
 	for _, test := range []struct {
 		name, field, want string
-		invalid           bool
+		wantErr           error
 	}{
 		{name: "omitted"},
 		{name: "auto", field: `,"scan_mode":"auto"`, want: "auto"},
@@ -1712,8 +1712,8 @@ func TestInjectExternalSpecProperties_PaimonScanMode(t *testing.T) {
 		{name: "data-split", field: `,"scan_mode":"data-split"`, want: "data-split"},
 		{name: "empty", field: `,"scan_mode":""`, want: "auto"},
 		{name: "null", field: `,"scan_mode":null`, want: "auto"},
-		{name: "invalid_mode", field: `,"scan_mode":"native"`, invalid: true},
-		{name: "invalid_type", field: `,"scan_mode":true`, invalid: true},
+		{name: "invalid_mode", field: `,"scan_mode":"native"`, wantErr: ErrLoonPermanent},
+		{name: "invalid_type", field: `,"scan_mode":true`, wantErr: merr.ErrParameterInvalid},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			spec := fmt.Sprintf(`{"format":"paimon-table","extfs":{"cloud_provider":"aws","region":"us-east-1","use_iam":"true"}%s}`, test.field)
@@ -1723,9 +1723,9 @@ func TestInjectExternalSpecProperties_PaimonScanMode(t *testing.T) {
 			require.NoError(t, err)
 			defer FreeProperties(props)
 			err = injectExternalSpecProperties(props, 42, source, spec)
-			if test.invalid {
+			if test.wantErr != nil {
 				require.Error(t, validationErr)
-				require.ErrorIs(t, err, ErrLoonPermanent)
+				require.ErrorIs(t, err, test.wantErr)
 				return
 			}
 			require.NoError(t, validationErr)
@@ -1733,6 +1733,27 @@ func TestInjectExternalSpecProperties_PaimonScanMode(t *testing.T) {
 			require.Equal(t, test.want, loonPropertyString(props, "paimon.scan_mode"))
 		})
 	}
+}
+
+func TestInjectExternalSpecProperties_LegacyKeys(t *testing.T) {
+	paramtable.Init()
+	config := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
+	props, err := MakePropertiesFromStorageConfig(config, nil)
+	require.NoError(t, err)
+	defer FreeProperties(props)
+	const spec = `{"FORMAT":"paimon-table","Snapshot_Id":9007199254740993,"SCAN_MODE":"auto","scan_mode":"data-split","EXTFS":{"cloud_provider":"aws","region":"us-east-1","use_iam":"true"}}`
+	require.NoError(t, injectExternalSpecProperties(props, 42, "s3://bucket/table", spec))
+	require.Equal(t, "data-split", loonPropertyString(props, "paimon.scan_mode"))
+	require.Equal(t, "9007199254740993", loonPropertyString(props, "reader.exttable.snapshot_id"))
+	require.Equal(t, "us-east-1", loonPropertyString(props, ExtfsPrefixForCollection(42)+"region"))
+}
+
+func TestNewCExternalContextRejectsMalformedSpec(t *testing.T) {
+	source, spec, cleanup, err := newCExternalContext("s3://bucket/table", `{"Format":"paimon-table","Scan_Mode":true}`)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.Nil(t, source)
+	require.Nil(t, spec)
+	require.Nil(t, cleanup)
 }
 
 func TestNormalizeExternalSourcePath_UsesExplicitEndpointURL(t *testing.T) {
@@ -2101,6 +2122,16 @@ func TestResolveFFIReaderFragments_EqualHostPreservesResolvedPaths(t *testing.T)
 }
 
 // ==================== SampleExternalFieldSizes Tests ====================
+
+func TestSampleExternalFieldSizes_InvalidSchemaSpec(t *testing.T) {
+	config := &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
+	result, err := SampleExternalFieldSizes(
+		"unused-manifest", 100, 42, "", "",
+		&schemapb.CollectionSchema{ExternalSpec: `{"Scan_Mode":true}`}, config,
+	)
+	require.Nil(t, result)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+}
 
 func TestSampleExternalFieldSizes_NilStorageConfig(t *testing.T) {
 	result, err := SampleExternalFieldSizes(

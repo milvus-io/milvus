@@ -142,20 +142,18 @@ func TestParseExternalSpec(t *testing.T) {
 		}
 	})
 
-	t.Run("known keys must match native spelling", func(t *testing.T) {
+	t.Run("legacy key spelling accepted", func(t *testing.T) {
 		for format := range supportedFormats {
 			t.Run(format, func(t *testing.T) {
 				for _, field := range []string{
 					`"SNAPSHOT_ID":1`, `"Snapshot_Id":"1"`,
-					`"ſnapshot_id":1`, `"ſcan_mode":"direct-file"`,
-					`"SCAN_MODE":"direct-file"`, `"Scan_Mode":"data-split"`,
+					`"ſnapshot_id":1`,
 					`"FORMAT":"paimon-table"`, `"COLUMNS":["pk"]`,
 					`"EXTFS":{"anonymous":"true"}`,
 					`"snapshot_id":1,"SNAPSHOT_ID":2`,
-					`"SCAN_MODE":"data-split","scan_mode":"direct-file"`,
 				} {
 					_, err := ParseExternalSpec(fmt.Sprintf(`{"format":%q,%s}`, format, field))
-					require.ErrorContains(t, err, "did you mean", field)
+					require.NoError(t, err, field)
 				}
 				_, err := ParseExternalSpec(fmt.Sprintf(`{"format":%q,"CUSTOM_OPTION":"unchanged"}`, format))
 				require.NoError(t, err)

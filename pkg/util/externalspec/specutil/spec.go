@@ -189,18 +189,6 @@ func ParseExternalSpec(specStr string) (*ExternalSpec, error) {
 	if err := json.Unmarshal([]byte(specStr), &spec); err != nil {
 		return nil, merr.WrapErrParameterInvalidErr(err, "invalid external spec JSON")
 	}
-	// Native readers consume the original JSON and use case-sensitive keys.
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(specStr), &fields); err != nil {
-		return nil, merr.WrapErrParameterInvalidErr(err, "invalid external spec JSON")
-	}
-	for key := range fields {
-		for _, expected := range []string{"format", "columns", "extfs", "snapshot_id", "scan_mode"} {
-			if key != expected && strings.EqualFold(key, expected) {
-				return nil, merr.WrapErrParameterInvalidMsg("invalid external spec key %q, did you mean %q?", key, expected)
-			}
-		}
-	}
 
 	if spec.Format == "" {
 		spec.Format = FormatParquet
@@ -236,6 +224,59 @@ func ParseExternalSpec(specStr string) (*ExternalSpec, error) {
 	}
 
 	return &spec, nil
+}
+
+// NormalizeExternalSpec decodes a spec and canonicalizes known top-level
+// keys for case-sensitive native readers. Call it at native boundaries as well
+// as for new inputs: persisted schemas may contain legacy case variants.
+//
+// Duplicate known keys use the result of Go's existing typed decoder, in input
+// order (including map merging and null handling). Unknown values stay as raw
+// JSON, preserving nested fields and numeric precision. Missing optional keys
+// remain absent, so a missing scan_mode does not override reader defaults.
+// API policy validation remains in ParseExternalSpec; native callers retain
+// their existing handling of unknown formats and filesystem options.
+func NormalizeExternalSpec(specStr string) (string, error) {
+	if specStr == "" {
+		return "", nil
+	}
+	var spec ExternalSpec
+	if err := json.Unmarshal([]byte(specStr), &spec); err != nil {
+		return "", merr.WrapErrParameterInvalidErr(err, "invalid external spec JSON")
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(specStr), &fields); err != nil {
+		return "", merr.WrapErrParameterInvalidErr(err, "invalid external spec JSON")
+	}
+	// A top-level null has historically meant the default spec.
+	if fields == nil {
+		return specStr, nil
+	}
+	var snapshotID *string
+	if spec.SnapshotID != nil {
+		value := strconv.FormatInt(*spec.SnapshotID, 10)
+		snapshotID = &value
+	}
+	known := map[string]any{
+		"format": spec.Format, "columns": spec.Columns, "extfs": spec.Extfs,
+		"snapshot_id": snapshotID, "scan_mode": spec.ScanMode,
+	}
+	normalized := make(map[string]any, len(fields))
+	for key, raw := range fields {
+		canonical, value := key, any(raw)
+		for name, parsed := range known {
+			if strings.EqualFold(key, name) {
+				canonical, value = name, parsed
+				break
+			}
+		}
+		normalized[canonical] = value
+	}
+	encoded, err := json.Marshal(normalized)
+	if err != nil {
+		return "", merr.WrapErrServiceInternalErr(err, "marshal normalized external spec")
+	}
+	return string(encoded), nil
 }
 
 func sortedKeys(m map[string]bool) []string {
