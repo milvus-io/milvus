@@ -261,6 +261,9 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		mlog.Warn(context.TODO(), "failed to get collection", mlog.Err(err))
 		return nil, err
 	}
+	schema := collection.Schema()
+	hasVirtualPK := typeutil.IsExternalCollection(schema) &&
+		(!typeutil.NewStorageColumnResolver(schema).IsMilvusTable() || !HasExternalPrimaryKey(schema))
 	for _, segment := range segments {
 		configureUseTakeForOutput(segment, collection.Schema())
 	}
@@ -352,6 +355,16 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		}
 		if err = loader.loadDeltalogs(ctx, segment, loadInfo); err != nil {
 			return merr.Wrap(err, "At LoadDeltaLogs")
+		}
+
+		// Collision diagnostics depend only on load metadata, not PK candidates.
+		if hasVirtualPK {
+			for _, collidingID := range detectVirtualPKCollisions(segmentID, infos) {
+				mlog.Warn(ctx, "virtual PK collision detected: two segments share truncated segment ID",
+					mlog.Int64("segmentID1", segmentID),
+					mlog.Int64("segmentID2", collidingID),
+					mlog.Int64("truncatedID", segmentID&0xFFFFFFFF))
+			}
 		}
 
 		if segment.Level() != datapb.SegmentLevel_L0 {
@@ -759,6 +772,21 @@ func separateIndexAndBinlog(loadInfo *querypb.SegmentLoadInfo) (map[int64]*Index
 	}
 
 	return indexedFieldInfos, fieldBinlogs
+}
+
+// detectVirtualPKCollisions checks if any segments in infos share the same
+// truncated (lower 32 bits) segment ID as segmentID. A collision means two
+// segments produce overlapping virtual PK spaces.
+func detectVirtualPKCollisions(segmentID int64, infos []*querypb.SegmentLoadInfo) []int64 {
+	truncatedID := segmentID & 0xFFFFFFFF
+	var collisions []int64
+	for _, info := range infos {
+		if info.GetSegmentID() != segmentID &&
+			(info.GetSegmentID()&0xFFFFFFFF) == truncatedID {
+			collisions = append(collisions, info.GetSegmentID())
+		}
+	}
+	return collisions
 }
 
 func separateLoadInfoV2(loadInfo *querypb.SegmentLoadInfo, schema *schemapb.CollectionSchema) (

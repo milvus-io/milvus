@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"sync"
 	"testing"
 	"time"
 
@@ -1191,6 +1192,130 @@ func (suite *SegmentLoaderSuite) TestLoadSealedExternalRealPKSkipsBloomFilter() 
 	suite.Require().Len(segments, 1)
 	suite.False(segments[0].PkCandidateExist())
 	suite.Zero(readBF.Times())
+}
+
+func TestDetectVirtualPKCollisions(t *testing.T) {
+	const segmentID int64 = 42
+	const collidingID int64 = segmentID + 1<<32
+	for _, tc := range []struct {
+		name string
+		ids  []int64
+		want []int64
+	}{
+		{name: "empty batch"},
+		{name: "same segment", ids: []int64{segmentID}},
+		{name: "different truncated IDs", ids: []int64{segmentID, segmentID + 1}},
+		{name: "one collision", ids: []int64{segmentID, collidingID}, want: []int64{collidingID}},
+		{name: "multiple collisions", ids: []int64{collidingID, segmentID + 1, collidingID + 1<<32}, want: []int64{collidingID, collidingID + 1<<32}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var infos []*querypb.SegmentLoadInfo
+			for _, id := range tc.ids {
+				infos = append(infos, &querypb.SegmentLoadInfo{SegmentID: id})
+			}
+			assert.Equal(t, tc.want, detectVirtualPKCollisions(segmentID, infos))
+		})
+	}
+}
+
+func (suite *SegmentLoaderSuite) TestLoadVirtualPKCollisionWarnings() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	baseSchema := proto.Clone(suite.schema).(*schemapb.CollectionSchema)
+	for i, tc := range []struct {
+		name          string
+		format        string
+		realPK        bool
+		distinctIDs   bool
+		disableBF     bool
+		alreadyLoaded bool
+		wantWarnings  bool
+	}{
+		{name: "virtual milvus-table", format: "milvus-table", wantWarnings: true},
+		{name: "virtual parquet", format: "parquet", wantWarnings: true},
+		{name: "BF disabled", format: "milvus-table", disableBF: true, wantWarnings: true},
+		{name: "distinct truncated IDs", format: "milvus-table", distinctIDs: true},
+		{name: "internal collection"},
+		{name: "real PK milvus-table", format: "milvus-table", realPK: true},
+		{name: "already loaded segment excluded", format: "milvus-table", alreadyLoaded: true},
+	} {
+		suite.Run(tc.name, func() {
+			t := suite.T()
+			schema := proto.Clone(baseSchema).(*schemapb.CollectionSchema)
+			if tc.format != "" {
+				schema.ExternalSource = "s3://bucket/source"
+				schema.ExternalSpec = fmt.Sprintf(`{"format":%q}`, tc.format)
+				for _, field := range schema.GetFields() {
+					if field.GetIsPrimaryKey() && !tc.realPK {
+						field.Name = common.VirtualPKFieldName
+					} else if field.GetFieldID() >= common.StartOfUserFieldID {
+						field.ExternalField = field.GetName()
+					}
+				}
+			}
+			require.NoError(t, suite.manager.Collection.UpdateSchema(suite.collectionID, schema, uint64(i+1)))
+			if tc.disableBF {
+				item := &paramtable.Get().CommonCfg.BloomFilterEnabled
+				oldValue := item.SwapTempValue("false")
+				defer item.SwapTempValue(oldValue)
+			}
+			ids := []int64{suite.segmentID, suite.segmentID + 1<<32}
+			if tc.distinctIDs {
+				ids[1]++
+			}
+			var infos []*querypb.SegmentLoadInfo
+			for _, id := range ids {
+				infos = append(infos, &querypb.SegmentLoadInfo{
+					CollectionID: suite.collectionID, PartitionID: suite.partitionID, SegmentID: id,
+					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+				})
+				defer suite.manager.Segment.Remove(ctx, id, querypb.DataScope_All)
+			}
+			// Exercise Load with real segment creation while isolating data-file I/O.
+			loadData := mockey.Mock((*segmentLoader).LoadSegment).Return(nil).Build()
+			defer loadData.UnPatch()
+			loadDeltas := mockey.Mock((*segmentLoader).loadDeltalogs).Return(nil).Build()
+			defer loadDeltas.UnPatch()
+			readBF := mockey.Mock(packed.ReadFileWithExternalSpec).
+				Return(nil, errors.New("worker must not load sealed bloom filters")).Build()
+			defer readBF.UnPatch()
+			var mu sync.Mutex
+			var warnings [][]mlog.Field
+			warn := mockey.Mock(mlog.Warn).To(func(logCtx context.Context, msg string, fields ...mlog.Field) {
+				if msg == "virtual PK collision detected: two segments share truncated segment ID" {
+					assert.Same(t, ctx, logCtx)
+					mu.Lock()
+					warnings = append(warnings, fields)
+					mu.Unlock()
+				}
+			}).Build()
+			defer warn.UnPatch()
+
+			if tc.alreadyLoaded {
+				_, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, infos[0])
+				require.NoError(t, err)
+			}
+			loaded, err := suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, infos...)
+			require.NoError(t, err)
+			if tc.alreadyLoaded {
+				require.Len(t, loaded, 1)
+			} else {
+				require.Len(t, loaded, 2)
+			}
+			for _, segment := range loaded {
+				assert.Nil(t, segment.(*LocalSegment).pkCandidate)
+			}
+			assert.Zero(t, readBF.Times())
+			if tc.wantWarnings {
+				assert.ElementsMatch(t, [][]mlog.Field{
+					{mlog.Int64("segmentID1", ids[0]), mlog.Int64("segmentID2", ids[1]), mlog.Int64("truncatedID", ids[0]&0xFFFFFFFF)},
+					{mlog.Int64("segmentID1", ids[1]), mlog.Int64("segmentID2", ids[0]), mlog.Int64("truncatedID", ids[0]&0xFFFFFFFF)},
+				}, warnings)
+			} else {
+				assert.Empty(t, warnings)
+			}
+		})
+	}
 }
 
 func (suite *SegmentLoaderSuite) TestLoadDupDeltaLogs() {
