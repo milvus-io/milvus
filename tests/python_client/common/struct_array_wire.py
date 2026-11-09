@@ -14,12 +14,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Shared setup, data models and assertions for struct array wire contracts."""
+"""Inspect and deliberately alter SDK-encoded RPCs for server validation tests."""
 
 import copy
 
 
-def _fields(request):
+def iter_wire_fields(request):
     for field in request.fields_data:
         if field.WhichOneof("field") == "struct_arrays":
             for child in field.struct_arrays.fields:
@@ -28,7 +28,7 @@ def _fields(request):
             yield field.field_name, field
 
 
-def _set_masks(field, legacy, current):
+def set_validity_masks(field, legacy, current):
     wrapper = getattr(field, field.WhichOneof("field"))
     del field.valid_data[:]
     field.valid_data.extend(legacy)
@@ -36,10 +36,10 @@ def _set_masks(field, legacy, current):
     wrapper.valid_data.extend(current)
 
 
-def _encode_masks(request, location, template=None):
+def encode_validity_masks(request, location, template=None):
     changed = []
-    template_fields = dict(_fields(template)) if template is not None else {}
-    for path, field in _fields(request):
+    template_fields = dict(iter_wire_fields(template)) if template is not None else {}
+    for path, field in iter_wire_fields(request):
         if field.WhichOneof("field") is None:
             # The SDK omits all-null wrappers. Retain schema metadata from a
             # non-null encoding, while removing every actual value and validity bit.
@@ -52,7 +52,15 @@ def _encode_masks(request, location, template=None):
         wrapper = getattr(field, field.WhichOneof("field"))
         mask = list(field.valid_data) or list(wrapper.valid_data)
         if mask:
-            _set_masks(field, mask if location != "current" else [], mask if location != "legacy" else [])
+            set_validity_masks(field, mask if location != "current" else [], mask if location != "legacy" else [])
             changed.append(path)
     assert {"note", "clips[value]", "clips[tag]", "clips[flag]", "clips[emb]"}.issubset(changed)
     return request
+
+
+def wire_struct(request):
+    return next(f for f in request.fields_data if f.field_name == "clips").struct_arrays
+
+
+def wire_child(request, name):
+    return next(f for f in wire_struct(request).fields if f.field_name in (name, f"clips[{name}]"))
