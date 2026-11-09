@@ -153,3 +153,31 @@ func TestDeadlineRetriesDoNotAdvanceOrResetBackoff(t *testing.T) {
 	require.GreaterOrEqual(t, runs[3].Sub(runs[2]), 20*time.Millisecond)
 	require.GreaterOrEqual(t, runs[5].Sub(runs[4]), 40*time.Millisecond)
 }
+
+func TestLaneSubmissionPreservesBackoff(t *testing.T) {
+	for _, lane := range []Lane{LaneDefault, LaneControl} {
+		t.Run(lane.String(), func(t *testing.T) {
+			scheduler := newLaneSchedulers(1)
+			defer scheduler.Close()
+			handle := scheduler.Submit(laneRetryTask{lane}, WithBackoff(typeutil.BackoffConfig{
+				InitialInterval: time.Hour, MaxInterval: time.Hour, Multiplier: 1,
+			}))
+			selected := scheduler[lane]
+			require.Eventually(t, func() bool {
+				selected.mu.Lock()
+				defer selected.mu.Unlock()
+				return len(selected.delayed) == 1 && time.Until(selected.delayed[0].nextRun) > 59*time.Minute
+			}, time.Second, time.Millisecond)
+			handle.Cancel()
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			require.NoError(t, handle.Wait(ctx))
+		})
+	}
+}
+
+type laneRetryTask struct{ lane Lane }
+
+func (t laneRetryTask) SchedulerLane() Lane { return t.lane }
+
+func (laneRetryTask) Execute(context.Context) error { return ErrDelay }

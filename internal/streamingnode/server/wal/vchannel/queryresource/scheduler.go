@@ -28,6 +28,10 @@ func newResourceBuildTask(build func(context.Context) (*QueryRuntime, error)) *r
 	}
 }
 
+// QueryView preparation and release run in the control lane: cold reads and
+// releases wait on them, so they must not wait for workers held by flushes.
+func (t *resourceBuildTask) SchedulerLane() nodescheduler.Lane { return nodescheduler.LaneControl }
+
 func (t *resourceBuildTask) Execute(ctx context.Context) error {
 	runtime, err := t.build(ctx)
 	if errors.Is(err, nodescheduler.ErrDelay) {
@@ -91,6 +95,8 @@ var _ nodescheduler.Task = (*resourceBuildTask)(nil)
 
 type resourceCallbackTask func()
 
+func (t resourceCallbackTask) SchedulerLane() nodescheduler.Lane { return nodescheduler.LaneControl }
+
 func (t resourceCallbackTask) Execute(context.Context) error {
 	t()
 	return nil
@@ -106,6 +112,8 @@ type resourceReadyTask struct {
 	onReady func()
 }
 
+func (t resourceReadyTask) SchedulerLane() nodescheduler.Lane { return nodescheduler.LaneControl }
+
 func (t resourceReadyTask) Execute(ctx context.Context) error {
 	return t.manager.prepareViewRef(ctx, t.key, t.ref, t.runtime, t.onReady)
 }
@@ -120,6 +128,8 @@ type resourceReleaseTask struct {
 	version      qviews.DataVersion
 	onDropped    func()
 }
+
+func (t resourceReleaseTask) SchedulerLane() nodescheduler.Lane { return nodescheduler.LaneControl }
 
 func (t resourceReleaseTask) Execute(ctx context.Context) error {
 	if err := t.resources.release(); err != nil {

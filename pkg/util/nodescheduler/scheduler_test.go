@@ -453,36 +453,109 @@ func TestGlobalSchedulerLazyInitializationAndDynamicResize(t *testing.T) {
 
 	first := Get()
 	assert.Same(t, first, Get())
-	scheduler := first.(*nodeScheduler)
+	lanes := first.(*laneSchedulers)
+	concurrencyIs := func(want int) func() bool {
+		return func() bool {
+			for _, scheduler := range lanes {
+				scheduler.mu.Lock()
+				concurrency := scheduler.concurrency
+				scheduler.mu.Unlock()
+				if concurrency != want {
+					return false
+				}
+			}
+			return true
+		}
+	}
 
 	cpu := hardware.GetCPUNum()
-	assert.Eventually(t, func() bool {
-		scheduler.mu.Lock()
-		defer scheduler.mu.Unlock()
-		return scheduler.concurrency == 2*cpu
-	}, time.Second, 10*time.Millisecond)
+	defaultConcurrency, _ := concurrencyFromRatio(cpu, ratioParam.GetAsFloat())
+	assert.Eventually(t, concurrencyIs(defaultConcurrency), time.Second, 10*time.Millisecond)
 
 	ratioForTwoWorkers := 2 / float64(cpu)
 	require.NoError(t, params.Save(ratioParam.Key, strconv.FormatFloat(ratioForTwoWorkers, 'g', -1, 64)))
-	assert.Eventually(t, func() bool {
-		scheduler.mu.Lock()
-		defer scheduler.mu.Unlock()
-		return scheduler.concurrency == 2
-	}, time.Second, 10*time.Millisecond)
+	assert.Eventually(t, concurrencyIs(2), time.Second, 10*time.Millisecond)
 
 	require.NoError(t, params.Save(ratioParam.Key, "0"))
 	time.Sleep(20 * time.Millisecond)
-	scheduler.mu.Lock()
-	assert.Equal(t, 2, scheduler.concurrency)
-	scheduler.mu.Unlock()
+	assert.True(t, concurrencyIs(2)())
 
 	require.NoError(t, params.Reset(ratioParam.Key))
-	assert.Eventually(t, func() bool {
-		scheduler.mu.Lock()
-		defer scheduler.mu.Unlock()
-		return scheduler.concurrency == 2*cpu
-	}, time.Second, 10*time.Millisecond)
+	assert.Eventually(t, concurrencyIs(defaultConcurrency), time.Second, 10*time.Millisecond)
 }
+
+func TestLaneOf(t *testing.T) {
+	assert.Equal(t, LaneDefault, LaneOf(TaskFunc(nil)))
+	assert.Equal(t, LaneControl, LaneOf(laneTask{lane: LaneControl}))
+	assert.Equal(t, LaneDefault, LaneOf(laneTask{lane: laneCount}), "an unknown lane runs in the default lane")
+}
+
+func TestControlLaneRunsWhileDefaultLaneIsFull(t *testing.T) {
+	scheduler := newLaneSchedulers(1)
+	defer scheduler.Close()
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	bulk := scheduler.Submit(TaskFunc(func(ctx context.Context) error {
+		close(started)
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return nil
+	}))
+	<-started
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	require.NoError(t, scheduler.Submit(laneTask{lane: LaneControl}).Wait(ctx),
+		"a full default lane must not delay the control lane")
+
+	close(release)
+	require.NoError(t, bulk.Wait(context.Background()))
+}
+
+func TestLaneShutdownCancelsDependentTasks(t *testing.T) {
+	scheduler := newLaneSchedulers(1)
+	// The bulk task waits for the control task to stop before it can finish.
+	controlStopped := make(chan struct{})
+	controlStarted := make(chan struct{})
+	scheduler[LaneControl].Submit(TaskFunc(func(ctx context.Context) error {
+		close(controlStarted)
+		<-ctx.Done()
+		close(controlStopped)
+		return nil
+	}))
+	<-controlStarted
+	bulkStarted := make(chan struct{})
+	release := make(chan struct{})
+	defer close(release)
+	scheduler.Submit(TaskFunc(func(context.Context) error {
+		close(bulkStarted)
+		select {
+		case <-controlStopped:
+		case <-release:
+		}
+		return nil
+	}))
+	<-bulkStarted
+	closed := make(chan struct{})
+	go func() {
+		scheduler.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("closing the bulk lane waited for the control task before canceling it")
+	}
+}
+
+type laneTask struct{ lane Lane }
+
+func (laneTask) Execute(context.Context) error { return nil }
+
+func (t laneTask) SchedulerLane() Lane { return t.lane }
 
 type TaskFunc func(context.Context) error
 

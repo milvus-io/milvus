@@ -179,6 +179,10 @@ type trackedTask struct {
 	task  nodescheduler.Task
 }
 
+func (t *trackedTask) SchedulerLane() nodescheduler.Lane {
+	return nodescheduler.LaneOf(t.task)
+}
+
 func (t *trackedTask) Execute(ctx context.Context) error {
 	err := t.task.Execute(ctx)
 	if !errors.Is(err, nodescheduler.ErrDelay) {

@@ -64,10 +64,14 @@ BroadcastAck, SegmentView, and L0Materializer keep separate APIs because their
 ownership and completion conditions differ.
 
 Asynchronous recovery tasks share the process-level NodeScheduler, which owns
-execution concurrency and delayed retries. Each RecoveryStorage keeps a scoped
-task tracker only to cancel and wait for its own tasks during shutdown; it has
-no per-PChannel concurrency limit or separate pending queue. Scheduling fairness
-between PChannels is future work in NodeScheduler.
+execution concurrency and delayed retries. QueryView preparation, QueryView
+release and BroadcastAck run in its control lane, which has its own workers, so
+they never wait for workers held by segment flushes; work they depend on, such
+as a closing segment's final commit, still runs in the default lane. Each
+RecoveryStorage keeps a scoped task tracker only to cancel and wait for its own
+tasks during shutdown; it has no per-PChannel concurrency limit or separate
+pending queue. Scheduling fairness between PChannels is future work in
+NodeScheduler.
 
 ## 3. One Global Checkpoint
 

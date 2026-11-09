@@ -92,3 +92,14 @@ type queryResourceTaskFunc func(context.Context) error
 func (f queryResourceTaskFunc) Execute(ctx context.Context) error {
 	return f(ctx)
 }
+
+func TestQueryViewTasksRunInControlLane(t *testing.T) {
+	for _, task := range []nodescheduler.Task{
+		newResourceBuildTask(nil),
+		resourceCallbackTask(nil),
+		resourceReadyTask{},
+		resourceReleaseTask{},
+	} {
+		require.Equal(t, nodescheduler.LaneControl, nodescheduler.LaneOf(task), "%T", task)
+	}
+}

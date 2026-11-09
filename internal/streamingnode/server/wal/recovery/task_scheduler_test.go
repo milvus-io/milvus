@@ -120,6 +120,11 @@ func TestScopedTaskSchedulerCloseCancelsDelayedTask(t *testing.T) {
 	require.NoError(t, scheduler.WaitIdle(context.Background()))
 }
 
+func TestTrackedTaskKeepsUnderlyingLane(t *testing.T) {
+	require.Equal(t, nodescheduler.LaneDefault, nodescheduler.LaneOf(&trackedTask{task: nodeschedulerTaskFunc(nil)}))
+	require.Equal(t, nodescheduler.LaneControl, nodescheduler.LaneOf(&trackedTask{task: &broadcastAckTask{}}))
+}
+
 type nodeschedulerTaskFunc func(context.Context) error
 
 func (f nodeschedulerTaskFunc) Execute(ctx context.Context) error {

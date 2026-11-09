@@ -1890,7 +1890,7 @@ If enabled, IPv6 ULA/global addresses will be prioritized ahead of IPv4.`,
 		Key:          "common.nodeScheduler.maxConcurrencyRatio",
 		Version:      "3.0",
 		DefaultValue: "2",
-		Doc:          "Maximum number of tasks executed concurrently by the process-level node scheduler, expressed as a ratio of CPU cores. Must be greater than zero; 2 by default.",
+		Doc:          "Maximum concurrent tasks per lane (bulk data and control), as a multiple of CPU cores. Each lane has its own budget. Must be greater than zero.",
 		Export:       true,
 	}
 	p.NodeSchedulerMaxConcurrencyRatio.Init(base.mgr)
