@@ -75,7 +75,7 @@ func TestSearchTaskStreamingConfigRefresh(t *testing.T) {
 }
 
 func TestQueryTaskStreamingConfigRefresh(t *testing.T) {
-	for _, shape := range []string{"plain", "iterator", "grouped"} {
+	for _, shape := range []string{"plain", "iterator", "grouped", "grouped_order_by"} {
 		t.Run(shape, func(t *testing.T) {
 			params := paramtable.Get()
 			cfg := &params.ProxyCfg
@@ -86,8 +86,11 @@ func TestQueryTaskStreamingConfigRefresh(t *testing.T) {
 				chunkBytes := 32 << i
 				task := newQueryViewQueryTask(t, legacy, 1)
 				task.IsIterator = shape == "iterator"
-				if shape == "grouped" {
+				if shape == "grouped" || shape == "grouped_order_by" {
 					task.GroupByFieldIds = []int64{101}
+				}
+				if shape == "grouped_order_by" {
+					task.OrderByFields = []*planpb.OrderByField{{FieldId: 101}}
 				}
 				require.NoError(t, params.Save(cfg.EnableReduceStream.Key, strconv.FormatBool(enabled)))
 				require.NoError(t, params.Save(cfg.ReduceStreamChunkBytes.Key, strconv.Itoa(chunkBytes)))
@@ -178,7 +181,6 @@ func TestStreamingConfigLeavesUnsupportedRequestsOnBatch(t *testing.T) {
 	for _, req := range []*internalpb.RetrieveRequest{
 		{},
 		{Limit: 1, IsCount: true},
-		{Limit: 1, GroupByFieldIds: []int64{100}, OrderByFields: []*planpb.OrderByField{{FieldId: 100}}},
 		{Limit: 1, Aggregates: []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}}},
 	} {
 		query := newQueryViewQueryTask(t, legacy, 1)
