@@ -1703,6 +1703,21 @@ func (t *SearchTask) supportsStreamingReduce() bool {
 			return !req.GetIsIterator()
 		}
 
+		if hasFunctionRerank(t.request) {
+			// L2 consumes the same ANN candidate window after reduction at Proxy.
+			// L0/L1 can change worker candidates and remain on the Batch path.
+			if t.rerankMeta == nil || req.GetIsIterator() || len(t.orderByFields) > 0 ||
+				req.GetSearchType() != internalpb.SearchType_DEFAULT {
+				return false
+			}
+			for _, chain := range t.request.GetFunctionChains() {
+				if chain.GetStage() != schemapb.FunctionChainStage_FunctionChainStageL2Rerank {
+					return false
+				}
+			}
+			return true
+		}
+
 		// Iterator Search is classified as SearchType_DEFAULT. After rejecting
 		// unsupported request shapes above, IsIterator identifies the supported path.
 		if req.GetIsIterator() {
