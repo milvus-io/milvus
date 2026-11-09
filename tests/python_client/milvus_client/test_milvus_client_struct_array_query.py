@@ -187,24 +187,67 @@ class TestMilvusClientStructArrayNullablePredicates(StructArrayTestBase):
             "MATCH_ANY(clips, $[tags] in [1])",
             'MATCH_ANY(clips, $[tags] like "a%")',
             "MATCH_ANY(clips, $[tags][0] == 1)",
+            "clips[0][tags] < [1]",
+            "clips[0][tags] <= [1]",
+            "clips[0][tags] > [1]",
+            "clips[0][tags] >= [1]",
+            "clips[0][tags] in [1]",
+            "clips[0][tags] not in [1]",
+            'clips[0][tags] like "a%"',
+            "clips[0][tags] + 1 == 2",
+            "clips[0][tags] == 1",
+            "clips[0][tags] != 1",
+            "clips[0][tags] == {needle}",
+            "clips[0][tags] != {needle}",
+            "clips[tags] IS NULL",
+            "clips[tags] IS NOT NULL",
+            "clips[0][tags] IS NULL",
+            "clips[0][tags] IS NOT NULL",
+            "MATCH_ANY(clips, $[tags] == [1])",
+            "MATCH_ANY(clips, $[tags] != [1])",
+            "MATCH_ANY(clips, $[tags] + 1 == 2)",
+            "element_filter(clips, $[tags] == [1])",
+            "element_filter(clips, $[tags] in [1])",
+            'element_filter(clips, $[tags] like "a%")',
+            "element_filter(clips, $[tags][0] == 1)",
         ],
     )
     def test_unsupported_nested_expressions(self, expression):
         """
         target: reject unsupported nested expression syntax without poisoning subsequent queries
-        method: execute each expression then a supported element predicate and full row comparison
-        expected: server parse/plan rejection and unchanged queryable rows
+        method: reject each expression through query/search, then check a supported array predicate and full rows
+        expected: code 1100 for unsupported syntax, valid array filters still work and stored rows are unchanged
         """
         client = self._client()
         name, schema = self.create_struct_collection(client, nullable_children())
         model = self.insert_rows_with_model(client, name, make_predicate_rows(schema))
+        params = {"needle": [1]} if "{needle}" in expression else {}
         result, ok = self.query(
-            client, name, filter=expression, output_fields=["id"], check_task=CheckTasks.check_nothing
+            client,
+            name,
+            filter=expression,
+            filter_params=params,
+            output_fields=["id"],
+            check_task=CheckTasks.check_nothing,
         )
         assert not ok and getattr(result, "code", None) == 1100, result
-        actual = client.query(name, filter="MATCH_ANY(clips, $[score] IS NULL)", output_fields=["id"], limit=100)
+        result, ok = self.search(
+            client,
+            name,
+            [next(iter(model.values()))["normal_vector"]],
+            anns_field="normal_vector",
+            filter=expression,
+            filter_params=params,
+            limit=10,
+            search_params={"metric_type": "L2"},
+            check_task=CheckTasks.check_nothing,
+        )
+        assert not ok and getattr(result, "code", None) == 1100, result
+        actual = client.query(
+            name, filter="MATCH_ANY(clips, array_contains($[tags], 1))", output_fields=["id"], limit=100
+        )
         assert {row["id"] for row in actual} == {
-            pk for pk, row in model.items() if any(e["score"] is None for e in row["clips"] or [])
+            pk for pk, row in model.items() if any(e["tags"] is not None and 1 in e["tags"] for e in row["clips"] or [])
         }
         self.assert_rows(client, name, model)
 
