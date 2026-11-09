@@ -240,6 +240,8 @@ func (s *DBPropertiesSuite) TestDenyWringDB() {
 }
 
 func (s *DBPropertiesSuite) SetupSuite() {
+	// Keep consecutive Flush requests limited independently of the production default.
+	s.WithMilvusConfig(paramtable.Get().QuotaConfig.MaxFlushRatePerCollection.Key, "0.1")
 	s.WithMilvusConfig(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
 	s.WithMilvusConfig(paramtable.Get().QuotaConfig.QuotaCenterCollectInterval.Key, "1")
 	s.MiniClusterSuite.SetupSuite()
