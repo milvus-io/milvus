@@ -478,7 +478,7 @@ func (aggMap *AggregationFieldMap) Count() int {
 }
 
 // IndexAt returns the first index for the given user output field index.
-// For avg aggregation, this returns the sum index.
+// For avg and variance aggregations, this returns the sum index.
 // For backward compatibility, this method is kept.
 func (aggMap *AggregationFieldMap) IndexAt(idx int) int {
 	if len(aggMap.userOriginalOutputFieldIdxes[idx]) > 0 {
@@ -488,7 +488,8 @@ func (aggMap *AggregationFieldMap) IndexAt(idx int) int {
 }
 
 // IndexesAt returns all indices for the given user output field index.
-// For avg aggregation, this returns both sum and count indices.
+// For avg aggregation, this returns the sum and count indices, and for variance
+// aggregations the sum, count and m2 indices.
 // For other aggregations, this returns a slice with a single index.
 func (aggMap *AggregationFieldMap) IndexesAt(idx int) []int {
 	return aggMap.userOriginalOutputFieldIdxes[idx]
@@ -512,17 +513,19 @@ func NewAggregationFieldMap(originalUserOutputFields []string, groupByFields []s
 		originalName := agg.OriginalName()
 		idx := i + numGroupingKeys
 
-		// Check if this aggregate is part of an avg aggregation
-		var isAvg bool
+		// Check if this aggregate is part of an avg or variance aggregation
+		var partial bool
 		switch a := agg.(type) {
 		case *SumAggregate:
-			isAvg = a.isAvg
+			partial = a.partial
 		case *CountAggregate:
-			isAvg = a.isAvg
+			partial = a.partial
+		case *M2Aggregate:
+			partial = true
 		}
 
-		if isAvg {
-			// For avg aggregates, both sum and count share the same originalName
+		if partial {
+			// For avg and variance aggregates, sum, count and m2 share the same originalName
 			// Add this index to the list for this originalName
 			aggFieldMap[originalName] = append(aggFieldMap[originalName], idx)
 		} else {
@@ -610,6 +613,51 @@ func ComputeAvgFromSumAndCount(sumFieldData *schemapb.FieldData, countFieldData 
 	}
 	result.GetScalars().GetDoubleData().Data = values
 	typeutil.SetFieldDataValidData(result, validity)
+	return result, nil
+}
+
+// ComputeVarianceFromCountAndM2 finalizes var_pop, var_samp, stddev_pop or
+// stddev_samp from the reduced count and m2 columns of a variance aggregate.
+// Rows with no values, or with 1 value for the sample functions, are NULL.
+func ComputeVarianceFromCountAndM2(op string, countFieldData *schemapb.FieldData,
+	m2FieldData *schemapb.FieldData,
+) (*schemapb.FieldData, error) {
+	counts := countFieldData.GetScalars().GetLongData().GetData()
+	m2s := m2FieldData.GetScalars().GetDoubleData().GetData()
+	m2Valid := typeutil.GetFieldDataValidData(m2FieldData)
+	if countFieldData.GetType() != schemapb.DataType_Int64 || m2FieldData.GetType() != schemapb.DataType_Double ||
+		len(counts) != len(m2s) {
+		return nil, merr.WrapErrServiceInternalMsg("invalid variance state: count %s with %d rows, m2 %s with %d rows",
+			countFieldData.GetType(), len(counts), m2FieldData.GetType(), len(m2s))
+	}
+	sample := op == kVarSamp || op == kStddevSamp
+	data := make([]float64, len(counts))
+	valid := make([]bool, len(counts))
+	for i, n := range counts {
+		if n == 0 || (sample && n == 1) {
+			continue
+		}
+		if n < 0 || m2s[i] < 0 || (len(m2Valid) > 0 && !m2Valid[i]) {
+			return nil, merr.WrapErrServiceInternalMsg("invalid variance state at row %d: count %d, m2 %v", i, n, m2s[i])
+		}
+		denom := float64(n)
+		if sample {
+			denom--
+		}
+		data[i], valid[i] = m2s[i]/denom, true
+		if op == kStddevPop || op == kStddevSamp {
+			data[i] = math.Sqrt(data[i])
+		}
+	}
+	result := &schemapb.FieldData{
+		Type: schemapb.DataType_Double,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: data}},
+			},
+		},
+	}
+	typeutil.SetFieldDataValidData(result, valid)
 	return result, nil
 }
 

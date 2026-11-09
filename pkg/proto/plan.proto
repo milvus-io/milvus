@@ -360,6 +360,9 @@ enum AggregateOp {
   avg = 2;
   min = 3;
   max = 4;
+  // Sum of squared deviations from the mean, the variance state of
+  // var_pop, var_samp, stddev_pop and stddev_samp.
+  m2 = 5;
 }
 
 message Aggregate {

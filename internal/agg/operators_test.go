@@ -2,6 +2,7 @@ package agg
 
 import (
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -59,6 +60,32 @@ func TestNewAggregateAvgReturnsPhysicalSumAndCount(t *testing.T) {
 	require.IsType(t, &CountAggregate{}, aggregates[1])
 	require.Equal(t, kSum, aggregates[0].Name())
 	require.Equal(t, kCount, aggregates[1].Name())
+}
+
+func TestNewAggregateVarianceReturnsSumCountAndM2(t *testing.T) {
+	for _, op := range []string{kVarPop, kVarSamp, kStddevPop, kStddevSamp} {
+		isAgg, name, field := MatchAggregationExpression(strings.ToUpper(op) + "( value )")
+		require.True(t, isAgg)
+		require.Equal(t, op, name)
+		require.Equal(t, "value", field)
+
+		aggregates, err := NewAggregate(op, 100, op+"(value)", schemapb.DataType_Float)
+		require.NoError(t, err)
+		pbs := AggregatesToPB(aggregates)
+		require.Len(t, pbs, 3)
+		for i, want := range []planpb.AggregateOp{planpb.AggregateOp_sum, planpb.AggregateOp_count, planpb.AggregateOp_m2} {
+			require.Equal(t, want, pbs[i].GetOp())
+			require.Equal(t, int64(100), pbs[i].GetFieldId())
+			require.Equal(t, op+"(value)", aggregates[i].OriginalName())
+		}
+
+		_, err = NewAggregate(op, 100, op+"(value)", schemapb.DataType_VarChar)
+		require.ErrorContains(t, err, "does not support data type VarChar")
+	}
+	m2, err := FromPB(&planpb.Aggregate{Op: planpb.AggregateOp_m2, FieldId: 100})
+	require.NoError(t, err)
+	require.Equal(t, kM2, m2.Name())
+	require.Error(t, m2.Update(NewFieldValue(1.0), NewFieldValue(1.0)))
 }
 
 func TestMinAggregateUpdateOrderedTypes(t *testing.T) {

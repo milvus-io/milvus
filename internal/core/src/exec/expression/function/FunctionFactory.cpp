@@ -22,6 +22,7 @@
 #include "common/protobuf_utils.h"
 #include "exec/expression/function/impl/StringFunctions.h"
 #include "exec/operator/query-agg/CountAggregateBase.h"
+#include "exec/operator/query-agg/M2Aggregate.h"
 #include "exec/operator/query-agg/MaxAggregateBase.h"
 #include "exec/operator/query-agg/MinAggregateBase.h"
 #include "exec/operator/query-agg/SumAggregateBase.h"
@@ -84,6 +85,7 @@ FunctionFactory::RegisterAggregateFunction() {
     milvus::exec::registerMinAggregate();
     milvus::exec::registerMaxAggregate();
     milvus::exec::registerSumAggregate();
+    milvus::exec::registerM2Aggregate();
 }
 
 const FilterFunctionPtr

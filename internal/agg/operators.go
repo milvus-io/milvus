@@ -62,7 +62,7 @@ func newSingleSlotState() []*FieldValue {
 type SumAggregate struct {
 	fieldID      int64
 	originalName string
-	isAvg        bool
+	partial      bool
 }
 
 func (sum *SumAggregate) Name() string {
@@ -103,7 +103,7 @@ func (sum *SumAggregate) OriginalName() string {
 type CountAggregate struct {
 	fieldID      int64
 	originalName string
-	isAvg        bool
+	partial      bool
 }
 
 func (count *CountAggregate) Name() string {
@@ -155,8 +155,8 @@ func NewAvgAggregate(fieldID int64, originalName string) *AvgAggregate {
 	return &AvgAggregate{
 		fieldID:      fieldID,
 		originalName: originalName,
-		sum:          &SumAggregate{fieldID: fieldID, originalName: originalName, isAvg: true},
-		count:        &CountAggregate{fieldID: fieldID, originalName: originalName, isAvg: true},
+		sum:          &SumAggregate{fieldID: fieldID, originalName: originalName, partial: true},
+		count:        &CountAggregate{fieldID: fieldID, originalName: originalName, partial: true},
 	}
 }
 
@@ -199,6 +199,46 @@ func (avg *AvgAggregate) FieldID() int64 {
 
 func (avg *AvgAggregate) OriginalName() string {
 	return avg.originalName
+}
+
+// M2Aggregate is the variance state column: the sum of squared deviations
+// from the mean. Row.Merge combines it with the sum and count in front of it,
+// so it has no update of its own.
+type M2Aggregate struct {
+	fieldID      int64
+	originalName string
+}
+
+func (m2 *M2Aggregate) Name() string {
+	return kM2
+}
+
+func (m2 *M2Aggregate) Update(target *FieldValue, new *FieldValue) error {
+	return merr.WrapErrServiceInternalMsg("m2 aggregate merges require the sum and count columns")
+}
+
+func (m2 *M2Aggregate) NewState() []*FieldValue {
+	return newSingleSlotState()
+}
+
+func (m2 *M2Aggregate) UpdateState(slots []*FieldValue, new *FieldValue) error {
+	return m2.Update(nil, new)
+}
+
+func (m2 *M2Aggregate) Terminate(slots []*FieldValue) (any, error) {
+	return nil, m2.Update(nil, nil)
+}
+
+func (m2 *M2Aggregate) ToPB() *planpb.Aggregate {
+	return &planpb.Aggregate{Op: planpb.AggregateOp_m2, FieldId: m2.FieldID()}
+}
+
+func (m2 *M2Aggregate) FieldID() int64 {
+	return m2.fieldID
+}
+
+func (m2 *M2Aggregate) OriginalName() string {
+	return m2.originalName
 }
 
 func updateOrderedState(target *FieldValue, new *FieldValue, op string) error {

@@ -287,6 +287,59 @@ func TestNewQueryPipeline_GroupBy(t *testing.T) {
 	assert.Equal(t, 2, len(result.GetFieldsData()))
 }
 
+// TestNewQueryPipeline_GroupByVariance merges 2 shards of stddev_samp(val)
+// state, [sum, count, m2] per group, with and without ORDER BY. Group 10 holds
+// {1, 3} and {5}, group 20 only {7}, so its sample deviation is NULL.
+func TestNewQueryPipeline_GroupByVariance(t *testing.T) {
+	aggs, err := agg.NewAggregate("stddev_samp", 101, "stddev_samp(val)", schemapb.DataType_Int64)
+	require.NoError(t, err)
+	outputMap, err := agg.NewAggregationFieldMap([]string{"stddev_samp(val)", "pk"}, []string{"pk"}, aggs)
+	require.NoError(t, err)
+	m2Field := func(vals []float64) *schemapb.FieldData {
+		return &schemapb.FieldData{
+			Type: schemapb.DataType_Double,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: vals}},
+			}},
+		}
+	}
+	shards := func() []*internalpb.RetrieveResults {
+		return []*internalpb.RetrieveResults{
+			{FieldsData: []*schemapb.FieldData{
+				makeTestInt64Field(100, "pk", []int64{10, 20}),
+				makeTestInt64Field(101, "val", []int64{4, 7}),
+				makeTestInt64Field(101, "val", []int64{2, 1}),
+				m2Field([]float64{2, 0}),
+			}},
+			{FieldsData: []*schemapb.FieldData{
+				makeTestInt64Field(100, "pk", []int64{10}),
+				makeTestInt64Field(101, "val", []int64{5}),
+				makeTestInt64Field(101, "val", []int64{1}),
+				m2Field([]float64{0}),
+			}},
+		}
+	}
+	for _, orderBy := range [][]*orderby.OrderByField{nil, {orderby.NewOrderByField(100, "pk", schemapb.DataType_Int64)}} {
+		pipeline, err := NewQueryPipeline(testSchema(), 10, 0, reduce.IReduceNoOrder, orderBy, []int64{100},
+			agg.AggregatesToPB(aggs), outputMap, nil)
+		require.NoError(t, err)
+		result, err := pipeline.Execute(context.Background(), shards())
+		require.NoError(t, err)
+		require.Len(t, result.GetFieldsData(), 2)
+		std, pks := result.GetFieldsData()[0], result.GetFieldsData()[1].GetScalars().GetLongData().GetData()
+		assert.Equal(t, "stddev_samp(val)", std.GetFieldName())
+		require.ElementsMatch(t, []int64{10, 20}, pks)
+		for i, pk := range pks {
+			if pk == 10 {
+				assert.True(t, std.GetValidData()[i])
+				assert.InDelta(t, 2.0, std.GetScalars().GetDoubleData().GetData()[i], 1e-12)
+			} else {
+				assert.False(t, std.GetValidData()[i])
+			}
+		}
+	}
+}
+
 func TestNewQueryPipeline_GroupByCountStarWithStructSchema(t *testing.T) {
 	schema := testSchemaWithStructArray()
 

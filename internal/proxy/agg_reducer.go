@@ -64,8 +64,17 @@ func (reducer *MilvusAggReducer) Reduce(results []*internalpb.RetrieveResults) (
 			}
 			avgFieldData.FieldName = reducer.outputMap.NameAt(i)
 			reOrganizedFieldDatas[i] = avgFieldData
+		} else if len(indices) == 3 {
+			// Three indices: variance aggregation (sum, count and m2)
+			_, op, _ := agg.MatchAggregationExpression(reducer.outputMap.NameAt(i))
+			varFieldData, err := agg.ComputeVarianceFromCountAndM2(op, reducedFieldDatas[indices[1]], reducedFieldDatas[indices[2]])
+			if err != nil {
+				return nil, merr.Wrapf(err, "failed to compute variance for field %s", reducer.outputMap.NameAt(i))
+			}
+			varFieldData.FieldName = reducer.outputMap.NameAt(i)
+			reOrganizedFieldDatas[i] = varFieldData
 		} else {
-			return nil, merr.WrapErrParameterInvalidMsg("unexpected number of indices (%d) for output field at index %d, expected 1 or 2", len(indices), i)
+			return nil, merr.WrapErrParameterInvalidMsg("unexpected number of indices (%d) for output field at index %d, expected 1 to 3", len(indices), i)
 		}
 	}
 	return &milvuspb.QueryResults{FieldsData: reOrganizedFieldDatas, Status: merr.Success()}, nil

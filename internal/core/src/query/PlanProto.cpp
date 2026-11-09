@@ -283,6 +283,8 @@ getAggregateOpName(planpb::AggregateOp op) {
             return "min";
         case planpb::max:
             return "max";
+        case planpb::m2:
+            return "m2";
         default:
             ThrowInfo(OpTypeInvalid, "Unknown op type for aggregation");
     }
