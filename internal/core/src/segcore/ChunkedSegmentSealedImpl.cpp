@@ -787,14 +787,21 @@ class CompletedTextStorageTranslator final
 
     CellResults
     get_cells(milvus::OpContext* ctx,
-              const std::vector<cachinglayer::cid_t>&) override {
-        return TakeStorage(ctx);
+              const std::vector<cachinglayer::cid_t>& cids) override {
+        return folly::coro::blockingWait(get_cells_async(ctx, cids));
     }
 
     folly::coro::Task<CellResults>
     get_cells_async(milvus::OpContext* ctx,
                     const std::vector<cachinglayer::cid_t>&) override {
-        co_return TakeStorage(ctx);
+        CheckCancellation(ctx, segment_id_, "CompletedTextStorageTranslator");
+        AssertInfo(storage_ != nullptr,
+                   "completed text storage was already transferred");
+        std::vector<std::pair<cachinglayer::cid_t,
+                              std::unique_ptr<index::TextIndexStorage>>>
+            result;
+        result.emplace_back(0, std::move(storage_));
+        co_return result;
     }
 
     cachinglayer::Meta*
@@ -803,18 +810,6 @@ class CompletedTextStorageTranslator final
     }
 
  private:
-    CellResults
-    TakeStorage(milvus::OpContext* ctx) {
-        CheckCancellation(ctx, segment_id_, "CompletedTextStorageTranslator");
-        AssertInfo(storage_ != nullptr,
-                   "completed text storage was already transferred");
-        std::vector<std::pair<cachinglayer::cid_t,
-                              std::unique_ptr<index::TextIndexStorage>>>
-            result;
-        result.emplace_back(0, std::move(storage_));
-        return result;
-    }
-
     std::unique_ptr<index::TextIndexStorage> storage_;
     std::string key_;
     int64_t segment_id_;
