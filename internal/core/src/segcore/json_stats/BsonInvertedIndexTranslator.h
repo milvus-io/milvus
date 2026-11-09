@@ -84,11 +84,6 @@ class BsonInvertedIndexTranslator : public milvus::cachinglayer::Translator<
     meta() override;
 
  private:
-    // Shared operation for synchronous callers and the asynchronous cache path.
-    folly::coro::Task<CellResults>
-    load_cells(milvus::OpContext* ctx,
-               const std::vector<cachinglayer::cid_t>& cids);
-
     BsonInvertedIndexLoadInfo load_info_;
     milvus::storage::FileManagerContext file_manager_context_;
     std::string key_;

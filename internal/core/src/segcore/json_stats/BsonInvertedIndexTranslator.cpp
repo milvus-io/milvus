@@ -164,17 +164,11 @@ std::vector<std::pair<milvus::cachinglayer::cid_t,
 BsonInvertedIndexTranslator::get_cells(
     milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
-    return folly::coro::blockingWait(load_cells(ctx, cids));
+    return folly::coro::blockingWait(get_cells_async(ctx, cids));
 }
 
 folly::coro::Task<BsonInvertedIndexTranslator::CellResults>
 BsonInvertedIndexTranslator::get_cells_async(
-    milvus::OpContext* ctx, const std::vector<cachinglayer::cid_t>& cids) {
-    return load_cells(ctx, cids);
-}
-
-folly::coro::Task<BsonInvertedIndexTranslator::CellResults>
-BsonInvertedIndexTranslator::load_cells(
     milvus::OpContext* ctx, const std::vector<cachinglayer::cid_t>& cids) {
     // Consume preparation even on cancellation; retries always bind a new source.
     auto source = std::move(prepared_source_);
