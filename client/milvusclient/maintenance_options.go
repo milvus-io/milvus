@@ -36,16 +36,21 @@ type loadCollectionOption struct {
 	skipLoadDynamicField bool
 	isRefresh            bool
 	resourceGroups       []string
+	warmupHint           bool
 }
 
 func (opt *loadCollectionOption) Request() *milvuspb.LoadCollectionRequest {
-	return &milvuspb.LoadCollectionRequest{
+	req := &milvuspb.LoadCollectionRequest{
 		CollectionName:       opt.collectionName,
 		ReplicaNumber:        int32(opt.replicaNum),
 		LoadFields:           opt.loadFields,
 		SkipLoadDynamicField: opt.skipLoadDynamicField,
 		ResourceGroups:       opt.resourceGroups,
 	}
+	if opt.warmupHint {
+		req.LoadParams = map[string]string{"warmup_hint": "true"}
+	}
+	return req
 }
 
 func (opt *loadCollectionOption) CheckInterval() time.Duration {
@@ -87,6 +92,15 @@ func NewLoadCollectionOption(collectionName string) *loadCollectionOption {
 		// replicaNum:     1, The default value of the replicaNum should be set on the server side
 		interval: time.Millisecond * 200,
 	}
+}
+
+// WithWarmupHint asks the server to warm the loaded data in the background,
+// including data loaded later, until ReleaseCollection. Each call warms the
+// data again, also on an already loaded collection. Neither Await nor searches
+// wait for the warmup, and warmed data remains subject to eviction.
+func (opt *loadCollectionOption) WithWarmupHint() *loadCollectionOption {
+	opt.warmupHint = true
+	return opt
 }
 
 type LoadPartitionsOption interface {

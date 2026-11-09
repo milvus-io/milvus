@@ -427,6 +427,53 @@ func (_c *MockCSegment_MemSize_Call) RunAndReturn(run func() int64) *MockCSegmen
 	return _c
 }
 
+// Prewarm provides a mock function with given fields: ctx, fieldIDs
+func (_m *MockCSegment) Prewarm(ctx context.Context, fieldIDs []int64) error {
+	ret := _m.Called(ctx, fieldIDs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Prewarm")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, []int64) error); ok {
+		r0 = rf(ctx, fieldIDs)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCSegment_Prewarm_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Prewarm'
+type MockCSegment_Prewarm_Call struct {
+	*mock.Call
+}
+
+// Prewarm is a helper method to define mock.On call
+//   - ctx context.Context
+//   - fieldIDs []int64
+func (_e *MockCSegment_Expecter) Prewarm(ctx interface{}, fieldIDs interface{}) *MockCSegment_Prewarm_Call {
+	return &MockCSegment_Prewarm_Call{Call: _e.mock.On("Prewarm", ctx, fieldIDs)}
+}
+
+func (_c *MockCSegment_Prewarm_Call) Run(run func(ctx context.Context, fieldIDs []int64)) *MockCSegment_Prewarm_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].([]int64))
+	})
+	return _c
+}
+
+func (_c *MockCSegment_Prewarm_Call) Return(_a0 error) *MockCSegment_Prewarm_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCSegment_Prewarm_Call) RunAndReturn(run func(context.Context, []int64) error) *MockCSegment_Prewarm_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RawPointer provides a mock function with no fields
 func (_m *MockCSegment) RawPointer() segcore.CSegmentInterface {
 	ret := _m.Called()

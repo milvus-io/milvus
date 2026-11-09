@@ -37,6 +37,8 @@ message CollectionLoadConfig {
     repeated LoadReplicaConfig replicas = 7;
     // True for an explicitly chosen replica configuration; false follows cluster defaults.
     bool user_specified_replica_mode = 8;
+    // Epoch of the latest LoadCollection warmup hint; 0 means none.
+    int64 warmup_epoch = 9;
 }
 
 // Field selection owned by immutable QueryView requirements. WAL messages use their own definition.
@@ -136,6 +138,8 @@ message QueryViewMeta {
     uint64 transform_start_after_timetick = 7;
     int32 schema_version = 8; // Required logical collection schema revision.
     QueryViewControl control = 9;
+    // Warmup epoch of the load config this view was built from; 0 means none.
+    int64 warmup_epoch = 10;
 }
 
 // QueryViewOfStreamingNode is the StreamingNode-local part of a QueryView.

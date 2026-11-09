@@ -38,6 +38,8 @@ type SegmentResourceManager struct {
 	mu          sync.Mutex
 	views       map[qviews.QueryViewKey]*viewResources
 	resources   map[int64]*segmentResource
+	warmTasks   []*segmentWarmTask
+	warmWorkers int
 	closed      bool
 	closeOnce   sync.Once
 	// Tracks owners through actual cleanup, including views removed from the map.
@@ -95,6 +97,12 @@ type segmentBase struct {
 	caughtUp       bool
 	catchupRunning bool
 	catchupErr     error
+	// warmedEpoch is the newest warmup epoch the base is fully warmed for;
+	// warm is the warm queued, running or waiting to retry for a newer one,
+	// and warmFailures counts its consecutive failures for the backoff.
+	warmedEpoch  int64
+	warmFailures int
+	warm         *segmentWarmTask
 }
 
 // A resource remains in the registry through Closing. Bindings arriving during
@@ -258,6 +266,7 @@ func (m *SegmentResourceManager) failView(v *viewResources, err error) {
 
 func (r *segmentResource) wakeLocked() {
 	r.dirty = true
+	r.cancelIdleWarmsLocked()
 	if r.scheduled || r.closing {
 		return
 	}
@@ -370,10 +379,13 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 		obsolete := r.pruneReadsLocked()
 		anchors := append([]*preparedSegmentRead(nil), r.reads...)
 		retired := r.pruneBasesLocked()
+		warms := r.startWarmsLocked()
 		if b == nil {
 			r.retryAtLocked(retryAt)
 			m.mu.Unlock()
 			r.retainBaseReads(anchors)
+			// Warm after adopting reads, so a new base warms only the scope it keeps.
+			m.submitWarms(warms)
 			for _, read := range obsolete {
 				read.ReleaseReadState()
 			}
@@ -389,6 +401,7 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 		b.view.operationRefs++
 		m.mu.Unlock()
 		r.retainBaseReads(anchors)
+		m.submitWarms(warms)
 		for _, read := range obsolete {
 			read.ReleaseReadState()
 		}
@@ -612,6 +625,7 @@ func (r *segmentResource) closeLocked() {
 	r.closing = true
 	r.stopRetryLocked()
 	r.cancel()
+	r.cancelIdleWarmsLocked()
 	go r.close()
 }
 
@@ -897,7 +911,13 @@ func (r *segmentResource) pruneBasesLocked() []*segmentBase {
 		}
 		if used[base] || base.operationRefs > 0 || base.catchupRunning || pending {
 			kept = append(kept, base)
+		} else if base.warm != nil && base.warm.running {
+			// Retire the base once its warm stops, so that its release does
+			// not wait for the warm on the node scheduler.
+			base.warm.cancel()
+			kept = append(kept, base)
 		} else {
+			base.warm = nil // drop a warm that has not started
 			retired = append(retired, base)
 		}
 	}

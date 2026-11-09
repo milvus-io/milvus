@@ -273,6 +273,12 @@ message LoadCollectionRequest {
     // Preload hints: empty follows the bound schema; nonempty is explicit.
     repeated int64 load_fields = 9;
     common.LoadPriority priority = 10;
+    // Whether the user named no load fields; Proxy fills load_fields from the
+    // schema either way.
+    bool load_all_fields = 11;
+    bool skip_load_dynamic_field = 12;
+    // Asks QueryNodes to warm the loaded data in the background until release.
+    bool warmup_hint = 13;
 }
 
 message ReleaseCollectionRequest {

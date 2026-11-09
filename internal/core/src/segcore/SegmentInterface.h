@@ -406,6 +406,12 @@ class SegmentInterface {
     Load(milvus::tracer::TraceContext& trace_ctx,
          milvus::OpContext* op_ctx) = 0;
 
+    // Loads the cache cells of the given fields, all fields when empty.
+    virtual void
+    Prewarm(milvus::OpContext* op_ctx,
+            const std::vector<FieldId>& field_ids) const {
+    }
+
     // Get the shared struct-element mapping for a struct sub-field.
     // Returns nullptr if the field has no struct-element mapping.
     // Sealed segments build it during loading, before publishing the column

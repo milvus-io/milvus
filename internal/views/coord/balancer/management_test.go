@@ -16,6 +16,7 @@ import (
 
 func TestManualBalance(t *testing.T) {
 	cfg := cfgFor(1, 10, []int64{100}, nil)
+	cfg.WarmupEpoch = 5
 	c := newTestCache(cfg)
 	id := cacheShard(1, 10)
 	dv := qviews.DataVersion{StreamingVersion: 1}
@@ -75,6 +76,7 @@ func TestManualBalance(t *testing.T) {
 	require.Equal(t, map[int64]int64{101: 2, 102: 1}, flattenAssignments(accepted[0]))
 	require.Equal(t, int32(7), accepted[0].GetMeta().GetSchemaVersion())
 	require.Equal(t, uint64(1), accepted[0].GetMeta().GetLoadInfoVersion())
+	require.Equal(t, int64(5), accepted[0].GetMeta().GetWarmupEpoch(), "a moved segment warms on its new node")
 	for _, node := range accepted[0].QueryNode {
 		for _, partition := range node.Partitions {
 			if node.NodeId == 2 {

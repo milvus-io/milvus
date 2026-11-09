@@ -134,6 +134,8 @@ type PhysicalSegmentLoader interface {
 	Load(ctx context.Context, info *querypb.SegmentLoadInfo, collection CollectionRuntime) (TransformSegment, error)
 	PrepareReadState(context.Context, TransformSegment, segments.ReadState, CollectionRuntime, SegmentLoadInfoSnapshot) (segments.ReadState, error)
 	AdoptReadState(TransformSegment, segments.ReadState) error
+	// Prewarm loads every cache cell of a loaded physical segment.
+	Prewarm(context.Context, TransformSegment) error
 }
 
 type SegmentResourceEstimator interface {

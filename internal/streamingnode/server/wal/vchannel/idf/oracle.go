@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/cenkalti/backoff/v4"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -241,7 +242,9 @@ type oracleRuntime struct {
 	currentGrowing  map[int64]struct{}
 	materialization *materializationCall
 	growingStore    *growingStatsStore
+	warmRetry       *backoff.ExponentialBackOff
 
+	warming     atomic.Bool
 	functionKey string // Owns the exact immutable schema and managed BM25 runners.
 	closeOnce   sync.Once
 }
@@ -445,51 +448,57 @@ func (r *oracleRuntime) PrepareDataVersion(ctx context.Context, target qviews.Da
 
 func (r *oracleRuntime) ensureMaterialized(ctx context.Context) error {
 	for {
-		if err := ctx.Err(); err != nil {
+		if retry, err := r.awaitMaterialization(ctx); !retry {
 			return err
 		}
+	}
+}
 
-		r.mu.Lock()
-		if r.closed {
-			r.mu.Unlock()
-			return context.Canceled
-		}
-		if r.currentStats != nil {
-			r.mu.Unlock()
-			return nil
-		}
-		call := r.materialization
-		if call == nil {
-			materializationCtx, cancel := context.WithCancel(r.ctx)
-			call = &materializationCall{
-				target: r.currentVersion,
-				ctx:    materializationCtx,
-				cancel: cancel,
-				done:   make(chan struct{}),
-			}
-			r.materialization = call
-			go func() {
-				defer cancel()
-				_ = r.materialize(call) // The deferred completion publishes the error to waiters.
-			}()
-		}
+// awaitMaterialization starts the shared materialization of the current target,
+// or joins the running one, and waits for it. retry reports that a newer target
+// canceled it.
+func (r *oracleRuntime) awaitMaterialization(ctx context.Context) (retry bool, err error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+
+	r.mu.Lock()
+	if r.closed {
 		r.mu.Unlock()
-
-		select {
-		case <-call.done:
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			r.mu.RLock()
-			targetChanged := !r.currentVersion.EQ(call.target)
-			r.mu.RUnlock()
-			if targetChanged {
-				continue
-			}
-			return call.err
-		case <-ctx.Done():
-			return ctx.Err()
+		return false, context.Canceled
+	}
+	if r.currentStats != nil {
+		r.mu.Unlock()
+		return false, nil
+	}
+	call := r.materialization
+	if call == nil {
+		materializationCtx, cancel := context.WithCancel(r.ctx)
+		call = &materializationCall{
+			target: r.currentVersion,
+			ctx:    materializationCtx,
+			cancel: cancel,
+			done:   make(chan struct{}),
 		}
+		r.materialization = call
+		go func() {
+			defer cancel()
+			_ = r.materialize(call) // The deferred completion publishes the error to waiters.
+		}()
+	}
+	r.mu.Unlock()
+
+	select {
+	case <-call.done:
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		r.mu.RLock()
+		targetChanged := !r.currentVersion.EQ(call.target)
+		r.mu.RUnlock()
+		return targetChanged, call.err
+	case <-ctx.Done():
+		return false, ctx.Err()
 	}
 }
 

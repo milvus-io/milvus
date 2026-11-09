@@ -1510,6 +1510,53 @@ func (_c *MockSegment_PkCandidateExist_Call) RunAndReturn(run func() bool) *Mock
 	return _c
 }
 
+// Prewarm provides a mock function with given fields: ctx, fieldIDs
+func (_m *MockSegment) Prewarm(ctx context.Context, fieldIDs []int64) error {
+	ret := _m.Called(ctx, fieldIDs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Prewarm")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, []int64) error); ok {
+		r0 = rf(ctx, fieldIDs)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockSegment_Prewarm_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Prewarm'
+type MockSegment_Prewarm_Call struct {
+	*mock.Call
+}
+
+// Prewarm is a helper method to define mock.On call
+//   - ctx context.Context
+//   - fieldIDs []int64
+func (_e *MockSegment_Expecter) Prewarm(ctx interface{}, fieldIDs interface{}) *MockSegment_Prewarm_Call {
+	return &MockSegment_Prewarm_Call{Call: _e.mock.On("Prewarm", ctx, fieldIDs)}
+}
+
+func (_c *MockSegment_Prewarm_Call) Run(run func(ctx context.Context, fieldIDs []int64)) *MockSegment_Prewarm_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].([]int64))
+	})
+	return _c
+}
+
+func (_c *MockSegment_Prewarm_Call) Return(_a0 error) *MockSegment_Prewarm_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_Prewarm_Call) RunAndReturn(run func(context.Context, []int64) error) *MockSegment_Prewarm_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Refund provides a mock function with no fields
 func (_m *MockSegment) Refund() {
 	_m.Called()
@@ -1633,53 +1680,6 @@ func (_c *MockSegment_Reopen_Call) Return(_a0 error) *MockSegment_Reopen_Call {
 }
 
 func (_c *MockSegment_Reopen_Call) RunAndReturn(run func(context.Context, *querypb.SegmentLoadInfo) error) *MockSegment_Reopen_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// LoadIndex provides a mock function with given fields: ctx, loadInfo
-func (_m *MockSegment) LoadIndex(ctx context.Context, loadInfo *querypb.SegmentLoadInfo) error {
-	ret := _m.Called(ctx, loadInfo)
-
-	if len(ret) == 0 {
-		panic("no return value specified for LoadIndex")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *querypb.SegmentLoadInfo) error); ok {
-		r0 = rf(ctx, loadInfo)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockSegment_LoadIndex_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadIndex'
-type MockSegment_LoadIndex_Call struct {
-	*mock.Call
-}
-
-// LoadIndex is a helper method to define mock.On call
-//   - ctx context.Context
-//   - loadInfo *querypb.SegmentLoadInfo
-func (_e *MockSegment_Expecter) LoadIndex(ctx interface{}, loadInfo interface{}) *MockSegment_LoadIndex_Call {
-	return &MockSegment_LoadIndex_Call{Call: _e.mock.On("LoadIndex", ctx, loadInfo)}
-}
-
-func (_c *MockSegment_LoadIndex_Call) Run(run func(ctx context.Context, loadInfo *querypb.SegmentLoadInfo)) *MockSegment_LoadIndex_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*querypb.SegmentLoadInfo))
-	})
-	return _c
-}
-
-func (_c *MockSegment_LoadIndex_Call) Return(_a0 error) *MockSegment_LoadIndex_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockSegment_LoadIndex_Call) RunAndReturn(run func(context.Context, *querypb.SegmentLoadInfo) error) *MockSegment_LoadIndex_Call {
 	_c.Call.Return(run)
 	return _c
 }

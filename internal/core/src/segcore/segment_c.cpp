@@ -458,6 +458,31 @@ AsyncSegmentLoad(CTraceContext c_trace, CSegmentInterface c_segment) {
         static_cast<milvus::futures::IFuture*>(future.release())));
 }
 
+CFuture*
+AsyncSegmentPrewarm(CSegmentInterface c_segment,
+                    const int64_t* field_ids,
+                    int64_t field_count) {
+    auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
+    std::vector<milvus::FieldId> fields;
+    fields.reserve(field_count);
+    for (int64_t i = 0; i < field_count; ++i) {
+        fields.emplace_back(field_ids[i]);
+    }
+
+    auto future = milvus::futures::Future<bool>::async(
+        milvus::futures::getLoadCPUExecutor(),
+        milvus::futures::ExecutePriority::LOW,
+        [segment, fields = std::move(fields)](
+            folly::CancellationToken cancel_token) -> bool* {
+            milvus::OpContext op_ctx(cancel_token);
+            segment->Prewarm(&op_ctx, fields);
+            return nullptr;
+        },
+        milvus::futures::PoolType::kLoad);
+    return static_cast<CFuture*>(static_cast<void*>(
+        static_cast<milvus::futures::IFuture*>(future.release())));
+}
+
 CStatus
 AdoptSealedSegmentReadState(CSegmentInterface c_segment,
                             CSegmentInterface read_segment) {

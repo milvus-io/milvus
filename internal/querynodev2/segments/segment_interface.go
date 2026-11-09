@@ -95,6 +95,9 @@ type Segment interface {
 	LoadDeltaData(ctx context.Context, deltaData *storage.DeltaData) error
 	LastDeltaTimestamp() uint64
 	Load(ctx context.Context) error
+	// Prewarm loads the cache cells of the given fields, all fields when
+	// fieldIDs is empty.
+	Prewarm(ctx context.Context, fieldIDs []int64) error
 	Release(ctx context.Context, opts ...releaseOption)
 	Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo) error
 

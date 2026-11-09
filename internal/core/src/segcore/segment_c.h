@@ -132,6 +132,16 @@ CFuture*
 AsyncSegmentLoad(CTraceContext c_trace, CSegmentInterface c_segment);
 
 /**
+ * @brief Async prewarm using Future mechanism with built-in cancellation.
+ * Loads the cache cells of the given fields, all fields when field_count is 0,
+ * at low priority on the load executor.
+ */
+CFuture*
+AsyncSegmentPrewarm(CSegmentInterface c_segment,
+                    const int64_t* field_ids,
+                    int64_t field_count);
+
+/**
  * @brief Async reopen segment using Future mechanism with built-in cancellation.
  *
  * Reopen applies a new SegmentLoadInfo and the latest collection schema.

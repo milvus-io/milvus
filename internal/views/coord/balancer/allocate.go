@@ -124,6 +124,7 @@ func allocate(p *planningContext, shardID qviews.ShardID, baseRows map[int64]int
 	builder := qviews.NewQueryViewAtCoordBuilder(shardID.ReplicaID, dataView, shardID.VChannel)
 	builder.SetAssignments(assignments)
 	builder.SetLoadInfoVersion(p.ConfigVersion(desired.CollectionID))
+	builder.SetWarmupEpoch(desired.WarmupEpoch)
 	return &allocationResult{builder: builder, assignments: ctx.assignments, rowsByNode: ctx.rows, more: more}
 }
 

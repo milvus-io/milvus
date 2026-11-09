@@ -41,7 +41,7 @@ const (
 //  3. Already has a Preparing view        → None (avoid stacking)
 //  4. Current DataVersion < DataView DV   → Must (data changed)
 //  5. Current view references an unavailable node → Must (node lost)
-//  6. LoadInfoVersion differs            → Must
+//  6. LoadInfoVersion or warmup epoch differs → Must
 //  7. Otherwise                           → MayOptimize
 func classifyShard(snap balanceInput, shardID qviews.ShardID) actionKind {
 	desired := snap.ConfigForShard(shardID)
@@ -219,5 +219,5 @@ func loadInfoDiffer(snap balanceInput, desired *loadmgr.LoadConfig, stats *coord
 	if loadInfoVersion == 0 {
 		return true
 	}
-	return stats.UpLoadInfoVersion != loadInfoVersion
+	return stats.UpLoadInfoVersion != loadInfoVersion || stats.UpWarmupEpoch < desired.WarmupEpoch
 }

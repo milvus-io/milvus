@@ -140,6 +140,8 @@ func (s *viewQueryGrowingSegment) LastDeltaTimestamp() uint64 { return 0 }
 
 func (s *viewQueryGrowingSegment) Load(context.Context) error { return nil }
 
+func (s *viewQueryGrowingSegment) Prewarm(context.Context, []int64) error { return nil }
+
 func (s *viewQueryGrowingSegment) Release(context.Context, ...releaseOption) {}
 
 func (s *viewQueryGrowingSegment) Reopen(context.Context, *querypb.SegmentLoadInfo) error {

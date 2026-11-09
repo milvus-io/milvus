@@ -263,6 +263,7 @@ func (m *ShardViewManager) statsLocked() *ShardStats {
 				stats.UpSchemaVersion = sm.View().GetMeta().GetSchemaVersion()
 				stats.UpNodes = viewNodeIDs(sm.View())
 				stats.UpPlacement = viewPlacement(sm)
+				stats.UpWarmupEpoch = sm.View().GetMeta().GetWarmupEpoch()
 			}
 		case qviews.QueryViewStatePreparing, qviews.QueryViewStateReady:
 			if stats.PreparingVersion == nil || version.GT(*stats.PreparingVersion) {

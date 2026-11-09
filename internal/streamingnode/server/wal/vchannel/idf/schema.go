@@ -244,6 +244,13 @@ func (b *viewBinding) advance(ctx context.Context, target qviews.DataVersion) er
 	return nil
 }
 
+// Warm warms, in the background, the aggregates of the fields this View serves.
+func (b *viewBinding) Warm() {
+	for _, field := range b.fields {
+		field.oracle.warm()
+	}
+}
+
 func (b *viewBinding) Release() {
 	r := b.runtime
 	// TODO: Make resource release retryable so waiting for another View's

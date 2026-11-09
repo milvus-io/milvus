@@ -80,6 +80,10 @@ type basicSegmentMethodSet interface {
 	// Load invokes segment managed loading.
 	Load(ctx context.Context) error
 
+	// Prewarm loads the cache cells of the given fields, all fields when
+	// fieldIDs is empty.
+	Prewarm(ctx context.Context, fieldIDs []int64) error
+
 	// Release releases the segment.
 	Release()
 }

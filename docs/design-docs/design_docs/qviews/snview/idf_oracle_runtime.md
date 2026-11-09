@@ -83,6 +83,10 @@ their original classification. A canceled or expired query context takes priorit
 and is never turned into a view retry. A failed materialization is not cached.
 Changing the lazy setting affects subsequently created field oracles.
 
+A Ready QueryView with a LoadCollection warmup hint starts this materialization
+in the background instead; see
+[the warmup hint design](../../20260907-load-collection-warmup-hint.md#58-streamingnode).
+
 `queryView.idfOracle.sealedStatsLoadConcurrencyRatio` defaults to 4 times CPU cores
 and dynamically resizes the shared limit. Both new configuration keys are version
 3.1.0. Reads reuse `queryNode.idfOracle.readBufferSize` and the existing storage

@@ -1304,6 +1304,14 @@ func (s *LocalSegment) Load(ctx context.Context) error {
 	return nil
 }
 
+func (s *LocalSegment) Prewarm(ctx context.Context, fieldIDs []int64) error {
+	if err := s.PinIfNotReleased(); err != nil {
+		return err
+	}
+	defer s.Unpin()
+	return s.csegment.Prewarm(ctx, fieldIDs)
+}
+
 func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo) error {
 	return s.reopen(ctx, newLoadInfo, nil)
 }
