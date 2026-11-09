@@ -33,3 +33,17 @@ func SearchOptions(tasks SearchSegmentTasks) *viewpb.SearchExecutionOptions {
 	}
 	return nil
 }
+
+// MaterializeTasksWithOptions borrows the same query handles while carrying
+// the request's IPC encoding options to the node-local executor.
+type MaterializeTasksWithOptions struct {
+	QuerySegmentTasks
+	Options *viewpb.MaterializeIPCOptions
+}
+
+func MaterializeOptions(tasks QuerySegmentTasks) *viewpb.MaterializeIPCOptions {
+	if configured, ok := tasks.(*MaterializeTasksWithOptions); ok {
+		return configured.Options
+	}
+	return nil
+}

@@ -6,6 +6,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	sharedviewquery "github.com/milvus-io/milvus/internal/views/viewquery"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -14,6 +15,7 @@ var _ sharedviewquery.Scheduler = (*Scheduler)(nil)
 type SegmentTaskExecutor interface {
 	Search(ctx context.Context, tasks []snview.SNSearchSegmentTask) (*internalpb.SearchResults, error)
 	Query(ctx context.Context, tasks []snview.SNQuerySegmentTask) (*internalpb.RetrieveResults, error)
+	Materialize(ctx context.Context, tasks []snview.SNQuerySegmentTask, options *viewpb.MaterializeIPCOptions) (*internalpb.MaterializeResults, error)
 }
 
 type Scheduler struct {

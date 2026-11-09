@@ -29,6 +29,9 @@ type LegacyClient interface {
 
 	Search(ctx context.Context, req *LegacySearchRequest) (*LegacySearchResult, error)
 	Query(ctx context.Context, req *LegacyQueryRequest) (*LegacyQueryResult, error)
+	// Materialize refills only the retained search plans. consume takes body
+	// ownership and can run concurrently; all workers join before returning.
+	Materialize(ctx context.Context, req *LegacyQueryRequest, fingerprint uint64, maxOutputSize int64, consume func(ShardPlan, qviews.WorkNode, *internalpb.MaterializeResults) error) error
 }
 
 type LegacySearchRequest struct {

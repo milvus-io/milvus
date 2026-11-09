@@ -7,9 +7,12 @@ import (
 
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/materialize"
+	"github.com/milvus-io/milvus/internal/views/queryclient"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/resource"
@@ -70,9 +73,14 @@ const (
 // It returns the path that served the request.
 func (t *QueryTask) executeMaterialize(ctx context.Context) (string, error) {
 	fill := t.newMaterializeFill()
-	err := t.executeWorkload(ctx, func(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
-		return t.materializeShard(ctx, nodeID, qn, channel, fill)
-	})
+	var err error
+	if t.viewQueryClient != nil {
+		err = t.materializeRetainedViews(ctx, fill)
+	} else {
+		err = t.executeWorkload(ctx, func(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
+			return t.materializeShard(ctx, nodeID, qn, channel, fill)
+		})
+	}
 	if reason, failure := fill.failure(); reason != "" {
 		// Nothing read from a Materialize reply survives.
 		mlog.Info(ctx, "Materialize unsupported, rerunning the request with Query",
@@ -176,10 +184,55 @@ func (t *QueryTask) finishMaterialize(ctx context.Context, fill *materializeFill
 	}
 	t.resultBuf.Insert(res)
 	for _, a := range fill.accepted {
-		t.shardDone(a.nodeID, a.channel, a.mvcc, a.cost)
+		if t.viewQueryClient == nil {
+			t.shardDone(a.nodeID, a.channel, a.mvcc, a.cost)
+		}
 	}
-	metrics.ProxyMaterializeShardTotal.WithLabelValues(paramtable.GetStringNodeID()).Add(float64(len(fill.accepted)))
+	shardCount := len(fill.accepted)
+	if t.viewQueryClient != nil {
+		channels := make(map[string]struct{}, len(t.queryViewPlans))
+		for _, plan := range t.queryViewPlans {
+			channels[plan.ShardID.VChannel] = struct{}{}
+			if t.actualChannelsMvcc != nil {
+				t.RecordChannelMvcc(plan.ShardID.VChannel, max(plan.Mvcc.GetGrowingTimetick(), plan.Mvcc.GetTransformingTimetick()))
+			}
+		}
+		shardCount = len(channels)
+	}
+	metrics.ProxyMaterializeShardTotal.WithLabelValues(paramtable.GetStringNodeID()).Add(float64(shardCount))
 	return nil
+}
+
+// materializeRetainedViews bypasses the delegator and consumes SN/QN IPC bodies
+// through the same fill as the legacy path. Unsupported requests or encodings
+// request fallback; lifecycle failures abort the parent search attempt.
+func (t *QueryTask) materializeRetainedViews(ctx context.Context, fill *materializeFill) error {
+	err := t.viewQueryClient.Legacy().Materialize(ctx, &queryclient.LegacyQueryRequest{
+		Req: t.RetrieveRequest, Schema: t.schema.CollectionSchema, Plans: t.queryViewPlans,
+	}, fill.known.fingerprint, fill.maxOutputSize, func(plan queryclient.ShardPlan, node qviews.WorkNode, result *internalpb.MaterializeResults) error {
+		if result.GetHeader().GetFormatVersion() != materialize.FormatVersion {
+			resource.ReleaseMaterializeBody(result)
+			fill.fallBack(fallbackVersion, merr.Wrap(merr.ErrServiceUnimplemented, "materialize: reply format mismatch"))
+			return nil
+		}
+		if err := fill.add(result.GetHeader().GetSourceId(), plan.ShardID.VChannel, result); err != nil {
+			if errors.Is(err, merr.ErrServiceUnimplemented) {
+				reason := fallbackSchemaSkew
+				if errors.Is(err, materialize.ErrFieldMismatch) {
+					reason = fallbackFormat
+				}
+				fill.fallBack(reason, err)
+			} else {
+				fill.fail(err)
+			}
+		}
+		return nil
+	})
+	if errors.Is(err, merr.ErrServiceUnimplemented) {
+		fill.fallBack(fallbackUnimplemented, err)
+		return nil
+	}
+	return QueryViewLoadError(ctx, t.node, t.GetCollectionID(), t.GetPartitionIDs(), err)
 }
 
 func recordMaterializeFallback(reason string) {

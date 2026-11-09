@@ -98,6 +98,7 @@ func TestSchedulerReturnsExecutorError(t *testing.T) {
 }
 
 type fakeQNSegmentTaskExecutor struct {
+	SegmentTaskExecutor
 	searchTasks  []qnview.QNSearchSegmentTask
 	searchResult *internalpb.SearchResults
 	searchErr    error

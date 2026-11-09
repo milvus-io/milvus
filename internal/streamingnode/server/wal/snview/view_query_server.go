@@ -7,6 +7,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/internal/views/viewquery"
 	worknodehandler "github.com/milvus-io/milvus/internal/views/worknode/handler"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -78,4 +79,16 @@ func (s *PChannelViewQueryServer) taskProviderForVChannel(ctx context.Context, v
 
 type pchannelWALProvider interface {
 	GetAvailableWAL(channel types.PChannelInfo) (wal.WAL, error)
+}
+
+func (s *PChannelViewQueryServer) MaterializeOnView(ctx context.Context, req *viewpb.MaterializeOnViewRequest) (*internalpb.MaterializeResults, error) {
+	query := req.GetQueryByPk()
+	if query.GetShardId() == nil {
+		return viewquery.NewServer(nil, s.scheduler).MaterializeOnView(ctx, req)
+	}
+	provider, err := s.taskProviderForVChannel(ctx, query.GetShardId().GetVchannel())
+	if err != nil {
+		return nil, err
+	}
+	return viewquery.NewServer(provider, s.scheduler).MaterializeOnView(ctx, req)
 }

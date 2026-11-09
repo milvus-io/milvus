@@ -17,7 +17,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/materialize"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -25,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/resource"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -158,4 +161,26 @@ func TestQueryTaskRunnerMultiSegmentFieldRetrieval(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("materialize_forces_arrow", func(t *testing.T) {
+		require.NoError(t, paramtable.Get().Save(cfg.Key, "false"))
+		req.Req.Limit = typeutil.Unlimited
+		collectionInput, segmentInputs, err := buildGrowingQueryTaskInputs(collection, selected, req)
+		require.NoError(t, err)
+		reply, err := tasks.ExecuteMaterializeOnSegments(ctx, collectionInput, segmentInputs, req)
+		require.NoError(t, err)
+		require.Len(t, reply.Body, 1, "node-local reduce must produce one batch")
+		layout, err := materialize.ParseSchema(reply.Header.BodySchema)
+		require.NoError(t, err)
+		body := resource.TakeMaterializeBody(reply)
+		defer body.Release()
+		batch, err := layout.ReadEntry(body.Entry(0), 0, reply.Header.BodyRawSize)
+		require.NoError(t, err)
+		require.Equal(t, []int64{0, 1, 2, 3}, batch.IntPKs)
+		rows := []materialize.RowRef{{Batch: 0, Row: 0}, {Batch: 0, Row: 1}, {Batch: 0, Row: 2}, {Batch: 0, Row: 3}}
+		ids, fields, err := layout.Gather([]*materialize.Batch{batch}, rows, helper)
+		require.NoError(t, err)
+		require.Equal(t, []int64{0, 1, 2, 3}, ids.GetIntId().GetData())
+		require.Equal(t, []int64{0, 10, 20, 30}, fields[1].GetScalars().GetLongData().GetData())
+	})
 }

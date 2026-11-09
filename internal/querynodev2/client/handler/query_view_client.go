@@ -7,12 +7,15 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // QueryViewClient is the QueryView domain client under the QueryNode handler client.
 type QueryViewClient interface {
+	MaterializeOnView(ctx context.Context, nodeID int64, req *viewpb.MaterializeOnViewRequest) (*internalpb.MaterializeResults, error)
+
 	StatisticsOnView(ctx context.Context, nodeID int64, req *viewpb.StatisticsOnViewRequest) (*viewpb.StatisticsOnViewResponse, error)
 
 	SearchOnView(ctx context.Context, nodeID int64, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error)
@@ -82,5 +85,11 @@ func (qvc *queryViewClient) close() {
 func (qvc *queryViewClient) StatisticsOnView(ctx context.Context, nodeID int64, req *viewpb.StatisticsOnViewRequest) (*viewpb.StatisticsOnViewResponse, error) {
 	return executeViewQueryRPC(ctx, qvc, nodeID, func(ctx context.Context, client viewpb.ViewQueryServiceClient) (*viewpb.StatisticsOnViewResponse, error) {
 		return client.StatisticsOnView(ctx, req)
+	})
+}
+
+func (qvc *queryViewClient) MaterializeOnView(ctx context.Context, nodeID int64, req *viewpb.MaterializeOnViewRequest) (*internalpb.MaterializeResults, error) {
+	return executeViewQueryRPC(ctx, qvc, nodeID, func(ctx context.Context, client viewpb.ViewQueryServiceClient) (*internalpb.MaterializeResults, error) {
+		return client.MaterializeOnView(ctx, req)
 	})
 }

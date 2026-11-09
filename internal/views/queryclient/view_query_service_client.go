@@ -5,6 +5,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 )
@@ -15,11 +16,13 @@ type compositeViewQueryServiceClient struct {
 }
 
 type StreamingNodeViewQueryServiceClient interface {
+	MaterializeOnView(ctx context.Context, pchannel types.PChannelInfo, req *viewpb.MaterializeOnViewRequest) (*internalpb.MaterializeResults, error)
 	SearchOnView(ctx context.Context, pchannel types.PChannelInfo, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error)
 	QueryOnView(ctx context.Context, pchannel types.PChannelInfo, req *viewpb.QueryOnViewRequest) (*viewpb.QueryOnViewResponse, error)
 }
 
 type QueryNodeViewQueryServiceClient interface {
+	MaterializeOnView(ctx context.Context, nodeID int64, req *viewpb.MaterializeOnViewRequest) (*internalpb.MaterializeResults, error)
 	StatisticsOnView(ctx context.Context, nodeID int64, req *viewpb.StatisticsOnViewRequest) (*viewpb.StatisticsOnViewResponse, error)
 
 	SearchOnView(ctx context.Context, nodeID int64, req *viewpb.SearchOnViewRequest) (*viewpb.SearchOnViewResponse, error)
@@ -68,4 +71,15 @@ func (c *compositeViewQueryServiceClient) StatisticsOnView(ctx context.Context, 
 		return nil, invalidWorkNodeError(node)
 	}
 	return c.queryNode.StatisticsOnView(ctx, qn.ID, req)
+}
+
+func (c *compositeViewQueryServiceClient) MaterializeOnView(ctx context.Context, node qviews.WorkNode, req *viewpb.MaterializeOnViewRequest) (*internalpb.MaterializeResults, error) {
+	switch typed := node.(type) {
+	case qviews.StreamingNode:
+		return c.streamingNode.MaterializeOnView(ctx, types.PChannelInfo{Name: typed.PChannel}, req)
+	case qviews.QueryNode:
+		return c.queryNode.MaterializeOnView(ctx, typed.ID, req)
+	default:
+		return nil, invalidWorkNodeError(node)
+	}
 }

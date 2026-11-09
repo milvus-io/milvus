@@ -28,6 +28,7 @@ func TestCompositeViewQueryServiceClientDispatchesByWorkNode(t *testing.T) {
 }
 
 type fakeStreamingNodeViewQueryServiceClient struct {
+	StreamingNodeViewQueryServiceClient
 	pchannel   types.PChannelInfo
 	searchResp *viewpb.SearchOnViewResponse
 }

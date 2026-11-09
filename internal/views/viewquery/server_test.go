@@ -226,6 +226,8 @@ func (p *fakeTaskProvider) AcquireQuerySegmentTasks(
 }
 
 type fakeScheduler struct {
+	// Search/Query fixtures do not execute the other scheduler operations.
+	Scheduler
 	searchTasks  SearchSegmentTasks
 	searchResult *internalpb.SearchResults
 	searchErr    error

@@ -1092,9 +1092,8 @@ func (t *QueryTask) Execute(ctx context.Context) error {
 	t.resultBuf = typeutil.NewConcurrentSet[*internalpb.RetrieveResults]()
 	t.executeStart = time.Now()
 	path, err := executePathQuery, error(nil)
-	// Materialize currently routes through the legacy delegator. QueryView
-	// requests must retain their View-bound execution and requery snapshots.
-	if t.viewQueryClient == nil && paramtable.Get().ProxyCfg.MaterializeEnabled.GetAsBool() && t.materializeInScope() {
+	if paramtable.Get().ProxyCfg.MaterializeEnabled.GetAsBool() && t.materializeInScope() &&
+		(t.viewQueryClient == nil || t.queryViewPlans != nil) {
 		path, err = t.executeMaterialize(ctx)
 	} else {
 		err = t.executeWorkload(ctx, t.queryShard)
