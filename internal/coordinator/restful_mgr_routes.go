@@ -1355,6 +1355,11 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 			return
 		}
 
+		if normalizedKey == pkgconfig.FormatKey(paramtable.Get().CommonCfg.CredentialBrokerAllowedEndpoints.Key) {
+			writeJSONError(writer, "credentialBrokerAllowedEndpoints cannot be modified through this endpoint; set it in the configuration file and restart", http.StatusBadRequest)
+			return
+		}
+
 		// The management-plane auth gate is not settable here. This endpoint is
 		// itself behind that gate, so allowing it would mean: while the gate is
 		// off, anyone who can reach port 9091 -- the exposure the gate exists to

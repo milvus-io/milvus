@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
@@ -50,11 +51,11 @@ type segmentChangeInspector struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	mt    *meta
+	mt    *meta.Meta
 	alloc allocator.Allocator
 }
 
-func newSegmentChangeInspector(ctx context.Context, mt *meta, alloc allocator.Allocator) *segmentChangeInspector {
+func newSegmentChangeInspector(ctx context.Context, mt *meta.Meta, alloc allocator.Allocator) *segmentChangeInspector {
 	ctx, cancel := context.WithCancel(ctx)
 	return &segmentChangeInspector{
 		ctx:    ctx,
@@ -126,7 +127,7 @@ func (i *segmentChangeInspector) evaluateStaged(ctx context.Context, g *model.Se
 		i.failGroup(ctx, g, "collection dropped or schema-less while staged")
 		return
 	}
-	readiness := i.mt.prepareReadiness(coll)
+	readiness := i.mt.PrepareReadiness(coll)
 	if readiness == nil {
 		i.failGroup(ctx, g, "cannot prepare readiness for collection")
 		return
@@ -142,7 +143,7 @@ func (i *segmentChangeInspector) evaluateStaged(ctx context.Context, g *model.Se
 		// the bump materialization only targets visible segments, so nothing can
 		// advance a staged member's SchemaVersion. Fail immediately instead of
 		// waiting out the staging timeout.
-		if !readiness.schemaReady(seg) {
+		if !readiness.SchemaReady(seg) {
 			i.failGroup(ctx, g, fmt.Sprintf("member %d schema version behind collection while staged (C23)", id))
 			return
 		}
@@ -187,7 +188,7 @@ func (i *segmentChangeInspector) evaluateStaged(ctx context.Context, g *model.Se
 //   - a member gone from meta or Dropped -> FAILED (unconvergeable);
 //   - every other error is transient -> keep READY, retry next round.
 func (i *segmentChangeInspector) tryPublish(ctx context.Context, g *model.SegmentChangeGroup) {
-	err := i.mt.publishGroup(ctx, g, i.alloc)
+	err := i.mt.PublishGroup(ctx, g, i.alloc)
 	if err == nil {
 		return
 	}
@@ -217,7 +218,7 @@ func (i *segmentChangeInspector) groupNoLongerReady(ctx context.Context, g *mode
 	if coll == nil || coll.Schema == nil {
 		return true
 	}
-	readiness := i.mt.prepareReadiness(coll)
+	readiness := i.mt.PrepareReadiness(coll)
 	if readiness == nil {
 		return true
 	}

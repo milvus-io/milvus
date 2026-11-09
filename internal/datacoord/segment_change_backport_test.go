@@ -25,6 +25,9 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/datacoord/partitionstats"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -35,9 +38,9 @@ func TestSegmentChangeLegacyViewsAndSeek(t *testing.T) {
 	for _, state := range []model.SegmentChangeState{model.SegmentChangeStateStaged, model.SegmentChangeStateReady} {
 		t.Run(state.String(), func(t *testing.T) {
 			ctx := context.Background()
-			m, err := newMemoryMeta(t)
+			m, err := meta.NewMemoryMeta(t)
 			require.NoError(t, err)
-			m.AddCollection(&collectionInfo{ID: 10, Schema: readinessVectorSchema()})
+			m.AddCollection(&meta.CollectionInfo{ID: 10, Schema: readinessVectorSchema()})
 			for _, fixture := range []struct {
 				id        int64
 				timestamp uint64
@@ -47,7 +50,7 @@ func TestSegmentChangeLegacyViewsAndSeek(t *testing.T) {
 				{2001, 30, false},
 				{3001, 20, true}, // Group-less flush awaiting sort must retain its DML position.
 			} {
-				require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+				require.NoError(t, m.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
 					ID: fixture.id, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
 					State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
 					IsInvisible: fixture.invisible, IsSorted: true, NumOfRows: 1,
@@ -55,14 +58,18 @@ func TestSegmentChangeLegacyViewsAndSeek(t *testing.T) {
 					Binlogs:     []*datapb.FieldBinlog{{FieldID: 2, Binlogs: []*datapb.Binlog{{LogID: fixture.id}}}},
 				})))
 			}
-			group := newTestGroup()
+			group := meta.NewTestGroup()
 			require.NoError(t, m.AddSegmentChangeGroup(ctx, group))
 			if state == model.SegmentChangeStateReady {
 				group.State = state
 				require.NoError(t, m.UpdateSegmentChangeGroup(ctx, group))
 			}
-			h := &ServerHandler{s: &Server{ctx: ctx, meta: m}}
-			channel := &channelMeta{Name: "ch-1", CollectionID: 10}
+			ps, err := partitionstats.NewPartitionStatsMeta(ctx, m.Catalog)
+			require.NoError(t, err)
+			im, err := index.NewIndexMeta(ctx, m.Catalog, []int64{10})
+			require.NoError(t, err)
+			h := &ServerHandler{s: &Server{ctx: ctx, meta: m, domainMetas: domainMetas{partitionStatsMeta: ps, indexMeta: im}}}
+			channel := &meta.ChannelMeta{Name: "ch-1", CollectionID: 10}
 			query := h.GetQueryVChanPositions(channel)
 			require.NotContains(t, query.GetFlushedSegmentIds(), int64(1001))
 			require.NotContains(t, query.GetUnflushedSegmentIds(), int64(1001))
@@ -99,15 +106,15 @@ func TestSegmentChangePublicationRetry(t *testing.T) {
 		{"canceled", merr.WrapErrServiceUnavailableMsg("catalog unavailable"), true},
 	} {
 		t.Run(failure.name, func(t *testing.T) {
-			m, err := newMemoryMeta(t)
+			m, err := meta.NewMemoryMeta(t)
 			require.NoError(t, err)
 			ready := seedPublishMeta(t, m, model.SegmentChangeSourceMixCompaction)
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			catalog := m.catalog
+			catalog := m.Catalog
 			calls := 0
 			var firstActions []metastore.UpdateAction
-			m.catalog = &segmentChangeBackportCatalog{
+			m.Catalog = &segmentChangeBackportCatalog{
 				DataCoordCatalog: catalog,
 				update: func(ctx context.Context, actions ...metastore.UpdateAction) error {
 					calls++
@@ -122,7 +129,7 @@ func TestSegmentChangePublicationRetry(t *testing.T) {
 					return catalog.Update(ctx, actions...)
 				},
 			}
-			err = m.publishGroup(ctx, ready, newMockAllocator(t))
+			err = m.PublishGroup(ctx, ready, meta.NewMockAllocator(t))
 			if failure.cancel {
 				require.ErrorIs(t, err, failure.err)
 				require.Equal(t, 1, calls)
@@ -135,7 +142,7 @@ func TestSegmentChangePublicationRetry(t *testing.T) {
 			require.Equal(t, 2, calls)
 			require.False(t, m.GetSegment(ctx, 1001).GetIsInvisible())
 			require.Equal(t, commonpb.SegmentState_Dropped, m.GetSegment(ctx, 2001).GetState())
-			groups, staged, superseded, err := m.loadSegmentChangeGroups(ctx)
+			groups, staged, superseded, err := m.LoadSegmentChangeGroups(ctx)
 			require.NoError(t, err)
 			require.Equal(t, model.SegmentChangeStateCommitted, groups[1].State)
 			require.Empty(t, staged)

@@ -1717,8 +1717,7 @@ func (_c *MockCluster_QueryStats_Call) RunAndReturn(run func(int64, *workerpb.Qu
 func NewMockCluster(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockCluster {
+}) *MockCluster {
 	mock := &MockCluster{}
 	mock.Mock.Test(t)
 

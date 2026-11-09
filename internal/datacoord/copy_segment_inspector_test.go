@@ -25,6 +25,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/copysegment"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	task2 "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -40,13 +42,15 @@ type CopySegmentInspectorSuite struct {
 
 	catalog   *mocks.DataCoordCatalog
 	broker    *broker.MockBroker
-	meta      *meta
-	copyMeta  CopySegmentMeta
+	meta      *meta.Meta
+	copyMeta  copysegment.CopySegmentMeta
 	scheduler *task2.MockGlobalScheduler
-	inspector *copySegmentInspector
+	inspector *copysegment.Inspector
 }
 
 func (s *CopySegmentInspectorSuite) SetupTest() {
+	dm := &domainMetas{}
+
 	var err error
 
 	s.collectionID = 1
@@ -70,24 +74,24 @@ func (s *CopySegmentInspectorSuite) SetupTest() {
 	s.broker = broker.NewMockBroker(s.T())
 	s.broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 
-	s.meta, err = newMeta(context.TODO(), s.catalog, nil, s.broker)
+	s.meta, err = meta.NewMeta(context.TODO(), s.catalog, nil, s.broker, loadDomainMetas(s.catalog, nil, dm))
 	s.NoError(err)
-	s.meta.AddCollection(&collectionInfo{
+	s.meta.AddCollection(&meta.CollectionInfo{
 		ID:     s.collectionID,
-		Schema: newTestSchema(),
+		Schema: meta.NewTestSchema(),
 	})
 
-	s.copyMeta, err = NewCopySegmentMeta(context.TODO(), s.catalog, s.meta, nil, nil)
+	s.copyMeta, err = copysegment.NewCopySegmentMeta(context.TODO(), s.catalog, s.meta, dm.indexMeta, nil, nil)
 	s.NoError(err)
 
 	s.scheduler = task2.NewMockGlobalScheduler(s.T())
 
-	s.inspector = NewCopySegmentInspector(
+	s.inspector = copysegment.NewCopySegmentInspector(
 		context.TODO(),
 		s.meta,
 		s.copyMeta,
 		s.scheduler,
-	).(*copySegmentInspector)
+	).(*copysegment.Inspector)
 }
 
 func (s *CopySegmentInspectorSuite) TearDownTest() {
@@ -103,24 +107,24 @@ func (s *CopySegmentInspectorSuite) TestReloadFromMeta_NoPendingTasks() {
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
 
 	// Create a job
-	job := &copySegmentJob{
+	job := &copysegment.Job{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:        s.jobID,
 			CollectionId: s.collectionID,
 			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
 		},
-		tr: timerecord.NewTimeRecorder("test job"),
+		Tr: timerecord.NewTimeRecorder("test job"),
 	}
 	err := s.copyMeta.AddJob(context.TODO(), job)
 	s.NoError(err)
 
 	// Create a completed task (should not be enqueued)
-	task := &copySegmentTask{
-		copyMeta: s.copyMeta,
-		tr:       timerecord.NewTimeRecorder("task"),
-		times:    taskcommon.NewTimes(),
+	task := &copysegment.Task{
+		CopyMeta: s.copyMeta,
+		Tr:       timerecord.NewTimeRecorder("task"),
+		Times:    taskcommon.NewTimes(),
 	}
-	task.task.Store(&datapb.CopySegmentTask{
+	task.Task.Store(&datapb.CopySegmentTask{
 		TaskId:       1001,
 		JobId:        s.jobID,
 		CollectionId: s.collectionID,
@@ -130,7 +134,7 @@ func (s *CopySegmentInspectorSuite) TestReloadFromMeta_NoPendingTasks() {
 	s.NoError(err)
 
 	// Reload should not enqueue completed tasks
-	s.inspector.reloadFromMeta()
+	s.inspector.ReloadFromMeta()
 }
 
 func (s *CopySegmentInspectorSuite) TestReloadFromMeta_WithInProgressTasks() {
@@ -138,24 +142,24 @@ func (s *CopySegmentInspectorSuite) TestReloadFromMeta_WithInProgressTasks() {
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(2)
 
 	// Create a job
-	job := &copySegmentJob{
+	job := &copysegment.Job{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:        s.jobID,
 			CollectionId: s.collectionID,
 			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
 		},
-		tr: timerecord.NewTimeRecorder("test job"),
+		Tr: timerecord.NewTimeRecorder("test job"),
 	}
 	err := s.copyMeta.AddJob(context.TODO(), job)
 	s.NoError(err)
 
 	// Create an in-progress task
-	task1 := &copySegmentTask{
-		copyMeta: s.copyMeta,
-		tr:       timerecord.NewTimeRecorder("task1"),
-		times:    taskcommon.NewTimes(),
+	task1 := &copysegment.Task{
+		CopyMeta: s.copyMeta,
+		Tr:       timerecord.NewTimeRecorder("task1"),
+		Times:    taskcommon.NewTimes(),
 	}
-	task1.task.Store(&datapb.CopySegmentTask{
+	task1.Task.Store(&datapb.CopySegmentTask{
 		TaskId:       1001,
 		JobId:        s.jobID,
 		CollectionId: s.collectionID,
@@ -165,12 +169,12 @@ func (s *CopySegmentInspectorSuite) TestReloadFromMeta_WithInProgressTasks() {
 	s.NoError(err)
 
 	// Create a pending task (should not be enqueued by reload)
-	task2 := &copySegmentTask{
-		copyMeta: s.copyMeta,
-		tr:       timerecord.NewTimeRecorder("task2"),
-		times:    taskcommon.NewTimes(),
+	task2 := &copysegment.Task{
+		CopyMeta: s.copyMeta,
+		Tr:       timerecord.NewTimeRecorder("task2"),
+		Times:    taskcommon.NewTimes(),
 	}
-	task2.task.Store(&datapb.CopySegmentTask{
+	task2.Task.Store(&datapb.CopySegmentTask{
 		TaskId:       1002,
 		JobId:        s.jobID,
 		CollectionId: s.collectionID,
@@ -181,11 +185,11 @@ func (s *CopySegmentInspectorSuite) TestReloadFromMeta_WithInProgressTasks() {
 
 	// Expect only the in-progress task to be enqueued
 	s.scheduler.EXPECT().Enqueue(mock.MatchedBy(func(t any) bool {
-		copyTask, ok := t.(CopySegmentTask)
+		copyTask, ok := t.(copysegment.CopySegmentTask)
 		return ok && copyTask.GetTaskId() == 1001
 	})).Once()
 
-	s.inspector.reloadFromMeta()
+	s.inspector.ReloadFromMeta()
 }
 
 func (s *CopySegmentInspectorSuite) TestProcessPending() {
@@ -193,24 +197,24 @@ func (s *CopySegmentInspectorSuite) TestProcessPending() {
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
 
 	// Create a job
-	job := &copySegmentJob{
+	job := &copysegment.Job{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:        s.jobID,
 			CollectionId: s.collectionID,
 			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
 		},
-		tr: timerecord.NewTimeRecorder("test job"),
+		Tr: timerecord.NewTimeRecorder("test job"),
 	}
 	err := s.copyMeta.AddJob(context.TODO(), job)
 	s.NoError(err)
 
 	// Create a pending task
-	task := &copySegmentTask{
-		copyMeta: s.copyMeta,
-		tr:       timerecord.NewTimeRecorder("task"),
-		times:    taskcommon.NewTimes(),
+	task := &copysegment.Task{
+		CopyMeta: s.copyMeta,
+		Tr:       timerecord.NewTimeRecorder("task"),
+		Times:    taskcommon.NewTimes(),
 	}
-	task.task.Store(&datapb.CopySegmentTask{
+	task.Task.Store(&datapb.CopySegmentTask{
 		TaskId:       1001,
 		JobId:        s.jobID,
 		CollectionId: s.collectionID,
@@ -221,11 +225,11 @@ func (s *CopySegmentInspectorSuite) TestProcessPending() {
 
 	// Expect task to be enqueued
 	s.scheduler.EXPECT().Enqueue(mock.MatchedBy(func(t any) bool {
-		copyTask, ok := t.(CopySegmentTask)
+		copyTask, ok := t.(copysegment.CopySegmentTask)
 		return ok && copyTask.GetTaskId() == 1001
 	})).Once()
 
-	s.inspector.processPending(task)
+	s.inspector.ProcessPending(task)
 }
 
 func (s *CopySegmentInspectorSuite) TestProcessFailed_DropTargetSegments() {
@@ -235,7 +239,7 @@ func (s *CopySegmentInspectorSuite) TestProcessFailed_DropTargetSegments() {
 	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
 
 	// Create target segments
-	seg1 := NewSegmentInfo(&datapb.SegmentInfo{
+	seg1 := meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID:            101,
 		CollectionID:  s.collectionID,
 		PartitionID:   10,
@@ -246,7 +250,7 @@ func (s *CopySegmentInspectorSuite) TestProcessFailed_DropTargetSegments() {
 	err := s.meta.AddSegment(context.TODO(), seg1)
 	s.NoError(err)
 
-	seg2 := NewSegmentInfo(&datapb.SegmentInfo{
+	seg2 := meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID:            102,
 		CollectionID:  s.collectionID,
 		PartitionID:   10,
@@ -254,16 +258,16 @@ func (s *CopySegmentInspectorSuite) TestProcessFailed_DropTargetSegments() {
 		NumOfRows:     100,
 		InsertChannel: "ch1",
 	})
-	s.meta.segments.SetSegment(seg2.GetID(), seg2)
+	s.meta.Segments.SetSegment(seg2.GetID(), seg2)
 
 	// Create a job
-	job := &copySegmentJob{
+	job := &copysegment.Job{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:        s.jobID,
 			CollectionId: s.collectionID,
 			State:        datapb.CopySegmentJobState_CopySegmentJobFailed,
 		},
-		tr: timerecord.NewTimeRecorder("test job"),
+		Tr: timerecord.NewTimeRecorder("test job"),
 	}
 	err = s.copyMeta.AddJob(context.TODO(), job)
 	s.NoError(err)
@@ -274,12 +278,12 @@ func (s *CopySegmentInspectorSuite) TestProcessFailed_DropTargetSegments() {
 		{SourceSegmentId: 2, TargetSegmentId: 102, PartitionId: 10},
 	}
 
-	task := &copySegmentTask{
-		copyMeta: s.copyMeta,
-		tr:       timerecord.NewTimeRecorder("task"),
-		times:    taskcommon.NewTimes(),
+	task := &copysegment.Task{
+		CopyMeta: s.copyMeta,
+		Tr:       timerecord.NewTimeRecorder("task"),
+		Times:    taskcommon.NewTimes(),
 	}
-	task.task.Store(&datapb.CopySegmentTask{
+	task.Task.Store(&datapb.CopySegmentTask{
 		TaskId:       1001,
 		JobId:        s.jobID,
 		CollectionId: s.collectionID,
@@ -291,7 +295,7 @@ func (s *CopySegmentInspectorSuite) TestProcessFailed_DropTargetSegments() {
 	s.NoError(err)
 
 	// Process failed task
-	s.inspector.processFailed(task)
+	s.inspector.ProcessFailed(task)
 
 	// Target segment should be marked as Dropped
 	segment := s.meta.GetSegment(context.TODO(), 101)
@@ -306,13 +310,13 @@ func (s *CopySegmentInspectorSuite) TestProcessFailed_NoTargetSegment() {
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil)
 
 	// Create a job
-	job := &copySegmentJob{
+	job := &copysegment.Job{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:        s.jobID,
 			CollectionId: s.collectionID,
 			State:        datapb.CopySegmentJobState_CopySegmentJobFailed,
 		},
-		tr: timerecord.NewTimeRecorder("test job"),
+		Tr: timerecord.NewTimeRecorder("test job"),
 	}
 	err := s.copyMeta.AddJob(context.TODO(), job)
 	s.NoError(err)
@@ -322,12 +326,12 @@ func (s *CopySegmentInspectorSuite) TestProcessFailed_NoTargetSegment() {
 		{SourceSegmentId: 1, TargetSegmentId: 999, PartitionId: 10},
 	}
 
-	task := &copySegmentTask{
-		copyMeta: s.copyMeta,
-		tr:       timerecord.NewTimeRecorder("task"),
-		times:    taskcommon.NewTimes(),
+	task := &copysegment.Task{
+		CopyMeta: s.copyMeta,
+		Tr:       timerecord.NewTimeRecorder("task"),
+		Times:    taskcommon.NewTimes(),
 	}
-	task.task.Store(&datapb.CopySegmentTask{
+	task.Task.Store(&datapb.CopySegmentTask{
 		TaskId:       1001,
 		JobId:        s.jobID,
 		CollectionId: s.collectionID,
@@ -340,7 +344,7 @@ func (s *CopySegmentInspectorSuite) TestProcessFailed_NoTargetSegment() {
 
 	// Process failed task should not panic when segment doesn't exist
 	s.NotPanics(func() {
-		s.inspector.processFailed(task)
+		s.inspector.ProcessFailed(task)
 	})
 }
 
@@ -351,7 +355,7 @@ func (s *CopySegmentInspectorSuite) TestInspect_ProcessPendingAndFailedTasks() {
 	s.catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
 
 	// Create target segment
-	seg1 := NewSegmentInfo(&datapb.SegmentInfo{
+	seg1 := meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID:            101,
 		CollectionID:  s.collectionID,
 		PartitionID:   10,
@@ -363,24 +367,24 @@ func (s *CopySegmentInspectorSuite) TestInspect_ProcessPendingAndFailedTasks() {
 	s.NoError(err)
 
 	// Create a job
-	job := &copySegmentJob{
+	job := &copysegment.Job{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:        s.jobID,
 			CollectionId: s.collectionID,
 			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
 		},
-		tr: timerecord.NewTimeRecorder("test job"),
+		Tr: timerecord.NewTimeRecorder("test job"),
 	}
 	err = s.copyMeta.AddJob(context.TODO(), job)
 	s.NoError(err)
 
 	// Create a pending task
-	task1 := &copySegmentTask{
-		copyMeta: s.copyMeta,
-		tr:       timerecord.NewTimeRecorder("task1"),
-		times:    taskcommon.NewTimes(),
+	task1 := &copysegment.Task{
+		CopyMeta: s.copyMeta,
+		Tr:       timerecord.NewTimeRecorder("task1"),
+		Times:    taskcommon.NewTimes(),
 	}
-	task1.task.Store(&datapb.CopySegmentTask{
+	task1.Task.Store(&datapb.CopySegmentTask{
 		TaskId:       1001,
 		JobId:        s.jobID,
 		CollectionId: s.collectionID,
@@ -390,12 +394,12 @@ func (s *CopySegmentInspectorSuite) TestInspect_ProcessPendingAndFailedTasks() {
 	s.NoError(err)
 
 	// Create an in-progress task (should not be processed by inspect)
-	task2 := &copySegmentTask{
-		copyMeta: s.copyMeta,
-		tr:       timerecord.NewTimeRecorder("task2"),
-		times:    taskcommon.NewTimes(),
+	task2 := &copysegment.Task{
+		CopyMeta: s.copyMeta,
+		Tr:       timerecord.NewTimeRecorder("task2"),
+		Times:    taskcommon.NewTimes(),
 	}
-	task2.task.Store(&datapb.CopySegmentTask{
+	task2.Task.Store(&datapb.CopySegmentTask{
 		TaskId:       1002,
 		JobId:        s.jobID,
 		CollectionId: s.collectionID,
@@ -408,12 +412,12 @@ func (s *CopySegmentInspectorSuite) TestInspect_ProcessPendingAndFailedTasks() {
 	idMappings := []*datapb.CopySegmentIDMapping{
 		{SourceSegmentId: 1, TargetSegmentId: 101, PartitionId: 10},
 	}
-	task3 := &copySegmentTask{
-		copyMeta: s.copyMeta,
-		tr:       timerecord.NewTimeRecorder("task3"),
-		times:    taskcommon.NewTimes(),
+	task3 := &copysegment.Task{
+		CopyMeta: s.copyMeta,
+		Tr:       timerecord.NewTimeRecorder("task3"),
+		Times:    taskcommon.NewTimes(),
 	}
-	task3.task.Store(&datapb.CopySegmentTask{
+	task3.Task.Store(&datapb.CopySegmentTask{
 		TaskId:       1003,
 		JobId:        s.jobID,
 		CollectionId: s.collectionID,
@@ -425,12 +429,12 @@ func (s *CopySegmentInspectorSuite) TestInspect_ProcessPendingAndFailedTasks() {
 
 	// Expect only the pending task to be enqueued
 	s.scheduler.EXPECT().Enqueue(mock.MatchedBy(func(t any) bool {
-		copyTask, ok := t.(CopySegmentTask)
+		copyTask, ok := t.(copysegment.CopySegmentTask)
 		return ok && copyTask.GetTaskId() == 1001
 	})).Once()
 
 	// Inspect should process pending and failed tasks
-	s.inspector.inspect()
+	s.inspector.Inspect()
 
 	// Verify failed task's target segment is dropped
 	segment := s.meta.GetSegment(context.TODO(), 101)
@@ -442,35 +446,35 @@ func (s *CopySegmentInspectorSuite) TestInspect_MultipleJobs() {
 	s.catalog.EXPECT().SaveCopySegmentTask(mock.Anything, mock.Anything).Return(nil).Times(2)
 
 	// Create two jobs
-	job1 := &copySegmentJob{
+	job1 := &copysegment.Job{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:        100,
 			CollectionId: s.collectionID,
 			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
 		},
-		tr: timerecord.NewTimeRecorder("job1"),
+		Tr: timerecord.NewTimeRecorder("job1"),
 	}
 	err := s.copyMeta.AddJob(context.TODO(), job1)
 	s.NoError(err)
 
-	job2 := &copySegmentJob{
+	job2 := &copysegment.Job{
 		CopySegmentJob: &datapb.CopySegmentJob{
 			JobId:        200,
 			CollectionId: s.collectionID,
 			State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
 		},
-		tr: timerecord.NewTimeRecorder("job2"),
+		Tr: timerecord.NewTimeRecorder("job2"),
 	}
 	err = s.copyMeta.AddJob(context.TODO(), job2)
 	s.NoError(err)
 
 	// Create pending tasks for both jobs
-	task1 := &copySegmentTask{
-		copyMeta: s.copyMeta,
-		tr:       timerecord.NewTimeRecorder("task1"),
-		times:    taskcommon.NewTimes(),
+	task1 := &copysegment.Task{
+		CopyMeta: s.copyMeta,
+		Tr:       timerecord.NewTimeRecorder("task1"),
+		Times:    taskcommon.NewTimes(),
 	}
-	task1.task.Store(&datapb.CopySegmentTask{
+	task1.Task.Store(&datapb.CopySegmentTask{
 		TaskId:       1001,
 		JobId:        100,
 		CollectionId: s.collectionID,
@@ -479,12 +483,12 @@ func (s *CopySegmentInspectorSuite) TestInspect_MultipleJobs() {
 	err = s.copyMeta.AddTask(context.TODO(), task1)
 	s.NoError(err)
 
-	task2 := &copySegmentTask{
-		copyMeta: s.copyMeta,
-		tr:       timerecord.NewTimeRecorder("task2"),
-		times:    taskcommon.NewTimes(),
+	task2 := &copysegment.Task{
+		CopyMeta: s.copyMeta,
+		Tr:       timerecord.NewTimeRecorder("task2"),
+		Times:    taskcommon.NewTimes(),
 	}
-	task2.task.Store(&datapb.CopySegmentTask{
+	task2.Task.Store(&datapb.CopySegmentTask{
 		TaskId:       2001,
 		JobId:        200,
 		CollectionId: s.collectionID,
@@ -496,7 +500,7 @@ func (s *CopySegmentInspectorSuite) TestInspect_MultipleJobs() {
 	// Expect both tasks to be enqueued
 	s.scheduler.EXPECT().Enqueue(mock.Anything).Times(2)
 
-	s.inspector.inspect()
+	s.inspector.Inspect()
 }
 
 func (s *CopySegmentInspectorSuite) TestClose() {
@@ -510,7 +514,7 @@ func (s *CopySegmentInspectorSuite) TestClose() {
 func (s *CopySegmentInspectorSuite) TestInspect_EmptyJobs() {
 	// Inspect with no jobs should not panic
 	s.NotPanics(func() {
-		s.inspector.inspect()
+		s.inspector.Inspect()
 	})
 }
 
@@ -521,24 +525,24 @@ func (s *CopySegmentInspectorSuite) TestInspect_JobsAreSorted() {
 	// Create jobs with non-sequential IDs to test sorting
 	jobs := []int64{300, 100, 200}
 	for _, jobID := range jobs {
-		job := &copySegmentJob{
+		job := &copysegment.Job{
 			CopySegmentJob: &datapb.CopySegmentJob{
 				JobId:        jobID,
 				CollectionId: s.collectionID,
 				State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
 			},
-			tr: timerecord.NewTimeRecorder("job"),
+			Tr: timerecord.NewTimeRecorder("job"),
 		}
 		err := s.copyMeta.AddJob(context.TODO(), job)
 		s.NoError(err)
 
 		// Create a pending task for each job
-		task := &copySegmentTask{
-			copyMeta: s.copyMeta,
-			tr:       timerecord.NewTimeRecorder("task"),
-			times:    taskcommon.NewTimes(),
+		task := &copysegment.Task{
+			CopyMeta: s.copyMeta,
+			Tr:       timerecord.NewTimeRecorder("task"),
+			Times:    taskcommon.NewTimes(),
 		}
-		task.task.Store(&datapb.CopySegmentTask{
+		task.Task.Store(&datapb.CopySegmentTask{
 			TaskId:       jobID*10 + 1,
 			JobId:        jobID,
 			CollectionId: s.collectionID,
@@ -551,12 +555,12 @@ func (s *CopySegmentInspectorSuite) TestInspect_JobsAreSorted() {
 	// Track the order of task IDs being enqueued
 	var enqueuedTaskIDs []int64
 	s.scheduler.EXPECT().Enqueue(mock.Anything).Run(func(t task2.Task) {
-		copyTask, ok := t.(CopySegmentTask)
+		copyTask, ok := t.(copysegment.CopySegmentTask)
 		s.True(ok)
 		enqueuedTaskIDs = append(enqueuedTaskIDs, copyTask.GetTaskId())
 	}).Times(3)
 
-	s.inspector.inspect()
+	s.inspector.Inspect()
 
 	// Verify tasks were processed in order of job IDs (100, 200, 300)
 	s.Equal([]int64{1001, 2001, 3001}, enqueuedTaskIDs)

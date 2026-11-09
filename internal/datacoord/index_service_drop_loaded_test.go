@@ -28,6 +28,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -62,11 +64,11 @@ func newLoadedVectorIndexServer(t *testing.T) (*Server, *indexpb.DropIndexReques
 		},
 	}, nil)
 	s := &Server{
-		meta: &meta{
-			catalog: catalog,
-			indexMeta: &indexMeta{
-				catalog: catalog,
-				indexes: map[UniqueID]map[UniqueID]*model.Index{
+		meta: &meta.Meta{
+			Catalog: catalog,
+			IndexCatalog: &index.IndexMeta{
+				Catalog: catalog,
+				Indexes: map[UniqueID]map[UniqueID]*model.Index{
 					collID: {
 						indexID: {
 							CollectionID: collID,
@@ -78,14 +80,15 @@ func newLoadedVectorIndexServer(t *testing.T) (*Server, *indexpb.DropIndexReques
 						},
 					},
 				},
-				segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
+				SegmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 			},
-			segments: NewSegmentsInfo(),
+			Segments: meta.NewSegmentsInfo(),
 		},
 		broker:          b,
-		allocator:       newMockAllocator(t),
+		allocator:       meta.NewMockAllocator(t),
 		notifyIndexChan: make(chan UniqueID, 1),
 	}
+	s.indexMeta = s.meta.IndexCatalog.(*index.IndexMeta)
 	mixCoord := mocks.NewMixCoord(t)
 	mixCoord.EXPECT().ShowLoadCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
 		Status:        merr.Success(),
@@ -104,6 +107,6 @@ func TestDropVectorIndexOnLoadedIsRefused(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, merr.Ok(status))
 	assert.Contains(t, status.GetReason(), "vector index cannot be dropped on loaded collection")
-	assert.NotEmpty(t, s.meta.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName()),
+	assert.NotEmpty(t, s.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName()),
 		"a refused drop must leave the index in place")
 }
