@@ -83,6 +83,7 @@ def is_verified_subfield_drop_failure(error, events, errors):
         len(summaries) != 1
         or not summaries[0]["read_write_overlap"]
         or not all(summaries[0]["ddl_write_overlap"].values())
+        or not all(summaries[0]["ddl_read_overlap"].values())
     ):
         return False
     return any(e["event"] == "verified" and e["phase"] == "reloaded" for e in events)
@@ -254,6 +255,185 @@ class TestMilvusClientStructArrayConcurrentMutations(MetadataStructArrayTestBase
 
 class TestMilvusClientStructArrayConcurrentSchemaUpdates(StructArrayTestBase):
     skip_global_role_cleanup = True
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("kind", ["scalar", "nested", "vector"])
+    @pytest.mark.parametrize("surface", ["query", "search"])
+    def test_add_drop_readd_child_overlaps_queries_and_preserves_schema_snapshots(self, kind, surface):
+        """
+        target: exercise queries naming a child while it is added, dropped and recreated
+        method: continuously read stable and changing projections; retain actual RPC intervals and row snapshots
+        expected: each DDL overlaps both readers, valid schema snapshots, explicit missing-field errors, fresh IDs
+        """
+        client = self._client()
+        name, schema = self.create_struct_collection(client, nullable_children())
+        rows = [make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n)) for n in range(128)]
+        model = self.insert_rows_with_model(client, name, rows)
+        dtype, options = {
+            "scalar": (DataType.INT64, {}),
+            "nested": (DataType.ARRAY, {"element_type": DataType.INT64, "max_capacity": 4, "element_nullable": True}),
+            "vector": (DataType.FLOAT_VECTOR, {"dim": 16}),
+        }[kind]
+        field = cf.gen_scalar_field(dtype, name="changing", **options)
+        query_vector = rows[0]["normal_vector"]
+        journal = []
+        first_id = None
+        for operation in ("add", "drop", "readd"):
+            before = copy.deepcopy(model)
+            after = copy.deepcopy(model)
+            for row in after.values():
+                for element in row["clips"] or []:
+                    if operation == "drop":
+                        del element["changing"]
+                    else:
+                        element["changing"] = None
+            started = {target: threading.Event() for target in (False, True)}
+            finished = threading.Event()
+            observations = []
+            lock = threading.Lock()
+            null_test = "IS NOT NULL" if operation == "drop" else "IS NULL"
+            target_expression = f"MATCH_ANY(clips, $[changing] {null_test})"
+
+            def read(target):
+                deadline = time.monotonic() + 90
+                count = 0
+                while not finished.is_set() or count < 3:
+                    assert time.monotonic() < deadline, "DDL/query concurrency deadline"
+                    record = {"target": target, "start": time.monotonic_ns()}
+                    started[target].set()
+                    try:
+                        expression = target_expression if target else "id >= 0"
+                        if surface == "query":
+                            result = client.query(
+                                name,
+                                filter=expression,
+                                output_fields=["id", "clips"],
+                                limit=len(model) + 1,
+                                consistency_level="Strong",
+                                timeout=30,
+                            )
+                        else:
+                            hits = client.search(
+                                name,
+                                [query_vector],
+                                anns_field="normal_vector",
+                                filter=expression,
+                                output_fields=["clips"],
+                                limit=len(model) + 1,
+                                search_params={"metric_type": "L2"},
+                                consistency_level="Strong",
+                                timeout=30,
+                            )
+                            result = [{"id": hit["id"], "clips": hit["entity"]["clips"]} for hit in hits[0]]
+                        record["rows"] = sorted(result, key=lambda row: row["id"])
+                    except MilvusException as error:
+                        record.update(code=error.code, message=error.message)
+                    finally:
+                        record["end"] = time.monotonic_ns()
+                        with lock:
+                            observations.append(record)
+                    count += 1
+
+            def evolve():
+                assert all(event.wait(timeout=30) for event in started.values())
+                begin = time.monotonic_ns()
+                try:
+                    if operation == "drop":
+                        client.drop_collection_field(name, field_name="clips[changing]", timeout=60)
+                    else:
+                        client.add_collection_field(
+                            name, "clips[changing]", dtype, nullable=True, timeout=60, **options
+                        )
+                    return begin, time.monotonic_ns()
+                finally:
+                    finished.set()
+
+            with ThreadPoolExecutor(max_workers=3) as pool:
+                readers = [pool.submit(read, target) for target in (False, True)]
+                ddl = pool.submit(evolve)
+                ddl_start, ddl_end = ddl.result(timeout=90)
+                for future in readers:
+                    future.result(timeout=100)
+            overlaps = {
+                target: sum(
+                    r["target"] == target and r["start"] < ddl_end and ddl_start < r["end"] for r in observations
+                )
+                for target in (False, True)
+            }
+            journal.append(
+                {
+                    "operation": operation,
+                    "surface": surface,
+                    "ddl_start": ddl_start,
+                    "ddl_end": ddl_end,
+                    "overlaps": overlaps,
+                    "reads": observations,
+                }
+            )
+            allure.attach(
+                json.dumps(journal),
+                name=f"{operation} {surface} intervals",
+                attachment_type=allure.attachment_type.JSON,
+            )
+            log.info(f"STRUCT_DDL_READ operation={operation} surface={surface} overlaps={overlaps}")
+            assert all(overlaps.values()), journal[-1]
+            for observation in observations:
+                states = (
+                    [before]
+                    if observation["end"] < ddl_start
+                    else [after]
+                    if observation["start"] > ddl_end
+                    else [before, after]
+                )
+                if "code" in observation:
+                    assert observation["target"], observation
+                    assert any(
+                        not any("changing" in e for r in state.values() for e in r["clips"] or []) for state in states
+                    ), observation
+                    assert observation["code"] == 1100 and "changing" in observation["message"], observation
+                    assert any(
+                        word in observation["message"].lower() for word in ("not found", "not exist", "unknown")
+                    ), observation
+                    continue
+                candidates = []
+                for state in states:
+                    if observation["target"]:
+                        if not any("changing" in e for r in state.values() for e in r["clips"] or []):
+                            continue
+                        state = {
+                            pk: row
+                            for pk, row in state.items()
+                            if any(
+                                (e["changing"] is not None) if operation == "drop" else (e["changing"] is None)
+                                for e in row["clips"] or []
+                            )
+                        }
+                    candidates.append([{"id": pk, "clips": row["clips"]} for pk, row in sorted(state.items())])
+                matched = False
+                for candidate in candidates:
+                    try:
+                        assert_values_equal(observation["rows"], candidate)
+                        matched = True
+                    except AssertionError:
+                        pass
+                assert matched, observation
+            model = after
+            self.assert_rows(client, name, model)
+            if operation == "add":
+                first_id = self.get_child_id(client, name, "changing")
+                # Seed non-null old-generation values so a reused field ID cannot hide stale data.
+                for row in model.values():
+                    for element in row["clips"] or []:
+                        element["changing"] = cf.gen_data_by_collection_field(field)
+                self.upsert(client, name, list(model.values()))
+            elif operation == "readd":
+                assert self.get_child_id(client, name, "changing") > first_id
+            if kind == "vector" and operation != "drop":
+                indexes, _ = self.prepare_index_params(client)
+                indexes.add_index("clips[changing]", index_type="FLAT", metric_type="L2")
+                self.create_index(client, name, indexes)
+            self.reload_collection(client, name)
+            self.assert_rows(client, name, model)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("kind", ["scalar", "nested", "vector"])

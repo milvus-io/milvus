@@ -789,8 +789,15 @@ class MixedHistory:
                 for e in ends
                 if e.get("ddl")
             }
-            if not overlap or not all(ddl_overlap.values()):
-                failure = failure or AssertionError("Required read/write or DDL/write overlap was not observed")
+            ddl_read_overlap = {
+                e["op"] + f"_{e['epoch']}": sum(r["rpc_start"] < e["end"] and e["rpc_start"] < r["end"] for r in reads)
+                for e in ends
+                if e.get("ddl")
+            }
+            if not overlap or not all(ddl_overlap.values()) or not all(ddl_read_overlap.values()):
+                failure = failure or AssertionError(
+                    "Required read/write, DDL/write or DDL/read overlap was not observed"
+                )
             summary = {
                 "event": "summary",
                 "seed": self.seed,
@@ -799,6 +806,7 @@ class MixedHistory:
                 "counts": dict(Counter(e["op"] for e in ends)),
                 "read_write_overlap": overlap,
                 "ddl_write_overlap": ddl_overlap,
+                "ddl_read_overlap": ddl_read_overlap,
                 "uncertain_writes": len(uncertain),
                 "acknowledged_writes": sum(
                     h["outcome"] == "ack" for history in self.histories.values() for h in history
@@ -810,7 +818,7 @@ class MixedHistory:
             (self.path / f"{self.name}-summary.json").write_text(json.dumps(summary, indent=2))
             self.journal.close()
             if failure is None:
-                assert overlap > 0 and all(ddl_overlap.values()), summary
+                assert overlap > 0 and all(ddl_overlap.values()) and all(ddl_read_overlap.values()), summary
                 assert not uncertain, summary
         if failure:
             raise failure
