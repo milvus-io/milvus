@@ -633,3 +633,230 @@ class TestMilvusClientStructArrayQueryNullReduction(MetadataStructArrayTestBase)
                     len(ids),
                     all(expected[key]["normal_vector"] is None for key in ids),
                 )
+
+
+class TestMilvusClientStructArrayArrayJsonSemantics(StructArrayTestBase):
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("dtype", [DataType.INT64, DataType.VARCHAR], ids=["int64", "varchar"])
+    def test_array_json_struct_filters_share_value_and_unknown_semantics(self, dtype):
+        """
+        target: align common array predicates across ARRAY, JSON and Struct Array
+        method: share boundary inputs and independent oracles through query/search, updates and reload
+        expected: equal PK sets for common predicates; explicit NULL/path capability differences
+        """
+        client = self._client()
+        options = {"element_type": dtype, "max_capacity": 8}
+        if dtype == DataType.VARCHAR:
+            options["max_length"] = 16
+        name, schema = self.create_struct_collection(
+            client,
+            {
+                "anchor": child_schema(DataType.INT64, False),
+                "tags": child_schema(DataType.ARRAY, element_nullable=True, **options),
+            },
+            dim=24,
+            extra_fields=[
+                cf.gen_scalar_field(DataType.ARRAY, name="values", nullable=True, **options),
+                cf.gen_scalar_field(DataType.JSON, name="doc", nullable=True),
+            ],
+        )
+        first, second, other = (1, 2, 3) if dtype == DataType.INT64 else ("雪", 'a"b', "λ")
+        boundary = [-(2**63), 2**63 - 1] if dtype == DataType.INT64 else ["", "雪" * 5 + "x"]
+        values = [
+            None,
+            None,
+            None,
+            [],
+            [first],
+            [first, second],
+            [second, first, second],
+            [other],
+            [first] * 8,
+            boundary,
+            None,
+        ]
+        rows = cf.gen_row_data_by_schema_with_defaults(
+            nb=len(values),
+            schema=schema,
+            default_values={
+                "values": copy.deepcopy(values),
+                "doc": [{"values": copy.deepcopy(value)} for value in values],
+                "clips": [[{"anchor": 0, "tags": copy.deepcopy(value)}] for value in values],
+            },
+        )
+        # Omitted parents, omitted nested members and explicit parent NULL are distinct inputs.
+        for field in ("values", "doc", "clips"):
+            del rows[0][field]
+        rows[1].pop("values")
+        rows[1]["doc"] = {}
+        rows[1]["clips"] = [{"anchor": 0}]
+        rows[10].update(values=None, doc=None, clips=None)
+        model = {row["id"]: copy.deepcopy(row) for row in rows}
+        model[0].update(values=None, doc=None, clips=None)
+        model[1]["values"] = None
+        model[1]["clips"][0]["tags"] = None
+        self.insert(client, name, rows)
+        query_vector = rows[3]["normal_vector"]
+        predicates = [
+            (f"array_contains({{path}}, {json.dumps(first)})", lambda value: first in value),
+            (
+                f"array_contains_any({{path}}, {json.dumps([first, other])})",
+                lambda value: first in value or other in value,
+            ),
+            (
+                f"array_contains_all({{path}}, {json.dumps([first, second])})",
+                lambda value: first in value and second in value,
+            ),
+            ("array_contains_any({path}, [])", lambda value: False),
+            ("array_contains_all({path}, [])", lambda value: True),
+            ("array_length({path}) == 0", lambda value: len(value) == 0),
+            ("array_length({path}) == 2", lambda value: len(value) == 2),
+            (f"{{path}} == {json.dumps([first, second])}", lambda value: value == [first, second]),
+            (f"{{path}} != {json.dumps([first, second])}", lambda value: value != [first, second]),
+        ]
+        failures = []
+
+        def check_filter(expression, expected, phase):
+            actual, _ = self.query(client, name, filter=expression, output_fields=["id"], limit=len(model) + 1)
+            hits, _ = self.search(
+                client,
+                name,
+                [query_vector],
+                anns_field="normal_vector",
+                filter=expression,
+                limit=len(model) + 1,
+                search_params={"metric_type": "L2"},
+                output_fields=["id"],
+            )
+            for surface, result in (("query", actual), ("search", hits[0])):
+                ids = [row["id"] for row in result]
+                if len(ids) != len(set(ids)) or set(ids) != expected:
+                    failures.append(
+                        {
+                            "phase": phase,
+                            "surface": surface,
+                            "expression": expression,
+                            "expected": sorted(expected),
+                            "actual": ids,
+                        }
+                    )
+
+        for phase in ("growing", "sealed", "updated_sealed"):
+            for template, predicate in predicates:
+                for negate in (False, True):
+                    expected = {
+                        pk
+                        for pk, value in enumerate(values)
+                        if value is not None and (not predicate(value) if negate else predicate(value))
+                    }
+                    for path in ("values", 'doc["values"]', "clips[0][tags]"):
+                        expression = template.format(path=path)
+                        wanted = expected
+                        # JSON empty candidate lists are constants; typed nullable arrays propagate UNKNOWN.
+                        if path == 'doc["values"]' and template in (
+                            "array_contains_any({path}, [])",
+                            "array_contains_all({path}, [])",
+                        ):
+                            matches = template.startswith("array_contains_all") != negate
+                            wanted = set(model) if matches else set()
+                        check_filter(f"not ({expression})" if negate else expression, wanted, phase)
+            # JSON path existence excludes missing, null and recursively empty containers.
+            # The same stored JSON must retain this result across growing/sealed execution.
+            check_filter("values IS NULL", {pk for pk, value in enumerate(values) if value is None}, phase)
+            json_null = {pk for pk, row in model.items() if row["doc"] is None or not row["doc"].get("values")}
+            check_filter('doc["values"] IS NULL', json_null, phase)
+            check_filter('doc["values"] IS NOT NULL', set(model) - json_null, phase)
+            child_nulls = {pk for pk, row in model.items() if row["clips"] and row["clips"][0]["tags"] is None}
+            check_filter("MATCH_ANY(clips, $[tags] IS NULL)", child_nulls, phase)
+            # Out-of-range Struct extraction remains UNKNOWN even under NOT.
+            check_filter("array_length(clips[7][tags]) == 0", set(), phase)
+            check_filter("not (array_length(clips[7][tags]) == 0)", set(), phase)
+            self.assert_rows(client, name, model)
+            if phase == "sealed":
+                patches = []
+                for pk in (0, 1, 2):
+                    value = [second, first]
+                    patch = {
+                        "id": pk,
+                        "values": value,
+                        "doc": {"values": value},
+                        "clips": [{"anchor": 0, "tags": value}],
+                    }
+                    patches.append(patch)
+                    values[pk] = value
+                    model[pk].update(copy.deepcopy(patch))
+                self.upsert(client, name, patches, partial_update=True)
+                # SDK batches require a uniform field set; omitted fields remain unchanged.
+                self.upsert(client, name, [{"id": 3, "revision": 17}], partial_update=True)
+                model[3]["revision"] = 17
+            if phase != "updated_sealed":
+                self.reload_collection(client, name)
+        for expression in ("values[0] IS NULL", "clips[0][tags] IS NULL"):
+            self.query(
+                client,
+                name,
+                filter=expression,
+                check_task=CheckTasks.err_res,
+                check_items={"err_code": 1100, "err_msg": ""},
+            )
+        assert not failures, json.dumps(failures, ensure_ascii=False)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_json_struct_null_leaves_preserve_slots_and_array_rejects_them(self):
+        """
+        target: distinguish supported NULL leaves from ordinary typed Array restrictions
+        method: share JSON/Struct NULL-leaf inputs, reject the same ordinary Array input, then reload
+        expected: logical lengths include NULL slots and rejected writes leave the model unchanged
+        """
+        client = self._client()
+        options = {"element_type": DataType.INT64, "max_capacity": 4}
+        name, schema = self.create_struct_collection(
+            client,
+            {
+                "anchor": child_schema(DataType.INT64, False),
+                "tags": child_schema(DataType.ARRAY, element_nullable=True, **options),
+            },
+            extra_fields=[
+                cf.gen_scalar_field(DataType.ARRAY, name="values", nullable=True, **options),
+                cf.gen_scalar_field(DataType.JSON, name="doc", nullable=True),
+            ],
+        )
+        values = [None, [], [None], [1, None, 2], [None, None, None, None]]
+        rows = cf.gen_row_data_by_schema_with_defaults(
+            nb=len(values),
+            schema=schema,
+            default_values={
+                "values": [None] * len(values),
+                "doc": [{"values": v} for v in values],
+                "clips": [[{"anchor": 0, "tags": v}] for v in values],
+            },
+        )
+        model = self.insert_rows_with_model(client, name, rows, split=False)
+        for phase in range(2):
+            for path in ('doc["values"]', "clips[0][tags]"):
+                for length in (0, 1, 3, 4):
+                    actual, _ = self.query(
+                        client, name, filter=f"array_length({path}) == {length}", output_fields=["id"], limit=10
+                    )
+                    assert {r["id"] for r in actual} == {
+                        i for i, v in enumerate(values) if v is not None and len(v) == length
+                    }
+                for negate in (False, True):
+                    expression = f"array_contains({path}, 1)"
+                    actual, _ = self.query(
+                        client,
+                        name,
+                        filter=f"not ({expression})" if negate else expression,
+                        output_fields=["id"],
+                        limit=10,
+                    )
+                    expected = {
+                        i for i, v in enumerate(values) if v is not None and ((1 not in v) if negate else (1 in v))
+                    }
+                    assert {r["id"] for r in actual} == expected
+            rejected = copy.deepcopy(rows[3])
+            rejected.update(id=100, values=[1, None, 2])
+            self.assert_insert_rejected(client, name, [rejected], model)
+            self.assert_rows(client, name, model)
+            if phase == 0:
+                self.reload_collection(client, name)

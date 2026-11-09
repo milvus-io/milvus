@@ -744,6 +744,73 @@ class TestMilvusClientStructArrayPartialUpdatePaths(StructArrayTestBase):
         self.reload_collection(client, name)
         self.assert_rows(client, name, model)
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("dtype", [DataType.INT64, DataType.VARCHAR], ids=["int64", "varchar"])
+    def test_path_replace_array_json_struct_preserves_siblings_and_rejects_out_of_bounds(self, dtype):
+        """
+        target: align positional replacement and non-mutation on invalid indexes across three representations
+        method: replace the same logical position through SDK-encoded wire operands, reject out-of-range paths, reload
+        expected: equal selected values; unchanged order, siblings and rows for rejected requests
+        """
+        client = self._client()
+        options = {"element_type": dtype, "max_capacity": 4}
+        scalar_options = {"max_length": 16} if dtype == DataType.VARCHAR else {}
+        name, schema = self.create_struct_collection(
+            client,
+            {"anchor": child_schema(DataType.INT64, False), "value": child_schema(dtype, **scalar_options)},
+            extra_fields=[
+                cf.gen_scalar_field(DataType.ARRAY, name="values", **options, **scalar_options),
+                cf.gen_scalar_field(DataType.JSON, name="doc"),
+            ],
+        )
+        values = [10, 20, 30] if dtype == DataType.INT64 else ["雪", 'a"b', "λ"]
+        replacement = -(2**63) if dtype == DataType.INT64 else "雪" * 5 + "x"
+        rows = cf.gen_row_data_by_schema_with_defaults(
+            nb=4,
+            schema=schema,
+            default_values={
+                "values": [copy.deepcopy(values) for _ in range(4)],
+                "doc": [{"values": copy.deepcopy(values), "keep": "unchanged"} for _ in range(4)],
+                "clips": [[{"anchor": n, "value": value} for n, value in enumerate(values)] for _ in range(4)],
+            },
+        )
+        model = self.insert_rows_with_model(client, name, rows)
+        handler = client._get_connection()
+        request = handler._prepare_row_upsert_request(
+            name,
+            [{"id": 0, "values": [replacement], "doc": {}, "clips": [{"anchor": 0, "value": replacement}]}],
+            partial_update=True,
+        )
+        # PATH_REPLACE requires a direct JSON value and only the selected Struct child.
+        # The current SDK row encoder drops paths, so retain the existing raw-RPC E2E boundary.
+        next(f for f in request.fields_data if f.field_name == "doc").scalars.json_data.data[0] = json.dumps(
+            replacement
+        ).encode()
+        child = copy.deepcopy(wire_child(request, "value"))
+        del wire_struct(request).fields[:]
+        wire_struct(request).fields.append(child)
+        paths = {"values": "[1]", "doc": '["values"][1]', "clips": "[1][value]"}
+        for field, path in paths.items():
+            request.field_ops.add(field_name=field, op=3, path=path)
+        check_status(handler._stub.Upsert(request, timeout=30).status)
+        model[0]["values"][1] = replacement
+        model[0]["doc"]["values"][1] = replacement
+        model[0]["clips"][1]["value"] = replacement
+        for phase in range(2):
+            self.assert_rows(client, name, model)
+            for field, path in paths.items():
+                invalid = copy.deepcopy(request)
+                operands = [copy.deepcopy(f) for f in invalid.fields_data if f.field_name in ("id", field)]
+                del invalid.fields_data[:]
+                invalid.fields_data.extend(operands)
+                del invalid.field_ops[:]
+                invalid.field_ops.add(field_name=field, op=3, path=path.replace("[1]", "[3]"))
+                status = handler._stub.Upsert(invalid, timeout=30).status
+                assert status.code == 1100 and "out of range" in status.reason.lower(), (field, status)
+                self.assert_rows(client, name, model)
+            if phase == 0:
+                self.reload_collection(client, name)
+
 
 class TestMilvusClientStructArrayPartialUpdateRejection(StructArrayTestBase):
     @pytest.mark.tags(CaseLabel.L1)
