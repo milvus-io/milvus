@@ -71,8 +71,8 @@ class TestMilvusClientStructArraySchemaValidation(StructArrayTestBase):
         expected: conflicting true row flag is rejected on a required parent; accepted fields inherit parent metadata
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children(), parent_nullable=parent_nullable)
-        rows = [make_nullable_row(n, make_nullable_elements(n)) for n in range(12)]
+        name, schema = self.create_struct_collection(client, nullable_children(), parent_nullable=parent_nullable)
+        rows = [make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n)) for n in range(12)]
         if not parent_nullable:
             for row in rows:
                 if row["clips"] is None:
@@ -142,9 +142,11 @@ class TestMilvusClientStructArraySchemaValidation(StructArrayTestBase):
         expected: precise placement rejection, unchanged schema/data, ordinary Array control succeeds
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children())
+        name, schema = self.create_struct_collection(client, nullable_children())
         model = self.insert_rows_with_model(
-            client, name, [make_nullable_row(n, make_nullable_elements(n)) for n in range(12)]
+            client,
+            name,
+            [make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n)) for n in range(12)],
         )
         before = client.describe_collection(name)
         if kind == "nested":
@@ -343,9 +345,11 @@ class TestMilvusClientStructArraySchemaValidation(StructArrayTestBase):
         expected: intended validation reason, no partial DDL, ordered NULL backfill on valid add
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children())
+        name, schema = self.create_struct_collection(client, nullable_children())
         model = self.insert_rows_with_model(
-            client, name, [make_nullable_row(n, make_nullable_elements(n)) for n in range(12)]
+            client,
+            name,
+            [make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n)) for n in range(12)],
         )
         before = client.describe_collection(name)
         field = Prepare.prepare_collection_field(FieldSchema("clips[added]", DataType.INT64, nullable=True))
@@ -399,9 +403,11 @@ class TestMilvusClientStructArraySchemaValidation(StructArrayTestBase):
         """
         client = self._client()
         if entrance == "add":
-            name = self.create_struct_collection(client, nullable_children())
+            name, schema = self.create_struct_collection(client, nullable_children())
             model = self.insert_rows_with_model(
-                client, name, [make_nullable_row(n, make_nullable_elements(n)) for n in range(6)]
+                client,
+                name,
+                [make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n)) for n in range(6)],
             )
             before = client.describe_collection(name)
             field = Prepare.prepare_collection_field(
@@ -461,9 +467,11 @@ class TestMilvusClientStructArraySchemaValidation(StructArrayTestBase):
         expected: required parent rejected atomically; nullable parent backfills NULL through reload
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children())
+        name, schema = self.create_struct_collection(client, nullable_children())
         model = self.insert_rows_with_model(
-            client, name, [make_nullable_row(n, make_nullable_elements(n)) for n in range(6)]
+            client,
+            name,
+            [make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n)) for n in range(6)],
         )
         before = client.describe_collection(name)
         children = client.create_struct_field_schema()
@@ -504,10 +512,12 @@ class TestMilvusClientStructArraySchemaValidation(StructArrayTestBase):
         expected: exact byte boundary survives reload and rejected new PK stays absent
         """
         client = self._client()
-        name = self.create_struct_collection(client, {"text": child_schema(DataType.VARCHAR, max_length=6)})
-        rows = [make_nullable_row(n, [{"text": value}, {"text": None}]) for n, value in enumerate(["雪ab", "雪雪"])]
+        name, schema = self.create_struct_collection(client, {"text": child_schema(DataType.VARCHAR, max_length=6)})
+        rows = [
+            make_nullable_row(schema, n, [{"text": value}, {"text": None}]) for n, value in enumerate(["雪ab", "雪雪"])
+        ]
         model = self.insert_rows_with_model(client, name, rows)
-        bad = make_nullable_row(100, [{"text": "雪雪a"}])
+        bad = make_nullable_row(schema, 100, [{"text": "雪雪a"}])
         handler = client._get_connection()
         status = handler._stub.Insert(handler._prepare_row_insert_request(name, [bad]), timeout=30).status
         assert status.code == 1100 and "length" in status.reason, status
@@ -524,7 +534,7 @@ class TestMilvusClientStructArraySchemaValidation(StructArrayTestBase):
         """
         client = self._client()
         if guard != "last_vector":
-            name = self.create_struct_collection(client, {"anchor": child_schema(DataType.INT64, False)})
+            name, schema = self.create_struct_collection(client, {"anchor": child_schema(DataType.INT64, False)})
             if guard == "last_original":
                 self.add_collection_field(client, name, "clips[added]", DataType.INT64, nullable=True)
             target = "clips[anchor]"
@@ -566,11 +576,13 @@ class TestMilvusClientStructArraySchemaValidation(StructArrayTestBase):
         expected: old client receives null backfill; dropped wire columns are rejected atomically
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children())
+        name, schema = self.create_struct_collection(client, nullable_children())
         model = self.insert_rows_with_model(
-            client, name, [make_nullable_row(n, make_nullable_elements(n)) for n in range(24)]
+            client,
+            name,
+            [make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n)) for n in range(24)],
         )
-        row = make_nullable_row(102, make_nullable_elements(102))
+        row = make_nullable_row(schema, 102, make_nullable_elements(schema.struct_fields[0], 102))
         handler = client._get_connection()
         stale = handler._prepare_row_insert_request(name, [row])
         # Exercise the documented unpinned old-client path.
@@ -603,9 +615,11 @@ class TestMilvusClientStructArrayAddSubfield(StructArrayTestBase):
         expected: parent and child nullability round trip and every logical element survives
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children())
+        name, schema = self.create_struct_collection(client, nullable_children())
         model = self.insert_rows_with_model(
-            client, name, [make_nullable_row(n, make_nullable_elements(n)) for n in range(6)]
+            client,
+            name,
+            [make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n)) for n in range(6)],
         )
         children, _ = self.create_struct_field_schema(client)
         children.add_field("score", DataType.INT64, nullable=True)
@@ -646,14 +660,16 @@ class TestMilvusClientStructArrayAddSubfield(StructArrayTestBase):
         expected: N null children per old row, preserved parent validity, fresh IDs on re-add
         """
         client = self._client()
-        name = self.create_struct_collection(
+        name, schema = self.create_struct_collection(
             client,
             {"anchor": child_schema(DataType.INT64, False), "old": child_schema(DataType.INT64)},
             parent_nullable,
         )
         rows = [
             make_nullable_row(
-                n, None if parent_nullable and n % 11 == 0 else [{"anchor": j, "old": n + j} for j in range(n % 6)]
+                schema,
+                n,
+                None if parent_nullable and n % 11 == 0 else [{"anchor": j, "old": n + j} for j in range(n % 6)],
             )
             for n in range(1200)
         ]
@@ -679,7 +695,10 @@ class TestMilvusClientStructArrayAddSubfield(StructArrayTestBase):
         for n in list(range(0, 1200, 17)) + [1300]:
             value = {"scalar": "雪", "vector": normalized_vector(n), "array": [n, None]}[kind]
             patch = make_nullable_row(
-                n, [{"anchor": 0, "old": n, "added": value}, {"anchor": 1, "old": None, "added": None}], revision=3
+                schema,
+                n,
+                [{"anchor": 0, "old": n, "added": value}, {"anchor": 1, "old": None, "added": None}],
+                revision=3,
             )
             changes.append(patch)
         self.upsert(client, name, changes)
@@ -707,9 +726,11 @@ class TestMilvusClientStructArrayAddSubfield(StructArrayTestBase):
         expected: rejected DDL leaves schema/data intact and a valid addition still works
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children())
+        name, schema = self.create_struct_collection(client, nullable_children())
         model = self.insert_rows_with_model(
-            client, name, [make_nullable_row(n, make_nullable_elements(n)) for n in range(20)]
+            client,
+            name,
+            [make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n)) for n in range(20)],
         )
         before, _ = self.describe_collection(client, name)
         response, succeeded = self.add_collection_field(
@@ -734,8 +755,8 @@ class TestMilvusClientStructArrayAddSubfield(StructArrayTestBase):
         expected: completed compaction has output segments and all rows/predicates stay correct
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children())
-        rows = [make_nullable_row(n, make_nullable_elements(n)) for n in range(1500)]
+        name, schema = self.create_struct_collection(client, nullable_children())
+        rows = [make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n)) for n in range(1500)]
         model = self.insert_rows_with_model(client, name, rows)
         self.flush(client, name)
         self.add_collection_field(client, name, "clips[new_scalar]", DataType.INT64, nullable=True)
@@ -831,9 +852,11 @@ class TestMilvusClientStructArrayAddedSubfieldTypes(TypedStructArrayTestBase):
         expected: old NULL/empty parents remain distinct and new values retain their type
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children())
+        name, schema = self.create_struct_collection(client, nullable_children())
         model = self.insert_rows_with_model(
-            client, name, [make_nullable_row(pk, make_nullable_elements(pk)) for pk in range(32)]
+            client,
+            name,
+            [make_nullable_row(schema, pk, make_nullable_elements(schema.struct_fields[0], pk)) for pk in range(32)],
         )
         options = {"nullable": True}
         if dtype == DataType.VARCHAR:
@@ -879,8 +902,8 @@ class TestMilvusClientStructArrayAddedSubfieldTypes(TypedStructArrayTestBase):
         client = self._client()
         kind = "BIN_FLAT" if dtype == DataType.BINARY_VECTOR else "HNSW" if dtype == DataType.INT8_VECTOR else "FLAT"
         metric = "HAMMING" if dtype == DataType.BINARY_VECTOR else "L2"
-        name = self.create_typed_collection(client, dtype, kind, metric)
-        model = self.insert_rows_with_model(client, name, self.make_typed_rows(dtype), split=False)
+        name, schema = self.create_typed_collection(client, dtype, kind, metric)
+        model = self.insert_rows_with_model(client, name, self.make_typed_rows(schema), split=False)
         self.reload_collection(client, name)
         self.add_collection_field(
             client, name, "clips[newvec]", dtype, nullable=True, dim=128 if dtype == DataType.BINARY_VECTOR else 32
@@ -929,8 +952,8 @@ class TestMilvusClientStructArrayFieldProperties(StructArrayTestBase):
         expected: specific struct-property rejection, no partial change, valid alter still succeeds
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children())
-        model = self.insert_rows_with_model(client, name, make_predicate_rows())
+        name, schema = self.create_struct_collection(client, nullable_children())
+        model = self.insert_rows_with_model(client, name, make_predicate_rows(schema))
         self.release_collection(client, name)
         before = client.describe_collection(name)
         result, ok = self.alter_collection_field(
@@ -965,9 +988,11 @@ class TestMilvusClientStructArrayFieldProperties(StructArrayTestBase):
         expected: property persists across reload and unrelated fields remain identical
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children())
+        name, schema = self.create_struct_collection(client, nullable_children())
         model = self.insert_rows_with_model(
-            client, name, [make_nullable_row(n, make_nullable_elements(n)) for n in range(16)]
+            client,
+            name,
+            [make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n)) for n in range(16)],
         )
         self.flush(client, name)
         self.release_collection(client, name)
@@ -1015,9 +1040,11 @@ class TestMilvusClientStructArrayFieldProperties(StructArrayTestBase):
         expected: exact keys/index inventory, new field ID, NULL backfill and successful new writes
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children())
+        name, schema = self.create_struct_collection(client, nullable_children())
         model = self.insert_rows_with_model(
-            client, name, [make_nullable_row(n, make_nullable_elements(n)) for n in range(16)]
+            client,
+            name,
+            [make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n)) for n in range(16)],
         )
         old_id = self.get_child_id(client, name, "emb")
         assert "clips[emb]" in client.list_indexes(name)
@@ -1066,8 +1093,8 @@ class TestMilvusClientStructArrayMmapWarmup(TypedStructArrayTestBase):
         """
         client = self._client()
         dtype = DataType.FLOAT_VECTOR
-        name = self.create_typed_collection(client, dtype, "FLAT", "L2")
-        model = self.insert_rows_with_model(client, name, self.make_typed_rows(dtype), split=False)
+        name, schema = self.create_typed_collection(client, dtype, "FLAT", "L2")
+        model = self.insert_rows_with_model(client, name, self.make_typed_rows(schema), split=False)
         self.flush(client, name)
         self.release_collection(client, name)
         properties = {}
@@ -1105,9 +1132,11 @@ class TestMilvusClientStructArraySchemaRbac(StructArrayTestBase):
         requires: authorizationEnabled=true and an administrator connection (dedicated RBAC lane)
         """
         owner = self._client()
-        name = self.create_struct_collection(owner, nullable_children())
+        name, schema = self.create_struct_collection(owner, nullable_children())
         model = self.insert_rows_with_model(
-            owner, name, [make_nullable_row(n, make_nullable_elements(n)) for n in range(12)]
+            owner,
+            name,
+            [make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n)) for n in range(12)],
         )
         user, role = cf.gen_unique_str("struct_user"), cf.gen_unique_str("struct_role")
         password = secrets.token_urlsafe(24)

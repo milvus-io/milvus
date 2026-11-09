@@ -58,8 +58,8 @@ class TestMilvusClientStructArrayBulkImport(MetadataStructArrayTestBase):
         expected: complete input-derived row map and predicate sets agree after every phase
         """
         client = self._client()
-        name = self.create_metadata_collection(client, vectors=False, scalar_index="INVERTED")
-        rows = [make_metadata_row(i, vectors=False) for i in range(1500)]
+        name, schema = self.create_metadata_collection(client, vectors=False, scalar_index="INVERTED")
+        rows = [make_metadata_row(schema, i) for i in range(1500)]
         for row in rows:
             if profile == "all_null" or 100 <= row["id"] < 500 or 900 <= row["id"] < 1100:
                 row["clips"] = None
@@ -69,7 +69,7 @@ class TestMilvusClientStructArrayBulkImport(MetadataStructArrayTestBase):
             local.write_text(json.dumps(rows))
         else:
             element = pa.struct([("value", pa.int64()), ("tag", pa.string()), ("flag", pa.bool_())])
-            schema = pa.schema(
+            parquet_schema = pa.schema(
                 [
                     ("id", pa.int64()),
                     ("revision", pa.int64()),
@@ -79,7 +79,7 @@ class TestMilvusClientStructArrayBulkImport(MetadataStructArrayTestBase):
                     ("clips", pa.list_(element)),
                 ]
             )
-            pq.write_table(pa.Table.from_pylist(rows, schema=schema), local, row_group_size=127)
+            pq.write_table(pa.Table.from_pylist(rows, schema=parquet_schema), local, row_group_size=127)
         storage = Minio(f"{minio_host}:9000", access_key="minioadmin", secret_key="minioadmin", secure=False)
         key = f"bulkinsert_data/struct_contract/{local.name}"
         storage.fput_object(minio_bucket, key, str(local))
@@ -112,14 +112,14 @@ class TestMilvusClientStructArrayBulkImport(MetadataStructArrayTestBase):
             # A single batch combines imported rows and new keys while omitting the imported struct.
             patches = []
             for number in list(range(0, 1500, 13)) + list(range(1500, 1530)):
-                source = make_metadata_row(number, 5, vectors=False)
+                source = make_metadata_row(schema, number, 5)
                 patch = {key: source[key] for key in ("id", "revision", "bucket", "normal_vector")}
                 expected = copy.deepcopy(model.get(number, {**source, "clips": None, "note": None}))
                 expected.update(copy.deepcopy(patch))
                 model[number] = expected
                 patches.append(patch)
             self.upsert(client, name, patches, partial_update=True)
-            replacements = [make_metadata_row(i, 7, vectors=False) for i in range(1, 1500, 11)]
+            replacements = [make_metadata_row(schema, i, 7) for i in range(1, 1500, 11)]
             self.upsert(client, name, replacements)
             model.update({row["id"]: copy.deepcopy(row) for row in replacements})
             deleted = list(range(2, 1500, 9))
@@ -130,14 +130,24 @@ class TestMilvusClientStructArrayBulkImport(MetadataStructArrayTestBase):
             self.assert_metadata_rows(client, name, model)
             self.assert_required_predicates(client, name, model)
 
-            self.add_collection_struct_field(
-                client, name, "added", self.required_child_schema(client, vectors=False), CAPACITY
+            added_children = self.required_child_schema(client, vectors=False)
+            self.add_collection_struct_field(client, name, "added", added_children, CAPACITY)
+            schema.add_field(
+                "added",
+                DataType.ARRAY,
+                element_type=DataType.STRUCT,
+                struct_schema=added_children,
+                max_capacity=CAPACITY,
+                nullable=True,
             )
             for row in model.values():
                 row["added"] = None
             self.refresh_load(client, name)
             self.assert_metadata_rows(client, name, model)
-            patches = [{"id": pk, "added": make_required_elements(pk, 9, vectors=False)} for pk in sorted(model)[::5]]
+            patches = [
+                {"id": pk, "added": make_required_elements(schema.struct_fields[-1], pk, 9)}
+                for pk in sorted(model)[::5]
+            ]
             self.upsert(client, name, patches, partial_update=True)
             for patch in patches:
                 model[patch["id"]].update(copy.deepcopy(patch))
@@ -182,7 +192,7 @@ def _write_file(path, rows):
                 pa.field("tags", pa.list_(pa.int64())),
             ]
         )
-        schema = pa.schema(
+        parquet_schema = pa.schema(
             [
                 pa.field("id", pa.int64()),
                 pa.field("revision", pa.int64()),
@@ -190,7 +200,7 @@ def _write_file(path, rows):
                 pa.field("clips", pa.list_(element)),
             ]
         )
-        pq.write_table(pa.Table.from_pylist(rows, schema=schema), path)
+        pq.write_table(pa.Table.from_pylist(rows, schema=parquet_schema), path)
 
 
 class TestMilvusClientStructArrayImportValidation(StructArrayTestBase):
@@ -271,7 +281,7 @@ class TestMilvusClientStructArrayImportValidation(StructArrayTestBase):
         expected: data-related failure, no visible failed-job rows, exact original and repaired values
         """
         client = self._client()
-        name = self.create_struct_collection(
+        name, schema = self.create_struct_collection(
             client,
             {
                 "score": child_schema(DataType.INT64, False),
@@ -281,10 +291,13 @@ class TestMilvusClientStructArrayImportValidation(StructArrayTestBase):
                 ),
             },
         )
-        rows = [make_nullable_row(n, [{"score": n, "emb": normalized_vector(n), "tags": [n, n + 1]}]) for n in range(3)]
+        rows = [
+            make_nullable_row(schema, n, [{"score": n, "emb": normalized_vector(n), "tags": [n, n + 1]}])
+            for n in range(3)
+        ]
         model = self.insert_rows_with_model(client, name, rows)
         incoming = [
-            make_nullable_row(n, [{"score": n, "emb": normalized_vector(n), "tags": [n, n + 1]}])
+            make_nullable_row(schema, n, [{"score": n, "emb": normalized_vector(n), "tags": [n, n + 1]}])
             for n in (100, 101, 102)
         ]
         bad = copy.deepcopy(incoming)

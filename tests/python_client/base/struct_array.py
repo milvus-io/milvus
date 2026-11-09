@@ -41,18 +41,32 @@ from pymilvus import DataType
 
 class StructArrayTestBase(TestMilvusClientV2Base):
     def create_struct_collection(
-        self, client, children, parent_nullable=True, pk_type="int", child_index=None, metric="L2"
+        self,
+        client,
+        children,
+        parent_nullable=True,
+        pk_type="int",
+        child_index=None,
+        metric="L2",
+        dim=DIM,
+        capacity=CAPACITY,
+        extra_fields=(),
     ):
         name = cf.gen_unique_str("struct_enhance")
-        schema, _ = self.create_schema(client, auto_id=False, enable_dynamic_field=False)
-        schema.add_field(
-            "id",
-            DataType.INT64 if pk_type == "int" else DataType.VARCHAR,
-            is_primary=True,
-            **({"max_length": 64} if pk_type == "str" else {}),
+        schema = cf.gen_collection_schema(
+            fields=[
+                cf.gen_scalar_field(
+                    DataType.INT64 if pk_type == "int" else DataType.VARCHAR,
+                    name="id",
+                    is_primary=True,
+                    **({"max_length": 64} if pk_type == "str" else {}),
+                ),
+                cf.gen_int64_field(name="revision"),
+                cf.gen_float_vec_field(name="normal_vector", dim=dim),
+                *extra_fields,
+            ],
+            enable_dynamic_field=False,
         )
-        schema.add_field("revision", DataType.INT64)
-        schema.add_field("normal_vector", DataType.FLOAT_VECTOR, dim=DIM)
         struct, _ = self.create_struct_field_schema(client)
         for field, (dtype, options) in children.items():
             struct.add_field(field, dtype, **options)
@@ -61,7 +75,7 @@ class StructArrayTestBase(TestMilvusClientV2Base):
             DataType.ARRAY,
             element_type=DataType.STRUCT,
             struct_schema=struct,
-            max_capacity=8,
+            max_capacity=capacity,
             nullable=parent_nullable,
         )
         indexes, _ = self.prepare_index_params(client)
@@ -76,7 +90,7 @@ class StructArrayTestBase(TestMilvusClientV2Base):
                     params={"M": 16, "efConstruction": 200} if kind == "HNSW" else {},
                 )
         self.create_collection(client, name, schema=schema, index_params=indexes, consistency_level="Strong")
-        return name
+        return name, schema
 
     def assert_rows(self, client, name, model):
         actual, _ = self.query(
@@ -178,19 +192,26 @@ class MetadataStructArrayTestBase(StructArrayTestBase):
         metric="L2",
         scalar_index=None,
         second=False,
+        dim=DIM,
+        extra_fields=(),
     ):
         name = cf.gen_unique_str("struct_contract")
-        schema, _ = self.create_schema(client, auto_id=False, enable_dynamic_field=False)
-        schema.add_field(
-            "id",
-            DataType.INT64 if pk_type == "int" else DataType.VARCHAR,
-            is_primary=True,
-            **({"max_length": 64} if pk_type == "str" else {}),
+        schema = cf.gen_collection_schema(
+            fields=[
+                cf.gen_scalar_field(
+                    DataType.INT64 if pk_type == "int" else DataType.VARCHAR,
+                    name="id",
+                    is_primary=True,
+                    **({"max_length": 64} if pk_type == "str" else {}),
+                ),
+                cf.gen_int64_field(name="revision"),
+                cf.gen_int64_field(name="bucket"),
+                cf.gen_float_vec_field(name="normal_vector", dim=dim),
+                cf.gen_string_field(name="note", max_length=64, nullable=True),
+                *extra_fields,
+            ],
+            enable_dynamic_field=False,
         )
-        schema.add_field("revision", DataType.INT64)
-        schema.add_field("bucket", DataType.INT64)
-        schema.add_field("normal_vector", DataType.FLOAT_VECTOR, dim=DIM)
-        schema.add_field("note", DataType.VARCHAR, max_length=64, nullable=True)
         for field in ("clips", "other") if second else ("clips",):
             schema.add_field(
                 field,
@@ -213,7 +234,7 @@ class MetadataStructArrayTestBase(StructArrayTestBase):
         if scalar_index:
             indexes.add_index("clips[value]", index_name="value_idx", index_type=scalar_index)
         self.create_collection(client, name, schema=schema, index_params=indexes)
-        return name
+        return name, schema
 
     def assert_metadata_rows(self, client, name, model, pk_type="int", partition_names=None):
         fields = list(next(iter(model.values()))) if model else ["id", "revision", "clips"]
@@ -335,7 +356,7 @@ class MetadataStructArrayTestBase(StructArrayTestBase):
                 if index_type == "FLAT":
                     assert set(keys) == expected, (expression, keys, ordered[:20])
                 else:
-                    # A quality threshold for this fixed synthetic corpus, not a universal ANN guarantee.
+                    # A quality threshold for this small corpus, not a universal ANN guarantee.
                     assert len(set(keys) & expected) / len(expected) >= 0.95, (expression, keys, ordered[:20])
 
 
@@ -343,10 +364,14 @@ class TypedStructArrayTestBase(StructArrayTestBase):
     def create_typed_collection(self, client, dtype, kind, metric):
         # Reuse the enhancement schema family; only the vector representation varies.
         name = cf.gen_unique_str("struct_vector_matrix")
-        schema, _ = self.create_schema(client, auto_id=False, enable_dynamic_field=False)
-        schema.add_field("id", DataType.INT64, is_primary=True)
-        schema.add_field("revision", DataType.INT64)
-        schema.add_field("normal_vector", DataType.FLOAT_VECTOR, dim=8)
+        schema = cf.gen_collection_schema(
+            fields=[
+                cf.gen_int64_field(name="id", is_primary=True),
+                cf.gen_int64_field(name="revision"),
+                cf.gen_float_vec_field(name="normal_vector", dim=DIM),
+            ],
+            enable_dynamic_field=False,
+        )
         children = nullable_children()
         children["emb"] = child_schema(dtype, dim=128 if dtype == DataType.BINARY_VECTOR else 32)
         struct, _ = self.create_struct_field_schema(client)
@@ -365,9 +390,11 @@ class TypedStructArrayTestBase(StructArrayTestBase):
         params = {"M": 16, "efConstruction": 200} if kind == "HNSW" else {"nlist": 16} if "IVF" in kind else {}
         indexes.add_index("clips[emb]", index_type=kind, metric_type=metric, params=params)
         self.create_collection(client, name, schema=schema, index_params=indexes, consistency_level="Strong")
-        return name
+        return name, schema
 
-    def make_typed_rows(self, dtype):
+    def make_typed_rows(self, schema):
+        struct = schema.struct_fields[0]
+        vector = next(field for field in struct.fields if field.name == "emb")
         rows = []
         for pk in range(1200):
             clips = [
@@ -375,12 +402,14 @@ class TypedStructArrayTestBase(StructArrayTestBase):
                     "anchor": j,
                     "score": None if j < 2 else pk,
                     "label": None,
-                    "emb": None if j % 2 == 0 or pk < 16 else make_typed_vector(dtype, pk * 17 + j),
+                    "emb": None
+                    if j % 2 == 0 or pk < 16
+                    else make_typed_vector(vector.dtype, pk * 17 + j, int(vector.params["dim"])),
                     "tags": [None, pk] if j % 2 else [],
                 }
-                for j in range(4)
+                for j in range(min(4, struct.max_capacity))
             ]
-            rows.append(make_nullable_row(pk, None if pk % 19 == 0 else [] if pk % 19 == 1 else clips))
+            rows.append(make_nullable_row(schema, pk, None if pk % 19 == 0 else [] if pk % 19 == 1 else clips))
         return rows
 
     def assert_typed_rows(self, client, name, model, dtype):

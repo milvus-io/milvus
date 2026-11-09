@@ -98,8 +98,13 @@ class TestMilvusClientStructArrayConcurrentMutations(MetadataStructArrayTestBase
         expected: every observed row is a legal complete revision; final model survives reload
         """
         client = self._client()
-        name = self.create_metadata_collection(client, pk_type=pk_type)
-        rows = [make_metadata_row(i, pk_type=pk_type) for i in range(40)]
+        name, schema = self.create_metadata_collection(client, pk_type=pk_type)
+        revisions = {
+            (number, revision): make_metadata_row(schema, number, revision)
+            for number in range(40)
+            for revision in range(9)
+        }
+        rows = [revisions[number, 0] for number in range(40)]
         self.insert(client, name, rows)
         self.reload_collection(client, name)
         barrier = threading.Barrier(5)
@@ -109,7 +114,7 @@ class TestMilvusClientStructArrayConcurrentMutations(MetadataStructArrayTestBase
             barrier.wait(timeout=30)
             result = {}
             for revision in range(1, 9):
-                batch = [make_metadata_row(i, revision, pk_type) for i in range(worker * 10, worker * 10 + 10)]
+                batch = [copy.deepcopy(revisions[i, revision]) for i in range(worker * 10, worker * 10 + 10)]
                 self.upsert(client, name, batch)
                 result = {row["id"]: row for row in batch}
                 log.info(f"STRUCT_CONCURRENT worker={worker} revision={revision} ids={list(result)}")
@@ -132,7 +137,7 @@ class TestMilvusClientStructArrayConcurrentMutations(MetadataStructArrayTestBase
                 assert len(actual) == 40
                 for row in actual:
                     number = row["id"] if pk_type == "int" else int(row["id"].rsplit("_", 1)[1])
-                    assert_values_equal(row, make_metadata_row(number, row["revision"], pk_type), exact_fields=False)
+                    assert_values_equal(row, revisions[number, row["revision"]], exact_fields=False)
                 reads += 1
             return reads
 
@@ -159,19 +164,23 @@ class TestMilvusClientStructArrayConcurrentMutations(MetadataStructArrayTestBase
         expected: every observed row is one complete legal revision and all final rows survive reload
         """
         client = self._client()
-        name = self.create_metadata_collection(client, pk_type=pk_type)
+        name, schema = self.create_metadata_collection(client, pk_type=pk_type)
         states = {}
         for number in range(40):
             pk = make_primary_key(number, pk_type)
-            states[pk] = {0: make_metadata_row(number, 0, pk_type), 1: make_metadata_row(number, 1, pk_type)}
-            states[pk][2] = {**copy.deepcopy(states[pk][1]), "revision": 2, "clips": make_required_elements(number, 2)}
-            states[pk][4] = make_metadata_row(number, 4, pk_type)
+            states[pk] = {0: make_metadata_row(schema, number, 0), 1: make_metadata_row(schema, number, 1)}
+            states[pk][2] = {
+                **copy.deepcopy(states[pk][1]),
+                "revision": 2,
+                "clips": make_required_elements(schema.struct_fields[0], number, 2),
+            }
+            states[pk][4] = make_metadata_row(schema, number, 4)
             states[pk][5] = {
                 **copy.deepcopy(states[pk][4]),
                 "revision": 5,
-                "normal_vector": make_metadata_row(number, 5, pk_type)["normal_vector"],
+                "normal_vector": make_metadata_row(schema, number, 5)["normal_vector"],
             }
-            states[pk][6] = make_metadata_row(number, 6, pk_type)
+            states[pk][6] = make_metadata_row(schema, number, 6)
         self.insert(client, name, [revisions[0] for revisions in states.values()])
         self.reload_collection(client, name)
         barrier = threading.Barrier(5)
@@ -255,9 +264,11 @@ class TestMilvusClientStructArrayConcurrentSchemaUpdates(StructArrayTestBase):
         expected: every write survives, new child backfills NULL, indexed vector reload remains valid
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children())
+        name, schema = self.create_struct_collection(client, nullable_children())
         model = self.insert_rows_with_model(
-            client, name, [make_nullable_row(n, make_nullable_elements(n)) for n in range(12)]
+            client,
+            name,
+            [make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n)) for n in range(12)],
         )
         barrier = threading.Barrier(4)
         dtype, options = {
@@ -272,7 +283,10 @@ class TestMilvusClientStructArrayConcurrentSchemaUpdates(StructArrayTestBase):
             for revision in range(6):
                 batch = [
                     make_nullable_row(
-                        100 + worker * 100 + j, make_nullable_elements(j + worker, revision), revision=revision
+                        schema,
+                        100 + worker * 100 + j,
+                        make_nullable_elements(schema.struct_fields[0], j + worker, revision),
+                        revision=revision,
                     )
                     for j in range(8)
                 ]
@@ -313,10 +327,10 @@ class TestMilvusClientStructArrayConcurrentSubfieldDrop(StructArrayTestBase):
         expected: all inserts succeed and exact retained fields survive the schema change
         """
         client = self._client()
-        name = self.create_struct_collection(
+        name, schema = self.create_struct_collection(
             client, {"anchor": child_schema(DataType.INT64, False), "added": child_schema(DataType.INT64)}
         )
-        seed = make_nullable_row(0, [{"anchor": 0}])
+        seed = make_nullable_row(schema, 0, [{"anchor": 0}])
         self.insert(client, name, [seed])
         barrier = threading.Barrier(5)
 
@@ -324,7 +338,7 @@ class TestMilvusClientStructArrayConcurrentSubfieldDrop(StructArrayTestBase):
             rows, errors = [], []
             barrier.wait(timeout=30)
             for step in range(12):
-                row = make_nullable_row(1 + worker * 100 + step, [{"anchor": step}])
+                row = make_nullable_row(schema, 1 + worker * 100 + step, [{"anchor": step}])
                 try:
                     result = client.insert(name, [row], timeout=30)
                     assert result["insert_count"] == 1, result

@@ -88,7 +88,7 @@ class TestMilvusClientStructArrayGrowingSealedSearch(MetadataStructArrayTestBase
         self.create_collection(
             client, name, schema=schema, shards_num=1, properties={"collection.autocompaction.enabled": "false"}
         )
-        rows = [make_metadata_row(i) for i in range(4000)]
+        rows = [make_metadata_row(schema, i) for i in range(4000)]
         model = {item["id"]: copy.deepcopy(item) for item in rows}
         self.insert(client, name, rows[:3000])
         self.flush(client, name)
@@ -200,8 +200,8 @@ class TestMilvusClientStructArrayNullableVectorCoordinates(StructArrayTestBase):
         expected: legal unique coordinates, exact distances and exact or high-recall top-k
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children(), child_index=index_type, metric=metric)
-        rows = [make_nullable_row(n, make_nullable_elements(n)) for n in range(1200)]
+        name, schema = self.create_struct_collection(client, nullable_children(), child_index=index_type, metric=metric)
+        rows = [make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n)) for n in range(1200)]
         # A separate all-null vector population still owns logical element slots.
         for row in rows[:100]:
             for element in row["clips"] or []:
@@ -254,7 +254,10 @@ class TestMilvusClientStructArrayNullableVectorCoordinates(StructArrayTestBase):
                 self.delete(client, name, ids=deleted)
                 for pk in deleted:
                     del model[pk]
-                changes = [make_nullable_row(n, make_nullable_elements(n, 5), revision=5) for n in range(1, 1200, 11)]
+                changes = [
+                    make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n, 5), revision=5)
+                    for n in range(1, 1200, 11)
+                ]
                 self.upsert(client, name, changes)
                 model.update({r["id"]: r for r in changes})
                 self.reload_collection(client, name)
@@ -269,7 +272,7 @@ class TestMilvusClientStructArraySearchValidation(StructArrayTestBase):
         expected: explicit same-struct restriction and exact coordinates from the allowed search
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children())
+        name, schema = self.create_struct_collection(client, nullable_children())
         other = client.create_struct_field_schema()
         other.add_field("score", DataType.INT64, nullable=True)
         other.add_field("emb", DataType.FLOAT_VECTOR, dim=8, nullable=True)
@@ -279,7 +282,7 @@ class TestMilvusClientStructArraySearchValidation(StructArrayTestBase):
         self.create_index(client, name, index)
         rows = [
             make_nullable_row(
-                n, [{"anchor": 0, "score": None, "label": None, "emb": normalized_vector(n), "tags": None}]
+                schema, n, [{"anchor": 0, "score": None, "label": None, "emb": normalized_vector(n), "tags": None}]
             )
             for n in range(4)
         ]
@@ -319,9 +322,11 @@ class TestMilvusClientStructArraySearchValidation(StructArrayTestBase):
         expected: explicit nullable-vector restriction and full data preserved through recovery
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children())
+        name, schema = self.create_struct_collection(client, nullable_children())
         model = self.insert_rows_with_model(
-            client, name, [make_nullable_row(n, make_nullable_elements(n)) for n in range(12)]
+            client,
+            name,
+            [make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n)) for n in range(12)],
         )
         self.release_collection(client, name)
         self.drop_index(client, name, index_name="clips[emb]")
@@ -345,9 +350,11 @@ class TestMilvusClientStructArraySearchValidation(StructArrayTestBase):
         expected: exact nullable embedding-list rejection and valid element search remains usable
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children())
+        name, schema = self.create_struct_collection(client, nullable_children())
         model = self.insert_rows_with_model(
-            client, name, [make_nullable_row(n, make_nullable_elements(n)) for n in range(12)]
+            client,
+            name,
+            [make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n)) for n in range(12)],
         )
         embeddings = EmbeddingList()
         embeddings.add(normalized_vector(1))
@@ -382,9 +389,11 @@ class TestMilvusClientStructArraySearchValidation(StructArrayTestBase):
         expected: parameter rejection, no orphan index, successful supported query
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children())
+        name, schema = self.create_struct_collection(client, nullable_children())
         model = self.insert_rows_with_model(
-            client, name, [make_nullable_row(n, make_nullable_elements(n)) for n in range(12)]
+            client,
+            name,
+            [make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n)) for n in range(12)],
         )
         before = set(client.list_indexes(name))
         index = client.prepare_index_params()
@@ -403,9 +412,11 @@ class TestMilvusClientStructArraySearchValidation(StructArrayTestBase):
         expected: NULL backfill is immediate and partial loading ordinary fields remains usable
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children())
+        name, schema = self.create_struct_collection(client, nullable_children())
         model = self.insert_rows_with_model(
-            client, name, [make_nullable_row(n, make_nullable_elements(n)) for n in range(12)]
+            client,
+            name,
+            [make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n)) for n in range(12)],
         )
         self.add_collection_field(client, name, "clips[newvec]", DataType.FLOAT_VECTOR, dim=8, nullable=True)
         for row in model.values():
@@ -434,10 +445,11 @@ class TestMilvusClientStructArraySearchValidation(StructArrayTestBase):
         expected: every PK and fused score matches the independent model before/after reload
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children())
+        name, schema = self.create_struct_collection(client, nullable_children())
         rows = []
         for n in range(10):
             row = make_nullable_row(
+                schema,
                 n,
                 [
                     {
@@ -537,8 +549,8 @@ class TestMilvusClientStructArrayVectorIndexMetric(TypedStructArrayTestBase):
         """
         client = self._client()
         score_deviations = [] if (dtype, kind, metric) in DISKANN_SCORE_PROFILES else None
-        name = self.create_typed_collection(client, dtype, kind, metric)
-        model = self.insert_rows_with_model(client, name, self.make_typed_rows(dtype), split=False)
+        name, schema = self.create_typed_collection(client, dtype, kind, metric)
+        model = self.insert_rows_with_model(client, name, self.make_typed_rows(schema), split=False)
         self.assert_typed_search(client, name, model, dtype, kind, metric, score_deviations)
         for phase in range(2):
             self.reload_collection(client, name)
@@ -557,6 +569,7 @@ class TestMilvusClientStructArrayVectorIndexMetric(TypedStructArrayTestBase):
                 patches = []
                 for pk in range(20, 1200, 11):
                     patch = make_nullable_row(
+                        schema,
                         pk,
                         [
                             {"anchor": 0, "score": None, "label": "updated", "emb": None, "tags": None},
@@ -588,8 +601,8 @@ class TestMilvusClientStructArrayVectorIndexMetric(TypedStructArrayTestBase):
         """
         client = self._client()
         dtype = DataType.FLOAT_VECTOR
-        name = self.create_typed_collection(client, dtype, "HNSW", "L2")
-        model = self.insert_rows_with_model(client, name, self.make_typed_rows(dtype)[:rows], split=False)
+        name, schema = self.create_typed_collection(client, dtype, "HNSW", "L2")
+        model = self.insert_rows_with_model(client, name, self.make_typed_rows(schema)[:rows], split=False)
         self.assert_typed_search(client, name, model, dtype, "HNSW", "L2")
         self.reload_collection(client, name)
         segments = client._get_connection().get_query_segment_info(name, timeout=30)
@@ -610,8 +623,8 @@ class TestMilvusClientStructArrayVectorIndexMetric(TypedStructArrayTestBase):
         expected: matching top-k coordinates and scores; retain exact-input score deviations
         """
         client = self._client()
-        name = self.create_typed_collection(client, dtype, "DISKANN", metric)
-        model = self.insert_rows_with_model(client, name, self.make_typed_rows(dtype), split=False)
+        name, schema = self.create_typed_collection(client, dtype, "DISKANN", metric)
+        model = self.insert_rows_with_model(client, name, self.make_typed_rows(schema), split=False)
         flat = cf.gen_unique_str("struct_diskann_flattened_control")
         schema, _ = self.create_schema(client, auto_id=False, enable_dynamic_field=False)
         schema.add_field("id", DataType.INT64, is_primary=True)

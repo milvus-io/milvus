@@ -71,8 +71,8 @@ class TestMilvusClientStructArrayNullablePredicates(StructArrayTestBase):
         expected: exact PK sets, including vacuous ALL and null-parent exclusion under NOT
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children())
-        model = self.insert_rows_with_model(client, name, make_predicate_rows())
+        name, schema = self.create_struct_collection(client, nullable_children())
+        model = self.insert_rows_with_model(client, name, make_predicate_rows(schema))
         expressions = {
             "plain": "$[score] > 0",
             "and": "$[score] > 0 and $[tags] IS NULL",
@@ -124,8 +124,8 @@ class TestMilvusClientStructArrayNullablePredicates(StructArrayTestBase):
         expected: exact PK sets at offsets 0/1/7 in growing and sealed data
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children())
-        model = self.insert_rows_with_model(client, name, make_predicate_rows())
+        name, schema = self.create_struct_collection(client, nullable_children())
+        model = self.insert_rows_with_model(client, name, make_predicate_rows(schema))
         templates = {
             "contains": "array_contains({path}, 1)",
             "any": "array_contains_any({path}, [1, 3])",
@@ -196,8 +196,8 @@ class TestMilvusClientStructArrayNullablePredicates(StructArrayTestBase):
         expected: server parse/plan rejection and unchanged queryable rows
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children())
-        model = self.insert_rows_with_model(client, name, make_predicate_rows())
+        name, schema = self.create_struct_collection(client, nullable_children())
+        model = self.insert_rows_with_model(client, name, make_predicate_rows(schema))
         result, ok = self.query(
             client, name, filter=expression, output_fields=["id"], check_task=CheckTasks.check_nothing
         )
@@ -222,13 +222,14 @@ class TestMilvusClientStructArrayNestedArrayPredicates(StructArrayTestBase):
         options = {"element_type": dtype, "max_capacity": 4, "element_nullable": True}
         if dtype == DataType.VARCHAR:
             options["max_length"] = 32
-        name = self.create_struct_collection(
+        name, schema = self.create_struct_collection(
             client, {"anchor": child_schema(DataType.INT64, False), "tags": child_schema(DataType.ARRAY, **options)}
         )
         needle = scalar_boundary_value(dtype, 2)
         shapes = [None, [], [None], [needle, None], [scalar_boundary_value(dtype, 3)], [needle, needle]]
         rows = [
             make_nullable_row(
+                schema,
                 pk,
                 None
                 if pk == 0
@@ -301,8 +302,10 @@ class TestMilvusClientStructArrayIndexedQuery(MetadataStructArrayTestBase):
         expected: complete PK sets match a local three-valued semantic model in every phase
         """
         client = self._client()
-        name = self.create_metadata_collection(client, value_type=value_type, vectors=False, scalar_index=index_type)
-        rows = [make_metadata_row(i, value_type=value_type, vectors=False) for i in range(1100)]
+        name, schema = self.create_metadata_collection(
+            client, value_type=value_type, vectors=False, scalar_index=index_type
+        )
+        rows = [make_metadata_row(schema, i) for i in range(1100)]
         model = {row["id"]: copy.deepcopy(row) for row in rows}
         self.insert(client, name, rows)
         self.assert_required_predicates(client, name, model, value_type)
@@ -310,7 +313,7 @@ class TestMilvusClientStructArrayIndexedQuery(MetadataStructArrayTestBase):
         if index_type:
             assert self.wait_for_index_ready(client, name, index_name="value_idx", timeout=300)
         self.assert_required_predicates(client, name, model, value_type)
-        changes = [make_metadata_row(i, revision=3, value_type=value_type, vectors=False) for i in range(0, 1100, 11)]
+        changes = [make_metadata_row(schema, i, revision=3) for i in range(0, 1100, 11)]
         self.upsert(client, name, changes)
         model.update({row["id"]: copy.deepcopy(row) for row in changes})
         self.reload_collection(client, name)
@@ -327,8 +330,8 @@ class TestMilvusClientStructArrayIndexedQuery(MetadataStructArrayTestBase):
         expected: valid unique coordinates and distances; exact FLAT top-k or bounded HNSW recall
         """
         client = self._client()
-        name = self.create_metadata_collection(client, vector_index=index_type, metric=metric)
-        rows = [make_metadata_row(i) for i in range(1100)]
+        name, schema = self.create_metadata_collection(client, vector_index=index_type, metric=metric)
+        rows = [make_metadata_row(schema, i) for i in range(1100)]
         model = {row["id"]: copy.deepcopy(row) for row in rows}
         self.insert(client, name, rows)
         self.assert_element_search(client, name, model, metric, index_type)
@@ -338,7 +341,7 @@ class TestMilvusClientStructArrayIndexedQuery(MetadataStructArrayTestBase):
         self.delete(client, name, ids=deleted)
         for pk in deleted:
             del model[pk]
-        changes = [make_metadata_row(i, revision=5) for i in range(1, 1100, 7)]
+        changes = [make_metadata_row(schema, i, revision=5) for i in range(1, 1100, 7)]
         self.upsert(client, name, changes)
         model.update({row["id"]: copy.deepcopy(row) for row in changes})
         self.reload_collection(client, name)
@@ -354,14 +357,14 @@ class TestMilvusClientStructArrayIndexedQuery(MetadataStructArrayTestBase):
         expected: projection and all three-valued predicates remain equal to retained inputs
         """
         client = self._client()
-        name = self.create_metadata_collection(client, vectors=False, value_type=value_type, scalar_index="BITMAP")
-        rows = [make_metadata_row(i, vectors=False, value_type=value_type) for i in range(1100)]
+        name, schema = self.create_metadata_collection(
+            client, vectors=False, value_type=value_type, scalar_index="BITMAP"
+        )
+        rows = [make_metadata_row(schema, i) for i in range(1100)]
         model = {row["id"]: copy.deepcopy(row) for row in rows}
         self.insert(client, name, rows)
         for revision, index_type in enumerate(["INVERTED", "STL_SORT", "BITMAP"], 1):
-            changes = [
-                make_metadata_row(i, revision, value_type=value_type, vectors=False) for i in range(revision, 1100, 13)
-            ]
+            changes = [make_metadata_row(schema, i, revision) for i in range(revision, 1100, 13)]
             self.upsert(client, name, changes)
             model.update({row["id"]: row for row in changes})
             self.flush(client, name)
@@ -392,8 +395,8 @@ class TestMilvusClientStructArrayIndexedQuery(MetadataStructArrayTestBase):
         expected: parameter error followed by correct complete query results
         """
         client = self._client()
-        name = self.create_metadata_collection(client, vectors=False)
-        rows = [make_metadata_row(i, vectors=False) for i in range(14)]
+        name, schema = self.create_metadata_collection(client, vectors=False)
+        rows = [make_metadata_row(schema, i) for i in range(14)]
         model = {row["id"]: row for row in rows}
         self.insert(client, name, rows)
         error, _ = self.query(
@@ -414,10 +417,12 @@ class TestMilvusClientStructArrayIndexedSubfields(StructArrayTestBase):
         expected: zero hits, then the exact logical coordinate, then zero hits without data loss
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children(), child_index=index_type)
+        name, schema = self.create_struct_collection(client, nullable_children(), child_index=index_type)
         rows = [
             make_nullable_row(
-                n, [{"anchor": j, "score": None, "label": None, "emb": None, "tags": [None]} for j in range(n % 5)]
+                schema,
+                n,
+                [{"anchor": j, "score": None, "label": None, "emb": None, "tags": [None]} for j in range(n % 5)],
             )
             for n in range(1200)
         ]
@@ -466,9 +471,11 @@ class TestMilvusClientStructArrayIndexedSubfields(StructArrayTestBase):
         expected: the parameter error is non-mutating and the remaining originals supply correct offsets
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children())
+        name, schema = self.create_struct_collection(client, nullable_children())
         model = self.insert_rows_with_model(
-            client, name, [make_nullable_row(n, make_nullable_elements(n)) for n in range(100)]
+            client,
+            name,
+            [make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n)) for n in range(100)],
         )
         self.release_collection(client, name)
         self.drop_index(client, name, index_name="clips[emb]")
@@ -501,8 +508,8 @@ class TestMilvusClientStructArrayIndexedSubfields(StructArrayTestBase):
         expected: schema and complete rows survive every rejection and remain queryable
         """
         client = self._client()
-        name = self.create_struct_collection(client, {"original": child_schema(DataType.INT64, False)})
-        rows = [make_nullable_row(n, None if n % 3 == 0 else [{"original": n}]) for n in range(12)]
+        name, schema = self.create_struct_collection(client, {"original": child_schema(DataType.INT64, False)})
+        rows = [make_nullable_row(schema, n, None if n % 3 == 0 else [{"original": n}]) for n in range(12)]
         model = self.insert_rows_with_model(client, name, rows)
         self.add_collection_field(client, name, "clips[added]", DataType.INT64, nullable=True)
         for row in model.values():
@@ -566,7 +573,7 @@ class TestMilvusClientStructArrayQueryNullReduction(MetadataStructArrayTestBase)
             shards_num=2,
             properties={"collection.autocompaction.enabled": "false"},
         )
-        rows = [make_metadata_row(number, pk_type=pk_type) for number in range(44)]
+        rows = [make_metadata_row(schema, number) for number in range(44)]
         for number, item in enumerate(rows):
             if number // 11 in (0, 2) or (number // 11 == 3 and tail == "all_null"):
                 item.update(normal_vector=None, clips=None, note=None)

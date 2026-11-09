@@ -14,12 +14,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Deterministic Struct Array inputs and independent value/vector oracles."""
+"""Schema-driven Struct Array inputs, scenario overrides and independent value/vector oracles."""
 
 import copy
 
 import numpy as np
 import pytest
+from common import common_func as cf
 from ml_dtypes import bfloat16
 from pymilvus import DataType
 
@@ -52,18 +53,22 @@ def scalar_boundary_value(dtype, n):
     return [-(2 ** (bits - 1)), 2 ** (bits - 1) - 1, 0, -1, 1][n % 5]
 
 
-def normalized_vector(n):
-    value = np.random.RandomState(n % (2**32)).normal(size=DIM).astype(np.float32)
+def normalized_vector(n, dim=DIM):
+    value = np.random.RandomState(n % (2**32)).normal(size=dim).astype(np.float32)
     return (value / np.linalg.norm(value)).tolist()
 
 
-def make_nullable_row(n, clips, pk_type="int", revision=0):
-    return {
-        "id": n if pk_type == "int" else f"key_雪_{n:06d}",
-        "revision": revision,
-        "normal_vector": normalized_vector(n + 100003 * revision + 9),
-        "clips": copy.deepcopy(clips),
+def make_nullable_row(schema, n, clips, revision=0):
+    """Generate ordinary fields from the request schema; control only the tested null shape."""
+    primary = schema.primary_field
+    defaults = {
+        primary.name: [make_primary_key(n, "str" if primary.dtype == DataType.VARCHAR else "int")],
+        "revision": [revision],
+        schema.struct_fields[0].name: [copy.deepcopy(clips)],
     }
+    names = {field.name for field in [*schema.fields, *schema.struct_fields]}
+    defaults = {name: value for name, value in defaults.items() if name in names}
+    return cf.gen_row_data_by_schema_with_defaults(nb=1, schema=schema, start=n, default_values=defaults)[0]
 
 
 def assert_values_equal(actual, expected, path="row", *, exact_fields=True):
@@ -103,22 +108,48 @@ def nullable_children():
     }
 
 
-def make_nullable_elements(n, revision=0, parent_nullable=True):
+def make_nullable_elements(struct_schema, n, revision=0):
+    """Apply the NULL/empty/mixed-slot scenario to values generated from the declared children."""
     shape = (n + revision) % 8
     if shape == 0:
-        return None if parent_nullable else []
+        return None if struct_schema.nullable else []
     if shape == 1:
         return []
-    return [
-        {
-            "anchor": j,
-            "score": None if (n + j + revision) % 3 == 0 else (n + j + revision) % 7 - 3,
-            "label": None if (n + j) % 4 == 0 else f"tag_{(n + j) % 3}",
-            "emb": None if (n + j + revision) % 3 == 1 else normalized_vector(n * 31 + j + revision * 100003),
-            "tags": [None, [], [None], [n, None], [1, 2, 3, 4]][(n + j + revision) % 5],
-        }
-        for j in range(1 + shape % 5)
-    ]
+    fields = {field.name: field for field in struct_schema.fields}
+    elements = []
+    for offset in range(min(1 + shape % 5, struct_schema.max_capacity)):
+        element = {field.name: cf.gen_data_by_collection_field(field) for field in struct_schema.fields}
+        if "anchor" in fields:
+            element["anchor"] = offset
+        if "score" in fields:
+            element["score"] = (
+                None
+                if fields["score"].nullable and (n + offset + revision) % 3 == 0
+                else (n + offset + revision) % 7 - 3
+            )
+        if "label" in fields:
+            element["label"] = (
+                None
+                if fields["label"].nullable and (n + offset) % 4 == 0
+                else f"tag_{(n + offset) % 3}"[: int(fields["label"].params["max_length"])]
+            )
+        if "emb" in fields and fields["emb"].dtype == DataType.FLOAT_VECTOR:
+            element["emb"] = (
+                None
+                if fields["emb"].nullable and (n + offset + revision) % 3 == 1
+                else normalized_vector(n * 31 + offset + revision * 100003, int(fields["emb"].params["dim"]))
+            )
+        if "tags" in fields and fields["tags"].element_type == DataType.INT64:
+            tags = [None, [], [None], [n, None], [1, 2, 3, 4]][(n + offset + revision) % 5]
+            if tags is None and not fields["tags"].nullable:
+                tags = []
+            if tags is not None:
+                if not fields["tags"].to_dict().get("element_nullable", False):
+                    tags = [value for value in tags if value is not None]
+                tags = tags[: int(fields["tags"].params["max_capacity"])]
+            element["tags"] = tags
+        elements.append(element)
+    return elements
 
 
 CAPACITY = 8
@@ -139,38 +170,48 @@ def sample_scalar_value(number, value_type):
     return number
 
 
-def make_required_element(number, offset, revision=0, value_type=DataType.INT64, vectors=True):
-    result = {
-        "value": sample_scalar_value(number + offset + revision, value_type),
-        "tag": "雪" * 21 if offset % 3 == 0 else f"tag_{(number + offset) % 5}",
-        "flag": (number + offset) % 2 == 0,
-    }
-    if vectors:
-        result["emb"] = normalized_vector(number * 1009 + offset * 31 + revision * 100003 + 7)
+def make_required_element(struct_schema, number, offset, revision=0):
+    """Keep predicate controls explicit; derive all other values and types from schema."""
+    result = {field.name: cf.gen_data_by_collection_field(field) for field in struct_schema.fields}
+    fields = {field.name: field for field in struct_schema.fields}
+    if "value" in fields:
+        result["value"] = sample_scalar_value(number + offset + revision, fields["value"].dtype)
+    if "tag" in fields:
+        limit = int(fields["tag"].params["max_length"])
+        result["tag"] = (
+            "雪" * (limit // 3) + "x" * (limit % 3) if offset % 3 == 0 else f"tag_{(number + offset) % 5}"[:limit]
+        )
+    if "flag" in fields:
+        result["flag"] = (number + offset) % 2 == 0
     return result
 
 
-def make_required_elements(number, revision=0, capacity=CAPACITY, value_type=DataType.INT64, vectors=True):
+def make_required_elements(struct_schema, number, revision=0, capacity=None):
+    """Exercise parent NULL/empty, short and capacity-sized arrays using their declared children."""
+    capacity = struct_schema.max_capacity if capacity is None else min(capacity, struct_schema.max_capacity)
     shape = (number + revision) % 7
     if shape in (0, 6):
-        return None
+        return None if struct_schema.nullable else []
     if shape == 1:
         return []
     length = {2: 1, 3: 2, 4: capacity, 5: 3}[shape]
-    return [
-        make_required_element(number, offset, revision, value_type, vectors) for offset in range(min(length, capacity))
-    ]
+    return [make_required_element(struct_schema, number, offset, revision) for offset in range(min(length, capacity))]
 
 
-def make_metadata_row(number, revision=0, pk_type="int", capacity=CAPACITY, value_type=DataType.INT64, vectors=True):
-    return {
-        "id": make_primary_key(number, pk_type),
-        "revision": revision,
-        "bucket": number % 3,
-        "normal_vector": normalized_vector(number + revision * 100003 + 999),
-        "note": None if number % 3 == 0 else f"note_{revision}",
-        "clips": make_required_elements(number, revision, capacity, value_type, vectors),
+def make_metadata_row(schema, number, revision=0):
+    """Overlay mutation/predicate controls on schema-generated fields, retaining the actual input as oracle."""
+    primary = schema.primary_field
+    struct = schema.struct_fields[0]
+    defaults = {
+        primary.name: [make_primary_key(number, "str" if primary.dtype == DataType.VARCHAR else "int")],
+        "revision": [revision],
+        "bucket": [number % 3],
+        "note": [None if number % 3 == 0 else f"note_{revision}"],
+        struct.name: [make_required_elements(struct, number, revision)],
     }
+    names = {field.name for field in [*schema.fields, *schema.struct_fields]}
+    defaults = {name: value for name, value in defaults.items() if name in names}
+    return cf.gen_row_data_by_schema_with_defaults(nb=1, schema=schema, start=number, default_values=defaults)[0]
 
 
 def vector_score(query, vector, metric):
@@ -182,13 +223,15 @@ def vector_score(query, vector, metric):
     return dot if metric == "IP" else dot / float(np.linalg.norm(query) * np.linalg.norm(vector))
 
 
-def make_typed_vector(dtype, seed):
+def make_typed_vector(dtype, seed, dim=None):
+    # Seeded vectors keep precision regressions and exact score oracles reproducible.
+    dim = dim if dim is not None else (128 if dtype == DataType.BINARY_VECTOR else 32)
     rng = np.random.RandomState(seed)
     if dtype == DataType.BINARY_VECTOR:
-        return rng.bytes(16)
+        return rng.bytes(dim // 8)
     if dtype == DataType.INT8_VECTOR:
-        return rng.randint(-16, 17, 32).astype(np.int8)
-    values = rng.uniform(-1, 1, 32)
+        return rng.randint(-16, 17, dim).astype(np.int8)
+    values = rng.uniform(-1, 1, dim)
     if dtype == DataType.FLOAT16_VECTOR:
         return values.astype(np.float16)
     if dtype == DataType.BFLOAT16_VECTOR:
@@ -216,7 +259,7 @@ def normalize_vector_row(row, dtype):
     return row
 
 
-def make_predicate_rows():
+def make_predicate_rows(schema):
     shapes = [
         None,
         [],
@@ -232,6 +275,7 @@ def make_predicate_rows():
     ]
     return [
         make_nullable_row(
+            schema,
             n,
             None
             if shape is None

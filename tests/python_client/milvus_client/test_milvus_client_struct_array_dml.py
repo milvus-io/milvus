@@ -69,8 +69,8 @@ class TestMilvusClientStructArrayDml(MetadataStructArrayTestBase):
         expected: complete rows match an independent PK map after every acknowledged mutation
         """
         client = self._client()
-        name = self.create_metadata_collection(client, pk_type=pk_type)
-        rows = [make_metadata_row(i, pk_type=pk_type) for i in range(24)]
+        name, schema = self.create_metadata_collection(client, pk_type=pk_type)
+        rows = [make_metadata_row(schema, i) for i in range(24)]
         if initial == "all_null":
             for row in rows:
                 row["clips"] = None
@@ -108,7 +108,7 @@ class TestMilvusClientStructArrayDml(MetadataStructArrayTestBase):
                 batch = []
                 for pk in ids:
                     number = pk if pk_type == "int" else int(pk.rsplit("_", 1)[1])
-                    row = make_metadata_row(number, step + 1, pk_type)
+                    row = make_metadata_row(schema, number, step + 1)
                     if operation.startswith("partial"):
                         patch = {key: row[key] for key in ("id", "revision", "bucket", "normal_vector")}
                         if operation != "partial_omit":
@@ -155,19 +155,27 @@ class TestMilvusClientStructArrayDml(MetadataStructArrayTestBase):
         assert not write_failures, json.dumps({"seed": seed, "failed_writes": write_failures})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("capacity", [1, 2, 128, 4096])
-    def test_struct_array_capacity_boundary_and_integer_extremes(self, capacity):
+    @pytest.mark.parametrize("capacity,dim", [(1, 16), (2, 24), (128, 64), (4096, 128)])
+    def test_struct_array_capacity_boundary_and_integer_extremes(self, capacity, dim):
         """
         target: retain exact INT64 and UTF-8 values at array capacity boundaries
         method: write NULL, empty, one, capacity-1 and capacity arrays and reload twice
         expected: no truncation, integer precision loss, array reordering or NULL/empty collapse
         """
         client = self._client()
-        name = self.create_metadata_collection(client, capacity=capacity, vectors=False)
-        rows = [make_metadata_row(i, capacity=capacity, vectors=False) for i in range(5)]
+        name, schema = self.create_metadata_collection(
+            client,
+            capacity=capacity,
+            vectors=False,
+            dim=dim,
+            extra_fields=[cf.gen_int32_field(name="tenant"), cf.gen_string_field(name="region", max_length=12)],
+        )
+        rows = [make_metadata_row(schema, i) for i in range(5)]
         for row, length in zip(rows, [None, 0, 1, max(0, capacity - 1), capacity]):
             row["clips"] = (
-                None if length is None else [make_required_element(row["id"], j, vectors=False) for j in range(length)]
+                None
+                if length is None
+                else [make_required_element(schema.struct_fields[0], row["id"], j) for j in range(length)]
             )
             for j, element in enumerate(row["clips"] or []):
                 element["value"] = [-(2**63), 2**63 - 1, 0][j % 3]
@@ -190,14 +198,14 @@ class TestMilvusClientStructArrayDml(MetadataStructArrayTestBase):
         expected: input rejection, unchanged collection and successful complete corrected batch
         """
         client = self._client()
-        name = self.create_metadata_collection(client)
-        existing = [make_metadata_row(i) for i in range(14)]
+        name, schema = self.create_metadata_collection(client)
+        existing = [make_metadata_row(schema, i) for i in range(14)]
         model = {row["id"]: copy.deepcopy(row) for row in existing}
         self.insert(client, name, existing)
         self.reload_collection(client, name)
-        good = [make_metadata_row(100 + i) for i in range(7)]
+        good = [make_metadata_row(schema, 100 + i) for i in range(7)]
         for row in good:
-            row["clips"] = [make_required_element(row["id"], 0)]
+            row["clips"] = [make_required_element(schema.struct_fields[0], row["id"], 0)]
         bad = copy.deepcopy(good)
         target = bad[position]
         if invalid == "capacity":
@@ -238,17 +246,25 @@ class TestMilvusClientStructArrayDml(MetadataStructArrayTestBase):
         expected: omitted sibling fields remain bit-for-bit logically unchanged
         """
         client = self._client()
-        name = self.create_metadata_collection(client, second=True)
-        rows = [make_metadata_row(i) for i in range(48)]
+        name, schema = self.create_metadata_collection(client, second=True)
+        rows = [make_metadata_row(schema, i) for i in range(48)]
         for row in rows:
-            row["other"] = make_required_elements(row["id"] + seed, capacity=3)
+            row["other"] = make_required_elements(schema.struct_fields[1], row["id"] + seed, capacity=3)
         model = {row["id"]: copy.deepcopy(row) for row in rows}
         self.insert(client, name, rows)
         for revision in range(1, 7):
             field = "clips" if revision % 2 else "other"
             batch = []
             for pk in range(revision % 3, 48, 3):
-                patch = {"id": pk, field: make_required_elements(pk + seed, revision, capacity=revision)}
+                patch = {
+                    "id": pk,
+                    field: make_required_elements(
+                        next(struct for struct in schema.struct_fields if struct.name == field),
+                        pk + seed,
+                        revision,
+                        capacity=revision,
+                    ),
+                }
                 batch.append(patch)
                 model[pk].update(copy.deepcopy(patch))
             self.upsert(client, name, batch, partial_update=True)
@@ -267,14 +283,14 @@ class TestMilvusClientStructArrayDml(MetadataStructArrayTestBase):
         expected: exact partition-specific PK maps with no duplicates or missing rows
         """
         client = self._client()
-        name = self.create_metadata_collection(client, pk_type=pk_type, second=True)
+        name, schema = self.create_metadata_collection(client, pk_type=pk_type, second=True)
         models = {}
         for part, start in (("left_part", 0), ("right_part", 1000)):
             self.create_partition(client, name, part)
-            rows = [make_metadata_row(i, pk_type=pk_type) for i in range(start, start + 73)]
+            rows = [make_metadata_row(schema, i) for i in range(start, start + 73)]
             for row in rows:
                 number = row["id"] if pk_type == "int" else int(row["id"].rsplit("_", 1)[1])
-                row["other"] = make_required_elements(number + 3, capacity=2)
+                row["other"] = make_required_elements(schema.struct_fields[1], number + 3, capacity=2)
             self.insert(client, name, rows, partition_name=part)
             models[part] = {row["id"]: copy.deepcopy(row) for row in rows}
         self.reload_collection(client, name)
@@ -284,7 +300,11 @@ class TestMilvusClientStructArrayDml(MetadataStructArrayTestBase):
             del models["left_part"][pk]
         patches = []
         for number in range(1, 73, 5):
-            patch = {"id": make_primary_key(number, pk_type), "clips": make_required_elements(number, 8), "revision": 8}
+            patch = {
+                "id": make_primary_key(number, pk_type),
+                "clips": make_required_elements(schema.struct_fields[0], number, 8),
+                "revision": 8,
+            }
             patches.append(patch)
             models["left_part"][patch["id"]].update(copy.deepcopy(patch))
         self.upsert(client, name, patches, partial_update=True, partition_name="left_part")
@@ -325,18 +345,27 @@ class TestMilvusClientStructArrayDml(MetadataStructArrayTestBase):
         expected: exact complete data and element search before and after a completed compaction
         """
         client = self._client()
-        name = self.create_metadata_collection(client)
-        rows = [make_metadata_row(i) for i in range(1200)]
+        name, schema = self.create_metadata_collection(client)
+        rows = [make_metadata_row(schema, i) for i in range(1200)]
         model = {row["id"]: copy.deepcopy(row) for row in rows}
         for batch in (rows[:600], rows[600:]):
             self.insert(client, name, batch)
             self.flush(client, name)
+        added_children = self.required_child_schema(client, vectors=new_field_vectors)
         self.add_collection_struct_field(
             client,
             name,
             "added",
-            self.required_child_schema(client, vectors=new_field_vectors),
+            added_children,
             CAPACITY,
+        )
+        schema.add_field(
+            "added",
+            DataType.ARRAY,
+            element_type=DataType.STRUCT,
+            struct_schema=added_children,
+            max_capacity=CAPACITY,
+            nullable=True,
         )
         for row in model.values():
             row["added"] = None
@@ -348,9 +377,9 @@ class TestMilvusClientStructArrayDml(MetadataStructArrayTestBase):
         self.assert_metadata_rows(client, name, model)
         patches = []
         for number in list(range(0, 1200, 3)) + list(range(1200, 1260)):
-            source = make_metadata_row(number, 4)
+            source = make_metadata_row(schema, number, 4)
             patch = {key: source[key] for key in ("id", "revision", "bucket", "normal_vector")}
-            patch["added"] = make_required_elements(number + 2, 4, vectors=new_field_vectors)
+            patch["added"] = make_required_elements(schema.struct_fields[-1], number + 2, 4)
             expected = copy.deepcopy(model.get(number, {**source, "note": None, "clips": None}))
             expected.update(copy.deepcopy(patch))
             model[number] = expected
@@ -393,10 +422,15 @@ class TestMilvusClientStructArrayPartitionIsolation(StructArrayTestBase):
         expected: exact retained values and key sets; peer partitions and collections stay unchanged
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children())
-        peer = self.create_struct_collection(client, nullable_children())
+        name, schema = self.create_struct_collection(client, nullable_children())
+        peer, peer_schema = self.create_struct_collection(client, nullable_children())
         peer_model = self.insert_rows_with_model(
-            client, peer, [make_nullable_row(n, make_nullable_elements(n + 20)) for n in range(12)]
+            client,
+            peer,
+            [
+                make_nullable_row(peer_schema, n, make_nullable_elements(peer_schema.struct_fields[0], n + 20))
+                for n in range(12)
+            ],
         )
         other = client.create_struct_field_schema()
         other.add_field("score", DataType.INT64, nullable=True)
@@ -408,7 +442,10 @@ class TestMilvusClientStructArrayPartitionIsolation(StructArrayTestBase):
         partitions = {}
         for partition, start in (("left", 0), ("right", 100)):
             client.create_partition(name, partition)
-            rows = [make_nullable_row(n, make_nullable_elements(n)) for n in range(start, start + 12)]
+            rows = [
+                make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n))
+                for n in range(start, start + 12)
+            ]
             for row in rows:
                 row["other"] = [{"score": -row["id"], "tags": [None, -row["id"]]}, {"score": None, "tags": None}]
             client.insert(name, rows, partition_name=partition)
@@ -444,7 +481,7 @@ class TestMilvusClientStructArrayNullableScalarChildren(StructArrayTestBase):
         expected: every logical element, value and schema nullability matches retained inputs
         """
         client = self._client()
-        name = self.create_struct_collection(
+        name, schema = self.create_struct_collection(
             client, {"anchor": child_schema(DataType.INT64, False), "value": child_schema(dtype)}, parent_nullable
         )
         rows = []
@@ -455,20 +492,23 @@ class TestMilvusClientStructArrayNullableScalarChildren(StructArrayTestBase):
             ]
             if n % 11 == 0 and parent_nullable:
                 clips = None
-            rows.append(make_nullable_row(n, clips))
+            rows.append(make_nullable_row(schema, n, clips))
         model = self.insert_rows_with_model(client, name, rows)
         self.assert_rows(client, name, model)
         changes = [
             make_nullable_row(
-                n, [{"anchor": 0, "value": None}, {"anchor": 1, "value": scalar_boundary_value(dtype, n)}], revision=1
+                schema,
+                n,
+                [{"anchor": 0, "value": None}, {"anchor": 1, "value": scalar_boundary_value(dtype, n)}],
+                revision=1,
             )
             for n in range(0, 72, 3)
         ]
         self.upsert(client, name, changes)
         model.update({r["id"]: r for r in changes})
-        omitted = make_nullable_row(100, [{"anchor": 0}, {"anchor": 1}])
+        omitted = make_nullable_row(schema, 100, [{"anchor": 0}, {"anchor": 1}])
         self.insert(client, name, [omitted])
-        model[100] = make_nullable_row(100, [{"anchor": 0, "value": None}, {"anchor": 1, "value": None}])
+        model[100] = {**copy.deepcopy(omitted), "clips": [{"anchor": 0, "value": None}, {"anchor": 1, "value": None}]}
         self.assert_rows(client, name, model)
         self.reload_collection(client, name)
         self.assert_rows(client, name, model)
@@ -489,9 +529,11 @@ class TestMilvusClientStructArrayNullableScalarChildren(StructArrayTestBase):
         expected: acknowledged writes, fields and element predicates survive every reload
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children(), pk_type=pk_type)
+        name, schema = self.create_struct_collection(client, nullable_children(), pk_type=pk_type)
         model = self.insert_rows_with_model(
-            client, name, [make_nullable_row(n, make_nullable_elements(n), pk_type) for n in range(40)]
+            client,
+            name,
+            [make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n)) for n in range(40)],
         )
         rng = random.Random(seed)
         for step in range(24):
@@ -501,11 +543,13 @@ class TestMilvusClientStructArrayNullableScalarChildren(StructArrayTestBase):
                 for pk in ids:
                     del model[pk]
             else:
-                ids.append(make_nullable_row(1000 + step, [], pk_type)["id"])
+                ids.append(make_nullable_row(schema, 1000 + step, [])["id"])
                 batch = []
                 for pk in ids:
                     n = pk if pk_type == "int" else int(pk.rsplit("_", 1)[1])
-                    source = make_nullable_row(n, make_nullable_elements(n, step + 1), pk_type, step + 1)
+                    source = make_nullable_row(
+                        schema, n, make_nullable_elements(schema.struct_fields[0], n, step + 1), step + 1
+                    )
                     if step % 6 == 0:
                         patch = {k: source[k] for k in ("id", "normal_vector", "revision")}
                         expected = copy.deepcopy(model.get(pk, {**source, "clips": None}))
@@ -541,7 +585,7 @@ class TestMilvusClientStructArrayNestedArrayChildren(StructArrayTestBase):
         options = dict(element_type=dtype, max_capacity=4, element_nullable=leaf_nullable)
         if dtype == DataType.VARCHAR:
             options["max_length"] = 32
-        name = self.create_struct_collection(
+        name, schema = self.create_struct_collection(
             client,
             {
                 "anchor": child_schema(DataType.INT64, False),
@@ -559,7 +603,7 @@ class TestMilvusClientStructArrayNestedArrayChildren(StructArrayTestBase):
                 if inner_nullable and (n + j) % 4 == 0:
                     tags = None
                 clips.append({"anchor": j, "tags": tags})
-            rows.append(make_nullable_row(n, None if n % 13 == 0 else clips))
+            rows.append(make_nullable_row(schema, n, None if n % 13 == 0 else clips))
         model = self.insert_rows_with_model(client, name, rows)
         self.assert_rows(client, name, model)
         for n in range(0, 64, 5):
@@ -576,9 +620,13 @@ class TestMilvusClientStructArrayNestedArrayChildren(StructArrayTestBase):
         assert tags.nullable == inner_nullable and tags.element_nullable == leaf_nullable
         assert tags.element_type == dtype and tags.params["max_capacity"] == 4
         if not inner_nullable:
-            self.assert_insert_rejected(client, name, [make_nullable_row(900, [{"anchor": 0, "tags": None}])], model)
+            self.assert_insert_rejected(
+                client, name, [make_nullable_row(schema, 900, [{"anchor": 0, "tags": None}])], model
+            )
         if not leaf_nullable:
-            self.assert_insert_rejected(client, name, [make_nullable_row(901, [{"anchor": 0, "tags": [None]}])], model)
+            self.assert_insert_rejected(
+                client, name, [make_nullable_row(schema, 901, [{"anchor": 0, "tags": [None]}])], model
+            )
         self.reload_collection(client, name)
         self.assert_rows(client, name, model)
         actual, _ = self.query(
@@ -610,12 +658,14 @@ class TestMilvusClientStructArrayNestedArrayChildren(StructArrayTestBase):
         expected: parameter rejection, no row changes, complete successful recovery
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children())
+        name, schema = self.create_struct_collection(client, nullable_children())
         model = self.insert_rows_with_model(
-            client, name, [make_nullable_row(n, make_nullable_elements(n)) for n in range(24)]
+            client,
+            name,
+            [make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n)) for n in range(24)],
         )
         clips = [{"anchor": 0, "score": 1, "label": "ok", "emb": normalized_vector(3), "tags": [1, None]}]
-        good = [make_nullable_row(300 + i, clips) for i in range(3)]
+        good = [make_nullable_row(schema, 300 + i, clips) for i in range(3)]
         bad = copy.deepcopy(good)
         elements = bad[bad_position]["clips"]
         if malformation == "required_null":
@@ -652,7 +702,7 @@ class TestMilvusClientStructArrayPartialUpdatePaths(StructArrayTestBase):
         expected: exactly the selected position changes and the whole model survives reload
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children())
+        name, schema = self.create_struct_collection(client, nullable_children())
         clips = [
             {
                 "anchor": j,
@@ -663,7 +713,7 @@ class TestMilvusClientStructArrayPartialUpdatePaths(StructArrayTestBase):
             }
             for j in range(4)
         ]
-        rows = [make_nullable_row(n, clips) for n in range(6)]
+        rows = [make_nullable_row(schema, n, clips) for n in range(6)]
         model = self.insert_rows_with_model(client, name, rows)
         element = {
             "anchor": 9,
@@ -706,12 +756,17 @@ class TestMilvusClientStructArrayPartialUpdateRejection(StructArrayTestBase):
         expected: explicit struct-operation rejection, unchanged rows and valid replacement
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children())
+        name, schema = self.create_struct_collection(client, nullable_children())
         model = self.insert_rows_with_model(
-            client, name, [make_nullable_row(n, make_nullable_elements(n)) for n in range(12)]
+            client,
+            name,
+            [make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n)) for n in range(12)],
         )
         before = client.describe_collection(name)
-        rows = [make_nullable_row(n, make_nullable_elements(n, 1), revision=1) for n in (2, 100, 3)]
+        rows = [
+            make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n, 1), revision=1)
+            for n in (2, 100, 3)
+        ]
         handler = client._get_connection()
         request = handler._prepare_row_upsert_request(name, rows, partial_update=True)
         request.field_ops.add(field_name=target, op=op)
@@ -735,12 +790,16 @@ class TestMilvusClientStructArrayPartialUpdateRejection(StructArrayTestBase):
         expected: no acknowledged sibling change; repaired request persists all rows
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children())
+        name, schema = self.create_struct_collection(client, nullable_children())
         model = self.insert_rows_with_model(
-            client, name, [make_nullable_row(n, make_nullable_elements(n)) for n in range(12)]
+            client,
+            name,
+            [make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n)) for n in range(12)],
         )
         rows = [
-            make_nullable_row(n, [{"anchor": n, "score": None, "label": None, "emb": None, "tags": [None]}], revision=1)
+            make_nullable_row(
+                schema, n, [{"anchor": n, "score": None, "label": None, "emb": None, "tags": [None]}], revision=1
+            )
             for n in (2, 100, 3)
         ]
         handler = client._get_connection()
@@ -782,16 +841,16 @@ class TestMilvusClientStructArrayStorageV3Flush(StructArrayTestBase):
         }[kind]
         children = client.create_struct_field_schema()
         children.add_field("value", dtype, **options)
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field("id", DataType.INT64, is_primary=True)
-        schema.add_field("normal_vector", DataType.FLOAT_VECTOR, dim=8)
-        schema.add_field(
+        nullable_schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        nullable_schema.add_field("id", DataType.INT64, is_primary=True)
+        nullable_schema.add_field("normal_vector", DataType.FLOAT_VECTOR, dim=8)
+        nullable_schema.add_field(
             "extra", DataType.ARRAY, element_type=DataType.STRUCT, struct_schema=children, nullable=True, max_capacity=8
         )
         if entrance == "create":
             name = cf.gen_unique_str("struct_storage_guard")
             try:
-                raw = Prepare.create_collection_request(name, schema)
+                raw = Prepare.create_collection_request(name, nullable_schema)
                 status = client._get_connection()._stub.CreateCollection(raw, timeout=30)
                 if mode == "v3-gsf":
                     assert status.code == 1100 and "growing-source flush is enabled" in status.reason, status
@@ -802,23 +861,25 @@ class TestMilvusClientStructArrayStorageV3Flush(StructArrayTestBase):
             finally:
                 client.drop_collection(name)
             # A schema without nullable elements must still be admitted with the guard enabled.
-            control = self.create_struct_collection(client, {"anchor": child_schema(DataType.INT64, False)})
+            control, schema = self.create_struct_collection(client, {"anchor": child_schema(DataType.INT64, False)})
             model = self.insert_rows_with_model(
-                client, control, [make_nullable_row(n, [{"anchor": n}]) for n in range(6)]
+                client, control, [make_nullable_row(schema, n, [{"anchor": n}]) for n in range(6)]
             )
             self.reload_collection(client, control)
             self.assert_rows(client, control, model)
             return
 
-        name = self.create_struct_collection(client, {"anchor": child_schema(DataType.INT64, False)})
+        name, schema = self.create_struct_collection(client, {"anchor": child_schema(DataType.INT64, False)})
         model = self.insert_rows_with_model(
             client,
             name,
-            [make_nullable_row(n, None if n == 0 else [] if n == 1 else [{"anchor": n}]) for n in range(6)],
+            [make_nullable_row(schema, n, None if n == 0 else [] if n == 1 else [{"anchor": n}]) for n in range(6)],
         )
         before = client.describe_collection(name)
         if entrance == "add_struct":
-            wire = schema_pb2.CollectionSchema.FromString(Prepare.create_collection_request("unused", schema).schema)
+            wire = schema_pb2.CollectionSchema.FromString(
+                Prepare.create_collection_request("unused", nullable_schema).schema
+            )
             raw = milvus_pb2.AddCollectionStructFieldRequest(
                 collection_name=name, struct_array_field_schema=wire.struct_array_fields[0]
             )
@@ -864,15 +925,15 @@ class TestMilvusClientStructArrayProtobufValidity(MetadataStructArrayTestBase):
         expected: identical complete rows and three-valued predicates for all supported encodings
         """
         client = self._client()
-        name = self.create_metadata_collection(client)
-        rows = [make_metadata_row(i) for i in range(21)]
+        name, schema = self.create_metadata_collection(client)
+        rows = [make_metadata_row(schema, i) for i in range(21)]
         if profile == "all_null":
             for row in rows:
                 row["clips"] = None
                 row["note"] = None
         model = {row["id"]: copy.deepcopy(row) for row in rows}
         handler = client._get_connection()
-        template = handler._prepare_row_insert_request(name, [make_metadata_row(4)])
+        template = handler._prepare_row_insert_request(name, [make_metadata_row(schema, 4)])
         request = encode_validity_masks(handler._prepare_row_insert_request(name, rows), location, template)
         response = handler._stub.Insert(request, timeout=30)
         assert response.status.code == 0, response.status
@@ -893,12 +954,12 @@ class TestMilvusClientStructArrayProtobufValidity(MetadataStructArrayTestBase):
         expected: parameter rejection, no valid sibling writes, then complete successful recovery
         """
         client = self._client()
-        name = self.create_metadata_collection(client)
-        existing = [make_metadata_row(i) for i in range(14)]
+        name, schema = self.create_metadata_collection(client)
+        existing = [make_metadata_row(schema, i) for i in range(14)]
         model = {row["id"]: copy.deepcopy(row) for row in existing}
         self.insert(client, name, existing)
         self.reload_collection(client, name)
-        rows = [make_metadata_row(100 + i) for i in range(7)]
+        rows = [make_metadata_row(schema, 100 + i) for i in range(7)]
         handler = client._get_connection()
         good = encode_validity_masks(handler._prepare_row_insert_request(name, rows), "dual")
         bad = copy.deepcopy(good)
@@ -938,16 +999,18 @@ class TestMilvusClientStructArrayNestedValidity(StructArrayTestBase):
         expected: Proxy parameter rejection without side effects and valid retry succeeds
         """
         client = self._client()
-        name = self.create_struct_collection(client, nullable_children())
+        name, schema = self.create_struct_collection(client, nullable_children())
         model = self.insert_rows_with_model(
-            client, name, [make_nullable_row(n, make_nullable_elements(n)) for n in range(20)]
+            client,
+            name,
+            [make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n)) for n in range(20)],
         )
         clips = [
             {"anchor": 0, "score": 1, "label": "one", "emb": normalized_vector(4), "tags": [1, None, 3]},
             {"anchor": 1, "score": None, "label": None, "emb": None, "tags": None},
             {"anchor": 2, "score": 3, "label": "three", "emb": normalized_vector(6), "tags": []},
         ]
-        row = make_nullable_row(100, clips)
+        row = make_nullable_row(schema, 100, clips)
         handler = client._get_connection()
         good = handler._prepare_row_insert_request(name, [row])
         bad = copy.deepcopy(good)
