@@ -86,7 +86,7 @@ ScanRawField(milvus::OpContext* op_ctx,
     }
     const auto column = snapshot
                             ? snapshot->GetDataScanResources(field_id).first
-                            : segment.GetDataScanResources(field_id).first;
+                            : segment.GetChunkedColumn(field_id);
     if (!column) {
         return false;
     }

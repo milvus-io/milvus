@@ -301,7 +301,7 @@ class PhyCompareFilterExpr : public Expr {
         if (snapshot_ != nullptr) {
             return snapshot_->GetDataScanResources(field_id).first;
         }
-        return segment_->GetDataScanResources(field_id).first;
+        return segment_->GetChunkedColumn(field_id);
     }
 
     int64_t
