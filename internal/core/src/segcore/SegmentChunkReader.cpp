@@ -27,7 +27,6 @@
 #include "common/type_c.h"
 #include "folly/FBVector.h"
 #include "mmap/ChunkedColumnInterface.h"
-#include "segcore/SegcoreConfig.h"
 #include "storage/MmapManager.h"
 #include "storage/Types.h"
 
@@ -234,7 +233,9 @@ SegmentChunkReader::GetChunkDataAccessor<std::string>(FieldId field_id,
                chunk_id,
                num_chunks);
     if (segment_->type() == SegmentType::Sealed) {
-        auto column = GetColumn(field_id);
+        auto column = snapshot_
+                          ? snapshot_->GetDataScanResources(field_id).first
+                          : segment_->GetChunkedColumn(field_id);
         AssertInfo(column != nullptr, "string field has no column");
         auto pin = column->GetChunk(op_ctx_, chunk_id);
         return [pin = std::move(pin)](int i) -> const data_access_type {

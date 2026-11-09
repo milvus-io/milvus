@@ -655,15 +655,6 @@ class SegmentChunkReaderScalarTest : public ::testing::Test {
         return std::make_shared<ReaderFixedColumn>(slot, meta, stats);
     }
 
-    void
-    Check(const data_access_type& value, int64_t row, bool nullable) {
-        const auto valid = !nullable || (row != 6 && row != 14);
-        ASSERT_EQ(value.has_value(), valid) << row;
-        if (valid) {
-            EXPECT_EQ(get_from_variant<T>(value), Value(row)) << row;
-        }
-    }
-
     std::vector<std::weak_ptr<ChunkMmapGuard>> lifetimes_;
     const bool saved_cursor_owns_pin_ =
         SegcoreConfig::default_config().get_scan_cursor_owns_pin();

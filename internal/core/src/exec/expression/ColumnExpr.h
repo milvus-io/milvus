@@ -68,8 +68,8 @@ class PhyColumnExpr : public Expr {
             num_chunk_ = segment_chunk_reader_.NumChunkData(
                 expr_->GetColumn().field_id_);
         } else if (segment->type() == SegmentType::Growing) {
-            num_chunk_ = upper_div(segment_chunk_reader_.active_count_,
-                                   segment_chunk_reader_.SizePerChunk());
+            num_chunk_ =
+                upper_div(active_count_, segment_chunk_reader_.SizePerChunk());
         }
         AssertInfo(
             batch_size_ > 0,
@@ -93,7 +93,7 @@ class PhyColumnExpr : public Expr {
                     std::min(current_row_ + batch_size_, active_count_);
                 return;
             }
-            if (segment_chunk_reader_.segment_->is_chunked()) {
+            if (segment_->is_chunked()) {
                 segment_chunk_reader_.MoveCursorForMultipleChunk(
                     current_chunk_id_,
                     current_chunk_pos_,
@@ -116,13 +116,12 @@ class PhyColumnExpr : public Expr {
         if (HasValueReader() || segment_->type() == SegmentType::Sealed) {
             return current_row_;
         }
-        if (segment_chunk_reader_.segment_->is_chunked()) {
+        if (segment_->is_chunked()) {
             return segment_chunk_reader_.NumRowsUntilChunk(
                        expr_->GetColumn().field_id_, current_chunk_id_) +
                    current_chunk_pos_;
         } else {
-            return segment_chunk_reader_.segment_->type() ==
-                           SegmentType::Growing
+            return segment_->type() == SegmentType::Growing
                        ? current_chunk_id_ *
                                  segment_chunk_reader_.SizePerChunk() +
                              current_chunk_pos_
