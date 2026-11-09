@@ -392,6 +392,10 @@ func (m *Meta) GetSegmentChangeGroupBySegmentID(ctx context.Context, segmentID i
 func (m *Meta) HasStagedSegment(ctx context.Context, collectionID, segmentID int64) bool {
 	m.groupMu.RLock()
 	defer m.groupMu.RUnlock()
+	return m.hasStagedSegmentLocked(collectionID, segmentID)
+}
+
+func (m *Meta) hasStagedSegmentLocked(collectionID, segmentID int64) bool {
 	groupID, ok := m.stagedSegmentToGroup[segmentID]
 	if !ok {
 		return false

@@ -18,6 +18,7 @@ package meta
 
 import (
 	"context"
+	"slices"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/dataview"
@@ -40,18 +41,10 @@ func (m *Meta) LoadableProjection(ctx context.Context, collectionID int64, previ
 			admitted.Insert(partition.GetSegmentIds()...)
 		}
 	}
-	// The collection snapshot is point-in-time. Read the staged members after it:
-	// a group committing in between then leaves its members invisible and its
-	// parents live in this snapshot, while the reverse order could exclude the
-	// members of a snapshot whose parents are already retired.
-	segments := m.Segments.GetSegmentsBySelector(WithCollection(collectionID))
-	staged := m.AliveStagedMembers(ctx, collectionID)
+	segments := m.unstagedProjectionSegments(collectionID)
 	valid := make(map[int64]*SegmentInfo, len(segments))
 	flushed, dropped := typeutil.NewUniqueSet(), typeutil.NewUniqueSet()
 	for _, segment := range segments {
-		if staged.Contain(segment.GetID()) {
-			continue
-		}
 		if segment.GetLevel() == datapb.SegmentLevel_L0 || segment.GetIsImporting() || segment.GetIsFake() ||
 			(len(segment.GetBinlogs()) == 0 && segment.GetManifestPath() == "") {
 			continue
@@ -158,4 +151,16 @@ func (m *Meta) LoadableProjection(ctx context.Context, collectionID int64, previ
 		result = append(result, segment)
 	}
 	return result, nil
+}
+
+func (m *Meta) unstagedProjectionSegments(collectionID int64) []*SegmentInfo {
+	// Snapshot segments first: if a group commits between the two reads, this
+	// snapshot still has its live parents. Reading group state first could
+	// exclude the new members from a snapshot whose parents are already retired.
+	segments := m.Segments.GetSegmentsBySelector(WithCollection(collectionID))
+	m.groupMu.RLock()
+	defer m.groupMu.RUnlock()
+	return slices.DeleteFunc(segments, func(segment *SegmentInfo) bool {
+		return m.hasStagedSegmentLocked(collectionID, segment.GetID())
+	})
 }

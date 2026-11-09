@@ -185,10 +185,12 @@ func TestMeta_UpdateSegmentsInfoAndChangeGroups_Publish(t *testing.T) {
 		NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, IsInvisible: true,
+			Binlogs: []*datapb.FieldBinlog{{FieldID: 100}},
 		}),
 		NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 2001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
 			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
+			Binlogs: []*datapb.FieldBinlog{{FieldID: 100}},
 		}),
 	} {
 		require.NoError(t, m.AddSegment(ctx, seg))
@@ -197,11 +199,21 @@ func TestMeta_UpdateSegmentsInfoAndChangeGroups_Publish(t *testing.T) {
 	group := NewTestGroup()
 	require.NoError(t, m.AddSegmentChangeGroup(ctx, group))
 
+	assertProjection := func(wantID int64) {
+		t.Helper()
+		projection, err := m.LoadableProjection(ctx, group.CollectionID, nil)
+		require.NoError(t, err)
+		require.Len(t, projection, 1)
+		require.Equal(t, wantID, projection[0].SegmentID)
+	}
+	assertProjection(2001)
+
 	// Mark READY (the publish state machine requires READY -> COMMITTED), then
 	// publish: flip member visible + commit_ts, drop superseded, COMMITTED.
 	ready := group.Clone()
 	ready.State = model.SegmentChangeStateReady
 	require.NoError(t, m.UpdateSegmentChangeGroup(ctx, ready))
+	assertProjection(2001)
 	committed := ready.Clone()
 	committed.State = model.SegmentChangeStateCommitted
 	committed.CommitTS = 500
@@ -212,6 +224,8 @@ func TestMeta_UpdateSegmentsInfoAndChangeGroups_Publish(t *testing.T) {
 		UpdateStatusOperator(2001, commonpb.SegmentState_Dropped),
 	)
 	require.NoError(t, err)
+
+	assertProjection(1001)
 
 	member := m.GetSegment(ctx, 1001)
 	require.NotNil(t, member)
