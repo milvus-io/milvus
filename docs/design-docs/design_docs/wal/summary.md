@@ -475,9 +475,14 @@ general APIs return the full requested range. Startup uses
 one boundary and plans a newest chunk suffix before I/O. Manifest TimeTicks
 apply `streaming.idempotency.ttlPerPChannel`; the sum of Insert and Idempotency
 section lengths charges `maxSizePerPChannel`, including one whole boundary
-chunk. Pending/sealed facts consume equivalent encoded bytes. Keyless sections
-are skipped, repeated keys do not reduce planned encoded cost, and no
-`bestEffortMinCountPerVChannel` reservation expands the suffix.
+chunk. Pending keyed facts consume their encoded bytes; keyless pending facts
+are skipped. Sealed sections consume the equivalent complete section lengths.
+Only wholly keyless sections are skipped: a mixed section charges both keyed
+and keyless insert facts and their aligned annotations, although only keyed
+facts enter the recovered window. This can shorten the recovered keyed history
+relative to the live window or an unsealed tail, even within the TTL; a retry
+outside that suffix may append again. Repeated keys do not reduce planned encoded
+cost, and no `bestEffortMinCountPerVChannel` reservation expands the suffix.
 
 Selected chunks are read oldest first in bounded batches of four through the
 shared cache. Ordered post-load admission promotes newer chunks even when reads

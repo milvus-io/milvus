@@ -1818,10 +1818,6 @@ streaming:
     concurrencyRatio: 4 # The concurrency ratio based on number of CPU for wal broadcaster, 4 by default.
   txn:
     defaultKeepaliveTimeout: 10s # The default keepalive timeout for wal txn, 10s by default
-  idempotency:
-    ttlPerPChannel: 1h # Idle TTL for committed Insert keys in each PChannel. Access refreshes are in memory only; recovery uses original commit time. Applied when the WAL opens.
-    maxSizePerPChannel: 256MB # Estimated record-byte budget shared by all VChannels in one PChannel. LRU eviction; not a process RSS limit. Recovery preselects the newest chunks by encoded Insert + Idempotency section bytes, including one boundary chunk.
-    bestEffortMinCountPerVChannel: 16 # Soft capacity preference per VChannel. PChannel TTL and maxSize take precedence; no per-VChannel recovery guarantee. Applied when the WAL opens.
   walWriteAheadBuffer:
     capacity: 64m # WAB cache capacity. Capacity/keepalive eviction only removes records consumed by RecoveryStorage and preserves the durable catchup anchor. Also scales walRateLimit.writeAheadBuffer.slowdownRatio.
     keepalive: 30s # WAB cache TTL. Expired records are evictable only after RecoveryStorage consumes them; the durable catchup anchor is retained.
@@ -1875,6 +1871,10 @@ streaming:
       lowWatermark: 4g # RecoveryStorage releases WAL append pressure after the unpublished WAL tail falls to this logical size.
       softWatermark: 8g # RecoveryStorage requests VChannel persistence and slows WAL append after the unpublished WAL tail reaches this logical size.
       highWatermark: 16g # RecoveryStorage rejects new DML append after the unpublished WAL tail reaches this logical size.
+  idempotency:
+    ttlPerPChannel: 1h # Idle lifetime of committed Insert idempotency records per PChannel. Duplicate access refreshes the in-memory lifetime; recovery uses the original WAL commit time. Applied when the WAL opens.
+    maxSizePerPChannel: 256MB # PChannel-wide estimated byte budget for committed Insert idempotency records. Eviction follows last access order. Recovery preselects a newest chunk suffix using encoded Insert and Idempotency section lengths and ttl, including one whole boundary chunk. This is not a process RSS limit. Applied when the WAL opens.
+    bestEffortMinCountPerVChannel: 16 # Best-effort minimum retained-record count per VChannel. Capacity eviction prefers channels above this count; ttl and the PChannel maxSize take precedence. Recovery does not reserve this count. Zero disables the preference. Applied when the WAL opens.
   transformLog:
     catchupConcurrencyRatioPerPChannel: 0.25 # TransformLog catch-up worker count for each consumer's PChannel stream is max(1, floor(CPU count * ratio)). Updates existing worker pools dynamically.
   replication:

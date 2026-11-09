@@ -279,6 +279,17 @@ before key deduplication. One whole boundary chunk is included, so selection
 can exceed the byte target by that boundary block. There is no per-VChannel
 count reservation or decode-dependent extension into older chunks.
 
+Pure keyless sections consume no idempotency recovery budget. In a mixed
+keyed/keyless section, sealed and durable selection charges the complete paired
+sections, including the empty key annotations and insert positions of keyless
+writes. Pending records are selected individually and skip keyless facts before
+charging bytes. Recovery therefore need not preserve the same keyed history
+across these storage states or as the live window: a busy keyless writer sharing
+a section can exhaust the recovery budget before an older keyed chunk, even
+within the TTL. A retry outside the recovered suffix may append again. The
+budget uses encoded section lengths without reading older chunks to compensate
+for keyless traffic; it is not a guaranteed amount of recovered keyed data.
+
 Selected durable chunks are scheduled oldest first in batches of at most four
 concurrent reads through the shared cache. After each batch joins, acquired
 payloads are re-admitted/promoted oldest to newest, so out-of-order downloads

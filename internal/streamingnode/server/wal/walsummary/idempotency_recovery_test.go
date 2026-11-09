@@ -111,6 +111,70 @@ func TestIdempotencyRecoveryReadsOnlySelectedTail(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 }
 
+func TestIdempotencyRecoveryMixedSectionBudgetBoundaries(t *testing.T) {
+	for _, state := range []string{"pending", "sealed", "durable"} {
+		t.Run(state, func(t *testing.T) {
+			ctx := context.Background()
+			now := time.Now().Truncate(time.Millisecond)
+			m, _ := newTestManagerWithStore(t)
+			observe := func(key string, at time.Time, pks []int64, offsets []uint32) uint64 {
+				msg := newTestIdempotentInsertMessage(t, "mixed", tsoutil.ComposeTSByTime(at), key, pks, offsets)
+				m.ObserveMessage(ctx, msg)
+				annotation, insert := insertSummaryOf(msg)
+				return idempotencyEncodedSize(&stagedRecord{idempotency: annotation, insert: insert})
+			}
+			observe("older", now.Add(-30*time.Minute), []int64{1}, []uint32{0})
+			require.NoError(t, persistSummary(ctx, m))
+			keyedBytes := observe("newer", now.Add(-2*time.Minute), []int64{2}, []uint32{0})
+			mixedBytes := keyedBytes
+			for i := 0; i < 8; i++ {
+				mixedBytes += observe("", now.Add(-time.Minute+time.Duration(i)*time.Millisecond), nil, nil)
+			}
+			require.Greater(t, mixedBytes, keyedBytes+1)
+			switch state {
+			case "sealed":
+				require.NotNil(t, m.seal())
+			case "durable":
+				require.NoError(t, persistSummary(ctx, m))
+				index := m.chunkIndex.chunks[1].GetVchannels()[0]
+				require.Equal(t, mixedBytes, index.GetIdempotency().GetLength()+index.GetInserts().GetLength())
+			}
+
+			for _, test := range []struct {
+				name      string
+				budget    uint64
+				wantOlder bool
+			}{
+				{"keyed-exact", keyedBytes, false},
+				{"keyed-plus-one", keyedBytes + 1, state == "pending"},
+				{"mixed-minus-one", mixedBytes - 1, state == "pending"},
+				{"mixed-exact", mixedBytes, state == "pending"},
+				{"mixed-plus-one", mixedBytes + 1, true},
+			} {
+				t.Run(test.name, func(t *testing.T) {
+					// All facts are within TTL. The soft count cannot extend the
+					// selected suffix; one byte left admits the whole older chunk.
+					policy := idempotencyview.RetentionConfig{TTL: time.Hour, MaxSize: int(test.budget), MinCount: 16}
+					snapshots, err := m.ReadIdempotencySnapshots(ctx, policy, now)
+					require.NoError(t, err)
+					require.Len(t, snapshots, 1)
+					wantKeys := []string{"newer"}
+					if test.wantOlder {
+						wantKeys = []string{"older", "newer"}
+					}
+					var keys []string
+					for _, record := range snapshots["mixed"].Records {
+						keys = append(keys, record.IdempotencyKey)
+					}
+					require.Equal(t, wantKeys, keys, "keyless facts must not create recovered identities")
+					newest := snapshots["mixed"].Records[len(keys)-1]
+					require.Equal(t, []int64{2}, newest.InsertResult.GetIds().GetIntId().GetData())
+				})
+			}
+		})
+	}
+}
+
 func TestIdempotencyRecoveryTTLBoundaryAndMissingTail(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().Truncate(time.Millisecond)
