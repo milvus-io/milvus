@@ -242,6 +242,8 @@ func (s *DBPropertiesSuite) TestDenyWringDB() {
 func (s *DBPropertiesSuite) SetupSuite() {
 	s.WithMilvusConfig(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
 	s.WithMilvusConfig(paramtable.Get().QuotaConfig.QuotaCenterCollectInterval.Key, "1")
+	// TestFlush expects a second immediate request on the same collection to be throttled.
+	s.WithMilvusConfig(paramtable.Get().QuotaConfig.MaxFlushRatePerCollection.Key, "0.1")
 	s.MiniClusterSuite.SetupSuite()
 }
 
