@@ -506,9 +506,9 @@ func TestInitLoonReaderConfig(t *testing.T) {
 	defer pt.Reset(pt.CommonCfg.StorageReaderThreadPoolSize.Key)
 	defer pt.Reset(pt.CommonCfg.IndexBuildReadWindowBytes.Key)
 
-	// Defaults (pool 0, window auto) keep the pre-existing sequential
-	// behavior outside a DataNode and must not create the pool:
-	// GetParallelism() reports 1 when no pool exists.
+	// Defaults (both auto) keep the pre-existing sequential behavior
+	// outside a DataNode and must not create the pool: GetParallelism()
+	// reports 1 when no pool exists.
 	assert.NoError(t, InitLoonReaderConfig(pt))
 	assert.LessOrEqual(t, EffectiveLoonReaderThreadPoolSize(), int32(1))
 
