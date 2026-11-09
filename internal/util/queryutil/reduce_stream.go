@@ -204,6 +204,10 @@ type OrderedReduceStream struct {
 	lastPK         any
 	deduplicatePKs bool
 	outputBuffer   []retrieveUnit
+	seenPKs        map[any]struct{}
+	orderByLimit   int64
+	outputChunks   []*internalpb.RetrieveResults
+	outputIndex    int
 
 	elementLevel      bool
 	elementLevelKnown bool
@@ -247,24 +251,33 @@ func NewReduceStream(
 		}
 	}
 
-	return &OrderedReduceStream{
+	stream := &OrderedReduceStream{
 		childStreams:  reduce.NewChildStreams[*internalpb.RetrieveResults](childStreams),
 		childBuffers:  make([]orderedChildBuffer, len(childStreams)),
 		chunkBytes:    chunkBytes,
 		reduceType:    reduce.ToReduceType(request.GetReduceType()),
 		orderByFields: request.GetOrderByFields(),
-	}, nil
+	}
+	if len(stream.orderByFields) > 0 {
+		stream.seenPKs = make(map[any]struct{})
+	}
+	return stream, nil
 }
 
-// NewShardReduceStream resolves duplicate PKs by timestamp for PK-ordered worker results.
-// ORDER BY and Group By retain their existing reduction behavior.
+// NewShardReduceStream resolves worker duplicate PKs by timestamp.
+// ORDER BY drains workers before sorting because a later version can change rank.
 func NewShardReduceStream(request *internalpb.RetrieveRequest, schema *schemapb.CollectionSchema, childStreams []ReduceStream, chunkBytes int) (ReduceStream, error) {
 	stream, err := NewReduceStream(request, schema, childStreams, chunkBytes)
 	if err != nil {
 		return nil, err
 	}
-	if ordered, ok := stream.(*OrderedReduceStream); ok && len(ordered.orderByFields) == 0 {
-		ordered.deduplicatePKs = true
+	if ordered, ok := stream.(*OrderedReduceStream); ok {
+		if len(ordered.orderByFields) == 0 {
+			ordered.deduplicatePKs = true
+		} else {
+			ordered.orderByLimit = request.GetLimit()
+			ordered.seenPKs = nil
+		}
 	}
 	return stream, nil
 }
@@ -278,6 +291,9 @@ func (s *OrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 	}
 	if s.closed {
 		return nil, io.ErrClosedPipe
+	}
+	if s.orderByLimit > 0 {
+		return s.recvOrderBy()
 	}
 
 	outputBuffer := s.outputBuffer
@@ -335,6 +351,12 @@ func (s *OrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 
 		unit := winner.pop()
 		unit.byteSize = unitBytes
+		if s.seenPKs != nil {
+			if _, exists := s.seenPKs[unit.pk()]; exists {
+				return nil, s.fail(merr.WrapErrDataIntegrityMsg("duplicate PK %v found across Query child streams", unit.pk()))
+			}
+			s.seenPKs[unit.pk()] = struct{}{}
+		}
 		if s.hasLastPK {
 			comparison := comparePK(unit.pk(), s.lastPK)
 			if comparison == 0 {
@@ -416,7 +438,7 @@ func (s *OrderedReduceStream) getReadyBuffers() ([]*orderedChildBuffer, error) {
 	for i := range s.childBuffers {
 		// EOF ends only this child's current result. Iterator reduction must
 		// stop if matching rows remain outside it, rather than skip those rows.
-		if reduce.ShouldStopWhenDrained(s.reduceType) &&
+		if len(s.orderByFields) == 0 && reduce.ShouldStopWhenDrained(s.reduceType) &&
 			s.childStreams.IsDrained(i) && s.childBuffers[i].hasMoreResult {
 			return nil, nil
 		}
@@ -807,6 +829,8 @@ func (s *OrderedReduceStream) closeChildren() error {
 		s.childBuffers[i] = orderedChildBuffer{}
 	}
 	s.outputBuffer = nil
+	s.outputChunks = nil
+	s.seenPKs = nil
 	s.metadata = nil
 	return s.closeErr
 }

@@ -70,7 +70,7 @@ func (s *shutdownErrorStream) Recv() (*internalpb.RetrieveResults, error) {
 }
 
 func TestReduceStreamShutdownWaitsForNestedRecv(t *testing.T) {
-	for _, mode := range []string{"ordered", "unordered"} {
+	for _, mode := range []string{"ordered", "unordered", "order_by"} {
 		t.Run(mode, func(t *testing.T) {
 			for _, siblingFails := range []bool{true, false} {
 				name := "concurrent_close"
@@ -89,6 +89,9 @@ func TestReduceStreamShutdownWaitsForNestedRecv(t *testing.T) {
 						closeErr: closeErr,
 					}
 					request := &internalpb.RetrieveRequest{Limit: 10}
+					if mode == "order_by" {
+						request.OrderByFields = []*planpb.OrderByField{{FieldId: 101, Ascending: true}}
+					}
 					var schema *schemapb.CollectionSchema
 					if mode == "unordered" {
 						request.GroupByFieldIds = []int64{100}
@@ -98,7 +101,7 @@ func TestReduceStreamShutdownWaitsForNestedRecv(t *testing.T) {
 							{FieldID: 101, DataType: schemapb.DataType_Int64},
 						}}
 					}
-					nested, err := NewReduceStream(request, schema, []ReduceStream{leaf}, 262144)
+					nested, err := NewShardReduceStream(request, schema, []ReduceStream{leaf}, 262144)
 					require.NoError(t, err)
 					children := []ReduceStream{nested}
 					recvErr := errors.New("worker failed")

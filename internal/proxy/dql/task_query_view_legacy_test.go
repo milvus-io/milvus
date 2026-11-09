@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -484,6 +485,41 @@ func TestQueryTaskStopsAtRequestedWindow(t *testing.T) {
 		require.Equal(t, wantPage.GetIds().GetIntId().GetData(), gotPage.GetIds().GetIntId().GetData())
 		require.Len(t, gotPage.GetFieldsData(), 1)
 		require.True(t, proto.Equal(wantPage.GetFieldsData()[0], gotPage.GetFieldsData()[0]))
+	}
+}
+
+func TestQueryTaskOrderByDrainsBeyondPage(t *testing.T) {
+	for _, failTail := range []bool{false, true} {
+		stream := &fakeLegacyQueryStream{recv: []fakeLegacyQueryRecv{
+			{chunk: newFinalQueryChunk([]int64{1, 2}, 10)},
+			{chunk: newFinalQueryChunk([]int64{3, 4}, 20)},
+			{err: io.EOF},
+		}}
+		if failTail {
+			stream.recv[2].err = merr.WrapErrDataIntegrityMsg("duplicate PK 1")
+		}
+		legacy := &fakeLegacyQueryClient{
+			queryResult: &queryclient.LegacyQueryResult{Stream: stream},
+		}
+		task := newQueryViewQueryTask(t, legacy, 2)
+		task.OrderByFields = []*planpb.OrderByField{{Ascending: true}}
+		err := task.Execute(t.Context())
+		require.True(t, legacy.lastQueryRequest.AllowStreaming)
+		if failTail {
+			require.ErrorContains(t, err, "duplicate PK 1")
+			require.Empty(t, task.resultBuf.Collect())
+		} else {
+			require.NoError(t, err)
+			output := task.resultBuf.Collect()
+			require.Len(t, output, 1)
+			require.Equal(t, []int64{1, 2}, output[0].GetIds().GetIntId().GetData())
+			require.EqualValues(t, 20, output[0].GetMvccTimestamp())
+			page, err := queryutil.NewSliceOperator(1, 1).Run(t.Context(), nil, output[0])
+			require.NoError(t, err)
+			require.Equal(t, []int64{2}, page[0].(*internalpb.RetrieveResults).GetIds().GetIntId().GetData())
+		}
+		require.Equal(t, 3, stream.next)
+		require.Equal(t, 1, stream.closeCalls)
 	}
 }
 

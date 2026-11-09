@@ -616,6 +616,48 @@ func TestLegacyClientQueryReducesGroupedVChannelStreams(t *testing.T) {
 	require.ErrorIs(t, err, io.EOF)
 }
 
+func TestLegacyClientQueryOrderByStreams(t *testing.T) {
+	setupTestReplicaRouting(t)
+	shardA := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
+	shardB := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_1_100v1"}
+	service := &legacyServiceClient{queryResults: map[string]*internalpb.RetrieveResults{
+		shardA.VChannel: newTestQueryChunk([]int64{3, 1}),
+		shardB.VChannel: newTestQueryChunk([]int64{4, 2}),
+	}}
+	client := NewLegacyViewQueryClient(
+		ViewQueryClientConfig{MaxRetries: 1},
+		&legacyPlanClient{getQueryPlan: func(_ context.Context, shard qviews.ShardID, input *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error) {
+			plan := legacyQueryPlan(shard, qviews.NewQueryNode(11))
+			plan.Request = &viewpb.QueryPlan_LegacyRetrieveRequest{LegacyRetrieveRequest: proto.Clone(input.GetLegacyRetrieveRequest()).(*internalpb.RetrieveRequest)}
+			return &viewpb.GetQueryPlanResponse{Plan: plan}, nil
+		}},
+		service,
+		&legacyResolver{vchannels: []string{shardA.VChannel, shardB.VChannel}},
+	)
+	req := &internalpb.RetrieveRequest{
+		CollectionID: 100, Limit: 2,
+		OrderByFields: []*planpb.OrderByField{{FieldId: 101, Ascending: false}},
+	}
+	result, err := client.Legacy().Query(t.Context(), &LegacyQueryRequest{
+		Req: req, AllowStreaming: SupportsQueryStream(req), ReduceStreamChunkBytes: 1,
+	})
+	require.NoError(t, err)
+	require.Empty(t, result.Results)
+	require.NotNil(t, result.Stream)
+	t.Cleanup(func() { require.NoError(t, result.Stream.Close()) })
+	var ids []int64
+	for {
+		chunk, err := result.Stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+		ids = append(ids, chunk.GetIds().GetIntId().GetData()...)
+	}
+	require.Equal(t, []int64{4, 3, 2, 1}, ids)
+	require.Zero(t, service.queryCallCount)
+}
+
 func TestSupportsQueryStream(t *testing.T) {
 	setupTestReplicaRouting(t)
 	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{}))
@@ -623,8 +665,12 @@ func TestSupportsQueryStream(t *testing.T) {
 	require.True(t, SupportsQueryStream(&internalpb.RetrieveRequest{IsIterator: true, Limit: typeutil.Unlimited}))
 	require.True(t, SupportsQueryStream(&internalpb.RetrieveRequest{Limit: typeutil.Unlimited}))
 	require.True(t, SupportsQueryStream(&internalpb.RetrieveRequest{Limit: 1}))
-	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{
+	require.True(t, SupportsQueryStream(&internalpb.RetrieveRequest{
 		Limit:         1,
+		OrderByFields: []*planpb.OrderByField{{FieldId: 101, Ascending: true}},
+	}))
+	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{
+		Limit:         typeutil.Unlimited,
 		OrderByFields: []*planpb.OrderByField{{FieldId: 101, Ascending: true}},
 	}))
 	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{
