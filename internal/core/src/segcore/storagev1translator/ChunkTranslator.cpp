@@ -158,6 +158,7 @@ std::vector<
 ChunkTranslator::get_cells(
     milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
+    const auto priority = ResolveLoadPriority(ctx, load_priority_);
     std::vector<
         std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<milvus::Chunk>>>
         cells;
@@ -174,7 +175,7 @@ ChunkTranslator::get_cells(
              segment_id_,
              field_id_,
              fmt::format("{}", fmt::join(cids, " ")));
-    LoadArrowReaderFromRemote(remote_files, channel, load_priority_);
+    LoadArrowReaderFromRemote(remote_files, channel, priority);
 
     for (auto cid : cids) {
         // Check for cancellation before processing each chunk
@@ -213,7 +214,7 @@ ChunkTranslator::get_cells(
                                  array_vec,
                                  mmap_populate_,
                                  filepath.string(),
-                                 load_priority_,
+                                 priority,
                                  writeback_mode_);
         }
         cells.emplace_back(cid, std::move(chunk));

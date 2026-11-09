@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -100,8 +101,12 @@ func ProjectDescribeCollectionSchema(source *schemapb.CollectionSchema, sourceSh
 	// Struct field names are restored in place, so these messages must always be
 	// detached from both RootCoord's response and MetaCache's canonical schema.
 	for _, field := range source.GetStructArrayFields() {
-		projected.StructArrayFields = append(projected.StructArrayFields,
-			proto.Clone(field).(*schemapb.StructArrayFieldSchema))
+		cloned := proto.Clone(field).(*schemapb.StructArrayFieldSchema)
+		// The struct sub-field origin marker is internal to Milvus.
+		for _, sub := range cloned.GetFields() {
+			sub.TypeParams = schemautil.StripStructSubFieldOriginMarker(sub.GetTypeParams())
+		}
+		projected.StructArrayFields = append(projected.StructArrayFields, cloned)
 	}
 
 	if err := restoreStructFieldNames(projected); err != nil {

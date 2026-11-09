@@ -99,6 +99,11 @@ class JsonKeyStats : public ScalarIndex<std::string> {
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
 
     void
+    Load(milvus::tracer::TraceContext ctx,
+         const Config& config,
+         milvus::OpContext* op_ctx);
+
+    void
     Load(const BinarySet& binary_set, const Config& config) override {
         ThrowInfo(ErrorCode::NotImplemented,
                   "Load not supported for JsonKeyStats");

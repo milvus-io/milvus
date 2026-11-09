@@ -363,3 +363,18 @@ UnRefPluginContext(CPluginContext c_plugin_context) {
         c_plugin_context.ez_id, c_plugin_context.collection_id, "");
     return milvus::SuccessCStatus();
 }
+
+CStatus
+InitCredentialBrokerPolicy(const char* endpoints_json) {
+    try {
+        const auto status = ::InitCredentialBrokerPolicy(
+            std::string(endpoints_json ? endpoints_json : "[]"));
+        if (!status.ok()) {
+            return milvus::FailureCStatus(milvus::ConfigInvalid,
+                                          status.ToString().c_str());
+        }
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}

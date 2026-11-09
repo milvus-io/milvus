@@ -118,6 +118,8 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 	MessageTypeRestoreRBAC:         {},
 	MessageTypeAlterResourceGroup:  {},
 	MessageTypeDropResourceGroup:   {},
+	MessageTypeAddFileResource:     {},
+	MessageTypeRemoveFileResource:  {},
 	MessageTypeCreateIndex:         {},
 	MessageTypeAlterIndex:          {},
 	MessageTypeDropIndex:           {},

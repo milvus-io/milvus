@@ -63,6 +63,10 @@
 #include "storage/huawei/HuaweiCloudCredentialsProvider.h"
 #include "storage/tencent/TencentCloudCredentialsProvider.h"
 
+// Implemented by the immutable native Broker policy.
+bool
+IsCredentialBrokerEndpoint(const std::string& endpoint);
+
 namespace milvus::storage {
 
 enum class RemoteStorageType {
@@ -312,6 +316,13 @@ class MinioChunkManager : public ChunkManager {
     static bool
     NeedChecksumOverride(const std::string& cloud_provider);
 
+    // Aws::InitAPI, whose reference ReleaseSDKAPIAtExit drops when the
+    // process exits. Called with client_mutex_ held.
+    static void
+    InitSDKAPIUntilExit(const Aws::SDKOptions& options);
+    static void
+    ReleaseSDKAPIAtExit();
+
     Aws::SDKOptions sdk_options_;
     static std::atomic<size_t> init_count_;
     static std::mutex client_mutex_;
@@ -467,6 +478,7 @@ AddGcsEndpointForCredentials(const std::string& address, bool use_ssl);
 // provider, and any other GCS request with the provider milvus-storage's
 // GcpCredentialRegistry holds for its endpoint and bucket, as milvus-storage's
 // own GCP factory does. Every other request is left alone.
+// Allowed Broker requests carry no GCP credentials.
 class GoogleHttpClientFactory : public Aws::Http::HttpClientFactory {
  public:
     explicit GoogleHttpClientFactory(const std::string& tls_min_version = "")

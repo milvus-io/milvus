@@ -165,7 +165,7 @@ JsonStatsTranslator::get_cells(
                     us / 1000.0);
             },
             milvus::ScopedTimer::LogLevel::Info);
-        stats->Load(milvus::tracer::TraceContext{}, config);
+        stats->Load(milvus::tracer::TraceContext{}, config, ctx);
     }
 
     CheckCancellation(

@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -189,6 +190,17 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 		return err
 	}
 
+	if err := rejectStructSubFieldOriginMarkers(schema.GetStructArrayFields()); err != nil {
+		return err
+	}
+	// A restored collection (preserveFieldID) keeps its stored schema, whose
+	// sub-fields may carry enable_match or enable_analyzer from an earlier
+	// version, so only a new schema is checked for them.
+	if !t.preserveFieldID {
+		if err := schemautil.RejectStructSubFieldsTextMatch(schema.GetStructArrayFields()); err != nil {
+			return err
+		}
+	}
 	if err := checkStructArrayFieldSchema(schema.GetStructArrayFields()); err != nil {
 		return err
 	}
@@ -211,7 +223,7 @@ func (t *createCollectionTask) validateSchema(ctx context.Context, schema *schem
 	// too. When a source is eventually supplied via alter/refresh, validation
 	// runs there.
 	if typeutil.IsExternalCollection(schema) && schema.GetExternalSource() != "" {
-		if err := externalspec.ValidateSourceAndSpec(schema.GetExternalSource(), schema.GetExternalSpec()); err != nil {
+		if err := externalspec.ValidateSourceAndSpec(schema.GetExternalSource(), schema.GetExternalSpec(), paramtable.Get().CommonCfg.CredentialBrokerPolicy()); err != nil {
 			return err
 		}
 	}
@@ -487,7 +499,7 @@ func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Cont
 	}
 	// Validate before reading snapshot metadata so RootCoord keeps the same
 	// external source boundary even if a request bypasses Proxy.
-	if err := externalspec.ValidateSourceAndSpec(schema.GetExternalSource(), schema.GetExternalSpec()); err != nil {
+	if err := externalspec.ValidateSourceAndSpec(schema.GetExternalSource(), schema.GetExternalSpec(), paramtable.Get().CommonCfg.CredentialBrokerPolicy()); err != nil {
 		return err
 	}
 	spec, err := externalspec.ParseExternalSpec(schema.GetExternalSpec())
@@ -554,6 +566,11 @@ func (t *createCollectionTask) prepareMilvusTableSnapshotSchema(ctx context.Cont
 	}
 	if err := assignFunctionIDsFromFieldNames(schema); err != nil {
 		return merr.Wrap(err, "align milvus-table function field IDs")
+	}
+	// The target schema is new input; validateSchema skips this check once
+	// preserveFieldID is set below.
+	if err := schemautil.RejectStructSubFieldsTextMatch(schema.GetStructArrayFields()); err != nil {
+		return err
 	}
 	t.preserveFieldID = true
 	t.Req.Properties = upsertCreateCollectionProperty(t.Req.GetProperties(), util.PreserveFieldIdsKey, "true")

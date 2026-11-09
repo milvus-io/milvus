@@ -12,6 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <mutex>
+#include <regex>
+#include <cctype>
+#include <arpa/inet.h>
+#include "arrow/util/uri.h"
 #include <nlohmann/json.hpp>
 #include <stdint.h>
 #include <algorithm>
@@ -48,6 +53,150 @@
 #include "storage/loon_ffi/util.h"
 
 using json = nlohmann::json;
+
+namespace {
+std::mutex broker_policy_mutex;
+std::optional<std::unordered_set<std::string>> broker_allowed_endpoints;
+}  // namespace
+
+arrow::Result<std::string>
+NormalizeBrokerEndpoint(const std::string& raw) {
+    for (unsigned char c : raw) {
+        if (c <= 32 || c >= 127 || c == '\\') {
+            return arrow::Status::Invalid(
+                "Invalid credential broker URL characters");
+        }
+    }
+    // Match Go specutil.NormalizeBrokerEndpoint without decoding the path.
+    static const std::regex pattern(
+        R"(^([A-Za-z][A-Za-z0-9+.-]*)://([^/?#]+)(/[^?#]*)?(\?[^#]*)?$)");
+    std::smatch match;
+    if (!std::regex_match(raw, match, pattern)) {
+        return arrow::Status::Invalid("Invalid credential broker URL");
+    }
+    auto lower = [](std::string value) {
+        std::transform(
+            value.begin(), value.end(), value.begin(), [](unsigned char c) {
+                return std::tolower(c);
+            });
+        return value;
+    };
+    auto scheme = lower(match[1]);
+    auto authority = lower(match[2]);
+    if ((scheme != "http" && scheme != "https") ||
+        authority.find_first_of("@%*") != std::string::npos) {
+        return arrow::Status::Invalid("Invalid credential broker authority");
+    }
+    std::string host, port;
+    if (authority.front() == '[') {
+        auto end = authority.find(']');
+        if (end == std::string::npos || end == 1) {
+            return arrow::Status::Invalid("Invalid broker IPv6 host");
+        }
+        host = authority.substr(0, end + 1);
+        if (end + 1 < authority.size()) {
+            if (authority[end + 1] != ':') {
+                return arrow::Status::Invalid("Invalid broker port");
+            }
+            port = authority.substr(end + 2);
+            if (port.empty())
+                return arrow::Status::Invalid("Empty broker port");
+        }
+    } else {
+        auto colon = authority.find(':');
+        host = authority.substr(0, colon);
+        if (colon != std::string::npos) {
+            port = authority.substr(colon + 1);
+            if (port.empty())
+                return arrow::Status::Invalid("Empty broker port");
+        }
+    }
+    if (!host.empty() && host.front() == '[') {
+        in6_addr parsed_address;
+        auto literal = host.substr(1, host.size() - 2);
+        if (inet_pton(AF_INET6, literal.c_str(), &parsed_address) != 1) {
+            return arrow::Status::Invalid("Invalid broker IPv6 host");
+        }
+    } else if (host.find_first_not_of(
+                   "abcdefghijklmnopqrstuvwxyz0123456789.-_") !=
+               std::string::npos) {
+        return arrow::Status::Invalid("Invalid broker hostname");
+    }
+    if (host.empty())
+        return arrow::Status::Invalid("Empty broker host");
+    if (!port.empty()) {
+        if (port.size() > 5 ||
+            port.find_first_not_of("0123456789") != std::string::npos) {
+            return arrow::Status::Invalid("Invalid broker port");
+        }
+        int value = std::stoi(port);
+        if (value < 1 || value > 65535)
+            return arrow::Status::Invalid("Invalid broker port");
+        port = (scheme == "http" && value == 80) ||
+                       (scheme == "https" && value == 443)
+                   ? ""
+                   : ":" + std::to_string(value);
+    }
+    // Arrow validates escapes and IPv6 syntax; its decoded path is never used.
+    arrow::util::Uri uri;
+    ARROW_RETURN_NOT_OK(uri.Parse(raw));
+    auto path = match[3].str();
+    if (path.empty())
+        path = "/";
+    if (path.find("//") != std::string::npos || path == "/." || path == "/.." ||
+        path.find("/./") != std::string::npos ||
+        path.find("/../") != std::string::npos ||
+        (path.size() >= 2 && path.compare(path.size() - 2, 2, "/.") == 0) ||
+        (path.size() >= 3 && path.compare(path.size() - 3, 3, "/..") == 0) ||
+        path.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTU"
+                               "VWXYZ0123456789-._~/") != std::string::npos) {
+        return arrow::Status::Invalid(
+            "Credential broker path must use unescaped unreserved characters, "
+            "without repeated separators or dot segments");
+    }
+    return scheme + "://" + host + port + path + match[4].str();
+}
+
+arrow::Status
+InitCredentialBrokerPolicy(const std::string& endpoints_json) {
+    std::unordered_set<std::string> endpoints;
+    try {
+        for (const auto& value :
+             json::parse(endpoints_json).get<std::vector<std::string>>()) {
+            ARROW_ASSIGN_OR_RAISE(auto endpoint,
+                                  NormalizeBrokerEndpoint(value));
+            endpoints.insert(std::move(endpoint));
+        }
+    } catch (const json::exception&) {
+        return arrow::Status::Invalid(
+            "Invalid credential broker allowlist JSON");
+    }
+    std::lock_guard lock(broker_policy_mutex);
+    if (broker_allowed_endpoints.has_value() &&
+        *broker_allowed_endpoints != endpoints) {
+        return arrow::Status::Invalid(
+            "Credential broker policy is immutable; restart required");
+    }
+    broker_allowed_endpoints = std::move(endpoints);
+    return arrow::Status::OK();
+}
+
+arrow::Status
+CheckCredentialBrokerEndpoint(const std::string& endpoint) {
+    std::lock_guard lock(broker_policy_mutex);
+    if (!broker_allowed_endpoints.has_value() ||
+        broker_allowed_endpoints->count(endpoint) == 0) {
+        return arrow::Status::IOError(
+            "Credential broker endpoint denied by server policy");
+    }
+    return arrow::Status::OK();
+}
+
+bool
+IsCredentialBrokerEndpoint(const std::string& endpoint) {
+    auto normalized = NormalizeBrokerEndpoint(endpoint);
+    return normalized.ok() && CheckCredentialBrokerEndpoint(*normalized).ok();
+}
 
 std::shared_ptr<milvus_storage::api::Properties>
 MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
@@ -209,6 +358,7 @@ static const std::unordered_set<std::string> kAllowedExtfsSpecKeys = {
     "azure_client_id",
     "azure_tenant_id",
     "azure_credential_endpoint",
+    "credential_endpoint",
 };
 
 // kExtfsFields is the contract with Go extfsFields in
@@ -543,12 +693,14 @@ InjectExternalSpecProperties(
     std::string spec_region;
     std::string spec_endpoint_url;
     bool has_spec_endpoint_url = false;
+    std::string broker_endpoint;
+    bool legacy_broker = false;
     if (!external_spec.empty()) {
         try {
             simdjson::ondemand::parser parser;
             simdjson::padded_string padded(external_spec);
             auto doc = parser.iterate(padded);
-            auto extfs_obj = doc.find_field("extfs");
+            auto extfs_obj = doc.find_field_unordered("extfs");
             if (extfs_obj.error() == simdjson::SUCCESS) {
                 for (auto field : extfs_obj.get_object()) {
                     try {
@@ -571,6 +723,20 @@ InjectExternalSpecProperties(
                             continue;
                         }
                         if (val.empty()) {
+                            continue;
+                        }
+                        if (key == "credential_endpoint" ||
+                            key == "azure_credential_endpoint") {
+                            ARROW_ASSIGN_OR_RAISE(auto endpoint,
+                                                  NormalizeBrokerEndpoint(val));
+                            if (!broker_endpoint.empty() &&
+                                broker_endpoint != endpoint) {
+                                return arrow::Status::Invalid(
+                                    "Conflicting credential broker endpoints");
+                            }
+                            broker_endpoint = std::move(endpoint);
+                            legacy_broker = legacy_broker ||
+                                            key == "azure_credential_endpoint";
                             continue;
                         }
                         if (key == "cloud_provider") {
@@ -612,6 +778,54 @@ InjectExternalSpecProperties(
                       collection_id,
                       e.what());
         }
+    }
+
+    if (!broker_endpoint.empty()) {
+        if (legacy_broker && spec_cloud_provider != "azure") {
+            return arrow::Status::Invalid(
+                "azure_credential_endpoint requires cloud_provider=azure");
+        }
+        if (spec_cloud_provider != "aws" && spec_cloud_provider != "aliyun" &&
+            spec_cloud_provider != "tencent" &&
+            spec_cloud_provider != "azure") {
+            return arrow::Status::Invalid(
+                "Unsupported credential broker cloud provider");
+        }
+        const auto value = [&](const char* key) {
+            return PropertyValueAsString(properties,
+                                         (extfs_prefix + key).c_str())
+                .value_or("");
+        };
+        if (spec_cloud_provider == "azure" && value("use_iam") == "true") {
+            return arrow::Status::Invalid(
+                "Azure SAS broker cannot use native IAM");
+        }
+        if (spec_cloud_provider != "azure" && value("use_iam") == "true") {
+            for (const auto* key : {"role_arn",
+                                    "external_id",
+                                    "session_name",
+                                    "access_key_id",
+                                    "access_key_value",
+                                    "gcp_target_service_account",
+                                    "azure_client_id",
+                                    "azure_tenant_id"}) {
+                if (!value(key).empty()) {
+                    return arrow::Status::Invalid(
+                        "Inactive credential field in broker IAM: ", key);
+                }
+            }
+        }
+        ARROW_RETURN_NOT_OK(CheckCredentialBrokerEndpoint(broker_endpoint));
+        const bool azure_broker = spec_cloud_provider == "azure";
+        properties.erase(extfs_prefix + (azure_broker
+                                             ? "credential_endpoint"
+                                             : "azure_credential_endpoint"));
+        milvus_storage::api::SetValue(
+            properties,
+            (extfs_prefix + (azure_broker ? "azure_credential_endpoint"
+                                          : "credential_endpoint"))
+                .c_str(),
+            broker_endpoint.c_str());
     }
 
     // Layer 3: resolve the effective endpoint.

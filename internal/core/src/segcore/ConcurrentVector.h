@@ -586,9 +586,15 @@ class ConcurrentVectorImpl : public VectorBase {
         return chunks_ptr_->get_element_offset(chunk_index);
     }
 
+    // The row accessors below return Type objects, which the batch-stored
+    // types (IsBatchStoredType) do not have: their chunks hold views. Read
+    // those through view_element() or view_physical_element().
+
     // just for fun, don't use it directly
     const Type*
-    get_element(ssize_t element_index) const {
+    get_element(ssize_t element_index) const
+        requires(!IsBatchStoredType<Type>)
+    {
         auto physical_index = offset_mapping_.GetPhysicalOffset(element_index);
         if (physical_index == -1) {
             return nullptr;
@@ -601,7 +607,9 @@ class ConcurrentVectorImpl : public VectorBase {
     }
 
     const Type*
-    get_physical_element(ssize_t physical_index) const {
+    get_physical_element(ssize_t physical_index) const
+        requires(!IsBatchStoredType<Type>)
+    {
         if (physical_index == -1) {
             return nullptr;
         }
@@ -616,7 +624,9 @@ class ConcurrentVectorImpl : public VectorBase {
     // concurrent try_remove_chunks cannot free the buffer mid-read.
     const Type*
     get_physical_element(const ChunkSnapshot& snap,
-                         ssize_t physical_index) const {
+                         ssize_t physical_index) const
+        requires(!IsBatchStoredType<Type>)
+    {
         if (physical_index == -1) {
             return nullptr;
         }
@@ -628,17 +638,14 @@ class ConcurrentVectorImpl : public VectorBase {
     }
 
     const Type&
-    operator[](ssize_t element_index) const {
+    operator[](ssize_t element_index) const
+        requires(!IsBatchStoredType<Type>)
+    {
         AssertInfo(
             elements_per_row_ == 1,
             fmt::format(
                 "The value of elements_per_row_ is not 1, elements_per_row_={}",
                 elements_per_row_));
-        if constexpr (std::is_same_v<Type, ArrayValue>) {
-            AssertInfo(!chunks_ptr_->is_mmap(),
-                       "mmap nested ARRAY rows must be accessed through "
-                       "view_element()");
-        }
         auto chunk_id = element_index / size_per_chunk_;
         auto chunk_offset = element_index % size_per_chunk_;
         auto data =
@@ -919,8 +926,8 @@ class ConcurrentVector<ArrayValue>
 
  private:
     void
-    set_mmap_proto_rows(ssize_t element_offset,
-                        std::span<const ScalarFieldProto* const> rows);
+    set_proto_rows(ssize_t element_offset,
+                   std::span<const ScalarFieldProto* const> rows);
 
     std::once_flag array_type_once_;
     std::shared_ptr<const proto::schema::TypeSchema> array_type_;
@@ -942,6 +949,13 @@ class ConcurrentVector<VectorArray>
               std::move(mmap_descriptor),
               valid_data_ptr,
               use_mapping_storage) {
+    }
+
+    VectorArrayView
+    view_physical_element(ssize_t physical_index) const {
+        auto chunk_id = physical_index / size_per_chunk_;
+        auto chunk_offset = physical_index % size_per_chunk_;
+        return chunks_ptr_->view_element(chunk_id, chunk_offset);
     }
 };
 

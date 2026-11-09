@@ -103,3 +103,11 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
                              int64_t collection_id,
                              const std::string& external_source,
                              const std::string& external_spec);
+
+// Server-owned startup policy. An uninitialized or empty policy denies brokers.
+arrow::Result<std::string>
+NormalizeBrokerEndpoint(const std::string& raw);
+arrow::Status
+InitCredentialBrokerPolicy(const std::string& endpoints_json);
+arrow::Status
+CheckCredentialBrokerEndpoint(const std::string& endpoint);

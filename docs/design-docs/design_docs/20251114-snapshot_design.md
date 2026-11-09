@@ -146,10 +146,12 @@ manifest index marker. The 3.0 reader skips that marker because the branch
 does not use it.
 
 V6 writes one record per Avro Object Container File (OCF), embedding the full
-writer schema and using the null (uncompressed) codec. The record fields remain
-those of V4 on 3.0; V6 changes the container encoding rather than the segment
-model. Embedded schemas also let the reader skip the V5 index marker in
-OCF manifests written by master.
+writer schema and using the null (uncompressed) codec. On 3.0 the writer extends
+V4 with an `index_type` string on each index record to preserve the segment
+artifact's actual type, which may differ from the collection definition.
+Missing or empty values retain the legacy restore behavior. This additive field
+keeps format version 6; historical V0-V5 raw binary writer schemas stay unchanged.
+The reader still skips the V5 index marker in OCF manifests written by master.
 
 `format_version` is a writer format identifier, not a reader ceiling. OCF
 readers use the embedded writer schema and skip fields absent from the current

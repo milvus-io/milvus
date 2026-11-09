@@ -7345,7 +7345,7 @@ func (node *Proxy) RefreshExternalCollection(ctx context.Context, req *milvuspb.
 	// that CreateCollection runs, otherwise alter-bypass via refresh would
 	// allow SSRF (file://, http://169.254.169.254/, userinfo URLs, etc.).
 	if srcSet {
-		if err := externalspec.ValidateSourceAndSpec(req.GetExternalSource(), req.GetExternalSpec()); err != nil {
+		if err := externalspec.ValidateSourceAndSpec(req.GetExternalSource(), req.GetExternalSpec(), paramtable.Get().CommonCfg.CredentialBrokerPolicy()); err != nil {
 			return &milvuspb.RefreshExternalCollectionResponse{
 				Status: merr.Status(err),
 			}, nil

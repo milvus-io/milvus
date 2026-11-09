@@ -504,8 +504,8 @@ BuildSearchResultBatch(
             auto& field_data = it->second;
             auto& field_meta = schema->operator[](field_id);
             auto name = std::string(field_meta.get_name().get());
-            auto result =
-                FieldDataToArrow(name, *field_data, total_valid, true);
+            auto result = FieldDataToArrow(
+                name, *field_data, total_valid, true, &field_meta);
             if (!result.ok()) {
                 return result.status();
             }
@@ -639,6 +639,8 @@ BuildSearchResultFullBatch(CSearchResult c_search_result,
         search_result->get_total_result_count() > 0) {
         auto size = search_result->seg_offsets_.size();
         milvus::OpContext op_ctx(cancel_token);
+        op_ctx.runtime_load_priority =
+            milvus::proto::common::LoadPriority::HIGH;
         for (int64_t i = 0; i < num_extra_fields; i++) {
             milvus::futures::throwIfCancelled(cancel_token);
             auto field_id = milvus::FieldId(extra_field_ids[i]);
@@ -699,7 +701,8 @@ BuildExplicitFieldsBatch(
             }
             ARROW_ASSIGN_OR_RAISE(
                 auto converted,
-                FieldDataToArrow(name, *it->second, total_rows, true));
+                FieldDataToArrow(
+                    name, *it->second, total_rows, true, &field_meta));
             array = converted.second;
         }
 
@@ -1350,6 +1353,8 @@ FillOutputFieldsOrderedImpl(CSearchResult* search_results,
                 temp_result.distances_.resize(
                     materialized.segment_offsets.size(), 0.0f);
                 milvus::OpContext op_ctx(cancel_token);
+                op_ctx.runtime_load_priority =
+                    milvus::proto::common::LoadPriority::HIGH;
                 segment->FillTargetEntry(plan, temp_result, &op_ctx);
                 materialized.fields =
                     std::move(temp_result.output_fields_data_);
@@ -1478,6 +1483,8 @@ FillFieldsOrderedAsArrowRecordBatchImpl(
                 milvus::segcore::SegmentInternalInterface* segment,
                 OrderedSegmentFields& materialized) {
                 milvus::OpContext op_ctx(cancel_token);
+                op_ctx.runtime_load_priority =
+                    milvus::proto::common::LoadPriority::HIGH;
                 for (auto field_id : requested_field_ids) {
                     milvus::futures::throwIfCancelled(cancel_token);
                     auto& field_meta = plan->schema_->operator[](field_id);
@@ -1624,6 +1631,8 @@ PrepareSearchResultsForExportImpl(
         }
 
         milvus::OpContext op_ctx(cancel_token);
+        op_ctx.runtime_load_priority =
+            milvus::proto::common::LoadPriority::HIGH;
         milvus::segcore::ReduceHelper helper(search_results,
                                              plan,
                                              placeholder_group,

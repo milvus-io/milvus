@@ -50,6 +50,7 @@
 #include "index/IndexStats.h"
 #include "index/Meta.h"
 #include "index/VectorIndex.h"
+#include "index/VectorIndexValidDataUtils.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/config.h"
 #include "knowhere/dataset.h"
@@ -67,6 +68,7 @@
 #include "query/SubSearchResult.h"
 #include "query/helper.h"
 #include "segcore/reduce/Reduce.h"
+#include "storage/DiskFileManagerImpl.h"
 #include "storage/FileManager.h"
 #include "storage/InsertData.h"
 #include "storage/PayloadReader.h"
@@ -1888,8 +1890,39 @@ RunNullableElementLevelDiskSearch(bool more_rows_than_vectors,
         {milvus::index::DISK_ANN_BUILD_THREAD_NUM, "2"},
         {INSERT_FILES_KEY, std::vector<std::string>{log_path}},
     };
+    // EN3 builds ordinary-metric VECTOR_ARRAY indexes without offsets or row
+    // validity. Publish the legacy per-row validity separately, through the
+    // same framed IndexData upload path as the engine files.
     ASSERT_NO_THROW(index->Build(build_conf));
-    const auto files = index->Upload()->GetIndexFiles();
+    auto files = index->Upload()->GetIndexFiles();
+    storage::DiskFileManagerImpl sidecar_manager(context);
+    auto local =
+        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    const auto validity_path = sidecar_manager.GetLocalIndexObjectPrefix() +
+                               "/" + milvus::index::VALID_DATA_KEY;
+    std::vector<uint8_t> row_validity(sizeof(uint64_t) + validity.size());
+    const uint64_t wire_count = row_count;
+    std::memcpy(row_validity.data(), &wire_count, sizeof(wire_count));
+    std::memcpy(row_validity.data() + sizeof(wire_count),
+                validity.data(),
+                validity.size());
+    local->CreateDir(sidecar_manager.GetLocalIndexObjectPrefix());
+    local->CreateFile(validity_path);
+    local->Write(validity_path, row_validity.data(), row_validity.size());
+    ASSERT_TRUE(sidecar_manager.AddFile(validity_path));
+    std::vector<std::string> validity_files;
+    for (const auto& [path, size] :
+         sidecar_manager.GetRemotePathsToFileSize()) {
+        files.push_back(path);
+        validity_files.push_back(path);
+    }
+    local->Remove(validity_path);
+    sidecar_manager.CacheIndexToDisk(validity_files,
+                                     proto::common::LoadPriority::HIGH);
+    ASSERT_EQ(local->Size(validity_path), row_validity.size());
+    std::vector<uint8_t> persisted(row_validity.size());
+    local->Read(validity_path, persisted.data(), persisted.size());
+    EXPECT_EQ(persisted, row_validity);
     index.reset();
 
     auto loaded =
@@ -1938,7 +1971,166 @@ RunNullableElementLevelDiskSearch(bool more_rows_than_vectors,
         fmt::format("{}{}", TestRemotePath, collection_id));
 }
 
+// Element-nullable VECTOR_ARRAY validity addresses logical elements; loading
+// must preserve it instead of replacing it with all-valid physical ids.
+void
+RunElementNullableDiskSearch(bool mmap_id_map) {
+    constexpr int64_t parents = 2000;
+    constexpr int64_t dim = 4;
+    const int64_t collection_id = 5492200 + mmap_id_map;
+    std::vector<bool> element_valid;
+    for (int64_t row = 0; row < parents; ++row) {
+        if (row % 5 == 1) {
+            continue;  // Null parents take no logical element ids.
+        }
+        for (int64_t j = 0; j < row % 4 + 1; ++j) {
+            element_valid.push_back(element_valid.size() % 7 != 3);
+        }
+    }
+    const int64_t logical = element_valid.size();
+    auto valid = std::make_unique<bool[]>(logical);
+    std::vector<int64_t> logical_ids;
+    auto bitmap = MakeValidBitmap(logical, false);
+    for (int64_t id = 0; id < logical; ++id) {
+        valid[id] = element_valid[id];
+        if (valid[id]) {
+            logical_ids.push_back(id);
+            bitmap[id / 8] |= static_cast<uint8_t>(1U << (id % 8));
+        }
+    }
+    const int64_t physical = logical_ids.size();
+    ASSERT_LT(physical, logical);
+    std::default_random_engine rng(42);
+    std::normal_distribution<float> dist(0.0F, 1.0F);
+    std::vector<float> values(physical * dim);
+    for (auto& value : values) {
+        value = dist(rng);
+    }
+    auto storage_config = get_default_local_storage_config();
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    auto field_meta = gen_field_meta(collection_id,
+                                     2,
+                                     3,
+                                     100,
+                                     DataType::VECTOR_ARRAY,
+                                     DataType::VECTOR_FLOAT,
+                                     true);
+    field_meta.field_schema.set_element_nullable(true);
+    storage::IndexMeta index_meta{3,
+                                  100,
+                                  collection_id,
+                                  1,
+                                  "test",
+                                  "vec_field",
+                                  DataType::VECTOR_FLOAT,
+                                  dim};
+    storage::FileManagerContext context(
+        field_meta, index_meta, chunk_manager, fs);
+    const auto index_type = knowhere::IndexEnum::INDEX_DISKANN;
+    const auto metric_type = knowhere::metric::COSINE;
+    const milvus::index::CreateIndexInfo info{
+        .field_type = DataType::VECTOR_ARRAY,
+        .index_type = index_type,
+        .metric_type = metric_type,
+        .index_engine_version =
+            knowhere::Version::GetCurrentVersion().VersionNumber(),
+        .dim = dim,
+    };
+    auto index =
+        milvus::index::IndexFactory::GetInstance().CreateIndex(info, context);
+    auto dataset = knowhere::GenDataSet(physical, dim, values.data());
+    dataset->SetIdMapData(
+        knowhere::IdMapData::FromValidData(valid.get(), logical));
+    Config build_conf{
+        {knowhere::meta::METRIC_TYPE, metric_type},
+        {knowhere::meta::DIM, dim},
+        {milvus::index::DISK_ANN_MAX_DEGREE, "24"},
+        {milvus::index::DISK_ANN_SEARCH_LIST_SIZE, "56"},
+        {milvus::index::DISK_ANN_PQ_CODE_BUDGET, "0.001"},
+        {milvus::index::DISK_ANN_BUILD_DRAM_BUDGET, "2"},
+        {milvus::index::DISK_ANN_BUILD_THREAD_NUM, "2"},
+    };
+    ASSERT_NO_THROW(index->BuildWithDataset(dataset, build_conf));
+    const auto files = index->Upload()->GetIndexFiles();
+    index.reset();
+
+    // Read the uploaded framed entry back, not just the build input bitmap.
+    storage::DiskFileManagerImpl sidecar_manager(context);
+    const auto validity_files =
+        milvus::index::FilterValidDataDiskFileSlices(files);
+    ASSERT_FALSE(validity_files.empty());
+    sidecar_manager.CacheIndexToDisk(validity_files,
+                                     proto::common::LoadPriority::HIGH);
+    auto local =
+        storage::LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    const auto validity_path = sidecar_manager.GetLocalIndexObjectPrefix() +
+                               "/" + milvus::index::VALID_DATA_KEY;
+    std::vector<uint8_t> expected(sizeof(uint64_t) + bitmap.size());
+    const uint64_t wire_count = logical;
+    std::memcpy(expected.data(), &wire_count, sizeof(wire_count));
+    std::memcpy(
+        expected.data() + sizeof(wire_count), bitmap.data(), bitmap.size());
+    ASSERT_EQ(local->Size(validity_path), expected.size());
+    std::vector<uint8_t> persisted(expected.size());
+    local->Read(validity_path, persisted.data(), persisted.size());
+    EXPECT_EQ(persisted, expected);
+
+    auto loaded =
+        milvus::index::IndexFactory::GetInstance().CreateIndex(info, context);
+    auto* vec_index = dynamic_cast<milvus::index::VectorIndex*>(loaded.get());
+    ASSERT_NE(vec_index, nullptr);
+    auto load_conf = generate_load_conf(index_type, metric_type, parents);
+    load_conf["index_files"] = files;
+    load_conf[knowhere::meta::DIM] = dim;
+    load_conf[milvus::LOAD_PRIORITY] = proto::common::LoadPriority::HIGH;
+    load_conf[milvus::index::ELEMENT_NULLABLE] = true;
+    load_conf[milvus::index::ENABLE_MMAP_I2O_MAP] = mmap_id_map;
+    load_conf[milvus::index::ENABLE_MMAP_O2I_MAP] = mmap_id_map;
+    ASSERT_NO_THROW(vec_index->Load(tracer::TraceContext{}, load_conf));
+    EXPECT_EQ(vec_index->Count(), physical);
+    EXPECT_TRUE(vec_index->HasValidData());
+    EXPECT_EQ(vec_index->GetValidCount(), physical);
+    EXPECT_EQ(vec_index->GetLogicalCount(), logical);
+    for (int64_t id = 0; id < logical; ++id) {
+        EXPECT_EQ(vec_index->IsRowValid(id), element_valid[id]) << id;
+    }
+    SearchInfo search_info;
+    search_info.topk_ = 1;
+    search_info.metric_type_ = metric_type;
+    search_info.search_params_ = {{milvus::index::DISK_ANN_QUERY_LIST, 128}};
+    const auto last = physical - 1;
+    SearchResult result;
+    vec_index->Query(knowhere::GenDataSet(1, dim, values.data() + last * dim),
+                     search_info,
+                     BitsetView{},
+                     nullptr,
+                     result);
+    ASSERT_EQ(result.seg_offsets_.size(), 1);
+    EXPECT_EQ(result.seg_offsets_[0], logical_ids[last]);
+    TargetBitmap filtered(logical, true);
+    const auto allowed = logical_ids[last - 1];
+    filtered.reset(allowed);
+    SearchResult filtered_result;
+    vec_index->Query(
+        knowhere::GenDataSet(1, dim, values.data() + (last - 1) * dim),
+        search_info,
+        BitsetView(filtered),
+        nullptr,
+        filtered_result);
+    ASSERT_EQ(filtered_result.seg_offsets_.size(), 1);
+    EXPECT_EQ(filtered_result.seg_offsets_[0], allowed);
+    vec_index->CleanLocalData();
+    boost::filesystem::remove_all(
+        fmt::format("{}{}", TestRemotePath, collection_id));
+}
+
 }  // namespace
+
+TEST(Indexing, DiskAnnElementNullableElementLevelKeepsElementValidity) {
+    RunElementNullableDiskSearch(false);
+    RunElementNullableDiskSearch(true);
+}
 
 TEST(Indexing, DiskAnnNullableElementLevelLoadsRowValidity) {
     RunNullableElementLevelDiskSearch(false, false);
