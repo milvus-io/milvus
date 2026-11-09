@@ -506,8 +506,9 @@ func TestInitLoonReaderConfig(t *testing.T) {
 	defer pt.Reset(pt.CommonCfg.StorageReaderThreadPoolSize.Key)
 	defer pt.Reset(pt.CommonCfg.IndexBuildReadWindowBytes.Key)
 
-	// Defaults (0/0) keep the pre-existing sequential behavior and must not
-	// create the pool: GetParallelism() reports 1 when no pool exists.
+	// Defaults (pool 0, window auto) keep the pre-existing sequential
+	// behavior outside a DataNode and must not create the pool:
+	// GetParallelism() reports 1 when no pool exists.
 	assert.NoError(t, InitLoonReaderConfig(pt))
 	assert.LessOrEqual(t, EffectiveLoonReaderThreadPoolSize(), int32(1))
 
@@ -516,7 +517,7 @@ func TestInitLoonReaderConfig(t *testing.T) {
 
 	// Out-of-range pool sizes are rejected instead of being narrowed to
 	// int32: 4294967296 would wrap to 0 and silently disable the pool.
-	for _, invalid := range []string{"-1", "4294967296", "1025"} {
+	for _, invalid := range []string{"-2", "4294967296", "1025"} {
 		assert.NoError(t, pt.Save(pt.CommonCfg.StorageReaderThreadPoolSize.Key, invalid))
 		err := InitLoonReaderConfig(pt)
 		assert.Error(t, err, "pool size %s must be rejected", invalid)

@@ -1008,7 +1008,8 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Doc: `Size of milvus-storage's global reader thread pool. When > 0, chunk ` +
 			`(row-group) reads issued by one storage-v3/external reader may be ` +
 			`fanned out across this pool. 0 keeps the pre-existing sequential ` +
-			`behavior. ` +
+			`behavior. -1 (auto) uses one thread per CPU core on a dedicated ` +
+			`DataNode and 0 in any other process (standalone, mixed roles). ` +
 			`Only DataNode's segcore init creates the pool, but the pool itself ` +
 			`is a process-wide singleton in milvus-storage. In a cluster ` +
 			`deployment QueryNode runs in its own process, never creates one, ` +
@@ -1041,20 +1042,26 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	p.IndexBuildReadWindowBytes = ParamItem{
 		Key:          "common.storage.indexBuildReadWindowBytes",
 		Version:      "3.0.0",
-		DefaultValue: "0",
+		DefaultValue: "-1",
 		Doc: `Per-round read window in bytes (milvus-storage reader.record_batch_max_size) ` +
-			`for index-build manifest reads. The default window (0 = milvus-storage's ` +
-			`32MB) admits a single 64MB-class parquet row group per prefetch round, ` +
-			`serializing the raw-data download to one object-storage range read at a ` +
-			`time. Set to N x row-group-size so one round spans multiple row groups, ` +
-			`whose column chunks are then prefetched in parallel by arrow ` +
-			`(common.arrow.ioThreadPoolCoefficient). ` +
+			`for index-build manifest reads. -1 (auto, the default) sizes it on a ` +
+			`dedicated DataNode so every arrow IO thread has two coalesced read ` +
+			`ranges in flight per round: 2 x arrow IO threads ` +
+			`(common.arrow.ioThreadPoolCoefficient) x read range size ` +
+			`(common.arrow.reader.rangeSizeLimitBytes, arrow's 32MB when 0), capped ` +
+			`at 4GB — e.g. 768MB with 12 IO threads. The IO pool is the ceiling on ` +
+			`concurrent object-storage reads, so a larger window buys no extra ` +
+			`concurrency. In any other process (standalone, mixed roles) -1 means 0. ` +
+			`0 keeps milvus-storage's 32MB, which admits a single 64MB-class parquet ` +
+			`row group per prefetch round and serializes the raw-data download to ` +
+			`one object-storage range read at a time. A value > 0 is used as is. ` +
 			`If you also want per-chunk fan-out on the milvus-storage reader pool, ` +
-			`N must be strictly greater than common.storage.readerThreadPoolSize: ` +
-			`at or below the pool size, contiguous chunks are merged into one task ` +
-			`(e.g. a 1GB window over 64MB row groups is 16 chunks, which a 16-thread ` +
-			`pool executes as a single task). Memory cost: up to this many bytes ` +
-			`buffered per running build task, on top of the decode window. Max 4GB. ` +
+			`the window must span strictly more row groups than ` +
+			`common.storage.readerThreadPoolSize: at or below the pool size, ` +
+			`contiguous chunks are merged into one task (e.g. a 1GB window over ` +
+			`64MB row groups is 16 chunks, which a 16-thread pool executes as a ` +
+			`single task). Memory cost: up to this many bytes buffered per running ` +
+			`build task, on top of the decode window. Max 4GB. ` +
 			`Only affects index build; query-node loads keep the default window. ` +
 			`Batch decode for these reads runs on the segcore LOW-priority pool ` +
 			`(common.threadCoreCoefficient.lowPriority), deliberately not the ` +
