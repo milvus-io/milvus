@@ -54,7 +54,8 @@ func TestRetrieveUnitByteSizeProtobuf(t *testing.T) {
 
 func TestRetrieveUnitComputedBytes(t *testing.T) {
 	result := newQueryTestChunk([]int64{1, 2, 3}, []int64{10, 20, 30})
-	result.ComputedResults = []*schemapb.FieldData{{FieldName: "scan.matches", Type: schemapb.DataType_JSON,
+	result.ComputedResults = []*schemapb.FieldData{{
+		FieldName: "scan.matches", Type: schemapb.DataType_JSON,
 		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
 			ValidData: []bool{true, false, true},
 			Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: [][]byte{

@@ -128,7 +128,7 @@ func (u retrieveUnit) reducibleByteSize() (int, error) {
 		if err != nil {
 			return 0, err
 		}
-		size += protowire.SizeTag(5) + protowire.SizeBytes(fieldSize)
+		size += protowire.SizeTag(reduce.RetrieveFieldsDataFieldNumber) + protowire.SizeBytes(fieldSize)
 	}
 	for _, field := range u.result.GetComputedResults() {
 		// Computed scalars retain a payload slot for every row, including NULLs.
@@ -136,20 +136,20 @@ func (u retrieveUnit) reducibleByteSize() (int, error) {
 		if err != nil {
 			return 0, err
 		}
-		size += protowire.SizeTag(22) + protowire.SizeBytes(fieldSize)
+		size += protowire.SizeTag(reduce.RetrieveComputedResultsFieldNumber) + protowire.SizeBytes(fieldSize)
 	}
 	if ids := u.result.GetIds(); ids.GetIdField() != nil {
 		idsSize, err := reduce.IDsRowSize(ids, u.rowIndex)
 		if err != nil {
 			return 0, err
 		}
-		size += protowire.SizeTag(4) + protowire.SizeBytes(idsSize)
+		size += protowire.SizeTag(reduce.RetrieveIDsFieldNumber) + protowire.SizeBytes(idsSize)
 	}
 	if indices := u.result.GetElementIndices(); u.result.GetElementLevel() && len(indices) > 0 {
 		if u.rowIndex >= int64(len(indices)) {
 			return 0, merr.WrapErrServiceInternalMsg("Query Unit element index %d is out of range", u.rowIndex)
 		}
-		size += protowire.SizeTag(19) + protowire.SizeBytes(proto.Size(indices[u.rowIndex]))
+		size += protowire.SizeTag(reduce.RetrieveElementIndicesFieldNumber) + protowire.SizeBytes(proto.Size(indices[u.rowIndex]))
 	}
 	return size, nil
 }
@@ -566,7 +566,7 @@ func newUnOrderedReduceStream(
 			return nil, merr.WrapErrServiceInternalMsg("Query ReduceStream child stream %d is nil", i)
 		}
 	}
-	reducer := agg.NewGroupAggReducer(request.GetGroupByFieldIds(), request.GetAggregates(), -1, schema)
+	reducer := agg.NewGroupAggReducer(request.GetGroupByFieldIds(), request.GetAggregates(), typeutil.Unlimited, schema)
 	var outputBuffer *agg.GroupAggBuffer
 	if len(request.GetGroupByFieldIds()) > 0 {
 		outputBuffer = reducer.NewBuffer()

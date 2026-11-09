@@ -78,8 +78,8 @@ func (u orderedUnit) reducibleByteSize() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	size := protowire.SizeTag(4) + protowire.SizeBytes(4) +
-		protowire.SizeTag(5) + protowire.SizeBytes(idsSize)
+	size := protowire.SizeTag(reduce.SearchScoresFieldNumber) + protowire.SizeBytes(protowire.SizeFixed32()) +
+		protowire.SizeTag(reduce.SearchIDsFieldNumber) + protowire.SizeBytes(idsSize)
 	computer := u.fieldIndexComputer
 	if computer == nil {
 		computer = typeutil.NewFieldDataIdxComputer(data.GetFieldsData())
@@ -94,20 +94,20 @@ func (u orderedUnit) reducibleByteSize() (int, error) {
 		if err != nil {
 			return 0, err
 		}
-		size += protowire.SizeTag(3) + protowire.SizeBytes(fieldSize)
+		size += protowire.SizeTag(reduce.SearchFieldsDataFieldNumber) + protowire.SizeBytes(fieldSize)
 	}
 	if indices := data.GetElementIndices(); indices != nil {
 		if row >= int64(len(indices.GetData())) {
 			return 0, merr.WrapErrServiceInternalMsg("Search Unit element index %d is out of range", row)
 		}
-		payload := protowire.SizeTag(1) + protowire.SizeBytes(protowire.SizeVarint(uint64(indices.Data[row])))
-		size += protowire.SizeTag(15) + protowire.SizeBytes(payload)
+		payload := protowire.SizeTag(reduce.LongArrayDataFieldNumber) + protowire.SizeBytes(protowire.SizeVarint(uint64(indices.Data[row])))
+		size += protowire.SizeTag(reduce.SearchElementIndicesFieldNumber) + protowire.SizeBytes(payload)
 	}
 	groupFields := data.GetGroupByFieldValues()
-	groupTag := protowire.Number(17)
+	groupTag := reduce.SearchGroupByFieldValuesFieldNumber
 	if len(groupFields) == 0 && data.GetGroupByFieldValue() != nil {
 		groupFields = []*schemapb.FieldData{data.GetGroupByFieldValue()}
-		groupTag = 8
+		groupTag = reduce.SearchGroupByFieldValueFieldNumber
 	}
 	for _, field := range groupFields {
 		fieldSize, err := reduce.GroupByFieldRowSize(field, row)
