@@ -431,3 +431,18 @@ UnRefPluginContext(CPluginContext c_plugin_context) {
     }
     CGO_CATCH_AND_RETURN_CSTATUS
 }
+
+CStatus
+InitCredentialBrokerPolicy(const char* endpoints_json) {
+    try {
+        const auto status = ::InitCredentialBrokerPolicy(
+            std::string(endpoints_json ? endpoints_json : "[]"));
+        if (!status.ok()) {
+            return milvus::FailureCStatus(milvus::ConfigInvalid,
+                                          status.ToString().c_str());
+        }
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}

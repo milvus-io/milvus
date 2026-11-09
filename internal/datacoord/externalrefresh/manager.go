@@ -1216,7 +1216,7 @@ func (m *Manager) exploreExternalFiles(
 	// Empty source is legal (see typeutil.IsExternalCollection); only validate
 	// when both present.
 	if job.GetExternalSource() != "" {
-		if err := externalspec.ValidateSourceAndSpec(job.GetExternalSource(), job.GetExternalSpec()); err != nil {
+		if err := externalspec.ValidateSourceAndSpec(job.GetExternalSource(), job.GetExternalSpec(), paramtable.Get().CommonCfg.CredentialBrokerPolicy()); err != nil {
 			return nil, "", merr.Wrap(err, "external source/spec failed revalidation")
 		}
 	}

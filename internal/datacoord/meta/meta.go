@@ -95,6 +95,9 @@ type Meta struct {
 	copyResultLocksOnce    sync.Once
 	copyResultLocks        *lock.KeyLock[int64]
 	ManifestCommitExecutor *manifestCommitExecutor
+	manifestCopyOnce       sync.Once
+	manifestCopySlots      *semaphore.Weighted
+	manifestCopyLimit      int
 	manifestReadOnce       sync.Once
 	manifestReadSlots      *semaphore.Weighted
 	DataViewManager        DataViewManager
@@ -1917,17 +1920,17 @@ func UpdateAsDroppedIfEmptyWhenFlushing(segmentID int64) UpdateOperator {
 // updateSegmentsInfo update segment infos
 // will exec all operators, and update all changed segments
 func (m *Meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperator) error {
-	committedUpdates, err := m.updateSegmentsInfo(ctx, operators...)
+	committedUpdates, err := m.UpdateSegmentsInfoWithoutNotify(ctx, operators...)
 	if err != nil {
 		return err
 	}
-	m.notifyQueryViewSegmentUpdates(ctx, committedUpdates)
+	m.NotifyQueryViewSegmentUpdates(ctx, committedUpdates)
 	return nil
 }
 
 // updateSegmentsInfo returns committed segment changes for the caller to notify
 // after releasing any manifest locks it owns.
-func (m *Meta) updateSegmentsInfo(ctx context.Context, operators ...UpdateOperator) ([]*SegmentInfo, error) {
+func (m *Meta) UpdateSegmentsInfoWithoutNotify(ctx context.Context, operators ...UpdateOperator) ([]*SegmentInfo, error) {
 	var committedUpdates []*SegmentInfo
 	m.SegMu.Lock()
 	defer m.SegMu.Unlock()
@@ -1965,7 +1968,7 @@ func (m *Meta) updateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 // Catalog retries overwrite the same actions until success or cancellation.
 func (m *Meta) UpdateSegmentsInfoAndDataView(ctx context.Context, dataView *viewpb.DataViewOfCollection, operators ...UpdateOperator) (bool, error) {
 	var updates []*SegmentInfo
-	defer func() { m.notifyQueryViewSegmentUpdates(ctx, updates) }()
+	defer func() { m.NotifyQueryViewSegmentUpdates(ctx, updates) }()
 	m.SegMu.Lock()
 	defer m.SegMu.Unlock()
 
@@ -2870,7 +2873,7 @@ func (m *Meta) CompleteCompactionMutation(ctx context.Context, t *datapb.Compact
 	}
 	defer func() {
 		if retErr == nil && t.GetType() == datapb.CompactionType_BumpSchemaVersionCompaction {
-			m.notifyQueryViewSegmentUpdates(ctx, newSegments)
+			m.NotifyQueryViewSegmentUpdates(ctx, newSegments)
 		}
 	}()
 	m.SegMu.Lock()

@@ -625,6 +625,34 @@ func TestParseMetricLabel(t *testing.T) {
 	assertLabels(metrics.FailLabel, metrics.CauseCancel, restCancel, merr.Error(restCancel))
 }
 
+// An operator cancel (CancelRequests) ends the request with
+// ErrRequestCanceled (3002) rather than the client cancellation code, so that
+// the client can tell the two apart. For the request metrics it is the same
+// kind of outcome: a cancellation, not a system failure, in each of the forms
+// the gRPC interceptor and the REST v2 wrapper hand over.
+func TestParseMetricLabelOperatorCancel(t *testing.T) {
+	operatorCancel := merr.WrapErrRequestCanceled("root", "too heavy")
+	st := merr.Status(operatorCancel)
+	assert.Equal(t, int32(3002), st.GetCode())
+
+	for _, tc := range []struct {
+		name       string
+		resp       any
+		err        error
+		wantStatus string
+	}{
+		{"gRPC: response carries the status, err nil", &milvuspb.SearchResults{Status: st}, nil, metrics.FailLabel},
+		{"REST v2: response status and err rebuilt from it", st, merr.Error(st), metrics.FailLabel},
+		{"err only", &commonpb.Status{}, operatorCancel, metrics.RejectedLabel},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			status, cause := ParseMetricLabel(tc.resp, tc.err)
+			assert.Equal(t, tc.wantStatus, status)
+			assert.Equal(t, metrics.CauseCancel, cause)
+		})
+	}
+}
+
 // The status label is a public monitoring contract: dashboards and alert rules
 // written against status="fail" / status="rejected" predate the cause dimension
 // and must keep working. Splitting the responsible party into new status values

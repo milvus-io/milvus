@@ -1392,6 +1392,23 @@ func (req *GetSegmentsInfoReq) GetSegmentIDs() []int64 {
 	return req.SegmentIDs
 }
 
+type ListRunningRequestsReq struct {
+	DbName         string `json:"dbName"`
+	CollectionName string `json:"collectionName"`
+	User           string `json:"user"`
+	MinElapsedMs   int64  `json:"minElapsedMs"`
+}
+
+func (req *ListRunningRequestsReq) GetDbName() string { return req.DbName }
+
+type CancelRequestsReq struct {
+	// Ids exactly as listRunningRequests returned them. They are strings so
+	// that a client decoding JSON numbers as doubles cannot round them.
+	RequestIDs []string `json:"requestIds" binding:"required"`
+	Reason     string   `json:"reason"`
+	User       string   `json:"user"`
+}
+
 type GetQuotaMetricsReq struct{}
 
 type RunAnalyzerReq struct {

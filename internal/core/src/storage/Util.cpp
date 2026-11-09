@@ -2185,9 +2185,10 @@ ReadFieldDataFromManifestInto(const std::string& manifest_path,
         auto read = [&]() -> arrow::Result<size_t> {
             auto columns = std::make_shared<std::vector<std::string>>(
                 std::vector<std::string>{column});
-            auto reader_properties = *properties;
+            auto reader_properties =
+                std::make_shared<milvus_storage::api::Properties>(*properties);
             const auto error = milvus_storage::api::SetValue(
-                reader_properties,
+                *reader_properties,
                 PROPERTY_READER_ASYNC_TASK_SPLIT_STRATEGY,
                 "bytes");
             if (error.has_value()) {
@@ -2425,7 +2426,7 @@ VisitFieldDataFromManifestPaged(
     auto needed_cols_ptr =
         std::make_shared<std::vector<std::string>>(needed_columns);
     auto reader = milvus_storage::api::Reader::create(
-        column_groups, reader_schema, needed_cols_ptr, *loon_ffi_properties);
+        column_groups, reader_schema, needed_cols_ptr, loon_ffi_properties);
 
     if (!(reader != nullptr)) {
         ThrowInfo(ErrorCode::FileReadFailed, "Failed to create reader");
@@ -2998,13 +2999,14 @@ BuildTextSegmentReaderConfig(const milvus_storage::api::Properties& properties,
                              int64_t field_id,
                              const std::string& lob_base_path) {
     milvus_storage::segment::SegmentReaderConfig config;
-    config.properties = properties;
+    config.properties =
+        std::make_shared<const milvus_storage::api::Properties>(properties);
 
     milvus_storage::lob_column::LobColumnConfig lob_config;
     lob_config.data_type = milvus_storage::lob_column::LobDataType::kText;
     lob_config.field_id = field_id;
     lob_config.lob_base_path = lob_base_path;
-    lob_config.properties = properties;
+    lob_config.properties = config.properties;
     config.lob_columns[field_id] = std::move(lob_config);
     return config;
 }
@@ -3022,7 +3024,7 @@ OpenTextFieldSegmentReader(
         BuildTextLobBasePath(segment_base_path, field_meta.field_id);
 
     auto fs_result = milvus_storage::FilesystemCache::getInstance().get(
-        *loon_ffi_properties, segment_base_path);
+        loon_ffi_properties, segment_base_path);
     if (!fs_result.ok()) {
         auto error = milvus_storage::ToSegcoreError(fs_result.status());
         ThrowInfo(error.get_error_code(),
