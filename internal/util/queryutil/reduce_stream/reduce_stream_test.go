@@ -375,6 +375,57 @@ func TestOrderedReduceStreamRejectsDuplicatePK(t *testing.T) {
 	require.Equal(t, 1, childB.closeCount())
 }
 
+func TestUnOrderedReduceStreamGlobalPartials(t *testing.T) {
+	for _, tail := range []string{"eof", "error", "canceled", "malformed"} {
+		t.Run(tail, func(t *testing.T) {
+			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64}}}
+			request := &internalpb.RetrieveRequest{Aggregates: []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}}}
+			payload := func(values []int64) *internalpb.RetrieveResults {
+				result := newGroupQueryTestChunk(nil, values)
+				result.FieldsData = result.FieldsData[1:]
+				return result
+			}
+			first, second := payload([]int64{30}), payload([]int64{60})
+			first.AllRetrieveCount = 2
+			second.AllRetrieveCount = 3
+			first.ScannedTotalBytes, second.ScannedTotalBytes = 10, 20
+			first.MvccTimestamp, second.MvccTimestamp = 10, 15
+			child := &queryTestStream{recv: []queryTestRecv{
+				{chunk: first}, {chunk: &internalpb.RetrieveResults{Status: merr.Success()}}, {chunk: second},
+			}}
+			var wantErr error
+			switch tail {
+			case "error":
+				wantErr = merr.ErrServiceUnavailable
+				child.recv = append(child.recv, queryTestRecv{err: wantErr})
+			case "canceled":
+				wantErr = context.Canceled
+				child.recv = append(child.recv, queryTestRecv{err: wantErr})
+			case "malformed":
+				wantErr = merr.ErrServiceInternal
+				child.recv = append(child.recv, queryTestRecv{chunk: payload([]int64{1, 2})})
+			}
+			stream, err := NewReduceStream(request, schema, []ReduceStream{child}, 1)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, stream.Close()) })
+			chunk, err := stream.Recv()
+			if wantErr != nil {
+				require.ErrorIs(t, err, wantErr)
+				require.Nil(t, chunk) // Even a late error must not expose a partial aggregate.
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, []int64{90}, chunk.FieldsData[0].GetScalars().GetLongData().GetData())
+				require.EqualValues(t, 5, chunk.GetAllRetrieveCount())
+				require.EqualValues(t, 30, chunk.GetScannedTotalBytes())
+				require.EqualValues(t, 15, chunk.GetMvccTimestamp())
+				_, err = stream.Recv()
+				require.ErrorIs(t, err, io.EOF)
+			}
+			require.Equal(t, 1, child.closeCount())
+		})
+	}
+}
+
 func TestUnOrderedReduceStreamMergesGroupedChunks(t *testing.T) {
 	childA := &queryTestStream{recv: []queryTestRecv{
 		{chunk: newGroupQueryTestChunk([]int64{1, 2}, []int64{2, 3})},

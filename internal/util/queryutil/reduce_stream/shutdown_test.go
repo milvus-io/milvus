@@ -70,7 +70,7 @@ func (s *shutdownErrorStream) Recv() (*internalpb.RetrieveResults, error) {
 }
 
 func TestReduceStreamShutdownWaitsForNestedRecv(t *testing.T) {
-	for _, mode := range []string{"ordered", "unordered", "order_by"} {
+	for _, mode := range []string{"ordered", "unordered", "global_aggregate", "order_by"} {
 		t.Run(mode, func(t *testing.T) {
 			for _, siblingFails := range []bool{true, false} {
 				name := "concurrent_close"
@@ -93,8 +93,10 @@ func TestReduceStreamShutdownWaitsForNestedRecv(t *testing.T) {
 						request.OrderByFields = []*planpb.OrderByField{{FieldId: 101, Ascending: true}}
 					}
 					var schema *schemapb.CollectionSchema
-					if mode == "unordered" {
-						request.GroupByFieldIds = []int64{100}
+					if mode == "unordered" || mode == "global_aggregate" {
+						if mode == "unordered" {
+							request.GroupByFieldIds = []int64{100}
+						}
 						request.Aggregates = []*planpb.Aggregate{{Op: planpb.AggregateOp_count, FieldId: 101}}
 						schema = &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 							{FieldID: 100, DataType: schemapb.DataType_Int64},

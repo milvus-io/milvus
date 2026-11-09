@@ -3,6 +3,7 @@ package queryclient
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"testing"
@@ -617,6 +618,47 @@ func TestLegacyClientQueryReducesGroupedVChannelStreams(t *testing.T) {
 	require.ErrorIs(t, err, io.EOF)
 }
 
+func TestLegacyClientQueryGlobalAggregateStreams(t *testing.T) {
+	setupTestReplicaRouting(t)
+	for _, empty := range []bool{false, true} {
+		t.Run(fmt.Sprintf("empty=%v", empty), func(t *testing.T) {
+			shard := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
+			plan := legacyQueryPlan(shard, qviews.NewQueryNode(11))
+			if empty {
+				plan = legacyQueryPlanWithoutWorkNodes(shard)
+			}
+			payload := newTestQueryChunk([]int64{7})
+			payload.Ids, payload.FieldsData = nil, payload.FieldsData[:1]
+			payload.FieldsData[0].FieldId = 100
+			payload.FieldsData[0].GetScalars().GetLongData().Data = []int64{7}
+			service := &legacyServiceClient{queryResults: map[string]*internalpb.RetrieveResults{shard.VChannel: payload}}
+			client := NewLegacyViewQueryClient(ViewQueryClientConfig{MaxRetries: 1},
+				&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{shard.VChannel: plan}}, service,
+				&legacyResolver{vchannels: []string{shard.VChannel}})
+			req := &internalpb.RetrieveRequest{CollectionID: 100, Limit: typeutil.Unlimited,
+				Aggregates: []*planpb.Aggregate{{Op: planpb.AggregateOp_count, FieldId: 100}}}
+			result, err := client.Legacy().Query(t.Context(), &LegacyQueryRequest{
+				Req: req, AllowStreaming: SupportsQueryStream(req), ReduceStreamChunkBytes: 1,
+				Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}},
+			})
+			require.NoError(t, err)
+			require.Empty(t, result.Results)
+			require.NotNil(t, result.Stream)
+			defer result.Stream.Close()
+			chunk, err := result.Stream.Recv()
+			require.NoError(t, err)
+			expected := int64(7)
+			if empty {
+				expected = 0
+			}
+			require.Equal(t, []int64{expected}, chunk.FieldsData[0].GetScalars().GetLongData().GetData())
+			_, err = result.Stream.Recv()
+			require.ErrorIs(t, err, io.EOF)
+			require.Zero(t, service.queryCallCount)
+		})
+	}
+}
+
 func TestLegacyClientQueryOrderByStreams(t *testing.T) {
 	setupTestReplicaRouting(t)
 	shardA := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
@@ -698,11 +740,9 @@ func TestSupportsQueryStream(t *testing.T) {
 			{Op: planpb.AggregateOp_count, FieldId: 101},
 		},
 	}))
-	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{
-		Aggregates: []*planpb.Aggregate{
-			{Op: planpb.AggregateOp_sum, FieldId: 101},
-		},
-	}))
+	for _, op := range []planpb.AggregateOp{planpb.AggregateOp_count, planpb.AggregateOp_sum, planpb.AggregateOp_min, planpb.AggregateOp_max} {
+		require.True(t, SupportsQueryStream(&internalpb.RetrieveRequest{Aggregates: []*planpb.Aggregate{{Op: op, FieldId: 101}}}))
+	}
 }
 
 func TestLegacyClientQueryPreservesEmptyDownstreamSnapshot(t *testing.T) {

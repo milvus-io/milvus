@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -538,6 +539,119 @@ func TestQueryTaskUnlimitedStreamEnforcesMaxOutputSize(t *testing.T) {
 	require.ErrorContains(t, task.Execute(t.Context()), "maxOutputSize")
 	require.Equal(t, 1, stream.closeCalls)
 	require.Empty(t, task.resultBuf.Collect())
+}
+
+func TestQueryTaskGlobalAggregationBatchParity(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, Name: "val", DataType: schemapb.DataType_Int64, Nullable: true},
+	}}
+	for _, outputs := range [][]string{{"count(*)"}, {"count(val)", "sum(val)", "avg(val)", "min(val)", "max(val)"}} {
+		for _, shape := range []string{"values", "zero", "null", "empty", "no_children"} {
+			for _, chunkBytes := range []int{1, 1 << 20} {
+				t.Run(fmt.Sprintf("%v/%s/bytes=%d", outputs, shape, chunkBytes), func(t *testing.T) {
+					legacy := &fakeLegacyQueryClient{}
+					task := newQueryViewQueryTask(t, legacy, typeutil.Unlimited)
+					task.schema = mustNewSchemaInfo(schema)
+					task.queryParams = &queryParams{limit: typeutil.Unlimited}
+					task.request.Expr, task.request.OutputFields = "pk >= 0", outputs
+					require.NoError(t, task.createPlan(t.Context()))
+					require.NotEmpty(t, task.GetAggregates()) // COUNT(*) uses the same aggregate plan.
+					require.False(t, task.GetIsCount())
+					var batches []*internalpb.RetrieveResults
+					var shards []queryreducestream.ReduceStream
+					var workers []*fakeLegacyQueryStream
+					for shard := 0; shard < 2; shard++ {
+						var children []queryreducestream.ReduceStream
+						if shape != "no_children" {
+							for child := 0; child < 2; child++ {
+								n := int64(1 + shard*2 + child)
+								batch := &internalpb.RetrieveResults{Status: merr.Success(), AllRetrieveCount: n}
+								if shape != "empty" {
+									for _, operator := range task.GetAggregates() {
+										value, valid := 30*n, shape != "null"
+										if shape == "zero" || shape == "null" {
+											value = 0
+										}
+										if operator.GetOp() == planpb.AggregateOp_count {
+											value, valid = n+1, true
+											if shape == "null" && outputs[0] != "count(*)" {
+												value = 0
+											}
+										}
+										field := makeTestInt64Field(101, "", []int64{value})
+										typeutil.SetFieldDataValidData(field, []bool{valid})
+										batch.FieldsData = append(batch.FieldsData, field)
+									}
+								}
+								batches = append(batches, proto.Clone(batch).(*internalpb.RetrieveResults))
+								chunks, err := queryreducestream.SplitRetrieveResult(batch, chunkBytes)
+								require.NoError(t, err)
+								worker := &fakeLegacyQueryStream{}
+								for _, chunk := range chunks {
+									worker.recv = append(worker.recv, fakeLegacyQueryRecv{chunk: chunk})
+								}
+								workers = append(workers, worker)
+								children = append(children, worker)
+							}
+						}
+						stream, err := queryreducestream.NewShardReduceStream(task.RetrieveRequest, schema, children, chunkBytes)
+						require.NoError(t, err)
+						require.IsType(t, &queryreducestream.UnOrderedReduceStream{}, stream)
+						shards = append(shards, stream)
+					}
+					stream, err := queryreducestream.NewReduceStream(task.RetrieveRequest, schema, shards, chunkBytes)
+					require.NoError(t, err)
+					t.Cleanup(func() { require.NoError(t, stream.Close()) })
+					legacy.queryResult = &queryclient.LegacyQueryResult{Stream: stream}
+					require.NoError(t, task.Execute(t.Context()))
+					require.True(t, legacy.lastQueryRequest.AllowStreaming)
+					output := task.resultBuf.Collect()
+					require.Len(t, output, 1)
+					require.Equal(t, 1, queryutil.GetRowCount(output[0]))
+					wantCount := int64(10)
+					if shape == "no_children" {
+						wantCount = 0
+					}
+					require.Equal(t, wantCount, output[0].GetAllRetrieveCount())
+					for _, worker := range workers {
+						require.Equal(t, len(worker.recv), worker.next)
+						require.Equal(t, 1, worker.closeCalls)
+					}
+					pipeline, err := NewQueryPipeline(schema, typeutil.Unlimited, 0, 0, nil, nil, task.GetAggregates(), task.aggregationFieldMap, nil)
+					require.NoError(t, err)
+					want, err := pipeline.Execute(t.Context(), batches)
+					require.NoError(t, err)
+					got, err := pipeline.Execute(t.Context(), output)
+					require.NoError(t, err)
+					require.True(t, proto.Equal(want, got), "batch=%v streaming=%v", want, got)
+					for _, field := range got.GetFieldsData() {
+						isCount := strings.HasPrefix(field.GetFieldName(), "count(")
+						isNull := !isCount && (shape == "empty" || shape == "no_children" || shape == "null")
+						if isNull {
+							require.Equal(t, []bool{false}, typeutil.GetFieldDataValidData(field))
+							continue
+						}
+						if field.GetFieldName() == "avg(val)" {
+							expected := float64(0)
+							if shape == "values" {
+								expected = 300.0 / 14
+							}
+							require.InDelta(t, expected, field.GetScalars().GetDoubleData().GetData()[0], 1e-12)
+						} else {
+							expected := int64(0)
+							if isCount && (shape == "values" || shape == "zero" || (shape == "null" && field.GetFieldName() == "count(*)")) {
+								expected = 14
+							} else if shape == "values" {
+								expected = map[string]int64{"sum(val)": 300, "min(val)": 30, "max(val)": 120}[field.GetFieldName()]
+							}
+							require.Equal(t, []int64{expected}, field.GetScalars().GetLongData().GetData())
+						}
+					}
+				})
+			}
+		}
+	}
 }
 
 func TestQueryTaskGroupedOrderByBatchParity(t *testing.T) {

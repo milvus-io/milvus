@@ -222,10 +222,10 @@ func (s *Server) QueryOnViewStream(stream viewpb.ViewQueryService_QueryOnViewStr
 		return status.Error(codes.InvalidArgument, "QueryOnViewStream first message must contain a request")
 	}
 	legacyRequest := request.GetLegacyReq()
-	hasGroupBy := legacyRequest != nil && len(legacyRequest.GetGroupByFieldIds()) > 0
+	hasAggregation := len(legacyRequest.GetGroupByFieldIds()) > 0 || len(legacyRequest.GetAggregates()) > 0
 	unlimited := legacyRequest.GetLimit() == typeutil.Unlimited && len(legacyRequest.GetOrderByFields()) == 0
 	if legacyRequest == nil || legacyRequest.GetIsCount() ||
-		(!hasGroupBy && ((legacyRequest.GetLimit() <= 0 && !unlimited) || len(legacyRequest.GetAggregates()) > 0)) {
+		(!hasAggregation && legacyRequest.GetLimit() <= 0 && !unlimited) {
 		return status.Error(codes.InvalidArgument, "unsupported QueryOnViewStream request or limit")
 	}
 

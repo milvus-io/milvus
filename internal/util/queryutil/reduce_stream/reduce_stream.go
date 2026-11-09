@@ -17,6 +17,7 @@
 package reducestream
 
 import (
+	"context"
 	"errors"
 	"io"
 	"sync"
@@ -230,14 +231,14 @@ func NewReduceStream(
 	if request == nil {
 		return nil, merr.WrapErrServiceInternalMsg("NewReduceStream requires a Query request")
 	}
-	if len(request.GetGroupByFieldIds()) > 0 {
+	if len(request.GetGroupByFieldIds()) > 0 || len(request.GetAggregates()) > 0 {
 		if schema == nil {
-			return nil, merr.WrapErrServiceInternalMsg("Query Group By ReduceStream requires a collection schema")
+			return nil, merr.WrapErrServiceInternalMsg("Query aggregation ReduceStream requires a collection schema")
 		}
 		return newUnOrderedReduceStream(request, schema, childStreams, chunkBytes)
 	}
-	if request.GetIsCount() || len(request.GetAggregates()) > 0 {
-		return nil, merr.WrapErrServiceUnimplemented(status.Error(codes.Unimplemented, "Query ReduceStream does not support global aggregation"))
+	if request.GetIsCount() {
+		return nil, merr.WrapErrServiceUnimplemented(status.Error(codes.Unimplemented, "Query ReduceStream requires an aggregate plan for count"))
 	}
 	unlimited := request.GetLimit() == typeutil.Unlimited && len(request.GetOrderByFields()) == 0
 	if request.GetLimit() <= 0 && !unlimited {
@@ -509,7 +510,7 @@ func buildRetrieveChunk(units []retrieveUnit) (*internalpb.RetrieveResults, erro
 	return chunk, nil
 }
 
-// UnOrderedReduceStream merges Query Group By results without depending on child arrival order.
+// UnOrderedReduceStream merges Query groups and aggregates without depending on child arrival order.
 type UnOrderedReduceStream struct {
 	recvMu       sync.Mutex
 	childStreams *reduce.ChildStreams[*internalpb.RetrieveResults]
@@ -541,11 +542,15 @@ func newUnOrderedReduceStream(
 		}
 	}
 	reducer := agg.NewGroupAggReducer(request.GetGroupByFieldIds(), request.GetAggregates(), -1, schema)
+	var outputBuffer *agg.GroupAggBuffer
+	if len(request.GetGroupByFieldIds()) > 0 {
+		outputBuffer = reducer.NewBuffer()
+	}
 	return &UnOrderedReduceStream{
 		childStreams: reduce.NewChildStreams[*internalpb.RetrieveResults](childStreams),
 		childBuffers: make([]*internalpb.RetrieveResults, len(childStreams)),
 		reducer:      reducer,
-		outputBuffer: reducer.NewBuffer(),
+		outputBuffer: outputBuffer,
 		chunkBytes:   chunkBytes,
 	}, nil
 }
@@ -562,6 +567,8 @@ func (s *UnOrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 	}
 
 	if s.outputChunks == nil {
+		// Global aggregation retains one mergeable partial, not a map of groups.
+		reduced := &agg.PartialAggregationResult{}
 		for {
 			readyBuffers, err := s.getReadyBuffers()
 			if err != nil {
@@ -579,7 +586,16 @@ func (s *UnOrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 				}
 				partialResults[i] = partial
 			}
-			if err := s.outputBuffer.Merge(partialResults); err != nil {
+			if s.outputBuffer != nil {
+				// Group By retains earlier contributions in outputBuffer's group map.
+				err = s.outputBuffer.Merge(partialResults)
+			} else {
+				// Global aggregation has no group map. Merge is stateless, so include
+				// the partial accumulated from earlier Chunks.
+				partialResults = append(partialResults, reduced)
+				reduced, err = s.reducer.Merge(context.Background(), partialResults)
+			}
+			if err != nil {
 				return nil, s.fail(err)
 			}
 			for i := range s.childBuffers {
@@ -587,9 +603,12 @@ func (s *UnOrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 			}
 		}
 
-		reduced, err := s.outputBuffer.Result()
-		if err != nil {
-			return nil, s.fail(err)
+		if s.outputBuffer != nil {
+			var err error
+			reduced, err = s.outputBuffer.Result()
+			if err != nil {
+				return nil, s.fail(err)
+			}
 		}
 		result, err := s.reducer.EncodePartial(reduced)
 		if err != nil {

@@ -75,7 +75,7 @@ func TestSearchTaskStreamingConfigRefresh(t *testing.T) {
 }
 
 func TestQueryTaskStreamingConfigRefresh(t *testing.T) {
-	for _, shape := range []string{"plain", "iterator", "grouped", "grouped_order_by"} {
+	for _, shape := range []string{"plain", "iterator", "grouped", "grouped_order_by", "global_count", "global_sum"} {
 		t.Run(shape, func(t *testing.T) {
 			params := paramtable.Get()
 			cfg := &params.ProxyCfg
@@ -91,6 +91,13 @@ func TestQueryTaskStreamingConfigRefresh(t *testing.T) {
 				}
 				if shape == "grouped_order_by" {
 					task.OrderByFields = []*planpb.OrderByField{{FieldId: 101}}
+				}
+				if shape == "global_count" || shape == "global_sum" {
+					op := planpb.AggregateOp_sum
+					if shape == "global_count" {
+						op = planpb.AggregateOp_count
+					}
+					task.Aggregates = []*planpb.Aggregate{{Op: op, FieldId: 101}}
 				}
 				require.NoError(t, params.Save(cfg.EnableReduceStream.Key, strconv.FormatBool(enabled)))
 				require.NoError(t, params.Save(cfg.ReduceStreamChunkBytes.Key, strconv.Itoa(chunkBytes)))
@@ -181,7 +188,7 @@ func TestStreamingConfigLeavesUnsupportedRequestsOnBatch(t *testing.T) {
 	for _, req := range []*internalpb.RetrieveRequest{
 		{},
 		{Limit: 1, IsCount: true},
-		{Limit: 1, Aggregates: []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}}},
+		{Limit: 1, Aggregates: []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}}, OrderByFields: []*planpb.OrderByField{{FieldId: 101}}},
 	} {
 		query := newQueryViewQueryTask(t, legacy, 1)
 		req.Base = query.Base

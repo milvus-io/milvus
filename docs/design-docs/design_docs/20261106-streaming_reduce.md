@@ -55,7 +55,7 @@ child Chunk: [Unit][Unit] -- Recv() --> child Buffer: [Unit][Unit]
 ```
 
 A Unit is indivisible: a Search hit, Query row (including matched-element indexes),
-or group key with partial aggregates. A Chunk is one result protobuf; a Buffer
+group key with partial aggregates, or global aggregate row. A Chunk is one result protobuf; a Buffer
 retains its reducible data. The byte threshold `B` sums independently encoded
 Unit fields, excluding result metadata and transport framing; it is not exact
 message size or heap usage. Append a complete Unit before checking `B`: 80 + 30
@@ -76,6 +76,7 @@ one outstanding receive per child and fills empty child Buffers concurrently.
 | Plain Query ORDER BY | Each vchannel drains workers into a PK map, resolves versions, sorts and selects candidates before emitting Chunks. Final merge uses scalar ordering and rejects cross-vchannel duplicate PKs. |
 | Search `OrderedReduceStream` | Each active child has a head or EOF; merge by score per vector. Group selection preserves Batch pruning, not exhaustive group membership. |
 | Query Group By `UnOrderedReduceStream` | Consume available Buffers into a stream-owned group map; drain all children before emitting partial aggregates. Finalize at Proxy, preserving AVG sum/count and NULL state between levels. |
+| Global Query aggregation `UnOrderedReduceStream` | Merge available partials into one retained partial; drain all children before emitting one aggregate row. Preserve AVG sum/count and NULL state until Proxy finalization. |
 
 Proxy `Execute()` consumes results and stops at the request's row, element, or
 per-vector window, or EOF; unlimited Query drains input. Plain Query ORDER BY
@@ -104,7 +105,7 @@ refreshed values without QN/SN restart; in-flight requests retain their values.
 Existing configuration-source precedence applies. SDK parameters cannot override
 them. Eligibility preserves existing API validation: supported ordinary/iterator
 Query, ANN variants, Search grouping/aggregation and legacy Hybrid fusion can
-stream, including Query Group By + ORDER BY. Query global aggregation/function chains, Hybrid Group By and
+stream, including Query Group By + ORDER BY and global aggregates. Query function chains, Hybrid Group By and
 unsupported reranking remain Batch, as does retained-plan requery. Exact gates:
 [Query](../../../internal/views/queryclient/legacy_client.go#L290),
 [Query function chains](../../../internal/proxy/dql/task_query.go#L1172),
@@ -131,7 +132,7 @@ improvement is claimed by this document.
 4. [Receive scheduling and implementation comparison](#4-receive-scheduling-and-implementation-comparison)
 5. [Ordered Query](#5-ordered-query)
 6. [Ordered Search](#6-ordered-search)
-7. [Unordered Query Group By](#7-unordered-query-group-by)
+7. [Unordered Query Aggregation](#7-unordered-query-aggregation)
 8. [Worker-to-Proxy execution](#8-worker-to-proxy-execution)
 9. [Metadata and lifecycle](#9-metadata-and-lifecycle)
 10. [Configuration and supported paths](#10-configuration-and-supported-paths)
@@ -217,7 +218,7 @@ queryreducestream.NewShardReduceStream(request, schema, childStreams, chunkBytes
 
 `NewShardReduceStream` enables the vchannel-level duplicate policy. The final
 factory composes vchannel streams. Query chooses `UnOrderedReduceStream` when
-grouping is requested; other eligible Query requests use `OrderedReduceStream`.
+grouping or aggregation is requested; other eligible Query requests use `OrderedReduceStream`.
 Eligible Search candidate reduction uses `OrderedReduceStream`, including Search
 Group By. Hybrid is decomposed before the factory, not merged as one ANN request.
 Sources: [Search factories](../../../internal/util/searchutil/reduce_stream/reduce_stream.go#L369),
@@ -590,7 +591,7 @@ does not compute aggregates over candidates never returned by workers. Sources:
 [candidate assembly](../../../internal/proxy/dql/task_search.go#L1887),
 [Proxy aggregation](../../../internal/proxy/dql/search_pipeline.go#L668).
 
-### 7. Unordered Query Group By
+### 7. Unordered Query Aggregation
 
 Query Group By can combine partial aggregates without cross-child head ordering.
 It cannot finalize a group on first arrival: later Chunks may update that group.
@@ -602,15 +603,18 @@ The stream owns `GroupAggBuffer`; `GroupAggReducer` supplies layout, decoding an
 encoding. Its ordinary `Merge(ctx, partials)` is a stateless operation, not a
 hidden map retained across calls. Incremental streaming calls the explicitly
 owned Buffer's `Merge()` instead. The Buffer can remain stateful without changing
-the `PartialAggregationResult` contract.
+the `PartialAggregationResult` contract. Global COUNT/SUM/AVG/MIN/MAX instead retain
+one partial and pass it with incoming partials to the shared stateless `Merge()`.
+They drain all children at both levels; only Proxy finalizes AVG from sum/count.
 
 ```text
 construction:
     reducer = NewGroupAggReducer(groupByFieldIDs, aggregates, -1, schema)
-    outputBuffer = reducer.NewBuffer()
+    outputBuffer = reducer.NewBuffer() if groupByFieldIDs is not empty else nil
 
 Recv():
     if outputChunks is not built:
+        reduced = PartialAggregationResult{}
         repeat:
             readyBuffers = getReadyBuffers()
             if readyBuffers is empty:
@@ -618,9 +622,13 @@ Recv():
             partialResults = []
             for readyBuffer in readyBuffers:
                 partialResults.append(reducer.DecodePartial(readyBuffer.FieldsData, 0))
-            outputBuffer.Merge(partialResults)
+            if outputBuffer != nil:
+                outputBuffer.Merge(partialResults)
+            else:
+                reduced = reducer.Merge(context.Background(), partialResults + [reduced])
             clear childBuffers
-        reduced = outputBuffer.Result()
+        if outputBuffer != nil:
+            reduced = outputBuffer.Result()
         result = reducer.EncodePartial(reduced)
         attachMetadata(result)
         outputChunks = SplitRetrieveResult(result, chunkBytes)
@@ -654,6 +662,13 @@ merged result and still performs aggregate finalization and pagination. Sources:
 [partial contract](../../../internal/agg/aggregate_reducer.go#L515),
 [Query finalization](../../../internal/proxy/dql/query_pipeline.go#L280).
 
+Without group keys, empty input produces one row: COUNT is zero; SUM/AVG/MIN/MAX
+are NULL. The global partial is one indivisible Unit, even when larger than the
+Chunk threshold. Retrieval metadata is combined separately from aggregate values.
+Normal COUNT(*) is compiled into an aggregate plan; the legacy bare `IsCount`
+request is not enabled. Global results are already small in Batch, so this path
+does not imply a substantial memory or transfer saving.
+
 Group By + ORDER BY uses the same UnOrderedReduceStream at both levels. Before
 its first output Chunk, the final reducer has merged every child contribution;
 the emitted group order is unspecified. QueryTask must therefore receive until
@@ -666,8 +681,7 @@ deduplication is added for grouped partials. Without ORDER BY, QueryTask can sti
 stop after enough fully merged groups have arrived for the requested page.
 
 Shared Query validation still requires an explicit limit for ORDER BY and only
-allows group keys as ordering columns, not aggregate expressions. Global
-aggregates without group keys remain outside the streaming gate. Sources:
+allows group keys as ordering columns, not aggregate expressions. Sources:
 [grouped consumption](../../../internal/proxy/dql/task_query.go#L1387),
 [final ordering](../../../internal/proxy/dql/query_pipeline.go#L160).
 
@@ -857,7 +871,7 @@ whereas an invalid request is not made valid by this feature.
 | Query | Bounded plain ORDER BY | Drain/version-resolve each vchannel, sort and emit Chunks; final merge drains for cross-vchannel integrity checks. |
 | Query | Group By + ORDER BY | Unordered grouped streaming; Proxy collects all merged groups, then orders and paginates. Existing validation requires a limit and ordering by group keys. |
 | Query | ORDER BY without an explicit limit | Rejected by shared Query validation in both Batch and Streaming modes. |
-| Query | Global COUNT/SUM/AVG/MIN/MAX without Group By | Batch. |
+| Query | Global COUNT/SUM/AVG/MIN/MAX without Group By | Unordered streaming; merge one partial across all children, then finalize at Proxy. |
 | Query | QueryScan function chains | Batch; streaming assembly does not preserve separate computed columns. |
 | Search | Ordinary ANN with/without filters; plain ANN iterator | Ordered streaming. |
 | Search | Element-level and embedding-list variants | Ordered streaming within existing field/metric validation. |
@@ -928,6 +942,7 @@ control or low-watermark prefetch is introduced by this feature. Sources:
 | Query ORDER BY | Late newer versions changing topK, equal/missing timestamps, ASC/DESC/NULL ordering, nested reduction, non-adjacent cross-vchannel duplicates beyond the page, and errors before worker drain. |
 | Byte contract | Crossing `B`, exact boundary, oversized Unit alone, timestamp replacement, nullable/nested/element fields and metadata exclusion. |
 | Grouped Query | Multiple Chunks per child, nested vchannel/final accumulation, unequal AVG counts, empty/NULL/zero values and partial-state preservation. Grouped ordering must retain groups beyond the page before ASC/DESC sorting, tie-breaking, offset and limit; verify Batch parity and failure cleanup. |
+| Global Query aggregation | Standalone COUNT and mixed aggregate projections; nested reduction, unequal AVG counts, empty/NULL/zero values, empty shards, late errors and cancellation. Verify one output row, metadata and Batch finalization parity. |
 | Search variants | Group pruning parity, aggregation candidate order, range/filter behavior, Hybrid sub-search windows, element identity and downstream assembly. |
 | Lifecycle | Cancellation while blocked, concurrent Close, receive cleanup, error propagation, retry isolation after internal output, and exhausted retry budgets. |
 | Configuration | In-process YAML refresh, stable in-flight/retry settings, unsupported-path fallback and no SDK override. |
@@ -968,7 +983,7 @@ as implemented features.
 
 Deferred work includes segment-level streaming and stateful SDK iteration;
 terminal metadata through Interrupt; application credit/prefetch coordination;
-Query global aggregation; candidate-preserving Hybrid Group By;
+candidate-preserving Hybrid Group By;
 remaining function-chain/reranking paths; Batch's optional two-stage Search
 optimization; and live failure/performance qualification. Each requires its own
 behavior contract and verification before changing the current path.
