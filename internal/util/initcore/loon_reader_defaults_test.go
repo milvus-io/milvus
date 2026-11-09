@@ -58,7 +58,8 @@ func TestResolveLoonReaderThreadPoolSize(t *testing.T) {
 		want              int64
 		wantErr           bool
 	}{
-		{name: "default stays off", role: typeutil.DataNodeRole, value: "", want: 0},
+		{name: "default is auto on datanode", role: typeutil.DataNodeRole, value: "", want: cpuThreads},
+		{name: "default is off on standalone", role: typeutil.StandaloneRole, value: "", want: 0},
 		{name: "explicit off", role: typeutil.DataNodeRole, value: "0", want: 0},
 		{name: "explicit size", role: typeutil.DataNodeRole, value: "16", want: 16},
 		{name: "explicit size ignores role", role: typeutil.StandaloneRole, value: "16", want: 16},
@@ -99,6 +100,11 @@ func TestResolveIndexBuildReadWindowBytes(t *testing.T) {
 	global := paramtable.Get()
 	ioKey := global.CommonCfg.ArrowIOThreadPoolCoefficient.Key
 	defer global.Reset(ioKey)
+	// Changing the IO pool keys below fires the loon reader watchers other
+	// tests registered on the global table while the role is DataNode; pin
+	// the pool to 0 so they cannot create the (non-destroyable) reader pool.
+	require.NoError(t, global.Save(global.CommonCfg.StorageReaderThreadPoolSize.Key, "0"))
+	defer global.Reset(global.CommonCfg.StorageReaderThreadPoolSize.Key)
 
 	ioThreads := arrowIOThreadsForReadWindow()
 	autoDefaultRange := min(ioThreads*2*arrowDefaultRangeSizeLimitBytes, int64(maxIndexBuildReadWindowBytes))
@@ -196,9 +202,12 @@ func TestInitLoonReaderConfigAutoWindowOnDataNode(t *testing.T) {
 	defer pt.Reset(pt.CommonCfg.IndexBuildReadWindowBytes.Key)
 	defer pt.Reset(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key)
 
-	// Only the window is automatic by default: applying it on a DataNode must
-	// succeed and still leave the (non-destroyable) reader pool uncreated.
+	// Applying the automatic window on a DataNode must succeed. The pool is
+	// pinned to 0 here: an automatic pool would be created, cannot be
+	// destroyed, and would leak into every later test in this binary.
 	withRole(t, typeutil.DataNodeRole)
+	require.NoError(t, pt.Save(pt.CommonCfg.StorageReaderThreadPoolSize.Key, "0"))
+	defer pt.Reset(pt.CommonCfg.StorageReaderThreadPoolSize.Key)
 	require.NoError(t, pt.Reset(pt.CommonCfg.IndexBuildReadWindowBytes.Key))
 	require.NoError(t, InitLoonReaderConfig(pt))
 	assert.LessOrEqual(t, EffectiveLoonReaderThreadPoolSize(), int32(1))

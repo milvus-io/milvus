@@ -283,8 +283,9 @@ func TestInitLoonReaderConfigRejectsOutOfRangePoolSize(t *testing.T) {
 	pt := paramtable.Get()
 	defer pt.Reset(pt.CommonCfg.StorageReaderThreadPoolSize.Key)
 
-	// The default (0) is accepted and leaves the pool uninitialized, which
-	// milvus-storage reports as parallelism 1.
+	// The default (-1, which resolves to 0 outside a DataNode) is accepted
+	// and leaves the pool uninitialized, which milvus-storage reports as
+	// parallelism 1.
 	assert.NoError(t, InitLoonReaderConfig(pt))
 	assert.EqualValues(t, 1, EffectiveLoonReaderThreadPoolSize())
 
@@ -429,7 +430,10 @@ func TestRegisterLoonReaderConfigWatchers(t *testing.T) {
 	assert.NoError(t, pt.Save(pt.CommonCfg.IndexBuildReadWindowBytes.Key, "1048576"))
 	assert.Positive(t, windowFires.Load(),
 		"helper must have registered a handler on IndexBuildReadWindowBytes")
-	assert.EqualValues(t, 0, pt.CommonCfg.StorageReaderThreadPoolSize.GetAsInt64())
+	// The default pool size (-1) resolves to 0 outside a DataNode.
+	requested, err := ResolveLoonReaderThreadPoolSize(pt)
+	assert.NoError(t, err)
+	assert.EqualValues(t, 0, requested)
 	assert.EqualValues(t, 1, EffectiveLoonReaderThreadPoolSize())
 
 	// An out-of-range pool size drives the handler's error branch: it must log
