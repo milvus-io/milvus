@@ -180,6 +180,7 @@ class PhyCompareFilterExpr : public Expr {
         : Expr(DataType::BOOL, std::move(input), name, op_ctx),
           left_field_(expr->left_field_id_),
           right_field_(expr->right_field_id_),
+          segment_(segment),
           segment_chunk_reader_(op_ctx, segment, active_count),
           batch_size_(batch_size),
           expr_(expr),
@@ -195,7 +196,7 @@ class PhyCompareFilterExpr : public Expr {
                               active_count) {
         is_left_indexed_ = left_value_lookup_.HasReader();
         is_right_indexed_ = right_value_lookup_.HasReader();
-        if (segment->is_chunked()) {
+        if (segment->type() == SegmentType::Growing && segment->is_chunked()) {
             left_num_chunk_ =
                 segment->type() == SegmentType::Growing
                     ? upper_div(segment_chunk_reader_.active_count_,
@@ -207,7 +208,7 @@ class PhyCompareFilterExpr : public Expr {
                                 segment_chunk_reader_.SizePerChunk())
                     : segment_chunk_reader_.NumChunkData(right_field_);
             num_chunk_ = left_num_chunk_;
-        } else {
+        } else if (segment->type() == SegmentType::Growing) {
             num_chunk_ = upper_div(segment_chunk_reader_.active_count_,
                                    segment_chunk_reader_.SizePerChunk());
         }
@@ -222,7 +223,7 @@ class PhyCompareFilterExpr : public Expr {
 
     void
     SetSnapshot(const segcore::SegmentReadSnapshot* snapshot) override {
-        segment_chunk_reader_.SetSnapshot(snapshot);
+        snapshot_ = snapshot;
     }
 
     void
@@ -239,7 +240,8 @@ class PhyCompareFilterExpr : public Expr {
     void
     MoveCursorInternal() {
         if (!has_offset_input_) {
-            if (is_left_indexed_ || is_right_indexed_) {
+            if (segment_->type() == SegmentType::Sealed || is_left_indexed_ ||
+                is_right_indexed_) {
                 // The value-lookup path addresses rows by absolute segment
                 // offset, so current_data_global_pos_ is its only cursor. An
                 // index-only field has no raw chunks to walk here.
@@ -302,13 +304,10 @@ class PhyCompareFilterExpr : public Expr {
     // for growing segments, which have no ChunkedColumn.
     std::shared_ptr<ChunkedColumnInterface>
     CaptureDataColumn(FieldId field_id) const {
-        if (segment_chunk_reader_.snapshot_ != nullptr) {
-            return segment_chunk_reader_.snapshot_
-                ->GetDataScanResources(field_id)
-                .first;
+        if (snapshot_ != nullptr) {
+            return snapshot_->GetDataScanResources(field_id).first;
         }
-        return segment_chunk_reader_.segment_->GetDataScanResources(field_id)
-            .first;
+        return segment_->GetDataScanResources(field_id).first;
     }
 
     int64_t
@@ -911,7 +910,7 @@ class PhyCompareFilterExpr : public Expr {
     VectorPtr
     ExecCompareExprDispatcher(OpType op, EvalCtx& context);
 
-    template <typename OpType>
+    template <typename T, typename U, typename OpType>
     VectorPtr
     ExecCompareWithValueLookup(OpType op, EvalCtx& context);
 
@@ -950,12 +949,13 @@ class PhyCompareFilterExpr : public Expr {
     int64_t right_current_chunk_pos_{0};
     int64_t current_chunk_id_{0};
     int64_t current_chunk_pos_{0};
-    segcore::ColumnScanState left_column_scan_state_;
-    segcore::ColumnScanState right_column_scan_state_;
     // Chunk cursors remain for the legacy fallback. Scan position is always a
     // segment offset so it does not depend on a later published chunk layout.
     int64_t current_data_global_pos_{0};
 
+    const segcore::SegmentInternalInterface* segment_;
+    const segcore::SegmentReadSnapshot* snapshot_{nullptr};
+    // Growing and remaining legacy operations alone use Chunk compatibility.
     const segcore::SegmentChunkReader segment_chunk_reader_;
     int64_t batch_size_;
     std::shared_ptr<const milvus::expr::CompareExpr> expr_;

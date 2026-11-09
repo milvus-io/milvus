@@ -31,6 +31,7 @@
 #include "expr/ITypeExpr.h"
 #include "exec/expression/ColumnExpr.h"
 #include "exec/expression/CompareExpr.h"
+#include "exec/operator/search-groupby/GroupMembership.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
 #include "query/ExecPlanNodeVisitor.h"
@@ -334,6 +335,10 @@ class ReaderSegment : public ChunkedSegmentSealedImpl {
         EXPECT_FALSE(forbid_live_column_read);
         return Column(field);
     }
+    bool
+    HasFieldData(FieldId) const override {
+        return true;
+    }
     int64_t
     num_chunk_data(FieldId field, OpContext* = nullptr) const override {
         return Column(field)->num_chunks();
@@ -539,6 +544,43 @@ class SegmentChunkReaderStringTest
                 << row;
         }
     }
+    std::unique_ptr<exec::PhyColumnExpr>
+    MakeExpression(int64_t batch = 17) {
+        auto logical = std::make_shared<expr::ColumnExpr>(
+            expr::ColumnInfo(field_, DataType::VARCHAR));
+        return std::make_unique<exec::PhyColumnExpr>(
+            std::vector<std::shared_ptr<exec::Expr>>{},
+            logical,
+            "direct column access",
+            nullptr,
+            segment_.get(),
+            expected_.size(),
+            batch);
+    }
+    std::shared_ptr<ColumnVector>
+    Evaluate(exec::PhyColumnExpr& expression,
+             int64_t start,
+             exec::OffsetVector* offsets = nullptr) {
+        exec::EvalCtx context(nullptr);
+        context.set_offset_input(offsets);
+        VectorPtr result;
+        expression.Eval(context, result);
+        auto values = std::dynamic_pointer_cast<ColumnVector>(result);
+        EXPECT_NE(values, nullptr);
+        if (!values) {
+            return nullptr;
+        }
+        for (int64_t i = 0; i < values->size(); ++i) {
+            const auto row = offsets ? (*offsets)[i] : start + i;
+            EXPECT_EQ(values->ValidAt(i), expected_[row].has_value()) << row;
+            if (expected_[row]) {
+                EXPECT_EQ(values->RawAsValues<std::string>()[i],
+                          *expected_[row])
+                    << row;
+            }
+        }
+        return values;
+    }
     FieldId field_{0};
     FieldId other_field_{0};
     SchemaPtr schema_;
@@ -656,35 +698,41 @@ TYPED_TEST(SegmentChunkReaderScalarTest,
             ReaderSegment segment(schema, column);
             ReaderSnapshot snapshot(column);
             segment.forbid_live_column_read = true;
-            SegmentChunkReader reader(nullptr, &segment, 17);
-            reader.SetSnapshot(&snapshot);
-            ColumnScanState scan_state;
-            int64_t chunk = 0, pos = 0;
+            auto logical = std::make_shared<expr::ColumnExpr>(
+                expr::ColumnInfo(field, TypeParam::TypeKind));
+            exec::PhyColumnExpr expression(
+                {}, logical, "direct scalar", nullptr, &segment, 17, 4);
+            expression.SetSnapshot(&snapshot);
+            exec::EvalCtx context(nullptr);
+            const auto check = [&](int64_t start,
+                                   exec::OffsetVector* offsets = nullptr) {
+                context.set_offset_input(offsets);
+                VectorPtr result;
+                expression.Eval(context, result);
+                const auto values =
+                    std::dynamic_pointer_cast<ColumnVector>(result);
+                ASSERT_NE(values, nullptr);
+                for (int64_t i = 0; i < values->size(); ++i) {
+                    const auto row = offsets ? (*offsets)[i] : start + i;
+                    const auto valid = !nullable || (row != 6 && row != 14);
+                    EXPECT_EQ(values->ValidAt(i), valid);
+                    if (valid) {
+                        EXPECT_EQ(values->template RawAsValues<
+                                      typename TestFixture::T>()[i],
+                                  TestFixture::Value(row));
+                    }
+                }
+            };
             for (int64_t start = 0; start < 17; start += 4) {
                 if (start == 4) {
-                    reader.MoveCursorForMultipleChunk(chunk, pos, field, 4, 4);
+                    expression.MoveCursor();
                     continue;
                 }
-                auto accessor = reader.GetMultipleChunkDataAccessor(
-                    TypeParam::TypeKind, field, chunk, pos, 4, &scan_state);
-                for (int64_t row = start;
-                     row < std::min<int64_t>(start + 4, 17);
-                     ++row) {
-                    this->Check(accessor(), row, nullable);
-                }
+                check(start);
                 if (start == 8) {
-                    const int32_t offsets[]{16, 6, 0, 16, 5, 14};
-                    auto take = reader.GetDataAccessorByOffsets(
-                        TypeParam::TypeKind,
-                        field,
-                        OffsetView::From(offsets, 6));
-                    ASSERT_TRUE(take);
+                    exec::OffsetVector offsets{16, 6, 0, 16, 5, 14};
                     const auto pins_before = stats->pins;
-                    for (int i = 0; i < 6; ++i) {
-                        this->Check(take(i), offsets[i], nullable);
-                    }
-                    // CurrentCell preserves the legacy consecutive-chunk pin
-                    // pattern, rather than eagerly pinning every input Cell.
+                    check(0, &offsets);
                     EXPECT_EQ(stats->pins - pins_before, 6);
                 }
             }
@@ -695,7 +743,7 @@ TYPED_TEST(SegmentChunkReaderScalarTest,
             EXPECT_LE(stats->largest_scan, 4);
             EXPECT_EQ(stats->legacy_spans, 0);
             EXPECT_EQ(stats->pins, cursor_owns_pin ? 8 : 10);
-            EXPECT_EQ(snapshot.column_reads, 2);
+            EXPECT_EQ(snapshot.column_reads, 1);
         }
     }
 }
@@ -711,77 +759,54 @@ TYPED_TEST(SegmentChunkReaderScalarTest,
     auto column = this->MakeColumn((*schema)[field], {5, 0, 3, 9}, stats);
     ASSERT_NE(column, nullptr);
     ReaderSegment segment(schema, column);
-    SegmentChunkReader reader(nullptr, &segment, 17);
-    ColumnScanState scan_state(ScanPinPolicy::CursorOwned);
-    int64_t chunk = 0, pos = 0;
-    auto accessor = reader.GetMultipleChunkDataAccessor(
-        TypeParam::TypeKind, field, chunk, pos, 2, &scan_state);
-    for (int64_t row = 0; row < 17; ++row) {
-        this->Check(accessor(), row, true);
-    }
+    const auto groups = exec::BuildGroupOffsets<typename TestFixture::T>(
+        nullptr,
+        segment,
+        field,
+        17,
+        {TestFixture::Value(0), std::nullopt},
+        nullptr);
+    ASSERT_TRUE(groups.has_value());
+    EXPECT_EQ((*groups)[1], (std::vector<int64_t>{6, 14}));
     EXPECT_EQ(stats->scans, 1);
     EXPECT_EQ(stats->pins, 3);
     EXPECT_EQ(stats->legacy_spans, 0);
     column->ManualEvictCache();
     EXPECT_TRUE(this->lifetimes_[0].expired());
     EXPECT_TRUE(this->lifetimes_[2].expired());
-    EXPECT_FALSE(this->lifetimes_[3].expired());
-    accessor = {};
-    scan_state = {};
-    column->ManualEvictCache();
     EXPECT_TRUE(this->lifetimes_[3].expired());
 }
 
 TEST_P(SegmentChunkReaderStringTest, SmallWindowsDoNotRebuildWholeChunkViews) {
-    SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
-    int64_t chunk = 0, pos = 0;
-    constexpr int64_t batch = 17;
-    ColumnScanState scan_state;
-    for (int64_t start = 0; start < expected_.size(); start += batch) {
-        const auto count = std::min<int64_t>(batch, expected_.size() - start);
-        auto accessor = reader.GetMultipleChunkDataAccessor(
-            DataType::VARCHAR, field_, chunk, pos, count, &scan_state);
-        for (int64_t i = 0; i < count; ++i) {
-            Check(accessor(), start + i);
-        }
-        EXPECT_EQ(segment_->num_rows_until_chunk(field_, chunk) + pos,
-                  start + count);
+    auto expression = MakeExpression();
+    for (int64_t start = 0; start < expected_.size(); start += 17) {
+        Evaluate(*expression, start);
     }
-    // The old accessor constructed 8192 views for each 17-row expression
-    // window. Count materialized rows, not timing, to catch that amplification.
     EXPECT_EQ(stats_->legacy_view_rows, 0);
     EXPECT_EQ(stats_->scanned_rows, expected_.size());
-    EXPECT_LE(stats_->largest_scan, batch);
+    EXPECT_LE(stats_->largest_scan, 17);
     EXPECT_EQ(stats_->scans, 1);
-    // ResultOwned pins each bounded batch: 484 windows plus two Cell splits.
     EXPECT_EQ(stats_->pins, CursorOwnsPin() ? 3 : 486);
 }
 
 TEST_P(SegmentChunkReaderStringTest, StringAccessorsUseBoundSnapshot) {
     ReaderSnapshot snapshot(column_);
+    auto expression = MakeExpression(2);
+    expression->SetSnapshot(&snapshot);
     segment_->forbid_live_column_read = true;
+    for (int64_t row = 0; row < 8192; row += 2) {
+        expression->MoveCursor();
+    }
+    Evaluate(*expression, 8192);
+    Evaluate(*expression, 8194);
     SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
     reader.SetSnapshot(&snapshot);
-    ColumnScanState scan_state;
-    int64_t chunk = 1, pos = 0;
-    for (int64_t row = 8192; row < 8196; row += 2) {
-        auto scan = reader.GetMultipleChunkDataAccessor(
-            DataType::VARCHAR, field_, chunk, pos, 2, &scan_state);
-        Check(scan(), row);
-        Check(scan(), row + 1);
-    }
     auto chunk_accessor =
         reader.GetChunkDataAccessor(DataType::VARCHAR, field_, 1);
     Check(chunk_accessor(0), 8192);
-    const std::vector<int32_t> offsets{8198, 0, 8198};
-    auto take = reader.GetDataAccessorByOffsets(
-        DataType::VARCHAR,
-        field_,
-        OffsetView::From(offsets.data(), offsets.size()));
-    for (int64_t i = 0; i < offsets.size(); ++i) {
-        Check(take(i), offsets[i]);
-    }
-    EXPECT_EQ(snapshot.column_reads, 3);
+    exec::OffsetVector offsets{8198, 0, 8198};
+    Evaluate(*expression, 0, &offsets);
+    EXPECT_EQ(snapshot.column_reads, 2);
     EXPECT_EQ(stats_->scans, 1);
 }
 
@@ -912,12 +937,9 @@ TEST_P(SegmentChunkReaderStringTest,
 }
 
 TEST_P(SegmentChunkReaderStringTest, OneAccessorCanScanAcrossManyWindows) {
-    SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
-    int64_t chunk = 0, pos = 0;
-    auto accessor = reader.GetMultipleChunkDataAccessor(
-        DataType::VARCHAR, field_, chunk, pos, 17);
-    for (int64_t i = 0; i < expected_.size(); ++i) {
-        Check(accessor(), i);
+    auto expression = MakeExpression();
+    for (int64_t start = 0; start < expected_.size(); start += 17) {
+        Evaluate(*expression, start);
     }
     EXPECT_EQ(stats_->scanned_rows, expected_.size());
     EXPECT_EQ(stats_->pins, CursorOwnsPin() ? 3 : 486);
@@ -925,15 +947,9 @@ TEST_P(SegmentChunkReaderStringTest, OneAccessorCanScanAcrossManyWindows) {
 
 TEST_P(SegmentChunkReaderStringTest,
        SparseTakePreservesOrderDuplicatesAndNulls) {
-    SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
-    const std::vector<int32_t> offsets{8192, 8198, 8192, 16, 0, 16, 8218};
-    auto accessor = reader.GetDataAccessorByOffsets(
-        DataType::VARCHAR,
-        field_,
-        OffsetView::From(offsets.data(), offsets.size()));
-    for (int i = 0; i < offsets.size(); ++i) {
-        Check(accessor(i), offsets[i]);
-    }
+    auto expression = MakeExpression();
+    exec::OffsetVector offsets{8192, 8198, 8192, 16, 0, 16, 8218};
+    Evaluate(*expression, 0, &offsets);
     EXPECT_EQ(stats_->takes, 1);
     EXPECT_EQ(stats_->legacy_view_rows, 0);
     EXPECT_EQ(stats_->scanned_rows, 0);
@@ -957,95 +973,73 @@ TEST_P(SegmentChunkReaderStringTest,
 
 TEST_P(SegmentChunkReaderStringTest,
        ScanPinSurvivesEvictionUntilAccessorRelease) {
-    SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
-    int64_t chunk = 1, pos = 0;
-    auto accessor = reader.GetMultipleChunkDataAccessor(
-        DataType::VARCHAR, field_, chunk, pos, 2);
-    auto value = accessor();
+    auto expression = MakeExpression(2);
+    for (int64_t row = 0; row < 8192; row += 2) {
+        expression->MoveCursor();
+    }
+    Evaluate(*expression, 8192);
+    auto result = Evaluate(*expression, 8194);
     column_->ManualEvictCache();
-    EXPECT_FALSE(lifetimes_[1].expired());
-    Check(value, 8192);
-    Check(accessor(), 8193);
-    Check(accessor(), 8194);  // Next window retains the same Scan cursor.
+    EXPECT_EQ(lifetimes_[1].expired(), !CursorOwnsPin());
+    EXPECT_EQ(result->RawAsValues<std::string>()[1], *expected_[8195]);
     EXPECT_EQ(stats_->pins, CursorOwnsPin() ? 1 : 2);
-    accessor = {};
+    expression.reset();
     column_->ManualEvictCache();
     EXPECT_TRUE(lifetimes_[1].expired());
 }
 
 TEST_P(SegmentChunkReaderStringTest,
        PersistentScanUsesConfiguredPinLifetimeAcrossWindows) {
-    SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
-    ColumnScanState scan_state;
-    int64_t chunk = 1, pos = 0;
-    {
-        auto accessor = reader.GetMultipleChunkDataAccessor(
-            DataType::VARCHAR, field_, chunk, pos, 2, &scan_state);
-        Check(accessor(), 8192);
-        Check(accessor(), 8193);
+    auto expression = MakeExpression(2);
+    for (int64_t row = 0; row < 8192; row += 2) {
+        expression->MoveCursor();
     }
-    // The startup setting is captured once per Scan, even if the global value
-    // is changed before the next window. TearDown restores the original value.
+    Evaluate(*expression, 8192);
+    // Scan captures its policy once, not once per expression window.
     SegcoreConfig::default_config().set_scan_cursor_owns_pin(!CursorOwnsPin());
-    {
-        auto accessor = reader.GetMultipleChunkDataAccessor(
-            DataType::VARCHAR, field_, chunk, pos, 2, &scan_state);
-        Check(accessor(), 8194);
-        Check(accessor(), 8195);
-        column_->ManualEvictCache();
-        EXPECT_FALSE(lifetimes_[1].expired());
-    }
+    Evaluate(*expression, 8194);
     EXPECT_EQ(stats_->pins, CursorOwnsPin() ? 1 : 2);
     EXPECT_EQ(stats_->scans, 1);
-    // Keep the persistent cursor alive while testing the window owner's
-    // release. This fixture cannot reload evicted payload, so eviction is
-    // checked after both windows have been consumed.
     column_->ManualEvictCache();
     EXPECT_EQ(lifetimes_[1].expired(), !CursorOwnsPin());
-    scan_state = {};
+    expression.reset();
     column_->ManualEvictCache();
     EXPECT_TRUE(lifetimes_[1].expired());
 }
 
 TEST_P(SegmentChunkReaderStringTest, TakeOwnsItsPinAfterColumnRelease) {
     const std::vector<int32_t> offsets{8192, 8193};
-    ChunkDataAccessor accessor;
-    {
-        SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
-        accessor = reader.GetDataAccessorByOffsets(
-            DataType::VARCHAR,
-            field_,
-            OffsetView::From(offsets.data(), offsets.size()));
-    }
-    auto value = accessor(0);
+    auto take = column_->Take(
+        nullptr,
+        TakeOptions{OffsetView::From(offsets.data(), offsets.size()),
+                    TargetType::StringView});
+    const auto items = take->Access<std::string_view>();
+    const auto value = items[0];
     column_->ManualEvictCache();
     segment_.reset();
     column_.reset();
     EXPECT_FALSE(lifetimes_[1].expired());
-    Check(value, 8192);
-    Check(accessor(1), 8193);
-    accessor = {};
+    Check(value.is_valid ? data_access_type(*value.value) : std::nullopt, 8192);
+    Check(data_access_type(*items[1].value), 8193);
+    take.reset();
     EXPECT_TRUE(lifetimes_[1].expired());
 }
 
 TEST_P(SegmentChunkReaderStringTest, ReadFailureKeepsItsCode) {
-    SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
+    auto expression = MakeExpression();
     stats_->fail_pin = true;
-    int64_t chunk = 0, pos = 0;
-    auto accessor = reader.GetMultipleChunkDataAccessor(
-        DataType::VARCHAR, field_, chunk, pos, 17);
+    exec::EvalCtx context(nullptr);
+    VectorPtr result;
     try {
-        accessor();
+        expression->Eval(context, result);
         FAIL() << "expected injected scan failure";
     } catch (const SegcoreError& error) {
         EXPECT_EQ(error.get_error_code(), ErrorCode::FileReadFailed);
     }
-    EXPECT_EQ(pos, 0);
-    const int32_t offset = 1;
-    auto take = reader.GetDataAccessorByOffsets(
-        DataType::VARCHAR, field_, OffsetView::From(&offset, 1));
+    exec::OffsetVector offsets{1};
+    context.set_offset_input(&offsets);
     try {
-        take(0);
+        expression->Eval(context, result);
         FAIL() << "expected injected Take failure";
     } catch (const SegcoreError& error) {
         EXPECT_EQ(error.get_error_code(), ErrorCode::FileReadFailed);

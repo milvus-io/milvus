@@ -45,31 +45,6 @@ using data_access_type = std::optional<boost::variant<bool,
 using ChunkDataAccessor = std::function<const data_access_type(int)>;
 using MultipleChunkDataAccessor = std::function<const data_access_type()>;
 
-// One sealed Column consumer owns this handle across complete execution
-// windows of one field and request snapshot. Two consumers of the same field
-// must use separate handles. A default handle does not allocate Scan state.
-class ColumnScanState {
- public:
-    ColumnScanState() = default;
-    explicit ColumnScanState(ScanPinPolicy pin_policy)
-        : pin_policy_(pin_policy) {
-    }
-    ColumnScanState(const ColumnScanState&) = delete;
-    ColumnScanState&
-    operator=(const ColumnScanState&) = delete;
-    ColumnScanState(ColumnScanState&&) noexcept = default;
-    ColumnScanState&
-    operator=(ColumnScanState&&) noexcept = default;
-
- private:
-    friend class SegmentChunkReader;
-    struct State;
-    std::shared_ptr<State> state_;
-    // Continuous consumers can retain the current Cell; expression windows
-    // otherwise capture the configured policy when their Scan is created.
-    std::optional<ScanPinPolicy> pin_policy_;
-};
-
 // Helper to extract a value of type T from data_access_type.
 // For std::string, handles both std::string and std::string_view in the variant.
 // Uses boost::apply_visitor to avoid ADL conflicts between boost::variant::get
@@ -131,23 +106,12 @@ class SegmentChunkReader {
           op_ctx_(op_ctx) {
     }
 
-    // A sequential sealed accessor materializes at most scan_batch_size rows
-    // per window. It may serve multiple windows; consume borrowed values before
-    // advancing it into the next window or Cell.
+    // Legacy sequential value access for Growing only.
     MultipleChunkDataAccessor
     GetMultipleChunkDataAccessor(DataType data_type,
                                  FieldId field_id,
                                  int64_t& current_chunk_id,
-                                 int64_t& current_chunk_pos,
-                                 int64_t scan_batch_size = 1024,
-                                 ColumnScanState* scan_state = nullptr) const;
-
-    // Sealed access over one expression's finite offset input. Both backends
-    // use one Take result; offsets must outlive the accessor.
-    ChunkDataAccessor
-    GetDataAccessorByOffsets(DataType data_type,
-                             FieldId field_id,
-                             OffsetView offsets) const;
+                                 int64_t& current_chunk_pos) const;
 
     ChunkDataAccessor
     GetChunkDataAccessor(DataType data_type,
@@ -356,46 +320,20 @@ class SegmentChunkReader {
     mutable const segcore::SegmentReadSnapshot* snapshot_{nullptr};
 
  private:
-    // Sealed reads prefer the bound request snapshot's published column;
-    // growing / non-pinned paths fall back to the live segment.
-    std::shared_ptr<ChunkedColumnInterface>
-    GetColumn(FieldId field_id) const {
-        return snapshot_ ? snapshot_->GetDataScanResources(field_id).first
-                         : segment_->GetChunkedColumn(field_id);
-    }
-
     template <typename T>
     MultipleChunkDataAccessor
     GetMultipleChunkDataAccessor(FieldId field_id,
                                  int64_t& current_chunk_id,
-                                 int64_t& current_chunk_pos,
-                                 int64_t scan_batch_size,
-                                 ColumnScanState* scan_state) const;
-
-    template <typename T>
-    MultipleChunkDataAccessor
-    GetMultipleChunkScanDataAccessor(
-        FieldId field_id,
-        int64_t& current_chunk_id,
-        int64_t& current_chunk_pos,
-        int64_t scan_batch_size,
-        ColumnScanState* scan_state,
-        std::shared_ptr<ChunkedColumnInterface> column) const;
+                                 int64_t& current_chunk_pos) const;
 
     MultipleChunkDataAccessor
     GetMultipleChunkStringDataAccessor(FieldId field_id,
                                        int64_t& current_chunk_id,
-                                       int64_t& current_chunk_pos,
-                                       int64_t scan_batch_size,
-                                       ColumnScanState* scan_state) const;
+                                       int64_t& current_chunk_pos) const;
 
     template <typename T>
     ChunkDataAccessor
     GetChunkDataAccessor(FieldId field_id, int chunk_id) const;
-
-    template <typename T>
-    ChunkDataAccessor
-    GetDataAccessorByOffsets(FieldId field_id, OffsetView offsets) const;
 
     const int64_t size_per_chunk_;
     milvus::OpContext* op_ctx_;
