@@ -85,7 +85,7 @@ func ResolveIndexBuildReadWindowBytes(params *paramtable.ComponentParam) (int64,
 		if !loonReaderAutoApplies() {
 			return 0, nil
 		}
-		ioThreads, err := ResolveArrowIOThreadPoolCapacity()
+		ioThreads, err := resolveArrowIOThreadPoolCapacity(params)
 		if err != nil {
 			return 0, err
 		}

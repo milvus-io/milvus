@@ -20,6 +20,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -95,13 +96,11 @@ func TestResolveIndexBuildReadWindowBytes(t *testing.T) {
 	pt := newIsolatedParams()
 	key := pt.CommonCfg.IndexBuildReadWindowBytes.Key
 	rangeKey := pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key
-	// the arrow IO pool size is resolved from the global table, like the
-	// storage runtime itself
-	global := paramtable.Get()
-	ioKey := global.CommonCfg.ArrowIOThreadPoolCoefficient.Key
-	defer global.Reset(ioKey)
+	// the arrow IO pool size is resolved from the same table as the window
+	ioKey := pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key
+	ioMaxKey := pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key
 
-	ioThreads, err := ResolveArrowIOThreadPoolCapacity()
+	ioThreads, err := resolveArrowIOThreadPoolCapacity(pt)
 	require.NoError(t, err)
 	autoDefaultRange := min(int64(ioThreads)*2*arrowDefaultRangeSizeLimitBytes, int64(maxIndexBuildReadWindowBytes))
 	autoConfiguredRange := min(int64(ioThreads)*2*(8<<20), int64(maxIndexBuildReadWindowBytes))
@@ -149,10 +148,23 @@ func TestResolveIndexBuildReadWindowBytes(t *testing.T) {
 		withRole(t, typeutil.DataNodeRole)
 		require.NoError(t, pt.Reset(key))
 		require.NoError(t, pt.Reset(rangeKey))
-		require.NoError(t, global.Save(ioKey, "-3"))
-		defer global.Reset(ioKey)
+		require.NoError(t, pt.Save(ioKey, "-3"))
+		defer pt.Reset(ioKey)
 		_, err := ResolveIndexBuildReadWindowBytes(pt)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("auto follows a capped IO pool of the passed table", func(t *testing.T) {
+		withRole(t, typeutil.DataNodeRole)
+		require.NoError(t, pt.Reset(key))
+		require.NoError(t, pt.Reset(rangeKey))
+		require.NoError(t, pt.Save(ioKey, "1"))
+		require.NoError(t, pt.Save(ioMaxKey, "3"))
+		defer pt.Reset(ioKey)
+		defer pt.Reset(ioMaxKey)
+		got, err := ResolveIndexBuildReadWindowBytes(pt)
+		require.NoError(t, err)
+		assert.Equal(t, int64(3)*2*arrowDefaultRangeSizeLimitBytes, got)
 	})
 }
 
@@ -202,8 +214,34 @@ func TestInitLoonReaderConfigAutoWindowOnDataNode(t *testing.T) {
 	})
 	window, err := ResolveIndexBuildReadWindowBytes(pt)
 	require.NoError(t, err)
-	ioThreads, err := ResolveArrowIOThreadPoolCapacity()
+	ioThreads, err := resolveArrowIOThreadPoolCapacity(pt)
 	require.NoError(t, err)
 	assert.Equal(t, min(int64(ioThreads)*2*(16<<20), int64(maxIndexBuildReadWindowBytes)), window)
 	assert.LessOrEqual(t, EffectiveLoonReaderThreadPoolSize(), int32(1))
+}
+
+// TestLoonReaderRangeSizeWatcherSkipsExplicitWindow pins that a change of
+// the arrow read range size only reconfigures the loon reader while the
+// window is automatic: an explicit window does not depend on it.
+func TestLoonReaderRangeSizeWatcherSkipsExplicitWindow(t *testing.T) {
+	paramtable.Init()
+	pt := newIsolatedParams()
+	var calls int
+	mockInit := mockey.Mock(InitLoonReaderConfig).To(func(*paramtable.ComponentParam) error {
+		calls++
+		return nil
+	}).Build()
+	defer mockInit.UnPatch()
+
+	require.NoError(t, pt.Save(pt.CommonCfg.IndexBuildReadWindowBytes.Key, "536870912"))
+	RegisterLoonReaderConfigWatchers(pt, "test")
+
+	calls = 0
+	require.NoError(t, pt.Save(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key, "16777216"))
+	assert.Equal(t, 0, calls, "an explicit window must not be reconfigured on a range size change")
+
+	require.NoError(t, pt.Save(pt.CommonCfg.IndexBuildReadWindowBytes.Key, "-1"))
+	calls = 0
+	require.NoError(t, pt.Save(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key, "8388608"))
+	assert.Equal(t, 1, calls, "an automatic window is re-resolved on a range size change")
 }

@@ -158,7 +158,11 @@ func ResolveArrowCPUThreadPoolCapacity() (int, error) {
 
 // ResolveArrowIOThreadPoolCapacity also determines the storage Tokio blocking-thread limit.
 func ResolveArrowIOThreadPoolCapacity() (int, error) {
-	cfg := &paramtable.Get().CommonCfg
+	return resolveArrowIOThreadPoolCapacity(paramtable.Get())
+}
+
+func resolveArrowIOThreadPoolCapacity(params *paramtable.ComponentParam) (int, error) {
+	cfg := &params.CommonCfg
 	return resolveArrowThreadPoolCapacity(&cfg.ArrowIOThreadPoolCoefficient, &cfg.ArrowIOThreadPoolMaxCapacity, defaultArrowIOThreadPoolCapacity)
 }
 
@@ -299,9 +303,15 @@ func RegisterLoonReaderConfigWatchers(pt *paramtable.ComponentParam, source stri
 	pt.Watch(pt.CommonCfg.IndexBuildReadWindowBytes.Key,
 		config.NewHandler(pt.CommonCfg.IndexBuildReadWindowBytes.Key, handler))
 	// An automatic (-1) read window is sized from the arrow read range size,
-	// so re-resolve it when that changes too.
+	// so re-resolve it when that changes too. An explicit window does not
+	// depend on it, so skip the reconfiguration then.
 	pt.Watch(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key,
-		config.NewHandler("loon-reader-"+pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key, handler))
+		config.NewHandler("loon-reader-"+pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key, func(evt *config.Event) {
+			if pt.CommonCfg.IndexBuildReadWindowBytes.GetAsInt64() != loonReaderAuto {
+				return
+			}
+			handler(evt)
+		}))
 }
 
 func UpdateStorageV2CellTargetSizeBytes(bytes int64) {
