@@ -16,8 +16,10 @@
 
 """Shared setup, data models and assertions for struct enhancement contracts."""
 
+import copy
 import time
 
+import numpy as np
 from base.testbase import TestBase
 from utils.struct_array_data import clips_struct_field
 from utils.utils import gen_collection_name
@@ -36,25 +38,25 @@ class StructArrayRestTestBase(TestBase):
         assert response["code"] == 0, response
         return response.get("data")
 
-    def create_struct_collection(self, nullable):
+    def create_struct_collection(self, nullable, dim=8, capacity=4, extra_fields=()):
         self.name = gen_collection_name("struct_enhance_rest")
+        schema = {
+            "autoID": False,
+            "enableDynamicField": False,
+            "fields": [
+                {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
+                {"fieldName": "normal_vector", "dataType": "FloatVector", "elementTypeParams": {"dim": str(dim)}},
+                *extra_fields,
+            ],
+            "structFields": [clips_struct_field(nullable)],
+        }
+        schema["structFields"][0]["typeParams"]["max_capacity"] = str(capacity)
+        self.schema = schema
         self.assert_success(
             self.collection_client.collection_create(
                 {
                     "collectionName": self.name,
-                    "schema": {
-                        "autoID": False,
-                        "enableDynamicField": False,
-                        "fields": [
-                            {"fieldName": "id", "dataType": "Int64", "isPrimary": True},
-                            {
-                                "fieldName": "normal_vector",
-                                "dataType": "FloatVector",
-                                "elementTypeParams": {"dim": "8"},
-                            },
-                        ],
-                        "structFields": [clips_struct_field(nullable)],
-                    },
+                    "schema": schema,
                     "indexParams": [
                         {"fieldName": field, "indexName": index, "metricType": "L2", "indexType": "FLAT", "params": {}}
                         for field, index in [("normal_vector", "normal"), ("clips[emb]", "element")]
@@ -72,12 +74,28 @@ class StructArrayRestTestBase(TestBase):
                     "collectionName": self.name,
                     "filter": "id >= 0",
                     "limit": 1000,
-                    "outputFields": ["id", "clips", "normal_vector"],
+                    "outputFields": ["*"],
                 }
             )
         )
         assert len(rows) == len(model)
-        assert {row["id"]: row for row in rows} == model
+        expected = copy.deepcopy(model)
+        # REST emits shortest float32 decimals; compare the exact stored values.
+        for row in [*rows, *expected.values()]:
+            for field in self.schema["fields"]:
+                if field["dataType"] == "FloatVector" and row.get(field["fieldName"]) is not None:
+                    row[field["fieldName"]] = np.asarray(row[field["fieldName"]], dtype=np.float32).tolist()
+            for struct in self.schema["structFields"]:
+                for element in row.get(struct["fieldName"]) or []:
+                    for field in struct["fields"]:
+                        if (
+                            field.get("elementDataType") == "FloatVector"
+                            and element.get(field["fieldName"]) is not None
+                        ):
+                            element[field["fieldName"]] = np.asarray(
+                                element[field["fieldName"]], dtype=np.float32
+                            ).tolist()
+        assert {row["id"]: row for row in rows} == expected
 
     def reload_collection(self):
         # Flush has a low default quota. Retry only explicit limiter rejection;

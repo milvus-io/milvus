@@ -35,7 +35,7 @@ class TestStructArraySubfieldEvolution(StructArrayRestTestBase):
         expected: supplied child types and NULL values round trip through REST
         """
         self.create_struct_collection(nullable)
-        rows = make_mutation_rows(nullable)[:12]
+        rows = make_mutation_rows(self.schema)[:12]
         self.assert_success(self.vector_client.vector_insert({"collectionName": self.name, "data": rows}))
         model = {row["id"]: copy.deepcopy(row) for row in rows}
         self.assert_rows(model)
@@ -130,7 +130,7 @@ class TestStructArraySubfieldEvolution(StructArrayRestTestBase):
         expected: a parameter error, unchanged full data and successful corrected retry
         """
         self.create_struct_collection(True)
-        rows = make_mutation_rows(True)[:12]
+        rows = make_mutation_rows(self.schema)[:12]
         self.assert_success(self.vector_client.vector_insert({"collectionName": self.name, "data": rows}))
         model = {row["id"]: copy.deepcopy(row) for row in rows}
         good = [
@@ -171,7 +171,7 @@ class TestStructArraySubfieldEvolution(StructArrayRestTestBase):
         expected: nullable-parent validation without schema or row mutation
         """
         self.create_struct_collection(True)
-        rows = make_mutation_rows(True)[:12]
+        rows = make_mutation_rows(self.schema)[:12]
         self.assert_success(self.vector_client.vector_insert({"collectionName": self.name, "data": rows}))
         model = {row["id"]: row for row in rows}
         before = self.describe_schema_and_indexes()
@@ -194,7 +194,7 @@ class TestStructArrayFieldProperties(StructArrayRestTestBase):
         expected: failed alteration is non-mutating and the allowed description is decoded by describe
         """
         self.create_struct_collection(True)
-        rows = make_mutation_rows(True)[:12]
+        rows = make_mutation_rows(self.schema)[:12]
         self.assert_success(self.vector_client.vector_insert({"collectionName": self.name, "data": rows}))
         model = {row["id"]: row for row in rows}
         before = self.describe_schema_and_indexes()

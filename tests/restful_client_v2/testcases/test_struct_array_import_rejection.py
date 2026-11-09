@@ -31,8 +31,13 @@ class TestStructArrayImportRejection(StructArrayRestTestBase):
         method: submit backup and snapshot imports; compare jobs and complete live data
         expected: the documented error is returned before job admission, without changing data
         """
-        self.create_struct_collection(True)
-        rows = make_mutation_rows(True)
+        self.create_struct_collection(
+            True,
+            dim=24,
+            capacity=3,
+            extra_fields=[{"fieldName": "tenant", "dataType": "Int32"}],
+        )
+        rows = make_mutation_rows(self.schema)
         self.assert_success(self.vector_client.vector_insert({"collectionName": self.name, "data": rows}))
         model = {row["id"]: row for row in rows}
         before = self.assert_success(self.import_job_client.list_import_jobs({"collectionName": self.name}))
@@ -67,7 +72,7 @@ class TestStructArrayImportRejection(StructArrayRestTestBase):
         expected: job admission succeeds, schema validation fails and existing rows remain intact
         """
         self.create_struct_collection(True)
-        rows = make_mutation_rows(True)
+        rows = make_mutation_rows(self.schema)
         self.assert_success(self.vector_client.vector_insert({"collectionName": self.name, "data": rows}))
         model = {row["id"]: row for row in rows}
 

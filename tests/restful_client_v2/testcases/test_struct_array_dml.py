@@ -259,7 +259,7 @@ class TestStructArrayPartialUpdate(StructArrayRestTestBase):
         expected: actual struct-op restriction without partial writes; corrected upsert succeeds
         """
         self.create_struct_collection(True)
-        rows = make_mutation_rows(True)[:12]
+        rows = make_mutation_rows(self.schema)[:12]
         self.assert_success(self.vector_client.vector_insert({"collectionName": self.name, "data": rows}))
         model = {row["id"]: row for row in rows}
         incoming = copy.deepcopy(rows[2:5])
