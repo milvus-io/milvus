@@ -750,15 +750,33 @@ TYPED_TEST(SegmentChunkReaderScalarTest,
     auto column = this->MakeColumn((*schema)[field], {5, 0, 3, 9}, stats);
     ASSERT_NE(column, nullptr);
     ReaderSegment segment(schema, column);
-    const auto groups = exec::BuildGroupOffsets<typename TestFixture::T>(
-        nullptr,
-        segment,
-        field,
-        17,
-        {TestFixture::Value(0), std::nullopt},
-        nullptr);
-    ASSERT_TRUE(groups.has_value());
-    EXPECT_EQ((*groups)[1], (std::vector<int64_t>{6, 14}));
+    if constexpr (std::is_floating_point_v<typename TestFixture::T>) {
+        // Floating-point fields are scannable but are not group-by keys.
+        auto cursor = column->Scan(
+            nullptr,
+            ScanOptions::ForData(0,
+                                 TargetTypeOf<typename TestFixture::T>(),
+                                 ScanPinPolicy::CursorOwned));
+        ASSERT_NE(cursor, nullptr);
+        ScanBatch batch;
+        int64_t rows = 0;
+        while (cursor->Next(2, ScanReadMode::DataAndValidity, &batch)) {
+            EXPECT_EQ(batch.row_id_start, rows);
+            EXPECT_LE(batch.size, 2);
+            rows += batch.size;
+        }
+        EXPECT_EQ(rows, 17);
+    } else {
+        const auto groups = exec::BuildGroupOffsets<typename TestFixture::T>(
+            nullptr,
+            segment,
+            field,
+            17,
+            {TestFixture::Value(0), std::nullopt},
+            nullptr);
+        ASSERT_TRUE(groups.has_value());
+        EXPECT_EQ((*groups)[1], (std::vector<int64_t>{6, 14}));
+    }
     EXPECT_EQ(stats->scans, 1);
     EXPECT_EQ(stats->pins, 3);
     EXPECT_EQ(stats->legacy_spans, 0);
