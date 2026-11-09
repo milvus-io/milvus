@@ -17,6 +17,7 @@ package dql
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"testing"
 
@@ -28,8 +29,10 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/agg"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	queryreducestream "github.com/milvus-io/milvus/internal/util/queryutil/reduce_stream"
+	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
 	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -535,6 +538,157 @@ func TestQueryTaskUnlimitedStreamEnforcesMaxOutputSize(t *testing.T) {
 	require.ErrorContains(t, task.Execute(t.Context()), "maxOutputSize")
 	require.Equal(t, 1, stream.closeCalls)
 	require.Empty(t, task.resultBuf.Collect())
+}
+
+func TestQueryTaskGroupedOrderByBatchParity(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 201, Name: "region", DataType: schemapb.DataType_Int64, Nullable: true},
+		{FieldID: 202, Name: "city", DataType: schemapb.DataType_Int64},
+		{FieldID: 203, Name: "value", DataType: schemapb.DataType_Int64, Nullable: true},
+	}}
+	for _, operation := range []string{"distinct", "count", "sum", "avg", "min", "max"} {
+		for _, ascending := range []bool{false, true} {
+			for _, chunkBytes := range []int{1, 1 << 20} {
+				for _, offset := range []int64{0, 1, 10} {
+					t.Run(fmt.Sprintf("%s/asc=%v/bytes=%d/offset=%d", operation, ascending, chunkBytes, offset), func(t *testing.T) {
+						var operators []agg.AggregateBase
+						names := []string{"city", "region"} // Output order differs from the raw group layout.
+						if operation != "distinct" {
+							name := operation + "(value)"
+							var err error
+							operators, err = agg.NewAggregate(operation, 203, name, schemapb.DataType_Int64)
+							require.NoError(t, err)
+							names = append(names, name)
+						}
+						outputMap, err := agg.NewAggregationFieldMap(names, []string{"region", "city"}, operators)
+						require.NoError(t, err)
+						direction := "desc"
+						if ascending {
+							direction = "asc"
+						}
+						orderFields, err := translateOrderByFields([]string{"region:" + direction}, []int64{201, 202}, schema)
+						require.NoError(t, err)
+						request := &internalpb.RetrieveRequest{
+							Limit: 2 + offset, GroupByFieldIds: []int64{201, 202},
+							Aggregates: agg.AggregatesToPB(operators), OrderByFields: orderFields,
+						}
+						var batches []*internalpb.RetrieveResults
+						var shards []queryreducestream.ReduceStream
+						var workers []*fakeLegacyQueryStream
+						for shard := 0; shard < 2; shard++ {
+							var children []queryreducestream.ReduceStream
+							for child := 0; child < 2; child++ {
+								n := int64(1 + shard*2 + child)
+								region := makeTestInt64Field(201, "region", []int64{1, 1, 2, 0})
+								typeutil.SetFieldDataValidData(region, []bool{true, true, true, false})
+								fields := []*schemapb.FieldData{region, makeTestInt64Field(202, "city", []int64{2, 1, 1, 1})}
+								for _, operator := range operators {
+									values := makeTestInt64Field(203, "value", []int64{10 * n, 20 * n, 0, 0})
+									typeutil.SetFieldDataValidData(values, []bool{true, true, true, false})
+									if operator.ToPB().GetOp() == planpb.AggregateOp_count {
+										values = makeTestInt64Field(203, "count", []int64{n + 1, n + 2, 1, 0})
+									}
+									fields = append(fields, values)
+								}
+								batch := &internalpb.RetrieveResults{Status: merr.Success(), FieldsData: fields, AllRetrieveCount: n}
+								batches = append(batches, proto.Clone(batch).(*internalpb.RetrieveResults))
+								chunks, err := queryreducestream.SplitRetrieveResult(batch, chunkBytes)
+								require.NoError(t, err)
+								worker := &fakeLegacyQueryStream{}
+								for _, chunk := range chunks {
+									worker.recv = append(worker.recv, fakeLegacyQueryRecv{chunk: chunk})
+								}
+								workers = append(workers, worker)
+								children = append(children, worker)
+							}
+							stream, err := queryreducestream.NewShardReduceStream(request, schema, children, chunkBytes)
+							require.NoError(t, err)
+							shards = append(shards, stream)
+						}
+						stream, err := queryreducestream.NewReduceStream(request, schema, shards, chunkBytes)
+						require.NoError(t, err)
+						t.Cleanup(func() { require.NoError(t, stream.Close()) })
+						legacy := &fakeLegacyQueryClient{queryResult: &queryclient.LegacyQueryResult{Stream: stream}}
+						task := newQueryViewQueryTask(t, legacy, request.Limit)
+						task.GroupByFieldIds, task.Aggregates, task.OrderByFields = request.GroupByFieldIds, request.Aggregates, request.OrderByFields
+						task.schema.CollectionSchema = schema
+						require.NoError(t, task.Execute(t.Context()))
+						require.True(t, legacy.lastQueryRequest.AllowStreaming)
+						output := task.resultBuf.Collect()
+						require.Len(t, output, 1)
+						require.Equal(t, 4, queryutil.GetRowCount(output[0])) // Never truncate before ordering.
+						require.EqualValues(t, 10, output[0].GetAllRetrieveCount())
+						require.Equal(t, request.Limit, task.GetLimit())
+						for _, worker := range workers {
+							require.Equal(t, len(worker.recv), worker.next)
+							require.Equal(t, 1, worker.closeCalls)
+						}
+						ordering, err := orderby.ConvertFromPlanOrderByFields(orderFields, schema)
+						require.NoError(t, err)
+						pipeline, err := NewQueryPipeline(schema, 2, offset, 0, ordering, request.GroupByFieldIds, request.Aggregates, outputMap, nil)
+						require.NoError(t, err)
+						want, err := pipeline.Execute(t.Context(), batches)
+						require.NoError(t, err)
+						got, err := pipeline.Execute(t.Context(), output)
+						require.NoError(t, err)
+						require.True(t, proto.Equal(want, got), "batch=%v streaming=%v", want, got)
+					})
+				}
+			}
+		}
+	}
+}
+
+func TestQueryTaskGroupedOrderByDrainErrors(t *testing.T) {
+	for _, tail := range []error{io.EOF, io.ErrUnexpectedEOF, context.Canceled} {
+		stream := &fakeLegacyQueryStream{recv: []fakeLegacyQueryRecv{
+			{chunk: newFinalQueryChunk([]int64{3, 2}, 10)},
+			{chunk: newFinalQueryChunk([]int64{1}, 20)},
+			{err: tail},
+		}}
+		for _, item := range stream.recv[:2] {
+			item.chunk.Ids = nil
+			item.chunk.FieldsData[0].FieldId = 100
+		}
+		legacy := &fakeLegacyQueryClient{queryResult: &queryclient.LegacyQueryResult{Stream: stream}}
+		task := newQueryViewQueryTask(t, legacy, 1)
+		task.GroupByFieldIds = []int64{100}
+		task.OrderByFields = []*planpb.OrderByField{{FieldId: 100, Ascending: true}}
+		err := task.Execute(t.Context())
+		if tail == io.EOF {
+			require.NoError(t, err)
+			require.Equal(t, []int64{3, 2, 1}, task.resultBuf.Collect()[0].GetFieldsData()[0].GetScalars().GetLongData().GetData())
+		} else {
+			require.ErrorIs(t, err, tail)
+			require.Empty(t, task.resultBuf.Collect())
+		}
+		require.Equal(t, 3, stream.next)
+		require.Equal(t, 1, stream.closeCalls)
+		require.Equal(t, 1, legacy.queryCalled)
+	}
+}
+
+func TestQueryTaskGroupedOrderByEmptyStream(t *testing.T) {
+	task := newQueryViewQueryTask(t, nil, 1)
+	task.GroupByFieldIds = []int64{101}
+	task.OrderByFields = []*planpb.OrderByField{{FieldId: 101, Ascending: true}}
+	stream, err := queryreducestream.NewReduceStream(task.RetrieveRequest, testSchema(), nil, 1)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, stream.Close()) })
+	output, err := task.consumeQueryResultStream(stream)
+	require.NoError(t, err)
+	require.Zero(t, queryutil.GetRowCount(output))
+	outputMap, err := agg.NewAggregationFieldMap([]string{"val"}, []string{"val"}, nil)
+	require.NoError(t, err)
+	ordering, err := orderby.ConvertFromPlanOrderByFields(task.OrderByFields, testSchema())
+	require.NoError(t, err)
+	pipeline, err := NewQueryPipeline(testSchema(), 1, 0, 0, ordering, task.GroupByFieldIds, nil, outputMap, nil)
+	require.NoError(t, err)
+	result, err := pipeline.Execute(t.Context(), []*internalpb.RetrieveResults{output})
+	require.NoError(t, err)
+	require.Len(t, result.GetFieldsData(), 1)
+	require.Empty(t, result.GetFieldsData()[0].GetScalars().GetLongData().GetData())
 }
 
 func TestQueryTaskConsumesElementChunks(t *testing.T) {

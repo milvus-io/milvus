@@ -293,9 +293,9 @@ func SupportsQueryStream(req *internalpb.RetrieveRequest) bool {
 	}
 	if len(req.GetOrderByFields()) > 0 {
 		// Plain ORDER BY drains and resolves worker versions before sorting.
-		// Group By + ORDER BY remains on Batch. Shared Query validation
+		// Group By + ORDER BY merges all groups before Proxy sorts them. Shared Query validation
 		// requires an explicit limit for ORDER BY in either reduction mode.
-		return req.GetLimit() > 0 && len(req.GetGroupByFieldIds()) == 0 && len(req.GetAggregates()) == 0
+		return req.GetLimit() > 0 && (len(req.GetGroupByFieldIds()) > 0 || len(req.GetAggregates()) == 0)
 	}
 	if len(req.GetGroupByFieldIds()) > 0 {
 		return true

@@ -1395,6 +1395,10 @@ func (t *QueryTask) consumeQueryResultStream(stream queryreducestream.ReduceStre
 	var outputSize int64
 	// The internal limit already includes the offset; the pipeline slices the page once.
 	limit := t.GetLimit()
+	if len(t.GetGroupByFieldIds()) > 0 && len(t.GetOrderByFields()) > 0 {
+		// Grouped Chunks are unordered. Retain every group for final ordering and pagination.
+		limit = typeutil.Unlimited
+	}
 	// ORDER BY can separate duplicate PKs. Drain finalized vchannel candidates
 	// so cross-vchannel integrity checks also cover rows beyond the client page.
 	drainOrderBy := len(t.GetOrderByFields()) > 0 && len(t.GetGroupByFieldIds()) == 0

@@ -678,6 +678,20 @@ func TestSupportsQueryStream(t *testing.T) {
 		GroupByFieldIds: []int64{100},
 		OrderByFields:   []*planpb.OrderByField{{FieldId: 100, Ascending: true}},
 	}))
+	for _, aggregates := range [][]*planpb.Aggregate{nil, {{Op: planpb.AggregateOp_sum, FieldId: 101}}} {
+		require.True(t, SupportsQueryStream(&internalpb.RetrieveRequest{
+			Limit: 1, GroupByFieldIds: []int64{100}, Aggregates: aggregates,
+			OrderByFields: []*planpb.OrderByField{{FieldId: 100, Ascending: true}},
+		}))
+	}
+	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{
+		Limit: typeutil.Unlimited, GroupByFieldIds: []int64{100},
+		OrderByFields: []*planpb.OrderByField{{FieldId: 100, Ascending: true}},
+	}))
+	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{
+		Limit: 1, Aggregates: []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}},
+		OrderByFields: []*planpb.OrderByField{{FieldId: 101, Ascending: true}},
+	}))
 	require.True(t, SupportsQueryStream(&internalpb.RetrieveRequest{
 		GroupByFieldIds: []int64{100},
 		Aggregates: []*planpb.Aggregate{
