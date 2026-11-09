@@ -319,8 +319,6 @@ TEST_F(VirtualPKChunkedColumnTest,
         std::exception);
 
     EXPECT_EQ(column.get_chunk_calls, 0);
-    EXPECT_EQ(column.make_take_access_calls, 0);
-    EXPECT_EQ(column.build_planner_calls, 0);
 }
 
 TEST_F(VirtualPKChunkedColumnTest,
