@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
@@ -590,4 +591,19 @@ func (s *Suite) TestProvidersAndCustomResourceGroup() {
 	}, 60*timeUnit, timeUnit, "the default resource group should get its nodes back")
 
 	qn.Stop()
+	// Feature-usage reports still poll a stopped node until QueryCoord removes it.
+	waitCtx, cancel := context.WithTimeout(ctx, 60*timeUnit)
+	defer cancel()
+	s.Require().Eventually(func() bool {
+		resp, err := s.Cluster.MixCoordClient.ListQueryNode(waitCtx, &querypb.ListQueryNodeRequest{})
+		if err != nil || resp.GetStatus() == nil || !merr.Ok(resp.GetStatus()) {
+			return false
+		}
+		for _, node := range resp.GetNodeInfos() {
+			if node.GetID() == qn.GetNodeID() {
+				return false
+			}
+		}
+		return true
+	}, 60*timeUnit, timeUnit, "QueryCoord should remove the stopped QueryNode %d", qn.GetNodeID())
 }
