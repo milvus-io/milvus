@@ -60,7 +60,12 @@ FetchContent_Declare(
         SOURCE_DIR      ${CMAKE_CURRENT_BINARY_DIR}/milvus-storage-src
         BINARY_DIR      ${CMAKE_CURRENT_BINARY_DIR}/milvus-storage-build
         SOURCE_SUBDIR   cpp
-        DOWNLOAD_DIR    ${THIRDPARTY_DOWNLOAD_PATH} )
+        DOWNLOAD_DIR    ${THIRDPARTY_DOWNLOAD_PATH}
+        # EKS Pod Identity / ECS task roles are reachable only through the AWS
+        # container credentials provider. Keep the fix local until the pinned
+        # milvus-storage release includes it.
+        PATCH_COMMAND   git apply --whitespace=nowarn
+                        ${CMAKE_CURRENT_SOURCE_DIR}/aws-container-credentials.patch )
 
 FetchContent_GetProperties( milvus-storage )
 if ( NOT milvus-storage_POPULATED )
