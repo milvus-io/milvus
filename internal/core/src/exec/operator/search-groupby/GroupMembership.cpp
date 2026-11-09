@@ -18,9 +18,11 @@
 
 #include <algorithm>
 #include <memory>
+#include <string_view>
+#include <type_traits>
 #include <unordered_map>
 
-#include "segcore/SegmentChunkReader.h"
+#include "mmap/ChunkedColumnInterface.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/Utils.h"
 
@@ -82,51 +84,52 @@ ScanRawField(milvus::OpContext* op_ctx,
         }
         return true;
     }
-    // Bind the request snapshot to the reader up front; its NumChunkData /
-    // NumRowsUntilChunk / ChunkSize metadata helpers then select the pinned
-    // snapshot or the segment exactly like the accessor below, keeping the
-    // generation-selection logic in one place.
-    segcore::SegmentChunkReader reader(op_ctx, &segment, row_count);
-    reader.SetSnapshot(snapshot);
-    auto raw_chunk_count = reader.NumChunkData(field_id);
-    if (raw_chunk_count == 0 || reader.NumRowsUntilChunk(field_id, 0) != 0) {
+    const auto column = snapshot
+                            ? snapshot->GetDataScanResources(field_id).first
+                            : segment.GetDataScanResources(field_id).first;
+    if (!column) {
         return false;
     }
-    size_t raw_row_count = 0;
-    for (int64_t chunk = 0; chunk < raw_chunk_count; ++chunk) {
-        raw_row_count += reader.ChunkSize(field_id, chunk);
-    }
-    if (raw_row_count < row_count) {
+    column->Prepare(op_ctx);
+    if (column->num_chunks() == 0 || column->GetNumRowsUntilChunk(0) != 0 ||
+        column->NumRows() < row_count) {
         // A partially indexed field may only retain raw data for a suffix of
         // the segment. Do not reinterpret that suffix as logical offset zero.
         return false;
     }
 
-    int64_t chunk_id = 0;
-    int64_t chunk_pos = 0;
-    // This accessor consumes the whole column continuously, so retain each
-    // source Cell until advancing past it, as the legacy Raw reader did.
-    segcore::ColumnScanState scan_state(ScanPinPolicy::CursorOwned);
-    auto accessor =
-        reader.GetMultipleChunkDataAccessor(segment.GetFieldDataType(field_id),
-                                            field_id,
-                                            chunk_id,
-                                            chunk_pos,
-                                            1024,
-                                            &scan_state);
-    for (size_t offset = 0; offset < row_count; ++offset) {
-        if ((offset & 1023) == 0) {
-            segcore::CheckCancellation(op_ctx,
-                                       segment.get_segment_id(),
-                                       field_id.get(),
-                                       "strict group membership");
+    using Value =
+        std::conditional_t<std::is_same_v<T, std::string>, std::string_view, T>;
+    // Retain each Cell across bounded batches, as the legacy Raw reader did.
+    auto cursor =
+        column->Scan(op_ctx,
+                     ScanOptions::ForData(
+                         0, TargetTypeOf<Value>(), ScanPinPolicy::CursorOwned));
+    AssertInfo(cursor != nullptr,
+               "group membership column does not support Scan");
+    ScanBatch batch;
+    int64_t offset = 0;
+    while (offset < row_count) {
+        segcore::CheckCancellation(op_ctx,
+                                   segment.get_segment_id(),
+                                   field_id.get(),
+                                   "strict group membership");
+        const auto count = std::min<int64_t>(1024, row_count - offset);
+        const auto returned =
+            cursor->Next(count, ScanReadMode::DataAndValidity, &batch);
+        AssertInfo(returned && batch.size > 0 && batch.size <= count &&
+                       batch.row_id_start == offset && !batch.values.empty(),
+                   "invalid group membership Scan batch at row {}",
+                   offset);
+        const auto* values = batch.values.template data_as<Value>();
+        for (int64_t i = 0; i < batch.size; ++i) {
+            if (batch.validity && !batch.validity[i]) {
+                visitor(offset + i, GroupKey<T>(std::nullopt));
+            } else {
+                visitor(offset + i, GroupKey<T>(T(values[i])));
+            }
         }
-        auto value = accessor();
-        if (value.has_value()) {
-            visitor(offset, GroupKey<T>(segcore::get_from_variant<T>(value)));
-        } else {
-            visitor(offset, GroupKey<T>(std::nullopt));
-        }
+        offset += batch.size;
     }
     return true;
 }

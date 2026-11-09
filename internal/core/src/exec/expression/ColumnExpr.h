@@ -54,6 +54,8 @@ class PhyColumnExpr : public Expr {
                   int64_t active_count,
                   int64_t batch_size)
         : Expr(expr->type(), std::move(input), name, op_ctx),
+          segment_(segment),
+          active_count_(active_count),
           segment_chunk_reader_(op_ctx, segment, active_count),
           batch_size_(batch_size),
           expr_(expr),
@@ -62,10 +64,10 @@ class PhyColumnExpr : public Expr {
                         expr->GetColumn().field_id_,
                         expr->GetColumn().data_type_,
                         active_count) {
-        if (segment->is_chunked()) {
+        if (segment->type() == SegmentType::Growing && segment->is_chunked()) {
             num_chunk_ = segment_chunk_reader_.NumChunkData(
                 expr_->GetColumn().field_id_);
-        } else {
+        } else if (segment->type() == SegmentType::Growing) {
             num_chunk_ = upper_div(segment_chunk_reader_.active_count_,
                                    segment_chunk_reader_.SizePerChunk());
         }
@@ -80,16 +82,15 @@ class PhyColumnExpr : public Expr {
 
     void
     SetSnapshot(const segcore::SegmentReadSnapshot* snapshot) override {
-        segment_chunk_reader_.SetSnapshot(snapshot);
+        snapshot_ = snapshot;
     }
 
     void
     MoveCursor() override {
         if (!has_offset_input_) {
-            if (HasValueReader()) {
-                value_lookup_current_row_ =
-                    std::min(value_lookup_current_row_ + batch_size_,
-                             segment_chunk_reader_.active_count_);
+            if (HasValueReader() || segment_->type() == SegmentType::Sealed) {
+                current_row_ =
+                    std::min(current_row_ + batch_size_, active_count_);
                 return;
             }
             if (segment_chunk_reader_.segment_->is_chunked()) {
@@ -112,8 +113,8 @@ class PhyColumnExpr : public Expr {
  private:
     int64_t
     GetCurrentRows() const {
-        if (HasValueReader()) {
-            return value_lookup_current_row_;
+        if (HasValueReader() || segment_->type() == SegmentType::Sealed) {
+            return current_row_;
         }
         if (segment_chunk_reader_.segment_->is_chunked()) {
             return segment_chunk_reader_.NumRowsUntilChunk(
@@ -175,9 +176,13 @@ class PhyColumnExpr : public Expr {
     int64_t num_chunk_{0};
     int64_t current_chunk_id_{0};
     int64_t current_chunk_pos_{0};
-    int64_t value_lookup_current_row_{0};
-
-    segcore::ColumnScanState column_scan_state_;
+    int64_t current_row_{0};
+    const segcore::SegmentInternalInterface* segment_;
+    const int64_t active_count_;
+    const segcore::SegmentReadSnapshot* snapshot_{nullptr};
+    std::shared_ptr<ChunkedColumnInterface> data_column_;
+    ScanResult scan_cursor_;
+    // Only Growing still uses the Chunk-position compatibility reader.
     const segcore::SegmentChunkReader segment_chunk_reader_;
     int64_t batch_size_;
     std::shared_ptr<const milvus::expr::ColumnExpr> expr_;
