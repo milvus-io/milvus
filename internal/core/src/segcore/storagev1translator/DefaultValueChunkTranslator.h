@@ -87,10 +87,6 @@ class DefaultValueChunkTranslator
     static constexpr int64_t kTargetCellBytes = 64 * 1024;  // 64KB
 
  private:
-    // Materialize views or per-cell buffers without changing their ownership.
-    CellResults
-    load_cells(const std::vector<cachinglayer::cid_t>& cids);
-
     // Build a ChunkBuffer for the given number of rows
     // Parent struct row validity of a backfilled struct sub-field row.
     bool
