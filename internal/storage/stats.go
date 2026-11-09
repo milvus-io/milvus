@@ -55,7 +55,7 @@ type PkStatsConfig struct {
 	Capacity              int64
 	BloomFilterType       string
 	MaxBloomFalsePositive float64
-	// UseDeferredBloomFilter builds a BlockedBloomFilter sized by the PKs actually added, at serialization.
+	// UseDeferredBloomFilter lets PkStatsCollector size a BlockedBloomFilter at serialization.
 	// Capacity then only hints the initial hash cache size. It has no effect on BasicBloomFilter.
 	UseDeferredBloomFilter bool
 }
@@ -151,11 +151,6 @@ func (stats *PrimaryKeyStats) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// ReserveSpace4BF reserves hash cache space when using a deferred BF.
-func (stats *PrimaryKeyStats) ReserveSpace4BF(additional int64) error {
-	return bloomfilter.ReserveSpace(stats.BF, additional)
-}
-
 func (stats *PrimaryKeyStats) UpdateByMsgs(msgs FieldData) {
 	switch schemapb.DataType(stats.PkType) {
 	case schemapb.DataType_Int64:
@@ -244,6 +239,15 @@ func DefaultPkStatsConfig(rowNum int64) PkStatsConfig {
 }
 
 func NewPrimaryKeyStatsWithConfig(fieldID, pkType int64, config PkStatsConfig) (*PrimaryKeyStats, error) {
+	stats, err := newPrimaryKeyStatsMetadata(fieldID, pkType, config)
+	if err != nil {
+		return nil, err
+	}
+	stats.BF = bloomfilter.NewBloomFilterWithType(uint(config.Capacity), config.MaxBloomFalsePositive, config.BloomFilterType)
+	return stats, nil
+}
+
+func newPrimaryKeyStatsMetadata(fieldID, pkType int64, config PkStatsConfig) (*PrimaryKeyStats, error) {
 	if config.Capacity <= 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("zero or negative row num %d", config.Capacity)
 	}
@@ -254,24 +258,10 @@ func NewPrimaryKeyStatsWithConfig(fieldID, pkType int64, config PkStatsConfig) (
 	if config.MaxBloomFalsePositive <= 0 || config.MaxBloomFalsePositive >= 1 {
 		return nil, merr.WrapErrParameterInvalidMsg("invalid bloom false positive rate %v", config.MaxBloomFalsePositive)
 	}
-	var bf bloomfilter.BloomFilterInterface
-	if config.UseDeferredBloomFilter && bfType == bloomfilter.BlockedBF {
-		var err error
-		bf, err = bloomfilter.NewDeferredBlockedBloomFilter(uint(config.Capacity), config.MaxBloomFalsePositive)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		bf = bloomfilter.NewBloomFilterWithType(
-			uint(config.Capacity),
-			config.MaxBloomFalsePositive,
-			config.BloomFilterType)
-	}
 	return &PrimaryKeyStats{
 		FieldID: fieldID,
 		PkType:  pkType,
 		BFType:  bfType,
-		BF:      bf,
 	}, nil
 }
 

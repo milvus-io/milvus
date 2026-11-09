@@ -24,6 +24,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/util/bloomfilter"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -48,6 +50,7 @@ type StatsCollector interface {
 
 // PkStatsCollector collects primary key statistics
 type PkStatsCollector struct {
+	builder      *bloomfilter.BlockedBloomFilterBuilder
 	pkstats      *PrimaryKeyStats
 	collectionID UniqueID // needed for initializing codecs, TODO: remove this
 	schema       *schemapb.CollectionSchema
@@ -60,26 +63,43 @@ func (c *PkStatsCollector) Collect(r Record) error {
 	}
 
 	rows := r.Len()
-	if err := c.pkstats.ReserveSpace4BF(int64(rows)); err != nil {
-		return err
+	if c.builder != nil {
+		if err := c.builder.Reserve(int64(rows)); err != nil {
+			return err
+		}
 	}
 	for i := 0; i < rows; i++ {
 		switch schemapb.DataType(c.pkstats.PkType) {
 		case schemapb.DataType_Int64:
-			pkArray := r.Column(c.pkstats.FieldID).(*array.Int64)
-			pk := &Int64PrimaryKey{
-				Value: pkArray.Value(i),
-			}
-			c.pkstats.Update(pk)
+			values := r.Column(c.pkstats.FieldID).(*array.Int64)
+			c.updatePrimaryKey(NewInt64PrimaryKey(values.Value(i)))
 		case schemapb.DataType_VarChar:
-			pkArray := r.Column(c.pkstats.FieldID).(*array.String)
-			pk := NewVarCharPrimaryKey(pkArray.Value(i))
-			c.pkstats.Update(pk)
+			values := r.Column(c.pkstats.FieldID).(*array.String)
+			c.updatePrimaryKey(NewVarCharPrimaryKey(values.Value(i)))
 		default:
 			panic("invalid data type")
 		}
 	}
 	return nil
+}
+
+func (c *PkStatsCollector) updatePrimaryKey(pk PrimaryKey) {
+	if c.builder == nil {
+		c.pkstats.Update(pk)
+		return
+	}
+
+	c.pkstats.UpdateMinMax(pk)
+	switch pk := pk.(type) {
+	case *Int64PrimaryKey:
+		var data [8]byte
+		common.Endian.PutUint64(data[:], uint64(pk.Value))
+		c.builder.Add(data[:])
+	case *VarCharPrimaryKey:
+		c.builder.AddString(pk.Value)
+	default:
+		panic("invalid data type")
+	}
 }
 
 // Digest serializes the collected primary key statistics, writes them to storage,
@@ -91,24 +111,12 @@ func (c *PkStatsCollector) Digest(
 	allocator allocator.Interface,
 	blobsWriter ChunkedBlobsWriter,
 ) (map[FieldID]*datapb.FieldBinlog, error) {
-	if c.pkstats == nil {
+	sblob, fieldID, err := c.SerializeBlob(rowNum)
+	if err != nil {
+		return nil, err
+	}
+	if sblob == nil {
 		return nil, nil
-	}
-
-	// Serialize PK stats
-	codec := NewInsertCodecWithSchema(&etcdpb.CollectionMeta{
-		ID:     c.collectionID,
-		Schema: c.schema,
-	})
-	sblob, err := codec.SerializePkStats(c.pkstats, rowNum)
-	if err != nil {
-		return nil, err
-	}
-
-	// Get pk field ID
-	pkField, err := typeutil.GetPrimaryFieldSchema(c.schema)
-	if err != nil {
-		return nil, err
 	}
 
 	// Allocate ID for stats blob
@@ -118,7 +126,6 @@ func (c *PkStatsCollector) Digest(
 	}
 
 	// Assign proper path to the blob
-	fieldID := pkField.GetFieldID()
 	sblob.Key = metautil.BuildStatsLogPath(rootPath,
 		c.collectionID, partitionID, segmentID, fieldID, id)
 
@@ -151,11 +158,20 @@ func (c *PkStatsCollector) SerializeBlob(rowNum int64) (*Blob, int64, error) {
 		return nil, 0, nil
 	}
 
+	stats := *c.pkstats
+	if c.builder != nil {
+		bf, err := c.builder.Build()
+		if err != nil {
+			return nil, 0, err
+		}
+		stats.BF = bf
+	}
+
 	codec := NewInsertCodecWithSchema(&etcdpb.CollectionMeta{
 		ID:     c.collectionID,
 		Schema: c.schema,
 	})
-	blob, err := codec.SerializePkStats(c.pkstats, rowNum)
+	blob, err := codec.SerializePkStats(&stats, rowNum)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -180,7 +196,14 @@ func NewPkStatsCollector(
 		return nil, err
 	}
 	var stats *PrimaryKeyStats
-	if config != nil {
+	var builder *bloomfilter.BlockedBloomFilterBuilder
+	if config != nil && config.UseDeferredBloomFilter && bloomfilter.BFTypeFromString(config.BloomFilterType) == bloomfilter.BlockedBF {
+		stats, err = newPrimaryKeyStatsMetadata(pkField.GetFieldID(), int64(pkField.GetDataType()), *config)
+		if err != nil {
+			return nil, err
+		}
+		builder, err = bloomfilter.NewBlockedBloomFilterBuilder(uint(config.Capacity), config.MaxBloomFalsePositive)
+	} else if config != nil {
 		stats, err = NewPrimaryKeyStatsWithConfig(pkField.GetFieldID(), int64(pkField.GetDataType()), *config)
 	} else {
 		stats, err = NewPrimaryKeyStats(pkField.GetFieldID(), int64(pkField.GetDataType()), maxRowNum)
@@ -190,6 +213,7 @@ func NewPkStatsCollector(
 	}
 
 	return &PkStatsCollector{
+		builder:      builder,
 		pkstats:      stats,
 		collectionID: collectionID,
 		schema:       schema,

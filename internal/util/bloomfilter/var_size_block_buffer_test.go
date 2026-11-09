@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package typeutil
+package bloomfilter
 
 import (
 	"fmt"
@@ -27,7 +27,7 @@ import (
 
 func TestNewVarSizeBlockBuffer(t *testing.T) {
 	t.Run("zero hint with large threshold", func(t *testing.T) {
-		buf, err := NewVarSizeBlockBuffer[uint64](65536, 0)
+		buf, err := newVarSizeBlockBuffer[uint64](65536, 0)
 		require.NoError(t, err)
 		require.NotNil(t, buf)
 		require.Nil(t, buf.blocks)
@@ -38,7 +38,7 @@ func TestNewVarSizeBlockBuffer(t *testing.T) {
 	})
 
 	t.Run("big positive hint", func(t *testing.T) {
-		buf, err := NewVarSizeBlockBuffer[uint64](12, 20)
+		buf, err := newVarSizeBlockBuffer[uint64](12, 20)
 		require.NoError(t, err)
 		require.NotNil(t, buf)
 		require.Nil(t, buf.blocks)
@@ -49,7 +49,7 @@ func TestNewVarSizeBlockBuffer(t *testing.T) {
 	})
 
 	t.Run("zero hint", func(t *testing.T) {
-		buf, err := NewVarSizeBlockBuffer[uint64](12, 0)
+		buf, err := newVarSizeBlockBuffer[uint64](12, 0)
 		require.Nil(t, err)
 		require.NotNil(t, buf)
 		require.Nil(t, buf.blocks)
@@ -60,7 +60,7 @@ func TestNewVarSizeBlockBuffer(t *testing.T) {
 	})
 
 	t.Run("hint = threshold", func(t *testing.T) {
-		buf, err := NewVarSizeBlockBuffer[uint64](12, 12)
+		buf, err := newVarSizeBlockBuffer[uint64](12, 12)
 		require.Nil(t, err)
 		require.NotNil(t, buf)
 		require.Nil(t, buf.blocks)
@@ -71,7 +71,7 @@ func TestNewVarSizeBlockBuffer(t *testing.T) {
 	})
 
 	t.Run("small positive hint", func(t *testing.T) {
-		buf, err := NewVarSizeBlockBuffer[uint64](65536, 12)
+		buf, err := newVarSizeBlockBuffer[uint64](65536, 12)
 		require.NoError(t, err)
 		require.NotNil(t, buf)
 		require.Len(t, buf.blocks, 1)
@@ -83,7 +83,7 @@ func TestNewVarSizeBlockBuffer(t *testing.T) {
 	})
 
 	t.Run("invalid negative hint", func(t *testing.T) {
-		buf, err := NewVarSizeBlockBuffer[uint64](65536, -12)
+		buf, err := newVarSizeBlockBuffer[uint64](65536, -12)
 		require.Nil(t, buf)
 		require.ErrorIs(t, err, merr.ErrParameterInvalid)
 		require.ErrorContains(t, err, "maxCountHint")
@@ -92,7 +92,7 @@ func TestNewVarSizeBlockBuffer(t *testing.T) {
 	// invalid threshold
 	for _, threshold := range []int64{0, -1} {
 		t.Run(fmt.Sprintf("invalid threshold %d", threshold), func(t *testing.T) {
-			buf, err := NewVarSizeBlockBuffer[uint64](threshold, 0)
+			buf, err := newVarSizeBlockBuffer[uint64](threshold, 0)
 			require.Nil(t, buf)
 			require.ErrorIs(t, err, merr.ErrParameterInvalid)
 			require.ErrorContains(t, err, "threshold")
@@ -100,7 +100,7 @@ func TestNewVarSizeBlockBuffer(t *testing.T) {
 	}
 }
 
-func TestAppend(t *testing.T) {
+func TestVarSizeBlockBufferAppend(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		hint       int64
@@ -148,7 +148,7 @@ func TestAppend(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			buf, err := NewVarSizeBlockBuffer[uint64](4, tc.hint)
+			buf, err := newVarSizeBlockBuffer[uint64](4, tc.hint)
 			require.NoError(t, err)
 
 			for i, val := range tc.values {
@@ -163,7 +163,7 @@ func TestAppend(t *testing.T) {
 	}
 
 	t.Run("reuse existing next block", func(t *testing.T) {
-		buf, err := NewVarSizeBlockBuffer[uint64](4, 0)
+		buf, err := newVarSizeBlockBuffer[uint64](4, 0)
 		require.NoError(t, err)
 		firstBlock := []uint64{1, 2, 3, 4}
 		nextBlock := make([]uint64, 4)
@@ -185,9 +185,9 @@ func TestAppend(t *testing.T) {
 	})
 }
 
-func TestGrow(t *testing.T) {
+func TestVarSizeBlockBufferGrow(t *testing.T) {
 	t.Run("grow with zero count", func(t *testing.T) {
-		buf, err := NewVarSizeBlockBuffer[uint64](4, 0)
+		buf, err := newVarSizeBlockBuffer[uint64](4, 0)
 		require.NoError(t, err)
 		require.Nil(t, buf.blocks)
 
@@ -208,7 +208,7 @@ func TestGrow(t *testing.T) {
 		{name: "count above threshold", count: 7, wantSize: 7},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			buf, err := NewVarSizeBlockBuffer[uint64](4, 0)
+			buf, err := newVarSizeBlockBuffer[uint64](4, 0)
 			require.NoError(t, err)
 
 			buf.grow(tc.count)
@@ -222,7 +222,7 @@ func TestGrow(t *testing.T) {
 	}
 
 	t.Run("preserve existing block and write position", func(t *testing.T) {
-		buf, err := NewVarSizeBlockBuffer[uint64](4, 2)
+		buf, err := newVarSizeBlockBuffer[uint64](4, 2)
 		require.NoError(t, err)
 		firstBlock := buf.blocks[0]
 		firstBlock[0] = 42
@@ -242,9 +242,9 @@ func TestGrow(t *testing.T) {
 	})
 }
 
-func TestAdvanceBlock(t *testing.T) {
+func TestVarSizeBlockBufferAdvanceBlock(t *testing.T) {
 	t.Run("init first block", func(t *testing.T) {
-		buf, err := NewVarSizeBlockBuffer[uint64](4, 0)
+		buf, err := newVarSizeBlockBuffer[uint64](4, 0)
 		require.NoError(t, err)
 		require.Nil(t, buf.blocks)
 		require.Equal(t, -1, buf.idx)
@@ -258,7 +258,7 @@ func TestAdvanceBlock(t *testing.T) {
 	})
 
 	t.Run("reuse existing next block", func(t *testing.T) {
-		buf, err := NewVarSizeBlockBuffer[uint64](4, 0)
+		buf, err := newVarSizeBlockBuffer[uint64](4, 0)
 		require.NoError(t, err)
 		firstBlock := []uint64{1, 2, 3, 4}
 		nextBlock := make([]uint64, 4)
@@ -278,8 +278,8 @@ func TestAdvanceBlock(t *testing.T) {
 	})
 }
 
-func TestLen(t *testing.T) {
-	buf, err := NewVarSizeBlockBuffer[uint64](4, 0)
+func TestVarSizeBlockBufferLen(t *testing.T) {
+	buf, err := newVarSizeBlockBuffer[uint64](4, 0)
 	require.NoError(t, err)
 	require.Zero(t, buf.Len())
 
@@ -288,100 +288,9 @@ func TestLen(t *testing.T) {
 	require.Equal(t, int64(2), buf.Len())
 }
 
-func TestReset(t *testing.T) {
-	t.Run("clear current contents", func(t *testing.T) {
-		buf, err := NewVarSizeBlockBuffer[uint64](4, 0)
-		require.NoError(t, err)
-		require.Zero(t, buf.Len())
-
-		buf.Append(1)
-		buf.Reset()
-
-		require.Len(t, buf.blocks, 1)
-		require.Len(t, buf.blocks[0], 4)
-		require.Equal(t, int64(0), buf.count)
-		require.Equal(t, -1, buf.idx)
-		require.Equal(t, 0, buf.offset)
-		require.Equal(t, int64(0), buf.Len())
-	})
-
-	t.Run("append after resetting empty buffer", func(t *testing.T) {
-		buf, err := NewVarSizeBlockBuffer[uint64](4, 0)
-		require.NoError(t, err)
-
-		buf.Reset()
-
-		require.Empty(t, buf.blocks)
-		require.Equal(t, -1, buf.idx)
-		require.Zero(t, buf.Len())
-		require.Zero(t, buf.offset)
-		require.NotPanics(t, func() {
-			buf.Append(42)
-		})
-		require.Equal(t, int64(1), buf.Len())
-		require.Equal(t, [][]uint64{{42, 0, 0, 0}}, buf.blocks)
-		require.Equal(t, 0, buf.idx)
-		require.Equal(t, 1, buf.offset)
-	})
-
-	t.Run("reuse multiple blocks after reset", func(t *testing.T) {
-		buf, err := NewVarSizeBlockBuffer[uint64](4, 0)
-		require.NoError(t, err)
-		for _, val := range []uint64{1, 2, 3, 4, 5, 6, 7, 8, 9} {
-			buf.Append(val)
-		}
-		require.Len(t, buf.blocks, 3)
-		oldBlocks := append([][]uint64(nil), buf.blocks...)
-
-		buf.Reset()
-
-		require.Zero(t, buf.Len())
-		require.Equal(t, -1, buf.idx)
-		require.Zero(t, buf.offset)
-		require.Len(t, buf.blocks, 3)
-		for _, val := range []uint64{11, 12, 13, 14, 15} {
-			buf.Append(val)
-		}
-
-		require.Len(t, buf.blocks, 3)
-		for i, block := range oldBlocks {
-			require.Same(t, &block[0], &buf.blocks[i][0])
-		}
-		require.Equal(t, []uint64{11, 12, 13, 14}, buf.blocks[0])
-		require.Equal(t, uint64(15), buf.blocks[1][0])
-		require.Equal(t, int64(5), buf.Len())
-		require.Equal(t, 1, buf.idx)
-		require.Equal(t, 1, buf.offset)
-	})
-
-	t.Run("repeated reset", func(t *testing.T) {
-		buf, err := NewVarSizeBlockBuffer[uint64](4, 0)
-		require.NoError(t, err)
-		buf.Append(1)
-		firstBlock := buf.blocks[0]
-
-		buf.Reset()
-		buf.Reset()
-
-		require.Zero(t, buf.Len())
-		require.Equal(t, -1, buf.idx)
-		require.Zero(t, buf.offset)
-		require.Len(t, buf.blocks, 1)
-		require.Same(t, &firstBlock[0], &buf.blocks[0][0])
-
-		buf.Append(2)
-
-		require.Len(t, buf.blocks, 1)
-		require.Equal(t, uint64(2), firstBlock[0])
-		require.Equal(t, int64(1), buf.Len())
-		require.Equal(t, 0, buf.idx)
-		require.Equal(t, 1, buf.offset)
-	})
-}
-
-func TestReserve(t *testing.T) {
+func TestVarSizeBlockBufferReserve(t *testing.T) {
 	t.Run("invalid negative additional", func(t *testing.T) {
-		buf, err := NewVarSizeBlockBuffer[uint64](4, 0)
+		buf, err := newVarSizeBlockBuffer[uint64](4, 0)
 		require.NoError(t, err)
 
 		err = buf.Reserve(-1)
@@ -395,7 +304,6 @@ func TestReserve(t *testing.T) {
 		name          string
 		hint          int64
 		appends       int
-		reset         bool
 		additional    int64
 		wantBlockLens []int
 		wantIdx       int
@@ -423,20 +331,12 @@ func TestReserve(t *testing.T) {
 
 		// remaining comes from a small hint block.
 		{name: "small hint block is not enough", hint: 2, additional: 5, wantBlockLens: []int{2, 4}, wantIdx: 0},
-
-		// remaining comes from blocks retained across Reset.
-		{name: "retained blocks are enough", appends: 5, reset: true, additional: 8, wantBlockLens: []int{4, 4}, wantIdx: -1},
-		{name: "retained blocks, shortfall below threshold", appends: 5, reset: true, additional: 10, wantBlockLens: []int{4, 4, 4}, wantIdx: -1},
-		{name: "retained blocks, shortfall above threshold", appends: 5, reset: true, additional: 15, wantBlockLens: []int{4, 4, 7}, wantIdx: -1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			buf, err := NewVarSizeBlockBuffer[uint64](4, tc.hint)
+			buf, err := newVarSizeBlockBuffer[uint64](4, tc.hint)
 			require.NoError(t, err)
 			for i := 0; i < tc.appends; i++ {
 				buf.Append(uint64(i))
-			}
-			if tc.reset {
-				buf.Reset()
 			}
 			wantLen := buf.Len()
 
@@ -455,7 +355,7 @@ func TestReserve(t *testing.T) {
 	}
 
 	t.Run("repeated reserve does not allocate again", func(t *testing.T) {
-		buf, err := NewVarSizeBlockBuffer[uint64](4, 0)
+		buf, err := newVarSizeBlockBuffer[uint64](4, 0)
 		require.NoError(t, err)
 
 		require.NoError(t, buf.Reserve(10))
@@ -466,7 +366,7 @@ func TestReserve(t *testing.T) {
 	})
 
 	t.Run("appends after reserve do not allocate", func(t *testing.T) {
-		buf, err := NewVarSizeBlockBuffer[uint64](4, 0)
+		buf, err := newVarSizeBlockBuffer[uint64](4, 0)
 		require.NoError(t, err)
 		buf.Append(0)
 		require.NoError(t, buf.Reserve(10))
@@ -486,26 +386,12 @@ func TestReserve(t *testing.T) {
 	})
 }
 
-func TestRemainingCapacity(t *testing.T) {
+func TestVarSizeBlockBufferRemainingCapacity(t *testing.T) {
 	t.Run("empty buffer", func(t *testing.T) {
-		buf, err := NewVarSizeBlockBuffer[uint64](4, 0)
+		buf, err := newVarSizeBlockBuffer[uint64](4, 0)
 		require.NoError(t, err)
 
 		require.Equal(t, 0, buf.remainingCapacity())
-	})
-
-	t.Run("after reset", func(t *testing.T) {
-		buf, err := NewVarSizeBlockBuffer[uint64](4, 2)
-		require.NoError(t, err)
-		for _, val := range []uint64{1, 2, 3} {
-			buf.Append(val)
-		}
-		require.Len(t, buf.blocks, 2)
-
-		buf.Reset()
-
-		// Both retained blocks are fully available again: 2 + 4.
-		require.Equal(t, 6, buf.remainingCapacity())
 	})
 
 	for _, tc := range []struct {
@@ -524,7 +410,7 @@ func TestRemainingCapacity(t *testing.T) {
 		{name: "all blocks full", blockSizes: []int{2, 4, 6}, idx: 2, offset: 6, want: 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			buf, err := NewVarSizeBlockBuffer[uint64](4, 0)
+			buf, err := newVarSizeBlockBuffer[uint64](4, 0)
 			require.NoError(t, err)
 			for i, size := range tc.blockSizes {
 				buf.blocks = append(buf.blocks, make([]uint64, size))
@@ -541,9 +427,9 @@ func TestRemainingCapacity(t *testing.T) {
 	}
 }
 
-func TestBlocks(t *testing.T) {
+func TestVarSizeBlockBufferBlocks(t *testing.T) {
 	t.Run("single element", func(t *testing.T) {
-		buf, err := NewVarSizeBlockBuffer[uint64](4, 0)
+		buf, err := newVarSizeBlockBuffer[uint64](4, 0)
 		require.NoError(t, err)
 		buf.Append(42)
 
@@ -568,7 +454,7 @@ func TestBlocks(t *testing.T) {
 		{name: "small first block", hint: 2, values: []uint64{1, 2, 3}, want: [][]uint64{{1, 2}, {3}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			buf, err := NewVarSizeBlockBuffer[uint64](4, tc.hint)
+			buf, err := newVarSizeBlockBuffer[uint64](4, tc.hint)
 			require.NoError(t, err)
 			for _, val := range tc.values {
 				buf.Append(val)
@@ -583,28 +469,8 @@ func TestBlocks(t *testing.T) {
 		})
 	}
 
-	t.Run("exclude old contents after reset", func(t *testing.T) {
-		buf, err := NewVarSizeBlockBuffer[uint64](4, 0)
-		require.NoError(t, err)
-		for _, val := range []uint64{1, 2, 3, 4, 5} {
-			buf.Append(val)
-		}
-		buf.Reset()
-
-		for range buf.Blocks() {
-			t.Fatal("reset buffer must not yield any blocks")
-		}
-
-		buf.Append(42)
-		var blocks [][]uint64
-		for block := range buf.Blocks() {
-			blocks = append(blocks, block)
-		}
-		require.Equal(t, [][]uint64{{42}}, blocks)
-	})
-
 	t.Run("stop iteration early", func(t *testing.T) {
-		buf, err := NewVarSizeBlockBuffer[uint64](4, 0)
+		buf, err := newVarSizeBlockBuffer[uint64](4, 0)
 		require.NoError(t, err)
 		for _, val := range []uint64{1, 2, 3, 4, 5} {
 			buf.Append(val)

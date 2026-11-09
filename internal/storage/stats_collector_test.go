@@ -277,6 +277,50 @@ func TestBm25StatsCollector_DigestEndToEnd(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestPkStatsCollectorBuilderSelection(t *testing.T) {
+	defaultConfig := DefaultPkStatsConfig(1024)
+	for _, pkType := range []schemapb.DataType{schemapb.DataType_Int64, schemapb.DataType_VarChar} {
+		t.Run(pkType.String(), func(t *testing.T) {
+			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+				FieldID: 100, Name: "pk", DataType: pkType, IsPrimaryKey: true,
+			}}}
+			for _, tc := range []struct {
+				name        string
+				config      *PkStatsConfig
+				wantBuilder bool
+			}{
+				{name: "nil config"},
+				{name: "default config", config: &defaultConfig},
+				{name: "blocked deferred", config: &PkStatsConfig{
+					Capacity: 1024, BloomFilterType: bloomfilter.BlockBFName, MaxBloomFalsePositive: 0.01, UseDeferredBloomFilter: true,
+				}, wantBuilder: true},
+				{name: "blocked eager", config: &PkStatsConfig{
+					Capacity: 1024, BloomFilterType: bloomfilter.BlockBFName, MaxBloomFalsePositive: 0.01,
+				}},
+				{name: "basic deferred flag", config: &PkStatsConfig{
+					Capacity: 1024, BloomFilterType: bloomfilter.BasicBFName, MaxBloomFalsePositive: 0.01, UseDeferredBloomFilter: true,
+				}},
+				{name: "basic eager", config: &PkStatsConfig{
+					Capacity: 1024, BloomFilterType: bloomfilter.BasicBFName, MaxBloomFalsePositive: 0.01,
+				}},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					collector, err := NewPkStatsCollector(1, schema, 1024, tc.config)
+					require.NoError(t, err)
+					require.NotNil(t, collector.pkstats)
+					if tc.wantBuilder {
+						require.NotNil(t, collector.builder)
+						require.Nil(t, collector.pkstats.BF)
+					} else {
+						require.Nil(t, collector.builder)
+						require.NotNil(t, collector.pkstats.BF)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestPkStatsCollectorWithDeferredBloomFilter(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
 		FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true,
@@ -294,13 +338,21 @@ func TestPkStatsCollectorWithDeferredBloomFilter(t *testing.T) {
 		require.NoError(t, collector.Collect(record))
 	}
 	digest := func(t *testing.T, collector *PkStatsCollector, rowNum int64) *PrimaryKeyStats {
+		serialized, fieldID, err := collector.SerializeBlob(rowNum)
+		require.NoError(t, err)
+		require.EqualValues(t, 100, fieldID)
 		var blobs []*Blob
 		writer := func(b []*Blob) error {
 			blobs = append(blobs, b...)
 			return nil
 		}
-		_, err := collector.Digest(1, 1, 2, "/tmp", rowNum, allocator.NewLocalAllocator(1, 100), writer)
+		_, err = collector.Digest(1, 1, 2, "/tmp", rowNum, allocator.NewLocalAllocator(1, 100), writer)
 		require.NoError(t, err)
+		require.Len(t, blobs, 1)
+		require.Equal(t, serialized.Value, blobs[0].Value)
+		repeated, _, err := collector.SerializeBlob(rowNum)
+		require.NoError(t, err)
+		require.Equal(t, serialized.Value, repeated.Value)
 		stats, err := DeserializeStats(blobs)
 		require.NoError(t, err)
 		require.Len(t, stats, 1)
@@ -318,6 +370,8 @@ func TestPkStatsCollectorWithDeferredBloomFilter(t *testing.T) {
 		collector, err := NewPkStatsCollector(1, schema, 100000, &config)
 		require.NoError(t, err)
 
+		require.NotNil(t, collector.builder)
+		require.Nil(t, collector.pkstats.BF)
 		collect(t, collector, 10)
 		stats := digest(t, collector, 10)
 
@@ -332,12 +386,41 @@ func TestPkStatsCollectorWithDeferredBloomFilter(t *testing.T) {
 		require.Equal(t, int64(9), stats.MaxPk.GetValue())
 	})
 
+	t.Run("varchar builder preserves bounds and membership", func(t *testing.T) {
+		varcharSchema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{
+			FieldID: 100, Name: "pk", DataType: schemapb.DataType_VarChar, IsPrimaryKey: true,
+		}}}
+		config := DefaultPkStatsConfig(100000)
+		config.BloomFilterType = bloomfilter.BlockBFName
+		config.UseDeferredBloomFilter = true
+		collector, err := NewPkStatsCollector(1, varcharSchema, 100000, &config)
+		require.NoError(t, err)
+		require.NotNil(t, collector.builder)
+		require.Nil(t, collector.pkstats.BF)
+		builder := array.NewRecordBuilder(memory.DefaultAllocator,
+			arrow.NewSchema([]arrow.Field{{Name: "pk", Type: arrow.BinaryTypes.String}}, nil))
+		defer builder.Release()
+		builder.Field(0).(*array.StringBuilder).AppendValues([]string{"z", "a", "middle"}, nil)
+		record := NewSimpleArrowRecord(builder.NewRecord(), map[FieldID]int{100: 0})
+		defer record.Release()
+		require.NoError(t, collector.Collect(record))
+		stats := digest(t, collector, 3)
+		require.Equal(t, "a", stats.MinPk.GetValue())
+		require.Equal(t, "z", stats.MaxPk.GetValue())
+		require.Equal(t, bloomfilter.NewBloomFilterWithType(3, config.MaxBloomFalsePositive, bloomfilter.BlockBFName).Cap(), stats.BF.Cap())
+		for _, pk := range []string{"z", "a", "middle"} {
+			require.True(t, stats.BF.TestString(pk))
+		}
+	})
+
 	t.Run("collect large batch with deferred bloom filter", func(t *testing.T) {
 		config := DefaultPkStatsConfig(1000000)
 		config.BloomFilterType = bloomfilter.BlockBFName
 		config.UseDeferredBloomFilter = true
 		collector, err := NewPkStatsCollector(1, schema, 1000000, &config)
 		require.NoError(t, err)
+		require.NotNil(t, collector.builder)
+		require.Nil(t, collector.pkstats.BF)
 		collect(t, collector, 100000)
 		stats := digest(t, collector, 100000)
 		require.Equal(t, bloomfilter.NewBloomFilterWithType(100000, config.MaxBloomFalsePositive, bloomfilter.BlockBFName).Cap(), stats.BF.Cap())
@@ -353,7 +436,7 @@ func TestPkStatsCollectorWithDeferredBloomFilter(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		require.NoError(t, collector.pkstats.ReserveSpace4BF(100000))
+		require.Nil(t, collector.builder)
 		require.Equal(t, bloomfilter.BasicBF, collector.pkstats.BFType)
 		require.Equal(t, bloomfilter.NewBloomFilterWithType(1024, 0.25, bloomfilter.BasicBFName).Cap(), collector.pkstats.BF.Cap())
 	})
@@ -363,9 +446,15 @@ func TestPkStatsCollectorWithDeferredBloomFilter(t *testing.T) {
 		config.UseDeferredBloomFilter = true
 		collector, err := NewPkStatsCollector(1, schema, 100, &config)
 		require.NoError(t, err)
+		require.NotNil(t, collector.builder)
+		require.Nil(t, collector.pkstats.BF)
 
-		_, err = collector.Digest(1, 1, 2, "/tmp", 0, allocator.NewLocalAllocator(1, 100), func([]*Blob) error { return nil })
-
+		_, _, err = collector.SerializeBlob(0)
+		require.Error(t, err)
+		_, err = collector.Digest(1, 1, 2, "/tmp", 0, allocator.NewLocalAllocator(1, 100), func([]*Blob) error {
+			t.Fatal("empty builder must not write a blob")
+			return nil
+		})
 		require.Error(t, err)
 	})
 }

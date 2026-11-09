@@ -28,8 +28,8 @@ import (
 
 const testFP = 0.001
 
-func newTestDeferredBF(t *testing.T, capacityHint uint) BloomFilterInterface {
-	bf, err := NewDeferredBlockedBloomFilter(capacityHint, testFP)
+func newTestBFBuilder(t *testing.T, capacityHint uint) *BlockedBloomFilterBuilder {
+	bf, err := NewBlockedBloomFilterBuilder(capacityHint, testFP)
 	require.NoError(t, err)
 	return bf
 }
@@ -40,28 +40,31 @@ func int64Key(v int64) []byte {
 	return b
 }
 
-func TestNewDeferredBlockedBloomFilter(t *testing.T) {
+func TestNewBlockedBloomFilterBuilder(t *testing.T) {
 	for _, fp := range []float64{-0.1, 0, 1, 1.5} {
 		t.Run(fmt.Sprintf("invalid fp %v", fp), func(t *testing.T) {
-			bf, err := NewDeferredBlockedBloomFilter(100, fp)
+			bf, err := NewBlockedBloomFilterBuilder(100, fp)
 			require.Nil(t, bf)
 			require.ErrorIs(t, err, merr.ErrParameterInvalid)
 		})
 	}
 
 	t.Run("type is blocked", func(t *testing.T) {
-		bf := newTestDeferredBF(t, 100)
+		builder := newTestBFBuilder(t, 100)
+		builder.Add(int64Key(1))
+		bf, err := builder.Build()
+		require.NoError(t, err)
 		require.Equal(t, BlockedBF, bf.Type())
 	})
 }
 
-func TestDeferredBlockedBloomFilterMarshal(t *testing.T) {
+func TestBlockedBloomFilterBuilderBuild(t *testing.T) {
 	t.Run("no data", func(t *testing.T) {
-		bf := newTestDeferredBF(t, 4)
+		bf := newTestBFBuilder(t, 4)
 
-		data, err := bf.MarshalJSON()
+		built, err := bf.Build()
 
-		require.Nil(t, data)
+		require.Nil(t, built)
 		require.ErrorIs(t, err, merr.ErrServiceInternal)
 	})
 
@@ -74,11 +77,11 @@ func TestDeferredBlockedBloomFilterMarshal(t *testing.T) {
 		{n: 5, hint: 4},
 		{n: 1000, hint: 4},
 		{n: 1000, hint: 100000},
-		{n: deferredHashBlockSize, hint: 0},
+		{n: builderHashBlockSize, hint: 0},
 	} {
 		n := tc.n
 		t.Run(fmt.Sprintf("same as blocked bloom filter with %d rows and hint %d", n, tc.hint), func(t *testing.T) {
-			deferred := newTestDeferredBF(t, tc.hint)
+			deferred := newTestBFBuilder(t, tc.hint)
 			for i := 0; i < n; i++ {
 				deferred.Add(int64Key(int64(i)))
 				deferred.AddString(fmt.Sprintf("pk-%d", i))
@@ -90,7 +93,9 @@ func TestDeferredBlockedBloomFilterMarshal(t *testing.T) {
 				want.AddString(fmt.Sprintf("pk-%d", i))
 			}
 
-			got, err := deferred.MarshalJSON()
+			built, err := deferred.Build()
+			require.NoError(t, err)
+			got, err := built.MarshalJSON()
 			require.NoError(t, err)
 			wantJSON, err := want.MarshalJSON()
 			require.NoError(t, err)
@@ -100,12 +105,14 @@ func TestDeferredBlockedBloomFilterMarshal(t *testing.T) {
 	}
 
 	t.Run("decoded filter contains added data", func(t *testing.T) {
-		bf := newTestDeferredBF(t, 4)
+		bf := newTestBFBuilder(t, 4)
 		for i := 0; i < 100; i++ {
 			bf.Add(int64Key(int64(i)))
 			bf.AddString(fmt.Sprintf("pk-%d", i))
 		}
-		data, err := bf.MarshalJSON()
+		built, err := bf.Build()
+		require.NoError(t, err)
+		data, err := built.MarshalJSON()
 		require.NoError(t, err)
 
 		decoded, err := UnmarshalJSON(data, BlockedBF)
@@ -120,45 +127,43 @@ func TestDeferredBlockedBloomFilterMarshal(t *testing.T) {
 		}
 	})
 
-	t.Run("marshal twice", func(t *testing.T) {
-		bf := newTestDeferredBF(t, 4)
+	t.Run("build twice and continue adding", func(t *testing.T) {
+		bf := newTestBFBuilder(t, 4)
 		for i := 0; i < 10; i++ {
 			bf.Add(int64Key(int64(i)))
 		}
 
-		first, err := bf.MarshalJSON()
+		first, err := bf.Build()
 		require.NoError(t, err)
-		second, err := bf.MarshalJSON()
+		firstJSON, err := first.MarshalJSON()
+		require.NoError(t, err)
+		second, err := bf.Build()
+		require.NoError(t, err)
+		secondJSON, err := second.MarshalJSON()
 		require.NoError(t, err)
 
-		require.Equal(t, first, second)
+		require.Equal(t, firstJSON, secondJSON)
+
+		for i := 10; i < 1000; i++ {
+			bf.Add(int64Key(int64(i)))
+		}
+		expanded, err := bf.Build()
+		require.NoError(t, err)
+		require.Equal(t, newBlockedBloomFilter(1000, testFP).Cap(), expanded.Cap())
+		for i := 0; i < 1000; i++ {
+			require.True(t, expanded.Test(int64Key(int64(i))))
+		}
+		unchanged, err := first.MarshalJSON()
+		require.NoError(t, err)
+		require.Equal(t, firstJSON, unchanged)
 	})
 }
 
-func TestDeferredBlockedBloomFilterWriteOnly(t *testing.T) {
-	bf := newTestDeferredBF(t, 4)
-	bf.Add(int64Key(1))
-
-	for name, call := range map[string]func(){
-		"Cap":                func() { bf.Cap() },
-		"K":                  func() { bf.K() },
-		"Test":               func() { bf.Test(int64Key(1)) },
-		"TestString":         func() { bf.TestString("1") },
-		"TestLocations":      func() { bf.TestLocations([]uint64{1}) },
-		"BatchTestLocations": func() { bf.BatchTestLocations([][]uint64{{1}}, []bool{false}) },
-		"UnmarshalJSON":      func() { _ = bf.UnmarshalJSON([]byte("{}")) },
-	} {
-		t.Run(name, func(t *testing.T) {
-			require.PanicsWithError(t, errDeferredWriteOnly(name).Error(), call)
-		})
-	}
-}
-
-func TestDeferredBlockedBloomFilterReserve(t *testing.T) {
-	bf := newTestDeferredBF(t, 1000000).(*deferredBlockedBloomFilter)
-	require.NoError(t, ReserveSpace(bf, 100000))
+func TestBlockedBloomFilterBuilderReserve(t *testing.T) {
+	bf := newTestBFBuilder(t, 1000000)
+	require.NoError(t, bf.Reserve(100000))
 	require.Zero(t, bf.hashes.Len())
-	require.Error(t, ReserveSpace(bf, -1))
+	require.Error(t, bf.Reserve(-1))
 	for i := 0; i < 100000; i++ {
 		bf.Add(int64Key(int64(i)))
 	}
@@ -168,19 +173,4 @@ func TestDeferredBlockedBloomFilterReserve(t *testing.T) {
 		require.Len(t, block, 100000)
 	}
 	require.Equal(t, 1, blocks)
-}
-
-func TestReserveSpaceOrdinaryBloomFilters(t *testing.T) {
-	for _, name := range []string{BasicBFName, BlockBFName} {
-		t.Run(name, func(t *testing.T) {
-			bf := NewBloomFilterWithType(100, testFP, name)
-			bf.Add(int64Key(42))
-			before, err := bf.MarshalJSON()
-			require.NoError(t, err)
-			require.NoError(t, ReserveSpace(bf, 100000))
-			after, err := bf.MarshalJSON()
-			require.NoError(t, err)
-			require.Equal(t, before, after)
-		})
-	}
 }
