@@ -21,6 +21,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 )
 
+// GetRowCount returns the number of rows using the shared Query helper.
+func GetRowCount(result *internalpb.RetrieveResults) int {
+	return getRowCount(result)
+}
+
 // RowRef lets ReduceStream reuse the existing row selection without conversion.
 type RowRef = rowRef
 

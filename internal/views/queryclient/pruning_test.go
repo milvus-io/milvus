@@ -128,7 +128,7 @@ func TestExecutionSummaryWireSize(t *testing.T) {
 func TestExecutionSummaryFeatureMapping(t *testing.T) {
 	bit, ok := featureusage.ExecBit(featureusage.FeatureSegmentPrune)
 	require.True(t, ok)
-	require.Zero(t, ExecutionSummaryFeatureBits(nil))
+	require.Zero(t, executionSummaryFeatureBits(nil))
 	for _, tc := range []struct {
 		name     string
 		flags    uint32
@@ -143,7 +143,7 @@ func TestExecutionSummaryFeatureMapping(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			summary := &viewpb.ExecutionSummary{GlobalOptimizer: &viewpb.GlobalOptimizerExecutionSummary{Flags: tc.flags}}
-			require.Equal(t, tc.expected, ExecutionSummaryFeatureBits(summary))
+			require.Equal(t, tc.expected, executionSummaryFeatureBits(summary))
 		})
 	}
 }
