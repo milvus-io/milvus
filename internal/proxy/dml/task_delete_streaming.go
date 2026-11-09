@@ -33,7 +33,7 @@ func (dt *DeleteTask) Execute(ctx context.Context) (err error) {
 		collectionSchema = dt.schema.CollectionSchema
 	}
 
-	result, numRows, err := repackDeleteMsgByHash(
+	result, numRows, err := repackDeleteMessages(
 		ctx, dt.primaryKeys,
 		dt.vChannels, dt.idAllocator,
 		dt.ts, dt.collectionID,
@@ -53,23 +53,20 @@ func (dt *DeleteTask) Execute(ctx context.Context) (err error) {
 	}
 
 	var msgs []message.MutableMessage
-	for hashKey, deleteMsgs := range result {
-		vchannel := dt.vChannels[hashKey]
-		for _, deleteMsg := range deleteMsgs {
-			msg, err := message.NewDeleteMessageBuilderV1().
-				WithHeader(&message.DeleteMessageHeader{
-					CollectionId: dt.collectionID,
-					Rows:         uint64(deleteMsg.NumRows),
-				}).
-				WithBody(deleteMsg.DeleteRequest).
-				WithVChannel(vchannel).
-				WithCipher(ez).
-				BuildMutable()
-			if err != nil {
-				return err
-			}
-			msgs = append(msgs, msg)
+	for _, deleteMsg := range result {
+		msg, err := message.NewDeleteMessageBuilderV1().
+			WithHeader(&message.DeleteMessageHeader{
+				CollectionId: dt.collectionID,
+				Rows:         uint64(deleteMsg.NumRows),
+			}).
+			WithBody(deleteMsg.DeleteRequest).
+			WithVChannel(deleteMsg.GetShardName()).
+			WithCipher(ez).
+			BuildMutable()
+		if err != nil {
+			return err
 		}
+		msgs = append(msgs, msg)
 	}
 
 	mlog.Debug(ctx, "send delete request to virtual channels",

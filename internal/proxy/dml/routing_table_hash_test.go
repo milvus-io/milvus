@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -34,40 +35,25 @@ import (
 	pkgtypeutil "github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func TestAssignChannelsByPKPreservesModuloRouting(t *testing.T) {
-	channelNames := []string{"channel-0", "channel-1", "channel-2"}
-	pks := []int64{0, 1, 10, 100, 1000, -1}
-	ids := &schemapb.IDs{
-		IdField: &schemapb.IDs_IntId{
-			IntId: &schemapb.LongArray{Data: pks},
-		},
+func TestAutoIDCandidatesPreservePKRouting(t *testing.T) {
+	channels := []string{"channel-0", "channel-1", "channel-2"}
+	keys := []int64{0, 1, 10, 100, 1000, -1}
+	got := make([][]int64, len(channels))
+	err := appendAutoIDCandidatesByChannels(got, keys, schemapb.DataType_Int64, channels)
+	require.NoError(t, err)
+	want := make([][]int64, len(channels))
+	for row, channel := range expectedInt64ModuloHashes(t, keys, len(channels)) {
+		want[channel] = append(want[channel], keys[row])
 	}
-	insertMsg := &msgstream.InsertMsg{}
-
-	got, err := assignChannelsByPK(ids, channelNames, insertMsg)
-
-	expectedHashes := expectedInt64ModuloHashes(t, pks, len(channelNames))
-	assert.NoError(t, err)
-	assert.Equal(t, expectedHashes, insertMsg.HashValues)
-	assert.Equal(t, expectedRowOffsetsByChannel(channelNames, expectedHashes), got)
+	assert.Equal(t, want, got)
 }
 
-func TestAssignChannelsByPKReturnsRoutingErrorWithoutChannels(t *testing.T) {
-	ids := &schemapb.IDs{
-		IdField: &schemapb.IDs_IntId{
-			IntId: &schemapb.LongArray{Data: []int64{1}},
-		},
-	}
-	insertMsg := &msgstream.InsertMsg{}
-
-	got, err := assignChannelsByPK(ids, nil, insertMsg)
-
+func TestAutoIDCandidatesReturnRoutingErrorWithoutChannels(t *testing.T) {
+	err := appendAutoIDCandidatesByChannels(nil, []int64{1}, schemapb.DataType_Int64, nil)
 	assert.ErrorIs(t, err, common.ErrRoutingTableNoValues)
-	assert.Nil(t, got)
-	assert.Empty(t, insertMsg.HashValues)
 }
 
-func TestRepackDeleteMsgByHashPreservesModuloRouting(t *testing.T) {
+func TestRepackDeleteMessagesPreservesModuloRouting(t *testing.T) {
 	paramtable.Init()
 	vChannels := []string{"vchan-0", "vchan-1", "vchan-2"}
 	pks := []int64{0, 1, 10, 100, 1000, -1}
@@ -77,7 +63,7 @@ func TestRepackDeleteMsgByHashPreservesModuloRouting(t *testing.T) {
 		},
 	}
 
-	got, rows, err := repackDeleteMsgByHash(
+	got, rows, err := repackDeleteMessages(
 		context.Background(),
 		primaryKeys,
 		vChannels,
@@ -100,19 +86,30 @@ func TestRepackDeleteMsgByHashPreservesModuloRouting(t *testing.T) {
 		expectedCounts[hash]++
 	}
 	actualCounts := make(map[uint32]int)
-	for hash, msgs := range got {
-		for _, msg := range msgs {
-			assert.Equal(t, vChannels[hash], msg.ShardName)
-			for _, msgHash := range msg.HashValues {
-				assert.Equal(t, hash, msgHash)
-				actualCounts[msgHash]++
+	for _, msg := range got {
+		hash := msg.HashValues[0]
+		assert.Equal(t, vChannels[hash], msg.ShardName)
+		var expectedKeys []int64
+		for row, expectedHash := range expectedInt64ModuloHashes(t, pks, len(vChannels)) {
+			if expectedHash == hash {
+				expectedKeys = append(expectedKeys, pks[row])
 			}
+		}
+		assert.Equal(t, expectedKeys, msg.PrimaryKeys.GetIntId().GetData())
+		assert.Equal(t, int64(len(expectedKeys)), msg.NumRows)
+		assert.Len(t, msg.Timestamps, len(expectedKeys))
+		for _, timestamp := range msg.Timestamps {
+			assert.Equal(t, uint64(1000), timestamp)
+		}
+		for _, msgHash := range msg.HashValues {
+			assert.Equal(t, hash, msgHash)
+			actualCounts[msgHash]++
 		}
 	}
 	assert.Equal(t, expectedCounts, actualCounts)
 }
 
-func TestRepackDeleteMsgByHashReturnsRoutingErrorWithoutChannels(t *testing.T) {
+func TestRepackDeleteMessagesReturnsRoutingErrorWithoutChannels(t *testing.T) {
 	paramtable.Init()
 	primaryKeys := &schemapb.IDs{
 		IdField: &schemapb.IDs_IntId{
@@ -120,7 +117,7 @@ func TestRepackDeleteMsgByHashReturnsRoutingErrorWithoutChannels(t *testing.T) {
 		},
 	}
 
-	got, rows, err := repackDeleteMsgByHash(
+	got, rows, err := repackDeleteMessages(
 		context.Background(),
 		primaryKeys,
 		nil,
@@ -140,15 +137,15 @@ func TestRepackDeleteMsgByHashReturnsRoutingErrorWithoutChannels(t *testing.T) {
 	assert.Zero(t, rows)
 }
 
-func TestRepackDeleteMsgByHashHonorsMaxDeleteSize(t *testing.T) {
+func TestRepackDeleteMessagesHonorsMaxDeleteSize(t *testing.T) {
 	paramtable.Init()
 	primaryKeys := &schemapb.IDs{
 		IdField: &schemapb.IDs_IntId{
 			IntId: &schemapb.LongArray{Data: []int64{1}},
 		},
 	}
-	repack := func() (map[uint32][]*msgstream.DeleteMsg, int64, error) {
-		return repackDeleteMsgByHash(
+	repack := func() ([]*msgstream.DeleteMsg, int64, error) {
+		return repackDeleteMessages(
 			context.Background(),
 			primaryKeys,
 			[]string{"vchan-0"},
@@ -173,9 +170,8 @@ func TestRepackDeleteMsgByHashHonorsMaxDeleteSize(t *testing.T) {
 	require.Equal(t, int64(1), rows)
 	require.Len(t, result, 1)
 	var materializedSize int
-	for _, msgs := range result {
-		require.Len(t, msgs, 1)
-		materializedSize = msgs[0].Size()
+	for _, msg := range result {
+		materializedSize = msg.Size()
 	}
 	require.Positive(t, materializedSize)
 
@@ -191,15 +187,13 @@ func TestRepackDeleteMsgByHashHonorsMaxDeleteSize(t *testing.T) {
 	assert.Zero(t, rows)
 }
 
-func TestRepackDeleteMsgByHashSwitchesChunkOwner(t *testing.T) {
+func TestRepackDeleteMessagesLeavesPhysicalChunkingToWAL(t *testing.T) {
 	paramtable.Init()
 	oldMaxMessageSize := paramtable.Get().PulsarCfg.MaxMessageSize.SwapTempValue("512")
 	oldMaxDeleteSize := paramtable.Get().QuotaConfig.MaxDeleteSize.SwapTempValue("-1")
-	oldSplitChunkProxy := paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue("true")
 	t.Cleanup(func() {
 		paramtable.Get().PulsarCfg.MaxMessageSize.SwapTempValue(oldMaxMessageSize)
 		paramtable.Get().QuotaConfig.MaxDeleteSize.SwapTempValue(oldMaxDeleteSize)
-		paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy)
 	})
 
 	primaryKeys := &schemapb.IDs{
@@ -207,8 +201,8 @@ func TestRepackDeleteMsgByHashSwitchesChunkOwner(t *testing.T) {
 			StrId: &schemapb.StringArray{Data: []string{strings.Repeat("a", 300), strings.Repeat("b", 300)}},
 		},
 	}
-	repack := func() map[uint32][]*msgstream.DeleteMsg {
-		result, rows, err := repackDeleteMsgByHash(
+	repack := func() []*msgstream.DeleteMsg {
+		result, rows, err := repackDeleteMessages(
 			context.Background(), primaryKeys, []string{"vchan-0"}, allocator.NewLocalAllocator(100, 200),
 			1000, 1, "collection", 2, "partition", "default", nil, nil,
 		)
@@ -218,11 +212,8 @@ func TestRepackDeleteMsgByHashSwitchesChunkOwner(t *testing.T) {
 	}
 
 	result := repack()
-	require.Len(t, result[0], 2)
-
-	paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue("false")
-	result = repack()
-	require.Len(t, result[0], 1)
+	require.Len(t, result, 1)
+	require.True(t, proto.Equal(primaryKeys, result[0].PrimaryKeys))
 }
 
 func expectedInt64ModuloHashes(t *testing.T, keys []int64, targetCount int) []uint32 {
@@ -234,13 +225,4 @@ func expectedInt64ModuloHashes(t *testing.T, keys []int64, targetCount int) []ui
 		hashes = append(hashes, hash%uint32(targetCount))
 	}
 	return hashes
-}
-
-func expectedRowOffsetsByChannel(channelNames []string, hashes []uint32) map[string][]int {
-	offsets := make(map[string][]int)
-	for offset, hash := range hashes {
-		channelName := channelNames[hash]
-		offsets[channelName] = append(offsets[channelName], offset)
-	}
-	return offsets
 }

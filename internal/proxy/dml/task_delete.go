@@ -2,7 +2,6 @@ package dml
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"strconv"
 	"sync"
@@ -13,7 +12,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/featureusage"
@@ -136,142 +134,6 @@ func (dt *DeleteTask) PostExecute(ctx context.Context) error {
 		dt.req.GetCollectionName(),
 	).Add(float64(dt.count))
 	return nil
-}
-
-// checkMaxDeleteSize rejects a materialized per-vchannel delete message whose
-// protobuf body exceeds quotaAndLimits.limits.maxDeleteSize.
-func checkMaxDeleteSize(ctx context.Context, size int) error {
-	maxDeleteSize := paramtable.Get().QuotaConfig.MaxDeleteSize.GetAsInt()
-	if maxDeleteSize == -1 || size <= maxDeleteSize {
-		return nil
-	}
-	mlog.Warn(ctx, "materialized delete message exceeds maxDeleteSize",
-		mlog.Int("message size", size),
-		mlog.Int("maxDeleteSize", maxDeleteSize))
-	return merr.WrapErrAsInputError(merr.WrapErrParameterTooLarge(
-		fmt.Sprintf("delete materialized message size %d exceeds maxDeleteSize %d", size, maxDeleteSize)))
-}
-
-func repackDeleteMsgByHash(
-	ctx context.Context,
-	primaryKeys *schemapb.IDs,
-	vChannels []string,
-	idAllocator allocator.Interface,
-	ts uint64,
-	collectionID int64,
-	collectionName string,
-	partitionID int64,
-	partitionName string,
-	dbName string,
-	namespace *string,
-	schema *schemapb.CollectionSchema,
-) (map[uint32][]*msgstream.DeleteMsg, int64, error) {
-	splitChunkProxy := paramtable.Get().ProxyCfg.SplitChunkProxy.GetAsBool()
-	maxWALMessageSize := paramtable.Get().PulsarCfg.MaxMessageSize.GetAsInt()
-	var hashValues []uint32
-	// Delete tombstones are PK+timestamp based. Namespace can narrow routing,
-	// but it is not part of the tombstone identity; PKs must stay unique across
-	// namespaces in the same collection.
-	channelID, ok, err := dql.NamespaceShardingChannelID(schema, namespace, vChannels)
-	if err != nil {
-		return nil, 0, err
-	}
-	if ok {
-		size := typeutil.GetSizeOfIDs(primaryKeys)
-		hashValues = make([]uint32, size)
-		for i := 0; i < size; i++ {
-			hashValues[i] = channelID
-		}
-	} else {
-		hashValues, err = typeutil.HashPK2Channels(primaryKeys, vChannels)
-		if err != nil {
-			return nil, 0, err
-		}
-	}
-	// Repack delete messages by dmChannel. Proxy keeps the legacy size packing
-	// while splitChunkProxy is enabled; once disabled, one logical tombstone
-	// body is built per hashed channel so StreamingNode can own physical chunking.
-	result := make(map[uint32][]*msgstream.DeleteMsg)
-	lastMessageSize := make(map[uint32]int)
-
-	numRows := int64(0)
-	numMessage := 0
-
-	createMessage := func(key uint32, vchannel string) *msgstream.DeleteMsg {
-		numMessage++
-		lastMessageSize[key] = 0
-		return &msgstream.DeleteMsg{
-			BaseMsg: msgstream.BaseMsg{
-				Ctx: ctx,
-			},
-			DeleteRequest: &msgpb.DeleteRequest{
-				Base: commonpbutil.NewMsgBase(
-					commonpbutil.WithMsgType(commonpb.MsgType_Delete),
-					// msgid of delete msg must be set later
-					// or it will be seen as duplicated msg in mq
-					commonpbutil.WithTimeStamp(ts),
-					commonpbutil.WithSourceID(paramtable.GetNodeID()),
-				),
-				ShardName:      vchannel,
-				CollectionName: collectionName,
-				PartitionName:  partitionName,
-				DbName:         dbName,
-				CollectionID:   collectionID,
-				PartitionID:    partitionID,
-				PrimaryKeys:    &schemapb.IDs{},
-			},
-		}
-	}
-
-	for index, key := range hashValues {
-		vchannel := vChannels[key]
-		msgs, ok := result[key]
-		if !ok {
-			result[key] = make([]*msgstream.DeleteMsg, 1)
-			msgs = result[key]
-			result[key][0] = createMessage(key, vchannel)
-		}
-		curMsg := msgs[len(msgs)-1]
-		size, id := typeutil.GetId(primaryKeys, index)
-		rowSize := 16 + size
-		if splitChunkProxy {
-			if maxWALMessageSize > 0 && rowSize >= maxWALMessageSize {
-				return nil, 0, merr.WrapErrAsInputError(merr.WrapErrParameterTooLarge(
-					fmt.Sprintf("single delete primary key at offset %d is too large to fit in one WAL message", index)))
-			}
-			if maxWALMessageSize > 0 && curMsg.NumRows > 0 && lastMessageSize[key]+rowSize > maxWALMessageSize {
-				curMsg = createMessage(key, vchannel)
-				result[key] = append(result[key], curMsg)
-			}
-		}
-		curMsg.HashValues = append(curMsg.HashValues, hashValues[index])
-		curMsg.Timestamps = append(curMsg.Timestamps, ts)
-
-		typeutil.AppendID(curMsg.PrimaryKeys, id)
-		curMsg.NumRows++
-		lastMessageSize[key] += rowSize
-		numRows++
-	}
-
-	// alloc messageID
-	start, _, err := idAllocator.Alloc(uint32(numMessage))
-	if err != nil {
-		return nil, 0, err
-	}
-
-	cnt := int64(0)
-	maxMessageSize := 0
-	for _, msgs := range result {
-		for _, msg := range msgs {
-			msg.Base.MsgID = start + cnt
-			maxMessageSize = max(maxMessageSize, msg.Size())
-			cnt++
-		}
-	}
-	if err := checkMaxDeleteSize(ctx, maxMessageSize); err != nil {
-		return nil, 0, err
-	}
-	return result, numRows, nil
 }
 
 type DeleteRunner struct {

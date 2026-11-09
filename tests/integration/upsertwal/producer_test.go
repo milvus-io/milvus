@@ -18,28 +18,21 @@ package upsertwal
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"strings"
-	"testing"
 	"time"
 
-	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	upsertfixture "github.com/milvus-io/milvus/pkg/v3/streaming/util/message/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/tests/integration"
-	"github.com/milvus-io/milvus/tests/integration/cluster"
 )
 
-func (s *UpsertWALSuite) TestGateOffAllowsDurableCommitAndLegacyProducer() {
+func (s *UpsertWALSuite) TestDurableTransactionAndNewProducerSurviveReopen() {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	c := s.create(ctx)
@@ -53,10 +46,7 @@ func (s *UpsertWALSuite) TestGateOffAllowsDurableCommitAndLegacyProducer() {
 	_, err = producer.Append(ctx, c.upsert(11, 2).WithTxnContext(*begin.TxnCtx))
 	s.Require().NoError(err)
 	pending := c.upsert(12, 4)
-	restore := s.Cluster.MustModifyMilvusConfig(map[string]string{"streaming.wal.enableUpsertMessage": "false"})
-	defer restore()
-	s.waitForProxyUpsertFormat(ctx, "false")
-	// A message generated before the update still appends after generation stops.
+	// A prepared autocommit message can append while another transaction is open.
 	_, err = producer.Append(ctx, pending)
 	s.Require().NoError(err)
 	s.assertRows(ctx, c, 12, 4, 1)
@@ -65,7 +55,7 @@ func (s *UpsertWALSuite) TestGateOffAllowsDurableCommitAndLegacyProducer() {
 	s.Require().NoError(err)
 	s.assertRows(ctx, c, 11, 1, 0)
 	s.assertRows(ctx, c, 11, 2, 1)
-	// API writes select legacy messages while previously generated Upsert remains supported.
+	// Ordinary Insert, Upsert and partial update share the new row encoding.
 	request := upsertfixture.Insert(message.MustAsMutableUpsertMessageV2(c.upsert(13, 5)).MustBody())
 
 	for _, column := range request.GetFieldsData() {
@@ -104,7 +94,7 @@ func (s *UpsertWALSuite) TestGateOffAllowsDurableCommitAndLegacyProducer() {
 	s.Require().NoError(merr.CheckRPCCall(result, err))
 	s.assertRows(ctx, c, 13, 6, 0)
 	s.assertRows(ctx, c, 13, 7, 1)
-	// Gate-off also leaves retained Upsert history readable after reopening WAL.
+	// Reopening preserves both the transaction and the subsequent API writes.
 	producer.Close()
 	s.restartStreamingNode(c)
 	s.assertRows(ctx, c, 11, 1, 0)
@@ -140,40 +130,41 @@ func (s *UpsertWALSuite) TestNamespaceRejectedBeforeUpsertAppend() {
 func (s *UpsertWALSuite) TestKeyedInsertRetryAcrossWALFormats() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	for _, firstMode := range []string{"false", "true"} {
-		s.Run(firstMode, func() {
+	for _, firstFormat := range []string{"legacy", "v2"} {
+		s.Run(firstFormat, func() {
 			c := s.createWithPK(ctx, schemapb.DataType_Int64, true)
 			producer := rawProducer(s.T(), ctx, s.Cluster, c.vchannel)
 			defer producer.Close()
-			setMode := func(mode string) {
-				restore := s.Cluster.MustModifyMilvusConfig(map[string]string{"streaming.wal.enableUpsertMessage": mode})
-				s.T().Cleanup(restore)
-				s.waitForProxyUpsertFormat(ctx, mode)
-			}
-			setMode(firstMode)
 			fields := upsertfixture.Insert(message.MustAsMutableUpsertMessageV2(c.upsert(11, 1)).MustBody()).GetFieldsData()
+			userFields := make([]*schemapb.FieldData, 0, len(fields)-1)
 			for _, column := range fields {
 				for _, field := range c.schema.GetFields() {
 					if column.GetFieldId() == field.GetFieldID() {
 						column.FieldName = field.GetName()
 					}
 				}
-			}
-			userFields := make([]*schemapb.FieldData, 0, len(fields)-1)
-			for _, field := range fields {
-				if field.GetFieldName() != "pk" {
-					userFields = append(userFields, field)
+				if column.GetFieldName() != "pk" {
+					userFields = append(userFields, column)
 				}
 			}
 			request := &milvuspb.InsertRequest{CollectionName: c.name, NumRows: 1, FieldsData: userFields}
-			keyed := metadata.AppendToOutgoingContext(ctx, util.HeaderIdempotencyKey, fmt.Sprintf("format-%s-%d", firstMode, c.id))
-			original, err := s.Cluster.MilvusClient.Insert(keyed, request)
-			s.Require().NoError(merr.CheckRPCCall(original, err))
-			otherMode := "true"
-			if firstMode == "true" {
-				otherMode = "false"
+			key := fmt.Sprintf("format-%s-%d", firstFormat, c.id)
+			keyed := metadata.AppendToOutgoingContext(ctx, util.HeaderIdempotencyKey, key)
+			var original *milvuspb.MutationResult
+			if firstFormat == "legacy" {
+				legacy := message.MustAsMutableInsertMessageV1(c.legacy("Insert", 11, 1))
+				header := legacy.Header()
+				ids := &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{11}}}}
+				message.SetInsertHeaderIdempotentInsertResult(header, &messagespb.IdempotentInsertResult{Ids: ids, RowOffsets: []uint32{0}})
+				originalMessage := message.NewInsertMessageBuilderV1().WithVChannel(c.vchannel).WithHeader(header).WithBody(legacy.MustBody()).WithIdempotencyKey(message.IdempotencyKey(key)).MustBuildMutable()
+				result, err := producer.Append(ctx, originalMessage)
+				s.Require().NoError(err)
+				original = &milvuspb.MutationResult{IDs: ids, Timestamp: result.TimeTick}
+			} else {
+				var err error
+				original, err = s.Cluster.MilvusClient.Insert(keyed, request)
+				s.Require().NoError(merr.CheckRPCCall(original, err))
 			}
-			setMode(otherMode)
 			checkRetry := func() {
 				retried, err := s.Cluster.MilvusClient.Insert(keyed, request)
 				s.Require().NoError(merr.CheckRPCCall(retried, err))
@@ -187,70 +178,4 @@ func (s *UpsertWALSuite) TestKeyedInsertRetryAcrossWALFormats() {
 			checkRetry()
 		})
 	}
-}
-
-// Observe the producer config without writing probe rows or depending on append rejection.
-func (s *upsertWALFixture) waitForProxyUpsertFormat(ctx context.Context, mode string) {
-	s.Require().Eventually(func() bool {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+s.Cluster.DefaultProxy().GetMetricsAddr()+"/api/v1/_cluster/configs", nil)
-		if err != nil {
-			return false
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return false
-		}
-		defer resp.Body.Close()
-		configs := map[string]string{}
-		if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&configs) != nil {
-			return false
-		}
-		for key, value := range configs {
-			if strings.EqualFold(key, "streaming.wal.enableUpsertMessage") || strings.EqualFold(key, "streamingwalenableupsertmessage") {
-				// The configuration view annotates each value with its source.
-				value, _, _ = strings.Cut(value, "[")
-				return value == mode
-			}
-		}
-		return false
-	}, 10*time.Second, 100*time.Millisecond, "Proxy must observe the requested producer format")
-}
-
-// Keep StreamingNode's periodic config refresh behind the producer's refresh.
-// This exercises a propagation window, not a mixed-version rollout.
-type UpsertWALConfigWindowSuite struct{ upsertWALFixture }
-
-func TestUpsertWALConfigWindow(t *testing.T) { suite.Run(t, new(UpsertWALConfigWindowSuite)) }
-
-func (s *UpsertWALConfigWindowSuite) SetupSuite() {
-	s.WithClusterOptions(cluster.WithMetricsPorts(), cluster.WithProcessEnv(func(role string, _ int64) map[string]string {
-		if role == "streamingnode" {
-			return map[string]string{paramtable.MilvusConfigRefreshIntervalEnvKey: "1h"}
-		}
-		return nil
-	}))
-	s.WithMilvusConfig("streaming.wal.enableUpsertMessage", "false")
-	s.WithOptions(integration.WithDropAllCollectionsWhenTestTearDown())
-	s.MiniClusterSuite.SetupSuite()
-}
-
-func (s *UpsertWALConfigWindowSuite) TestProducerEnablesBeforeStreamingNodeRefresh() {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
-	c := s.create(ctx)
-	s.waitForProxyUpsertFormat(ctx, "false")
-	restore := s.Cluster.MustModifyMilvusConfig(map[string]string{"streaming.wal.enableUpsertMessage": "true"})
-	defer restore()
-	s.waitForProxyUpsertFormat(ctx, "true")
-	fields := upsertfixture.Insert(message.MustAsMutableUpsertMessageV2(c.upsert(11, 1)).MustBody()).GetFieldsData()
-	for _, field := range fields {
-		for _, schemaField := range c.schema.GetFields() {
-			if field.GetFieldId() == schemaField.GetFieldID() {
-				field.FieldName = schemaField.GetName()
-			}
-		}
-	}
-	inserted, err := s.Cluster.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{CollectionName: c.name, NumRows: 1, FieldsData: fields})
-	s.Require().NoError(merr.CheckRPCCall(inserted, err))
-	s.assertRows(ctx, c, 11, 1, 1)
 }

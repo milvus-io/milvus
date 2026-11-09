@@ -65,7 +65,7 @@ func extractPKsFromInsertWithContext(ctx context.Context, msg message.MutableMes
 	if msg == nil || fieldID <= 0 {
 		return primarykey.Keys{}, status.NewUnrecoverableError("insert primary key field id is invalid")
 	}
-	body, err := utility.DecodeInsertBody(ctx, msg)
+	body, err := utility.DecodeLegacyInsertBody(ctx, msg)
 	if err != nil {
 		return primarykey.Keys{}, err
 	}
@@ -89,19 +89,17 @@ func extractPKsFromCASInsertWithContext(
 ) (primarykey.Keys, casInsertScope, string, error) {
 	switch msg.MessageType() {
 	case message.MessageTypeUpsert:
-		keys, err := extractPKsFromUpsert(ctx, msg, descriptorGetter)
+		header, err := message.ReadInsertOrUpsertHeader(msg)
 		if err != nil {
 			return primarykey.Keys{}, casInsertScope{}, "", err
 		}
-		body, err := message.ReadUpsertProjection(ctx, msg)
+		body, err := message.ReadInsertOrUpsertProjection(ctx, msg)
 		if err != nil {
 			return primarykey.Keys{}, casInsertScope{}, "", err
 		}
-		var header *message.UpsertMessageHeader
-		if immutable, ok := msg.(message.ImmutableMessage); ok {
-			header = message.MustAsImmutableUpsertMessageV2(immutable).Header()
-		} else {
-			header = message.MustAsMutableUpsertMessageV2(msg.(message.MutableMessage)).Header()
+		keys, err := extractPKsFromInsertOrUpsertProjection(header, body, descriptorGetter)
+		if err != nil {
+			return primarykey.Keys{}, casInsertScope{}, "", err
 		}
 		encoded, err := message.EncodeProto(body.GetPartialUpdateCas())
 		if body.GetPartialUpdateCas() == nil {
@@ -109,6 +107,9 @@ func extractPKsFromCASInsertWithContext(
 		}
 		return keys, casInsertScope{collectionID: header.GetCollectionId(), schemaVersion: header.GetSchemaVersion()}, encoded, err
 	case message.MessageTypeInsert:
+		if msg.Version() == message.VersionV2 {
+			return primarykey.Keys{}, casInsertScope{}, "", status.NewUnrecoverableError("Insert V2 has no partial update CAS proof")
+		}
 		if descriptorGetter == nil {
 			return primarykey.Keys{}, casInsertScope{}, "", status.NewUnrecoverableError(
 				"partial update primary key descriptor getter is unavailable",
@@ -173,6 +174,9 @@ func extractPKsFromOrdinaryInsertWithContext(
 	msg message.BasicMessage,
 	descriptorGetter primaryKeyDescriptorGetter,
 ) (primarykey.Keys, error) {
+	if msg.Version() == message.VersionV2 {
+		return extractPKsFromInsertOrUpsert(ctx, msg, descriptorGetter)
+	}
 	header, err := insertHeader(msg)
 	if err != nil {
 		return primarykey.Keys{}, status.NewUnrecoverableError("decode insert message for partial update tracking failed: %v", err)
@@ -259,7 +263,7 @@ func decodeInsertBody(ctx context.Context, msg message.BasicMessage) (*msgpb.Ins
 		}
 		return decodeRecoveredBody(ctx, "insert", insert)
 	}
-	return utility.DecodeInsertBody(ctx, msg.(message.MutableMessage))
+	return utility.DecodeLegacyInsertBody(ctx, msg.(message.MutableMessage))
 }
 
 func decodeDeleteBody(ctx context.Context, msg message.BasicMessage) (*msgpb.DeleteRequest, error) {
@@ -339,24 +343,26 @@ func extractDropCollectionID(msg message.BasicMessage) (int64, bool) {
 	return dropMsg.Header().GetCollectionId(), true
 }
 
-// extractPKsFromUpsert reads the PK types and values needed by lock tracking.
+// extractPKsFromInsertOrUpsert reads the PK types and values needed by lock tracking.
 // Lock and version tracking cover inserted keys and all explicit delete keys.
-func extractPKsFromUpsert(ctx context.Context, msg message.BasicMessage, getter primaryKeyDescriptorGetter) (primarykey.Keys, error) {
-	var header *message.UpsertMessageHeader
-	if immutable, ok := msg.(message.ImmutableMessage); ok {
-		header = message.MustAsImmutableUpsertMessageV2(immutable).Header()
-	} else {
-		header = message.MustAsMutableUpsertMessageV2(msg.(message.MutableMessage)).Header()
-	}
-	body, err := message.ReadUpsertProjection(ctx, msg)
+func extractPKsFromInsertOrUpsert(ctx context.Context, msg message.BasicMessage, getter primaryKeyDescriptorGetter) (primarykey.Keys, error) {
+	header, err := message.ReadInsertOrUpsertHeader(msg)
 	if err != nil {
 		return primarykey.Keys{}, err
 	}
+	body, err := message.ReadInsertOrUpsertProjection(ctx, msg)
+	if err != nil {
+		return primarykey.Keys{}, err
+	}
+	return extractPKsFromInsertOrUpsertProjection(header, body, getter)
+}
+
+func extractPKsFromInsertOrUpsertProjection(header *message.InsertOrUpsertHeader, body *message.InsertOrUpsertProjection, getter primaryKeyDescriptorGetter) (primarykey.Keys, error) {
 	descriptor, err := primaryKeyDescriptorOf(getter, header.GetCollectionId())
 	if err != nil {
 		return primarykey.Keys{}, err
 	}
-	result, err := primarykey.KeysOfDelete(&msgpb.DeleteRequest{PrimaryKeys: body.GetPrimaryKeys()})
+	result, err := primarykey.KeysOfDelete(&msgpb.DeleteRequest{PrimaryKeys: body.GetRows().GetPrimaryKeys()})
 	if err != nil {
 		return primarykey.Keys{}, err
 	}

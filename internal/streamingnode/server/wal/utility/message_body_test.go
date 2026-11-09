@@ -45,22 +45,22 @@ func corruptBody(msg message.MutableMessage) message.MutableMessage {
 	return message.NewMutableMessageBeforeAppend([]byte{0xff}, msg.Properties().ToRawMap())
 }
 
-func TestDecodeInsertBody(t *testing.T) {
+func TestDecodeLegacyInsertBody(t *testing.T) {
 	ctx := context.Background()
 
-	body, err := DecodeInsertBody(ctx, newBodyTestInsert())
+	body, err := DecodeLegacyInsertBody(ctx, newBodyTestInsert())
 	require.NoError(t, err)
 	require.Equal(t, uint64(3), body.GetNumRows())
 
-	_, err = DecodeInsertBody(ctx, newBodyTestDelete())
+	_, err = DecodeLegacyInsertBody(ctx, newBodyTestDelete())
 	requireStreamingCode(t, err, streamingpb.StreamingCode_STREAMING_CODE_UNRECOVERABLE, "decode insert message failed")
 
-	_, err = DecodeInsertBody(ctx, corruptBody(newBodyTestInsert()))
+	_, err = DecodeLegacyInsertBody(ctx, corruptBody(newBodyTestInsert()))
 	requireStreamingCode(t, err, streamingpb.StreamingCode_STREAMING_CODE_UNRECOVERABLE, "decode insert body failed")
 
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
-	_, err = DecodeInsertBody(canceled, newBodyTestInsert())
+	_, err = DecodeLegacyInsertBody(canceled, newBodyTestInsert())
 	require.ErrorIs(t, err, context.Canceled)
 }
 

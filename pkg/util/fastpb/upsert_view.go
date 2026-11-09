@@ -24,94 +24,102 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 )
 
-// UpsertViewEncoder writes borrowed columns directly after independent non-column
-// fields. It uses the Insert view encoder's field plans and nullable cursors.
-type UpsertViewEncoder struct {
+// insertRowsViewEncoder encodes shared rows directly into its destination.
+// It borrows source columns until the synchronous MarshalTo call completes.
+type insertRowsViewEncoder struct {
 	encodedNonColumnFields []byte
 	columns                *InsertRequestViewEncoder
 }
 
-func (*UpsertViewEncoder) BodyType() *messagespb.UpsertMessageBody { return nil }
-func NewUpsertViewEncoder(nonColumnFields *messagespb.UpsertMessageBody, source *msgpb.InsertRequest, rows []int) (*UpsertViewEncoder, error) {
-	if len(nonColumnFields.GetColumns()) != 0 {
-		return nil, insertViewInternal("Upsert non-column fields must not include columns")
+func newInsertRowsViewEncoder(rows *messagespb.InsertRows, source *msgpb.InsertRequest, selected []int) (*insertRowsViewEncoder, error) {
+	if len(rows.GetColumns()) != 0 {
+		return nil, insertViewInternal("row non-column fields must not include columns")
 	}
-	encoder, err := NewInsertRequestViewEncoder(&msgpb.InsertRequest{}, source, rows)
+	encoder, err := NewInsertRequestViewEncoder(&msgpb.InsertRequest{}, source, selected)
 	if err != nil {
 		return nil, err
 	}
-	// Remove Insert-only framing from the existing exact size plan.
-	encoder.size -= protowire.SizeTag(10) + protowire.SizeBytes(encoder.sizePlan[0]) + protowire.SizeTag(11) + protowire.SizeBytes(encoder.sizePlan[1]) + protowire.SizeTag(14) + protowire.SizeVarint(uint64(len(rows)))
+	encoder.size -= protowire.SizeTag(10) + protowire.SizeBytes(encoder.sizePlan[0]) + protowire.SizeTag(11) + protowire.SizeBytes(encoder.sizePlan[1]) + protowire.SizeTag(14) + protowire.SizeVarint(uint64(len(selected)))
 	encoder.columnsOnly = true
-	// The Insert plan starts with packed timestamps and RowIDs.
 	encoder.sizePlan = encoder.sizePlan[2:]
-	payload, err := proto.Marshal(nonColumnFields)
+	payload, err := proto.Marshal(rows)
 	if err != nil {
 		return nil, err
 	}
-	return &UpsertViewEncoder{encodedNonColumnFields: payload, columns: encoder}, nil
+	return &insertRowsViewEncoder{encodedNonColumnFields: payload, columns: encoder}, nil
 }
 
-func (e *UpsertViewEncoder) EncodedSize() (int, error) {
+func (e *insertRowsViewEncoder) EncodedSize() (int, error) {
 	size, err := e.columns.EncodedSize()
 	return len(e.encodedNonColumnFields) + size, err
 }
 
-func (e *UpsertViewEncoder) MarshalTo(dst []byte) (int, error) {
+func (e *insertRowsViewEncoder) MarshalTo(dst []byte) (int, error) {
+	copy(dst, e.encodedNonColumnFields)
+	n, err := e.columns.MarshalTo(dst[len(e.encodedNonColumnFields):])
+	return len(e.encodedNonColumnFields) + n, err
+}
+
+// insertOrUpsertViewEncoder owns outer framing and shares the same nested rows codec.
+type insertOrUpsertViewEncoder struct {
+	rows   *insertRowsViewEncoder
+	suffix []byte
+}
+
+func (e *insertOrUpsertViewEncoder) EncodedSize() (int, error) {
+	size, err := e.rows.EncodedSize()
+	return protowire.SizeTag(1) + protowire.SizeBytes(size) + len(e.suffix), err
+}
+
+func (e *insertOrUpsertViewEncoder) MarshalTo(dst []byte) (int, error) {
 	size, err := e.EncodedSize()
 	if err != nil {
 		return 0, err
 	}
 	if len(dst) < size {
-		return 0, insertViewInternal("Upsert destination is too small")
+		return 0, insertViewInternal("row-write destination is too small")
 	}
-	copy(dst, e.encodedNonColumnFields)
-	n, err := e.columns.MarshalTo(dst[len(e.encodedNonColumnFields):])
-	return n + len(e.encodedNonColumnFields), err
+	rowSize, err := e.rows.EncodedSize()
+	if err != nil {
+		return 0, err
+	}
+	prefix := protowire.AppendTag(dst[:0], 1, protowire.BytesType)
+	prefix = protowire.AppendVarint(prefix, uint64(rowSize))
+	n, err := e.rows.MarshalTo(dst[len(prefix):])
+	if err != nil {
+		return 0, err
+	}
+	end := len(prefix) + n
+	copy(dst[end:], e.suffix)
+	return end + len(e.suffix), nil
 }
 
-// UpsertViewCursor shares nullable positions and size-plan scratch across chunks.
-// The source is immutable until the cursor and its synchronous encoder expire.
-type UpsertViewCursor struct{ columns *InsertRequestViewCursor }
+// InsertMessageViewEncoder writes Insert V2 without copying selected columns.
+type InsertMessageViewEncoder struct{ insertOrUpsertViewEncoder }
 
-func NewUpsertViewCursor(source *msgpb.InsertRequest) (*UpsertViewCursor, error) {
-	cursor, err := NewInsertRequestViewCursor(source)
+func (*InsertMessageViewEncoder) BodyType() *messagespb.InsertMessageBody { return nil }
+func NewInsertMessageViewEncoder(body *messagespb.InsertMessageBody, source *msgpb.InsertRequest, selected []int) (*InsertMessageViewEncoder, error) {
+	rows, err := newInsertRowsViewEncoder(body.GetRows(), source, selected)
 	if err != nil {
 		return nil, err
 	}
-	return &UpsertViewCursor{columns: cursor}, nil
+	return &InsertMessageViewEncoder{insertOrUpsertViewEncoder: insertOrUpsertViewEncoder{rows: rows}}, nil
 }
 
-// NextEncoder plans columns without encoding them. nonColumnSizePrefix contains
-// cumulative row-nonColumnFields budgets. fixedBytes reserves the envelope and cipher.
-// The first row is returned even when it exceeds the budget.
-func (c *UpsertViewCursor) NextEncoder(rows []int, limit int, nonColumnSizePrefix []int, fixedBytes int) (*UpsertViewEncoder, int, error) {
-	if len(nonColumnSizePrefix) != len(rows)+1 {
-		return nil, 0, insertViewInternal("Upsert non-column field budget length differs from rows")
-	}
-	encoder, count, err := c.columns.nextEncoder(&msgpb.InsertRequest{}, rows, 0, func(count, size int) bool {
-		return limit <= 0 || size+fixedBytes+nonColumnSizePrefix[count]-nonColumnSizePrefix[0] <= limit
-	})
-	if err != nil {
-		return nil, 0, err
-	}
-	encoder.size -= protowire.SizeTag(10) + protowire.SizeBytes(encoder.sizePlan[0]) + protowire.SizeTag(11) + protowire.SizeBytes(encoder.sizePlan[1]) + protowire.SizeTag(14) + protowire.SizeVarint(uint64(count))
-	encoder.columnsOnly = true
-	encoder.sizePlan = encoder.sizePlan[2:]
-	return &UpsertViewEncoder{columns: encoder}, count, nil
-}
+// UpsertViewEncoder adds explicit effects and CAS to the shared rows encoding.
+type UpsertViewEncoder struct{ insertOrUpsertViewEncoder }
 
-// SetNonColumnFields completes an accepted prefix before its single MarshalTo call.
-func (e *UpsertViewEncoder) SetNonColumnFields(nonColumnFields *messagespb.UpsertMessageBody) error {
-	if len(nonColumnFields.GetColumns()) != 0 {
-		return insertViewInternal("Upsert non-column fields must not include columns")
-	}
-	payload, err := proto.Marshal(nonColumnFields)
+func (*UpsertViewEncoder) BodyType() *messagespb.UpsertMessageBody { return nil }
+func NewUpsertViewEncoder(body *messagespb.UpsertMessageBody, source *msgpb.InsertRequest, selected []int) (*UpsertViewEncoder, error) {
+	rows, err := newInsertRowsViewEncoder(body.GetRows(), source, selected)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	e.encodedNonColumnFields = payload
-	return nil
+	suffix, err := proto.Marshal(&messagespb.UpsertMessageBody{DeleteEffects: body.GetDeleteEffects(), PartialUpdateCas: body.GetPartialUpdateCas()})
+	if err != nil {
+		return nil, err
+	}
+	return &UpsertViewEncoder{insertOrUpsertViewEncoder: insertOrUpsertViewEncoder{rows: rows, suffix: suffix}}, nil
 }
 
 // UpsertPartitionSizes computes the same row-and-column sizes as independent
@@ -147,7 +155,7 @@ func UpsertPartitionSizes(source *msgpb.InsertRequest, selections [][]int64) ([]
 			return nil, err
 		}
 		size := encoder.size - protowire.SizeTag(10) - protowire.SizeBytes(encoder.sizePlan[0]) - protowire.SizeTag(11) - protowire.SizeBytes(encoder.sizePlan[1]) - protowire.SizeTag(14) - protowire.SizeVarint(uint64(len(rows)))
-		sizes[index] = uint64(size + proto.Size(&messagespb.UpsertMessageBody{RowIds: rowIDs}))
+		sizes[index] = uint64(size + proto.Size(&messagespb.InsertRows{RowIds: rowIDs}))
 		// No encoder escapes this size-only operation or needs a MarshalTo call.
 		cursor.activeEncoder = nil
 	}

@@ -67,7 +67,16 @@ func (bs *TxnInsertResultBuffers) Add(msg message.MutableMessage, result *messag
 	var rows uint64
 	switch msg.MessageType() {
 	case message.MessageTypeInsert:
-		for _, partition := range message.MustAsMutableInsertMessageV1(msg).Header().GetPartitions() {
+		var partitions []*message.PartitionSegmentAssignment
+		switch msg.Version() {
+		case message.VersionOld, message.VersionV1:
+			partitions = message.MustAsMutableInsertMessageV1(msg).Header().GetPartitions()
+		case message.VersionV2:
+			partitions = message.MustAsMutableInsertMessageV2(msg).Header().GetPartitions()
+		default:
+			panic("unexpected Insert message version")
+		}
+		for _, partition := range partitions {
 			rows += partition.GetRows()
 		}
 	case message.MessageTypeUpsert:

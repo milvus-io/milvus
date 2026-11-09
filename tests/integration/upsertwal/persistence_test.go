@@ -31,58 +31,71 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func (s *UpsertWALSuite) TestChunkedUpsertHasOneLogicalEffect() {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
-	c := s.create(ctx)
-	producer := rawProducer(s.T(), ctx, s.Cluster, c.vchannel)
-	_, err := producer.Append(ctx, c.upsert(11, 1))
-	s.Require().NoError(err)
-	const rows = 32768
-	msg := c.upsert(11, 2, "chunked")
-	typed := message.MustAsMutableUpsertMessageV2(msg)
-	body := typed.MustBody()
-	keys, rowIDs, markers := make([]int64, rows), make([]int64, rows), make([]int64, rows)
-	vectors := make([]float32, rows*2)
-	offsets := make([]uint32, rows)
-	for index := range rows {
-		keys[index], rowIDs[index], markers[index] = int64(index+11), (1<<62)+rowSequence.Add(1), 2
-		vectors[2*index], vectors[2*index+1] = 1, 2
-		offsets[index] = uint32(index)
+func (s *UpsertWALSuite) TestChunkedInsertOrUpsertHasOneLogicalEffect() {
+	for _, kind := range []string{"InsertV2", "Upsert"} {
+		s.Run(kind, func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+			defer cancel()
+			c := s.create(ctx)
+			producer := rawProducer(s.T(), ctx, s.Cluster, c.vchannel)
+			_, err := producer.Append(ctx, c.upsert(11, 1))
+			s.Require().NoError(err)
+			const rows = 32768
+			msg := c.upsert(11, 2, "chunked")
+			typed := message.MustAsMutableUpsertMessageV2(msg)
+			body := typed.MustBody()
+			keys, rowIDs, markers := make([]int64, rows), make([]int64, rows), make([]int64, rows)
+			vectors := make([]float32, rows*2)
+			offsets := make([]uint32, rows)
+			for index := range rows {
+				keys[index], rowIDs[index], markers[index] = int64(index+11), (1<<62)+rowSequence.Add(1), 2
+				vectors[2*index], vectors[2*index+1] = 1, 2
+				offsets[index] = uint32(index)
+			}
+			for _, field := range body.Rows.Columns {
+				switch field.GetFieldName() {
+				case "pk":
+					field.GetScalars().GetLongData().Data = keys
+				case "marker":
+					field.GetScalars().GetLongData().Data = markers
+				case "vector":
+					field.GetVectors().GetFloatVector().Data = vectors
+				}
+			}
+			body.Rows.PrimaryKeys.GetIntId().Data, body.Rows.RowIds = keys, rowIDs
+			body.DeleteEffects[0].PrimaryKeys.GetIntId().Data = keys
+			typed.OverwriteBody(body)
+			header := typed.Header()
+			body.Rows.RequestRowMapping.RowOffsets = offsets
+			typed.OverwriteBody(body)
+			header.DeleteRows, header.Partitions[0].Rows, header.Partitions[0].BinarySize = rows, rows, rows*32
+			typed.OverwriteHeader(header)
+			if kind == "InsertV2" {
+				msg = message.NewInsertMessageBuilderV2().WithVChannel(c.vchannel).WithIdempotencyKey(message.IdempotencyKeyOf(msg)).
+					WithHeader(&message.InsertMessageHeaderV2{CollectionId: c.id, Partitions: header.Partitions, SchemaVersion: header.SchemaVersion}).
+					WithBody(&message.InsertMessageBody{Rows: body.Rows}).MustBuildMutable()
+			}
+			s.Require().Greater(msg.EstimateSize(), 524288, "input must exceed the configured physical message limit")
+			result, err := producer.Append(ctx, msg)
+			s.Require().NoError(err)
+			s.Require().NotNil(result.MessageID)
+			s.Require().Positive(result.TimeTick)
+			// Check the persisted effects without depending on the query startup change.
+			s.flush(ctx, c)
+			status, err := s.Cluster.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{CollectionName: c.name})
+			s.Require().NoError(merr.CheckRPCCall(status, err))
+			status, err = s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{CollectionName: c.name})
+			s.Require().NoError(merr.CheckRPCCall(status, err))
+			s.WaitForLoad(ctx, c.name)
+			oldRows := 0
+			if kind == "InsertV2" {
+				oldRows = 1
+			}
+			s.assertRows(ctx, c, 11, 1, oldRows)
+			s.assertRows(ctx, c, 11, 2, 1)
+			s.assertRows(ctx, c, rows+10, 2, 1)
+		})
 	}
-	for _, field := range body.Columns {
-		switch field.GetFieldName() {
-		case "pk":
-			field.GetScalars().GetLongData().Data = keys
-		case "marker":
-			field.GetScalars().GetLongData().Data = markers
-		case "vector":
-			field.GetVectors().GetFloatVector().Data = vectors
-		}
-	}
-	body.PrimaryKeys.GetIntId().Data, body.RowIds = keys, rowIDs
-	body.DeleteEffects[0].PrimaryKeys.GetIntId().Data = keys
-	typed.OverwriteBody(body)
-	header := typed.Header()
-	body.RequestRowMapping.RowOffsets = offsets
-	typed.OverwriteBody(body)
-	header.DeleteRows, header.Partitions[0].Rows, header.Partitions[0].BinarySize = rows, rows, rows*32
-	typed.OverwriteHeader(header)
-	s.Require().Greater(msg.EstimateSize(), 524288, "input must exceed the configured physical message limit")
-	result, err := producer.Append(ctx, msg)
-	s.Require().NoError(err)
-	s.Require().NotNil(result.MessageID)
-	s.Require().Positive(result.TimeTick)
-	// Check the persisted effects without depending on the query startup change.
-	s.flush(ctx, c)
-	status, err := s.Cluster.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{CollectionName: c.name})
-	s.Require().NoError(merr.CheckRPCCall(status, err))
-	status, err = s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{CollectionName: c.name})
-	s.Require().NoError(merr.CheckRPCCall(status, err))
-	s.WaitForLoad(ctx, c.name)
-	s.assertRows(ctx, c, 11, 1, 0)
-	s.assertRows(ctx, c, 11, 2, 1)
-	s.assertRows(ctx, c, rows+10, 2, 1)
 }
 
 func (s *UpsertWALSuite) TestCompactionPreservesReplacement() {
@@ -190,7 +203,7 @@ func (s *UpsertWALSuite) TestUpsertTransactionInterveningWriteAndKeyedReopen() {
 
 // Check both public producers through WAL persistence. Live QueryView startup
 // remains a separate deployment dependency.
-func (s *UpsertWALSuite) TestPublicInsertAndUpsertPersist() {
+func (s *UpsertWALSuite) TestPublicInsertUpsertAndDeletePersist() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	c := s.create(ctx)
@@ -222,4 +235,16 @@ func (s *UpsertWALSuite) TestPublicInsertAndUpsertPersist() {
 	s.assertRows(ctx, c, 11, 1, 0)
 	s.assertRows(ctx, c, 11, 2, 1)
 	s.assertPhysicalRows(ctx, c, 2)
+	deleted, err := s.Cluster.MilvusClient.Delete(ctx, &milvuspb.DeleteRequest{CollectionName: c.name, Expr: "pk == 11"})
+	s.Require().NoError(merr.CheckRPCCall(deleted, err))
+	s.Require().Equal(int64(1), deleted.GetDeleteCnt())
+	s.assertRows(ctx, c, 11, 2, 0)
+	s.flush(ctx, c)
+	status, err = s.Cluster.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{CollectionName: c.name})
+	s.Require().NoError(merr.CheckRPCCall(status, err))
+	status, err = s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{CollectionName: c.name})
+	s.Require().NoError(merr.CheckRPCCall(status, err))
+	s.WaitForLoad(ctx, c.name)
+	s.assertRows(ctx, c, 11, 1, 0)
+	s.assertRows(ctx, c, 11, 2, 0)
 }

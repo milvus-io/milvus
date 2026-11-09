@@ -59,13 +59,13 @@ func (s *upsertWALFixture) sequentialKeyedUpsertResults() {
 		second := c.upsert(12, 3, "sequential-keyed")
 		typed := message.MustAsMutableUpsertMessageV2(second)
 		resultBody := typed.MustBody()
-		resultBody.RequestRowMapping.RowOffsets = []uint32{1}
+		resultBody.Rows.RequestRowMapping.RowOffsets = []uint32{1}
 		typed.OverwriteBody(resultBody)
 		if mixed {
 			second = c.legacy("Insert", 12, 3)
 			insert := message.MustAsMutableInsertMessageV1(second)
 			header := insert.Header()
-			message.SetInsertHeaderIdempotentInsertResult(header, &messagespb.IdempotentInsertResult{Ids: resultBody.PrimaryKeys, RowOffsets: resultBody.RequestRowMapping.RowOffsets})
+			message.SetInsertHeaderIdempotentInsertResult(header, &messagespb.IdempotentInsertResult{Ids: resultBody.Rows.PrimaryKeys, RowOffsets: resultBody.Rows.RequestRowMapping.RowOffsets})
 			insert.OverwriteHeader(header)
 		}
 		_, err = producer.Append(ctx, second.WithTxnContext(*begin.TxnCtx))
@@ -163,7 +163,7 @@ func (s *UpsertWALSuite) TestRequestMappingAndInvalidMetadata() {
 	invalid := c.upsert(11, 999, "invalid-metadata")
 	typed := message.MustAsMutableUpsertMessageV2(invalid)
 	body := typed.MustBody()
-	body.RequestRowMapping.RowOffsets = []uint32{0, 1}
+	body.Rows.RequestRowMapping.RowOffsets = []uint32{0, 1}
 	typed.OverwriteBody(body)
 	_, err = producer.Append(ctx, invalid)
 	s.Require().Error(err)

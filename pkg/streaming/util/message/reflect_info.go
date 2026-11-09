@@ -98,6 +98,8 @@ type (
 	CacheExpirations                 = messagespb.CacheExpirations
 	CacheExpiration                  = messagespb.CacheExpiration
 	LegacyProxyCollectionMetaCache   = messagespb.LegacyProxyCollectionMetaCache
+	InsertRows                       = messagespb.InsertRows
+	RequestRowMapping                = messagespb.RequestRowMapping
 )
 
 // Export message header and body types
@@ -110,6 +112,8 @@ type (
 	TimeTickMsg                            = msgpb.TimeTickMsg
 	InsertMessageHeader                    = messagespb.InsertMessageHeader
 	InsertRequest                          = msgpb.InsertRequest
+	InsertMessageHeaderV2                  = messagespb.InsertMessageHeaderV2
+	InsertMessageBody                      = messagespb.InsertMessageBody
 	DeleteMessageHeader                    = messagespb.DeleteMessageHeader
 	DeleteRequest                          = msgpb.DeleteRequest
 	UpsertMessageHeader                    = messagespb.UpsertMessageHeader
@@ -423,6 +427,56 @@ var MustAsBroadcastInsertMessageV1 = MustAsSpecializedBroadcastMessage[*InsertMe
 
 // NewInsertMessageBuilderV1 creates a new message builder for InsertMessageV1
 var NewInsertMessageBuilderV1 = newMutableMessageBuilder[*InsertMessageHeader, *InsertRequest]
+
+// Type aliases for InsertMessageV2
+type (
+	MutableInsertMessageV2           = specializedMutableMessage[*InsertMessageHeaderV2, *InsertMessageBody]
+	ImmutableInsertMessageV2         = SpecializedImmutableMessage[*InsertMessageHeaderV2, *InsertMessageBody]
+	OwnedImmutableInsertMessageV2    = SpecializedOwnedImmutableMessage[*InsertMessageHeaderV2, *InsertMessageBody]
+	RetainedImmutableInsertMessageV2 = SpecializedRetainedImmutableMessage[*InsertMessageHeaderV2, *InsertMessageBody]
+	BroadcastInsertMessageV2         = SpecializedBroadcastMessage[*InsertMessageHeaderV2, *InsertMessageBody]
+	BroadcastResultInsertMessageV2   = BroadcastResult[*InsertMessageHeaderV2, *InsertMessageBody]
+	AckResultInsertMessageV2         = AckResult[*InsertMessageHeaderV2, *InsertMessageBody]
+)
+
+// MessageTypeWithVersion for InsertMessageV2
+var MessageTypeInsertV2 = MessageTypeWithVersion{
+	MessageType: MessageTypeInsert,
+	Version:     VersionV2,
+}
+
+// MessageSpecializedType for InsertMessageV2
+var SpecializedTypeInsertV2 = MessageSpecializedType{
+	BodyType:   reflect.TypeOf((*InsertMessageBody)(nil)),
+	HeaderType: reflect.TypeOf((*InsertMessageHeaderV2)(nil)),
+}
+
+// AsMutableInsertMessageV2 converts a BasicMessage to MutableInsertMessageV2
+var AsMutableInsertMessageV2 = asSpecializedMutableMessage[*InsertMessageHeaderV2, *InsertMessageBody]
+
+// MustAsMutableInsertMessageV2 converts a BasicMessage to MutableInsertMessageV2, panics on error
+var MustAsMutableInsertMessageV2 = mustAsSpecializedMutableMessage[*InsertMessageHeaderV2, *InsertMessageBody]
+
+// AsImmutableInsertMessageV2 converts an ImmutableMessage to ImmutableInsertMessageV2
+var AsImmutableInsertMessageV2 = asSpecializedImmutableMessage[*InsertMessageHeaderV2, *InsertMessageBody]
+
+// MustAsImmutableInsertMessageV2 converts an ImmutableMessage to ImmutableInsertMessageV2, panics on error
+var MustAsImmutableInsertMessageV2 = MustAsSpecializedImmutableMessage[*InsertMessageHeaderV2, *InsertMessageBody]
+
+// MustAsOwnedImmutableInsertMessageV2 converts an OwnedImmutableMessage to OwnedImmutableInsertMessageV2, panics on error
+var MustAsOwnedImmutableInsertMessageV2 = MustAsSpecializedOwnedImmutableMessage[*InsertMessageHeaderV2, *InsertMessageBody]
+
+// MustAsRetainedImmutableInsertMessageV2 converts a RetainedImmutableMessage to RetainedImmutableInsertMessageV2, panics on error
+var MustAsRetainedImmutableInsertMessageV2 = MustAsSpecializedRetainedImmutableMessage[*InsertMessageHeaderV2, *InsertMessageBody]
+
+// AsBroadcastInsertMessageV2 converts a BasicMessage to BroadcastInsertMessageV2
+var AsBroadcastInsertMessageV2 = asSpecializedBroadcastMessage[*InsertMessageHeaderV2, *InsertMessageBody]
+
+// MustAsBroadcastInsertMessageV2 converts a BasicMessage to BroadcastInsertMessageV2, panics on error
+var MustAsBroadcastInsertMessageV2 = MustAsSpecializedBroadcastMessage[*InsertMessageHeaderV2, *InsertMessageBody]
+
+// NewInsertMessageBuilderV2 creates a new message builder for InsertMessageV2
+var NewInsertMessageBuilderV2 = newMutableMessageBuilder[*InsertMessageHeaderV2, *InsertMessageBody]
 
 // Type aliases for DeleteMessageV1
 type (
@@ -3244,6 +3298,7 @@ var messageTypeMap = map[reflect.Type]MessageType{
 	reflect.TypeOf(&messagespb.FlushMessageHeader{}):                     MessageTypeFlush,
 	reflect.TypeOf(&messagespb.ImportMessageHeader{}):                    MessageTypeImport,
 	reflect.TypeOf(&messagespb.InsertMessageHeader{}):                    MessageTypeInsert,
+	reflect.TypeOf(&messagespb.InsertMessageHeaderV2{}):                  MessageTypeInsert,
 	reflect.TypeOf(&messagespb.MVCCBarrierMessageHeader{}):               MessageTypeMVCCBarrier,
 	reflect.TypeOf(&messagespb.ManualFlushMessageHeader{}):               MessageTypeManualFlush,
 	reflect.TypeOf(&messagespb.RecoveryBarrierMessageHeader{}):           MessageTypeRecoveryBarrier,
@@ -3324,6 +3379,7 @@ var messageTypeVersionSpecializedMap = map[MessageTypeWithVersion]MessageSpecial
 	MessageTypeFlushV2:                     SpecializedTypeFlushV2,
 	MessageTypeImportV1:                    SpecializedTypeImportV1,
 	MessageTypeInsertV1:                    SpecializedTypeInsertV1,
+	MessageTypeInsertV2:                    SpecializedTypeInsertV2,
 	MessageTypeMVCCBarrierV2:               SpecializedTypeMVCCBarrierV2,
 	MessageTypeManualFlushV2:               SpecializedTypeManualFlushV2,
 	MessageTypeRecoveryBarrierV2:           SpecializedTypeRecoveryBarrierV2,
@@ -3388,6 +3444,7 @@ var messageSpecializedTypeVersionMap = map[MessageSpecializedType]MessageTypeWit
 	SpecializedTypeFlushV2:                     MessageTypeFlushV2,
 	SpecializedTypeImportV1:                    MessageTypeImportV1,
 	SpecializedTypeInsertV1:                    MessageTypeInsertV1,
+	SpecializedTypeInsertV2:                    MessageTypeInsertV2,
 	SpecializedTypeMVCCBarrierV2:               MessageTypeMVCCBarrierV2,
 	SpecializedTypeManualFlushV2:               MessageTypeManualFlushV2,
 	SpecializedTypeRecoveryBarrierV2:           MessageTypeRecoveryBarrierV2,

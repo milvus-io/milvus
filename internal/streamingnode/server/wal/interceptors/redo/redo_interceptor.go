@@ -86,13 +86,19 @@ func (r *redoAppendInterceptor) waitUntilGrowingSegmentReady(ctx context.Context
 	var partitions []*message.PartitionSegmentAssignment
 	switch msg.MessageType() {
 	case message.MessageTypeInsert:
-		insertMessage := message.MustAsMutableInsertMessageV1(msg)
-		h := insertMessage.Header()
-		if len(h.Partitions) != 1 {
-			// TODO: We will support multi-partition insert in the future.
-			panic("insert message should only have one partition")
+		switch msg.Version() {
+		case message.VersionOld, message.VersionV1:
+			h := message.MustAsMutableInsertMessageV1(msg).Header()
+			if len(h.Partitions) != 1 {
+				panic("insert message should only have one partition")
+			}
+			collectionID, partitions = h.CollectionId, h.Partitions
+		case message.VersionV2:
+			h := message.MustAsMutableInsertMessageV2(msg).Header()
+			collectionID, partitions = h.GetCollectionId(), h.GetPartitions()
+		default:
+			panic("unexpected Insert message version")
 		}
-		collectionID, partitions = h.CollectionId, h.Partitions
 	case message.MessageTypeUpsert:
 		h := message.MustAsMutableUpsertMessageV2(msg).Header()
 		collectionID, partitions = h.GetCollectionId(), h.GetPartitions()

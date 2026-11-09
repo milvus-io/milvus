@@ -66,11 +66,14 @@ and original request mapping. The secondary preserves these decisions and assign
 its own segments. It does not query a local PK index to infer deletes. Transaction
 replay retains Commit visibility and the existing source-ID prefix rules.
 
-`streaming.wal.enableUpsertMessage` defaults to auto with the standard 3.1.0
-version gate. Automatic switching checks registered online components in the local
-cluster, with the distributed stability window or standard embedded-etcd local
-version path. It does not check CDC target compatibility or establish downgrade
-safety for retained records. Deployment management must keep targets compatible.
+3.1 produces Insert V2 and Upsert without a format setting, and SN always chunks
+oversized physical payloads when the backend has a configured chunk budget.
+Readers always reassemble before CDC sends logical records. The prerequisite
+latest 3.0 release must support the complete new-format receiving/consumption
+paths and chunk reading; its producers keep existing behavior. Deployment must
+also ensure compatible CDC targets. Mixed-version large writes may wait or time
+out until an old owner upgrades or moves. No automatic target negotiation or
+retained-history downgrade guarantee is provided.
 See [Unified Insert and Upsert WAL format](../../../design-docs/design_docs/wal/upsert_message.md).
 
 ## Recovery

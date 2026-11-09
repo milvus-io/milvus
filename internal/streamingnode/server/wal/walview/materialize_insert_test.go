@@ -62,34 +62,38 @@ func TestMaterializeInsertPreservesWALAndExistingOutputs(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestUpsertMinHashMaterializationAcrossPartitions(t *testing.T) {
+func TestInsertOrUpsertMinHashMaterializationAcrossPartitions(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Version: 1, Fields: []*schemapb.FieldSchema{
 		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 		{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "max_length", Value: "256"}, {Key: "enable_analyzer", Value: "true"}}},
 		{FieldID: 102, Name: "hash", DataType: schemapb.DataType_BinaryVector, IsFunctionOutput: true, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "512"}}},
 	}, Functions: []*schemapb.FunctionSchema{{Name: "minhash", Type: schemapb.FunctionType_MinHash, InputFieldNames: []string{"text"}, InputFieldIds: []int64{101}, OutputFieldNames: []string{"hash"}, OutputFieldIds: []int64{102}, Params: []*commonpb.KeyValuePair{{Key: "num_hashes", Value: "16"}}}}}
 	version := int32(1)
-	raw := message.NewUpsertMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&message.UpsertMessageHeader{CollectionId: 1, SchemaVersion: &version, Partitions: []*messagespb.PartitionSegmentAssignment{{PartitionId: 10, Rows: 1, SegmentAssignment: &messagespb.SegmentAssignment{SegmentId: 20}}, {PartitionId: 11, Rows: 1, SegmentAssignment: &messagespb.SegmentAssignment{SegmentId: 21}}}}).WithBody(&message.UpsertMessageBody{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7, 8}}}}, RowIds: []int64{1, 2}, PartitionIndexes: []uint32{0, 1}, Columns: []*schemapb.FieldData{{FieldId: 101, FieldName: "text", Type: schemapb.DataType_VarChar, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"first text", "second document"}}}}}}}}).MustBuildMutable().WithTimeTick(42).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(42))
+	raw := message.NewUpsertMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&message.UpsertMessageHeader{CollectionId: 1, SchemaVersion: &version, Partitions: []*messagespb.PartitionSegmentAssignment{{PartitionId: 10, Rows: 1, SegmentAssignment: &messagespb.SegmentAssignment{SegmentId: 20}}, {PartitionId: 11, Rows: 1, SegmentAssignment: &messagespb.SegmentAssignment{SegmentId: 21}}}}).WithBody(&message.UpsertMessageBody{Rows: &message.InsertRows{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7, 8}}}}, RowIds: []int64{1, 2}, PartitionIndexes: []uint32{0, 1}, Columns: []*schemapb.FieldData{{FieldId: 101, FieldName: "text", Type: schemapb.DataType_VarChar, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"first text", "second document"}}}}}}}}}).MustBuildMutable().WithTimeTick(42).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(42))
 	before := proto.Clone(message.MustAsImmutableUpsertMessageV2(raw).MustBody())
+	header := message.MustAsImmutableUpsertMessageV2(raw).Header()
+	insert := message.NewInsertMessageBuilderV2().WithVChannel(raw.VChannel()).WithHeader(&message.InsertMessageHeaderV2{CollectionId: header.CollectionId, Partitions: header.Partitions, SchemaVersion: header.SchemaVersion}).WithBody(&message.InsertMessageBody{Rows: message.MustAsImmutableUpsertMessageV2(raw).MustBody().GetRows()}).MustBuildMutable().WithTimeTick(42).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(42))
 	seen := 0
-	require.NoError(t, ForEachSegmentInsertMessage(raw, 0, func(selected SegmentInsertMessage) error {
-		row, err := MaterializeInsertRequest(schema, selected)
-		if err != nil {
-			return err
-		}
-		require.Equal(t, uint64(1), row.NumRows)
-		require.Equal(t, []uint64{42}, row.Timestamps)
-		var hashes []byte
-		for _, column := range row.FieldsData {
-			if column.FieldId == 102 {
-				hashes = column.GetVectors().GetBinaryVector()
+	for _, input := range []message.ImmutableMessage{raw, insert} {
+		require.NoError(t, ForEachSegmentInsertMessage(input, 0, func(selected SegmentInsertMessage) error {
+			row, err := MaterializeInsertRequest(schema, selected)
+			if err != nil {
+				return err
 			}
-		}
-		require.Len(t, hashes, 64)
-		seen++
-		return nil
-	}))
-	require.Equal(t, 2, seen)
+			require.Equal(t, uint64(1), row.NumRows)
+			require.Equal(t, []uint64{42}, row.Timestamps)
+			var hashes []byte
+			for _, column := range row.FieldsData {
+				if column.FieldId == 102 {
+					hashes = column.GetVectors().GetBinaryVector()
+				}
+			}
+			require.Len(t, hashes, 64)
+			seen++
+			return nil
+		}))
+	}
+	require.Equal(t, 4, seen)
 	require.True(t, proto.Equal(before, message.MustAsImmutableUpsertMessageV2(raw).MustBody()))
 }
 
@@ -106,7 +110,7 @@ func BenchmarkUpsertBM25Materialization(b *testing.B) {
 	}
 	version := int32(1)
 	assignment := &messagespb.PartitionSegmentAssignment{PartitionId: 10, Rows: rows, SegmentAssignment: &messagespb.SegmentAssignment{SegmentId: 20}}
-	raw := message.NewUpsertMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&message.UpsertMessageHeader{CollectionId: 1, SchemaVersion: &version, Partitions: []*messagespb.PartitionSegmentAssignment{assignment}}).WithBody(&message.UpsertMessageBody{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: make([]int64, rows)}}}, RowIds: make([]int64, rows), Columns: []*schemapb.FieldData{{FieldId: 101, FieldName: "text", Type: schemapb.DataType_VarChar, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: texts}}}}}}}).MustBuildMutable().WithTimeTick(42).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(42))
+	raw := message.NewUpsertMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&message.UpsertMessageHeader{CollectionId: 1, SchemaVersion: &version, Partitions: []*messagespb.PartitionSegmentAssignment{assignment}}).WithBody(&message.UpsertMessageBody{Rows: &message.InsertRows{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: make([]int64, rows)}}}, RowIds: make([]int64, rows), Columns: []*schemapb.FieldData{{FieldId: 101, FieldName: "text", Type: schemapb.DataType_VarChar, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: texts}}}}}}}}).MustBuildMutable().WithTimeTick(42).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(42))
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

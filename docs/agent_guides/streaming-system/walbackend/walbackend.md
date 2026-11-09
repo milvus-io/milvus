@@ -46,3 +46,12 @@ so the relevant producer/transaction protocol handles that rejection directly.
 - `pkg/streaming/walimpls/` — `WALImpls` interface, Kafka/Pulsar/RMQ/Woodpecker implementations
 - `internal/streamingnode/server/wal/adaptor/wal_adaptor.go` — logical append context, backend retry and writer fencing
 - `internal/streamingnode/server/wal/adaptor/scanner_adaptor.go` — consumer ordering, physical deduplication and transaction assembly
+
+## Physical payload chunking
+
+SN always splits oversized encoded payloads below the interceptor chain when
+its backend has a configured record budget. There is no `streaming.splitChunkSN`
+setting in 3.1. Proxy sends one logical message per nonempty VChannel group and
+has no `proxy.splitChunk` setting. Chunk assembly remains unconditional before
+body interpretation. A backend without a chunk budget keeps single-record writes.
+See [WAL payload chunking](../../../design-docs/design_docs/20260822-wal-payload-chunking.md).

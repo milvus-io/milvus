@@ -41,6 +41,14 @@ func (r *insertRowsReader) ReadRows(ctx context.Context, schema *schemapb.Collec
 	var source *msgpb.InsertRequest
 	switch r.msg.MessageType() {
 	case message.MessageTypeInsert:
+		if r.msg.Version() == message.VersionV2 {
+			var err error
+			source, err = readInsertOrUpsertRows(ctx, r.msg, schema)
+			if err != nil {
+				return nil, err
+			}
+			break
+		}
 		body, err := message.MustAsImmutableInsertMessageV1(r.msg).Body(ctx)
 		if err != nil {
 			return nil, err
@@ -60,19 +68,11 @@ func (r *insertRowsReader) ReadRows(ctx context.Context, schema *schemapb.Collec
 		}
 		source = body
 	case message.MessageTypeUpsert:
-		upsert := message.MustAsImmutableUpsertMessageV2(r.msg)
-		body, err := upsert.Body(ctx)
+		var err error
+		source, err = readInsertOrUpsertRows(ctx, r.msg, schema)
 		if err != nil {
 			return nil, err
 		}
-		pk, err := typeutil.GetPrimaryFieldSchema(schema)
-		if err != nil {
-			return nil, err
-		}
-		fields := append([]*schemapb.FieldData(nil), body.GetColumns()...)
-		field := message.UpsertPrimaryKeyColumn(pk, body.GetPrimaryKeys())
-		fields = append(fields, field)
-		source = &msgpb.InsertRequest{CollectionID: upsert.Header().GetCollectionId(), NumRows: uint64(len(body.GetRowIds())), RowIDs: body.GetRowIds(), FieldsData: fields, Version: msgpb.InsertDataVersion_ColumnBased}
 	default:
 		panic("unexpected insert rows message type")
 	}
@@ -96,14 +96,14 @@ func (r *insertRowsReader) ReadRows(ctx context.Context, schema *schemapb.Collec
 		valid := typeutil.GetFieldDataValidData(field)
 		if field.GetVectors() != nil && field.GetVectors().GetVectorArray() == nil && len(valid) > 0 {
 			var mapping []int64
-			switch r.msg.MessageType() {
-			case message.MessageTypeUpsert:
+			switch {
+			case message.IsInsertOrUpsertMessage(r.msg):
 				var err error
-				mapping, err = message.ReadUpsertCompactRows(ctx, r.msg, field.GetFieldId(), valid)
+				mapping, err = message.ReadInsertOrUpsertCompactRows(ctx, r.msg, field.GetFieldId(), valid)
 				if err != nil {
 					return nil, err
 				}
-			case message.MessageTypeInsert:
+			case r.msg.MessageType() == message.MessageTypeInsert:
 				mapping = make([]int64, len(valid))
 				cursor := int64(0)
 				for logical, exists := range valid {
@@ -146,6 +146,9 @@ func AsInsertRowsReader(msg message.ImmutableMessage) (InsertRowsReader, []*mess
 	}
 	switch msg.MessageType() {
 	case message.MessageTypeInsert:
+		if msg.Version() == message.VersionV2 {
+			return &insertRowsReader{msg: msg}, message.MustAsImmutableInsertMessageV2(msg).Header().GetPartitions(), true
+		}
 		return &insertRowsReader{msg: msg}, message.MustAsImmutableInsertMessageV1(msg).Header().GetPartitions(), true
 	case message.MessageTypeUpsert:
 		return &insertRowsReader{msg: msg}, message.MustAsImmutableUpsertMessageV2(msg).Header().GetPartitions(), true
@@ -155,10 +158,10 @@ func AsInsertRowsReader(msg message.ImmutableMessage) (InsertRowsReader, []*mess
 
 // InsertSelections computes one logical selection for every partition.
 func InsertSelections(ctx context.Context, msg message.ImmutableMessage) ([][]int64, error) {
-	if msg.MessageType() != message.MessageTypeUpsert {
+	if !message.IsInsertOrUpsertMessage(msg) {
 		return nil, nil
 	}
-	return message.ReadUpsertRowSelections(ctx, msg)
+	return message.ReadInsertOrUpsertRowSelections(ctx, msg)
 }
 
 // DeleteRequests exposes all explicit effects with the final visibility timestamp.
@@ -200,7 +203,7 @@ func DeleteRequests(ctx context.Context, msg message.ImmutableMessage) ([]*msgpb
 	if msg.MessageType() != message.MessageTypeUpsert {
 		return nil, nil
 	}
-	body, err := message.ReadUpsertProjection(ctx, msg)
+	body, err := message.ReadInsertOrUpsertProjection(ctx, msg)
 	if err != nil {
 		return nil, err
 	}
@@ -251,4 +254,34 @@ func AsDeleteRequest(msg message.ImmutableMessage) (*msgpb.DeleteRequest, bool) 
 		panic(err)
 	}
 	return requests[0], true
+}
+
+func readInsertOrUpsertRows(ctx context.Context, msg message.ImmutableMessage, schema *schemapb.CollectionSchema) (*msgpb.InsertRequest, error) {
+	var rows *messagespb.InsertRows
+	var collection int64
+	switch msg.MessageType() {
+	case message.MessageTypeInsert:
+		typed := message.MustAsImmutableInsertMessageV2(msg)
+		body, err := typed.Body(ctx)
+		if err != nil {
+			return nil, err
+		}
+		rows, collection = body.GetRows(), typed.Header().GetCollectionId()
+	case message.MessageTypeUpsert:
+		typed := message.MustAsImmutableUpsertMessageV2(msg)
+		body, err := typed.Body(ctx)
+		if err != nil {
+			return nil, err
+		}
+		rows, collection = body.GetRows(), typed.Header().GetCollectionId()
+	default:
+		panic("unexpected row-write message type")
+	}
+	primary, err := typeutil.GetPrimaryFieldSchema(schema)
+	if err != nil {
+		return nil, err
+	}
+	fields := append([]*schemapb.FieldData(nil), rows.GetColumns()...)
+	fields = append(fields, message.UpsertPrimaryKeyColumn(primary, rows.GetPrimaryKeys()))
+	return &msgpb.InsertRequest{CollectionID: collection, NumRows: uint64(len(rows.GetRowIds())), RowIDs: rows.GetRowIds(), FieldsData: fields, Version: msgpb.InsertDataVersion_ColumnBased}, nil
 }

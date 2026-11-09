@@ -222,7 +222,6 @@ func (p *ComponentParam) versionGateItems() []*ParamItem {
 		&p.FunctionCfg.EnableWriteBeforeMaterialization,
 		&p.DataCoordCfg.ImportEnableIDRangeMsg,
 		&p.DataCoordCfg.EnableArraySortIndex,
-		&p.StreamingCfg.EnableUpsertMessage,
 	}
 }
 
@@ -2812,9 +2811,6 @@ type proxyConfig struct {
 	// Alias  string
 	SoPath ParamItem `refreshable:"false"`
 
-	// WAL payload chunking rollout switch.
-	SplitChunkProxy ParamItem `refreshable:"true"`
-
 	ExprParseCacheEnabled    ParamItem `refreshable:"false"`
 	ExprParseCacheMaxEntries ParamItem `refreshable:"false"`
 
@@ -2921,17 +2917,6 @@ func (p *proxyConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.ExprParseCacheMaxEntries.Init(base.mgr)
-
-	p.SplitChunkProxy = ParamItem{
-		Key:          "proxy.splitChunk",
-		Version:      "3.0.2",
-		DefaultValue: "true",
-		Doc: `Whether Proxy keeps the legacy row-based size packing before sending messages to StreamingNode.
-Keep this enabled until chunk writing is enabled and observed on every StreamingNode that can own a pchannel.
-For migration, enable streaming.splitChunkSN first, then disable proxy.splitChunk. Both parameters support live refresh.`,
-		Export: true,
-	}
-	p.SplitChunkProxy.Init(base.mgr)
 
 	p.TimeTickInterval = ParamItem{
 		Key:          "proxy.timeTickInterval",
@@ -9576,12 +9561,8 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 }
 
 type streamingConfig struct {
-	EnableUpsertMessage                              ParamItem `refreshable:"true"`
 	SchemaCacheTTL                                   ParamItem `refreshable:"false"`
 	QueryViewLiveEventDispatchConcurrencyPerPChannel ParamItem `refreshable:"true"`
-
-	// WAL payload chunking rollout switch.
-	SplitChunkSN ParamItem `refreshable:"true"`
 
 	// primary resource group
 	PrimaryResourceGroup ParamItem `refreshable:"true"`
@@ -9709,17 +9690,6 @@ type streamingConfig struct {
 func (p *streamingConfig) init(base *BaseTable) {
 	p.SchemaCacheTTL = ParamItem{Key: "streaming.schemaCacheTTL", Version: "3.0.5", DefaultValue: "900", Doc: "Idle lifetime in seconds of cached schema bodies. Non-positive values disable schema body retention.", Export: true}
 	p.SchemaCacheTTL.Init(base.mgr)
-
-	p.SplitChunkSN = ParamItem{
-		Key:          "streaming.splitChunkSN",
-		Version:      "3.0.2",
-		DefaultValue: "false",
-		Doc: `Whether StreamingNode splits oversized logical messages into physical WAL records.
-Enable this on every StreamingNode and confirm the live update before disabling proxy.splitChunk.
-Once chunk records have been written, do not roll StreamingNode back to a version that cannot reassemble them. Both parameters support live refresh.`,
-		Export: true,
-	}
-	p.SplitChunkSN.Init(base.mgr)
 
 	// primary resource group
 	p.PrimaryResourceGroup = ParamItem{
@@ -9984,22 +9954,6 @@ Zero disables this key-length bound; requests that carry no key are accepted at 
 		Export:       false,
 	}
 	p.IdempotencyMaxKeyLength.Init(base.mgr)
-
-	p.EnableUpsertMessage = ParamItem{
-		Key:          "streaming.wal.enableUpsertMessage",
-		Version:      "3.1.0",
-		DefaultValue: "auto",
-		Export:       true,
-		Doc:          "Select the producer WAL format. StreamingNode accepts supported Upsert messages regardless of this setting. auto: enable after all registered online components in this cluster reach 3.1.0 and the one-minute stability window elapses; false: use legacy Insert/Delete messages; true: force enable and bypass the version gate. This gate does not check CDC target versions or provide a downgrade guarantee. Retained decoding and durable transaction resolution remain available.",
-		VersionGateSwitcher: &VersionGateSwitcher{
-			EnableAutoSwitchValue: "auto",
-			PreSwitchValue:        "false",
-			GateVersion:           "3.1.0",
-			TargetValue:           "true",
-			SwitchDelay:           time.Minute,
-		},
-	}
-	p.EnableUpsertMessage.Init(base.mgr)
 
 	// txn
 	p.TxnDefaultKeepaliveTimeout = ParamItem{

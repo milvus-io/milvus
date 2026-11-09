@@ -56,7 +56,7 @@ func upsertFunctionFixture() (message.MutableMessage, *schemapb.CollectionSchema
 	msg := upsertForTest("p_1v0")
 	typed := message.MustAsMutableUpsertMessageV2(msg)
 	body := typed.MustBody()
-	body.Columns = append(body.Columns, &schemapb.FieldData{FieldId: 101, FieldName: "text", Type: schemapb.DataType_VarChar, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"new row"}}}}}})
+	body.Rows.Columns = append(body.Rows.Columns, &schemapb.FieldData{FieldId: 101, FieldName: "text", Type: schemapb.DataType_VarChar, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"new row"}}}}}})
 	typed.OverwriteBody(body)
 	header := typed.Header()
 	header.Partitions[0].BinarySize = 1

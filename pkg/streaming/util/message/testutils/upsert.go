@@ -25,19 +25,19 @@ import (
 )
 
 func Body(insert *msgpb.InsertRequest, deletion *msgpb.DeleteRequest) *messagespb.UpsertMessageBody {
-	body := &messagespb.UpsertMessageBody{}
+	body := &messagespb.UpsertMessageBody{Rows: &messagespb.InsertRows{}}
 	if insert != nil {
-		body.RowIds = insert.RowIDs
+		body.Rows.RowIds = insert.RowIDs
 		for _, column := range insert.GetFieldsData() {
 			if column.GetFieldId() == 100 {
 				switch data := column.GetScalars().GetData().(type) {
 				case *schemapb.ScalarField_LongData:
-					body.PrimaryKeys = &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: data.LongData}}
+					body.Rows.PrimaryKeys = &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: data.LongData}}
 				case *schemapb.ScalarField_StringData:
-					body.PrimaryKeys = &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: data.StringData}}
+					body.Rows.PrimaryKeys = &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: data.StringData}}
 				}
 			} else if column.GetFieldId() > 1 {
-				body.Columns = append(body.Columns, column)
+				body.Rows.Columns = append(body.Rows.Columns, column)
 			}
 		}
 	}
@@ -58,19 +58,19 @@ func Insert(body *messagespb.UpsertMessageBody) *msgpb.InsertRequest {
 	if body == nil {
 		return nil
 	}
-	fields := append([]*schemapb.FieldData(nil), body.Columns...)
+	fields := append([]*schemapb.FieldData(nil), body.Rows.Columns...)
 	field := &schemapb.FieldData{FieldId: 100}
-	if body.GetPrimaryKeys().GetIntId() != nil {
+	if body.GetRows().GetPrimaryKeys().GetIntId() != nil {
 		field.Type = schemapb.DataType_Int64
-		field.Field = &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: body.PrimaryKeys.GetIntId()}}}
-	} else if body.GetPrimaryKeys().GetStrId() != nil {
+		field.Field = &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: body.Rows.PrimaryKeys.GetIntId()}}}
+	} else if body.GetRows().GetPrimaryKeys().GetStrId() != nil {
 		field.Type = schemapb.DataType_VarChar
-		field.Field = &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: body.PrimaryKeys.GetStrId()}}}
+		field.Field = &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: body.Rows.PrimaryKeys.GetStrId()}}}
 	}
 	if field.Field != nil {
 		fields = append(fields, field)
 	}
-	return &msgpb.InsertRequest{NumRows: uint64(len(body.RowIds)), RowIDs: body.RowIds, FieldsData: fields, Version: msgpb.InsertDataVersion_ColumnBased}
+	return &msgpb.InsertRequest{NumRows: uint64(len(body.Rows.RowIds)), RowIDs: body.Rows.RowIds, FieldsData: fields, Version: msgpb.InsertDataVersion_ColumnBased}
 }
 
 func Delete(body *messagespb.UpsertMessageBody) *msgpb.DeleteRequest {

@@ -29,72 +29,73 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// ReadUpsertProjection reads PK, RowID, partition indexes, delete effects,
+// ReadInsertOrUpsertProjection reads PK, RowID, partition indexes, delete effects,
 // request row mapping, CAS and column descriptors without decoding ordinary
 // column values. Descriptors contain only field IDs. The returned projection
 // is read-only and does not retain the plaintext payload.
-func ReadUpsertProjection(ctx context.Context, msg BasicMessage) (*UpsertMessageBody, error) {
-	if msg == nil || msg.MessageType() != MessageTypeUpsert {
-		return nil, merr.WrapErrServiceInternalMsg("expected an Upsert message")
+func ReadInsertOrUpsertProjection(ctx context.Context, msg BasicMessage) (*InsertOrUpsertProjection, error) {
+	if msg == nil || !IsInsertOrUpsertMessage(msg) {
+		return nil, merr.WrapErrServiceInternalMsg("expected an Insert V2 or Upsert V2 message")
 	}
 	reader, ok := msg.(interface {
-		readUpsertProjection(context.Context) (*upsertProjection, error)
+		readInsertOrUpsertProjection(context.Context) (*InsertOrUpsertProjection, error)
 	})
 	if !ok {
-		return nil, merr.WrapErrServiceInternalMsg("Upsert projection reader is unavailable")
+		return nil, merr.WrapErrServiceInternalMsg("row projection reader is unavailable")
 	}
-	projection, err := reader.readUpsertProjection(ctx)
+	projection, err := reader.readInsertOrUpsertProjection(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return projection.UpsertMessageBody, nil
+	return projection, nil
 }
 
-func (m *messageImpl) readUpsertProjection(ctx context.Context) (*upsertProjection, error) {
-	if m.upsertProjectionCache == nil {
-		m.upsertProjectionCache = newBodyCacheSlot()
+func (m *messageImpl) readInsertOrUpsertProjection(ctx context.Context) (*InsertOrUpsertProjection, error) {
+	if m.insertOrUpsertProjectionCache == nil {
+		m.insertOrUpsertProjectionCache = newBodyCacheSlot()
 	}
-	return cachedUpsertProjection(ctx, m, m.upsertProjectionCache)
+	return cachedInsertOrUpsertProjection(ctx, m, m.insertOrUpsertProjectionCache)
 }
 
-func (m *immutableMessageImpl) readUpsertProjection(ctx context.Context) (*upsertProjection, error) {
+func (m *immutableMessageImpl) readInsertOrUpsertProjection(ctx context.Context) (*InsertOrUpsertProjection, error) {
 	cache := globalBodyCache()
 	shard := &cache.shards[m.bodyCache.shard]
 	shard.mu.Lock()
-	if m.bodyCache.upsertProjectionCache == nil {
-		m.bodyCache.upsertProjectionCache = &bodyCacheSlot{shard: m.bodyCache.shard}
+	if m.bodyCache.insertOrUpsertProjectionCache == nil {
+		m.bodyCache.insertOrUpsertProjectionCache = &bodyCacheSlot{shard: m.bodyCache.shard}
 	}
-	slot := m.bodyCache.upsertProjectionCache
+	slot := m.bodyCache.insertOrUpsertProjectionCache
 	shard.mu.Unlock()
-	return cachedUpsertProjection(ctx, m, slot)
+	return cachedInsertOrUpsertProjection(ctx, m, slot)
 }
 
-func cachedUpsertProjection(ctx context.Context, msg interface {
+func cachedInsertOrUpsertProjection(ctx context.Context, msg interface {
+	BasicMessage
 	decodePayload(context.Context) ([]byte, error)
 }, slot *bodyCacheSlot,
-) (*upsertProjection, error) {
+) (*InsertOrUpsertProjection, error) {
 	result, err := globalBodyCache().get(ctx, slot, func() (proto.Message, int, error) {
 		payload, err := msg.decodePayload(ctx)
 		if err != nil {
 			return nil, 0, err
 		}
-		body, err := decodeUpsertProjection(payload)
+		body, err := decodeInsertOrUpsertProjection(payload, msg.MessageType() == MessageTypeUpsert)
 		if err != nil {
 			return nil, 0, errors.Wrap(ErrMalformedBody, err.Error())
 		}
 		// Include slice storage and column wrappers in addition to encoded values.
 		// The shared cache applies its existing object-overhead multiplier.
-		size := proto.Size(body) + 8*len(body.GetRowIds())*(2+len(body.GetColumns())) + 4*len(body.GetPartitionIndexes()) + 8*UpsertPrimaryKeyCount(body.GetPrimaryKeys()) + 192*len(body.GetColumns())
+		size := proto.Size(body) + 8*len(body.GetRows().GetRowIds())*(2+len(body.GetRows().GetColumns())) + 4*len(body.GetRows().GetPartitionIndexes()) + 8*UpsertPrimaryKeyCount(body.GetRows().GetPrimaryKeys()) + 192*len(body.GetRows().GetColumns())
 		for _, effect := range body.GetDeleteEffects() {
 			size += 8*UpsertPrimaryKeyCount(effect.GetPrimaryKeys()) + 64
 		}
-		size += 4 * len(body.GetRequestRowMapping().GetRowOffsets())
-		return &upsertProjection{UpsertMessageBody: body}, size, nil
+		size += 4 * len(body.GetRows().GetRequestRowMapping().GetRowOffsets())
+		return &InsertOrUpsertProjection{UpsertMessageBody: body}, size, nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return result.(*upsertProjection), nil
+	return result.(*InsertOrUpsertProjection), nil
 }
 
 func upsertWireFields(payload []byte, visit func(protowire.Number, protowire.Type, []byte, []byte) error) error {
@@ -115,13 +116,51 @@ func upsertWireFields(payload []byte, visit func(protowire.Number, protowire.Typ
 	return nil
 }
 
-func decodeUpsertProjection(payload []byte) (*UpsertMessageBody, error) {
+func decodeInsertOrUpsertProjection(payload []byte, upsert bool) (*UpsertMessageBody, error) {
+	var selected []byte
+	var rows *InsertRows
+	err := upsertWireFields(payload, func(number protowire.Number, kind protowire.Type, encoded, value []byte) error {
+		if number == 1 {
+			if kind != protowire.BytesType {
+				return merr.WrapErrServiceInternalMsg("row-write rows have an invalid wire type")
+			}
+			raw, n := protowire.ConsumeBytes(value)
+			if n < 0 {
+				return protowire.ParseError(n)
+			}
+			part, err := decodeInsertRowsProjection(raw)
+			if err != nil {
+				return err
+			}
+			if rows == nil {
+				rows = part
+			} else {
+				proto.Merge(rows, part)
+			}
+		} else if upsert && (number == 2 || number == 3) {
+			selected = append(selected, encoded...)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	body := &UpsertMessageBody{}
+	if err := proto.Unmarshal(selected, body); err != nil {
+		return nil, err
+	}
+	body.Rows = rows
+	return body, nil
+}
+
+func decodeInsertRowsProjection(payload []byte) (*InsertRows, error) {
 	var selected []byte
 	var columns []*schemapb.FieldData
 	err := upsertWireFields(payload, func(number protowire.Number, kind protowire.Type, encoded, value []byte) error {
-		if number == 4 {
+		switch number {
+		case 4:
 			if kind != protowire.BytesType {
-				return merr.WrapErrServiceInternalMsg("Upsert column has an invalid wire type")
+				return merr.WrapErrServiceInternalMsg("row-write column has an invalid wire type")
 			}
 			raw, n := protowire.ConsumeBytes(value)
 			if n < 0 {
@@ -141,9 +180,7 @@ func decodeUpsertProjection(payload []byte) (*UpsertMessageBody, error) {
 				return err
 			}
 			columns = append(columns, column)
-			return nil
-		}
-		if number >= 1 && number <= 7 {
+		case 1, 2, 3, 7:
 			selected = append(selected, encoded...)
 		}
 		return nil
@@ -151,12 +188,12 @@ func decodeUpsertProjection(payload []byte) (*UpsertMessageBody, error) {
 	if err != nil {
 		return nil, err
 	}
-	body := &UpsertMessageBody{}
-	if err := proto.Unmarshal(selected, body); err != nil {
+	rows := &InsertRows{}
+	if err := proto.Unmarshal(selected, rows); err != nil {
 		return nil, err
 	}
-	body.Columns = columns
-	return body, nil
+	rows.Columns = columns
+	return rows, nil
 }
 
 // ReplaceUpsertDeleteEffects replaces explicit effects while copying the other
@@ -170,7 +207,7 @@ func ReplaceUpsertDeleteEffects(ctx context.Context, msg MutableUpsertMessageV2,
 	}
 	payload := make([]byte, 0, len(raw))
 	if err := upsertWireFields(raw, func(number protowire.Number, _ protowire.Type, encoded, _ []byte) error {
-		if number != 5 {
+		if number != 2 {
 			payload = append(payload, encoded...)
 		}
 		return nil
@@ -217,13 +254,13 @@ func (m *messageImpl) replaceUpsertPayload(payload []byte) error {
 		m.properties.Set(messageCipherHeader, cipherHeader)
 	}
 	m.payload = payload
-	m.upsertProjectionCache = nil
+	m.insertOrUpsertProjectionCache = nil
 	return nil
 }
 
-// upsertProjection owns derived row mappings with the cached projection. It never
-// retains columns or plaintext. Eviction releases all derived mappings too.
-type upsertProjection struct {
+// InsertOrUpsertProjection owns derived row mappings with the cached projection. It never
+// retains ordinary column values or plaintext. Eviction releases derived mappings too.
+type InsertOrUpsertProjection struct {
 	*UpsertMessageBody
 	mu           sync.Mutex
 	placementKey string
@@ -232,36 +269,16 @@ type upsertProjection struct {
 	compact      map[int64][]int64
 }
 
-func upsertProjectionOf(ctx context.Context, msg BasicMessage) (*upsertProjection, *UpsertMessageHeader, error) {
-	reader, ok := msg.(interface {
-		readUpsertProjection(context.Context) (*upsertProjection, error)
-	})
-	if !ok {
-		return nil, nil, merr.WrapErrServiceInternalMsg("Upsert projection reader is unavailable")
-	}
-	projection, err := reader.readUpsertProjection(ctx)
+func insertOrUpsertProjectionOf(ctx context.Context, msg BasicMessage) (*InsertOrUpsertProjection, *InsertOrUpsertHeader, error) {
+	projection, err := ReadInsertOrUpsertProjection(ctx, msg)
 	if err != nil {
 		return nil, nil, err
 	}
-	if immutable, ok := msg.(ImmutableMessage); ok {
-		typed, err := AsImmutableUpsertMessageV2(immutable)
-		if err != nil {
-			return nil, nil, err
-		}
-		return projection, typed.Header(), nil
-	}
-	mutable, ok := msg.(MutableMessage)
-	if !ok {
-		return nil, nil, merr.WrapErrServiceInternalMsg("invalid Upsert message")
-	}
-	typed, err := AsMutableUpsertMessageV2(mutable)
-	if err != nil {
-		return nil, nil, err
-	}
-	return projection, typed.Header(), nil
+	header, err := ReadInsertOrUpsertHeader(msg)
+	return projection, header, err
 }
 
-func upsertProjectionKey(header *UpsertMessageHeader) string {
+func insertOrUpsertProjectionKey(header *InsertOrUpsertHeader) string {
 	var key []byte
 	key = protowire.AppendVarint(key, uint64(header.GetCollectionId()))
 	key = protowire.AppendVarint(key, uint64(header.GetSchemaVersion()))
@@ -279,34 +296,34 @@ func upsertProjectionKey(header *UpsertMessageHeader) string {
 	return string(key)
 }
 
-// ReadUpsertRowSelections shares validated placement across segment consumers.
+// ReadInsertOrUpsertRowSelections shares validated placement across segment consumers.
 // Returned selections are immutable. Physical segment IDs do not affect them.
-func ReadUpsertRowSelections(ctx context.Context, msg BasicMessage) ([][]int64, error) {
-	projection, header, err := upsertProjectionOf(ctx, msg)
+func ReadInsertOrUpsertRowSelections(ctx context.Context, msg BasicMessage) ([][]int64, error) {
+	projection, header, err := insertOrUpsertProjectionOf(ctx, msg)
 	if err != nil {
 		return nil, err
 	}
-	key := upsertProjectionKey(header)
+	key := insertOrUpsertProjectionKey(header)
 	projection.mu.Lock()
 	defer projection.mu.Unlock()
 	if projection.placementKey == "" {
-		projection.rows, projection.placementErr = UpsertSelections(header, projection.UpsertMessageBody)
+		projection.rows, projection.placementErr = UpsertSelections(&UpsertMessageHeader{CollectionId: header.CollectionId, Partitions: header.Partitions, SchemaVersion: header.SchemaVersion, DeleteRows: header.DeleteRows}, projection.UpsertMessageBody)
 		projection.placementKey = key
 	}
 	if projection.placementKey != key {
-		return UpsertSelections(header, projection.UpsertMessageBody)
+		return UpsertSelections(&UpsertMessageHeader{CollectionId: header.CollectionId, Partitions: header.Partitions, SchemaVersion: header.SchemaVersion, DeleteRows: header.DeleteRows}, projection.UpsertMessageBody)
 	}
 	return projection.rows, projection.placementErr
 }
 
-// ReadUpsertCompactRows shares nullable-vector logical-to-physical positions.
+// ReadInsertOrUpsertCompactRows shares nullable-vector logical-to-physical positions.
 // The cache stores positions only and does not retain the supplied column.
-func ReadUpsertCompactRows(ctx context.Context, msg BasicMessage, fieldID int64, valid []bool) ([]int64, error) {
-	projection, _, err := upsertProjectionOf(ctx, msg)
+func ReadInsertOrUpsertCompactRows(ctx context.Context, msg BasicMessage, fieldID int64, valid []bool) ([]int64, error) {
+	projection, err := ReadInsertOrUpsertProjection(ctx, msg)
 	if err != nil {
 		return nil, err
 	}
-	if len(valid) != len(projection.GetRowIds()) {
+	if len(valid) != len(projection.GetRows().GetRowIds()) {
 		return nil, merr.WrapErrServiceInternalMsg("nullable vector validity count differs from logical rows")
 	}
 	projection.mu.Lock()

@@ -85,7 +85,6 @@ func (s *upsertWALFixture) SetupSuite() {
 			walpoint.BeforeIdempotencyAppend + `=return("` + filepath.Join(s.controlDir, "commit.json") + `")`,
 		}, ";")}
 	}))
-	s.WithMilvusConfig("streaming.wal.enableUpsertMessage", "true")
 	s.WithMilvusConfig("function.enableWriteBeforeMaterialization", "true")
 	s.WithMilvusConfig("common.session.ttl", "10")
 	s.WithMilvusConfig("dataCoord.enableCompaction", "true")
@@ -179,9 +178,9 @@ func (c collection) upsert(pk, marker int64, key ...string) message.MutableMessa
 	if len(key) > 0 {
 		idempotencyKey = key[0]
 	}
-	var mapping *messagespb.UpsertRequestRowMapping
+	var mapping *messagespb.RequestRowMapping
 	if idempotencyKey != "" {
-		mapping = &messagespb.UpsertRequestRowMapping{RowOffsets: []uint32{0}}
+		mapping = &messagespb.RequestRowMapping{RowOffsets: []uint32{0}}
 	}
 	return message.NewUpsertMessageBuilderV2().WithVChannel(c.vchannel).WithIdempotencyKey(message.NewCollectionScopedIdempotencyKey(c.id, idempotencyKey)).
 		WithHeader(&message.UpsertMessageHeader{
@@ -190,7 +189,7 @@ func (c collection) upsert(pk, marker int64, key ...string) message.MutableMessa
 		}).
 		WithBody(func() *message.UpsertMessageBody {
 			body := upsertfixture.Body(&msgpb.InsertRequest{CollectionID: c.id, NumRows: 1, RowIDs: []int64{rowID}, FieldsData: fields}, &msgpb.DeleteRequest{PartitionID: -1, PrimaryKeys: keys})
-			body.RequestRowMapping = mapping
+			body.Rows.RequestRowMapping = mapping
 			return body
 		}()).MustBuildMutable()
 }

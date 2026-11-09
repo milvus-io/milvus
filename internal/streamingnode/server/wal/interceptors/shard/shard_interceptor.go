@@ -45,7 +45,7 @@ func (impl *shardInterceptor) initOpTable() {
 		message.MessageTypeCreatePartition:    impl.handleCreatePartition,
 		message.MessageTypeDropPartition:      impl.handleDropPartition,
 		message.MessageTypeInsert:             impl.handleInsertMessage,
-		message.MessageTypeUpsert:             impl.handleUpsert,
+		message.MessageTypeUpsert:             impl.handleInsertOrUpsert,
 		message.MessageTypeDelete:             impl.handleDeleteMessage,
 		message.MessageTypeManualFlush:        impl.handleManualFlushMessage,
 		message.MessageTypeCreateSnapshot:     impl.handleCreateSnapshotMessage,
@@ -179,9 +179,20 @@ func (impl *shardInterceptor) handleDropPartition(ctx context.Context, msg messa
 
 // handleInsertMessage handles the insert message.
 func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	switch msg.Version() {
+	case message.VersionOld, message.VersionV1:
+		return impl.handleLegacyInsert(ctx, msg, appendOp)
+	case message.VersionV2:
+		return impl.handleInsertOrUpsert(ctx, msg, appendOp)
+	default:
+		panic("unexpected Insert message version")
+	}
+}
+
+func (impl *shardInterceptor) handleLegacyInsert(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
 	insertMsg := message.MustAsMutableInsertMessageV1(msg)
 	// Assign segment for insert message.
-	// !!! Current implementation a insert message only has one parition, but we need to merge the message for partition-key in future.
+	// Legacy Insert messages carry one partition.
 	header := insertMsg.Header()
 	collectionID := header.GetCollectionId()
 	schemaVersion := header.GetSchemaVersion()
@@ -458,36 +469,77 @@ func (impl *shardInterceptor) Close() {
 	}
 }
 
-// mutableUpsertInsert exposes nested row content to the existing function manager.
-type mutableUpsertInsert struct {
-	message.MutableUpsertMessageV2
-	primary *schemapb.FieldSchema
+// mutableInsertOrUpsert exposes the shared row content to the function manager.
+type mutableInsertOrUpsert struct {
+	header           *message.InsertOrUpsertHeader
+	primary          *schemapb.FieldSchema
+	readRows         func(context.Context) (*message.InsertRows, error)
+	overwriteColumns func([]*schemapb.FieldData)
+	overwriteHeader  func()
 }
 
-func (u mutableUpsertInsert) MustBody() *msgpb.InsertRequest {
-	body := u.MutableUpsertMessageV2.MustBody()
-	fields := append([]*schemapb.FieldData(nil), body.GetColumns()...)
-	fields = append(fields, message.UpsertPrimaryKeyColumn(u.primary, body.GetPrimaryKeys()))
-	return &msgpb.InsertRequest{CollectionID: u.Header().GetCollectionId(), NumRows: message.UpsertRowCount(u.Header()), RowIDs: body.GetRowIds(), FieldsData: fields, Version: msgpb.InsertDataVersion_ColumnBased}
+func (u mutableInsertOrUpsert) MustBody() *msgpb.InsertRequest {
+	rows, err := u.readRows(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	fields := append([]*schemapb.FieldData(nil), rows.GetColumns()...)
+	fields = append(fields, message.UpsertPrimaryKeyColumn(u.primary, rows.GetPrimaryKeys()))
+	return &msgpb.InsertRequest{CollectionID: u.header.GetCollectionId(), NumRows: uint64(len(rows.GetRowIds())), RowIDs: rows.GetRowIds(), FieldsData: fields, Version: msgpb.InsertDataVersion_ColumnBased}
 }
 
-func (u mutableUpsertInsert) OverwriteBody(insert *msgpb.InsertRequest) {
-	body := u.MutableUpsertMessageV2.MustBody()
-	body.Columns = nil
+func (u mutableInsertOrUpsert) OverwriteBody(insert *msgpb.InsertRequest) {
+	var columns []*schemapb.FieldData
 	for _, field := range insert.GetFieldsData() {
 		if field.GetFieldId() != u.primary.GetFieldID() {
-			body.Columns = append(body.Columns, field)
+			columns = append(columns, field)
 		}
 	}
-	u.MutableUpsertMessageV2.OverwriteBody(body)
+	u.overwriteColumns(columns)
 }
 
-func (impl *shardInterceptor) handleUpsert(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
-	upsert, err := message.AsMutableUpsertMessageV2(msg)
-	if err != nil {
-		return nil, status.NewUnrecoverableError("invalid Upsert envelope: %v", err)
+func (impl *shardInterceptor) handleInsertOrUpsert(ctx context.Context, msg message.MutableMessage, appendOp interceptors.Append) (message.MessageID, error) {
+	// Hold one specialized wrapper through validation, materialization and assignment.
+	var mutable mutableInsertOrUpsert
+	switch msg.MessageType() {
+	case message.MessageTypeInsert:
+		typed, err := message.AsMutableInsertMessageV2(msg)
+		if err != nil {
+			return nil, status.NewUnrecoverableError("invalid Insert V2 header: %v", err)
+		}
+		h := typed.Header()
+		mutable.header = &message.InsertOrUpsertHeader{CollectionId: h.CollectionId, Partitions: h.Partitions, SchemaVersion: h.SchemaVersion}
+		mutable.readRows = func(ctx context.Context) (*message.InsertRows, error) {
+			body, err := typed.Body(ctx)
+			return body.GetRows(), err
+		}
+		mutable.overwriteColumns = func(columns []*schemapb.FieldData) {
+			body := typed.MustBody()
+			body.Rows.Columns = columns
+			typed.OverwriteBody(body)
+		}
+		mutable.overwriteHeader = func() { typed.OverwriteHeader(h) }
+	case message.MessageTypeUpsert:
+		typed, err := message.AsMutableUpsertMessageV2(msg)
+		if err != nil {
+			return nil, status.NewUnrecoverableError("invalid Upsert header: %v", err)
+		}
+		h := typed.Header()
+		mutable.header = &message.InsertOrUpsertHeader{CollectionId: h.CollectionId, Partitions: h.Partitions, SchemaVersion: h.SchemaVersion, DeleteRows: h.DeleteRows}
+		mutable.readRows = func(ctx context.Context) (*message.InsertRows, error) {
+			body, err := typed.Body(ctx)
+			return body.GetRows(), err
+		}
+		mutable.overwriteColumns = func(columns []*schemapb.FieldData) {
+			body := typed.MustBody()
+			body.Rows.Columns = columns
+			typed.OverwriteBody(body)
+		}
+		mutable.overwriteHeader = func() { typed.OverwriteHeader(h) }
+	default:
+		panic("unexpected row-write message type")
 	}
-	header := upsert.Header()
+	header := mutable.header
 	collectionID := header.GetCollectionId()
 
 	version, err := impl.shardManager.CheckIfCollectionSchemaVersionMatch(&message.InsertMessageHeader{CollectionId: collectionID, SchemaVersion: header.SchemaVersion})
@@ -509,19 +561,20 @@ func (impl *shardInterceptor) handleUpsert(ctx context.Context, msg message.Muta
 	if err != nil {
 		return nil, err
 	}
-	body, err := message.ReadUpsertProjection(ctx, msg)
+	body, err := message.ReadInsertOrUpsertProjection(ctx, msg)
 	if err != nil {
-		return nil, upsertBodyDecodeError(err)
+		return nil, insertOrUpsertBodyDecodeError(err)
 	}
-	selections, err := message.ValidateUpsertWithSelections(header, body, primary)
+	selections, err := message.ValidateInsertOrUpsertWithSelections(header, body, primary)
 	if err != nil {
-		return nil, status.NewUnrecoverableError("invalid Upsert body: %v", err)
+		return nil, status.NewUnrecoverableError("invalid row-write body: %v", err)
 	}
 	if (body.GetPartialUpdateCas() != nil) != message.HasPartialUpdateCAS(msg) {
-		return nil, status.NewUnrecoverableError("Upsert CAS marker and proof differ")
+		return nil, status.NewUnrecoverableError("row-write CAS marker and proof differ")
 	}
+	mutable.primary = primary
 	if paramtable.Get().FunctionCfg.EnableWriteBeforeMaterialization.GetAsBool() {
-		_, err := function.GetManager().Materialize(function.WithDeferredPreparation(ctx), collectionID, WALFunctionRunnerKey(msg.VChannel()), version, mutableUpsertInsert{MutableUpsertMessageV2: upsert, primary: primary})
+		_, err := function.GetManager().Materialize(function.WithDeferredPreparation(ctx), collectionID, WALFunctionRunnerKey(msg.VChannel()), version, mutable)
 		if err != nil {
 			var preparation *function.PreparationRequiredError
 			if errors.As(err, &preparation) {
@@ -534,9 +587,9 @@ func (impl *shardInterceptor) handleUpsert(ctx context.Context, msg message.Muta
 			return nil, errors.Join(status.NewUnrecoverableError("failed to materialize function fields before WAL append"), err)
 		}
 	}
-	content, err := upsert.Body(ctx)
+	content, err := mutable.readRows(ctx)
 	if err != nil {
-		return nil, upsertBodyDecodeError(err)
+		return nil, insertOrUpsertBodyDecodeError(err)
 	}
 	// Borrow all columns for exact selected-row sizing. The view encoder does not
 	// copy vectors or materialize partition-sized FieldData objects.
@@ -567,7 +620,7 @@ func (impl *shardInterceptor) handleUpsert(ctx context.Context, msg message.Muta
 		defer assignment.Ack()
 		header.Partitions[index].SegmentAssignment = &message.SegmentAssignment{SegmentId: assignment.SegmentID}
 	}
-	upsert.OverwriteHeader(header)
+	mutable.overwriteHeader()
 	if header.GetDeleteRows() > 0 {
 		impl.shardManager.RecordDelete(msg.VChannel(), msg.TimeTick(), header.GetDeleteRows(), uint64(proto.Size(&message.UpsertMessageBody{DeleteEffects: body.GetDeleteEffects()})))
 	}
@@ -575,9 +628,9 @@ func (impl *shardInterceptor) handleUpsert(ctx context.Context, msg message.Muta
 	return appendOp(ctx, msg)
 }
 
-func upsertBodyDecodeError(err error) error {
+func insertOrUpsertBodyDecodeError(err error) error {
 	if errors.Is(err, message.ErrMalformedBody) {
-		return status.NewUnrecoverableError("malformed Upsert transaction body: %v", err)
+		return status.NewUnrecoverableError("malformed row-write body: %v", err)
 	}
 	return err
 }

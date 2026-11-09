@@ -22,7 +22,9 @@
         "messagespb.AlterCollectionMessageUpdates",
         "messagespb.CacheExpirations",
         "messagespb.CacheExpiration",
-        "messagespb.LegacyProxyCollectionMetaCache"
+        "messagespb.LegacyProxyCollectionMetaCache",
+        "messagespb.InsertRows",
+        "messagespb.RequestRowMapping"
     ],
     "messageReflectInfoTable": [
         {
@@ -63,6 +65,16 @@
             "MessageTypeWithVersion": {
                 "MessageType": "MessageTypeInsert",
                 "Version": 1
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.InsertMessageHeaderV2",
+                "BodyType": "messagespb.InsertMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeInsert",
+                "Version": 2
             }
         },
         {

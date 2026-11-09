@@ -12,8 +12,8 @@ mask semantics. `collection.on.truncating` remains coordinator/DataCoord state.
 
 ## Upsert assignment
 
-With the unified format enabled, Insert, Upsert, and partial update carry an
-Upsert partition table for one collection/VChannel. Schema mismatch is checked
+Insert V2 and Upsert carry a partition table for one collection/VChannel and
+share nested InsertRows. Legacy Insert v0/V1 keeps its existing path. Schema mismatch is checked
 before schema-dependent content checks. Shard admission checks ownership,
 namespace support, compound body shape, and CAS proof shape; producers validate
 ordinary column values. Function preparation retains its existing append path.

@@ -153,8 +153,13 @@ func (s *UpsertWALCDCSuite) TestReplicationAndSwitchover() {
 		return merr.CheckRPCCall(response, err) == nil && response.GetProgress() == 100
 	}, time.Minute, 100*time.Millisecond, "the primary Load configuration must reach the secondary through WAL")
 	producer := rawProducer(s.T(), ctx, s.Cluster, c.vchannel)
-	_, err = producer.Append(ctx, c.upsert(11, 1))
+	initial := message.MustAsMutableUpsertMessageV2(c.upsert(11, 1))
+	insert := message.NewInsertMessageBuilderV2().WithVChannel(c.vchannel).
+		WithHeader(&message.InsertMessageHeaderV2{CollectionId: c.id, Partitions: initial.Header().Partitions, SchemaVersion: initial.Header().SchemaVersion}).
+		WithBody(&message.InsertMessageBody{Rows: initial.MustBody().GetRows()}).MustBuildMutable()
+	_, err = producer.Append(ctx, insert)
 	s.Require().NoError(err)
+	s.replicatedRows(ctx, target.MilvusClient, c, 0, 1)
 	_, err = producer.Append(ctx, c.upsert(11, 2))
 	s.Require().NoError(err)
 	s.assertRows(ctx, c, 11, 1, 0)

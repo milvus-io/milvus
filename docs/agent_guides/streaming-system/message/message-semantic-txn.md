@@ -16,9 +16,11 @@ Messages managing transactions on a single VChannel.
 
 ## Key Invariants
 
-- Upsert is one logical body, even with several insert partitions and explicit delete effects. The producer guarantees that Begin, bodies, and Commit use the same VChannel. Shard admission checks collection ownership and the body contract. Commit does not retain and revalidate complete Begin/body messages.
+- Insert V2 and Upsert each count as one logical body, even with several insert partitions and explicit delete effects. The producer guarantees that Begin, bodies, and Commit use the same VChannel. Shard admission checks collection ownership and the body contract. Commit does not retain and revalidate complete Begin/body messages.
 - The common body-count contract applies to Upsert: a nonzero count must match successful logical body appends. Zero keeps the existing compatibility behavior. Sessions retain counts and a lightweight effects classification. Row-only Upsert is insert-only; Upsert with deletes requires Transform consumption. Recovery reconstructs the same counts and classification from durable bodies, without retaining members for Commit revalidation.
 - Repeated PKs and overlapping transaction bodies retain existing equal-TimeTick semantics, without a last-write-wins guarantee. See [Unified Insert and Upsert WAL format](../../../design-docs/design_docs/wal/upsert_message.md).
+
+- Ordinary Insert/Upsert/Delete no longer require a transaction solely for backend-sized packing. Local partial-update CAS retains its existing transaction wrapper, including one body. Historical and CDC transaction replay remain supported.
 
 - Producers wait for BeginTxn, send bodies, wait for every successful body response, then send CommitTxn. BeginTxn must precede the bodies and CommitTxn/RollbackTxn for the same transaction.
 - Body messages must arrive within the keepalive window, otherwise the transaction expires. After expiration, local clients must begin a new transaction. A replicated transaction aborted by local Flush may reuse its source TxnID during complete replay.

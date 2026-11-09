@@ -2,9 +2,9 @@
 
 ## Motivation and scope
 
-When enabled, the write-ahead log (WAL) uses one Upsert format for Insert, Upsert, and partial update. Ordinary Insert carries rows without delete effects. Upsert and partial update carry prepared rows and the producer's explicit delete effects. Consumers do not consult a local primary key (PK) index to infer replacements. This format does not enable PRIMARY_KEY indexes or implement their decision algorithm.
+The write-ahead log (WAL) uses Insert V2 for ordinary Insert and Upsert for Upsert and partial update. The message types have distinct headers and bodies, with a shared nested InsertRows encoding. Ordinary Insert carries rows without delete effects. Upsert and partial update carry prepared rows and the producer's explicit delete effects. Consumers do not consult a local primary key (PK) index to infer replacements. This format does not enable PRIMARY_KEY indexes or implement their decision algorithm.
 
-An autocommit write is one logical WAL record with one MessageID and one final visibility TimeTick. Its rows and delete effects use that TimeTick. Backend chunking preserves this logical identity. A request that produces multiple messages still uses the existing per-VChannel transaction protocol. There is no cross-VChannel atomicity.
+An autocommit write is one logical WAL record with one MessageID and one final visibility TimeTick. Its rows and delete effects use that TimeTick. Backend chunking preserves this logical identity. Routing creates one logical message per nonempty VChannel group. Local compare-and-swap (CAS) writes keep the existing per-VChannel transaction wrapper even for a single body. There is no cross-VChannel atomicity.
 
 Logical WAL identity and visibility do not imply an in-memory transaction around native execution. Consumers apply rows and deletes through their existing execution paths. There is no rollback of partially completed native mutations. An execution failure stops progress rather than publishing completion for the failed operation.
 
@@ -12,7 +12,7 @@ Historical Insert and Delete records remain readable. Independent Delete message
 
 ## Wire contract
 
-The outer properties carry VChannel, TimeTick, transaction context, and the optional idempotency key. `UpsertMessageHeader` contains:
+The outer properties carry VChannel, TimeTick, transaction context, and the optional idempotency key. Insert V2 uses `InsertMessageHeaderV2`; Upsert keeps `UpsertMessageHeader`. Both carry fields 1 through 3 below. Only the Upsert header has field 4:
 
 | Field number | Field | Meaning |
 | --- | --- | --- |
@@ -23,17 +23,30 @@ The outer properties carry VChannel, TimeTick, transaction context, and the opti
 
 Each `PartitionSegmentAssignment` contains `partition_id` (1), `rows` (2), `binary_size` (3), and `segment_assignment` (4). Partition IDs are positive and unique. Each entry has a positive row count. Segment IDs describe physical placement within the receiving cluster.
 
-`UpsertMessageBody` contains:
+The body types remain distinct:
+
+```proto
+message InsertMessageBody {
+    InsertRows rows = 1;
+}
+message UpsertMessageBody {
+    InsertRows rows = 1;
+    repeated UpsertDeleteEffect delete_effects = 2;
+    PartialUpdateCAS partial_update_cas = 3;
+}
+```
+
+`InsertRows` is shared:
 
 | Field number | Field | Meaning |
 | --- | --- | --- |
 | 1 | `primary_keys` | Resolved Int64 or VarChar PKs in logical row order |
-| 2 | `row_ids` | Internal row identifier (RowID) for each inserted row |
+| 2 | `row_ids` | Internal row identifier for each inserted row |
 | 3 | `partition_indexes` | Index into the header partition table for each row |
 | 4 | `columns` | Ordinary columns and materialized function outputs |
-| 5 | `delete_effects` | Explicit keys with independent deletion scopes |
-| 6 | `partial_update_cas` | Optional compare-and-swap (CAS) proof |
 | 7 | `request_row_mapping` | Original request offsets for retry results |
+
+Insert V2 has no delete effects or header result. Its body directly owns one nested `InsertRows`. Upsert combines the same rows with optional explicit effects and CAS proof. Historical Insert V1 keeps its original header and `InsertRequest` body, including its optional header result. The nested Upsert layout replaces the unpublished flat draft; there is no flat-draft compatibility adapter.
 
 PK, RowID, and Timestamp are not repeated in `columns`. The final message TimeTick supplies inserted-row and delete timestamps. A transaction uses Commit's final TimeTick. The body does not embed an InsertRequest or DeleteRequest and stores no duplicate retry result.
 
@@ -53,7 +66,7 @@ Each `UpsertDeleteEffect` has exactly one scope: `all_partitions` (field 1) or a
 
 Deletes affect only versions strictly earlier than the final visibility TimeTick. They cannot delete this message's newly inserted rows. An absent older version is a no-op. Repeated PKs within a message or across transaction bodies retain existing equal-TimeTick semantics. The format does not promise last-write-wins among those rows.
 
-AutoID values must be resolved before packing. Namespace requests and namespace-enabled collections are unsupported by this format. Proxy rejects them before producing Upsert records, and StreamingNode rejects namespace collection schemas for local and replicated appends. The legacy producer retains its existing namespace behavior when the format is disabled.
+AutoID values must be resolved before packing. Namespace requests and namespace-enabled collections are unsupported by this format. Proxy rejects them before producing Upsert records, and StreamingNode rejects namespace collection schemas for local and replicated appends. There is no legacy producer fallback in 3.1. Historical namespace-bearing Insert records remain readable; independent Delete retains its existing routing semantics.
 
 Producers validate ordinary column values. Shard admission validates collection ownership, schema version, placement, counts, PK types, column identities, delete scopes, mapping, and CAS shape. A schema-version mismatch precedes schema-dependent content checks. CAS proof presence must match the existing outer CAS marker.
 
@@ -61,11 +74,11 @@ Producers validate ordinary column values. Shard admission validates collection 
 
 Proxy resolves API behavior, AutoID, partition placement, function preparation, and delete effects before encoding. Existing AutoID rows retain their PK and corresponding delete effects. Missing rows receive allocated keys without an old-version delete effect. Ordinary Insert supplies no deletes.
 
-Proxy routes by the final PK to business VChannels. A specified partition supplies one target, while partition-key routing can select several targets within a message. Packing groups by VChannel and encoded size, not partition. Original row offsets survive routing and size splitting. The current Proxy packer associates each delete occurrence with the first inserted occurrence of its PK and preserves delete order across chunks. This packing policy does not narrow the wire contract's independent scopes and key sets.
+Proxy routes by the final PK to business VChannels. A specified partition supplies one target, while partition-key routing can select several targets within a message. Packing creates one logical message per nonempty VChannel group, not per partition or backend record size. Original row offsets survive VChannel routing. The current Proxy packer groups delete occurrences by their preserved PK's VChannel and keeps the original delete order within each logical message. This packing policy does not narrow the wire contract's independent scopes and key sets.
 
 Producers construct ordinary, persisted, replicable messages on the collection business VChannel. This is an internal producer contract, not an Upsert-specific flags validation requirement at each interceptor. Generic builder and replication property handling remains unchanged. The shard dispatcher keeps the existing CChannel skip rule and PChannel-level exception.
 
-The activation setting controls producer format selection only. StreamingNode accepts supported Upsert records regardless of its local setting. TimeTick and transaction handling retain their existing position in the interceptor chain. Partial-update locking covers the union of inserted keys and explicit delete keys. CAS uses the existing proof, conflict, retry, and version-tracking paths.
+There is no producer format switch in 3.1. StreamingNode accepts supported Insert V1, Insert V2 and Upsert records. TimeTick and transaction handling retain their existing position in the interceptor chain. Partial-update locking covers the union of inserted keys and explicit delete keys. CAS uses the existing proof, conflict, retry, and version-tracking paths.
 
 The shard handler checks schema compatibility and ownership, prepares function materialization when enabled, and assigns all insert targets as a batch. Every partition must be ready. Per-partition selection checks fencing, TimeTick, Growing state, and capacity. No rows or bytes are charged until all candidates are available. Ack references precede batch accounting, including capacity-triggered sealing. Failed accounting releases those references. Transaction cleanup retains its existing segment-reference lifecycle.
 
@@ -85,7 +98,7 @@ A nonzero `body_cnt` must equal successful logical body appends. Zero keeps the 
 
 Commit freezes admission and uses the existing wait for in-flight bodies. This does not extend the producer contract to sending Commit before body results. Rollback, expiry, rejection, cleanup callbacks, and lease behavior remain unchanged. Cancellation or fencing can leave a Commit outcome uncertain until recovery determines durable state.
 
-`BuildUpsertResult` combines the original stored PKs with `request_row_mapping.row_offsets`. First append, transaction result buffering, Summary, and keyed retries share this path. Keyed writes require complete mapping and valid results. A keyed Commit cannot cache or return a partial merge. Missing buffered results return TransactionExpired so the existing producer can rebuild the transaction.
+`BuildInsertOrUpsertResult` combines the original stored PKs with `rows.request_row_mapping.row_offsets`. First append, transaction result buffering, Summary, and keyed retries share this path. Keyed writes require complete mapping and valid results. A keyed Commit cannot cache or return a partial merge. Missing buffered results return TransactionExpired so the existing producer can rebuild the transaction.
 
 A duplicate returns the original AppendResult, including original MessageID, TimeTick, and available result IDs. It must not substitute newly allocated IDs from a retry request. Summary and WAL recovery reconstruct results from the original records. Retry suppression retains the existing bounded window and unknown-outcome behavior. Keyless re-appends remain separate writes. This format does not add unconditional exactly-once delivery.
 
@@ -103,9 +116,11 @@ There is no whole-unit predecode or native rollback. Body decoding, decryption, 
 
 ## Encoding and projections
 
-The borrowed Proxy view encoder writes selected column values directly without first constructing copied destination columns. Size planning selects an accepted row prefix before final encoding. Conservative budgets include non-column fields, partition information, framing, CAS, delete effects, and envelope/encryption overhead. An indivisible plain row can use existing backend chunking. Keyed and CAS writes retain their size limits. These mechanisms require measurement before any performance claim.
+The borrowed Proxy view encoder writes selected columns directly into the final payload without constructing copied destination columns. Insert and Upsert encoders reuse the same `InsertRows` codec. Each body adds its own nested protobuf framing. No temporary encoded row buffer is required solely for nesting.
 
-The Upsert projection reads PKs, RowIDs, partition indexes, delete effects, mapping, CAS, and column descriptors. It scans wire fields and skips ordinary column values without calling full `Body()`. Descriptors contain field IDs, not scalar/vector values. This projection is distinct from the encoder's non-column fields, which participate in the complete body encoding.
+Proxy no longer splits a VChannel batch to fit a physical backend record. The existing materialized Insert/Delete request limits and transport limits remain. SN chunks the final encoded, possibly encrypted payload when its backend has a configured chunk budget. Backend chunking does not decode rows or create extra transaction bodies. Keyed and CAS writes use the same physical mechanism within existing logical-request limits. Fewer logical records do not establish a throughput gain without measurement.
+
+The Insert/Upsert projection reads PKs, RowIDs, partition indexes, delete effects, mapping, CAS, and column descriptors. It enters the nested rows field and skips ordinary column values without calling full `Body()`. Descriptors contain field IDs, not scalar/vector values. This projection is distinct from the encoder's non-column fields, which participate in complete body encoding.
 
 Immutable readers share the projection through the bounded body cache. Projection and full-body entries share its budget and eviction policy. Accounting covers decoded projection data and reserved derived mappings. Row-selection and nullable-vector position caches belong to the projection and leave with its eviction. Projection entries do not retain the decrypted payload or ordinary column values.
 
@@ -117,18 +132,13 @@ CDC forwards the primary's decided rows, partition identities, explicit effects,
 
 The native QueryView path from #52977 is a reader dependency and is included in the upstream base. Deployment still requires compatible readers. This change adds no legacy MsgPack pipeline or msgdispatcher support.
 
-`streaming.wal.enableUpsertMessage` defaults to `auto` and uses the standard version gate:
+3.1 removes `streaming.wal.enableUpsertMessage`, `proxy.splitChunk`, and `streaming.splitChunkSN`. Insert always produces Insert V2. Upsert and partial update always produce Upsert. Proxy does not split by backend record size. SN always performs physical chunking when a payload exceeds its backend budget; an unbounded backend retains its single-record behavior. Readers always reassemble chunks independently of configuration.
 
-| Setting | Behavior |
-| --- | --- |
-| `auto`, distributed deployment | Remain false until this cluster's registered online components satisfy version 3.1.0 and a one-minute stability window |
-| `auto`, embedded-etcd deployment | Use the standard local-process version condition, since that process is the cluster |
-| `false` | Produce legacy Insert/Delete records |
-| `true` | Force the new format without the version condition |
+Deployment first upgrades every component to the prerequisite latest 3.0 release with complete Insert V2/Upsert reception, consumption and chunk-reading support. The 3.0 compatibility backport is separate release work; this 3.1 implementation does not prove that backport complete. Existing 3.0 producers keep their formats. Deployment management must also upgrade CDC targets before sending new formats. There is no automatic remote compatibility negotiation or retained-history downgrade guarantee.
 
-The gate checks local cluster versions only. It does not verify CDC target compatibility or guarantee downgrade safety for retained WAL history. Deployment management must ensure compatible CDC targets before activation.
+During a mixed 3.0/3.1 rollout, a new Proxy may send a large logical message to an old SN that cannot chunk writes. That SN can remain in its backend retry loop. After shutdown/fencing and reassignment, a still-live producer can resume on a new owner; its deadline may expire first. Temporary delay or timeout is accepted. No new version probe, config propagation wait, retry policy or format fallback is added.
 
-Format selection occurs before packing. Append failure does not trigger a second append in another format. Already packed requests retain their format during producer retries. Disabling the setting stops producers from generating new Upsert records. Already generated records and in-flight requests can still append. Retained Upsert decoding and Commit/Rollback for durable bodies remain available. Disabling generation does not make old readers safe to read retained new-format records.
+Local CAS writes still use their existing transaction wrapper, even with one body. Ordinary writes no longer need a transaction solely because of size or partition grouping. Historical and replicated transactions remain readable. No cross-VChannel atomicity is introduced.
 
 ## Validation requirements
 
@@ -138,6 +148,6 @@ Trace redo, accounting failure, cancellation, unknown append outcomes, duplicate
 
 Check decode/decrypt/conversion/apply failures at actual consumers and prove that later work cannot advance past a failed completion. Verify row-only versus delete-bearing frontier classification. Test CDC receiving-prefix replay, receiver restart, and switchover separately from local persistence.
 
-Confirm legacy history reads, explicit gate overrides, version-gate registration and timing, and gate-off producer selection. Simulated session switching and compile-only checks do not establish a real mixed-version rollout or CDC acceptance.
+Confirm legacy history reads, unconditional Insert V2/Upsert generation, no size-induced transaction controls, retained CAS transactions, and physical chunk identity across retries. Simulated session switching and compile-only checks do not establish a real mixed-version rollout or CDC acceptance.
 
-Projection tests must prove ordinary column values are not decoded. Encoding tests must compare split boundaries, full payloads, and properties. Benchmarks should measure projection, Proxy encoding, scatter, allocations, and WAL bytes under stated encryption and function-materialization conditions. Do not infer end-to-end throughput from isolated encoder results.
+Projection tests must prove ordinary column values are not decoded. Encoding tests must compare complete nested payloads and properties, and verify one logical message per VChannel despite physical chunking. Benchmarks should measure projection, Proxy encoding, scatter, allocations, and WAL bytes under stated encryption and function-materialization conditions. Do not infer end-to-end throughput from isolated encoder results.

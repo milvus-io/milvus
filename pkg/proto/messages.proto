@@ -198,6 +198,13 @@ message InsertMessageHeader {
     optional IdempotentInsertResult idempotent_result = 4;
 }
 
+// Insert V2 uses the shared nested row representation, without a result copy.
+message InsertMessageHeaderV2 {
+    int64 collection_id = 1;
+    repeated PartitionSegmentAssignment partitions = 2;
+    optional int32 schema_version = 3;
+}
+
 // IdempotentInsertResult returns the original primary keys and request offsets.
 // Historical Insert headers retain this result. Upsert reconstructs it
 // from primary_keys and request_row_mapping without decoding ordinary columns.
@@ -261,57 +268,41 @@ message UpsertMessageHeader {
     uint64 delete_rows = 4;
 }
 
-// Contains inserted rows and optional explicit deletion of older versions.
-// Insert, Upsert, and partial-update APIs use this format. Ordinary Insert
-// requests have no delete effects. Consumers never infer deletes from inserted PKs.
-// Rows and effects use one final visibility TimeTick, supplied by the message
-// or its transaction Commit. Equal-TimeTick duplicates do not imply last-write-wins.
-// Separate metadata fields permit PK projection without decoding ordinary columns.
-message UpsertMessageBody {
-    // Inserted Int64 or VarChar primary keys, in logical row order.
-    // The key type must match the schema. AutoID values are already resolved.
-    // The columns field must not contain another primary key column.
-    schema.IDs primary_keys = 1;
-
-    // Internal RowIDs, one for each inserted primary key, in the same order.
-    // RowID and user PK have separate roles, even when AutoID makes values equal.
-    repeated int64 row_ids = 2 [packed = true];
-
-    // Maps each logical row to the header's partition table.
-    // Values are zero-based table indexes, not partition IDs.
-    //
-    // Omit this field for one partition; every row uses table entry zero.
-    // For multiple partitions, supply one valid index per inserted primary key.
-    // Each entry's occurrence count must equal that partition's header row count.
-    repeated uint32 partition_indexes = 3 [packed = true];
-
-    // Ordinary user columns and materialized function outputs.
-    // Excludes PK, RowID, and Timestamp fields. Each field ID occurs at most once.
-    // Columns follow the logical row order of primary_keys and share its selection.
-    // Nullable columns retain existing FieldData validity and compact-vector encodings.
-    // The final visible message TimeTick supplies the inserted row timestamps.
-    repeated schema.FieldData columns = 4;
-
-    // Explicit keys and scopes for deleting older row versions.
-    // Deletion scope is independent of insert placement and inserted key membership.
-    // An empty list means no old versions are deleted.
-    repeated UpsertDeleteEffect delete_effects = 5;
-
-    // Proof for the existing partial-update compare-and-swap (CAS) protocol.
-    // Omit it for writes without CAS. Presence must match the outer CAS marker.
-    PartialUpdateCAS partial_update_cas = 6;
-
-    // Maps inserted rows back to the original client request after routing/splitting.
-    // Required when an idempotent retry must return the original row results.
-    // No separate result copy is stored in this header or body.
-    UpsertRequestRowMapping request_row_mapping = 7;
+// InsertMessageBody carries only inserted rows. Insert V2 does not express deletes.
+message InsertMessageBody {
+    InsertRows rows = 1;
 }
 
-// Preserves request row identity across VChannel routing and message splitting.
-// Retry results combine these offsets with the original stored primary_keys.
-message UpsertRequestRowMapping {
-    // Original request offset for each inserted primary key, in the same order.
-    // The count must equal the inserted PK count. Offsets are not chunk-local.
+// Upsert combines inserted rows with explicit effects at one visibility TimeTick.
+// A transaction body uses Commit's TimeTick. Equal-TimeTick rows do not imply
+// last-write-wins. The consumer never infers deletes from the inserted keys.
+message UpsertMessageBody {
+    InsertRows rows = 1;
+    repeated UpsertDeleteEffect delete_effects = 2;
+    PartialUpdateCAS partial_update_cas = 3;
+}
+
+// InsertRows is the shared row representation for Insert V2 and Upsert V2.
+// Separate fields permit PK projection without decoding ordinary column values.
+message InsertRows {
+    // Resolved Int64 or VarChar keys in logical row order. AutoID is resolved
+    // before encoding; columns must not contain another PK column.
+    schema.IDs primary_keys = 1;
+    // One internal RowID per logical row; RowID and user PK have separate roles.
+    repeated int64 row_ids = 2 [packed = true];
+    // Zero-based indexes into the header partition table. Omit for one partition.
+    // Multiple partitions require one index per row and matching header counts.
+    repeated uint32 partition_indexes = 3 [packed = true];
+    // Ordinary columns and materialized outputs, excluding PK, RowID and Timestamp.
+    // All columns share logical row order and the existing nullable encodings.
+    repeated schema.FieldData columns = 4;
+    // Original request offsets paired with primary_keys. Required for keyed retry
+    // results; no duplicate result copy is stored in the header or body.
+    RequestRowMapping request_row_mapping = 7;
+}
+
+message RequestRowMapping {
+    // One original request offset per logical row, never a chunk-local offset.
     repeated uint32 row_offsets = 1 [packed = true];
 }
 

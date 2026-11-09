@@ -34,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -136,15 +135,14 @@ func cloneFieldDataList(fields []*schemapb.FieldData) []*schemapb.FieldData {
 func (ut *UpsertTask) appendUpsertAttempt(ctx context.Context, ez *message.CipherConfig) error {
 	logger := mlog.With(mlog.FieldCollectionName(ut.req.CollectionName))
 
-	insertMsgs, err := ut.packInsertMessage(ctx, ez)
+	messages, err := ut.packUpsertMessages(ctx, ez)
 	if err != nil {
-		logger.Warn(ctx, "pack insert message failed", mlog.Err(err))
+		logger.Warn(ctx, "failed to prepare Upsert WAL messages", mlog.Err(err))
 		return err
 	}
-	messages := insertMsgs
 
 	if ut.req.GetPartialUpdate() {
-		if err := ut.attachPartialUpdateCAS(messages); err != nil {
+		if err := ut.validatePartialUpdateCASCoverage(messages); err != nil {
 			logger.Warn(ctx, "attach partial update CAS metadata failed", mlog.Err(err))
 			return err
 		}
@@ -185,7 +183,7 @@ func unwrapPartialUpdateAppendError(resp streaming.AppendResponses) error {
 	return casErr
 }
 
-func (ut *UpsertTask) packInsertMessage(ctx context.Context, ez *message.CipherConfig) ([]message.MutableMessage, error) {
+func (ut *UpsertTask) packUpsertMessages(ctx context.Context, ez *message.CipherConfig) ([]message.MutableMessage, error) {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy insertExecute upsert %d", ut.ID()))
 	defer tr.Elapse("insert execute done when insertExecute")
 
@@ -211,91 +209,13 @@ func (ut *UpsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 		mlog.FieldTaskID(ut.ID()),
 		mlog.Duration("get msgStream duration", getMsgStreamDur))
 
-	// Select the complete write format before packing either effect.
-	if !paramtable.Get().StreamingCfg.EnableUpsertMessage.GetAsBool() {
-		var inserts []message.MutableMessage
-		if ut.partitionKeys == nil {
-			inserts, err = repackInsertDataForStreamingService(ctx, ut.GetMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ez, ut.schemaVersion, ut.partialUpdateCASGroups, nil)
-		} else {
-			inserts, err = repackInsertDataWithPartitionKeyForStreamingService(ctx, ut.GetMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ut.partitionKeys, ez, ut.schema.CollectionSchema, ut.schemaVersion, ut.partialUpdateCASGroups, nil)
-		}
-		if err != nil {
-			return nil, err
-		}
-		deletes, err := ut.packDeleteMessage(ctx, ez)
-		if err != nil {
-			return nil, err
-		}
-		return append(inserts, deletes...), nil
-	}
-
 	if err := validateUpsertNamespace(ut.req.Namespace, ut.schema.CollectionSchema); err != nil {
 		return nil, err
 	}
-	return repackUpsertMessages(ctx, ut.GetMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result.GetIDs(), ut.partitionKeys, ut.schema.CollectionSchema, ut.schemaVersion, ez, ut.partialUpdateCASGroups, nil, ut.upsertMsg.DeleteMsg.GetPrimaryKeys(), ut.upsertMsg.DeleteMsg.PartitionID)
+	return repackUpsertMessages(ctx, ut.GetMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result.GetIDs(), ut.partitionKeys, ut.schema.CollectionSchema, ut.schemaVersion, ez, ut.partialUpdateCASGroups, "", ut.upsertMsg.DeleteMsg.GetPrimaryKeys(), ut.upsertMsg.DeleteMsg.PartitionID)
 }
 
-func (ut *UpsertTask) packDeleteMessage(ctx context.Context, ez *message.CipherConfig) ([]message.MutableMessage, error) {
-	if typeutil.GetSizeOfIDs(ut.upsertMsg.DeleteMsg.PrimaryKeys) == 0 {
-		return nil, nil
-	}
-	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy deleteExecute upsert %d", ut.ID()))
-	collID := ut.upsertMsg.DeleteMsg.CollectionID
-	log := mlog.With(
-		mlog.FieldCollectionID(collID))
-	// hash primary keys to channels
-	vChannels, err := ut.chMgr.GetVChannels(collID)
-	if err != nil {
-		log.Warn(ctx, "get vChannels failed when deleteExecute", mlog.Err(err))
-		ut.result.Status = merr.Status(err)
-		return nil, err
-	}
-	result, numRows, err := repackDeleteMsgByHash(
-		ctx,
-		ut.upsertMsg.DeleteMsg.PrimaryKeys,
-		vChannels, ut.idAllocator,
-		ut.BeginTs(),
-		ut.upsertMsg.DeleteMsg.CollectionID, ut.upsertMsg.DeleteMsg.CollectionName,
-		ut.upsertMsg.DeleteMsg.PartitionID, ut.upsertMsg.DeleteMsg.PartitionName,
-		ut.upsertMsg.DeleteMsg.GetDbName(),
-		ut.req.Namespace,
-		ut.schema.CollectionSchema,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	var msgs []message.MutableMessage
-	for hashKey, deleteMsgs := range result {
-		vchannel := vChannels[hashKey]
-		for _, deleteMsg := range deleteMsgs {
-			msg, err := message.NewDeleteMessageBuilderV1().
-				WithHeader(&message.DeleteMessageHeader{
-					CollectionId: ut.upsertMsg.DeleteMsg.CollectionID,
-					Rows:         uint64(deleteMsg.NumRows),
-				}).
-				WithBody(deleteMsg.DeleteRequest).
-				WithVChannel(vchannel).
-				WithCipher(ez).
-				BuildMutable()
-			if err != nil {
-				return nil, err
-			}
-			msgs = append(msgs, msg)
-		}
-	}
-
-	log.Debug(ctx, "Proxy Upsert deleteExecute done",
-		mlog.FieldCollectionID(collID),
-		mlog.Strings("virtual_channels", vChannels),
-		mlog.FieldTaskID(ut.ID()),
-		mlog.Int64("numRows", numRows),
-		mlog.Duration("prepare duration", tr.ElapseSpan()))
-
-	return msgs, nil
-}
-
-func (ut *UpsertTask) attachPartialUpdateCAS(messages []message.MutableMessage) error {
+func (ut *UpsertTask) validatePartialUpdateCASCoverage(messages []message.MutableMessage) error {
 	groups := ut.partialUpdateCASGroups
 	if len(groups) == 0 {
 		return merr.WrapErrServiceInternalMsg("partial update CAS metadata snapshot is empty")
@@ -303,9 +223,6 @@ func (ut *UpsertTask) attachPartialUpdateCAS(messages []message.MutableMessage) 
 
 	attached := make(map[string]struct{}, len(groups))
 	for _, msg := range messages {
-		if msg.MessageType() != message.MessageTypeUpsert && msg.MessageType() != message.MessageTypeInsert {
-			continue
-		}
 		vchannel := msg.VChannel()
 		_, ok := groups[vchannel]
 		if !ok {
@@ -314,18 +231,7 @@ func (ut *UpsertTask) attachPartialUpdateCAS(messages []message.MutableMessage) 
 		if !message.HasPartialUpdateCAS(msg) {
 			return merr.WrapErrServiceInternalMsg("partial update insert is missing CAS metadata for vchannel %s", vchannel)
 		}
-		if paramtable.Get().ProxyCfg.SplitChunkProxy.GetAsBool() {
-			maxMessageSize := paramtable.Get().PulsarCfg.MaxMessageSize.GetAsInt()
-			messageSize := msg.EstimateSize()
-			if messageSize > maxMessageSize {
-				return merr.WrapErrServiceInternalMsg(
-					"partial update insert packer emitted oversized message for vchannel %s: size=%d, max=%d",
-					vchannel,
-					messageSize,
-					maxMessageSize,
-				)
-			}
-		}
+
 		attached[vchannel] = struct{}{}
 	}
 	for vchannel := range groups {

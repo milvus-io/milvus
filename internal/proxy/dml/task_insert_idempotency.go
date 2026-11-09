@@ -37,8 +37,8 @@ func (it *InsertTask) prepareIdempotencyKey(collectionProperties []*commonpb.Key
 	if !it.idempotencyEnabled {
 		return nil
 	}
-	// The key and duplicate result are plaintext message properties; collection
-	// encryption currently protects only the body.
+	// Keep the existing encrypted-idempotent API restriction. Encryption protects
+	// the body, while the idempotency key remains a plaintext message property.
 	if hookutil.IsClusterEncryptionEnabled() &&
 		hookutil.GetEzByCollProperties(collectionProperties, it.collectionID).AsMessageConfig() != nil {
 		return merr.WrapErrParameterInvalidMsg(
@@ -74,115 +74,6 @@ func (it *InsertTask) reassignAutoIDForIdempotencyIfNeeded(ctx context.Context, 
 		return err
 	}
 	return nil
-}
-
-// insertIdempotencyDecoration single-sources idempotency marking for inserts in
-// the proxy. It pairs the two things that together make a write unit idempotent:
-//   - the idempotency key, which travels in the `_ik` message property rather
-//     than in the insert header (so every message type is read the same way);
-//   - the per-write-unit insert result, which is stamped onto the insert header.
-//
-// They are carried in one value so the idempotency interceptor's "insert result
-// requires key" invariant cannot be broken by applying one without the other. A
-// nil decoration means idempotency is disabled for this insert and every method
-// below is a no-op.
-type insertIdempotencyDecoration struct {
-	key            string
-	decorateHeader func(*message.InsertMessageHeader, []int) error
-}
-
-// idempotentInsertDecoration returns the idempotency decoration for this insert,
-// or nil when idempotency is disabled for it. The transaction commit message,
-// synthesized later in the producer, gets the key applied there.
-func (it *InsertTask) idempotentInsertDecoration() *insertIdempotencyDecoration {
-	if !it.idempotencyEnabled {
-		return nil
-	}
-	ids := it.result.GetIDs()
-	return &insertIdempotencyDecoration{
-		key: it.idempotencyKey,
-		decorateHeader: func(header *message.InsertMessageHeader, rowOffsets []int) error {
-			result, err := buildInsertWriteUnitIdempotentInsertResult(ids, rowOffsets)
-			if err != nil {
-				return err
-			}
-			message.SetInsertHeaderIdempotentInsertResult(header, result)
-			return nil
-		},
-	}
-}
-
-// enabled reports whether this insert is an idempotent write.
-func (d *insertIdempotencyDecoration) enabled() bool {
-	return d != nil
-}
-
-// idempotencyKey returns the key to stamp on the message property, or "" when
-// the insert is not idempotent (WithIdempotencyKey then no-ops).
-//
-// The key is unscoped: the dedup window is per vchannel, and a vchannel name
-// already carries the collection id.
-func (d *insertIdempotencyDecoration) idempotencyKey() message.IdempotencyKey {
-	if d == nil {
-		return ""
-	}
-	return message.IdempotencyKey(d.key)
-}
-
-// decorate stamps the per-write-unit insert result onto the insert header.
-func (d *insertIdempotencyDecoration) decorate(header *message.InsertMessageHeader, rowOffsets []int) error {
-	if d == nil {
-		return nil
-	}
-	return d.decorateHeader(header, rowOffsets)
-}
-
-func buildInsertWriteUnitIdempotentInsertResult(ids *schemapb.IDs, rowOffsets []int) (*messagespb.IdempotentInsertResult, error) {
-	writeUnitIDs, err := idsByOffsets(ids, rowOffsets)
-	if err != nil {
-		return nil, err
-	}
-	offsets := make([]uint32, 0, len(rowOffsets))
-	for _, offset := range rowOffsets {
-		if offset < 0 {
-			return nil, merr.WrapErrServiceInternalMsg("negative row offset %d", offset)
-		}
-		offsets = append(offsets, uint32(offset))
-	}
-	return message.NewIdempotentInsertResult(offsets, writeUnitIDs), nil
-}
-
-func idsByOffsets(ids *schemapb.IDs, rowOffsets []int) (*schemapb.IDs, error) {
-	if ids == nil {
-		return nil, merr.WrapErrServiceInternalMsg("missing mutation result ids")
-	}
-	if intIDs := ids.GetIntId(); intIDs != nil {
-		data := intIDs.GetData()
-		selected := make([]int64, 0, len(rowOffsets))
-		for _, offset := range rowOffsets {
-			if offset < 0 || offset >= len(data) {
-				return nil, merr.WrapErrServiceInternalMsg("row offset %d out of int id range %d", offset, len(data))
-			}
-			selected = append(selected, data[offset])
-		}
-		return &schemapb.IDs{
-			IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: selected}},
-		}, nil
-	}
-	if strIDs := ids.GetStrId(); strIDs != nil {
-		data := strIDs.GetData()
-		selected := make([]string, 0, len(rowOffsets))
-		for _, offset := range rowOffsets {
-			if offset < 0 || offset >= len(data) {
-				return nil, merr.WrapErrServiceInternalMsg("row offset %d out of string id range %d", offset, len(data))
-			}
-			selected = append(selected, data[offset])
-		}
-		return &schemapb.IDs{
-			IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: selected}},
-		}, nil
-	}
-	return nil, merr.WrapErrServiceInternalMsg("unsupported mutation result ids type")
 }
 
 // warnOnPartialIdempotentDuplicate makes a fan-out that was deduplicated on some

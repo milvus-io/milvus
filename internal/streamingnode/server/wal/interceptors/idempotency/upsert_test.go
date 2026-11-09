@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 )
@@ -37,14 +38,22 @@ func upsertForTest(vc string) message.MutableMessage {
 	keys := &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7}}}}
 	return message.NewUpsertMessageBuilderV2().WithVChannel(vc).
 		WithHeader(&message.UpsertMessageHeader{CollectionId: 1, SchemaVersion: &version, Partitions: []*message.PartitionSegmentAssignment{{PartitionId: 2, Rows: 1}}, DeleteRows: 1}).
-		WithBody(&message.UpsertMessageBody{PrimaryKeys: keys, RowIds: []int64{7}, DeleteEffects: []*messagespb.UpsertDeleteEffect{{PrimaryKeys: keys, Scope: &messagespb.UpsertDeleteEffect_AllPartitions{AllPartitions: &messagespb.UpsertAllPartitions{}}}}}).MustBuildMutable().WithTimeTick(10)
+		WithBody(&message.UpsertMessageBody{Rows: &message.InsertRows{PrimaryKeys: keys, RowIds: []int64{7}}, DeleteEffects: []*messagespb.UpsertDeleteEffect{{PrimaryKeys: keys, Scope: &messagespb.UpsertDeleteEffect_AllPartitions{AllPartitions: &messagespb.UpsertAllPartitions{}}}}}).MustBuildMutable().WithTimeTick(10)
 }
 
 func mapUpsert(msg message.MutableMessage, offsets ...uint32) {
-	typed := message.MustAsMutableUpsertMessageV2(msg)
-	body := typed.MustBody()
-	body.RequestRowMapping = &messagespb.UpsertRequestRowMapping{RowOffsets: offsets}
-	typed.OverwriteBody(body)
+	switch msg.MessageType() {
+	case message.MessageTypeInsert:
+		typed := message.MustAsMutableInsertMessageV2(msg)
+		body := typed.MustBody()
+		body.Rows.RequestRowMapping = &messagespb.RequestRowMapping{RowOffsets: offsets}
+		typed.OverwriteBody(body)
+	case message.MessageTypeUpsert:
+		typed := message.MustAsMutableUpsertMessageV2(msg)
+		body := typed.MustBody()
+		body.Rows.RequestRowMapping = &messagespb.RequestRowMapping{RowOffsets: offsets}
+		typed.OverwriteBody(body)
+	}
 }
 
 func TestUpsertBoundedRetryReturnsOriginalResult(t *testing.T) {
@@ -68,7 +77,7 @@ func TestUpsertBoundedRetryReturnsOriginalResult(t *testing.T) {
 		if i == 1 {
 			typed := message.MustAsMutableUpsertMessageV2(msg)
 			body := typed.MustBody()
-			body.PrimaryKeys.GetIntId().Data[0] = 999
+			body.Rows.PrimaryKeys.GetIntId().Data[0] = 999
 			typed.OverwriteBody(body)
 		}
 		extra := &utility.ExtraAppendResult{}
@@ -121,7 +130,7 @@ func TestSequentialKeyedUpsertTransactionUsesBufferedOriginalResult(t *testing.T
 			require.NoError(t, err)
 			count := uint64(1)
 			if mixed {
-				result, err := message.BuildUpsertResult(context.Background(), body)
+				result, err := message.BuildInsertOrUpsertResult(context.Background(), body)
 				require.NoError(t, err)
 				result = proto.Clone(result).(*messagespb.IdempotentInsertResult)
 				result.RowOffsets = []uint32{1}
@@ -179,5 +188,57 @@ func TestSequentialKeyedUpsertRejectsMissingBodyResult(t *testing.T) {
 		require.Zero(t, interceptor.window("p_1v0").Len())
 		require.Nil(t, interceptor.txnInsertResultBuffers.Build(commit))
 		interceptor.Close()
+	}
+}
+
+func TestInsertV2BoundedRetryReturnsOriginalResult(t *testing.T) {
+	interceptor := newIdempotencyInterceptor(WindowConfig{MaxBytes: 1 << 20})
+	defer interceptor.Close()
+	build := func(key int64) message.MutableMessage {
+		upsert := message.MustAsMutableUpsertMessageV2(upsertForTest("p_1v0"))
+		h := upsert.Header()
+		rows := upsert.MustBody().GetRows()
+		rows.PrimaryKeys.GetIntId().Data[0] = key
+		rows.RequestRowMapping = &messagespb.RequestRowMapping{RowOffsets: []uint32{2}}
+		return message.NewInsertMessageBuilderV2().WithVChannel("p_1v0").WithIdempotencyKey("key").
+			WithHeader(&message.InsertMessageHeaderV2{CollectionId: h.CollectionId, SchemaVersion: h.SchemaVersion, Partitions: h.Partitions}).
+			WithBody(&message.InsertMessageBody{Rows: rows}).MustBuildMutable().WithTimeTick(10)
+	}
+	calls := 0
+	appendOp := func(ctx context.Context, _ message.MutableMessage) (message.MessageID, error) {
+		calls++
+		extra := utility.GetExtraAppendResult(ctx)
+		extra.TimeTick, extra.LastConfirmedMessageID = 42, rmq.NewRmqID(9)
+		return rmq.NewRmqID(10), nil
+	}
+	for _, key := range []int64{7, 999} {
+		extra := &utility.ExtraAppendResult{}
+		id, err := interceptor.DoAppend(utility.WithExtraAppendResult(t.Context(), extra), build(key), appendOp)
+		require.NoError(t, err)
+		require.Equal(t, rmq.NewRmqID(10), id)
+		require.Equal(t, rmq.NewRmqID(9), extra.LastConfirmedMessageID)
+		require.Equal(t, uint64(42), extra.TimeTick)
+		result := extra.Extra.(*messagespb.IdempotentInsertResult)
+		require.Equal(t, []int64{7}, result.Ids.GetIntId().Data)
+		require.Equal(t, []uint32{2}, result.RowOffsets)
+	}
+	require.Equal(t, 1, calls)
+	invalid := build(999)
+	mapUpsert(invalid, 0, 1)
+	_, err := interceptor.DoAppend(t.Context(), invalid, appendOp)
+	require.Error(t, err)
+	require.Equal(t, 1, calls)
+}
+
+func TestInsertOrUpsertResultRejectsMalformedHeader(t *testing.T) {
+	upsert := upsertForTest("p_1v0")
+	insert := message.NewInsertMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&message.InsertMessageHeaderV2{}).WithBody(&message.InsertMessageBody{}).MustBuildMutable()
+	for _, msg := range []message.MutableMessage{upsert, insert} {
+		properties := msg.Properties().ToRawMap()
+		properties["_h"] = "invalid-base64"
+		raw := message.NewMutableMessageBeforeAppend(msg.IntoMessageProto().GetPayload(), properties)
+		_, err := getInsertResultFromInsertMessage(t.Context(), raw)
+		require.Error(t, err)
+		require.Equal(t, streamingpb.StreamingCode_STREAMING_CODE_INVAILD_ARGUMENT, status.AsStreamingError(err).Code)
 	}
 }

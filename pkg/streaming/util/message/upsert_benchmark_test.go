@@ -28,7 +28,7 @@ import (
 
 func BenchmarkUpsertProjection(b *testing.B) {
 	const rows = 1024
-	body := &UpsertMessageBody{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: make([]int64, rows)}}}, RowIds: make([]int64, rows), Columns: []*schemapb.FieldData{{FieldId: 101, Type: schemapb.DataType_FloatVector, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 128, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, rows*128)}}}}}}}
+	body := &UpsertMessageBody{Rows: &InsertRows{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: make([]int64, rows)}}}, RowIds: make([]int64, rows), Columns: []*schemapb.FieldData{{FieldId: 101, Type: schemapb.DataType_FloatVector, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 128, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, rows*128)}}}}}}}}
 	payload, err := proto.Marshal(body)
 	if err != nil {
 		b.Fatal(err)
@@ -66,7 +66,7 @@ func BenchmarkUpsertProjection(b *testing.B) {
 						}
 					}
 					if projection {
-						if _, err := decodeUpsertProjection(data); err != nil {
+						if _, err := decodeInsertOrUpsertProjection(data, true); err != nil {
 							b.Fatal(err)
 						}
 					} else {

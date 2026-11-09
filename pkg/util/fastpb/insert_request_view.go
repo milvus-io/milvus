@@ -134,11 +134,6 @@ func (c *InsertRequestViewCursor) newEncoder(template *msgpb.InsertRequest, rows
 // scratch. Callers must synchronously marshal the returned encoder before
 // requesting the next one.
 func (c *InsertRequestViewCursor) NextEncoder(template *msgpb.InsertRequest, rows []int, sizeLimit int) (*InsertRequestViewEncoder, int, error) {
-	return c.nextEncoder(template, rows, sizeLimit, nil)
-}
-
-// nextEncoder uses the same row plan for Insert framing and Upsert columns.
-func (c *InsertRequestViewCursor) nextEncoder(template *msgpb.InsertRequest, rows []int, sizeLimit int, fitsColumns func(count, size int) bool) (*InsertRequestViewEncoder, int, error) {
 	if c == nil || c.source == nil {
 		return nil, 0, insertViewInternal("nil insert request view cursor")
 	}
@@ -162,36 +157,7 @@ func (c *InsertRequestViewCursor) nextEncoder(template *msgpb.InsertRequest, row
 	planScanRow := c.scanRow
 	previous := c.lastSelectedRow
 	consumed := 0
-	aggregatedRows := 0
-	var err error
-	if fitsColumns == nil {
-		aggregatedRows, err = c.sizeState.aggregateSimpleRows(rows, previous, sizeLimit)
-	} else if c.sizeState.hasFixedWidthSimpleFields() {
-		// The bound includes Insert framing, so an accepted prefix is also
-		// safe for the Upsert column and metadata budget. Exact row sizing
-		// continues below to fill the boundary without changing splits.
-		low, high := 0, len(rows)
-		for low < high {
-			middle := low + (high-low+1)/2
-			bound, boundErr := c.sizeState.simpleRowsUpperBound(middle)
-			if boundErr == nil && fitsColumns(middle, bound) {
-				low = middle
-			} else {
-				high = middle - 1
-			}
-		}
-		if low > 0 {
-			aggregatedRows, err = c.sizeState.aggregateSimpleRows(rows[:low], previous, 0)
-			if err != nil {
-				// Aggregation visits fields in a different order. Restore
-				// sizing scratch and use the original row-wise error order.
-				if resetErr := c.sizeState.reset(template, c.source, len(rows)); resetErr != nil {
-					return nil, 0, resetErr
-				}
-				aggregatedRows, err = 0, nil
-			}
-		}
-	}
+	aggregatedRows, err := c.sizeState.aggregateSimpleRows(rows, previous, sizeLimit)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -238,10 +204,7 @@ func (c *InsertRequestViewCursor) nextEncoder(template *msgpb.InsertRequest, row
 			return nil, 0, err
 		}
 		fits := sizeLimit <= 0 || encodedSize < sizeLimit
-		if fitsColumns != nil {
-			columnsSize := encodedSize - c.sizeState.previewTimestampWireSize - c.sizeState.previewRowIDWireSize - c.sizeState.previewNumRowsWireSize
-			fits = fitsColumns(consumed+1, columnsSize)
-		}
+
 		if consumed > 0 && !fits {
 			c.pendingRow = row
 			copy(c.pendingFieldDataIndices, c.rowFieldDataIndices)

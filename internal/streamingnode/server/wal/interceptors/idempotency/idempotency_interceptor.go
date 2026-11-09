@@ -170,8 +170,8 @@ func (impl *idempotencyInterceptor) appendIdempotentMessage(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	if msg.MessageType() == message.MessageTypeUpsert && insertResult == nil {
-		return nil, status.NewInvalidArgument("keyed Upsert requires a complete request row mapping")
+	if message.IsInsertOrUpsertMessage(msg) && insertResult == nil {
+		return nil, status.NewInvalidArgument("keyed row write requires a complete request row mapping")
 	}
 	window := impl.window(msg.VChannel())
 	begin := window.Begin(key, msg)
@@ -456,27 +456,28 @@ func getInsertResultFromInsertMessage(ctx context.Context, msg message.MutableMe
 	var result *messagespb.IdempotentInsertResult
 	switch msg.MessageType() {
 	case message.MessageTypeInsert:
-		typed, err := message.AsMutableInsertMessageV1(msg)
-		if err != nil {
-			return nil, status.NewInvalidArgument("malformed insert message header")
+		switch msg.Version() {
+		case message.VersionOld, message.VersionV1:
+			typed, err := message.AsMutableInsertMessageV1(msg)
+			if err != nil {
+				return nil, status.NewInvalidArgument("malformed insert message header")
+			}
+			result = typed.Header().GetIdempotentResult()
+		case message.VersionV2:
+			typed, err := message.AsMutableInsertMessageV2(msg)
+			if err != nil {
+				return nil, status.NewInvalidArgument("malformed Insert V2 message header")
+			}
+			return getInsertOrUpsertResult(ctx, typed)
+		default:
+			panic("unexpected Insert message version")
 		}
-		result = typed.Header().GetIdempotentResult()
 	case message.MessageTypeUpsert:
 		typed, err := message.AsMutableUpsertMessageV2(msg)
 		if err != nil {
 			return nil, status.NewInvalidArgument("malformed Upsert message header")
 		}
-		result, err = message.BuildUpsertResult(ctx, typed)
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			if errors.Is(err, message.ErrMalformedBody) {
-				return nil, status.NewInvalidArgument("malformed Upsert retry result")
-			}
-			return nil, err
-		}
-		return result, nil
+		return getInsertOrUpsertResult(ctx, typed)
 	default:
 		return nil, nil
 	}
@@ -540,4 +541,19 @@ func fillDuplicateResult(ctx context.Context, entry *idempotencyview.Record) (me
 		}
 	}
 	return msgID, nil
+}
+
+// getInsertOrUpsertResult preserves decode errors while reconstructing original IDs.
+func getInsertOrUpsertResult(ctx context.Context, msg message.BasicMessage) (*messagespb.IdempotentInsertResult, error) {
+	result, err := message.BuildInsertOrUpsertResult(ctx, msg)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if errors.Is(err, message.ErrMalformedBody) {
+			return nil, status.NewInvalidArgument("malformed row-write retry result")
+		}
+		return nil, err
+	}
+	return result, nil
 }

@@ -15,15 +15,11 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type invalidationTestWAL struct{ streaming.WALAccesser }
 
 func TestInsertAppendReturnsMixedOutcomeWithoutReplay(t *testing.T) {
-	gate := &paramtable.Get().StreamingCfg.EnableUpsertMessage
-	previous := gate.SwapTempValue("true")
-	defer gate.SwapTempValue(previous)
 	cache := newTestCache()
 	task := &InsertTask{
 		baseTask: baseTask{MetaCache: cache}, ctx: t.Context(), collectionID: 10,
@@ -34,14 +30,12 @@ func TestInsertAppendReturnsMixedOutcomeWithoutReplay(t *testing.T) {
 	wal := &invalidationTestWAL{}
 	patch := mockey.Mock(streaming.WAL).Return(wal).Build()
 	defer patch.UnPatch()
-	patch = mockey.Mock(repackUpsertMessages).Return([]message.MutableMessage{}, nil).Build()
+	patch = mockey.Mock(repackInsertMessages).Return([]message.MutableMessage{}, nil).Build()
 	defer patch.UnPatch()
 	appends, invalidations := 0, 0
 	patch = mockey.Mock((*invalidationTestWAL).AppendMessagesWithOptions).To(func(_ *invalidationTestWAL, _ context.Context, _ []message.MutableMessage, _ ...streaming.AppendOption) streaming.AppendResponses {
 		appends++
-		// A configuration change after packing must not resend this fan-out
-		// through the legacy path after an unknown or partial outcome.
-		gate.SwapTempValue("false")
+		// An unknown or partial outcome must not resend the fan-out.
 		return streaming.AppendResponses{Responses: []streaming.AppendResponse{
 			{Error: status.NewOnShutdownError("first shard shutting down")},
 			{}, // This shard committed and must not be replayed.

@@ -63,16 +63,21 @@ func TestUpsertAppliesNativeRowsAndDeletes(t *testing.T) {
 	defer runtime.Close()
 	version := int32(1)
 	build := func(tick uint64, deleteOld bool) message.ImmutableMessage {
-		body := &message.UpsertMessageBody{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7, 8}}}}, RowIds: []int64{int64(tick), int64(tick + 1)}, Columns: []*schemapb.FieldData{
+		body := &message.UpsertMessageBody{Rows: &message.InsertRows{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7, 8}}}}, RowIds: []int64{int64(tick), int64(tick + 1)}, Columns: []*schemapb.FieldData{
 			{FieldId: 101, Type: schemapb.DataType_Int64, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{int64(tick), int64(tick)}}}}}},
 			{FieldId: 102, Type: schemapb.DataType_FloatVector, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}}}}},
-		}}
+		}}}
 		header := &message.UpsertMessageHeader{CollectionId: 1, SchemaVersion: &version, Partitions: []*message.PartitionSegmentAssignment{{PartitionId: 10, Rows: 2, SegmentAssignment: &messagespb.SegmentAssignment{SegmentId: 100}}}}
 		if deleteOld {
-			body.DeleteEffects = []*messagespb.UpsertDeleteEffect{{PrimaryKeys: body.PrimaryKeys, Scope: &messagespb.UpsertDeleteEffect_AllPartitions{AllPartitions: &messagespb.UpsertAllPartitions{}}}}
+			body.DeleteEffects = []*messagespb.UpsertDeleteEffect{{PrimaryKeys: body.Rows.PrimaryKeys, Scope: &messagespb.UpsertDeleteEffect_AllPartitions{AllPartitions: &messagespb.UpsertAllPartitions{}}}}
 			header.DeleteRows = 2
 		}
 		return message.NewUpsertMessageBuilderV2().WithVChannel("ch").WithHeader(header).WithBody(body).MustBuildMutable().WithTimeTick(tick).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(int64(tick)))
+	}
+	buildInsert := func(tick uint64) message.ImmutableMessage {
+		source := message.MustAsImmutableUpsertMessageV2(build(tick, false))
+		header := source.Header()
+		return message.NewInsertMessageBuilderV2().WithVChannel("ch").WithHeader(&message.InsertMessageHeaderV2{CollectionId: header.CollectionId, Partitions: header.Partitions, SchemaVersion: header.SchemaVersion}).WithBody(&message.InsertMessageBody{Rows: source.MustBody().GetRows()}).MustBuildMutable().WithTimeTick(tick).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(int64(tick)))
 	}
 	require.NoError(t, runtime.dispatchMessage(context.Background(), build(10, false), true, true))
 	segment, ok := runtime.Segment(100)
@@ -82,12 +87,9 @@ func TestUpsertAppliesNativeRowsAndDeletes(t *testing.T) {
 	manager.ApplyRecoveryBarrier("ch", 10)
 	runtime.markGrowingTimeTick(10)
 	runtime.markTransformTimeTick(10)
-	for _, effects := range []bool{false, true} {
-		tick := uint64(20)
-		if effects {
-			tick = 30
-		}
-		msg := build(tick, effects)
+	for _, msg := range []message.ImmutableMessage{buildInsert(20), build(25, false), build(30, true)} {
+		tick := msg.TimeTick()
+		effects := tick == 30
 		wire := msg.IntoMessageProto()
 		manager.ObserveAppend(message.NewMutableMessageBeforeAppend(wire.Payload, wire.Properties))
 		manager.Publish(func(yield func(message.ImmutableMessage, bool) bool) { yield(msg, false) }, tick, nil)
@@ -124,7 +126,7 @@ func TestUpsertAppliesNativeRowsAndDeletes(t *testing.T) {
 	txnContext := message.TxnContext{TxnID: 1}
 	begin := message.NewBeginTxnMessageBuilderV2().WithVChannel("ch").WithHeader(&message.BeginTxnMessageHeader{}).WithBody(&message.BeginTxnMessageBody{}).MustBuildMutable().WithTxnContext(txnContext).WithTimeTick(39).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(39))
 	commit := message.NewCommitTxnMessageBuilderV2().WithVChannel("ch").WithHeader(&message.CommitTxnMessageHeader{BodyCnt: 1}).WithBody(&message.CommitTxnMessageBody{}).MustBuildMutable().WithTxnContext(txnContext).WithTimeTick(41).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(41))
-	transaction, err := message.NewImmutableTxnMessageBuilder(message.MustAsImmutableBeginTxnMessageV2(begin)).Add(build(40, false)).Build(message.MustAsImmutableCommitTxnMessageV2(commit))
+	transaction, err := message.NewImmutableTxnMessageBuilder(message.MustAsImmutableBeginTxnMessageV2(begin)).Add(buildInsert(40)).Build(message.MustAsImmutableCommitTxnMessageV2(commit))
 	require.NoError(t, err)
 	manager.Publish(func(yield func(message.ImmutableMessage, bool) bool) { yield(commit, true) }, 41, nil)
 	snapshot, ready := manager.Snapshot("ch", 41)

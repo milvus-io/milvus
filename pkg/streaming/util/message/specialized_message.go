@@ -39,7 +39,7 @@ func asSpecializedMutableMessage[H proto.Message, B proto.Message](msg BasicMess
 
 	var header H
 	msgType := MustGetMessageTypeWithVersion[H, B]()
-	if underlying.MessageType() != msgType.MessageType {
+	if underlying.MessageType() != msgType.MessageType || !specializedVersionMatches(underlying.Version(), msgType.Version) {
 		// The message type do not match the specialized header.
 		return nil, merr.WrapErrParameterInvalidMsg("message type do not match specialized header")
 	}
@@ -99,7 +99,7 @@ func asSpecializedImmutableMessage[H proto.Message, B proto.Message](msg Immutab
 
 	var header H
 	msgType := MustGetMessageTypeWithVersion[H, B]()
-	if underlying.MessageType() != msgType.MessageType {
+	if underlying.MessageType() != msgType.MessageType || !specializedVersionMatches(underlying.Version(), msgType.Version) {
 		// The message type do not match the specialized header.
 		return nil, merr.WrapErrParameterInvalidMsg("message type do not match specialized header")
 	}
@@ -213,7 +213,7 @@ func (m *specializedMutableMessageImpl[H, B]) OverwriteBody(body B) {
 		m.properties.Set(messageCipherHeader, cipherHeader)
 	}
 	m.payload = payload
-	m.upsertProjectionCache = nil
+	m.insertOrUpsertProjectionCache = nil
 }
 
 // BroadcastMessage returns the broadcast message.
@@ -298,4 +298,9 @@ func unmarshalProtoB[B proto.Message](data []byte) (B, error) {
 		return nilBody, err
 	}
 	return body, nil
+}
+
+// Converted pre-streaming records keep VersionOld while using a V1 body/header.
+func specializedVersionMatches(actual, expected Version) bool {
+	return actual == expected || actual == VersionOld && expected == VersionV1
 }

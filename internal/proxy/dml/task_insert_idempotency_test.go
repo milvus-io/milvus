@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestInsertTaskIdempotencyBehavior(t *testing.T) {
@@ -59,11 +60,6 @@ func TestInsertTaskIdempotencyBehavior(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, key != "", task.idempotencyEnabled)
 				require.Equal(t, key, task.idempotencyKey)
-				if key == "" {
-					require.Nil(t, task.idempotentInsertDecoration())
-				} else {
-					require.NotNil(t, task.idempotentInsertDecoration())
-				}
 			})
 		}
 	}
@@ -89,7 +85,6 @@ func TestInsertTaskKeylessAutoIDIsNewWrite(t *testing.T) {
 		require.NoError(t, task.PreExecute(context.Background()))
 		require.False(t, task.idempotencyEnabled)
 		require.Empty(t, task.idempotencyKey)
-		require.Nil(t, task.idempotentInsertDecoration())
 		ids := task.result.GetIDs().GetIntId().GetData()
 		require.NotEmpty(t, ids)
 		require.NotEqual(t, previousIDs, ids)
@@ -323,14 +318,10 @@ func newInsertTaskForIdempotencyAutoIDTest(cache Cache, idAllocator *allocator.I
 }
 
 func rowChannelsByPK(ids *schemapb.IDs, channels []string) []string {
-	offsetsByChannel, _ := assignChannelsByPK(ids, channels, &BaseInsertTask{
-		InsertRequest: &msgpb.InsertRequest{},
-	})
-	rowChannels := make([]string, len(idsByOffsetsForTest(ids)))
-	for channel, offsets := range offsetsByChannel {
-		for _, offset := range offsets {
-			rowChannels[offset] = channel
-		}
+	hashes, _ := typeutil.HashPK2Channels(ids, channels)
+	rowChannels := make([]string, len(hashes))
+	for row, channel := range hashes {
+		rowChannels[row] = channels[channel]
 	}
 	return rowChannels
 }

@@ -62,8 +62,7 @@ func newOversizedTestInsertMessage(t *testing.T, budget int) message.MutableMess
 func TestAppendWithOptionalChunkingUsesSuccessfulHeadIDOnDurableAssembly(t *testing.T) {
 	resource.InitForTest(t)
 	params := paramtable.Get()
-	oldSplitChunkSN := params.StreamingCfg.SplitChunkSN.SwapTempValue("true")
-	t.Cleanup(func() { params.StreamingCfg.SplitChunkSN.SwapTempValue(oldSplitChunkSN) })
+
 	maxMessageSizeKey := params.PulsarCfg.MaxMessageSize.Key
 	reserveSizeKey := params.PulsarCfg.MessageReserveSize.Key
 	// The smallest budget a valid configuration can express: keep the WAL
@@ -132,15 +131,14 @@ func TestAppendWithOptionalChunkingUsesSuccessfulHeadIDOnDurableAssembly(t *test
 	assert.Equal(t, msg.IntoMessageProto().GetPayload(), assembled.IntoImmutableMessageProto().GetPayload())
 }
 
-func TestAppendWithOptionalChunkingDisabledUsesSingleRecord(t *testing.T) {
+func TestAppendWithOptionalChunkingAlwaysSplitsOversizedPayload(t *testing.T) {
 	resource.InitForTest(t)
 
 	// A budget both messages below can be compared against: the oversized
 	// insert must exceed it while an ordinary time tick stays well under.
 	const chunkBudget = 2048
 	params := paramtable.Get()
-	oldSplitChunkSN := params.StreamingCfg.SplitChunkSN.SwapTempValue("false")
-	t.Cleanup(func() { params.StreamingCfg.SplitChunkSN.SwapTempValue(oldSplitChunkSN) })
+
 	maxMessageSizeKey := params.PulsarCfg.MaxMessageSize.Key
 	reserveSizeKey := params.PulsarCfg.MessageReserveSize.Key
 	require.NoError(t, params.Save(maxMessageSizeKey, strconv.Itoa(testMinWALMessageSize)))
@@ -165,66 +163,12 @@ func TestAppendWithOptionalChunkingDisabledUsesSingleRecord(t *testing.T) {
 
 	_, err := w.appendWithOptionalChunking(context.Background(), msg)
 	require.NoError(t, err)
-	require.Len(t, persisted, 1)
-	assert.False(t, message.IsChunkedPayload(persisted[0]))
-}
-
-func TestAppendWithOptionalChunkingObservesSplitChunkSNHotUpdate(t *testing.T) {
-	resource.InitForTest(t)
-
-	const chunkBudget = 2048
-	params := paramtable.Get()
-	oldSplitChunkSN := params.StreamingCfg.SplitChunkSN.SwapTempValue("false")
-	t.Cleanup(func() { params.StreamingCfg.SplitChunkSN.SwapTempValue(oldSplitChunkSN) })
-	maxMessageSizeKey := params.PulsarCfg.MaxMessageSize.Key
-	reserveSizeKey := params.PulsarCfg.MessageReserveSize.Key
-	require.NoError(t, params.Save(maxMessageSizeKey, strconv.Itoa(testMinWALMessageSize)))
-	require.NoError(t, params.Save(reserveSizeKey, strconv.Itoa(testMinWALMessageSize-chunkBudget)))
-	t.Cleanup(func() {
-		assert.NoError(t, params.Reset(reserveSizeKey))
-		assert.NoError(t, params.Reset(maxMessageSizeKey))
-	})
-
-	var persisted []message.MutableMessage
-	inner := newFirstTimeTickWALImpls(func(_ context.Context, msg message.MutableMessage) (message.MessageID, error) {
-		persisted = append(persisted, msg)
-		return walimplstest.NewTestMessageID(int64(len(persisted))), nil
-	})
-	w := &walAdaptorImpl{
-		rwWALImpls: &chunkRetryTestWALImpls{firstTimeTickWALImpls: inner},
-	}
-
-	appendWithSwitch := func(timeTick uint64, enabled bool) []message.MutableMessage {
-		params.StreamingCfg.SplitChunkSN.SwapTempValue(strconv.FormatBool(enabled))
-		start := len(persisted)
-		msg := newOversizedTestInsertMessage(t, chunkBudget).
-			WithTimeTick(timeTick).
-			WithLastConfirmedUseMessageID()
-		_, err := w.appendWithOptionalChunking(context.Background(), msg)
-		require.NoError(t, err)
-		return persisted[start:]
-	}
-
-	disabled := appendWithSwitch(100, false)
-	require.Len(t, disabled, 1)
-	assert.False(t, message.IsChunkedPayload(disabled[0]))
-
-	enabled := appendWithSwitch(200, true)
-	require.Greater(t, len(enabled), 1)
-	for _, physical := range enabled {
-		assert.True(t, message.IsChunkedPayload(physical))
-	}
-
-	disabledAgain := appendWithSwitch(300, false)
-	require.Len(t, disabledAgain, 1)
-	assert.False(t, message.IsChunkedPayload(disabledAgain[0]))
+	require.Greater(t, len(persisted), 1)
+	assert.True(t, message.IsChunkedPayload(persisted[0]))
 }
 
 func TestAppendWithOptionalChunkingDoesNotChunkWithoutRecordLimit(t *testing.T) {
 	resource.InitForTest(t)
-	params := paramtable.Get()
-	oldSplitChunkSN := params.StreamingCfg.SplitChunkSN.SwapTempValue("true")
-	t.Cleanup(func() { params.StreamingCfg.SplitChunkSN.SwapTempValue(oldSplitChunkSN) })
 
 	var persisted []message.MutableMessage
 	w := &walAdaptorImpl{

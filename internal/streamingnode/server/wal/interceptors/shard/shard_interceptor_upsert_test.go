@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -31,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	upsertfixture "github.com/milvus-io/milvus/pkg/v3/streaming/util/message/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type upsertSchemaManager struct {
@@ -92,10 +94,10 @@ func TestUpsertRejectsDuplicatedPrimaryColumnBeforeAppend(t *testing.T) {
 	msg := upsertForTest("p_1v0")
 	typed := message.MustAsMutableUpsertMessageV2(msg)
 	body := typed.MustBody()
-	body.Columns = append(body.Columns, &schemapb.FieldData{FieldId: 100})
+	body.Rows.Columns = append(body.Rows.Columns, &schemapb.FieldData{FieldId: 100})
 	typed.OverwriteBody(body)
 	appended := false
-	_, err := interceptor.handleUpsert(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+	_, err := interceptor.handleInsertOrUpsert(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
 		appended = true
 		return nil, nil
 	})
@@ -112,14 +114,14 @@ func TestMalformedUpsertContractIsTerminal(t *testing.T) {
 	body := typed.MustBody()
 	body.DeleteEffects = nil
 	typed.OverwriteBody(body)
-	_, err := shard.handleUpsert(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+	_, err := shard.handleInsertOrUpsert(context.Background(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
 		t.Fatal("invalid contract reached backend")
 		return nil, nil
 	})
 	require.Error(t, err)
 	require.True(t, status.AsStreamingError(err).IsUnrecoverable())
-	require.True(t, status.AsStreamingError(upsertBodyDecodeError(message.ErrMalformedBody)).IsUnrecoverable())
-	require.ErrorIs(t, upsertBodyDecodeError(context.DeadlineExceeded), context.DeadlineExceeded)
+	require.True(t, status.AsStreamingError(insertOrUpsertBodyDecodeError(message.ErrMalformedBody)).IsUnrecoverable())
+	require.ErrorIs(t, insertOrUpsertBodyDecodeError(context.DeadlineExceeded), context.DeadlineExceeded)
 }
 
 func TestUpsertRejectsNamespaceCollectionBeforeAssignment(t *testing.T) {
@@ -138,4 +140,37 @@ func TestUpsertRejectsNamespaceCollectionBeforeAssignment(t *testing.T) {
 		})
 		require.ErrorContains(t, err, "namespace")
 	}
+}
+
+func TestInsertV2UsesSharedAssignmentWithoutDeleteAccounting(t *testing.T) {
+	paramtable.Init()
+	gate := &paramtable.Get().FunctionCfg.EnableWriteBeforeMaterialization
+	previous := gate.SwapTempValue("false")
+	t.Cleanup(func() { gate.SwapTempValue(previous) })
+	upsert := message.MustAsMutableUpsertMessageV2(upsertForTest("p_1v0"))
+	header := upsert.Header()
+	msg := message.NewInsertMessageBuilderV2().WithVChannel("p_1v0").
+		WithHeader(&message.InsertMessageHeaderV2{CollectionId: header.CollectionId, SchemaVersion: header.SchemaVersion, Partitions: header.Partitions}).
+		WithBody(&message.InsertMessageBody{Rows: upsert.MustBody().GetRows()}).MustBuildMutable().WithTimeTick(10)
+	manager := mock_shards.NewMockShardManager(t)
+	manager.EXPECT().CheckIfCollectionSchemaVersionMatch(mock.Anything).Return(int32(1), nil).Once()
+	assignment := &shards.AssignSegmentResult{SegmentID: 123, Acknowledge: atomic.NewInt32(1)}
+	manager.EXPECT().AssignSegment(mock.MatchedBy(func(request *shards.AssignSegmentRequest) bool {
+		return request.CollectionID == 1 && request.PartitionID == 2 && request.TimeTick == 10 && request.ModifiedMetrics.Rows == 1 && request.ModifiedMetrics.BinarySize > 0
+	})).Return(assignment, nil).Once()
+	schemaManager := &upsertSchemaManager{MockShardManager: manager, schema: &schemapb.CollectionSchema{Version: 1, Fields: []*schemapb.FieldSchema{{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}}}
+	interceptor := &shardInterceptor{shardManager: schemaManager}
+	interceptor.initOpTable()
+	id := walimplstest.NewTestMessageID(10)
+	result, err := interceptor.DoAppend(t.Context(), msg, func(_ context.Context, appended message.MutableMessage) (message.MessageID, error) {
+		typed := message.MustAsMutableInsertMessageV2(appended)
+		require.Equal(t, int64(123), typed.Header().GetPartitions()[0].GetSegmentAssignment().GetSegmentId())
+		require.Equal(t, []int64{7}, typed.MustBody().GetRows().GetPrimaryKeys().GetIntId().GetData())
+		return id, nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, id, result)
+	require.Zero(t, assignment.Acknowledge.Load())
+	require.Zero(t, schemaManager.deleteRows)
+	require.Zero(t, schemaManager.deleteBytes)
 }

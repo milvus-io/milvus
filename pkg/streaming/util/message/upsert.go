@@ -42,9 +42,9 @@ func UpsertPrimaryKeyCount(ids *schemapb.IDs) int {
 // Each selection preserves source order and is shared by every column.
 func UpsertSelections(header *UpsertMessageHeader, body *UpsertMessageBody) ([][]int64, error) {
 	invalid := func() ([][]int64, error) { return nil, merr.WrapErrServiceInternalMsg("invalid Upsert row placement") }
-	rows := UpsertPrimaryKeyCount(body.GetPrimaryKeys())
+	rows := UpsertPrimaryKeyCount(body.GetRows().GetPrimaryKeys())
 	partitions := header.GetPartitions()
-	if rows == 0 || len(partitions) == 0 || len(body.GetRowIds()) != rows {
+	if rows == 0 || len(partitions) == 0 || len(body.GetRows().GetRowIds()) != rows {
 		return invalid()
 	}
 	result := make([][]int64, len(partitions))
@@ -58,7 +58,7 @@ func UpsertSelections(header *UpsertMessageHeader, body *UpsertMessageBody) ([][
 		}
 		seen[p.GetPartitionId()] = struct{}{}
 	}
-	indexes := body.GetPartitionIndexes()
+	indexes := body.GetRows().GetPartitionIndexes()
 	if (len(partitions) == 1 && len(indexes) != 0) || (len(partitions) > 1 && len(indexes) != rows) {
 		return invalid()
 	}
@@ -109,11 +109,11 @@ func ValidateUpsertWithSelections(header *UpsertMessageHeader, body *UpsertMessa
 		}
 		return false
 	}
-	if !validKeys(body.GetPrimaryKeys()) {
+	if !validKeys(body.GetRows().GetPrimaryKeys()) {
 		return nil, invalid("primary key type differs from schema")
 	}
 	seen := map[int64]struct{}{}
-	for _, column := range body.GetColumns() {
+	for _, column := range body.GetRows().GetColumns() {
 		id := column.GetFieldId()
 		if id <= 1 || id == primary.GetFieldID() {
 			return nil, invalid("columns contain a primary key or system field")
@@ -145,11 +145,11 @@ func ValidateUpsertWithSelections(header *UpsertMessageHeader, body *UpsertMessa
 	if deleted != header.GetDeleteRows() {
 		return nil, invalid("delete count differs from effects")
 	}
-	if mapping := body.GetRequestRowMapping(); mapping != nil {
-		if len(mapping.GetRowOffsets()) != UpsertPrimaryKeyCount(body.GetPrimaryKeys()) {
+	if mapping := body.GetRows().GetRequestRowMapping(); mapping != nil {
+		if len(mapping.GetRowOffsets()) != UpsertPrimaryKeyCount(body.GetRows().GetPrimaryKeys()) {
 			return nil, invalid("request row mapping count differs")
 		}
-		if err := ValidateIdempotentInsertResult(&messagespb.IdempotentInsertResult{Ids: body.GetPrimaryKeys(), RowOffsets: mapping.GetRowOffsets()}); err != nil {
+		if err := ValidateIdempotentInsertResult(&messagespb.IdempotentInsertResult{Ids: body.GetRows().GetPrimaryKeys(), RowOffsets: mapping.GetRowOffsets()}); err != nil {
 			return nil, err
 		}
 	}
@@ -161,17 +161,22 @@ func ValidateUpsertWithSelections(header *UpsertMessageHeader, body *UpsertMessa
 	return selections, nil
 }
 
-// BuildUpsertResult constructs the insert result from original keys and row offsets
+// ValidateInsertOrUpsertWithSelections checks a projected Insert/Upsert contract at admission.
+func ValidateInsertOrUpsertWithSelections(header *InsertOrUpsertHeader, body *InsertOrUpsertProjection, primary *schemapb.FieldSchema) ([][]int64, error) {
+	return ValidateUpsertWithSelections(&UpsertMessageHeader{CollectionId: header.CollectionId, Partitions: header.Partitions, SchemaVersion: header.SchemaVersion, DeleteRows: header.DeleteRows}, body.UpsertMessageBody, primary)
+}
+
+// BuildInsertOrUpsertResult constructs the insert result from original keys and row offsets
 // without decoding columns. Append, transaction buffering, recovery, and retry share it.
-func BuildUpsertResult(ctx context.Context, msg BasicMessage) (*messagespb.IdempotentInsertResult, error) {
-	body, err := ReadUpsertProjection(ctx, msg)
+func BuildInsertOrUpsertResult(ctx context.Context, msg BasicMessage) (*messagespb.IdempotentInsertResult, error) {
+	body, err := ReadInsertOrUpsertProjection(ctx, msg)
 	if err != nil {
 		return nil, err
 	}
-	if body.GetRequestRowMapping() == nil {
+	if body.GetRows().GetRequestRowMapping() == nil {
 		return nil, nil
 	}
-	result := &messagespb.IdempotentInsertResult{Ids: body.GetPrimaryKeys(), RowOffsets: body.GetRequestRowMapping().GetRowOffsets()}
+	result := &messagespb.IdempotentInsertResult{Ids: body.GetRows().GetPrimaryKeys(), RowOffsets: body.GetRows().GetRequestRowMapping().GetRowOffsets()}
 	if err := ValidateIdempotentInsertResult(result); err != nil {
 		return nil, err
 	}

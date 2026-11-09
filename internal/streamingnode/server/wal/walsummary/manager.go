@@ -242,7 +242,7 @@ func stagedRecordSize(msg message.ImmutableMessage, record *stagedRecord) uint64
 
 // insertSummaryOf records every committed insert unit. Keyless writes retain
 // their WAL positions without acquiring an idempotency identity. Optional
-// Insert results come from headers; Upsert results use the metadata projection.
+// Insert V1 results come from headers; new-format results use the row projection.
 func insertSummaryOf(ctx context.Context, msg message.ImmutableMessage) (*streamingpb.VChannelSummaryIdempotencyRecord, *streamingpb.VChannelSummaryInsertRecord, error) {
 	result, hasInsert, err := insertResultOf(ctx, msg)
 	if err != nil {
@@ -300,9 +300,8 @@ func idempotencyKeyOf(msg message.ImmutableMessage) string {
 		// interceptor deduplicated: the scanner's txn buffer packs begin + bodies
 		// + commit into one message, and the assembly copies only the trace
 		// context off the commit -- the idempotency key property stays on the
-		// commit sub-message. Reading it from there is what keeps a multi-message
-		// insert (a partition-key collection, or one split by maxMessageSize)
-		// in the durable window at all.
+		// commit sub-message. Read it there for explicit transactions and
+		// historical Inserts split by partition or backend record size.
 		txnMsg := message.AsImmutableTxnMessage(msg)
 		if txnMsg == nil {
 			return ""
@@ -336,16 +335,24 @@ func insertResultOf(ctx context.Context, msg message.ImmutableMessage) (*message
 		if replicated {
 			return nil, true, nil
 		}
-		typed, err := message.AsImmutableInsertMessageV1(msg)
-		if err != nil {
-			return nil, true, nil
+		switch msg.Version() {
+		case message.VersionOld, message.VersionV1:
+			typed, err := message.AsImmutableInsertMessageV1(msg)
+			if err != nil {
+				return nil, true, nil
+			}
+			return typed.Header().GetIdempotentResult(), true, nil
+		case message.VersionV2:
+			result, err := message.BuildInsertOrUpsertResult(ctx, msg)
+			return result, true, err
+		default:
+			panic("unexpected Insert message version")
 		}
-		return typed.Header().GetIdempotentResult(), true, nil
 	case message.MessageTypeUpsert:
 		if replicated {
 			return nil, true, nil
 		}
-		result, err := message.BuildUpsertResult(ctx, msg)
+		result, err := message.BuildInsertOrUpsertResult(ctx, msg)
 		return result, true, err
 	case message.MessageTypeTxn:
 		txn := message.AsImmutableTxnMessage(msg)

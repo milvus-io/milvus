@@ -42,7 +42,7 @@ func TestUpsertTrackingMutableAndRecovered(t *testing.T) {
 	getter := &staticPrimaryKeyDescriptorGetter{descriptor: shards.PrimaryKeyDescriptor{FieldID: 100, DataType: schemapb.DataType_Int64}}
 	mutable := trackingUpsert()
 	for _, msg := range []message.BasicMessage{mutable, mutable.IntoImmutableMessage(rmq.NewRmqID(1))} {
-		keys, err := extractPKsFromUpsert(context.Background(), msg, getter)
+		keys, err := extractPKsFromInsertOrUpsert(context.Background(), msg, getter)
 		require.NoError(t, err)
 		require.Equal(t, []int64{10, 20, 20, 10}, keys.Int64Values)
 	}
@@ -51,7 +51,7 @@ func TestUpsertTrackingMutableAndRecovered(t *testing.T) {
 	body := typed.MustBody()
 	body.DeleteEffects[0].PrimaryKeys.GetIntId().Data[0] = 30
 	typed.OverwriteBody(body)
-	keys, err := extractPKsFromUpsert(context.Background(), invalid, getter)
+	keys, err := extractPKsFromInsertOrUpsert(context.Background(), invalid, getter)
 	require.NoError(t, err)
 	require.Contains(t, keys.Int64Values, int64(30), "independent delete keys participate in RowLock")
 }
@@ -108,7 +108,7 @@ func TestRepeatedUpsertKeysRemainOrdinaryWritesWithCASEnabled(t *testing.T) {
 	msg := trackingUpsert().WithTimeTick(120)
 	typed := message.MustAsMutableUpsertMessageV2(msg)
 	body := typed.MustBody()
-	body.PrimaryKeys.GetIntId().Data = []int64{10, 10}
+	body.Rows.PrimaryKeys.GetIntId().Data = []int64{10, 10}
 	body.DeleteEffects[0].PrimaryKeys.GetIntId().Data = []int64{10, 10}
 	typed.OverwriteBody(body)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -127,21 +127,40 @@ func TestUpsertPKExtractionOnlyChecksTrackingKeys(t *testing.T) {
 	msg := trackingUpsert()
 	typed := message.MustAsMutableUpsertMessageV2(msg)
 	body := typed.MustBody()
-	body.PartitionIndexes = []uint32{99}
-	body.RequestRowMapping = nil
-	body.Columns = append(body.Columns, &schemapb.FieldData{FieldId: 100})
+	body.Rows.PartitionIndexes = []uint32{99}
+	body.Rows.RequestRowMapping = nil
+	body.Rows.Columns = append(body.Rows.Columns, &schemapb.FieldData{FieldId: 100})
 	typed.OverwriteBody(body)
-	keys, err := extractPKsFromUpsert(t.Context(), msg, getter)
+	keys, err := extractPKsFromInsertOrUpsert(t.Context(), msg, getter)
 	require.NoError(t, err)
 	require.Equal(t, []int64{10, 20, 20, 10}, keys.Int64Values)
 	strings := &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"foreign"}}}}
-	body.PrimaryKeys = strings
+	body.Rows.PrimaryKeys = strings
 	typed.OverwriteBody(body)
-	_, err = extractPKsFromUpsert(t.Context(), msg, getter)
+	_, err = extractPKsFromInsertOrUpsert(t.Context(), msg, getter)
 	require.ErrorContains(t, err, "primary key type")
-	body.PrimaryKeys = &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{10, 20}}}}
+	body.Rows.PrimaryKeys = &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{10, 20}}}}
 	body.DeleteEffects[0].PrimaryKeys = strings
 	typed.OverwriteBody(body)
-	_, err = extractPKsFromUpsert(t.Context(), msg, getter)
+	_, err = extractPKsFromInsertOrUpsert(t.Context(), msg, getter)
 	require.ErrorContains(t, err, "primary key type")
+}
+
+func TestInsertV2OrdinaryTrackingMutableAndRecovered(t *testing.T) {
+	getter := &staticPrimaryKeyDescriptorGetter{descriptor: shards.PrimaryKeyDescriptor{FieldID: 100, DataType: schemapb.DataType_Int64}}
+	upsert := message.MustAsMutableUpsertMessageV2(trackingUpsert())
+	h := upsert.Header()
+	mutable := message.NewInsertMessageBuilderV2().WithVChannel("v1").
+		WithHeader(&message.InsertMessageHeaderV2{CollectionId: h.CollectionId, SchemaVersion: h.SchemaVersion, Partitions: h.Partitions}).
+		WithBody(&message.InsertMessageBody{Rows: upsert.MustBody().GetRows()}).MustBuildMutable()
+	for _, msg := range []message.BasicMessage{mutable, mutable.IntoImmutableMessage(rmq.NewRmqID(1))} {
+		keys, err := extractPKsFromOrdinaryInsertWithContext(t.Context(), msg, getter)
+		require.NoError(t, err)
+		require.Equal(t, []int64{10, 20}, keys.Int64Values)
+	}
+	interceptor := newTestAppendInterceptor(types.PChannelInfo{Name: "p1", Term: 1})
+	_, err := interceptor.DoAppend(t.Context(), mutable.WithTimeTick(120), appendOK)
+	require.NoError(t, err)
+	requirePartialUpdateRetryable(t, interceptor.state.pkVersions.Verify("v1", []any{int64(10)}, 119, 121))
+	requirePartialUpdateRetryable(t, interceptor.state.pkVersions.Verify("v1", []any{int64(20)}, 119, 121))
 }

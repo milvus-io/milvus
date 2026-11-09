@@ -28,11 +28,11 @@ import (
 
 type upsertReadyShard struct {
 	shards.ShardManager
-	key shards.PartitionUniqueKey
+	keys []shards.PartitionUniqueKey
 }
 
 func (s *upsertReadyShard) WaitUntilGrowingSegmentReady(key shards.PartitionUniqueKey) (<-chan struct{}, error) {
-	s.key = key
+	s.keys = append(s.keys, key)
 	ready := make(chan struct{})
 	close(ready)
 	return ready, nil
@@ -45,5 +45,15 @@ func TestUpsertWaitsForTargetPartition(t *testing.T) {
 		WithHeader(&message.UpsertMessageHeader{CollectionId: 10, Partitions: []*message.PartitionSegmentAssignment{{PartitionId: 20}}}).
 		WithBody(&message.UpsertMessageBody{}).MustBuildMutable()
 	require.NoError(t, r.waitUntilGrowingSegmentReady(context.Background(), msg))
-	require.Equal(t, shards.PartitionUniqueKey{CollectionID: 10, PartitionID: 20}, s.key)
+	require.Equal(t, shards.PartitionUniqueKey{CollectionID: 10, PartitionID: 20}, s.keys[0])
+}
+
+func TestInsertV2WaitsForEveryTargetPartition(t *testing.T) {
+	s := &upsertReadyShard{}
+	r := &redoAppendInterceptor{shardManager: s, gracefulStop: make(chan struct{})}
+	msg := message.NewInsertMessageBuilderV2().WithVChannel("p_10v0").
+		WithHeader(&message.InsertMessageHeaderV2{CollectionId: 10, Partitions: []*message.PartitionSegmentAssignment{{PartitionId: 20}, {PartitionId: 30}}}).
+		WithBody(&message.InsertMessageBody{}).MustBuildMutable()
+	require.NoError(t, r.waitUntilGrowingSegmentReady(t.Context(), msg))
+	require.Equal(t, []shards.PartitionUniqueKey{{CollectionID: 10, PartitionID: 20}, {CollectionID: 10, PartitionID: 30}}, s.keys)
 }

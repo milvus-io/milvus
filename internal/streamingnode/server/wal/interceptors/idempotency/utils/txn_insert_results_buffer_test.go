@@ -104,16 +104,19 @@ func TestTxnInsertResultBuffersConcurrentAddBuildRemove(t *testing.T) {
 }
 
 func TestTxnInsertResultBuffersCompletenessForInsertAndUpsert(t *testing.T) {
-	for _, withUpsert := range []bool{false, true} {
+	for _, format := range []string{"legacy", "Insert V2", "Upsert"} {
 		buffers := NewTxnInsertResultBuffers(nil, nil)
 		legacy := newTestTxnMessage(t, "v1", 1)
 		buffers.Add(legacy, nil, 0)
 		msg := legacy
-		if withUpsert {
+		switch format {
+		case "Insert V2":
+			msg = message.NewInsertMessageBuilderV2().WithVChannel("v1").WithHeader(&message.InsertMessageHeaderV2{}).WithBody(&message.InsertMessageBody{}).MustBuildMutable().WithTxnContext(*legacy.TxnContext())
+		case "Upsert":
 			msg = message.NewUpsertMessageBuilderV2().WithVChannel("v1").WithHeader(&message.UpsertMessageHeader{}).WithBody(&message.UpsertMessageBody{}).MustBuildMutable().WithTxnContext(*legacy.TxnContext())
 		}
 		buffers.Add(msg, intIDsResult([]uint32{0}, 100), 0)
-		require.Nil(t, buffers.Build(msg), "a partial response cannot be cached for either message type")
+		require.Nil(t, buffers.Build(msg), "a partial response cannot be cached for %s", format)
 		buffers.Remove(msg)
 		require.Empty(t, buffers.builders)
 	}

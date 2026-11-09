@@ -287,9 +287,7 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 }
 
 // appendWithOptionalChunking appends a logical message, splitting it into WAL
-// records only when streaming.splitChunkSN is enabled. During a rolling
-// upgrade, proxy.splitChunk stays enabled until every StreamingNode has been
-// upgraded and observed streaming.splitChunkSN=true.
+// records when the payload exceeds the selected backend's payload budget.
 //
 // The timetick durability barrier does not depend on record adjacency: a
 // TimeTick(T) message is only published after every message with ts <= T has
@@ -298,10 +296,6 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 // acknowledges exactly once -- when its whole run is persisted), so no
 // downstream component can ever observe a half-written pack.
 func (w *walAdaptorImpl) appendWithOptionalChunking(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
-	if !paramtable.Get().StreamingCfg.SplitChunkSN.GetAsBool() {
-		return w.appendOneWithRetry(ctx, msg)
-	}
-
 	chunkPayloadSize := w.chunkPayloadSize()
 	if chunkPayloadSize <= 0 || len(msg.IntoMessageProto().GetPayload()) <= chunkPayloadSize {
 		return w.appendOneWithRetry(ctx, msg)

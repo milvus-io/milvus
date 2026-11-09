@@ -1613,7 +1613,7 @@ Empty by default, in which case http://<host of pulsar.address>:<pulsar.webport>
 		Version:      "2.0.0",
 		DefaultValue: "2097152",
 		Doc: `The maximum size of each message in Pulsar. Unit: Byte.
-By default, Pulsar can transmit at most 2MB of data in a single message. When streaming.splitChunkSN is enabled, the StreamingNode WAL layer splits larger payloads into multiple records that fit this limit.
+By default, Pulsar can transmit at most 2MB of data in a single message. The StreamingNode WAL layer splits larger payloads into multiple records that fit this limit.
 Values below 256 KiB are clamped to 256 KiB. The Pulsar broker/proxy limit must be no smaller than this effective value; otherwise Pulsar can still reject records that Milvus considers valid. Invalid or out-of-range values fall back to the default 2 MiB limit.`,
 		Export:    true,
 		Formatter: walMessageSizeFormatter("pulsar.maxMessageSize", 2*1024*1024),
