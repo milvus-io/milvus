@@ -40,14 +40,14 @@ func TestSelectNode(t *testing.T) {
 	balancer := NewRoundRobinBalancer()
 
 	// Test case 1: Empty availableNodes
-	_, err1 := balancer.SelectNode(context.Background(), []int64{}, 0)
+	_, _, err1 := balancer.SelectNode(context.Background(), []int64{}, 0)
 	if err1 != merr.ErrNodeNotAvailable {
 		t.Errorf("Expected ErrNodeNotAvailable, got %v", err1)
 	}
 
 	// Test case 2: Non-empty availableNodes
 	availableNodes := []int64{1, 2, 3}
-	selectedNode2, err2 := balancer.SelectNode(context.Background(), availableNodes, 0)
+	selectedNode2, _, err2 := balancer.SelectNode(context.Background(), availableNodes, 0)
 	if err2 != nil {
 		t.Errorf("Expected no error, got %v", err2)
 	}
@@ -57,7 +57,7 @@ func TestSelectNode(t *testing.T) {
 
 	// Test case 3: Boundary case
 	availableNodes = []int64{1}
-	selectedNode3, err3 := balancer.SelectNode(context.Background(), availableNodes, 0)
+	selectedNode3, _, err3 := balancer.SelectNode(context.Background(), availableNodes, 0)
 	if err3 != nil {
 		t.Errorf("Expected no error, got %v", err3)
 	}
