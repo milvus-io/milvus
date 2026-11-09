@@ -2558,9 +2558,9 @@ func getBM25FunctionOfAnnsField(fieldID int64, functions []*schemapb.FunctionSch
 // the coarse "fail" so that a query written against it counts every hard
 // failure regardless of who caused it.
 func failMetricLabel(err error) (status string, cause string) {
-	// Client cancellation is neither party's failure; cause is what lets a
-	// consumer exclude it (parity with ParseMetricLabel).
-	if errors.Is(err, context.Canceled) {
+	// Client and operator cancellation are neither party's failure; cause is
+	// what lets a consumer exclude them (parity with ParseMetricLabel).
+	if errors.Is(err, context.Canceled) || errors.Is(err, merr.ErrRequestCanceled) {
 		return metrics.FailLabel, metrics.CauseCancel
 	}
 	if merr.GetErrorType(err) == merr.InputError {

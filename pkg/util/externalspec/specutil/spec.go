@@ -60,8 +60,10 @@ const (
 	ExtfsKeyUseSSL                  = "use_ssl"
 	ExtfsKeyUseVirtualHost          = "use_virtual_host"
 	ExtfsKeyLoadFrequency           = "load_frequency"
-	ExtfsKeyAzureClientID           = "azure_client_id"
-	ExtfsKeyAzureTenantID           = "azure_tenant_id"
+	// #nosec G101 -- configuration key name, not a credential.
+	ExtfsKeyCredentialEndpoint = "credential_endpoint"
+	ExtfsKeyAzureClientID      = "azure_client_id"
+	ExtfsKeyAzureTenantID      = "azure_tenant_id"
 	// #nosec G101 -- configuration key name, not a credential.
 	ExtfsKeyAzureCredentialEndpoint = "azure_credential_endpoint"
 )
@@ -161,6 +163,7 @@ var allowedExtfsKeys = map[string]bool{
 	ExtfsKeyBucketName:              true,
 	ExtfsKeyGCPTargetServiceAccount: true,
 	ExtfsKeyAnonymous:               true,
+	ExtfsKeyCredentialEndpoint:      true,
 	ExtfsKeyAzureClientID:           true,
 	ExtfsKeyAzureTenantID:           true,
 	ExtfsKeyAzureCredentialEndpoint: true,

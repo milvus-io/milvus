@@ -244,8 +244,7 @@ class TestCDCSyncSwitchover(TestCDCSyncBase):
                 )
 
             # After switchover, downstream is the new primary. Flushing the
-            # old primary (upstream) hits the replica-role rate limiter
-            # (rate=0.1/s) and exhausts pymilvus's 75 retries. Flush the
+            # old primary (upstream) can hit replica-role limits. Flush the
             # current primary instead.
             downstream_client.flush(c_name)
 

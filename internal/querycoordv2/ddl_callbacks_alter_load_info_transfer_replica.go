@@ -48,14 +48,14 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForTransferReplica(ctx cont
 		return merr.WrapErrParameterInvalid("NumReplica > 0", fmt.Sprintf("invalid NumReplica %d", req.GetNumReplica()))
 	}
 
-	coll, err := s.broker.DescribeCollection(ctx, req.GetCollectionID())
+	coll, err := s.meta.GetCollectionInfo(req.GetCollectionID())
 	if err != nil {
 		return err
 	}
 
 	currentLoadConfig := s.getCurrentLoadConfig(ctx, req.GetCollectionID())
 	if currentLoadConfig.Collection == nil {
-		return merr.WrapErrCollectionNotLoaded(coll.CollectionName)
+		return merr.WrapErrCollectionNotLoaded(coll.Schema.GetName())
 	}
 	if int(req.NumReplica) > len(currentLoadConfig.Replicas) {
 		return merr.WrapErrParameterInvalid(int(req.NumReplica), len(currentLoadConfig.Replicas), "the number of replicas to transfer is greater than the number of replicas in the collection")
@@ -67,7 +67,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForTransferReplica(ctx cont
 		return merr.WrapErrParameterInvalid("NumReplica not greater than the number of replica in source resource group",
 			fmt.Sprintf("only found [%d] replicas of collection [%s] in source resource group [%s], but %d require",
 				replicaNumberInSourceRG,
-				coll.CollectionName,
+				coll.Schema.GetName(),
 				req.GetSourceResourceGroup(),
 				req.GetNumReplica()))
 	}

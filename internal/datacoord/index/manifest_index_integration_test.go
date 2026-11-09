@@ -25,7 +25,6 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -42,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
@@ -126,9 +124,7 @@ func TestBuildManifestIndexInfoFromDataCoordMetadata(t *testing.T) {
 	require.EqualValues(t, 5, info.CurrentIndexVersion)
 	require.EqualValues(t, 6, info.CurrentScalarIndexVersion)
 	require.Equal(t, []string{"0", "1"}, info.IndexFileKeys)
-	require.Equal(t, "16", info.Properties["M"])
-	require.Equal(t, "8", info.Properties[common.DimKey])
-	require.Equal(t, "HNSW", info.Properties[common.IndexTypeKey])
+	require.Empty(t, info.Properties, "collection parameters are not segment build metadata")
 
 	// The stored path is relative to <basePath>/_index and resolves back to the
 	// segment index prefix, which is what milvus-storage reproduces on read.
@@ -172,7 +168,7 @@ func TestBuildManifestIndexInfoRespectsSegmentIndexTypeOverride(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, "FLAT", info.IndexType)
-	require.Equal(t, "FLAT", info.Properties[common.IndexTypeKey])
+	require.Empty(t, info.Properties)
 	// A field the schema does not describe leaves ColumnName empty rather than
 	// inventing one; field_id stays the authoritative identity.
 	require.Empty(t, info.ColumnName)
@@ -298,12 +294,8 @@ func TestUnreadableManifestAbortsMetaBoot(t *testing.T) {
 	store.FailReadsFrom()
 
 	b := broker.NewMockBroker(t)
-	b.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{
-		Status:        merr.Success(),
-		DbCollections: []*rootcoordpb.DBCollections{{DbName: "default", CollectionIDs: []int64{meta.RestartCollID}}},
-	}, nil).Maybe()
 	cm := storage.NewLocalChunkManager(objectstorage.RootPath("/tmp/test-restart"))
-	_, err := meta.NewMeta(context.TODO(), catalog, cm, metacache.NewMetaStore(catalog), b, LoadIndexTestMetas(catalog, &IndexTestMetas{}))
+	_, err := meta.NewMeta(context.TODO(), catalog, cm, meta.NewMetaStoreWithCollections(catalog, meta.RestartCollID), b, LoadIndexTestMetas(catalog, &IndexTestMetas{}))
 	require.Error(t, err, "startup must fail rather than come up with an incomplete indexMeta")
 }
 
@@ -324,6 +316,7 @@ func TestSegmentIndexSurvivesRestartFromManifestOnly(t *testing.T) {
 	manifestEntries := store.Revisions[m.GetSegment(ctx, meta.RestartSegID).GetManifestPath()]
 	require.Len(t, manifestEntries, 1, "the index task must publish its artifact into the manifest")
 	assert.EqualValues(t, meta.RestartBuildID, manifestEntries[0].BuildID)
+	assert.Empty(t, manifestEntries[0].Properties)
 
 	// Nothing about this index reached etcd.
 	persisted, err := catalog.ListSegmentIndexes(ctx, meta.RestartCollID)

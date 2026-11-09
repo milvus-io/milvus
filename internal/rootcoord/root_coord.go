@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/featureusage"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	kvmetastore "github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -277,6 +278,16 @@ func (c *Core) GetQuotaCenter() *QuotaCenter {
 
 func (c *Core) GetProxyClientManager() proxyutil.ProxyClientManagerInterface {
 	return c.proxyClientManager
+}
+
+// CollectionSource returns the collection view that DataCoord and QueryCoord
+// read from. Call it after Init, which loads the MetaTable.
+func (c *Core) CollectionSource() (metacache.CollectionSource, error) {
+	mt, ok := c.meta.(*MetaTable)
+	if !ok {
+		return nil, merr.WrapErrServiceInternalMsg("rootcoord meta %T is not a MetaTable", c.meta)
+	}
+	return mt.CollectionSource(), nil
 }
 
 func (c *Core) ServerExist(serverID int64) bool {
@@ -1206,16 +1217,6 @@ func (c *Core) TruncateCollection(ctx context.Context, in *milvuspb.TruncateColl
 	}, nil
 }
 
-// IsCollectionAvailable lets in-process GC skip live collections without
-// materializing their schemas. False means unknown, not safe to delete.
-func (c *Core) IsCollectionAvailable(collectionID int64) bool {
-	if c.GetStateCode() != commonpb.StateCode_Healthy {
-		return false
-	}
-	checker, ok := c.meta.(interface{ IsCollectionAvailable(int64) bool })
-	return ok && checker.IsCollectionAvailable(collectionID)
-}
-
 func (c *Core) GetCollectionProperties(ctx context.Context, collectionID int64) ([]*commonpb.KeyValuePair, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return nil, err
@@ -1292,10 +1293,9 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 		DbName: dbName,
 	}
 
-	resp.Schema = collInfo.ToCollectionSchemaPB()
 	// Use the dbName parameter (resolved from the request) for consistency
 	// with resp.DbName; the model's DBName may not always be in sync.
-	resp.Schema.DbName = dbName
+	resp.Schema = collectionSchemaPB(collInfo, dbName)
 	resp.CollectionID = collInfo.CollectionID
 	resp.VirtualChannelNames = collInfo.VirtualChannelNames
 	resp.PhysicalChannelNames = collInfo.PhysicalChannelNames
@@ -2992,6 +2992,68 @@ func (c *Core) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearRead
 		mlog.Int64("proxyQueuedCleared", resp.GetProxyQueuedCleared()),
 		mlog.Int("results", len(resp.GetResults())),
 		mlog.Err(merr.Error(resp.GetStatus())))
+	return resp, nil
+}
+
+// ListRunningRequests returns the requests every proxy is currently serving.
+//
+// The coordinator owns the fan-out because a client talks to one proxy but
+// asks about the cluster. Per-proxy results travel with the answer so that a
+// proxy that could not be reached is visible rather than silently missing.
+func (c *Core) ListRunningRequests(ctx context.Context, req *milvuspb.ListRunningRequestsRequest) (*milvuspb.ListRunningRequestsResponse, error) {
+	resp := &milvuspb.ListRunningRequestsResponse{Status: merr.Success()}
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+
+	requests, nodeResults, err := c.proxyClientManager.ListRunningRequests(ctx, req)
+	resp.Requests = requests
+	resp.NodeResults = nodeResults
+	if err != nil {
+		resp.Status = merr.Status(err)
+	}
+
+	mlog.Info(ctx, "listed running requests",
+		mlog.String("dbName", req.GetDbName()),
+		mlog.String("collectionName", req.GetCollectionName()),
+		mlog.String("user", req.GetUser()),
+		mlog.Int64("minElapsedMs", req.GetMinElapsedMs()),
+		mlog.Int("requests", len(requests)),
+		mlog.Int("nodes", len(nodeResults)),
+		mlog.Err(err))
+	return resp, nil
+}
+
+// CancelRequests cancels the given requests wherever they are running.
+//
+// The ids are broadcast to every proxy: a request id does not carry the proxy
+// that serves it, and the proxies are few. An id nobody claimed comes back in
+// NotFound when every proxy answered, and in Undetermined otherwise.
+func (c *Core) CancelRequests(ctx context.Context, req *milvuspb.CancelRequestsRequest) (*milvuspb.CancelRequestsResponse, error) {
+	resp := &milvuspb.CancelRequestsResponse{Status: merr.Success()}
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+
+	result, err := c.proxyClientManager.CancelRequests(ctx, req)
+	resp.Canceled = result.Canceled
+	resp.NotFound = result.NotFound
+	resp.Undetermined = result.Undetermined
+	resp.NodeResults = result.NodeResults
+	if err != nil {
+		resp.Status = merr.Status(err)
+	}
+
+	mlog.Info(ctx, "canceled running requests",
+		mlog.Strings("requestIDs", req.GetRequestIds()),
+		mlog.String("reason", req.GetReason()),
+		mlog.Int("canceled", len(result.Canceled)),
+		mlog.Int("notFound", len(result.NotFound)),
+		mlog.Int("undetermined", len(result.Undetermined)),
+		mlog.Int("nodes", len(result.NodeResults)),
+		mlog.Err(err))
 	return resp, nil
 }
 

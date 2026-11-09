@@ -31,11 +31,9 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
-	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
 	"github.com/milvus-io/milvus/internal/datacoord/ddl"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
@@ -48,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -319,12 +318,7 @@ func (s *ImportServicesSuite) TestImportV2_BroadcastFailsReturnsError() {
 		}).Build()
 	defer mockAssignment.UnPatch()
 
-	// Mock broker.DescribeCollectionInternal (called once in StartBroadcastWithCollectionID, which will fail at StartBroadcastWithResourceKeys)
-	mockBroker := broker.NewMockBroker(s.T())
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-	}, nil)
+	coll := &meta.CollectionInfo{ID: 100, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{Name: "test_collection"}}
 
 	// Mock StartBroadcastWithResourceKeys to fail
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
@@ -333,11 +327,10 @@ func (s *ImportServicesSuite) TestImportV2_BroadcastFailsReturnsError() {
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	server := &Server{
+	server := seedCollections(&Server{
 		importMeta: &bulkimport.Meta{},
-		broker:     mockBroker,
 		meta:       newTestMetaWithChunkManager(s.T()),
-	}
+	}, coll)
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 	server.ddl = newDDLCallbacks(server)
 
@@ -402,23 +395,15 @@ func (s *ImportServicesSuite) TestImportV2_SuccessReturnsJobID() {
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	// Mock broker: DescribeCollectionInternal is called twice
-	// First call in StartBroadcastWithCollectionID, second call in BroadcastImport
-	mockBroker := broker.NewMockBroker(s.T())
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-		Schema: &schemapb.CollectionSchema{
-			Name:   "test_collection",
-			DbName: "test_db",
-		},
-	}, nil).Times(2)
+	coll := &meta.CollectionInfo{ID: 100, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{
+		Name:   "test_collection",
+		DbName: "test_db",
+	}}
 
-	server := &Server{
+	server := seedCollections(&Server{
 		importMeta: &bulkimport.Meta{},
-		broker:     mockBroker,
 		meta:       newTestMetaWithChunkManager(s.T()),
-	}
+	}, coll)
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 	server.ddl = newDDLCallbacks(server)
 
@@ -514,23 +499,15 @@ func (s *ImportServicesSuite) setupImportV2DuplicateBroadcast(importMeta bulkimp
 		}).Build()
 	s.T().Cleanup(func() { mockBroadcast.UnPatch() })
 
-	mockBroker := broker.NewMockBroker(s.T())
-	// Maybe rather than Times(2): a request rejected by ValidateImportRequest -- the
-	// job-count limit, say -- returns before either describe call.
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
-		Schema: &schemapb.CollectionSchema{
-			Name:   "test_collection",
-			DbName: "test_db",
-		},
-	}, nil).Maybe()
+	coll := &meta.CollectionInfo{ID: 100, DatabaseName: "test_db", Schema: &schemapb.CollectionSchema{
+		Name:   "test_collection",
+		DbName: "test_db",
+	}}
 
-	server := &Server{
+	server := seedCollections(&Server{
 		importMeta: importMeta,
-		broker:     mockBroker,
 		meta:       newTestMetaWithChunkManager(s.T()),
-	}
+	}, coll)
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 	server.ddl = newDDLCallbacks(server)
 
@@ -711,18 +688,13 @@ func (s *ImportServicesSuite) TestImportV2_UsesDefaultDbNameWhenEmpty() {
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	// Mock broker.DescribeCollectionInternal to return empty dbName (called in StartBroadcastWithCollectionID)
-	mockBroker := broker.NewMockBroker(s.T())
-	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "", // Empty - should use default
-		CollectionName: "test_collection",
-	}, nil)
+	// Empty database name in the view - should use default
+	coll := &meta.CollectionInfo{ID: 100, Schema: &schemapb.CollectionSchema{Name: "test_collection"}}
 
-	server := &Server{
+	server := seedCollections(&Server{
 		importMeta: &bulkimport.Meta{},
-		broker:     mockBroker,
 		meta:       newTestMetaWithChunkManager(s.T()),
-	}
+	}, coll)
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 	server.ddl = newDDLCallbacks(server)
 
@@ -769,6 +741,7 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 		{"allocator_failure", merr.ErrServiceUnavailable},
 		{"collection_not_found", merr.ErrCollectionNotFound},
 		{"collection_nil", merr.ErrCollectionNotFound},
+		{"collection_dropping", merr.ErrCollectionNotFound},
 		{"collection_unavailable", merr.ErrServiceNotReady},
 		{"save_job_failure", merr.ErrServiceUnavailable},
 		{"provided_job_id", nil},
@@ -803,6 +776,8 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck() {
 				coll, collectionErr = nil, tc.wantErr
 			case "collection_nil":
 				coll = nil
+			case "collection_dropping":
+				coll.State = etcdpb.CollectionState_CollectionDropping
 			case "save_job_failure":
 				saveErr = tc.wantErr
 			case "allocated_job_id":

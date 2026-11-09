@@ -533,8 +533,8 @@ func (m *Manager) applyFinishedJobSegments(ctx context.Context, job *datapb.Exte
 		return err
 	}
 	// A stats task reads the external source/spec at dispatch. While this
-	// refresh's are still being published, wait for that publish: its
-	// BroadcastAlteredCollection notifies the whole collection.
+	// refresh's are still being published, wait for that publish:
+	// watchCollectionAlters notifies the whole collection.
 	if externalRefreshSchemaVisible(m.mt, job) {
 		for _, segment := range updatedSegments {
 			meta.NotifySegmentStatsBuild(segment.GetID())
@@ -687,7 +687,7 @@ func (m *Manager) handleJobFinished(ctx context.Context, job *datapb.ExternalCol
 		// Nothing to deliver - the collection already describes this refresh.
 		// That is a delivered publish, so keep the key. The source/spec is already
 		// visible, so the applied segments can be indexed now; otherwise
-		// BroadcastAlteredCollection enqueues them when the publish lands.
+		// watchCollectionAlters enqueues them when the publish lands.
 		published = true
 		meta.NotifyCollectionIndexBuild(m.notifyIndexChan, job.GetCollectionId())
 		return
@@ -767,12 +767,10 @@ func (m *Manager) SubmitRefreshJobWithID(
 		return jobID, nil
 	}
 
-	// Get collection info to validate it's an external collection.
-	// collectionGetter handles cache miss by lazy-loading from RootCoord,
-	// which covers the race condition where refresh is triggered before
-	// DataCoord syncs the newly created collection.
+	// Get collection info to validate it's an external collection. A
+	// Dropping collection gets no new refresh job.
 	collection, err := m.collectionGetter(ctx, collectionID)
-	if err != nil || collection == nil {
+	if err != nil || !collection.IsCreated() {
 		log.Warn(ctx, "collection not found", mlog.Err(err))
 		return 0, merr.WrapErrCollectionNotFound(collectionID)
 	}
@@ -1218,7 +1216,7 @@ func (m *Manager) exploreExternalFiles(
 	// Empty source is legal (see typeutil.IsExternalCollection); only validate
 	// when both present.
 	if job.GetExternalSource() != "" {
-		if err := externalspec.ValidateSourceAndSpec(job.GetExternalSource(), job.GetExternalSpec()); err != nil {
+		if err := externalspec.ValidateSourceAndSpec(job.GetExternalSource(), job.GetExternalSpec(), paramtable.Get().CommonCfg.CredentialBrokerPolicy()); err != nil {
 			return nil, "", merr.Wrap(err, "external source/spec failed revalidation")
 		}
 	}
@@ -1228,7 +1226,7 @@ func (m *Manager) exploreExternalFiles(
 	}
 
 	collInfo := m.mt.GetCollection(job.GetCollectionId())
-	if collInfo == nil {
+	if !collInfo.IsCreated() {
 		return nil, "", merr.WrapErrCollectionNotFound(job.GetCollectionId())
 	}
 	if spec.Format == externalspec.FormatMilvusTable {

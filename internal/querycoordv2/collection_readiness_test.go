@@ -409,9 +409,8 @@ func TestEnsureCollectionReadySharesLoadAcrossRPCs(t *testing.T) {
 		{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 		{FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector},
 	}
-	broker.EXPECT().DescribeCollection(mock.Anything, int64(100)).Return(coll, nil).Times(3)
-	broker.EXPECT().GetPartitions(mock.Anything, int64(100)).Return([]int64{10}, nil).Once()
-	broker.EXPECT().GetCollectionLoadInfo(mock.Anything, int64(100)).Return([]string{meta.DefaultResourceGroupName}, int64(1), nil).Once()
+	broker.EXPECT().DescribeCollection(mock.Anything, int64(100)).Return(coll, nil).Once()
+	putTestCollection(s, coll, 10)
 
 	mix := mocks.NewMixCoord(t)
 	s.mixCoord = mix
@@ -536,9 +535,8 @@ func TestAutoLoadAppliesDefaultsAfterConcurrentLoad(t *testing.T) {
 		{FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector},
 		{FieldID: 102, Name: "scalar", DataType: schemapb.DataType_Int64},
 	}
-	broker.EXPECT().DescribeCollection(mock.Anything, int64(100)).Return(coll, nil).Times(3)
-	broker.EXPECT().GetPartitions(mock.Anything, int64(100)).Return([]int64{10}, nil).Once()
-	broker.EXPECT().GetCollectionLoadInfo(mock.Anything, int64(100)).Return([]string{meta.DefaultResourceGroupName}, int64(1), nil).Once()
+	broker.EXPECT().DescribeCollection(mock.Anything, int64(100)).Return(coll, nil).Once()
+	putTestCollection(s, coll, 10)
 	mix := mocks.NewMixCoord(t)
 	s.mixCoord = mix
 	mix.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(
@@ -678,9 +676,8 @@ func TestEnsureCollectionReadyLoadFailureCanBeRetried(t *testing.T) {
 	t.Cleanup(s.qviewsRuntime.stop)
 	const channel = "by-dev-rootcoord-dml_100v0"
 	coll := testDescribeCollection(100, []string{channel})
-	broker.EXPECT().DescribeCollection(mock.Anything, int64(100)).Return(coll, nil).Times(5)
-	broker.EXPECT().GetPartitions(mock.Anything, int64(100)).Return([]int64{10}, nil).Once()
-	broker.EXPECT().GetCollectionLoadInfo(mock.Anything, int64(100)).Return([]string{meta.DefaultResourceGroupName}, int64(1), nil).Once()
+	broker.EXPECT().DescribeCollection(mock.Anything, int64(100)).Return(coll, nil).Times(3)
+	putTestCollection(s, coll, 10)
 	mix := mocks.NewMixCoord(t)
 	s.mixCoord = mix
 	mix.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(

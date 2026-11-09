@@ -92,11 +92,6 @@ func (c *DDLCallback) truncateCollectionV2AckCallback(ctx context.Context, resul
 		}
 		return merr.Wrap(err, "when truncating collection")
 	}
-
-	// notify datacoord to update their meta cache
-	if err := c.broker.BroadcastAlteredCollection(ctx, header.CollectionId); err != nil {
-		return merr.Wrap(err, "when broadcasting altered collection")
-	}
 	return nil
 }
 
@@ -116,11 +111,6 @@ func (c *DDLCallback) truncateCollectionV2AckOnceCallback(ctx context.Context, r
 			return nil
 		}
 		return merr.Wrap(err, "when beginning truncate collection")
-	}
-
-	// notify datacoord to update their meta cache
-	if err := c.broker.BroadcastAlteredCollection(ctx, collectionID); err != nil {
-		return merr.Wrap(err, "when broadcasting altered collection")
 	}
 	return nil
 }

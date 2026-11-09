@@ -44,6 +44,7 @@ const (
 	FileResourceCategory          = "/file_resources/"
 	SegmentCategory               = "/segments/"
 	QuotaCenterCategory           = "/quotacenter/"
+	RunningRequestCategory        = "/requests/running/"
 	CommonCategory                = "/common/"
 
 	ListAction           = "list"
@@ -64,6 +65,7 @@ const (
 	UpsertAction         = "upsert"
 	SearchAction         = "search"
 	AdvancedSearchAction = "advanced_search"
+	CancelAction         = "cancel"
 	HybridSearchAction   = "hybrid_search"
 
 	UpdatePasswordAction            = "update_password"

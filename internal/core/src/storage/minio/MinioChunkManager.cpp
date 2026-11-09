@@ -94,10 +94,9 @@ GcsEndpointHosts() {
 }
 
 // The IAM providers of the GCS buckets Milvus itself is configured with,
-// guarded by GcsEndpointsMutex(). milvus-storage replaces its registry entry
-// for a bucket whenever it opens a filesystem there, possibly with another
-// identity (an external table on the same bucket), so Milvus' own requests do
-// not use the registry entry. Reusing the provider also keeps its cached token.
+// guarded by GcsEndpointsMutex(). Keep the existing preference for Milvus's
+// own provider when selecting credentials from the shared registry. Reusing
+// the provider also keeps its cached token.
 using GcpProviderMap =
     std::unordered_map<milvus_storage::GcpBucketKey,
                        std::shared_ptr<milvus_storage::GcpCredentialProvider>,
@@ -194,6 +193,9 @@ GoogleHttpClientFactory::CreateHttpRequest(
     auto request = Aws::MakeShared<Aws::Http::Standard::StandardHttpRequest>(
         GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG, uri, method);
     request->SetResponseStreamFactory(streamFactory);
+    if (IsCredentialBrokerEndpoint(uri.GetURIString().c_str())) {
+        return request;
+    }
     // Only GCS endpoints get a token, and only for buckets with a registered
     // provider, as in milvus-storage's GCP factory. Requests to any other
     // host, such as the instance metadata endpoint or an external table
@@ -201,12 +203,13 @@ GoogleHttpClientFactory::CreateHttpRequest(
     if (!IsGcsHostForCredentials(uri.GetAuthority().c_str())) {
         return request;
     }
+    auto& registry = milvus_storage::GcpCredentialRegistry::Instance();
     auto provider = LookupMilvusGcpProvider(uri);
     if (provider == nullptr) {
-        provider =
-            milvus_storage::GcpCredentialRegistry::Instance().Lookup(uri);
+        provider = registry.Lookup(uri);
     }
-    if (provider == nullptr) {
+    if (provider == nullptr || !provider->IssuesBearerToken() ||
+        !registry.MayCarryBearerToken(uri)) {
         return request;
     }
     // The AWS SDK calls this and is built with -fno-exceptions: an exception
@@ -563,7 +566,12 @@ MinioChunkManager::BuildGoogleCloudClient(
                 MilvusGcpProviders().emplace(key, provider).first->second;
         }
     }
-    milvus_storage::GcpCredentialRegistry::Instance().Register(key, provider);
+    // Only operator-configured storage can authorize a custom GCS endpoint.
+    auto status = milvus_storage::GcpCredentialRegistry::Instance().Register(
+        key, provider, /*trusted_endpoint=*/true);
+    if (!status.ok()) {
+        throw milvus_storage::ToSegcoreError(status);
+    }
     AddGcsEndpointForCredentials(storage_config.address, storage_config.useSSL);
 
     if (storage_config.useIAM) {

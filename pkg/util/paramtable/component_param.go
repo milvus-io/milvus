@@ -18,6 +18,7 @@ package paramtable
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"os"
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/fips"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
@@ -433,6 +435,8 @@ type commonConfig struct {
 	UseLoonFFI                           ParamItem `refreshable:"true"`
 	EnableGrowingSourceFlush             ParamItem `refreshable:"false"`
 
+	CredentialBrokerAllowedEndpoints    ParamItem `refreshable:"false"`
+	credentialBrokerPolicy              *specutil.BrokerPolicy
 	StoragePathPrefix                   ParamItem `refreshable:"false"`
 	StorageZstdConcurrency              ParamItem `refreshable:"false"`
 	StorageReadRetryAttempts            ParamItem `refreshable:"true"`
@@ -1158,6 +1162,32 @@ For example, if the rate limit is 100KB/s, and the high priority ratio is 2, the
 		Export:       true,
 	}
 	p.BuildIndexThreadPoolRatio.Init(base.mgr)
+
+	p.CredentialBrokerAllowedEndpoints = ParamItem{
+		Key:          "common.security.credentialBrokerAllowedEndpoints",
+		Sensitivity:  Sensitive,
+		Version:      "3.0.0",
+		DefaultValue: "[]",
+		Export:       true,
+		// Keep file/env changes effective after restart; do not persist this in etcd.
+		Doc: "Configured initial Broker URLs for External Tables, including legacy Azure Brokers.\n" +
+			"Redirects follow storage SDK defaults; redirect targets are not checked.\n" +
+			"JSON array string, not a YAML list or comma-separated URLs.\n" +
+			"Example: '[\"https://broker.example.com/token?scope=a,b\"]'\n" +
+			"Empty or [] denies all Brokers. Restart all components after changing this value.",
+	}
+	p.CredentialBrokerAllowedEndpoints.Init(base.mgr)
+	var brokerEndpoints []string
+	if raw := strings.TrimSpace(p.CredentialBrokerAllowedEndpoints.GetValue()); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &brokerEndpoints); err != nil || brokerEndpoints == nil {
+			panic("common.security.credentialBrokerAllowedEndpoints must be a JSON array of URL strings")
+		}
+	}
+	var brokerErr error
+	p.credentialBrokerPolicy, brokerErr = specutil.NewBrokerPolicy(brokerEndpoints)
+	if brokerErr != nil {
+		panic(brokerErr)
+	}
 
 	p.AuthorizationEnabled = ParamItem{
 		Key:          "common.security.authorizationEnabled",
@@ -6580,6 +6610,14 @@ type dataCoordConfig struct {
 	IndexStorePathVersion               ParamItem `refreshable:"true"`
 	WriteSegmentIndexToManifest         ParamItem `refreshable:"false"`
 	SegmentIndexManifestLoadConcurrency ParamItem `refreshable:"false"`
+	ManifestIndexBackfillEnabled        ParamItem `refreshable:"false"`
+	ManifestIndexBackfillInterval       ParamItem `refreshable:"true"`
+	ManifestIndexBackfillBatchSize      ParamItem `refreshable:"true"`
+	ManifestIndexBackfillConcurrency    ParamItem `refreshable:"true"`
+	ManifestIndexRollbackEnabled        ParamItem `refreshable:"false"`
+	ManifestIndexRollbackInterval       ParamItem `refreshable:"true"`
+	ManifestIndexRollbackBatchSize      ParamItem `refreshable:"true"`
+	ManifestIndexRollbackConcurrency    ParamItem `refreshable:"true"`
 	HybridIndexLowCardinalityIndexType  ParamItem `refreshable:"true"`
 	HybridIndexHighCardinalityIndexType ParamItem `refreshable:"true"`
 
@@ -7431,6 +7469,91 @@ Startup continuously schedules bounded concurrent reads and retries failed reads
 		Export: true,
 	}
 	p.SegmentIndexManifestLoadConcurrency.Init(base.mgr)
+
+	p.ManifestIndexBackfillEnabled = ParamItem{
+		Key:          "dataCoord.index.manifestIndexBackfill.enabled",
+		Version:      "3.0.1",
+		DefaultValue: "false",
+		Doc: `Whether DataCoord migrates historical finished StorageV3 SegmentIndex catalog rows into segment manifests. This is an operator-controlled, restart-scoped migration and is inert unless dataCoord.index.writeSegmentIndexToManifest is also true.
+Artifact files are copied with object-storage server-side Copy into the segment _index directory before publication; local-storage layout migration is unsupported. Copies run concurrently under a shared storage I/O budget.
+Each eligible record is moved through the ordinary segment manifest commit: the new manifest pointer, manifest_has_index marker, and deletion of the old catalog row land in one transaction. No separate index-prune phase is required. Failed, in-flight, fake-finished, deleted, StorageV1/V2, and L0 records remain on their existing lifecycle paths.
+Enable only after all DataCoord replicas, workers and QueryNodes support path version 2 and manifest-index reload. Migrated rows are not recreated when this switch is disabled, so rolling DataCoord back to an older version is unsupported after migration starts.
+Watch milvus_datacoord_manifest_index_backfill_pending_records. Zero means no eligible historical catalog row remains; mixed manifest and etcd placement is safe while the migration is still running.`,
+		Export: true,
+	}
+	p.ManifestIndexBackfillEnabled.Init(base.mgr)
+
+	p.ManifestIndexBackfillInterval = ParamItem{
+		Key:          "dataCoord.index.manifestIndexBackfill.interval",
+		Version:      "3.0.1",
+		DefaultValue: "60",
+		Doc:          "Interval in seconds between manifest index backfill scans while work remains. Empty scans stop the timer; new catalog-backed finished index records wake the inspector.",
+		Export:       true,
+	}
+	p.ManifestIndexBackfillInterval.Init(base.mgr)
+
+	p.ManifestIndexBackfillBatchSize = ParamItem{
+		Key:          "dataCoord.index.manifestIndexBackfill.batchSize",
+		Version:      "3.0.1",
+		DefaultValue: "1000",
+		Formatter: func(v string) string {
+			batchSize := getAsInt(v)
+			if batchSize < 1 {
+				return "1"
+			}
+			return strconv.Itoa(batchSize)
+		},
+		Doc:    "Target number of SegmentIndex catalog records migrated per scan. Whole segments are selected, so the last segment may exceed this budget; the pending gauge counts the full backlog.",
+		Export: true,
+	}
+	p.ManifestIndexBackfillBatchSize.Init(base.mgr)
+
+	p.ManifestIndexBackfillConcurrency = ParamItem{
+		Key:          "dataCoord.index.manifestIndexBackfill.concurrency",
+		Version:      "3.0.1",
+		DefaultValue: "16",
+		Formatter: func(v string) string {
+			concurrency := getAsInt(v)
+			if concurrency < 1 {
+				return "1"
+			}
+			// The pool backend stores capacity as int32; a larger value wraps
+			// negative and blocks Submit forever.
+			if concurrency > math.MaxInt32 {
+				return strconv.Itoa(math.MaxInt32)
+			}
+			return strconv.Itoa(concurrency)
+		},
+		Doc:    "Number of segments whose manifest index backfill may run in parallel. Each segment batches its indexes into one commit unless the etcd transaction operation limit requires splitting.",
+		Export: true,
+	}
+	p.ManifestIndexBackfillConcurrency.Init(base.mgr)
+
+	p.ManifestIndexRollbackEnabled = ParamItem{
+		Key: "dataCoord.index.manifestIndexRollback.enabled", Version: "3.0.1", DefaultValue: "false",
+		Doc: `Copy StorageV3 path-version-2 index files to index_v1 with object-storage server-side Copy, then atomically restore etcd records with path version 1 and remove their manifest entries. Source files remain retained for readers and snapshots. Local-storage layout migration is unsupported. This restart-scoped switch overrides forward backfill and creation of new manifest index tasks; already-created version-2 tasks still finish in manifests and are then eligible for rollback.
+Only in-memory manifest-resident records are migrated. Untracked manifest entries remain owned by GC. Readiness reports that the current record backlog is empty; later records wake the inspector.`,
+		Export: true,
+	}
+	p.ManifestIndexRollbackEnabled.Init(base.mgr)
+	p.ManifestIndexRollbackInterval = ParamItem{
+		Key: "dataCoord.index.manifestIndexRollback.interval", Version: "3.0.1", DefaultValue: "60",
+		Doc: "Seconds between rollback scans while manifest-resident records remain. Scans stop after readiness and resume on manifest-resident record notifications. Nonpositive durations use 60 seconds.", Export: true,
+	}
+	p.ManifestIndexRollbackInterval.Init(base.mgr)
+	p.ManifestIndexRollbackBatchSize = ParamItem{
+		Key: "dataCoord.index.manifestIndexRollback.batchSize", Version: "3.0.1", DefaultValue: "1000",
+		Formatter: func(v string) string { return strconv.Itoa(max(1, getAsInt(v))) },
+		Doc:       "Maximum segments visited per rollback scan. Each visit restores at most maxEtcdTxnNum-1 indexes atomically.", Export: true,
+	}
+	p.ManifestIndexRollbackBatchSize.Init(base.mgr)
+	p.ManifestIndexRollbackConcurrency = ParamItem{
+		Key: "dataCoord.index.manifestIndexRollback.concurrency", Version: "3.0.1", DefaultValue: "8",
+		Formatter: func(v string) string { return strconv.Itoa(min(256, max(1, getAsInt(v)))) },
+		Doc:       "Maximum segments processed concurrently during rollback, clamped to [1, 256].", Export: true,
+	}
+	p.ManifestIndexRollbackConcurrency.Init(base.mgr)
+
 	p.HybridIndexLowCardinalityIndexType = ParamItem{
 		Key:          "dataCoord.index.hybridIndex.lowCardinalityIndexType",
 		Version:      "2.6.10",
@@ -10499,4 +10622,9 @@ func (params *ComponentParam) Reset(key string) error {
 
 func (params *ComponentParam) GetWithDefault(key string, dft string) string {
 	return params.baseTable.GetWithDefault(key, dft)
+}
+
+// CredentialBrokerPolicy returns the immutable policy captured during initialization.
+func (p *commonConfig) CredentialBrokerPolicy() *specutil.BrokerPolicy {
+	return p.credentialBrokerPolicy
 }
