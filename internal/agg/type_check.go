@@ -11,7 +11,7 @@ func isSupportedAggFieldType(aggregateName string, dt schemapb.DataType) bool {
 		// count(*) uses DataType_None; count(field) can work for any type since it
 		// doesn't depend on the field's scalar representation in reducer.
 		return true
-	case kSum, kAvg:
+	case kSum, kAvg, kVarPop, kVarSamp, kStddevPop, kStddevSamp:
 		switch dt {
 		case schemapb.DataType_Int8,
 			schemapb.DataType_Int16,

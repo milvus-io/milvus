@@ -219,6 +219,10 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 			useAllDyncamicFields = true
 		} else {
 			if isAgg, aggregateName, aggFieldName := agg.MatchAggregationExpression(outputFieldName); isAgg {
+				if userOutputFieldsMap[outputFieldName] {
+					// A repeated expression reuses the aggregates planned for its first occurrence.
+					continue
+				}
 				if aggField, ok := allFieldNameMap[aggFieldName]; ok {
 					aggFuncs, aggErr := agg.NewAggregate(aggregateName, aggField.GetFieldID(), outputFieldName, aggField.GetDataType())
 					if aggErr != nil {
