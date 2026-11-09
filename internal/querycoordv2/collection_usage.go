@@ -240,14 +240,16 @@ func (m *collectionUsageManager) shouldRelease(ctx context.Context, collectionID
 // query, a manual release, disabling auto release or a TTL change while it was
 // queued keeps it loaded, and a later scan evaluates it again.
 func (m *collectionUsageManager) stillIdle(ctx context.Context, collectionID int64) bool {
-	m.mu.Lock()
-	lastActiveAt, tracked := m.lastActiveAt[collectionID]
-	m.mu.Unlock()
-	if !tracked {
+	ttl, err := m.idleTTL(ctx, collectionID)
+	if err != nil {
 		return false
 	}
-	ttl, err := m.idleTTL(ctx, collectionID)
-	return err == nil && idleFor(lastActiveAt, ttl)
+
+	// Activity and feature gates may change during the property lookup.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	lastActiveAt, tracked := m.lastActiveAt[collectionID]
+	return m.enabled && tracked && idleFor(lastActiveAt, ttl)
 }
 
 func idleFor(lastActiveAt time.Time, ttl time.Duration) bool {

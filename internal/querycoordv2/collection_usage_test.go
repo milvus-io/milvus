@@ -604,6 +604,57 @@ func TestCollectionUsageQueuedReleaseChecksIdlenessAgain(t *testing.T) {
 	}
 }
 
+func TestCollectionUsageActivityChangesDuringReleaseTTLLookup(t *testing.T) {
+	const collectionID int64 = 100
+	params := paramtable.Get()
+	for _, tc := range []struct {
+		name   string
+		change func(*testing.T, *collectionUsageManager)
+	}{
+		{"query touches collection", func(_ *testing.T, m *collectionUsageManager) { m.touch(collectionID) }},
+		{"load config removed", func(_ *testing.T, m *collectionUsageManager) { m.handleLoadConfigChange(collectionID, true) }},
+		{"auto release disabled", func(t *testing.T, _ *collectionUsageManager) {
+			require.NoError(t, params.Save(params.QueryCoordCfg.AutoReleaseEnabled.Key, "false"))
+		}},
+		{"auto load disabled", func(t *testing.T, _ *collectionUsageManager) {
+			require.NoError(t, params.Save(params.ProxyCfg.EnableAutoLoad.Key, "false"))
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			enableAutoReleaseForTest(t)
+			_, manager, _, releaseCount := newUsageTestManager(t)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			lookupStarted := make(chan struct{})
+			resumeLookup := make(chan struct{})
+			broker := meta.NewMockBroker(t)
+			broker.EXPECT().GetCollectionProperties(mock.Anything, collectionID).RunAndReturn(func(ctx context.Context, _ int64) ([]*commonpb.KeyValuePair, error) {
+				close(lookupStarted)
+				select {
+				case <-resumeLookup:
+					return nil, nil
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			}).Once()
+			manager.broker = broker
+
+			setActivityTime(manager, collectionID, time.Now().Add(-time.Hour))
+			manager.queueReleases(ctx, []int64{collectionID})
+			select {
+			case <-lookupStarted:
+			case <-ctx.Done():
+				t.Fatal("release worker did not reach the TTL lookup")
+			}
+			tc.change(t, manager)
+			close(resumeLookup)
+			waitReleasesDone(t, manager)
+			require.NoError(t, ctx.Err())
+			require.Zero(t, *releaseCount)
+		})
+	}
+}
+
 func TestCollectionUsageConcurrentTouchAndScan(t *testing.T) {
 	enableAutoReleaseForTest(t)
 	_, manager, _, _ := newUsageTestManager(t)
