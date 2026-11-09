@@ -106,7 +106,7 @@ Existing configuration-source precedence applies. SDK parameters cannot override
 them. Eligibility preserves existing API validation: supported ordinary/iterator
 Query, ANN variants, Search grouping/aggregation and legacy Hybrid fusion can
 stream, including Query Group By + ORDER BY, global aggregates, valid QueryScan
-function chains and ordinary L2-only reranking. Hybrid Group By and unsupported
+function chains and ordinary ungrouped L0/L1/L2 reranking. Hybrid Group By and unsupported
 reranking remain Batch, as does retained-plan requery. Exact gates:
 [Query](../../../internal/views/queryclient/legacy_client.go#L290),
 [QueryScan validation](../../../internal/proxy/dql/query_function_chain.go#L29),
@@ -893,7 +893,7 @@ whereas an invalid request is not made valid by this feature.
 | Search | Group By, group_size > 1 and supported composite keys | Ordered grouped candidate selection with Batch pruning. |
 | Search | Search aggregation | Ordered candidate reduction, then existing Proxy aggregation. |
 | Search | Ordinary ungrouped Proxy-side function/model reranking and L2-only chains | Ordered ANN streaming, then existing Proxy reranking over the complete candidate window. |
-| Search | Ungrouped L0/L1 chains, including combinations with L2 | Batch. |
+| Search | Ordinary ungrouped L0/L1 chains, including combinations with L2 | Workers execute L0/L1 before Chunk splitting; ordered streaming preserves their candidates, followed by optional Proxy L2. |
 | Hybrid | Legacy RRF/weighted fusion with eligible ANN, range, iterative-filter, element/embedding-list sub-searches | One streaming tree per sub-search, then Proxy fusion/collapse. |
 | Hybrid | Group By | Batch; final fusion needs a candidate-preserving grouping policy. |
 | Hybrid | Top-level model/function reranking beyond legacy fusion; sub-search L0/L1 chains | Batch. |
@@ -912,6 +912,14 @@ the ANN candidate window. Reranker input fields (including JSON/dynamic roots)
 travel with the candidates; output-field requery and field assembly remain in
 their existing pipeline positions. L2 is not invoked separately for each transport
 Chunk, and its complete candidate list still occupies memory at Proxy.
+
+Ordinary ungrouped L0/L1 chains reuse the same worker execution as Batch. L0 runs
+before segment reduction; L1 runs after worker reduction and normalizes the
+selected candidates to score-descending/PK-ascending order. An L1 `limit` applies
+to the worker's per-vector candidate list, not to individual transport Chunks.
+Neither stage is re-executed by ReduceStream. Worker-only chains do not require
+Proxy `rerankMeta`; combinations with L2 keep the existing Proxy rerank pipeline.
+Iterator/ORDER BY restrictions and Hybrid eligibility remain unchanged.
 
 ### 11. Memory and Backpressure
 

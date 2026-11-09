@@ -58,14 +58,42 @@ func TestRerankStreamingEligibility(t *testing.T) {
 			task.rerankMeta = &funcScoreRerankMeta{}
 		}},
 		{name: "unprepared", change: func(task *SearchTask) { task.rerankMeta = nil }},
+		{name: "function score without Proxy metadata", change: func(task *SearchTask) {
+			task.request.FunctionChains = nil
+			task.request.FunctionScore = &schemapb.FunctionScore{}
+			task.rerankMeta = nil
+		}},
 		{name: "iterator", change: func(task *SearchTask) { task.IsIterator = true }},
 		{name: "order by", change: func(task *SearchTask) { task.orderByFields = []OrderByField{{FieldName: "rank"}} }},
 		{name: "unknown classification", change: func(task *SearchTask) { task.SearchType = internalpb.SearchType(99) }},
-		{name: "L0 with L2", change: func(task *SearchTask) {
+		{name: "L0 only", want: true, change: func(task *SearchTask) {
+			task.request.FunctionChains = []*schemapb.FunctionChain{l0FunctionChain(mapOp("$score", "expr", columnArg("rank")))}
+			task.rerankMeta = nil
+		}},
+		{name: "L1 only", want: true, change: func(task *SearchTask) {
+			task.request.FunctionChains = []*schemapb.FunctionChain{l1LimitFunctionChain(2)}
+			task.rerankMeta = nil
+		}},
+		{name: "L0 with L1", want: true, change: func(task *SearchTask) {
+			task.request.FunctionChains = []*schemapb.FunctionChain{l0FunctionChain(mapOp("$score", "expr", columnArg("rank"))), l1LimitFunctionChain(2)}
+			task.rerankMeta = nil
+		}},
+		{name: "L0 with L2", want: true, change: func(task *SearchTask) {
 			task.request.FunctionChains = append(task.request.FunctionChains, l0FunctionChain(mapOp("$score", "expr", columnArg("rank"))))
 		}},
-		{name: "L1 with L2", change: func(task *SearchTask) {
+		{name: "L1 with L2", want: true, change: func(task *SearchTask) {
 			task.request.FunctionChains = append(task.request.FunctionChains, l1LimitFunctionChain(2))
+		}},
+		{name: "L0 with L1 and L2", want: true, change: func(task *SearchTask) {
+			task.request.FunctionChains = append(task.request.FunctionChains, l0FunctionChain(mapOp("$score", "expr", columnArg("rank"))), l1LimitFunctionChain(2))
+		}},
+		{name: "L0 with unprepared L2", change: func(task *SearchTask) {
+			task.request.FunctionChains = append(task.request.FunctionChains, l0FunctionChain(mapOp("$score", "expr", columnArg("rank"))))
+			task.rerankMeta = nil
+		}},
+		{name: "L1 iterator", change: func(task *SearchTask) {
+			task.request.FunctionChains = []*schemapb.FunctionChain{l1LimitFunctionChain(2)}
+			task.rerankMeta, task.IsIterator = nil, true
 		}},
 		{name: "unspecified stage", change: func(task *SearchTask) { task.request.FunctionChains = []*schemapb.FunctionChain{{}} }},
 		{name: "hybrid function rerank", change: func(task *SearchTask) {
@@ -99,6 +127,8 @@ func TestRerankStreamingMatchesBatch(t *testing.T) {
 		requery       bool
 		emptyFirst    bool
 		allEmpty      bool
+		workerStages  []schemapb.FunctionChainStage
+		workerOnly    bool
 	}{
 		{name: "L2 sort and limit"},
 		{name: "L2 score mapping", mapScore: true},
@@ -110,6 +140,12 @@ func TestRerankStreamingMatchesBatch(t *testing.T) {
 		{name: "requery", requery: true},
 		{name: "empty first vector", emptyFirst: true},
 		{name: "all empty", allEmpty: true},
+		{name: "L0 only", workerOnly: true, workerStages: []schemapb.FunctionChainStage{schemapb.FunctionChainStage_FunctionChainStageL0Rerank}},
+		{name: "L1 only", workerOnly: true, workerStages: []schemapb.FunctionChainStage{schemapb.FunctionChainStage_FunctionChainStageL1Rerank}},
+		{name: "L0 and L1", workerOnly: true, workerStages: []schemapb.FunctionChainStage{schemapb.FunctionChainStage_FunctionChainStageL0Rerank, schemapb.FunctionChainStage_FunctionChainStageL1Rerank}},
+		{name: "L0 and L2", workerStages: []schemapb.FunctionChainStage{schemapb.FunctionChainStage_FunctionChainStageL0Rerank}},
+		{name: "L1 and L2", workerStages: []schemapb.FunctionChainStage{schemapb.FunctionChainStage_FunctionChainStageL1Rerank}},
+		{name: "L0 L1 and L2", workerStages: []schemapb.FunctionChainStage{schemapb.FunctionChainStage_FunctionChainStageL0Rerank, schemapb.FunctionChainStage_FunctionChainStageL1Rerank}},
 	} {
 		for _, metric := range []string{"IP", "L2"} {
 			for _, offset := range []int64{0, 1} {
@@ -197,6 +233,16 @@ func TestRerankStreamingMatchesBatch(t *testing.T) {
 							task.request.FunctionChains = nil
 							task.request.FunctionScore = &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{function}}
 							task.rerankMeta = mustNewRerankMeta(t, task.schema.CollectionSchema, task.request.FunctionScore)
+						}
+						if tc.workerOnly {
+							task.request.FunctionChains, task.rerankMeta = nil, nil
+						}
+						// Worker results below are already reranked. Native worker execution is
+						// covered by TestWorkerRerankStreamingMatchesBatch in querynodev2/tasks.
+						for _, stage := range tc.workerStages {
+							task.request.FunctionChains = append(task.request.FunctionChains, &schemapb.FunctionChain{
+								Stage: stage, Ops: []*schemapb.FunctionChainOp{mapOp("$score", "num_combine", columnArg("$score"), columnArg("rank"))},
+							})
 						}
 
 						var batchShards []*internalpb.SearchResults
@@ -306,7 +352,7 @@ func TestRerankStreamingMatchesBatch(t *testing.T) {
 						require.NoError(t, streamErr)
 						expected.Results.PrimaryFieldName, expected.Results.OutputFields = "pk", task.userOutputFields
 						require.True(t, proto.Equal(expected.GetResults(), task.result.GetResults()), "Batch=%s\nStreaming=%s", expected.GetResults(), task.result.GetResults())
-						if !tc.functionScore && !tc.allEmpty {
+						if !tc.functionScore && !tc.allEmpty && !tc.workerOnly {
 							winner := int64(3)
 							if tc.nullable {
 								winner = 2

@@ -5655,6 +5655,7 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 
 		require.NoError(t, task.initSearchRequest(ctx))
 		assert.Nil(t, task.rerankMeta)
+		assert.True(t, task.supportsStreamingReduce())
 
 		plan := &planpb.PlanNode{}
 		require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
@@ -5668,6 +5669,7 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 
 		require.NoError(t, task.initSearchRequest(ctx))
 		assert.Nil(t, task.rerankMeta)
+		assert.True(t, task.supportsStreamingReduce())
 
 		plan := &planpb.PlanNode{}
 		require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
@@ -5680,6 +5682,7 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 		task := newTask(request)
 
 		require.NoError(t, task.initSearchRequest(ctx))
+		assert.True(t, task.supportsStreamingReduce())
 		meta, ok := task.rerankMeta.(*functionChainRerankMeta)
 		require.True(t, ok)
 		assert.Equal(t, []string{"ts"}, meta.GetInputFieldNames())
