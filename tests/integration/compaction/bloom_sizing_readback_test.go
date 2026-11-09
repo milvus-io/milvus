@@ -29,10 +29,16 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/compaction"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/bloomfilter"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -46,7 +52,12 @@ func (s *BloomSizingReadbackSuite) SetupSuite() {
 	s.WithMilvusConfig(p.CommonCfg.UseLoonFFI.Key, strconv.FormatBool(s.storageVersion == 3))
 
 	s.WithMilvusConfig(p.QuotaConfig.FlushLimitEnabled.Key, "false")
-	s.WithMilvusConfig(p.CommonCfg.BloomFilterType.Key, "BlockedBloomFilter")
+	s.WithMilvusConfig(p.CommonCfg.BloomFilterType.Key, bloomfilter.BlockBFName)
+	s.WithMilvusConfig(p.CommonCfg.MaxBloomFalsePositive.Key, "0.001")
+	s.WithMilvusConfig(p.DataNodeCfg.EnableDeferredBloomFilter.Key, "true")
+	s.WithMilvusConfig(p.DataNodeCfg.UseMergeSort.Key, "true")
+	// Flush records below the 1 MiB output target so the writer can rotate.
+	s.WithMilvusConfig(p.DataNodeCfg.BinLogMaxSize.Key, "65536")
 	s.WithMilvusConfig(p.DataCoordCfg.EnableAutoCompaction.Key, "true")
 	s.WithMilvusConfig(p.DataCoordCfg.MixCompactionTriggerInterval.Key, "3600")
 	s.WithMilvusConfig(p.DataCoordCfg.L0CompactionTriggerInterval.Key, "1")
@@ -75,7 +86,8 @@ func (s *BloomSizingReadbackSuite) runBloomReadback(varchar bool) {
 	defer cancel()
 	c := s.Cluster
 	name := "BloomReadback_" + funcutil.GenRandomStr()
-	const batch, batches, dim = 128, 3, 32
+	// Keep the surviving data above one output target and the inputs within one compaction plan.
+	const batch, batches, dim = 5000, 3, 32
 	const preDeleted = batch * batches / 2
 	schema := integration.ConstructSchemaOfVecDataType(name, dim, false, schemapb.DataType_FloatVector)
 	if varchar {
@@ -182,17 +194,30 @@ func (s *BloomSizingReadbackSuite) runBloomReadback(varchar bool) {
 	}, 3*time.Minute, time.Second, "manual target_size compaction must complete a plan")
 	segments, err := c.ShowSegments(name)
 	s.Require().NoError(err)
-	merged := false
+	var outputs []*datapb.SegmentInfo
 	var compactedRows int64
 	for _, seg := range segments {
 		if seg.GetState() == commonpb.SegmentState_Flushed && len(seg.GetCompactionFrom()) > 1 {
-			merged = true
+			outputs = append(outputs, seg)
 			compactedRows += seg.GetNumOfRows()
 			s.Require().True(seg.GetIsSorted())
 			s.Require().Equal(s.storageVersion, seg.GetStorageVersion())
 		}
 	}
-	s.Require().True(merged, "must observe a sorted multi-input output")
+	pkField, err := typeutil.GetPrimaryFieldSchema(desc.GetSchema())
+	s.Require().NoError(err)
+	s.Require().Len(outputs, 2, "must exercise deferred sizing with two output segments")
+	s.ElementsMatch(outputs[0].GetCompactionFrom(), outputs[1].GetCompactionFrom(), "both outputs must come from the same compaction inputs")
+	s.Require().NotEqual(outputs[0].GetNumOfRows(), outputs[1].GetNumOfRows(), "outputs should require different BF capacities")
+	for _, seg := range outputs {
+		stats := s.readPersistedBloomStats(ctx, seg, pkField.GetFieldID())
+		const fp = 0.001
+		expected := bloomfilter.NewBloomFilterWithType(uint(seg.GetNumOfRows()), fp, bloomfilter.BlockBFName)
+		inputSized := bloomfilter.NewBloomFilterWithType(uint(batch*batches), fp, bloomfilter.BlockBFName)
+		s.Equal(bloomfilter.BlockedBF, stats.BFType)
+		s.Equal(expected.Cap(), stats.BF.Cap(), "segment %d BF must match its own %d rows", seg.GetID(), seg.GetNumOfRows())
+		s.Less(stats.BF.Cap(), inputSized.Cap(), "segment %d must not retain the total input capacity", seg.GetID())
+	}
 	s.Require().Equal(int64(batch*batches-preDeleted), compactedRows, "compaction must physically remove deleted rows")
 	check := func(start int) {
 		result, err := c.MilvusClient.Query(ctx, &milvuspb.QueryRequest{CollectionName: name, Expr: fmt.Sprintf("%s >= %s", integration.Int64Field, literal(0)), OutputFields: []string{integration.Int64Field}, ConsistencyLevel: commonpb.ConsistencyLevel_Strong})
@@ -228,6 +253,40 @@ func (s *BloomSizingReadbackSuite) runBloomReadback(varchar bool) {
 	s.WaitForFlush(ctx, flushed.GetFlushCollSegIDs()[name].GetData(), flushed.GetCollFlushTs()[name], "", name)
 	reload()
 	check(preDeleted + 64)
+}
+
+func (s *BloomSizingReadbackSuite) readPersistedBloomStats(ctx context.Context, seg *datapb.SegmentInfo, pkFieldID int64) *storage.PrimaryKeyStats {
+	s.T().Helper()
+	var path string
+	if seg.GetStorageVersion() == storage.StorageV3 {
+		s.Require().NotEmpty(seg.GetManifestPath())
+		config := compaction.CreateStorageConfig()
+		config.RootPath = s.Cluster.RootPath()
+		manifestStats, err := packed.GetManifestStats(seg.GetManifestPath(), config)
+		s.Require().NoError(err)
+		stat, ok := manifestStats[fmt.Sprintf("bloom_filter.%d", pkFieldID)]
+		s.Require().True(ok, "segment %d manifest must contain PK Bloom filter stats", seg.GetID())
+		s.Require().Len(stat.Paths, 1)
+		path = stat.Paths[0]
+	} else {
+		s.Require().Equal(storage.StorageV2, seg.GetStorageVersion())
+		s.Require().Len(seg.GetStatslogs(), 1)
+		field := seg.GetStatslogs()[0]
+		s.Equal(pkFieldID, field.GetFieldID())
+		s.Require().Len(field.GetBinlogs(), 1)
+		log := field.GetBinlogs()[0]
+		path = log.GetLogPath()
+		if path == "" {
+			path = metautil.BuildStatsLogPath(s.Cluster.RootPath(), seg.GetCollectionID(),
+				seg.GetPartitionID(), seg.GetID(), field.GetFieldID(), log.GetLogID())
+		}
+	}
+	blob, err := s.Cluster.ChunkManager.Read(ctx, path)
+	s.Require().NoError(err)
+	stats, err := storage.DeserializeStats([]*storage.Blob{{Value: blob}})
+	s.Require().NoError(err)
+	s.Require().Len(stats, 1)
+	return stats[0]
 }
 
 func TestBloomSizingReadback(t *testing.T) {

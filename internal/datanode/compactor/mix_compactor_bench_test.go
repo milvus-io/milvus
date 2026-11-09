@@ -223,7 +223,7 @@ func benchmarkMixBloomSizing(b *testing.B, config bloomSizingBenchConfig) {
 	} else {
 		require.Greater(b, len(result.GetSegments()), 1, "fixture must exercise output rotation")
 	}
-	deferred := pt.DataNodeCfg.EnableDeferredBloomFilter.GetAsBool() && task.estimatedOutputSegmentCount > 1
+	deferred := params.EnableDeferredBloomFilter && task.estimatedOutputSegmentCount > 1
 	fp := pt.CommonCfg.MaxBloomFalsePositive.GetAsFloat()
 	var outputRows, bfBytes, idealBytes int64
 	for _, seg := range result.GetSegments() {

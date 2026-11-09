@@ -1746,14 +1746,26 @@ func TestMixCompactionDeferredBloomFilterSelection(t *testing.T) {
 			} else {
 				assert.NoError(t, paramtable.Get().Save(key, tc.enabled))
 			}
+			params := compaction.GenParams()
+			assert.NoError(t, paramtable.Get().Save(key, fmt.Sprint(!params.EnableDeferredBloomFilter)))
+			config := storage.DefaultPkStatsConfig(1000)
+			var configReads, optionCalls int
+			configPatch := mockey.Mock(storage.DefaultPkStatsConfig).To(func(rows int64) storage.PkStatsConfig {
+				configReads++
+				assert.EqualValues(t, 1000, rows)
+				return config
+			}).Build()
+			defer configPatch.UnPatch()
 			var got storage.PkStatsConfig
 			patch := mockey.Mock(storage.WithPkStatsConfig).To(func(config storage.PkStatsConfig) storage.RwOption {
+				optionCalls++
 				got = config
 				return nil
 			}).Build()
 			defer patch.UnPatch()
 			task := &mixCompactionTask{
-				ctx: context.Background(),
+				ctx:              context.Background(),
+				compactionParams: params,
 				plan: &datapb.CompactionPlan{
 					MaxSize: 1000,
 					Schema:  &schemapb.CollectionSchema{},
@@ -1767,8 +1779,15 @@ func TestMixCompactionDeferredBloomFilterSelection(t *testing.T) {
 			assert.NoError(t, task.preCompact())
 			assert.Equal(t, tc.outputs, task.estimatedOutputSegmentCount)
 			task.buildWriterOptions(context.Background())
-			assert.Equal(t, tc.want, got.UseDeferredBloomFilter)
-			assert.EqualValues(t, 1000, got.Capacity)
+			if tc.want {
+				assert.Equal(t, 1, configReads)
+				assert.Equal(t, 1, optionCalls)
+				config.UseDeferredBloomFilter = true
+				assert.Equal(t, config, got)
+			} else {
+				assert.Zero(t, configReads, "eager path must not read PK configuration while building options")
+				assert.Zero(t, optionCalls, "eager path must use the writer's default PK configuration")
+			}
 		})
 	}
 }

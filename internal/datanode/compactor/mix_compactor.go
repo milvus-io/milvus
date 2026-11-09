@@ -165,16 +165,17 @@ func (t *mixCompactionTask) ensureLOBCompactionContext(ctx context.Context) erro
 }
 
 func (t *mixCompactionTask) buildWriterOptions(ctx context.Context) []storage.RwOption {
-	// Avoid the hash cache cost for estimated single-output compactions.
-	// The estimate only selects a performance trade-off; both paths support any output count.
-	pkStatsConfig := storage.DefaultPkStatsConfig(t.maxRows)
-	pkStatsConfig.UseDeferredBloomFilter = paramtable.Get().DataNodeCfg.EnableDeferredBloomFilter.GetAsBool() &&
-		t.estimatedOutputSegmentCount > 1
 	writerOpts := []storage.RwOption{
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 		storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
 		storage.WithWriterFormat(t.compactionParams.GetStorageFormat()),
-		storage.WithPkStatsConfig(pkStatsConfig),
+	}
+	// Enable deferred sizing only when multiple outputs are expected to avoid hash caching overhead for single-output compactions.
+	// An inaccurate estimate affects memory usage, not correctness.
+	if t.compactionParams.EnableDeferredBloomFilter && t.estimatedOutputSegmentCount > 1 {
+		pkStatsConfig := storage.DefaultPkStatsConfig(t.maxRows)
+		pkStatsConfig.UseDeferredBloomFilter = true
+		writerOpts = append(writerOpts, storage.WithPkStatsConfig(pkStatsConfig))
 	}
 
 	if t.lobContext != nil && t.lobContext.ShouldRewriteAnyField() {

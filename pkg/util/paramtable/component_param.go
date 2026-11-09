@@ -9166,7 +9166,7 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 		Key:          "dataNode.compaction.enableDeferredBloomFilter",
 		Version:      "3.0.0",
 		DefaultValue: "false",
-		Doc:          "Enable deferred Bloom filter sizing for mix compactions estimated to produce multiple output segments. Single-output estimates use the existing path.",
+		Doc:          "Enable deferred Bloom filter sizing for mix compactions estimated to produce multiple output segments. Read by DataCoord and passed to DataNode in the compaction plan. Single-output estimates use the existing path.",
 		Export:       true,
 	}
 	p.EnableDeferredBloomFilter.Init(base.mgr)

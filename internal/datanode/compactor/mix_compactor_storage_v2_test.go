@@ -230,8 +230,10 @@ func (s *MixCompactionTaskStorageV2Suite) TestCompactOverestimatedBloomFilterOut
 
 func (s *MixCompactionTaskStorageV2Suite) testCompactSingleOutputBloomFilter(version int64, overestimate bool) {
 	pt := paramtable.Get()
-	s.Require().NoError(pt.Save(pt.DataNodeCfg.EnableDeferredBloomFilter.Key, "true"))
+	// Deliberately disagree with the plan to verify the local setting is ignored.
+	s.Require().NoError(pt.Save(pt.DataNodeCfg.EnableDeferredBloomFilter.Key, "false"))
 	defer pt.Reset(pt.DataNodeCfg.EnableDeferredBloomFilter.Key)
+	s.task.compactionParams.EnableDeferredBloomFilter = true
 	s.task.compactionParams.StorageVersion = version
 	s.task.compactionParams.UseLoonFFI = version == storage.StorageV3
 	const rowsPerSegment, deletedPerSegment = 100, 90
@@ -350,8 +352,10 @@ func (s *MixCompactionTaskStorageV2Suite) TestCompactUnderestimatedBloomFilterOu
 
 func (s *MixCompactionTaskStorageV2Suite) testCompactSizesBloomFilterPerOutputSegment(version int64, enabled, underestimate bool) {
 	pt := paramtable.Get()
-	s.Require().NoError(pt.Save(pt.DataNodeCfg.EnableDeferredBloomFilter.Key, fmt.Sprint(enabled)))
+	// Deliberately disagree with the plan to verify the local setting is ignored.
+	s.Require().NoError(pt.Save(pt.DataNodeCfg.EnableDeferredBloomFilter.Key, fmt.Sprint(!enabled)))
 	defer pt.Reset(pt.DataNodeCfg.EnableDeferredBloomFilter.Key)
+	s.task.compactionParams.EnableDeferredBloomFilter = enabled
 	s.task.compactionParams.StorageVersion = version
 	s.task.compactionParams.UseLoonFFI = version == storage.StorageV3
 	// Each input fits in one record. A one-byte target forces rotation before
@@ -717,9 +721,11 @@ func TestMixCompactionBloomFilterTTL(t *testing.T) {
 					s.SetT(t)
 					s.SetupTest()
 					defer s.TearDownTest()
-					s.Require().NoError(pt.Save(pt.DataNodeCfg.EnableDeferredBloomFilter.Key, fmt.Sprint(enabled)))
+					// Deliberately disagree with the plan to verify the local setting is ignored.
+					s.Require().NoError(pt.Save(pt.DataNodeCfg.EnableDeferredBloomFilter.Key, fmt.Sprint(!enabled)))
 					defer pt.Reset(pt.DataNodeCfg.EnableDeferredBloomFilter.Key)
 					s.prepareSplitMergeEntityExpired()
+					s.task.compactionParams.EnableDeferredBloomFilter = enabled
 					s.task.compactionParams.StorageVersion = version
 					s.task.compactionParams.UseLoonFFI = version == storage.StorageV3
 					s.task.compactionParams.UseMergeSort = mergeSort
