@@ -294,25 +294,6 @@ func ValidateManifestIndexPublishable(segmentID int64, manifestIndex packed.Mani
 	return nil
 }
 
-func manifestIndexParams(manifestIndex packed.ManifestIndexInfo) []*commonpb.KeyValuePair {
-	properties := make(map[string]string, len(manifestIndex.Properties)+1)
-	for key, value := range manifestIndex.Properties {
-		properties[key] = value
-	}
-	properties[common.IndexTypeKey] = manifestIndex.IndexType
-
-	keys := make([]string, 0, len(properties))
-	for key := range properties {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	params := make([]*commonpb.KeyValuePair, 0, len(keys))
-	for _, key := range keys {
-		params = append(params, &commonpb.KeyValuePair{Key: key, Value: properties[key]})
-	}
-	return params
-}
-
 // BeginManifestIndexRecovery starts collecting the collections whose DataView
 // projection found an unfinished index on a segment whose manifest records
 // indexes. Until the manifest scan ends that may only mean the scan has not

@@ -1894,7 +1894,7 @@ func LegacyManifestIndexFilePathInfo(segmentID int64, manifestIndex packed.Manif
 		BuildID:                   manifestIndex.BuildID,
 		IndexName:                 manifestIndex.IndexName,
 		IndexType:                 manifestIndex.IndexType,
-		IndexParams:               manifestIndexParams(manifestIndex),
+		IndexParams:               []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: manifestIndex.IndexType}},
 		IndexFilePaths:            filePaths,
 		SerializedSize:            uint64(manifestIndex.SerializedSize),
 		MemSize:                   uint64(manifestIndex.MemSize),
