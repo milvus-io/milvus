@@ -341,11 +341,17 @@ treated as released. Removal or update callbacks from a retired manager must
 not erase a new manager with the same key. Reclamation checks instance identity.
 
 After cache publication, notifications coalesce affected keys. An update that
-arrives while a key is being processed must schedule a successor pass. Sources
-need not trigger expensive optimization for every progress report:
+requires a new plan and arrives while a key is being processed must schedule a
+successor pass. Sources need not trigger expensive optimization for every
+progress report:
 
 - Desired config or DataView changes enqueue the collection.
 - Preparing completion and Unrecoverable transitions enqueue the shard.
+- For an existing shard with no desired replica, losing its last Up/Preparing
+  view updates the cache without enqueuing another release. Its manager and
+  syncer already drive teardown. Initial discovery, final removal, late
+  Up/Preparing publications and desired-config changes still notify, preserving
+  recovery and release/reload reconciliation.
 - Node loss/Stopping enqueues its placed shards and the affected RG collections,
   including collections without placements on that node.
 - Node addition/recovery enqueues its RG's desired collections; RG migration

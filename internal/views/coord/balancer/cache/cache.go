@@ -507,9 +507,18 @@ func (c *Cache) PublishShard(id qviews.ShardID, stats *coordview.ShardStats) {
 		delete(c.replicas, id.ReplicaID)
 	}
 	c.mu.Unlock()
-	if old == nil || stats == nil || !sameVersion(old.stats.UpVersion, stats.UpVersion) || !sameVersion(old.stats.PreparingVersion, stats.PreparingVersion) {
-		c.changed(api.TriggerScope{DirtyShards: []qviews.ShardID{id}})
+	if old != nil && stats != nil {
+		if sameVersion(old.stats.UpVersion, stats.UpVersion) && sameVersion(old.stats.PreparingVersion, stats.PreparingVersion) {
+			return
+		}
+		// An undesired shard's teardown is already driven by its manager and
+		// syncer. Publish the accounting without scheduling another release.
+		// Initial discovery, final removal and late Up/Preparing still notify.
+		if stats.UpVersion == nil && stats.PreparingVersion == nil && (next.config == nil || !hasReplica(next.config, id.ReplicaID)) {
+			return
+		}
 	}
+	c.changed(api.TriggerScope{DirtyShards: []qviews.ShardID{id}})
 }
 
 func sameVersion(a, b *qviews.QueryViewVersion) bool {
