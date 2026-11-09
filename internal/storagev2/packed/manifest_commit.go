@@ -56,6 +56,10 @@ type ManifestUpdates struct {
 	// NewFiles is the column-groups / LOB payload returned by an FFI
 	// writer's Close. nil if no insert files were written.
 	NewFiles WriterOutput
+	// ColumnGroups registers existing groups from Go-owned descriptors. This
+	// is needed by external refresh to retain Function outputs without owning
+	// the original writer's C payload or changing the refreshed delete set.
+	ColumnGroups []ColumnGroupEntry
 	// DeltaLogs is the list of delta-log entries to register.
 	DeltaLogs []DeltaLogEntry
 	// Stats is the list of stat entries (bloom filter, bm25, etc.) to
@@ -76,7 +80,7 @@ func (u *ManifestUpdates) isEmpty() bool {
 	if u.NewFiles != nil {
 		return false
 	}
-	return len(u.DeltaLogs) == 0 && len(u.Stats) == 0
+	return len(u.ColumnGroups) == 0 && len(u.DeltaLogs) == 0 && len(u.Stats) == 0
 }
 
 // CommitManifestUpdates opens a loon transaction at (basePath, baseVersion),
@@ -140,6 +144,9 @@ func applyManifestUpdates(handle C.LoonTransactionHandle, updates *ManifestUpdat
 		if err := updates.NewFiles.applyTo(handle); err != nil {
 			return err
 		}
+	}
+	if err := addColumnGroupEntries(handle, updates.ColumnGroups); err != nil {
+		return err
 	}
 
 	for _, entry := range updates.DeltaLogs {
