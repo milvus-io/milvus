@@ -1257,6 +1257,26 @@ func (coord *MixCoordMock) DropCollectionFunction(ctx context.Context, request *
 	return &commonpb.Status{}, nil
 }
 
+func (*MixCoordMock) CreateNamespace(context.Context, *milvuspb.CreateNamespaceRequest, ...grpc.CallOption) (*rootcoordpb.CreateNamespaceResponse, error) {
+	panic("unexpected CreateNamespace call in DDL task test")
+}
+
+func (*MixCoordMock) DescribeNamespace(context.Context, *milvuspb.DescribeNamespaceRequest, ...grpc.CallOption) (*milvuspb.DescribeNamespaceResponse, error) {
+	panic("unexpected DescribeNamespace call in DDL task test")
+}
+
+func (*MixCoordMock) ListNamespaces(context.Context, *milvuspb.ListNamespacesRequest, ...grpc.CallOption) (*milvuspb.ListNamespacesResponse, error) {
+	panic("unexpected ListNamespaces call in DDL task test")
+}
+
+func (*MixCoordMock) DropNamespace(context.Context, *milvuspb.DropNamespaceRequest, ...grpc.CallOption) (*milvuspb.DropNamespaceResponse, error) {
+	panic("unexpected DropNamespace call in DDL task test")
+}
+
+func (*MixCoordMock) HasNamespace(context.Context, *milvuspb.HasNamespaceRequest, ...grpc.CallOption) (*milvuspb.HasNamespaceResponse, error) {
+	panic("unexpected HasNamespace call in DDL task test")
+}
+
 func (coord *MixCoordMock) CreateDatabase(ctx context.Context, in *milvuspb.CreateDatabaseRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, nil
 }
