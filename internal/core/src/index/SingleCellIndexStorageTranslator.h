@@ -99,16 +99,19 @@ class SingleCellIndexStorageTranslator final
             context.ctx.cancellation_token,
             co_await folly::coro::co_current_cancellation_token);
         auto task = load_(&context.ctx);
-        auto storage =
-            use_async_
-                ? co_await folly::coro::co_withExecutor(
-                      storage::ResolveAsyncLoadExecutor(
-                          {},
-                          context.ctx.runtime_load_priority.value_or(0) != 0
-                              ? proto::common::LoadPriority::LOW
-                              : proto::common::LoadPriority::HIGH),
-                      std::move(task))
-                : co_await std::move(task);
+        std::unique_ptr<Storage> storage;
+        // Separate awaits avoid GCC coroutine temporary lifetime bugs in ?:.
+        if (use_async_) {
+            storage = co_await folly::coro::co_withExecutor(
+                storage::ResolveAsyncLoadExecutor(
+                    {},
+                    context.ctx.runtime_load_priority.value_or(0) != 0
+                        ? proto::common::LoadPriority::LOW
+                        : proto::common::LoadPriority::HIGH),
+                std::move(task));
+        } else {
+            storage = co_await std::move(task);
+        }
         AssertInfo(storage != nullptr, "index storage loader returned null");
         std::vector<std::pair<cachinglayer::cid_t, std::unique_ptr<Storage>>>
             result;

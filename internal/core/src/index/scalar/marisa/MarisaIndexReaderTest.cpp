@@ -91,6 +91,33 @@ TEST(SingleCellIndexStorageTranslatorTest, BatchEstimatePreservesSharedBudget) {
     EXPECT_EQ(empty.shared_overhead, cachinglayer::ResourceUsage{});
 }
 
+TEST(SingleCellIndexStorageTranslatorTest, ReturnedCellsOwnStorage) {
+    for (bool use_async : {false, true}) {
+        SCOPED_TRACE(use_async);
+        std::weak_ptr<const marisa::Trie> lifetime;
+        SingleCellIndexStorageTranslator<MarisaIndexStorage> translator(
+            TestIndexCacheConfig(),
+            use_async,
+            [&](OpContext*)
+                -> folly::coro::Task<std::unique_ptr<MarisaIndexStorage>> {
+                auto storage = MakeStorage();
+                lifetime = storage->trie;
+                co_return storage;
+            });
+        auto cells =
+            folly::coro::blockingWait(translator.get_cells_async(nullptr, {0}));
+        ASSERT_EQ(cells.size(), 1);
+        const bool alive = !lifetime.expired();
+        if (!alive) {
+            // Avoid a second delete when detecting premature destruction.
+            cells.front().second.release();
+        }
+        ASSERT_TRUE(alive);
+        cells.clear();
+        EXPECT_TRUE(lifetime.expired());
+    }
+}
+
 TEST(SingleCellIndexStorageTranslatorTest, AsyncLoadSuspendsAndRetainsContext) {
     folly::coro::Baton resume;
     OpContext parent;
