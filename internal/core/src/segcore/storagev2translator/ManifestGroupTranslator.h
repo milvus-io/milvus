@@ -217,11 +217,6 @@ class ManifestGroupTranslator
     }
 
  private:
-    // Shared operation for synchronous callers and the asynchronous cache path.
-    folly::coro::Task<CellResults>
-    load_cells(milvus::OpContext* ctx,
-               const std::vector<cachinglayer::cid_t>& cids);
-
     using CellResult = std::pair<milvus::cachinglayer::cid_t,
                                  std::unique_ptr<milvus::GroupChunk>>;
 

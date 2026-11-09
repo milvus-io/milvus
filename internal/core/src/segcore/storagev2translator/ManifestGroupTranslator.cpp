@@ -635,17 +635,11 @@ std::vector<
 ManifestGroupTranslator::get_cells(
     milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
-    return folly::coro::blockingWait(load_cells(ctx, cids));
+    return folly::coro::blockingWait(get_cells_async(ctx, cids));
 }
 
 folly::coro::Task<ManifestGroupTranslator::CellResults>
 ManifestGroupTranslator::get_cells_async(
-    milvus::OpContext* ctx, const std::vector<cachinglayer::cid_t>& cids) {
-    return load_cells(ctx, cids);
-}
-
-folly::coro::Task<ManifestGroupTranslator::CellResults>
-ManifestGroupTranslator::load_cells(
     milvus::OpContext* ctx, const std::vector<cachinglayer::cid_t>& cids) {
     // Check for cancellation before loading group chunks
     CheckCancellation(ctx, segment_id_, "ManifestGroupTranslator::get_cells()");
