@@ -199,15 +199,8 @@ class PhyCompareFilterExpr : public Expr {
         is_right_indexed_ = right_value_lookup_.HasReader();
         if (segment->type() == SegmentType::Growing && segment->is_chunked()) {
             left_num_chunk_ =
-                segment->type() == SegmentType::Growing
-                    ? upper_div(active_count_,
-                                segment_chunk_reader_.SizePerChunk())
-                    : segment_chunk_reader_.NumChunkData(left_field_);
-            right_num_chunk_ =
-                segment->type() == SegmentType::Growing
-                    ? upper_div(active_count_,
-                                segment_chunk_reader_.SizePerChunk())
-                    : segment_chunk_reader_.NumChunkData(right_field_);
+                upper_div(active_count_, segment_chunk_reader_.SizePerChunk());
+            right_num_chunk_ = left_num_chunk_;
             num_chunk_ = left_num_chunk_;
         } else if (segment->type() == SegmentType::Growing) {
             num_chunk_ =

@@ -238,9 +238,7 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
         int64_t processed_rows = 0;
         // Keep the chunk's data accessor (which pins the chunk) across
         // iterations and rebuild only when the chunk id changes, avoiding a
-        // per-row chunk pin + accessor construction. Safe on both sealed
-        // (CellAccessor keeps the chunk resident) and growing (data and the
-        // chunked validity storage have stable per-chunk buffers).
+        // per-row accessor construction on Growing's stable per-chunk buffers.
         int64_t cached_chunk_id = -1;
         segcore::ChunkDataAccessor cda;
         for (auto i = 0; i < real_batch_size; ++i) {
