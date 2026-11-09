@@ -262,15 +262,14 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
                                   cached_right_chunk_id,
                                   right);
             if (!left_opt.has_value() || !right_opt.has_value()) {
-                res[processed_rows] = false;
-                valid_res[processed_rows] = false;
+                res[i] = false;
+                valid_res[i] = false;
             } else {
-                res[processed_rows] = boost::apply_visitor(
+                res[i] = boost::apply_visitor(
                     milvus::query::Relational<decltype(op)>{},
                     left_opt.value(),
                     right_opt.value());
             }
-            processed_rows++;
         }
         return res_vec;
     }
