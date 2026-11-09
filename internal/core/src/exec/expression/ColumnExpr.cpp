@@ -153,7 +153,7 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
             const auto field = expr_->GetColumn().field_id_;
             data_column_ = snapshot_
                                ? snapshot_->GetDataScanResources(field).first
-                               : segment_->GetDataScanResources(field).first;
+                               : segment_->GetChunkedColumn(field);
             AssertInfo(
                 data_column_ != nullptr, "field {} has no column", field.get());
         }
