@@ -25,7 +25,10 @@ type segmentLimitation struct {
 // SegmentLimitationPolicy is the interface to generate the limitation of the segment.
 type SegmentLimitationPolicy interface {
 	// GenerateLimitation generates the limitation of the segment.
-	GenerateLimitation(lv datapb.SegmentLevel) segmentLimitation
+	// rowCapped tells whether the collection is capped at
+	// dataCoord.segment.maxRows rows per segment (it has no vector field); an
+	// L1 segment is then sealed on rows as well as on bytes.
+	GenerateLimitation(lv datapb.SegmentLevel, rowCapped bool) segmentLimitation
 }
 
 // jitterSegmentLimitationPolicyExtraInfo is the extra info of the jitter segment limitation policy.
@@ -40,12 +43,12 @@ type jitterSegmentLimitationPolicyExtraInfo struct {
 type jitterSegmentLimitationPolicy struct{}
 
 // GenerateLimitation generates the limitation of the segment.
-func (p jitterSegmentLimitationPolicy) GenerateLimitation(lv datapb.SegmentLevel) segmentLimitation {
+func (p jitterSegmentLimitationPolicy) GenerateLimitation(lv datapb.SegmentLevel, rowCapped bool) segmentLimitation {
 	switch lv {
 	case datapb.SegmentLevel_L0:
 		return p.generateL0Limitation()
 	case datapb.SegmentLevel_L1:
-		return p.generateL1Limitation()
+		return p.generateL1Limitation(rowCapped)
 	default:
 		panic(fmt.Sprintf("invalid segment level: %s", lv))
 	}
@@ -74,17 +77,28 @@ func (p jitterSegmentLimitationPolicy) generateL0Limitation() segmentLimitation 
 	}
 }
 
-// generateL1Limitation generates the limitation of the L1 segment.
-func (p jitterSegmentLimitationPolicy) generateL1Limitation() segmentLimitation {
+// generateL1Limitation generates the limitation of the L1 segment: the seal
+// proportion of the segment size, and for a row capped collection
+// dataCoord.segment.maxRows rows, both with the same jitter.
+//
+// The seal proportion is not applied to the row limit. It exists to keep a
+// growing segment, which is held in memory, well below maxSize bytes; a row
+// capped segment of narrow rows is small in bytes at maxRows rows, and sealing
+// it earlier would only produce segments that compaction has to merge back.
+func (p jitterSegmentLimitationPolicy) generateL1Limitation(rowCapped bool) segmentLimitation {
 	// TODO: It's weird to set such a parameter into datacoord configuration.
 	// Refactor it in the future
 	jitterRatio := p.getJitterRatio()
 	maxSegmentSize := uint64(paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024)
 	proportion := paramtable.Get().DataCoordCfg.SegmentSealProportion.GetAsFloat()
 	segmentSize := uint64(jitterRatio * float64(maxSegmentSize) * proportion)
+	segmentRows := uint64(math.MaxUint64)
+	if maxRows := paramtable.Get().DataCoordCfg.SegmentMaxRows.GetAsInt64(); rowCapped && maxRows > 0 {
+		segmentRows = max(uint64(jitterRatio*float64(maxRows)), 1)
+	}
 	return segmentLimitation{
 		PolicyName:  "jitter_segment_limitation",
-		SegmentRows: math.MaxUint64,
+		SegmentRows: segmentRows,
 		SegmentSize: segmentSize,
 	}
 }

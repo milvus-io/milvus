@@ -6,6 +6,7 @@ import (
 	"math"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -93,7 +94,7 @@ func RecoverShardManager(param *ShardManagerRecoverParam) ShardManager {
 				param.TxnManager,
 				param.InitialRecoverSnapshot.Checkpoint.TimeTick, // use the checkpoint time tick to fence directly.
 				metrics,
-			)
+			).withCollectionInfo(collectionInfo)
 			segmentTotal += len(segmentManagers)
 		}
 	}
@@ -221,6 +222,21 @@ type CollectionInfo struct {
 	PartitionIDs map[int64]struct{}
 	Schema       *streamingpb.CollectionSchemaOfVChannel
 	primaryKey   *PrimaryKeyDescriptor
+	// rowCapped tells whether the segments of the collection are capped at
+	// dataCoord.segment.maxRows rows: the current schema is known and has no
+	// vector field. The segment alloc worker reads it without the shard
+	// manager lock, hence atomic.
+	rowCapped atomic.Bool
+}
+
+// RowCapped tells whether new L1 segments of the collection are sealed on a
+// row count in addition to the byte size. It is false when the schema is
+// unknown.
+func (c *CollectionInfo) RowCapped() bool {
+	if c == nil {
+		return false
+	}
+	return c.rowCapped.Load()
 }
 
 // PrimaryKeyDescriptor is the immutable PK information needed by WAL write
@@ -233,6 +249,7 @@ type PrimaryKeyDescriptor struct {
 func (c *CollectionInfo) setSchema(schema *streamingpb.CollectionSchemaOfVChannel) {
 	c.Schema = schema
 	c.primaryKey = nil
+	c.rowCapped.Store(schema.GetSchema() != nil && !typeutil.HasVectorField(schema.GetSchema()))
 	if schema == nil || schema.GetSchema() == nil {
 		return
 	}

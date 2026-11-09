@@ -2133,3 +2133,44 @@ func TestGetV3TaskProgressesFromReshardHashedRows(t *testing.T) {
 	assert.Equal(t, "2026-01-02T03:04:05Z07:00", byName["[b.parquet]"].GetCompleteTime())
 	assert.Empty(t, byName["[a.parquet]"].GetCompleteTime())
 }
+
+// A collection without a vector field imports segments of about
+// dataCoord.segment.maxRows rows: the byte target is lowered to maxRows rows of
+// the job's measured row size. Other collections keep the byte target.
+func TestImportUtil_CapSegmentMaxSizeByRows(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.DataCoordCfg.SegmentMaxRows.Key, "4000000"))
+	t.Cleanup(func() { params.Reset(params.DataCoordCfg.SegmentMaxRows.Key) })
+
+	const gb = int64(1024 * 1024 * 1024)
+	pk := &schemapb.FieldSchema{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
+	newJob := func(options []*commonpb.KeyValuePair, fields ...*schemapb.FieldSchema) ImportJob {
+		return &Job{ImportJob: &datapb.ImportJob{
+			JobID:        1,
+			CollectionID: 2,
+			Schema:       &schemapb.CollectionSchema{Fields: append([]*schemapb.FieldSchema{pk}, fields...)},
+			Options:      options,
+		}}
+	}
+	age := &schemapb.FieldSchema{FieldID: 101, Name: "age", DataType: schemapb.DataType_Int32}
+	vec := &schemapb.FieldSchema{
+		FieldID: 102, Name: "vec", DataType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}},
+	}
+
+	// 44 M rows of 12 B: 4 M rows are 48 MB
+	require.Equal(t, int64(48_000_000), CapSegmentMaxSizeByRows(newJob(nil, age), gb, 44_000_000*12, 44_000_000))
+	// 1 M rows of 2 KB: 4 M rows would be 8 GB, the byte target stays
+	require.Equal(t, gb, CapSegmentMaxSizeByRows(newJob(nil, age), gb, 1_000_000*2048, 1_000_000))
+	// a vector field: no row cap
+	require.Equal(t, gb, CapSegmentMaxSizeByRows(newJob(nil, age, vec), gb, 44_000_000*44, 44_000_000))
+	// nothing measured yet
+	require.Equal(t, gb, CapSegmentMaxSizeByRows(newJob(nil, age), gb, 0, 0))
+	// an L0 import carries deletes, not rows
+	l0 := []*commonpb.KeyValuePair{{Key: importutilv2.L0Import, Value: "true"}}
+	require.Equal(t, gb, CapSegmentMaxSizeByRows(newJob(l0, age), gb, 44_000_000*12, 44_000_000))
+	// maxRows 0 disables the cap
+	require.NoError(t, params.Save(params.DataCoordCfg.SegmentMaxRows.Key, "0"))
+	require.Equal(t, gb, CapSegmentMaxSizeByRows(newJob(nil, age), gb, 44_000_000*12, 44_000_000))
+}

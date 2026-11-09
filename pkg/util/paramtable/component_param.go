@@ -6539,6 +6539,7 @@ type dataCoordConfig struct {
 	// --- SEGMENTS ---
 	SegmentMaxSize                 ParamItem `refreshable:"false"`
 	DiskSegmentMaxSize             ParamItem `refreshable:"true"`
+	SegmentMaxRows                 ParamItem `refreshable:"true"`
 	SegmentSealProportion          ParamItem `refreshable:"false"`
 	SegmentSealProportionJitter    ParamItem `refreshable:"true"`
 	SegAssignmentExpiration        ParamItem `refreshable:"false"`
@@ -6857,6 +6858,20 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.DiskSegmentMaxSize.Init(base.mgr)
+
+	p.SegmentMaxRows = ParamItem{
+		Key:          "dataCoord.segment.maxRows",
+		Version:      "3.0.0",
+		DefaultValue: "4000000",
+		Doc: `The maximum number of rows in a segment of a collection without a vector field. Segments are sized in bytes
+(maxSize); a vector field bounds the row count as a side effect, but without one a segment of maxSize bytes
+can hold tens of millions of rows, and per-segment work such as building a scalar index or replaying deletes
+at load grows with the row count. Such a collection is therefore sealed, compacted and imported at maxSize
+bytes or maxRows rows per segment, whichever comes first. Collections with a vector field are not affected.
+0 disables the row limit.`,
+		Export: true,
+	}
+	p.SegmentMaxRows.Init(base.mgr)
 
 	p.SegmentSealProportion = ParamItem{
 		Key:          "dataCoord.segment.sealProportion",

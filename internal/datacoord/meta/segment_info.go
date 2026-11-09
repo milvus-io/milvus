@@ -73,6 +73,12 @@ type SegmentInfo struct {
 	LastFlushTime   time.Time
 	IsCompacting    bool
 	LastWrittenTime time.Time
+	// minRowSize is the minimum number of bytes one row is charged by
+	// GetSegmentSize and GetResidualSegmentSize; 0 charges the stored bytes
+	// only. It is set with WithMinRowSize on the copies a compaction planner
+	// works on, to apply a per-segment row cap through the byte based packing,
+	// and is never set on a segment stored in meta.
+	minRowSize float64
 }
 
 // EnsureStats returns a non-nil Statistics view for read-only aggregate
@@ -441,6 +447,7 @@ func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 		LastFlushTime:   s.LastFlushTime,
 		IsCompacting:    s.IsCompacting,
 		LastWrittenTime: s.LastWrittenTime,
+		minRowSize:      s.minRowSize,
 	}
 	for _, opt := range opts {
 		opt(cloned)
@@ -456,6 +463,7 @@ func (s *SegmentInfo) ShadowClone(opts ...SegmentInfoOption) *SegmentInfo {
 		LastFlushTime:   s.LastFlushTime,
 		IsCompacting:    s.IsCompacting,
 		LastWrittenTime: s.LastWrittenTime,
+		minRowSize:      s.minRowSize,
 	}
 	for _, opt := range opts {
 		opt(cloned)
@@ -477,6 +485,14 @@ func (s *SegmentsInfo) deleteCompactFrom(compactionFrom []int64) {
 
 // SegmentInfoOption is the option to set fields in segment info
 type SegmentInfoOption func(segment *SegmentInfo)
+
+// WithMinRowSize makes GetSegmentSize and GetResidualSegmentSize of the copy
+// charge at least minRowSize bytes per row. See SegmentInfo.minRowSize.
+func WithMinRowSize(minRowSize float64) SegmentInfoOption {
+	return func(segment *SegmentInfo) {
+		segment.minRowSize = minRowSize
+	}
+}
 
 // SetRowCount is the option to set row count for segment info
 func SetRowCount(rowCount int64) SegmentInfoOption {
@@ -551,7 +567,11 @@ func SetIsCompacting(isCompacting bool) SegmentInfoOption {
 
 func (s *SegmentInfo) GetSegmentSize() int64 {
 	stats := s.EnsureStats()
-	return stats.GetInsertBinlogSize() + stats.GetStatsBinlogSize() + stats.GetDeltaBinlogSize()
+	size := stats.GetInsertBinlogSize() + stats.GetStatsBinlogSize() + stats.GetDeltaBinlogSize()
+	if s.minRowSize > 0 {
+		size = max(size, int64(float64(s.GetNumOfRows())*s.minRowSize))
+	}
+	return size
 }
 
 func (s *SegmentInfo) GetFieldBinlogSize(fieldID int64) int64 {

@@ -203,7 +203,7 @@ func (s *ClusteringCompactionPolicySuite) TestCalculateClusteringCompactionConfi
 					segment.Size = float64(expectedSegmentSize) * float64(segment.NumOfRows) / float64(test.maxSegmentRows)
 				}
 			}
-			totalRows, maxSegmentRows, preferSegmentRows, err := policy.CalculateClusteringCompactionConfig(test.coll, test.view, expectedSegmentSize)
+			totalRows, maxSegmentRows, preferSegmentRows, err := policy.CalculateClusteringCompactionConfig(test.coll, test.view, expectedSegmentSize, 0)
 			s.Equal(test.totalRows, totalRows)
 			s.Equal(test.maxSegmentRows, maxSegmentRows)
 			s.Equal(test.preferSegmentRows, preferSegmentRows)
