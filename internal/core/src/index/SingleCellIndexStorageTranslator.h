@@ -79,19 +79,12 @@ class SingleCellIndexStorageTranslator final
     CellResults
     get_cells(OpContext* parent,
               const std::vector<cachinglayer::cid_t>& cids) override {
-        return folly::coro::blockingWait(load_cells(parent, cids));
+        return folly::coro::blockingWait(get_cells_async(parent, cids));
     }
 
     folly::coro::Task<CellResults>
     get_cells_async(OpContext* parent,
                     const std::vector<cachinglayer::cid_t>& cids) override {
-        return load_cells(parent, cids);
-    }
-
- private:
-    folly::coro::Task<CellResults>
-    load_cells(OpContext* parent,
-               const std::vector<cachinglayer::cid_t>& cids) {
         AssertInfo(cids.size() == 1 && cids.front() == 0,
                    "single-cell index received invalid cell ids");
         IndexLoadContext context(parent, config_.load_priority);
@@ -119,6 +112,7 @@ class SingleCellIndexStorageTranslator final
         co_return result;
     }
 
+ private:
     IndexCacheConfig config_;
     const bool use_async_;
     LoadFn load_;
