@@ -197,10 +197,20 @@ func TestStreamingConfigLeavesUnsupportedRequestsOnBatch(t *testing.T) {
 		require.NoError(t, query.Execute(t.Context()))
 		require.False(t, legacy.lastQueryRequest.AllowStreaming)
 	}
-	query := newQueryViewQueryTask(t, legacy, 1)
-	query.request.FunctionChains = []*schemapb.FunctionChain{{Stage: schemapb.FunctionChainStage_FunctionChainStageQueryScan}}
-	require.NoError(t, query.Execute(t.Context()))
-	require.False(t, legacy.lastQueryRequest.AllowStreaming)
+}
+
+func TestStreamingConfigAllowsQueryScan(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		legacy := &fakeLegacyQueryClient{queryResult: &queryclient.LegacyQueryResult{}}
+		query := newQueryViewQueryTask(t, legacy, 1)
+		cfg := &paramtable.Get().ProxyCfg.EnableReduceStream
+		old := cfg.GetValue()
+		t.Cleanup(func() { require.NoError(t, paramtable.Get().Save(cfg.Key, old)) })
+		require.NoError(t, paramtable.Get().Save(cfg.Key, strconv.FormatBool(enabled)))
+		query.request.FunctionChains = []*schemapb.FunctionChain{{Stage: schemapb.FunctionChainStage_FunctionChainStageQueryScan}}
+		require.NoError(t, query.Execute(t.Context()))
+		require.Equal(t, enabled, legacy.lastQueryRequest.AllowStreaming)
+	}
 }
 
 func TestStreamingConfigLeavesRetainedPlansOnBatch(t *testing.T) {

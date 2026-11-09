@@ -331,6 +331,62 @@ func TestQueryOnViewStreamSendsChunksAndEOF(t *testing.T) {
 	require.NoError(t, stream.Close())
 }
 
+func TestQueryOnViewStreamPreservesComputedResults(t *testing.T) {
+	for _, empty := range []bool{false, true} {
+		ids, details := []int64{1, 2}, [][]byte{[]byte(`[{"content":"first"}]`), []byte(`[{"content":"second"}]`)}
+		if empty {
+			ids, details = nil, nil
+		}
+		result := &internalpb.RetrieveResults{Status: merr.Success(),
+			Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ids}}},
+			FieldsData: []*schemapb.FieldData{{FieldId: 100, Type: schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: ids}}}},
+			}},
+			ComputedResults: []*schemapb.FieldData{{FieldName: "matches", Type: schemapb.DataType_JSON,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: details}}}},
+			}},
+		}
+		plan := &planpb.PlanNode{QuerynodeFunctionChains: []*schemapb.FunctionChain{{Name: "scan",
+			Stage: schemapb.FunctionChainStage_FunctionChainStageQueryScan, OutputColumns: []string{"matches"},
+			Ops: []*schemapb.FunctionChainOp{{Op: "grep", Inputs: []string{"text"}, Outputs: []string{"matches"}}},
+		}}}
+		encodedPlan, err := proto.Marshal(plan)
+		require.NoError(t, err)
+		common := streamTestRequest()
+		request := &viewpb.QueryOnViewRequest{
+			LegacyReq: &internalpb.RetrieveRequest{Limit: typeutil.Unlimited, SerializedExprPlan: encodedPlan},
+			ShardId:   common.ShardId, Version: common.Version, Mvcc: common.Mvcc, StreamChunkBytes: 1,
+		}
+		provider := &streamTestProvider{queryTasks: &streamTestQueryTasks{tasks: []QuerySegmentTask{struct{}{}}}}
+		client, cleanup := startSearchStreamTestServer(t, NewServer(provider, &streamTestScheduler{queryResult: result}))
+		t.Cleanup(cleanup)
+		worker, err := queryreducestream.NewGRPCReduceStream(t.Context(), client, request)
+		require.NoError(t, err)
+		shard, err := queryreducestream.NewShardReduceStream(request.LegacyReq, nil, []queryreducestream.ReduceStream{worker}, 1)
+		require.NoError(t, err)
+		stream, err := queryreducestream.NewReduceStream(request.LegacyReq, nil, []queryreducestream.ReduceStream{shard}, 1)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, stream.Close()) })
+		var gotIDs []int64
+		var gotDetails [][]byte
+		for {
+			chunk, err := stream.Recv()
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			require.NoError(t, err)
+			require.Len(t, chunk.ComputedResults, 1)
+			require.Equal(t, "matches", chunk.ComputedResults[0].FieldName)
+			require.Equal(t, schemapb.DataType_JSON, chunk.ComputedResults[0].Type)
+			gotIDs = append(gotIDs, chunk.GetIds().GetIntId().GetData()...)
+			gotDetails = append(gotDetails, chunk.ComputedResults[0].GetScalars().GetJsonData().GetData()...)
+		}
+		require.Equal(t, ids, gotIDs)
+		require.Equal(t, details, gotDetails)
+		require.Equal(t, encodedPlan, provider.queryRequest.GetSerializedExprPlan())
+	}
+}
+
 func TestQueryOnViewStreamPreservesElementIndices(t *testing.T) {
 	result := &internalpb.RetrieveResults{
 		Status: merr.Success(), ElementLevel: true, HasMoreResult: true,
