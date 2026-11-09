@@ -85,7 +85,7 @@ type baseSegment struct {
 	version        *atomic.Int64
 
 	segmentType   SegmentType
-	pkCandidate   pkoracle.Candidate // Initialized for growing segments; optional for sealed segments.
+	pkCandidate   pkoracle.Candidate // Initialized for growing segments when BF is enabled; optional for sealed segments.
 	loadInfo      *atomic.Pointer[querypb.SegmentLoadInfo]
 	skipGrowingBF bool // Skip generating or maintaining BF for growing segments; deletion checks will be handled in segcore.
 	channel       metautil.Channel
@@ -101,17 +101,18 @@ func newBaseSegment(collection *Collection, segmentType SegmentType, version int
 		return baseSegment{}, err
 	}
 	bs := baseSegment{
-		collection:    collection,
-		loadInfo:      atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo),
-		version:       atomic.NewInt64(version),
-		segmentType:   segmentType,
-		channel:       channel,
-		skipGrowingBF: segmentType == SegmentTypeGrowing && paramtable.Get().QueryNodeCfg.SkipGrowingSegmentBF.GetAsBool(),
+		collection:  collection,
+		loadInfo:    atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo),
+		version:     atomic.NewInt64(version),
+		segmentType: segmentType,
+		channel:     channel,
+		skipGrowingBF: segmentType == SegmentTypeGrowing &&
+			(paramtable.Get().QueryNodeCfg.SkipGrowingSegmentBF.GetAsBool() || !paramtable.Get().CommonCfg.BloomFilterEnabled.GetAsBool()),
 
 		resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
 		needUpdatedVersion: atomic.NewInt64(0),
 	}
-	if segmentType == SegmentTypeGrowing {
+	if segmentType == SegmentTypeGrowing && !bs.skipGrowingBF {
 		bs.pkCandidate = pkoracle.NewBloomFilterSet(loadInfo.GetSegmentID(), loadInfo.GetPartitionID(), segmentType)
 	}
 	return bs, nil

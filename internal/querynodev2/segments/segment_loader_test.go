@@ -733,6 +733,9 @@ func (suite *SegmentLoaderSuite) TestLoadSealedNilCandidateFailureCleanup() {
 }
 
 func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
+	item := &paramtable.Get().QueryNodeCfg.SkipGrowingSegmentBF
+	oldValue := item.SwapTempValue("false")
+	defer item.SwapTempValue(oldValue)
 	ctx := context.Background()
 	loadInfos := make([]*querypb.SegmentLoadInfo, 0, suite.segmentNum)
 
@@ -1026,6 +1029,135 @@ func (suite *SegmentLoaderSuite) TestLoadBloomFilter() {
 			exist := bf.MayPkExist(lc)
 			suite.Require().True(exist)
 		}
+	}
+}
+
+func TestLoadGrowingStatsHonorsBloomFilterSettings(t *testing.T) {
+	type statsChunkManager struct{ storage.ChunkManager }
+	paramtable.Init()
+	require.NoError(t, initcore.InitTieredStorage(paramtable.Get()))
+	ctx := context.Background()
+	schema := mock_segcore.GenTestCollectionSchema("growing-stats", schemapb.DataType_Int64, false)
+	pkField := GetPkField(schema)
+	const bm25FieldID int64 = 200
+	pkStats, err := storage.NewPrimaryKeyStats(pkField.GetFieldID(), int64(schemapb.DataType_Int64), 1)
+	require.NoError(t, err)
+	pkStats.Update(storage.NewInt64PrimaryKey(42))
+	writer := &storage.StatsWriter{}
+	require.NoError(t, writer.Generate(pkStats))
+	bm25Stats := storage.NewBM25Stats()
+	bm25Stats.Append(map[uint32]float32{1: 2})
+	bm25Bytes, err := bm25Stats.Serialize()
+	require.NoError(t, err)
+	injected := errors.New("stats unavailable")
+
+	for _, tc := range []struct {
+		name      string
+		enabled   bool
+		skip      bool
+		failStage string
+	}{
+		{name: "BF enabled", enabled: true},
+		{name: "skip growing BF", enabled: true, skip: true},
+		{name: "global BF disabled"},
+		{name: "both disable BF", skip: true},
+		{name: "BF read fails", enabled: true, failStage: "bf"},
+		{name: "BM25 read fails with BF", enabled: true, failStage: "bm25"},
+		{name: "BM25 read fails without BF", failStage: "bm25"},
+		{name: "BM25 path resolution fails without BF", failStage: "paths"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			params := paramtable.Get()
+			oldEnabled := params.CommonCfg.BloomFilterEnabled.SwapTempValue(fmt.Sprint(tc.enabled))
+			defer params.CommonCfg.BloomFilterEnabled.SwapTempValue(oldEnabled)
+			oldSkip := params.QueryNodeCfg.SkipGrowingSegmentBF.SwapTempValue(fmt.Sprint(tc.skip))
+			defer params.QueryNodeCfg.SkipGrowingSegmentBF.SwapTempValue(oldSkip)
+			info := &querypb.SegmentLoadInfo{
+				CollectionID: 100, PartitionID: 10, SegmentID: 1,
+				InsertChannel: "by-dev-rootcoord-dml_0_100v0",
+				Statslogs: []*datapb.FieldBinlog{{
+					FieldID: pkField.GetFieldID(),
+					Binlogs: []*datapb.Binlog{{LogPath: "bf/100"}},
+				}},
+				Bm25Logs: []*datapb.FieldBinlog{{
+					FieldID: bm25FieldID,
+					Binlogs: []*datapb.Binlog{{LogPath: "bm25/100"}},
+				}},
+			}
+			collection := NewCollectionWithoutSegcoreForTest(100, schema)
+			base, err := newBaseSegment(collection, SegmentTypeGrowing, 0, info)
+			require.NoError(t, err)
+			useBF := tc.enabled && !tc.skip
+			assert.Equal(t, !useBF, base.skipGrowingBF)
+			assert.Equal(t, useBF, base.pkCandidate != nil)
+			segment := &LocalSegment{
+				baseSegment: base, manager: NewManager().Segment,
+				bm25StatsHolder: newBM25StatsHolder(),
+				relatedDataSize: atomic.NewInt64(0), binlogSize: atomic.NewInt64(0),
+			}
+			defer segment.Refund()
+			loadData := mockey.Mock((*LocalSegment).Load).Return(nil).Build()
+			defer loadData.UnPatch()
+			cm := &statsChunkManager{}
+			var reads []string
+			read := mockey.Mock((*statsChunkManager).MultiRead).To(
+				func(_ *statsChunkManager, _ context.Context, paths []string) ([][]byte, error) {
+					require.Len(t, paths, 1)
+					reads = append(reads, paths[0])
+					switch paths[0] {
+					case "bf/100":
+						// Disabled BF must not touch even an unavailable stats file.
+						if !useBF || tc.failStage == "bf" {
+							return nil, injected
+						}
+						return [][]byte{writer.GetBuffer()}, nil
+					case "bm25/100":
+						if tc.failStage == "bm25" {
+							return nil, injected
+						}
+						return [][]byte{bm25Bytes}, nil
+					default:
+						t.Fatalf("unexpected stats path %q", paths[0])
+						return nil, nil
+					}
+				}).Build()
+			defer read.UnPatch()
+			if tc.failStage == "paths" {
+				paths := mockey.Mock((*packed.StatsResolver).BM25StatsPaths).Return(nil, injected).Build()
+				defer paths.UnPatch()
+			}
+			loader := &segmentLoader{cm: cm}
+			err = loader.LoadSegment(ctx, segment, info)
+			var wantReads []string
+			if useBF {
+				wantReads = append(wantReads, "bf/100")
+			}
+			if tc.failStage != "bf" && tc.failStage != "paths" {
+				wantReads = append(wantReads, "bm25/100")
+			}
+			assert.Equal(t, wantReads, reads)
+			if tc.failStage != "" {
+				require.ErrorIs(t, err, injected)
+				assert.Empty(t, segment.GetBM25Stats())
+				return
+			}
+			require.NoError(t, err)
+			stats := segment.GetBM25Stats()
+			require.Contains(t, stats, bm25FieldID)
+			assert.Equal(t, int64(1), stats[bm25FieldID].NumRow())
+			assert.Equal(t, int64(2), stats[bm25FieldID].NumToken())
+			assert.Equal(t, useBF, segment.PkCandidateExist())
+			segment.UpdatePkCandidate([]storage.PrimaryKey{storage.NewInt64PrimaryKey(84)})
+			segment.baseSegment.UpdatePkCandidate([]storage.PrimaryKey{storage.NewInt64PrimaryKey(85)})
+			for _, pk := range []int64{42, 84, 85} {
+				assert.True(t, segment.MayPkExist(storage.NewLocationsCache(storage.NewInt64PrimaryKey(pk))))
+			}
+			missing := storage.NewInt64PrimaryKey(1000)
+			assert.Equal(t, !useBF, segment.MayPkExist(storage.NewLocationsCache(missing)))
+			assert.Equal(t, []bool{!useBF}, segment.BatchPkExist(storage.NewBatchLocationsCache([]storage.PrimaryKey{missing})))
+			assert.Equal(t, useBF, segment.PkCandidateExist())
+			assert.Equal(t, useBF, segment.pkCandidate != nil)
+		})
 	}
 }
 

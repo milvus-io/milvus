@@ -255,10 +255,6 @@ func (suite *RetrieveSuite) TestRetrieveWithFilter() {
 			)
 			suite.Require().NoError(err)
 
-			if i == 0 {
-				setNonMatchingWorkerCandidate(suite.T(), sealseg, 1, 2, 3)
-			}
-
 			suite.manager.Segment.Put(suite.ctx, SegmentTypeSealed, sealseg)
 		}
 
@@ -274,10 +270,19 @@ func (suite *RetrieveSuite) TestRetrieveWithFilter() {
 
 		// PK filtering now happens at the delegator layer, not at the worker layer.
 		// All requested segments are returned regardless of the expression.
-		res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req)
-		suite.NoError(err)
-		suite.Len(res, 10)
-		suite.manager.Segment.Unpin(segments)
+		for _, candidateCount := range []int{1, len(req.GetSegmentIDs())} {
+			suite.Run(fmt.Sprintf("RetrieveAllSegmentsWith%dCandidates", candidateCount), func() {
+				for _, segmentID := range req.GetSegmentIDs()[:candidateCount] {
+					segment := suite.manager.Segment.GetWithType(segmentID, SegmentTypeSealed)
+					suite.Require().NotNil(segment)
+					setNonMatchingWorkerCandidate(suite.T(), segment, 1, 2, 3)
+				}
+				res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req)
+				suite.NoError(err)
+				suite.Len(res, 10)
+				suite.manager.Segment.Unpin(segments)
+			})
+		}
 
 		// remove the segs
 		for i := range 10 {

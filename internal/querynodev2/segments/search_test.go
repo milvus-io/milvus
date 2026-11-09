@@ -240,10 +240,6 @@ func (suite *SearchSuite) TestSearchWithFilter() {
 		)
 		suite.Require().NoError(err)
 
-		if i == 0 {
-			setNonMatchingWorkerCandidate(suite.T(), seg, math.MaxInt64)
-		}
-
 		for _, binlog := range binlogs {
 			err = seg.(*LocalSegment).LoadFieldData(ctx, binlog.FieldID, int64(msgLen), binlog)
 			suite.Require().NoError(err)
@@ -256,20 +252,31 @@ func (suite *SearchSuite) TestSearchWithFilter() {
 
 	// Segment pruning by PK filter now happens at the delegator layer (before RPC).
 	// SearchHistorical receives only the segments assigned to it and searches all of them.
-	suite.Run("SearchHistoricalSearchesAllAssignedSegments", func() {
-		searchReq, err := mock_segcore.GenSearchPlanAndRequestsWithNoMatchPKPredicate(suite.collection.GetCCollection(), segIDs, 1, 1)
-		suite.NoError(err)
+	for _, candidateCount := range []int{1, len(segIDs)} {
+		suite.Run(fmt.Sprintf("SearchAllSegmentsWith%dCandidates", candidateCount), func() {
+			for _, segmentID := range segIDs[:candidateCount] {
+				segment := suite.manager.Segment.GetWithType(segmentID, SegmentTypeSealed)
+				suite.Require().NotNil(segment)
+				setNonMatchingWorkerCandidate(suite.T(), segment, math.MaxInt64)
+			}
+			searchReq, err := mock_segcore.GenSearchPlanAndRequestsWithNoMatchPKPredicate(suite.collection.GetCCollection(), segIDs, 1, 1)
+			suite.NoError(err)
 
-		res, segments, err := SearchHistorical(ctx, suite.manager, searchReq,
-			suite.collectionID,
-			[]int64{suite.partitionID},
-			segIDs,
-		)
-		suite.NoError(err)
-		suite.Len(segments, 10)
-		suite.manager.Segment.Unpin(segments)
-		DeleteSearchResults(res)
-	})
+			res, segments, err := SearchHistorical(ctx, suite.manager, searchReq,
+				suite.collectionID,
+				[]int64{suite.partitionID},
+				segIDs,
+			)
+			suite.NoError(err)
+			suite.Len(segments, 10)
+			suite.Len(res, len(segIDs))
+			for _, result := range res {
+				suite.NotNil(result)
+			}
+			suite.manager.Segment.Unpin(segments)
+			DeleteSearchResults(res)
+		})
+	}
 
 	// cleanup
 	for _, segID := range segIDs {
