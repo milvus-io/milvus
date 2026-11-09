@@ -93,7 +93,7 @@ func (s *propagationAnalyzeSuite) TestVectorClustering() {
 	defer revert()
 	analyzeNode := s.coldDataNode(s.fixture)
 	analyzeFault := keyFaultControl{Role: "mixcoord", EZID: s.ezID, CollectionID: collectionID, Operation: "unsafe", Caller: "(*analyzeTask).CreateTaskOnWorker"}
-	compactFault := keyFaultControl{Role: "mixcoord", EZID: s.ezID, CollectionID: collectionID, Operation: "unsafe", Caller: "(*clusteringCompactionTask).BuildCompactionRequest"}
+	compactFault := keyFaultControl{Role: "mixcoord", EZID: s.ezID, CollectionID: collectionID, Operation: "unsafe", Caller: "(*ClusteringCompactionTask).BuildCompactionRequest"}
 	initialFault := compactFault
 	if s.faultStage == "analyze" {
 		initialFault = analyzeFault
@@ -287,7 +287,7 @@ func (s *propagationCompactionSuite) TestRewrite() {
 	prefixes := []string{fmt.Sprintf("insert_log/%d", collectionID), fmt.Sprintf("stats_log/%d", collectionID), "text_log"}
 	before := s.objectSnapshot(ctx, prefixes...)
 	s.Require().NotEmpty(before, "snapshot must include the existing raw input objects")
-	fault := keyFaultControl{Role: "mixcoord", EZID: s.ezID, CollectionID: collectionID, Operation: "unsafe", Caller: "(*mixCompactionTask).BuildCompactionRequest"}
+	fault := keyFaultControl{Role: "mixcoord", EZID: s.ezID, CollectionID: collectionID, Operation: "unsafe", Caller: "(*MixCompactionTask).BuildCompactionRequest"}
 	if s.fault {
 		s.fixture.setFault(s.T(), fault)
 	}
@@ -444,7 +444,7 @@ func (s *propagationSchemaSuite) TestBackfill() {
 	prefixes := []string{fmt.Sprintf("insert_log/%d", collectionID), fmt.Sprintf("stats_log/%d", collectionID), "text_log"}
 	before := s.objectSnapshot(ctx, prefixes...)
 	s.Require().NotEmpty(before, "snapshot must include the existing raw input objects")
-	fault := keyFaultControl{Role: "mixcoord", EZID: s.ezID, CollectionID: collectionID, Operation: "unsafe", Caller: "(*bumpSchemaVersionTask).BuildCompactionRequest"}
+	fault := keyFaultControl{Role: "mixcoord", EZID: s.ezID, CollectionID: collectionID, Operation: "unsafe", Caller: "(*BumpSchemaVersionTask).BuildCompactionRequest"}
 	if s.faultStage == "schema" {
 		s.fixture.setFault(s.T(), fault)
 	}
