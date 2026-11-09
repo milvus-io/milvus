@@ -15,7 +15,10 @@
 #include "index/Meta.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/index/index_factory.h"
+#include "milvus-storage/transaction/transaction.h"
 #include "segcore/SegmentLoadInfo.h"
+#include "storage/loon_ffi/property_singleton.h"
+#include "test_utils/TmpPath.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
@@ -351,6 +354,60 @@ TEST_F(SegmentLoadInfoTest, IndexWithoutFiles) {
 }
 
 // ==================== GetLoadDiff Tests ====================
+
+TEST_F(SegmentLoadInfoTest, GetLoadDiffWithManifestAndPartialFields) {
+    namespace storage_api = milvus_storage::api;
+    namespace transaction = storage_api::transaction;
+
+    test::TmpPath path;
+    const auto base_path = path.get().string();
+    auto& properties_singleton =
+        storage::LoonFFIPropertiesSingleton::GetInstance();
+    properties_singleton.Init(TestLocalPath.c_str());
+    auto properties = properties_singleton.GetProperties();
+    ASSERT_NE(properties, nullptr);
+
+    auto group = std::make_shared<storage_api::ColumnGroup>();
+    group->columns = {"100", "104"};
+    group->format = "parquet";
+    group->files = {{base_path + "/data.parquet", 0, 1}};
+    auto groups = std::make_shared<storage_api::ColumnGroups>(
+        std::vector<std::shared_ptr<storage_api::ColumnGroup>>{group});
+    transaction::TransactionImpl<storage_api::ColumnGroups> writer(*properties,
+                                                                   base_path);
+    ASSERT_TRUE(writer.begin(0).ok());
+    auto commit =
+        writer.commit(groups,
+                      transaction::UpdateType::APPENDFILES,
+                      transaction::TransResolveStrategy::RESOLVE_FAIL);
+    ASSERT_TRUE(commit.ok()) << commit.status().ToString();
+    ASSERT_TRUE(commit.ValueOrDie().success)
+        << commit.ValueOrDie().failed_message;
+
+    proto::segcore::SegmentLoadInfo test_proto;
+    test_proto.set_segmentid(100);
+    // Older useLoonFFI writers persisted manifests with storage version 2.
+    test_proto.set_storageversion(2);
+    test_proto.set_manifest_path(
+        "{\"base_path\":\"" + base_path + "\",\"ver\":" +
+        std::to_string(commit.ValueOrDie().committed_version) + "}");
+    schema_->UpdateLoadFields({100});
+    SegmentLoadInfo info(test_proto, schema_);
+
+    // Initial loading must preserve the schema in its empty comparison state.
+    auto diff = info.GetLoadDiff();
+
+    ASSERT_EQ(diff.column_groups_to_load.size(), 1);
+    EXPECT_EQ(diff.column_groups_to_load[0].first, 0);
+    EXPECT_EQ(diff.column_groups_to_load[0].second,
+              std::vector<FieldId>{FieldId(100)});
+    ASSERT_EQ(diff.column_groups_to_lazyload.size(), 1);
+    EXPECT_EQ(diff.column_groups_to_lazyload[0].first, 0);
+    EXPECT_EQ(diff.column_groups_to_lazyload[0].second,
+              std::vector<FieldId>{FieldId(104)});
+    EXPECT_TRUE(diff.binlogs_to_load.empty());
+    EXPECT_TRUE(diff.field_data_to_drop.empty());
+}
 
 TEST_F(SegmentLoadInfoTest, GetLoadDiffWithEmptyInfo) {
     // Empty SegmentLoadInfo should return empty diff

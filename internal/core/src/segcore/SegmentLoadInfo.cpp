@@ -321,6 +321,7 @@ SegmentLoadInfo::GetLoadDiff() {
     LoadDiff diff;
 
     SegmentLoadInfo empty_info;
+    empty_info.schema_ = schema_;
 
     // Handle index changes
     empty_info.ComputeDiffIndexes(diff, *this);
