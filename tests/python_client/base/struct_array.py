@@ -477,7 +477,21 @@ class TypedStructArrayTestBase(StructArrayTestBase):
             )
             # Tie-aware top-k quality: binary distances legitimately tie at the boundary.
             recall = len(set(coordinates) & eligible) / 20
-            assert recall >= (1.0 if kind in ("FLAT", "BIN_FLAT", "IVF_FLAT", "BIN_IVF_FLAT") else 0.95)
+            if kind in ("FLAT", "BIN_FLAT", "IVF_FLAT", "BIN_IVF_FLAT"):
+                assert recall == 1.0
+                required = (
+                    {key for key, score in scores.items() if score > cutoff}
+                    if reverse
+                    else {key for key, score in scores.items() if score < cutoff}
+                )
+                assert required <= set(coordinates), {
+                    "missing_better_neighbors": required - set(coordinates),
+                    "filtered": filtered,
+                    "kind": kind,
+                    "metric": metric,
+                }
+            else:
+                assert recall >= 0.95
             distances = [hit["distance"] for hit in hits]
             assert distances == sorted(distances, reverse=reverse)
             for hit, coordinate in zip(hits, coordinates):
