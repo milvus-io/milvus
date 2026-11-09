@@ -1492,11 +1492,10 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayNewSegment(t *tes
 }
 
 func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayPatchedBaselineSegment(t *testing.T) {
-	// A replayed patch is not harmless: applyExternalRefreshPatch clears
-	// TextStatsLogs and JsonKeyStats unconditionally, so writing the same
-	// result twice discards a text index or JSON key stats built between the
-	// two applies and orphans their files. New segments have always had this
-	// short-circuit; patches need it for the same reason.
+	// A replayed patch is not harmless: replacing placeholders from the same
+	// incoming result discards text or JSON stats built between the two applies
+	// and orphans their files. New segments have always had this short-circuit;
+	// patches need it for the same reason.
 	ctx := context.Background()
 	collectionID := int64(100)
 	segmentID := int64(10)
@@ -1550,7 +1549,7 @@ func TestApplyExternalCollectionSegmentUpdateForBaseline_ReplayPatchedBaselineSe
 		"a genuine patch still invalidates the stats it supersedes")
 }
 
-func TestApplyExternalRefreshPatchClearsStatsPlaceholders(t *testing.T) {
+func TestApplyExternalRefreshPatchUsesIncomingStatsPlaceholders(t *testing.T) {
 	oldManifest := packed.MarshalManifestPath("files/insert_log/100/200/300", 1)
 	newManifest := packed.MarshalManifestPath("files/insert_log/100/200/300", 2)
 
@@ -1560,6 +1559,8 @@ func TestApplyExternalRefreshPatchClearsStatsPlaceholders(t *testing.T) {
 			CollectionID:   100,
 			PartitionID:    200,
 			NumOfRows:      1000,
+			State:          commonpb.SegmentState_Flushed,
+			Level:          datapb.SegmentLevel_L1,
 			ManifestPath:   oldManifest,
 			StorageVersion: storage.StorageV3,
 			SchemaVersion:  1,
@@ -1590,6 +1591,23 @@ func TestApplyExternalRefreshPatchClearsStatsPlaceholders(t *testing.T) {
 		ManifestPath:   newManifest,
 		StorageVersion: storage.StorageV3,
 		SchemaVersion:  2,
+		TextStatsLogs: map[int64]*datapb.TextIndexStats{
+			500: {
+				FieldID: 500,
+				Version: 1,
+				BuildID: 10,
+				Files:   []string{"files/insert_log/100/200/300/_stats/text_index.500/tokenizer.json"},
+			},
+		},
+		JsonKeyStats: map[int64]*datapb.JsonKeyStats{
+			500: {
+				FieldID:                500,
+				Version:                1,
+				BuildID:                10,
+				Files:                  []string{"shared_key_index/.managed.json_0"},
+				JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion,
+			},
+		},
 		Binlogs: []*datapb.FieldBinlog{{
 			FieldID:     0,
 			ChildFields: []int64{100, 500},
@@ -1604,8 +1622,17 @@ func TestApplyExternalRefreshPatchClearsStatsPlaceholders(t *testing.T) {
 
 	patched := applyExternalRefreshPatch(oldSeg, incoming)
 	assert.Equal(t, newManifest, patched.GetManifestPath())
-	assert.Empty(t, patched.GetTextStatsLogs())
-	assert.Empty(t, patched.GetJsonKeyStats())
+	assert.Equal(t, incoming.GetTextStatsLogs(), patched.GetTextStatsLogs())
+	assert.Equal(t, incoming.GetJsonKeyStats(), patched.GetJsonKeyStats())
+	assert.False(t, meta.NeedDoTextIndex(patched, []UniqueID{500}, true))
+	assert.False(t, meta.NeedDoJSONKeyIndex(patched, []UniqueID{500}, true))
+
+	incomingWithoutStats := proto.Clone(incoming).(*datapb.SegmentInfo)
+	incomingWithoutStats.TextStatsLogs = nil
+	incomingWithoutStats.JsonKeyStats = nil
+	patchedWithoutStats := applyExternalRefreshPatch(oldSeg, incomingWithoutStats)
+	assert.True(t, meta.NeedDoTextIndex(patchedWithoutStats, []UniqueID{500}, true))
+	assert.True(t, meta.NeedDoJSONKeyIndex(patchedWithoutStats, []UniqueID{500}, true))
 }
 
 func TestApplyExternalCollectionSegmentUpdateForBaseline_RejectPatchRowCountChange(t *testing.T) {

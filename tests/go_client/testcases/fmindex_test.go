@@ -119,7 +119,7 @@ func insertFMIndexRows(t *testing.T, ctx CtxT, mc MC, collectionName string, sta
 
 func flushFMIndexRows(t *testing.T, ctx CtxT, mc MC, collectionName string) {
 	t.Helper()
-	// The shared standalone test instance limits Flush to 0.1 requests/sec.
+	// Flush quotas and each proxy's share depend on the deployment.
 	// Keep the helper deterministic when two lifecycle phases flush the same
 	// collection within one token-bucket interval.
 	const maxAttempts = 5

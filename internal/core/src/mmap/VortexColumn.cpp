@@ -2852,7 +2852,8 @@ VortexColumn::BuildFileReader(
         group_file.sparse_fs,
         projected_arrow_schema,
         group_file.sparse_path,
-        local_format_properties_,
+        std::make_shared<const milvus_storage::api::Properties>(
+            local_format_properties_),
         std::vector<std::string>{field_name_},
         group_file.footer_reader->file_size(),
         group_file.footer_reader->footer_size());

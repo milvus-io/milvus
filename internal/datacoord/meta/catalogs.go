@@ -37,6 +37,8 @@ type SegmentIndexCatalog interface {
 	// GetIndexNameByID returns the name of the index.
 	GetIndexNameByID(collID, indexID UniqueID) string
 
+	GetIndexJob(buildID UniqueID) (*model.SegmentIndex, bool)
+	NotifyManifestIndexMigration(record *model.SegmentIndex)
 	// LockBuildIDs takes the write lock of each build ID, in ascending order
 	// after removing duplicates, so overlapping callers cannot deadlock.
 	// Callers must not hold segMu. Lock order: segment manifest lock, then

@@ -85,7 +85,10 @@ segment-directory listing and collects indexes from that explicit list, so
 GC of unreferenced builds does not change the export file set.
 Cleanup prefixes and result admission use the same
 persisted destination version. A result claiming a different layout is rejected
-before making the target segment visible.
+before making the target segment visible. Result installation retains import
+protection until all index records are installed, then publishes the manifest
+and finalized segment state under the segment manifest lock. Replayed results
+skip finalized targets even if the task completion write was lost.
 
 ## Garbage collection
 

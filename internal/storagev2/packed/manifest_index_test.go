@@ -81,6 +81,23 @@ func TestCommitManifestUpdates_IndexRoundTrip(t *testing.T) {
 	require.Equal(t, indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED, got.IndexStorePathVersion)
 	require.Equal(t, []string{"0", "1"}, got.IndexFileKeys)
 	require.Equal(t, map[string]string{"index_type": "HNSW", "metric_type": "L2"}, got.Properties)
+
+	// Republishing without collection properties must clear the old copy while
+	// retaining the typed artifact metadata through the real storage boundary.
+	entry := indexEntry(t, basePath, indexPrefix, 10, 500)
+	entry.Properties = nil
+	_, version, err := UnmarshalManifestPath(committed)
+	require.NoError(t, err)
+	committed, err = CommitManifestUpdates(MarshalManifestPath(basePath, version), cfg, &ManifestUpdates{
+		Indexes: []ManifestIndexInfo{entry},
+	})
+	require.NoError(t, err)
+	indexes, err = GetManifestIndexInfos(committed, cfg)
+	require.NoError(t, err)
+	require.Len(t, indexes, 1)
+	require.Empty(t, indexes[0].Properties)
+	got.Properties = indexes[0].Properties
+	require.Equal(t, got, indexes[0])
 }
 
 // A rebuild republishes the same index_id under a new build. milvus-storage

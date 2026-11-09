@@ -19,7 +19,6 @@ package meta
 import (
 	"context"
 	"path"
-	"sort"
 	"strings"
 
 	"golang.org/x/sync/semaphore"
@@ -70,17 +69,14 @@ func BuildManifestIndexInfo(m *Meta, segment *SegmentInfo, segIdx *model.Segment
 	}
 
 	indexParams := m.IndexCatalog.GetIndexParams(segIdx.CollectionID, segIdx.IndexID)
-	properties := common.KeyValuePairs(m.IndexCatalog.GetTypeParams(segIdx.CollectionID, segIdx.IndexID)).ToMap()
-	for key, value := range common.KeyValuePairs(indexParams).ToMap() {
-		properties[key] = value
-	}
 	indexType := GetIndexType(indexParams)
 	// A per-segment override wins: DataCoord may downgrade the index type for
 	// one segment (e.g. to a flat index for a tiny segment).
 	if segIdx.IndexType != "" {
 		indexType = segIdx.IndexType
 	}
-	properties[common.IndexTypeKey] = indexType
+	// Collection parameters describe the current definition, not this build.
+	// Leave Properties empty rather than persisting them as artifact metadata.
 
 	fieldID := m.IndexCatalog.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID)
 	return packed.ManifestIndexInfo{
@@ -99,7 +95,6 @@ func BuildManifestIndexInfo(m *Meta, segment *SegmentInfo, segIdx *model.Segment
 		CurrentScalarIndexVersion: segIdx.CurrentScalarIndexVersion,
 		IndexStorePathVersion:     segIdx.IndexStorePathVersion,
 		IndexFileKeys:             common.CloneStringList(segIdx.IndexFileKeys),
-		Properties:                properties,
 	}, nil
 }
 
@@ -183,7 +178,7 @@ func manifestIndexFilePathInfo(segmentID int64, manifestIndex packed.ManifestInd
 		BuildID:                   manifestIndex.BuildID,
 		IndexName:                 manifestIndex.IndexName,
 		IndexType:                 manifestIndex.IndexType,
-		IndexParams:               manifestIndexParams(manifestIndex),
+		IndexParams:               []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: manifestIndex.IndexType}},
 		IndexFilePaths:            filePaths,
 		SerializedSize:            uint64(manifestIndex.SerializedSize),
 		MemSize:                   uint64(manifestIndex.MemSize),
@@ -495,5 +490,6 @@ func segmentIndexFromManifest(segment *SegmentInfo, manifestIndex packed.Manifes
 		CurrentScalarIndexVersion: manifestIndex.CurrentScalarIndexVersion,
 		IndexType:                 manifestIndex.IndexType,
 		IndexStorePathVersion:     manifestIndex.IndexStorePathVersion,
+		ManifestPublished:         true,
 	}
 }
