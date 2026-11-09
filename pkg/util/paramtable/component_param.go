@@ -846,16 +846,16 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 	p.ArrowIOThreadPoolCoefficient = ParamItem{
 		Key:          "common.arrow.ioThreadPoolCoefficient",
 		Version:      "3.0.0",
-		DefaultValue: "0",
+		DefaultValue: "1",
 		Doc: `Coefficient for arrow's internal IO thread pool size ` +
 			`(threads = CPU cores × coefficient, then clamped by ` +
 			`common.arrow.ioThreadPoolMaxCapacity when > 0). Arrow runs async ` +
 			`range reads (ReadRangeCache) on this pool, which issue the actual ` +
 			`S3 GetObject requests — it is the real ceiling on parallel ` +
 			`object-storage reads, independent of segcore HIGH/MIDDLE pools and ` +
-			`minio.maxConnections. Arrow's built-in default is a fixed constant ` +
-			`of 8, which is almost always undersized. Typical range 2–8. 0 keeps ` +
-			`arrow's default (and the cap is ignored).`,
+			`minio.maxConnections. The default 1 gives one thread per core. ` +
+			`0 keeps arrow's built-in fixed pool of 8 threads (and the cap is ` +
+			`ignored), which is undersized on most hosts.`,
 		Export: false,
 	}
 	p.ArrowIOThreadPoolCoefficient.Init(base.mgr)

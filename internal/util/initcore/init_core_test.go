@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -159,6 +160,29 @@ func TestRegisterArrowIOThreadPoolWatchers(t *testing.T) {
 		"helper must have registered a handler on ArrowIOThreadPoolCoefficient")
 	assert.Positive(t, maxFires.Load(),
 		"helper must have registered a handler on ArrowIOThreadPoolMaxCapacity")
+}
+
+func TestResolveArrowIOThreadPoolCapacity(t *testing.T) {
+	paramtable.Init()
+	pt := paramtable.Get()
+	coefKey := pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key
+	maxKey := pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key
+	defer pt.Reset(coefKey)
+	defer pt.Reset(maxKey)
+
+	// The default is one IO thread per core.
+	require.NoError(t, pt.Reset(coefKey))
+	require.NoError(t, pt.Reset(maxKey))
+	assert.Equal(t, max(1, hardware.GetCPUNum()), ResolveArrowIOThreadPoolCapacity())
+
+	// 0 keeps arrow's built-in pool and ignores the cap.
+	require.NoError(t, pt.Save(coefKey, "0"))
+	require.NoError(t, pt.Save(maxKey, "3"))
+	assert.Equal(t, 0, ResolveArrowIOThreadPoolCapacity())
+
+	// A positive coefficient is clamped by the cap.
+	require.NoError(t, pt.Save(coefKey, "2"))
+	assert.Equal(t, min(3, max(1, 2*hardware.GetCPUNum())), ResolveArrowIOThreadPoolCapacity())
 }
 
 // TestRegisterArrowReaderConfigWatchers verifies the lifted helper registers
