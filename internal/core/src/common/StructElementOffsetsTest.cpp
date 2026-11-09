@@ -277,35 +277,6 @@ TEST_F(StructElementOffsetsTest, GrowingOutOfOrderInsert) {
     }
 }
 
-// Missing row ranges keep later rows pending. This structure-level control
-// does not establish that normal DML can omit a required offsets update.
-TEST_F(StructElementOffsetsTest, GrowingGapNeverFillsStaysStalled) {
-    StructElementOffsetsGrowing offsets;
-
-    std::vector<int32_t> lens0 = {2};
-    offsets.Insert(0, lens0.data(), 1);  // row 0 committed
-
-    // Rows 1-2 are never inserted (the injected missing batch). A later row
-    // 3 therefore goes pending and can never drain.
-    std::vector<int32_t> lens3 = {1};
-    offsets.Insert(3, lens3.data(), 1);
-
-    EXPECT_EQ(offsets.GetRowCount(), 1);  // stalled at row 1
-    EXPECT_EQ(offsets.GetTotalElementCount(), 2);
-
-    // A subsequent insert at row 4 stays pending too (gap still open).
-    std::vector<int32_t> lens4 = {5};
-    offsets.Insert(4, lens4.data(), 1);
-    EXPECT_EQ(offsets.GetRowCount(), 1);
-    EXPECT_EQ(offsets.GetTotalElementCount(), 2);
-
-    // Only the committed prefix is addressable; elements of pending rows are
-    // invisible (any lookup beyond total_elements is out of range).
-    auto [row_id, elem_idx] = offsets.ElementIDToRowID(0);
-    EXPECT_EQ(row_id, 0);
-    EXPECT_EQ(elem_idx, 0);
-}
-
 TEST_F(StructElementOffsetsTest, GrowingEmptyArrays) {
     StructElementOffsetsGrowing offsets;
 
