@@ -83,7 +83,7 @@ class TestMilvusClientStructArrayBulkImport(MetadataStructArrayTestBase):
         storage = Minio(f"{minio_host}:9000", access_key="minioadmin", secret_key="minioadmin", secure=False)
         key = f"bulkinsert_data/struct_contract/{local.name}"
         storage.fput_object(minio_bucket, key, str(local))
-        url = f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
+        url = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
         try:
             result = bulk_import(url=url, collection_name=name, files=[[key]], api_key=cf.param_info.param_token)
             result.raise_for_status()
