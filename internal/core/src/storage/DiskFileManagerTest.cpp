@@ -9,6 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <arrow/result.h>
 #include <boost/filesystem/operations.hpp>
 #include <boost/filesystem/path.hpp>
@@ -155,21 +157,25 @@ struct PublishedConsumerIndex {
             index::LoaderRegistry::Instance().Lookup(type.family);
         AssertInfo(static_cast<bool>(loader), "storage consumer has no loader");
         if (packed) {
-            return loader.Load(
-                {index::IndexFiles{std::move(context),
-                                   Files(),
-                                   index::PackedIndexStorageConfig{}},
-                 std::move(options)});
+            return loader
+                .Load({index::IndexFiles{std::move(context),
+                                         Files(),
+                                         index::PackedIndexStorageConfig{}},
+                       std::move(options),
+                       milvus::index::test::TestIndexCacheConfig()})
+                ->CreateReader(nullptr);
         }
-        return loader.Load(
-            {index::IndexFiles{
-                 std::move(context),
-                 Files(),
-                 index::LegacyIndexStorageConfig{
-                     type.family == index::families::kVectorDisk
-                         ? storage::V1SourceLayout::DiskFiles
-                         : storage::V1SourceLayout::MemoryEntries}},
-             std::move(options)});
+        return loader
+            .Load({index::IndexFiles{
+                       std::move(context),
+                       Files(),
+                       index::LegacyIndexStorageConfig{
+                           type.family == index::families::kVectorDisk
+                               ? storage::V1SourceLayout::DiskFiles
+                               : storage::V1SourceLayout::MemoryEntries}},
+                   std::move(options),
+                   milvus::index::test::TestIndexCacheConfig()})
+            ->CreateReader(nullptr);
     }
 };
 
@@ -2239,11 +2245,8 @@ TEST_F(DiskAnnFileManagerTest, BuildAllValidEmptyEmbListDiskIndexFromBinlog) {
     search_info.topk_ = 2;
 
     SearchResult search_result;
-    vector.Search(query_dataset,
-                  search_info,
-                  milvus::BitsetView{},
-                  nullptr,
-                  search_result);
+    vector.Search(
+        query_dataset, search_info, milvus::BitsetView{}, search_result);
     EXPECT_EQ(search_result.total_nq_, num_rows);
     ASSERT_EQ(search_result.seg_offsets_.size(), num_rows * search_info.topk_);
     for (auto offset : search_result.seg_offsets_) {
@@ -2274,7 +2277,6 @@ TEST_F(DiskAnnFileManagerTest, BuildAllValidEmptyEmbListDiskIndexFromBinlog) {
         legacy.Search(element_query,
                       element_search,
                       milvus::BitsetView{},
-                      nullptr,
                       element_result);
         EXPECT_EQ(element_result.total_nq_, 1);
         ASSERT_EQ(element_result.seg_offsets_.size(), element_search.topk_);

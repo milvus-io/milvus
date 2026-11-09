@@ -161,14 +161,14 @@ TantivyGrowingTextIndex::PublishCommitted() {
                count,
                committed_end_);
     const auto payload_bytes = TextIndexRamPayloadBytes(*snapshot);
-    auto reader = std::make_unique<TextIndexReader>(nullptr,
-                                                    std::move(snapshot),
-                                                    validity_.Freeze(),
-                                                    committed_end_,
-                                                    value_type_,
-                                                    /*file_backed=*/false,
-                                                    payload_bytes);
-    PublishSnapshot(std::move(reader), committed_end_);
+    auto index = std::make_shared<TextIndex>(nullptr,
+                                             std::move(snapshot),
+                                             validity_.Freeze(),
+                                             committed_end_,
+                                             value_type_,
+                                             /*file_backed=*/false,
+                                             payload_bytes);
+    PublishSnapshot(std::move(index), committed_end_);
     published_end_ = committed_end_;
     commit_policy_.NoteCommitted();
 }

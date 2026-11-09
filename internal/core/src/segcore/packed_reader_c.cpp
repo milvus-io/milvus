@@ -46,12 +46,12 @@
 
 namespace {
 
-arrow::Result<milvus_storage::api::Properties>
+arrow::Result<std::shared_ptr<const milvus_storage::api::Properties>>
 ConvertLoonProperties(const LoonProperties* properties) {
     if (properties == nullptr) {
         return arrow::Status::Invalid("properties is null");
     }
-    milvus_storage::api::Properties converted;
+    std::shared_ptr<const milvus_storage::api::Properties> converted;
     auto opt = milvus_storage::api::ConvertFFIProperties(converted, properties);
     if (opt != std::nullopt) {
         return arrow::Status::Invalid("failed to parse properties: ", *opt);

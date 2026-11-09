@@ -490,7 +490,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
                      Timestamp timestamp) const override;
 
     void
-    search_ids(BitsetType& bitset, const IdArray& id_array) const override;
+    search_ids(BitsetType& bitset,
+               const IdArray& id_array,
+               milvus::OpContext* op_ctx = nullptr) const override;
 
     bool
     HasIndex(FieldId field_id) const override {
@@ -518,14 +520,15 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return registrations;
     }
 
-    IndexPin
-    PinIndex(milvus::OpContext*, const IndexKey&) const override {
+    index::IIndexReaderBasePtr
+    CreateIndexReader(milvus::OpContext*, const IndexKey&) const override {
         return {};
     }
 
     index::GrowingIndexSnapshotPin
-    PinGrowingIndex(FieldId field_id) const override {
-        return growing_indexes_.PinSnapshot(field_id);
+    PinGrowingIndex(milvus::OpContext* op_ctx,
+                    FieldId field_id) const override {
+        return growing_indexes_.PinSnapshot(op_ctx, field_id);
     }
 
     bool
@@ -561,7 +564,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
         if (!growing_indexes_.Has(id)) {
             return true;
         }
-        auto pin = growing_indexes_.PinSnapshot(id);
+        auto pin = growing_indexes_.PinSnapshot(nullptr, id);
         if (!pin) {
             // Below threshold an all-null compact column has no chunks and no
             // engine, but validity alone is a complete materialization.
@@ -575,7 +578,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     bool
     CanReadRawVectorFromIndex(FieldId field_id) const {
-        auto pin = growing_indexes_.PinSnapshot(field_id);
+        auto pin = growing_indexes_.PinSnapshot(nullptr, field_id);
         if (!pin) {
             return false;
         }

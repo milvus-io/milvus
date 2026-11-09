@@ -23,12 +23,15 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include <numeric>
 #include <roaring/roaring.hh>
 #include <roaring/memory.h>
 
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
 #include "index/Meta.h"
+#include "index/contracts/query/INullReader.h"
+#include "storage/artifact/LocalDirectory.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
 #include "index/test_utils/ArtifactTestUtils.h"
 #include "index/test_utils/ScalarTestData.h"
@@ -60,6 +63,119 @@ ExpectLegacyRoundTrip(std::string_view backend_name,
     const auto hits = predicate->In(1, &key);
     ASSERT_EQ(hits.size(), 4);
     EXPECT_EQ(hits.count(), expected_hits);
+}
+
+template <typename T>
+void
+CheckCachedBitmap(std::string_view backend_name,
+                  ScalarTestData<T> data,
+                  T key) {
+    const auto& backend = ScalarReaderBackends().Get<T>(backend_name);
+    const auto count = data.values.size();
+    auto artifact = BuildBitmap(backend, std::move(data));
+    for (const bool mmap : {false, true}) {
+        for (const bool packed : {false, true}) {
+            for (const bool async : {false, true}) {
+                SCOPED_TRACE(::testing::Message() << packed << async << mmap);
+                auto staging = storage::LocalDirectory::CreateOwned(
+                    std::filesystem::temp_directory_path().string(),
+                    "bitmap-cache-XXXXXX",
+                    "Bitmap cache test");
+                const auto persisted =
+                    packed ? SerializeV3(*artifact) : SerializeV1V2(*artifact);
+                auto source = [&]() -> OpenedIndexSource {
+                    if (!packed) {
+                        return LegacyIndexSource{
+                            std::make_shared<TestArtifactSource>(
+                                persisted, storage::Generation::V1V2),
+                            async};
+                    }
+                    auto input = std::make_shared<storage::RemoteInputStream>(
+                        std::make_shared<arrow::io::BufferReader>(
+                            MakePackedArtifactBuffer(persisted)));
+                    if (async) {
+                        return PackedIndexSource{std::shared_ptr<
+                            storage::AsyncIndexEntryReader>(
+                            folly::coro::blockingWait(
+                                folly::coro::co_withExecutor(
+                                    storage::ResolveAsyncLoadExecutor(
+                                        {}, proto::common::LoadPriority::HIGH),
+                                    storage::AsyncIndexEntryReader::Open(
+                                        input,
+                                        0,
+                                        proto::common::LoadPriority::HIGH))))};
+                    }
+                    return PackedIndexSource{
+                        std::shared_ptr<storage::IndexEntryReader>(
+                            storage::IndexEntryReader::Open(input,
+                                                            input->Size()))};
+                }();
+                storage::LoadOptions options;
+                options.params = backend.LoadParams({.row_count = count});
+                options.enable_mmap = mmap;
+                options.mmap_dir_path = staging->Path();
+                IndexCacheConfig cache{
+                    staging->Path(),
+                    cachinglayer::Meta{
+                        mmap ? cachinglayer::StorageType::DISK
+                             : cachinglayer::StorageType::MEMORY,
+                        cachinglayer::CellIdMappingMode::IDENTICAL,
+                        cachinglayer::CellDataType::OTHER,
+                        CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                        true},
+                    {1024 * 1024, 1024 * 1024},
+                    {},
+                    4096};
+                auto index = LoaderRegistry::Instance()
+                                 .Lookup(backend.Family())
+                                 .Load({std::move(source), options, cache});
+                EXPECT_EQ(index->Metadata().count, count);
+                folly::CancellationSource cancellation;
+                cancellation.requestCancellation();
+                OpContext cancelled(cancellation.getToken());
+                auto reader = index->CreateReader(&cancelled);
+                EXPECT_EQ(reader->Count(), count);
+                EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+                const auto* nulls =
+                    dynamic_cast<const INullReader*>(reader.get());
+                ASSERT_NE(nulls, nullptr);
+                ExpectSegcoreError(ErrorCode::FollyCancel,
+                                   [&] { (void)nulls->IsNull(); });
+                index->CancelWarmup();
+                OpContext retry;
+                reader = index->CreateReader(&retry);
+                index.reset();
+                nulls = dynamic_cast<const INullReader*>(reader.get());
+                ASSERT_NE(nulls, nullptr);
+                const auto result = nulls->IsNull();
+                EXPECT_EQ(result.count(), 1);
+                EXPECT_TRUE(result[count - 1]);
+                const auto* predicate =
+                    dynamic_cast<const IScalarPredicateReader<T>*>(
+                        reader.get());
+                ASSERT_NE(predicate, nullptr);
+                EXPECT_EQ(predicate->In(1, &key).count(), 2);
+                EXPECT_EQ(predicate->NotIn(1, &key).count(), count - 3);
+                EXPECT_EQ(predicate->Range(key, CompareOp::Equal).count(), 2);
+            }
+        }
+    }
+}
+
+TEST(BitmapIndexArtifactTest, CachedStorageLoadsWithRequestContext) {
+    ScalarTestData<int64_t> numbers({1, 2, 2, 3});
+    numbers.validity.reset(3);
+    CheckCachedBitmap<int64_t>("BitmapInt64", std::move(numbers), 2);
+    ScalarTestData<std::string_view> strings({"a", "b", "b", "c"});
+    strings.validity.reset(3);
+    CheckCachedBitmap<std::string_view>(
+        "BitmapVarchar", std::move(strings), "b");
+    std::vector<int64_t> distinct(DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND + 5);
+    std::iota(distinct.begin(), distinct.end(), 0);
+    distinct[2] = 1;
+    ScalarTestData<int64_t> roaring(std::move(distinct));
+    roaring.validity.reset(roaring.values.size() - 1);
+    CheckCachedBitmap<int64_t>("BitmapInt64", std::move(roaring), 1);
 }
 
 TEST(BitmapIndexArtifactTest, LegacyNumericRoundTrip) {

@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+	"github.com/milvus-io/milvus/internal/metastore/kv/txn"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
@@ -297,7 +298,7 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 		return err
 	}
 
-	if err := kc.SaveByBatch(ctx, kvs); err != nil {
+	if err := kc.saveAlteredSegments(ctx, segments, kvs); err != nil {
 		return err
 	}
 	// Explicit removal is required: AlterSegments persists binlogs as
@@ -312,6 +313,46 @@ func (kc *Catalog) AlterSegments(ctx context.Context, segments []*datapb.Segment
 		}
 	}
 	return nil
+}
+
+// L0 completion publishes a replay prefix. On the oversized fallback, binlogs
+// must precede target base/cursor records, and every target must precede input
+// retirement: a retired L0 is no longer counted as a gap by other completions.
+// When the bundle fits, all three stages still commit in one transaction.
+func (kc *Catalog) saveAlteredSegments(ctx context.Context, segments []*datapb.SegmentInfo, kvs map[string]string) error {
+	retiringL0 := false
+	for _, segment := range segments {
+		if isRetiringL0(segment) {
+			retiringL0 = true
+			break
+		}
+	}
+	if !retiringL0 {
+		return kc.SaveByBatch(ctx, kvs)
+	}
+	b := txn.New()
+	records := make(map[string]struct{}, len(segments))
+	for _, segment := range segments {
+		records[buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())] = struct{}{}
+	}
+	for key, value := range kvs {
+		if _, record := records[key]; !record {
+			b.Save(key, value)
+		}
+	}
+	for _, retiring := range []bool{false, true} {
+		for _, segment := range segments {
+			if isRetiringL0(segment) == retiring {
+				key := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
+				b.Save(key, kvs[key])
+			}
+		}
+	}
+	return txn.Commit(ctx, kc.MetaKv, b)
+}
+
+func isRetiringL0(segment *datapb.SegmentInfo) bool {
+	return segment.GetLevel() == datapb.SegmentLevel_L0 && segment.GetState() == commonpb.SegmentState_Dropped && segment.GetCompacted()
 }
 
 // buildAlterSegmentsKvs computes the persisted key/value writes and orphan

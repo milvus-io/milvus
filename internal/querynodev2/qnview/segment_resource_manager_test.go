@@ -396,3 +396,19 @@ func TestPrunedResourceSlicesReleaseBackingReferences(t *testing.T) {
 	require.Equal(t, []*segmentBase{second}, r.bases)
 	require.Nil(t, baseBacking[1])
 }
+
+func TestSegmentResourceManagerListsQueryViewCollections(t *testing.T) {
+	mockey.PatchConvey("collections are listed while a QueryView holds them", t, func() {
+		f := setupResourceTest(t, nil)
+		require.Empty(t, f.manager.CollectionIDs())
+		first := f.acquire(1, 1, 1)
+		second := f.acquire(2, 1, 1)
+		require.Equal(t, []int64{testCollectionID}, f.manager.CollectionIDs())
+		f.await(t, 1)
+		f.await(t, 1)
+		f.drop(t, first)
+		require.Equal(t, []int64{testCollectionID}, f.manager.CollectionIDs())
+		f.drop(t, second)
+		require.Empty(t, f.manager.CollectionIDs())
+	})
+}

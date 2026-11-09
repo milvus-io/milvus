@@ -53,8 +53,7 @@ class CachedSearchIterator {
     CachedSearchIterator(const milvus::index::IVectorReader& reader,
                          const knowhere::DataSetPtr& dataset,
                          const SearchInfo& search_info,
-                         const BitsetView& bitset,
-                         milvus::OpContext* op_context = nullptr);
+                         const BitsetView& bitset);
 
     // For growing segment with chunked data, BF.
     //
@@ -82,7 +81,8 @@ class CachedSearchIterator {
                          const SearchInfo& search_info,
                          const std::map<std::string, std::string>& index_info,
                          const BitsetView& bitset,
-                         const milvus::DataType& data_type);
+                         const milvus::DataType& data_type,
+                         milvus::OpContext* op_context = nullptr);
 
     // This method fetches the next batch of search results based on the provided search information
     // and updates the search_result object with the new batch of results.

@@ -17,6 +17,8 @@
 #pragma once
 
 #include <memory>
+#include <utility>
+#include "index/IndexCacheConfig.h"
 #include <variant>
 #include <vector>
 #include "storage/AsyncIndexEntryReader.h"
@@ -107,11 +109,21 @@ using OpenedIndexSource = std::variant<LegacyIndexSource, PackedIndexSource>;
  *
  * Existing sources avoid another remote open. options.op_ctx is borrowed for
  * the complete top-level load. The concrete loader retains fixed options with
- * that pointer cleared and receives the context separately for each Load.
+ * that pointer cleared and receives the context separately for its single Load.
  */
 struct IndexLoadRequest {
+    // Persisted loading always uses a cache; callers must supply its policy explicitly.
+    IndexLoadRequest(std::variant<IndexFiles, OpenedIndexSource> source,
+                     storage::LoadOptions options,
+                     IndexCacheConfig cache)
+        : source(std::move(source)),
+          options(std::move(options)),
+          cache(std::move(cache)) {
+    }
+
     std::variant<IndexFiles, OpenedIndexSource> source;
     storage::LoadOptions options;
+    IndexCacheConfig cache;
 };
 
 }  // namespace milvus::index

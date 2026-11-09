@@ -414,7 +414,7 @@ get_default_index_meta() {
     return conf.c_str();
 }
 
-[[maybe_unused]] index::IIndexReaderBasePtr
+[[maybe_unused]] BuiltTestIndex
 generate_index(void* raw_data,
                DataType field_type,
                MetricType metric_type,
@@ -433,7 +433,7 @@ generate_index(void* raw_data,
                                            metric_type,
                                            build_config);
         },
-        []() -> index::IIndexReaderBasePtr {
+        []() -> BuiltTestIndex {
             throw std::logic_error("generate_index requires a vector field");
         });
     auto vector = dynamic_cast<const index::IVectorReader*>(indexing.get());
@@ -445,9 +445,9 @@ generate_index(void* raw_data,
     return indexing;
 }
 
-// Capture the reader metadata before transferring ownership into the cache.
+// Capture metadata before installing the Index in the segment.
 inline milvus::segcore::LoadIndexInfo
-CreateTestLoadIndexInfo(index::IIndexReaderBasePtr indexing,
+CreateTestLoadIndexInfo(BuiltTestIndex indexing,
                         DataType field_type,
                         int64_t field_id = 100,
                         std::string family = index::families::kSort) {
@@ -471,7 +471,7 @@ CreateTestLoadIndexInfo(index::IIndexReaderBasePtr indexing,
                      .family;
     }
     SetTestIndexMetadata(info, *indexing, family);
-    info.cache_index = CreateTestCacheIndex("test", std::move(indexing));
+    info.index = CreateTestIndex("test", std::move(indexing));
     return info;
 }
 

@@ -259,10 +259,10 @@ TEST_F(GrowingNullableVectorTest, IndexedTypesKeepLogicalOffsets) {
                              << int(type) << "/" << interim << "/" << nullable);
                 MakeSegment(type, nullable, interim);
                 Insert(100);
-                ASSERT_FALSE(impl_->PinGrowingIndex(vec_));
+                ASSERT_FALSE(impl_->PinGrowingIndex(nullptr, vec_));
                 Check({99, 14, 0, 14, 10});
                 Insert(2000);
-                const auto index_pin = impl_->PinGrowingIndex(vec_);
+                const auto index_pin = impl_->PinGrowingIndex(nullptr, vec_);
                 ASSERT_TRUE(index_pin);
                 EXPECT_EQ(index_pin.CoveredRowEnd(), expected_.size());
                 EXPECT_EQ(index_pin.Reader().Count(),
@@ -294,7 +294,7 @@ TEST_F(GrowingNullableVectorTest, IndexTakesOverBetweenFilteringAndFetch) {
         MakeSegment(type, true, "IVF_FLAT_CC");
         Insert(100);
         ASSERT_FALSE(impl_->CanReadRawVectorFromIndex(vec_));
-        ASSERT_FALSE(impl_->PinGrowingIndex(vec_));
+        ASSERT_FALSE(impl_->PinGrowingIndex(nullptr, vec_));
         const std::vector<int64_t> offsets = {14, 99, 12, 14, 0, -1, 100};
         auto filtered = impl_->FilterVectorValidOffsets(
             nullptr, vec_, offsets.data(), offsets.size());
@@ -306,7 +306,7 @@ TEST_F(GrowingNullableVectorTest, IndexTakesOverBetweenFilteringAndFetch) {
         // stages. Insert builds the index and reclaims the segment's chunks.
         // No sleeps or product-only test hooks are needed at this boundary.
         Insert(2000);
-        const auto index_pin = impl_->PinGrowingIndex(vec_);
+        const auto index_pin = impl_->PinGrowingIndex(nullptr, vec_);
         ASSERT_TRUE(index_pin);
         EXPECT_EQ(index_pin.CoveredRowEnd(), expected_.size());
         const auto* index_reader =

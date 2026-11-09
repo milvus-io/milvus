@@ -3156,7 +3156,7 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         # 4. insert data again
         new_rows = cf.gen_row_data_by_schema(nb=default_nb, schema=schema, start=10000)
         self.insert(client, collection_name, new_rows)
-        self.flush(client, collection_name)
+        # Keep this batch growing: a flushed batch may already be handed off.
         # 5. query with param ignore_growing
         ignore_growings = [True, False]
         for ignore_growing in ignore_growings:
@@ -3203,7 +3203,8 @@ class TestMilvusClientQueryValid(TestMilvusClientV2Base):
         # 4. upsert data (which creates growing segment data)
         upsert_data = cf.gen_row_data_by_schema(nb=default_nb, schema=schema)
         self.upsert(client, collection_name, upsert_data)
-        self.flush(client, collection_name)
+        # Keep the replacement rows growing. Flush may hand them off to sealed
+        # segments before the query, where ignore_growing no longer excludes them.
         # 5. query with param ignore_growing
         if ignore_growing:
             exp_len = 0

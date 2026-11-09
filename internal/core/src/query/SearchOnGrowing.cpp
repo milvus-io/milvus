@@ -181,7 +181,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
     const auto chunks = vec_ptr->acquire_chunks();
     RunAfterChunkSnapshotHookForTest();
 
-    auto index_pin = segment.PinGrowingIndex(vecfield_id);
+    auto index_pin = segment.PinGrowingIndex(op_context, vecfield_id);
     const bool index_covers_query = index_pin &&
                                     index_pin.CoveredRowEnd() >= plan_bound &&
                                     data_type != DataType::VECTOR_ARRAY;
@@ -216,7 +216,6 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                       *reader,
                       search_conf,
                       bitset,
-                      op_context,
                       search_result,
                       is_sparse);
         // A growing segment's only vector index is the interim index.

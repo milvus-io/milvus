@@ -333,8 +333,6 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			} else {
 				logger.Info(msgCtx, "handle alter wal message success")
 			}
-			fgMsg.isAlterWal = true
-			fgMsg.alterWalTimeTick = alterWALMsg.AlterWALMessage.TimeTick()
 		}
 	}
 

@@ -106,3 +106,9 @@ func TestWorkNodeSelectionMatchesNodeIdentity(t *testing.T) {
 	require.Nil(t, WorkNodeSelection(plan, StreamingNode{PChannel: "missing"}))
 	require.Nil(t, WorkNodeSelection(nil, QueryNode{ID: 1}))
 }
+
+func TestBuilderBindsStatsForAssignedPartitions(t *testing.T) {
+	dv := &viewpb.DataViewOfCollection{CollectionId: 1, DataVersion: &viewpb.DataVersion{StreamingVersion: 1}, Shards: []*viewpb.DataViewOfShard{{Vchannel: "p_1v0", Partitions: []*viewpb.DataViewOfPartition{{PartitionId: 2, SegmentIds: []int64{10}, PartitionStatsVersion: 7}, {PartitionId: 3, SegmentIds: []int64{11}, PartitionStatsVersion: 8}}}}}
+	view := NewQueryViewAtCoordBuilder(1, dv, "p_1v0").SetAssignments(map[int64]map[int64][]int64{100: {2: {10}}}).Build()
+	require.Equal(t, []*viewpb.ClusteredPartitionStats{{PartitionId: 2, Version: 7}}, view.StreamingNode.PartitionStats)
+}

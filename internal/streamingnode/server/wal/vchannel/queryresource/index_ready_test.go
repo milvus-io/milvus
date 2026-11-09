@@ -37,7 +37,7 @@ func TestReadyRefreshesIndexesAcrossRetainedReplicaViews(t *testing.T) {
 		return QueryViewLoadInfo{IndexInfos: []*indexpb.IndexInfo{{FieldID: 102}}}, resolveErr
 	}).Build()
 	defer resolve.UnPatch()
-	update := mockey.Mock((*growingruntime.Runtime).UpdateIndexMeta).To(func(_ *growingruntime.Runtime, _ context.Context, indexes []*indexpb.IndexInfo) error {
+	update := mockey.Mock((*growingruntime.Runtime).PrepareGrowingIndexes).To(func(_ *growingruntime.Runtime, _ context.Context, indexes []*indexpb.IndexInfo) error {
 		updates++
 		require.Equal(t, int64(102), indexes[0].GetFieldID())
 		return applyErr
@@ -94,7 +94,7 @@ func TestIndexRefreshSerializesResolutionAndPublication(t *testing.T) {
 	}).Build()
 	defer resolve.UnPatch()
 	var applied []int64
-	update := mockey.Mock((*growingruntime.Runtime).UpdateIndexMeta).To(func(_ *growingruntime.Runtime, _ context.Context, indexes []*indexpb.IndexInfo) error {
+	update := mockey.Mock((*growingruntime.Runtime).PrepareGrowingIndexes).To(func(_ *growingruntime.Runtime, _ context.Context, indexes []*indexpb.IndexInfo) error {
 		applied = append(applied, indexes[0].GetIndexID())
 		return nil
 	}).Build()

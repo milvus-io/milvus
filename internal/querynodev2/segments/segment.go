@@ -791,14 +791,6 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *segcore.SearchRequ
 
 func (s *LocalSegment) searchWithSegment(ctx context.Context, searchReq *segcore.SearchRequest, native segcore.CSegment) (*segcore.SearchResult, error) {
 	filterOnly := searchReq.FilterOnly()
-	log := mlog.WithLazy(
-		mlog.Uint64("mvcc", searchReq.MVCC()),
-		mlog.FieldCollectionID(s.Collection()),
-		mlog.FieldSegmentID(s.ID()),
-		mlog.String("segmentType", s.segmentType.String()),
-		mlog.Bool("filterOnly", filterOnly),
-	)
-
 	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		// TODO: check if the segment is readable but not released. too many related logic need to be refactor.
 		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
@@ -806,7 +798,14 @@ func (s *LocalSegment) searchWithSegment(ctx context.Context, searchReq *segcore
 	defer s.ptrLock.Unpin()
 
 	hasIndex := s.ExistIndex(searchReq.SearchFieldID())
-	log = log.With(mlog.Bool("withIndex", hasIndex))
+	log := mlog.WithLazy(
+		mlog.Uint64("mvcc", searchReq.MVCC()),
+		mlog.FieldCollectionID(s.Collection()),
+		mlog.FieldSegmentID(s.ID()),
+		mlog.String("segmentType", s.segmentType.String()),
+		mlog.Bool("filterOnly", filterOnly),
+		mlog.Bool("withIndex", hasIndex),
+	)
 	log.Debug(ctx, "search segment...")
 
 	tr := timerecord.NewTimeRecorder("cgoSearch")

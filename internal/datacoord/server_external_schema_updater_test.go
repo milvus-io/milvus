@@ -27,19 +27,21 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestUpdateExternalSchemaViaWAL_CollectionNotFound(t *testing.T) {
 	ctx := context.Background()
 
-	mockGetCloned := mockey.Mock((*meta).GetCollection).Return(nil).Build()
+	mockGetCloned := mockey.Mock((*meta.Meta).GetCollection).Return(nil).Build()
 	defer mockGetCloned.UnPatch()
 
 	server := &Server{
-		meta: &meta{},
+		meta: &meta.Meta{},
 	}
 
 	err := server.updateExternalSchemaViaWAL(ctx, 999, "s3://bucket/new", `{"format":"parquet"}`)
@@ -47,10 +49,24 @@ func TestUpdateExternalSchemaViaWAL_CollectionNotFound(t *testing.T) {
 	assert.True(t, errors.Is(err, merr.ErrCollectionNotFound))
 }
 
+func TestUpdateExternalSchemaViaWAL_CollectionDropping(t *testing.T) {
+	mockGet := mockey.Mock((*meta.Meta).GetCollection).Return(&meta.CollectionInfo{
+		ID:     100,
+		State:  etcdpb.CollectionState_CollectionDropping,
+		Schema: &schemapb.CollectionSchema{Name: "test_collection"},
+	}).Build()
+	defer mockGet.UnPatch()
+
+	// No mixCoord: AlterCollection must not be called.
+	server := &Server{meta: &meta.Meta{}}
+	err := server.updateExternalSchemaViaWAL(context.Background(), 100, "s3://bucket/new", `{"format":"parquet"}`)
+	assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
+}
+
 func TestUpdateExternalSchemaViaWAL_AlterCollectionRPCError(t *testing.T) {
 	ctx := context.Background()
 
-	mockGetCloned := mockey.Mock((*meta).GetCollection).Return(&collectionInfo{
+	mockGetCloned := mockey.Mock((*meta.Meta).GetCollection).Return(&meta.CollectionInfo{
 		ID: 100,
 		Schema: &schemapb.CollectionSchema{
 			Name:           "test_collection",
@@ -66,7 +82,7 @@ func TestUpdateExternalSchemaViaWAL_AlterCollectionRPCError(t *testing.T) {
 		Return(nil, errors.New("rpc connection error"))
 
 	server := &Server{
-		meta:     &meta{},
+		meta:     &meta.Meta{},
 		mixCoord: mixCoord,
 	}
 
@@ -78,7 +94,7 @@ func TestUpdateExternalSchemaViaWAL_AlterCollectionRPCError(t *testing.T) {
 func TestUpdateExternalSchemaViaWAL_AlterCollectionStatusError(t *testing.T) {
 	ctx := context.Background()
 
-	mockGetCloned := mockey.Mock((*meta).GetCollection).Return(&collectionInfo{
+	mockGetCloned := mockey.Mock((*meta.Meta).GetCollection).Return(&meta.CollectionInfo{
 		ID: 100,
 		Schema: &schemapb.CollectionSchema{
 			Name:           "test_collection",
@@ -94,7 +110,7 @@ func TestUpdateExternalSchemaViaWAL_AlterCollectionStatusError(t *testing.T) {
 		Return(merr.Status(merr.WrapErrCollectionNotFound(100)), nil)
 
 	server := &Server{
-		meta:     &meta{},
+		meta:     &meta.Meta{},
 		mixCoord: mixCoord,
 	}
 
@@ -106,7 +122,7 @@ func TestUpdateExternalSchemaViaWAL_AlterCollectionStatusError(t *testing.T) {
 func TestUpdateExternalSchemaViaWAL_Success(t *testing.T) {
 	ctx := context.Background()
 
-	mockGetCloned := mockey.Mock((*meta).GetCollection).Return(&collectionInfo{
+	mockGetCloned := mockey.Mock((*meta.Meta).GetCollection).Return(&meta.CollectionInfo{
 		ID: 100,
 		Schema: &schemapb.CollectionSchema{
 			Name:           "test_collection",
@@ -131,7 +147,7 @@ func TestUpdateExternalSchemaViaWAL_Success(t *testing.T) {
 		Return(merr.Success(), nil)
 
 	server := &Server{
-		meta:     &meta{},
+		meta:     &meta.Meta{},
 		mixCoord: mixCoord,
 	}
 

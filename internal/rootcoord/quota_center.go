@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/quota"
 	rlinternal "github.com/milvus-io/milvus/internal/util/ratelimitutil"
+	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -171,10 +172,9 @@ type QuotaCenter struct {
 
 	rateAllocateStrategy RateAllocateStrategy
 
-	// Cache previous collection rates (baseLimit * factor) to avoid unnecessary updates
-	// If rate change is less than FactorChangeThreshold, skip SetLimit to reduce proxy updates
-	// Key format: "collectionID-rateType"
-	prevRates map[string]float64
+	// Write factors applied in the last round, by collection ID. calculateWriteRates reuses a collection's
+	// previous factor while the new one differs by less than FactorChangeThreshold, so small changes don't move proxy rates.
+	prevFactors map[int64]float64
 
 	keyManager *KeyManager
 
@@ -201,7 +201,7 @@ func NewQuotaCenter(proxies proxyutil.ProxyClientManagerInterface, mixCoord type
 		collectionProps:      make(map[int64]map[string]string),
 		rateLimiter:          rlinternal.NewRateLimiterTree(initInfLimiter(internalpb.RateScope_Cluster, allOps)),
 		rateAllocateStrategy: DefaultRateAllocateStrategy,
-		prevRates:            make(map[string]float64),
+		prevFactors:          make(map[int64]float64),
 		stopChan:             make(chan struct{}),
 	}
 	q.clearMetrics()
@@ -441,6 +441,16 @@ func (q *QuotaCenter) collectMetrics() error {
 			}
 			if queryNodeMetric.CollectionMetrics != nil {
 				numEntitiesLoaded = updateNumEntitiesLoaded(numEntitiesLoaded, queryNodeMetric.CollectionMetrics)
+			}
+		}
+
+		// Empty and growing-only QueryViews need read quotas too. QN physical
+		// metrics alone do not enumerate them. Keep released-but-resident views
+		// covered until their cleanup completes.
+		if resources := qvresource.Resource(); resources != nil {
+			collections.Insert(resources.ShardViews.CollectionIDs()...)
+			for collectionID := range resources.LoadConfigs.Snapshot().ConfigsMap() {
+				collections.Insert(collectionID)
 			}
 		}
 
@@ -917,6 +927,8 @@ func (q *QuotaCenter) calculateWriteRates() error {
 
 	// Get factorChangeThreshold
 	factorChangeThreshold := Params.QuotaConfig.FactorChangeThreshold.GetAsFloat()
+	prevFactors := q.prevFactors
+	q.prevFactors = make(map[int64]float64, len(collectionFactors))
 
 	for collection, factor := range collectionFactors {
 		metrics.RootCoordRateLimitRatio.WithLabelValues(strconv.FormatInt(collection, 10)).Set(1 - factor)
@@ -939,6 +951,13 @@ func (q *QuotaCenter) calculateWriteRates() error {
 			return merr.WrapErrServiceInternalMsg("collection limiter not found: %d", collection)
 		}
 
+		// Reuse the previous factor if the new one differs by less than FactorChangeThreshold, unless the new one lifts
+		// the throttling (factor 1). resetAllCurrentRates rebuilt the limiters at baseLimit, so always set the rate.
+		if prevFactor := prevFactors[collection]; factor < 1 && math.Abs(factor-prevFactor) < factorChangeThreshold*prevFactor {
+			factor = prevFactor
+		}
+		q.prevFactors[collection] = factor
+
 		limiter := collectionLimiter.GetLimiters()
 		for _, rt := range []internalpb.RateType{
 			internalpb.RateType_DMLInsert,
@@ -948,21 +967,7 @@ func (q *QuotaCenter) calculateWriteRates() error {
 			if !ok || v.Limit() == Inf {
 				continue
 			}
-
-			// Check if rate change is significant enough to trigger an update
-			// Calculate newRate = baseLimit * factor for each rate type and compare with previous rate
-			// If the rate change is less than FactorChangeThreshold, skip SetLimit to reduce proxy updates
-			newRate := float64(v.Limit() * Limit(factor))
-			rateKey := strconv.FormatInt(collection, 10) + "-" + strconv.FormatInt(int64(rt), 10)
-			prevRate, ok := q.prevRates[rateKey]
-			if ok && prevRate > 0 {
-				relativeChange := math.Abs(newRate-prevRate) / prevRate
-				if relativeChange < factorChangeThreshold {
-					continue
-				}
-			}
-			v.SetLimit(Limit(newRate))
-			q.prevRates[rateKey] = newRate
+			v.SetLimit(v.Limit() * Limit(factor))
 		}
 
 		collectionProps := q.getCollectionLimitProperties(collection)

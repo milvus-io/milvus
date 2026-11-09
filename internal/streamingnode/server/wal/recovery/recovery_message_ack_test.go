@@ -83,7 +83,7 @@ func TestDataScannerReleasesOwnerAfterAllModulesObserve(t *testing.T) {
 	t.Cleanup(storage.metrics.Close)
 	module := &retainingRecoveryModule{}
 	installRetainingManager(t, storage, module)
-	msg := newAckTestTimeTickMessage(t, 20, 2)
+	msg := newAckTestRecoveryBarrier(t, 20, 2)
 
 	storage.observeMessage(context.Background(), msg)
 
@@ -151,7 +151,7 @@ func TestReplayDoesNotRegressCheckpoint(t *testing.T) {
 	storage := newTestRecoveryStorage(t, checkpoint)
 	t.Cleanup(storage.metrics.Close)
 
-	storage.observeMessage(context.Background(), newAckTestTimeTickMessage(t, 20, 2))
+	storage.observeMessage(context.Background(), newAckTestRecoveryBarrier(t, 20, 2))
 	completed := storage.ackTracker.CompletedPoint()
 	assert.True(t, checkpoint.MessageID.EQ(completed.MessageID))
 	assert.Equal(t, checkpoint.TimeTick, completed.TimeTick)
@@ -173,7 +173,7 @@ func TestPersistRetryKeepsFrozenCheckpointAndSchedulesAckFollowUp(t *testing.T) 
 	storage.SetLogger(mlog.With())
 	module := &retainingRecoveryModule{}
 	installRetainingManager(t, storage, module)
-	first := newAckTestTimeTickMessage(t, 20, 2)
+	first := newAckTestRecoveryBarrier(t, 20, 2)
 	storage.observeMessage(context.Background(), first)
 	module.handle.Release()
 	assert.Equal(t, uint64(20), storage.ackTracker.CompletedPoint().TimeTick)
@@ -200,7 +200,7 @@ func TestPersistRetryKeepsFrozenCheckpointAndSchedulesAckFollowUp(t *testing.T) 
 	firstEndOffset := uint64(first.EstimateSize())
 	assert.Equal(t, firstEndOffset, storage.pendingPersistSnapshot.LogicalEndOffset)
 
-	second := newAckTestTimeTickMessage(t, 30, 3)
+	second := newAckTestRecoveryBarrier(t, 30, 3)
 	storage.observeMessage(context.Background(), second)
 	module.handle.Release()
 	assert.Equal(t, uint64(30), storage.ackTracker.CompletedPoint().TimeTick)
@@ -393,6 +393,16 @@ func assertCheckpointPointEqual(t *testing.T, expected, actual *WALCheckpoint) {
 	assert.True(t, expected.MessageID.EQ(actual.MessageID))
 }
 
+func newAckTestRecoveryBarrier(t *testing.T, timetick uint64, lastConfirmed int64) message.ImmutableMessage {
+	t.Helper()
+	return message.NewRecoveryBarrierMessageBuilderV2().WithAllVChannel().
+		WithHeader(&message.RecoveryBarrierMessageHeader{}).
+		WithBody(&message.RecoveryBarrierMessageBody{}).
+		MustBuildMutable().WithTimeTick(timetick).
+		WithLastConfirmed(walimplstest.NewTestMessageID(lastConfirmed)).
+		IntoImmutableMessage(walimplstest.NewTestMessageID(lastConfirmed + 1))
+}
+
 func newAckTestTimeTickMessage(t *testing.T, timetick uint64, lastConfirmed int64) message.ImmutableMessage {
 	t.Helper()
 	mutable, err := message.NewTimeTickMessageBuilderV1().
@@ -450,10 +460,11 @@ func TestSummaryCoveragePrecedesVChannelObservation(t *testing.T) {
 		batch, err := storage.summaryManager.ReadTransform(ctx, "v1", 0, retained.Message().TimeTick(), walsummary.ReadLimits{MaxRows: 1})
 		require.NoError(t, err)
 		require.Equal(t, retained.Message().TimeTick(), batch.CoveredThrough, "a VChannel task must already see complete Summary coverage")
+		require.Len(t, batch.Entries, 1)
 		observed = true
 	}).Build()
 	defer patch.UnPatch()
-	storage.observeMessage(context.Background(), newAckTestTimeTickMessage(t, 20, 2))
+	storage.observeMessage(context.Background(), newRecoveryTestDeleteMessage(t, "v1", 20))
 	require.True(t, observed)
 }
 

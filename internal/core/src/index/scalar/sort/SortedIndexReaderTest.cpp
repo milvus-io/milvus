@@ -16,6 +16,9 @@
 
 #include <gtest/gtest.h>
 
+#include "index/scalar/sort/SortedIndexLoader.h"
+#include "index/test_utils/StorageTestUtils.h"
+
 #include <array>
 #include <algorithm>
 #include <cstdint>
@@ -24,6 +27,8 @@
 #include <vector>
 
 #include "index/contracts/query/IPatternMatchReader.h"
+#include "index/scalar/sort/SortedIndexReader.h"
+#include "index/SingleCellIndexStorageTranslator.h"
 #include "index/contracts/query/INullReader.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
 #include "index/contracts/query/IScalarValueReader.h"
@@ -33,6 +38,149 @@
 
 namespace milvus::index::test {
 namespace {
+
+TEST(SortedIndexCacheTest, OperationsSharePinUntilReaderDestruction) {
+    const cachinglayer::ResourceUsage limit{16 * 1024 * 1024, 0};
+    auto dlist = std::make_shared<cachinglayer::internal::DList>(
+        false, limit, limit, limit, cachinglayer::EvictionConfig{});
+    std::vector<int32_t> priorities;
+    auto load = [&](OpContext* ctx)
+        -> folly::coro::Task<
+            std::unique_ptr<SortedIndexStorage<std::string_view>>> {
+        priorities.push_back(ctx->runtime_load_priority.value_or(-1));
+        auto layout = SortedStringLayout::FromHeap({"apple"}, {{0}}, 2);
+        auto offsets = std::make_shared<const std::vector<int32_t>>(
+            std::initializer_list<int32_t>{0, -1});
+        auto validity = std::make_shared<TargetBitmap>(2, false);
+        validity->set(0);
+        SortedIndexStorage<std::string_view>::OpenArgs args;
+        args.state.valid_bitset = std::move(validity);
+        args.state.idx_to_offsets = offsets->data();
+        args.state.idx_to_offsets_size = offsets->size();
+        args.state.idx_to_offsets_owner = std::move(offsets);
+        args.state.total_num_rows = 2;
+        args.storage.layout = std::move(layout);
+        co_return std::make_unique<SortedIndexStorage<std::string_view>>(
+            std::move(args));
+    };
+    IndexCacheConfig cache{
+        "sorted-storage-test",
+        cachinglayer::Meta{cachinglayer::StorageType::MEMORY,
+                           cachinglayer::CellIdMappingMode::IDENTICAL,
+                           cachinglayer::CellDataType::OTHER,
+                           CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                           true},
+        {1024 * 1024, 0},
+        {},
+        128};
+    std::weak_ptr<cachinglayer::CacheSlot<SortedIndexStorage<std::string_view>>>
+        slot_lifetime;
+    auto make_index = [&] {
+        auto slot = std::make_shared<
+            cachinglayer::CacheSlot<SortedIndexStorage<std::string_view>>>(
+            std::make_unique<SingleCellIndexStorageTranslator<
+                SortedIndexStorage<std::string_view>>>(cache, false, load),
+            dlist.get(),
+            true,
+            true,
+            true,
+            std::chrono::seconds(5),
+            std::chrono::seconds(5));
+        slot_lifetime = slot;
+        return std::make_shared<SortedIndex<std::string_view>>(
+            slot,
+            IndexMetadata{ReaderCaps{.predicate = true,
+                                     .pattern_match = true,
+                                     .value_lookup = true,
+                                     .cheap_value_lookup = true},
+                          Domain::Row,
+                          DataType::VARCHAR,
+                          2});
+    };
+    auto index = make_index();
+    OpContext first_ctx;
+    first_ctx.runtime_load_priority = 0;
+    OpContext second_ctx;
+    second_ctx.runtime_load_priority = 1;
+    auto first = index->CreateReader(&first_ctx);
+    EXPECT_EQ(first->Count(), 2);
+    EXPECT_TRUE(priorities.empty());
+    const auto* values =
+        dynamic_cast<const IScalarValueReader<std::string_view>*>(first.get());
+    ASSERT_NE(values, nullptr);
+    const auto* predicate =
+        dynamic_cast<const IScalarPredicateReader<std::string_view>*>(
+            first.get());
+    ASSERT_NE(predicate, nullptr);
+    const std::string_view key = "apple";
+    EXPECT_EQ(predicate->Range(key, CompareOp::Equal).count(), 1);
+    const auto scanned_bytes =
+        first_ctx.storage_usage.scanned_total_bytes.load();
+    ASSERT_GT(scanned_bytes, 0);
+    EXPECT_EQ(predicate->NotIn(1, &key).count(), 0);
+    const int64_t rows[] = {0, 1};
+    values->Gather(
+        rows, 2, [&](int64_t i, const std::string_view* value, bool valid) {
+            EXPECT_EQ(valid, i == 0);
+            if (valid)
+                EXPECT_EQ(*value, "apple");
+        });
+    EXPECT_EQ(priorities, (std::vector<int32_t>{0}));
+    EXPECT_EQ(values->Lookup(0), "apple");
+    EXPECT_FALSE(values->Lookup(1).has_value());
+    EXPECT_EQ(values->Lookup(0), "apple");
+    EXPECT_EQ(priorities, (std::vector<int32_t>{0}));
+    EXPECT_EQ(first_ctx.storage_usage.scanned_total_bytes.load(),
+              scanned_bytes);
+    index.reset();
+    EXPECT_FALSE(slot_lifetime.expired());
+    first.reset();
+    EXPECT_TRUE(slot_lifetime.expired());
+    index = make_index();
+    auto second = index->CreateReader(&second_ctx);
+    const auto* nulls = dynamic_cast<const INullReader*>(second.get());
+    ASSERT_NE(nulls, nullptr);
+    EXPECT_EQ(nulls->IsNull().count(), 1);
+    EXPECT_EQ(priorities, (std::vector<int32_t>{0, 1}));
+    index.reset();
+    second.reset();
+    EXPECT_TRUE(slot_lifetime.expired());
+}
+
+TEST(SortedIndexOwnershipTest, ReadersShareLayoutAndPreserveNulls) {
+    auto layout = SortedStringLayout::FromHeap({"apple"}, {{0}}, 2);
+    std::weak_ptr<const SortedStringLayout> lifetime = layout;
+    auto offsets = std::make_shared<const std::vector<int32_t>>(
+        std::initializer_list<int32_t>{0, -1});
+    auto validity = std::make_shared<TargetBitmap>(2, false);
+    validity->set(0);
+    SortedIndexStorage<std::string_view>::OpenArgs args;
+    args.state.valid_bitset = std::move(validity);
+    args.state.idx_to_offsets = offsets->data();
+    args.state.idx_to_offsets_size = offsets->size();
+    args.state.idx_to_offsets_owner = std::move(offsets);
+    args.state.total_num_rows = 2;
+    args.storage.layout = std::move(layout);
+    auto index =
+        std::make_shared<SortedIndex<std::string_view>>(std::move(args));
+    auto first = index->CreateReader(nullptr);
+    auto second = index->CreateReader(nullptr);
+    EXPECT_NE(first.get(), second.get());
+    index.reset();
+    first.reset();
+    EXPECT_FALSE(lifetime.expired());
+    const auto* predicates =
+        dynamic_cast<const IScalarPredicateReader<std::string_view>*>(
+            second.get());
+    ASSERT_NE(predicates, nullptr);
+    const std::string_view value = "missing";
+    const auto hits = predicates->NotIn(1, &value);
+    ASSERT_EQ(hits.size(), 2);
+    EXPECT_TRUE(hits[0]);
+    EXPECT_FALSE(hits[1]);
+    second.reset();
+    EXPECT_TRUE(lifetime.expired());
+}
 
 template <typename T>
 void
@@ -114,12 +262,14 @@ TEST(SortedIndexReaderTest, MmapAccountsValidityWordOnce) {
     data.validity.reset(0);
     const ScalarTestInput<int64_t> input(data);
     auto artifact = backend.Build(input.View(), {.row_count = rows});
-    auto reader = OpenV3(backend, SerializeV3(*artifact), {.row_count = rows});
-    ASSERT_NE(reader, nullptr);
-    const auto usage = reader->CellByteSize();
+    auto storage = OpenV3Storage<SortedIndexLoader, int64_t>(
+        backend, SerializeV3(*artifact), {.row_count = rows});
+    const auto usage = storage->CellByteSize();
     EXPECT_EQ(usage.memory_bytes,
               static_cast<int64_t>(TargetBitmap(rows).size_in_bytes()));
     EXPECT_GT(usage.file_bytes, 0);
+    auto index = std::make_shared<SortedIndex<int64_t>>(std::move(storage));
+    auto reader = index->CreateReader(nullptr);
     const auto* nulls = dynamic_cast<const INullReader*>(reader.get());
     ASSERT_NE(nulls, nullptr);
     ExpectHits(nulls->IsNull(), rows, {0});

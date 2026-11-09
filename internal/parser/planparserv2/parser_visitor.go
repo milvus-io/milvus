@@ -1369,78 +1369,113 @@ func isValidStructSubField(tokenText string) bool {
 	return len(tokenText) >= 4 && tokenText[:2] == "$[" && tokenText[len(tokenText)-1] == ']'
 }
 
-func validateMatchColumnInfo(columnInfo *planpb.ColumnInfo) (bool, error) {
+// elementPredicateScope names the construct whose predicate is validated by
+// validateElementLevelPredicate, so a rejection names what the user wrote.
+type elementPredicateScope struct {
+	// name is used in the generic rejections, e.g. "MATCH predicate".
+	name string
+	// rowLevel is the rejection of a field that is not an element of the
+	// current struct.
+	rowLevel string
+	// rawColumn is the rejection of a bare element column used as a value.
+	rawColumn string
+}
+
+var matchPredicateScope = elementPredicateScope{
+	name:      "MATCH predicate",
+	rowLevel:  "MATCH predicate can only use element-level fields",
+	rawColumn: "raw element columns are not supported inside MATCH predicate",
+}
+
+func elementFilterPredicateScope(structName string) elementPredicateScope {
+	return elementPredicateScope{
+		name: "element_filter predicate",
+		rowLevel: fmt.Sprintf("element_filter predicate can only use $[sub_field] of struct %[1]s; "+
+			"row-level fields (top-level fields, %[1]s[i][sub_field], fields of another struct) must be filtered outside element_filter "+
+			"and combined with AND, e.g. top_level_field > 5 && element_filter(%[1]s, $[sub_field] > 1)", structName),
+		rawColumn: "raw element columns are not supported inside element_filter predicate",
+	}
+}
+
+func validateElementPredicateColumn(columnInfo *planpb.ColumnInfo, scope elementPredicateScope) (bool, error) {
 	if columnInfo == nil {
-		return false, merr.WrapErrParameterInvalidMsg("MATCH predicate column info is missing")
+		return false, merr.WrapErrParameterInvalidMsg("%s column info is missing", scope.name)
 	}
 	if !columnInfo.GetIsElementLevel() {
-		return false, merr.WrapErrParameterInvalidMsg("MATCH predicate can only use element-level fields")
+		return false, merr.WrapErrParameterInvalidMsg("%s", scope.rowLevel)
 	}
 	return true, nil
 }
 
-func validateMatchPredicateElementLevel(expr *planpb.Expr) (bool, error) {
+// validateElementLevelPredicate checks that the predicate of MATCH_* or
+// element_filter only uses expressions segcore evaluates per element of the
+// current struct. It reports whether every leaf references an element-level
+// field; constant leaves such as true make it false without an error.
+func validateElementLevelPredicate(expr *planpb.Expr, scope elementPredicateScope) (bool, error) {
 	if expr == nil {
-		return false, merr.WrapErrParameterInvalidMsg("MATCH predicate is missing")
+		return false, merr.WrapErrParameterInvalidMsg("%s is missing", scope.name)
 	}
 
 	switch realExpr := expr.GetExpr().(type) {
 	case *planpb.Expr_ColumnExpr:
-		return false, merr.WrapErrParameterInvalidMsg("raw element columns are not supported inside MATCH predicate")
+		if !realExpr.ColumnExpr.GetInfo().GetIsElementLevel() {
+			return false, merr.WrapErrParameterInvalidMsg("%s", scope.rowLevel)
+		}
+		return false, merr.WrapErrParameterInvalidMsg("%s", scope.rawColumn)
 	case *planpb.Expr_TermExpr:
-		return validateMatchColumnInfo(realExpr.TermExpr.GetColumnInfo())
+		return validateElementPredicateColumn(realExpr.TermExpr.GetColumnInfo(), scope)
 	case *planpb.Expr_UnaryRangeExpr:
-		return validateMatchColumnInfo(realExpr.UnaryRangeExpr.GetColumnInfo())
+		return validateElementPredicateColumn(realExpr.UnaryRangeExpr.GetColumnInfo(), scope)
 	case *planpb.Expr_BinaryRangeExpr:
-		return validateMatchColumnInfo(realExpr.BinaryRangeExpr.GetColumnInfo())
+		return validateElementPredicateColumn(realExpr.BinaryRangeExpr.GetColumnInfo(), scope)
 	case *planpb.Expr_BinaryArithOpEvalRangeExpr:
-		return validateMatchColumnInfo(realExpr.BinaryArithOpEvalRangeExpr.GetColumnInfo())
+		return validateElementPredicateColumn(realExpr.BinaryArithOpEvalRangeExpr.GetColumnInfo(), scope)
 	case *planpb.Expr_CompareExpr:
-		return false, merr.WrapErrParameterInvalidMsg("column-to-column comparison is not supported inside MATCH predicate")
+		return false, merr.WrapErrParameterInvalidMsg("column-to-column comparison is not supported inside %s", scope.name)
 	case *planpb.Expr_JsonContainsExpr:
-		return validateMatchColumnInfo(realExpr.JsonContainsExpr.GetColumnInfo())
+		return validateElementPredicateColumn(realExpr.JsonContainsExpr.GetColumnInfo(), scope)
 	case *planpb.Expr_NullExpr:
-		return validateMatchColumnInfo(realExpr.NullExpr.GetColumnInfo())
+		return validateElementPredicateColumn(realExpr.NullExpr.GetColumnInfo(), scope)
 	case *planpb.Expr_ExistsExpr:
-		return validateMatchColumnInfo(realExpr.ExistsExpr.GetInfo())
+		return validateElementPredicateColumn(realExpr.ExistsExpr.GetInfo(), scope)
 	case *planpb.Expr_GisfunctionFilterExpr:
-		return validateMatchColumnInfo(realExpr.GisfunctionFilterExpr.GetColumnInfo())
+		return validateElementPredicateColumn(realExpr.GisfunctionFilterExpr.GetColumnInfo(), scope)
 	case *planpb.Expr_TimestamptzArithCompareExpr:
-		return validateMatchColumnInfo(realExpr.TimestamptzArithCompareExpr.GetTimestamptzColumn())
+		return validateElementPredicateColumn(realExpr.TimestamptzArithCompareExpr.GetTimestamptzColumn(), scope)
 	case *planpb.Expr_UnaryExpr:
-		return validateMatchPredicateElementLevel(realExpr.UnaryExpr.GetChild())
+		return validateElementLevelPredicate(realExpr.UnaryExpr.GetChild(), scope)
 	case *planpb.Expr_BinaryExpr:
-		leftElementLevel, err := validateMatchPredicateElementLevel(realExpr.BinaryExpr.GetLeft())
+		leftElementLevel, err := validateElementLevelPredicate(realExpr.BinaryExpr.GetLeft(), scope)
 		if err != nil {
 			return false, err
 		}
-		rightElementLevel, err := validateMatchPredicateElementLevel(realExpr.BinaryExpr.GetRight())
+		rightElementLevel, err := validateElementLevelPredicate(realExpr.BinaryExpr.GetRight(), scope)
 		if err != nil {
 			return false, err
 		}
 		return leftElementLevel && rightElementLevel, nil
 	case *planpb.Expr_BinaryArithExpr:
-		leftElementLevel, err := validateMatchPredicateElementLevel(realExpr.BinaryArithExpr.GetLeft())
+		leftElementLevel, err := validateElementLevelPredicate(realExpr.BinaryArithExpr.GetLeft(), scope)
 		if err != nil {
 			return false, err
 		}
-		rightElementLevel, err := validateMatchPredicateElementLevel(realExpr.BinaryArithExpr.GetRight())
+		rightElementLevel, err := validateElementLevelPredicate(realExpr.BinaryArithExpr.GetRight(), scope)
 		if err != nil {
 			return false, err
 		}
 		return leftElementLevel && rightElementLevel, nil
 	case *planpb.Expr_CallExpr:
-		return false, merr.WrapErrParameterInvalidMsg("function calls are not supported inside MATCH predicate")
+		return false, merr.WrapErrParameterInvalidMsg("function calls are not supported inside %s", scope.name)
 	case *planpb.Expr_ValueExpr, *planpb.Expr_AlwaysTrueExpr:
 		return false, nil
 	case *planpb.Expr_ElementFilterExpr:
-		return false, merr.WrapErrParameterInvalidMsg("element_filter is not supported inside MATCH predicate")
+		return false, merr.WrapErrParameterInvalidMsg("element_filter is not supported inside %s", scope.name)
 	case *planpb.Expr_MatchExpr:
-		return false, merr.WrapErrParameterInvalidMsg("nested MATCH predicate is not supported")
+		return false, merr.WrapErrParameterInvalidMsg("MATCH_* is not supported inside %s", scope.name)
 	case *planpb.Expr_RandomSampleExpr:
-		return false, merr.WrapErrParameterInvalidMsg("random sample is not supported inside MATCH predicate")
+		return false, merr.WrapErrParameterInvalidMsg("random sample is not supported inside %s", scope.name)
 	default:
-		return false, merr.WrapErrParameterInvalidMsg("unsupported MATCH predicate expression")
+		return false, merr.WrapErrParameterInvalidMsg("unsupported %s expression", scope.name)
 	}
 }
 
@@ -3640,6 +3675,28 @@ func (v *ParserVisitor) VisitElementFilter(ctx *parser.ElementFilterContext) int
 			"membership_match filters are not supported inside element_filter element expressions")
 	}
 
+	// segcore evaluates the element expression on batches of struct elements
+	// and combines the result as an element bitmap. A non-boolean expression
+	// fails the segcore type check, and a row-level field there is read with
+	// element offsets, so both are rejected here with the rules of MATCH_*.
+	// The check runs before template values are filled; filling replaces values
+	// only and cannot change which columns or node kinds the expression uses.
+	if column := exprWithType.expr.GetColumnExpr(); column != nil && column.GetInfo().GetIsElementLevel() &&
+		typeutil.IsBoolType(exprWithType.dataType) {
+		return merr.WrapErrParameterInvalidMsg(
+			"element_filter predicate %s is a bare Bool sub-field; write it as a comparison, e.g. %s == true",
+			ctx.Expr().GetText(), ctx.Expr().GetText())
+	}
+	if column := exprWithType.expr.GetColumnExpr(); (column == nil || column.GetInfo().GetIsElementLevel()) &&
+		!canBeExecuted(exprWithType) {
+		return merr.WrapErrParameterInvalidMsg(
+			"element_filter predicate must be a boolean expression, got %s of type %s",
+			ctx.Expr().GetText(), exprWithType.dataType.String())
+	}
+	if _, err := validateElementLevelPredicate(exprWithType.expr, elementFilterPredicateScope(arrayFieldName)); err != nil {
+		return err
+	}
+
 	// Build ElementFilterExpr proto
 	return &ExprWithType{
 		expr: &planpb.Expr{
@@ -3727,7 +3784,7 @@ func (v *ParserVisitor) parseMatchExpr(structArrayFieldName string, exprCtx pars
 	if predicateExpr == nil {
 		return merr.WrapErrParameterInvalidMsg("invalid predicate expression in %s: %s", funcName, exprCtx.GetText())
 	}
-	isElementLevel, err := validateMatchPredicateElementLevel(predicateExpr.expr)
+	isElementLevel, err := validateElementLevelPredicate(predicateExpr.expr, matchPredicateScope)
 	if err != nil {
 		return merr.WrapErrParameterInvalidMsg("invalid predicate expression in %s: %s", funcName, err)
 	}

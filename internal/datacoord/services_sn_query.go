@@ -103,12 +103,15 @@ func (s *Server) GetStreamingNodeQueryViewResources(ctx context.Context, req *da
 			}
 			manifestPath = packed.MarshalManifestPath(base, version)
 		}
-		bm25Logs := lo.Map(segment.GetBm25Statslogs(), func(log *datapb.FieldBinlog, _ int) *datapb.FieldBinlog {
-			return proto.Clone(log).(*datapb.FieldBinlog)
-		})
-		if err := binlog.DecompressBinLog(storage.BM25Binlog, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(), bm25Logs); err != nil {
-			resp.Status = merr.Status(merr.Wrap(err, "decode query view BM25 log paths"))
-			return resp, nil
+		var bm25Logs []*datapb.FieldBinlog
+		if segment.GetStorageVersion() < storage.StorageV3 {
+			bm25Logs = lo.Map(segment.GetBm25Statslogs(), func(log *datapb.FieldBinlog, _ int) *datapb.FieldBinlog {
+				return proto.Clone(log).(*datapb.FieldBinlog)
+			})
+			if err := binlog.DecompressBinLog(storage.BM25Binlog, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID(), bm25Logs); err != nil {
+				resp.Status = merr.Status(merr.Wrap(err, "decode query view BM25 log paths"))
+				return resp, nil
+			}
 		}
 		byID[segment.GetID()] = &datapb.StreamingNodeBM25Resource{
 			SegmentId:      segment.GetID(),
@@ -164,11 +167,11 @@ func (s *Server) GetQueryViewCollectionIndexInfos(collectionID int64, indexIDs .
 	if len(indexIDs) == 0 {
 		return s.queryViewCollectionIndexInfos(collectionID)
 	}
-	return packQueryViewCollectionIndexInfos(s.meta.indexMeta.GetIndexesByID(collectionID, indexIDs))
+	return packQueryViewCollectionIndexInfos(s.indexMeta.GetIndexesByID(collectionID, indexIDs))
 }
 
 func (s *Server) queryViewCollectionIndexInfos(collectionID int64) []*indexpb.IndexInfo {
-	indexes := s.meta.indexMeta.GetIndexesForCollection(collectionID, "")
+	indexes := s.indexMeta.GetIndexesForCollection(collectionID, "")
 	return packQueryViewCollectionIndexInfos(indexes)
 }
 

@@ -23,12 +23,128 @@
 #include <vector>
 
 #include "common/RegexQuery.h"
+#include "index/SingleCellIndexStorageTranslator.h"
+#include "index/scalar/fmindex/FmIndexReader.h"
+#include "index/fmindex/FMIndex.h"
 #include "index/contracts/query/IPatternMatchReader.h"
 #include "index/test_utils/ScalarReaderFactory.h"
 #include "index/test_utils/ScalarTestData.h"
 
 namespace milvus::index::test {
 namespace {
+
+TEST(FmIndexCacheTest, FreshSlotUsesEachReadersContext) {
+    const cachinglayer::ResourceUsage limit{16 * 1024 * 1024, 0};
+    auto dlist = std::make_shared<cachinglayer::internal::DList>(
+        false, limit, limit, limit, cachinglayer::EvictionConfig{});
+    std::vector<int32_t> priorities;
+    auto load = [&](OpContext* ctx)
+        -> folly::coro::Task<std::unique_ptr<FmIndexStorage>> {
+        priorities.push_back(ctx->runtime_load_priority.value_or(-1));
+        auto engine = std::make_shared<fmindex::FMIndex>();
+        const std::vector<std::string_view> docs{"apple", ""};
+        engine->Build(docs, 32);
+        TargetBitmap nulls(2, false);
+        nulls.set(1);
+        co_return FmIndexStorage::Create(nullptr,
+                                         std::move(engine),
+                                         std::move(nulls),
+                                         2,
+                                         DataType::VARCHAR,
+                                         true,
+                                         FmIndexStateOrigin::Builder);
+    };
+    IndexCacheConfig cache{
+        "fm-storage-test",
+        cachinglayer::Meta{cachinglayer::StorageType::MEMORY,
+                           cachinglayer::CellIdMappingMode::IDENTICAL,
+                           cachinglayer::CellDataType::OTHER,
+                           CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                           true},
+        {1024 * 1024, 0},
+        {},
+        4096};
+    std::weak_ptr<cachinglayer::CacheSlot<FmIndexStorage>> slot_lifetime;
+    auto make_index = [&] {
+        auto slot = std::make_shared<cachinglayer::CacheSlot<FmIndexStorage>>(
+            std::make_unique<SingleCellIndexStorageTranslator<FmIndexStorage>>(
+                cache, false, load),
+            dlist.get(),
+            true,
+            true,
+            true,
+            std::chrono::seconds(5),
+            std::chrono::seconds(5));
+        slot_lifetime = slot;
+        return std::make_shared<FmIndex>(slot, DataType::VARCHAR, 2, 0.001);
+    };
+    auto index = make_index();
+    OpContext first_ctx;
+    first_ctx.runtime_load_priority = 0;
+    OpContext second_ctx;
+    second_ctx.runtime_load_priority = 1;
+    auto first = index->CreateReader(&first_ctx);
+    EXPECT_EQ(first->Count(), 2);
+    EXPECT_TRUE(priorities.empty());
+    const auto* pattern = dynamic_cast<const IPatternMatchReader*>(first.get());
+    ASSERT_NE(pattern, nullptr);
+    EXPECT_EQ(pattern->PatternMatch("apple", PatternOp::PrefixMatch).count(),
+              1);
+    const auto scanned = first_ctx.storage_usage.scanned_total_bytes.load();
+    ASSERT_GT(scanned, 0);
+    EXPECT_EQ(pattern->PatternMatch("apple", PatternOp::InnerMatch).count(), 1);
+    EXPECT_EQ(dynamic_cast<const INullReader*>(first.get())->IsNull().count(),
+              1);
+    EXPECT_EQ(first_ctx.storage_usage.scanned_total_bytes.load(), scanned);
+    EXPECT_EQ(priorities, (std::vector<int32_t>{0}));
+    index.reset();
+    EXPECT_FALSE(slot_lifetime.expired());
+    first.reset();
+    EXPECT_TRUE(slot_lifetime.expired());
+    index = make_index();
+    auto second = index->CreateReader(&second_ctx);
+    EXPECT_EQ(priorities, (std::vector<int32_t>{0}));
+    const auto* nulls = dynamic_cast<const INullReader*>(second.get());
+    ASSERT_NE(nulls, nullptr);
+    EXPECT_EQ(nulls->IsNull().count(), 1);
+    EXPECT_EQ(priorities, (std::vector<int32_t>{0, 1}));
+    EXPECT_GT(second_ctx.storage_usage.scanned_total_bytes.load(), 0);
+    index.reset();
+    second.reset();
+    EXPECT_TRUE(slot_lifetime.expired());
+}
+
+TEST(FmIndexOwnershipTest, ReadersRetainSharedStorage) {
+    auto engine = std::make_shared<fmindex::FMIndex>();
+    const std::vector<std::string_view> docs{"apple", "banana"};
+    engine->Build(docs, 32);
+    std::shared_ptr<const FmIndexStorage> storage =
+        FmIndexStorage::Create(nullptr,
+                               std::move(engine),
+                               TargetBitmap(2, false),
+                               2,
+                               DataType::VARCHAR,
+                               false,
+                               FmIndexStateOrigin::Builder);
+    std::weak_ptr<const FmIndexStorage> lifetime = storage;
+    auto index = std::make_shared<FmIndex>(std::move(storage));
+    auto first = index->CreateReader(nullptr);
+    auto second = index->CreateReader(nullptr);
+    EXPECT_NE(first.get(), second.get());
+    EXPECT_EQ(index->Metadata().count, 2);
+    index.reset();
+    first.reset();
+    EXPECT_FALSE(lifetime.expired());
+    const auto* pattern =
+        dynamic_cast<const IPatternMatchReader*>(second.get());
+    ASSERT_NE(pattern, nullptr);
+    const auto hits = pattern->PatternMatch("apple", PatternOp::PrefixMatch);
+    ASSERT_EQ(hits.size(), 2);
+    EXPECT_TRUE(hits[0]);
+    EXPECT_FALSE(hits[1]);
+    second.reset();
+    EXPECT_TRUE(lifetime.expired());
+}
 
 TEST(FmIndexReaderTest, AdvertisesSelectiveVarcharPatternPolicy) {
     for (const auto name : {"FmIndexVarchar",

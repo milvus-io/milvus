@@ -59,8 +59,13 @@ func TestAssignmentService(t *testing.T) {
 						Version: &streamingpb.VersionPair{Global: 2, Local: 3},
 						Assignments: []*streamingpb.StreamingNodeAssignment{
 							{
-								Node:     &streamingpb.StreamingNodeInfo{ServerId: 1},
-								Channels: []*streamingpb.PChannelInfo{{Name: "c1", Term: 1}, {Name: "c2", Term: 2}},
+								Node: &streamingpb.StreamingNodeInfo{ServerId: 1},
+								Channels: []*streamingpb.PChannelInfo{
+									{Name: "c1", Term: 1},
+									{Name: "c2", Term: 2},
+									{Name: "c1", Term: 3, AccessMode: streamingpb.PChannelAccessMode_PCHANNEL_ACCESS_READONLY},
+									{Name: "c1-ro", Term: 3, AccessMode: streamingpb.PChannelAccessMode_PCHANNEL_ACCESS_READONLY},
+								},
 							},
 							{
 								Node:     &streamingpb.StreamingNodeInfo{ServerId: 2},
@@ -107,6 +112,9 @@ func TestAssignmentService(t *testing.T) {
 	assign, err := assignmentService.GetLatestAssignments(ctx)
 	assert.NoError(t, err)
 	assert.True(t, assign.Version.EQ(typeutil.VersionInt64Pair{Global: 2, Local: 3}))
+	assert.Len(t, assign.Assignments[1].Channels, 2)
+	assert.Equal(t, types.PChannelInfo{Name: "c1", Term: 1, AccessMode: types.AccessModeRW}, assign.Assignments[1].Channels["c1"])
+	assert.NotContains(t, assign.Assignments[1].Channels, "c1-ro")
 
 	resp, err := assignmentService.UpdateWALBalancePolicy(ctx, &streamingpb.UpdateWALBalancePolicyRequest{})
 	assert.NoError(t, err)

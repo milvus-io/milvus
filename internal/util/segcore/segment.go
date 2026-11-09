@@ -52,7 +52,7 @@ type CreateCSegmentRequest struct {
 	IsSorted          bool
 	LoadInfo          *querypb.SegmentLoadInfo
 	LoadFields        []int64 // independent sealed load scope; never mutates CCollection
-	FieldHints        []int64 // preload only; empty follows the bound scope
+	FieldHints        []int64 // explicit preloads within the bound scope; empty means none
 	ExplicitLoadScope bool    // QN scope distinguishes empty from legacy all-fields
 }
 

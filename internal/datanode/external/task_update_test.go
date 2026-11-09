@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -41,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -596,6 +598,9 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_SameFragmentsM
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 	task.columns = []string{"id", "vec", "text", "score"}
 
+	manifestColumns := mockey.Mock(packed.ManifestMissingColumns).Return([]string{"score"}, nil).Build()
+	defer manifestColumns.UnPatch()
+
 	mockAppend := mockey.Mock(packed.AppendSegmentManifestColumns).
 		To(func(ctx context.Context, oldManifestPath string, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
 			s.Equal(`{"base_path":"seg10","ver":1}`, oldManifestPath)
@@ -695,6 +700,9 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_PatchedSegment
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 	task.columns = []string{"id", "text", "score"}
 
+	manifestColumns := mockey.Mock(packed.ManifestMissingColumns).Return([]string{"score"}, nil).Build()
+	defer manifestColumns.UnPatch()
+
 	mockAppend := mockey.Mock(packed.AppendSegmentManifestColumns).
 		To(func(ctx context.Context, oldManifestPath string, format string, columns []string, fragments []packed.Fragment, storageConfig *indexpb.StorageConfig) (string, error) {
 			s.Equal(`{"base_path":"seg10","ver":1}`, oldManifestPath)
@@ -763,6 +771,201 @@ func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_SameFragmentsA
 	s.Len(result, 1)
 	s.ElementsMatch([]int64{10}, task.GetKeptSegmentIDs())
 	s.Empty(task.GetUpdatedSegments())
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestRebuildSegmentFakeBinlogs() {
+	paramtable.Init()
+	pt := paramtable.Get()
+	pt.Save(pt.QueryNodeCfg.ExternalCollectionSampleRows.Key, "100")
+	defer pt.Reset(pt.QueryNodeCfg.ExternalCollectionSampleRows.Key)
+	readErr := merr.WrapErrServiceUnavailableMsg("sample unavailable")
+	outputErr := merr.WrapErrFunctionFailedMsg("output size unavailable")
+	for _, tc := range []struct {
+		name         string
+		rows         int64
+		sampleErr    error
+		outputErr    error
+		emptySample  bool
+		cancelBefore bool
+		cancelSample bool
+		wantErr      string
+	}{
+		{name: "sample capped by segment rows", rows: 10},
+		{name: "sample capped by configuration", rows: 200},
+		{name: "sample error", rows: 10, sampleErr: readErr},
+		{name: "empty sample", rows: 10, emptySample: true, wantErr: "non-positive average size"},
+		{name: "output sizing error", rows: 10, outputErr: outputErr},
+		{name: "zero memory size", wantErr: "non-positive memory size"},
+		{name: "canceled before sampling", rows: 10, cancelBefore: true},
+		{name: "canceled during sampling", rows: 10, cancelSample: true},
+	} {
+		s.Run(tc.name, func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			schema := &schemapb.CollectionSchema{Version: 9, Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", ExternalField: "pk", DataType: schemapb.DataType_Int64},
+				{
+					FieldID: 101, Name: "vector", IsFunctionOutput: true, DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}},
+				},
+			}}
+			task := s.newTask(ctx, &datapb.RefreshExternalCollectionTaskRequest{Schema: schema})
+			task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
+			seg := &datapb.SegmentInfo{
+				ID: 10, CollectionID: 1000, PartitionID: 2000, NumOfRows: tc.rows,
+				ManifestPath: "old", SchemaVersion: 3,
+				TextStatsLogs: map[int64]*datapb.TextIndexStats{100: {Version: 2}},
+				JsonKeyStats:  map[int64]*datapb.JsonKeyStats{100: {Version: 3}},
+			}
+			var gotManifest string
+			var gotRows int
+			sample := mockey.Mock(packed.SampleExternalFieldSizes).
+				To(func(manifest string, rows int, _ int64, _, _ string, _ *schemapb.CollectionSchema, _ *indexpb.StorageConfig) (map[string]int64, error) {
+					gotManifest, gotRows = manifest, rows
+					if tc.cancelSample {
+						cancel()
+					}
+					if tc.emptySample {
+						return nil, nil
+					}
+					return map[string]int64{"pk": 8}, tc.sampleErr
+				}).Build()
+			defer sample.UnPatch()
+			if tc.outputErr != nil {
+				estimate := mockey.Mock(estimateFunctionOutputBytesPerRow).Return(int64(0), tc.outputErr).Build()
+				defer estimate.UnPatch()
+			}
+			appendColumns := mockey.Mock(packed.AppendSegmentManifestColumns).Return("", nil).Build()
+			defer appendColumns.UnPatch()
+			if tc.cancelBefore {
+				cancel()
+			}
+
+			updated, err := task.rebuildSegmentFakeBinlogs(ctx, seg, "final")
+			s.Zero(appendColumns.Times(), "metadata recovery must never change physical columns")
+			s.Equal("old", seg.GetManifestPath())
+			s.Equal(int32(3), seg.GetSchemaVersion())
+			s.Empty(seg.GetBinlogs())
+			if tc.cancelBefore || tc.cancelSample {
+				s.ErrorIs(err, context.Canceled)
+			} else if tc.sampleErr != nil {
+				s.ErrorIs(err, tc.sampleErr)
+			} else if tc.outputErr != nil {
+				s.ErrorIs(err, tc.outputErr)
+			} else if tc.wantErr != "" {
+				s.ErrorContains(err, tc.wantErr)
+			} else {
+				s.Require().NoError(err)
+				s.Require().NotNil(updated)
+				s.Equal(seg.GetID(), updated.GetID())
+				s.Equal(seg.GetNumOfRows(), updated.GetNumOfRows())
+				s.Equal("final", updated.GetManifestPath())
+				s.Equal(int32(9), updated.GetSchemaVersion())
+				s.Equal(storage.StorageV3, updated.GetStorageVersion())
+				s.Equal(seg.GetTextStatsLogs(), updated.GetTextStatsLogs())
+				s.Equal(seg.GetJsonKeyStats(), updated.GetJsonKeyStats())
+				s.Require().Len(updated.GetBinlogs(), 1)
+				binlog := updated.GetBinlogs()[0]
+				s.Equal([]int64{100, 101}, binlog.GetChildFields())
+				s.Require().Len(binlog.GetBinlogs(), 1)
+				s.Equal(tc.rows, binlog.GetBinlogs()[0].GetEntriesNum())
+				s.Equal(int64(24)*tc.rows, binlog.GetBinlogs()[0].GetMemorySize(), "include 16 Function-output bytes per row")
+			}
+			if err != nil {
+				s.Nil(updated)
+			}
+			if tc.cancelBefore {
+				s.Zero(sample.Times())
+			} else {
+				s.Equal(1, sample.Times())
+				s.Equal("final", gotManifest)
+				s.Equal(int(min(tc.rows, 100)), gotRows)
+			}
+		})
+	}
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestMissingExternalColumnsManifestFallback() {
+	readErr := merr.WrapErrServiceUnavailableMsg("manifest temporarily unavailable")
+	for _, tc := range []struct {
+		name        string
+		spec        string
+		schemaSpec  string
+		noSchema    bool
+		binlogs     []*datapb.FieldBinlog
+		noManifest  bool
+		missing     []string
+		readErr     error
+		want        []string
+		wantColumns string
+	}{
+		{name: "nil schema", noSchema: true},
+		{name: "ChildFields fast path", binlogs: []*datapb.FieldBinlog{{ChildFields: []int64{100, 101}}}},
+		{name: "field binlog fast path", binlogs: []*datapb.FieldBinlog{{FieldID: 100}, {FieldID: 101}}},
+		{name: "no manifest retains missing names", noManifest: true, want: []string{"doc", "price"}},
+		{name: "parquet after restart", spec: `{"format":"parquet"}`, wantColumns: "doc,price"},
+		{name: "milvus-table after restart", spec: `{"format":"milvus-table"}`, wantColumns: "100,101"},
+		{name: "milvus-table schema spec", schemaSpec: `{"format":"milvus-table"}`, wantColumns: "100,101"},
+		{
+			name: "only unadvertised columns are read", spec: `{"format":"milvus-table"}`,
+			binlogs: []*datapb.FieldBinlog{{ChildFields: []int64{100}}}, wantColumns: "101",
+		},
+		{name: "only truly missing parquet column returned", missing: []string{"price"}, want: []string{"price"}, wantColumns: "doc,price"},
+		{
+			name: "physical IDs map back to external names", spec: `{"format":"milvus-table"}`,
+			missing: []string{"101"}, want: []string{"price"}, wantColumns: "100,101",
+		},
+		{name: "read error is preserved", readErr: readErr, wantColumns: "doc,price"},
+		{name: "cancellation is preserved", readErr: context.Canceled, wantColumns: "doc,price"},
+	} {
+		s.Run(tc.name, func() {
+			schema := &schemapb.CollectionSchema{
+				ExternalSpec: tc.schemaSpec,
+				Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "text", ExternalField: "doc"},
+					{FieldID: 101, Name: "amount", ExternalField: "price"},
+					{FieldID: 102, Name: "output", IsFunctionOutput: true},
+				},
+			}
+			if tc.noSchema {
+				schema = nil
+			}
+			cfg := &indexpb.StorageConfig{StorageType: "local"}
+			task := s.newTask(context.Background(), &datapb.RefreshExternalCollectionTaskRequest{
+				Schema: schema, ExternalSpec: tc.spec, StorageConfig: cfg,
+			})
+			seg := &datapb.SegmentInfo{ID: 10, ManifestPath: "pinned-manifest", Binlogs: tc.binlogs}
+			if tc.noManifest {
+				seg.ManifestPath = ""
+			}
+			var gotPath, gotColumns string
+			var gotConfig *indexpb.StorageConfig
+			read := mockey.Mock(packed.ManifestMissingColumns).
+				To(func(path string, config *indexpb.StorageConfig, columns []string) ([]string, error) {
+					// Capture scalars, not reflection-based assertions on stack-backed slices.
+					gotPath, gotColumns, gotConfig = path, strings.Join(columns, ","), config
+					return tc.missing, tc.readErr
+				}).Build()
+			defer read.UnPatch()
+
+			missing, err := task.missingExternalColumns(seg)
+			if tc.readErr != nil {
+				s.ErrorIs(err, tc.readErr)
+				s.ErrorContains(err, "check external columns for segment 10")
+			} else {
+				s.NoError(err)
+			}
+			s.Equal(tc.want, missing)
+			s.Equal(tc.wantColumns, gotColumns)
+			if tc.wantColumns == "" {
+				s.Zero(read.Times())
+			} else {
+				s.Equal(1, read.Times(), "one manifest read for all unadvertised columns")
+				s.Equal(seg.GetManifestPath(), gotPath)
+				s.Same(cfg, gotConfig)
+			}
+		})
+	}
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestOrganizeSegments_FragmentRemoved() {
@@ -1201,14 +1404,44 @@ func (s *RefreshExternalCollectionTaskSuite) TestSegmentHasFunctionOutputColumns
 	s.NoError(err)
 	s.False(hasColumns)
 
-	mock := mockey.Mock(packed.ManifestHasColumns).To(
-		func(string, *indexpb.StorageConfig, []string) (bool, error) {
-			s.FailNow("ManifestHasColumns should not be called when ChildFields already prove the output field exists")
-			return false, nil
-		}).Build()
-	defer mock.UnPatch()
+	// Verify routing through call counts without inspecting slice arguments in
+	// a reflection-based mock callback, which crashed under CI's race checks.
+	mock := mockey.Mock(packed.ManifestHasColumns).Return(false, nil).Build()
 	hasColumns, err = task.segmentHasFunctionOutputColumns(&datapb.SegmentInfo{
 		ManifestPath: "manifest",
+		Binlogs: []*datapb.FieldBinlog{
+			{ChildFields: []int64{100, 101}},
+		},
+	}, []string{"101"})
+	s.NoError(err)
+	s.True(hasColumns)
+	s.Zero(mock.Times(), "advertised Function outputs must not require a manifest read")
+	hasColumns, err = task.segmentHasFunctionOutputColumns(&datapb.SegmentInfo{
+		ManifestPath: "manifest",
+	}, []string{"101"})
+	s.NoError(err)
+	s.False(hasColumns)
+	s.Equal(1, mock.Times())
+	mock.UnPatch()
+
+	mock = mockey.Mock(packed.ManifestHasColumns).Return(true, nil).Build()
+	hasColumns, err = task.segmentHasFunctionOutputColumns(&datapb.SegmentInfo{
+		ManifestPath: "manifest",
+	}, []string{"101"})
+	s.NoError(err)
+	s.True(hasColumns)
+	mock.UnPatch()
+
+	mock = mockey.Mock(packed.ManifestHasColumns).Return(false, fmt.Errorf("manifest read failed")).Build()
+	_, err = task.segmentHasFunctionOutputColumns(&datapb.SegmentInfo{
+		ID:           10,
+		ManifestPath: "manifest",
+	}, []string{"101"})
+	s.Error(err)
+	s.ErrorContains(err, "check function output columns for segment 10")
+	mock.UnPatch()
+
+	hasColumns, err = task.segmentHasFunctionOutputColumns(&datapb.SegmentInfo{
 		Binlogs: []*datapb.FieldBinlog{
 			{ChildFields: []int64{100, 101}},
 		},

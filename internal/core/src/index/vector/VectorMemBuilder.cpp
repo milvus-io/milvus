@@ -540,7 +540,7 @@ VectorMemBuilder<T>::Build(const VectorBuildInput<T>& input) && {
 }
 
 template <typename T>
-storage::ArtifactPtr
+std::unique_ptr<VectorMemArtifact>
 VectorMemBuilder<T>::Build(const InterimVectorBuildInput<T>& input) && {
     EnsureOpen("build interim index");
     sealed_ = true;

@@ -21,6 +21,8 @@
 #include "index/scalar/text/TextIndexLoader.h"
 #include "index/PackedIndexLoad.h"
 #include "index/LegacyIndexLoad.h"
+#include "index/SingleCellIndexStorageTranslator.h"
+#include "cachinglayer/Manager.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -411,15 +413,15 @@ LoadState(bool use_async,
 
 // Share initialized state with the reader; retain the directory only for
 // file-backed use.
-std::unique_ptr<IIndexReaderBase>
-MakeReader(const TextLoadState& state) {
+std::unique_ptr<TextIndexStorage>
+MakeStorage(const TextLoadState& state, const storage::LoadOptions& opts) {
     AssertInfo(state.directory != nullptr,
                "text load state requires a staging directory");
     AssertInfo(state.engine != nullptr,
                "text load state requires a reader engine");
     AssertInfo(state.null_offsets != nullptr,
                "text load state requires null offsets");
-    return std::make_unique<TextIndexReader>(
+    auto storage = std::make_unique<TextIndexStorage>(
         state.reader_file_backed ? state.directory : nullptr,
         state.engine,
         state.null_offsets,
@@ -427,6 +429,15 @@ MakeReader(const TextLoadState& state) {
         state.params.value_type,
         state.reader_file_backed,
         state.payload_bytes);
+    const auto rows =
+        GetValueFromConfig<int64_t>(opts.params, INDEX_NUM_ROWS_KEY);
+    if (rows && *rows > 0 && *rows != storage->count_) {
+        ThrowInfo(DataFormatBroken,
+                  "text index count {} disagrees with metadata count {}",
+                  storage->count_,
+                  *rows);
+    }
+    return storage;
 }
 
 /**
@@ -446,20 +457,60 @@ TextIndexLoader::Create(OpenedIndexSource source,
     auto loader = std::unique_ptr<TextIndexLoader>(
         new TextIndexLoader(std::move(source), std::move(options)));
     (void)DeriveCaps(loader->options_.params);
-    if (const auto* legacy = std::get_if<LegacyIndexSource>(&loader->source_)) {
+    if (const auto* legacy =
+            std::get_if<LegacyIndexSource>(&*loader->source_)) {
         (void)ReadPersistedEntries(*legacy->source);
     }
     co_return loader;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
-TextIndexLoader::Load(milvus::OpContext* context) {
-    if (auto* packed = std::get_if<PackedIndexSource>(&source_)) {
-        return RunPackedIndexLoad(
-            *packed, options_, &PlanPacked, &FinishPacked, context);
+IndexPtr
+TextIndexLoader::Load(milvus::OpContext* context,
+                      const IndexCacheConfig& cache) {
+    AssertInfo(source_.has_value(),
+               "cached text construction consumed this loader");
+    std::optional<int64_t> count;
+    const auto rows =
+        GetValueFromConfig<int64_t>(options_.params, INDEX_NUM_ROWS_KEY);
+    if (rows && *rows > 0)
+        count = *rows;
+    const auto runtime = ParseRuntimeParams(options_.params);
+    const IndexMetadata metadata{
+        DeriveCaps(options_.params), Domain::Row, runtime.value_type, count};
+    const auto* legacy = std::get_if<LegacyIndexSource>(&*source_);
+    const bool use_async =
+        legacy ? legacy->use_async
+               : std::holds_alternative<
+                     std::shared_ptr<storage::AsyncIndexEntryReader>>(
+                     std::get<PackedIndexSource>(*source_).reader);
+    auto source = std::move(*source_);
+    source_.reset();
+    auto load = [source = std::move(source),
+                 options = options_](OpContext* ctx) mutable {
+        return LoadStorage(source, options, ctx);
+    };
+    auto slot =
+        cachinglayer::Manager::GetInstance().CreateCacheSlot<TextIndexStorage>(
+            std::make_unique<
+                SingleCellIndexStorageTranslator<TextIndexStorage>>(
+                cache, use_async, std::move(load)),
+            context);
+    return std::make_shared<TextIndex>(std::move(slot), metadata);
+}
+
+folly::coro::Task<std::unique_ptr<TextIndexStorage>>
+TextIndexLoader::LoadStorage(OpenedIndexSource& source,
+                             const storage::LoadOptions& options,
+                             milvus::OpContext* context) {
+    if (auto* packed = std::get_if<PackedIndexSource>(&source)) {
+        return RunPackedIndexLoad<std::unique_ptr<TextIndexStorage>>(
+            *packed, options, &PlanPacked, &FinishPackedStorage, context);
     }
-    return RunLegacyLoad(
-        std::get<LegacyIndexSource>(source_), options_, &LoadLegacy, context);
+    return RunLegacyLoad<std::unique_ptr<TextIndexStorage>>(
+        std::get<LegacyIndexSource>(source),
+        options,
+        &LoadLegacyStorage,
+        context);
 }
 
 ReaderCaps
@@ -468,15 +519,15 @@ TextIndexLoader::DeriveCaps(const Config& index_meta) {
     return ReaderCaps{.text_match = true};
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
-TextIndexLoader::LoadLegacy(storage::FileSource& source,
-                            const storage::LoadOptions& opts,
-                            bool use_async) {
+folly::coro::Task<std::unique_ptr<TextIndexStorage>>
+TextIndexLoader::LoadLegacyStorage(storage::FileSource& source,
+                                   const storage::LoadOptions& opts,
+                                   bool use_async) {
     TextLoadState state;
-    auto load = [&]() -> folly::coro::Task<IIndexReaderBasePtr> {
+    auto load = [&]() -> folly::coro::Task<std::unique_ptr<TextIndexStorage>> {
         co_await LoadState(
             use_async, source, opts, ParseRuntimeParams(opts.params), state);
-        co_return MakeReader(state);
+        co_return MakeStorage(state, opts);
     };
     auto result = co_await folly::coro::co_awaitTry(load());
     const auto priority =
@@ -516,10 +567,10 @@ TextIndexLoader::PlanPacked(const storage::IndexEntryDirectory& directory,
     return plan;
 }
 
-folly::coro::Task<IIndexReaderBasePtr>
-TextIndexLoader::FinishPacked(IndexLoadPlan& plan,
-                              const storage::LoadOptions& opts,
-                              bool use_async) {
+folly::coro::Task<std::unique_ptr<TextIndexStorage>>
+TextIndexLoader::FinishPackedStorage(IndexLoadPlan& plan,
+                                     const storage::LoadOptions& opts,
+                                     bool use_async) {
     const auto& state = std::any_cast<const std::shared_ptr<PackedTextState>&>(
         plan.load_context);
     AssertInfo(state != nullptr, "Text packed load context is null");
@@ -565,7 +616,7 @@ TextIndexLoader::FinishPacked(IndexLoadPlan& plan,
     loaded.payload_bytes = state->effective.file_backed
                                ? file_bytes
                                : TextIndexRamPayloadBytes(*engine);
-    co_return MakeReader(loaded);
+    co_return MakeStorage(loaded, opts);
 }
 
 namespace {
