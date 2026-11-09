@@ -66,13 +66,15 @@ func (c *legacyClient) Materialize(ctx context.Context, req *LegacyQueryRequest,
 					mu.Unlock()
 					if tooLarge {
 						resource.ReleaseMaterializeBody(result)
-						callErr = merr.WrapErrParameterInvalidMsg("query results exceed the maxOutputSize Limit %d", maxOutputSize)
+						// This input budget counts duplicate PKs across workers.
+						// Query must reduce them before enforcing the output quota.
+						callErr = merr.Wrapf(merr.ErrServiceUnimplemented, "materialize: pre-reduce size exceeds budget %d", maxOutputSize)
 					} else {
 						callErr = consume(plan, node, result)
 					}
 				}
-				// Preserve an unsupported request or encoding until all workers
-				// finish, so the caller can fall back as one operation.
+				// Preserve a required fallback until all workers finish, so the
+				// caller can discard the replies and rerun as one operation.
 				if errors.Is(toMilvusError(callErr), merr.ErrServiceUnimplemented) {
 					mu.Lock()
 					if unsupported == nil {

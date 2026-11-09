@@ -31,6 +31,8 @@ type LegacyClient interface {
 	Query(ctx context.Context, req *LegacyQueryRequest) (*LegacyQueryResult, error)
 	// Materialize refills only the retained search plans. consume takes body
 	// ownership and can run concurrently; all workers join before returning.
+	// maxOutputSize bounds input before cross-worker deduplication; exceeding it
+	// requests whole-query fallback through ErrServiceUnimplemented.
 	Materialize(ctx context.Context, req *LegacyQueryRequest, fingerprint uint64, maxOutputSize int64, consume func(ShardPlan, qviews.WorkNode, *internalpb.MaterializeResults) error) error
 }
 
