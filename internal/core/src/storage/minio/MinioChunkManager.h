@@ -24,6 +24,7 @@
 #include <aws/core/http/curl/CurlHttpClient.h>
 #include <aws/core/http/standard/StandardHttpRequest.h>
 #include <aws/core/utils/logging/FormattedLogSystem.h>
+#include <aws/core/utils/StringUtils.h>
 #include <aws/s3/S3Client.h>
 #include <fmt/core.h>
 #include <google/cloud/credentials.h>
@@ -89,7 +90,28 @@ S3ErrorMessage(const std::string& func,
         fmt::format(fmt::runtime(fmt_string), std::forward<Args>(args)...);
     oss << "Error in " << func << "[errcode:" << int(err.GetResponseCode())
         << ", exception:" << err.GetExceptionName()
-        << ", errmessage:" << err.GetMessage() << ", params:" << message << "]";
+        << ", errmessage:" << err.GetMessage();
+    auto request_id = err.GetRequestId();
+    if (request_id.empty()) {
+        // HEAD errors may have no response body. S3-compatible services also
+        // use provider-specific headers that the AWS error marshaller may not
+        // recognize. Only inspect request ID headers, not arbitrary headers.
+        for (const auto& [name, value] : err.GetResponseHeaders()) {
+            const auto lower_name =
+                Aws::Utils::StringUtils::ToLower(name.c_str());
+            if (!value.empty() && (lower_name == "x-amz-request-id" ||
+                                   lower_name == "x-cos-request-id" ||
+                                   lower_name == "x-oss-request-id" ||
+                                   lower_name == "x-obs-request-id")) {
+                request_id = value;
+                break;
+            }
+        }
+    }
+    if (!request_id.empty()) {
+        oss << ", request_id:" << request_id;
+    }
+    oss << ", params:" << message << "]";
     return oss.str();
 }
 
