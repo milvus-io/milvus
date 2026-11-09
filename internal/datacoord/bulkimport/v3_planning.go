@@ -118,6 +118,10 @@ func planImportV3(jc *importV3JobContext) error {
 	}
 	totalFragmentBytes := lo.SumBy(fragments, func(f importV3PlanningFragment) int64 { return f.bytes })
 	totalRows := lo.SumBy(fragments, func(f importV3PlanningFragment) int64 { return f.rows })
+	// For a row capped collection the byte target shrinks to about maxRows
+	// rows of this job's measured row size. Both are functions of the same
+	// fragments, so a retry of the planning computes the same target.
+	target = CapSegmentMaxSizeByRows(job, target, totalFragmentBytes, totalRows)
 	// Empty input job (zero total rows): shortcut to Uncommitted/Completed
 	// exactly like the legacy import path does for empty preimports. The
 	// Reshard-stage latency was already recorded by the resharding handler; only

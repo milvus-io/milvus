@@ -34,6 +34,7 @@ func (m *partitionManager) asyncAllocSegment() {
 		partitionID:  m.partitionID,
 		vchannel:     m.vchannel,
 		wal:          m.wal.Get(),
+		rowCapped:    m.collection.RowCapped(),
 	}
 	w.SetLogger(m.Logger().With(
 		mlog.FieldVChannel(m.vchannel),
@@ -57,6 +58,7 @@ type segmentAllocWorker struct {
 	segmentID      uint64            // allocated segment ID
 	storageVersion int64             // storage version determined at first attempt
 	limitation     segmentLimitation // segment limitation determined at first attempt
+	rowCapped      bool              // the collection has no vector field, so the segment is also sealed on rows
 }
 
 // do is the main loop of the segment allocation worker.
@@ -149,6 +151,6 @@ func (w *segmentAllocWorker) initSegmentConfig() error {
 	}
 
 	// Generate growing segment limitation.
-	w.limitation = getSegmentLimitationPolicy().GenerateLimitation(datapb.SegmentLevel_L1)
+	w.limitation = getSegmentLimitationPolicy().GenerateLimitation(datapb.SegmentLevel_L1, w.rowCapped)
 	return nil
 }
