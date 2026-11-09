@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	worknodehandler "github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -19,6 +20,8 @@ import (
 
 // QueryViewClient is the QueryView domain client under HandlerClient.
 type QueryViewClient interface {
+	MaterializeOnView(ctx context.Context, pchannel types.PChannelInfo, req *viewpb.MaterializeOnViewRequest) (*internalpb.MaterializeResults, error)
+
 	// GetQueryPlan generates a shard-level query plan from the StreamingNode owning the shard pchannel.
 	GetQueryPlan(ctx context.Context, shardID qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error)
 
@@ -165,4 +168,10 @@ func queryViewRPCNeedsWaitForReady(err error) bool {
 	}
 	viewErr := viewerror.AsViewError(err)
 	return viewErr.IsOnShutdown() || viewErr.IsNotPrimary() || grpcstatus.Code(err) == codes.Unavailable
+}
+
+func (qvc *queryViewClient) MaterializeOnView(ctx context.Context, pchannel types.PChannelInfo, req *viewpb.MaterializeOnViewRequest) (*internalpb.MaterializeResults, error) {
+	return executeViewQueryRPC(ctx, qvc, pchannel, viewpb.ViewQueryService_MaterializeOnView_FullMethodName, func(ctx context.Context, client viewpb.ViewQueryServiceClient) (*internalpb.MaterializeResults, error) {
+		return client.MaterializeOnView(ctx, req)
+	})
 }

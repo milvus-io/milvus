@@ -6,15 +6,52 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	querytasks "github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	sharedviewquery "github.com/milvus-io/milvus/internal/views/viewquery"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+func TestMaterializeUsesPinnedGrowingSnapshot(t *testing.T) {
+	executor := NewDirectSegmentTaskExecutor(100)
+	req := &internalpb.RetrieveRequest{CollectionID: 10, SchemaVersion: 7, MvccTimestamp: 999}
+	mvcc := &viewpb.QueryPlanMVCC{GrowingTimetick: 101, TransformingTimetick: 99}
+	selected := []snview.SNQuerySegmentTask{
+		{Handle: fakeGrowingSegmentHandle{id: 42}, Request: req, MVCC: mvcc, VChannel: "v1"},
+	}
+	adapter := mockey.Mock(buildGrowingQueryTaskInputs).Return(&segments.Collection{}, []segments.Segment{nil}, nil).Build()
+	defer adapter.UnPatch()
+	patch := mockey.Mock(querytasks.ExecuteMaterializeOnSegments).To(func(_ context.Context, _ *segments.Collection, pinned []segments.Segment, query *querypb.QueryRequest) (*internalpb.MaterializeResults, error) {
+		require.Len(t, pinned, 1)
+		require.Equal(t, []int64{42}, query.SegmentIDs)
+		require.Equal(t, querypb.DataScope_Streaming, query.Scope)
+		require.Equal(t, []string{"v1"}, query.DmlChannels)
+		require.EqualValues(t, 101, query.Req.MvccTimestamp)
+		require.EqualValues(t, 7, query.Req.SchemaVersion)
+		require.EqualValues(t, 321, query.MaterializeSchemaFingerprint)
+		require.EqualValues(t, 1, query.MaterializeFormatVersion)
+		return &internalpb.MaterializeResults{}, nil
+	}).Build()
+	defer patch.UnPatch()
+	_, err := NewScheduler(executor).Materialize(t.Context(), &sharedviewquery.MaterializeTasksWithOptions{QuerySegmentTasks: snview.NewSNQuerySegmentTasks(selected), Options: &viewpb.MaterializeIPCOptions{SchemaFingerprint: 321, FormatVersion: 1}})
+	require.NoError(t, err)
+	require.EqualValues(t, 999, req.MvccTimestamp)
+	_, err = NewScheduler(executor).Materialize(t.Context(), qnview.NewQNQuerySegmentTasks([]qnview.QNQuerySegmentTask{{}}))
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	adapter.UnPatch()
+	_, err = executor.Materialize(t.Context(), selected, &viewpb.MaterializeIPCOptions{})
+	require.Error(t, err, "unavailable native collection must not execute")
+}
 
 func TestDirectSegmentTaskExecutorSearchBuildsStreamingRequestFromHandles(t *testing.T) {
 	runner := &fakeSearchTaskRunner{result: &internalpb.SearchResults{NumQueries: 10}}

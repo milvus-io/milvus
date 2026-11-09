@@ -419,6 +419,8 @@ service ViewQueryService {
     rpc SearchOnView(SearchOnViewRequest) returns (SearchOnViewResponse) {}
     // QueryOnView executes a query (retrieve by expression) on segments belonging to the given view version.
     rpc QueryOnView(QueryOnViewRequest) returns (QueryOnViewResponse) {}
+    // Fetch retained requery rows directly from this worker as Arrow IPC.
+    rpc MaterializeOnView(MaterializeOnViewRequest) returns (internal.MaterializeResults) {}
     rpc StatisticsOnView(StatisticsOnViewRequest) returns (StatisticsOnViewResponse) {}
 }
 
@@ -467,6 +469,22 @@ message QueryOnViewRequest {
 message QueryOnViewResponse {
     // TODO: replace with native view result types once legacy internal protos are removed.
     internal.RetrieveResults legacy_results = 1;
+}
+
+message MaterializeOnViewRequest {
+    // Retrieve fields by primary keys on the retained query snapshot.
+    oneof request {
+        QueryOnViewRequest query_by_pk = 1;
+    }
+    // IPC transport options shared by request implementations.
+    MaterializeIPCOptions ipc_options = 2;
+}
+
+message MaterializeIPCOptions {
+    // Arrow Schema already held by the caller; 0 means no cached Schema.
+    uint64 schema_fingerprint = 1;
+    // Materialize response encoding understood by the caller.
+    int32 format_version = 2;
 }
 
 message QueryPayloadReuse {

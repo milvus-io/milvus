@@ -6,6 +6,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	sharedviewquery "github.com/milvus-io/milvus/internal/views/viewquery"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -14,6 +15,7 @@ var _ sharedviewquery.Scheduler = (*Scheduler)(nil)
 type SegmentTaskExecutor interface {
 	Search(ctx context.Context, tasks []qnview.QNSearchSegmentTask) (*internalpb.SearchResults, error)
 	Query(ctx context.Context, tasks []qnview.QNQuerySegmentTask) (*internalpb.RetrieveResults, error)
+	Materialize(ctx context.Context, tasks []qnview.QNQuerySegmentTask, options *viewpb.MaterializeIPCOptions) (*internalpb.MaterializeResults, error)
 }
 
 type Scheduler struct {

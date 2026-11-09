@@ -459,6 +459,5 @@ func (s *MaterializeSuite) upsertThenSearch(ctx context.Context, collection stri
 }
 
 func TestMaterialize(t *testing.T) {
-	t.Skip("IT introduced by #54600: QueryView adaptation and acceptance deferred to a separate PR")
 	suite.Run(t, new(MaterializeSuite))
 }

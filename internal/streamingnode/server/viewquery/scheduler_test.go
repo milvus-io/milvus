@@ -83,6 +83,7 @@ func TestSchedulerReturnsExecutorError(t *testing.T) {
 }
 
 type fakeSNSegmentTaskExecutor struct {
+	SegmentTaskExecutor
 	searchTasks  []snview.SNSearchSegmentTask
 	searchResult *internalpb.SearchResults
 	searchErr    error
