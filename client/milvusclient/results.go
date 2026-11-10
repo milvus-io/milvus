@@ -43,7 +43,7 @@ type ResultSet struct {
 	// Nil when the search request did not include a Highlighter, or when the
 	// server returned no highlight data for the matched rows.
 	Highlights map[string][]Highlight
-	Scores             []float32 // distance to the target vector
+	Scores     []float32 // distance to the target vector
 	// ElementOffsets holds, for an element-level search, the offset of the matched struct element
 	// within its row, one per hit. It is nil for other searches.
 	ElementOffsets []int64
