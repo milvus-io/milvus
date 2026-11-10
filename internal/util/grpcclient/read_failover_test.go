@@ -83,8 +83,10 @@ func TestReadFailFastOnConnectionError(t *testing.T) {
 }
 
 func TestReadRetriesTransientRPCError(t *testing.T) {
-	base := &ClientBase[*mockClient]{MaxAttempts: 10, InitialBackoff: 0.001, MaxBackoff: 0.001,
-		minResetInterval: time.Hour, isNode: true}
+	base := &ClientBase[*mockClient]{
+		MaxAttempts: 10, InitialBackoff: 0.001, MaxBackoff: 0.001,
+		minResetInterval: time.Hour, isNode: true,
+	}
 	base.lastReset.Store(time.Now()) // Keep the established connection for the retry.
 	base.grpcClient = &clientConnWrapper[*mockClient]{client: &mockClient{}}
 	calls := 0
@@ -101,8 +103,10 @@ func TestReadRetriesTransientRPCError(t *testing.T) {
 }
 
 func TestReadFailedReconnectReturnsAfterOneRPC(t *testing.T) {
-	base := &ClientBase[*mockClient]{MaxAttempts: 10, InitialBackoff: 0.001, MaxBackoff: 0.001,
-		isNode: true, role: "querynode-1906"}
+	base := &ClientBase[*mockClient]{
+		MaxAttempts: 10, InitialBackoff: 0.001, MaxBackoff: 0.001,
+		isNode: true, role: "querynode-1906",
+	}
 	base.sess = sessionutil.NewMockSession(t)
 	base.grpcClient = &clientConnWrapper[*mockClient]{client: &mockClient{}}
 	dials := 0

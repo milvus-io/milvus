@@ -1629,15 +1629,14 @@ func (s *LBPolicySuite) TestDeadWorkerConnectionFailsOverBeforeDeadline() {
 	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil)
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, available []int64, _ int64) (int64, error) {
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, available []int64, _ int64) (int64, func(), error) {
 		for _, node := range available {
 			if node == 1 {
-				return 1, nil
+				return 1, func() {}, nil
 			}
 		}
-		return available[0], nil
+		return available[0], func() {}, nil
 	})
-	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
 	base := grpcclient.NewClientBase[*mocks.MockQueryNodeClient](&paramtable.Get().QueryNodeGrpcClientCfg, "test")
 	base.DialTimeout = 20 * time.Millisecond
 	// Localhost port 0 cannot accept a TCP connection; no remote service required.
@@ -1685,8 +1684,7 @@ func (s *LBPolicySuite) TestTransientWorkerRPCDoesNotBlacklistReplica() {
 	s.mgr.EXPECT().GetShard(mock.Anything, true, s.dbName, s.collectionName, s.collectionID, channel).Return(nodes, nil)
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().RegisterNodeInfo(mock.Anything)
-	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
-	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
+	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), func() {}, nil)
 
 	base := grpcclient.NewClientBase[*mocks.MockQueryNodeClient](&paramtable.Get().QueryNodeGrpcClientCfg, "test")
 	base.SetGetAddrFunc(func() (string, error) { return listener.Addr().String(), nil })

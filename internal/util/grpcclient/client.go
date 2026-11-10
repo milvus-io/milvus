@@ -256,7 +256,7 @@ func (c *ClientBase[T]) GetGrpcClient(ctx context.Context) (*clientConnWrapper[T
 		// A connection is shared across requests, so its dial must outlive the
 		// caller that first noticed the missing connection. Keep context values
 		// for tracing, but give the dial its own cancellation lifetime.
-		dialCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+		dialCtx, cancel := context.WithCancel(context.WithoutCancel(ctx)) //nolint:gosec // G118: cancel is stored in pending.cancel and invoked by finishConnectionAttempt and Close.
 		pending = &connectionAttempt[T]{done: make(chan struct{}), cancel: cancel}
 		c.connecting = pending
 		go c.finishConnectionAttempt(dialCtx, pending)
