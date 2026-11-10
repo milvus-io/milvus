@@ -181,7 +181,36 @@ TEST(Growing, RealCount) {
     ASSERT_EQ(0, segment->get_real_count());
 }
 
-TEST(Growing, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
+class GrowingManifestLoadTest : public ::testing::TestWithParam<bool> {
+ protected:
+    void
+    SetUp() override {
+        async_enabled_ = storagev2translator::StorageV2AsyncLoadEnabled();
+        auto& admission = storage::LoadAdmissionController::GetInstance();
+        bytes_ = admission.CapacityBytes();
+        slots_ = admission.CapacitySlots();
+        storagev2translator::SetStorageV2AsyncLoadEnabled(GetParam());
+        admission.SetCapacityBytes(0);
+        admission.SetCapacitySlots(0);
+    }
+
+    void
+    TearDown() override {
+        storagev2translator::SetStorageV2AsyncLoadEnabled(async_enabled_);
+        auto& admission = storage::LoadAdmissionController::GetInstance();
+        admission.SetCapacityBytes(bytes_);
+        admission.SetCapacitySlots(slots_);
+    }
+
+ private:
+    bool async_enabled_;
+    size_t bytes_;
+    size_t slots_;
+};
+
+INSTANTIATE_TEST_SUITE_P(LoadModes, GrowingManifestLoadTest, ::testing::Bool());
+
+TEST_P(GrowingManifestLoadTest, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
     auto schema = std::make_shared<Schema>();
     AddStorageV3SystemFields(schema);
     auto pk = schema->AddDebugField("pk", DataType::INT64);
@@ -201,7 +230,8 @@ TEST(Growing, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
     schema->set_primary_field_id(pk);
 
     auto base_path = (std::filesystem::path(TestLocalPath) /
-                      "growing_recovery_checkpoint_row_cap")
+                      (GetParam() ? "growing_recovery_checkpoint_row_cap_async"
+                                  : "growing_recovery_checkpoint_row_cap_sync"))
                          .string();
     std::filesystem::remove_all(base_path);
     milvus::test::V3SegmentTestData test_data(
@@ -237,22 +267,30 @@ TEST(Growing, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
             .Value();
     const auto low_tasks =
         milvus::monitor::internal_storage_pool_task_submitted_total_low.Value();
-    auto& admission = storage::LoadAdmissionController::GetInstance();
-    const auto slots = admission.CapacitySlots();
-    admission.SetCapacitySlots(1);
-    auto restore_slots =
-        folly::makeGuard([&] { admission.SetCapacitySlots(slots); });
-    auto lease = folly::coro::blockingWait(
-        admission.AcquireAsync({0, 1}, storage::LoadAdmissionPriority::High));
-    auto load = std::async(std::launch::async,
-                           [&] { segment->Load(trace_ctx, nullptr); });
-    EXPECT_EQ(load.wait_for(std::chrono::milliseconds(100)),
-              std::future_status::timeout);
-    lease.Release();
-    load.get();
-    EXPECT_EQ(milvus::monitor::internal_storage_pool_task_submitted_total_high
-                  .Value(),
-              high_tasks);
+    if (GetParam()) {
+        auto& admission = storage::LoadAdmissionController::GetInstance();
+        admission.SetCapacitySlots(1);
+        auto lease = folly::coro::blockingWait(admission.AcquireAsync(
+            {0, 1}, storage::LoadAdmissionPriority::High));
+        auto load = std::async(std::launch::async,
+                               [&] { segment->Load(trace_ctx, nullptr); });
+        EXPECT_EQ(load.wait_for(std::chrono::milliseconds(100)),
+                  std::future_status::timeout);
+        lease.Release();
+        load.get();
+        EXPECT_EQ(
+            milvus::monitor::internal_storage_pool_task_submitted_total_high
+                .Value(),
+            high_tasks);
+    } else {
+        // Both optional admission limits are disabled; synchronous reads must
+        // still execute on the bounded HIGH pool.
+        segment->Load(trace_ctx, nullptr);
+        EXPECT_GT(
+            milvus::monitor::internal_storage_pool_task_submitted_total_high
+                .Value(),
+            high_tasks);
+    }
     EXPECT_EQ(
         milvus::monitor::internal_storage_pool_task_submitted_total_low.Value(),
         low_tasks);
@@ -285,15 +323,17 @@ TEST(Growing, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
     std::filesystem::remove_all(base_path);
 }
 
-TEST(Growing, LoadStorageV3ManifestRejectsShortRequiredRows) {
+TEST_P(GrowingManifestLoadTest, LoadStorageV3ManifestRejectsShortRequiredRows) {
     auto schema = std::make_shared<Schema>();
     AddStorageV3SystemFields(schema);
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     schema->set_primary_field_id(pk);
 
-    auto base_path = (std::filesystem::path(TestLocalPath) /
-                      "growing_recovery_short_required_rows")
-                         .string();
+    auto base_path =
+        (std::filesystem::path(TestLocalPath) /
+         (GetParam() ? "growing_recovery_short_required_rows_async"
+                     : "growing_recovery_short_required_rows_sync"))
+            .string();
     std::filesystem::remove_all(base_path);
     milvus::test::V3SegmentTestData test_data(
         schema, 1, 2, 1, TestLocalPath, base_path);
@@ -313,20 +353,27 @@ TEST(Growing, LoadStorageV3ManifestRejectsShortRequiredRows) {
         CreateGrowingSegment(schema, empty_index_meta, load_info.segmentid());
     segment->SetLoadInfo(load_info);
     milvus::tracer::TraceContext trace_ctx;
-    ASSERT_ANY_THROW(segment->Load(trace_ctx, nullptr));
+    try {
+        segment->Load(trace_ctx, nullptr);
+        FAIL() << "expected checkpoint row-count mismatch";
+    } catch (const SegcoreError& error) {
+        EXPECT_NE(std::string(error.what()).find("fewer rows than checkpoint"),
+                  std::string::npos);
+    }
     EXPECT_EQ(segment->get_row_count(), 0);
 
     std::filesystem::remove_all(base_path);
 }
 
-TEST(Growing, LoadStorageV3ManifestRejectsMissingDataFile) {
+TEST_P(GrowingManifestLoadTest, LoadStorageV3ManifestRejectsMissingDataFile) {
     auto schema = std::make_shared<Schema>();
     AddStorageV3SystemFields(schema);
     auto pk = schema->AddDebugField("pk", DataType::INT64);
     schema->set_primary_field_id(pk);
 
     auto base_path = (std::filesystem::path(TestLocalPath) /
-                      "growing_recovery_missing_data_file")
+                      (GetParam() ? "growing_recovery_missing_data_file_async"
+                                  : "growing_recovery_missing_data_file_sync"))
                          .string();
     std::filesystem::remove_all(base_path);
     milvus::test::V3SegmentTestData test_data(
