@@ -16,6 +16,7 @@
 #include <string.h>
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <initializer_list>
 #include <iostream>
@@ -56,6 +57,7 @@
 #include "knowhere/dataset.h"
 #include "knowhere/expected.h"
 #include "knowhere/index/index_node.h"
+#include "knowhere/index/index_factory.h"
 #include "knowhere/object.h"
 #include "knowhere/operands.h"
 #include "knowhere/sparse_utils.h"
@@ -71,6 +73,7 @@
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/FileManager.h"
 #include "storage/InsertData.h"
+#include "storage/LocalChunkManager.h"
 #include "storage/PayloadReader.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
@@ -1810,6 +1813,169 @@ TEST(Indexing, DiskAnnEmbListBuildFromBinlog) {
 
 namespace {
 
+class ValidityCountingChunkManager final : public storage::LocalChunkManager {
+ public:
+    using LocalChunkManager::LocalChunkManager;
+
+    uint64_t
+    Size(const std::string& path) override {
+        if (milvus::index::IsValidDataDiskFileSlice(path))
+            ++sizes;
+        return LocalChunkManager::Size(path);
+    }
+
+    uint64_t
+    Read(const std::string& path, void* data, uint64_t bytes) override {
+        return Read(path, 0, data, bytes);
+    }
+
+    uint64_t
+    Read(const std::string& path,
+         uint64_t offset,
+         void* data,
+         uint64_t bytes) override {
+        if (milvus::index::IsValidDataDiskFileSlice(path))
+            ++reads;
+        return LocalChunkManager::Read(path, offset, data, bytes);
+    }
+
+    std::atomic<size_t> sizes{0};
+    std::atomic<size_t> reads{0};
+};
+
+void
+RunNullableDiskLoad(int32_t version, bool all_null) {
+    SCOPED_TRACE(::testing::Message()
+                 << "index_version=" << version << ", all_null=" << all_null);
+    constexpr int64_t dim = 4;
+    constexpr int64_t vectors = 1000;
+    constexpr int64_t rows = vectors * 3 + 1;
+    const int64_t collection_id = 5481800 + version * 2 + all_null;
+    auto bitmap = MakeValidBitmap(rows, false);
+    if (!all_null) {
+        for (int64_t i = 0; i < vectors; ++i) {
+            const auto row = i * 2;
+            bitmap[row / 8] |= static_cast<uint8_t>(1U << (row % 8));
+        }
+    }
+    std::default_random_engine rng(42);
+    std::normal_distribution<float> dist(0.0F, 1.0F);
+    std::vector<float> values(all_null ? 0 : vectors * dim);
+    for (auto& value : values) value = dist(rng);
+
+    const auto storage_config = get_default_local_storage_config();
+    auto manager = std::make_shared<ValidityCountingChunkManager>(
+        storage_config.root_path);
+    const auto field_meta = gen_field_meta(
+        collection_id, 2, 3, 100, DataType::VECTOR_FLOAT, DataType::NONE, true);
+    storage::IndexMeta index_meta{3,
+                                  100,
+                                  collection_id,
+                                  1,
+                                  "test",
+                                  "vec_field",
+                                  DataType::VECTOR_FLOAT,
+                                  dim};
+    storage::FileManagerContext context(
+        field_meta,
+        index_meta,
+        manager,
+        storage::InitArrowFileSystem(storage_config));
+    const auto index_type = knowhere::IndexEnum::INDEX_DISKANN;
+    const auto metric_type = knowhere::metric::COSINE;
+    const milvus::index::CreateIndexInfo info{
+        .field_type = DataType::VECTOR_FLOAT,
+        .index_type = index_type,
+        .metric_type = metric_type,
+        .index_engine_version = version,
+        .dim = dim,
+    };
+    auto index =
+        milvus::index::IndexFactory::GetInstance().CreateIndex(info, context);
+    auto dataset =
+        knowhere::GenDataSet(all_null ? 0 : vectors, dim, values.data());
+    dataset->SetIdMapData(
+        knowhere::IdMapData::FromValidBitmap(bitmap.data(), rows));
+    Config build_conf{
+        {knowhere::meta::METRIC_TYPE, metric_type},
+        {knowhere::meta::DIM, dim},
+        {milvus::index::DISK_ANN_MAX_DEGREE, "24"},
+        {milvus::index::DISK_ANN_SEARCH_LIST_SIZE, "56"},
+        {milvus::index::DISK_ANN_PQ_CODE_BUDGET, "0.001"},
+        {milvus::index::DISK_ANN_BUILD_DRAM_BUDGET, "2"},
+        {milvus::index::DISK_ANN_BUILD_THREAD_NUM, "2"},
+    };
+    ASSERT_NO_THROW(index->BuildWithDataset(dataset, build_conf));
+    const auto files = index->Upload()->GetIndexFiles();
+    index.reset();
+
+    auto load_conf = generate_load_conf(index_type, metric_type, rows);
+    load_conf["index_files"] = files;
+    load_conf[knowhere::meta::DIM] = dim;
+    load_conf[milvus::LOAD_PRIORITY] = proto::common::LoadPriority::HIGH;
+    bool needs_external_validity = true;
+    if (!all_null) {
+        // Determine the expected behavior through the public backend contract.
+        auto file_manager =
+            std::make_shared<storage::DiskFileManagerImpl>(context);
+        auto native = knowhere::IndexFactory::Instance().Create<float>(
+            index_type,
+            version,
+            knowhere::Pack(std::shared_ptr<milvus::FileManager>(file_manager)));
+        ASSERT_TRUE(native.has_value());
+        auto probe = load_conf;
+        probe[milvus::index::DISK_ANN_PREFIX_PATH] =
+            file_manager->GetLocalIndexObjectPrefix();
+        probe[milvus::index::DISK_ANN_THREADS_NUM] = 2;
+        const auto requirements =
+            native.value().InspectLoadRequirements({}, probe);
+        ASSERT_TRUE(requirements.has_value()) << requirements.what();
+        needs_external_validity = requirements.value().needs_external_validity;
+    }
+    manager->sizes = 0;
+    manager->reads = 0;
+    auto loaded =
+        milvus::index::IndexFactory::GetInstance().CreateIndex(info, context);
+    auto* vec_index = dynamic_cast<milvus::index::VectorIndex*>(loaded.get());
+    ASSERT_NE(vec_index, nullptr);
+    ASSERT_NO_THROW(vec_index->Load(tracer::TraceContext{}, load_conf));
+    if (needs_external_validity) {
+        EXPECT_GT(manager->reads.load(), 0);
+    } else {
+        EXPECT_EQ(manager->sizes.load(), 0);
+        EXPECT_EQ(manager->reads.load(), 0);
+    }
+    EXPECT_TRUE(vec_index->HasValidData());
+    EXPECT_EQ(vec_index->GetValidCount(), all_null ? 0 : vectors);
+    for (int64_t row = 0; row < rows; ++row) {
+        EXPECT_EQ(vec_index->IsRowValid(row),
+                  !all_null && row < vectors * 2 && row % 2 == 0)
+            << row;
+    }
+    if (!all_null) {
+        TargetBitmap excluded(rows, true);
+        const int64_t allowed = (vectors - 1) * 2;
+        excluded.reset(allowed);
+        SearchInfo search_info;
+        search_info.topk_ = 1;
+        search_info.metric_type_ = metric_type;
+        search_info.search_params_ = {
+            {milvus::index::DISK_ANN_QUERY_LIST, 128}};
+        SearchResult result;
+        vec_index->Query(
+            knowhere::GenDataSet(1, dim, values.data() + (vectors - 1) * dim),
+            search_info,
+            BitsetView(excluded),
+            nullptr,
+            result);
+        ASSERT_EQ(result.seg_offsets_.size(), 1);
+        EXPECT_EQ(result.seg_offsets_[0], allowed);
+    }
+    vec_index->CleanLocalData();
+    boost::filesystem::remove_all(
+        fmt::format("{}{}", TestRemotePath, collection_id));
+}
+
 void
 RunNullableElementLevelDiskSearch(bool more_rows_than_vectors,
                                   bool mmap_id_map) {
@@ -2126,6 +2292,14 @@ RunElementNullableDiskSearch(bool mmap_id_map) {
 }
 
 }  // namespace
+
+TEST(Indexing, DiskAnnNullableLoadUsesBackendRequirements) {
+    const auto latest = knowhere::Version::GetMaximumVersion().VersionNumber();
+    for (const auto version : {latest - 1, latest}) {
+        RunNullableDiskLoad(version, false);
+        RunNullableDiskLoad(version, true);
+    }
+}
 
 TEST(Indexing, DiskAnnElementNullableElementLevelKeepsElementValidity) {
     RunElementNullableDiskSearch(false);
