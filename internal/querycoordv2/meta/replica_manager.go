@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"sync"
 	"time"
 
 	"github.com/samber/lo"
@@ -74,17 +73,9 @@ type ReplicaManagerInterface interface {
 // Add the interface implementation assertion
 var _ ReplicaManagerInterface = (*ReplicaManager)(nil)
 
-// ReplicaUpdateHook coordinates publication with consumers of replica ownership.
-// The hook must synchronously call publish exactly once. The collection's replica
-// write lock is held, so the hook must not invoke ReplicaManager write methods.
-type ReplicaUpdateHook func(collectionID int64, publish func())
-
 type ReplicaManager struct {
 	// per-collection write lock, auto-created/recycled by KeyLock
 	collLock *lock.KeyLock[int64]
-
-	replicaUpdateMu   sync.RWMutex
-	replicaUpdateHook ReplicaUpdateHook
 
 	// flat index: replicaID -> *Replica, lock-free read for Get()
 	flatReplicas *typeutil.ConcurrentMap[int64, *Replica]
@@ -115,34 +106,6 @@ func NewReplicaManager(idAllocator func() (int64, error), catalog metastore.Quer
 		queryInvisibleReplicas: typeutil.NewConcurrentSet[int64](),
 		idAllocator:            idAllocator,
 		catalog:                catalog,
-	}
-}
-
-// SetReplicaUpdateHook installs the publication boundary used by the task
-// scheduler. A nil hook restores publication without additional coordination.
-func (m *ReplicaManager) SetReplicaUpdateHook(hook ReplicaUpdateHook) {
-	m.replicaUpdateMu.Lock()
-	m.replicaUpdateHook = hook
-	m.replicaUpdateMu.Unlock()
-}
-
-// publishReplicas applies one complete in-memory update under the publication
-// hook. Persistence must have succeeded, and the caller must hold collLock.
-func (m *ReplicaManager) publishReplicas(collectionID int64, replicas []*Replica, removals []int64) {
-	if len(replicas) == 0 && len(removals) == 0 {
-		return
-	}
-	publish := func() {
-		m.putReplicasInMemoryRaw(collectionID, replicas...)
-		m.removeReplicasInMemoryRaw(collectionID, removals...)
-	}
-	m.replicaUpdateMu.RLock()
-	hook := m.replicaUpdateHook
-	m.replicaUpdateMu.RUnlock()
-	if hook != nil {
-		hook(collectionID, publish)
-	} else {
-		publish()
 	}
 }
 
@@ -318,7 +281,16 @@ func (m *ReplicaManager) SpawnWithReplicaConfig(ctx context.Context, params Spaw
 		}
 	}
 
-	m.publishReplicas(params.CollectionID, replicas, toRemove)
+	m.putReplicasInMemory(params.CollectionID, replicas...)
+	if len(toRemove) > 0 {
+		for _, replicaID := range toRemove {
+			if replica, ok := m.flatReplicas.Get(replicaID); ok {
+				metrics.QueryCoordResourceGroupReplicaTotal.WithLabelValues(replica.GetResourceGroup()).Dec()
+				metrics.QueryCoordReplicaRONodeTotal.Add(float64(-replica.RONodesCount()))
+			}
+		}
+		m.removeReplicasInMemory(params.CollectionID, toRemove...)
+	}
 	return replicas, nil
 }
 
@@ -460,11 +432,6 @@ func (m *ReplicaManager) put(ctx context.Context, collectionID typeutil.UniqueID
 // putReplicasInMemory puts replicas into in-memory indexes.
 // Caller must hold collLock for the collection.
 func (m *ReplicaManager) putReplicasInMemory(collectionID typeutil.UniqueID, replicas ...*Replica) {
-	m.publishReplicas(collectionID, replicas, nil)
-}
-
-// putReplicasInMemoryRaw is called only within publishReplicas.
-func (m *ReplicaManager) putReplicasInMemoryRaw(collectionID typeutil.UniqueID, replicas ...*Replica) {
 	if len(replicas) == 0 {
 		return
 	}
@@ -594,11 +561,16 @@ func (m *ReplicaManager) RemoveCollection(ctx context.Context, collectionID type
 	}
 
 	if replicas, ok := m.coll2Replicas.Get(collectionID); ok {
-		replicaIDs := make([]int64, 0, len(replicas))
+		// Remove all replica of collection and remove collection from coll2Replicas.
+		// coll2Replicas is updated before flatReplicas so the invariant
+		// "visible via GetByCollection => visible via Get" holds during deletion.
+		m.coll2Replicas.Remove(collectionID)
 		for _, replica := range replicas {
-			replicaIDs = append(replicaIDs, replica.GetID())
+			metrics.QueryCoordResourceGroupReplicaTotal.WithLabelValues(replica.GetResourceGroup()).Dec()
+			metrics.QueryCoordReplicaRONodeTotal.Add(-float64(replica.RONodesCount()))
+			m.flatReplicas.Remove(replica.GetID())
+			m.queryInvisibleReplicas.Remove(replica.GetID())
 		}
-		m.removeReplicasInMemory(collectionID, replicaIDs...)
 	}
 	return nil
 }
@@ -625,6 +597,12 @@ func (m *ReplicaManager) removeReplicas(ctx context.Context, collectionID int64,
 	if err := m.catalog.ReleaseReplica(ctx, collectionID, replicaIDs...); err != nil {
 		return err
 	}
+	for _, replicaID := range replicaIDs {
+		if replica, ok := m.flatReplicas.Get(replicaID); ok {
+			metrics.QueryCoordResourceGroupReplicaTotal.WithLabelValues(replica.GetResourceGroup()).Dec()
+			metrics.QueryCoordReplicaRONodeTotal.Add(float64(-replica.RONodesCount()))
+		}
+	}
 	m.removeReplicasInMemory(collectionID, replicaIDs...)
 	return nil
 }
@@ -634,14 +612,6 @@ func (m *ReplicaManager) removeReplicas(ctx context.Context, collectionID int64,
 // a replica that is visible via GetByCollection but missing from Get(id).
 // Caller must hold collLock for the collection.
 func (m *ReplicaManager) removeReplicasInMemory(collectionID typeutil.UniqueID, replicaIDs ...int64) {
-	m.publishReplicas(collectionID, nil, replicaIDs)
-}
-
-// removeReplicasInMemoryRaw is called only within publishReplicas.
-func (m *ReplicaManager) removeReplicasInMemoryRaw(collectionID typeutil.UniqueID, replicaIDs ...int64) {
-	if len(replicaIDs) == 0 {
-		return
-	}
 	old, ok := m.coll2Replicas.Get(collectionID)
 	if ok {
 		removeSet := typeutil.NewSet(replicaIDs...)
@@ -659,10 +629,6 @@ func (m *ReplicaManager) removeReplicasInMemoryRaw(collectionID typeutil.UniqueI
 	}
 
 	for _, replicaID := range replicaIDs {
-		if replica, ok := m.flatReplicas.Get(replicaID); ok {
-			metrics.QueryCoordResourceGroupReplicaTotal.WithLabelValues(replica.GetResourceGroup()).Dec()
-			metrics.QueryCoordReplicaRONodeTotal.Add(-float64(replica.RONodesCount()))
-		}
 		m.flatReplicas.Remove(replicaID)
 		m.queryInvisibleReplicas.Remove(replicaID)
 	}
