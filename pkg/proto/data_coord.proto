@@ -499,6 +499,21 @@ message SegmentInfo {
   // Exclusive TransformLog replay start for this exact data/manifest revision.
   // Persisted with the base; compaction inherits its actual input coverage.
   uint64 transform_start_after_timetick = 42;
+  repeated SegmentIndexSummary index_summaries = 43;
+}
+
+// Completed index inventory. File ownership remains in the pinned manifest.
+message SegmentIndexSummary {
+  int64 index_id = 1;
+  int64 field_id = 2;
+  int64 build_id = 3;
+  bool has_artifact = 4;
+  int64 index_version = 5;
+  uint64 serialized_size = 6;
+  uint64 mem_size = 7;
+  int32 vector_engine_version = 8;
+  int32 scalar_engine_version = 9;
+  string index_type = 10;
 }
 
 // Statistics carries aggregate metrics for a segment so DataCoord can make
