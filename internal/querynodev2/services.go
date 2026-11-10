@@ -1555,16 +1555,16 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 	}
 	defer node.lifetime.Done()
 
-	// QV resources are not tracked by the legacy delta tracker. Include both
-	// inventories in a full report, preserving any legacy resources/LeaderViews
-	// still present on this node during a transition.
+	// QV mutations have their own monotonic timestamp. Unchanged requests skip
+	// sampling; changed mixed inventories use a full report because QV entries
+	// are not tracked by the legacy delta tracker.
 	queryViewResources := node.queryViewSegments.Load()
 	node.distDeltaTracker.mu.Lock()
 	lastModifyTs := node.getDistributionModifyTS()
 	if queryViewResources != nil {
-		lastModifyTs = max(lastModifyTs, time.Now().UnixNano())
+		lastModifyTs = max(lastModifyTs, queryViewResources.DistributionModifyTS())
 	}
-	if queryViewResources == nil && !hasDataDistributionChange(req, lastModifyTs) {
+	if !hasDataDistributionChange(req, lastModifyTs) {
 		node.distDeltaTracker.mu.Unlock()
 		resp := &querypb.GetDataDistributionResponse{
 			Status:       merr.Success(),

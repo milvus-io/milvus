@@ -63,8 +63,9 @@ func TestQueryViewDataDistributionUsesPhysicalResources(t *testing.T) {
 		require.NoError(t, merr.CheckRPCCall(unchanged, err))
 		require.Empty(t, unchanged.GetSegments())
 		node.queryViewSegments.Store(resources)
+		version := mockey.Mock((*qnview.SegmentResourceManager).DistributionModifyTS).Return(int64(101)).Build()
 		infos := []*querypb.SegmentVersionInfo{{ID: 10, Collection: 1, ManifestPath: "segment/_manifest/7.manifest"}}
-		mockey.Mock((*qnview.SegmentResourceManager).SegmentDistribution).Return(infos).Build()
+		report := mockey.Mock((*qnview.SegmentResourceManager).SegmentDistribution).Return(infos).Build()
 		response, err := node.GetDataDistribution(t.Context(), &querypb.GetDataDistributionRequest{LastUpdateTs: 100, SupportDelta: true})
 		require.NoError(t, merr.CheckRPCCall(response, err))
 		require.False(t, response.GetIsDelta())
@@ -72,6 +73,16 @@ func TestQueryViewDataDistributionUsesPhysicalResources(t *testing.T) {
 		require.EqualValues(t, 1, response.GetTotalSegmentCount())
 		require.EqualValues(t, 5, response.GetNodeID())
 		require.Empty(t, response.GetLeaderViews(), "serving topology belongs to QueryViews")
+		unchanged, err = node.GetDataDistribution(t.Context(), &querypb.GetDataDistributionRequest{LastUpdateTs: 101, SupportDelta: true})
+		require.NoError(t, merr.CheckRPCCall(unchanged, err))
+		require.Empty(t, unchanged.GetSegments())
+		require.Equal(t, 1, report.Times(), "unchanged requests must not sample or clone QV resources")
+		version.Return(int64(102))
+		response, err = node.GetDataDistribution(t.Context(), &querypb.GetDataDistributionRequest{LastUpdateTs: 101, SupportDelta: true})
+		require.NoError(t, merr.CheckRPCCall(response, err))
+		require.False(t, response.GetIsDelta())
+		require.Equal(t, infos, response.GetSegments())
+		require.Equal(t, 2, report.Times())
 	})
 }
 
@@ -121,6 +132,7 @@ func TestQueryViewDataDistributionPreservesLegacyResources(t *testing.T) {
 	mockey.PatchConvey("a QV manager must not hide legacy resources on the same node", t, func() {
 		node := queryViewDistributionTestNode()
 		node.queryViewSegments.Store(&qnview.SegmentResourceManager{})
+		mockey.Mock((*qnview.SegmentResourceManager).DistributionModifyTS).Return(int64(101)).Build()
 		mockey.Mock((*qnview.SegmentResourceManager).SegmentDistribution).Return([]*querypb.SegmentVersionInfo{{ID: 10}}).Build()
 		segment := &distributionLegacySegment{}
 		mockey.Mock((*distributionLegacySegment).ID).Return(int64(20)).Build()

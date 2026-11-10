@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
@@ -29,7 +30,8 @@ var _ nodescheduler.Task = schedulerTaskFunc(nil)
 
 type transformStartSegment struct {
 	TransformSegment
-	startAfter uint64
+	startAfter  uint64
+	onTransform func()
 }
 
 func (s *transformStartSegment) UnwrapTransformSegment() TransformSegment {
@@ -54,4 +56,13 @@ func (s *transformStartSegment) Collection() *segments.Collection {
 		return nil
 	}
 	return readable.Collection()
+}
+
+// Applying a delete can advance the physical delta watermark without a new View.
+func (s *transformStartSegment) ApplyTransform(ctx context.Context, entry *streamingpb.TransformLogEntry) error {
+	err := s.TransformSegment.ApplyTransform(ctx, entry)
+	if entry.GetDelete() != nil && s.onTransform != nil {
+		s.onTransform()
+	}
+	return err
 }
