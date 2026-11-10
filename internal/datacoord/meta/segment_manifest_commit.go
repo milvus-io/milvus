@@ -546,6 +546,16 @@ func (m *Meta) commitSegmentManifestLocked(ctx context.Context, commit SegmentMa
 			return err
 		}
 		updated.ManifestPath = manifestPath
+		for _, staged := range stagedIndexes {
+			if staged.Record == nil {
+				continue
+			}
+			ApplyIndexSummary(updated.SegmentInfo, staged.Record,
+				manifestSummaryFieldID(commit, staged.Record.BuildID),
+				slices.ContainsFunc(commit.CatalogMutation.SegmentIndexes, func(mut SegmentIndexMutation) bool {
+					return mut.BuildID == staged.Record.BuildID && (mut.Type == SegmentIndexUpsert || mut.Type == SegmentIndexBackfill)
+				}))
+		}
 		var action metastore.UpdateAction
 		if isNewSegment {
 			action = metastore.AddSegment(updated.SegmentInfo)
