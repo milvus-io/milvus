@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -33,18 +34,30 @@ type (
 )
 
 func (s *Server) CreateCollectionDataView(ctx context.Context, collectionID int64, vchannels []string) (*viewpb.DataVersion, error) {
-	return s.CreateCollectionDataViewWithTransformStarts(ctx, collectionID, vchannels, nil)
+	return s.createCollectionDataView(ctx, dataview.CreateCollectionDataViewEvent{CollectionID: collectionID, VChannels: vchannels})
 }
 
-func (s *Server) CreateCollectionDataViewWithTransformStarts(ctx context.Context, collectionID int64, vchannels []string, starts map[string]uint64) (*viewpb.DataVersion, error) {
+// CreateCollectionDataViewWithTransformStarts derives the initial schema and
+// each business channel's frontier from the same committed creation result.
+func (s *Server) CreateCollectionDataViewWithTransformStarts(ctx context.Context, result message.BroadcastResultCreateCollectionMessageV1) (*viewpb.DataVersion, error) {
+	body := result.Message.MustBody()
+	starts := make(map[string]uint64, len(body.VirtualChannelNames))
+	for _, vchannel := range body.VirtualChannelNames {
+		starts[vchannel] = result.Results[vchannel].TimeTick
+	}
+	return s.createCollectionDataView(ctx, dataview.CreateCollectionDataViewEvent{
+		SchemaVersion:   body.CollectionSchema.GetVersion(),
+		CollectionID:    result.Message.Header().CollectionId,
+		VChannels:       body.VirtualChannelNames,
+		TransformStarts: starts,
+	})
+}
+
+func (s *Server) createCollectionDataView(ctx context.Context, event dataview.CreateCollectionDataViewEvent) (*viewpb.DataVersion, error) {
 	if s.dataViewManager == nil {
 		return nil, merr.WrapErrServiceInternalMsg("DataView manager is not initialized")
 	}
-	return s.dataViewManager.OnCreateCollection(ctx, dataview.CreateCollectionDataViewEvent{
-		CollectionID:    collectionID,
-		VChannels:       vchannels,
-		TransformStarts: starts,
-	})
+	return s.dataViewManager.OnCreateCollection(ctx, event)
 }
 
 func (s *Server) DropCollectionDataView(ctx context.Context, collectionID int64) error {

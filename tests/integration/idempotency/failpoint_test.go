@@ -27,7 +27,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -401,10 +403,21 @@ func (s *FailpointSuite) TestClientTimeoutAfterDurableAppend() {
 			s.assertPending(pending)
 			select {
 			case result := <-pending:
-				s.Require().Error(merr.CheckRPCCall(result.result, result.err))
-				s.Require().ErrorIs(attempt.Err(), context.DeadlineExceeded)
+				if result.err != nil {
+					s.Require().Equal(codes.DeadlineExceeded, status.Code(result.err), "%v", result.err)
+				} else {
+					s.Require().NotNil(result.result)
+					s.Require().Equal(merr.TimeoutCode, result.result.GetStatus().GetCode())
+				}
 			case <-ctx.Done():
 				s.FailNow("client deadline did not finish the request")
+			}
+			// A peer's deadline response can arrive before the local context's timer fires.
+			select {
+			case <-attempt.Done():
+				s.Require().ErrorIs(attempt.Err(), context.DeadlineExceeded)
+			case <-ctx.Done():
+				s.FailNow("client context did not reach its deadline")
 			}
 			s.Require().NoError(os.WriteFile(filepath.Join(dir, "release"), nil, 0o600))
 			ids := s.retry(ctx, req, key)

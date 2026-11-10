@@ -290,15 +290,14 @@ PrepareCommonLoadConfig(Config& config,
     config[DISK_ANN_THREADS_NUM] = *open_options.load_threads;
 }
 
-// Create the backend mmap prefix, reporting filesystem failures before
-// deserialization.
+// Stream backends may create local disk files even when mmap is disabled.
 void
-EnsureMmapDirectory(const std::string& path) {
+EnsureLocalIndexDirectory(const std::string& path) {
     std::error_code error;
     std::filesystem::create_directories(path, error);
     if (error) {
         ThrowInfo(FileCreateFailed,
-                  "failed to create disk vector mmap directory {}: {}",
+                  "failed to create disk vector index directory {}: {}",
                   path,
                   error.message());
     }
@@ -459,9 +458,9 @@ OpenEngine(bool use_async,
                               paths[i]);
                 }
             }
-        } else if (enable_mmap) {
+        } else {
             {
-                auto local_io = [&] { EnsureMmapDirectory(prefix); };
+                auto local_io = [&] { EnsureLocalIndexDirectory(prefix); };
                 if (use_async) {
                     co_await storage::RunLocalFileIOAsync(local_io, priority);
                 } else {
