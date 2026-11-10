@@ -194,8 +194,8 @@ type Server struct {
 	manifestIndexBackfillInspector   *index.ManifestIndexBackfillInspector
 	manifestIndexRollbackInspector   *index.ManifestIndexRollbackInspector
 	analyzeInspector                 *analyze.AnalyzeInspector
-	talonPrewarmInspector             *TalonPrewarmInspector
-	incrementalPrewarm                *talonIncrementalPrewarm
+	talonPrewarmInspector            *TalonPrewarmInspector
+	incrementalPrewarm               *talonIncrementalPrewarm
 	segmentChangeInspector           *segmentChangeInspector
 	externalCollectionRefreshManager externalrefresh.ExternalCollectionRefreshManager
 	globalScheduler                  task.GlobalScheduler

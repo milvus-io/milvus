@@ -98,8 +98,10 @@ type Meta struct {
 	manifestCopyOnce       sync.Once
 	manifestCopySlots      *semaphore.Weighted
 	manifestCopyLimit      int
+
 	// Installed before manifest commits start; the callback must not block on I/O.
 	PrewarmManifestCommit func(string, *SegmentInfo, ManifestMutation, int64)
+
 	manifestReadOnce       sync.Once
 	manifestReadSlots      *semaphore.Weighted
 	DataViewManager        DataViewManager
