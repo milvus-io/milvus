@@ -463,11 +463,21 @@ func TestSnapshotPChannelEndTsOptions(t *testing.T) {
 	_, ok = SnapshotPChannelEnd(nil, "dml_0_4600v0")
 	assert.False(t, ok)
 
+	// A padded key is trimmed before validation, so it still reaches the
+	// source channel it names instead of becoming an unreachable map entry.
+	padded := &commonpb.KeyValuePair{Key: SnapshotPChannelEndTs, Value: fmt.Sprintf(`{" dml_1 ":"%d"}`, later)}
+	bounds, err = GetSnapshotPChannelEndTs(append(base, padded))
+	assert.NoError(t, err)
+	end, ok = SnapshotPChannelEnd(bounds, "dml_1_4600v0")
+	assert.True(t, ok)
+	assert.Equal(t, later, end)
+
 	for _, value := range []string{
 		"", "null", "[]", "{}",
 		fmt.Sprintf(`{"":"%d"}`, now),
 		fmt.Sprintf(`{"dml_0_4600v0":"%d"}`, now),
 		fmt.Sprintf(`{"dml_0":"%d","dml_0_4600v0":"%d"}`, now, later),
+		fmt.Sprintf(`{"dml_0":"%d"," dml_0":"%d"}`, now, later),
 		fmt.Sprintf(`{"dml_0":%d}`, now),
 		fmt.Sprintf(`{"dml_0":"%d"} {}`, now),
 		`{"dml_0":"not-a-timestamp"}`,

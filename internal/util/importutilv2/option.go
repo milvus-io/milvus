@@ -269,9 +269,17 @@ func GetSnapshotPChannelEndTs(options Options) (map[string]uint64, error) {
 	}
 
 	bounds := make(map[string]uint64, len(named))
-	for channel, raw := range named {
-		if strings.TrimSpace(channel) == "" {
+	for key, raw := range named {
+		// Keys are matched exactly by SnapshotPChannelEnd, so a padded name
+		// would become an entry no source channel can reach. Trim before
+		// validating, and reject two keys that trim to the same channel instead
+		// of letting one silently replace the other.
+		channel := strings.TrimSpace(key)
+		if channel == "" {
 			return nil, merr.WrapErrImportFailedMsg("%s contains an empty PChannel name", SnapshotPChannelEndTs)
+		}
+		if _, exists := bounds[channel]; exists {
+			return nil, merr.WrapErrImportFailedMsg("%s contains duplicate PChannel %s", SnapshotPChannelEndTs, channel)
 		}
 		if !funcutil.IsPhysicalChannel(channel) {
 			return nil, merr.WrapErrImportFailedMsg("%s key %s must be a PChannel, not a VChannel",
