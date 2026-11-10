@@ -1035,11 +1035,27 @@ unchanged. StorageV2's legacy packed-binlog path is not modified by this change.
 ### 11.1 Validation and Filling in Both Phases
 
 DataCoord checks that source/target schemas exist and the collections are
-eligible, but does not compare schema identity, names or types. The DataNode
+eligible, but does not require schema identity or compare field names. For
+matching physical FieldIDs, it rejects different data types when either field
+is a vector (including ArrayOfVector). For the same fixed-dimensional vector
+type, it rejects different dimensions and ArrayOfVector element types before
+opening the native reader. Equal-width
+element types such as Float16Vector and BFloat16Vector are not interchangeable:
+interpreting source buffers with the target type or width can otherwise
+hide a mismatch from row-level checks. Sparse vectors have no fixed dimension.
+The DataNode
 reader checks required physical fields against each exact manifest and decodes
 present columns with the target schema. Missing required columns or decoding
 errors can therefore fail an admitted task/job; request acceptance is not a
-promise that every segment can be decoded.
+promise that every segment can be decoded. A missing or invalid target dimension
+is classified as a system error because the target schema comes from collection
+metadata; malformed source dimensions retain input-error classification.
+
+Manifest-backed Import validates decoded VarChar values against the target
+`max_length` in UTF-8 bytes, after stored-NULL/default conversion and before
+timestamp/delete filtering. A wider source declaration alone is not rejected
+when its actual values fit the target limit. Both PreImport and Import use this
+reader check.
 
 Both phases retain the full target task schema while projecting only the
 reader schema. Filling occurs at the point the existing pipeline needs it:
@@ -1074,7 +1090,10 @@ For ordinary fields, whole-column absence and a stored NULL are separate paths:
 | Column present, row is NULL | Non-nullable, no default | Reject during row conversion |
 
 `ValueDeserializerWithSchema` applies the present-NULL rule before timestamp
-and delete filtering. A non-NULL stored value must decode as the target type;
+and delete filtering. For manifest reads, a separate native read schema makes
+default-valued fields nullable so Vortex can return stored NULLs for that
+conversion. The logical reader and target schemas retain their original
+nullability. A non-NULL stored value must decode as the target type;
 it is not replaced merely because the target has a default. Missing dynamic
 data is filled with `{}`; StructArray presence retains the shared backup rules
 described above.

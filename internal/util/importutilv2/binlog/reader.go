@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/parameterutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -436,12 +437,51 @@ func (r *reader) initStorageV3Manifest(manifestPath string, tsStart, tsEnd uint6
 			deltaPaths[i] = snapshotstorage.NormalizeSnapshotObjectPath(path)
 		}
 	}
-	rr, err := storage.NewManifestRecordReader(r.ctx, manifestPath, r.schema, rwOptions...)
+	type varcharLimit struct {
+		field     *schemapb.FieldSchema
+		maxLength int64
+	}
+	var varcharLimits []varcharLimit
+	for _, field := range typeutil.GetAllFieldSchemas(r.schema) {
+		if field.GetDataType() != schemapb.DataType_VarChar {
+			continue
+		}
+		maxLength, err := parameterutil.GetMaxLength(field)
+		if err != nil {
+			return err
+		}
+		varcharLimits = append(varcharLimits, varcharLimit{field: field, maxLength: maxLength})
+	}
+	// Vortex enforces Arrow nullability while decoding. Preserve stored NULLs
+	// until ValueDeserializerWithSchema applies the target defaults below.
+	readSchema := typeutil.Clone(r.schema)
+	for _, field := range typeutil.GetAllFieldSchemas(readSchema) {
+		if field.GetDefaultValue() != nil {
+			field.Nullable = true
+		}
+	}
+	rr, err := storage.NewManifestRecordReader(r.ctx, manifestPath, readSchema, rwOptions...)
 	if err != nil {
 		return err
 	}
 	r.dr = storage.NewDeserializeReader(rr, func(record storage.Record, v []*storage.Value) error {
-		return storage.ValueDeserializerWithSchema(record, v, r.schema, true)
+		if err := storage.ValueDeserializerWithSchema(record, v, r.schema, true); err != nil {
+			return err
+		}
+		// Manifest reads bypass the ordinary Parquet import value checks. Apply
+		// target limits after NULL/default conversion and before row filtering.
+		for _, limit := range varcharLimits {
+			for _, value := range v {
+				cell := value.Value.(map[int64]any)[limit.field.GetFieldID()]
+				if cell == nil {
+					continue
+				}
+				if err := importcommon.CheckValidString(cell.(string), limit.maxLength, limit.field); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
 	})
 	if r.deleteMask != nil {
 		return nil // Both shared and segment-local deletes are already folded.
@@ -753,6 +793,8 @@ func (r *reader) Read() (*storage.InsertData, error) {
 			break
 		}
 		if err != nil {
+			r.readErr = err
+			r.Close()
 			return nil, err
 		}
 		// Validate before any range/delete filter can hide an invalid row.

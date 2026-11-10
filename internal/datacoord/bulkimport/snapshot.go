@@ -776,5 +776,44 @@ func prepareSnapshotImportOptions(target, source *schemapb.CollectionSchema, opt
 	// Renaming a field does not remap its data; callers must retain the intended
 	// field-ID correspondence, just as when importing binlog backups. Optional
 	// target columns, AutoID and target routing use the existing Import behavior.
+	sourceFields := make(map[int64]*schemapb.FieldSchema)
+	for _, field := range typeutil.GetAllFieldSchemas(source) {
+		sourceFields[field.GetFieldID()] = field
+	}
+	for _, field := range typeutil.GetAllFieldSchemas(target) {
+		sourceField := sourceFields[field.GetFieldID()]
+		if sourceField == nil {
+			continue // Missing columns retain reader validation and default filling.
+		}
+		if sourceField.GetDataType() != field.GetDataType() &&
+			(typeutil.IsVectorType(sourceField.GetDataType()) || typeutil.IsVectorType(field.GetDataType())) {
+			return nil, merr.WrapErrImportFailedMsg(
+				"vector data type mismatch for field %s (ID %d): source %s, target %s",
+				field.GetName(), field.GetFieldID(), sourceField.GetDataType(), field.GetDataType())
+		}
+		if !typeutil.IsFixDimVectorType(field.GetDataType()) && !typeutil.IsVectorArrayType(field.GetDataType()) {
+			continue
+		}
+		if typeutil.IsVectorArrayType(field.GetDataType()) && sourceField.GetElementType() != field.GetElementType() {
+			return nil, merr.WrapErrImportFailedMsg(
+				"vector element type mismatch for field %s (ID %d): source %s, target %s",
+				field.GetName(), field.GetFieldID(), sourceField.GetElementType(), field.GetElementType())
+		}
+		sourceDim, err := typeutil.GetDim(sourceField)
+		if err != nil {
+			return nil, merr.Wrapf(err, "snapshot source field %s", sourceField.GetName())
+		}
+		targetDim, err := typeutil.GetDim(field)
+		if err != nil {
+			// The target schema comes from coordinator-owned collection metadata.
+			return nil, merr.Wrapf(merr.WrapErrAsSysError(err), "snapshot target field %s", field.GetName())
+		}
+		// Reject before FFI can interpret the source buffer with the target width.
+		if sourceDim != targetDim {
+			return nil, merr.WrapErrImportFailedMsg(
+				"vector dimension mismatch for field %s (ID %d): source %d, target %d",
+				field.GetName(), field.GetFieldID(), sourceDim, targetDim)
+		}
+	}
 	return options, nil
 }
