@@ -106,8 +106,8 @@ Existing configuration-source precedence applies. SDK parameters cannot override
 them. Eligibility preserves existing API validation: supported ordinary/iterator
 Query, ANN variants, Search grouping/aggregation and legacy Hybrid fusion can
 stream, including Query Group By + ORDER BY, global aggregates, valid QueryScan
-function chains and ordinary ungrouped L0/L1/L2 reranking. Hybrid Group By and unsupported
-reranking remain Batch, as does retained-plan requery. Exact gates:
+function chains, ordinary ungrouped L0/L1/L2 reranking, and legacy Hybrid Group By.
+Unsupported reranking remains Batch, as does retained-plan requery. Exact gates:
 [Query](../../../internal/views/queryclient/legacy_client.go#L290),
 [QueryScan validation](../../../internal/proxy/dql/query_function_chain.go#L29),
 [Search/Hybrid](../../../internal/proxy/dql/task_search.go#L1678).
@@ -745,6 +745,9 @@ for each non-skipped sub-search on each selected worker. Each sub-search retains
 its own metric, candidate window and selections. Proxy consumes those final
 streams concurrently; failure closes sibling streams. RRF/weighted fusion happens
 after sub-search reduction, not as a k-way merge between different searches.
+For Hybrid Group By, each final sub-search stream forwards all per-vchannel
+candidates in Batch-equivalent per-query order. Proxy drains the streams before
+fusion and final group selection; it does not stop at the sub-search topK.
 See [Hybrid consumption](../../../internal/proxy/dql/task_search.go#L1977).
 
 Search passes its already-reduced candidate results into `RunFromReduced`,
@@ -895,7 +898,7 @@ whereas an invalid request is not made valid by this feature.
 | Search | Ordinary ungrouped Proxy-side function/model reranking and L2-only chains | Ordered ANN streaming, then existing Proxy reranking over the complete candidate window. |
 | Search | Ordinary ungrouped L0/L1 chains, including combinations with L2 | Workers execute L0/L1 before Chunk splitting; ordered streaming preserves their candidates, followed by optional Proxy L2. |
 | Hybrid | Legacy RRF/weighted fusion with eligible ANN, range, iterative-filter, element/embedding-list sub-searches | One streaming tree per sub-search, then Proxy fusion/collapse. |
-| Hybrid | Group By | Batch; final fusion needs a candidate-preserving grouping policy. |
+| Hybrid | Group By with legacy RRF/weighted fusion | Per-vchannel grouped selection, followed by candidate-preserving final streams; Proxy drains before fusion and final grouping. |
 | Hybrid | Top-level model/function reranking beyond legacy fusion; sub-search L0/L1 chains | Batch. |
 
 Search Group By/aggregation iterators and Hybrid aggregation/ORDER BY are rejected
@@ -1014,7 +1017,6 @@ as implemented features.
 
 Deferred work includes segment-level streaming and stateful SDK iteration;
 terminal metadata through Interrupt; application credit/prefetch coordination;
-candidate-preserving Hybrid Group By;
 remaining function-chain/reranking paths; Batch's optional two-stage Search
 optimization; and live failure/performance qualification. Each requires its own
 behavior contract and verification before changing the current path.

@@ -1683,12 +1683,11 @@ func (t *SearchTask) supportsStreamingReduce() bool {
 	if req.GetIsAdvanced() {
 		if _, legacyFusion := t.rerankMeta.(*legacyRerankMeta); !legacyFusion ||
 			req.GetIsIterator() || t.aggCtx != nil ||
-			req.GetGroupByFieldId() > 0 || len(req.GetGroupByFieldIds()) > 0 ||
 			len(t.orderByFields) > 0 || len(req.GetSubReqs()) == 0 {
 			return false
 		}
 		for _, sub := range req.GetSubReqs() {
-			if sub == nil || sub.GetGroupByFieldId() > 0 {
+			if sub == nil {
 				return false
 			}
 		}
@@ -1790,6 +1789,7 @@ func appendFinalSearchChunk(
 	offset int64,
 	limit int64,
 	metricType string,
+	preserveCandidates bool,
 ) (int64, error) {
 	if chunk.GetNumQueries() != output.GetNumQueries() {
 		return 0, fmt.Errorf("Search CHUNK nq %d does not match final result nq %d", chunk.GetNumQueries(), output.GetNumQueries())
@@ -1859,7 +1859,7 @@ func appendFinalSearchChunk(
 	var appendedSize int64
 	for queryIndex, count := range chunk.GetTopks() {
 		for i := int64(0); i < count; i++ {
-			include := seenPerQuery[queryIndex] >= offset && output.Topks[queryIndex] < limit
+			include := preserveCandidates || (seenPerQuery[queryIndex] >= offset && output.Topks[queryIndex] < limit)
 			seenPerQuery[queryIndex]++
 			if !include {
 				rowIndex++
@@ -1915,6 +1915,7 @@ func (t *SearchTask) consumeResultStream(
 	metricType string,
 	collectMetadata func(*internalpb.SearchResults),
 ) (*milvuspb.SearchResults, string, error) {
+	preserveCandidates := t.GetIsAdvanced() && (t.GetGroupByFieldId() > 0 || len(t.GetGroupByFieldIds()) > 0 || request.GetGroupByFieldId() > 0 || len(request.GetGroupByFieldIds()) > 0)
 	offset := request.GetOffset()
 	limit := request.GetTopk() - offset
 	groupByFieldIDs := request.GetGroupByFieldIds()
@@ -1967,6 +1968,7 @@ func (t *SearchTask) consumeResultStream(
 			offset,
 			limit,
 			metricType,
+			preserveCandidates,
 		)
 		if appendErr != nil {
 			return nil, metricType, appendErr
@@ -1978,15 +1980,17 @@ func (t *SearchTask) consumeResultStream(
 		}
 
 		// Hits arrive in query order: earlier vectors are complete even if they had fewer hits.
-		if len(data.Topks) == 0 || data.Topks[len(data.Topks)-1] == limit {
+		if !preserveCandidates && (len(data.Topks) == 0 || data.Topks[len(data.Topks)-1] == limit) {
 			break
 		}
 	}
-	if len(data.GetTopks()) > 0 {
+	if preserveCandidates {
+		data.TopK = request.GetTopk()
+	} else if len(data.GetTopks()) > 0 {
 		data.TopK = data.GetTopks()[len(data.GetTopks())-1]
 	}
 	// Composite-key aggregation preserves Batch's accepted-hit walk order.
-	if len(groupByFieldIDs) > 0 && (t.aggCtx == nil || len(groupByFieldIDs) == 1) {
+	if !preserveCandidates && len(groupByFieldIDs) > 0 && (t.aggCtx == nil || len(groupByFieldIDs) == 1) {
 		var err error
 		data, err = regroupFinalSearchResult(data, groupByFieldIDs)
 		if err != nil {

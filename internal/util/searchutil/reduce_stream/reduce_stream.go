@@ -343,25 +343,26 @@ type OrderedReduceStream struct {
 	childStreams *reduce.ChildStreams[*internalpb.SearchResults]
 	childBuffers []orderedChildBuffer
 
-	nq              int64
-	topK            int64
-	chunkBytes      int
-	metricType      string
-	currentQuery    int64
-	emittedPerQuery []int64
-	seenPKs         map[any]struct{}
-	groupByFieldIDs []int64
-	groupSize       int64
-	groupOffset     int64
-	groups          map[uint64][]*searchGroup
-	groupCount      int64
-	isTopKReduce    bool
-	isRecallEval    bool
-	metadata        *internalpb.SearchResults
-	metadataEmitted bool
+	nq                 int64
+	topK               int64
+	chunkBytes         int
+	metricType         string
+	currentQuery       int64
+	emittedPerQuery    []int64
+	seenPKs            map[any]struct{}
+	groupByFieldIDs    []int64
+	groupSize          int64
+	groupOffset        int64
+	groups             map[uint64][]*searchGroup
+	groupCount         int64
+	preserveCandidates bool // Forward all vchannel candidates in order for Hybrid Group By fusion.
+	isTopKReduce       bool // OR of the IsTopkReduce flags received from children.
+	isRecallEval       bool // OR of the IsRecallEvaluation flags received from children.
+	metadata           *internalpb.SearchResults
+	metadataEmitted    bool // Metadata has already been attached to an output Chunk.
 
-	closed   bool
-	finished bool
+	closed   bool // Child streams have been closed and buffers released.
+	finished bool // Reduction reached EOF; subsequent Recv calls return EOF.
 	closeErr error
 }
 
@@ -421,6 +422,16 @@ func NewShardReduceStream(request *internalpb.SearchRequest, childStreams []Redu
 	}
 	stream.(*OrderedReduceStream).seenPKs = make(map[any]struct{})
 	stream.(*OrderedReduceStream).groupOffset = 0
+	return stream, nil
+}
+
+// NewHybridGroupReduceStream preserves each vchannel's candidates for Hybrid fusion.
+func NewHybridGroupReduceStream(request *internalpb.SearchRequest, childStreams []ReduceStream, chunkBytes int) (ReduceStream, error) {
+	stream, err := NewReduceStream(request, childStreams, chunkBytes)
+	if err != nil {
+		return nil, err
+	}
+	stream.(*OrderedReduceStream).preserveCandidates = true
 	return stream, nil
 }
 
@@ -622,7 +633,7 @@ func (s *OrderedReduceStream) acceptMetadata(chunk *internalpb.SearchResults, da
 func (s *OrderedReduceStream) produceNextUnits(readyBuffers []*orderedChildBuffer, outputBytes int) (*orderedUnit, bool, error) {
 	hitLimit := (s.topK - s.groupOffset) * s.groupSize
 	for s.currentQuery < s.nq {
-		if s.currentQuery < s.nq-1 && s.emittedPerQuery[s.currentQuery] >= hitLimit {
+		if !s.preserveCandidates && s.currentQuery < s.nq-1 && s.emittedPerQuery[s.currentQuery] >= hitLimit {
 			for _, buffer := range readyBuffers {
 				s.discardQuery(buffer, s.currentQuery)
 			}
@@ -652,6 +663,9 @@ func (s *OrderedReduceStream) produceNextUnits(readyBuffers []*orderedChildBuffe
 			}
 			if winner == -1 {
 				winner = i
+				continue
+			}
+			if s.preserveCandidates {
 				continue
 			}
 
@@ -690,7 +704,7 @@ func (s *OrderedReduceStream) produceNextUnits(readyBuffers []*orderedChildBuffe
 		}
 		var group *searchGroup
 		var groupHash uint64
-		if len(s.groupByFieldIDs) > 0 {
+		if len(s.groupByFieldIDs) > 0 && !s.preserveCandidates {
 			var values []any
 			groupHash, values = readyBuffers[winner].groupKey(int(selected.rowIndex))
 			for _, candidate := range s.groups[groupHash] {
@@ -738,7 +752,7 @@ func (s *OrderedReduceStream) produceNextUnits(readyBuffers []*orderedChildBuffe
 		}
 		s.emittedPerQuery[s.currentQuery]++
 		// Yield the last vector's window before fetching more input. Only the caller ends the pull.
-		chunkReady := s.currentQuery == s.nq-1 && s.emittedPerQuery[s.currentQuery] == hitLimit
+		chunkReady := !s.preserveCandidates && s.currentQuery == s.nq-1 && s.emittedPerQuery[s.currentQuery] == hitLimit
 		return &oneReduceResult, chunkReady, nil
 	}
 	return nil, false, nil

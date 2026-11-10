@@ -115,7 +115,7 @@ func TestAppendFinalSearchChunkPreservesOrderAndAppliesOffset(t *testing.T) {
 	}
 
 	for _, chunk := range chunks {
-		_, err := appendFinalSearchChunk(output, chunk, seenPerQuery, 1, 2, metric.L2)
+		_, err := appendFinalSearchChunk(output, chunk, seenPerQuery, 1, 2, metric.L2, false)
 		require.NoError(t, err)
 	}
 
