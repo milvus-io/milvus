@@ -138,6 +138,7 @@ type quotaConfig struct {
 	TtProtectionEnabled                   ParamItem `refreshable:"true"`
 	MaxTimeTickDelay                      ParamItem `refreshable:"true"`
 	MemProtectionEnabled                  ParamItem `refreshable:"true"`
+	MemProtectionDenyAllLoaded            ParamItem `refreshable:"true"`
 	DataNodeMemoryLowWaterLevel           ParamItem `refreshable:"true"`
 	DataNodeMemoryHighWaterLevel          ParamItem `refreshable:"true"`
 	QueryNodeMemoryLowWaterLevel          ParamItem `refreshable:"true"`
@@ -1593,6 +1594,17 @@ When memory usage < memoryLowWaterLevel, no action.`,
 		Export: true,
 	}
 	p.MemProtectionEnabled.Init(base.mgr)
+
+	p.MemProtectionDenyAllLoaded = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.memProtection.denyAllLoadedCollections",
+		Version:      "3.0.3",
+		DefaultValue: "true",
+		Doc: `When a QueryNode or StreamingNode reaches queryNodeMemoryHighWaterLevel:
+true: reject dml requests to all loaded collections;
+false: reject dml requests only to the collections loaded on that node.`,
+		Export: false,
+	}
+	p.MemProtectionDenyAllLoaded.Init(base.mgr)
 
 	lowWaterLevel := fmt.Sprintf("%f", defaultLowWaterLevel)
 	highWaterLevel := fmt.Sprintf("%f", defaultHighWaterLevel)
