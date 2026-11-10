@@ -46,12 +46,17 @@ struct IndexedCell {
     size_t request_index;
 };
 
-struct WindowCellResult {
-    size_t request_index;
-    AsyncCellResult cell;
+struct AsyncReadWindow {
+    std::vector<CellSpec> cells;
+    std::vector<size_t> request_indices;
+    std::vector<int64_t> chunk_indices;
+    size_t budget_bytes{0};
 };
 
-using WindowLoadResult = std::vector<WindowCellResult>;
+std::vector<AsyncReadWindow>
+BuildAsyncReadWindows(const std::vector<CellSpec>& cells,
+                      size_t read_window_bytes);
+
 using RecordBatches = std::vector<std::shared_ptr<arrow::RecordBatch>>;
 
 // Stores the first window failure and propagates cancellation to peer windows.
@@ -107,18 +112,16 @@ CheckCancellationToken(const folly::CancellationToken& cancellation_token,
     }
 }
 
-// Converts a window's Arrow batches into cache cells in request order.
-WindowLoadResult
+// Consumes each cell under the window lease, releasing its Arrow batches.
+void
 FinalizeWindow(const int64_t segment_id,
                const folly::CancellationToken& cancellation_token,
                const AsyncReadWindow& window,
-               const CellFinalizeFunc& finalize_cell,
+               const CellReadCallback& consume_cell,
                RecordBatches batches) {
     CheckCancellationToken(
         cancellation_token, segment_id, "AsyncLoadPipeline::read");
 
-    WindowLoadResult results;
-    results.reserve(window.cells.size());
     size_t batch_offset = 0;
     for (size_t i = 0; i < window.cells.size(); ++i) {
         CheckCancellationToken(
@@ -131,45 +134,33 @@ FinalizeWindow(const int64_t segment_id,
                       "requested");
         }
 
-        std::vector<std::shared_ptr<arrow::Table>> tables;
-        tables.reserve(rg_count);
-        for (size_t j = 0; j < rg_count; ++j) {
-            auto table_result = arrow::Table::FromRecordBatches(
-                {std::move(batches[batch_offset + j])});
-            if (!table_result.ok()) {
-                throw milvus_storage::ToSegcoreError(table_result.status());
-            }
-            tables.push_back(std::move(table_result).ValueOrDie());
+        auto cell_batches = std::span(batches).subspan(batch_offset, rg_count);
+        consume_cell(cell_batches, cell, window.request_indices[i]);
+        for (auto& batch : cell_batches) {
+            batch.reset();
         }
         batch_offset += rg_count;
-        auto chunk = finalize_cell(tables, cell.cid);
-        AssertInfo(chunk != nullptr,
-                   "[StorageV3] async finalizer returned null for cell {}",
-                   cell.cid);
-        results.push_back({window.request_indices[i],
-                           {static_cast<milvus::cachinglayer::cid_t>(cell.cid),
-                            std::move(chunk)}});
     }
-    return results;
 }
 
 // Runs finalization on an optional dedicated executor while retaining the
 // transient-memory lease until all Arrow-backed buffers are released.
-folly::coro::Task<WindowLoadResult>
+folly::coro::Task<void>
 FinalizeWindowAsync(const int64_t segment_id,
                     folly::CancellationToken cancellation_token,
                     AsyncReadWindow window,
-                    std::shared_ptr<const CellFinalizeFunc> finalize_cell,
+                    std::shared_ptr<const CellReadCallback> consume_cell,
                     storage::LoadAdmissionLease lease,
                     RecordBatches batches,
                     std::shared_ptr<WindowFailureState> failure_state) {
     try {
         (void)lease;
-        co_return FinalizeWindow(segment_id,
-                                 cancellation_token,
-                                 window,
-                                 *finalize_cell,
-                                 std::move(batches));
+        FinalizeWindow(segment_id,
+                       cancellation_token,
+                       window,
+                       *consume_cell,
+                       std::move(batches));
+        co_return;
     } catch (...) {
         // This frame owns the moved lease during finalization. Publish the
         // failure before unwinding releases it.
@@ -178,19 +169,18 @@ FinalizeWindowAsync(const int64_t segment_id,
     }
 }
 
-// Reads one window and writes its completed cells into its exclusive slot.
+// Reads one window and invokes its consumer while retaining admission.
 folly::coro::Task<void>
 LoadWindowAsync(const int64_t segment_id,
                 std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
                 AsyncReadWindow window,
-                std::shared_ptr<const CellFinalizeFunc> finalize_cell,
+                std::shared_ptr<const CellReadCallback> consume_cell,
                 storage::LoadAdmissionLease lease,
                 std::function<folly::Executor::KeepAlive<>()>
                     finalization_executor_provider,
                 const milvus::proto::common::LoadPriority load_priority,
                 folly::CancellationToken cancellation_token,
-                std::shared_ptr<WindowFailureState> failure_state,
-                std::optional<WindowLoadResult>& result_slot) {
+                std::shared_ptr<WindowFailureState> failure_state) {
     try {
         CheckCancellationToken(
             cancellation_token, segment_id, "AsyncLoadPipeline::admission");
@@ -213,21 +203,21 @@ LoadWindowAsync(const int64_t segment_id,
                                          : folly::Executor::KeepAlive<>{};
         if (!finalization_executor) {
             (void)lease;
-            result_slot = FinalizeWindow(segment_id,
-                                         cancellation_token,
-                                         window,
-                                         *finalize_cell,
-                                         std::move(batches));
+            FinalizeWindow(segment_id,
+                           cancellation_token,
+                           window,
+                           *consume_cell,
+                           std::move(batches));
             co_return;
         }
 
-        result_slot = co_await folly::coro::co_withExecutor(
+        co_await folly::coro::co_withExecutor(
             storage::ResolveAsyncLoadExecutor(std::move(finalization_executor),
                                               load_priority),
             FinalizeWindowAsync(segment_id,
                                 cancellation_token,
                                 std::move(window),
-                                std::move(finalize_cell),
+                                std::move(consume_cell),
                                 std::move(lease),
                                 std::move(batches),
                                 failure_state));
@@ -240,12 +230,12 @@ LoadWindowAsync(const int64_t segment_id,
     co_return;
 }
 
-// Orchestrates admission and parallel window work, then restores request order.
-folly::coro::Task<std::vector<AsyncCellResult>>
-LoadCellsAsyncImpl(
+// Orchestrates admission and parallel window work, then drains all tasks.
+folly::coro::Task<void>
+ReadCellsAsyncImpl(
     std::vector<CellSpec> cells,
     std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
-    CellFinalizeFunc finalize_cell,
+    CellReadCallback consume_cell,
     const int64_t segment_id,
     const std::optional<size_t> read_window_bytes,
     folly::Executor::KeepAlive<> work_executor,
@@ -263,11 +253,11 @@ LoadCellsAsyncImpl(
         cancellation_token, segment_id, "AsyncLoadPipeline::admission");
     AssertInfo(chunk_reader != nullptr,
                "[StorageV3] async load requires a chunk reader");
-    AssertInfo(static_cast<bool>(finalize_cell),
+    AssertInfo(static_cast<bool>(consume_cell),
                "[StorageV3] async load requires a cell finalizer");
 
     if (cells.empty()) {
-        co_return std::vector<AsyncCellResult>{};
+        co_return;
     }
     for (const auto& cell : cells) {
         AssertInfo(cell.file_idx == 0,
@@ -295,15 +285,11 @@ LoadCellsAsyncImpl(
         admission.CapacityBytes() >> 20,
         admission.CapacitySlots(),
         priority_name);
-    const std::shared_ptr<const CellFinalizeFunc> shared_finalizer =
-        std::make_shared<CellFinalizeFunc>(std::move(finalize_cell));
+    const auto shared_consumer =
+        std::make_shared<CellReadCallback>(std::move(consume_cell));
     const auto window_failure_state = std::make_shared<WindowFailureState>();
     const auto window_cancellation_token = folly::cancellation_token_merge(
         cancellation_token, window_failure_state->GetCancellationToken());
-    const auto request_count = cells.size();
-    // Slots have stable addresses and outlive every AsyncScope task. Each task
-    // exclusively writes one slot.
-    std::vector<std::optional<WindowLoadResult>> window_results(windows.size());
     folly::coro::AsyncScope scope;
     const bool debug_logging_enabled = VLOG_IS_ON(GLOG_DEBUG);
     try {
@@ -346,13 +332,12 @@ LoadCellsAsyncImpl(
                     LoadWindowAsync(segment_id,
                                     chunk_reader,
                                     std::move(windows[i]),
-                                    shared_finalizer,
+                                    shared_consumer,
                                     std::move(lease),
                                     finalization_executor_provider,
                                     load_priority,
                                     window_cancellation_token,
-                                    window_failure_state,
-                                    window_results[i]))));
+                                    window_failure_state))));
         }
     } catch (...) {
         window_failure_state->RecordAndCancel(std::current_exception());
@@ -364,31 +349,8 @@ LoadCellsAsyncImpl(
     if (const auto failure = window_failure_state->FirstFailure()) {
         std::rethrow_exception(failure);
     }
-    std::vector<std::optional<AsyncCellResult>> ordered(request_count);
-    for (auto& result : window_results) {
-        AssertInfo(result.has_value(),
-                   "[StorageV3] async window result is missing");
-        for (auto& cell : *result) {
-            AssertInfo(cell.request_index < ordered.size(),
-                       "[StorageV3] async result index {} is out of range {}",
-                       cell.request_index,
-                       ordered.size());
-            ordered[cell.request_index] = std::move(cell.cell);
-        }
-    }
-
-    std::vector<AsyncCellResult> results;
-    results.reserve(request_count);
-    for (size_t i = 0; i < ordered.size(); ++i) {
-        AssertInfo(ordered[i].has_value(),
-                   "[StorageV3] async load result {} is missing",
-                   i);
-        results.push_back(std::move(*ordered[i]));
-    }
-    co_return results;
+    co_return;
 }
-
-}  // namespace
 
 std::vector<AsyncReadWindow>
 BuildAsyncReadWindows(const std::vector<CellSpec>& cells,
@@ -474,12 +436,14 @@ BuildAsyncReadWindows(const std::vector<CellSpec>& cells,
     return windows;
 }
 
-folly::coro::Task<std::vector<AsyncCellResult>>
-LoadCellsAsync(const milvus::OpContext* ctx,
+}  // namespace
+
+folly::coro::Task<void>
+ReadCellsAsync(const milvus::OpContext* ctx,
                const int64_t segment_id,
                std::vector<CellSpec> cells,
                std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
-               CellFinalizeFunc finalize_cell,
+               CellReadCallback consume_cell,
                AsyncLoadPipelineOptions options) {
     try {
         auto executor_keep_alive = storage::ResolveAsyncLoadExecutor(
@@ -492,9 +456,9 @@ LoadCellsAsync(const milvus::OpContext* ctx,
             ctx ? ctx->cancellation_token : folly::CancellationToken{};
 
         return detail::ClassifyAsyncLoadExceptions(
-            LoadCellsAsyncImpl(std::move(cells),
+            ReadCellsAsyncImpl(std::move(cells),
                                std::move(chunk_reader),
-                               std::move(finalize_cell),
+                               std::move(consume_cell),
                                segment_id,
                                options.read_window_bytes,
                                std::move(executor_keep_alive),
@@ -502,6 +466,63 @@ LoadCellsAsync(const milvus::OpContext* ctx,
                                options.load_priority,
                                admission_priority,
                                context_cancellation_token));
+    } catch (...) {
+        detail::RethrowAsyncLoadException();
+    }
+}
+
+namespace {
+folly::coro::Task<std::vector<AsyncCellResult>>
+CollectCellsAsync(folly::coro::Task<void> task,
+                  std::shared_ptr<std::vector<AsyncCellResult>> results) {
+    co_await std::move(task);
+    co_return std::move(*results);
+}
+}  // namespace
+
+folly::coro::Task<std::vector<AsyncCellResult>>
+LoadCellsAsync(const milvus::OpContext* ctx,
+               const int64_t segment_id,
+               std::vector<CellSpec> cells,
+               std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
+               CellFinalizeFunc finalize_cell,
+               AsyncLoadPipelineOptions options) {
+    try {
+        AssertInfo(static_cast<bool>(finalize_cell),
+                   "[StorageV3] async load requires a cell finalizer");
+        auto results =
+            std::make_shared<std::vector<AsyncCellResult>>(cells.size());
+        auto consume =
+            [results, finalize_cell = std::move(finalize_cell)](
+                std::span<std::shared_ptr<arrow::RecordBatch>> batches,
+                const CellSpec& cell,
+                size_t request_index) {
+                std::vector<std::shared_ptr<arrow::Table>> tables;
+                tables.reserve(batches.size());
+                for (auto& batch : batches) {
+                    auto table =
+                        arrow::Table::FromRecordBatches({std::move(batch)});
+                    if (!table.ok()) {
+                        throw milvus_storage::ToSegcoreError(table.status());
+                    }
+                    tables.push_back(std::move(table).ValueOrDie());
+                }
+                auto chunk = finalize_cell(tables, cell.cid);
+                AssertInfo(
+                    chunk != nullptr,
+                    "[StorageV3] async finalizer returned null for cell {}",
+                    cell.cid);
+                (*results)[request_index] = {
+                    static_cast<milvus::cachinglayer::cid_t>(cell.cid),
+                    std::move(chunk)};
+            };
+        auto task = ReadCellsAsync(ctx,
+                                   segment_id,
+                                   std::move(cells),
+                                   std::move(chunk_reader),
+                                   std::move(consume),
+                                   std::move(options));
+        return CollectCellsAsync(std::move(task), std::move(results));
     } catch (...) {
         detail::RethrowAsyncLoadException();
     }
