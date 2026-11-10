@@ -92,14 +92,14 @@ class DiskFileManagerImpl : public FileManagerImpl {
     RemoveFile(const std::string& filename) noexcept override;
 
  public:
-    bool
-    AddTextLog(const std::string& filename) noexcept;
+    void
+    AddTextLog(const std::string& filename);
 
-    bool
-    AddJsonSharedIndexLog(const std::string& filename) noexcept;
+    void
+    AddJsonSharedIndexLog(const std::string& filename);
 
-    bool
-    AddJsonStatsMetaLog(const std::string& filename) noexcept;
+    void
+    AddJsonStatsMetaLog(const std::string& filename);
 
  public:
     std::string
