@@ -191,7 +191,8 @@ func importPlan(job ImportJob, p *datapb.ImportTaskV3, cfg importV3Config) (*imp
 	}
 	fanIn := getImportV3FanIn(cfg.fragmentMergeFanIn, len(p.GetFragments()))
 	slot := calculateImportTaskV3Slot(importSlotModel(cfg),
-		reshardmem.MemoryPerSlot(cfg.workerSlotUnit, cfg.buildParallel), packed.DefaultWriteBufferSize, fanIn)
+		reshardmem.MemoryPerSlot(cfg.workerSlotUnit, cfg.buildParallel), packed.DefaultWriteBufferSize,
+		textWriterBuffer(cfg, job.GetSchema()), fanIn)
 	return &importv3pb.ImportTaskPlan{
 		PartitionId:      p.GetPartitionId(),
 		Fragments:        p.GetFragments(),
@@ -243,10 +244,28 @@ func importSlotModel(cfg importV3Config) reshardmem.Model {
 // importSlot derives the ImportTaskV3 slot charge from the fan-in that
 // importPlan computes from the same fragment count under the same config, so
 // the charged slot and the merge that runs always agree.
-func importSlot(fragmentCount int, cfg importV3Config) int64 {
+func importSlot(fragmentCount int, cfg importV3Config, schema *schemapb.CollectionSchema) int64 {
 	fanIn := getImportV3FanIn(cfg.fragmentMergeFanIn, fragmentCount)
 	return calculateImportTaskV3Slot(importSlotModel(cfg),
-		reshardmem.MemoryPerSlot(cfg.workerSlotUnit, cfg.buildParallel), packed.DefaultWriteBufferSize, fanIn)
+		reshardmem.MemoryPerSlot(cfg.workerSlotUnit, cfg.buildParallel), packed.DefaultWriteBufferSize,
+		textWriterBuffer(cfg, schema), fanIn)
+}
+
+// textWriterBuffer is the LOB writer buffer the final merge keeps per TEXT
+// column: each column stages up to textFlushThresholdBytes before flushing to
+// its LOB file. The staged bytes live beside the converted batch, whose TEXT
+// column is only a reference, so ImportWorkingSet has to charge them separately.
+func textWriterBuffer(cfg importV3Config, schema *schemapb.CollectionSchema) int64 {
+	if schema == nil {
+		return 0
+	}
+	var columns int64
+	for _, field := range typeutil.GetAllFieldSchemas(schema) {
+		if field.GetDataType() == schemapb.DataType_Text {
+			columns++
+		}
+	}
+	return columns * cfg.textFlushThresholdBytes
 }
 
 // validateImportV3StorageVersion fails a TEXT collection when the given storage
