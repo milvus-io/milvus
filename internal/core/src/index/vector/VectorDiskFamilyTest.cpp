@@ -263,6 +263,7 @@ struct DiskBuildCase {
     std::vector<uint8_t> legacy_validity;
     // A resident payload; the raw file then holds only its header.
     const void* tensor = nullptr;
+    int32_t version = knowhere::Version::GetCurrentVersion().VersionNumber();
     bool defer_load = false;
     OpContext* reader_context = nullptr;
     std::optional<IndexCacheConfig> cache_config;
@@ -281,8 +282,7 @@ BuildDisk(const std::string& raw_path,
         .index_type = knowhere::IndexEnum::INDEX_DISKANN,
         .field_type = vector_array ? DataType::VECTOR_ARRAY : PhysicalType<T>(),
         .element_type = vector_array ? PhysicalType<T>() : DataType::NONE,
-        .index_engine_version =
-            knowhere::Version::GetCurrentVersion().VersionNumber(),
+        .index_engine_version = build.version,
         .params = {{METRIC_TYPE, build.metric},
                    {DIM_KEY, build.dim},
                    {DISK_ANN_MAX_DEGREE, "24"},
@@ -811,6 +811,37 @@ TEST(VectorDiskFamilyTest, CachedFloatBuildLoadSearchAndRawCapability) {
 
 TEST(VectorDiskFamilyTest, FloatBuildLoadSearchAndRawCapability) {
     RunOrdinaryDiskSearch<float>(false);
+}
+
+TEST(VectorDiskFamilyTest, LatestVersionBuildLoadSearchWithoutMmap) {
+    auto files = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_disk_stream_XXXXXX", "disk stream load test");
+    const auto raw_path = files->Path() + "/raw";
+    auto values = MakeRows<float>();
+    WriteRaw(raw_path, values, kRows, kDim);
+    OpenedDiskIndex<float> opened;
+    BuildDisk(
+        raw_path,
+        files->Path(),
+        opened,
+        {.version = knowhere::Version::GetMaximumVersion().VersionNumber()});
+    ASSERT_NE(opened.base, nullptr);
+    const auto* reader = dynamic_cast<const IVectorReader*>(opened.base.get());
+    ASSERT_NE(reader, nullptr);
+    EXPECT_EQ(opened.base->Count(), kRows);
+    VectorSearchParams params{
+        .search_params_ = {{DISK_ANN_QUERY_LIST, 8}},
+        .metric_type_ = "L2",
+        .topk_ = 4,
+    };
+    SearchResult result;
+    reader->Search(
+        GenDataset(1, kDim, values.data()), params, BitsetView{}, result);
+    ASSERT_EQ(result.seg_offsets_.size(), 4);
+    for (const auto offset : result.seg_offsets_) {
+        EXPECT_GE(offset, 0);
+        EXPECT_LT(offset, kRows);
+    }
 }
 
 TEST(VectorDiskFamilyTest, ResidentInputBuildLoadSearch) {

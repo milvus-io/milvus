@@ -554,9 +554,27 @@ func (s *Server) initCluster() error {
 		s.nodeManager = session.NewNodeManager(s.dataNodeCreator)
 	}
 	if s.cluster2 == nil {
-		s.cluster2 = session.NewCluster(s.nodeManager)
+		s.cluster2 = session.NewCluster(s.nodeManager, session.WithCollectionLabels(s.collectionLabelsForTask))
 	}
 	return nil
+}
+
+// collectionLabelsForTask names a task's collection from the local collection
+// cache only: dispatch must not wait on RootCoord, and a task whose collection
+// is not cached is dispatched without the names, as before.
+func (s *Server) collectionLabelsForTask(collectionID int64) (session.CollectionLabels, bool) {
+	if s.meta == nil {
+		return session.CollectionLabels{}, false
+	}
+	collection := s.meta.GetCollection(collectionID)
+	if collection == nil {
+		return session.CollectionLabels{}, false
+	}
+	return session.CollectionLabels{
+		CollectionName: collection.Schema.GetName(),
+		DatabaseID:     collection.DatabaseID,
+		DatabaseName:   collection.DatabaseName,
+	}, true
 }
 
 func (s *Server) SetAddress(address string) {

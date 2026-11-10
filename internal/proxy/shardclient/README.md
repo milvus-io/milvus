@@ -166,6 +166,14 @@ Cost-aware load balancer that considers QueryNode workload and health.
 - **Unavailable node handling**: Marks nodes unreachable after consecutive health check failures
 - **Adaptive behavior**: Falls back to round-robin when workload difference is small
 
+**Workload reservation**: `SelectNode` returns `(nodeID, release, error)`.
+On success, the caller must invoke `release` exactly once when that attempt
+finishes or its selection is abandoned. The function retains the counter that
+received `+nq`, so a health-check eviction and re-registration cannot redirect
+an old request's `-nq` to a new counter. Cost updates use `GetOrInsert` to avoid
+overwriting concurrent reservations. The same contract applies to the refined
+balancer; round-robin returns a no-op release function.
+
 **Configuration Parameters**:
 - `ProxyCfg.CostMetricsExpireTime`: How long to trust cached cost metrics (default: varies)
 - `ProxyCfg.CheckWorkloadRequestNum`: Check workload every N requests (default: varies)
@@ -316,6 +324,8 @@ The package includes extensive test coverage:
 - `lb_policy_test.go`: Tests for retry logic and workload execution
 - `roundrobin_balancer_test.go`: Tests for round-robin selection
 - `look_aside_balancer_test.go`: Tests for cost-aware selection and health checks
+- `workload_release_test.go`: Tests for reservations across health eviction,
+  concurrent metrics creation, failed selections, cancellation and retries
 
 **Mock interfaces** (via mockery):
 - `mock_shardclient_manager.go`: Mock `ShardClientMgr`

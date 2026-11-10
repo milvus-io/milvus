@@ -211,18 +211,38 @@ type ReadRuntime struct {
 }
 
 func (r *ReadRuntime) AcquireGrowingSegmentHandles(ctx context.Context, version qviews.DataVersion, partitions []int64) ([]snview.GrowingSegmentHandle, error) {
-	handles, err := r.QueryRuntime.AcquireGrowingSegmentHandles(ctx, version, partitions)
+	operationCtx, end, err := r.resources.begin(ctx)
 	if err != nil {
 		return nil, err
 	}
+	handles, err := r.QueryRuntime.AcquireGrowingSegmentHandles(operationCtx, version, partitions)
+	if err != nil {
+		end()
+		return nil, err
+	}
+	if len(handles) == 0 {
+		end()
+		return handles, nil
+	}
+	var remaining atomic.Int64
+	remaining.Store(int64(len(handles)))
+	done := func() {
+		if remaining.Add(-1) == 0 {
+			end()
+		}
+	}
 	for i, handle := range handles {
 		if !r.schema.pin() {
-			for _, acquired := range handles {
+			for _, acquired := range handles[:i] {
 				acquired.Release()
+			}
+			for _, acquired := range handles[i:] {
+				acquired.Release()
+				done()
 			}
 			return nil, merr.WrapErrServiceNotReadyMsg("query read schema is released")
 		}
-		handles[i] = &readSchemaHandle{GrowingSegmentHandle: handle, schema: r.schema}
+		handles[i] = &readSchemaHandle{GrowingSegmentHandle: handle, schema: r.schema, done: done}
 	}
 	return handles, nil
 }
@@ -230,12 +250,19 @@ func (r *ReadRuntime) AcquireGrowingSegmentHandles(ctx context.Context, version 
 type readSchemaHandle struct {
 	snview.GrowingSegmentHandle
 	schema *readSchema
+	done   func()
 	once   sync.Once
 }
 
 func (h *readSchemaHandle) Collection() *segcore.CCollection { return h.schema.collection }
 func (h *readSchemaHandle) Release() {
-	h.once.Do(func() { h.GrowingSegmentHandle.Release(); h.schema.release() })
+	h.once.Do(func() {
+		h.GrowingSegmentHandle.Release()
+		h.schema.release()
+		if h.done != nil {
+			h.done()
+		}
+	})
 }
 
 func (r *ReadRuntime) GlobalOptimizer() optimizer.GlobalOptimizer {
