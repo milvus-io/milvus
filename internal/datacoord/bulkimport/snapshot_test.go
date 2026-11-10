@@ -2546,3 +2546,88 @@ func TestExpandSnapshotV2StorageManifestRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestSnapshotImportBucketOnlyRelocation(t *testing.T) {
+	paramtable.Init()
+	PatchSnapshotImportInstance(t)
+	ctx := context.Background()
+	for _, root := range []string{"root", ""} {
+		for _, representation := range []string{"keys", "avro_uri", "manifest_uri", "l0_uri", "all_uri"} {
+			for _, versions := range [][]int64{{2}, {2, 3}, {3}} {
+				t.Run(fmt.Sprintf("root=%s/%s/versions=%v", root, representation, versions), func(t *testing.T) {
+					metadataKey := path.Join(root, "snapshots/1/metadata/2.json")
+					uri := "s3://source/" + metadataKey
+					metadata := &datapb.SnapshotMetadata{
+						FormatVersion: 6, Layout: datapb.SnapshotLayout_SnapshotLayoutSelfContained,
+						SnapshotInfo: &datapb.SnapshotInfo{Id: 2, CollectionId: 1, S3Location: "s3://old-bucket/" + metadataKey},
+						Collection:   &datapb.CollectionDescription{Schema: SnapshotImportTestSchema(), Partitions: map[string]int64{"p": 10}},
+					}
+					objects := make(map[string][]byte)
+					reference := func(key, kind string) string {
+						if representation == kind || representation == "all_uri" {
+							return "s3://old-bucket/" + key
+						}
+						return key
+					}
+					addSegment := func(segment *datapb.SegmentDescription) {
+						key := path.Join(root, fmt.Sprintf("snapshots/1/manifests/%d.avro", segment.SegmentId))
+						data, err := snapshotio.MarshalSegmentManifest(segment)
+						require.NoError(t, err)
+						objects[key] = data
+						metadata.ManifestList = append(metadata.ManifestList, reference(key, "avro_uri"))
+						metadata.SegmentIds = append(metadata.SegmentIds, segment.SegmentId)
+					}
+					for i, version := range versions {
+						id := int64(20 + i)
+						manifest := path.Join(root, fmt.Sprintf("files/segment/%d", id))
+						if version == 2 {
+							manifest = reference(manifest, "manifest_uri")
+						} else {
+							manifest = packed.MarshalManifestPath(reference(manifest, "manifest_uri"), 7)
+						}
+						metadata.Storagev2ManifestList = append(metadata.Storagev2ManifestList, &datapb.StorageV2SegmentManifest{SegmentId: id, Manifest: manifest})
+						addSegment(&datapb.SegmentDescription{SegmentId: id, PartitionId: 10, ChannelName: "channel", StorageVersion: version, SegmentLevel: datapb.SegmentLevel_L1})
+					}
+					deltaKey := path.Join(root, "files/l0/delta")
+					addSegment(&datapb.SegmentDescription{SegmentId: 30, PartitionId: 10, ChannelName: "channel", StorageVersion: 2, SegmentLevel: datapb.SegmentLevel_L0,
+						Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: reference(deltaKey, "l0_uri")}}}},
+					})
+					frozen := proto.Clone(metadata)
+					raw, err := protojson.Marshal(metadata)
+					require.NoError(t, err)
+					objects[metadataKey] = raw
+					cm := milvusstorage.NewLocalChunkManager()
+					read := mockey.Mock((*milvusstorage.LocalChunkManager).Read).To(func(_ *milvusstorage.LocalChunkManager, _ context.Context, key string) ([]byte, error) {
+						data, ok := objects[key]
+						require.True(t, ok, "unexpected object read: %s", key)
+						return data, nil
+					}).Build()
+					defer read.UnPatch()
+					// Exercise real Create admission and Pending expansion, including
+					// Avro parsing and storage identity validation in both phases.
+					pending, options, err := PrepareSnapshotImportFiles(ctx, []int64{100}, cm, SnapshotImportTestSchema(),
+						[]*internalpb.ImportFile{{Paths: []string{uri}}}, SnapshotImportTestOptions())
+					require.NoError(t, err)
+					require.True(t, importutilv2.IsSnapshotPreparation(pending))
+					files, options, l0, err := expandSnapshotImportFiles(ctx, []int64{100}, cm, SnapshotImportTestSchema(), uri, options, metadata)
+					require.NoError(t, err)
+					require.Len(t, files, len(versions))
+					require.NoError(t, importutilv2.ValidateSnapshotImportPlan(files, options, l0))
+					require.Len(t, l0, 1)
+					require.Equal(t, []string{deltaKey}, l0[0].LegacyL0Deltalogs)
+					for i, file := range files {
+						if versions[i] == 2 {
+							ref := file.GetSnapshotSource().GetV2Reference()
+							require.Equal(t, path.Join(root, fmt.Sprintf("snapshots/1/manifests/%d.avro", 20+i)), ref.GetSnapshotManifestPath())
+							require.NotNil(t, ref.OriginalKeyPrefix)
+							require.Equal(t, root, ref.GetOriginalKeyPrefix())
+						} else {
+							require.Equal(t, packed.MarshalManifestPath(path.Join(root, fmt.Sprintf("files/segment/%d", 20+i)), 7), file.GetSnapshotSource().GetManifestPath())
+						}
+					}
+					require.True(t, proto.Equal(frozen, metadata), "preparation must not mutate captured metadata")
+				})
+			}
+		}
+	}
+}

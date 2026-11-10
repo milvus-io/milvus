@@ -464,6 +464,13 @@ func (r *SnapshotReader) ReadSnapshotFromMetadata(ctx context.Context, metadataF
 		var oldRootFound bool
 		oldRoot, oldRootFound = DeriveSnapshotRootPath(metadata.GetSnapshotInfo().GetS3Location())
 		shouldRebase = oldRootFound && oldRoot != newRoot
+		if oldRootFound && oldRoot == newRoot {
+			// Preserve same-location URI spelling for persisted restore fingerprints.
+			// Only two known, different storage identities establish a relocation.
+			oldIdentity, oldURI, oldErr := parseSnapshotURIIdentity(metadata.GetSnapshotInfo().GetS3Location())
+			newIdentity, newURI, newErr := parseSnapshotURIIdentity(metadataFilePath)
+			shouldRebase = oldErr == nil && newErr == nil && oldURI && newURI && oldIdentity != newIdentity
+		}
 		if shouldRebase {
 			if err := RebaseSelfContainedSnapshotMetadata(metadata, oldRoot, newRoot); err != nil {
 				return nil, merr.Wrap(err, "failed to rebase snapshot metadata")

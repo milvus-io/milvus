@@ -3262,9 +3262,12 @@ func runStorageV2AndMixedSnapshotImport(t *testing.T, compatibility string) {
 				if !mixed {
 					metadata.ManifestList, metadata.SegmentIds, metadata.Storagev2ManifestList = nil, nil, nil
 				}
-				if compatibility == "plain_manifest" {
+				if compatibility == "plain_manifest" || compatibility == "same_prefix_bucket" {
 					manifestKey := bundleRoot + "/files/v2/manifest.json"
 					put(manifestKey, []byte("{}"))
+					if compatibility == "same_prefix_bucket" {
+						manifestKey = extTestURI(serverCfg, manifestKey)
+					}
 					metadata.Storagev2ManifestList = append(metadata.Storagev2ManifestList,
 						&datapb.StorageV2SegmentManifest{SegmentId: segmentID, Manifest: manifestKey})
 				}
@@ -3287,6 +3290,9 @@ func runStorageV2AndMixedSnapshotImport(t *testing.T, compatibility string) {
 					require.NoError(t, writer.Close())
 					deltaPath := bundleRoot + "/files/v2/l0.parquet"
 					put(deltaPath, buf.Bytes())
+					if compatibility == "same_prefix_bucket" {
+						deltaPath = extTestURI(serverCfg, deltaPath)
+					}
 					l0 := &datapb.SegmentDescription{
 						SegmentId: segmentID + 1, PartitionId: partitionID, ChannelName: firstSegment.ChannelName, SegmentLevel: datapb.SegmentLevel_L0, StorageVersion: 2,
 						Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: deltaPath, EntriesNum: 1}}}},
@@ -3300,6 +3306,13 @@ func runStorageV2AndMixedSnapshotImport(t *testing.T, compatibility string) {
 				}
 				if !selfContained {
 					metadata.Layout = datapb.SnapshotLayout_SnapshotLayoutReferenced
+				}
+				if compatibility == "same_prefix_bucket" {
+					for i, manifest := range metadata.ManifestList {
+						key, err := snapshotFixtureObjectKey(manifest, cfg.bucket, serverCfg.address, "", "")
+						require.NoError(t, err)
+						metadata.ManifestList[i] = extTestURI(serverCfg, key)
+					}
 				}
 				raw, err = protojson.Marshal(metadata)
 				require.NoError(t, err)

@@ -18,10 +18,12 @@ package copysegment
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -32,7 +34,10 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metacache"
 	kvdatacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	"github.com/milvus-io/milvus/internal/snapshotio"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -282,4 +287,87 @@ func TestRestoreSegmentRetainsEffectiveInsertTime(t *testing.T) {
 	require.EqualValues(t, 100, target.GetStartPosition().GetTimestamp())
 	require.EqualValues(t, 500, target.GetTransformStartAfterTimetick())
 	require.Equal(t, "source", source.GetStartPosition().GetChannelName())
+}
+
+func TestLoadCopySnapshotPreservesLegacyFingerprintAfterRestart(t *testing.T) {
+	paramtable.Init()
+	for _, version := range []int64{2, 3} {
+		t.Run(fmt.Sprintf("v%d", version), func(t *testing.T) {
+			ctx := t.Context()
+			uri := "s3://source/root/snapshots/1/metadata/2.json"
+			manifest := "s3://source/root/snapshots/1/manifests/20.avro"
+			metadata := &datapb.SnapshotMetadata{
+				FormatVersion: 6, Layout: datapb.SnapshotLayout_SnapshotLayoutSelfContained,
+				SnapshotInfo: &datapb.SnapshotInfo{Id: 2, CollectionId: 1, S3Location: uri},
+				Collection:   &datapb.CollectionDescription{Schema: &schemapb.CollectionSchema{}},
+				ManifestList: []string{manifest}, SegmentIds: []int64{20},
+			}
+			segment := &datapb.SegmentDescription{SegmentId: 20, StorageVersion: version, SegmentLevel: datapb.SegmentLevel_L1,
+				Statslogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: "s3://source/root/files/stats"}}}},
+			}
+			if version == 2 {
+				segment.Binlogs = []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: "s3://source/root/files/insert"}}}}
+			} else {
+				segment.ManifestPath = packed.MarshalManifestPath("s3://source/root/files/segment", 7)
+				metadata.Storagev2ManifestList = []*datapb.StorageV2SegmentManifest{{SegmentId: 20, Manifest: segment.ManifestPath}}
+			}
+			raw, err := protojson.Marshal(metadata)
+			require.NoError(t, err)
+			avro, err := snapshotio.MarshalSegmentManifest(segment)
+			require.NoError(t, err)
+			cm := storage.NewLocalChunkManager()
+			read := mockey.Mock((*storage.LocalChunkManager).Read).To(func(_ *storage.LocalChunkManager, _ context.Context, key string) ([]byte, error) {
+				switch key {
+				case "root/snapshots/1/metadata/2.json":
+					return raw, nil
+				case "root/snapshots/1/manifests/20.avro":
+					return avro, nil
+				default:
+					return nil, merr.WrapErrDataIntegrityMsg("unexpected object key: %s", key)
+				}
+			}).Build()
+			defer read.UnPatch()
+			reader := snapshotstorage.NewSnapshotReader(cm)
+			// Legacy same-location reads retained URI fields and applied the manifest mapping.
+			legacySegment, err := reader.ReadSegmentManifest(ctx, manifest, 6)
+			require.NoError(t, err)
+			legacySegment.ManifestPath = segment.ManifestPath
+			legacy := &snapshotstorage.SnapshotData{
+				SnapshotInfo: metadata.SnapshotInfo, Collection: metadata.Collection,
+				Segments: []*datapb.SegmentDescription{legacySegment}, ManifestPaths: metadata.ManifestList,
+				SegmentIDs: metadata.SegmentIds, Layout: metadata.Layout,
+			}
+			fingerprint, err := snapshotstorage.SnapshotFingerprint(legacy)
+			require.NoError(t, err)
+			catalog := kvdatacoord.NewCatalog(meta.NewMetaMemoryKV(), "", "")
+			require.NoError(t, catalog.SaveCopySegmentJob(ctx, &datapb.CopySegmentJob{
+				JobId: 100, External: true, SnapshotS3Location: uri, SnapshotFingerprint: fingerprint,
+				State: datapb.CopySegmentJobState_CopySegmentJobExecuting,
+			}))
+			resolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).Return(&snapshotstorage.ResolvedForeignStorage{ForeignCM: cm}, nil).Build()
+			defer resolve.UnPatch()
+			source := &restoreSnapshotSource{}
+			externalRead := mockey.Mock((*restoreSnapshotSource).ReadExternalSnapshotDataWithChunkManager).To(
+				func(_ *restoreSnapshotSource, ctx context.Context, cm storage.ChunkManager, location string, includeSegments bool) (*snapshotstorage.SnapshotData, error) {
+					return snapshotstorage.NewSnapshotReader(cm).ReadSnapshot(ctx, location, includeSegments)
+				}).Build()
+			defer externalRead.UnPatch()
+			restored, err := NewCopySegmentMeta(ctx, catalog, nil, nil, source, nil)
+			require.NoError(t, err)
+			job := restored.GetJob(ctx, 100)
+			require.Nil(t, job.(*Job).SnapshotCache.data)
+			got, err := loadCopySnapshot(ctx, job, source)
+			require.NoError(t, err)
+			require.True(t, proto.Equal(legacySegment, got.Segments[0]))
+
+			// Real content changes must still fail after another restart.
+			segment.NumOfRows = 42
+			avro, err = snapshotio.MarshalSegmentManifest(segment)
+			require.NoError(t, err)
+			restored, err = NewCopySegmentMeta(ctx, catalog, nil, nil, source, nil)
+			require.NoError(t, err)
+			_, err = loadCopySnapshot(ctx, restored.GetJob(ctx, 100), source)
+			require.ErrorContains(t, err, "external snapshot changed after restore job creation")
+		})
+	}
 }

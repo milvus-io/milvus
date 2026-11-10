@@ -3666,3 +3666,79 @@ func TestRebaseSelfContainedSnapshotData_SameKeyPrefix(t *testing.T) {
 		}
 	}
 }
+
+func TestSnapshotReaderSamePrefixRelocationBoundaries(t *testing.T) {
+	for _, mode := range []string{"same_bucket", "scheme_alias", "same_endpoint", "new_endpoint", "new_bucket", "key_origin", "key_location", "unknown_origin", "outside_avro", "outside_data", "referenced"} {
+		t.Run(mode, func(t *testing.T) {
+			metadata := &datapb.SnapshotMetadata{
+				FormatVersion: 6, Layout: datapb.SnapshotLayout_SnapshotLayoutSelfContained,
+				SnapshotInfo: &datapb.SnapshotInfo{Id: 2, CollectionId: 1, S3Location: "s3://old/root/snapshots/1/metadata/2.json"},
+				Collection:   &datapb.CollectionDescription{Schema: &schemapb.CollectionSchema{}},
+				ManifestList: []string{"s3://old/root/snapshots/1/manifests/20.avro"},
+			}
+			uri := "s3://new/root/snapshots/1/metadata/2.json"
+			dataPath := "s3://old/root/files/insert"
+			switch mode {
+			case "same_bucket":
+				uri = metadata.SnapshotInfo.S3Location
+			case "scheme_alias":
+				metadata.SnapshotInfo.S3Location = "gcs://old/root/snapshots/1/metadata/2.json"
+				metadata.ManifestList[0] = "gcs://old/root/snapshots/1/manifests/20.avro"
+				dataPath = "gcs://old/root/files/insert"
+				uri = "gs://old/root/snapshots/1/metadata/2.json"
+			case "same_endpoint", "new_endpoint":
+				metadata.SnapshotInfo.S3Location = "minio://OLD:9000/bucket/root/snapshots/1/metadata/2.json"
+				metadata.ManifestList[0] = "minio://old:9000/bucket/root/snapshots/1/manifests/20.avro"
+				dataPath = "minio://old:9000/bucket/root/files/insert"
+				uri = "minio://old:9000/bucket/root/snapshots/1/metadata/2.json"
+				if mode == "new_endpoint" {
+					uri = "minio://new:9000/bucket/root/snapshots/1/metadata/2.json"
+				}
+			case "key_origin":
+				metadata.SnapshotInfo.S3Location = "root/snapshots/1/metadata/2.json"
+			case "key_location":
+				uri = "root/snapshots/1/metadata/2.json"
+			case "unknown_origin":
+				metadata.SnapshotInfo.S3Location = ""
+			case "outside_avro":
+				metadata.ManifestList[0] = "s3://old/outside/20.avro"
+			case "outside_data":
+				dataPath = "s3://old/outside/insert"
+			case "referenced":
+				metadata.Layout = datapb.SnapshotLayout_SnapshotLayoutReferenced
+			}
+			frozen := proto.Clone(metadata)
+			segment := &datapb.SegmentDescription{SegmentId: 20, StorageVersion: 2, SegmentLevel: datapb.SegmentLevel_L1,
+				Binlogs: []*datapb.FieldBinlog{{FieldID: 0, Binlogs: []*datapb.Binlog{{LogPath: dataPath}}}},
+			}
+			data, err := snapshotio.MarshalSegmentManifest(segment)
+			require.NoError(t, err)
+			read := mockey.Mock((*storage.LocalChunkManager).Read).Return(data, nil).Build()
+			defer read.UnPatch()
+			reader := snapshotstorage.NewSnapshotReader(storage.NewLocalChunkManager())
+			got, err := reader.ReadSnapshotFromMetadata(context.Background(), uri, metadata, true)
+			require.True(t, proto.Equal(frozen, metadata))
+			if mode == "outside_avro" || mode == "outside_data" {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			logPath := got.Segments[0].Binlogs[0].Binlogs[0].LogPath
+			refs := []snapshotstorage.SnapshotFileRef{{Path: logPath, NormalizedPath: snapshotstorage.NormalizeSnapshotObjectPath(logPath)}}
+			err = snapshotstorage.ValidateExternalSnapshotPaths(uri, got, refs)
+			if mode == "unknown_origin" || mode == "referenced" || mode == "key_origin" {
+				require.Error(t, err, "unknown origins and referenced snapshots must not silently change storage identity")
+				require.Equal(t, dataPath, logPath)
+				return
+			}
+			require.NoError(t, err)
+			if mode == "same_bucket" || mode == "scheme_alias" || mode == "same_endpoint" || mode == "key_location" {
+				require.Equal(t, dataPath, logPath)
+				require.Equal(t, metadata.ManifestList, got.ManifestPaths)
+				return
+			}
+			require.Equal(t, "root/files/insert", logPath)
+			require.Equal(t, []string{"root/snapshots/1/manifests/20.avro"}, got.ManifestPaths)
+		})
+	}
+}
