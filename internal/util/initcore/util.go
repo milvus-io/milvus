@@ -23,6 +23,7 @@ package initcore
 #include <stdint.h>
 #include <stdbool.h>
 #include "common/init_c.h"
+#include "futures/future_c.h"
 #include "storage/storage_c.h"
 */
 import "C"
@@ -70,6 +71,10 @@ func UpdateHighPriorityThreadCoreCoefficient(coefficient float64) {
 
 func UpdateMiddlePriorityThreadCoreCoefficient(coefficient float64) {
 	C.SetMiddlePriorityThreadCoreCoefficient(C.float(coefficient))
+}
+
+func UpdateSearchFanoutThreadCoreCoefficient(coefficient float64) {
+	C.executor_set_search_fanout_thread_core_coefficient(C.float(coefficient))
 }
 
 func UpdateLowPriorityThreadCoreCoefficient(coefficient float64) {
