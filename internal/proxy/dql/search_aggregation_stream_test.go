@@ -215,7 +215,7 @@ func TestAppendFinalSearchChunkPreservesGroupValidity(t *testing.T) {
 	for row, group := range []any{int64(10), nil, int64(20)} {
 		request := &internalpb.SearchRequest{Nq: 1, Topk: 3, MetricType: "IP", GroupByFieldIds: []int64{101}}
 		chunk := groupStreamResult(t, request, [][]groupStreamHit{{{int64(row + 1), .9, group}}}, false)
-		_, err := appendFinalSearchChunk(output, chunk.GetResultData(), seen, 0, 3, "IP")
+		_, err := appendFinalSearchChunk(output, chunk.GetResultData(), seen, 0, 3, "IP", false)
 		require.NoError(t, err)
 	}
 	field := output.GetGroupByFieldValues()[0]

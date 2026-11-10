@@ -12,6 +12,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -237,6 +238,54 @@ func TestLegacyHybridStreamsReduceEachSubSearchAcrossVChannels(t *testing.T) {
 		}
 		require.Equal(t, [][]int64{{1, 2, 3}, {11, 12}}[i], ids)
 		require.EqualValues(t, 8, bits)
+		require.NoError(t, stream.Close())
+	}
+}
+
+func TestLegacyHybridGroupStreamsPreserveVChannelCandidates(t *testing.T) {
+	setupTestReplicaRouting(t)
+	request := hybridStreamRequest()
+	request.GroupByFieldIds = []int64{200}
+	for _, sub := range request.SubReqs {
+		sub.Topk, sub.Offset, sub.GroupByFieldId, sub.GroupSize = 1, 0, 200, 1
+	}
+	channels := []string{"grouped-hybrid-v0", "grouped-hybrid-v1"}
+	plans := make(map[string]*viewpb.QueryPlan)
+	for _, channel := range channels {
+		shard := qviews.ShardID{ReplicaID: 1, VChannel: channel}
+		plan := legacySearchPlan(shard, qviews.NewQueryNode(11))
+		plan.Request = &viewpb.QueryPlan_LegacySearchRequest{LegacySearchRequest: proto.Clone(request).(*internalpb.SearchRequest)}
+		plans[channel] = plan
+	}
+	service := &legacyServiceClient{searchOnViewStream: func(ctx context.Context, _ qviews.WorkNode, req *viewpb.SearchOnViewRequest) (searchreducestream.ReduceStream, error) {
+		id := int64(1)
+		if req.GetShardId().GetVchannel() == channels[1] {
+			id = 2
+		}
+		if req.GetLegacyReq().GetFieldId() == 102 {
+			id += 10
+		}
+		chunk := newTestSearchChunk(1, []int64{id}, []float32{.9})
+		chunk.MetricType = req.GetLegacyReq().GetMetricType()
+		chunk.ResultData.GroupByFieldValues = []*schemapb.FieldData{{FieldId: 200, Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{id}}}}}}}
+		return &fakeSearchStream{ctx: ctx, recv: []fakeSearchStreamRecv{{chunk: chunk}}}, nil
+	}}
+	client := NewLegacyViewQueryClient(ViewQueryClientConfig{}, &legacyPlanClient{plans: plans}, service, &legacyResolver{vchannels: channels})
+	result, err := client.Legacy().Search(context.Background(), &LegacySearchRequest{Req: request, AllowStreaming: true, ReduceStreamChunkBytes: 1})
+	require.NoError(t, err)
+	require.Len(t, result.SubStreams, 2)
+	for i, stream := range result.SubStreams {
+		var ids []int64
+		for {
+			chunk, err := stream.Recv()
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			require.NoError(t, err)
+			ids = append(ids, chunk.GetResultData().GetIds().GetIntId().GetData()...)
+		}
+		require.Equal(t, [][]int64{{1, 2}, {11, 12}}[i], ids)
 		require.NoError(t, stream.Close())
 	}
 }

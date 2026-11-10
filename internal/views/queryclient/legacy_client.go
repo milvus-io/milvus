@@ -224,7 +224,11 @@ func (c *legacyClient) searchStream(ctx context.Context, req *LegacySearchReques
 		for i := range vchannels {
 			children[i] = vchannelStreams[i][index]
 		}
-		finalStreams[index], err = searchreducestream.NewReduceStream(request, children, chunkBytes)
+		if req.Req.GetIsAdvanced() && (req.Req.GetGroupByFieldId() > 0 || len(req.Req.GetGroupByFieldIds()) > 0 || request.GetGroupByFieldId() > 0 || len(request.GetGroupByFieldIds()) > 0) {
+			finalStreams[index], err = searchreducestream.NewHybridGroupReduceStream(request, children, chunkBytes)
+		} else {
+			finalStreams[index], err = searchreducestream.NewReduceStream(request, children, chunkBytes)
+		}
 		if err != nil {
 			for _, streams := range vchannelStreams {
 				for _, stream := range streams {

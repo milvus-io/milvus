@@ -15,6 +15,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/util/reduce"
 	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/views/queryclient"
@@ -37,7 +39,7 @@ func TestHybridStreamingEligibility(t *testing.T) {
 		}
 	}
 	task.GroupByFieldIds = []int64{101}
-	require.False(t, task.supportsStreamingReduce())
+	require.True(t, task.supportsStreamingReduce())
 	task.GroupByFieldIds = nil
 	task.orderByFields = []OrderByField{{FieldID: 101}}
 	require.False(t, task.supportsStreamingReduce())
@@ -48,7 +50,7 @@ func TestHybridStreamingEligibility(t *testing.T) {
 	require.False(t, task.supportsStreamingReduce())
 	task.SubReqs[0].SearchType = internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER
 	task.SubReqs[0].GroupByFieldId = 101
-	require.False(t, task.supportsStreamingReduce())
+	require.True(t, task.supportsStreamingReduce())
 	task.SubReqs[0].GroupByFieldId = 0
 	task.rerankMeta = &functionChainRerankMeta{}
 	require.False(t, task.supportsStreamingReduce())
@@ -82,6 +84,71 @@ func TestSearchTaskConsumesHybridStreamsWithIndependentWindows(t *testing.T) {
 	require.EqualValues(t, 3, task.reducedFeatureBits)
 	require.Equal(t, 1, first.closeCalls)
 	require.Equal(t, 1, second.closeCalls)
+}
+
+func TestHybridGroupStreamingCandidatesMatchBatch(t *testing.T) {
+	for _, nq := range []int64{1, 2} {
+		for _, metric := range []string{"IP", "L2"} {
+			for _, groupSize := range []int64{1, 2} {
+				for _, chunkBytes := range []int{1, 128, 256 * 1024} {
+					t.Run(fmt.Sprintf("nq=%d/%s/group=%d/chunk=%d", nq, metric, groupSize, chunkBytes), func(t *testing.T) {
+						request := &internalpb.SearchRequest{Nq: nq, Topk: 3, Offset: 1, MetricType: metric, GroupSize: groupSize, GroupByFieldIds: []int64{101}}
+						info := reduce.NewReduceSearchResultInfo(nq, request.GetTopk()).WithMetricType(metric).
+							WithGroupSize(groupSize).WithGroupByFieldIdsFromProto(0, request.GetGroupByFieldIds())
+						hits := [][][]groupStreamHit{
+							{{{1, .99, int64(10)}, {2, .95, int64(20)}, {3, .90, int64(10)}}, {{11, .99, int64(50)}, {12, .80, int64(60)}}},
+							{{{4, .98, int64(10)}, {5, .95, int64(30)}, {6, .80, int64(30)}}, {{13, .97, int64(50)}, {14, .90, int64(70)}}},
+							{{{7, .97, int64(20)}, {8, .90, int64(40)}}, {{15, .95, int64(70)}}},
+							{{}, {}},
+						}
+						var batchShards []*schemapb.SearchResultData
+						var shardStreams []searchreducestream.ReduceStream
+						for shard := 0; shard < 2; shard++ {
+							var workers []*internalpb.SearchResults
+							var children []searchreducestream.ReduceStream
+							for _, nodeHits := range hits[shard*2 : shard*2+2] {
+								node := groupStreamResult(t, request, nodeHits[:nq], false)
+								workers = append(workers, proto.Clone(node).(*internalpb.SearchResults))
+								chunks, err := searchreducestream.SplitSearchResult(node, chunkBytes)
+								require.NoError(t, err)
+								children = append(children, &searchTaskReduceStream{chunks: chunks})
+							}
+							batch, err := segments.ReduceSearchOnQueryNode(context.Background(), workers, info)
+							require.NoError(t, err)
+							decoded, err := decodeSearchResults(context.Background(), []*internalpb.SearchResults{batch})
+							require.NoError(t, err)
+							require.Len(t, decoded, 1)
+							batchShards = append(batchShards, decoded[0])
+							stream, err := searchreducestream.NewShardReduceStream(request, children, chunkBytes)
+							require.NoError(t, err)
+							shardStreams = append(shardStreams, stream)
+						}
+						batch, err := reduceAdvanceGroupBy(context.Background(), batchShards, nq, request.GetTopk(), schemapb.DataType_Int64, metric, request.GetGroupByFieldIds())
+						require.NoError(t, err)
+						stream, err := searchreducestream.NewHybridGroupReduceStream(request, shardStreams, chunkBytes)
+						require.NoError(t, err)
+						defer stream.Close()
+						task := &SearchTask{SearchRequest: &internalpb.SearchRequest{IsAdvanced: true, GroupByFieldIds: []int64{101}}}
+						actual, _, err := task.consumeResultStream(stream, request, metric, func(*internalpb.SearchResults) {})
+						require.NoError(t, err)
+						require.True(t, proto.Equal(batch.GetResults(), actual.GetResults()), "batch=%s\nstream=%s", batch.GetResults(), actual.GetResults())
+					})
+				}
+			}
+		}
+	}
+}
+
+func TestHybridGroupStreamingEmptyCandidates(t *testing.T) {
+	request := &internalpb.SearchRequest{Nq: 2, Topk: 3, MetricType: "IP", GroupSize: 1, GroupByFieldIds: []int64{101}}
+	stream, err := searchreducestream.NewHybridGroupReduceStream(request, nil, 128)
+	require.NoError(t, err)
+	defer stream.Close()
+	task := &SearchTask{SearchRequest: &internalpb.SearchRequest{IsAdvanced: true, GroupByFieldIds: []int64{101}}}
+	result, _, err := task.consumeResultStream(stream, request, "IP", func(*internalpb.SearchResults) {})
+	require.NoError(t, err)
+	require.Equal(t, []int64{0, 0}, result.GetResults().GetTopks())
+	require.Zero(t, typeutil.GetSizeOfIDs(result.GetResults().GetIds()))
 }
 
 type blockedHybridSearchStream struct {
