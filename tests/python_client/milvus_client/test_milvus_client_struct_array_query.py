@@ -62,9 +62,13 @@ def _positive(element):
 
 class TestMilvusClientStructArrayNullablePredicates(StructArrayTestBase):
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("quantifier", ["ANY", "ALL", "EXACT"])
+    @pytest.mark.parametrize(
+        "quantifier,threshold",
+        [("ANY", None), ("ALL", None)]
+        + [(op, n) for op in ("EXACT", "MOST", "LEAST") for n in (0, 1, 2, 8, 9) if op != "LEAST" or n > 0],
+    )
     @pytest.mark.parametrize("combination", ["plain", "and", "or", "not"])
-    def test_match_predicates_preserve_null_truth_values(self, quantifier, combination):
+    def test_match_predicates_preserve_null_truth_values(self, quantifier, threshold, combination):
         """
         target: preserve UNKNOWN inside predicates and on null parent rows
         method: evaluate independent three-valued predicates and outer NOT before/after reload
@@ -72,7 +76,14 @@ class TestMilvusClientStructArrayNullablePredicates(StructArrayTestBase):
         """
         client = self._client()
         name, schema = self.create_struct_collection(client, nullable_children())
-        model = self.insert_rows_with_model(client, name, make_predicate_rows(schema))
+        rows = make_predicate_rows(schema)
+        for scores in ([1] * 8, [None, 1, -1, None, 1, 0, None, 1]):
+            clips = [
+                {"anchor": offset, "score": score, "label": None, "emb": None, "tags": [None]}
+                for offset, score in enumerate(scores)
+            ]
+            rows.append(make_nullable_row(schema, len(rows), clips))
+        model = self.insert_rows_with_model(client, name, rows)
         expressions = {
             "plain": "$[score] > 0",
             "and": "$[score] > 0 and $[tags] IS NULL",
@@ -94,10 +105,16 @@ class TestMilvusClientStructArrayNullablePredicates(StructArrayTestBase):
                 expected[pk] = None
                 continue
             matches = [predicate(e) is True for e in row["clips"]]
-            expected[pk] = (
-                any(matches) if quantifier == "ANY" else all(matches) if quantifier == "ALL" else sum(matches) == 1
-            )
-        suffix = ", threshold=1" if quantifier == "EXACT" else ""
+            if quantifier == "ANY":
+                expected[pk] = any(matches)
+            elif quantifier == "ALL":
+                expected[pk] = all(matches)
+            else:
+                count = sum(matches)
+                expected[pk] = {"EXACT": count == threshold, "MOST": count <= threshold, "LEAST": count >= threshold}[
+                    quantifier
+                ]
+        suffix = f", threshold={threshold}" if threshold is not None else ""
         expression = f"MATCH_{quantifier}(clips, {expressions[combination]}{suffix})"
         for phase in range(2):
             for negate in (False, True):
@@ -109,7 +126,30 @@ class TestMilvusClientStructArrayNullablePredicates(StructArrayTestBase):
                     consistency_level="Strong",
                 )
                 wanted = {pk for pk, value in expected.items() if (_not(value) if negate else value) is True}
-                assert {row["id"] for row in actual} == wanted, (phase, expression, negate, actual, wanted)
+                assert len(actual) == len(wanted) and {row["id"] for row in actual} == wanted, (
+                    phase,
+                    expression,
+                    negate,
+                    actual,
+                    wanted,
+                )
+                hits, _ = self.search(
+                    client,
+                    name,
+                    [next(iter(model.values()))["normal_vector"]],
+                    anns_field="normal_vector",
+                    filter=f"not ({expression})" if negate else expression,
+                    limit=len(model) + 1,
+                    search_params={"metric_type": "L2"},
+                    consistency_level="Strong",
+                )
+                assert len(hits[0]) == len(wanted) and {hit["id"] for hit in hits[0]} == wanted, (
+                    phase,
+                    expression,
+                    negate,
+                    hits,
+                    wanted,
+                )
             if phase == 0:
                 self.reload_collection(client, name)
 
