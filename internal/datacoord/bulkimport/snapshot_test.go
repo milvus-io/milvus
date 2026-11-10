@@ -2078,6 +2078,136 @@ func TestPrepareSnapshotImportOptions_Schema(t *testing.T) {
 	}
 }
 
+func TestPrepareSnapshotImportOptions_VectorDimensions(t *testing.T) {
+	for _, dataType := range []schemapb.DataType{
+		schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector,
+		schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector,
+		schemapb.DataType_Int8Vector, schemapb.DataType_ArrayOfVector,
+	} {
+		for _, mode := range []string{"matching", "smaller", "larger", "missing_source", "different_type", "source_dim_missing", "target_dim_missing", "source_dim_invalid", "target_dim_invalid", "struct_child"} {
+			t.Run(dataType.String()+"/"+mode, func(t *testing.T) {
+				source, target := SnapshotImportTestSchema(), SnapshotImportTestSchema()
+				vector := &schemapb.FieldSchema{
+					FieldID: 102, Name: "source_vector", DataType: dataType,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "32"}},
+				}
+				if dataType == schemapb.DataType_ArrayOfVector {
+					vector.ElementType = schemapb.DataType_FloatVector
+				}
+				source.Fields = append(source.Fields, vector)
+				targetVector := proto.Clone(vector).(*schemapb.FieldSchema)
+				targetVector.Name = "renamed_vector"
+				target.Fields = append([]*schemapb.FieldSchema{targetVector}, target.Fields...)
+				switch mode {
+				case "smaller", "struct_child":
+					targetVector.TypeParams[0].Value = "16"
+				case "larger":
+					targetVector.TypeParams[0].Value = "64"
+				case "missing_source":
+					source.Fields = source.Fields[:2]
+				case "different_type":
+					vector.DataType = schemapb.DataType_Int64
+				case "source_dim_missing":
+					vector.TypeParams = nil
+				case "target_dim_missing":
+					targetVector.TypeParams = nil
+				case "source_dim_invalid":
+					vector.TypeParams[0].Value = "invalid"
+				case "target_dim_invalid":
+					targetVector.TypeParams[0].Value = "invalid"
+				}
+				if mode == "struct_child" {
+					source.Fields = source.Fields[:2]
+					target.Fields = target.Fields[1:]
+					source.StructArrayFields = []*schemapb.StructArrayFieldSchema{{FieldID: 103, Fields: []*schemapb.FieldSchema{vector}}}
+					target.StructArrayFields = []*schemapb.StructArrayFieldSchema{{FieldID: 103, Fields: []*schemapb.FieldSchema{targetVector}}}
+				}
+				beforeSource, beforeTarget := proto.Clone(source), proto.Clone(target)
+				_, err := prepareSnapshotImportOptions(target, source, SnapshotImportTestOptions())
+				switch mode {
+				case "different_type":
+					require.ErrorIs(t, err, merr.ErrImportFailed)
+					require.ErrorContains(t, err, "vector data type mismatch")
+				case "smaller", "larger", "struct_child":
+					require.ErrorIs(t, err, merr.ErrImportFailed)
+					require.ErrorContains(t, err, "vector dimension mismatch")
+				case "source_dim_missing", "target_dim_missing", "source_dim_invalid", "target_dim_invalid":
+					require.ErrorIs(t, err, merr.ErrParameterInvalid)
+					if strings.HasPrefix(mode, "target_") {
+						require.Equal(t, merr.SystemError, merr.GetErrorType(err))
+					} else {
+						require.Equal(t, merr.InputError, merr.GetErrorType(err))
+					}
+					require.Equal(t, merr.GetErrorType(err), merr.GetErrorType(merr.Error(merr.Status(err))))
+				default:
+					require.NoError(t, err)
+				}
+				require.True(t, proto.Equal(beforeSource, source))
+				require.True(t, proto.Equal(beforeTarget, target))
+			})
+		}
+	}
+	t.Run("sparse_has_no_dimension", func(t *testing.T) {
+		source, target := SnapshotImportTestSchema(), SnapshotImportTestSchema()
+		field := &schemapb.FieldSchema{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector}
+		source.Fields = append(source.Fields, field)
+		target.Fields = append(target.Fields, proto.Clone(field).(*schemapb.FieldSchema))
+		_, err := prepareSnapshotImportOptions(target, source, SnapshotImportTestOptions())
+		require.NoError(t, err)
+	})
+	t.Run("vector_data_types", func(t *testing.T) {
+		for _, sourceType := range []schemapb.DataType{schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector,
+			schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_Int8Vector,
+			schemapb.DataType_SparseFloatVector, schemapb.DataType_Int64} {
+			for _, targetType := range []schemapb.DataType{schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector,
+				schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_Int8Vector,
+				schemapb.DataType_SparseFloatVector, schemapb.DataType_Int64} {
+				t.Run(sourceType.String()+"_to_"+targetType.String(), func(t *testing.T) {
+					source, target := SnapshotImportTestSchema(), SnapshotImportTestSchema()
+					field := &schemapb.FieldSchema{FieldID: 102, Name: "vector", DataType: sourceType,
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "32"}}}
+					source.Fields = append(source.Fields, field)
+					targetField := proto.Clone(field).(*schemapb.FieldSchema)
+					targetField.DataType = targetType
+					target.Fields = append(target.Fields, targetField)
+					_, err := prepareSnapshotImportOptions(target, source, SnapshotImportTestOptions())
+					if sourceType == targetType {
+						require.NoError(t, err)
+					} else {
+						require.ErrorIs(t, err, merr.ErrImportFailed)
+						require.ErrorContains(t, err, "vector data type mismatch")
+					}
+				})
+			}
+		}
+	})
+
+	t.Run("array_element_types", func(t *testing.T) {
+		for _, sourceType := range []schemapb.DataType{schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector,
+			schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_Int8Vector} {
+			for _, targetType := range []schemapb.DataType{schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector,
+				schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_Int8Vector} {
+				t.Run(sourceType.String()+"_to_"+targetType.String(), func(t *testing.T) {
+					source, target := SnapshotImportTestSchema(), SnapshotImportTestSchema()
+					field := &schemapb.FieldSchema{FieldID: 103, Name: "vectors", DataType: schemapb.DataType_ArrayOfVector,
+						ElementType: sourceType, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "32"}}}
+					source.StructArrayFields = []*schemapb.StructArrayFieldSchema{{FieldID: 102, Fields: []*schemapb.FieldSchema{field}}}
+					targetField := proto.Clone(field).(*schemapb.FieldSchema)
+					targetField.ElementType = targetType
+					target.StructArrayFields = []*schemapb.StructArrayFieldSchema{{FieldID: 102, Fields: []*schemapb.FieldSchema{targetField}}}
+					_, err := prepareSnapshotImportOptions(target, source, SnapshotImportTestOptions())
+					if sourceType == targetType {
+						require.NoError(t, err)
+					} else {
+						require.ErrorIs(t, err, merr.ErrImportFailed)
+						require.ErrorContains(t, err, "vector element type mismatch")
+					}
+				})
+			}
+		}
+	})
+}
+
 func TestPrepareSnapshotImportOptions_FieldIdentity(t *testing.T) {
 	target := SnapshotImportTestSchema()
 	target.Fields = append(target.Fields, &schemapb.FieldSchema{

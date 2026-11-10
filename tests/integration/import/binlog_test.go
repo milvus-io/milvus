@@ -20,15 +20,18 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"testing"
 	"time"
 
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -55,6 +58,251 @@ type SourceCollectionInfo struct {
 	// Exact timestamp range retained in the source SegmentStats.
 	l1MinTs uint64
 	l1MaxTs uint64
+}
+
+// SnapshotSchemaImportSuite exercises schema conversion through the public
+// insert/snapshot APIs, the import scheduler, and queries of imported rows.
+type SnapshotSchemaImportSuite struct {
+	importSuite
+}
+
+func (s *SnapshotSchemaImportSuite) SetupSuite() {
+	s.WithMilvusConfig(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.EnableImportV3.Key, "false")
+	s.importSuite.SetupSuite()
+}
+
+func TestSnapshotSchemaImportSuite(t *testing.T) {
+	suite.Run(t, new(SnapshotSchemaImportSuite))
+}
+
+func (s *SnapshotSchemaImportSuite) TestSnapshotSchemaConversion() {
+	for _, format := range []string{"vortex", "parquet"} {
+		s.Run(format, func() {
+			restore := s.Cluster.MustModifyMilvusConfig(map[string]string{
+				paramtable.Get().DataNodeCfg.StorageFormat.Key: format,
+			})
+			defer restore()
+			for _, tc := range []struct {
+				name          string
+				dim           int
+				targetType    schemapb.DataType
+				sourceElement schemapb.DataType
+				targetElement schemapb.DataType
+				text          string
+				nullable      bool
+				withDefault   bool
+				admissionErr  string
+				readErr       string
+			}{
+				{name: "smaller_dimension", dim: 64, admissionErr: "vector dimension mismatch"},
+				{name: "larger_dimension", dim: 256, admissionErr: "vector dimension mismatch"},
+				{name: "float_to_bfloat16_equal_width", dim: 256, targetType: schemapb.DataType_BFloat16Vector,
+					admissionErr: "vector data type mismatch"},
+				{name: "array_float_to_binary", sourceElement: schemapb.DataType_FloatVector,
+					targetElement: schemapb.DataType_BinaryVector, admissionErr: "vector element type mismatch"},
+				{name: "array_float16_to_bfloat16", sourceElement: schemapb.DataType_Float16Vector,
+					targetElement: schemapb.DataType_BFloat16Vector, admissionErr: "vector element type mismatch"},
+				{name: "ascii_boundary", text: "abcdef", nullable: true},
+				{name: "utf8_boundary", text: "中文", nullable: true},
+				{name: "ascii_oversized", text: "abcdefg", nullable: true, readErr: "exceeds max_length(6)"},
+				{name: "utf8_oversized", text: "中文a", nullable: true, readErr: "exceeds max_length(6)"},
+				{name: "required_default", withDefault: true},
+				{name: "nullable_default", nullable: true, withDefault: true},
+				{name: "nullable_no_default", nullable: true},
+				{name: "required_no_default", readErr: ""},
+			} {
+				s.Run(tc.name, func() {
+					ctx, cancel := context.WithTimeout(s.Cluster.GetContext(), 3*time.Minute)
+					defer cancel()
+					create := func(schema *schemapb.CollectionSchema) {
+						encoded, err := proto.Marshal(schema)
+						s.Require().NoError(err)
+						status, err := s.Cluster.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+							CollectionName: schema.GetName(), Schema: encoded, ShardsNum: 1,
+						})
+						s.Require().NoError(merr.CheckRPCCall(status, err))
+						s.T().Cleanup(func() {
+							cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
+							defer cleanupCancel()
+							status, err := s.Cluster.MilvusClient.DropCollection(cleanupCtx,
+								&milvuspb.DropCollectionRequest{CollectionName: schema.GetName()})
+							s.NoError(merr.CheckRPCCall(status, err))
+						})
+					}
+					const sourceDim = 128
+					source := &schemapb.CollectionSchema{Name: "snapshot_schema_src_" + funcutil.RandomString(8), Fields: []*schemapb.FieldSchema{
+						{Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+						{Name: "vector", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}},
+						{Name: "text", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "64"}}},
+						{Name: "value", DataType: schemapb.DataType_Int64, Nullable: true},
+					}}
+					if tc.sourceElement != schemapb.DataType_None {
+						source.StructArrayFields = []*schemapb.StructArrayFieldSchema{{Name: "group", Fields: []*schemapb.FieldSchema{
+							{Name: "vectors", DataType: schemapb.DataType_ArrayOfVector, ElementType: tc.sourceElement,
+								TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "32"}, {Key: common.MaxCapacityKey, Value: "1000"}}},
+						}}}
+					}
+					create(source)
+					values := integration.NewInt64FieldData("value", 3)
+					values.GetScalars().GetLongData().Data = []int64{0, 5}
+					typeutil.SetFieldDataValidData(values, []bool{false, true, true})
+					text := integration.NewVarCharFieldData("text", 3, false)
+					typeutil.SetFieldDataValidData(text, nil)
+					text.GetScalars().GetStringData().Data = []string{"", "a", tc.text}
+					fieldsData := []*schemapb.FieldData{integration.NewInt64FieldData("pk", 3),
+						integration.NewFloatVectorFieldData("vector", 3, sourceDim), text, values}
+					if tc.sourceElement != schemapb.DataType_None {
+						fieldsData = append(fieldsData, integration.NewStructArrayFieldData(source.StructArrayFields[0], "group", 3, 32))
+					}
+					insert, err := s.Cluster.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
+						CollectionName: source.GetName(), NumRows: 3, HashKeys: integration.GenerateHashKeys(3),
+						FieldsData: fieldsData,
+					})
+					s.Require().NoError(merr.CheckRPCCall(insert, err))
+					s.Require().EqualValues(3, insert.GetInsertCnt())
+					flush, err := s.Cluster.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{CollectionNames: []string{source.GetName()}})
+					s.Require().NoError(merr.CheckRPCCall(flush, err))
+					s.Require().Eventually(func() bool {
+						segments, err := s.Cluster.ShowSegments(source.GetName())
+						if err != nil {
+							return false
+						}
+						var rows int64
+						for _, segment := range segments {
+							if segment.GetState() == commonpb.SegmentState_Flushed && segment.GetLevel() == datapb.SegmentLevel_L1 {
+								if segment.GetStorageVersion() != storage.StorageV3 || segment.GetManifestPath() == "" {
+									return false
+								}
+								rows += segment.GetNumOfRows()
+							}
+						}
+						return rows == 3
+					}, time.Minute, 100*time.Millisecond)
+					description, err := s.Cluster.MilvusClient.DescribeCollection(ctx,
+						&milvuspb.DescribeCollectionRequest{CollectionName: source.GetName()})
+					s.Require().NoError(merr.CheckRPCCall(description, err))
+					valueField, found := lo.Find(description.GetSchema().GetFields(), func(field *schemapb.FieldSchema) bool {
+						return field.GetName() == "value"
+					})
+					s.Require().True(found)
+					valueID := fmt.Sprint(valueField.GetFieldID())
+					segments, err := s.Cluster.ShowSegments(source.GetName())
+					s.Require().NoError(err)
+					foundValue := false
+					for _, segment := range segments {
+						if segment.GetState() != commonpb.SegmentState_Flushed || segment.GetLevel() != datapb.SegmentLevel_L1 {
+							continue
+						}
+						groups, err := packed.ReadManifestColumnGroups(segment.GetManifestPath(), packed.CreateStorageConfig())
+						s.Require().NoError(err)
+						for _, group := range groups {
+							if lo.Contains(group.Columns, valueID) {
+								foundValue = true
+								// Prove the nullable column actually exercises this format.
+								s.Require().Equal(format, group.Format)
+							}
+						}
+					}
+					s.Require().True(foundValue)
+					snapshotName := "schema_" + funcutil.RandomString(8)
+					status, err := s.Cluster.MilvusClient.CreateSnapshot(ctx, &milvuspb.CreateSnapshotRequest{Name: snapshotName, CollectionName: source.GetName()})
+					s.Require().NoError(merr.CheckRPCCall(status, err))
+					s.T().Cleanup(func() {
+						cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
+						defer cleanupCancel()
+						status, err := s.Cluster.MilvusClient.DropSnapshot(cleanupCtx,
+							&milvuspb.DropSnapshotRequest{Name: snapshotName, CollectionName: source.GetName()})
+						s.NoError(merr.CheckRPCCall(status, err))
+					})
+					snapshot, err := s.Cluster.MilvusClient.DescribeSnapshot(ctx, &milvuspb.DescribeSnapshotRequest{Name: snapshotName, CollectionName: source.GetName()})
+					s.Require().NoError(merr.CheckRPCCall(snapshot, err))
+					s.Require().NotEmpty(snapshot.GetS3Location())
+					target := proto.Clone(source).(*schemapb.CollectionSchema)
+					target.Name = "snapshot_schema_dst_" + funcutil.RandomString(8)
+					if tc.dim != 0 {
+						target.Fields[1].TypeParams[0].Value = fmt.Sprint(tc.dim)
+					}
+					if tc.targetType != schemapb.DataType_None {
+						target.Fields[1].DataType = tc.targetType
+					}
+					if tc.targetElement != schemapb.DataType_None {
+						target.StructArrayFields[0].Fields[0].ElementType = tc.targetElement
+					}
+					target.Fields[2].TypeParams[0].Value = "6"
+					target.Fields[3].Nullable = tc.nullable
+					if tc.withDefault {
+						target.Fields[3].DefaultValue = &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 42}}
+					}
+					create(target)
+					response, err := s.Cluster.ProxyClient.ImportV2(ctx, &internalpb.ImportRequest{
+						CollectionName: target.GetName(), Files: []*internalpb.ImportFile{{Paths: []string{snapshot.GetS3Location()}}},
+						Options: []*commonpb.KeyValuePair{{Key: "backup", Value: "true"}, {Key: importutilv2.SourceType, Value: importutilv2.SourceTypeSnapshot}},
+					})
+					if tc.admissionErr != "" {
+						s.Require().ErrorContains(merr.CheckRPCCall(response, err), tc.admissionErr)
+						// A rejected schema must leave the service available.
+						response, err := s.Cluster.MilvusClient.DescribeCollection(ctx,
+							&milvuspb.DescribeCollectionRequest{CollectionName: target.GetName()})
+						s.Require().NoError(merr.CheckRPCCall(response, err))
+						return
+					}
+					s.Require().NoError(merr.CheckRPCCall(response, err))
+					s.Require().NotEmpty(response.GetJobID())
+					// Bound polling here rather than using WaitForImportDone, whose
+					// loop does not stop when the context expires.
+					var progress *internalpb.GetImportProgressResponse
+					s.Require().Eventually(func() bool {
+						var err error
+						progress, err = s.Cluster.ProxyClient.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{JobID: response.GetJobID()})
+						return err == nil && merr.Ok(progress.GetStatus()) &&
+							(progress.GetState() == internalpb.ImportJobState_Completed || progress.GetState() == internalpb.ImportJobState_Failed)
+					}, time.Minute, 100*time.Millisecond)
+					if tc.readErr != "" || tc.name == "required_no_default" {
+						s.Require().Equal(internalpb.ImportJobState_Failed, progress.GetState(), progress.GetReason())
+						s.Require().NotEmpty(progress.GetReason())
+						if tc.readErr != "" {
+							s.Contains(progress.GetReason(), tc.readErr)
+						} else {
+							// Vortex rejects NULL during decoding; Parquet can reject
+							// nil when appending the required Int64 field instead.
+							s.Regexp(`(?i)null|\[expected=int64\]\[actual=<nil>\]`, progress.GetReason())
+						}
+						return
+					}
+					s.Require().Equal(internalpb.ImportJobState_Completed, progress.GetState(), progress.GetReason())
+					status, err = s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+						CollectionName: target.GetName(), FieldName: "vector", IndexName: "vector_idx",
+						ExtraParams: integration.ConstructIndexParam(sourceDim, integration.IndexFaissIDMap, metric.L2),
+					})
+					s.Require().NoError(merr.CheckRPCCall(status, err))
+					s.WaitForIndexBuilt(ctx, target.GetName(), "vector")
+					status, err = s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{CollectionName: target.GetName()})
+					s.Require().NoError(merr.CheckRPCCall(status, err))
+					s.WaitForLoad(ctx, target.GetName())
+					for pk := int64(0); pk < 3; pk++ {
+						result, err := s.Cluster.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
+							CollectionName: target.GetName(), Expr: fmt.Sprintf("pk == %d", pk),
+							OutputFields: []string{"pk", "text", "value"}, ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+						})
+						s.Require().NoError(merr.CheckRPCCall(result, err))
+						fields := lo.KeyBy(result.GetFieldsData(), func(field *schemapb.FieldData) string { return field.GetFieldName() })
+						s.Require().Equal([]int64{pk}, fields["pk"].GetScalars().GetLongData().GetData())
+						s.Equal([]string{"", "a", tc.text}[pk], fields["text"].GetScalars().GetStringData().GetData()[0])
+						if pk == 0 && !tc.withDefault {
+							s.Require().Equal([]bool{false}, typeutil.GetFieldDataValidData(fields["value"]))
+						} else {
+							want := []int64{42, 0, 5}[pk]
+							if valid := typeutil.GetFieldDataValidData(fields["value"]); len(valid) != 0 {
+								s.Equal([]bool{true}, valid)
+							}
+							s.Equal([]int64{want}, fields["value"].GetScalars().GetLongData().GetData())
+						}
+					}
+				})
+			}
+		})
+	}
 }
 
 func (s *importTestBase) PrepareSourceCollection(dim int, dmlGroup *DMLGroup) *SourceCollectionInfo {
