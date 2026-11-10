@@ -37,6 +37,7 @@ const (
 	FormatLanceTable   = specutil.FormatLanceTable
 	FormatVortex       = specutil.FormatVortex
 	FormatIcebergTable = specutil.FormatIcebergTable
+	FormatPaimonTable  = specutil.FormatPaimonTable
 	FormatMilvusTable  = specutil.FormatMilvusTable
 )
 
@@ -159,6 +160,21 @@ func ParseExternalSpec(specStr string) (*ExternalSpec, error) {
 		return nil, merr.Wrap(err, "parse external spec")
 	}
 	return spec, nil
+}
+
+// MarshalCollectionSchema normalizes external_spec before sending a schema to
+// native readers. It also handles historical schemas without mutating the
+// caller's shared schema or rewriting persisted metadata.
+func MarshalCollectionSchema(schema *schemapb.CollectionSchema) ([]byte, error) {
+	normalized, err := specutil.NormalizeExternalSpec(schema.GetExternalSpec())
+	if err != nil {
+		return nil, err
+	}
+	if normalized != schema.GetExternalSpec() {
+		schema = proto.Clone(schema).(*schemapb.CollectionSchema)
+		schema.ExternalSpec = normalized
+	}
+	return proto.Marshal(schema)
 }
 
 func sortedKeys(m map[string]bool) []string {

@@ -1014,7 +1014,7 @@ InjectExternalSpecProperties(
     }
 
     // Format-layer: emit per-format properties derived from spec.format.
-    // Currently only Iceberg-table → reader.exttable.snapshot_id. Future formats
+    // Iceberg and Paimon use reader.exttable.snapshot_id. Future formats
     // (Lance version, Iceberg branch, etc.) land here.
     if (external_spec.empty()) {
         return arrow::Status::OK();
@@ -1027,7 +1027,7 @@ InjectExternalSpecProperties(
         if (doc.find_field("format").get_string().get(format_view) ==
             simdjson::SUCCESS) {
             std::string format{format_view};
-            if (format == "iceberg-table") {
+            if (format == "iceberg-table" || format == "paimon-table") {
                 // JSON fields may appear before or after "format".
                 auto snapshot_field = doc.find_field_unordered("snapshot_id");
                 int64_t snapshot_id = 0;
@@ -1042,8 +1042,9 @@ InjectExternalSpecProperties(
                             int_err = simdjson::SUCCESS;
                         } catch (const std::exception& e) {
                             LOG_WARN(
-                                "iceberg snapshot_id parse failed "
+                                "{} parse failed "
                                 "(collection_id={}): {}",
+                                PROPERTY_READER_EXTTABLE_SNAPSHOT_ID,
                                 collection_id,
                                 e.what());
                         }
@@ -1059,6 +1060,29 @@ InjectExternalSpecProperties(
                         return arrow::Status::Invalid(
                             PROPERTY_READER_EXTTABLE_SNAPSHOT_ID, ": ", *error);
                     }
+                }
+            }
+            if (format == "paimon-table") {
+                auto scan_mode = doc.find_field_unordered("scan_mode");
+                if (scan_mode.error() == simdjson::NO_SUCH_FIELD) {
+                    return arrow::Status::OK();
+                }
+                bool is_null = false;
+                std::string_view mode;
+                if (scan_mode.is_null().get(is_null) != simdjson::SUCCESS ||
+                    (!is_null &&
+                     scan_mode.get_string().get(mode) != simdjson::SUCCESS)) {
+                    return arrow::Status::Invalid(
+                        "Paimon scan_mode must be a string");
+                }
+                // Missing leaves reader defaults intact; null/empty means auto.
+                const auto error = milvus_storage::api::SetValue(
+                    properties,
+                    PROPERTY_PAIMON_SCAN_MODE,
+                    mode.empty() ? "auto" : std::string(mode).c_str());
+                if (error.has_value()) {
+                    return arrow::Status::Invalid(
+                        PROPERTY_PAIMON_SCAN_MODE, ": ", *error);
                 }
             }
         }
