@@ -17,61 +17,70 @@
 package index
 
 import (
-    "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-    "github.com/milvus-io/milvus/internal/datacoord/meta"
-    "github.com/milvus-io/milvus/internal/metacache"
-    "github.com/milvus-io/milvus/internal/metastore/model"
-    "github.com/milvus-io/milvus/pkg/v3/util/merr"
-    "github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/metacache"
+	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func (m *IndexMeta) UsesSegmentSummaries() bool { return m.summarySource != nil }
 
 // UseSegmentSummaries runs once during recovery, before metadata is published.
 func (m *IndexMeta) UseSegmentSummaries(source metacache.MetaView) error {
-    for _, record := range m.SegmentBuildInfo.List() {
-        if record.IndexState == commonpb.IndexState_Finished {
-            return merr.Wrapf(merr.ErrDataIntegrity, "summary mode cannot recover completed task row %d", record.BuildID)
-        }
-    }
-    m.summarySource = source
-    for _, segment := range source.GetAllSegments() {
-        for _, summary := range segment.GetIndexSummaries() {
-            record := meta.SegmentIndexFromSummary(segment, summary)
-            m.taskCounts.replaceTask(nil, record)
-        }
-    }
-    return nil
+	for _, record := range m.SegmentBuildInfo.List() {
+		if record.IndexState == commonpb.IndexState_Finished {
+			return merr.Wrapf(merr.ErrDataIntegrity, "summary mode cannot recover completed task row %d", record.BuildID)
+		}
+	}
+	m.summarySource = source
+	for _, segment := range source.GetAllSegments() {
+		for _, summary := range segment.GetIndexSummaries() {
+			record := meta.SegmentIndexFromSummary(segment, summary)
+			m.taskCounts.replaceTask(nil, record)
+		}
+	}
+	return nil
 }
 
 // segmentIndexRecords is a request-scoped projection, never a resident cache.
 func (m *IndexMeta) segmentIndexRecords(segmentID int64) (*typeutil.ConcurrentMap[int64, *model.SegmentIndex], bool) {
-    active, found := m.SegmentIndexes.Get(segmentID)
-    if !m.UsesSegmentSummaries() { return active, found }
-    records := typeutil.NewConcurrentMap[int64, *model.SegmentIndex]()
-    if segment, ok := m.summarySource.GetSegment(segmentID); ok {
-        for _, summary := range segment.GetIndexSummaries() {
-            records.Insert(summary.GetIndexId(), meta.SegmentIndexFromSummary(segment, summary))
-        }
-    }
-    if found {
-        active.Range(func(id int64, record *model.SegmentIndex) bool { records.Insert(id, record); return true })
-    }
-    return records, records.Len() != 0
+	active, found := m.SegmentIndexes.Get(segmentID)
+	if !m.UsesSegmentSummaries() {
+		return active, found
+	}
+	records := typeutil.NewConcurrentMap[int64, *model.SegmentIndex]()
+	if segment, ok := m.summarySource.GetSegment(segmentID); ok {
+		for _, summary := range segment.GetIndexSummaries() {
+			records.Insert(summary.GetIndexId(), meta.SegmentIndexFromSummary(segment, summary))
+		}
+	}
+	if found {
+		active.Range(func(id int64, record *model.SegmentIndex) bool { records.Insert(id, record); return true })
+	}
+	return records, records.Len() != 0
 }
 
 func (m *IndexMeta) summaryRecord(segmentID, buildID int64) (*model.SegmentIndex, bool) {
-    if !m.UsesSegmentSummaries() { return nil, false }
-    segment, ok := m.summarySource.GetSegment(segmentID)
-    if !ok { return nil, false }
-    for _, summary := range segment.GetIndexSummaries() {
-        if summary.GetBuildId() == buildID { return meta.SegmentIndexFromSummary(segment, summary), true }
-    }
-    return nil, false
+	if !m.UsesSegmentSummaries() {
+		return nil, false
+	}
+	segment, ok := m.summarySource.GetSegment(segmentID)
+	if !ok {
+		return nil, false
+	}
+	for _, summary := range segment.GetIndexSummaries() {
+		if summary.GetBuildId() == buildID {
+			return meta.SegmentIndexFromSummary(segment, summary), true
+		}
+	}
+	return nil, false
 }
 
 func (m *IndexMeta) GetSegmentIndexBuild(segmentID, buildID int64) (*model.SegmentIndex, bool) {
-    if record, ok := m.GetIndexJob(buildID); ok { return record, record.SegmentID == segmentID }
-    return m.summaryRecord(segmentID, buildID)
+	if record, ok := m.GetIndexJob(buildID); ok {
+		return record, record.SegmentID == segmentID
+	}
+	return m.summaryRecord(segmentID, buildID)
 }
-

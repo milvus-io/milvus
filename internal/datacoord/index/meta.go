@@ -36,7 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metacache"
-"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
@@ -77,9 +77,9 @@ func validateIndexStorePathVersionForFinish(buildID int64, requested, actual ind
 }
 
 type IndexMeta struct {
- summarySource metacache.MetaView
-	ctx     context.Context
-	Catalog metastore.DataCoordCatalog
+	summarySource metacache.MetaView
+	ctx           context.Context
+	Catalog       metastore.DataCoordCatalog
 
 	// fieldIndexLock protects collection index definitions and serializes the
 	// resident publication of segment index records observed together by
@@ -306,16 +306,18 @@ func (m *IndexMeta) updateSegmentIndex(segIdx *model.SegmentIndex) {
 	defer locks.Unlock(segIdx.SegmentID)
 	old, _ := m.SegmentBuildInfo.Get(segIdx.BuildID)
 	m.taskCounts.replaceTask(old, segIdx)
-    if m.UsesSegmentSummaries() && segIdx.ManifestPublished && segIdx.IndexState == commonpb.IndexState_Finished {
-        if indexes, ok := m.SegmentIndexes.Get(segIdx.SegmentID); ok {
-            if current, exists := indexes.Get(segIdx.IndexID); exists && current.BuildID == segIdx.BuildID {
-                indexes.Remove(segIdx.IndexID)
-                if indexes.Len() == 0 { m.SegmentIndexes.Remove(segIdx.SegmentID) }
-            }
-        }
-        m.SegmentBuildInfo.Remove(segIdx.BuildID)
-        return
-    }
+	if m.UsesSegmentSummaries() && segIdx.ManifestPublished && segIdx.IndexState == commonpb.IndexState_Finished {
+		if indexes, ok := m.SegmentIndexes.Get(segIdx.SegmentID); ok {
+			if current, exists := indexes.Get(segIdx.IndexID); exists && current.BuildID == segIdx.BuildID {
+				indexes.Remove(segIdx.IndexID)
+				if indexes.Len() == 0 {
+					m.SegmentIndexes.Remove(segIdx.SegmentID)
+				}
+			}
+		}
+		m.SegmentBuildInfo.Remove(segIdx.BuildID)
+		return
+	}
 	indexes, ok := m.SegmentIndexes.Get(segIdx.SegmentID)
 	if ok {
 		indexes.Insert(segIdx.IndexID, segIdx)
@@ -1413,7 +1415,9 @@ func (m *IndexMeta) stageSegmentIndexMutation(mut meta.SegmentIndexMutation) (*m
 	staged := &meta.StagedSegmentIndexMutation{Install: func() func() { return func() {} }}
 
 	previous, ok := m.SegmentBuildInfo.Get(mut.BuildID)
-    if !ok && mut.Type == meta.SegmentIndexRemove { previous, ok = m.summaryRecord(mut.SegmentID, mut.BuildID) }
+	if !ok && mut.Type == meta.SegmentIndexRemove {
+		previous, ok = m.summaryRecord(mut.SegmentID, mut.BuildID)
+	}
 	if !ok {
 		if mut.Type == meta.SegmentIndexUpsert {
 			return staged, meta.ErrSegmentIndexRecordGone

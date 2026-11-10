@@ -1264,17 +1264,27 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 	segmentsIndexes := s.indexMeta.GetSegmentsIndexes(req.GetCollectionID(), req.GetSegmentIDs())
 	for _, segID := range req.GetSegmentIDs() {
 		segIdxes := segmentsIndexes[segID]
-        var summarySegment *datapb.SegmentInfo
-        if s.indexMeta.UsesSegmentSummaries() {
-            segment := s.meta.GetSegment(ctx, segID)
-            if segment == nil { return &indexpb.GetIndexInfoResponse{Status: merr.Status(merr.WrapErrSegmentNotFound(segID))}, nil }
-            if segment.GetCollectionID() != req.GetCollectionID() { return &indexpb.GetIndexInfoResponse{Status: merr.Status(merr.WrapErrSegmentNotFound(segID))}, nil }
-            summarySegment = segment.SegmentInfo
-            var err error
-            segIdxes, err = s.meta.ReadCompletedIndexes(ctx, summarySegment)
-            if err != nil { return &indexpb.GetIndexInfoResponse{Status: merr.Status(err)}, nil }
-            for id := range segIdxes { if !s.indexMeta.IsIndexExist(req.GetCollectionID(), id) { delete(segIdxes, id) } }
-        }
+		var summarySegment *datapb.SegmentInfo
+		if s.indexMeta.UsesSegmentSummaries() {
+			segment := s.meta.GetSegment(ctx, segID)
+			if segment == nil {
+				return &indexpb.GetIndexInfoResponse{Status: merr.Status(merr.WrapErrSegmentNotFound(segID))}, nil
+			}
+			if segment.GetCollectionID() != req.GetCollectionID() {
+				return &indexpb.GetIndexInfoResponse{Status: merr.Status(merr.WrapErrSegmentNotFound(segID))}, nil
+			}
+			summarySegment = segment.SegmentInfo
+			var err error
+			segIdxes, err = s.meta.ReadCompletedIndexes(ctx, summarySegment)
+			if err != nil {
+				return &indexpb.GetIndexInfoResponse{Status: merr.Status(err)}, nil
+			}
+			for id := range segIdxes {
+				if !s.indexMeta.IsIndexExist(req.GetCollectionID(), id) {
+					delete(segIdxes, id)
+				}
+			}
+		}
 		ret.SegmentInfo[segID] = &indexpb.SegmentInfo{
 			CollectionID: req.GetCollectionID(),
 			SegmentID:    segID,
