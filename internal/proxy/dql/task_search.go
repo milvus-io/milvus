@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/internal/util/function/rerank"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -1721,8 +1722,16 @@ func (t *SearchTask) supportsStreamingReduce() bool {
 				return false
 			}
 			if t.request.GetFunctionScore() != nil && t.rerankMeta == nil {
-				// Function-score reranking needs prepared Proxy metadata.
-				return false
+				// Boost executes on workers and does not require Proxy rerank metadata.
+				functions := t.request.GetFunctionScore().GetFunctions()
+				if len(functions) == 0 {
+					return false
+				}
+				for _, function := range functions {
+					if function == nil || rerank.GetRerankName(function) != rerank.BoostName {
+						return false
+					}
+				}
 			}
 			for _, chain := range t.request.GetFunctionChains() {
 				switch chain.GetStage() {
