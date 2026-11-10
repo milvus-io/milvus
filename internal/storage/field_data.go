@@ -2819,15 +2819,21 @@ func newTimestamptzFieldData(schema *schemapb.FieldSchema, options fieldDataOpti
 	return data, nil
 }
 
+// vectorDataCapacity preserves the smaller payload reservation for nullable vectors.
+// Their payload contains only non-null rows and grows as values are appended.
+func vectorDataCapacity(nullable bool, capacity, fullCapacity int) int {
+	if nullable {
+		return capacity
+	}
+	return fullCapacity
+}
+
 func newBinaryVectorFieldData(schema *schemapb.FieldSchema, options fieldDataOptions) (FieldData, error) {
 	dim, err := GetDimFromParams(schema.GetTypeParams())
 	if err != nil {
 		return nil, err
 	}
-	payloadCapacity := options.capacity * dim / 8
-	if schema.GetNullable() {
-		payloadCapacity = options.capacity
-	}
+	payloadCapacity := vectorDataCapacity(schema.GetNullable(), options.capacity, options.capacity*dim/8)
 	data := &BinaryVectorFieldData{
 		Data:     make([]byte, 0, payloadCapacity),
 		Dim:      dim,
@@ -2844,10 +2850,7 @@ func newFloatVectorFieldData(schema *schemapb.FieldSchema, options fieldDataOpti
 	if err != nil {
 		return nil, err
 	}
-	payloadCapacity := options.capacity * dim
-	if schema.GetNullable() {
-		payloadCapacity = options.capacity
-	}
+	payloadCapacity := vectorDataCapacity(schema.GetNullable(), options.capacity, options.capacity*dim)
 	data := &FloatVectorFieldData{
 		Data:     make([]float32, 0, payloadCapacity),
 		Dim:      dim,
@@ -2864,10 +2867,7 @@ func newFloat16VectorFieldData(schema *schemapb.FieldSchema, options fieldDataOp
 	if err != nil {
 		return nil, err
 	}
-	payloadCapacity := options.capacity * dim * 2
-	if schema.GetNullable() {
-		payloadCapacity = options.capacity
-	}
+	payloadCapacity := vectorDataCapacity(schema.GetNullable(), options.capacity, options.capacity*dim*2)
 	data := &Float16VectorFieldData{
 		Data:     make([]byte, 0, payloadCapacity),
 		Dim:      dim,
@@ -2884,10 +2884,7 @@ func newBFloat16VectorFieldData(schema *schemapb.FieldSchema, options fieldDataO
 	if err != nil {
 		return nil, err
 	}
-	payloadCapacity := options.capacity * dim * 2
-	if schema.GetNullable() {
-		payloadCapacity = options.capacity
-	}
+	payloadCapacity := vectorDataCapacity(schema.GetNullable(), options.capacity, options.capacity*dim*2)
 	data := &BFloat16VectorFieldData{
 		Data:     make([]byte, 0, payloadCapacity),
 		Dim:      dim,
@@ -2904,10 +2901,7 @@ func newInt8VectorFieldData(schema *schemapb.FieldSchema, options fieldDataOptio
 	if err != nil {
 		return nil, err
 	}
-	payloadCapacity := options.capacity * dim
-	if schema.GetNullable() {
-		payloadCapacity = options.capacity
-	}
+	payloadCapacity := vectorDataCapacity(schema.GetNullable(), options.capacity, options.capacity*dim)
 	data := &Int8VectorFieldData{
 		Data:     make([]int8, 0, payloadCapacity),
 		Dim:      dim,

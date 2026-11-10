@@ -2667,7 +2667,9 @@ func TestStorageV3Reader_ReadFailurePaths(t *testing.T) {
 			if name == "missing_field" || name == "allocate_field" {
 				delete(data.Data, 100)
 			}
-			batchPatch := mockey.Mock((*storage.InsertDataBuilder).Build).To(func(_ *storage.InsertDataBuilder) (*storage.InsertData, error) {
+			batchPatch := mockey.Mock((*storage.InsertDataBuilder).Build).To(func(builder *storage.InsertDataBuilder) (*storage.InsertData, error) {
+				expected := storage.NewInsertDataBuilder(r.schema).WithFunctionOutputFields().WithMemoryTracking()
+				require.Equal(t, expected, builder, "reader must include function output fields and enable memory tracking")
 				if name == "allocate_batch" {
 					return nil, cause
 				}
@@ -2675,7 +2677,12 @@ func TestStorageV3Reader_ReadFailurePaths(t *testing.T) {
 			}).Build()
 			defer batchPatch.UnPatch()
 			if name == "allocate_field" {
-				fieldPatch := mockey.Mock((*storage.FieldDataBuilder).Build).Return(nil, cause).Build()
+				fieldPatch := mockey.Mock((*storage.FieldDataBuilder).Build).To(func(builder *storage.FieldDataBuilder) (storage.FieldData, error) {
+					field := schema.Fields[0]
+					expected := storage.NewFieldDataBuilder(field.GetDataType(), field).WithCapacity(1024).WithMemoryTracking()
+					require.Equal(t, expected, builder, "reader must preserve field capacity and enable memory tracking")
+					return nil, cause
+				}).Build()
 				defer fieldPatch.UnPatch()
 			}
 
