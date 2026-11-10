@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/highlight"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -5511,6 +5512,36 @@ func TestSearchTask_FunctionChainRerankMeta(t *testing.T) {
 		require.NoError(t, task.initSearchRequest(ctx))
 		assert.Equal(t, internalpb.SearchType_DEFAULT, task.SearchType)
 		assert.True(t, task.supportsStreamingReduce())
+	})
+
+	t.Run("ordinary boost-only search uses configured reduction", func(t *testing.T) {
+		for _, count := range []int{1, 2} {
+			request := newRequest()
+			request.FunctionScore = &schemapb.FunctionScore{}
+			for range count {
+				request.FunctionScore.Functions = append(request.FunctionScore.Functions, &schemapb.FunctionSchema{
+					Type:   schemapb.FunctionType_Rerank,
+					Params: []*commonpb.KeyValuePair{{Key: "reranker", Value: "boost"}, {Key: "filter", Value: "ts > 50"}, {Key: "weight", Value: "2"}},
+				})
+			}
+			task := newTask(request)
+			require.NoError(t, task.initSearchRequest(ctx))
+			require.Nil(t, task.rerankMeta)
+			require.True(t, task.supportsStreamingReduce())
+			plan := &planpb.PlanNode{}
+			require.NoError(t, proto.Unmarshal(task.SerializedExprPlan, plan))
+			require.Len(t, plan.GetScorers(), count)
+			legacy := &fakeLegacyQueryClient{searchResult: &queryclient.LegacySearchResult{}}
+			task.viewQueryClient = &fakeLegacyViewQueryClient{legacy: legacy}
+			key := paramtable.Get().ProxyCfg.EnableReduceStream.Key
+			original := paramtable.Get().ProxyCfg.EnableReduceStream.GetValue()
+			t.Cleanup(func() { require.NoError(t, paramtable.Get().Save(key, original)) })
+			for _, enabled := range []bool{false, true} {
+				require.NoError(t, paramtable.Get().Save(key, strconv.FormatBool(enabled)))
+				require.NoError(t, task.executeByQueryView(ctx))
+				require.Equal(t, enabled, legacy.lastSearchRequest.AllowStreaming)
+			}
+		}
 	})
 
 	t.Run("ordinary search rejects order by with function chains", func(t *testing.T) {

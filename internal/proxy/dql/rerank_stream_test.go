@@ -46,6 +46,8 @@ import (
 )
 
 func TestRerankStreamingEligibility(t *testing.T) {
+	boost := &schemapb.FunctionSchema{Params: []*commonpb.KeyValuePair{{Key: "reranker", Value: "boost"}}}
+	other := &schemapb.FunctionSchema{Params: []*commonpb.KeyValuePair{{Key: "reranker", Value: "decay"}}}
 	for _, tc := range []struct {
 		name   string
 		change func(*SearchTask)
@@ -61,6 +63,36 @@ func TestRerankStreamingEligibility(t *testing.T) {
 		{name: "function score without Proxy metadata", change: func(task *SearchTask) {
 			task.request.FunctionChains = nil
 			task.request.FunctionScore = &schemapb.FunctionScore{}
+			task.rerankMeta = nil
+		}},
+		{name: "boost only", want: true, change: func(task *SearchTask) {
+			task.request.FunctionChains = nil
+			task.request.FunctionScore = &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{boost}}
+			task.rerankMeta = nil
+		}},
+		{name: "multiple boosts", want: true, change: func(task *SearchTask) {
+			task.request.FunctionChains = nil
+			task.request.FunctionScore = &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{boost, boost}}
+			task.rerankMeta = nil
+		}},
+		{name: "boost iterator", change: func(task *SearchTask) {
+			task.request.FunctionChains = nil
+			task.request.FunctionScore = &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{boost}}
+			task.rerankMeta, task.IsIterator = nil, true
+		}},
+		{name: "boost order by", change: func(task *SearchTask) {
+			task.request.FunctionChains = nil
+			task.request.FunctionScore = &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{boost}}
+			task.rerankMeta, task.orderByFields = nil, []OrderByField{{FieldName: "rank"}}
+		}},
+		{name: "boost and unprepared reranker", change: func(task *SearchTask) {
+			task.request.FunctionChains = nil
+			task.request.FunctionScore = &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{boost, other}}
+			task.rerankMeta = nil
+		}},
+		{name: "nil function", change: func(task *SearchTask) {
+			task.request.FunctionChains = nil
+			task.request.FunctionScore = &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{nil}}
 			task.rerankMeta = nil
 		}},
 		{name: "iterator", change: func(task *SearchTask) { task.IsIterator = true }},
@@ -169,6 +201,7 @@ func TestRerankStreamingMatchesBatch(t *testing.T) {
 		allEmpty      bool
 		workerStages  []schemapb.FunctionChainStage
 		workerOnly    bool
+		boost         bool
 	}{
 		{name: "L2 sort and limit"},
 		{name: "L2 score mapping", mapScore: true},
@@ -181,6 +214,7 @@ func TestRerankStreamingMatchesBatch(t *testing.T) {
 		{name: "empty first vector", emptyFirst: true},
 		{name: "all empty", allEmpty: true},
 		{name: "L0 only", workerOnly: true, workerStages: []schemapb.FunctionChainStage{schemapb.FunctionChainStage_FunctionChainStageL0Rerank}},
+		{name: "boost only", workerOnly: true, boost: true},
 		{name: "L1 only", workerOnly: true, workerStages: []schemapb.FunctionChainStage{schemapb.FunctionChainStage_FunctionChainStageL1Rerank}},
 		{name: "L0 and L1", workerOnly: true, workerStages: []schemapb.FunctionChainStage{schemapb.FunctionChainStage_FunctionChainStageL0Rerank, schemapb.FunctionChainStage_FunctionChainStageL1Rerank}},
 		{name: "L0 and L2", workerStages: []schemapb.FunctionChainStage{schemapb.FunctionChainStage_FunctionChainStageL0Rerank}},
@@ -276,6 +310,11 @@ func TestRerankStreamingMatchesBatch(t *testing.T) {
 						}
 						if tc.workerOnly {
 							task.request.FunctionChains, task.rerankMeta = nil, nil
+						}
+						if tc.boost {
+							task.request.FunctionScore = &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{{
+								Params: []*commonpb.KeyValuePair{{Key: "reranker", Value: "boost"}},
+							}}}
 						}
 						// Worker results below are already reranked. Native worker execution is
 						// covered by TestWorkerRerankStreamingMatchesBatch in querynodev2/tasks.

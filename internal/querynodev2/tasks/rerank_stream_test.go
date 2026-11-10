@@ -81,8 +81,10 @@ func TestWorkerRerankStreamingMatchesBatch(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		chains []*schemapb.FunctionChain
+		boost  bool
 		count  int64
 	}{
+		{name: "boost", boost: true, count: topK},
 		{name: "L0", chains: []*schemapb.FunctionChain{l0}, count: topK},
 		{name: "L1", chains: []*schemapb.FunctionChain{l1}, count: 2},
 		{name: "L0_L1", chains: []*schemapb.FunctionChain{l0, l1}, count: 2},
@@ -95,6 +97,16 @@ func TestWorkerRerankStreamingMatchesBatch(t *testing.T) {
 				plan := &planpb.PlanNode{}
 				require.NoError(t, proto.Unmarshal(request.Req.SerializedExprPlan, plan))
 				plan.QuerynodeFunctionChains = tc.chains
+				if tc.boost {
+					plan.Scorers = []*planpb.ScoreFunction{{
+						Weight: 2,
+						Filter: &planpb.Expr{Expr: &planpb.Expr_UnaryRangeExpr{UnaryRangeExpr: &planpb.UnaryRangeExpr{
+							ColumnInfo: &planpb.ColumnInfo{FieldId: 109, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+							Op:         planpb.OpType_GreaterThan, Value: &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: 4}},
+						}}},
+					}}
+					plan.ScoreOption = &planpb.ScoreOption{BoostMode: planpb.BoostMode_BoostModeSum}
+				}
 				plan.OutputFieldIds = []int64{109, 105}
 				plan.GetVectorAnns().QueryInfo.MetricType = metric
 				request.Req.SerializedExprPlan, err = proto.Marshal(plan)
@@ -117,6 +129,17 @@ func TestWorkerRerankStreamingMatchesBatch(t *testing.T) {
 				require.NoError(t, err)
 				require.Len(t, data, 1)
 				require.Equal(t, []int64{tc.count, tc.count}, data[0].Topks, "L1 limit is per worker and vector")
+				if tc.boost && worker == 0 {
+					plan.Scorers, plan.ScoreOption = nil, nil
+					request.Req.SerializedExprPlan, err = proto.Marshal(plan)
+					require.NoError(t, err)
+					baseline := NewSearchTask(ctx, ts.collection, ts.manager, request, int64(worker+1))
+					require.NoError(t, baseline.ExecuteOnSegments(ts.segs[worker*2:worker*2+2]))
+					unboosted, err := segments.DecodeSearchResults(ctx, []*internalpb.SearchResults{baseline.SearchResult()})
+					require.NoError(t, err)
+					require.Len(t, unboosted, 1)
+					require.NotEqual(t, unboosted[0].GetScores(), data[0].GetScores(), "boost must affect worker scores")
+				}
 				var rankField *schemapb.FieldData
 				for _, field := range data[0].FieldsData {
 					if field.FieldId == 105 {
@@ -128,7 +151,9 @@ func TestWorkerRerankStreamingMatchesBatch(t *testing.T) {
 					rank := rankField.GetScalars().GetDoubleData().GetData()[row]
 					pk := data[0].GetIds().GetIntId().GetData()[row]
 					require.Equal(t, float64((pk-1)/(workers*2)+1), rank, "late materialization must follow reranked rows")
-					require.Equal(t, float32(rank), score, "worker score mapping must execute")
+					if !tc.boost {
+						require.Equal(t, float32(rank), score, "worker score mapping must execute")
+					}
 					if row%int(tc.count) > 0 {
 						require.GreaterOrEqual(t, data[0].Scores[row-1], score)
 						if data[0].Scores[row-1] == score {
