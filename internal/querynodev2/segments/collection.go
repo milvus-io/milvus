@@ -18,7 +18,6 @@ package segments
 
 import (
 	"context"
-	"encoding/base64"
 	"sync"
 
 	"github.com/samber/lo"
@@ -27,7 +26,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -654,9 +652,7 @@ func (c *Collection) GetLoadType() querypb.LoadType {
 }
 
 func (c *Collection) Ref(count uint32) uint32 {
-	refCount := c.refCount.Add(count)
-	putOrUpdateStorageContext(c.Schema().GetProperties(), c.ID())
-	return refCount
+	return c.refCount.Add(count)
 }
 
 func (c *Collection) Unref(count uint32) uint32 {
@@ -799,31 +795,9 @@ func DeleteCollection(collection *Collection) {
 	collection.mu.Lock()
 	defer collection.mu.Unlock()
 
-	if hookutil.IsClusterEncryptionEnabled() {
-		ez := hookutil.GetEzByCollProperties(collection.Schema().GetProperties(), collection.ID())
-		if ez != nil {
-			if err := segcore.UnRefPluginContext(ez); err != nil {
-				mlog.Error(context.TODO(), "failed to unref plugin context", mlog.Int64("collectionID", collection.ID()), mlog.Err(err))
-			}
-		}
-	}
-
 	if collection.ccollection == nil {
 		return
 	}
 	collection.ccollection.Release()
 	collection.ccollection = nil
-}
-
-func putOrUpdateStorageContext(properties []*commonpb.KeyValuePair, collectionID int64) {
-	if hookutil.IsClusterEncryptionEnabled() {
-		ez := hookutil.GetEzByCollProperties(properties, collectionID)
-		if ez != nil {
-			key := hookutil.GetCipher().GetUnsafeKey(ez.EzID, ez.CollectionID)
-			err := segcore.PutOrRefPluginContext(ez, base64.StdEncoding.EncodeToString(key))
-			if err != nil {
-				mlog.Error(context.TODO(), "failed to put or update plugin context", mlog.Int64("collectionID", collectionID), mlog.Err(err))
-			}
-		}
-	}
 }

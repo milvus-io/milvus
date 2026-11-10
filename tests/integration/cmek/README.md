@@ -81,6 +81,29 @@ Raw-data format campaigns disable compaction before starting the cluster; propag
 
 The V3 scalar scenario uses one nonempty Parquet object for the format's key baseline. An independent Arrow Go reader fully reads its known payload with the correct fixture-derived key, rejects missing decryption configuration and rejects a legal-length wrong key. All three modes use the same bytes and a fresh reader.
 
+Under QueryView, loaded-artifact checks read physical bases from QueryNode's
+`GetDataDistribution`. Serving checks independently compare the persisted Up
+QueryView with the StreamingNode's actual QueryPlan, and require its Growing
+Statistics to be zero before claiming a sealed-only cold read. StreamingNode
+does not implement the legacy QueryNode distribution or metrics services.
+Release waits for QueryNode resources and all persisted collection QueryViews
+to disappear before reloading. A physical base's legacy load-task version may
+be zero; the serving QueryView version and exact Manifest identity establish the
+read identity instead.
+
+StorageV3 index publication advances the segment manifest and retires the
+Finished catalog row. Index propagation checks join DataCoord's actual task
+statistics (including the cold worker and BuildID) with `GetIndexInfos` artifact
+identities. The V3 consumer verifies the old manifest bytes and exact raw-data
+objects remain unchanged, the same segment lineage advances, and the cold read
+uses the new manifest containing the HNSW build.
+
+Collection cipher contexts are shared by `(EZ, collection)` across native
+collection shells, including StreamingNode growing/recovery resources and
+versioned read bindings. Releasing an older binding must not remove the context
+while another shell still needs it. The first shell acquires the required key;
+the last shell releases the context.
+
 ## Object discovery and encryption checks
 
 | File | Responsibility |
