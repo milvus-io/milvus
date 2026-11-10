@@ -34,6 +34,21 @@
 
 namespace milvus::segcore::storagev2translator {
 
+// One contiguous read window shared by sealed loading and growing recovery.
+struct AsyncReadWindow {
+    std::vector<CellSpec> cells;
+    std::vector<size_t> request_indices;
+    std::vector<int64_t> chunk_indices;
+    size_t budget_bytes{0};
+};
+
+// Groups cells by estimated loaded bytes, preserving each original request index.
+// A cell larger than the target occupies its own window; budget_bytes sums the
+// transient estimates, which callers must reserve through finalization.
+[[nodiscard]] std::vector<AsyncReadWindow>
+BuildAsyncReadWindows(const std::vector<CellSpec>& cells,
+                      size_t read_window_bytes);
+
 struct AsyncLoadPipelineOptions {
     // Empty uses the process default. Explicit values must be positive bytes.
     std::optional<size_t> read_window_bytes;

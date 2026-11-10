@@ -46,13 +46,6 @@ struct IndexedCell {
     size_t request_index;
 };
 
-struct AsyncReadWindow {
-    std::vector<CellSpec> cells;
-    std::vector<size_t> request_indices;
-    std::vector<int64_t> chunk_indices;
-    size_t budget_bytes{0};
-};
-
 struct WindowCellResult {
     size_t request_index;
     AsyncCellResult cell;
@@ -60,12 +53,6 @@ struct WindowCellResult {
 
 using WindowLoadResult = std::vector<WindowCellResult>;
 using RecordBatches = std::vector<std::shared_ptr<arrow::RecordBatch>>;
-
-// Groups contiguous cells into bounded remote-read windows while retaining
-// each cell's original request index.
-std::vector<AsyncReadWindow>
-BuildAsyncReadWindows(const std::vector<CellSpec>& cells,
-                      size_t read_window_bytes);
 
 // Stores the first window failure and propagates cancellation to peer windows.
 class WindowFailureState {
@@ -401,6 +388,8 @@ LoadCellsAsyncImpl(
     co_return results;
 }
 
+}  // namespace
+
 std::vector<AsyncReadWindow>
 BuildAsyncReadWindows(const std::vector<CellSpec>& cells,
                       const size_t read_window_bytes) {
@@ -484,8 +473,6 @@ BuildAsyncReadWindows(const std::vector<CellSpec>& cells,
     append_window();
     return windows;
 }
-
-}  // namespace
 
 folly::coro::Task<std::vector<AsyncCellResult>>
 LoadCellsAsync(const milvus::OpContext* ctx,
