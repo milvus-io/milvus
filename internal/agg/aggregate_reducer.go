@@ -336,12 +336,12 @@ func (reducer *GroupAggReducer) mergeValues(ctx context.Context, results []*Part
 
 // GroupAggBuffer retains one grouped accumulation independently of the reducer.
 type GroupAggBuffer struct {
-	reducer          *GroupAggReducer
-	hashValsMap      map[uint64]*Bucket
-	firstFieldData   []*schemapb.FieldData
-	totalGroupCount  int64
-	allRetrieveCount int64
-	limitReached     bool
+	reducer          *GroupAggReducer      // Aggregation definitions and group limit for this buffer.
+	hashValsMap      map[uint64]*Bucket    // Accumulated group values and aggregate state by hash.
+	firstFieldData   []*schemapb.FieldData // Empty output column templates from the first partial.
+	totalGroupCount  int64                 // Number of distinct groups accumulated.
+	allRetrieveCount int64                 // Retrieve count summed across merged partials.
+	limitReached     bool                  // Whether the configured group limit has been reached.
 }
 
 // NewBuffer creates a grouped output Buffer for one merge or ReduceStream.

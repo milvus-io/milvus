@@ -203,32 +203,32 @@ func (b *orderedChildBuffer) accept(chunk *internalpb.RetrieveResults) error {
 
 // OrderedReduceStream merges Query rows in order until its input is exhausted or closed.
 type OrderedReduceStream struct {
-	recvMu       sync.Mutex
-	childStreams *reduce.ChildStreams[*internalpb.RetrieveResults]
-	childBuffers []orderedChildBuffer
+	recvMu       sync.Mutex                                        // Serializes Recv and cleanup after cancellation.
+	childStreams *reduce.ChildStreams[*internalpb.RetrieveResults] // Receives and closes child streams.
+	childBuffers []orderedChildBuffer                              // Holds each child's current Chunk and row cursor.
 
-	chunkBytes     int
-	reduceType     reduce.IReduceType
-	orderByFields  []*planpb.OrderByField
-	hasLastPK      bool
-	lastPK         any
-	deduplicatePKs bool
-	outputBuffer   []retrieveUnit
-	seenPKs        map[any]struct{}
-	orderByLimit   int64
-	outputChunks   []*internalpb.RetrieveResults
-	outputIndex    int
+	chunkBytes     int                           // Reducible-payload byte threshold for output Chunks.
+	reduceType     reduce.IReduceType            // Controls when drained child streams end reduction.
+	orderByFields  []*planpb.OrderByField        // Query ORDER BY: columns and directions used for comparison.
+	hasLastPK      bool                          // Whether lastPK has been initialized.
+	lastPK         any                           // Last selected PK, used for ordering and duplicate checks.
+	deduplicatePKs bool                          // Per-vchannel Query: resolve duplicate PK versions by timestamp.
+	outputBuffer   []retrieveUnit                // Holds an oversize Unit deferred to the next Chunk.
+	seenPKs        map[any]struct{}              // Query ORDER BY: detect duplicate PKs across vchannels.
+	orderByLimit   int64                         // Per-vchannel Query ORDER BY: candidate limit after deduplication.
+	outputChunks   []*internalpb.RetrieveResults // Query ORDER BY: sorted Chunks prepared after draining workers.
+	outputIndex    int                           // Index of the next prepared ORDER BY Chunk.
 
-	elementLevel      bool
-	elementLevelKnown bool
-	computedFields    []*schemapb.FieldData // Empty column templates, never retained input rows.
-	computedKnown     bool
+	elementLevel      bool                  // Element-level Query: whether input rows represent elements.
+	elementLevelKnown bool                  // Whether an input Chunk established elementLevel.
+	computedFields    []*schemapb.FieldData // QueryScan: empty computed-column templates, without input rows.
+	computedKnown     bool                  // Whether input established the QueryScan computed-column layout.
 
-	metadata        *internalpb.RetrieveResults
-	metadataEmitted bool
-	closed          bool
-	finished        bool
-	closeErr        error
+	metadata        *internalpb.RetrieveResults // Metadata accumulated from child Chunks.
+	metadataEmitted bool                        // Whether metadata has been attached to an output Chunk.
+	closed          bool                        // Whether child streams and retained buffers were released.
+	finished        bool                        // Whether subsequent Recv calls return EOF.
+	closeErr        error                       // Result of closing child streams.
 }
 
 // NewReduceStream creates the Query ReduceStream selected by request semantics.
@@ -537,19 +537,19 @@ func buildRetrieveChunk(units []retrieveUnit) (*internalpb.RetrieveResults, erro
 
 // UnOrderedReduceStream merges Query groups and aggregates without depending on child arrival order.
 type UnOrderedReduceStream struct {
-	recvMu       sync.Mutex
-	childStreams *reduce.ChildStreams[*internalpb.RetrieveResults]
-	childBuffers []*internalpb.RetrieveResults
-	reducer      *agg.GroupAggReducer
-	outputBuffer *agg.GroupAggBuffer
-	chunkBytes   int
+	recvMu       sync.Mutex                                        // Serializes Recv and cleanup after cancellation.
+	childStreams *reduce.ChildStreams[*internalpb.RetrieveResults] // Receives and closes child streams.
+	childBuffers []*internalpb.RetrieveResults                     // Holds available partial results, one Chunk per child.
+	reducer      *agg.GroupAggReducer                              // Decodes, merges and encodes aggregate partials.
+	outputBuffer *agg.GroupAggBuffer                               // Query Group By: accumulates partials by group; nil for global aggregation.
+	chunkBytes   int                                               // Reducible-payload byte threshold for output Chunks.
 
-	outputChunks []*internalpb.RetrieveResults
-	outputIndex  int
-	metadata     *internalpb.RetrieveResults
-	closed       bool
-	finished     bool
-	closeErr     error
+	outputChunks []*internalpb.RetrieveResults // Partial aggregate Chunks prepared after all children drain.
+	outputIndex  int                           // Index of the next prepared Chunk.
+	metadata     *internalpb.RetrieveResults   // Metadata accumulated from child Chunks.
+	closed       bool                          // Whether child streams and retained buffers were released.
+	finished     bool                          // Whether subsequent Recv calls return EOF.
+	closeErr     error                         // Result of closing child streams.
 }
 
 func newUnOrderedReduceStream(
