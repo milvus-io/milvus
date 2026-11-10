@@ -2417,6 +2417,8 @@ def gen_row_data_by_schema(
         # Generate data for struct array fields
         for struct_field in struct_fields:
             field_name = struct_field.get("name", None)
+            if field_name in skip_field_names or (desired_field_names and field_name not in desired_field_names):
+                continue
             struct_data = gen_struct_array_data(struct_field, start=start, random_pk=random_pk)
             tmp[field_name] = struct_data
 
