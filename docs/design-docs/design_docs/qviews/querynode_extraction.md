@@ -138,20 +138,3 @@ Memory is counted once per physical base, while logical rows and repeated index
 metadata are deduplicated per segment. View acquisition, readiness, coordinator
 state application, failure, reporting and release emit the shared QueryView
 observation events.
-
-`GetDataDistribution` reports one SegmentVersionInfo per logical SegmentID from
-the most recently completed, caught-up prepared read that the resource still
-retains. Its manifest, DataVersion, selected index artifacts and JSON stats are
-captured after successful preparation; the physical base's initial Go LoadInfo
-does not describe successor read states. Failed attempts and unfinished catch-up
-cannot advertise their targets. Physical generations retained by older Views or
-queries remain owned and counted by segment metrics; this distribution summary
-is not a physical reclamation barrier.
-
-The resource manager advances a monotonic distribution timestamp on preparation
-attempt completion (historical deletes may already have applied on failure),
-catch-up changes, read retirement, resource closure and delete application.
-Stable distribution requests skip sampling. Changed QV/mixed inventories return
-full reports; legacy-only nodes retain the existing delta protocol. Polling does
-not create a new timestamp, and the normal QV coordinator does not start the
-legacy distribution pull loop.

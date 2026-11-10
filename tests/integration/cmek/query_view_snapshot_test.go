@@ -2,6 +2,7 @@ package cmek
 
 import (
 	"context"
+	"encoding/json"
 	"sort"
 
 	"google.golang.org/protobuf/proto"
@@ -9,60 +10,44 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
-	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/tests/integration/cluster/process"
-	"github.com/milvus-io/milvus/tests/integration/cmek/inspector"
 )
 
 func (s *rawDataSuite) collectionQueryViews(ctx context.Context, collectionID int64) []*viewpb.QueryViewOfShard {
-	var views []*viewpb.QueryViewOfShard
-	for _, view := range readPropagationRecords(ctx, s, "coord/qv", func() *viewpb.QueryViewOfShard { return &viewpb.QueryViewOfShard{} }) {
-		if view.GetMeta().GetCollectionId() == collectionID {
-			views = append(views, view)
-		}
-	}
-	return views
+	return s.GetQueryViewDistribution(ctx, collectionID).Views
 }
 
-// Keep physical loading evidence separate from serving placement. QV physical
-// segments have no legacy load-task version or delegator LeaderView.
+// Keep physical QN metrics separate from durable QV requirements and live SN serving.
 func (s *rawDataSuite) parquetReadSnapshot(ctx context.Context, collectionID int64) v3ReadSnapshot {
-	snapshot := v3ReadSnapshot{Loaded: make(map[int64][]v3LoadedIdentity), Serving: make(map[int64][]int64)}
+	snapshot := v3ReadSnapshot{Loaded: make(map[int64][]v3LoadedIdentity), Serving: make(map[int64][]v3ServingIdentity)}
+	request, err := metricsinfo.ConstructGetMetricsRequest(map[string]interface{}{
+		metricsinfo.MetricTypeKey: metricsinfo.SegmentKey, metricsinfo.MetricRequestParamCollectionIDKey: collectionID,
+	})
+	s.Require().NoError(err)
 	for _, node := range s.Cluster.GetAllQueryNodes() {
-		response, err := node.MustGetClient(ctx).GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
+		response, err := node.MustGetClient(ctx).GetMetrics(ctx, request)
 		s.Require().NoError(merr.CheckRPCCall(response, err))
-		s.Require().False(response.GetIsDelta())
-		for _, segment := range response.GetSegments() {
-			if segment.GetCollection() != collectionID {
-				continue
+		var segments []*metricsinfo.Segment
+		s.Require().NoError(json.Unmarshal([]byte(response.GetResponse()), &segments))
+		for _, segment := range segments {
+			if segment.CollectionID == collectionID && segment.State == "Sealed" {
+				snapshot.Loaded[segment.SegmentID] = append(snapshot.Loaded[segment.SegmentID], v3LoadedIdentity{NodeID: segment.NodeID})
 			}
-			locator, err := inspector.ParseManifestLocatorV3(segment.GetManifestPath())
-			s.Require().NoError(err)
-			snapshot.Loaded[segment.GetID()] = append(snapshot.Loaded[segment.GetID()], v3LoadedIdentity{response.GetNodeID(), locator})
 		}
 	}
-	latest := make(map[qviews.ShardID]*viewpb.QueryViewOfShard)
-	for _, view := range s.collectionQueryViews(ctx, collectionID) {
-		meta := view.GetMeta()
-		if meta.GetState() != viewpb.QueryViewState_QueryViewStateUp {
-			continue
-		}
-		id := qviews.ShardID{VChannel: meta.GetVchannel(), ReplicaID: meta.GetReplicaId()}
-		previous := latest[id]
-		if previous == nil || qviews.FromProtoQueryViewVersion(meta.GetVersion()).GT(qviews.FromProtoQueryViewVersion(previous.GetMeta().GetVersion())) {
-			latest[id] = view
-		}
-	}
+	distribution := s.GetQueryViewDistribution(ctx, collectionID)
 	assignments := make(map[string]*streamingpb.PChannelMeta)
 	for _, assignment := range readPropagationRecords(ctx, s, "streamingcoord-meta/pchannel", func() *streamingpb.PChannelMeta { return &streamingpb.PChannelMeta{} }) {
 		assignments[assignment.GetChannel().GetName()] = assignment
 	}
-	for id, view := range latest {
+	for _, view := range distribution.UpViews {
+		id := qviews.ShardID{VChannel: view.GetMeta().GetVchannel(), ReplicaID: view.GetMeta().GetReplicaId()}
 		assignment := assignments[funcutil.ToPhysicalChannel(id.VChannel)]
 		if assignment.GetState() != streamingpb.PChannelMetaState_PCHANNEL_META_STATE_ASSIGNED {
 			snapshot.Unserviceable = true
@@ -94,15 +79,16 @@ func (s *rawDataSuite) parquetReadSnapshot(ctx context.Context, collectionID int
 		}
 		for _, node := range view.GetQueryNode() {
 			for _, partition := range node.GetPartitions() {
-				for _, segmentID := range partition.GetSegmentIds() {
+				for i, segmentID := range partition.GetSegmentIds() {
 					snapshot.Unserviceable = snapshot.Unserviceable || !routed[node.GetNodeId()]
-					snapshot.Serving[segmentID] = append(snapshot.Serving[segmentID], node.GetNodeId())
+					s.Require().Len(partition.GetSegmentManifestVersions(), len(partition.GetSegmentIds()), "V3 views require explicit manifest versions")
+					snapshot.Serving[segmentID] = append(snapshot.Serving[segmentID], v3ServingIdentity{NodeID: node.GetNodeId(), MinimumManifestVersion: partition.GetSegmentManifestVersions()[i]})
 				}
 			}
 		}
 	}
 	for _, nodes := range snapshot.Serving {
-		sort.Slice(nodes, func(i, j int) bool { return nodes[i] < nodes[j] })
+		sort.Slice(nodes, func(i, j int) bool { return nodes[i].NodeID < nodes[j].NodeID })
 	}
 	return snapshot
 }

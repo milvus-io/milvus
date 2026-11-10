@@ -49,8 +49,8 @@ func TestParquetReadSnapshotRequiresPhysicalAndServingIdentity(t *testing.T) {
 	expected := map[int64]inspector.ManifestLocatorV3{31: manifest}
 	valid := func() v3ReadSnapshot {
 		return v3ReadSnapshot{
-			Loaded:  map[int64][]v3LoadedIdentity{31: {{NodeID: 5, Manifest: manifest}}},
-			Serving: map[int64][]int64{31: {5}},
+			Loaded:  map[int64][]v3LoadedIdentity{31: {{NodeID: 5}}},
+			Serving: map[int64][]v3ServingIdentity{31: {{NodeID: 5, MinimumManifestVersion: 7}}},
 		}
 	}
 	require.True(t, valid().matches(expected, expected))
@@ -62,10 +62,10 @@ func TestParquetReadSnapshotRequiresPhysicalAndServingIdentity(t *testing.T) {
 		{"not-serving", func(s *v3ReadSnapshot) { s.Unserviceable = true }},
 		{"missing-physical", func(s *v3ReadSnapshot) { delete(s.Loaded, 31) }},
 		{"missing-route", func(s *v3ReadSnapshot) { delete(s.Serving, 31) }},
-		{"wrong-node", func(s *v3ReadSnapshot) { s.Serving[31][0] = 6 }},
-		{"wrong-manifest", func(s *v3ReadSnapshot) { s.Loaded[31][0].Manifest.Version++ }},
+		{"wrong-node", func(s *v3ReadSnapshot) { s.Serving[31][0].NodeID = 6 }},
+		{"wrong-manifest", func(s *v3ReadSnapshot) { s.Serving[31][0].MinimumManifestVersion++ }},
 		{"duplicate-base", func(s *v3ReadSnapshot) { s.Loaded[31] = append(s.Loaded[31], s.Loaded[31][0]) }},
-		{"duplicate-route", func(s *v3ReadSnapshot) { s.Serving[31] = append(s.Serving[31], 5) }},
+		{"duplicate-route", func(s *v3ReadSnapshot) { s.Serving[31] = append(s.Serving[31], s.Serving[31][0]) }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			snapshot := valid()

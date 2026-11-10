@@ -1555,15 +1555,8 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 	}
 	defer node.lifetime.Done()
 
-	// QV mutations have their own monotonic timestamp. Unchanged requests skip
-	// sampling; changed mixed inventories use a full report because QV entries
-	// are not tracked by the legacy delta tracker.
-	queryViewResources := node.queryViewSegments.Load()
 	node.distDeltaTracker.mu.Lock()
 	lastModifyTs := node.getDistributionModifyTS()
-	if queryViewResources != nil {
-		lastModifyTs = max(lastModifyTs, queryViewResources.DistributionModifyTS())
-	}
 	if !hasDataDistributionChange(req, lastModifyTs) {
 		node.distDeltaTracker.mu.Unlock()
 		resp := &querypb.GetDataDistributionResponse{
@@ -1574,7 +1567,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 		return resp, nil
 	}
 
-	fullReport := queryViewResources != nil || !node.distDeltaTracker.canBuildDelta(req)
+	fullReport := !node.distDeltaTracker.canBuildDelta(req)
 	dirtySegments := node.distDeltaTracker.dirtySegments
 	removedSegments := node.distDeltaTracker.removedSegments
 	dirtyChannels := node.distDeltaTracker.dirtyChannels
@@ -1644,11 +1637,6 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			continue
 		}
 		segmentVersionInfos = append(segmentVersionInfos, buildSegmentVersionInfo(s))
-	}
-	if queryViewResources != nil {
-		queryViewInfos := queryViewResources.SegmentDistribution()
-		segmentVersionInfos = append(segmentVersionInfos, queryViewInfos...)
-		totalSegmentCount += len(queryViewInfos)
 	}
 	var labels map[string]string
 	if node.session != nil {
