@@ -42,7 +42,7 @@ import (
 
 var snapshotPrefix = "snapshot"
 
-// flushWithRetry retries Flush if it hits the collection-level rate limiter (default: 0.1 rps),
+// flushWithRetry retries Flush if it hits the collection-level rate limiter (default: 1 rps),
 // and awaits flush completion before returning.
 func flushWithRetry(ctx context.Context, mc *base.MilvusClient, collName string) error {
 	maxRetries := 5

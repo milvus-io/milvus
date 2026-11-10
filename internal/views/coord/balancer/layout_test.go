@@ -110,6 +110,7 @@ func TestReplicaLayoutIsolationSuspensionAndRestore(t *testing.T) {
 	lost := qviews.ShardID{ReplicaID: owners[1], VChannel: shard.VChannel}
 	plan = policy.Plan(c, []qviews.ShardID{lost})
 	require.Contains(t, plan.Releases, lost)
+	require.False(t, plan.ReleaseControls[lost].GetPreemptServingLease(), "suspension preserves ordinary lease protection")
 	require.Empty(t, plan.Retries)
 	require.NotContains(t, plan.Prepares, lost)
 	c.PublishShard(lost, nil)

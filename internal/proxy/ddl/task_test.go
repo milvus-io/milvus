@@ -1794,7 +1794,7 @@ func TestCreateCollectionTaskExternalCollection(t *testing.T) {
 		return &schemapb.CollectionSchema{
 			Name:           collectionName,
 			ExternalSource: "s3://bucket/prefix",
-			ExternalSpec:   `{"format":"parquet"}`,
+			ExternalSpec:   `{"format":"parquet","extfs":{"cloud_provider":"aws","region":"us-east-1","anonymous":"true"}}`,
 			Fields: []*schemapb.FieldSchema{
 				{
 					FieldID:       1,
@@ -1841,6 +1841,45 @@ func TestCreateCollectionTaskExternalCollection(t *testing.T) {
 		err = task.PreExecute(ctx)
 		require.NoError(t, err)
 	})
+
+	for _, tc := range []struct {
+		name string
+		want string
+	}{
+		{"external_source", "both set or both empty"},
+		{"external_spec", "both set or both empty"},
+		{"cloud_provider", "extfs.cloud_provider is required"},
+	} {
+		t.Run("missing "+tc.name, func(t *testing.T) {
+			schema := buildExternalSchema()
+			switch tc.name {
+			case "external_source":
+				schema.ExternalSource = ""
+			case "external_spec":
+				schema.ExternalSpec = ""
+			case "cloud_provider":
+				schema.ExternalSpec = `{"format":"parquet"}`
+			}
+			freshTask := &CreateCollectionTask{
+				Condition: NewTaskCondition(ctx),
+				CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+					CollectionName: collectionName,
+					Schema:         marshal(schema),
+					ShardsNum:      common.DefaultShardsNum,
+				},
+				ctx:      ctx,
+				mixCoord: mix,
+			}
+			require.NoError(t, freshTask.OnEnqueue())
+			err := freshTask.PreExecute(ctx)
+			if tc.name == "cloud_provider" {
+				require.ErrorIs(t, err, merr.ErrParameterMissing)
+			} else {
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			}
+			require.Contains(t, err.Error(), tc.want)
+		})
+	}
 
 	t.Run("source spec without external field rejected", func(t *testing.T) {
 		schema := buildExternalSchema()

@@ -49,9 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -97,6 +95,9 @@ type Meta struct {
 	copyResultLocksOnce    sync.Once
 	copyResultLocks        *lock.KeyLock[int64]
 	ManifestCommitExecutor *manifestCommitExecutor
+	manifestCopyOnce       sync.Once
+	manifestCopySlots      *semaphore.Weighted
+	manifestCopyLimit      int
 	manifestReadOnce       sync.Once
 	manifestReadSlots      *semaphore.Weighted
 	DataViewManager        DataViewManager
@@ -144,30 +145,6 @@ type dbInfo struct {
 	Properties []*commonpb.KeyValuePair
 }
 
-// showCollectionIDs retrieves all collection IDs from RootCoord with retry on ErrServiceUnimplemented.
-func showCollectionIDs(ctx context.Context, broker broker.Broker) ([]int64, error) {
-	var (
-		err  error
-		resp *rootcoordpb.ShowCollectionIDsResponse
-	)
-	retryErr := retry.Handle(ctx, func() (bool, error) {
-		resp, err = broker.ShowCollectionIDs(ctx)
-		if errors.Is(err, merr.ErrServiceUnimplemented) {
-			return true, err
-		}
-		return false, err
-	})
-	if retryErr != nil {
-		return nil, retryErr
-	}
-
-	collectionIDs := make([]int64, 0, 4096)
-	for _, collections := range resp.GetDbCollections() {
-		collectionIDs = append(collectionIDs, collections.GetCollectionIDs()...)
-	}
-	return collectionIDs, nil
-}
-
 func (m *Meta) CloseManifestCommitExecutor() {
 	if m.ManifestCommitExecutor != nil {
 		m.ManifestCommitExecutor.Close()
@@ -176,11 +153,10 @@ func (m *Meta) CloseManifestCommitExecutor() {
 
 // NewMeta creates meta from provided `kv.TxnKV`
 func NewMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager, metaStore metacache.MetaStore, broker broker.Broker, loadDomainMetas DomainMetaLoader) (*Meta, error) {
-	// Fetch collection IDs first so both MetaStore.LoadFromCatalog and indexMeta can use them for per-collection loading.
-	collectionIDs, err := showCollectionIDs(ctx, broker)
-	if err != nil {
-		return nil, err
-	}
+	// RootCoord has loaded the collection view before DataCoord starts, so
+	// its IDs (Dropping included) drive per-collection loading in both
+	// MetaStore.LoadFromCatalog and indexMeta.
+	collectionIDs := metaStore.GetCollectionIDs()
 
 	var (
 		indexCatalog SegmentIndexCatalog
@@ -316,62 +292,9 @@ func (m *Meta) segmentLoadNormalizer() metacache.SegmentNormalizer {
 	}
 }
 
-func (m *Meta) ReloadCollectionsFromRootcoord(ctx context.Context, broker broker.Broker) error {
-	resp, err := broker.ListDatabases(ctx)
-	if err != nil {
-		return err
-	}
-	for _, dbName := range resp.GetDbNames() {
-		collectionsResp, err := broker.ShowCollectionIDs(ctx, dbName)
-		if err != nil {
-			return err
-		}
-		var collectionIDs []int64
-		for _, collections := range collectionsResp.GetDbCollections() {
-			collectionIDs = append(collectionIDs, collections.GetCollectionIDs()...)
-		}
-		for _, collectionID := range collectionIDs {
-			descResp, err := broker.DescribeCollectionInternal(ctx, collectionID)
-			if err != nil {
-				return err
-			}
-			partitionIDs, err := broker.ShowPartitionsInternal(ctx, collectionID)
-			if err != nil {
-				return err
-			}
-			m.AddCollection(&CollectionInfo{
-				ID:             collectionID,
-				Schema:         descResp.GetSchema(),
-				Partitions:     partitionIDs,
-				StartPositions: descResp.GetStartPositions(),
-				Properties:     funcutil.KeyValuePair2Map(descResp.GetProperties()),
-				CreatedAt:      descResp.GetCreatedTimestamp(),
-				DatabaseName:   descResp.GetDbName(),
-				DatabaseID:     descResp.GetDbId(),
-				VChannelNames:  descResp.GetVirtualChannelNames(),
-			})
-		}
-	}
-	return nil
-}
-
-// AddCollection adds a collection into MetaStore.
-func (m *Meta) AddCollection(collection *CollectionInfo) {
-	mlog.Info(m.Ctx, "meta update: add collection", mlog.Int64("collectionID", collection.ID))
-	// PutCollection emits the collection-count metric itself.
-	m.MetaStore.PutCollection(collection)
-	mlog.Info(m.Ctx, "meta update: add collection - complete", mlog.Int64("collectionID", collection.ID))
-}
-
-// DropCollection removes a collection from MetaStore.
-func (m *Meta) DropCollection(collectionID int64) {
-	mlog.Info(m.Ctx, "meta update: drop collection", mlog.Int64("collectionID", collectionID))
-	// RemoveCollection emits the collection metric cleanup itself.
-	m.MetaStore.RemoveCollection(collectionID)
-	mlog.Info(m.Ctx, "meta update: drop collection - complete", mlog.Int64("collectionID", collectionID))
-}
-
-// GetCollection returns collection info from MetaStore.
+// GetCollection returns the collection from the shared CollectionSource,
+// including a Dropping one (check IsCreated). nil means the source has no
+// such collection.
 func (m *Meta) GetCollection(collectionID UniqueID) *CollectionInfo {
 	coll, ok := m.MetaStore.GetCollection(collectionID)
 	if !ok {
@@ -380,8 +303,36 @@ func (m *Meta) GetCollection(collectionID UniqueID) *CollectionInfo {
 	return coll
 }
 
-// GetCollections returns all collections from MetaStore.
+// GetCollectionByName resolves a collection name or alias in dbName.
+func (m *Meta) GetCollectionByName(dbName, name string) *CollectionInfo {
+	coll, ok := m.MetaStore.GetCollectionByName(dbName, name)
+	if !ok {
+		return nil
+	}
+	return coll
+}
+
+// GetCollectionOrNotFound is GetCollection with a miss reported as
+// ErrCollectionNotFound, as RootCoord's internal describe does. A Dropping
+// collection is returned with its State.
+func (m *Meta) GetCollectionOrNotFound(collectionID UniqueID) (*CollectionInfo, error) {
+	coll := m.GetCollection(collectionID)
+	if coll == nil {
+		return nil, merr.WrapErrCollectionNotFound(collectionID)
+	}
+	return coll, nil
+}
+
+// GetCollections returns the Created collections, the ones DataCoord serves.
 func (m *Meta) GetCollections() []*CollectionInfo {
+	return lo.Filter(m.MetaStore.GetCollections(), func(c *CollectionInfo, _ int) bool {
+		return c.IsCreated()
+	})
+}
+
+// GetAllCollections returns every published collection, Dropping ones
+// included until RootCoord removes them.
+func (m *Meta) GetAllCollections() []*CollectionInfo {
 	return m.MetaStore.GetCollections()
 }
 
@@ -1969,17 +1920,17 @@ func UpdateAsDroppedIfEmptyWhenFlushing(segmentID int64) UpdateOperator {
 // updateSegmentsInfo update segment infos
 // will exec all operators, and update all changed segments
 func (m *Meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperator) error {
-	committedUpdates, err := m.updateSegmentsInfo(ctx, operators...)
+	committedUpdates, err := m.UpdateSegmentsInfoWithoutNotify(ctx, operators...)
 	if err != nil {
 		return err
 	}
-	m.notifyQueryViewSegmentUpdates(ctx, committedUpdates)
+	m.NotifyQueryViewSegmentUpdates(ctx, committedUpdates)
 	return nil
 }
 
 // updateSegmentsInfo returns committed segment changes for the caller to notify
 // after releasing any manifest locks it owns.
-func (m *Meta) updateSegmentsInfo(ctx context.Context, operators ...UpdateOperator) ([]*SegmentInfo, error) {
+func (m *Meta) UpdateSegmentsInfoWithoutNotify(ctx context.Context, operators ...UpdateOperator) ([]*SegmentInfo, error) {
 	var committedUpdates []*SegmentInfo
 	m.SegMu.Lock()
 	defer m.SegMu.Unlock()
@@ -2017,7 +1968,7 @@ func (m *Meta) updateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 // Catalog retries overwrite the same actions until success or cancellation.
 func (m *Meta) UpdateSegmentsInfoAndDataView(ctx context.Context, dataView *viewpb.DataViewOfCollection, operators ...UpdateOperator) (bool, error) {
 	var updates []*SegmentInfo
-	defer func() { m.notifyQueryViewSegmentUpdates(ctx, updates) }()
+	defer func() { m.NotifyQueryViewSegmentUpdates(ctx, updates) }()
 	m.SegMu.Lock()
 	defer m.SegMu.Unlock()
 
@@ -2922,7 +2873,7 @@ func (m *Meta) CompleteCompactionMutation(ctx context.Context, t *datapb.Compact
 	}
 	defer func() {
 		if retErr == nil && t.GetType() == datapb.CompactionType_BumpSchemaVersionCompaction {
-			m.notifyQueryViewSegmentUpdates(ctx, newSegments)
+			m.NotifyQueryViewSegmentUpdates(ctx, newSegments)
 		}
 	}()
 	m.SegMu.Lock()

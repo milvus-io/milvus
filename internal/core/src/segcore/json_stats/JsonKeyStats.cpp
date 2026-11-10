@@ -359,7 +359,7 @@ ReadJsonStatsParquetMetadata(const std::string& file,
         std::make_shared<milvus_storage::parquet::ParquetFormatReader>(
             fs,
             file,
-            properties,
+            std::make_shared<const milvus_storage::api::Properties>(properties),
             std::vector<std::string>{},
             NoopParquetKeyRetriever);
     // The storage API cannot interrupt an issued open; keep the reader alive.
@@ -1993,6 +1993,8 @@ JsonKeyStats::LoadShreddingMeta(
     storage::ThrowIfCancelled(token, "prepare JSON stats footers");
     if (key_field_map_.empty()) {
         // Arrow's stored schema can omit user KV appended to the raw footer.
+        auto metadata_properties =
+            std::make_shared<const milvus_storage::api::Properties>(properties);
         auto read_layout = [&]() -> folly::coro::Task<void> {
             using MetadataReader =
                 milvus_storage::parquet::ParquetFormatReader::MetaTrait;
@@ -2009,9 +2011,11 @@ JsonKeyStats::LoadShreddingMeta(
                                           "prepare JSON stats legacy layout");
                 result = co_await folly::coro::co_withCancellation(
                     folly::CancellationToken{},
-                    MetadataReader::load_metadata_async(file, properties, {}));
+                    MetadataReader::load_metadata_async(
+                        file, metadata_properties, {}));
             } else {
-                result = MetadataReader::load_metadata(file, properties, {});
+                result = MetadataReader::load_metadata(
+                    file, metadata_properties, {});
             }
             storage::ThrowIfCancelled(token,
                                       "prepare JSON stats legacy layout");
@@ -2157,7 +2161,11 @@ JsonKeyStats::LoadColumnGroup(
             std::make_shared<std::vector<std::string>>(column_names);
         const auto reader = std::shared_ptr<milvus_storage::api::Reader>(
             milvus_storage::api::Reader::create(
-                column_groups, nullptr, needed_columns, properties));
+                column_groups,
+                nullptr,
+                needed_columns,
+                std::make_shared<const milvus_storage::api::Properties>(
+                    properties)));
         AssertInfo(reader != nullptr,
                    "[JsonStats] failed to create reader for column group {} "
                    "segment {}",
@@ -2241,7 +2249,11 @@ JsonKeyStats::LoadColumnGroup(
         std::make_shared<std::vector<std::string>>(column_names);
     const auto reader = std::shared_ptr<milvus_storage::api::Reader>(
         milvus_storage::api::Reader::create(
-            column_groups, nullptr, all_columns, properties));
+            column_groups,
+            nullptr,
+            all_columns,
+            std::make_shared<const milvus_storage::api::Properties>(
+                properties)));
     AssertInfo(reader != nullptr,
                "[JsonStats] failed to create reader for column group {} "
                "segment {}",
@@ -2526,12 +2538,7 @@ JsonKeyStats::Upload(const Config& config) {
 
     // upload meta file
     auto meta_file_path = GetMetaFilePath();
-    if (!(disk_file_manager_->AddJsonStatsMetaLog(meta_file_path))) {
-        ThrowInfo(ErrorCode::FileWriteFailed,
-                  "failed to upload meta file: {} for segment {}",
-                  meta_file_path,
-                  segment_id_);
-    }
+    disk_file_manager_->AddJsonStatsMetaLog(meta_file_path);
 
     // upload parquet file, parquet writer has already upload file to remote
     const auto& shredding_remote_paths_to_size =

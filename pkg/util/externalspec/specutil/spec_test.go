@@ -18,6 +18,7 @@ package specutil
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -83,34 +84,167 @@ func TestParseExternalSpec(t *testing.T) {
 			spec.Extfs[ExtfsKeyAzureCredentialEndpoint])
 	})
 
-	t.Run("snapshot id accepts string and number", func(t *testing.T) {
-		spec, err := ParseExternalSpec(`{"format":"iceberg-table","snapshot_id":"5320540205222981137"}`)
-		require.NoError(t, err)
-		require.NotNil(t, spec.SnapshotID)
-		require.Equal(t, int64(5320540205222981137), *spec.SnapshotID)
+	t.Run("table snapshot id accepts string and number", func(t *testing.T) {
+		for _, format := range []string{FormatIcebergTable, FormatPaimonTable} {
+			spec, err := ParseExternalSpec(fmt.Sprintf(`{"format":%q,"snapshot_id":"5320540205222981137"}`, format))
+			require.NoError(t, err)
+			require.NotNil(t, spec.SnapshotID)
+			require.Equal(t, int64(5320540205222981137), *spec.SnapshotID)
 
-		spec, err = ParseExternalSpec(`{"format":"iceberg-table","snapshot_id":5320540205222981137}`)
+			spec, err = ParseExternalSpec(fmt.Sprintf(`{"format":%q,"snapshot_id":5320540205222981137}`, format))
+			require.NoError(t, err)
+			require.NotNil(t, spec.SnapshotID)
+			require.Equal(t, int64(5320540205222981137), *spec.SnapshotID)
+		}
+	})
+
+	t.Run("paimon table with optional snapshot id", func(t *testing.T) {
+		spec, err := ParseExternalSpec(`{"format":"paimon-table"}`)
+		require.NoError(t, err)
+		require.Equal(t, FormatPaimonTable, spec.Format)
+		require.Nil(t, spec.SnapshotID)
+		require.Equal(t, "auto", spec.ScanMode)
+
+		spec, err = ParseExternalSpec(`{"format":"paimon-table","snapshot_id":7}`)
 		require.NoError(t, err)
 		require.NotNil(t, spec.SnapshotID)
-		require.Equal(t, int64(5320540205222981137), *spec.SnapshotID)
+		require.Equal(t, int64(7), *spec.SnapshotID)
+	})
+
+	t.Run("paimon scan mode", func(t *testing.T) {
+		for _, mode := range []string{"auto", "direct-file", "data-split"} {
+			spec, err := ParseExternalSpec(fmt.Sprintf(`{"format":"paimon-table","scan_mode":%q}`, mode))
+			require.NoError(t, err)
+			require.Equal(t, mode, spec.ScanMode)
+		}
+		_, err := ParseExternalSpec(`{"format":"paimon-table","scan_mode":"native"}`)
+		require.ErrorContains(t, err, "unsupported Paimon scan_mode")
+		_, err = ParseExternalSpec(`{"format":"iceberg-table","scan_mode":"auto"}`)
+		require.ErrorContains(t, err, "only supported")
+	})
+
+	t.Run("paimon scan mode defaults", func(t *testing.T) {
+		for _, value := range []string{`""`, "null"} {
+			spec, err := ParseExternalSpec(fmt.Sprintf(`{"format":"paimon-table","scan_mode":%s}`, value))
+			require.NoError(t, err)
+			require.Equal(t, "auto", spec.ScanMode)
+		}
+		for _, value := range []string{"true", "1", "{}", "[]"} {
+			_, err := ParseExternalSpec(fmt.Sprintf(`{"format":"paimon-table","scan_mode":%s}`, value))
+			require.Error(t, err)
+		}
 	})
 
 	t.Run("invalid snapshot id rejected", func(t *testing.T) {
-		_, err := ParseExternalSpec(`{"format":"iceberg-table","snapshot_id":"abc"}`)
-		require.ErrorContains(t, err, "invalid external spec JSON")
+		for _, format := range []string{FormatIcebergTable, FormatPaimonTable} {
+			_, err := ParseExternalSpec(fmt.Sprintf(`{"format":%q,"snapshot_id":"abc"}`, format))
+			require.ErrorContains(t, err, "invalid external spec JSON")
+		}
+	})
+
+	t.Run("legacy key spelling accepted", func(t *testing.T) {
+		for format := range supportedFormats {
+			t.Run(format, func(t *testing.T) {
+				for _, field := range []string{
+					`"SNAPSHOT_ID":1`, `"Snapshot_Id":"1"`,
+					`"ſnapshot_id":1`,
+					`"FORMAT":"paimon-table"`, `"COLUMNS":["pk"]`,
+					`"EXTFS":{"anonymous":"true"}`,
+					`"snapshot_id":1,"SNAPSHOT_ID":2`,
+				} {
+					_, err := ParseExternalSpec(fmt.Sprintf(`{"format":%q,%s}`, format, field))
+					require.NoError(t, err, field)
+				}
+				_, err := ParseExternalSpec(fmt.Sprintf(`{"format":%q,"CUSTOM_OPTION":"unchanged"}`, format))
+				require.NoError(t, err)
+			})
+		}
 	})
 }
 
 func TestExternalSpecMarshalJSON(t *testing.T) {
-	snapshotID := int64(5320540205222981137)
-	out, err := json.Marshal(ExternalSpec{
-		Format:     FormatIcebergTable,
-		SnapshotID: &snapshotID,
-	})
-	require.NoError(t, err)
-	require.Contains(t, string(out), `"snapshot_id":"5320540205222981137"`)
+	for _, format := range []string{FormatIcebergTable, FormatPaimonTable} {
+		snapshotID := int64(5320540205222981137)
+		out, err := json.Marshal(ExternalSpec{
+			Format:     format,
+			SnapshotID: &snapshotID,
+		})
+		require.NoError(t, err)
+		require.Contains(t, string(out), `"snapshot_id":"5320540205222981137"`)
+	}
 
-	out, err = json.Marshal(ExternalSpec{Format: FormatParquet})
+	out, err := json.Marshal(ExternalSpec{Format: FormatParquet})
 	require.NoError(t, err)
 	require.NotContains(t, string(out), "snapshot_id")
+}
+
+func TestBrokerPolicy(t *testing.T) {
+	endpoint := "https://broker.example.com/v1/credentials/assume-role"
+	policy, err := NewBrokerPolicy([]string{endpoint, endpoint})
+	require.NoError(t, err)
+	require.Len(t, policy.Endpoints(), 1)
+	for _, tc := range []struct{ raw, normalized string }{
+		{"HTTPS://BROKER.example.com:443/v1/credentials/assume-role", endpoint},
+		{"http://broker:080/path", "http://broker/path"},
+		{"http://[::1]:80/path", "http://[::1]/path"},
+		{"https://[2001:db8::1]:8443/path", "https://[2001:db8::1]:8443/path"},
+		{"https://broker:8443/a_b/", "https://broker:8443/a_b/"},
+		{"https://broker", "https://broker/"},
+		{"HTTPS://BROKER:443/path?api-version=1&scope=a%2Fb+x&scope=y", "https://broker/path?api-version=1&scope=a%2Fb+x&scope=y"},
+		{"https://broker?", "https://broker/?"},
+	} {
+		actual, err := NormalizeBrokerEndpoint(tc.raw)
+		require.NoError(t, err, tc.raw)
+		require.Equal(t, tc.normalized, actual)
+	}
+	for _, raw := range []string{"", "ftp://broker/path", "https:///path", "https://user:secret@broker/path", "https://broker/path#", "https://broker/path#f", "https://broker:", "https://broker:0/path", "https://broker:65536/path", "https://*.broker/path", "https://broker/%zz", "https://broker/a b", "https://broker:000080/path", "https://[invalid]/path", "https://[gg::1]/path", "https://[::ffff:invalid]/path", "https://[127.0.0.1]/path", "http://2001:db8::1/path", "https://broker!example/path", "https://broker/a%2Fb/", "https://broker/allowed//admin", "https://broker/a/../admin", "https://broker/./admin", "https://broker/a:b"} {
+		_, err := NormalizeBrokerEndpoint(raw)
+		require.Error(t, err, raw)
+		_, err = NewBrokerPolicy([]string{raw})
+		require.Error(t, err, raw)
+	}
+	for _, raw := range []string{endpoint + "/", "http://broker.example.com/v1/credentials/assume-role", "https://broker.example.com.evil/v1/credentials/assume-role", "https://broker.example.com/other"} {
+		require.Error(t, policy.Validate(map[string]string{ExtfsKeyCredentialEndpoint: raw}))
+	}
+	extfs := map[string]string{ExtfsKeyCloudProvider: "azure", ExtfsKeyAzureCredentialEndpoint: endpoint}
+	require.NoError(t, policy.Validate(extfs))
+	require.NotContains(t, extfs, ExtfsKeyCredentialEndpoint)
+	extfs[ExtfsKeyCredentialEndpoint] = "HTTPS://BROKER.example.com:443/v1/credentials/assume-role"
+	require.NoError(t, policy.Validate(extfs))
+	extfs[ExtfsKeyCredentialEndpoint] = endpoint + "/"
+	require.Error(t, policy.Validate(extfs))
+	extfs[ExtfsKeyCloudProvider] = "aws"
+	require.Error(t, policy.Validate(extfs))
+	require.Error(t, policy.Validate(map[string]string{ExtfsKeyCredentialEndpoint: "invalid"}))
+	var empty *BrokerPolicy
+	require.Empty(t, empty.Endpoints())
+	require.NoError(t, empty.Validate(nil))
+	require.Error(t, empty.Validate(map[string]string{ExtfsKeyCredentialEndpoint: endpoint}))
+	copy := policy.Endpoints()
+	copy[0] = "https://other"
+	require.NoError(t, policy.Validate(map[string]string{ExtfsKeyCredentialEndpoint: endpoint}))
+}
+
+func TestBrokerQuerySyntaxAndExactIdentity(t *testing.T) {
+	const endpoint = "https://broker/token?scope=a,b&next=https://nested/token?x=1&scope=a%2Fb+x&scope=a%2fb&json=%5B1%5D&punct=!$'()*+,-._~;=:@/?%25"
+	policy, err := NewBrokerPolicy([]string{endpoint})
+	require.NoError(t, err)
+	normalized, err := NormalizeBrokerEndpoint(endpoint)
+	require.NoError(t, err)
+	require.Equal(t, endpoint, normalized)
+	for _, field := range []string{ExtfsKeyCredentialEndpoint, ExtfsKeyAzureCredentialEndpoint} {
+		extfs := map[string]string{ExtfsKeyCloudProvider: "azure", field: endpoint}
+		require.NoError(t, policy.Validate(extfs))
+		for _, denied := range []string{"https://nested/token?x=1", "https://broker/token?scope=a", endpoint + "&extra=1"} {
+			extfs[field] = denied
+			require.Error(t, policy.Validate(extfs), denied)
+		}
+	}
+	for _, query := range []string{"x=%", "x=%2", "x=%zz", "x=%0g", "q=[1]", "q={1}", "q=|", "q=^", "q=`", "q=\""} {
+		endpoint := "https://broker/token?" + query
+		_, err := NormalizeBrokerEndpoint(endpoint)
+		require.Error(t, err, query)
+		_, err = NewBrokerPolicy([]string{endpoint})
+		require.Error(t, err, query)
+	}
 }

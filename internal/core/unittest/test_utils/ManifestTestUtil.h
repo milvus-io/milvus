@@ -104,15 +104,18 @@ WriteRecordBatchesToV3(
                                   column_group_pattern.c_str());
     milvus_storage::api::SetValue(
         props, PROPERTY_WRITER_FORMAT, LOON_FORMAT_PARQUET);
+    auto shared_properties =
+        std::make_shared<const milvus_storage::api::Properties>(
+            std::move(props));
     auto policy_result =
         milvus_storage::api::ColumnGroupPolicy::create_column_group_policy(
-            props, loon_schema);
+            shared_properties, loon_schema);
     AssertInfo(policy_result.ok(),
                "failed to create column group policy: {}",
                policy_result.status().ToString());
     auto policy = std::move(policy_result).ValueOrDie();
     auto writer = milvus_storage::api::Writer::create(
-        base_path, loon_schema, std::move(policy), props);
+        base_path, loon_schema, std::move(policy), shared_properties);
     for (const auto& batch : batches) {
         AssertInfo(batch->schema()->Equals(loon_schema),
                    "storage V3 test batch schema mismatch");
@@ -224,9 +227,12 @@ class V3SegmentTestData {
                 props, PROPERTY_WRITER_FILE_ROLLING_SIZE, "1");
         }
 
+        auto shared_properties =
+            std::make_shared<const milvus_storage::api::Properties>(
+                std::move(props));
         auto policy_result =
             milvus_storage::api::ColumnGroupPolicy::create_column_group_policy(
-                props, loon_schema_);
+                shared_properties, loon_schema_);
         AssertInfo(policy_result.ok(),
                    "Failed to create column group policy: {}",
                    policy_result.status().ToString());
@@ -234,7 +240,7 @@ class V3SegmentTestData {
 
         // Write data using Writer API
         auto writer = milvus_storage::api::Writer::create(
-            base_path_, loon_schema_, std::move(policy), props);
+            base_path_, loon_schema_, std::move(policy), shared_properties);
         for (auto& batch : batches) {
             auto status = writer->write(batch);
             AssertInfo(
@@ -308,7 +314,11 @@ class V3SegmentTestData {
         milvus_storage::api::SetValue(
             reader_props, PROPERTY_FS_ROOT_PATH, kLoonLocalFSRootPath);
         auto reader = milvus_storage::api::Reader::create(
-            column_groups_, loon_schema_, needed_columns, reader_props);
+            column_groups_,
+            loon_schema_,
+            needed_columns,
+            std::make_shared<const milvus_storage::api::Properties>(
+                reader_props));
         auto result = reader->get_chunk_reader(cg_index);
         AssertInfo(result.ok(),
                    "Failed to create chunk reader for cg_index {}: {}",

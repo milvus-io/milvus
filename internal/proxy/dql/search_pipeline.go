@@ -171,7 +171,24 @@ func NewNode(info *nodeDef, t *SearchTask) (*Node, error) {
 	return &n, nil
 }
 
+// searchScoreInfo describes scores after Proxy reduction and distance restoration.
+// Internal reduction still compares larger-is-better scores before restoration.
+type searchScoreInfo struct {
+	MetricType     string
+	Rewritten      bool
+	LargerIsBetter bool
+}
+
+func newSearchScoreInfo(metricType string, rewritten bool) searchScoreInfo {
+	return searchScoreInfo{
+		MetricType:     metricType,
+		Rewritten:      rewritten,
+		LargerIsBetter: rewritten || metric.PositivelyRelated(metricType),
+	}
+}
+
 type searchReduceOperator struct {
+	scoreRewritten      bool
 	traceCtx            context.Context
 	primaryFieldSchema  *schemapb.FieldSchema
 	nq                  int64
@@ -196,6 +213,7 @@ func newSearchReduceOperator(t *SearchTask, params map[string]any) (operator, er
 		offset = v
 	}
 	return &searchReduceOperator{
+		scoreRewritten:      chain.QueryNodeChainsWriteScore(t.request.GetFunctionChains()),
 		traceCtx:            t.TraceCtx(),
 		primaryFieldSchema:  pkField,
 		nq:                  t.GetNq(),
@@ -216,15 +234,16 @@ func (op *searchReduceOperator) run(ctx context.Context, span trace.Span, inputs
 	metricType := getMetricType(toReduceResults)
 	result, err := reduceResults(
 		op.traceCtx, toReduceResults, op.nq, op.topK, op.offset,
-		metricType, op.primaryFieldSchema.GetDataType(), op.queryInfos[0], false, op.isSearchAggregation, op.collectionID, op.partitionIDs)
+		metricType, op.primaryFieldSchema.GetDataType(), op.queryInfos[0], false, op.isSearchAggregation, op.collectionID, op.partitionIDs, op.scoreRewritten)
 	if err != nil {
 		return nil, err
 	}
 	fillFieldNames(op.collSchema, result.GetResults())
-	return []any{[]*milvuspb.SearchResults{result}, []string{metricType}}, nil
+	return []any{[]*milvuspb.SearchResults{result}, []searchScoreInfo{newSearchScoreInfo(metricType, op.scoreRewritten)}}, nil
 }
 
 type hybridSearchReduceOperator struct {
+	scoresRewritten    []bool
 	traceCtx           context.Context
 	subReqs            []*internalpb.SubSearchRequest
 	primaryFieldSchema *schemapb.FieldSchema
@@ -240,6 +259,7 @@ func newHybridSearchReduceOperator(t *SearchTask, _ map[string]any) (operator, e
 		return nil, err
 	}
 	return &hybridSearchReduceOperator{
+		scoresRewritten:    t.subSearchScoresRewritten(),
 		traceCtx:           t.TraceCtx(),
 		subReqs:            t.GetSubReqs(),
 		primaryFieldSchema: pkField,
@@ -280,22 +300,22 @@ func (op *hybridSearchReduceOperator) run(ctx context.Context, span trace.Span, 
 	}
 
 	multipleMilvusResults := make([]*milvuspb.SearchResults, len(op.subReqs))
-	searchMetrics := []string{}
+	scoreInfos := make([]searchScoreInfo, 0, len(op.subReqs))
 	for index, internalResults := range multipleInternalResults {
 		subReq := op.subReqs[index]
 		// Since the metrictype in the request may be empty, it can only be obtained from the result
 		subMetricType := getMetricType(internalResults)
 		result, err := reduceResults(
 			op.traceCtx, internalResults, subReq.GetNq(), subReq.GetTopk(), subReq.GetOffset(), subMetricType,
-			op.primaryFieldSchema.GetDataType(), op.queryInfos[index], true, false, op.collectionID, op.partitionIDs)
+			op.primaryFieldSchema.GetDataType(), op.queryInfos[index], true, false, op.collectionID, op.partitionIDs, scoreRewrittenAt(op.scoresRewritten, index))
 		if err != nil {
 			return nil, err
 		}
 		fillFieldNames(op.collSchema, result.GetResults())
-		searchMetrics = append(searchMetrics, subMetricType)
+		scoreInfos = append(scoreInfos, newSearchScoreInfo(subMetricType, scoreRewrittenAt(op.scoresRewritten, index)))
 		multipleMilvusResults[index] = result
 	}
-	return []any{multipleMilvusResults, searchMetrics}, nil
+	return []any{multipleMilvusResults, scoreInfos}, nil
 }
 
 type elementBestCollapseOperator struct {
@@ -308,6 +328,18 @@ func newElementBestCollapseOperator(t *SearchTask, _ map[string]any) (operator, 
 		configs:            t.hybridCollapseConfigs(),
 		elementLevelHybrid: t.hybridElementLevel,
 	}, nil
+}
+
+func (t *SearchTask) subSearchScoresRewritten() []bool {
+	rewritten := make([]bool, len(t.request.GetSubReqs()))
+	for index, subReq := range t.request.GetSubReqs() {
+		rewritten[index] = chain.QueryNodeChainsWriteScore(subReq.GetFunctionChains())
+	}
+	return rewritten
+}
+
+func scoreRewrittenAt(rewritten []bool, index int) bool {
+	return index < len(rewritten) && rewritten[index]
 }
 
 func (t *SearchTask) hybridCollapseConfigs() []elementCollapseConfig {
@@ -335,12 +367,12 @@ func (op *elementBestCollapseOperator) run(ctx context.Context, span trace.Span,
 	if !ok {
 		return nil, merr.WrapErrParameterInvalidMsg("element best collapse: inputs[0] must be []*SearchResults, got %T", inputs[0])
 	}
-	metrics, ok := inputs[1].([]string)
+	scoreInfos, ok := inputs[1].([]searchScoreInfo)
 	if !ok {
-		return nil, merr.WrapErrParameterInvalidMsg("element best collapse: inputs[1] must be []string, got %T", inputs[1])
+		return nil, merr.WrapErrServiceInternalMsg("element best collapse: inputs[1] must be []searchScoreInfo, got %T", inputs[1])
 	}
-	if len(metrics) != len(results) {
-		return nil, merr.WrapErrServiceInternalMsg("element best collapse: metrics length (%d) does not match results length (%d)", len(metrics), len(results))
+	if len(scoreInfos) != len(results) {
+		return nil, merr.WrapErrServiceInternalMsg("element best collapse: score info length (%d) does not match results length (%d)", len(scoreInfos), len(results))
 	}
 
 	collapsed := make([]*milvuspb.SearchResults, len(results))
@@ -353,7 +385,8 @@ func (op *elementBestCollapseOperator) run(ctx context.Context, span trace.Span,
 			}
 			continue
 		}
-		metricType := metrics[i]
+		info := scoreInfos[i]
+		metricType := info.MetricType
 		if result != nil && result.GetResults() != nil && result.GetResults().GetElementIndices() != nil && strings.TrimSpace(metricType) == "" {
 			totalRows := int64(0)
 			for _, topk := range result.GetResults().GetTopks() {
@@ -368,7 +401,12 @@ func (op *elementBestCollapseOperator) run(ctx context.Context, span trace.Span,
 		if i < len(op.configs) && op.configs[i].Strategy != "" {
 			config = op.configs[i]
 		}
-		collapsed[i], err = collapseElementLevelResultByMetricType(result, metricType, config)
+		// Strategy eligibility follows the original metric, just as in
+		// PreExecute, even when rewritten scores have a different direction.
+		if err := validateElementCollapseMetricType(config, metricType); err != nil {
+			return nil, err
+		}
+		collapsed[i], err = collapseElementLevelResultWithMetricDirection(result, info.LargerIsBetter, strings.TrimSpace(metricType) != "", config)
 		if err != nil {
 			return nil, err
 		}
@@ -416,11 +454,6 @@ func collapseElementLevelResult(result *milvuspb.SearchResults, largerScoreIsBet
 	return collapseElementLevelResultWithMetricDirection(result, largerScoreIsBetter, true, config)
 }
 
-func collapseElementLevelResultByMetricType(result *milvuspb.SearchResults, metricType string, config elementCollapseConfig) (*milvuspb.SearchResults, error) {
-	metricType = strings.TrimSpace(metricType)
-	return collapseElementLevelResultWithMetricDirection(result, metric.PositivelyRelated(metricType), metricType != "", config)
-}
-
 func collapseElementLevelResultWithMetricDirection(result *milvuspb.SearchResults, largerScoreIsBetter bool, metricKnown bool, config elementCollapseConfig) (*milvuspb.SearchResults, error) {
 	if result == nil || result.GetResults() == nil || result.GetResults().GetElementIndices() == nil {
 		return result, nil
@@ -433,11 +466,6 @@ func collapseElementLevelResultWithMetricDirection(result *milvuspb.SearchResult
 		totalRows += topk
 	}
 
-	if isElementCollapseSumFamily(config.Strategy) && metricKnown && !largerScoreIsBetter {
-		return nil, merr.WrapErrParameterInvalidMsg(
-			"%s.collapse.strategy %s is only supported for positively related metrics",
-			elementScopeKey, config.Strategy)
-	}
 	if totalRows == 0 {
 		return copySearchResultsWithData(result, &schemapb.SearchResultData{
 			NumQueries:              data.GetNumQueries(),
@@ -709,11 +737,11 @@ func (op *aggregateOperator) run(ctx context.Context, span trace.Span, inputs ..
 	if len(reducedList) == 0 || reducedList[0] == nil || reducedList[0].GetResults() == nil {
 		return nil, merr.WrapErrServiceInternal("aggregateOperator received empty reduced results")
 	}
-	metrics, ok := inputs[1].([]string)
-	if !ok || len(metrics) != 1 {
-		return nil, merr.WrapErrServiceInternal("aggregateOperator: expected one search metric (pipeline wire)")
+	scoreInfos, ok := inputs[1].([]searchScoreInfo)
+	if !ok || len(scoreInfos) != 1 {
+		return nil, merr.WrapErrServiceInternal("aggregateOperator: expected one search score info (pipeline wire)")
 	}
-	computer := search_agg.NewSearchAggregationComputer(reducedList[0].GetResults(), op.aggCtx, metrics[0])
+	computer := search_agg.NewSearchAggregationComputer(reducedList[0].GetResults(), op.aggCtx, scoreInfos[0].LargerIsBetter)
 	nqAggResults, err := computer.Compute(ctx)
 	if err != nil {
 		return nil, err
@@ -1068,6 +1096,7 @@ func buildChainFromMeta(
 		}
 		if searchParams != nil {
 			buildCtx.ModelExtraInfo = searchParams.ModelExtraInfo
+			buildCtx.Search.ScoresRewritten = searchParams.ScoresRewritten
 		}
 		return chain.FuncChainFromReprWithContext(m.repr, alloc, buildCtx)
 	case *legacyRerankMeta:
@@ -1085,9 +1114,18 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 	if !ok {
 		return nil, merr.WrapErrParameterInvalidMsg("rerank operator: inputs[0] must be []*SearchResults, got %T", inputs[0])
 	}
-	inputMetrics, ok := inputs[1].([]string)
+	scoreInfos, ok := inputs[1].([]searchScoreInfo)
 	if !ok {
-		return nil, merr.WrapErrParameterInvalidMsg("rerank operator: inputs[1] must be []string, got %T", inputs[1])
+		return nil, merr.WrapErrServiceInternalMsg("rerank operator: inputs[1] must be []searchScoreInfo, got %T", inputs[1])
+	}
+	if len(scoreInfos) != len(reducedResults) {
+		return nil, merr.WrapErrServiceInternalMsg("rerank operator: score info length (%d) does not match results length (%d)", len(scoreInfos), len(reducedResults))
+	}
+	inputMetrics := make([]string, len(scoreInfos))
+	scoresRewritten := make([]bool, len(scoreInfos))
+	for i, info := range scoreInfos {
+		inputMetrics[i] = info.MetricType
+		scoresRewritten[i] = info.Rewritten
 	}
 	if op.rerankMeta == nil {
 		return nil, merr.WrapErrFunctionFailedMsg(
@@ -1143,6 +1181,7 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 		ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
 		DBName:    op.dbName,
 	}
+	searchParams.ScoresRewritten = scoresRewritten
 	fc, err := buildChainFromMeta(op.rerankMeta, op.collSchema, inputMetrics, searchParams, alloc)
 	if err != nil {
 		for _, df := range dataframes {
@@ -3160,12 +3199,12 @@ var searchWithAggPipe = &pipelineDef{
 			// (reduceSearchResultDataWithMultiGroupBy) before hierarchy compute.
 			name:    "reduce",
 			inputs:  []string{pipelineInput, pipelineStorageCost},
-			outputs: []string{"reduced", "metrics"},
+			outputs: []string{"reduced", "score_infos"},
 			opName:  searchReduceOp,
 		},
 		{
 			name:    "agg",
-			inputs:  []string{"reduced", "metrics"},
+			inputs:  []string{"reduced", "score_infos"},
 			outputs: []string{pipelineOutput},
 			opName:  aggOp,
 		},
@@ -3178,7 +3217,7 @@ var searchPipe = &pipelineDef{
 		{
 			name:    "reduce",
 			inputs:  []string{pipelineInput, pipelineStorageCost},
-			outputs: []string{"reduced", "metrics"},
+			outputs: []string{"reduced", "score_infos"},
 			opName:  searchReduceOp,
 		},
 		{
@@ -3202,7 +3241,7 @@ var searchWithRequeryPipe = &pipelineDef{
 		{
 			name:    "reduce",
 			inputs:  []string{pipelineInput, pipelineStorageCost},
-			outputs: []string{"reduced", "metrics"},
+			outputs: []string{"reduced", "score_infos"},
 			opName:  searchReduceOp,
 		},
 		{
@@ -3260,12 +3299,12 @@ var searchWithRerankPipe = &pipelineDef{
 		{
 			name:    "reduce",
 			inputs:  []string{pipelineInput, pipelineStorageCost},
-			outputs: []string{"reduced", "metrics"},
+			outputs: []string{"reduced", "score_infos"},
 			opName:  searchReduceOp,
 		},
 		{
 			name:    "rerank",
-			inputs:  []string{"reduced", "metrics"},
+			inputs:  []string{"reduced", "score_infos"},
 			outputs: []string{"rank_result"},
 			opName:  rerankOp,
 		},
@@ -3312,12 +3351,12 @@ var searchWithRerankRequeryPipe = &pipelineDef{
 		{
 			name:    "reduce",
 			inputs:  []string{pipelineInput, pipelineStorageCost},
-			outputs: []string{"reduced", "metrics"},
+			outputs: []string{"reduced", "score_infos"},
 			opName:  searchReduceOp,
 		},
 		{
 			name:    "rerank",
-			inputs:  []string{"reduced", "metrics"},
+			inputs:  []string{"reduced", "score_infos"},
 			outputs: []string{"rank_result"},
 			opName:  rerankOp,
 		},
@@ -3380,18 +3419,18 @@ var hybridSearchPipe = &pipelineDef{
 		{
 			name:    "reduce",
 			inputs:  []string{pipelineInput, pipelineStorageCost},
-			outputs: []string{"reduced", "metrics"},
+			outputs: []string{"reduced", "score_infos"},
 			opName:  hybridSearchReduceOp,
 		},
 		{
 			name:    "element_best_collapse",
-			inputs:  []string{"reduced", "metrics"},
+			inputs:  []string{"reduced", "score_infos"},
 			outputs: []string{"collapsed"},
 			opName:  elementBestCollapseOp,
 		},
 		{
 			name:    "rerank",
-			inputs:  []string{"collapsed", "metrics"},
+			inputs:  []string{"collapsed", "score_infos"},
 			outputs: []string{"rank_result"},
 			opName:  rerankOp,
 		},
@@ -3410,12 +3449,12 @@ var hybridSearchWithRequeryAndRerankByFieldDataPipe = &pipelineDef{
 		{
 			name:    "reduce",
 			inputs:  []string{pipelineInput, pipelineStorageCost},
-			outputs: []string{"reduced", "metrics"},
+			outputs: []string{"reduced", "score_infos"},
 			opName:  hybridSearchReduceOp,
 		},
 		{
 			name:    "element_best_collapse",
-			inputs:  []string{"reduced", "metrics"},
+			inputs:  []string{"reduced", "score_infos"},
 			outputs: []string{"collapsed"},
 			opName:  elementBestCollapseOp,
 		},
@@ -3473,7 +3512,7 @@ var hybridSearchWithRequeryAndRerankByFieldDataPipe = &pipelineDef{
 		},
 		{
 			name:    "rerank",
-			inputs:  []string{"rank_data", "metrics"},
+			inputs:  []string{"rank_data", "score_infos"},
 			outputs: []string{"rank_result"},
 			opName:  rerankOp,
 		},
@@ -3517,18 +3556,18 @@ var hybridSearchWithRequeryPipe = &pipelineDef{
 		{
 			name:    "reduce",
 			inputs:  []string{pipelineInput, pipelineStorageCost},
-			outputs: []string{"reduced", "metrics"},
+			outputs: []string{"reduced", "score_infos"},
 			opName:  hybridSearchReduceOp,
 		},
 		{
 			name:    "element_best_collapse",
-			inputs:  []string{"reduced", "metrics"},
+			inputs:  []string{"reduced", "score_infos"},
 			outputs: []string{"collapsed"},
 			opName:  elementBestCollapseOp,
 		},
 		{
 			name:    "rerank",
-			inputs:  []string{"collapsed", "metrics"},
+			inputs:  []string{"collapsed", "score_infos"},
 			outputs: []string{"rank_result"},
 			opName:  rerankOp,
 		},
@@ -3583,7 +3622,7 @@ var searchWithOrderByPipe = &pipelineDef{
 		{
 			name:    "reduce",
 			inputs:  []string{pipelineInput, pipelineStorageCost},
-			outputs: []string{"reduced", "metrics"},
+			outputs: []string{"reduced", "score_infos"},
 			params: map[string]any{
 				reduceOffsetParamKey: int64(0),
 			},

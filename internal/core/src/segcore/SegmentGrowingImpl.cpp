@@ -4187,7 +4187,7 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
     auto arrow_schema =
         schema->ConvertToLoonArrowSchema(/*text_lob_as_binary=*/true);
     reader_ = milvus_storage::api::Reader::create(
-        column_groups, arrow_schema, nullptr, *properties);
+        column_groups, arrow_schema, nullptr, properties);
     if (storage::PluginLoader::GetInstance().getCipherPlugin()) {
         reader_->set_keyretriever([](const std::string& key_metadata) {
             return storage::KeyRetriever().GetKey(key_metadata);

@@ -14,6 +14,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <nlohmann/json.hpp>
+#include "milvus-storage/filesystem/fs.h"
+#include <algorithm>
 #include <arrow/array.h>
 #include <arrow/builder.h>
 #include <arrow/compute/api.h>
@@ -3675,6 +3678,12 @@ TEST(InjectExtfsAllowlist, AzurePublicCloudWithExplicitRegion) {
 }
 
 TEST(InjectExtfsAllowlist, AzureCredentialBrokerProperties) {
+    ASSERT_TRUE(
+        InitCredentialBrokerPolicy(
+            std::string(
+                R"(["https://broker.example.com/v1/credentials/assume-role","https://broker.example.com/v1/credentials/assume-role?api-version=1&scope=a%2Fb+x"])"))
+            .ok());
+
     milvus_storage::api::Properties props;
     const int64_t coll_id = 42;
     std::string spec = R"({
@@ -3693,7 +3702,8 @@ TEST(InjectExtfsAllowlist, AzureCredentialBrokerProperties) {
         props, coll_id, "azure://core.windows.net/container/path", spec);
 
     auto config = milvus_storage::FilesystemCache::resolve_config(
-        props, "azure://core.windows.net/container/path");
+        std::make_shared<const milvus_storage::api::Properties>(props),
+        "azure://core.windows.net/container/path");
     ASSERT_TRUE(config.ok()) << config.status().ToString();
     EXPECT_EQ(config->credential_endpoint,
               "https://broker.example.com/v1/credentials/assume-role");
@@ -3714,6 +3724,38 @@ TEST(InjectExtfsAllowlist, AzureCredentialBrokerProperties) {
     EXPECT_EQ(props.count("extfs.42.azure_credential_endpoint"), 0u);
     EXPECT_EQ(props.count("extfs.42.access_key_value"), 0u);
     EXPECT_EQ(props.count("extfs.42.request_timeout_ms"), 0u);
+}
+
+TEST(InjectExtfsAllowlist, AzureLegacyBrokerQuery) {
+    ASSERT_TRUE(
+        InitCredentialBrokerPolicy(
+            std::string(
+                R"(["https://broker.example.com/v1/credentials/assume-role","https://broker.example.com/v1/credentials/assume-role?api-version=1&scope=a%2Fb+x"])"))
+            .ok());
+    const std::string endpoint =
+        "https://broker.example.com/v1/credentials/"
+        "assume-role?api-version=1&scope=a%2Fb+x";
+    auto inject = [&](const std::string& url) {
+        milvus_storage::api::Properties props;
+        const std::string spec =
+            R"({"format":"parquet","extfs":{"cloud_provider":"azure","access_key_id":"account","region":"westus3","azure_client_id":"client","azure_tenant_id":"tenant","azure_credential_endpoint":")" +
+            url + R"("}})";
+        ::InjectExternalSpecProperties(
+            props, 42, "azure://core.windows.net/container/path", spec);
+        return props;
+    };
+    auto props = inject(endpoint);
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.credential_endpoint")),
+              endpoint);
+    EXPECT_EQ(props.count("extfs.42.azure_credential_endpoint"), 0u);
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.talon.mode")), "0");
+    EXPECT_ANY_THROW(inject(endpoint + "&extra=1"));
+    EXPECT_ANY_THROW(
+        inject("https://broker.example.com/v1/credentials/"
+               "assume-role?api-version=2&scope=a%2Fb+x"));
+    EXPECT_ANY_THROW(
+        inject("https://broker.example.com/v1/credentials/"
+               "assume-role?scope=a%2Fb+x&api-version=1"));
 }
 
 TEST(InjectExtfsAllowlist, AzureSovereignCloudEndpoints) {
@@ -3913,7 +3955,8 @@ TEST(InjectExtfsAllowlist, IcebergSnapshotID) {
         // Read the same typed property as IcebergFormat::explore so a stale
         // property key cannot silently fall back to the latest snapshot.
         const auto snapshot_id = milvus_storage::api::GetValue<int64_t>(
-            props, PROPERTY_READER_EXTTABLE_SNAPSHOT_ID);
+            std::make_shared<const milvus_storage::api::Properties>(props),
+            PROPERTY_READER_EXTTABLE_SNAPSHOT_ID);
         ASSERT_TRUE(snapshot_id.ok()) << snapshot_id.status().ToString();
         EXPECT_EQ(*snapshot_id, 5320540205222981137LL);
     }
@@ -3944,7 +3987,7 @@ TEST(InjectExtfsAllowlist, IcebergSnapshotIDCAbiRoundTrip) {
         EXPECT_STREQ(loon_properties_get(&properties,
                                          PROPERTY_READER_EXTTABLE_SNAPSHOT_ID),
                      "5320540205222981137");
-        milvus_storage::api::Properties round_tripped;
+        std::shared_ptr<const milvus_storage::api::Properties> round_tripped;
         const auto conversion_error = milvus_storage::api::ConvertFFIProperties(
             round_tripped, &properties);
         loon_properties_free(&properties);
@@ -3985,6 +4028,172 @@ TEST(InjectExtfsAllowlist, InvalidIcebergSnapshotIDIsRejected) {
         EXPECT_NE(error.find("-2"), std::string::npos);
         loon_ffi_free_result(&result);
         loon_properties_free(&properties);
+    }
+}
+
+TEST(InjectExtfsAllowlist, PaimonSnapshotIDAcceptsStringAndNumber) {
+    const int64_t coll_id = 42;
+    {
+        milvus_storage::api::Properties props;
+        std::string spec =
+            R"({"format":"paimon-table","snapshot_id":"5320540205222981137"})";
+        ::InjectExternalSpecProperties(
+            props, coll_id, "s3://s3.amazonaws.com/bucket/key", spec);
+        EXPECT_EQ(
+            std::get<int64_t>(props.at(PROPERTY_READER_EXTTABLE_SNAPSHOT_ID)),
+            int64_t{5320540205222981137});
+    }
+    {
+        milvus_storage::api::Properties props;
+        std::string spec = R"({"format":"paimon-table","snapshot_id":7})";
+        ::InjectExternalSpecProperties(
+            props, coll_id, "s3://s3.amazonaws.com/bucket/key", spec);
+        EXPECT_EQ(
+            std::get<int64_t>(props.at(PROPERTY_READER_EXTTABLE_SNAPSHOT_ID)),
+            int64_t{7});
+    }
+}
+
+TEST(InjectExtfsAllowlist, PaimonSnapshotIDSurvivesCABIConversion) {
+    LoonProperties props{nullptr, 0};
+    auto result = loon_properties_inject_external_spec(
+        &props,
+        42,
+        "s3://s3.amazonaws.com/bucket/key",
+        R"({"format":"paimon-table","snapshot_id":"5320540205222981137"})",
+        2000,
+        5000);
+    ASSERT_NE(loon_ffi_is_success(&result), 0);
+    loon_ffi_free_result(&result);
+
+    const auto* snapshot_id =
+        loon_properties_get(&props, PROPERTY_READER_EXTTABLE_SNAPSHOT_ID);
+    ASSERT_NE(snapshot_id, nullptr);
+    EXPECT_STREQ(snapshot_id, "5320540205222981137");
+
+    const auto* use_ssl = loon_properties_get(&props, "extfs.42.use_ssl");
+    ASSERT_NE(use_ssl, nullptr);
+    EXPECT_STREQ(use_ssl, "true");
+
+    loon_properties_free(&props);
+}
+
+TEST(InjectExtfsAllowlist, PaimonSnapshotIDOptional) {
+    // Without snapshot_id the property must stay absent so the paimon
+    // planner falls back to the latest snapshot.
+    milvus_storage::api::Properties props;
+    const int64_t coll_id = 42;
+    std::string spec = R"({"format":"paimon-table"})";
+
+    ::InjectExternalSpecProperties(
+        props, coll_id, "s3://s3.amazonaws.com/bucket/key", spec);
+
+    EXPECT_EQ(props.count(PROPERTY_READER_EXTTABLE_SNAPSHOT_ID), 0u);
+}
+
+TEST(InjectExtfsAllowlist, PaimonScanModeIsInjected) {
+    for (const auto& mode : {"auto", "direct-file", "data-split"}) {
+        milvus_storage::api::Properties props;
+        const auto spec =
+            std::string(R"({"format":"paimon-table","scan_mode":")") + mode +
+            "\"}";
+        ::InjectExternalSpecProperties(
+            props, 42, "s3://s3.amazonaws.com/bucket/key", spec);
+        EXPECT_EQ(std::get<std::string>(props.at(PROPERTY_PAIMON_SCAN_MODE)),
+                  mode);
+    }
+}
+
+TEST(InjectExtfsAllowlist, PaimonScanModeDefaults) {
+    for (const auto& value : {"\"\"", "null"}) {
+        SCOPED_TRACE(value);
+        milvus_storage::api::Properties props;
+        props[PROPERTY_PAIMON_SCAN_MODE] = std::string("data-split");
+        const auto spec =
+            std::string(R"({"format":"paimon-table","scan_mode":)") + value +
+            "}";
+        ::InjectExternalSpecProperties(
+            props, 42, "s3://s3.amazonaws.com/bucket/key", spec);
+        EXPECT_EQ(std::get<std::string>(props.at(PROPERTY_PAIMON_SCAN_MODE)),
+                  "auto");
+    }
+}
+
+TEST(InjectExtfsAllowlist, InvalidPaimonScanModeIsRejected) {
+    for (const auto& value : {"\"native\"", "true", "1", "{}", "[]"}) {
+        SCOPED_TRACE(value);
+        milvus_storage::api::Properties props;
+        const auto spec =
+            std::string(R"({"format":"paimon-table","scan_mode":)") + value +
+            "}";
+        EXPECT_THROW(::InjectExternalSpecProperties(
+                         props, 42, "s3://s3.amazonaws.com/bucket/key", spec),
+                     milvus::SegcoreError);
+    }
+}
+
+TEST(InjectExtfsAllowlist, PaimonFormatPropertiesIgnoreFieldOrder) {
+    for (const std::string snapshot : {"7", "\"7\"", "null"}) {
+        for (const std::string value : {"\"auto\"",
+                                        "\"direct-file\"",
+                                        "\"data-split\"",
+                                        "\"\"",
+                                        "null",
+                                        "\"invalid\"",
+                                        "true",
+                                        "1",
+                                        "{}",
+                                        "[]"}) {
+            const bool valid =
+                value == "\"auto\"" || value == "\"direct-file\"" ||
+                value == "\"data-split\"" || value == "\"\"" || value == "null";
+            const auto expected = value == "\"\"" || value == "null"
+                                      ? "auto"
+                                      : value.substr(1, value.size() - 2);
+            std::vector<std::string> fields{"\"format\":\"paimon-table\"",
+                                            "\"snapshot_id\":" + snapshot,
+                                            "\"scan_mode\":" + value};
+            std::sort(fields.begin(), fields.end());
+            do {
+                const auto spec =
+                    "{" + fields[0] + "," + fields[1] + "," + fields[2] + "}";
+                SCOPED_TRACE(spec);
+                LoonProperties props{nullptr, 0};
+                auto result = loon_properties_inject_external_spec(
+                    &props, 42, "s3://bucket/table", spec.c_str(), 2000, 5000);
+                if (valid) {
+                    EXPECT_EQ(result.err_code, loon_errcode_success);
+                    EXPECT_STREQ(
+                        loon_properties_get(&props, PROPERTY_PAIMON_SCAN_MODE),
+                        expected.c_str());
+                    if (snapshot != "null") {
+                        EXPECT_STREQ(
+                            loon_properties_get(
+                                &props, PROPERTY_READER_EXTTABLE_SNAPSHOT_ID),
+                            "7");
+                    }
+                } else {
+                    EXPECT_EQ(result.err_code, loon_errcode_invalid_properties);
+                }
+                loon_ffi_free_result(&result);
+                loon_properties_free(&props);
+            } while (std::next_permutation(fields.begin(), fields.end()));
+        }
+    }
+}
+
+TEST(InjectExtfsAllowlist, MissingPaimonScanModePreservesReaderDefault) {
+    for (const std::string spec : {
+             R"({"format":"paimon-table"})",
+             R"({"snapshot_id":7,"format":"paimon-table"})",
+         }) {
+        milvus_storage::api::Properties props;
+        ::InjectExternalSpecProperties(props, 42, "s3://bucket/table", spec);
+        EXPECT_EQ(props.count(PROPERTY_PAIMON_SCAN_MODE), 0u);
+        props[PROPERTY_PAIMON_SCAN_MODE] = std::string("data-split");
+        ::InjectExternalSpecProperties(props, 42, "s3://bucket/table", spec);
+        EXPECT_EQ(std::get<std::string>(props.at(PROPERTY_PAIMON_SCAN_MODE)),
+                  "data-split");
     }
 }
 
@@ -4158,4 +4367,138 @@ TEST(NormalizeExternalArrow, NonMatchingTypePassthrough) {
 
     EXPECT_EQ(result->type_id(), arrow::Type::INT64);
     EXPECT_EQ(result.get(), arr.get());
+}
+
+TEST(InjectExtfsAllowlist, BrokerIamPolicyAndLegacyAliases) {
+    const std::string endpoint =
+        "https://broker.example.com/v1/credentials/assume-role";
+    const auto policy = std::string(
+        R"(["https://broker.example.com/v1/credentials/assume-role","https://broker.example.com/v1/credentials/assume-role?api-version=1&scope=a%2Fb+x"])");
+    ASSERT_TRUE(InitCredentialBrokerPolicy(policy).ok());
+    EXPECT_FALSE(InitCredentialBrokerPolicy(std::string("[]")).ok());
+    EXPECT_FALSE(InitCredentialBrokerPolicy(std::string("invalid")).ok());
+    EXPECT_FALSE(
+        InitCredentialBrokerPolicy(std::string(R"(["file:///tmp/broker"])"))
+            .ok());
+    for (const auto& cloud : {"aws", "aliyun", "tencent"}) {
+        for (const auto* format : {"parquet", "milvus-table"}) {
+            for (uint32_t mode : {0u, 1u, 2u}) {
+                milvus_storage::api::Properties props;
+                props["milvus.talon.external_mode"] = mode;
+                props[PROPERTY_FS_TALON_MODE] = uint32_t{1};
+                props[PROPERTY_FS_TALON_COORDINATOR] =
+                    std::string("talon:1234");
+                auto spec =
+                    nlohmann::json{{"format", format},
+                                   {"extfs",
+                                    {{"cloud_provider", cloud},
+                                     {"region", "us-west-2"},
+                                     {"use_iam", "true"},
+                                     {"credential_endpoint", endpoint}}}};
+                InjectExternalSpecProperties(
+                    props, 42, "s3://bucket/path", spec.dump());
+                EXPECT_EQ(std::get<std::string>(
+                              props.at("extfs.42.credential_endpoint")),
+                          endpoint);
+                EXPECT_EQ(props.count("extfs.42.role_arn"), 0u);
+                auto address =
+                    std::get<std::string>(props.at("extfs.42.address"));
+                auto scheme_end = address.find("://");
+                if (scheme_end != std::string::npos)
+                    address = address.substr(scheme_end + 3);
+                auto config = milvus_storage::FilesystemCache::resolve_config(
+                    std::make_shared<const milvus_storage::api::Properties>(
+                        props),
+                    "s3://" + address + "/bucket/path");
+                ASSERT_TRUE(config.ok()) << config.status();
+                EXPECT_TRUE(config->use_iam);
+                EXPECT_TRUE(config->IsAwsCredentialBrokerEnabled());
+                EXPECT_EQ(config->credential_endpoint, endpoint);
+                EXPECT_FALSE(config->s3_use_crt);
+                EXPECT_EQ(config->talon_mode,
+                          milvus_storage::TalonMode::Disabled);
+                EXPECT_EQ(props.count("extfs.42.talon.coordinator"), 0u);
+                spec["extfs"]["credential_endpoint"] = endpoint + "/other";
+                EXPECT_ANY_THROW(InjectExternalSpecProperties(
+                    props, 42, "s3://bucket/path", spec.dump()));
+            }
+        }
+    }
+    auto spec = nlohmann::json{
+        {"format", "parquet"},
+        {"extfs",
+         {{"cloud_provider", "azure"},
+          {"region", "westus3"},
+          {"azure_client_id", "client"},
+          {"azure_tenant_id", "tenant"},
+          {"access_key_id", "account"},
+          {"credential_endpoint", endpoint},
+          {"azure_credential_endpoint",
+           "HTTPS://BROKER.example.com:443/v1/credentials/assume-role"}}}};
+    milvus_storage::api::Properties props;
+    props["milvus.talon.external_mode"] = uint32_t{2};
+    props[PROPERTY_FS_TALON_COORDINATOR] = std::string("talon:1234");
+    InjectExternalSpecProperties(
+        props, 42, "azure://core.windows.net/container/path", spec.dump());
+    EXPECT_EQ(props.count("extfs.42.azure_credential_endpoint"), 0u);
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.talon.mode")), "0");
+    EXPECT_EQ(props.count("extfs.42.talon.coordinator"), 0u);
+    EXPECT_EQ(std::get<std::string>(props.at("extfs.42.credential_endpoint")),
+              endpoint);
+    spec["extfs"]["azure_credential_endpoint"] = endpoint + "/other";
+    EXPECT_ANY_THROW(InjectExternalSpecProperties(
+        props, 42, "azure://core.windows.net/container/path", spec.dump()));
+}
+
+TEST(InjectExtfsAllowlist, NonBrokerRetainsTalonMode) {
+    for (uint32_t mode : {0u, 1u, 2u}) {
+        milvus_storage::api::Properties props;
+        props["milvus.talon.external_mode"] = mode;
+        props[PROPERTY_FS_TALON_COORDINATOR] = std::string("talon:1234");
+        const auto spec = nlohmann::json{{"format", "parquet"},
+                                         {"extfs",
+                                          {{"cloud_provider", "aws"},
+                                           {"region", "us-west-2"},
+                                           {"use_iam", "true"}}}};
+        InjectExternalSpecProperties(
+            props, 42, "s3://bucket/path", spec.dump());
+        EXPECT_EQ(std::get<std::string>(props.at("extfs.42.talon.mode")),
+                  std::to_string(mode));
+        EXPECT_EQ(std::get<std::string>(props.at("extfs.42.talon.coordinator")),
+                  "talon:1234");
+        EXPECT_EQ(props.count("extfs.42.credential_endpoint"), 0u);
+        EXPECT_EQ(std::get<std::string>(props.at("extfs.42.s3.use_crt")),
+                  "false");
+    }
+}
+
+TEST(InjectExtfsAllowlist, BrokerEndpointNormalization) {
+    for (const auto& entry : std::vector<std::pair<std::string, std::string>>{
+             {"HTTPS://BROKER.example.com:443/path",
+              "https://broker.example.com/path"},
+             {"http://broker:080/path", "http://broker/path"},
+             {"HTTPS://BROKER:443/path?api-version=1&scope=a%2Fb+x&scope=y",
+              "https://broker/path?api-version=1&scope=a%2Fb+x&scope=y"},
+             {"https://broker?", "https://broker/?"},
+             {"http://[::1]:80/path", "http://[::1]/path"},
+             {"https://broker:8443/a_b/", "https://broker:8443/a_b/"}}) {
+        auto result = NormalizeBrokerEndpoint(entry.first);
+        ASSERT_TRUE(result.ok()) << result.status();
+        EXPECT_EQ(*result, entry.second);
+    }
+    for (const auto& raw : {"",
+                            "ftp://broker/path",
+                            "https:///path",
+                            "https://user@broker/path",
+                            "https://broker/path#",
+                            "https://broker:",
+                            "https://broker:0/path",
+                            "https://broker:65536/path",
+                            "https://*.broker/path",
+                            "https://broker/a%2Fb/",
+                            "https://broker/allowed//admin",
+                            "https://broker/a/../admin",
+                            "https://broker/a:b"}) {
+        EXPECT_FALSE(NormalizeBrokerEndpoint(raw).ok()) << raw;
+    }
 }

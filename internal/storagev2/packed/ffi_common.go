@@ -4,6 +4,7 @@ package packed
 #cgo pkg-config: milvus_core milvus-storage
 #include <stdlib.h>
 #include "milvus-storage/ffi_c.h"
+#include "storage/storage_c.h"
 #include "storage/loon_ffi/ffi_writer_c.h"
 #include "storage/loon_ffi/external_spec_c.h"
 #include "arrow/c/abi.h"
@@ -24,6 +25,7 @@ import (
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -66,6 +68,7 @@ var (
 	PropertyFSGCPCredentialJSON   = C.GoString(C.loon_properties_fs_gcp_credential_json)
 	PropertyFSUseCustomPartUpload = C.GoString(C.loon_properties_fs_use_custom_part_upload)
 	PropertyFSMaxConnections      = C.GoString(C.loon_properties_fs_max_connections)
+	PropertyFSS3UseCRT            = C.GoString(C.loon_properties_fs_s3_use_crt)
 	PropertyFSTLSMinVersion       = C.GoString(C.loon_properties_fs_tls_min_version)
 	PropertyFSUseCRC32CChecksum   = C.GoString(C.loon_properties_fs_use_crc32c_checksum)
 
@@ -114,6 +117,22 @@ func writerEncryptionProperties(storagePluginContext *indexcgopb.StoragePluginCo
 // ExtfsPrefixForCollection returns the per-collection extfs property prefix.
 func ExtfsPrefixForCollection(collectionID int64) string {
 	return fmt.Sprintf("extfs.%d.", collectionID)
+}
+
+// Publish the server-owned policy for Go FFI readers.
+func initCredentialBrokerPolicy(params *paramtable.ComponentParam) error {
+	policyJSON, err := json.Marshal(params.CommonCfg.CredentialBrokerPolicy().Endpoints())
+	if err != nil {
+		return merr.WrapErrServiceInternalErr(err, "encode credential broker policy")
+	}
+	cPolicy := C.CString(string(policyJSON))
+	defer C.free(unsafe.Pointer(cPolicy))
+	policyStatus := C.InitCredentialBrokerPolicy(cPolicy)
+	if policyStatus.error_code != 0 {
+		defer C.free(unsafe.Pointer(policyStatus.error_msg))
+		return merr.WrapErrServiceInternalMsg("credential broker policy initialization failed")
+	}
+	return nil
 }
 
 // MakePropertiesFromStorageConfig creates a Properties object from StorageConfig.
@@ -201,6 +220,9 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 
 	keys = append(keys, PropertyFSUseCustomPartUpload)
 	values = append(values, "true") // hardcoded to true as in the original code
+	// Preserve SDK I/O and its TLS minimum enforcement across the SDK upgrade.
+	keys = append(keys, PropertyFSS3UseCRT)
+	values = append(values, "false")
 
 	// Add integer fields
 	keys = append(keys, PropertyFSRequestTimeoutMS)
@@ -379,12 +401,19 @@ func injectExternalSpecProperties(properties *C.LoonProperties, collectionID int
 	if externalSource == "" {
 		return nil
 	}
+	normalizedSpec, err := specutil.NormalizeExternalSpec(externalSpec)
+	if err != nil {
+		return err
+	}
 	params := paramtable.Get()
+	if err := initCredentialBrokerPolicy(params); err != nil {
+		return err
+	}
 	cSource := C.CString(externalSource)
 	defer C.free(unsafe.Pointer(cSource))
 	var cSpec *C.char
 	if externalSpec != "" {
-		cSpec = C.CString(externalSpec)
+		cSpec = C.CString(normalizedSpec)
 		defer C.free(unsafe.Pointer(cSpec))
 	}
 	result := C.loon_properties_inject_external_spec(

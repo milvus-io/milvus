@@ -10,6 +10,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metacache/metacachetest"
 	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/types"
@@ -46,7 +47,7 @@ func TestQueryViewLoadInfoInitializationAndRecovery(t *testing.T) {
 	defer patch.UnPatch()
 
 	for _, withIndexSource := range []bool{true, false} {
-		s := &Server{ctx: ctx, kv: storage, nodeMgr: session.NewNodeManager()}
+		s := &Server{ctx: ctx, kv: storage, nodeMgr: session.NewNodeManager(), metaView: metacachetest.NewMetaStore()}
 		if withIndexSource {
 			s.mixCoord = &loadInfoIndexSourceForTest{}
 		}

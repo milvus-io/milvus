@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -232,6 +233,15 @@ func (s *mixCoordImpl) initInternal() error {
 	}
 	s.fileResourceObserver.InitProxy(s.rootcoordServer.GetProxyClientManager())
 
+	// RootCoord's MetaTable, loaded in Init, owns collection metadata.
+	// DataCoord and QueryCoord read it through the shared MetaStore.
+	collectionSource, err := s.rootcoordServer.CollectionSource()
+	if err != nil {
+		mlog.Error(s.ctx, "rootCoord collection source unavailable", mlog.Err(err))
+		return err
+	}
+	s.metaStore.SetCollectionSource(collectionSource)
+
 	if err := s.rootcoordServer.Start(); err != nil {
 		mlog.Error(s.ctx, "rootCoord start failed", mlog.Err(err))
 		return err
@@ -368,8 +378,8 @@ func (s *mixCoordImpl) CreateCollectionDataView(ctx context.Context, collectionI
 	return err
 }
 
-func (s *mixCoordImpl) CreateCollectionDataViewWithTransformStarts(ctx context.Context, collectionID int64, vchannels []string, starts map[string]uint64) error {
-	_, err := s.datacoordServer.CreateCollectionDataViewWithTransformStarts(ctx, collectionID, vchannels, starts)
+func (s *mixCoordImpl) CreateCollectionDataViewWithTransformStarts(ctx context.Context, result message.BroadcastResultCreateCollectionMessageV1) error {
+	_, err := s.datacoordServer.CreateCollectionDataViewWithTransformStarts(ctx, result)
 	return err
 }
 
@@ -585,11 +595,6 @@ func (s *mixCoordImpl) DropCollection(ctx context.Context, req *milvuspb.DropCol
 
 func (s *mixCoordImpl) HasCollection(ctx context.Context, req *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	return s.rootcoordServer.HasCollection(ctx, req)
-}
-
-// IsCollectionAvailable is an in-process, positive-only GC fast path.
-func (s *mixCoordImpl) IsCollectionAvailable(collectionID int64) bool {
-	return s.rootcoordServer.IsCollectionAvailable(collectionID)
 }
 
 func (s *mixCoordImpl) DescribeCollection(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
@@ -1458,6 +1463,14 @@ func (s *mixCoordImpl) ValidateAnalyzer(ctx context.Context, req *querypb.Valida
 
 func (s *mixCoordImpl) ComputePhraseMatchSlop(ctx context.Context, req *querypb.ComputePhraseMatchSlopRequest) (*querypb.ComputePhraseMatchSlopResponse, error) {
 	return s.queryCoordServer.ComputePhraseMatchSlop(ctx, req)
+}
+
+func (s *mixCoordImpl) ListRunningRequests(ctx context.Context, req *milvuspb.ListRunningRequestsRequest) (*milvuspb.ListRunningRequestsResponse, error) {
+	return s.rootcoordServer.ListRunningRequests(ctx, req)
+}
+
+func (s *mixCoordImpl) CancelRequests(ctx context.Context, req *milvuspb.CancelRequestsRequest) (*milvuspb.CancelRequestsResponse, error) {
+	return s.rootcoordServer.CancelRequests(ctx, req)
 }
 
 // Deprecated: QueryView does not use the legacy cluster read-task queues.

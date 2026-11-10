@@ -49,4 +49,7 @@ func TestRestoreCollectionVisibilityAfterDurableCompletion(t *testing.T) {
 	require.Equal(t, etcdpb.CollectionState_CollectionRestoring, collection.State, "published metadata is immutable")
 	_, err = mt.GetCollectionByID(t.Context(), "default", 10, typeutil.MaxTimestamp, false)
 	require.NoError(t, err)
+	view, ok := mt.collViews.Get(10)
+	require.True(t, ok)
+	require.Equal(t, etcdpb.CollectionState_CollectionCreated, view.State, "completion publishes the view")
 }

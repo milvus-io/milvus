@@ -48,7 +48,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
@@ -166,15 +165,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 	suite.Run("ListSegments_fail", func() {
 		defer suite.resetMock()
 		brk := broker.NewMockBroker(suite.T())
-		brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{
-			Status: merr.Success(),
-			DbCollections: []*rootcoordpb.DBCollections{
-				{
-					DbName:        "db_1",
-					CollectionIDs: []int64{100},
-				},
-			},
-		}, nil)
 		suite.catalog.EXPECT().ListSegments(mock.Anything, mock.Anything).Return(nil, errors.New("mock"))
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
@@ -187,14 +177,13 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
-		_, err := meta.NewMeta(ctx, suite.catalog, nil, metacache.NewMetaStore(suite.catalog), brk, loadDomainMetas(suite.catalog, nil, &domainMetas{}))
+		_, err := meta.NewMeta(ctx, suite.catalog, nil, meta.NewMetaStoreWithCollections(suite.catalog, 100), brk, loadDomainMetas(suite.catalog, nil, &domainMetas{}))
 		suite.Error(err)
 	})
 
 	suite.Run("ListChannelCheckpoint_fail", func() {
 		defer suite.resetMock()
 		brk := broker.NewMockBroker(suite.T())
-		brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListSegments(mock.Anything, mock.Anything).Return([]*datapb.SegmentInfo{}, nil)
 		suite.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, errors.New("mock"))
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
@@ -218,16 +207,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableTargetBasedCompaction.Key)
 
 		brk := broker.NewMockBroker(suite.T())
-		brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{
-			Status: merr.Success(),
-			DbCollections: []*rootcoordpb.DBCollections{
-				{
-					DbName:        "db_1",
-					CollectionIDs: []int64{1},
-				},
-			},
-		}, nil)
-
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
@@ -261,7 +240,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 		suite.catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
 
 		dm := &domainMetas{}
-		_, err := meta.NewMeta(ctx, suite.catalog, nil, metacache.NewMetaStore(suite.catalog), brk, loadDomainMetas(suite.catalog, nil, dm))
+		_, err := meta.NewMeta(ctx, suite.catalog, nil, meta.NewMetaStoreWithCollections(suite.catalog, 1), brk, loadDomainMetas(suite.catalog, nil, dm))
 		suite.NoError(err)
 		suite.NotNil(dm.compactionTargetMeta)
 		suite.Equal(datapb.TargetState_TARGET_STATE_ACTIVE, dm.compactionTargetMeta.GetCompactionTarget(10).GetState())
@@ -272,7 +251,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 	suite.Run("ListIndexes_fail", func() {
 		defer suite.resetMock()
 		brk := broker.NewMockBroker(suite.T())
-		brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, errors.New("mock"))
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
@@ -292,7 +270,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 	suite.Run("ListAnalyzeTasks_fail", func() {
 		defer suite.resetMock()
 		brk := broker.NewMockBroker(suite.T())
-		brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, errors.New("mock"))
@@ -312,7 +289,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 	suite.Run("ListPartitionStatsInfos_fail", func() {
 		defer suite.resetMock()
 		brk := broker.NewMockBroker(suite.T())
-		brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
@@ -332,7 +308,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 	suite.Run("ListCompactionTask_fail", func() {
 		defer suite.resetMock()
 		brk := broker.NewMockBroker(suite.T())
-		brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
@@ -352,7 +327,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 	suite.Run("ListStatsTasks_fail", func() {
 		defer suite.resetMock()
 		brk := broker.NewMockBroker(suite.T())
-		brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
@@ -372,7 +346,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 	suite.Run("ListSnapshots_fail", func() {
 		defer suite.resetMock()
 		brk := broker.NewMockBroker(suite.T())
-		brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
@@ -392,20 +365,6 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 	suite.Run("test list segments", func() {
 		defer suite.resetMock()
 		brk := broker.NewMockBroker(suite.T())
-		brk.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{
-			Status: merr.Success(),
-			DbCollections: []*rootcoordpb.DBCollections{
-				{
-					DbName:        "db_1",
-					CollectionIDs: []int64{100, 101, 102},
-				},
-				{
-					DbName:        "db_2",
-					CollectionIDs: []int64{200, 201, 202},
-				},
-			},
-		}, nil)
-
 		suite.catalog.EXPECT().ListIndexes(mock.Anything).Return([]*model.Index{}, nil)
 		suite.catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return([]*model.SegmentIndex{}, nil).Maybe()
 		suite.catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
@@ -429,7 +388,7 @@ func (suite *MetaReloadSuite) TestReloadFromKV() {
 				}, nil
 			})
 
-		mt, err := meta.NewMeta(ctx, suite.catalog, nil, metacache.NewMetaStore(suite.catalog), brk, loadDomainMetas(suite.catalog, nil, &domainMetas{}))
+		mt, err := meta.NewMeta(ctx, suite.catalog, nil, meta.NewMetaStoreWithCollections(suite.catalog, 100, 101, 102, 200, 201, 202), brk, loadDomainMetas(suite.catalog, nil, &domainMetas{}))
 		suite.NoError(err)
 		for _, collectionID := range []int64{100, 101, 102, 200, 201, 202} {
 			segments := mt.GetSegmentsOfCollection(ctx, collectionID)
@@ -488,8 +447,6 @@ func (suite *MetaBasicSuite) TestCollection() {
 	suite.EqualValues(info.Schema, collInfo.Schema)
 	suite.EqualValues(len(suite.partIDs), len(collInfo.Partitions))
 	suite.ElementsMatch(info.Partitions, collInfo.Partitions)
-
-	suite.MetricsEqual(metrics.DataCoordNumCollections.WithLabelValues(), 1)
 }
 
 func (suite *MetaBasicSuite) TestCompleteCompactionMutation() {

@@ -466,11 +466,6 @@ func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result m
 		}
 		return merr.Wrap(err, "failed to alter collection")
 	}
-	// DataCoord prepares against Broadcaster's acknowledged schema. Refresh its
-	// public metadata cache only after the serving schema has been published.
-	if err := c.broker.BroadcastAlteredCollection(ctx, header.CollectionId); err != nil {
-		return merr.Wrap(err, "failed to broadcast altered collection")
-	}
 	if body.Updates.AlterLoadConfig != nil {
 		err := qvresource.Resource().LoadManager.UpdateReplicaConfig(ctx, header.CollectionId,
 			body.Updates.AlterLoadConfig.ReplicaNumber, body.Updates.AlterLoadConfig.ResourceGroups)

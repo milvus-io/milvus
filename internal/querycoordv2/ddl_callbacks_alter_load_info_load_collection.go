@@ -25,7 +25,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
@@ -48,15 +48,12 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 	defer broadcaster.Close()
 
 	// double check if the collection is already dropped
-	coll, err := s.broker.DescribeCollection(ctx, req.GetCollectionID())
+	coll, err := s.meta.GetCollectionInfo(req.GetCollectionID())
 	if err != nil {
 		return err
 	}
 
-	partitionIDs, err := s.broker.GetPartitions(ctx, coll.CollectionID)
-	if err != nil {
-		return err
-	}
+	partitionIDs := coll.Partitions
 	replicaNumber, resourceGroups, scopedResourceGroups, userSpecifiedReplicaMode, err := s.getLoadReplicaConfigForRequest(
 		ctx,
 		req.GetReplicaNumber(),
@@ -121,8 +118,8 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 			ExpectedPartitionIDs:             partitionIDs,
 			ExpectedReplicaNumber:            expectedReplicasNumber,
 			ExpectedFieldIndexID:             req.GetFieldIndexID(),
-			ExpectedLoadFields:               loadmgr.PreloadFieldIDsForSchema(coll.GetSchema(), req.GetLoadFields()),
-			ExpectedRequiredFields:           loadmgr.FieldsToMessage(loadmgr.RequiredFieldsForSchema(coll.GetSchema())),
+			ExpectedLoadFields:               loadmgr.PreloadFieldIDsForSchema(coll.Schema, req.GetLoadFields()),
+			ExpectedRequiredFields:           loadmgr.FieldsToMessage(loadmgr.RequiredFieldsForSchema(coll.Schema)),
 			ExpectedPriority:                 req.GetPriority(),
 			ExpectedUserSpecifiedReplicaMode: userSpecifiedReplicaMode,
 		},
@@ -228,7 +225,7 @@ type qviewsExpectedLoadConfig struct {
 
 func (s *Server) generateAlterLoadConfigMessageForLoadCollection(
 	ctx context.Context,
-	coll *milvuspb.DescribeCollectionResponse,
+	coll *metacache.CollectionInfo,
 	current *loadmgr.LoadConfig,
 	expected qviewsExpectedLoadConfig,
 ) (message.BroadcastMutableMessage, error) {
@@ -237,11 +234,11 @@ func (s *Server) generateAlterLoadConfigMessageForLoadCollection(
 		return nil, err
 	}
 	header := &messagespb.AlterLoadConfigMessageHeader{
-		DbId:                     coll.GetDbId(),
-		CollectionId:             coll.GetCollectionID(),
+		DbId:                     coll.DatabaseID,
+		CollectionId:             coll.ID,
 		PartitionIds:             sortedInt64s(expected.PartitionIDs),
-		LoadFields:               generateQViewsLoadFields(loadmgr.PreloadFieldIDsForSchema(coll.GetSchema(), expected.LoadFields), expected.FieldIndexID),
-		RequiredFields:           loadmgr.FieldsToMessage(loadmgr.RequiredFieldsForSchema(coll.GetSchema())),
+		LoadFields:               generateQViewsLoadFields(loadmgr.PreloadFieldIDsForSchema(coll.Schema, expected.LoadFields), expected.FieldIndexID),
+		RequiredFields:           loadmgr.FieldsToMessage(loadmgr.RequiredFieldsForSchema(coll.Schema)),
 		Replicas:                 replicas,
 		UserSpecifiedReplicaMode: expected.UserSpecifiedReplicaMode,
 	}
@@ -378,7 +375,7 @@ func (s *Server) getDefaultResourceGroupsAndReplicaNumber(ctx context.Context, r
 	// so only both replica and resource groups didn't set in request, it will turn to use the configured load info
 	if replicaNumber <= 0 && len(resourceGroups) == 0 {
 		// when replica number or resource groups is not set, use pre-defined load config
-		rgs, replicas, err := s.broker.GetCollectionLoadInfo(ctx, collectionID)
+		rgs, replicas, err := s.meta.GetCollectionLoadInfo(ctx, collectionID)
 		if err != nil {
 			mlog.Warn(ctx, "failed to get pre-defined load info", mlog.Err(err))
 		} else {

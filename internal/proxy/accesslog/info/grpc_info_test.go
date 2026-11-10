@@ -186,6 +186,13 @@ func (s *GrpcAccessInfoSuite) TestCollectionName() {
 	result = Get(s.info, "$collection_name")
 	s.Equal(fmt.Sprint([]string{"coll_a", "coll_b"}), result[0])
 	s.NotEqual(Unknown, result[0])
+
+	// a batch describe by ID logs the IDs
+	s.info.req = &milvuspb.BatchDescribeCollectionRequest{
+		CollectionID: []int64{100, 200},
+	}
+	result = Get(s.info, "$collection_name")
+	s.Equal(fmt.Sprint([]int64{100, 200}), result[0])
 }
 
 func (s *GrpcAccessInfoSuite) TestSdkInfo() {

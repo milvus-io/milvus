@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
@@ -97,6 +98,93 @@ func TestQueryTaskPreExecuteSnapshotFences(t *testing.T) {
 				require.EqualValues(t, 80, task.channelsMvcc["ch0"])
 			}
 		})
+	}
+}
+
+// TestQueryShardCanceledContextKeepsShardLeaderCache: a QueryNode error
+// observed after the request's own ctx is done is a consequence of the
+// cancellation, so the shard leader cache must stay intact. The mock manager
+// has no expectation for InvalidateShardLeaderCache; a call would fail the test.
+func TestQueryShardCanceledContextKeepsShardLeaderCache(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	qn := mocks.NewMockQueryNodeClient(t)
+	qn.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *querypb.QueryRequest, opts ...grpc.CallOption) (*internalpb.RetrieveResults, error) {
+			cancel()
+			return nil, context.Canceled
+		})
+
+	task := &QueryTask{
+		shardclientMgr:     shardclient.NewMockShardClientManager(t),
+		RetrieveRequest:    &internalpb.RetrieveRequest{Base: &commonpb.MsgBase{}, ConsistencyLevel: commonpb.ConsistencyLevel_Strong},
+		resultBuf:          typeutil.NewConcurrentSet[*internalpb.RetrieveResults](),
+		actualChannelsMvcc: typeutil.NewConcurrentMap[string, uint64](),
+	}
+
+	err := task.queryShard(ctx, 1, qn, "ch-canceled")
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+// TestQueryShardTimedOutContextInvalidatesShardLeaderCache pins the boundary
+// of the test above: a deadline is not a cancellation, and the cache is
+// invalidated as before.
+func TestQueryShardTimedOutContextInvalidatesShardLeaderCache(t *testing.T) {
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(20*time.Millisecond))
+	defer cancel()
+	qn := mocks.NewMockQueryNodeClient(t)
+	qn.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *querypb.QueryRequest, opts ...grpc.CallOption) (*internalpb.RetrieveResults, error) {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		})
+	mgr := shardclient.NewMockShardClientManager(t)
+	mgr.EXPECT().InvalidateShardLeaderCache([]int64{7}).Return().Once()
+
+	task := &QueryTask{
+		shardclientMgr:     mgr,
+		RetrieveRequest:    &internalpb.RetrieveRequest{Base: &commonpb.MsgBase{}, CollectionID: 7, ConsistencyLevel: commonpb.ConsistencyLevel_Strong},
+		resultBuf:          typeutil.NewConcurrentSet[*internalpb.RetrieveResults](),
+		actualChannelsMvcc: typeutil.NewConcurrentMap[string, uint64](),
+	}
+
+	err := task.queryShard(ctx, 1, qn, "ch-timed-out")
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+// TestShardReplyErrorInvalidatesCacheUnlessCanceled pins the rule on the
+// helper that Query and Materialize share: a failed call made under a
+// canceled ctx leaves the shard leader cache alone, while one made under an
+// expired deadline, or a live ctx, invalidates it as before.
+func TestShardReplyErrorInvalidatesCacheUnlessCanceled(t *testing.T) {
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	expired, cancelExpired := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancelExpired()
+
+	for _, tc := range []struct {
+		name       string
+		ctx        context.Context
+		err        error
+		invalidate bool
+	}{
+		{"canceled", canceled, context.Canceled, false},
+		{"deadline expired", expired, context.DeadlineExceeded, true},
+		{"live ctx, node error", context.Background(), merr.WrapErrServiceUnavailable("down"), true},
+	} {
+		for _, rpc := range []string{"Query", "Materialize"} {
+			t.Run(tc.name+"/"+rpc, func(t *testing.T) {
+				mgr := shardclient.NewMockShardClientManager(t)
+				if tc.invalidate {
+					mgr.EXPECT().InvalidateShardLeaderCache([]int64{7}).Return().Once()
+				}
+				task := &QueryTask{
+					shardclientMgr:  mgr,
+					RetrieveRequest: &internalpb.RetrieveRequest{Base: &commonpb.MsgBase{}, CollectionID: 7},
+				}
+				err := task.shardReplyError(tc.ctx, mlog.With(), rpc, 1, nil, tc.err)
+				require.ErrorIs(t, err, tc.err)
+			})
+		}
 	}
 }
 

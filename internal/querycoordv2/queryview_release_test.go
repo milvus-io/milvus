@@ -8,7 +8,7 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
@@ -227,12 +227,11 @@ func TestDropLoadConfigAckWaitsAfterDesiredStateRemoval(t *testing.T) {
 
 func TestQueryViewRepeatedReleaseWaitsWithoutLoadConfig(t *testing.T) {
 	s := newReleaseTestServer(t)
-	s.broker = &meta.CoordinatorBroker{}
+	s.meta = newViewMeta(&metacache.CollectionInfo{ID: 100})
 	s.qviewsRuntime.loadConfigStore = &loadmgr.LoadConfigStore{}
 	manager := s.qviewsRuntime.shardViewRegistry.Ensure(qviews.ShardID{ReplicaID: 1, VChannel: "p_100v0"})
 	for _, patch := range []*mockey.Mocker{
 		mockey.Mock((*Server).startBroadcastWithCollectionIDLock).Return(stubBroadcaster{}, nil).Build(),
-		mockey.Mock((*meta.CoordinatorBroker).DescribeCollection).Return(&milvuspb.DescribeCollectionResponse{CollectionID: 100}, nil).Build(),
 		mockey.Mock((*loadmgr.LoadConfigStore).Contains).Return(false).Build(),
 	} {
 		t.Cleanup(func() { patch.UnPatch() })

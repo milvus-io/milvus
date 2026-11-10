@@ -6,8 +6,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -17,7 +17,7 @@ import (
 
 func TestLoadFieldHintsAfterProtocolSimplification(t *testing.T) {
 	paramtable.Init()
-	coll := &milvuspb.DescribeCollectionResponse{CollectionID: 1, Schema: &schemapb.CollectionSchema{
+	coll := &metacache.CollectionInfo{ID: 1, Schema: &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 			{FieldID: 101, DataType: schemapb.DataType_FloatVector},
@@ -64,7 +64,7 @@ func TestLoadFieldHintsAfterProtocolSimplification(t *testing.T) {
 
 func TestPlacementMessagePreservesEmptyLoadScopes(t *testing.T) {
 	msg, err := job.GenerateAlterLoadConfigMessage(t.Context(), &job.AlterLoadConfigRequest{
-		CollectionInfo: &milvuspb.DescribeCollectionResponse{CollectionID: 1, Schema: &schemapb.CollectionSchema{
+		CollectionInfo: &metacache.CollectionInfo{ID: 1, Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{{FieldID: 100}, {FieldID: 101}},
 		}},
 		// Placement updates carry existing explicit sets, even when both are empty.
