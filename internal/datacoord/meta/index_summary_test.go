@@ -17,10 +17,12 @@
 package meta
 
 import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func TestIndexSummaryReplacementAndEmptyCompletion(t *testing.T) {
