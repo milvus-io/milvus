@@ -454,7 +454,7 @@ func TestLegacyClientQueryReducesUnlimitedOrdinaryVChannelStreams(t *testing.T) 
 		&legacyResolver{vchannels: []string{shardA.VChannel, shardB.VChannel}},
 	)
 
-	request := &LegacyQueryRequest{Req: req, Schema: schema, AllowStreaming: SupportsQueryStream(req), ReduceStreamChunkBytes: 32}
+	request := &LegacyQueryRequest{Req: req, Schema: schema, AllowStreaming: true, ReduceStreamChunkBytes: 32}
 	result, err := client.Legacy().Query(t.Context(), request)
 	require.NoError(t, err)
 	require.NotNil(t, result.Stream)
@@ -516,9 +516,8 @@ func TestLegacyClientElementFilterQueryStreamingParity(t *testing.T) {
 				&legacyResolver{vchannels: []string{shardA.VChannel, shardB.VChannel}},
 			)
 			request := &internalpb.RetrieveRequest{CollectionID: 100, Limit: 4, IsIterator: iterator, SerializedExprPlan: planBytes}
-			require.True(t, SupportsQueryStream(request))
 			result, err := client.Legacy().Query(context.Background(), &LegacyQueryRequest{
-				Req: request, Schema: schema, AllowStreaming: streaming && SupportsQueryStream(request), ReduceStreamChunkBytes: 1,
+				Req: request, Schema: schema, AllowStreaming: streaming, ReduceStreamChunkBytes: 1,
 			})
 			require.NoError(t, err)
 			results := result.Results
@@ -638,7 +637,7 @@ func TestLegacyClientQueryGlobalAggregateStreams(t *testing.T) {
 			req := &internalpb.RetrieveRequest{CollectionID: 100, Limit: typeutil.Unlimited,
 				Aggregates: []*planpb.Aggregate{{Op: planpb.AggregateOp_count, FieldId: 100}}}
 			result, err := client.Legacy().Query(t.Context(), &LegacyQueryRequest{
-				Req: req, AllowStreaming: SupportsQueryStream(req), ReduceStreamChunkBytes: 1,
+				Req: req, AllowStreaming: true, ReduceStreamChunkBytes: 1,
 				Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}},
 			})
 			require.NoError(t, err)
@@ -682,7 +681,7 @@ func TestLegacyClientQueryOrderByStreams(t *testing.T) {
 		OrderByFields: []*planpb.OrderByField{{FieldId: 101, Ascending: false}},
 	}
 	result, err := client.Legacy().Query(t.Context(), &LegacyQueryRequest{
-		Req: req, AllowStreaming: SupportsQueryStream(req), ReduceStreamChunkBytes: 1,
+		Req: req, AllowStreaming: true, ReduceStreamChunkBytes: 1,
 	})
 	require.NoError(t, err)
 	require.Empty(t, result.Results)
@@ -699,50 +698,6 @@ func TestLegacyClientQueryOrderByStreams(t *testing.T) {
 	}
 	require.Equal(t, []int64{4, 3, 2, 1}, ids)
 	require.Zero(t, service.queryCallCount)
-}
-
-func TestSupportsQueryStream(t *testing.T) {
-	setupTestReplicaRouting(t)
-	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{}))
-	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{Limit: -2}))
-	require.True(t, SupportsQueryStream(&internalpb.RetrieveRequest{IsIterator: true, Limit: typeutil.Unlimited}))
-	require.True(t, SupportsQueryStream(&internalpb.RetrieveRequest{Limit: typeutil.Unlimited}))
-	require.True(t, SupportsQueryStream(&internalpb.RetrieveRequest{Limit: 1}))
-	require.True(t, SupportsQueryStream(&internalpb.RetrieveRequest{
-		Limit:         1,
-		OrderByFields: []*planpb.OrderByField{{FieldId: 101, Ascending: true}},
-	}))
-	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{
-		Limit:         typeutil.Unlimited,
-		OrderByFields: []*planpb.OrderByField{{FieldId: 101, Ascending: true}},
-	}))
-	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{
-		GroupByFieldIds: []int64{100},
-		OrderByFields:   []*planpb.OrderByField{{FieldId: 100, Ascending: true}},
-	}))
-	for _, aggregates := range [][]*planpb.Aggregate{nil, {{Op: planpb.AggregateOp_sum, FieldId: 101}}} {
-		require.True(t, SupportsQueryStream(&internalpb.RetrieveRequest{
-			Limit: 1, GroupByFieldIds: []int64{100}, Aggregates: aggregates,
-			OrderByFields: []*planpb.OrderByField{{FieldId: 100, Ascending: true}},
-		}))
-	}
-	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{
-		Limit: typeutil.Unlimited, GroupByFieldIds: []int64{100},
-		OrderByFields: []*planpb.OrderByField{{FieldId: 100, Ascending: true}},
-	}))
-	require.False(t, SupportsQueryStream(&internalpb.RetrieveRequest{
-		Limit: 1, Aggregates: []*planpb.Aggregate{{Op: planpb.AggregateOp_sum, FieldId: 101}},
-		OrderByFields: []*planpb.OrderByField{{FieldId: 101, Ascending: true}},
-	}))
-	require.True(t, SupportsQueryStream(&internalpb.RetrieveRequest{
-		GroupByFieldIds: []int64{100},
-		Aggregates: []*planpb.Aggregate{
-			{Op: planpb.AggregateOp_count, FieldId: 101},
-		},
-	}))
-	for _, op := range []planpb.AggregateOp{planpb.AggregateOp_count, planpb.AggregateOp_sum, planpb.AggregateOp_min, planpb.AggregateOp_max} {
-		require.True(t, SupportsQueryStream(&internalpb.RetrieveRequest{Aggregates: []*planpb.Aggregate{{Op: op, FieldId: 101}}}))
-	}
 }
 
 func TestLegacyClientQueryPreservesEmptyDownstreamSnapshot(t *testing.T) {

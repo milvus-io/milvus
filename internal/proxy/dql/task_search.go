@@ -1641,7 +1641,7 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 		if result.SubStreams != nil {
 			reducedSubResults, reducedSubMetrics, recvErr = t.consumeHybridResultStreams(result.SubStreams, collectMetadata)
 		} else {
-			reducedResult, reducedMetricType, recvErr = t.consumeResultStream(result.Stream, searchRequest, metricType, collectMetadata)
+			reducedResult, reducedMetricType, recvErr = t.consumeSearchResultStream(result.Stream, searchRequest, metricType, collectMetadata)
 			closeErr = result.Stream.Close()
 		}
 		retryable := recvErr != nil && viewerror.AsViewError(recvErr).IsRetryable()
@@ -1678,36 +1678,50 @@ func (t *SearchTask) executeByQueryView(ctx context.Context) error {
 func (t *SearchTask) supportsStreamingReduce() bool {
 	req := t.SearchRequest
 	if req == nil {
+		// A missing request cannot be streamed.
 		return false
 	}
 	if req.GetIsAdvanced() {
-		if _, legacyFusion := t.rerankMeta.(*legacyRerankMeta); !legacyFusion ||
-			req.GetIsIterator() || t.aggCtx != nil ||
+		switch t.rerankMeta.(type) {
+		case *legacyRerankMeta, *functionChainRerankMeta, *funcScoreRerankMeta:
+		default:
+			// Hybrid streaming requires a prepared, supported reranker.
+			return false
+		}
+		// Hybrid iterators are not supported here; aggregation and ORDER BY are rejected by validation.
+		// An advanced request must also have at least one sub-search.
+		if req.GetIsIterator() || t.aggCtx != nil ||
 			len(t.orderByFields) > 0 || len(req.GetSubReqs()) == 0 {
 			return false
 		}
 		for _, sub := range req.GetSubReqs() {
 			if sub == nil {
+				// A missing sub-search cannot be planned or streamed.
 				return false
 			}
 		}
 	} else {
 		if len(req.GetSubReqs()) > 0 {
+			// Only advanced requests may contain sub-searches.
 			return false
 		}
 		if t.aggCtx != nil {
+			// Search aggregation streaming requires grouping and does not support iterators.
 			return len(req.GetGroupByFieldIds()) > 0 && !req.GetIsIterator()
 		}
 		if req.GetGroupByFieldId() > 0 || len(req.GetGroupByFieldIds()) > 0 {
+			// Grouped Search iterators are not supported by streaming reduction.
 			return !req.GetIsIterator()
 		}
 
 		if hasFunctionRerank(t.request) {
+			// Function reranking is only enabled for non-iterator DEFAULT Search without ORDER BY.
 			if req.GetIsIterator() || len(t.orderByFields) > 0 ||
 				req.GetSearchType() != internalpb.SearchType_DEFAULT {
 				return false
 			}
 			if t.request.GetFunctionScore() != nil && t.rerankMeta == nil {
+				// Function-score reranking needs prepared Proxy metadata.
 				return false
 			}
 			for _, chain := range t.request.GetFunctionChains() {
@@ -1718,9 +1732,11 @@ func (t *SearchTask) supportsStreamingReduce() bool {
 				case schemapb.FunctionChainStage_FunctionChainStageL2Rerank:
 					// Only Proxy-side reranking needs rerankMeta.
 					if t.rerankMeta == nil {
+						// L2 reranking needs prepared Proxy metadata.
 						return false
 					}
 				default:
+					// Other function-chain stages are not supported by this Search path.
 					return false
 				}
 			}
@@ -1743,18 +1759,28 @@ func (t *SearchTask) supportsStreamingReduce() bool {
 			searchType == internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER {
 			continue
 		}
-		if searchType != internalpb.SearchType_DEFAULT || index >= len(t.queryInfos) || hasFunctionRerank(t.request) {
+		if searchType != internalpb.SearchType_DEFAULT || index >= len(t.queryInfos) {
+			// Unknown Search types or missing query information cannot be classified safely.
 			return false
 		}
+		functionRerank := req.GetIsAdvanced() && hasFunctionRerank(t.request)
 		if req.GetIsAdvanced() && index < len(t.request.GetSubReqs()) &&
 			len(t.request.GetSubReqs()[index].GetFunctionChains()) > 0 {
-			return false
+			for _, chain := range t.request.GetSubReqs()[index].GetFunctionChains() {
+				if chain == nil || (chain.GetStage() != schemapb.FunctionChainStage_FunctionChainStageL0Rerank &&
+					chain.GetStage() != schemapb.FunctionChainStage_FunctionChainStageL1Rerank) {
+					// Hybrid sub-search chains support L0/L1 only.
+					return false
+				}
+			}
+			functionRerank = true
 		}
 		info := t.queryInfos[index]
 		groupedHybrid := req.GetIsAdvanced() && (info.GetGroupByFieldId() > 0 || len(info.GetGroupByFieldIds()) > 0)
-		if !groupedHybrid && !gjson.Get(info.GetSearchParams(), radiusKey).Exists() &&
+		if !functionRerank && !groupedHybrid && !gjson.Get(info.GetSearchParams(), radiusKey).Exists() &&
 			info.GetHints() != iterativeFilterKey &&
 			gjson.Get(info.GetSearchParams(), common.HintsKey).String() != iterativeFilterKey {
+			// Other DEFAULT Search shapes are not qualified for streaming reduction.
 			return false
 		}
 	}
@@ -1910,7 +1936,7 @@ func appendFinalSearchChunk(
 	return appendedSize, nil
 }
 
-func (t *SearchTask) consumeResultStream(
+func (t *SearchTask) consumeSearchResultStream(
 	stream searchreducestream.ReduceStream,
 	request *internalpb.SearchRequest,
 	metricType string,
@@ -2042,7 +2068,7 @@ func (t *SearchTask) consumeHybridResultStreams(
 	for index, stream := range streams {
 		group.Go(func() error {
 			var recvErr error
-			results[index], metrics[index], recvErr = t.consumeResultStream(stream, requests[index], requests[index].GetMetricType(), func(chunk *internalpb.SearchResults) {
+			results[index], metrics[index], recvErr = t.consumeSearchResultStream(stream, requests[index], requests[index].GetMetricType(), func(chunk *internalpb.SearchResults) {
 				metadataMu.Lock()
 				defer metadataMu.Unlock()
 				collectMetadata(chunk)

@@ -51,6 +51,40 @@ type fakeLegacyViewQueryClient struct {
 	legacy queryclient.LegacyClient
 }
 
+func TestQuerySupportsStreamingReduce(t *testing.T) {
+	order := []*planpb.OrderByField{{FieldId: 101, Ascending: true}}
+	count := []*planpb.Aggregate{{Op: planpb.AggregateOp_count, FieldId: 101}}
+	for _, tc := range []struct {
+		name string
+		req  *internalpb.RetrieveRequest
+		want bool
+	}{
+		{name: "nil"},
+		{name: "legacy count", req: &internalpb.RetrieveRequest{IsCount: true}},
+		{name: "missing limit", req: &internalpb.RetrieveRequest{}},
+		{name: "invalid limit", req: &internalpb.RetrieveRequest{Limit: -2}},
+		{name: "unlimited iterator", req: &internalpb.RetrieveRequest{IsIterator: true, Limit: typeutil.Unlimited}, want: true},
+		{name: "unlimited", req: &internalpb.RetrieveRequest{Limit: typeutil.Unlimited}, want: true},
+		{name: "limited", req: &internalpb.RetrieveRequest{Limit: 1}, want: true},
+		{name: "ordered", req: &internalpb.RetrieveRequest{Limit: 1, OrderByFields: order}, want: true},
+		{name: "unlimited ordered", req: &internalpb.RetrieveRequest{Limit: typeutil.Unlimited, OrderByFields: order}},
+		{name: "grouped ordered missing limit", req: &internalpb.RetrieveRequest{GroupByFieldIds: []int64{101}, OrderByFields: order}},
+		{name: "grouped ordered", req: &internalpb.RetrieveRequest{Limit: 1, GroupByFieldIds: []int64{101}, OrderByFields: order}, want: true},
+		{name: "grouped aggregate ordered", req: &internalpb.RetrieveRequest{Limit: 1, GroupByFieldIds: []int64{101}, Aggregates: count, OrderByFields: order}, want: true},
+		{name: "grouped ordered unlimited", req: &internalpb.RetrieveRequest{Limit: typeutil.Unlimited, GroupByFieldIds: []int64{101}, OrderByFields: order}},
+		{name: "global aggregate ordered", req: &internalpb.RetrieveRequest{Limit: 1, Aggregates: count, OrderByFields: order}},
+		{name: "grouped aggregate", req: &internalpb.RetrieveRequest{GroupByFieldIds: []int64{101}, Aggregates: count}, want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, (&QueryTask{RetrieveRequest: tc.req}).supportsStreamingReduce())
+		})
+	}
+	for _, op := range []planpb.AggregateOp{planpb.AggregateOp_count, planpb.AggregateOp_sum, planpb.AggregateOp_min, planpb.AggregateOp_max} {
+		task := &QueryTask{RetrieveRequest: &internalpb.RetrieveRequest{Aggregates: []*planpb.Aggregate{{Op: op, FieldId: 101}}}}
+		require.True(t, task.supportsStreamingReduce())
+	}
+}
+
 func (*fakeLegacyViewQueryClient) Close() {}
 
 func (c *fakeLegacyViewQueryClient) Legacy() queryclient.LegacyClient {

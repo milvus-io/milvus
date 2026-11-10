@@ -49,18 +49,19 @@ type ReduceStream interface {
 	Interrupt() (*internalpb.RetrieveResults, error)
 }
 
-type retrieveUnit struct {
+// queryReduceUnit is one reducible Query row, retaining its fields and timestamp for ordering and deduplication.
+type queryReduceUnit struct {
 	result             *internalpb.RetrieveResults
 	rowIndex           int64
 	byteSize           int
 	fieldIndexComputer *typeutil.FieldDataIdxComputer
 }
 
-func (u retrieveUnit) pk() any {
+func (u queryReduceUnit) pk() any {
 	return typeutil.GetPK(u.result.GetIds(), u.rowIndex)
 }
 
-func (u retrieveUnit) timestamp() int64 {
+func (u queryReduceUnit) timestamp() int64 {
 	timestamps := queryutil.ExtractTimestamps(u.result)
 	if u.rowIndex >= int64(len(timestamps)) {
 		return 0
@@ -68,7 +69,7 @@ func (u retrieveUnit) timestamp() int64 {
 	return timestamps[u.rowIndex]
 }
 
-func (u retrieveUnit) fieldData(fieldID int64) (*schemapb.FieldData, error) {
+func (u queryReduceUnit) fieldData(fieldID int64) (*schemapb.FieldData, error) {
 	for _, field := range u.result.GetFieldsData() {
 		if field.GetFieldId() == fieldID {
 			return field, nil
@@ -77,7 +78,7 @@ func (u retrieveUnit) fieldData(fieldID int64) (*schemapb.FieldData, error) {
 	return nil, merr.WrapErrServiceInternalMsg("Query ORDER BY field %d is missing from a child Chunk", fieldID)
 }
 
-func compareRetrieveUnits(left, right retrieveUnit, orderByFields []*planpb.OrderByField) (int, error) {
+func compareRetrieveUnits(left, right queryReduceUnit, orderByFields []*planpb.OrderByField) (int, error) {
 	for _, orderByField := range orderByFields {
 		leftField, err := left.fieldData(orderByField.GetFieldId())
 		if err != nil {
@@ -109,7 +110,7 @@ func compareRetrieveUnits(left, right retrieveUnit, orderByFields []*planpb.Orde
 }
 
 // reducibleByteSize counts the encoded reducible fields of one Unit.
-func (u retrieveUnit) reducibleByteSize() (int, error) {
+func (u queryReduceUnit) reducibleByteSize() (int, error) {
 	if u.rowIndex < 0 || u.rowIndex >= int64(queryutil.GetRowCount(u.result)) {
 		return 0, merr.WrapErrServiceInternalMsg("Query Unit row index %d is out of range", u.rowIndex)
 	}
@@ -165,11 +166,11 @@ func (b *orderedChildBuffer) hasUnit() bool {
 	return b.chunk != nil && int(b.cursor) < typeutil.GetSizeOfIDs(b.chunk.GetIds())
 }
 
-func (b *orderedChildBuffer) front() retrieveUnit {
-	return retrieveUnit{result: b.chunk, rowIndex: b.cursor, fieldIndexComputer: b.fieldIndexComputer}
+func (b *orderedChildBuffer) front() queryReduceUnit {
+	return queryReduceUnit{result: b.chunk, rowIndex: b.cursor, fieldIndexComputer: b.fieldIndexComputer}
 }
 
-func (b *orderedChildBuffer) pop() retrieveUnit {
+func (b *orderedChildBuffer) pop() queryReduceUnit {
 	unit := b.front()
 	b.cursor++
 	if !b.hasUnit() {
@@ -213,7 +214,7 @@ type OrderedReduceStream struct {
 	hasLastPK      bool                          // Whether lastPK has been initialized.
 	lastPK         any                           // Last selected PK, used for ordering and duplicate checks.
 	deduplicatePKs bool                          // Per-vchannel Query: resolve duplicate PK versions by timestamp.
-	outputBuffer   []retrieveUnit                // Holds an oversize Unit deferred to the next Chunk.
+	outputBuffer   []queryReduceUnit             // Holds an oversize Unit deferred to the next Chunk.
 	seenPKs        map[any]struct{}              // Query ORDER BY: detect duplicate PKs across vchannels.
 	orderByLimit   int64                         // Per-vchannel Query ORDER BY: candidate limit after deduplication.
 	outputChunks   []*internalpb.RetrieveResults // Query ORDER BY: sorted Chunks prepared after draining workers.
@@ -323,65 +324,14 @@ func (s *OrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 			break
 		}
 
-		winner := readyBuffers[0]
-		for _, candidate := range readyBuffers[1:] {
-			comparison, err := compareRetrieveUnits(candidate.front(), winner.front(), s.orderByFields)
-			if err != nil {
-				return nil, s.fail(err)
-			}
-			if comparison < 0 {
-				winner = candidate
-			}
-		}
-
-		selected := winner.front()
-		// Resolve the trailing PK even after the byte threshold is reached.
-		// Returning its Chunk first would make a newer row in the next input Chunk too late.
-		if s.deduplicatePKs && len(outputBuffer) > 0 && queryutil.ComparePK(selected.pk(), s.lastPK) == 0 {
-			unit := winner.pop()
-			last := len(outputBuffer) - 1
-			if timestamp := unit.timestamp(); timestamp != 0 && timestamp > outputBuffer[last].timestamp() {
-				unit.byteSize, err = unit.reducibleByteSize()
-				if err != nil {
-					return nil, s.fail(err)
-				}
-				outputBytes += unit.byteSize - outputBuffer[last].byteSize
-				outputBuffer[last] = unit
-			}
-			continue
-		}
-		if outputBytes >= s.chunkBytes {
-			break
-		}
-		unitBytes, err := selected.reducibleByteSize()
+		var chunkReady bool
+		outputBuffer, outputBytes, chunkReady, err = s.produceNextUnit(readyBuffers, outputBuffer, outputBytes)
 		if err != nil {
 			return nil, s.fail(err)
 		}
-		if unitBytes > s.chunkBytes && outputBytes > 0 {
+		if chunkReady {
 			break
 		}
-
-		unit := winner.pop()
-		unit.byteSize = unitBytes
-		if s.seenPKs != nil {
-			if _, exists := s.seenPKs[unit.pk()]; exists {
-				return nil, s.fail(merr.WrapErrDataIntegrityMsg("duplicate PK %v found across Query child streams", unit.pk()))
-			}
-			s.seenPKs[unit.pk()] = struct{}{}
-		}
-		if s.hasLastPK {
-			comparison := queryutil.ComparePK(unit.pk(), s.lastPK)
-			if comparison == 0 {
-				return nil, s.fail(merr.WrapErrDataIntegrityMsg("duplicate PK %v found across Query child streams", unit.pk()))
-			}
-			if len(s.orderByFields) == 0 && comparison < 0 {
-				return nil, s.fail(merr.WrapErrServiceInternalMsg("Query child streams are not ordered by primary key"))
-			}
-		}
-		s.lastPK = unit.pk()
-		s.hasLastPK = true
-		outputBuffer = append(outputBuffer, unit)
-		outputBytes += unitBytes
 	}
 
 	if len(outputBuffer) == 0 {
@@ -404,7 +354,7 @@ func (s *OrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 	if s.deduplicatePKs && last > 0 && outputBuffer[last].byteSize > s.chunkBytes {
 		// A newer version can turn the trailing Unit into an oversized Unit.
 		// Keep it for the next Recv so it is still emitted alone.
-		s.outputBuffer = []retrieveUnit{outputBuffer[last]}
+		s.outputBuffer = []queryReduceUnit{outputBuffer[last]}
 		outputBuffer = outputBuffer[:last]
 	}
 	chunk, err := buildRetrieveChunk(outputBuffer)
@@ -413,6 +363,70 @@ func (s *OrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 	}
 	s.attachMetadata(chunk)
 	return chunk, nil
+}
+
+// produceNextUnit appends a row or replaces the trailing row with a newer version.
+// It returns the updated buffer, its byte size, and whether the Chunk is ready.
+func (s *OrderedReduceStream) produceNextUnit(readyBuffers []*orderedChildBuffer, outputBuffer []queryReduceUnit, outputBytes int) ([]queryReduceUnit, int, bool, error) {
+	winner := readyBuffers[0]
+	for _, candidate := range readyBuffers[1:] {
+		comparison, err := compareRetrieveUnits(candidate.front(), winner.front(), s.orderByFields)
+		if err != nil {
+			return outputBuffer, outputBytes, false, err
+		}
+		if comparison < 0 {
+			winner = candidate
+		}
+	}
+
+	selected := winner.front()
+	// Resolve the trailing PK even after the byte threshold is reached.
+	// Returning its Chunk first would make a newer row in the next input Chunk too late.
+	if s.deduplicatePKs && len(outputBuffer) > 0 && queryutil.ComparePK(selected.pk(), s.lastPK) == 0 {
+		unit := winner.pop()
+		last := len(outputBuffer) - 1
+		if timestamp := unit.timestamp(); timestamp != 0 && timestamp > outputBuffer[last].timestamp() {
+			var err error
+			unit.byteSize, err = unit.reducibleByteSize()
+			if err != nil {
+				return outputBuffer, outputBytes, false, err
+			}
+			outputBytes += unit.byteSize - outputBuffer[last].byteSize
+			outputBuffer[last] = unit
+		}
+		return outputBuffer, outputBytes, false, nil
+	}
+	if outputBytes >= s.chunkBytes {
+		return outputBuffer, outputBytes, true, nil
+	}
+	unitBytes, err := selected.reducibleByteSize()
+	if err != nil {
+		return outputBuffer, outputBytes, false, err
+	}
+	if unitBytes > s.chunkBytes && outputBytes > 0 {
+		return outputBuffer, outputBytes, true, nil
+	}
+
+	unit := winner.pop()
+	unit.byteSize = unitBytes
+	if s.seenPKs != nil {
+		if _, exists := s.seenPKs[unit.pk()]; exists {
+			return outputBuffer, outputBytes, false, merr.WrapErrDataIntegrityMsg("duplicate PK %v found across Query child streams", unit.pk())
+		}
+		s.seenPKs[unit.pk()] = struct{}{}
+	}
+	if s.hasLastPK {
+		comparison := queryutil.ComparePK(unit.pk(), s.lastPK)
+		if comparison == 0 {
+			return outputBuffer, outputBytes, false, merr.WrapErrDataIntegrityMsg("duplicate PK %v found across Query child streams", unit.pk())
+		}
+		if len(s.orderByFields) == 0 && comparison < 0 {
+			return outputBuffer, outputBytes, false, merr.WrapErrServiceInternalMsg("Query child streams are not ordered by primary key")
+		}
+	}
+	s.lastPK = unit.pk()
+	s.hasLastPK = true
+	return append(outputBuffer, unit), outputBytes + unitBytes, false, nil
 }
 
 func (s *OrderedReduceStream) getReadyBuffers() ([]*orderedChildBuffer, error) {
@@ -520,7 +534,7 @@ func (s *OrderedReduceStream) attachMetadata(chunk *internalpb.RetrieveResults) 
 	s.metadata = nil
 }
 
-func buildRetrieveChunk(units []retrieveUnit) (*internalpb.RetrieveResults, error) {
+func buildRetrieveChunk(units []queryReduceUnit) (*internalpb.RetrieveResults, error) {
 	results := make([]*internalpb.RetrieveResults, len(units))
 	rows := make([]queryutil.RowRef, len(units))
 	for i, unit := range units {
@@ -783,11 +797,11 @@ func SplitRetrieveResult(result *internalpb.RetrieveResults, chunkBytes int) ([]
 	}
 
 	chunks := make([]*internalpb.RetrieveResults, 0)
-	units := make([]retrieveUnit, 0)
+	units := make([]queryReduceUnit, 0)
 	accumulatedBytes := 0
 	fieldIndexComputer := typeutil.NewFieldDataIdxComputer(result.GetFieldsData())
 	for row := 0; row < rowCount; row++ {
-		unit := retrieveUnit{result: result, rowIndex: int64(row), fieldIndexComputer: fieldIndexComputer}
+		unit := queryReduceUnit{result: result, rowIndex: int64(row), fieldIndexComputer: fieldIndexComputer}
 		unitBytes, err := unit.reducibleByteSize()
 		if err != nil {
 			return nil, err

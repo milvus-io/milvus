@@ -73,7 +73,12 @@ func TestRangeAndIterativeFilterStreamingEligibility(t *testing.T) {
 				if test.subChain && hybrid {
 					task.request.SubReqs[1].FunctionChains = []*schemapb.FunctionChain{{}}
 				}
-				require.Equal(t, test.want, task.supportsStreamingReduce())
+				want := test.want
+				if hybrid && test.function {
+					task.rerankMeta = &funcScoreRerankMeta{}
+					want = true
+				}
+				require.Equal(t, want, task.supportsStreamingReduce())
 				require.Equal(t, test.searchType, task.GetSearchType())
 			})
 		}

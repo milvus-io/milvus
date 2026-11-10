@@ -55,9 +55,11 @@ func TestHybridGroupByWithoutRequeryAcrossShards(t *testing.T) {
 		allNullTemplate bool
 		legacyTemplate  bool
 		weighted        bool
+		workerChain     bool
 	}{
 		{name: "no output fields", policy: "OutputFields"},
 		{name: "weighted fusion", policy: "OutputFields", weighted: true},
+		{name: "L1 sub-search", policy: "OutputFields", workerChain: true},
 		{name: "namespace output vector", policy: "OutputVector", namespace: true},
 		{name: "namespace always", policy: "Always", namespace: true},
 		{name: "all-null vector template", policy: "Always", namespace: true, allNullTemplate: true},
@@ -129,6 +131,9 @@ func TestHybridGroupByWithoutRequeryAcrossShards(t *testing.T) {
 					},
 				})
 			}
+			if tc.workerChain {
+				task.request.SubReqs[0].FunctionChains = []*schemapb.FunctionChain{l1LimitFunctionChain(2)}
+			}
 			require.NoError(t, task.initAdvancedSearchRequest(ctx))
 			require.False(t, task.needRequery)
 			for _, sub := range task.SubReqs {
@@ -137,7 +142,11 @@ func TestHybridGroupByWithoutRequeryAcrossShards(t *testing.T) {
 			require.True(t, task.supportsStreamingReduce(), "initialized Hybrid Group By must use the streaming path")
 			task.request.SubReqs[0].FunctionChains = []*schemapb.FunctionChain{{}}
 			require.False(t, task.supportsStreamingReduce(), "Hybrid sub-search function chains remain Batch-only")
-			task.request.SubReqs[0].FunctionChains = nil
+			if tc.workerChain {
+				task.request.SubReqs[0].FunctionChains = []*schemapb.FunctionChain{l1LimitFunctionChain(2)}
+			} else {
+				task.request.SubReqs[0].FunctionChains = nil
+			}
 			legacy := &fakeLegacyQueryClient{searchResult: &queryclient.LegacySearchResult{}}
 			task.viewQueryClient = &fakeLegacyViewQueryClient{legacy: legacy}
 			streamKey := paramtable.Get().ProxyCfg.EnableReduceStream.Key

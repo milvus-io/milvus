@@ -128,10 +128,10 @@ func TestSearchUnitByteSizeMatchesChunk(t *testing.T) {
 			result.ResultData.Ids = &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"", "pk"}}}}
 		}
 		for row := int64(0); row < 2; row++ {
-			unit := orderedUnit{data: result.ResultData, rowIndex: row}
+			unit := searchReduceUnit{data: result.ResultData, rowIndex: row}
 			got, err := unit.reducibleByteSize()
 			require.NoError(t, err)
-			chunk, err := buildSearchChunk([]orderedUnit{unit}, 1, 2, "", false, false)
+			chunk, err := buildSearchChunk([]searchReduceUnit{unit}, 1, 2, "", false, false)
 			require.NoError(t, err)
 			data := chunk.GetResultData()
 			want := proto.Size(&schemapb.SearchResultData{FieldsData: data.FieldsData, Scores: data.Scores, Ids: data.Ids, ElementIndices: data.ElementIndices, GroupByFieldValue: data.GroupByFieldValue, GroupByFieldValues: data.GroupByFieldValues})
@@ -168,7 +168,7 @@ func TestSearchUnitByteSizeCompound(t *testing.T) {
 		for _, unit := range buffer.units {
 			got, err := unit.reducibleByteSize()
 			require.NoError(t, err)
-			chunk, err := buildSearchChunk([]orderedUnit{unit}, 2, 2, "", false, false)
+			chunk, err := buildSearchChunk([]searchReduceUnit{unit}, 2, 2, "", false, false)
 			require.NoError(t, err)
 			row := chunk.GetResultData()
 			want := proto.Size(&schemapb.SearchResultData{FieldsData: row.FieldsData, Ids: row.Ids, Scores: row.Scores, ElementIndices: row.ElementIndices, GroupByFieldValue: row.GroupByFieldValue, GroupByFieldValues: row.GroupByFieldValues})
@@ -208,7 +208,7 @@ func BenchmarkSearchUnitByteSize(b *testing.B) {
 					}},
 				}}}})
 		}
-		unit := orderedUnit{data: data, fieldIndexComputer: typeutil.NewFieldDataIdxComputer(data.FieldsData)}
+		unit := searchReduceUnit{data: data, fieldIndexComputer: typeutil.NewFieldDataIdxComputer(data.FieldsData)}
 		for _, mode := range []string{"direct", "materialized"} {
 			b.Run(shape+"/"+mode, func(b *testing.B) {
 				b.ReportAllocs()
@@ -218,7 +218,7 @@ func BenchmarkSearchUnitByteSize(b *testing.B) {
 							b.Fatal(err)
 						}
 					} else {
-						chunk, err := buildSearchChunk([]orderedUnit{unit}, 1, 1, "", false, false)
+						chunk, err := buildSearchChunk([]searchReduceUnit{unit}, 1, 1, "", false, false)
 						if err != nil {
 							b.Fatal(err)
 						}
@@ -499,7 +499,7 @@ func TestOrderedReduceStreamRetainsOneChunkPerChild(t *testing.T) {
 
 	outputBuffer := final.allocBuffer()
 	for range 2 {
-		unit, chunkReady, err := final.produceNextUnits(readyBuffers, outputBuffer.byteSize)
+		unit, chunkReady, err := final.produceNextUnit(readyBuffers, outputBuffer.byteSize)
 		require.NoError(t, err)
 		require.False(t, chunkReady)
 		require.NotNil(t, unit)

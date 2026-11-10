@@ -50,7 +50,7 @@ func (s *OrderedReduceStream) recvOrderBy() (*internalpb.RetrieveResults, error)
 
 func (s *OrderedReduceStream) prepareOrderBy() error {
 	positions := make(map[any]int)
-	var units []retrieveUnit
+	var units []queryReduceUnit
 	var rowSizes []int64
 	var outputSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
@@ -109,7 +109,7 @@ func (s *OrderedReduceStream) prepareOrderBy() error {
 	if len(units) > 0 {
 		fields := make([]*orderby.OrderByField, len(s.orderByFields))
 		for i, field := range s.orderByFields {
-			data, err := (retrieveUnit{result: result}).fieldData(field.GetFieldId())
+			data, err := (queryReduceUnit{result: result}).fieldData(field.GetFieldId())
 			if err != nil {
 				return err
 			}

@@ -17,7 +17,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // Client exposes QueryView query client domains.
@@ -289,23 +288,6 @@ func (c *legacyClient) Query(ctx context.Context, req *LegacyQueryRequest) (resu
 		Results: results,
 		Plans:   shardPlans,
 	}, nil
-}
-
-func SupportsQueryStream(req *internalpb.RetrieveRequest) bool {
-	if req == nil || req.GetIsCount() {
-		return false
-	}
-	if len(req.GetOrderByFields()) > 0 {
-		// Plain ORDER BY drains and resolves worker versions before sorting.
-		// Group By + ORDER BY merges all groups before Proxy sorts them. Shared Query validation
-		// requires an explicit limit for ORDER BY in either reduction mode.
-		return req.GetLimit() > 0 && (len(req.GetGroupByFieldIds()) > 0 || len(req.GetAggregates()) == 0)
-	}
-	if len(req.GetGroupByFieldIds()) > 0 || len(req.GetAggregates()) > 0 {
-		return true
-	}
-	validLimit := req.GetLimit() > 0 || req.GetLimit() == typeutil.Unlimited
-	return validLimit
 }
 
 func (c *legacyClient) queryStream(ctx context.Context, req *LegacyQueryRequest, chunkBytes int) (*LegacyQueryResult, error) {
