@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -1418,6 +1419,100 @@ func TestSnapshotPChannelEnd(t *testing.T) {
 
 	_, err = snapshotReadEnd(boundOption(channelEnd), jobEnd, "dml_9_4600v0")
 	assert.ErrorContains(t, err, "no end bound for source channel")
+}
+
+// The per-PChannel bound has to hold at the reader glue, not only inside
+// snapshotReadEnd: one fixture, one row, and the same options decide whether
+// that row survives NewReader. A bound above the row keeps it, a bound below
+// the row cuts it, and a job without bounds is unaffected.
+func TestImportNewReader_SnapshotPChannelEnd(t *testing.T) {
+	type boundedRecordReader struct{ storage.RecordReader }
+	paramtable.Init()
+	fieldIDsPatch := mockey.Mock(packed.GetManifestFieldIDs).
+		Return(map[int64]struct{}{common.RowIDField: {}, common.TimeStampField: {}, 100: {}}, nil).Build()
+	defer fieldIDsPatch.UnPatch()
+	manifest := packed.MarshalManifestPath("snapshot/files/segment/10", 7)
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+	}}
+	rowTs := tsoutil.ComposeTSByTime(time.Now())
+	beforeRow := tsoutil.ComposeTSByTime(time.Now().Add(-time.Second))
+	afterRow := tsoutil.ComposeTSByTime(time.Now().Add(time.Second))
+	base := Options{{Key: BackupFlag, Value: "true"}, {Key: SourceType, Value: SourceTypeSnapshot}}
+	bound := func(ts uint64) Options {
+		return append(append(Options{}, base...),
+			&commonpb.KeyValuePair{Key: SnapshotPChannelEndTs, Value: fmt.Sprintf(`{"dml_0":"%d"}`, ts)})
+	}
+
+	owner := &boundedRecordReader{}
+	read := false
+	nextPatch := mockey.Mock((*boundedRecordReader).Next).To(func(_ *boundedRecordReader) (storage.Record, error) {
+		if read {
+			return nil, io.EOF
+		}
+		read = true
+		// The reader owns the returned record and releases it, so every scan
+		// gets a fresh one; the timestamp column is what the bound filters on.
+		builder := array.NewRecordBuilder(memory.DefaultAllocator, arrow.NewSchema([]arrow.Field{
+			{Name: "row_id", Type: arrow.PrimitiveTypes.Int64},
+			{Name: "ts", Type: arrow.PrimitiveTypes.Int64},
+			{Name: "pk", Type: arrow.PrimitiveTypes.Int64},
+		}, nil))
+		builder.Field(0).(*array.Int64Builder).Append(1)
+		builder.Field(1).(*array.Int64Builder).Append(int64(rowTs))
+		builder.Field(2).(*array.Int64Builder).Append(1)
+		record := builder.NewRecord()
+		builder.Release()
+		return storage.NewSimpleArrowRecord(record, map[storage.FieldID]int{
+			common.RowIDField: 0, common.TimeStampField: 1, 100: 2,
+		}), nil
+	}).Build()
+	defer nextPatch.UnPatch()
+	closePatch := mockey.Mock((*boundedRecordReader).Close).Return(nil).Build()
+	defer closePatch.UnPatch()
+	manifestPatch := mockey.Mock(storage.NewManifestRecordReader).Return(owner, nil).Build()
+	defer manifestPatch.UnPatch()
+	fragmentsPatch := mockey.Mock(packed.ReadFragmentsFromManifest).Return([]packed.Fragment(nil), nil).Build()
+	defer fragmentsPatch.UnPatch()
+	lobPatch := mockey.Mock(packed.GetManifestLobFiles).Return([]packed.LobFileInfo(nil), nil).Build()
+	defer lobPatch.UnPatch()
+	deltaPatch := mockey.Mock(packed.GetDeltaLogPathsFromManifest).Return([]string(nil), nil).Build()
+	defer deltaPatch.UnPatch()
+
+	for _, c := range []struct {
+		name     string
+		version  uint32
+		options  Options
+		wantRows int
+		wantEOF  bool
+	}{
+		{name: "no_bound", version: 1, options: base, wantRows: 1},
+		{name: "bound_above_row", version: SnapshotBoundedVersionOffset + 1, options: bound(afterRow), wantRows: 1},
+		{name: "bound_below_row", version: SnapshotBoundedVersionOffset + 1, options: bound(beforeRow), wantEOF: true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			read = false
+			// Only a bounded descriptor may name its source scope; the legacy
+			// 1-4 contract rejects it.
+			source := &internalpb.SnapshotImportSource{Version: c.version, ManifestPath: manifest}
+			if c.version > SnapshotBoundedVersionOffset {
+				source.SourceChannel = "dml_0_4600v0"
+				source.SourcePartitionId = 10
+			}
+			file := &internalpb.ImportFile{SnapshotSource: source}
+			r, err := NewReader(context.Background(), nil, schema, file, c.options, 1024, &indexpb.StorageConfig{}, 1024)
+			require.NoError(t, err)
+			defer r.Close()
+			data, err := r.Read()
+			if c.wantEOF {
+				require.ErrorIs(t, err, io.EOF)
+				require.Nil(t, data)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, c.wantRows, data.GetRowNum())
+		})
+	}
 }
 
 // The data reader only implements the 1-4 contract, so the scope bit leaves the
