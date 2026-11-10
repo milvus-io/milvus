@@ -4119,6 +4119,8 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 			case *schemapb.IDs_StrId:
 				stringPks := ids.GetStrId().GetData()
 				rowsNum = int64(len(stringPks))
+			case nil:
+				// An empty search result can carry IDs with no IdField set.
 			default:
 				return nil, merr.WrapErrParameterInvalidMsg("the type of primary key(id) is not supported, use other sdk please")
 			}
