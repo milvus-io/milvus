@@ -21,6 +21,8 @@
 
 #include "cachinglayer/CacheSlot.h"
 #include "folly/coro/BlockingWait.h"
+#include "folly/coro/Baton.h"
+#include "folly/executors/ManualExecutor.h"
 #include "storage/EntryStreamUtils.h"
 
 #include "index/SingleCellIndexStorageTranslator.h"
@@ -28,6 +30,7 @@
 #include "index/scalar/marisa/MarisaIndexReader.h"
 #include "index/scalar/json/JsonPathIndexReader.h"
 #include "index/test_utils/ScalarReaderFactory.h"
+#include "index/test_utils/IndexCacheTestUtils.h"
 
 namespace milvus::index::test {
 namespace {
@@ -86,6 +89,67 @@ TEST(SingleCellIndexStorageTranslatorTest, BatchEstimatePreservesSharedBudget) {
     EXPECT_EQ(empty.resident, cachinglayer::ResourceUsage{});
     EXPECT_EQ(empty.private_overhead, cachinglayer::ResourceUsage{});
     EXPECT_EQ(empty.shared_overhead, cachinglayer::ResourceUsage{});
+}
+
+TEST(SingleCellIndexStorageTranslatorTest, ReturnedCellsOwnStorage) {
+    for (bool use_async : {false, true}) {
+        SCOPED_TRACE(use_async);
+        std::weak_ptr<const marisa::Trie> lifetime;
+        SingleCellIndexStorageTranslator<MarisaIndexStorage> translator(
+            TestIndexCacheConfig(),
+            use_async,
+            [&](OpContext*)
+                -> folly::coro::Task<std::unique_ptr<MarisaIndexStorage>> {
+                auto storage = MakeStorage();
+                lifetime = storage->trie;
+                co_return storage;
+            });
+        auto cells =
+            folly::coro::blockingWait(translator.get_cells_async(nullptr, {0}));
+        ASSERT_EQ(cells.size(), 1);
+        const bool alive = !lifetime.expired();
+        if (!alive) {
+            // Avoid a second delete when detecting premature destruction.
+            cells.front().second.release();
+        }
+        ASSERT_TRUE(alive);
+        cells.clear();
+        EXPECT_TRUE(lifetime.expired());
+    }
+}
+
+TEST(SingleCellIndexStorageTranslatorTest, AsyncLoadSuspendsAndRetainsContext) {
+    folly::coro::Baton resume;
+    OpContext parent;
+    auto config = TestIndexCacheConfig();
+    SingleCellIndexStorageTranslator<MarisaIndexStorage> translator(
+        config,
+        false,
+        [&](OpContext* context)
+            -> folly::coro::Task<std::unique_ptr<MarisaIndexStorage>> {
+            co_await resume;
+            context->storage_usage.scanned_cold_bytes.fetch_add(7);
+            co_return MakeStorage();
+        });
+    const std::vector<cachinglayer::cid_t> cids{0};
+    folly::ManualExecutor executor;
+    auto future = folly::coro::co_withExecutor(
+                      &executor, translator.get_cells_async(&parent, cids))
+                      .start();
+    executor.drain();
+    EXPECT_FALSE(future.isReady());
+    bool progressed = false;
+    executor.add([&] { progressed = true; });
+    executor.drain();
+    EXPECT_TRUE(progressed);
+    resume.post();
+    while (!future.isReady()) {
+        executor.drive();
+    }
+    auto cells = std::move(future).get();
+    ASSERT_EQ(cells.size(), 1);
+    EXPECT_NE(cells.front().second, nullptr);
+    EXPECT_EQ(parent.storage_usage.scanned_cold_bytes.load(), 7);
 }
 
 TEST(MarisaIndexOwnershipTest, ReadersRetainStorageAndOwnedValues) {
