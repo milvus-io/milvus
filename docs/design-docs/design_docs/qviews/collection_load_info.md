@@ -90,16 +90,6 @@ legacy dual writes. Release removes only this collection's new-format prefix.
 The legacy CollectionLoadInfo/PartitionLoadInfo catalogs and ReplicaManager
 retain the master implementation and are not QueryView state owners.
 
-QueryCoord no longer retains the unused legacy Load/Release/Update job executor,
-its scheduler or its target-wait helpers. Load and release ACK callbacks apply
-QueryView state directly; UpdateLoadConfig uses the same load manager. The
-`querycoordv2/job/load_config.go` request/message adapters remain active.
-This cleanup preserves RPC registration and forwarding, WAL message definitions
-and ACK registration, and legacy catalog readers. With the upgrade order
-Coord → StreamingNode/QueryNode → Proxy, older nodes and Proxies still require
-those service contracts. Removing unused in-process jobs does not establish
-legacy metadata migration or uninterrupted mixed-version reads and writes.
-
 Replica identities, resource groups and priorities come from this record.
 Balancer owns target node placement; ShardViewRegistry owns actual View state.
 ID allocation uses the Coordinator allocator directly. QueryView load admission,
