@@ -21,9 +21,14 @@ func RegisterBuilder(b walimpls.OpenerBuilderImpls) {
 	}
 }
 
+// GetBuilder returns the walimpls builder by name if it is registered.
+func GetBuilder(name message.WALName) (walimpls.OpenerBuilderImpls, bool) {
+	return builders.Get(name)
+}
+
 // MustGetBuilder returns the walimpls builder by name.
 func MustGetBuilder(name message.WALName) walimpls.OpenerBuilderImpls {
-	b, ok := builders.Get(name)
+	b, ok := GetBuilder(name)
 	if !ok {
 		panic("walimpls builder not found: " + name.String())
 	}

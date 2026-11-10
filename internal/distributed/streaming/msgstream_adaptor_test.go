@@ -4,6 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/require"
+
 	"github.com/milvus-io/milvus/pkg/v3/mq/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 )
@@ -162,3 +165,25 @@ func TestDelegatorMsgstreamAdaptor(t *testing.T) {
 		_ = adaptor.CheckTopicValid("channel1")
 	})
 }
+
+func TestDelegatorMsgstreamAdaptorReportsScannerError(t *testing.T) {
+	expected := errors.New("terminal scanner error")
+	adaptor := &delegatorMsgstreamAdaptor{scanner: &testErrorScanner{err: expected}}
+	require.ErrorIs(t, adaptor.Error(), expected)
+}
+
+type testErrorScanner struct {
+	err error
+}
+
+func (s *testErrorScanner) Done() <-chan struct{} {
+	done := make(chan struct{})
+	close(done)
+	return done
+}
+
+func (s *testErrorScanner) Error() error {
+	return s.err
+}
+
+func (s *testErrorScanner) Close() {}
