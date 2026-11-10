@@ -41,6 +41,7 @@ Derived pressure values are:
 recoveryTailBytes = observedOffset - publishedOffset
 blockingBytes     = observedOffset - completedOffset
 publishLagBytes   = completedOffset - publishedOffset
+recoveryTailMessages = observedMessageCount - publishedMessageCount
 ```
 
 The recovery tail uses `publishedOffset`, not `completedOffset`, because a
@@ -51,6 +52,20 @@ completed but unpublished message is replayed after a crash.
 Each tracked WAL point records the message's estimated logical encoded bytes
 and a monotonic cumulative end offset. The offset is runtime bookkeeping, not
 part of the durable checkpoint format.
+
+Each tracked point also carries a cumulative message count. It counts persisted
+messages that advance the observed prefix, including TimeTicks; an assembled
+committed transaction counts once, matching the existing logical-byte units.
+Completed ACKs do not remove this count. Summary-gated checkpoint selection
+freezes its byte offset and count from the same entry, and only successful
+catalog publication advances both published frontiers. Retries reuse the frozen
+pair, so newer observations cannot be accidentally subtracted from the tail.
+
+Idle time is local elapsed time since the last newly observed persisted
+non-TimeTick message. TimeTicks and volatile heartbeats do not refresh it, and
+checkpoint publication does not restart the timer. Replay reconstructs the
+relative counters and starts a new local idle clock; no clock or count is added
+to the durable checkpoint format.
 
 After restart, replay begins with offset zero at the persisted checkpoint and
 reconstructs the relative tail size while scanning. Thresholds include headroom
@@ -122,13 +137,33 @@ The initial defaults are:
 streaming.walRecovery.tail.lowWatermark  = 4 GiB
 streaming.walRecovery.tail.softWatermark = 8 GiB
 streaming.walRecovery.tail.highWatermark = 16 GiB
+streaming.walRecovery.tail.softWatermarkMessages = 6144
+streaming.walRecovery.tail.idleMinSize = 512 MiB
+streaming.walRecovery.tail.idleTimeout = 10 minutes
 ```
 
 ```text
 recoveryTailBytes >= softWatermark
+  OR recoveryTailMessages >= softWatermarkMessages
+  OR (recoveryTailBytes > idleMinSize AND idle time >= idleTimeout)
   -> request progress for the VChannel owning the oldest incomplete prefix
   -> increase publisher frequency while completed progress is unpublished
+  -> enter the same recovery-storage append slowdown mode
+  -> let Summary's independent worker seal its pending span under tail pressure
 ```
+
+The additional thresholds are captured when a WAL opens. A nonpositive message
+threshold disables the count trigger; either nonpositive idle setting disables
+the size-and-idle trigger. The existing periodic Tracker and Summary workers
+reevaluate pressure even with no new WAL messages, so timeout expiry also enters
+the shared append limiter. Summary has no independent idle/size conjunction.
+
+These are soft triggers, including below the 4 GiB byte low watermark. While
+any new trigger holds, the slowdown checker must not recover just because bytes
+are below that watermark. Once no trigger holds and bytes are at or below the
+low watermark, recovery proceeds normally. The 16 GiB hard rejection threshold
+is unchanged; reaching the byte low watermark releases rejection, downgrading
+to slowdown if an additional soft trigger still holds.
 
 A strict bound needs append admission control:
 

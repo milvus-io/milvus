@@ -1,6 +1,9 @@
 package recovery
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
 
 type recoveryTailPressureState int
 
@@ -20,12 +23,15 @@ const (
 )
 
 type recoveryTailSnapshot struct {
-	ObservedOffset  uint64
-	CompletedOffset uint64
-	PublishedOffset uint64
-	RecoveryTail    uint64
-	Blocking        uint64
-	PublishLag      uint64
+	ObservedOffset       uint64
+	CompletedOffset      uint64
+	PublishedOffset      uint64
+	RecoveryTail         uint64
+	Blocking             uint64
+	PublishLag           uint64
+	ObservedMessages     uint64
+	PublishedMessages    uint64
+	RecoveryTailMessages uint64
 }
 
 // recoveryTailController maintains relative byte frontiers for one RecoveryStorage.
@@ -36,11 +42,15 @@ type recoveryTailController struct {
 	transitionMu sync.Mutex
 	mu           sync.Mutex
 
-	lowWatermark  uint64
-	softWatermark uint64
-	highWatermark uint64
-	rateLimiter   RecoveryTailRateLimiter
-	metrics       *recoveryMetrics
+	lowWatermark          uint64
+	softWatermark         uint64
+	highWatermark         uint64
+	rateLimiter           RecoveryTailRateLimiter
+	metrics               *recoveryMetrics
+	softWatermarkMessages uint64
+	idleMinBytes          uint64
+	idleTimeout           time.Duration
+	lastMessageAt         time.Time
 
 	state     recoveryTailPressureState
 	frontiers recoveryTailSnapshot
@@ -52,21 +62,28 @@ func newRecoveryTailController(
 	metrics *recoveryMetrics,
 ) *recoveryTailController {
 	return &recoveryTailController{
-		lowWatermark:  cfg.tailLowWatermarkBytes,
-		softWatermark: cfg.tailSoftWatermarkBytes,
-		highWatermark: cfg.tailHighWatermarkBytes,
-		rateLimiter:   rateLimiter,
-		metrics:       metrics,
+		lowWatermark:          cfg.tailLowWatermarkBytes,
+		softWatermark:         cfg.tailSoftWatermarkBytes,
+		highWatermark:         cfg.tailHighWatermarkBytes,
+		rateLimiter:           rateLimiter,
+		metrics:               metrics,
+		softWatermarkMessages: cfg.tailSoftWatermarkMessages,
+		idleMinBytes:          cfg.tailIdleMinBytes,
+		idleTimeout:           cfg.tailIdleTimeout,
 	}
 }
 
-func (c *recoveryTailController) UpdateTrackerFrontiers(observed, completed uint64) {
+func (c *recoveryTailController) UpdateTrackerFrontiers(observed, completed, messages uint64, lastMessageAt time.Time) {
 	c.transitionMu.Lock()
 	defer c.transitionMu.Unlock()
 	c.mu.Lock()
-	c.frontiers.ObservedOffset = observed
-	c.frontiers.CompletedOffset = completed
-	action := c.refreshLocked()
+	c.frontiers.ObservedOffset = max(c.frontiers.ObservedOffset, observed)
+	c.frontiers.CompletedOffset = max(c.frontiers.CompletedOffset, completed)
+	c.frontiers.ObservedMessages = max(c.frontiers.ObservedMessages, messages)
+	if lastMessageAt.After(c.lastMessageAt) {
+		c.lastMessageAt = lastMessageAt
+	}
+	action := c.refreshLocked(time.Now())
 	c.mu.Unlock()
 	c.applyAction(action)
 }
@@ -78,6 +95,7 @@ func (c *recoveryTailController) Reset() {
 	wasPressured := c.state != recoveryTailPressureNormal
 	c.state = recoveryTailPressureNormal
 	c.frontiers = recoveryTailSnapshot{}
+	c.lastMessageAt = time.Time{}
 	if c.metrics != nil {
 		c.metrics.ObserveTailBytes(0, 0, 0)
 	}
@@ -87,22 +105,31 @@ func (c *recoveryTailController) Reset() {
 	}
 }
 
-func (c *recoveryTailController) Publish(offset uint64) {
+func (c *recoveryTailController) Publish(offset, messages uint64) {
 	c.transitionMu.Lock()
 	defer c.transitionMu.Unlock()
 	c.mu.Lock()
 	if offset > c.frontiers.PublishedOffset {
 		c.frontiers.PublishedOffset = offset
 	}
-	action := c.refreshLocked()
+	c.frontiers.PublishedMessages = max(c.frontiers.PublishedMessages, messages)
+	action := c.refreshLocked(time.Now())
 	c.mu.Unlock()
 	c.applyAction(action)
 }
 
 func (c *recoveryTailController) UnderSoftPressure() bool {
+	// Maintenance workers call this even without new WAL traffic, so an idle
+	// tail must also enter the shared append limiter here.
+	c.transitionMu.Lock()
+	defer c.transitionMu.Unlock()
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.frontiers.RecoveryTail >= c.softWatermark
+	now := time.Now()
+	action := c.refreshLocked(now)
+	pressured := c.softPressureLocked(now)
+	c.mu.Unlock()
+	c.applyAction(action)
+	return pressured
 }
 
 func (c *recoveryTailController) Snapshot() recoveryTailSnapshot {
@@ -111,7 +138,7 @@ func (c *recoveryTailController) Snapshot() recoveryTailSnapshot {
 	return c.frontiers
 }
 
-func (c *recoveryTailController) refreshLocked() recoveryTailAction {
+func (c *recoveryTailController) refreshLocked(now time.Time) recoveryTailAction {
 	c.frontiers.RecoveryTail = saturatingSub(
 		c.frontiers.ObservedOffset,
 		c.frontiers.PublishedOffset,
@@ -124,6 +151,7 @@ func (c *recoveryTailController) refreshLocked() recoveryTailAction {
 		c.frontiers.CompletedOffset,
 		c.frontiers.PublishedOffset,
 	)
+	c.frontiers.RecoveryTailMessages = saturatingSub(c.frontiers.ObservedMessages, c.frontiers.PublishedMessages)
 	if c.metrics != nil {
 		c.metrics.ObserveTailBytes(
 			c.frontiers.RecoveryTail,
@@ -138,8 +166,9 @@ func (c *recoveryTailController) refreshLocked() recoveryTailAction {
 			c.state = recoveryTailPressureReject
 			return recoveryTailActionReject
 		}
-	case c.frontiers.RecoveryTail >= c.softWatermark:
-		if c.state == recoveryTailPressureNormal {
+	case c.softPressureLocked(now):
+		if c.state == recoveryTailPressureNormal ||
+			(c.state == recoveryTailPressureReject && c.frontiers.RecoveryTail <= c.lowWatermark) {
 			c.state = recoveryTailPressureSlowdown
 			return recoveryTailActionSlowdown
 		}
@@ -150,6 +179,13 @@ func (c *recoveryTailController) refreshLocked() recoveryTailAction {
 		}
 	}
 	return recoveryTailActionNone
+}
+
+func (c *recoveryTailController) softPressureLocked(now time.Time) bool {
+	return c.frontiers.RecoveryTail >= c.softWatermark ||
+		(c.softWatermarkMessages > 0 && c.frontiers.RecoveryTailMessages >= c.softWatermarkMessages) ||
+		(c.idleMinBytes > 0 && c.idleTimeout > 0 && c.frontiers.RecoveryTail > c.idleMinBytes &&
+			!c.lastMessageAt.IsZero() && !now.Before(c.lastMessageAt.Add(c.idleTimeout)))
 }
 
 func (c *recoveryTailController) applyAction(action recoveryTailAction) {
@@ -173,7 +209,7 @@ type recoveryTailSlowdownChecker struct {
 func (c recoveryTailSlowdownChecker) Check() bool {
 	c.controller.mu.Lock()
 	defer c.controller.mu.Unlock()
-	return c.controller.frontiers.RecoveryTail > c.controller.lowWatermark
+	return c.controller.frontiers.RecoveryTail > c.controller.lowWatermark || c.controller.softPressureLocked(time.Now())
 }
 
 func (recoveryTailSlowdownChecker) SlowdownStartupHWM() int64 {

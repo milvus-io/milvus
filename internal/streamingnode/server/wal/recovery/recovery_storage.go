@@ -36,11 +36,12 @@ type RecoverySnapshot struct {
 }
 
 type dirtyPersistSnapshot struct {
-	Checkpoint        *WALCheckpoint
-	LogicalEndOffset  uint64
-	CheckpointDirty   bool
-	ModuleDirtySnaps  []moduleapi.DirtySnapshot
-	SalvageCheckpoint *utility.ReplicateCheckpoint
+	Checkpoint             *WALCheckpoint
+	LogicalEndOffset       uint64
+	LogicalEndMessageCount uint64
+	CheckpointDirty        bool
+	ModuleDirtySnaps       []moduleapi.DirtySnapshot
+	SalvageCheckpoint      *utility.ReplicateCheckpoint
 }
 
 func clonePChannelControl(control *streamingpb.PChannelRecoveryControlMeta) *streamingpb.PChannelRecoveryControlMeta {

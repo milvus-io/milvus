@@ -9659,14 +9659,14 @@ type streamingConfig struct {
 	WALRecoveryTailLowWatermark          ParamItem `refreshable:"true"`
 	WALRecoveryTailSoftWatermark         ParamItem `refreshable:"true"`
 	WALRecoveryTailHighWatermark         ParamItem `refreshable:"true"`
+	WALRecoveryTailSoftWatermarkMessages ParamItem `refreshable:"false"`
+	WALRecoveryTailIdleMinSize           ParamItem `refreshable:"false"`
+	WALRecoveryTailIdleTimeout           ParamItem `refreshable:"false"`
 
 	// idempotent write configuration.
 	IdempotencyTTLPerPChannel                ParamItem `refreshable:"false"`
 	IdempotencyMaxSizePerPChannel            ParamItem `refreshable:"false"`
 	IdempotencyBestEffortMinCountPerVChannel ParamItem `refreshable:"false"`
-	IdempotencyMaxBytesPerWindow             ParamItem `refreshable:"false"`
-	IdempotencyChunkMaxBytes                 ParamItem `refreshable:"false"`
-	IdempotencyMaxStagingInterval            ParamItem `refreshable:"false"`
 
 	TransformLogCatchupConcurrencyPerPChannel ParamItem `refreshable:"true"`
 
@@ -9976,8 +9976,7 @@ Coordinator recovery restarts the retention clock; checkpoint lag can extend it 
 		Doc: `The max length in bytes of a client-supplied idempotency key, 256 by default.
 The key is stored in the message properties of every write it guards, so an
 oversized key inflates both the WAL entry and the in-memory dedup index.
-Zero disables the bound, as it does for the other streaming.idempotency.*
-limits; requests that carry no key are accepted at any value.`,
+Zero disables this key-length bound; requests that carry no key are accepted at any value.`,
 		DefaultValue: "256",
 		Export:       false,
 	}
@@ -10200,6 +10199,24 @@ This no-op setting is retained so existing configurations remain loadable.`,
 		Export:       true,
 	}
 	p.WALRecoveryTailHighWatermark.Init(base.mgr)
+	p.WALRecoveryTailSoftWatermarkMessages = ParamItem{
+		Key:     "streaming.walRecovery.tail.softWatermarkMessages",
+		Version: "3.1.0", DefaultValue: "6144", Export: true,
+		Doc: "Unpublished persisted WAL message count per PChannel that triggers the same soft pressure as softWatermark. Includes completed but unpublished messages and counts an assembled transaction once. Nonpositive values disable this trigger. Applied when the WAL opens.",
+	}
+	p.WALRecoveryTailSoftWatermarkMessages.Init(base.mgr)
+	p.WALRecoveryTailIdleMinSize = ParamItem{
+		Key:     "streaming.walRecovery.tail.idleMinSize",
+		Version: "3.1.0", DefaultValue: "512MB", Export: true,
+		Doc: "Unpublished logical WAL bytes per PChannel must exceed this size and remain idle for idleTimeout to trigger the same soft pressure as softWatermark. Nonpositive values disable this trigger. Applied when the WAL opens.",
+	}
+	p.WALRecoveryTailIdleMinSize.Init(base.mgr)
+	p.WALRecoveryTailIdleTimeout = ParamItem{
+		Key:     "streaming.walRecovery.tail.idleTimeout",
+		Version: "3.1.0", DefaultValue: "10m", Export: true,
+		Doc: "Idle time without a newly observed persisted non-TimeTick WAL message before applying soft pressure above idleMinSize. TimeTicks and volatile heartbeats do not reset it; checkpoint publication does not refresh it. Nonpositive values disable this trigger. Applied when the WAL opens.",
+	}
+	p.WALRecoveryTailIdleTimeout.Init(base.mgr)
 
 	p.WALRecoverySchemaExpirationTolerance = ParamItem{
 		Key:     "streaming.walRecovery.schemaExpirationTolerance",
@@ -10235,15 +10252,6 @@ If the schema is older than (the channel checkpoint - tolerance), it will be rem
 		Export:       true,
 	}
 	p.IdempotencyBestEffortMinCountPerVChannel.Init(base.mgr)
-	p.IdempotencyMaxBytesPerWindow = ParamItem{
-		Key:          "streaming.idempotency.maxBytesPerWindow",
-		Version:      "3.0.0",
-		Doc:          "Deprecated. Insert idempotency retention is controlled by streaming.idempotency.ttlPerPChannel, streaming.idempotency.maxSizePerPChannel and streaming.idempotency.bestEffortMinCountPerVChannel. This per-VChannel byte limit is no longer used.",
-		DefaultValue: "16777216",
-		FallbackKeys: []string{"idempotency.maxBytesPerWindow"},
-		Export:       false,
-	}
-	p.IdempotencyMaxBytesPerWindow.Init(base.mgr)
 
 	p.QueryViewLiveEventDispatchConcurrencyPerPChannel = ParamItem{
 		Key:          "streaming.queryView.liveEventDispatchConcurrencyRatioPerPChannel",

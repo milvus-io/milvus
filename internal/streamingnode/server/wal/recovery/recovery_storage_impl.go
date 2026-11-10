@@ -222,9 +222,9 @@ func (r *recoveryStorageImpl) installCheckpoint(checkpoint *WALCheckpoint) {
 	}
 	var tracker *messageack.Tracker
 	tracker = messageack.NewTracker(point, func(utility.WALCheckpoint) {
-		observed, completed := tracker.LogicalOffsets()
+		observed, completed, count, lastMessageAt := tracker.LogicalState()
 		if r.tailController != nil {
-			r.tailController.UpdateTrackerFrontiers(observed, completed)
+			r.tailController.UpdateTrackerFrontiers(observed, completed, count, lastMessageAt)
 		}
 		r.notifyPersist()
 	}, r.vchannelManager)
@@ -443,12 +443,14 @@ func (r *recoveryStorageImpl) consumeDirtySnapshot() *dirtyPersistSnapshot {
 	if r.summaryManager != nil {
 		summaryThrough = r.summaryManager.LastAcked()
 	}
-	completedPoint, completedLogicalOffset := r.ackTracker.CheckpointThrough(summaryThrough)
+	completedPoint, completedLogicalOffset, completedMessageCount := r.ackTracker.CheckpointThroughWithCount(summaryThrough)
 
 	if checkpoint != nil && !shouldAdvanceConsumePoint(*checkpoint, completedPoint) {
 		completedPoint = *checkpoint.Clone()
 		if r.tailController != nil {
-			completedLogicalOffset = r.tailController.Snapshot().PublishedOffset
+			published := r.tailController.Snapshot()
+			completedLogicalOffset = published.PublishedOffset
+			completedMessageCount = published.PublishedMessages
 		}
 	}
 	frozenCheckpoint := &WALCheckpoint{
@@ -483,11 +485,12 @@ func (r *recoveryStorageImpl) consumeDirtySnapshot() *dirtyPersistSnapshot {
 		return nil
 	}
 	return &dirtyPersistSnapshot{
-		Checkpoint:        frozenCheckpoint,
-		LogicalEndOffset:  completedLogicalOffset,
-		CheckpointDirty:   checkpointDirty,
-		SalvageCheckpoint: salvageCP,
-		ModuleDirtySnaps:  moduleSnapshots,
+		Checkpoint:             frozenCheckpoint,
+		LogicalEndOffset:       completedLogicalOffset,
+		LogicalEndMessageCount: completedMessageCount,
+		CheckpointDirty:        checkpointDirty,
+		SalvageCheckpoint:      salvageCP,
+		ModuleDirtySnaps:       moduleSnapshots,
 	}
 }
 
@@ -564,8 +567,8 @@ func (r *recoveryStorageImpl) refreshRecoveryTail() {
 	if r.ackTracker == nil || r.tailController == nil {
 		return
 	}
-	observed, completed := r.ackTracker.LogicalOffsets()
-	r.tailController.UpdateTrackerFrontiers(observed, completed)
+	observed, completed, count, lastMessageAt := r.ackTracker.LogicalState()
+	r.tailController.UpdateTrackerFrontiers(observed, completed, count, lastMessageAt)
 }
 
 func (r *recoveryStorageImpl) observeModulesMessage(

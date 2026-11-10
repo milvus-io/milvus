@@ -117,9 +117,8 @@ Legacy global or collection enable settings have no effect.
 
 Idempotency retention is captured when a WAL opens; these three settings are
 not dynamically refreshed. Nonpositive TTL or maxSize uses the default;
-minCount zero disables the soft preference. The former
-`streaming.idempotency.maxBytesPerWindow` remains registered but no longer
-controls retention. No alias is provided for the unreleased unscoped names.
+minCount zero disables the soft preference. No alias is provided for the
+unreleased legacy per-VChannel byte limit or unscoped names.
 
 The shared retained-object budget remains independent of the idempotency cache;
 see [Retention](#retention) and

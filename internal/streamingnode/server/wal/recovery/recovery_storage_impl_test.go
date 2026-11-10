@@ -1391,12 +1391,55 @@ func TestRecoverySummaryBacklogRequiresTailPressure(t *testing.T) {
 				return rs.summaryManager.LastAcked() == 50
 			}, 1100*time.Millisecond, time.Millisecond,
 				"neither syncPeriod nor the checkpoint interval may seal Summary")
-			rs.tailController.UpdateTrackerFrontiers(rs.cfg.tailSoftWatermarkBytes, rs.cfg.tailSoftWatermarkBytes)
+			rs.tailController.UpdateTrackerFrontiers(rs.cfg.tailSoftWatermarkBytes, rs.cfg.tailSoftWatermarkBytes, 0, time.Time{})
 			require.Eventually(t, func() bool {
 				return rs.summaryManager.LastAcked() == 50
 			}, 3*time.Second, time.Millisecond)
 			require.Equal(t, uint64(50), rs.consumeDirtySnapshot().Checkpoint.TimeTick,
 				"summary-only backlog must release the candidate without new WAL messages")
+		})
+	}
+}
+
+func TestAdditionalTailPressureFlushesCompletedSummaryBacklog(t *testing.T) {
+	for _, idle := range []bool{false, true} {
+		name := "message-count"
+		if idle {
+			name = "idle-size"
+		}
+		t.Run(name, func(t *testing.T) {
+			rs := newTestRecoveryStorage(t, &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 10})
+			rs.cfg.tailSoftWatermarkMessages = 3
+			rs.cfg.tailIdleMinBytes = 0
+			rs.cfg.tailIdleTimeout = 0
+			if idle {
+				rs.cfg.tailSoftWatermarkMessages = 0
+				rs.cfg.tailIdleMinBytes = 1
+				rs.cfg.tailIdleTimeout = time.Nanosecond
+			}
+			limiter := &recordingRecoveryTailRateLimiter{}
+			rs.tailController = newRecoveryTailController(rs.cfg, limiter, rs.metrics)
+			rs.summaryManager = newSummaryManagerWithStagedDelete(t, "test-vchannel", 50)
+			for _, tt := range []uint64{49, 50, 100} {
+				rs.ackTracker.Track(newAckTestTimeTickMessage(t, tt, int64(tt))).Release()
+			}
+			rs.refreshRecoveryTail()
+			require.Zero(t, rs.ackTracker.Pending())
+			require.Less(t, rs.Metrics().RecoveryTailBytes, rs.cfg.tailLowWatermarkBytes)
+			require.True(t, rs.tailController.UnderSoftPressure())
+			rs.startSummaryBacklog()
+			t.Cleanup(func() {
+				rs.backgroundTaskNotifier.Cancel()
+				rs.summaryWG.Wait()
+				rs.closeRecoveryResources()
+			})
+			require.Eventually(t, func() bool { return rs.summaryManager.LastAcked() == 50 }, 5*time.Second, time.Millisecond)
+			snapshot := rs.consumeDirtySnapshot()
+			require.Equal(t, uint64(50), snapshot.Checkpoint.TimeTick)
+			require.Equal(t, uint64(2), snapshot.LogicalEndMessageCount, "count and bytes must stop at the Summary-gated checkpoint")
+			actions, checker := limiter.snapshot()
+			require.Equal(t, []recoveryTailAction{recoveryTailActionSlowdown}, actions)
+			require.True(t, checker.Check())
 		})
 	}
 }

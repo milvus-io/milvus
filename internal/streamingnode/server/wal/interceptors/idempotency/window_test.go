@@ -239,15 +239,9 @@ func TestIdempotencyWindowCompleteReportsEvictionCount(t *testing.T) {
 	require.Equal(t, BeginDecisionDuplicate, window.Begin("key-2", nil).Decision)
 }
 
-// A key can appear twice in a snapshot: the store retains by the Summary byte budget
-// per pchannel while the window caps itself by maxBytesPerWindow per vchannel,
-// so a key evicted here and later reused is written again and both records can
-// survive in the retained chunk set.
-//
-// Loading both would double-count the bytes and put the key in commitOrder
-// twice; the first eviction would then delete the LIVE record while the second
-// pop refunded nothing, leaving the byte count permanently inflated and the key
-// silently no longer deduplicating.
+// Summary retention and the live PChannel cache have independent budgets.
+// A key evicted from the cache and later reused can appear twice in retained
+// history. Restore must keep the newest result and charge only one record.
 func TestIdempotencyWindowRestoreDeduplicatesRepeatedKey(t *testing.T) {
 	older := &idempotencyview.Record{
 		SourceMessageID:        &commonpb.MessageID{WALName: commonpb.WALName_Test, Id: "10"},
