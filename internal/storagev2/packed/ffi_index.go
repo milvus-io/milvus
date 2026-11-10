@@ -62,6 +62,7 @@ func ManifestIndexRelativePath(basePath, indexPrefix string) (string, error) {
 // On read storage resolves it to a complete artifact key. Existing legacy
 // entries can be read but cannot be added or updated with an external path.
 type ManifestIndexInfo struct {
+	FileSizes                 map[string]uint64 // Known on-disk sizes by file key, for prewarming.
 	ColumnName                string
 	IndexName                 string
 	IndexType                 string

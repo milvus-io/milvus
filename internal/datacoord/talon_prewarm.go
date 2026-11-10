@@ -21,6 +21,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -41,19 +43,73 @@ func (c *talonPrewarmAdapter) BatchLoad(ctx context.Context, requests []TalonPre
 	return err
 }
 
+// Each producer releases its lease after stopping. The last release drains the
+// shared native client; stopping one producer cannot close the other's client.
+type talonPrewarmClientLease struct {
+	TalonPrewarmClient
+	once    sync.Once
+	release func()
+}
+
+func (c *talonPrewarmClientLease) Close() { c.once.Do(c.release) }
+
+// The factory is called sequentially during initialization. Both producers use
+// one native admission slot, held through callback completion even on cancellation.
+func sharedTalonPrewarmFactory(factory func(*indexpb.StorageConfig, int) (TalonPrewarmClient, error)) func(*indexpb.StorageConfig, int) (TalonPrewarmClient, error) {
+	var client TalonPrewarmClient
+	var users atomic.Int64
+	return func(config *indexpb.StorageConfig, concurrency int) (TalonPrewarmClient, error) {
+		if client == nil {
+			var err error
+			client, err = factory(config, concurrency)
+			if err != nil {
+				return nil, err
+			}
+		}
+		users.Add(1)
+		return &talonPrewarmClientLease{TalonPrewarmClient: client, release: func() {
+			if users.Add(-1) == 0 {
+				client.Close()
+			}
+		}}, nil
+	}
+}
+
 func (s *Server) initTalonPrewarm() error {
-	inspector, err := newTalonPrewarm(s.ctx, Params, s.GetPublishedManifestPaths, func(config *indexpb.StorageConfig, concurrency int) (TalonPrewarmClient, error) {
+	return s.initTalonPrewarmWithFactory(Params, func(config *indexpb.StorageConfig, concurrency int) (TalonPrewarmClient, error) {
 		client, err := packed.NewTalonClient(config, concurrency)
 		if err != nil {
 			return nil, err
 		}
 		return &talonPrewarmAdapter{client}, nil
 	})
+}
+
+func (s *Server) initTalonPrewarmWithFactory(p *paramtable.ComponentParam, factory func(*indexpb.StorageConfig, int) (TalonPrewarmClient, error)) error {
+	factory = sharedTalonPrewarmFactory(factory)
+	inspector, err := newTalonPrewarm(s.ctx, p, s.GetPublishedManifestPaths, factory)
 	if err != nil {
 		return err
 	}
 	s.talonPrewarmInspector = inspector
+	if err := s.initTalonIncrementalPrewarm(p, factory); err != nil {
+		if inspector != nil {
+			inspector.Stop()
+		}
+		s.talonPrewarmInspector = nil
+		return err
+	}
 	return nil
+}
+
+func talonPrewarmStorageConfig(p *paramtable.ComponentParam) *indexpb.StorageConfig {
+	return &indexpb.StorageConfig{
+		BucketName:          p.MinioCfg.BucketName.GetValue(),
+		CloudProvider:       p.MinioCfg.CloudProvider.GetValue(),
+		TalonCoordinator:    p.CommonCfg.StorageTalonCoordinator.GetValue(),
+		TalonBlockSize:      p.CommonCfg.StorageTalonBlockSize.GetAsUint32(),
+		TalonMaxIdlePerAddr: p.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32(),
+	}
 }
 
 func newTalonPrewarm(ctx context.Context, p *paramtable.ComponentParam, supplier func(context.Context) ([]string, error), factory func(*indexpb.StorageConfig, int) (TalonPrewarmClient, error)) (*TalonPrewarmInspector, error) {
@@ -79,13 +135,7 @@ func newTalonPrewarm(ctx context.Context, p *paramtable.ComponentParam, supplier
 	if err != nil {
 		return nil, err
 	}
-	client, err := factory(&indexpb.StorageConfig{
-		BucketName:          p.MinioCfg.BucketName.GetValue(),
-		CloudProvider:       p.MinioCfg.CloudProvider.GetValue(),
-		TalonCoordinator:    coordinator,
-		TalonBlockSize:      p.CommonCfg.StorageTalonBlockSize.GetAsUint32(),
-		TalonMaxIdlePerAddr: p.CommonCfg.StorageTalonMaxIdlePerAddr.GetAsUint32(),
-	}, 1)
+	client, err := factory(talonPrewarmStorageConfig(p), 1)
 	if err != nil {
 		return nil, merr.Wrap(err, "initialize Talon prewarm")
 	}

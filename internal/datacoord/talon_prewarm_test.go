@@ -18,6 +18,8 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
+	"strconv"
 	"testing"
 	"time"
 
@@ -194,4 +196,91 @@ func TestTalonPrewarmDataCoordStopBeforeStart(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("DC Stop leaked the prewarm client before Start")
 	}
+}
+
+func TestTalonPrewarmSharedClientConfiguration(t *testing.T) {
+	for _, tc := range []struct{ periodic, incremental, local bool }{
+		{false, false, false}, {true, false, false}, {false, true, false}, {true, true, false}, {true, true, true},
+	} {
+		t.Run(fmt.Sprintf("periodic=%t/incremental=%t/local=%t", tc.periodic, tc.incremental, tc.local), func(t *testing.T) {
+			p := &paramtable.ComponentParam{}
+			p.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
+			storageType := "remote"
+			if tc.local {
+				storageType = "local"
+			}
+			for key, value := range map[string]string{
+				p.CommonCfg.StorageType.Key:                       storageType,
+				p.CommonCfg.StorageTalonCoordinator.Key:           "coordinator:7000",
+				p.MinioCfg.CloudProvider.Key:                      "aws",
+				p.MinioCfg.BucketName.Key:                         "bucket",
+				p.DataCoordCfg.TalonPrewarmEnabled.Key:            strconv.FormatBool(tc.periodic),
+				p.DataCoordCfg.TalonIncrementalPrewarmEnabled.Key: strconv.FormatBool(tc.incremental),
+			} {
+				require.NoError(t, p.Save(key, value))
+			}
+			c := &recordingTalonPrewarm{stats: map[string]int{}}
+			s := &Server{ctx: context.Background(), meta: meta.NewEmptyTestMeta()}
+			calls := 0
+			err := s.initTalonPrewarmWithFactory(p, func(config *indexpb.StorageConfig, concurrency int) (TalonPrewarmClient, error) {
+				calls++
+				require.Equal(t, 1, concurrency)
+				require.Equal(t, "coordinator:7000", config.GetTalonCoordinator())
+				return c, nil
+			})
+			require.NoError(t, err)
+			require.Equal(t, tc.periodic && !tc.local, s.talonPrewarmInspector != nil)
+			require.Equal(t, tc.incremental && !tc.local, s.incrementalPrewarm != nil)
+			if tc.local || (!tc.periodic && !tc.incremental) {
+				require.Zero(t, calls)
+				return
+			}
+			require.Equal(t, 1, calls, "both producers must share one native admission budget")
+			if s.talonPrewarmInspector != nil && s.incrementalPrewarm != nil {
+				periodic := s.talonPrewarmInspector.client.(*talonPrewarmClientLease)
+				incremental := s.incrementalPrewarm.client.(*talonPrewarmClientLease)
+				require.Same(t, periodic.TalonPrewarmClient, incremental.TalonPrewarmClient)
+			}
+			if s.talonPrewarmInspector != nil {
+				s.talonPrewarmInspector.Stop()
+				// Stop before Start schedules cleanup; explicitly finish this lease release
+				// before checking that the incremental producer still owns the native client.
+				s.talonPrewarmInspector.client.Close()
+			}
+			if s.incrementalPrewarm != nil {
+				c.mu.Lock()
+				require.Zero(t, c.closes, "stopping periodic warming must not close incremental warming")
+				c.mu.Unlock()
+				require.NoError(t, s.incrementalPrewarm.prewarm(incrementalPrewarmCommit{objects: []packed.PrewarmObject{{Path: "data", Size: 17}}}))
+				s.incrementalPrewarm.stop()
+			}
+			c.mu.Lock()
+			require.Equal(t, 1, c.closes, "last producer must close the native client exactly once")
+			c.mu.Unlock()
+		})
+	}
+}
+
+func TestTalonPrewarmSharedClientReleaseIncrementalFirst(t *testing.T) {
+	c := &recordingTalonPrewarm{}
+	factory := sharedTalonPrewarmFactory(func(*indexpb.StorageConfig, int) (TalonPrewarmClient, error) { return c, nil })
+	periodic, err := factory(nil, 1)
+	require.NoError(t, err)
+	incremental, err := factory(nil, 1)
+	require.NoError(t, err)
+	incremental.Close()
+	require.Zero(t, c.closes)
+	require.NoError(t, periodic.BatchLoad(context.Background(), []TalonPrewarmRequest{{URI: "manifest", Size: 17}}))
+	periodic.Close()
+	incremental.Close()
+	periodic.Close()
+	require.Equal(t, 1, c.closes)
+}
+
+func TestTalonPrewarmSharedClientFactoryFailure(t *testing.T) {
+	failure := merr.WrapErrServiceUnavailableMsg("native initialization failed")
+	factory := sharedTalonPrewarmFactory(func(*indexpb.StorageConfig, int) (TalonPrewarmClient, error) { return nil, failure })
+	client, err := factory(nil, 1)
+	require.ErrorIs(t, err, failure)
+	require.Nil(t, client)
 }

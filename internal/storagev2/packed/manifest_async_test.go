@@ -42,6 +42,12 @@ func TestAsyncManifestRoundTrip(t *testing.T) {
 	index := ManifestIndexInfo{ColumnName: "100", IndexName: "index", IndexType: "FLAT", Path: "artifact", FieldID: 100, IndexID: 1, BuildID: 2}
 	first, err := CommitManifestUpdatesWithResultAsync(ctx, io, MarshalManifestPath(base, 0), cfg, &ManifestUpdates{Indexes: []ManifestIndexInfo{index}})
 	require.NoError(t, err)
+	manifestFile, err := ManifestFilePath(first.ManifestPath)
+	require.NoError(t, err)
+	info, err := os.Stat(manifestFile)
+	require.NoError(t, err)
+	require.Positive(t, first.ManifestSize)
+	require.Equal(t, info.Size(), first.ManifestSize)
 	entries, err := GetManifestIndexInfosAsync(ctx, io, first.ManifestPath, cfg)
 	require.NoError(t, err)
 	require.Len(t, entries, 1)

@@ -6509,9 +6509,10 @@ user-task-polling:
 // /////////////////////////////////////////////////////////////////////////////
 // --- datacoord ---
 type dataCoordConfig struct {
-	TalonPrewarmEnabled   ParamItem `refreshable:"false"`
-	TalonPrewarmInterval  ParamItem `refreshable:"false"`
-	TalonPrewarmBatchSize ParamItem `refreshable:"false"`
+	TalonIncrementalPrewarmEnabled ParamItem `refreshable:"false"`
+	TalonPrewarmEnabled            ParamItem `refreshable:"false"`
+	TalonPrewarmInterval           ParamItem `refreshable:"false"`
+	TalonPrewarmBatchSize          ParamItem `refreshable:"false"`
 
 	// --- CHANNEL ---
 	WatchTimeoutInterval         ParamItem `refreshable:"false"`
@@ -6746,6 +6747,14 @@ type dataCoordConfig struct {
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
+	p.TalonIncrementalPrewarmEnabled = ParamItem{
+		Key:          "dataCoord.talonPrewarm.incrementalEnabled",
+		Version:      "3.0.1",
+		DefaultValue: "false",
+		Export:       false,
+		Doc:          "Prewarm newly published objects of sealed StorageV3 segments after manifest commit. Independent of periodic manifest prewarming. Remote storage only; requires restart.",
+	}
+	p.TalonIncrementalPrewarmEnabled.Init(base.mgr)
 	p.TalonPrewarmEnabled = ParamItem{
 		Key:          "dataCoord.talonPrewarm.enabled",
 		Version:      "3.0.1",

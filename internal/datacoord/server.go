@@ -194,7 +194,8 @@ type Server struct {
 	manifestIndexBackfillInspector   *index.ManifestIndexBackfillInspector
 	manifestIndexRollbackInspector   *index.ManifestIndexRollbackInspector
 	analyzeInspector                 *analyze.AnalyzeInspector
-	talonPrewarmInspector            *TalonPrewarmInspector
+	talonPrewarmInspector             *TalonPrewarmInspector
+	incrementalPrewarm                *talonIncrementalPrewarm
 	segmentChangeInspector           *segmentChangeInspector
 	externalCollectionRefreshManager externalrefresh.ExternalCollectionRefreshManager
 	globalScheduler                  task.GlobalScheduler
@@ -1442,6 +1443,9 @@ func (s *Server) initMixCoord() error {
 //
 //	stop message stream client and stop server loops
 func (s *Server) Stop() error {
+	if s.incrementalPrewarm != nil {
+		s.incrementalPrewarm.stop()
+	}
 	// Init can create the client without reaching Start. Release it even when
 	// the state guard below skips the rest of component shutdown.
 	if s.talonPrewarmInspector != nil {
