@@ -123,6 +123,7 @@ func InitSegcore(nodeID int64) error {
 	if err := initcore.InitLoonReaderConfig(paramtable.Get()); err != nil {
 		return err
 	}
+	initcore.LogLoonReaderConfig(paramtable.Get(), "datanode")
 
 	// Wire hot-reload watchers so capacity / coalescing-limit changes take effect
 	// without restart, matching QueryNode behavior.

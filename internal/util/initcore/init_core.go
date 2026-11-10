@@ -556,7 +556,9 @@ var loonReaderConfigMu sync.Mutex
 // settings: the global reader thread pool size (chunk/file-level read
 // fan-out) and the index-build read window (how many bytes one prefetch
 // round may span, which bounds how many row groups download in parallel per
-// round). Both default to 0 = pre-existing sequential behavior.
+// round). -1 resolves both from the hardware on a DataNode, see
+// ResolveLoonReaderThreadPoolSize and ResolveIndexBuildReadWindowBytes; 0 is
+// the pre-existing sequential behavior.
 //
 // Both values are validated before either is applied. Resizing the global
 // reader pool is not revertible through config (it cannot be destroyed at
@@ -566,17 +568,13 @@ func InitLoonReaderConfig(params *paramtable.ComponentParam) error {
 	loonReaderConfigMu.Lock()
 	defer loonReaderConfigMu.Unlock()
 
-	poolSize := params.CommonCfg.StorageReaderThreadPoolSize.GetAsInt64()
-	if poolSize < 0 || poolSize > maxStorageReaderThreadPoolSize {
-		return merr.WrapErrParameterInvalidMsg(
-			"common.storage.readerThreadPoolSize must be in [0, %d], got %d",
-			maxStorageReaderThreadPoolSize, poolSize)
+	poolSize, err := ResolveLoonReaderThreadPoolSize(params)
+	if err != nil {
+		return err
 	}
-	window := params.CommonCfg.IndexBuildReadWindowBytes.GetAsInt64()
-	if window < 0 || window > maxIndexBuildReadWindowBytes {
-		return merr.WrapErrParameterInvalidMsg(
-			"common.storage.indexBuildReadWindowBytes must be in [0, %d], got %d",
-			maxIndexBuildReadWindowBytes, window)
+	window, err := ResolveIndexBuildReadWindowBytes(params)
+	if err != nil {
+		return err
 	}
 	status := C.InitLoonReaderThreadPool(C.int32_t(poolSize))
 	if err := HandleCStatus(&status, "InitLoonReaderThreadPool failed"); err != nil {
