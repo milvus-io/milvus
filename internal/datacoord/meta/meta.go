@@ -102,10 +102,10 @@ type Meta struct {
 	// Installed before manifest commits start; the callback must not block on I/O.
 	PrewarmManifestCommit func(string, *SegmentInfo, ManifestMutation, int64)
 
-	manifestReadOnce       sync.Once
-	manifestReadSlots      *semaphore.Weighted
-	DataViewManager        DataViewManager
-	StreamingNodeCatalog   metastore.StreamingNodeCataLog
+	manifestReadOnce     sync.Once
+	manifestReadSlots    *semaphore.Weighted
+	DataViewManager      DataViewManager
+	StreamingNodeCatalog metastore.StreamingNodeCataLog
 
 	ChannelSync  *channelSync
 	ChunkManager storage.ChunkManager

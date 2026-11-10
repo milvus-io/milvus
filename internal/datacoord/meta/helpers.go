@@ -324,7 +324,7 @@ func BuildL0V3DeltaLogEntries(segmentID int64, deltalogs []*datapb.FieldBinlog) 
 			entries = append(entries, packed.DeltaLogEntry{
 				Path:       path,
 				NumEntries: binlog.GetEntriesNum(),
-				FileSize: binlog.GetLogSize(),
+				FileSize:   binlog.GetLogSize(),
 			})
 		}
 	}
