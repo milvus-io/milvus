@@ -41,6 +41,7 @@ func TestSingleCompactionPolicySuite(t *testing.T) {
 }
 
 type SingleCompactionPolicySuite struct {
+	jitter string
 	suite.Suite
 
 	mockAlloc          *allocator.MockAllocator
@@ -52,7 +53,14 @@ type SingleCompactionPolicySuite struct {
 	singlePolicy *policy.SingleCompactionPolicy
 }
 
+func (s *SingleCompactionPolicySuite) TearDownTest() {
+	Params.Save(Params.DataCoordCfg.SingleCompactionThresholdJitter.Key, s.jitter)
+}
+
 func (s *SingleCompactionPolicySuite) SetupTest() {
+	// The boundary cases below assume the configured thresholds apply exactly.
+	s.jitter = Params.DataCoordCfg.SingleCompactionThresholdJitter.GetValue()
+	Params.Save(Params.DataCoordCfg.SingleCompactionThresholdJitter.Key, "0")
 	s.testLabel = &view.CompactionGroupLabel{
 		CollectionID: 1,
 		PartitionID:  10,
@@ -163,9 +171,9 @@ func (s *SingleCompactionPolicySuite) TestL2SingleCompaction() {
 		State:        datapb.CompactionTaskState_executing,
 	})
 
-	views, _, _, _, err := s.singlePolicy.TriggerOneCollection(context.TODO(), collID, false)
+	round, err := s.singlePolicy.TriggerOneCollection(context.TODO(), collID, false)
 	s.NoError(err)
-	s.Equal(2, len(views))
+	s.Equal(2, len(round.Candidates))
 }
 
 func (s *SingleCompactionPolicySuite) TestSortCompaction() {
@@ -198,9 +206,9 @@ func (s *SingleCompactionPolicySuite) TestSortCompaction() {
 		Type:         datapb.CompactionType_SortCompaction,
 	})
 
-	_, invisibleSortViews, visibleSortViews, _, err := s.singlePolicy.TriggerOneCollection(context.TODO(), collID, false)
+	round, err := s.singlePolicy.TriggerOneCollection(context.TODO(), collID, false)
 	s.NoError(err)
-	s.Equal(3, len(invisibleSortViews)+len(visibleSortViews))
+	s.Equal(3, len(round.InvisibleSortViews)+len(round.VisibleSortViews))
 }
 
 // TestTriggerSortsInvisibleSegmentsFirst checks that the sort sweep returns the
@@ -294,10 +302,82 @@ func (s *SingleCompactionPolicySuite) TestTriggerOneCollectionSkipExternal() {
 	mockHandler.EXPECT().GetCollection(mock.Anything, collID).Return(coll, nil)
 	pol := policy.NewSingleCompactionPolicy(s.singlePolicy.Meta, s.singlePolicy.IndexMeta, s.mockAlloc, mockHandler)
 
-	views, invisibleSortViews, visibleSortViews, triggerID, err := pol.TriggerOneCollection(context.Background(), collID, false)
+	round, err := pol.TriggerOneCollection(context.Background(), collID, false)
 	s.NoError(err)
-	s.Nil(views)
-	s.Nil(invisibleSortViews)
-	s.Nil(visibleSortViews)
-	s.EqualValues(0, triggerID)
+	s.Nil(round.Candidates)
+	s.Nil(round.InvisibleSortViews)
+	s.Nil(round.VisibleSortViews)
+	s.EqualValues(0, round.TriggerID)
+}
+
+// resetSingleCompactionAdmitterForTest replaces the process-wide admitter so a
+// test starts with a full bucket and fresh fairness cursors.
+func resetSingleCompactionAdmitterForTest() {
+	policy.ResetSingleCompactionAdmitterForTest()
+}
+
+// With a budget of two tokens and three eligible segments in each of two
+// collections, one trigger round admits one segment per collection: the
+// candidates of the whole round are admitted in one pass and the budget
+// rotates across collections instead of being drained by the first one.
+func (s *SingleCompactionPolicySuite) TestTriggerAdmitsAcrossCollections() {
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.IndexBasedCompaction.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.IndexBasedCompaction.Key)
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.SingleCompactionRateLimitTokens.Key, "2")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.SingleCompactionRateLimitTokens.Key)
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.SingleCompactionRateLimitInterval.Key, "60")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.SingleCompactionRateLimitInterval.Key)
+	resetSingleCompactionAdmitterForTest()
+
+	mt := s.singlePolicy.Meta
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Unset()
+	for _, collID := range []int64{100, 200} {
+		coll := &meta.CollectionInfo{ID: collID, Schema: meta.NewTestSchema()}
+		mt.MetaStore.PutCollection(coll)
+		s.handler.EXPECT().GetCollection(mock.Anything, collID).Return(coll, nil).Maybe()
+		for i := int64(1); i <= 3; i++ {
+			id := collID + i
+			// 201 deltalogs: over the file-count threshold, so every segment is eligible.
+			mt.Segments.SetSegment(id, buildTestSegment(id, collID, datapb.SegmentLevel_L2, 0, 10000, 201, true, false))
+		}
+	}
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&meta.CollectionInfo{
+		ID:     s.testLabel.CollectionID,
+		Schema: &schemapb.CollectionSchema{},
+	}, nil).Maybe()
+
+	events, err := s.singlePolicy.Trigger(context.Background())
+	s.NoError(err)
+	views := events[policy.TriggerTypeSingle]
+	s.Len(views, 2)
+	admittedCollections := make(map[int64]int)
+	for _, cv := range views {
+		admittedCollections[cv.GetGroupLabel().CollectionID]++
+	}
+	s.Equal(map[int64]int{100: 1, 200: 1}, admittedCollections)
+}
+
+// The budget is bounded by the room left in the inspector.
+func (s *SingleCompactionPolicySuite) TestTriggerBoundedByInspectorCapacity() {
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.IndexBasedCompaction.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.IndexBasedCompaction.Key)
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.SingleCompactionRateLimitTokens.Key, "10")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.SingleCompactionRateLimitTokens.Key)
+	resetSingleCompactionAdmitterForTest()
+
+	mt := s.singlePolicy.Meta
+	collID := int64(100)
+	coll := &meta.CollectionInfo{ID: collID, Schema: meta.NewTestSchema()}
+	mt.MetaStore.PutCollection(coll)
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Unset()
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil).Maybe()
+	for i := int64(1); i <= 5; i++ {
+		mt.Segments.SetSegment(collID+i, buildTestSegment(collID+i, collID, datapb.SegmentLevel_L2, 0, 10000, 201, true, false))
+	}
+	s.singlePolicy.RemainingCapacity = func() int { return 1 }
+
+	events, err := s.singlePolicy.Trigger(context.Background())
+	s.NoError(err)
+	s.Len(events[policy.TriggerTypeSingle], 1)
+	s.Equal(9.0, policy.GetSingleCompactionAdmitter().TokensForTest(), "only the admitted candidate consumed a token")
 }

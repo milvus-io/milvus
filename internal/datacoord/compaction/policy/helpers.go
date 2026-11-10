@@ -52,34 +52,43 @@ func HasTooManyDeletions(segment *meta.SegmentInfo) bool {
 	totalDeletedRows := int(stats.GetDeleteNumRows())
 	totalDeleteLogSize := stats.GetDeltaBinlogSize()
 
+	// Deterministic per-segment jitter de-synchronizes same-batch segments,
+	// whose accumulation rates are nearly identical, so they do not cross the
+	// hard thresholds simultaneously (see admission.go).
+	mult := SingleCompactionThresholdMultiplier(segment.ID)
+
 	// Too many deltalog files, accumulates IO count.
-	if deltaLogCount > Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsInt() {
+	if float64(deltaLogCount) > Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsFloat()*mult {
 		mlog.Info(context.TODO(), "delta logs file count exceeds threshold",
 			mlog.FieldSegmentID(segment.ID),
 			mlog.Int("delta log count", deltaLogCount),
 			mlog.Int("file number threshold", Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsInt()),
+			mlog.Float64("jitterMultiplier", mult),
 		)
 		return true
 	}
 
 	// The proportion of deleted rows is too large, int64 PK tends to accumulates deleted row counts.
-	if float64(totalDeletedRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() {
+	// The jittered ratio is capped at 1 so a fully deleted segment always qualifies.
+	if float64(totalDeletedRows)/float64(segment.GetNumOfRows()) >= min(Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat()*mult, 1) {
 		mlog.Info(context.TODO(), "deleted entities rows proportion exceeds threshold",
 			mlog.FieldSegmentID(segment.ID),
 			mlog.Int64("number of rows", segment.GetNumOfRows()),
 			mlog.Int("deleted rows", totalDeletedRows),
 			mlog.Float64("proportion threshold", Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat()),
+			mlog.Float64("jitterMultiplier", mult),
 		)
 		return true
 	}
 
 	// Delete size is too large, varchar PK tends to accumulates deltalog size.
-	if totalDeleteLogSize > Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetAsInt64() {
+	if float64(totalDeleteLogSize) > float64(Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetAsInt64())*mult {
 		mlog.Info(context.TODO(), "total delete entries size exceeds threshold",
 			mlog.FieldSegmentID(segment.ID),
 			mlog.Int64("numRows", segment.GetNumOfRows()),
 			mlog.Int64("delete entries size", totalDeleteLogSize),
 			mlog.Int64("size threshold", Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetAsInt64()),
+			mlog.Float64("jitterMultiplier", mult),
 		)
 		return true
 	}

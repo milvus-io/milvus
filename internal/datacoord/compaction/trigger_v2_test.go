@@ -1038,6 +1038,29 @@ func (s *CompactionTriggerManagerSuite) TestSubmitViewToSchedulerDefensiveReturn
 		s.triggerManager.SubmitSingleViewToScheduler(context.Background(), makeMixView(), policy.TriggerTypeSingle)
 	})
 
+	// Only a view that took an admission token gives one back when it fails
+	// before reaching the queue; a single view that bypassed admission (e.g.
+	// from the target reconciler) does not mint one.
+	s.Run("single early failure refunds only admitted views", func() {
+		s.SetupTest()
+		handler := meta.NewNMockHandler(s.T())
+		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
+			Return(nil, errors.New("get collection error")).Twice()
+		s.triggerManager.handler = handler
+
+		admitter := policy.GetSingleCompactionAdmitter()
+		admitter.SetTokensForTest(0)
+		tokens := admitter.TokensForTest
+
+		s.triggerManager.SubmitSingleViewToScheduler(context.Background(), makeMixView(), policy.TriggerTypeSingle)
+		s.Equal(0.0, tokens(), "a view that bypassed admission refunds nothing")
+
+		admitted := makeMixView()
+		admitted.Admitted = true
+		s.triggerManager.SubmitSingleViewToScheduler(context.Background(), admitted, policy.TriggerTypeSingle)
+		s.Equal(1.0, tokens(), "an admitted view that failed early gives its token back")
+	})
+
 	s.Run("single AllocN error returns before enqueue", func() {
 		s.SetupTest()
 		s.setIndexMeta(&index.IndexMeta{Indexes: make(map[UniqueID]map[UniqueID]*model.Index)})
@@ -1347,6 +1370,7 @@ func (s *CompactionTriggerManagerSuite) TestHandleTicker() {
 		}
 		s.triggerManager.policies[BumpSchemaVersionTicker] = mockPolicy
 		s.inspector.EXPECT().isFull().Return(true).Once()
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		s.triggerManager.handleTicker(context.Background(), BumpSchemaVersionTicker)
 	})
 
@@ -1360,6 +1384,7 @@ func (s *CompactionTriggerManagerSuite) TestHandleTicker() {
 		s.triggerManager.policies[BumpSchemaVersionTicker] = mockPolicy
 		// isFull() IS called now (step 2, before Trigger). Trigger() errors → no notify().
 		s.inspector.EXPECT().isFull().Return(false).Once()
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		s.triggerManager.handleTicker(context.Background(), BumpSchemaVersionTicker)
 	})
 
@@ -1374,6 +1399,7 @@ func (s *CompactionTriggerManagerSuite) TestHandleTicker() {
 		s.triggerManager.policies[BumpSchemaVersionTicker] = mockPolicy
 		// isFull() IS called now (step 2 gate before Trigger). Trigger returns nil → no notify.
 		s.inspector.EXPECT().isFull().Return(false).Once()
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		s.triggerManager.handleTicker(context.Background(), BumpSchemaVersionTicker)
 	})
 
@@ -1388,9 +1414,42 @@ func (s *CompactionTriggerManagerSuite) TestHandleTicker() {
 		}
 		s.triggerManager.policies[BumpSchemaVersionTicker] = mockPolicy
 		s.inspector.EXPECT().isFull().Return(false).Once()
+		s.inspector.EXPECT().getRemainingCapacity().Return(-1).Maybe()
 		// stubDispatchableView.Trigger() returns nil, so notify() short-circuits
 		// before reaching SubmitBumpSchemaVersionViewToScheduler. We only care here that
 		// isFull was consulted and the dispatch path was entered.
 		s.triggerManager.handleTicker(context.Background(), BumpSchemaVersionTicker)
 	})
+}
+
+// TestHandleTickerRefundsSingleViewsDroppedWhenFull checks that the single
+// views an automatic run drops at the capped dispatch, after the policy took
+// their admission tokens, give those tokens back; otherwise the shared budget
+// would stay spent on compactions that never reached the queue.
+func (s *CompactionTriggerManagerSuite) TestHandleTickerRefundsSingleViewsDroppedWhenFull() {
+	paramtable.Get().Save(Params.DataCoordCfg.SingleCompactionRateLimitTokens.Key, "2")
+	defer paramtable.Get().Reset(Params.DataCoordCfg.SingleCompactionRateLimitTokens.Key)
+	resetSingleCompactionAdmitterForTest()
+	defer resetSingleCompactionAdmitterForTest()
+	admittedViews := func(segmentIDs ...int64) []view.CompactionView {
+		return lo.Map(segmentIDs, func(segmentID int64, _ int) view.CompactionView {
+			return &policy.MixSegmentView{Label: s.testLabel, Segments: []*view.SegmentView{{ID: segmentID, Label: s.testLabel, Size: 1}}, TriggerID: 1000, Admitted: true}
+		})
+	}
+	// The policy spent both tokens on the two views, in a contested round.
+	admitter := policy.GetSingleCompactionAdmitter()
+	admitter.SetTokensForTest(0)
+	admitter.SetServedForTest(policy.AdmissionSourcePolicy, 2)
+	s.triggerManager.policies[SingleTicker] = &testCompactionPolicy{enabled: true, policyName: "test", triggerResult: map[policy.CompactionTriggerType][]view.CompactionView{
+		policy.TriggerTypeSingle: admittedViews(901, 902),
+	}}
+	// Room when the run starts, none by the time the single views are dispatched.
+	s.inspector.EXPECT().isFull().Return(false).Once()
+	s.inspector.EXPECT().isFull().Return(true).Once()
+	// No EnqueueCompaction expectation is set, so a submission would fail the test.
+
+	s.triggerManager.handleTicker(context.Background(), SingleTicker)
+
+	s.Equal(2.0, admitter.TokensForTest(), "both dropped views gave their tokens back")
+	s.Equal(0, admitter.ServedForTest(policy.AdmissionSourcePolicy), "the service charge of the dropped views is reversed")
 }
