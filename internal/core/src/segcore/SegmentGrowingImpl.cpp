@@ -4277,18 +4277,30 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
                 id_);
             continue;
         }
-        auto future = folly::via(&pool,
-            [this, column_groups, properties, i, num_rows, enable_async_load] {
-                auto task = LoadColumnGroup(
-                    column_groups, properties, i, num_rows, enable_async_load);
-                if (!enable_async_load) {
-                    return folly::coro::blockingWait(std::move(task));
-                }
-                return folly::coro::blockingWait(folly::coro::co_withExecutor(
-                    storage::ResolveAsyncLoadExecutor(
-                        {}, proto::common::LoadPriority::HIGH),
-                    std::move(task)));
-            }).semi();
+        auto future =
+            folly::via(
+                &pool,
+                [this,
+                 column_groups,
+                 properties,
+                 i,
+                 num_rows,
+                 enable_async_load] {
+                    auto task = LoadColumnGroup(column_groups,
+                                                properties,
+                                                i,
+                                                num_rows,
+                                                enable_async_load);
+                    if (!enable_async_load) {
+                        return folly::coro::blockingWait(std::move(task));
+                    }
+                    return folly::coro::blockingWait(
+                        folly::coro::co_withExecutor(
+                            storage::ResolveAsyncLoadExecutor(
+                                {}, proto::common::LoadPriority::HIGH),
+                            std::move(task)));
+                })
+                .semi();
         load_group_futures.emplace_back(std::move(future));
     }
 
@@ -4435,7 +4447,9 @@ SegmentGrowingImpl::LoadColumnGroup(
     }
 
     const auto window_bytes = static_cast<size_t>(
-        storagev2translator::StorageV2AsyncLoadReadWindowSizeBytes());
+        enable_async_load
+            ? storagev2translator::StorageV2AsyncLoadReadWindowSizeBytes()
+            : FieldDataLoadBatchSplitTargetBytes());
     auto sizes_result = chunk_reader->get_chunk_estimated_size();
     if (!sizes_result.ok() && !sizes_result.status().IsNotImplemented()) {
         throw milvus_storage::ToSegcoreError(sizes_result.status());
@@ -4515,37 +4529,51 @@ SegmentGrowingImpl::LoadColumnGroup(
             std::move(consume_cell),
             {.read_window_bytes = window_bytes});
     } else {
-        auto& pool =
-            ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
+        auto& pool = ThreadPools::GetExecutor(milvus::ThreadPoolPriority::HIGH);
         auto& admission = storage::LoadAdmissionController::GetInstance();
-        std::vector<std::future<void>> futures;
-        futures.reserve(cells.size());
+        auto read_batches = PlanCellLoadBatches(std::move(cells), window_bytes);
+        std::vector<folly::SemiFuture<folly::Unit>> futures;
+        futures.reserve(read_batches.size());
         // Join before destroying the reader and callback's borrowed result slots,
         // including when submission, reading, or conversion throws.
         auto drain = folly::makeGuard([&] { storage::DrainFutures(futures); });
-        for (size_t i = 0; i < cells.size(); ++i) {
+        for (size_t i = 0; i < read_batches.size(); ++i) {
             auto lease = folly::coro::blockingWait(admission.AcquireAsync(
-                {static_cast<size_t>(cells[i].memory_size), 1},
+                {read_batches[i].batch_loading_overhead_bytes, 1},
                 storage::LoadAdmissionPriority::High));
             futures.emplace_back(
-                pool.Submit([&, i, lease = std::move(lease)]() mutable {
+                folly::via(&pool, [&, i, lease = std::move(lease)]() mutable {
                     // Release at task completion, even if its future stays alive.
                     auto active_lease = std::move(lease);
+                    const auto& read_batch = read_batches[i];
+                    std::vector<int64_t> chunk_indices(read_batch.rg_count);
+                    std::iota(chunk_indices.begin(),
+                              chunk_indices.end(),
+                              read_batch.rg_offset);
                     auto batches_result = chunk_reader->get_chunks(
-                        {cells[i].local_rg_offset}, /*parallelism=*/1);
+                        chunk_indices, /*parallelism=*/1);
                     if (!batches_result.ok()) {
                         throw milvus_storage::ToSegcoreError(
                             batches_result.status());
                     }
                     auto batches = std::move(batches_result).ValueOrDie();
                     AssertInfo(
-                        batches.size() == 1,
+                        batches.size() == chunk_indices.size(),
                         "growing chunk reader returned unexpected batch count");
-                    consume_cell(batches, cells[i], i);
-                }));
+                    for (const auto& cell : read_batch.cells) {
+                        const auto offset =
+                            cell.local_rg_offset - read_batch.rg_offset;
+                        auto cell_batches =
+                            std::span(batches).subspan(offset, cell.rg_count);
+                        consume_cell(cell_batches, cell, cell.cid);
+                        for (auto& batch : cell_batches) {
+                            batch.reset();
+                        }
+                    }
+                }).semi());
         }
         for (auto& future : futures) {
-            future.get();
+            std::move(future).get();
         }
     }
     std::unordered_map<FieldId, std::vector<FieldDataPtr>> field_data_map;
