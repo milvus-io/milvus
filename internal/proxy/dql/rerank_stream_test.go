@@ -115,6 +115,46 @@ func TestRerankStreamingEligibility(t *testing.T) {
 	}
 }
 
+func TestHybridRerankStreamingEligibility(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		meta         rerankMeta
+		parentChains []*schemapb.FunctionChain
+		subChains    []*schemapb.FunctionChain
+		grouped      bool
+		want         bool
+	}{
+		{name: "legacy", meta: &legacyRerankMeta{}, want: true},
+		{name: "L0", meta: &legacyRerankMeta{}, subChains: []*schemapb.FunctionChain{l0FunctionChain()}, want: true},
+		{name: "L1", meta: &legacyRerankMeta{}, subChains: []*schemapb.FunctionChain{l1LimitFunctionChain(2)}, want: true},
+		{name: "grouped L0 L1", meta: &legacyRerankMeta{}, subChains: []*schemapb.FunctionChain{l0FunctionChain(), l1LimitFunctionChain(2)}, grouped: true, want: true},
+		{name: "top-level chain", meta: &functionChainRerankMeta{}, parentChains: []*schemapb.FunctionChain{l2LimitFunctionChain(2)}, want: true},
+		{name: "top-level chain and L1", meta: &functionChainRerankMeta{}, parentChains: []*schemapb.FunctionChain{l2LimitFunctionChain(2)}, subChains: []*schemapb.FunctionChain{l1LimitFunctionChain(2)}, want: true},
+		{name: "function score", meta: &funcScoreRerankMeta{}, want: true},
+		{name: "unsupported sub-search L2", meta: &legacyRerankMeta{}, subChains: []*schemapb.FunctionChain{l2LimitFunctionChain(2)}},
+		{name: "missing reranker"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := &SearchTask{
+				SearchRequest: &internalpb.SearchRequest{IsAdvanced: true, SubReqs: []*internalpb.SubSearchRequest{{SearchType: internalpb.SearchType_DEFAULT}}},
+				request:       &milvuspb.SearchRequest{FunctionChains: tc.parentChains, SubReqs: []*milvuspb.SubSearchRequest{{FunctionChains: tc.subChains}}},
+				rerankMeta:    tc.meta,
+				queryInfos:    []*planpb.QueryInfo{{}},
+			}
+			if _, ok := tc.meta.(*funcScoreRerankMeta); ok {
+				task.request.FunctionScore = &schemapb.FunctionScore{}
+			}
+			if tc.grouped {
+				task.queryInfos[0].GroupByFieldId = 101
+			}
+			if tc.name == "legacy" {
+				task.SubReqs[0].SearchType = internalpb.SearchType_PURE_ANN_SEARCH_WITH_FILTER
+			}
+			require.Equal(t, tc.want, task.supportsStreamingReduce())
+		})
+	}
+}
+
 func TestRerankStreamingMatchesBatch(t *testing.T) {
 	for _, tc := range []struct {
 		name          string

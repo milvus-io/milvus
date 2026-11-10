@@ -175,7 +175,7 @@ func TestSplitRetrieveResultEmitsOversizedUnitAlone(t *testing.T) {
 		}},
 	})
 	firstUnitBytes := queryChunkBytes(t, result, 1)
-	largeUnitBytes, err := (retrieveUnit{result: result, rowIndex: 1}).reducibleByteSize()
+	largeUnitBytes, err := (queryReduceUnit{result: result, rowIndex: 1}).reducibleByteSize()
 	require.NoError(t, err)
 	chunkBytes := firstUnitBytes + 1
 	require.Greater(t, largeUnitBytes, chunkBytes)
@@ -207,7 +207,7 @@ func TestSplitRetrieveResultWithGroupedUnits(t *testing.T) {
 
 func TestSplitRetrieveResultIncludesElementIndexBytes(t *testing.T) {
 	result := makeElementLevelResult([]int64{1, 2}, []int64{10, 20}, [][]int32{{0}, {1, 2, 3, 4, 5, 6, 7, 8}})
-	expectedBytes := queryUnitReferenceSize(t, retrieveUnit{result: result})
+	expectedBytes := queryUnitReferenceSize(t, queryReduceUnit{result: result})
 	require.Equal(t, expectedBytes, queryChunkBytes(t, result, 1))
 	chunks, err := SplitRetrieveResult(result, expectedBytes+1)
 	require.NoError(t, err)
@@ -397,7 +397,7 @@ func TestOrderedReduceStreamDefersOversizedUnitToNextChunk(t *testing.T) {
 	})
 	child := &queryTestStream{recv: []queryTestRecv{{chunk: result}}}
 	chunkBytes := queryChunkBytes(t, result, 1) + 1
-	largeUnitBytes, err := (retrieveUnit{result: result, rowIndex: 1}).reducibleByteSize()
+	largeUnitBytes, err := (queryReduceUnit{result: result, rowIndex: 1}).reducibleByteSize()
 	require.NoError(t, err)
 	require.Greater(t, largeUnitBytes, chunkBytes)
 
@@ -823,7 +823,7 @@ func queryChunkBytes(t *testing.T, result *internalpb.RetrieveResults, unitCount
 	t.Helper()
 	bytes := 0
 	for row := 0; row < unitCount; row++ {
-		unitBytes, err := (retrieveUnit{result: result, rowIndex: int64(row)}).reducibleByteSize()
+		unitBytes, err := (queryReduceUnit{result: result, rowIndex: int64(row)}).reducibleByteSize()
 		require.NoError(t, err)
 		bytes += unitBytes
 	}

@@ -93,7 +93,7 @@ func TestShardOrderByStreamMatchesBatch(t *testing.T) {
 						stream, err := NewShardReduceStream(&internalpb.RetrieveRequest{Limit: 3, OrderByFields: fields}, nil, children, chunkBytes)
 						require.NoError(t, err)
 						t.Cleanup(func() { require.NoError(t, stream.Close()) })
-						var got []retrieveUnit
+						var got []queryReduceUnit
 						for {
 							chunk, err := stream.Recv()
 							if err == io.EOF {
@@ -104,7 +104,7 @@ func TestShardOrderByStreamMatchesBatch(t *testing.T) {
 								require.True(t, stream.(*OrderedReduceStream).childStreams.IsDrained(i))
 							}
 							for row := 0; row < queryutil.GetRowCount(chunk); row++ {
-								got = append(got, retrieveUnit{result: chunk, rowIndex: int64(row)})
+								got = append(got, queryReduceUnit{result: chunk, rowIndex: int64(row)})
 							}
 						}
 						merged, err := buildRetrieveChunk(got)

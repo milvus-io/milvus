@@ -14,9 +14,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func queryUnitReferenceSize(t testing.TB, unit retrieveUnit) int {
+func queryUnitReferenceSize(t testing.TB, unit queryReduceUnit) int {
 	t.Helper()
-	chunk, err := buildRetrieveChunk([]retrieveUnit{unit})
+	chunk, err := buildRetrieveChunk([]queryReduceUnit{unit})
 	require.NoError(t, err)
 	return proto.Size(&internalpb.RetrieveResults{Ids: chunk.GetIds(), FieldsData: chunk.GetFieldsData(), ComputedResults: chunk.GetComputedResults(), ElementIndices: chunk.GetElementIndices()})
 }
@@ -32,7 +32,7 @@ func TestRetrieveUnitByteSizeProtobuf(t *testing.T) {
 	})
 	calculator := typeutil.NewFieldDataIdxComputer(result.GetFieldsData())
 	for row := range values {
-		unit := retrieveUnit{result: result, rowIndex: int64(row), fieldIndexComputer: calculator}
+		unit := queryReduceUnit{result: result, rowIndex: int64(row), fieldIndexComputer: calculator}
 		got, err := unit.reducibleByteSize()
 		require.NoError(t, err)
 		require.Equal(t, queryUnitReferenceSize(t, unit), got)
@@ -41,7 +41,7 @@ func TestRetrieveUnitByteSizeProtobuf(t *testing.T) {
 	}
 	result.ReqID = 123
 	result.AllRetrieveCount = math.MaxInt64
-	unit := retrieveUnit{result: result, fieldIndexComputer: calculator}
+	unit := queryReduceUnit{result: result, fieldIndexComputer: calculator}
 	got, err := unit.reducibleByteSize()
 	require.NoError(t, err)
 	require.Equal(t, queryUnitReferenceSize(t, unit), got)
@@ -64,7 +64,7 @@ func TestRetrieveUnitComputedBytes(t *testing.T) {
 		}},
 	}}
 	for row := int64(0); row < 3; row++ {
-		unit := retrieveUnit{result: result, rowIndex: row, fieldIndexComputer: typeutil.NewFieldDataIdxComputer(result.FieldsData)}
+		unit := queryReduceUnit{result: result, rowIndex: row, fieldIndexComputer: typeutil.NewFieldDataIdxComputer(result.FieldsData)}
 		got, err := unit.reducibleByteSize()
 		require.NoError(t, err)
 		require.Equal(t, queryUnitReferenceSize(t, unit), got)
@@ -101,7 +101,7 @@ func TestRetrieveUnitByteSizeMixedFields(t *testing.T) {
 	)
 	calculator := typeutil.NewFieldDataIdxComputer(result.GetFieldsData())
 	for row := 0; row < 3; row++ {
-		unit := retrieveUnit{result: result, rowIndex: int64(row), fieldIndexComputer: calculator}
+		unit := queryReduceUnit{result: result, rowIndex: int64(row), fieldIndexComputer: calculator}
 		got, err := unit.reducibleByteSize()
 		require.NoError(t, err)
 		require.Equal(t, queryUnitReferenceSize(t, unit), got)
@@ -109,7 +109,7 @@ func TestRetrieveUnitByteSizeMixedFields(t *testing.T) {
 		require.NoError(t, err)
 	}
 	result.Ids = &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"id", "", "long-id"}}}}
-	unit := retrieveUnit{result: result, rowIndex: 2, fieldIndexComputer: calculator}
+	unit := queryReduceUnit{result: result, rowIndex: 2, fieldIndexComputer: calculator}
 	got, err := unit.reducibleByteSize()
 	require.NoError(t, err)
 	require.Equal(t, queryUnitReferenceSize(t, unit), got)
@@ -130,7 +130,7 @@ func TestRetrieveUnitByteSizeVectorArray(t *testing.T) {
 		}
 		result.FieldsData = append(result.FieldsData, &schemapb.FieldData{Type: schemapb.DataType_ArrayOfVector, FieldId: 101,
 			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{ValidData: []bool{valid}, Data: &schemapb.VectorField_VectorArray{VectorArray: array}}}})
-		unit := retrieveUnit{result: result}
+		unit := queryReduceUnit{result: result}
 		got, err := unit.reducibleByteSize()
 		require.NoError(t, err)
 		require.Equal(t, queryUnitReferenceSize(t, unit), got)
@@ -146,12 +146,12 @@ func TestRetrieveUnitByteSizeCalculatorLifetime(t *testing.T) {
 	require.Same(t, calculator, first.fieldIndexComputer)
 	require.Same(t, calculator, second.fieldIndexComputer)
 	require.Nil(t, buffer.fieldIndexComputer)
-	for _, unit := range []retrieveUnit{first, second} {
+	for _, unit := range []queryReduceUnit{first, second} {
 		got, err := unit.reducibleByteSize()
 		require.NoError(t, err)
 		require.Equal(t, queryUnitReferenceSize(t, unit), got)
 	}
-	_, err := (retrieveUnit{result: first.result, rowIndex: -1}).reducibleByteSize()
+	_, err := (queryReduceUnit{result: first.result, rowIndex: -1}).reducibleByteSize()
 	require.Error(t, err)
 }
 
@@ -164,7 +164,7 @@ func BenchmarkRetrieveUnitByteSize(b *testing.B) {
 			Dim: 768, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, 768)}},
 		}},
 	})
-	unit := retrieveUnit{result: result, fieldIndexComputer: typeutil.NewFieldDataIdxComputer(result.GetFieldsData())}
+	unit := queryReduceUnit{result: result, fieldIndexComputer: typeutil.NewFieldDataIdxComputer(result.GetFieldsData())}
 	for _, mode := range []string{"direct", "materialized"} {
 		b.Run(mode, func(b *testing.B) {
 			b.ReportAllocs()
@@ -174,7 +174,7 @@ func BenchmarkRetrieveUnitByteSize(b *testing.B) {
 						b.Fatal(err)
 					}
 				} else {
-					chunk, err := buildRetrieveChunk([]retrieveUnit{unit})
+					chunk, err := buildRetrieveChunk([]queryReduceUnit{unit})
 					if err != nil {
 						b.Fatal(err)
 					}

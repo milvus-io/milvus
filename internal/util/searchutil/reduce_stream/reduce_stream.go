@@ -43,7 +43,8 @@ type ReduceStream interface {
 	Interrupt() (*internalpb.SearchResults, error)
 }
 
-type orderedUnit struct {
+// searchReduceUnit is one reducible Search hit, retaining its score and query-vector index for ranking.
+type searchReduceUnit struct {
 	result             *internalpb.SearchResults      // Source Chunk retained while the Unit is buffered.
 	data               *schemapb.SearchResultData     // Decoded Search data for the source Chunk.
 	queryIndex         int64                          // Query vector to which the Unit belongs.
@@ -52,16 +53,16 @@ type orderedUnit struct {
 	fieldIndexComputer *typeutil.FieldDataIdxComputer // Resolves nullable field positions in the source.
 }
 
-func (u orderedUnit) score() float32 {
+func (u searchReduceUnit) score() float32 {
 	return u.data.GetScores()[u.rowIndex]
 }
 
-func (u orderedUnit) pk() any {
+func (u searchReduceUnit) pk() any {
 	return typeutil.GetPK(u.data.GetIds(), u.rowIndex)
 }
 
 type orderedOutputBuffer struct {
-	units    []orderedUnit
+	units    []searchReduceUnit
 	byteSize int
 }
 
@@ -69,7 +70,7 @@ func (b *orderedOutputBuffer) isEmpty() bool {
 	return len(b.units) == 0
 }
 
-func (u orderedUnit) reducibleByteSize() (int, error) {
+func (u searchReduceUnit) reducibleByteSize() (int, error) {
 	data, row := u.data, u.rowIndex
 	if data == nil || row < 0 || row >= int64(len(data.GetScores())) {
 		return 0, merr.WrapErrServiceInternalMsg("Search Unit row %d is out of range", row)
@@ -120,7 +121,7 @@ func (u orderedUnit) reducibleByteSize() (int, error) {
 }
 
 type orderedChildBuffer struct {
-	units    []orderedUnit
+	units    []searchReduceUnit
 	cursor   int
 	groupKey func(int) (uint64, []any)
 }
@@ -129,11 +130,11 @@ func (b *orderedChildBuffer) hasUnit() bool {
 	return b.cursor < len(b.units)
 }
 
-func (b *orderedChildBuffer) front() orderedUnit {
+func (b *orderedChildBuffer) front() searchReduceUnit {
 	return b.units[b.cursor]
 }
 
-func (b *orderedChildBuffer) pop() orderedUnit {
+func (b *orderedChildBuffer) pop() searchReduceUnit {
 	unit := b.front()
 	b.cursor++
 	if !b.hasUnit() {
@@ -166,13 +167,13 @@ func (b *orderedChildBuffer) accept(chunk *internalpb.SearchResults, nq, topK in
 		return nil, fmt.Errorf("Search Chunk Topks total %d does not match hit count %d", totalTopK, hitCount)
 	}
 
-	b.units = make([]orderedUnit, 0, hitCount)
+	b.units = make([]searchReduceUnit, 0, hitCount)
 	b.cursor = 0
 	rowIndex := int64(0)
 	fieldIndexComputer := typeutil.NewFieldDataIdxComputer(data.GetFieldsData())
 	for queryIndex, count := range data.GetTopks() {
 		for i := int64(0); i < count; i++ {
-			b.units = append(b.units, orderedUnit{
+			b.units = append(b.units, searchReduceUnit{
 				result:             chunk,
 				data:               data,
 				queryIndex:         int64(queryIndex),
@@ -455,7 +456,7 @@ func (s *OrderedReduceStream) Recv() (*internalpb.SearchResults, error) {
 			return nil, s.fail(err)
 		}
 
-		oneReduceResult, chunkReady, err := s.produceNextUnits(readyBuffers, outputBuffer.byteSize)
+		oneReduceResult, chunkReady, err := s.produceNextUnit(readyBuffers, outputBuffer.byteSize)
 		if err != nil {
 			return nil, s.fail(err)
 		}
@@ -630,7 +631,7 @@ func (s *OrderedReduceStream) acceptMetadata(chunk *internalpb.SearchResults, da
 	s.metadata.ResultData.AllSearchCount += data.GetAllSearchCount()
 }
 
-func (s *OrderedReduceStream) produceNextUnits(readyBuffers []*orderedChildBuffer, outputBytes int) (*orderedUnit, bool, error) {
+func (s *OrderedReduceStream) produceNextUnit(readyBuffers []*orderedChildBuffer, outputBytes int) (*searchReduceUnit, bool, error) {
 	hitLimit := (s.topK - s.groupOffset) * s.groupSize
 	for s.currentQuery < s.nq {
 		if !s.preserveCandidates && s.currentQuery < s.nq-1 && s.emittedPerQuery[s.currentQuery] >= hitLimit {
@@ -758,14 +759,14 @@ func (s *OrderedReduceStream) produceNextUnits(readyBuffers []*orderedChildBuffe
 	return nil, false, nil
 }
 
-func (s *OrderedReduceStream) merge(outputBuffer *orderedOutputBuffer, oneReduceResult *orderedUnit) {
+func (s *OrderedReduceStream) merge(outputBuffer *orderedOutputBuffer, oneReduceResult *searchReduceUnit) {
 	if oneReduceResult != nil {
 		outputBuffer.units = append(outputBuffer.units, *oneReduceResult)
 		outputBuffer.byteSize += oneReduceResult.byteSize
 	}
 }
 
-func (s *OrderedReduceStream) pop(buffer *orderedChildBuffer) orderedUnit {
+func (s *OrderedReduceStream) pop(buffer *orderedChildBuffer) searchReduceUnit {
 	return buffer.pop()
 }
 
@@ -837,7 +838,7 @@ func (s *OrderedReduceStream) attachMetadata(chunk *internalpb.SearchResults) {
 }
 
 func buildSearchChunk(
-	units []orderedUnit,
+	units []searchReduceUnit,
 	nq int64,
 	topK int64,
 	metricType string,

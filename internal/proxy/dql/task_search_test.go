@@ -132,7 +132,7 @@ func TestConsumeResultStreamStopsAtLastVectorWindow(t *testing.T) {
 	last.ResultData.NumQueries, last.ResultData.Topks = 2, []int64{0, 2}
 	stream := &searchTaskReduceStream{chunks: []*internalpb.SearchResults{first, last, nil}}
 
-	result, _, err := (&SearchTask{}).consumeResultStream(stream, request, metric.IP, func(*internalpb.SearchResults) {})
+	result, _, err := (&SearchTask{}).consumeSearchResultStream(stream, request, metric.IP, func(*internalpb.SearchResults) {})
 	require.NoError(t, err)
 	require.Equal(t, []int64{1, 2}, result.Results.Topks)
 	require.Equal(t, []int64{11, 21, 22}, result.Results.Ids.GetIntId().GetData())
@@ -173,7 +173,7 @@ func TestConsumeResultStreamPreservesOrderByCandidateWindow(t *testing.T) {
 		},
 	}}
 
-	result, metricType, err := task.consumeResultStream(stream, task.SearchRequest, metric.L2, func(*internalpb.SearchResults) {})
+	result, metricType, err := task.consumeSearchResultStream(stream, task.SearchRequest, metric.L2, func(*internalpb.SearchResults) {})
 	require.NoError(t, err)
 	require.Equal(t, metric.L2, metricType)
 	require.Equal(t, []int64{10, 11, 12}, result.GetResults().GetIds().GetIntId().GetData())

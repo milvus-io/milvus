@@ -1167,11 +1167,31 @@ func (t *QueryTask) executeWorkload(ctx context.Context, exec shardclient.Execut
 	return nil
 }
 
+func (t *QueryTask) supportsStreamingReduce() bool {
+	req := t.RetrieveRequest
+	if req == nil || req.GetIsCount() {
+		// Missing requests and legacy count results cannot use the Query stream reducer.
+		return false
+	}
+	if len(req.GetOrderByFields()) > 0 {
+		// Plain ORDER BY drains and resolves worker versions before sorting.
+		// Group By + ORDER BY merges all groups before Proxy sorts them. Shared Query validation
+		// requires an explicit limit for ORDER BY in either reduction mode.
+		// Ungrouped aggregates with ORDER BY are not supported by this streaming path.
+		return req.GetLimit() > 0 && (len(req.GetGroupByFieldIds()) > 0 || len(req.GetAggregates()) == 0)
+	}
+	if len(req.GetGroupByFieldIds()) > 0 || len(req.GetAggregates()) > 0 {
+		return true
+	}
+	// Plain Query needs a positive limit or the Unlimited sentinel.
+	return req.GetLimit() > 0 || req.GetLimit() == typeutil.Unlimited
+}
+
 func (t *QueryTask) executeByQueryView(ctx context.Context) error {
 	legacy := t.viewQueryClient.Legacy()
 	// Refresh applies to new requests, not retries. Retained-plan requery stays on Batch.
 	allowStreaming := t.queryViewPlans == nil && paramtable.Get().ProxyCfg.EnableReduceStream.GetAsBool() &&
-		queryclient.SupportsQueryStream(t.RetrieveRequest)
+		t.supportsStreamingReduce()
 	request := &queryclient.LegacyQueryRequest{
 		Req: t.RetrieveRequest, Plans: t.queryViewPlans, Schema: t.schema.CollectionSchema,
 		BarrierMVCC: t.MvccTimestamp, AllowStreaming: allowStreaming,

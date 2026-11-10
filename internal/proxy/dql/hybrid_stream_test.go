@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/internal/views/viewquery"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -53,7 +54,7 @@ func TestHybridStreamingEligibility(t *testing.T) {
 	require.True(t, task.supportsStreamingReduce())
 	task.SubReqs[0].GroupByFieldId = 0
 	task.rerankMeta = &functionChainRerankMeta{}
-	require.False(t, task.supportsStreamingReduce())
+	require.True(t, task.supportsStreamingReduce())
 }
 
 func TestSearchTaskConsumesHybridStreamsWithIndependentWindows(t *testing.T) {
@@ -129,7 +130,7 @@ func TestHybridGroupStreamingCandidatesMatchBatch(t *testing.T) {
 						require.NoError(t, err)
 						defer stream.Close()
 						task := &SearchTask{SearchRequest: &internalpb.SearchRequest{IsAdvanced: true, GroupByFieldIds: []int64{101}}}
-						actual, _, err := task.consumeResultStream(stream, request, metric, func(*internalpb.SearchResults) {})
+						actual, _, err := task.consumeSearchResultStream(stream, request, metric, func(*internalpb.SearchResults) {})
 						require.NoError(t, err)
 						require.True(t, proto.Equal(batch.GetResults(), actual.GetResults()), "batch=%s\nstream=%s", batch.GetResults(), actual.GetResults())
 					})
@@ -145,7 +146,7 @@ func TestHybridGroupStreamingEmptyCandidates(t *testing.T) {
 	require.NoError(t, err)
 	defer stream.Close()
 	task := &SearchTask{SearchRequest: &internalpb.SearchRequest{IsAdvanced: true, GroupByFieldIds: []int64{101}}}
-	result, _, err := task.consumeResultStream(stream, request, "IP", func(*internalpb.SearchResults) {})
+	result, _, err := task.consumeSearchResultStream(stream, request, "IP", func(*internalpb.SearchResults) {})
 	require.NoError(t, err)
 	require.Equal(t, []int64{0, 0}, result.GetResults().GetTopks())
 	require.Zero(t, typeutil.GetSizeOfIDs(result.GetResults().GetIds()))
@@ -236,13 +237,14 @@ func (s *SearchPipelineSuite) TestHybridElementStreamingMatchesBatch() {
 		{"mixed-topk-avg", [2]hybridSubSearchKind{hybridSubSearchStructElement, hybridSubSearchNormal}, false, elementCollapseConfig{Strategy: elementCollapseTopKAvg, TopK: 2}},
 		{"embedding-list", [2]hybridSubSearchKind{hybridSubSearchStructEmbList, hybridSubSearchStructEmbList}, false, defaultElementCollapseConfig()},
 		{"element-and-list", [2]hybridSubSearchKind{hybridSubSearchStructElement, hybridSubSearchStructEmbList}, false, defaultElementCollapseConfig()},
+		{"worker-l0-l1", [2]hybridSubSearchKind{hybridSubSearchNormal, hybridSubSearchNormal}, false, defaultElementCollapseConfig()},
 	}
 	for _, tc := range cases {
 		for _, metric := range []string{"IP", "L2"} {
 			if metric == "L2" && isElementCollapseSumFamily(tc.collapse.Strategy) {
 				continue // The existing API rejects sum-family collapse for L2.
 			}
-			for _, strategy := range []string{"rrf", "weighted"} {
+			for _, strategy := range []string{"rrf", "weighted", "function-score"} {
 				for _, nq := range []int64{1, 2} {
 					for _, emptyFirst := range []bool{false, true} {
 						s.Run(fmt.Sprintf("%s/%s/%s/nq%d/empty%t", tc.name, metric, strategy, nq, emptyFirst), func() {
@@ -252,7 +254,17 @@ func (s *SearchPipelineSuite) TestHybridElementStreamingMatchesBatch() {
 							if strategy == "weighted" {
 								params = `{"weights":[0.3,0.7]}`
 							}
-							task.rerankMeta = newRerankMetaFromLegacy([]*commonpb.KeyValuePair{{Key: "strategy", Value: strategy}, {Key: "params", Value: params}})
+							if strategy != "function-score" {
+								task.rerankMeta = newRerankMetaFromLegacy([]*commonpb.KeyValuePair{{Key: "strategy", Value: strategy}, {Key: "params", Value: params}})
+							}
+							if tc.name == "worker-l0-l1" {
+								task.request.FunctionScore = nil
+								if strategy == "function-score" {
+									return // function_score with sub-search chains is rejected by request validation.
+								}
+								task.request.SubReqs[0].FunctionChains = []*schemapb.FunctionChain{l0FunctionChain(), l1LimitFunctionChain(2)}
+								task.queryInfos = []*planpb.QueryInfo{{}, {}}
+							}
 							task.rankParams.limit, task.rankParams.offset, task.rankParams.roundDecimal = 2, 1, -1
 							task.hybridSubSearchInfos = make([]hybridSubSearchInfo, 2)
 							batch := make([]*milvuspb.SearchResults, 2)
@@ -261,6 +273,9 @@ func (s *SearchPipelineSuite) TestHybridElementStreamingMatchesBatch() {
 								task.SubReqs[index].Nq, task.SubReqs[index].Topk = nq, 4
 								task.SubReqs[index].Offset = int64(index)
 								task.SubReqs[index].MetricType, task.SubReqs[index].SearchType = metric, internalpb.SearchType_PURE_ANN_SEARCH_NO_FILTER
+								if tc.name == "worker-l0-l1" && index == 0 {
+									task.SubReqs[index].SearchType = internalpb.SearchType_DEFAULT
+								}
 								task.hybridSubSearchInfos[index] = hybridSubSearchInfo{Kind: kind, Collapse: tc.collapse}
 								request, err := viewquery.BuildSubSearchRequest(task.SearchRequest, task.SubReqs[index])
 								s.Require().NoError(err)
