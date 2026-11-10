@@ -51,6 +51,7 @@ class StructArrayTestBase(TestMilvusClientV2Base):
         dim=DIM,
         capacity=CAPACITY,
         extra_fields=(),
+        shards_num=None,
     ):
         name = cf.gen_unique_str("struct_enhance")
         schema = cf.gen_collection_schema(
@@ -89,7 +90,8 @@ class StructArrayTestBase(TestMilvusClientV2Base):
                     metric_type=metric,
                     params={"M": 16, "efConstruction": 200} if kind == "HNSW" else {},
                 )
-        self.create_collection(client, name, schema=schema, index_params=indexes, consistency_level="Strong")
+        options = {"shards_num": shards_num} if shards_num is not None else {}
+        self.create_collection(client, name, schema=schema, index_params=indexes, consistency_level="Strong", **options)
         return name, schema
 
     def assert_rows(self, client, name, model):
@@ -105,6 +107,44 @@ class StructArrayTestBase(TestMilvusClientV2Base):
         self.flush(client, name)
         self.release_collection(client, name)
         self.load_collection(client, name)
+
+    def assert_nullable_element_search(self, client, name, model, index_type="FLAT"):
+        """Check every live vector coordinate and score, including gaps left by NULL slots."""
+        vectors = {
+            (pk, offset): element["emb"]
+            for pk, row in model.items()
+            for offset, element in enumerate(row["clips"] or [])
+            if element["emb"] is not None
+        }
+        limit = max(1, len(vectors) + 1)
+        assert limit <= 16384, "Use a bounded corpus for exhaustive element search"
+        queries = [normalized_vector(701), normalized_vector(907)]
+        results, _ = self.search(
+            client,
+            name,
+            queries,
+            anns_field="clips[emb]",
+            limit=limit,
+            search_params={"metric_type": "L2", "params": {"ef": max(512, limit)} if index_type == "HNSW" else {}},
+            output_fields=["clips"],
+            consistency_level="Strong",
+        )
+        assert len(results) == len(queries)
+        for query, hits in zip(queries, results):
+            coordinates = [(hit["id"], hit["offset"]) for hit in hits]
+            assert len(coordinates) == len(vectors) and set(coordinates) == set(vectors), {
+                "missing": set(vectors) - set(coordinates),
+                "unexpected": set(coordinates) - set(vectors),
+                "actual_count": len(coordinates),
+                "expected_count": len(vectors),
+            }
+            distances = [hit["distance"] for hit in hits]
+            assert distances == sorted(distances)
+            for hit, coordinate in zip(hits, coordinates):
+                assert hit["distance"] == pytest.approx(
+                    vector_score(query, vectors[coordinate], "L2"), abs=2e-4, rel=2e-4
+                )
+                assert_values_equal(hit["entity"]["clips"], model[hit["id"]]["clips"])
 
     def assert_insert_rejected(self, client, name, rows, model):
         response, succeeded = self.insert(client, name, rows, check_task=CheckTasks.check_nothing)
@@ -157,14 +197,15 @@ class StructArrayTestBase(TestMilvusClientV2Base):
                 expr = f"MATCH_{quantifier}(clips, {expression}{suffix})"
                 actual, _ = self.query(client, name, filter=expr, output_fields=["id"], limit=len(model) + 10)
                 assert {r["id"] for r in actual} == expected, expr
+        expected = {(pk, j) for pk, r in model.items() for j, e in enumerate(r["clips"] or []) if e["score"] is None}
+        assert len(expected) < 16384, "Use a bounded corpus for exhaustive element filtering"
         filtered, _ = self.query(
             client,
             name,
             filter="element_filter(clips, $[score] IS NULL)",
             output_fields=["id", "clips"],
-            limit=len(model) * 8 + 10,
+            limit=max(1, len(expected) + 1),
         )
-        expected = {(pk, j) for pk, r in model.items() for j, e in enumerate(r["clips"] or []) if e["score"] is None}
         assert {(r["id"], r["offset"]) for r in filtered} == expected
         assert len(filtered) == len(expected)
         for row in filtered:

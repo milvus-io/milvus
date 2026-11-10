@@ -722,27 +722,36 @@ class TestMilvusClientStructArrayPartialUpdatePaths(StructArrayTestBase):
             "emb": None if null_value else normalized_vector(90),
             "tags": None if null_value else [None, 7],
         }
-        handler = client._get_connection()
-        request = handler._prepare_row_upsert_request(name, [{"id": 2, "clips": [element]}], partial_update=True)
-        # The ordinary SDK row encoder only sets VectorArray.dim. Raw PATH_REPLACE
-        # validates both dimensions before the normal insert normalization runs.
-        for field in wire_struct(request).fields:
-            if field.HasField("vectors") and field.vectors.HasField("vector_array"):
-                field.vectors.dim = field.vectors.vector_array.dim
-        if target != "element":
-            selected = copy.deepcopy(wire_child(request, target))
-            del wire_struct(request).fields[:]
-            wire_struct(request).fields.append(selected)
-        path = "[1]" if target == "element" else f"[1][{target}]"
-        request.field_ops.add(field_name="clips", op=3, path=path)
-        check_status(handler._stub.Upsert(request, timeout=30).status)
-        if target == "element":
-            model[2]["clips"][1] = element
-        else:
-            model[2]["clips"][1][target] = element[target]
-        self.assert_rows(client, name, model)
-        self.reload_collection(client, name)
-        self.assert_rows(client, name, model)
+        # Exercise both removal and replacement of previously searchable vectors.
+        values = (
+            [normalized_vector(90), normalized_vector(91), None] if target in ("emb", "element") else [element["emb"]]
+        )
+        self.assert_nullable_element_search(client, name, model)
+        for vector in values:
+            element["emb"] = vector
+            handler = client._get_connection()
+            request = handler._prepare_row_upsert_request(name, [{"id": 2, "clips": [element]}], partial_update=True)
+            # The ordinary SDK row encoder only sets VectorArray.dim. Raw PATH_REPLACE
+            # validates both dimensions before the normal insert normalization runs.
+            for field in wire_struct(request).fields:
+                if field.HasField("vectors") and field.vectors.HasField("vector_array"):
+                    field.vectors.dim = field.vectors.vector_array.dim
+            if target != "element":
+                selected = copy.deepcopy(wire_child(request, target))
+                del wire_struct(request).fields[:]
+                wire_struct(request).fields.append(selected)
+            path = "[1]" if target == "element" else f"[1][{target}]"
+            request.field_ops.add(field_name="clips", op=3, path=path)
+            check_status(handler._stub.Upsert(request, timeout=30).status)
+            if target == "element":
+                model[2]["clips"][1] = copy.deepcopy(element)
+            else:
+                model[2]["clips"][1][target] = element[target]
+            for phase in range(2):
+                self.assert_rows(client, name, model)
+                self.assert_nullable_element_search(client, name, model)
+                if phase == 0:
+                    self.reload_collection(client, name)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("dtype", [DataType.INT64, DataType.VARCHAR], ids=["int64", "varchar"])

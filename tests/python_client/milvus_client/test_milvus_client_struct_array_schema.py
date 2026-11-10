@@ -17,11 +17,15 @@
 """Struct Array schema E2E coverage."""
 
 import copy
+import json
+import os
 import secrets
 import time
+from urllib.parse import urlsplit
 
 import grpc
 import pytest
+import requests
 from base.struct_array import StructArrayTestBase, TypedStructArrayTestBase
 from common import common_func as cf
 from common.common_type import CaseLabel, CheckTasks
@@ -747,16 +751,28 @@ class TestMilvusClientStructArrayAddSubfield(StructArrayTestBase):
         self.reload_collection(client, name)
         self.assert_rows(client, name, model)
 
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_added_children_survive_compaction_and_mmap(self):
+    @pytest.mark.parametrize(
+        "index_type",
+        [
+            pytest.param("FLAT", marks=pytest.mark.tags(CaseLabel.L2)),
+            pytest.param("HNSW", marks=pytest.mark.tags(CaseLabel.L3)),
+        ],
+    )
+    def test_added_children_survive_compaction_and_mmap(self, index_type, host, token):
         """
         target: materialize child backfill without changing nested validity or original fields
         method: two sealed batches, add scalar/Array children, partial writes, real compaction and mmap
         expected: completed compaction has output segments and all rows/predicates stay correct
         """
         client = self._client()
-        name, schema = self.create_struct_collection(client, nullable_children())
-        rows = [make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n)) for n in range(1500)]
+        name, schema = self.create_struct_collection(client, nullable_children(), child_index=index_type, shards_num=1)
+        rows = [make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n)) for n in range(6000)]
+        for row in rows:
+            for offset, element in enumerate(row["clips"] or []):
+                if 100 <= row["id"] < 500 or offset % 2 == 0:
+                    element["emb"] = None
+        for batch in (rows[:3000], rows[3000:]):
+            assert sum(e["emb"] is not None for row in batch for e in row["clips"] or []) >= 1024
         model = self.insert_rows_with_model(client, name, rows)
         self.flush(client, name)
         self.add_collection_field(client, name, "clips[new_scalar]", DataType.INT64, nullable=True)
@@ -775,15 +791,65 @@ class TestMilvusClientStructArrayAddSubfield(StructArrayTestBase):
             for element in row["clips"] or []:
                 element.update(new_scalar=None, new_array=None)
         changes = []
-        for n in range(0, 1500, 7):
+        for n in range(0, 6000, 7):
             row = copy.deepcopy(model[n])
-            for element in row["clips"] or []:
-                element.update(new_scalar=n, new_array=["雪", None])
+            for offset, element in enumerate(row["clips"] or []):
+                element.update(
+                    new_scalar=n,
+                    new_array=["雪", None],
+                    emb=normalized_vector(n * 8 + offset) if offset % 2 == 0 else None,
+                )
             changes.append(row)
         self.upsert(client, name, changes)
         model.update({r["id"]: r for r in changes})
+        deleted = list(range(3, 6000, 11))
+        self.delete(client, name, ids=deleted)
+        for pk in deleted:
+            del model[pk]
         self.reload_collection(client, name)
+        assert self.wait_for_index_ready(client, name, index_name="clips[emb]", timeout=300)
+        info = client.describe_index(name, "clips[emb]")
+        assert info["index_type"] == index_type and int(info["indexed_rows"]) >= 1024, info
+        log.info(f"STRUCT_NULL_COMPACTION_INDEX phase=before info={info}")
+
+        def assert_loaded_hnsw(phase):
+            if index_type != "HNSW":
+                return
+            # L3: actual-index proof requires the read-only administration endpoint.
+            hostname = urlsplit(host if "://" in host else f"http://{host}").hostname
+            admin_uri = os.environ.get("STRUCT_ARRAY_ADMIN_URI", f"http://{hostname}:9091")
+            assert token and ":" in token, "HNSW path proof requires administrator credentials"
+            description, _ = self.describe_collection(client, name)
+            collection_id = description["collection_id"]
+            emb_id = self.get_child_id(client, name, "emb")
+            deadline = time.monotonic() + 90
+            while True:
+                response = requests.get(
+                    f"{admin_uri}/api/v1/_qn/segments",
+                    auth=tuple(token.split(":", 1)),
+                    params={"collection_id": collection_id, "in": "qn"},
+                    timeout=15,
+                )
+                response.raise_for_status()
+                segments = [s for s in response.json() or [] if str(s["collection_id"]) == str(collection_id)]
+                if any(
+                    s.get("state", "").lower() == "sealed"
+                    and any(
+                        int(f["field_id"]) == emb_id
+                        and f.get("is_loaded") in (True, "true")
+                        and int(f.get("index_size", 0)) > 0
+                        for f in s.get("index_fields", [])
+                    )
+                    for s in segments
+                ):
+                    log.info(f"STRUCT_NULL_COMPACTION_LOADED phase={phase} segments={json.dumps(segments)}")
+                    return
+                assert time.monotonic() < deadline, (phase, "No loaded HNSW artifact", segments)
+                time.sleep(1)
+
+        assert_loaded_hnsw("before")
         self.assert_rows(client, name, model)
+        self.assert_nullable_element_search(client, name, model, index_type)
         deadline = time.monotonic() + 120
         while True:
             compact_id, _ = self.compact(client, name)
@@ -796,11 +862,20 @@ class TestMilvusClientStructArrayAddSubfield(StructArrayTestBase):
         plans = client.get_compaction_plans(compact_id, timeout=30)
         assert any(p.sources and p.targets for p in plans.plans), plans
         log.info(f"STRUCT_ENHANCE_COMPACTION id={compact_id} plans={plans}")
+        self.assert_rows(client, name, model)
+        self.assert_nullable_element_search(client, name, model, index_type)
         self.release_collection(client, name)
         self.alter_collection_properties(client, name, properties={"mmap.enabled": True})
         self.load_collection(client, name)
         self.assert_rows(client, name, model)
         self.assert_nullable_predicates(client, name, model)
+
+        assert self.wait_for_index_ready(client, name, index_name="clips[emb]", timeout=300)
+        info = client.describe_index(name, "clips[emb]")
+        assert info["index_type"] == index_type and int(info["indexed_rows"]) >= 1024, info
+        log.info(f"STRUCT_NULL_COMPACTION_INDEX phase=reloaded info={info}")
+        assert_loaded_hnsw("reloaded")
+        self.assert_nullable_element_search(client, name, model, index_type)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_new_vector_child_search_ready_after_refresh(self):
