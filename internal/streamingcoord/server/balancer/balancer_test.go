@@ -25,6 +25,7 @@ import (
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
@@ -1111,6 +1112,25 @@ func TestBalancer_WaitGracePeriodWhenNodeNotAlive(t *testing.T) {
 func TestBalancer_NoGracePeriodWhenRemoveSucceeds(t *testing.T) {
 	// The helper fails at its 10s assign timeout if the balancer waits the 30s grace period.
 	gap := reassignFromLostNode(t, nil, "30s")
+	assert.Less(t, gap, 30*time.Second)
+}
+
+func TestBalancer_NoGracePeriodWhenWALFencesPreviousWriter(t *testing.T) {
+	paramtable.Init()
+	previousWALName := message.GetDefaultWALName()
+	defer message.RegisterDefaultWALName(previousWALName)
+	accessMode := &paramtable.Get().PulsarCfg.ProducerAccessMode
+	defer accessMode.SwapTempValue(accessMode.SwapTempValue(paramtable.PulsarProducerAccessModeExclusiveWithFencing))
+
+	// The pulsar access mode does not matter for another wal: the grace period still applies.
+	message.RegisterDefaultWALName(message.WALNameKafka)
+	gap := reassignFromLostNode(t, types.ErrNotAlive, "500ms")
+	assert.GreaterOrEqual(t, gap, 500*time.Millisecond)
+
+	// Pulsar opened with exclusiveWithFencing fences out the previous writer, so the balancer does not wait.
+	// The helper fails at its 10s assign timeout if the balancer waits the 30s grace period.
+	message.RegisterDefaultWALName(message.WALNamePulsar)
+	gap = reassignFromLostNode(t, types.ErrNotAlive, "30s")
 	assert.Less(t, gap, 30*time.Second)
 }
 

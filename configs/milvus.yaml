@@ -363,6 +363,7 @@ pulsar:
   # exclusiveWithFencing: the producer creation fences out the producers that are connected to the topic, so a new wal owner does not wait for the previous one to disconnect.
   # shared: multiple producers can write to the topic at the same time.
   # exclusive access is enforced by pulsar broker 2.8.0 or later, exclusiveWithFencing requires pulsar broker 2.11.0 or later.
+  # With exclusiveWithFencing the streaming coord does not wait streaming.walBalancer.nodeLostGracePeriod before it reassigns the wal of a lost streaming node.
   producerAccessMode: exclusive
   # The max time that a streaming node retries creating the pulsar producer when it opens a wal, 1m by default.
   # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration

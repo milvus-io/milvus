@@ -710,6 +710,11 @@ func (b *balancerImpl) waitNodeLostGracePeriod(ctx context.Context, meta *channe
 	if grace <= 0 {
 		return nil
 	}
+	if walFencesPreviousWriter() {
+		b.Logger().Info(ctx, "skip grace period, the wal fences out the previous writer when it is opened",
+			mlog.String("target", meta.CurrentAssignment().String()))
+		return nil
+	}
 	b.Logger().Info(ctx, "wait grace period before assigning channel whose streaming node is lost",
 		mlog.String("target", meta.CurrentAssignment().String()),
 		mlog.Duration("gracePeriod", grace))
@@ -721,6 +726,16 @@ func (b *balancerImpl) waitNodeLostGracePeriod(ctx context.Context, meta *channe
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// walFencesPreviousWriter reports whether opening a wal on a new streaming node fences out the writer of
+// the previous one by itself. The grace period only gives a lost streaming node time to exit, so it is
+// not needed then: a previous writer that is still alive fails its next write instead.
+// If the streaming nodes do not run with the same pulsar.producerAccessMode as the coord, the wal is
+// still opened in exclusive mode, which refuses a second writer rather than admitting it.
+func walFencesPreviousWriter() bool {
+	return message.GetDefaultWALName() == message.WALNamePulsar &&
+		paramtable.Get().PulsarCfg.ProducerAccessMode.GetValue() == paramtable.PulsarProducerAccessModeExclusiveWithFencing
 }
 
 // generateCurrentLayout generate layout from all nodes info and meta.
