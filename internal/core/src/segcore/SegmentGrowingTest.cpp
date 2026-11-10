@@ -234,9 +234,21 @@ TEST_P(GrowingManifestLoadTest, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
                                   : "growing_recovery_checkpoint_row_cap_sync"))
                          .string();
     std::filesystem::remove_all(base_path);
-    milvus::test::V3SegmentTestData test_data(
-        schema, 2, 3, dim, TestLocalPath, base_path);
+    milvus::test::V3SegmentTestData test_data(schema,
+                                              2,
+                                              3,
+                                              dim,
+                                              TestLocalPath,
+                                              base_path,
+                                              "",
+                                              /*file_per_batch=*/true);
     ASSERT_EQ(test_data.NumColumnGroups(), 2);
+    for (int64_t i = 0; i < test_data.NumColumnGroups(); ++i) {
+        auto reader = test_data.CreateChunkReader(i);
+        auto rows = reader->get_chunk_rows();
+        ASSERT_TRUE(rows.ok());
+        ASSERT_EQ(rows.ValueOrDie(), (std::vector<uint64_t>{3, 3}));
+    }
     ASSERT_TRUE(ManifestHasField(test_data, RowFieldID));
     ASSERT_TRUE(ManifestHasField(test_data, TimestampFieldID));
 
@@ -254,7 +266,8 @@ TEST_P(GrowingManifestLoadTest, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
         CreateGrowingSegment(schema, empty_index_meta, load_info.segmentid());
     segment->SetLoadInfo(load_info);
     milvus::tracer::TraceContext trace_ctx;
-    // Force multiple read windows, with the checkpoint inside the final one.
+    // Force multiple async windows; synchronous recovery uses the sealed batch
+    // target and should merge the small groups, including the checkpoint tail.
     const auto window_bytes =
         storagev2translator::StorageV2AsyncLoadReadWindowSizeBytes();
     storagev2translator::SetStorageV2AsyncLoadReadWindowSizeBytes(1);
@@ -286,10 +299,11 @@ TEST_P(GrowingManifestLoadTest, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
         // Both optional admission limits are disabled; synchronous reads must
         // still execute on the bounded HIGH pool.
         segment->Load(trace_ctx, nullptr);
-        EXPECT_GT(
+        EXPECT_EQ(
             milvus::monitor::internal_storage_pool_task_submitted_total_high
-                .Value(),
-            high_tasks);
+                    .Value() -
+                high_tasks,
+            test_data.NumColumnGroups());
     }
     EXPECT_EQ(
         milvus::monitor::internal_storage_pool_task_submitted_total_low.Value(),
