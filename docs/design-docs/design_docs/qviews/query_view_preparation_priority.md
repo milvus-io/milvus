@@ -13,7 +13,7 @@
 1. 优先级是范围 `[Pmin, Pmax]` 内的有符号整数，`Pmin < 0 < Pmax`。0 为默认基准，负数更低，正数更高。
 2. 它是绝对分值，不是增量命令；收到 `+10` 始终表示值为 10。
 3. **同一个 QueryView identity 的优先级 immutable**。创建时计算，此后准备、重试、重发与恢复均保留原值。
-4. Coord 使用 `(ResourceGroup, Collection)` 聚合访问统计计算新 View 的分值。SN 为状态机仍持有的 View 独立上报最后活动时间与 GetQueryPlan 累计访问次数，不按 Up 过滤；Coord 逐 View 计算速率后聚合，QN 不新增访问统计。
+4. Coord 使用 `(ResourceGroup, Collection)` 聚合访问统计计算新 View 的分值。SN 为状态机仍持有的 View 独立上报最后活动时间与 GetQueryPlan 累计访问次数，不按 Up 过滤；Coord 由各 View 状态机维护窗口请求数贡献后聚合，QN 不新增访问统计。
 5. RG 内制定策略，不创建跨 RG 的唯一恢复目标或串行屏障。无实际资源竞争时并行推进。
 6. 优先级不改变 placement、readiness、schema/MVCC、lease、引用计数或 WAL 顺序。
 
@@ -84,7 +84,7 @@ QN/SN 将固定值与当前 acquisition 一起保存。不能为重排而替换�
 统计输入来自同一 `(RG, collection)` 的整体访问情况：
 
 - 最后活动时间：域内已观测 View 最后活动时间的最大值。
-- 查询流量：域内有效 View 的近期 GetQueryPlan 访问速率之和。
+- 查询流量：域内存活 View 的近期窗口 GetQueryPlan 请求数之和；ObservedAt用于判断最近观测时间。
 
 新 View 不需要有自己的查询历史，也不与某一个旧 View 一一对应。不同 RG 的同一 collection 独立计算；SN 共享物理资源不改变这一业务聚合边界。
 
@@ -98,7 +98,7 @@ QN/SN 将固定值与当前 acquisition 一起保存。不能为重排而替换�
 P(view) = clamp(
     ConfigScore(replica_configuration)
   + StatsScore(now - domain.last_active_time)
-  + TrafficScore(domain.query_rate),
+  + TrafficScore(domain.recent_requests),
   Pmin, Pmax)
 ```
 
@@ -107,7 +107,7 @@ P(view) = clamp(
 函数应满足：
 
 - 默认配置、无额外有效统计偏好时基准为 0。统计未知采用明确默认，不把 unknown 当作已观测的冷数据。
-- 同等其他输入下，更近的活动时间不应降低 StatsScore；更高的访问速率不应降低 TrafficScore。分项有界，可采用分段或饱和函数，避免单一异常值吞掉整个数值范围。
+- 同等其他输入下，更近的活动时间不应降低 StatsScore；更多的窗口请求数不应降低 TrafficScore。分项有界，可采用分段或饱和函数，避免单一异常值吞掉整个数值范围。
 - `LoadReplicaConfig.priority` 通过显式语义映射进入 ConfigScore，不能直接使用已有 enum 的底层整数。默认配置映射到基准，不凭 HIGH/LOW 名称擅定数值。
 - 在足够宽的中间类型计算后截断，避免溢出。同一函数和参数用于所有 RG，最终值可在实际共享的 SN 队列中比较；不把每个 RG 的局部排名直接当成同尺度分值。
 - 不使用新采集的执行成本、NQ、资源压力或准备进度，因为这些不在第一版反馈范围内。
