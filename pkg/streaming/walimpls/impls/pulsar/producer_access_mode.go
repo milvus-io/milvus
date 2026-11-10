@@ -3,8 +3,9 @@ package pulsar
 import "github.com/apache/pulsar-client-go/pulsar"
 
 const (
-	producerAccessModeShared    = "shared"
-	producerAccessModeExclusive = "exclusive"
+	producerAccessModeShared               = "shared"
+	producerAccessModeExclusive            = "exclusive"
+	producerAccessModeExclusiveWithFencing = "exclusiveWithFencing"
 )
 
 // producerAccessModeFromConfig maps the value of pulsar.producerAccessMode to the pulsar producer access mode.
@@ -15,6 +16,8 @@ func producerAccessModeFromConfig(value string) (mode pulsar.ProducerAccessMode,
 		return pulsar.ProducerAccessModeShared, true
 	case producerAccessModeExclusive:
 		return pulsar.ProducerAccessModeExclusive, true
+	case producerAccessModeExclusiveWithFencing:
+		return pulsar.ProducerAccessModeExclusiveWithFencing, true
 	default:
 		return pulsar.ProducerAccessModeExclusive, false
 	}

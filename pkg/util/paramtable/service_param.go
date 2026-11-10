@@ -1728,10 +1728,11 @@ If this option is zero or negative, it will be ignored and the default value (10
 		Key:          "pulsar.producerAccessMode",
 		Version:      "3.0.2",
 		DefaultValue: "exclusive",
-		Doc: `The access mode of the pulsar producer that a streaming node creates for a wal topic, shared or exclusive.
+		Doc: `The access mode of the pulsar producer that a streaming node creates for a wal topic, shared, exclusive or exclusiveWithFencing.
 exclusive: the producer creation fails while another producer is connected to the topic, and the streaming node retries it.
+exclusiveWithFencing: the producer creation fences out the producers that are connected to the topic, so a new wal owner does not wait for the previous one to disconnect.
 shared: multiple producers can write to the topic at the same time.
-exclusive access is enforced by pulsar broker 2.8.0 or later.`,
+exclusive access is enforced by pulsar broker 2.8.0 or later, exclusiveWithFencing requires pulsar broker 2.11.0 or later.`,
 		Export: true,
 	}
 	p.ProducerAccessMode.Init(base.mgr)
