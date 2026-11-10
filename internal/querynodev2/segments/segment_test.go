@@ -622,14 +622,7 @@ func (suite *SegmentSuite) TestSealedNilPKCandidateLifecycle() {
 }
 
 func (suite *SegmentSuite) TestGrowingPKCandidateLifecycle() {
-	item := &paramtable.Get().QueryNodeCfg.SkipGrowingSegmentBF
-	oldValue := item.SwapTempValue("false")
-	defer item.SwapTempValue(oldValue)
-	segment, err := NewSegment(context.Background(), suite.collection, suite.manager.Segment,
-		SegmentTypeGrowing, 0, suite.growing.LoadInfo())
-	suite.Require().NoError(err)
-	growing := segment.(*LocalSegment)
-	defer growing.Release(context.Background())
+	growing := suite.growing.(*LocalSegment)
 	bfs, ok := growing.pkCandidate.(*pkoracle.BloomFilterSet)
 	suite.Require().True(ok)
 	growing.skipGrowingBF = true

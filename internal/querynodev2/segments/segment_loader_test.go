@@ -733,9 +733,6 @@ func (suite *SegmentLoaderSuite) TestLoadSealedNilCandidateFailureCleanup() {
 }
 
 func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
-	item := &paramtable.Get().QueryNodeCfg.SkipGrowingSegmentBF
-	oldValue := item.SwapTempValue("false")
-	defer item.SwapTempValue(oldValue)
 	ctx := context.Background()
 	loadInfos := make([]*querypb.SegmentLoadInfo, 0, suite.segmentNum)
 
@@ -1032,7 +1029,7 @@ func (suite *SegmentLoaderSuite) TestLoadBloomFilter() {
 	}
 }
 
-func TestLoadGrowingStatsHonorsBloomFilterSettings(t *testing.T) {
+func TestLoadGrowingStatsPreservesBloomFilterBehavior(t *testing.T) {
 	type statsChunkManager struct{ storage.ChunkManager }
 	paramtable.Init()
 	require.NoError(t, initcore.InitTieredStorage(paramtable.Get()))
@@ -1060,11 +1057,13 @@ func TestLoadGrowingStatsHonorsBloomFilterSettings(t *testing.T) {
 		{name: "BF enabled", enabled: true},
 		{name: "skip growing BF", enabled: true, skip: true},
 		{name: "global BF disabled"},
-		{name: "both disable BF", skip: true},
+		{name: "global BF disabled and skip growing BF", skip: true},
 		{name: "BF read fails", enabled: true, failStage: "bf"},
-		{name: "BM25 read fails with BF", enabled: true, failStage: "bm25"},
-		{name: "BM25 read fails without BF", failStage: "bm25"},
-		{name: "BM25 path resolution fails without BF", failStage: "paths"},
+		{name: "BF read fails with global BF disabled", failStage: "bf"},
+		{name: "BF read fails with skip growing BF", enabled: true, skip: true, failStage: "bf"},
+		{name: "BM25 read fails with global BF enabled", enabled: true, failStage: "bm25"},
+		{name: "BM25 read fails with global BF disabled", failStage: "bm25"},
+		{name: "BM25 path resolution fails with global BF disabled", failStage: "paths"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			params := paramtable.Get()
@@ -1087,9 +1086,9 @@ func TestLoadGrowingStatsHonorsBloomFilterSettings(t *testing.T) {
 			collection := NewCollectionWithoutSegcoreForTest(100, schema)
 			base, err := newBaseSegment(collection, SegmentTypeGrowing, 0, info)
 			require.NoError(t, err)
-			useBF := tc.enabled && !tc.skip
-			assert.Equal(t, !useBF, base.skipGrowingBF)
-			assert.Equal(t, useBF, base.pkCandidate != nil)
+			// Preserve the existing behavior: both switches leave initial BF loading unchanged.
+			assert.Equal(t, tc.skip, base.skipGrowingBF)
+			require.NotNil(t, base.pkCandidate)
 			segment := &LocalSegment{
 				baseSegment: base, manager: NewManager().Segment,
 				bm25StatsHolder: newBM25StatsHolder(),
@@ -1106,8 +1105,7 @@ func TestLoadGrowingStatsHonorsBloomFilterSettings(t *testing.T) {
 					reads = append(reads, paths[0])
 					switch paths[0] {
 					case "bf/100":
-						// Disabled BF must not touch even an unavailable stats file.
-						if !useBF || tc.failStage == "bf" {
+						if tc.failStage == "bf" {
 							return nil, injected
 						}
 						return [][]byte{writer.GetBuffer()}, nil
@@ -1128,10 +1126,7 @@ func TestLoadGrowingStatsHonorsBloomFilterSettings(t *testing.T) {
 			}
 			loader := &segmentLoader{cm: cm}
 			err = loader.LoadSegment(ctx, segment, info)
-			var wantReads []string
-			if useBF {
-				wantReads = append(wantReads, "bf/100")
-			}
+			wantReads := []string{"bf/100"}
 			if tc.failStage != "bf" && tc.failStage != "paths" {
 				wantReads = append(wantReads, "bm25/100")
 			}
@@ -1146,17 +1141,21 @@ func TestLoadGrowingStatsHonorsBloomFilterSettings(t *testing.T) {
 			require.Contains(t, stats, bm25FieldID)
 			assert.Equal(t, int64(1), stats[bm25FieldID].NumRow())
 			assert.Equal(t, int64(2), stats[bm25FieldID].NumToken())
-			assert.Equal(t, useBF, segment.PkCandidateExist())
+			assert.True(t, segment.PkCandidateExist())
 			segment.UpdatePkCandidate([]storage.PrimaryKey{storage.NewInt64PrimaryKey(84)})
 			segment.baseSegment.UpdatePkCandidate([]storage.PrimaryKey{storage.NewInt64PrimaryKey(85)})
+			// SkipGrowingSegmentBF only bypasses subsequent maintenance and filtering.
+			for _, pk := range []int64{84, 85} {
+				assert.Equal(t, !tc.skip, segment.pkCandidate.MayPkExist(storage.NewLocationsCache(storage.NewInt64PrimaryKey(pk))))
+			}
 			for _, pk := range []int64{42, 84, 85} {
 				assert.True(t, segment.MayPkExist(storage.NewLocationsCache(storage.NewInt64PrimaryKey(pk))))
 			}
 			missing := storage.NewInt64PrimaryKey(1000)
-			assert.Equal(t, !useBF, segment.MayPkExist(storage.NewLocationsCache(missing)))
-			assert.Equal(t, []bool{!useBF}, segment.BatchPkExist(storage.NewBatchLocationsCache([]storage.PrimaryKey{missing})))
-			assert.Equal(t, useBF, segment.PkCandidateExist())
-			assert.Equal(t, useBF, segment.pkCandidate != nil)
+			assert.Equal(t, tc.skip, segment.MayPkExist(storage.NewLocationsCache(missing)))
+			assert.Equal(t, []bool{tc.skip}, segment.BatchPkExist(storage.NewBatchLocationsCache([]storage.PrimaryKey{missing})))
+			assert.True(t, segment.PkCandidateExist())
+			require.NotNil(t, segment.pkCandidate)
 		})
 	}
 }

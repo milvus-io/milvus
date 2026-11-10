@@ -1070,9 +1070,9 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 
 	// load statslog if it's growing segment
 	if segment.segmentType == SegmentTypeGrowing {
-		resolver := packed.NewStatsResolverFromLoadInfo(loadInfo)
-		if bf, ok := segment.pkCandidate.(*pkoracle.BloomFilterSet); ok && !segment.skipGrowingBF {
+		if bf, ok := segment.pkCandidate.(*pkoracle.BloomFilterSet); ok {
 			mlog.Info(context.TODO(), "loading statslog...")
+			resolver := packed.NewStatsResolverFromLoadInfo(loadInfo)
 			bfPaths, err := resolver.BloomFilterPaths(pkField.GetFieldID())
 			if err != nil {
 				return err
@@ -1080,17 +1080,17 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 			if err := loader.loadBloomFilter(ctx, segment.ID(), bf, bfPaths, loader.cm.MultiRead); err != nil {
 				return err
 			}
+
+			bm25Paths, err := resolver.BM25StatsPaths()
+			if err != nil {
+				return err
+			}
+			bm25Stats := make(map[int64]*storage.BM25Stats)
+			if err := loader.loadBm25Stats(ctx, segment.ID(), bm25Stats, bm25Paths); err != nil {
+				return err
+			}
+			segment.UpdateBM25Stats(bm25Stats)
 		}
-		// BM25 statistics are required independently of PK bloom filters.
-		bm25Paths, err := resolver.BM25StatsPaths()
-		if err != nil {
-			return err
-		}
-		bm25Stats := make(map[int64]*storage.BM25Stats)
-		if err := loader.loadBm25Stats(ctx, segment.ID(), bm25Stats, bm25Paths); err != nil {
-			return err
-		}
-		segment.UpdateBM25Stats(bm25Stats)
 	}
 	return nil
 }
