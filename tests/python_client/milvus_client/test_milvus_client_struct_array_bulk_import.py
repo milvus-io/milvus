@@ -21,6 +21,7 @@ import csv
 import json
 import os
 import time
+from pathlib import Path
 from uuid import uuid4
 
 import pyarrow as pa
@@ -40,7 +41,7 @@ from common.struct_array_data import (
 )
 from minio import Minio
 from pymilvus import DataType
-from pymilvus.bulk_writer import bulk_import, get_import_progress
+from pymilvus.bulk_writer import BulkFileType, LocalBulkWriter, RemoteBulkWriter, bulk_import, get_import_progress
 from pymilvus.client.prepare import Prepare
 from utils.util_log import test_log as log
 
@@ -171,7 +172,7 @@ class TestMilvusClientStructArrayBulkImport(MetadataStructArrayTestBase):
             storage.remove_object(minio_bucket, key)
 
 
-def _write_file(path, rows):
+def _write_file(path, rows, *, row_group_size=None, omitted_children=()):
     if path.suffix == ".json":
         path.write_text(json.dumps(rows), encoding="utf-8")
     elif path.suffix == ".jsonl":
@@ -187,9 +188,13 @@ def _write_file(path, rows):
     else:
         element = pa.struct(
             [
-                pa.field("score", pa.int64()),
-                pa.field("emb", pa.list_(pa.float32())),
-                pa.field("tags", pa.list_(pa.int64())),
+                field
+                for field in (
+                    pa.field("score", pa.int64()),
+                    pa.field("emb", pa.list_(pa.float32())),
+                    pa.field("tags", pa.list_(pa.int64())),
+                )
+                if field.name not in omitted_children
             ]
         )
         parquet_schema = pa.schema(
@@ -200,10 +205,137 @@ def _write_file(path, rows):
                 pa.field("clips", pa.list_(element)),
             ]
         )
-        pq.write_table(pa.Table.from_pylist(rows, schema=parquet_schema), path)
+        pq.write_table(pa.Table.from_pylist(rows, schema=parquet_schema), path, row_group_size=row_group_size)
 
 
 class TestMilvusClientStructArrayImportValidation(StructArrayTestBase):
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("format_name", ["json", "jsonl", "csv", "parquet"])
+    @pytest.mark.parametrize("writer_kind", ["raw", "local_bulk_writer", "remote_bulk_writer"])
+    def test_nullable_children_import_preserves_values_predicates_and_search(
+        self, tmp_path, minio_host, minio_bucket, format_name, writer_kind
+    ):
+        """
+        target: import legal NULLs independently at parent, child, inner-array and leaf levels
+        method: raw files and both SDK BulkWriters; explicit/omitted children and long NULL runs
+        expected: complete rows, NULL predicates and every vector coordinate/score survive reload
+        """
+        client = self._client()
+        name, schema = self.create_struct_collection(
+            client,
+            {
+                "score": child_schema(DataType.INT64),
+                "emb": child_schema(DataType.FLOAT_VECTOR),
+                "tags": child_schema(
+                    DataType.ARRAY, element_type=DataType.INT64, max_capacity=4, element_nullable=True
+                ),
+            },
+        )
+        rows = []
+        for pk in range(384):
+            clips = []
+            for offset in range(pk % 5):
+                element = {
+                    "score": None if (pk + offset) % 3 == 0 else pk,
+                    "emb": None if 90 <= pk < 270 or offset % 2 == 0 else normalized_vector(pk * 8 + offset),
+                    "tags": [None, [], [None], [pk, None, 1]][(pk + offset) % 4],
+                }
+                if (pk + offset) % 7 == 0:
+                    element.pop("score")
+                    element.pop("emb")
+                clips.append(element)
+            rows.append(make_nullable_row(schema, pk, None if pk % 13 == 0 else clips))
+        # A separate Parquet file physically omits the child columns instead of materializing NULLs.
+        omitted = [make_nullable_row(schema, pk, [{"tags": [None, pk]}, {"tags": []}]) for pk in range(1000, 1006)]
+        model = {row["id"]: copy.deepcopy(row) for row in rows + omitted}
+        for row in model.values():
+            for element in row["clips"] or []:
+                for child in ("score", "emb", "tags"):
+                    element.setdefault(child, None)
+        endpoint = minio_host if ":" in minio_host else f"{minio_host}:9000"
+        storage = Minio(
+            endpoint,
+            access_key=os.getenv("MILVUS_MINIO_ACCESS_KEY", "minioadmin"),
+            secret_key=os.getenv("MILVUS_MINIO_SECRET_KEY", "minioadmin"),
+            secure=False,
+        )
+        url = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
+        objects = []
+        try:
+            for label, data, missing in (("mixed", rows, ()), ("omitted", omitted, ("score", "emb"))):
+                prefix = f"bulkinsert_data/struct_nullable/{uuid4().hex}"
+                if writer_kind == "raw":
+                    path = tmp_path / f"{label}.{format_name}"
+                    _write_file(path, data, row_group_size=127, omitted_children=missing)
+                    key = f"{prefix}/{path.name}"
+                    objects.append(key)
+                    storage.fput_object(minio_bucket, key, str(path))
+                    files = [[key]]
+                else:
+                    options = dict(schema=schema, local_path=str(tmp_path), file_type=BulkFileType[format_name.upper()])
+                    if writer_kind == "remote_bulk_writer":
+                        writer = RemoteBulkWriter(
+                            **options,
+                            remote_path=prefix,
+                            connect_param=RemoteBulkWriter.S3ConnectParam(
+                                bucket_name=minio_bucket,
+                                endpoint=endpoint,
+                                access_key=os.getenv("MILVUS_MINIO_ACCESS_KEY", "minioadmin"),
+                                secret_key=os.getenv("MILVUS_MINIO_SECRET_KEY", "minioadmin"),
+                            ),
+                        )
+                    else:
+                        writer = LocalBulkWriter(**options)
+                    with writer:
+                        for row in copy.deepcopy(data):
+                            writer.append_row(row)
+                        writer.commit()
+                        files = copy.deepcopy(writer.batch_files)
+                        assert files and all(files), (writer_kind, format_name, label)
+                        if writer_kind == "local_bulk_writer":
+                            uploaded = []
+                            for batch_number, batch in enumerate(files):
+                                keys = []
+                                for local_file in batch:
+                                    key = f"{prefix}/{batch_number}/{Path(local_file).name}"
+                                    objects.append(key)
+                                    storage.fput_object(minio_bucket, key, local_file)
+                                    keys.append(key)
+                                uploaded.append(keys)
+                            files = uploaded
+                        else:
+                            objects.extend(key for batch in files for key in batch)
+                response = bulk_import(url=url, collection_name=name, files=files, api_key=cf.param_info.param_token)
+                response.raise_for_status()
+                payload = response.json()
+                assert payload["code"] == 0, payload
+                job_id = payload["data"]["jobId"]
+                deadline = time.monotonic() + 300
+                while True:
+                    response = get_import_progress(url=url, job_id=job_id, api_key=cf.param_info.param_token)
+                    response.raise_for_status()
+                    progress = response.json()
+                    assert progress["code"] == 0 and progress["data"]["state"] != "Failed", progress
+                    if progress["data"]["state"] == "Completed":
+                        assert progress["data"]["progress"] == 100, progress
+                        break
+                    assert time.monotonic() < deadline, progress
+                    time.sleep(1)
+                log.info(
+                    f"STRUCT_NULL_IMPORT writer={writer_kind} format={format_name} profile={label} job={job_id} rows={len(data)}"
+                )
+            assert self.wait_for_index_ready(client, name, index_name="clips[emb]", timeout=300)
+            self.refresh_load(client, name)
+            for phase in range(2):
+                self.assert_rows(client, name, model)
+                self.assert_nullable_predicates(client, name, model)
+                self.assert_nullable_element_search(client, name, model)
+                if phase == 0:
+                    self.reload_collection(client, name)
+        finally:
+            for key in objects:
+                storage.remove_object(minio_bucket, key)
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_external_struct_rejection_with_real_source_control(self, tmp_path, minio_host, minio_bucket):
         """
