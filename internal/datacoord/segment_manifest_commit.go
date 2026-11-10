@@ -69,6 +69,9 @@ type ManifestMutation struct {
 	Updates *packed.ManifestUpdates
 	// ManifestPath is the published result of a Noop mutation.
 	ManifestPath string
+	// NewObjects carries known-size artifacts from a prepared Noop producer.
+	NewObjects   []packed.PrewarmObject
+	ManifestSize int64
 }
 
 // SegmentCatalogMutation contains the segment fields that become visible with
@@ -304,6 +307,7 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	// segMu would park this commit — segMu held — behind that round trip and
 	// stall every segment reader. No lock is acquired inside segMu.
 	var deferredIndexMetrics []func()
+	var publishedSegment *SegmentInfo
 	if err := func() error {
 		m.segMu.Lock()
 		defer m.segMu.Unlock()
@@ -387,6 +391,7 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 		// Memory is installed only after the catalog write has succeeded while the
 		// same segMu critical section still excludes competing full-record writers.
 		m.segments.SetSegment(commit.SegmentID, updated)
+		publishedSegment = updated
 		for _, stagedIndex := range stagedIndexes {
 			deferredIndexMetrics = append(deferredIndexMetrics, stagedIndex.install())
 		}
@@ -399,6 +404,7 @@ func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifest
 	// MarkIndexAsDeleted (via fieldIndexLock) and ordered before the next
 	// writer of the same build, without ever awaiting fieldIndexLock inside
 	// segMu.
+	m.prewarmManifestCommit(segment.GetManifestPath(), publishedSegment, commit.Mutation, result.ManifestSize)
 	for _, deferredIndexMetric := range deferredIndexMetrics {
 		deferredIndexMetric()
 	}
@@ -582,7 +588,7 @@ func (m *meta) commitManifestMutation(ctx context.Context, io *packed.ManifestIO
 		if err := validatePreparedManifest(baseManifest, commit.Mutation.ManifestPath); err != nil {
 			return packed.ManifestUpdateResult{}, merr.Wrap(err, "validate noop manifest")
 		}
-		return packed.ManifestUpdateResult{ManifestPath: commit.Mutation.ManifestPath}, nil
+		return packed.ManifestUpdateResult{ManifestPath: commit.Mutation.ManifestPath, ManifestSize: commit.Mutation.ManifestSize}, nil
 	default:
 		return packed.ManifestUpdateResult{}, merr.WrapErrServiceInternalMsg("unsupported segment manifest mutation %d", commit.Mutation.Type)
 	}
@@ -712,6 +718,7 @@ func applySegmentCatalogTypedFields(segment *SegmentInfo, mutation SegmentCatalo
 type preparedSegmentManifest struct {
 	commit       SegmentManifestCommit
 	manifestPath string
+	manifestSize int64
 	// baseManifest is the pointer the revision was generated from (the stage-2
 	// snapshot). Stage 3 re-checks it so a pointer advanced mid-I/O by an
 	// out-of-lock writer aborts the batch instead of being silently overwritten:
@@ -864,7 +871,21 @@ func (m *meta) CommitSegmentManifests(ctx context.Context, commits []SegmentMani
 		operators = append(operators, m.publishSegmentManifestOperator(prepared[i]))
 	}
 	operators = append(operators, extraOperators...)
-	return m.UpdateSegmentsInfo(ctx, operators...)
+	if err := m.UpdateSegmentsInfo(ctx, operators...); err != nil {
+		return err
+	}
+	for _, item := range prepared {
+		m.segMu.RLock()
+		segment := m.segments.GetSegment(item.commit.SegmentID)
+		if segment != nil {
+			segment = segment.Clone()
+		}
+		m.segMu.RUnlock()
+		if segment != nil && packed.SameManifestPath(segment.GetManifestPath(), item.manifestPath) {
+			m.prewarmManifestCommit(item.baseManifest, segment, item.commit.Mutation, item.manifestSize)
+		}
+	}
+	return nil
 }
 
 // acquireSegmentManifestLocks takes every segment's manifest lock in two phases.
@@ -1023,6 +1044,7 @@ func (m *meta) submitSegmentManifest(ctx context.Context, io *packed.ManifestIOC
 		complete(&preparedSegmentManifest{
 			commit:       commit,
 			manifestPath: result.ManifestPath,
+			manifestSize: result.ManifestSize,
 			baseManifest: snapshot.GetManifestPath(),
 		}, err)
 	})

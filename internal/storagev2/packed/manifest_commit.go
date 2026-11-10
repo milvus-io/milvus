@@ -19,6 +19,8 @@ package packed
 import "C"
 
 import (
+	"strconv"
+	"strings"
 	"unsafe"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -44,6 +46,7 @@ type WriterOutput interface {
 	// Appending files invalidates indexes on columns with new files. Adding new
 	// column groups and registering LOBs do not invalidate existing indexes.
 	invalidatedIndexColumns() []string
+	prewarmObjects() ([]PrewarmObject, []string, error)
 }
 
 // ManifestUpdates bundles every data-file-level change a single caller
@@ -255,4 +258,60 @@ func resolveManifestIndexDrops(manifestPath string, current []ManifestIndexInfo,
 		indexIDs = append(indexIDs, drop.IndexID)
 	}
 	return indexIDs, nil
+}
+
+// PrewarmObject carries a complete key and its known on-disk size.
+type PrewarmObject struct {
+	Path string
+	Size uint64
+}
+
+// NewObjects copies known-size objects without opening a manifest or statting files.
+// Missing sizes are returned separately so callers can report incomplete producers.
+func (u *ManifestUpdates) NewObjects(basePath string) ([]PrewarmObject, []string, error) {
+	var objects []PrewarmObject
+	var missing []string
+	if u == nil {
+		return nil, nil, nil
+	}
+	if u.NewFiles != nil {
+		var err error
+		objects, missing, err = u.NewFiles.prewarmObjects()
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	add := func(key string, size uint64, known bool) {
+		if known {
+			objects = append(objects, PrewarmObject{Path: key, Size: size})
+		} else {
+			missing = append(missing, key)
+		}
+	}
+	for _, group := range u.ColumnGroups {
+		for _, file := range group.Files {
+			size, err := strconv.ParseUint(file.Properties["file_size"], 10, 64)
+			add(file.Path, size, err == nil)
+		}
+	}
+	for _, delta := range u.DeltaLogs {
+		add(delta.Path, uint64(delta.FileSize), delta.FileSize > 0)
+	}
+	for _, stat := range u.Stats {
+		for _, key := range stat.Files {
+			size, ok := stat.FileSizes[key]
+			add(key, size, ok)
+		}
+	}
+	for _, index := range u.Indexes {
+		prefix := strings.TrimRight(basePath, "/") + "/" + ManifestIndexDir + "/" + index.Path + "/"
+		for _, file := range index.IndexFileKeys {
+			size, ok := index.FileSizes[file]
+			if !ok && len(index.IndexFileKeys) == 1 && index.SerializedSize > 0 {
+				size, ok = uint64(index.SerializedSize), true
+			}
+			add(prefix+file, size, ok)
+		}
+	}
+	return objects, missing, nil
 }

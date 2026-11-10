@@ -226,14 +226,15 @@ func (e *ManifestCommitError) Unwrap() error { return e.Err }
 type manifestCommitResult struct {
 	outcome ManifestCommitOutcome
 	version int64
+	size    int64
 	err     error
 }
 
 //export milvusManifestCommitDone
-func milvusManifestCommitDone(token C.uintptr_t, result C.LoonFFIResult, outcome C.int32_t, version C.int64_t, _ C.int64_t) {
+func milvusManifestCommitDone(token C.uintptr_t, result C.LoonFFIResult, outcome C.int32_t, version C.int64_t, size C.int64_t) {
 	h := cgo.Handle(token)
 	complete := h.Value().(func(manifestCommitResult))
-	value := manifestCommitResult{ManifestCommitOutcome(outcome), int64(version), handleManifestAsyncResult(result)}
+	value := manifestCommitResult{outcome: ManifestCommitOutcome(outcome), version: int64(version), size: int64(size), err: handleManifestAsyncResult(result)}
 	h.Delete()
 	complete(value)
 }
@@ -447,6 +448,7 @@ func transactionIndexInfos(txn C.LoonTransactionHandle, manifestPath string) ([]
 // Marker changes are delivered only after a successful commit (or a proven no-op).
 type ManifestUpdateResult struct {
 	ManifestPath string
+	ManifestSize int64
 	HasIndexes   *bool
 }
 
@@ -491,7 +493,7 @@ func SubmitManifestUpdates(ctx context.Context, io *ManifestIOContext, baseManif
 			return
 		}
 		if !changed {
-			finish(ManifestUpdateResult{baseManifestPath, hasIndexes}, nil)
+			finish(ManifestUpdateResult{ManifestPath: baseManifestPath, HasIndexes: hasIndexes}, nil)
 			return
 		}
 		// Keep the original admission slot and transaction until commit completes.
@@ -502,7 +504,7 @@ func SubmitManifestUpdates(ctx context.Context, io *ManifestIOContext, baseManif
 				finish(ManifestUpdateResult{}, err)
 				return
 			}
-			finish(ManifestUpdateResult{MarshalManifestPath(base, committed), hasIndexes}, nil)
+			finish(ManifestUpdateResult{ManifestPath: MarshalManifestPath(base, committed), ManifestSize: result.size, HasIndexes: hasIndexes}, nil)
 		})
 		if err != nil {
 			finish(ManifestUpdateResult{}, err)

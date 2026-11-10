@@ -644,6 +644,24 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 	return req, nil
 }
 
+// statsResultObjects copies the complete artifact keys returned by a
+// prepared-manifest producer; a manifest pointer alone carries no object delta.
+func statsResultObjects(result *workerpb.StatsResult) []packed.PrewarmObject {
+	var paths []packed.PrewarmObject
+	for _, fields := range [][]*datapb.FieldBinlog{result.GetInsertLogs(), result.GetStatsLogs(), result.GetBm25Logs()} {
+		for _, field := range fields {
+			for _, file := range field.GetBinlogs() {
+				if file.GetLogPath() != "" {
+					if file.GetLogSize() > 0 {
+						paths = append(paths, packed.PrewarmObject{Path: file.GetLogPath(), Size: uint64(file.GetLogSize())})
+					}
+				}
+			}
+		}
+	}
+	return paths
+}
+
 func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResult) error {
 	var err error
 	switch st.GetSubJobType() {
@@ -710,6 +728,7 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 				Mutation: ManifestMutation{
 					Type:         ManifestMutationNoop,
 					ManifestPath: manifest,
+					NewObjects:   statsResultObjects(result),
 				},
 			}))
 		} else {

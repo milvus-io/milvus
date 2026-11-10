@@ -219,3 +219,18 @@ func addOneColumnGroupEntry(handle C.LoonTransactionHandle, entry ColumnGroupEnt
 	}
 	return nil
 }
+
+func columnGroupPrewarmObjects(groups *C.LoonColumnGroups) ([]PrewarmObject, []string, error) {
+	entries, err := columnGroupEntriesFromC(groups)
+	if err != nil {
+		return nil, nil, err
+	}
+	return (&ManifestUpdates{ColumnGroups: entries}).NewObjects("")
+}
+
+func (f *ColumnGroups) prewarmObjects() ([]PrewarmObject, []string, error) {
+	if f == nil {
+		return nil, nil, nil
+	}
+	return columnGroupPrewarmObjects(f.cColumnGroups)
+}
