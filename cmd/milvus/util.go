@@ -276,10 +276,35 @@ func addActiveKeySuffix(ctx context.Context, client *clientv3.Client, sessionPat
 				log.Info("add active serverID key", zap.String("suffix", suffix), zap.String("key", key))
 				suffixSet[serverType] = struct{}{}
 			}
+
+			if serverType == typeutil.MixCoordRole {
+				// An active MixCoord also registers the session keys of the coordinators it replaced.
+				// If they outlive the process, a restarted MixCoord stays in standby until the lease expires.
+				for _, role := range legacyCoordinatorRolesOf(targetServerID, func(role string) (int64, error) {
+					return getServerID(ctx, client, path.Join(sessionPathPrefix, role))
+				}) {
+					log.Info("add legacy coordinator key", zap.String("suffix", suffix), zap.String("role", role))
+					suffixSet[role] = struct{}{}
+				}
+			}
 		}
 	}
 
 	return lo.MapToSlice(suffixSet, func(key string, v struct{}) string { return key })
+}
+
+// legacyCoordinatorRolesOf returns the legacy coordinator session keys (rootcoord, datacoord, querycoord)
+// that are registered by the server serverID. getServerID returns the server id registered at a role key.
+// A key that is missing, unreadable or owned by another server is skipped: it may belong to a coordinator
+// that is still alive.
+func legacyCoordinatorRolesOf(serverID int64, getServerID func(role string) (int64, error)) []string {
+	roles := make([]string, 0, 3)
+	for _, role := range []string{typeutil.RootCoordRole, typeutil.DataCoordRole, typeutil.QueryCoordRole} {
+		if id, err := getServerID(role); err == nil && id == serverID {
+			roles = append(roles, role)
+		}
+	}
+	return roles
 }
 
 func getServerID(ctx context.Context, client *clientv3.Client, key string) (int64, error) {
