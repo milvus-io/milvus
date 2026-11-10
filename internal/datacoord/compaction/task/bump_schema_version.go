@@ -147,7 +147,9 @@ func (t *BumpSchemaVersionTask) BuildCompactionRequest() (*datapb.CompactionPlan
 	}
 	plan.PreAllocatedLogIDs = logIDRange
 	plan.BeginLogID = logIDRange.Begin
-	meta.WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan)
+	if err := meta.WrapPluginContext(taskProto.GetCollectionID(), taskProto.GetSchema().GetProperties(), plan); err != nil {
+		return nil, err
+	}
 	return plan, nil
 }
 

@@ -139,6 +139,7 @@
 #include "segcore/TextColumnCache.h"
 #include "storage/FileManager.h"
 #include "storage/KeyRetriever.h"
+#include "storage/PluginLoader.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/MmapManager.h"
@@ -2487,6 +2488,13 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
                                             needed_columns,
                                             *properties)
             .release());
+    // QueryNode registers the collection's cipher context before loading.
+    // Resolve encrypted Parquet keys through that context when opening files.
+    if (storage::PluginLoader::GetInstance().getCipherPlugin()) {
+        reader->set_keyretriever([](const std::string& key_metadata) {
+            return storage::KeyRetriever().GetKey(key_metadata);
+        });
+    }
     committer.Commit([reader](RuntimeResourceState& runtime,
                               PublishedSegmentState&) mutable {
         runtime.reader = std::move(reader);
@@ -7672,6 +7680,11 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
                 milvus_storage::api::Reader::create(
                     column_groups, arrow_schema, needed_columns, *properties)
                     .release());
+            if (storage::PluginLoader::GetInstance().getCipherPlugin()) {
+                reader->set_keyretriever([](const std::string& key_metadata) {
+                    return storage::KeyRetriever().GetKey(key_metadata);
+                });
+            }
             committer.Commit(
                 [reader = std::move(reader)](RuntimeResourceState& runtime,
                                              PublishedSegmentState&) mutable {

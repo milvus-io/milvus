@@ -75,6 +75,7 @@
 #include "storage/MemFileManagerImpl.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/KeyRetriever.h"
+#include "storage/PluginLoader.h"
 #include "segcore/memory_planner.h"
 #include "mmap/Types.h"
 #include "storage/loon_ffi/ffi_reader_c.h"
@@ -1889,6 +1890,11 @@ IterateFieldDataFromManifest(
         column_groups, reader_schema, needed_cols_ptr, *loon_ffi_properties);
 
     AssertInfo(reader != nullptr, "Failed to create reader");
+    if (PluginLoader::GetInstance().getCipherPlugin()) {
+        reader->set_keyretriever([](const std::string& key_metadata) {
+            return KeyRetriever().GetKey(key_metadata);
+        });
+    }
 
     auto reader_result = reader->get_record_batch_reader("");
     if (!reader_result.ok()) {

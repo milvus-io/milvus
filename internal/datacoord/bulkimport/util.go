@@ -407,7 +407,9 @@ func assemblePreImportRequest(task ImportTask, job ImportJob, importFiles []*int
 		PluginContext:    meta.GetReadPluginContext(job.GetOptions()),
 		SnapshotL0Source: l0Source,
 	}
-	meta.WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req)
+	if err := meta.WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
+		return nil, err
+	}
 	return req, nil
 }
 
@@ -487,7 +489,9 @@ func AssembleImportRequest(task ImportTask, job ImportJob, mt *meta.Meta, alloc 
 		UseLoonFfi:       useLoonFFI,
 		SnapshotL0Source: l0Source,
 	}
-	meta.WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req)
+	if err := meta.WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req); err != nil {
+		return nil, err
+	}
 	return req, nil
 }
 
