@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/taskcost"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -43,9 +44,11 @@ type TaskQueue interface {
 	PopUnissuedTask(allowVector bool) Task
 	AddActiveTask(t Task)
 	PopActiveTask(tName string) Task
+	ReleaseResource(t Task)
 	Enqueue(t Task) error
 	GetTaskNum() (int, int)
 	GetUsingSlot() int64
+	GetUsingResource() taskcommon.Resource
 	GetSlotUsage() (int64, int64)
 	GetActiveSlot() int64
 }
@@ -62,6 +65,13 @@ type IndexTaskQueue struct {
 	maxTaskNum int64
 
 	utBufChan chan struct{} // to block scheduler
+
+	// Cpu/memory booked for enqueued and active tasks, the two-dimensional
+	// counterpart of the slot accounting above. DataCoord estimates both and
+	// QuerySlot reports them; nothing on this node admits by them, so they sit
+	// beside the slot ledger rather than inside the admission path.
+	usingCPU    atomic.Int64
+	usingMemory atomic.Int64
 
 	sched *TaskScheduler
 }
@@ -93,6 +103,13 @@ func (queue *IndexTaskQueue) addUnissuedTask(t Task) error {
 		(queue.queuedSlot >= budget || slots > budget-queue.queuedSlot)) {
 		return merr.Wrap(merr.ErrServiceResourceInsufficient, "index task queue is full")
 	}
+	// Book cpu/memory before the task becomes visible to the scheduler: once
+	// it is in unissuedTasks it can be popped, run and released by
+	// ReleaseResource at any time, and a release that ran ahead of its booking
+	// would leave the ledger briefly below zero -- reported as an idle node.
+	res := t.GetResource()
+	queue.usingCPU.Add(res.CPU)
+	queue.usingMemory.Add(res.Memory)
 	queue.unissuedTasks.PushBack(t)
 	queue.queuedSlot += slots
 	select {
@@ -104,6 +121,22 @@ func (queue *IndexTaskQueue) addUnissuedTask(t Task) error {
 
 func (queue *IndexTaskQueue) GetUsingSlot() int64 {
 	return queue.sched.usingSlot.Load()
+}
+
+// GetUsingResource returns the cpu/memory booked by enqueued and active tasks.
+//
+// A task is booked before it can be released (addUnissuedTask), so the
+// counters do not go negative in normal operation. They are plain atomics,
+// though, where the other two executors clamp at zero
+// (taskcommon.Resource.Sub), and a negative figure here is the unsafe
+// direction: QuerySlot computes available = total - used, so a negative "used"
+// reports more free than the node has. It is clamped at zero on the way out so
+// the three ledgers behave the same.
+func (queue *IndexTaskQueue) GetUsingResource() taskcommon.Resource {
+	return taskcommon.Resource{
+		CPU:    max(queue.usingCPU.Load(), 0),
+		Memory: max(queue.usingMemory.Load(), 0),
+	}
 }
 
 // GetSlotUsage snapshots held and queued slots together, including the transfer
@@ -183,17 +216,28 @@ func (queue *IndexTaskQueue) PopActiveTask(tName string) Task {
 	return nil
 }
 
+// ReleaseResource returns the cpu/memory that addUnissuedTask booked for t.
+//
+// It is released per task, not per name as the slots are: a dropped task
+// whose native build ignores cancellation keeps running while DataCoord
+// dispatches the same clusterID/taskID again. Both executions are booked,
+// and AddActiveTask keeps only the newer one under the name, so a release
+// through activeTasks would return one booking and leak the other. Each
+// enqueued task has one execution, and finishTask releases it once, so the
+// ledger returns exactly what was booked.
+func (queue *IndexTaskQueue) ReleaseResource(t Task) {
+	res := t.GetResource()
+	queue.usingCPU.Sub(res.CPU)
+	queue.usingMemory.Sub(res.Memory)
+}
+
 // Enqueue adds a task to TaskQueue.
 func (queue *IndexTaskQueue) Enqueue(t Task) error {
 	err := t.OnEnqueue(t.Ctx())
 	if err != nil {
 		return err
 	}
-	if err = queue.addUnissuedTask(t); err != nil {
-		return err
-	}
-
-	return nil
+	return queue.addUnissuedTask(t)
 }
 
 func (queue *IndexTaskQueue) GetTaskNum() (int, int) {
@@ -379,6 +423,9 @@ type taskExecution struct {
 	buildTimeMs int64
 	stopCancel  func() bool
 	onFinish    func()
+	// released guards ReleaseResource: the booking belongs to this
+	// execution and is returned once, even if finishTask ran twice.
+	released bool
 }
 
 func (sched *TaskScheduler) beginTask(t Task) *taskExecution {
@@ -449,6 +496,10 @@ func (sched *TaskScheduler) finishTask(exec *taskExecution, err error) {
 		t.SetState(state, reason)
 	}
 	sched.TaskQueue.PopActiveTask(t.Name())
+	if !exec.released {
+		exec.released = true
+		sched.TaskQueue.ReleaseResource(t)
+	}
 }
 
 func (sched *TaskScheduler) processTask(exec *taskExecution) {

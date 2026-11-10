@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -50,6 +51,7 @@ type BumpSchemaVersionTask struct {
 	compactionTaskMeta *CompactionTaskMeta
 	ievm               index.IndexEngineVersionManager
 	times              *taskcommon.Times
+	resource           taskresource.Cache
 }
 
 func NewBumpSchemaVersionTask(t *datapb.CompactionTask, allocator allocator.Allocator, mt meta.CompactionMeta, compactionTaskMeta *CompactionTaskMeta, ievm index.IndexEngineVersionManager) *BumpSchemaVersionTask {
@@ -78,6 +80,19 @@ func (t *BumpSchemaVersionTask) GetTaskState() taskcommon.State {
 
 func (t *BumpSchemaVersionTask) GetTaskProto() *datapb.CompactionTask {
 	return t.taskProto.Load().(*datapb.CompactionTask)
+}
+
+// GetTaskResource: a schema bump streams one segment through the mix
+// compaction writer, so it is priced like a mix compaction of that segment.
+func (t *BumpSchemaVersionTask) GetTaskResource() (taskcommon.Resource, bool) {
+	return t.resource.Get(func() (taskcommon.Resource, bool) {
+		// The bump rewrites its one segment with that segment's delete map.
+		inputSize, deleteMapBytes, ok := mixCompactionInputs(t.meta, t.GetTaskProto())
+		if !ok {
+			return taskresource.Default(), false
+		}
+		return taskresource.MixCompaction(inputSize, deleteMapBytes), true
+	})
 }
 
 func (t *BumpSchemaVersionTask) GetTaskSlot() int64 {
@@ -236,7 +251,8 @@ func (t *BumpSchemaVersionTask) CreateTaskOnWorker(nodeID int64, cluster session
 		return
 	}
 
-	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID())
+	resource, _ := t.GetTaskResource()
+	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID(), resource)
 	if err != nil {
 		log.Warn(context.TODO(), "bumpSchemaVersionTask failed to notify compaction tasks to DataNode",
 			mlog.Int64("planID", t.GetTaskProto().GetPlanID()),

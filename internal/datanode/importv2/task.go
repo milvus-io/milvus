@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 )
 
@@ -202,6 +203,10 @@ type Task interface {
 	GetReason() string
 	GetSchema() *schemapb.CollectionSchema
 	GetSlots() int64
+	// GetResource is the cpu/memory DataCoord estimated for this task. The
+	// worker never computes it; it reports what the request carried. Zero when
+	// the coordinator predates the field.
+	GetResource() taskcommon.Resource
 	GetBufferSize() int64
 	Cancel()
 	Clone() Task

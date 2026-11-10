@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -45,6 +46,8 @@ type analyzeTask struct {
 	schema      *schemapb.CollectionSchema
 	meta        *meta.Meta
 	analyzeMeta *AnalyzeMeta
+
+	resource taskresource.Cache
 }
 
 var _ globalTask.Task = (*analyzeTask)(nil)
@@ -82,6 +85,50 @@ func (at *analyzeTask) GetTaskType() taskcommon.Type {
 
 func (at *analyzeTask) GetTaskState() taskcommon.State {
 	return at.State
+}
+
+// GetTaskResource prices the analyze by the vectors it trains on: the size of
+// the clustering-key field in every input segment, by the one field-size rule
+// every family uses (taskresource.EstimateFieldSize -- meta's binlog size
+// first, the schema bound as the fallback, capped at the segment).
+//
+// Going through that rule rather than rows x dim x element width is what gives
+// every vector type an answer. A sparse or array-of-vector clustering key has no
+// dim to multiply, and the closed form answered 0 for it; that answer was never
+// cached, so every scheduling round re-walked all of the task's input segments
+// for as long as it was pending.
+func (at *analyzeTask) GetTaskResource() (taskcommon.Resource, bool) {
+	return at.resource.Get(func() (taskcommon.Resource, bool) {
+		// NewAnalyzeTask snapshots the schema, and the snapshot is empty when
+		// the collection was not cached yet. Resolve it again here, or a task
+		// built before the cache was warmed would be priced without its field
+		// for its whole life.
+		//
+		// The result is deliberately not written back to at.schema: other code
+		// reads that field without synchronization.
+		schema := at.schema
+		if schema == nil {
+			if coll := at.meta.GetCollection(at.GetCollectionID()); coll != nil {
+				schema = coll.Schema
+			}
+		}
+		var fieldSize int64
+		for _, segID := range at.GetSegmentIDs() {
+			segment := at.meta.GetHealthySegment(context.TODO(), segID)
+			if segment == nil {
+				// The input is gone for good. CreateTaskOnWorker retires the
+				// task, so its price only has to let it get there.
+				return taskresource.Default(), false
+			}
+			fieldSize += taskresource.EstimateFieldSize(segment, schema, at.GetFieldID())
+		}
+		// Without the field in the schema the rule has answered with meta's
+		// binlog size or the whole segment -- an upper bound, safe to place on.
+		// It is not cached: the schema may not be warmed yet, and once it is the
+		// field's own size replaces the bound.
+		cacheable := typeutil.GetFieldByID(schema, at.GetFieldID()) != nil
+		return taskresource.Analyze(fieldSize), cacheable
+	})
 }
 
 func (at *analyzeTask) GetTaskSlot() int64 {
@@ -248,7 +295,8 @@ func (at *analyzeTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster)
 		}
 	}()
 
-	err = cluster.CreateAnalyze(nodeID, req)
+	resource, _ := at.GetTaskResource()
+	err = cluster.CreateAnalyze(nodeID, req, resource)
 	if err != nil {
 		log.Warn(context.TODO(), "assign analyze task to worker failed", mlog.Err(err))
 		return

@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -54,6 +55,7 @@ type L0CompactionTask struct {
 
 	times                *taskcommon.Times
 	CommittedV3Manifests map[int64]string
+	resource             taskresource.Cache
 }
 
 func (t *L0CompactionTask) GetTaskID() int64 {
@@ -66,6 +68,42 @@ func (t *L0CompactionTask) GetTaskType() taskcommon.Type {
 
 func (t *L0CompactionTask) GetTaskState() taskcommon.State {
 	return taskcommon.FromCompactionState(t.GetTaskProto().GetState())
+}
+
+// GetTaskResource prices an L0 compaction by what the worker holds in memory:
+// the delta logs of every input L0 segment, and the PK stats logs (bloom
+// filters) of every target segment the deletes are applied to, which
+// l0_compactor.go loadBF loads in full before applying. On a large collection
+// the targets' stats logs usually outweigh the delta logs. The targets are
+// the segments the plan will select (targetSegments), read at pricing time;
+// a segment that flushes between pricing and dispatch is not counted.
+func (t *L0CompactionTask) GetTaskResource() (taskcommon.Resource, bool) {
+	return t.resource.Get(func() (taskcommon.Resource, bool) {
+		var deltaSize, statsSize int64
+		for _, segID := range t.GetTaskProto().GetInputSegments() {
+			segment := t.meta.GetHealthySegment(t.context(), segID)
+			if segment == nil {
+				return taskresource.Default(), false
+			}
+			deltaSize += segment.EnsureStats().GetDeltaBinlogSize()
+		}
+		targets, err := t.targetSegments()
+		if err != nil {
+			return taskresource.Default(), false
+		}
+		// A target still Sealed at dispatch fails the task there
+		// (SelectFlushedSegment). Price what is there now but do not cache
+		// it: a task that waits for capacity while the target flushes is then
+		// priced again, on the stats logs its final flush added.
+		exact := true
+		for _, segment := range targets {
+			statsSize += segment.EnsureStats().GetStatsBinlogSize()
+			if segment.GetState() == commonpb.SegmentState_Sealed {
+				exact = false
+			}
+		}
+		return taskresource.L0Compaction(deltaSize, statsSize), exact
+	})
 }
 
 func (t *L0CompactionTask) GetTaskSlot() int64 {
@@ -134,7 +172,8 @@ func (t *L0CompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clus
 		return
 	}
 
-	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID())
+	resource, _ := t.GetTaskResource()
+	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID(), resource)
 	if err != nil {
 		originNodeID := t.GetTaskProto().GetNodeID()
 		log.Warn(context.TODO(), "l0CompactionTask failed to notify compaction tasks to DataNode",
@@ -322,25 +361,31 @@ func (t *L0CompactionTask) ShadowClone(opts ...compactionTaskOpt) *datapb.Compac
 	return taskClone
 }
 
-func (t *L0CompactionTask) SelectFlushedSegment() ([]*meta.SegmentInfo, []*datapb.CompactionSegmentBinlogs, error) {
+// targetSegments is the segments the task's delete records are applied to:
+// the restore targets of a restore L0 compaction, or otherwise the flushed
+// L1/L2 segments of the task's channel (and partition) whose data predates the
+// trigger position. The plan (SelectFlushedSegment) and the price
+// (GetTaskResource) select them through this one function.
+func (t *L0CompactionTask) targetSegments() ([]*meta.SegmentInfo, error) {
 	taskProto := t.taskProto.Load().(*datapb.CompactionTask)
-	var flushedSegments []*meta.SegmentInfo
 	if taskProto.GetType() == datapb.CompactionType_RestoreLevel0DeleteCompaction {
-		var err error
-		flushedSegments, err = t.restoreTargets()
-		if err != nil {
-			return nil, nil, err
-		}
-	} else {
-		// Ordinary L0 compaction selects bases older than the trigger position.
-		flushedSegments = t.meta.SelectSegments(t.context(), meta.WithCollection(taskProto.GetCollectionID()), meta.SegmentFilterFunc(func(info *meta.SegmentInfo) bool {
-			return (taskProto.GetPartitionID() == common.AllPartitionsID || info.GetPartitionID() == taskProto.GetPartitionID()) &&
-				info.GetInsertChannel() == taskProto.GetChannel() &&
-				(info.GetState() == commonpb.SegmentState_Sealed || meta.IsFlushState(info.GetState())) &&
-				!info.GetIsImporting() &&
-				info.GetLevel() != datapb.SegmentLevel_L0 &&
-				meta.SegmentEffectiveTs(info.SegmentInfo) < taskProto.GetPos().GetTimestamp()
-		}))
+		return t.restoreTargets()
+	}
+	// Ordinary L0 compaction selects bases older than the trigger position.
+	return t.meta.SelectSegments(t.context(), meta.WithCollection(taskProto.GetCollectionID()), meta.SegmentFilterFunc(func(info *meta.SegmentInfo) bool {
+		return (taskProto.GetPartitionID() == common.AllPartitionsID || info.GetPartitionID() == taskProto.GetPartitionID()) &&
+			info.GetInsertChannel() == taskProto.GetChannel() &&
+			(info.GetState() == commonpb.SegmentState_Sealed || meta.IsFlushState(info.GetState())) &&
+			!info.GetIsImporting() &&
+			info.GetLevel() != datapb.SegmentLevel_L0 &&
+			meta.SegmentEffectiveTs(info.SegmentInfo) < taskProto.GetPos().GetTimestamp()
+	})), nil
+}
+
+func (t *L0CompactionTask) SelectFlushedSegment() ([]*meta.SegmentInfo, []*datapb.CompactionSegmentBinlogs, error) {
+	flushedSegments, err := t.targetSegments()
+	if err != nil {
+		return nil, nil, err
 	}
 
 	sealedSegBinlogs := []*datapb.CompactionSegmentBinlogs{}

@@ -21,12 +21,14 @@ import (
 	"fmt"
 	"runtime/debug"
 	"sync"
+	"sync/atomic"
 
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -112,6 +114,11 @@ type ExternalCollectionManager struct {
 	tasks     map[TaskKey]*TaskInfo
 	pool      *conc.Pool[any]
 	closeOnce sync.Once
+
+	// Cpu/memory booked by submitted tasks that have not finished, the same
+	// ledger the other executors keep: QuerySlot subtracts it from the node.
+	usingCPU    atomic.Int64
+	usingMemory atomic.Int64
 }
 
 // NewExternalCollectionManager constructs a manager with the provided worker pool size.
@@ -131,6 +138,28 @@ func (m *ExternalCollectionManager) Close() {
 		}
 		mlog.Info(m.ctx, "external collection manager closed")
 	})
+}
+
+// Resource returns the cpu/memory booked by submitted, unfinished tasks.
+func (m *ExternalCollectionManager) Resource() taskcommon.Resource {
+	return taskcommon.Resource{
+		CPU:    max(m.usingCPU.Load(), 0),
+		Memory: max(m.usingMemory.Load(), 0),
+	}
+}
+
+// book charges resource to the ledger and returns the release that undoes it,
+// safe to call more than once.
+func (m *ExternalCollectionManager) book(resource taskcommon.Resource) func() {
+	m.usingCPU.Add(resource.CPU)
+	m.usingMemory.Add(resource.Memory)
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			m.usingCPU.Add(-resource.CPU)
+			m.usingMemory.Add(-resource.Memory)
+		})
+	}
 }
 
 // LoadOrStore adds a task entry if absent and returns the existing entry if present.
@@ -214,9 +243,12 @@ func (m *ExternalCollectionManager) CancelTask(clusterID string, taskID int64) b
 }
 
 // SubmitTask registers and runs a task asynchronously in the manager pool.
+// resource is booked from the moment the task is accepted, queued in the pool
+// included, until it finishes; a duplicate dispatch books nothing.
 func (m *ExternalCollectionManager) SubmitTask(
 	clusterID string,
 	req *datapb.RefreshExternalCollectionTaskRequest,
+	resource taskcommon.Resource,
 	taskFunc func(context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error),
 ) error {
 	taskID := req.GetTaskID()
@@ -243,8 +275,10 @@ func (m *ExternalCollectionManager) SubmitTask(
 		return nil
 	}
 
+	release := m.book(resource)
 	// Submit to pool
-	m.pool.Submit(func() (_ any, retErr error) {
+	future := m.pool.Submit(func() (_ any, retErr error) {
+		defer release()
 		defer cancel()
 		// Defense-in-depth: isolate panics in a single task so a buggy
 		// external source cannot crash the whole datanode process (e.g.
@@ -288,6 +322,12 @@ func (m *ExternalCollectionManager) SubmitTask(
 			mlog.FieldTaskID(taskID))
 		return nil, nil
 	})
+	// A pool that refuses the task (it is closed) never runs it, so nothing
+	// above releases its booking. A task that already ran and failed has
+	// released it; release is idempotent either way.
+	if future.Done() && future.Err() != nil {
+		release()
+	}
 
 	return nil
 }

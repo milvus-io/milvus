@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/json"
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -117,6 +118,22 @@ func (t *reshardTask) GetTaskSlot() int64 {
 }
 
 func (t *reshardTask) GetTaskVersion() int64 { return t.task.Load().GetRunId() }
+
+// GetTaskResource prices a reshard run on the same reshardmem working set the
+// slot charge is derived from (reshardWorkingSet), so the two never disagree.
+// A job that is gone is priced at the floor so the task can be retired; an
+// invalid fragment-size config is a transient answer, recomputed next round.
+func (t *reshardTask) GetTaskResource() (taskcommon.Resource, bool) {
+	job := t.importMeta.GetJob(context.TODO(), t.GetJobID())
+	if job == nil {
+		return taskresource.Default(), false
+	}
+	workingSet, err := reshardWorkingSet(job, getImportV3Config())
+	if err != nil {
+		return taskresource.Default(), false
+	}
+	return taskresource.ImportV3(workingSet), true
+}
 
 func (t *reshardTask) SetTaskTime(tt taskcommon.TimeType, tm time.Time) { t.times.SetTaskTime(tt, tm) }
 
@@ -214,7 +231,8 @@ func (t *reshardTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) 
 		mlog.Warn(context.TODO(), "persist reshard task running state failed", WrapTaskLog(t, mlog.Err(err))...)
 		return
 	}
-	err = cluster.CreateReshard(nodeID, req, t.GetCollectionID())
+	resource, _ := t.GetTaskResource()
+	err = cluster.CreateReshard(nodeID, req, t.GetCollectionID(), resource)
 	if err != nil {
 		mlog.Warn(context.TODO(), "create reshard task failed", WrapTaskLog(t, mlog.Err(err))...)
 		// Raw transport errors are not terminal and retry; a deterministic

@@ -19,6 +19,7 @@ package session
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -211,8 +212,13 @@ func TestCluster_QuerySlot(t *testing.T) {
 		mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
 
 		mockClient.EXPECT().QuerySlot(mock.Anything, mock.Anything).Return(&datapb.QuerySlotResponse{
-			Status:         merr.Success(),
-			AvailableSlots: 5,
+			Status:          merr.Success(),
+			AvailableSlots:  5,
+			TotalCpu:        16,
+			AvailableCpu:    12,
+			TotalMemory:     64 << 30,
+			AvailableMemory: 40 << 30,
+			MachineMemory:   256 << 30,
 		}, nil)
 
 		// Test
@@ -221,6 +227,13 @@ func TestCluster_QuerySlot(t *testing.T) {
 		assert.Len(t, result, 2)
 		for _, slots := range result {
 			assert.Equal(t, int64(5), slots.AvailableSlots)
+			// Every dimension of the report must reach the scheduler, and reach
+			// the field it was reported as.
+			assert.Equal(t, int64(16), slots.TotalCPU)
+			assert.Equal(t, int64(12), slots.AvailableCPU)
+			assert.Equal(t, int64(64)<<30, slots.TotalMemory)
+			assert.Equal(t, int64(40)<<30, slots.AvailableMemory)
+			assert.Equal(t, int64(256)<<30, slots.MachineMemory)
 		}
 	})
 
@@ -250,7 +263,7 @@ func TestCluster_Compaction(t *testing.T) {
 		mockClient.EXPECT().CreateTask(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
 		// Test
-		err := cluster.CreateCompaction(1, &datapb.CompactionPlan{}, 100)
+		err := cluster.CreateCompaction(1, &datapb.CompactionPlan{}, 100, taskcommon.Resource{})
 		assert.NoError(t, err)
 	})
 
@@ -365,7 +378,7 @@ func TestCluster_Import(t *testing.T) {
 		mockClient.EXPECT().CreateTask(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
 		// Test
-		err := cluster.CreatePreImport(1, &datapb.PreImportRequest{}, 1)
+		err := cluster.CreatePreImport(1, &datapb.PreImportRequest{}, 1, taskcommon.Resource{})
 		assert.NoError(t, err)
 	})
 
@@ -379,7 +392,7 @@ func TestCluster_Import(t *testing.T) {
 		mockClient.EXPECT().CreateTask(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
 		// Test
-		err := cluster.CreateImport(1, &datapb.ImportRequest{}, 1)
+		err := cluster.CreateImport(1, &datapb.ImportRequest{}, 1, taskcommon.Resource{})
 		assert.NoError(t, err)
 	})
 
@@ -600,7 +613,7 @@ func TestCluster_Index(t *testing.T) {
 		mockClient.EXPECT().CreateTask(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
 		// Test
-		err := cluster.CreateIndex(1, &workerpb.CreateJobRequest{})
+		err := cluster.CreateIndex(1, &workerpb.CreateJobRequest{}, taskcommon.Resource{})
 		assert.NoError(t, err)
 	})
 
@@ -698,7 +711,7 @@ func TestCluster_Stats(t *testing.T) {
 		mockClient.EXPECT().CreateTask(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
 		// Test
-		err := cluster.CreateStats(1, &workerpb.CreateStatsRequest{})
+		err := cluster.CreateStats(1, &workerpb.CreateStatsRequest{}, taskcommon.Resource{})
 		assert.NoError(t, err)
 	})
 
@@ -796,7 +809,7 @@ func TestCluster_Analyze(t *testing.T) {
 		mockClient.EXPECT().CreateTask(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
 		// Test
-		err := cluster.CreateAnalyze(1, &workerpb.AnalyzeRequest{})
+		err := cluster.CreateAnalyze(1, &workerpb.AnalyzeRequest{}, taskcommon.Resource{})
 		assert.NoError(t, err)
 	})
 
@@ -944,7 +957,7 @@ func TestCluster_CreateProperties(t *testing.T) {
 			PlanID:    1,
 			SlotUsage: 1,
 		}
-		err := cluster.CreateCompaction(1, req, 100)
+		err := cluster.CreateCompaction(1, req, 100, taskcommon.Resource{})
 		assert.NoError(t, err)
 	})
 
@@ -952,7 +965,7 @@ func TestCluster_CreateProperties(t *testing.T) {
 		req := &datapb.PreImportRequest{
 			TaskID: 1,
 		}
-		err := cluster.CreatePreImport(1, req, 1)
+		err := cluster.CreatePreImport(1, req, 1, taskcommon.Resource{})
 		assert.NoError(t, err)
 	})
 
@@ -960,7 +973,7 @@ func TestCluster_CreateProperties(t *testing.T) {
 		req := &datapb.ImportRequest{
 			TaskID: 1,
 		}
-		err := cluster.CreateImport(1, req, 1)
+		err := cluster.CreateImport(1, req, 1, taskcommon.Resource{})
 		assert.NoError(t, err)
 	})
 
@@ -971,7 +984,7 @@ func TestCluster_CreateProperties(t *testing.T) {
 			NumRows:      1000,
 			IndexVersion: 1,
 		}
-		err := cluster.CreateIndex(1, req)
+		err := cluster.CreateIndex(1, req, taskcommon.Resource{})
 		assert.NoError(t, err)
 	})
 
@@ -983,7 +996,7 @@ func TestCluster_CreateProperties(t *testing.T) {
 			TaskVersion: 1,
 			SubJobType:  indexpb.StatsSubJob_Sort,
 		}
-		err := cluster.CreateStats(1, req)
+		err := cluster.CreateStats(1, req, taskcommon.Resource{})
 		assert.NoError(t, err)
 	})
 
@@ -993,7 +1006,7 @@ func TestCluster_CreateProperties(t *testing.T) {
 			TaskSlot: 1,
 			Version:  1,
 		}
-		err := cluster.CreateAnalyze(1, req)
+		err := cluster.CreateAnalyze(1, req, taskcommon.Resource{})
 		assert.NoError(t, err)
 	})
 }
@@ -1017,37 +1030,37 @@ func TestCluster_CreateProperties_CollectionLabels(t *testing.T) {
 		create func(c Cluster, collectionID int64) error
 	}{
 		{"CreateCompaction", func(c Cluster, collectionID int64) error {
-			return c.CreateCompaction(1, &datapb.CompactionPlan{PlanID: 1, SlotUsage: 1}, collectionID)
+			return c.CreateCompaction(1, &datapb.CompactionPlan{PlanID: 1, SlotUsage: 1}, collectionID, taskcommon.Resource{})
 		}},
 		{"CreatePreImport", func(c Cluster, collectionID int64) error {
-			return c.CreatePreImport(1, &datapb.PreImportRequest{TaskID: 1, CollectionID: collectionID}, 1)
+			return c.CreatePreImport(1, &datapb.PreImportRequest{TaskID: 1, CollectionID: collectionID}, 1, taskcommon.Resource{})
 		}},
 		{"CreateImport", func(c Cluster, collectionID int64) error {
-			return c.CreateImport(1, &datapb.ImportRequest{TaskID: 1, CollectionID: collectionID}, 1)
+			return c.CreateImport(1, &datapb.ImportRequest{TaskID: 1, CollectionID: collectionID}, 1, taskcommon.Resource{})
 		}},
 		{"CreatePreImportV3", func(c Cluster, collectionID int64) error {
-			return c.CreatePreImportV3(1, &datapb.PreImportRequest{TaskID: 1, CollectionID: collectionID}, 1)
+			return c.CreatePreImportV3(1, &datapb.PreImportRequest{TaskID: 1, CollectionID: collectionID}, 1, taskcommon.Resource{})
 		}},
 		{"CreateReshard", func(c Cluster, collectionID int64) error {
-			return c.CreateReshard(1, &datapb.ReshardTaskRequest{}, collectionID)
+			return c.CreateReshard(1, &datapb.ReshardTaskRequest{}, collectionID, taskcommon.Resource{})
 		}},
 		{"CreateImportV3", func(c Cluster, collectionID int64) error {
-			return c.CreateImportV3(1, &datapb.ImportTaskV3Request{}, collectionID)
+			return c.CreateImportV3(1, &datapb.ImportTaskV3Request{}, collectionID, taskcommon.Resource{})
 		}},
 		{"CreateIndex", func(c Cluster, collectionID int64) error {
-			return c.CreateIndex(1, &workerpb.CreateJobRequest{BuildID: 1, CollectionID: collectionID})
+			return c.CreateIndex(1, &workerpb.CreateJobRequest{BuildID: 1, CollectionID: collectionID}, taskcommon.Resource{})
 		}},
 		{"CreateStats", func(c Cluster, collectionID int64) error {
-			return c.CreateStats(1, &workerpb.CreateStatsRequest{TaskID: 1, CollectionID: collectionID, SubJobType: indexpb.StatsSubJob_Sort})
+			return c.CreateStats(1, &workerpb.CreateStatsRequest{TaskID: 1, CollectionID: collectionID, SubJobType: indexpb.StatsSubJob_Sort}, taskcommon.Resource{})
 		}},
 		{"CreateAnalyze", func(c Cluster, collectionID int64) error {
-			return c.CreateAnalyze(1, &workerpb.AnalyzeRequest{TaskID: 1, CollectionID: collectionID})
+			return c.CreateAnalyze(1, &workerpb.AnalyzeRequest{TaskID: 1, CollectionID: collectionID}, taskcommon.Resource{})
 		}},
 		{"CreateRefreshExternalCollectionTask", func(c Cluster, collectionID int64) error {
-			return c.CreateRefreshExternalCollectionTask(1, &datapb.RefreshExternalCollectionTaskRequest{TaskID: 1, CollectionID: collectionID})
+			return c.CreateRefreshExternalCollectionTask(1, &datapb.RefreshExternalCollectionTaskRequest{TaskID: 1, CollectionID: collectionID}, taskcommon.Resource{})
 		}},
 		{"CreateCopySegment", func(c Cluster, collectionID int64) error {
-			return c.CreateCopySegment(1, &datapb.CopySegmentRequest{TaskID: 1}, collectionID, false)
+			return c.CreateCopySegment(1, &datapb.CopySegmentRequest{TaskID: 1}, collectionID, false, taskcommon.Resource{})
 		}},
 	}
 
@@ -1277,7 +1290,7 @@ func TestCluster_CopySegment(t *testing.T) {
 			TaskID:   123,
 			TaskSlot: 1,
 		}
-		err := cluster.CreateCopySegment(1, req, 100, false)
+		err := cluster.CreateCopySegment(1, req, 100, false, taskcommon.Resource{})
 		assert.NoError(t, err)
 	})
 
@@ -1295,7 +1308,7 @@ func TestCluster_CopySegment(t *testing.T) {
 			TaskID:   123,
 			TaskSlot: 1,
 		}
-		err := cluster.CreateCopySegment(1, req, 100, true)
+		err := cluster.CreateCopySegment(1, req, 100, true, taskcommon.Resource{})
 		assert.NoError(t, err)
 	})
 
@@ -1311,7 +1324,7 @@ func TestCluster_CopySegment(t *testing.T) {
 			TaskID:   123,
 			TaskSlot: 1,
 		}
-		err := cluster.CreateCopySegment(1, req, 100, false)
+		err := cluster.CreateCopySegment(1, req, 100, false, taskcommon.Resource{})
 		assert.Error(t, err)
 	})
 
@@ -1500,7 +1513,7 @@ func TestClusterCopySegmentSharedIndexCompatibility(t *testing.T) {
 					}
 				}
 			}).Return(merr.Success(), nil)
-			require.NoError(t, cluster.CreateCopySegment(1, req, 300, false))
+			require.NoError(t, cluster.CreateCopySegment(1, req, 300, false, taskcommon.Resource{}))
 			require.Empty(t, req.GetTargets()[0].GetTargetIndexes(), "legacy expansion must not mutate the shared request")
 		})
 	}
@@ -1558,12 +1571,12 @@ func TestClusterSegmentRootedIndexCapability(t *testing.T) {
 				}
 				var err error
 				if operation == "build" {
-					err = cluster.CreateIndex(1, &workerpb.CreateJobRequest{BuildID: 123, IndexStorePathVersion: tc.version})
+					err = cluster.CreateIndex(1, &workerpb.CreateJobRequest{BuildID: 123, IndexStorePathVersion: tc.version}, taskcommon.Resource{})
 				} else {
 					err = cluster.CreateCopySegment(1, &datapb.CopySegmentRequest{
 						TaskID:  123,
 						Targets: []*datapb.CopySegmentTarget{{SegmentId: 1, IndexStorePathVersion: tc.version.Enum()}},
-					}, 300, false)
+					}, 300, false, taskcommon.Resource{})
 				}
 				if canDispatch {
 					require.NoError(t, err)
@@ -1580,4 +1593,91 @@ func TestClusterSegmentRootedIndexCapability(t *testing.T) {
 			})
 		}
 	}
+}
+
+// captureCreateTaskProperties dispatches one Create* call against a mock client
+// and returns the properties the worker would receive.
+func captureCreateTaskProperties(t *testing.T, call func(Cluster) error) taskcommon.Properties {
+	var sent taskcommon.Properties
+	mockNodeManager := NewMockNodeManager(t)
+	mockClient := mocks.NewMockDataNodeClient(t)
+	mockNodeManager.EXPECT().GetClient(mock.Anything).Return(mockClient, nil)
+	mockClient.EXPECT().CreateTask(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, req *workerpb.CreateTaskRequest, _ ...grpc.CallOption) (*commonpb.Status, error) {
+			sent = taskcommon.NewProperties(req.GetProperties())
+			return merr.Success(), nil
+		})
+	assert.NoError(t, call(NewCluster(mockNodeManager)))
+	return sent
+}
+
+// TestCluster_TaskResourcePropagation proves every Create* dispatch puts the
+// resource it was handed into the CreateTask properties beside task_slot. The
+// payload protos carry no resource fields, so this is the only channel.
+func TestCluster_TaskResourcePropagation(t *testing.T) {
+	cases := []struct {
+		name     string
+		resource taskcommon.Resource
+		call     func(Cluster, taskcommon.Resource) error
+	}{
+		{"CreateCompaction", taskcommon.Resource{CPU: 2, Memory: 1 << 30}, func(c Cluster, r taskcommon.Resource) error {
+			return c.CreateCompaction(1, &datapb.CompactionPlan{PlanID: 1, SlotUsage: 1}, 100, r)
+		}},
+		{"CreatePreImport", taskcommon.Resource{CPU: 3, Memory: 2 << 30}, func(c Cluster, r taskcommon.Resource) error {
+			return c.CreatePreImport(1, &datapb.PreImportRequest{TaskID: 1}, 1, r)
+		}},
+		{"CreateImport", taskcommon.Resource{CPU: 4, Memory: 3 << 30}, func(c Cluster, r taskcommon.Resource) error {
+			return c.CreateImport(1, &datapb.ImportRequest{TaskID: 1}, 1, r)
+		}},
+		{"CreateIndex", taskcommon.Resource{CPU: 5, Memory: 4 << 30}, func(c Cluster, r taskcommon.Resource) error {
+			return c.CreateIndex(1, &workerpb.CreateJobRequest{BuildID: 1, TaskSlot: 1, IndexVersion: 1}, r)
+		}},
+		{"CreateStats", taskcommon.Resource{CPU: 6, Memory: 5 << 30}, func(c Cluster, r taskcommon.Resource) error {
+			return c.CreateStats(1, &workerpb.CreateStatsRequest{
+				TaskID: 1, TaskSlot: 1, TaskVersion: 1, SubJobType: indexpb.StatsSubJob_Sort,
+			}, r)
+		}},
+		{"CreateAnalyze", taskcommon.Resource{CPU: 7, Memory: 6 << 30}, func(c Cluster, r taskcommon.Resource) error {
+			return c.CreateAnalyze(1, &workerpb.AnalyzeRequest{TaskID: 1, TaskSlot: 1, Version: 1}, r)
+		}},
+		{"CreateCopySegment", taskcommon.Resource{CPU: 8, Memory: 7 << 30}, func(c Cluster, r taskcommon.Resource) error {
+			return c.CreateCopySegment(1, &datapb.CopySegmentRequest{TaskID: 1, TaskSlot: 1}, 100, false, r)
+		}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			props := captureCreateTaskProperties(t, func(c Cluster) error { return tc.call(c, tc.resource) })
+			assert.Equal(t, strconv.FormatInt(tc.resource.CPU, 10), props[taskcommon.CPUKey])
+			assert.Equal(t, strconv.FormatInt(tc.resource.Memory, 10), props[taskcommon.MemoryKey])
+
+			// And the worker reads back exactly what was placed.
+			got, err := props.GetTaskResource()
+			assert.NoError(t, err)
+			assert.Equal(t, tc.resource, got)
+		})
+	}
+}
+
+// TestCluster_ZeroTaskResourceIsExplicit pins that a zero estimate is still
+// written, so a worker talking to a current coordinator never has to tell
+// "priced at zero" apart from "key absent".
+func TestCluster_ZeroTaskResourceIsExplicit(t *testing.T) {
+	props := captureCreateTaskProperties(t, func(c Cluster) error {
+		return c.CreateCompaction(1, &datapb.CompactionPlan{PlanID: 1}, 100, taskcommon.Resource{})
+	})
+	assert.Equal(t, "0", props[taskcommon.CPUKey])
+	assert.Equal(t, "0", props[taskcommon.MemoryKey])
+}
+
+// TestCluster_RefreshExternalCollectionCarriesResource pins that the refresh
+// task ships its estimate like every other task, so the DataNode books it.
+func TestCluster_RefreshExternalCollectionCarriesResource(t *testing.T) {
+	props := captureCreateTaskProperties(t, func(c Cluster) error {
+		return c.CreateRefreshExternalCollectionTask(1, &datapb.RefreshExternalCollectionTaskRequest{
+			TaskID: 1, CollectionID: 100,
+		}, taskcommon.Resource{CPU: 1, Memory: 1 << 30})
+	})
+	assert.Equal(t, "1", props[taskcommon.CPUKey])
+	assert.Equal(t, fmt.Sprint(int64(1)<<30), props[taskcommon.MemoryKey])
 }

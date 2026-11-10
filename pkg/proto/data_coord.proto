@@ -1794,6 +1794,21 @@ message QuerySlotResponse {
   bool copy_segment_shared_indexes = 4;
   // Supports v2 index build and copy destinations under a segment's _index.
   bool segment_rooted_indexes = 5;
+  // Two-dimensional report. A worker that predates it leaves total_* at zero,
+  // and a coordinator that sees total_memory == 0 places on available_slots.
+  // available_cpu = total_cpu - sum(cpu of accepted, unfinished tasks).
+  // available_memory = min(total_memory - sum(memory of accepted, unfinished
+  // tasks), memory the machine currently has free).
+  int64 total_cpu = 6;
+  int64 available_cpu = 7;
+  int64 total_memory = 8;   // bytes
+  int64 available_memory = 9; // bytes
+  // The machine's memory (the cgroup-aware limit), without the standalone
+  // discount that total_memory carries. It is the base of a bound the worker
+  // applies against the whole machine, such as the import allocator's share,
+  // so the coordinator charges what the worker books. Zero means the worker
+  // predates it; the coordinator then uses total_memory.
+  int64 machine_memory = 10; // bytes
 }
 
 enum CompactionTaskState {

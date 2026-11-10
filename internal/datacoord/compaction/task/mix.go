@@ -10,11 +10,13 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -23,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 var _ CompactionTask = (*MixCompactionTask)(nil)
@@ -39,6 +42,7 @@ type MixCompactionTask struct {
 	times *taskcommon.Times
 
 	slotUsage atomic.Int64
+	resource  taskresource.Cache
 }
 
 func (t *MixCompactionTask) GetTaskID() int64 {
@@ -51,6 +55,35 @@ func (t *MixCompactionTask) GetTaskType() taskcommon.Type {
 
 func (t *MixCompactionTask) GetTaskState() taskcommon.State {
 	return taskcommon.FromCompactionState(t.GetTaskProto().GetState())
+}
+
+// GetTaskResource prices a sort compaction by the segment it sorts (it reads
+// and rewrites all of it) and a mix compaction by its streamed input, bounded
+// by one output segment, plus the delete maps it holds (mixCompactionInputs).
+func (t *MixCompactionTask) GetTaskResource() (taskcommon.Resource, bool) {
+	return t.resource.Get(func() (taskcommon.Resource, bool) {
+		taskProto := t.GetTaskProto()
+		if taskProto.GetType() != datapb.CompactionType_SortCompaction {
+			inputSize, deleteMapBytes, ok := mixCompactionInputs(t.Meta, taskProto)
+			if !ok {
+				return taskresource.Default(), false
+			}
+			return taskresource.MixCompaction(inputSize, deleteMapBytes), true
+		}
+		inputs := taskProto.GetInputSegments()
+		if len(inputs) == 0 {
+			return taskresource.Default(), false
+		}
+		segment := t.Meta.GetHealthySegment(context.TODO(), inputs[0])
+		if segment == nil {
+			return taskresource.Default(), false
+		}
+		size := taskresource.EstimateSegmentSize(segment, taskProto.GetSchema())
+		if size <= 0 {
+			return taskresource.Default(), false
+		}
+		return taskresource.SortCompaction(size), true
+	})
 }
 
 func (t *MixCompactionTask) GetTaskSlot() int64 {
@@ -94,7 +127,8 @@ func (t *MixCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clu
 		return
 	}
 
-	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID())
+	resource, _ := t.GetTaskResource()
+	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID(), resource)
 	if err != nil {
 		// Compaction tasks may be refused by DataNode because of slot limit. In this case, the node id is reset
 		//  to enable a retry in compaction.checkCompaction().
@@ -451,4 +485,59 @@ func (t *MixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 
 func (t *MixCompactionTask) GetSlotUsage() int64 {
 	return t.GetTaskSlot()
+}
+
+// compactionInputSize sums the sizes of a compaction's input segments, or
+// reports ok=false when one of them is not in meta (dropped between enqueue
+// and dispatch) so the caller prices at the floor without caching.
+func compactionInputSize(compactionMeta meta.CompactionMeta, taskProto *datapb.CompactionTask) (int64, bool) {
+	var size int64
+	for _, segID := range taskProto.GetInputSegments() {
+		segment := compactionMeta.GetHealthySegment(context.TODO(), segID)
+		if segment == nil {
+			return 0, false
+		}
+		size += taskresource.EstimateSegmentSize(segment, taskProto.GetSchema())
+	}
+	return size, true
+}
+
+// mixCompactionInputs walks a mix compaction's inputs once and returns their
+// streamed size (as compactionInputSize) and the delete-map memory the worker
+// holds at once. mergeSplit reads one input at a time and drops its map before
+// the next, so the largest input's map is what it holds. storage.MergeSort
+// keeps the map of every input until the merge ends, so on that path they add
+// up. The worker picks the path with canMergeSort from the plan's sorted
+// flags, the input count and the compaction params, which DataCoord generates
+// for the plan from the same dataNode.compaction keys (compaction.GenParams),
+// so the same rule is applied here. ok=false when an input is not in meta.
+func mixCompactionInputs(compactionMeta meta.CompactionMeta, taskProto *datapb.CompactionTask) (inputSize, deleteMapBytes int64, ok bool) {
+	schema := taskProto.GetSchema()
+	pkType := schemapb.DataType_Int64
+	if pk, err := typeutil.GetPrimaryFieldSchema(schema); err == nil {
+		pkType = pk.GetDataType()
+	}
+	inputs := taskProto.GetInputSegments()
+	mergeSort := paramtable.Get().DataNodeCfg.UseMergeSort.GetAsBool() &&
+		len(inputs) <= paramtable.Get().DataNodeCfg.MaxSegmentMergeSort.GetAsInt()
+	var sum, largest int64
+	for _, segID := range inputs {
+		segment := compactionMeta.GetHealthySegment(context.TODO(), segID)
+		if segment == nil {
+			return 0, 0, false
+		}
+		inputSize += taskresource.EstimateSegmentSize(segment, schema)
+		sorted := segment.GetIsSorted()
+		if schema.GetEnableNamespace() {
+			sorted = segment.GetIsSortedByNamespace()
+		}
+		mergeSort = mergeSort && sorted
+		bytes := taskresource.DeleteMapBytes(segment, pkType)
+		sum += bytes
+		largest = max(largest, bytes)
+	}
+	if mergeSort {
+		return inputSize, sum, true
+	}
+	return inputSize, largest, true
 }

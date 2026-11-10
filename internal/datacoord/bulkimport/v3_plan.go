@@ -212,22 +212,37 @@ func importPlan(job ImportJob, p *datapb.ImportTaskV3, cfg importV3Config) (*imp
 // instead of being persisted, so a refreshable-config change cannot make the
 // charge drift from the run.
 func reshardSlot(job ImportJob, cfg importV3Config) int64 {
-	fragmentSize, err := importFragmentSizeBytes(cfg)
+	workingSet, err := reshardWorkingSet(job, cfg)
 	if err != nil {
 		// Planning rejects an invalid fragment size before any task exists; a
 		// later refresh to an invalid value must still yield a positive charge.
 		return 1
 	}
-	return calculateReshardTaskSlot(reshardmem.Model{
+	return calculateImportV3Slots(workingSet, reshardmem.MemoryPerSlot(cfg.workerSlotUnit, cfg.buildParallel))
+}
+
+// reshardWorkingSet is the bytes one reshard run of job holds on the worker
+// under cfg: the reshardmem model's working set (the GC-scaled resident set,
+// the prepare pipeline and one sort copy; see calculateReshardTaskSlot). It is
+// the single number both the slot charge (reshardSlot) and the cpu/memory
+// estimate (reshardTask.GetTaskResource) are derived from. It fails only on an
+// invalid fragment size.
+func reshardWorkingSet(job ImportJob, cfg importV3Config) (int64, error) {
+	fragmentSize, err := importFragmentSizeBytes(cfg)
+	if err != nil {
+		return 0, err
+	}
+	model := reshardmem.Model{
 		ReadBuffer:       cfg.importBaseBufferSize,
 		FragmentTarget:   fragmentSize,
 		FlushConcurrency: cfg.reshardFlushConcurrency,
 		ExpansionFactor:  cfg.reshardMemoryExpansionFactor,
-	}, reshardmem.MemoryPerSlot(cfg.workerSlotUnit, cfg.buildParallel),
+	}
+	return model.WorkingSet(
 		int64(len(job.GetVchannels())*len(job.GetPartitionIDs())),
 		cfg.reshardResidentBucketCap,
 		int64(len(typeutil.GetAllFieldSchemas(importutilv2.FragmentSchema(job.GetSchema(), importutilv2.IsBackup(job.GetOptions()))))),
-	)
+	), nil
 }
 
 // importSlotModel is the deployment-dependent part of the ImportTaskV3 charge:
@@ -245,10 +260,19 @@ func importSlotModel(cfg importV3Config) reshardmem.Model {
 // importPlan computes from the same fragment count under the same config, so
 // the charged slot and the merge that runs always agree.
 func importSlot(fragmentCount int, cfg importV3Config, schema *schemapb.CollectionSchema) int64 {
+	return calculateImportV3Slots(importV3WorkingSet(fragmentCount, cfg, schema),
+		reshardmem.MemoryPerSlot(cfg.workerSlotUnit, cfg.buildParallel))
+}
+
+// importV3WorkingSet is the bytes one ImportTaskV3 (final merge) run holds on
+// the worker: the reshardmem model's import working set for the fan-in that
+// importPlan computes from the same fragment count, plus the LOB writer buffers
+// of the schema's TEXT columns (see calculateImportTaskV3Slot). Both the slot
+// charge (importSlot) and the cpu/memory estimate
+// (importTaskV3.GetTaskResource) derive from it.
+func importV3WorkingSet(fragmentCount int, cfg importV3Config, schema *schemapb.CollectionSchema) int64 {
 	fanIn := getImportV3FanIn(cfg.fragmentMergeFanIn, fragmentCount)
-	return calculateImportTaskV3Slot(importSlotModel(cfg),
-		reshardmem.MemoryPerSlot(cfg.workerSlotUnit, cfg.buildParallel), packed.DefaultWriteBufferSize,
-		textWriterBuffer(cfg, schema), fanIn)
+	return importSlotModel(cfg).ImportWorkingSet(packed.DefaultWriteBufferSize, textWriterBuffer(cfg, schema), fanIn)
 }
 
 // textWriterBuffer is the LOB writer buffer the final merge keeps per TEXT

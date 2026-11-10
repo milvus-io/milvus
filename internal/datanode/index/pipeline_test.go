@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -119,6 +120,7 @@ func (t *pipelineTestTask) GetSlot() int64 {
 func (t *pipelineTestTask) Ctx() context.Context             { return t.ctx }
 func (t *pipelineTestTask) Name() string                     { return t.id }
 func (t *pipelineTestTask) IsVectorIndex() bool              { return true }
+func (t *pipelineTestTask) GetResource() taskcommon.Resource { return taskcommon.Resource{} }
 func (t *pipelineTestTask) OnEnqueue(context.Context) error  { return nil }
 func (t *pipelineTestTask) PreExecute(context.Context) error { return nil }
 func (t *pipelineTestTask) SetState(state indexpb.JobState, _ string) {

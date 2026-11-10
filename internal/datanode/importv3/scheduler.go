@@ -25,6 +25,7 @@ import (
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -57,6 +58,9 @@ type Task interface {
 	Kind() string
 	// Slot is the task's slot cost on this node.
 	Slot() int64
+	// Resource is the cpu/memory DataCoord estimated for the task; it is
+	// booked from Submit until the run's closure exits.
+	Resource() taskcommon.Resource
 	// Execute runs the task to completion (or error) on the pool's
 	// goroutine. A canceled ctx is the only cancellation mechanism.
 	Execute(ctx context.Context) (any, error)
@@ -336,6 +340,25 @@ func (s *Scheduler) QueuedSlots() int64 {
 	defer s.mu.RUnlock()
 	_, slots := s.queuedUnsafe()
 	return slots
+}
+
+// Resource returns the cpu/memory booked by every run DataCoord has placed
+// here and that has not exited yet: queued and started alike, the same scope
+// Slots()+QueuedSlots() covers for the scalar slot. A dropped or superseded
+// run keeps counting until its closure exits, like its slot.
+func (s *Scheduler) Resource() taskcommon.Resource {
+	if s == nil {
+		return taskcommon.Resource{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var used taskcommon.Resource
+	for _, key := range s.tasks.Keys() {
+		if rec, ok := s.tasks.Get(key); ok && !rec.finished {
+			used = used.Add(rec.worker.Resource())
+		}
+	}
+	return used
 }
 
 // Start runs the admission loop until Close. It is a singleton loop like the

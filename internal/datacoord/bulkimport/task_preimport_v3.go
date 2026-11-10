@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/datacoord/taskresource"
 	"github.com/milvus-io/milvus/internal/json"
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -113,12 +114,25 @@ func (p *preImportV3Task) GetTaskState() taskcommon.State {
 	return taskcommon.FromImportState(p.GetState())
 }
 
-// GetTaskSlot reports one slot. The count-only preimport only reads file
-// metadata (a parquet footer or a numpy header, bounded by
+// GetTaskSlot reports one slot. The count-only preimport reads only the
+// metadata of a parquet or numpy file (the footer or the header, bounded by
 // dataCoord.import.parquetFooterMaxSize) and, for a backup job, walks the object
-// list for sizes; it holds no data buffer, so a single slot always covers it.
+// list for sizes. A JSON or CSV file has no row count in its metadata and is
+// scanned through one read buffer (see GetTaskResource).
 func (p *preImportV3Task) GetTaskSlot() int64 {
 	return 1
+}
+
+// GetTaskResource prices the count-only preimport at one base read buffer per
+// file, as the V2 preimport is priced. The worker counts every file of the task
+// at once, and a JSON or CSV file is scanned through a reader with a
+// dataNode.import.readBufferSizeInMB buffer. Parquet, numpy and backup files
+// hold no buffer, so they are over-priced; the price looks only at the task's
+// own file count, without resolving the files. A CSV reader checks its buffer
+// every few rows and can overshoot it; that is not modeled.
+func (p *preImportV3Task) GetTaskResource() (taskcommon.Resource, bool) {
+	base := Params.DataNodeCfg.ImportBaseBufferSize.GetAsInt64()
+	return taskresource.PreImport(int64(len(p.GetV3FileStats())) * base), true
 }
 
 func (p *preImportV3Task) SetTaskTime(timeType taskcommon.TimeType, time time.Time) {
@@ -176,7 +190,8 @@ func (p *preImportV3Task) CreateTaskOnWorker(nodeID int64, cluster session.Clust
 		return
 	}
 
-	err = cluster.CreatePreImportV3(nodeID, req, p.GetTaskSlot())
+	resource, _ := p.GetTaskResource()
+	err = cluster.CreatePreImportV3(nodeID, req, p.GetTaskSlot(), resource)
 	if err != nil {
 		mlog.Warn(context.TODO(), "preimport v3 failed", WrapTaskLog(p, mlog.Err(err))...)
 		// Raw transport errors are not terminal and retry; a deterministic

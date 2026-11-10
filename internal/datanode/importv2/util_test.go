@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -1883,7 +1884,7 @@ func Test_ImportFlowFillsMissingStructSubFields(t *testing.T) {
 			JobID: 1, TaskID: 2, CollectionID: 3, PartitionIDs: []int64{4}, Vchannels: []string{"ch-0"},
 			Schema:      schema,
 			ImportFiles: []*internalpb.ImportFile{{Paths: []string{"dummy.parquet"}}},
-		}, NewTaskManager(), nil).(*PreImportTask)
+		}, NewTaskManager(), nil, taskcommon.Resource{}).(*PreImportTask)
 		require.NoError(t, task.readFileStat(newElementNullMockReader(t, data), 0))
 		assert.Equal(t, 3, data.Data[enTextID].RowNum())
 		assert.Equal(t, 3, data.Data[enNestedID].RowNum())
@@ -1913,7 +1914,7 @@ func Test_ImportFlowFillsMissingStructSubFields(t *testing.T) {
 			RequestSegments: []*datapb.ImportRequestSegment{
 				{SegmentID: 14, PartitionID: 13, Vchannel: "v0"},
 			},
-		}, NewTaskManager(), syncMgr, nil).(*ImportTask)
+		}, NewTaskManager(), syncMgr, nil, taskcommon.Resource{}).(*ImportTask)
 		require.NoError(t, task.importFile(newElementNullMockReader(t, data), nil))
 		assert.Equal(t, 3, data.Data[enTextID].RowNum())
 		assert.Equal(t, 3, data.Data[enNestedID].RowNum())

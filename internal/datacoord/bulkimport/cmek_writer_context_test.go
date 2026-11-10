@@ -133,7 +133,7 @@ func TestPreImportWriterContext(t *testing.T) {
 						return
 					}
 
-					create := func(nodeID int64, req *datapb.PreImportRequest, _ int64) error {
+					create := func(nodeID int64, req *datapb.PreImportRequest, _ int64, _ taskcommon.Resource) error {
 						require.Equal(t, int64(42), nodeID)
 						require.Equal(t, task.GetTaskID(), req.GetTaskID())
 						require.Equal(t, job.GetFiles(), req.GetImportFiles())
@@ -143,9 +143,9 @@ func TestPreImportWriterContext(t *testing.T) {
 						return nil
 					}
 					if version == internalpb.ImportVersion_ImportVersionV3 {
-						cluster.EXPECT().CreatePreImportV3(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(create).Once()
+						cluster.EXPECT().CreatePreImportV3(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(create).Once()
 					} else {
-						cluster.EXPECT().CreatePreImport(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(create).Once()
+						cluster.EXPECT().CreatePreImport(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(create).Once()
 					}
 					task.CreateTaskOnWorker(42, cluster)
 					require.Equal(t, datapb.ImportTaskStateV2_InProgress, task.GetState())

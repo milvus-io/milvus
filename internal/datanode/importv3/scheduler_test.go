@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -27,14 +28,16 @@ type fakeTask struct {
 	taskID   int64
 	runID    int64
 	slot     int64
+	resource taskcommon.Resource
 	progress TaskProgress
 	execute  func(ctx context.Context) (any, error)
 }
 
-func (t *fakeTask) TaskID() int64 { return t.taskID }
-func (t *fakeTask) RunID() int64  { return t.runID }
-func (t *fakeTask) Kind() string  { return "import" }
-func (t *fakeTask) Slot() int64   { return t.slot }
+func (t *fakeTask) TaskID() int64                 { return t.taskID }
+func (t *fakeTask) RunID() int64                  { return t.runID }
+func (t *fakeTask) Kind() string                  { return "import" }
+func (t *fakeTask) Slot() int64                   { return t.slot }
+func (t *fakeTask) Resource() taskcommon.Resource { return t.resource }
 func (t *fakeTask) Progress() TaskProgress {
 	return t.progress
 }
