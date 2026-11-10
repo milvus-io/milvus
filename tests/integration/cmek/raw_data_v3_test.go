@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
@@ -56,7 +55,6 @@ func (s *RawDataV3Suite) SetupSuite() {
 }
 
 func TestRawDataV3Suite(t *testing.T) {
-	t.Skip("IT introduced by #53450: QueryView adaptation and acceptance deferred to a separate PR")
 	suite.Run(t, new(RawDataV3Suite))
 }
 
@@ -129,7 +127,6 @@ func (s *rawDataSuite) inspectRawDataV3(ctx context.Context, segments []*datapb.
 
 type v3LoadedIdentity struct {
 	NodeID   int64
-	Version  int64
 	Manifest inspector.ManifestLocatorV3
 }
 
@@ -146,7 +143,7 @@ func (snapshot v3ReadSnapshot) matches(expected, current map[int64]inspector.Man
 	}
 	for segmentID, manifest := range expected {
 		loaded, serving := snapshot.Loaded[segmentID], snapshot.Serving[segmentID]
-		if len(loaded) != 1 || len(serving) != 1 || loaded[0].NodeID <= 0 || loaded[0].Version <= 0 ||
+		if len(loaded) != 1 || len(serving) != 1 || loaded[0].NodeID <= 0 ||
 			loaded[0].Manifest != manifest || loaded[0].NodeID != serving[0] {
 			return false
 		}
@@ -183,34 +180,6 @@ func (s *rawDataSuite) manifestIdentity(segments []*datapb.SegmentInfo) map[int6
 	return identity
 }
 
-func (s *rawDataSuite) parquetReadSnapshot(ctx context.Context, collectionID int64) v3ReadSnapshot {
-	snapshot := v3ReadSnapshot{Loaded: make(map[int64][]v3LoadedIdentity), Serving: make(map[int64][]int64)}
-	for _, client := range s.Cluster.GetAllStreamingAndQueryNodesClient() {
-		response, err := client.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{LastUpdateTs: 0, SupportDelta: false})
-		s.Require().NoError(merr.CheckRPCCall(response, err))
-		s.Require().False(response.GetIsDelta())
-		for _, segment := range response.GetSegments() {
-			if segment.GetCollection() != collectionID {
-				continue
-			}
-			locator, err := inspector.ParseManifestLocatorV3(segment.GetManifestPath())
-			s.Require().NoError(err)
-			snapshot.Loaded[segment.GetID()] = append(snapshot.Loaded[segment.GetID()], v3LoadedIdentity{response.GetNodeID(), segment.GetVersion(), locator})
-		}
-		for _, view := range response.GetLeaderViews() {
-			if view.GetCollection() != collectionID {
-				continue
-			}
-			snapshot.Unserviceable = snapshot.Unserviceable || !view.GetStatus().GetServiceable()
-			snapshot.Growing = snapshot.Growing || len(view.GetGrowingSegmentIDs()) > 0 || len(view.GetGrowingSegments()) > 0
-			for id, distribution := range view.GetSegmentDist() {
-				snapshot.Serving[id] = append(snapshot.Serving[id], distribution.GetNodeID())
-			}
-		}
-	}
-	return snapshot
-}
-
 func (s *rawDataSuite) waitParquetReleased(ctx context.Context, collectionID int64) {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
@@ -218,7 +187,8 @@ func (s *rawDataSuite) waitParquetReleased(ctx context.Context, collectionID int
 	s.Require().NoError(err)
 	for {
 		released := true
-		for _, client := range s.Cluster.GetAllStreamingAndQueryNodesClient() {
+		for _, node := range s.Cluster.GetAllQueryNodes() {
+			client := node.MustGetClient(ctx)
 			response, err := client.GetMetrics(ctx, request)
 			s.Require().NoError(merr.CheckRPCCall(response, err))
 			var info metricsinfo.QueryNodeInfos
@@ -231,7 +201,7 @@ func (s *rawDataSuite) waitParquetReleased(ctx context.Context, collectionID int
 			}
 		}
 		snapshot := s.parquetReadSnapshot(ctx, collectionID)
-		if released && len(snapshot.Loaded) == 0 && len(snapshot.Serving) == 0 && !snapshot.Growing {
+		if released && len(snapshot.Loaded) == 0 && len(snapshot.Serving) == 0 && !snapshot.Growing && len(s.collectionQueryViews(ctx, collectionID)) == 0 {
 			return
 		}
 		select {

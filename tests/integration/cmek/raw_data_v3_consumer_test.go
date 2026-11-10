@@ -54,7 +54,6 @@ func (s *RawDataV3ConsumerSuite) SetupSuite() {
 }
 
 func TestRawDataV3ConsumerSuite(t *testing.T) {
-	t.Skip("IT introduced by #53450: QueryView adaptation and acceptance deferred to a separate PR")
 	suite.Run(t, new(RawDataV3ConsumerSuite))
 }
 
@@ -231,14 +230,30 @@ func (s *rawDataSuite) runV3EncryptedManifestBuildIndex() {
 	s.Require().Contains(builds, indexed.GetID(), "above-threshold segment lacks physical HNSW")
 	afterSegments := s.currentParquetSegments(ctx, description.GetCollectionID())
 	afterLocators, afterDigests := s.sealedV3ObjectDigests(ctx, afterSegments, description.GetCollectionID())
-	s.Require().True(maps.Equal(beforeLocators, afterLocators), "source manifest identity changed during HNSW build")
-	s.Require().True(maps.Equal(beforeDigests, afterDigests), "encrypted source objects changed during HNSW build")
+	s.Require().Len(afterLocators, len(beforeLocators))
+	for segmentID, before := range beforeLocators {
+		s.Require().Contains(afterLocators, segmentID)
+		after := afterLocators[segmentID]
+		s.Require().Equal(before.BasePath, after.BasePath, "index publication must preserve the source segment lineage")
+		s.Require().Greater(after.Version, before.Version, "physical HNSW publication must advance the manifest")
+		// The source revision remains immutable. Only the new index metadata
+		// belongs in a new revision; its encrypted raw-data objects stay exact.
+		raw, err := s.Cluster.ChunkManager.Read(ctx, before.ObjectPath())
+		s.Require().NoError(err)
+		s.Require().Equal(beforeDigests[before.ObjectPath()], sha256.Sum256(raw), "index build changed its source manifest bytes")
+		delete(beforeDigests, before.ObjectPath())
+		delete(afterDigests, after.ObjectPath())
+	}
+	s.Require().True(maps.Equal(beforeDigests, afterDigests), "encrypted raw-data objects changed during HNSW build")
 	load, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName: s.dbName, CollectionName: collection, ReplicaNumber: 1, LoadFields: campaign.loadFields,
 	})
 	s.Require().NoError(merr.CheckRPCCall(load, err))
 	s.WaitForLoadWithDB(ctx, s.dbName, collection)
 	s.waitLoadedHNSW(ctx, description, builds, fieldIDs[0], index.GetIndexID())
+	snapshot := s.parquetReadSnapshot(ctx, description.GetCollectionID())
+	s.Require().True(snapshot.matches(afterLocators, s.manifestIdentity(s.currentParquetSegments(ctx, description.GetCollectionID()))),
+		"cold read must use the exact manifest revision containing the physical HNSW")
 	s.assertConsumerRows(ctx, collection, expected)
 	s.assertHNSWSearch(ctx, collection, 0)
 	s.assertHNSWSearch(ctx, collection, int64(total-1))

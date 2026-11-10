@@ -21,12 +21,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
-	"path"
 	"strconv"
 	"strings"
 	"time"
 
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -37,7 +35,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
+	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 	"github.com/milvus-io/milvus/tests/integration"
 	"github.com/milvus-io/milvus/tests/integration/cmek/inspector"
 )
@@ -64,18 +64,47 @@ func (s *propagationIndexSuite) SetupSuite() {
 	s.setupRawData(s.version)
 }
 
-func (s *rawDataSuite) indexTasks(ctx context.Context, collectionID, indexID int64) map[int64]*indexpb.SegmentIndex {
-	response, err := s.Cluster.EtcdCli.Get(ctx,
-		path.Join(s.Cluster.RootPath(), "meta", "segment-index", strconv.FormatInt(collectionID, 10))+"/",
-		clientv3.WithPrefix())
+// Completed V3 builds retire their catalog rows when the manifest is published.
+// These small, coordinator-stable scenarios remain inside the task-stat LRU's
+// 30-minute lifetime and 1024-entry capacity. Keep its real dispatch identity
+// separate from the artifact metadata returned by GetIndexInfos.
+type propagationIndexTask struct {
+	*metricsinfo.IndexTaskStats
+	artifact *indexpb.IndexFilePathInfo
+}
+
+func (s *rawDataSuite) indexTasks(ctx context.Context, collectionID, indexID int64) map[int64]*propagationIndexTask {
+	request, err := metricsinfo.ConstructGetMetricsRequest(map[string]interface{}{
+		metricsinfo.MetricTypeKey:                 metricsinfo.BuildIndexTaskKey,
+		metricsinfo.MetricRequestProcessInRoleKey: typeutil.DataCoordRole,
+	})
 	s.Require().NoError(err)
-	tasks := make(map[int64]*indexpb.SegmentIndex)
-	for _, item := range response.Kvs {
-		task := &indexpb.SegmentIndex{}
-		s.Require().NoError(proto.Unmarshal(item.Value, task))
-		if task.GetIndexID() == indexID && !task.GetDeleted() {
-			s.Require().Equal(collectionID, task.GetCollectionID())
-			tasks[task.GetBuildID()] = task
+	response, err := s.Cluster.MixCoordClient.GetMetrics(ctx, request)
+	s.Require().NoError(merr.CheckRPCCall(response, err))
+	var stats []*metricsinfo.IndexTaskStats
+	s.Require().NoError(json.Unmarshal([]byte(response.GetResponse()), &stats))
+	tasks := make(map[int64]*propagationIndexTask)
+	var segmentIDs []int64
+	for _, task := range stats {
+		if task.CollectionID == collectionID && task.IndexID == indexID {
+			s.Require().NotContains(tasks, task.BuildID)
+			tasks[task.BuildID] = &propagationIndexTask{IndexTaskStats: task}
+			segmentIDs = append(segmentIDs, task.SegmentID)
+		}
+	}
+	info, err := s.Cluster.MixCoordClient.GetIndexInfos(ctx, &indexpb.GetIndexInfoRequest{
+		CollectionID: collectionID, SegmentIDs: segmentIDs,
+	})
+	s.Require().NoError(merr.CheckRPCCall(info, err))
+	for _, segment := range info.GetSegmentInfo() {
+		for _, artifact := range segment.GetIndexInfos() {
+			if artifact.GetIndexID() != indexID {
+				continue
+			}
+			task := tasks[artifact.GetBuildID()]
+			s.Require().NotNil(task, "artifact must retain its actual build-task identity")
+			s.Require().Equal(task.SegmentID, artifact.GetSegmentID())
+			task.artifact = artifact
 		}
 	}
 	return tasks
@@ -160,16 +189,16 @@ func (s *propagationIndexSuite) TestBuild() {
 	s.Require().NoError(merr.CheckRPCCall(described, err))
 	s.Require().Len(described.GetIndexDescriptions(), 1)
 	indexID := described.GetIndexDescriptions()[0].GetIndexID()
-	var blocked map[int64]*indexpb.SegmentIndex
+	var blocked map[int64]*propagationIndexTask
 	if s.fault {
 		s.fixture.waitForRetry(s.T(), fault, func() {
 			s.Require().True(maps.Equal(before, s.objectSnapshot(ctx, prefixes...)),
 				"writer-key failure produced target index files or changed source objects")
 			blocked = s.indexTasks(ctx, collectionID, indexID)
 			for _, task := range blocked {
-				s.Require().NotEqual(commonpb.IndexState_Finished, task.GetState())
-				s.Require().NotEqual(commonpb.IndexState_Failed, task.GetState())
-				s.Require().Empty(task.GetIndexFileKeys())
+				s.Require().NotEqual(commonpb.IndexState_Finished.String(), task.IndexState)
+				s.Require().NotEqual(commonpb.IndexState_Failed.String(), task.IndexState)
+				s.Require().Empty(task.artifact.GetIndexFilePaths())
 			}
 			s.fixture.assertNotRegistered(s.T(), nodeID, s.ezID)
 		})
@@ -187,25 +216,28 @@ func (s *propagationIndexSuite) TestBuild() {
 	}
 	builds := make(map[int64]int64)
 	segmentIDs := make([]int64, 0, len(segments))
+	partitions := make(map[int64]int64, len(segments))
 	for _, segment := range segments {
 		segmentIDs = append(segmentIDs, segment.GetID())
+		partitions[segment.GetID()] = segment.GetPartitionID()
 	}
 	info, err := s.Cluster.MixCoordClient.GetIndexInfos(ctx, &indexpb.GetIndexInfoRequest{
 		CollectionID: collectionID, SegmentIDs: segmentIDs,
 	})
 	s.Require().NoError(merr.CheckRPCCall(info, err))
 	for _, task := range tasks {
-		s.Require().Equal(commonpb.IndexState_Finished, task.GetState())
-		s.Require().Equal(nodeID, task.GetNodeID())
-		s.Require().NotEmpty(task.GetIndexFileKeys(), "fake-finished build is not propagation coverage")
-		builds[task.GetSegmentID()] = task.GetBuildID()
+		s.Require().Contains(partitions, task.SegmentID)
+		s.Require().Equal(commonpb.IndexState_Finished.String(), task.IndexState)
+		s.Require().Equal(nodeID, task.NodeID)
+		s.Require().NotEmpty(task.artifact.GetIndexFilePaths(), "fake-finished build is not propagation coverage")
+		builds[task.SegmentID] = task.BuildID
 		found := false
-		for _, index := range info.GetSegmentInfo()[task.GetSegmentID()].GetIndexInfos() {
+		for _, index := range info.GetSegmentInfo()[task.SegmentID].GetIndexInfos() {
 			if index.GetIndexID() != indexID {
 				continue
 			}
 			found = true
-			s.Require().Equal(task.GetBuildID(), index.GetBuildID())
+			s.Require().Equal(task.BuildID, index.GetBuildID())
 			s.Require().NotEmpty(index.GetIndexFilePaths())
 			for _, object := range index.GetIndexFilePaths() {
 				raw, err := s.Cluster.ChunkManager.Read(ctx, object)
@@ -213,19 +245,19 @@ func (s *propagationIndexSuite) TestBuild() {
 				if s.kind == "vector" {
 					s.Require().Equal(int32(8), index.GetCurrentIndexVersion())
 					err = inspector.InspectIndexDataV2(raw, inspector.VectorIndexObject{
-						CollectionID: collectionID, PartitionID: task.GetPartitionID(), SegmentID: task.GetSegmentID(),
-						FieldID: fieldID, BuildID: task.GetBuildID(), EZID: s.ezID,
+						CollectionID: collectionID, PartitionID: partitions[task.SegmentID], SegmentID: task.SegmentID,
+						FieldID: fieldID, BuildID: task.BuildID, EZID: s.ezID,
 					})
 				} else {
 					s.Require().Equal(int32(3), index.GetCurrentScalarIndexVersion())
 					err = inspector.InspectV3(raw, s.ezID)
 				}
-				s.Require().NoError(err, "build=%d object=%s", task.GetBuildID(), object)
+				s.Require().NoError(err, "build=%d object=%s", task.BuildID, object)
 			}
 		}
 		s.Require().True(found)
 		s.T().Logf("stage=index-built kind=%s storage=%d node=%d task=%d segment=%d version=%d",
-			s.kind, s.version, nodeID, task.GetBuildID(), task.GetSegmentID(), task.GetIndexVersion())
+			s.kind, s.version, nodeID, task.BuildID, task.SegmentID, task.IndexVersion)
 	}
 	s.fixture.assertRegistration(s.T(), nodeID, s.ezID, collectionID)
 	status, err = s.Cluster.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
@@ -357,7 +389,8 @@ func (s *propagationJSONSuite) TestSharedKeys() {
 	s.reloadPropagation(ctx, description, outputs)
 	s.Require().Eventually(func() bool {
 		seen := 0
-		for _, client := range s.Cluster.GetAllStreamingAndQueryNodesClient() {
+		for _, node := range s.Cluster.GetAllQueryNodes() {
+			client := node.MustGetClient(ctx)
 			response, err := client.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
 			s.Require().NoError(merr.CheckRPCCall(response, err))
 			for _, segment := range response.GetSegments() {

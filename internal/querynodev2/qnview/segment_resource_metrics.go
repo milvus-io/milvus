@@ -7,10 +7,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
 
-// SegmentMetrics snapshots actual physical bases, once per base rather than per
-// View. The existing operation references prevent teardown during native reads;
-// no Schema is needed and native calls run outside the manager lock.
-func (m *SegmentResourceManager) SegmentMetrics(collectionID, nodeID int64) []*metricsinfo.Segment {
+// inspectPhysicalSegments retains actual bases while the callback reads them.
+// Native calls run outside the manager lock; requirements without a loaded
+// physical base are never reported as loaded resources.
+func (m *SegmentResourceManager) inspectPhysicalSegments(collectionID int64, inspect func(segments.Segment)) {
 	type pinnedBase struct {
 		resource *segmentResource
 		base     *segmentBase
@@ -37,7 +37,6 @@ func (m *SegmentResourceManager) SegmentMetrics(collectionID, nodeID int64) []*m
 			pinned.resource.operations.Done()
 		}
 	}()
-	byID := make(map[int64]*metricsinfo.Segment)
 	for _, pinned := range bases {
 		// The physical adapter exposes metadata without borrowing a View schema.
 		readable, ok := UnwrapTransformSegment(pinned.base.segment).(interface{ QuerySegment() segments.Segment })
@@ -48,6 +47,14 @@ func (m *SegmentResourceManager) SegmentMetrics(collectionID, nodeID int64) []*m
 		if s == nil {
 			continue
 		}
+		inspect(s)
+	}
+}
+
+// SegmentMetrics counts physical bases, independently of their View count.
+func (m *SegmentResourceManager) SegmentMetrics(collectionID, nodeID int64) []*metricsinfo.Segment {
+	byID := make(map[int64]*metricsinfo.Segment)
+	m.inspectPhysicalSegments(collectionID, func(s segments.Segment) {
 		item := byID[s.ID()]
 		if item == nil {
 			item = &metricsinfo.Segment{SegmentID: s.ID(), CollectionID: s.Collection(), PartitionID: s.Partition(), State: s.Type().String(), ResourceGroup: s.ResourceGroup(), NodeID: nodeID}
@@ -72,7 +79,7 @@ func (m *SegmentResourceManager) SegmentMetrics(collectionID, nodeID int64) []*m
 				item.IndexedFields = append(item.IndexedFields, &metricsinfo.IndexedField{IndexFieldID: info.FieldID, IndexID: info.IndexID, IndexSize: info.IndexSize, BuildID: info.BuildID, IsLoaded: index.IsLoaded, HasRawData: s.HasRawData(info.FieldID)})
 			}
 		}
-	}
+	})
 	result := make([]*metricsinfo.Segment, 0, len(byID))
 	for _, item := range byID {
 		result = append(result, item)
