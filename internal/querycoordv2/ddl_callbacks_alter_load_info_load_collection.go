@@ -56,7 +56,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 	}
 
 	currentLoadConfig := s.qviewsRuntime.loadConfigStore.GetConfig(req.GetCollectionID())
-	if currentLoadConfig != nil && warmsInPlace(req) {
+	if currentLoadConfig != nil && req.RequestsInPlaceWarmup() {
 		warmupEpoch, err := s.admitLoadCollectionWarmupHint(ctx, req, coll, currentLoadConfig)
 		if err != nil {
 			return err
@@ -65,6 +65,16 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 		header.WarmupEpoch = warmupEpoch
 		_, err = broadcaster.Broadcast(ctx, newAlterLoadConfigBroadcast(header))
 		return err
+	}
+
+	loadFields, fieldIndexIDs := req.GetLoadFields(), req.GetFieldIndexID()
+	if req.RequestsInPlaceWarmup() {
+		// No load configuration exists under the lock. This is a first load,
+		// including when a release won the race with this request.
+		loadFields, fieldIndexIDs, err = s.defaultLoadFieldsAndIndexes(ctx, coll.ID, coll.Schema.GetName(), coll.Schema)
+		if err != nil {
+			return err
+		}
 	}
 
 	partitionIDs := coll.Partitions
@@ -131,8 +141,8 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 		Expected: job.ExpectedLoadConfig{
 			ExpectedPartitionIDs:             partitionIDs,
 			ExpectedReplicaNumber:            expectedReplicasNumber,
-			ExpectedFieldIndexID:             req.GetFieldIndexID(),
-			ExpectedLoadFields:               loadmgr.PreloadFieldIDsForSchema(coll.Schema, req.GetLoadFields()),
+			ExpectedFieldIndexID:             fieldIndexIDs,
+			ExpectedLoadFields:               loadmgr.PreloadFieldIDsForSchema(coll.Schema, loadFields),
 			ExpectedRequiredFields:           loadmgr.FieldsToMessage(loadmgr.RequiredFieldsForSchema(coll.Schema)),
 			ExpectedPriority:                 req.GetPriority(),
 			ExpectedUserSpecifiedReplicaMode: userSpecifiedReplicaMode,
@@ -146,8 +156,8 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 	msg, err := s.generateAlterLoadConfigMessageForLoadCollection(ctx, coll, currentLoadConfig, qviewsExpectedLoadConfig{
 		PartitionIDs:             partitionIDs,
 		ReplicaNumber:            expectedReplicasNumber,
-		FieldIndexID:             req.GetFieldIndexID(),
-		LoadFields:               req.GetLoadFields(),
+		FieldIndexID:             fieldIndexIDs,
+		LoadFields:               loadFields,
 		Priority:                 req.GetPriority(),
 		UserSpecifiedReplicaMode: userSpecifiedReplicaMode,
 		WarmupEpoch:              warmupEpoch,
@@ -201,16 +211,6 @@ func (s *Server) admitLoadCollectionWarmupHint(
 	}
 	mlog.Info(ctx, "accept load warmup hint", mlog.FieldCollectionID(req.GetCollectionID()), mlog.Int64("warmupEpoch", epoch))
 	return epoch, nil
-}
-
-// warmsInPlace reports whether a load request on a loaded collection only asks
-// to warm it, keeping its load configuration instead of restating the defaults
-// a bare load means: the request carries the warmup hint and names no replica
-// number, resource groups or load fields. The proxy lists the fields to load
-// even when the request names none, so LoadAllFields tells whether it did.
-func warmsInPlace(req *querypb.LoadCollectionRequest) bool {
-	return req.GetWarmupHint() && req.GetReplicaNumber() <= 0 && len(req.GetResourceGroups()) == 0 &&
-		req.GetLoadAllFields() && !req.GetSkipLoadDynamicField()
 }
 
 func newAlterLoadConfigBroadcast(header *messagespb.AlterLoadConfigMessageHeader) message.BroadcastMutableMessage {

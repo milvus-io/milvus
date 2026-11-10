@@ -3224,43 +3224,6 @@ func (t *LoadCollectionTask) Execute(ctx context.Context) (err error) {
 		return err
 	}
 
-	// check index
-	indexResponse, err := t.mixCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
-		CollectionID: collID,
-		IndexName:    "",
-	})
-	if err == nil {
-		err = merr.Error(indexResponse.GetStatus())
-	}
-	if err != nil {
-		if errors.Is(err, merr.ErrIndexNotFound) {
-			err = merr.WrapErrIndexNotFoundForCollection(t.GetCollectionName())
-		}
-		return err
-	}
-
-	// not support multiple indexes on one field
-	fieldIndexIDs := make(map[int64]int64)
-	for _, index := range indexResponse.IndexInfos {
-		fieldIndexIDs[index.FieldID] = index.IndexID
-	}
-
-	loadFieldsSet := typeutil.NewSet(loadFields...)
-	unindexedVecFields := make([]string, 0)
-	allFields := typeutil.GetAllFieldSchemas(collSchema.CollectionSchema)
-	for _, field := range allFields {
-		if typeutil.IsVectorType(field.GetDataType()) && loadFieldsSet.Contain(field.GetFieldID()) {
-			if _, ok := fieldIndexIDs[field.GetFieldID()]; !ok {
-				unindexedVecFields = append(unindexedVecFields, field.GetName())
-			}
-		}
-	}
-
-	if len(unindexedVecFields) != 0 {
-		errMsg := fmt.Sprintf("there is no vector index on field: %v, please create index firstly", unindexedVecFields)
-		log.Debug(ctx, errMsg)
-		return merr.WrapErrParameterInvalidMsg("%s", errMsg)
-	}
 	request := &querypb.LoadCollectionRequest{
 		Base: commonpbutil.UpdateMsgBase(
 			t.Base,
@@ -3270,7 +3233,6 @@ func (t *LoadCollectionTask) Execute(ctx context.Context) (err error) {
 		CollectionID:         collID,
 		Schema:               collSchema.CollectionSchema,
 		ReplicaNumber:        t.ReplicaNumber,
-		FieldIndexID:         fieldIndexIDs,
 		Refresh:              t.Refresh,
 		ResourceGroups:       t.ResourceGroups,
 		LoadFields:           loadFields,
@@ -3278,6 +3240,18 @@ func (t *LoadCollectionTask) Execute(ctx context.Context) (err error) {
 		SkipLoadDynamicField: t.GetSkipLoadDynamicField(),
 		Priority:             t.GetLoadPriority(),
 		WarmupHint:           t.warmupHint,
+	}
+	if request.RequestsInPlaceWarmup() {
+		// Only QueryCoord knows which fields are loaded when the warmup is
+		// admitted. A first load is validated there under the collection lock.
+		if !paramtable.Get().QueryCoordCfg.EnableLoadCollectionWarmupHint.GetAsBool() {
+			return merr.Wrap(merr.ErrServiceUnimplemented, "LoadCollection warmup hint requires queryCoord.enableLoadCollectionWarmupHint after a full-cluster upgrade")
+		}
+	} else {
+		request.FieldIndexID, err = t.loadFieldIndexes(ctx, collID, request.GetSchema(), loadFields)
+		if err != nil {
+			return err
+		}
 	}
 	log.Info(ctx, "send LoadCollectionRequest to query coordinator",
 		mlog.FieldSchema(request.Schema),
@@ -3290,6 +3264,46 @@ func (t *LoadCollectionTask) Execute(ctx context.Context) (err error) {
 		return merr.CheckRPCCall(t.result, nil)
 	}
 	return nil
+}
+
+func (t *LoadCollectionTask) loadFieldIndexes(ctx context.Context, collID int64, schema *schemapb.CollectionSchema, loadFields []int64) (map[int64]int64, error) {
+	indexResponse, err := t.mixCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+		CollectionID: collID,
+		IndexName:    "",
+	})
+	if err == nil {
+		err = merr.Error(indexResponse.GetStatus())
+	}
+	if err != nil {
+		if errors.Is(err, merr.ErrIndexNotFound) {
+			err = merr.WrapErrIndexNotFoundForCollection(t.GetCollectionName())
+		}
+		return nil, err
+	}
+
+	// not support multiple indexes on one field
+	fieldIndexIDs := make(map[int64]int64)
+	for _, index := range indexResponse.IndexInfos {
+		fieldIndexIDs[index.FieldID] = index.IndexID
+	}
+
+	loadFieldsSet := typeutil.NewSet(loadFields...)
+	unindexedVecFields := make([]string, 0)
+	allFields := typeutil.GetAllFieldSchemas(schema)
+	for _, field := range allFields {
+		if typeutil.IsVectorType(field.GetDataType()) && loadFieldsSet.Contain(field.GetFieldID()) {
+			if _, ok := fieldIndexIDs[field.GetFieldID()]; !ok {
+				unindexedVecFields = append(unindexedVecFields, field.GetName())
+			}
+		}
+	}
+
+	if len(unindexedVecFields) != 0 {
+		errMsg := fmt.Sprintf("there is no vector index on field: %v, please create index firstly", unindexedVecFields)
+		mlog.Debug(ctx, errMsg)
+		return nil, merr.WrapErrParameterInvalidMsg("%s", errMsg)
+	}
+	return fieldIndexIDs, nil
 }
 
 func (t *LoadCollectionTask) PostExecute(ctx context.Context) error {

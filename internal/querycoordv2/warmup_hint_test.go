@@ -5,12 +5,15 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metacache"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -81,7 +84,13 @@ func TestWarmupHintWarmsLoadedCollectionInPlace(t *testing.T) {
 	collectionID := int64(100)
 	// The collection has a partition the load config leaves out, so restating
 	// the load would add it.
-	putTestCollection(server, testDescribeCollection(collectionID, []string{"v0"}), 10, 20, 30)
+	coll := testDescribeCollection(collectionID, []string{"v0"})
+	coll.Schema.Fields = []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "loaded", DataType: schemapb.DataType_FloatVector},
+		{FieldID: 101, Name: "unindexed", DataType: schemapb.DataType_FloatVector},
+	}
+	putTestCollection(server, coll, 10, 20, 30)
+	server.mixCoord = mocks.NewMixCoord(t) // An in-place warmup needs no index lookup.
 	store := server.qviewsRuntime.loadConfigStore
 	require.NoError(t, store.Put(ctx, &loadmgr.LoadConfig{
 		DbID:                     1,
@@ -104,7 +113,7 @@ func TestWarmupHintWarmsLoadedCollectionInPlace(t *testing.T) {
 	// The proxy lists the fields to load even when the request names none.
 	require.NoError(t, server.broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx, &querypb.LoadCollectionRequest{
 		CollectionID:  collectionID,
-		LoadFields:    []int64{100},
+		LoadFields:    []int64{100, 101},
 		LoadAllFields: true,
 		WarmupHint:    true,
 	}))
@@ -120,6 +129,38 @@ func TestWarmupHintWarmsLoadedCollectionInPlace(t *testing.T) {
 		{LoadAllFields: false, WarmupHint: true, LoadFields: []int64{100}},
 		{LoadAllFields: true, WarmupHint: true, SkipLoadDynamicField: true},
 	} {
-		require.False(t, warmsInPlace(req), "a load that names load options restates the configuration")
+		require.False(t, req.RequestsInPlaceWarmup(), "a load that names load options restates the configuration")
 	}
+}
+
+func TestWarmupHintFirstLoadChecksDefaultFieldIndexes(t *testing.T) {
+	enableWarmupHintGate(t, "true")
+	server, _, _ := newLoadConfigQViewsServer(t)
+	coll := testDescribeCollection(100, []string{"v0"})
+	coll.Schema.Fields = []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector},
+	}
+	putTestCollection(server, coll, 10)
+	mix := mocks.NewMixCoord(t)
+	server.mixCoord = mix
+	indexReq := &indexpb.DescribeIndexRequest{CollectionID: coll.GetCollectionID()}
+	indexes := &indexpb.DescribeIndexResponse{Status: merr.Success()}
+	mix.EXPECT().DescribeIndex(mock.Anything, indexReq).Return(indexes, nil).Twice()
+	req := &querypb.LoadCollectionRequest{CollectionID: coll.GetCollectionID(), LoadAllFields: true, WarmupHint: true}
+	err := server.broadcastAlterLoadConfigCollectionV2ForLoadCollection(t.Context(), req)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.ErrorContains(t, err, "vec")
+	require.Nil(t, server.qviewsRuntime.loadConfigStore.GetConfig(coll.GetCollectionID()))
+
+	var captured message.BroadcastMutableMessage
+	registerCaptureBroadcast(t, func(msg message.BroadcastMutableMessage) { captured = msg })
+	indexes.IndexInfos = []*indexpb.IndexInfo{{FieldID: 101, IndexID: 201}}
+	require.NoError(t, server.broadcastAlterLoadConfigCollectionV2ForLoadCollection(t.Context(), req))
+	header := message.MustAsBroadcastAlterLoadConfigMessageV2(captured).Header()
+	require.Positive(t, header.GetWarmupEpoch())
+	require.Len(t, header.GetLoadFields(), 2)
+	require.EqualValues(t, 100, header.GetLoadFields()[0].GetFieldId())
+	require.EqualValues(t, 101, header.GetLoadFields()[1].GetFieldId())
+	require.EqualValues(t, 201, header.GetLoadFields()[1].GetIndexId())
 }

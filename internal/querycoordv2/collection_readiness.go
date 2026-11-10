@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/coord/loadstatus"
@@ -106,12 +107,27 @@ func (s *Server) prepareAutoLoadRequest(ctx context.Context, coll *milvuspb.Desc
 	if err := typeutil.ValidateTextRequiresStorageV3(schema, paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool()); err != nil {
 		return nil, merr.WrapErrParameterInvalidMsg("%s", err.Error())
 	}
-	indexes, err := s.mixCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{CollectionID: coll.GetCollectionID()})
+	loadFields, fieldIndexes, err := s.defaultLoadFieldsAndIndexes(ctx, coll.GetCollectionID(), coll.GetCollectionName(), schema)
+	if err != nil {
+		return nil, err
+	}
+	return &querypb.LoadCollectionRequest{
+		DbID:         coll.GetDbId(),
+		CollectionID: coll.GetCollectionID(),
+		Schema:       schema,
+		LoadFields:   loadFields,
+		FieldIndexID: fieldIndexes,
+		Priority:     commonpb.LoadPriority_HIGH,
+	}, nil
+}
+
+func (s *Server) defaultLoadFieldsAndIndexes(ctx context.Context, collectionID int64, collectionName string, schema *schemapb.CollectionSchema) ([]int64, map[int64]int64, error) {
+	indexes, err := s.mixCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{CollectionID: collectionID})
 	if err = merr.CheckRPCCall(indexes, err); err != nil {
 		if errors.Is(err, merr.ErrIndexNotFound) {
-			return nil, merr.WrapErrIndexNotFoundForCollection(coll.GetCollectionName())
+			return nil, nil, merr.WrapErrIndexNotFoundForCollection(collectionName)
 		}
-		return nil, err
+		return nil, nil, err
 	}
 	fieldIndexes := make(map[int64]int64)
 	for _, index := range indexes.GetIndexInfos() {
@@ -137,16 +153,9 @@ func (s *Server) prepareAutoLoadRequest(ctx context.Context, coll *milvuspb.Desc
 		}
 	}
 	if len(unindexed) != 0 {
-		return nil, merr.WrapErrParameterInvalidMsg("there is no vector index on field: %v, please create index firstly", unindexed)
+		return nil, nil, merr.WrapErrParameterInvalidMsg("there is no vector index on field: %v, please create index firstly", unindexed)
 	}
-	return &querypb.LoadCollectionRequest{
-		DbID:         coll.GetDbId(),
-		CollectionID: coll.GetCollectionID(),
-		Schema:       schema,
-		LoadFields:   loadFields,
-		FieldIndexID: fieldIndexes,
-		Priority:     commonpb.LoadPriority_HIGH,
-	}, nil
+	return loadFields, fieldIndexes, nil
 }
 
 func (s *Server) waitCollectionReady(ctx context.Context, req *querypb.EnsureCollectionReadyRequest) error {

@@ -17,6 +17,7 @@ func NewQueryViewAtCoordBuilderFromView(view *viewpb.QueryViewOfShard) *QueryVie
 		collectionID: m.GetCollectionId(), replicaID: m.GetReplicaId(), vchannel: m.GetVchannel(),
 		dataVersion: FromProtoDataVersion(m.GetVersion().GetDataVersion()), queryVersion: m.GetVersion().GetQueryVersion(),
 		transformStartAfterTimetick: m.GetTransformStartAfterTimetick(),
+		warmupEpoch:                 m.GetWarmupEpoch(),
 		loadInfoVersion:             m.GetLoadInfoVersion(), schemaVersion: m.GetSchemaVersion(),
 		assignments: make(map[int64]map[int64][]int64), segmentManifestVersions: make(map[int64]int64),
 		streamingNode: proto.Clone(view.GetStreamingNode()).(*viewpb.QueryViewOfStreamingNode),
