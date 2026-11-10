@@ -45,6 +45,7 @@ func (opt *loadCollectionOption) Request() *milvuspb.LoadCollectionRequest {
 		LoadFields:           opt.loadFields,
 		SkipLoadDynamicField: opt.skipLoadDynamicField,
 		ResourceGroups:       opt.resourceGroups,
+		Refresh:              opt.isRefresh,
 	}
 }
 

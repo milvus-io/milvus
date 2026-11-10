@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "arrow/array.h"
+#include "arrow/array/builder_base.h"
 #include "arrow/table.h"
 #include "common/Consts.h"
 #include "common/FieldMeta.h"
@@ -187,6 +188,7 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
         struct SampleField {
             milvus::FieldMeta field_meta;
             std::string column_name;
+            bool fill_missing_with_null = false;
         };
         std::vector<SampleField> external_fields;
         if (collection_schema.proto_blob != nullptr &&
@@ -218,8 +220,19 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
                 auto column_name = is_milvus_table_data_field
                                        ? std::to_string(field_schema.fieldid())
                                        : field_meta.get_external_field();
-                external_fields.push_back(
-                    {std::move(field_meta), std::move(column_name)});
+                const bool fill_missing_with_null =
+                    is_milvus_table &&
+                    milvus::CanFillMissingMilvusTableColumn(field_schema) &&
+                    std::none_of(
+                        cgs->begin(), cgs->end(), [&](const auto& group) {
+                            return std::find(group->columns.begin(),
+                                             group->columns.end(),
+                                             column_name) !=
+                                   group->columns.end();
+                        });
+                external_fields.push_back({std::move(field_meta),
+                                           std::move(column_name),
+                                           fill_missing_with_null});
             }
             if (is_milvus_table && uses_external_primary_key) {
                 // Real-PK milvus-table loading also keeps source insert
@@ -268,6 +281,23 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
                 const auto& field_meta = sample_field.field_meta;
                 const auto& column_name = sample_field.column_name;
                 auto chunked = table->GetColumnByName(column_name);
+                if (chunked == nullptr && sample_field.fill_missing_with_null) {
+                    auto builder = milvus::storage::CreateArrowBuilder(
+                        field_meta.get_data_type());
+                    auto status = builder->AppendNulls(num_rows);
+                    if (!status.ok()) {
+                        auto error = milvus_storage::ToSegcoreError(status);
+                        return milvus::FailureCStatus(&error);
+                    }
+                    auto array = builder->Finish();
+                    if (!array.ok()) {
+                        auto error =
+                            milvus_storage::ToSegcoreError(array.status());
+                        return milvus::FailureCStatus(&error);
+                    }
+                    chunked = std::make_shared<arrow::ChunkedArray>(
+                        array.ValueOrDie());
+                }
                 if (chunked == nullptr) {
                     return MakeCStatusError(
                         fmt::format("Column '{}' not found in schema",

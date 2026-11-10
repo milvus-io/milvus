@@ -57,6 +57,7 @@
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealed.h"
 #include "segcore/search_result_export_c.h"
+#include "segcore/test_utils/ConsumerIndexTestUtils.h"
 #include "storage/ThreadPools.h"
 #include "storage/Util.h"
 #include "storage/loon_ffi/external_spec_c.h"
@@ -3251,6 +3252,83 @@ TEST(ExternalTakeAccessMode, SearchRejectRemoteVectorOutputReturnsFalse) {
 // ============================================================
 // Tests for GetExternalColumnNames
 // ============================================================
+
+TEST(ExternalTakeAccessMode, MilvusTableMissingColumnUsesRawDataIndex) {
+    auto schema = std::make_shared<Schema>();
+    const auto pk = FieldId(100);
+    const auto extra = FieldId(101);
+    schema->AddField(FieldName("id"), pk, DataType::INT64, false, std::nullopt);
+    schema->AddField(
+        FieldName("extra"), extra, DataType::INT64, true, std::nullopt);
+    schema->set_primary_field_id(pk);
+    schema->set_external_source("s3://bucket/snapshot");
+    schema->set_external_spec(R"({"format":"milvus-table"})");
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, schema);
+    proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_segmentid(1);
+    load_info.set_num_of_rows(3);
+    load_info.set_manifest_path("/manifest/missing-nullable-column");
+    segment->SetLoadInfo(load_info);
+
+    const int64_t values[] = {0, 0, 0};
+    const bool valid[] = {false, false, false};
+    auto index = test::consumer::BuildScalarReader<int64_t>(
+        extra, DataType::INT64, "STL_SORT", 3, values, valid);
+    auto index_info = test::consumer::MakeLoadIndexInfo(
+        std::move(index), DataType::INT64, extra.get());
+    // Use the production estimator instead of the fixture's empty estimate.
+    index_info.load_resource_request.reset();
+    segment->LoadIndex(index_info);
+    ASSERT_FALSE(segment->HasFieldData(extra));
+    ASSERT_TRUE(segment->IndexHasRawData(extra));
+
+    // A missing manifest column must bypass the reader before storage IO.
+    class UnexpectedTakeReader : public MockTakeReader {
+     public:
+        UnexpectedTakeReader() : MockTakeReader(nullptr) {
+        }
+        arrow::Result<std::shared_ptr<arrow::Table>>
+        take(const std::vector<int64_t>&,
+             size_t,
+             const std::shared_ptr<std::vector<std::string>>&) override {
+            ADD_FAILURE() << "take must not read a missing manifest column";
+            return arrow::Status::Invalid("missing column");
+        }
+    };
+    segment->SetReaderForTesting(std::make_unique<UnexpectedTakeReader>());
+    segment->SetUseTakeForOutputForTesting(true);
+    query::RetrievePlan retrieve_plan(schema);
+    retrieve_plan.field_ids_ = {extra};
+    query::Plan search_plan(schema);
+    search_plan.target_entries_ = {extra};
+    auto& config = SegcoreConfig::default_config();
+    const auto previous =
+        config.get_prefer_field_data_when_index_has_raw_data();
+    auto restore = folly::makeGuard([&] {
+        config.set_prefer_field_data_when_index_has_raw_data(previous);
+    });
+    for (bool prefer_columns : {false, true}) {
+        SCOPED_TRACE(prefer_columns);
+        config.set_prefer_field_data_when_index_has_raw_data(prefer_columns);
+        auto retrieved = std::make_unique<proto::segcore::RetrieveResults>();
+        int64_t offsets[] = {2, 0};
+        EXPECT_FALSE(segment->TryTakeForRetrieve(
+            &retrieve_plan, retrieved, offsets, 2, false, false));
+        EXPECT_EQ(retrieved->fields_data_size(), 0);
+
+        SearchResult results;
+        results.seg_offsets_ = {2, 0};
+        results.distances_ = {0.0f, 1.0f};
+        ASSERT_NO_THROW(segment->TestFillTargetEntry(&search_plan, results));
+        ASSERT_EQ(results.output_fields_data_.count(extra), 1);
+        const auto& field = *results.output_fields_data_.at(extra);
+        const auto& row_validity = GetFieldDataRowValidData(field);
+        ASSERT_EQ(row_validity.size(), 2);
+        EXPECT_FALSE(row_validity[0]);
+        EXPECT_FALSE(row_validity[1]);
+    }
+}
 
 TEST(SchemaExternalColumns, ExternalCollectionReturnsExternalFieldNames) {
     auto schema = std::make_shared<Schema>();

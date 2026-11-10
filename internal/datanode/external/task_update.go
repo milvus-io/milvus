@@ -349,12 +349,13 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 	usedFragments := make(map[string]bool)
 	var keptSegments []*datapb.SegmentInfo
 	var patchedSegments []*datapb.SegmentInfo
-	// Reason counters count baseline segments. A segment can increment both
-	// patch counters when deltalogs and missing columns are refreshed together.
+	// Reason counters count baseline segments. A segment can increment multiple
+	// counters when deltalogs, physical columns, and metadata change together.
 	removedFragmentSegments := 0
 	missingFunctionOutputSegments := 0
 	deltalogRefreshedSegments := 0
 	missingColumnPatchedSegments := 0
+	nullableMetadataUpdatedSegments := 0
 
 	var outputColumns []string
 	if t.hasFunctions() {
@@ -424,12 +425,27 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 		if err != nil {
 			return nil, err
 		}
+		refreshNullableMetadata := false
+		if len(missingColumns) > 0 && t.parsedSpec != nil && t.parsedSpec.Format == externalspec.FormatMilvusTable {
+			missingCount := len(missingColumns)
+			missingColumns, err = t.milvusTableColumnsToRepair(missingColumns, matchedNewFragments)
+			if err != nil {
+				return nil, err
+			}
+			// An actual schema advance still needs new sizing and coverage;
+			// catalog recovery alone does not require rewriting a manifest.
+			refreshNullableMetadata = len(missingColumns) < missingCount && seg.GetSchemaVersion() < t.req.GetSchema().GetVersion()
+		}
 		shouldRefreshDeltalogs, err := t.shouldRefreshMilvusTableDeltalogs(seg, fragments, matchedNewFragments)
 		if err != nil {
 			return nil, err
 		}
+		// Reimport missing physical groups using numeric field IDs; the generic
+		// appender cannot interpret source snapshot manifests.
+		refreshMilvusTableColumns := len(missingColumns) > 0 && t.parsedSpec != nil &&
+			t.parsedSpec.Format == externalspec.FormatMilvusTable
 		var patchedSegment *datapb.SegmentInfo
-		if shouldRefreshDeltalogs {
+		if shouldRefreshDeltalogs || refreshMilvusTableColumns {
 			if len(outputColumns) > 0 {
 				// ChildFields is sufficient for unchanged segments, but older refreshes
 				// could leave advertised Function outputs absent from the manifest.
@@ -453,27 +469,26 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 					continue
 				}
 			}
-			updatedSegment, err := t.refreshMilvusTableSegmentManifest(ctx, seg, matchedNewFragments, outputColumns)
+			updatedSegment, err := t.refreshMilvusTableSegmentManifest(ctx, seg, matchedNewFragments, outputColumns, shouldRefreshDeltalogs)
 			if err != nil {
 				return nil, err
 			}
 			patchedSegment = updatedSegment
-			deltalogRefreshedSegments++
-			taskLog.Info(ctx, "Segment kept with refreshed milvus-table deltalogs",
+			if shouldRefreshDeltalogs {
+				deltalogRefreshedSegments++
+			}
+			if refreshMilvusTableColumns {
+				missingColumnPatchedSegments++
+			}
+			taskLog.Info(ctx, "Segment kept with refreshed milvus-table manifest",
 				mlog.FieldSegmentID(seg.GetID()),
-				mlog.String("updateReason", "refreshed_milvus_table_deltalogs"),
+				mlog.String("updateReason", "refreshed_milvus_table_manifest"),
 				mlog.String("oldManifestPath", seg.GetManifestPath()),
 				mlog.String("newManifestPath", updatedSegment.GetManifestPath()))
 		}
 
-		if len(missingColumns) > 0 {
-			segmentToPatch := seg
-			patchFragments := fragments
-			if patchedSegment != nil {
-				segmentToPatch = patchedSegment
-				patchFragments = matchedNewFragments
-			}
-			patchedWithColumns, err := t.patchSegmentForMissingColumns(ctx, segmentToPatch, patchFragments, missingColumns)
+		if len(missingColumns) > 0 && !refreshMilvusTableColumns {
+			patchedWithColumns, err := t.patchSegmentForMissingColumns(ctx, seg, fragments, missingColumns)
 			if err != nil {
 				return nil, err
 			}
@@ -485,13 +500,24 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 				mlog.Strings("missingColumns", missingColumns))
 		}
 
-		if patchedSegment != nil && len(patchedSegment.GetBinlogs()) == 0 {
-			// Catalog recovery omits V3 fake binlogs. Even when every physical
-			// column exists, DataCoord requires them on a same-ID manifest patch.
-			// Restore metadata from the final manifest without appending columns.
+		if patchedSegment == nil && refreshNullableMetadata {
+			patchedSegment = seg
+		}
+		if patchedSegment != nil && (refreshMilvusTableColumns || refreshNullableMetadata || len(patchedSegment.GetBinlogs()) == 0) {
+			// Restore fake binlogs omitted by catalog recovery, and update field
+			// coverage and load sizes when reimporting missing columns. Sampling
+			// also validates that physically absent columns can be filled with NULL.
 			patchedSegment, err = t.rebuildSegmentFakeBinlogs(ctx, patchedSegment, patchedSegment.GetManifestPath())
 			if err != nil {
 				return nil, err
+			}
+			if refreshNullableMetadata {
+				nullableMetadataUpdatedSegments++
+				taskLog.Info(ctx, "Segment metadata prepared for nullable schema advance",
+					mlog.FieldSegmentID(seg.GetID()),
+					mlog.String("updateReason", "nullable_schema_advanced"),
+					mlog.Int32("oldSchemaVersion", seg.GetSchemaVersion()),
+					mlog.Int32("newSchemaVersion", patchedSegment.GetSchemaVersion()))
 			}
 		}
 
@@ -565,6 +591,7 @@ func (t *RefreshExternalCollectionTask) organizeSegments(
 		mlog.Int("missingFunctionOutputSegments", missingFunctionOutputSegments),
 		mlog.Int("deltalogRefreshedSegments", deltalogRefreshedSegments),
 		mlog.Int("missingColumnPatchedSegments", missingColumnPatchedSegments),
+		mlog.Int("nullableMetadataUpdatedSegments", nullableMetadataUpdatedSegments),
 		mlog.Int("totalSegments", len(result)),
 		mlog.Int64("outputRows", outputRows),
 		mlog.Int64("rowDelta", outputRows-inputRows))

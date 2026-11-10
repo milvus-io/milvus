@@ -4261,3 +4261,207 @@ TEST(SealedFieldLayoutTest, EmptyPreloadsKeepSelectedFieldsOnDemand) {
     SealedFieldLayout legacy(schema, LoadScope::FromLegacySchema(*schema));
     EXPECT_TRUE(legacy.ShouldLoadField(id));
 }
+
+TEST_F(SegmentLoadInfoTest, MilvusTableMissingNullableColumnLifecycle) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddField(
+        FieldName("id"), FieldId(100), DataType::INT64, false, std::nullopt);
+    schema->AddField(
+        FieldName("extra"), FieldId(101), DataType::INT64, true, std::nullopt);
+    schema->set_primary_field_id(FieldId(100));
+    schema->set_external_source("s3://bucket/snapshot");
+    schema->set_external_spec(R"({"format":"milvus-table"})");
+    auto old_proto = MakeManifestProto("/manifest/v1");
+    // Refresh fake binlogs contain logical fields, including absent columns.
+    old_proto.add_binlog_paths()->set_fieldid(101);
+    SegmentLoadInfo old_info(old_proto, schema);
+    old_info.SetColumnGroupsForTesting(
+        MakeExternalColumnGroups({{{"100"}, {"/pk"}}}));
+    EXPECT_EQ(
+        old_info.GetLoadDiff(LoadFieldsFor(schema)).fields_to_fill_default,
+        std::vector<FieldId>{FieldId(101)});
+    old_info.SetFieldFilledWithDefault(FieldId(101));
+    EXPECT_EQ(old_info.GetDefaultFilledFieldsForNewInfo(old_info),
+              std::set<FieldId>{FieldId(101)});
+    EXPECT_TRUE(old_info.ComputeDiff(old_info, LoadFieldsFor(schema))
+                    .fields_to_fill_default.empty());
+
+    SegmentLoadInfo present(MakeManifestProto("/manifest/v2"), schema);
+    present.SetColumnGroupsForTesting(
+        MakeExternalColumnGroups({{{"100", "101"}, {"/data"}}}));
+    auto diff = old_info.ComputeDiff(present, LoadFieldsFor(schema));
+    EXPECT_TRUE(diff.load_external_manifest);
+    EXPECT_TRUE(diff.manifest_updated);
+    EXPECT_TRUE(diff.fields_to_fill_default.empty());
+    EXPECT_TRUE(old_info.GetDefaultFilledFieldsForNewInfo(present).empty());
+    EXPECT_EQ(present.ComputeDiff(old_info, LoadFieldsFor(schema))
+                  .fields_to_fill_default,
+              std::vector<FieldId>{FieldId(101)});
+
+    SegmentLoadInfo missing_pk(MakeManifestProto("/manifest/bad"), schema);
+    missing_pk.SetColumnGroupsForTesting(
+        MakeExternalColumnGroups({{{"101"}, {"/extra"}}}));
+    EXPECT_THROW(missing_pk.GetLoadDiff(LoadFieldsFor(schema)), SegcoreError);
+}
+
+TEST_F(SegmentLoadInfoTest, MilvusTableMissingNullableColumnWithRawDataIndex) {
+    auto schema = std::make_shared<Schema>();
+    schema->AddField(
+        FieldName("id"), FieldId(100), DataType::INT64, false, std::nullopt);
+    schema->AddField(
+        FieldName("extra"), FieldId(101), DataType::INT64, true, std::nullopt);
+    schema->set_primary_field_id(FieldId(100));
+    schema->set_external_source("s3://bucket/snapshot");
+    schema->set_external_spec(R"({"format":"milvus-table"})");
+    auto proto = MakeManifestProto("/manifest/v1");
+    proto.add_binlog_paths()->set_fieldid(101);
+    auto* index = proto.add_index_infos();
+    index->set_fieldid(101);
+    index->set_indexid(1001);
+    index->add_index_file_paths("/index/extra");
+    auto* param = index->add_index_params();
+    param->set_key("index_type");
+    param->set_value("STL_SORT");
+    SegmentLoadInfo indexed(proto, schema);
+    indexed.SetColumnGroupsForTesting(
+        MakeExternalColumnGroups({{{"100"}, {"/pk"}}}));
+    auto diff = indexed.GetLoadDiff(LoadFieldsFor(schema));
+    EXPECT_FALSE(diff.indexes_to_load.empty());
+    EXPECT_TRUE(diff.fields_to_fill_default.empty());
+    indexed.SetFieldFilledWithDefault(FieldId(101));
+    // An index supersedes a previous NULL fill, as it does for native tables.
+    EXPECT_TRUE(indexed.GetDefaultFilledFieldsForNewInfo(indexed).empty());
+    EXPECT_TRUE(indexed.ComputeDiff(indexed, LoadFieldsFor(schema))
+                    .fields_to_fill_default.empty());
+
+    proto.set_manifest_path("/manifest/v2");
+    SegmentLoadInfo reopened(proto, schema);
+    reopened.SetColumnGroupsForTesting(
+        MakeExternalColumnGroups({{{"100"}, {"/pk"}}}));
+    EXPECT_TRUE(indexed.ComputeDiff(reopened, LoadFieldsFor(schema))
+                    .fields_to_fill_default.empty());
+    EXPECT_TRUE(indexed.GetDefaultFilledFieldsForNewInfo(reopened).empty());
+
+    reopened.SetColumnGroupsForTesting(
+        MakeExternalColumnGroups({{{"100", "101"}, {"/data"}}}));
+    EXPECT_TRUE(indexed.ComputeDiff(reopened, LoadFieldsFor(schema))
+                    .fields_to_fill_default.empty());
+    EXPECT_TRUE(indexed.GetDefaultFilledFieldsForNewInfo(reopened).empty());
+
+    // An index without raw values still needs a synthesized NULL column.
+    proto.mutable_index_infos(0)->mutable_index_params(0)->set_value(
+        "INVERTED");
+    SegmentLoadInfo non_raw_index(proto, schema);
+    non_raw_index.SetColumnGroupsForTesting(
+        MakeExternalColumnGroups({{{"100"}, {"/pk"}}}));
+    EXPECT_FALSE(non_raw_index.FieldIndexHasRawData(FieldId(101)));
+    EXPECT_EQ(
+        non_raw_index.GetLoadDiff(LoadFieldsFor(schema)).fields_to_fill_default,
+        std::vector<FieldId>{FieldId(101)});
+}
+
+TEST(SchemaExternalColumns, MissingMilvusTableColumnScope) {
+    proto::schema::FieldSchema field;
+    field.set_fieldid(101);
+    field.set_data_type(proto::schema::Int64);
+    field.set_nullable(true);
+    for (auto type : {proto::schema::Bool,
+                      proto::schema::Int8,
+                      proto::schema::Int16,
+                      proto::schema::Int32,
+                      proto::schema::Int64,
+                      proto::schema::Float,
+                      proto::schema::Double,
+                      proto::schema::String,
+                      proto::schema::VarChar,
+                      proto::schema::Timestamptz}) {
+        field.set_data_type(type);
+        EXPECT_TRUE(CanFillMissingMilvusTableColumn(field));
+    }
+    field.set_data_type(proto::schema::Int64);
+    field.set_nullable(false);
+    EXPECT_FALSE(CanFillMissingMilvusTableColumn(field));
+    field.set_nullable(true);
+    field.mutable_default_value()->set_long_data(7);
+    EXPECT_FALSE(CanFillMissingMilvusTableColumn(field));
+    field.clear_default_value();
+    for (auto type : {proto::schema::Text,
+                      proto::schema::Geometry,
+                      proto::schema::Array,
+                      proto::schema::JSON,
+                      proto::schema::FloatVector,
+                      proto::schema::SparseFloatVector}) {
+        field.set_data_type(type);
+        EXPECT_FALSE(CanFillMissingMilvusTableColumn(field));
+    }
+    field.set_data_type(proto::schema::Int64);
+    field.set_is_primary_key(true);
+    EXPECT_FALSE(CanFillMissingMilvusTableColumn(field));
+    field.set_is_primary_key(false);
+    field.set_is_partition_key(true);
+    EXPECT_FALSE(CanFillMissingMilvusTableColumn(field));
+    field.set_is_partition_key(false);
+    field.set_is_clustering_key(true);
+    EXPECT_FALSE(CanFillMissingMilvusTableColumn(field));
+    field.set_is_clustering_key(false);
+    field.set_is_dynamic(true);
+    EXPECT_FALSE(CanFillMissingMilvusTableColumn(field));
+    field.set_is_dynamic(false);
+    field.set_is_function_output(true);
+    EXPECT_FALSE(CanFillMissingMilvusTableColumn(field));
+    field.set_is_function_output(false);
+    field.set_fieldid(1);
+    EXPECT_FALSE(CanFillMissingMilvusTableColumn(field));
+}
+
+TEST_F(SegmentLoadInfoTest, MilvusTableMissingNullableColumnPreservesRoles) {
+    for (const auto& role :
+         {"ordinary", "partition", "clustering", "function"}) {
+        SCOPED_TRACE(role);
+        proto::schema::CollectionSchema schema_proto;
+        schema_proto.set_external_source("s3://bucket/snapshot");
+        schema_proto.set_external_spec(R"({"format":"milvus-table"})");
+        auto* pk = schema_proto.add_fields();
+        pk->set_fieldid(100);
+        pk->set_name("pk");
+        pk->set_data_type(proto::schema::Int64);
+        pk->set_is_primary_key(true);
+        auto* value = schema_proto.add_fields();
+        value->set_fieldid(101);
+        value->set_name("value");
+        value->set_data_type(proto::schema::Int64);
+        value->set_nullable(true);
+        value->set_is_partition_key(std::string(role) == "partition");
+        value->set_is_clustering_key(std::string(role) == "clustering");
+        value->set_is_function_output(std::string(role) == "function");
+        auto parsed = Schema::ParseFrom(schema_proto);
+        auto copied = std::make_shared<Schema>(*parsed);
+        auto assigned = std::make_shared<Schema>();
+        *assigned = *parsed;
+        for (const auto& schema : {parsed, copied, assigned}) {
+            auto fields = LoadFieldsFor(schema);
+            EXPECT_EQ(fields->CanFillMissingMilvusTableColumn(FieldId(101)),
+                      milvus::CanFillMissingMilvusTableColumn(*value));
+            SegmentLoadInfo load(MakeManifestProto("/manifest/v1"), schema);
+            load.SetColumnGroupsForTesting(
+                MakeExternalColumnGroups({{{"100"}, {"/pk"}}}));
+            if (std::string(role) == "ordinary") {
+                EXPECT_EQ(load.GetLoadDiff(fields).fields_to_fill_default,
+                          std::vector<FieldId>{FieldId(101)});
+            } else if (std::string(role) == "function") {
+                EXPECT_TRUE(
+                    load.GetLoadDiff(fields).fields_to_fill_default.empty());
+            } else {
+                EXPECT_THROW(load.GetLoadDiff(fields), SegcoreError);
+            }
+        }
+        // Assignment must replace role metadata, not retain the previous keys.
+        proto::schema::CollectionSchema ordinary = schema_proto;
+        ordinary.mutable_fields(1)->set_is_partition_key(false);
+        ordinary.mutable_fields(1)->set_is_clustering_key(false);
+        ordinary.mutable_fields(1)->set_is_function_output(false);
+        *assigned = *Schema::ParseFrom(ordinary);
+        EXPECT_TRUE(LoadFieldsFor(assigned)->CanFillMissingMilvusTableColumn(
+            FieldId(101)));
+    }
+}

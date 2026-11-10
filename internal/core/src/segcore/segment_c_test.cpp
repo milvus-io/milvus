@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <folly/FBVector.h>
+#include <folly/ScopeGuard.h>
 #include <stdlib.h>
 #include <time.h>
 #include <algorithm>
@@ -1105,6 +1106,97 @@ TEST(CApiTest, RetrieveByOffsetsChecksExternalLoadedManifest) {
         << status.error_msg;
     EXPECT_EQ(retrieve_result, nullptr);
     free(const_cast<char*>(status.error_msg));
+}
+
+TEST(CApiTest, MilvusTableMissingNullableColumnWithRawDataIndex) {
+    const auto pk = FieldId(100);
+    const auto extra = FieldId(101);
+    auto schema = std::make_shared<Schema>();
+    schema->AddField(FieldName("id"), pk, DataType::INT64, false, std::nullopt);
+    schema->AddField(
+        FieldName("extra"), extra, DataType::INT64, true, std::nullopt);
+    schema->AddField(FieldName("Timestamp"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    schema->set_primary_field_id(pk);
+    schema->set_external_source("s3://bucket/snapshot");
+    schema->set_external_spec(R"({"format":"milvus-table"})");
+    auto segment = CreateSealedSegment(schema);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+
+    proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_segmentid(1);
+    load_info.set_num_of_rows(3);
+    load_info.set_manifest_path("/manifest/missing-nullable-column");
+    sealed->SetLoadInfo(load_info);
+    // Neither a missing user field nor an unavailable source timestamp may
+    // become readable merely because the collection supports NULL fills.
+    for (auto field : {extra, TimestampFieldID}) {
+        query::RetrievePlan missing_plan(schema);
+        missing_plan.field_ids_ = {field};
+        missing_plan.access_entries_ = {field};
+        int64_t offset = 0;
+        CRetrieveResult* result = nullptr;
+        auto status = CRetrieveByOffsets(
+            segment.get(), &missing_plan, &offset, 1, &result);
+        auto cleanup = folly::makeGuard([&] {
+            if (result != nullptr) {
+                DeleteRetrieveResult(result);
+            }
+            free(const_cast<char*>(status.error_msg));
+        });
+        EXPECT_EQ(status.error_code, FieldNotLoaded);
+        EXPECT_EQ(result, nullptr);
+    }
+    const int64_t values[] = {0, 0, 0};
+    const bool valid[] = {false, false, false};
+    auto index = BuildScalarReader<int64_t>(
+        extra, DataType::INT64, "STL_SORT", 3, values, valid);
+    auto index_info =
+        MakeLoadIndexInfo(std::move(index), DataType::INT64, extra.get());
+    // Use the production estimator instead of the fixture's empty estimate.
+    index_info.load_resource_request.reset();
+    sealed->LoadIndex(index_info);
+    ASSERT_TRUE(sealed->IndexHasRawData(extra));
+    ASSERT_FALSE(sealed->HasFieldData(extra));
+    ASSERT_FALSE(sealed->HasColumnInLoadedManifest("101"));
+
+    query::RetrievePlan plan(schema);
+    plan.field_ids_ = {extra};
+    plan.access_entries_ = {extra};
+    int64_t offsets[] = {2, 0};
+    auto& config = SegcoreConfig::default_config();
+    const auto previous =
+        config.get_prefer_field_data_when_index_has_raw_data();
+    auto restore = folly::makeGuard([&] {
+        config.set_prefer_field_data_when_index_has_raw_data(previous);
+    });
+    for (bool prefer_columns : {false, true}) {
+        SCOPED_TRACE(prefer_columns);
+        config.set_prefer_field_data_when_index_has_raw_data(prefer_columns);
+        CRetrieveResult* result = nullptr;
+        auto status =
+            CRetrieveByOffsets(segment.get(), &plan, offsets, 2, &result);
+        auto cleanup = folly::makeGuard([&] {
+            if (result != nullptr) {
+                DeleteRetrieveResult(result);
+            }
+            free(const_cast<char*>(status.error_msg));
+        });
+        ASSERT_EQ(status.error_code, Success)
+            << (status.error_msg == nullptr ? "" : status.error_msg);
+        proto::segcore::RetrieveResults output;
+        ASSERT_TRUE(
+            output.ParseFromArray(result->proto_blob, result->proto_size));
+        ASSERT_EQ(output.fields_data_size(), 1);
+        const auto& field = output.fields_data(0);
+        ASSERT_EQ(field.valid_data_size(), 2);
+        EXPECT_FALSE(field.valid_data(0));
+        EXPECT_FALSE(field.valid_data(1));
+    }
 }
 
 TEST(CApiTest, GetMemoryUsageInBytesTest) {

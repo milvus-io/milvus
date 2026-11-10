@@ -23,12 +23,94 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// milvusTableColumnsToRepair excludes columns that can be synthesized as NULL
+// and are absent from every source fragment. A source column with real data
+// must still be imported even when the target field is nullable.
+func (t *RefreshExternalCollectionTask) milvusTableColumnsToRepair(
+	missing []string, fragments []packed.Fragment,
+) ([]string, error) {
+	if len(missing) == 0 || len(fragments) == 0 {
+		return missing, nil
+	}
+	required := make(map[string]struct{}, len(missing))
+	for _, name := range missing {
+		required[name] = struct{}{}
+	}
+	var nullableColumns []string
+	physicalColumnToExternalName := make(map[string]string)
+	resolver := typeutil.NewStorageColumnResolver(t.req.GetSchema(),
+		typeutil.WithStorageColumnExternalSpec(t.req.GetExternalSpec()))
+	for _, field := range t.req.GetSchema().GetFields() {
+		if _, ok := required[field.GetExternalField()]; !ok {
+			continue
+		}
+		if !canFillMissingMilvusTableColumn(field) {
+			continue
+		}
+		column, ok := resolver.SourceDataColumnName(field)
+		if !ok {
+			continue
+		}
+		nullableColumns = append(nullableColumns, column)
+		physicalColumnToExternalName[column] = field.GetExternalField()
+	}
+	seen := make(map[string]struct{})
+	for _, fragment := range fragments {
+		if len(nullableColumns) == 0 {
+			break
+		}
+		if _, ok := seen[fragment.FilePath]; ok {
+			continue
+		}
+		seen[fragment.FilePath] = struct{}{}
+		var err error
+		nullableColumns, err = packed.ManifestMissingColumnsWithExtfs(
+			fragment.FilePath, t.req.GetStorageConfig(), nullableColumns, t.milvusTableExternalSpecContext())
+		if err != nil {
+			return nil, merr.Wrapf(err, "check nullable columns in source manifest %s", fragment.FilePath)
+		}
+	}
+	for _, column := range nullableColumns {
+		delete(required, physicalColumnToExternalName[column])
+	}
+	var repair []string
+	for _, name := range missing {
+		if _, ok := required[name]; ok {
+			repair = append(repair, name)
+		}
+	}
+	return repair, nil
+}
+
+// Match segcore's CanFillMissingMilvusTableColumn. Go's IsPrimitiveType also
+// includes TEXT, whose LOB storage is outside the supported NULL-fill scope.
+func canFillMissingMilvusTableColumn(field *schemapb.FieldSchema) bool {
+	if field.GetFieldID() < common.StartOfUserFieldID || !field.GetNullable() ||
+		field.GetDefaultValue() != nil || field.GetIsPrimaryKey() || field.GetIsPartitionKey() ||
+		field.GetIsClusteringKey() || field.GetIsDynamic() || field.GetIsFunctionOutput() {
+		return false
+	}
+	switch field.GetDataType() {
+	case schemapb.DataType_Bool, schemapb.DataType_Int8, schemapb.DataType_Int16,
+		schemapb.DataType_Int32, schemapb.DataType_Int64, schemapb.DataType_Float,
+		schemapb.DataType_Double, schemapb.DataType_String, schemapb.DataType_VarChar,
+		schemapb.DataType_Timestamptz:
+		return true
+	default:
+		return false
+	}
+}
 
 // prepareMilvusTableDeltalogFragments returns the fragments that should be used
 // to build a target segment manifest. Virtual-PK collections include source
@@ -196,28 +278,59 @@ func stringSetEqual(left, right map[string]struct{}) bool {
 	return true
 }
 
-// refreshMilvusTableSegmentManifest replaces the delete set and retains derived
-// artifacts in one manifest commit. outputColumns is resolved once by
+// refreshMilvusTableSegmentManifest refreshes columns and deletes while retaining
+// derived artifacts in one manifest commit. outputColumns is resolved once by
 // organizeSegments for both the segment-reuse check and artifact retention.
 func (t *RefreshExternalCollectionTask) refreshMilvusTableSegmentManifest(
 	ctx context.Context,
 	seg *datapb.SegmentInfo,
 	fragments []packed.Fragment,
 	outputColumns []string,
+	refreshDeltalogs bool,
 ) (*datapb.SegmentInfo, error) {
 	basePath, _, err := packed.UnmarshalManifestPath(seg.GetManifestPath())
 	if err != nil {
 		return nil, merr.WrapErrDataIntegrity(err, "parse refresh manifest path")
 	}
-	workFragments, err := t.prepareMilvusTableDeltalogFragments(fragments)
-	if err != nil {
-		return nil, err
-	}
+	workFragments := fragments
 	var deltas []packed.DeltaLogEntry
-	if packed.HasExternalPrimaryKey(t.req.GetSchema()) {
-		deltas, err = t.prepareMilvusTableL0Deltalogs(ctx, workFragments)
+	hasExternalPK := packed.HasExternalPrimaryKey(t.req.GetSchema())
+	if !hasExternalPK && !refreshDeltalogs {
+		// Column-only repair must preserve ALL translated deletes, including
+		// zero-entry identity markers. The new manifest starts empty, so
+		// skipping translation without carrying these references loses deletes.
+		// The virtual-PK writer always gives markers a nonempty path containing
+		// the source log ID; the getter preserves these zero-entry identities.
+		// Read target-owned paths with target storage credentials.
+		logs, err := packed.GetDeltaLogsFromManifestWithExtfs(
+			seg.GetManifestPath(), t.req.GetStorageConfig(), packed.ExternalSpecContext{})
+		if err != nil {
+			return nil, merr.Wrapf(err, "read retained deltalogs for segment %d", seg.GetID())
+		}
+		for _, field := range logs {
+			for _, binlog := range field.GetBinlogs() {
+				deltas = append(deltas, packed.DeltaLogEntry{Path: binlog.GetLogPath(), NumEntries: binlog.GetEntriesNum()})
+			}
+		}
+		// Count metadata references, including zero-entry markers, not files.
+		mlog.Info(ctx, "Prepared retained virtual-PK deltalogs without translation",
+			mlog.FieldTaskID(t.req.GetTaskID()),
+			mlog.FieldCollectionID(t.req.GetCollectionID()),
+			mlog.FieldSegmentID(seg.GetID()),
+			mlog.String("deleteMode", "reuse"),
+			mlog.Int("retainedDeltaLogCount", len(deltas)))
 	} else {
-		deltas, err = t.prepareMilvusTableVirtualPKDeltalogs(ctx, basePath, seg.GetID(), workFragments)
+		workFragments, err = t.prepareMilvusTableDeltalogFragments(fragments)
+		if err != nil {
+			return nil, err
+		}
+		if hasExternalPK {
+			// Real-PK source imports already carry manifest deletes; only add
+			// L0 references here to avoid registering source deletes twice.
+			deltas, err = t.prepareMilvusTableL0Deltalogs(ctx, workFragments)
+		} else {
+			deltas, err = t.prepareMilvusTableVirtualPKDeltalogs(ctx, basePath, seg.GetID(), workFragments)
+		}
 	}
 	if err != nil {
 		return nil, err

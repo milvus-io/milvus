@@ -50,6 +50,10 @@ ParseFieldIdColumnName(const std::string& column_name);
 bool
 IsMilvusTableExternalSpec(const std::string& external_spec);
 
+// Missing ordinary nullable columns in old milvus-table segments read as NULL.
+bool
+CanFillMissingMilvusTableColumn(const proto::schema::FieldSchema& field);
+
 // Physical column mapping for a schema field in external storage manifests.
 struct PhysicalColumnMapping {
     std::string schema_column_name;
@@ -697,6 +701,9 @@ class Schema {
         return function_output_field_ids_.count(field_id) > 0;
     }
 
+    bool
+    CanFillMissingMilvusTableColumn(FieldId field_id) const;
+
     void
     add_function_output_field_id(const FieldId& field_id) {
         function_output_field_ids_.insert(field_id);
@@ -723,6 +730,8 @@ class Schema {
     std::unordered_map<FieldId, FieldName> id_names_;  // field_id -> field_name
 
     std::optional<FieldId> primary_field_id_opt_;
+    std::optional<FieldId> partition_key_field_id_opt_;
+    std::optional<FieldId> clustering_key_field_id_opt_;
     std::optional<FieldId> dynamic_field_id_opt_;
     std::optional<FieldId> namespace_field_id_opt_;
     std::optional<FieldId> ttl_field_id_opt_;

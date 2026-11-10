@@ -6472,12 +6472,17 @@ func TestValidateMilvusTableSchemaIdentity(t *testing.T) {
 		assert.Contains(t, err.Error(), "dynamic field setting mismatch")
 	})
 
-	t.Run("user field count mismatch rejected", func(t *testing.T) {
+	t.Run("unmapped ordinary source field is optional", func(t *testing.T) {
 		target := validTarget()
-		target.Fields = target.Fields[:1]
-		err := ValidateMilvusTableSchemaIdentity(target, source, false)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "user field count mismatch")
+		sourceWithExtra := proto.Clone(source).(*schemapb.CollectionSchema)
+		sourceWithExtra.Fields = append(sourceWithExtra.Fields, &schemapb.FieldSchema{
+			FieldID:  102,
+			Name:     "extra",
+			DataType: schemapb.DataType_Int64,
+		})
+		assert.NoError(t, ValidateMilvusTableSchemaIdentity(target, sourceWithExtra, false))
+		assert.NoError(t, ValidateMilvusTableSchemaIdentity(target, source, true))
+		assert.NoError(t, ValidateMilvusTableSchemaIdentity(target, sourceWithExtra, true))
 	})
 
 	t.Run("target field without mapping rejected", func(t *testing.T) {
@@ -6499,13 +6504,33 @@ func TestValidateMilvusTableSchemaIdentity(t *testing.T) {
 		assert.Contains(t, err.Error(), "mapped by multiple target fields")
 	})
 
-	t.Run("unmapped source field rejected", func(t *testing.T) {
+	t.Run("unmapped source primary key rejected with virtual primary key", func(t *testing.T) {
 		target := validTarget()
-		target.Fields[0].Name = "same_name"
-		target.Fields[1].Name = "same_name"
-		err := ValidateMilvusTableSchemaIdentity(target, source, false)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "is not mapped by target schema")
+		target.Fields[0] = &schemapb.FieldSchema{
+			FieldID:      102,
+			Name:         common.VirtualPKFieldName,
+			DataType:     schemapb.DataType_Int64,
+			IsPrimaryKey: true,
+		}
+		for _, requireFieldID := range []bool{false, true} {
+			err := ValidateMilvusTableSchemaIdentity(target, source, requireFieldID)
+			assert.ErrorContains(t, err, `source snapshot field "pk" is not mapped by target schema`)
+		}
+	})
+
+	t.Run("unmapped source partition or clustering key rejected", func(t *testing.T) {
+		for _, field := range []*schemapb.FieldSchema{
+			{FieldID: 102, Name: "partition_key", DataType: schemapb.DataType_Int64, IsPartitionKey: true},
+			{FieldID: 102, Name: common.NamespaceFieldName, DataType: schemapb.DataType_VarChar, IsPartitionKey: true},
+			{FieldID: 102, Name: "clustering_key", DataType: schemapb.DataType_Int64, IsClusteringKey: true},
+		} {
+			sourceWithKey := proto.Clone(source).(*schemapb.CollectionSchema)
+			sourceWithKey.Fields = append(sourceWithKey.Fields, field)
+			for _, requireFieldID := range []bool{false, true} {
+				err := ValidateMilvusTableSchemaIdentity(validTarget(), sourceWithKey, requireFieldID)
+				assert.ErrorContains(t, err, fmt.Sprintf("source snapshot field %q is not mapped", field.GetName()))
+			}
+		}
 	})
 
 	t.Run("source function output field is not required to be mapped", func(t *testing.T) {

@@ -3335,6 +3335,7 @@ func isExternalSystemOrVirtualField(name string) bool {
 
 // ValidateMilvusTableSchemaIdentity checks that every target milvus-table data
 // field maps to exactly one source snapshot data field through ExternalField.
+// Source key fields must be mapped; ordinary source fields are optional.
 // Source function outputs are optional source columns: a target ordinary field
 // may map to them, but a target function output remains target-local and is
 // regenerated during refresh. Create-time validation may ignore field IDs so
@@ -3354,13 +3355,7 @@ func ValidateMilvusTableSchemaIdentity(target, source *schemapb.CollectionSchema
 	}
 
 	targetFields := milvusTableMappableUserFieldMap(target)
-	requiredSourceFields := milvusTableMappableUserFieldMap(source)
 	allSourceFields := milvusTableUserFieldMap(source)
-	targetFieldCount := milvusTableMappableUserFieldCount(target)
-	requiredSourceFieldCount := milvusTableMappableUserFieldCount(source)
-	if targetFieldCount < requiredSourceFieldCount || targetFieldCount > len(allSourceFields) {
-		return merr.WrapErrParameterInvalidMsg("user field count mismatch: target=%d source=%d", targetFieldCount, requiredSourceFieldCount)
-	}
 	targetUsesVirtualPK := milvusTableUsesVirtualPrimaryKey(target)
 	mappedSourceFields := make(map[string]string, len(targetFields))
 	for targetName, targetField := range targetFields {
@@ -3382,8 +3377,11 @@ func ValidateMilvusTableSchemaIdentity(target, source *schemapb.CollectionSchema
 			return merr.Wrapf(err, "field %q mapped to source field %q", targetName, sourceName)
 		}
 	}
-	for sourceName := range requiredSourceFields {
-		if _, ok := mappedSourceFields[sourceName]; !ok {
+	for sourceName, sourceField := range allSourceFields {
+		if !sourceField.GetIsPrimaryKey() && !sourceField.GetIsPartitionKey() && !sourceField.GetIsClusteringKey() {
+			continue
+		}
+		if _, mapped := mappedSourceFields[sourceName]; !mapped {
 			return merr.WrapErrParameterInvalidMsg("source snapshot field %q is not mapped by target schema", sourceName)
 		}
 	}
@@ -3581,17 +3579,6 @@ func milvusTableMappableUserFieldMap(schema *schemapb.CollectionSchema) map[stri
 		fields[field.GetName()] = field
 	}
 	return fields
-}
-
-func milvusTableMappableUserFieldCount(schema *schemapb.CollectionSchema) int {
-	count := 0
-	for _, field := range schema.GetFields() {
-		if isExternalSystemOrVirtualField(field.GetName()) || IsFunctionOutputField(schema, field) {
-			continue
-		}
-		count++
-	}
-	return count
 }
 
 func milvusTableUsesVirtualPrimaryKey(schema *schemapb.CollectionSchema) bool {

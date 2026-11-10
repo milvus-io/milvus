@@ -790,6 +790,14 @@ SegmentLoadInfo::CollectDataFields() const {
 std::set<FieldId>
 SegmentLoadInfo::CollectRowColumnFields() const {
     std::set<FieldId> fields;
+    if (milvus_table_ && HasManifestPath()) {
+        for (const auto& group : *GetColumnGroups()) {
+            for (const auto& column : group->columns) {
+                fields.emplace(std::stoll(column));
+            }
+        }
+        return fields;
+    }
 
     for (int i = 0; i < GetBinlogPathCount(); i++) {
         auto& binlog = GetBinlogPath(i);
@@ -820,10 +828,13 @@ SegmentLoadInfo::CollectRowColumnFields() const {
 std::set<FieldId>
 SegmentLoadInfo::GetDefaultFilledFieldsForNewInfo(
     const SegmentLoadInfo& new_info) const {
-    if (external_ || new_info.external_) {
+    if ((external_ && !milvus_table_) ||
+        (new_info.external_ && !new_info.milvus_table_)) {
         return {};
     }
 
+    // Physical columns and raw-data indexes both supersede a default fill,
+    // including for milvus-table segments whose manifest still lacks the column.
     auto new_info_fields = new_info.CollectDataFields();
     std::set<FieldId> fields;
     for (const auto& field_id : fields_filled_with_default_) {
@@ -843,6 +854,23 @@ SegmentLoadInfo::ComputeDiffDefaultFields(LoadDiff& diff,
                                           SegmentLoadInfo& new_info,
                                           const SealedFieldLayoutPtr& fields) {
     std::set<FieldId> new_info_fields = new_info.CollectDataFields();
+    if (new_info.milvus_table_) {
+        for (const auto field_id : fields->get_field_ids()) {
+            if (!new_info.HasFieldInSchema(field_id) ||
+                !fields->IsExternalDataField(field_id) ||
+                new_info_fields.count(field_id)) {
+                continue;
+            }
+            AssertInfo(fields->CanFillMissingMilvusTableColumn(field_id),
+                       "missing required milvus-table column {}",
+                       field_id.get());
+            if (diff.manifest_updated ||
+                !fields_filled_with_default_.count(field_id)) {
+                diff.fields_to_fill_default.push_back(field_id);
+            }
+        }
+        return;
+    }
     std::set<FieldId> current_fields = CollectDataFields();
 
     // Build "current handled" set:
@@ -1123,7 +1151,7 @@ SegmentLoadInfo::ComputeDiff(SegmentLoadInfo& new_info,
     }
 
     // Compute fields that need default value filling (schema evolution)
-    if (!external_) {
+    if (!external_ || milvus_table_) {
         ComputeDiffDefaultFields(diff, new_info, fields);
     }
 
@@ -1182,10 +1210,8 @@ SegmentLoadInfo::GetLoadDiff(const SealedFieldLayoutPtr& fields) {
     }
 
     // Compute fields that need default value filling (schema evolution)
-    // Skip for external collections: collect_data_fields() calls std::stoll
-    // on column group names, and external collections don't need default fills
-    // (all fields are either external or virtual PK).
-    if (!external_) {
+    // Only milvus-table supports missing nullable manifest columns.
+    if (!external_ || milvus_table_) {
         empty_info.ComputeDiffDefaultFields(diff, *this, fields);
     }
 

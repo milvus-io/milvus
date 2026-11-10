@@ -458,6 +458,7 @@ class SegmentLoadInfo {
         : info_(other.info_),
           field_ids_(other.field_ids_),
           external_(other.external_),
+          milvus_table_(other.milvus_table_),
           restrict_load_fields_(other.restrict_load_fields_),
           converted_field_index_cache_(other.converted_field_index_cache_),
           field_index_id_cache_(other.field_index_id_cache_),
@@ -476,6 +477,7 @@ class SegmentLoadInfo {
         : info_(std::move(other.info_)),
           field_ids_(std::move(other.field_ids_)),
           external_(other.external_),
+          milvus_table_(other.milvus_table_),
           restrict_load_fields_(other.restrict_load_fields_),
           converted_field_index_cache_(
               std::move(other.converted_field_index_cache_)),
@@ -500,6 +502,7 @@ class SegmentLoadInfo {
             info_ = other.info_;
             field_ids_ = other.field_ids_;
             external_ = other.external_;
+            milvus_table_ = other.milvus_table_;
             restrict_load_fields_ = other.restrict_load_fields_;
             converted_field_index_cache_ = other.converted_field_index_cache_;
             field_index_id_cache_ = other.field_index_id_cache_;
@@ -522,6 +525,7 @@ class SegmentLoadInfo {
             info_ = std::move(other.info_);
             field_ids_ = std::move(other.field_ids_);
             external_ = other.external_;
+            milvus_table_ = other.milvus_table_;
             restrict_load_fields_ = other.restrict_load_fields_;
             converted_field_index_cache_ =
                 std::move(other.converted_field_index_cache_);
@@ -1188,6 +1192,7 @@ class SegmentLoadInfo {
     void
     SetFieldSelection(const SealedFieldLayout& fields) {
         external_ = fields.is_external_collection();
+        milvus_table_ = fields.is_milvus_table_external_collection();
         field_ids_.clear();
         for (auto id : fields.get_field_ids()) {
             if (!restrict_load_fields_ || fields.IsFieldInLoadScope(id)) {
@@ -1327,6 +1332,7 @@ class SegmentLoadInfo {
     // policies and defaults are borrowed from the caller while preparing.
     std::vector<FieldId> field_ids_;
     bool external_{false};
+    bool milvus_table_{false};
     bool restrict_load_fields_{false};
 
     // Cache for quick field -> converted LoadIndexInfo lookup

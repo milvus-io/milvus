@@ -683,6 +683,17 @@ func ManifestMissingColumns(
 	storageConfig *indexpb.StorageConfig,
 	columns []string,
 ) ([]string, error) {
+	return ManifestMissingColumnsWithExtfs(manifestPath, storageConfig, columns, ExternalSpecContext{})
+}
+
+// ManifestMissingColumnsWithExtfs checks source manifests using their external
+// credentials. Read failures must not be interpreted as nullable-column absence.
+func ManifestMissingColumnsWithExtfs(
+	manifestPath string,
+	storageConfig *indexpb.StorageConfig,
+	columns []string,
+	extfs ExternalSpecContext,
+) ([]string, error) {
 	if len(columns) == 0 {
 		return nil, nil
 	}
@@ -692,7 +703,7 @@ func ManifestMissingColumns(
 		required[column] = struct{}{}
 	}
 
-	groups, err := readColumnGroupsFromManifest(manifestPath, storageConfig)
+	groups, err := readColumnGroupsFromManifestWithExtfs(manifestPath, storageConfig, extfs)
 	if err != nil {
 		return nil, err
 	}
@@ -985,7 +996,15 @@ func readColumnGroupsFromManifest(
 	manifestPath string,
 	storageConfig *indexpb.StorageConfig,
 ) ([]manifestColumnGroup, error) {
-	manifest, err := GetManifestHandle(manifestPath, storageConfig)
+	return readColumnGroupsFromManifestWithExtfs(manifestPath, storageConfig, ExternalSpecContext{})
+}
+
+func readColumnGroupsFromManifestWithExtfs(
+	manifestPath string,
+	storageConfig *indexpb.StorageConfig,
+	extfs ExternalSpecContext,
+) ([]manifestColumnGroup, error) {
+	manifest, err := GetManifestHandleWithExtfs(manifestPath, storageConfig, extfs)
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to read manifest")
 	}
