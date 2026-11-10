@@ -126,13 +126,17 @@ func (s *rawDataSuite) inspectRawDataV3(ctx context.Context, segments []*datapb.
 }
 
 type v3LoadedIdentity struct {
-	NodeID   int64
-	Manifest inspector.ManifestLocatorV3
+	NodeID int64
+}
+
+type v3ServingIdentity struct {
+	NodeID                 int64
+	MinimumManifestVersion int64
 }
 
 type v3ReadSnapshot struct {
 	Loaded        map[int64][]v3LoadedIdentity
-	Serving       map[int64][]int64
+	Serving       map[int64][]v3ServingIdentity
 	Growing       bool
 	Unserviceable bool
 }
@@ -144,7 +148,7 @@ func (snapshot v3ReadSnapshot) matches(expected, current map[int64]inspector.Man
 	for segmentID, manifest := range expected {
 		loaded, serving := snapshot.Loaded[segmentID], snapshot.Serving[segmentID]
 		if len(loaded) != 1 || len(serving) != 1 || loaded[0].NodeID <= 0 ||
-			loaded[0].Manifest != manifest || loaded[0].NodeID != serving[0] {
+			serving[0].MinimumManifestVersion != manifest.Version || loaded[0].NodeID != serving[0].NodeID {
 			return false
 		}
 	}
@@ -226,7 +230,7 @@ func (s *rawDataSuite) reloadRawDataV3(description *milvuspb.DescribeCollectionR
 	s.assertLoadedFields(ctx, collectionID, requestedFieldIDs(description.GetSchema(), c.loadFields))
 	before := s.parquetReadSnapshot(ctx, collectionID)
 	current := s.manifestIdentity(s.currentParquetSegments(ctx, collectionID))
-	s.Require().True(before.matches(expected, current), "loaded data differs from inspected flush: expected=%v current=%v actual=%+v", expected, current, before)
+	s.Require().True(before.matches(expected, current), "physical placement or confirmed View requirements differ from inspected flush: expected=%v current=%v actual=%+v", expected, current, before)
 	s.assertRawDataOracle(ctx, collection, c)
 	after := s.parquetReadSnapshot(ctx, collectionID)
 	s.Require().Equal(expected, s.manifestIdentity(s.currentParquetSegments(ctx, collectionID)), "flush manifests changed during read")

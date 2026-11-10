@@ -12,11 +12,12 @@ import (
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func cipherCollectionRequest(id int64, shared bool) *CreateCCollectionRequest {
-	return &CreateCCollectionRequest{CollectionID: id, ShareSchema: shared, Schema: &schemapb.CollectionSchema{
+	return &CreateCCollectionRequest{CollectionID: id, ShareSchema: shared, IndexMeta: &segcorepb.CollectionIndexMeta{MaxIndexRowCount: 1024}, Schema: &schemapb.CollectionSchema{
 		Name: "cipher-lifetime", Version: 1,
 		Properties: []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "19"}},
 		Fields:     []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64}},
@@ -88,4 +89,29 @@ func TestCollectionCipherContextCreationFailure(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestCollectionCipherContextWaitsForNativeInitialization(t *testing.T) {
+	mockey.PatchConvey("native initialization must finish before acquiring cipher ownership", t, func() {
+		lookup := mockey.Mock(hookutil.GetCollectionPluginContext).Return(nil, nil).Build()
+		request := cipherCollectionRequest(991903, false)
+		request.Schema.Name = string([]byte{0xff})
+		collection, err := CreateCCollection(request)
+		require.Error(t, err, "invalid schema cannot create a native collection")
+		require.Nil(t, collection)
+		require.Zero(t, lookup.Times())
+		request.Schema.Name = "cipher-initialization-failure"
+		request.IndexMeta.IndexMetas = []*segcorepb.FieldIndexMeta{{IndexName: string([]byte{0xff})}}
+		collection, err = CreateCCollection(request)
+		require.Error(t, err, "invalid index metadata cannot acquire cipher ownership")
+		require.Nil(t, collection)
+		require.Zero(t, lookup.Times())
+		request.IndexMeta.IndexMetas = nil
+		unavailable := merr.WrapErrServiceUnavailableMsg("native schema initialization failed")
+		mockey.Mock((*CCollection).UpdateSchema).Return(unavailable).Build()
+		collection, err = CreateCCollection(request)
+		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+		require.Nil(t, collection)
+		require.Zero(t, lookup.Times(), "native rollback must not acquire a plugin-context reference")
+	})
 }

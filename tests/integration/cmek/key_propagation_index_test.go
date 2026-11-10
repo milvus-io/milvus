@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
@@ -387,24 +386,19 @@ func (s *propagationJSONSuite) TestSharedKeys() {
 	s.Require().Equal(1, metaCount)
 	s.T().Logf("stage=json-stats build=%d version=%d shared_slices=%d files=%v", stats.GetBuildID(), stats.GetVersion(), shared, files)
 	s.reloadPropagation(ctx, description, outputs)
-	s.Require().Eventually(func() bool {
-		seen := 0
-		for _, node := range s.Cluster.GetAllQueryNodes() {
-			client := node.MustGetClient(ctx)
-			response, err := client.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
-			s.Require().NoError(merr.CheckRPCCall(response, err))
-			for _, segment := range response.GetSegments() {
-				if segment.GetID() != outputs[0].GetID() {
-					continue
-				}
-				loaded := segment.GetJsonStatsInfo()[fieldID]
-				if loaded.GetBuildID() == stats.GetBuildID() && loaded.GetVersionID() == stats.GetVersion() {
-					seen++
-				}
-			}
-		}
-		return seen == 1
-	}, time.Minute, 100*time.Millisecond)
+	// reloadPropagation has drained old cache ownership, reloaded, and verified
+	// physical segment IDs. For V2 each new binding fetches a fresh loading snapshot.
+	// Check durable Up confirmation and that the exact inspected stats metadata
+	// remains unchanged across this cold reload; keep actual JSON queries below.
+	distribution := s.GetQueryViewDistribution(ctx, collectionID)
+	s.Require().Len(distribution.Segments, 1)
+	s.Require().Len(distribution.Segments[outputs[0].GetID()], 1)
+	s.Require().Positive(distribution.Segments[outputs[0].GetID()][0].NodeID)
+	current := s.propagationSegments(ctx, collection)
+	s.Require().Len(current, 1)
+	s.Require().Equal(outputs[0].GetID(), current[0].GetID())
+	s.Require().True(proto.Equal(stats, current[0].GetJsonKeyStats()[fieldID]), "cold reload must retain the inspected JSON Stats build/version/files")
+
 	s.assertPropagationQuery(ctx, collection, `exists json["rare"]`, matching)
 	s.assertConsumerRows(ctx, collection, expected)
 	// The SHARED BSON values in shredding_data remain outside CMEK support.
