@@ -2972,8 +2972,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-HybridSearch")
 	defer sp.End()
-	newSearchReq := ConvertHybridSearchToSearch(request)
-	qt := NewSearchTask(ctx, node, node.sched, newSearchReq, optimizedSearch, false, tr)
+	qt, newSearchReq := NewHybridSearchTask(ctx, node, node.sched, request, optimizedSearch, tr)
 	qt.SetCountFeatures(countFeatures)
 
 	succeeded := false

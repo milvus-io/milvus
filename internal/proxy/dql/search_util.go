@@ -1166,7 +1166,24 @@ func getGroupScorerStr(params []*commonpb.KeyValuePair) string {
 	return groupScorerStr
 }
 
+// hybridSubSearch pairs a converted sub-search with the function_score of the
+// HybridSearch sub-request it was built from. milvuspb.SubSearchRequest has no
+// function_score field, so the score travels next to the sub-search it belongs
+// to instead of in a second index-aligned slice.
+type hybridSubSearch struct {
+	request       *milvuspb.SubSearchRequest
+	functionScore *schemapb.FunctionScore
+}
+
+// ConvertHybridSearchToSearch folds a HybridSearchRequest into the advanced
+// SearchRequest shape. It drops each sub-request's function_score, which
+// SubSearchRequest cannot carry; NewHybridSearchTask keeps it.
 func ConvertHybridSearchToSearch(req *milvuspb.HybridSearchRequest) *milvuspb.SearchRequest {
+	ret, _ := convertHybridSearch(req)
+	return ret
+}
+
+func convertHybridSearch(req *milvuspb.HybridSearchRequest) (*milvuspb.SearchRequest, []hybridSubSearch) {
 	ret := &milvuspb.SearchRequest{
 		Base:                  req.GetBase(),
 		DbName:                req.GetDbName(),
@@ -1187,6 +1204,7 @@ func ConvertHybridSearchToSearch(req *milvuspb.HybridSearchRequest) *milvuspb.Se
 		FunctionChains:        req.GetFunctionChains(),
 	}
 
+	subSearches := make([]hybridSubSearch, 0, len(req.GetRequests()))
 	for _, sub := range req.GetRequests() {
 		subReq := &milvuspb.SubSearchRequest{
 			Dsl:                sub.GetDsl(),
@@ -1198,8 +1216,12 @@ func ConvertHybridSearchToSearch(req *milvuspb.HybridSearchRequest) *milvuspb.Se
 			FunctionChains:     sub.GetFunctionChains(),
 		}
 		ret.SubReqs = append(ret.SubReqs, subReq)
+		subSearches = append(subSearches, hybridSubSearch{
+			request:       subReq,
+			functionScore: sub.GetFunctionScore(),
+		})
 	}
-	return ret
+	return ret, subSearches
 }
 
 func getMetricType(toReduceResults []*internalpb.SearchResults) string {
