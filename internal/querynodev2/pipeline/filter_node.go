@@ -107,6 +107,9 @@ func (fNode *filterNode) filtrate(c *Collection, msg msgstream.TsMsg) error {
 	switch msg.Type() {
 	case commonpb.MsgType_Insert:
 		insertMsg := msg.(*msgstream.InsertMsg)
+		if err := insertMsg.MaterializePrimaryKey(c.Schema()); err != nil {
+			panic(err)
+		}
 		metrics.QueryNodeConsumeCounter.WithLabelValues(paramtable.GetStringNodeID(), metrics.InsertLabel).Add(float64(insertMsg.Size()))
 		for _, policy := range fNode.InsertMsgPolicys {
 			err := policy(fNode, c, insertMsg)

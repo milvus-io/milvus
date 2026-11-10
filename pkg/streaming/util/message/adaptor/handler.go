@@ -58,7 +58,9 @@ func (m *MsgPackAdaptorHandler) Handle(param message.HandleParam) message.Handle
 	messageHandled := false
 	// not handle new message if there are pending msgPack.
 	if param.Message != nil && m.base.PendingMsgPack.Len() == 0 {
-		m.base.GenerateMsgPack(param.Message)
+		if err := m.base.GenerateMsgPack(param.Message); err != nil {
+			return message.HandleResult{Error: err}
+		}
 		messageHandled = true
 	}
 
@@ -122,14 +124,16 @@ type BaseMsgPackAdaptorHandler struct {
 }
 
 // GenerateMsgPack generate msgPack from message.
-func (m *BaseMsgPackAdaptorHandler) GenerateMsgPack(msg message.ImmutableMessage) {
+func (m *BaseMsgPackAdaptorHandler) GenerateMsgPack(msg message.ImmutableMessage) error {
 	switch msg.Version() {
 	case message.VersionOld:
 		if len(m.Pendings) != 0 {
 			// multiple message from old version may share the same time tick.
 			// should be packed into one msgPack.
 			if msg.TimeTick() > m.Pendings[0].TimeTick() {
-				m.addMsgPackIntoPending(m.Pendings...)
+				if err := m.addMsgPackIntoPending(m.Pendings...); err != nil {
+					return err
+				}
 				m.Pendings = nil
 			} else if msg.TimeTick() < m.Pendings[0].TimeTick() {
 				m.Logger.Warn(context.TODO(), "message time tick is less than pendings",
@@ -137,23 +141,28 @@ func (m *BaseMsgPackAdaptorHandler) GenerateMsgPack(msg message.ImmutableMessage
 					mlog.String("pendingMessageID", m.Pendings[0].MessageID().String()),
 					mlog.Uint64("timeTick", msg.TimeTick()),
 					mlog.Uint64("pendingTimeTick", m.Pendings[0].TimeTick()))
-				return
+				return nil
 			}
 		}
 		m.Pendings = append(m.Pendings, msg)
 	case message.VersionV1, message.VersionV2:
 		if len(m.Pendings) != 0 { // all previous message should be vOld.
-			m.addMsgPackIntoPending(m.Pendings...)
+			if err := m.addMsgPackIntoPending(m.Pendings...); err != nil {
+				return err
+			}
 			m.Pendings = nil
 		}
-		m.addMsgPackIntoPending(msg)
+		if err := m.addMsgPackIntoPending(msg); err != nil {
+			return err
+		}
 	default:
 		panic("unsupported message version")
 	}
+	return nil
 }
 
 // addMsgPackIntoPending add message into pending msgPack.
-func (m *BaseMsgPackAdaptorHandler) addMsgPackIntoPending(msgs ...message.ImmutableMessage) {
+func (m *BaseMsgPackAdaptorHandler) addMsgPackIntoPending(msgs ...message.ImmutableMessage) error {
 	// Because the old version message may have same time tick,
 	// So we may read the same message multiple times on same time tick because of the auto-resuming by ResumableConsumer.
 	// we need to filter out the duplicate messages here.
@@ -182,9 +191,15 @@ func (m *BaseMsgPackAdaptorHandler) addMsgPackIntoPending(msgs ...message.Immuta
 		}
 	}
 	if err != nil {
+		for _, msg := range dedupMessages {
+			if containsRowWrite(msg) {
+				return err
+			}
+		}
 		m.Logger.Warn(context.TODO(), "failed to convert message to msgpack", mlog.Err(err))
 	}
 	if newPack != nil {
 		m.PendingMsgPack.AddOne(newPack)
 	}
+	return nil
 }

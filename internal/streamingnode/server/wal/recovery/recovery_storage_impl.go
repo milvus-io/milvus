@@ -331,8 +331,17 @@ func (r *recoveryStorageImpl) handleMessage(msg message.ImmutableMessage) {
 
 	switch msg.MessageType() {
 	case message.MessageTypeInsert:
-		immutableMsg := message.MustAsImmutableInsertMessageV1(msg)
-		r.handleInsert(immutableMsg)
+		switch msg.Version() {
+		case message.VersionOld, message.VersionV1:
+			r.handleInsert(msg, message.MustAsImmutableInsertMessageV1(msg).Header().GetPartitions())
+		case message.VersionV2:
+			r.handleInsert(msg, message.MustAsImmutableInsertMessageV2(msg).Header().GetPartitions())
+		default:
+			panic("unsupported Insert message version")
+		}
+	case message.MessageTypeUpsert:
+		// Delete effects are consumed and persisted by the flusher, as for Delete.
+		r.handleInsert(msg, message.MustAsImmutableUpsertMessageV2(msg).Header().GetPartitions())
 	case message.MessageTypeDelete:
 		immutableMsg := message.MustAsImmutableDeleteMessageV1(msg)
 		r.handleDelete(immutableMsg)
@@ -425,8 +434,8 @@ func (r *recoveryStorageImpl) handleAlterWAL(msg message.ImmutableAlterWALMessag
 }
 
 // handleInsert handles the insert message.
-func (r *recoveryStorageImpl) handleInsert(msg message.ImmutableInsertMessageV1) {
-	for _, partition := range msg.Header().GetPartitions() {
+func (r *recoveryStorageImpl) handleInsert(msg message.ImmutableMessage, partitions []*message.PartitionSegmentAssignment) {
+	for _, partition := range partitions {
 		if segment, ok := r.segments[partition.SegmentAssignment.SegmentId]; ok && segment.IsGrowing() {
 			segment.ObserveInsert(msg.TimeTick(), partition)
 		} else {

@@ -167,34 +167,48 @@ func (s *scannerAdaptorImpl) clear() {
 }
 
 func (s *scannerAdaptorImpl) execute() {
+	var finalErr error
 	defer func() {
 		s.readOption.MesasgeHandler.Close()
-		s.Finish(nil)
-		s.logger.Info(context.TODO(), "scanner is closed")
+		s.Finish(finalErr)
+		s.logger.Info(s.Context(), "scanner is closed")
 	}()
-	s.logger.Info(context.TODO(), "scanner start background task")
+	s.logger.Info(s.Context(), "scanner start background task")
 
 	msgChan := make(chan message.ImmutableMessage)
 
-	ch := make(chan struct{})
-	defer func() { <-ch }()
+	producerErrCh := make(chan error, 1)
 	// TODO: optimize the extra goroutine here after msgstream is removed.
 	go func() {
-		defer close(ch)
 		err := s.produceEventLoop(msgChan)
-		if errors.Is(err, context.Canceled) {
-			s.logger.Info(context.TODO(), "the produce event loop of scanner is closed")
-			return
-		}
-		s.logger.Warn(context.TODO(), "the produce event loop of scanner is closed with unexpected error", mlog.Err(err))
+		producerErrCh <- err
+		// Wake a consumer blocked in its handler. execute reconciles the two
+		// loop results below and preserves a non-cancellation producer error.
+		s.Cancel()
 	}()
 
-	err := s.consumeEventLoop(msgChan)
-	if errors.Is(err, context.Canceled) {
-		s.logger.Info(context.TODO(), "the consuming event loop of scanner is closed")
-		return
+	consumeErr := s.consumeEventLoop(msgChan)
+	s.Cancel()
+	producerErr := <-producerErrCh
+
+	if errors.Is(producerErr, context.Canceled) {
+		s.logger.Info(s.Context(), "the produce event loop of scanner is closed")
+	} else if producerErr != nil {
+		s.logger.Warn(s.Context(), "the produce event loop of scanner is closed with unexpected error", mlog.Err(producerErr))
 	}
-	s.logger.Warn(context.TODO(), "the consuming event loop of scanner is closed with unexpected error", mlog.Err(err))
+	if errors.Is(consumeErr, context.Canceled) {
+		s.logger.Info(s.Context(), "the consuming event loop of scanner is closed")
+	} else if consumeErr != nil {
+		s.logger.Warn(s.Context(), "the consuming event loop of scanner is closed with unexpected error", mlog.Err(consumeErr))
+	}
+
+	// A consumer-side processing failure wins if both loops fail. Otherwise a
+	// fatal durable-reader/assembly error must be visible from Scanner.Error().
+	if consumeErr != nil && !errors.Is(consumeErr, context.Canceled) {
+		finalErr = consumeErr
+	} else if producerErr != nil && !errors.Is(producerErr, context.Canceled) {
+		finalErr = producerErr
+	}
 }
 
 // produceEventLoop produces the message from the wal and write ahead buffer.
@@ -349,9 +363,9 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 	var isTailing bool
 	msg, isTailing = isTailingScanImmutableMessage(msg)
 	s.metrics.ObserveMessage(isTailing, msg.MessageType(), msg.EstimateSize())
-	if msg.MessageType() == message.MessageTypeTimeTick {
-		// If the time tick message incoming,
-		// the reorder buffer can be consumed until latest confirmed timetick.
+	if msg.MessageType() == message.MessageTypeTimeTick || msg.MessageType() == message.MessageTypeMVCCBarrier || msg.MessageType() == message.MessageTypeRecoveryBarrier {
+		// Confirmation barriers establish the same complete TimeTick prefix,
+		// including records written by newer WAL writers during an upgrade.
 		messages := s.reorderBuffer.PopUtilTimeTick(msg.TimeTick())
 		s.metrics.UpdateTimeTickBufSize(s.reorderBuffer.Bytes())
 
@@ -371,7 +385,7 @@ func (s *scannerAdaptorImpl) handleUpstream(msg message.ImmutableMessage) {
 			}
 			s.pendingQueue.Add(msgs)
 		}
-		if msg.IsPersisted() || s.pendingQueue.Len() == 0 {
+		if msg.MessageType() != message.MessageTypeTimeTick || msg.IsPersisted() || s.pendingQueue.Len() == 0 {
 			// If the ts message is persisted, it must can be seen by the consumer.
 			//
 			// Otherwise if there's no new message incoming and there's no pending message in the queue.

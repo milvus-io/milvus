@@ -273,11 +273,20 @@ func (d *Dispatcher) work() {
 			continue
 		}
 		backoff = 100 * time.Millisecond
-		d.pendingPack = nil
 		if err != nil {
+			for _, msg := range pack.Msgs {
+				if _, compound := msg.(interface {
+					TryUnmarshalMessages() ([]msgstream.TsMsg, error)
+				}); compound {
+					log.Error(d.ctx, "failed to decode compound WAL record; stop dispatch before advancing progress", mlog.Err(err))
+					return
+				}
+			}
+			d.pendingPack = nil
 			log.Warn(d.ctx, "failed to decode streaming msgPack", mlog.Err(err))
 			continue
 		}
+		d.pendingPack = nil
 		d.curTs.Store(pack.EndPositions[0].GetTimestamp())
 		for vchannel, p := range targetPacks {
 			var err error
@@ -397,6 +406,16 @@ func (d *Dispatcher) groupAndParseMsgs(pack *msgstream.ConsumeMsgPack, unmarshal
 			continue
 		}
 		if _, ok := targetPacks[vchannel]; ok {
+			if compound, ok := msg.(interface {
+				TryUnmarshalMessages() ([]msgstream.TsMsg, error)
+			}); ok {
+				messages, err := compound.TryUnmarshalMessages()
+				if err != nil {
+					return nil, err
+				}
+				targetPacks[vchannel].Msgs = append(targetPacks[vchannel].Msgs, messages...)
+				continue
+			}
 			var tsMsg msgstream.TsMsg
 			var err error
 			if deferred, ok := msg.(deferredUnmarshaler); ok {

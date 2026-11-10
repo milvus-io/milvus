@@ -2,6 +2,9 @@ package flusherimpl
 
 import (
 	"context"
+	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
@@ -9,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 // newDataSyncServiceWrapper creates a new data sync service wrapper.
@@ -44,7 +48,16 @@ func (ds *dataSyncServiceWrapper) Start() {
 
 // HandleMessage handles the incoming message.
 func (ds *dataSyncServiceWrapper) HandleMessage(ctx context.Context, msg message.ImmutableMessage) error {
-	ds.handler.GenerateMsgPack(msg)
+	// Preserve the existing Payload KMS retry policy for the eager flusher
+	// reader. Only revoked/invalid keys wait; malformed content fails immediately.
+	if err := retry.Do(ctx, func() error { return ds.handler.GenerateMsgPack(msg) },
+		retry.AttemptAlways(), retry.Sleep(100*time.Millisecond), retry.MaxSleepTime(3*time.Second),
+		retry.RetryErr(func(err error) bool { return errors.Is(err, message.ErrKmsKeyInvalid) })); err != nil {
+		if contextErr := ctx.Err(); contextErr != nil {
+			return contextErr
+		}
+		return err
+	}
 	for ds.handler.PendingMsgPack.Len() > 0 {
 		next := ds.handler.PendingMsgPack.Next()
 		nextTsMsg := msgstream.MustBuildMsgPackFromConsumeMsgPack(next, adaptor.UnmashalerDispatcher)

@@ -46,6 +46,11 @@ func (s *ScannerHelper) Close() error {
 	return s.notifier.BlockAndGetResult()
 }
 
+// Cancel requests scanner shutdown without waiting for completion.
+func (s *ScannerHelper) Cancel() {
+	s.notifier.Cancel()
+}
+
 // Finish finishes the scanner with an error.
 func (s *ScannerHelper) Finish(err error) {
 	s.notifier.Finish(err)
