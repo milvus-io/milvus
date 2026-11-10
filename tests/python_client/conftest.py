@@ -44,6 +44,11 @@ delete_timeout = 60
 
 def pytest_addoption(parser):
     parser.addoption(
+        "--pyudf-expected-commit",
+        default=None,
+        help="Optional deployed Git commit prefix for dedicated PyUDF profiles.",
+    )
+    parser.addoption(
         "--struct-max-array-capacity",
         type=int,
         default=None,
@@ -54,6 +59,18 @@ def pytest_addoption(parser):
         choices=["v3-gsf", "v3", "v2"],
         default=None,
         help="Run L3 StructArray configuration contracts against an independently verified storage mode",
+    )
+    parser.addoption(
+        "--pyudf-expected-autoindex",
+        choices=("HNSW", "DISKANN", "CARDINAL_TIERED"),
+        default=None,
+        help="Run PyUDF against an explicitly reserved Cardinal index profile",
+    )
+    parser.addoption(
+        "--run-pyudf-benchmark",
+        action="store_true",
+        default=False,
+        help="Run the reserved 48-minute PyUDF ABBA measurement workload",
     )
     parser.addoption(
         "--run-pyudf-disabled",
