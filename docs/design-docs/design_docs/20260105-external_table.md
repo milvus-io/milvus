@@ -497,6 +497,27 @@ Supported formats:
 `snapshot_id` for Iceberg snapshot selection. Parsing and validation are defined
 in `pkg/util/externalspec/specutil/spec.go`.
 
+For Azure workload identity, use an external source such as
+`azure://core.windows.net/<container>/<prefix>` with:
+
+```json
+{
+    "format": "parquet",
+    "extfs": {
+        "cloud_provider": "azure",
+        "use_iam": "true",
+        "access_key_id": "mystorageacct"
+    }
+}
+```
+
+Here `access_key_id` is the required storage account name, not a credential.
+Omit `access_key_value`: a shared account key cannot be combined with workload
+identity. The Milvus pods accessing storage must have `AZURE_CLIENT_ID`,
+`AZURE_TENANT_ID`, and `AZURE_FEDERATED_TOKEN_FILE` configured for an identity
+with read access to the container. Do not set credential broker fields for
+native workload identity. Use `"format": "iceberg-table"` for an Iceberg table.
+
 ### 4.3.1 Paimon
 
 `paimon-table` uses the Paimon table root as `external_source` and reuses the

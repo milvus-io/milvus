@@ -461,8 +461,15 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 		}
 	}
 
+	// Azure uses access_key_id as the storage account name even when the
+	// pod's workload identity supplies credentials instead of a shared key.
+	hasAzureIAM := cp == CloudProviderAzure && extfs[ExtfsKeyUseIAM] == "true"
+	if hasAzureIAM && extfs[ExtfsKeyAccessKeyID] == "" {
+		return merr.WrapErrParameterMissingMsg("extfs.access_key_id is required as the storage account name for Azure workload identity")
+	}
+
 	hasAKSK := extfs[ExtfsKeyAccessKeyID] != "" && extfs[ExtfsKeyAccessKeyValue] != ""
-	hasAKOnly := !hasAzureBroker &&
+	hasAKOnly := !hasAzureBroker && !hasAzureIAM &&
 		((extfs[ExtfsKeyAccessKeyID] != "") != (extfs[ExtfsKeyAccessKeyValue] != ""))
 	hasRoleARN := extfs[ExtfsKeyRoleARN] != ""
 	hasUseIAMAlone := extfs[ExtfsKeyUseIAM] == "true" && !hasRoleARN
