@@ -20,6 +20,9 @@ import (
 	"context"
 	"fmt"
 
+	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -255,18 +258,43 @@ func matchUpsertDeletes(inserted, deleted *schemapb.IDs, channels []uint32) (map
 	return offsets, nil
 }
 
-// checkMaxDeleteSize rejects a materialized per-vchannel delete message whose
-// protobuf body exceeds quotaAndLimits.limits.maxDeleteSize.
-func checkMaxDeleteSize(ctx context.Context, size int) error {
-	maxDeleteSize := paramtable.Get().QuotaConfig.MaxDeleteSize.GetAsInt()
-	if maxDeleteSize == -1 || size <= maxDeleteSize {
-		return nil
+// deleteMessageRowCount selects a prefix that fits the logical Delete limit.
+// request contains fixed fields, including its allocated MsgID, but no rows yet.
+// Routing supplies valid PKs and source offsets. No candidate body is encoded.
+func deleteMessageRowCount(ctx context.Context, request *msgpb.DeleteRequest, keys *schemapb.IDs, selected []int, maxDeleteSize int) (int, error) {
+	if maxDeleteSize == -1 {
+		return len(selected), nil
 	}
-	mlog.Warn(ctx, "materialized delete message exceeds maxDeleteSize",
-		mlog.Int("message size", size),
-		mlog.Int("maxDeleteSize", maxDeleteSize))
-	return merr.WrapErrAsInputError(merr.WrapErrParameterTooLarge(
-		fmt.Sprintf("delete materialized message size %d exceeds maxDeleteSize %d", size, maxDeleteSize)))
+	baseSize := proto.Size(request)
+	timestampSize := protowire.SizeVarint(request.Base.Timestamp)
+	keyBytes := 0
+	for index, row := range selected {
+		var keysSize int
+		switch data := keys.GetIdField().(type) {
+		case *schemapb.IDs_IntId:
+			keyBytes += protowire.SizeVarint(uint64(data.IntId.Data[row]))
+			keysSize = protowire.SizeTag(1) + protowire.SizeBytes(protowire.SizeTag(1)+protowire.SizeBytes(keyBytes))
+		case *schemapb.IDs_StrId:
+			keyBytes += protowire.SizeTag(1) + protowire.SizeBytes(len(data.StrId.Data[row]))
+			keysSize = protowire.SizeTag(2) + protowire.SizeBytes(keyBytes)
+		default:
+			panic("unexpected delete primary key type")
+		}
+		rows := index + 1
+		size := baseSize + protowire.SizeTag(12) + protowire.SizeBytes(keysSize) +
+			protowire.SizeTag(10) + protowire.SizeBytes(rows*timestampSize) +
+			protowire.SizeTag(11) + protowire.SizeVarint(uint64(rows))
+		if size > maxDeleteSize {
+			if index > 0 {
+				return index, nil
+			}
+			mlog.Warn(ctx, "materialized delete message exceeds maxDeleteSize",
+				mlog.Int("message size", size), mlog.Int("maxDeleteSize", maxDeleteSize))
+			return 0, merr.WrapErrAsInputError(merr.WrapErrParameterTooLarge(
+				fmt.Sprintf("delete materialized message size %d exceeds maxDeleteSize %d", size, maxDeleteSize)))
+		}
+	}
+	return len(selected), nil
 }
 
 func repackDeleteMessages(
@@ -303,50 +331,50 @@ func repackDeleteMessages(
 			return nil, 0, err
 		}
 	}
-	// Route first, then construct each complete logical message once.
+	// Route first. Only the logical Delete quota splits a VChannel's keys;
+	// the WAL remains responsible for backend-size chunking of each message.
 	groups := groupRowsByChannel(hashValues, len(vChannels))
 	messages := make([]*msgstream.DeleteMsg, 0, len(vChannels))
+	maxDeleteSize := paramtable.Get().QuotaConfig.MaxDeleteSize.GetAsInt()
 	for channel, vchannel := range vChannels {
 		selected := groups[channel]
-		if len(selected) == 0 {
-			continue
+		for len(selected) > 0 {
+			msgID, err := idAllocator.AllocOne()
+			if err != nil {
+				return nil, 0, err
+			}
+			msg := &msgstream.DeleteMsg{
+				BaseMsg: msgstream.BaseMsg{Ctx: ctx},
+				DeleteRequest: &msgpb.DeleteRequest{
+					Base: commonpbutil.NewMsgBase(
+						commonpbutil.WithMsgType(commonpb.MsgType_Delete),
+						commonpbutil.WithMsgID(msgID),
+						commonpbutil.WithTimeStamp(ts),
+						commonpbutil.WithSourceID(paramtable.GetNodeID()),
+					),
+					ShardName: vchannel, CollectionName: collectionName,
+					PartitionName: partitionName, DbName: dbName,
+					CollectionID: collectionID, PartitionID: partitionID,
+				},
+			}
+			rows, err := deleteMessageRowCount(ctx, msg.DeleteRequest, primaryKeys, selected, maxDeleteSize)
+			if err != nil {
+				return nil, 0, err
+			}
+			msg.PrimaryKeys, err = idsByOffsets(primaryKeys, selected[:rows])
+			if err != nil {
+				return nil, 0, err
+			}
+			msg.NumRows = int64(rows)
+			msg.Timestamps = make([]uint64, rows)
+			msg.HashValues = make([]uint32, rows)
+			for row := range rows {
+				msg.Timestamps[row] = ts
+				msg.HashValues[row] = uint32(channel)
+			}
+			messages = append(messages, msg)
+			selected = selected[rows:]
 		}
-		keys, err := idsByOffsets(primaryKeys, selected)
-		if err != nil {
-			return nil, 0, err
-		}
-		timestamps := make([]uint64, len(selected))
-		hashes := make([]uint32, len(selected))
-		for index := range selected {
-			timestamps[index] = ts
-			hashes[index] = uint32(channel)
-		}
-		messages = append(messages, &msgstream.DeleteMsg{
-			BaseMsg: msgstream.BaseMsg{Ctx: ctx, HashValues: hashes},
-			DeleteRequest: &msgpb.DeleteRequest{
-				Base: commonpbutil.NewMsgBase(
-					commonpbutil.WithMsgType(commonpb.MsgType_Delete),
-					commonpbutil.WithTimeStamp(ts),
-					commonpbutil.WithSourceID(paramtable.GetNodeID()),
-				),
-				ShardName: vchannel, CollectionName: collectionName,
-				PartitionName: partitionName, DbName: dbName,
-				CollectionID: collectionID, PartitionID: partitionID,
-				PrimaryKeys: keys, Timestamps: timestamps, NumRows: int64(len(selected)),
-			},
-		})
-	}
-	start, _, err := idAllocator.Alloc(uint32(len(messages)))
-	if err != nil {
-		return nil, 0, err
-	}
-	maxMessageSize := 0
-	for index, msg := range messages {
-		msg.Base.MsgID = start + int64(index)
-		maxMessageSize = max(maxMessageSize, msg.Size())
-	}
-	if err := checkMaxDeleteSize(ctx, maxMessageSize); err != nil {
-		return nil, 0, err
 	}
 	return messages, int64(len(hashValues)), nil
 }

@@ -2,6 +2,8 @@ package dml
 
 import (
 	"context"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -10,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -19,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
@@ -28,6 +32,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	streamingtypes "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -211,6 +217,70 @@ func TestDeleteTask_Execute(t *testing.T) {
 
 func TestDeleteRunnerSuite(t *testing.T) {
 	suite.Run(t, new(DeleteRunnerSuite))
+}
+
+func TestDeleteTaskExecuteSplitsBeforeAppend(t *testing.T) {
+	paramtable.Init()
+	oldLimit := paramtable.Get().QuotaConfig.MaxDeleteSize.SwapTempValue("-1")
+	oldWAL := streaming.WAL()
+	t.Cleanup(func() {
+		paramtable.Get().QuotaConfig.MaxDeleteSize.SwapTempValue(oldLimit)
+		streaming.SetWALForTest(oldWAL)
+	})
+	keys := &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{strings.Repeat("a", 64), strings.Repeat("b", 64), strings.Repeat("c", 64)}}}}
+	whole, _, err := repackDeleteMessages(t.Context(), keys, []string{"vchan-0"}, allocator.NewLocalAllocator(100, 200),
+		1000, 1, "collection", 2, "partition", "default", nil, nil)
+	require.NoError(t, err)
+	single := whole[0]
+	single.PrimaryKeys.GetStrId().Data = single.PrimaryKeys.GetStrId().Data[:1]
+	single.Timestamps, single.NumRows = single.Timestamps[:1], 1
+	limit := single.Size()
+	paramtable.Get().QuotaConfig.MaxDeleteSize.SwapTempValue(strconv.Itoa(limit))
+	for _, oversized := range []bool{false, true} {
+		t.Run(strconv.FormatBool(oversized), func(t *testing.T) {
+			input := proto.Clone(keys).(*schemapb.IDs)
+			if oversized {
+				input.GetStrId().Data[2] = strings.Repeat("x", limit)
+			}
+			wal := mock_streaming.NewMockWALAccesser(t)
+			streaming.SetWALForTest(wal)
+			if !oversized {
+				wal.EXPECT().AppendMessages(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+					func(ctx context.Context, messages ...message.MutableMessage) streaming.AppendResponses {
+						require.Len(t, messages, 3)
+						responses := streamingtypes.NewAppendResponseN(len(messages))
+						for index, msg := range messages {
+							typed := message.MustAsMutableDeleteMessageV1(msg)
+							body, err := typed.Body(ctx)
+							require.NoError(t, err)
+							require.LessOrEqual(t, proto.Size(body), limit)
+							require.Equal(t, uint64(1), typed.Header().Rows)
+							require.Equal(t, []string{input.GetStrId().Data[index]}, body.PrimaryKeys.GetStrId().Data)
+							responses.FillResponseAtIdx(streamingtypes.AppendResponse{AppendResult: &streamingtypes.AppendResult{TimeTick: uint64(100 + index)}}, index)
+						}
+						return responses
+					}).Once()
+			}
+			task := DeleteTask{
+				collectionID: 1,
+				partitionID:  2,
+				vChannels:    []string{"vchan-0"},
+				ts:           1000,
+				idAllocator:  allocator.NewLocalAllocator(100, 200),
+				primaryKeys:  input,
+				req:          &milvuspb.DeleteRequest{CollectionName: "collection", PartitionName: "partition", DbName: "default", Expr: "pk in [\"a\",\"b\",\"c\"]"},
+			}
+			err := task.Execute(t.Context())
+			if oversized {
+				require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+				require.Zero(t, task.count)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, int64(3), task.count)
+				require.Equal(t, uint64(102), task.sessionTS)
+			}
+		})
+	}
 }
 
 type DeleteRunnerSuite struct {

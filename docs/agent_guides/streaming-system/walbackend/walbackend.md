@@ -51,7 +51,9 @@ so the relevant producer/transaction protocol handles that rejection directly.
 
 SN always splits oversized encoded payloads below the interceptor chain when
 its backend has a configured record budget. There is no `streaming.splitChunkSN`
-setting in 3.1. Proxy sends one logical message per nonempty VChannel group and
-has no `proxy.splitChunk` setting. Chunk assembly remains unconditional before
+setting in 3.1. Insert V2/Upsert producers send one logical message per nonempty
+VChannel group. Standalone Delete can emit multiple logical messages per VChannel
+to satisfy `quotaAndLimits.limits.maxDeleteSize`; each remains eligible for SN
+physical chunking. Proxy has no `proxy.splitChunk` setting. Chunk assembly remains unconditional before
 body interpretation. A backend without a chunk budget keeps single-record writes.
 See [WAL payload chunking](../../../design-docs/design_docs/20260822-wal-payload-chunking.md).
