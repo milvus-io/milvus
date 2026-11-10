@@ -607,7 +607,9 @@ func TestInitLoonReaderConfigConcurrent(t *testing.T) {
 // under both loon reader keys and that the handler survives a rejected update.
 func TestRegisterLoonReaderConfigWatchers(t *testing.T) {
 	paramtable.Init()
-	pt := paramtable.Get()
+	// The registered watchers outlive the test; on the global table a later
+	// test's pool write would fire them and create the non-destroyable pool.
+	pt := newIsolatedParams()
 	defer pt.Reset(pt.CommonCfg.StorageReaderThreadPoolSize.Key)
 	defer pt.Reset(pt.CommonCfg.IndexBuildReadWindowBytes.Key)
 

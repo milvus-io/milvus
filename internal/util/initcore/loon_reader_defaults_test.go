@@ -158,7 +158,9 @@ func TestResolveIndexBuildReadWindowBytes(t *testing.T) {
 		withRole(t, typeutil.DataNodeRole)
 		require.NoError(t, pt.Reset(key))
 		require.NoError(t, pt.Reset(rangeKey))
-		require.NoError(t, pt.Save(ioKey, "1"))
+		// coefficient 3 yields at least 3 threads on any CPU count, so the
+		// cap of 3 decides the result regardless of the host.
+		require.NoError(t, pt.Save(ioKey, "3"))
 		require.NoError(t, pt.Save(ioMaxKey, "3"))
 		defer pt.Reset(ioKey)
 		defer pt.Reset(ioMaxKey)
@@ -192,16 +194,27 @@ func TestLogLoonReaderConfig(t *testing.T) {
 
 func TestInitLoonReaderConfigAutoWindowOnDataNode(t *testing.T) {
 	paramtable.Init()
-	pt := paramtable.Get()
+	// The watchers registered below stay registered after the test; on an
+	// isolated table they cannot fire on later tests' writes to the global one.
+	pt := newIsolatedParams()
+	// Runs after every defer below: the cleanup must not have created the
+	// process-wide reader pool either.
+	t.Cleanup(func() { assert.LessOrEqual(t, EffectiveLoonReaderThreadPoolSize(), int32(1)) })
 	defer pt.Reset(pt.CommonCfg.IndexBuildReadWindowBytes.Key)
 	defer pt.Reset(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key)
+	defer pt.Reset(pt.CommonCfg.StorageReaderThreadPoolSize.Key)
 
 	// Applying the automatic window on a DataNode must succeed. The pool is
 	// pinned to 0 here: an automatic pool would be created, cannot be
 	// destroyed, and would leak into every later test in this binary.
-	withRole(t, typeutil.DataNodeRole)
+	// The role is restored by a defer registered after the resets, so it
+	// runs before them: each reset fires the watcher registered below, and
+	// resetting the pool to its automatic default while still a DataNode
+	// would create the pool.
+	previousRole := paramtable.GetRole()
+	paramtable.SetRole(typeutil.DataNodeRole)
+	defer paramtable.SetRole(previousRole)
 	require.NoError(t, pt.Save(pt.CommonCfg.StorageReaderThreadPoolSize.Key, "0"))
-	defer pt.Reset(pt.CommonCfg.StorageReaderThreadPoolSize.Key)
 	require.NoError(t, pt.Reset(pt.CommonCfg.IndexBuildReadWindowBytes.Key))
 	require.NoError(t, InitLoonReaderConfig(pt))
 	assert.LessOrEqual(t, EffectiveLoonReaderThreadPoolSize(), int32(1))
@@ -244,4 +257,22 @@ func TestLoonReaderRangeSizeWatcherSkipsExplicitWindow(t *testing.T) {
 	calls = 0
 	require.NoError(t, pt.Save(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key, "8388608"))
 	assert.Equal(t, 1, calls, "an automatic window is re-resolved on a range size change")
+}
+
+// TestLoonReaderWatcherReportsSurvivingPool covers the warning for a disable
+// request that cannot destroy an existing pool. The pool is faked, since a
+// real one could not be torn down and would leak into later tests.
+func TestLoonReaderWatcherReportsSurvivingPool(t *testing.T) {
+	paramtable.Init()
+	pt := newIsolatedParams()
+	mockInit := mockey.Mock(InitLoonReaderConfig).Return(nil).Build()
+	defer mockInit.UnPatch()
+	mockEffective := mockey.Mock(EffectiveLoonReaderThreadPoolSize).Return(int32(8)).Build()
+	defer mockEffective.UnPatch()
+
+	RegisterLoonReaderConfigWatchers(pt, "test")
+	assert.NotPanics(t, func() {
+		require.NoError(t, pt.Save(pt.CommonCfg.StorageReaderThreadPoolSize.Key, "0"))
+	})
+	assert.Equal(t, 1, mockInit.Times())
 }
