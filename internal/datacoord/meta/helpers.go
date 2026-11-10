@@ -29,7 +29,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
@@ -183,7 +182,7 @@ func MergeFieldBinlogs(currentBinlogs []*datapb.FieldBinlog, newBinlogs []*datap
 }
 
 func CanBuildExternalJSONKeyIndex(segment *SegmentInfo) bool {
-	return segment.GetStorageVersion() == storage.StorageV3 && segment.GetManifestPath() != ""
+	return SupportsFieldProjection(segment)
 }
 
 // filterDuplicateFieldBinlogs removes FieldBinlog entries from newLogs whose (fieldID, logID)
