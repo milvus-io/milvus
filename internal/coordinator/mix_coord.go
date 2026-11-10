@@ -168,6 +168,7 @@ func (s *mixCoordImpl) activateFunc() error {
 
 func (s *mixCoordImpl) initInternal() error {
 	s.rootcoordServer.SetMixCoord(s)
+	s.rootcoordServer.SetSchemaLoadFieldsUpdater(s.queryCoordServer.UpdateLoadFieldsForSchema)
 	s.datacoordServer.SetMixCoord(s)
 	s.queryCoordServer.SetMixCoord(s)
 	s.fileResourceObserver = NewFileResourceObserver(s.ctx)
