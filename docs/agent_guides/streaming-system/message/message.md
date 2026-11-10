@@ -46,7 +46,7 @@ Messages transition through three stages:
 Every specialized message has a **header** and a **body**, both protobuf. Their storage is different:
 
 - `EncodeProto` stores the header as base64 in the `_h` property. Each `AsSpecialized*` call decodes it, and log output decodes it again (`marshalSpecializedHeader`).
-- The body is the payload. `Body()`/`MustBody()` decode it fully. Insert V2 and Upsert also support a projection read that skips ordinary column values. When cipher is enabled, only the payload is encrypted.
+- The body is the payload. `Body()`/`MustBody()` decode it fully. Insert V2 and Upsert also support a projection read that skips ordinary column values. Their shared `InsertRows` carries either explicit `LongArray` RowIDs or a base plus signed deltas; producers choose delta encoding only when smaller and safe from int64 overflow. Upsert delete effects explicitly choose independent PKs or an all-inserted-keys reference, preserving ordered duplicate occurrences. Body and projection readers expand these wire representations into the same logical view; do not infer delete effects from missing keys. When cipher is enabled, only the payload is encrypted.
 
 Use these rules to choose where a new field goes:
 
@@ -81,7 +81,11 @@ Mutable payload replacement invalidates the projection. Header-only assignment
 leaves unchanged body data valid. Projections do not retain decrypted payloads.
 
 `messageutil.InsertRowsReader` reads selected rows at the execution boundary.
-All columns share partition selections. It restores the standalone PK column and
+All columns share partition selections. One partition uses nil to select all rows;
+a non-nil empty slice selects none. All-row reads borrow immutable values and own
+execution metadata. Multi-partition selections share exactly sized backing storage.
+The projection decoder consumes selected wire fields without a concatenation buffer.
+It restores the standalone PK column and
 system fields for storage conversion. The encoder's non-column fields describe
 encoded body content, not a read projection. Encryption remains over the whole
 payload, so projection reads can still require decryption of that payload.

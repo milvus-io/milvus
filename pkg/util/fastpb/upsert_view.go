@@ -21,6 +21,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 )
 
@@ -42,7 +43,7 @@ func newInsertRowsViewEncoder(rows *messagespb.InsertRows, source *msgpb.InsertR
 	encoder.size -= protowire.SizeTag(10) + protowire.SizeBytes(encoder.sizePlan[0]) + protowire.SizeTag(11) + protowire.SizeBytes(encoder.sizePlan[1]) + protowire.SizeTag(14) + protowire.SizeVarint(uint64(len(selected)))
 	encoder.columnsOnly = true
 	encoder.sizePlan = encoder.sizePlan[2:]
-	payload, err := proto.Marshal(rows)
+	payload, err := proto.Marshal(CompactInsertRows(rows))
 	if err != nil {
 		return nil, err
 	}
@@ -115,15 +116,17 @@ func NewUpsertViewEncoder(body *messagespb.UpsertMessageBody, source *msgpb.Inse
 	if err != nil {
 		return nil, err
 	}
-	suffix, err := proto.Marshal(&messagespb.UpsertMessageBody{DeleteEffects: body.GetDeleteEffects(), PartialUpdateCas: body.GetPartialUpdateCas()})
+	suffix, err := proto.Marshal(&messagespb.UpsertMessageBody{DeleteEffects: CompactDeleteEffects(body.GetRows().GetPrimaryKeys(), body.GetDeleteEffects()), PartialUpdateCas: body.GetPartialUpdateCas()})
 	if err != nil {
 		return nil, err
 	}
 	return &UpsertViewEncoder{insertOrUpsertViewEncoder: insertOrUpsertViewEncoder{rows: rows, suffix: suffix}}, nil
 }
 
-// UpsertPartitionSizes computes the same row-and-column sizes as independent
-// Upsert views. Scratch is shared, but each partition starts a new row selection.
+// UpsertPartitionSizes computes per-partition logical row-and-column accounting.
+// RowIDs use their explicit representation, independently of wire compression.
+// Scratch is shared, but each partition starts a new row selection.
+// Nil selects all rows; a non-nil empty selection retains its existing error.
 // The source and selections must remain unchanged during this call.
 func UpsertPartitionSizes(source *msgpb.InsertRequest, selections [][]int64) ([]uint64, error) {
 	cursor, err := NewInsertRequestViewCursor(source)
@@ -131,18 +134,30 @@ func UpsertPartitionSizes(source *msgpb.InsertRequest, selections [][]int64) ([]
 		return nil, err
 	}
 	sizes := make([]uint64, len(selections))
-	capacity := 0
+	capacity, explicitCapacity := 0, 0
 	for _, selection := range selections {
-		capacity = max(capacity, len(selection))
+		explicitCapacity = max(explicitCapacity, len(selection))
+		count := len(selection)
+		if selection == nil {
+			count = len(source.RowIDs)
+		}
+		capacity = max(capacity, count)
 	}
 	rows := make([]int, 0, capacity)
-	rowIDs := make([]int64, 0, capacity)
+	rowIDStorage := make([]int64, 0, explicitCapacity)
 	for index, selection := range selections {
 		rows = rows[:0]
-		rowIDs = rowIDs[:0]
-		for _, row := range selection {
-			rows = append(rows, int(row))
-			rowIDs = append(rowIDs, source.RowIDs[row])
+		rowIDs := rowIDStorage[:0]
+		if selection == nil {
+			for row := range source.RowIDs {
+				rows = append(rows, row)
+			}
+			rowIDs = source.RowIDs
+		} else {
+			for _, row := range selection {
+				rows = append(rows, int(row))
+				rowIDs = append(rowIDs, source.RowIDs[row])
+			}
 		}
 		// Partition selections can interleave. Reset logical and compact positions
 		// while retaining field plans and scratch owned by this sizing call.
@@ -155,7 +170,7 @@ func UpsertPartitionSizes(source *msgpb.InsertRequest, selections [][]int64) ([]
 			return nil, err
 		}
 		size := encoder.size - protowire.SizeTag(10) - protowire.SizeBytes(encoder.sizePlan[0]) - protowire.SizeTag(11) - protowire.SizeBytes(encoder.sizePlan[1]) - protowire.SizeTag(14) - protowire.SizeVarint(uint64(len(rows)))
-		sizes[index] = uint64(size + proto.Size(&messagespb.InsertRows{RowIds: rowIDs}))
+		sizes[index] = uint64(size + proto.Size(&messagespb.InsertRows{RowIdsEncoding: &messagespb.InsertRows_RowIds{RowIds: &schemapb.LongArray{Data: rowIDs}}}))
 		// No encoder escapes this size-only operation or needs a MarshalTo call.
 		cursor.activeEncoder = nil
 	}

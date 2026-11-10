@@ -32,6 +32,7 @@ import (
 
 // InsertRowsReader reads selected logical rows at the storage execution boundary.
 // Source columns remain immutable. All columns use the same row selection.
+// Nil selects all rows and borrows read-only values; a non-nil empty slice selects none.
 type InsertRowsReader interface {
 	ReadRows(context.Context, *schemapb.CollectionSchema, []int64) (*msgpb.InsertRequest, error)
 }
@@ -77,10 +78,25 @@ func (r *insertRowsReader) ReadRows(ctx context.Context, schema *schemapb.Collec
 		panic("unexpected insert rows message type")
 	}
 	if rows == nil {
-		rows = make([]int64, source.GetNumRows())
-		for i := range rows {
-			rows[i] = int64(i)
+		// All-row reads own execution metadata and borrow immutable values, just
+		// like historical Insert. Do not expand a selection or copy every vector.
+		result := &msgpb.InsertRequest{CollectionID: source.GetCollectionID(), NumRows: source.GetNumRows(), Version: msgpb.InsertDataVersion_ColumnBased, RowIDs: source.GetRowIDs(), Timestamps: make([]uint64, source.GetNumRows()), FieldsData: typeutil.CopyFieldDataMetadata(source.GetFieldsData())}
+		for i := range result.Timestamps {
+			result.Timestamps[i] = r.msg.TimeTick()
 		}
+		for _, field := range result.FieldsData {
+			if vectors := field.GetVectors(); vectors != nil && vectors.GetVectorArray() == nil {
+				if valid := typeutil.GetFieldDataValidData(field); len(valid) > 0 && uint64(len(valid)) != source.GetNumRows() {
+					return nil, merr.WrapErrServiceInternalMsg("nullable vector validity count differs from logical rows")
+				}
+			}
+			if field.GetType() == schemapb.DataType_SparseFloatVector && field.GetVectors().GetSparseFloatVector() == nil {
+				// Encoded all-null chunks omit the sparse payload. Normalize only
+				// the owned wrapper, preserving the immutable source.
+				field.GetVectors().Data = &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{}}
+			}
+		}
+		return result, nil
 	}
 	result := &msgpb.InsertRequest{CollectionID: source.GetCollectionID(), NumRows: uint64(len(rows)), Version: msgpb.InsertDataVersion_ColumnBased, RowIDs: make([]int64, len(rows)), Timestamps: make([]uint64, len(rows))}
 	for i, row := range rows {
@@ -283,5 +299,5 @@ func readInsertOrUpsertRows(ctx context.Context, msg message.ImmutableMessage, s
 	}
 	fields := append([]*schemapb.FieldData(nil), rows.GetColumns()...)
 	fields = append(fields, message.UpsertPrimaryKeyColumn(primary, rows.GetPrimaryKeys()))
-	return &msgpb.InsertRequest{CollectionID: collection, NumRows: uint64(len(rows.GetRowIds())), RowIDs: rows.GetRowIds(), FieldsData: fields, Version: msgpb.InsertDataVersion_ColumnBased}, nil
+	return &msgpb.InsertRequest{CollectionID: collection, NumRows: uint64(len(rows.GetRowIds().GetData())), RowIDs: rows.GetRowIds().GetData(), FieldsData: fields, Version: msgpb.InsertDataVersion_ColumnBased}, nil
 }

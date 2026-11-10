@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility/primarykey"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	upsertfixture "github.com/milvus-io/milvus/pkg/v3/streaming/util/message/testutils"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -49,7 +50,7 @@ func TestUpsertTrackingMutableAndRecovered(t *testing.T) {
 	invalid := trackingUpsert()
 	typed := message.MustAsMutableUpsertMessageV2(invalid)
 	body := typed.MustBody()
-	body.DeleteEffects[0].PrimaryKeys.GetIntId().Data[0] = 30
+	body.DeleteEffects[0].GetPrimaryKeys().GetIntId().Data[0] = 30
 	typed.OverwriteBody(body)
 	keys, err := extractPKsFromInsertOrUpsert(context.Background(), invalid, getter)
 	require.NoError(t, err)
@@ -109,7 +110,7 @@ func TestRepeatedUpsertKeysRemainOrdinaryWritesWithCASEnabled(t *testing.T) {
 	typed := message.MustAsMutableUpsertMessageV2(msg)
 	body := typed.MustBody()
 	body.Rows.PrimaryKeys.GetIntId().Data = []int64{10, 10}
-	body.DeleteEffects[0].PrimaryKeys.GetIntId().Data = []int64{10, 10}
+	body.DeleteEffects[0].GetPrimaryKeys().GetIntId().Data = []int64{10, 10}
 	typed.OverwriteBody(body)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -140,7 +141,7 @@ func TestUpsertPKExtractionOnlyChecksTrackingKeys(t *testing.T) {
 	_, err = extractPKsFromInsertOrUpsert(t.Context(), msg, getter)
 	require.ErrorContains(t, err, "primary key type")
 	body.Rows.PrimaryKeys = &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{10, 20}}}}
-	body.DeleteEffects[0].PrimaryKeys = strings
+	body.DeleteEffects[0].KeySource = &messagespb.UpsertDeleteEffect_PrimaryKeys{PrimaryKeys: strings}
 	typed.OverwriteBody(body)
 	_, err = extractPKsFromInsertOrUpsert(t.Context(), msg, getter)
 	require.ErrorContains(t, err, "primary key type")

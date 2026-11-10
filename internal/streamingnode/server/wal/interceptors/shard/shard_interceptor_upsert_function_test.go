@@ -18,6 +18,7 @@ package shard
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -293,5 +294,109 @@ func TestUpsertCASMismatchSkipsMaterialization(t *testing.T) {
 			return nil, nil
 		})
 		require.ErrorContains(t, err, "CAS marker and proof differ")
+	})
+}
+
+func TestInsertOrUpsertAdmissionDecodesBodyOncePerAttempt(t *testing.T) {
+	paramtable.Init()
+	for _, kind := range []message.MessageType{message.MessageTypeInsert, message.MessageTypeUpsert} {
+		for _, materialize := range []bool{false, true} {
+			mockey.PatchConvey(fmt.Sprintf("%s/materialize_%t", kind, materialize), t, func() {
+				gate := &paramtable.Get().FunctionCfg.EnableWriteBeforeMaterialization
+				old := gate.SwapTempValue("true")
+				defer gate.SwapTempValue(old)
+				msg, schema := upsertFunctionFixture()
+				if kind == message.MessageTypeInsert {
+					body := message.MustAsMutableUpsertMessageV2(msg).MustBody()
+					msg = message.NewInsertMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&message.InsertMessageHeaderV2{CollectionId: 1, SchemaVersion: proto.Int32(1), Partitions: []*message.PartitionSegmentAssignment{{PartitionId: 2, Rows: 1}}}).WithBody(&message.InsertMessageBody{Rows: body.Rows}).MustBuildMutable().WithTimeTick(10)
+				}
+				reads := 0
+				switch kind {
+				case message.MessageTypeInsert:
+					typed := message.MustAsMutableInsertMessageV2(msg)
+					mockey.Mock(message.AsMutableInsertMessageV2).Return(&countedInsertBody{MutableInsertMessageV2: typed, reads: &reads}, nil).Build()
+				case message.MessageTypeUpsert:
+					typed := message.MustAsMutableUpsertMessageV2(msg)
+					mockey.Mock(message.AsMutableUpsertMessageV2).Return(&countedUpsertBody{MutableUpsertMessageV2: typed, reads: &reads}, nil).Build()
+				}
+				manager := &upsertMaterializationManager{materialize: func(_ context.Context, _ int64, _ string, _ int32, insert function.InsertMessage) (bool, error) {
+					if !materialize {
+						return false, nil // No runner outputs: sizing must still read once.
+					}
+					body := insert.MustBody()
+					require.True(t, proto.Equal(body, insert.MustBody()))
+					if !function.HasAllFieldDataByID(body.FieldsData, []int64{102}) {
+						body.FieldsData = append(body.FieldsData, &schemapb.FieldData{FieldId: 102, Type: schemapb.DataType_FloatVector, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2}}}}}})
+						insert.OverwriteBody(body)
+					}
+					return true, nil
+				}}
+				mockey.Mock(function.GetManager).Return(manager).Build()
+				base := mock_shards.NewMockShardManager(t)
+				base.EXPECT().CheckIfCollectionSchemaVersionMatch(mock.Anything).Return(int32(1), nil).Twice()
+				base.EXPECT().AssignSegment(mock.Anything).Return(nil, shards.ErrWaitForNewSegment).Once()
+				base.EXPECT().AssignSegment(mock.Anything).Return(&shards.AssignSegmentResult{SegmentID: 123, Acknowledge: atomic.NewInt32(1)}, nil).Once()
+				interceptor := &shardInterceptor{shardManager: &upsertSchemaManager{MockShardManager: base, schema: schema}}
+				appends := 0
+				appendOp := func(context.Context, message.MutableMessage) (message.MessageID, error) {
+					appends++
+					return walimplstest.NewTestMessageID(1), nil
+				}
+				_, err := interceptor.handleInsertOrUpsert(t.Context(), msg, appendOp)
+				require.ErrorIs(t, err, redo.ErrRedo)
+				require.Equal(t, 1, reads)
+				require.Zero(t, appends)
+				_, err = interceptor.handleInsertOrUpsert(t.Context(), msg, appendOp)
+				require.NoError(t, err)
+				require.Equal(t, 2, reads, "redo must get a fresh attempt-local body")
+				require.Equal(t, 1, appends)
+			})
+		}
+	}
+}
+
+type countedInsertBody struct {
+	message.MutableInsertMessageV2
+	reads *int
+}
+
+func (m *countedInsertBody) Body(ctx context.Context) (*message.InsertMessageBody, error) {
+	*m.reads++
+	return m.MutableInsertMessageV2.Body(ctx)
+}
+
+type countedUpsertBody struct {
+	message.MutableUpsertMessageV2
+	reads *int
+}
+
+func (m *countedUpsertBody) Body(ctx context.Context) (*message.UpsertMessageBody, error) {
+	*m.reads++
+	return m.MutableUpsertMessageV2.Body(ctx)
+}
+
+func TestInsertOrUpsertReusedBodyPreservesCancellation(t *testing.T) {
+	paramtable.Init()
+	mockey.PatchConvey("cancel after a successful function read", t, func() {
+		gate := &paramtable.Get().FunctionCfg.EnableWriteBeforeMaterialization
+		old := gate.SwapTempValue("true")
+		defer gate.SwapTempValue(old)
+		msg, schema := upsertFunctionFixture()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		manager := &upsertMaterializationManager{materialize: func(_ context.Context, _ int64, _ string, _ int32, insert function.InsertMessage) (bool, error) {
+			require.NotNil(t, insert.MustBody())
+			cancel()
+			return false, nil
+		}}
+		mockey.Mock(function.GetManager).Return(manager).Build()
+		base := mock_shards.NewMockShardManager(t)
+		base.EXPECT().CheckIfCollectionSchemaVersionMatch(mock.Anything).Return(int32(1), nil).Once()
+		impl := &shardInterceptor{shardManager: &upsertSchemaManager{MockShardManager: base, schema: schema}}
+		_, err := impl.handleInsertOrUpsert(ctx, msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+			t.Fatal("cancellation must precede accounting and backend append")
+			return nil, nil
+		})
+		require.ErrorIs(t, err, context.Canceled)
 	})
 }

@@ -38,7 +38,7 @@ func upsertForTest(vc string) message.MutableMessage {
 	keys := &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7}}}}
 	return message.NewUpsertMessageBuilderV2().WithVChannel(vc).
 		WithHeader(&message.UpsertMessageHeader{CollectionId: 1, SchemaVersion: &version, Partitions: []*message.PartitionSegmentAssignment{{PartitionId: 2, Rows: 1}}, DeleteRows: 1}).
-		WithBody(&message.UpsertMessageBody{Rows: &message.InsertRows{PrimaryKeys: keys, RowIds: []int64{7}}, DeleteEffects: []*messagespb.UpsertDeleteEffect{{PrimaryKeys: keys, Scope: &messagespb.UpsertDeleteEffect_AllPartitions{AllPartitions: &messagespb.UpsertAllPartitions{}}}}}).MustBuildMutable().WithTimeTick(10)
+		WithBody(&message.UpsertMessageBody{Rows: &message.InsertRows{PrimaryKeys: keys, RowIdsEncoding: &message.InsertRows_RowIds{RowIds: &schemapb.LongArray{Data: []int64{7}}}}, DeleteEffects: []*messagespb.UpsertDeleteEffect{{KeySource: &messagespb.UpsertDeleteEffect_PrimaryKeys{PrimaryKeys: keys}, Scope: &messagespb.UpsertDeleteEffect_AllPartitions{AllPartitions: &messagespb.UpsertAllPartitions{}}}}}).MustBuildMutable().WithTimeTick(10)
 }
 
 func mapUpsert(msg message.MutableMessage, offsets ...uint32) {

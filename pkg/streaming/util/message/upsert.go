@@ -40,42 +40,55 @@ func UpsertPrimaryKeyCount(ids *schemapb.IDs) int {
 
 // UpsertSelections validates placement and returns logical rows per partition.
 // Each selection preserves source order and is shared by every column.
+// For one partition, its nil selection denotes all logical rows.
 func UpsertSelections(header *UpsertMessageHeader, body *UpsertMessageBody) ([][]int64, error) {
 	invalid := func() ([][]int64, error) { return nil, merr.WrapErrServiceInternalMsg("invalid Upsert row placement") }
 	rows := UpsertPrimaryKeyCount(body.GetRows().GetPrimaryKeys())
 	partitions := header.GetPartitions()
-	if rows == 0 || len(partitions) == 0 || len(body.GetRows().GetRowIds()) != rows {
+	if rows == 0 || len(partitions) == 0 || len(body.GetRows().GetRowIds().GetData()) != rows {
 		return invalid()
 	}
-	result := make([][]int64, len(partitions))
+	indexes := body.GetRows().GetPartitionIndexes()
+	if len(partitions) == 1 {
+		p := partitions[0]
+		if p.GetPartitionId() <= 0 || p.GetRows() != uint64(rows) || len(indexes) != 0 {
+			return invalid()
+		}
+		// ReadRows already uses nil for all rows; an empty, non-nil slice selects none.
+		return [][]int64{nil}, nil
+	}
+	if len(indexes) != rows {
+		return invalid()
+	}
 	seen := make(map[int64]struct{}, len(partitions))
+	remaining := uint64(rows)
 	for _, p := range partitions {
-		if p.GetPartitionId() <= 0 || p.GetRows() == 0 {
+		if p.GetPartitionId() <= 0 || p.GetRows() == 0 || p.GetRows() > remaining {
 			return invalid()
 		}
 		if _, ok := seen[p.GetPartitionId()]; ok {
 			return invalid()
 		}
 		seen[p.GetPartitionId()] = struct{}{}
+		remaining -= p.GetRows()
 	}
-	indexes := body.GetRows().GetPartitionIndexes()
-	if (len(partitions) == 1 && len(indexes) != 0) || (len(partitions) > 1 && len(indexes) != rows) {
+	if remaining != 0 {
 		return invalid()
 	}
-	for row := 0; row < rows; row++ {
-		index := uint32(0)
-		if len(indexes) > 0 {
-			index = indexes[row]
-		}
-		if uint64(index) >= uint64(len(partitions)) {
+	result := make([][]int64, len(partitions))
+	storage := make([]int64, rows)
+	for i, p := range partitions {
+		count := int(p.GetRows())
+		result[i] = storage[:0:count]
+		storage = storage[count:]
+	}
+	// Capacities sum to the logical row count, so rejecting any overflow also
+	// guarantees every final partition count without another pass.
+	for row, index := range indexes {
+		if uint64(index) >= uint64(len(partitions)) || len(result[index]) == cap(result[index]) {
 			return invalid()
 		}
 		result[index] = append(result[index], int64(row))
-	}
-	for i, p := range partitions {
-		if uint64(len(result[i])) != p.GetRows() {
-			return invalid()
-		}
 	}
 	return result, nil
 }

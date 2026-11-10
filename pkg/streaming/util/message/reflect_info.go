@@ -99,6 +99,9 @@ type (
 	CacheExpiration                  = messagespb.CacheExpiration
 	LegacyProxyCollectionMetaCache   = messagespb.LegacyProxyCollectionMetaCache
 	InsertRows                       = messagespb.InsertRows
+	InsertRows_RowIds                = messagespb.InsertRows_RowIds
+	InsertRows_DeltaRowIds           = messagespb.InsertRows_DeltaRowIds
+	DeltaEncodedRowIDs               = messagespb.DeltaEncodedRowIDs
 	RequestRowMapping                = messagespb.RequestRowMapping
 )
 

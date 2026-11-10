@@ -127,7 +127,7 @@ func TestUpsertPackingLargeKeyedWriteAndExplicitEffects(t *testing.T) {
 		offsets = append(offsets, body.Rows.RequestRowMapping.RowOffsets...)
 		for _, effect := range body.DeleteEffects {
 			require.NotNil(t, effect.GetAllPartitions())
-			deleted = append(deleted, effect.PrimaryKeys.GetIntId().Data...)
+			deleted = append(deleted, effect.GetPrimaryKeys().GetIntId().Data...)
 		}
 	}
 	require.Equal(t, []uint32{0, 1, 2, 3, 4, 5, 6, 7}, offsets)
@@ -344,11 +344,11 @@ func TestUpsertPackingDuplicateDeleteOccurrences(t *testing.T) {
 			body := message.MustAsMutableUpsertMessageV2(msg).MustBody()
 			for _, effect := range body.DeleteEffects {
 				if effects == nil {
-					effects = effect.PrimaryKeys
+					effects = effect.GetPrimaryKeys()
 				} else {
 					t.Fatal("all duplicate delete occurrences must belong to the logical message")
 				}
-				deletes += message.UpsertPrimaryKeyCount(effect.PrimaryKeys)
+				deletes += message.UpsertPrimaryKeyCount(effect.GetPrimaryKeys())
 			}
 		}
 		require.Equal(t, count, deletes)
@@ -415,8 +415,8 @@ func TestUpsertPackingLargeDeleteOccurrences(t *testing.T) {
 				effectMessages++
 			}
 			for _, effect := range body.DeleteEffects {
-				gotInts = append(gotInts, effect.PrimaryKeys.GetIntId().GetData()...)
-				gotStrings = append(gotStrings, effect.PrimaryKeys.GetStrId().GetData()...)
+				gotInts = append(gotInts, effect.GetPrimaryKeys().GetIntId().GetData()...)
+				gotStrings = append(gotStrings, effect.GetPrimaryKeys().GetStrId().GetData()...)
 			}
 		}
 		require.Equal(t, 1, effectMessages)

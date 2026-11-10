@@ -23,6 +23,8 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
+	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -173,4 +175,39 @@ func TestInsertV2UsesSharedAssignmentWithoutDeleteAccounting(t *testing.T) {
 	require.Zero(t, assignment.Acknowledge.Load())
 	require.Zero(t, schemaManager.deleteRows)
 	require.Zero(t, schemaManager.deleteBytes)
+}
+
+func TestInsertOrUpsertColumnDecodeFailurePrecedesAccounting(t *testing.T) {
+	paramtable.Init()
+	gate := &paramtable.Get().FunctionCfg.EnableWriteBeforeMaterialization
+	old := gate.SwapTempValue("false")
+	defer gate.SwapTempValue(old)
+	base := mock_shards.NewMockShardManager(t)
+	base.EXPECT().CheckIfCollectionSchemaVersionMatch(mock.Anything).Return(int32(1), nil).Once()
+	original := upsertForTest("p_1v0")
+	body := message.MustAsMutableUpsertMessageV2(original).MustBody()
+	rows, err := proto.Marshal(body.Rows)
+	require.NoError(t, err)
+	column := protowire.AppendTag(nil, 5, protowire.VarintType)
+	column = protowire.AppendVarint(column, 101)
+	column = protowire.AppendTag(column, 4, protowire.BytesType)
+	column = protowire.AppendBytes(column, []byte{0xff}) // Invalid nested vector; projection skips its values.
+	rows = protowire.AppendTag(rows, 4, protowire.BytesType)
+	rows = protowire.AppendBytes(rows, column)
+	payload, err := proto.Marshal(&message.UpsertMessageBody{DeleteEffects: body.DeleteEffects})
+	require.NoError(t, err)
+	payload = protowire.AppendTag(payload, 1, protowire.BytesType)
+	payload = protowire.AppendBytes(payload, rows)
+	msg := message.NewMutableMessageBeforeAppend(payload, original.IntoMessageProto().Properties).WithTimeTick(10)
+	_, err = message.ReadInsertOrUpsertProjection(t.Context(), msg)
+	require.NoError(t, err)
+	manager := &upsertSchemaManager{MockShardManager: base, schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}}}
+	impl := &shardInterceptor{shardManager: manager}
+	_, err = impl.handleInsertOrUpsert(t.Context(), msg, func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		t.Fatal("malformed column reached backend append")
+		return nil, nil
+	})
+	require.True(t, status.AsStreamingError(err).IsUnrecoverable())
+	require.ErrorContains(t, err, "malformed row-write body")
+	require.Zero(t, manager.deleteRows)
 }

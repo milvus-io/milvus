@@ -887,10 +887,10 @@ func buildPartialUpdateCASTestMessages(
 	deleteGroups := groupPartialUpdateCASIntPKs(t, deletePKs, vchannels)
 	var messages []streamingmessage.MutableMessage
 	for channel, keys := range insertGroups {
-		body := &streamingmessage.UpsertMessageBody{Rows: &messagespb.InsertRows{PrimaryKeys: partialUpdateCASIDs(keys), RowIds: make([]int64, len(keys))}}
+		body := &streamingmessage.UpsertMessageBody{Rows: &messagespb.InsertRows{PrimaryKeys: partialUpdateCASIDs(keys), RowIdsEncoding: &messagespb.InsertRows_RowIds{RowIds: &schemapb.LongArray{Data: make([]int64, len(keys))}}}}
 		header := &streamingmessage.UpsertMessageHeader{CollectionId: collectionID, Partitions: []*streamingmessage.PartitionSegmentAssignment{{PartitionId: 100, Rows: uint64(len(keys))}}}
 		if deleted := deleteGroups[channel]; len(deleted) > 0 {
-			body.DeleteEffects = []*messagespb.UpsertDeleteEffect{{PrimaryKeys: partialUpdateCASIDs(deleted), Scope: &messagespb.UpsertDeleteEffect_AllPartitions{AllPartitions: &messagespb.UpsertAllPartitions{}}}}
+			body.DeleteEffects = []*messagespb.UpsertDeleteEffect{{KeySource: &messagespb.UpsertDeleteEffect_PrimaryKeys{PrimaryKeys: partialUpdateCASIDs(deleted)}, Scope: &messagespb.UpsertDeleteEffect_AllPartitions{AllPartitions: &messagespb.UpsertAllPartitions{}}}}
 			header.DeleteRows = uint64(len(deleted))
 		}
 		builder := streamingmessage.NewUpsertMessageBuilderV2().WithVChannel(channel).WithHeader(header).WithBody(body)
@@ -916,10 +916,10 @@ func buildPartialUpdateCASStringTestMessages(
 	deleteGroups := groupPartialUpdateCASStringPKs(t, deletePKs, vchannels)
 	var messages []streamingmessage.MutableMessage
 	for channel, keys := range insertGroups {
-		body := &streamingmessage.UpsertMessageBody{Rows: &messagespb.InsertRows{PrimaryKeys: partialUpdateCASStringIDs(keys), RowIds: make([]int64, len(keys))}}
+		body := &streamingmessage.UpsertMessageBody{Rows: &messagespb.InsertRows{PrimaryKeys: partialUpdateCASStringIDs(keys), RowIdsEncoding: &messagespb.InsertRows_RowIds{RowIds: &schemapb.LongArray{Data: make([]int64, len(keys))}}}}
 		header := &streamingmessage.UpsertMessageHeader{CollectionId: collectionID, Partitions: []*streamingmessage.PartitionSegmentAssignment{{PartitionId: 100, Rows: uint64(len(keys))}}}
 		if deleted := deleteGroups[channel]; len(deleted) > 0 {
-			body.DeleteEffects = []*messagespb.UpsertDeleteEffect{{PrimaryKeys: partialUpdateCASStringIDs(deleted), Scope: &messagespb.UpsertDeleteEffect_AllPartitions{AllPartitions: &messagespb.UpsertAllPartitions{}}}}
+			body.DeleteEffects = []*messagespb.UpsertDeleteEffect{{KeySource: &messagespb.UpsertDeleteEffect_PrimaryKeys{PrimaryKeys: partialUpdateCASStringIDs(deleted)}, Scope: &messagespb.UpsertDeleteEffect_AllPartitions{AllPartitions: &messagespb.UpsertAllPartitions{}}}}
 			header.DeleteRows = uint64(len(deleted))
 		}
 		builder := streamingmessage.NewUpsertMessageBuilderV2().WithVChannel(channel).WithHeader(header).WithBody(body)
@@ -1292,7 +1292,7 @@ func TestUpsertDeleteMessageCipher(t *testing.T) {
 				require.NoError(t, err)
 				require.True(t, proto.Equal(ids, body.Rows.PrimaryKeys))
 				require.Len(t, body.DeleteEffects, 1)
-				require.True(t, proto.Equal(ids, body.DeleteEffects[0].PrimaryKeys))
+				require.True(t, proto.Equal(ids, body.DeleteEffects[0].GetPrimaryKeys()))
 				require.Equal(t, int64(20), body.DeleteEffects[0].GetPartitionId())
 				require.Empty(t, body.Rows.Columns, "PK is stored independently")
 				if encrypted {
@@ -1419,7 +1419,7 @@ func TestFullAutoIDRoutesExistingInsertAndDeleteTogether(t *testing.T) {
 				insertChannels[id] = msg.VChannel()
 			}
 			for _, effect := range body.DeleteEffects {
-				for _, id := range effect.PrimaryKeys.GetIntId().Data {
+				for _, id := range effect.GetPrimaryKeys().GetIntId().Data {
 					deleteChannels[id] = msg.VChannel()
 				}
 			}
@@ -7430,9 +7430,9 @@ func TestUpsertPackingPreservesCASAndExplicitEffects(t *testing.T) {
 			require.Len(t, msgs, 1)
 			upsert := streamingmessage.MustAsMutableUpsertMessageV2(msgs[0])
 			body := upsert.MustBody()
-			require.Len(t, body.Rows.RowIds, 2)
+			require.Len(t, body.Rows.GetRowIds().Data, 2)
 			require.Len(t, body.DeleteEffects, 1)
-			require.Equal(t, []int64{10}, body.DeleteEffects[0].PrimaryKeys.GetIntId().Data)
+			require.Equal(t, []int64{10}, body.DeleteEffects[0].GetPrimaryKeys().GetIntId().Data)
 			require.Equal(t, partial, streamingmessage.HasPartialUpdateCAS(msgs[0]))
 			if partial {
 				require.NoError(t, task.validatePartialUpdateCASCoverage(msgs))

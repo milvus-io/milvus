@@ -976,7 +976,7 @@ func TestInsertExecuteProducesV2(t *testing.T) {
 		require.Equal(t, message.MessageTypeInsert, msgs[0].MessageType())
 		insert := message.MustAsMutableInsertMessageV2(msgs[0])
 		rows := insert.MustBody().GetRows()
-		require.Equal(t, source.RowIDs, rows.RowIds)
+		require.Equal(t, source.RowIDs, rows.GetRowIds().Data)
 		require.True(t, proto.Equal(result.IDs, rows.PrimaryKeys))
 		require.Equal(t, []uint32{0, 1, 2}, rows.RequestRowMapping.RowOffsets)
 		return streaming.AppendResponses{}

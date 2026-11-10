@@ -52,3 +52,8 @@ DropPartition retires its target partition with the `partition_removed` seal
 policy before fencing the surviving partitions. Flush metrics are recorded only
 when a growing segment first becomes flushed; a later fence/drop also removes
 segments with pending async Flush messages without recording them again.
+
+Insert V2/Upsert admission reuses one decoded body within each attempt for function
+materialization, writeback and exact partition sizing. This is local ownership, not
+a mutable body cache: redo starts a fresh attempt. Header-only segment assignment
+does not change the rows. Function outputs are encoded only when changed.

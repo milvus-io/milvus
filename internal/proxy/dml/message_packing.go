@@ -120,7 +120,7 @@ func packInsertOrUpsertMessages(ctx context.Context, cache Cache, channels []str
 				if err != nil {
 					return nil, err
 				}
-				effect := &messagespb.UpsertDeleteEffect{PrimaryKeys: deleteKeys}
+				effect := &messagespb.UpsertDeleteEffect{KeySource: &messagespb.UpsertDeleteEffect_PrimaryKeys{PrimaryKeys: deleteKeys}}
 				if deletePartition == -1 {
 					effect.Scope = &messagespb.UpsertDeleteEffect_AllPartitions{AllPartitions: &messagespb.UpsertAllPartitions{}}
 				} else {
@@ -188,12 +188,12 @@ func packInsertRows(source *msgstream.InsertMsg, ids *schemapb.IDs, selected []i
 	if err != nil {
 		return nil, nil, err
 	}
-	rows := &messagespb.InsertRows{PrimaryKeys: keys, RowIds: make([]int64, len(selected))}
+	rows := &messagespb.InsertRows{PrimaryKeys: keys, RowIdsEncoding: &messagespb.InsertRows_RowIds{RowIds: &schemapb.LongArray{Data: make([]int64, len(selected))}}}
 	if key != "" {
 		rows.RequestRowMapping = &messagespb.RequestRowMapping{RowOffsets: make([]uint32, len(selected))}
 	}
 	for index, row := range selected {
-		rows.RowIds[index] = source.GetRowIDs()[row]
+		rows.GetRowIds().Data[index] = source.GetRowIDs()[row]
 		if rows.RequestRowMapping != nil {
 			rows.RequestRowMapping.RowOffsets[index] = uint32(row)
 		}

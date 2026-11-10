@@ -43,7 +43,7 @@ func testUpsertRows(t *testing.T, nullable bool) (message.ImmutableMessage, *sch
 		vector.ValidData = []bool{true, false, true}
 		vector.GetFloatVector().Data = []float32{1, 2, 5, 6}
 	}
-	body := &message.UpsertMessageBody{Rows: &message.InsertRows{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{4, 5, 4}}}}, RowIds: []int64{10, 20, 30}, PartitionIndexes: []uint32{0, 1, 0}, Columns: []*schemapb.FieldData{{FieldId: 101, Type: schemapb.DataType_FloatVector, Field: &schemapb.FieldData_Vectors{Vectors: vector}}}}, DeleteEffects: []*messagespb.UpsertDeleteEffect{{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{99}}}}, Scope: &messagespb.UpsertDeleteEffect_PartitionId{PartitionId: 30}}}}
+	body := &message.UpsertMessageBody{Rows: &message.InsertRows{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{4, 5, 4}}}}, RowIdsEncoding: &message.InsertRows_RowIds{RowIds: &schemapb.LongArray{Data: []int64{10, 20, 30}}}, PartitionIndexes: []uint32{0, 1, 0}, Columns: []*schemapb.FieldData{{FieldId: 101, Type: schemapb.DataType_FloatVector, Field: &schemapb.FieldData_Vectors{Vectors: vector}}}}, DeleteEffects: []*messagespb.UpsertDeleteEffect{{KeySource: &messagespb.UpsertDeleteEffect_PrimaryKeys{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{99}}}}}, Scope: &messagespb.UpsertDeleteEffect_PartitionId{PartitionId: 30}}}}
 	raw := message.NewUpsertMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&message.UpsertMessageHeader{CollectionId: 1, SchemaVersion: &version, Partitions: []*message.PartitionSegmentAssignment{{PartitionId: 10, Rows: 2}, {PartitionId: 20, Rows: 1}}, DeleteRows: 1}).WithBody(body).MustBuildMutable().WithTimeTick(42).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(42))
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64}, {FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector, Nullable: nullable}}}
 	return raw, schema
@@ -131,7 +131,7 @@ func BenchmarkUpsertConsumerScatter(b *testing.B) {
 		b.Run(fmt.Sprintf("partitions_%d", partitions), func(b *testing.B) {
 			version := int32(1)
 			header := &message.UpsertMessageHeader{CollectionId: 1, SchemaVersion: &version}
-			body := &message.UpsertMessageBody{Rows: &message.InsertRows{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: make([]int64, rows)}}}, RowIds: make([]int64, rows), Columns: []*schemapb.FieldData{{FieldId: 101, Type: schemapb.DataType_FloatVector, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 128, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, rows*128)}}}}}}}}
+			body := &message.UpsertMessageBody{Rows: &message.InsertRows{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: make([]int64, rows)}}}, RowIdsEncoding: &message.InsertRows_RowIds{RowIds: &schemapb.LongArray{Data: make([]int64, rows)}}, Columns: []*schemapb.FieldData{{FieldId: 101, Type: schemapb.DataType_FloatVector, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 128, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, rows*128)}}}}}}}}
 			for i := 0; i < partitions; i++ {
 				header.Partitions = append(header.Partitions, &message.PartitionSegmentAssignment{PartitionId: int64(i + 1), Rows: rows / uint64(partitions)})
 			}
@@ -164,7 +164,7 @@ func transformUpsert(tick uint64) message.ImmutableMessage {
 	keys := &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"one", "two"}}}}
 	return message.NewUpsertMessageBuilderV2().WithVChannel("p_1v0").
 		WithHeader(&message.UpsertMessageHeader{CollectionId: 1, Partitions: []*message.PartitionSegmentAssignment{{PartitionId: 2, Rows: 2}}, DeleteRows: 2}).
-		WithBody(&message.UpsertMessageBody{Rows: &message.InsertRows{PrimaryKeys: keys, RowIds: []int64{1, 2}}, DeleteEffects: []*messagespb.UpsertDeleteEffect{{PrimaryKeys: keys, Scope: &messagespb.UpsertDeleteEffect_AllPartitions{AllPartitions: &messagespb.UpsertAllPartitions{}}}}}).MustBuildMutable().WithTimeTick(tick).WithLastConfirmedUseMessageID().IntoImmutableMessage(walimplstest.NewTestMessageID(int64(tick)))
+		WithBody(&message.UpsertMessageBody{Rows: &message.InsertRows{PrimaryKeys: keys, RowIdsEncoding: &message.InsertRows_RowIds{RowIds: &schemapb.LongArray{Data: []int64{1, 2}}}}, DeleteEffects: []*messagespb.UpsertDeleteEffect{{KeySource: &messagespb.UpsertDeleteEffect_PrimaryKeys{PrimaryKeys: keys}, Scope: &messagespb.UpsertDeleteEffect_AllPartitions{AllPartitions: &messagespb.UpsertAllPartitions{}}}}}).MustBuildMutable().WithTimeTick(tick).WithLastConfirmedUseMessageID().IntoImmutableMessage(walimplstest.NewTestMessageID(int64(tick)))
 }
 
 func transformDelete(tick uint64, partition int64, key string) message.ImmutableMessage {
@@ -227,7 +227,7 @@ func TestInsertRowsReaderPreservesSparseDimensions(t *testing.T) {
 					body := &msgpb.InsertRequest{CollectionID: 1, NumRows: 3, RowIDs: []int64{10, 20, 30}, FieldsData: []*schemapb.FieldData{column}, Version: msgpb.InsertDataVersion_ColumnBased}
 					raw = message.NewInsertMessageBuilderV1().WithVChannel("p_1v0").WithHeader(&message.InsertMessageHeader{}).WithBody(body).MustBuildMutable().WithTimeTick(42).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(42))
 				} else {
-					body := &message.UpsertMessageBody{Rows: &message.InsertRows{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3}}}}, RowIds: []int64{10, 20, 30}, Columns: []*schemapb.FieldData{column}}}
+					body := &message.UpsertMessageBody{Rows: &message.InsertRows{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3}}}}, RowIdsEncoding: &message.InsertRows_RowIds{RowIds: &schemapb.LongArray{Data: []int64{10, 20, 30}}}, Columns: []*schemapb.FieldData{column}}}
 					if format == "insert-v2" {
 						raw = message.NewInsertMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&message.InsertMessageHeaderV2{CollectionId: 1, Partitions: []*message.PartitionSegmentAssignment{{PartitionId: 10, Rows: 3}}}).WithBody(&message.InsertMessageBody{Rows: body.Rows}).MustBuildMutable().WithTimeTick(42).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(42))
 					} else {
@@ -287,7 +287,7 @@ func TestInsertRowsReaderAllNullSparsePayload(t *testing.T) {
 		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 		{FieldID: 101, Name: "vector", DataType: schemapb.DataType_SparseFloatVector, Nullable: true},
 	}}
-	body := &message.UpsertMessageBody{Rows: &message.InsertRows{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2}}}}, RowIds: []int64{10, 20}, Columns: []*schemapb.FieldData{{FieldId: 101, Type: schemapb.DataType_SparseFloatVector, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 32, ValidData: []bool{false, false}}}}}}}
+	body := &message.UpsertMessageBody{Rows: &message.InsertRows{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2}}}}, RowIdsEncoding: &message.InsertRows_RowIds{RowIds: &schemapb.LongArray{Data: []int64{10, 20}}}, Columns: []*schemapb.FieldData{{FieldId: 101, Type: schemapb.DataType_SparseFloatVector, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 32, ValidData: []bool{false, false}}}}}}}
 	raw := message.NewUpsertMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&message.UpsertMessageHeader{CollectionId: 1, Partitions: []*message.PartitionSegmentAssignment{{PartitionId: 10, Rows: 2}}}).WithBody(body).MustBuildMutable().WithTimeTick(42).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(42))
 	source := message.MustAsImmutableUpsertMessageV2(raw).MustBody()
 	require.Nil(t, source.Rows.Columns[0].GetVectors().Data)
@@ -328,7 +328,7 @@ func TestInsertRowsReaderAllNullSparseEncodedSelection(t *testing.T) {
 			keys[i] = int64(index + 1)
 			rowIDs[i] = source.RowIDs[index]
 		}
-		encoder, err := fastpb.NewUpsertViewEncoder(&message.UpsertMessageBody{Rows: &message.InsertRows{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: keys}}}, RowIds: rowIDs}}, source, selected)
+		encoder, err := fastpb.NewUpsertViewEncoder(&message.UpsertMessageBody{Rows: &message.InsertRows{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: keys}}}, RowIdsEncoding: &message.InsertRows_RowIds{RowIds: &schemapb.LongArray{Data: rowIDs}}}}, source, selected)
 		require.NoError(t, err)
 		raw := message.NewUpsertMessageBuilderV2().WithVChannel("p_1v0").WithHeader(&message.UpsertMessageHeader{CollectionId: 1, Partitions: []*message.PartitionSegmentAssignment{{PartitionId: 10, Rows: uint64(count)}}}).WithBodyEncoder(encoder).MustBuildMutable().WithTimeTick(42).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(int64(len(chunks) + 1)))
 		decoded := message.MustAsImmutableUpsertMessageV2(raw).MustBody()
@@ -362,4 +362,48 @@ func TestInsertRowsReaderAllNullSparseEncodedSelection(t *testing.T) {
 	require.Equal(t, 1, nullChunks)
 	require.Equal(t, []bool{true, false, false, true}, allValidity)
 	require.True(t, proto.Equal(before, source))
+}
+
+func TestInsertOrUpsertAllRowsPreservesValuesAndOwnsMetadata(t *testing.T) {
+	for _, nullable := range []bool{false, true} {
+		t.Run(fmt.Sprintf("nullable_%t", nullable), func(t *testing.T) {
+			raw, schema := testUpsertRows(t, nullable)
+			reader, _, _ := AsInsertRowsReader(raw)
+			before := proto.Clone(message.MustAsImmutableUpsertMessageV2(raw).MustBody())
+			all, err := reader.ReadRows(t.Context(), schema, nil)
+			require.NoError(t, err)
+			explicit, err := reader.ReadRows(t.Context(), schema, []int64{0, 1, 2})
+			require.NoError(t, err)
+			// Storage normalizes the legacy and field-specific validity locations.
+			// The all-row view preserves source metadata rather than synthesizing
+			// a second copy of the bitmap as selected-row conversion does.
+			for _, field := range all.FieldsData {
+				typeutil.NormalizeFieldDataValidData(field)
+			}
+			for _, field := range explicit.FieldsData {
+				typeutil.NormalizeFieldDataValidData(field)
+			}
+			require.True(t, proto.Equal(all, explicit), "all=%s explicit=%s", all, explicit)
+			empty, err := reader.ReadRows(t.Context(), schema, []int64{})
+			require.NoError(t, err)
+			require.Zero(t, empty.NumRows)
+			require.Empty(t, empty.RowIDs)
+			all.FieldsData[0].FieldName = "execution-local"
+			all.FieldsData[0].GetVectors().Dim = 99
+			all.FieldsData[0].GetVectors().ValidData = nil
+			require.True(t, proto.Equal(before, message.MustAsImmutableUpsertMessageV2(raw).MustBody()))
+		})
+	}
+}
+
+func TestAllRowsPreservesNullableValidityError(t *testing.T) {
+	raw, schema := testUpsertRows(t, true)
+	body := proto.Clone(message.MustAsImmutableUpsertMessageV2(raw).MustBody()).(*message.UpsertMessageBody)
+	body.Rows.Columns[0].GetVectors().ValidData = []bool{true, false}
+	broken := message.NewUpsertMessageBuilderV2().WithVChannel("p_1v0").WithHeader(message.MustAsImmutableUpsertMessageV2(raw).Header()).WithBody(body).MustBuildMutable().WithTimeTick(42).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(42))
+	reader, _, _ := AsInsertRowsReader(broken)
+	for _, selection := range [][]int64{nil, {0, 1, 2}} {
+		_, err := reader.ReadRows(t.Context(), schema, selection)
+		require.ErrorContains(t, err, "nullable vector validity count differs from logical rows")
+	}
 }

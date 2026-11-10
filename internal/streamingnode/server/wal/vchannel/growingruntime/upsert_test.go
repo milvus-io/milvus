@@ -63,13 +63,13 @@ func TestUpsertAppliesNativeRowsAndDeletes(t *testing.T) {
 	defer runtime.Close()
 	version := int32(1)
 	build := func(tick uint64, deleteOld bool) message.ImmutableMessage {
-		body := &message.UpsertMessageBody{Rows: &message.InsertRows{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7, 8}}}}, RowIds: []int64{int64(tick), int64(tick + 1)}, Columns: []*schemapb.FieldData{
+		body := &message.UpsertMessageBody{Rows: &message.InsertRows{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7, 8}}}}, RowIdsEncoding: &message.InsertRows_RowIds{RowIds: &schemapb.LongArray{Data: []int64{int64(tick), int64(tick + 1)}}}, Columns: []*schemapb.FieldData{
 			{FieldId: 101, Type: schemapb.DataType_Int64, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{int64(tick), int64(tick)}}}}}},
 			{FieldId: 102, Type: schemapb.DataType_FloatVector, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}}}}}},
 		}}}
 		header := &message.UpsertMessageHeader{CollectionId: 1, SchemaVersion: &version, Partitions: []*message.PartitionSegmentAssignment{{PartitionId: 10, Rows: 2, SegmentAssignment: &messagespb.SegmentAssignment{SegmentId: 100}}}}
 		if deleteOld {
-			body.DeleteEffects = []*messagespb.UpsertDeleteEffect{{PrimaryKeys: body.Rows.PrimaryKeys, Scope: &messagespb.UpsertDeleteEffect_AllPartitions{AllPartitions: &messagespb.UpsertAllPartitions{}}}}
+			body.DeleteEffects = []*messagespb.UpsertDeleteEffect{{KeySource: &messagespb.UpsertDeleteEffect_PrimaryKeys{PrimaryKeys: body.Rows.PrimaryKeys}, Scope: &messagespb.UpsertDeleteEffect_AllPartitions{AllPartitions: &messagespb.UpsertAllPartitions{}}}}
 			header.DeleteRows = 2
 		}
 		return message.NewUpsertMessageBuilderV2().WithVChannel("ch").WithHeader(header).WithBody(body).MustBuildMutable().WithTimeTick(tick).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(int64(tick)))

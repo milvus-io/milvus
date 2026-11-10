@@ -41,12 +41,14 @@ message UpsertMessageBody {
 | Field number | Field | Meaning |
 | --- | --- | --- |
 | 1 | `primary_keys` | Resolved Int64 or VarChar PKs in logical row order |
-| 2 | `row_ids` | Internal row identifier for each inserted row |
+| 2 / 5 | `row_ids` / `delta_row_ids` | Internal row identifier for each inserted row |
 | 3 | `partition_indexes` | Index into the header partition table for each row |
 | 4 | `columns` | Ordinary columns and materialized function outputs |
 | 7 | `request_row_mapping` | Original request offsets for retry results |
 
 Insert V2 has no delete effects or header result. Its body directly owns one nested `InsertRows`. Upsert combines the same rows with optional explicit effects and CAS proof. Historical Insert V1 keeps its original header and `InsertRequest` body, including its optional header result. The nested Upsert layout replaces the unpublished flat draft; there is no flat-draft compatibility adapter.
+
+Internal RowIDs use an `InsertRows` oneof: explicit `schema.LongArray row_ids` (field 2), or `DeltaEncodedRowIDs delta_row_ids` (field 5). The latter contains the first RowID (`base`, field 1) and packed signed ZigZag differences (`deltas`, field 2), preserving order including zero or negative differences. The encoder selects delta encoding only when the complete field is smaller and subtraction cannot overflow int64. Readers reject reconstruction overflow. Full-body and projection readers expose explicit logical values, and materialization reselects the wire encoding. Immutable readers share referenced PK values. Mutable Body readers detach delete-key containers so editing inserted keys cannot silently alter an independent delete effect; immutable string values remain shared. This replaces the unpublished draft representation without an adapter; historical formal Insert/Delete formats are unchanged.
 
 PK, RowID, and Timestamp are not repeated in `columns`. The final message TimeTick supplies inserted-row and delete timestamps. A transaction uses Commit's final TimeTick. The body does not embed an InsertRequest or DeleteRequest and stores no duplicate retry result.
 
@@ -62,7 +64,7 @@ request row offsets: [4, 0, 7]
 
 Partition 10 receives logical rows 0 and 2, with keys 101 and 103. Partition 20 receives logical row 1, with key 102. The offsets refer to positions 4, 0, and 7 in the original request, not positions within this message. Every column uses the same logical selection.
 
-Each `UpsertDeleteEffect` has exactly one scope: `all_partitions` (field 1) or a positive `partition_id` (field 2). Its nonempty `primary_keys` (field 3) must match the collection's PK type. All-partitions scope covers only this collection's partitions within the message's VChannel. A targeted partition need not receive inserted rows. Delete keys need not equal or be a subset of inserted keys. For example, the message above can independently delete key 99 from partition 30. `delete_rows` counts all explicit key occurrences.
+Each `UpsertDeleteEffect` has exactly one scope: `all_partitions` (field 1) or a positive `partition_id` (field 2). Its key source is either nonempty `primary_keys` (field 3), matching the collection's PK type, or an explicit `all_inserted_keys` marker (field 4). The marker references the complete ordered inserted PK sequence, preserving duplicate occurrences; readers never infer delete keys from an absent source. Producers use the marker only for identical sequences. Independent keys retain their explicit representation. All-partitions scope covers only this collection's partitions within the message's VChannel. A targeted partition need not receive inserted rows. Delete keys need not equal or be a subset of inserted keys. For example, the message above can independently delete key 99 from partition 30. `delete_rows` counts all resolved key occurrences.
 
 Deletes affect only versions strictly earlier than the final visibility TimeTick. They cannot delete this message's newly inserted rows. An absent older version is a no-op. Repeated PKs within a message or across transaction bodies retain existing equal-TimeTick semantics. The format does not promise last-write-wins among those rows.
 
@@ -82,7 +84,9 @@ There is no producer format switch in 3.1. StreamingNode accepts supported Inser
 
 The shard handler checks schema compatibility and ownership, prepares function materialization when enabled, and assigns all insert targets as a batch. Every partition must be ready. Per-partition selection checks fencing, TimeTick, Growing state, and capacity. No rows or bytes are charged until all candidates are available. Ack references precede batch accounting, including capacity-triggered sealing. Failed accounting releases those references. Transaction cleanup retains its existing segment-reference lifecycle.
 
-Each partition's `binary_size` describes its own selected rows, including PK and RowID. It excludes delete effects and the outer envelope. A later target requiring redo cannot leave a charged successful prefix. The receiving StreamingNode writes local segment assignments into the header before backend append.
+Within one admission attempt, the function adapter, column writeback, and partition sizing reuse one decoded body. The attempt owns this value; it is not a mutable-message body cache and is discarded on return or redo. Materialization updates that body and re-encodes only when outputs change. Projection data remains separate and does not retain column values.
+
+Each partition's `binary_size` describes its own selected rows, including PK and explicit logical RowID representation; choosing a compact wire encoding does not reduce this accounting. It excludes delete effects and the outer envelope. A later target requiring redo cannot leave a charged successful prefix. The receiving StreamingNode writes local segment assignments into the header before backend append.
 
 ## Transaction and retry
 
@@ -104,7 +108,7 @@ A duplicate returns the original AppendResult, including original MessageID, Tim
 
 ## Consumption, persistence and recovery
 
-Native consumers obtain an `InsertRowsReader` through `AsInsertRowsReader`. It reads selected rows into the existing storage InsertRequest representation. Partition selections are computed once and shared by all columns and receiving segments. Consumers restore the standalone PK column and supply system fields at the execution boundary. Nullable compact vectors use logical-to-physical positions. StructArray, VectorArray, and function outputs follow existing FieldData conversion rules.
+Native consumers obtain an `InsertRowsReader` through `AsInsertRowsReader`. It reads selected rows into the existing storage InsertRequest representation. Partition selections are computed once and shared by all columns and receiving segments. A single partition uses an implicit all-row selection, without an array of row numbers. All-row readers own execution metadata while borrowing immutable column values and RowIDs. Multi-partition selections preserve interleaving and use one exactly sized backing array divided into partition-local slices; they do not reorder the wire rows. Consumers restore the standalone PK column and supply system fields at the execution boundary. Nullable compact vectors use logical-to-physical positions. StructArray, VectorArray, and function outputs follow existing FieldData conversion rules.
 
 `DeleteRequests` exposes only explicit effects at final visibility time. Native growing execution, L1 persistence, L0 materialization, Summary, and local flush replay use the same logical format. Transaction assembly supplies Commit visibility before these consumers apply the bodies.
 
@@ -120,7 +124,7 @@ The borrowed Proxy view encoder writes selected columns directly into the final 
 
 Proxy no longer splits a VChannel batch to fit a physical backend record. The existing materialized Insert/Delete request limits and transport limits remain. SN chunks the final encoded, possibly encrypted payload when its backend has a configured chunk budget. Backend chunking does not decode rows or create extra transaction bodies. Keyed and CAS writes use the same physical mechanism within existing logical-request limits. Fewer logical records do not establish a throughput gain without measurement.
 
-The Insert/Upsert projection reads PKs, RowIDs, partition indexes, delete effects, mapping, CAS, and column descriptors. It enters the nested rows field and skips ordinary column values without calling full `Body()`. Descriptors contain field IDs, not scalar/vector values. This projection is distinct from the encoder's non-column fields, which participate in complete body encoding.
+The Insert/Upsert projection reads PKs, RowIDs, partition indexes, delete effects, mapping, CAS, and column descriptors. It enters the nested rows field and skips ordinary column values without calling full `Body()`. Descriptors contain field IDs, not scalar/vector values. The projection decoder merges selected wire fields directly into their protobuf destinations rather than concatenating them into a temporary encoded buffer. Repeated embedded fields retain protobuf merge semantics. This projection is distinct from the encoder's non-column fields, which participate in complete body encoding.
 
 Immutable readers share the projection through the bounded body cache. Projection and full-body entries share its budget and eviction policy. Accounting covers decoded projection data and reserved derived mappings. Row-selection and nullable-vector position caches belong to the projection and leave with its eviction. Projection entries do not retain the decrypted payload or ordinary column values.
 

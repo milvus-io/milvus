@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/util/fastpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -85,7 +86,7 @@ func cachedInsertOrUpsertProjection(ctx context.Context, msg interface {
 		}
 		// Include slice storage and column wrappers in addition to encoded values.
 		// The shared cache applies its existing object-overhead multiplier.
-		size := proto.Size(body) + 8*len(body.GetRows().GetRowIds())*(2+len(body.GetRows().GetColumns())) + 4*len(body.GetRows().GetPartitionIndexes()) + 8*UpsertPrimaryKeyCount(body.GetRows().GetPrimaryKeys()) + 192*len(body.GetRows().GetColumns())
+		size := proto.Size(body) + 8*len(body.GetRows().GetRowIds().GetData())*(2+len(body.GetRows().GetColumns())) + 4*len(body.GetRows().GetPartitionIndexes()) + 8*UpsertPrimaryKeyCount(body.GetRows().GetPrimaryKeys()) + 192*len(body.GetRows().GetColumns())
 		for _, effect := range body.GetDeleteEffects() {
 			size += 8*UpsertPrimaryKeyCount(effect.GetPrimaryKeys()) + 64
 		}
@@ -117,8 +118,8 @@ func upsertWireFields(payload []byte, visit func(protowire.Number, protowire.Typ
 }
 
 func decodeInsertOrUpsertProjection(payload []byte, upsert bool) (*UpsertMessageBody, error) {
-	var selected []byte
-	var rows *InsertRows
+	body := &UpsertMessageBody{}
+	merge := proto.UnmarshalOptions{Merge: true}
 	err := upsertWireFields(payload, func(number protowire.Number, kind protowire.Type, encoded, value []byte) error {
 		if number == 1 {
 			if kind != protowire.BytesType {
@@ -128,35 +129,25 @@ func decodeInsertOrUpsertProjection(payload []byte, upsert bool) (*UpsertMessage
 			if n < 0 {
 				return protowire.ParseError(n)
 			}
-			part, err := decodeInsertRowsProjection(raw)
-			if err != nil {
-				return err
+			if body.Rows == nil {
+				body.Rows = &InsertRows{}
 			}
-			if rows == nil {
-				rows = part
-			} else {
-				proto.Merge(rows, part)
-			}
-		} else if upsert && (number == 2 || number == 3) {
-			selected = append(selected, encoded...)
+			return decodeInsertRowsProjection(raw, body.Rows)
+		}
+		if upsert && (number == 2 || number == 3) {
+			return merge.Unmarshal(encoded, body)
 		}
 		return nil
 	})
-	if err != nil {
-		return nil, err
+	if err == nil {
+		err = fastpb.NormalizeInsertOrUpsertBody(body)
 	}
-	body := &UpsertMessageBody{}
-	if err := proto.Unmarshal(selected, body); err != nil {
-		return nil, err
-	}
-	body.Rows = rows
-	return body, nil
+	return body, err
 }
 
-func decodeInsertRowsProjection(payload []byte) (*InsertRows, error) {
-	var selected []byte
-	var columns []*schemapb.FieldData
-	err := upsertWireFields(payload, func(number protowire.Number, kind protowire.Type, encoded, value []byte) error {
+func decodeInsertRowsProjection(payload []byte, rows *InsertRows) error {
+	merge := proto.UnmarshalOptions{Merge: true}
+	return upsertWireFields(payload, func(number protowire.Number, kind protowire.Type, encoded, value []byte) error {
 		switch number {
 		case 4:
 			if kind != protowire.BytesType {
@@ -166,34 +157,21 @@ func decodeInsertRowsProjection(payload []byte) (*InsertRows, error) {
 			if n < 0 {
 				return protowire.ParseError(n)
 			}
-			var descriptor []byte
+			column := &schemapb.FieldData{}
 			if err := upsertWireFields(raw, func(field protowire.Number, _ protowire.Type, encoded, _ []byte) error {
 				if field == 5 {
-					descriptor = append(descriptor, encoded...)
+					return merge.Unmarshal(encoded, column)
 				}
 				return nil
 			}); err != nil {
 				return err
 			}
-			column := &schemapb.FieldData{}
-			if err := proto.Unmarshal(descriptor, column); err != nil {
-				return err
-			}
-			columns = append(columns, column)
-		case 1, 2, 3, 7:
-			selected = append(selected, encoded...)
+			rows.Columns = append(rows.Columns, column)
+		case 1, 2, 3, 5, 7:
+			return merge.Unmarshal(encoded, rows)
 		}
 		return nil
 	})
-	if err != nil {
-		return nil, err
-	}
-	rows := &InsertRows{}
-	if err := proto.Unmarshal(selected, rows); err != nil {
-		return nil, err
-	}
-	rows.Columns = columns
-	return rows, nil
 }
 
 // ReplaceUpsertDeleteEffects replaces explicit effects while copying the other
@@ -205,6 +183,11 @@ func ReplaceUpsertDeleteEffects(ctx context.Context, msg MutableUpsertMessageV2,
 	if err != nil {
 		return err
 	}
+	// Reuse this plaintext: replacement invalidates any existing projection.
+	projection, err := decodeInsertOrUpsertProjection(raw, true)
+	if err != nil {
+		return errors.Wrap(ErrMalformedBody, err.Error())
+	}
 	payload := make([]byte, 0, len(raw))
 	if err := upsertWireFields(raw, func(number protowire.Number, _ protowire.Type, encoded, _ []byte) error {
 		if number != 2 {
@@ -214,7 +197,7 @@ func ReplaceUpsertDeleteEffects(ctx context.Context, msg MutableUpsertMessageV2,
 	}); err != nil {
 		return errors.Wrap(ErrMalformedBody, err.Error())
 	}
-	suffix, err := proto.Marshal(&UpsertMessageBody{DeleteEffects: effects})
+	suffix, err := proto.Marshal(&UpsertMessageBody{DeleteEffects: fastpb.CompactDeleteEffects(projection.GetRows().GetPrimaryKeys(), effects)})
 	if err != nil {
 		return err
 	}
@@ -225,7 +208,11 @@ func ReplaceUpsertDeleteEffects(ctx context.Context, msg MutableUpsertMessageV2,
 	header := msg.Header()
 	header.DeleteRows = 0
 	for _, effect := range effects {
-		header.DeleteRows += uint64(UpsertPrimaryKeyCount(effect.GetPrimaryKeys()))
+		keys := effect.GetPrimaryKeys()
+		if effect.GetAllInsertedKeys() != nil {
+			keys = projection.GetRows().GetPrimaryKeys()
+		}
+		header.DeleteRows += uint64(UpsertPrimaryKeyCount(keys))
 	}
 	msg.OverwriteHeader(header)
 	return nil
@@ -323,7 +310,7 @@ func ReadInsertOrUpsertCompactRows(ctx context.Context, msg BasicMessage, fieldI
 	if err != nil {
 		return nil, err
 	}
-	if len(valid) != len(projection.GetRows().GetRowIds()) {
+	if len(valid) != len(projection.GetRows().GetRowIds().GetData()) {
 		return nil, merr.WrapErrServiceInternalMsg("nullable vector validity count differs from logical rows")
 	}
 	projection.mu.Lock()

@@ -327,6 +327,10 @@ func (s *UpsertWALSuite) TestAutocommitReplacementAndRetry() {
 	s.Require().Positive(first.TimeTick)
 	s.assertRows(ctx, c, 11, 1, 1)
 	newWrite := c.upsert(11, 2, "replace")
+	wire := &messagespb.UpsertMessageBody{}
+	s.Require().NoError(proto.Unmarshal(newWrite.Payload(), wire))
+	s.Require().NotNil(wire.Rows.GetDeltaRowIds())
+	s.Require().NotNil(wire.DeleteEffects[0].GetAllInsertedKeys())
 	replacement, err := producer.Append(ctx, newWrite)
 	s.Require().NoError(err)
 	s.Require().Greater(replacement.TimeTick, first.TimeTick)

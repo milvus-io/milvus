@@ -27,7 +27,7 @@ import (
 func Body(insert *msgpb.InsertRequest, deletion *msgpb.DeleteRequest) *messagespb.UpsertMessageBody {
 	body := &messagespb.UpsertMessageBody{Rows: &messagespb.InsertRows{}}
 	if insert != nil {
-		body.Rows.RowIds = insert.RowIDs
+		body.Rows.RowIdsEncoding = &messagespb.InsertRows_RowIds{RowIds: &schemapb.LongArray{Data: insert.RowIDs}}
 		for _, column := range insert.GetFieldsData() {
 			if column.GetFieldId() == 100 {
 				switch data := column.GetScalars().GetData().(type) {
@@ -42,7 +42,7 @@ func Body(insert *msgpb.InsertRequest, deletion *msgpb.DeleteRequest) *messagesp
 		}
 	}
 	if deletion != nil {
-		effect := &messagespb.UpsertDeleteEffect{PrimaryKeys: deletion.PrimaryKeys}
+		effect := &messagespb.UpsertDeleteEffect{KeySource: &messagespb.UpsertDeleteEffect_PrimaryKeys{PrimaryKeys: deletion.PrimaryKeys}}
 		if deletion.PartitionID == -1 {
 			effect.Scope = &messagespb.UpsertDeleteEffect_AllPartitions{AllPartitions: &messagespb.UpsertAllPartitions{}}
 		} else {
@@ -70,7 +70,7 @@ func Insert(body *messagespb.UpsertMessageBody) *msgpb.InsertRequest {
 	if field.Field != nil {
 		fields = append(fields, field)
 	}
-	return &msgpb.InsertRequest{NumRows: uint64(len(body.Rows.RowIds)), RowIDs: body.Rows.RowIds, FieldsData: fields, Version: msgpb.InsertDataVersion_ColumnBased}
+	return &msgpb.InsertRequest{NumRows: uint64(len(body.Rows.GetRowIds().Data)), RowIDs: body.Rows.GetRowIds().Data, FieldsData: fields, Version: msgpb.InsertDataVersion_ColumnBased}
 }
 
 func Delete(body *messagespb.UpsertMessageBody) *msgpb.DeleteRequest {
@@ -83,5 +83,5 @@ func Delete(body *messagespb.UpsertMessageBody) *msgpb.DeleteRequest {
 		partition = effect.GetPartitionId()
 	}
 	count := len(effect.GetPrimaryKeys().GetIntId().GetData()) + len(effect.GetPrimaryKeys().GetStrId().GetData())
-	return &msgpb.DeleteRequest{PrimaryKeys: effect.PrimaryKeys, NumRows: int64(count), PartitionID: partition}
+	return &msgpb.DeleteRequest{PrimaryKeys: effect.GetPrimaryKeys(), NumRows: int64(count), PartitionID: partition}
 }

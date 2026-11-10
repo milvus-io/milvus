@@ -40,7 +40,7 @@ func (s *UpsertWALSuite) TestChunkedInsertOrUpsertHasOneLogicalEffect() {
 			producer := rawProducer(s.T(), ctx, s.Cluster, c.vchannel)
 			_, err := producer.Append(ctx, c.upsert(11, 1))
 			s.Require().NoError(err)
-			const rows = 32768
+			const rows = 65536
 			msg := c.upsert(11, 2, "chunked")
 			typed := message.MustAsMutableUpsertMessageV2(msg)
 			body := typed.MustBody()
@@ -62,8 +62,8 @@ func (s *UpsertWALSuite) TestChunkedInsertOrUpsertHasOneLogicalEffect() {
 					field.GetVectors().GetFloatVector().Data = vectors
 				}
 			}
-			body.Rows.PrimaryKeys.GetIntId().Data, body.Rows.RowIds = keys, rowIDs
-			body.DeleteEffects[0].PrimaryKeys.GetIntId().Data = keys
+			body.Rows.PrimaryKeys.GetIntId().Data, body.Rows.GetRowIds().Data = keys, rowIDs
+			body.DeleteEffects[0].GetPrimaryKeys().GetIntId().Data = keys
 			typed.OverwriteBody(body)
 			header := typed.Header()
 			body.Rows.RequestRowMapping.RowOffsets = offsets

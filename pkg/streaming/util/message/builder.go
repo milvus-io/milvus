@@ -11,6 +11,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/util/fastpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -411,7 +412,7 @@ func (b *mutableMesasgeBuilder[H, B]) build() (*messageImpl, error) {
 	if bodyEncoderSet {
 		payload, err = marshalBodyEncoder(b.bodyEncoder)
 	} else {
-		payload, err = proto.Marshal(b.body)
+		payload, err = proto.Marshal(fastpb.PrepareInsertOrUpsertBody(b.body))
 		if err != nil {
 			err = errors.Wrap(err, "failed to marshal body")
 		}

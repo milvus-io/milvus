@@ -83,7 +83,7 @@ func TestUpsertSummaryPersistsBothEffectsAtOnePosition(t *testing.T) {
 	ids := &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7}}}}
 	raw := message.NewUpsertMessageBuilderV2().WithVChannel("v1").WithIdempotencyKey("replace-7").
 		WithHeader(&message.UpsertMessageHeader{CollectionId: 1, DeleteRows: 1}).
-		WithBody(&message.UpsertMessageBody{Rows: &message.InsertRows{PrimaryKeys: ids, RowIds: []int64{1}, RequestRowMapping: &messagespb.RequestRowMapping{RowOffsets: []uint32{2}}}, DeleteEffects: []*messagespb.UpsertDeleteEffect{{PrimaryKeys: ids, Scope: &messagespb.UpsertDeleteEffect_AllPartitions{AllPartitions: &messagespb.UpsertAllPartitions{}}}}}).MustBuildMutable().WithTimeTick(100).WithLastConfirmed(walimplstest.NewTestMessageID(90)).IntoImmutableMessage(walimplstest.NewTestMessageID(100))
+		WithBody(&message.UpsertMessageBody{Rows: &message.InsertRows{PrimaryKeys: ids, RowIdsEncoding: &message.InsertRows_RowIds{RowIds: &schemapb.LongArray{Data: []int64{1}}}, RequestRowMapping: &messagespb.RequestRowMapping{RowOffsets: []uint32{2}}}, DeleteEffects: []*messagespb.UpsertDeleteEffect{{KeySource: &messagespb.UpsertDeleteEffect_PrimaryKeys{PrimaryKeys: ids}, Scope: &messagespb.UpsertDeleteEffect_AllPartitions{AllPartitions: &messagespb.UpsertAllPartitions{}}}}}).MustBuildMutable().WithTimeTick(100).WithLastConfirmed(walimplstest.NewTestMessageID(90)).IntoImmutableMessage(walimplstest.NewTestMessageID(100))
 	manager.ObserveMessage(ctx, raw)
 	require.Equal(t, uint64(50), manager.LastAcked(), "Summary persistence independently pins the recovery prefix")
 	require.NoError(t, persistSummary(ctx, manager))
@@ -125,7 +125,7 @@ func TestInsertV2SummaryRestoresOriginalResult(t *testing.T) {
 	ids := &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7}}}}
 	original := message.NewInsertMessageBuilderV2().WithVChannel("v1").WithIdempotencyKey("insert-7").
 		WithHeader(&message.InsertMessageHeaderV2{CollectionId: 1}).
-		WithBody(&message.InsertMessageBody{Rows: &message.InsertRows{PrimaryKeys: ids, RowIds: []int64{1}, RequestRowMapping: &messagespb.RequestRowMapping{RowOffsets: []uint32{2}}}}).
+		WithBody(&message.InsertMessageBody{Rows: &message.InsertRows{PrimaryKeys: ids, RowIdsEncoding: &message.InsertRows_RowIds{RowIds: &schemapb.LongArray{Data: []int64{1}}}, RequestRowMapping: &messagespb.RequestRowMapping{RowOffsets: []uint32{2}}}}).
 		MustBuildMutable().WithTimeTick(100).WithLastConfirmed(walimplstest.NewTestMessageID(90)).IntoImmutableMessage(walimplstest.NewTestMessageID(100))
 	manager.ObserveMessage(ctx, original)
 	require.NoError(t, persistSummary(ctx, manager))

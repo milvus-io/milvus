@@ -485,7 +485,7 @@ func (u mutableInsertOrUpsert) MustBody() *msgpb.InsertRequest {
 	}
 	fields := append([]*schemapb.FieldData(nil), rows.GetColumns()...)
 	fields = append(fields, message.UpsertPrimaryKeyColumn(u.primary, rows.GetPrimaryKeys()))
-	return &msgpb.InsertRequest{CollectionID: u.header.GetCollectionId(), NumRows: uint64(len(rows.GetRowIds())), RowIDs: rows.GetRowIds(), FieldsData: fields, Version: msgpb.InsertDataVersion_ColumnBased}
+	return &msgpb.InsertRequest{CollectionID: u.header.GetCollectionId(), NumRows: uint64(len(rows.GetRowIds().GetData())), RowIDs: rows.GetRowIds().GetData(), FieldsData: fields, Version: msgpb.InsertDataVersion_ColumnBased}
 }
 
 func (u mutableInsertOrUpsert) OverwriteBody(insert *msgpb.InsertRequest) {
@@ -509,14 +509,26 @@ func (impl *shardInterceptor) handleInsertOrUpsert(ctx context.Context, msg mess
 		}
 		h := typed.Header()
 		mutable.header = &message.InsertOrUpsertHeader{CollectionId: h.CollectionId, Partitions: h.Partitions, SchemaVersion: h.SchemaVersion}
+		// Reuse this attempt's body for function reads, writeback and sizing.
+		// The value does not escape into a message cache or survive a redo.
+		var content *message.InsertMessageBody
 		mutable.readRows = func(ctx context.Context) (*message.InsertRows, error) {
-			body, err := typed.Body(ctx)
-			return body.GetRows(), err
+			if content == nil {
+				var err error
+				content, err = typed.Body(ctx)
+				if err != nil {
+					return nil, err
+				}
+			}
+			// A reused body must preserve Body(ctx)'s cancellation boundary.
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			return content.GetRows(), nil
 		}
 		mutable.overwriteColumns = func(columns []*schemapb.FieldData) {
-			body := typed.MustBody()
-			body.Rows.Columns = columns
-			typed.OverwriteBody(body)
+			content.Rows.Columns = columns
+			typed.OverwriteBody(content)
 		}
 		mutable.overwriteHeader = func() { typed.OverwriteHeader(h) }
 	case message.MessageTypeUpsert:
@@ -526,14 +538,26 @@ func (impl *shardInterceptor) handleInsertOrUpsert(ctx context.Context, msg mess
 		}
 		h := typed.Header()
 		mutable.header = &message.InsertOrUpsertHeader{CollectionId: h.CollectionId, Partitions: h.Partitions, SchemaVersion: h.SchemaVersion, DeleteRows: h.DeleteRows}
+		// Reuse this attempt's body for function reads, writeback and sizing.
+		// The value does not escape into a message cache or survive a redo.
+		var content *message.UpsertMessageBody
 		mutable.readRows = func(ctx context.Context) (*message.InsertRows, error) {
-			body, err := typed.Body(ctx)
-			return body.GetRows(), err
+			if content == nil {
+				var err error
+				content, err = typed.Body(ctx)
+				if err != nil {
+					return nil, err
+				}
+			}
+			// A reused body must preserve Body(ctx)'s cancellation boundary.
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			return content.GetRows(), nil
 		}
 		mutable.overwriteColumns = func(columns []*schemapb.FieldData) {
-			body := typed.MustBody()
-			body.Rows.Columns = columns
-			typed.OverwriteBody(body)
+			content.Rows.Columns = columns
+			typed.OverwriteBody(content)
 		}
 		mutable.overwriteHeader = func() { typed.OverwriteHeader(h) }
 	default:
@@ -595,7 +619,7 @@ func (impl *shardInterceptor) handleInsertOrUpsert(ctx context.Context, msg mess
 	// copy vectors or materialize partition-sized FieldData objects.
 	primaryColumn := message.UpsertPrimaryKeyColumn(primary, content.GetPrimaryKeys())
 	fields := append(append([]*schemapb.FieldData(nil), content.GetColumns()...), primaryColumn)
-	source := &msgpb.InsertRequest{NumRows: uint64(len(content.GetRowIds())), RowIDs: content.GetRowIds(), Timestamps: make([]uint64, len(content.GetRowIds())), FieldsData: fields, Version: msgpb.InsertDataVersion_ColumnBased}
+	source := &msgpb.InsertRequest{NumRows: uint64(len(content.GetRowIds().GetData())), RowIDs: content.GetRowIds().GetData(), Timestamps: make([]uint64, len(content.GetRowIds().GetData())), FieldsData: fields, Version: msgpb.InsertDataVersion_ColumnBased}
 	sizes, err := fastpb.UpsertPartitionSizes(source, selections)
 	if err != nil {
 		return nil, err

@@ -74,9 +74,9 @@ func (s *UpsertWALSuite) TestProducerCanonicalColumnsSurvivePersistence() {
 		body := typed.MustBody()
 		second := message.MustAsMutableUpsertMessageV2(c.upsert(12, marker)).MustBody()
 		body.Rows.PrimaryKeys.GetIntId().Data = []int64{11, 12}
-		body.Rows.RowIds = append(body.Rows.RowIds, second.Rows.RowIds...)
+		body.Rows.GetRowIds().Data = append(body.Rows.GetRowIds().Data, second.Rows.GetRowIds().Data...)
 
-		body.DeleteEffects[0].PrimaryKeys.GetIntId().Data = []int64{11, 12}
+		body.DeleteEffects[0].GetPrimaryKeys().GetIntId().Data = []int64{11, 12}
 		for _, field := range body.Rows.Columns {
 			switch field.GetFieldName() {
 			case "pk":
@@ -388,7 +388,7 @@ func (s *UpsertWALSuite) TestDuplicateKeysInOneMessageAreAccepted() {
 	typed := message.MustAsMutableUpsertMessageV2(msg)
 	body := typed.MustBody()
 	body.Rows.PrimaryKeys.GetIntId().Data = []int64{11, 11}
-	body.Rows.RowIds = append(body.Rows.RowIds, body.Rows.RowIds[0]+1)
+	body.Rows.GetRowIds().Data = append(body.Rows.GetRowIds().Data, body.Rows.GetRowIds().Data[0]+1)
 	for _, field := range body.Rows.Columns {
 		if field.GetScalars() != nil {
 			field.GetScalars().GetLongData().Data = append(field.GetScalars().GetLongData().Data, field.GetScalars().GetLongData().Data...)
@@ -397,7 +397,7 @@ func (s *UpsertWALSuite) TestDuplicateKeysInOneMessageAreAccepted() {
 		}
 	}
 
-	body.DeleteEffects[0].PrimaryKeys.GetIntId().Data = []int64{11, 11}
+	body.DeleteEffects[0].GetPrimaryKeys().GetIntId().Data = []int64{11, 11}
 	typed.OverwriteBody(body)
 	header := typed.Header()
 	header.Partitions[0].Rows = 2
@@ -552,7 +552,7 @@ func (s *UpsertWALSuite) TestOneMessagePlacesRowsInMultiplePartitions() {
 			body := typed.MustBody()
 			second := message.MustAsMutableUpsertMessageV2(c.upsert(12, 3)).MustBody()
 			body.Rows.PrimaryKeys.GetIntId().Data = append(body.Rows.PrimaryKeys.GetIntId().Data, 12)
-			body.Rows.RowIds = append(body.Rows.RowIds, second.Rows.RowIds...)
+			body.Rows.GetRowIds().Data = append(body.Rows.GetRowIds().Data, second.Rows.GetRowIds().Data...)
 			body.Rows.PartitionIndexes = []uint32{0, 1}
 			body.Rows.RequestRowMapping.RowOffsets = []uint32{0, 1}
 			for i, field := range body.Rows.Columns {

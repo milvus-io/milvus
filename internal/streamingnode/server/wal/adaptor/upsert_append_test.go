@@ -54,7 +54,7 @@ func TestUpsertAppendAcceptsSupportedFormat(t *testing.T) {
 	defer w.Close()
 	build := func() message.MutableMessage {
 		return message.NewUpsertMessageBuilderV2().WithVChannel("upsert-append-channel_1v0").
-			WithHeader(&message.UpsertMessageHeader{CollectionId: 1, SchemaVersion: proto.Int32(0), Partitions: []*message.PartitionSegmentAssignment{{PartitionId: 10, Rows: 1}}}).WithBody(&message.UpsertMessageBody{Rows: &messagespb.InsertRows{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7}}}}, RowIds: []int64{1}}}).MustBuildMutable()
+			WithHeader(&message.UpsertMessageHeader{CollectionId: 1, SchemaVersion: proto.Int32(0), Partitions: []*message.PartitionSegmentAssignment{{PartitionId: 10, Rows: 1}}}).WithBody(&message.UpsertMessageBody{Rows: &messagespb.InsertRows{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7}}}}, RowIdsEncoding: &messagespb.InsertRows_RowIds{RowIds: &schemapb.LongArray{Data: []int64{1}}}}}).MustBuildMutable()
 	}
 	for _, replicated := range []bool{false, true} {
 		msg := build()
@@ -82,7 +82,7 @@ func TestUpsertAppendAsyncDeliversResult(t *testing.T) {
 	w, err := opener.Open(ctx, &wal.OpenOption{Channel: types.PChannelInfo{Name: "upsert-append-async", Term: 1}, DisableFlusher: true})
 	require.NoError(t, err)
 	defer w.Close()
-	msg := message.NewUpsertMessageBuilderV2().WithVChannel("upsert-append-async_1v0").WithHeader(&message.UpsertMessageHeader{CollectionId: 1, SchemaVersion: proto.Int32(0), Partitions: []*message.PartitionSegmentAssignment{{PartitionId: 10, Rows: 1}}}).WithBody(&message.UpsertMessageBody{Rows: &messagespb.InsertRows{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7}}}}, RowIds: []int64{1}}}).MustBuildMutable()
+	msg := message.NewUpsertMessageBuilderV2().WithVChannel("upsert-append-async_1v0").WithHeader(&message.UpsertMessageHeader{CollectionId: 1, SchemaVersion: proto.Int32(0), Partitions: []*message.PartitionSegmentAssignment{{PartitionId: 10, Rows: 1}}}).WithBody(&message.UpsertMessageBody{Rows: &messagespb.InsertRows{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{7}}}}, RowIdsEncoding: &messagespb.InsertRows_RowIds{RowIds: &schemapb.LongArray{Data: []int64{1}}}}}).MustBuildMutable()
 	done := make(chan struct{})
 	w.AppendAsync(ctx, msg, func(result *wal.AppendResult, err error) {
 		defer close(done)

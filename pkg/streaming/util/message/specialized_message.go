@@ -8,7 +8,9 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/util/fastpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -162,7 +164,21 @@ func (m *specializedMutableMessageImpl[H, B]) Header() H {
 
 // Body returns the message body.
 func (m *specializedMutableMessageImpl[H, B]) Body(ctx context.Context) (B, error) {
-	return decodeProtoB[B](ctx, m)
+	body, err := decodeProtoB[B](ctx, m)
+	if err != nil {
+		return body, err
+	}
+	if upsert, ok := any(body).(*UpsertMessageBody); ok {
+		// Mutable bodies are owned by the caller. Editing inserted keys must not
+		// edit independently exposed delete effects. Immutable readers keep sharing.
+		keys := upsert.GetRows().GetPrimaryKeys()
+		for _, effect := range upsert.GetDeleteEffects() {
+			if keys != nil && effect.GetPrimaryKeys() == keys {
+				effect.KeySource = &messagespb.UpsertDeleteEffect_PrimaryKeys{PrimaryKeys: proto.Clone(keys).(*schemapb.IDs)}
+			}
+		}
+	}
+	return body, nil
 }
 
 // MustBody returns the message body.
@@ -186,7 +202,7 @@ func (m *specializedMutableMessageImpl[H, B]) OverwriteHeader(header H) {
 
 // OverwriteBody overwrites the message body.
 func (m *specializedMutableMessageImpl[H, B]) OverwriteBody(body B) {
-	payload, err := proto.Marshal(body)
+	payload, err := proto.Marshal(fastpb.PrepareInsertOrUpsertBody(body))
 	if err != nil {
 		panic(fmt.Sprintf("failed to marshal specialized body, %s", err.Error()))
 	}
@@ -267,7 +283,8 @@ func decodeProtoB[B proto.Message](ctx context.Context, msg interface {
 	return body, err
 }
 
-// decodeProtoBWithSize reports the plaintext length without retaining its buffer.
+// decodeProtoBWithSize estimates retained body bytes without retaining plaintext.
+// Compact RowIDs expand into int64 storage independently of their wire size.
 func decodeProtoBWithSize[B proto.Message](ctx context.Context, msg interface {
 	decodePayload(context.Context) ([]byte, error)
 },
@@ -282,7 +299,14 @@ func decodeProtoBWithSize[B proto.Message](ctx context.Context, msg interface {
 		// Wrap instead of Mark, so that both the standard and the cockroachdb errors.Is find the sentinel.
 		return body, 0, errors.Wrap(ErrMalformedBody, err.Error())
 	}
-	return body, len(payload), nil
+	size := len(payload)
+	switch decoded := any(body).(type) {
+	case *InsertMessageBody:
+		size += 8 * len(decoded.GetRows().GetRowIds().GetData())
+	case *UpsertMessageBody:
+		size += 8 * len(decoded.GetRows().GetRowIds().GetData())
+	}
+	return body, size, nil
 }
 
 func unmarshalProtoB[B proto.Message](data []byte) (B, error) {
@@ -295,6 +319,9 @@ func unmarshalProtoB[B proto.Message](data []byte) (B, error) {
 
 	err := proto.Unmarshal(data, body)
 	if err != nil {
+		return nilBody, err
+	}
+	if err := fastpb.NormalizeInsertOrUpsertBody(body); err != nil {
 		return nilBody, err
 	}
 	return body, nil

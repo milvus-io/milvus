@@ -24,6 +24,9 @@
         "messagespb.CacheExpiration",
         "messagespb.LegacyProxyCollectionMetaCache",
         "messagespb.InsertRows",
+        "messagespb.InsertRows_RowIds",
+        "messagespb.InsertRows_DeltaRowIds",
+        "messagespb.DeltaEncodedRowIDs",
         "messagespb.RequestRowMapping"
     ],
     "messageReflectInfoTable": [

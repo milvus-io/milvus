@@ -33,7 +33,7 @@ import (
 
 func upsertFixture() (*message.UpsertMessageHeader, *message.UpsertMessageBody, *schemapb.FieldSchema) {
 	v := int32(0)
-	return &message.UpsertMessageHeader{CollectionId: 1, SchemaVersion: &v, Partitions: []*message.PartitionSegmentAssignment{{PartitionId: 10, Rows: 2}, {PartitionId: 20, Rows: 1}}}, &message.UpsertMessageBody{Rows: &message.InsertRows{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{4, 5, 4}}}}, RowIds: []int64{1, 2, 3}, PartitionIndexes: []uint32{0, 1, 0}}}, &schemapb.FieldSchema{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
+	return &message.UpsertMessageHeader{CollectionId: 1, SchemaVersion: &v, Partitions: []*message.PartitionSegmentAssignment{{PartitionId: 10, Rows: 2}, {PartitionId: 20, Rows: 1}}}, &message.UpsertMessageBody{Rows: &message.InsertRows{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{4, 5, 4}}}}, RowIdsEncoding: &message.InsertRows_RowIds{RowIds: &schemapb.LongArray{Data: []int64{1, 2, 3}}}, PartitionIndexes: []uint32{0, 1, 0}}}, &schemapb.FieldSchema{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
 }
 
 func TestUpsertContract(t *testing.T) {
@@ -42,7 +42,7 @@ func TestUpsertContract(t *testing.T) {
 	rows, err := message.UpsertSelections(h, b)
 	require.NoError(t, err)
 	require.Equal(t, [][]int64{{0, 2}, {1}}, rows)
-	b.DeleteEffects = []*messagespb.UpsertDeleteEffect{{Scope: &messagespb.UpsertDeleteEffect_PartitionId{PartitionId: 30}, PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{99}}}}}}
+	b.DeleteEffects = []*messagespb.UpsertDeleteEffect{{Scope: &messagespb.UpsertDeleteEffect_PartitionId{PartitionId: 30}, KeySource: &messagespb.UpsertDeleteEffect_PrimaryKeys{PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{99}}}}}}}
 	h.DeleteRows = 1
 	require.NoError(t, message.ValidateUpsert(h, b, pk))
 	h.DeleteRows = 2
@@ -86,7 +86,7 @@ func TestUpsertReplacementInvalidatesProjection(t *testing.T) {
 	before, err := message.ReadInsertOrUpsertProjection(t.Context(), msg)
 	require.NoError(t, err)
 	encoded := msg.IntoMessageProto().Payload
-	effect := &messagespb.UpsertDeleteEffect{Scope: &messagespb.UpsertDeleteEffect_AllPartitions{AllPartitions: &messagespb.UpsertAllPartitions{}}, PrimaryKeys: b.Rows.PrimaryKeys}
+	effect := &messagespb.UpsertDeleteEffect{Scope: &messagespb.UpsertDeleteEffect_AllPartitions{AllPartitions: &messagespb.UpsertAllPartitions{}}, KeySource: &messagespb.UpsertDeleteEffect_PrimaryKeys{PrimaryKeys: b.Rows.PrimaryKeys}}
 	require.NoError(t, message.ReplaceUpsertDeleteEffects(t.Context(), msg, []*messagespb.UpsertDeleteEffect{effect}))
 	after, err := message.ReadInsertOrUpsertProjection(t.Context(), msg)
 	require.NoError(t, err)
@@ -133,7 +133,9 @@ func TestUpsertProjectionConcurrentReadersAndBodyReplacement(t *testing.T) {
 func TestUpsertRejectsIncompleteContract(t *testing.T) {
 	tests := map[string]func(*message.UpsertMessageHeader, *message.UpsertMessageBody){
 		"missing schema": func(h *message.UpsertMessageHeader, _ *message.UpsertMessageBody) { h.SchemaVersion = nil },
-		"missing RowID":  func(_ *message.UpsertMessageHeader, b *message.UpsertMessageBody) { b.Rows.RowIds = b.Rows.RowIds[:1] },
+		"missing RowID": func(_ *message.UpsertMessageHeader, b *message.UpsertMessageBody) {
+			b.Rows.GetRowIds().Data = b.Rows.GetRowIds().Data[:1]
+		},
 		"wrong PK type": func(_ *message.UpsertMessageHeader, b *message.UpsertMessageBody) {
 			b.Rows.PrimaryKeys = &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"a", "b", "c"}}}}
 		},
@@ -157,7 +159,7 @@ func TestUpsertRejectsIncompleteContract(t *testing.T) {
 		},
 		"missing delete scope": func(h *message.UpsertMessageHeader, b *message.UpsertMessageBody) {
 			h.DeleteRows = 3
-			b.DeleteEffects = []*messagespb.UpsertDeleteEffect{{PrimaryKeys: b.Rows.PrimaryKeys}}
+			b.DeleteEffects = []*messagespb.UpsertDeleteEffect{{KeySource: &messagespb.UpsertDeleteEffect_PrimaryKeys{PrimaryKeys: b.Rows.PrimaryKeys}}}
 		},
 	}
 	for name, mutate := range tests {
@@ -199,7 +201,7 @@ func BenchmarkUpsertValidationSelections(b *testing.B) {
 			header.Partitions[0].Rows = count / 2
 			header.Partitions[1].Rows = count / 2
 			body.Rows.PrimaryKeys = &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: make([]int64, count)}}}
-			body.Rows.RowIds = make([]int64, count)
+			body.Rows.GetRowIds().Data = make([]int64, count)
 			body.Rows.PartitionIndexes = make([]uint32, count)
 			for i := range body.Rows.PartitionIndexes {
 				body.Rows.PartitionIndexes[i] = uint32(i % 2)
@@ -221,5 +223,27 @@ func BenchmarkUpsertValidationSelections(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+func TestUpsertSelectionsSinglePartitionAndInvalidCounts(t *testing.T) {
+	header, body, _ := upsertFixture()
+	header.Partitions = header.Partitions[:1]
+	header.Partitions[0].Rows = 3
+	body.Rows.PartitionIndexes = nil
+	selection, err := message.UpsertSelections(header, body)
+	require.NoError(t, err)
+	require.Len(t, selection, 1)
+	require.Nil(t, selection[0])
+	header.Partitions[0].Rows = 2
+	selection, err = message.UpsertSelections(header, body)
+	require.Error(t, err)
+	require.Nil(t, selection)
+	for _, counts := range [][]uint64{{1, 1}, {3, 1}, {2, ^uint64(0)}, {1, 2}} {
+		header, body, _ := upsertFixture()
+		header.Partitions[0].Rows, header.Partitions[1].Rows = counts[0], counts[1]
+		selection, err = message.UpsertSelections(header, body)
+		require.Error(t, err)
+		require.Nil(t, selection)
 	}
 }

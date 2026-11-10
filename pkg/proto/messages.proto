@@ -263,7 +263,7 @@ message UpsertMessageHeader {
     // Producers must supply this field, including an explicit version zero.
     optional int32 schema_version = 3;
 
-    // Sum of primary key counts across every explicit delete effect.
+    // Total delete-key occurrences after resolving every effect's key source.
     // Zero means that the message has no delete effects.
     uint64 delete_rows = 4;
 }
@@ -288,8 +288,15 @@ message InsertRows {
     // Resolved Int64 or VarChar keys in logical row order. AutoID is resolved
     // before encoding; columns must not contain another PK column.
     schema.IDs primary_keys = 1;
-    // One internal RowID per logical row; RowID and user PK have separate roles.
-    repeated int64 row_ids = 2 [packed = true];
+    // Exactly one encoding of internal RowIDs in logical row order.
+    // RowIDs and user primary keys have separate roles. The decoded count must
+    // equal the inserted primary key count; equal RowIDs are not deduplicated.
+    oneof row_ids_encoding {
+        // Explicit values, also used when delta encoding would not be smaller.
+        schema.LongArray row_ids = 2;
+        // Base plus signed differences, without changing logical row order.
+        DeltaEncodedRowIDs delta_row_ids = 5;
+    }
     // Zero-based indexes into the header partition table. Omit for one partition.
     // Multiple partitions require one index per row and matching header counts.
     repeated uint32 partition_indexes = 3 [packed = true];
@@ -299,6 +306,17 @@ message InsertRows {
     // Original request offsets paired with primary_keys. Required for keyed retry
     // results; no duplicate result copy is stored in the header or body.
     RequestRowMapping request_row_mapping = 7;
+}
+
+// A nonempty logical RowID sequence. This is an internal encoding only.
+message DeltaEncodedRowIDs {
+    // First logical RowID; zero is a valid value.
+    int64 base = 1;
+    // Each value is the difference from the preceding RowID. Signed ZigZag
+    // encoding supports small negative differences without changing row order.
+    // Empty deltas represent the single value base. Reconstruction must not
+    // overflow int64. Producers fall back to explicit values when needed.
+    repeated sint64 deltas = 2 [packed = true];
 }
 
 message RequestRowMapping {
@@ -320,11 +338,22 @@ message UpsertDeleteEffect {
         int64 partition_id = 2;
     }
 
-    // Nonempty keys whose older versions must be deleted.
-    // The key type must match the collection's PK schema.
-    // Keys need not equal or be a subset of inserted keys.
-    schema.IDs primary_keys = 3;
+    // Exactly one producer-selected key source, independent of delete scope.
+    // Preserve the selected sequence, including order and duplicate occurrences.
+    oneof key_source {
+        // Independent, nonempty keys matching the collection's PK type.
+        // They need not equal or be a subset of inserted keys.
+        schema.IDs primary_keys = 3;
+        // Explicitly references rows.primary_keys in the enclosing Upsert body.
+        // Select only when the intended delete sequence matches it exactly,
+        // including order and duplicate occurrences. Consumers never infer this
+        // choice merely because the message type is Upsert.
+        UpsertAllInsertedKeys all_inserted_keys = 4;
+    }
 }
+
+// Presence explicitly selects every inserted primary key as a delete key.
+message UpsertAllInsertedKeys {}
 
 // Presence selects all collection partitions within the message's VChannel.
 message UpsertAllPartitions {}
