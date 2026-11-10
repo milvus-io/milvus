@@ -356,12 +356,16 @@ func TestTraceLogRequestFieldRedactsRESTImportCredentials(t *testing.T) {
 			PartitionName:  "p1",
 			Files:          [][]string{{"s3://bucket/snapshot.json"}},
 			Options: map[string]string{
-				"backup":        "true",
-				"source_type":   "snapshot",
-				"external_spec": spec,
-				"EXTERNAL_SPEC": spec,
-				"ezk":           "IMPORT_EZK_SENTINEL",
-				"EzK":           "IMPORT_EZK_MIXED_SENTINEL",
+				"backup":                  "true",
+				"source_type":             "snapshot",
+				"external_spec":           spec,
+				"EXTERNAL_SPEC":           spec,
+				"ezk":                     "IMPORT_EZK_SENTINEL",
+				"storage.endpoint":        "ENDPOINT_SENTINEL",
+				"storage.accessKeyID":     "ACCESS_SENTINEL",
+				"storage.secretAccessKey": "SECRET_SENTINEL",
+				"STORAGE.secretAccessKey": "MIXED_SECRET_SENTINEL",
+				"EzK":                     "IMPORT_EZK_MIXED_SENTINEL",
 			},
 		}
 		before, err := json.Marshal(req)
@@ -373,12 +377,16 @@ func TestTraceLogRequestFieldRedactsRESTImportCredentials(t *testing.T) {
 		require.True(t, ok)
 		want := *req
 		want.Options = map[string]string{
-			"backup":        "true",
-			"source_type":   "snapshot",
-			"external_spec": "<redacted>",
-			"EXTERNAL_SPEC": "<redacted>",
-			"ezk":           "<redacted>",
-			"EzK":           "<redacted>",
+			"backup":                  "true",
+			"source_type":             "snapshot",
+			"external_spec":           "<redacted>",
+			"EXTERNAL_SPEC":           "<redacted>",
+			"ezk":                     "<redacted>",
+			"storage.endpoint":        "<redacted>",
+			"storage.accessKeyID":     "<redacted>",
+			"storage.secretAccessKey": "<redacted>",
+			"STORAGE.secretAccessKey": "<redacted>",
+			"EzK":                     "<redacted>",
 		}
 		assert.Equal(t, &want, redacted)
 		after, err := json.Marshal(req)
@@ -407,10 +415,14 @@ func TestCreateImportJobTraceLogRedactsCredentials(t *testing.T) {
 				require.NoError(t, params.Save(params.CommonCfg.TraceLogMode.Key, mode))
 				logs := captureHTTPServerLogs(t)
 				options := map[string]string{
-					"backup":        "true",
-					"source_type":   "snapshot",
-					"external_spec": `{"extfs":{"access_key_id":"IMPORT_ACCESS_SENTINEL","access_key_value":"IMPORT_SECRET_SENTINEL","future_password":"IMPORT_FUTURE_SENTINEL"}}`,
-					"ezk":           "IMPORT_EZK_SENTINEL",
+					"backup":                  "true",
+					"source_type":             "snapshot",
+					"external_spec":           `{"extfs":{"access_key_id":"IMPORT_ACCESS_SENTINEL","access_key_value":"IMPORT_SECRET_SENTINEL","future_password":"IMPORT_FUTURE_SENTINEL"}}`,
+					"ezk":                     "IMPORT_EZK_SENTINEL",
+					"storage.endpoint":        "ENDPOINT_SENTINEL",
+					"storage.accessKeyID":     "ACCESS_SENTINEL",
+					"storage.secretAccessKey": "SECRET_SENTINEL",
+					"STORAGE.secretAccessKey": "MIXED_SECRET_SENTINEL",
 				}
 				fakeProxy := &importProxy{}
 				called := false
@@ -441,7 +453,7 @@ func TestCreateImportJobTraceLogRedactsCredentials(t *testing.T) {
 				assert.Contains(t, output, "trace info:")
 				assert.Contains(t, output, "import_trace_target")
 				assert.Contains(t, output, "redacted")
-				for _, secret := range []string{"IMPORT_ACCESS_SENTINEL", "IMPORT_SECRET_SENTINEL", "IMPORT_FUTURE_SENTINEL", "IMPORT_EZK_SENTINEL"} {
+				for _, secret := range []string{"IMPORT_ACCESS_SENTINEL", "IMPORT_SECRET_SENTINEL", "IMPORT_FUTURE_SENTINEL", "IMPORT_EZK_SENTINEL", "ENDPOINT_SENTINEL", "ACCESS_SENTINEL", "SECRET_SENTINEL", "MIXED_SECRET_SENTINEL"} {
 					assert.NotContains(t, output, secret)
 				}
 			})

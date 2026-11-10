@@ -27,6 +27,8 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/json"
@@ -845,4 +847,55 @@ func TestImportMetaTaskByJobIndex(t *testing.T) {
 	assert.NoError(t, im.RemoveTask(context.TODO(), 20))
 	assert.Equal(t, []int64(nil), byJob(2))
 	assert.Len(t, im.GetTaskBy(context.TODO()), 1)
+}
+
+func TestImportMetaExternalCredentialsLifecycle(t *testing.T) {
+	for _, terminal := range []internalpb.ImportJobState{internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed} {
+		t.Run(terminal.String(), func(t *testing.T) {
+			ctx := context.Background()
+			assertOptionsEqual := func(want, got []*commonpb.KeyValuePair) {
+				t.Helper()
+				require.Len(t, got, len(want))
+				for i := range want {
+					require.True(t, proto.Equal(want[i], got[i]), "option %d differs", i)
+				}
+			}
+			catalog := mocks.NewDataCoordCatalog(t)
+			catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+			catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+			catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+			catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
+			catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+			catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
+			var saved *datapb.ImportJob
+			catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).RunAndReturn(
+				func(_ context.Context, job *datapb.ImportJob) error {
+					saved = proto.Clone(job).(*datapb.ImportJob)
+					return nil
+				})
+			meta, err := NewImportMeta(ctx, catalog, nil, nil)
+			require.NoError(t, err)
+			options := []*commonpb.KeyValuePair{
+				{Key: importutilv2.StorageEndpoint, Value: "source.example.com"},
+				{Key: importutilv2.StorageBucket, Value: "source-bucket"},
+				{Key: importutilv2.StorageAccessKeyID, Value: "SOURCE_ACCESS_SENTINEL"},
+				{Key: importutilv2.StorageSecretAccessKey, Value: "SOURCE_SECRET_SENTINEL"},
+				{Key: "STORAGE.futurePassword", Value: "FUTURE_SECRET_SENTINEL"},
+				{Key: "timeout", Value: "1h"},
+			}
+			job := &Job{ImportJob: &datapb.ImportJob{JobID: 100, State: internalpb.ImportJobState_Pending, Options: options}}
+			require.NoError(t, meta.AddJob(ctx, job))
+			require.NoError(t, meta.UpdateJob(ctx, 100, UpdateJobState(internalpb.ImportJobState_Importing)))
+			// Active jobs need credentials for recovery. Compare protobuf values,
+			// not the lazy internal message metadata populated by proto.Clone.
+			assertOptionsEqual(options, saved.GetOptions())
+			active := meta.GetJob(ctx, 100)
+			require.NoError(t, meta.UpdateJob(ctx, 100, UpdateJobState(terminal)))
+			assertOptionsEqual([]*commonpb.KeyValuePair{{Key: "timeout", Value: "1h"}}, saved.GetOptions())
+			assertOptionsEqual(saved.GetOptions(), meta.GetJob(ctx, 100).GetOptions())
+			require.NotContains(t, saved.String(), "SENTINEL")
+			// Do not mutate the options still held by an in-flight task.
+			assertOptionsEqual(options, active.GetOptions())
+		})
+	}
 }

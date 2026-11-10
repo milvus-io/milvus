@@ -96,6 +96,20 @@ func ResolveSnapshotImportStorage(ctx context.Context, cm storage.ChunkManager,
 // public metadata URI. Losing the descriptor must fail even on an old ACK path
 // that preserves only the deliberately empty legacy paths.
 func ValidateSnapshotImportFiles(files []*internalpb.ImportFile, options Options) error {
+	// Ordinary external sources also travel through the WAL and catalog. Check
+	// their durable contract before ACK creates a job or a worker opens storage.
+	if HasSourceStorageOptions(options) {
+		if err := ValidateSnapshotSourceOptions(options); err != nil {
+			return err
+		}
+		for _, file := range files {
+			for _, key := range file.GetPaths() {
+				if err := ValidateSourceStorageFilePath(key); err != nil {
+					return err
+				}
+			}
+		}
+	}
 	typed := false
 	for _, file := range files {
 		typed = typed || file.GetSnapshotSource() != nil

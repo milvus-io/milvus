@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
@@ -78,6 +79,35 @@ func TestSnapshotExternalSourceOptions(t *testing.T) {
 	redacted := RedactOptions(append(internal, nil, &commonpb.KeyValuePair{Key: EZK, Value: "key-secret"}))
 	assert.NotContains(t, fmt.Sprint(redacted), "secret")
 	assert.Contains(t, spec.Value, "secret", "redaction must not change live options")
+}
+
+func TestOrdinarySourceStorageOptions(t *testing.T) {
+	options := externalStorageOptions()
+	assert.NoError(t, ValidateSnapshotSourceRequest(options))
+	assert.NoError(t, ValidateSnapshotSourceOptions(options))
+	// The ACK validates the durable contract before creating a runnable job.
+	assert.NoError(t, ValidateSnapshotImportPlan([]*internalpb.ImportFile{{Paths: []string{"folder/data.json"}}}, options, nil))
+	assert.ErrorIs(t, ValidateSnapshotImportPlan([]*internalpb.ImportFile{{Paths: []string{"s3://bucket/data.json"}}}, options, nil), merr.ErrParameterInvalid)
+	assert.ErrorIs(t, ValidateSnapshotImportPlan([]*internalpb.ImportFile{{Paths: []string{"data.json"}}}, options[:3], nil), merr.ErrParameterInvalid)
+	for _, incompatible := range (Options{
+		{Key: BackupFlag, Value: "true"},
+		{Key: L0Import, Value: "true"},
+		{Key: SourceType, Value: SourceTypeSnapshot},
+		{Key: ExternalSpec, Value: `{}`},
+	}) {
+		assert.ErrorContains(t, ValidateSnapshotSourceOptions(append(externalStorageOptions(), incompatible)), "ordinary file imports")
+	}
+	assert.Error(t, ValidateSnapshotSourceRequest(append(options, options[0])))
+	assert.Error(t, ValidateSnapshotSourceOptions(append(options, nil)))
+	redacted := RedactOptions(append(options, &commonpb.KeyValuePair{Key: "timeout", Value: "1h"}))
+	for _, option := range redacted {
+		if option.Key == "timeout" {
+			assert.Equal(t, "1h", option.Value)
+		} else {
+			assert.Equal(t, "<redacted>", option.Value)
+		}
+	}
+	assert.Equal(t, "external-secret-key", options[4].Value)
 }
 
 func TestOption_GetTimeout(t *testing.T) {

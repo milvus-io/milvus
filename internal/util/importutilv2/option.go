@@ -236,6 +236,11 @@ func ValidateSnapshotSourceOptions(options Options) error {
 			counts[option.GetKey()]++
 		}
 	}
+	if source, err := GetSourceStorageConfig(options); err != nil {
+		return err
+	} else if source != nil && (IsBackup(options) || IsL0Import(options) || hasSnapshotContractOption) {
+		return merr.WrapErrParameterInvalidMsg("storage.* options are only supported for ordinary file imports")
+	}
 	if hasSnapshotContractOption {
 		for _, key := range contractKeys {
 			if counts[key] > 1 {
@@ -388,7 +393,8 @@ func RedactOptions(options Options) Options {
 			continue
 		}
 		value := option.GetValue()
-		if strings.EqualFold(option.GetKey(), ExternalSpec) || strings.EqualFold(option.GetKey(), EZK) {
+		if strings.EqualFold(option.GetKey(), ExternalSpec) || strings.EqualFold(option.GetKey(), EZK) ||
+			IsSourceStorageOption(option.GetKey()) {
 			value = "<redacted>"
 		}
 		result = append(result, &commonpb.KeyValuePair{Key: option.GetKey(), Value: value})

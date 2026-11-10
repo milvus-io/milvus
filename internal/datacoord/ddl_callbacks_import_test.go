@@ -550,6 +550,20 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_ReplicatingClusterEnabl
 		{Key: importutilv2.AutoCommitKey, Value: "false"},
 	})
 	s.NoError(err)
+
+	// External sources are unsupported even when ordinary replicated imports
+	// are enabled and the caller opts into manual commit.
+	err = newDDLCallbacks(server).ValidateImportRequest(ctx,
+		[]*msgpb.ImportFile{{Id: 1, Paths: []string{"data.json"}}},
+		[]*commonpb.KeyValuePair{
+			{Key: importutilv2.AutoCommitKey, Value: "false"},
+			{Key: importutilv2.StorageEndpoint, Value: "source.example.com"},
+			{Key: importutilv2.StorageBucket, Value: "source-bucket"},
+			{Key: importutilv2.StorageAccessKeyID, Value: "source-key"},
+			{Key: importutilv2.StorageSecretAccessKey, Value: "source-secret"},
+		})
+	s.ErrorIs(err, merr.ErrOperationNotSupported)
+	s.Contains(err.Error(), "external source storage import")
 }
 
 func (s *ImportCallbacksSuite) TestValidateImportRequest_SuccessWithValidInput() {

@@ -160,6 +160,11 @@ func (c *Callbacks) ValidateImportReplication(ctx context.Context, options []*co
 	if !isReplicatingCluster(assignment.ReplicateConfiguration) {
 		return nil
 	}
+	// External credentials and source lifetime have no supported CDC contract
+	// yet. This is rechecked under the shared-cluster broadcast lock below.
+	if importutilv2.HasSourceStorageOptions(options) {
+		return merr.WrapErrOperationNotSupportedMsg("external source storage import is not supported on a replicating cluster")
+	}
 
 	if !paramtable.Get().DataCoordCfg.ImportInReplicatingCluster.GetAsBool() {
 		return merr.WrapErrOperationNotSupportedMsg("import in replicating cluster is not supported yet")

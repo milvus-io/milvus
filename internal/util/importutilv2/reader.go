@@ -75,6 +75,10 @@ func NewReaderFactory(ctx context.Context, cm storage.ChunkManager, cfg *indexpb
 			if err := ctx.Err(); err != nil {
 				return readerStorage{}, err
 			}
+			if HasSourceStorageOptions(options) {
+				sourceCM, sourceCfg, err := ResolveSourceStorage(ctx, options, cm, cfg)
+				return readerStorage{cm: sourceCM, cfg: sourceCfg}, err
+			}
 			uri, _ := funcutil.GetAttrByKeyFromRepeatedKV(SnapshotSourceURI, options)
 			sourceCM, sourceCfg, err := ResolveSnapshotImportStorage(ctx, cm, cfg, uri, options)
 			if err != nil {
@@ -106,16 +110,23 @@ func (f *ReaderFactory) NewReader(ctx context.Context, schema *schemapb.Collecti
 	if err := ValidateSnapshotSourceOptions(f.options); err != nil {
 		return nil, err
 	}
+	if HasSourceStorageOptions(f.options) {
+		for _, key := range file.GetPaths() {
+			if err := ValidateSourceStorageFilePath(key); err != nil {
+				return nil, err
+			}
+		}
+	}
 	if file.GetSnapshotSource() != nil || HasExternalSource(f.options) {
 		if err := ValidateSnapshotImportFiles([]*internalpb.ImportFile{file}, f.options); err != nil {
 			return nil, err
 		}
 	}
 	resolved := readerStorage{cm: f.cm, cfg: f.cfg}
-	if IsSnapshotSource(f.options) {
+	if IsSnapshotSource(f.options) || HasSourceStorageOptions(f.options) {
 		// Validate the descriptor before accessing storage or the key retriever.
-		// Same-bucket and no-L0 snapshots use this path too. Ordinary import
-		// retains its existing storage and encryption initialization.
+		// Source storage is resolved once for this task attempt. Each reader
+		// still owns its stream; writes retain the task's target storage.
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
