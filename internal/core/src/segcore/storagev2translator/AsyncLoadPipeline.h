@@ -21,6 +21,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -33,21 +34,6 @@
 #include "segcore/memory_planner.h"
 
 namespace milvus::segcore::storagev2translator {
-
-// One contiguous read window shared by sealed loading and growing recovery.
-struct AsyncReadWindow {
-    std::vector<CellSpec> cells;
-    std::vector<size_t> request_indices;
-    std::vector<int64_t> chunk_indices;
-    size_t budget_bytes{0};
-};
-
-// Groups cells by estimated loaded bytes, preserving each original request index.
-// A cell larger than the target occupies its own window; budget_bytes sums the
-// transient estimates, which callers must reserve through finalization.
-[[nodiscard]] std::vector<AsyncReadWindow>
-BuildAsyncReadWindows(const std::vector<CellSpec>& cells,
-                      size_t read_window_bytes);
 
 struct AsyncLoadPipelineOptions {
     // Empty uses the process default. Explicit values must be positive bytes.
@@ -73,6 +59,24 @@ struct AsyncLoadPipelineOptions {
     std::function<folly::Executor::KeepAlive<>()>
         finalization_executor_provider{};
 };
+
+// Invoked concurrently for independent cells. request_index identifies the
+// original request slot; captured state must outlive the task. Arrow buffers
+// must not be retained after this callback returns.
+using CellReadCallback =
+    std::function<void(std::span<std::shared_ptr<arrow::RecordBatch>>,
+                       const CellSpec&,
+                       size_t request_index)>;
+
+// Uses shared admission and concurrent windows, draining all started work on
+// failure. Callbacks run under the window lease; the first failure cancels peers.
+[[nodiscard]] folly::coro::Task<void>
+ReadCellsAsync(const milvus::OpContext* ctx,
+               int64_t segment_id,
+               std::vector<CellSpec> cells,
+               std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader,
+               CellReadCallback consume_cell,
+               AsyncLoadPipelineOptions options = {});
 
 using AsyncCellResult =
     std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<milvus::GroupChunk>>;
