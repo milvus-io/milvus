@@ -712,17 +712,18 @@ func canArithmeticDataType(left, right schemapb.DataType) bool {
 // describeArithOperand renders an operand of an arithmetic/bitwise/modulo
 // expression for error messages. When the operand is backed by a named
 // collection field, it names the field and its actual data type (e.g.
-// "field 'price' is DOUBLE") so the user can tell which field is at fault;
-// otherwise it falls back to describing just the type.
+// "field 'price' is Double", or "field 'tags' is Array[VarChar]" for an
+// array field) so the user can tell which field is at fault; otherwise it
+// falls back to describing just the type.
 func describeArithOperand(dataType, elementType schemapb.DataType, fieldName string) string {
-	actualType := dataType
+	typeDesc := dataType.String()
 	if typeutil.IsArrayType(dataType) {
-		actualType = elementType
+		typeDesc = fmt.Sprintf("%s[%s]", dataType, elementType)
 	}
 	if fieldName != "" {
-		return fmt.Sprintf("field '%s' is %s", fieldName, actualType.String())
+		return fmt.Sprintf("field '%s' is %s", fieldName, typeDesc)
 	}
-	return actualType.String()
+	return typeDesc
 }
 
 func canArithmetic(left, leftElement, right, rightElement schemapb.DataType, leftFieldName, rightFieldName string, reverse bool) error {

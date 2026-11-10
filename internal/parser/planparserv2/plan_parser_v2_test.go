@@ -1802,6 +1802,20 @@ func TestExpr_ArithTypeMismatchErrorDetail(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "field 'DoubleField' is Double")
 	})
+
+	t.Run("modulo on a value-on-left, non-integer right field names the field and its type", func(t *testing.T) {
+		_, err := ParseExpr(helper, `4 % DoubleField == 1`, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "modulo requires an integer field")
+		assert.Contains(t, err.Error(), "field 'DoubleField' is Double")
+	})
+
+	t.Run("bitwise op on a value-on-left, non-integer right field names the field and its type", func(t *testing.T) {
+		_, err := ParseExpr(helper, `(4 & DoubleField) == 0`, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "bitwise operators require an integer field")
+		assert.Contains(t, err.Error(), "field 'DoubleField' is Double")
+	})
 }
 
 // TestExpr_BitwiseArith asserts the generated plan structure for bitwise

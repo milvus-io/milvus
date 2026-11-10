@@ -307,7 +307,7 @@ func fillExpressionValue(
 	case *planpb.Expr_BinaryRangeExpr:
 		return FillBinaryRangeExpressionValue(e.BinaryRangeExpr, templateValues)
 	case *planpb.Expr_BinaryArithOpEvalRangeExpr:
-		return FillBinaryArithOpEvalRangeExpressionValue(e.BinaryArithOpEvalRangeExpr, templateValues)
+		return fillBinaryArithOpEvalRangeExpressionValue(e.BinaryArithOpEvalRangeExpr, templateValues, ctx)
 	case *planpb.Expr_BinaryArithExpr:
 		if err := fillExpressionValue(e.BinaryArithExpr.GetLeft(), templateValues, ctx); err != nil {
 			return err
@@ -514,6 +514,10 @@ func FillBinaryRangeExpressionValue(expr *planpb.BinaryRangeExpr, templateValues
 }
 
 func FillBinaryArithOpEvalRangeExpressionValue(expr *planpb.BinaryArithOpEvalRangeExpr, templateValues map[string]*planpb.GenericValue) error {
+	return fillBinaryArithOpEvalRangeExpressionValue(expr, templateValues, nil)
+}
+
+func fillBinaryArithOpEvalRangeExpressionValue(expr *planpb.BinaryArithOpEvalRangeExpr, templateValues map[string]*planpb.GenericValue, ctx *fillExpressionContext) error {
 	var dataType schemapb.DataType
 	var err error
 	var ok bool
@@ -541,11 +545,15 @@ func FillBinaryArithOpEvalRangeExpressionValue(expr *planpb.BinaryArithOpEvalRan
 			lDataType = expr.GetColumnInfo().GetElementType()
 		}
 
-		// The column's own field name isn't resolvable here (no schema is
-		// threaded into this deferred, template-fill-time path); the parse-time
-		// check in parser_visitor.go already reports the field name for the
-		// common, non-template case.
-		if err = checkValidModArith(expr.GetArithOp(), expr.GetColumnInfo().GetDataType(), expr.GetColumnInfo().GetElementType(), "",
+		// Name the column's own field when a schema was threaded into this
+		// deferred, template-fill-time path, so modulo/bitwise type-mismatch
+		// errors can report it the same way the parse-time check in
+		// parser_visitor.go does for the common, non-template case.
+		fieldName := ""
+		if ctx != nil && ctx.schema != nil {
+			fieldName = ctx.membershipFieldName(expr.GetColumnInfo())
+		}
+		if err = checkValidModArith(expr.GetArithOp(), expr.GetColumnInfo().GetDataType(), expr.GetColumnInfo().GetElementType(), fieldName,
 			rDataType, schemapb.DataType_None, ""); err != nil {
 			return err
 		}
