@@ -20,6 +20,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"testing/synctest"
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
@@ -31,6 +32,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	mix "github.com/milvus-io/milvus/internal/distributed/mixcoord/client"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/types"
@@ -84,6 +86,47 @@ func TestMain(m *testing.M) {
 	paramtable.Init()
 	code := m.Run()
 	os.Exit(code)
+}
+
+func TestInitMixCoordForQueryView(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		server, err := NewServer(t.Context(), nil)
+		require.NoError(t, err)
+		defer server.cancel()
+		require.NotNil(t, server.mixCoord)
+
+		client := mocks.NewMockMixCoordClient(t)
+		client.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
+			Status: merr.Success(),
+			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Initializing},
+		}, nil).Once()
+		client.EXPECT().GetComponentStates(mock.Anything, mock.Anything).Return(&milvuspb.ComponentStates{
+			Status: merr.Success(),
+			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
+		}, nil).Once()
+		client.EXPECT().GetQueryViewLoadInfo(mock.Anything, mock.Anything).Return(&querypb.GetQueryViewLoadInfoResponse{
+			Status: merr.Success(), CollectionID: 1, Version: 2, PartitionIDs: []int64{10},
+		}, nil).Once()
+
+		attempts := 0
+		patch := mockey.Mock(mix.NewClient).To(func(context.Context) (types.MixCoordClient, error) {
+			attempts++
+			if attempts == 1 {
+				return nil, merr.WrapErrServiceUnavailable("mixcoord is starting")
+			}
+			return client, nil
+		}).Build()
+		defer patch.UnPatch()
+
+		server.initMixCoord()
+		provider := &lazyQueryViewLoadMetadataProvider{ctx: server.ctx, mixCoord: server.mixCoord}
+		info, err := provider.GetQueryViewLoadInfo(t.Context(), 1, 2)
+		require.NoError(t, err)
+		require.EqualValues(t, 1, info.CollectionID)
+		require.EqualValues(t, 2, info.Version)
+		require.Equal(t, []int64{10}, info.PartitionIDs)
+		require.Equal(t, 2, attempts)
+	})
 }
 
 func Test_NewServer(t *testing.T) {

@@ -1422,7 +1422,7 @@ class TestMilvusClientTextLOBIndependent(TestMilvusClientV2Base):
     @pytest.mark.tags(CaseLabel.L1)
     def test_text_lob_not_loaded_flush_and_reload(self):
         """
-        target: verify unloaded TEXT insert/flush succeeds without requiring growing-source logs
+        target: verify unloaded TEXT insert/flush persists through the ordinary storage writer
         method: create an unloaded TEXT/BM25 collection, insert and flush, then load/reload and validate payloads/search
         expected: flush succeeds and loaded/reloaded TEXT payloads remain exact
         """

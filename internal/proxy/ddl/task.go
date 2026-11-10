@@ -494,9 +494,6 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 	if err := schemautil.RejectStructSubFieldsTextMatch(t.schema.GetStructArrayFields()); err != nil {
 		return err
 	}
-	if err := validateNativeListArrayGrowingSourceFlush(t.schema, typeutil.GetAllFieldSchemas(t.schema)...); err != nil {
-		return err
-	}
 
 	// Transform struct field names to ensure global uniqueness
 	// This allows different structs to have fields with the same name
@@ -687,9 +684,6 @@ func (t *AddCollectionStructFieldTask) PreExecute(ctx context.Context) error {
 
 	t.structFieldSchema = proto.Clone(t.GetStructArrayFieldSchema()).(*schemapb.StructArrayFieldSchema)
 	if err := validateAddStructFieldRequest(t.oldSchema, t.structFieldSchema); err != nil {
-		return err
-	}
-	if err := validateNativeListArrayGrowingSourceFlush(t.oldSchema, t.structFieldSchema.GetFields()...); err != nil {
 		return err
 	}
 	transformStructArrayFieldSubNames(t.structFieldSchema)
@@ -1020,7 +1014,7 @@ func (t *AlterCollectionSchemaTask) preExecuteAdd(ctx context.Context) error {
 			if err := validateAddStructSubFieldRequest(t.oldSchema, plan); err != nil {
 				return err
 			}
-			return validateNativeListArrayGrowingSourceFlush(t.oldSchema, plan.Field)
+			return nil
 		}
 		if err := validateAddFieldRequest(t.oldSchema, plan.Field); err != nil {
 			return err

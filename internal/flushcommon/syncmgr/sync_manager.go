@@ -120,8 +120,6 @@ func (mgr *syncManager) SyncData(ctx context.Context, task Task, callbacks ...fu
 	switch t := task.(type) {
 	case *SyncTask:
 		t.WithChunkManager(mgr.chunkManager)
-	case *GrowingSourceSyncTask:
-		t.WithChunkManager(mgr.chunkManager)
 	}
 
 	return mgr.safeSubmitTask(ctx, task, callbacks...), nil
@@ -134,8 +132,6 @@ func (mgr *syncManager) SyncDataWithChunkManager(ctx context.Context, task Task,
 
 	switch t := task.(type) {
 	case *SyncTask:
-		t.WithChunkManager(chunkManager)
-	case *GrowingSourceSyncTask:
 		t.WithChunkManager(chunkManager)
 	}
 

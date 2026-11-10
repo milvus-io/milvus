@@ -431,7 +431,6 @@ type commonConfig struct {
 	Stv2SplitByAvgSize                   ParamItem `refreshable:"true"`
 	Stv2SplitAvgSizeThreshold            ParamItem `refreshable:"true"`
 	UseLoonFFI                           ParamItem `refreshable:"true"`
-	EnableGrowingSourceFlush             ParamItem `refreshable:"false"`
 
 	CredentialBrokerAllowedEndpoints    ParamItem `refreshable:"false"`
 	credentialBrokerPolicy              *specutil.BrokerPolicy
@@ -1451,15 +1450,6 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		Export:       true,
 	}
 	p.UseLoonFFI.Init(base.mgr)
-
-	p.EnableGrowingSourceFlush = ParamItem{
-		Key:          "common.storage.enableGrowingSourceFlush",
-		Version:      "3.0.0",
-		DefaultValue: "false",
-		Doc:          "enable flushing growing segment payload from QueryNode growing source through StorageV3 manifest path",
-		Export:       true,
-	}
-	p.EnableGrowingSourceFlush.Init(base.mgr)
 
 	p.Stv2SplitSystemColumn = ParamItem{
 		Key:          "common.storage.stv2.splitSystemColumn.enabled",

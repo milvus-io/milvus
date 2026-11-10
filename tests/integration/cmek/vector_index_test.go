@@ -66,7 +66,6 @@ func (s *VectorIndexV2Suite) SetupSuite() {
 	s.WithOptions(integration.WithoutResetDeploymentWhenTestTearDown())
 	s.WithMilvusConfig("common.storage.useLoonFFI", "false")
 	s.WithMilvusConfig("dataNode.storage.format", "parquet")
-	s.WithMilvusConfig("common.storage.enableGrowingSourceFlush", "false")
 	s.WithMilvusConfig("dataCoord.targetVecIndexVersion", strconv.Itoa(int(vectorIndexVersion)))
 	s.WithMilvusConfig("dataCoord.forceRebuildSegmentIndex", "true")
 	s.WithMilvusConfig("dataCoord.index.storePathVersion", "0")

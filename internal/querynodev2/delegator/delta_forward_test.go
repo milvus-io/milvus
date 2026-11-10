@@ -67,10 +67,6 @@ func (s *StreamingForwardSuite) SetupSuite() {
 }
 
 func (s *StreamingForwardSuite) SetupTest() {
-	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "false")
-	s.T().Cleanup(func() {
-		paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key)
-	})
 
 	s.collectionID = 1000
 	s.partitionIDs = []int64{500, 501}
@@ -157,7 +153,7 @@ func (s *StreamingForwardSuite) SetupTest() {
 	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), s.rootPath)
 	s.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(context.Background())
 
-	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
+	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 	s.Require().NoError(err)
 
 	sd, ok := delegator.(*shardDelegator)
@@ -306,10 +302,6 @@ func (s *GrowingMergeL0Suite) SetupSuite() {
 }
 
 func (s *GrowingMergeL0Suite) SetupTest() {
-	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "false")
-	s.T().Cleanup(func() {
-		paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key)
-	})
 
 	s.collectionID = 1000
 	s.partitionIDs = []int64{500, 501}
@@ -397,7 +389,7 @@ func (s *GrowingMergeL0Suite) SetupTest() {
 	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), s.rootPath)
 	s.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(context.Background())
 
-	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
+	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 	s.Require().NoError(err)
 
 	sd, ok := delegator.(*shardDelegator)

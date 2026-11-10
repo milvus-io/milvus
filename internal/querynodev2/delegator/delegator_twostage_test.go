@@ -131,7 +131,7 @@ func (s *TwoStageSearchSuite) SetupTest() {
 	s.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(context.Background())
 
 	var err error
-	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
+	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 	s.Require().NoError(err)
 	s.delegator = delegator.(*shardDelegator)
 }
