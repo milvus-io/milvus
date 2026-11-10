@@ -61,6 +61,7 @@ type resourceTestFixture struct {
 }
 
 func setupResourceTest(t *testing.T, prepare func(CollectionRuntime) error) *resourceTestFixture {
+	mockey.Mock((*packed.StatsResolver).TextAndJSONIndexStatsWithBasePaths).Return(&packed.StatsResultWithErr{}).Build()
 	mockey.Mock((*resourceTestLoader).AdoptReadState).Return(nil).Build()
 	f := &resourceTestFixture{ready: make(chan int32, 20)}
 	f.manifest.Store(1)
@@ -384,6 +385,7 @@ func TestPrunedResourceSlicesReleaseBackingReferences(t *testing.T) {
 	retired := &preparedSegmentRead{base: first, read: &resourceTestRead{}}
 	live := &preparedSegmentRead{base: second, read: &resourceTestRead{}}
 	r := &segmentResource{
+		manager:  &SegmentResourceManager{},
 		reads:    []*preparedSegmentRead{retired, live},
 		bases:    []*segmentBase{first, second},
 		bindings: []*segmentBinding{{prepared: live}},

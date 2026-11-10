@@ -5,6 +5,7 @@ import (
 	"maps"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -44,7 +45,8 @@ type SegmentResourceManager struct {
 	drain sync.WaitGroup
 
 	// viewsByCollection counts the views of each collection for quota metrics.
-	viewsByCollection map[int64]int
+	viewsByCollection    map[int64]int
+	distributionModifyTs atomic.Int64
 }
 
 type viewResources struct {
@@ -76,12 +78,13 @@ type segmentBinding struct {
 }
 
 type preparedSegmentRead struct {
-	schema   int32
-	load     uint64
-	manifest int64
-	snapshot *querypb.SegmentLoadInfo
-	base     *segmentBase
-	read     segments.ReadState
+	schema       int32
+	load         uint64
+	manifest     int64
+	snapshot     *querypb.SegmentLoadInfo
+	distribution *querypb.SegmentVersionInfo // immutable metadata of this successfully prepared read
+	base         *segmentBase
+	read         segments.ReadState
 }
 
 type segmentBase struct {
@@ -122,7 +125,9 @@ type segmentResource struct {
 }
 
 func NewSegmentResourceManager(ctx context.Context, scheduler nodescheduler.Scheduler, loader PhysicalSegmentLoader, estimator SegmentResourceEstimator, metadata SegmentLoadInfoProvider, buffer TransformLogBuffer, collections QueryViewCollectionRuntimeManager) *SegmentResourceManager {
-	return &SegmentResourceManager{ctx: ctx, scheduler: scheduler, loader: loader, estimator: estimator, metadata: metadata, buffer: buffer, collections: collections, views: make(map[qviews.QueryViewKey]*viewResources), viewsByCollection: make(map[int64]int), resources: make(map[int64]*segmentResource)}
+	m := &SegmentResourceManager{ctx: ctx, scheduler: scheduler, loader: loader, estimator: estimator, metadata: metadata, buffer: buffer, collections: collections, views: make(map[qviews.QueryViewKey]*viewResources), viewsByCollection: make(map[int64]int), resources: make(map[int64]*segmentResource)}
+	m.markDistributionChanged()
+	return m
 }
 
 func (m *SegmentResourceManager) Acquire(req AcquireSegments) {
@@ -404,6 +409,7 @@ func (r *segmentResource) reconcile(schedulerCtx context.Context) error {
 		}
 		m.mu.Lock()
 		b.view.operationRefs--
+		m.markDistributionChanged() // Failed preparation may already have applied historical deletes.
 		if err != nil {
 			// A missing V2 artifact may have appeared since this attempt.
 			b.snapshot = nil
@@ -561,7 +567,7 @@ func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collec
 		if err != nil {
 			return nil, err
 		}
-		segment = &transformStartSegment{TransformSegment: segment, startAfter: info.GetTransformStartAfterTimetick()}
+		segment = &transformStartSegment{TransformSegment: segment, startAfter: info.GetTransformStartAfterTimetick(), onTransform: m.markDistributionChanged}
 		baseCtx, cancel := context.WithCancel(r.ctx) //nolint:gosec // Ownership transfers to the base; resource closure or base retirement cancels it.
 		base = &segmentBase{segment: segment, snapshot: snapshot, ctx: baseCtx, cancel: cancel}
 		m.mu.Lock()
@@ -575,7 +581,7 @@ func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collec
 	if err != nil {
 		return nil, err
 	}
-	return &preparedSegmentRead{schema: b.view.req.Meta.GetSchemaVersion(), load: b.view.req.Meta.GetLoadInfoVersion(), manifest: snapshotManifestVersion(snapshot), base: base, read: read}, nil
+	return &preparedSegmentRead{schema: b.view.req.Meta.GetSchemaVersion(), load: b.view.req.Meta.GetLoadInfoVersion(), manifest: snapshotManifestVersion(snapshot), distribution: preparedReadDistribution(info), base: base, read: read}, nil
 }
 
 func (r *segmentResource) catchup(base *segmentBase) {
@@ -588,6 +594,7 @@ func (r *segmentResource) catchup(base *segmentBase) {
 	m.mu.Lock()
 	base.registration, base.catchupErr = reg, err
 	base.caughtUp, base.catchupRunning = err == nil, false
+	m.markDistributionChanged()
 	r.wakeLocked()
 	m.mu.Unlock()
 	if err == nil {
@@ -595,6 +602,7 @@ func (r *segmentResource) catchup(base *segmentBase) {
 			m.mu.Lock()
 			if base.ctx.Err() == nil {
 				base.catchupErr = err
+				m.markDistributionChanged()
 				r.wakeLocked()
 			}
 			m.mu.Unlock()
@@ -610,6 +618,7 @@ func (r *segmentResource) closeLocked() {
 		return
 	}
 	r.closing = true
+	r.manager.markDistributionChanged()
 	r.stopRetryLocked()
 	r.cancel()
 	go r.close()
@@ -840,6 +849,9 @@ func (r *segmentResource) pruneReadsLocked() []segments.ReadState {
 	}
 	clear(r.reads[len(retained):])
 	r.reads = retained
+	if len(obsolete) > 0 {
+		r.manager.markDistributionChanged()
+	}
 	return obsolete
 }
 
