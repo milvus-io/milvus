@@ -224,7 +224,17 @@ func NewMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	// mode. A segment marked manifest_has_index may contain records published
 	// while the switch was previously on, so it must still be loaded after the
 	// switch is turned off. Unmarked clusters perform no manifest reads.
-	if err := mt.ReloadSegmentIndexesFromManifests(ctx); err != nil {
+	if paramtable.Get().DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool() {
+		source, ok := mt.IndexCatalog.(interface {
+			UseSegmentSummaries(metacache.MetaView) error
+		})
+		if !ok {
+			return nil, merr.Wrap(merr.ErrServiceUnimplemented, "index catalog does not support segment summaries")
+		}
+		if err := source.UseSegmentSummaries(mt.MetaStore); err != nil {
+			return nil, err
+		}
+	} else if err := mt.ReloadSegmentIndexesFromManifests(ctx); err != nil {
 		// Object-store reads have already retried per segment. Re-entering
 		// initMeta's metastore retry would reread every successful manifest.
 		return nil, retry.Unrecoverable(err)
@@ -505,6 +515,9 @@ func (m *Meta) GetAllCollectionNumRows() map[int64]int64 {
 
 // AddSegment records segment info, persisting info into kv store
 func (m *Meta) AddSegment(ctx context.Context, segment *SegmentInfo) error {
+	if paramtable.Get().DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool() && segment.GetLevel() != datapb.SegmentLevel_L0 && segment.GetStorageVersion() != storage.StorageV3 {
+		return merr.Wrap(merr.ErrServiceUnimplemented, "segment index summaries require StorageV3 segments")
+	}
 	mlog.Info(ctx, "meta update: adding segment - Start", mlog.Int64("segmentID", segment.GetID()))
 	m.SegMu.Lock()
 	defer m.SegMu.Unlock()

@@ -183,6 +183,11 @@ func (it *indexBuildTask) SetJobInfo(result *workerpb.IndexTaskInfo) error {
 	if err != nil {
 		return err
 	}
+	if !published && it.indexMeta.UsesSegmentSummaries() && result.GetState() == commonpb.IndexState_Finished && len(result.GetIndexFileKeys()) > 0 {
+		if segment := it.meta.GetSegment(it.meta.Ctx, it.SegmentID); meta.IsSegmentHealthy(segment) && it.indexMeta.IsIndexExist(it.CollectionID, it.IndexID) {
+			return merr.Wrapf(merr.ErrDataIntegrity, "summary mode requires manifest publication for build %d", it.BuildID)
+		}
+	}
 	if !published {
 		if err := it.indexMeta.FinishTask(result); err != nil {
 			return err

@@ -13,7 +13,22 @@ The new mode is selected only when an empty cluster first starts and is persiste
 in the metadata namespace. Subsequent starts must select the same mode. Existing
 clusters cannot enable it, and summary-mode clusters cannot disable it. StorageV3
 and manifest publication are required. Historical migration, rollback, and
-conversion of incompatible snapshots are outside this version.
+conversion of incompatible snapshots are outside this version. Legacy direct
+manifest-version adoption (BatchUpdateManifest and pre-baked backfill results)
+is rejected before publication because it cannot update index inventory or fence
+active builds. Structured backfill remains supported by the commit framework.
+
+Enable at the first startup, with both index migration switches disabled:
+
+```yaml
+dataCoord:
+  index:
+    segmentIndexSummariesEnabled: true
+    writeSegmentIndexToManifest: true
+```
+
+The durable selection is `datacoord-meta/index-metadata-mode`. A restart with a
+different selection fails before recovery or background work starts.
 
 ## Metadata and publication
 
@@ -56,13 +71,24 @@ and artifacts. No new replicated side effect or WAL message is introduced.
 
 1. Persist completed inventory with segment manifest publication, with replacement
    and failure tests. Keep existing readers and startup behavior.
-2. Add immutable new-cluster mode, summary readers and on-demand artifact loading;
-   retire completed in-memory records. Include lifecycle and restart tests.
-3. Complete GC and compatible snapshot/copy integration, then expose the mode.
-   Validate failures, cleanup races and end-to-end build/load/restart.
+2. Add summary readers and on-demand artifact loading; retire completed
+   in-memory records. Keep the new mode inaccessible until lifecycle integration.
+3. Add immutable new-cluster selection, GC and compatible snapshot/copy
+   integration, then expose the mode. Validate failures, cleanup races and restart.
 
 Use the matching Milvus development container for generation, formatting, builds
 and tests. Check catalog failure leaves both pointer and summaries unchanged;
 repeated completion, drop/recreate, empty completion, restart, data replacement,
 snapshot pins, incompatible restore, bounded manifest reads and memory retention.
 Report source-traced paths separately from executed integration evidence.
+
+Executed validation in the matching development container:
+
+- Native C++ build and standard Go protobuf generation passed.
+- Full DataCoord index and metadata package tests passed.
+- Focused summary/publication, GC, copy, restore, catalog and configuration tests
+  passed, including failed catalog publication and the task-retirement GC race.
+- The full paramtable suite is blocked by its existing storage-I/O test using
+  `/var/lib/milvus/data` on the read-only container root; focused mode tests passed.
+
+Live-cluster end-to-end build/load/restart and memory benchmarks have not run.

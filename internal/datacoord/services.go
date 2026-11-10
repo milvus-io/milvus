@@ -2576,6 +2576,10 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 }
 
 func (s *Server) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdateManifestRequest) (*commonpb.Status, error) {
+	if Params.DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool() {
+		return merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "direct manifest version adoption is unsupported in segment index summary mode; use structured backfill")), nil
+	}
+
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}

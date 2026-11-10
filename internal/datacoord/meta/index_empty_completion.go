@@ -62,6 +62,9 @@ func (m *Meta) CompleteEmptyIndex(ctx context.Context, segmentID int64, result *
 			return merr.WrapErrSegmentNotFound(segmentID)
 		}
 		for _, summary := range segment.GetIndexSummaries() {
+			if summary.GetIndexId() == record.IndexID && summary.GetHasArtifact() {
+				return merr.WrapErrServiceInternalMsg("empty completion cannot replace a live index artifact")
+			}
 			if summary.GetIndexId() == record.IndexID && summary.GetBuildId() > record.BuildID {
 				return merr.WrapErrServiceInternalMsg("obsolete empty index completion for build %d", record.BuildID)
 			}

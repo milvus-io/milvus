@@ -6597,6 +6597,7 @@ type dataCoordConfig struct {
 	// Index related configuration
 	IndexMemSizeEstimateMultiplier      ParamItem `refreshable:"true"`
 	IndexStorePathVersion               ParamItem `refreshable:"true"`
+	SegmentIndexSummariesEnabled        ParamItem `refreshable:"false"`
 	WriteSegmentIndexToManifest         ParamItem `refreshable:"false"`
 	SegmentIndexManifestLoadConcurrency ParamItem `refreshable:"false"`
 	ManifestIndexBackfillEnabled        ParamItem `refreshable:"false"`
@@ -7433,6 +7434,12 @@ Layout 1 is additionally gated on no QueryNode still reporting an older release 
 		Export: true,
 	}
 	p.IndexStorePathVersion.Init(base.mgr)
+
+	p.SegmentIndexSummariesEnabled = ParamItem{
+		Key: "dataCoord.index.segmentIndexSummariesEnabled", Version: "3.0.0", DefaultValue: "false",
+		Doc: "Use SegmentInfo summaries and on-demand manifest reads instead of resident completed index records. New empty clusters only; the first startup choice is durable and cannot be changed. Requires StorageV3, manifest index publication and no index migration/rollback. Incompatible snapshot restores are rejected.", Export: true,
+	}
+	p.SegmentIndexSummariesEnabled.Init(base.mgr)
 
 	p.WriteSegmentIndexToManifest = ParamItem{
 		Key:          "dataCoord.index.writeSegmentIndexToManifest",

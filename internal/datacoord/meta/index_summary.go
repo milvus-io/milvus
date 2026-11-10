@@ -19,10 +19,13 @@ package meta
 import (
 	"slices"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // ApplyIndexSummary updates a cloned segment before its catalog publication.
@@ -73,5 +76,19 @@ func SegmentIndexFromSummary(segment *datapb.SegmentInfo, summary *datapb.Segmen
 		CurrentIndexVersion: summary.GetVectorEngineVersion(), CurrentScalarIndexVersion: summary.GetScalarEngineVersion(),
 		IndexType: summary.GetIndexType(), ManifestPublished: true, ArtifactPresent: summary.GetHasArtifact(),
 		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_SEGMENT_ROOTED,
+	}
+}
+
+func UpdateIndexSummaries(segmentID int64, summaries []*datapb.SegmentIndexSummary) UpdateOperator {
+	return func(pack *UpdateSegmentPack) bool {
+		segment := pack.Get(segmentID)
+		if segment == nil {
+			return pack.Fail(merr.WrapErrSegmentNotFound(segmentID))
+		}
+		segment.IndexSummaries = make([]*datapb.SegmentIndexSummary, len(summaries))
+		for i, summary := range summaries {
+			segment.IndexSummaries[i] = proto.Clone(summary).(*datapb.SegmentIndexSummary)
+		}
+		return true
 	}
 }

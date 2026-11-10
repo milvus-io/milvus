@@ -1075,6 +1075,24 @@ func (m *IndexMeta) GetSegmentIndexes(collectionID UniqueID, segID UniqueID) map
 // It only reads the self-synchronized segmentIndexes map and does not acquire
 // fieldIndexLock or consult field-index definitions.
 func (m *IndexMeta) GetAllSegmentIndexes(segID UniqueID) []*model.SegmentIndex {
+	if m.UsesSegmentSummaries() {
+		var records []*model.SegmentIndex
+		activeBuilds := make(map[int64]struct{})
+		if active, ok := m.SegmentIndexes.Get(segID); ok {
+			for _, record := range active.Values() {
+				records = append(records, model.CloneSegmentIndex(record))
+				activeBuilds[record.BuildID] = struct{}{}
+			}
+		}
+		if segment, ok := m.summarySource.GetSegment(segID); ok {
+			for _, summary := range segment.GetIndexSummaries() {
+				if _, exists := activeBuilds[summary.GetBuildId()]; !exists {
+					records = append(records, meta.SegmentIndexFromSummary(segment, summary))
+				}
+			}
+		}
+		return records
+	}
 	if m.SegmentIndexes == nil {
 		return nil
 	}
@@ -1504,6 +1522,16 @@ func (m *IndexMeta) stageSegmentIndexMutation(mut meta.SegmentIndexMutation) (*m
 		return staged, nil
 	}
 
+	var replacedSummary *model.SegmentIndex
+	if m.UsesSegmentSummaries() {
+		if segment, exists := m.summarySource.GetSegment(previous.SegmentID); exists {
+			for _, summary := range segment.GetIndexSummaries() {
+				if summary.GetIndexId() == previous.IndexID && summary.GetBuildId() != previous.BuildID {
+					replacedSummary = meta.SegmentIndexFromSummary(segment, summary)
+				}
+			}
+		}
+	}
 	finished, err := m.buildFinishedSegmentIndex(previous, mut.FinishedTask)
 	if err != nil {
 		return staged, err
@@ -1516,6 +1544,9 @@ func (m *IndexMeta) stageSegmentIndexMutation(mut meta.SegmentIndexMutation) (*m
 	staged.Record = finished
 	staged.Install = func() func() {
 		finished.ManifestPublished = true
+		if replacedSummary != nil {
+			m.taskCounts.replaceTask(replacedSummary, nil)
+		}
 		m.updateSegmentIndex(finished)
 		// recordFinishedTask is observability only, and the stored-size gauge
 		// can wait for a Prometheus scrape, so the whole step is deferred out

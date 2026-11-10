@@ -22,16 +22,19 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestSummaryModeEmptyCompletion(t *testing.T) {
@@ -89,4 +92,63 @@ func TestSummaryModeRecoveryDoesNotCreateBuildRecords(t *testing.T) {
 	require.Empty(t, dm.IndexMeta.GetUnIndexedSegmentIDsForIndexTask(1, []int64{3}).Collect())
 	_, err = mt.ReadCompletedIndexes(ctx, mt.GetSegment(ctx, 3).SegmentInfo)
 	require.ErrorIs(t, err, merr.ErrDataIntegrity)
+}
+
+func TestSummaryModeRestartDoesNotReadCompletedManifests(t *testing.T) {
+	params := paramtable.Get()
+	key := params.DataCoordCfg.SegmentIndexSummariesEnabled.Key
+	previous := params.DataCoordCfg.SegmentIndexSummariesEnabled.GetValue()
+	params.Save(key, "true")
+	t.Cleanup(func() { params.Save(key, previous) })
+	meta.WithSegmentIndexManifestWrites(t, true)
+	manifests := meta.NewFakeManifestStore(t)
+	catalog := datacoord.NewCatalog(meta.NewMetaMemoryKV(), "", "")
+	mt, dm := BootMetaForRestart(t, catalog, meta.RestartCollID)
+	SeedRestartFixture(t, mt, dm.IndexMeta)
+	require.False(t, dm.IndexMeta.HasBuildInfo(meta.RestartBuildID))
+	manifests.FailReadsFrom()
+	before := manifests.ReadCount
+	recovered, recoveredDM := BootMetaForRestart(t, catalog, meta.RestartCollID)
+	require.Equal(t, before, manifests.ReadCount)
+	require.False(t, recoveredDM.IndexMeta.HasBuildInfo(meta.RestartBuildID))
+	require.Zero(t, recoveredDM.IndexMeta.SegmentIndexes.Len())
+	require.Equal(t, []int64{meta.RestartSegID}, recoveredDM.IndexMeta.GetIndexedSegments(meta.RestartCollID, []int64{meta.RestartSegID}, []int64{meta.RestartFieldID}))
+	_, err := recovered.ReadCompletedIndexes(t.Context(), recovered.GetSegment(t.Context(), meta.RestartSegID).SegmentInfo)
+	require.Error(t, err)
+	manifests.ResumeReads()
+	records, err := recovered.ReadCompletedIndexes(t.Context(), recovered.GetSegment(t.Context(), meta.RestartSegID).SegmentInfo)
+	require.NoError(t, err)
+	require.Equal(t, []string{"0", "1"}, records[meta.RestartIndexID].IndexFileKeys)
+	require.False(t, recoveredDM.IndexMeta.HasBuildInfo(meta.RestartBuildID))
+}
+
+func TestSummaryColumnChangeRetractsCompletedAndActiveBuilds(t *testing.T) {
+	mt, dm, err := NewMemoryMetaWithIndex(t)
+	require.NoError(t, err)
+	base := "/tmp/test-index-summary/insert_log/1/2/3"
+	require.NoError(t, mt.AddSegment(t.Context(), meta.NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 3, CollectionID: 1, PartitionID: 2, StorageVersion: storage.StorageV3, State: commonpb.SegmentState_Flushed,
+		ManifestPath: packed.MarshalManifestPath(base, 1), ManifestHasIndex: true,
+		IndexSummaries: []*datapb.SegmentIndexSummary{{IndexId: 10, FieldId: 100, BuildId: 20, IndexVersion: 1, HasArtifact: true}},
+	})))
+	require.NoError(t, dm.IndexMeta.UseSegmentSummaries(mt.MetaStore))
+	// The definition has already been removed; the summary still owns the field identity.
+	require.NoError(t, dm.IndexMeta.AddSegmentIndex(t.Context(), &model.SegmentIndex{CollectionID: 1, PartitionID: 2, SegmentID: 3, IndexID: 10, BuildID: 21, IndexState: commonpb.IndexState_InProgress}))
+	params := paramtable.Get()
+	key := params.DataCoordCfg.SegmentIndexSummariesEnabled.Key
+	previous := params.DataCoordCfg.SegmentIndexSummariesEnabled.GetValue()
+	params.Save(key, "true")
+	t.Cleanup(func() { params.Save(key, previous) })
+	commit := mockey.Mock(packed.CommitManifestUpdatesWithResultAsync).Return(packed.ManifestUpdateResult{
+		ManifestPath: packed.MarshalManifestPath(base, 2), HasIndexes: proto.Bool(false),
+	}, nil).Build()
+	defer commit.UnPatch()
+	require.NoError(t, mt.CommitSegmentManifest(t.Context(), meta.SegmentManifestCommit{SegmentID: 3,
+		Mutation: meta.ManifestMutation{Type: meta.ManifestMutationCommitUpdates, Updates: &packed.ManifestUpdates{
+			ColumnGroups: []packed.ColumnGroupEntry{{Columns: []string{"100"}, Format: "parquet", Files: []packed.ColumnGroupFileEntry{{Path: "data.parquet", StartIndex: 0, EndIndex: 10}}}},
+		}},
+	}))
+	require.Empty(t, mt.GetSegment(t.Context(), 3).GetIndexSummaries())
+	require.False(t, dm.IndexMeta.HasBuildInfo(21))
+	require.False(t, mt.GetSegment(t.Context(), 3).GetManifestHasIndex())
 }

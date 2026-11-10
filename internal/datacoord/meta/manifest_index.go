@@ -218,6 +218,11 @@ func (m *Meta) ReadManifestIndexesWithIO(ctx context.Context, io *packed.Manifes
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	// Per-request readers allocate their native context only after admission.
+	if io == nil {
+		io = packed.NewManifestIOContext(1)
+		defer io.Close()
+	}
 	return packed.GetManifestIndexInfosAsync(ctx, io, manifestPath, config)
 }
 

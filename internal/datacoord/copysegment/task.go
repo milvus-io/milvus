@@ -1269,8 +1269,12 @@ func installCopySegmentResult(ctx context.Context, result *datapb.CopySegmentRes
 	}
 
 	// Sync vector/scalar indexes
-	if err := syncVectorScalarIndexes(ctx, result, task, mt, indexMeta, copyMeta, publishedBuilds); err != nil {
+	summarySegment := &datapb.SegmentInfo{}
+	if err := syncVectorScalarIndexesWithSummary(ctx, result, task, mt, indexMeta, copyMeta, publishedBuilds, summarySegment); err != nil {
 		return err
+	}
+	if indexMeta.UsesSegmentSummaries() {
+		operators = append(operators, meta.UpdateIndexSummaries(result.GetSegmentId(), summarySegment.GetIndexSummaries()))
 	}
 
 	// Sync text indexes
@@ -1289,6 +1293,11 @@ func installCopySegmentResult(ctx context.Context, result *datapb.CopySegmentRes
 	manifestUpdates, err = mt.UpdateSegmentsInfoWithoutNotify(ctx, operators...)
 	if err != nil {
 		return failCopySegmentSync(ctx, task, copyMeta, err)
+	}
+	if indexMeta.UsesSegmentSummaries() {
+		if published := mt.GetSegment(ctx, result.GetSegmentId()); published != nil {
+			indexMeta.AccountCopiedIndexes(published.SegmentInfo)
+		}
 	}
 	// An inspector may have skipped these records while import protection
 	// was set. Wake it again after the durable target becomes eligible.
@@ -1590,6 +1599,13 @@ func cloneOptionalBool(value *bool) *bool {
 func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResult,
 	task CopySegmentTask, mt *meta.Meta, indexMeta *index.IndexMeta, copyMeta CopySegmentMeta, publishedBuilds map[int64]int64,
 ) error {
+	return syncVectorScalarIndexesWithSummary(ctx, result, task, mt, indexMeta, copyMeta, publishedBuilds, nil)
+}
+
+func syncVectorScalarIndexesWithSummary(ctx context.Context, result *datapb.CopySegmentResult,
+	task CopySegmentTask, mt *meta.Meta, indexMeta *index.IndexMeta, copyMeta CopySegmentMeta, publishedBuilds map[int64]int64,
+	summarySegment *datapb.SegmentInfo,
+) error {
 	if len(result.GetIndexInfos()) == 0 {
 		return nil
 	}
@@ -1675,6 +1691,21 @@ func syncVectorScalarIndexes(ctx context.Context, result *datapb.CopySegmentResu
 			IndexStorePathVersion:     indexInfo.GetIndexStorePathVersion(),
 		}
 
+		if indexMeta.UsesSegmentSummaries() {
+			if summarySegment == nil {
+				return merr.WrapErrServiceInternalMsg("copy summary publication is missing its target")
+			}
+			if hasArtifact && !manifestResident {
+				return merr.Wrap(merr.ErrServiceUnimplemented, "copied index is incompatible with segment summary mode")
+			}
+			for _, summary := range summarySegment.GetIndexSummaries() {
+				if summary.GetIndexId() == targetIndexID {
+					return merr.WrapErrServiceInternalMsg("copied indexes contain a duplicate index ID")
+				}
+			}
+			meta.ApplyIndexSummary(summarySegment, segIndex, indexInfo.GetFieldId(), true)
+			continue
+		}
 		var err error
 		if manifestResident {
 			err = indexMeta.AddSegmentIndexFromManifest(ctx, segIndex)

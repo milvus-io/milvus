@@ -874,6 +874,19 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	if s.meta != nil {
 		return nil
 	}
+	summaryMode := Params.DataCoordCfg.SegmentIndexSummariesEnabled.GetAsBool()
+	if summaryMode && (!index.WriteSegmentIndexToManifest() || Params.DataCoordCfg.ManifestIndexBackfillEnabled.GetAsBool()) {
+		return merr.Wrap(merr.ErrServiceUnimplemented, "segment index summaries require manifest publication with backfill and rollback disabled")
+	}
+	if modeCatalog, ok := s.catalog.(interface {
+		EnsureIndexMetadataMode(context.Context, bool, bool) error
+	}); ok {
+		if err := modeCatalog.EnsureIndexMetadataMode(s.ctx, summaryMode, len(s.metaStore.GetCollectionIDs()) != 0); err != nil {
+			return err
+		}
+	} else if summaryMode {
+		return merr.Wrap(merr.ErrServiceUnimplemented, "catalog cannot persist index metadata mode")
+	}
 	// DataView persistence lives on the concrete KV catalog, not on the
 	// DataCoordCatalog interface.
 	catalog, ok := s.catalog.(dataview.Catalog)
