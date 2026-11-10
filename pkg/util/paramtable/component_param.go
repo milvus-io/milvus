@@ -6561,13 +6561,9 @@ type dataCoordConfig struct {
 	DiskSegmentMaxSize             ParamItem `refreshable:"true"`
 	SegmentSealProportion          ParamItem `refreshable:"false"`
 	SegmentSealProportionJitter    ParamItem `refreshable:"true"`
-	SegAssignmentExpiration        ParamItem `refreshable:"false"`
-	AllocLatestExpireAttempt       ParamItem `refreshable:"true"`
 	SegmentMaxLifetime             ParamItem `refreshable:"false"`
 	SegmentMaxIdleTime             ParamItem `refreshable:"false"`
 	SegmentMinSizeFromIdleToSealed ParamItem `refreshable:"false"`
-	SegmentMaxBinlogFileNumber     ParamItem `refreshable:"false"`
-	GrowingSegmentsMemSizeInMB     ParamItem `refreshable:"true"`
 	AutoUpgradeSegmentIndex        ParamItem `refreshable:"true"`
 	ForceRebuildSegmentIndex       ParamItem `refreshable:"true"`
 	TargetVecIndexVersion          ParamItem `refreshable:"true"`
@@ -6896,24 +6892,6 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	}
 	p.SegmentSealProportionJitter.Init(base.mgr)
 
-	p.SegAssignmentExpiration = ParamItem{
-		Key:          "dataCoord.segment.assignmentExpiration",
-		Version:      "2.0.0",
-		DefaultValue: "2000",
-		Doc:          "Expiration time of the segment assignment, unit: ms",
-		Export:       true,
-	}
-	p.SegAssignmentExpiration.Init(base.mgr)
-
-	p.AllocLatestExpireAttempt = ParamItem{
-		Key:          "dataCoord.segment.allocLatestExpireAttempt",
-		Version:      "2.2.0",
-		DefaultValue: "200",
-		Doc:          "The time attempting to alloc latest lastExpire from rootCoord after restart",
-		Export:       true,
-	}
-	p.AllocLatestExpireAttempt.Init(base.mgr)
-
 	p.SegmentMaxLifetime = ParamItem{
 		Key:          "dataCoord.segment.maxLife",
 		Version:      "2.0.0",
@@ -6942,26 +6920,6 @@ The max idle time of segment in seconds, 10*60.`,
 		Export:       true,
 	}
 	p.SegmentMinSizeFromIdleToSealed.Init(base.mgr)
-
-	p.SegmentMaxBinlogFileNumber = ParamItem{
-		Key:          "dataCoord.segment.maxBinlogFileNumber",
-		Version:      "2.2.0",
-		DefaultValue: "32",
-		Doc: `The max number of binlog (which is equal to the binlog file num of primary key) for one segment,
-the segment will be sealed if the number of binlog file reaches to max value.`,
-		Export: true,
-	}
-	p.SegmentMaxBinlogFileNumber.Init(base.mgr)
-
-	p.GrowingSegmentsMemSizeInMB = ParamItem{
-		Key:          "dataCoord.sealPolicy.channel.growingSegmentsMemSize",
-		Version:      "2.4.6",
-		DefaultValue: "4096",
-		Doc: `The size threshold in MB, if the total size of growing segments of each shard
-exceeds this threshold, the largest growing segment will be sealed.`,
-		Export: true,
-	}
-	p.GrowingSegmentsMemSizeInMB.Init(base.mgr)
 
 	p.BlockingL0EntryNum = ParamItem{
 		Key:          "dataCoord.sealPolicy.channel.blockingL0EntryNum",

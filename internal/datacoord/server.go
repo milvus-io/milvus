@@ -730,11 +730,7 @@ func (s *Server) rewatchDataNodes(sessions map[string]*sessionutil.Session) erro
 
 func (s *Server) initSegmentManager() error {
 	if s.segmentManager == nil {
-		manager, err := segment.NewSegmentManager(s.meta, s.allocator)
-		if err != nil {
-			return err
-		}
-		s.segmentManager = manager
+		s.segmentManager = segment.NewSegmentManager(s.meta)
 	}
 	return nil
 }

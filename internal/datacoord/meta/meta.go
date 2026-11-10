@@ -2360,44 +2360,6 @@ func (m *Meta) GetRealSegmentsForChannel(channel string) []*SegmentInfo {
 	return m.Segments.GetRealSegmentsForChannel(channel)
 }
 
-// AddAllocation add allocation in segment
-func (m *Meta) AddAllocation(segmentID UniqueID, allocation *Allocation) error {
-	mlog.Debug(m.Ctx, "meta update: add allocation",
-		mlog.Int64("segmentID", segmentID),
-		mlog.Any("allocation", allocation))
-	m.SegMu.Lock()
-	defer m.SegMu.Unlock()
-	curSegInfo := m.Segments.GetSegment(segmentID)
-	if curSegInfo == nil {
-		// TODO: Error handling.
-		mlog.Error(m.Ctx, "meta update: add allocation failed - segment not found", mlog.Int64("segmentID", segmentID))
-		return merr.WrapErrSegmentNotFound(segmentID, "meta update: add allocation failed")
-	}
-	// As we use global segment lastExpire to guarantee data correctness after restart
-	// there is no need to persist allocation to meta store, only update allocation in-memory meta.
-	m.Segments.AddAllocation(segmentID, allocation)
-	mlog.Info(m.Ctx, "meta update: add allocation - complete", mlog.Int64("segmentID", segmentID))
-	return nil
-}
-
-// SetAllocations set Segment allocations, will overwrite ALL original allocations
-// Note that allocations is not persisted in KV store
-func (m *Meta) SetAllocations(segmentID UniqueID, allocations []*Allocation) {
-	m.SegMu.Lock()
-	defer m.SegMu.Unlock()
-	m.Segments.SetAllocations(segmentID, allocations)
-}
-
-// SetLastExpire set lastExpire time for segment
-// Note that last is not necessary to store in KV meta
-func (m *Meta) SetLastExpire(segmentID UniqueID, lastExpire uint64) {
-	m.SegMu.Lock()
-	defer m.SegMu.Unlock()
-	clonedSegment := m.Segments.GetSegment(segmentID).Clone()
-	clonedSegment.LastExpireTime = lastExpire
-	m.Segments.SetSegment(segmentID, clonedSegment)
-}
-
 // SetLastFlushTime set LastFlushTime for segment with provided `segmentID`
 // Note that lastFlushTime is not persisted in KV store
 func (m *Meta) SetLastFlushTime(segmentID UniqueID, t time.Time) {
