@@ -517,6 +517,10 @@ identity. The Milvus pods accessing storage must have `AZURE_CLIENT_ID`,
 `AZURE_TENANT_ID`, and `AZURE_FEDERATED_TOKEN_FILE` configured for an identity
 with read access to the container. Do not set credential broker fields for
 native workload identity. Use `"format": "iceberg-table"` for an Iceberg table.
+This applies to master, where Iceberg reuses the C++ filesystem. See the
+[Azure workload identity E2E instructions](../../../tests/go_client/README_azure_workload_identity.md)
+for deployment prerequisites and verification; the 3.0 Iceberg backend does not
+support this path.
 
 ### 4.3.1 Paimon
 
