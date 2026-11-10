@@ -44,12 +44,12 @@ type ReduceStream interface {
 }
 
 type orderedUnit struct {
-	result             *internalpb.SearchResults
-	data               *schemapb.SearchResultData
-	queryIndex         int64
-	rowIndex           int64
-	byteSize           int
-	fieldIndexComputer *typeutil.FieldDataIdxComputer
+	result             *internalpb.SearchResults      // Source Chunk retained while the Unit is buffered.
+	data               *schemapb.SearchResultData     // Decoded Search data for the source Chunk.
+	queryIndex         int64                          // Query vector to which the Unit belongs.
+	rowIndex           int64                          // Row position in the source Search data.
+	byteSize           int                            // Encoded reducible-payload size of this Unit.
+	fieldIndexComputer *typeutil.FieldDataIdxComputer // Resolves nullable field positions in the source.
 }
 
 func (u orderedUnit) score() float32 {
@@ -339,31 +339,31 @@ type searchGroup struct {
 
 // OrderedReduceStream merges ANN Search child Chunks by score, with optional group limits.
 type OrderedReduceStream struct {
-	recvMu       sync.Mutex
-	childStreams *reduce.ChildStreams[*internalpb.SearchResults]
-	childBuffers []orderedChildBuffer
+	recvMu       sync.Mutex                                      // Serializes Recv and cleanup after cancellation.
+	childStreams *reduce.ChildStreams[*internalpb.SearchResults] // Receives and closes child streams.
+	childBuffers []orderedChildBuffer                            // Holds each child's current Chunk and Unit cursor.
 
-	nq                 int64
-	topK               int64
-	chunkBytes         int
-	metricType         string
-	currentQuery       int64
-	emittedPerQuery    []int64
-	seenPKs            map[any]struct{}
-	groupByFieldIDs    []int64
-	groupSize          int64
-	groupOffset        int64
-	groups             map[uint64][]*searchGroup
-	groupCount         int64
-	preserveCandidates bool // Forward all vchannel candidates in order for Hybrid Group By fusion.
-	isTopKReduce       bool // OR of the IsTopkReduce flags received from children.
-	isRecallEval       bool // OR of the IsRecallEvaluation flags received from children.
-	metadata           *internalpb.SearchResults
-	metadataEmitted    bool // Metadata has already been attached to an output Chunk.
+	nq                 int64                     // Number of query vectors in the request.
+	topK               int64                     // Requested candidate window, or group count for Search Group By.
+	chunkBytes         int                       // Reducible-payload byte threshold for output Chunks.
+	metricType         string                    // Search metric carried by child and output Chunks.
+	currentQuery       int64                     // Query vector currently being reduced.
+	emittedPerQuery    []int64                   // Number of Units emitted for each query vector.
+	seenPKs            map[any]struct{}          // Per-vchannel Search: deduplicate PKs, including element indexes when present.
+	groupByFieldIDs    []int64                   // Search Group By: field IDs identifying a group.
+	groupSize          int64                     // Search Group By: maximum accepted members per group.
+	groupOffset        int64                     // Search Group By: number of leading groups skipped.
+	groups             map[uint64][]*searchGroup // Search Group By: accepted and skipped groups for the current vector.
+	groupCount         int64                     // Search Group By: number of groups encountered for the current vector.
+	preserveCandidates bool                      // Forward all vchannel candidates in order for Hybrid Group By fusion.
+	isTopKReduce       bool                      // OR of the IsTopkReduce flags received from children.
+	isRecallEval       bool                      // OR of the IsRecallEvaluation flags received from children.
+	metadata           *internalpb.SearchResults // Metadata accumulated from child Chunks.
+	metadataEmitted    bool                      // Metadata has already been attached to an output Chunk.
 
-	closed   bool // Child streams have been closed and buffers released.
-	finished bool // Reduction reached EOF; subsequent Recv calls return EOF.
-	closeErr error
+	closed   bool  // Child streams have been closed and buffers released.
+	finished bool  // Reduction reached EOF; subsequent Recv calls return EOF.
+	closeErr error // Result of closing child streams.
 }
 
 // NewReduceStream creates the ANN Search or Search Group By OrderedReduceStream implementation.

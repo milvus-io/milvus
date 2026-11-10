@@ -42,16 +42,16 @@ type childRecvCompletion[T any] struct {
 // called serially by the owning ReduceStream, except Cancel, which may run
 // concurrently to wake a pending receive wait.
 type ChildStreams[T any] struct {
-	streams     []ChildStream[T]
-	receiving   []bool
-	drained     []bool
-	completions chan childRecvCompletion[T]
-	done        chan struct{}
-	cancelOnce  sync.Once
-	pending     sync.WaitGroup
+	streams     []ChildStream[T]            // Child streams owned by this manager.
+	receiving   []bool                      // Whether each child has a Recv in progress.
+	drained     []bool                      // Whether each child has returned EOF.
+	completions chan childRecvCompletion[T] // Delivers asynchronous Recv results to the owner.
+	done        chan struct{}               // Signals cancellation to waiting receive calls.
+	cancelOnce  sync.Once                   // Ensures the cancellation signal is closed once.
+	pending     sync.WaitGroup              // Tracks in-flight child Recv calls during shutdown.
 
-	closed   bool
-	closeErr error
+	closed   bool  // Whether Close has closed the child streams.
+	closeErr error // Combined result of closing the child streams.
 }
 
 // NewChildStreams creates the shared child receive state for one ReduceStream.

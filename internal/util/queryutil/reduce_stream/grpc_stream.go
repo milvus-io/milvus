@@ -32,13 +32,13 @@ import (
 )
 
 type grpcReduceStream struct {
-	client viewpb.ViewQueryService_QueryOnViewStreamClient
-	cancel context.CancelFunc
+	client viewpb.ViewQueryService_QueryOnViewStreamClient // Request-scoped Query gRPC stream.
+	cancel context.CancelFunc                              // Cancels the RPC and unblocks Recv.
 
-	closeOnce sync.Once
-	closeErr  error
-	closed    atomic.Bool
-	finished  bool
+	closeOnce sync.Once   // Ensures the RPC is closed once.
+	closeErr  error       // Result of closing the client send side.
+	closed    atomic.Bool // Records Close across concurrent Recv and Close calls.
+	finished  bool        // Whether the server has returned EOF.
 }
 
 // NewGRPCReduceStream opens QueryOnViewStream and sends its initial request.
