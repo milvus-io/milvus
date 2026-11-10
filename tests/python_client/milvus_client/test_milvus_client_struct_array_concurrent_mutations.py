@@ -132,6 +132,7 @@ class TestMilvusClientStructArrayConcurrentMutations(MetadataStructArrayTestBase
                     consistency_level="Strong",
                 )
                 assert len(actual) == 40
+                assert {row["id"] for row in actual} == {row["id"] for row in rows}
                 for row in actual:
                     number = row["id"] if pk_type == "int" else int(row["id"].rsplit("_", 1)[1])
                     assert_values_equal(row, revisions[number, row["revision"]], exact_fields=False)
@@ -182,13 +183,18 @@ class TestMilvusClientStructArrayConcurrentMutations(MetadataStructArrayTestBase
         self.reload_collection(client, name)
         barrier = threading.Barrier(5)
         done = threading.Event()
+        mutations = []
+        observations = []
+        lock = threading.Lock()
 
         def writer(worker):
             keys = [make_primary_key(i, pk_type) for i in range(worker * 10, worker * 10 + 10)]
             barrier.wait(timeout=30)
             for revision in range(1, 7):
+                started = time.monotonic_ns()
                 if revision == 3:
                     self.delete(client, name, ids=keys)
+                    ended = time.monotonic_ns()
                     remaining, _ = self.query(
                         client,
                         name,
@@ -209,14 +215,22 @@ class TestMilvusClientStructArrayConcurrentMutations(MetadataStructArrayTestBase
                     )
                 else:
                     self.upsert(client, name, [states[pk][revision] for pk in keys])
+                if revision != 3:
+                    ended = time.monotonic_ns()
+                with lock:
+                    mutations.append(
+                        {"keys": keys, "revision": None if revision == 3 else revision, "start": started, "end": ended}
+                    )
                 log.info(f"STRUCT_CONCURRENT_MIX worker={worker} completed_revision={revision}")
 
         def reader():
             barrier.wait(timeout=30)
             reads = 0
             deadline = time.monotonic() + 120
-            while not done.is_set() or reads < 3:
+            while True:
                 assert time.monotonic() < deadline
+                final_read = done.is_set()
+                started = time.monotonic_ns()
                 rows, _ = self.query(
                     client,
                     name,
@@ -225,12 +239,15 @@ class TestMilvusClientStructArrayConcurrentMutations(MetadataStructArrayTestBase
                     limit=100,
                     consistency_level="Strong",
                 )
+                observations.append({"start": started, "end": time.monotonic_ns(), "rows": rows})
                 keys = [row["id"] for row in rows]
                 assert len(keys) == len(set(keys)) and set(keys).issubset(states)
                 for row in rows:
                     assert row["revision"] in states[row["id"]]
                     assert_values_equal(row, states[row["id"]][row["revision"]], exact_fields=False)
                 reads += 1
+                if final_read and reads >= 3:
+                    break
             return reads
 
         with ThreadPoolExecutor(max_workers=5) as pool:
@@ -242,6 +259,27 @@ class TestMilvusClientStructArrayConcurrentMutations(MetadataStructArrayTestBase
             finally:
                 done.set()
             assert reading.result(timeout=130) >= 3
+        allure.attach(
+            json.dumps({"mutations": mutations, "reads": observations}),
+            name="per-key mutation and read intervals",
+            attachment_type=allure.attachment_type.JSON,
+        )
+        for observation in observations:
+            actual = {row["id"]: row for row in observation["rows"]}
+            for pk, revisions in states.items():
+                history = sorted((m for m in mutations if pk in m["keys"]), key=lambda m: m["start"])
+                completed = [m for m in history if m["end"] < observation["start"]]
+                allowed = {completed[-1]["revision"] if completed else 0}
+                allowed.update(
+                    m["revision"]
+                    for m in history
+                    if m["start"] <= observation["end"] and m["end"] >= observation["start"]
+                )
+                if pk not in actual:
+                    assert None in allowed, ("Missing continuously present key", pk, allowed, observation)
+                else:
+                    assert actual[pk]["revision"] in allowed, (pk, allowed, observation)
+                    assert_values_equal(actual[pk], revisions[actual[pk]["revision"]], exact_fields=False)
         final = {pk: revisions[6] for pk, revisions in states.items()}
         self.assert_metadata_rows(client, name, final, pk_type)
         self.reload_collection(client, name)
@@ -447,6 +485,24 @@ class TestMilvusClientStructArrayConcurrentSchemaUpdates(StructArrayTestBase):
             [make_nullable_row(schema, n, make_nullable_elements(schema.struct_fields[0], n)) for n in range(12)],
         )
         barrier = threading.Barrier(4)
+        started = [threading.Event() for _ in range(3)]
+        finished = threading.Event()
+        intervals = []
+        batches = {
+            worker: [
+                [
+                    make_nullable_row(
+                        schema,
+                        100 + worker * 100 + j,
+                        make_nullable_elements(schema.struct_fields[0], j + worker, revision),
+                        revision=revision,
+                    )
+                    for j in range(8)
+                ]
+                for revision in range(60)
+            ]
+            for worker in range(3)
+        }
         dtype, options = {
             "scalar": (DataType.INT64, {}),
             "nested": (DataType.ARRAY, {"element_type": DataType.INT64, "max_capacity": 4, "element_nullable": True}),
@@ -456,31 +512,40 @@ class TestMilvusClientStructArrayConcurrentSchemaUpdates(StructArrayTestBase):
         def writer(worker):
             barrier.wait(timeout=30)
             rows = []
-            for revision in range(6):
-                batch = [
-                    make_nullable_row(
-                        schema,
-                        100 + worker * 100 + j,
-                        make_nullable_elements(schema.struct_fields[0], j + worker, revision),
-                        revision=revision,
-                    )
-                    for j in range(8)
-                ]
+            for revision, batch in enumerate(batches[worker]):
+                started[worker].set()
+                begin = time.monotonic_ns()
                 result = client.upsert(name, batch, timeout=60)
+                end = time.monotonic_ns()
+                intervals.append({"worker": worker, "revision": revision, "start": begin, "end": end})
                 assert result["upsert_count"] == len(batch)
                 rows = batch
+                if revision >= 5 and finished.is_set():
+                    break
             return rows
 
         def evolve():
             barrier.wait(timeout=30)
-            client.add_collection_field(name, "clips[added]", dtype, nullable=True, timeout=60, **options)
+            assert all(event.wait(timeout=30) for event in started)
+            begin = time.monotonic_ns()
+            try:
+                client.add_collection_field(name, "clips[added]", dtype, nullable=True, timeout=60, **options)
+                return begin, time.monotonic_ns()
+            finally:
+                finished.set()
 
         with ThreadPoolExecutor(max_workers=4) as pool:
             futures = [pool.submit(writer, i) for i in range(3)]
             ddl = pool.submit(evolve)
             for future in futures:
                 model.update({row["id"]: row for row in future.result(timeout=180)})
-            ddl.result(timeout=90)
+            ddl_start, ddl_end = ddl.result(timeout=90)
+        overlaps = [r for r in intervals if r["start"] < ddl_end and ddl_start < r["end"]]
+        evidence = {"ddl_start": ddl_start, "ddl_end": ddl_end, "writes": intervals, "overlaps": overlaps}
+        allure.attach(
+            json.dumps(evidence), name="DDL/write invocation intervals", attachment_type=allure.attachment_type.JSON
+        )
+        assert overlaps, evidence
         for row in model.values():
             for element in row["clips"] or []:
                 element["added"] = None
