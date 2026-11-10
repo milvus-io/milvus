@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/partitionstats"
+	pkcompaction "github.com/milvus-io/milvus/internal/datacoord/pkindex/compaction"
 	pkindexgc "github.com/milvus-io/milvus/internal/datacoord/pkindex/gc"
 	pkindexservice "github.com/milvus-io/milvus/internal/datacoord/pkindex/service"
 	"github.com/milvus-io/milvus/internal/datacoord/segment"
@@ -138,20 +139,21 @@ type Server struct {
 	segmentManager                      segment.Manager
 	allocator                           allocator.Allocator
 	// self host id allocator, to avoid get unique id from rootcoord
-	idAllocator      *globalIDAllocator.GlobalIDAllocator
-	nodeManager      session.NodeManager
-	cluster2         session.Cluster
-	mixCoord         types.MixCoord
-	garbageCollector *gc.GarbageCollector
-	gcOpt            gc.GcOption
-	pkindexService   *pkindexservice.Service
-	pkindexGC        *pkindexgc.GC
-	handler          meta.Handler
-	importMeta       bulkimport.ImportMeta
-	importInspector  bulkimport.ImportInspector
-	importChecker    bulkimport.ImportChecker
-	importCheckerV3  bulkimport.ImportChecker
-	importJobLock    *lock.KeyLock[int64]
+	idAllocator       *globalIDAllocator.GlobalIDAllocator
+	nodeManager       session.NodeManager
+	cluster2          session.Cluster
+	mixCoord          types.MixCoord
+	garbageCollector  *gc.GarbageCollector
+	gcOpt             gc.GcOption
+	pkindexService    *pkindexservice.Service
+	pkindexGC         *pkindexgc.GC
+	handler           meta.Handler
+	importMeta        bulkimport.ImportMeta
+	importInspector   bulkimport.ImportInspector
+	importChecker     bulkimport.ImportChecker
+	importCheckerV3   bulkimport.ImportChecker
+	importJobLock     *lock.KeyLock[int64]
+	pkindexCompaction *pkcompaction.Inspector
 
 	domainMetas
 
@@ -1125,6 +1127,9 @@ func (s *Server) startServerLoop() {
 	if s.pkindexGC != nil {
 		s.pkindexGC.Start(s.serverLoopCtx)
 	}
+	if s.pkindexCompaction != nil {
+		s.pkindexCompaction.Start()
+	}
 
 	s.statsTaskMeta.StartCleanupDeprecatedSortTasks(s.serverLoopCtx, &s.serverLoopWg)
 }
@@ -1462,6 +1467,10 @@ func (s *Server) Stop() error {
 	if s.pkindexGC != nil {
 		s.pkindexGC.Close()
 		mlog.Info(s.ctx, "datacoord primary key index gc stopped")
+	}
+	if s.pkindexCompaction != nil {
+		s.pkindexCompaction.Close()
+		mlog.Info(s.ctx, "datacoord primary key index compaction inspector stopped")
 	}
 	if s.snapshotExportManager != nil {
 		s.snapshotExportManager.Close()

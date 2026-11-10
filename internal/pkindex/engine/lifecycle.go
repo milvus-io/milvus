@@ -52,10 +52,9 @@ func (e *Engine) RotateIncrement(ctx context.Context) (Generation, error) {
 
 // StageFrozen writes a frozen generation out and stages the result.
 //
-// Staging is what makes a retry safe. Pebble numbers files per DB, so two
-// generations produce the same file names, and the generation's own directory
-// is deleted when it retires. The engine therefore hard-links each output into
-// a directory of its own under the table's allocated ID, and records the order
+// Staging is what makes a retry safe. The generation's own directory is
+// deleted when it retires, so the engine merges the generation into tables in
+// a directory of its own, each under its allocated ID, and records their order
 // in a manifest written last. A second call for the same generation finds that
 // manifest and returns exactly the same tables under exactly the same IDs, so
 // an upload that already put some of them in object storage is idempotent. A

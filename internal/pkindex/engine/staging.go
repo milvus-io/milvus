@@ -21,41 +21,50 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/cockroachdb/errors"
-	"github.com/cockroachdb/pebble"
 
 	"github.com/milvus-io/milvus/internal/pkindex"
 	"github.com/milvus-io/milvus/internal/pkindex/sst"
 )
 
-// stage writes a frozen generation out and stages its tables:
+// stagedTableTargetBytes caps the size of one staged table. A larger
+// generation is staged as several tables with disjoint key ranges. It matches
+// the default target size of a compaction output table. It is a var only so
+// that tests can lower it.
+var stagedTableTargetBytes uint64 = 128 << 20
+
+// stage writes a frozen generation out and stages it as merged tables:
 //
-//		increment-7/                       staged-7/
-//		  000005.sst  (auto-flushed)   ══▶  1002.sst   hard links, so no copy and
-//		  memtable ─flush─▶ 000007.sst ══▶  1001.sst   they outlive increment-7/
-//		                                    STAGED     "1001\n1002\n"
+//	increment-7/                         staged-7/
+//	  000005.sst  (auto-flushed)  ─┐
+//	  memtable ─flush─▶ 000007.sst ─┼─merge▶ 1001.sst   newest value per key,
+//	                               ─┘                   tombstones kept
+//	                                       STAGED     "1001\n"
 //
-//	 1. Clear staged-7/: debris of an earlier attempt that never finished.
-//	 2. Flush the memtable, then list every SST of the generation, including
-//	    the ones pebble flushed earlier when a memtable filled up.
-//	 3. Order them newest first by largest sequence number. Their key ranges
-//	    can overlap, so this order decides which value a read sees.
-//	 4. Give each one a new ID and hard-link it as <id>.sst.
-//	 5. Fsync staged-7/ so the links are durable, then write STAGED (temp file,
-//	    fsync, rename, fsync the directory). It records the order, and by
-//	    existing at all it marks the staging complete.
+//	1. Clear staged-7/: debris of an earlier attempt that never finished.
+//	2. Flush the memtable, so that every write of the generation is in an SST.
+//	3. Iterate the generation in key order. The iterator yields the newest
+//	   value of each key; a delete is a tombstone value and is written as is.
+//	4. Write the entries into tables. Each table gets a new ID when its first
+//	   key arrives, and is closed once it reaches stagedTableTargetBytes, so
+//	   the tables are in key order and their key ranges do not overlap. Each
+//	   table file is fsynced before it is renamed to <id>.sst.
+//	5. Fsync staged-7/ so the renames are durable, then write STAGED (temp
+//	   file, fsync, rename, fsync the directory). It records the order, and by
+//	   existing at all it marks the staging complete.
+//
+// An empty generation gives no tables and an empty STAGED.
 //
 // A later call for the same generation finds STAGED and returns the same
 // tables under the same IDs without redoing any step. Without STAGED, the
 // attempt was interrupted; its IDs were never handed out, so step 1 discards
 // it and the whole staging runs again under new IDs.
 func (e *Engine) stage(ctx context.Context, g *generation) ([]sst.ID, error) {
-	// an earlier attempt may have linked some tables before failing; their IDs
-	// were never reported to anyone, so the whole attempt is discarded
+	// an earlier attempt may have written some tables before failing; their
+	// IDs were never reported to anyone, so the whole attempt is discarded
 	if err := os.RemoveAll(g.stagedDir); err != nil {
 		return nil, pkindex.MarkIO(err, "clear staged tables %s", g.stagedDir)
 	}
@@ -68,42 +77,75 @@ func (e *Engine) stage(ctx context.Context, g *generation) ([]sst.ID, error) {
 	if err := g.db.Flush(); err != nil {
 		return nil, sst.MarkPebbleErr(errors.Wrapf(err, "flush generation %s", g.dir))
 	}
-	levels, err := g.db.SSTables()
+	ids, err := e.mergeGeneration(ctx, g)
 	if err != nil {
-		return nil, sst.MarkPebbleErr(errors.Wrapf(err, "list ssts of generation %s", g.dir))
+		return nil, err
 	}
-	var tables []pebble.SSTableInfo
-	for _, level := range levels {
-		tables = append(tables, level...)
-	}
-	// Flushes of one DB are serial and nothing compacts or ingests, so tables
-	// from different flushes have disjoint sequence number ranges, and the
-	// later flush sorts first. One flush can be split by key into several
-	// files whose sequence number ranges overlap, but their key ranges do not,
-	// so their relative order does not matter; the STAGED list fixes whatever
-	// order this sort picked.
-	sort.Slice(tables, func(i, j int) bool { return tables[i].LargestSeqNum > tables[j].LargestSeqNum })
-
-	ids := make([]sst.ID, 0, len(tables))
-	for _, t := range tables {
-		raw, err := e.cfg.AllocID(ctx)
-		if err != nil {
-			return nil, errors.Wrapf(err, "allocate sst id for generation %d", g.gen)
-		}
-		id := sst.ID(raw)
-		src := filepath.Join(g.dir, fmt.Sprintf("%s%s", t.FileNum, sst.Extension))
-		if err := os.Link(src, filepath.Join(g.stagedDir, sst.FileName(id))); err != nil {
-			return nil, pkindex.MarkIO(err, "stage sst %s of generation %d", src, g.gen)
-		}
-		ids = append(ids, id)
-	}
-	// the links must be durable before STAGED marks them complete, or a
+	// the renames must be durable before STAGED marks them complete, or a
 	// crash can keep a list that names tables which are gone
 	if err := syncDir(g.stagedDir); err != nil {
 		return nil, pkindex.MarkIO(err, "sync staged tables %s", g.stagedDir)
 	}
 	if err := writeStagedList(g.stagedDir, ids); err != nil {
 		return nil, err
+	}
+	return ids, nil
+}
+
+// mergeGeneration writes the newest value of every key of g, in key order,
+// into tables under g.stagedDir, and returns their IDs in key order. On error
+// the open table is aborted; tables already closed stay behind until the next
+// attempt clears staged-N/.
+func (e *Engine) mergeGeneration(ctx context.Context, g *generation) (ids []sst.ID, err error) {
+	it, err := g.db.NewIter(nil)
+	if err != nil {
+		return nil, sst.MarkPebbleErr(errors.Wrapf(err, "iterate generation %s", g.dir))
+	}
+	var w *sst.Writer
+	defer func() {
+		if w != nil {
+			w.Abort()
+		}
+		if cerr := it.Close(); cerr != nil && err == nil {
+			ids, err = nil, sst.MarkPebbleErr(errors.Wrapf(cerr, "iterate generation %s", g.dir))
+		}
+	}()
+	for valid := it.First(); valid; valid = it.Next() {
+		value, verr := it.ValueAndErr()
+		if verr != nil {
+			return nil, sst.MarkPebbleErr(errors.Wrapf(verr, "read generation %s", g.dir))
+		}
+		if w == nil {
+			raw, aerr := e.cfg.AllocID(ctx)
+			if aerr != nil {
+				return nil, errors.Wrapf(aerr, "allocate sst id for generation %d", g.gen)
+			}
+			if w, err = sst.NewWriter(g.stagedDir, sst.ID(raw)); err != nil {
+				return nil, err
+			}
+		}
+		if err := w.Add(it.Key(), value); err != nil {
+			return nil, err
+		}
+		if w.EstimatedSize() >= stagedTableTargetBytes {
+			info, cerr := w.Close()
+			w = nil
+			if cerr != nil {
+				return nil, cerr
+			}
+			ids = append(ids, info.ID)
+		}
+	}
+	if ierr := it.Error(); ierr != nil {
+		return nil, sst.MarkPebbleErr(errors.Wrapf(ierr, "iterate generation %s", g.dir))
+	}
+	if w != nil {
+		info, cerr := w.Close()
+		w = nil
+		if cerr != nil {
+			return nil, cerr
+		}
+		ids = append(ids, info.ID)
 	}
 	return ids, nil
 }

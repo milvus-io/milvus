@@ -18,6 +18,7 @@ package gc
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -101,6 +102,11 @@ func refs(ids ...int64) []*pkindexpb.SSTRef {
 	return out
 }
 
+// runRefs returns one compaction output table in a new run.
+func runRefs(id int64) []*pkindexpb.SSTRef {
+	return []*pkindexpb.SSTRef{{Id: id, RunId: 7, MinKey: []byte("a"), MaxKey: []byte("z")}}
+}
+
 func (e *env) upload(t *testing.T, vchannel string, ids ...int64) {
 	for _, id := range ids {
 		require.NoError(t, e.store.Write(context.Background(), sstKey(vchannel, id), []byte("x")))
@@ -166,7 +172,7 @@ func TestSSTSweep(t *testing.T) {
 	e.create(t, "v")
 	e.upload(t, "v", 1, 2, 3, 4, 5)
 	e.flush(t, "v", 10, 2, 1)
-	_, err := e.mgr.CommitCompaction(ctx, 1, "v", manifest.Compaction{Inputs: []int64{2, 1}, Outputs: refs(3)})
+	_, err := e.mgr.CommitCompaction(ctx, 1, "v", manifest.Compaction{Inputs: []int64{2, 1}, Outputs: runRefs(3)})
 	require.NoError(t, err)
 	e.inFlight = func(context.Context, int64, string) ([]int64, error) { return []int64{4}, nil }
 
@@ -254,7 +260,7 @@ func TestGCDoesNotDependOnManagerCache(t *testing.T) {
 	other := manifest.New(e.pointers, e.store, testRoot)
 	flushWith(t, other, "v", 20, 2) // version 3
 	// version 4
-	_, err := other.CommitCompaction(ctx, 1, "v", manifest.Compaction{Inputs: []int64{2, 1}, Outputs: refs(3)})
+	_, err := other.CommitCompaction(ctx, 1, "v", manifest.Compaction{Inputs: []int64{2, 1}, Outputs: runRefs(3)})
 	require.NoError(t, err)
 	flushWith(t, other, "v", 30, 4) // version 5
 	flushWith(t, other, "v", 40, 5) // version 6
@@ -318,7 +324,7 @@ func TestCompactionCommittedBetweenReads(t *testing.T) {
 	e.inFlight = func(context.Context, int64, string) ([]int64, error) {
 		e.store.Now = func() time.Time { return t0 }
 		defer func() { e.store.Now = func() time.Time { return e.now } }()
-		_, err := e.mgr.CommitCompaction(ctx, 1, "v", manifest.Compaction{Inputs: []int64{2, 1}, Outputs: refs(3)})
+		_, err := e.mgr.CommitCompaction(ctx, 1, "v", manifest.Compaction{Inputs: []int64{2, 1}, Outputs: runRefs(3)})
 		require.NoError(t, err)
 		return nil, nil
 	}
@@ -538,8 +544,11 @@ func TestLayoutMismatchSkipsVChannel(t *testing.T) {
 			badBodies, otherBodies := len(e.bodies(t, "bad")), len(e.bodies(t, "other"))
 			e.now = e.now.Add(3 * time.Hour)
 
+			obs := &recordingObserver{}
+			e.gc.SetObserver(obs)
 			// collect "bad" alone, so that "other" stays as it was
 			require.NoError(t, e.gc.runVChannel(ctx, 1, "bad"))
+			assert.Empty(t, obs.versions, "a vchannel that fails the layout check is not reported")
 			assert.Len(t, e.bodies(t, "bad"), badBodies)
 			assert.Len(t, e.bodies(t, "other"), otherBodies)
 			for _, vch := range []string{"bad", "other"} {
@@ -737,4 +746,25 @@ func TestPauseDuringScanSkipsDeletes(t *testing.T) {
 	e.beforeReclaim = nil
 	require.NoError(t, e.gc.RunOnce(ctx))
 	assert.False(t, e.has(sstKey("v", 7)))
+}
+
+type recordingObserver struct {
+	mu       sync.Mutex
+	versions []int64
+}
+
+func (o *recordingObserver) ManifestChanged(_ context.Context, m *pkindexpb.Manifest) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.versions = append(o.versions, m.GetVersion())
+}
+
+func TestGCReportsCurrentManifest(t *testing.T) {
+	e := newEnv(t, testConfig)
+	e.create(t, "v")
+	e.flush(t, "v", 10, 1)
+	obs := &recordingObserver{}
+	e.gc.SetObserver(obs)
+	require.NoError(t, e.gc.RunOnce(context.Background()))
+	require.Equal(t, []int64{2}, obs.versions)
 }
