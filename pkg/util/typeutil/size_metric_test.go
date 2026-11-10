@@ -99,9 +99,11 @@ func TestEstimateMainIndexSizePerRecord(t *testing.T) {
 	t.Run("ArrayOfVector only falls back to zero", func(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
-				{FieldID: 1, Name: "vecarr", DataType: schemapb.DataType_ArrayOfVector,
+				{
+					FieldID: 1, Name: "vecarr", DataType: schemapb.DataType_ArrayOfVector,
 					ElementType: schemapb.DataType_FloatVector,
-					TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
+					TypeParams:  []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}},
+				},
 			},
 		}
 		size, err := EstimateMainIndexSizePerRecord(schema)
