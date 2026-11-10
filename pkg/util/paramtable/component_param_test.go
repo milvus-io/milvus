@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/config"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -136,6 +137,21 @@ func shouldPanic(t *testing.T, name string, f func()) {
 	defer func() { recover() }()
 	f()
 	t.Errorf("%s should have panicked", name)
+}
+
+func TestCommonConfigCollectionLevelMetricsMode(t *testing.T) {
+	const key = "common.metrics.collectionLevelMode"
+
+	defaultBase := NewBaseTable(SkipRemote(true))
+	var defaultConfig commonConfig
+	defaultConfig.init(defaultBase)
+	assert.Equal(t, metrics.CollectionLevelMetricsModeFull, defaultConfig.CollectionLevelMetricsMode.GetValue())
+
+	aggregateBase := NewBaseTable(SkipRemote(true))
+	assert.NoError(t, aggregateBase.Save(key, metrics.CollectionLevelMetricsModeAggregate))
+	var aggregateConfig commonConfig
+	aggregateConfig.init(aggregateBase)
+	assert.Equal(t, metrics.CollectionLevelMetricsModeAggregate, aggregateConfig.CollectionLevelMetricsMode.GetValue())
 }
 
 func TestComponentParam_DataCoordBumpSchemaVersionCompactionParams(t *testing.T) {
