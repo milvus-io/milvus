@@ -914,14 +914,20 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 			`standalone all roles share one process, so QueryNode readers ` +
 			`opened after DataNode's segcore init pick up this pool too and ` +
 			`fan out on it — size it with the co-located search traffic in ` +
-			`mind. ` +
+			`mind. On a DataNode every storage-v3/external reader in the process ` +
+			`uses the pool once it exists, not only index build: compaction, ` +
+			`import and sort reads keep the 32MB window but can fan out on it ` +
+			`when a round holds more chunks than the pool (e.g. small row groups ` +
+			`across several column groups); the effect on those paths has not ` +
+			`been measured. ` +
 			`IMPORTANT: milvus-storage splits a round's chunks into contiguous ` +
 			`blocks and merges them without limit when the chunk count does not ` +
 			`exceed the pool size, so a round whose chunks are contiguous and ` +
-			`fewer than or equal to this value is submitted as a SINGLE task — ` +
-			`exactly what a disabled pool does, so the pool never reads slower ` +
-			`than 0, but it only fans out rounds holding more chunks than this ` +
-			`value — see common.storage.indexBuildReadWindowBytes. Range-level parallelism ` +
+			`fewer than or equal to this value is submitted as a SINGLE task, ` +
+			`exactly as a disabled pool reads it. Only rounds holding more ` +
+			`chunks than this value fan out, which is expected, not measured, ` +
+			`to be no slower than 0 — see ` +
+			`common.storage.indexBuildReadWindowBytes. Range-level parallelism ` +
 			`from arrow's parquet prebuffer (common.arrow.ioThreadPoolCoefficient) ` +
 			`is independent of this pool. ` +
 			`Values > 0 resize the pool in both directions at runtime. Setting ` +
@@ -957,10 +963,18 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 			`common.storage.readerThreadPoolSize: at or below the pool size, ` +
 			`contiguous chunks are merged into one task (e.g. a 1GB window over ` +
 			`64MB row groups is 16 chunks, which a 16-thread pool executes as a ` +
-			`single task). With both settings automatic that holds for row groups ` +
+			`single task). With both settings automatic and the default arrow IO ` +
+			`pool (common.arrow.ioThreadPoolCoefficient=1, ` +
+			`common.arrow.ioThreadPoolMaxCapacity=0) that holds for row groups ` +
 			`under 64MB (2 x 32MB ranges per IO thread, one IO and one reader ` +
-			`thread per core). Memory cost: up to this many bytes buffered per running ` +
-			`build task, on top of the decode window. Max 4GB. ` +
+			`thread per core); a capped IO pool shrinks the window and with it ` +
+			`that row-group bound. Memory cost: up to this many bytes buffered ` +
+			`per CONCURRENT build task, on top of the decode window, so K tasks ` +
+			`running at once may buffer K windows (the IO pool, and so read ` +
+			`concurrency, is shared by all of them). The automatic window grows ` +
+			`with the core count (512MB on 8 cores, 2GB on 32, the 4GB cap from ` +
+			`64) and is not part of DataCoord's task slot estimate; set an ` +
+			`explicit value on memory-tight DataNodes. Max 4GB. ` +
 			`Only affects index build; query-node loads keep the default window. ` +
 			`Batch decode for these reads runs on the segcore LOW-priority pool ` +
 			`(common.threadCoreCoefficient.lowPriority), deliberately not the ` +

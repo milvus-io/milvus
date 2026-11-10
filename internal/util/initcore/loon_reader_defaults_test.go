@@ -20,6 +20,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -95,18 +96,11 @@ func TestResolveIndexBuildReadWindowBytes(t *testing.T) {
 	pt := newIsolatedParams()
 	key := pt.CommonCfg.IndexBuildReadWindowBytes.Key
 	rangeKey := pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key
-	// the arrow IO pool size is resolved from the global table, like the
-	// storage runtime itself
-	global := paramtable.Get()
-	ioKey := global.CommonCfg.ArrowIOThreadPoolCoefficient.Key
-	defer global.Reset(ioKey)
-	// Changing the IO pool keys below fires the loon reader watchers other
-	// tests registered on the global table while the role is DataNode; pin
-	// the pool to 0 so they cannot create the (non-destroyable) reader pool.
-	require.NoError(t, global.Save(global.CommonCfg.StorageReaderThreadPoolSize.Key, "0"))
-	defer global.Reset(global.CommonCfg.StorageReaderThreadPoolSize.Key)
+	// the arrow IO pool size is resolved from the same table as the window
+	ioKey := pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key
+	ioMaxKey := pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key
 
-	ioThreads := arrowIOThreadsForReadWindow()
+	ioThreads := arrowIOThreadsForReadWindow(pt)
 	autoDefaultRange := min(ioThreads*2*arrowDefaultRangeSizeLimitBytes, int64(maxIndexBuildReadWindowBytes))
 	autoConfiguredRange := min(ioThreads*2*(8<<20), int64(maxIndexBuildReadWindowBytes))
 
@@ -153,21 +147,23 @@ func TestResolveIndexBuildReadWindowBytes(t *testing.T) {
 		withRole(t, typeutil.DataNodeRole)
 		require.NoError(t, pt.Reset(key))
 		require.NoError(t, pt.Reset(rangeKey))
-		require.NoError(t, global.Save(ioKey, "0"))
-		defer global.Reset(ioKey)
+		require.NoError(t, pt.Save(ioKey, "0"))
+		defer pt.Reset(ioKey)
 		got, err := ResolveIndexBuildReadWindowBytes(pt)
 		require.NoError(t, err)
 		assert.Equal(t, int64(arrowDefaultIOThreadPoolCapacity)*2*arrowDefaultRangeSizeLimitBytes, got)
 	})
 
-	t.Run("auto follows the configured IO pool size", func(t *testing.T) {
+	t.Run("auto follows a capped IO pool of the passed table", func(t *testing.T) {
 		withRole(t, typeutil.DataNodeRole)
 		require.NoError(t, pt.Reset(key))
 		require.NoError(t, pt.Reset(rangeKey))
-		require.NoError(t, global.Save(ioKey, "1"))
-		require.NoError(t, global.Save(global.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key, "3"))
-		defer global.Reset(ioKey)
-		defer global.Reset(global.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key)
+		// coefficient 3 yields at least 3 threads on any CPU count, so the
+		// cap of 3 decides the result regardless of the host.
+		require.NoError(t, pt.Save(ioKey, "3"))
+		require.NoError(t, pt.Save(ioMaxKey, "3"))
+		defer pt.Reset(ioKey)
+		defer pt.Reset(ioMaxKey)
 		got, err := ResolveIndexBuildReadWindowBytes(pt)
 		require.NoError(t, err)
 		assert.Equal(t, int64(3)*2*arrowDefaultRangeSizeLimitBytes, got)
@@ -198,16 +194,27 @@ func TestLogLoonReaderConfig(t *testing.T) {
 
 func TestInitLoonReaderConfigAutoWindowOnDataNode(t *testing.T) {
 	paramtable.Init()
-	pt := paramtable.Get()
+	// The watchers registered below stay registered after the test; on an
+	// isolated table they cannot fire on later tests' writes to the global one.
+	pt := newIsolatedParams()
+	// Runs after every defer below: the cleanup must not have created the
+	// process-wide reader pool either.
+	t.Cleanup(func() { assert.LessOrEqual(t, EffectiveLoonReaderThreadPoolSize(), int32(1)) })
 	defer pt.Reset(pt.CommonCfg.IndexBuildReadWindowBytes.Key)
 	defer pt.Reset(pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key)
+	defer pt.Reset(pt.CommonCfg.StorageReaderThreadPoolSize.Key)
 
 	// Applying the automatic window on a DataNode must succeed. The pool is
 	// pinned to 0 here: an automatic pool would be created, cannot be
 	// destroyed, and would leak into every later test in this binary.
-	withRole(t, typeutil.DataNodeRole)
+	// The role is restored by a defer registered after the resets, so it
+	// runs before them: each reset fires the watcher registered below, and
+	// resetting the pool to its automatic default while still a DataNode
+	// would create the pool.
+	previousRole := paramtable.GetRole()
+	paramtable.SetRole(typeutil.DataNodeRole)
+	defer paramtable.SetRole(previousRole)
 	require.NoError(t, pt.Save(pt.CommonCfg.StorageReaderThreadPoolSize.Key, "0"))
-	defer pt.Reset(pt.CommonCfg.StorageReaderThreadPoolSize.Key)
 	require.NoError(t, pt.Reset(pt.CommonCfg.IndexBuildReadWindowBytes.Key))
 	require.NoError(t, InitLoonReaderConfig(pt))
 	assert.LessOrEqual(t, EffectiveLoonReaderThreadPoolSize(), int32(1))
@@ -220,6 +227,59 @@ func TestInitLoonReaderConfigAutoWindowOnDataNode(t *testing.T) {
 	})
 	window, err := ResolveIndexBuildReadWindowBytes(pt)
 	require.NoError(t, err)
-	assert.Equal(t, min(arrowIOThreadsForReadWindow()*2*(16<<20), int64(maxIndexBuildReadWindowBytes)), window)
+	assert.Equal(t, min(arrowIOThreadsForReadWindow(pt)*2*(16<<20), int64(maxIndexBuildReadWindowBytes)), window)
 	assert.LessOrEqual(t, EffectiveLoonReaderThreadPoolSize(), int32(1))
+}
+
+// TestLoonReaderAutoWindowWatchersSkipExplicitWindow pins that a change of
+// the arrow read range size or IO pool size only reconfigures the loon reader
+// while the window is automatic: an explicit window does not depend on them.
+func TestLoonReaderAutoWindowWatchersSkipExplicitWindow(t *testing.T) {
+	paramtable.Init()
+	pt := newIsolatedParams()
+	var calls int
+	mockInit := mockey.Mock(InitLoonReaderConfig).To(func(*paramtable.ComponentParam) error {
+		calls++
+		return nil
+	}).Build()
+	defer mockInit.UnPatch()
+
+	require.NoError(t, pt.Save(pt.CommonCfg.IndexBuildReadWindowBytes.Key, "536870912"))
+	RegisterLoonReaderConfigWatchers(pt, "test")
+
+	changes := []struct{ key, value string }{
+		{pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key, "16777216"},
+		{pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key, "2"},
+		{pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key, "4"},
+	}
+	calls = 0
+	for _, c := range changes {
+		require.NoError(t, pt.Save(c.key, c.value))
+	}
+	assert.Equal(t, 0, calls, "an explicit window must not be reconfigured on a range or IO pool size change")
+
+	require.NoError(t, pt.Save(pt.CommonCfg.IndexBuildReadWindowBytes.Key, "-1"))
+	calls = 0
+	for _, c := range changes {
+		require.NoError(t, pt.Reset(c.key))
+	}
+	assert.Equal(t, len(changes), calls, "an automatic window is re-resolved on a range or IO pool size change")
+}
+
+// TestLoonReaderWatcherReportsSurvivingPool covers the warning for a disable
+// request that cannot destroy an existing pool. The pool is faked, since a
+// real one could not be torn down and would leak into later tests.
+func TestLoonReaderWatcherReportsSurvivingPool(t *testing.T) {
+	paramtable.Init()
+	pt := newIsolatedParams()
+	mockInit := mockey.Mock(InitLoonReaderConfig).Return(nil).Build()
+	defer mockInit.UnPatch()
+	mockEffective := mockey.Mock(EffectiveLoonReaderThreadPoolSize).Return(int32(8)).Build()
+	defer mockEffective.UnPatch()
+
+	RegisterLoonReaderConfigWatchers(pt, "test")
+	assert.NotPanics(t, func() {
+		require.NoError(t, pt.Save(pt.CommonCfg.StorageReaderThreadPoolSize.Key, "0"))
+	})
+	assert.Equal(t, 1, mockInit.Times())
 }

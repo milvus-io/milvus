@@ -123,7 +123,13 @@ func UpdateArrowIOThreadPoolCapacity(threads int) {
 // when the coefficient is unset, which signals the C++ side to keep arrow's
 // built-in default (8).
 func ResolveArrowIOThreadPoolCapacity() int {
-	cfg := &paramtable.Get().CommonCfg
+	return resolveArrowIOThreadPoolCapacity(paramtable.Get())
+}
+
+// resolveArrowIOThreadPoolCapacity is ResolveArrowIOThreadPoolCapacity for
+// the given param table.
+func resolveArrowIOThreadPoolCapacity(params *paramtable.ComponentParam) int {
+	cfg := &params.CommonCfg
 	coef := cfg.ArrowIOThreadPoolCoefficient.GetAsFloat()
 	if coef <= 0 {
 		return 0
@@ -274,12 +280,20 @@ func RegisterLoonReaderConfigWatchers(pt *paramtable.ComponentParam, source stri
 		config.NewHandler(pt.CommonCfg.IndexBuildReadWindowBytes.Key, handler))
 	// An automatic (-1) read window is sized from the arrow read range size
 	// and the arrow IO pool size, so re-resolve it when either changes too.
+	// An explicit window does not depend on them, so skip the
+	// reconfiguration then.
+	autoWindowHandler := func(evt *config.Event) {
+		if pt.CommonCfg.IndexBuildReadWindowBytes.GetAsInt64() != loonReaderAuto {
+			return
+		}
+		handler(evt)
+	}
 	for _, key := range []string{
 		pt.CommonCfg.ArrowReaderRangeSizeLimitBytes.Key,
 		pt.CommonCfg.ArrowIOThreadPoolCoefficient.Key,
 		pt.CommonCfg.ArrowIOThreadPoolMaxCapacity.Key,
 	} {
-		pt.Watch(key, config.NewHandler("loon-reader-"+key, handler))
+		pt.Watch(key, config.NewHandler("loon-reader-"+key, autoWindowHandler))
 	}
 }
 

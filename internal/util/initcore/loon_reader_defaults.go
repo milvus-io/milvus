@@ -94,7 +94,7 @@ func ResolveIndexBuildReadWindowBytes(params *paramtable.ComponentParam) (int64,
 		if rangeSize <= 0 {
 			rangeSize = arrowDefaultRangeSizeLimitBytes
 		}
-		return autoIndexBuildReadWindowBytes(arrowIOThreadsForReadWindow(), rangeSize), nil
+		return autoIndexBuildReadWindowBytes(arrowIOThreadsForReadWindow(params), rangeSize), nil
 	}
 	if window < 0 || window > maxIndexBuildReadWindowBytes {
 		return 0, merr.WrapErrParameterInvalidMsg(
@@ -105,10 +105,11 @@ func ResolveIndexBuildReadWindowBytes(params *paramtable.ComponentParam) (int64,
 }
 
 // arrowIOThreadsForReadWindow returns the arrow IO pool size the automatic
-// read window is sized for: the configured capacity, or arrow's built-in
-// default when the coefficient is 0 and the pool keeps arrow's size.
-func arrowIOThreadsForReadWindow() int64 {
-	if threads := ResolveArrowIOThreadPoolCapacity(); threads > 0 {
+// read window is sized for, resolved from params: the configured capacity, or
+// arrow's built-in default when the coefficient is 0 and the pool keeps
+// arrow's size.
+func arrowIOThreadsForReadWindow(params *paramtable.ComponentParam) int64 {
+	if threads := resolveArrowIOThreadPoolCapacity(params); threads > 0 {
 		return int64(threads)
 	}
 	return arrowDefaultIOThreadPoolCapacity
