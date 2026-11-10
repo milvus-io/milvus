@@ -290,16 +290,17 @@ func (ob *TargetObserver) check(ctx context.Context, collectionID int64) {
 }
 
 func (ob *TargetObserver) init(ctx context.Context, collectionID int64) {
-	// pull next target first if not exist
+	// pull next target first if not exist, holding the collection lock as check() does: the
+	// dispatchers are already running, and a check() queued before the observer started updates
+	// the same targets.
+	ob.keylocks.Lock(collectionID)
 	if !ob.targetMgr.IsNextTargetExist(ctx, collectionID) {
 		ob.updateNextTarget(ctx, collectionID)
 	}
+	ob.keylocks.Unlock(collectionID)
 
-	// try to update current target if all segment/channel are ready
-	if ob.shouldUpdateCurrentTarget(ctx, collectionID) {
-		ob.updateCurrentTarget(ctx, collectionID)
-	}
-	// refresh collection loading status upon restart
+	// check() takes the lock itself. It updates the current target if all segments/channels are
+	// ready, and refreshes the collection loading status upon restart.
 	ob.check(ctx, collectionID)
 }
 

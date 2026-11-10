@@ -57,11 +57,14 @@ type distHandler struct {
 	scheduler    task.Scheduler
 	dist         *meta.DistributionManager
 	target       meta.TargetManagerInterface
-	mu           sync.Mutex
+	mu           sync.Mutex // held while a distribution is fetched and handled, by the pull loop and SyncAll
 	stopOnce     sync.Once
 	lastUpdateTs int64
 
 	notifyFunc NotifyDelegatorChanges
+	// triggerTargetCheck asks the target observer to check a collection right away
+	// instead of waiting for its next periodic round. Nil disables the trigger.
+	triggerTargetCheck TriggerUpdateTargetVersion
 }
 
 func (dh *distHandler) start(ctx context.Context) {
@@ -139,6 +142,11 @@ func (dh *distHandler) startDispatchLoop(ctx context.Context) {
 }
 
 func (dh *distHandler) pullDist(ctx context.Context, failures *int) {
+	// Fetch and apply under mu, as SyncAll does, so lastUpdateTs and the response pulled with it
+	// are never handled by two goroutines at once.
+	dh.mu.Lock()
+	defer dh.mu.Unlock()
+
 	tr := timerecord.NewTimeRecorder("")
 	resp, err := dh.getDistribution(ctx)
 	d1 := tr.RecordSpan()
@@ -328,6 +336,24 @@ func (dh *distHandler) updateChannelsDistribution(ctx context.Context, resp *que
 	} else {
 		newLeaderOnNode = dh.dist.ChannelDistManager.Update(resp.GetNodeID(), updates...)
 	}
+	// Trigger after the distribution is stored, since the target observer reads it from there.
+	// An unserviceable delegator whose data is ready for the next target only waits for the target
+	// observer to sync the target to it. Without a next target the readiness check has no segment
+	// to look at and would always pass. No state is kept: a waiting delegator triggers again on its
+	// next report (every pull with full reports, only on a change with delta reports), and the
+	// periodic round of the target observer remains the fallback.
+	if dh.triggerTargetCheck != nil {
+		waitingForTarget := typeutil.NewUniqueSet()
+		for _, ch := range updates {
+			if !ch.IsServiceable() && dh.target.IsNextTargetExist(ctx, ch.CollectionID) &&
+				utils.CheckDelegatorDataReady(dh.nodeManager, dh.target, ch.View, meta.NextTarget) == nil {
+				waitingForTarget.Insert(ch.CollectionID)
+			}
+		}
+		for _, collectionID := range waitingForTarget.Collect() {
+			dh.triggerTargetCheck(collectionID)
+		}
+	}
 	if dh.notifyFunc != nil {
 		collectionIDs := typeutil.NewUniqueSet()
 		for _, ch := range newLeaderOnNode {
@@ -391,10 +417,9 @@ func checkDelegatorServiceable(ctx context.Context, dh *distHandler, view *meta.
 	return true
 }
 
+// getDistribution pulls the distribution of the node. The caller holds mu until the response is
+// handled.
 func (dh *distHandler) getDistribution(ctx context.Context) (*querypb.GetDataDistributionResponse, error) {
-	dh.mu.Lock()
-	defer dh.mu.Unlock()
-
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.DistributionRequestTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 	supportDelta := paramtable.Get().QueryCoordCfg.EnableDataDistributionDelta.GetAsBool()
@@ -434,6 +459,7 @@ func newDistHandler(
 	dist *meta.DistributionManager,
 	targetMgr meta.TargetManagerInterface,
 	notifyFunc NotifyDelegatorChanges,
+	triggerTargetCheck TriggerUpdateTargetVersion,
 ) *distHandler {
 	h := &distHandler{
 		nodeID:      nodeID,
@@ -444,6 +470,8 @@ func newDistHandler(
 		dist:        dist,
 		target:      targetMgr,
 		notifyFunc:  notifyFunc,
+
+		triggerTargetCheck: triggerTargetCheck,
 	}
 	h.wg.Add(1)
 	go h.start(ctx)
