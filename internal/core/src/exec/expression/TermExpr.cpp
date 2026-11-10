@@ -238,7 +238,7 @@ PhyTermFilterExpr::InitPkCacheOffset() {
     }
 
     cached_bits_.resize(active_count_, false);
-    segment_->search_ids(cached_bits_, *id_array);
+    segment_->search_ids(cached_bits_, *id_array, op_ctx_);
     cached_bits_inited_ = true;
 }
 
@@ -267,7 +267,7 @@ PhyTermFilterExpr::ExecVisitorImplTemplateJson(EvalCtx& context) {
     } else {
         if (exec_path_ == ExprExecPath::ScalarIndex && !has_offset_input_) {
             if constexpr (std::is_same_v<ValueType, int64_t>) {
-                if (PinnedJsonIndexIsFlat()) {
+                if (SelectedJsonIndexIsFlat()) {
                     return ExecVisitorImplForIndex<int64_t>();
                 }
                 return ExecVisitorImplForIndex<double>();
@@ -1279,11 +1279,9 @@ PhyTermFilterExpr::DetermineExecPath() {
         return;
     }
 
-    // JsonStats
-    if (CanUseJsonStatsAtInit()) {
-        exec_path_ = ExprExecPath::JsonStats;
-        return;
-    }
+    // JsonStats is the fallback applied by EnsureExecPathDetermined() when no
+    // index below serves this expression; see SegmentExpr::
+    // FallbackToJsonStatsIfEligible().
 
     auto data_type = expr_->column_.data_type_;
     if (expr_->column_.element_level_) {
@@ -1306,7 +1304,7 @@ PhyTermFilterExpr::DetermineExecPath() {
                 return !IsInt64SafeForJsonDoubleIndex(val.int64_val());
             });
     }
-    SelectAndPinIndex(req);
+    SelectAndCreateIndexReader(req);
 }
 
 void

@@ -68,6 +68,11 @@ class InterceptedSpatialCandidates final : public index::IIndexReaderBase,
         : reader_(std::move(reader)), hook_(std::move(hook)) {
     }
 
+    void
+    Prefetch() const override {
+        reader_->Prefetch();
+    }
+
     index::ReaderCaps
     Caps() const override {
         return reader_->Caps();
@@ -83,14 +88,6 @@ class InterceptedSpatialCandidates final : public index::IIndexReaderBase,
     DataType
     ValueType() const override {
         return reader_->ValueType();
-    }
-    int64_t
-    MemoryUsage() const override {
-        return reader_->MemoryUsage();
-    }
-    cachinglayer::ResourceUsage
-    CellByteSize() const override {
-        return reader_->CellByteSize();
     }
     TargetBitmap
     Candidates(index::SpatialOp op, const Geometry& query) const override {
@@ -266,8 +263,12 @@ class GISIndexRefinementTest : public ::testing::Test {
                                                    index::RTREE_INDEX_TYPE,
                                                    {data});
         if (hook) {
-            opened.reader = std::make_unique<InterceptedSpatialCandidates>(
-                std::move(opened.reader), std::move(hook));
+            test::expr_index::DecorateIndex(
+                opened,
+                [hook = std::move(hook)](index::IIndexReaderBasePtr reader) {
+                    return std::make_unique<InterceptedSpatialCandidates>(
+                        std::move(reader), hook);
+                });
         }
         test::expr_index::InstallIndex(*segment.sealed,
                                        segment.geo_id,

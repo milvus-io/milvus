@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/util/function/validator"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -55,21 +56,21 @@ func (f *FunctionTaskSuite) TestAddFunctionRequiresStorageV3Gate() {
 
 	// useLoonFFI off -> reject
 	paramtable.Get().Save(useLoon, "false")
-	f.ErrorContains(validateAddFunctionRequiresStorageV3(), "StorageV3")
+	f.ErrorContains(schemautil.ValidateAddFunctionRequiresStorageV3(), "StorageV3")
 
 	// useLoonFFI on but bumpSchemaVersion.enabled off -> reject
 	paramtable.Get().Save(useLoon, "true")
 	paramtable.Get().Save(bumpEnabled, "false")
-	f.ErrorContains(validateAddFunctionRequiresStorageV3(), "bumpSchemaVersion.enabled")
+	f.ErrorContains(schemautil.ValidateAddFunctionRequiresStorageV3(), "bumpSchemaVersion.enabled")
 
 	// bumpSchemaVersion on but storageVersion.enabled off -> reject
 	paramtable.Get().Save(bumpEnabled, "true")
 	paramtable.Get().Save(svEnabled, "false")
-	f.ErrorContains(validateAddFunctionRequiresStorageV3(), "storageVersion.enabled")
+	f.ErrorContains(schemautil.ValidateAddFunctionRequiresStorageV3(), "storageVersion.enabled")
 
 	// all on -> pass
 	paramtable.Get().Save(svEnabled, "true")
-	f.NoError(validateAddFunctionRequiresStorageV3())
+	f.NoError(schemautil.ValidateAddFunctionRequiresStorageV3())
 }
 
 // TestValidateAddFunctionInputNotText guards the reject of a BM25/MinHash function whose
@@ -86,13 +87,13 @@ func (f *FunctionTaskSuite) TestValidateAddFunctionInputNotText() {
 	}
 
 	// TEXT input rejected for BM25 and MinHash
-	f.ErrorContains(validateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_BM25, "text_in")), "TEXT input field")
-	f.ErrorContains(validateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_MinHash, "text_in")), "TEXT input field")
+	f.ErrorContains(schemautil.ValidateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_BM25, "text_in")), "TEXT input field")
+	f.ErrorContains(schemautil.ValidateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_MinHash, "text_in")), "TEXT input field")
 	// VarChar input allowed
-	f.NoError(validateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_BM25, "varchar_in")))
-	f.NoError(validateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_MinHash, "varchar_in")))
+	f.NoError(schemautil.ValidateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_BM25, "varchar_in")))
+	f.NoError(schemautil.ValidateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_MinHash, "varchar_in")))
 	// non-materialized function type (e.g. TextEmbedding) is out of scope -> allowed even with TEXT input
-	f.NoError(validateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_TextEmbedding, "text_in")))
+	f.NoError(schemautil.ValidateAddFunctionInputNotText(schema, fn(schemapb.FunctionType_TextEmbedding, "text_in")))
 }
 
 func (f *FunctionTaskSuite) TestFunctionOnType() {

@@ -81,17 +81,35 @@ func dataFrameFromArrowRecordBatch(rec arrow.Record, chunkSizes []int64) (*chain
 			offset += size
 		}
 		builder.SetFieldNullable(colName, nullable)
+		definition := &schemapb.FieldSchema{Name: colName, Nullable: nullable}
+		hasFieldID := false
 		if fieldID, ok, err := fieldMetadataInt64(field.Metadata, arrowMetadataFieldIDKey); err != nil {
 			releaseChunks()
 			return nil, merr.WrapErrServiceInternalMsg("invalid Arrow field metadata %s for column %s: %v", arrowMetadataFieldIDKey, colName, err)
 		} else if ok {
 			builder.SetFieldID(colName, fieldID)
+			definition.FieldID, hasFieldID = fieldID, true
 		}
 		if dataType, ok, err := fieldMetadataInt64(field.Metadata, arrowMetadataDataTypeKey); err != nil {
 			releaseChunks()
 			return nil, merr.WrapErrServiceInternalMsg("invalid Arrow field metadata %s for column %s: %v", arrowMetadataDataTypeKey, colName, err)
 		} else if ok {
-			builder.SetFieldType(colName, schemapb.DataType(dataType))
+			if err := builder.SetFieldType(colName, schemapb.DataType(dataType)); err != nil {
+				releaseChunks()
+				return nil, err
+			}
+			definition.DataType = schemapb.DataType(dataType)
+		}
+		if hasFieldID {
+			if definition.DataType == schemapb.DataType_None {
+				dataType, err := chain.ToMilvusType(fullChunk.DataType())
+				if err != nil {
+					releaseChunks()
+					return nil, err
+				}
+				definition.DataType = dataType
+			}
+			builder.SetFieldSchema(colName, definition)
 		}
 		if err := builder.AddColumnFromChunks(colName, chunks); err != nil {
 			return nil, err

@@ -20,14 +20,76 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
+#include <variant>
 
+#include "index/contracts/IIndex.h"
 #include "index/contracts/query/IVectorReader.h"
 #include "index/vector/KnowhereEngine.h"
 
+namespace milvus::cachinglayer {
+template <typename T>
+class CacheSlot;
+}
+
 namespace milvus::index {
+
+class VectorIndexReader;
+
+/** @brief Owns a Knowhere handle and the metadata of one published version. */
+class VectorIndex final : public IIndex,
+                          public std::enable_shared_from_this<VectorIndex> {
+ public:
+    explicit VectorIndex(KnowhereEngine engine);
+    explicit VectorIndex(std::shared_ptr<const KnowhereEngine> engine);
+    /** @brief Own a cold engine slot; reader creation and metadata do no I/O. */
+    VectorIndex(std::shared_ptr<cachinglayer::CacheSlot<KnowhereEngine>> slot,
+                DataType physical_type,
+                IndexType index_type,
+                MetricType metric,
+                std::optional<uint32_t> disk_ann_beamwidth = std::nullopt);
+    VectorIndex(uint32_t disk_ann_beamwidth, KnowhereEngine engine);
+    VectorIndex(KnowhereEngine engine,
+                int64_t logical_count,
+                int64_t physical_count,
+                knowhere::Json search_defaults);
+
+    IndexMetadata
+    Metadata() const override;
+    IIndexReaderBasePtr
+    CreateReader(milvus::OpContext* op_ctx) const override;
+    void
+    CancelWarmup() const override;
+
+ private:
+    friend class VectorIndexReader;
+    enum class Backend {
+        Memory,
+        Disk,
+    };
+
+    struct CachedEngine {
+        std::shared_ptr<cachinglayer::CacheSlot<KnowhereEngine>> slot;
+        DataType physical_type;
+        IndexType index_type;
+        MetricType metric;
+    };
+    // Keeps the exact engine cell alive through a reader or iterator.
+    std::shared_ptr<const KnowhereEngine>
+    PinEngine(milvus::OpContext* op_ctx) const;
+
+    std::variant<std::shared_ptr<const KnowhereEngine>, CachedEngine> engine_;
+    Backend backend_{Backend::Memory};
+    uint32_t disk_ann_beamwidth_{8};
+    std::optional<int64_t> physical_count_;
+    // Growing only: the frozen public row count this generation may answer
+    // for. Sealed readers read their row domain from the immutable IdMap.
+    int64_t logical_count_{0};
+    std::optional<knowhere::Json> growing_search_defaults_;
+};
 
 class VectorIndexReader final : public IIndexReaderBase, public IVectorReader {
  public:
@@ -49,9 +111,6 @@ class VectorIndexReader final : public IIndexReaderBase, public IVectorReader {
 
     ~VectorIndexReader() override = default;
 
-    cachinglayer::ResourceUsage
-    CellByteSize() const override;
-
     ReaderCaps
     Caps() const override;
 
@@ -64,21 +123,19 @@ class VectorIndexReader final : public IIndexReaderBase, public IVectorReader {
     DataType
     ValueType() const override;
 
-    int64_t
-    MemoryUsage() const override;
+    void
+    Prefetch() const override;
 
     void
     Search(const DatasetPtr& dataset,
            const VectorSearchParams& params,
            const BitsetView& bitset,
-           milvus::OpContext* op_ctx,
            SearchResult& result) const override;
 
     knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
     Iterators(const DatasetPtr& dataset,
               const knowhere::Json& json,
-              const BitsetView& bitset,
-              milvus::OpContext* op_ctx) const override;
+              const BitsetView& bitset) const override;
 
     bool
     RefineEnabled() const override;
@@ -128,18 +185,18 @@ class VectorIndexReader final : public IIndexReaderBase, public IVectorReader {
                   const BitsetView& bitset,
                   const int64_t* labels,
                   size_t labels_len,
-                  bool is_cosine,
-                  milvus::OpContext* op_ctx) const override;
+                  bool is_cosine) const override;
 
     std::pair<std::vector<uint8_t>, std::vector<size_t>>
     GetEmbListByIds(const DatasetPtr& dataset,
                     const std::string& metric_type) const override;
 
  private:
-    enum class Backend {
-        Memory,
-        Disk,
-    };
+    friend class VectorIndex;
+    VectorIndexReader(std::shared_ptr<const VectorIndex> index,
+                      milvus::OpContext* op_ctx);
+
+    using Backend = VectorIndex::Backend;
 
     static constexpr std::array<const char*, 5> kGrowingQueryOverrides = {
         "radius",
@@ -152,22 +209,26 @@ class VectorIndexReader final : public IIndexReaderBase, public IVectorReader {
     IsGrowingGeneration() const;
 
     VectorSearchParams
-    EffectiveSearchParams(const VectorSearchParams& params) const;
+    EffectiveSearchParams(const KnowhereEngine& engine,
+                          const VectorSearchParams& params) const;
 
     void
-    FillEmptySearchResult(const DatasetPtr& dataset,
+    FillEmptySearchResult(const KnowhereEngine& engine,
+                          const DatasetPtr& dataset,
                           const VectorSearchParams& params,
                           SearchResult& result) const;
 
     void
-    SearchMemory(const DatasetPtr& dataset,
+    SearchMemory(const KnowhereEngine& engine,
+                 const DatasetPtr& dataset,
                  const VectorSearchParams& params,
                  const BitsetView& bitset,
                  milvus::OpContext* op_ctx,
                  SearchResult& result) const;
 
     void
-    SearchDisk(const DatasetPtr& dataset,
+    SearchDisk(const KnowhereEngine& engine,
+               const DatasetPtr& dataset,
                const VectorSearchParams& params,
                const BitsetView& bitset,
                milvus::OpContext* op_ctx,
@@ -183,25 +244,30 @@ class VectorIndexReader final : public IIndexReaderBase, public IVectorReader {
     // covers, so every id-addressed operation is clipped to the frozen
     // logical prefix.
     void
-    ValidateGenerationIds(const DatasetPtr& dataset,
+    ValidateGenerationIds(const KnowhereEngine& engine,
+                          const DatasetPtr& dataset,
                           const char* operation) const;
 
     void
-    ValidateGenerationIds(const int64_t* ids,
+    ValidateGenerationIds(const KnowhereEngine& engine,
+                          const int64_t* ids,
                           size_t count,
                           const char* operation) const;
 
     bool
-    IsEmptyEngine() const;
+    IsEmptyEngine(const KnowhereEngine& engine) const;
 
-    KnowhereEngine engine_;
-    Backend backend_{Backend::Memory};
-    uint32_t disk_ann_beamwidth_{8};
-    int64_t physical_count_;
-    // Growing only: the frozen public row count this generation may answer
-    // for. Sealed readers read their row domain from the immutable IdMap.
-    int64_t logical_count_{0};
-    std::optional<knowhere::Json> growing_search_defaults_;
+    const std::shared_ptr<const KnowhereEngine>&
+    GetEngine() const {
+        std::call_once(engine_once_,
+                       [this] { engine_ = index_->PinEngine(op_ctx_); });
+        return engine_;
+    }
+
+    std::shared_ptr<const VectorIndex> index_;
+    milvus::OpContext* const op_ctx_;
+    mutable std::once_flag engine_once_;
+    mutable std::shared_ptr<const KnowhereEngine> engine_;
 };
 
 }  // namespace milvus::index

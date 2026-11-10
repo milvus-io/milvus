@@ -272,7 +272,7 @@ func (b *DefaultBalancer) apply(ctx context.Context, plan *BalancePlan) error {
 		if mgr == nil {
 			continue
 		}
-		if err := mgr.RequestRelease(ctx); err != nil {
+		if err := mgr.RequestReleaseWithControl(ctx, plan.ReleaseControls[shardID]); err != nil {
 			errs = append(errs, err)
 			b.queue.addRetry(TriggerScope{DirtyShards: []qviews.ShardID{shardID}})
 		}

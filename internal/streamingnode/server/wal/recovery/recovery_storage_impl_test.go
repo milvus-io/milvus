@@ -1166,7 +1166,7 @@ func TestInitialCheckpointFromLastTimeTickMessage(t *testing.T) {
 	require.NotNil(t, checkpoint)
 	assert.True(t, lastConfirmed.EQ(checkpoint.MessageID))
 	assert.Equal(t, uint64(200), checkpoint.TimeTick)
-	assert.Equal(t, utility.RecoveryMagicRecoveryStorageV2, checkpoint.Magic)
+	assert.Equal(t, utility.RecoveryMagicSchemaMetadataAligned, checkpoint.Magic)
 }
 
 type recordingAckTaskScheduler struct {
@@ -1250,8 +1250,8 @@ func newBroadcastAckMessageWith(t *testing.T, builder interface {
 // TestRecoverRecoveryStorageFailureReleasesResources covers the second-phase
 // failure path: recoverRecoveryInfoFromMeta succeeded (modules started), but
 // runBoundedRecovery failed. The half-built storage must release the started
-// goroutines and schedulers — otherwise a PChannelCheckpointUpdater keeps
-// reporting forever and the scheduler keeps retrying a dead store.
+// goroutines and schedulers, including the shared L0 age check, rather than
+// leaving background work running against a dead store.
 func TestRecoverRecoveryStorageFailureReleasesResources(t *testing.T) {
 	nodeScheduler := nodescheduler.New(4)
 	t.Cleanup(nodeScheduler.Close)

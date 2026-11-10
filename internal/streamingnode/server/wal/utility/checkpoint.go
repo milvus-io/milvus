@@ -11,6 +11,9 @@ import (
 const (
 	RecoveryMagicStreamingInitialized int64 = 1 // the vchannel info is set into the catalog.
 	RecoveryMagicRecoveryStorageV2    int64 = 2 // recovery metadata uses one published global checkpoint.
+	// TODO(#40451): support mixed-version assignment and rollback after schema alignment;
+	// older StreamingNodes reject recovery magic 3.
+	RecoveryMagicSchemaMetadataAligned int64 = 3 // collection schema metadata was aligned with the coordinator.
 )
 
 // NewWALCheckpointFromProto creates a new WALCheckpoint from a protobuf message.

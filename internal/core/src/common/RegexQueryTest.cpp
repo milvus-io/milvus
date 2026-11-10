@@ -241,14 +241,6 @@ class StringValueOnlyReader final
     ValueType() const override {
         return reader_->ValueType();
     }
-    int64_t
-    MemoryUsage() const override {
-        return reader_->MemoryUsage();
-    }
-    cachinglayer::ResourceUsage
-    CellByteSize() const override {
-        return reader_->CellByteSize();
-    }
 
     std::optional<std::string>
     Lookup(int64_t offset) const override {
@@ -354,9 +346,11 @@ class SealedSegmentRegexQueryTest : public ::testing::Test {
             DataType::VARCHAR,
             index::MARISA_TRIE,
             {test::expr_index::StringField(raw_str)});
-        opened.reader =
-            std::make_unique<StringValueOnlyReader>(std::move(opened.reader));
-        opened.caps = opened.reader->Caps();
+        test::expr_index::DecorateIndex(
+            opened, [](index::IIndexReaderBasePtr reader) {
+                return std::make_unique<StringValueOnlyReader>(
+                    std::move(reader));
+            });
         test::expr_index::InstallIndex(
             *seg, field_id, DataType::VARCHAR, std::move(opened));
     }

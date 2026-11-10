@@ -193,6 +193,8 @@ func TestHandleAlterConfigLegacyValidation(t *testing.T) {
 		{"MQ/TYPE", "mqtype configuration cannot be modified"},
 		{"custom.mqtype.option", "mqtype configuration cannot be modified"},
 		{"MQ_TYPE", "mqtype configuration cannot be modified"},
+		{"common.security.credentialBrokerAllowedEndpoints", "cannot be modified through this endpoint"},
+		{"COMMON_SECURITY_CREDENTIALBROKERALLOWEDENDPOINTS", "cannot be modified through this endpoint"},
 		{"common.security.adminAuthEnabled", "cannot be modified through this endpoint; set it in the configuration file"},
 		{"common_security_adminAuthEnabled", "cannot be modified through this endpoint; set it in the configuration file"},
 		{"common/security/adminAuthEnabled", "cannot be modified through this endpoint; set it in the configuration file"},

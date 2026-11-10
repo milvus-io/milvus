@@ -162,12 +162,12 @@ TEST_F(SchemaReopenTest, ReopenBuildsTextIndexForNewEnableMatchField) {
     schema_v2->set_primary_field_id(pk_fid);
     schema_v2->set_schema_version(2);
 
-    EXPECT_ANY_THROW(seg_impl->PinGrowingIndex(text_fid).Reader());
+    EXPECT_ANY_THROW(seg_impl->PinGrowingIndex(nullptr, text_fid).Reader());
 
     seg_impl->Reopen(schema_v2);
 
-    ASSERT_NO_THROW(seg_impl->PinGrowingIndex(text_fid).Reader());
-    auto pw = seg_impl->PinGrowingIndex(text_fid);
+    ASSERT_NO_THROW(seg_impl->PinGrowingIndex(nullptr, text_fid).Reader());
+    auto pw = seg_impl->PinGrowingIndex(nullptr, text_fid);
     auto* index =
         dynamic_cast<const milvus::index::ITextMatchReader*>(&pw.Reader());
     ASSERT_NE(index, nullptr);
@@ -222,7 +222,7 @@ TEST_F(SchemaReopenTest, ReopenTextIndexIndexesDefaultValueForOldRows) {
 
     seg_impl->Reopen(schema_v2);
 
-    auto pw = seg_impl->PinGrowingIndex(text_fid);
+    auto pw = seg_impl->PinGrowingIndex(nullptr, text_fid);
     auto* index =
         dynamic_cast<const milvus::index::ITextMatchReader*>(&pw.Reader());
     ASSERT_NE(index, nullptr);
@@ -284,7 +284,7 @@ TEST_F(SchemaReopenTest, ReopenBuildsTextIndexesForMultipleNewFields) {
 
     seg_impl->Reopen(schema_v2);
 
-    auto null_pw = seg_impl->PinGrowingIndex(null_fid);
+    auto null_pw = seg_impl->PinGrowingIndex(nullptr, null_fid);
     ASSERT_TRUE(static_cast<bool>(null_pw));
     auto* null_index =
         dynamic_cast<const milvus::index::ITextMatchReader*>(&null_pw.Reader());
@@ -295,7 +295,7 @@ TEST_F(SchemaReopenTest, ReopenBuildsTextIndexesForMultipleNewFields) {
     ASSERT_NE(null_reader, nullptr);
     EXPECT_EQ(null_reader->IsNotNull().count(), 0);
 
-    auto default_pw = seg_impl->PinGrowingIndex(default_fid);
+    auto default_pw = seg_impl->PinGrowingIndex(nullptr, default_fid);
     ASSERT_TRUE(static_cast<bool>(default_pw));
     auto* default_index = dynamic_cast<const milvus::index::ITextMatchReader*>(
         &default_pw.Reader());

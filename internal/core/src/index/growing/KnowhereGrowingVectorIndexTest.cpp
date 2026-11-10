@@ -284,7 +284,7 @@ class KnowhereGrowingVectorIndexTest : public ::testing::Test {
     GrowingIndexSnapshotPin
     Pin() const {
         // Exercise the same maintenance hook + pin sequence as a Segment.
-        return indexes_->PinSnapshot(field_);
+        return indexes_->PinSnapshot(nullptr, field_);
     }
 
     void
@@ -335,7 +335,9 @@ TEST_F(KnowhereGrowingVectorIndexTest, PublicationRetryStaysOnFlush) {
     control_->short_count = false;
     control_->fail_publication_after_add = false;
     // Pin must neither retry publication nor advance the published prefix.
-    EXPECT_EQ(&Pin().Reader(), &first.Reader());
+    const auto repeated = Pin();
+    EXPECT_NE(&repeated.Reader(), &first.Reader());
+    EXPECT_EQ(repeated.Reader().Count(), first.Reader().Count());
     EXPECT_EQ(Pin().CoveredRowEnd(), 4);
     owner_->Flush();
     EXPECT_EQ(control_->adds.load(), 1);

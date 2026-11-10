@@ -39,7 +39,7 @@ def main() -> None:
     args = parser.parse_args()
     # Pin the runtime and generators together in pyproject.toml. Do not silently
     # regenerate checked-in products with whichever compiler happens to be installed.
-    for package, expected in (("grpcio-tools", "1.74.0"), ("grpcio", "1.74.0"), ("protobuf", "6.31.1")):
+    for package, expected in (("grpcio-tools", "1.74.0"), ("grpcio", "1.74.0"), ("protobuf", "6.33.5")):
         actual = importlib.metadata.version(package)
         if actual != expected:
             raise SystemExit(f"{package}=={expected} required for codegen, found {actual}")

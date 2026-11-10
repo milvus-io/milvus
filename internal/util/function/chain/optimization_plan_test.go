@@ -351,7 +351,7 @@ func TestPruneDataFramePreservesMetadata(t *testing.T) {
 	fieldID, ok := pruned.FieldID("keep")
 	require.True(t, ok)
 	require.EqualValues(t, 100, fieldID)
-	require.False(t, pruned.fieldNullables["keep"])
+	require.False(t, pruned.FieldNullable("keep"))
 	metricType, ok := pruned.MetricType()
 	require.True(t, ok)
 	require.Equal(t, "IP", metricType)

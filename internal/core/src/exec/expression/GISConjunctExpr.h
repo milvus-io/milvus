@@ -266,15 +266,9 @@ class PhyGISRefineConjunctExpr : public SegmentExpr {
         st_->refine_cursor_complete = current_pos_ == active_count_;
     }
 
-    // The refine node reads the raw geometry column only for survivors (via the
-    // geometry cache or a bulk_subscript over their offsets) and never touches
-    // reader pin -- only the Coarse node queries the R-Tree, via its own
-    // exact capability selection in RunRTreeQuery(). The SegmentExpr default would see
-    // HasIndex() == true, pin an index cell this node never reads (a pointless
-    // cold fetch under tiered storage), and commit to ScalarIndex. Commit to
-    // RawData instead so no index is pinned. This exec_path_ choice is about
-    // pinning, NOT prefetch: see PrefetchRawData() below, which overrides the
-    // wasteful full-column warm-up the RawData default would otherwise trigger.
+    // Only the coarse node selects an R-Tree reader. Refinement reads raw
+    // geometry for survivors, so it must use the raw-data execution path.
+    // PrefetchRawData() below also avoids warming the whole geometry column.
     void
     DetermineExecPath() override {
         exec_path_ = ExprExecPath::RawData;

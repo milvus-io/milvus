@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querynodev2/qnview"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/util/schemautil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -141,7 +142,7 @@ func TestQueryViewCollectionRuntimeManager_AcquireClassifiesRetryability(t *test
 // Patch points use mockey so requests are checked at the streaming boundary.
 type queryViewSchemaClient struct{ streaming.SchemaClient }
 
-func (*queryViewSchemaClient) GetSchemaVersion(context.Context, streaming.GetSchemaVersionRequest) (*streaming.SchemaSnapshot, error) {
+func (*queryViewSchemaClient) GetSchemaVersion(context.Context, streaming.GetSchemaVersionRequest) (*schemautil.SchemaInfo, error) {
 	panic("mock with mockey")
 }
 
@@ -149,10 +150,9 @@ func mockQueryViewSchemaClient(t *testing.T) *queryViewSchemaClient {
 	t.Helper()
 	client := &queryViewSchemaClient{}
 	patch := mockey.Mock((*queryViewSchemaClient).GetSchemaVersion).To(
-		func(_ *queryViewSchemaClient, _ context.Context, req streaming.GetSchemaVersionRequest) (*streaming.SchemaSnapshot, error) {
-			return &streaming.SchemaSnapshot{
-				Schema:            &schemapb.CollectionSchema{Name: "coll", DbName: "db", Version: req.Version, Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}},
-				EffectiveTimeTick: 9,
+		func(_ *queryViewSchemaClient, _ context.Context, req streaming.GetSchemaVersionRequest) (*schemautil.SchemaInfo, error) {
+			return &schemautil.SchemaInfo{
+				CollectionSchema: &schemapb.CollectionSchema{Name: "coll", DbName: "db", Version: req.Version, Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}},
 			}, nil
 		}).Build()
 	t.Cleanup(func() { patch.UnPatch() })
@@ -240,14 +240,9 @@ func TestQueryViewCollectionRuntimeIsolatesReadGenerations(t *testing.T) {
 func TestQueryViewCollectionRuntimeIgnoresPerChannelSchemaTicks(t *testing.T) {
 	paramtable.Init()
 	patch := mockey.Mock((*queryViewSchemaClient).GetSchemaVersion).To(
-		func(_ *queryViewSchemaClient, _ context.Context, req streaming.GetSchemaVersionRequest) (*streaming.SchemaSnapshot, error) {
-			tick := uint64(900)
-			if req.VChannel == "p_1v1" {
-				tick = 1000
-			}
-			return &streaming.SchemaSnapshot{
-				Schema:            &schemapb.CollectionSchema{Name: "coll", Version: req.Version, Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}},
-				EffectiveTimeTick: tick,
+		func(_ *queryViewSchemaClient, _ context.Context, req streaming.GetSchemaVersionRequest) (*schemautil.SchemaInfo, error) {
+			return &schemautil.SchemaInfo{
+				CollectionSchema: &schemapb.CollectionSchema{Name: "coll", Version: req.Version, Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}},
 			}, nil
 		}).Build()
 	defer patch.UnPatch()
@@ -271,17 +266,15 @@ func TestQueryViewCollectionRuntimeIgnoresPerChannelSchemaTicks(t *testing.T) {
 }
 
 func TestQueryViewRequiredFieldsAreIndependentOfHints(t *testing.T) {
-	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100}, {FieldID: 101}, {FieldID: 102, IsDynamic: true}}}
 	for _, tc := range []struct {
 		name  string
 		hints []int64
 		want  []int64
 	}{
-		{name: "empty hints follow schema"},
+		{name: "empty means no preloads"},
 		{name: "skip dynamic normalized by producer", hints: []int64{100, 101}, want: []int64{100, 101}},
 		{name: "partial preload", hints: []int64{100}, want: []int64{100}},
 		{name: "explicit dynamic preload", hints: []int64{102}, want: []int64{102}},
-		{name: "hints filtered by bound schema", hints: []int64{103, 101}, want: []int64{101}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			info := qnview.QueryViewLoadInfo{RequiredFields: []*viewpb.LoadFieldConfig{{FieldId: 100}, {FieldId: 101}, {FieldId: 102}}}
@@ -289,7 +282,7 @@ func TestQueryViewRequiredFieldsAreIndependentOfHints(t *testing.T) {
 				info.LoadFields = append(info.LoadFields, &viewpb.LoadFieldConfig{FieldId: id})
 			}
 			require.Equal(t, []int64{100, 101, 102}, loadInfoFieldIDs(info), "preload hints must not remove dynamic-field query access")
-			require.Equal(t, tc.want, loadInfoHintIDs(info, schema))
+			require.ElementsMatch(t, tc.want, loadInfoHintIDs(info))
 			info.RequiredFields = nil
 			require.Empty(t, loadInfoFieldIDs(info), "missing requirements must not expand to all fields")
 		})
@@ -310,19 +303,17 @@ func TestCollectionRuntimeRejectsMismatchedLoadIdentity(t *testing.T) {
 	}
 }
 
-func TestCollectionRuntimeRejectsMissingRequiredFields(t *testing.T) {
+func TestCollectionRuntimePreservesEmptyRequiredFields(t *testing.T) {
 	patch := mockey.Mock((*fakeQVLoadMetadataProvider).GetQueryViewLoadInfo).Return(qnview.QueryViewLoadInfo{
-		CollectionID: 1, Version: 7, LoadFields: []*viewpb.LoadFieldConfig{{FieldId: 100}},
+		CollectionID: 1, Version: 7,
 	}, nil).Build()
 	defer patch.UnPatch()
-	collection := &fakeQVCollectionManager{}
-	manager := newTestQueryViewCollectionRuntimeManager(&fakeQVLoadMetadataProvider{}, collection, mockQueryViewSchemaClient(t))
-	view := qviews.NewQueryViewAtQueryNode(&viewpb.QueryViewMeta{CollectionId: 1, LoadInfoVersion: 7}, &viewpb.QueryViewOfQueryNode{}).(*qviews.QueryViewAtQueryNode)
-	guard, retryable, err := manager.Acquire(t.Context(), view)
-	require.ErrorIs(t, err, merr.ErrServiceInternal)
-	require.True(t, retryable)
-	require.Nil(t, guard)
-	require.Zero(t, collection.putCount)
+	manager := newQueryViewCollectionRuntimeManager(&fakeQVLoadMetadataProvider{}, nil)
+	info, err := manager.loadInfo(t.Context(), &viewpb.QueryViewMeta{CollectionId: 1, LoadInfoVersion: 7})
+	require.NoError(t, err)
+	require.Empty(t, info.RequiredFields)
+	require.Empty(t, loadInfoFieldIDs(info))
+	require.Empty(t, loadInfoHintIDs(info))
 }
 
 func TestCollectionRuntimePreservesEmptySnapshotPartitions(t *testing.T) {

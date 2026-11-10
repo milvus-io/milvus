@@ -173,8 +173,8 @@ RTreeGrowingSpatialIndex::PublishPending() {
     }
     auto state = RTreeIndexState::CreateFromValidatedShards(
         std::move(engines), validity_.Freeze(), accepted_end_);
-    auto reader = std::make_unique<RTreeIndexReader>(std::move(state));
-    PublishSnapshot(std::move(reader), accepted_end_);
+    auto index = std::make_shared<RTreeIndex>(std::move(state));
+    PublishSnapshot(std::move(index), accepted_end_);
 
     // Everything above is built from local/shared immutable state. Only after
     // publication succeeds may the writer discard its retryable window.

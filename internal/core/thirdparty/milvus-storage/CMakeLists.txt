@@ -14,7 +14,7 @@
 # Update milvus-storage_VERSION for the first occurrence
 milvus_add_pkg_config("milvus-storage")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-set( milvus-storage_VERSION e9cb668)
+set( milvus-storage_VERSION 5c2ea329889e30d94b4e65209c0bc782256e7a95)
 set( GIT_REPOSITORY  "https://github.com/milvus-io/milvus-storage.git")
 message(STATUS "milvus-storage repo: ${GIT_REPOSITORY}")
 message(STATUS "milvus-storage version: ${milvus-storage_VERSION}")
@@ -103,6 +103,10 @@ if ( NOT milvus-storage_POPULATED )
     else()
         message(FATAL_ERROR "Neither AWS::aws-sdk-cpp-s3 nor AWS::s3 target found after find_package(AWSSDK)")
     endif()
+
+    # Native CRT calls need explicit links when the AWS runtime is shared.
+    find_package(aws-c-io REQUIRED CONFIG)
+    target_link_libraries(milvus-storage PUBLIC AWS::aws-c-io)
 
     # On macOS, aws-c-io uses Apple's Network.framework for socket operations
     if(APPLE)

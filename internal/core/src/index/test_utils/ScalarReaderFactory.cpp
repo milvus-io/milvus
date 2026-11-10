@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include "index/test_utils/ScalarReaderFactory.h"
 
 #include <algorithm>
@@ -25,6 +27,8 @@
 
 #include "index/IndexTypeAdapter.h"
 #include "index/PackedIndexLoad.h"
+#include "index/scalar/text/TextIndexArtifact.h"
+#include "index/scalar/text/TextIndexReader.h"
 #include "storage/IndexEntryDirectStreamWriter.h"
 #include "storage/RemoteInputStream.h"
 #include "storage/RemoteOutputStream.h"
@@ -233,7 +237,14 @@ ReaderBackend::Open(storage::ArtifactPtr artifact,
         }
         const auto expected_caps =
             Loader(spec_.load_families.front()).derive_caps(params);
-        auto reader = IReaderConvertible::FromArtifact(std::move(artifact));
+        auto* text = dynamic_cast<TextIndexArtifact*>(artifact.get());
+        if (!text) {
+            throw std::logic_error(Name() +
+                                   ": consume mode requires a text artifact");
+        }
+        auto reader =
+            std::make_shared<TextIndex>(std::move(*text).IntoStorage())
+                ->CreateReader(nullptr);
         ValidateReader(Name(), *this, expected_caps, reader);
         return reader;
     }
@@ -271,10 +282,13 @@ ReaderBackend::Open(storage::ArtifactPtr artifact,
         options.mmap_dir_path = std::filesystem::temp_directory_path().string();
     }
     options.params = std::move(params);
-    auto reader = loader_entry.Load(
-        {OpenedIndexSource{PackedIndexSource{
-             std::shared_ptr<storage::IndexEntryReader>(std::move(source))}},
-         options});
+    auto reader = loader_entry
+                      .Load({OpenedIndexSource{PackedIndexSource{
+                                 std::shared_ptr<storage::IndexEntryReader>(
+                                     std::move(source))}},
+                             options,
+                             milvus::index::test::TestIndexCacheConfig()})
+                      ->CreateReader(nullptr);
     ValidateReader(Name(), *this, expected_caps, reader);
     return reader;
 }

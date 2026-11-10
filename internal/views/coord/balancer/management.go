@@ -14,6 +14,8 @@ import (
 // Management exposes the same replica ownership and lifecycle used by automatic
 // scheduling. Manual migration is a one-time placement change, not a node pin.
 type Management interface {
+	ManualPlace(context.Context, PlacementScope, func(map[qviews.ShardID]*qviews.QueryViewAtCoordBuilder) error) (map[qviews.ShardID]ManualPlaceResult, error)
+	MoveSegmentsAndWait(context.Context, int64, int64, []int64, []int64) (map[qviews.ShardID]ManualPlaceResult, error)
 	Placement(context.Context, int64) (*CollectionPlacement, error)
 	MoveSegments(context.Context, *loadmgr.LoadConfig, int64, []int64, []int64) (map[qviews.ShardID]*SegmentMove, error)
 }

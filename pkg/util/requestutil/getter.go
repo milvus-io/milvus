@@ -256,8 +256,10 @@ func ParseMetricLabel(resp any, err error) (status string, cause string) {
 	if st != nil && !merr.Ok(st) {
 		// Client cancellation is neither party's failure, but it stays a "fail"
 		// like it was before the cause dimension existed; cause is what lets a
-		// consumer exclude it.
-		if st.GetCode() == merr.CanceledCode {
+		// consumer exclude it. An operator cancel (CancelRequests) is the same
+		// kind of outcome under its own code, ErrRequestCanceled, so that the
+		// client can tell it from its own cancellation.
+		if st.GetCode() == merr.CanceledCode || st.GetCode() == merr.RequestCanceledCode {
 			return metrics.FailLabel, metrics.CauseCancel
 		}
 		// Retryability takes priority over classification.
@@ -284,7 +286,7 @@ func ParseMetricLabel(resp any, err error) (status string, cause string) {
 	// caller's fault, so bucket them as a user-side rejection. Everything else
 	// is a system-side rejection.
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
+		if errors.Is(err, context.Canceled) || errors.Is(err, merr.ErrRequestCanceled) {
 			return metrics.RejectedLabel, metrics.CauseCancel
 		}
 		if merr.GetErrorType(err) == merr.InputError {

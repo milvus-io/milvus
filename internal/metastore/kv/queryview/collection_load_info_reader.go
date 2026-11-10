@@ -12,8 +12,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-const VersionedLoadInfoPrefix = "coord/load_info"
-
 // GetCollectionLoadInfo reads the exact requirements published by the QueryView
 // producer. Publication, reference tracking and GC belong to that producer.
 func GetCollectionLoadInfo(ctx context.Context, storage kv.MetaKv, collectionID int64, version uint64) (*viewpb.CollectionLoadConfig, error) {

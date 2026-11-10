@@ -46,6 +46,13 @@ func (s *ArrowSelection) Empty() bool {
 	return s == nil || len(s.Rows) == 0 || len(s.Records) == 0
 }
 
+// Row returns the i-th selected row: the index of its record in Records and
+// its row in that record. The caller range-checks both.
+func (s *ArrowSelection) Row(i int) (record int, row int64) {
+	r := s.Rows[i]
+	return r.resultIdx, r.rowIdx
+}
+
 // Template returns the first non-nil record, whose schema and metadata
 // (milvus.field_order, milvus.valid_data_fields) describe every record in the
 // selection. Returns nil when the selection carries no record at all.

@@ -24,19 +24,20 @@ import (
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metacache"
+	"github.com/milvus-io/milvus/internal/metacache/metacachetest"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -220,7 +221,7 @@ func (suite *CollectionManagerSuite) TestUpdate() {
 	}
 
 	suite.clearMemory()
-	err := mgr.Recover(ctx, suite.broker)
+	err := mgr.Recover(ctx)
 	suite.NoError(err)
 	collections = mgr.GetAllCollections(ctx)
 	partitions = mgr.GetAllPartitions(ctx)
@@ -279,7 +280,7 @@ func (suite *CollectionManagerSuite) TestRemove() {
 	}
 
 	// Make sure the removes applied to meta store
-	err := mgr.Recover(ctx, suite.broker)
+	err := mgr.Recover(ctx)
 	suite.NoError(err)
 	for i, collectionID := range suite.collections {
 		if suite.loadTypes[i] == querypb.LoadType_LoadCollection {
@@ -308,7 +309,7 @@ func (suite *CollectionManagerSuite) TestRemove() {
 	for _, collectionID := range suite.collections {
 		err := mgr.RemoveCollection(ctx, collectionID)
 		suite.NoError(err)
-		err = mgr.Recover(ctx, suite.broker)
+		err = mgr.Recover(ctx)
 		suite.NoError(err)
 		collection := mgr.GetCollection(ctx, collectionID)
 		suite.Nil(collection)
@@ -322,7 +323,7 @@ func (suite *CollectionManagerSuite) TestRecover_normal() {
 	ctx := suite.ctx
 
 	suite.clearMemory()
-	err := mgr.Recover(ctx, suite.broker)
+	err := mgr.Recover(ctx)
 	suite.NoError(err)
 	for _, collection := range suite.collections {
 		suite.True(mgr.Exist(ctx, collection))
@@ -339,7 +340,6 @@ func (suite *CollectionManagerSuite) TestRecoverLoadingCollection() {
 	ctx := suite.ctx
 	// test put collection with partitions
 	for i, collection := range suite.collections {
-		suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil).Maybe()
 		col := &Collection{
 			CollectionLoadInfo: &querypb.CollectionLoadInfo{
 				CollectionID:  collection,
@@ -368,7 +368,7 @@ func (suite *CollectionManagerSuite) TestRecoverLoadingCollection() {
 
 	// recover for first time, expected recover success
 	suite.clearMemory()
-	err := mgr.Recover(ctx, suite.broker)
+	err := mgr.Recover(ctx)
 	suite.NoError(err)
 	for _, collectionID := range suite.collections {
 		collection := mgr.GetCollection(ctx, collectionID)
@@ -391,7 +391,7 @@ func (suite *CollectionManagerSuite) TestRecoverLoadingCollection() {
 		suite.NoError(err)
 	}
 	suite.clearMemory()
-	err = mgr.Recover(ctx, suite.broker)
+	err = mgr.Recover(ctx)
 	suite.NoError(err)
 	for _, collectionID := range suite.collections {
 		collection := mgr.GetCollection(ctx, collectionID)
@@ -408,7 +408,7 @@ func (suite *CollectionManagerSuite) TestRecoverLoadingCollection() {
 	for i := 0; i < int(paramtable.Get().QueryCoordCfg.CollectionRecoverTimesLimit.GetAsInt32()); i++ {
 		mlog.Info(suite.ctx, "stupid", mlog.Int("count", i))
 		suite.clearMemory()
-		err = mgr.Recover(ctx, suite.broker)
+		err = mgr.Recover(ctx)
 		suite.NoError(err)
 	}
 	for _, collectionID := range suite.collections {
@@ -511,10 +511,9 @@ func (suite *CollectionManagerSuite) TestUpgradeLoadFields() {
 		}
 	}
 
-	// set expectations
 	for _, collection := range suite.collections {
-		suite.broker.EXPECT().DescribeCollection(mock.Anything, collection).Return(&milvuspb.DescribeCollectionResponse{
-			Status: merr.Success(),
+		suite.putCollectionInfo(&metacache.CollectionInfo{
+			ID: collection,
 			Schema: &schemapb.CollectionSchema{
 				Fields: []*schemapb.FieldSchema{
 					{FieldID: common.RowIDField},
@@ -523,12 +522,12 @@ func (suite *CollectionManagerSuite) TestUpgradeLoadFields() {
 					{FieldID: 101, Name: "vector"},
 				},
 			},
-		}, nil)
+		})
 	}
 
 	// do recovery
 	suite.clearMemory()
-	err := mgr.Recover(ctx, suite.broker)
+	err := mgr.Recover(ctx)
 	suite.NoError(err)
 	suite.checkLoadResult()
 
@@ -538,74 +537,55 @@ func (suite *CollectionManagerSuite) TestUpgradeLoadFields() {
 	}
 }
 
-func (suite *CollectionManagerSuite) TestUpgradeLoadFieldsFail() {
-	suite.Run("normal_error", func() {
-		suite.releaseAll()
-		mgr := suite.mgr
-		ctx := suite.ctx
+// TestUpgradeLoadFieldsCollectionNotFound tests that recovery skips the
+// upgrade of a collection RootCoord no longer serves.
+func (suite *CollectionManagerSuite) TestUpgradeLoadFieldsCollectionNotFound() {
+	for name, info := range map[string]*metacache.CollectionInfo{
+		"missing":  nil,
+		"dropping": {ID: 100, State: etcdpb.CollectionState_CollectionDropping},
+	} {
+		suite.Run(name, func() {
+			suite.releaseAll()
+			mgr := suite.mgr
+			ctx := suite.ctx
+			if info != nil {
+				suite.putCollectionInfo(info)
+				defer suite.mgr.metaView.(metacache.MetaStore).RemoveCollection(info.ID)
+			}
 
-		mgr.PutCollection(ctx, &Collection{
-			CollectionLoadInfo: &querypb.CollectionLoadInfo{
-				CollectionID:  100,
-				ReplicaNumber: 1,
-				Status:        querypb.LoadStatus_Loaded,
-				LoadType:      querypb.LoadType_LoadCollection,
-				LoadFields:    nil, // use nil Load fields, mocking old load info
-			},
-			LoadPercentage: 100,
-			CreatedAt:      time.Now(),
+			mgr.PutCollection(ctx, &Collection{
+				CollectionLoadInfo: &querypb.CollectionLoadInfo{
+					CollectionID:  100,
+					ReplicaNumber: 1,
+					Status:        querypb.LoadStatus_Loaded,
+					LoadType:      querypb.LoadType_LoadCollection,
+					LoadFields:    nil, // use nil Load fields, mocking old load info
+				},
+				LoadPercentage: 100,
+				CreatedAt:      time.Now(),
+			})
+			mgr.PutPartition(ctx, &Partition{
+				PartitionLoadInfo: &querypb.PartitionLoadInfo{
+					CollectionID: 100,
+					PartitionID:  1000,
+					Status:       querypb.LoadStatus_Loaded,
+				},
+				LoadPercentage: 100,
+				CreatedAt:      time.Now(),
+			})
+
+			// do recovery
+			suite.clearMemory()
+			err := mgr.Recover(ctx)
+			suite.NoError(err)
+			suite.Nil(mgr.GetCollection(ctx, 100).GetLoadFields())
 		})
-		mgr.PutPartition(ctx, &Partition{
-			PartitionLoadInfo: &querypb.PartitionLoadInfo{
-				CollectionID: 100,
-				PartitionID:  1000,
-				Status:       querypb.LoadStatus_Loaded,
-			},
-			LoadPercentage: 100,
-			CreatedAt:      time.Now(),
-		})
+	}
+}
 
-		suite.broker.EXPECT().DescribeCollection(mock.Anything, int64(100)).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
-		// do recovery
-		suite.clearMemory()
-		err := mgr.Recover(ctx, suite.broker)
-		suite.Error(err)
-	})
-
-	suite.Run("normal_error", func() {
-		suite.releaseAll()
-		mgr := suite.mgr
-		ctx := suite.ctx
-
-		mgr.PutCollection(ctx, &Collection{
-			CollectionLoadInfo: &querypb.CollectionLoadInfo{
-				CollectionID:  100,
-				ReplicaNumber: 1,
-				Status:        querypb.LoadStatus_Loaded,
-				LoadType:      querypb.LoadType_LoadCollection,
-				LoadFields:    nil, // use nil Load fields, mocking old load info
-			},
-			LoadPercentage: 100,
-			CreatedAt:      time.Now(),
-		})
-		mgr.PutPartition(ctx, &Partition{
-			PartitionLoadInfo: &querypb.PartitionLoadInfo{
-				CollectionID: 100,
-				PartitionID:  1000,
-				Status:       querypb.LoadStatus_Loaded,
-			},
-			LoadPercentage: 100,
-			CreatedAt:      time.Now(),
-		})
-
-		suite.broker.EXPECT().DescribeCollection(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-			Status: merr.Status(merr.WrapErrCollectionNotFound(100)),
-		}, nil).Once()
-		// do recovery
-		suite.clearMemory()
-		err := mgr.Recover(ctx, suite.broker)
-		suite.NoError(err)
-	})
+// putCollectionInfo publishes info in the manager's collection view.
+func (suite *CollectionManagerSuite) putCollectionInfo(info *metacache.CollectionInfo) {
+	suite.mgr.metaView.(metacache.MetaStore).PutCollection(info)
 }
 
 func (suite *CollectionManagerSuite) loadAll() {
@@ -705,4 +685,57 @@ func TestCollectionManager_GetSchemaFromSharedStore(t *testing.T) {
 	assert.NotNil(t, schema)
 	assert.Equal(t, "shared_coll", schema.GetName())
 	assert.Len(t, schema.GetFields(), 2)
+}
+
+func TestCollectionManager_GetCollectionLoadInfo(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	params.Save(params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key, "4")
+	params.Save(params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key, "rg_cluster")
+	defer params.Reset(params.QueryCoordCfg.ClusterLevelLoadReplicaNumber.Key)
+	defer params.Reset(params.QueryCoordCfg.ClusterLevelLoadResourceGroups.Key)
+
+	collProps := []*commonpb.KeyValuePair{
+		{Key: common.CollectionReplicaNumber, Value: "2"},
+		{Key: common.CollectionResourceGroups, Value: "rg_coll"},
+	}
+	dbProps := []*commonpb.KeyValuePair{
+		{Key: common.DatabaseReplicaNumber, Value: "3"},
+		{Key: common.DatabaseResourceGroups, Value: "rg1,rg2"},
+	}
+	tests := []struct {
+		name         string
+		collProps    []*commonpb.KeyValuePair
+		dbProps      []*commonpb.KeyValuePair
+		noCollection bool
+		noDatabase   bool
+		wantRGs      []string
+		wantReplicas int64
+		wantErr      error
+	}{
+		{name: "collection level", collProps: collProps, dbProps: dbProps, wantRGs: []string{"rg_coll"}, wantReplicas: 2},
+		{name: "database level", dbProps: dbProps, wantRGs: []string{"rg1", "rg2"}, wantReplicas: 3},
+		{name: "cluster level", wantRGs: []string{"rg_cluster"}, wantReplicas: 4},
+		{name: "collection missing", noCollection: true, wantErr: merr.ErrCollectionNotFound},
+		{name: "database missing", noDatabase: true, wantErr: merr.ErrDatabaseNotFound},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			store := metacache.NewMetaStore(nil)
+			if !tc.noCollection {
+				store.PutCollection(&metacache.CollectionInfo{ID: 1, DatabaseName: "db", PropertyPairs: tc.collProps})
+			}
+			if !tc.noDatabase {
+				metacachetest.Collections(store).PutDatabase(&metacache.DatabaseInfo{Name: "db", Properties: tc.dbProps})
+			}
+			rgs, replicas, err := NewCollectionManager(nil, store).GetCollectionLoadInfo(context.Background(), 1)
+			if tc.wantErr != nil {
+				assert.ErrorIs(t, err, tc.wantErr)
+				return
+			}
+			assert.NoError(t, err)
+			assert.ElementsMatch(t, tc.wantRGs, rgs)
+			assert.Equal(t, tc.wantReplicas, replicas)
+		})
+	}
 }

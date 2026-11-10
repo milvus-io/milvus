@@ -75,7 +75,8 @@ func NewVChannelMetaFromCreateCollectionMessage(msg message.ImmutableCreateColle
 				},
 			},
 		},
-		CheckpointTimeTick: msg.TimeTick(),
+		CheckpointTimeTick:       msg.TimeTick(),
+		CreateCollectionTimeTick: msg.TimeTick(),
 	}
 }
 
@@ -114,6 +115,9 @@ func (info *VChannelView) AssignmentMeta() *streamingpb.VChannelMeta {
 	return proto.Clone(info.meta).(*streamingpb.VChannelMeta)
 }
 
+// WritePathRecoveryState captures write-path state with a shared, read-only
+// Schema. Callers may retain it across history updates and cleanup, but must
+// not modify the schema or its nested values.
 func (info *VChannelView) WritePathRecoveryState() (moduleapi.VChannelWritePathRecoveryState, bool) {
 	info.mu.Lock()
 	defer info.mu.Unlock()
@@ -132,7 +136,7 @@ func (info *VChannelView) WritePathRecoveryState() (moduleapi.VChannelWritePathR
 		}
 	}
 	if schemas := collection.GetSchemas(); len(schemas) > 0 && schemas[len(schemas)-1].GetSchema() != nil {
-		state.Schema = proto.Clone(schemas[len(schemas)-1].GetSchema()).(*schemapb.CollectionSchema)
+		state.Schema = schemas[len(schemas)-1].GetSchema()
 		state.SchemaTimeTick = schemas[len(schemas)-1].GetCheckpointTimeTick()
 	}
 	return state, true
@@ -353,11 +357,18 @@ func (info *VChannelView) restoreSegmentSchema(partitionID int64, timetick uint6
 	if !info.hasPartitionMetaLocked(partitionID) {
 		return nil
 	}
-	for _, version := range info.meta.GetCollectionInfo().GetSchemas() {
-		if version.GetState() == streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL &&
-			version.GetSchema() != nil && version.GetSchema().GetVersion() == schemaVersion {
-			return version.GetSchema()
+	history := info.meta.GetCollectionInfo().GetSchemas()
+	for i := len(history) - 1; i >= 0; i-- {
+		entry := history[i]
+		if entry.GetState() == streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL &&
+			entry.GetSchema() != nil && entry.GetSchema().GetVersion() == schemaVersion && entry.GetCheckpointTimeTick() <= timetick {
+			return entry.GetSchema()
 		}
+	}
+	// Legacy migration can resolve an encoding version whose allocation
+	// predates retained history. Preserve that exact version's canonical body.
+	if entry := info.canonicalReadSchemaLocked(schemaVersion); entry != nil {
+		return entry.GetSchema()
 	}
 	return nil
 }
@@ -523,9 +534,9 @@ func (info *VChannelView) ObserveAlterCollectionMessageV2(msg message.ImmutableA
 	if info.closingLocked(0) || info.meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL {
 		return false
 	}
-	schemaChange := messageutil.IsSchemaChange(msg.Header())
-	if schemaChange {
-		schema := msg.MustBody().Updates.Schema
+	schemas := info.meta.CollectionInfo.Schemas
+	current := schemas[len(schemas)-1].GetSchema()
+	if schema := messageutil.ApplyCollectionSchemaUpdates(current, msg.Header(), msg.MustBody()); schema != nil {
 		if info.hasSchemaVersionLocked(msg.TimeTick(), schema) {
 			return false
 		}

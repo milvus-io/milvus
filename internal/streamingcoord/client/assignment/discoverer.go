@@ -47,12 +47,20 @@ type assignmentDiscoverClient struct {
 }
 
 // ReportAssignmentError reports the assignment error to server.
-func (c *assignmentDiscoverClient) ReportAssignmentError(pchannel types.PChannelInfo, err error) {
+func (c *assignmentDiscoverClient) ReportAssignmentError(ctx context.Context, pchannel types.PChannelInfo, err error) error {
 	if !c.lifetime.Add(typeutil.LifetimeStateWorking) {
-		return
+		return status.NewOnShutdownError("assignment discover client is closing")
 	}
 	defer c.lifetime.Done()
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// A closed stream never sends what is queued. With room in the queue the
+	// select below could pick the send and lose the report.
+	if !c.IsAvailable() {
+		return status.NewOnShutdownError("assignment discover client is closing")
+	}
 	statusErr := status.AsStreamingError(err).AsPBError()
 	select {
 	case c.requestCh <- &streamingpb.AssignmentDiscoverRequest{
@@ -63,7 +71,11 @@ func (c *assignmentDiscoverClient) ReportAssignmentError(pchannel types.PChannel
 			},
 		},
 	}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	case <-c.exitCh:
+		return status.NewOnShutdownError("assignment discover client is closing")
 	}
 }
 
@@ -164,7 +176,11 @@ func (c *assignmentDiscoverClient) recvLoop() (err error) {
 			for _, assignment := range resp.FullAssignment.Assignments {
 				channels := make(map[string]types.PChannelInfo, len(assignment.Channels))
 				for _, channel := range assignment.Channels {
-					channels[channel.Name] = types.NewPChannelInfoFromProto(channel)
+					info := types.NewPChannelInfoFromProto(channel)
+					// Current channel routing targets only the primary read-write WAL.
+					if info.AccessMode == types.AccessModeRW {
+						channels[info.Name] = info
+					}
 				}
 				newIncomingAssignments[assignment.GetNode().GetServerId()] = types.StreamingNodeAssignment{
 					NodeInfo: types.NewStreamingNodeInfoFromProto(assignment.Node),

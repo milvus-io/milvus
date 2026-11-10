@@ -59,6 +59,8 @@ fail=0
 ############################################################################
 # Allowed throw operands:
 #   SegcoreError / milvus::SegcoreError   the typed base
+#   GrepError / milvus::grep::GrepError   derives from SegcoreError, retaining
+#                                         the private Grep status and operation
 #   LoonFFIError                          derives from SegcoreError and also
 #                                         carries the producer's raw LOON code
 #                                         across milvus's own C-ABI export tail
@@ -94,7 +96,7 @@ fail=0
 #                                         deliberately NOT allowed: it rethrows
 #                                         by the CAUGHT type, slicing a derived
 #                                         SegcoreError back to its base
-ALLOWED_THROW='^(milvus::)?(SegcoreError|ExecOperatorException|ExecDriverException|LoonFFIError)\(|^milvus_storage::ToSegcoreError\(|^folly::Future[A-Za-z]*\(|^std::bad_alloc\(|^;'
+ALLOWED_THROW='^(milvus::)?(SegcoreError|ExecOperatorException|ExecDriverException|LoonFFIError)\(|^(milvus::grep::)?GrepError\(|^milvus_storage::ToSegcoreError\(|^folly::Future[A-Za-z]*\(|^std::bad_alloc\(|^;'
 
 # `throw` is matched anywhere on the line, not just at its start: `if (bad)
 # throw ...;` and `} else throw ...;` are throws too. Line comments are stripped

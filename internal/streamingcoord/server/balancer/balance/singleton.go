@@ -20,13 +20,6 @@ func Register(balancer balancer.Balancer) {
 	s.Set(balancer)
 }
 
-func SetFileResourceChecker(checker balancer.FileResourceChecker) {
-	singletonMu.RLock()
-	s := singleton
-	singletonMu.RUnlock()
-	s.Get().SetFileResourceChecker(checker)
-}
-
 func GetWithContext(ctx context.Context) (balancer.Balancer, error) {
 	singletonMu.RLock()
 	s := singleton

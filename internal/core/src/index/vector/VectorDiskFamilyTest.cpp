@@ -14,10 +14,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <gtest/gtest.h>
 
 #ifdef BUILD_DISK_ANN
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -26,6 +29,7 @@
 #include <fstream>
 #include <functional>
 #include <memory>
+#include <map>
 #include <optional>
 #include <random>
 #include <stdexcept>
@@ -35,7 +39,11 @@
 #include <vector>
 
 #include "arrow/buffer.h"
+#include "cachinglayer/Metrics.h"
+#include "folly/ScopeGuard.h"
+#include "knowhere/index/index_factory.h"
 #include "common/Utils.h"
+#include "common/OpContext.h"
 #include "index/IndexTypeAdapter.h"
 #include "index/Meta.h"
 #include "index/contracts/Registry.h"
@@ -44,8 +52,10 @@
 #include "index/vector/KnowhereEngine.h"
 #include "index/vector/VectorDiskBuildFileManager.h"
 #include "index/vector/VectorDiskArtifact.h"
+#include "index/vector/VectorDiskBuilder.h"
 #include "index/vector/VectorIndexValidDataUtils.h"
 #include "indexbuilder/VectorDiskBuildMaterializer.h"
+#include "knowhere/index/index_factory.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/version.h"
 #include "storage/FileManager.h"
@@ -256,6 +266,10 @@ struct DiskBuildCase {
     std::vector<uint8_t> legacy_validity;
     // A resident payload; the raw file then holds only its header.
     const void* tensor = nullptr;
+    int32_t version = knowhere::Version::GetCurrentVersion().VersionNumber();
+    bool defer_load = false;
+    OpContext* reader_context = nullptr;
+    std::optional<IndexCacheConfig> cache_config;
 };
 
 template <typename T>
@@ -271,8 +285,7 @@ BuildDisk(const std::string& raw_path,
         .index_type = knowhere::IndexEnum::INDEX_DISKANN,
         .field_type = vector_array ? DataType::VECTOR_ARRAY : PhysicalType<T>(),
         .element_type = vector_array ? PhysicalType<T>() : DataType::NONE,
-        .index_engine_version =
-            knowhere::Version::GetCurrentVersion().VersionNumber(),
+        .index_engine_version = build.version,
         .params = {{METRIC_TYPE, build.metric},
                    {DIM_KEY, build.dim},
                    {DISK_ANN_MAX_DEGREE, "24"},
@@ -368,19 +381,40 @@ BuildDisk(const std::string& raw_path,
     options.params[DISK_ANN_LOAD_THREAD_NUM] = 2;
     options.enable_mmap = build.mmap;
     options.mmap_dir_path = staging_dir;
-    opened.base =
-        LoaderRegistry::Instance()
-            .Lookup(adapted.family)
-            .Load({IndexFiles{context,
-                              std::move(paths),
-                              LegacyIndexStorageConfig{
-                                  storage::V1SourceLayout::DiskFiles}},
-                   options});
+    auto cache = milvus::index::test::TestIndexCacheConfig();
+    if (build.defer_load) {
+        cache = IndexCacheConfig{
+            staging_dir + "/engine_cache",
+            cachinglayer::Meta{cachinglayer::StorageType::DISK,
+                               cachinglayer::CellIdMappingMode::IDENTICAL,
+                               cachinglayer::CellDataType::OTHER,
+                               CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                               true},
+            {1024 * 1024, 1024 * 1024},
+            {},
+            4096};
+    }
+    if (build.cache_config) {
+        cache = *build.cache_config;
+    }
+    auto index = LoaderRegistry::Instance()
+                     .Lookup(adapted.family)
+                     .Load({IndexFiles{context,
+                                       std::move(paths),
+                                       LegacyIndexStorageConfig{
+                                           storage::V1SourceLayout::DiskFiles}},
+                            options,
+                            cache});
+    if (build.defer_load)
+        EXPECT_FALSE(index->Metadata().count.has_value());
+    opened.base = index->CreateReader(build.reader_context);
 }
 
 template <typename T>
 void
-RunOrdinaryDiskSearch(bool mmap, bool resident = false) {
+RunOrdinaryDiskSearch(bool mmap,
+                      bool resident = false,
+                      bool defer_load = false) {
     auto files = storage::LocalDirectory::CreateOwned(
         "/tmp", "vector_disk_family_XXXXXX", "vector disk family test");
     const auto raw_path = files->Path() + "/raw";
@@ -390,7 +424,9 @@ RunOrdinaryDiskSearch(bool mmap, bool resident = false) {
     BuildDisk(raw_path,
               files->Path(),
               opened,
-              {.mmap = mmap, .tensor = resident ? values.data() : nullptr});
+              {.mmap = mmap,
+               .tensor = resident ? values.data() : nullptr,
+               .defer_load = defer_load});
     ASSERT_NE(opened.base, nullptr);
     const auto* reader = dynamic_cast<const IVectorReader*>(opened.base.get());
     ASSERT_NE(reader, nullptr);
@@ -404,7 +440,7 @@ RunOrdinaryDiskSearch(bool mmap, bool resident = false) {
     };
     auto query = GenDataset(2, kDim, values.data() + 100 * kDim);
     SearchResult result;
-    reader->Search(query, params, BitsetView{}, nullptr, result);
+    reader->Search(query, params, BitsetView{}, result);
     EXPECT_EQ(result.total_nq_, 2);
     ASSERT_EQ(result.seg_offsets_.size(), 8);
     EXPECT_EQ(result.unity_topK_, 4);
@@ -415,7 +451,7 @@ RunOrdinaryDiskSearch(bool mmap, bool resident = false) {
     params.search_params_[knowhere::meta::RADIUS] = 0.2;
     params.search_params_[knowhere::meta::RANGE_FILTER] = 0.1;
     SearchResult range_result;
-    reader->Search(query, params, BitsetView{}, nullptr, range_result);
+    reader->Search(query, params, BitsetView{}, range_result);
     EXPECT_EQ(range_result.total_nq_, 2);
     EXPECT_EQ(range_result.seg_offsets_.size(), 8);
     if constexpr (std::is_same_v<T, float>) {
@@ -652,8 +688,163 @@ TEST(VectorDiskFamilyTest, SerializationRequiresMemoryOrFileOutput) {
     }
 }
 
+TEST(VectorDiskCacheTest, ColdMetadataAndCancelledCountDoNotOpenEngine) {
+    auto files = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_disk_cold_XXXXXX", "vector disk cold test");
+    const auto raw_path = files->Path() + "/raw";
+    const auto values = MakeRows<float>();
+    WriteRaw(raw_path, values, kRows, kDim);
+    folly::CancellationSource cancellation;
+    cancellation.requestCancellation();
+    OpContext context(cancellation.getToken());
+    OpenedDiskIndex<float> opened;
+    BuildDisk(raw_path,
+              files->Path(),
+              opened,
+              {.defer_load = true, .reader_context = &context});
+    ASSERT_NE(opened.base, nullptr);
+    const auto* vector = dynamic_cast<const IVectorReader*>(opened.base.get());
+    ASSERT_NE(vector, nullptr);
+    EXPECT_EQ(vector->Metric(), "L2");
+    EXPECT_EQ(vector->KnowhereIndexType(), knowhere::IndexEnum::INDEX_DISKANN);
+    try {
+        (void)opened.base->Count();
+        FAIL() << "cancelled cold disk load unexpectedly succeeded";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), FollyCancel);
+    }
+}
+
+// Scope the lazy feature bit on real DiskANN to exercise the loader policy
+// even when a native lazy backend is not linked. Backend algorithms are unchanged.
+TEST(VectorDiskCacheTest, NativeLazyEngineUsesAdmissionAndResidentAccounting) {
+    auto& features = const_cast<std::map<std::string, uint64_t>&>(
+        knowhere::IndexFactory::GetIndexFeatures());
+    auto& disk_features = features.at(knowhere::IndexEnum::INDEX_DISKANN);
+    const auto original_features = disk_features;
+    auto restore_features =
+        folly::makeGuard([&] { disk_features = original_features; });
+    disk_features |= knowhere::feature::LAZY_LOAD;
+    auto files = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_native_lazy_XXXXXX", "native lazy budget test");
+    const auto raw_path = files->Path() + "/raw";
+    WriteRaw(raw_path, MakeRows<float>(), kRows, kDim);
+    auto& resident = cachinglayer::monitor::cache_loaded_bytes(
+        cachinglayer::CellDataType::OTHER, cachinglayer::StorageType::MEMORY);
+    auto& loading = cachinglayer::monitor::cache_loading_bytes(
+        cachinglayer::CellDataType::OTHER, cachinglayer::StorageType::MEMORY);
+    auto& resident_disk = cachinglayer::monitor::cache_loaded_bytes(
+        cachinglayer::CellDataType::OTHER, cachinglayer::StorageType::DISK);
+    auto& loading_disk = cachinglayer::monitor::cache_loading_bytes(
+        cachinglayer::CellDataType::OTHER, cachinglayer::StorageType::DISK);
+    const auto resident_disk_before = resident_disk.Value();
+    const auto loading_disk_before = loading_disk.Value();
+    const auto resident_before = resident.Value();
+    const auto loading_before = loading.Value();
+    IndexCacheConfig config{
+        files->Path() + "/native_engine",
+        cachinglayer::Meta{cachinglayer::StorageType::DISK,
+                           cachinglayer::CellIdMappingMode::IDENTICAL,
+                           cachinglayer::CellDataType::OTHER,
+                           CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                           true},
+        {1024 * 1024, 1024 * 1024},
+        {4096, 4096},
+        4096,
+        0,
+        {8192, 0}};
+    OpContext ctx;
+    OpenedDiskIndex<float> opened;
+    BuildDisk(
+        raw_path,
+        files->Path(),
+        opened,
+        {.defer_load = true, .reader_context = &ctx, .cache_config = config});
+    ASSERT_NE(opened.base, nullptr);
+    const auto* vector = dynamic_cast<const IVectorReader*>(opened.base.get());
+    ASSERT_NE(vector, nullptr);
+    folly::CancellationSource cancelled;
+    cancelled.requestCancellation();
+    ctx.cancellation_token = cancelled.getToken();
+    EXPECT_THROW(opened.base->Prefetch(), SegcoreError);
+    EXPECT_EQ(resident.Value(), resident_before);
+    EXPECT_EQ(resident_disk.Value(), resident_disk_before);
+    EXPECT_EQ(loading.Value(), loading_before);
+    EXPECT_EQ(loading_disk.Value(), loading_disk_before);
+    ctx.cancellation_token = {};
+    opened.base->Prefetch();
+    EXPECT_EQ(opened.base->Count(), kRows);
+    EXPECT_EQ(resident.Value(),
+              resident_before + config.loaded_usage.memory_bytes);
+    EXPECT_EQ(resident_disk.Value(),
+              resident_disk_before + config.loaded_usage.file_bytes);
+    EXPECT_EQ(loading.Value(), loading_before);
+    EXPECT_EQ(loading_disk.Value(), loading_disk_before);
+    opened.base->Prefetch();
+    opened.base.reset();
+    EXPECT_EQ(resident.Value(), resident_before);
+    EXPECT_EQ(resident_disk.Value(), resident_disk_before);
+    EXPECT_EQ(loading.Value(), loading_before);
+    EXPECT_EQ(loading_disk.Value(), loading_disk_before);
+
+    // A request larger than the test cache budget must fail admission.
+    config.loaded_usage.memory_bytes = int64_t{1} << 40;
+    BuildDisk(raw_path,
+              files->Path(),
+              opened,
+              {.defer_load = true, .cache_config = config});
+    vector = dynamic_cast<const IVectorReader*>(opened.base.get());
+    ASSERT_NE(vector, nullptr);
+    try {
+        opened.base->Prefetch();
+        FAIL() << "native lazy load bypassed resource admission";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), InsufficientResource);
+    }
+    opened.base.reset();
+    EXPECT_EQ(resident.Value(), resident_before);
+    EXPECT_EQ(resident_disk.Value(), resident_disk_before);
+    EXPECT_EQ(loading.Value(), loading_before);
+    EXPECT_EQ(loading_disk.Value(), loading_disk_before);
+}
+
+TEST(VectorDiskFamilyTest, CachedFloatBuildLoadSearchAndRawCapability) {
+    RunOrdinaryDiskSearch<float>(false, false, true);
+}
+
 TEST(VectorDiskFamilyTest, FloatBuildLoadSearchAndRawCapability) {
     RunOrdinaryDiskSearch<float>(false);
+}
+
+TEST(VectorDiskFamilyTest, LatestVersionBuildLoadSearchWithoutMmap) {
+    auto files = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_disk_stream_XXXXXX", "disk stream load test");
+    const auto raw_path = files->Path() + "/raw";
+    auto values = MakeRows<float>();
+    WriteRaw(raw_path, values, kRows, kDim);
+    OpenedDiskIndex<float> opened;
+    BuildDisk(
+        raw_path,
+        files->Path(),
+        opened,
+        {.version = knowhere::Version::GetMaximumVersion().VersionNumber()});
+    ASSERT_NE(opened.base, nullptr);
+    const auto* reader = dynamic_cast<const IVectorReader*>(opened.base.get());
+    ASSERT_NE(reader, nullptr);
+    EXPECT_EQ(opened.base->Count(), kRows);
+    VectorSearchParams params{
+        .search_params_ = {{DISK_ANN_QUERY_LIST, 8}},
+        .metric_type_ = "L2",
+        .topk_ = 4,
+    };
+    SearchResult result;
+    reader->Search(
+        GenDataset(1, kDim, values.data()), params, BitsetView{}, result);
+    ASSERT_EQ(result.seg_offsets_.size(), 4);
+    for (const auto offset : result.seg_offsets_) {
+        EXPECT_GE(offset, 0);
+        EXPECT_LT(offset, kRows);
+    }
 }
 
 TEST(VectorDiskFamilyTest, ResidentInputBuildLoadSearch) {
@@ -725,6 +916,153 @@ TEST(VectorDiskFamilyTest, MmapCapabilityAndSearch) {
     RunOrdinaryDiskSearch<float>(native_mmap);
 }
 
+void
+RunNullableDiskBuild(bool resident, bool embedding_list = false) {
+    const int64_t valid_rows = embedding_list ? kRows / 2 : kRows;
+    const int64_t logical_rows = valid_rows + 5;
+    const std::array<int64_t, 5> null_rows{
+        0, 1, 2, logical_rows / 2 + 1, logical_rows - 1};
+    std::vector<uint8_t> bitmap(GetValidDataBitmapSize(logical_rows), 0);
+    for (int64_t row = 0; row < logical_rows; ++row) {
+        if (std::find(null_rows.begin(), null_rows.end(), row) ==
+            null_rows.end()) {
+            bitmap[row / 8] |= uint8_t{1} << (row % 8);
+        }
+    }
+    auto files = storage::LocalDirectory::CreateOwned(
+        "/tmp", "vector_disk_nullable_XXXXXX", "nullable disk test");
+    const auto raw_path = files->Path() + "/raw";
+    const auto validity_path = files->Path() + "/validity";
+    const auto values = MakeRows<float>();
+    ASSERT_NO_FATAL_FAILURE(WriteRaw(raw_path, values, kRows, kDim));
+    if (resident) {
+        std::filesystem::resize_file(raw_path, 2 * sizeof(uint32_t));
+    }
+    std::optional<std::string> offsets_path;
+    std::vector<size_t> offsets;
+    if (embedding_list) {
+        // The bitmap addresses parents, including valid empty lists; raw data
+        // and offsets address their compacted vectors.
+        offsets.push_back(0);
+        for (int64_t row = 0; row < valid_rows; ++row) {
+            offsets.push_back(offsets.back() + (row + 1) % 5);
+        }
+        ASSERT_EQ(offsets.back(), kRows);
+        offsets_path = files->Path() + "/offsets";
+        ASSERT_NO_FATAL_FAILURE(WriteOffsets(*offsets_path, offsets));
+    }
+    {
+        std::ofstream stream(validity_path, std::ios::binary);
+        ASSERT_TRUE(stream.good());
+        const auto wire_count = ToValidDataCount(logical_rows);
+        stream.write(reinterpret_cast<const char*>(&wire_count),
+                     sizeof(wire_count));
+        stream.write(reinterpret_cast<const char*>(bitmap.data()),
+                     bitmap.size());
+        ASSERT_TRUE(stream.good());
+    }
+
+    // Retain the actual engine handle to inspect its mapping before any load
+    // can reconstruct it. The alias still creates the normal DiskANN node.
+    using NativeIndex = knowhere::Index<knowhere::IndexNode>;
+    static std::weak_ptr<NativeIndex> captured;
+    constexpr const char* index_type = "MILVUS_TEST_NULLABLE_DISK_BUILD";
+    static const auto& registration =
+        knowhere::IndexFactory::Instance().Register<knowhere::fp32>(
+            index_type,
+            [](const int32_t& version, const knowhere::Object& object) {
+                // Select the open-source node when DISKANN is registered by
+                // another engine in the local build.
+                const auto& features =
+                    knowhere::IndexFactory::GetIndexFeatures();
+                const auto diskann_type =
+                    features.count("DISKANN_DEPRECATED") != 0
+                        ? "DISKANN_DEPRECATED"
+                        : knowhere::IndexEnum::INDEX_DISKANN;
+                auto created =
+                    knowhere::IndexFactory::Instance().Create<knowhere::fp32>(
+                        diskann_type, version, object);
+                AssertInfo(created.has_value(), "failed to create test index");
+                auto target = captured.lock();
+                AssertInfo(target != nullptr, "test index capture is missing");
+                *target = created.value();
+                return created.value();
+            },
+            knowhere::feature::FLOAT32 | knowhere::feature::DISK |
+                knowhere::feature::EMB_LIST);
+    static_cast<void>(registration);
+    auto native_index = std::make_shared<NativeIndex>();
+    captured = native_index;
+    const auto metric =
+        embedding_list ? knowhere::metric::MAX_SIM_IP : knowhere::metric::L2;
+    Config params{{METRIC_TYPE, metric},
+                  {DIM_KEY, kDim},
+                  {DISK_ANN_MAX_DEGREE, 24},
+                  {DISK_ANN_SEARCH_LIST_SIZE, 56},
+                  {DISK_ANN_PQ_CODE_BUDGET, 0.001},
+                  {DISK_ANN_BUILD_DRAM_BUDGET, 2},
+                  {DISK_ANN_THREADS_NUM, 2}};
+    VectorDiskBuilder<float> builder(
+        embedding_list ? DataType::VECTOR_FLOAT : DataType::NONE,
+        index_type,
+        metric,
+        knowhere::Version::GetCurrentVersion().VersionNumber(),
+        kDim,
+        params,
+        files->Path());
+    auto artifact =
+        std::move(builder).Build({.raw_path = raw_path,
+                                  .validity_path = validity_path,
+                                  .embedding_offsets_path = offsets_path,
+                                  .tensor = resident ? values.data() : nullptr,
+                                  .raw_file_complete = !resident});
+    ASSERT_NE(artifact, nullptr);
+    ASSERT_NE(native_index->Node(), nullptr);
+    const auto& id_map = native_index->Node()->GetIdMap();
+    ASSERT_TRUE(id_map.IsEnabled());
+    ASSERT_EQ(id_map.OutCount(), logical_rows);
+    ASSERT_EQ(id_map.InCount(), valid_rows);
+    int64_t compact_id = 0;
+    for (int64_t row = 0; row < logical_rows; ++row) {
+        const bool valid = std::find(null_rows.begin(), null_rows.end(), row) ==
+                           null_rows.end();
+        EXPECT_EQ(id_map.IsValidOutId(row), valid);
+        if (valid) {
+            EXPECT_EQ(id_map.MapInToOut(compact_id), row);
+            EXPECT_EQ(id_map.MapOutToIn(row), compact_id);
+            if (embedding_list) {
+                for (size_t vector_id = offsets[compact_id];
+                     vector_id < offsets[compact_id + 1];
+                     ++vector_id) {
+                    EXPECT_EQ(id_map.MapInToOut(
+                                  vector_id, knowhere::IdMap::Domain::EMB_LIST),
+                              row);
+                }
+            }
+            ++compact_id;
+        } else {
+            EXPECT_EQ(id_map.MapOutToIn(row), -1);
+        }
+    }
+}
+
+TEST(VectorDiskFamilyTest, NullableBuildPreservesRowMapping) {
+    RunNullableDiskBuild(false);
+}
+
+TEST(VectorDiskFamilyTest, ResidentNullableBuildPreservesRowMapping) {
+    RunNullableDiskBuild(true);
+}
+
+TEST(VectorDiskFamilyTest, NullableEmbeddingListBuildPreservesParentMapping) {
+    RunNullableDiskBuild(false, true);
+}
+
+TEST(VectorDiskFamilyTest,
+     ResidentNullableEmbeddingListBuildPreservesParentMapping) {
+    RunNullableDiskBuild(true, true);
+}
+
 TEST(VectorDiskFamilyTest, RejectsQueryListSmallerThanTopK) {
     auto files = storage::LocalDirectory::CreateOwned(
         "/tmp", "vector_disk_invalid_XXXXXX", "vector disk test");
@@ -742,11 +1080,8 @@ TEST(VectorDiskFamilyTest, RejectsQueryListSmallerThanTopK) {
         .topk_ = 4,
     };
     SearchResult result;
-    EXPECT_ANY_THROW(reader->Search(GenDataset(1, kDim, values.data()),
-                                    params,
-                                    BitsetView{},
-                                    nullptr,
-                                    result));
+    EXPECT_ANY_THROW(reader->Search(
+        GenDataset(1, kDim, values.data()), params, BitsetView{}, result));
 }
 
 TEST(VectorDiskFamilyTest, EmbeddingListsPreserveTrailingEmptyParents) {
@@ -795,7 +1130,7 @@ TEST(VectorDiskFamilyTest, EmbeddingListsPreserveTrailingEmptyParents) {
         .topk_ = 4,
     };
     SearchResult result;
-    reader->Search(query, params, BitsetView{}, nullptr, result);
+    reader->Search(query, params, BitsetView{}, result);
     EXPECT_EQ(result.total_nq_, 2);
     EXPECT_EQ(result.unity_topK_, 4);
     EXPECT_EQ(result.seg_offsets_.size(), 8);
@@ -883,7 +1218,6 @@ RunNullableElementLevelDiskSearch(bool more_rows_than_vectors,
     reader->Search(GenDataset(1, kDim, values.data()),
                    params,
                    BitsetView(filtered),
-                   nullptr,
                    unfiltered_result);
     ASSERT_EQ(unfiltered_result.seg_offsets_.size(), 1);
     EXPECT_GE(unfiltered_result.seg_offsets_[0], 0);
@@ -896,7 +1230,6 @@ RunNullableElementLevelDiskSearch(bool more_rows_than_vectors,
     reader->Search(GenDataset(1, kDim, values.data() + allowed * kDim),
                    params,
                    BitsetView(filtered),
-                   nullptr,
                    result);
     ASSERT_EQ(result.seg_offsets_.size(), 1);
     EXPECT_EQ(result.seg_offsets_[0], allowed);
@@ -982,7 +1315,6 @@ RunElementNullableDiskSearch(bool mmap_id_map) {
     reader->Search(GenDataset(1, kDim, values.data() + last * kDim),
                    params,
                    BitsetView{},
-                   nullptr,
                    result);
     ASSERT_EQ(result.seg_offsets_.size(), 1);
     EXPECT_EQ(result.seg_offsets_[0], logical_ids[last]);
@@ -994,7 +1326,6 @@ RunElementNullableDiskSearch(bool mmap_id_map) {
     reader->Search(GenDataset(1, kDim, values.data() + (last - 1) * kDim),
                    params,
                    BitsetView(filtered),
-                   nullptr,
                    filtered_result);
     ASSERT_EQ(filtered_result.seg_offsets_.size(), 1);
     EXPECT_EQ(filtered_result.seg_offsets_[0], allowed);

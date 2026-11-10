@@ -17,67 +17,36 @@
 package storage
 
 import (
+	"maps"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-const (
-	// concurrentBM25StatsShardBits sets 32 shards; each token belongs to exactly one shard.
-	concurrentBM25StatsShardBits = 5
-	concurrentBM25StatsShards    = 1 << concurrentBM25StatsShardBits
-
-	// below this many tokens a merge locks the shard per token instead of splitting the stats first
-	concurrentBM25StatsSplitThreshold = 1024
-)
-
 // ConcurrentBM25Stats holds the same data as BM25Stats with the token table split into shards,
 // each guarded by its own lock, so concurrent merges of different stats proceed in parallel.
-// Every token lives in exactly one shard, so it takes the same memory as a single BM25Stats.
+// The token maps use the same shard layout as BM25Stats; only the synchronization differs.
 // A reader running concurrently with a merge may observe that merge partially applied.
 //
 // A concurrent BuildIDF still never sees more rows containing a token than rows in total, which would
 // make the IDF negative: Merge and MergeFrom add the row count before the token counts, and BuildIDF reads
 // the token counts before the row count. Minus does not keep this, so it must not run concurrently with BuildIDF.
 //
-// The shard locks cost an atomic update per token, which matters on hot paths that are already
-// serialized by the caller. The Unlocked methods skip them: MergeUnlocked and MinusUnlocked need
+// The Unlocked methods skip shard locks on paths already serialized by the caller:
+// MergeUnlocked and MinusUnlocked need
 // the caller to hold c exclusively, and BuildIDFUnlocked needs that no write runs concurrently.
 type ConcurrentBM25Stats struct {
-	shards    [concurrentBM25StatsShards]bm25StatsShard
-	numRow    atomic.Int64
-	numToken  atomic.Int64
-	nextShard atomic.Uint32 // rotates the first shard a large merge writes to, to spread contention
+	rowsWithToken bm25TokenCounts
+	shardLocks    [bm25StatsShards]sync.RWMutex
+	numRow        atomic.Int64
+	numToken      atomic.Int64
 }
-
-type bm25StatsShard struct {
-	sync.RWMutex
-	rowsWithToken map[uint32]int32
-}
-
-type tokenCount struct {
-	token uint32
-	count int32
-}
-
-var splitBufferPool = sync.Pool{New: func() any {
-	split := make([][]tokenCount, concurrentBM25StatsShards)
-	return &split
-}}
 
 func NewConcurrentBM25Stats() *ConcurrentBM25Stats {
-	c := &ConcurrentBM25Stats{}
-	for i := range c.shards {
-		c.shards[i].rowsWithToken = map[uint32]int32{}
-	}
-	return c
-}
-
-// shardOf spreads tokens with Fibonacci hashing, so shards stay balanced even if token low bits are not uniform.
-func shardOf(token uint32) uint32 {
-	return (token * 2654435769) >> (32 - concurrentBM25StatsShardBits)
+	return &ConcurrentBM25Stats{}
 }
 
 // Merge adds stats into c. Safe for concurrent use.
@@ -85,83 +54,36 @@ func (c *ConcurrentBM25Stats) Merge(stats *BM25Stats) {
 	// the row count goes first, see the type comment
 	c.numRow.Add(stats.numRow)
 	c.numToken.Add(stats.numToken)
-	c.apply(stats.rowsWithToken, 1)
+	c.apply(&stats.rowsWithToken, 1, true)
 }
 
 // Minus subtracts stats from c. Safe for concurrent use with other writes, but not with BuildIDF.
 func (c *ConcurrentBM25Stats) Minus(stats *BM25Stats) {
-	c.apply(stats.rowsWithToken, -1)
+	c.apply(&stats.rowsWithToken, -1, true)
 	c.numRow.Add(-stats.numRow)
 	c.numToken.Add(-stats.numToken)
 }
 
 // MergeUnlocked adds stats into c. The caller must hold c exclusively.
 func (c *ConcurrentBM25Stats) MergeUnlocked(stats *BM25Stats) {
-	c.applyUnlocked(stats.rowsWithToken, 1)
+	c.apply(&stats.rowsWithToken, 1, false)
 	c.numRow.Add(stats.numRow)
 	c.numToken.Add(stats.numToken)
 }
 
 // MinusUnlocked subtracts stats from c. The caller must hold c exclusively.
 func (c *ConcurrentBM25Stats) MinusUnlocked(stats *BM25Stats) {
-	c.applyUnlocked(stats.rowsWithToken, -1)
+	c.apply(&stats.rowsWithToken, -1, false)
 	c.numRow.Add(-stats.numRow)
 	c.numToken.Add(-stats.numToken)
 }
 
-func (c *ConcurrentBM25Stats) applyUnlocked(rows map[uint32]int32, sign int32) {
-	for token, count := range rows {
-		addTokenCount(c.shards[shardOf(token)].rowsWithToken, token, sign*count)
+func (c *ConcurrentBM25Stats) apply(source *bm25TokenCounts, sign int32, lockShards bool) {
+	var locks *[bm25StatsShards]sync.RWMutex
+	if lockShards {
+		locks = &c.shardLocks
 	}
-}
-
-// addTokenCount adds delta to the count of token and drops the token once its count is zero,
-// like BM25Stats.Minus, so tokens of removed segments do not stay in the table.
-func addTokenCount(rows map[uint32]int32, token uint32, delta int32) {
-	if count := rows[token] + delta; count != 0 {
-		rows[token] = count
-	} else {
-		delete(rows, token)
-	}
-}
-
-func (c *ConcurrentBM25Stats) apply(rows map[uint32]int32, sign int32) {
-	if len(rows) < concurrentBM25StatsSplitThreshold {
-		for token, count := range rows {
-			shard := &c.shards[shardOf(token)]
-			shard.Lock()
-			addTokenCount(shard.rowsWithToken, token, sign*count)
-			shard.Unlock()
-		}
-		return
-	}
-
-	// the split buffers are reused across merges: a recovering delegator merges thousands of
-	// segments with hundreds of thousands of tokens each, and fresh buffers per merge pile up as garbage
-	bufp := splitBufferPool.Get().(*[][]tokenCount)
-	split := *bufp
-	for i := range split {
-		split[i] = split[i][:0]
-	}
-	for token, count := range rows {
-		s := shardOf(token)
-		split[s] = append(split[s], tokenCount{token, count})
-	}
-	defer func() {
-		*bufp = split
-		splitBufferPool.Put(bufp)
-	}()
-
-	start := c.nextShard.Add(1)
-	for i := uint32(0); i < concurrentBM25StatsShards; i++ {
-		s := (start + i) % concurrentBM25StatsShards
-		shard := &c.shards[s]
-		shard.Lock()
-		for _, tc := range split[s] {
-			addTokenCount(shard.rowsWithToken, tc.token, sign*tc.count)
-		}
-		shard.Unlock()
-	}
+	c.rowsWithToken.apply(source, sign, locks, true)
 }
 
 // MergeFrom adds other into c, merging the shards in parallel. Safe for concurrent use,
@@ -170,23 +92,7 @@ func (c *ConcurrentBM25Stats) MergeFrom(other *ConcurrentBM25Stats) {
 	// the row count goes first, see the type comment
 	c.numRow.Add(other.numRow.Load())
 	c.numToken.Add(other.numToken.Load())
-	var wg sync.WaitGroup
-	for i := range c.shards {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			src := &other.shards[i]
-			dst := &c.shards[i]
-			src.RLock()
-			dst.Lock()
-			for token, count := range src.rowsWithToken {
-				addTokenCount(dst.rowsWithToken, token, count)
-			}
-			dst.Unlock()
-			src.RUnlock()
-		}(i)
-	}
-	wg.Wait()
+	c.apply(&other.rowsWithToken, 1, true)
 }
 
 func (c *ConcurrentBM25Stats) NumRow() int64 {
@@ -204,10 +110,10 @@ func (c *ConcurrentBM25Stats) BuildIDF(tf []byte) (idf []byte) {
 	nqs := make([]int32, numElements)
 	for idx := 0; idx < numElements; idx++ {
 		key := typeutil.SparseFloatRowIndexAt(tf, idx)
-		shard := &c.shards[shardOf(key)]
-		shard.RLock()
-		nqs[idx] = shard.rowsWithToken[key]
-		shard.RUnlock()
+		shard := shardOf(key)
+		c.shardLocks[shard].RLock()
+		nqs[idx] = c.rowsWithToken[shard][key]
+		c.shardLocks[shard].RUnlock()
 	}
 	// read after the token counts, so it covers every merge they include, see the type comment
 	numRow := c.numRow.Load()
@@ -229,7 +135,7 @@ func (c *ConcurrentBM25Stats) BuildIDFUnlocked(tf []byte) (idf []byte) {
 	for idx := 0; idx < numElements; idx++ {
 		key := typeutil.SparseFloatRowIndexAt(tf, idx)
 		value := typeutil.SparseFloatRowValueAt(tf, idx)
-		nq := c.shards[shardOf(key)].rowsWithToken[key]
+		nq := c.rowsWithToken.get(key)
 		typeutil.SparseFloatRowSetAt(idf, idx, key, bm25TermIDF(value, numRow, nq))
 	}
 	return
@@ -243,28 +149,28 @@ func (c *ConcurrentBM25Stats) GetAvgdl() float64 {
 	return float64(numToken) / float64(numRow)
 }
 
-// MemSize estimates the in-memory size with the same per-entry cost as BM25Stats.MemSize.
+// MemSize estimates the object, live shard-map headers and token entries.
 func (c *ConcurrentBM25Stats) MemSize() int64 {
-	entries := 0
-	for i := range c.shards {
-		shard := &c.shards[i]
-		shard.RLock()
-		entries += len(shard.rowsWithToken)
-		shard.RUnlock()
+	size := int64(unsafe.Sizeof(*c))
+	bytesPerEntry := paramtable.Get().QueryNodeCfg.BM25StatsBytesPerEntry.GetAsInt64()
+	for i := range c.rowsWithToken {
+		c.shardLocks[i].RLock()
+		entries := len(c.rowsWithToken[i])
+		c.shardLocks[i].RUnlock()
+		if entries != 0 {
+			size += bm25StatsMapOverhead + int64(entries)*bytesPerEntry
+		}
 	}
-	return 120 + int64(entries)*paramtable.Get().QueryNodeCfg.BM25StatsBytesPerEntry.GetAsInt64()
+	return size
 }
 
-// Snapshot copies the stats into a BM25Stats.
+// Snapshot copies the stats into a BM25Stats with the same shard layout.
 func (c *ConcurrentBM25Stats) Snapshot() *BM25Stats {
 	stats := NewBM25Stats()
-	for i := range c.shards {
-		shard := &c.shards[i]
-		shard.RLock()
-		for token, count := range shard.rowsWithToken {
-			stats.rowsWithToken[token] = count
-		}
-		shard.RUnlock()
+	for i := range c.rowsWithToken {
+		c.shardLocks[i].RLock()
+		stats.rowsWithToken[i] = maps.Clone(c.rowsWithToken[i])
+		c.shardLocks[i].RUnlock()
 	}
 	stats.numRow = c.numRow.Load()
 	stats.numToken = c.numToken.Load()

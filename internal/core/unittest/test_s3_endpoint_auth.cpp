@@ -27,7 +27,6 @@
 #include <aws/core/http/standard/StandardHttpRequest.h>
 #include <aws/core/http/standard/StandardHttpResponse.h>
 #include <aws/crt/endpoints/RuleEngine.h>
-#include <aws/s3/S3EndpointRules.h>
 #include <aws/s3/model/ListObjectsRequest.h>
 
 #include <cstdio>
@@ -264,16 +263,33 @@ TEST_F(S3EndpointAuthGuardDeathTest, CrtRuleEngineUsesSdkInitialization) {
             // Static CRT copies in this binary and libmilvus-storage.so leave
             // this copy's JSON allocator uninitialized, even when compiler
             // inlining happens to make the endpoint-provider tests pass.
+            // S3 now uses internal binary rules. Use a small JSON ruleset to
+            // keep exercising CRT's JSON allocator through its public API.
+            constexpr char rules[] = R"({
+                "version": "1.0",
+                "parameters": {},
+                "rules": [{
+                    "type": "endpoint", "conditions": [],
+                    "endpoint": {
+                        "url": "https://s3.example.test",
+                        "properties": {}, "headers": {}
+                    }
+                }]
+            })";
             Aws::Crt::Endpoints::RuleEngine engine(
-                Aws::Crt::ByteCursorFromArray(
-                    reinterpret_cast<const uint8_t*>(
-                        Aws::S3::S3EndpointRules::GetRulesBlob()),
-                    Aws::S3::S3EndpointRules::RulesBlobSize),
+                Aws::Crt::ByteCursorFromCString(rules),
                 Aws::Crt::ByteCursorFromArray(
                     reinterpret_cast<const uint8_t*>(
                         Aws::Endpoint::AWSPartitions::GetPartitionsBlob()),
                     Aws::Endpoint::AWSPartitions::PartitionsBlobSize));
             ASSERT_TRUE(engine);
+            Aws::Crt::Endpoints::RequestContext context;
+            auto endpoint = engine.Resolve(context);
+            ASSERT_TRUE(endpoint);
+            ASSERT_TRUE(endpoint->IsEndpoint());
+            auto url = endpoint->GetUrl();
+            ASSERT_TRUE(url);
+            EXPECT_EQ(url->compare("https://s3.example.test"), 0);
             // engine is destroyed before RunWithSdk shuts down the SDK.
         }),
         ::testing::ExitedWithCode(0),

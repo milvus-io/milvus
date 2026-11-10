@@ -7,6 +7,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	qvobserve "github.com/milvus-io/milvus/internal/views/qviews/observe"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -42,8 +43,9 @@ type snShardView struct {
 
 // snViewEntry pairs an ApplyView (carrying the OnReport callback) with its state machine.
 type snViewEntry struct {
-	advertisedUp bool
-	preparing    bool
+	leaseDisabled bool // Explicit Down control permanently closes this View's lease.
+	advertisedUp  bool
+	preparing     bool
 	handler.ApplyView
 	sm             *snQueryViewStateMachine
 	queryRefs      int
@@ -103,6 +105,7 @@ func (s *snShardView) startRecoveryVersions(versions []qviews.QueryViewVersion) 
 		key := qviews.QueryViewKey{ShardID: s.shardID, QueryViewVersion: version}
 		entry := s.views[version]
 		v := version // capture loop variable
+		qvobserve.Observe(s.ctx, qvobserve.StreamingNodeRecoverAcquireResourceEvent{View: key})
 		s.resMgr.Acquire(AcquireResource{
 			Key:            key,
 			Meta:           entry.sm.Meta(),
@@ -183,6 +186,7 @@ func (s *snShardView) applyOneLocked(av *handler.ApplyView) {
 			entry = &snViewEntry{ApplyView: *av, sm: sm}
 			s.views[key.QueryViewVersion] = entry
 			s.publishReplicaLocked(entry)
+			qvobserve.Observe(s.ctx, qvobserve.StreamingNodeAcquireResourceEvent{View: key})
 			// SN SM constructor generates a Preparing report.
 			s.consumeReport(entry)
 
@@ -224,6 +228,10 @@ func (s *snShardView) applyOneLocked(av *handler.ApplyView) {
 	entry.ApplyView = *av
 	entry.sm.UpdateView(av.View.IntoProto())
 	if pushedState == qviews.QueryViewStateDown && entry.sm.State() == qviews.QueryViewStateUp {
+		if av.View.IntoProto().GetMeta().GetControl().GetPreemptServingLease() {
+			entry.disableServingLease()
+			s.publishReplicaLocked(entry)
+		}
 		entry.pendingDown = true
 		s.advancePendingDownLocked(key.QueryViewVersion, entry)
 		return
@@ -231,7 +239,16 @@ func (s *snShardView) applyOneLocked(av *handler.ApplyView) {
 	if pushedState == qviews.QueryViewStateDropped {
 		entry.cancelPendingDown()
 	}
+	before := entry.sm.State()
 	entry.sm.OnCoordStateDelivered(pushedState)
+	qvobserve.Observe(s.ctx, qvobserve.StreamingNodeApplyCoordViewEvent{
+		ViewStateTransition: qvobserve.ViewStateTransition{
+			CollectionID: collectionIDForEntry(entry),
+			View:         key,
+			From:         before,
+			To:           entry.sm.State(),
+		},
+	})
 	s.consumeReportPersistAndCleanup(key.QueryViewVersion, entry)
 }
 
@@ -257,7 +274,17 @@ func (s *snShardView) notifyReady(version qviews.QueryViewVersion) {
 		return
 	}
 
+	key := entry.View.QueryViewKey()
+	before := entry.sm.State()
 	entry.sm.OnReady()
+	qvobserve.Observe(s.ctx, qvobserve.StreamingNodeResourceReadyEvent{
+		ViewStateTransition: qvobserve.ViewStateTransition{
+			CollectionID: collectionIDForEntry(entry),
+			View:         key,
+			From:         before,
+			To:           entry.sm.State(),
+		},
+	})
 	s.consumeReportPersistAndCleanup(version, entry)
 }
 
@@ -286,7 +313,17 @@ func (s *snShardView) notifyRecoveringDone(version qviews.QueryViewVersion) {
 		return
 	}
 
+	key := entry.View.QueryViewKey()
+	before := entry.sm.State()
 	entry.sm.OnRecoveringDone()
+	qvobserve.Observe(s.ctx, qvobserve.StreamingNodeRecoveringDoneEvent{
+		ViewStateTransition: qvobserve.ViewStateTransition{
+			CollectionID: collectionIDForEntry(entry),
+			View:         key,
+			From:         before,
+			To:           entry.sm.State(),
+		},
+	})
 	s.consumeReportPersistAndCleanup(version, entry)
 }
 
@@ -295,6 +332,7 @@ func (s *snShardView) notifyRecoveringDone(version qviews.QueryViewVersion) {
 func (s *snShardView) consumeReport(entry *snViewEntry) {
 	report := entry.sm.ConsumeReport()
 	if report != nil && entry.OnReport != nil {
+		qvobserve.Observe(s.ctx, qvobserve.StreamingNodeReportViewEvent{View: entry.View.QueryViewKey(), State: qviews.QueryViewState(report.Meta.State)})
 		entry.OnReport(qviews.NewQueryViewAtWorkNodeFromProto(report))
 	}
 }
@@ -310,7 +348,17 @@ func (s *snShardView) notifyDropped(version qviews.QueryViewVersion) {
 		return
 	}
 
+	key := entry.View.QueryViewKey()
+	before := entry.sm.State()
 	entry.sm.OnDropped()
+	qvobserve.Observe(s.ctx, qvobserve.StreamingNodeReleaseDoneEvent{
+		ViewStateTransition: qvobserve.ViewStateTransition{
+			CollectionID: collectionIDForEntry(entry),
+			View:         key,
+			From:         before,
+			To:           entry.sm.State(),
+		},
+	})
 	s.consumeReportPersistAndCleanup(version, entry)
 }
 
@@ -356,6 +404,7 @@ func (s *snShardView) consumeAndPersist(entry *snViewEntry) bool {
 	if persist == nil {
 		return true
 	}
+	qvobserve.Observe(s.ctx, qvobserve.StreamingNodePersistViewEvent{View: entry.View.QueryViewKey(), State: qviews.QueryViewState(persist.Meta.State)})
 	if err := s.catalog.SaveQueryViews(s.ctx, s.pchannel, []*viewpb.QueryViewOfShard{persist}); err != nil {
 		if s.ctx.Err() != nil {
 			return false
@@ -391,6 +440,7 @@ func (s *snShardView) startReleaseLocked(version qviews.QueryViewVersion, entry 
 	if key.QueryViewVersion == (qviews.QueryViewVersion{}) {
 		key = qviews.QueryViewKey{ShardID: s.shardID, QueryViewVersion: version}
 	}
+	qvobserve.Observe(s.ctx, qvobserve.StreamingNodeReleaseResourceEvent{View: key})
 	s.resMgr.Release(ReleaseResource{
 		Key: key,
 		OnDropped: func() {
@@ -426,7 +476,7 @@ func (s *snShardView) tryAcquireUpViewForSchema(ctx context.Context, schema *int
 		if entry.sm.IsRecovering() {
 			recovering = true
 		}
-		if entry.sm.State() != qviews.QueryViewStateUp {
+		if entry.leaseDisabled || entry.sm.State() != qviews.QueryViewStateUp {
 			continue
 		}
 		if selected == nil || version.GT(selectedVersion) {
@@ -488,8 +538,8 @@ func (s *snShardView) releaseQueryViewLease(version qviews.QueryViewVersion) {
 	}
 }
 
-// publishReplicaLocked follows successful persistence and precedes entry cleanup.
-// Recovery, lease timers and Coord pushes all use the same transition drain.
+// publishReplicaLocked advertises local serving eligibility. State transitions
+// publish after persistence; lease closure can withdraw admission while calls drain.
 func (s *snShardView) publishReplicaLocked(entry *snViewEntry) {
 	state := entry.sm.State()
 	preparing := state == qviews.QueryViewStatePreparing || state == qviews.QueryViewStateReady || state == qviews.QueryViewStateUpRecovering
@@ -502,7 +552,7 @@ func (s *snShardView) publishReplicaLocked(entry *snViewEntry) {
 		}
 		entry.preparing = preparing
 	}
-	up := state == qviews.QueryViewStateUp
+	up := state == qviews.QueryViewStateUp && !entry.leaseDisabled
 	if entry.advertisedUp == up && !preparingChanged {
 		return
 	}
@@ -527,4 +577,8 @@ func (s *snShardView) publishReplicaLocked(entry *snViewEntry) {
 	if s.replicas != nil {
 		s.replicas.Set(s.shardID.VChannel, s.shardID.ReplicaID, s.maxUpVersion, s.preparingViews > 0)
 	}
+}
+
+func collectionIDForEntry(entry *snViewEntry) int64 {
+	return entry.sm.Meta().GetCollectionId()
 }

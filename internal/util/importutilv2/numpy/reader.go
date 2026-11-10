@@ -18,6 +18,7 @@ package numpy
 
 import (
 	"context"
+	"fmt"
 	"io"
 
 	"github.com/samber/lo"
@@ -26,6 +27,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
+	pkgcommon "github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type reader struct {
@@ -39,6 +43,72 @@ type reader struct {
 
 	count int64
 	frs   map[int64]*FieldReader // fieldID -> FieldReader
+}
+
+// ValidateSchema rejects a NumPy import that cannot fill the collection: struct
+// rows it cannot carry, a provided auto-id or function-output field, an
+// unsupported type, or a required field with no file.
+func ValidateSchema(schema *schemapb.CollectionSchema, paths []string) error {
+	for _, structField := range schema.GetStructArrayFields() {
+		if !structField.GetNullable() {
+			return merr.WrapErrImportFailedMsg(
+				"numpy import cannot fill struct field '%s', which is not nullable: numpy files cannot carry struct data; use JSON, CSV or Parquet files",
+				structField.GetName())
+		}
+	}
+	if err := checkStructFilePaths(schema, paths); err != nil {
+		return err
+	}
+
+	sourced, all := resolveFieldPaths(schema, paths)
+	nameToField := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) string {
+		return field.GetName()
+	})
+	for name := range sourced {
+		field := nameToField[name]
+
+		// auto-id field must not provided
+		if typeutil.IsAutoPKField(field) {
+			return merr.WrapErrImportFailed(
+				fmt.Sprintf("the primary key '%s' is auto-generated, no need to provide", field.GetName()))
+		}
+		// validate function output field
+		if field.GetIsFunctionOutput() {
+			if typeutil.IsBM25FunctionOutputField(field, schema) {
+				return merr.WrapErrImportFailed(
+					fmt.Sprintf("not allowed to provide data for BM25 function output field '%s'", field.GetName()))
+			}
+			if !pkgcommon.GetCollectionAllowInsertNonBM25FunctionOutputs(schema.GetProperties()) {
+				return merr.WrapErrImportFailed(
+					fmt.Sprintf("not allowed to provide data for function output field '%s', "+
+						"set collection property '%s' to enable", field.GetName(), pkgcommon.CollectionAllowInsertNonBM25FunctionOutputs))
+			}
+		}
+		// report an error if user provided the files for unsupported fields
+		if err := checkUnsupportedDataType(field.GetDataType()); err != nil {
+			return err
+		}
+	}
+
+	// this loop is for "are there any fields not provided?"
+	for _, field := range nameToField {
+		// auto-id field, function output field already checked
+		// dynamic field, nullable field, default value field, not provided or provided both ok
+		if typeutil.IsAutoPKField(field) || field.GetIsDynamic() || field.GetIsFunctionOutput() ||
+			field.GetNullable() || field.GetDefaultValue() != nil {
+			continue
+		}
+		// report an error if the collection contains an unsupported field even user doesn't provide a numpy file for the field
+		if err := checkUnsupportedDataType(field.GetDataType()); err != nil {
+			return err
+		}
+		// the other field must be provided
+		if _, ok := sourced[field.GetName()]; !ok {
+			return merr.WrapErrImportFailed(
+				fmt.Sprintf("no file for field: %s, files: %v", field.GetName(), lo.Values(all)))
+		}
+	}
+	return nil
 }
 
 func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, paths []string, bufferSize int) (*reader, error) {

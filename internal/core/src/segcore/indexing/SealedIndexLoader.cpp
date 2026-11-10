@@ -1,0 +1,440 @@
+#include "segcore/indexing/SealedIndexLoader.h"
+
+#include <filesystem>
+#include <limits>
+#include <optional>
+#include <utility>
+
+#include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/Utils.h"
+#include "common/common_type_c.h"
+#include "common/resource_c.h"
+#include "fmt/core.h"
+#include "glog/logging.h"
+#include "index/Families.h"
+#include "index/IndexTypeAdapter.h"
+#include "index/LoadResource.h"
+#include "index/PackedIndexLoad.h"
+#include "index/LegacyIndexLoad.h"
+#include "folly/ScopeGuard.h"
+#include "folly/coro/BlockingWait.h"
+#include "storage/AsyncLoadExecutor.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
+#include "index/Meta.h"
+#include "index/ParamUtils.h"
+#include "index/Utils.h"
+#include "index/contracts/Registry.h"
+#include "index/scalar/json/JsonProjectedIndexLoad.h"
+#include "log/Log.h"
+#include "nlohmann/json.hpp"
+#include "segcore/CacheMetricAttribution.h"
+#include "segcore/Types.h"
+#include "segcore/Utils.h"
+#include "segcore/memory_planner.h"
+#include "storage/EntryStreamUtils.h"
+#include "storage/LocalFileIOPool.h"
+#include "storage/LoadOverheadController.h"
+#include "storage/ThreadPools.h"
+#include "storage/artifact/FileSource.h"
+#include "storage/artifact/LoadOptions.h"
+
+namespace milvus::segcore {
+
+namespace {
+
+IndexType
+ReadIndexType(const Config& config) {
+    const auto index_type =
+        index::GetValueFromConfig<std::string>(config, index::INDEX_TYPE);
+    AssertInfo(index_type.has_value() && !index_type->empty(),
+               "index type is empty");
+    return *index_type;
+}
+
+bool
+UsesV1DiskLayout(const index::IndexFamily& family) {
+    return family == index::families::kVectorDisk ||
+           family == index::families::kInverted ||
+           family == index::families::kNgram ||
+           family == index::families::kRTree ||
+           family == index::families::kJsonFlat ||
+           family == index::families::kHybrid;
+}
+
+std::unique_ptr<storage::V1RemoteSource>
+MakeRemoteSource(const index::IndexFamily& requested_family,
+                 const storage::FileManagerContext& context,
+                 const std::vector<std::string>& remote_paths,
+                 const storage::LoadOptions& options) {
+    const auto layout = UsesV1DiskLayout(requested_family)
+                            ? storage::V1SourceLayout::DiskFiles
+                            : storage::V1SourceLayout::MemoryEntries;
+    // Inspect metadata before the concrete family can be selected.
+    if (!context.use_async_load.value_or(
+            storagev2translator::StorageV2AsyncLoadEnabled())) {
+        return std::make_unique<storage::V1RemoteSource>(
+            context,
+            remote_paths,
+            options,
+            storage::ArtifactStorageNamespace::Index,
+            layout);
+    }
+    const auto priority =
+        options.op_ctx && options.op_ctx->runtime_load_priority.value_or(0) != 0
+            ? proto::common::LoadPriority::LOW
+            : proto::common::LoadPriority::HIGH;
+    return folly::coro::blockingWait(folly::coro::co_withExecutor(
+        storage::ResolveAsyncLoadExecutor({}, priority),
+        storage::V1RemoteSource::OpenAsync(
+            context,
+            remote_paths,
+            options,
+            storage::ArtifactStorageNamespace::Index,
+            layout)));
+}
+
+}  // namespace
+
+SealedIndexLoader::SealedIndexLoader(
+    const milvus::segcore::LoadIndexInfo* load_index_info,
+    milvus::tracer::TraceContext ctx,
+    milvus::storage::FileManagerContext file_manager_context,
+    Config config,
+    milvus::OpContext* op_ctx)
+    : index_type_(ReadIndexType(config)),
+      ctx_(ctx),
+      file_manager_context_(std::move(file_manager_context)),
+      config_(std::move(config)),
+      index_key_(fmt::format("seg_{}_si_{}",
+                             load_index_info->segment_id,
+                             load_index_info->field_id)),
+      index_load_info_({load_index_info->enable_mmap,
+                        load_index_info->mmap_dir_path,
+                        load_index_info->field_type,
+                        load_index_info->element_type,
+                        load_index_info->index_params,
+                        load_index_info->index_size,
+                        load_index_info->index_engine_version,
+                        std::to_string(load_index_info->index_id),
+                        std::to_string(load_index_info->segment_id),
+                        std::to_string(load_index_info->field_id),
+                        load_index_info->num_rows,
+                        load_index_info->dim,
+                        load_index_info->index_files,
+                        load_index_info->warmup_policy,
+                        load_index_info->load_resource_request}),
+      lazy_load_(IsVectorDataType(load_index_info->field_type) &&
+                 knowhere::IndexFactory::Instance().FeatureCheck(
+                     index_type_, knowhere::feature::LAZY_LOAD)),
+      meta_(
+          load_index_info->enable_mmap
+              ? milvus::cachinglayer::StorageType::DISK
+              : milvus::cachinglayer::StorageType::MEMORY,
+          milvus::cachinglayer::CellIdMappingMode::ALWAYS_ZERO,
+          milvus::segcore::getCellDataType(
+              /* is_vector */ IsVectorDataType(load_index_info->field_type),
+              /* is_index */ true),
+          milvus::segcore::getCacheWarmupPolicy(
+              load_index_info->warmup_policy,
+              /* is_vector */ IsVectorDataType(load_index_info->field_type),
+              /* is_index */ true),
+          /* support_eviction */
+          // if index data supports lazy load internally, we don't need to support eviction for index metadata
+          // currently only vector index is possible to support lazy load
+          !lazy_load_,
+          std::nullopt,
+          milvus::segcore::MetricAttributionFromShard(load_index_info->shard)) {
+    index::IndexLoadContext metadata_ctx(
+        op_ctx,
+        index::GetValueFromConfig<int32_t>(config_, "load_priority")
+            .value_or(0));
+    const auto& token = metadata_ctx.ctx.cancellation_token;
+    storage::ThrowIfCancelled(token, "inspect sealed index metadata");
+    const auto priority =
+        metadata_ctx.ctx.runtime_load_priority.value_or(0) != 0
+            ? proto::common::LoadPriority::LOW
+            : proto::common::LoadPriority::HIGH;
+    file_manager_context_.use_async_load =
+        file_manager_context_.use_async_load.value_or(
+            segcore::storagev2translator::StorageV2AsyncLoadEnabled());
+    config_[milvus::index::INDEX_FILES] = index_load_info_.index_files;
+    config_[DIM_KEY] = index_load_info_.dim;
+    config_[INDEX_NUM_ROWS_KEY] = index_load_info_.num_rows;
+    const auto nested =
+        milvus::index::ReadNestedConfigParam(config_, "sealed index translator")
+            .value_or(false);
+    auto adapted = milvus::index::AdaptIndexType({
+        .index_type = index_type_,
+        .field_type = index_load_info_.field_type,
+        .element_type = index_load_info_.element_type,
+        .index_engine_version =
+            static_cast<IndexVersion>(index_load_info_.index_engine_version),
+        .params = std::move(config_),
+        .is_nested = nested,
+        .is_text_match = false,
+    });
+    const auto value_type = adapted.value_type;
+    source_family_ = adapted.family;
+    config_ = std::move(adapted.params);
+
+    const auto scalar_version =
+        milvus::index::GetValueFromConfig<int32_t>(
+            config_, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
+            .value_or(1);
+    const bool packed_v3 =
+        (scalar_version >= 3 || index_type_ == index::FMINDEX_INDEX_TYPE) &&
+        !IsVectorDataType(index_load_info_.field_type);
+    storage::LoadOptions metadata_options;
+    metadata_options.op_ctx = &metadata_ctx.ctx;
+    metadata_options.params = config_;
+    metadata_options.estimated_bytes = index_load_info_.index_size;
+    auto resolved_family = adapted.family;
+    std::optional<index::PackedIndexSource> packed_source;
+    auto detach = folly::makeGuard([&] {
+        if (prepared_legacy_source_) {
+            prepared_legacy_source_->SetLoadContext(
+                proto::common::LoadPriority::HIGH, {});
+        }
+    });
+    if (packed_v3) {
+        packed_source = index::InspectPackedIndexFile(
+            index_load_info_.index_files,
+            file_manager_context_,
+            storage::ArtifactStorageNamespace::Index,
+            &metadata_ctx.ctx);
+        resolved_family = index::ResolvePackedLoadFamily(
+            adapted.family, packed_source->Metadata(), config_);
+        if (adapted.family != index::families::kJsonFlat) {
+            config_ = index::AnnotateJsonProjectionCompleteness(
+                std::move(config_),
+                packed_source->Directory(),
+                packed_source->Metadata());
+        }
+    } else {
+        prepared_legacy_source_ = MakeRemoteSource(adapted.family,
+                                                   file_manager_context_,
+                                                   index_load_info_.index_files,
+                                                   metadata_options);
+        auto& source = prepared_legacy_source_;
+        if (*file_manager_context_.use_async_load) {
+            resolved_family =
+                folly::coro::blockingWait(folly::coro::co_withExecutor(
+                    storage::ResolveAsyncLoadExecutor({}, priority),
+                    index::ResolveLoadFamilyAsync(
+                        adapted.family, *source, config_)));
+        } else {
+            resolved_family =
+                index::ResolveLoadFamily(adapted.family, *source, config_);
+        }
+        if (adapted.family != index::families::kJsonFlat) {
+            config_ = index::AnnotateJsonProjectionCompleteness(
+                std::move(config_), *source);
+        }
+    }
+    const auto loader_entry =
+        index::LoaderRegistry::Instance().Lookup(resolved_family);
+    AssertInfo(static_cast<bool>(loader_entry),
+               "no index loader is registered for family {}",
+               resolved_family);
+    family_ = std::move(resolved_family);
+    value_type_ = value_type;
+    caps_ = loader_entry.derive_caps(config_);
+
+    if (!IsVectorDataType(index_load_info_.field_type)) {
+        // Family selection and resource accounting share the same inspection.
+        index::ScalarIndexLoadResources resources;
+        if (packed_source) {
+            resources = index::PackedScalarIndexLoadResource(
+                index_load_info_.field_type,
+                index_load_info_.index_size,
+                index_load_info_.index_params,
+                index_load_info_.enable_mmap,
+                index_load_info_.num_rows,
+                index_load_info_.index_files,
+                *packed_source,
+                *file_manager_context_.use_async_load);
+        } else if (*file_manager_context_.use_async_load &&
+                   file_manager_context_.Valid() &&
+                   !index_load_info_.index_files.empty()) {
+            resources.request =
+                folly::coro::blockingWait(folly::coro::co_withExecutor(
+                    storage::ResolveAsyncLoadExecutor(
+                        storage::LocalFileIOPool::GetInstance().GetExecutor(),
+                        priority),
+                    index::LegacyScalarIndexLoadResourceAsync(
+                        index_load_info_.field_type,
+                        index_load_info_.index_size,
+                        index_load_info_.index_params,
+                        index_load_info_.enable_mmap,
+                        index_load_info_.num_rows,
+                        *prepared_legacy_source_)));
+        } else {
+            resources = index::ScalarIndexFileLoadResource(
+                index_load_info_.field_type,
+                index_load_info_.index_size,
+                index_load_info_.index_params,
+                index_load_info_.enable_mmap,
+                index_load_info_.num_rows,
+                index_load_info_.index_files,
+                file_manager_context_,
+                storage::ArtifactStorageNamespace::Index,
+                &metadata_ctx.ctx);
+        }
+        load_resource_request_ = resources.request;
+        shared_overhead_ = resources.shared_overhead;
+        meta_.loading_overhead_config = std::move(resources.overhead);
+    } else {
+        load_resource_request_ =
+            index::IndexLoadResource(index_load_info_.field_type,
+                                     index_load_info_.element_type,
+                                     index_load_info_.index_engine_version,
+                                     index_load_info_.index_size,
+                                     index_load_info_.index_params,
+                                     index_load_info_.enable_mmap,
+                                     index_load_info_.num_rows,
+                                     index_load_info_.dim);
+    }
+    if (!packed_v3 && IsVectorDataType(index_load_info_.field_type) &&
+        *file_manager_context_.use_async_load) {
+        metadata_options.params = config_;
+        metadata_options.enable_mmap = index_load_info_.enable_mmap;
+        load_resource_request_ =
+            folly::coro::blockingWait(folly::coro::co_withExecutor(
+                storage::ResolveAsyncLoadExecutor(
+                    storage::LocalFileIOPool::GetInstance().GetExecutor(),
+                    priority),
+                index::LegacyVectorFileLoadResourceAsync(
+                    load_resource_request_,
+                    Family() == index::families::kVectorDisk,
+                    metadata_options,
+                    *prepared_legacy_source_)));
+    }
+    if (index_load_info_.load_resource_request.has_value()) {
+        load_resource_request_ = *index_load_info_.load_resource_request;
+        // An explicit legacy estimate does not identify admitted scratch.
+        shared_overhead_ = {};
+        meta_.loading_overhead_config.reset();
+    }
+    storage::ThrowIfCancelled(token, "inspect sealed index metadata");
+    if (!*file_manager_context_.use_async_load ||
+        meta_.cache_warmup_policy ==
+            CacheWarmupPolicy::CacheWarmupPolicy_Disable) {
+        prepared_legacy_source_.reset();
+    }
+}
+
+milvus::cachinglayer::LoadingResourceUsage
+SealedIndexLoader::EstimatedResources() const {
+    // this is an estimation, error could be up to 20%.
+    // Preserve the historical 2x disk safety margin for temporary file growth
+    // during writes. final_disk_cost is already counted as loaded resource, so
+    // the file overhead is the remainder of 2 * max_disk_cost.
+    return {milvus::cachinglayer::ResourceUsage(
+                load_resource_request_.final_memory_cost,
+                load_resource_request_.final_disk_cost),
+            milvus::cachinglayer::ResourceUsage(
+                load_resource_request_.max_memory_cost -
+                    load_resource_request_.final_memory_cost -
+                    shared_overhead_.memory_bytes,
+                load_resource_request_.max_disk_cost * 2 -
+                    load_resource_request_.final_disk_cost),
+            shared_overhead_};
+}
+
+index::IndexPtr
+SealedIndexLoader::CreateIndex(milvus::OpContext* ctx) {
+    // Release preparation metadata after this attempt, including early failure.
+    auto prepared_source = std::move(prepared_legacy_source_);
+    int64_t segment_id = std::stoll(index_load_info_.segment_id);
+
+    storage::LoadOptions options;
+    options.enable_mmap = index_load_info_.enable_mmap;
+    options.estimated_bytes = index_load_info_.index_size;
+    index::IndexLoadContext load_ctx(
+        ctx,
+        index::GetValueFromConfig<int32_t>(config_, "load_priority")
+            .value_or(0));
+    options.op_ctx = &load_ctx.ctx;
+    // Loaders stage local files under localStorage even without mmap.
+    const auto base_path =
+        std::filesystem::path(
+            LocalStagingRoot(index_load_info_.mmap_dir_path)) /
+        "index_files" / index_load_info_.index_id /
+        index_load_info_.segment_id / index_load_info_.field_id;
+    options.mmap_dir_path = (base_path / "index").string();
+    if (index_load_info_.enable_mmap) {
+        config_[milvus::index::ENABLE_MMAP] = true;
+        config_[milvus::index::MMAP_FILE_PATH] = options.mmap_dir_path;
+        config_[milvus::index::EMB_LIST_META_PATH] =
+            (base_path / index::EMB_LIST_META_FILE_NAME).string();
+        config_[milvus::index::EMB_LIST_RAW_INDEX_PATH] =
+            (base_path / index::EMB_LIST_RAW_INDEX_FILE_NAME).string();
+    } else {
+        config_[milvus::index::ENABLE_MMAP] = false;
+    }
+    options.params = config_;
+
+    // Check for cancellation before loading index data
+    CheckCancellation(ctx, segment_id, "LoadIndex");
+
+    const auto scalar_version =
+        milvus::index::GetValueFromConfig<int32_t>(
+            config_, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
+            .value_or(1);
+    const bool packed_v3 =
+        (scalar_version >= 3 || index_type_ == index::FMINDEX_INDEX_TYPE) &&
+        !IsVectorDataType(index_load_info_.field_type);
+    const auto loader_entry =
+        milvus::index::LoaderRegistry::Instance().Lookup(Family());
+    AssertInfo(static_cast<bool>(loader_entry),
+               "no index loader is registered for family {}",
+               Family());
+    LOG_DEBUG(
+        "load index family {} with configs: {}", Family(), config_.dump());
+    const auto [loaded, overhead, shared_overhead] = EstimatedResources();
+    const index::IndexCacheConfig cache{
+        index_key_,
+        meta_,
+        loaded,
+        overhead,
+        StorageBytes(),
+        index::GetValueFromConfig<int32_t>(config_, "load_priority")
+            .value_or(0),
+        shared_overhead};
+    index::IndexPtr index;
+    if (packed_v3) {
+        AssertInfo(index_load_info_.index_files.size() == 1,
+                   "Packed scalar index requires one file");
+        index = loader_entry.Load(
+            {index::IndexFiles{file_manager_context_,
+                               {index_load_info_.index_files.front()},
+                               index::PackedIndexStorageConfig{
+                                   storage::ArtifactStorageNamespace::Index}},
+             options,
+             cache});
+    } else if (prepared_source) {
+        index = loader_entry.Load(
+            {index::OpenedIndexSource{
+                 index::LegacyIndexSource{std::move(prepared_source), true}},
+             options,
+             cache});
+    } else {
+        const auto layout = UsesV1DiskLayout(source_family_)
+                                ? storage::V1SourceLayout::DiskFiles
+                                : storage::V1SourceLayout::MemoryEntries;
+        index = loader_entry.Load(
+            {index::IndexFiles{
+                 file_manager_context_,
+                 index_load_info_.index_files,
+                 index::LegacyIndexStorageConfig{
+                     layout, storage::ArtifactStorageNamespace::Index}},
+             options,
+             cache});
+    }
+    AssertInfo(
+        index != nullptr, "index loader for family {} returned null", Family());
+    return index;
+}
+
+}  // namespace milvus::segcore

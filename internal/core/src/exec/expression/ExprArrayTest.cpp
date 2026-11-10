@@ -309,8 +309,7 @@ MakeSealedVectorIndexOnlySegment(const SchemaPtr& schema,
     load_index_info.index_value_type = opened.reader->ValueType();
     load_index_info.index_caps = opened.caps;
     load_index_info.index_params["metric_type"] = knowhere::metric::L2;
-    load_index_info.cache_index =
-        CreateTestCacheIndex(cache_key, std::move(opened.reader));
+    load_index_info.index = std::move(opened.index);
     sealed_segment->LoadIndex(load_index_info);
     return sealed_segment;
 }
@@ -456,8 +455,10 @@ class ArrayEqualityCountingIndex final
       public index::IScalarValueReader<int64_t>,
       public index::INullReader {
  public:
-    explicit ArrayEqualityCountingIndex(index::IIndexReaderBasePtr reader)
-        : reader_(std::move(reader)),
+    ArrayEqualityCountingIndex(index::IIndexReaderBasePtr reader,
+                               std::shared_ptr<size_t> calls)
+        : callback_calls(std::move(calls)),
+          reader_(std::move(reader)),
           predicates_(
               dynamic_cast<const index::IScalarPredicateReader<int64_t>*>(
                   reader_.get())),
@@ -470,7 +471,12 @@ class ArrayEqualityCountingIndex final
                    "ARRAY equality fixture needs the advertised value reader");
     }
 
-    mutable size_t callback_calls = 0;
+    std::shared_ptr<size_t> callback_calls;
+
+    void
+    Prefetch() const override {
+        reader_->Prefetch();
+    }
 
     index::ReaderCaps
     Caps() const override {
@@ -488,18 +494,10 @@ class ArrayEqualityCountingIndex final
     ValueType() const override {
         return reader_->ValueType();
     }
-    int64_t
-    MemoryUsage() const override {
-        return reader_->MemoryUsage();
-    }
-    cachinglayer::ResourceUsage
-    CellByteSize() const override {
-        return reader_->CellByteSize();
-    }
 
     TargetBitmap
     In(size_t n, const int64_t* values) const override {
-        ++callback_calls;
+        ++*callback_calls;
         return predicates_->In(n, values);
     }
 
@@ -1296,10 +1294,13 @@ CheckArrayIndexEqualityReadsOnlyCandidates(const std::string& index_type,
                     ASSERT_EQ(opened.family, index::families::kSort);
                     ASSERT_EQ(opened.caps.value_lookup, nested);
                 }
-                auto counting = std::make_unique<ArrayEqualityCountingIndex>(
-                    std::move(opened.reader));
-                auto* index_ptr = counting.get();
-                opened.reader = std::move(counting);
+                auto callback_calls = std::make_shared<size_t>(0);
+                test::expr_index::DecorateIndex(
+                    opened,
+                    [callback_calls](index::IIndexReaderBasePtr reader) {
+                        return std::make_unique<ArrayEqualityCountingIndex>(
+                            std::move(reader), callback_calls);
+                    });
                 test::expr_index::InstallIndex(segment,
                                                field,
                                                DataType::ARRAY,
@@ -1347,7 +1348,7 @@ CheckArrayIndexEqualityReadsOnlyCandidates(const std::string& index_type,
                         exec::EvalCtx eval_ctx(&exec_context);
                         segment.materialized_array_rows = 0;
                         segment.data_resource_reads = 0;
-                        index_ptr->callback_calls = 0;
+                        *callback_calls = 0;
                         int64_t processed = 0;
                         while (processed < N) {
                             std::vector<VectorPtr> results;
@@ -1376,7 +1377,7 @@ CheckArrayIndexEqualityReadsOnlyCandidates(const std::string& index_type,
                         if (!target.empty()) {
                             // Both the index and exact array recheck execute;
                             // later expression batches reuse the cached bitmap.
-                            EXPECT_GT(index_ptr->callback_calls, 0);
+                            EXPECT_GT(*callback_calls, 0);
                             EXPECT_EQ(segment.data_resource_reads,
                                       target.front() == 1 ? 1 : 0);
                             EXPECT_EQ(segment.materialized_array_rows, 0);
@@ -1754,7 +1755,7 @@ TEST(Expr, TestFloatVectorNullExprUsesGrowingIndexValidity) {
                     std::make_shared<InsertRecordProto>(*raw_data.raw_));
     auto growing_segment = dynamic_cast<SegmentGrowingImpl*>(growing.get());
     ASSERT_NE(growing_segment, nullptr);
-    auto index_pin = growing_segment->PinGrowingIndex(vector_fid);
+    auto index_pin = growing_segment->PinGrowingIndex(nullptr, vector_fid);
     ASSERT_TRUE(index_pin);
     ASSERT_GE(index_pin.CoveredRowEnd(), N);
     const auto* vec_index =
@@ -4188,12 +4189,11 @@ TEST(Expr, TestArrayContainsForStruct) {
     load_index_info.index_engine_version =
         knowhere::Version::GetCurrentVersion().VersionNumber();
     load_index_info.num_rows = N;
-    load_index_info.index_size = indexing->MemoryUsage();
+    load_index_info.index_size = 0;  // Resident fixture has no persisted files.
     SetTestIndexMetadata(
         load_index_info, *indexing, index::families::kVectorMem);
     load_index_info.index_params = GenIndexParams(indexing.get());
-    load_index_info.cache_index =
-        CreateTestCacheIndex("test", std::move(indexing));
+    load_index_info.index = CreateTestIndex("test", std::move(indexing));
     load_index_info.index_params["metric_type"] = knowhere::metric::L2;
     segment->LoadIndex(load_index_info);
 

@@ -32,6 +32,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -50,6 +51,112 @@ func (s *MergeHelperTestSuite) SetupTest() {
 
 func (s *MergeHelperTestSuite) TearDownTest() {
 	s.pool.AssertSize(s.T(), 0)
+}
+
+func TestMergeRewrittenScores(t *testing.T) {
+	for _, normalize := range []bool{false, true} {
+		for _, strategy := range []MergeStrategy{MergeStrategyWeighted, MergeStrategyMax, MergeStrategySum, MergeStrategyAvg} {
+			for _, mixed := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/normalize=%v/mixed=%v", strategy, normalize, mixed), func(t *testing.T) {
+					pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
+					defer pool.AssertSize(t, 0)
+					makeInput := func(scores []float32) *DataFrame {
+						frame, err := FromSearchResultData(&schemapb.SearchResultData{
+							NumQueries: 1, Topks: []int64{2}, Scores: scores,
+							Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2}}}},
+						}, pool, nil)
+						require.NoError(t, err)
+						return frame
+					}
+					first := makeInput([]float32{-3, -1})
+					defer first.Release()
+					secondScores := []float32{-2, -4}
+					expectedScores := []float32{-5, -5}
+					expectedIDs := []int64{1, 2}
+					if mixed {
+						secondScores = []float32{1, 0}
+						expectedScores = []float32{0, -2.5}
+						expectedIDs = []int64{2, 1}
+					}
+					switch strategy {
+					case MergeStrategyMax:
+						expectedIDs = []int64{2, 1}
+						expectedScores = []float32{-1, -2}
+						if mixed {
+							expectedScores = []float32{1, 0.5}
+						}
+					case MergeStrategyAvg:
+						for index := range expectedScores {
+							expectedScores[index] /= 2
+						}
+					}
+					if normalize {
+						normalizeBusiness := func(score float64) float32 {
+							return float32(0.5 + math.Atan(score)/math.Pi)
+						}
+						byID := make([]float32, 2)
+						for i, firstScore := range []float64{-3, -1} {
+							a := normalizeBusiness(firstScore)
+							b := normalizeBusiness(float64(secondScores[i]))
+							if mixed {
+								b = float32(1 - 2*math.Atan(float64(secondScores[i]))/math.Pi)
+							}
+							switch strategy {
+							case MergeStrategyMax:
+								byID[i] = max(a, b)
+							case MergeStrategyAvg:
+								byID[i] = (a + b) / 2
+							default:
+								byID[i] = a + b
+							}
+						}
+						expectedIDs = []int64{2, 1}
+						expectedScores = []float32{byID[1], byID[0]}
+					}
+					second := makeInput(secondScores)
+					defer second.Release()
+					rewritten := []bool{true, !mixed}
+					params := map[string]*schemapb.FunctionParamValue{
+						"strategy": stringParam(string(strategy)), "norm_score": {Value: &schemapb.FunctionParamValue_BoolValue{BoolValue: normalize}},
+					}
+					if strategy == MergeStrategyWeighted {
+						params["weights"] = arrayParam(doubleParam(1), doubleParam(1))
+					}
+					declarative, err := NewMergeOpFromReprWithContext(&OperatorRepr{Type: types.OpTypeMerge, Params: params},
+						types.FunctionBuildContext{Search: &types.SearchRuntimeInfo{MetricTypes: []string{"L2", "L2"}, ScoresRewritten: rewritten}})
+					require.NoError(t, err)
+					for _, op := range []*MergeOp{
+						declarative.(*MergeOp),
+						NewMergeOp(strategy, WithMetricTypes([]string{"L2", "L2"}), WithScoresRewritten(rewritten), WithWeights([]float64{1, 1}), WithNormalize(normalize), WithForceDescending(true)),
+					} {
+						require.True(t, op.SortDescending())
+						output, err := op.ExecuteMulti(types.NewFuncContext(pool), []*DataFrame{first, second})
+						require.NoError(t, err)
+						result, err := ToSearchResultData(output)
+						output.Release()
+						require.NoError(t, err)
+						require.Equal(t, expectedIDs, result.GetIds().GetIntId().GetData())
+						require.InDeltaSlice(t, expectedScores, result.GetScores(), 1e-6)
+					}
+					if strategy == MergeStrategyWeighted {
+						searchParams := NewSearchParams(1, 2, 0, -1)
+						searchParams.ScoresRewritten = rewritten
+						legacy, err := BuildRerankChainWithLegacy(nil, []*commonpb.KeyValuePair{
+							{Key: "strategy", Value: "weighted"}, {Key: "params", Value: fmt.Sprintf(`{"weights":[1,1],"norm_score":%v}`, normalize)},
+						}, []string{"L2", "L2"}, searchParams, pool)
+						require.NoError(t, err)
+						output, err := legacy.ExecuteWithContext(t.Context(), first, second)
+						require.NoError(t, err)
+						result, err := ToSearchResultData(output)
+						output.Release()
+						require.NoError(t, err)
+						require.Equal(t, expectedIDs, result.GetIds().GetIntId().GetData())
+						require.InDeltaSlice(t, expectedScores, result.GetScores(), 1e-6)
+					}
+				})
+			}
+		}
+	}
 }
 
 func TestMergeHelperTestSuite(t *testing.T) {
@@ -2253,23 +2360,23 @@ func (s *MergeHelperTestSuite) TestMergeWithNullFieldValues() {
 }
 
 // =============================================================================
-// classifyMetricsOrder Tests
+// classifyScoreOrder Tests
 // =============================================================================
 
-func (s *MergeHelperTestSuite) TestClassifyMetricsOrderAllLargerBetter() {
-	mixed, desc := classifyMetricsOrder([]string{"COSINE", "IP", "BM25"})
+func (s *MergeHelperTestSuite) TestClassifyScoreOrderAllLargerBetter() {
+	mixed, desc := classifyScoreOrder([]string{"COSINE", "IP", "BM25"}, nil)
 	s.False(mixed)
 	s.True(desc)
 }
 
-func (s *MergeHelperTestSuite) TestClassifyMetricsOrderAllSmallerBetter() {
-	mixed, desc := classifyMetricsOrder([]string{"L2", "HAMMING"})
+func (s *MergeHelperTestSuite) TestClassifyScoreOrderAllSmallerBetter() {
+	mixed, desc := classifyScoreOrder([]string{"L2", "HAMMING"}, nil)
 	s.False(mixed)
 	s.False(desc)
 }
 
-func (s *MergeHelperTestSuite) TestClassifyMetricsOrderMixed() {
-	mixed, desc := classifyMetricsOrder([]string{"COSINE", "L2"})
+func (s *MergeHelperTestSuite) TestClassifyScoreOrderMixed() {
+	mixed, desc := classifyScoreOrder([]string{"COSINE", "L2"}, nil)
 	s.True(mixed)
 	s.True(desc) // mixed -> descending
 }
@@ -2759,4 +2866,33 @@ func TestMergeRefreshInfoDoesNotDeclareSystemColumns(t *testing.T) {
 	assert.Empty(t, repr.Info.Ops[0].ReadNames)
 	assert.Empty(t, repr.Info.Ops[0].WriteNames)
 	assert.Empty(t, repr.Operators[0].Outputs)
+}
+
+func TestMergeRewrittenNormalizationIgnoresOriginalMetric(t *testing.T) {
+	for _, metricType := range []string{"L2", "IP", "COSINE", "BM25"} {
+		t.Run(metricType, func(t *testing.T) {
+			pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
+			defer pool.AssertSize(t, 0)
+			input, err := FromSearchResultData(&schemapb.SearchResultData{
+				NumQueries: 1, Topks: []int64{3}, Scores: []float32{-10, 0, 10},
+				Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1, 2, 3}}}},
+			}, pool, nil)
+			require.NoError(t, err)
+			defer input.Release()
+			for _, normalize := range []bool{false, true} {
+				op := NewMergeOp(MergeStrategySum, WithMetricTypes([]string{metricType}), WithScoresRewritten([]bool{true}), WithNormalize(normalize))
+				output, err := op.ExecuteMulti(types.NewFuncContext(pool), []*DataFrame{input})
+				require.NoError(t, err)
+				result, err := ToSearchResultData(output)
+				output.Release()
+				require.NoError(t, err)
+				require.Equal(t, []int64{3, 2, 1}, result.GetIds().GetIntId().GetData())
+				want := []float32{10, 0, -10}
+				if normalize {
+					want = []float32{float32(0.5 + math.Atan(10)/math.Pi), 0.5, float32(0.5 - math.Atan(10)/math.Pi)}
+				}
+				require.InDeltaSlice(t, want, result.Scores, 1e-6)
+			}
+		})
+	}
 }

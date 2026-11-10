@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include <arrow/api.h>
+#include <arrow/c/abi.h>
 #include <arrow/array/array_base.h>
 #include <arrow/array/builder_binary.h>
 #include <arrow/array/builder_primitive.h>
@@ -51,6 +52,7 @@
 #include <utility>
 #include <vector>
 #include "segcore/default_fs.h"
+#include "segcore/retrieve_result_export_c.h"
 
 #include "NamedType/named_type_impl.hpp"
 #include "cachinglayer/Manager.h"
@@ -800,12 +802,12 @@ class TestLazyManifest : public TestChunkSegmentStorageV2 {
 
 INSTANTIATE_TEST_SUITE_P(TestLazyManifest, TestLazyManifest, testing::Bool());
 
-IndexInventory::RootSlot
-LazyTestIndexSlot(const IndexInventory& inventory, FieldId field) {
+index::IndexPtr
+LazyTestIndexOwner(const IndexInventory& inventory, FieldId field) {
     for (const auto& entry : inventory.Entries(field)) {
         if (entry.kind == IndexKind::Vector) {
             auto copy = inventory;
-            return copy.Drop(entry.key);
+            return copy.Drop(entry.key)->Peek();
         }
     }
     return nullptr;
@@ -890,35 +892,32 @@ TEST_P(TestLazyManifest, LazyManifestPreparesInterimIndex) {
             ASSERT_TRUE(column->IsLazy());
             if (num_rows == 1) {
                 EXPECT_FALSE(column->IsMaterialized());
-                EXPECT_EQ((LazyTestIndexSlot(snapshot->runtime->indexes, vec) !=
-                           nullptr),
+                EXPECT_EQ((LazyTestIndexOwner(snapshot->runtime->indexes,
+                                              vec) != nullptr),
                           0);
                 EXPECT_FALSE(snapshot->binlog_index_bitset[vec.get() -
                                                            START_USER_FIELDID]);
                 continue;
             }
 
-            ASSERT_TRUE((LazyTestIndexSlot(snapshot->runtime->indexes, vec) !=
+            ASSERT_TRUE((LazyTestIndexOwner(snapshot->runtime->indexes, vec) !=
                          nullptr));
             EXPECT_TRUE(
                 snapshot->binlog_index_bitset[vec.get() - START_USER_FIELDID]);
-            auto slot = LazyTestIndexSlot(snapshot->runtime->indexes, vec);
+            auto slot = LazyTestIndexOwner(snapshot->runtime->indexes, vec);
             ASSERT_NE(slot, nullptr);
             if (warmup == CacheWarmupPolicy::CacheWarmupPolicy_Disable) {
                 EXPECT_FALSE(column->IsMaterialized());
-                EXPECT_FALSE(slot->IsCached(0));
             } else if (warmup == CacheWarmupPolicy::CacheWarmupPolicy_Sync) {
                 EXPECT_TRUE(column->IsMaterialized());
-                EXPECT_TRUE(slot->IsCached(0));
             }
 
-            auto first =
-                cachinglayer::SemiInlineGet(slot->PinCells(&op_ctx, {0}));
+            auto first = slot->CreateReader(&op_ctx);
+            EXPECT_EQ(first->Count(), num_rows);
             EXPECT_TRUE(column->IsMaterialized());
-            EXPECT_EQ(first->get_cell_of(0)->Count(), num_rows);
-            auto second =
-                cachinglayer::SemiInlineGet(slot->PinCells(&op_ctx, {0}));
-            EXPECT_EQ(first->get_cell_of(0), second->get_cell_of(0));
+            auto second = slot->CreateReader(&op_ctx);
+            EXPECT_NE(first.get(), second.get());
+            EXPECT_EQ(second->Count(), num_rows);
         }
     }
 }
@@ -1588,8 +1587,15 @@ TEST_P(TestLazyManifest,
     ASSERT_GT(column->num_chunks(), 0);
     EXPECT_FALSE(column->CellsLoaded(&first_offset, 1));
 
-    int64_t value = 0;
-    column->BulkPrimitiveValueAt(nullptr, &value, &first_offset, 1);
+    auto take = column->Take(
+        nullptr,
+        ChunkedColumnInterface::TakeOptions{
+            ChunkedColumnInterface::OffsetView::From(&first_offset, 1),
+            ChunkedColumnInterface::TargetType::Int64,
+            nullptr,
+            TakePinPolicy::Batch});
+    ASSERT_NE(take, nullptr);
+    EXPECT_TRUE(take->Get<int64_t>(0).is_valid);
     EXPECT_TRUE(column->CellsLoaded(&first_offset, 1));
 }
 
@@ -1677,6 +1683,32 @@ TEST_P(TestLazyManifest, LazyManifestRetrieveSizeAndValuesAreCorrect) {
         std::make_shared<expr::AlwaysTrueExpr>());
     plan->field_ids_ = {fields.at("string1")};
 
+    // Late materialization must use the same real column statistics, not a
+    // schema/default string length. This check must precede bulk field reads.
+    CSegmentInterface c_segment = manifest_segment.get();
+    int32_t segment_index = 0;
+    int64_t segment_offset = 0;
+    ArrowSchema out_schema{};
+    ArrowArray out_array{};
+    auto status = FillRetrieveFieldsOrdered(&c_segment,
+                                            1,
+                                            plan.get(),
+                                            &segment_index,
+                                            &segment_offset,
+                                            1,
+                                            eager_avg_size - 1,
+                                            &out_schema,
+                                            &out_array,
+                                            nullptr);
+    EXPECT_EQ(status.error_code, InvalidParameter);
+    EXPECT_EQ(out_schema.release, nullptr);
+    EXPECT_EQ(out_array.release, nullptr);
+    if (status.error_code != Success) {
+        free(const_cast<char*>(status.error_msg));
+    }
+    EXPECT_EQ(segment_impl->get_fields_avg_size(plan->field_ids_),
+              eager_avg_size);
+
     segment_interface->set_field_avg_size(
         fields.at("string1"), kNumRows, kNumRows);
     try {
@@ -1712,6 +1744,118 @@ TEST_P(TestLazyManifest, LazyManifestRetrieveSizeAndValuesAreCorrect) {
         if (expected_valid[i]) {
             EXPECT_EQ(values.data(i), expected[i]) << "row " << i;
         }
+    }
+}
+
+TEST_P(TestLazyManifest, UnsortedPkInPreservesQueryLoadPriority) {
+    auto policies =
+        cachinglayer::TieredStorageConfig::GetInstance().warmup_policies();
+    policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(policies);
+    auto schema = std::make_shared<Schema>();
+    const auto type = GetParam() ? DataType::VARCHAR : DataType::INT64;
+    const auto pk = schema->AddDebugField("pk", type, false);
+    schema->AddField(FieldName("Timestamp"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    schema->set_primary_field_id(pk);
+    constexpr int64_t kRows = 64;
+    auto expected = DataGen(schema, kRows, 42);
+    std::vector<proto::plan::GenericValue> values(1);
+    IdArray ids;
+    if (GetParam()) {
+        auto value = expected.get_col<std::string>(pk)[0];
+        values[0].set_string_val(value);
+        ids.mutable_str_id()->add_data(value);
+    } else {
+        auto value = expected.get_col<int64_t>(pk)[0];
+        values[0].set_int64_val(value);
+        ids.mutable_int_id()->add_data(value);
+    }
+    // A fresh index and evicted PK column exercise the real translator load.
+    for (bool query : {false, true}) {
+        SCOPED_TRACE(query);
+        auto path = UniqueManifestTestPath("unsorted_pk_priority");
+        StorageV2TempDirGuard dir_guard(GetDefaultArrowFileSystem(), path);
+        milvus::test::V3SegmentTestData data(
+            schema,
+            1,
+            kRows,
+            1,
+            TestLocalPath,
+            path,
+            fmt::format("{},{}", pk.get(), TimestampFieldID.get()));
+        auto segment = CreateV3ManifestSegment(
+            data, 3290 + query + 10 * GetParam(), 0, schema);
+        auto* impl = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(impl, nullptr);
+        auto runtime = impl->TestCloneMutableRuntimeResourceState();
+        auto column = runtime->fields.at(pk);
+        column->ManualEvictCache();
+        bool loaded = false;
+        class CheckingPkTranslator
+            : public storagev2translator::PkIndexTranslator {
+         public:
+            CheckingPkTranslator(int64_t id,
+                                 std::shared_ptr<ChunkedColumnInterface> column,
+                                 DataType type,
+                                 bool query,
+                                 bool& loaded)
+                : PkIndexTranslator(id, std::move(column), type, false),
+                  query_(query),
+                  loaded_(loaded) {
+            }
+            std::vector<
+                std::pair<cachinglayer::cid_t,
+                          std::unique_ptr<storagev2translator::PkIndexCell>>>
+            get_cells(milvus::OpContext* ctx,
+                      const std::vector<cachinglayer::cid_t>& cids) override {
+                loaded_ = true;
+                if (query_) {
+                    EXPECT_NE(ctx, nullptr);
+                    if (ctx)
+                        EXPECT_EQ(ctx->runtime_load_priority,
+                                  proto::common::LoadPriority::HIGH);
+                } else {
+                    EXPECT_TRUE(ctx == nullptr ||
+                                !ctx->runtime_load_priority.has_value());
+                }
+                return PkIndexTranslator::get_cells(ctx, cids);
+            }
+
+         private:
+            bool query_;
+            bool& loaded_;
+        };
+        runtime->pk_index_slot =
+            cachinglayer::Manager::GetInstance()
+                .CreateCacheSlot<storagev2translator::PkIndexCell>(
+                    std::make_unique<CheckingPkTranslator>(
+                        impl->get_segment_id(), column, type, query, loaded));
+        EXPECT_FALSE(runtime->pk_index_slot->IsCached(0));
+        impl->TestPublishRuntimeResourceState(std::move(runtime));
+        if (query) {
+            auto plan = std::make_unique<query::RetrievePlan>(schema);
+            plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
+            plan->plan_node_->plannodes_ =
+                milvus::test::CreateRetrievePlanByExpr(
+                    std::make_shared<expr::TermFilterExpr>(
+                        expr::ColumnInfo(pk, type), values));
+            auto result = segment->Retrieve(nullptr,
+                                            plan.get(),
+                                            MAX_TIMESTAMP,
+                                            DEFAULT_MAX_OUTPUT_SIZE,
+                                            false);
+            EXPECT_GT(result->offset_size(), 0);
+        } else {
+            BitsetType bits(kRows, false);
+            static_cast<SegmentInternalInterface*>(impl)->search_ids(bits, ids);
+            EXPECT_TRUE(bits[0]);
+        }
+        EXPECT_TRUE(loaded);
     }
 }
 
@@ -2364,9 +2508,12 @@ TEST_P(TestLazyManifest, LazyManifestReopenRebindsGeneration) {
 
     auto read_value = [](const std::shared_ptr<ChunkedColumnInterface>& column,
                          int64_t offset) {
-        int64_t value = -1;
-        column->BulkPrimitiveValueAt(nullptr, &value, &offset, 1);
-        return value;
+        auto take = column->Take(
+            nullptr,
+            ChunkedColumnInterface::TakeOptions{
+                ChunkedColumnInterface::OffsetView::From(&offset, 1),
+                ChunkedColumnInterface::TargetType::Int64});
+        return *take->Get<int64_t>(0).value;
     };
     EXPECT_EQ(read_value(old_column, 40), 40);
 
@@ -2477,9 +2624,12 @@ TEST_P(TestLazyManifest, LazyManifestSchemaOnlyDropKeepsSurvivorTask) {
     // keeps the unchanged physical Task for surviving fields.
     auto read_int64 = [](const std::shared_ptr<ChunkedColumnInterface>& column,
                          int64_t offset) {
-        int64_t value = -1;
-        column->BulkPrimitiveValueAt(nullptr, &value, &offset, 1);
-        return value;
+        auto take = column->Take(
+            nullptr,
+            ChunkedColumnInterface::TakeOptions{
+                ChunkedColumnInterface::OffsetView::From(&offset, 1),
+                ChunkedColumnInterface::TargetType::Int64});
+        return *take->Get<int64_t>(0).value;
     };
 
     EXPECT_EQ(read_int64(new_survivor, kOffset), kOffset);
@@ -2676,11 +2826,16 @@ TEST(LazyManifest, ExternalMappedColumnsStayColdUntilRead) {
 
         ASSERT_TRUE(fs->Move(hidden_path, parquet_path).ok());
         restore_file.dismiss();
-        int64_t values[4];
-        number_column->BulkPrimitiveValueAt(
-            nullptr, values, offsets, 4, /*small_int_raw_type=*/false);
+        auto take = number_column->Take(
+            nullptr,
+            ChunkedColumnInterface::TakeOptions{
+                ChunkedColumnInterface::OffsetView::From(offsets, 4),
+                ChunkedColumnInterface::TargetType::Int64,
+                nullptr,
+                TakePinPolicy::Batch});
+        ASSERT_NE(take, nullptr);
         for (int i = 0; i < 4; ++i) {
-            EXPECT_EQ(values[i], offsets[i]);
+            EXPECT_EQ(*take->Get<int64_t>(i).value, offsets[i]);
         }
         EXPECT_TRUE(number_column->IsMaterialized());
         // Separate Tasks from the same physical CG materialize independently.

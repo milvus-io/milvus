@@ -49,6 +49,8 @@ type TransformLogSubscriptionOption struct {
 // loop: a blocked handler also delays other subscriptions on that RPC.
 // Close is a completion notification, not the mechanism for aborting Handle.
 // Handle receives only Entry/SyncUp and completes delivery before returning.
+// Events and their payloads are immutable; live dispatch may share a payload
+// across subscriptions and Summary. Consumers must copy before modifying it.
 // Failures are exposed by the underlying stream's Done/Error and handled by
 // resuming; they are never delivered as business events.
 type TransformLogEventHandler interface {

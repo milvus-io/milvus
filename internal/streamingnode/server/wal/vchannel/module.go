@@ -2,6 +2,7 @@ package vchannel
 
 import (
 	"context"
+	"math"
 	"sync"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -13,7 +14,6 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
-	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -165,14 +165,14 @@ func newModule(config ModuleConfig, adoptVChannelMeta bool) (*VChannelRecoveryMo
 		}
 	}
 	module.l0Materializer = l0materializer.NewWALMaterializer(l0materializer.WALConfig{
-		VChannel:                  config.VChannel,
-		MaterializedTimeTick:      config.VChannelMeta.GetTransformMaterializedTimeTick(),
-		MaterializeMaxRows:        config.L0MaterializeRows,
-		MaterializeMaxBytes:       config.L0MaterializeBytes,
-		Materializer:              config.L0Materializer,
-		Runtime:                   config.Runtime,
-		OnMaterialized:            module.markL0Materialized,
-		GrowingSegmentsRegistered: module.growingSegmentsRegistered,
+		VChannel:               config.VChannel,
+		MaterializedTimeTick:   config.VChannelMeta.GetTransformMaterializedTimeTick(),
+		MaterializeMaxRows:     config.L0MaterializeRows,
+		MaterializeMaxBytes:    config.L0MaterializeBytes,
+		Materializer:           config.L0Materializer,
+		Runtime:                config.Runtime,
+		OnMaterialized:         module.markL0Materialized,
+		EarlierSegmentsFlushed: module.earlierSegmentsFlushed,
 	})
 	module.refreshQueryRetentionLocked()
 	return module, nil
@@ -218,6 +218,10 @@ func (m *VChannelRecoveryModule) ObserveMessage(
 	switch msg.MessageType() {
 	case message.MessageTypeCreateCollection:
 		m.handleCreateCollectionMessage(message.MustAsImmutableCreateCollectionMessageV1(msg))
+	case message.MessageTypeRestoreSnapshot:
+		if created := messageutil.RestoreCollectionMessage(msg); created != nil {
+			m.handleCreateCollectionMessage(created)
+		}
 	case message.MessageTypeCreatePartition:
 		m.handleCreatePartitionMessage(message.MustAsImmutableCreatePartitionMessageV1(msg))
 	case message.MessageTypeSchemaChange:
@@ -355,6 +359,7 @@ func (m *VChannelRecoveryModule) handleCreateCollectionMessage(msg message.Immut
 			m.vchannelView = replacement
 		}
 	}
+	m.refreshQueryRetentionLocked()
 }
 
 func (m *VChannelRecoveryModule) handleCreatePartitionMessage(msg message.ImmutableCreatePartitionMessageV1) {
@@ -545,13 +550,30 @@ func (m *VChannelRecoveryModule) markSegmentViewUpdatedLocked(segmentID int64, v
 	m.markSegmentDirty(segmentID, view)
 }
 
-// L0 may precede L1 output, but DataCoord must know every earlier L1 so its
-// compaction policy can protect growing data. No L1 flush is requested here.
-func (m *VChannelRecoveryModule) growingSegmentsRegistered(through uint64) bool {
+// GrowingTransformStartAfterTimeTick captures a conditional publication proof.
+// Only this request's Segment may be excluded before its final commit succeeds.
+func (m *VChannelRecoveryModule) GrowingTransformStartAfterTimeTick(publishingSegmentID int64) uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	start := m.queryObservedTimeTick
+	for id, view := range m.segments {
+		if id == publishingSegmentID {
+			continue
+		}
+		if created, pending := view.L1MaterializationBlockerTimeTick(); pending {
+			start = min(start, created)
+		}
+	}
+	return start
+}
+
+// Transform materialization through T requires final DataCoord publication of
+// every earlier L1, including other partitions and in-flight Flush RPCs.
+func (m *VChannelRecoveryModule) earlierSegmentsFlushed(through uint64) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, view := range m.segments {
-		if view.CreateTimeTick() <= through && !view.Registered() {
+		if created, pending := view.L1MaterializationBlockerTimeTick(); pending && created < through {
 			return false
 		}
 	}
@@ -682,9 +704,16 @@ func (m *VChannelRecoveryModule) ConsumeCleanupSnapshots(cleanup moduleapi.Clean
 			cleanup.PhysicalTimeTick,
 			m.vchannelView.PersistedMaterializedTimeTick(),
 		)
+		dropReady := dropSnapshot != nil && len(m.segments) == 0 && !queryReferenced
+		if dropReady && m.summaryManager != nil {
+			// A durable collection tombstone forbids new query references. All
+			// existing references and Segment recovery state are gone, so release
+			// the collection-origin pin before waiting for Summary retirement.
+			m.summaryManager.SetQueryRetention(m.vchannel, math.MaxUint64)
+		}
 		if len(cleanupPartitions) > 0 {
 			vchannelChanged = m.vchannelView.ApplyPartitionCleanup(cleanupPartitions) || vchannelChanged
-		} else if dropSnapshot != nil && len(m.segments) == 0 && !queryReferenced &&
+		} else if dropReady &&
 			cleanup.SummaryRetired != nil && cleanup.SummaryRetired(m.vchannel, dropSnapshot.GetCheckpointTimeTick()) {
 			checkpointTimeTick := dropSnapshot.GetCheckpointTimeTick()
 			snapshots = append(snapshots,
@@ -699,9 +728,9 @@ func (m *VChannelRecoveryModule) ConsumeCleanupSnapshots(cleanup moduleapi.Clean
 		} else {
 			// Keep references until segment catalog deletion has completed; pending
 			// cleanup entries still belong to m.segments.
-			segments := make([]*streamingpb.SegmentAssignmentMeta, 0, len(m.segments))
+			segments := make([]segment.SchemaReference, 0, len(m.segments))
 			for _, view := range m.segments {
-				segments = append(segments, view.AssignmentMeta())
+				segments = append(segments, view.SchemaReference())
 			}
 			owner := m.vchannelView
 			deleted, changed := owner.SchemaCleanupPlan(cleanup.PhysicalTimeTick, segments)
@@ -746,9 +775,9 @@ func (m *VChannelRecoveryModule) segmentCleanupReadyLocked(view *segment.Segment
 	if m.vchannelView == nil || !view.TombstonedCleanupReady(cleanup.PhysicalTimeTick) {
 		return false
 	}
-	sealed := view.AssignmentMeta().GetSealedAtDataVersion()
-	if sealed != nil {
-		version := qviews.FromProtoDataVersion(sealed)
+	// TombstonedCleanupReady implies the TOMBSTONED state SealedDataVersion
+	// requires, and every view of this module belongs to m.vchannel.
+	if version, sealed := view.SealedDataVersion(m.vchannel); sealed {
 		if oldest, ok := m.queryResources.OldestDataVersion(); ok && version.GT(oldest) {
 			return false
 		}

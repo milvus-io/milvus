@@ -54,6 +54,56 @@ type reader struct {
 	rowsPerBuffer int
 
 	frs map[int64]*FieldReader // fieldID -> FieldReader
+
+	structFills []structFill
+}
+
+// structFill names the element-nullable sub-fields of one struct column that
+// the file does not carry, and the present sibling they take their element
+// counts from.
+type structFill struct {
+	structName string
+	refField   *schemapb.FieldSchema
+	missing    []*schemapb.FieldSchema
+}
+
+// newStructFills plans the null-element fill of the struct sub-fields that
+// have no reader. A struct with no reader at all (a nullable struct the file
+// does not carry) is left to the DataNode, which imports its rows as null.
+func newStructFills(schema *schemapb.CollectionSchema, frs map[int64]*FieldReader) []structFill {
+	fills := make([]structFill, 0)
+	for _, structField := range schema.GetStructArrayFields() {
+		fill := structFill{structName: structField.GetName()}
+		for _, subField := range structField.GetFields() {
+			if _, ok := frs[subField.GetFieldID()]; ok {
+				if fill.refField == nil {
+					fill.refField = subField
+				}
+				continue
+			}
+			fill.missing = append(fill.missing, subField)
+		}
+		if fill.refField != nil && len(fill.missing) > 0 {
+			fills = append(fills, fill)
+		}
+	}
+	return fills
+}
+
+// fillMissingStructSubFields extends the columns of the missing sub-fields to
+// the rows read so far, so the batch memory check sees them. CreateFieldReaders
+// only leaves an element-nullable sub-field without a reader.
+func (r *reader) fillMissingStructSubFields(insertData *storage.InsertData) error {
+	for _, fill := range r.structFills {
+		refData := insertData.Data[fill.refField.GetFieldID()]
+		for _, subField := range fill.missing {
+			if err := common.AppendNullElementRows(fill.structName, subField, fill.refField, refData,
+				insertData.Data[subField.GetFieldID()]); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, path string, bufferSize int) (*reader, error) {
@@ -117,6 +167,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 		count:         count,
 		rowsPerBuffer: bufferSize / sizePerRecord,
 		frs:           crs,
+		structFills:   newStructFills(schema, crs),
 	}, nil
 }
 
@@ -139,6 +190,12 @@ OUTER:
 			if err != nil {
 				return nil, err
 			}
+		}
+		// Fill the sub-fields the file omits chunk by chunk, before the
+		// memory check, so a batch stays within bufferSize plus one chunk
+		// with the filled columns counted.
+		if err := r.fillMissingStructSubFields(insertData); err != nil {
+			return nil, err
 		}
 		if insertData.GetMemorySize() >= r.bufferSize {
 			break

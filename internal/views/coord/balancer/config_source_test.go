@@ -80,15 +80,9 @@ func TestBalanceConfigSourcePublicationAndValidation(t *testing.T) {
 
 func TestBalanceConfigIndependentOfQueryCoord(t *testing.T) {
 	p := newBalanceParams()
-	// Legacy settings must not affect startup or subsequent QueryView refreshes.
+	// QueryCoord balancing must not affect QueryView startup or refreshes.
 	require.NoError(t, p.Save(p.QueryCoordCfg.AutoBalance.Key, "false"))
-	for key, value := range map[string]string{
-		"queryCoord.queryView.fullReconsileInterval":    "30",
-		"queryCoord.queryView.fullReconcileInterval":    "40",
-		"queryCoord.queryView.balance.stickinessWeight": "9",
-	} {
-		require.NoError(t, p.Save(key, value))
-	}
+
 	c := balancercache.New(nil)
 	b := NewDefaultBalancer(c, nil, nil, nil)
 	stop := b.watchBalanceConfig(t.Context(), p)

@@ -188,7 +188,7 @@ func TestServingLeaseForcedDropCancelsTimer(t *testing.T) {
 func TestServingLeaseConfigurationIsCaptured(t *testing.T) {
 	params := paramtable.Get()
 	key := params.QueryViewCfg.LeaseDuration.Key
-	require.Equal(t, "60s", params.QueryViewCfg.LeaseDuration.DefaultValue)
+	require.Equal(t, "5s", params.QueryViewCfg.LeaseDuration.DefaultValue)
 	original := params.QueryViewCfg.LeaseDuration.GetValue()
 	t.Cleanup(func() { require.NoError(t, params.Save(key, original)) })
 	require.NoError(t, params.Save(key, "3s"))
@@ -300,4 +300,49 @@ func TestServingLeaseCancelledAndMissingAcquisitionDoesNotRenew(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, entry.leaseExpireAt.IsZero())
 	require.Zero(t, entry.queryRefs)
+}
+
+func TestPreemptServingLeaseWithdrawsAdmissionAndDrainsCalls(t *testing.T) {
+	h, shard, entry, _, reports := leasedUpView(t, time.Hour)
+	lease, err := h.AcquireLatestUpView(t.Context(), shard.shardID)
+	require.NoError(t, err)
+	lease.Release()
+	pushLeaseDown(h, reports)
+	require.NotNil(t, entry.downTimer)
+	lease, err = h.AcquireLatestUpView(t.Context(), shard.shardID)
+	require.NoError(t, err, "ordinary pending Down protects inter-phase access")
+	view := newSNViewWithState(1, viewpb.QueryViewState_QueryViewStateDown).IntoProto()
+	view.Meta.Control = &viewpb.QueryViewControl{PreemptServingLease: true}
+	h.ApplyViews([]handler.ApplyView{{View: qviews.NewQueryViewAtWorkNodeFromProto(view), OnReport: reports.onReport}})
+	require.True(t, entry.leaseDisabled)
+	require.True(t, entry.leaseExpireAt.IsZero())
+	require.Nil(t, entry.downTimer)
+	require.Equal(t, qviews.QueryViewStateUp, entry.sm.State(), "active reference still protects Down completion")
+	_, err = h.AcquireUpView(t.Context(), shard.shardID, lease.Version)
+	require.Error(t, err)
+	_, err = h.AcquireLatestUpView(t.Context(), shard.shardID)
+	require.Error(t, err)
+	deadline := entry.leaseExpireAt
+	lease.Renew()
+	require.Equal(t, deadline, entry.leaseExpireAt)
+	pushLeaseDown(h, reports) // An older control-free push cannot undo preemption.
+	require.True(t, entry.leaseDisabled)
+	lease.Release()
+	require.Equal(t, qviews.QueryViewStateDown, entry.sm.State(), "an hour-long lease is bypassed")
+	require.Nil(t, entry.downTimer)
+}
+
+func TestControlledDownClearsFreshLeaseWithoutActiveCalls(t *testing.T) {
+	h, shard, entry, _, reports := leasedUpView(t, time.Hour)
+	lease, err := h.AcquireLatestUpView(t.Context(), shard.shardID)
+	require.NoError(t, err)
+	lease.Release()
+	require.True(t, entry.leaseExpireAt.After(time.Now()))
+	view := newSNViewWithState(1, viewpb.QueryViewState_QueryViewStateDown).IntoProto()
+	view.Meta.Control = &viewpb.QueryViewControl{PreemptServingLease: true}
+	h.ApplyViews([]handler.ApplyView{{View: qviews.NewQueryViewAtWorkNodeFromProto(view), OnReport: reports.onReport}})
+	require.True(t, entry.leaseExpireAt.IsZero())
+	require.True(t, entry.leaseDisabled)
+	require.Equal(t, qviews.QueryViewStateDown, entry.sm.State())
+	require.Nil(t, entry.downTimer)
 }

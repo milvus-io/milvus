@@ -501,12 +501,16 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
         return expr_->column_.element_level_;
     }
 
+    bool
+    SupportsJsonStatsExecPath() const override {
+        return true;
+    }
+
     void
     DetermineExecPath() override {
-        if (CanUseJsonStatsAtInit()) {
-            exec_path_ = ExprExecPath::JsonStats;
-            return;
-        }
+        // JsonStats is the fallback applied by EnsureExecPathDetermined()
+        // when no index below serves this expression; see SegmentExpr::
+        // FallbackToJsonStatsIfEligible().
         if (expr_->column_.data_type_ == DataType::JSON &&
             (!expr_->same_type_ ||
              std::any_of(expr_->vals_.begin(),
@@ -540,7 +544,7 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
                              ? value_type_
                              : expr_->column_.element_type_;
         req.json_array_cast = expr_->column_.data_type_ == DataType::JSON;
-        SelectAndPinIndex(req);
+        SelectAndCreateIndexReader(req);
     }
 
  private:
