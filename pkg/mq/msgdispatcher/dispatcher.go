@@ -279,6 +279,8 @@ func (d *Dispatcher) work() {
 					TryUnmarshalMessages() ([]msgstream.TsMsg, error)
 				}); compound {
 					log.Error(d.ctx, "failed to decode compound WAL record; stop dispatch before advancing progress", mlog.Err(err))
+					// Retain the failed pack while participating in the manager's pause/terminate lifecycle.
+					<-d.done
 					return
 				}
 			}
