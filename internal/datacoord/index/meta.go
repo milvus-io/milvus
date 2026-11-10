@@ -35,7 +35,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/json"
-	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metacache"
+"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
@@ -76,6 +77,7 @@ func validateIndexStorePathVersionForFinish(buildID int64, requested, actual ind
 }
 
 type IndexMeta struct {
+ summarySource metacache.MetaView
 	ctx     context.Context
 	Catalog metastore.DataCoordCatalog
 
@@ -304,6 +306,16 @@ func (m *IndexMeta) updateSegmentIndex(segIdx *model.SegmentIndex) {
 	defer locks.Unlock(segIdx.SegmentID)
 	old, _ := m.SegmentBuildInfo.Get(segIdx.BuildID)
 	m.taskCounts.replaceTask(old, segIdx)
+    if m.UsesSegmentSummaries() && segIdx.ManifestPublished && segIdx.IndexState == commonpb.IndexState_Finished {
+        if indexes, ok := m.SegmentIndexes.Get(segIdx.SegmentID); ok {
+            if current, exists := indexes.Get(segIdx.IndexID); exists && current.BuildID == segIdx.BuildID {
+                indexes.Remove(segIdx.IndexID)
+                if indexes.Len() == 0 { m.SegmentIndexes.Remove(segIdx.SegmentID) }
+            }
+        }
+        m.SegmentBuildInfo.Remove(segIdx.BuildID)
+        return
+    }
 	indexes, ok := m.SegmentIndexes.Get(segIdx.SegmentID)
 	if ok {
 		indexes.Insert(segIdx.IndexID, segIdx)
@@ -775,7 +787,7 @@ func (m *IndexMeta) GetSegmentIndexState(collID, segmentID UniqueID, indexID Uni
 	}
 	m.fieldIndexLock.RUnlock()
 
-	indexes, ok := m.SegmentIndexes.Get(segmentID)
+	indexes, ok := m.segmentIndexRecords(segmentID)
 	if !ok {
 		state.State = commonpb.IndexState_Unissued
 		state.FailReason = fmt.Sprintf("segment index not exist with ID: %d", segmentID)
@@ -839,7 +851,7 @@ func (m *IndexMeta) GetIndexedSegments(collectionID int64, segmentIDs, fieldIDs 
 
 	ret := make([]int64, 0)
 	for _, sid := range segmentIDs {
-		if indexes, ok := m.SegmentIndexes.Get(sid); ok {
+		if indexes, ok := m.segmentIndexRecords(sid); ok {
 			if checkSegmentState(indexes) {
 				ret = append(ret, sid)
 			}
@@ -1000,7 +1012,7 @@ func (m *IndexMeta) GetUnIndexedSegmentIDsForIndexTask(collectionID UniqueID, se
 
 	for _, segID := range segIDs {
 		// the segment should be unindexed status if the fieldIndexes is not nil
-		segIndexInfos, ok := m.SegmentIndexes.Get(segID)
+		segIndexInfos, ok := m.segmentIndexRecords(segID)
 		if !ok || segIndexInfos.Len() == 0 {
 			unindexed.Insert(segID)
 			continue
@@ -1064,7 +1076,7 @@ func (m *IndexMeta) GetAllSegmentIndexes(segID UniqueID) []*model.SegmentIndex {
 	if m.SegmentIndexes == nil {
 		return nil
 	}
-	segIndexInfos, ok := m.SegmentIndexes.Get(segID)
+	segIndexInfos, ok := m.segmentIndexRecords(segID)
 	if !ok || segIndexInfos.Len() == 0 {
 		return nil
 	}
@@ -1080,7 +1092,7 @@ func (m *IndexMeta) GetAllSegmentIndexes(segID UniqueID) []*model.SegmentIndex {
 // Note: thread-unsafe, don't call it outside indexMeta
 func (m *IndexMeta) GetSegmentIndexesUnsafe(collectionID UniqueID, segID UniqueID) map[UniqueID]*model.SegmentIndex {
 	ret := make(map[UniqueID]*model.SegmentIndex, 0)
-	segIndexInfos, ok := m.SegmentIndexes.Get(segID)
+	segIndexInfos, ok := m.segmentIndexRecords(segID)
 	if !ok || segIndexInfos.Len() == 0 {
 		return ret
 	}
@@ -1401,6 +1413,7 @@ func (m *IndexMeta) stageSegmentIndexMutation(mut meta.SegmentIndexMutation) (*m
 	staged := &meta.StagedSegmentIndexMutation{Install: func() func() { return func() {} }}
 
 	previous, ok := m.SegmentBuildInfo.Get(mut.BuildID)
+    if !ok && mut.Type == meta.SegmentIndexRemove { previous, ok = m.summaryRecord(mut.SegmentID, mut.BuildID) }
 	if !ok {
 		if mut.Type == meta.SegmentIndexUpsert {
 			return staged, meta.ErrSegmentIndexRecordGone
@@ -1579,7 +1592,7 @@ func (m *IndexMeta) GetSegmentsIndexStates(collectionID UniqueID, segmentIDs []U
 	m.fieldIndexLock.RUnlock()
 
 	for _, segID := range segmentIDs {
-		segIndexInfos, ok := m.SegmentIndexes.Get(segID)
+		segIndexInfos, ok := m.segmentIndexRecords(segID)
 		if !ok || segIndexInfos.Len() == 0 {
 			// Leave the entry out rather than storing an empty map. Both
 			// callers read it as `states[indexID]`, which behaves identically
@@ -1720,7 +1733,7 @@ func (m *IndexMeta) GetSegmentIndexedFields(collectionID UniqueID, segmentID Uni
 	m.fieldIndexLock.RUnlock()
 
 	// the segment should be unindexed status if the segment indexes is not found
-	segIndexInfos, ok := m.SegmentIndexes.Get(segmentID)
+	segIndexInfos, ok := m.segmentIndexRecords(segmentID)
 	if !ok || segIndexInfos.Len() == 0 {
 		return false, []*metricsinfo.IndexedField{}
 	}

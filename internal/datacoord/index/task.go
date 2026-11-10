@@ -144,6 +144,9 @@ func (it *indexBuildTask) SetState(state indexpb.JobState, failReason string) {
 }
 
 func (it *indexBuildTask) UpdateStateWithMeta(state indexpb.JobState, failReason string) error {
+    if it.indexMeta.UsesSegmentSummaries() && state == indexpb.JobState_JobStateFinished {
+        return it.SetJobInfo(&workerpb.IndexTaskInfo{BuildID: it.BuildID, State: commonpb.IndexState_Finished})
+    }
 	if err := it.indexMeta.UpdateIndexState(it.BuildID, commonpb.IndexState(state), failReason); err != nil {
 		return err
 	}
@@ -164,7 +167,15 @@ func (it *indexBuildTask) UpdateTaskVersion(nodeID int64) error {
 }
 
 func (it *indexBuildTask) SetJobInfo(result *workerpb.IndexTaskInfo) error {
-	published, err := it.publishIndexToManifest(result)
+	var published bool
+    var err error
+    if it.indexMeta.UsesSegmentSummaries() && result.GetState() == commonpb.IndexState_Finished && len(result.GetIndexFileKeys()) == 0 {
+        published, err = it.meta.CompleteEmptyIndex(it.meta.Ctx, it.SegmentID, result)
+        if errors.Is(err, merr.ErrSegmentNotFound) { published, err = false, nil }
+        if err == nil { it.meta.RecomputeDataView(it.meta.Ctx, it.CollectionID) }
+    } else {
+        published, err = it.publishIndexToManifest(result)
+    }
 	if err != nil {
 		return err
 	}

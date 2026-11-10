@@ -7,6 +7,8 @@ import (
 )
 
 type SegmentIndex struct {
+ // ArtifactPresent is set on transient projections of SegmentInfo summaries.
+ ArtifactPresent bool
 	SegmentID      int64
 	CollectionID   int64
 	PartitionID    int64
@@ -107,6 +109,7 @@ func MarshalSegmentIndexModel(segIdx *SegmentIndex) *indexpb.SegmentIndex {
 
 func CloneSegmentIndex(segIndex *SegmentIndex) *SegmentIndex {
 	return &SegmentIndex{
+ ArtifactPresent: segIndex.ArtifactPresent,
 		SegmentID:                 segIndex.SegmentID,
 		CollectionID:              segIndex.CollectionID,
 		PartitionID:               segIndex.PartitionID,
@@ -131,3 +134,5 @@ func CloneSegmentIndex(segIndex *SegmentIndex) *SegmentIndex {
 		ManifestPublished:         segIndex.ManifestPublished,
 	}
 }
+
+func (s *SegmentIndex) HasArtifact() bool { return s.ArtifactPresent || len(s.IndexFileKeys) > 0 }

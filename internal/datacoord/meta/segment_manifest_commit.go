@@ -136,6 +136,8 @@ const (
 type SegmentIndexMutation struct {
 	Type    SegmentIndexMutationType
 	BuildID int64
+ // SegmentID is populated by the commit framework before staging.
+ SegmentID int64
 	// FinishedTask is the raw worker result an upsert projects the persisted
 	// record from. Required for SegmentIndexUpsert, rejected for
 	// SegmentIndexRemove, SegmentIndexBackfill and SegmentIndexRollback.
@@ -363,7 +365,8 @@ func (m *Meta) commitSegmentManifestLocked(ctx context.Context, commit SegmentMa
 			}
 			removedBuildIDs[indexMutation.BuildID] = struct{}{}
 		}
-		staged, err := m.IndexCatalog.StageSegmentIndexMutation(*indexMutation)
+		indexMutation.SegmentID = commit.SegmentID
+        staged, err := m.IndexCatalog.StageSegmentIndexMutation(*indexMutation)
 		if err != nil {
 			if errors.Is(err, ErrSegmentIndexRecordGone) {
 				// Only an upsert whose task row vanished mid-commit produces

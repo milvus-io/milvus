@@ -915,7 +915,7 @@ func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *meta.SegmentInfo)
 		// index version of segment lower than resolved version and IndexFileKeys should have value, trigger compaction
 		indexIDToSegIdxes := t.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
 		for _, idx := range indexIDToSegIdxes {
-			if len(idx.IndexFileKeys) == 0 {
+			if !idx.HasArtifact() {
 				continue
 			}
 
@@ -952,7 +952,7 @@ func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *meta.SegmentInfo)
 		resolvedVecTarget := t.indexEngineVersionManager.ResolveVecIndexVersion()
 		indexIDToSegIdxes := t.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
 		for _, idx := range indexIDToSegIdxes {
-			if len(idx.IndexFileKeys) == 0 {
+			if !idx.HasArtifact() {
 				continue
 			}
 
@@ -983,7 +983,7 @@ func (t *compactionTrigger) ShouldRebuildSegmentIndex(segment *meta.SegmentInfo)
 		resolvedScalarTarget := t.indexEngineVersionManager.ResolveScalarIndexVersion()
 		indexIDToSegIdxes := t.indexMeta.GetSegmentIndexes(segment.CollectionID, segment.ID)
 		for _, idx := range indexIDToSegIdxes {
-			if len(idx.IndexFileKeys) == 0 {
+			if !idx.HasArtifact() {
 				continue
 			}
 
