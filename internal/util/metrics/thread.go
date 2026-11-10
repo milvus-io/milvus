@@ -235,23 +235,16 @@ func collectThreadGroups(current []threadStat, previous map[int32]threadSample, 
 func collectNamedThreadStats(procRoot string, clockTicks float64) ([]threadStat, uint64, error) {
 	var scanStart uint64
 	if clockTicks > 0 {
-		uptime, err := os.ReadFile(filepath.Join(procRoot, "uptime"))
-		if err != nil {
-			return nil, 0, err
+		// Uptime may be hidden by subset=pid; only new-thread lifetime CPU needs it.
+		if uptime, err := os.ReadFile(filepath.Join(procRoot, "uptime")); err == nil {
+			if fields := strings.Fields(string(uptime)); len(fields) > 0 {
+				seconds, err := strconv.ParseFloat(fields[0], 64)
+				if err == nil && seconds >= 0 && !math.IsNaN(seconds) && !math.IsInf(seconds, 0) && seconds*clockTicks < math.Exp2(64) {
+					// Proc uptime is rounded to centiseconds. Exclude the boundary tick.
+					scanStart = uint64(math.Ceil(seconds * clockTicks))
+				}
+			}
 		}
-		fields := strings.Fields(string(uptime))
-		if len(fields) == 0 {
-			return nil, 0, merr.WrapErrServiceInternalMsg("empty proc uptime")
-		}
-		seconds, err := strconv.ParseFloat(fields[0], 64)
-		if err != nil {
-			return nil, 0, err
-		}
-		if seconds < 0 || math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds*clockTicks >= math.Exp2(64) {
-			return nil, 0, merr.WrapErrServiceInternalMsg("invalid proc uptime")
-		}
-		// proc uptime is rounded to centiseconds. Exclude the boundary tick.
-		scanStart = uint64(math.Ceil(seconds * clockTicks))
 	}
 	taskDir := filepath.Join(procRoot, "self", "task")
 	entries, err := os.ReadDir(taskDir)

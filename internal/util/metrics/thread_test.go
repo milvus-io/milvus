@@ -217,14 +217,70 @@ func TestCollectThreadStatsFailures(t *testing.T) {
 	require.False(t, stats[0].unreadable)
 	for _, uptime := range []string{"", "bad", "NaN", "+Inf", "-1", "1e30"} {
 		require.NoError(t, os.WriteFile(filepath.Join(root, "uptime"), []byte(uptime), 0o600))
-		_, _, err = collectNamedThreadStats(root, 100)
-		require.Error(t, err, uptime)
+		current, boundary, err := collectNamedThreadStats(root, 100)
+		require.NoError(t, err, uptime)
+		require.Zero(t, boundary, uptime)
+		require.Equal(t, stats, current, uptime)
 	}
 	_, _, err = collectNamedThreadStats(root, 0)
 	require.NoError(t, err, "thread counts still work without CPU frequency")
 	require.NoError(t, os.RemoveAll(filepath.Join(root, "self", "task")))
 	_, _, err = collectNamedThreadStats(root, 0)
 	require.Error(t, err)
+}
+
+func TestThreadSamplingWithoutUptime(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux thread sampling")
+	}
+	root := t.TempDir()
+	taskDir := filepath.Join(root, "self", "task", "42")
+	require.NoError(t, os.MkdirAll(taskDir, 0o700))
+	writeStat := func(user, system uint64) {
+		raw := fmt.Sprintf("42 (HIGH_SEGC_POOL) S 1 2 3 4 5 6 7 8 9 10 %d %d 0 0 0 0 0 0 200", user, system)
+		require.NoError(t, os.WriteFile(filepath.Join(taskDir, "stat"), []byte(raw), 0o600))
+	}
+	collect := collectNamedThreadStats
+	patch := mockey.Mock(collectNamedThreadStats).To(func(_ string, ticks float64) ([]threadStat, uint64, error) {
+		return collect(root, ticks)
+	}).Origin(&collect).Build()
+	defer patch.UnPatch()
+	metrics.ThreadPoolCPUSeconds.Reset()
+	metrics.ThreadCPUActiveNumByPool.Reset()
+	t.Cleanup(func() { metrics.ThreadPoolCPUSeconds.Reset(); metrics.ThreadCPUActiveNumByPool.Reset() })
+	watcher := &threadWatcher{clockTicks: 100}
+	user := metrics.ThreadPoolCPUSeconds.WithLabelValues("segcore_high", "user")
+	system := metrics.ThreadPoolCPUSeconds.WithLabelValues("segcore_high", "system")
+	active := metrics.ThreadCPUActiveNumByPool.WithLabelValues("segcore_high")
+
+	writeStat(100, 50)
+	watcher.updateNamedThreadMetrics()
+	require.Len(t, watcher.samples, 1)
+	require.Zero(t, testutil.ToFloat64(user))
+	require.Zero(t, testutil.ToFloat64(system))
+	writeStat(130, 70)
+	watcher.updateNamedThreadMetrics()
+	require.InDelta(t, 0.3, testutil.ToFloat64(user), 1e-9)
+	require.InDelta(t, 0.2, testutil.ToFloat64(system), 1e-9)
+	require.Equal(t, 1.0, testutil.ToFloat64(active))
+
+	// Recovering uptime must not import CPU already present in the baseline.
+	require.NoError(t, os.WriteFile(filepath.Join(root, "uptime"), []byte("3 0"), 0o600))
+	watcher.updateNamedThreadMetrics()
+	require.Equal(t, uint64(300), watcher.scanStart)
+	require.InDelta(t, 0.3, testutil.ToFloat64(user), 1e-9)
+	require.InDelta(t, 0.2, testutil.ToFloat64(system), 1e-9)
+	require.NoError(t, os.Remove(filepath.Join(root, "uptime")))
+	watcher.updateNamedThreadMetrics()
+	require.Zero(t, watcher.scanStart, "do not retain a stale birth-time boundary")
+
+	// A directory in place of uptime also causes a read error, even as root.
+	require.NoError(t, os.Mkdir(filepath.Join(root, "uptime"), 0o700))
+	writeStat(140, 80)
+	watcher.updateNamedThreadMetrics()
+	require.InDelta(t, 0.4, testutil.ToFloat64(user), 1e-9)
+	require.InDelta(t, 0.3, testutil.ToFloat64(system), 1e-9)
+	require.Equal(t, 1.0, testutil.ToFloat64(active))
 }
 
 func TestThreadCPUCounterPublication(t *testing.T) {
