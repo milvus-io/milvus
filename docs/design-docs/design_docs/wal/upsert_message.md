@@ -10,6 +10,25 @@ Logical WAL identity and visibility do not imply an in-memory transaction around
 
 Historical Insert and Delete records remain readable. Independent Delete messages remain supported. Public API semantics, including batch duplicate behavior, remain unchanged by the format name.
 
+## Breaking change in 3.1: namespace writes are unsupported
+
+> **Upgrade impact:** namespace-scoped writes were exposed by the released 3.0
+> SDKs. This change intentionally stops accepting namespace-bearing Insert,
+> Upsert and partial-update requests in 3.1. Writes to namespace-enabled
+> collections are also rejected when the request omits namespace.
+
+Proxy returns an invalid-parameter error before sending any WAL messages. The
+new Insert V2/Upsert producer has no namespace representation or legacy-format
+fallback. Applications using namespace writes cannot continue those writes
+with this 3.1 format. This is a behavior change, not an unimplemented SDK option.
+The [Go SDK client/v3.0.0 release notes](https://github.com/milvus-io/milvus/releases/tag/client/v3.0.0)
+explicitly listed namespace-scoped operations.
+
+Historical namespace-bearing Insert records remain readable. This restriction
+does not remove namespace selection from reads over existing data or change
+standalone Delete's existing namespace routing. E2E tests assert namespace write
+rejection; ordinary function-chain coverage uses collections without namespace.
+
 ## Wire contract
 
 The outer properties carry VChannel, TimeTick, transaction context, and the optional idempotency key. Insert V2 uses `InsertMessageHeaderV2`; Upsert keeps `UpsertMessageHeader`. Both carry fields 1 through 3 below. Only the Upsert header has field 4:
@@ -106,6 +125,18 @@ Commit freezes admission and uses the existing wait for in-flight bodies. This d
 
 A duplicate returns the original AppendResult, including original MessageID, TimeTick, and available result IDs. It must not substitute newly allocated IDs from a retry request. Summary and WAL recovery reconstruct results from the original records. Retry suppression retains the existing bounded window and unknown-outcome behavior. Keyless re-appends remain separate writes. This format does not add unconditional exactly-once delivery.
 
+### Backend ACK-loss recovery boundary
+
+The normal keyed retry/reopen path preserves the original AppendResult. An
+additional failure combination remains: a backend may durably append Commit,
+lose its ACK, then persist the same TimeTick again under a later MessageID.
+The successful live append returns the later ID, while recovery's existing
+physical TimeTick deduplication can retain the earlier durable Commit ID.
+Consequently, identical WAL MessageID recovery is not guaranteed for this
+ACK-loss combination. This was also reproduced with legacy Insert V1 bodies;
+it is not specific to the new row encoding. It does not establish a change to
+row visibility or result PKs, and those outcomes require their own checks.
+
 ## Consumption, persistence and recovery
 
 Native consumers obtain an `InsertRowsReader` through `AsInsertRowsReader`. It reads selected rows into the existing storage InsertRequest representation. Partition selections are computed once and shared by all columns and receiving segments. A single partition uses an implicit all-row selection, without an array of row numbers. All-row readers own execution metadata while borrowing immutable column values and RowIDs. Multi-partition selections preserve interleaving and use one exactly sized backing array divided into partition-local slices; they do not reorder the wire rows. Consumers restore the standalone PK column and supply system fields at the execution boundary. Nullable compact vectors use logical-to-physical positions. StructArray, VectorArray, and function outputs follow existing FieldData conversion rules.
@@ -140,9 +171,9 @@ The native QueryView path from #52977 is a reader dependency and is included in 
 
 3.1 removes `streaming.wal.enableUpsertMessage`, `proxy.splitChunk`, and `streaming.splitChunkSN`. Insert always produces Insert V2. Upsert and partial update always produce Upsert. Proxy does not split by backend record size. SN always performs physical chunking when a payload exceeds its backend budget; an unbounded backend retains its single-record behavior. Readers always reassemble chunks independently of configuration.
 
-Deployment first upgrades every component to the prerequisite latest 3.0 release with complete Insert V2/Upsert reception, consumption and chunk-reading support. The 3.0 compatibility backport is separate release work; this 3.1 implementation does not prove that backport complete. Existing 3.0 producers keep their formats. Deployment management must also upgrade CDC targets before sending new formats. There is no automatic remote compatibility negotiation or retained-history downgrade guarantee.
+Deployment first upgrades readers through the prerequisite latest 3.0 release with final-format Insert V2/Upsert decoding, consumption and chunk-reading support. The reader-only backport is tracked in [PR #55375](https://github.com/milvus-io/milvus/pull/55375); it keeps existing 3.0 producers and append handlers, and adds no chunk writer. Reader compatibility does not enable new-format writes through a 3.0 SN. Deployment management must keep the secondary cluster ahead of its primary and prohibit switchover during upgrades. These operational conditions are not enforced by this format. There is no automatic remote compatibility negotiation or retained-history downgrade guarantee.
 
-During a mixed 3.0/3.1 rollout, a new Proxy may send a large logical message to an old SN that cannot chunk writes. That SN can remain in its backend retry loop. After shutdown/fencing and reassignment, a still-live producer can resume on a new owner; its deadline may expire first. Temporary delay or timeout is accepted. No new version probe, config propagation wait, retry policy or format fallback is added.
+During a mixed 3.0/3.1 rollout, a new Proxy can encounter an old SN that lacks the new append handlers or chunk writer. Such writes may fail, wait or time out until the owner is upgraded or reassigned; reader-only backport support does not guarantee successful mixed-version appends. Existing retries are not a substitute for reader compatibility. No new version probe, config propagation wait, retry policy or format fallback is added.
 
 Local CAS writes still use their existing transaction wrapper, even with one body. Ordinary writes no longer need a transaction solely because of size or partition grouping. Historical and replicated transactions remain readable. No cross-VChannel atomicity is introduced.
 

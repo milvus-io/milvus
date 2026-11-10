@@ -61,6 +61,16 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 The retired `AlterRLSMetadata` and `DropRLSMetadata` wire types remain decodable,
 but have no ACK callbacks and do not maintain metadata during replay.
 
+## 3.1 namespace write restriction
+
+Insert V2 and Upsert producers reject namespace-bearing Insert, Upsert and
+partial-update requests before WAL append. They also reject writes to
+namespace-enabled collections when namespace is omitted. This deliberately
+changes the namespace write behavior exposed by released 3.0 SDKs; there is no
+legacy producer fallback. Historical records remain readable, namespace reads retain their existing
+behavior, and standalone Delete keeps its namespace routing. See the
+[WAL format compatibility contract](../../../design-docs/design_docs/wal/upsert_message.md).
+
 ## Replication Compatibility
 
 Current producers explicitly mark these collection-scoped broadcast messages with `Unreplicable` (`_ur`): CreateSnapshot, DropSnapshot, RestoreSnapshot, BatchUpdateManifest, RefreshExternalCollection, and ManualFlush. Replication skips the concrete marked messages instead of classifying the whole message type as permanently unsupported, so newly generated messages can become replicable later by no longer setting `_ur`.
