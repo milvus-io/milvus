@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -39,6 +40,7 @@
 #include <vector>
 
 #include "arrow/buffer.h"
+#include "arrow/filesystem/localfs.h"
 #include "cachinglayer/Metrics.h"
 #include "folly/ScopeGuard.h"
 #include "knowhere/index/index_factory.h"
@@ -60,6 +62,8 @@
 #include "knowhere/version.h"
 #include "storage/FileManager.h"
 #include "storage/Types.h"
+#include "storage/LocalChunkManager.h"
+#include "storage/artifact/DiskEngineFileHandle.h"
 #include "storage/Util.h"
 #include "storage/artifact/FileSink.h"
 #include "storage/artifact/FileSource.h"
@@ -242,6 +246,65 @@ MakeRows() {
     return values;
 }
 
+// Count only validity sidecar I/O; index metadata uses the backend's streams.
+class ValidityCountingChunkManager final : public storage::LocalChunkManager {
+ public:
+    using LocalChunkManager::LocalChunkManager;
+
+    uint64_t
+    Size(const std::string& path) override {
+        if (IsValidity(path))
+            ++sizes;
+        return LocalChunkManager::Size(path);
+    }
+
+    uint64_t
+    Read(const std::string& path, void* data, uint64_t bytes) override {
+        return Read(path, 0, data, bytes);
+    }
+
+    uint64_t
+    Read(const std::string& path,
+         uint64_t offset,
+         void* data,
+         uint64_t bytes) override {
+        if (IsValidity(path))
+            ++reads;
+        return LocalChunkManager::Read(path, offset, data, bytes);
+    }
+
+    std::atomic<size_t> sizes{0};
+    std::atomic<size_t> reads{0};
+
+ private:
+    static bool
+    IsValidity(const std::string& path) {
+        return std::filesystem::path(path).filename().string().starts_with(
+            VALID_DATA_KEY);
+    }
+};
+
+// Async entry reads use Arrow instead of ChunkManager. Count opening the
+// sidecar so a skipped entry cannot issue any subsequent size/range reads.
+class ValidityCountingFileSystem final : public arrow::fs::SubTreeFileSystem {
+ public:
+    ValidityCountingFileSystem()
+        : SubTreeFileSystem("",
+                            std::make_shared<arrow::fs::LocalFileSystem>()) {
+    }
+
+    arrow::Future<std::shared_ptr<arrow::io::RandomAccessFile>>
+    OpenInputFileAsync(const std::string& path) override {
+        if (std::filesystem::path(path).filename().string().starts_with(
+                VALID_DATA_KEY)) {
+            ++opens;
+        }
+        return base_fs()->OpenInputFileAsync(path);
+    }
+
+    std::atomic<size_t> opens{0};
+};
+
 template <typename T>
 struct OpenedDiskIndex {
     IIndexReaderBasePtr base;
@@ -270,6 +333,8 @@ struct DiskBuildCase {
     bool defer_load = false;
     OpContext* reader_context = nullptr;
     std::optional<IndexCacheConfig> cache_config;
+    bool check_validity_io = false;
+    bool use_async_load = false;
 };
 
 template <typename T>
@@ -322,6 +387,8 @@ BuildDisk(const std::string& raw_path,
     std::filesystem::create_directories(config.root_path);
     const auto field_type =
         vector_array ? DataType::VECTOR_ARRAY : PhysicalType<T>();
+    auto manager =
+        std::make_shared<ValidityCountingChunkManager>(config.root_path);
     storage::FileManagerContext context({1, 2, 3, 100},
                                         {3,
                                          100,
@@ -332,9 +399,9 @@ BuildDisk(const std::string& raw_path,
                                          field_type,
                                          build.dim,
                                          false},
-                                        storage::CreateChunkManager(config),
+                                        manager,
                                         storage::InitArrowFileSystem(config));
-    context.use_async_load = false;
+    context.use_async_load = build.use_async_load;
     storage::V1DiskSink sink(context);
     artifact->Serialize(sink);
     if (!build.legacy_validity.empty()) {
@@ -381,6 +448,52 @@ BuildDisk(const std::string& raw_path,
     options.params[DISK_ANN_LOAD_THREAD_NUM] = 2;
     options.enable_mmap = build.mmap;
     options.mmap_dir_path = staging_dir;
+    auto fs = std::make_shared<ValidityCountingFileSystem>();
+    bool needs_external_validity = true;
+    if (build.check_validity_io) {
+        // Use absolute object paths, as the ChunkManager path does.
+        if (build.use_async_load)
+            context.fs = fs;
+        // Ask the public backend contract, without assuming an engine or
+        // persisted format version. Exclude this probe from the load counters.
+        storage::V1RemoteSource source(context,
+                                       paths,
+                                       options,
+                                       storage::ArtifactStorageNamespace::Index,
+                                       storage::V1SourceLayout::DiskFiles);
+        auto names = source.EntryNames();
+        std::erase(names, std::string(VALID_DATA_KEY));
+        std::erase(names, std::string(EMPTY_EMB_LIST_OFFSETS_KEY));
+        if (!names.empty()) {
+            auto handle = source.OpenDiskEngineFiles(
+                storage::DiskEngineFileMode::LocalFiles, names);
+            auto native = knowhere::IndexFactory::Instance().Create<T>(
+                knowhere::IndexEnum::INDEX_DISKANN,
+                build.version,
+                knowhere::Pack(handle->Manager()));
+            ASSERT_TRUE(native.has_value());
+            if (native.value().LoadIndexWithStream()) {
+                handle = source.OpenDiskEngineFiles(
+                    storage::DiskEngineFileMode::RemoteStreams, names);
+                native = knowhere::IndexFactory::Instance().Create<T>(
+                    knowhere::IndexEnum::INDEX_DISKANN,
+                    build.version,
+                    knowhere::Pack(handle->Manager()));
+                ASSERT_TRUE(native.has_value());
+                auto probe = options.params;
+                probe[DISK_ANN_PREFIX_PATH] = handle->LocalPrefix();
+                probe[DISK_ANN_THREADS_NUM] = 2;
+                const auto requirements =
+                    native.value().InspectLoadRequirements({}, probe);
+                ASSERT_TRUE(requirements.has_value());
+                needs_external_validity =
+                    requirements.value().needs_external_validity;
+            }
+        }
+        manager->sizes = 0;
+        manager->reads = 0;
+        fs->opens = 0;
+    }
     auto cache = milvus::index::test::TestIndexCacheConfig();
     if (build.defer_load) {
         cache = IndexCacheConfig{
@@ -408,6 +521,19 @@ BuildDisk(const std::string& raw_path,
     if (build.defer_load)
         EXPECT_FALSE(index->Metadata().count.has_value());
     opened.base = index->CreateReader(build.reader_context);
+    if (build.check_validity_io) {
+        if (needs_external_validity) {
+            if (build.use_async_load) {
+                EXPECT_GT(fs->opens.load(), 0);
+            } else {
+                EXPECT_GT(manager->reads.load(), 0);
+            }
+        } else {
+            EXPECT_EQ(manager->sizes.load(), 0);
+            EXPECT_EQ(manager->reads.load(), 0);
+            EXPECT_EQ(fs->opens.load(), 0);
+        }
+    }
 }
 
 template <typename T>
@@ -1160,6 +1286,75 @@ RandomVectors(int64_t count) {
         value = dist(rng);
     }
     return values;
+}
+
+TEST(VectorDiskFamilyTest, NullableRowsPreserveTrailingNullsAfterLoad) {
+    const auto latest = knowhere::Version::GetMaximumVersion().VersionNumber();
+    // Exercise persisted formats through the public version range.
+    for (const auto version : {latest - 1, latest}) {
+        SCOPED_TRACE(::testing::Message() << "index_version=" << version);
+        for (bool use_async : {false, true}) {
+            SCOPED_TRACE(::testing::Message() << "async=" << use_async);
+            for (bool all_null : {false, true}) {
+                auto files = storage::LocalDirectory::CreateOwned(
+                    "/tmp",
+                    "vector_disk_validity_XXXXXX",
+                    "nullable disk load test");
+                const int64_t rows = kRows * 3 + 1;
+                std::vector<bool> valid(rows, false);
+                if (!all_null) {
+                    for (int64_t i = 0; i < kRows; ++i) valid[i * 2] = true;
+                }
+                const auto bytes = EncodeValidity(valid);
+                const auto validity_path = files->Path() + "/validity";
+                {
+                    std::ofstream out(validity_path, std::ios::binary);
+                    out.write(reinterpret_cast<const char*>(bytes.data()),
+                              bytes.size());
+                    ASSERT_TRUE(out.good());
+                }
+                const auto values = RandomVectors(all_null ? 0 : kRows);
+                const auto raw_path = files->Path() + "/raw";
+                WriteRaw(raw_path, values, all_null ? 0 : kRows, kDim);
+                OpenedDiskIndex<float> opened;
+                BuildDisk(raw_path,
+                          files->Path(),
+                          opened,
+                          {.logical_rows = rows,
+                           .validity_path = validity_path,
+                           .version = version,
+                           .check_validity_io = true,
+                           .use_async_load = use_async});
+                ASSERT_NE(opened.base, nullptr);
+                const auto* reader =
+                    dynamic_cast<const IVectorReader*>(opened.base.get());
+                ASSERT_NE(reader, nullptr);
+                EXPECT_TRUE(reader->HasValidData());
+                EXPECT_EQ(reader->ValidCount(), all_null ? 0 : kRows);
+                for (int64_t row = 0; row < rows; ++row) {
+                    EXPECT_EQ(reader->IsRowValid(row), valid[row]);
+                }
+                if (all_null)
+                    continue;
+                TargetBitmap excluded(rows, true);
+                const int64_t allowed = (kRows - 1) * 2;
+                excluded.reset(allowed);
+                VectorSearchParams params{
+                    .search_params_ = {{DISK_ANN_QUERY_LIST, 128}},
+                    .metric_type_ = "L2",
+                    .topk_ = 1,
+                };
+                SearchResult result;
+                reader->Search(
+                    GenDataset(1, kDim, values.data() + (kRows - 1) * kDim),
+                    params,
+                    BitsetView(excluded),
+                    result);
+                ASSERT_EQ(result.seg_offsets_.size(), 1);
+                EXPECT_EQ(result.seg_offsets_[0], allowed);
+            }
+        }
+    }
 }
 
 // An element-level index of a nullable VECTOR_ARRAY built before element-level
