@@ -56,8 +56,8 @@ func TestPartitionManagerLogging(t *testing.T) {
 	defer flush.UnPatch()
 
 	managers := []*partitionManager{
-		newPartitionSegmentManager(ctx, parent, future, types.PChannelInfo{}, "v1", 1, 2, nil, nil, 0, nil),
-		newPartitionSegmentManager(ctx, parent, future, types.PChannelInfo{}, "v2", 3, 4, nil, nil, 0, nil),
+		newPartitionSegmentManager(ctx, parent, future, types.PChannelInfo{}, "v1", 1, 2, nil, nil, 0, nil, nil),
+		newPartitionSegmentManager(ctx, parent, future, types.PChannelInfo{}, "v2", 3, 4, nil, nil, 0, nil, nil),
 	}
 	for _, manager := range managers {
 		require.Same(t, parent, manager.Logger())
@@ -180,6 +180,7 @@ func TestPartitionManager(t *testing.T) {
 		&mockedTxnManager{},
 		100,
 		metricsutil.NewSegmentAssignMetrics(channel.Name),
+		nil,
 	)
 	createSegmentDone := make(chan struct{}, 1)
 	flushSegmentDone := make(chan struct{}, 1)

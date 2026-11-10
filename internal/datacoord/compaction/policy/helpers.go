@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/datacoord/segment"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -99,10 +100,10 @@ func GetExpectedSegmentSize(indexMeta *index.IndexMeta, collectionID int64, sche
 	allDiskIndex := indexMeta.AllDenseWithDiskIndex(collectionID, schema)
 	if allDiskIndex {
 		// Only if all dense vector fields index type are DiskANN, recalc segment max size here.
-		return Params.DataCoordCfg.DiskSegmentMaxSize.GetAsInt64() * 1024 * 1024
+		return segment.CapByCeiling(Params.DataCoordCfg.DiskSegmentMaxSize.GetAsInt64() * 1024 * 1024)
 	}
 	// If some dense vector fields index type are not DiskANN, recalc segment max size using default policy.
-	return Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
+	return segment.CapByCeiling(Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024)
 }
 
 func IsNormalManualCompactionCandidate(mt *meta.Meta, segment *meta.SegmentInfo) bool {
