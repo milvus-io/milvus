@@ -88,7 +88,8 @@ func TestExternalTableAzureWorkloadIdentityE2E(t *testing.T) {
 			externalSpec := spec(extfs)
 			require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(name, schema(externalSpec))))
 			refresh, err := mc.RefreshExternalCollection(ctx,
-				client.NewRefreshExternalCollectionOption(name).WithExternalSpec(externalSpec))
+				client.NewRefreshExternalCollectionOption(name).
+					WithExternalSource(fixture.source).WithExternalSpec(externalSpec))
 			require.NoError(t, err)
 			waitForRefreshComplete(ctx, t, mc, refresh.JobID, 5*time.Minute)
 
@@ -117,7 +118,7 @@ func TestExternalTableAzureWorkloadIdentityE2E(t *testing.T) {
 				require.Equal(t, "azure-workload-identity", label)
 				vector, err := result.GetColumn("vector").Get(0)
 				require.NoError(t, err)
-				require.Equal(t, []float32{1, 0, 0, 0}, vector)
+				require.Equal(t, entity.FloatVector{1, 0, 0, 0}, vector)
 				search, err := mc.Search(ctx, client.NewSearchOption(name, 1,
 					[]entity.Vector{entity.FloatVector{1, 0, 0, 0}}).
 					WithConsistencyLevel(entity.ClStrong).
