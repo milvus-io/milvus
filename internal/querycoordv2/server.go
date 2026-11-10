@@ -381,6 +381,7 @@ func (s *Server) initQueryCoord() error {
 		s.targetMgr,
 		s.taskScheduler,
 		s.leaderCacheObserver.RegisterEvent,
+		s.targetObserver.TriggerUpdateCurrentTarget,
 	)
 
 	// Init load status cache

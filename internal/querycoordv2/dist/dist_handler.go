@@ -62,6 +62,13 @@ type distHandler struct {
 	lastUpdateTs int64
 
 	notifyFunc NotifyDelegatorChanges
+	// triggerTargetCheck asks the target observer to check a collection right away
+	// instead of waiting for its next periodic round. Nil disables the trigger.
+	triggerTargetCheck TriggerUpdateTargetVersion
+	// dataReadyTriggered records, per channel, the delegator version the target check
+	// has been triggered for, so one delegator triggers it once. It is only touched by
+	// the pull loop goroutine.
+	dataReadyTriggered map[string]int64
 }
 
 func (dh *distHandler) start(ctx context.Context) {
@@ -271,6 +278,7 @@ func (dh *distHandler) updateChannelsDistribution(ctx context.Context, resp *que
 	})
 
 	updates := make([]*meta.DmChannel, 0, len(resp.GetChannels()))
+	dataReadyCollections := typeutil.NewUniqueSet()
 	for _, lview := range resp.GetLeaderViews() {
 		channel, ok := channelMap[lview.GetChannel()]
 		if !ok {
@@ -330,6 +338,9 @@ func (dh *distHandler) updateChannelsDistribution(ctx context.Context, resp *que
 		updates = append(updates, dmChannel)
 
 		serviceable := checkDelegatorServiceable(ctx, dh, dmChannel.View)
+		if dh.delegatorBecameDataReady(dmChannel, serviceable) {
+			dataReadyCollections.Insert(collectionID)
+		}
 		// Delta responses rely on QueryNodes to report serviceability changes through leader-view deltas.
 		// Keep the full-pull fallback for legacy and full responses.
 		if !serviceable && !resp.GetIsDelta() {
@@ -353,6 +364,11 @@ func (dh *distHandler) updateChannelsDistribution(ctx context.Context, resp *que
 	} else {
 		newLeaderOnNode = dh.dist.ChannelDistManager.Update(resp.GetNodeID(), updates...)
 	}
+	dh.forgetDataReadyTriggers(resp, updates)
+	// Trigger after the distribution is stored: the target observer reads it from there.
+	for _, collectionID := range dataReadyCollections.Collect() {
+		dh.triggerTargetCheck(collectionID)
+	}
 	if dh.notifyFunc != nil {
 		collectionIDs := typeutil.NewUniqueSet()
 		for _, ch := range newLeaderOnNode {
@@ -362,6 +378,53 @@ func (dh *distHandler) updateChannelsDistribution(ctx context.Context, resp *que
 			collectionIDs.Insert(ch.CollectionID)
 		}
 		dh.notifyFunc(collectionIDs.Collect()...)
+	}
+}
+
+// delegatorBecameDataReady reports whether an unserviceable delegator has just become data-ready
+// for the next target, which means the only thing it still waits for is the target observer
+// syncing the target version to it. A delegator gets there asynchronously, e.g. when it finishes
+// catching up streaming data after a channel is recovered on another node, and nothing else
+// wakes the target observer up before its next periodic round.
+// It returns true once per delegator version; the periodic round remains the fallback.
+func (dh *distHandler) delegatorBecameDataReady(channel *meta.DmChannel, serviceable bool) bool {
+	if dh.triggerTargetCheck == nil {
+		return false
+	}
+	name := channel.GetChannelName()
+	if serviceable || utils.CheckDelegatorDataReady(dh.nodeManager, dh.target, channel.View, meta.NextTarget) != nil {
+		delete(dh.dataReadyTriggered, name)
+		return false
+	}
+	if version, ok := dh.dataReadyTriggered[name]; ok && version == channel.Version {
+		return false
+	}
+	if dh.dataReadyTriggered == nil {
+		dh.dataReadyTriggered = make(map[string]int64)
+	}
+	dh.dataReadyTriggered[name] = channel.Version
+	return true
+}
+
+// forgetDataReadyTriggers drops the trigger records of channels that left this node.
+func (dh *distHandler) forgetDataReadyTriggers(resp *querypb.GetDataDistributionResponse, updates []*meta.DmChannel) {
+	if len(dh.dataReadyTriggered) == 0 {
+		return
+	}
+	if resp.GetIsDelta() {
+		for _, name := range resp.GetRemovedChannelNames() {
+			delete(dh.dataReadyTriggered, name)
+		}
+		return
+	}
+	reported := make(map[string]struct{}, len(updates))
+	for _, channel := range updates {
+		reported[channel.GetChannelName()] = struct{}{}
+	}
+	for name := range dh.dataReadyTriggered {
+		if _, ok := reported[name]; !ok {
+			delete(dh.dataReadyTriggered, name)
+		}
 	}
 }
 
@@ -450,6 +513,7 @@ func newDistHandler(
 	dist *meta.DistributionManager,
 	targetMgr meta.TargetManagerInterface,
 	notifyFunc NotifyDelegatorChanges,
+	triggerTargetCheck TriggerUpdateTargetVersion,
 ) *distHandler {
 	h := &distHandler{
 		nodeID:      nodeID,
@@ -460,6 +524,8 @@ func newDistHandler(
 		dist:        dist,
 		target:      targetMgr,
 		notifyFunc:  notifyFunc,
+
+		triggerTargetCheck: triggerTargetCheck,
 	}
 	h.wg.Add(1)
 	go h.start(ctx)

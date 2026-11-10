@@ -120,7 +120,7 @@ func (suite *DistHandlerSuite) TestBasic() {
 		LastModifyTs: 1,
 	}, nil)
 
-	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target, func(collectionID ...int64) {})
+	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target, func(collectionID ...int64) {}, nil)
 	defer suite.handler.stop()
 
 	time.Sleep(3 * time.Second)
@@ -141,7 +141,7 @@ func (suite *DistHandlerSuite) TestGetDistributionFailed() {
 	}))
 	suite.client.EXPECT().GetDataDistribution(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("fake error"))
 
-	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target, func(collectionID ...int64) {})
+	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target, func(collectionID ...int64) {}, nil)
 	defer suite.handler.stop()
 
 	time.Sleep(3 * time.Second)
@@ -291,7 +291,7 @@ func (suite *DistHandlerSuite) TestHandlerWithSyncDelegatorChanges() {
 		notifyCounter.Inc()
 	}
 
-	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target, notifyFunc)
+	suite.handler = newDistHandler(suite.ctx, suite.nodeID, suite.client, suite.nodeManager, suite.scheduler, suite.dist, suite.target, notifyFunc, nil)
 	defer suite.handler.stop()
 
 	// Wait for distribution to be processed
@@ -597,6 +597,81 @@ func TestDeltaDistributionPatchNotifiesNewServiceableChannel(t *testing.T) {
 	handler.handleDistResp(ctx, deltaResp)
 
 	assert.Equal(t, []int64{collectionID}, notified)
+}
+
+func TestTriggerTargetCheckWhenDelegatorBecomesDataReady(t *testing.T) {
+	ctx := context.Background()
+	nodeID := time.Now().UnixNano()%1000000 + 1000000
+	collectionID := int64(11)
+	channel := "test-channel-data-ready"
+	nodeManager := session.NewNodeManager()
+	nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   nodeID,
+		Address:  "localhost:19530",
+		Hostname: "localhost",
+	}))
+	target := meta.NewMockTargetManager(t)
+	target.EXPECT().GetDmChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	target.EXPECT().GetSealedSegmentIDsByChannel(mock.Anything, collectionID, channel, meta.NextTarget).Return(typeutil.NewUniqueSet()).Maybe()
+	dist := meta.NewDistributionManager(nodeManager)
+	var triggered []int64
+	handler := &distHandler{
+		nodeID:      nodeID,
+		nodeManager: nodeManager,
+		dist:        dist,
+		target:      target,
+		triggerTargetCheck: func(collectionID int64) {
+			// The distribution must already hold the delegator when the target observer is woken up.
+			assert.Len(t, dist.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(channel)), 1)
+			triggered = append(triggered, collectionID)
+		},
+	}
+	defer metrics.QueryCoordLastHeartbeatTimeStamp.DeleteLabelValues(fmt.Sprint(nodeID))
+
+	ts := int64(0)
+	report := func(version int64, status *querypb.LeaderViewStatus) {
+		ts++
+		handler.handleDistResp(ctx, &querypb.GetDataDistributionResponse{
+			Status:       merr.Success(),
+			NodeID:       nodeID,
+			LastModifyTs: ts,
+			Channels:     []*querypb.ChannelVersionInfo{{Channel: channel, Collection: collectionID, Version: version}},
+			LeaderViews:  []*querypb.LeaderView{{Collection: collectionID, Channel: channel, Status: status}},
+		})
+	}
+
+	// Still catching up streaming data: not data-ready, nothing to trigger.
+	report(1, &querypb.LeaderViewStatus{Serviceable: false, CatchingUpStreamingData: true})
+	assert.Empty(t, triggered)
+
+	// Caught up but not serviceable yet: it only waits for the target observer, trigger it.
+	report(1, &querypb.LeaderViewStatus{Serviceable: false})
+	assert.Equal(t, []int64{collectionID}, triggered)
+
+	// The same delegator reported again must not trigger again.
+	report(1, &querypb.LeaderViewStatus{Serviceable: false})
+	assert.Equal(t, []int64{collectionID}, triggered)
+
+	// Falling back to catching up re-arms the trigger.
+	report(1, &querypb.LeaderViewStatus{Serviceable: false, CatchingUpStreamingData: true})
+	report(1, &querypb.LeaderViewStatus{Serviceable: false})
+	assert.Equal(t, []int64{collectionID, collectionID}, triggered)
+
+	// A new delegator version triggers once more.
+	report(2, &querypb.LeaderViewStatus{Serviceable: false})
+	assert.Equal(t, []int64{collectionID, collectionID, collectionID}, triggered)
+
+	// A serviceable delegator never triggers and clears the record.
+	report(2, &querypb.LeaderViewStatus{Serviceable: true})
+	assert.Equal(t, []int64{collectionID, collectionID, collectionID}, triggered)
+	assert.Empty(t, handler.dataReadyTriggered)
+
+	// A channel that left the node is forgotten.
+	report(3, &querypb.LeaderViewStatus{Serviceable: false})
+	assert.Len(t, handler.dataReadyTriggered, 1)
+	ts++
+	handler.handleDistResp(ctx, &querypb.GetDataDistributionResponse{Status: merr.Success(), NodeID: nodeID, LastModifyTs: ts})
+	assert.Empty(t, handler.dataReadyTriggered)
 }
 
 func TestDeltaDistributionPatchNotifiesRemovedChannel(t *testing.T) {

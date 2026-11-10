@@ -43,6 +43,8 @@ type ControllerImpl struct {
 	scheduler   task.Scheduler
 
 	notifyFunc NotifyDelegatorChanges
+
+	triggerTargetCheck TriggerUpdateTargetVersion
 }
 
 func (dc *ControllerImpl) StartDistInstance(ctx context.Context, nodeID int64) {
@@ -52,7 +54,7 @@ func (dc *ControllerImpl) StartDistInstance(ctx context.Context, nodeID int64) {
 		mlog.Info(ctx, "node has started", mlog.FieldNodeID(nodeID))
 		return
 	}
-	h := newDistHandler(ctx, nodeID, dc.client, dc.nodeManager, dc.scheduler, dc.dist, dc.targetMgr, dc.notifyFunc)
+	h := newDistHandler(ctx, nodeID, dc.client, dc.nodeManager, dc.scheduler, dc.dist, dc.targetMgr, dc.notifyFunc, dc.triggerTargetCheck)
 	dc.handlers[nodeID] = h
 }
 
@@ -101,6 +103,7 @@ func NewDistController(
 	targetMgr meta.TargetManagerInterface,
 	scheduler task.Scheduler,
 	notifyFunc NotifyDelegatorChanges,
+	triggerTargetCheck TriggerUpdateTargetVersion,
 ) *ControllerImpl {
 	return &ControllerImpl{
 		handlers:    make(map[int64]*distHandler),
@@ -110,5 +113,7 @@ func NewDistController(
 		targetMgr:   targetMgr,
 		scheduler:   scheduler,
 		notifyFunc:  notifyFunc,
+
+		triggerTargetCheck: triggerTargetCheck,
 	}
 }
