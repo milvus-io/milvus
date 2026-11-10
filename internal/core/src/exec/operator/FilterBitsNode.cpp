@@ -154,15 +154,19 @@ PhyFilterBitsNode::GetOutput() {
     // (segment_id, FilterBitsNode signature + dynamic filter context), so
     // cross-query reuse is automatic only when the effective predicate matches.
     auto* cache_segment = query_context_->get_segment();
-    const bool can_use_cache = enable_expr_cache_ && !expr_cache_key_.empty() &&
-                               cache_segment != nullptr &&
-                               cache_segment->type() == SegmentType::Sealed &&
-                               ExprResCacheManager::IsEnabled();
+    const bool can_use_cache =
+        enable_expr_cache_ && !expr_cache_key_.empty() &&
+        ExprCacheHelper::HasCacheIdentity(
+            cache_segment, query_context_->get_read_snapshot().get()) &&
+        cache_segment->type() == SegmentType::Sealed &&
+        ExprResCacheManager::IsEnabled();
     if (can_use_cache) {
         RowVectorPtr cached_output;
         RunExprCacheBestEffort([&]() {
-            ExprResCacheManager::Key key{cache_segment->get_segment_id(),
-                                         expr_cache_key_};
+            auto key = ExprCacheHelper::MakeKey(
+                cache_segment,
+                query_context_->get_read_snapshot().get(),
+                expr_cache_key_);
             ExprResCacheManager::Value cached;
             cached.active_count = need_process_rows_;
             if (!ExprResCacheManager::Instance().Get(key, cached) ||
@@ -228,8 +232,10 @@ PhyFilterBitsNode::GetOutput() {
 
         if (can_use_cache) {
             RunExprCacheBestEffort([&]() {
-                ExprResCacheManager::Key key{cache_segment->get_segment_id(),
-                                             expr_cache_key_};
+                auto key = ExprCacheHelper::MakeKey(
+                    cache_segment,
+                    query_context_->get_read_snapshot().get(),
+                    expr_cache_key_);
                 ExprResCacheManager::Value v;
                 v.result = std::make_shared<TargetBitmap>(view);
                 v.valid_result = std::make_shared<TargetBitmap>(valid_view);
@@ -294,8 +300,10 @@ PhyFilterBitsNode::GetOutput() {
     // the ColumnVector return value below.
     if (can_use_cache) {
         RunExprCacheBestEffort([&]() {
-            ExprResCacheManager::Key key{cache_segment->get_segment_id(),
-                                         expr_cache_key_};
+            auto key = ExprCacheHelper::MakeKey(
+                cache_segment,
+                query_context_->get_read_snapshot().get(),
+                expr_cache_key_);
             ExprResCacheManager::Value v;
             v.result = std::make_shared<TargetBitmap>(bitset.clone());
             v.valid_result =

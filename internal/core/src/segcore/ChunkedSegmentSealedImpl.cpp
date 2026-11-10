@@ -12,6 +12,7 @@
 #include <numeric>
 #include "index/scalar/sort/SortedMembership.h"
 #include "ChunkedSegmentSealedImpl.h"
+#include "exec/expression/ExprCache.h"
 #include "segcore/default_fs.h"
 
 #include <cxxabi.h>
@@ -1561,6 +1562,11 @@ ChunkedSegmentSealedImpl::PrepareStructElementOffsets(
 class ChunkedSegmentSealedImpl::SealedReadSnapshot
     : public SegmentReadSnapshot {
  public:
+    exec::ExprCacheGenerationPtr
+    GetExprCacheGeneration() const override {
+        return state_->expr_cache_generation;
+    }
+
     explicit SealedReadSnapshot(
         std::shared_ptr<const PublishedSegmentState> state)
         : state_(std::move(state)) {
@@ -2459,11 +2465,20 @@ ChunkedSegmentSealedImpl::PublishStateOnline(
     if (!state) {
         return;
     }
-    auto publish_lease =
-        publish_mode == PublishMode::FailFast
-            ? operation_gate_.AcquirePublishFailFast(op_ctx, id_)
-            : operation_gate_.AcquirePublish(op_ctx, id_);
-    PublishState(publish_lease, state);
+    // Allocate/prepare the next state before entering this function. Retired
+    // resources outlive the PublishLease so destructors/file I/O cannot block
+    // admission of new readers or hold cache-manager locks.
+    auto retired = [&] {
+        auto publish_lease =
+            publish_mode == PublishMode::FailFast
+                ? operation_gate_.AcquirePublishFailFast(op_ctx, id_)
+                : operation_gate_.AcquirePublish(op_ctx, id_);
+        auto current = CapturePublishedState();
+        auto resources = exec::ExprResCacheManager::Instance().RetireGeneration(
+            id_, current->expr_cache_generation);
+        PublishState(publish_lease, state);
+        return resources;
+    }();
 }
 
 void
@@ -5427,10 +5442,11 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
 
 std::unique_ptr<ChunkedSegmentSealedImpl>
 ChunkedSegmentSealedImpl::PinReadState() const {
-    // Sharing PublishedSegmentState shares its column, index and reader handles;
-    // it neither duplicates segment data nor blocks future Reopen publication.
+    // Share column, index and reader handles, but give this independently
+    // published/destructed instance its own expression-cache generation.
     return std::unique_ptr<ChunkedSegmentSealedImpl>(
-        new ChunkedSegmentSealedImpl(*this, CapturePublishedState()));
+        new ChunkedSegmentSealedImpl(
+            *this, ClonePublishedState(CapturePublishedState())));
 }
 
 void
@@ -5438,10 +5454,16 @@ ChunkedSegmentSealedImpl::AdoptReadState(const ChunkedSegmentSealedImpl& read) {
     std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
     AssertInfo(id_ == read.id_ && read.read_state_fork_,
                "adopting a read state requires a fork of the same segment");
-    PublishStateOnline(read.CapturePublishedState());
+    PublishStateOnline(ClonePublishedState(read.CapturePublishedState()));
 }
 
 ChunkedSegmentSealedImpl::~ChunkedSegmentSealedImpl() {
+    // The token scopes cleanup to this incarnation even if another segment
+    // with the same ID has already been loaded in this process.
+    exec::RunExprCacheBestEffort([&] {
+        auto retired = exec::ExprResCacheManager::Instance().RetireGeneration(
+            id_, CapturePublishedState()->expr_cache_generation);
+    });
     if (mmap_descriptor_ != nullptr) {
         auto mm = storage::MmapManager::GetInstance().GetMmapChunkManager();
         mm->UnRegister(mmap_descriptor_);

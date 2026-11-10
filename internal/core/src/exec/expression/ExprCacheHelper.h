@@ -40,7 +40,7 @@ namespace exec {
 // Example usage in an expression:
 //
 //   auto cached = exec::ExprCacheHelper::GetOrCompute(
-//       segment_, [this]() { return this->ToString(); }, active_count_,
+//       segment_, snapshot_, [this]() { return this->ToString(); }, active_count_,
 //       [&]() -> exec::ExprCacheHelper::ComputeResult {
 //           TargetBitmap res = do_actual_computation();
 //           TargetBitmap valid = compute_valid();
@@ -51,6 +51,23 @@ namespace exec {
 
 class ExprCacheHelper {
  public:
+    static bool
+    HasCacheIdentity(const segcore::SegmentInternalInterface* segment,
+                     const segcore::SegmentReadSnapshot* snapshot) {
+        return segment != nullptr &&
+               (segment->type() != SegmentType::Sealed ||
+                (snapshot != nullptr && snapshot->GetExprCacheGeneration()));
+    }
+
+    static ExprResCacheManager::Key
+    MakeKey(const segcore::SegmentInternalInterface* segment,
+            const segcore::SegmentReadSnapshot* snapshot,
+            std::string signature) {
+        return {segment->get_segment_id(),
+                std::move(signature),
+                snapshot ? snapshot->GetExprCacheGeneration() : nullptr};
+    }
+
     struct CachedBitmaps {
         std::shared_ptr<TargetBitmap> result;
         std::shared_ptr<TargetBitmap> valid;
@@ -82,11 +99,14 @@ class ExprCacheHelper {
     //     DebugString).
     //   - `active_count` MUST be the current segment row count. Used to
     //     detect staleness after insert/compaction.
-    //   - `compute` MUST be deterministic: same segment + same signature
+    //   - `snapshot` MUST be the snapshot used by `compute`; sealed calls without
+    //     a snapshot bypass the cache. Never fetch the latest generation on Put.
+    //   - `compute` MUST be deterministic: same segment generation + same signature
     //     + same active_count must always produce the same bitmaps.
     template <typename SignatureFn, typename ComputeFn>
     static CachedBitmaps
     GetOrCompute(const segcore::SegmentInternalInterface* segment,
+                 const segcore::SegmentReadSnapshot* snapshot,
                  SignatureFn&& make_signature,
                  int64_t active_count,
                  ComputeFn&& compute,
@@ -95,7 +115,8 @@ class ExprCacheHelper {
         ExprResCacheManager* manager = nullptr;
         bool cache_eligible = false;
         std::string expr_signature;
-        if (segment != nullptr && ExprResCacheManager::IsEnabled()) {
+        if (HasCacheIdentity(segment, snapshot) &&
+            ExprResCacheManager::IsEnabled()) {
             RunExprCacheBestEffort([&]() {
                 manager = &ExprResCacheManager::Instance();
                 if (!manager->CanCacheSegment(segment->type())) {
@@ -110,8 +131,7 @@ class ExprCacheHelper {
             ExprResCacheManager::Value got;
             bool cache_hit = false;
             RunExprCacheBestEffort([&]() {
-                ExprResCacheManager::Key key{segment->get_segment_id(),
-                                             expr_signature};
+                auto key = MakeKey(segment, snapshot, expr_signature);
                 got.active_count = active_count;
                 cache_hit = manager->Get(key, got);
             });
@@ -140,8 +160,7 @@ class ExprCacheHelper {
         auto valid = std::make_shared<TargetBitmap>(std::move(out.valid));
 
         RunExprCacheBestEffort([&]() {
-            ExprResCacheManager::Key key{segment->get_segment_id(),
-                                         expr_signature};
+            auto key = MakeKey(segment, snapshot, expr_signature);
             ExprResCacheManager::Value v;
             v.result = result;
             v.valid_result = valid;
@@ -160,12 +179,14 @@ class ExprCacheHelper {
     template <typename SignatureFn, typename ComputeFn>
     static std::shared_ptr<TargetBitmap>
     GetOrComputeBitmap(const segcore::SegmentInternalInterface* segment,
+                       const segcore::SegmentReadSnapshot* snapshot,
                        SignatureFn&& make_signature,
                        int64_t active_count,
                        ComputeFn&& compute,
                        bool enable_cache_write = true) {
         auto cached = GetOrCompute(
             segment,
+            snapshot,
             std::forward<SignatureFn>(make_signature),
             active_count,
             [&]() -> ComputeResult {

@@ -75,6 +75,7 @@ RawExprCacheAdapter::EnsureLookup() {
         try {
             if (!ExprResCacheManager::IsEnabled() ||
                 !input_->SupportsRawExprCache() || !input_->IsCacheable() ||
+                !input_->HasExprCacheIdentity() ||
                 input_->GetActiveCount() <= 0) {
                 return;
             }
@@ -87,9 +88,8 @@ RawExprCacheAdapter::EnsureLookup() {
                 return;
             }
 
-            state_.key.emplace(ExprResCacheManager::Key{
-                segment->get_segment_id(),
-                input_->GetSignatureForRawExprCache()});
+            state_.key.emplace(input_->MakeExprCacheKey(
+                input_->GetSignatureForRawExprCache()));
             ExprResCacheManager::Value cached;
             cached.active_count = input_->GetActiveCount();
             const auto lookup = manager.GetWithStatus(*state_.key, cached);

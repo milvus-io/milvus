@@ -14,7 +14,7 @@ Expression Result Cache is a QueryNode-local cache for scalar filter expression 
 The cache is implemented in segcore through `ExprResCacheManager`, with two storage modes:
 
 - **Memory mode:** heap memory, adaptive bitmap compression, frequency and latency admission, and Clock eviction.
-- **Disk mode:** one fixed-slot cache file per sealed segment, direct `pread`/`pwrite`, frequency and latency admission, per-segment Clock eviction, and global segment-file eviction.
+- **Disk mode:** one fixed-slot cache file per sealed segment generation, direct `pread`/`pwrite`, frequency and latency admission, per-segment Clock eviction, and global segment-file eviction.
 
 The feature is controlled by refreshable `queryNode.exprCache` parameters. It is disabled by default and does not change query semantics when disabled.
 
@@ -113,6 +113,7 @@ void SetExprResCacheConfig(const char* mode,
 struct Key {
     int64_t segment_id;
     std::string signature;
+    ExprCacheGenerationPtr generation;
 };
 
 struct Value {
@@ -183,7 +184,11 @@ ExprResCacheManager
 
 ### 2. Cache Key and Value
 
-The external cache key is `(segment_id, expression_signature)`.
+The external cache key is `(segment_id, generation, expression_signature)`.
+Sealed queries take `generation` from their pinned `SegmentReadSnapshot`;
+missing snapshots bypass caching. Growing segments retain generation zero and
+the existing active-count checks. `MATCH` signatures include the complete child
+predicate as well as struct name, match type, and count.
 
 The expression signature is normally `expr->ToString()` or `this->ToString()`. It must include every parameter that can affect the result:
 
@@ -321,7 +326,7 @@ Slot layout:
 Each segment owns one cache file:
 
 ```text
-<localStorage.path>/cache/<nodeID>/expr_cache/seg_<segment_id>.cache
+<localStorage.path>/cache/<nodeID>/expr_cache/seg_<segment_id>_<generation>.cache
 ```
 
 Disk files are temporary process-local cache files. Signature-to-slot metadata is kept in memory, so old `.cache` files are removed when disk config is applied or rebuilt.
@@ -390,7 +395,7 @@ manager or pool lock.
 Two admission policies are applied before writing a new entry:
 
 - **Latency admission:** skip expressions whose miss-path evaluation duration is lower than `queryNode.exprCache.minEvalDurationUs`.
-- **Frequency admission:** count observations by segment id, expression signature, and active row count; admit the snapshot when its counter reaches `queryNode.exprCache.admissionThreshold`.
+- **Frequency admission:** count observations by segment id, generation, expression signature, and active row count; admit the snapshot when its counter reaches `queryNode.exprCache.admissionThreshold`.
 
 Frequency admission is mode-independent and is owned by `ExprResCacheManager`, not by `EntryPool`, so memory and disk use the same policy.
 
@@ -959,17 +964,50 @@ Integration rules:
 
 ### 8. Segment Lifecycle
 
-Segment release can call:
+Each sealed `PublishedSegmentState` owns an `ExprCacheGeneration` token with a
+process-unique, monotonically allocated ID. Staging a state can consume an ID;
+only the published snapshot is visible to queries. IDs need not be contiguous,
+are never reused within the process, and are not stored in segment metadata.
+Disk cache files are not reused across restarts.
 
-```cpp
-EraseSegmentCache(segment_id)
-```
+Read-state forks and adoption clone the published metadata with a fresh token
+while sharing column, index, and reader resources. Publishing or destroying one
+instance therefore does not retire another instance's cache generation.
 
-In memory mode, this removes all entries for the segment from `EntryPool`.
-Lookups that already acquired a payload reference may finish; new lookups
-miss. Reader-held payloads remain charged until decoding finishes.
+All online state publications pass through `PublishStateOnline`. After acquiring
+the exclusive `PublishLease` and draining old readers, it retires the previous
+token, detaches its entries, and publishes the new state before releasing the
+lease. Gate acquisition failures and cancellation leave the previous token and
+cache intact. Successful publications conservatively invalidate the entire
+segment generation, including schema/index-only changes. The sealed destructor
+retires its own final token; it never erases a newer instance with the same ID.
+The C API `ExprResCacheEraseLegacySegment(segment_id)` is for generation-zero/growing
+entries; sealed lifecycle cleanup uses the exact token instead.
 
-In disk mode, this closes and deletes the segment cache file, clears the segment's ineligible marker, and removes the segment from global disk Clock metadata.
+`Get`, admission, and `Put` reject retired tokens under the manager state lock.
+Retirement remains effective across `Clear`, config rebuild, and disable/enable
+because the flag belongs to the token rather than the cache backend. A delayed
+writer carries its original snapshot token; it cannot recreate retired entries
+or write its bitmap under the latest generation. Admission tickets also include
+generation in their key hash.
+
+Memory entries have a secondary intrusive list per `(segment_id, generation)`.
+Retirement visits only that generation, detaches entries from the lookup map and
+Clock, and returns an allocation-free ownership chain. Disk retirement removes
+that generation's file and Clock/ineligible metadata from the manager. Payload
+and file destruction happen after both cache locks and the PublishLease are
+released. Reader-held payloads remain charged until their last owner releases
+them. Logical disk usage drops at detachment; physical unlink can finish later.
+Generation-specific filenames keep delayed cleanup from deleting a new file.
+Failed unlinks leave disposable files for directory cleanup on rebuild.
+
+The tradeoffs are extra per-entry list links/index metadata, a shared token per
+snapshot, and cache warming after every publication. Retiring a heavily cached
+segment still takes time proportional to its own entry count under the manager
+lock; it does not scan unrelated segment entries. Existing frequency counters
+are bounded/aged and can retain old generation hashes; they cannot authorize a
+retired token. Out-of-band object overwrites without a Milvus state publication
+are outside this mechanism: refresh/reopen must publish the new reader state.
 
 ### 9. Metrics and Resource Accounting
 

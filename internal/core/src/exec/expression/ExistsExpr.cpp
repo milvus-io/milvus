@@ -101,6 +101,7 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
         // Use ExprResCache for the full-segment bitset.
         auto cached = ExprCacheHelper::GetOrCompute(
             segment_,
+            snapshot_,
             [this]() { return this->ToString(); },
             active_count_,
             [&]() -> ExprCacheHelper::ComputeResult {
@@ -219,6 +220,7 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
 
         auto cached = ExprCacheHelper::GetOrCompute(
             segment_,
+            snapshot_,
             [this]() { return this->ToString(); },
             active_count_,
             [&]() -> ExprCacheHelper::ComputeResult {

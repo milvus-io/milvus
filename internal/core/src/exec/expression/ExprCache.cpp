@@ -124,7 +124,9 @@ AdmissionKeyHash(const ExprResCacheManager::Key& key, int64_t active_count) {
     const auto key_hash = XXH64(key.signature.data(),
                                 key.signature.size(),
                                 static_cast<uint64_t>(key.segment_id));
-    return XXH64(&active_count, sizeof(active_count), key_hash);
+    const auto generation = key.SegmentKey().generation;
+    const auto snapshot_hash = XXH64(&generation, sizeof(generation), key_hash);
+    return XXH64(&active_count, sizeof(active_count), snapshot_hash);
 }
 
 void
@@ -166,6 +168,57 @@ RemoveCacheFilesInDir(const std::string& base_path) {
 }
 
 }  // namespace
+
+ExprCacheGeneration::ExprCacheGeneration()
+    : id([] {
+          static std::atomic<uint64_t> next{1};
+          const auto value = next.fetch_add(1, std::memory_order_relaxed);
+          // Never recycle an identity, including on the theoretical wraparound.
+          if (value == 0) {
+              std::terminate();
+          }
+          return value;
+      }()) {
+}
+
+ExprResCacheManager::RetiredGeneration::RetiredGeneration() = default;
+ExprResCacheManager::RetiredGeneration::RetiredGeneration(
+    RetiredGeneration&&) noexcept = default;
+ExprResCacheManager::RetiredGeneration::~RetiredGeneration() {
+    if (disk) {
+        disk->Remove();
+    }
+}
+
+ExprResCacheManager::RetiredGeneration
+ExprResCacheManager::RetireGeneration(
+    int64_t segment_id, const ExprCacheGenerationPtr& generation) {
+    RetiredGeneration retired;
+    if (!generation) {
+        return retired;
+    }
+    std::unique_lock state_lock(state_mutex_);
+    generation->retired_ = true;
+    const ExprCacheSegmentKey key{segment_id, generation->id};
+    if (entry_pool_) {
+        retired.memory = entry_pool_->DetachSegment(key);
+    }
+    {
+        std::unique_lock files_lock(disk_files_mutex_);
+        auto it = disk_files_.find(key);
+        if (it != disk_files_.end()) {
+            retired.disk = std::move(it->second);
+            disk_files_.erase(it);
+        }
+        disk_ineligible_segments_.erase(key);
+        RemoveDiskClockSegment(key);
+        if (retired.disk) {
+            SyncDiskUsageMetrics(reported_disk_bytes_.load() -
+                                 retired.disk->GetUsedBytes());
+        }
+    }
+    return retired;
+}
 
 std::atomic<bool> ExprResCacheManager::enabled_{false};
 
@@ -511,7 +564,7 @@ ExprResCacheManager::GetWithStatus(const Key& key,
 
     {
         std::shared_lock state_lock(state_mutex_);
-        if (!IsEnabled()) {
+        if (!IsEnabled() || (key.generation && key.generation->retired_)) {
             return LookupResult::Miss;
         }
         if (config_.mode == CacheMode::Memory) {
@@ -519,7 +572,7 @@ ExprResCacheManager::GetWithStatus(const Key& key,
                 return LookupResult::Miss;
             }
             auto payload = entry_pool_->Lookup(
-                key.segment_id, key.signature, out_value.active_count);
+                key.SegmentKey(), key.signature, out_value.active_count);
             if (!payload) {
                 return LookupResult::Miss;
             }
@@ -538,7 +591,7 @@ ExprResCacheManager::GetWithStatus(const Key& key,
         } else {
             // Disk slots still require their file/metadata locks during I/O.
             std::shared_lock lock(disk_files_mutex_);
-            auto it = disk_files_.find(key.segment_id);
+            auto it = disk_files_.find(key.SegmentKey());
             if (it == disk_files_.end() || !it->second) {
                 return LookupResult::Miss;
             }
@@ -549,7 +602,7 @@ ExprResCacheManager::GetWithStatus(const Key& key,
                                  std::ref(before_materialize))) {
                 return failure;
             }
-            TryTouchDiskSegment(key.segment_id);
+            TryTouchDiskSegment(key.SegmentKey());
         }
     }
 
@@ -579,7 +632,8 @@ ExprResCacheManager::ObserveMiss(const Key& key,
     }
 
     std::shared_lock state_lock(state_mutex_);
-    if (!IsEnabled() || !CanCacheSegmentLocked(segment_type)) {
+    if (!IsEnabled() || !CanCacheSegmentLocked(segment_type) ||
+        (key.generation && key.generation->retired_)) {
         return ticket;
     }
 
@@ -595,7 +649,7 @@ ExprResCacheManager::ObserveMiss(const Key& key,
             return ticket;
         }
         std::shared_lock lock(disk_files_mutex_);
-        if (disk_ineligible_segments_.find(key.segment_id) !=
+        if (disk_ineligible_segments_.find(key.SegmentKey()) !=
             disk_ineligible_segments_.end()) {
             return ticket;
         }
@@ -631,7 +685,7 @@ ExprResCacheManager::PutInternal(const Key& key,
     }
 
     std::shared_lock state_lock(state_mutex_);
-    if (!IsEnabled()) {
+    if (!IsEnabled() || (key.generation && key.generation->retired_)) {
         return;
     }
 
@@ -659,7 +713,7 @@ ExprResCacheManager::PutInternal(const Key& key,
                                      config_.admission_threshold)) {
             return;
         }
-        entry_pool_->Put(key.segment_id,
+        entry_pool_->Put(key.SegmentKey(),
                          key.signature,
                          value.active_count,
                          *value.result,
@@ -674,7 +728,7 @@ ExprResCacheManager::PutInternal(const Key& key,
 
         {
             std::shared_lock lock(disk_files_mutex_);
-            if (disk_ineligible_segments_.find(key.segment_id) !=
+            if (disk_ineligible_segments_.find(key.SegmentKey()) !=
                 disk_ineligible_segments_.end()) {
                 return;
             }
@@ -697,21 +751,23 @@ ExprResCacheManager::PutInternal(const Key& key,
         }
 
         std::unique_lock lock(disk_files_mutex_);
-        if (disk_ineligible_segments_.find(key.segment_id) !=
+        if (disk_ineligible_segments_.find(key.SegmentKey()) !=
             disk_ineligible_segments_.end()) {
             return;
         }
-        std::string path = config_.disk_base_path + "/seg_" +
-                           std::to_string(key.segment_id) + ".cache";
-        auto file_it = disk_files_.find(key.segment_id);
+        std::string path =
+            config_.disk_base_path + "/seg_" + std::to_string(key.segment_id) +
+            (key.generation ? "_" + std::to_string(key.generation->id) : "") +
+            ".cache";
+        auto file_it = disk_files_.find(key.SegmentKey());
         if (file_it != disk_files_.end() && file_it->second &&
             file_it->second->GetRowCount() !=
                 static_cast<int64_t>(value.result->size())) {
             // Disk cache is sealed-only. A row-count change identifies a
             // growing/unstable segment for this backend, so drop the old fixed
             // file and skip future disk puts until the segment/config resets.
-            RemoveDiskSegmentFile(key.segment_id);
-            disk_ineligible_segments_.insert(key.segment_id);
+            RemoveDiskSegmentFile(key.SegmentKey());
+            disk_ineligible_segments_.insert(key.SegmentKey());
             SyncDiskUsageMetrics(GetDiskCurrentBytesLocked());
             return;
         }
@@ -719,14 +775,14 @@ ExprResCacheManager::PutInternal(const Key& key,
             file_it == disk_files_.end() || !file_it->second;
         // Finish the allocating Clock registration before creating a file or
         // committing a slot. A failed registration must leave no disk write.
-        TouchDiskSegment(key.segment_id, hook);
+        TouchDiskSegment(key.SegmentKey(), hook);
         auto rollback_new_file = folly::makeGuard([&]() {
             if (create_file) {
-                disk_files_.erase(key.segment_id);
+                disk_files_.erase(key.SegmentKey());
                 // Reuse the prepared path: exception cleanup must not allocate
                 // another path string while handling an allocation failure.
                 ::unlink(path.c_str());
-                RemoveDiskClockSegment(key.segment_id);
+                RemoveDiskClockSegment(key.SegmentKey());
             }
         });
         if (create_file) {
@@ -743,7 +799,7 @@ ExprResCacheManager::PutInternal(const Key& key,
             }
             if (file_it == disk_files_.end()) {
                 file_it =
-                    disk_files_.emplace(key.segment_id, std::move(new_file))
+                    disk_files_.emplace(key.SegmentKey(), std::move(new_file))
                         .first;
             } else {
                 file_it->second = std::move(new_file);
@@ -765,7 +821,7 @@ ExprResCacheManager::PutInternal(const Key& key,
             return;
         }
         rollback_new_file.dismiss();
-        EvictDiskSegmentsUntilWithinBudget(key.segment_id);
+        EvictDiskSegmentsUntilWithinBudget(key.SegmentKey());
         SyncDiskUsageMetrics(GetDiskCurrentBytesLocked());
     }
 }
@@ -797,7 +853,7 @@ ExprResCacheManager::Clear() {
 }
 
 size_t
-ExprResCacheManager::EraseSegment(int64_t segment_id) {
+ExprResCacheManager::EraseLegacySegment(int64_t segment_id) {
     std::unique_lock state_lock(state_mutex_);
     if (config_.mode == CacheMode::Memory) {
         size_t erased = entry_pool_ ? entry_pool_->EraseSegment(segment_id) : 0;
@@ -829,7 +885,7 @@ ExprResCacheManager::GetDiskCurrentBytesLocked() const {
 
 size_t
 ExprResCacheManager::EvictDiskSegmentsUntilWithinBudget(
-    int64_t protected_segment_id) {
+    ExprCacheSegmentKey protected_segment_id) {
     if (config_.disk_max_bytes == 0) {
         return 0;
     }
@@ -837,7 +893,7 @@ ExprResCacheManager::EvictDiskSegmentsUntilWithinBudget(
     size_t total = GetDiskCurrentBytesLocked();
     size_t erased = 0;
     while (total > config_.disk_max_bytes) {
-        int64_t victim_segment_id = 0;
+        ExprCacheSegmentKey victim_segment_id;
         bool found_victim = false;
         {
             std::lock_guard lock(disk_clock_mutex_);
@@ -894,14 +950,14 @@ ExprResCacheManager::EvictDiskSegmentsUntilWithinBudget(
             "protected segment {} is kept",
             total,
             config_.disk_max_bytes,
-            protected_segment_id);
+            protected_segment_id.segment_id);
     }
 
     return erased;
 }
 
 void
-ExprResCacheManager::TouchDiskSegment(int64_t segment_id,
+ExprResCacheManager::TouchDiskSegment(ExprCacheSegmentKey segment_id,
                                       const DiskPutHook& hook) {
     static constexpr uint8_t kMaxSegmentUsage = 5;
 
@@ -936,7 +992,7 @@ ExprResCacheManager::TouchDiskSegment(int64_t segment_id,
 }
 
 void
-ExprResCacheManager::TryTouchDiskSegment(int64_t segment_id) {
+ExprResCacheManager::TryTouchDiskSegment(ExprCacheSegmentKey segment_id) {
     static constexpr uint8_t kMaxSegmentUsage = 5;
 
     std::unique_lock lock(disk_clock_mutex_, std::try_to_lock);
@@ -954,7 +1010,7 @@ ExprResCacheManager::TryTouchDiskSegment(int64_t segment_id) {
 }
 
 void
-ExprResCacheManager::RemoveDiskClockSegment(int64_t segment_id) {
+ExprResCacheManager::RemoveDiskClockSegment(ExprCacheSegmentKey segment_id) {
     std::lock_guard lock(disk_clock_mutex_);
     auto index_it = disk_clock_index_.find(segment_id);
     if (index_it == disk_clock_index_.end()) {
@@ -984,7 +1040,7 @@ ExprResCacheManager::RemoveDiskClockSegment(int64_t segment_id) {
 }
 
 size_t
-ExprResCacheManager::RemoveDiskSegmentFile(int64_t segment_id) {
+ExprResCacheManager::RemoveDiskSegmentFile(ExprCacheSegmentKey segment_id) {
     auto it = disk_files_.find(segment_id);
     if (it == disk_files_.end()) {
         RemoveDiskClockSegment(segment_id);
@@ -995,17 +1051,7 @@ ExprResCacheManager::RemoveDiskSegmentFile(int64_t segment_id) {
     auto* file = it->second.get();
     const size_t file_size = file ? file->GetUsedBytes() : 0;
     if (file) {
-        file->Close();
-    }
-
-    std::string path = config_.disk_base_path + "/seg_" +
-                       std::to_string(segment_id) + ".cache";
-    std::error_code ec;
-    std::filesystem::remove(path, ec);
-    if (ec) {
-        LOG_WARN("ExprResCacheManager: failed to remove cache file {}: {}",
-                 path,
-                 ec.message());
+        file->Remove();
     }
 
     disk_files_.erase(it);

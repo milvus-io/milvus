@@ -283,7 +283,7 @@ ExecuteQueryExpr(std::shared_ptr<milvus::plan::PlanNode> plannode,
                  uint64_t active_count,
                  uint64_t timestamp) {
     return ExecuteQueryExprImpl(
-        std::move(plannode), segment, active_count, timestamp, 0, false);
+        std::move(plannode), segment, active_count, timestamp, 0, true);
 }
 
 // for test use only - with explicit entity_ttl_physical_time_us
@@ -298,7 +298,7 @@ ExecuteQueryExpr(std::shared_ptr<milvus::plan::PlanNode> plannode,
                                 active_count,
                                 timestamp,
                                 entity_ttl_physical_time_us,
-                                false);
+                                true);
 }
 
 // for test use only - pin the sealed read snapshot once per request

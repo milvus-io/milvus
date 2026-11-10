@@ -31,6 +31,7 @@
 #include <vector>
 
 #include "common/Types.h"
+#include "exec/expression/EntryPool.h"
 
 namespace milvus {
 namespace exec {
@@ -171,10 +172,16 @@ class ExprResCacheManager {
     struct Key {
         int64_t segment_id{0};
         std::string signature;  // expr signature including parameters
+        ExprCacheGenerationPtr generation;
+
+        ExprCacheSegmentKey
+        SegmentKey() const {
+            return {segment_id, generation ? generation->id : 0};
+        }
 
         bool
         operator==(const Key& other) const {
-            return segment_id == other.segment_id &&
+            return SegmentKey() == other.SegmentKey() &&
                    signature == other.signature;
         }
     };
@@ -182,9 +189,9 @@ class ExprResCacheManager {
     struct KeyHasher {
         size_t
         operator()(const Key& k) const noexcept {
-            std::hash<int64_t> h1;
             std::hash<std::string> h2;
-            return (h1(k.segment_id) * 1315423911u) ^ h2(k.signature);
+            return ExprCacheSegmentKeyHasher{}(k.SegmentKey()) ^
+                   h2(k.signature);
         }
     };
 
@@ -293,9 +300,25 @@ class ExprResCacheManager {
     void
     Clear();
 
-    // Erase all cache entries of a specific segment. Returns number of erased entries.
+    // Detach under the cache lock; release the returned resources only after
+    // dropping the segment PublishLease. No allocation on the retirement path.
+    struct RetiredGeneration {
+        EntryPool::RetiredEntries memory;
+        std::unique_ptr<DiskSlotFile> disk;
+        RetiredGeneration();
+        RetiredGeneration(RetiredGeneration&&) noexcept;
+        ~RetiredGeneration();
+    };
+
+    RetiredGeneration
+    RetireGeneration(int64_t segment_id,
+                     const ExprCacheGenerationPtr& generation);
+
+    // Generation-zero legacy/growing cache only. Sealed lifecycle retirement
+    // must use its own token, never erase another incarnation of the same ID.
+    // Returns the number of erased entries (files in disk mode).
     size_t
-    EraseSegment(int64_t segment_id);
+    EraseLegacySegment(int64_t segment_id);
 
  private:
     ExprResCacheManager();
@@ -308,7 +331,8 @@ class ExprResCacheManager {
     GetDiskCurrentBytesLocked() const;
 
     size_t
-    EvictDiskSegmentsUntilWithinBudget(int64_t protected_segment_id);
+    EvictDiskSegmentsUntilWithinBudget(
+        ExprCacheSegmentKey protected_segment_id);
 
     // Private injection points for testing disk-put exception safety.
     enum class DiskPutStage {
@@ -323,16 +347,16 @@ class ExprResCacheManager {
     using DiskPutHook = std::function<void(DiskPutStage)>;
 
     void
-    TouchDiskSegment(int64_t segment_id, const DiskPutHook& hook);
+    TouchDiskSegment(ExprCacheSegmentKey segment_id, const DiskPutHook& hook);
 
     void
-    TryTouchDiskSegment(int64_t segment_id);
+    TryTouchDiskSegment(ExprCacheSegmentKey segment_id);
 
     void
-    RemoveDiskClockSegment(int64_t segment_id);
+    RemoveDiskClockSegment(ExprCacheSegmentKey segment_id);
 
     size_t
-    RemoveDiskSegmentFile(int64_t segment_id);
+    RemoveDiskSegmentFile(ExprCacheSegmentKey segment_id);
 
     void
     SyncDiskUsageMetrics(size_t disk_bytes);
@@ -362,12 +386,18 @@ class ExprResCacheManager {
 
     // Disk mode backend
     mutable std::shared_mutex disk_files_mutex_;
-    std::unordered_map<int64_t, std::unique_ptr<DiskSlotFile>> disk_files_;
-    std::unordered_set<int64_t> disk_ineligible_segments_;
+    std::unordered_map<ExprCacheSegmentKey,
+                       std::unique_ptr<DiskSlotFile>,
+                       ExprCacheSegmentKeyHasher>
+        disk_files_;
+    std::unordered_set<ExprCacheSegmentKey, ExprCacheSegmentKeyHasher>
+        disk_ineligible_segments_;
     mutable std::mutex disk_clock_mutex_;
-    std::vector<int64_t> disk_clock_segments_;
-    std::unordered_map<int64_t, size_t> disk_clock_index_;
-    std::unordered_map<int64_t, uint8_t> disk_segment_usage_;
+    std::vector<ExprCacheSegmentKey> disk_clock_segments_;
+    std::unordered_map<ExprCacheSegmentKey, size_t, ExprCacheSegmentKeyHasher>
+        disk_clock_index_;
+    std::unordered_map<ExprCacheSegmentKey, uint8_t, ExprCacheSegmentKeyHasher>
+        disk_segment_usage_;
     size_t disk_clock_hand_{0};
 
     FrequencyTracker frequency_tracker_;
