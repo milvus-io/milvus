@@ -2114,24 +2114,24 @@ func (s *MergeOpTestSuite) TestMergeOpMax_MixedMetrics_NoNormalize() {
 	s.InDelta(0.94, float64(scoreChunk.Value(0)), 0.01)
 }
 
-func (s *MergeOpTestSuite) TestClassifyMetricsOrder() {
-	mixed, desc := classifyMetricsOrder([]string{"COSINE", "L2"})
+func (s *MergeOpTestSuite) TestClassifyScoreOrder() {
+	mixed, desc := classifyScoreOrder([]string{"COSINE", "L2"}, nil)
 	s.True(mixed)
 	s.True(desc)
 
-	mixed, desc = classifyMetricsOrder([]string{"COSINE", "IP"})
+	mixed, desc = classifyScoreOrder([]string{"COSINE", "IP"}, nil)
 	s.False(mixed)
 	s.True(desc)
 
-	mixed, desc = classifyMetricsOrder([]string{"L2", "L2"})
+	mixed, desc = classifyScoreOrder([]string{"L2", "L2"}, nil)
 	s.False(mixed)
 	s.False(desc)
 
-	mixed, desc = classifyMetricsOrder([]string{"COSINE", "IP", "BM25"})
+	mixed, desc = classifyScoreOrder([]string{"COSINE", "IP", "BM25"}, nil)
 	s.False(mixed)
 	s.True(desc)
 
-	mixed, desc = classifyMetricsOrder([]string{"COSINE", "L2", "BM25"})
+	mixed, desc = classifyScoreOrder([]string{"COSINE", "L2", "BM25"}, nil)
 	s.True(mixed)
 	s.True(desc)
 }
