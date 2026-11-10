@@ -115,7 +115,7 @@ func TestCollectionCreationPreservesSchemaVersionOnReplay(t *testing.T) {
 			mt := &MetaTable{
 				ctx: ctx, catalog: kvrootcoord.NewCatalog(store), names: newNameDb(), aliases: newNameDb(),
 				dbName2Meta: map[string]*model.Database{"default": {ID: 1, Name: "default"}},
-				collID2Meta: map[int64]*model.Collection{}, partitionName2ID: map[int64]map[string]int64{},
+				collID2Meta: map[int64]*model.Collection{},
 			}
 			channel.ResetStaticPChannelStatsManager()
 			channel.RecoverPChannelStatsManager(nil)
