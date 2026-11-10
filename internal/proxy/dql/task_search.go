@@ -1751,7 +1751,8 @@ func (t *SearchTask) supportsStreamingReduce() bool {
 			return false
 		}
 		info := t.queryInfos[index]
-		if !gjson.Get(info.GetSearchParams(), radiusKey).Exists() &&
+		groupedHybrid := req.GetIsAdvanced() && (info.GetGroupByFieldId() > 0 || len(info.GetGroupByFieldIds()) > 0)
+		if !groupedHybrid && !gjson.Get(info.GetSearchParams(), radiusKey).Exists() &&
 			info.GetHints() != iterativeFilterKey &&
 			gjson.Get(info.GetSearchParams(), common.HintsKey).String() != iterativeFilterKey {
 			return false

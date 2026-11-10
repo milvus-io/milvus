@@ -18,6 +18,7 @@ package dql
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -29,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	searchreducestream "github.com/milvus-io/milvus/internal/util/searchutil/reduce_stream"
+	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/internal/views/viewquery"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -129,6 +131,23 @@ func TestHybridGroupByWithoutRequeryAcrossShards(t *testing.T) {
 			}
 			require.NoError(t, task.initAdvancedSearchRequest(ctx))
 			require.False(t, task.needRequery)
+			for _, sub := range task.SubReqs {
+				require.Equal(t, internalpb.SearchType_DEFAULT, sub.GetSearchType())
+			}
+			require.True(t, task.supportsStreamingReduce(), "initialized Hybrid Group By must use the streaming path")
+			task.request.SubReqs[0].FunctionChains = []*schemapb.FunctionChain{{}}
+			require.False(t, task.supportsStreamingReduce(), "Hybrid sub-search function chains remain Batch-only")
+			task.request.SubReqs[0].FunctionChains = nil
+			legacy := &fakeLegacyQueryClient{searchResult: &queryclient.LegacySearchResult{}}
+			task.viewQueryClient = &fakeLegacyViewQueryClient{legacy: legacy}
+			streamKey := paramtable.Get().ProxyCfg.EnableReduceStream.Key
+			oldStream := paramtable.Get().ProxyCfg.EnableReduceStream.GetValue()
+			t.Cleanup(func() { require.NoError(t, paramtable.Get().Save(streamKey, oldStream)) })
+			for _, enabled := range []bool{true, false} {
+				require.NoError(t, paramtable.Get().Save(streamKey, strconv.FormatBool(enabled)))
+				require.NoError(t, task.executeByQueryView(ctx))
+				require.Equal(t, enabled, legacy.lastSearchRequest.AllowStreaming)
+			}
 
 			// QueryNode returns requested output columns, including the PK even
 			// when the client did not request any output fields. Put an empty
