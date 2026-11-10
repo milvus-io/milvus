@@ -140,6 +140,7 @@ const (
 
 var (
 	NewSearchTask                            = dql.NewSearchTask
+	NewHybridSearchTask                      = dql.NewHybridSearchTask
 	NewQueryTask                             = dql.NewQueryTask
 	NewGetStatisticsTask                     = dql.NewGetStatisticsTask
 	NewGetCollectionStatisticsTask           = dql.NewGetCollectionStatisticsTask
