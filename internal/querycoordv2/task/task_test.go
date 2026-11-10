@@ -2378,7 +2378,6 @@ func TestSegmentTaskDeltaDefensiveBranches(t *testing.T) {
 
 	delta := NewSegmentTaskDelta()
 	delta.Add(segmentTask)
-	delta.printDetailInfos()
 	delta.Add(segmentTask)
 	assert.Len(t, delta.records[segmentTask.ID()], 1)
 
@@ -2414,7 +2413,6 @@ func TestChannelTaskDeltaDefensiveBranches(t *testing.T) {
 
 	delta := NewChannelTaskDelta()
 	delta.Add(channelTask)
-	delta.printDetailInfos()
 	delta.Add(channelTask)
 	assert.Equal(t, 1, delta.Get(1, 100))
 
@@ -3129,10 +3127,9 @@ func (suite *TaskSuite) TestTaskQueueRangePriority() {
 	suite.Equal(3, queue.Len())
 
 	var visited []Priority
-	queue.Range(func(t Task) bool {
+	for _, t := range queue.Snapshot() {
 		visited = append(visited, t.Priority())
-		return true
-	})
+	}
 	suite.Equal([]Priority{TaskPriorityHigh, TaskPriorityNormal, TaskPriorityLow}, visited)
 
 	queue.Remove(taskHigh)
@@ -3187,18 +3184,10 @@ func (suite *TaskSuite) TestNodeTaskQueueNodeBucketing() {
 	suite.Equal(1, queue.LenByNode(2))
 	suite.Equal(0, queue.LenByNode(999))
 
-	var node1Tasks []Task
-	queue.RangeByNode(1, func(task Task) bool {
-		node1Tasks = append(node1Tasks, task)
-		return true
-	})
+	node1Tasks := queue.SnapshotByNode(1)
 	suite.Equal(2, len(node1Tasks))
 
-	var node2Tasks []Task
-	queue.RangeByNode(2, func(task Task) bool {
-		node2Tasks = append(node2Tasks, task)
-		return true
-	})
+	node2Tasks := queue.SnapshotByNode(2)
 	suite.Equal(1, len(node2Tasks))
 	suite.Equal(int64(2), node2Tasks[0].ID())
 
@@ -3234,19 +3223,11 @@ func (suite *TaskSuite) TestNodeTaskQueueMoveTaskDualNode() {
 	suite.Equal(1, queue.LenByNode(destNode))
 	suite.Equal(1, queue.LenByNode(srcNode))
 
-	var destTasks []Task
-	queue.RangeByNode(destNode, func(t Task) bool {
-		destTasks = append(destTasks, t)
-		return true
-	})
+	destTasks := queue.SnapshotByNode(destNode)
 	suite.Equal(1, len(destTasks))
 	suite.Equal(int64(10), destTasks[0].ID())
 
-	var srcTasks []Task
-	queue.RangeByNode(srcNode, func(t Task) bool {
-		srcTasks = append(srcTasks, t)
-		return true
-	})
+	srcTasks := queue.SnapshotByNode(srcNode)
 	suite.Equal(1, len(srcTasks))
 	suite.Equal(int64(10), srcTasks[0].ID())
 
@@ -3273,19 +3254,11 @@ func (suite *TaskSuite) TestNodeTaskQueueLeaderActionDualNode() {
 	suite.Equal(1, queue.LenByNode(workerID))
 	suite.Equal(1, queue.LenByNode(leaderID))
 
-	var workerTasks []Task
-	queue.RangeByNode(workerID, func(t Task) bool {
-		workerTasks = append(workerTasks, t)
-		return true
-	})
+	workerTasks := queue.SnapshotByNode(workerID)
 	suite.Equal(1, len(workerTasks))
 	suite.Equal(int64(20), workerTasks[0].ID())
 
-	var leaderTasks []Task
-	queue.RangeByNode(leaderID, func(t Task) bool {
-		leaderTasks = append(leaderTasks, t)
-		return true
-	})
+	leaderTasks := queue.SnapshotByNode(leaderID)
 	suite.Equal(1, len(leaderTasks))
 	suite.Equal(int64(20), leaderTasks[0].ID())
 
@@ -3345,10 +3318,9 @@ func (suite *TaskSuite) TestNodeTaskQueueRangeByNodePriority() {
 	suite.Equal(3, queue.LenByNode(nodeID))
 
 	var visited []Priority
-	queue.RangeByNode(nodeID, func(t Task) bool {
+	for _, t := range queue.SnapshotByNode(nodeID) {
 		visited = append(visited, t.Priority())
-		return true
-	})
+	}
 	suite.Equal([]Priority{TaskPriorityHigh, TaskPriorityNormal, TaskPriorityLow}, visited)
 }
 

@@ -87,7 +87,8 @@ func TestReleasedCollectionRetiresRegularTasks(t *testing.T) {
 	require.NoError(t, scheduler.Add(task))
 	// ReleaseCollection removes load metadata before the replicas.
 	require.NoError(t, scheduler.meta.CollectionManager.RemoveCollection(context.Background(), membershipCollectionID))
-	require.ErrorIs(t, scheduler.checkReplica(task), merr.ErrCollectionNotLoaded)
+	_, err := scheduler.checkReplica(task)
+	require.ErrorIs(t, err, merr.ErrCollectionNotLoaded)
 	scheduler.Dispatch(1)
 	require.Zero(t, scheduler.tasks.Len())
 	// The released copy can now be cleaned up.
@@ -124,11 +125,11 @@ func captureNodeTasks(queue *nodeTaskQueue, node int64) []Task {
 	return tasks
 }
 
-func checkConcurrentSchedulerTask(scheduler *taskScheduler, task Task, checkDist bool) error {
+func checkConcurrentSchedulerTask(scheduler *taskScheduler, task Task) error {
 	if err := task.Context().Err(); err != nil {
 		return err
 	}
-	return scheduler.checkStale(task, checkDist)
+	return scheduler.checkStale(task)
 }
 
 func TestSchedulerDispatchAllowsOtherCollectionsToProgress(t *testing.T) {
@@ -144,14 +145,16 @@ func TestSchedulerDispatchAllowsOtherCollectionsToProgress(t *testing.T) {
 	checking, resume := make(chan struct{}), make(chan struct{})
 	var pauseOnce, releaseOnce sync.Once
 	release := func() { releaseOnce.Do(func() { close(resume) }) }
-	checkPatch := mockey.Mock((*taskScheduler).check).To(func(s *taskScheduler, task Task, checkDist bool) error {
-		if s == scheduler && task == first && !checkDist {
+	// Pause while the first collection's task is being advanced. Every node in
+	// this test is alive, so the node-state check itself always passes.
+	checkPatch := mockey.Mock((*taskScheduler).checkNodeState).To(func(s *taskScheduler, task Task) error {
+		if s == scheduler && task == first {
 			pauseOnce.Do(func() {
 				close(checking)
 				<-resume
 			})
 		}
-		return checkConcurrentSchedulerTask(s, task, checkDist)
+		return nil
 	}).Build()
 	defer checkPatch.UnPatch()
 	second := registrationChannelTask(t, otherReplica, 14, "independent-collection")
@@ -213,11 +216,11 @@ func TestSchedulerConcurrentDispatchPromotesOnce(t *testing.T) {
 		return result
 	}).Build()
 	defer snapshotPatch.UnPatch()
-	checkPatch := mockey.Mock((*taskScheduler).check).To(func(s *taskScheduler, checked Task, checkDist bool) error {
-		if s == scheduler && checked == task && checkDist {
+	checkPatch := mockey.Mock((*taskScheduler).check).To(func(s *taskScheduler, checked Task) error {
+		if s == scheduler && checked == task {
 			promotionChecks.Add(1)
 		}
-		return checkConcurrentSchedulerTask(s, checked, checkDist)
+		return checkConcurrentSchedulerTask(s, checked)
 	}).Build()
 	defer checkPatch.UnPatch()
 	done := make(chan struct{})

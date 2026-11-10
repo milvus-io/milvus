@@ -18,52 +18,26 @@ package task
 
 import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// applyReplicaUpdate publishes a complete replica update and retires invalid
-// plans before another Add or executor admission can observe the new assignment.
-// ReplicaManager already holds its own collection write lock; scheduler paths
-// only read replica snapshots and must never acquire that write lock in reverse.
-func (scheduler *taskScheduler) applyReplicaUpdate(collectionID int64, publish func()) {
-	scheduler.lifecycleMu.RLock()
-	defer scheduler.lifecycleMu.RUnlock()
-	scheduler.collKeyLock.Lock(collectionID)
-	defer scheduler.collKeyLock.Unlock(collectionID)
-
-	publish()
-	if scheduler.closed {
-		return
-	}
-	scheduler.tasks.Range(func(_ int64, entry scheduledTask) bool {
-		task := entry.task
-		if task.CollectionID() != collectionID {
-			return true
-		}
-		if err := scheduler.checkReplica(task); err != nil {
-			mlog.Info(task.Context(), "cancel task after replica assignment changed",
-				mlog.Int64("taskID", task.ID()), mlog.Int64("collectionID", collectionID),
-				mlog.Int64("replicaID", task.ReplicaID()), mlog.Err(err))
-			task.Cancel(err)
-			// Do not perform target-refresh RPCs while ReplicaManager is publishing.
-			scheduler.retire(task)
-		}
-		return true
-	})
-}
-
 // checkReplica validates the plan against current ownership, not the replica
-// snapshot captured when the checker produced it. Call under the collection
-// gate on admission and before advancing a task, including waiting-dist tasks.
-func (scheduler *taskScheduler) checkReplica(task Task) error {
+// snapshot captured when the checker produced it, and returns that current
+// replica (nil for a NilReplica cleanup task).
+//
+// ReplicaManager does not notify the scheduler of an update. Every gate a task
+// passes calls this instead: admission, promotion, and each Dispatch before the
+// task advances, including waiting-dist tasks. A task made stale by an update
+// is therefore retired by the next Dispatch of one of its nodes, and until then
+// cannot commit another action.
+func (scheduler *taskScheduler) checkReplica(task Task) (*meta.Replica, error) {
 	ctx := task.Context()
 	if task.ReplicaID() == meta.NilReplica.GetID() {
 		// ReleaseCollection removes load metadata first. Its cleanup must remain
 		// valid even while old replica metadata is still present.
 		if !scheduler.meta.Exist(ctx, task.CollectionID()) {
-			return nil
+			return nil, nil
 		}
 		for _, action := range task.Actions() {
 			if action.Type() != ActionTypeReduce {
@@ -73,33 +47,54 @@ func (scheduler *taskScheduler) checkReplica(task Task) error {
 				continue
 			}
 			if scheduler.meta.GetByCollectionAndNode(ctx, task.CollectionID(), action.Node()) != nil {
-				return merr.WrapErrNodeStateUnexpected(action.Node(), "cleanup task no longer matches replica assignment")
+				return nil, merr.WrapErrNodeStateUnexpected(action.Node(), "cleanup task no longer matches replica assignment")
 			}
 		}
-		return nil
+		return nil, nil
 	}
 
 	// ReleaseCollection removes load metadata before replicas; a regular task
 	// must not keep its reservations meanwhile.
 	if !scheduler.meta.Exist(ctx, task.CollectionID()) {
-		return merr.WrapErrCollectionNotLoaded(task.CollectionID())
+		return nil, merr.WrapErrCollectionNotLoaded(task.CollectionID())
 	}
 	replica := scheduler.meta.Get(ctx, task.ReplicaID())
 	if replica == nil || replica.GetCollectionID() != task.CollectionID() {
-		return merr.WrapErrReplicaNotFound(task.ReplicaID())
+		return nil, merr.WrapErrReplicaNotFound(task.ReplicaID())
 	}
 	for _, action := range task.Actions() {
 		// LeaderAction updates the delegator; its worker may legitimately be RO.
 		node := actionExecutorNode(action)
 		if !replica.Contains(node) {
-			return merr.WrapErrNodeStateUnexpected(node, "task node no longer belongs to replica")
+			// ReplicaObserver drops an RO node as soon as its distribution is
+			// empty, which can precede the Dispatch that reports the release
+			// finished. Nothing is left on the node for this action to touch.
+			if scheduler.reduceApplied(action) {
+				continue
+			}
+			return nil, merr.WrapErrNodeStateUnexpected(node, "task node no longer belongs to replica")
 		}
 		if _, leader := action.(*LeaderAction); leader && action.Type() == ActionTypeGrow && !replica.Contains(action.Node()) {
-			return merr.WrapErrNodeStateUnexpected(action.Node(), "leader route worker no longer belongs to replica")
+			return nil, merr.WrapErrNodeStateUnexpected(action.Node(), "leader route worker no longer belongs to replica")
 		}
 		if action.Type() == ActionTypeGrow && (replica.ContainRONode(node) || replica.ContainROSQNode(node)) {
-			return merr.WrapErrNodeStateUnexpected(node, "node becomes ro node")
+			return nil, merr.WrapErrNodeStateUnexpected(node, "node becomes ro node")
 		}
 	}
-	return nil
+	return replica, nil
+}
+
+// reduceApplied reports whether the copy a reduce action removes is already
+// absent from the distribution, whether or not its RPC has returned.
+func (scheduler *taskScheduler) reduceApplied(action Action) bool {
+	if action.Type() != ActionTypeReduce {
+		return false
+	}
+	switch action := action.(type) {
+	case *SegmentAction:
+		return action.isDistMatched(scheduler.distMgr)
+	case *ChannelAction:
+		return action.IsFinished(scheduler.distMgr)
+	}
+	return false
 }

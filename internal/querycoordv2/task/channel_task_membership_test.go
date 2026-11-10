@@ -226,13 +226,11 @@ func TestChannelTaskMembershipPreservesExistingStates(t *testing.T) {
 				scheduler.nodeMgr.Get(1).SetState(session.NodeStateStopping)
 			}
 			task := membershipTask(t, tc.replica, 1, false)
-			for _, promote := range []bool{false, true} {
-				err := scheduler.checkStale(task, promote)
-				if tc.err == nil {
-					require.NoError(t, err)
-				} else {
-					require.ErrorIs(t, err, tc.err)
-				}
+			err := scheduler.checkStale(task)
+			if tc.err == nil {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, tc.err)
 			}
 		})
 	}
@@ -242,7 +240,7 @@ func TestChannelTaskMembershipPreservesExistingStates(t *testing.T) {
 			meta.NilReplica, NewChannelAction(1, ActionTypeReduce, membershipChannel))
 		require.NoError(t, err)
 		defer task.Cancel(nil)
-		require.NoError(t, scheduler.checkStale(task, true))
+		require.NoError(t, scheduler.checkStale(task))
 	})
 	t.Run("leader_grow_uses_leader_not_ro_worker", func(t *testing.T) {
 		replica := membershipReplica([]int64{14}, []int64{1}, nil, nil)
@@ -250,6 +248,6 @@ func TestChannelTaskMembershipPreservesExistingStates(t *testing.T) {
 		task := NewLeaderSegmentTask(context.Background(), time.Minute, WrapIDSource(1), membershipCollectionID,
 			replica, 14, NewLeaderAction(14, 1, ActionTypeGrow, membershipChannel, 99, 1))
 		defer task.Cancel(nil)
-		require.NoError(t, scheduler.checkStale(task, true))
+		require.NoError(t, scheduler.checkStale(task))
 	})
 }

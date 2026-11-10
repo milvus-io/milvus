@@ -159,15 +159,6 @@ func (queue *taskQueue) Snapshot() []Task {
 	return tasks
 }
 
-// Range iterates a snapshot ordered by priority from high to low.
-func (queue *taskQueue) Range(fn func(task Task) bool) {
-	for _, task := range queue.Snapshot() {
-		if !fn(task) {
-			return
-		}
-	}
-}
-
 type nodeTaskQueue struct {
 	mu sync.RWMutex
 	// NodeID -> TaskPriority -> TaskID -> Task
@@ -266,15 +257,6 @@ func (queue *nodeTaskQueue) SnapshotByNode(nodeID int64) []Task {
 		}
 	}
 	return tasks
-}
-
-// RangeByNode iterates a snapshot ordered by priority from high to low.
-func (queue *nodeTaskQueue) RangeByNode(nodeID int64, fn func(task Task) bool) {
-	for _, task := range queue.SnapshotByNode(nodeID) {
-		if !fn(task) {
-			return
-		}
-	}
 }
 
 type SegmentTaskDelta struct {
@@ -450,23 +432,6 @@ func (record segmentDeltaRecord) isSegmentDistMatched(distMgr *meta.Distribution
 	}
 }
 
-func (delta *SegmentTaskDelta) printDetailInfos() {
-	delta.mu.RLock()
-	defer delta.mu.RUnlock()
-
-	if len(delta.records) > 0 {
-		mlog.Info(context.TODO(), "segment task delta cache info",
-			mlog.String("records", fmt.Sprintf("%+v", delta.records)),
-		)
-	}
-}
-
-func (delta *SegmentTaskDelta) Clear() {
-	delta.mu.Lock()
-	defer delta.mu.Unlock()
-	delta.records = make(map[int64][]segmentDeltaRecord)
-}
-
 // Add updates the channel task delta for the given nodeID and collectionID.
 func (delta *ChannelTaskDelta) Add(task *ChannelTask) {
 	delta.mu.Lock()
@@ -556,27 +521,6 @@ func (delta *ChannelTaskDelta) Get(nodeID, collectionID int64) int {
 	return sum
 }
 
-func (delta *ChannelTaskDelta) printDetailInfos() {
-	delta.mu.RLock()
-	defer delta.mu.RUnlock()
-
-	if delta.taskIDRecords.Len() > 0 {
-		mlog.Info(context.TODO(), "channel task delta cache info",
-			mlog.Any("taskIDRecords", delta.taskIDRecords.Collect()),
-			mlog.Any("data", delta.data),
-			mlog.Any("nodeTotalDelta", delta.nodeTotalDelta),
-		)
-	}
-}
-
-func (delta *ChannelTaskDelta) Clear() {
-	delta.mu.Lock()
-	defer delta.mu.Unlock()
-	delta.data = make(map[int64]map[int64]int)
-	delta.nodeTotalDelta = make(map[int64]int)
-	delta.taskIDRecords.Clear()
-}
-
 type Scheduler interface {
 	Start()
 	Stop()
@@ -623,10 +567,10 @@ type taskScheduler struct {
 	nodeMgr   *session.NodeManager
 
 	// Lock order: lifecycleMu -> collKeyLock -> queue/map/delta locks.
-	// Add, Dispatch, RemoveByNode and applyReplicaUpdate hold lifecycleMu for
-	// reading and take the relevant collection lock; Stop holds the lifecycle
-	// writer. Queue snapshots release their internal lock before acquiring a
-	// collection lock.
+	// Add, Dispatch and RemoveByNode hold lifecycleMu for reading and take the
+	// relevant collection lock; Stop holds the lifecycle writer. Queue snapshots
+	// release their internal lock before acquiring a collection lock. The
+	// scheduler only reads replica metadata and never runs under its locks.
 	lifecycleMu  sync.RWMutex
 	closed       bool
 	collKeyLock  *lock.KeyLock[int64]
@@ -685,9 +629,6 @@ func NewScheduler(ctx context.Context,
 		channelTaskDelta: NewChannelTaskDelta(),
 
 		pendingTargetRefresh: NewConcurrentSet[int64](),
-	}
-	if meta != nil && meta.ReplicaManager != nil {
-		meta.SetReplicaUpdateHook(scheduler.applyReplicaUpdate)
 	}
 	return scheduler
 }
@@ -858,7 +799,7 @@ func (scheduler *taskScheduler) updateTaskMetrics() {
 // preAdd checks admission while holding lifecycleMu for reading and the
 // collection lock, including cleanup of a lower-priority replacement.
 func (scheduler *taskScheduler) preAdd(task Task) error {
-	if err := scheduler.checkReplica(task); err != nil {
+	if _, err := scheduler.checkReplica(task); err != nil {
 		return err
 	}
 	var old Task
@@ -875,6 +816,16 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 		object = "segment"
 	default:
 		panic(fmt.Sprintf("preAdd: forget to process task type: %+v", task))
+	}
+	if old != nil {
+		// A replica update is not pushed to the scheduler. Revalidate the
+		// incumbent here so a plan made stale by one cannot hold the key until
+		// the next Dispatch of its node.
+		if _, err := scheduler.checkReplica(old); err != nil {
+			old.Cancel(err)
+			scheduler.remove(old)
+			old = nil
+		}
 	}
 	if old != nil && task.Priority() <= old.Priority() {
 		return merr.WrapErrServiceInternal("task with the same " + object + " exists")
@@ -975,7 +926,7 @@ func (scheduler *taskScheduler) promote(task Task) error {
 		mlog.String("source", task.Source().String()),
 	)
 
-	if err := scheduler.check(task, true); err != nil {
+	if err := scheduler.check(task); err != nil {
 		log.Info(task.Context(), "failed to promote task", mlog.Err(err))
 		return err
 	}
@@ -1205,7 +1156,7 @@ func (scheduler *taskScheduler) preProcess(task Task) (shouldProcess bool) {
 	}
 	// Validate before advancing or reporting success: a distribution update can
 	// describe a copy now assigned to another replica, not completion of this plan.
-	if err := scheduler.checkReplica(task); err != nil {
+	if _, err := scheduler.checkReplica(task); err != nil {
 		task.Cancel(err)
 		return false
 	}
@@ -1251,10 +1202,11 @@ func (scheduler *taskScheduler) preProcess(task Task) (shouldProcess bool) {
 
 	if task.IsFinished(scheduler.distMgr) {
 		task.SetStatus(TaskStatusSucceeded)
-	} else {
-		if err := scheduler.check(task, false); err != nil {
-			task.Cancel(err)
-		}
+	} else if err := task.Context().Err(); err != nil {
+		task.Cancel(err)
+	} else if err := scheduler.checkNodeState(task); err != nil {
+		// Replica membership was validated above, before advancing.
+		task.Cancel(err)
 	}
 
 	return shouldProcess && task.Status() == TaskStatusStarted
@@ -1296,10 +1248,11 @@ func (scheduler *taskScheduler) process(task Task) bool {
 	return executor.Execute(task, step)
 }
 
-func (scheduler *taskScheduler) check(task Task, checkDistExist bool) error {
+// check admits a waiting task into the process queue.
+func (scheduler *taskScheduler) check(task Task) error {
 	err := task.Context().Err()
 	if err == nil {
-		err = scheduler.checkStale(task, checkDistExist)
+		err = scheduler.checkStale(task)
 	}
 
 	return err
@@ -1335,13 +1288,7 @@ func (scheduler *taskScheduler) recordSegmentTaskError(task *SegmentTask) {
 	meta.GlobalFailedLoadCache.Put(task.collectionID, task.Err())
 }
 
-// remove retires bookkeeping at most once. The caller must hold the lifecycle
-// writer or the lifecycle reader together with this task's collection lock.
-func (scheduler *taskScheduler) remove(task Task) {
-	scheduler.retire(task)
-}
-
-// refreshPendingTargets refreshes the next targets recorded by retire. Callers
+// refreshPendingTargets refreshes the next targets recorded by remove. Callers
 // must not hold any scheduler lock.
 func (scheduler *taskScheduler) refreshPendingTargets() {
 	for _, collectionID := range scheduler.pendingTargetRefresh.Collect() {
@@ -1353,9 +1300,10 @@ func (scheduler *taskScheduler) refreshPendingTargets() {
 	}
 }
 
-// retire is shared by remove and replica publication. Callers hold the
-// lifecycle writer, or lifecycle reader and collection gate.
-func (scheduler *taskScheduler) retire(task Task) {
+// remove retires bookkeeping at most once. The caller must hold the lifecycle
+// writer or the lifecycle reader together with this task's collection lock.
+// It only records a pending target refresh; refreshPendingTargets runs it.
+func (scheduler *taskScheduler) remove(task Task) {
 	_, ok := scheduler.tasks.GetAndRemove(task.ID())
 	if !ok {
 		return // A stale queue snapshot must not touch a replacement or its delta.
@@ -1486,43 +1434,41 @@ func WrapTaskLog(task Task, fields ...mlog.Field) []mlog.Field {
 	return res
 }
 
-func (scheduler *taskScheduler) checkStale(task Task, checkDistExist bool) error {
-	if err := scheduler.checkReplica(task); err != nil {
+// checkStale decides whether a waiting task may be promoted. It is not used
+// once a task is processing: by then the segment may have been loaded by the
+// task's own in-flight RPC, and canceling the task would kill that RPC with a
+// misleading "context canceled" error.
+func (scheduler *taskScheduler) checkStale(task Task) error {
+	// replica is the current membership, nil for NilReplica (ID=-1), which is
+	// used for reduce-only tasks like unsubscribe channel.
+	replica, err := scheduler.checkReplica(task)
+	if err != nil {
 		return err
-	}
-	// Resolve current membership rather than the task's replica snapshot.
-	// NilReplica (ID=-1) is used for reduce-only tasks like unsubscribe channel
-	var replica *meta.Replica
-	if task.ReplicaID() != meta.NilReplica.GetID() {
-		replica = scheduler.meta.Get(scheduler.ctx, task.ReplicaID())
-		if replica == nil {
-			mlog.Warn(task.Context(), "task stale due to replica not found", mlog.String("task", task.String()))
-			return merr.WrapErrReplicaNotFound(task.ReplicaID())
-		}
 	}
 
 	// For segment grow tasks, check if segment is already loaded in dist.
 	// This prevents duplicate load RPCs when the checker creates tasks from a stale dist snapshot
 	// but the segment has already been loaded before the task is dispatched.
-	// Only checked during promote (waitQueue → processQueue), not during preProcess,
-	// because during preProcess the segment may have been loaded by this task's own in-flight RPC,
-	// and canceling the task would kill that RPC with a misleading "context canceled" error.
-	if checkDistExist {
-		if segmentTask, ok := task.(*SegmentTask); ok && GetTaskType(task) == TaskTypeGrow && replica != nil {
-			existsInDist := scheduler.distMgr.SegmentDistManager.GetByFilter(
-				meta.WithCollectionID(task.CollectionID()),
-				meta.WithReplica(replica),
-				meta.WithSegmentID(segmentTask.SegmentID()),
-			)
-			if len(existsInDist) > 0 {
-				mlog.Info(task.Context(), "task stale due to segment already loaded in dist",
-					mlog.String("task", task.String()),
-					mlog.Int64("segmentID", segmentTask.SegmentID()))
-				return merr.WrapErrServiceInternal("segment already loaded in dist")
-			}
+	if segmentTask, ok := task.(*SegmentTask); ok && GetTaskType(task) == TaskTypeGrow && replica != nil {
+		existsInDist := scheduler.distMgr.SegmentDistManager.GetByFilter(
+			meta.WithCollectionID(task.CollectionID()),
+			meta.WithReplica(replica),
+			meta.WithSegmentID(segmentTask.SegmentID()),
+		)
+		if len(existsInDist) > 0 {
+			mlog.Info(task.Context(), "task stale due to segment already loaded in dist",
+				mlog.String("task", task.String()),
+				mlog.Int64("segmentID", segmentTask.SegmentID()))
+			return merr.WrapErrServiceInternal("segment already loaded in dist")
 		}
 	}
 
+	return scheduler.checkNodeState(task)
+}
+
+// checkNodeState requires every executor node to be alive, and a grow target
+// not to be stopping.
+func (scheduler *taskScheduler) checkNodeState(task Task) error {
 	for _, action := range task.Actions() {
 		// Determine the target node for stale checking.
 		// For LeaderAction, we need to check the leader node (delegator) instead of the worker node.
