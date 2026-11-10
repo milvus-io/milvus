@@ -70,6 +70,22 @@ using ChunkReadFuture = folly::SemiFuture<ChunkReadResult>;
 constexpr int64_t kTestSegmentId = 100;
 constexpr size_t kChunkReaderOpenConcurrencyLimit = 16;
 
+TEST(AsyncReadWindowTest, UsesByteTargetAndKeepsOversizedCellsSeparate) {
+    const std::vector<CellSpec> cells{{0, 0, 0, 1, 6, 12},
+                                      {1, 0, 1, 1, 4, 8},
+                                      {2, 0, 2, 1, 11, 22},
+                                      {3, 0, 3, 1, 3, 6},
+                                      {4, 0, 4, 1, 3, 6}};
+    const auto windows = BuildAsyncReadWindows(cells, 10);
+    ASSERT_EQ(windows.size(), 3);
+    EXPECT_EQ(windows[0].chunk_indices, (std::vector<int64_t>{0, 1}));
+    EXPECT_EQ(windows[1].chunk_indices, (std::vector<int64_t>{2}));
+    EXPECT_EQ(windows[2].chunk_indices, (std::vector<int64_t>{3, 4}));
+    EXPECT_EQ(windows[0].budget_bytes, 20);
+    EXPECT_EQ(windows[1].budget_bytes, 22);
+    EXPECT_EQ(windows[2].budget_bytes, 12);
+}
+
 struct AsyncLoadExceptionCase {
     const char* name;
     std::exception_ptr exception;

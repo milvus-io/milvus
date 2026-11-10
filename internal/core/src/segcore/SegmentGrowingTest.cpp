@@ -67,6 +67,9 @@
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/Utils.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/LoadAdmissionController.h"
+#include "folly/coro/BlockingWait.h"
 #include "storage/Util.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/ManifestTestUtil.h"
@@ -222,16 +225,31 @@ TEST(Growing, LoadStorageV3ManifestCapsRowsAtCheckpoint) {
     segment->SetLoadInfo(load_info);
     milvus::tracer::TraceContext trace_ctx;
     // Force multiple read windows, with the checkpoint inside the final one.
-    const auto slice_size =
-        FILE_SLICE_SIZE.exchange(DEFAULT_FIELD_MAX_MEMORY_LIMIT);
-    auto restore_slice_size =
-        folly::makeGuard([&] { FILE_SLICE_SIZE.store(slice_size); });
+    const auto window_bytes =
+        storagev2translator::StorageV2AsyncLoadReadWindowSizeBytes();
+    storagev2translator::SetStorageV2AsyncLoadReadWindowSizeBytes(1);
+    auto restore_window = folly::makeGuard([&] {
+        storagev2translator::SetStorageV2AsyncLoadReadWindowSizeBytes(
+            window_bytes);
+    });
     const auto high_tasks =
         milvus::monitor::internal_storage_pool_task_submitted_total_high
             .Value();
     const auto low_tasks =
         milvus::monitor::internal_storage_pool_task_submitted_total_low.Value();
-    segment->Load(trace_ctx, nullptr);
+    auto& admission = storage::LoadAdmissionController::GetInstance();
+    const auto slots = admission.CapacitySlots();
+    admission.SetCapacitySlots(1);
+    auto restore_slots =
+        folly::makeGuard([&] { admission.SetCapacitySlots(slots); });
+    auto lease = folly::coro::blockingWait(
+        admission.AcquireAsync({0, 1}, storage::LoadAdmissionPriority::High));
+    auto load = std::async(std::launch::async,
+                           [&] { segment->Load(trace_ctx, nullptr); });
+    EXPECT_EQ(load.wait_for(std::chrono::milliseconds(100)),
+              std::future_status::timeout);
+    lease.Release();
+    load.get();
     EXPECT_EQ(milvus::monitor::internal_storage_pool_task_submitted_total_high
                   .Value(),
               high_tasks);

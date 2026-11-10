@@ -14,6 +14,9 @@
 #include "folly/coro/BlockingWait.h"
 #include "folly/coro/WithCancellation.h"
 #include "storage/AsyncLoadExecutor.h"
+#include "storage/LoadAdmissionController.h"
+#include "segcore/storagev2translator/AsyncLoadPipeline.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "common/FastMem.h"
 #include <cxxabi.h>
 #include <algorithm>
@@ -4327,9 +4330,6 @@ SegmentGrowingImpl::LoadColumnGroup(
     auto chunk_reader = std::move(chunk_reader_result.ValueOrDie());
     auto schema = get_schema_snapshot();
 
-    auto parallel_degree =
-        static_cast<uint64_t>(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
-
     AssertInfo(row_limit >= 0,
                "load column group row limit should be non-negative, got {}",
                row_limit);
@@ -4361,21 +4361,48 @@ SegmentGrowingImpl::LoadColumnGroup(
                rows_to_read,
                row_limit);
 
+    if (row_groups_to_load.empty()) {
+        co_return std::unordered_map<FieldId, std::vector<FieldDataPtr>>{};
+    }
+
+    const auto window_bytes = static_cast<size_t>(
+        storagev2translator::StorageV2AsyncLoadReadWindowSizeBytes());
+    auto sizes_result = chunk_reader->get_chunk_estimated_size();
+    if (!sizes_result.ok() && !sizes_result.status().IsNotImplemented()) {
+        throw milvus_storage::ToSegcoreError(sizes_result.status());
+    }
+    std::vector<uint64_t> chunk_bytes =
+        sizes_result.ok() ? std::move(sizes_result).ValueOrDie()
+                          : std::vector<uint64_t>(chunk_rows.size(), 0);
+    AssertInfo(chunk_bytes.size() == chunk_rows.size(),
+               "growing chunk size estimates do not match row group count");
+    std::vector<CellSpec> cells;
+    cells.reserve(row_groups_to_load.size());
+    for (const auto chunk_index : row_groups_to_load) {
+        // Unknown sizes occupy a full window instead of packing unbounded rows.
+        const auto bytes = chunk_bytes[chunk_index] == 0
+                               ? window_bytes
+                               : chunk_bytes[chunk_index];
+        AssertInfo(bytes <= std::numeric_limits<int64_t>::max(),
+                   "growing row group size estimate exceeds int64");
+        cells.push_back(
+            {chunk_index, 0, chunk_index, 1, static_cast<int64_t>(bytes)});
+    }
+    const auto windows =
+        storagev2translator::BuildAsyncReadWindows(cells, window_bytes);
+    auto& admission = storage::LoadAdmissionController::GetInstance();
+    const auto token = co_await folly::coro::co_current_cancellation_token;
     std::unordered_map<FieldId, std::vector<FieldDataPtr>> field_data_map;
-    // Growing recovery may reuse a manifest that already contains rows past the
-    // segment checkpoint. Only load rows covered by SegmentLoadInfo so WAL
-    // replay can append the remaining rows at the expected offsets.
+    // Keep checkpoint truncation while reserving only transient Arrow buffers;
+    // restored FieldData remains resident for subsequent recovery/index building.
     int64_t loaded_rows = 0;
-    // Bound outstanding row groups instead of relying on HIGH/LOW worker count.
-    const auto window_size = std::max<uint64_t>(1, parallel_degree);
-    for (size_t begin = 0; begin < row_groups_to_load.size();) {
-        const auto count =
-            std::min<size_t>(window_size, row_groups_to_load.size() - begin);
-        const std::vector<int64_t> window(
-            row_groups_to_load.begin() + begin,
-            row_groups_to_load.begin() + begin + count);
-        auto batches_result =
-            co_await chunk_reader->get_chunks_async(window, window_size);
+    for (const auto& window : windows) {
+        auto lease = co_await admission.AcquireAsync(
+            {window.budget_bytes, 1},
+            storage::LoadAdmissionPriority::High,
+            token);
+        auto batches_result = co_await chunk_reader->get_chunks_async(
+            window.chunk_indices, /*parallelism=*/1);
         if (!batches_result.ok()) {
             throw milvus_storage::ToSegcoreError(batches_result.status());
         }
@@ -4417,8 +4444,6 @@ SegmentGrowingImpl::LoadColumnGroup(
             loaded_rows += rows_to_load;
             record_batch.reset();
         }
-
-        begin += count;
     }
 
     LOG_INFO("Finished loading segment {} column group {}", id_, index);
