@@ -107,18 +107,11 @@ func (f *ReaderFactory) NewReader(ctx context.Context, schema *schemapb.Collecti
 	if shared != nil && !SnapshotSourceUsesSharedL0(file.GetSnapshotSource()) {
 		return nil, merr.WrapErrServiceInternalMsg("shared L0 reader requires a task-shared snapshot descriptor and prepared bitmaps")
 	}
-	if err := ValidateSnapshotSourceOptions(f.options); err != nil {
+	if err := ValidateImportSourceOptions(f.options); err != nil {
 		return nil, err
 	}
-	if HasSourceStorageOptions(f.options) {
-		for _, key := range file.GetPaths() {
-			if err := ValidateSourceStorageFilePath(key); err != nil {
-				return nil, err
-			}
-		}
-	}
-	if file.GetSnapshotSource() != nil || HasExternalSource(f.options) {
-		if err := ValidateSnapshotImportFiles([]*internalpb.ImportFile{file}, f.options); err != nil {
+	if HasSourceStorageOptions(f.options) || file.GetSnapshotSource() != nil || HasExternalSource(f.options) {
+		if err := ValidateImportFiles([]*internalpb.ImportFile{file}, f.options); err != nil {
 			return nil, err
 		}
 	}
@@ -220,7 +213,7 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 			// DataCoord broadcasts a metadata URI, then expands and persists
 			// exact StorageV3 manifests during Pending preparation before dispatch.
 			// Do not consult storage_version: snapshot metadata is the source of
-			// truth and ValidateSnapshotSourceOptions rejects that ambiguity.
+			// truth and ValidateImportSourceOptions rejects that ambiguity.
 			if len(paths) != 1 {
 				return nil, merr.WrapErrImportFailedMsg(
 					"snapshot-source import file requires exactly one manifest path",

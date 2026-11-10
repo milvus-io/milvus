@@ -64,7 +64,7 @@ func NewPreImportTask(req *datapb.PreImportRequest, cm storage.ChunkManager) Tas
 func (t *preImportTask) Kind() string { return "preimport" }
 
 func (t *preImportTask) Execute(ctx context.Context) (any, error) {
-	if err := importutilv2.ValidateSnapshotSourceOptions(t.req.GetOptions()); err != nil {
+	if err := importutilv2.ValidateImportSourceOptions(t.req.GetOptions()); err != nil {
 		return nil, err
 	}
 	// A single file failure short-circuits AwaitAll; cancel the shared ctx so
@@ -239,10 +239,8 @@ func (t *preImportTask) simpleRowCount(ctx context.Context, file *internalpb.Imp
 		return 0, 0, 0, false, nil
 	}
 	if importutilv2.HasSourceStorageOptions(t.req.GetOptions()) {
-		for _, key := range file.GetPaths() {
-			if err := importutilv2.ValidateSourceStorageFilePath(key); err != nil {
-				return 0, 0, 0, false, err
-			}
+		if err := importutilv2.ValidateSourceStorageFilePaths(file.GetPaths()); err != nil {
+			return 0, 0, 0, false, err
 		}
 	}
 	// Metadata-only counting bypasses NewReader, so resolve the same external

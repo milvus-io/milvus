@@ -89,7 +89,7 @@ func (c *Checker) scheduleSnapshotPreparation(job ImportJob) {
 
 func (c *Checker) prepareSnapshotJob(ctx context.Context, job ImportJob) {
 	// Recovered jobs must validate the reference before doing source I/O.
-	err := importutilv2.ValidateSnapshotImportPlan(job.GetFiles(), job.GetOptions(), nil)
+	err := importutilv2.ValidateImportPlan(job.GetFiles(), job.GetOptions(), nil)
 	var files []*internalpb.ImportFile
 	var options importutilv2.Options
 	var sources []*internalpb.SnapshotImportL0Source
@@ -117,7 +117,7 @@ func (c *Checker) prepareSnapshotJob(ctx context.Context, job ImportJob) {
 		// Expansion can rebase paths and add external/routing descriptors after
 		// its intermediate checks. Validate the complete durable plan, including
 		// allocated IDs, before publishing any executable files to the checker.
-		err = importutilv2.ValidateSnapshotImportPlan(files, options, sources)
+		err = importutilv2.ValidateImportPlan(files, options, sources)
 	}
 	if ctx.Err() != nil {
 		return
@@ -175,7 +175,7 @@ func readSnapshotImportMetadata(ctx context.Context, cm milvusstorage.ChunkManag
 func PrepareSnapshotImportFiles(ctx context.Context, partitions []int64, cm milvusstorage.ChunkManager,
 	schema *schemapb.CollectionSchema, files []*internalpb.ImportFile, options importutilv2.Options,
 ) ([]*internalpb.ImportFile, importutilv2.Options, error) {
-	if err := importutilv2.ValidateSnapshotSourceOptions(options); err != nil {
+	if err := importutilv2.ValidateImportSourceOptions(options); err != nil {
 		return nil, nil, err
 	}
 	if !importutilv2.IsSnapshotSource(options) {
@@ -259,7 +259,7 @@ func expandSnapshotImportFiles(
 	options importutilv2.Options,
 	metadata *datapb.SnapshotMetadata,
 ) ([]*internalpb.ImportFile, importutilv2.Options, []*internalpb.SnapshotImportL0Source, error) {
-	if err := importutilv2.ValidateSnapshotSourceOptions(options); err != nil {
+	if err := importutilv2.ValidateImportSourceOptions(options); err != nil {
 		return nil, nil, nil, err
 	}
 	if cm == nil {

@@ -67,8 +67,10 @@ func (s *SchedulerSuite) TestExternalSourcePreservesDestination() {
 		{Key: "storage.region", Value: "us-east-1"},
 	}
 	destination := mocks.NewChunkManager(s.T())
-	config := &indexpb.StorageConfig{StorageType: "remote", BucketName: "destination-bucket",
-		RootPath: "milvus", AccessKeyID: "destination-key", SecretAccessKey: "destination-secret"}
+	config := &indexpb.StorageConfig{
+		StorageType: "remote", BucketName: "destination-bucket",
+		RootPath: "milvus", AccessKeyID: "destination-key", SecretAccessKey: "destination-secret",
+	}
 	originalConfig := proto.Clone(config)
 	files := []*internalpb.ImportFile{{Paths: []string{"external/data.json"}}}
 	pre := NewPreImportTask(&datapb.PreImportRequest{

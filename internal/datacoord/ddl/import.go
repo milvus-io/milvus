@@ -99,7 +99,7 @@ func (c *Callbacks) ValidateImportRequest(ctx context.Context, files []*msgpb.Im
 		return err
 	}
 
-	if err := importutilv2.ValidateSnapshotSourceOptions(options); err != nil {
+	if err := importutilv2.ValidateImportSourceOptions(options); err != nil {
 		return err
 	}
 	// Validate timeout
@@ -246,7 +246,7 @@ func (c *Callbacks) BroadcastImport(ctx context.Context,
 	idempotencyKey string,
 	version internalpb.ImportVersion,
 ) (duplicatedJobID int64, duplicated bool, err error) {
-	if err := importutilv2.ValidateSnapshotSourceRequest(options); err != nil {
+	if err := importutilv2.ValidateImportSourceRequest(options); err != nil {
 		return 0, false, err
 	}
 	// Convert files to msgpb format for validation
@@ -306,7 +306,7 @@ func (c *Callbacks) BroadcastImport(ctx context.Context,
 	if err != nil {
 		return 0, false, merr.Wrap(err, "failed to capture snapshot import source")
 	}
-	if err := importutilv2.ValidateSnapshotImportPlan(files, options, nil); err != nil {
+	if err := importutilv2.ValidateImportPlan(files, options, nil); err != nil {
 		return 0, false, err
 	}
 	// Snapshot preparation is pinned by body options. Empty legacy paths make

@@ -102,7 +102,7 @@ func (it *ImportTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	if err := importutilv2.ValidateSnapshotSourceRequest(req.GetOptions()); err != nil {
+	if err := importutilv2.ValidateImportSourceRequest(req.GetOptions()); err != nil {
 		return err
 	}
 	collectionID, err := it.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())

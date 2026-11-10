@@ -383,7 +383,7 @@ func TestSnapshotPreparationPersistence(t *testing.T) {
 				require.False(t, importutilv2.IsSnapshotPreparation(got.GetFiles()))
 				require.Len(t, got.GetFiles(), 2)
 				require.EqualValues(t, 100, got.GetFiles()[0].Id)
-				require.NoError(t, importutilv2.ValidateSnapshotImportPlan(got.GetFiles(), got.GetOptions(), got.GetSnapshotL0Sources()))
+				require.NoError(t, importutilv2.ValidateImportPlan(got.GetFiles(), got.GetOptions(), got.GetSnapshotL0Sources()))
 			}
 			require.Empty(t, m.tasks.listTasks(), "preparation must not create tasks before durable publication")
 		})
@@ -1337,7 +1337,7 @@ func TestSnapshotSharedL0PlanAndTasks(t *testing.T) {
 	}
 	// Pending preparation persists the expanded plan directly to the catalog;
 	// only the metadata URI and options cross the WAL/CDC boundary.
-	require.NoError(t, importutilv2.ValidateSnapshotImportPlan(files, options, sources))
+	require.NoError(t, importutilv2.ValidateImportPlan(files, options, sources))
 	encoded, err := proto.Marshal(&datapb.ImportJob{
 		JobID: 1, Files: files, Options: options, Schema: SnapshotImportTestSchema(),
 		PartitionIDs: []int64{20}, Vchannels: []string{"target"}, DataTs: 100, SnapshotL0Sources: sources,
@@ -1506,7 +1506,7 @@ func TestSnapshotPartitionMappingTasksAndRecovery(t *testing.T) {
 			ManifestPath: packed.MarshalManifestPath(fmt.Sprintf("root/data/%d", i), 7), SourceCommitTimestamp: 100,
 		}})
 	}
-	require.NoError(t, importutilv2.ValidateSnapshotImportPlan(files, opts, nil))
+	require.NoError(t, importutilv2.ValidateImportPlan(files, opts, nil))
 	encoded, err := proto.Marshal(&datapb.ImportJob{
 		JobID: 1, CollectionID: 2, Files: files, Options: opts,
 		PartitionIDs: []int64{300, 100, 200}, Vchannels: []string{"target_v1"}, Schema: SnapshotImportTestSchema(), DataTs: 100, AutoCommit: false,

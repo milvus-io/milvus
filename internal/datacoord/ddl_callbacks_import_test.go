@@ -154,7 +154,7 @@ func TestBroadcastSnapshotImportMappedPartitions(t *testing.T) {
 			options = append(options, &commonpb.KeyValuePair{Key: key, Value: value})
 		}
 		files := ddl.ImportFilesFromMessage(decoded.MustBody().GetFiles(), options)
-		require.NoError(t, importutilv2.ValidateSnapshotImportPlan(files, options, nil))
+		require.NoError(t, importutilv2.ValidateImportPlan(files, options, nil))
 		require.True(t, importutilv2.IsSnapshotPreparation(files))
 		require.Equal(t, "s3://source/root/snapshots/1/metadata/2.json", decoded.MustBody().Options[importutilv2.SnapshotSourceURI])
 		return &types.BroadcastAppendResult{}, nil

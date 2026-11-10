@@ -1256,10 +1256,8 @@ func ValidateImportFilePaths(cm storage.ChunkManager, files []*msgpb.ImportFile,
 		// Explicit source credentials authorize reads in that bucket. These
 		// keys are unrelated to the destination's local paths or storage root.
 		for _, file := range files {
-			for _, key := range file.GetPaths() {
-				if err := importutilv2.ValidateSourceStorageFilePath(key); err != nil {
-					return err
-				}
+			if err := importutilv2.ValidateSourceStorageFilePaths(file.GetPaths()); err != nil {
+				return err
 			}
 		}
 		return nil

@@ -2226,7 +2226,7 @@ func (s *Server) createImportJobFromAck(ctx context.Context, result message.Broa
 
 	// Persist malformed durable input as a Failed job rather than retrying the
 	// same ACK forever. This validation is pure: source reads belong to Pending.
-	sourceErr := importutilv2.ValidateSnapshotImportPlan(files, options, nil)
+	sourceErr := importutilv2.ValidateImportPlan(files, options, nil)
 	timeoutTs, err := importutilv2.GetTimeoutTs(options)
 	if err != nil {
 		if sourceErr == nil && !importutilv2.IsSnapshotSource(options) {

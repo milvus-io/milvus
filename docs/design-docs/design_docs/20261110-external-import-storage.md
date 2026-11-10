@@ -81,8 +81,11 @@ chunk manager, storage config, and encryption context.
 
 ## Design details: execution and recovery
 
-Proxy and DataCoord validate the source options using the existing import
-validation entry points. DataCoord also validates file keys before broadcast.
+Proxy and DataCoord use `ValidateImportSourceRequest` for public options and
+`ValidateImportSourceOptions` for internal options. `ValidateImportFiles` and
+`ValidateImportPlan` check durable sources and delegate snapshot rules to the
+snapshot validators. Source key checks share `ValidateSourceStorageFilePaths`.
+DataCoord also validates file keys before broadcast.
 The existing Import WAL body carries the options. Its ACK callback validates
 the durable source contract before creating a job; a malformed persisted
 contract becomes a failed job instead of an indefinitely retried callback.

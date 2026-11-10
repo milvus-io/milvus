@@ -36,7 +36,7 @@ func ResolveSourceStorage(ctx context.Context, options Options, cm storage.Chunk
 	if source == nil {
 		return cm, config, nil
 	}
-	if err := ValidateSnapshotSourceOptions(options); err != nil {
+	if err := ValidateImportSourceOptions(options); err != nil {
 		return nil, nil, err
 	}
 	if err := ctx.Err(); err != nil {

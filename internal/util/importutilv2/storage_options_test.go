@@ -135,11 +135,11 @@ func TestGetSourceStorageConfigInvalid(t *testing.T) {
 	require.NotContains(t, err.Error(), "SECOND_SECRET")
 }
 
-func TestValidateSourceStorageFilePath(t *testing.T) {
+func TestValidateSourceStorageFilePaths(t *testing.T) {
 	for _, key := range []string{"data.json", "a/../data.json", "a//data.json", "./pk.npy", "insert_log/data.parquet", "a/b:c.json"} {
-		require.NoError(t, ValidateSourceStorageFilePath(key), key)
+		require.NoError(t, ValidateSourceStorageFilePaths([]string{key}), key)
 	}
 	for _, key := range []string{"", " ", "/data.json", "s3://bucket/data.json", "https://host/data.json", "s3:bucket/data.json", `C:\data.json`} {
-		require.ErrorIs(t, ValidateSourceStorageFilePath(key), merr.ErrParameterInvalid, key)
+		require.ErrorIs(t, ValidateSourceStorageFilePaths([]string{"valid.json", key}), merr.ErrParameterInvalid, key)
 	}
 }

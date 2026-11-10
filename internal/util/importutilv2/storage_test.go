@@ -105,8 +105,10 @@ func TestExternalImportReader(t *testing.T) {
 				&commonpb.KeyValuePair{Key: StorageRegion, Value: "us-east-1"})
 			// No mock expectations: any access to destination storage fails the test.
 			cm := mocks.NewChunkManager(t)
-			destination := &indexpb.StorageConfig{BucketName: "destination", RootPath: "milvus",
-				AccessKeyID: "destination-key", SecretAccessKey: "destination-secret", UseIAM: true}
+			destination := &indexpb.StorageConfig{
+				BucketName: "destination", RootPath: "milvus",
+				AccessKeyID: "destination-key", SecretAccessKey: "destination-secret", UseIAM: true,
+			}
 			before := proto.Clone(destination)
 			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},

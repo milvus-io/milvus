@@ -23,7 +23,6 @@ import (
 
 	"github.com/minio/minio-go/v7/pkg/s3utils"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -42,7 +41,7 @@ const (
 // GetSourceStorageConfig returns nil when no source storage is specified.
 // External storage is self-contained: never inherit the destination's credentials,
 // IAM settings, or root path when connecting to a user-supplied endpoint.
-func GetSourceStorageConfig(options []*commonpb.KeyValuePair) (*indexpb.StorageConfig, error) {
+func GetSourceStorageConfig(options Options) (*indexpb.StorageConfig, error) {
 	values := make(map[string]string)
 	for _, option := range options {
 		key := option.GetKey()
@@ -117,7 +116,7 @@ func GetSourceStorageConfig(options []*commonpb.KeyValuePair) (*indexpb.StorageC
 
 // HasSourceStorageOptions reports whether the request supplies an ordinary-file
 // import source. Snapshot imports use their existing external_spec contract.
-func HasSourceStorageOptions(options []*commonpb.KeyValuePair) bool {
+func HasSourceStorageOptions(options Options) bool {
 	for _, option := range options {
 		if IsSourceStorageOption(option.GetKey()) {
 			return true
@@ -132,9 +131,18 @@ func IsSourceStorageOption(key string) bool {
 	return strings.HasPrefix(strings.ToLower(key), "storage.")
 }
 
-// ValidateSourceStorageFilePath preserves literal object keys, including dot
+// ValidateSourceStorageFilePaths preserves literal object keys, including dot
 // components and repeated separators. No filesystem normalization is applied.
-func ValidateSourceStorageFilePath(key string) error {
+func ValidateSourceStorageFilePaths(paths []string) error {
+	for _, key := range paths {
+		if err := validateSourceStorageFilePath(key); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateSourceStorageFilePath(key string) error {
 	if strings.TrimSpace(key) == "" || strings.HasPrefix(key, "/") || strings.Contains(key, "://") {
 		return merr.WrapErrParameterInvalidMsg("external import files must be relative object keys without a URI scheme")
 	}

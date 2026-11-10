@@ -43,6 +43,23 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
+func TestImportTaskPreExecuteRejectsInvalidSourceOptions(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		options importutilv2.Options
+		want    error
+	}{
+		{"incomplete storage", importutilv2.Options{{Key: importutilv2.StorageBucket, Value: "source-bucket"}}, merr.ErrParameterInvalid},
+		{"reserved routing", importutilv2.Options{{Key: importutilv2.SnapshotSourceURI, Value: "s3://source/metadata.json"}}, merr.ErrImportFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// No metadata dependencies: reject invalid source options first.
+			task := &ImportTask{req: &internalpb.ImportRequest{Options: tc.options}}
+			require.ErrorIs(t, task.PreExecute(context.Background()), tc.want)
+		})
+	}
+}
+
 func TestImportTaskPreExecuteTargetPartitions(t *testing.T) {
 	paramtable.Init()
 	for _, tc := range []struct {
@@ -101,7 +118,7 @@ func TestImportTaskPreExecuteTargetPartitions(t *testing.T) {
 			if tc.failAt == "mapping" {
 				// Exercise propagation at the routing boundary independently of
 				// the earlier public-option validator, which has its own tests.
-				validation := mockey.Mock(importutilv2.ValidateSnapshotSourceRequest).Return(nil).Build()
+				validation := mockey.Mock(importutilv2.ValidateImportSourceRequest).Return(nil).Build()
 				defer validation.UnPatch()
 				mapping := mockey.Mock(importutilv2.GetPartitionMapping).Return(nil, errFor("mapping")).Build()
 				defer mapping.UnPatch()
