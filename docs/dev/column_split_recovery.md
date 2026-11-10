@@ -1,5 +1,13 @@
 # V3 segment columnSplit：重启恢复问题与修复
 
+> master 清理说明（#55289）：以下是原修复的历史验证记录。旧
+> `internal/flushcommon/pipeline` 和其 `initMetaCache` 已随无调用的
+> flowgraph 删除，相关旧路径测试不再适用于当前 master；3.0 的记录不变。
+> 当前 master 仍保留 `storagecommon`、`storagev2/packed`、
+> `flushcommon/metacache` 以及 `streamingnode/server/wal/vchannel/segment`
+> 的列组恢复实现和测试，包括新 SN 的 Stats/manifest 恢复后续写路径。
+> 删除旧管线不表示可以移除这些历史数据兼容能力。
+
 ## 分支与结论
 
 分析及实现基线：

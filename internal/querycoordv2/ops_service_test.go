@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
-	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -64,7 +63,6 @@ type OpsServiceSuite struct {
 	targetObserver *observers.TargetObserver
 	cluster        *session.MockCluster
 	nodeMgr        *session.NodeManager
-	jobScheduler   *job.Scheduler
 	taskScheduler  *task.MockScheduler
 	balancer       balance.Balance
 	proxyManager   *proxyutil.MockProxyClientManager
@@ -111,12 +109,10 @@ func (suite *OpsServiceSuite) SetupTest() {
 		suite.nodeMgr,
 	)
 	suite.cluster = session.NewMockCluster(suite.T())
-	suite.jobScheduler = job.NewScheduler()
 	suite.taskScheduler = task.NewMockScheduler(suite.T())
 	suite.taskScheduler.EXPECT().GetSegmentTaskDeltaSnapshot(mock.Anything, mock.Anything).Return(task.NewSegmentTaskDeltaSnapshot(nil, nil)).Maybe()
 	suite.taskScheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
 
-	suite.jobScheduler.Start()
 	assign.InitGlobalAssignPolicyFactory(suite.taskScheduler, suite.nodeMgr, suite.dist, suite.meta, suite.targetMgr)
 	suite.balancer = balance.NewScoreBasedBalancer(
 		suite.taskScheduler,
@@ -143,7 +139,6 @@ func (suite *OpsServiceSuite) SetupTest() {
 		targetObserver:      suite.targetObserver,
 		nodeMgr:             suite.nodeMgr,
 		cluster:             suite.cluster,
-		jobScheduler:        suite.jobScheduler,
 		taskScheduler:       suite.taskScheduler,
 		distController:      suite.distController,
 		ctx:                 context.Background(),
