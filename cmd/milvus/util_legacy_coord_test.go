@@ -2,11 +2,11 @@ package milvus
 
 import (
 	"context"
-	"errors"
 	"path"
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
@@ -128,9 +128,10 @@ func TestSessionCleanupLegacyPreservesChangedRevision(t *testing.T) {
 				require.Len(t, targets, len(suffixes))
 				key := path.Join(prefix, role)
 				value := sessionCleanupJSON(7)
-				if change == "new owner" {
+				switch change {
+				case "new owner":
 					value = sessionCleanupJSON(9)
-				} else if change == "delete and recreate" {
+				case "delete and recreate":
 					_, err = cli.Delete(ctx, key)
 					require.NoError(t, err)
 				}
