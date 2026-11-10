@@ -35,7 +35,7 @@
 #include "log/Log.h"
 #include "query/PlanImpl.h"
 #include "segcore/SegmentInterface.h"
-#include "storage/ThreadPools.h"
+#include "futures/Executor.h"
 
 namespace milvus::segcore {
 
@@ -225,8 +225,7 @@ ReduceHelper::FillPrimaryKey() {
     }
     if (fanout) {
         // Isolate search fanout from background field and index loading.
-        auto& pool = ThreadPools::GetThreadPool(
-            milvus::ThreadPoolPriority::SEARCH_FANOUT);
+        auto* executor = milvus::futures::getSearchFanoutCPUExecutor();
         std::vector<std::future<void>> futures;
         futures.reserve(num_segments_);
         // Drain accepted tasks even if a later submission throws.
@@ -241,12 +240,14 @@ ReduceHelper::FillPrimaryKey() {
             }
         });
         for (auto& search_result : search_results_) {
-            auto future = pool.Submit([this, search_result] {
-                auto segment =
-                    static_cast<SegmentInterface*>(search_result->segment_);
-                segment->FillPrimaryKeys(plan_, *search_result, op_ctx_);
-            });
-            futures.emplace_back(std::move(future));
+            auto task = std::make_shared<std::packaged_task<void()>>(
+                [this, search_result] {
+                    auto segment =
+                        static_cast<SegmentInterface*>(search_result->segment_);
+                    segment->FillPrimaryKeys(plan_, *search_result, op_ctx_);
+                });
+            futures.emplace_back(task->get_future());
+            executor->add([task] { (*task)(); });
         }
         for (auto& future : futures) {
             future.get();
@@ -476,8 +477,7 @@ ReduceHelper::RefineDistances() {
     auto dense_blob = static_cast<const char*>(placeholder.get_blob());
 
     if (num_segments_ > 1) {
-        auto& pool = ThreadPools::GetThreadPool(
-            milvus::ThreadPoolPriority::SEARCH_FANOUT);
+        auto* executor = milvus::futures::getSearchFanoutCPUExecutor();
         std::vector<std::future<void>> futures;
         futures.reserve(num_segments_);
         // Drain accepted tasks even if a later submission throws.
@@ -495,23 +495,25 @@ ReduceHelper::RefineDistances() {
             if (!IsSearchResultRefineEnabled(search_result)) {
                 continue;
             }
-            auto future = pool.Submit([this,
-                                       search_result,
-                                       field_id,
-                                       is_cosine,
-                                       is_negated,
-                                       dim,
-                                       element_size,
-                                       dense_blob] {
-                RefineOneSegment(search_result,
-                                 field_id,
-                                 is_cosine,
-                                 is_negated,
-                                 dim,
-                                 element_size,
-                                 dense_blob);
-            });
-            futures.emplace_back(std::move(future));
+            auto task =
+                std::make_shared<std::packaged_task<void()>>([this,
+                                                              search_result,
+                                                              field_id,
+                                                              is_cosine,
+                                                              is_negated,
+                                                              dim,
+                                                              element_size,
+                                                              dense_blob] {
+                    RefineOneSegment(search_result,
+                                     field_id,
+                                     is_cosine,
+                                     is_negated,
+                                     dim,
+                                     element_size,
+                                     dense_blob);
+                });
+            futures.emplace_back(task->get_future());
+            executor->add([task] { (*task)(); });
         }
         for (auto& future : futures) {
             future.get();
