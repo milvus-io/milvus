@@ -54,12 +54,14 @@
 #include "filemanager/InputStream.h"
 #include "filemanager/OutputStream.h"
 #include "gtest/gtest.h"
+#include "index/IndexStats.h"
 #include "index/Meta.h"
 #include "knowhere/binaryset.h"
 #include "knowhere/index/index_factory.h"
 #include "knowhere/operands.h"
 #include "knowhere/sparse_utils.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "pb/cgo_msg.pb.h"
 #include "pb/common.pb.h"
 #include "pb/index_coord.pb.h"
 #include "storage/ChunkManager.h"
@@ -155,6 +157,121 @@ CollectIdMapMmapDirectories(const std::string& root_path,
 }
 
 }  // namespace
+
+TEST_F(DiskAnnFileManagerTest, AddFileMetaReportsStreamedIndexSize) {
+    FieldDataMeta field_meta = {1, 2, 3, 100};
+    IndexMeta index_meta = {3, 100, 1000, 1, "index"};
+    auto file_manager = std::make_shared<DiskFileManagerImpl>(
+        FileManagerContext(field_meta, index_meta, cm_, fs_));
+
+    const auto local_path =
+        file_manager->GetLocalIndexObjectPrefix() + "streamed_index";
+    const std::string data(4096, 'x');
+    auto output = file_manager->OpenOutputStream(local_path);
+    output->Write(data.data(), data.size());
+    const auto file_size = output->Tell();
+    output->Close();
+    ASSERT_EQ(file_size, data.size());
+    ASSERT_TRUE(file_manager->AddFileMeta({local_path, file_size}));
+
+    const auto& files = file_manager->GetRemotePathsToFileSize();
+    ASSERT_EQ(files.size(), 1);
+    EXPECT_EQ(files.begin()->second, data.size());
+    EXPECT_EQ(cm_->Size(files.begin()->first), data.size());
+    EXPECT_EQ(file_manager->GetAddedTotalFileSize(), data.size());
+
+    auto stats = milvus::index::IndexStats::NewFromSizeMap(
+        file_manager->GetAddedTotalFileSize(), files);
+    EXPECT_EQ(stats->GetMemSize(), data.size());
+    EXPECT_EQ(stats->GetSerializedSize(), data.size());
+
+    milvus::ProtoLayout layout;
+    stats->SerializeAt(&layout);
+    const auto* c_layout = reinterpret_cast<const CProto*>(&layout);
+    milvus::proto::cgo::IndexStats serialized_stats;
+    ASSERT_TRUE(serialized_stats.ParseFromArray(c_layout->proto_blob,
+                                                c_layout->proto_size));
+    EXPECT_EQ(serialized_stats.mem_size(), data.size());
+    ASSERT_EQ(serialized_stats.serialized_index_infos_size(), 1);
+    EXPECT_EQ(serialized_stats.serialized_index_infos(0).file_size(),
+              data.size());
+    cm_->Remove(files.begin()->first);
+}
+
+TEST_F(DiskAnnFileManagerTest, AddFileMetaReplacesSizeWithoutDoubleCounting) {
+    FieldDataMeta field_meta = {1, 2, 3, 100};
+    IndexMeta index_meta = {3, 100, 1000, 1, "index"};
+    DiskFileManagerImpl file_manager(
+        FileManagerContext(field_meta, index_meta, cm_, fs_));
+
+    const struct {
+        const char* file_name;
+        size_t file_size;
+        size_t expected_total;
+    } registrations[] = {
+        {"empty", 0, 0},
+        {"first", 64, 64},
+        {"second", 32, 96},
+        {"first", 64, 96},
+        {"first", 96, 128},
+        {"first", 16, 48},
+        {"second", 0, 16},
+        {"second", 8, 24},
+        {"empty", 0, 24},
+    };
+    EXPECT_EQ(file_manager.GetAddedTotalFileSize(), 0);
+    for (const auto& registration : registrations) {
+        SCOPED_TRACE(registration.file_name);
+        ASSERT_TRUE(file_manager.AddFileMeta(
+            {registration.file_name, registration.file_size}));
+        EXPECT_EQ(file_manager.GetAddedTotalFileSize(),
+                  registration.expected_total);
+        const auto remote_path = file_manager.GetRemoteIndexObjectPrefix() +
+                                 "/" + registration.file_name;
+        EXPECT_EQ(file_manager.GetRemotePathsToFileSize().at(remote_path),
+                  registration.file_size);
+    }
+    EXPECT_EQ(file_manager.GetRemotePathsToFileSize().size(), 3);
+}
+
+TEST_F(DiskAnnFileManagerTest, AddFileMetaCountsAlongsideSlicedUploads) {
+    FieldDataMeta field_meta = {1, 2, 3, 100};
+    IndexMeta index_meta = {3, 100, 1000, 1, "index"};
+    auto file_manager = std::make_shared<DiskFileManagerImpl>(
+        FileManagerContext(field_meta, index_meta, cm_, fs_));
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    const auto legacy_path =
+        file_manager->GetLocalIndexObjectPrefix() + "legacy_index";
+    std::vector<uint8_t> legacy_data(1024, 42);
+    local_chunk_manager->CreateFile(legacy_path);
+    local_chunk_manager->Write(
+        legacy_path, legacy_data.data(), legacy_data.size());
+    ASSERT_TRUE(file_manager->AddFile(legacy_path));
+    ASSERT_EQ(file_manager->GetAddedTotalFileSize(), legacy_data.size());
+
+    const auto streamed_path =
+        file_manager->GetLocalIndexObjectPrefix() + "streamed_index";
+    const std::string streamed_data(4096, 'x');
+    auto output = file_manager->OpenOutputStream(streamed_path);
+    output->Write(streamed_data.data(), streamed_data.size());
+    const auto streamed_size = output->Tell();
+    output->Close();
+    ASSERT_TRUE(file_manager->AddFileMeta({streamed_path, streamed_size}));
+    ASSERT_TRUE(file_manager->AddFileMeta({streamed_path, streamed_size}));
+    EXPECT_EQ(file_manager->GetAddedTotalFileSize(),
+              legacy_data.size() + streamed_data.size());
+
+    auto empty_output = file_manager->OpenOutputStream(streamed_path);
+    empty_output->Close();
+    ASSERT_TRUE(file_manager->AddFileMeta({streamed_path, 0}));
+    EXPECT_EQ(file_manager->GetAddedTotalFileSize(), legacy_data.size());
+    const auto& files = file_manager->GetRemotePathsToFileSize();
+    ASSERT_EQ(files.size(), 2);
+    for (const auto& [path, size] : files) {
+        cm_->Remove(path);
+    }
+}
 
 TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
     auto lcm = LocalChunkManagerSingleton::GetInstance().GetChunkManager();
