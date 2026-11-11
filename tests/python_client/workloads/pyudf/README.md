@@ -9,17 +9,17 @@ in `base/client_v2_pyudf_base.py`; tests do not import another testcase module.
 
 Use the repository's Python 3.12 environment and suite requirements. Run each
 suite from its own directory so its `base`, `utils` and `conftest.py` resolve
-correctly. The optional plugin in `tests/pyudf_regression_plugin.py` redacts
-credential-bearing log lines and prints recorded result properties.
+correctly. Use pytest's standard `--junitxml` option when result properties
+need to be retained in a report.
 
 ```sh
 # From tests/python_client, with the repository environment activated:
 PYTHONPATH=..:. python -m pytest milvus_client/test_milvus_client_pyudf*.py \
-  --tags L0 L1 L2 -p pyudf_regression_plugin --collect-only
+  --tags L0 L1 L2 --collect-only
 
 # From tests/restful_client_v2:
 PYTHONPATH=..:. python -m pytest testcases/test_pyudf.py \
-  --tags L0 L1 L2 -p pyudf_regression_plugin --collect-only
+  --tags L0 L1 L2 --collect-only
 ```
 
 For execution, remove `--collect-only` and supply the suite's Milvus and object

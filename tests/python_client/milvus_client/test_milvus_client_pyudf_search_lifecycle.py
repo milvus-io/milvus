@@ -468,32 +468,9 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index,mmap,kind,policy,priority", INDEX_TUPLES)
     def test_pyudf_index_mmap_warmup_paths(
-        self, tmp_path, minio_host, minio_bucket, record_property, request, index, mmap, kind, policy, priority
+        self, tmp_path, minio_host, minio_bucket, record_property, index, mmap, kind, policy, priority
     ):
         """Verify indexed PyUDF scores and retrieved vectors across three cold/hot reloads."""
-        observation_seconds = request.config.getoption("--pyudf-mmap-observe-seconds", default=0)
-        assert 0 <= observation_seconds <= 10
-
-        def observe_phase(phase, reload_id, collection, segments):
-            if not observation_seconds:
-                return
-            started = time.time()
-            time.sleep(observation_seconds)
-            record_property(
-                f"index_mapping_{reload_id}_{phase}",
-                json.dumps(
-                    {
-                        "phase": phase,
-                        "reload": reload_id,
-                        "collection": collection,
-                        "segments": segments,
-                        "vector_field_id": 102,
-                        "started_unix": started,
-                        "finished_unix": time.time(),
-                    }
-                ),
-            )
-
         rows = [{"id": i, "ts": i * 3 + 7, "vector": [i % 97 / 97, i // 97 / 103]} for i in range(10000)]
         with self._pyudf_test_environment(tmp_path, minio_host, minio_bucket, MODULE, rows=rows, index_type=index) as (
             client,
@@ -565,7 +542,6 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
                     for segment in client.list_loaded_segments(name)
                 ]
                 assert sum(segment["rows"] for segment in segments) == 10000, segments
-                observe_phase("pre_query", reload_id, name, segments)
                 first_query = time.time()
                 for temperature in ("cold", "hot"):
                     for query in ([0.13, 0.41], [0.7, 0.2], [0.99, 0.99]):
@@ -573,8 +549,8 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
                             "data": [query],
                             "anns_field": "vector",
                             "limit": 64,
-                            # Request raw vectors within the observed window so
-                            # disabled field warmup has a real demand-read control.
+                            # Request raw vectors so disabled field warmup
+                            # also exercises demand reads.
                             "output_fields": ["ts", "vector"],
                             "search_params": {"metric_type": "L2", "params": {"ef": 128, "nprobe": 128}},
                             "filter": "ts >= 7",
@@ -594,7 +570,6 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
                         observations.append(
                             {"reload": reload_id, "temperature": temperature, "query": query, "candidate_ids": expected}
                         )
-                observe_phase("post_query", reload_id, name, segments)
                 record_property(
                     f"index_reload_{reload_id}",
                     json.dumps(
