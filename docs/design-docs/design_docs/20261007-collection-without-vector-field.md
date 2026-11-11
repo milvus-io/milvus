@@ -140,12 +140,25 @@ schema has a vector field, the state of a loaded collection that gained a
 vector field and has no index yet; they are not adapted and the conversion
 is not supported on them.
 
+Rolling upgrade. A collection without a vector field can only be created
+through a Proxy that has this change: the Proxy before it rejects the schema
+itself (`schema does not contain vector field`). The Proxy is the last role
+to be upgraded, so by the time such a collection can exist every QueryNode
+and DataNode already has the change, and a conversion never runs against an
+older node. If a Proxy were upgraded before the QueryNodes, the one
+difference on an older QueryNode would be the text of the search error on a
+vector field added to a collection loaded with no index (a segcore assertion
+message in place of "not loaded"); this was read from the code and not run.
+The upgrade from a deployment that predates QueryView is the subject of
+#52977, whose design leaves the migration of the earlier load metadata open;
+it does not involve collections without a vector field, which cannot exist
+before the upgrade.
+
 Not covered by the conversion work:
 
 - Backfill. A function field (BM25, MinHash) added to a collection without a
   vector field needs its output computed for existing rows; adding one
   requires StorageV3 and was not exercised.
-- A conversion while roles of different versions are running.
 
 **Clients**
 
@@ -719,7 +732,7 @@ that drops a scalar field shows the same.
 ## 8. Follow-ups
 
 - The items listed as not covered under "Conversion" in Section 2: backfill
-  for function fields and mixed version runs.
+  for function fields.
 - The loader's memory estimate is about 3× too low for narrow fixed-width
   rows. The QueryNode uses it for admission before loading a segment; the
   formula adds up the `MemorySize` of each field's binlogs and multiplies by
