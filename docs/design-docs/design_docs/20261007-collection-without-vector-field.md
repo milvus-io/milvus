@@ -75,7 +75,7 @@ cap do not change during the life of a collection.
 | pymilvus ORM (Object-Relational Mapping) `Collection` | rejected on the client by `check_schema` (`No vector field is found.`) | none: the ORM interface is deprecated and stays as it is; use `MilvusClient` |
 | Java SDK, v1 and v2 | sent to the server unchanged (read from the source, not run) | none |
 | Go SDK | works | none |
-| Node SDK | rejected on the client by `checkCollectionFieldsWithOptions` | the check is removed in a milvus-sdk-node PR |
+| Node SDK | rejected on the client by `checkCollectionFieldsWithOptions` | the check is removed in milvus-io/milvus-sdk-node#626 |
 | RESTful v2 | works | done in the implementation PR (insert check, one search error) |
 | RESTful v1 | has only the quick create by dimension | none |
 
@@ -92,6 +92,21 @@ collection:
 `search` and `hybrid_search` reach the server and get the error above. The
 V1 fallback of pymilvus `search_iterator` fails on the client with its own
 message, `there should be at least one vector field in milvus collection`.
+The Node SDK `search` fails on the client as well, with `Target anns field
+not found, please check your search parameters.`
+
+**Tools and replication**
+
+The following comes from reading the source of each tool; none of it was
+run against a collection without a vector field.
+
+| Tool | Result | Notes |
+|---|---|---|
+| milvus-backup (`2ec7cbd`) | no change needed | a collection with no index is handled (`ListIndex` maps `IndexNotExist` to an empty list); the schema is copied field by field and sent to the server unchecked; `--rebuild_index` and `--use_auto_index` only process indexes that were backed up; data is restored by directory; restore does not load. Restore relies on the server importing backup binlogs into such a collection, which has not been tested |
+| Replication built into Milvus (same version on both sides) | works | the secondary applies a replicated `CreateCollection` in the broadcast ack callback, below the Proxy check and RootCoord `validateSchema`. `common.enableCollectionWithoutVector=false` on the secondary therefore does not stop a replicated collection without a vector field: the switch applies to create requests received by that cluster, and a secondary mirrors its primary |
+| Replication built into Milvus, older secondary | unknown | the old secondary would not reject the create message at the metadata layer; whether its QueryNode, DataNode and index code work with such a collection has not been examined. Replicating to an older version is not supported by this design |
+| milvus-cdc (standalone tool, `3a4af3b`, built against 2.5 packages) | fails on a target that rejects the schema | it calls the target's public `CreateCollection`. A 2.5 or 2.6 target, or a target with the switch off, rejects it; the tool retries for about two days (17,280 attempts), during which the other collection events of that source and target pair wait, and then pauses the task. A task that lists its collections by name does not touch other collections |
+| Attu | not examined | closed source since 2.6.0; the public repository has no code. Its server uses the Node SDK, so creating such a collection from Attu needs a Node SDK release with the change above |
 
 **Config**
 
