@@ -1179,7 +1179,7 @@ grpc:
     compressionConcurrency: 2
     dialTimeout: 200
     keepAliveTime: 10000
-    keepAliveTimeout: 20000
+    keepAliveTimeout: 2000
     maxMaxAttempts: 10
     initialBackoff: 0.2
     maxBackoff: 10
