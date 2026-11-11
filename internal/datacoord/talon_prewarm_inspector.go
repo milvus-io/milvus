@@ -24,7 +24,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
-// TalonPrewarmRequest carries the immutable object identity returned by stat.
+// TalonPrewarmRequest carries an object size and an optional version.
+// An empty version selects Talon unchecked-version matching.
 type TalonPrewarmRequest struct {
 	URI     string
 	Size    uint64

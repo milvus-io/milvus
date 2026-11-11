@@ -327,3 +327,22 @@ func freeCSegmentWriterConfig(cConfig *C.LoonSegmentWriterConfig) {
 
 	C.free(unsafe.Pointer(cConfig))
 }
+
+func (f *SegmentOutput) prewarmObjects() ([]PrewarmObject, []string, error) {
+	if f == nil {
+		return nil, nil, nil
+	}
+	objects, missing, err := columnGroupPrewarmObjects(f.cOutput.column_groups)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, file := range unsafe.Slice(f.cOutput.lob_files, int(f.cOutput.num_lob_files)) {
+		key := C.GoString(file.path)
+		if file.file_size_bytes < 0 {
+			missing = append(missing, key)
+		} else {
+			objects = append(objects, PrewarmObject{Path: key, Size: uint64(file.file_size_bytes)})
+		}
+	}
+	return objects, missing, nil
+}

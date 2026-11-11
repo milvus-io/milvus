@@ -53,6 +53,7 @@ func getRetryLimit() C.uint32_t {
 
 // DeltaLogEntry represents a delta log to be added to the manifest
 type DeltaLogEntry struct {
+	FileSize   int64  // Known on-disk size; non-positive means unavailable.
 	Path       string // Full path to the deltalog file
 	NumEntries int64  // Number of entries in the deltalog
 }
@@ -278,9 +279,10 @@ func GetDeltaLogsFromManifestWithExtfs(
 
 // StatEntry represents a stat entry to be added to the manifest.
 type StatEntry struct {
-	Key      string            // Manifest stat key, e.g. "bloom_filter.100"
-	Files    []string          // Relative file paths under manifest base path
-	Metadata map[string]string // Optional key-value metadata
+	FileSizes map[string]uint64 // Known on-disk sizes by complete key, for prewarming.
+	Key       string            // Manifest stat key, e.g. "bloom_filter.100"
+	Files     []string          // Relative file paths under manifest base path
+	Metadata  map[string]string // Optional key-value metadata
 }
 
 // AddStatsToManifest adds stats to an existing manifest and returns the new manifest path.

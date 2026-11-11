@@ -462,6 +462,7 @@ func transactionIndexInfos(txn C.LoonTransactionHandle, manifestPath string) ([]
 // Marker changes are delivered only after a successful commit (or a proven no-op).
 type ManifestUpdateResult struct {
 	ManifestPath string
+	ManifestSize int64
 	HasIndexes   *bool
 }
 
@@ -508,7 +509,7 @@ func SubmitManifestUpdates(ctx context.Context, io *ManifestIOContext, baseManif
 			return
 		}
 		if !changed {
-			finish(ManifestUpdateResult{baseManifestPath, hasIndexes}, nil)
+			finish(ManifestUpdateResult{ManifestPath: baseManifestPath, HasIndexes: hasIndexes}, nil)
 			return
 		}
 		// Keep the original admission slot and transaction until commit completes.
@@ -520,7 +521,7 @@ func SubmitManifestUpdates(ctx context.Context, io *ManifestIOContext, baseManif
 				return
 			}
 			manifestPath := CommittedManifestPath(baseManifest.BasePath, committed, size, config.GetStorageType())
-			finish(ManifestUpdateResult{manifestPath, hasIndexes}, nil)
+			finish(ManifestUpdateResult{ManifestPath: manifestPath, ManifestSize: size, HasIndexes: hasIndexes}, nil)
 		})
 		if err != nil {
 			finish(ManifestUpdateResult{}, err)
