@@ -43,7 +43,7 @@ Do not select all L3 parameters against one unchanged deployment.
 `workload.py` retains generated vectors, query inputs, candidate baselines and
 wheel digests. Its checker validates IDs, scalar/NULL alignment and transformed
 scores independently of the server. `benchmark.py` measures RPC activity and
-equivalent operations; `stress.py` contains interference and resource-cache
+equivalent operations; `stress.py` contains interference and PyUDF wheel-package
 scenarios. `runner.py` is the common command-line entry point.
 
 The caller owns an isolated cluster with two distinct Proxy endpoints, object
@@ -85,10 +85,8 @@ collection. Already in-flight requests drain within their request timeouts;
 no later measurement window starts after the stop is observed. Standalone pytest
 benchmarks use `STOP` in their evidence directory.
 
-Additional phases are `performance`, `interference`, and `cache`. Cache steps
-are explicitly selected with `--cache-phase baseline|cold|replay|remove|recovery`;
-the caller supplies any intervening restart and verifies internal load/cache
-evidence. Each phase writes separate machine-readable artifacts and propagates
+Additional phases are `performance`, `interference`, and `package-cache`.
+Each phase writes separate machine-readable artifacts and propagates
 assertion failures to the process exit status. The `cleanup` phase removes the
 extra performance/interference registrations. Retained collections, input wheels
 and evidence remain owned by the caller until final environment cleanup.
@@ -111,6 +109,34 @@ aggregate accounting for multi-worker pools.
 Periodic Jenkins deployment and fault orchestration belong in `test-jobs` and
 are a separate integration step. These workload files alone do not establish
 that a periodic regression has run.
+
+## PyUDF package-cache checks
+
+`package-cache` exercises PyUDF wheel loading, repeated calls and resource
+invalidation. It does **not** test tiered storage or data/index caching. After
+initialization, run the steps in order:
+
+```sh
+python -m workloads.pyudf.runner package-cache --evidence "$EVIDENCE" --package-cache-phase baseline
+python -m workloads.pyudf.runner package-cache --evidence "$EVIDENCE" --package-cache-phase cold
+python -m workloads.pyudf.runner package-cache --evidence "$EVIDENCE" --package-cache-phase replay
+python -m workloads.pyudf.runner package-cache --evidence "$EVIDENCE" --package-cache-phase remove
+python -m workloads.pyudf.runner package-cache --evidence "$EVIDENCE" --package-cache-phase recovery
+```
+
+- `baseline`: verify ordinary/PyUDF searches on both Proxies and audit the rows.
+- `cold`: register 32 new wheel resources and verify their first calls on Proxy 0.
+  This does not assert that OS or storage caches are cold.
+- `replay`: call each resource ten times, checking scores and recording latency.
+- `remove`: remove the registrations and verify that Proxy 0 rejects subsequent
+  calls after resource-snapshot convergence.
+- `recovery`: recheck the original workload resources and retained data.
+
+Results are written to `$EVIDENCE/package-cache/`. `PASS` covers those functional
+assertions only; `cache_hit_verification` remains `NOT_MEASURED`. Cache hits,
+eviction and memory reclamation require separate server evidence. Any intervening
+restart and evidence collection are owned by the scenario driver. Wheel objects
+remain in object storage after resource removal.
 
 ## Migration checks
 

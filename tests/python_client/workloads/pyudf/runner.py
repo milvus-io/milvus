@@ -228,7 +228,8 @@ def soak(root, duration=7200, drain=300, replay=600):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "phase", choices=("initialize", "soak", "performance", "interference", "cache", "cleanup", "concurrency")
+        "phase",
+        choices=("initialize", "soak", "performance", "interference", "package-cache", "cleanup", "concurrency"),
     )
     parser.add_argument(
         "--evidence",
@@ -239,12 +240,16 @@ def main():
     parser.add_argument("--duration", type=int, default=7200)
     parser.add_argument("--drain", type=int, default=300)
     parser.add_argument("--replay", type=int, default=600)
-    parser.add_argument("--cache-phase", choices=("baseline", "cold", "replay", "remove", "recovery"))
+    parser.add_argument(
+        "--package-cache-phase",
+        choices=("baseline", "cold", "replay", "remove", "recovery"),
+        help="PyUDF wheel loading and resource invalidation step; not a tiered-storage test",
+    )
     args = parser.parse_args()
     if not 0 < args.duration <= 7200 or not 0 <= args.drain <= 300 or not 0 < args.replay <= 600:
         parser.error("Durations exceed the bounded workload limits")
-    if args.phase == "cache" and not args.cache_phase:
-        parser.error("cache requires --cache-phase")
+    if args.phase == "package-cache" and not args.package_cache_phase:
+        parser.error("package-cache requires --package-cache-phase")
     WorkloadConfig.read(args.evidence)
     if args.phase == "initialize":
         initialize(args.evidence)
@@ -253,8 +258,8 @@ def main():
     else:
         from workloads.pyudf import stress
 
-        if args.phase == "cache":
-            stress.cache(args.evidence, args.cache_phase)
+        if args.phase == "package-cache":
+            stress.package_cache(args.evidence, args.package_cache_phase)
         else:
             {
                 "performance": stress.performance,

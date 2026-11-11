@@ -443,22 +443,23 @@ def interference(root):
             client.close()
 
 
-def cache(root, phase):
+def package_cache(root, phase):
+    """Check wheel reuse and resource removal; latency does not prove a cache hit."""
     config = WorkloadConfig.read(root)
     checker, clients = load_checker(root)
-    output = root / "cache"
+    output = root / "package-cache"
     output.mkdir(exist_ok=True)
     try:
         if phase == "baseline":
             wheels = []
         elif phase == "cold":
             assert not (output / "wheels.json").exists()
-            prefix = config.collection + "_cache"
-            cache_source = MODULE.replace(
+            prefix = config.collection + "_package_cache"
+            package_source = MODULE.replace(
                 "def create_udf(context):\n    return UDF(context)",
                 "def create_udf(context):\n    context.logger.warning('PYUDF_R2_FACTORY resource=%s pid=%s', context.resource_name, os.getpid())\n    return UDF(context)",
             )
-            wheels = register(checker, output, prefix, 32, cache_source, config)
+            wheels = register(checker, output, prefix, 32, package_source, config)
         else:
             wheels = json.loads((output / "wheels.json").read_text())
         result = []
@@ -518,6 +519,8 @@ def cache(root, phase):
         save(
             output / f"{phase}.json",
             {
+                "workload": "pyudf_package_cache",
+                "cache_hit_verification": "NOT_MEASURED",
                 "phase": phase,
                 "unix": time.time(),
                 "outcome": "PASS",
