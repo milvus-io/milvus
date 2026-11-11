@@ -19,6 +19,7 @@ package externalspec
 import (
 	"encoding/json"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,6 +30,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec/specutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+// Azure account names are interpolated into Blob/DFS hostnames.
+var azureAccountNamePattern = regexp.MustCompile(`^[a-z0-9]{3,24}$`)
 
 // File formats supported by external collections. Mirror of LOON_FORMAT_*
 // in the C++ FFI layer — keep the two in sync.
@@ -515,6 +519,10 @@ func ValidateExtfsComplete(externalSource string, extfs map[string]string) error
 	}
 	if cp == CloudProviderAzure && scheme != "" && scheme != SchemeAzure {
 		return merr.WrapErrParameterInvalidMsg("extfs.cloud_provider=azure requires scheme=azure, got scheme=%q", scheme)
+	}
+
+	if account := extfs[ExtfsKeyAccessKeyID]; cp == CloudProviderAzure && account != "" && !azureAccountNamePattern.MatchString(account) {
+		return merr.WrapErrParameterInvalidMsg("extfs.access_key_id must be an Azure storage account name containing 3-24 lowercase letters or digits")
 	}
 
 	// Two-form URI contract: Milvus-form (scheme://endpoint/bucket/key) has
