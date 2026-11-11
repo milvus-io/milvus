@@ -159,7 +159,16 @@ func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
 				reduceTasks := c.createChannelReduceTasks(ctx, channels, meta.NilReplica)
 				task.SetReason("dirty channel exists", reduceTasks...)
 				tasks = append(tasks, reduceTasks...)
+				continue
 			}
+			// A delegator that another replica left on the node, for instance one
+			// removed by a replica-number decrease, serves no replica, and
+			// QueryNode rejects the node's replica's Watch until it is gone.
+			// The node's replica removes it.
+			leftovers := lo.Filter(channels, func(ch *meta.DmChannel, _ int) bool { return !ch.BelongsTo(replica) })
+			reduceTasks := c.createChannelReduceTasks(ctx, leftovers, replica)
+			task.SetReason("channel left by another replica", reduceTasks...)
+			tasks = append(tasks, reduceTasks...)
 		}
 	}
 	return tasks
@@ -374,7 +383,7 @@ func nodesGroupKey(nodes []int64) string {
 func (c *ChannelChecker) createChannelReduceTasks(ctx context.Context, channels []*meta.DmChannel, replica *meta.Replica) []task.Task {
 	ret := make([]task.Task, 0, len(channels))
 	for _, ch := range channels {
-		action := task.NewChannelAction(ch.Node, task.ActionTypeReduce, ch.GetChannelName())
+		action := task.NewChannelReduceAction(ch.Node, ch.GetChannelName(), ch.Version)
 		task, err := task.NewChannelTask(ctx, Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), c.ID(), ch.GetCollectionID(), replica, action)
 		if err != nil {
 			mlog.Warn(ctx, "create channel reduce task failed",

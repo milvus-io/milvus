@@ -418,6 +418,11 @@ message UnsubDmChannelRequest {
     int64 nodeID = 2;
     int64 collectionID = 3;
     string channel_name = 4;
+    // Version of the delegator the coordinator planned to unsubscribe, as it
+    // was reported in the data distribution. A delegator with a newer version
+    // was watched after the plan was made and is kept. 0 unsubscribes any
+    // delegator.
+    int64 version = 5;
 }
 
 message SegmentLoadInfo {
@@ -772,6 +777,10 @@ message ChannelVersionInfo {
     string channel = 1;
     int64 collection = 2;
     int64 version = 3;
+    // Replica the delegator was created for. A delegator left on a node by
+    // another replica keeps routing to that replica's workers. 0 means the
+    // QueryNode does not report it.
+    int64 replicaID = 4;
 }
 
 enum LoadStatus {

@@ -286,6 +286,7 @@ func (dh *distHandler) updateChannelsDistribution(ctx context.Context, resp *que
 			VchannelInfo: vChannelInfo,
 			Node:         resp.NodeID,
 			Version:      delegatorVersion,
+			ReplicaID:    channel.GetReplicaID(),
 			View: &meta.LeaderView{
 				ID:                     resp.NodeID,
 				CollectionID:           collectionID,
