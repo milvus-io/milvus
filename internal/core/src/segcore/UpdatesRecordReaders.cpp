@@ -254,6 +254,49 @@ ValueReader::ReadOffsets(const std::vector<int64_t>& offsets) const {
         binding_->field_id, offsets, binding_->query_ts);
 }
 
+std::unique_ptr<proto::schema::FieldData>
+ValueReader::ReadOutput(const int64_t* offsets,
+                        int64_t count,
+                        bool nullable) const {
+    RequireReaderInput(count >= 0 && (count == 0 || offsets != nullptr),
+                       "Invalid output offsets");
+    std::vector<int64_t> rows;
+    rows.reserve(count);
+    for (int64_t i = 0; i < count; ++i) {
+        // Search padding uses INVALID_SEG_OFFSET; preserve its output position.
+        if (offsets[i] != -1) {
+            rows.push_back(offsets[i]);
+        }
+    }
+    auto values = ReadOffsets(rows);
+    auto output = std::make_unique<proto::schema::FieldData>();
+    output->set_field_id(binding_->field_id);
+    output->set_type(static_cast<proto::schema::DataType>(ValueType()));
+    auto* scalars = output->mutable_scalars();
+    if (ValueType() == DataType::INT64) {
+        scalars->mutable_long_data();
+    } else {
+        scalars->mutable_string_data();
+    }
+    size_t next = 0;
+    for (int64_t i = 0; i < count; ++i) {
+        auto value = offsets[i] == -1 ? nullptr : values[next++];
+        const bool valid =
+            value && !std::holds_alternative<std::monostate>(*value);
+        if (nullable) {
+            output->add_valid_data(valid);
+        }
+        if (ValueType() == DataType::INT64) {
+            scalars->mutable_long_data()->add_data(
+                valid ? std::get<int64_t>(*value) : 0);
+        } else {
+            scalars->mutable_string_data()->add_data(
+                valid ? std::get<std::string>(*value) : "");
+        }
+    }
+    return output;
+}
+
 UpdateReaders
 UpdatesRecord::CreateReaders(int64_t field_id, uint64_t query_ts) const {
     auto binding = std::make_shared<const detail::UpdateReadBinding>(

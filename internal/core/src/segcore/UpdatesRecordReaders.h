@@ -17,6 +17,7 @@
 #pragma once
 
 #include <utility>
+#include "pb/schema.pb.h"
 
 #include "index/contracts/query/IIndexReaderBase.h"
 #include "index/contracts/query/INullReader.h"
@@ -89,6 +90,8 @@ class ValueReader : public index::IIndexReaderBase {
     Scan(int64_t begin_offset, size_t count) const;
     std::vector<std::shared_ptr<const UpdateValue>>
     ReadOffsets(const std::vector<int64_t>& offsets) const;
+    std::unique_ptr<proto::schema::FieldData>
+    ReadOutput(const int64_t* offsets, int64_t count, bool nullable) const;
 
  protected:
     explicit ValueReader(

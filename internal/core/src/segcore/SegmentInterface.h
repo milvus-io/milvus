@@ -881,7 +881,8 @@ class SegmentInternalInterface : public SegmentInterface {
         const query::RetrievePlan* plan,
         const std::unique_ptr<proto::segcore::RetrieveResults>& results,
         RetrieveResult& retrieveResult,
-        milvus::OpContext* op_ctx) const;
+        milvus::OpContext* op_ctx,
+        std::optional<Timestamp> query_timestamp = std::nullopt) const;
 
     void
     FillTargetEntry(
@@ -892,7 +893,8 @@ class SegmentInternalInterface : public SegmentInterface {
         int64_t size,
         bool ignore_non_pk,
         bool fill_ids,
-        milvus::OpContext* op_ctx = nullptr) const;
+        milvus::OpContext* op_ctx = nullptr,
+        std::optional<Timestamp> query_timestamp = std::nullopt) const;
 
     // return whether field mmap or not
     virtual bool
@@ -1061,7 +1063,8 @@ BulkSubscriptWithSnapshot(
     const milvus::FieldMeta& field_meta,
     const int64_t* seg_offsets,
     int64_t count,
-    const std::vector<std::string>* dynamic_field_names = nullptr);
+    const std::vector<std::string>* dynamic_field_names = nullptr,
+    std::optional<Timestamp> query_timestamp = std::nullopt);
 
 }  // namespace milvus::segcore
 

@@ -49,7 +49,7 @@ class SealedUpdatesRecord {
           const std::vector<UpdateAssignment>& assignments,
           OpContext* op_ctx = nullptr);
 
-    // Call before starting queries; output fill continues to read base values.
+    // Call before starting queries to enable versioned filtering and output fill.
     void
     EnableExprEvaluation();
 

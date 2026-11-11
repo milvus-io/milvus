@@ -13,6 +13,7 @@
 #include "index/scalar/sort/SortedMembership.h"
 #include "ChunkedSegmentSealedImpl.h"
 #include "segcore/UpdatesRecord.h"
+#include "segcore/UpdatesRecordReaders.h"
 #include "segcore/default_fs.h"
 
 #include <cxxabi.h>
@@ -1706,7 +1707,16 @@ BulkSubscriptWithSnapshot(
     const FieldMeta& field_meta,
     const int64_t* seg_offsets,
     int64_t count,
-    const std::vector<std::string>* dynamic_field_names) {
+    const std::vector<std::string>* dynamic_field_names,
+    std::optional<Timestamp> query_timestamp) {
+    if (auto updates = segment->GetExperimentalUpdates();
+        updates && updates->HasField(field_id.get())) {
+        AssertInfo(query_timestamp.has_value(),
+                   "Updated output field requires the filter query timestamp");
+        auto readers = updates->CreateReaders(field_id.get(), *query_timestamp);
+        return readers.values->ReadOutput(
+            seg_offsets, count, field_meta.is_nullable());
+    }
     auto* chunked = dynamic_cast<const ChunkedSegmentSealedImpl*>(segment);
     auto pinned =
         chunked ? ChunkedSegmentSealedImpl::ToPublishedState(snapshot)
@@ -10239,6 +10249,18 @@ ChunkedSegmentSealedImpl::FillTargetEntry(const query::Plan* plan,
     auto fetch_one = [this, plan, snapshot, &results, size](
                          FieldId field_id, milvus::OpContext* field_ctx) {
         auto& field_meta = plan->schema_->operator[](field_id);
+        if (auto updates = GetExperimentalUpdates();
+            updates && updates->HasField(field_id.get())) {
+            return BulkSubscriptWithSnapshot(this,
+                                             results.read_snapshot_,
+                                             field_ctx,
+                                             field_id,
+                                             field_meta,
+                                             results.seg_offsets_.data(),
+                                             size,
+                                             nullptr,
+                                             results.query_timestamp_);
+        }
         if (plan->schema_->get_dynamic_field_id().has_value() &&
             plan->schema_->get_dynamic_field_id().value() == field_id &&
             !plan->target_dynamic_fields_.empty()) {
@@ -10894,6 +10916,10 @@ ChunkedSegmentSealedImpl::TryTakeForRetrieve(
     std::vector<std::string> take_column_names;
     bool has_vector_output = false;
     for (auto field_id : plan->field_ids_) {
+        if (auto updates = GetExperimentalUpdates();
+            updates && updates->HasField(field_id.get()) && !ignore_non_pk) {
+            return false;
+        }
         if (SystemProperty::Instance().IsSystem(field_id)) {
             continue;
         }
@@ -11193,6 +11219,10 @@ ChunkedSegmentSealedImpl::TryTakeForSearch(
     std::vector<std::string> take_column_names;
     bool has_vector_output = false;
     for (auto field_id : plan->target_entries_) {
+        if (auto updates = GetExperimentalUpdates();
+            updates && updates->HasField(field_id.get())) {
+            continue;
+        }
         auto& field_meta = schema_snapshot->operator[](field_id);
         if (is_external_collection &&
             !schema_snapshot->IsExternalManifestStoredField(field_id)) {
