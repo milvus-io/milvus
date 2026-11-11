@@ -167,9 +167,9 @@ function field applies unchanged: it needs StorageV3
 (`common.storage.useLoonFFI`), the schema-bump compaction
 (`dataCoord.compaction.bumpSchemaVersion.enabled`) and the storage-version
 upgrade compaction (`dataCoord.compaction.storageVersion.enabled`), and is
-rejected otherwise. With them on, the backfill behaves the same on a
-collection without a vector field as on one with a vector field (Section
-6.2).
+rejected otherwise. With them on, a BM25 function field is backfilled the
+same way on a collection without a vector field as on one with a vector
+field (Section 6.2). MinHash goes through the same path and was not run.
 
 **Clients**
 
