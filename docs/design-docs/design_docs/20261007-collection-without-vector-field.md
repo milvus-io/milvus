@@ -759,17 +759,17 @@ sealed into about 20 small segments, which compaction then merged into 4
 segments of 2.25–3.0 M rows. That was dropped for the reason given in
 Section 4.2.
 
-The final run on head `2cc7740f6e` (2026-11-09 and 11-10) repeated the
-script twice, once with the default `maxRows` of 4 M and once with `maxRows`
+The final runs on head `2cc7740f6e` (2026-11-10) ran the script at two
+scales, once with the default `maxRows` of 4 M and once with `maxRows`
 set to 400 k and every row count divided by 10.
 
 | Scenario | `maxRows` 4 M | `maxRows` 400 k |
 |---|---|---|
-| Insert (10 M / 1 M rows), then flush and a manual compaction | 3.95 M, 3.75 M, 2.30 M rows | 400 k, 400 k, 200 k rows |
+| Insert (10 M / 1 M rows), then flush and a manual compaction | 4.00 M, 3.80 M, 2.20 M rows | 400 k, 400 k, 200 k rows |
 | Import from one parquet file (12 M / 1.2 M rows) | 3 segments allocated; 5.60 M, 3.61 M, 2.80 M rows | 3 segments allocated; all 1.2 M rows in one of them, the two empty ones are dropped |
 | One manual compaction of the imported collection | 4,000,000, 3.61 M, 2.80 M, 1.60 M rows | 400,000, 400,000, 400,000 rows |
 | 200 s of automatic trigger cycles afterwards | unchanged | unchanged |
-| Control: vector collection, dim 8 (6 M / 600 k rows) | not run, see Appendix C | 1 segment of 600 k rows |
+| Control: vector collection, dim 8 (6 M / 600 k rows) | 1 segment of 6 M rows | 1 segment of 600 k rows |
 
 In the 400 k import the file (1.2 M rows, 14.4 MB in memory, 12 B per row)
 is smaller than one read batch of the import, so the whole file is one
@@ -815,16 +815,15 @@ standalone, unless stated otherwise.
 - **pytest**: the 4 new cases
   (`test_milvus_client_collection_without_vector.py` and one case of
   `test_milvus_client_collection.py`) pass.
-- **Row cap end to end** (Appendix B.6), two runs. With `maxRows` 4 M the
-  first 7 checks gave the expected output; the run then stopped in the
-  eighth (the vector collection control) because the data disk crossed the
-  0.90 hard watermark of woodpecker and writes were rejected. With `maxRows`
-  400 k and all row counts divided by 10, 7 of 8 checks pass, the vector
-  collection control among them. The one that fails is "import allocates at
-  least rows / `maxRows` non-empty segments": the file is smaller than one
-  read batch, which is a property of the reduced scale and of `PickSegment`
-  (B.6), and the DataCoord log shows the expected three segments allocated.
-  Each check has passed on this head in at least one of the two runs.
+- **Row cap end to end** (Appendix B.6), two scales. With the default
+  `maxRows` of 4 M all 8 checks pass (run of 11-10; a run on 11-09 stopped
+  in the eighth check because the data disk crossed the 0.90 hard watermark
+  of woodpecker and writes were rejected). With `maxRows` 400 k and all row
+  counts divided by 10, 7 of 8 checks pass. The one that fails is "import
+  allocates at least rows / `maxRows` non-empty segments": the file is
+  smaller than one read batch, which is a property of the reduced scale and
+  of `PickSegment` (B.6), and the DataCoord log shows the expected three
+  segments allocated.
 - **Verified on earlier heads and not rerun**: the 44 M-row aarch64 runs
   (B.1–B.3) and the five-process deployment and switch flip (B.4). Apart
   from segment sizing, the code on these paths did not change.
