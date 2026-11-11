@@ -64,7 +64,9 @@ func TestViewFeedbackPersistentStreamWithoutViews(t *testing.T) {
 		case <-time.After(5500 * time.Millisecond):
 		}
 		h.RecordShardAccess(id)
-		require.EqualValues(t, 1, next().Shards[id].RequestCount)
+		afterIdle := next()
+		require.EqualValues(t, 1, afterIdle.Shards[id].RequestCount)
+		require.GreaterOrEqual(t, afterIdle.StartUnixNanos-first.EndUnixNanos, int64(4*time.Second), "unsent empty windows still advance Start")
 		cancel()
 		select {
 		case <-reports:

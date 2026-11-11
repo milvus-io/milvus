@@ -3,6 +3,7 @@ package viewfeedback
 
 import (
 	"slices"
+	"sort"
 	"sync"
 	"time"
 
@@ -12,6 +13,23 @@ import (
 )
 
 const retention = 2 * time.Minute
+
+var rateWindowCounts = [...]int{2, 6, 12, 24}
+
+// Snapshot combines the retained count and lifetime last access with recent rates.
+type Snapshot struct {
+	qviews.ViewFeedback
+	RequestRates RequestRates
+}
+
+// RequestRates uses the actual Node time span of up to N most recent windows.
+// Values are planning attempts per second, not successful queries or NQ.
+type RequestRates struct {
+	Last2Windows  float64
+	Last6Windows  float64
+	Last12Windows float64
+	Last24Windows float64
+}
 
 // ReplicaFeedbackStore follows current load intent, independently of View state.
 type ReplicaFeedbackStore struct {
@@ -26,12 +44,25 @@ type ReplicaFeedbackStore struct {
 
 type replicaFeedback struct {
 	collectionID int64
-	shards       map[qviews.ShardID][]shardWindow
+	shards       map[qviews.ShardID]*shardFeedback
 }
 
-type shardWindow struct {
-	expiresAt int64
-	sample    qviews.ViewFeedback
+type shardFeedback struct {
+	qviews.ViewFeedback
+	windows []feedbackContribution // Sorted by the Node's report time.
+	recent  [4]windowAggregate
+}
+
+type windowAggregate struct {
+	requestCount uint64
+	startedAt    int64
+}
+
+// Counts are reverted; LastAccess is a lifetime high-water mark.
+type feedbackContribution struct {
+	startedAt    int64
+	reportedAt   int64
+	requestCount uint64
 }
 
 // New replays configured replicas before the caller starts receiving reports.
@@ -53,7 +84,7 @@ func (s *ReplicaFeedbackStore) onLoadConfig(collectionID int64, config *loadmgr.
 			ids = append(ids, id)
 			kept[id] = struct{}{}
 			if s.replicas[id] == nil {
-				s.replicas[id] = &replicaFeedback{collectionID: collectionID, shards: make(map[qviews.ShardID][]shardWindow)}
+				s.replicas[id] = &replicaFeedback{collectionID: collectionID, shards: make(map[qviews.ShardID]*shardFeedback)}
 			}
 		}
 	}
@@ -71,11 +102,8 @@ func (s *ReplicaFeedbackStore) onLoadConfig(collectionID int64, config *loadmgr.
 
 // OnViewFeedback accepts best-effort windows only for currently configured replicas.
 func (s *ReplicaFeedbackStore) OnViewFeedback(window qviews.ViewFeedbackWindow) {
-	now := time.Now().UnixNano()
-	// Legacy cumulative reports have no window. Future node clocks must not
-	// retain a window longer than two minutes after local receipt.
-	expiresAt := min(window.EndUnixNanos, now) + int64(retention)
-	if window.StartUnixNanos <= 0 || window.EndUnixNanos <= window.StartUnixNanos || window.EndUnixNanos-window.StartUnixNanos > int64(retention) || expiresAt <= now {
+	// Use the Node's window end as report time, without a receipt timestamp.
+	if window.StartUnixNanos <= 0 || window.EndUnixNanos <= window.StartUnixNanos || window.EndUnixNanos-window.StartUnixNanos > int64(retention) {
 		return
 	}
 	s.mu.Lock()
@@ -89,31 +117,72 @@ func (s *ReplicaFeedbackStore) OnViewFeedback(window qviews.ViewFeedbackWindow) 
 		if err != nil || collectionID != replica.collectionID {
 			continue
 		}
-		replica.shards[id] = append(replica.shards[id], shardWindow{
-			expiresAt: expiresAt, sample: sample,
+		shard := replica.shards[id]
+		if shard == nil {
+			shard = &shardFeedback{ViewFeedback: qviews.ViewFeedback{ShardID: id}}
+			replica.shards[id] = shard
+		}
+		// Reports can arrive out of order across stream reconnections.
+		index := sort.Search(len(shard.windows), func(i int) bool {
+			return shard.windows[i].reportedAt > window.EndUnixNanos
 		})
+		shard.windows = slices.Insert(shard.windows, index, feedbackContribution{
+			startedAt: window.StartUnixNanos, reportedAt: window.EndUnixNanos, requestCount: sample.RequestCount,
+		})
+		for i, n := range rateWindowCounts {
+			start := max(0, len(shard.windows)-n)
+			if index >= start {
+				shard.recent[i].requestCount += sample.RequestCount
+				if len(shard.windows) > n {
+					// The inserted window replaces the oldest member of this group.
+					old := shard.windows[start-1]
+					shard.recent[i].requestCount -= old.requestCount
+				}
+			}
+		}
+		shard.refreshRateStarts()
+		shard.RequestCount += sample.RequestCount
+		shard.LastAccessUnixNanos = max(shard.LastAccessUnixNanos, sample.LastAccessUnixNanos)
 	}
 }
 
-// GetViewFeedback sums unexpired received windows; missing windows are not zeros.
-// Expiration is checked here as well as by the independent cleanup worker.
-func (s *ReplicaFeedbackStore) GetViewFeedback(id qviews.ShardID) (qviews.ViewFeedback, bool) {
-	now := time.Now().UnixNano()
+// GetViewFeedback returns the cached aggregate without scanning windows.
+// Expiration is applied by the cleanup worker, including when there are no reads.
+func (s *ReplicaFeedbackStore) GetViewFeedback(id qviews.ShardID) (Snapshot, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	var result qviews.ViewFeedback
-	found := false
 	if replica := s.replicas[id.ReplicaID]; replica != nil {
-		for _, window := range replica.shards[id] {
-			if window.expiresAt > now {
-				result.ShardID = id
-				result.RequestCount += window.sample.RequestCount
-				result.LastAccessUnixNanos = max(result.LastAccessUnixNanos, window.sample.LastAccessUnixNanos)
-				found = true
+		if shard := replica.shards[id]; shard != nil {
+			return Snapshot{ViewFeedback: shard.ViewFeedback, RequestRates: RequestRates{
+				Last2Windows: shard.requestRate(0), Last6Windows: shard.requestRate(1),
+				Last12Windows: shard.requestRate(2), Last24Windows: shard.requestRate(3),
+			}}, true
+		}
+	}
+	return Snapshot{}, false
+}
+
+func (s *shardFeedback) requestRate(index int) float64 {
+	if len(s.windows) == 0 {
+		return 0
+	}
+	aggregate := s.recent[index]
+	span := s.windows[len(s.windows)-1].reportedAt - aggregate.startedAt
+	return float64(aggregate.requestCount) / time.Duration(span).Seconds()
+}
+
+// Refresh only the bounded recent groups, never the full retained history.
+// Start times need not be ordered when reports overlap across owner changes.
+func (s *shardFeedback) refreshRateStarts() {
+	for i, n := range rateWindowCounts {
+		start := max(0, len(s.windows)-n)
+		s.recent[i].startedAt = 0
+		for _, window := range s.windows[start:] {
+			if s.recent[i].startedAt == 0 || window.startedAt < s.recent[i].startedAt {
+				s.recent[i].startedAt = window.startedAt
 			}
 		}
 	}
-	return result, found
 }
 
 func (s *ReplicaFeedbackStore) expireLoop() {
@@ -133,13 +202,27 @@ func (s *ReplicaFeedbackStore) expireLoop() {
 func (s *ReplicaFeedbackStore) expire(now int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	cutoff := now - int64(retention)
 	for _, replica := range s.replicas {
-		for id, windows := range replica.shards {
-			windows = slices.DeleteFunc(windows, func(w shardWindow) bool { return w.expiresAt <= now })
-			if len(windows) == 0 {
-				delete(replica.shards, id)
+		for _, shard := range replica.shards {
+			n := 0
+			for n < len(shard.windows) && shard.windows[n].reportedAt <= cutoff {
+				shard.RequestCount -= shard.windows[n].requestCount
+				n++
+			}
+			for i, count := range rateWindowCounts {
+				for j := max(0, len(shard.windows)-count); j < n; j++ {
+					old := shard.windows[j]
+					shard.recent[i].requestCount -= old.requestCount
+				}
+			}
+			if n == len(shard.windows) {
+				shard.windows = nil
 			} else {
-				replica.shards[id] = windows
+				shard.windows = shard.windows[n:]
+			}
+			if n > 0 {
+				shard.refreshRateStarts()
 			}
 		}
 	}

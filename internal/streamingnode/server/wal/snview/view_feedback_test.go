@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -132,4 +133,27 @@ func BenchmarkViewFeedback(b *testing.B) {
 			})
 		})
 	}
+}
+
+func TestViewFeedbackEmptyTakesAdvanceStart(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := &SNQueryViewHandler{}
+		last := h.TakeViewFeedback()
+		for range 3 {
+			time.Sleep(5 * time.Second)
+			empty := h.TakeViewFeedback()
+			require.Empty(t, empty.Shards)
+			require.Equal(t, last.EndUnixNanos, empty.StartUnixNanos)
+			require.EqualValues(t, 5*time.Second, empty.EndUnixNanos-empty.StartUnixNanos)
+			last = empty
+		}
+		time.Sleep(2 * time.Second)
+		id := qviews.ShardID{ReplicaID: 1, VChannel: "p_1v0"}
+		h.RecordShardAccess(id)
+		time.Sleep(time.Second)
+		active := h.TakeViewFeedback()
+		require.Equal(t, last.EndUnixNanos, active.StartUnixNanos)
+		require.EqualValues(t, 3*time.Second, active.EndUnixNanos-active.StartUnixNanos)
+		require.EqualValues(t, 1, active.Shards[id].RequestCount)
+	})
 }

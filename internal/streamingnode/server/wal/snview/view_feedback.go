@@ -58,6 +58,7 @@ func (s *viewFeedback) take() qviews.ViewFeedbackWindow {
 	defer s.mu.Unlock()
 	now := time.Now().UnixNano()
 	window := qviews.ViewFeedbackWindow{StartUnixNanos: s.start, EndUnixNanos: now, Shards: s.shards}
+	// Empty windows are not sent, but must still advance the next window start.
 	s.start, s.shards = now, nil
 	select {
 	case <-s.notify:
