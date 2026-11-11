@@ -67,7 +67,7 @@ Select a node under `system_tests/pyudf/test_workloads.py`:
 | `test_batches_preserve_scores_and_input_columns[DISKANN]` | Same batch gates against explicit DISKANN |
 | `test_concurrent_search_reaches_requested_rpc_concurrency` | 1/8/32 concurrent ordinary and PyUDF Search, 20 seconds per window; exact results and observed RPC concurrency |
 | `test_cpu_and_wait_load_preserve_peer_search` | Bounded CPU/wait load with ordinary peer Search and recovery; about 3 minutes |
-| `test_package_reuse_and_removal_preserve_search` | Baseline, first calls to 32 wheels, 10 replays, removal rejection and recovery in one test |
+| `test_package_reuse_and_removal_preserve_search` | RAG document reranking through 32 wheel policies, ten replays, removal rejection and recovery in one test |
 
 Performance nodes replace the old SDK ABBA/batch entrypoints with explicit HNSW
 and DISKANN parameters, overriding `index_type` for ABBA and batch nodes.
@@ -95,6 +95,26 @@ seconds. Shortened runs do not establish full soak validation. The workload uses
 Package checks cover wheel loading/reuse and resource invalidation. They do not
 test tiered storage or prove cache hits, eviction or memory reclamation;
 `cache_hit_verification` remains `NOT_MEASURED` in their artifacts.
+
+### Document reranking workload
+
+The package lifecycle uses a business UDF rather than an arithmetic-only payload.
+It reranks vector candidates using L2 relevance, exponential publication-age decay,
+source trust and document quality. Missing quality defaults to 0.5; quality is
+clamped to [0, 1], future publication times have zero age, and unknown sources
+receive the fallback trust weight. The query time is fixed for reproducible CI.
+
+The retained 100,000-row input includes publication timestamps, source categories
+and nullable quality scores alongside 128-dimensional vectors. The 32 existing
+wheels carry distinct freshness policies; the test independently computes scores
+from retained vectors/document fields, checks exact top-k order and tie-breaking,
+and requires policies to produce different rankings. First calls and all ten
+replays use this oracle; removed resources must become uncallable. Full audits
+also compare document metadata before and after the lifecycle.
+
+This is deterministic business reranking, without an external model/service or a
+claim about semantic relevance quality. Arithmetic UDFs remain deliberate controls
+for serialization, instrumentation, throughput comparison and precise failures.
 
 ## Failure handling and evidence
 

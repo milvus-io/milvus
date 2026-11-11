@@ -4,6 +4,7 @@ import copy
 import hashlib
 import io
 import json
+import math
 import os
 import threading
 import time
@@ -19,7 +20,7 @@ from pymilvus.function_chain import col
 from pymilvus.function_chain.chain import FunctionChainExpr
 from workloads.pyudf.benchmark import SearchActivity, SearchWireCounter, run_abba, run_batch_measurements
 from workloads.pyudf.runner import save
-from workloads.pyudf.workload import MODULE, check_stop_file
+from workloads.pyudf.workload import DOCUMENT_FIELDS, FIELDS, MODULE, RAG_QUERY_TIME, check_stop_file
 
 # The instrumented subclass preserves the original transform and its column checks.
 # Snapshots read process-local counters atomically through the same UDF instance.
@@ -84,11 +85,11 @@ def create_udf(context):
 """
 
 
-def register(workload, root, prefix, count, source):
+def register(workload, root, prefix, sources):
     checker, store, config = workload.checker, workload.storage, workload.config
     registered = {item.name for item in checker.client.list_file_resources()}
     wheels = []
-    for number in range(count):
+    for number, source in enumerate(sources):
         check_stop_file(root.parent / "STOP")
         name = f"{prefix}_{number:02d}"
         assert name not in registered, f"Refuse to overwrite {name}"
@@ -193,7 +194,7 @@ def abba(workload):
     save(output / "worker-prerequisites.json", prerequisites)
     checker.evidence = output
     prefix = config.collection + "_perf"
-    wheels = register(workload, output, prefix, 2, COUNTED_MODULE)
+    wheels = register(workload, output, prefix, [COUNTED_MODULE] * 2)
     original_resource = checker.resources[0]
     checker.resources = [item["resource"] for item in wheels]
     save(
@@ -292,7 +293,7 @@ def interference(workload):
         output.mkdir()
         checker.evidence = output
         prefix = config.collection + "_interference"
-        resource = register(workload, output, prefix, 1, INTERFERENCE_MODULE)[0]["resource"]
+        resource = register(workload, output, prefix, [INTERFERENCE_MODULE])[0]["resource"]
         addresses = config.proxy_uris
         for number in range(32):
             attackers.append(MilvusClient(addresses[number % 2], token=os.environ["MILVUS_TOKEN"], dedicated=True))
@@ -427,6 +428,68 @@ def interference(workload):
             client.close()
 
 
+# Each wheel contains its own policy, so resource mix-ups change the expected ranking.
+RAG_RERANK_MODULE = """import numpy as np
+import pyarrow as pa
+
+class DocumentReranker:
+    def transform_query(self, params, columns):
+        distances, published, sources, quality = columns
+        distances = distances.to_numpy(zero_copy_only=False).astype(np.float64)
+        if not np.all(np.isfinite(distances)) or np.any(distances < 0):
+            raise ValueError("Document reranking requires finite nonnegative L2 distances")
+        age_days = np.maximum(0, params['as_of'] - published.to_numpy(zero_copy_only=False)) / 86400
+        freshness = np.exp2(-age_days / POLICY['half_life_days'])
+        trust = np.array([{'official': 1.0, 'community': 0.65}.get(source, 0.25)
+                          for source in sources.to_pylist()])
+        quality = np.clip(np.nan_to_num(quality.to_numpy(zero_copy_only=False), nan=0.5), 0, 1)
+        scores = (0.6 / (1 + distances) + POLICY['freshness_weight'] * freshness
+                  + (0.3 - POLICY['freshness_weight']) * trust + 0.1 * quality)
+        return [pa.array(scores, type=pa.float32())]
+
+def create_udf(context):
+    context.logger.info('Document reranker policy=%s resource=%s', POLICY, context.resource_name)
+    return DocumentReranker()
+"""
+
+
+def rag_chain(resource):
+    return (
+        FunctionChain(FunctionChainStage.L2_RERANK)
+        .map(
+            "$score",
+            FunctionChainExpr(
+                "py_udf",
+                args=tuple(col(name) for name in ["$score", *DOCUMENT_FIELDS]),
+                params={"resource_name": resource, "udf_params": {"as_of": RAG_QUERY_TIME}},
+            ),
+        )
+        .sort(col("$score"), desc=True, tie_break_col=col("$id"))
+        .limit(20)
+    )
+
+
+def verify_document_ranking(checker, hits, query_index, policy):
+    """Compute the business oracle from retained inputs, independently of the UDF."""
+    scores = {}
+    for pk in checker.candidates[query_index]:
+        document = checker.documents[pk]
+        distance = float(np.sum((checker.vectors[pk] - checker.queries[query_index]) ** 2))
+        age = max(0, RAG_QUERY_TIME - document["published_at"]) / 86400
+        freshness = math.exp(-math.log(2) * age / policy["half_life_days"])
+        trust = 1.0 if document["source"] == "official" else 0.65 if document["source"] == "community" else 0.25
+        quality = 0.5 if document["quality"] is None else min(1.0, max(0.0, document["quality"]))
+        score = 0.6 / (1 + distance) + policy["freshness_weight"] * freshness
+        score += (0.3 - policy["freshness_weight"]) * trust + 0.1 * quality
+        scores[pk] = float(np.float32(score))
+    expected_ids = sorted(scores, key=lambda pk: (-scores[pk], pk))[:20]
+    assert checker.verify_fields(hits) == expected_ids, "Document ranking differs from the retained-input oracle"
+    for hit in hits:
+        assert np.isclose(hit["distance"], scores[hit["id"]], rtol=1e-5, atol=1e-6), hit
+        assert {field: hit["entity"][field] for field in DOCUMENT_FIELDS} == checker.documents[hit["id"]], hit
+    return expected_ids
+
+
 def package_cache(workload):
     """Check wheel reuse and resource removal; latency does not prove a cache hit."""
     root, config = workload.root, workload.config
@@ -434,27 +497,44 @@ def package_cache(workload):
     output = root / "package-cache"
     output.mkdir()
     wheels = []
+    first_rankings = set()
+    changed_rankings = 0
     for phase in ("baseline", "cold", "replay", "remove", "recovery"):
         check_stop_file(root / "STOP")
         if phase == "cold":
             prefix = config.collection + "_package_cache"
-            package_source = MODULE.replace(
-                "def create_udf(context):\n    return UDF(context)",
-                "def create_udf(context):\n    context.logger.warning('PYUDF_R2_FACTORY resource=%s pid=%s', context.resource_name, os.getpid())\n    return UDF(context)",
-            )
-            wheels = register(workload, output, prefix, 32, package_source)
+            policies = [
+                {"half_life_days": days, "freshness_weight": weight}
+                for days in (7, 14, 30, 60, 90, 180, 365, 730)
+                for weight in (0.1, 0.15, 0.2, 0.25)
+            ]
+            sources = [f"POLICY = {policy!r}\n" + RAG_RERANK_MODULE for policy in policies]
+            wheels = register(workload, output, prefix, sources)
+            for wheel, policy in zip(wheels, policies):
+                wheel["policy"] = policy
+            save(output / "wheels.json", wheels)
         result = []
         if phase in ("cold", "replay"):
             for repeat in range(1 if phase == "cold" else 10):
                 for wheel in wheels:
                     check_stop_file(root / "STOP")
                     before = time.monotonic()
-                    hits = checker.search(clients[0], checker.queries[repeat], checker.chain(wheel["resource"], 2, 0))
-                    checker.verify_udf(hits, checker.candidates[repeat], 2, 0)
+                    hits = checker.search(
+                        clients[0],
+                        checker.queries[repeat],
+                        rag_chain(wheel["resource"]),
+                        output_fields=FIELDS + DOCUMENT_FIELDS,
+                    )
+                    ids = verify_document_ranking(checker, hits, repeat, wheel["policy"])
+                    changed_rankings += ids != checker.candidates[repeat][:20]
+                    if phase == "cold":
+                        first_rankings.add(tuple(ids))
                     result.append(
                         {
                             "resource": wheel["resource"],
                             "repeat": repeat,
+                            "ids": ids,
+                            "policy": wheel["policy"],
                             "latency_ms": 1000 * (time.monotonic() - before),
                         }
                     )
@@ -470,8 +550,13 @@ def package_cache(workload):
                 while True:
                     check_stop_file(root / "STOP")
                     try:
-                        hits = checker.search(clients[0], checker.queries[0], checker.chain(wheel["resource"], 2, 0))
-                        checker.verify_udf(hits, checker.candidates[0], 2, 0)
+                        hits = checker.search(
+                            clients[0],
+                            checker.queries[0],
+                            rag_chain(wheel["resource"]),
+                            output_fields=FIELDS + DOCUMENT_FIELDS,
+                        )
+                        verify_document_ranking(checker, hits, 0, wheel["policy"])
                         accepted_before_convergence += 1
                     except Exception as error:
                         message = str(error)
@@ -503,7 +588,10 @@ def package_cache(workload):
         save(
             output / f"{phase}.json",
             {
-                "workload": "pyudf_package_cache",
+                "workload": "pyudf_rag_package_lifecycle",
+                "query_time": RAG_QUERY_TIME,
+                "changed_rankings": changed_rankings,
+                "distinct_policy_rankings": len(first_rankings),
                 "cache_hit_verification": "NOT_MEASURED",
                 "phase": phase,
                 "unix": time.time(),
@@ -513,6 +601,9 @@ def package_cache(workload):
                 "target_proxy": 0,
             },
         )
+
+    assert changed_rankings > 0, "Business features never changed the vector-only ranking"
+    assert len(first_rankings) > 1, "Different wheel policies never changed the ranking"
 
 
 def concurrency(workload):

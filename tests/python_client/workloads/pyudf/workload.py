@@ -20,6 +20,9 @@ from pymilvus.function_chain.chain import FunctionChainExpr
 
 SEED = 20261105
 FIELDS = ["ts", "label", "flag", "optional"]
+DOCUMENT_FIELDS = ["published_at", "source", "quality"]
+# A fixed query time makes freshness ranking reproducible across CI runs.
+RAG_QUERY_TIME = 1735689600
 MODULE = """import os
 import threading
 import pyarrow as pa
@@ -71,7 +74,9 @@ def check_stop_file(path):
 class PyUDFSearchChecker:
     """A reusable oracle for immutable collections; no fault injection or retries."""
 
-    def __init__(self, client, collection, resources, vectors, queries, evidence, index_type, stop_file=None):
+    def __init__(
+        self, client, collection, resources, vectors, queries, evidence, index_type, stop_file=None, documents=None
+    ):
         self.client = client
         self.collection = collection
         self.resources = resources
@@ -80,6 +85,7 @@ class PyUDFSearchChecker:
         self.evidence = evidence
         self.index_type = index_type
         self.stop_file = Path(stop_file) if stop_file is not None else evidence / "STOP"
+        self.documents = documents
         self.candidates = []
         self.baseline_distances = []
 
@@ -103,7 +109,7 @@ class PyUDFSearchChecker:
         params = {"search_list": max(100, limit)} if self.index_type == "DISKANN" else {"ef": max(256, limit)}
         return {"metric_type": "L2", "params": params}
 
-    def search(self, client, query, chain=None, limit=100, filter_expr=""):
+    def search(self, client, query, chain=None, limit=100, filter_expr="", output_fields=None):
         check_stop_file(self.stop_file)
         options = {"function_chains": chain} if chain is not None else {}
         return client.search(
@@ -113,7 +119,7 @@ class PyUDFSearchChecker:
             limit=limit,
             filter=filter_expr,
             search_params=self.search_params(limit),
-            output_fields=FIELDS,
+            output_fields=FIELDS if output_fields is None else output_fields,
             consistency_level="Strong",
             timeout=30,
             **options,
@@ -201,7 +207,7 @@ class PyUDFSearchChecker:
             rows = self.client.query(
                 self.collection,
                 filter=f"id >= {start} and id < {end}",
-                output_fields=["id", "vector", *FIELDS],
+                output_fields=["id", "vector", *FIELDS, *(DOCUMENT_FIELDS if self.documents is not None else [])],
                 limit=1000,
                 consistency_level="Strong",
                 timeout=30,
@@ -210,6 +216,8 @@ class PyUDFSearchChecker:
             self.verify_fields([{"id": row["id"], "entity": row} for row in rows])
             for row in rows:
                 assert np.array_equal(np.asarray(row["vector"], dtype=np.float32), self.vectors[row["id"]]), row["id"]
+                if self.documents is not None:
+                    assert {field: row[field] for field in DOCUMENT_FIELDS} == self.documents[row["id"]], row["id"]
             checked += len(rows)
             time.sleep(0.05)
         result = {
@@ -255,12 +263,24 @@ def prepare(client, storage, args, evidence, stop_file=None):
     queries = vectors[rng.choice(args.rows, size=min(1000, args.rows), replace=False)].copy()
     np.save(evidence / "vectors.npy", vectors)
     np.save(evidence / "queries.npy", queries)
+    documents = [
+        {
+            "published_at": RAG_QUERY_TIME + 86400 if pk % 31 == 0 else RAG_QUERY_TIME - (pk % 730) * 86400,
+            "source": ("official", "community", "external")[pk % 3],
+            "quality": None if pk % 11 == 0 else (pk % 121 - 10) / 100,
+        }
+        for pk in range(args.rows)
+    ]
+    (evidence / "documents.json").write_text(json.dumps(documents))
     schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
     schema.add_field("id", DataType.INT64, is_primary=True)
     schema.add_field("ts", DataType.INT64)
     schema.add_field("label", DataType.VARCHAR, max_length=64)
     schema.add_field("flag", DataType.BOOL)
     schema.add_field("optional", DataType.INT64, nullable=True)
+    schema.add_field("published_at", DataType.INT64)
+    schema.add_field("source", DataType.VARCHAR, max_length=16)
+    schema.add_field("quality", DataType.DOUBLE, nullable=True)
     schema.add_field("vector", DataType.FLOAT_VECTOR, dim=128)
     check_stop_file(stop_file)
     client.create_collection(name, schema=schema, num_shards=2, consistency_level="Strong")
@@ -274,6 +294,7 @@ def prepare(client, storage, args, evidence, stop_file=None):
                 "flag": pk % 2 == 0,
                 "optional": None if pk % 7 == 0 else pk,
                 "vector": vectors[pk].tolist(),
+                **documents[pk],
             }
             for pk in range(start, min(start + 1000, args.rows))
         ]
@@ -325,8 +346,11 @@ def prepare(client, storage, args, evidence, stop_file=None):
         "index": index,
         "collection": name,
         "vectors_sha256": hashlib.sha256((evidence / "vectors.npy").read_bytes()).hexdigest(),
+        "documents_sha256": hashlib.sha256((evidence / "documents.json").read_bytes()).hexdigest(),
         "workload_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
     }
     (evidence / "metadata.json").write_text(json.dumps(metadata, indent=2))
     print(json.dumps({"event": "prepared", **metadata}), flush=True)
-    return PyUDFSearchChecker(client, name, resources, vectors, queries, evidence, args.index_type, stop_file)
+    return PyUDFSearchChecker(
+        client, name, resources, vectors, queries, evidence, args.index_type, stop_file, documents
+    )
