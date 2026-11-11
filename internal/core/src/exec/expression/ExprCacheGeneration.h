@@ -34,9 +34,21 @@ class ExprCacheGeneration {
 
     const uint64_t id;
 
+    // Logical retirement must not wait for backend locks or unrelated I/O.
+    // Backend detachment separately drains operations that already passed
+    // IsRetired() by taking the manager's exclusive state lock.
+    void
+    Retire() noexcept {
+        retired_.store(true, std::memory_order_release);
+    }
+
+    bool
+    IsRetired() const noexcept {
+        return retired_.load(std::memory_order_acquire);
+    }
+
  private:
-    friend class ExprResCacheManager;
-    bool retired_{false};  // guarded by ExprResCacheManager::state_mutex_
+    std::atomic<bool> retired_{false};
 };
 
 using ExprCacheGenerationPtr = std::shared_ptr<ExprCacheGeneration>;

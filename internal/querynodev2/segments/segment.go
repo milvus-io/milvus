@@ -1402,8 +1402,8 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 		return
 	}
 
-	if paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.GetAsBool() {
-		// Clear generation-zero entries. Sealed instances retire their own
+	if s.Type() == SegmentTypeGrowing && paramtable.Get().QueryNodeCfg.ExprResCacheEnabled.GetAsBool() {
+		// Clear growing segments' generation-zero entries. Sealed instances retire their own
 		// generation in DeleteSegment without touching other live read states.
 		C.ExprResCacheEraseLegacySegment(C.int64_t(s.ID()))
 	}

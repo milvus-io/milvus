@@ -197,8 +197,10 @@ ExprResCacheManager::RetireGeneration(
     if (!generation) {
         return retired;
     }
+    generation->Retire();
+    // Drain puts that passed the token check before retirement. Later puts
+    // still check the token under this lock and cannot recreate the entries.
     std::unique_lock state_lock(state_mutex_);
-    generation->retired_ = true;
     const ExprCacheSegmentKey key{segment_id, generation->id};
     if (entry_pool_) {
         retired.memory = entry_pool_->DetachSegment(key);
@@ -564,7 +566,7 @@ ExprResCacheManager::GetWithStatus(const Key& key,
 
     {
         std::shared_lock state_lock(state_mutex_);
-        if (!IsEnabled() || (key.generation && key.generation->retired_)) {
+        if (!IsEnabled() || (key.generation && key.generation->IsRetired())) {
             return LookupResult::Miss;
         }
         if (config_.mode == CacheMode::Memory) {
@@ -595,11 +597,16 @@ ExprResCacheManager::GetWithStatus(const Key& key,
             if (it == disk_files_.end() || !it->second) {
                 return LookupResult::Miss;
             }
-            if (!it->second->Get(key.signature,
-                                 out_value.active_count,
-                                 result,
-                                 valid,
-                                 std::ref(before_materialize))) {
+            if (!it->second->Get(
+                    key.signature, out_value.active_count, result, valid, [&] {
+                        if (!before_materialize()) {
+                            return false;
+                        }
+                        if (before_decode) {
+                            before_decode();
+                        }
+                        return true;
+                    })) {
                 return failure;
             }
             TryTouchDiskSegment(key.SegmentKey());
@@ -633,7 +640,7 @@ ExprResCacheManager::ObserveMiss(const Key& key,
 
     std::shared_lock state_lock(state_mutex_);
     if (!IsEnabled() || !CanCacheSegmentLocked(segment_type) ||
-        (key.generation && key.generation->retired_)) {
+        (key.generation && key.generation->IsRetired())) {
         return ticket;
     }
 
@@ -685,7 +692,7 @@ ExprResCacheManager::PutInternal(const Key& key,
     }
 
     std::shared_lock state_lock(state_mutex_);
-    if (!IsEnabled() || (key.generation && key.generation->retired_)) {
+    if (!IsEnabled() || (key.generation && key.generation->IsRetired())) {
         return;
     }
 

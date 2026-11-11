@@ -976,15 +976,19 @@ instance therefore does not retire another instance's cache generation.
 
 All online state publications pass through `PublishStateOnline`. After acquiring
 the exclusive `PublishLease` and draining old readers, it retires the previous
-token, detaches its entries, and publishes the new state before releasing the
-lease. Gate acquisition failures and cancellation leave the previous token and
+token with an atomic flag and publishes the new state before releasing the
+lease. Backend detachment happens after releasing the lease, because acquiring
+the manager lock can wait for unrelated disk cache I/O. Gate acquisition failures
+and cancellation leave the previous token and
 cache intact. Successful publications conservatively invalidate the entire
 segment generation, including schema/index-only changes. The sealed destructor
 retires its own final token; it never erases a newer instance with the same ID.
 The C API `ExprResCacheEraseLegacySegment(segment_id)` is for generation-zero/growing
 entries; sealed lifecycle cleanup uses the exact token instead.
 
-`Get`, admission, and `Put` reject retired tokens under the manager state lock.
+`Get`, admission, and `Put` check the atomic retirement flag under the manager
+state lock. Puts that passed the check before retirement may finish in the old
+generation; detachment takes the exclusive state lock to drain and remove them.
 Retirement remains effective across `Clear`, config rebuild, and disable/enable
 because the flag belongs to the token rather than the cache backend. A delayed
 writer carries its original snapshot token; it cannot recreate retired entries

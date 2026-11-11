@@ -4844,7 +4844,8 @@ TEST_P(ExprCacheGenerationTest, RetirementSurvivesClearReconfigureAndDisable) {
     ExprResCacheManager::Key old{73002, "x > 0", generation};
     manager_.Put(old, value_);
     ExprResCacheManager::SetEnabled(false);
-    { auto retired = manager_.RetireGeneration(old.segment_id, generation); }
+    generation->Retire();
+    // Rebuild before detachment: retirement belongs to the token, not backend.
     manager_.Clear();
     ASSERT_TRUE(manager_.SetConfig(config_));
     ExprResCacheManager::SetEnabled(true);
@@ -4862,6 +4863,139 @@ TEST_P(ExprCacheGenerationTest, RetirementSurvivesClearReconfigureAndDisable) {
             manager_.RetireGeneration(old.segment_id, generation);
     }
     EXPECT_TRUE(Hit(reloaded));
+}
+
+TEST_P(ExprCacheGenerationTest, RetiredTokenRejectsWritesBeforeDetachment) {
+    auto generation = std::make_shared<milvus::exec::ExprCacheGeneration>();
+    ExprResCacheManager::Key old{73006, "x > 0", generation};
+    ExprResCacheManager::Key late{73006, "x > 1", generation};
+    ExprResCacheManager::Key next{
+        old.segment_id,
+        old.signature,
+        std::make_shared<milvus::exec::ExprCacheGeneration>()};
+    manager_.Put(old, value_);
+    auto ticket = manager_.ObserveMiss(late, 64, SegmentType::Sealed);
+    ASSERT_TRUE(ticket.admitted);
+
+    generation->Retire();
+    EXPECT_FALSE(Hit(old));
+    EXPECT_FALSE(manager_.ObserveMiss(late, 64, SegmentType::Sealed).admitted);
+    manager_.Put(late, value_);
+    manager_.PutAdmitted(late, value_, ticket);
+    // Only the original entry remains pending physical detachment.
+    EXPECT_EQ(manager_.GetEntryCount(), 1);
+    manager_.Put(next, value_);
+    EXPECT_TRUE(Hit(next));
+    EXPECT_EQ(manager_.GetEntryCount(), 2);
+    { auto retired = manager_.RetireGeneration(old.segment_id, generation); }
+    EXPECT_EQ(manager_.GetEntryCount(), 1);
+    EXPECT_TRUE(Hit(next));
+}
+
+TEST_P(ExprCacheGenerationTest, PublicationAdmitsReadersDuringUnrelatedDiskIO) {
+    if (GetParam() != milvus::exec::CacheMode::Disk) {
+        GTEST_SKIP() << "Disk lookups retain the manager lock during I/O";
+    }
+    using namespace milvus;
+    using namespace milvus::segcore;
+    auto schema = std::make_shared<Schema>();
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto segment = CreateSealedSegment(schema, empty_index_meta, 73007);
+    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+    ASSERT_NE(sealed, nullptr);
+    auto generation = sealed->CaptureReadSnapshot()->GetExprCacheGeneration();
+    ExprResCacheManager::Key old{73007, "x > 0", generation};
+    ExprResCacheManager::Key unrelated{
+        73008, "x > 0", std::make_shared<exec::ExprCacheGeneration>()};
+    manager_.Put(old, value_);
+    manager_.Put(unrelated, value_);
+
+    std::promise<void> reading;
+    auto reading_started = reading.get_future();
+    std::promise<void> resume;
+    auto resume_read = resume.get_future().share();
+    std::future<bool> reader;
+    std::future<void> publisher;
+    // Unblock I/O before joining either future, including assertion failures.
+    auto release = folly::makeGuard([&] { resume.set_value(); });
+    reader = std::async(std::launch::async, [&] {
+        ExprResCacheManager::Value result;
+        result.active_count = 64;
+        return exec::ExprCacheTestPeer::Get(manager_, unrelated, result, [&] {
+                   // The real disk lookup holds all locks needed by pread.
+                   reading.set_value();
+                   resume_read.wait();
+               }) == ExprResCacheManager::LookupResult::Hit;
+    });
+    ASSERT_EQ(reading_started.wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    publisher = std::async(std::launch::async,
+                           [&] { sealed->TestPublishSystemFieldState(); });
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while ((sealed->CaptureReadSnapshot()->GetExprCacheGeneration() ==
+                generation ||
+            sealed->TestReadGateWriterPending()) &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::yield();
+    }
+    EXPECT_NE(sealed->CaptureReadSnapshot()->GetExprCacheGeneration(),
+              generation);
+    EXPECT_TRUE(generation->IsRetired());
+    EXPECT_NO_THROW(sealed->AcquireReadLease(folly::CancellationToken()));
+    // Cleanup still waits for A, but it no longer holds B's publication lease.
+    EXPECT_EQ(publisher.wait_for(std::chrono::seconds(0)),
+              std::future_status::timeout);
+    resume.set_value();
+    release.dismiss();
+    EXPECT_TRUE(reader.get());
+    publisher.get();
+    EXPECT_FALSE(Hit(old));
+    EXPECT_TRUE(Hit(unrelated));
+    EXPECT_EQ(manager_.GetEntryCount(), 1);
+}
+
+TEST_P(ExprCacheGenerationTest, DetachmentDrainsPutThatPassedRetirementCheck) {
+    if (GetParam() != milvus::exec::CacheMode::Disk) {
+        GTEST_SKIP() << "Uses the disk put hook to suspend an in-flight write";
+    }
+    using namespace milvus::exec;
+    auto generation = std::make_shared<ExprCacheGeneration>();
+    ExprResCacheManager::Key old{73009, "x > 0", generation};
+    std::promise<void> writing;
+    auto writing_started = writing.get_future();
+    std::promise<void> resume;
+    auto resume_write = resume.get_future().share();
+    std::future<bool> writer;
+    std::future<void> cleanup;
+    auto release = folly::makeGuard([&] { resume.set_value(); });
+    writer = std::async(std::launch::async, [&] {
+        return ExprCacheTestPeer::Put(
+            manager_, old, value_, [&](ExprCacheTestPeer::DiskPutStage stage) {
+                if (stage == ExprCacheTestPeer::DiskPutStage::SlotWrite) {
+                    writing.set_value();
+                    resume_write.wait();
+                }
+            });
+    });
+    ASSERT_EQ(writing_started.wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    generation->Retire();
+    cleanup = std::async(std::launch::async, [&] {
+        auto retired = manager_.RetireGeneration(old.segment_id, generation);
+    });
+    EXPECT_EQ(cleanup.wait_for(std::chrono::milliseconds(50)),
+              std::future_status::timeout);
+    resume.set_value();
+    release.dismiss();
+    EXPECT_TRUE(writer.get());
+    cleanup.get();
+    EXPECT_EQ(manager_.GetEntryCount(), 0);
+    EXPECT_FALSE(Hit(old));
+    manager_.Put(old, value_);
+    EXPECT_EQ(manager_.GetEntryCount(), 0);
+    EXPECT_FALSE(std::filesystem::exists(
+        path_ + "/seg_73009_" + std::to_string(generation->id) + ".cache"));
 }
 
 TEST_P(ExprCacheGenerationTest, LegacyCleanupPreservesLiveSealedGenerations) {

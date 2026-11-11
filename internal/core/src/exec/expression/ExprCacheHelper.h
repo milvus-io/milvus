@@ -115,8 +115,8 @@ class ExprCacheHelper {
         ExprResCacheManager* manager = nullptr;
         bool cache_eligible = false;
         std::string expr_signature;
-        if (HasCacheIdentity(segment, snapshot) &&
-            ExprResCacheManager::IsEnabled()) {
+        if (ExprResCacheManager::IsEnabled() &&
+            HasCacheIdentity(segment, snapshot)) {
             RunExprCacheBestEffort([&]() {
                 manager = &ExprResCacheManager::Instance();
                 if (!manager->CanCacheSegment(segment->type())) {

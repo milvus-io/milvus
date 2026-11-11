@@ -2465,20 +2465,21 @@ ChunkedSegmentSealedImpl::PublishStateOnline(
     if (!state) {
         return;
     }
-    // Allocate/prepare the next state before entering this function. Retired
-    // resources outlive the PublishLease so destructors/file I/O cannot block
-    // admission of new readers or hold cache-manager locks.
-    auto retired = [&] {
+    // Keep the old state alive outside the lease as well as its cache entries.
+    // Only logical retirement belongs in the publication critical section:
+    // backend detachment can wait for unrelated cache I/O on the global lock.
+    std::shared_ptr<const PublishedSegmentState> current;
+    {
         auto publish_lease =
             publish_mode == PublishMode::FailFast
                 ? operation_gate_.AcquirePublishFailFast(op_ctx, id_)
                 : operation_gate_.AcquirePublish(op_ctx, id_);
-        auto current = CapturePublishedState();
-        auto resources = exec::ExprResCacheManager::Instance().RetireGeneration(
-            id_, current->expr_cache_generation);
+        current = CapturePublishedState();
+        current->expr_cache_generation->Retire();
         PublishState(publish_lease, state);
-        return resources;
-    }();
+    }
+    auto retired = exec::ExprResCacheManager::Instance().RetireGeneration(
+        id_, current->expr_cache_generation);
 }
 
 void

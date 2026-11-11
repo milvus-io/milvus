@@ -300,8 +300,10 @@ class ExprResCacheManager {
     void
     Clear();
 
-    // Detach under the cache lock; release the returned resources only after
-    // dropping the segment PublishLease. No allocation on the retirement path.
+    // Retire the token and detach under the cache lock. Online publication
+    // must first Retire() the token under its PublishLease, then call this
+    // after releasing the lease: even acquiring the cache lock can wait for
+    // unrelated I/O. No allocation on the retirement path.
     struct RetiredGeneration {
         EntryPool::RetiredEntries memory;
         std::unique_ptr<DiskSlotFile> disk;
@@ -362,7 +364,7 @@ class ExprResCacheManager {
     SyncDiskUsageMetrics(size_t disk_bytes);
 
     friend class ExprCacheTestPeer;
-    // The test peer can suspend/fail a real hit immediately before decoding.
+    // The test peer can suspend/fail a real hit before decoding or disk I/O.
     // Public callers use the overload without a callback.
     LookupResult
     GetWithStatus(const Key& key,
