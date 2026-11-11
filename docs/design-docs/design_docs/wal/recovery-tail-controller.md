@@ -127,56 +127,71 @@ Components implement idempotency:
   Explicit blocker classification is not implemented; a VChannel persist
   request may still be issued without resolving an Ack or poisoned-message stall.
 
-## 5. Watermarks
+## 5. Independent Persistence And Append Admission
 
-Soft pressure starts persistence requests before the target is exceeded.
+Persistence requests and append rate limiting use independent configurations.
+They share the observed-to-published tail counters, but neither predicate uses
+the other's thresholds.
 
-The initial defaults are:
+### Persistence triggers
+
+The initial per-PChannel defaults are:
+
+```text
+streaming.walRecovery.flush.sizeThreshold = 6 GiB
+streaming.walRecovery.flush.messageThreshold = 6144
+streaming.walRecovery.flush.idleMinSize = 512 MiB
+streaming.walRecovery.flush.idleTimeout = 10 minutes
+```
+
+```text
+recoveryTailBytes >= flush.sizeThreshold
+  OR recoveryTailMessages >= flush.messageThreshold
+  OR (recoveryTailBytes > flush.idleMinSize AND idle time >= flush.idleTimeout)
+  -> request progress for the VChannel owning the oldest incomplete prefix
+  -> let Summary's independent worker seal its pending span
+```
+
+These thresholds are captured when a WAL opens. Nonpositive size or message
+thresholds disable the respective trigger; either nonpositive idle setting
+disables the size-and-idle trigger. The periodic Tracker and Summary workers
+check the predicate once per second, even without new WAL messages or incomplete
+ACKs. Summary has no separate idle/count policy. Requests enqueue asynchronous
+work; they neither close every growing Segment nor establish a full-tail drain
+barrier. Existing age-based Segment/L0 persistence remains independent.
+
+`ShouldFlush` is a read-only predicate. Reaching a persistence threshold does
+not enter slowdown, arm a rejection timer, or change the limiter's recovery
+condition. Disabling persistence triggers does not disable byte-based append
+admission. The thresholds need not be ordered against the limiter watermarks.
+
+### Append admission watermarks
+
+Existing configuration keys and defaults remain:
 
 ```text
 streaming.walRecovery.tail.lowWatermark  = 4 GiB
 streaming.walRecovery.tail.softWatermark = 8 GiB
 streaming.walRecovery.tail.highWatermark = 16 GiB
-streaming.walRecovery.tail.softWatermarkMessages = 6144
-streaming.walRecovery.tail.idleMinSize = 512 MiB
-streaming.walRecovery.tail.idleTimeout = 10 minutes
 ```
 
 ```text
-recoveryTailBytes >= softWatermark
-  OR recoveryTailMessages >= softWatermarkMessages
-  OR (recoveryTailBytes > idleMinSize AND idle time >= idleTimeout)
-  -> request progress for the VChannel owning the oldest incomplete prefix
-  -> increase publisher frequency while completed progress is unpublished
-  -> enter the same recovery-storage append slowdown mode
-  -> let Summary's independent worker seal its pending span under tail pressure
+recoveryTailBytes >= softWatermark -> enter adaptive append slowdown
+recoveryTailBytes >= highWatermark -> reject new DML append on this PChannel
+recoveryTailBytes <= lowWatermark  -> enter adaptive recovery
 ```
 
-The additional thresholds are captured when a WAL opens. A nonpositive message
-threshold disables the count trigger; either nonpositive idle setting disables
-the size-and-idle trigger. The existing periodic Tracker and Summary workers
-reevaluate pressure even with no new WAL messages, so timeout expiry also enters
-the shared append limiter. Summary has no independent idle/size conjunction.
-
-These are soft triggers, including below the 4 GiB byte low watermark. While
-any new trigger holds, the slowdown checker must not recover just because bytes
-are below that watermark. Once no trigger holds and bytes are at or below the
-low watermark, recovery proceeds normally. The 16 GiB hard rejection threshold
-is unchanged; reaching the byte low watermark releases rejection, downgrading
-to slowdown if an additional soft trigger still holds.
-
-A strict bound needs append admission control:
-
-```text
-recoveryTailBytes >= highWatermark
-  -> reject new DML append on this PChannel
-
-recoveryTailBytes <= lowWatermark
-  -> enter the existing adaptive-rate-limit recovery path
-```
+Only bytes affect this state machine and its slowdown checker. At the low
+watermark, rejection is released through `EnterRecoveryMode`, even if the count
+or idle persistence condition still holds. There is no Reject-to-Slowdown request.
+The existing adaptive limiter can also escalate sustained slowdown to rejection
+after its configured delay; 16 GiB is the immediate byte rejection threshold,
+not the only route to rejection. Persistence requests never start this delay.
 
 Without append backpressure, object storage, catalog, or Coordinator Ack failure
-can grow the tail without bound. A background trigger alone is best-effort.
+can grow the tail without bound. A background persistence trigger alone is
+best-effort. Increasing publisher frequency while completed progress is
+unpublished remains independent of these two predicates.
 
 ## 6. RTO Configuration
 

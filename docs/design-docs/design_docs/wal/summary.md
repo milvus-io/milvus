@@ -227,8 +227,11 @@ NodeScheduler manifest publication task
 ### 3.1 Ordered Publication After Concurrent Uploads
 
 `FlushMaxBytes` triggers sealing when staged bytes reach the threshold.
-`Manager.Run` independently checks WAL recovery-tail pressure once per second
-and requests a flush through the observed frontier under soft pressure. This
+`Manager.Run` independently checks the `streaming.walRecovery.flush` tail
+thresholds once per second and requests a flush through the observed frontier
+when any persistence trigger holds. These thresholds are independent of append
+rate limiting and default to 6 GiB, 6144 messages, or more than 512 MiB idle for
+10 minutes. This
 works even when AckTracker has no incomplete entries or no new messages arrive.
 AckTracker stall requests target only VChannel consumers and never seal Summary.
 Neither `dataNode.segment.syncPeriod` nor the checkpoint persistence interval
@@ -237,7 +240,7 @@ backed by WAL, and pin the global checkpoint until size or tail pressure require
 persistence. This does not weaken the Summary confirmation bound.
 
 Sealed chunks and dirty manifests continue on their own scheduler retry paths;
-periodic pressure checks do not manufacture completion or bypass the first-manifest
+periodic persistence checks do not manufacture completion or bypass the first-manifest
 requirement. Empty backlog produces no new chunk.
 Observation retains no source WAL handle and performs no object-storage I/O.
 In the target read integration, Summary installs records and their complete

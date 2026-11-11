@@ -9659,9 +9659,10 @@ type streamingConfig struct {
 	WALRecoveryTailLowWatermark          ParamItem `refreshable:"true"`
 	WALRecoveryTailSoftWatermark         ParamItem `refreshable:"true"`
 	WALRecoveryTailHighWatermark         ParamItem `refreshable:"true"`
-	WALRecoveryTailSoftWatermarkMessages ParamItem `refreshable:"false"`
-	WALRecoveryTailIdleMinSize           ParamItem `refreshable:"false"`
-	WALRecoveryTailIdleTimeout           ParamItem `refreshable:"false"`
+	WALRecoveryFlushSizeThreshold        ParamItem `refreshable:"false"`
+	WALRecoveryFlushMessageThreshold     ParamItem `refreshable:"false"`
+	WALRecoveryFlushIdleMinSize          ParamItem `refreshable:"false"`
+	WALRecoveryFlushIdleTimeout          ParamItem `refreshable:"false"`
 
 	// idempotent write configuration.
 	IdempotencyTTLPerPChannel                ParamItem `refreshable:"false"`
@@ -10185,7 +10186,7 @@ This no-op setting is retained so existing configurations remain loadable.`,
 	p.WALRecoveryTailSoftWatermark = ParamItem{
 		Key:          "streaming.walRecovery.tail.softWatermark",
 		Version:      "2.7.0",
-		Doc:          "RecoveryStorage requests VChannel persistence and slows WAL append after the unpublished WAL tail reaches this logical size.",
+		Doc:          "RecoveryStorage slows WAL append after the unpublished WAL tail reaches this logical size. Independent of the walRecovery.flush persistence thresholds.",
 		DefaultValue: "8g",
 		Export:       true,
 	}
@@ -10199,24 +10200,30 @@ This no-op setting is retained so existing configurations remain loadable.`,
 		Export:       true,
 	}
 	p.WALRecoveryTailHighWatermark.Init(base.mgr)
-	p.WALRecoveryTailSoftWatermarkMessages = ParamItem{
-		Key:     "streaming.walRecovery.tail.softWatermarkMessages",
+	p.WALRecoveryFlushSizeThreshold = ParamItem{
+		Key:     "streaming.walRecovery.flush.sizeThreshold",
+		Version: "3.1.0", DefaultValue: "6g", Export: true,
+		Doc: "Unpublished logical WAL bytes per PChannel that trigger WALSummary sealing and VChannel buffer persistence, without changing append rate limits. Nonpositive values disable this trigger. Applied when the WAL opens.",
+	}
+	p.WALRecoveryFlushSizeThreshold.Init(base.mgr)
+	p.WALRecoveryFlushMessageThreshold = ParamItem{
+		Key:     "streaming.walRecovery.flush.messageThreshold",
 		Version: "3.1.0", DefaultValue: "6144", Export: true,
-		Doc: "Unpublished persisted WAL message count per PChannel that triggers the same soft pressure as softWatermark. Includes completed but unpublished messages and counts an assembled transaction once. Nonpositive values disable this trigger. Applied when the WAL opens.",
+		Doc: "Unpublished persisted WAL message count per PChannel that triggers WALSummary sealing and VChannel buffer persistence, without changing append rate limits. Includes completed but unpublished messages and counts an assembled transaction once. Nonpositive values disable this trigger. Applied when the WAL opens.",
 	}
-	p.WALRecoveryTailSoftWatermarkMessages.Init(base.mgr)
-	p.WALRecoveryTailIdleMinSize = ParamItem{
-		Key:     "streaming.walRecovery.tail.idleMinSize",
+	p.WALRecoveryFlushMessageThreshold.Init(base.mgr)
+	p.WALRecoveryFlushIdleMinSize = ParamItem{
+		Key:     "streaming.walRecovery.flush.idleMinSize",
 		Version: "3.1.0", DefaultValue: "512MB", Export: true,
-		Doc: "Unpublished logical WAL bytes per PChannel must exceed this size and remain idle for idleTimeout to trigger the same soft pressure as softWatermark. Nonpositive values disable this trigger. Applied when the WAL opens.",
+		Doc: "Unpublished logical WAL bytes per PChannel must exceed this size and remain idle for idleTimeout to trigger WALSummary sealing and VChannel buffer persistence, without changing append rate limits. Nonpositive values disable this trigger. Applied when the WAL opens.",
 	}
-	p.WALRecoveryTailIdleMinSize.Init(base.mgr)
-	p.WALRecoveryTailIdleTimeout = ParamItem{
-		Key:     "streaming.walRecovery.tail.idleTimeout",
+	p.WALRecoveryFlushIdleMinSize.Init(base.mgr)
+	p.WALRecoveryFlushIdleTimeout = ParamItem{
+		Key:     "streaming.walRecovery.flush.idleTimeout",
 		Version: "3.1.0", DefaultValue: "10m", Export: true,
-		Doc: "Idle time without a newly observed persisted non-TimeTick WAL message before applying soft pressure above idleMinSize. TimeTicks and volatile heartbeats do not reset it; checkpoint publication does not refresh it. Nonpositive values disable this trigger. Applied when the WAL opens.",
+		Doc: "Idle time without a newly observed persisted non-TimeTick WAL message before triggering buffer persistence above idleMinSize. TimeTicks and volatile heartbeats do not reset it; checkpoint publication does not refresh it. Does not change append rate limits. Nonpositive values disable this trigger. Applied when the WAL opens.",
 	}
-	p.WALRecoveryTailIdleTimeout.Init(base.mgr)
+	p.WALRecoveryFlushIdleTimeout.Init(base.mgr)
 
 	p.WALRecoverySchemaExpirationTolerance = ParamItem{
 		Key:     "streaming.walRecovery.schemaExpirationTolerance",

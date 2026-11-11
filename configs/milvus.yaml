@@ -1869,11 +1869,13 @@ streaming:
     gracefulCloseTimeout: 3s
     tail:
       lowWatermark: 4g # RecoveryStorage releases WAL append pressure after the unpublished WAL tail falls to this logical size.
-      softWatermark: 8g # RecoveryStorage requests VChannel persistence and slows WAL append after the unpublished WAL tail reaches this logical size.
+      softWatermark: 8g # RecoveryStorage slows WAL append after the unpublished WAL tail reaches this logical size. Independent of the walRecovery.flush persistence thresholds.
       highWatermark: 16g # RecoveryStorage rejects new DML append after the unpublished WAL tail reaches this logical size.
-      softWatermarkMessages: 6144 # Unpublished persisted WAL message count per PChannel that triggers the same soft pressure as softWatermark. Includes completed but unpublished messages and counts an assembled transaction once. Nonpositive values disable this trigger. Applied when the WAL opens.
-      idleMinSize: 512MB # Unpublished logical WAL bytes per PChannel must exceed this size and remain idle for idleTimeout to trigger the same soft pressure as softWatermark. Nonpositive values disable this trigger. Applied when the WAL opens.
-      idleTimeout: 10m # Idle time without a newly observed persisted non-TimeTick WAL message before applying soft pressure above idleMinSize. TimeTicks and volatile heartbeats do not reset it; checkpoint publication does not refresh it. Nonpositive values disable this trigger. Applied when the WAL opens.
+    flush:
+      sizeThreshold: 6g # Unpublished logical WAL bytes per PChannel that trigger WALSummary sealing and VChannel buffer persistence, without changing append rate limits. Nonpositive values disable this trigger. Applied when the WAL opens.
+      messageThreshold: 6144 # Unpublished persisted WAL message count per PChannel that triggers WALSummary sealing and VChannel buffer persistence, without changing append rate limits. Includes completed but unpublished messages and counts an assembled transaction once. Nonpositive values disable this trigger. Applied when the WAL opens.
+      idleMinSize: 512MB # Unpublished logical WAL bytes per PChannel must exceed this size and remain idle for idleTimeout to trigger WALSummary sealing and VChannel buffer persistence, without changing append rate limits. Nonpositive values disable this trigger. Applied when the WAL opens.
+      idleTimeout: 10m # Idle time without a newly observed persisted non-TimeTick WAL message before triggering buffer persistence above idleMinSize. TimeTicks and volatile heartbeats do not reset it; checkpoint publication does not refresh it. Does not change append rate limits. Nonpositive values disable this trigger. Applied when the WAL opens.
   idempotency:
     ttlPerPChannel: 1h # Idle lifetime of committed Insert idempotency records per PChannel. Duplicate access refreshes the in-memory lifetime; recovery uses the original WAL commit time. Applied when the WAL opens.
     maxSizePerPChannel: 256MB # PChannel-wide estimated byte budget for committed Insert idempotency records. Eviction follows last access order. Recovery preselects a newest chunk suffix using encoded Insert and Idempotency section lengths and ttl, including one whole boundary chunk. This is not a process RSS limit. Applied when the WAL opens.

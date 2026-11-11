@@ -42,15 +42,16 @@ type recoveryTailController struct {
 	transitionMu sync.Mutex
 	mu           sync.Mutex
 
-	lowWatermark          uint64
-	softWatermark         uint64
-	highWatermark         uint64
-	rateLimiter           RecoveryTailRateLimiter
-	metrics               *recoveryMetrics
-	softWatermarkMessages uint64
-	idleMinBytes          uint64
-	idleTimeout           time.Duration
-	lastMessageAt         time.Time
+	lowWatermark      uint64
+	softWatermark     uint64
+	highWatermark     uint64
+	rateLimiter       RecoveryTailRateLimiter
+	metrics           *recoveryMetrics
+	flushSizeBytes    uint64
+	flushMessageCount uint64
+	idleMinBytes      uint64
+	idleTimeout       time.Duration
+	lastMessageAt     time.Time
 
 	state     recoveryTailPressureState
 	frontiers recoveryTailSnapshot
@@ -62,14 +63,15 @@ func newRecoveryTailController(
 	metrics *recoveryMetrics,
 ) *recoveryTailController {
 	return &recoveryTailController{
-		lowWatermark:          cfg.tailLowWatermarkBytes,
-		softWatermark:         cfg.tailSoftWatermarkBytes,
-		highWatermark:         cfg.tailHighWatermarkBytes,
-		rateLimiter:           rateLimiter,
-		metrics:               metrics,
-		softWatermarkMessages: cfg.tailSoftWatermarkMessages,
-		idleMinBytes:          cfg.tailIdleMinBytes,
-		idleTimeout:           cfg.tailIdleTimeout,
+		lowWatermark:      cfg.tailLowWatermarkBytes,
+		softWatermark:     cfg.tailSoftWatermarkBytes,
+		highWatermark:     cfg.tailHighWatermarkBytes,
+		rateLimiter:       rateLimiter,
+		metrics:           metrics,
+		flushSizeBytes:    cfg.flushSizeBytes,
+		flushMessageCount: cfg.flushMessageCount,
+		idleMinBytes:      cfg.flushIdleMinBytes,
+		idleTimeout:       cfg.flushIdleTimeout,
 	}
 }
 
@@ -83,7 +85,7 @@ func (c *recoveryTailController) UpdateTrackerFrontiers(observed, completed, mes
 	if lastMessageAt.After(c.lastMessageAt) {
 		c.lastMessageAt = lastMessageAt
 	}
-	action := c.refreshLocked(time.Now())
+	action := c.refreshLocked()
 	c.mu.Unlock()
 	c.applyAction(action)
 }
@@ -113,23 +115,17 @@ func (c *recoveryTailController) Publish(offset, messages uint64) {
 		c.frontiers.PublishedOffset = offset
 	}
 	c.frontiers.PublishedMessages = max(c.frontiers.PublishedMessages, messages)
-	action := c.refreshLocked(time.Now())
+	action := c.refreshLocked()
 	c.mu.Unlock()
 	c.applyAction(action)
 }
 
-func (c *recoveryTailController) UnderSoftPressure() bool {
-	// Maintenance workers call this even without new WAL traffic, so an idle
-	// tail must also enter the shared append limiter here.
-	c.transitionMu.Lock()
-	defer c.transitionMu.Unlock()
+// ShouldFlush is polled by the persistence workers, including during idle
+// traffic. Flush thresholds never change append admission or limiter state.
+func (c *recoveryTailController) ShouldFlush() bool {
 	c.mu.Lock()
-	now := time.Now()
-	action := c.refreshLocked(now)
-	pressured := c.softPressureLocked(now)
-	c.mu.Unlock()
-	c.applyAction(action)
-	return pressured
+	defer c.mu.Unlock()
+	return c.shouldFlushLocked(time.Now())
 }
 
 func (c *recoveryTailController) Snapshot() recoveryTailSnapshot {
@@ -138,7 +134,7 @@ func (c *recoveryTailController) Snapshot() recoveryTailSnapshot {
 	return c.frontiers
 }
 
-func (c *recoveryTailController) refreshLocked(now time.Time) recoveryTailAction {
+func (c *recoveryTailController) refreshLocked() recoveryTailAction {
 	c.frontiers.RecoveryTail = saturatingSub(
 		c.frontiers.ObservedOffset,
 		c.frontiers.PublishedOffset,
@@ -166,9 +162,8 @@ func (c *recoveryTailController) refreshLocked(now time.Time) recoveryTailAction
 			c.state = recoveryTailPressureReject
 			return recoveryTailActionReject
 		}
-	case c.softPressureLocked(now):
-		if c.state == recoveryTailPressureNormal ||
-			(c.state == recoveryTailPressureReject && c.frontiers.RecoveryTail <= c.lowWatermark) {
+	case c.frontiers.RecoveryTail >= c.softWatermark:
+		if c.state == recoveryTailPressureNormal {
 			c.state = recoveryTailPressureSlowdown
 			return recoveryTailActionSlowdown
 		}
@@ -181,9 +176,9 @@ func (c *recoveryTailController) refreshLocked(now time.Time) recoveryTailAction
 	return recoveryTailActionNone
 }
 
-func (c *recoveryTailController) softPressureLocked(now time.Time) bool {
-	return c.frontiers.RecoveryTail >= c.softWatermark ||
-		(c.softWatermarkMessages > 0 && c.frontiers.RecoveryTailMessages >= c.softWatermarkMessages) ||
+func (c *recoveryTailController) shouldFlushLocked(now time.Time) bool {
+	return (c.flushSizeBytes > 0 && c.frontiers.RecoveryTail >= c.flushSizeBytes) ||
+		(c.flushMessageCount > 0 && c.frontiers.RecoveryTailMessages >= c.flushMessageCount) ||
 		(c.idleMinBytes > 0 && c.idleTimeout > 0 && c.frontiers.RecoveryTail > c.idleMinBytes &&
 			!c.lastMessageAt.IsZero() && !now.Before(c.lastMessageAt.Add(c.idleTimeout)))
 }
@@ -209,7 +204,7 @@ type recoveryTailSlowdownChecker struct {
 func (c recoveryTailSlowdownChecker) Check() bool {
 	c.controller.mu.Lock()
 	defer c.controller.mu.Unlock()
-	return c.controller.frontiers.RecoveryTail > c.controller.lowWatermark || c.controller.softPressureLocked(time.Now())
+	return c.controller.frontiers.RecoveryTail > c.controller.lowWatermark
 }
 
 func (recoveryTailSlowdownChecker) SlowdownStartupHWM() int64 {

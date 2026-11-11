@@ -392,11 +392,11 @@ func (r *recoveryStorageImpl) startAckTracker() {
 	r.ackTrackerWG.Add(1)
 	go func() {
 		defer r.ackTrackerWG.Done()
-		var underPressure func() bool
+		var shouldFlush func() bool
 		if r.tailController != nil {
-			underPressure = r.tailController.UnderSoftPressure
+			shouldFlush = r.tailController.ShouldFlush
 		}
-		r.ackTracker.Run(r.backgroundTaskNotifier.Context(), r.cfg.ackStallTimeout, underPressure)
+		r.ackTracker.Run(r.backgroundTaskNotifier.Context(), r.cfg.ackStallTimeout, shouldFlush)
 	}()
 }
 
@@ -407,13 +407,13 @@ func (r *recoveryStorageImpl) startSummaryBacklog() {
 	r.summaryWG.Add(1)
 	go func() {
 		defer r.summaryWG.Done()
-		var underPressure func() bool
+		var shouldFlush func() bool
 		if r.tailController != nil {
-			underPressure = r.tailController.UnderSoftPressure
+			shouldFlush = r.tailController.ShouldFlush
 		}
-		// Summary checks tail pressure independently of AckTracker stalls. The
+		// Summary checks flush thresholds independently of AckTracker stalls. The
 		// current WAL L0 materializer owns its own consumption age policy.
-		r.summaryManager.Run(r.backgroundTaskNotifier.Context(), 0, underPressure)
+		r.summaryManager.Run(r.backgroundTaskNotifier.Context(), 0, shouldFlush)
 	}()
 }
 

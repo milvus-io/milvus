@@ -17,15 +17,16 @@ func newConfig() *config {
 	tailSoftWatermark := params.StreamingCfg.WALRecoveryTailSoftWatermark.GetAsSize()
 	tailHighWatermark := params.StreamingCfg.WALRecoveryTailHighWatermark.GetAsSize()
 	cfg := &config{
-		persistInterval:           persistInterval,
-		ackStallTimeout:           ackStallTimeout,
-		maxDirtyMessages:          maxDirtyMessages,
-		tailLowWatermarkBytes:     nonNegativeSize(tailLowWatermark),
-		tailSoftWatermarkBytes:    nonNegativeSize(tailSoftWatermark),
-		tailHighWatermarkBytes:    nonNegativeSize(tailHighWatermark),
-		tailSoftWatermarkMessages: nonNegativeSize(int64(params.StreamingCfg.WALRecoveryTailSoftWatermarkMessages.GetAsInt())),
-		tailIdleMinBytes:          nonNegativeSize(params.StreamingCfg.WALRecoveryTailIdleMinSize.GetAsSize()),
-		tailIdleTimeout:           params.StreamingCfg.WALRecoveryTailIdleTimeout.GetAsDurationByParse(),
+		persistInterval:        persistInterval,
+		ackStallTimeout:        ackStallTimeout,
+		maxDirtyMessages:       maxDirtyMessages,
+		tailLowWatermarkBytes:  nonNegativeSize(tailLowWatermark),
+		tailSoftWatermarkBytes: nonNegativeSize(tailSoftWatermark),
+		tailHighWatermarkBytes: nonNegativeSize(tailHighWatermark),
+		flushSizeBytes:         nonNegativeSize(params.StreamingCfg.WALRecoveryFlushSizeThreshold.GetAsSize()),
+		flushMessageCount:      nonNegativeSize(int64(params.StreamingCfg.WALRecoveryFlushMessageThreshold.GetAsInt())),
+		flushIdleMinBytes:      nonNegativeSize(params.StreamingCfg.WALRecoveryFlushIdleMinSize.GetAsSize()),
+		flushIdleTimeout:       params.StreamingCfg.WALRecoveryFlushIdleTimeout.GetAsDurationByParse(),
 	}
 	if err := cfg.validate(); err != nil {
 		panic(err)
@@ -42,15 +43,16 @@ func nonNegativeSize(size int64) uint64 {
 
 // config is the configuration for the recovery module.
 type config struct {
-	persistInterval           time.Duration // persistInterval is the interval to persist the dirty recovery snapshot.
-	ackStallTimeout           time.Duration // ackStallTimeout is the maximum wait before requesting VChannel data persistence.
-	maxDirtyMessages          int           // maxDirtyMessages is the maximum number of dirty messages to be persisted.
-	tailLowWatermarkBytes     uint64        // tailLowWatermarkBytes releases append pressure after checkpoint publication catches up.
-	tailSoftWatermarkBytes    uint64        // tailSoftWatermarkBytes triggers VChannel persistence and append slowdown.
-	tailHighWatermarkBytes    uint64        // tailHighWatermarkBytes rejects new DML appends.
-	tailSoftWatermarkMessages uint64        // unpublished message count that starts soft pressure; zero disables it.
-	tailIdleMinBytes          uint64        // minimum idle unpublished bytes for soft pressure; zero disables it.
-	tailIdleTimeout           time.Duration // time without new non-TimeTick WAL messages before idle pressure.
+	persistInterval        time.Duration // persistInterval is the interval to persist the dirty recovery snapshot.
+	ackStallTimeout        time.Duration // ackStallTimeout is the maximum wait before requesting VChannel data persistence.
+	maxDirtyMessages       int           // maxDirtyMessages is the maximum number of dirty messages to be persisted.
+	tailLowWatermarkBytes  uint64        // tailLowWatermarkBytes releases append pressure after checkpoint publication catches up.
+	tailSoftWatermarkBytes uint64        // tailSoftWatermarkBytes triggers append slowdown.
+	tailHighWatermarkBytes uint64        // tailHighWatermarkBytes rejects new DML appends.
+	flushSizeBytes         uint64        // unpublished bytes that trigger persistence; zero disables it.
+	flushMessageCount      uint64        // unpublished message count that triggers persistence; zero disables it.
+	flushIdleMinBytes      uint64        // minimum idle unpublished bytes for persistence; zero disables it.
+	flushIdleTimeout       time.Duration // time without new non-TimeTick WAL messages before idle persistence.
 }
 
 func (cfg *config) validate() error {

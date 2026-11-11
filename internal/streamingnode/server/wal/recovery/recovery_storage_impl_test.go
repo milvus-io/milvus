@@ -1391,7 +1391,7 @@ func TestRecoverySummaryBacklogRequiresTailPressure(t *testing.T) {
 				return rs.summaryManager.LastAcked() == 50
 			}, 1100*time.Millisecond, time.Millisecond,
 				"neither syncPeriod nor the checkpoint interval may seal Summary")
-			rs.tailController.UpdateTrackerFrontiers(rs.cfg.tailSoftWatermarkBytes, rs.cfg.tailSoftWatermarkBytes, 0, time.Time{})
+			rs.tailController.UpdateTrackerFrontiers(rs.cfg.flushSizeBytes, rs.cfg.flushSizeBytes, 0, time.Time{})
 			require.Eventually(t, func() bool {
 				return rs.summaryManager.LastAcked() == 50
 			}, 3*time.Second, time.Millisecond)
@@ -1401,21 +1401,23 @@ func TestRecoverySummaryBacklogRequiresTailPressure(t *testing.T) {
 	}
 }
 
-func TestAdditionalTailPressureFlushesCompletedSummaryBacklog(t *testing.T) {
-	for _, idle := range []bool{false, true} {
-		name := "message-count"
-		if idle {
-			name = "idle-size"
-		}
+func TestFlushThresholdsPersistCompletedSummaryWithoutLimiting(t *testing.T) {
+	for _, name := range []string{"message-count", "idle-size", "size"} {
 		t.Run(name, func(t *testing.T) {
 			rs := newTestRecoveryStorage(t, &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 10})
-			rs.cfg.tailSoftWatermarkMessages = 3
-			rs.cfg.tailIdleMinBytes = 0
-			rs.cfg.tailIdleTimeout = 0
-			if idle {
-				rs.cfg.tailSoftWatermarkMessages = 0
-				rs.cfg.tailIdleMinBytes = 1
-				rs.cfg.tailIdleTimeout = time.Nanosecond
+			rs.cfg.flushSizeBytes = 0
+			rs.cfg.flushMessageCount = 3
+			rs.cfg.flushIdleMinBytes = 0
+			rs.cfg.flushIdleTimeout = 0
+			if name != "message-count" {
+				rs.cfg.flushMessageCount = 0
+			}
+			if name == "size" {
+				rs.cfg.flushSizeBytes = 1
+			}
+			if name == "idle-size" {
+				rs.cfg.flushIdleMinBytes = 1
+				rs.cfg.flushIdleTimeout = time.Nanosecond
 			}
 			limiter := &recordingRecoveryTailRateLimiter{}
 			rs.tailController = newRecoveryTailController(rs.cfg, limiter, rs.metrics)
@@ -1426,7 +1428,7 @@ func TestAdditionalTailPressureFlushesCompletedSummaryBacklog(t *testing.T) {
 			rs.refreshRecoveryTail()
 			require.Zero(t, rs.ackTracker.Pending())
 			require.Less(t, rs.Metrics().RecoveryTailBytes, rs.cfg.tailLowWatermarkBytes)
-			require.True(t, rs.tailController.UnderSoftPressure())
+			require.True(t, rs.tailController.ShouldFlush())
 			rs.startSummaryBacklog()
 			t.Cleanup(func() {
 				rs.backgroundTaskNotifier.Cancel()
@@ -1437,9 +1439,63 @@ func TestAdditionalTailPressureFlushesCompletedSummaryBacklog(t *testing.T) {
 			snapshot := rs.consumeDirtySnapshot()
 			require.Equal(t, uint64(50), snapshot.Checkpoint.TimeTick)
 			require.Equal(t, uint64(2), snapshot.LogicalEndMessageCount, "count and bytes must stop at the Summary-gated checkpoint")
-			actions, checker := limiter.snapshot()
-			require.Equal(t, []recoveryTailAction{recoveryTailActionSlowdown}, actions)
-			require.True(t, checker.Check())
+			actions, _ := limiter.snapshot()
+			require.Empty(t, actions, "Summary persistence must not change append admission")
+		})
+	}
+}
+
+func TestFlushThresholdsRequestVChannelPersistenceWithoutLimiting(t *testing.T) {
+	for _, name := range []string{"message-count", "idle-size", "size"} {
+		t.Run(name, func(t *testing.T) {
+			rs := newTestRecoveryStorage(t, &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 10})
+			rs.cfg.ackStallTimeout = time.Hour // Isolate flushing from the ordinary age trigger.
+			rs.cfg.flushSizeBytes = 0
+			rs.cfg.flushMessageCount = 0
+			rs.cfg.flushIdleMinBytes = 0
+			rs.cfg.flushIdleTimeout = 0
+			switch name {
+			case "message-count":
+				rs.cfg.flushMessageCount = 1
+			case "size":
+				rs.cfg.flushSizeBytes = 1
+			case "idle-size":
+				rs.cfg.flushIdleMinBytes = 1
+				rs.cfg.flushIdleTimeout = time.Nanosecond
+			}
+			limiter := &recordingRecoveryTailRateLimiter{}
+			rs.tailController = newRecoveryTailController(rs.cfg, limiter, rs.metrics)
+			owner := rs.ackTracker.Track(newRecoveryTestDeleteMessage(t, "test-vchannel", 50))
+			defer owner.Release()
+			rs.refreshRecoveryTail()
+			requested := make(chan struct {
+				vchannel string
+				through  uint64
+			}, 1)
+			mock := mockey.Mock((*vchannel.PChannelRecoveryManager).RequestPersistThrough).To(func(
+				_ *vchannel.PChannelRecoveryManager, vc string, through uint64,
+			) {
+				requested <- struct {
+					vchannel string
+					through  uint64
+				}{vc, through}
+			}).Build()
+			defer mock.UnPatch()
+			defer func() {
+				rs.backgroundTaskNotifier.Cancel()
+				rs.ackTrackerWG.Wait()
+				rs.closeRecoveryResources()
+			}()
+			rs.startAckTracker()
+			select {
+			case request := <-requested:
+				require.Equal(t, "test-vchannel", request.vchannel)
+				require.Equal(t, uint64(50), request.through)
+			case <-time.After(3 * time.Second):
+				t.Fatal("flush trigger did not reach the VChannel persistence path")
+			}
+			actions, _ := limiter.snapshot()
+			require.Empty(t, actions)
 		})
 	}
 }

@@ -33,34 +33,43 @@ func TestRecoveryConfigValidatesTailWatermarks(t *testing.T) {
 	}
 }
 
-func TestRecoveryTailAdditionalTriggerConfiguration(t *testing.T) {
+func TestRecoveryFlushTriggerConfiguration(t *testing.T) {
 	params := paramtable.Get()
 	cfg := newConfig()
-	require.Equal(t, uint64(6144), cfg.tailSoftWatermarkMessages)
-	require.Equal(t, uint64(512<<20), cfg.tailIdleMinBytes)
-	require.Equal(t, 10*time.Minute, cfg.tailIdleTimeout)
+	require.Equal(t, uint64(6<<30), cfg.flushSizeBytes)
+	require.Equal(t, uint64(6144), cfg.flushMessageCount)
+	require.Equal(t, uint64(512<<20), cfg.flushIdleMinBytes)
+	require.Equal(t, 10*time.Minute, cfg.flushIdleTimeout)
 	for _, item := range []*paramtable.ParamItem{
-		&params.StreamingCfg.WALRecoveryTailSoftWatermarkMessages,
-		&params.StreamingCfg.WALRecoveryTailIdleMinSize,
-		&params.StreamingCfg.WALRecoveryTailIdleTimeout,
+		&params.StreamingCfg.WALRecoveryFlushSizeThreshold,
+		&params.StreamingCfg.WALRecoveryFlushMessageThreshold,
+		&params.StreamingCfg.WALRecoveryFlushIdleMinSize,
+		&params.StreamingCfg.WALRecoveryFlushIdleTimeout,
 	} {
 		old := item.GetValue()
 		t.Cleanup(func() { require.NoError(t, params.Save(item.Key, old)) })
 	}
-	require.NoError(t, params.Save(params.StreamingCfg.WALRecoveryTailSoftWatermarkMessages.Key, "12"))
-	require.NoError(t, params.Save(params.StreamingCfg.WALRecoveryTailIdleMinSize.Key, "1MB"))
-	require.NoError(t, params.Save(params.StreamingCfg.WALRecoveryTailIdleTimeout.Key, "1s"))
+	require.NoError(t, params.Save(params.StreamingCfg.WALRecoveryFlushSizeThreshold.Key, "32GB"))
+	require.NoError(t, params.Save(params.StreamingCfg.WALRecoveryFlushMessageThreshold.Key, "12"))
+	require.NoError(t, params.Save(params.StreamingCfg.WALRecoveryFlushIdleMinSize.Key, "1MB"))
+	require.NoError(t, params.Save(params.StreamingCfg.WALRecoveryFlushIdleTimeout.Key, "1s"))
 	cfg = newConfig()
-	require.Equal(t, uint64(12), cfg.tailSoftWatermarkMessages)
-	require.Equal(t, uint64(1<<20), cfg.tailIdleMinBytes)
-	require.Equal(t, time.Second, cfg.tailIdleTimeout)
+	require.Equal(t, uint64(32<<30), cfg.flushSizeBytes)
+	require.Equal(t, uint64(4<<30), cfg.tailLowWatermarkBytes)
+	require.Equal(t, uint64(8<<30), cfg.tailSoftWatermarkBytes)
+	require.Equal(t, uint64(16<<30), cfg.tailHighWatermarkBytes)
+	require.Equal(t, uint64(12), cfg.flushMessageCount)
+	require.Equal(t, uint64(1<<20), cfg.flushIdleMinBytes)
+	require.Equal(t, time.Second, cfg.flushIdleTimeout)
 	for _, value := range []string{"0", "-1"} {
-		require.NoError(t, params.Save(params.StreamingCfg.WALRecoveryTailSoftWatermarkMessages.Key, value))
-		require.NoError(t, params.Save(params.StreamingCfg.WALRecoveryTailIdleMinSize.Key, value))
-		require.NoError(t, params.Save(params.StreamingCfg.WALRecoveryTailIdleTimeout.Key, value+"s"))
+		require.NoError(t, params.Save(params.StreamingCfg.WALRecoveryFlushSizeThreshold.Key, value))
+		require.NoError(t, params.Save(params.StreamingCfg.WALRecoveryFlushMessageThreshold.Key, value))
+		require.NoError(t, params.Save(params.StreamingCfg.WALRecoveryFlushIdleMinSize.Key, value))
+		require.NoError(t, params.Save(params.StreamingCfg.WALRecoveryFlushIdleTimeout.Key, value+"s"))
 		cfg = newConfig()
-		require.Zero(t, cfg.tailSoftWatermarkMessages)
-		require.Zero(t, cfg.tailIdleMinBytes)
-		require.LessOrEqual(t, cfg.tailIdleTimeout, time.Duration(0))
+		require.Zero(t, cfg.flushSizeBytes)
+		require.Zero(t, cfg.flushMessageCount)
+		require.Zero(t, cfg.flushIdleMinBytes)
+		require.LessOrEqual(t, cfg.flushIdleTimeout, time.Duration(0))
 	}
 }
