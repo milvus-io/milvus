@@ -47,8 +47,9 @@ move between the two states; the rules for load, compaction and the segment
 row cap follow the schema at the time they are evaluated. A struct array
 field with only scalar sub-fields does not make a vector collection.
 
-The implementation is Draft PR #54604. Its first five commits create
-collections without a vector field; the last three add the conversion.
+The implementation is Draft PR #54604, one PR for creating collections
+without a vector field and for the conversion; its description lists the
+commits.
 
 ## 2. What changes
 
@@ -849,8 +850,8 @@ from `3df0cbcdd68`.
 | `proxy/task.go:3141`, `:3410` load collection / partitions | `ErrIndexNotFound` fails the load | fail only if a loaded vector field has no index; QueryCoord already treats "no index" as an empty index list |
 | `querynodev2/services.go:206` `WatchDmChannels`, `:497` `LoadSegments` | an empty `IndexInfoList` returns `ErrIndexNotFound`, the channel watch retries forever and the load times out after `loadTimeoutSeconds` | the check applies only when the schema has vector fields |
 | `httpserver/utils.go:3061` `anyToColumns` | REST insert needs a vector or function | check removed |
-| RootCoord `prepareAlterSchemaAddField` and the function-add path, `schemautil.ValidateSchemaEvolution`; Proxy `addCollectionFieldTask`, `validateAddStructFieldRequest` | a vector field, struct vector sub-field or vector-output function may be added | first five commits of #54604: rejected when the collection has no vector field. Conversion commits: allowed again, under the existing rule that an added vector field is nullable |
-| Proxy `validateDropField`, `validateDropStructSubField`, drop struct field, `validateDropFunction`; RootCoord `buildSchemaForDropField`, `buildSchemaForDropFunctionField`; `schemautil.validateDroppedEvolutionField` | dropping the last vector field is rejected (eight checks with three messages) | first five commits of #54604: unchanged. Conversion commits: rejected only when `common.enableCollectionWithoutVector` is off |
+| RootCoord `prepareAlterSchemaAddField` and the function-add path, `schemautil.ValidateSchemaEvolution`; Proxy `addCollectionFieldTask`, `validateAddStructFieldRequest` | a vector field, struct vector sub-field or vector-output function may be added | unchanged: also allowed on a collection without a vector field, under the existing rule that an added vector field is nullable (an earlier revision of #54604 rejected it) |
+| Proxy `validateDropField`, `validateDropStructSubField`, drop struct field, `validateDropFunction`; RootCoord `buildSchemaForDropField`, `buildSchemaForDropFunctionField`; `schemautil.validateDroppedEvolutionField` | dropping the last vector field is rejected (eight checks with three messages) | rejected only when `common.enableCollectionWithoutVector` is off |
 | segcore `plan_c.cpp` `CreateSearchPlanByExpr` | asserts that the collection has index meta; always true while a loaded collection had a vector index | Conversion: no index meta is reported as "field index is not loaded", the error of a vector field whose index is not loaded |
 | QueryCoord `collection_readiness.go` `prepareAutoLoadRequest` (`proxy.enableAutoLoad`) | `ErrIndexNotFound` fails the automatic load | fail only if the schema has a vector field |
 | `proxy/task.go:1297`, `:1337` drop struct field / function | `removed >= vectorCount` blocks the drop; always true at 0, so every struct-field and function drop is blocked | `removed > 0 &&`, as RootCoord already does |
