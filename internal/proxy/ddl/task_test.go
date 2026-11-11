@@ -6136,6 +6136,9 @@ func TestCreateCollectionTaskRejectsStructSubFieldTextMatch(t *testing.T) {
 // for their source field IDs only with the property, sub-fields use bare
 // names, and text match on stored sub-fields is accepted for a restore.
 func TestCreateCollectionTaskPreserveFieldIDs(t *testing.T) {
+	enableMaterializedView := &paramtable.Get().CommonCfg.EnableMaterializedView
+	previous := enableMaterializedView.SwapTempValue("true")
+	t.Cleanup(func() { enableMaterializedView.SwapTempValue(previous) })
 	ctx := context.Background()
 	preserve := []*commonpb.KeyValuePair{{Key: util.PreserveFieldIdsKey, Value: "true"}}
 	newTask := func(t *testing.T, schema *schemapb.CollectionSchema, properties []*commonpb.KeyValuePair) *CreateCollectionTask {
@@ -6169,9 +6172,6 @@ func TestCreateCollectionTaskPreserveFieldIDs(t *testing.T) {
 
 	t.Run("dynamic field id is forwarded", func(t *testing.T) {
 		schema := baseSchema()
-		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
-			FieldID: 901, Name: common.NamespaceFieldName, DataType: schemapb.DataType_VarChar,
-		})
 		task := newTask(t, schema, preserve)
 		require.NoError(t, task.PreExecute(ctx))
 		forwarded := &schemapb.CollectionSchema{}
@@ -6181,13 +6181,99 @@ func TestCreateCollectionTaskPreserveFieldIDs(t *testing.T) {
 			ids[field.GetName()] = field.GetFieldID()
 		}
 		require.Equal(t, int64(900), ids[common.MetaFieldName])
-		require.Equal(t, int64(901), ids[common.NamespaceFieldName])
 		for i, sub := range forwarded.GetStructArrayFields()[0].GetFields() {
 			source := schema.GetStructArrayFields()[0].GetFields()[i]
 			require.Equal(t, typeutil.ConcatStructFieldName(testStructArrayField, source.GetName()), sub.GetName())
 			require.Equal(t, source.GetFieldID(), sub.GetFieldID())
 		}
 	})
+
+	for _, mode := range []string{"", common.NamespaceModePartitionKey} {
+		for _, numPartitions := range []int64{0, 8} {
+			t.Run(fmt.Sprintf("namespace mode %q partitions %d", mode, numPartitions), func(t *testing.T) {
+				schema := baseSchema()
+				schema.EnableNamespace = true
+				// Only the source ID and type are required; RootCoord owns the role.
+				schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+					FieldID: 901, Name: common.NamespaceFieldName, DataType: schemapb.DataType_VarChar,
+				})
+				properties := append(append([]*commonpb.KeyValuePair{}, preserve...),
+					&commonpb.KeyValuePair{Key: common.PartitionKeyIsolationKey, Value: "true"},
+					&commonpb.KeyValuePair{Key: common.NamespaceModeKey, Value: mode})
+				task := newTask(t, schema, properties)
+				task.NumPartitions = numPartitions
+				require.NoError(t, task.PreExecute(ctx))
+				require.Positive(t, task.NumPartitions)
+				if numPartitions != 0 {
+					require.Equal(t, numPartitions, task.NumPartitions)
+				}
+				forwarded := &schemapb.CollectionSchema{}
+				require.NoError(t, proto.Unmarshal(task.Schema, forwarded))
+				var namespaceID int64
+				for _, field := range forwarded.GetFields() {
+					if field.GetName() == common.NamespaceFieldName {
+						namespaceID = field.GetFieldID()
+					}
+				}
+				require.Equal(t, int64(901), namespaceID)
+			})
+		}
+	}
+
+	for _, tc := range []struct {
+		name             string
+		enableNamespace  bool
+		mode             string
+		numPartitions    int64
+		userPartitionKey bool
+		wantError        string
+	}{
+		{name: "namespace disabled", wantError: "does not get a namespace field"},
+		{name: "partition namespace mode", enableNamespace: true, mode: common.NamespaceModePartition, wantError: "does not get a namespace field"},
+		{name: "invalid namespace mode", enableNamespace: true, mode: "invalid", wantError: "invalid namespace.mode"},
+		{name: "negative partition count", enableNamespace: true, numPartitions: -1, wantError: "partitions should be greater than 0"},
+		{name: "excess partition count", enableNamespace: true, numPartitions: paramtable.Get().RootCoordCfg.MaxPartitionNum.GetAsInt64() + 1, wantError: "exceeds max configuration"},
+		{name: "explicit partition key conflicts", enableNamespace: true, userPartitionKey: true, wantError: "more than one partition key"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := baseSchema()
+			schema.EnableNamespace = tc.enableNamespace
+			schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+				FieldID: 901, Name: common.NamespaceFieldName, DataType: schemapb.DataType_VarChar,
+			})
+			if tc.userPartitionKey {
+				schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+					FieldID: 902, Name: "tenant", DataType: schemapb.DataType_Int64, IsPartitionKey: true,
+				})
+			}
+			properties := append(append([]*commonpb.KeyValuePair{}, preserve...),
+				&commonpb.KeyValuePair{Key: common.NamespaceModeKey, Value: tc.mode})
+			task := newTask(t, schema, properties)
+			task.NumPartitions = tc.numPartitions
+			err := task.PreExecute(ctx)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.ErrorContains(t, err, tc.wantError)
+		})
+	}
+
+	for _, mode := range []string{"", common.NamespaceModePartition} {
+		t.Run("without hidden namespace field "+mode, func(t *testing.T) {
+			schema := baseSchema()
+			schema.EnableNamespace = mode == common.NamespaceModePartition
+			properties := append(append([]*commonpb.KeyValuePair{}, preserve...),
+				&commonpb.KeyValuePair{Key: common.NamespaceModeKey, Value: mode})
+			require.NoError(t, newTask(t, schema, properties).PreExecute(ctx))
+			if !schema.EnableNamespace {
+				schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+					FieldID: 902, Name: "tenant", DataType: schemapb.DataType_Int64, IsPartitionKey: true,
+				})
+				properties = append(properties, &commonpb.KeyValuePair{Key: common.PartitionKeyIsolationKey, Value: "true"})
+				task := newTask(t, schema, properties)
+				task.NumPartitions = 8
+				require.NoError(t, task.PreExecute(ctx))
+			}
+		})
+	}
 
 	t.Run("dynamic field rejected without the property", func(t *testing.T) {
 		err := newTask(t, baseSchema(), nil).PreExecute(ctx)

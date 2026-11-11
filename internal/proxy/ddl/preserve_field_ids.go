@@ -37,7 +37,7 @@ func isPreserveFieldIDs(properties []*commonpb.KeyValuePair) bool {
 // returns them. They carry only the source field IDs: RootCoord creates both
 // fields itself and keeps these IDs, so they skip the user-field validation
 // and are put back before the request is forwarded.
-func takePreservedSystemFields(schema *schemapb.CollectionSchema) ([]*schemapb.FieldSchema, error) {
+func takePreservedSystemFields(schema *schemapb.CollectionSchema, properties []*commonpb.KeyValuePair) ([]*schemapb.FieldSchema, error) {
 	var taken []*schemapb.FieldSchema
 	fields := make([]*schemapb.FieldSchema, 0, len(schema.GetFields()))
 	for _, field := range schema.GetFields() {
@@ -50,6 +50,14 @@ func takePreservedSystemFields(schema *schemapb.CollectionSchema) ([]*schemapb.F
 			}
 			taken = append(taken, field)
 		case common.NamespaceFieldName:
+			if err := common.ValidateNamespaceMode(properties...); err != nil {
+				return nil, err
+			}
+			if !schema.GetEnableNamespace() || !common.IsNamespaceModePartitionKey(properties...) {
+				return nil, merr.WrapErrParameterInvalidMsg(
+					"the schema contains the namespace field %s but the collection does not get a namespace field",
+					common.NamespaceFieldName)
+			}
 			if field.GetDataType() != schemapb.DataType_VarChar {
 				return nil, merr.WrapErrParameterInvalidMsg(
 					"with %s=true the namespace field %s must have data type VarChar; only its field ID is used",
