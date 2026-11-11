@@ -751,6 +751,10 @@ func (s *Server) OperatePrivilegeGroup(ctx context.Context, request *milvuspb.Op
 	return s.mixCoord.OperatePrivilegeGroup(ctx, request)
 }
 
+func (s *Server) PrewarmCollection(ctx context.Context, req *querypb.PrewarmCollectionRequest) (*commonpb.Status, error) {
+	return s.mixCoord.PrewarmCollection(ctx, req)
+}
+
 func (s *Server) EnsureCollectionReady(ctx context.Context, req *querypb.EnsureCollectionReadyRequest) (*commonpb.Status, error) {
 	return s.mixCoord.EnsureCollectionReady(ctx, req)
 }

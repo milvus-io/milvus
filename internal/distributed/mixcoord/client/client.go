@@ -1667,6 +1667,18 @@ func (c *Client) ListIndexes(ctx context.Context, in *indexpb.ListIndexesRequest
 	})
 }
 
+// PrewarmCollection never retries admission: an uncertain response must not
+// recreate this ephemeral request on a replacement coordinator.
+func (c *Client) PrewarmCollection(ctx context.Context, req *querypb.PrewarmCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	ctx = retry.WithMaxAttemptsContext(ctx, 1)
+	req = typeutil.Clone(req)
+	req.Base = commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())))
+	opts = append(opts, grpc.WaitForReady(false))
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*commonpb.Status, error) {
+		return client.PrewarmCollection(ctx, req, opts...)
+	})
+}
+
 func (c *Client) EnsureCollectionReady(ctx context.Context, req *querypb.EnsureCollectionReadyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())))

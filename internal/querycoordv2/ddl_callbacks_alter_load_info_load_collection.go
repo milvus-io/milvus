@@ -36,13 +36,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // broadcastAlterLoadConfigCollectionV2ForLoadCollection is called when the load collection request is received.
-func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (retErr error) {
+func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) error {
 	broadcaster, err := s.startBroadcastWithCollectionIDLock(ctx, req.GetCollectionID())
 	if err != nil {
 		return err
@@ -53,37 +51,6 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 	coll, err := s.meta.GetCollectionInfo(req.GetCollectionID())
 	if err != nil {
 		return err
-	}
-
-	if err := s.validateLoadCollectionWarmupHint(req, coll); err != nil {
-		return err
-	}
-	if req.GetWarmupHint() {
-		// Subscribe while holding the DDL guard, before Broadcast can release
-		// it. Release/reload must invalidate this request even if it races the
-		// return from Broadcast. Warmup is local work, never WAL intent.
-		subscription := s.qviewsRuntime.readyChanges.Subscribe(req.GetCollectionID())
-		defer func() {
-			if retErr != nil {
-				subscription.Close()
-				return
-			}
-			s.qviewsRuntime.warmCollectionOnce(ctx, req.GetCollectionID(), coll.VChannelNames, subscription)
-		}()
-	}
-	currentLoadConfig := s.qviewsRuntime.loadConfigStore.GetConfig(req.GetCollectionID())
-	if currentLoadConfig != nil && req.RequestsInPlaceWarmup() {
-		return nil
-	}
-
-	loadFields, fieldIndexIDs := req.GetLoadFields(), req.GetFieldIndexID()
-	if req.RequestsInPlaceWarmup() {
-		// No load configuration exists under the lock. This is a first load,
-		// including when a release won the race with this request.
-		loadFields, fieldIndexIDs, err = s.defaultLoadFieldsAndIndexes(ctx, coll.ID, coll.Schema.GetName(), coll.Schema)
-		if err != nil {
-			return err
-		}
 	}
 
 	partitionIDs := coll.Partitions
@@ -150,19 +117,20 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 		Expected: job.ExpectedLoadConfig{
 			ExpectedPartitionIDs:             partitionIDs,
 			ExpectedReplicaNumber:            expectedReplicasNumber,
-			ExpectedFieldIndexID:             fieldIndexIDs,
-			ExpectedLoadFields:               loadmgr.PreloadFieldIDsForSchema(coll.Schema, loadFields),
+			ExpectedFieldIndexID:             req.GetFieldIndexID(),
+			ExpectedLoadFields:               loadmgr.PreloadFieldIDsForSchema(coll.Schema, req.GetLoadFields()),
 			ExpectedRequiredFields:           loadmgr.FieldsToMessage(loadmgr.RequiredFieldsForSchema(coll.Schema)),
 			ExpectedPriority:                 req.GetPriority(),
 			ExpectedUserSpecifiedReplicaMode: userSpecifiedReplicaMode,
 		},
 	}
 
+	currentLoadConfig := s.qviewsRuntime.loadConfigStore.GetConfig(req.GetCollectionID())
 	msg, err := s.generateAlterLoadConfigMessageForLoadCollection(ctx, coll, currentLoadConfig, qviewsExpectedLoadConfig{
 		PartitionIDs:             partitionIDs,
 		ReplicaNumber:            expectedReplicasNumber,
-		FieldIndexID:             fieldIndexIDs,
-		LoadFields:               loadFields,
+		FieldIndexID:             req.GetFieldIndexID(),
+		LoadFields:               req.GetLoadFields(),
 		Priority:                 req.GetPriority(),
 		UserSpecifiedReplicaMode: userSpecifiedReplicaMode,
 	})
@@ -185,29 +153,6 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 	}
 	recordLoadResourceDemand(requiredByRG)
 	return nil
-}
-
-// validateLoadCollectionWarmupHint validates an optional, local cache request.
-// It allocates no identity and never records durable load intent.
-func (s *Server) validateLoadCollectionWarmupHint(req *querypb.LoadCollectionRequest, coll *metacache.CollectionInfo) error {
-	if !req.GetWarmupHint() {
-		return nil
-	}
-	if !paramtable.Get().QueryCoordCfg.EnableLoadCollectionWarmupHint.GetAsBool() {
-		return merr.Wrap(merr.ErrServiceUnimplemented, "LoadCollection warmup hint requires queryCoord.enableLoadCollectionWarmupHint after a full-cluster upgrade")
-	}
-	if typeutil.IsExternalCollection(coll.Schema) {
-		return merr.WrapErrParameterInvalidMsg("load warmup hint is not supported for external collections")
-	}
-	return nil
-}
-
-func newAlterLoadConfigBroadcast(header *messagespb.AlterLoadConfigMessageHeader) message.BroadcastMutableMessage {
-	return message.NewAlterLoadConfigMessageBuilderV2().
-		WithHeader(header).
-		WithBody(&messagespb.AlterLoadConfigMessageBody{}).
-		WithControlChannelBroadcast().
-		MustBuildBroadcast()
 }
 
 // getLoadReplicaConfigForRequest resolves the replica configuration a load
@@ -300,7 +245,11 @@ func (s *Server) generateAlterLoadConfigMessageForLoadCollection(
 	if proto.Equal(loadConfigIntoAlterLoadConfigHeader(current), header) {
 		return nil, nil
 	}
-	return newAlterLoadConfigBroadcast(header), nil
+	return message.NewAlterLoadConfigMessageBuilderV2().
+		WithHeader(header).
+		WithBody(&messagespb.AlterLoadConfigMessageBody{}).
+		WithControlChannelBroadcast().
+		MustBuildBroadcast(), nil
 }
 
 func (s *Server) generateQViewsReplicaConfigs(

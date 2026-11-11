@@ -1,14 +1,14 @@
-# LoadCollection Warmup Hint Design (v5)
+# LoadCollection Warmup Hint Design (v6)
 
 - **Scope:** Load admission, one-time prewarm requests, QN segment caches and SN lazy BM25 statistics.
-- **History:** v3 attached an epoch to load intent; v4 made dispatch ephemeral. v5 removes the epoch and separates prewarming from View synchronization entirely.
+- **Architecture:** Ordinary load and ephemeral prewarm use independent coordinator RPCs. There is no warmup epoch or View synchronization trigger.
 
 ## 1. Contract
 
 `LoadCollection(load_params={"warmup_hint": "true"})` requests one background cache-warming pass on the local cluster. It creates no collection property or persistent policy.
 
-- A cold collection first reaches ordinary load readiness. Prewarming starts afterwards; queries and public loading progress do not wait for it.
-- A bare hinted load on an already loaded collection preserves its fields, partitions, replicas and resource groups. Explicit load-setting changes retain ordinary semantics, followed by prewarming after readiness.
+- Proxy performs an ordinary load, then asynchronously submits a separate prewarm request after load admission succeeds. Each shard starts prewarming when its own serving View is Up; it does not wait for whole-collection loading progress. Queries and public loading progress do not wait for prewarming.
+- Hinted loads retain ordinary load validation and configuration semantics, including field/index checks. The separate prewarm RPC never loads a collection or modifies its load configuration.
 - Each explicit hint creates a new request. Existing cache entries or an already materialized BM25 aggregate can make the pass cheap.
 - Balance, flush, compaction, new writes and restart neither inherit nor restore the request. Already borrowed resources continue warming across View replacement; the request never follows a new View or retries on another node.
 - Release, load-config replacement, timeout and coordinator shutdown discard pending work and cancel running requests. A canceled warm must not abort a cache load shared by a live query.
@@ -25,13 +25,13 @@ Existing collection and field cache warmup settings remain independent. Ordinary
 
 ## 3. Admission and dispatch
 
-QueryCoord subscribes to collection readiness under the collection DDL guard before accepting the load. On successful admission it starts an in-memory task bounded by the existing load timeout. Completion of the client RPC does not cancel accepted background work. A warm-only request on a loaded collection needs no load-config broadcast or allocator call.
+The public hint is consumed by Proxy. Proxy sends the existing `LoadCollectionRequest` without any warmup fields. Its load task retains ordinary validation and dispatch. After success, Proxy asynchronously submits `PrewarmCollection(collection_id)` once; admission errors are logged and cannot change the successful load result. The coordinator load callback, WAL broadcast and load completion criteria are unchanged.
 
-The task captures the accepted load-config identity and waits for ordinary readiness. Release permanently invalidates its subscription, including release/reload with identical settings. Config replacement or coordinator shutdown also ends the wait.
+The separate prewarm handler requires an existing load configuration. Under a short config-identity guard it subscribes to release/readiness notifications, then starts an in-memory task bounded by the existing load timeout. Admission returns without waiting for Up. Completion of the admission RPC does not cancel accepted background work. No collection DDL broadcast or allocator call is involved. The task captures replicas and channels at admission; release/reload, config replacement, timeout and coordinator shutdown cancel it.
 
-After readiness it snapshots current serving shard versions and their QN placements under a load-config identity check. It sends `PrewarmOnView(shard_id, version)` once to each selected QN and the current SN owner. This request uses the existing View only to locate and borrow resources. It creates no View, changes no View metadata and participates in no View synchronization queue.
+For each captured replica/shard, the task independently waits for a serving Up View matching that load-config version. It snapshots that View version and QN placements, removes the shard from its pending set and sends `PrewarmOnView(shard_id, version)` once to each selected QN and the current SN owner. Ready shards need not wait for other shards. This request uses the existing View only to locate and borrow resources. It creates no View, changes no View metadata and participates in no View synchronization queue.
 
-Dispatch concurrency is bounded. Each target has one attempt; missing/retired Views, node loss, assignment races, timeout and storage errors end that attempt. SN resolves its owner once and pins the node ID and channel term. Neither application retry nor gRPC configured retry follows a replacement owner. Errors on one target do not cancel other targets.
+Dispatch concurrency is bounded. Both Proxy-to-QC admission and each worker target have one attempt; missing/retired Views, node loss, assignment races, timeout and storage errors end that attempt. SN resolves its owner once and pins the node ID and channel term. Neither application retry nor gRPC configured retry follows a replacement owner. Errors on one target do not cancel other targets.
 
 ## 4. Persistence, recovery and CDC
 
@@ -57,6 +57,6 @@ If a new lazy target arrives during the flight, the old warm continues its borro
 
 ## 7. Verification scope
 
-Regression tests cover cold readiness before dispatch, warm-only admission, release/reload/shutdown cancellation, one-attempt RPC behavior including real SN gRPC transport, immutable QN ReadState borrowing across View replacement, shared-query cancellation protection, and old-target SN materialization without following new data.
+Regression tests cover per-shard Up dispatch before whole-collection readiness, independent admission without load mutation, ordinary hinted-load field/index validation, release/reload/shutdown cancellation, one-attempt RPC behavior including real SN gRPC transport, immutable QN ReadState borrowing across View replacement, shared-query cancellation protection, and old-target SN materialization without following new data.
 
 Source tracing covers proxy admission, ordinary load/WAL replay, load-config recovery, automatic placement, manual placement, native ReadState pinning, and QN/SN request routing. No deployment performance claim is made by this change.

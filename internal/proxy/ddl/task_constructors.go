@@ -667,6 +667,12 @@ func (t *AddCollectionStructFieldTask) OldSchema() *schemapb.CollectionSchema { 
 func (t *AddCollectionStructFieldTask) SetOldSchema(schema *schemapb.CollectionSchema) {
 	t.oldSchema = schema
 }
+
+// PrewarmCollectionID identifies the independent prewarm request, if requested.
+func (t *LoadCollectionTask) PrewarmCollectionID() (int64, bool) {
+	return t.collectionID, t.warmupHint
+}
+
 func (t *AlterCollectionTask) Result() *commonpb.Status                              { return t.result }
 func (t *AlterCollectionFunctionTask) Result() *commonpb.Status                      { return t.result }
 func (t *AlterCollectionFieldTask) Result() *commonpb.Status                         { return t.result }

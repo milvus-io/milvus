@@ -21,7 +21,7 @@ func mockSealedResources(t *testing.T, fn func(context.Context, qviews.DataVersi
 	t.Cleanup(func() { patch.UnPatch() })
 }
 
-func startPrewarm(r *oracleRuntime, ctx context.Context, target qviews.DataVersion) <-chan error {
+func startPrewarm(ctx context.Context, r *oracleRuntime, target qviews.DataVersion) <-chan error {
 	done := make(chan error, 1)
 	go func() { _, err := r.awaitMaterializationAt(ctx, &target); done <- err }()
 	return done
@@ -34,8 +34,8 @@ func TestPrewarmMaterializesLazyAggregateOnce(t *testing.T) {
 		return nil, nil
 	})
 	r := newLazyOracle(t)
-	require.NoError(t, <-startPrewarm(r, t.Context(), r.currentVersion))
-	require.NoError(t, <-startPrewarm(r, t.Context(), r.currentVersion))
+	require.NoError(t, <-startPrewarm(t.Context(), r, r.currentVersion))
+	require.NoError(t, <-startPrewarm(t.Context(), r, r.currentVersion))
 	require.NoError(t, r.ensureMaterialized(t.Context()))
 	require.EqualValues(t, 1, calls.Load())
 }
@@ -50,9 +50,9 @@ func TestPrewarmFailureRequiresAnotherExplicitRequest(t *testing.T) {
 	})
 	r := newLazyOracle(t)
 	target := r.currentVersion
-	require.ErrorIs(t, <-startPrewarm(r, t.Context(), target), context.DeadlineExceeded)
+	require.ErrorIs(t, <-startPrewarm(t.Context(), r, target), context.DeadlineExceeded)
 	require.Never(t, func() bool { return calls.Load() > 1 }, 100*time.Millisecond, time.Millisecond)
-	require.NoError(t, <-startPrewarm(r, t.Context(), target))
+	require.NoError(t, <-startPrewarm(t.Context(), r, target))
 	require.EqualValues(t, 2, calls.Load())
 }
 
@@ -73,7 +73,7 @@ func TestPrewarmFinishesOldTargetWithoutFollowingNewView(t *testing.T) {
 		return nil, nil
 	})
 	r := newLazyOracle(t)
-	done := startPrewarm(r, t.Context(), r.currentVersion)
+	done := startPrewarm(t.Context(), r, r.currentVersion)
 	ctx := <-started
 	require.NoError(t, r.PrepareDataVersion(t.Context(), qviews.DataVersion{StreamingVersion: 11}))
 	require.NoError(t, ctx.Err(), "changing the View must preserve the acquired reads")
@@ -84,7 +84,7 @@ func TestPrewarmFinishesOldTargetWithoutFollowingNewView(t *testing.T) {
 	stats := r.currentStats
 	r.mu.RUnlock()
 	require.Nil(t, stats, "old aggregate cannot be published for the new target")
-	require.NoError(t, <-startPrewarm(r, t.Context(), qviews.DataVersion{StreamingVersion: 11}))
+	require.NoError(t, <-startPrewarm(t.Context(), r, qviews.DataVersion{StreamingVersion: 11}))
 	require.EqualValues(t, 2, calls.Load())
 }
 
@@ -103,7 +103,7 @@ func TestPrewarmCancellationPreservesSharingQuery(t *testing.T) {
 	r := newLazyOracle(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	done := startPrewarm(r, ctx, r.currentVersion)
+	done := startPrewarm(ctx, r, r.currentVersion)
 	loadCtx := <-started
 	query := make(chan error, 1)
 	go func() { query <- r.ensureMaterialized(t.Context()) }()
@@ -131,7 +131,7 @@ func TestPrewarmCancellationAndShutdownDiscardUnsharedWork(t *testing.T) {
 			r := newLazyOracle(t)
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			done := startPrewarm(r, ctx, r.currentVersion)
+			done := startPrewarm(ctx, r, r.currentVersion)
 			loadCtx := <-started
 			if shutdown {
 				r.Close()
@@ -152,7 +152,7 @@ func TestPrewarmShutdownDrainsDetachedFlight(t *testing.T) {
 		return nil, nil
 	})
 	r := newLazyOracle(t)
-	done := startPrewarm(r, t.Context(), r.currentVersion)
+	done := startPrewarm(t.Context(), r, r.currentVersion)
 	<-started
 	require.NoError(t, r.PrepareDataVersion(t.Context(), qviews.DataVersion{StreamingVersion: 11}))
 	closed := make(chan struct{})

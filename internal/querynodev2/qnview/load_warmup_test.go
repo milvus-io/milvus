@@ -53,7 +53,7 @@ func expectNoWarmup(t *testing.T, calls <-chan warmupCall) {
 	}
 }
 
-func startWarm(f *resourceTestFixture, ctx context.Context, req AcquireSegments) <-chan error {
+func startWarm(ctx context.Context, f *resourceTestFixture, req AcquireSegments) <-chan error {
 	done := make(chan error, 1)
 	go func() { done <- f.manager.Prewarm(ctx, req.Key, req.View) }()
 	return done
@@ -66,7 +66,7 @@ func TestPrewarmBorrowsReadStateAcrossViewReplacement(t *testing.T) {
 		old := f.acquire(1, 1, 1)
 		f.await(t, 1)
 		expectNoWarmup(t, warms)
-		done := startWarm(f, t.Context(), old)
+		done := startWarm(t.Context(), f, old)
 		call := awaitWarmup(t, warms)
 		f.manager.mu.Lock()
 		read := f.manager.views[old.Key].bindings[1000].prepared.read
@@ -88,7 +88,7 @@ func TestPrewarmBorrowsReadStateAcrossViewReplacement(t *testing.T) {
 		require.EqualValues(t, 1, f.loads.Load())
 
 		// A later explicit request may warm the same physical segment again.
-		again := startWarm(f, t.Context(), next)
+		again := startWarm(t.Context(), f, next)
 		awaitWarmup(t, warms).done <- nil
 		require.NoError(t, <-again)
 		expectNoWarmup(t, warms)
@@ -104,7 +104,7 @@ func TestPrewarmCancellationPreservesSharingQueries(t *testing.T) {
 		f.await(t, 1)
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
-		done := startWarm(f, ctx, req)
+		done := startWarm(ctx, f, req)
 		call := awaitWarmup(t, warms)
 		handles, err := f.manager.AcquireSealedSegmentHandles(t.Context(), req.Key, req.View, 0)
 		require.NoError(t, err)
@@ -123,7 +123,7 @@ func TestPrewarmFailureDoesNotRequeueOrFollowReplacement(t *testing.T) {
 		warms := recordWarmups(f)
 		req := f.acquire(1, 1, 1)
 		f.await(t, 1)
-		done := startWarm(f, t.Context(), req)
+		done := startWarm(t.Context(), f, req)
 		err := errors.New("storage throttled")
 		awaitWarmup(t, warms).done <- err
 		require.ErrorIs(t, <-done, err)
@@ -141,7 +141,7 @@ func TestPrewarmNodeCloseCancelsWithoutQueryConsumers(t *testing.T) {
 		warms := recordWarmups(f)
 		req := f.acquire(1, 1, 1)
 		f.await(t, 1)
-		done := startWarm(f, t.Context(), req)
+		done := startWarm(t.Context(), f, req)
 		awaitWarmup(t, warms)
 		closed := make(chan struct{})
 		go func() { f.manager.Close(); close(closed) }()

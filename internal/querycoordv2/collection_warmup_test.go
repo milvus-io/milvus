@@ -31,7 +31,7 @@ func TestColdLoadWarmupWaitsForReadinessWithoutGatingQueries(t *testing.T) {
 			return ctx.Err()
 		}
 	}
-	r.warmCollectionOnce(t.Context(), 100, channels, r.readyChanges.Subscribe(100))
+	r.warmCollectionOnce(t.Context(), r.loadConfigStore.GetConfig(100), channels, r.readyChanges.Subscribe(100))
 	require.Never(t, func() bool { return len(sync.sent) != 0 }, 50*time.Millisecond, time.Millisecond)
 	id := qviews.ShardID{ReplicaID: 1000, VChannel: channels[0]}
 	builder := qviews.NewQueryViewAtCoordBuilder(1000, &viewpb.DataViewOfCollection{
@@ -70,7 +70,7 @@ func TestPendingWarmupDoesNotSurviveReleaseReloadOrShutdown(t *testing.T) {
 				r.loadConfigStore.StopPlanning(100)
 				require.NoError(t, r.loadConfigStore.Put(t.Context(), cfg))
 			}
-			r.warmCollectionOnce(t.Context(), 100, []string{"by-dev-rootcoord-dml_100v0"}, sub)
+			r.warmCollectionOnce(t.Context(), r.loadConfigStore.GetConfig(100), []string{"by-dev-rootcoord-dml_100v0"}, sub)
 			if !release {
 				r.stopWarmups()
 			}
@@ -97,7 +97,7 @@ func TestRunningWarmupIgnoresViewChangesButStopsOnRelease(t *testing.T) {
 		<-ctx.Done()
 		return ctx.Err()
 	}
-	r.warmCollectionOnce(t.Context(), 100, []string{"by-dev-rootcoord-dml_100v0"}, r.readyChanges.Subscribe(100))
+	r.warmCollectionOnce(t.Context(), r.loadConfigStore.GetConfig(100), []string{"by-dev-rootcoord-dml_100v0"}, r.readyChanges.Subscribe(100))
 	var warmCtx context.Context
 	select {
 	case warmCtx = <-started:
@@ -115,4 +115,53 @@ func TestRunningWarmupIgnoresViewChangesButStopsOnRelease(t *testing.T) {
 		t.Fatal("release did not cancel prewarm")
 	}
 	require.ErrorIs(t, warmCtx.Err(), context.Canceled)
+}
+
+func TestPrewarmDispatchesEachShardOnceWithoutCollectionBarrier(t *testing.T) {
+	paramtable.Init()
+	channels := []string{"by-dev-rootcoord-dml_100v0", "by-dev-rootcoord-dml_100v1"}
+	first := qviews.ShardID{ReplicaID: 1000, VChannel: channels[0]}
+	s, _, sync := newReadinessTestServer(t, testPersistedQueryView(100, first))
+	r := s.qviewsRuntime
+	t.Cleanup(r.stopWarmups)
+	cfg := r.loadConfigStore.GetConfig(100)
+	calls := make(chan *viewpb.PrewarmOnViewRequest, 4)
+	r.prewarm = func(_ context.Context, _ qviews.WorkNode, req *viewpb.PrewarmOnViewRequest) error {
+		calls <- req
+		return context.DeadlineExceeded // An attempt failure must not enqueue a retry.
+	}
+	r.warmCollectionOnce(t.Context(), cfg, channels, r.readyChanges.Subscribe(100))
+	select {
+	case req := <-calls:
+		require.Equal(t, first.IntoProto(), req.GetShardId())
+	case <-time.After(3 * time.Second):
+		t.Fatal("ready shard waited for the other shard")
+	}
+	require.False(t, loadstatus.Get(r.loadConfigStore, r.shardViewRegistry, 100, channels).Ready())
+	for range 3 {
+		r.readyChanges.Notify(100)
+	}
+	require.Never(t, func() bool { return len(calls) != 0 }, 30*time.Millisecond, time.Millisecond)
+
+	second := qviews.ShardID{ReplicaID: 1000, VChannel: channels[1]}
+	builder := qviews.NewQueryViewAtCoordBuilder(1000, &viewpb.DataViewOfCollection{
+		CollectionId: 100, DataVersion: &viewpb.DataVersion{StreamingVersion: 1},
+		Shards: []*viewpb.DataViewOfShard{{Vchannel: channels[1]}},
+	}, channels[1]).SetLoadInfoVersion(cfg.Version)
+	require.NoError(t, r.shardViewRegistry.Ensure(second).AddPreparing(t.Context(), builder))
+	preparing := receiveReadinessSync(t, sync, qviews.QueryViewStatePreparing)
+	ready := preparing.View.IntoProto()
+	ready.Meta.State = viewpb.QueryViewState_QueryViewStateReady
+	preparing.OnSyncResponse(qviews.NewQueryViewAtWorkNodeFromProto(ready))
+	up := receiveReadinessSync(t, sync, qviews.QueryViewStateUp)
+	up.OnSyncResponse(up.View)
+	select {
+	case req := <-calls:
+		require.Equal(t, second.IntoProto(), req.GetShardId())
+	case <-time.After(3 * time.Second):
+		t.Fatal("second shard did not prewarm after Up")
+	}
+	r.warmWG.Wait()
+	r.readyChanges.Notify(100)
+	require.Empty(t, calls)
 }

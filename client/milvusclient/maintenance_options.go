@@ -94,8 +94,8 @@ func NewLoadCollectionOption(collectionName string) *loadCollectionOption {
 	}
 }
 
-// WithWarmupHint requests one background pass over the serving resources after
-// load readiness. Later balance, flush and restart do not repeat it. Each explicit
+// WithWarmupHint requests a separate background pass after ordinary load admission,
+// starting as each shard becomes Up. Later balance, flush and restart do not repeat it. Each explicit
 // call can warm an already loaded collection again. Await does not wait for the
 // pass; queries can share its cache reads, and warmed data remains evictable.
 func (opt *loadCollectionOption) WithWarmupHint() *loadCollectionOption {

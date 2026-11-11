@@ -28,6 +28,7 @@ const (
 	QueryCoord_LoadPartitions_FullMethodName              = "/milvus.proto.query.QueryCoord/LoadPartitions"
 	QueryCoord_ReleasePartitions_FullMethodName           = "/milvus.proto.query.QueryCoord/ReleasePartitions"
 	QueryCoord_LoadCollection_FullMethodName              = "/milvus.proto.query.QueryCoord/LoadCollection"
+	QueryCoord_PrewarmCollection_FullMethodName           = "/milvus.proto.query.QueryCoord/PrewarmCollection"
 	QueryCoord_ReleaseCollection_FullMethodName           = "/milvus.proto.query.QueryCoord/ReleaseCollection"
 	QueryCoord_SyncNewCreatedPartition_FullMethodName     = "/milvus.proto.query.QueryCoord/SyncNewCreatedPartition"
 	QueryCoord_GetPartitionStates_FullMethodName          = "/milvus.proto.query.QueryCoord/GetPartitionStates"
@@ -78,6 +79,8 @@ type QueryCoordClient interface {
 	LoadPartitions(ctx context.Context, in *LoadPartitionsRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	ReleasePartitions(ctx context.Context, in *ReleasePartitionsRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	LoadCollection(ctx context.Context, in *LoadCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	// Accept one local, ephemeral prewarm request without changing load intent.
+	PrewarmCollection(ctx context.Context, in *PrewarmCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	ReleaseCollection(ctx context.Context, in *ReleaseCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	SyncNewCreatedPartition(ctx context.Context, in *SyncNewCreatedPartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	// Deprecated: Do not use.
@@ -181,6 +184,15 @@ func (c *queryCoordClient) ReleasePartitions(ctx context.Context, in *ReleasePar
 func (c *queryCoordClient) LoadCollection(ctx context.Context, in *LoadCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
 	err := c.cc.Invoke(ctx, QueryCoord_LoadCollection_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryCoordClient) PrewarmCollection(ctx context.Context, in *PrewarmCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, QueryCoord_PrewarmCollection_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -543,6 +555,8 @@ type QueryCoordServer interface {
 	LoadPartitions(context.Context, *LoadPartitionsRequest) (*commonpb.Status, error)
 	ReleasePartitions(context.Context, *ReleasePartitionsRequest) (*commonpb.Status, error)
 	LoadCollection(context.Context, *LoadCollectionRequest) (*commonpb.Status, error)
+	// Accept one local, ephemeral prewarm request without changing load intent.
+	PrewarmCollection(context.Context, *PrewarmCollectionRequest) (*commonpb.Status, error)
 	ReleaseCollection(context.Context, *ReleaseCollectionRequest) (*commonpb.Status, error)
 	SyncNewCreatedPartition(context.Context, *SyncNewCreatedPartitionRequest) (*commonpb.Status, error)
 	// Deprecated: Do not use.
@@ -611,6 +625,9 @@ func (UnimplementedQueryCoordServer) ReleasePartitions(context.Context, *Release
 }
 func (UnimplementedQueryCoordServer) LoadCollection(context.Context, *LoadCollectionRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method LoadCollection not implemented")
+}
+func (UnimplementedQueryCoordServer) PrewarmCollection(context.Context, *PrewarmCollectionRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PrewarmCollection not implemented")
 }
 func (UnimplementedQueryCoordServer) ReleaseCollection(context.Context, *ReleaseCollectionRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReleaseCollection not implemented")
@@ -842,6 +859,24 @@ func _QueryCoord_LoadCollection_Handler(srv interface{}, ctx context.Context, de
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(QueryCoordServer).LoadCollection(ctx, req.(*LoadCollectionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _QueryCoord_PrewarmCollection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PrewarmCollectionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryCoordServer).PrewarmCollection(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryCoord_PrewarmCollection_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryCoordServer).PrewarmCollection(ctx, req.(*PrewarmCollectionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1560,6 +1595,10 @@ var QueryCoord_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "LoadCollection",
 			Handler:    _QueryCoord_LoadCollection_Handler,
+		},
+		{
+			MethodName: "PrewarmCollection",
+			Handler:    _QueryCoord_PrewarmCollection_Handler,
 		},
 		{
 			MethodName: "ReleaseCollection",

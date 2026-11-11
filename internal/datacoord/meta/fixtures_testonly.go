@@ -1866,6 +1866,10 @@ func (s *fakeManifestStore) ResumeReads() {
 	s.failReads = false
 }
 
+func (s *MockMixCoord) PrewarmCollection(context.Context, *querypb.PrewarmCollectionRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
 func (s *MockMixCoord) EnsureCollectionReady(context.Context, *querypb.EnsureCollectionReadyRequest) (*commonpb.Status, error) {
 	return &commonpb.Status{}, nil
 }

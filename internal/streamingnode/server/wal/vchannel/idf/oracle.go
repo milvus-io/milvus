@@ -515,7 +515,7 @@ func (r *oracleRuntime) awaitMaterializationAt(ctx context.Context, target *qvie
 			r.materializationWG.Add(1)
 			go func(call *materializationCall) {
 				defer r.materializationWG.Done()
-				defer call.cancel()
+				defer cancel()
 				_ = r.materialize(call)
 			}(call)
 		}
