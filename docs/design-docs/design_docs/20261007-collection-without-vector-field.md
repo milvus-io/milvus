@@ -73,7 +73,7 @@ cap do not change during the life of a collection.
 |---|---|---|
 | pymilvus `MilvusClient` | works | none |
 | pymilvus ORM (Object-Relational Mapping) `Collection` | rejected on the client by `check_schema` (`No vector field is found.`) | none: the ORM interface is deprecated and stays as it is; use `MilvusClient` |
-| Java SDK, v1 and v2 | sent to the server unchanged (read from the source, not run) | none |
+| Java SDK, v1 and v2 | works (release 3.0.12 run against the implementation branch: v2 create, insert, load, query, and search returns the server error; v1 create and load) | none |
 | Go SDK | works | none |
 | Node SDK | rejected on the client by `checkCollectionFieldsWithOptions` | the check is removed in milvus-io/milvus-sdk-node#626 |
 | RESTful v2 | works | done in the implementation PR (insert check, one search error) |
