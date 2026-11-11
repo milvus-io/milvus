@@ -71,7 +71,7 @@ cap do not change during the life of a collection.
 
 | Client | Create with an explicit schema that has no vector field | Change |
 |---|---|---|
-| pymilvus `MilvusClient` | works | none |
+| pymilvus `MilvusClient` and `AsyncMilvusClient` | works | none |
 | pymilvus ORM (Object-Relational Mapping) `Collection` | rejected on the client by `check_schema` (`No vector field is found.`) | none: the ORM interface is deprecated and stays as it is; use `MilvusClient` |
 | Java SDK, v1 and v2 | works (release 3.0.12 run against the implementation branch: v2 create, insert, load, query, and search returns the server error; v1 create and load) | none |
 | Go SDK | works | none |
