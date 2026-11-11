@@ -65,7 +65,7 @@ class VectorDiskLoader final : public IndexLoader {
     /**
      * @brief Select entries that need eager async reads for the disk backend.
      * @return All entries for materialized backends; sidecars only for
-     * streaming.
+     * streaming, except ordinary validity estimated from the row count.
      * @note Selects the backend before inspecting remote engine envelopes.
      */
     static std::vector<std::string>

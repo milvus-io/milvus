@@ -12,6 +12,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -322,4 +323,23 @@ func TestLazyOracleWaitsForCompactedGrowingFinalCommit(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, float64(2), avg)
 	require.Equal(t, int64(1), r.currentStats[102].NumRow())
+}
+
+// One manifest revision is the same sealed resource whether or not its path
+// records the manifest size; another revision or any other change is not.
+func TestSameSealedResource(t *testing.T) {
+	resource := func(manifestPath string) *datapb.StreamingNodeBM25Resource {
+		return &datapb.StreamingNodeBM25Resource{SegmentId: 1, PartitionId: 2, StorageVersion: storage.StorageV3, ManifestPath: manifestPath}
+	}
+	unsized := packed.MarshalManifestPath("segments/1", 9)
+	sized := packed.CommittedManifestPath("segments/1", 9, 4096, "remote")
+	require.True(t, sameSealedResource(resource(unsized), resource(unsized)))
+	require.True(t, sameSealedResource(resource(unsized), resource(sized)))
+	require.True(t, sameSealedResource(resource(sized), resource(unsized)))
+	require.False(t, sameSealedResource(resource(sized), resource(packed.MarshalManifestPath("segments/1", 10))))
+	other := resource(sized)
+	other.PartitionId = 3
+	require.False(t, sameSealedResource(resource(unsized), other))
+	require.False(t, sameSealedResource(resource(unsized), nil))
+	require.True(t, sameSealedResource(nil, nil))
 }
