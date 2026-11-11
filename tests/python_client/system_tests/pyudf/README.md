@@ -126,6 +126,25 @@ and exact node selectors; do not run all L3 profiles on one unchanged deployment
 They retain the SDK suite's connection options, `--pyudf-management-endpoint`,
 `--run-pyudf-disabled` and `--pyudf-expected-autoindex` where applicable.
 
+## Coverage and execution cost
+
+Keep distinct failures and deployment prerequisites independently selectable.
+Related read-only queries reuse their collection and indexes within one node:
+
+| Coverage | Execution change | Retained assertions |
+|---|---|---|
+| Cross-stage scores | 144 independent setups become 24; build the requested metric directly | All 144 metric/mode/sort/stage-order combinations, including all six stage permutations and strict #55212 scores/ranks |
+| Indexed hybrid fusion | 8 setups become 4; write 40,000 fewer rows across the complete matrix | All 8 merger/NQ/read-or-rewrite combinations with independent fusion scores |
+| mmap/warmup | All 30 profiles remain; configured load/reload calls drop from 4 to 2 and Search calls from 36 to 24 per profile | First configured load and one reload, cold/hot queries, every configuration and the full retained-row audit |
+| Ragged batches | Use NQ 1 and 8 rather than 1/2/4/8 | Singleton behavior and the complete nonempty/empty/nonempty sequence repeated twice |
+| SDK nesting | Use depths 1/24/32/64 rather than 1/16/24/32/64/65 | Shallow/deep accepted inputs and both protobuf rejection forms; raw REST depth cases remain separate |
+| Package lifecycle | Open clients and load the retained input ledger once rather than once per phase | All five phases, 32 packages, ten replays each, removal rejection and recovery |
+
+These are reductions in setup and request counts, not measured wall-clock speedups.
+Assertions retain per-permutation/NQ evidence for grouped queries. An assertion
+failure ends its node; different metric/mode/sort or merger/rewrite nodes remain
+independent. System load durations and resource guards are unchanged.
+
 ## Upgrade, restore and CDC
 
 `workloads/pyudf/migration.py` remains a reusable retained-data checker, not a

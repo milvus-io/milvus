@@ -459,96 +459,97 @@ def interference(root):
             client.close()
 
 
-def package_cache(root, phase):
+def package_cache(root):
     """Check wheel reuse and resource removal; latency does not prove a cache hit."""
     config = WorkloadConfig.read(root)
     checker, clients = load_checker(root)
     try:
         output = root / "package-cache"
-        output.mkdir(exist_ok=True)
-        check_stop_file(root / "STOP")
-        if phase == "baseline":
-            wheels = []
-        elif phase == "cold":
-            assert not (output / "wheels.json").exists()
-            prefix = config.collection + "_package_cache"
-            package_source = MODULE.replace(
-                "def create_udf(context):\n    return UDF(context)",
-                "def create_udf(context):\n    context.logger.warning('PYUDF_R2_FACTORY resource=%s pid=%s', context.resource_name, os.getpid())\n    return UDF(context)",
-            )
-            wheels = register(checker, output, prefix, 32, package_source, config)
-        else:
-            wheels = json.loads((output / "wheels.json").read_text())
-        result = []
-        if phase in ("cold", "replay"):
-            for repeat in range(1 if phase == "cold" else 10):
-                for wheel in wheels:
-                    check_stop_file(root / "STOP")
-                    before = time.monotonic()
-                    hits = checker.search(clients[0], checker.queries[repeat], checker.chain(wheel["resource"], 2, 0))
-                    checker.verify_udf(hits, checker.candidates[repeat], 2, 0)
-                    result.append(
-                        {
-                            "resource": wheel["resource"],
-                            "repeat": repeat,
-                            "latency_ms": 1000 * (time.monotonic() - before),
-                        }
-                    )
-        elif phase == "remove":
-            for wheel in wheels:
-                check_stop_file(root / "STOP")
-                clients[0].remove_file_resource(wheel["resource"], timeout=30)
-            names = {item.name for item in clients[0].list_file_resources()}
-            assert not any(wheel["resource"] in names for wheel in wheels)
-            for wheel in wheels:
-                started = time.monotonic()
-                accepted_before_convergence = 0
-                while True:
-                    check_stop_file(root / "STOP")
-                    try:
-                        hits = checker.search(clients[0], checker.queries[0], checker.chain(wheel["resource"], 2, 0))
-                        checker.verify_udf(hits, checker.candidates[0], 2, 0)
-                        accepted_before_convergence += 1
-                    except Exception as error:
-                        message = str(error)
-                        assert (
-                            getattr(error, "code", None) == 1100
-                            and "file resource" in message
-                            and "not found" in message
-                        ), error
+        output.mkdir()
+        wheels = []
+        for phase in ("baseline", "cold", "replay", "remove", "recovery"):
+            check_stop_file(root / "STOP")
+            if phase == "cold":
+                prefix = config.collection + "_package_cache"
+                package_source = MODULE.replace(
+                    "def create_udf(context):\n    return UDF(context)",
+                    "def create_udf(context):\n    context.logger.warning('PYUDF_R2_FACTORY resource=%s pid=%s', context.resource_name, os.getpid())\n    return UDF(context)",
+                )
+                wheels = register(checker, output, prefix, 32, package_source, config)
+            result = []
+            if phase in ("cold", "replay"):
+                for repeat in range(1 if phase == "cold" else 10):
+                    for wheel in wheels:
+                        check_stop_file(root / "STOP")
+                        before = time.monotonic()
+                        hits = checker.search(
+                            clients[0], checker.queries[repeat], checker.chain(wheel["resource"], 2, 0)
+                        )
+                        checker.verify_udf(hits, checker.candidates[repeat], 2, 0)
                         result.append(
                             {
                                 "resource": wheel["resource"],
-                                "rejected": True,
-                                "elapsed": time.monotonic() - started,
-                                "accepted_before_convergence": accepted_before_convergence,
-                                "error": message,
+                                "repeat": repeat,
+                                "latency_ms": 1000 * (time.monotonic() - before),
                             }
                         )
-                        break
-                    assert time.monotonic() - started < 30, (
-                        "Removed resource remained callable beyond the observation budget"
-                    )
-                    time.sleep(0.2)
-        elif phase in ("baseline", "recovery"):
-            for client in clients:
-                checker.verify_control(checker.search(client, checker.queries[0]), 0)
-                checker.once(client, 1)
-            checker.evidence = output
-            checker.audit_all_rows()
-        save(
-            output / f"{phase}.json",
-            {
-                "workload": "pyudf_package_cache",
-                "cache_hit_verification": "NOT_MEASURED",
-                "phase": phase,
-                "unix": time.time(),
-                "outcome": "PASS",
-                "operations": result,
-                "packages": len(wheels),
-                "target_proxy": 0,
-            },
-        )
+            elif phase == "remove":
+                for wheel in wheels:
+                    check_stop_file(root / "STOP")
+                    clients[0].remove_file_resource(wheel["resource"], timeout=30)
+                names = {item.name for item in clients[0].list_file_resources()}
+                assert not any(wheel["resource"] in names for wheel in wheels)
+                for wheel in wheels:
+                    started = time.monotonic()
+                    accepted_before_convergence = 0
+                    while True:
+                        check_stop_file(root / "STOP")
+                        try:
+                            hits = checker.search(
+                                clients[0], checker.queries[0], checker.chain(wheel["resource"], 2, 0)
+                            )
+                            checker.verify_udf(hits, checker.candidates[0], 2, 0)
+                            accepted_before_convergence += 1
+                        except Exception as error:
+                            message = str(error)
+                            assert (
+                                getattr(error, "code", None) == 1100
+                                and "file resource" in message
+                                and "not found" in message
+                            ), error
+                            result.append(
+                                {
+                                    "resource": wheel["resource"],
+                                    "rejected": True,
+                                    "elapsed": time.monotonic() - started,
+                                    "accepted_before_convergence": accepted_before_convergence,
+                                    "error": message,
+                                }
+                            )
+                            break
+                        assert time.monotonic() - started < 30, (
+                            "Removed resource remained callable beyond the observation budget"
+                        )
+                        time.sleep(0.2)
+            elif phase in ("baseline", "recovery"):
+                for client in clients:
+                    checker.verify_control(checker.search(client, checker.queries[0]), 0)
+                    checker.once(client, 1)
+                checker.evidence = output
+                checker.audit_all_rows()
+            save(
+                output / f"{phase}.json",
+                {
+                    "workload": "pyudf_package_cache",
+                    "cache_hit_verification": "NOT_MEASURED",
+                    "phase": phase,
+                    "unix": time.time(),
+                    "outcome": "PASS",
+                    "operations": result,
+                    "packages": len(wheels),
+                    "target_proxy": 0,
+                },
+            )
     finally:
         for client in clients:
             client.close()

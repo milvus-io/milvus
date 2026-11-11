@@ -29,5 +29,4 @@ def test_cpu_and_wait_load_preserve_peer_search(pyudf_system):
 
 def test_package_reuse_and_removal_preserve_search(pyudf_system):
     """Wheel reuse and invalidation, without claiming tiered-storage/cache hits."""
-    for phase in ("baseline", "cold", "replay", "remove", "recovery"):
-        stress.package_cache(pyudf_system, phase)
+    stress.package_cache(pyudf_system)
