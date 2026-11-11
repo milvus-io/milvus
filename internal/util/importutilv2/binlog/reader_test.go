@@ -163,6 +163,43 @@ func TestSnapshotBitmapTextAndLocalDeletes(t *testing.T) {
 	}
 }
 
+func TestValidateSnapshotRowTimestampDiagnostics(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		source   *internalpb.SnapshotImportSource
+		location string
+	}{
+		{
+			name: "v2",
+			source: &internalpb.SnapshotImportSource{Version: 10, V2Reference: &internalpb.SnapshotImportV2Reference{
+				SnapshotManifestPath: "snapshot/manifests/source.avro", SegmentId: 200,
+			}},
+			location: "snapshot/manifests/source.avro (segment 200)",
+		},
+		{
+			name:     "v3",
+			source:   &internalpb.SnapshotImportSource{Version: 1, ManifestPath: packed.MarshalManifestPath("snapshot/files/source", 7)},
+			location: packed.MarshalManifestPath("snapshot/files/source", 7),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.source.SourceCommitTimestamp = 100
+			frozen := proto.Clone(tc.source)
+			err := validateSnapshotRowTimestamp(tc.source, 101)
+			require.ErrorIs(t, err, merr.ErrDataIntegrity)
+			require.ErrorContains(t, err, fmt.Sprintf("snapshot source manifest %s has raw row timestamp 101 above segment commit timestamp 100", tc.location))
+			require.True(t, proto.Equal(frozen, tc.source))
+			require.NoError(t, validateSnapshotRowTimestamp(tc.source, 99))
+			require.NoError(t, validateSnapshotRowTimestamp(tc.source, 100))
+			tc.source.SourceCommitTimestamp = 0
+			require.NoError(t, validateSnapshotRowTimestamp(tc.source, math.MaxUint64))
+			tc.source.SourceCommitTimestamp = math.MaxUint64
+			require.NoError(t, validateSnapshotRowTimestamp(tc.source, math.MaxUint64))
+		})
+	}
+	require.NoError(t, validateSnapshotRowTimestamp(nil, math.MaxUint64))
+}
+
 func TestSnapshotBitmapBoundsAndBatchFailure(t *testing.T) {
 	budget := &maskBudget{limit: maskBlockWords*8 + 64}
 	mask := &rowDeleteMask{rows: -1}
@@ -211,7 +248,7 @@ func TestSnapshotBitmapBoundsAndBatchFailure(t *testing.T) {
 }
 
 func TestSnapshotBitmapScanFailures(t *testing.T) {
-	for _, mode := range []string{"empty", "open", "read", "cancel", "cancel_after_open", "commit", "bitmap_budget", "shorter", "longer", "null_ts", "wrong_pk"} {
+	for _, mode := range []string{"empty", "open", "read", "cancel", "cancel_after_open", "commit_v2", "commit_v3", "bitmap_budget", "shorter", "longer", "null_ts", "wrong_pk"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -262,8 +299,16 @@ func TestSnapshotBitmapScanFailures(t *testing.T) {
 				want = openErr
 			case "read":
 				want = merr.ErrIoKeyNotFound
-			case "commit":
+			case "commit_v2", "commit_v3":
 				scan.source.SourceCommitTimestamp = 99
+				scan.source.ManifestPath = packed.MarshalManifestPath("snapshot/files/source", 7)
+				if mode == "commit_v2" {
+					scan.source.ManifestPath = ""
+					scan.source.V2Reference = &internalpb.SnapshotImportV2Reference{SnapshotManifestPath: "snapshot/manifests/source.avro", SegmentId: 200}
+					scan.v2Input = &snapshotV2Input{}
+					openV2 := mockey.Mock(storage.NewBinlogRecordReader).Return(owner, nil).Build()
+					defer openV2.UnPatch()
+				}
 			case "bitmap_budget":
 				budget.limit = 1
 				want = merr.ErrServiceResourceInsufficient
@@ -280,6 +325,11 @@ func TestSnapshotBitmapScanFailures(t *testing.T) {
 				require.Zero(t, scan.mask.rows)
 			} else {
 				require.ErrorIs(t, err, want)
+				if mode == "commit_v2" {
+					require.ErrorContains(t, err, "snapshot/manifests/source.avro (segment 200)")
+				} else if mode == "commit_v3" {
+					require.ErrorContains(t, err, scan.source.ManifestPath)
+				}
 			}
 		})
 	}

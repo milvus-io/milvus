@@ -103,6 +103,7 @@ func SnapshotImportTestData(layout datapb.SnapshotLayout) *snapshotstorage.Snaps
 			Schema:     sourceSchema,
 			Partitions: map[string]int64{"source_partition": 10},
 		},
+		ManifestPaths: []string{"root/snapshots/1/manifests/20.avro", "root/snapshots/1/manifests/10.avro"},
 		Segments: []*datapb.SegmentDescription{
 			{
 				SegmentId:      20,

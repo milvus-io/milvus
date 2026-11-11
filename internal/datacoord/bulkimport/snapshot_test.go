@@ -672,7 +672,7 @@ func TestSnapshotImportL0URIRead(t *testing.T) {
 		PartitionId: 10, ChannelName: "source", StorageVersion: milvusstorage.StorageV1,
 		Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: "s3://source/" + key}, {LogPath: key}}}},
 	}}
-	files := []*internalpb.ImportFile{{}}
+	files := []*internalpb.ImportFile{{SnapshotSource: &internalpb.SnapshotImportSource{Version: 5, ManifestPath: manifest}}}
 	l0Sources, err := attachSnapshotImportSources(ctx, cm, "s3://source/"+strings.TrimPrefix(root, "/")+"/snapshots/1/metadata/2.json",
 		snapshot, data, deltas, files)
 	require.NoError(t, err)
@@ -764,6 +764,7 @@ func TestExpandSnapshotImportExternalStorage(t *testing.T) {
 				SegmentLevel: datapb.SegmentLevel_L0, StorageVersion: milvusstorage.StorageV3,
 				ManifestPath: packed.MarshalManifestPath("root/files/l0", 1),
 			})
+			snapshot.ManifestPaths = append(snapshot.ManifestPaths, "root/snapshots/1/manifests/extra.avro")
 			foreignCM := milvusstorage.NewRemoteChunkManagerForTesting(nil, "source", "root")
 			foreignCfg := &indexpb.StorageConfig{BucketName: "source"}
 			resolve := mockey.Mock(snapshotstorage.ResolveSnapshotReadStorage).Return(&snapshotstorage.ResolvedForeignStorage{
@@ -818,6 +819,7 @@ func TestExpandSnapshotImportExternalStorage(t *testing.T) {
 			// External jobs without L0 still need a typed descriptor so older
 			// workers cannot ignore the source credentials and read target keys.
 			snapshot.Segments = snapshot.Segments[:len(snapshot.Segments)-1]
+			snapshot.ManifestPaths = snapshot.ManifestPaths[:len(snapshot.ManifestPaths)-1]
 			files, _, _, err = expandSnapshotImportFiles(context.Background(), nil, milvusstorage.NewLocalChunkManager(), SnapshotImportTestSchema(),
 				"s3://source/root/snapshots/1/metadata/2.json", options, &datapb.SnapshotMetadata{})
 			require.NoError(t, err)
@@ -976,6 +978,7 @@ func TestExpandSnapshotImportPartitionMapping(t *testing.T) {
 							PartitionId: id, ChannelName: "source", SegmentLevel: datapb.SegmentLevel_L0, StorageVersion: milvusstorage.StorageV1,
 							Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: fmt.Sprintf("root/files/delete-%d", id)}}}},
 						})
+						snapshot.ManifestPaths = append(snapshot.ManifestPaths, "root/snapshots/1/manifests/extra.avro")
 					}
 				}
 				read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
@@ -1039,6 +1042,7 @@ func TestExpandSnapshotImportMultiplePartitionsL0(t *testing.T) {
 					StorageVersion: milvusstorage.StorageV1,
 					Deltalogs:      []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: delta.path}}}},
 				})
+				snapshot.ManifestPaths = append(snapshot.ManifestPaths, "root/snapshots/1/manifests/extra.avro")
 			}
 			read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
 			defer read.UnPatch()
@@ -1098,6 +1102,7 @@ func TestExpandSnapshotImportL0(t *testing.T) {
 					}
 				}
 				snapshot.Segments = append(snapshot.Segments, delta)
+				snapshot.ManifestPaths = append(snapshot.ManifestPaths, "root/snapshots/1/manifests/extra.avro")
 				readPatch := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
 				defer readPatch.UnPatch()
 				validationPatch := mockey.Mock(snapshotstorage.ValidateExternalSnapshotDataFiles).Return(nil).Build()
@@ -1161,6 +1166,7 @@ func TestExpandSnapshotImportPathValidationLinear(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/%d", layout, count), func(t *testing.T) {
 				snapshot := SnapshotImportTestData(layout)
 				snapshot.Segments = nil
+				snapshot.ManifestPaths = nil
 				for i := 0; i < count; i++ {
 					snapshot.ManifestPaths = append(snapshot.ManifestPaths, fmt.Sprintf("root/snapshots/1/manifests/2/%d", i))
 					snapshot.Segments = append(snapshot.Segments, &datapb.SegmentDescription{
@@ -1171,6 +1177,7 @@ func TestExpandSnapshotImportPathValidationLinear(t *testing.T) {
 						StorageVersion: milvusstorage.StorageV2,
 						Deltalogs:      []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: fmt.Sprintf("root/files/l0/%d", i)}}}},
 					})
+					snapshot.ManifestPaths = append(snapshot.ManifestPaths, "root/snapshots/1/manifests/extra.avro")
 				}
 				read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
 				defer read.UnPatch()
@@ -1185,7 +1192,7 @@ func TestExpandSnapshotImportPathValidationLinear(t *testing.T) {
 				_, _, _, err := expandSnapshotImportFiles(context.Background(), nil, milvusstorage.NewLocalChunkManager(), SnapshotImportTestSchema(),
 					"s3://source/root/snapshots/1/metadata/2.json", SnapshotImportTestOptions(), &datapb.SnapshotMetadata{})
 				require.NoError(t, err)
-				require.Equal(t, count, manifestVisits, "metadata references must be scanned once regardless of data/L0 counts")
+				require.Equal(t, 2*count, manifestVisits, "metadata references must be scanned once regardless of data/L0 counts")
 				require.Equal(t, 2*count, refVisits, "every data and legacy L0 reference must still be checked")
 				for _, invalid := range []string{"metadata_root", "data_root", "data_bucket", "l0_root", "l0_bucket", "l0_scheme"} {
 					t.Run(invalid, func(t *testing.T) {
@@ -1316,7 +1323,7 @@ func TestSnapshotSharedL0PlanAndTasks(t *testing.T) {
 			SegmentId: int64(i + 1), PartitionId: 10, ChannelName: "source", CommitTimestamp: uint64(i + 100),
 			ManifestPath: packed.MarshalManifestPath(fmt.Sprintf("root/data/%d", i), 7),
 		})
-		files = append(files, &internalpb.ImportFile{Id: int64(i + 1)})
+		files = append(files, &internalpb.ImportFile{Id: int64(i + 1), SnapshotSource: &internalpb.SnapshotImportSource{Version: 5, ManifestPath: data[i].ManifestPath}})
 	}
 	var paths []string
 	var logs []*datapb.Binlog
@@ -1772,6 +1779,7 @@ func TestExpandSnapshotImportFiles(t *testing.T) {
 			StorageVersion: milvusstorage.StorageV3,
 			ManifestPath:   packed.MarshalManifestPath("root/files/segment/30", 9),
 		})
+		snapshot.ManifestPaths = append(snapshot.ManifestPaths, "root/snapshots/1/manifests/extra.avro")
 		readPatch := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).
 			Return(snapshot, nil).Build()
 		defer readPatch.UnPatch()
@@ -1930,6 +1938,7 @@ func TestExpandSnapshotImportFiles(t *testing.T) {
 			name: "empty snapshot",
 			mutate: func(snapshot *snapshotstorage.SnapshotData) {
 				snapshot.Segments = nil
+				snapshot.ManifestPaths = nil
 			},
 			expected: merr.ErrImportFailed,
 			message:  "snapshot contains no data segments",
@@ -1941,6 +1950,7 @@ func TestExpandSnapshotImportFiles(t *testing.T) {
 				snapshot.Segments = append(snapshot.Segments, &datapb.SegmentDescription{
 					SegmentId: 30, PartitionId: 20, SegmentLevel: datapb.SegmentLevel_L1, StorageVersion: milvusstorage.StorageV1,
 				})
+				snapshot.ManifestPaths = append(snapshot.ManifestPaths, "root/snapshots/1/manifests/extra.avro")
 			},
 			expected: merr.ErrOperationNotSupported,
 			message:  "only supports StorageV2 and StorageV3",
@@ -2141,6 +2151,7 @@ func TestExpandSnapshotImportFiles_AdmissionFailures(t *testing.T) {
 				snapshot.Collection.Schema = nil
 			case "nil_segment":
 				snapshot.Segments = append(snapshot.Segments, nil)
+				snapshot.ManifestPaths = append(snapshot.ManifestPaths, "root/snapshots/1/manifests/extra.avro")
 			case "too_many_segments":
 				item := &paramtable.Get().DataCoordCfg.MaxFilesPerImportReq
 				previous := item.SwapTempValue("1")
@@ -2200,6 +2211,7 @@ func TestExpandSnapshotImportCommitTimestamps(t *testing.T) {
 						SegmentId: 30, PartitionId: 10, ChannelName: "source", SegmentLevel: datapb.SegmentLevel_L0,
 						StorageVersion: milvusstorage.StorageV3, ManifestPath: packed.MarshalManifestPath("root/files/l0", 1),
 					})
+					snapshot.ManifestPaths = append(snapshot.ManifestPaths, "root/snapshots/1/manifests/extra.avro")
 				}
 				options := SnapshotImportTestOptions()
 				var targetPartitions []int64
@@ -2251,6 +2263,19 @@ func TestExpandSnapshotImportCommitTimestamps(t *testing.T) {
 					require.Empty(t, files[0].Paths)
 					require.EqualValues(t, tc.commit, files[0].GetSnapshotSource().GetSourceCommitTimestamp())
 					require.NotNil(t, files[1].SnapshotSource, "timestamp context uses uniform job-wide descriptors")
+					expectedVersion := uint32(1)
+					if tc.l0 {
+						expectedVersion += 4
+					}
+					if tc.name == "external_source" {
+						expectedVersion++
+					}
+					if tc.name == "partition_mapping" {
+						expectedVersion += 2
+					}
+					for _, file := range files {
+						require.Equal(t, expectedVersion, file.GetSnapshotSource().GetVersion())
+					}
 				}
 				if tc.name == "external_source" {
 					require.EqualValues(t, 2, files[0].GetSnapshotSource().GetVersion())
@@ -2326,6 +2351,7 @@ func TestSnapshotImportManifestDeleteTimestamps(t *testing.T) {
 						SegmentId: 20, PartitionId: 10, SegmentLevel: datapb.SegmentLevel_L1,
 						StorageVersion: milvusstorage.StorageV3, ManifestPath: manifest, CommitTimestamp: tc.commit,
 					}}
+					snapshot.ManifestPaths = snapshot.ManifestPaths[:1]
 					read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
 					defer read.UnPatch()
 					uri := "s3://source/root/snapshots/1/metadata/2.json"
@@ -2446,6 +2472,40 @@ func TestExpandSnapshotV2References(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestExpandSnapshotManifestCountValidation(t *testing.T) {
+	paramtable.Init()
+	PatchSnapshotImportInstance(t)
+	for _, version := range []int64{milvusstorage.StorageV2, milvusstorage.StorageV3} {
+		for _, count := range []int{1, 3} {
+			t.Run(fmt.Sprintf("version=%d/count=%d", version, count), func(t *testing.T) {
+				snapshot := SnapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
+				for _, segment := range snapshot.Segments {
+					segment.StorageVersion = version
+				}
+				snapshot.ManifestPaths = make([]string, count)
+				read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadSnapshotFromMetadata).Return(snapshot, nil).Build()
+				defer read.UnPatch()
+				files, _, sources, err := expandSnapshotImportFiles(context.Background(), nil, milvusstorage.NewLocalChunkManager(),
+					SnapshotImportTestSchema(), "s3://source/root/snapshots/1/metadata/2.json", SnapshotImportTestOptions(), &datapb.SnapshotMetadata{FormatVersion: 6})
+				require.ErrorIs(t, err, merr.ErrDataIntegrity)
+				require.Contains(t, err.Error(), "manifest counts differ")
+				require.Nil(t, files)
+				require.Nil(t, sources)
+			})
+		}
+	}
+}
+
+func TestAttachSnapshotImportSourcesPreservesVersion(t *testing.T) {
+	snapshot := SnapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
+	files := []*internalpb.ImportFile{{SnapshotSource: &internalpb.SnapshotImportSource{Version: 12}}, {}}
+	_, err := attachSnapshotImportSources(context.Background(), milvusstorage.NewLocalChunkManager(),
+		"root/snapshots/1/metadata/2.json", snapshot, snapshot.Segments, nil, files)
+	require.NoError(t, err)
+	require.EqualValues(t, 12, files[0].SnapshotSource.Version)
+	require.Zero(t, files[1].SnapshotSource.Version, "the expansion boundary owns capability encoding")
 }
 
 func TestExpandSnapshotV2ReferenceValidation(t *testing.T) {
@@ -2589,7 +2649,8 @@ func TestSnapshotImportBucketOnlyRelocation(t *testing.T) {
 						addSegment(&datapb.SegmentDescription{SegmentId: id, PartitionId: 10, ChannelName: "channel", StorageVersion: version, SegmentLevel: datapb.SegmentLevel_L1})
 					}
 					deltaKey := path.Join(root, "files/l0/delta")
-					addSegment(&datapb.SegmentDescription{SegmentId: 30, PartitionId: 10, ChannelName: "channel", StorageVersion: 2, SegmentLevel: datapb.SegmentLevel_L0,
+					addSegment(&datapb.SegmentDescription{
+						SegmentId: 30, PartitionId: 10, ChannelName: "channel", StorageVersion: 2, SegmentLevel: datapb.SegmentLevel_L0,
 						Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: reference(deltaKey, "l0_uri")}}}},
 					})
 					frozen := proto.Clone(metadata)

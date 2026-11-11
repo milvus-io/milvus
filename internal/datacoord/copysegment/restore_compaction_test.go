@@ -291,18 +291,23 @@ func TestRestoreSegmentRetainsEffectiveInsertTime(t *testing.T) {
 
 func TestLoadCopySnapshotPreservesLegacyFingerprintAfterRestart(t *testing.T) {
 	paramtable.Init()
-	for _, version := range []int64{2, 3} {
-		t.Run(fmt.Sprintf("v%d", version), func(t *testing.T) {
+	for _, tc := range []struct {
+		version int64
+		origin  string
+	}{{2, "source"}, {3, "source"}, {2, "old"}, {3, "old"}} {
+		version, origin := tc.version, tc.origin
+		t.Run(fmt.Sprintf("v%d/origin_%s", version, origin), func(t *testing.T) {
 			ctx := t.Context()
 			uri := "s3://source/root/snapshots/1/metadata/2.json"
 			manifest := "s3://source/root/snapshots/1/manifests/20.avro"
 			metadata := &datapb.SnapshotMetadata{
 				FormatVersion: 6, Layout: datapb.SnapshotLayout_SnapshotLayoutSelfContained,
-				SnapshotInfo: &datapb.SnapshotInfo{Id: 2, CollectionId: 1, S3Location: uri},
+				SnapshotInfo: &datapb.SnapshotInfo{Id: 2, CollectionId: 1, S3Location: "s3://" + origin + "/root/snapshots/1/metadata/2.json"},
 				Collection:   &datapb.CollectionDescription{Schema: &schemapb.CollectionSchema{}},
 				ManifestList: []string{manifest}, SegmentIds: []int64{20},
 			}
-			segment := &datapb.SegmentDescription{SegmentId: 20, StorageVersion: version, SegmentLevel: datapb.SegmentLevel_L1,
+			segment := &datapb.SegmentDescription{
+				SegmentId: 20, StorageVersion: version, SegmentLevel: datapb.SegmentLevel_L1,
 				Statslogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: "s3://source/root/files/stats"}}}},
 			}
 			if version == 2 {
@@ -328,15 +333,16 @@ func TestLoadCopySnapshotPreservesLegacyFingerprintAfterRestart(t *testing.T) {
 			}).Build()
 			defer read.UnPatch()
 			reader := snapshotstorage.NewSnapshotReader(cm)
-			// Legacy same-location reads retained URI fields and applied the manifest mapping.
+			// Legacy same-prefix reads retained destination URI fields even with an old origin.
 			legacySegment, err := reader.ReadSegmentManifest(ctx, manifest, 6)
 			require.NoError(t, err)
 			legacySegment.ManifestPath = segment.ManifestPath
 			legacy := &snapshotstorage.SnapshotData{
-				SnapshotInfo: metadata.SnapshotInfo, Collection: metadata.Collection,
+				SnapshotInfo: proto.Clone(metadata.SnapshotInfo).(*datapb.SnapshotInfo), Collection: metadata.Collection,
 				Segments: []*datapb.SegmentDescription{legacySegment}, ManifestPaths: metadata.ManifestList,
 				SegmentIDs: metadata.SegmentIds, Layout: metadata.Layout,
 			}
+			legacy.SnapshotInfo.S3Location = uri
 			fingerprint, err := snapshotstorage.SnapshotFingerprint(legacy)
 			require.NoError(t, err)
 			catalog := kvdatacoord.NewCatalog(meta.NewMetaMemoryKV(), "", "")

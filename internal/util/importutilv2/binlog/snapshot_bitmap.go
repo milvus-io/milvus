@@ -116,6 +116,9 @@ func (m *rowDeleteMask) finish(rows int64) error {
 // A nil source or zero commit timestamp imposes no upper bound.
 func validateSnapshotRowTimestamp(source *internalpb.SnapshotImportSource, raw uint64) error {
 	if commit := source.GetSourceCommitTimestamp(); commit != 0 && raw > commit {
+		if ref := source.GetV2Reference(); ref != nil {
+			return merr.WrapErrDataIntegrityMsg("snapshot source manifest %s (segment %d) has raw row timestamp %d above segment commit timestamp %d", ref.GetSnapshotManifestPath(), ref.GetSegmentId(), raw, commit)
+		}
 		return merr.WrapErrDataIntegrityMsg("snapshot source manifest %s has raw row timestamp %d above segment commit timestamp %d", source.GetManifestPath(), raw, commit)
 	}
 	return nil

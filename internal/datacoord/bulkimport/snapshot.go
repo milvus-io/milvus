@@ -322,13 +322,13 @@ func expandSnapshotImportFiles(
 	}
 
 	// Preserve the Avro association before filtering L0 or sorting data segments.
+	if len(snapshot.Segments) != len(snapshot.ManifestPaths) {
+		return nil, nil, nil, merr.WrapErrDataIntegrityMsg("snapshot segment and Avro manifest counts differ")
+	}
 	manifestBySegment := make(map[int64]string, len(snapshot.Segments))
 	for i, segment := range snapshot.Segments {
 		if segment.GetStorageVersion() != milvusstorage.StorageV2 || segment.GetSegmentLevel() == datapb.SegmentLevel_L0 {
 			continue
-		}
-		if len(snapshot.Segments) != len(snapshot.ManifestPaths) {
-			return nil, nil, nil, merr.WrapErrDataIntegrityMsg("snapshot segment and Avro manifest counts differ")
 		}
 		manifestBySegment[segment.GetSegmentId()] = snapshot.ManifestPaths[i]
 	}
@@ -450,8 +450,9 @@ func expandSnapshotImportFiles(
 			return nil, nil, nil, err
 		}
 	}
+	// Encode the complete job-wide capabilities once, after attaching source context.
 	external := importutilv2.HasExternalSource(options)
-	if hasV2 || external || partitionMapping != nil {
+	if needsSourceContext || external || partitionMapping != nil {
 		version := importutilv2.EncodeSnapshotSourceVersion(importutilv2.SnapshotSourceCapabilities{
 			ExternalStorage:  external,
 			PartitionMapping: partitionMapping != nil,
@@ -579,7 +580,6 @@ func attachSnapshotImportSources(ctx context.Context, cm milvusstorage.ChunkMana
 		if source == nil {
 			source = &internalpb.SnapshotImportSource{ManifestPath: segment.GetManifestPath()}
 		}
-		source.Version = importutilv2.EncodeSnapshotSourceVersion(importutilv2.SnapshotSourceCapabilities{SharedL0: len(deltas) != 0})
 		source.SourceCommitTimestamp = segment.GetCommitTimestamp()
 		if len(deltas) != 0 {
 			source.SourceChannel = segment.GetChannelName()

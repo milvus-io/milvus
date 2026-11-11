@@ -3668,7 +3668,7 @@ func TestRebaseSelfContainedSnapshotData_SameKeyPrefix(t *testing.T) {
 }
 
 func TestSnapshotReaderSamePrefixRelocationBoundaries(t *testing.T) {
-	for _, mode := range []string{"same_bucket", "scheme_alias", "same_endpoint", "new_endpoint", "new_bucket", "key_origin", "key_location", "unknown_origin", "outside_avro", "outside_data", "referenced"} {
+	for _, mode := range []string{"same_bucket", "scheme_alias", "same_endpoint", "new_endpoint", "new_bucket", "key_origin", "key_location", "unknown_origin", "outside_avro", "outside_data", "referenced", "destination_bucket", "destination_endpoint", "destination_alias", "bare_key", "mixed_identities", "unrelated_bucket"} {
 		t.Run(mode, func(t *testing.T) {
 			metadata := &datapb.SnapshotMetadata{
 				FormatVersion: 6, Layout: datapb.SnapshotLayout_SnapshotLayoutSelfContained,
@@ -3694,6 +3694,24 @@ func TestSnapshotReaderSamePrefixRelocationBoundaries(t *testing.T) {
 				if mode == "new_endpoint" {
 					uri = "minio://new:9000/bucket/root/snapshots/1/metadata/2.json"
 				}
+			case "destination_bucket", "mixed_identities":
+				metadata.ManifestList[0] = "s3://new/root/snapshots/1/manifests/20.avro"
+				dataPath = "s3://new/root/files/insert"
+			case "destination_endpoint":
+				metadata.SnapshotInfo.S3Location = "minio://old:9000/bucket/root/snapshots/1/metadata/2.json"
+				uri = "minio://new:9000/bucket/root/snapshots/1/metadata/2.json"
+				metadata.ManifestList[0] = "minio://NEW:9000/bucket/root/snapshots/1/manifests/20.avro"
+				dataPath = "minio://NEW:9000/bucket/root/files/insert"
+			case "destination_alias":
+				metadata.SnapshotInfo.S3Location = "gs://old/root/snapshots/1/metadata/2.json"
+				uri = "gs://new/root/snapshots/1/metadata/2.json"
+				metadata.ManifestList[0] = "gcs://new/root/snapshots/1/manifests/20.avro"
+				dataPath = "gcs://new/root/files/insert"
+			case "bare_key":
+				metadata.ManifestList[0] = "root/snapshots/1/manifests/20.avro"
+				dataPath = "root/files/insert"
+			case "unrelated_bucket":
+				dataPath = "s3://unrelated/root/files/insert"
 			case "key_origin":
 				metadata.SnapshotInfo.S3Location = "root/snapshots/1/metadata/2.json"
 			case "key_location":
@@ -3708,8 +3726,14 @@ func TestSnapshotReaderSamePrefixRelocationBoundaries(t *testing.T) {
 				metadata.Layout = datapb.SnapshotLayout_SnapshotLayoutReferenced
 			}
 			frozen := proto.Clone(metadata)
-			segment := &datapb.SegmentDescription{SegmentId: 20, StorageVersion: 2, SegmentLevel: datapb.SegmentLevel_L1,
+			segment := &datapb.SegmentDescription{
+				SegmentId: 20, StorageVersion: 2, SegmentLevel: datapb.SegmentLevel_L1,
 				Binlogs: []*datapb.FieldBinlog{{FieldID: 0, Binlogs: []*datapb.Binlog{{LogPath: dataPath}}}},
+			}
+			if mode == "mixed_identities" {
+				segment.Binlogs[0].Binlogs = append(segment.Binlogs[0].Binlogs,
+					&datapb.Binlog{LogPath: "s3://old/root/files/old"},
+					&datapb.Binlog{LogPath: "root/files/key"})
 			}
 			data, err := snapshotio.MarshalSegmentManifest(segment)
 			require.NoError(t, err)
@@ -3726,15 +3750,20 @@ func TestSnapshotReaderSamePrefixRelocationBoundaries(t *testing.T) {
 			logPath := got.Segments[0].Binlogs[0].Binlogs[0].LogPath
 			refs := []snapshotstorage.SnapshotFileRef{{Path: logPath, NormalizedPath: snapshotstorage.NormalizeSnapshotObjectPath(logPath)}}
 			err = snapshotstorage.ValidateExternalSnapshotPaths(uri, got, refs)
-			if mode == "unknown_origin" || mode == "referenced" || mode == "key_origin" {
+			if mode == "unknown_origin" || mode == "referenced" || mode == "key_origin" || mode == "unrelated_bucket" {
 				require.Error(t, err, "unknown origins and referenced snapshots must not silently change storage identity")
 				require.Equal(t, dataPath, logPath)
 				return
 			}
 			require.NoError(t, err)
-			if mode == "same_bucket" || mode == "scheme_alias" || mode == "same_endpoint" || mode == "key_location" {
+			if mode == "same_bucket" || mode == "scheme_alias" || mode == "same_endpoint" || mode == "key_location" ||
+				mode == "destination_bucket" || mode == "destination_endpoint" || mode == "destination_alias" || mode == "bare_key" || mode == "mixed_identities" {
 				require.Equal(t, dataPath, logPath)
 				require.Equal(t, metadata.ManifestList, got.ManifestPaths)
+				if mode == "mixed_identities" {
+					require.Equal(t, "root/files/old", got.Segments[0].Binlogs[0].Binlogs[1].LogPath)
+					require.Equal(t, "root/files/key", got.Segments[0].Binlogs[0].Binlogs[2].LogPath)
+				}
 				return
 			}
 			require.Equal(t, "root/files/insert", logPath)
