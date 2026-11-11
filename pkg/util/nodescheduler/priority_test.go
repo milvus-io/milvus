@@ -211,12 +211,17 @@ func TestPriorityDelayedUpdateAppliesAfterDeadline(t *testing.T) {
 	var attempts int
 	var retriedAt time.Time
 	firstAttempt := make(chan struct{})
+	finishFirstAttempt := make(chan struct{})
 	deadline := time.Now().Add(100 * time.Millisecond)
 	order := make(chan string, 2)
-	retry := s.Submit(TaskFunc(func(context.Context) error {
+	retry := s.Submit(TaskFunc(func(ctx context.Context) error {
 		attempts++
 		if attempts == 1 {
 			close(firstAttempt)
+			select {
+			case <-finishFirstAttempt:
+			case <-ctx.Done():
+			}
 			return DelayUntil(deadline)
 		}
 		retriedAt = time.Now()
@@ -224,8 +229,24 @@ func TestPriorityDelayedUpdateAppliesAfterDeadline(t *testing.T) {
 		return nil
 	}), WithPriority(-100)).(PriorityTaskHandle)
 	<-firstAttempt
-	// The blocker starts only after the first attempt entered delayed state.
-	release := blockPriorityWorker(t, s)
+	// Queue the blocker before allowing the first attempt to finish. Its higher
+	// priority keeps it ahead of the retry even if the deadline has elapsed.
+	blockerStarted := make(chan struct{})
+	release := make(chan struct{})
+	s.Submit(TaskFunc(func(ctx context.Context) error {
+		close(blockerStarted)
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return nil
+	}))
+	close(finishFirstAttempt)
+	select {
+	case <-blockerStarted:
+	case <-ctx.Done():
+		t.Fatal("blocker did not start")
+	}
 	require.True(t, retry.SetPriority(100))
 	other := s.Submit(TaskFunc(func(context.Context) error { order <- "other"; return nil }), WithPriority(10))
 	require.Eventually(t, func() bool {
@@ -234,7 +255,7 @@ func TestPriorityDelayedUpdateAppliesAfterDeadline(t *testing.T) {
 		return len(s.delayed) == 0 && len(s.ready) == 2
 	}, 5*time.Second, time.Millisecond)
 	require.Empty(t, order)
-	release()
+	close(release)
 	require.NoError(t, retry.Wait(ctx))
 	require.NoError(t, other.Wait(ctx))
 	require.False(t, retriedAt.Before(deadline))
