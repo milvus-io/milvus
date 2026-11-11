@@ -157,9 +157,9 @@ type broadcastAckTask struct {
 }
 
 func (t *broadcastAckTask) Execute(ctx context.Context) error {
-	// Include the legacy import RPC in the same attempt budget. Scheduler
-	// cancellation and module shutdown both stop an in-flight attempt.
-	ctx, cancel := context.WithTimeout(ctx, broadcastAckAttemptTimeout)
+	// Legacy import completion has no additional deadline. Scheduler
+	// cancellation and module shutdown still stop an in-flight attempt.
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	stop := context.AfterFunc(t.module.ctx, cancel)
 	defer stop()
@@ -169,7 +169,9 @@ func (t *broadcastAckTask) Execute(ctx context.Context) error {
 	if err := ackLegacyCommitImport(ctx, t.owner.Message()); err != nil {
 		return nodescheduler.ErrDelay
 	}
-	if err := t.module.ack(ctx, t.owner.Message()); err != nil {
+	ackCtx, ackCancel := context.WithTimeout(ctx, broadcastAckAttemptTimeout)
+	defer ackCancel()
+	if err := t.module.ack(ackCtx, t.owner.Message()); err != nil {
 		return nodescheduler.ErrDelay
 	}
 	t.owner.Release()

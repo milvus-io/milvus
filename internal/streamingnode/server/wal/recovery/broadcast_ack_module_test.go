@@ -536,3 +536,94 @@ func TestBroadcastAckUsesReservedWorker(t *testing.T) {
 	require.NoError(t, scoped.WaitIdle(ctx))
 	require.Equal(t, msg.TimeTick(), tracker.CompletedPoint().TimeTick)
 }
+
+func TestBroadcastAckLegacyImportOutlivesAckTimeout(t *testing.T) {
+	module := newBroadcastAckModule(moduleapi.Runtime{})
+	defer module.Close()
+	patch := mockey.Mock(commitLegacyImportVChannel).To(func(ctx context.Context, _ *datapb.HandleCommitVchannelRequest) error {
+		_, hasDeadline := ctx.Deadline()
+		require.False(t, hasDeadline, "legacy completion must not inherit the ACK budget")
+		timer := time.NewTimer(2 * broadcastAckAttemptTimeout)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}).Build()
+	defer patch.UnPatch()
+	acked := false
+	module.ack = func(ctx context.Context, _ message.ImmutableMessage) error {
+		deadline, ok := ctx.Deadline()
+		require.True(t, ok)
+		require.LessOrEqual(t, time.Until(deadline), broadcastAckAttemptTimeout)
+		require.NoError(t, ctx.Err(), "ACK must receive a fresh budget after legacy completion")
+		acked = true
+		return nil
+	}
+	msg := newBroadcastAckMessageWith(t, message.NewCommitImportMessageBuilderV2().
+		WithHeader(&message.CommitImportMessageHeader{JobId: 42}).
+		WithBody(&message.CommitImportMessageBody{}).WithBroadcast([]string{"v1"}), 1, 100)
+	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
+	owner := tracker.Track(msg)
+	task := &broadcastAckTask{module: module, owner: owner}
+	require.NoError(t, task.Execute(context.Background()))
+	require.True(t, acked)
+	require.Equal(t, 1, patch.Times())
+	require.EqualValues(t, 100, tracker.CompletedPoint().TimeTick)
+}
+
+func TestBroadcastAckLegacyImportRemainsCancelable(t *testing.T) {
+	for _, mode := range []string{"task-cancel", "module-close"} {
+		t.Run(mode, func(t *testing.T) {
+			module := newBroadcastAckModule(moduleapi.Runtime{})
+			defer module.Close()
+			entered := make(chan context.Context, 1)
+			patch := mockey.Mock(commitLegacyImportVChannel).To(func(ctx context.Context, _ *datapb.HandleCommitVchannelRequest) error {
+				entered <- ctx
+				<-ctx.Done()
+				return ctx.Err()
+			}).Build()
+			defer patch.UnPatch()
+			var acked atomic.Bool
+			module.ack = func(context.Context, message.ImmutableMessage) error {
+				acked.Store(true)
+				return nil
+			}
+			msg := newBroadcastAckMessageWith(t, message.NewCommitImportMessageBuilderV2().
+				WithHeader(&message.CommitImportMessageHeader{JobId: 42}).
+				WithBody(&message.CommitImportMessageBody{}).WithBroadcast([]string{"v1"}), 1, 100)
+			tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
+			owner := tracker.Track(msg)
+			task := &broadcastAckTask{module: module, owner: owner}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			done := make(chan error, 1)
+			go func() { done <- task.Execute(ctx) }()
+			select {
+			case legacyCtx := <-entered:
+				_, hasDeadline := legacyCtx.Deadline()
+				require.False(t, hasDeadline)
+			case <-time.After(5 * time.Second):
+				t.Fatal("legacy completion did not start")
+			}
+			require.Same(t, msg, owner.Message())
+			require.Zero(t, tracker.CompletedPoint().TimeTick)
+			if mode == "task-cancel" {
+				cancel()
+			} else {
+				module.Close()
+			}
+			select {
+			case err := <-done:
+				require.ErrorIs(t, err, nodescheduler.ErrDelay)
+			case <-time.After(5 * time.Second):
+				t.Fatal("legacy completion ignored cancellation")
+			}
+			require.False(t, acked.Load())
+			require.Same(t, msg, owner.Message())
+			require.Zero(t, tracker.CompletedPoint().TimeTick)
+		})
+	}
+}
