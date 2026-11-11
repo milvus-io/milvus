@@ -74,18 +74,24 @@ func (s *ViewSyncServer) sendLoop(
 	stream viewpb.ViewSyncService_SyncQueryViewServer,
 	pending *pendingReports,
 ) {
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-	lastSent := make(map[qviews.ShardID]qviews.ShardStats)
-	if s.sendShardStats(stream, pending, lastSent) {
+	timer := time.NewTimer(qviews.ShardStatsInterval)
+	defer timer.Stop()
+	statsReady := s.handler.ShardStatsReady()
+	if s.sendShardStats(stream, pending) {
 		return
 	}
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
-			if s.sendShardStats(stream, pending, lastSent) {
+		case <-timer.C:
+			timer.Reset(qviews.ShardStatsInterval)
+			if s.sendShardStats(stream, pending) {
+				return
+			}
+		case <-statsReady:
+			timer.Reset(qviews.ShardStatsInterval)
+			if s.sendShardStats(stream, pending) {
 				return
 			}
 		case _, ok := <-pending.Ready():
@@ -100,15 +106,10 @@ func (s *ViewSyncServer) sendLoop(
 }
 
 // sendShardStats runs only in sendLoop. Return true when sending must stop.
-func (s *ViewSyncServer) sendShardStats(stream viewpb.ViewSyncService_SyncQueryViewServer, pending *pendingReports, lastSent map[qviews.ShardID]qviews.ShardStats) bool {
-	samples := s.handler.CollectShardStats()
-	changed := samples[:0]
-	for _, sample := range samples {
-		if previous, ok := lastSent[sample.ShardID]; !ok || previous != sample {
-			changed = append(changed, sample)
-		}
-	}
-	for len(changed) > 0 {
+func (s *ViewSyncServer) sendShardStats(stream viewpb.ViewSyncService_SyncQueryViewServer, pending *pendingReports) bool {
+	window := s.handler.TakeShardStats()
+	batch := make([]*viewpb.ShardStats, 0, min(256, len(window.Shards)))
+	sendBatch := func() bool {
 		// State/close reports take precedence between bounded stats batches.
 		select {
 		case <-stream.Context().Done():
@@ -120,20 +121,22 @@ func (s *ViewSyncServer) sendShardStats(stream viewpb.ViewSyncService_SyncQueryV
 			}
 		default:
 		}
-		batch := changed[:min(256, len(changed))]
-		protos := make([]*viewpb.ShardStats, 0, len(batch))
-		for _, sample := range batch {
-			protos = append(protos, &viewpb.ShardStats{ShardId: sample.ShardID.IntoProto(), RequestCount: sample.RequestCount, LastAccessUnixNanos: sample.LastAccessUnixNanos})
-		}
-		if err := stream.Send(&viewpb.SyncResponse{Response: &viewpb.SyncResponse_Stats{Stats: &viewpb.ShardStatsReport{Shards: protos}}}); err != nil {
-			return true
-		}
-		for _, sample := range batch {
-			lastSent[sample.ShardID] = sample
-		}
-		changed = changed[len(batch):]
+		err := stream.Send(&viewpb.SyncResponse{Response: &viewpb.SyncResponse_Stats{Stats: &viewpb.ShardStatsReport{
+			Shards: batch, WindowStartUnixNanos: window.StartUnixNanos, WindowEndUnixNanos: window.EndUnixNanos,
+		}}})
+		// Detached windows are best effort; never restore or replay them.
+		return err != nil
 	}
-	return false
+	for id, sample := range window.Shards {
+		batch = append(batch, &viewpb.ShardStats{ShardId: id.IntoProto(), RequestCount: sample.RequestCount, LastAccessUnixNanos: sample.LastAccessUnixNanos})
+		if len(batch) == 256 {
+			if sendBatch() {
+				return true
+			}
+			batch = make([]*viewpb.ShardStats, 0, 256)
+		}
+	}
+	return len(batch) > 0 && sendBatch()
 }
 
 // sendPendingReports drains all pending reports and sends them on the stream.

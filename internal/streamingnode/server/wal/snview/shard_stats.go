@@ -7,47 +7,73 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 )
 
-// shardStats is owned by the PChannel handler, not by its View state machines.
-// Entries survive View retirement and are reclaimed with the handler.
+// shardStats owns only the current window, independently of View state machines.
 type shardStats struct {
-	shards sync.Map // qviews.ShardID -> *shardAccessCounter
-}
-
-type shardAccessCounter struct {
-	mu         sync.Mutex
-	count      uint64
-	lastAccess int64
+	mu     sync.Mutex
+	start  int64
+	shards map[qviews.ShardID]qviews.ShardStats
+	notify chan struct{}
 }
 
 func (s *shardStats) record(id qviews.ShardID, now int64) {
-	value, ok := s.shards.Load(id)
-	if !ok {
-		value, _ = s.shards.LoadOrStore(id, &shardAccessCounter{})
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.shards == nil {
+		s.shards = make(map[qviews.ShardID]qviews.ShardStats)
 	}
-	counter := value.(*shardAccessCounter)
-	counter.mu.Lock()
-	counter.count++
-	counter.lastAccess = max(counter.lastAccess, now)
-	counter.mu.Unlock()
+	if s.start == 0 {
+		s.start = now
+	}
+	sample := s.shards[id]
+	sample.ShardID = id
+	sample.RequestCount++
+	sample.LastAccessUnixNanos = max(sample.LastAccessUnixNanos, now)
+	s.shards[id] = sample
+	if len(s.shards) >= qviews.ShardStatsMaxEntries {
+		s.signalLocked()
+	}
 }
 
-func (s *shardStats) collect() []qviews.ShardStats {
-	var result []qviews.ShardStats
-	s.shards.Range(func(key, value any) bool {
-		counter := value.(*shardAccessCounter)
-		counter.mu.Lock()
-		sample := qviews.ShardStats{ShardID: key.(qviews.ShardID), RequestCount: counter.count, LastAccessUnixNanos: counter.lastAccess}
-		counter.mu.Unlock()
-		result = append(result, sample)
-		return true
-	})
-	return result
+func (s *shardStats) signalLocked() {
+	select {
+	case s.notify <- struct{}{}:
+	default:
+	}
+}
+
+func (s *shardStats) ready() <-chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.notify == nil {
+		s.notify = make(chan struct{}, 1)
+	}
+	if len(s.shards) >= qviews.ShardStatsMaxEntries {
+		s.signalLocked()
+	}
+	return s.notify
+}
+
+func (s *shardStats) take() qviews.ShardStatsWindow {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UnixNano()
+	window := qviews.ShardStatsWindow{StartUnixNanos: s.start, EndUnixNanos: now, Shards: s.shards}
+	s.start, s.shards = now, nil
+	select {
+	case <-s.notify:
+	default:
+	}
+	return window
 }
 
 func (h *SNQueryViewHandler) RecordShardAccess(id qviews.ShardID) {
 	h.stats.record(id, time.Now().UnixNano())
 }
 
-func (h *SNQueryViewHandler) CollectShardStats() []qviews.ShardStats {
-	return h.stats.collect()
+func (h *SNQueryViewHandler) TakeShardStats() qviews.ShardStatsWindow {
+	return h.stats.take()
+}
+
+func (h *SNQueryViewHandler) ShardStatsReady() <-chan struct{} {
+	return h.stats.ready()
 }

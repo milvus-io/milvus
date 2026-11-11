@@ -554,4 +554,6 @@ func TestViewSyncServer_EmptyApplyResult(t *testing.T) {
 	<-errCh
 }
 
-func (*mockHandler) CollectShardStats() []qviews.ShardStats { return nil }
+func (*mockHandler) TakeShardStats() qviews.ShardStatsWindow { return qviews.ShardStatsWindow{} }
+
+func (*mockHandler) ShardStatsReady() <-chan struct{} { return nil }

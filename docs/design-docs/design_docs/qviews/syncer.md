@@ -337,10 +337,10 @@ internal/views/coord/coordview/
 
 See [Shard access statistics](query_view_statistics.md). ReliableSyncer receives
 a `ShardStatsHandler` at construction, after Replica configuration replay. SN
-responses carry ShardID snapshots and are dispatched directly to that handler,
+responses carry best-effort ShardID windows and are dispatched directly to that handler,
 without matching pending View callbacks. The receiver validates the stream's
-PChannel; the stats store validates Replica and collection membership. A stream
-reconnect replays current counters even if no View command is pending.
+PChannel; the stats store validates Replica and collection membership. The store retains received windows for thirty seconds and expires them independently.
+A stream reconnect does not replay consumed statistics, even if delivery failed.
 
 The PChannel discovery watcher is canceled and joined during Close. Temporary
 assignment gaps do not discard pending View commands or stop SN reconnection.

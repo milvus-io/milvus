@@ -34,9 +34,9 @@ func TestShardStatsPersistentStreamWithoutViews(t *testing.T) {
 		conn, err := grpc.NewClient("passthrough:///stats", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
 		require.NoError(t, err)
 		defer conn.Close()
-		reports := make(chan []qviews.ShardStats, 16)
+		reports := make(chan qviews.ShardStatsWindow, 16)
 		sink := &shardstats.ReplicaStatsStore{}
-		mockey.Mock((*shardstats.ReplicaStatsStore).OnShardStats).To(func(_ *shardstats.ReplicaStatsStore, samples []qviews.ShardStats) { reports <- samples }).Build()
+		mockey.Mock((*shardstats.ReplicaStatsStore).OnShardStats).To(func(_ *shardstats.ReplicaStatsStore, samples qviews.ShardStatsWindow) { reports <- samples }).Build()
 		mockey.Mock((*mockViewSyncClient).WatchPChannels).To(func(_ *mockViewSyncClient, ctx context.Context, cb func([]string)) error {
 			cb([]string{"p", "p"})
 			cb(nil)
@@ -53,18 +53,18 @@ func TestShardStatsPersistentStreamWithoutViews(t *testing.T) {
 		}
 		rs := NewReliableSyncer(client, sink)
 		defer rs.Close()
-		next := func() []qviews.ShardStats {
+		next := func() qviews.ShardStatsWindow {
 			select {
 			case batch := <-reports:
 				return batch
 			case <-time.After(8 * time.Second):
 				t.Fatal("missing stats report")
-				return nil
+				return qviews.ShardStatsWindow{}
 			}
 		}
 		first := next()
-		require.Len(t, first, 1)
-		require.EqualValues(t, 1, first[0].RequestCount)
+		require.Len(t, first.Shards, 1)
+		require.EqualValues(t, 1, first.Shards[id].RequestCount)
 		cancel := <-attempts
 		select {
 		case <-reports:
@@ -72,13 +72,28 @@ func TestShardStatsPersistentStreamWithoutViews(t *testing.T) {
 		case <-time.After(5500 * time.Millisecond):
 		}
 		h.RecordShardAccess(id)
-		require.EqualValues(t, 2, next()[0].RequestCount)
+		require.EqualValues(t, 1, next().Shards[id].RequestCount)
 		cancel()
-		require.EqualValues(t, 2, next()[0].RequestCount, "reconnect sends unchanged baseline")
+		select {
+		case <-reports:
+			t.Fatal("reconnect replayed a consumed window")
+		case <-time.After(time.Second):
+		}
 		cancel = <-attempts
 		defer cancel()
 		h.RecordShardAccess(id)
-		require.EqualValues(t, 3, next()[0].RequestCount)
+		require.EqualValues(t, 1, next().Shards[id].RequestCount)
+		for i := range qviews.ShardStatsMaxEntries {
+			h.RecordShardAccess(qviews.ShardID{ReplicaID: int64(i + 100), VChannel: "p_1v0"})
+		}
+		for range qviews.ShardStatsMaxEntries / 256 {
+			select {
+			case batch := <-reports:
+				require.Len(t, batch.Shards, 256)
+			case <-time.After(2 * time.Second):
+				t.Fatal("size threshold did not wake sender")
+			}
+		}
 		require.NoError(t, rs.Close())
 		select {
 		case <-attempts:
@@ -92,7 +107,11 @@ func TestShardStatsRoutingAndDiscoveryRetry(t *testing.T) {
 	mockey.PatchConvey("stats accepts only the owning SN, discovery retries", t, func() {
 		var received []qviews.ShardStats
 		sink := &shardstats.ReplicaStatsStore{}
-		mockey.Mock((*shardstats.ReplicaStatsStore).OnShardStats).To(func(_ *shardstats.ReplicaStatsStore, s []qviews.ShardStats) { received = append(received, s...) }).Build()
+		mockey.Mock((*shardstats.ReplicaStatsStore).OnShardStats).To(func(_ *shardstats.ReplicaStatsStore, s qviews.ShardStatsWindow) {
+			for _, sample := range s.Shards {
+				received = append(received, sample)
+			}
+		}).Build()
 		report := &viewpb.ShardStatsReport{Shards: []*viewpb.ShardStats{nil, {ShardId: &viewpb.ShardID{Vchannel: "other_1v0", ReplicaId: 1}}, {ShardId: &viewpb.ShardID{Vchannel: "p_1v0", ReplicaId: 1}, RequestCount: 3, LastAccessUnixNanos: 5}}}
 		rs := &resumableSyncer{node: qviews.QueryNode{}, statsHandler: sink}
 		rs.receiveShardStats(report)

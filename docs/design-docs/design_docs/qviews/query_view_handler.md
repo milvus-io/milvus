@@ -67,7 +67,8 @@ The `QueryViewHandler` interface provides state application and Shard statistics
 
 ```
 ApplyViews(views []ApplyView)
-CollectShardStats() []qviews.ShardStats
+TakeShardStats() qviews.ShardStatsWindow
+ShardStatsReady() <-chan struct{}
 ```
 
 Each `ApplyView` carries a coord-pushed `View` and an `OnReport` callback. All state reports — both immediate (from Coord push handling) and asynchronous (from external dependency callbacks) — are delivered exclusively through `OnReport`.
@@ -315,10 +316,9 @@ both protected resource reuse and eventual readiness without another push.
 
 ## Shard access statistics
 
-[Shard access statistics](query_view_statistics.md) are collected by an SN
-handler-owned `shardStats` child structure, independently of ShardView state
-machines. QN returns no samples. The existing send loop samples at connection
-start and every five seconds, sends only changed entries after the first
-snapshot, and checks pending state/close reports between bounded stats batches.
-State callbacks and pendingReports retain their existing View-key semantics;
-stats collection never acquires View or ShardView locks.
+[Shard access statistics](query_view_statistics.md) live in the SN handler's private
+`shardStats` child structure, independently of View state machines. Observe updates
+only the current window. The existing send loop takes ownership of its map every
+five seconds or at 1024 distinct Shards, then sends batches of up to 256 samples.
+Empty windows are skipped; failed windows are dropped rather than replayed.
+QN returns no statistics. State callbacks retain their existing View-key semantics.

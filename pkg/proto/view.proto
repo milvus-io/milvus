@@ -209,7 +209,7 @@ message SyncQueryViewsResponse {
 message SyncCloseResponse {
 }
 
-// Shard planning access; counters reset with the SN handler, not View versions.
+// Shard planning access within a best-effort reporting window, independent of View versions.
 message ShardStats {
     ShardID shard_id = 1;
     uint64 request_count = 2;
@@ -218,6 +218,8 @@ message ShardStats {
 
 message ShardStatsReport {
     repeated ShardStats shards = 1;
+    int64 window_start_unix_nanos = 2;
+    int64 window_end_unix_nanos = 3;
 }
 
 // ShardID identifies one shard within a replica.

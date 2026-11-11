@@ -229,17 +229,17 @@ func (rs *resumableSyncer) receiveShardStats(report *viewpb.ShardStatsReport) {
 	if !ok || rs.statsHandler == nil {
 		return
 	}
-	samples := make([]qviews.ShardStats, 0, len(report.GetShards()))
+	window := qviews.ShardStatsWindow{StartUnixNanos: report.GetWindowStartUnixNanos(), EndUnixNanos: report.GetWindowEndUnixNanos(), Shards: make(map[qviews.ShardID]qviews.ShardStats, len(report.GetShards()))}
 	for _, sample := range report.GetShards() {
 		id := sample.GetShardId()
 		if id == nil || funcutil.ToPhysicalChannel(id.GetVchannel()) != node.PChannel {
 			continue
 		}
-		samples = append(samples, qviews.ShardStats{
+		window.Shards[qviews.FromProtoShardID(id)] = qviews.ShardStats{
 			ShardID: qviews.FromProtoShardID(id), RequestCount: sample.GetRequestCount(), LastAccessUnixNanos: sample.GetLastAccessUnixNanos(),
-		})
+		}
 	}
-	rs.statsHandler.OnShardStats(samples)
+	rs.statsHandler.OnShardStats(window)
 }
 
 // rePush sends all pending entries for this node through the stream in batches

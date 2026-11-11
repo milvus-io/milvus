@@ -3,6 +3,7 @@ package querycoordv2
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
@@ -30,7 +31,7 @@ func TestQViewsStatsRecoveryFailureCleanup(t *testing.T) {
 		id := qviews.ShardID{ReplicaID: 7, VChannel: "p_1v0"}
 		mockey.Mock(shardstats.New).Origin(&original).To(func(configs *loadmgr.LoadConfigStore) *shardstats.ReplicaStatsStore {
 			store = original(configs)
-			store.OnShardStats([]qviews.ShardStats{{ShardID: id, RequestCount: 1}})
+			store.OnShardStats(runtimeTestStatsWindow(id, 1))
 			_, found := store.GetShardStats(id)
 			require.True(t, found)
 			return store
@@ -51,7 +52,7 @@ func TestQViewsStatsRecoveryFailureCleanup(t *testing.T) {
 		require.ErrorIs(t, err, context.Canceled)
 		require.Nil(t, runtime)
 		require.NotNil(t, store)
-		store.OnShardStats([]qviews.ShardStats{{ShardID: id, RequestCount: 2}})
+		store.OnShardStats(runtimeTestStatsWindow(id, 2))
 		_, found := store.GetShardStats(id)
 		require.False(t, found)
 		select {
@@ -60,4 +61,9 @@ func TestQViewsStatsRecoveryFailureCleanup(t *testing.T) {
 			t.Fatal("runtime returned before discovery stopped")
 		}
 	})
+}
+
+func runtimeTestStatsWindow(id qviews.ShardID, count uint64) qviews.ShardStatsWindow {
+	now := time.Now().UnixNano()
+	return qviews.ShardStatsWindow{StartUnixNanos: now - int64(time.Second), EndUnixNanos: now, Shards: map[qviews.ShardID]qviews.ShardStats{id: {ShardID: id, RequestCount: count}}}
 }

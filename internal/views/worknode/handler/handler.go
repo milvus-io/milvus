@@ -25,8 +25,11 @@ type QueryViewHandler interface {
 	// exclusively through the OnReport callback in each ApplyView.
 	ApplyViews(views []ApplyView)
 
-	// CollectShardStats samples planning access without acquiring View locks.
-	// The returned snapshot is owned by the caller.
-	// QueryNodes return nil; statistics are collected only on StreamingNodes.
-	CollectShardStats() []qviews.ShardStats
+	// TakeShardStats transfers the current window and starts an empty one.
+	// The caller owns the samples and may discard them on send failure.
+	TakeShardStats() qviews.ShardStatsWindow
+
+	// ShardStatsReady signals that the current window reached its size threshold.
+	// QueryNodes return nil and never produce statistics.
+	ShardStatsReady() <-chan struct{}
 }
