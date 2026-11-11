@@ -76,6 +76,25 @@ def _read_table(storage, bucket, key, format_name, tmp_path):
     raise AssertionError(f"unsupported column-group format: {format_name}")
 
 
+def _float_vector_values(column, dim):
+    dtype = column.type
+    values = column.to_pylist()
+    assert all(value is not None for value in values), "unexpected NULL FloatVector"
+    if pa.types.is_fixed_size_binary(dtype):
+        assert dtype.byte_width == dim * 4, f"invalid physical FloatVector width: {dtype}"
+    elif pa.types.is_fixed_size_list(dtype):
+        if dtype.value_type == pa.float32():
+            assert dtype.list_size == dim, f"invalid physical FloatVector width: {dtype}"
+            assert all(None not in value for value in values), "unexpected NULL FloatVector element"
+            return values
+        assert dtype.value_type == pa.uint8() and dtype.list_size == dim * 4, (
+            f"invalid physical FloatVector byte list: {dtype}"
+        )
+    else:
+        raise AssertionError(f"invalid physical FloatVector type: {dtype}")
+    return [list(struct.unpack(f"<{dim}f", bytes(value))) for value in values]
+
+
 def read_segment_rows(storage, bucket, manifest_path, field_ids, row_count, vector_dim, tmp_path):
     """Reassemble column groups by position; preserve manifest/file/row-group order."""
     import fastavro
@@ -110,19 +129,15 @@ def read_segment_rows(storage, bucket, manifest_path, field_ids, row_count, vect
             assert set(selected) <= set(table.column_names), "missing physical column"
             part = table.slice(start, end - start)
             for column in selected:
-                values[column].extend(part[column].to_pylist())
+                physical = part[column]
+                if names[column] == "vector":
+                    values[column].extend(_float_vector_values(physical, vector_dim))
+                else:
+                    values[column].extend(physical.to_pylist())
         assert all(len(column) == row_count for column in values.values()), "column-group row count differs"
         columns.update(values)
     assert set(columns) == set(names), "manifest is missing a requested field"
-    rows = [{names[column]: values[i] for column, values in columns.items()} for i in range(row_count)]
-    for row in rows:
-        vector = row["vector"]
-        if isinstance(vector, bytes):
-            assert len(vector) == vector_dim * 4, "invalid physical FloatVector width"
-            row["vector"] = list(struct.unpack(f"<{vector_dim}f", vector))
-        else:
-            assert isinstance(vector, list) and len(vector) == vector_dim, "invalid physical FloatVector shape"
-    return rows
+    return [{names[column]: values[i] for column, values in columns.items()} for i in range(row_count)]
 
 
 def _export_request(url, action, payload, db_name, api_key):
@@ -737,9 +752,10 @@ class BatchContext:
         assert progress["state"] == "Completed" and progress["importedRows"] == rows, self.redact(progress)
         return progress
 
-    def import_rejected(self, target, uri, *, options=None, files=None, partition=None, label, reason=()):
+    def import_rejected(self, target, uri, *, options=None, files=None, partition=None, label, reason=(), failure=None):
         result = self.request(target, uri, options=options, files=files, partition=partition, label=label)
-        if result["code"] == 0:
+        stage = "create" if result["code"] != 0 else "job"
+        if stage == "job":
             progress = self.wait(result["data"]["jobId"])
             assert progress["state"] == "Failed", self.redact(progress)
             message = progress.get("reason", "")
@@ -748,7 +764,11 @@ class BatchContext:
         assert message, self.redact(result)
         if reason:
             assert any(token.lower() in message.lower() for token in reason), self.redact(message)
-        self.record("rejected", label=label, reason=message)
+        if failure:
+            expected_stage, pattern = failure
+            assert stage == expected_stage, (label, expected_stage, stage, self.redact(message))
+            assert re.search(pattern, message, re.IGNORECASE), (label, pattern, self.redact(message))
+        self.record("rejected", label=label, stage=stage, reason=message)
 
     def assert_rows(self, name, rows, fields=None):
         expected = {row["id"]: row for row in rows}
@@ -1505,7 +1525,7 @@ def ownership_runtime_config():
 
 def ownership_rows(threshold):
     """4096 unique rows; eight scattered LOB values per TEXT column."""
-    vectors = np.random.default_rng().random((4096, 32)).astype(np.float32)
+    vectors = np.random.default_rng(17).random((4096, 32)).astype(np.float32)
     unit = "中文🙂/owned snapshot/"
     long_text = unit * (max(96 * 1024, threshold + 1024) // len(unit.encode("utf-8")) + 1)
     # One LOB per column in each 512-row block, on different PKs.
@@ -1716,11 +1736,19 @@ def inspect_snapshot_ownership(
 
 
 def assert_owned_hnsw_search(results, queries, rows):
-    """HNSW is approximate: verify returned identities, payload, distance and ordering."""
+    """Check HNSW hits against an exact L2 oracle with a per-query recall floor."""
     expected = {row["id"]: row for row in rows}
+    ids = list(expected)
+    vectors = np.asarray([expected[pk]["vec"] for pk in ids], dtype=np.float64)
     assert len(results) == len(queries)
     for vector, hits in zip(queries, results):
-        assert len(hits) == len({hit["id"] for hit in hits}) == 5
+        hit_ids = {hit["id"] for hit in hits}
+        assert len(hits) == len(hit_ids) == 5
+        exact_distances = np.sum((vectors - vector) ** 2, axis=1)
+        top = np.argsort(exact_distances, kind="stable")[:6]
+        assert exact_distances[top[4]] < exact_distances[top[5]], "ambiguous exact top-5 boundary"
+        nearest = {ids[i] for i in top[:5]}
+        assert len(hit_ids & nearest) >= 4, (hit_ids, nearest)
         for hit in hits:
             assert hit["id"] in expected
             row = expected[hit["id"]]

@@ -1289,23 +1289,35 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("layout", ["referenced", "self_contained"])
-    @pytest.mark.skip(reason="Known Vortex NULL/default bug: https://github.com/milvus-io/milvus/issues/54961")
-    def test_snapshot_import_combined_defaults(self, snapshot_default_resources, layout, db_name):
+    @pytest.mark.parametrize(
+        "stored_null_to_default",
+        [
+            pytest.param(False, id="supported-defaults"),
+            pytest.param(
+                True,
+                id="stored-null-to-default",
+                marks=pytest.mark.skip(
+                    reason="Known Vortex NULL/default bug: https://github.com/milvus-io/milvus/issues/54961"
+                ),
+            ),
+        ],
+    )
+    def test_snapshot_import_combined_defaults(
+        self, snapshot_default_resources, layout, db_name, stored_null_to_default
+    ):
         """
-        target: SI-FN-10, combine the four valid missing/NULL rules in different fields
+        target: SI-FN-10, exercise supported missing/NULL rules independently of stored NULL to default
         method: import mixed NULL/0/5 and false/empty controls into default/nullable target fields
         expected: missing and stored-NULL values follow target rules; all non-NULL values and vectors survive reload
         """
         client, source, target, snapshot, export_prefix = snapshot_default_resources
         source_specs = [
-            ("null_to_default", DataType.INT64, {"nullable": True}),
             ("keep_null", DataType.INT64, {"nullable": True}),
             ("bool_value", DataType.BOOL, {}),
             ("text_value", DataType.VARCHAR, {"max_length": 64}),
             ("array_value", DataType.ARRAY, {"element_type": DataType.INT64, "max_capacity": 8}),
         ]
         target_specs = [
-            ("null_to_default", DataType.INT64, {"default_value": 42}),
             ("keep_null", DataType.INT64, {"nullable": True}),
             ("bool_value", DataType.BOOL, {"default_value": True}),
             ("text_value", DataType.VARCHAR, {"max_length": 64, "default_value": "fallback"}),
@@ -1313,6 +1325,13 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
             ("missing_default", DataType.INT64, {"default_value": 42}),
             ("missing_nullable", DataType.INT64, {"nullable": True}),
         ]
+        nullable_fields = ["keep_null"]
+        default_fields = ["missing_default"]
+        if stored_null_to_default:
+            source_specs.insert(0, ("null_to_default", DataType.INT64, {"nullable": True}))
+            target_specs.insert(0, ("null_to_default", DataType.INT64, {"default_value": 42}))
+            nullable_fields.append("null_to_default")
+            default_fields.append("null_to_default")
 
         # Step 1: Missing fields are appended after all common fields; verify actual IDs.
         source_fields = self._create_default_fields_collection(client, source, source_specs)
@@ -1325,9 +1344,9 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
             assert target_fields[name]["type"] == field["type"]
         for name in ("missing_default", "missing_nullable"):
             assert name not in source_fields and target_fields[name]["field_id"] not in source_ids
-        for name in ("null_to_default", "keep_null"):
+        for name in nullable_fields:
             assert source_fields[name].get("nullable") and "default_value" not in source_fields[name]
-        for name in ("null_to_default", "missing_default"):
+        for name in default_fields:
             assert target_fields[name]["default_value"].long_data == 42
             assert not target_fields[name].get("nullable", False)
         for name in ("keep_null", "missing_nullable"):
@@ -1340,7 +1359,6 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
             {
                 "id": i,
                 "vec": [(i * DIM + j) / 4096 for j in range(DIM)],
-                "null_to_default": (None, 0, 5)[i % 3],
                 "keep_null": (None, 0, 5)[i % 3],
                 "bool_value": i % 2 != 0,
                 "text_value": "" if i % 2 == 0 else f"text_{i}",
@@ -1348,15 +1366,21 @@ class TestMilvusClientSnapshotImportIndependent(TestMilvusClientV2Base):
             }
             for i in range(128)
         ]
+        if stored_null_to_default:
+            for row in rows:
+                row["null_to_default"] = row["keep_null"]
         expected = {
             row["id"]: {
                 **deepcopy(row),
-                "null_to_default": 42 if row["null_to_default"] is None else row["null_to_default"],
                 "missing_default": 42,
                 "missing_nullable": None,
             }
             for row in rows
         }
+        if stored_null_to_default:
+            for row in expected.values():
+                if row["null_to_default"] is None:
+                    row["null_to_default"] = 42
         source_scalars = tuple(spec[0] for spec in source_specs)
         target_scalars = tuple(spec[0] for spec in target_specs)
         assert self.insert(client, source, deepcopy(rows))[0]["insert_count"] == len(rows)
@@ -4095,6 +4119,54 @@ OPTION_ERRORS = {
     "reverse_range": ("start_ts", "18446744073709551615"),
 }
 FILE_ERRORS = ("empty_files", "two_entries", "two_uris", "empty_uri", "bare_key", "segment_manifest")
+REQUEST_FAILURES = {
+    "missing_backup": ("create", r"source_type=snapshot requires backup=true"),
+    "backup_false": ("create", r"source_type=snapshot requires backup=true"),
+    "unknown_source": ("create", r"unsupported source_type: not-a-source"),
+    "storage_version": ("create", r"storage_version must not be specified with source_type=snapshot"),
+    "l0_import": ("create", r"source_type=snapshot does not support l0_import=true"),
+    "source_partition": (
+        "create",
+        r"source_partition_name is not supported; snapshot import reads all source partitions",
+    ),
+    "reserved_uri": ("create", r"_snapshot_source_uri is reserved for internal use"),
+    "reserved_layout": ("create", r"_snapshot_layout is reserved for internal use"),
+    "bad_timestamp": ("job", r"parse start_ts failed, value=not-a-timestamp.*invalid syntax"),
+    "reverse_range": ("job", r"start_ts shouldn't be larger than end_ts"),
+    "empty_files": ("create", r"^import request is empty: invalid parameter"),
+    "two_entries": ("create", r"snapshot-source import requires exactly one snapshot metadata path"),
+    "two_uris": ("create", r"snapshot-source import requires exactly one snapshot metadata path"),
+    "empty_uri": ("create", r"foreign_uri is empty"),
+    "bare_key": ("create", r"snapshot-source import requires a complete metadata URI"),
+    "segment_manifest": (
+        "create",
+        r"restore metadata URI must end with snapshots/\{collectionID\}/metadata/\{snapshotID\}\.json",
+    ),
+}
+CORRUPT_OBJECT_BYTES = b"deliberately corrupt private test object"
+OBJECT_FAILURES = {
+    "missing_metadata": ("create", r"failed to read metadata file.*key not found"),
+    "corrupt_metadata": ("create", r"failed to read metadata file.*failed to parse metadata JSON"),
+    "missing_descriptor": ("job", r"failed to read manifest file.*key not found"),
+    "corrupt_descriptor": ("job", r"failed to read manifest file.*invalid snapshot segment manifest"),
+    "escape_descriptor": ("create", r"outside (?:snapshot|source) root|invalid snapshot object path"),
+    "foreign_descriptor": ("create", r"outside snapshot root|does not match configured bucket"),
+    "missing_physical_manifest": ("job", r"File not found.*(?:Path does not exist|No such file or directory)"),
+    "corrupt_physical_manifest": ("job", r"Failed to deserialize Manifest.*(?:Invalid MILV magic|Invalid Avro)"),
+    "missing_data": (
+        "job",
+        r"failed to get reader stream.*(?:RESOURCE_NOT_FOUND|NO_SUCH_KEY|NoSuchKey|Path does not exist)",
+    ),
+    "corrupt_data": (
+        "job",
+        r"failed to get reader stream.*(?:Parquet magic bytes not found|Malformed file, invalid magic bytes|"
+        rf"Failed to open vortex file:.*Read size mismatch, expected size=\d+, actual size={len(CORRUPT_OBJECT_BYTES)}\b)",
+    ),
+    "missing_l0": ("job", r"Error making file reader with path.*(?:Path does not exist|No such file or directory)"),
+    "corrupt_l0": ("job", r"Error making file reader with path.*Parquet magic bytes not found"),
+    "missing_lob": ("job", r"snapshot LOB does not exist"),
+    "corrupt_lob": ("job", r"failed to read TEXT-decoded segment batch.*Malformed file, invalid magic bytes"),
+}
 MAPPING_ERRORS = (
     "missing_A",
     "missing_empty",
@@ -4174,7 +4246,7 @@ class TestSnapshotImportErrors(SnapshotBatchBase):
         """
         target: SI-ER-01, invalid options/file cardinality/source URI cannot silently import
         method: change one known-good request field; require rejection/Failed; check sentinel/schema/reload
-        expected: nonempty failure reason and unchanged target
+        expected: stage and failure match the altered input; target stays unchanged
         """
         source, uri, rows = self._source(batch)
         target = self._target(batch)
@@ -4201,16 +4273,9 @@ class TestSnapshotImportErrors(SnapshotBatchBase):
                     [urlsplit(uri)._replace(path=f"/{batch.bucket}/{metadata['manifest_list'][0]}").geturl()]
                 ],
             }[variant]
-        reason = (
-            ["import request is empty"]
-            if variant == "empty_files"
-            else ["source", "snapshot", "uri", "path", "file"]
-            if variant in FILE_ERRORS
-            else ["timestamp", "start", "end", "time"]
-            if variant in ("bad_timestamp", "reverse_range")
-            else [OPTION_ERRORS[variant][0], "reserved", "backup", "source_type"]
+        batch.import_rejected(
+            target, uri, options=options, files=files, label="SI-ER-01/" + variant, failure=REQUEST_FAILURES[variant]
         )
-        batch.import_rejected(target, uri, options=options, files=files, label="SI-ER-01/" + variant, reason=reason)
         self._unchanged(batch, target, before)
         batch.assert_rows(source, rows)
 
@@ -4497,7 +4562,7 @@ class TestSnapshotImportErrors(SnapshotBatchBase):
             if variant.startswith("missing") or variant == "unprojected_lob":
                 batch.store.remove_object(batch.bucket, damaged)
             else:
-                batch.put(damaged, b"deliberately corrupt private test object")
+                batch.put(damaged, CORRUPT_OBJECT_BYTES)
         if variant == "unprojected_lob":
             target = self._target(batch)
             batch.import_ok(target, uri, 32, label="SI-ER-04/unprojected_LOB_control")
@@ -4513,15 +4578,25 @@ class TestSnapshotImportErrors(SnapshotBatchBase):
             target = self._target(batch)
             sentinel = plain_rows([-1])
         before = batch.client.describe_collection(target)
+        stage, pattern = OBJECT_FAILURES[variant]
+        if variant in (
+            "missing_metadata",
+            "missing_descriptor",
+            "corrupt_descriptor",
+            "missing_physical_manifest",
+            "missing_l0",
+            "corrupt_l0",
+            "missing_lob",
+        ):
+            pattern = rf"(?=[\s\S]*{re.escape(damaged)})[\s\S]*{pattern}"
+        elif variant in ("missing_data", "corrupt_data", "corrupt_lob"):
+            # Loon names the source segment in these messages rather than its individual object.
+            pattern = rf"(?=[\s\S]*{re.escape(base)})[\s\S]*{pattern}"
         batch.import_rejected(
             target,
             uri,
             label="SI-ER-04/" + variant,
-            reason=(
-                ["outside snapshot root", "does not match configured bucket", "outside source root"]
-                if variant in ("escape_descriptor", "foreign_descriptor")
-                else ["read", "decode", "manifest", "path", "file", "metadata", "EOF", "json", "exist", "invalid"]
-            ),
+            failure=(stage, pattern),
         )
         batch.reload_assert(target, sentinel)
         assert batch.client.describe_collection(target) == before
