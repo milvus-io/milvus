@@ -28,6 +28,11 @@ RUN uv python install 3.12.13 && \
         setuptools==80.9.0 wheel==0.45.1 && \
     uv tool install --python python3.12 conan==2.25.1
 
+# upgrade gcc to 12
+RUN apt-get update && apt-get install -y gcc-12 g++-12 && cd /usr/bin \
+    && unlink gcc && ln -s gcc-12 gcc \
+    && unlink g++ && ln -s g++-12 g++ \
+    && unlink gcov && ln -s gcov-12 gcov
 
 
 # Install go
