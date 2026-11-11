@@ -18,6 +18,7 @@ package index
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -39,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // TestCommitSegmentManifestPublishesIndexTaskAtomically proves the index task
@@ -65,6 +67,17 @@ func manifestIndexEntryForCommitTest(t *testing.T, m *meta.Meta, indexMeta *Inde
 }
 
 func TestCommitSegmentManifestPublishesIndexTaskAtomically(t *testing.T) {
+	t.Run("resident", func(t *testing.T) { testCommitSegmentManifestIndexPublication(t, false) })
+	t.Run("summary", func(t *testing.T) { testCommitSegmentManifestIndexPublication(t, true) })
+}
+
+func testCommitSegmentManifestIndexPublication(t *testing.T, summaries bool) {
+	params := paramtable.Get()
+	key := params.DataCoordCfg.SegmentIndexSummariesEnabled.Key
+	previousMode := params.DataCoordCfg.SegmentIndexSummariesEnabled.GetValue()
+	require.NoError(t, params.Save(key, strconv.FormatBool(summaries)))
+	t.Cleanup(func() { require.NoError(t, params.Save(key, previousMode)) })
+
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	const (
@@ -80,6 +93,8 @@ func TestCommitSegmentManifestPublishesIndexTaskAtomically(t *testing.T) {
 
 	mt, dm, err := NewMemoryMetaWithIndex(t)
 	require.NoError(t, err)
+	require.Equal(t, summaries, dm.IndexMeta.UsesSegmentSummaries())
+
 	require.NoError(t, mt.AddSegment(context.Background(), meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID:             segmentID,
 		CollectionID:   collectionID,
@@ -149,12 +164,22 @@ func TestCommitSegmentManifestPublishesIndexTaskAtomically(t *testing.T) {
 		},
 	}
 	failCatalog := mockey.Mock((*datacoord.Catalog).Update).Return(merr.ErrServiceUnavailable).Build()
+	defer failCatalog.UnPatch()
 	require.ErrorIs(t, mt.CommitSegmentManifest(ctx, request), merr.ErrServiceUnavailable)
 	require.Equal(t, oldManifest, mt.GetSegment(ctx, segmentID).GetManifestPath())
 	require.Empty(t, mt.GetSegment(ctx, segmentID).GetIndexSummaries())
 	pending, exists := dm.IndexMeta.GetIndexJob(buildID)
 	require.True(t, exists)
 	require.Equal(t, commonpb.IndexState_InProgress, pending.IndexState)
+	pendingRows, err := mt.Catalog.ListSegmentIndexes(ctx, collectionID)
+	require.NoError(t, err)
+	require.Len(t, pendingRows, 1)
+	require.Equal(t, commonpb.IndexState_InProgress, pendingRows[0].IndexState)
+	failedSegments, err := mt.Catalog.ListSegments(ctx, collectionID)
+	require.NoError(t, err)
+	require.Len(t, failedSegments, 1)
+	require.Equal(t, oldManifest, failedSegments[0].GetManifestPath())
+	require.Empty(t, failedSegments[0].GetIndexSummaries())
 	failCatalog.UnPatch()
 	require.NoError(t, mt.CommitSegmentManifest(ctx, request))
 
@@ -164,13 +189,29 @@ func TestCommitSegmentManifestPublishesIndexTaskAtomically(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, persistedSegments, 1)
 	require.True(t, persistedSegments[0].GetManifestHasIndex())
-	require.Empty(t, persistedSegments[0].GetIndexSummaries())
-	require.Empty(t, mt.GetSegment(ctx, segmentID).GetIndexSummaries())
-	published, ok := dm.IndexMeta.GetIndexJob(buildID)
-	require.True(t, ok)
-	require.Equal(t, commonpb.IndexState_Finished, published.IndexState)
-	require.Equal(t, []string{"0", "1"}, published.IndexFileKeys)
-	require.EqualValues(t, 2000, published.IndexSerializedSize)
+	finishedRows, err := mt.Catalog.ListSegmentIndexes(ctx, collectionID)
+	require.NoError(t, err)
+	require.Empty(t, finishedRows)
+	if summaries {
+		require.Len(t, persistedSegments[0].GetIndexSummaries(), 1)
+		require.Len(t, mt.GetSegment(ctx, segmentID).GetIndexSummaries(), 1)
+		summary := persistedSegments[0].GetIndexSummaries()[0]
+		require.EqualValues(t, buildID, summary.GetBuildId())
+		require.EqualValues(t, indexID, summary.GetIndexId())
+		require.EqualValues(t, 2000, summary.GetSerializedSize())
+		require.True(t, summary.GetHasArtifact())
+		require.False(t, dm.IndexMeta.HasBuildInfo(buildID))
+		require.Zero(t, dm.IndexMeta.SegmentIndexes.Len())
+	} else {
+		require.Empty(t, persistedSegments[0].GetIndexSummaries())
+		require.Empty(t, mt.GetSegment(ctx, segmentID).GetIndexSummaries())
+		published, ok := dm.IndexMeta.GetIndexJob(buildID)
+		require.True(t, ok)
+		require.Equal(t, commonpb.IndexState_Finished, published.IndexState)
+		require.Equal(t, []string{"0", "1"}, published.IndexFileKeys)
+		require.EqualValues(t, 2000, published.IndexSerializedSize)
+	}
+
 	// The same physical-index commit must drive a new DataView even though
 	// SegmentID and SchemaVersion did not change. Retained Views keep revision 3.
 	require.Eventually(t, func() bool {

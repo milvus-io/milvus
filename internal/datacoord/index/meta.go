@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
@@ -76,8 +77,9 @@ func validateIndexStorePathVersionForFinish(buildID int64, requested, actual ind
 }
 
 type IndexMeta struct {
-	ctx     context.Context
-	Catalog metastore.DataCoordCatalog
+	summarySource metacache.MetaView
+	ctx           context.Context
+	Catalog       metastore.DataCoordCatalog
 
 	// fieldIndexLock protects collection index definitions and serializes the
 	// resident publication of segment index records observed together by
@@ -304,6 +306,18 @@ func (m *IndexMeta) updateSegmentIndex(segIdx *model.SegmentIndex) {
 	defer locks.Unlock(segIdx.SegmentID)
 	old, _ := m.SegmentBuildInfo.Get(segIdx.BuildID)
 	m.taskCounts.replaceTask(old, segIdx)
+	if m.UsesSegmentSummaries() && segIdx.ManifestPublished && segIdx.IndexState == commonpb.IndexState_Finished {
+		if indexes, ok := m.SegmentIndexes.Get(segIdx.SegmentID); ok {
+			if current, exists := indexes.Get(segIdx.IndexID); exists && current.BuildID == segIdx.BuildID {
+				indexes.Remove(segIdx.IndexID)
+				if indexes.Len() == 0 {
+					m.SegmentIndexes.Remove(segIdx.SegmentID)
+				}
+			}
+		}
+		m.SegmentBuildInfo.Remove(segIdx.BuildID)
+		return
+	}
 	indexes, ok := m.SegmentIndexes.Get(segIdx.SegmentID)
 	if ok {
 		indexes.Insert(segIdx.IndexID, segIdx)
@@ -1062,6 +1076,24 @@ func (m *IndexMeta) GetSegmentIndexes(collectionID UniqueID, segID UniqueID) map
 // It only reads the self-synchronized segmentIndexes map and does not acquire
 // fieldIndexLock or consult field-index definitions.
 func (m *IndexMeta) GetAllSegmentIndexes(segID UniqueID) []*model.SegmentIndex {
+	if m.UsesSegmentSummaries() {
+		var records []*model.SegmentIndex
+		activeBuilds := make(map[int64]struct{})
+		if active, ok := m.SegmentIndexes.Get(segID); ok {
+			for _, record := range active.Values() {
+				records = append(records, model.CloneSegmentIndex(record))
+				activeBuilds[record.BuildID] = struct{}{}
+			}
+		}
+		if segment, ok := m.summarySource.GetSegment(segID); ok {
+			for _, summary := range segment.GetIndexSummaries() {
+				if _, exists := activeBuilds[summary.GetBuildId()]; !exists {
+					records = append(records, meta.SegmentIndexFromSummary(segment, summary))
+				}
+			}
+		}
+		return records
+	}
 	if m.SegmentIndexes == nil {
 		return nil
 	}
@@ -1400,9 +1432,15 @@ func (m *IndexMeta) stageSegmentIndexMutation(mut meta.SegmentIndexMutation) (*m
 		return nil, merr.WrapErrServiceInternalMsg("unknown segment index mutation type %d, buildID=%d", mut.Type, mut.BuildID)
 	}
 
-	staged := &meta.StagedSegmentIndexMutation{Install: func() func() { return func() {} }}
+	staged := &meta.StagedSegmentIndexMutation{
+		PublishSummary: m.UsesSegmentSummaries(),
+		Install:        func() func() { return func() {} },
+	}
 
 	previous, ok := m.SegmentBuildInfo.Get(mut.BuildID)
+	if !ok && mut.Type == meta.SegmentIndexRemove {
+		previous, ok = m.summaryRecord(mut.SegmentID, mut.BuildID)
+	}
 	if !ok {
 		if mut.Type == meta.SegmentIndexUpsert {
 			return staged, meta.ErrSegmentIndexRecordGone
@@ -1489,6 +1527,16 @@ func (m *IndexMeta) stageSegmentIndexMutation(mut meta.SegmentIndexMutation) (*m
 		return staged, nil
 	}
 
+	var replacedSummary *model.SegmentIndex
+	if m.UsesSegmentSummaries() {
+		if segment, exists := m.summarySource.GetSegment(previous.SegmentID); exists {
+			for _, summary := range segment.GetIndexSummaries() {
+				if summary.GetIndexId() == previous.IndexID && summary.GetBuildId() != previous.BuildID {
+					replacedSummary = meta.SegmentIndexFromSummary(segment, summary)
+				}
+			}
+		}
+	}
 	finished, err := m.buildFinishedSegmentIndex(previous, mut.FinishedTask)
 	if err != nil {
 		return staged, err
@@ -1501,6 +1549,9 @@ func (m *IndexMeta) stageSegmentIndexMutation(mut meta.SegmentIndexMutation) (*m
 	staged.Record = finished
 	staged.Install = func() func() {
 		finished.ManifestPublished = true
+		if replacedSummary != nil {
+			m.taskCounts.replaceTask(replacedSummary, nil)
+		}
 		m.updateSegmentIndex(finished)
 		// recordFinishedTask is observability only, and the stored-size gauge
 		// can wait for a Prometheus scrape, so the whole step is deferred out

@@ -9,11 +9,31 @@ segment manifest. Do not reconstruct completed SegmentIndex objects at startup.
 Collection index definitions and active or pending-cleanup build tasks remain
 coordinator metadata. The default mode retains existing behavior.
 
+Completed inventory has one publication mode: legacy mode retains completed
+SegmentIndex records and does not write summaries; summary mode writes summaries
+and retires completed records. Manifest artifact entries remain in both modes.
+
 The new mode is selected only when an empty cluster first starts and is persisted
 in the metadata namespace. Subsequent starts must select the same mode. Existing
 clusters cannot enable it, and summary-mode clusters cannot disable it. StorageV3
 and manifest publication are required. Historical migration, rollback, and
-conversion of incompatible snapshots are outside this version.
+conversion of incompatible snapshots are outside this version. Legacy direct
+manifest-version adoption (BatchUpdateManifest and pre-baked backfill results)
+is rejected before publication because it cannot update index inventory or fence
+active builds. Structured backfill remains supported by the commit framework.
+
+Enable after both stack layers are installed, at the first startup, with both
+index migration switches disabled:
+
+```yaml
+dataCoord:
+  index:
+    segmentIndexSummariesEnabled: true
+    writeSegmentIndexToManifest: true
+```
+
+The durable selection is `datacoord-meta/index-metadata-mode`. A restart with a
+different selection fails before recovery or background work starts.
 
 ## Metadata and publication
 
@@ -54,16 +74,29 @@ and artifacts. No new replicated side effect or WAL message is introduced.
 
 ## Stack and validation
 
-1. Define completed-index summaries and their replacement rules. Keep publication,
-   readers and startup unchanged; manifest commits must not write summaries yet.
-2. Add summary readers and on-demand artifact loading behind the inactive mode.
-3. Add immutable new-cluster selection, summary publication, GC and compatible
-   snapshot/copy integration together. Legacy mode publishes completed SegmentIndex
-   records without summaries; summary mode publishes summaries and retires completed
-   records. Validate both modes, failures, cleanup races and build/load/restart.
+1. Add the default-off immutable mode and all summary writes: normal and empty
+   completion, replacement/invalidation, retirement, and copy/restore publication.
+   Legacy mode retains completed SegmentIndex records without summaries; summary
+   mode publishes summaries and retires completed records. Include the metadata
+   access needed to validate writes, and test persistence, failure and restart.
+2. Adapt consumers: readiness, scheduling, progress, compaction, load responses,
+   snapshot extraction and GC. Read artifact details from the pinned manifest on
+   demand, without rebuilding a resident completed-index cache. Validate consumers
+   against the first layer's publications, including read failures and cleanup races.
 
 Use the matching Milvus development container for generation, formatting, builds
 and tests. Check catalog failure leaves both pointer and summaries unchanged;
 repeated completion, drop/recreate, empty completion, restart, data replacement,
 snapshot pins, incompatible restore, bounded manifest reads and memory retention.
 Report source-traced paths separately from executed integration evidence.
+
+Executed validation in the matching development container:
+
+- Native C++ build and standard Go protobuf generation passed.
+- Full DataCoord index and metadata package tests passed.
+- Focused summary/publication, GC, copy, restore, catalog and configuration tests
+  passed, including failed catalog publication and the task-retirement GC race.
+- The full paramtable suite is blocked by its existing storage-I/O test using
+  `/var/lib/milvus/data` on the read-only container root; focused mode tests passed.
+
+Live-cluster end-to-end build/load/restart and memory benchmarks have not run.
