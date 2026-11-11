@@ -374,7 +374,8 @@ func (s *OrderedReduceStream) produceNextUnit(readyBuffers []*orderedChildBuffer
 		if err != nil {
 			return outputBuffer, outputBytes, false, err
 		}
-		if comparison < 0 {
+		// Match Batch: select the newest available version before a child drains.
+		if comparison < 0 || (comparison == 0 && s.deduplicatePKs && candidate.front().timestamp() > winner.front().timestamp()) {
 			winner = candidate
 		}
 	}
