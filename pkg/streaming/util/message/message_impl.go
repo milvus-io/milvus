@@ -154,6 +154,12 @@ func (m *messageImpl) WithReplicateHeader(rh *ReplicateHeader) MutableMessage {
 	return m
 }
 
+// WithoutIdempotencyKey removes the idempotency key of current message.
+func (m *messageImpl) WithoutIdempotencyKey() MutableMessage {
+	m.properties.Delete(messageIdempotencyKey)
+	return m
+}
+
 // WithTimeTick sets the time tick of current message.
 func (m *messageImpl) WithTimeTick(tt uint64) MutableMessage {
 	m.properties.Set(messageTimeTick, EncodeUint64(tt))

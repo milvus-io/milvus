@@ -1276,6 +1276,53 @@ func (_c *MockMutableMessage_WithWALTerm_Call) RunAndReturn(run func(int64) mess
 	return _c
 }
 
+// WithoutIdempotencyKey provides a mock function with no fields
+func (_m *MockMutableMessage) WithoutIdempotencyKey() message.MutableMessage {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for WithoutIdempotencyKey")
+	}
+
+	var r0 message.MutableMessage
+	if rf, ok := ret.Get(0).(func() message.MutableMessage); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(message.MutableMessage)
+		}
+	}
+
+	return r0
+}
+
+// MockMutableMessage_WithoutIdempotencyKey_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WithoutIdempotencyKey'
+type MockMutableMessage_WithoutIdempotencyKey_Call struct {
+	*mock.Call
+}
+
+// WithoutIdempotencyKey is a helper method to define mock.On call
+func (_e *MockMutableMessage_Expecter) WithoutIdempotencyKey() *MockMutableMessage_WithoutIdempotencyKey_Call {
+	return &MockMutableMessage_WithoutIdempotencyKey_Call{Call: _e.mock.On("WithoutIdempotencyKey")}
+}
+
+func (_c *MockMutableMessage_WithoutIdempotencyKey_Call) Run(run func()) *MockMutableMessage_WithoutIdempotencyKey_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockMutableMessage_WithoutIdempotencyKey_Call) Return(_a0 message.MutableMessage) *MockMutableMessage_WithoutIdempotencyKey_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMutableMessage_WithoutIdempotencyKey_Call) RunAndReturn(run func() message.MutableMessage) *MockMutableMessage_WithoutIdempotencyKey_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockMutableMessage creates a new instance of MockMutableMessage. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockMutableMessage(t interface {
