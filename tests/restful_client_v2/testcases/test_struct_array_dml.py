@@ -14,14 +14,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Struct array dml regression cases."""
+"""Struct Array dml REST round trips."""
 
 import copy
 import json
 
 import pytest
+from base.struct_array import StructArrayRestTestBase
 from base.testbase import TestBase
 from utils.constant import CaseLabel
+from utils.struct_array_data import make_mutation_rows
 from utils.utils import gen_collection_name
 
 
@@ -43,7 +45,7 @@ def row(number, kind, revision=0):
 
 
 class TestStructArrayDml(TestBase):
-    def _create(self, kind):
+    def create_struct_collection(self, kind):
         self.name = gen_collection_name()
         rsp = self.collection_client.collection_create(
             {
@@ -97,7 +99,7 @@ class TestStructArrayDml(TestBase):
         assert rsp["code"] == 0, rsp
         self.wait_load_completed(self.name, timeout=60)
 
-    def _write(self, rows, upsert=False, partial=False):
+    def write_rows(self, rows, upsert=False, partial=False):
         payload = {"collectionName": self.name, "data": rows}
         if upsert:
             payload["partialUpdate"] = partial
@@ -105,7 +107,7 @@ class TestStructArrayDml(TestBase):
         assert rsp["code"] == 0, rsp
         assert rsp["data"]["upsertCount" if upsert else "insertCount"] == len(rows), rsp
 
-    def _verify(self, model, kind):
+    def assert_projection_and_search(self, model, kind):
         base_filter = "id >= 0" if kind == "Int64" else 'id != ""'
         for fields in (
             ["id", "revision", "normal_vector", "profile"],
@@ -154,14 +156,14 @@ class TestStructArrayDml(TestBase):
         method: exercise each JSON mutation option once and read parent/child projections
         expected: mutation counts, primary keys and decoded query/search rows match the input
         """
-        self._create(kind)
+        self.create_struct_collection(kind)
         rows = [row(i, kind) for i in range(8)]
         if initial == "all_null":
             for item in rows:
                 item["profile"] = None
         model = {item["id"]: copy.deepcopy(item) for item in rows}
-        self._write(rows)
-        self._verify(model, kind)
+        self.write_rows(rows)
+        self.assert_projection_and_search(model, kind)
         revision = 1
         changes = []
         for number in (0, 1, 7, 24 + revision):
@@ -171,17 +173,17 @@ class TestStructArrayDml(TestBase):
             expected = copy.deepcopy(model.get(item["id"], {"profile": None}))
             expected.update(item)
             model[item["id"]] = expected
-        self._write(changes, upsert=True, partial=True)
-        self._verify(model, kind)
+        self.write_rows(changes, upsert=True, partial=True)
+        self.assert_projection_and_search(model, kind)
         replacements = [row(number, kind, revision) for number in range(0, 8, 3)]
-        self._write(replacements, upsert=True)
+        self.write_rows(replacements, upsert=True)
         model.update({item["id"]: copy.deepcopy(item) for item in replacements})
-        self._verify(model, kind)
+        self.assert_projection_and_search(model, kind)
         patches = [
             {"id": pk(number, kind), "profile": [] if number % 2 else row(4, kind)["profile"]}
             for number in (1, 2, 3, 4)
         ]
-        self._write(patches, upsert=True, partial=True)
+        self.write_rows(patches, upsert=True, partial=True)
         for patch in patches:
             model[patch["id"]].update(patch)
         removed = [pk(number, kind) for number in (5, 6)]
@@ -189,11 +191,11 @@ class TestStructArrayDml(TestBase):
         assert rsp["code"] == 0, rsp
         for key in removed:
             del model[key]
-        self._verify(model, kind)
+        self.assert_projection_and_search(model, kind)
         replacements = [row(number, kind, revision) for number in (5, 6)]
-        self._write(replacements)
+        self.write_rows(replacements)
         model.update({item["id"]: copy.deepcopy(item) for item in replacements})
-        self._verify(model, kind)
+        self.assert_projection_and_search(model, kind)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("kind", ["Int64", "VarChar"])
@@ -203,13 +205,13 @@ class TestStructArrayDml(TestBase):
         method: replace two existing structs and add one new key with null structs
         expected: all three decoded rows contain JSON null
         """
-        self._create(kind)
+        self.create_struct_collection(kind)
         rows = [row(number, kind) for number in (0, 2)]
-        self._write(rows)
+        self.write_rows(rows)
         changes = [dict(row(number, kind, 1), profile=None) for number in (0, 2, 25)]
-        self._write(changes, upsert=True, partial=True)
+        self.write_rows(changes, upsert=True, partial=True)
         model = {item["id"]: item for item in changes}
-        self._verify(model, kind)
+        self.assert_projection_and_search(model, kind)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize(
@@ -227,10 +229,10 @@ class TestStructArrayDml(TestBase):
         method: place an invalid row before/between/after valid rows, then repair and retry
         expected: code 1804, unchanged data and successful corrected JSON batch
         """
-        self._create("Int64")
+        self.create_struct_collection("Int64")
         rows = [row(number, "Int64") for number in range(8)]
         model = {item["id"]: copy.deepcopy(item) for item in rows}
-        self._write(rows)
+        self.write_rows(rows)
         batch = [row(number, "Int64") for number in (12, 13, 14)]
         original = copy.deepcopy(batch)
         if invalid == "missing":
@@ -241,7 +243,39 @@ class TestStructArrayDml(TestBase):
             batch[position]["profile"] = {"value": 1, "tag": "invalid"}
         rsp = self.vector_client.vector_insert({"collectionName": self.name, "data": batch})
         assert rsp["code"] == 1804 and message in rsp["message"], rsp
-        self._verify(model, "Int64")
-        self._write(original)
+        self.assert_projection_and_search(model, "Int64")
+        self.write_rows(original)
         model.update({item["id"]: item for item in original})
-        self._verify(model, "Int64")
+        self.assert_projection_and_search(model, "Int64")
+
+
+class TestStructArrayPartialUpdate(StructArrayRestTestBase):
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("operation", ["ARRAY_APPEND", "ARRAY_REMOVE"])
+    def test_partial_upsert_rejects_array_operators_without_row_changes(self, operation):
+        """
+        target: reject unsupported struct partial operators through the REST fieldOps surface
+        method: mixed existing/new PK batch, exact non-mutation check and legal replacement
+        expected: actual struct-op restriction without partial writes; corrected upsert succeeds
+        """
+        self.create_struct_collection(True)
+        rows = make_mutation_rows(self.schema)[:12]
+        self.assert_success(self.vector_client.vector_insert({"collectionName": self.name, "data": rows}))
+        model = {row["id"]: row for row in rows}
+        incoming = copy.deepcopy(rows[2:5])
+        incoming[1]["id"] = 100
+        for row in incoming:
+            row["clips"] = [{"score": 99, "lang": None, "emb": None, "tags": [None]}]
+        payload = {
+            "collectionName": self.name,
+            "data": incoming,
+            "partialUpdate": True,
+            "fieldOps": [{"fieldName": "clips", "op": operation}],
+        }
+        response = self.vector_client.vector_upsert(payload)
+        assert response["code"] == 1100 and "not supported for struct field" in response["message"], response
+        self.assert_rows(model)
+        del payload["fieldOps"]
+        self.assert_success(self.vector_client.vector_upsert(payload))
+        model.update({row["id"]: row for row in incoming})
+        self.assert_rows(model)

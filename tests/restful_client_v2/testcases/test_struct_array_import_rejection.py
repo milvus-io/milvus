@@ -17,24 +17,30 @@
 """Struct array import rejection regression cases."""
 
 import pytest
-from base.struct_array_helpers import StructArrayHelpersBase
+from base.struct_array import StructArrayRestTestBase
 from utils.constant import CaseLabel
+from utils.struct_array_data import make_mutation_rows
 
 
-class TestStructArrayImportRejection(StructArrayHelpersBase):
+class TestStructArrayImportRejection(StructArrayRestTestBase):
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("source", ["binlog", "snapshot", "numpy"])
+    @pytest.mark.parametrize("source", ["binlog", "snapshot"])
     def test_unsupported_struct_import_creates_no_job_or_rows(self, source):
         """
         target: reject source formats that cannot represent native nullable/nested struct children
-        method: submit backup, snapshot and NumPy imports; compare jobs and complete live data
+        method: submit backup and snapshot imports; compare jobs and complete live data
         expected: the documented error is returned before job admission, without changing data
         """
-        self._create(True)
-        rows = self._rows(True)
-        self._ok(self.vector_client.vector_insert({"collectionName": self.name, "data": rows}))
+        self.create_struct_collection(
+            True,
+            dim=24,
+            capacity=3,
+            extra_fields=[{"fieldName": "tenant", "dataType": "Int32"}],
+        )
+        rows = make_mutation_rows(self.schema)
+        self.assert_success(self.vector_client.vector_insert({"collectionName": self.name, "data": rows}))
         model = {row["id"]: row for row in rows}
-        before = self._ok(self.import_job_client.list_import_jobs({"collectionName": self.name}))
+        before = self.assert_success(self.import_job_client.list_import_jobs({"collectionName": self.name}))
         files, options, code, message = {
             "binlog": ([["insert", "delta"]], {"backup": "true"}, 1100, "binlog import (backup restore)"),
             "snapshot": (
@@ -42,12 +48,6 @@ class TestStructArrayImportRejection(StructArrayHelpersBase):
                 {"backup": "true", "source_type": "snapshot"},
                 1100,
                 "snapshot-source import",
-            ),
-            "numpy": (
-                [["staging/id.npy", "staging/normal_vector.npy", "staging/clips.npy"]],
-                {},
-                2100,
-                "numpy import does not support struct data",
             ),
         }[source]
         response = self.import_job_client.create_import_jobs(
@@ -60,6 +60,33 @@ class TestStructArrayImportRejection(StructArrayHelpersBase):
         )
         assert response["code"] == code and message in response["message"], response
         assert not response.get("data", {}).get("jobId"), response
-        after = self._ok(self.import_job_client.list_import_jobs({"collectionName": self.name}))
+        after = self.assert_success(self.import_job_client.list_import_jobs({"collectionName": self.name}))
         assert after == before
-        self._check(model)
+        self.assert_rows(model)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_numpy_struct_import_reports_failed_job_without_changing_rows(self):
+        """
+        target: report unsupported NumPy struct input through the import job
+        method: submit struct-named NumPy paths, await failure and compare complete live data
+        expected: job admission succeeds, schema validation fails and existing rows remain intact
+        """
+        self.create_struct_collection(True)
+        rows = make_mutation_rows(self.schema)
+        self.assert_success(self.vector_client.vector_insert({"collectionName": self.name, "data": rows}))
+        model = {row["id"]: row for row in rows}
+
+        # NumPy schema validation runs in the job before any source file is opened.
+        paths = [f"{self.name}/{field}.npy" for field in ("id", "normal_vector", "clips")]
+        created = self.assert_success(
+            self.import_job_client.create_import_jobs(
+                {"collectionName": self.name, "partitionName": "_default", "files": [paths]}
+            )
+        )
+        assert created["jobId"], created
+        response, failed = self.import_job_client.wait_import_job_state(created["jobId"], "Failed", timeout=120)
+        progress = self.assert_success(response)
+        assert failed and progress["state"] == "Failed", progress
+        assert "numpy import does not support struct data" in progress["reason"], progress
+        assert "names struct field 'clips'" in progress["reason"], progress
+        self.assert_rows(model)

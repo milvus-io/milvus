@@ -31,9 +31,26 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import pytest
-from common.struct_array_workload_assertions import _equal, identity
+from common.struct_array_data import assert_values_equal
 from pymilvus import AnnSearchRequest, DataType, MilvusClient, RRFRanker
+from pymilvus.client.prepare import Prepare
+from pymilvus.client.utils import check_status
 from pymilvus.exceptions import SchemaMismatchRetryableException
+
+
+def server_identity(client):
+    # Detailed SDK version metadata is cached by pooled handlers across reconnects.
+    response = client._get_connection()._stub.Connect(Prepare.register_request("", ""), timeout=10)
+    check_status(response.status)
+    info = response.server_info
+    return {
+        "version": info.build_tags,
+        "git_commit": info.git_commit,
+        "build_time": info.build_time,
+        "go_version": info.go_version,
+        "deploy_mode": info.deploy_mode,
+    }
+
 
 CORE = ("anchor", "score", "label", "emb", "tags")
 
@@ -175,7 +192,7 @@ class MixedHistory:
         return result, rpc_start, end
 
     def create(self):
-        build = identity(self.client)
+        build = server_identity(self.client)
         assert build["git_commit"], build
         if self.config.expected_product is not None:
             assert self.config.expected_product.startswith(build["git_commit"]), build
@@ -278,7 +295,7 @@ class MixedHistory:
                         pk=pk,
                     )
                     expected = project(before, self.schema)
-                    _equal(observed, [] if expected is None else [expected])
+                    assert_values_equal(observed, [] if expected is None else [expected])
                     self.emit({"event": "schema_rejection_verified", "pk": pk, "attempt": attempt})
                     time.sleep(0.1)
             count_key = (
@@ -571,7 +588,7 @@ class MixedHistory:
                 for schema in schemas:
                     expected = [] if candidate is None else [project(candidate, schema)]
                     try:
-                        _equal(read["rows"], expected)
+                        assert_values_equal(read["rows"], expected)
                         matches = True
                     except AssertionError:
                         pass
@@ -590,7 +607,7 @@ class MixedHistory:
         )
         assert len(rows) == len(expected) and {r["id"] for r in rows} == set(expected)
         for row in rows:
-            _equal(row, expected[row["id"]])
+            assert_values_equal(row, expected[row["id"]])
         all_keys = sorted(set(expected) | self.deleted | {9999999})
         for begin in range(0, len(all_keys), 50):
             batch = all_keys[begin : begin + 50]
@@ -602,7 +619,7 @@ class MixedHistory:
             )
             assert {r["id"] for r in rows} == set(batch) & set(expected)
             for row in rows:
-                _equal(row, expected[row["id"]])
+                assert_values_equal(row, expected[row["id"]])
         for selector in range(4):
             self.predicates(False, selector)
         offsets, _, _ = self.call(
@@ -740,7 +757,7 @@ class MixedHistory:
                 for label in ("before", "after"):
                     candidate = project(entry[label], self.schema)
                     try:
-                        _equal(rows, [] if candidate is None else [candidate])
+                        assert_values_equal(rows, [] if candidate is None else [candidate])
                         matches.append(label)
                     except AssertionError:
                         pass
@@ -772,8 +789,15 @@ class MixedHistory:
                 for e in ends
                 if e.get("ddl")
             }
-            if not overlap or not all(ddl_overlap.values()):
-                failure = failure or AssertionError("Required read/write or DDL/write overlap was not observed")
+            ddl_read_overlap = {
+                e["op"] + f"_{e['epoch']}": sum(r["rpc_start"] < e["end"] and e["rpc_start"] < r["end"] for r in reads)
+                for e in ends
+                if e.get("ddl")
+            }
+            if not overlap or not all(ddl_overlap.values()) or not all(ddl_read_overlap.values()):
+                failure = failure or AssertionError(
+                    "Required read/write, DDL/write or DDL/read overlap was not observed"
+                )
             summary = {
                 "event": "summary",
                 "seed": self.seed,
@@ -782,6 +806,7 @@ class MixedHistory:
                 "counts": dict(Counter(e["op"] for e in ends)),
                 "read_write_overlap": overlap,
                 "ddl_write_overlap": ddl_overlap,
+                "ddl_read_overlap": ddl_read_overlap,
                 "uncertain_writes": len(uncertain),
                 "acknowledged_writes": sum(
                     h["outcome"] == "ack" for history in self.histories.values() for h in history
@@ -793,7 +818,7 @@ class MixedHistory:
             (self.path / f"{self.name}-summary.json").write_text(json.dumps(summary, indent=2))
             self.journal.close()
             if failure is None:
-                assert overlap > 0 and all(ddl_overlap.values()), summary
+                assert overlap > 0 and all(ddl_overlap.values()) and all(ddl_read_overlap.values()), summary
                 assert not uncertain, summary
         if failure:
             raise failure

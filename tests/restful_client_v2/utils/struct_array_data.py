@@ -16,6 +16,10 @@
 
 """Shared REST schemas and exact vectors for nullable Struct children."""
 
+import numpy as np
+from utils.utils import gen_vector as generate_vector
+from utils.utils import get_data_by_fields
+
 REST_VECTOR_DIM = 8
 STRUCT_CAPACITY = 4
 SUB_FIELDS = ("lang", "score", "emb", "tags")
@@ -107,3 +111,32 @@ def gen_rows() -> list[dict]:
             "clips": [{"score": 50}, {"score": 51}],
         },
     ]
+
+
+def make_mutation_rows(schema):
+    """Generate ordinary fields from the request schema and overlay mutation NULL shapes."""
+    struct = schema["structFields"][0]
+    capacity = int(struct["typeParams"]["max_capacity"])
+    vector = next(field for field in struct["fields"] if field["fieldName"] == "emb")
+    dim = int(vector["elementTypeParams"]["dim"])
+    rows = get_data_by_fields(schema["fields"], 48)
+    for n, row in enumerate(rows):
+        row["id"] = n
+        # Store float32-representable inputs for exact JSON round-trip assertions.
+        for field in schema["fields"]:
+            if field["dataType"] == "FloatVector":
+                row[field["fieldName"]] = np.asarray(row[field["fieldName"]], dtype=np.float32).tolist()
+        row[struct["fieldName"]] = (
+            None
+            if struct.get("nullable", False) and n % 7 == 0
+            else [
+                {
+                    "score": n + j,
+                    "lang": None if j % 2 else "雪",
+                    "emb": None if (n + j) % 3 else np.asarray(generate_vector(dim=dim), dtype=np.float32).tolist(),
+                    "tags": [None, [], [None], ["a", None, "雪"]][(n + j) % 4],
+                }
+                for j in range(n % (capacity + 1))
+            ]
+        )
+    return rows
