@@ -1026,7 +1026,10 @@ func (s *DelegatorSuite) TestMaterialize() {
 	}
 	// the schema fingerprint must survive the per-worker request split; the
 	// worker sets the Materialize flag itself (MaterializeSegments)
-	checkFlag := func(_ context.Context, req *querypb.QueryRequest) {
+	checkFlag := func(ctx context.Context, req *querypb.QueryRequest) {
+		attempts, ok := retry.MaxAttemptsFromContext(ctx)
+		s.True(ok)
+		s.Equal(uint(2), attempts)
 		s.Equal(uint64(42), req.GetMaterializeSchemaFingerprint())
 		s.Equal(int32(7), req.GetMaterializeFormatVersion())
 	}

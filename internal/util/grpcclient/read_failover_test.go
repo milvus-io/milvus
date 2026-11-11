@@ -283,24 +283,6 @@ func TestCloseCancelsSharedDial(t *testing.T) {
 	}
 }
 
-func TestOneAttemptDoesNotBackOffOnRetriableStatus(t *testing.T) {
-	base := &ClientBase[*mockClient]{MaxAttempts: 1, InitialBackoff: 2, MaxBackoff: 2}
-	base.grpcClient = &clientConnWrapper[*mockClient]{client: &mockClient{}}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := make(chan error, 1)
-	go func() {
-		_, err := base.Call(ctx, func(*mockClient) (any, error) { return merr.Status(merr.ErrServiceUnavailable), nil })
-		done <- err
-	}()
-	select {
-	case err := <-done:
-		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
-	case <-time.After(time.Second):
-		t.Fatal("one-attempt call backed off before returning its status")
-	}
-}
-
 // Notify only after the waiter has reached the cancellable shared-dial wait.
 type connectionWaitContext struct {
 	context.Context

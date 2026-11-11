@@ -569,13 +569,12 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 	var ret any
 	attempts := retry.MaxAttemptsFromContextOrDefault(ctx, uint(c.MaxAttempts))
 	failFastOnConnectionError, _ := ctx.Value(failFastOnConnectionErrorKey{}).(bool)
-	var attempt uint
+	// Single-attempt calls skip auxiliary session checks. retry.Handle owns
+	// the attempt limit and skips backoff after the final failure.
+	canRetry := attempts != 1
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	err := retry.Handle(ctx, func() (bool, error) {
-		attempt++
-		// The scoped worker policy must not sleep after its final failed RPC.
-		canRetry := attempts != 1 && (!failFastOnConnectionError || attempts == 0 || attempt < attempts)
 		// Connection acquisition belongs to this attempt, including the first dial.
 		wrapper, clientErr := c.GetGrpcClient(ctx)
 		if clientErr != nil {
