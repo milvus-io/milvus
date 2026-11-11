@@ -30,7 +30,8 @@ so concurrent requests can wait beyond their own connection timeout.
    in-flight dial from publishing a connection afterward. The address lookup
    callback has no context parameter, so an address lookup that itself blocks
    cannot be interrupted; Close still releases its callers immediately.
-4. SearchSegments, QuerySegments and QueryStreamSegments allow two attempts.
+4. SearchSegments, QuerySegments and QueryStreamSegments share a worker read
+   context allowing two attempts.
    A failed connection acquisition returns immediately on either attempt,
    without a session lookup or another dial. An RPC error on an established
    connection can retry once; the second failure returns without an additional
@@ -43,12 +44,12 @@ The scoped read path no longer derives `ErrNodeNotFound` from a synchronous
 session lookup after either a failed dial or a retryable RPC error. Its previous
 `markSegmentOffline` side effect therefore does not run for those failures.
 A session lookup is rate limited but its duration is not bounded separately;
-doing it synchronously after a failed dial
-could spend the request's remaining failover budget on etcd. Server-reported
-`ErrNodeNotFound` and ServerID mismatch still mark segments offline. QueryCoord
-also removes unavailable workers through its own session and distribution
-recovery. A later change could restore this signal using a separately bounded
-or cached session check.
+doing it synchronously after a failed dial could spend the request's remaining
+failover budget on etcd. These worker read paths no longer produce
+`ErrNodeNotFound`; only ServerID mismatch triggers their `markSegmentOffline`
+checks. QueryCoord also removes unavailable workers through its own session
+and distribution recovery. A later change could restore this signal using a
+separately bounded or cached session check.
 
 No protobuf or merr wire projection changes are included. ErrConnect remains
 an internal transport sentinel and flows through the existing Status boundary.
@@ -82,6 +83,12 @@ the full wire contract and SDK consumers. Do not mark segments permanently
 offline on one transient connection failure or route to another worker without
 confirmed segment placement. Replica sweep/backoff scheduling is a separate
 Proxy change; this patch retains existing retry intervals.
+
+The retry helper owns the attempt limit and returns without sleeping after its
+last failed attempt. Backports to branches that still sleep after the last
+attempt must include the equivalent retry fix (#55035), or retain a local guard.
+The 2.6 port retains the local guard in `ClientBase.call` because the #55035
+retry fix is not present in the 2.6 branch.
 
 ## Verification
 

@@ -26,7 +26,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
@@ -331,6 +330,12 @@ func (sd *shardDelegator) modifyQueryRequest(req *querypb.QueryRequest, scope qu
 	}
 }
 
+// workerReadContext retries one transient RPC error on a pinned worker, but
+// returns immediately on a failed connection so Proxy can try another replica.
+func workerReadContext(ctx context.Context) context.Context {
+	return grpcclient.WithFailFastOnConnectionError(retry.WithMaxAttemptsContext(ctx, 2))
+}
+
 // Search preforms search operation on shard.
 func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest, sealed []SnapshotItem, growing []SegmentEntry, sealedRowCount map[int64]int64) ([]*internalpb.SearchResults, error) {
 	log := sd.getLogger(ctx)
@@ -385,10 +390,9 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		return nil, err
 	}
 	results, err := executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount), func(ctx context.Context, req *querypb.SearchRequest, worker cluster.Worker) (*internalpb.SearchResults, error) {
-		// Retry one transient RPC error, but let Proxy fail over on a failed dial.
-		ctx = grpcclient.WithFailFastOnConnectionError(retry.WithMaxAttemptsContext(ctx, 2))
+		ctx = workerReadContext(ctx)
 		resp, err := worker.SearchSegments(ctx, req)
-		if errors.Is(err, merr.ErrNodeNotFound) || grpcclient.IsServerIDMismatchErr(err) {
+		if grpcclient.IsServerIDMismatchErr(err) {
 			sd.markSegmentOffline(req.GetSegmentIDs()...)
 		}
 		return resp, err
@@ -607,9 +611,9 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 
 	_, err = executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount), func(ctx context.Context, req *querypb.QueryRequest, worker cluster.Worker) (*internalpb.RetrieveResults, error) {
 		// ClientBase only retries stream creation; it never replays received data.
-		ctx = grpcclient.WithFailFastOnConnectionError(retry.WithMaxAttemptsContext(ctx, 2))
+		ctx = workerReadContext(ctx)
 		err := worker.QueryStreamSegments(ctx, req, srv)
-		if errors.Is(err, merr.ErrNodeNotFound) || grpcclient.IsServerIDMismatchErr(err) {
+		if grpcclient.IsServerIDMismatchErr(err) {
 			sd.markSegmentOffline(req.GetSegmentIDs()...)
 		}
 		return nil, err
@@ -707,9 +711,9 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 	}
 
 	results, err := executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount), func(ctx context.Context, req *querypb.QueryRequest, worker cluster.Worker) (*internalpb.RetrieveResults, error) {
-		ctx = grpcclient.WithFailFastOnConnectionError(retry.WithMaxAttemptsContext(ctx, 2))
+		ctx = workerReadContext(ctx)
 		resp, err := worker.QuerySegments(ctx, req)
-		if errors.Is(err, merr.ErrNodeNotFound) || grpcclient.IsServerIDMismatchErr(err) {
+		if grpcclient.IsServerIDMismatchErr(err) {
 			sd.markSegmentOffline(req.GetSegmentIDs()...)
 		}
 		return resp, err
