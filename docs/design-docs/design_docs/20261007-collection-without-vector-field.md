@@ -503,12 +503,16 @@ Lowering it does not split existing segments.
   - create without a vector, load with no index, then query, get, count,
     delete and upsert; search returns the unified error;
   - with a scalar `INVERTED` index, partition key and clustering key;
-  - `add_field` with a vector is rejected and with a scalar succeeds.
+  - `add_field` with a vector is rejected and with a scalar succeeds;
+  - bulk import (`test_milvus_client_import.py`, JSON, CSV and parquet): the
+    imported rows are returned unchanged after a load with no index, and a
+    file that provides no field of the collection fails the job with no row
+    visible.
 - Covered by Go unit tests instead of an end-to-end case: REST v2 insert
   and search, and the switch turned off.
 - Run with local scripts that are not in the repository, because they need
   millions of rows or a server restart (results in 6.1 and Appendix B):
-  - bulk import followed by compaction;
+  - bulk import of millions of rows followed by compaction;
   - after 10 M narrow rows are inserted (dynamic field on), compaction
     outputs stay at or below `maxRows` rows and the IDs of full segments do
     not change over the following automatic trigger cycles; an import of
