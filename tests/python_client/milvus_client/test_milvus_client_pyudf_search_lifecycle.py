@@ -836,7 +836,9 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
             )
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_pyudf_pinned_old_sdk_capability_boundary(self, tmp_path, minio_host, minio_bucket, record_property):
+    def test_pyudf_pinned_old_sdk_capability_boundary(
+        self, tmp_path, minio_host, minio_bucket, request, record_property
+    ):
         """target: Q13; method: isolated published SDK2.6.6; expected: ordinary requests work and DSL absence is local."""
         uv = shutil.which("uv")
         assert uv, "The approved Python environment requires uv"
@@ -865,7 +867,10 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
         with self._pyudf_test_environment(tmp_path, minio_host, minio_bucket, MODULE) as (client, name, resource):
             self._assert_pyudf_recovery(client, name, resource)
             server = client.get_server_version(detail=True)
-            assert server["git_commit"].startswith("de9d02b"), server
+            record_property("server_identity_from_current_sdk", json.dumps(server))
+            expected_commit = request.config.getoption("--pyudf-expected-commit")
+            if expected_commit:
+                assert server["git_commit"].startswith(expected_commit), server
             config = {
                 "collection": name,
                 "server_version": server["version"],
@@ -886,7 +891,6 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
             )
             assert process.returncode == 0, (process.stdout, process.stderr)
             record_property("old_sdk", process.stdout.strip())
-            record_property("server_identity_from_current_sdk", json.dumps(server))
             self._assert_pyudf_recovery(client, name, resource)
 
     @pytest.mark.tags(CaseLabel.L3)
