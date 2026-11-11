@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -130,6 +131,113 @@ func TestOrderedReduceStreamIteratorDrainParity(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestShardReduceStreamTimestampTieAtIteratorBoundary(t *testing.T) {
+	for _, mode := range []reduce.IReduceType{reduce.IReduceNoOrder, reduce.IReduceInOrder, reduce.IReduceInOrderForBest} {
+		for _, timestamps := range [][2]int64{{100, 200}, {200, 100}, {100, 100}, {0, 200}, {0, 0}} {
+			for _, reverse := range []bool{false, true} {
+				for _, incomplete := range []int{-1, 0, 1} {
+					for _, chunkBytes := range []int{1, 1 << 20} {
+						t.Run(fmt.Sprintf("mode_%d/ts_%d_%d/reverse_%t/incomplete_%d/bytes_%d", mode, timestamps[0], timestamps[1], reverse, incomplete, chunkBytes), func(t *testing.T) {
+							first := newQueryTestChunk([]int64{1}, []int64{11})
+							second := newQueryTestChunk([]int64{1, 2}, []int64{22, 33})
+							if timestamps != [2]int64{0, 0} {
+								first.FieldsData = append(first.FieldsData, makeTimestampField([]int64{timestamps[0]}))
+								second.FieldsData = append(second.FieldsData, makeTimestampField([]int64{timestamps[1], 50}))
+							}
+							inputs := []*internalpb.RetrieveResults{first, second}
+							if reverse {
+								inputs[0], inputs[1] = inputs[1], inputs[0]
+							}
+							if incomplete >= 0 {
+								inputs[incomplete].HasMoreResult = true
+							}
+							batch, err := queryutil.NewReduceByPKWithTimestampOperator(mode, 0, 10, nil).Run(t.Context(), nil, inputs)
+							require.NoError(t, err)
+							children := make([]ReduceStream, len(inputs))
+							for i, input := range inputs {
+								chunks, err := SplitRetrieveResult(input, chunkBytes)
+								require.NoError(t, err)
+								child := &queryTestStream{}
+								for _, chunk := range chunks {
+									child.recv = append(child.recv, queryTestRecv{chunk: chunk})
+								}
+								children[i] = child
+							}
+							stream, err := NewShardReduceStream(&internalpb.RetrieveRequest{IsIterator: mode != reduce.IReduceNoOrder, ReduceType: int32(mode), Limit: 10}, nil, children, chunkBytes)
+							require.NoError(t, err)
+							defer stream.Close()
+							var ids, gotTimestamps, values []int64
+							for {
+								chunk, err := stream.Recv()
+								if err == io.EOF {
+									break
+								}
+								require.NoError(t, err)
+								ids = append(ids, queryTestIDs(chunk)...)
+								gotTimestamps = append(gotTimestamps, queryutil.ExtractTimestamps(chunk)...)
+								if len(chunk.GetFieldsData()) > 0 {
+									values = append(values, chunk.GetFieldsData()[0].GetScalars().GetLongData().GetData()...)
+								}
+							}
+							want := batch[0].(*internalpb.RetrieveResults)
+							require.Equal(t, queryTestIDs(want), ids)
+							require.Equal(t, queryutil.ExtractTimestamps(want), gotTimestamps)
+							require.Equal(t, want.GetFieldsData()[0].GetScalars().GetLongData().GetData(), values)
+						})
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestShardReduceStreamTimestampTieStringPK(t *testing.T) {
+	older := newQueryTestChunk([]int64{1}, []int64{11})
+	newer := newQueryTestChunk([]int64{1}, []int64{22})
+	for i, chunk := range []*internalpb.RetrieveResults{older, newer} {
+		chunk.Ids = &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"same"}}}}
+		chunk.FieldsData = append(chunk.FieldsData, makeTimestampField([]int64{int64((i + 1) * 100)}))
+	}
+	older.HasMoreResult = true
+	inputs := []*internalpb.RetrieveResults{older, newer}
+	batch, err := queryutil.NewReduceByPKWithTimestampOperator(reduce.IReduceInOrder, 0, 10, nil).Run(t.Context(), nil, inputs)
+	require.NoError(t, err)
+	children := []ReduceStream{&queryTestStream{recv: []queryTestRecv{{chunk: older}}}, &queryTestStream{recv: []queryTestRecv{{chunk: newer}}}}
+	stream, err := NewShardReduceStream(&internalpb.RetrieveRequest{IsIterator: true, ReduceType: int32(reduce.IReduceInOrder), Limit: 10}, nil, children, 1<<20)
+	require.NoError(t, err)
+	defer stream.Close()
+	chunk, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []string{"same"}, chunk.GetIds().GetStrId().GetData())
+	require.Equal(t, queryutil.ExtractTimestamps(batch[0].(*internalpb.RetrieveResults)), queryutil.ExtractTimestamps(chunk))
+	require.Equal(t, []int64{200}, queryutil.ExtractTimestamps(chunk))
+}
+
+func TestShardReduceStreamTimestampTieThreeChildren(t *testing.T) {
+	for _, mode := range []reduce.IReduceType{reduce.IReduceNoOrder, reduce.IReduceInOrder, reduce.IReduceInOrderForBest} {
+		t.Run(fmt.Sprintf("mode_%d", mode), func(t *testing.T) {
+			var inputs []*internalpb.RetrieveResults
+			var children []ReduceStream
+			for i, ts := range []int64{100, 200, 300} {
+				chunk := newQueryTestChunk([]int64{1}, []int64{int64(i)})
+				chunk.FieldsData = append(chunk.FieldsData, makeTimestampField([]int64{ts}))
+				chunk.HasMoreResult = i == 0
+				inputs = append(inputs, chunk)
+				children = append(children, &queryTestStream{recv: []queryTestRecv{{chunk: chunk}}})
+			}
+			batch, err := queryutil.NewReduceByPKWithTimestampOperator(mode, 0, 10, nil).Run(t.Context(), nil, inputs)
+			require.NoError(t, err)
+			stream, err := NewShardReduceStream(&internalpb.RetrieveRequest{IsIterator: mode != reduce.IReduceNoOrder, ReduceType: int32(mode), Limit: 10}, nil, children, 1<<20)
+			require.NoError(t, err)
+			defer stream.Close()
+			chunk, err := stream.Recv()
+			require.NoError(t, err)
+			require.Equal(t, queryutil.ExtractTimestamps(batch[0].(*internalpb.RetrieveResults)), queryutil.ExtractTimestamps(chunk))
+			require.Equal(t, []int64{300}, queryutil.ExtractTimestamps(chunk))
+		})
 	}
 }
 
