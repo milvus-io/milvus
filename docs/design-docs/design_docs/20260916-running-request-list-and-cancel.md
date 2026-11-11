@@ -194,9 +194,23 @@ message CancelRequestsResponse {
 - The proxy stamps `MsgBase.msg_type` with `ListRunningRequests` (2500) or
   `CancelRequests` (2501) before forwarding to the coordinator, so `MsgBase`
   alone tells the read-only list from the cancel.
-- REST v2: `POST /v2/vectordb/requests/list` and
-  `POST /v2/vectordb/requests/cancel`, wired through `wrapperPost` in
-  `internal/distributed/proxy/httpserver/handler_v2.go`.
+- REST v2: `POST /v2/vectordb/requests/running/list` and
+  `POST /v2/vectordb/requests/running/cancel`, wired through `wrapperPost` in
+  `internal/distributed/proxy/httpserver/handler_v2.go`. The list body takes
+  the four filters `dbName`, `collectionName`, `user` and `minElapsedMs`; the
+  cancel body takes `requestIds` (strings, required), `reason` and `user`. The
+  answer uses the proto's JSON names, as other v2 responses do: rows in
+  `requests` or `canceled` carry `requestId`, `proxyId`, `type`, `dbName`,
+  `collectionName`, `user`, `clientAddr`, `nq`, `topk`, `expr`, `startTimeMs`,
+  `queuedMs`, `elapsedMs`, `state`, `taskIds`, `traceId` and `cancellable`;
+  a cancel adds `notFound` and `undetermined`; both add `nodeResults`, one
+  `{nodeId, code, message, unimplemented}` per proxy, where code 0 means the
+  proxy answered. Every field is present, zero values included, and a list is
+  `[]`, never null. `taskIds` come from the id allocator and exceed 2^53, so
+  they follow the rule for int64 primary keys: numbers when the
+  `Accept-Type-Allow-Int64` header is true (absent, it takes
+  `proxy.http.acceptTypeAllowInt64`, true by default), strings when it is
+  false. The request id is always a string.
 
 ### Checking the group isolation rule
 
