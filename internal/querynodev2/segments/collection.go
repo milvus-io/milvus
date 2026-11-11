@@ -92,16 +92,8 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 	m.mut.Lock()
 	defer m.mut.Unlock()
 	if collection, ok := m.collections[collectionID]; ok {
-		if loadMeta.GetSchemaVersion() > collection.schemaVersion {
-			// the schema may be changed even the collection is loaded
-			collection.schema.Store(schema)
-			collection.ccollection.UpdateSchema(schema, loadMeta.GetSchemaVersion())
-			collection.schemaVersion = loadMeta.GetSchemaVersion()
-			log.Info("update collection schema",
-				zap.Int64("collectionID", collectionID),
-				zap.Uint64("schemaVersion", loadMeta.GetSchemaVersion()),
-				zap.Any("schema", schema),
-			)
+		if err := collection.updateSchema(schema, loadMeta.GetSchemaVersion()); err != nil {
+			return err
 		}
 		// Always update index meta to ensure newly indexed fields are visible
 		// for search plan creation (CollectionIndexMeta::HasField check).
@@ -136,11 +128,7 @@ func (m *collectionManager) UpdateSchema(collectionID int64, schema *schemapb.Co
 		return merr.WrapErrCollectionNotFound(collectionID, "collection not found in querynode collection manager")
 	}
 
-	if err := collection.ccollection.UpdateSchema(schema, version); err != nil {
-		return err
-	}
-	collection.schema.Store(schema)
-	return nil
+	return collection.updateSchema(schema, version)
 }
 
 func (m *collectionManager) updateMetric() {
@@ -201,8 +189,40 @@ type Collection struct {
 	isGpuIndex    bool
 	loadFields    typeutil.Set[int64]
 	schemaVersion uint64
+	// Protected by collectionManager.mut, independently of the published version.
+	lastAttemptedSegcoreSchemaVersion uint64
 
 	refCount *atomic.Uint32
+}
+
+// updateSchema is serialized by collectionManager.mut. Publish the Go schema
+// only after both native schema and load hints have been applied successfully.
+func (c *Collection) updateSchema(schema *schemapb.CollectionSchema, version uint64) error {
+	if schema == nil {
+		return merr.WrapErrServiceInternal("update collection schema with nil")
+	}
+	if version <= c.schemaVersion {
+		return nil
+	}
+	loadFields := typeutil.NewSet(c.loadFields.Collect()...)
+	loadFields.Insert(common.GetAddedLoadFieldIDs(c.Schema(), schema)...)
+	// A failed hint update can leave the native schema ahead of the Go
+	// snapshot. Reserve a fresh token even when retrying the same timestamp.
+	nativeVersion := version
+	if nativeVersion <= c.lastAttemptedSegcoreSchemaVersion {
+		nativeVersion = c.lastAttemptedSegcoreSchemaVersion + 1
+	}
+	c.lastAttemptedSegcoreSchemaVersion = nativeVersion
+	if err := c.ccollection.UpdateSchema(schema, nativeVersion); err != nil {
+		return err
+	}
+	if err := c.ccollection.UpdateLoadFields(loadFields.Collect()); err != nil {
+		return err
+	}
+	c.loadFields = loadFields
+	c.schema.Store(schema)
+	c.schemaVersion = version
+	return nil
 }
 
 // GetDBName returns the database name of collection.
@@ -336,17 +356,18 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		return nil, err
 	}
 	coll := &Collection{
-		ccollection:   ccollection,
-		id:            collectionID,
-		partitions:    typeutil.NewConcurrentSet[int64](),
-		loadType:      loadMetaInfo.GetLoadType(),
-		dbName:        loadMetaInfo.GetDbName(),
-		dbProperties:  loadMetaInfo.GetDbProperties(),
-		resourceGroup: loadMetaInfo.GetResourceGroup(),
-		schemaVersion: loadMetaInfo.GetSchemaVersion(),
-		refCount:      atomic.NewUint32(0),
-		isGpuIndex:    isGpuIndex,
-		loadFields:    loadFieldIDs,
+		ccollection:                       ccollection,
+		id:                                collectionID,
+		partitions:                        typeutil.NewConcurrentSet[int64](),
+		loadType:                          loadMetaInfo.GetLoadType(),
+		dbName:                            loadMetaInfo.GetDbName(),
+		dbProperties:                      loadMetaInfo.GetDbProperties(),
+		resourceGroup:                     loadMetaInfo.GetResourceGroup(),
+		schemaVersion:                     loadMetaInfo.GetSchemaVersion(),
+		lastAttemptedSegcoreSchemaVersion: max(loadMetaInfo.GetSchemaVersion(), uint64(schema.GetVersion())),
+		refCount:                          atomic.NewUint32(0),
+		isGpuIndex:                        isGpuIndex,
+		loadFields:                        loadFieldIDs,
 	}
 	for _, partitionID := range loadMetaInfo.GetPartitionIDs() {
 		coll.partitions.Insert(partitionID)

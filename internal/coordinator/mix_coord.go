@@ -161,6 +161,8 @@ func (s *mixCoordImpl) initInternal() error {
 	s.datacoordServer.SetMixCoord(s)
 	s.queryCoordServer.SetMixCoord(s)
 
+	s.rootcoordServer.SetSchemaLoadFieldsUpdater(s.queryCoordServer.UpdateLoadFieldsForSchema)
+
 	// Register WAL callbacks
 	RegisterWALCallbacks(s)
 
