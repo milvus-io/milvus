@@ -260,7 +260,7 @@ func fillSubChannelRequest(
 	return nil
 }
 
-func packUnsubDmChannelRequest(task *ChannelTask, action Action) *querypb.UnsubDmChannelRequest {
+func packUnsubDmChannelRequest(task *ChannelTask, action *ChannelAction) *querypb.UnsubDmChannelRequest {
 	return &querypb.UnsubDmChannelRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_UnsubDmChannel),
@@ -269,6 +269,7 @@ func packUnsubDmChannelRequest(task *ChannelTask, action Action) *querypb.UnsubD
 		NodeID:       action.Node(),
 		CollectionID: task.CollectionID(),
 		ChannelName:  task.Channel(),
+		Version:      action.CopyVersion(),
 	}
 }
 

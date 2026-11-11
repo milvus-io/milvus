@@ -448,7 +448,7 @@ func replicaLoadPercentage(
 	loadedCount := 0
 	for _, channel := range channelTargets {
 		for _, delegator := range delegators[channel.GetChannelName()] {
-			if replica.Contains(delegator.Node) {
+			if delegator.BelongsTo(replica) {
 				loadedCount++
 				break
 			}
