@@ -202,7 +202,7 @@ func newCollectionModel(header *message.CreateCollectionMessageHeader, body *mes
 		EnableDynamicField:   body.CollectionSchema.EnableDynamicField,
 		EnableNamespace:      body.CollectionSchema.EnableNamespace,
 		UpdateTimestamp:      ts,
-		SchemaVersion:        0,
+		SchemaVersion:        body.CollectionSchema.GetVersion(),
 		ShardInfos:           shardInfos,
 	}
 }
