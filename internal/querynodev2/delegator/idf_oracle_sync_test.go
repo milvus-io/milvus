@@ -382,7 +382,9 @@ func TestSyncDistributionFetchFailureChangesNothing(t *testing.T) {
 	o.LazyRemoveGrowings(2, 3)
 	broken := newSyncTestSegment(t, 2, map[int64]*storage.BM25Stats{102: randomSyncTestStats(r, 3)})
 	broken.load(t, o, 102)
-	require.NoError(t, os.RemoveAll(path.Join(o.dirPath, "2", "102")))
+	brokenEntry, loaded := o.sealed.Get(2)
+	require.True(t, loaded)
+	require.NoError(t, os.RemoveAll(path.Join(brokenEntry.localDir, "102")))
 
 	o.next.SetSnapshot(syncTestSnapshot(2, 1, 2))
 	assert.Error(t, o.SyncDistribution())
@@ -523,16 +525,14 @@ func TestReopenAddsFieldToSegmentRemovedDuringDownload(t *testing.T) {
 	})
 	seg.load(t, o, 102) // inactive
 
-	syncErr := make(chan error, 1)
 	reopenWithRetry(t, o, seg, func() bool { return false }, func() {
-		// Cleanup waits for this reopen's file writes to finish, but target
-		// publication must finish first so the reopen can detect the removal.
+		// The staging directory is independent: the entire sync, including
+		// physical cleanup, finishes before the reopen tries to install.
 		o.next.SetSnapshot(syncTestSnapshot(2))
-		go func() { syncErr <- o.SyncDistribution() }()
-		require.Eventually(t, func() bool { return o.TargetVersion() == 2 }, 5*time.Second, time.Millisecond)
+		require.NoError(t, o.SyncDistribution())
+		require.Equal(t, int64(2), o.TargetVersion())
 		require.False(t, o.sealed.Contain(1))
 	}, 102, 104)
-	require.NoError(t, <-syncErr)
 
 	entry, ok := o.sealed.Get(1)
 	require.True(t, ok)
