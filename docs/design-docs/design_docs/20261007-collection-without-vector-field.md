@@ -97,12 +97,12 @@ not found, please check your search parameters.`
 
 **Tools and replication**
 
-The following comes from reading the source of each tool; none of it was
-run against a collection without a vector field.
+milvus-backup was run against the implementation branch; the other rows
+come from reading the source of each tool and were not run.
 
 | Tool | Result | Notes |
 |---|---|---|
-| milvus-backup (`2ec7cbd`) | no change needed | a collection with no index is handled (`ListIndex` maps `IndexNotExist` to an empty list); the schema is copied field by field and sent to the server unchecked; `--rebuild_index` and `--use_auto_index` only process indexes that were backed up; data is restored by directory; restore does not load. Restore relies on the server importing backup binlogs into such a collection, which has not been tested |
+| milvus-backup (`2ec7cbd`) | no change needed, tested | Backup and restore of two collections without a vector field (one with no index, one with an `INVERTED` index; dynamic field on, 200 k rows, 1,000 rows deleted after flush, 500 rows not flushed) on a local standalone. Three restore paths give the source row count (199,500), no deleted row, equal sampled rows and the same index list: the snapshot format (the tool's default on this server), and the binlog format with the `per_seg` and `merged_seg` strategies. A binlog-format backup that contains L0 delete segments has to go through `milvus-backup l0compact` first: the server rejects L0 import by default (`dataCoord.import.enableL0Import=false`, #51194), for every collection, and without that step the restore fails and leaves the deleted rows visible |
 | Replication built into Milvus (same version on both sides) | works | the secondary applies a replicated `CreateCollection` in the broadcast ack callback, below the Proxy check and RootCoord `validateSchema`. `common.enableCollectionWithoutVector=false` on the secondary therefore does not stop a replicated collection without a vector field: the switch applies to create requests received by that cluster, and a secondary mirrors its primary |
 | Replication built into Milvus, older secondary | unknown | the old secondary would not reject the create message at the metadata layer; whether its QueryNode, DataNode and index code work with such a collection has not been examined. Replicating to an older version is not supported by this design |
 | milvus-cdc (standalone tool, `3a4af3b`, built against 2.5 packages) | fails on a target that rejects the schema | it calls the target's public `CreateCollection`. A 2.5 or 2.6 target, or a target with the switch off, rejects it; the tool retries for about two days (17,280 attempts), during which the other collection events of that source and target pair wait, and then pauses the task. A task that lists its collections by name does not touch other collections |
