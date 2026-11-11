@@ -166,10 +166,26 @@ class UpdatesRecord::Impl {
 };
 
 UpdatesRecord::UpdatesRecord(size_t row_count, bool enable_temp_index)
-    : impl_(std::make_unique<Impl>(row_count, enable_temp_index)) {
+    : impl_(std::make_shared<Impl>(row_count, enable_temp_index)) {
+}
+
+UpdatesRecord::UpdatesRecord(std::shared_ptr<Impl> impl)
+    : impl_(std::move(impl)) {
 }
 
 UpdatesRecord::~UpdatesRecord() = default;
+
+detail::UpdateReadBinding
+UpdatesRecord::CaptureReadBinding(int64_t field_id, uint64_t query_ts) const {
+    std::shared_lock lock(impl_->mutex);
+    const auto& field = impl_->GetField(field_id);
+    return {std::shared_ptr<const UpdatesRecord>(new UpdatesRecord(impl_)),
+            field_id,
+            query_ts,
+            static_cast<int64_t>(impl_->row_count),
+            field.type,
+            field.index != nullptr};
+}
 
 void
 UpdatesRecord::InitializeField(int64_t field_id,

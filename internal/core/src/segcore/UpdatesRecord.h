@@ -27,11 +27,16 @@
 
 namespace milvus::segcore::experimental {
 
-// Query-side POC primitives, not a persistent index or an expression reader.
+// Query-side POC version storage; snapshot-bound readers are defined separately.
 // monostate denotes SQL NULL; it is distinct from an absent visible version.
 using UpdateValue = std::variant<std::monostate, int64_t, std::string>;
 
 enum class UpdateFieldType { Int64, VarChar };
+
+struct UpdateReaders;
+namespace detail {
+struct UpdateReadBinding;
+}
 
 struct UpdateAssignment {
     int64_t field_id;
@@ -134,9 +139,33 @@ class UpdatesRecord {
     std::vector<int64_t>
     IsNotNull(int64_t field_id, uint64_t query_ts) const;
 
+    // Creates both access paths with one field/timestamp binding. The caller
+    // must have completed the input prefix through query_ts before opening it;
+    // binding does not advance or replace the QueryView apply frontier.
+    // Include UpdatesRecordReaders.h to use the returned reader pair.
+    UpdateReaders
+    CreateReaders(int64_t field_id, uint64_t query_ts) const;
+
  private:
+    detail::UpdateReadBinding
+    CaptureReadBinding(int64_t field_id, uint64_t query_ts) const;
+
     class Impl;
-    std::unique_ptr<Impl> impl_;
+    explicit UpdatesRecord(std::shared_ptr<Impl> impl);
+    std::shared_ptr<Impl> impl_;
 };
+
+namespace detail {
+// Shared by the two readers; only UpdatesRecord creates a binding. The retained
+// facade owns the same Impl as the writer, not a copy of the version records.
+struct UpdateReadBinding {
+    std::shared_ptr<const UpdatesRecord> records;
+    int64_t field_id;
+    uint64_t query_ts;
+    int64_t row_count;
+    UpdateFieldType type;
+    bool has_index;
+};
+}  // namespace detail
 
 }  // namespace milvus::segcore::experimental
