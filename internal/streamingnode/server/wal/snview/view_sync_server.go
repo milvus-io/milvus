@@ -48,6 +48,10 @@ type pchannelScopedQueryViewHandler struct {
 	handler  handler.QueryViewHandler
 }
 
+func (h *pchannelScopedQueryViewHandler) CollectShardStats() []qviews.ShardStats {
+	return h.handler.CollectShardStats()
+}
+
 func (h *pchannelScopedQueryViewHandler) ApplyViews(views []handler.ApplyView) {
 	var matched []handler.ApplyView
 	for _, view := range views {

@@ -69,6 +69,10 @@ func TestStatisticsPlanCountsSNAndReturnsOnlySelectedQNs(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.True(t, released)
+		stats := w.queryViewHandler.CollectShardStats()
+		require.Len(t, stats, 1)
+		require.EqualValues(t, 1, stats[0].RequestCount)
+		require.EqualValues(t, 3, stats[0].ShardID.ReplicaID)
 		require.EqualValues(t, 23, plan.GetGrowingInlineResponse().GetStatisticsResponse().GetRowCount())
 		require.Len(t, plan.GetPlan().GetWorkNodes(), 1)
 		require.EqualValues(t, 11, plan.GetPlan().GetWorkNodes()[0].GetQueryNode().GetNodeId())
@@ -111,6 +115,7 @@ func TestQueryPlanRenewsLeaseOnlyOnSuccessfulReturn(t *testing.T) {
 		} else {
 			require.Error(t, err)
 		}
+		require.EqualValues(t, 1, w.queryViewHandler.CollectShardStats()[0].RequestCount)
 		require.Equal(t, valid, renewed)
 		require.True(t, released)
 	}
@@ -132,6 +137,7 @@ func TestQueryPlanCannotUseOldSchemaView(t *testing.T) {
 	req.Request = &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{SchemaVersion: 0}}
 	_, err = w.GetQueryPlan(t.Context(), req)
 	require.True(t, viewerror.AsViewError(err).IsRetryable(), "newer schema cannot satisfy an old request")
+	require.Empty(t, w.queryViewHandler.CollectShardStats())
 }
 
 func TestQueryPlanRejectsUnloadedPartitionBeforePruning(t *testing.T) {
@@ -153,6 +159,7 @@ func TestQueryPlanRejectsUnloadedPartitionBeforePruning(t *testing.T) {
 		req.Request = &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: &internalpb.SearchRequest{PartitionIDs: []int64{20}}}
 		_, err = w.GetQueryPlan(t.Context(), req)
 		require.ErrorIs(t, err, merr.ErrPartitionNotLoaded)
+		require.EqualValues(t, 2, w.queryViewHandler.CollectShardStats()[0].RequestCount)
 	})
 }
 
@@ -473,4 +480,36 @@ func TestQueryPlanSealedSegmentCountWithFullNodeSelection(t *testing.T) {
 			require.Equal(t, tc.count, queryPlanSealedSegmentCount(plan, view))
 		})
 	}
+}
+
+func TestQueryPlanStatsAdmissionBoundary(t *testing.T) {
+	mockey.PatchConvey("only admitted shard planning attempts are counted", t, func() {
+		h := &snview.SNQueryViewHandler{}
+		w := &walAdaptorImpl{roWALAdaptorImpl: &roWALAdaptorImpl{availableCtx: context.Background(), lifetime: typeutil.NewLifetime()}, queryViewHandler: h}
+		req := &viewpb.GetQueryPlanRequest{CollectionId: 1, ShardId: &viewpb.ShardID{Vchannel: "p_1v0"}, Mvcc: &viewpb.GetQueryPlanRequest_QueryPlanMvcc{QueryPlanMvcc: &viewpb.QueryPlanMVCC{GrowingTimetick: 1}}}
+		w.lifetime.SetState(typeutil.LifetimeStateStopped)
+		_, err := w.GetQueryPlan(t.Context(), req)
+		require.True(t, viewerror.AsViewError(err).IsOnShutdown())
+		w.lifetime.SetState(typeutil.LifetimeStateWorking)
+		_, err = w.GetQueryPlan(t.Context(), nil)
+		require.Error(t, err)
+		w.queryViewHandler = nil
+		_, err = w.GetQueryPlan(t.Context(), req)
+		require.Error(t, err)
+		w.queryViewHandler = h
+		meta := &viewpb.QueryViewMeta{CollectionId: 1, Vchannel: "p_1v0", ReplicaId: 7}
+		lease := &snview.QueryViewLease{Meta: meta, Release: func() {}}
+		mockey.Mock((*snview.SNQueryViewHandler).AcquireUpViewAtSchema).Return(lease, nil).Build()
+		req.CollectionId = 2
+		_, err = w.GetQueryPlan(t.Context(), req)
+		require.Error(t, err)
+		require.Empty(t, h.CollectShardStats())
+		req.CollectionId = 1
+		_, err = w.GetQueryPlan(t.Context(), req)
+		require.Error(t, err, "missing read resources fails after admission")
+		samples := h.CollectShardStats()
+		require.Len(t, samples, 1)
+		require.EqualValues(t, 7, samples[0].ShardID.ReplicaID)
+		require.EqualValues(t, 1, samples[0].RequestCount)
+	})
 }

@@ -197,6 +197,7 @@ message SyncResponse {
     oneof response {
         SyncQueryViewsResponse views = 1;
         SyncCloseResponse close = 2;
+        ShardStatsReport stats = 3;
     }
 }
 
@@ -206,6 +207,17 @@ message SyncQueryViewsResponse {
 }
 
 message SyncCloseResponse {
+}
+
+// Shard planning access; counters reset with the SN handler, not View versions.
+message ShardStats {
+    ShardID shard_id = 1;
+    uint64 request_count = 2;
+    int64 last_access_unix_nanos = 3;
+}
+
+message ShardStatsReport {
+    repeated ShardStats shards = 1;
 }
 
 // ShardID identifies one shard within a replica.

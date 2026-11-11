@@ -24,4 +24,9 @@ type QueryViewHandler interface {
 	// State updates (both immediate and asynchronous) are reported
 	// exclusively through the OnReport callback in each ApplyView.
 	ApplyViews(views []ApplyView)
+
+	// CollectShardStats samples planning access without acquiring View locks.
+	// The returned snapshot is owned by the caller.
+	// QueryNodes return nil; statistics are collected only on StreamingNodes.
+	CollectShardStats() []qviews.ShardStats
 }

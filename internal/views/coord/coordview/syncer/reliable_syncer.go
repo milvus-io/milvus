@@ -105,6 +105,9 @@ type ReliableSyncer interface {
 // Internally routes QueryNodes through the QueryNode manager client and
 // StreamingNodes through the pchannel-level StreamingNode handler client.
 type ViewSyncClient interface {
+	// WatchPChannels supplies initial and subsequent assigned SN logical targets.
+	// Missing assignments can be temporary; existing SN syncers keep resuming.
+	WatchPChannels(context.Context, func([]string)) error
 	// RegisterNodeChangedNotifier registers a callback that is invoked whenever
 	// node changes may require draining removed QueryNode syncers. The notifier
 	// must be non-blocking.
@@ -119,4 +122,10 @@ type ViewSyncClient interface {
 
 	// Close closes the client and releases resources.
 	Close()
+}
+
+// ShardStatsHandler receives bounded batches independently of pending Views.
+// Implementations must be thread-safe and must not perform I/O.
+type ShardStatsHandler interface {
+	OnShardStats([]qviews.ShardStats)
 }

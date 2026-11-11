@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -18,7 +19,8 @@ var (
 )
 
 type reliableSyncer struct {
-	client ViewSyncClient
+	client       ViewSyncClient
+	statsHandler ShardStatsHandler
 
 	mu               sync.Mutex
 	resumableSyncers map[qviews.WorkNodeKey]*resumableSyncer
@@ -32,19 +34,51 @@ type reliableSyncer struct {
 }
 
 // NewReliableSyncer creates a new ReliableSyncer.
-func NewReliableSyncer(client ViewSyncClient) ReliableSyncer {
+func NewReliableSyncer(client ViewSyncClient, statsHandler ShardStatsHandler) ReliableSyncer {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &reliableSyncer{
 		client:           client,
+		statsHandler:     statsHandler,
 		resumableSyncers: make(map[qviews.WorkNodeKey]*resumableSyncer),
 		ctx:              ctx,
 		cancel:           cancel,
 		nodeChanged:      make(chan struct{}, 1),
 	}
-	s.drainWG.Add(1)
+	s.drainWG.Add(2)
 	go s.watchNodeChanged()
+	go s.watchPChannels()
 	client.RegisterNodeChangedNotifier(s.notifyNodeChanged)
 	return s
+}
+
+// SN streams are discovered eagerly and kept even without pending Views.
+// Assignment gaps must not discard pending state or stop reconnection.
+func (s *reliableSyncer) watchPChannels() {
+	defer s.drainWG.Done()
+	bo := backoff.NewExponentialBackOff()
+	bo.MaxElapsedTime = 0
+	for s.ctx.Err() == nil {
+		err := s.client.WatchPChannels(s.ctx, func(channels []string) {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			if s.closed {
+				return
+			}
+			for _, channel := range channels {
+				node := qviews.StreamingNode{PChannel: channel}
+				if s.resumableSyncers[node.Key()] == nil {
+					s.resumableSyncers[node.Key()] = newResumableSyncer(s.ctx, node, s.client, s.statsHandler)
+				}
+			}
+		})
+		if s.ctx.Err() != nil {
+			return
+		}
+		mlog.Warn(s.ctx, "ReliableSyncer: channel discovery interrupted", mlog.Err(err))
+		if !waitReconnectBackoff(s.ctx, bo) {
+			return
+		}
+	}
 }
 
 // notifyNodeChanged coalesces membership-change notifications without blocking
@@ -132,7 +166,7 @@ func (s *reliableSyncer) syncViewsToNode(ctx context.Context, nodeKey qviews.Wor
 
 	mlog.Info(ctx, "ReliableSyncer: node discovered on demand, creating ResumableSyncer",
 		mlog.String("node", nodeKey))
-	rs := newResumableSyncer(s.ctx, node, s.client)
+	rs := newResumableSyncer(s.ctx, node, s.client, s.statsHandler)
 	s.resumableSyncers[nodeKey] = rs
 	rs.Sync(views)
 	return false, nil
@@ -163,7 +197,7 @@ func (s *reliableSyncer) Close() error {
 }
 
 // drainRemovedNodes drains ResumableSyncers whose target nodes are no longer alive.
-// It does NOT create ResumableSyncers for new nodes — that is done lazily by tryCreateSyncer.
+// SN targets remain alive across assignment gaps; only lost QNs are drained.
 func (s *reliableSyncer) drainRemovedNodes() {
 	s.mu.Lock()
 	if s.closed {

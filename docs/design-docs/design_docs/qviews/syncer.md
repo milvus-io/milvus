@@ -18,7 +18,7 @@
 │  ┌─────────────────────────────────────────────────────────────┐ │
 │  │                     ReliableSyncer                          │ │
 │  │  • Watches node changes via ViewSyncClient                 │ │
-│  │  • Lazily creates resumableSyncers per node                │ │
+│  │  • Discovers SN streams; lazily creates QN streams                │ │
 │  │  • Drains removed nodes (service discovery)                │ │
 │  │                                                             │ │
 │  │  ┌──────────────────┐ ┌──────────────────┐                 │ │
@@ -37,7 +37,7 @@
 ```
 
 **ReliableSyncer**: Top-level component that:
-1. Lazily creates per-node `resumableSyncer` instances on first `SyncViews` call (via `getOrCreateSyncer`).
+1. Creates SN/PChannel `resumableSyncer` instances from initial and subsequent assignment discovery, even without pending Views. QN streams are created on first `SyncViews`.
 2. Watches node changes via `ViewSyncClient` and drains `resumableSyncer` instances for removed nodes.
 3. Detects QueryNode loss via service discovery (not reconnect timeout).
 
@@ -201,7 +201,7 @@ node-change worker:
 ```
 
 Key design decisions:
-- **Lazy creation**: `resumableSyncer` instances are created on demand by `getOrCreateSyncer`, NOT by the background watcher. The watcher only handles removals.
+- **SN keepalive**: assignment discovery creates SN streams eagerly. Existing SN streams keep resuming across idle periods and temporary assignment gaps; shutdown closes them. QN streams remain lazy and the QN membership notifier handles their removal.
 - **No reconnect timeout**: `resumableSyncer` retries indefinitely with backoff until closed.
 - **Separation of concerns**: Stream reconnection (resumableSyncer) is independent of node liveness (service discovery).
 
@@ -332,3 +332,16 @@ internal/views/coord/coordview/
 │   └── pending_sync_query_views.go # Per-node pending view tracker
 └── state_machine.go                # CoordQueryView state machine
 ```
+
+## Shard access statistics
+
+See [Shard access statistics](query_view_statistics.md). ReliableSyncer receives
+a `ShardStatsHandler` at construction, after Replica configuration replay. SN
+responses carry ShardID snapshots and are dispatched directly to that handler,
+without matching pending View callbacks. The receiver validates the stream's
+PChannel; the stats store validates Replica and collection membership. A stream
+reconnect replays current counters even if no View command is pending.
+
+The PChannel discovery watcher is canceled and joined during Close. Temporary
+assignment gaps do not discard pending View commands or stop SN reconnection.
+Stats do not introduce a separate source, subscriber or recovery-ready gate.

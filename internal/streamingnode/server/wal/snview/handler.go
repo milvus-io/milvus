@@ -67,6 +67,7 @@ var _ handler.QueryViewHandler = (*SNQueryViewHandler)(nil)
 //     Repeated Down pushes update the callback without renewing the lease.
 //   - Other states: SM handles coord push and responds accordingly.
 type SNQueryViewHandler struct {
+	stats          shardStats
 	replicas       *replicaDirectory
 	mu             sync.Mutex
 	closed         bool

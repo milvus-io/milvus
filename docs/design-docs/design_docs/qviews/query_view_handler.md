@@ -63,10 +63,11 @@ Implements the gRPC `SyncQueryView` bidirectional streaming RPC. Per-stream — 
 
 ## 3. QueryViewHandler
 
-The `QueryViewHandler` interface has a single method:
+The `QueryViewHandler` interface provides state application and Shard statistics:
 
 ```
 ApplyViews(views []ApplyView)
+CollectShardStats() []qviews.ShardStats
 ```
 
 Each `ApplyView` carries a coord-pushed `View` and an `OnReport` callback. All state reports — both immediate (from Coord push handling) and asynchronous (from external dependency callbacks) — are delivered exclusively through `OnReport`.
@@ -311,3 +312,13 @@ and node loss. Handler call-order tests alone do not establish physical reuse.
 No RPC change is required for this handover. Validation blocks replacement
 preparation, releases the old View, then completes the dependency and verifies
 both protected resource reuse and eventual readiness without another push.
+
+## Shard access statistics
+
+[Shard access statistics](query_view_statistics.md) are collected by an SN
+handler-owned `shardStats` child structure, independently of ShardView state
+machines. QN returns no samples. The existing send loop samples at connection
+start and every five seconds, sends only changed entries after the first
+snapshot, and checks pending state/close reports between bounded stats batches.
+State callbacks and pendingReports retain their existing View-key semantics;
+stats collection never acquires View or ShardView locks.

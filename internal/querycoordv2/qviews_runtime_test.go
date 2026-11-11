@@ -99,6 +99,16 @@ func TestNewQViewsRuntimeRecoversLoadConfigAndQueryViews(t *testing.T) {
 	require.NoError(t, runtime.balanceCache.WaitForReady(ctx))
 	require.Same(t, data, runtime.balanceCache.GetCollection(100).DataView())
 	require.Equal(t, "rg1", runtime.balanceCache.GetNode(10).Info().ResourceGroup)
+	statsID := qviews.ShardID{ReplicaID: 1000, VChannel: "p_100v0"}
+	require.Same(t, runtime.shardStats, runtime.resources.ShardStats)
+	runtime.shardStats.OnShardStats([]qviews.ShardStats{{ShardID: statsID, RequestCount: 5}})
+	got, found := runtime.shardStats.GetShardStats(statsID)
+	require.True(t, found)
+	require.EqualValues(t, 5, got.RequestCount)
+	runtime.loadConfigStore.StopPlanning(100)
+	runtime.shardStats.OnShardStats([]qviews.ShardStats{{ShardID: statsID, RequestCount: 6}})
+	_, found = runtime.shardStats.GetShardStats(statsID)
+	require.False(t, found)
 	runtime.stop()
 	runtime.stop()
 	require.Equal(t, 3, detached)
@@ -273,4 +283,9 @@ func (c *fakeRuntimeQueryNodeClient) RegisterQueryNodeListener(context.Context, 
 
 func (m *fakeRuntimeResourceGroupManager) RegisterResourceGroupListener(func(string, []int64)) func() {
 	return func() {}
+}
+
+func (*fakeRuntimeViewSyncClient) WatchPChannels(ctx context.Context, callback func([]string)) error {
+	<-ctx.Done()
+	return ctx.Err()
 }

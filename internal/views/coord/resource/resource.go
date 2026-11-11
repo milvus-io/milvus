@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/coord/loadstatus"
 	"github.com/milvus-io/milvus/internal/views/coord/readiness"
+	"github.com/milvus-io/milvus/internal/views/coord/shardstats"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -34,8 +35,9 @@ type DataViewReconciler interface {
 // are installed once before DDL callbacks and external requests are enabled.
 // The owners retain responsibility for shutting down the underlying managers.
 type Resources struct {
-	DataViews balancer.DataViewProvider
-	Balancer  interface {
+	ShardStats *shardstats.ReplicaStatsStore
+	DataViews  balancer.DataViewProvider
+	Balancer   interface {
 		Trigger(...balancer.TriggerScope)
 	}
 	BalanceCache    *cache.Cache

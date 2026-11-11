@@ -36,7 +36,7 @@ func newReliableTestSetup(t *testing.T, nodes ...qviews.WorkNode) *reliableTestS
 		return s, nil
 	}
 
-	syncer := NewReliableSyncer(client)
+	syncer := NewReliableSyncer(client, nil)
 	return &reliableTestSetup{
 		syncer:      syncer,
 		client:      client,
@@ -161,7 +161,7 @@ func TestReliable_LazyCreation(t *testing.T) {
 		return newMockStream(ctx), nil
 	}
 
-	syncer := NewReliableSyncer(client)
+	syncer := NewReliableSyncer(client, nil)
 	defer syncer.Close()
 
 	// No stream opened initially.

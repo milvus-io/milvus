@@ -553,3 +553,5 @@ func TestViewSyncServer_EmptyApplyResult(t *testing.T) {
 	cancel()
 	<-errCh
 }
+
+func (*mockHandler) CollectShardStats() []qviews.ShardStats { return nil }

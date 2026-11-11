@@ -132,3 +132,8 @@ func (c *fakeQueryNodeViewSyncClient) RegisterQueryNodeListener(_ context.Contex
 	}
 	return func() {}, nil
 }
+
+func (*fakeStreamingNodeViewSyncClient) WatchPChannels(ctx context.Context, callback func([]string)) error {
+	<-ctx.Done()
+	return ctx.Err()
+}

@@ -551,6 +551,14 @@ for its serving views. Full mixed-version upgrade validation is a separate check
 [DDL visibility](ddl_visibility.md) specifies the DataVersion and configuration
 fences and the operations still deferred.
 
+## Shard access statistics (proposed)
+
+[Shard access statistics](query_view_statistics.md) proposes collecting request
+counts and last access times by ShardID in the top-level SN handler, reporting
+through persistent Syncer streams, and owning Coordinator statistics by Replica
+load-config lifetime. It is independent of QueryView state machines and does not
+implement preparation priority. This proposal is not implemented yet.
+
 ## Partition statistics and pruning
 
 [Global segment pruning](query/segment_pruning.md) defines immutable DataView

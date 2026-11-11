@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/nodeview"
 	"github.com/milvus-io/milvus/internal/views/coord/readiness"
 	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
+	"github.com/milvus-io/milvus/internal/views/coord/shardstats"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -63,6 +64,7 @@ type qviewsRuntime struct {
 	readyChanges      *readiness.Notifications
 	refreshVersions   sync.Map // collection ID -> qviews.DataVersion, max requested refresh fence
 	syncer            syncer.ReliableSyncer
+	shardStats        *shardstats.ReplicaStatsStore
 	balancer          qviewsBalancer
 	balanceCache      *cache.Cache
 	nodePublisher     *nodeview.QueryNodePublisher
@@ -136,11 +138,13 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 	if err != nil {
 		return nil, err
 	}
-	reliableSyncer := syncer.NewReliableSyncer(deps.viewSyncClient)
+	stats := shardstats.New(loadConfigStore)
+	reliableSyncer := syncer.NewReliableSyncer(deps.viewSyncClient, stats)
 	shardViewRegistry, err := coordview.RecoverShardViewRegistryWithDataViews(ctx, deps.queryViewCatalog, reliableSyncer, deps.dataViewProvider, loadConfigStore)
 	if err != nil {
 		nodePublisher.Close()
 		_ = reliableSyncer.Close()
+		stats.Close()
 		return nil, err
 	}
 
@@ -177,6 +181,7 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 		shardViewRegistry:    shardViewRegistry,
 		readyChanges:         newCollectionReadiness(loadConfigStore, shardViewRegistry),
 		syncer:               reliableSyncer,
+		shardStats:           stats,
 		balancer:             balancerController,
 		balanceCache:         balanceCache,
 		nodePublisher:        nodePublisher,
@@ -184,7 +189,7 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 		streamingCoordClient: deps.streamingCoordClient,
 		streamingNodeHandler: deps.streamingNodeHandler,
 	}
-	runtime.resources = &qvresource.Resources{DataViews: deps.dataViewProvider, Balancer: balancerController, BalanceCache: balanceCache, LoadConfigs: loadConfigStore, LoadManager: loadManager, ShardViews: shardViewRegistry, Readiness: runtime.readyChanges, Reconciler: deps.dataViewReconciler, VChannels: deps.vchannels, RefreshVersions: &runtime.refreshVersions}
+	runtime.resources = &qvresource.Resources{ShardStats: stats, DataViews: deps.dataViewProvider, Balancer: balancerController, BalanceCache: balanceCache, LoadConfigs: loadConfigStore, LoadManager: loadManager, ShardViews: shardViewRegistry, Readiness: runtime.readyChanges, Reconciler: deps.dataViewReconciler, VChannels: deps.vchannels, RefreshVersions: &runtime.refreshVersions}
 	loadConfigStore.RegisterObserver(func(collectionID int64, released bool) {
 		if released {
 			runtime.refreshVersions.Delete(collectionID)
@@ -235,6 +240,7 @@ func (r *qviewsRuntime) stop() {
 			r.shardViewRegistry.Close()
 		}
 		_ = r.syncer.Close()
+		r.shardStats.Close()
 		if r.queryNodeManager != nil {
 			r.queryNodeManager.Close()
 		}

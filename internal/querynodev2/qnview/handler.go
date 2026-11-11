@@ -76,6 +76,8 @@ func NewQNQueryViewHandler(segMgr SegmentManager) *QNQueryViewHandler {
 // ApplyViews applies a batch of coord-pushed views.
 // Views are grouped by ShardID and applied atomically per shard.
 // All state reports are delivered through the OnReport callback.
+func (h *QNQueryViewHandler) CollectShardStats() []qviews.ShardStats { return nil }
+
 func (h *QNQueryViewHandler) ApplyViews(views []handler.ApplyView) {
 	// Group views by ShardID.
 	grouped := make(map[qviews.ShardID][]handler.ApplyView)

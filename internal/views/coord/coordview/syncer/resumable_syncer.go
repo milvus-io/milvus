@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
 // resumableSyncer manages a single gRPC bidirectional stream to a work node.
@@ -21,9 +22,10 @@ import (
 // Close stops the loop but does NOT drain pending views.
 // Use DrainPendingIfNodeLost after Close for node loss scenarios.
 type resumableSyncer struct {
-	node    qviews.WorkNode
-	client  ViewSyncClient
-	pending *pendingSyncQueryViews
+	statsHandler ShardStatsHandler
+	node         qviews.WorkNode
+	client       ViewSyncClient
+	pending      *pendingSyncQueryViews
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -34,14 +36,16 @@ func newResumableSyncer(
 	ctx context.Context,
 	node qviews.WorkNode,
 	client ViewSyncClient,
+	statsHandler ShardStatsHandler,
 ) *resumableSyncer {
 	ctx, cancel := context.WithCancel(ctx)
 	rs := &resumableSyncer{
-		node:    node,
-		client:  client,
-		pending: newPendingSyncQueryViews(),
-		ctx:     ctx,
-		cancel:  cancel,
+		statsHandler: statsHandler,
+		node:         node,
+		client:       client,
+		pending:      newPendingSyncQueryViews(),
+		ctx:          ctx,
+		cancel:       cancel,
 	}
 	rs.wg.Add(1)
 	go rs.loop()
@@ -200,6 +204,11 @@ func (rs *resumableSyncer) recvLoop(ctx context.Context, stream viewpb.ViewSyncS
 			return receivedResponse
 		}
 
+		if stats := resp.GetStats(); stats != nil {
+			rs.receiveShardStats(stats)
+			receivedResponse = true
+			continue
+		}
 		viewsResp := resp.GetViews()
 		if viewsResp == nil {
 			if resp.GetClose() != nil {
@@ -213,6 +222,24 @@ func (rs *resumableSyncer) recvLoop(ctx context.Context, stream viewpb.ViewSyncS
 			rs.pending.MatchResponse(pb)
 		}
 	}
+}
+
+func (rs *resumableSyncer) receiveShardStats(report *viewpb.ShardStatsReport) {
+	node, ok := rs.node.(qviews.StreamingNode)
+	if !ok || rs.statsHandler == nil {
+		return
+	}
+	samples := make([]qviews.ShardStats, 0, len(report.GetShards()))
+	for _, sample := range report.GetShards() {
+		id := sample.GetShardId()
+		if id == nil || funcutil.ToPhysicalChannel(id.GetVchannel()) != node.PChannel {
+			continue
+		}
+		samples = append(samples, qviews.ShardStats{
+			ShardID: qviews.FromProtoShardID(id), RequestCount: sample.GetRequestCount(), LastAccessUnixNanos: sample.GetLastAccessUnixNanos(),
+		})
+	}
+	rs.statsHandler.OnShardStats(samples)
 }
 
 // rePush sends all pending entries for this node through the stream in batches

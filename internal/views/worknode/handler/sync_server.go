@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -73,10 +74,20 @@ func (s *ViewSyncServer) sendLoop(
 	stream viewpb.ViewSyncService_SyncQueryViewServer,
 	pending *pendingReports,
 ) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	lastSent := make(map[qviews.ShardID]qviews.ShardStats)
+	if s.sendShardStats(stream, pending, lastSent) {
+		return
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-ticker.C:
+			if s.sendShardStats(stream, pending, lastSent) {
+				return
+			}
 		case _, ok := <-pending.Ready():
 			// Drain pending reports regardless of whether the channel is
 			// still open or was closed (final drain before exit).
@@ -86,6 +97,43 @@ func (s *ViewSyncServer) sendLoop(
 			}
 		}
 	}
+}
+
+// sendShardStats runs only in sendLoop. Return true when sending must stop.
+func (s *ViewSyncServer) sendShardStats(stream viewpb.ViewSyncService_SyncQueryViewServer, pending *pendingReports, lastSent map[qviews.ShardID]qviews.ShardStats) bool {
+	samples := s.handler.CollectShardStats()
+	changed := samples[:0]
+	for _, sample := range samples {
+		if previous, ok := lastSent[sample.ShardID]; !ok || previous != sample {
+			changed = append(changed, sample)
+		}
+	}
+	for len(changed) > 0 {
+		// State/close reports take precedence between bounded stats batches.
+		select {
+		case <-stream.Context().Done():
+			return true
+		case _, ok := <-pending.Ready():
+			closing, err := s.sendPendingReports(stream, pending)
+			if !ok || closing || err != nil {
+				return true
+			}
+		default:
+		}
+		batch := changed[:min(256, len(changed))]
+		protos := make([]*viewpb.ShardStats, 0, len(batch))
+		for _, sample := range batch {
+			protos = append(protos, &viewpb.ShardStats{ShardId: sample.ShardID.IntoProto(), RequestCount: sample.RequestCount, LastAccessUnixNanos: sample.LastAccessUnixNanos})
+		}
+		if err := stream.Send(&viewpb.SyncResponse{Response: &viewpb.SyncResponse_Stats{Stats: &viewpb.ShardStatsReport{Shards: protos}}}); err != nil {
+			return true
+		}
+		for _, sample := range batch {
+			lastSent[sample.ShardID] = sample
+		}
+		changed = changed[len(batch):]
+	}
+	return false
 }
 
 // sendPendingReports drains all pending reports and sends them on the stream.
