@@ -334,6 +334,7 @@ void
 VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
                             const Config& config) {
     knowhere::Json load_config = update_load_json(config);
+    bool needs_external_validity = true;
 
     // start read file span with active scope
     {
@@ -360,8 +361,35 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
         // deciding whether any backend payload should be loaded.
         auto cache_files = GetCacheFilesForDiskIndexLoad(
             index_files.value(), index_.LoadIndexWithStream() && !empty_index);
+        const auto validity_files =
+            FilterValidDataDiskFileSlices(index_files.value());
+        const bool has_engine_files = std::any_of(
+            index_files->begin(), index_files->end(), [](const auto& file) {
+                return !IsValidDataDiskFileSlice(file);
+            });
+        const bool inspect_validity =
+            !empty_index && has_engine_files && !validity_files.empty();
+        if (inspect_validity) {
+            // Materialize engine files first when required by the backend.
+            // Validity is fetched only after inspecting its load requirements.
+            std::erase_if(cache_files, IsValidDataDiskFileSlice);
+        }
         if (!cache_files.empty()) {
             file_manager_->CacheIndexToDisk(cache_files, load_priority);
+        }
+        if (inspect_validity) {
+            const auto requirements = index_.InspectLoadRequirements(
+                knowhere::BinarySet(), load_config);
+            if (!requirements.has_value()) {
+                ThrowInfo(ErrorCode::UnexpectedError,
+                          "failed to inspect disk vector load requirements, {}",
+                          requirements.what());
+            }
+            needs_external_validity =
+                requirements.value().needs_external_validity;
+            if (needs_external_validity) {
+                file_manager_->CacheIndexToDisk(validity_files, load_priority);
+            }
         }
         read_file_span->End();
     }
@@ -372,7 +400,9 @@ VectorDiskAnnIndex<T>::Load(milvus::tracer::TraceContext ctx,
 
     auto valid_data_path = local_index_path_prefix + "/" + VALID_DATA_KEY;
     auto disk_valid_data =
-        ReadDiskValidData(local_chunk_manager, valid_data_path);
+        needs_external_validity
+            ? ReadDiskValidData(local_chunk_manager, valid_data_path)
+            : OwnedValidData{};
     const bool element_nullable =
         GetValueFromConfig<bool>(config, ELEMENT_NULLABLE).value_or(false);
     // Preserve logical-element validity for element-nullable fields. Other
