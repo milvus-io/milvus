@@ -241,7 +241,7 @@ type Local interface {
 type Broadcast interface {
 	// Ack acknowledges a broadcast message at the specified vchannel.
 	// It must be called after the message is consumed by the unique-consumer.
-	// Each call has a maximum 100 ms context budget and does not retry internally.
-	// The consumer must arrange retries after errors, including timeouts.
+	// It uses the caller's context and does not retry internally.
+	// The consumer controls timeouts and retries after errors.
 	Ack(ctx context.Context, msg message.ImmutableMessage) error
 }

@@ -34,14 +34,23 @@ type ackTestClient struct{ client.Client }
 
 func (*ackTestClient) Broadcast() client.BroadcastService { return nil }
 
-func TestBroadcastAckSingleBoundedAttempt(t *testing.T) {
+func TestBroadcastAckSingleAttemptUsesCallerContext(t *testing.T) {
 	service := &clientbroadcast.GRPCBroadcastServiceImpl{}
 	clientPatch := mockey.Mock((*ackTestClient).Broadcast).Return(service).Build()
 	defer clientPatch.UnPatch()
-	for _, mode := range []string{"success", "failure", "timeout", "caller-canceled", "closed"} {
+	for _, mode := range []string{"success", "caller-deadline", "failure", "timeout", "caller-canceled", "closed"} {
 		t.Run(mode, func(t *testing.T) {
 			b := broadcast{&walAccesserImpl{lifetime: typeutil.NewLifetime(), streamingCoordClient: &ackTestClient{}}}
-			ctx, cancel := context.WithCancel(t.Context())
+			var ctx context.Context
+			var cancel context.CancelFunc
+			switch mode {
+			case "caller-deadline":
+				ctx, cancel = context.WithTimeout(t.Context(), time.Second)
+			case "timeout":
+				ctx, cancel = context.WithTimeout(t.Context(), 20*time.Millisecond)
+			default:
+				ctx, cancel = context.WithCancel(t.Context())
+			}
 			defer cancel()
 			if mode == "caller-canceled" {
 				cancel()
@@ -50,24 +59,22 @@ func TestBroadcastAckSingleBoundedAttempt(t *testing.T) {
 				b.lifetime.SetState(typeutil.LifetimeStateStopped)
 			}
 			patch := mockey.Mock((*clientbroadcast.GRPCBroadcastServiceImpl).Ack).To(
-				func(_ *clientbroadcast.GRPCBroadcastServiceImpl, ctx context.Context, _ message.ImmutableMessage) error {
-					deadline, ok := ctx.Deadline()
-					require.True(t, ok)
-					require.LessOrEqual(t, time.Until(deadline), 100*time.Millisecond)
+				func(_ *clientbroadcast.GRPCBroadcastServiceImpl, callCtx context.Context, _ message.ImmutableMessage) error {
+					require.Same(t, ctx, callCtx, "client must not add or shorten the caller's deadline")
 					switch mode {
-					case "success":
+					case "success", "caller-deadline":
 						return nil
 					case "failure":
 						return context.DeadlineExceeded
 					default:
-						<-ctx.Done()
-						return ctx.Err()
+						<-callCtx.Done()
+						return callCtx.Err()
 					}
 				}).Build()
 			defer patch.UnPatch()
 			err := b.Ack(ctx, nil)
 			switch mode {
-			case "success":
+			case "success", "caller-deadline":
 				require.NoError(t, err)
 			case "closed":
 				require.ErrorIs(t, err, ErrWALAccesserClosed)

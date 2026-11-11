@@ -109,8 +109,8 @@ Priority adds no worker, per-task goroutine or timer.
 The WAL recovery scoped scheduler forwards priority options and dynamic handle
 updates while retaining owner tracking, cancellation and Close behavior. A legacy
 inner handle without `PriorityTaskHandle` rejects dynamic updates with false.
-The wrapper does not close the shared executor. Broadcast ACK uses a 100 ms
-RPC deadline and returns `ErrDelay` on failure, releasing its worker while
+The wrapper does not close the shared executor. The broadcast ACK task supplies
+a 100 ms RPC deadline to the client and returns `ErrDelay` on failure, releasing its worker while
 waiting for retry. Its preceding legacy import completion RPC has no additional
 timeout, but remains cancelable; that transitional path can occupy a worker for
 longer than 100 ms. In-memory QueryView callbacks run in separate goroutines.

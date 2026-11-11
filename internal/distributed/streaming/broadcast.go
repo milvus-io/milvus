@@ -2,7 +2,6 @@ package streaming
 
 import (
 	"context"
-	"time"
 
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -21,9 +20,6 @@ func (b broadcast) Ack(ctx context.Context, msg message.ImmutableMessage) error 
 	}
 	defer b.lifetime.Done()
 
-	// Retry belongs to the caller's scheduler, so an unavailable coordinator
-	// cannot occupy a worker indefinitely.
-	ctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
-	defer cancel()
+	// The caller owns timeout and retry policy; pass its context through.
 	return b.streamingCoordClient.Broadcast().Ack(ctx, msg)
 }

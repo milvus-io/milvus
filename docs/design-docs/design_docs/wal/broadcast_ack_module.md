@@ -70,8 +70,9 @@ and does not block unrelated tasks.
 
 The transitional legacy import commit RPC has no additional timeout; it remains
 cancelable by the scheduler and module shutdown. It can occupy its worker for
-longer than 100ms. After it succeeds, Broadcast.Ack gets a fresh 100ms context
-budget, makes one client call and does not retry internally.
+longer than 100ms. After it succeeds, broadcastAckTask supplies a fresh 100ms
+context budget to Broadcast.Ack. The client forwards that context unchanged,
+makes one call and does not retry internally; timeout policy belongs to the task.
 Failure returns NodeScheduler's ErrDelay; the shared
 scheduler retains the same submission and applies its exponential backoff.
 The task stays in flight across delayed retries, so the dispatcher cannot submit
