@@ -53,9 +53,10 @@ func NewGRPCReduceStream(ctx context.Context, client viewpb.ViewQueryServiceClie
 		cancel()
 		return nil, err
 	}
+	// Send EOF can hide the server status, which must be read by Recv.
 	if err := clientStream.Send(&viewpb.SearchOnViewStreamRequest{
 		Payload: &viewpb.SearchOnViewStreamRequest_Request{Request: request},
-	}); err != nil {
+	}); err != nil && !errors.Is(err, io.EOF) {
 		cancel()
 		_ = clientStream.CloseSend()
 		return nil, err

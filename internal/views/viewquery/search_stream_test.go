@@ -19,6 +19,7 @@ package viewquery
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"testing"
@@ -45,6 +46,130 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+type sendStatusTestState struct {
+	ctx              context.Context
+	sendErr, recvErr error
+	closeCount       int
+}
+
+type sendStatusTestClient struct {
+	viewpb.ViewQueryServiceClient
+	state *sendStatusTestState
+}
+
+func (c *sendStatusTestClient) SearchOnViewStream(ctx context.Context, _ ...grpc.CallOption) (viewpb.ViewQueryService_SearchOnViewStreamClient, error) {
+	c.state.ctx = ctx
+	return &sendStatusSearchStream{state: c.state}, nil
+}
+
+func (c *sendStatusTestClient) QueryOnViewStream(ctx context.Context, _ ...grpc.CallOption) (viewpb.ViewQueryService_QueryOnViewStreamClient, error) {
+	c.state.ctx = ctx
+	return &sendStatusQueryStream{state: c.state}, nil
+}
+
+type sendStatusSearchStream struct {
+	grpc.ClientStream
+	state *sendStatusTestState
+}
+
+func (s *sendStatusSearchStream) Send(*viewpb.SearchOnViewStreamRequest) error {
+	return s.state.sendErr
+}
+func (s *sendStatusSearchStream) Recv() (*viewpb.SearchOnViewStreamResponse, error) {
+	return nil, s.state.recvErr
+}
+func (s *sendStatusSearchStream) CloseSend() error { s.state.closeCount++; return nil }
+
+type sendStatusQueryStream struct {
+	grpc.ClientStream
+	state *sendStatusTestState
+}
+
+func (s *sendStatusQueryStream) Send(*viewpb.QueryOnViewStreamRequest) error { return s.state.sendErr }
+func (s *sendStatusQueryStream) Recv() (*viewpb.QueryOnViewStreamResponse, error) {
+	return nil, s.state.recvErr
+}
+func (s *sendStatusQueryStream) CloseSend() error { s.state.closeCount++; return nil }
+
+func TestGRPCReduceStreamSendStatus(t *testing.T) {
+	serverErr := status.Error(codes.Unavailable, "server rejected request")
+	clientErr := status.Error(codes.ResourceExhausted, "client send failed")
+	for _, query := range []bool{false, true} {
+		for _, tc := range []struct {
+			name             string
+			sendErr, recvErr error
+		}{{"send_eof_server_status", io.EOF, serverErr}, {"send_eof_success", io.EOF, io.EOF}, {"send_client_error", clientErr, nil}} {
+			t.Run(fmt.Sprintf("query_%t/%s", query, tc.name), func(t *testing.T) {
+				state := &sendStatusTestState{sendErr: tc.sendErr, recvErr: tc.recvErr}
+				client := &sendStatusTestClient{state: state}
+				var recv func() error
+				var closeStream func() error
+				var err error
+				if query {
+					var stream queryreducestream.ReduceStream
+					stream, err = queryreducestream.NewGRPCReduceStream(t.Context(), client, &viewpb.QueryOnViewRequest{})
+					if stream != nil {
+						recv = func() error { _, err := stream.Recv(); return err }
+						closeStream = stream.Close
+					}
+				} else {
+					var stream searchreducestream.ReduceStream
+					stream, err = searchreducestream.NewGRPCReduceStream(t.Context(), client, &viewpb.SearchOnViewRequest{})
+					if stream != nil {
+						recv = func() error { _, err := stream.Recv(); return err }
+						closeStream = stream.Close
+					}
+				}
+				if tc.sendErr != io.EOF {
+					require.ErrorIs(t, err, tc.sendErr)
+					require.Equal(t, context.Canceled, state.ctx.Err())
+					require.Equal(t, 1, state.closeCount)
+					return
+				}
+				require.NoError(t, err)
+				require.NoError(t, state.ctx.Err())
+				require.ErrorIs(t, recv(), tc.recvErr)
+				require.NoError(t, closeStream())
+				require.Equal(t, context.Canceled, state.ctx.Err())
+				require.Equal(t, 1, state.closeCount)
+			})
+		}
+	}
+}
+
+func TestGRPCReduceStreamEarlyServerRejection(t *testing.T) {
+	listener := bufconn.Listen(1 << 20)
+	server := grpc.NewServer(grpc.StreamInterceptor(func(_ any, _ grpc.ServerStream, _ *grpc.StreamServerInfo, _ grpc.StreamHandler) error {
+		return status.Error(codes.Unavailable, "worker unavailable")
+	}))
+	viewpb.RegisterViewQueryServiceServer(server, &viewpb.UnimplementedViewQueryServiceServer{})
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(func() { server.Stop(); _ = listener.Close() })
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	conn, err := grpc.DialContext(ctx, "bufnet", grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+		return listener.Dial()
+	}), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	client := viewpb.NewViewQueryServiceClient(conn)
+	plan := make([]byte, 2<<20)
+	t.Run("search", func(t *testing.T) {
+		stream, err := searchreducestream.NewGRPCReduceStream(ctx, client, &viewpb.SearchOnViewRequest{LegacyReq: &internalpb.SearchRequest{SerializedExprPlan: plan}})
+		require.NoError(t, err)
+		defer stream.Close()
+		_, err = stream.Recv()
+		require.Equal(t, codes.Unavailable, status.Code(err))
+	})
+	t.Run("query", func(t *testing.T) {
+		stream, err := queryreducestream.NewGRPCReduceStream(ctx, client, &viewpb.QueryOnViewRequest{LegacyReq: &internalpb.RetrieveRequest{SerializedExprPlan: plan}})
+		require.NoError(t, err)
+		defer stream.Close()
+		_, err = stream.Recv()
+		require.Equal(t, codes.Unavailable, status.Code(err))
+	})
+}
 
 func TestSearchOnViewStreamSendsChunksAndEOF(t *testing.T) {
 	tasks := &streamTestSearchTasks{tasks: []SearchSegmentTask{struct{}{}}}
