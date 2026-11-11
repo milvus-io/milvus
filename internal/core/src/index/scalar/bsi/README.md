@@ -8,8 +8,9 @@ results, see
 [the design doc](../../../../../../docs/design-docs/design_docs/20261013-int32-bit-sliced-index-kernel.md).
 
 This is a standalone kernel. It is not registered as an index type, and it has
-no loader, serialization or growing-segment support, so no user query reaches
-it yet.
+no registry loader or growing-segment support, so no user query reaches it
+yet. It can be persisted and reloaded through the index-file envelopes; see
+[Persistence](#persistence).
 
 ## Usage
 
@@ -55,6 +56,43 @@ ignored. A non-empty validity view must cover the batch's values, as the
 - The index is immutable after construction, and const methods are safe to
   call concurrently.
 
+## Persistence
+
+`BitSlicedIndexArtifact<T>` (`BitSlicedIndexArtifact.h`) owns a built index
+and writes it as named entries (`bsi_header`, `bsi_existence`, and one
+`bsi_slice_NN` per slice) to a `storage::FileSink` (V1/V2) or a
+`storage::IndexEntryWriter` (packed V3), without copying any bitmap. `LoadBitSlicedIndex<T>` reads it
+back from the matching `storage::FileSource` or `storage::IndexEntryReader`.
+The layout is documented in the header and in
+[the serialization design doc](../../../../../../docs/design-docs/design_docs/20261021-bit-sliced-index-serialization.md).
+
+```cpp
+#include "index/scalar/bsi/BitSlicedIndexArtifact.h"
+
+BitSlicedIndexArtifactInt32 artifact(std::move(index));
+artifact.Serialize(sink);          // storage::FileSink& or IndexEntryWriter&
+artifact.Index().Range(7, CompareOp::Equal);   // still queryable
+
+BitSlicedIndexInt32 loaded = LoadBitSlicedIndex<int32_t>(source);
+```
+
+A loaded index answers every query exactly like the one that was written.
+Loading is bounded: the header is read first (its version before anything
+else) and each bitmap entry is read only after its size has been checked
+against the header, so a truncated or inflated entry is rejected before any
+bitmap is allocated, and at most one entry's bytes are in transit. Failures
+are clear:
+
+- An unknown format version, or an artifact written for another value kind
+  or width, raises `Unsupported`.
+- A missing, truncated or inflated entry, an inconsistent header (including
+  bounds that no row reaches), or slice bits that break the encoding (set on
+  a NULL row, encoding a value above `max`, or past the last row) raise
+  `DataFormatBroken`.
+
+There is no builder or loader registry entry yet; a caller passes the
+envelope objects directly, as in `BitSlicedIndexArtifactTest.cpp`.
+
 ## Size and cost
 
 The index stores `k = bit_width(max - min)` slices plus an existence bitmap,
@@ -74,11 +112,12 @@ and on selectivity; the benchmark below measures this.
 
 ## Tests and benchmark
 
-The tests are in `BitSlicedIndexInt32Test.cpp`, which is part of the
+The tests are in `BitSlicedIndexInt32Test.cpp` (kernel) and
+`BitSlicedIndexArtifactTest.cpp` (persistence), both part of the
 `index_tests` binary. To run them:
 
 ```bash
-cmake_build/unittest/index_tests --gtest_filter='BitSlicedIndexInt32Test.*'
+cmake_build/unittest/index_tests --gtest_filter='BitSlicedIndex*'
 ```
 
 The benchmark is in `internal/core/benchmark/BitSlicedIndexBenchmark.cpp`
