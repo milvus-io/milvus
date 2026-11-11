@@ -83,6 +83,10 @@ func (s *SnapshotSchemaImportSuite) TestSnapshotSchemaConversion() {
 				paramtable.Get().DataNodeCfg.StorageFormat.Key: format,
 			})
 			defer restore()
+			requiredNullErr := "Wrong row type: invalid parameter[expected=int64][actual=<nil>]"
+			if format == "vortex" {
+				requiredNullErr = "to non-nullable Arrow field because it contains nulls"
+			}
 			for _, tc := range []struct {
 				name          string
 				dim           int
@@ -116,7 +120,7 @@ func (s *SnapshotSchemaImportSuite) TestSnapshotSchemaConversion() {
 				{name: "required_default", withDefault: true},
 				{name: "nullable_default", nullable: true, withDefault: true},
 				{name: "nullable_no_default", nullable: true},
-				{name: "required_no_default", readErr: ""},
+				{name: "required_no_default", readErr: requiredNullErr},
 			} {
 				s.Run(tc.name, func() {
 					ctx, cancel := context.WithTimeout(s.Cluster.GetContext(), 3*time.Minute)
@@ -268,16 +272,9 @@ func (s *SnapshotSchemaImportSuite) TestSnapshotSchemaConversion() {
 						return err == nil && merr.Ok(progress.GetStatus()) &&
 							(progress.GetState() == internalpb.ImportJobState_Completed || progress.GetState() == internalpb.ImportJobState_Failed)
 					}, time.Minute, 100*time.Millisecond)
-					if tc.readErr != "" || tc.name == "required_no_default" {
+					if tc.readErr != "" {
 						s.Require().Equal(internalpb.ImportJobState_Failed, progress.GetState(), progress.GetReason())
-						s.Require().NotEmpty(progress.GetReason())
-						if tc.readErr != "" {
-							s.Contains(progress.GetReason(), tc.readErr)
-						} else {
-							// Vortex rejects NULL during decoding; Parquet can reject
-							// nil when appending the required Int64 field instead.
-							s.Regexp(`(?i)null|\[expected=int64\]\[actual=<nil>\]`, progress.GetReason())
-						}
+						s.Contains(progress.GetReason(), tc.readErr)
 						return
 					}
 					s.Require().Equal(internalpb.ImportJobState_Completed, progress.GetState(), progress.GetReason())

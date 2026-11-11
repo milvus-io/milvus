@@ -448,7 +448,7 @@ func (r *reader) initStorageV3Manifest(manifestPath string, tsStart, tsEnd uint6
 		}
 		maxLength, err := parameterutil.GetMaxLength(field)
 		if err != nil {
-			return err
+			return merr.Wrapf(merr.WrapErrAsSysError(err), "target field %s", field.GetName())
 		}
 		varcharLimits = append(varcharLimits, varcharLimit{field: field, maxLength: maxLength})
 	}
