@@ -45,7 +45,7 @@ class WorkloadConfig:
         if not 1000 <= self.rows <= 100000:
             raise ValueError("rows must be between 1000 and 100000")
         if self.index_type not in ("HNSW", "DISKANN"):
-            raise ValueError("index_type must be HNSW or DISKANN; use the dedicated SDK profile for AUTOINDEX")
+            raise ValueError("index_type must be HNSW or DISKANN")
         if not 0 < self.duration <= 7200 or not 0 <= self.drain <= 300 or not 0 < self.replay <= 600:
             raise ValueError("Require 0 < duration <= 7200, 0 <= drain <= 300 and 0 < replay <= 600")
 

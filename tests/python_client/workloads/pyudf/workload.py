@@ -87,7 +87,6 @@ class PyUDFSearchChecker:
         self.stop_file = Path(stop_file) if stop_file is not None else evidence / "STOP"
         self.documents = documents
         self.candidates = []
-        self.baseline_distances = []
 
     @staticmethod
     def chain(resource, factor, bias, final_limit=20):
@@ -160,14 +159,12 @@ class PyUDFSearchChecker:
             ids = self.verify_fields(hits)
             assert len(ids) == 100, len(ids)
             self.candidates.append(ids)
-            self.baseline_distances.append({hit["id"]: hit["distance"] for hit in hits})
             if number < 10:
                 distances = np.sum((self.vectors - query) ** 2, axis=1)
                 exact = set(np.argsort(distances)[:100].tolist())
                 recalls.append(len(exact.intersection(ids)) / 100)
                 distance_errors.append(max(abs(hit["distance"] - float(distances[hit["id"]])) for hit in hits))
         (self.evidence / "candidates.json").write_text(json.dumps(self.candidates))
-        (self.evidence / "baseline_distances.json").write_text(json.dumps(self.baseline_distances))
         # Exhaustive small candidate search makes this check independent of ANN recall.
         query = self.queries[0]
         small = self.search(self.client, query, limit=257, filter_expr="id < 257")
@@ -186,14 +183,7 @@ class PyUDFSearchChecker:
         for hit in hits:
             pk = hit["id"]
             assert np.isfinite(hit["distance"]) and hit["distance"] >= 0, hit
-            if self.index_type == "AUTOINDEX":
-                # Cardinal HNSW build_level=1 uses RBQ4/RBQM4 distances.
-                # Measure approximation separately; require stable control results here.
-                if pk not in self.baseline_distances[query_index]:
-                    raise CandidateDrift(f"Control candidate {pk} was absent from the retained baseline")
-                distance = self.baseline_distances[query_index][pk]
-            else:
-                distance = float(np.sum((self.vectors[pk] - self.queries[query_index]) ** 2))
+            distance = float(np.sum((self.vectors[pk] - self.queries[query_index]) ** 2))
             assert np.isclose(hit["distance"], distance, rtol=1e-5, atol=1e-6), hit
 
     def audit_all_rows(self):

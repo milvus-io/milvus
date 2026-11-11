@@ -72,8 +72,8 @@ Select a node under `system_tests/pyudf/test_workloads.py`:
 Performance nodes replace the old SDK ABBA/batch entrypoints with explicit HNSW
 and DISKANN parameters, overriding `index_type` for ABBA and batch nodes.
 Select either family independently; batches do not run instrumentation or ABBA. Other nodes
-use `index_type` from the configuration. AUTOINDEX remains in the dedicated
-Cardinal SDK profile. DISKANN requires a deployment with disk indexing enabled
+use `index_type` from the configuration. SDK search-lifecycle cases retain their
+AUTOINDEX combinations. DISKANN requires a deployment with disk indexing enabled
 and sufficient local disk; Search uses `search_list`, while HNSW uses `ef`.
 Preparation requires all rows to be indexed, so a tiny smoke dataset below the
 deployment's segment indexing threshold is not sufficient.
@@ -146,11 +146,12 @@ in `tests/restful_client_v2/testcases/test_pyudf.py`. Run each suite from its ow
 directory. L0–L2 selectors and assertions remain unchanged, including the strict
 cross-stage score regression for [#55212](https://github.com/milvus-io/milvus/issues/55212).
 
-Existing SDK L3 profiles also carry `pyudf`. Worker-pool, admission, cancellation,
-disabled-feature and Cardinal profiles require their specific deployment settings
+Existing SDK L3 profiles also carry `pyudf`. Worker-pool, admission, cancellation
+and disabled-feature profiles require their specific deployment settings
 and exact node selectors; do not run all L3 profiles on one unchanged deployment.
 They retain the SDK suite's connection options, `--pyudf-management-endpoint`,
-`--run-pyudf-disabled` and `--pyudf-expected-autoindex` where applicable.
+`--run-pyudf-disabled` where applicable. Search-lifecycle cases also accept
+`--pyudf-expected-autoindex` for their existing index and hybrid-search checks.
 
 ## Coverage and execution cost
 
