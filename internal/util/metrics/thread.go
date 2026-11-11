@@ -83,7 +83,7 @@ var threadNameGroupRules = []struct {
 	{prefix: "EvntLoopCleanup", group: "aws_crt_cleanup"},
 	{prefix: "MILVUS_FL_WR", group: "file_write"},
 	{prefix: "MILVUS_LF_IO", group: "local_file_io"},
-	{prefix: "MILVUS_ASYNC_LOA", group: "async_load"},
+	{prefix: "MILVUS_ASYNC_LO", group: "async_load"},
 	{prefix: "MILVUS_PREFETCH", group: "prefetch"},
 	{prefix: "MILVUS_SEARCH", group: "milvus_search"},
 	{prefix: "MILVUS_LOAD", group: "milvus_load"},
