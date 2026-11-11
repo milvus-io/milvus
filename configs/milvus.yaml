@@ -1313,7 +1313,6 @@ common:
   storageType: remote # please adjust in embedded Milvus: local, available values are [local, remote], value minio is deprecated, use remote instead
   storage:
     manifestTransactionRetryLimit: 10 # Maximum number of retry attempts for V3 storage manifest transaction commits on optimistic concurrency conflicts
-    manifestFFIConcurrency: 128 # Maximum number of goroutines that may concurrently execute blocking milvus-storage manifest FFI calls in one process. cgo pins each such goroutine to an OS thread, so unbounded concurrency across the synchronous manifest transaction/filesystem entry points and the async manifest executor workers inflates thread count and process RSS (observed 1500+ cgo threads / multiple GBs on coordinators). The budget is process-wide and shared by every component in the process. Values are clamped to [1, 2048]; read once at first manifest I/O, changes require restart.
     useArrowFileSystemChunkManager: false # Whether segcore routes chunk manager IO (segment load, index build/load) through the milvus-storage Arrow FileSystem, unified with storage v2. Applies to both remote and local storage types; when false, the legacy chunk managers are used. Not effective for cloudProvider=gcpnative, which always uses the legacy implementation.
     stv2:
       splitSystemColumn:
