@@ -154,11 +154,17 @@ The upgrade from a deployment that predates QueryView is the subject of
 it does not involve collections without a vector field, which cannot exist
 before the upgrade.
 
-Not covered by the conversion work:
-
-- Backfill. A function field (BM25, MinHash) added to a collection without a
-  vector field needs its output computed for existing rows; adding one
-  requires StorageV3 and was not exercised.
+Function fields. A function field whose output is a vector (BM25,
+MinHash) added to a collection without a vector field also makes it a
+vector collection. Unlike a nullable vector field, its output must be
+computed for the rows written earlier. The existing rule for adding a
+function field applies unchanged: it needs StorageV3
+(`common.storage.useLoonFFI`), the schema-bump compaction
+(`dataCoord.compaction.bumpSchemaVersion.enabled`) and the storage-version
+upgrade compaction (`dataCoord.compaction.storageVersion.enabled`), and is
+rejected otherwise. With them on, the backfill behaves the same on a
+collection without a vector field as on one with a vector field (Section
+6.2).
 
 **Clients**
 
@@ -655,7 +661,8 @@ x86 standalone, 2026-11-10.
 | Python e2e cases in the repository: `test_milvus_client_vector_field_conversion.py` (4 cases), the three changed cases of `test_drop_field_feature.py`, `test_milvus_client_collection_without_vector.py` | pass |
 | RESTful `test_drop_field_operations.py`, with a new case that drops the only vector field | 8 passed |
 | C++ unit test `CApiTest.CPlanWithoutIndexMeta` | pass: a search plan on a collection with no index meta returns `FieldNotLoaded` |
-| Local scripts on standalone, 28 cases | 27 pass, 1 not run |
+| Local scripts on standalone, 28 cases | 27 pass; the one not run adds a BM25 function field on an instance without StorageV3 and is rejected by the existing rule; it is covered by the backfill cases below |
+| Backfill of an added BM25 function field, with StorageV3 and both backfill compactions on; 4 cases, each run on a collection without a vector field and on a control with a `FLOAT_VECTOR` field | 8 of 8 pass, the same result on both collections at every step |
 | Local scripts on a cluster (mixcoord, proxy, two QueryNodes, datanode, two StreamingNodes; Pulsar), 14 cases | pass: the 12 cases of the first three groups below, and the 2 replica cases |
 
 The local scripts cover, per group:
@@ -670,7 +677,7 @@ The local scripts cover, per group:
 | Index build | 1 | the vector index finishes on segments written before the field existed |
 | Row cap | 2 | both directions, numbers in Section 2 |
 | Switch off | 1 | create and every form of dropping the last vector are rejected; dropping one of two vector fields is allowed |
-| Function field | 2 | dropping a BM25 function field that holds the only vector passes; adding one was not run (needs StorageV3 and backfill) |
+| Function field | 2 | dropping a BM25 function field that holds the only vector passes; adding one is covered by the backfill cases below |
 | Import after a conversion | 2 | parquet import into a collection that gained a vector field (file with and without the vector column) and into one that lost its last vector field (file without and with the dropped column); each result equals that of a control collection created with the final schema; rows, null values and search results are checked |
 | Clustering compaction | 2 | 1 M rows, the schema change sent 1.5 s after the trigger. The log shows the change inside the execution of the plan in both directions (drop: plan 09:29:20.1 to 24.6, change at 21.4; add: plan 09:30:20.1 to 22.9, change at 21.2). The plan completes, the row count is unchanged, and a second clustering compaction after the change completes |
 | Two replicas (cluster only) | 2 | both conversions on a collection loaded with two replicas on two QueryNodes: repeated queries and searches return the same result or the same error, and the collection loads with two replicas again |
@@ -678,6 +685,32 @@ The local scripts cover, per group:
 With inserts running during a change, the only client error is one rejected
 insert after a drop, sent with the schema the client had cached; the control
 that drops a scalar field shows the same.
+
+The backfill cases write the same history into both collections: three
+sealed segments, 100 deleted rows, 50 rows upserted with new text and 500
+rows left in a growing segment, 3,400 live rows. After the function field
+is added, a search for a word that every row contains must return exactly
+the live rows, and three probes must hold: a deleted row is not returned,
+an upserted row is found by its new text and not by its old text, and a row
+from an old sealed segment and a row that was growing at the add are each
+the top hit for their own word. 200 rows written after the add are
+included.
+
+| Case | Collection before the add | Result on both collections |
+|---|---|---|
+| Loaded | loaded (with no index for the collection without a vector field) | the collection stays loaded; the checks pass without reload and after reload |
+| Round trip | the loaded collection above | dropping the function field returns the collection without a vector field to no vector field (search rejected, load with no index); adding it again backfills again and the checks pass |
+| Released | never loaded | the checks pass on the first load |
+| V2 segments | written while StorageV3 was off, then the instance restarted with it on | the segments are upgraded to V3 and the checks pass without reload and after reload |
+
+`add_function_field` returns after every sealed segment holds the output:
+the log shows the schema-bump compaction finishing before RootCoord
+completes the change. On segments that are already V3 this took 2 to 19 s.
+On V2 segments the add waits for the storage-version upgrade, whose rate
+limit (`rateLimitTokens` 3 per `rateLimitInterval` 120 s, for the whole
+cluster) set the time: 157.7 s for the collection without a vector field,
+whose second segment waited for the next window, against 17.5 s for the
+control, whose segments had been upgraded in the earlier window.
 
 ## 7. Alternatives
 
@@ -731,8 +764,6 @@ that drops a scalar field shows the same.
 
 ## 8. Follow-ups
 
-- The items listed as not covered under "Conversion" in Section 2: backfill
-  for function fields.
 - The loader's memory estimate is about 3× too low for narrow fixed-width
   rows. The QueryNode uses it for admission before loading a segment; the
   formula adds up the `MemorySize` of each field's binlogs and multiplies by
