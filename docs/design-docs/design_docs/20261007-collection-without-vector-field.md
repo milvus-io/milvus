@@ -179,7 +179,7 @@ field (Section 6.2). MinHash goes through the same path and was not run.
 | pymilvus ORM (Object-Relational Mapping) `Collection` | rejected on the client by `check_schema` (`No vector field is found.`) | none: the ORM interface is deprecated and stays as it is; use `MilvusClient` |
 | Java SDK, v1 and v2 | works (release 3.0.12 run against the implementation branch: v2 create, insert, load, query, and search returns the server error; v1 create and load) | none |
 | Go SDK | works | none |
-| Node SDK | rejected on the client by `checkCollectionFieldsWithOptions` | the check is removed in milvus-io/milvus-sdk-node#626 |
+| Node SDK | rejected on the client by `checkCollectionFieldsWithOptions` | the check is removed in milvus-io/milvus-sdk-node#626; the server already rejects such a schema when it does not accept it (the Proxy check in 2.4, 2.5, 2.6 and master, and the switch in this design) |
 | RESTful v2 | works | done in the implementation PR (insert check, one search error) |
 | RESTful v1 | has only the quick create by dimension | none |
 
@@ -196,8 +196,10 @@ collection:
 `search` and `hybrid_search` reach the server and get the error above. The
 V1 fallback of pymilvus `search_iterator` fails on the client with its own
 message, `there should be at least one vector field in milvus collection`.
-The Node SDK `search` fails on the client as well, with `Target anns field
-not found, please check your search parameters.`
+The Node SDK `search` failed on the client with `Target anns field not
+found, please check your search parameters.`; with
+milvus-io/milvus-sdk-node#626 it sends the request to the server, which
+returns the error above.
 
 **Tools and replication**
 
@@ -861,7 +863,7 @@ from `3df0cbcdd68`.
 | StreamingNode `segment_limitation_policy.go`; DataCoord `compaction/trigger.go`, `trigger_v2.go`, `compaction/policy/helpers.go`, `clustering.go`, `bulkimport`; DataNode `compactor/segment_writer.go` | seal, full check, split and allocation on bytes only | collections without a vector field get the additional `maxRows` row cap (Section 4.2); `GetExpectedSegmentSize` is unchanged |
 | Search entries, REST handlers | four different errors | one error |
 | pymilvus `orm/schema.py` `check_schema` (legacy ORM) | client-side reject | not changed; `MilvusClient` has no such check |
-| milvus-sdk-node `milvus/utils/Validate.ts` `checkCollectionFieldsWithOptions` | client-side reject | check removed, in the milvus-sdk-node repository |
+| milvus-sdk-node `milvus/utils/Validate.ts` `checkCollectionFieldsWithOptions`; `milvus/utils/Search.ts` `buildSearchRequest` | client-side reject of create and of search | create check removed; a search on a collection without a vector field is sent to the server; milvus-io/milvus-sdk-node#626 |
 
 ## Appendix B. Measurements
 
