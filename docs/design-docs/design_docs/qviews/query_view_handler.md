@@ -322,5 +322,6 @@ only the current window. The existing send loop takes ownership of its map every
 five seconds or at 1024 distinct Shards, then sends batches of up to 256 samples.
 Size-triggered takes are at least one second apart within a stream; the send loop
 continues processing state and close reports during the wait. Empty windows are
-skipped; failed windows are dropped rather than replayed.
+skipped, but taking an empty window still advances its Start; failed windows
+are dropped rather than replayed.
 QN returns no feedback. State callbacks retain their existing View-key semantics.

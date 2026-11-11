@@ -140,7 +140,7 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 	if err != nil {
 		return nil, err
 	}
-	feedback := viewfeedback.New(loadConfigStore)
+	feedback := viewfeedback.New(loadConfigStore, deps.dataViewProvider)
 	reliableSyncer := syncer.NewReliableSyncer(deps.viewSyncClient, feedback, deps.pchannels)
 	shardViewRegistry, err := coordview.RecoverShardViewRegistryWithDataViews(ctx, deps.queryViewCatalog, reliableSyncer, deps.dataViewProvider, loadConfigStore)
 	if err != nil {

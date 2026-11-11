@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
+	"github.com/milvus-io/milvus/internal/views/coord/balancer/api"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/coord/viewfeedback"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -26,13 +27,17 @@ func TestQViewsFeedbackRecoveryFailureCleanup(t *testing.T) {
 			<-started
 			return nil, context.Canceled
 		}).Build()
-		var original func(*loadmgr.LoadConfigStore) *viewfeedback.ReplicaFeedbackStore
+		mockey.Mock((*fakeRuntimeDataViewProvider).RegisterDataViewListener).To(func(_ *fakeRuntimeDataViewProvider, listener api.DataViewListener) func() {
+			listener(1, &api.CollectionDataView{Shards: []*api.ShardDataView{{VChannel: "p_1v0"}}})
+			return func() {}
+		}).Build()
+		var original func(*loadmgr.LoadConfigStore, api.DataViewPublisher) *viewfeedback.ReplicaFeedbackStore
 		var store *viewfeedback.ReplicaFeedbackStore
 		id := qviews.ShardID{ReplicaID: 7, VChannel: "p_1v0"}
-		mockey.Mock(viewfeedback.New).Origin(&original).To(func(configs *loadmgr.LoadConfigStore) *viewfeedback.ReplicaFeedbackStore {
-			store = original(configs)
+		mockey.Mock(viewfeedback.New).Origin(&original).To(func(configs *loadmgr.LoadConfigStore, dataViews api.DataViewPublisher) *viewfeedback.ReplicaFeedbackStore {
+			store = original(configs, dataViews)
 			store.OnViewFeedback(runtimeTestFeedbackWindow(id, 1))
-			_, found := store.GetViewFeedback(id)
+			_, found := store.GetViewFeedback(id.ReplicaID)
 			require.True(t, found)
 			return store
 		}).Build()
@@ -54,7 +59,7 @@ func TestQViewsFeedbackRecoveryFailureCleanup(t *testing.T) {
 		require.Nil(t, runtime)
 		require.NotNil(t, store)
 		store.OnViewFeedback(runtimeTestFeedbackWindow(id, 2))
-		_, found := store.GetViewFeedback(id)
+		_, found := store.GetViewFeedback(id.ReplicaID)
 		require.False(t, found)
 		select {
 		case <-stopped:

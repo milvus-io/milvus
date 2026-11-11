@@ -1,82 +1,107 @@
-# ViewFeedback：Shard 近期访问反馈
+# ViewFeedback: Recent Replica Access Feedback
 
-关联需求：[milvus-io/milvus#55284](https://github.com/milvus-io/milvus/issues/55284)。
+Related feature: [milvus-io/milvus#55284](https://github.com/milvus-io/milvus/issues/55284).
 
-ViewFeedback 按 ShardID 聚合，通过已有 SyncQueryView stream 尽力上报。SN 只维护当前时间窗口，
-Coord 保留最近 **2 分钟**的有效窗口并自主过期清理。统计允许丢失，不实现可靠投递、
-历史累计总量、加载优先级或调度评分。
+StreamingNode collects best-effort planning access windows by ShardID and sends
+those windows through the existing SyncQueryView streams. Coordinator publishes
+an immutable aggregate per Replica: the latest access time and four request
+rates, averaged over the Replica's full shard count. It retains received windows
+for two minutes and expires them independently of reports and reads.
 
-## 1. 统计口径
+Feedback may be lost. This module does not implement reliable delivery,
+persistent access history, loading priority, or scheduling scores.
 
-`qviews.ShardID = (ReplicaID, VChannel)`，不携带 QueryView 版本。
+## 1. Measurement and identities
 
-`GetQueryPlan` 取得实际 View lease、完成 schema/collection 校验后，进入 MVCC 等待和
-计划构建前调用 `SNQueryViewHandler.RecordShardAccess`。未知 Replica 请求使用 lease
-解析出的真实 ReplicaID。Search、Retrieve、Statistics 每次计划构建各记一次；后续失败
-不回滚，重试重新计数，Phase 2 不重复计数。
+`qviews.ShardID = (ReplicaID, VChannel)` has no QueryView version.
+`GetQueryPlan` records one access after acquiring a serving View lease and
+validating the schema and collection, before MVCC waiting and plan construction.
+When the request does not name a Replica, the acquired lease supplies its actual
+ReplicaID. Search, Retrieve, and Statistics planning attempts each count once.
+A later failure does not undo the access; retries count again. Phase 2 does not
+record another planning access. Counts are neither successful queries nor NQ.
 
-每个样本包含窗口内访问次数和最后访问的 SN Unix 纳秒时间。每个窗口携带公共起止时间，
-次数不是累计值，也不是成功查询数或 NQ。大小触发会产生不足 5 秒的窗口；窗口次数不能
-直接当作 QPS。
+Each raw shard sample contains a window request count and the SN's latest access
+Unix timestamp in nanoseconds. All samples in a report share the Node's window
+Start and End. The counters are increments within that window, not cumulative
+counters. The final Replica snapshot does not expose these raw counters or a
+ShardID.
 
-## 2. SN：只保存尚未取走的窗口
+## 2. StreamingNode collection
 
-顶层 `SNQueryViewHandler` 按 PChannel/WAL 实例存在，持有私有 `viewFeedback` 子结构：
+Each top-level `SNQueryViewHandler`, scoped to a PChannel/WAL instance, owns a
+private `viewFeedback` child structure:
 
 ```text
 viewFeedback
-  mu
-  window start
+  mutex
+  current window start
   ShardID -> (window request count, last access)
   capacity-one size notification
 ```
 
-Observe 在统计自己的短锁内更新当前窗口。它不获取 handler View map 锁、snShardView
-锁或状态机锁，也不编码 protobuf 或发送网络请求。
+`RecordShardAccess` updates the current window under this structure's short
+mutex. It does not acquire the handler's View map lock, a snShardView lock, or a
+state-machine lock, and it does not encode protobuf or perform network I/O.
 
-`TakeViewFeedback` 在同一把锁下交换出当前 map，并以取走时刻开始空窗口。第一次访问
-初始化未开启的窗口。每次取窗都会推进 Start，即使窗口为空而不发送也一样，
-后续访问不会把此前已跳过的空窗口带入新窗口。交换是 O(1)，不遍历 Shard；交出的 map 完全属于发送方，之后的
-Observe 只写新窗口。因此发送方可以在锁外遍历、编码、释放 map。
+`TakeViewFeedback` detaches the current map in O(1) and starts a new window at
+the take time. The first access initializes a window if none has started yet.
+**Every take advances Start, even when the map is empty and no report is sent.**
+Later accesses therefore do not inherit earlier skipped empty windows. The sender
+owns the detached map; collection immediately continues in a new map. Encoding
+and sending happen outside the collection mutex.
 
-不再维护 groundtruth、累计 counter、上次发送缓存或历史 Shard 表。View 换版、Down、
-Dropped 不影响尚未取走的窗口；取走后数据被消费，无论发送是否成功都不恢复。
-SN 重启或 WAL owner 迁移可以丢失当前窗口，不重建统计。
+There is no cumulative ground truth, last-sent comparison cache, or historical
+shard table on SN. View replacement, Down, and Dropped do not clear the current
+window. Once taken, a window is consumed regardless of send success. SN restart
+or WAL owner migration may lose the current window without reconstruction.
 
-## 3. 触发和传输
+## 3. Persistent streams and reporting
 
-初始化时由 qviewsRuntime 调用本地 `GetClusterChannels(OptIncludeUnavailableInReplication())`，
-把全量 PChannel 名单传给 ReliableSyncer，预建常驻 resumable stream；无需等待 View 或
-assignment owner 就绪。之后新 PChannel 在第一次 `SyncViews` 时补建，建好后持续保活。
-新增但尚无 View 的 PChannel 暂不建流，因为尚无可服务的 QueryView 产生访问统计。
-SN owner 解析和迁移重连继续由已有 HandlerClient 负责；Syncer 不增加持续发现监听。
+At initialization, `qviewsRuntime` obtains the local PChannel inventory through
+`GetClusterChannels(OptIncludeUnavailableInReplication())` and supplies it to
+`ReliableSyncer`. The Syncer creates persistent resumable streams without waiting
+for a View or an assignment owner to become ready. Later `SyncViews` calls add
+previously unknown PChannels. Once created, a stream remains alive with no pending
+Views or feedback. Newly added PChannels without Views have no planning accesses
+to report yet. Existing HandlerClient assignment resolution handles owner changes
+and reconnection; no additional discovery RPC or continuous inventory watcher is
+introduced.
 
-沿用现有发送循环：
+The existing node send loop takes feedback:
 
-- 建流时取走当前尚未发送的窗口；没有历史重放。
-- 此后取窗后满 **5 秒**，或当前 map 达到 **1024 个不同 Shard 条目**，触发下一次取窗。
-- 阈值衡量聚合条目数，不是请求数。热点 Shard 的高频 Observe 不会独自产生高频上报。
-- 大小触发的相邻取窗至少间隔 **1 秒**（同一 stream 内）；过早通知安排到该时刻，等待期间继续处理状态/关闭报告。
-- 大小通知容量为一，等待时暂不接收重复通知；不会反复延后截止时间，也不需要新的 SN goroutine 或订阅者列表。
-- 空窗口不发送；取走窗口时清除旧大小通知，每次实际取窗重置 5 秒发送计时。
-- 1024 是触发阈值，不是硬内存上限；发送循环受阻时，新窗口仍可继续聚合。
+- When the stream starts, using only the currently unconsumed window.
+- Five seconds after the previous take, or when the map reaches 1024 distinct
+  ShardID entries. The threshold counts entries, not accesses; one hot shard
+  cannot trigger frequent size-based reports.
+- At least one second apart for size-triggered takes within the same stream.
+  An early notification schedules that deadline while state and close reports
+  remain serviceable. Repeated notifications do not postpone the deadline.
 
-取走的窗口按每批最多 256 个 Shard 编码，批次之间优先处理 pending 状态/关闭报告。
-不要求整个窗口分批全部到达，Coord 可独立接收每批。发送失败、取消或关闭后，剩余
-统计直接丢弃；不回填、不 ACK、不去重重放，也不添加 sequence、epoch 或补偿队列。
-重连只恢复 stream 和原有 View pending，不能重发已经取走的 ViewFeedback。
+Taking a window drains the old size notification and resets the five-second
+interval. Empty windows are not sent. The capacity-one notification needs no
+additional SN goroutine or subscriber list. The 1024-entry threshold is not a
+hard memory cap: collection continues while the sender is blocked.
 
-窗口取走不再占用发送循环做全表扫描、变化比对。编码、网络发送仍有成本，已经开始
-的 gRPC Send 无法被后来的状态报告抢占；本方案不承诺慢网络下严格隔离状态同步延迟。
+The sender encodes up to 256 shards per batch and checks pending state/close
+reports between feedback batches. Coordinator can accept each batch independently.
+On failure, cancellation, or shutdown, unsent feedback is discarded. There is no
+ACK, replay, sequence, epoch, or compensation queue. Reconnection resumes the
+stream and existing View pending state, not already consumed feedback.
 
-### 协议
+Detaching a map requires no full-table scan or change detection. Encoding and
+network sending still consume resources; an in-progress gRPC Send cannot be
+preempted by a later state report. This is not a strict latency isolation guarantee
+under slow network conditions.
 
-复用现有 `viewpb.ShardID` 和 `SyncResponse.view_feedback`：
+### Wire format
+
+The protocol reuses `viewpb.ShardID` and `SyncResponse.view_feedback`:
 
 ```proto
 message ViewFeedback {
     ShardID shard_id = 1;
-    uint64 request_count = 2;       // 当前窗口内次数
+    uint64 request_count = 2;
     int64 last_access_unix_nanos = 3;
 }
 message ViewFeedbackReport {
@@ -86,76 +111,158 @@ message ViewFeedbackReport {
 }
 ```
 
-不改变 views/close 字段或 RPC 签名。缺少窗口时间的旧累计 ViewFeedback 消息直接忽略，不能
-把累计值当增量相加；master 原有不带 ViewFeedback 的节点继续正常进行状态同步。
+The views/close fields and RPC signatures are unchanged. Reports lacking valid
+window times are ignored; an older cumulative counter must not be interpreted as
+a window increment. Nodes without ViewFeedback continue ordinary state syncing.
+QN does not produce feedback.
 
-## 4. Coord：Replica 生命周期和窗口生命周期
+## 4. Coordinator ownership and topology
 
-ReliableSyncer 检查样本属于 stream 的 PChannel，直接调用 `ReplicaFeedbackStore.OnViewFeedback`。
-Store 检查 Replica 当前存在及 VChannel 的 collection 归属，不经过 Registry 或状态机。
+ReliableSyncer validates that each sample belongs to its stream's PChannel and
+calls `ReplicaFeedbackStore.OnViewFeedback` directly. The store checks current
+Replica membership and the collection encoded in the VChannel. It does not call
+the Registry or a QueryView state machine.
 
-`LoadConfigStore.RegisterLoadConfigListener` 的初始回放和增量通知管理 Replica：保留
-ReplicaID 则保留其有效窗口，RG/字段/索引变化不清空；撤销 Replica 或 collection load intent
-立即删除统计，迟到报告不能复活。View 的创建、换版、删除不决定统计生命周期。
+`LoadConfigStore.RegisterLoadConfigListener` replays and tracks configured
+Replicas. Keeping the same ReplicaID preserves feedback across resource-group,
+field, and index changes. Withdrawing a Replica or collection load intent removes
+its feedback immediately; late reports cannot resurrect it. Individual View
+creation, replacement, and deletion do not own this lifetime.
 
-每个 Shard 缓存一个聚合结果，并保存按 Node 汇报时间排序的 contribution 列表：
+The existing local `DataViewPublisher` supplies the collection's full shard count,
+including shards with no feedback. Each Replica of the collection uses this count
+as its divisor. The listener caches only the count, performs no I/O, and never
+re-enters either metadata publisher. Ordinary DataView updates with unchanged
+shard count do not republish feedback. A changed count republishes existing
+Replica aggregates. Without a nonzero published count, the store returns no
+snapshot rather than guessing the divisor from observed shards.
 
-- 汇报时间直接使用 Node 的 `window.EndUnixNanos`，不记录 Coord 接收时间，也不修正 Node 时间。
-- 写入时累加 `RequestCount`，以 `max` 更新 `LastAccessUnixNanos`；窗口 contribution 保存 Node 的 Start、End 和访问次数。
-- contribution 按汇报时间有序插入，支持迟到、乱序和同时间的分批报告。
-- 断线或发送阻塞会延长实际窗口；超过 2 分钟的整窗仍直接丢弃。
-- 不维护跨流去重协议。按整个窗口过期，不对跨越边界的窗口切分或比例折算。
+## 5. Windows, contributions, and expiration
 
-Store 启动一个独立 goroutine，每秒以当前时刻减 2 分钟为 cutoff，逐 Shard 从队首
-移除汇报时间不晚于 cutoff 的 contribution，并从缓存次数中扣除；遇到尚未过期的
-窗口就停止处理该 Shard。只使用当前时刻推进淘汰，不额外保存一套 Coord 时间戳。
-晚到且已经超过保留期的报告在下一次清理时扣除。Node 时钟偏差直接影响过期时机。
+Each shard retains contributions sorted by the **Node's EndUnixNanos**. A
+contribution contains Start, End, and request count. Out-of-order arrival across
+stream reconnections is inserted in report-time order. Start must be positive,
+End must exceed Start, and the entire window must be no longer than two minutes.
+There is no Coordinator receipt timestamp or correction of Node timestamps.
 
-`LastAccessUnixNanos` 的 revert 是 noop，表示该 Shard 已观测到的历史最大访问时间。
-所有窗口过期后，次数归零，LastAccess 和 Shard 聚合条目继续保留，直到 Replica 撤销。
-窗口列表为空时释放其 backing array。没有任何反馈的 Shard 才返回 `found=false`。
+The store maintains four private recent-window counters per shard, for up to the
+latest 2, 6, 12, and 24 received windows. Insertion adds a contribution to affected
+groups and removes any contribution displaced from a full group. The minimum
+Start for each group is refreshed from its bounded set of windows, including
+when overlapping windows have Start values in a different order from End.
 
-`GetViewFeedback` 返回 `Snapshot`：缓存的计数/LastAccess，以及最近 2、6、12、24 个
-窗口的平均访问速率 `RequestRates`。每档按 Node End 选择该 Shard 最近最多 N 个仍保留的反馈窗口：
+One store-owned goroutine runs every second. It removes the expired prefix whose
+End is at or before `now - 2 minutes`, subtracts those contributions from affected
+recent counters, and refreshes the shard's rates. No report or read is needed to
+drive expiration. Whole windows expire together; boundary windows are not split
+or prorated. Empty window lists release their backing arrays.
 
-`rate = sum(RequestCount) / (max(End) - min(Start)).Seconds()`
+Current Coordinator time only advances cleanup. Late reports already outside the
+retention horizon are removed on the next sweep. Node clock skew directly affects
+expiration. Reports are best effort, with no cross-stream deduplication or loss
+compensation.
 
-分母使用真实窗口跨度，包含中间不上报的空档；不假设一个窗口固定为 5 秒，也不把
-Node 时间改成 Coord 时间。窗口不足 N 个时使用已有窗口；没有窗口时速率为零。
-速率描述这些已上报窗口覆盖的时段，不用 Coord 当前时间延长最后 End 之后的分母。
-反馈丢失不做补偿。请求计数和四档近期计数都在写入/淘汰时增减，不在读时累加。
-各档最早 Start 在写入/淘汰时从其最多 24 个窗口中更新，支持重叠窗口的起点乱序。
+`LastAccessUnixNanos` is the maximum access timestamp ever observed for the
+Replica. Its revert operation is a no-op. After all windows expire, RequestRates
+becomes zero while LastAccess remains, until the Replica is withdrawn.
 
-读取持读锁，只复制缓存并做四次除法，O(1)，不遍历窗口或读取时钟。
-读取可见值随后台清理更新，通常存在约一个清理周期的过期滞后。
-写入有序定位 O(log W)，有序到达时追加，乱序插入需要移动后缀；每轮清理
-撤销过期前缀，更新四档受影响计数和固定大小的时间边界，不扫描全部存活窗口。
-反馈允许丢失，因此次数为零不证明没有真实访问。
+## 6. Replica rates and immutable snapshots
 
-配置差分、收样和过期清理使用 ViewFeedback 自己的锁；LoadConfig listener 不做 I/O、不反向
-获取 LoadConfigStore 锁、不操作状态机。统计锁竞争仍可能间接延迟配置通知，不能将
-模块解耦描述为完全没有共享 CPU、分配或锁等待成本。
+For each shard and each N in {2, 6, 12, 24}, select at most its latest N retained
+windows by Node End and calculate:
 
-## 5. 启停
+```text
+shardRate[N] = sum(selected request counts)
+               / seconds(max(selected End) - min(selected Start))
+replicaRate[N] = sum(shardRate[N]) / total collection shard count
+replicaLastAccess = max(all observed shard access timestamps)
+```
 
-Coord 恢复 LoadConfig 后创建 Store、回放 Replica，并启动清理任务，再把 Store 交给
-ReliableSyncer。关闭时先停止 Syncer，再注销 listener、停止并等待清理 goroutine、
-释放统计。初始化失败执行同样清理，Close 可重复调用。
+The time denominator includes gaps between selected windows. It uses actual Node
+Start and End, not an assumed five-second duration and not Coordinator receipt
+time. Fewer than N windows use the available windows; no windows contribute zero.
+The denominator does not extend beyond the latest received End toward the present.
+Each shard selects its own N windows before averaging: reports from different
+shards are not pooled into one sequence or one common time span.
 
-Coord 重启不恢复旧窗口，也不要求 SN 补发已消费窗口；等待后续访问产生新窗口。
-已建立的 SN/PChannel stream 在没有 View、没有 ViewFeedback 时继续保活。QN 不生产 ViewFeedback。
+Unreported shards contribute zero but still participate in the divisor. For two
+shards, rates of 4/s and 0/s produce 2/s; rates of 4/s and 3/s produce 3.5/s.
+Missing feedback can understate the result. A zero rate does not prove an absence
+of real traffic.
 
-## 6. 验证
+The public read interface is:
 
-- Observe 与取窗并发：窗口互不影响，正常取走无重复或计数丢失；主动丢弃窗口不补发。
-- 持有 View 锁时仍能 Observe/取窗；View map 清理不影响当前窗口。
-- 5 秒和大小触发、空窗口推进 Start 且不发送、大小通知合并、热点不触发大小上报。
-- 最近 2/6/12/24 窗口速率：可变时长、空档、乱序/重叠、数量不足、淘汰与全部归零。
-- 连续大小触发至少间隔 1 秒；等待期间状态/关闭及时处理，停止通知后已安排的发送仍会执行。
-- 状态/关闭报告批次优先；失败、重连只发送新窗口；无 pending View 也能建流。
-- Coord 累计近期窗口、按期淘汰、无上报/无读取自主清理、Node 时间保持、乱序/同时间 contribution 撤销、LastAccess 不回退。
-- Replica 删除、RG 变化、runtime 恢复失败和重复关闭；race 与变更函数覆盖率。
-- 真实 SDK 查询后停止访问超过 2 分钟，验证次数归零且 LastAccess 保留；再查询从新窗口计数。
+```go
+type Snapshot struct {
+    LastAccessUnixNanos int64
+    RequestRates        RequestRates
+}
 
-实际构建、测试、benchmark、覆盖率和 E2E 结果记录于本工作区 docs/plans，不以文档
-验收清单替代已执行证据。
+type RequestRates struct {
+    Last2Windows  float64
+    Last6Windows  float64
+    Last12Windows float64
+    Last24Windows float64
+}
+
+func (*ReplicaFeedbackStore) GetViewFeedback(replicaID int64) (*Snapshot, bool)
+```
+
+Reports and actual expiration update private shard counters/rates, then publish
+one newly allocated Replica snapshot per affected Replica per batch/sweep under
+the store's write lock. Publication sums the four cached shard rates and divides
+by the total shard count. It does not traverse historical windows again. A cleanup
+pass that removes nothing keeps the same snapshot pointer.
+
+Readers take a read lock for the Replica lookup and return the **same published
+pointer**. Reads do not copy, allocate, divide, scan windows, or inspect a clock.
+Callers must treat the snapshot as read-only; exported Go fields do not enforce
+immutability. New reports, expiration, withdrawal, and Close never mutate an
+already published snapshot, so a reader may safely retain it after releasing the
+read lock.
+
+Unknown/withdrawn Replicas, Replicas without feedback, or unavailable topology
+return `(nil, false)`. A previously observed Replica whose windows all expired
+still returns a snapshot with preserved LastAccess and zero rates. Expiration
+visibility can lag by approximately one cleanup interval.
+
+Writes locate a window in O(log W); an out-of-order insertion moves its suffix.
+Rate-boundary refresh examines at most 2 + 6 + 12 + 24 contributions per affected
+shard. Replica publication is O(S) over cached rates of its observed shards, once
+per affected Replica per batch/sweep. Reads are O(1). Configuration callbacks,
+reports, and cleanup share only the feedback store's lock, but their CPU,
+allocation, and lock-wait costs can still indirectly delay synchronous metadata
+publication. They do not acquire state-machine locks.
+
+## 7. Startup and shutdown
+
+After LoadConfig recovery, the store registers DataView and LoadConfig listeners,
+replays their state, and starts cleanup before being passed to ReliableSyncer.
+Shutdown stops Syncer first, unregisters both metadata listeners, stops and joins
+the cleanup goroutine, and clears owned state. Initialization failure follows the
+same cleanup path. Close is idempotent.
+
+Coordinator restart does not recover windows or request replay from SN. New
+accesses provide new feedback. Persistent SN streams remain alive while idle.
+
+## 8. Verification scope
+
+- Concurrent observation and O(1) takes; detached windows remain independent.
+- Observation/takes while View locks are held; View cleanup does not clear feedback.
+- Timer/size triggers, one-second size cooldown, notification coalescing, empty
+  takes advancing Start without a report, and state/close handling between batches.
+- Dropped feedback is not replayed after failure or reconnection; idle streams
+  remain active without pending Views.
+- Actual-span rates for variable windows, gaps, out-of-order/overlapping windows,
+  partial groups, prefix reversion, and autonomous expiration.
+- Replica means include silent shards, preserve independent shard time spans,
+  isolate Replica identities, and follow DataView shard counts.
+- Copy-on-write pointer identity, retained snapshot stability, zero-allocation
+  reads, concurrent readers, LastAccess preservation, and lifecycle removal.
+- Runtime recovery failure and repeated shutdown detach both listeners.
+- SDK queries observed by Coordinator, rates returning to zero after two minutes
+  without traffic, renewed access, and release/reload/drop behavior.
+
+Actual commands, builds, coverage, lint, and E2E outcomes belong to the workspace's
+`docs/plans` evidence. This verification list is not a claim that a particular
+revision has passed those checks.

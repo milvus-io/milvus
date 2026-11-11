@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/views/coord/balancer/api"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -16,10 +17,11 @@ const retention = 2 * time.Minute
 
 var rateWindowCounts = [...]int{2, 6, 12, 24}
 
-// Snapshot combines the retained count and lifetime last access with recent rates.
+// Snapshot contains replica-wide feedback. RequestRates is the mean over all shards.
+// It is published copy-on-write. Callers must not modify it or its fields.
 type Snapshot struct {
-	qviews.ViewFeedback
-	RequestRates RequestRates
+	LastAccessUnixNanos int64
+	RequestRates        RequestRates
 }
 
 // RequestRates uses the actual Node time span of up to N most recent windows.
@@ -33,22 +35,26 @@ type RequestRates struct {
 
 // ReplicaFeedbackStore follows current load intent, independently of View state.
 type ReplicaFeedbackStore struct {
-	stop        chan struct{}
-	done        chan struct{}
-	closeOnce   sync.Once
-	mu          sync.RWMutex
-	collections map[int64][]int64
-	replicas    map[int64]*replicaFeedback
-	unregister  func()
+	stop                chan struct{}
+	done                chan struct{}
+	closeOnce           sync.Once
+	mu                  sync.RWMutex
+	collections         map[int64][]int64
+	replicas            map[int64]*replicaFeedback
+	shardCounts         map[int64]int
+	unregister          func()
+	unregisterDataViews func()
 }
 
 type replicaFeedback struct {
-	collectionID int64
-	shards       map[qviews.ShardID]*shardFeedback
+	collectionID        int64
+	lastAccessUnixNanos int64
+	snapshot            *Snapshot
+	shards              map[qviews.ShardID]*shardFeedback
 }
 
 type shardFeedback struct {
-	qviews.ViewFeedback
+	rates   [4]float64
 	windows []feedbackContribution // Sorted by the Node's report time.
 	recent  [4]windowAggregate
 }
@@ -66,11 +72,34 @@ type feedbackContribution struct {
 }
 
 // New replays configured replicas before the caller starts receiving reports.
-func New(configs *loadmgr.LoadConfigStore) *ReplicaFeedbackStore {
-	s := &ReplicaFeedbackStore{collections: make(map[int64][]int64), replicas: make(map[int64]*replicaFeedback), stop: make(chan struct{}), done: make(chan struct{})}
+func New(configs *loadmgr.LoadConfigStore, dataViews api.DataViewPublisher) *ReplicaFeedbackStore {
+	s := &ReplicaFeedbackStore{collections: make(map[int64][]int64), replicas: make(map[int64]*replicaFeedback), shardCounts: make(map[int64]int), stop: make(chan struct{}), done: make(chan struct{})}
+	s.unregisterDataViews = dataViews.RegisterDataViewListener(s.onDataView)
 	s.unregister = configs.RegisterLoadConfigListener(s.onLoadConfig)
 	go s.expireLoop()
 	return s
+}
+
+// DataView supplies the total shard count, including shards with no reports.
+// The listener never calls back into either metadata publisher.
+func (s *ReplicaFeedbackStore) onDataView(collectionID int64, view *api.CollectionDataView) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	count := 0
+	if view != nil {
+		count = len(view.Shards)
+	}
+	if count == s.shardCounts[collectionID] {
+		return
+	}
+	if count == 0 {
+		delete(s.shardCounts, collectionID)
+	} else {
+		s.shardCounts[collectionID] = count
+	}
+	for _, id := range s.collections[collectionID] {
+		s.replicas[id].publishSnapshot(count)
+	}
 }
 
 func (s *ReplicaFeedbackStore) onLoadConfig(collectionID int64, config *loadmgr.LoadConfig, _ uint64) {
@@ -108,6 +137,7 @@ func (s *ReplicaFeedbackStore) OnViewFeedback(window qviews.ViewFeedbackWindow) 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	changed := make(map[*replicaFeedback]struct{})
 	for id, sample := range window.Shards {
 		replica := s.replicas[id.ReplicaID]
 		if replica == nil {
@@ -119,7 +149,7 @@ func (s *ReplicaFeedbackStore) OnViewFeedback(window qviews.ViewFeedbackWindow) 
 		}
 		shard := replica.shards[id]
 		if shard == nil {
-			shard = &shardFeedback{ViewFeedback: qviews.ViewFeedback{ShardID: id}}
+			shard = &shardFeedback{}
 			replica.shards[id] = shard
 		}
 		// Reports can arrive out of order across stream reconnections.
@@ -140,26 +170,56 @@ func (s *ReplicaFeedbackStore) OnViewFeedback(window qviews.ViewFeedbackWindow) 
 				}
 			}
 		}
-		shard.refreshRateStarts()
-		shard.RequestCount += sample.RequestCount
-		shard.LastAccessUnixNanos = max(shard.LastAccessUnixNanos, sample.LastAccessUnixNanos)
+		replica.lastAccessUnixNanos = max(replica.lastAccessUnixNanos, sample.LastAccessUnixNanos)
+		shard.updateRates()
+		changed[replica] = struct{}{}
+	}
+	for replica := range changed {
+		replica.publishSnapshot(s.shardCounts[replica.collectionID])
 	}
 }
 
-// GetViewFeedback returns the cached aggregate without scanning windows.
+// GetViewFeedback returns the published immutable snapshot pointer without copying.
 // Expiration is applied by the cleanup worker, including when there are no reads.
-func (s *ReplicaFeedbackStore) GetViewFeedback(id qviews.ShardID) (Snapshot, bool) {
+func (s *ReplicaFeedbackStore) GetViewFeedback(replicaID int64) (*Snapshot, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if replica := s.replicas[id.ReplicaID]; replica != nil {
-		if shard := replica.shards[id]; shard != nil {
-			return Snapshot{ViewFeedback: shard.ViewFeedback, RequestRates: RequestRates{
-				Last2Windows: shard.requestRate(0), Last6Windows: shard.requestRate(1),
-				Last12Windows: shard.requestRate(2), Last24Windows: shard.requestRate(3),
-			}}, true
+	if replica := s.replicas[replicaID]; replica != nil && replica.snapshot != nil {
+		return replica.snapshot, true
+	}
+	return nil, false
+}
+
+// Called under the write lock, once per affected replica per report or sweep.
+// Missing shards contribute zero; the divisor comes from DataView, not reports.
+func (r *replicaFeedback) publishSnapshot(shardCount int) {
+	if shardCount == 0 || len(r.shards) == 0 {
+		r.snapshot = nil
+		return
+	}
+	var rates [4]float64
+	for _, shard := range r.shards {
+		for i, rate := range shard.rates {
+			rates[i] += rate
 		}
 	}
-	return Snapshot{}, false
+	for i := range rates {
+		rates[i] /= float64(shardCount)
+	}
+	r.snapshot = &Snapshot{
+		LastAccessUnixNanos: r.lastAccessUnixNanos,
+		RequestRates: RequestRates{
+			Last2Windows: rates[0], Last6Windows: rates[1],
+			Last12Windows: rates[2], Last24Windows: rates[3],
+		},
+	}
+}
+
+func (s *shardFeedback) updateRates() {
+	s.refreshRateStarts()
+	for i := range s.rates {
+		s.rates[i] = s.requestRate(i)
+	}
 }
 
 func (s *shardFeedback) requestRate(index int) float64 {
@@ -204,10 +264,10 @@ func (s *ReplicaFeedbackStore) expire(now int64) {
 	defer s.mu.Unlock()
 	cutoff := now - int64(retention)
 	for _, replica := range s.replicas {
+		changed := false
 		for _, shard := range replica.shards {
 			n := 0
 			for n < len(shard.windows) && shard.windows[n].reportedAt <= cutoff {
-				shard.RequestCount -= shard.windows[n].requestCount
 				n++
 			}
 			for i, count := range rateWindowCounts {
@@ -222,8 +282,12 @@ func (s *ReplicaFeedbackStore) expire(now int64) {
 				shard.windows = shard.windows[n:]
 			}
 			if n > 0 {
-				shard.refreshRateStarts()
+				shard.updateRates()
+				changed = true
 			}
+		}
+		if changed {
+			replica.publishSnapshot(s.shardCounts[replica.collectionID])
 		}
 	}
 }
@@ -232,10 +296,12 @@ func (s *ReplicaFeedbackStore) expire(now int64) {
 func (s *ReplicaFeedbackStore) Close() {
 	s.closeOnce.Do(func() {
 		s.unregister()
+		s.unregisterDataViews()
 		close(s.stop)
 		<-s.done
 		s.mu.Lock()
 		clear(s.collections)
+		clear(s.shardCounts)
 		clear(s.replicas)
 		s.mu.Unlock()
 	})

@@ -340,6 +340,8 @@ a `ViewFeedbackHandler` at construction, after Replica configuration replay. SN
 responses carry best-effort ShardID windows and are dispatched directly to that handler,
 without matching pending View callbacks. The receiver validates the stream's
 PChannel; the feedback store validates Replica and collection membership. The store retains received windows for two minutes and expires them independently.
+It publishes immutable Replica feedback, averaging shard rates by the full
+collection shard count supplied by DataView.
 A stream reconnect does not replay consumed feedback, even if delivery failed.
 
 The Syncer has no ongoing PChannel discovery watcher. The initial topology comes

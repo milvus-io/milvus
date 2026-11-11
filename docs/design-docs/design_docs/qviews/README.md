@@ -558,6 +558,9 @@ windows by ShardID in a dedicated top-level SN handler child structure. Windows
 are taken every five seconds or at 1024 distinct Shards and sent through persistent
 Syncer streams. Coord owns feedback by Replica load-config lifetime and expires
 received windows after two minutes, independently of reports and reads.
+It publishes copy-on-write Replica snapshots containing LastAccess and
+RequestRates averaged over all collection shards, including silent shards.
+Readers receive the immutable snapshot pointer without copying.
 Feedback does not drive QueryView state machines or preparation priority.
 
 ## Partition statistics and pruning

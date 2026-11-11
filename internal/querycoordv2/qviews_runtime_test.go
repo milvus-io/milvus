@@ -102,16 +102,16 @@ func TestNewQViewsRuntimeRecoversLoadConfigAndQueryViews(t *testing.T) {
 	feedbackID := qviews.ShardID{ReplicaID: 1000, VChannel: "p_100v0"}
 	require.Same(t, runtime.viewFeedback, runtime.resources.ViewFeedback)
 	runtime.viewFeedback.OnViewFeedback(runtimeTestFeedbackWindow(feedbackID, 5))
-	got, found := runtime.viewFeedback.GetViewFeedback(feedbackID)
+	got, found := runtime.viewFeedback.GetViewFeedback(feedbackID.ReplicaID)
 	require.True(t, found)
-	require.EqualValues(t, 5, got.RequestCount)
+	require.EqualValues(t, 5, got.RequestRates.Last2Windows)
 	runtime.loadConfigStore.StopPlanning(100)
 	runtime.viewFeedback.OnViewFeedback(runtimeTestFeedbackWindow(feedbackID, 6))
-	_, found = runtime.viewFeedback.GetViewFeedback(feedbackID)
+	_, found = runtime.viewFeedback.GetViewFeedback(feedbackID.ReplicaID)
 	require.False(t, found)
 	runtime.stop()
 	runtime.stop()
-	require.Equal(t, 3, detached)
+	require.Equal(t, 4, detached)
 }
 
 func TestQViewsRuntimeLoadManagerTriggersBalancer(t *testing.T) {
