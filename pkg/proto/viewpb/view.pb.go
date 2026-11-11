@@ -4270,9 +4270,9 @@ func file_view_proto_rawDescGZIP() []byte {
 var file_view_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
 var file_view_proto_msgTypes = make([]protoimpl.MessageInfo, 51)
 var file_view_proto_goTypes = []interface{}{
-	(QueryViewState)(0),                            // 0: milvus.proto.view.QueryViewState
-	(ViewCode)(0),                                  // 1: milvus.proto.view.ViewCode
-	(SegmentSelection_Mode)(0),                     // 2: milvus.proto.view.SegmentSelection.Mode
+	(QueryViewState)(0),        // 0: milvus.proto.view.QueryViewState
+	(ViewCode)(0),              // 1: milvus.proto.view.ViewCode
+	(SegmentSelection_Mode)(0), // 2: milvus.proto.view.SegmentSelection.Mode
 	(GlobalOptimizerExecutionSummary_BitOffset)(0), // 3: milvus.proto.view.GlobalOptimizerExecutionSummary.BitOffset
 	(*CollectionLoadConfig)(nil),                   // 4: milvus.proto.view.CollectionLoadConfig
 	(*LoadFieldConfig)(nil),                        // 5: milvus.proto.view.LoadFieldConfig
