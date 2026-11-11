@@ -14,6 +14,7 @@ const (
 	// TODO(#40451): support mixed-version assignment and rollback after schema alignment;
 	// older StreamingNodes reject recovery magic 3.
 	RecoveryMagicSchemaMetadataAligned int64 = 3 // collection schema metadata was aligned with the coordinator.
+	RecoveryMagicHotWALSwitch          int64 = 4 // linked WAL readers are required before accepting a hot switch.
 )
 
 // NewWALCheckpointFromProto creates a new WALCheckpoint from a protobuf message.

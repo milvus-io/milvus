@@ -728,6 +728,9 @@ message RestoreSnapshotMessageBody {
 message AlterWALMessageHeader {
     common.WALName target_wal_name = 1; // Specifies the target WALName for the alter operation.
     map<string, string> config = 2; // Contains additional configuration parameters for the WAL alter operation.
+    // Filled by the local WAL with the durable anchor in the target backend.
+    // Linked readers continue after this position. Absent in legacy AlterWAL.
+    common.MessageID target_start_message_id = 3;
 }
 
 message AlterWALMessageBody {}

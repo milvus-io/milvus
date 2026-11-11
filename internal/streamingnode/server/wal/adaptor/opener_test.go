@@ -102,9 +102,17 @@ func TestOpenRWWALCleansRecoveredShardManagerOnReplicateRecoveryFailure(t *testi
 			metricsutil.NewScanMetrics(channel).NewScannerMetrics(),
 		),
 	}
-	mockRecoverStorage := mockey.Mock(recovery.RecoverRecoveryStorage).
-		Return(rs, snapshot, nil).
-		Build()
+	var recoveryComplete func(*recovery.RecoverySnapshot)
+	hook := mockey.Mock(recovery.WithRecoveryComplete).To(func(f func(*recovery.RecoverySnapshot)) recovery.RecoveryStorageOption {
+		recoveryComplete = f
+		return nil
+	}).Build()
+	defer hook.UnPatch()
+	mockRecoverStorage := mockey.Mock(recovery.RecoverRecoveryStorage).To(func(_ context.Context, _ recovery.RecoveryStreamBuilder, _ *utility.WALCheckpoint, barrier message.ImmutableMessage, _ ...recovery.RecoveryStorageOption) (recovery.RecoveryStorage, *recovery.RecoverySnapshot, error) {
+		snapshot.RecoveryBarrier = barrier
+		recoveryComplete(snapshot)
+		return rs, snapshot, nil
+	}).Build()
 	defer mockRecoverStorage.UnPatch()
 
 	errExpected := errors.New("replicate recovery failed")

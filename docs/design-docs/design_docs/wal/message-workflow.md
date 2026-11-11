@@ -49,6 +49,11 @@ Point.TimeTick  = M.TimeTick()
 
 TimeTick is the unique, monotonic log-order identifier within one PChannel.
 
+[AlterWAL](alter-wal.md) also supplies a durable confirmation boundary. It must
+both confirm the older prefix and execute its exclusive transaction/control
+effects. The same ordered observation triggers asynchronous old-prefix flush;
+switching the writer does not imply checkpoint publication.
+
 ## 2. Component Idempotency
 
 Each component compares the message TimeTick with the

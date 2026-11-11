@@ -71,6 +71,9 @@ func RecoverRecoveryStorage(
 		rs.closeRecoveryResources()
 		return nil, nil, err
 	}
+	if rs.recoveryComplete != nil {
+		rs.recoveryComplete(snapshot)
+	}
 	// Register recovered QueryView references before background cleanup can
 	// advance the segment-version floor or reclaim their bootstrap resources.
 	if rs.recoverQueryViews != nil {
@@ -92,6 +95,12 @@ func RecoverRecoveryStorage(
 }
 
 type RecoveryStorageOption func(*recoveryStorageImpl)
+
+// WithRecoveryComplete installs the live WAL only after bounded replay succeeds,
+// before starting persistence, truncation or live consumption.
+func WithRecoveryComplete(complete func(*RecoverySnapshot)) RecoveryStorageOption {
+	return func(r *recoveryStorageImpl) { r.recoveryComplete = complete }
+}
 
 // WithQueryViewRecovery installs query references at the startup barrier, before
 // background persistence and cleanup begin. The callback must not block on I/O.
@@ -179,6 +188,8 @@ type recoveryStorageImpl struct {
 	currentClusterID        string
 	channel                 types.PChannelInfo
 	checkpoint              *WALCheckpoint
+	minimumRecoveryMagic    int64
+	walSwitchReady          chan struct{}
 	pchannelControl         *streamingpb.PChannelRecoveryControlMeta
 	ackTracker              *messageack.Tracker
 	tailController          *recoveryTailController
@@ -198,6 +209,7 @@ type recoveryStorageImpl struct {
 	pendingPersistSnapshot *dirtyPersistSnapshot
 	scannerWG              sync.WaitGroup
 	recoveryStream         RecoveryStream
+	recoveryComplete       func(*RecoverySnapshot)
 	ackTrackerWG           sync.WaitGroup
 	summaryWG              sync.WaitGroup
 	// pendingSalvageCheckpoint holds the salvage checkpoint captured during force promote.
@@ -454,7 +466,7 @@ func (r *recoveryStorageImpl) consumeDirtySnapshot() *dirtyPersistSnapshot {
 	frozenCheckpoint := &WALCheckpoint{
 		MessageID: completedPoint.MessageID,
 		TimeTick:  completedPoint.TimeTick,
-		Magic:     r.checkpoint.Magic,
+		Magic:     max(r.checkpoint.Magic, r.minimumRecoveryMagic),
 		Term:      r.channel.Term,
 	}
 	// Freeze the latest control state with its own applied frontier. Its
@@ -536,7 +548,7 @@ func (r *recoveryStorageImpl) observeMessage(ctx context.Context, msg message.Im
 	// confirmations enter the recovery tracker and dirty a snapshot.
 	defer func() {
 		r.observeQueryBarriers(ctx, msg)
-		if r.consumedThrough != nil && messageutil.IsTimeTickConfirmBarrier(msg.MessageType()) {
+		if r.consumedThrough != nil && (messageutil.IsTimeTickConfirmBarrier(msg.MessageType()) || message.IsWALSwitch(msg)) {
 			r.consumedThrough(msg.TimeTick())
 		}
 	}()
@@ -675,7 +687,7 @@ func (r *recoveryStorageImpl) updatePChannelControl(msg message.ImmutableMessage
 			}
 		}
 	}
-	if msg.MessageType() == message.MessageTypeAlterWAL {
+	if msg.MessageType() == message.MessageTypeAlterWAL && !message.IsWALSwitch(msg) {
 		alterWAL := message.MustAsImmutableAlterWALMessageV2(msg)
 		header := alterWAL.Header()
 		if r.pchannelControl.AlterWalState == nil || r.pchannelControl.AlterWalState.Stage == streamingpb.AlterWALStage_NONE {

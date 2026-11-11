@@ -29,6 +29,7 @@ import (
 	msgadaptor "github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/autowalimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/registry"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -118,6 +119,9 @@ func (o *openerAdaptorImpl) Open(ctx context.Context, opt *wal.OpenOption) (wal.
 	case types.AccessModeRW:
 		wal, err = o.openRWWAL(ctx, l, opt)
 	case types.AccessModeRO:
+		if l.WALName() != message.WALNameTest {
+			l = autowalimpls.New(l, o.backendOpener(opt.Channel))
+		}
 		wal, err = o.openROWAL(l)
 	default:
 		panic("unknown access mode")
@@ -128,6 +132,19 @@ func (o *openerAdaptorImpl) Open(ctx context.Context, opt *wal.OpenOption) (wal.
 	}
 	logger.Info(ctx, "open wal done", mlog.Stringer("walName", walName), mlog.String("pchannel", opt.Channel.Name))
 	return wal, nil
+}
+
+// backendOpener keeps physical writer acquisition explicit during recovery.
+func (o *openerAdaptorImpl) backendOpener(channel types.PChannelInfo) autowalimpls.OpenBackend {
+	return func(ctx context.Context, name message.WALName, mode types.AccessMode) (walimpls.WALImpls, error) {
+		opener, err := o.getOrCreateOpenerImpl(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		info := channel
+		info.AccessMode = mode
+		return opener.Open(ctx, &walimpls.OpenOption{Channel: info})
+	}
 }
 
 // determineWALName determines which walName to use for the given channel.
@@ -203,26 +220,47 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 	}
 	cp := utility.NewWALCheckpointFromProto(cpProto)
 
-	// recover the wal state.
-	param, err := buildInterceptorParams(ctx, l, cp)
-	if err != nil {
-		return nil, errors.Wrap(err, "when building interceptor params")
+	var firstPosition message.MessageID
+	if cp != nil {
+		firstPosition = cp.MessageID
 	}
-	resources.param = param
-	param.WriteAheadBuffer.SetPressureController(roWAL.MuxRateLimitObserverRegistryImpl)
+	firstBarrier, err := sendFirstTimeTick(ctx, l, firstPosition)
+	if err != nil {
+		return nil, err
+	}
+	var param *interceptors.InterceptorBuildParam
 	queryViewCatalog := resource.Resource().StreamingNodeCatalog()
 	persistedViews, err := queryViewCatalog.ListQueryViews(ctx, opt.Channel.Name)
 	if err != nil {
 		return nil, merr.Wrap(err, "load streaming node query views")
 	}
 	liveReady := make(chan struct{})
+	builder := newRecoveryStreamBuilder(roWAL, nil, liveReady)
+	if l.WALName() != message.WALNameTest {
+		builder.openBackend = o.backendOpener(opt.Channel)
+	}
+	defer builder.closeUntransferredWriters()
 	rs, snapshot, err := recovery.RecoverRecoveryStorage(
 		ctx,
-		newRecoveryStreamBuilder(roWAL, param.WriteAheadBuffer, liveReady),
+		builder,
 		cp,
-		param.LastTimeTickMessage,
+		firstBarrier,
 		recovery.WithRecoveryTailRateLimiter(roWAL.RecoveryStorage),
-		recovery.WithConsumedThrough(param.WriteAheadBuffer.ReleaseThrough),
+		recovery.WithConsumedThrough(func(tt uint64) {
+			// Bounded recovery precedes WAB construction. Live input starts only
+			// after the completion callback has bound the final buffer.
+			if param != nil {
+				param.WriteAheadBuffer.ReleaseThrough(tt)
+			}
+		}),
+		recovery.WithRecoveryComplete(func(snapshot *recovery.RecoverySnapshot) {
+			liveWAL := builder.finishRecovery()
+			roWAL.roWALImpls = liveWAL
+			param = newInterceptorParams(ctx, liveWAL, snapshot.RecoveryBarrier)
+			resources.param = param
+			param.WriteAheadBuffer.SetPressureController(roWAL.MuxRateLimitObserverRegistryImpl)
+			builder.writeAheadBuffer = param.WriteAheadBuffer
+		}),
 		recovery.WithRecoveryFatalHandler(roWAL.markUnavailable),
 		recovery.WithQueryViewRecovery(func(manager *vchannel.PChannelRecoveryManager) {
 			resources.queryViewHandler = snview.RecoverPChannelSNQueryViewHandler(roWAL.availableCtx, opt.Channel.Name, queryViewCatalog, manager, persistedViews)

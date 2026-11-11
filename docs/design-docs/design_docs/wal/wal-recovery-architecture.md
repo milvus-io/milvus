@@ -127,12 +127,15 @@ work for 101 is incomplete, even if the work for 102 completed first.
 RW startup is one logical replay:
 
 ```text
-append RecoveryBarrier to fence the old writer
+open the checkpoint physical WAL and append RecoveryBarrier
   -> load and claim checkpoint with the assignment term
   -> load component snapshots and restore Summary plus L0 materialization cursors
-  -> open one scanner from the checkpoint
+  -> open the first physical scanner from the checkpoint
   -> observe messages with complete semantics
-  -> reach this open's RecoveryBarrier and capture the write-path snapshot
+  -> on AlterWAL, RecoveryStorage opens the target writer, writes a new barrier,
+     and continues the same recovery after the target anchor
+  -> reach the current leg's RecoveryBarrier and capture the write-path snapshot
+  -> construct autowalimpls from the recovered writers and initialize WAB
   -> pause raw input while initializing the write path
   -> resume the same scanner through WriteAheadBuffer
 ```
@@ -140,8 +143,10 @@ append RecoveryBarrier to fence the old writer
 RecoveryBarrier is a writer fence and startup catch-up marker. It never
 switches component observation behavior. Recovery and ordinary reads share the
 same scanner constructor, ordering, transaction assembly, source switching, and
-shutdown paths. Recovery supplies an optional startup boundary and the WAB
-created by the opener; it does not create a separate kind of scanner.
+shutdown paths. Recovery supplies an optional startup boundary and pauses at cross-backend
+AlterWAL records. Physical scanner legs change only after that ordered boundary;
+RecoveryStorage retains all component state and pending completion handles.
+The final leg receives its WAB only after bounded recovery succeeds.
 
 The startup boundary matches the exact RecoveryBarrier MessageID and TimeTick.
 Earlier barriers and TimeTicks cannot trigger the handoff. Before delivering the
@@ -152,10 +157,10 @@ before the barrier can therefore be completed by CommitTxn or RollbackTxn after
 it; live transaction assembly cannot mutate the write-path startup snapshot.
 
 After write-path initialization, the scanner reads WAB exclusively after the
-barrier TimeTick. The WAB is seeded by that exact barrier, so this also works
+barrier TimeTick. The WAB is created after bounded recovery and seeded by that exact final barrier, so this also works
 when it contains no later messages: creating the reader needs no additional
 persisted TimeTick. Startup does not wait for TimeTickInspector registration.
-The barrier is delivered once, and no second logical scanner is opened.
+The final barrier is delivered once; live handoff reuses the final scanner.
 
 The sync operator publishes QueryMVCC from the complete ACK prefix before
 appending its confirmation to WAL and WAB. The acknowledged data is already
@@ -186,7 +191,7 @@ supports durable catchup from the last consumed message's safe physical
 LastConfirmedMessageID, filtering already consumed TimeTicks and preserving its
 transaction and ordering state. Cancellation releases the scanner while reading durable WAL,
 paused at the startup boundary, or waiting on an empty WAB. Open failure,
-AlterWAL early return, and normal close all release the retained stream.
+legacy AlterWAL early return, and normal close all release the retained stream.
 
 The current RO opener only constructs the read-only adaptor and does not run
 RecoveryStorage initialization. Recovery against a stable readable WAL frontier

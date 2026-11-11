@@ -235,7 +235,7 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 				return msgID, err
 			}
 
-			if msg.MessageType() == message.MessageTypeAlterWAL {
+			if msg.MessageType() == message.MessageTypeAlterWAL && !message.IsWALSwitch(msg) {
 				// AlterWAL is exclusive and pchannel-level, so the lock interceptor holds
 				// the global exclusive lock here while every other append holds the shared
 				// one. Raising the fence inside the callback therefore makes it atomic with
@@ -260,9 +260,12 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 		return nil, err
 	}
 	// The fence itself was already raised inside the append callback.
-	if msg.MessageType() == message.MessageTypeAlterWAL {
+	if msg.MessageType() == message.MessageTypeAlterWAL && !message.IsWALSwitch(msg) {
 		w.forceCancelAfterGracefulTimeout()
 		w.Logger().Info(ctx, "alter WAL message appended, WAL marked as fenced, all append operations will be rejected")
+	}
+	if message.IsWALSwitch(msg) {
+		w.chunkPayloadSizeAt.Store(0)
 	}
 	w.appendRateCounter.Add(int64(msg.EstimateSize()))
 
@@ -298,7 +301,9 @@ func (w *walAdaptorImpl) Append(ctx context.Context, msg message.MutableMessage)
 // acknowledges exactly once -- when its whole run is persisted), so no
 // downstream component can ever observe a half-written pack.
 func (w *walAdaptorImpl) appendWithOptionalChunking(ctx context.Context, msg message.MutableMessage) (message.MessageID, error) {
-	if !paramtable.Get().StreamingCfg.SplitChunkSN.GetAsBool() {
+	// A switch link must be one complete physical record: splitting it would
+	// switch the backend before its remaining chunks were appended.
+	if msg.MessageType() == message.MessageTypeAlterWAL || !paramtable.Get().StreamingCfg.SplitChunkSN.GetAsBool() {
 		return w.appendOneWithRetry(ctx, msg)
 	}
 

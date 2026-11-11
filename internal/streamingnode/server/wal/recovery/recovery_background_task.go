@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -109,6 +110,10 @@ func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl mlo
 	if snapshot.CheckpointDirty {
 		rs.mu.Lock()
 		rs.checkpoint = snapshot.Checkpoint.Clone()
+		if rs.checkpoint.Magic >= utility.RecoveryMagicHotWALSwitch && rs.walSwitchReady != nil {
+			close(rs.walSwitchReady)
+			rs.walSwitchReady = nil
+		}
 		rs.mu.Unlock()
 		if rs.tailController != nil {
 			rs.tailController.Publish(snapshot.LogicalEndOffset)

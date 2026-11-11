@@ -24,7 +24,10 @@ WAL replay supplies newer versions. This directly repairs schema
 updates that older nodes missed, including legacy property-only TTL changes.
 Aligned snapshots are saved before the new magic; failed saves leave the old
 marker and can be retried. Fresh checkpoints start at magic 3. Ordinary
-publication and WAL switching preserve the migrated marker.
+publication and legacy WAL switching preserve the migrated marker. Before the
+first hot switch, the publisher upgrades it to magic 4 without advancing the
+data checkpoint, requiring readers that understand durable WAL links. Schema
+alignment accepts and preserves magic 4; see [AlterWAL](../../../design-docs/design_docs/wal/alter-wal.md).
 
 This upgrade uses an ordinary Describe snapshot, without an additional
 coordinator DDL completion barrier. It does not provide an atomic snapshot of
@@ -37,7 +40,7 @@ persisted. Older StreamingNodes reject this marker and cannot reopen an upgraded
 PChannel. This compatibility work is deferred; the current migration is not
 rollback-safe.
 
-1. RW WAL opening appends a RecoveryBarrier to fence the old writer.
+1. RW WAL opening starts with the checkpoint physical writer and a RecoveryBarrier. RecoveryStorage observes AlterWAL, opens the linked target, writes its next barrier and continues replay. Only after reaching the final barrier does the opener construct autowalimpls and initialize WAB. See [AlterWAL](../../../design-docs/design_docs/wal/alter-wal.md).
 2. **Metadata recovery** (`recoverRecoveryInfoFromMeta`): Claim the checkpoint with the assignment term, load component metadata and restore WALSummary. WALMaterializer restores its cursor and rebuilds unmaterialized Delete handles through WAL replay.
 3. **Startup recovery** (`runBoundedRecovery`): Use the ordinary scanner to observe the WAL from the checkpoint through this open's exact barrier. Capture the write-path snapshot and an independent copy of unfinished transaction builders, and restore idempotency snapshots from retained Summary history plus replayed records (retrying transient object reads until recovery or cancellation, and failing WAL open on permanent errors or cancellation); pause further raw input until write-path initialization finishes. Asynchronous persistence need not have finished.
 4. Resume the same scanner exclusively after the barrier through the opener-provided WAB, retaining its ordering and transaction state. An empty WAB needs no additional persisted TimeTick to switch. WAB retains the live suffix until RecoveryStorage reports complete consumption; capacity/keepalive cannot evict that suffix. After observing each confirmation, including Summary and ordered VChannel query-barrier dispatch, mark its complete prefix eligible for WAB eviction. Capacity/TTL still determines actual eviction, and the latest durable confirmation is retained separately for catchup handoff without pinning consumed volatile barriers in the queue. This consumption boundary is separate from persistence completion. WAB occupancy directly controls producer backpressure; scanner catchup/tailing transitions do not. Run AckTracker stall checks, independent Summary backlog checks, and catalog publication. Component snapshots precede checkpoint publication and WAL truncation. Poisoned messages remain incomplete and block the checkpoint.

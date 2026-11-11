@@ -25,7 +25,7 @@ import (
 // coordinator's version once when upgrading recovery metadata. Other versions
 // remain available for segment recovery and WAL replay.
 func (r *recoveryStorageImpl) alignCollectionSchema(ctx context.Context, vchannels map[string]*streamingpb.VChannelMeta) error {
-	if r.checkpoint.Magic == utility.RecoveryMagicSchemaMetadataAligned {
+	if r.checkpoint.Magic == utility.RecoveryMagicSchemaMetadataAligned || r.checkpoint.Magic == utility.RecoveryMagicHotWALSwitch {
 		return nil
 	}
 	aligned := make(map[string]*streamingpb.VChannelMeta)

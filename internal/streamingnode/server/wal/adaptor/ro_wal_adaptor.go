@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/autowalimpls"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -107,6 +108,9 @@ func (w *roWALAdaptorImpl) Read(ctx context.Context, opts wal.ReadOption) (wal.S
 }
 
 func (w *roWALAdaptorImpl) checkReadOptWALName(opts wal.ReadOption) error {
+	if _, ok := w.roWALImpls.(*autowalimpls.WAL); ok {
+		return nil
+	}
 	if opts.DeliverPolicy != nil {
 		currentWALName := w.WALName()
 		var msgID *commonpb.MessageID

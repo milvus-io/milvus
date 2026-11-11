@@ -2,6 +2,7 @@ package interceptors
 
 import (
 	"context"
+	"sync"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate/replicates"
@@ -32,6 +33,8 @@ type MessageRowLock interface {
 
 // InterceptorBuildParam is the parameter to build a interceptor.
 type InterceptorBuildParam struct {
+	// TimeTickSyncMu orders complete Sync operations before the PChannel append lock.
+	TimeTickSyncMu         sync.Mutex
 	Context                context.Context // WAL-open context for bounded startup recovery; optional in tests.
 	ChannelInfo            types.PChannelInfo
 	WAL                    *syncutil.Future[wal.WAL]    // The wal final object, can be used after interceptor is ready.
