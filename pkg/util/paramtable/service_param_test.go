@@ -255,6 +255,10 @@ func TestServiceParam(t *testing.T) {
 		assert.NotEqual(t, Params.KvRootPath, "")
 		t.Logf("kv root path = %s", Params.KvRootPath.GetValue())
 
+		assert.False(t, Params.GCEnabled.GetAsBool())
+		assert.Equal(t, 10*time.Minute, Params.GCLifeTime.GetAsDuration(time.Second))
+		assert.Equal(t, 10*time.Minute, Params.GCInterval.GetAsDuration(time.Second))
+
 		t.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
 		SParams.init(bt)
 	})

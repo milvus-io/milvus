@@ -17,7 +17,6 @@
 package tikv
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"math"
@@ -42,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	_ "github.com/milvus-io/milvus/pkg/v3/util/resource" // Register the shared protobuf codec before Params starts etcd RPCs.
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	tikvutil "github.com/milvus-io/milvus/pkg/v3/util/tikv"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -60,7 +60,7 @@ const (
 	// This empty value is what we are reserving within TiKv to represent an empty string value.
 	// TiKV does not allow storing empty values for keys which is something we do in Milvus, so
 	// to get over this we are using the reserved keyword as placeholder.
-	EmptyValueString = "__milvus_reserved_empty_tikv_value_DO_NOT_USE"
+	EmptyValueString = tikvutil.EmptyValueString
 	// maxTiKVTxnOps bounds how many key ops we treat as one atomic TiKV txn.
 	// TiKV's own client-side limits are far higher (txn-entry-count-limit
 	// defaults to 300k, txn-total-size-limit to 100MB); 64Ki metadata-sized
@@ -598,7 +598,7 @@ func (kv *txnTiKV) checkPredicates(ctx context.Context, txn *transaction.KVTxn, 
 			if !exists {
 				return markPredicateNotMet(merr.WrapErrIoFailedReason(fmt.Sprintf("failed to read predicate target (%s:%v) for MultiSaveAndRemove", pred.Key(), pred.TargetValue()), tikverr.ErrNotExist.Error()))
 			}
-			if !pred.IsTrue(val) {
+			if !pred.IsTrue(tikvutil.DecodeValue(val)) {
 				return markPredicateNotMet(merr.WrapErrIoFailedReason("failed to meet predicate", fmt.Sprintf("key=%s, value=%v", pred.Key(), pred.TargetValue())))
 			}
 		case predicates.PredTargetKeyExistence:
@@ -812,13 +812,7 @@ func (kv *txnTiKV) WalkWithPrefix(ctx context.Context, prefix string, pagination
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
 		}
-		// Grab value for empty check
-		byteVal := iter.Value()
-		// Check if empty val and replace with placeholder
-		if isEmptyByte(byteVal) {
-			byteVal = []byte{}
-		}
-		err = fn(iter.Key(), byteVal)
+		err = fn(iter.Key(), tikvutil.DecodeValue(iter.Value()))
 		if err != nil {
 			return err
 		}
@@ -1001,10 +995,21 @@ func (kv *txnTiKV) removeTiKVMeta(ctx context.Context, key string) error {
 	return err
 }
 
+// CompareVersionAndSwap supports only version 0, which etcd gives a key that
+// does not exist: it saves target when key is absent and reports false when key
+// exists, as a save guarded by KeyNotExist. TiKV keeps no per-key version
+// counter, so any other version stays unimplemented.
 func (kv *txnTiKV) CompareVersionAndSwap(ctx context.Context, key string, version int64, target string) (bool, error) {
-	err := errors.Wrap(merr.ErrServiceUnimplemented, "CompareVersionAndSwap is under deprecation")
-	logWarnOnFailure(&err, "Unimplemented")
-	return false, err
+	if version != 0 {
+		err := errors.Wrap(merr.ErrServiceUnimplemented, "CompareVersionAndSwap is under deprecation")
+		logWarnOnFailure(&err, "Unimplemented")
+		return false, err
+	}
+	err := kv.MultiSaveAndRemove(ctx, map[string]string{key: target}, nil, predicates.KeyNotExist(key))
+	if errors.Is(err, errPredicateNotMet) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // CheckElapseAndWarn checks the elapsed time and warns if it is too long.
@@ -1018,27 +1023,10 @@ func CheckElapseAndWarn(start time.Time, message string, fields ...mlog.Field) b
 	return false
 }
 
-// Since TiKV cannot store empty key values, we assign them a placeholder held by EmptyValue.
-// Upon loading, we need to check if the returned value is the placeholder.
-func isEmptyByte(value []byte) bool {
-	return bytes.Equal(value, EmptyValueByte) || len(value) == 0
-}
-
-// Return an empty string if the value is the Empty placeholder, else return actual string value.
 func convertEmptyByteToString(value []byte) string {
-	if isEmptyByte(value) {
-		return ""
-	}
-	return string(value)
+	return string(tikvutil.DecodeValue(value))
 }
 
-// Convert string into EmptyValue if empty else cast to []byte. Will throw error if value is equal
-// to the EmptyValueString.
 func convertEmptyStringToByte(value string) ([]byte, error) {
-	if len(value) == 0 {
-		return EmptyValueByte, nil
-	} else if value == EmptyValueString {
-		return nil, merr.WrapErrParameterInvalidMsg("value for key is reserved by EmptyValue: %s", EmptyValueString)
-	}
-	return []byte(value), nil
+	return tikvutil.EncodeValue([]byte(value))
 }

@@ -615,7 +615,79 @@ func TestTiKVUnimplemented(t *testing.T) {
 	defer kv.RemoveWithPrefix(context.TODO(), "")
 
 	_, err = kv.CompareVersionAndSwap(context.TODO(), "k", 1, "target")
-	assert.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrServiceUnimplemented)
+}
+
+// Version 0 creates a key that does not exist and leaves an existing key alone.
+func TestCompareVersionAndSwapCreate(t *testing.T) {
+	kv := NewTiKV(txnClient, "/tikv/test/root/cas_create")
+	ctx := context.TODO()
+	require.NoError(t, kv.RemoveWithPrefix(ctx, ""))
+	defer kv.Close()
+	defer kv.RemoveWithPrefix(ctx, "")
+
+	ok, err := kv.CompareVersionAndSwap(ctx, "checkpoint", 0, "v1")
+	require.NoError(t, err)
+	assert.True(t, ok)
+	value, err := kv.Load(ctx, "checkpoint")
+	require.NoError(t, err)
+	assert.Equal(t, "v1", value)
+
+	ok, err = kv.CompareVersionAndSwap(ctx, "checkpoint", 0, "v2")
+	require.NoError(t, err)
+	assert.False(t, ok)
+	value, err = kv.Load(ctx, "checkpoint")
+	require.NoError(t, err)
+	assert.Equal(t, "v1", value)
+
+	// an empty value is stored as the placeholder and still counts as existing
+	ok, err = kv.CompareVersionAndSwap(ctx, "empty", 0, "")
+	require.NoError(t, err)
+	assert.True(t, ok)
+	value, err = kv.Load(ctx, "empty")
+	require.NoError(t, err)
+	assert.Equal(t, "", value)
+	ok, err = kv.CompareVersionAndSwap(ctx, "empty", 0, "v")
+	require.NoError(t, err)
+	assert.False(t, ok)
+
+	_, err = kv.CompareVersionAndSwap(ctx, "reserved", 0, EmptyValueString)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+}
+
+// Of concurrent creations of one key exactly one succeeds, and the key keeps
+// its value.
+func TestCompareVersionAndSwapConcurrentCreate(t *testing.T) {
+	kv := NewTiKV(txnClient, "/tikv/test/root/cas_concurrent")
+	ctx := context.TODO()
+	require.NoError(t, kv.RemoveWithPrefix(ctx, ""))
+	defer kv.Close()
+	defer kv.RemoveWithPrefix(ctx, "")
+
+	const writers = 16
+	oks := make([]bool, writers)
+	errs := make([]error, writers)
+	var wg sync.WaitGroup
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			oks[i], errs[i] = kv.CompareVersionAndSwap(ctx, "checkpoint", 0, fmt.Sprintf("v%d", i))
+		}(i)
+	}
+	wg.Wait()
+	winner := -1
+	for i := range oks {
+		require.NoError(t, errs[i], "writer %d", i)
+		if oks[i] {
+			require.Equal(t, -1, winner, "writers %d and %d both created the key", winner, i)
+			winner = i
+		}
+	}
+	require.NotEqual(t, -1, winner)
+	value, err := kv.Load(ctx, "checkpoint")
+	require.NoError(t, err)
+	assert.Equal(t, fmt.Sprintf("v%d", winner), value)
 }
 
 func TestTxnWithPredicates(t *testing.T) {
@@ -626,6 +698,7 @@ func TestTxnWithPredicates(t *testing.T) {
 	prepareKV := map[string]string{
 		"lease1": "1",
 		"lease2": "2",
+		"empty":  "",
 	}
 
 	err = kv.MultiSave(context.TODO(), prepareKV)
@@ -638,6 +711,8 @@ func TestTxnWithPredicates(t *testing.T) {
 		expectSuccess bool
 	}{
 		{"predicate_ok", map[string]string{"a": "b"}, []predicates.Predicate{predicates.ValueEqual("lease1", "1")}, true},
+		{"locked_empty", map[string]string{"a": "b"}, []predicates.Predicate{predicates.ValueEqual("empty", "")}, true},
+		{"written_empty", map[string]string{"empty": ""}, []predicates.Predicate{predicates.ValueEqual("empty", "")}, true},
 		{"predicate_fail", map[string]string{"a": "b"}, []predicates.Predicate{predicates.ValueEqual("lease1", "2")}, false},
 		{"key_not_exist_ok", map[string]string{"a": "b"}, []predicates.Predicate{predicates.KeyNotExist("lease_absent")}, true},
 		{"key_not_exist_fail", map[string]string{"a": "b"}, []predicates.Predicate{predicates.KeyNotExist("lease1")}, false},
