@@ -325,9 +325,10 @@ func TestSnapshotBitmapScanFailures(t *testing.T) {
 				require.Zero(t, scan.mask.rows)
 			} else {
 				require.ErrorIs(t, err, want)
-				if mode == "commit_v2" {
+				switch mode {
+				case "commit_v2":
 					require.ErrorContains(t, err, "snapshot/manifests/source.avro (segment 200)")
-				} else if mode == "commit_v3" {
+				case "commit_v3":
 					require.ErrorContains(t, err, scan.source.ManifestPath)
 				}
 			}
