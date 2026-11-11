@@ -121,11 +121,13 @@ func (c *recoveryTailController) Publish(offset, messages uint64) {
 }
 
 // ShouldFlush is polled by the persistence workers, including during idle
-// traffic. Flush thresholds never change append admission or limiter state.
+// traffic. Once append pressure starts, keep persisting until the byte tail
+// reaches the recovery watermark, even after the independent flush triggers
+// clear. This predicate never changes append admission or limiter state.
 func (c *recoveryTailController) ShouldFlush() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.shouldFlushLocked(time.Now())
+	return c.state != recoveryTailPressureNormal || c.shouldFlushLocked(time.Now())
 }
 
 func (c *recoveryTailController) Snapshot() recoveryTailSnapshot {

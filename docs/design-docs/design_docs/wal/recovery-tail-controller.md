@@ -129,9 +129,9 @@ Components implement idempotency:
 
 ## 5. Independent Persistence And Append Admission
 
-Persistence requests and append rate limiting use independent configurations.
-They share the observed-to-published tail counters, but neither predicate uses
-the other's thresholds.
+Persistence triggers and append rate limiting use independent configurations.
+They share the observed-to-published tail counters. Once append pressure is
+active, persistence must continue until that pressure can enter recovery.
 
 ### Persistence triggers
 
@@ -152,6 +152,13 @@ recoveryTailBytes >= flush.sizeThreshold
   -> let Summary's independent worker seal its pending span
 ```
 
+Append Slowdown or Reject also keeps this periodic persistence loop active until
+the tail reaches `tail.lowWatermark` and the controller sends
+`EnterRecoveryMode`. For example, draining 8 GiB to 5 GiB must not stop
+persistence just because it passed the 6 GiB flush threshold: admission still
+needs a tail of at most 4 GiB to recover. This also covers rejection reached by
+the adaptive limiter's delay rather than the immediate 16 GiB threshold.
+
 These thresholds are captured when a WAL opens. Nonpositive size or message
 thresholds disable the respective trigger; either nonpositive idle setting
 disables the size-and-idle trigger. The periodic Tracker and Summary workers
@@ -163,7 +170,11 @@ barrier. Existing age-based Segment/L0 persistence remains independent.
 `ShouldFlush` is a read-only predicate. Reaching a persistence threshold does
 not enter slowdown, arm a rejection timer, or change the limiter's recovery
 condition. Disabling persistence triggers does not disable byte-based append
-admission. The thresholds need not be ordered against the limiter watermarks.
+admission or its required persistence-to-recovery loop. The thresholds need not
+be ordered against the limiter watermarks. When no recovery-tail pressure is
+active, including after requesting Recovery, only the independent flush triggers
+apply; starting persistence at 6 GiB does not itself put the limiter into
+Slowdown or Recovery.
 
 ### Append admission watermarks
 

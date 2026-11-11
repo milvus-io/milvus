@@ -1445,8 +1445,8 @@ func TestFlushThresholdsPersistCompletedSummaryWithoutLimiting(t *testing.T) {
 	}
 }
 
-func TestFlushThresholdsRequestVChannelPersistenceWithoutLimiting(t *testing.T) {
-	for _, name := range []string{"message-count", "idle-size", "size"} {
+func TestFlushRequestsReachVChannelPersistence(t *testing.T) {
+	for _, name := range []string{"message-count", "idle-size", "size", "limiter-recovery"} {
 		t.Run(name, func(t *testing.T) {
 			rs := newTestRecoveryStorage(t, &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 10})
 			rs.cfg.ackStallTimeout = time.Hour // Isolate flushing from the ordinary age trigger.
@@ -1468,6 +1468,11 @@ func TestFlushThresholdsRequestVChannelPersistenceWithoutLimiting(t *testing.T) 
 			owner := rs.ackTracker.Track(newRecoveryTestDeleteMessage(t, "test-vchannel", 50))
 			defer owner.Release()
 			rs.refreshRecoveryTail()
+			if name == "limiter-recovery" {
+				rs.tailController.UpdateTrackerFrontiers(8<<30, 0, 100, time.Now())
+				rs.tailController.Publish(3<<30, 0)
+				require.True(t, rs.tailController.ShouldFlush(), "persistence must continue through the 5GB gap")
+			}
 			requested := make(chan struct {
 				vchannel string
 				through  uint64
@@ -1495,9 +1500,38 @@ func TestFlushThresholdsRequestVChannelPersistenceWithoutLimiting(t *testing.T) 
 				t.Fatal("flush trigger did not reach the VChannel persistence path")
 			}
 			actions, _ := limiter.snapshot()
-			require.Empty(t, actions)
+			if name == "limiter-recovery" {
+				require.Equal(t, []recoveryTailAction{recoveryTailActionSlowdown}, actions)
+			} else {
+				require.Empty(t, actions)
+			}
 		})
 	}
+}
+
+func TestSummaryKeepsFlushingUntilLimiterRecovery(t *testing.T) {
+	rs := newTestRecoveryStorage(t, &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 10})
+	rs.cfg.flushSizeBytes = 6 << 30
+	rs.cfg.flushMessageCount = 0
+	rs.cfg.flushIdleMinBytes = 0
+	limiter := &recordingRecoveryTailRateLimiter{}
+	rs.tailController = newRecoveryTailController(rs.cfg, limiter, rs.metrics)
+	rs.summaryManager = newSummaryManagerWithStagedDelete(t, "test-vchannel", 50)
+	rs.tailController.UpdateTrackerFrontiers(8<<30, 0, 100, time.Now())
+	rs.tailController.Publish(3<<30, 0)
+	require.True(t, rs.tailController.ShouldFlush())
+	rs.startSummaryBacklog()
+	t.Cleanup(func() {
+		rs.backgroundTaskNotifier.Cancel()
+		rs.summaryWG.Wait()
+		rs.closeRecoveryResources()
+	})
+	require.Eventually(t, func() bool { return rs.summaryManager.LastAcked() == 50 }, 3*time.Second, time.Millisecond,
+		"Summary must still seal below 6GB while append admission needs to reach 4GB")
+	rs.tailController.Publish(4<<30, 0)
+	require.False(t, rs.tailController.ShouldFlush())
+	actions, _ := limiter.snapshot()
+	require.Equal(t, []recoveryTailAction{recoveryTailActionSlowdown, recoveryTailActionRecover}, actions)
 }
 
 func TestAckTrackerStallDoesNotFlushSummary(t *testing.T) {

@@ -233,6 +233,9 @@ when any persistence trigger holds. These thresholds are independent of append
 rate limiting and default to 6 GiB, 6144 messages, or more than 512 MiB idle for
 10 minutes. This
 works even when AckTracker has no incomplete entries or no new messages arrive.
+While append pressure is active, the same periodic check keeps requesting
+persistence below the 6 GiB trigger until the controller can enter Recovery at
+the byte low watermark. Independent flush triggers never start append limiting.
 AckTracker stall requests target only VChannel consumers and never seal Summary.
 Neither `dataNode.segment.syncPeriod` nor the checkpoint persistence interval
 is a Summary sealing trigger. Small low-traffic batches may remain in memory,

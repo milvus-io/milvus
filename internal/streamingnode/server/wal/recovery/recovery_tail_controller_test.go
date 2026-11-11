@@ -5,11 +5,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor/rate"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/ratelimit"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type recordingRecoveryTailRateLimiter struct {
@@ -140,8 +145,8 @@ func TestRecoveryTailFlushSizeIndependentOfRateLimit(t *testing.T) {
 		{"below-flush", 6 << 30, 6<<30 - 1, false, false},
 		{"exact-flush", 6 << 30, 6 << 30, true, false},
 		{"both", 6 << 30, 8 << 30, true, true},
-		{"rate-limit-only", 10 << 30, 8 << 30, false, true},
-		{"flush-disabled", 0, 8 << 30, false, true},
+		{"rate-limit-forces-progress", 10 << 30, 8 << 30, true, true},
+		{"flush-triggers-disabled-under-pressure", 0, 8 << 30, true, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			limiter := &recordingRecoveryTailRateLimiter{}
@@ -260,4 +265,101 @@ func TestRecoveryTailRealLimiterRecoversWhileFlushStillRequired(t *testing.T) {
 	require.True(t, c.ShouldFlush())
 	require.Eventually(t, func() bool { return !mux.IsRejected() }, time.Second, time.Millisecond,
 		"the real limiter must leave Reject at 4GB even while count and idle still require persistence")
+}
+
+// recoveryTailLimiterState reads the real controller's exported mode and rate,
+// rather than inferring them from requested mode transitions.
+func recoveryTailLimiterState(t *testing.T, channel string) (string, float64) {
+	t.Helper()
+	metricCh := make(chan prometheus.Metric)
+	go func() {
+		metrics.WALRateLimitControllerState.Collect(metricCh)
+		close(metricCh)
+	}()
+	mode := ""
+	var currentRate float64
+	for metric := range metricCh {
+		var value dto.Metric
+		require.NoError(t, metric.Write(&value))
+		labels := make(map[string]string)
+		for _, label := range value.Label {
+			labels[label.GetName()] = label.GetValue()
+		}
+		if labels[metrics.WALChannelLabelName] == channel && labels[metrics.WALRateLimitControllerSourceLabelName] == rate.SourceRecoveryStorage {
+			mode, currentRate = labels[metrics.WALRateLimitStateLabelName], value.GetGauge().GetValue()
+		}
+	}
+	return mode, currentRate
+}
+
+func TestRecoveryTailKeepsFlushingThroughLimiterRecovery(t *testing.T) {
+	params := paramtable.Get()
+	adaptive := &params.StreamingCfg.WALRateLimitRecoveryStorageAdaptiveRateLimit
+	// Preserve the real byte thresholds, rates and decrease ratio; compress only
+	// timers so the production state machine can be simulated without minutes of waiting.
+	for _, override := range []struct {
+		item  *paramtable.ParamItem
+		value string
+	}{
+		{&adaptive.SlowdownStartupDelayInterval, "10ms"},
+		{&adaptive.SlowdownDecreaseInterval, "10ms"},
+		{&adaptive.SlowdownRejectDelayInterval, "20ms"},
+		{&adaptive.RecoveryIncreaseInterval, "5ms"},
+		{&adaptive.RecoveryNormalDelayInterval, "10ms"},
+	} {
+		previous := override.item.GetValue()
+		t.Cleanup(func() { require.NoError(t, params.Save(override.item.Key, previous)) })
+		require.NoError(t, params.Save(override.item.Key, override.value))
+	}
+	for _, test := range []struct {
+		name          string
+		initial       uint64
+		delayedReject bool
+	}{
+		{"slowdown", 8 << 30, false},
+		{"hard-reject", 16 << 30, false},
+		{"delayed-reject", 8 << 30, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := newConfig()
+			require.Equal(t, uint64(6<<30), cfg.flushSizeBytes)
+			component := rate.NewWALRateLimitComponent(types.PChannelInfo{Name: t.Name()})
+			t.Cleanup(component.Close)
+			controller := newRecoveryTailController(cfg, component.RecoveryStorage, nil)
+			state := func() (string, float64) { return recoveryTailLimiterState(t, t.Name()) }
+			logState := func(phase string) {
+				mode, limit := state()
+				t.Logf("%s: tail=%dMiB flush=%t limiter=%s rate=%.1fMiB/s", phase,
+					controller.Snapshot().RecoveryTail>>20, controller.ShouldFlush(), mode, limit/(1<<20))
+			}
+			controller.UpdateTrackerFrontiers(test.initial, 0, 100, time.Now())
+			require.Eventually(t, func() bool {
+				mode, limit := state()
+				if test.initial == 16<<30 {
+					return mode == "reject"
+				}
+				return mode == "slowdown" && limit <= 16<<20
+			}, 3*time.Second, time.Millisecond)
+			logState("pressure started")
+			controller.Publish(test.initial-(5<<30), 0)
+			require.Equal(t, uint64(5<<30), controller.Snapshot().RecoveryTail)
+			require.True(t, controller.ShouldFlush(), "crossing 6GB must not end persistence while admission is still pressured")
+			controller.mu.Lock()
+			independentTrigger := controller.shouldFlushLocked(time.Now())
+			controller.mu.Unlock()
+			require.False(t, independentTrigger, "this fixture must isolate persistence required by the limiter")
+			logState("below flush threshold")
+			if test.delayedReject {
+				require.Eventually(t, component.IsRejected, 3*time.Second, time.Millisecond)
+				require.True(t, controller.ShouldFlush(), "adaptive rejection must keep the persistence loop active")
+				logState("adaptive rejection")
+			}
+			controller.Publish(test.initial-(4<<30), 0)
+			require.Eventually(t, func() bool { mode, _ := state(); return mode == "recovery" }, 3*time.Second, time.Millisecond)
+			require.False(t, controller.ShouldFlush(), "the forced loop can stop after requesting recovery if no independent trigger holds")
+			logState("byte recovery watermark")
+			require.Eventually(t, func() bool { mode, _ := state(); return mode == "normal" }, 3*time.Second, time.Millisecond)
+			logState("recovered")
+		})
+	}
 }
