@@ -71,7 +71,7 @@ def check_stop_file(path):
 class PyUDFSearchChecker:
     """A reusable oracle for immutable collections; no fault injection or retries."""
 
-    def __init__(self, client, collection, resources, vectors, queries, evidence, index_type):
+    def __init__(self, client, collection, resources, vectors, queries, evidence, index_type, stop_file=None):
         self.client = client
         self.collection = collection
         self.resources = resources
@@ -79,6 +79,7 @@ class PyUDFSearchChecker:
         self.queries = queries
         self.evidence = evidence
         self.index_type = index_type
+        self.stop_file = Path(stop_file) if stop_file is not None else evidence / "STOP"
         self.candidates = []
         self.baseline_distances = []
 
@@ -103,6 +104,7 @@ class PyUDFSearchChecker:
         return {"metric_type": "L2", "params": params}
 
     def search(self, client, query, chain=None, limit=100, filter_expr=""):
+        check_stop_file(self.stop_file)
         options = {"function_chains": chain} if chain is not None else {}
         return client.search(
             self.collection,
@@ -193,6 +195,7 @@ class PyUDFSearchChecker:
         started = time.monotonic()
         checked = 0
         for start in range(0, len(self.vectors), 1000):
+            check_stop_file(self.stop_file)
             assert time.monotonic() - started < 180, "Full ledger audit exceeded its observation budget"
             end = min(start + 1000, len(self.vectors))
             rows = self.client.query(
@@ -241,7 +244,9 @@ class PyUDFSearchChecker:
         }
 
 
-def prepare(client, storage, args, evidence):
+def prepare(client, storage, args, evidence, stop_file=None):
+    stop_file = Path(stop_file) if stop_file is not None else evidence / "STOP"
+    check_stop_file(stop_file)
     name = args.collection
     assert name.startswith("pyudf_"), "Use an exclusively owned pyudf_ collection"
     assert not client.has_collection(name), "Refuse to overwrite an existing collection"
@@ -257,8 +262,10 @@ def prepare(client, storage, args, evidence):
     schema.add_field("flag", DataType.BOOL)
     schema.add_field("optional", DataType.INT64, nullable=True)
     schema.add_field("vector", DataType.FLOAT_VECTOR, dim=128)
+    check_stop_file(stop_file)
     client.create_collection(name, schema=schema, num_shards=2, consistency_level="Strong")
     for start in range(0, args.rows, 1000):
+        check_stop_file(stop_file)
         rows = [
             {
                 "id": pk,
@@ -272,6 +279,7 @@ def prepare(client, storage, args, evidence):
         ]
         result = client.insert(name, rows, timeout=60)
         assert result["insert_count"] == len(rows), result
+    check_stop_file(stop_file)
     client.flush(name, timeout=180)
     params = client.prepare_index_params()
     params.add_index(
@@ -280,8 +288,11 @@ def prepare(client, storage, args, evidence):
         metric_type="L2",
         params={"M": 18, "efConstruction": 240} if args.index_type == "HNSW" else {},
     )
+    check_stop_file(stop_file)
     client.create_index(name, params, timeout=300)
+    check_stop_file(stop_file)
     client.load_collection(name, replica_number=1, timeout=300)
+    check_stop_file(stop_file)
     index = client.describe_index(name, "vector")
     assert index["state"] == "Finished" and index["indexed_rows"] == args.rows, index
     assert client.query(name, filter="", output_fields=["count(*)"])[0]["count(*)"] == args.rows
@@ -290,6 +301,7 @@ def prepare(client, storage, args, evidence):
     if not storage.bucket_exists(args.bucket):
         storage.make_bucket(args.bucket)
     for number in range(2):
+        check_stop_file(stop_file)
         resource = f"{name}_wheel_{number}"
         package = f"{name}_pkg_{number}"
         wheel = build_wheel(package, MODULE)
@@ -299,6 +311,7 @@ def prepare(client, storage, args, evidence):
         wheels.append({"resource": resource, "path": path, "sha256": hashlib.sha256(wheel).hexdigest()})
         (evidence / "wheels.json").write_text(json.dumps(wheels, indent=2))
         storage.put_object(args.bucket, path, io.BytesIO(wheel), len(wheel))
+        check_stop_file(stop_file)
         client.add_file_resource(resource, path, timeout=30)
         resources.append(resource)
     metadata = {
@@ -316,7 +329,7 @@ def prepare(client, storage, args, evidence):
     }
     (evidence / "metadata.json").write_text(json.dumps(metadata, indent=2))
     print(json.dumps({"event": "prepared", **metadata}), flush=True)
-    return PyUDFSearchChecker(client, name, resources, vectors, queries, evidence, args.index_type)
+    return PyUDFSearchChecker(client, name, resources, vectors, queries, evidence, args.index_type, stop_file)
 
 
 def resume(client, storage, args, evidence):

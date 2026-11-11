@@ -93,12 +93,13 @@ def load_checker(root):
 
 
 def initialize(root):
+    check_stop_file(root / "STOP")
     config = WorkloadConfig.read(root)
     inputs = root / "input"
     inputs.mkdir()
     clients = config.connections()
     try:
-        checker = prepare(clients[0], config.storage(), config, inputs)
+        checker = prepare(clients[0], config.storage(), config, inputs, stop_file=root / "STOP")
         checker.baseline()
         checker.evidence = root
         save(root / "pre-soak-audit.json", checker.audit_all_rows())
