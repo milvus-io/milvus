@@ -74,17 +74,16 @@ func (r *Runtime) dispatchMessage(ctx context.Context, msg message.ImmutableMess
 		return nil
 	}
 	switch msg.MessageType() {
-	case message.MessageTypeAlterCollection:
+	case message.MessageTypeAlterCollection, message.MessageTypeRefreshExternalCollection:
 		if !applyGrowing {
 			return nil
 		}
-		altered := message.MustAsImmutableAlterCollectionMessageV2(msg)
-		if !messageutil.IsSchemaChange(altered.Header()) {
+		schema := messageutil.CollectionSchemaTarget(msg)
+		if schema == nil {
 			return nil
 		}
 		// WAL dispatch serializes this transition with insert conversion and write.
 		// The native collection lazily reopens existing segments on the next access.
-		schema := altered.MustBody().GetUpdates().GetSchema()
 		if err := r.collection.UpdateSchema(schema, msg.TimeTick()); err != nil {
 			return err
 		}

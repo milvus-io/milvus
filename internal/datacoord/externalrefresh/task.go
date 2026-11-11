@@ -49,13 +49,9 @@ type refreshExternalCollectionTask struct {
 	refreshMeta *ExternalCollectionRefreshMeta
 	mt          *meta.Meta
 	allocator   allocator.Allocator
-	// processFinishedJob is the per-job entry point on the refresh checker.
-	// The task calls it synchronously after transitioning to a terminal state
-	// so the finished-callback (schema update + WAL broadcast) fires before
-	// the task method returns and progress polls observe a consistent state.
-	// The checker still runs the same logic on its periodic tick as a safety
-	// net for missed events. Set by the manager during task wrapping; nil in
-	// unit tests.
+	// processFinishedJob records terminal task progress synchronously. The
+	// original Refresh callback owns publication; this scheduler path must not
+	// acquire a DDL lock or wait for that callback.
 	processFinishedJob func(jobID int64)
 }
 
@@ -152,14 +148,8 @@ func (t *refreshExternalCollectionTask) UpdateStateWithMeta(state indexpb.JobSta
 	}
 	t.SetState(state, failReason)
 
-	// When the task reaches a terminal state, synchronously drive per-job
-	// processing on the checker. processJob is the single aggregation point
-	// — it re-reads tasks, transitions job state, and fires the finish
-	// callback + schema update + WAL broadcast before this method returns.
-	// This guarantees that callers polling GetRefreshExternalCollectionProgress
-	// observe a consistent state: when the job appears Finished, the schema
-	// update has already been applied. The checker's periodic tick runs the
-	// same logic as a safety net for missed events (e.g., DataCoord restart).
+	// Aggregate failure/progress promptly. Successful publication and completion
+	// remain with the original Refresh callback, outside the global scheduler.
 	if state == indexpb.JobState_JobStateFinished || state == indexpb.JobState_JobStateFailed {
 		if t.processFinishedJob != nil {
 			t.processFinishedJob(t.GetJobId())
@@ -814,13 +804,8 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 		mlog.Int64("idEnd", idEnd),
 		mlog.Int64("count", idEnd-idBegin))
 
-	// Use the current collection schema as this task's snapshot. There is no
-	// job/task-level schema-version gate for the current additive-only refresh
-	// scope: if AddField races after this request is built, the task may finish
-	// with the older schema and skip the new field, and a later refresh will
-	// self-heal it through missing-column detection. Drop, rename, or type
-	// changes must reintroduce stronger schema coordination, such as a gate or
-	// lock, before they are supported.
+	// The collection guard excludes concurrent schema DDLs. Use the prepared
+	// Refresh target while public metadata still describes the previous view.
 	collInfo := t.mt.GetCollection(t.GetCollectionId())
 	if collInfo == nil {
 		err = merr.WrapErrServiceInternalMsg("collection %d not found in meta", t.GetCollectionId())
@@ -836,6 +821,11 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 	}
 	partitionID := collInfo.Partitions[0]
 
+	prepared, prepareErr := t.mt.CollectionForPreparation(ctx, collInfo)
+	if prepareErr != nil {
+		log.Warn(ctx, "refresh schema preparation pending", mlog.Err(prepareErr))
+		return
+	}
 	req := &datapb.RefreshExternalCollectionTaskRequest{
 		ClusterID:              paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
 		CollectionID:           t.GetCollectionId(),
@@ -845,7 +835,7 @@ func (t *refreshExternalCollectionTask) CreateTaskOnWorker(nodeID int64, cluster
 		ExternalSource:         t.GetExternalSource(),
 		ExternalSpec:           t.GetExternalSpec(),
 		StorageConfig:          meta.CreateStorageConfig(),
-		Schema:                 collInfo.Schema,
+		Schema:                 prepared.Schema,
 		PreAllocatedSegmentIds: idRange,
 		NumSegmentsExpected:    preAllocCount,
 		ExploreManifestPath:    t.GetExploreManifestPath(),

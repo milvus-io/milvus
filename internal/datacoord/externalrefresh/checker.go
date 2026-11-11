@@ -63,11 +63,8 @@ type externalCollectionRefreshChecker struct {
 	indexMeta   *index.IndexMeta
 	refreshMeta *ExternalCollectionRefreshMeta
 	closeChan   chan struct{}
-	// onJobFinished is the manager-side callback that pushes the refreshed
-	// schema (ExternalSource/ExternalSpec) into RootCoord via the WAL
-	// broadcast. The manager holds a notifiedJobs dedup map so this callback
-	// is delivered exactly once per jobID even when called concurrently
-	// from the eager task path and the periodic checker tick.
+	// onJobFinished reclaims preparation resources and notifies index builds.
+	// It must not start a DDL or wait for the original Refresh callback.
 	onJobFinished func(ctx context.Context, job *datapb.ExternalCollectionRefreshJob)
 	// applyJobInfo is invoked exactly before a job is persisted as Finished.
 	// It performs the collection-global segment update from all finished task
@@ -80,12 +77,10 @@ type externalCollectionRefreshChecker struct {
 	// without waiting for the retention-gated GC path. The callback itself
 	// is idempotent — the manager dedups on its own cleanup key so concurrent
 	// eager and periodic paths only fire one cleanup per jobID. That key is
-	// deliberately NOT the schema-publish key: a job that applied its
-	// segments and then failed still owes the publish.
+	// independent from schema publication, which the Refresh callback owns.
 	onJobFailed func(jobID int64)
 	// onJobGC is invoked after the checker successfully drops a job during
-	// GC so the manager can release any per-job bookkeeping (the publish and
-	// cleanup dedup entries). Keeps those maps bounded across DataCoord
+	// GC so the manager can release cleanup bookkeeping across DataCoord
 	// lifetime.
 	onJobGC func(jobID int64)
 	// onInitJobPending is fired for jobs still in Init state with no tasks
@@ -213,8 +208,8 @@ func (c *externalCollectionRefreshChecker) processJob(job *datapb.ExternalCollec
 
 // processJobByID looks up a job and runs one inspection pass for it
 // synchronously. Used by the eager task path after a task transitions to
-// a terminal state, so the schemaUpdater fires before the task call returns
-// and progress polls observe a consistent state. Returns silently if the
+// a terminal state, so failure/progress is recorded promptly. The Refresh
+// callback owns publication and successful completion. Returns silently if the
 // job is missing (e.g., already GC'd).
 func (c *externalCollectionRefreshChecker) processJobByID(jobID int64) {
 	job := c.refreshMeta.GetJob(jobID)
@@ -509,6 +504,9 @@ func (c *externalCollectionRefreshChecker) AggregateJobState(job *datapb.Externa
 		return
 	}
 
+	if state == indexpb.JobState_JobStateFinished && refreshCallbackOwnsJob(job) {
+		return
+	}
 	if state == indexpb.JobState_JobStateFinished && len(job.GetTransformStartAfterTimeticks()) != 0 {
 		c.finishPublishedJob(job)
 		return
@@ -672,12 +670,10 @@ func (c *externalCollectionRefreshChecker) AggregateJobState(job *datapb.Externa
 	}
 }
 
-// ensureJobFinishedNotified calls onJobFinished for a finished job. The checker
-// is the single processing path, so this fires once per job per cycle; the
-// callback itself is idempotent (the manager short-circuits when source/spec
-// already match), so re-firing on a later tick before GC is harmless.
+// ensureJobFinishedNotified cleans preparation resources for legacy jobs.
+// Callback-owned jobs perform their own completion cleanup.
 func (c *externalCollectionRefreshChecker) ensureJobFinishedNotified(job *datapb.ExternalCollectionRefreshJob) {
-	if c.onJobFinished == nil {
+	if c.onJobFinished == nil || refreshCallbackOwnsJob(job) {
 		return
 	}
 	// Re-read job from meta to get latest state (may have been updated eagerly)
@@ -685,22 +681,6 @@ func (c *externalCollectionRefreshChecker) ensureJobFinishedNotified(job *datapb
 	if latestJob == nil {
 		return
 	}
-	// Finished, OR applied - waiting for indexes, or done waiting one way or
-	// the other. The callback publishes the refreshed source/spec and reclaims
-	// the explore temp dir, and both become due the moment the segments are
-	// applied - which with the index wait on happens before Finished. Waiting
-	// for Finished would hold the schema back for the whole wait, and index
-	// builds take the external source/spec from the collection schema.
-	// Publishing here narrows the window in which a build can read the previous
-	// source/spec; it does not close it, because the index inspector's own tick
-	// needs no notification. See nudgeIndexBuilds.
-	//
-	// The marker also holds for a job that FAILED after applying (it outran
-	// the job timeout mid-wait). Such a job still owes the publish: its
-	// segments are the collection's contents and are being served, so the
-	// schema must describe them - Failed only says the wait did not finish in
-	// budget. That is why the Failed path may not claim the publish dedup key;
-	// see handleJobFailed.
 	if latestJob.GetState() != indexpb.JobState_JobStateFinished &&
 		latestJob.GetIndexWaitStartedTime() == 0 && !latestJob.GetSegmentsApplied() {
 		return
@@ -833,6 +813,9 @@ func (c *externalCollectionRefreshChecker) tryTimeoutJob(job *datapb.ExternalCol
 
 // checkGC performs garbage collection for completed/failed jobs.
 func (c *externalCollectionRefreshChecker) checkGC(job *datapb.ExternalCollectionRefreshJob) {
+	if refreshCallbackOwnsJob(job) {
+		return
+	}
 	// Only GC terminal states
 	if job.GetState() != indexpb.JobState_JobStateFinished &&
 		job.GetState() != indexpb.JobState_JobStateFailed {

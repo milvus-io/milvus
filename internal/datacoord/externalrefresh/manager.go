@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -120,6 +121,9 @@ func (m *Manager) exploreDirForChunkManager(dir string) string {
 
 // ExternalCollectionRefreshManager defines the interface for managing external table refresh jobs.
 type ExternalCollectionRefreshManager interface {
+	PrepareRefresh(context.Context, int64, int64, string, *schemapb.CollectionSchema) ([]*datapb.ExternalCollectionRefreshTask, error)
+	RunPreparedRefresh(context.Context, message.BroadcastResultRefreshExternalCollectionMessageV2, func(context.Context, message.BroadcastResultRefreshExternalCollectionMessageV2) error) error
+
 	// Lifecycle management
 	Start() // Start all internal components (inspector and checker loops)
 	Stop()  // Stop all internal components gracefully
@@ -158,10 +162,6 @@ type Manager struct {
 	// before the collection metadata has been synced to DataCoord.
 	collectionGetter func(ctx context.Context, collectionID int64) (*meta.CollectionInfo, error)
 
-	// schemaUpdater broadcasts schema changes to RootCoord via WAL after refresh
-	// completes with updated external_source or external_spec.
-	schemaUpdater func(ctx context.Context, collectionID int64, externalSource, externalSpec string) error
-
 	// Unified refresh meta for Job and Task management
 	refreshMeta *ExternalCollectionRefreshMeta
 
@@ -185,27 +185,9 @@ type Manager struct {
 	closeChan chan struct{}
 	wg        sync.WaitGroup
 
-	// notifiedJobs tracks jobs whose schema-update callback has already been
-	// delivered. It guards against concurrent invocations of handleJobFinished
-	// from the eager task path and the periodic checker tick — both paths read
-	// collection.Schema before calling schemaUpdater, so without this dedup
-	// they could both observe a stale snapshot (before the WAL broadcast
-	// propagates back into the DataCoord cache) and both broadcast.
-	// forgetJob on GC prevents unbounded growth.
-	//
-	// cleanedJobs is the same shape for the OTHER one-time side effect, the
-	// per-job explore temp dir, and it is deliberately a SEPARATE key. The two
-	// obligations do not coincide: a job that has applied its segments owes a
-	// schema publish whatever state it ends in, while every job - published or
-	// not - owes exactly one temp-dir cleanup. Sharing one key let the Failed
-	// path claim it and permanently suppress a publish that was still due,
-	// which becomes reachable the moment a job can be applied and non-terminal
-	// at once (the index wait): a job that enters the wait and hits the timeout
-	// in the same processJob pass would commit its segments and never publish
-	// the refreshed source/spec. Both maps are guarded by notifiedMu.
-	notifiedMu   sync.Mutex
-	notifiedJobs map[int64]struct{}
-	cleanedJobs  map[int64]struct{}
+	// Terminal cleanup is idempotent across scheduler and callback paths.
+	cleanupMu   sync.Mutex
+	cleanedJobs map[int64]struct{}
 
 	// initJobsInFlight tracks jobs whose async task-creation (Phase B) is
 	// currently running. SubmitRefreshJobWithID persists the job record in
@@ -230,7 +212,6 @@ func NewExternalCollectionRefreshManager(
 	refreshMeta *ExternalCollectionRefreshMeta,
 	cluster session.Cluster,
 	collectionGetter func(ctx context.Context, collectionID int64) (*meta.CollectionInfo, error),
-	schemaUpdater func(ctx context.Context, collectionID int64, externalSource, externalSpec string) error,
 	chunkManager storage.ChunkManager,
 	notifyIndexChan chan<- UniqueID,
 ) ExternalCollectionRefreshManager {
@@ -244,11 +225,9 @@ func NewExternalCollectionRefreshManager(
 		cluster:          cluster,
 		refreshMeta:      refreshMeta,
 		collectionGetter: collectionGetter,
-		schemaUpdater:    schemaUpdater,
 		chunkManager:     chunkManager,
 		notifyIndexChan:  notifyIndexChan,
 		closeChan:        closeChan,
-		notifiedJobs:     make(map[int64]struct{}),
 		cleanedJobs:      make(map[int64]struct{}),
 		initJobsInFlight: make(map[int64]struct{}),
 	}
@@ -282,26 +261,15 @@ func (m *Manager) forgetJob(jobID int64) {
 	// same call re-run a cleanup a terminal handler already did.
 	m.cleanupExploreTempOnce(jobID)
 
-	m.notifiedMu.Lock()
-	delete(m.notifiedJobs, jobID)
+	m.cleanupMu.Lock()
 	delete(m.cleanedJobs, jobID)
-	m.notifiedMu.Unlock()
+	m.cleanupMu.Unlock()
 }
 
 // handleJobFailed reclaims per-job resources when the checker transitions
 // a job into Failed state (via aggregateJobState or tryTimeoutJob). It is
 // the Failed-path companion to handleJobFinished for the temp dir, and only
 // for the temp dir.
-//
-// It must not claim the schema-publish key. A Failed job that never applied
-// its segments has no publish due, so claiming it looks free - but with the
-// index wait a job CAN be applied and Failed at once (it applied on wait
-// entry, then outran the job timeout), and there the publish is still owed:
-// its segments are the collection's contents and are being served, and index
-// builds read the external source/spec from the collection schema. Claiming
-// one key for both would silence that publish for good, since the only key
-// removal is forgetJob at GC. handleJobFinished, which ensureJobFinishedNotified
-// still fires for such a job, owns the publish.
 func (m *Manager) handleJobFailed(jobID int64) {
 	m.cleanupExploreTempOnce(jobID)
 }
@@ -311,13 +279,13 @@ func (m *Manager) handleJobFailed(jobID int64) {
 // fallback). The underlying removal is idempotent; this only keeps the
 // object-store round trips down to one.
 func (m *Manager) cleanupExploreTempOnce(jobID int64) {
-	m.notifiedMu.Lock()
+	m.cleanupMu.Lock()
 	if _, already := m.cleanedJobs[jobID]; already {
-		m.notifiedMu.Unlock()
+		m.cleanupMu.Unlock()
 		return
 	}
 	m.cleanedJobs[jobID] = struct{}{}
-	m.notifiedMu.Unlock()
+	m.cleanupMu.Unlock()
 
 	m.cleanupExploreTempForJob(jobID)
 }
@@ -597,118 +565,11 @@ func (m *Manager) Stop() {
 	m.wg.Wait()
 }
 
-// handleJobFinished publishes the refreshed external source/spec for a job
-// whose segments are applied. It is called both eagerly (synchronously from
-// the task path via processJobByID) and from the periodic checker tick. The
-// notifiedJobs dedup map below admits at most ONE schemaUpdater call in
-// flight per jobID, and none at all once one has delivered: concurrent calls
-// from the two paths race on the mutex, the loser sees the jobID already
-// present and short-circuits. The source/spec equality check is a cheap
-// secondary guard (e.g., for jobs that finished with the same schema as the
-// current collection).
-//
-// "Applied", not "Finished", is the trigger: ensureJobFinishedNotified fires
-// this for a job that is Finished, and also for one still in the index wait
-// or one that outran the job timeout while waiting - both have committed
-// their segments, so the publish is due either way.
-//
-// "Owed" is about which jobs reach here; whether the publish actually lands
-// is the dedup key's own business, and the key is a lock before it is a
-// receipt - see the block below. A call that fails releases it, so a
-// transient RootCoord or WAL failure retries on the next checker tick instead
-// of reading as published for the rest of this DataCoord lifetime.
+// handleJobFinished cleans resources after publication. Schema publication belongs
+// to the original Refresh callback; this scheduler path must never start DDL.
 func (m *Manager) handleJobFinished(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) {
-	if m.schemaUpdater == nil {
-		return
-	}
-
-	// Exactly-once dedup across concurrent eager + periodic paths.
-	m.notifiedMu.Lock()
-	if _, already := m.notifiedJobs[job.GetJobId()]; already {
-		m.notifiedMu.Unlock()
-		return
-	}
-	m.notifiedJobs[job.GetJobId()] = struct{}{}
-	mapSize := len(m.notifiedJobs)
-	m.notifiedMu.Unlock()
-	if mapSize > 1000 {
-		mlog.Warn(ctx, "notifiedJobs dedup map is large, GC may be lagging",
-			mlog.Int("size", mapSize))
-	}
-
-	// The key is an in-flight lock first and a delivered marker second. It is
-	// claimed above so a concurrent caller cannot broadcast the same schema
-	// twice, and released below unless this call actually delivered - a
-	// transient RootCoord or WAL failure must not read as "published" for the
-	// rest of this DataCoord lifetime, since the only other removal is
-	// forgetJob at GC.
-	//
-	// Releasing on failure cannot reopen the duplicate-broadcast window it
-	// guards: the release happens after this call is done, so no other caller
-	// is ever in flight at the same time. What it buys is a retry on the next
-	// checker tick - and with the index wait that retry is load-bearing, not
-	// cosmetic. nudgeIndexBuilds holds the build acceleration until the
-	// refreshed source/spec are visible in collection meta, so a publish that
-	// failed once and never retried would suppress the nudge for the whole
-	// wait and leave the refresh to run out its timeout.
-	published := false
-	defer func() {
-		if published {
-			return
-		}
-		m.notifiedMu.Lock()
-		delete(m.notifiedJobs, job.GetJobId())
-		m.notifiedMu.Unlock()
-	}()
-
-	// Reclaim the per-job explore temp dir now that all datanode tasks have
-	// finished consuming the manifest. Deduped on its own key, so a job that
-	// reached here after handleJobFailed already reclaimed it does not repeat
-	// the object-store round trip.
-	defer m.cleanupExploreTempOnce(job.GetJobId())
-
-	// Get current collection info
-	collection, err := m.collectionGetter(ctx, job.GetCollectionId())
-	if err != nil || collection == nil {
-		mlog.Warn(ctx, "failed to get collection for schema update after refresh, will retry on the next check",
-			mlog.FieldJobID(job.GetJobId()),
-			mlog.FieldCollectionID(job.GetCollectionId()),
-			mlog.Err(err))
-		return
-	}
-
-	// Check if external_source or external_spec changed
-	currentSource := collection.Schema.GetExternalSource()
-	currentSpec := collection.Schema.GetExternalSpec()
-	newSource := job.GetExternalSource()
-	newSpec := job.GetExternalSpec()
-
-	if currentSource == newSource && currentSpec == newSpec {
-		// Nothing to deliver - the collection already describes this refresh.
-		// That is a delivered publish, so keep the key. The source/spec is already
-		// visible, so the applied segments can be indexed now; otherwise
-		// watchCollectionAlters enqueues them when the publish lands.
-		published = true
-		meta.NotifyCollectionIndexBuild(m.notifyIndexChan, job.GetCollectionId())
-		return
-	}
-
-	mlog.Info(ctx, "updating collection schema after refresh",
-		mlog.FieldJobID(job.GetJobId()),
-		mlog.FieldCollectionID(job.GetCollectionId()),
-		mlog.String("oldSource", currentSource),
-		mlog.String("newSource", newSource),
-		mlog.String("oldSpec", externalspec.RedactExternalSpecForLog(currentSpec)),
-		mlog.String("newSpec", externalspec.RedactExternalSpecForLog(newSpec)))
-
-	if err := m.schemaUpdater(ctx, job.GetCollectionId(), newSource, newSpec); err != nil {
-		mlog.Warn(ctx, "failed to update external schema after refresh, will retry on the next check",
-			mlog.FieldJobID(job.GetJobId()),
-			mlog.FieldCollectionID(job.GetCollectionId()),
-			mlog.Err(err))
-		return
-	}
-	published = true
+	m.cleanupExploreTempOnce(job.GetJobId())
+	meta.NotifyCollectionIndexBuild(m.notifyIndexChan, job.GetCollectionId())
 }
 
 // ============================================================================
@@ -846,6 +707,9 @@ func (m *Manager) SubmitRefreshJobWithID(
 // context to cancel). Errors are logged but not returned: the checker tick
 // will retry on the next cycle, and tryTimeoutJob is the final safety net.
 func (m *Manager) ensureTasksForInitJob(jobID int64) {
+	if job := m.refreshMeta.GetJob(jobID); job != nil && refreshCallbackOwnsJob(job) {
+		return
+	}
 	m.initMu.Lock()
 	if _, running := m.initJobsInFlight[jobID]; running {
 		m.initMu.Unlock()
@@ -946,10 +810,10 @@ func (m *Manager) ensureTasksForInitJob(jobID int64) {
 // produced by this planning attempt plus a [FileIndexBegin, FileIndexEnd)
 // slice. All tasks in the plan share that manifest; if publication fails, a
 // later planning retry may run Explore again and produce another manifest.
-func (m *Manager) createTasksForJob(
+func (m *Manager) planTasksForJob(
 	ctx context.Context,
 	job *datapb.ExternalCollectionRefreshJob,
-) ([]*refreshExternalCollectionTask, error) {
+) ([]*datapb.ExternalCollectionRefreshTask, error) {
 	log := mlog.With(mlog.FieldJobID(job.GetJobId()), mlog.FieldCollectionID(job.GetCollectionId()))
 
 	// Explore once for this planning attempt to get the full file list and
@@ -1115,6 +979,16 @@ func (m *Manager) createTasksForJob(
 			mlog.Int("ownedSegments", len(plan.OwnedSegmentIDs)))
 		rawTasks = append(rawTasks, task)
 	}
+
+	return rawTasks, nil
+}
+
+func (m *Manager) createTasksForJob(ctx context.Context, job *datapb.ExternalCollectionRefreshJob) ([]*refreshExternalCollectionTask, error) {
+	rawTasks, err := m.planTasksForJob(ctx, job)
+	if err != nil {
+		return nil, err
+	}
+	log := mlog.With(mlog.FieldJobID(job.GetJobId()))
 
 	if err = m.refreshMeta.AddTasksToJob(job.GetJobId(), rawTasks); err != nil {
 		if errors.Is(err, errExternalRefreshTaskPlanNotPublishable) {

@@ -116,12 +116,13 @@ var Params = paramtable.Get()
 // Server implements `types.DataCoord`
 // handles Data Coordinator related jobs
 type Server struct {
-	ctx              context.Context
-	serverLoopCtx    context.Context
-	serverLoopCancel context.CancelFunc
-	serverLoopWg     sync.WaitGroup
-	quitCh           chan struct{}
-	stateCode        atomic.Value
+	externalRefreshSchemaManager ExternalRefreshSchemaManager
+	ctx                          context.Context
+	serverLoopCtx                context.Context
+	serverLoopCancel             context.CancelFunc
+	serverLoopWg                 sync.WaitGroup
+	quitCh                       chan struct{}
+	stateCode                    atomic.Value
 
 	etcdCli                             *clientv3.Client
 	tikvCli                             *txnkv.Client
@@ -934,6 +935,13 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 			recoveredMeta.LoadableProjection,
 			collectionIDs,
 			collectionVChannels,
+			dataview.WithRecomputeGuard(func(ctx context.Context, id int64) (bool, error) {
+				collection := recoveredMeta.GetCollection(id)
+				if collection == nil || !collection.IsExternal() {
+					return false, nil
+				}
+				return refreshOwnsDataView(ctx, id)
+			}),
 			dataview.WithFrontierProjector(func(ctx context.Context, collectionID int64) (map[string]uint64, error) {
 				return transformFrontierBounds(ctx, recoveredMeta, recoveredImports, collectionID)
 			}),
@@ -1047,7 +1055,7 @@ func (s *Server) initExternalCollectionInspector(storageCli storage.ChunkManager
 	// Initialize Manager (handles job submission, query, and internal inspector/checker)
 	if s.externalCollectionRefreshManager == nil {
 		s.externalCollectionRefreshManager = externalrefresh.NewExternalCollectionRefreshManager(
-			s.ctx, s.meta, s.indexMeta, s.globalScheduler, s.allocator, s.externalCollectionRefreshMeta, s.cluster2, s.handler.GetCollection, s.updateExternalSchemaViaWAL, storageCli, s.notifyIndexChan)
+			s.ctx, s.meta, s.indexMeta, s.globalScheduler, s.allocator, s.externalCollectionRefreshMeta, s.cluster2, s.handler.GetCollection, storageCli, s.notifyIndexChan)
 	}
 }
 

@@ -14,11 +14,12 @@ import (
 )
 
 // SchemaTarget is a snapshot of the earliest unfinished durable schema
-// ALTER for a collection. It is readable after task persistence, before WAL
+// ALTER or Refresh for a collection. It is readable after task persistence, before WAL
 // append or ACK completion. This does not authorize publication or prove that
 // any channel has applied the schema. Completion of its callback retires it.
 type SchemaTarget struct {
 	CollectionID int64
+	RefreshJobID int64
 	BroadcastID  uint64
 	// Schema is shared and immutable; callers must not modify it.
 	Schema *schemapb.CollectionSchema
@@ -32,6 +33,9 @@ type SchemaTarget struct {
 // Read only the header: completed tasks need not have their bodies decoded
 // during recovery.
 func schemaTargetCollectionID(msg message.BroadcastMutableMessage) int64 {
+	if msg.MessageTypeWithVersion() == message.MessageTypeRefreshExternalCollectionV2 {
+		return message.MustAsMutableRefreshExternalCollectionMessageV2(msg).Header().GetCollectionId()
+	}
 	if msg.MessageTypeWithVersion() != message.MessageTypeAlterCollectionV2 {
 		return 0
 	}
@@ -46,7 +50,7 @@ func schemaTargetCollectionID(msg message.BroadcastMutableMessage) int64 {
 // holding its lock never acquires a manager or task lock, so persistence can
 // update it under the task lock without blocking readers on metadata I/O.
 //
-// ALTERs for a collection are serial: withResourceKeys allocates BroadcastID
+// Schema DDLs for a collection are serial: withResourceKeys allocates BroadcastID
 // after acquiring the resource lock, and replication preserves that ID. Keep the
 // earliest unfinished ID, including on secondaries with several pending ALTERs.
 // ACK arrival order and missing control-channel checkpoints do not change order.
@@ -103,8 +107,12 @@ func (b *broadcastTask) pendingSchemaTarget() *SchemaTarget {
 		return nil
 	}
 	if b.schemaForTarget == nil {
-		msg := message.MustAsMutableAlterCollectionMessageV2(b.msg)
-		schema := msg.MustBody().GetUpdates().GetSchema()
+		var schema *schemapb.CollectionSchema
+		if b.msg.MessageType() == message.MessageTypeRefreshExternalCollection {
+			schema = message.MustAsMutableRefreshExternalCollectionMessageV2(b.msg).MustBody().GetSchema()
+		} else {
+			schema = message.MustAsMutableAlterCollectionMessageV2(b.msg).MustBody().GetUpdates().GetSchema()
+		}
 		if schema == nil {
 			return nil
 		}
@@ -117,6 +125,9 @@ func (b *broadcastTask) pendingSchemaTarget() *SchemaTarget {
 		BroadcastID:  b.header().BroadcastID,
 		Schema:       b.schemaForTarget,
 		TimeTicks:    make(map[string]uint64),
+	}
+	if b.msg.MessageType() == message.MessageTypeRefreshExternalCollection {
+		snapshot.RefreshJobID = message.MustAsMutableRefreshExternalCollectionMessageV2(b.msg).Header().GetJobId()
 	}
 	for i, channel := range b.header().VChannels {
 		if tick := b.task.AckedCheckpoints[i].GetTimeTick(); !funcutil.IsControlChannel(channel) && tick != 0 {
@@ -139,6 +150,7 @@ func (bm *broadcastTaskManager) GetPendingSchemaTarget(collectionID int64) (*Sch
 	// acquiring any task lock or inspecting pending successors.
 	return &SchemaTarget{
 		CollectionID: snapshot.CollectionID,
+		RefreshJobID: snapshot.RefreshJobID,
 		BroadcastID:  snapshot.BroadcastID,
 		Schema:       snapshot.Schema,
 		TimeTicks:    maps.Clone(snapshot.TimeTicks),
