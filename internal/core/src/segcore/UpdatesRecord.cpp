@@ -76,14 +76,15 @@ using Postings = std::unordered_map<int64_t, History>;
 // contains only one non-null type. Strings use byte lexicographic ordering.
 // B-tree mutations invalidate iterators: retain neither them nor key addresses.
 // Heap-owned posting groups and deque-owned versions have stable addresses.
-using ValueTree = absl::btree_map<UpdateValue, std::unique_ptr<Postings>>;
+using AllDataVersionedIndex =
+    absl::btree_map<UpdateValue, std::unique_ptr<Postings>>;
 
 struct Field {
     UpdateFieldType type;
     bool nullable;
     std::deque<Version> versions;
     std::vector<History> offsets;
-    std::unique_ptr<ValueTree> index;
+    std::unique_ptr<AllDataVersionedIndex> index;
 
     void
     Validate(const UpdateValue& value) const {
@@ -192,7 +193,7 @@ UpdatesRecord::InitializeField(int64_t field_id,
     field->nullable = nullable;
     field->offsets.resize(impl_->row_count);
     if (impl_->enable_temp_index) {
-        field->index = std::make_unique<ValueTree>();
+        field->index = std::make_unique<AllDataVersionedIndex>();
     }
     for (size_t offset = 0; offset < values.size(); ++offset) {
         field->Validate(values[offset]);
@@ -306,6 +307,43 @@ UpdatesRecord::Lookup(int64_t field_id,
     const auto* version =
         Visible(impl_->GetField(field_id).offsets[offset], query_ts);
     return version ? version->value : nullptr;
+}
+
+std::vector<std::shared_ptr<const UpdateValue>>
+UpdatesRecord::Gather(int64_t field_id,
+                      const std::vector<int64_t>& offsets,
+                      uint64_t query_ts) const {
+    std::shared_lock lock(impl_->mutex);
+    const auto& field = impl_->GetField(field_id);
+    std::vector<std::shared_ptr<const UpdateValue>> result;
+    result.reserve(offsets.size());
+    for (auto offset : offsets) {
+        impl_->ValidateOffset(offset);
+        const auto* version = Visible(field.offsets[offset], query_ts);
+        result.push_back(version ? version->value : nullptr);
+    }
+    return result;
+}
+
+std::vector<std::shared_ptr<const UpdateValue>>
+UpdatesRecord::Scan(int64_t field_id,
+                    int64_t begin_offset,
+                    size_t count,
+                    uint64_t query_ts) const {
+    std::shared_lock lock(impl_->mutex);
+    Require(begin_offset >= 0 &&
+                static_cast<size_t>(begin_offset) <= impl_->row_count &&
+                count <= impl_->row_count - static_cast<size_t>(begin_offset),
+            "POC scan range is outside the physical segment");
+    const auto& field = impl_->GetField(field_id);
+    std::vector<std::shared_ptr<const UpdateValue>> result;
+    result.reserve(count);
+    for (size_t i = 0; i < count; ++i) {
+        const auto* version =
+            Visible(field.offsets[begin_offset + i], query_ts);
+        result.push_back(version ? version->value : nullptr);
+    }
+    return result;
 }
 
 std::vector<int64_t>

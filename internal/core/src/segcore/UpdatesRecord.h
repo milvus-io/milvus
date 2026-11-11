@@ -92,6 +92,21 @@ class UpdatesRecord {
     std::shared_ptr<const UpdateValue>
     Lookup(int64_t field_id, int64_t offset, uint64_t query_ts) const;
 
+    // One read lock and one timestamp for the entire batch. Results preserve
+    // input order (including duplicate offsets), with the same NULL/absence
+    // distinction as Lookup. Values retain ownership without copying strings.
+    std::vector<std::shared_ptr<const UpdateValue>>
+    Gather(int64_t field_id,
+           const std::vector<int64_t>& offsets,
+           uint64_t query_ts) const;
+
+    // Contiguous batch for a raw evaluator, without building an offsets array.
+    std::vector<std::shared_ptr<const UpdateValue>>
+    Scan(int64_t field_id,
+         int64_t begin_offset,
+         size_t count,
+         uint64_t query_ts) const;
+
     // Exact, sorted unique offset results. Ordinary predicates exclude NULL.
     // A future expression adapter supplies SQL validity and segment visibility.
     // Calling an index operation with enable_temp_index=false is an error,
