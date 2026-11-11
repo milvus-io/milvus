@@ -497,20 +497,24 @@ Lowering it does not split existing segments.
   - the compaction writer cuts at `max_segment_rows`; the row limit of the
     StreamingNode seal; the clustering row limit; the conversion of the
     import byte target.
-- End-to-end tests under `tests/python_client/milvus_client/`:
+- End-to-end cases in the repository
+  (`tests/python_client/milvus_client/test_milvus_client_collection_without_vector.py`,
+  and the updated create case of the Go SDK suite):
   - create without a vector, load with no index, then query, get, count,
-    iterator, delete and upsert;
-  - with scalar indexes, partition key and clustering key;
+    delete and upsert; search returns the unified error;
+  - with a scalar `INVERTED` index, partition key and clustering key;
+  - `add_field` with a vector is rejected and with a scalar succeeds.
+- Covered by Go unit tests instead of an end-to-end case: REST v2 insert
+  and search, and the switch turned off.
+- Run with local scripts that are not in the repository, because they need
+  millions of rows or a server restart (results in 6.1 and Appendix B):
   - bulk import followed by compaction;
-  - search returns the unified error;
-  - `add_field` with a vector is rejected and with a scalar succeeds;
-  - the switch turned off;
-  - REST v2;
   - after 10 M narrow rows are inserted (dynamic field on), compaction
     outputs stay at or below `maxRows` rows and the IDs of full segments do
     not change over the following automatic trigger cycles; an import of
     12 M narrow rows produces at least 3 segments; a low-dimensional vector
-    collection is not capped.
+    collection is not capped;
+  - every role restarted with the switch off and on again (Appendix B.4).
 
 ### 6.1 Results
 
