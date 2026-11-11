@@ -881,7 +881,7 @@ class Checker:
             )
             return res, True
         except Exception as e:
-            return str(e), False
+            return e, False
 
     def total(self):
         return self._succ + self._fail
@@ -1906,12 +1906,19 @@ class AddFieldChecker(Checker):
             )
             log.debug(f"add field {new_field_name} to collection {self.c_name}")
             time.sleep(1)
-            _, result = self.insert_data()
+            res, result = self.insert_data()
+            if not result and isinstance(res, SchemaMismatchRetryableException):
+                # Refresh the active database's schema and retry only the insert, not the DDL.
+                context = self.milvus_client._generate_call_context()
+                self.milvus_client._get_connection()._invalidate_schema(self.c_name, db_name=context.get_db_name())
+                res, result = self.insert_data()
+            if not result:
+                return str(res), False
             _ = self.milvus_client.query(
                 collection_name=self.c_name, filter=f"{new_field_name} >= 0", output_fields=[new_field_name]
             )
             log.debug(f"query with field {new_field_name} success")
-            return None, result
+            return None, True
         except Exception as e:
             log.error(e)
             return str(e), False
