@@ -97,12 +97,18 @@ func (s *SnapshotSchemaImportSuite) TestSnapshotSchemaConversion() {
 			}{
 				{name: "smaller_dimension", dim: 64, admissionErr: "vector dimension mismatch"},
 				{name: "larger_dimension", dim: 256, admissionErr: "vector dimension mismatch"},
-				{name: "float_to_bfloat16_equal_width", dim: 256, targetType: schemapb.DataType_BFloat16Vector,
-					admissionErr: "vector data type mismatch"},
-				{name: "array_float_to_binary", sourceElement: schemapb.DataType_FloatVector,
-					targetElement: schemapb.DataType_BinaryVector, admissionErr: "vector element type mismatch"},
-				{name: "array_float16_to_bfloat16", sourceElement: schemapb.DataType_Float16Vector,
-					targetElement: schemapb.DataType_BFloat16Vector, admissionErr: "vector element type mismatch"},
+				{
+					name: "float_to_bfloat16_equal_width", dim: 256, targetType: schemapb.DataType_BFloat16Vector,
+					admissionErr: "vector data type mismatch",
+				},
+				{
+					name: "array_float_to_binary", sourceElement: schemapb.DataType_FloatVector,
+					targetElement: schemapb.DataType_BinaryVector, admissionErr: "vector element type mismatch",
+				},
+				{
+					name: "array_float16_to_bfloat16", sourceElement: schemapb.DataType_Float16Vector,
+					targetElement: schemapb.DataType_BFloat16Vector, admissionErr: "vector element type mismatch",
+				},
 				{name: "ascii_boundary", text: "abcdef", nullable: true},
 				{name: "utf8_boundary", text: "中文", nullable: true},
 				{name: "ascii_oversized", text: "abcdefg", nullable: true, readErr: "exceeds max_length(6)"},
@@ -139,8 +145,10 @@ func (s *SnapshotSchemaImportSuite) TestSnapshotSchemaConversion() {
 					}}
 					if tc.sourceElement != schemapb.DataType_None {
 						source.StructArrayFields = []*schemapb.StructArrayFieldSchema{{Name: "group", Fields: []*schemapb.FieldSchema{
-							{Name: "vectors", DataType: schemapb.DataType_ArrayOfVector, ElementType: tc.sourceElement,
-								TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "32"}, {Key: common.MaxCapacityKey, Value: "1000"}}},
+							{
+								Name: "vectors", DataType: schemapb.DataType_ArrayOfVector, ElementType: tc.sourceElement,
+								TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "32"}, {Key: common.MaxCapacityKey, Value: "1000"}},
+							},
 						}}}
 					}
 					create(source)
@@ -150,8 +158,10 @@ func (s *SnapshotSchemaImportSuite) TestSnapshotSchemaConversion() {
 					text := integration.NewVarCharFieldData("text", 3, false)
 					typeutil.SetFieldDataValidData(text, nil)
 					text.GetScalars().GetStringData().Data = []string{"", "a", tc.text}
-					fieldsData := []*schemapb.FieldData{integration.NewInt64FieldData("pk", 3),
-						integration.NewFloatVectorFieldData("vector", 3, sourceDim), text, values}
+					fieldsData := []*schemapb.FieldData{
+						integration.NewInt64FieldData("pk", 3),
+						integration.NewFloatVectorFieldData("vector", 3, sourceDim), text, values,
+					}
 					if tc.sourceElement != schemapb.DataType_None {
 						fieldsData = append(fieldsData, integration.NewStructArrayFieldData(source.StructArrayFields[0], "group", 3, 32))
 					}

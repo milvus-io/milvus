@@ -2156,16 +2156,22 @@ func TestPrepareSnapshotImportOptions_VectorDimensions(t *testing.T) {
 		require.NoError(t, err)
 	})
 	t.Run("vector_data_types", func(t *testing.T) {
-		for _, sourceType := range []schemapb.DataType{schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector,
+		for _, sourceType := range []schemapb.DataType{
+			schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector,
 			schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_Int8Vector,
-			schemapb.DataType_SparseFloatVector, schemapb.DataType_Int64} {
-			for _, targetType := range []schemapb.DataType{schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector,
+			schemapb.DataType_SparseFloatVector, schemapb.DataType_Int64,
+		} {
+			for _, targetType := range []schemapb.DataType{
+				schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector,
 				schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_Int8Vector,
-				schemapb.DataType_SparseFloatVector, schemapb.DataType_Int64} {
+				schemapb.DataType_SparseFloatVector, schemapb.DataType_Int64,
+			} {
 				t.Run(sourceType.String()+"_to_"+targetType.String(), func(t *testing.T) {
 					source, target := SnapshotImportTestSchema(), SnapshotImportTestSchema()
-					field := &schemapb.FieldSchema{FieldID: 102, Name: "vector", DataType: sourceType,
-						TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "32"}}}
+					field := &schemapb.FieldSchema{
+						FieldID: 102, Name: "vector", DataType: sourceType,
+						TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "32"}},
+					}
 					source.Fields = append(source.Fields, field)
 					targetField := proto.Clone(field).(*schemapb.FieldSchema)
 					targetField.DataType = targetType
@@ -2183,14 +2189,20 @@ func TestPrepareSnapshotImportOptions_VectorDimensions(t *testing.T) {
 	})
 
 	t.Run("array_element_types", func(t *testing.T) {
-		for _, sourceType := range []schemapb.DataType{schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector,
-			schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_Int8Vector} {
-			for _, targetType := range []schemapb.DataType{schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector,
-				schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_Int8Vector} {
+		for _, sourceType := range []schemapb.DataType{
+			schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector,
+			schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_Int8Vector,
+		} {
+			for _, targetType := range []schemapb.DataType{
+				schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector,
+				schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_Int8Vector,
+			} {
 				t.Run(sourceType.String()+"_to_"+targetType.String(), func(t *testing.T) {
 					source, target := SnapshotImportTestSchema(), SnapshotImportTestSchema()
-					field := &schemapb.FieldSchema{FieldID: 103, Name: "vectors", DataType: schemapb.DataType_ArrayOfVector,
-						ElementType: sourceType, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "32"}}}
+					field := &schemapb.FieldSchema{
+						FieldID: 103, Name: "vectors", DataType: schemapb.DataType_ArrayOfVector,
+						ElementType: sourceType, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "32"}},
+					}
 					source.StructArrayFields = []*schemapb.StructArrayFieldSchema{{FieldID: 102, Fields: []*schemapb.FieldSchema{field}}}
 					targetField := proto.Clone(field).(*schemapb.FieldSchema)
 					targetField.ElementType = targetType
