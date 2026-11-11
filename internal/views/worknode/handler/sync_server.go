@@ -76,7 +76,9 @@ func (s *ViewSyncServer) sendLoop(
 ) {
 	timer := time.NewTimer(qviews.ShardStatsInterval)
 	defer timer.Stop()
-	statsReady := s.handler.ShardStatsReady()
+	sizeReady := s.handler.ShardStatsReady()
+	statsReady := sizeReady
+	lastStatsTake := time.Now()
 	if s.sendShardStats(stream, pending) {
 		return
 	}
@@ -85,15 +87,17 @@ func (s *ViewSyncServer) sendLoop(
 		case <-ctx.Done():
 			return
 		case <-timer.C:
+			lastStatsTake = time.Now()
 			timer.Reset(qviews.ShardStatsInterval)
 			if s.sendShardStats(stream, pending) {
 				return
 			}
+			statsReady = sizeReady
 		case <-statsReady:
-			timer.Reset(qviews.ShardStatsInterval)
-			if s.sendShardStats(stream, pending) {
-				return
-			}
+			// Coalesce size notifications until the next allowed take. Keep
+			// serving state reports while the timer enforces the minimum gap.
+			statsReady = nil
+			timer.Reset(max(0, time.Until(lastStatsTake.Add(qviews.ShardStatsMinInterval))))
 		case _, ok := <-pending.Ready():
 			// Drain pending reports regardless of whether the channel is
 			// still open or was closed (final drain before exit).

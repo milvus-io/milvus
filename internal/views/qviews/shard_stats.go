@@ -3,8 +3,9 @@ package qviews
 import "time"
 
 const (
-	ShardStatsInterval   = 5 * time.Second
-	ShardStatsMaxEntries = 1024
+	ShardStatsInterval    = 5 * time.Second
+	ShardStatsMinInterval = time.Second
+	ShardStatsMaxEntries  = 1024
 )
 
 // ShardStats counts planning attempts within one reporting window.

@@ -82,17 +82,24 @@ func TestShardStatsPersistentStreamWithoutViews(t *testing.T) {
 		cancel = <-attempts
 		defer cancel()
 		h.RecordShardAccess(id)
-		require.EqualValues(t, 1, next().Shards[id].RequestCount)
-		for i := range qviews.ShardStatsMaxEntries {
-			h.RecordShardAccess(qviews.ShardID{ReplicaID: int64(i + 100), VChannel: "p_1v0"})
-		}
-		for range qviews.ShardStatsMaxEntries / 256 {
-			select {
-			case batch := <-reports:
-				require.Len(t, batch.Shards, 256)
-			case <-time.After(2 * time.Second):
-				t.Fatal("size threshold did not wake sender")
+		previous := next()
+		require.EqualValues(t, 1, previous.Shards[id].RequestCount)
+		for range 2 {
+			for i := range qviews.ShardStatsMaxEntries {
+				h.RecordShardAccess(qviews.ShardID{ReplicaID: int64(i + 100), VChannel: "p_1v0"})
 			}
+			var end int64
+			for range qviews.ShardStatsMaxEntries / 256 {
+				select {
+				case batch := <-reports:
+					require.Len(t, batch.Shards, 256)
+					require.GreaterOrEqual(t, batch.EndUnixNanos-previous.EndUnixNanos, int64(qviews.ShardStatsMinInterval))
+					end = batch.EndUnixNanos
+				case <-time.After(2 * time.Second):
+					t.Fatal("size threshold did not wake sender")
+				}
+			}
+			previous.EndUnixNanos = end
 		}
 		require.NoError(t, rs.Close())
 		select {

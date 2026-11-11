@@ -320,5 +320,7 @@ both protected resource reuse and eventual readiness without another push.
 `shardStats` child structure, independently of View state machines. Observe updates
 only the current window. The existing send loop takes ownership of its map every
 five seconds or at 1024 distinct Shards, then sends batches of up to 256 samples.
-Empty windows are skipped; failed windows are dropped rather than replayed.
+Size-triggered takes are at least one second apart within a stream; the send loop
+continues processing state and close reports during the wait. Empty windows are
+skipped; failed windows are dropped rather than replayed.
 QN returns no statistics. State callbacks retain their existing View-key semantics.
