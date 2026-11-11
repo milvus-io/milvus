@@ -11,7 +11,7 @@ import os
 import re
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -162,8 +162,11 @@ def paced(checker, clients, output, duration):
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         futures = [pool.submit(worker, number) for number in range(8)]
-        while not all(future.done() for future in futures):
-            stop.wait(10)
+        pending = set(futures)
+        while pending:
+            # A request failure sets stop immediately; reporting still waits for
+            # in-flight requests or the next interval instead of busy-looping.
+            _, pending = wait(pending, timeout=10)
             with lock:
                 journal.flush()
                 print(
