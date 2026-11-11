@@ -1704,6 +1704,60 @@ func TestHybridSearchWithRerank(t *testing.T) {
 	sendReqAndVerify(t, testEngine, queryTestCases.path, http.MethodPost, queryTestCases)
 }
 
+// TestSearchCollectionWithoutVectorField: search, search by primary keys and
+// hybrid search on a collection without a vector field return the error of the
+// Proxy, not a request body error, and never reach the Proxy.
+func TestSearchCollectionWithoutVectorField(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key)
+
+	schema := &schemapb.CollectionSchema{
+		Name: DefaultCollectionName,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "age", DataType: schemapb.DataType_Int32},
+		},
+	}
+	mp := mocks.NewMockProxy(t)
+	testEngine := initHTTPServerV2(mp, false)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         schema,
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Times(5)
+
+	errCode := merr.Code(merr.ErrParameterInvalid)
+	errMsg := "collection book has no vector field, search is not supported"
+	for name, tc := range map[string]requestBodyTestCase{
+		"search with annsField": {
+			path:        versionalV2(EntityCategory, SearchAction),
+			requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "annsField": "vec", "limit": 3}`),
+		},
+		"search without annsField": {
+			path:        versionalV2(EntityCategory, SearchAction),
+			requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "limit": 3}`),
+		},
+		"search by ids": {
+			path:        versionalV2(EntityCategory, SearchAction),
+			requestBody: []byte(`{"collectionName": "book", "ids": [1, 2], "limit": 3}`),
+		},
+		"hybrid search": {
+			path:        versionalV2(EntityCategory, HybridSearchAction),
+			requestBody: []byte(`{"collectionName": "book", "search": [{"data": [[0.1, 0.2]], "annsField": "vec", "limit": 3}], "rerank": {"strategy": "rrf", "params": {"k": 1}}, "limit": 3}`),
+		},
+		"advanced search": {
+			path:        versionalV2(EntityCategory, AdvancedSearchAction),
+			requestBody: []byte(`{"collectionName": "book", "search": [{"data": [[0.1, 0.2]], "annsField": "vec", "limit": 3}], "rerank": {"strategy": "rrf", "params": {"k": 1}}, "limit": 3}`),
+		},
+	} {
+		tc.errCode = errCode
+		tc.errMsg = errMsg
+		sendReqAndVerify(t, testEngine, name, http.MethodPost, tc)
+	}
+}
+
 // TestSearchStructVectorOnlyWithoutAnnsField: on a collection whose only vector
 // is a struct sub-field, search and hybrid sub-searches without annsField build
 // the placeholder from that sub-field and leave anns_field empty, so the proxy
