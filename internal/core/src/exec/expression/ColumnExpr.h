@@ -79,6 +79,20 @@ class PhyColumnExpr : public Expr {
     Eval(EvalCtx& context, VectorPtr& result) override;
 
     void
+    SetQueryTimestamp(Timestamp timestamp) override {
+        has_updates_ =
+            value_lookup_.BindUpdates(segment_chunk_reader_.segment_,
+                                      expr_->GetColumn().field_id_,
+                                      timestamp,
+                                      segment_chunk_reader_.active_count_);
+    }
+
+    bool
+    IsCacheable() const override {
+        return !has_updates_ && Expr::IsCacheable();
+    }
+
+    void
     SetSnapshot(const segcore::SegmentReadSnapshot* snapshot) override {
         segment_chunk_reader_.SetSnapshot(snapshot);
     }
@@ -178,6 +192,7 @@ class PhyColumnExpr : public Expr {
     int64_t value_lookup_current_row_{0};
 
     segcore::ColumnScanState column_scan_state_;
+    bool has_updates_ = false;
     const segcore::SegmentChunkReader segment_chunk_reader_;
     int64_t batch_size_;
     std::shared_ptr<const milvus::expr::ColumnExpr> expr_;

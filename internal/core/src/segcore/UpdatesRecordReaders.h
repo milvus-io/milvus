@@ -87,6 +87,8 @@ class ValueReader : public index::IIndexReaderBase {
     Caps() const override;
     std::vector<std::shared_ptr<const UpdateValue>>
     Scan(int64_t begin_offset, size_t count) const;
+    std::vector<std::shared_ptr<const UpdateValue>>
+    ReadOffsets(const std::vector<int64_t>& offsets) const;
 
  protected:
     explicit ValueReader(

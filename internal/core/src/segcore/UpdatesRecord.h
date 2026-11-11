@@ -139,6 +139,12 @@ class UpdatesRecord {
     std::vector<int64_t>
     IsNotNull(int64_t field_id, uint64_t query_ts) const;
 
+    bool
+    HasField(int64_t field_id) const;
+
+    size_t
+    RowCount() const;
+
     // Creates both access paths with one field/timestamp binding. The caller
     // must have completed the input prefix through query_ts before opening it;
     // binding does not advance or replace the QueryView apply frontier.

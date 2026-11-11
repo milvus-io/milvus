@@ -30,7 +30,7 @@ namespace milvus::segcore::experimental {
 
 // Preparation adapter for the static, sealed-segment POC. Pins the original
 // physical base/index state and builds the experimental store from its values.
-// It does not register an expression reader or alter segment query routing.
+// Expression routing is activated explicitly after preparation.
 class SealedUpdatesRecord {
  public:
     static std::unique_ptr<SealedUpdatesRecord>
@@ -49,6 +49,10 @@ class SealedUpdatesRecord {
           const std::vector<UpdateAssignment>& assignments,
           OpContext* op_ctx = nullptr);
 
+    // Call before starting queries; output fill continues to read base values.
+    void
+    EnableExprEvaluation();
+
     const UpdatesRecord&
     Records() const {
         return *records_;
@@ -62,7 +66,7 @@ class SealedUpdatesRecord {
     // outlive the facade. Reverse member destruction preserves that order.
     std::shared_ptr<ChunkedSegmentSealedImpl> source_;
     std::unique_ptr<ChunkedSegmentSealedImpl> read_state_;
-    std::unique_ptr<UpdatesRecord> records_;
+    std::shared_ptr<UpdatesRecord> records_;
     std::vector<uint64_t> insertion_timestamps_;
 };
 

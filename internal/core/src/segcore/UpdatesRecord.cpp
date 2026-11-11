@@ -175,6 +175,17 @@ UpdatesRecord::UpdatesRecord(std::shared_ptr<Impl> impl)
 
 UpdatesRecord::~UpdatesRecord() = default;
 
+bool
+UpdatesRecord::HasField(int64_t field_id) const {
+    std::shared_lock lock(impl_->mutex);
+    return impl_->fields.count(field_id) != 0;
+}
+
+size_t
+UpdatesRecord::RowCount() const {
+    return impl_->row_count;
+}
+
 detail::UpdateReadBinding
 UpdatesRecord::CaptureReadBinding(int64_t field_id, uint64_t query_ts) const {
     std::shared_lock lock(impl_->mutex);

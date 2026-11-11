@@ -45,6 +45,11 @@ SealedUpdatesRecord::SealedUpdatesRecord(
 
 SealedUpdatesRecord::~SealedUpdatesRecord() = default;
 
+void
+SealedUpdatesRecord::EnableExprEvaluation() {
+    source_->AttachExperimentalUpdates(records_);
+}
+
 std::unique_ptr<SealedUpdatesRecord>
 SealedUpdatesRecord::Build(std::shared_ptr<ChunkedSegmentSealedImpl> source,
                            const std::vector<int64_t>& field_ids,
@@ -70,7 +75,7 @@ SealedUpdatesRecord::Build(std::shared_ptr<ChunkedSegmentSealedImpl> source,
     }
     AssertInfo(!field_ids.empty(), "POC update field list is empty");
     result->records_ =
-        std::make_unique<UpdatesRecord>(row_count, enable_temp_index);
+        std::make_shared<UpdatesRecord>(row_count, enable_temp_index);
     result->insertion_timestamps_.resize(row_count);
     std::vector<int64_t> offsets;
     for (int64_t start = 0; start < row_count;) {

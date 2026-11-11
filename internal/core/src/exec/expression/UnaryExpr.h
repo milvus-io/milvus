@@ -951,6 +951,28 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     }
 
     void
+    DetermineUpdateExecPath() override {
+        if (IsTextIndexOpType(expr_->op_type_)) {
+            throw SegcoreError(
+                Unsupported,
+                "Text/phrase matching on POC updated fields is not supported");
+        }
+        switch (expr_->op_type_) {
+            case proto::plan::Equal:
+            case proto::plan::NotEqual:
+            case proto::plan::GreaterThan:
+            case proto::plan::GreaterEqual:
+            case proto::plan::LessThan:
+            case proto::plan::LessEqual:
+            case proto::plan::PrefixMatch:
+                SelectUpdateIndexReader();
+                break;
+            default:
+                exec_path_ = ExprExecPath::RawData;
+        }
+    }
+
+    void
     DetermineExecPath() override;
 
     bool

@@ -12,6 +12,7 @@
 #include <numeric>
 #include "index/scalar/sort/SortedMembership.h"
 #include "ChunkedSegmentSealedImpl.h"
+#include "segcore/UpdatesRecord.h"
 #include "segcore/default_fs.h"
 
 #include <cxxabi.h>
@@ -5414,7 +5415,8 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
 ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
     const ChunkedSegmentSealedImpl& source,
     std::shared_ptr<const PublishedSegmentState> state)
-    : read_state_fork_(true),
+    : experimental_updates_(source.GetExperimentalUpdates()),
+      read_state_fork_(true),
       deleted_record_(source.deleted_record_),
       published_state_(std::move(state)),
       id_(source.id_),
@@ -5424,6 +5426,14 @@ ChunkedSegmentSealedImpl::ChunkedSegmentSealedImpl(
       segcore_config_(source.segcore_config_),
       is_sorted_by_pk_(source.is_sorted_by_pk_),
       reader_mutex_(source.reader_mutex_) {
+}
+
+void
+ChunkedSegmentSealedImpl::AttachExperimentalUpdates(
+    std::shared_ptr<const experimental::UpdatesRecord> records) {
+    AssertInfo(records != nullptr && records->RowCount() == get_row_count(),
+               "POC update store must cover the sealed segment");
+    std::atomic_store(&experimental_updates_, std::move(records));
 }
 
 std::unique_ptr<ChunkedSegmentSealedImpl>

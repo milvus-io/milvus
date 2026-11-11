@@ -248,6 +248,12 @@ ValueReader::Scan(int64_t begin_offset, size_t count) const {
         binding_->field_id, begin_offset, count, binding_->query_ts);
 }
 
+std::vector<std::shared_ptr<const UpdateValue>>
+ValueReader::ReadOffsets(const std::vector<int64_t>& offsets) const {
+    return binding_->records->Gather(
+        binding_->field_id, offsets, binding_->query_ts);
+}
+
 UpdateReaders
 UpdatesRecord::CreateReaders(int64_t field_id, uint64_t query_ts) const {
     auto binding = std::make_shared<const detail::UpdateReadBinding>(

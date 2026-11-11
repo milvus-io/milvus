@@ -416,8 +416,18 @@ class SegmentInterface {
 
 // internal API for DSL calculation
 // only for implementation
+namespace experimental {
+class UpdatesRecord;
+}
+
 class SegmentInternalInterface : public SegmentInterface {
  public:
+    // Query-only POC store. Ordinary segments expose no experimental values.
+    virtual std::shared_ptr<const experimental::UpdatesRecord>
+    GetExperimentalUpdates() const {
+        return nullptr;
+    }
+
     // Process-unique id for THIS segment OBJECT, distinct from
     // get_segment_id() which identifies the logical segment.
     //
