@@ -32,13 +32,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 // dcSegmentState holds the DC-only fields that are not part of the shared
 // datapb.SegmentInfo proto and therefore never go through MetaStore.
 type dcSegmentState struct {
-	allocations     []*Allocation
 	lastFlushTime   time.Time
 	isCompacting    bool
 	lastWrittenTime time.Time
@@ -69,7 +67,6 @@ type SegmentsInfo struct {
 // SegmentInfo wraps datapb.SegmentInfo and patches some extra info on it
 type SegmentInfo struct {
 	*datapb.SegmentInfo
-	Allocations     []*Allocation
 	LastFlushTime   time.Time
 	IsCompacting    bool
 	LastWrittenTime time.Time
@@ -122,9 +119,6 @@ func (s *SegmentInfo) GetEarliestTs() uint64 {
 }
 
 // NewSegmentInfo create `SegmentInfo` wrapper from `datapb.SegmentInfo`
-// assign current rows to last checkpoint and pre-allocate `allocations` slice
-// Note that the allocation information is not preserved,
-// the worst case scenario is to have a segment with twice size we expects
 //
 // Stats is populated from the FieldBinlog arrays when nil so legacy
 // segments (persisted before Statistics existed) and live aggregate
@@ -139,7 +133,6 @@ func NewSegmentInfo(info *datapb.SegmentInfo) *SegmentInfo {
 	}
 	// setup growing fields
 	if s.GetState() == commonpb.SegmentState_Growing {
-		s.Allocations = make([]*Allocation, 0, 16)
 		s.LastFlushTime = time.Now().Add(-1 * paramtable.Get().DataCoordCfg.SegmentFlushInterval.GetAsDuration(time.Second))
 		// A growing segment from recovery can be also considered idle.
 		s.LastWrittenTime = GetZeroTime()
@@ -176,7 +169,6 @@ func (s *SegmentsInfo) RebuildFromStore() {
 func newDCSegmentState(segProto *datapb.SegmentInfo) *dcSegmentState {
 	dc := &dcSegmentState{}
 	if segProto.GetState() == commonpb.SegmentState_Growing {
-		dc.allocations = make([]*Allocation, 0, 16)
 		dc.lastFlushTime = time.Now().Add(-1 * paramtable.Get().DataCoordCfg.SegmentFlushInterval.GetAsDuration(time.Second))
 		// A growing segment from recovery can be also considered idle.
 		dc.lastWrittenTime = GetZeroTime()
@@ -206,7 +198,6 @@ func (s *SegmentsInfo) dcStateFor(segmentID UniqueID) *dcSegmentState {
 func (s *SegmentsInfo) assemble(segProto *datapb.SegmentInfo, dc *dcSegmentState) *SegmentInfo {
 	si := &SegmentInfo{SegmentInfo: segProto}
 	if dc != nil {
-		si.Allocations = dc.allocations
 		si.LastFlushTime = dc.lastFlushTime
 		si.IsCompacting = dc.isCompacting
 		si.LastWrittenTime = dc.lastWrittenTime
@@ -343,7 +334,6 @@ func (s *SegmentsInfo) SetSegment(segmentID UniqueID, segment *SegmentInfo) {
 	normalizeSegmentRowCount(segment.SegmentInfo)
 	s.store.PutSegment(segment.SegmentInfo)
 	s.dcState[segmentID] = &dcSegmentState{
-		allocations:     segment.Allocations,
 		lastFlushTime:   segment.LastFlushTime,
 		isCompacting:    segment.IsCompacting,
 		lastWrittenTime: segment.LastWrittenTime,
@@ -360,21 +350,6 @@ func (s *SegmentsInfo) ModifyProto(segmentID UniqueID, fn func(*datapb.SegmentIn
 	cloned := proto.Clone(seg).(*datapb.SegmentInfo)
 	fn(cloned)
 	s.store.PutSegment(cloned)
-}
-
-func (s *SegmentsInfo) SetAllocations(segmentID UniqueID, allocations []*Allocation) {
-	if dc := s.dcStateFor(segmentID); dc != nil {
-		dc.allocations = allocations
-	}
-}
-
-func (s *SegmentsInfo) AddAllocation(segmentID UniqueID, allocation *Allocation) {
-	s.ModifyProto(segmentID, func(seg *datapb.SegmentInfo) {
-		seg.LastExpireTime = allocation.ExpireTime
-	})
-	if dc := s.dcStateFor(segmentID); dc != nil {
-		dc.allocations = append(dc.allocations, allocation)
-	}
 }
 
 func (s *SegmentsInfo) SetLastWrittenTime(segmentID UniqueID) {
@@ -437,7 +412,6 @@ func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 	info := proto.Clone(s.SegmentInfo).(*datapb.SegmentInfo)
 	cloned := &SegmentInfo{
 		SegmentInfo:     info,
-		Allocations:     s.Allocations,
 		LastFlushTime:   s.LastFlushTime,
 		IsCompacting:    s.IsCompacting,
 		LastWrittenTime: s.LastWrittenTime,
@@ -452,7 +426,6 @@ func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 func (s *SegmentInfo) ShadowClone(opts ...SegmentInfoOption) *SegmentInfo {
 	cloned := &SegmentInfo{
 		SegmentInfo:     s.SegmentInfo,
-		Allocations:     s.Allocations,
 		LastFlushTime:   s.LastFlushTime,
 		IsCompacting:    s.IsCompacting,
 		LastWrittenTime: s.LastWrittenTime,
@@ -485,13 +458,6 @@ func SetRowCount(rowCount int64) SegmentInfoOption {
 	}
 }
 
-// SetExpireTime is the option to set expire time for segment info
-func SetExpireTime(expireTs Timestamp) SegmentInfoOption {
-	return func(segment *SegmentInfo) {
-		segment.LastExpireTime = expireTs
-	}
-}
-
 // SetState is the option to set state for segment info
 func SetState(state commonpb.SegmentState) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
@@ -510,21 +476,6 @@ func SetDmlPosition(pos *msgpb.MsgPosition) SegmentInfoOption {
 func SetStartPosition(pos *msgpb.MsgPosition) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
 		segment.StartPosition = pos
-	}
-}
-
-// SetAllocations is the option to set allocations for segment info
-func SetAllocations(allocations []*Allocation) SegmentInfoOption {
-	return func(segment *SegmentInfo) {
-		segment.Allocations = allocations
-	}
-}
-
-// AddAllocation is the option to add allocation info for segment info
-func AddAllocation(allocation *Allocation) SegmentInfoOption {
-	return func(segment *SegmentInfo) {
-		segment.Allocations = append(segment.Allocations, allocation)
-		segment.LastExpireTime = allocation.ExpireTime
 	}
 }
 
@@ -646,16 +597,4 @@ func SegmentEffectiveDmlTs(seg *datapb.SegmentInfo) uint64 {
 		return ts
 	}
 	return seg.GetDmlPosition().GetTimestamp()
-}
-
-// Allocation records the allocation info
-type Allocation struct {
-	SegmentID  UniqueID
-	NumOfRows  int64
-	ExpireTime Timestamp
-}
-
-func (alloc *Allocation) String() string {
-	t, _ := tsoutil.ParseTS(alloc.ExpireTime)
-	return fmt.Sprintf("SegmentID: %d, NumOfRows: %d, ExpireTime: %v", alloc.SegmentID, alloc.NumOfRows, t)
 }

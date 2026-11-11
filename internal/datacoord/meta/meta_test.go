@@ -300,16 +300,6 @@ func TestMeta_Basic(t *testing.T) {
 		assert.Equal(t, int64(size0+size1), quotaInfo.CollectionBinlogSize[collID])
 		assert.Equal(t, int64(size0+size1), quotaInfo.TotalBinlogSize)
 	})
-
-	t.Run("Test AddAllocation", func(t *testing.T) {
-		meta, _ := NewMemoryMeta(t)
-		err := meta.AddAllocation(1, &Allocation{
-			SegmentID:  1,
-			NumOfRows:  1,
-			ExpireTime: 0,
-		})
-		assert.Error(t, err)
-	})
 }
 
 func TestGetQuotaInfoCollectionMetrics(t *testing.T) {

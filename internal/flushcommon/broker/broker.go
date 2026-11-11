@@ -7,7 +7,6 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // Broker is the interface for datanode to interact with other components.
@@ -32,7 +31,6 @@ func NewCoordBroker(mixc types.MixCoordClient, serverID int64) Broker {
 
 // DataCoord is the interface wraps `DataCoord` grpc call
 type DataCoord interface {
-	AssignSegmentID(ctx context.Context, reqs ...*datapb.SegmentIDRequest) ([]typeutil.UniqueID, error)
 	ReportTimeTick(ctx context.Context, msgs []*msgpb.DataNodeTtMsg) error
 	GetSegmentInfo(ctx context.Context, segmentIDs []int64) ([]*datapb.SegmentInfo, error)
 	SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) error

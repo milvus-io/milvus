@@ -52,7 +52,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/importid"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
-	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -99,19 +98,15 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		}, nil
 	}
 
-	var bc broadcaster.BroadcastAPI
-	if streamingutil.IsStreamingServiceEnabled() {
-		var err error
-		bc, err = s.ddl.StartLocalFlushBroadcast(ctx, req.GetCollectionID())
-		if err != nil {
-			return &datapb.FlushResponse{
-				Status: merr.Status(err),
-			}, nil
-		}
-		defer bc.Close()
+	bc, err := s.ddl.StartLocalFlushBroadcast(ctx, req.GetCollectionID())
+	if err != nil {
+		return &datapb.FlushResponse{
+			Status: merr.Status(err),
+		}, nil
 	}
+	defer bc.Close()
 
-	flushResult, err := s.flushCollection(ctx, req.GetCollectionID(), req.GetSegmentIDs(), bc)
+	flushResult, err := s.flushCollection(ctx, req.GetCollectionID(), bc)
 	if err != nil {
 		return &datapb.FlushResponse{Status: merr.Status(err)}, nil
 	}
@@ -140,7 +135,7 @@ func (s *Server) broadcastManualFlush(ctx context.Context, bc broadcaster.Broadc
 	return err
 }
 
-func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, toFlushSegments []UniqueID, bc broadcaster.BroadcastAPI) (*datapb.FlushResult, error) {
+func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, bc broadcaster.BroadcastAPI) (*datapb.FlushResult, error) {
 	channelCPs := make(map[string]*msgpb.MsgPosition, 0)
 	coll, err := s.handler.GetCollection(ctx, collectionID)
 	if err != nil {
@@ -156,31 +151,13 @@ func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, toF
 		channelCPs[vchannel] = cp
 	}
 
-	var flushTs uint64
 	timeOfSeal := time.Now()
-	sealedSegmentsIDDict := make(map[UniqueID]bool)
 
-	if bc != nil {
-		// AckSyncUp proves completion directly; zero tells GetFlushState that
-		// no independently reported channel checkpoint needs to be checked.
-		if err := s.broadcastManualFlush(ctx, bc, coll); err != nil {
-			return nil, err
-		}
-	} else {
-		flushTs, err = s.allocator.AllocTimestamp(ctx)
-		if err != nil {
-			return nil, err
-		}
-		timeOfSeal, _ = tsoutil.ParseTS(flushTs)
-		for _, channel := range coll.VChannelNames {
-			sealedSegmentIDs, err := s.segmentManager.SealAllSegments(ctx, channel, toFlushSegments)
-			if err != nil {
-				return nil, merr.Wrapf(err, "failed to flush collection %d", collectionID)
-			}
-			for _, sealedSegmentID := range sealedSegmentIDs {
-				sealedSegmentsIDDict[sealedSegmentID] = true
-			}
-		}
+	// AckSyncUp proves completion directly. The response therefore carries no
+	// flush timestamp: zero tells GetFlushState that no independently reported
+	// channel checkpoint needs to be checked.
+	if err := s.broadcastManualFlush(ctx, bc, coll); err != nil {
+		return nil, err
 	}
 
 	segments := s.meta.GetSegmentsOfCollection(ctx, collectionID)
@@ -188,26 +165,20 @@ func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, toF
 	for _, seg := range segments {
 		if seg != nil &&
 			meta.IsFlushState(seg.GetState()) &&
-			seg.GetLevel() != datapb.SegmentLevel_L0 && // SegmentLevel_Legacy, SegmentLevel_L1, SegmentLevel_L2
-			!sealedSegmentsIDDict[seg.GetID()] {
+			seg.GetLevel() != datapb.SegmentLevel_L0 { // SegmentLevel_Legacy, SegmentLevel_L1, SegmentLevel_L2
 			flushSegmentIDs = append(flushSegmentIDs, seg.GetID())
 		}
 	}
 
 	mlog.Info(ctx, "flush response with segments",
 		mlog.Int64("collectionID", collectionID),
-		mlog.Int64s("sealSegments", lo.Keys(sealedSegmentsIDDict)),
 		mlog.Int("flushedSegmentsCount", len(flushSegmentIDs)),
-		mlog.Time("timeOfSeal", timeOfSeal),
-		mlog.Uint64("flushTs", flushTs),
-		mlog.Time("flushTs in time", tsoutil.PhysicalTime(flushTs)))
+		mlog.Time("timeOfSeal", timeOfSeal))
 
 	return &datapb.FlushResult{
 		CollectionID:    collectionID,
-		SegmentIDs:      lo.Keys(sealedSegmentsIDDict),
 		TimeOfSeal:      timeOfSeal.Unix(),
 		FlushSegmentIDs: flushSegmentIDs,
-		FlushTs:         flushTs,
 		ChannelCps:      channelCPs,
 		DbName:          coll.DatabaseName,
 		CollectionName:  coll.Schema.GetName(),
@@ -273,63 +244,17 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 	}, nil
 }
 
-// AssignSegmentID applies for segment ids and make allocation for records.
+// AssignSegmentID was the row-quota allocation of the pre-streaming write
+// path. Growing segments are allocated by the streaming node through
+// AllocSegment now; the RPC is kept in the service definition only.
 func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &datapb.AssignSegmentIDResponse{
 			Status: merr.Status(err),
 		}, nil
 	}
-
-	assigns := make([]*datapb.SegmentIDAssignment, 0, len(req.SegmentIDRequests))
-
-	for _, r := range req.SegmentIDRequests {
-		mlog.Info(context.TODO(), "handle assign segment request",
-			mlog.Int64("collectionID", r.GetCollectionID()),
-			mlog.Int64("partitionID", r.GetPartitionID()),
-			mlog.String("channelName", r.GetChannelName()),
-			mlog.Uint32("count", r.GetCount()),
-		)
-
-		// Load the collection info from Root Coordinator, if it is not found in server meta.
-		// Note: this request wouldn't be received if collection didn't exist.
-		_, err := s.handler.GetCollection(ctx, r.GetCollectionID())
-		if err != nil {
-			mlog.Warn(context.TODO(), "cannot get collection schema", mlog.Err(err))
-		}
-
-		// Have segment manager allocate and return the segment allocation info.
-		segmentAllocations, err := s.segmentManager.AllocSegment(ctx,
-			r.CollectionID, r.PartitionID, r.ChannelName, int64(r.Count), r.GetStorageVersion())
-		if err != nil {
-			mlog.Warn(context.TODO(), "failed to alloc segment", mlog.Any("request", r), mlog.Err(err))
-			assigns = append(assigns, &datapb.SegmentIDAssignment{
-				ChannelName:  r.ChannelName,
-				CollectionID: r.CollectionID,
-				PartitionID:  r.PartitionID,
-				Status:       merr.Status(err),
-			})
-			continue
-		}
-
-		mlog.Info(context.TODO(), "success to assign segments", mlog.Int64("collectionID", r.GetCollectionID()), mlog.Any("assignments", segmentAllocations))
-
-		for _, allocation := range segmentAllocations {
-			result := &datapb.SegmentIDAssignment{
-				SegID:        allocation.SegmentID,
-				ChannelName:  r.ChannelName,
-				Count:        uint32(allocation.NumOfRows),
-				CollectionID: r.CollectionID,
-				PartitionID:  r.PartitionID,
-				ExpireTime:   allocation.ExpireTime,
-				Status:       merr.Success(),
-			}
-			assigns = append(assigns, result)
-		}
-	}
 	return &datapb.AssignSegmentIDResponse{
-		Status:           merr.Success(),
-		SegIDAssignments: assigns,
+		Status: merr.Status(merr.Wrap(merr.ErrServiceUnimplemented, "AssignSegmentID is removed, growing segments are allocated by the streaming node")),
 	}, nil
 }
 
@@ -728,11 +653,8 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 
 		// Set segment state
 		if req.GetDropped() {
-			// segmentManager manages growing segments
-			s.segmentManager.DropSegment(ctx, req.GetChannel(), req.GetSegmentID())
 			operators = append(operators, meta.UpdateStatusOperator(req.GetSegmentID(), commonpb.SegmentState_Dropped))
 		} else if req.GetFlushed() {
-			s.segmentManager.DropSegment(ctx, req.GetChannel(), req.GetSegmentID())
 			// keep the original SegmentMeta persistence semantics: when sort
 			// compaction is enabled, a flushed non-L0 Segment stays invisible
 			// until its sorted output replaces it (see data_view.md TODO).
@@ -1031,7 +953,6 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
-	s.segmentManager.DropSegmentsOfChannel(ctx, channel)
 	s.compactionInspector.RemoveTasksByChannel(channel)
 	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(paramtable.GetStringNodeID(), channel)
 	s.meta.MarkChannelCheckpointDropped(ctx, channel)
@@ -1862,13 +1783,6 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 		return merr.Status(err), nil
 	}
 
-	for _, pos := range checkpoints {
-		if pos == nil || pos.GetMsgID() == nil || pos.GetChannelName() == "" {
-			continue
-		}
-		s.segmentManager.CleanZeroSealedSegmentsOfChannel(ctx, pos.GetChannelName(), pos.GetTimestamp())
-	}
-
 	return merr.Success(), nil
 }
 
@@ -2438,7 +2352,6 @@ func (s *Server) NotifyDropPartition(ctx context.Context, channel string, collec
 		mlog.String("channelname", channel),
 		mlog.FieldCollectionID(collectionID),
 		mlog.Any("partitionID", partitionIDs))
-	s.segmentManager.DropSegmentsOfPartition(ctx, channel, partitionIDs)
 	// release all segments of the partition.
 	if err := s.meta.DropSegmentsOfPartition(ctx, partitionIDs); err != nil {
 		return err

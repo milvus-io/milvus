@@ -5,8 +5,6 @@ import (
 	"math"
 	"time"
 
-	"github.com/samber/lo"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
@@ -17,31 +15,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type dataCoordBroker struct {
 	client   types.MixCoordClient
 	serverID int64
-}
-
-func (dc *dataCoordBroker) AssignSegmentID(ctx context.Context, reqs ...*datapb.SegmentIDRequest) ([]typeutil.UniqueID, error) {
-	req := &datapb.AssignSegmentIDRequest{
-		NodeID:            dc.serverID,
-		PeerRole:          typeutil.ProxyRole,
-		SegmentIDRequests: reqs,
-	}
-
-	resp, err := dc.client.AssignSegmentID(ctx, req)
-
-	if err := merr.CheckRPCCall(resp, err); err != nil {
-		mlog.Warn(ctx, "failed to call datacoord AssignSegmentID", mlog.Err(err))
-		return nil, err
-	}
-
-	return lo.Map(resp.GetSegIDAssignments(), func(result *datapb.SegmentIDAssignment, _ int) typeutil.UniqueID {
-		return result.GetSegID()
-	}), nil
 }
 
 func (dc *dataCoordBroker) ReportTimeTick(ctx context.Context, msgs []*msgpb.DataNodeTtMsg) error {

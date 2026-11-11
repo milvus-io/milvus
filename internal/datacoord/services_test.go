@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/index"
 	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/datacoord/partitionstats"
-	"github.com/milvus-io/milvus/internal/datacoord/segment"
 	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
 	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
@@ -1134,48 +1133,6 @@ func (s *ServerSuite) TestBootstrapDataViews() {
 	s.Equal(ref.Version().String(), ref2.Version().String())
 }
 
-func (s *ServerSuite) TestFlush_NormalCase() {
-	req := &datapb.FlushRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_Flush,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  0,
-		},
-		DbID:         0,
-		CollectionID: 0,
-	}
-
-	schema := meta.NewTestSchema()
-	s.testServer.meta.AddCollection(&meta.CollectionInfo{ID: 0, Schema: schema, Partitions: []int64{}, VChannelNames: []string{"channel-1"}})
-	allocations, err := s.testServer.segmentManager.AllocSegment(context.TODO(), 0, 1, "channel-1", 1, storage.StorageV1)
-	s.NoError(err)
-	s.EqualValues(1, len(allocations))
-	expireTs := allocations[0].ExpireTime
-	segID := allocations[0].SegmentID
-
-	info, err := s.testServer.segmentManager.AllocNewGrowingSegment(context.TODO(), segment.AllocNewGrowingSegmentRequest{
-		CollectionID:         0,
-		PartitionID:          1,
-		SegmentID:            1,
-		ChannelName:          "channel1-1",
-		StorageVersion:       storage.StorageV1,
-		IsCreatedByStreaming: true,
-	})
-	s.NoError(err)
-	s.NotNil(info)
-
-	resp, err := s.testServer.Flush(context.TODO(), req)
-	s.NoError(err)
-	s.EqualValues(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-
-	segment.SetTestRowCount(s.testServer.meta, segID, 1)
-	ids, err := s.testServer.segmentManager.GetFlushableSegments(context.TODO(), "channel-1", expireTs)
-	s.NoError(err)
-	s.EqualValues(1, len(ids))
-	s.EqualValues(segID, ids[0])
-}
-
 func (s *ServerSuite) TestFlush_CollectionNotExist() {
 	req := &datapb.FlushRequest{
 		Base: &commonpb.MsgBase{
@@ -1187,6 +1144,14 @@ func (s *ServerSuite) TestFlush_CollectionNotExist() {
 		DbID:         0,
 		CollectionID: 0,
 	}
+
+	// Flush always goes through the local flush broadcast; the collection
+	// lookup happens after the broadcaster is acquired.
+	bc := &embeddedBroadcastAPI{}
+	patchLock := mockey.Mock((*ddl.Callbacks).StartLocalFlushBroadcast).Return(bc, nil).Build()
+	defer patchLock.UnPatch()
+	patchClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
+	defer patchClose.UnPatch()
 
 	resp, err := s.testServer.Flush(context.TODO(), req)
 	s.NoError(err)
@@ -1251,88 +1216,45 @@ func (s *ServerSuite) TestGetSegmentInfo() {
 	s.EqualValues(2, len(resp.Infos[0].Deltalogs))
 }
 
+func (s *ServerSuite) TestFlush_StartBroadcastFailed() {
+	patchLock := mockey.Mock((*ddl.Callbacks).StartLocalFlushBroadcast).
+		Return(nil, merr.WrapErrServiceUnavailable("mock")).Build()
+	defer patchLock.UnPatch()
+
+	resp, err := s.testServer.Flush(context.TODO(), &datapb.FlushRequest{CollectionID: 0})
+	s.NoError(err)
+	s.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrServiceUnavailable)
+}
+
+// AssignSegmentID belonged to the pre-streaming write path. The RPC is still
+// registered, and reports that it is no longer implemented.
 func (s *ServerSuite) TestAssignSegmentID() {
-	s.TearDownTest()
-	const collID = 100
-	const collIDInvalid = 101
-	const partID = 0
-	const channel0 = "channel0"
-
-	s.Run("assign segment normally", func() {
-		s.SetupTest()
-		defer s.TearDownTest()
-
-		schema := meta.NewTestSchema()
-		s.testServer.meta.AddCollection(&meta.CollectionInfo{
-			ID:         collID,
-			Schema:     schema,
-			Partitions: []int64{},
-		})
-		req := &datapb.SegmentIDRequest{
+	req := &datapb.AssignSegmentIDRequest{
+		SegmentIDRequests: []*datapb.SegmentIDRequest{{
 			Count:        1000,
-			ChannelName:  channel0,
-			CollectionID: collID,
-			PartitionID:  partID,
-		}
+			ChannelName:  "channel0",
+			CollectionID: 100,
+			PartitionID:  0,
+		}},
+	}
 
-		resp, err := s.testServer.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
-			NodeID:            0,
-			PeerRole:          "",
-			SegmentIDRequests: []*datapb.SegmentIDRequest{req},
-		})
+	s.Run("unimplemented", func() {
+		s.testServer.meta.AddCollection(&meta.CollectionInfo{ID: 100, Schema: meta.NewTestSchema()})
+
+		resp, err := s.testServer.AssignSegmentID(context.TODO(), req)
 		s.NoError(err)
-		s.EqualValues(1, len(resp.SegIDAssignments))
-		assign := resp.SegIDAssignments[0]
-		s.EqualValues(commonpb.ErrorCode_Success, assign.GetStatus().GetErrorCode())
-		s.EqualValues(collID, assign.CollectionID)
-		s.EqualValues(partID, assign.PartitionID)
-		s.EqualValues(channel0, assign.ChannelName)
-		s.EqualValues(1000, assign.Count)
+		s.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrServiceUnimplemented)
+		s.Empty(resp.GetSegIDAssignments())
+		// No segment is allocated for the request.
+		s.Empty(s.testServer.meta.GetSegmentsOfCollection(context.TODO(), 100))
 	})
 
 	s.Run("with closed server", func() {
-		s.SetupTest()
 		s.TearDownTest()
 
-		req := &datapb.SegmentIDRequest{
-			Count:        100,
-			ChannelName:  channel0,
-			CollectionID: collID,
-			PartitionID:  partID,
-		}
-		resp, err := s.testServer.AssignSegmentID(context.Background(), &datapb.AssignSegmentIDRequest{
-			NodeID:            0,
-			PeerRole:          "",
-			SegmentIDRequests: []*datapb.SegmentIDRequest{req},
-		})
+		resp, err := s.testServer.AssignSegmentID(context.Background(), req)
 		s.NoError(err)
 		s.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
-	})
-
-	s.Run("assign segment with invalid collection", func() {
-		s.SetupTest()
-		defer s.TearDownTest()
-
-		schema := meta.NewTestSchema()
-		s.testServer.meta.AddCollection(&meta.CollectionInfo{
-			ID:         collID,
-			Schema:     schema,
-			Partitions: []int64{},
-		})
-		req := &datapb.SegmentIDRequest{
-			Count:        1000,
-			ChannelName:  channel0,
-			CollectionID: collIDInvalid,
-			PartitionID:  partID,
-		}
-
-		resp, err := s.testServer.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
-			NodeID:            0,
-			PeerRole:          "",
-			SegmentIDRequests: []*datapb.SegmentIDRequest{req},
-		})
-		s.NoError(err)
-		s.EqualValues(1, len(resp.SegIDAssignments))
 	})
 }
 
