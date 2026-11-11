@@ -192,6 +192,10 @@ func (n *namespaceRequeryMockNode) ExecuteQuery(ctx context.Context, qt taskmode
 	panic("ExecuteQuery must be patched by mockey")
 }
 
+func (n *namespaceRequeryMockNode) RetryRead(ctx context.Context, _, _ string, read func(context.Context) error) error {
+	return read(ctx)
+}
+
 var (
 	_ taskmodel.TaskNode    = (*namespaceRequeryMockNode)(nil)
 	_ taskmodel.QueryRunner = (*namespaceRequeryMockNode)(nil)

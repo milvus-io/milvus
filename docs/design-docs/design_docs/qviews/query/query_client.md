@@ -151,6 +151,21 @@ protocol errors and remote protocol errors use the same mapping:
   unclassified protocol failures become system internal errors. Internal RPC
   InvalidArgument is not assumed to be invalid user input.
 
+Expression deletes, partial upserts and full AutoID upserts use
+`QueryRunner.RetryRead` for their read stage. A primary-key delete or a plain
+upsert can proceed without loading the collection.
+
+The read finishes before the first write. On retry, Delete fetches the schema
+for the original collection ID, rebuilds its plan and reads at a new BarrierMVCC.
+If the name resolves to a replacement collection, the request fails before writing.
+Upsert keeps its write schema and rebuilds the query task, read schema and
+channel snapshots. Partial upsert uses the successful read's snapshots for CAS.
+
+With AutoLoad enabled, the read waits until the collection is ready at its current
+load configuration. That includes a loaded collection during a load-requirement
+change, while its old Up view still serves. Delete waits on the request goroutine.
+Upsert waits on its DmQueue worker, so enough waiting upserts stall that Proxy's DML.
+
 The shared client error interceptors attach an independent `RPCRequestContext`
 protobuf in gRPC status details. It describes the request, not an error category;
 `ViewError` and `StreamingError` remain unchanged. It records the generated full

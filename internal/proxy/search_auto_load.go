@@ -55,6 +55,13 @@ func (node *Proxy) retryDQL(ctx context.Context, dbName, collectionName string, 
 	})
 }
 
+// RetryRead implements taskmodel.QueryRunner.
+func (node *Proxy) RetryRead(ctx context.Context, dbName, collectionName string, read func(context.Context) error) error {
+	return node.retryDQL(ctx, dbName, collectionName, nil, func(ctx context.Context) (bool, error) {
+		return false, read(ctx)
+	})
+}
+
 func (node *Proxy) retryDQLWithExecutionRetry(ctx context.Context, dbName, collectionName string, execute func(context.Context) (bool, error), retryExecution func(error) bool) error {
 	var terminalErr error
 	err := retry.Handle(ctx, func() (bool, error) {

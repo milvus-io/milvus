@@ -201,6 +201,8 @@ type mockUpsertNode struct {
 	mixCoord     types.MixCoordClient
 	lbPolicy     shardclient.LBPolicy
 	chMgr        channelmgr.ChannelsMgr
+	// retryOnce replays a failed read once, as Proxy does after a retired view.
+	retryOnce bool
 }
 
 func (n *mockUpsertNode) TsoAllocator() taskmodel.TsoAllocator { return n.tsoAllocator }
@@ -213,6 +215,14 @@ func (n *mockUpsertNode) query(ctx context.Context, qt *dql.QueryTask, sp trace.
 
 func (n *mockUpsertNode) ExecuteQuery(ctx context.Context, qt taskmodel.Task, sp trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 	return n.query(ctx, qt.(*dql.QueryTask), sp)
+}
+
+func (n *mockUpsertNode) RetryRead(ctx context.Context, _, _ string, read func(context.Context) error) error {
+	err := read(ctx)
+	if err != nil && n.retryOnce {
+		return read(ctx)
+	}
+	return err
 }
 
 func constructCollectionSchemaByDataType(collectionName string, fieldName2DataType map[string]schemapb.DataType, primaryFieldName string, autoID bool) *schemapb.CollectionSchema {

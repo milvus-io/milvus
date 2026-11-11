@@ -44,10 +44,15 @@ type TaskNode interface {
 	CheckClusterPrivilege(ctx context.Context, req interface{}, fullMethod string, objectPrivilege string) error
 }
 
-// QueryRunner executes a query task. Implemented by the proxy composition root;
-// the concrete task type is asserted inside the implementation. The method is
-// named ExecuteQuery (not Query) because *Proxy already owns a Query gRPC
-// handler with a different signature and Go forbids two same-named methods.
+// QueryRunner runs reads for a task. Implemented by the proxy composition root;
+// the concrete task type is asserted inside ExecuteQuery. That method is named
+// ExecuteQuery (not Query) because *Proxy already owns a Query gRPC handler with a
+// different signature and Go forbids two same-named methods.
 type QueryRunner interface {
 	ExecuteQuery(ctx context.Context, qt Task, sp trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error)
+	// RetryRead runs the read stage of a write under the policy of a complete DQL
+	// attempt: it waits for a ready collection, loading it if AutoLoad is enabled,
+	// and repeats read when its view retires. read must have no write side effects
+	// and must resolve again whatever a previous attempt bound.
+	RetryRead(ctx context.Context, dbName, collectionName string, read func(context.Context) error) error
 }

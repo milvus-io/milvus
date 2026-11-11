@@ -211,7 +211,25 @@ func (it *UpsertTask) OnEnqueue() error {
 	return nil
 }
 
+// retrieveByPKs reads the rows an upsert replaces. An unloaded collection is loaded
+// first, and the read restarts when its view retires. The worker stays occupied
+// meanwhile, as it does for the read itself.
 func retrieveByPKs(ctx context.Context, t *UpsertTask, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+	queryRunner, ok := t.node.(taskmodel.QueryRunner)
+	if !ok {
+		return nil, segcore.StorageCost{}, merr.WrapErrServiceInternalMsg("host node does not implement QueryRunner")
+	}
+	var result *milvuspb.QueryResults
+	var storageCost segcore.StorageCost
+	err := queryRunner.RetryRead(ctx, t.req.GetDbName(), t.req.GetCollectionName(), func(ctx context.Context) error {
+		var err error
+		result, storageCost, err = retrieveByPKsOnce(ctx, queryRunner, t, ids, outputFields)
+		return err
+	})
+	return result, storageCost, err
+}
+
+func retrieveByPKsOnce(ctx context.Context, queryRunner taskmodel.QueryRunner, t *UpsertTask, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 	log := mlog.With(mlog.String("collectionName", t.req.GetCollectionName()))
 	readSchema, err := t.upsertReadSchema(ctx, outputFields)
 	if err != nil {
@@ -289,10 +307,6 @@ func retrieveByPKs(ctx context.Context, t *UpsertTask, ids *schemapb.IDs, output
 	defer func() {
 		sp.End()
 	}()
-	queryRunner, ok := t.node.(taskmodel.QueryRunner)
-	if !ok {
-		return nil, segcore.StorageCost{}, merr.WrapErrServiceInternalMsg("host node does not implement QueryRunner")
-	}
 	queryResult, storageCost, err := queryRunner.ExecuteQuery(ctx, qt, sp)
 	if err := merr.CheckRPCCall(queryResult, err); err != nil {
 		return nil, storageCost, err
