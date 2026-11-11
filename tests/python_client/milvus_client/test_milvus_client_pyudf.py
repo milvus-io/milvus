@@ -1659,7 +1659,8 @@ def create_udf(context):
             assert [self._hit_field(h, "ts") for h in result[0]] == [ledger[i] for i in expected]
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("nq", [1, 2, 4, 8])
+    # Eight queries include the full ragged sequence twice; keep the single-query path separately.
+    @pytest.mark.parametrize("nq", [1, 8])
     def test_pyudf_ragged_query_batches(self, tmp_path, minio_host, minio_bucket, nq):
         """target: unequal query chunk sizes; method: independent range ledger; expected: no cross-query leakage."""
         with self._pyudf_test_environment(tmp_path, minio_host, minio_bucket, None) as (client, name, resource):
@@ -1843,7 +1844,9 @@ def create_udf(context):
                 assert [h["distance"] for h in allowed[0]] == pytest.approx([60, 40, 20])
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("depth", [1, 16, 24, 32, 64, 65])
+    # Shallow/deep supported inputs and both protobuf rejection forms. Raw REST
+    # separately covers depth 64/65; SDK depth 65 repeats the depth-64 rejection.
+    @pytest.mark.parametrize("depth", [1, 24, 32, 64])
     def test_pyudf_nested_parameter_serialization_boundary(self, tmp_path, minio_host, minio_bucket, depth):
         """
         target: distinguish protobuf nesting limits from worker validation

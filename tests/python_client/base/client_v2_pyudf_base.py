@@ -142,6 +142,7 @@ def create_udf(context):
         rows=None,
         nullable=False,
         index_type="FLAT",
+        metric_type="L2",
     ):
         from minio import Minio
 
@@ -190,7 +191,7 @@ def create_udf(context):
             index_params.add_index(
                 field_name=self.vector_field,
                 index_type=index_type,
-                metric_type="L2",
+                metric_type=metric_type,
                 params={"M": 8, "efConstruction": 64} if index_type == "HNSW" else {},
             )
             _, collection_created = self.create_collection(

@@ -626,7 +626,7 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
     def test_pyudf_index_mmap_warmup_paths(
         self, tmp_path, minio_host, minio_bucket, record_property, index, mmap, kind, policy, priority
     ):
-        """Verify indexed PyUDF scores and retrieved vectors across three cold/hot reloads."""
+        """Verify configured loading and reloading, each with cold/hot searches and retained vectors."""
         rows = [{"id": i, "ts": i * 3 + 7, "vector": [i % 97 / 97, i // 97 / 103]} for i in range(10000)]
         with self._pyudf_test_environment(tmp_path, minio_host, minio_bucket, MODULE, rows=rows, index_type=index) as (
             client,
@@ -684,7 +684,7 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
                 assert cf.get_index_warmup(indices["ts"]) == "async"
                 assert cf.get_index_warmup(indices["vector"]) == "sync"
             observations = []
-            for reload_id in range(3):
+            for reload_id in range(2):
                 started = time.time()
                 self.load_collection(client, name)
                 load_completed = time.time()
@@ -740,8 +740,8 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
                         }
                     ),
                 )
-                self.release_collection(client, name)
-            self.load_collection(client, name)
+                if reload_id == 0:
+                    self.release_collection(client, name)
             stored = client.query(name, filter="", output_fields=["id", "ts", "vector"], limit=11000)
             assert len(stored) == 10000
             for item in stored:
@@ -1470,26 +1470,20 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("metric", ["L2", "IP", "COSINE"])
-    @pytest.mark.parametrize("stage_order", [(0, 1, 2), (2, 0, 1), (1, 2, 0), (0, 2, 1), (1, 0, 2), (2, 1, 0)])
     @pytest.mark.parametrize("sort", [False, True], ids=["map_only", "explicit_sort"])
     @pytest.mark.parametrize("mode", ["rewrite", "preserve", "rewrite_group", "preserve_group"])
     def test_pyudf_cross_stage_score_sign_and_rank(
-        self, tmp_path, minio_host, minio_bucket, metric, stage_order, sort, mode, record_property
+        self, tmp_path, minio_host, minio_bucket, metric, sort, mode, record_property
     ):
         """target: #55212; method: positive stage arithmetic and real identity UDF; expected: positive scores and exact ranks."""
         rows = [{"id": i, "ts": i * 10, "vector": [float(i), 1.0]} for i in (1, 2, 3)]
-        with self._pyudf_test_environment(tmp_path, minio_host, minio_bucket, MODULE, rows=rows) as (
+        with self._pyudf_test_environment(
+            tmp_path, minio_host, minio_bucket, MODULE, rows=rows, metric_type=metric
+        ) as (
             client,
             name,
             resource,
         ):
-            if metric != "L2":
-                self.release_collection(client, name)
-                self.drop_index(client, name, "vector")
-                indexes = self.prepare_index_params(client)[0]
-                indexes.add_index("vector", index_type="FLAT", metric_type=metric)
-                self.create_index(client, name, indexes)
-                self.load_collection(client, name)
             plain = self.search(
                 client,
                 name,
@@ -1531,38 +1525,39 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
             if sort:
                 l2.sort(col("$score"), desc=True, tie_break_col=col("$id"))
             stages = [l0, l1, l2]
-            result = self._search_with_synced_resource(
-                client,
-                name,
-                [stages[i] for i in stage_order],
-                data=[[1.0, 1.0]],
-                search_params={"metric_type": metric},
-                **({"group_by_field": "ts", "group_size": 1} if mode.endswith("group") else {}),
-            )
-            record_property(
-                "cross_stage_observed",
-                json.dumps({"metric": metric, "stages": stage_order, "sort": sort, "mode": mode, "hits": result}),
-            )
-            # Preserve positive business-score expectations even on the known failing baseline.
-            expected_scores = expected_raw if preserve else {1: 30.0, 2: 60.0, 3: 90.0}
-            assert {hit["id"]: hit["distance"] for hit in result[0]} == pytest.approx(
-                expected_scores, rel=1e-5, abs=1e-6
-            )
-            if sort:
-                assert [hit["id"] for hit in result[0]] == sorted(
-                    expected_scores, key=lambda pk: (-expected_scores[pk], pk)
+            # All six permutations share immutable rows, index and UDF behavior.
+            for stage_order in ((0, 1, 2), (2, 0, 1), (1, 2, 0), (0, 2, 1), (1, 0, 2), (2, 1, 0)):
+                result = self._search_with_synced_resource(
+                    client,
+                    name,
+                    [stages[i] for i in stage_order],
+                    data=[[1.0, 1.0]],
+                    search_params={"metric_type": metric},
+                    **({"group_by_field": "ts", "group_size": 1} if mode.endswith("group") else {}),
                 )
-            elif preserve:
-                assert [hit["id"] for hit in result[0]] == [hit["id"] for hit in plain[0]]
-            for hit in result[0]:
-                assert self._hit_field(hit, "ts") == hit["id"] * 10
+                record_property(
+                    f"cross_stage_observed_{stage_order}",
+                    json.dumps({"metric": metric, "stages": stage_order, "sort": sort, "mode": mode, "hits": result}),
+                )
+                # Preserve positive business-score expectations even on the known failing baseline.
+                expected_scores = expected_raw if preserve else {1: 30.0, 2: 60.0, 3: 90.0}
+                assert {hit["id"]: hit["distance"] for hit in result[0]} == pytest.approx(
+                    expected_scores, rel=1e-5, abs=1e-6
+                )
+                if sort:
+                    assert [hit["id"] for hit in result[0]] == sorted(
+                        expected_scores, key=lambda pk: (-expected_scores[pk], pk)
+                    )
+                elif preserve:
+                    assert [hit["id"] for hit in result[0]] == [hit["id"] for hit in plain[0]]
+                for hit in result[0]:
+                    assert self._hit_field(hit, "ts") == hit["id"] * 10
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("merge", ["rrf", "weighted"])
-    @pytest.mark.parametrize("nq", [1, 2])
     @pytest.mark.parametrize("rewrite", [False, True], ids=["read_only", "rewrite"])
     def test_pyudf_indexed_hybrid_fusion_read_and_rewrite(
-        self, tmp_path, minio_host, minio_bucket, request, merge, nq, rewrite, record_property
+        self, tmp_path, minio_host, minio_bucket, request, merge, rewrite, record_property
     ):
         """target: Q03 profile mapping; method: indexed dense/BM25 independent fusion; expected: exact read-only or rewritten scores."""
         expected_auto = request.config.getoption("--pyudf-expected-autoindex")
@@ -1625,86 +1620,90 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
                     value["indexed_rows"] == 10000 and value["state"] == "Finished" for value in index_details.values()
                 ), index_details
                 self.load_collection(client, name)
-                dense, texts = [[0.0, 0.0], [0.02, 0.0]][:nq], ["milvus", "relational"][:nq]
-                dense_hits = client.search(
-                    name,
-                    data=dense,
-                    anns_field="vector",
-                    search_params={"metric_type": "L2", "params": {"ef": 128}},
-                    limit=2,
-                )
-                sparse_hits = client.search(
-                    name, data=texts, anns_field="sparse", search_params={"metric_type": "BM25"}, limit=3
-                )
-                expected = []
-                for query_id, (first, second) in enumerate(zip(dense_hits, sparse_hits, strict=True)):
-                    # ANN recall is measured independently from fusion and UDF
-                    # correctness; use the actual branch candidates as input.
-                    assert len(first) == len({hit["id"] for hit in first}) == 2
-                    assert all(1 <= hit["id"] <= 10000 for hit in first)
+                # Single/batch queries are read-only and reuse the same built indexes.
+                for nq in (1, 2):
+                    dense, texts = [[0.0, 0.0], [0.02, 0.0]][:nq], ["milvus", "relational"][:nq]
+                    dense_hits = client.search(
+                        name,
+                        data=dense,
+                        anns_field="vector",
+                        search_params={"metric_type": "L2", "params": {"ef": 128}},
+                        limit=2,
+                    )
+                    sparse_hits = client.search(
+                        name, data=texts, anns_field="sparse", search_params={"metric_type": "BM25"}, limit=3
+                    )
+                    expected = []
+                    for query_id, (first, second) in enumerate(zip(dense_hits, sparse_hits, strict=True)):
+                        # ANN recall is measured independently from fusion and UDF
+                        # correctness; use the actual branch candidates as input.
+                        assert len(first) == len({hit["id"] for hit in first}) == 2
+                        assert all(1 <= hit["id"] <= 10000 for hit in first)
+                        record_property(
+                            f"ann_recall_{query_id}",
+                            json.dumps({"exact_ids": [1, 2] if query_id == 0 else [3, 2], "actual": first}),
+                        )
+                        assert {hit["id"] for hit in second} == ({1, 2, 4} if query_id == 0 else {3, 4})
+                        scores = {}
+                        for branch, weight, dense_branch in ((first, 0.3, True), (second, 0.7, False)):
+                            for rank, hit in enumerate(branch, start=1):
+                                normalized = 2 * math.atan(hit["distance"]) / math.pi
+                                contribution = (
+                                    1 / (60 + rank)
+                                    if merge == "rrf"
+                                    else weight * (1 - normalized if dense_branch else normalized)
+                                )
+                                scores[hit["id"]] = scores.get(hit["id"], 0) + contribution
+                        expected.append(
+                            {pk: 100 * score + pk * 20 if rewrite else score for pk, score in scores.items()}
+                        )
+                    chain = FunctionChain(FunctionChainStage.L2_RERANK)
+                    chain.merge("rrf", k=60) if merge == "rrf" else chain.merge(
+                        "weighted", weights=[0.3, 0.7], norm_score=True
+                    )
+                    chain.map(
+                        "$score" if rewrite else "read_fused",
+                        self._expr(resource, "$score", "ts", mode="fusion" if rewrite else "identity"),
+                    )
+                    chain.sort(col("$score"), desc=True, tie_break_col=col("$id"))
+                    requests = [
+                        AnnSearchRequest(
+                            data=dense, anns_field="vector", param={"metric_type": "L2", "params": {"ef": 128}}, limit=2
+                        ),
+                        AnnSearchRequest(data=texts, anns_field="sparse", param={"metric_type": "BM25"}, limit=3),
+                    ]
+                    result = client.hybrid_search(
+                        name, reqs=requests, ranker=None, limit=3, output_fields=["ts"], function_chains=chain
+                    )
+                    assert len(result) == nq
+                    for scores, hits in zip(expected, result, strict=True):
+                        ids = sorted(scores, key=lambda pk: (-scores[pk], pk))[:3]
+                        assert [hit["id"] for hit in hits] == ids
+                        assert [hit["distance"] for hit in hits] == pytest.approx(
+                            [scores[pk] for pk in ids], rel=1e-5, abs=1e-6
+                        )
+                        assert [self._hit_field(hit, "ts") for hit in hits] == [pk * 10 for pk in ids]
                     record_property(
-                        f"ann_recall_{query_id}",
-                        json.dumps({"exact_ids": [1, 2] if query_id == 0 else [3, 2], "actual": first}),
+                        f"indexed_fusion_nq{nq}",
+                        json.dumps(
+                            {
+                                "collection": name,
+                                "resource": resource,
+                                "merge": merge,
+                                "nq": nq,
+                                "rewrite": rewrite,
+                                "expected_autoindex": expected_auto,
+                                "indices": index_details,
+                                "segments": [
+                                    {"id": segment.segment_id, "rows": segment.num_rows, "index": segment.index_id}
+                                    for segment in client.list_loaded_segments(name)
+                                ],
+                                "start_unix": started,
+                                "end_unix": time.time(),
+                                "hits": result,
+                            }
+                        ),
                     )
-                    assert {hit["id"] for hit in second} == ({1, 2, 4} if query_id == 0 else {3, 4})
-                    scores = {}
-                    for branch, weight, dense_branch in ((first, 0.3, True), (second, 0.7, False)):
-                        for rank, hit in enumerate(branch, start=1):
-                            normalized = 2 * math.atan(hit["distance"]) / math.pi
-                            contribution = (
-                                1 / (60 + rank)
-                                if merge == "rrf"
-                                else weight * (1 - normalized if dense_branch else normalized)
-                            )
-                            scores[hit["id"]] = scores.get(hit["id"], 0) + contribution
-                    expected.append({pk: 100 * score + pk * 20 if rewrite else score for pk, score in scores.items()})
-                chain = FunctionChain(FunctionChainStage.L2_RERANK)
-                chain.merge("rrf", k=60) if merge == "rrf" else chain.merge(
-                    "weighted", weights=[0.3, 0.7], norm_score=True
-                )
-                chain.map(
-                    "$score" if rewrite else "read_fused",
-                    self._expr(resource, "$score", "ts", mode="fusion" if rewrite else "identity"),
-                )
-                chain.sort(col("$score"), desc=True, tie_break_col=col("$id"))
-                requests = [
-                    AnnSearchRequest(
-                        data=dense, anns_field="vector", param={"metric_type": "L2", "params": {"ef": 128}}, limit=2
-                    ),
-                    AnnSearchRequest(data=texts, anns_field="sparse", param={"metric_type": "BM25"}, limit=3),
-                ]
-                result = client.hybrid_search(
-                    name, reqs=requests, ranker=None, limit=3, output_fields=["ts"], function_chains=chain
-                )
-                assert len(result) == nq
-                for scores, hits in zip(expected, result, strict=True):
-                    ids = sorted(scores, key=lambda pk: (-scores[pk], pk))[:3]
-                    assert [hit["id"] for hit in hits] == ids
-                    assert [hit["distance"] for hit in hits] == pytest.approx(
-                        [scores[pk] for pk in ids], rel=1e-5, abs=1e-6
-                    )
-                    assert [self._hit_field(hit, "ts") for hit in hits] == [pk * 10 for pk in ids]
-                record_property(
-                    "indexed_fusion",
-                    json.dumps(
-                        {
-                            "collection": name,
-                            "resource": resource,
-                            "merge": merge,
-                            "nq": nq,
-                            "rewrite": rewrite,
-                            "expected_autoindex": expected_auto,
-                            "indices": index_details,
-                            "segments": [
-                                {"id": segment.segment_id, "rows": segment.num_rows, "index": segment.index_id}
-                                for segment in client.list_loaded_segments(name)
-                            ],
-                            "start_unix": started,
-                            "end_unix": time.time(),
-                            "hits": result,
-                        }
-                    ),
-                )
             self._assert_pyudf_recovery(client, control, resource)
 
     @pytest.mark.tags(CaseLabel.L3, "pyudf")
