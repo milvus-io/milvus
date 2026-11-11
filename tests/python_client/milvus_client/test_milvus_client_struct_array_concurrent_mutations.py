@@ -43,6 +43,8 @@ from pymilvus import DataType
 from pymilvus.exceptions import MilvusException, SchemaMismatchRetryableException
 from utils.util_log import test_log as log
 
+# These races are intermittent: XPASS does not establish a fix. Keep issue-scoped
+# errors, and verify fixes with --runxfail before removing the temporary marks.
 STALE_READ_SCHEMA_ISSUE = "https://github.com/milvus-io/milvus/issues/55024"
 REQUERY_SCHEMA_ISSUE = "https://github.com/milvus-io/milvus/issues/55411"
 
@@ -307,7 +309,7 @@ class TestMilvusClientStructArrayConcurrentSchemaUpdates(StructArrayTestBase):
                 kind,
                 id=f"{surface}-{kind}",
                 marks=pytest.mark.xfail(
-                    strict=True,
+                    strict=False,
                     raises=ConcurrentSchemaReadFailure,
                     reason=f"{STALE_READ_SCHEMA_ISSUE}: dropped child remains in an in-flight query plan"
                     if surface == "query"
@@ -673,7 +675,7 @@ class TestMilvusClientStructArrayConcurrentReadWrite(StructArrayTestBase):
                 smoke,
                 id="smoke" if smoke else f"seed{seed}",
                 marks=pytest.mark.xfail(
-                    strict=True,
+                    strict=False,
                     raises=ConcurrentSchemaReadFailure,
                     reason=f"{STALE_READ_SCHEMA_ISSUE}: mixed-history reads retain the dropped child ID",
                 )
