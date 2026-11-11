@@ -2210,6 +2210,8 @@ func TestStorageV3Reader_VarcharTargetLimit(t *testing.T) {
 				manifest, 0, math.MaxUint64, 1024, SourceEncryption{}, nil, 0, nil)
 			if tc.maxLength != "" {
 				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				require.Equal(t, merr.SystemError, merr.GetErrorType(err))
+				require.ErrorContains(t, err, "renamed_text")
 				require.ErrorContains(t, err, tc.wantErr)
 				require.Nil(t, r)
 				return
@@ -2220,6 +2222,7 @@ func TestStorageV3Reader_VarcharTargetLimit(t *testing.T) {
 			data, err := r.Read()
 			if tc.wantErr != "" {
 				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				require.Equal(t, merr.InputError, merr.GetErrorType(err))
 				require.ErrorContains(t, err, tc.wantErr)
 				require.Nil(t, data)
 				require.Nil(t, r.dr, "failed read must immediately close the native reader")
