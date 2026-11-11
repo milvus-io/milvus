@@ -36,13 +36,21 @@ vector field.
 |---|---|
 | Create without a vector field | supported |
 | Add a scalar field / drop a scalar field | supported |
-| Add a vector field or a BM25 / embedding / MinHash function to a collection created without one | rejected |
-| Drop the last vector field of a vector collection | rejected (unchanged) |
+| Add a nullable vector field, or a struct array field with a vector sub-field, to a collection without one | supported: the collection becomes a vector collection (Section 2, "Conversion") |
+| Drop the last vector field of a vector collection | supported while `common.enableCollectionWithoutVector` is on: the collection becomes one without a vector field |
 | Quick-setup paths (`create_collection(dimension=...)`, REST `quickCreate`) | unchanged, still create a vector collection |
 
-Whether a collection has vectors is decided at creation and cannot be
-converted afterwards. So the rules for load, compaction and the segment row
-cap do not change during the life of a collection.
+Whether a collection has vectors is read from its current schema, by one
+predicate (`typeutil.HasVectorField`: top-level vector fields, vector
+sub-fields of struct array fields, and function outputs). A collection can
+move between the two states; the rules for load, compaction and the segment
+row cap follow the schema at the time they are evaluated. A struct array
+field with only scalar sub-fields does not make a vector collection.
+
+The implementation is in two steps. Draft PR #54604 creates collections
+without a vector field and rejects both conversions. The conversion is a
+separate change stacked on it (branch `nonvec-phase2-convert`, not yet a
+pull request).
 
 ## 2. What changes
 
@@ -59,13 +67,87 @@ cap do not change during the life of a collection.
   a vector field has no index it must build. The QueryNode rejects an empty
   index list today; the check now applies only when the schema has a vector
   field.
-- **Adding a vector** to such a collection is rejected. RootCoord's schema
-  evolution entry makes the decision, for a vector field, a struct field
-  with a vector sub-field, and a function with a vector output alike. The
-  Proxy repeats the check so the user gets the error early.
+- **Adding a vector** to such a collection, and dropping the last vector
+  field of a vector collection, are described under "Conversion" below.
 - **Search**: `search`, `hybrid_search`, `search_iterator` and their REST
   counterparts return one error, `collection %s has no vector field, search
   is not supported`.
+
+**Conversion**
+
+*No vector field → vector.* A vector field can be added to a collection
+without one under the rule that already applies to adding a vector field to
+a vector collection: the field must be nullable. The same holds for a struct
+array field with a vector sub-field. Nothing is backfilled:
+
+- rows written before the field exists read it as null and are not returned
+  by a search on it;
+- a loaded collection stays loaded and queries are not interrupted. A search
+  on the new field returns `field index of the field: <name> is not loaded,
+  please reload the collection` until an index is built on it and the
+  collection is loaded again;
+- from the moment the field exists the collection is a vector collection:
+  the next load needs an index on the field and is rejected without one
+  (`index not found` when the collection has no index at all, `there is no
+  vector index on field` when it has other indexes).
+
+*Vector → no vector field.* The last vector field can be dropped, as a
+top-level field, as a struct array field, as the vector sub-field of a
+struct array field, or as a function field. Its index is dropped with it. A
+loaded collection stays loaded; search returns the error of a collection
+without a vector field; the next load needs no index.
+
+Dropping the last vector field produces a collection that
+`common.enableCollectionWithoutVector` forbids to create, so it follows the
+switch: with the switch off the drop is rejected with the previous errors
+(`cannot drop the last vector field`, `it would leave no vector field in
+the collection`). Adding a vector field is not gated.
+
+A field dropped and added again under the same name is a new field with a
+new field ID: rows written before the drop read it as null, not their old
+vector.
+
+No rule other than the checks at the schema-change entry had to change,
+because each of them reads the current schema:
+
+| Rule | Where it reads the schema | Effect of a conversion |
+|---|---|---|
+| Load needs a vector index | Proxy load task, QueryCoord automatic load | applies from the next load after a vector field is added; stops applying after the last one is dropped |
+| Search is rejected | Proxy search task | follows the schema immediately |
+| Index readiness for handoff and compaction input (Section 3) | computed per evaluation from the schema and the index metadata | the fields to wait for change with the schema; a vector field with no index defined is not waited for |
+| Growing segment seal on rows (Section 4) | StreamingNode shard manager, updated on schema change | segments sealed after the change follow the new state |
+| Compaction planners and writer row cap (Section 4) | DataCoord, per trigger | after a vector field is added the capped segments are merged on bytes; after the last one is dropped, segments above `maxRows` are cut at `maxRows` by the next compaction that rewrites them |
+
+Measured with `maxRows` set to 400 k (local standalone, branch
+`nonvec-phase2-convert`):
+
+| Direction | Step | Segment rows |
+|---|---|---|
+| no vector → vector | 1 M rows before the change | 400 k, 400 k, 200 k |
+| | 600 k rows with vectors after the change, flushed | 1 M (merged), 600 k: sealed on bytes, above `maxRows` |
+| | one manual compaction | 1.6 M in one segment |
+| vector → no vector | 1 M rows (dim 8) before the change | 1 M in one segment |
+| | 500 k rows after the change, flushed | 1 M, 400 k, 100 k: new segments sealed at `maxRows` |
+| | one manual compaction | 400 k, 400 k, 400 k, 200 k, 100 k; unchanged over the next 120 s |
+
+One defect was found and fixed: a collection loaded while it had no vector
+field and no index has no index meta in segcore, and a search on a vector
+field added afterwards failed an assertion (`index meta not exist`) instead
+of returning the "not loaded" error above.
+
+Not covered by the conversion work:
+
+- Backfill. A function field (BM25, MinHash) added to a collection without a
+  vector field needs its output computed for existing rows; adding one
+  requires StorageV3 and was not exercised.
+- The QueryNode load path used before QueryView (`WatchDmChannels` /
+  `LoadSegments`). It rejects an empty index list when the schema has a
+  vector field; a loaded collection with a vector field added and not yet
+  indexed is in exactly that state. The local tests ran on the QueryView
+  path only.
+- More than one QueryNode or replica, clustering compaction during a
+  conversion, bulk import after a conversion, and a conversion while roles
+  of different versions are running.
 
 **Clients**
 
@@ -470,8 +552,9 @@ Lowering it does not split existing segments.
 - Collections with a vector field are not affected by the row cap:
   `dataCoord.segment.maxRows` applies to collections without a vector field
   only, and their segment size target, seal, compaction and import are the
-  same as today. Collections without a vector field are new, so no existing
-  collection changes its segmentation.
+  same as today. No existing collection changes its segmentation unless its
+  last vector field is dropped, after which it is sealed and compacted under
+  the row cap (Section 2, "Conversion").
 - The row cap during a rolling upgrade: `max_segment_rows` on a mix
   compaction plan is a new use, and an old DataNode ignores it and cuts on
   bytes only, so an output may exceed `maxRows`; the new planner treats such
@@ -549,11 +632,43 @@ Row cap script at the default `maxRows`:
 Upstream CI has not run its build, unit test and e2e pipelines on #54604
 yet; they do not start while the PR is a draft.
 
+### 6.2 Conversion
+
+Run on branch `nonvec-phase2-convert` (stacked on #54604), local x86
+standalone, 2026-11-10.
+
+| Test | Result |
+|---|---|
+| Go unit tests of `internal/util/schemautil` and `internal/proxy/ddl` | pass. Nine cases that asserted the rejections now assert "allowed with the switch on, rejected with it off" |
+| Go unit tests of `internal/rootcoord` | the changed cases pass on their own. A full run of the package fails 2 to 8 different `TestDDLCallbacks*` cases each time, on the #54604 tree as well; the cause was not investigated |
+| Python e2e cases in the repository: `test_milvus_client_vector_field_conversion.py` (4 cases), the three changed cases of `test_drop_field_feature.py`, `test_milvus_client_collection_without_vector.py` | pass |
+| RESTful `test_drop_field_operations.py`, with a new case that drops the only vector field | 8 passed |
+| Local scripts, 24 cases | 23 pass, 1 not run |
+
+The local scripts cover, per group:
+
+| Group | Cases | What is checked |
+|---|---|---|
+| No vector → vector | 5 | released and loaded collections, an empty collection, two added fields with hybrid search, upsert of old rows; null on old rows, the load and search errors of Section 2, search results, compaction |
+| Vector → no vector | 3 | released and loaded collections, two vector fields dropped one after the other; index removal, load with no index, the search error |
+| Round trips | 4 | vector → none → vector under the same field name, none → vector → none without ever indexing, inserts running during both changes, and a control with a scalar field |
+| No index at all, restart | 4 | a loaded collection with no index gains a vector field, is flushed and compacted; three converted collections are served again after a restart |
+| Struct array | 4 | a struct field with a vector sub-field added and dropped, only the vector sub-field dropped, and the two shapes at creation |
+| Index build | 1 | the vector index finishes on segments written before the field existed |
+| Row cap | 2 | both directions, numbers in Section 2 |
+| Switch off | 1 | create and every form of dropping the last vector are rejected; dropping one of two vector fields is allowed |
+| Function field | 2 | dropping a BM25 function field that holds the only vector passes; adding one was not run (needs StorageV3 and backfill) |
+
+With inserts running during a change, the only client error is one rejected
+insert after a drop, sent with the schema the client had cached; the control
+that drops a scalar field shows the same.
+
 ## 7. Alternatives
 
 - **An explicit table type or proto flag.** Every client and tool would have
-  to know it. Whether a collection has vectors is decided at creation and
-  the schema already carries it, so it is not needed.
+  to know it. The schema already carries whether a collection has vectors,
+  and it changes with the schema when a collection is converted, so it is
+  not needed.
 - **Handoff waits for every defined index for all collections.** This is a
   review suggestion and is the same as changing the default of
   `forceAllIndexReady` to true. Compaction outputs of a vector collection
@@ -600,9 +715,9 @@ yet; they do not start while the PR is a draft.
 
 ## 8. Follow-ups
 
-- Converting a collection between having and not having vectors: adding the
-  first vector field to a collection without one, or dropping the last
-  vector field of a vector collection. This document rejects both.
+- The items listed as not covered under "Conversion" in Section 2: backfill
+  for function fields, the pre-QueryView load path, multi-node and mixed
+  version runs.
 - The loader's memory estimate is about 3× too low for narrow fixed-width
   rows. The QueryNode uses it for admission before loading a segment; the
   formula adds up the `MemorySize` of each field's binlogs and multiplies by
@@ -672,7 +787,10 @@ from `3df0cbcdd68`.
 | `proxy/task.go:3141`, `:3410` load collection / partitions | `ErrIndexNotFound` fails the load | fail only if a loaded vector field has no index; QueryCoord already treats "no index" as an empty index list |
 | `querynodev2/services.go:206` `WatchDmChannels`, `:497` `LoadSegments` | an empty `IndexInfoList` returns `ErrIndexNotFound`, the channel watch retries forever and the load times out after `loadTimeoutSeconds` | the check applies only when the schema has vector fields |
 | `httpserver/utils.go:3061` `anyToColumns` | REST insert needs a vector or function | check removed |
-| RootCoord `prepareAlterSchemaAddField` and the function-add path; Proxy `task.go:644` `addCollectionFieldTask`, `:1033` `alterCollectionSchemaTask` | a vector field, struct vector sub-field or vector-output function may be added | rejected when `HasVectorField` would turn from false to true (RootCoord decides, the Proxy checks early) |
+| RootCoord `prepareAlterSchemaAddField` and the function-add path, `schemautil.ValidateSchemaEvolution`; Proxy `addCollectionFieldTask`, `validateAddStructFieldRequest` | a vector field, struct vector sub-field or vector-output function may be added | #54604: rejected when the collection has no vector field. Conversion: allowed again, under the existing rule that an added vector field is nullable |
+| Proxy `validateDropField`, `validateDropStructSubField`, drop struct field, `validateDropFunction`; RootCoord `buildSchemaForDropField`, `buildSchemaForDropFunctionField`; `schemautil.validateDroppedEvolutionField` | dropping the last vector field is rejected (eight checks with three messages) | #54604: unchanged. Conversion: rejected only when `common.enableCollectionWithoutVector` is off |
+| segcore `plan_c.cpp` `CreateSearchPlanByExpr` | asserts that the collection has index meta; always true while a loaded collection had a vector index | Conversion: no index meta is reported as "field index is not loaded", the error of a vector field whose index is not loaded |
+| QueryCoord `collection_readiness.go` `prepareAutoLoadRequest` (`proxy.enableAutoLoad`) | `ErrIndexNotFound` fails the automatic load | fail only if the schema has a vector field |
 | `proxy/task.go:1297`, `:1337` drop struct field / function | `removed >= vectorCount` blocks the drop; always true at 0, so every struct-field and function drop is blocked | `removed > 0 &&`, as RootCoord already does |
 | `datacoord/util.go:77` `FilterInIndexedSegments` (now in `datacoord/index/filter.go`) | with no vector the result depends on unrelated details (Section 3.2) | split into `handoffReady` / `compactionInputReady`; the handoff target fields are shared with the staging `PrepareReadiness` through `HandoffIndexTargetFields` |
 | `datacoord/index_meta.go:1497` `AllDenseWithDiskIndex` (now in `datacoord/index/meta.go`) | true at 0 dense fields, so a scalar-only collection gets the 2 GB DiskANN target | returns false when there is no vector field at all; a sparse-only collection keeps today's result |
