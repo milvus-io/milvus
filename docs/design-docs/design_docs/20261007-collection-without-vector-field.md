@@ -472,6 +472,35 @@ Lowering it does not split existing segments.
     12 M narrow rows produces at least 3 segments; a low-dimensional vector
     collection is not capped.
 
+### 6.1 Results
+
+Run on the implementation head `2cc7740f6e` (Draft PR #54604), local x86
+standalone, 2026-11-09 to 11-10. Appendix C has the details and what was
+not rerun.
+
+| Test | Result |
+|---|---|
+| Build | passes |
+| Go unit tests, 17 groups of packages touched by the change | all pass. Two cases of `pkg/util/paramtable` fail on an unmodified master as well |
+| Functional end-to-end script (create, insert, load without index, query, get, count, delete, upsert, search rejected) | passes |
+| Compaction end-to-end script | passes |
+| pytest, the 4 new cases | 4 passed |
+| Row cap script, default `maxRows` 4 M | 8 of 8 checks pass |
+| Row cap script, `maxRows` 400 k, row counts divided by 10 | 7 of 8 checks pass; the import check fails because of the reduced scale (Appendix B.6) |
+
+Row cap script at the default `maxRows`:
+
+| Check | Measured |
+|---|---|
+| 10 M rows inserted, dynamic field on | 3 segments of 4.00 M, 3.80 M, 2.20 M rows; `count(*)` is 10 M |
+| 12 M rows imported from one parquet file | 3 segments of 5.60 M, 3.61 M, 2.80 M rows |
+| Manual compaction of the imported collection | 4,000,000, 3.61 M, 2.80 M, 1.60 M rows: the segment above `maxRows` is cut at `maxRows` |
+| 200 s of automatic trigger cycles | no segment changes |
+| Vector collection, dim 8, 6 M rows | 1 segment of 6 M rows: not capped |
+
+Upstream CI has not run its build, unit test and e2e pipelines on #54604
+yet; they do not start while the PR is a draft.
+
 ## 7. Alternatives
 
 - **An explicit table type or proto flag.** Every client and tool would have
