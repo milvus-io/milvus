@@ -111,3 +111,33 @@ aggregate accounting for multi-worker pools.
 Periodic Jenkins deployment and fault orchestration belong in `test-jobs` and
 are a separate integration step. These workload files alone do not establish
 that a periodic regression has run.
+
+## Migration checks
+
+`migration.py` provides a reusable checker for upgrade, restore and CDC
+switchover scenarios. It retains 10,000 rows with 128-dimensional vectors,
+scalar/nullable/JSON/array/dynamic fields, and a UDF wheel. Input and wheel
+digests are checked when reopening the ledger; existing files are never
+silently replaced.
+
+The scenario driver imports `retained_ledger` and `MigrationChecker` from
+`workloads.pyudf.migration`, with `tests/python_client` on `PYTHONPATH`:
+
+1. Call `retained_ledger(directory, "pyudf_r2_<run_id>", metric="L2")` once,
+   then reopen it with `MigrationChecker(directory)`. `IP` is also supported.
+2. Call `seed(client, index_type)` and explicitly provision the wheel with
+   `prepare_resource(client, storage, bucket)`. Call `mutate(client)` when the
+   scenario includes acknowledged updates and deletes.
+3. After the driver performs the transfer or upgrade, call `resource_state`,
+   `audit`, `ordinary` and `udf` against the destination. Pass `mutated=True`
+   after mutations; pass `post_switch=True` after `post_switch_write`.
+4. For mixed-version checks, `window(clients, commits, emit)` verifies each
+   directly addressed Proxy for at least 600 seconds, using live Connect RPCs
+   to check server identity. `emit(event, **details)` retains request evidence.
+
+The driver must require `outcome == "PASS"` for returned verdicts, and check
+both `registry_matches` and `bytes_match` in resource-state results. Verification
+does not copy or register missing wheels. Credentials, deployments, transfers,
+client lifetimes, resource guards and cleanup belong to the driver. This module
+is not selected by the workload CLI or normal pytest collection; adding it does
+not establish live migration or scheduled-regression coverage.
