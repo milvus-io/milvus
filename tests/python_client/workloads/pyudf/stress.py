@@ -126,15 +126,16 @@ def register(checker, root, prefix, count, source, config):
     registered = {item.name for item in checker.client.list_file_resources()}
     wheels = []
     for number in range(count):
+        check_stop_file(root.parent / "STOP")
         name = f"{prefix}_{number:02d}"
         assert name not in registered, f"Refuse to overwrite {name}"
         wheel = build_wheel(name + "_pkg", source)
         path = f"pyudf_r2/{name}.whl"
+        wheels.append({"resource": name, "path": path, "sha256": hashlib.sha256(wheel).hexdigest()})
+        save(root / "wheels.json", wheels)
         store.put_object(config.bucket, path, io.BytesIO(wheel), len(wheel))
         checker.client.add_file_resource(name, path, timeout=30)
         (root / (name + ".whl")).write_bytes(wheel)
-        wheels.append({"resource": name, "path": path, "sha256": hashlib.sha256(wheel).hexdigest()})
-        save(root / "wheels.json", wheels)
     return wheels
 
 
@@ -292,6 +293,7 @@ def performance(root):
             {"outcome": "FAIL" if failed else "MEASURED", "failed_windows": len(failed), "unix": time.time()},
         )
         assert not failed, "Strict benchmark gate failed; independent measurements retained"
+        save(output / "post-performance-audit.json", checker.audit_all_rows())
     finally:
         for client in clients:
             client.close()
@@ -303,6 +305,7 @@ def peer_baseline(checker, clients, output, seconds=15):
     sequence = 0
     while time.monotonic() - started < seconds:
         for number, client in enumerate(clients):
+            check_stop_file(output.parent.parent / "STOP")
             before = time.monotonic()
             hits = checker.search(client, checker.queries[sequence % 1000])
             checker.verify_control(hits, sequence % 1000)
@@ -315,14 +318,17 @@ def peer_baseline(checker, clients, output, seconds=15):
 def interference(root):
     config = WorkloadConfig.read(root)
     checker, clients = load_checker(root)
-    output = root / "interference"
-    output.mkdir()
-    prefix = config.collection + "_interference"
-    resource = register(checker, output, prefix, 1, INTERFERENCE_MODULE, config)[0]["resource"]
-    addresses = config.proxy_uris
-    attackers = [MilvusClient(addresses[n % 2], token=os.environ["MILVUS_TOKEN"], dedicated=True) for n in range(32)]
-    wire = [SearchWireCounter(client) for client in attackers]
+    attackers = []
     try:
+        output = root / "interference"
+        output.mkdir()
+        checker.evidence = output
+        prefix = config.collection + "_interference"
+        resource = register(checker, output, prefix, 1, INTERFERENCE_MODULE, config)[0]["resource"]
+        addresses = config.proxy_uris
+        for number in range(32):
+            attackers.append(MilvusClient(addresses[number % 2], token=os.environ["MILVUS_TOKEN"], dedicated=True))
+        wire = [SearchWireCounter(client) for client in attackers]
         for mode in ("cpu", "wait"):
             peer_baseline(checker, clients, output / f"{mode}-baseline.json")
             rpc_activity = SearchActivity()
@@ -339,7 +345,7 @@ def interference(root):
 
             def actor(number):
                 nonlocal active, peak, area, changed
-                barrier.wait()
+                barrier.wait(timeout=30)
                 sequence = number
                 while time.monotonic() - started < 60:
                     with lock:
@@ -391,11 +397,12 @@ def interference(root):
                     sequence += 32
 
             def peer_actor(number):
-                barrier.wait()
+                barrier.wait(timeout=30)
                 sequence = 0
                 while time.monotonic() - started < 60:
                     before = time.monotonic()
                     try:
+                        check_stop_file(root / "STOP")
                         hits = checker.search(clients[number], checker.queries[sequence % 1000])
                         checker.verify_control(hits, sequence % 1000)
                         item = {"proxy": number, "latency_ms": 1000 * (time.monotonic() - before)}
@@ -403,13 +410,21 @@ def interference(root):
                         item = {"proxy": number, "error": str(error)}
                     with lock:
                         peer.append(item)
+                    if "error" in item:
+                        break
                     sequence += 1
                     time.sleep(0.05)
 
             with ThreadPoolExecutor(max_workers=34) as pool:
-                futures = [pool.submit(actor, n) for n in range(32)] + [pool.submit(peer_actor, n) for n in range(2)]
-                for future in futures:
-                    future.result()
+                try:
+                    futures = [pool.submit(actor, n) for n in range(32)] + [
+                        pool.submit(peer_actor, n) for n in range(2)
+                    ]
+                    for future in futures:
+                        future.result()
+                except BaseException:
+                    (root / "STOP").touch()
+                    raise
             elapsed = time.monotonic() - started
             rpc_measurement = rpc_activity.snapshot()
             save(
@@ -438,6 +453,7 @@ def interference(root):
         outcomes = {mode: json.loads((output / f"{mode}.json").read_text())["outcome"] for mode in ("cpu", "wait")}
         save(output / "terminal.json", {"outcomes": outcomes, "unix": time.time()})
         assert all(value == "PASS" for value in outcomes.values()), outcomes
+        save(output / "post-interference-audit.json", checker.audit_all_rows())
     finally:
         for client in clients + attackers:
             client.close()
@@ -447,9 +463,10 @@ def package_cache(root, phase):
     """Check wheel reuse and resource removal; latency does not prove a cache hit."""
     config = WorkloadConfig.read(root)
     checker, clients = load_checker(root)
-    output = root / "package-cache"
-    output.mkdir(exist_ok=True)
     try:
+        output = root / "package-cache"
+        output.mkdir(exist_ok=True)
+        check_stop_file(root / "STOP")
         if phase == "baseline":
             wheels = []
         elif phase == "cold":
@@ -466,6 +483,7 @@ def package_cache(root, phase):
         if phase in ("cold", "replay"):
             for repeat in range(1 if phase == "cold" else 10):
                 for wheel in wheels:
+                    check_stop_file(root / "STOP")
                     before = time.monotonic()
                     hits = checker.search(clients[0], checker.queries[repeat], checker.chain(wheel["resource"], 2, 0))
                     checker.verify_udf(hits, checker.candidates[repeat], 2, 0)
@@ -478,6 +496,7 @@ def package_cache(root, phase):
                     )
         elif phase == "remove":
             for wheel in wheels:
+                check_stop_file(root / "STOP")
                 clients[0].remove_file_resource(wheel["resource"], timeout=30)
             names = {item.name for item in clients[0].list_file_resources()}
             assert not any(wheel["resource"] in names for wheel in wheels)
@@ -485,6 +504,7 @@ def package_cache(root, phase):
                 started = time.monotonic()
                 accepted_before_convergence = 0
                 while True:
+                    check_stop_file(root / "STOP")
                     try:
                         hits = checker.search(clients[0], checker.queries[0], checker.chain(wheel["resource"], 2, 0))
                         checker.verify_udf(hits, checker.candidates[0], 2, 0)
@@ -538,18 +558,20 @@ def concurrency(root):
     """Follow up at the RPC boundary without repeating the full ABBA campaign."""
     config = WorkloadConfig.read(root)
     checker, controls = load_checker(root)
-    output = root / "concurrency"
-    output.mkdir()
-    addresses = config.proxy_uris
-    summaries = []
     try:
+        output = root / "concurrency"
+        output.mkdir()
+        checker.evidence = output
+        addresses = config.proxy_uris
+        summaries = []
         for workers in (1, 8, 32):
-            clients = [
-                MilvusClient(addresses[n % 2], token=os.environ["MILVUS_TOKEN"], dedicated=True)
-                for n in range(max(2, workers))
-            ]
-            counters = [SearchWireCounter(client) for client in clients]
+            clients = []
             try:
+                for number in range(max(2, workers)):
+                    clients.append(
+                        MilvusClient(addresses[number % 2], token=os.environ["MILVUS_TOKEN"], dedicated=True)
+                    )
+                counters = [SearchWireCounter(client) for client in clients]
                 for mode in ("ordinary", "python_arithmetic"):
                     activity = SearchActivity()
                     for counter in counters:
@@ -563,7 +585,7 @@ def concurrency(root):
 
                     def invoke():
                         nonlocal count
-                        barrier.wait()
+                        barrier.wait(timeout=30)
                         while time.monotonic() - started < 20:
                             with lock:
                                 sequence = count
@@ -584,9 +606,13 @@ def concurrency(root):
                                 return
 
                     with ThreadPoolExecutor(max_workers=workers) as pool:
-                        futures = [pool.submit(invoke) for _ in range(workers)]
-                        for future in futures:
-                            future.result()
+                        try:
+                            futures = [pool.submit(invoke) for _ in range(workers)]
+                            for future in futures:
+                                future.result()
+                        except BaseException:
+                            (root / "STOP").touch()
+                            raise
                     measured = activity.snapshot()
                     summary = {
                         "mode": mode,
@@ -605,31 +631,7 @@ def concurrency(root):
                 for client in clients:
                     client.close()
         assert all(item["outcome"] == "PASS" for item in summaries), "RPC concurrency target not observed"
+        save(output / "post-concurrency-audit.json", checker.audit_all_rows())
     finally:
         for client in controls:
-            client.close()
-
-
-def cleanup(root):
-    config = WorkloadConfig.read(root)
-    checker, clients = load_checker(root)
-    try:
-        names = {item.name for item in clients[0].list_file_resources()}
-        removed = []
-        for phase in ("performance", "interference"):
-            path = root / phase / "wheels.json"
-            if not path.exists():
-                continue
-            for item in json.loads(path.read_text()):
-                name = item["resource"]
-                assert name.startswith(config.collection + "_")
-                if name in names:
-                    clients[0].remove_file_resource(name, timeout=30)
-                    removed.append(name)
-        save(
-            root / "extra-resource-cleanup.json",
-            {"removed": removed, "wheel_objects_retained": True, "unix": time.time()},
-        )
-    finally:
-        for client in clients:
             client.close()

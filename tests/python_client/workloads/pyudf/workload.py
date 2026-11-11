@@ -1,6 +1,6 @@
 """Bounded PyUDF workload with retained inputs and independent result checks.
 
-Run through ``python -m workloads.pyudf.runner`` with tests/python_client on PYTHONPATH.
+Run through ``pytest system_tests/pyudf`` from tests/python_client.
 Credentials are read from the environment and are never included in artifacts.
 The caller owns deployment, faults, resource monitoring, and eventual cleanup.
 """
@@ -98,6 +98,10 @@ class PyUDFSearchChecker:
             .limit(final_limit)
         )
 
+    def search_params(self, limit):
+        params = {"search_list": max(100, limit)} if self.index_type == "DISKANN" else {"ef": max(256, limit)}
+        return {"metric_type": "L2", "params": params}
+
     def search(self, client, query, chain=None, limit=100, filter_expr=""):
         options = {"function_chains": chain} if chain is not None else {}
         return client.search(
@@ -106,7 +110,7 @@ class PyUDFSearchChecker:
             anns_field="vector",
             limit=limit,
             filter=filter_expr,
-            search_params={"metric_type": "L2", "params": {"ef": max(256, limit)}},
+            search_params=self.search_params(limit),
             output_fields=FIELDS,
             consistency_level="Strong",
             timeout=30,
@@ -278,6 +282,8 @@ def prepare(client, storage, args, evidence):
     )
     client.create_index(name, params, timeout=300)
     client.load_collection(name, replica_number=1, timeout=300)
+    index = client.describe_index(name, "vector")
+    assert index["state"] == "Finished" and index["indexed_rows"] == args.rows, index
     assert client.query(name, filter="", output_fields=["count(*)"])[0]["count(*)"] == args.rows
     resources = []
     wheels = []
@@ -289,10 +295,12 @@ def prepare(client, storage, args, evidence):
         wheel = build_wheel(package, MODULE)
         path = f"pyudf_r1/{resource}.whl"
         (evidence / f"{resource}.whl").write_bytes(wheel)
+        # Persist ownership before remote writes, including ambiguous RPC failures.
+        wheels.append({"resource": resource, "path": path, "sha256": hashlib.sha256(wheel).hexdigest()})
+        (evidence / "wheels.json").write_text(json.dumps(wheels, indent=2))
         storage.put_object(args.bucket, path, io.BytesIO(wheel), len(wheel))
         client.add_file_resource(resource, path, timeout=30)
         resources.append(resource)
-        wheels.append({"resource": resource, "path": path, "sha256": hashlib.sha256(wheel).hexdigest()})
     metadata = {
         "server": client.get_server_version(detail=True),
         "sdk": pymilvus.__version__,
@@ -301,7 +309,7 @@ def prepare(client, storage, args, evidence):
         "dim": 128,
         "queries": len(queries),
         "wheels": wheels,
-        "index": client.describe_index(name, "vector"),
+        "index": index,
         "collection": name,
         "vectors_sha256": hashlib.sha256((evidence / "vectors.npy").read_bytes()).hexdigest(),
         "workload_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),

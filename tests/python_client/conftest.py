@@ -67,12 +67,6 @@ def pytest_addoption(parser):
         help="Run PyUDF against an explicitly reserved Cardinal index profile",
     )
     parser.addoption(
-        "--run-pyudf-benchmark",
-        action="store_true",
-        default=False,
-        help="Run the reserved 48-minute PyUDF ABBA measurement workload",
-    )
-    parser.addoption(
         "--run-pyudf-disabled",
         action="store_true",
         default=False,

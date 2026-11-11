@@ -1,11 +1,10 @@
-"""One bounded entry point for retained-data PyUDF system workloads.
+"""Preparation and bounded load phases used by the PyUDF pytest scenarios.
 
 The scenario runner owns deployment and faults. This module owns data preparation,
 Search assertions and load phases. Credentials are supplied through environment
 variables; the configuration file contains only targets and workload parameters.
 """
 
-import argparse
 import json
 import os
 import re
@@ -13,7 +12,6 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass
-from pathlib import Path
 
 import numpy as np
 from minio import Minio
@@ -32,6 +30,9 @@ class WorkloadConfig:
     rows: int = 100000
     minio_secure: bool = False
     proxy_management_endpoints: list[str] | None = None
+    duration: int = 7200
+    drain: int = 300
+    replay: int = 600
 
     def __post_init__(self):
         if len(self.proxy_uris) != 2 or len(set(self.proxy_uris)) != 2:
@@ -42,8 +43,10 @@ class WorkloadConfig:
             raise ValueError("An exclusively owned pyudf_ collection is required")
         if not 1000 <= self.rows <= 100000:
             raise ValueError("rows must be between 1000 and 100000")
-        if self.index_type not in ("HNSW", "AUTOINDEX"):
-            raise ValueError("index_type must be HNSW or AUTOINDEX")
+        if self.index_type not in ("HNSW", "DISKANN"):
+            raise ValueError("index_type must be HNSW or DISKANN; use the dedicated SDK profile for AUTOINDEX")
+        if not 0 < self.duration <= 7200 or not 0 <= self.drain <= 300 or not 0 < self.replay <= 600:
+            raise ValueError("Require 0 < duration <= 7200, 0 <= drain <= 300 and 0 < replay <= 600")
 
     @classmethod
     def read(cls, root):
@@ -161,30 +164,33 @@ def paced(checker, clients, output, duration):
                 skipped[number] += 1
                 sequence += 8
 
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        futures = [pool.submit(worker, number) for number in range(8)]
-        pending = set(futures)
-        while pending:
-            # A request failure sets stop immediately; reporting still waits for
-            # in-flight requests or the next interval instead of busy-looping.
-            _, pending = wait(pending, timeout=10)
-            with lock:
-                journal.flush()
-                print(
-                    json.dumps(
-                        {
-                            "event": "progress",
-                            "phase": output.name,
-                            "elapsed": time.monotonic() - started,
-                            "requests": len(results),
-                            "failures": failures,
-                        }
-                    ),
-                    flush=True,
-                )
-        for future in futures:
-            future.result()
-    journal.close()
+    with journal, ThreadPoolExecutor(max_workers=8) as pool:
+        try:
+            futures = [pool.submit(worker, number) for number in range(8)]
+            pending = set(futures)
+            while pending:
+                # A request failure sets stop immediately; reporting still waits for
+                # in-flight requests or the next interval instead of busy-looping.
+                _, pending = wait(pending, timeout=10)
+                with lock:
+                    journal.flush()
+                    print(
+                        json.dumps(
+                            {
+                                "event": "progress",
+                                "phase": output.name,
+                                "elapsed": time.monotonic() - started,
+                                "requests": len(results),
+                                "failures": failures,
+                            }
+                        ),
+                        flush=True,
+                    )
+            for future in futures:
+                future.result()
+        except BaseException:
+            stop.set()
+            raise
     elapsed = time.monotonic() - started
     summary = {
         "event": output.name + "_summary",
@@ -215,7 +221,10 @@ def soak(root, duration=7200, drain=300, replay=600):
         checker.evidence = root
         save(root / "post-soak-audit.json", checker.audit_all_rows())
         save(root / "drain-started.json", {"unix": time.time(), "seconds": drain})
-        time.sleep(drain)
+        deadline = time.monotonic() + drain
+        while time.monotonic() < deadline:
+            check_stop_file(root / "STOP")
+            time.sleep(min(1, max(0, deadline - time.monotonic())))
         save(root / "drain-ended.json", {"unix": time.time()})
         paced(checker, clients, root / "replay", replay)
         checker.evidence = root
@@ -223,51 +232,3 @@ def soak(root, duration=7200, drain=300, replay=600):
     finally:
         for client in clients:
             client.close()
-
-
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "phase",
-        choices=("initialize", "soak", "performance", "interference", "package-cache", "cleanup", "concurrency"),
-    )
-    parser.add_argument(
-        "--evidence",
-        type=Path,
-        required=True,
-        help="Owned directory containing config.json and the retained input ledger",
-    )
-    parser.add_argument("--duration", type=int, default=7200)
-    parser.add_argument("--drain", type=int, default=300)
-    parser.add_argument("--replay", type=int, default=600)
-    parser.add_argument(
-        "--package-cache-phase",
-        choices=("baseline", "cold", "replay", "remove", "recovery"),
-        help="PyUDF wheel loading and resource invalidation step; not a tiered-storage test",
-    )
-    args = parser.parse_args()
-    if not 0 < args.duration <= 7200 or not 0 <= args.drain <= 300 or not 0 < args.replay <= 600:
-        parser.error("Durations exceed the bounded workload limits")
-    if args.phase == "package-cache" and not args.package_cache_phase:
-        parser.error("package-cache requires --package-cache-phase")
-    WorkloadConfig.read(args.evidence)
-    if args.phase == "initialize":
-        initialize(args.evidence)
-    elif args.phase == "soak":
-        soak(args.evidence, args.duration, args.drain, args.replay)
-    else:
-        from workloads.pyudf import stress
-
-        if args.phase == "package-cache":
-            stress.package_cache(args.evidence, args.package_cache_phase)
-        else:
-            {
-                "performance": stress.performance,
-                "interference": stress.interference,
-                "cleanup": stress.cleanup,
-                "concurrency": stress.concurrency,
-            }[args.phase](args.evidence)
-
-
-if __name__ == "__main__":
-    main()

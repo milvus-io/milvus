@@ -185,12 +185,11 @@ def run_abba(
     journal = (checker.evidence / "benchmark-requests.jsonl").open("w")
     try:
         for workers in worker_counts:
-            clients = [
-                MilvusClient(addresses[number % len(addresses)], token=token, dedicated=True)
-                for number in range(max(workers, len(addresses)))
-            ]
-            wire = [SearchWireCounter(client) for client in clients]
+            clients = []
             try:
+                for number in range(max(workers, len(addresses))):
+                    clients.append(MilvusClient(addresses[number % len(addresses)], token=token, dedicated=True))
+                wire = [SearchWireCounter(client) for client in clients]
                 for mode in (
                     "ordinary",
                     "python_identity",
@@ -230,7 +229,7 @@ def run_abba(
                     def worker(number):
                         nonlocal active, peak, offered, area, changed
                         sequence = number
-                        barrier.wait()
+                        barrier.wait(timeout=30)
                         while time.monotonic() < started + window_seconds and not stop.is_set():
                             with lock:
                                 now = time.monotonic()
@@ -278,9 +277,13 @@ def run_abba(
                             sequence += workers
 
                     with ThreadPoolExecutor(max_workers=workers) as pool:
-                        futures = [pool.submit(worker, number) for number in range(workers)]
-                        for future in futures:
-                            future.result()
+                        try:
+                            futures = [pool.submit(worker, number) for number in range(workers)]
+                            for future in futures:
+                                future.result()
+                        except BaseException:
+                            stop.set()
+                            raise
                     elapsed = time.monotonic() - started
                     measured_wire = wire_delta(wire, wire_before)
                     stopped = stop_file.exists()
@@ -343,9 +346,11 @@ def run_batch_measurements(checker, uri, token, proxy_uris=None, stop_file=None)
     stop_file = Path(stop_file) if stop_file is not None else checker.evidence / "STOP"
     check_stop_file(stop_file)
     addresses = proxy_uris or [uri]
-    clients = [MilvusClient(addresses[n % len(addresses)], token=token, dedicated=True) for n in range(8)]
-    wire = [SearchWireCounter(client) for client in clients]
+    clients = []
     try:
+        for number in range(8):
+            clients.append(MilvusClient(addresses[number % len(addresses)], token=token, dedicated=True))
+        wire = [SearchWireCounter(client) for client in clients]
         for candidate_count in (10, 100, 1000):
             # Retain one baseline per tuple. The two input-layout windows share it.
             queries = checker.queries[:100]
@@ -383,7 +388,7 @@ def run_batch_measurements(checker, uri, token, proxy_uris=None, stop_file=None)
                             data=[queries[index].tolist() for index in selected],
                             anns_field="vector",
                             limit=candidate_count,
-                            search_params={"metric_type": "L2", "params": {"ef": max(256, candidate_count)}},
+                            search_params=checker.search_params(candidate_count),
                             output_fields=["ts", "label", "flag", "optional"],
                             consistency_level="Strong",
                             function_chains=chain,
