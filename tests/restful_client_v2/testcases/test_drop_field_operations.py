@@ -144,15 +144,14 @@ class TestCollectionDropField(TestBase):
         "field_name,expected_message",
         [
             ("id", "cannot drop primary key field"),
-            ("dense", "cannot drop the last vector field"),
             ("missing_field", "field not found"),
         ],
-        ids=["primary-key", "last-vector", "unknown-field"],
+        ids=["primary-key", "unknown-field"],
     )
     def test_drop_field_rejects_protected_or_unknown_field(self, field_name, expected_message):
         """
         target: verify REST surfaces server-side field drop validation
-        method: request a primary-key, last-vector, or unknown field drop by name
+        method: request a primary-key or unknown field drop by name
         expected: each request fails without removing any schema field
         """
         collection_name = self._create_collection()
@@ -173,6 +172,23 @@ class TestCollectionDropField(TestBase):
             expected_indexes=["dense_idx"],
         )
         assert after_state == before_state
+
+    def test_drop_last_vector_field(self):
+        """
+        target: verify REST can drop the only vector field of a collection
+        method: drop the vector field by name
+        expected: the request succeeds and the collection is left with no vector field and no vector index
+        """
+        collection_name = self._create_collection()
+        self._assert_collection_state(
+            collection_name,
+            expected_fields=["id", "dense", "tag"],
+            expected_indexes=["dense_idx"],
+        )
+
+        rsp = self.collection_client.drop_field(collection_name, field_name="dense")
+        assert rsp["code"] == 0, rsp
+        self._assert_collection_state(collection_name, expected_fields=["id", "tag"], expected_indexes=[])
 
     def test_drop_field_second_request_is_rejected(self):
         """

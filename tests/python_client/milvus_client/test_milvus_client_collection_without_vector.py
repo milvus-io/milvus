@@ -11,7 +11,6 @@ pk_field = "id"
 int_field = "age"
 str_field = "name"
 no_vector_search_msg = "has no vector field, search is not supported"
-no_vector_add_msg = "has no vector field, adding a vector field is not supported"
 
 
 class TestMilvusClientCollectionWithoutVector(TestMilvusClientV2Base):
@@ -19,7 +18,8 @@ class TestMilvusClientCollectionWithoutVector(TestMilvusClientV2Base):
     A collection created without a vector field. Everything except search is
     expected to work: insert, upsert, delete, query, get, count, scalar index,
     load without any index, partition and clustering keys, adding scalar
-    fields. Search returns one error, and a vector field cannot be added.
+    fields. Search returns one error. Adding a vector field turns it into a
+    vector collection (test_milvus_client_vector_field_conversion.py).
     """
 
     def _create_without_vector(self, client, collection_name, partition_key=False, clustering_key=False):
@@ -109,8 +109,8 @@ class TestMilvusClientCollectionWithoutVector(TestMilvusClientV2Base):
     def test_milvus_client_collection_without_vector_add_field(self):
         """
         target: schema evolution on a collection with no vector field
-        method: add a scalar field, then try to add a vector field
-        expected: the scalar field is added, the vector field is rejected
+        method: add a scalar field, then a nullable vector field
+        expected: both are added; a vector field that is not nullable is rejected as for any collection
         """
         client = self._client()
         collection_name = cf.gen_collection_name_by_testcase_name()
@@ -119,19 +119,22 @@ class TestMilvusClientCollectionWithoutVector(TestMilvusClientV2Base):
         described = self.describe_collection(client, collection_name)[0]
         assert "score" in [f["name"] for f in described["fields"]]
 
-        error = {ct.err_code: 1100, ct.err_msg: no_vector_add_msg}
+        error = {ct.err_code: 1100, ct.err_msg: "nullable"}
         self.add_collection_field(
             client,
             collection_name,
             field_name="vec",
             data_type=DataType.FLOAT_VECTOR,
             dim=8,
-            nullable=True,
+            nullable=False,
             check_task=CheckTasks.err_res,
             check_items=error,
         )
+        self.add_collection_field(
+            client, collection_name, field_name="vec", data_type=DataType.FLOAT_VECTOR, dim=8, nullable=True
+        )
         described = self.describe_collection(client, collection_name)[0]
-        assert "vec" not in [f["name"] for f in described["fields"]]
+        assert "vec" in [f["name"] for f in described["fields"]]
         self.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
