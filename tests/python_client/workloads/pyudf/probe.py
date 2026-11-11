@@ -134,7 +134,8 @@ def pyudf_probe(client, storage, bucket, string_pk=False, vector_kind=None, metr
     resource = name + "_resource"
     path = f"pyudf_r1/{resource}.whl"
     wheel = build_wheel(name + "_pkg", PROBE_MODULE)
-    collection_created = resource_added = object_uploaded = False
+    collection_owned = resource_owned = object_owned = False
+    failure = None
     try:
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(
@@ -158,8 +159,9 @@ def pyudf_probe(client, storage, bucket, string_pk=False, vector_kind=None, metr
             metric_type=metric,
             params={"M": 8, "efConstruction": 64} if index_type == "HNSW" else {},
         )
+        # Record ownership before each write: a timeout may hide a successful RPC.
+        collection_owned = True
         client.create_collection(name, schema=schema, index_params=index, consistency_level="Strong")
-        collection_created = True
         probe = PyUDFProbe(client, name, resource, string_pk, query=query, metric=metric)
         client.insert(
             name,
@@ -172,10 +174,10 @@ def pyudf_probe(client, storage, bucket, string_pk=False, vector_kind=None, metr
         client.load_collection(name, timeout=60)
         if not storage.bucket_exists(bucket):
             storage.make_bucket(bucket)
+        object_owned = True
         storage.put_object(bucket, path, io.BytesIO(wheel), len(wheel))
-        object_uploaded = True
+        resource_owned = True
         client.add_file_resource(resource, path, timeout=30)
-        resource_added = True
         deadline = time.monotonic() + 30
         while True:
             try:
@@ -190,11 +192,22 @@ def pyudf_probe(client, storage, bucket, string_pk=False, vector_kind=None, metr
                     raise
                 time.sleep(0.2)
         yield probe
+    except BaseException as error:
+        failure = error
+        raise
     finally:
         # Callers must drain any timed-out UDF before leaving this context.
-        if collection_created:
-            client.drop_collection(name, timeout=30)
-        if resource_added:
-            client.remove_file_resource(resource, timeout=30)
-        if object_uploaded:
-            storage.remove_object(bucket, path)
+        errors = []
+        for owned, operation, remove in (
+            (collection_owned, "drop collection", lambda: client.drop_collection(name, timeout=30)),
+            (resource_owned, "remove resource", lambda: client.remove_file_resource(resource, timeout=30)),
+            (object_owned, "remove wheel object", lambda: storage.remove_object(bucket, path)),
+        ):
+            if owned:
+                try:
+                    remove()
+                except Exception as error:
+                    error.add_note(operation)
+                    errors.append(error)
+        if errors:
+            raise BaseExceptionGroup("PyUDF probe cleanup failed", ([failure] if failure else []) + errors)
