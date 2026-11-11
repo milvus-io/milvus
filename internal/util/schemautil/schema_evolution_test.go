@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestValidateSchemaEvolutionAllowed(t *testing.T) {
@@ -580,7 +581,11 @@ func TestValidateSchemaEvolutionStructSubFieldMutation(t *testing.T) {
 		setMaxFieldID(oldSchema, 108)
 		newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
 		newSchema.StructArrayFields[0].Fields = newSchema.StructArrayFields[0].Fields[:1]
-		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "cannot drop the last vector field")
+		// The last vector may go: the collection becomes one without a vector field.
+		require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
+		withCollectionWithoutVectorDisabled(t, func() {
+			require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "cannot drop the last vector field")
+		})
 	})
 
 	t.Run("drop function input child", func(t *testing.T) {
@@ -718,7 +723,6 @@ func TestValidateSchemaEvolutionRejectsProtectedDrops(t *testing.T) {
 		{name: "system field", mutate: func(schema *schemapb.CollectionSchema) {
 			schema.Fields = removeEvolutionField(schema.Fields, int64(common.RowIDField))
 		}},
-		{name: "last vector field", mutate: func(schema *schemapb.CollectionSchema) { schema.Fields = removeEvolutionField(schema.Fields, 103) }},
 	}
 
 	for _, test := range tests {
@@ -980,9 +984,9 @@ func setEvolutionProperty(schema *schemapb.CollectionSchema, key, value string) 
 	schema.Properties = append(schema.Properties, &commonpb.KeyValuePair{Key: key, Value: value})
 }
 
-// A collection created without a vector field keeps that property: no schema
-// change may introduce one, whether as a field, a struct sub-field or a
-// function output. Scalar changes on such a collection stay allowed.
+// A collection created without a vector field may gain one later, through a
+// top-level field, a struct array sub-field or a function output. Scalar
+// changes on such a collection are allowed as before.
 func TestValidateSchemaEvolutionVectorIntroduction(t *testing.T) {
 	withoutVector := func() *schemapb.CollectionSchema {
 		schema := evolutionBaseSchema()
@@ -1017,7 +1021,7 @@ func TestValidateSchemaEvolutionVectorIntroduction(t *testing.T) {
 		}
 	})
 
-	rejected := []struct {
+	introduced := []struct {
 		name   string
 		mutate func(*schemapb.CollectionSchema)
 	}{
@@ -1047,14 +1051,50 @@ func TestValidateSchemaEvolutionVectorIntroduction(t *testing.T) {
 			setMaxFieldID(schema, 107)
 		}},
 	}
-	for _, test := range rejected {
+	for _, test := range introduced {
 		t.Run(test.name, func(t *testing.T) {
 			oldSchema := withoutVector()
 			newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
 			test.mutate(newSchema)
-			err := ValidateSchemaEvolution(oldSchema, newSchema)
-			require.Error(t, err)
-			require.Contains(t, err.Error(), "has no vector field")
+			// A collection without a vector field may gain one. Other rules of
+			// schema evolution still apply to the mutation, but none of them is
+			// about the collection having had no vector.
+			if err := ValidateSchemaEvolution(oldSchema, newSchema); err != nil {
+				require.NotContains(t, err.Error(), "has no vector field")
+			}
 		})
 	}
+}
+
+// TestValidateSchemaEvolutionLastVectorDrop: dropping the last vector field
+// turns the collection into one without a vector field, which is allowed
+// exactly while such collections may be created.
+func TestValidateSchemaEvolutionLastVectorDrop(t *testing.T) {
+	oldSchema := evolutionBaseSchema()
+	newSchema := proto.Clone(oldSchema).(*schemapb.CollectionSchema)
+	newSchema.Fields = removeEvolutionField(newSchema.Fields, 103)
+
+	require.NoError(t, ValidateSchemaEvolution(oldSchema, newSchema))
+	withCollectionWithoutVectorDisabled(t, func() {
+		require.ErrorContains(t, ValidateSchemaEvolution(oldSchema, newSchema), "cannot drop the last vector field")
+	})
+
+	// With the switch off a collection that already has no vector field may
+	// still gain one.
+	withCollectionWithoutVectorDisabled(t, func() {
+		grown := proto.Clone(newSchema).(*schemapb.CollectionSchema)
+		vector := evolutionField(106, "embedding", schemapb.DataType_FloatVector, true)
+		vector.TypeParams = []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}
+		grown.Fields = append(grown.Fields, vector)
+		setMaxFieldID(grown, 106)
+		require.NoError(t, ValidateSchemaEvolution(newSchema, grown))
+	})
+}
+
+func withCollectionWithoutVectorDisabled(t *testing.T, fn func()) {
+	t.Helper()
+	key := paramtable.Get().CommonCfg.EnableCollectionWithoutVector.Key
+	paramtable.Get().Save(key, "false")
+	defer paramtable.Get().Reset(key)
+	fn()
 }
