@@ -52,6 +52,19 @@ type TaskHandle interface {
 	Wait(context.Context) error
 }
 
+// PriorityTaskHandle is the optional handle extension supported by the
+// schedulers returned by New and Get.
+// Scheduler implementations that wrap their handles should forward this
+// capability when available; TaskHandle and Scheduler remain compatible.
+type PriorityTaskHandle interface {
+	TaskHandle
+	// SetPriority replaces the absolute priority, preserving the current ready
+	// queue age. It never interrupts an execution or advances a retry deadline.
+	// A running task uses the new value only when it requeues. It returns false
+	// after completion; a true result does not imply that the task is runnable.
+	SetPriority(int32) bool
+}
+
 type scheduleErrorKind int
 
 const scheduleErrorKindDelay scheduleErrorKind = iota + 1
@@ -86,13 +99,15 @@ type nodeScheduler struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu       sync.Mutex
-	cond     *sync.Cond
-	queue    *list.List
-	delayed  delayedTasks
-	timer    *time.Timer
-	sequence uint64
-	closed   bool
+	mu                 sync.Mutex
+	cond               *sync.Cond
+	queue              *list.List
+	ready              readyTasks
+	priorityDispatches int
+	delayed            delayedTasks
+	timer              *time.Timer
+	sequence           uint64
+	closed             bool
 
 	concurrency int
 	workerCount int
@@ -100,11 +115,14 @@ type nodeScheduler struct {
 }
 
 type taskEntry struct {
-	task    Task
-	ctx     context.Context
-	cancel  context.CancelFunc
-	handle  *taskHandle
-	backoff *backoff.ExponentialBackOff // Accessed only by the worker executing this entry.
+	priority   int32
+	readyIndex int
+	readyOrder uint64
+	task       Task
+	ctx        context.Context
+	cancel     context.CancelFunc
+	handle     *taskHandle
+	backoff    *backoff.ExponentialBackOff // Accessed only by the worker executing this entry.
 	// nextRun is the earliest time a delayed (ErrDelay) requeue may execute
 	// again. Zero means the entry may run immediately.
 	nextRun   time.Time
@@ -114,9 +132,10 @@ type taskEntry struct {
 }
 
 type taskHandle struct {
-	done       chan struct{}
-	mu         sync.Mutex
-	cancelTask func()
+	done        chan struct{}
+	mu          sync.Mutex
+	cancelTask  func()
+	setPriority func(int32) bool
 }
 
 func (h *taskHandle) Cancel() {
@@ -189,18 +208,22 @@ func (s *nodeScheduler) resize(concurrency int) {
 }
 
 func (s *nodeScheduler) Submit(task Task, opts ...Option) TaskHandle {
-	backoff := newTaskBackoff(opts...)
+	options := newTaskOptions(opts...)
+	backoff := newTaskBackoff(options)
 	ctx, cancel := context.WithCancel(s.ctx) // #nosec G118 -- task completion invokes the retained cancel function.
 	handle := &taskHandle{done: make(chan struct{})}
 	entry := &taskEntry{
-		task:      task,
-		ctx:       ctx,
-		cancel:    cancel,
-		handle:    handle,
-		heapIndex: -1,
-		backoff:   backoff,
+		task:       task,
+		priority:   options.priority,
+		readyIndex: -1,
+		ctx:        ctx,
+		cancel:     cancel,
+		handle:     handle,
+		heapIndex:  -1,
+		backoff:    backoff,
 	}
 	handle.cancelTask = func() { s.cancelTask(entry) }
+	handle.setPriority = func(priority int32) bool { return s.setPriority(entry, priority) }
 
 	s.mu.Lock()
 	if s.closed {
@@ -209,7 +232,7 @@ func (s *nodeScheduler) Submit(task Task, opts ...Option) TaskHandle {
 		return handle
 	}
 	// The queue is intentionally unbounded: Submit must never wait for capacity.
-	entry.queued = s.queue.PushBack(entry)
+	s.enqueueLocked(entry)
 	s.cond.Signal()
 	s.mu.Unlock()
 	return handle
@@ -227,9 +250,12 @@ func (s *nodeScheduler) Close() {
 	for element := s.queue.Front(); element != nil; element = element.Next() {
 		entry := element.Value.(*taskEntry)
 		entry.queued = nil
+		entry.readyIndex = -1
 		s.finishLocked(entry)
 	}
 	s.queue.Init()
+	clear(s.ready)
+	s.ready = nil
 	for len(s.delayed) > 0 {
 		s.finishLocked(heap.Pop(&s.delayed).(*taskEntry))
 	}
@@ -257,8 +283,7 @@ func (s *nodeScheduler) cancelTask(entry *taskEntry) {
 	}
 	entry.cancel()
 	if entry.queued != nil {
-		s.queue.Remove(entry.queued)
-		entry.queued = nil
+		s.removeReadyLocked(entry)
 		s.finishLocked(entry)
 	} else if entry.heapIndex >= 0 {
 		heap.Remove(&s.delayed, entry.heapIndex)
@@ -287,6 +312,7 @@ func (s *nodeScheduler) finishLocked(entry *taskEntry) {
 	entry.nextRun = time.Time{}
 	handle.mu.Lock()
 	handle.cancelTask = nil
+	handle.setPriority = nil
 	close(handle.done)
 	handle.mu.Unlock()
 }
@@ -348,9 +374,14 @@ func (s *nodeScheduler) dequeue() *taskEntry {
 			return nil
 		}
 		if element := s.queue.Front(); element != nil {
-			entry := element.Value.(*taskEntry)
-			s.queue.Remove(element)
-			entry.queued = nil
+			entry := s.ready[0]
+			if s.priorityDispatches >= priorityBurst {
+				entry = element.Value.(*taskEntry)
+				s.priorityDispatches = 0
+			} else {
+				s.priorityDispatches++
+			}
+			s.removeReadyLocked(entry)
 			return entry
 		}
 		s.cond.Wait()
@@ -364,7 +395,7 @@ func (s *nodeScheduler) requeue(entry *taskEntry, nextRun time.Time) bool {
 		return false
 	}
 	if !nextRun.After(time.Now()) {
-		entry.queued = s.queue.PushBack(entry)
+		s.enqueueLocked(entry)
 		s.cond.Signal()
 		return true
 	}
@@ -406,7 +437,7 @@ func (s *nodeScheduler) promoteDelayed() {
 	promoted := false
 	for len(s.delayed) > 0 && !s.delayed[0].nextRun.After(now) {
 		entry := heap.Pop(&s.delayed).(*taskEntry)
-		entry.queued = s.queue.PushBack(entry)
+		s.enqueueLocked(entry)
 		promoted = true
 	}
 	s.resetTimerLocked()

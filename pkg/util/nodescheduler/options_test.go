@@ -31,7 +31,7 @@ import (
 )
 
 func TestDefaultBackoffReachesCapWithoutStopping(t *testing.T) {
-	b := newTaskBackoff()
+	b := newTaskBackoff(newTaskOptions())
 	for _, expected := range []time.Duration{
 		10 * time.Millisecond, 20 * time.Millisecond, 40 * time.Millisecond,
 		80 * time.Millisecond, 160 * time.Millisecond, 320 * time.Millisecond,
@@ -54,7 +54,7 @@ func TestCustomBackoff(t *testing.T) {
 		{"constant", typeutil.BackoffConfig{InitialInterval: time.Millisecond, Multiplier: 1, MaxInterval: time.Millisecond}, []time.Duration{time.Millisecond, time.Millisecond}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			b := newTaskBackoff(WithBackoff(test.config))
+			b := newTaskBackoff(newTaskOptions(WithBackoff(test.config)))
 			for _, expected := range test.expected {
 				require.Equal(t, expected, b.NextBackOff())
 			}
