@@ -1443,7 +1443,6 @@ func TestDropVirtualChannel(t *testing.T) {
 			}
 			req.Segments = append(req.Segments, seg2Drop)
 		}
-		segmentManager.EXPECT().DropSegmentsOfChannel(mock.Anything, mock.Anything).Return()
 		resp, err := svr.DropVirtualChannel(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())

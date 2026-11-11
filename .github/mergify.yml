@@ -251,6 +251,18 @@ pull_request_rules:
         add:
           - ci-passed
 
+  # Match the 3.0 Jenkins test-only router, including optional Markdown files.
+  - name: Test passed for Go SDK tests changed on 3.0
+    conditions:
+      - *3X_BRANCH
+      - files~=^tests/go_client/(?!.*\.md$).+
+      - -files~=^(?!tests/go_client/|.*\.md$).+
+      - status-success=ci-v2/go-sdk
+    actions:
+      label:
+        add:
+          - ci-passed
+
   - name: Test passed for docs changed only
     conditions:
       - or: *BRANCHES
@@ -307,7 +319,8 @@ pull_request_rules:
   - name: Test passed for go unittest code changed on 3.0
     conditions:
       - *3X_BRANCH
-      - *only_go_unittest_files
+      - files~=^(client|internal|pkg|cmd|tests/integration)/.*_test\.go$
+      - -files~=^(?!(client|internal|pkg|cmd|tests/integration)/.*_test\.go$|.*\.md$).+
       - or: *WHEN_BUILD_UT_COV_SUCCESS
     actions:
       label:
@@ -406,6 +419,32 @@ pull_request_rules:
         remove:
           - ci-passed
 
+  - name: Remove ci-passed when Go SDK test checks are not success on 3.0
+    conditions:
+      - *3X_BRANCH
+      - files~=^tests/go_client/(?!.*\.md$).+
+      - -files~=^(?!tests/go_client/|.*\.md$).+
+      - label!=manual-pass
+      - label=ci-passed
+      - -status-success=ci-v2/go-sdk
+    actions:
+      label:
+        remove:
+          - ci-passed
+
+  - name: Remove ci-passed when Go unit tests are not success on 3.0
+    conditions:
+      - *3X_BRANCH
+      - files~=^(client|internal|pkg|cmd|tests/integration)/.*_test\.go$
+      - -files~=^(?!(client|internal|pkg|cmd|tests/integration)/.*_test\.go$|.*\.md$).+
+      - label!=manual-pass
+      - label=ci-passed
+      - -status-success=ci-v2/build-ut-cov
+    actions:
+      label:
+        remove:
+          - ci-passed
+
   # ==========================================================================
   # SOURCE CODE CI-PASSED INVALIDATION
   # Keep the required-check matrix aligned with the corresponding pass rules
@@ -498,13 +537,18 @@ pull_request_rules:
       - label!=manual-pass
       - label=ci-passed
       - *source_code_files
+      # SDK-only changes are governed by the dedicated SDK rule above.
+      - files~=^(?!tests/go_client/|.*\.md$).+
       - or:
         # build-ut-cov is required for every source-code pass path.
         - -status-success=ci-v2/build-ut-cov
-        # Go SDK and E2E are required only for regular source-code changes.
+        # Match the same UT-only boundary as the dedicated 3.0 pass rule.
         - and:
             - -title~=\[skip e2e\]
-            - *morethan_go_unittest_files
+            - not:
+                and:
+                  - files~=^(client|internal|pkg|cmd|tests/integration)/.*_test\.go$
+                  - -files~=^(?!(client|internal|pkg|cmd|tests/integration)/.*_test\.go$|.*\.md$).+
             - not:
                 or:
                   - status-success=go-sdk
@@ -512,7 +556,10 @@ pull_request_rules:
                   - status-success=ci-v2/go-sdk
         - and:
             - -title~=\[skip e2e\]
-            - *morethan_go_unittest_files
+            - not:
+                and:
+                  - files~=^(client|internal|pkg|cmd|tests/integration)/.*_test\.go$
+                  - -files~=^(?!(client|internal|pkg|cmd|tests/integration)/.*_test\.go$|.*\.md$).+
             - -status-success=ci-v2/e2e-amd
     actions:
       label:
@@ -628,6 +675,18 @@ pull_request_rules:
           ```
           design doc: docs/design-docs/design_docs/YYYYMMDD-your_design.md
           ```
+
+  # Removing kind/feature alone must not bypass a remaining feat: title (or vice versa).
+  - name: Dismiss stale design doc block label for non-feature PRs
+    conditions:
+      - or: *BRANCHES
+      - label=do-not-merge/missing-design-doc
+      - '-title~=^feat:'
+      - label!=kind/feature
+    actions:
+      label:
+        remove:
+          - do-not-merge/missing-design-doc
 
   - name: Dismiss block label if design doc is provided
     conditions:

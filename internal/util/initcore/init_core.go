@@ -43,6 +43,7 @@ import (
 	_ "github.com/milvus-io/milvus/internal/util/cgo"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
+	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -601,7 +602,9 @@ var loonReaderConfigMu sync.Mutex
 // settings: the global reader thread pool size (chunk/file-level read
 // fan-out) and the index-build read window (how many bytes one prefetch
 // round may span, which bounds how many row groups download in parallel per
-// round). Both default to 0 = pre-existing sequential behavior.
+// round). -1 resolves both from the hardware on a DataNode, see
+// ResolveLoonReaderThreadPoolSize and ResolveIndexBuildReadWindowBytes; 0 is
+// the pre-existing sequential behavior.
 //
 // Both values are validated before either is applied. Resizing the global
 // reader pool is not revertible through config (it cannot be destroyed at
@@ -611,17 +614,13 @@ func InitLoonReaderConfig(params *paramtable.ComponentParam) error {
 	loonReaderConfigMu.Lock()
 	defer loonReaderConfigMu.Unlock()
 
-	poolSize := params.CommonCfg.StorageReaderThreadPoolSize.GetAsInt64()
-	if poolSize < 0 || poolSize > maxStorageReaderThreadPoolSize {
-		return merr.WrapErrParameterInvalidMsg(
-			"common.storage.readerThreadPoolSize must be in [0, %d], got %d",
-			maxStorageReaderThreadPoolSize, poolSize)
+	poolSize, err := ResolveLoonReaderThreadPoolSize(params)
+	if err != nil {
+		return err
 	}
-	window := params.CommonCfg.IndexBuildReadWindowBytes.GetAsInt64()
-	if window < 0 || window > maxIndexBuildReadWindowBytes {
-		return merr.WrapErrParameterInvalidMsg(
-			"common.storage.indexBuildReadWindowBytes must be in [0, %d], got %d",
-			maxIndexBuildReadWindowBytes, window)
+	window, err := ResolveIndexBuildReadWindowBytes(params)
+	if err != nil {
+		return err
 	}
 	status := C.InitLoonReaderThreadPool(C.int32_t(poolSize))
 	if err := HandleCStatus(&status, "InitLoonReaderThreadPool failed"); err != nil {
@@ -762,6 +761,13 @@ func SetupCoreConfigChangelCallback() {
 			UpdateLowPriorityThreadCoreCoefficient(coefficient)
 			return nil
 		})
+
+		fanoutRatio := &paramtable.Get().QueryNodeCfg.SearchFanoutPoolSizeRatio
+		paramtable.Get().Watch(fanoutRatio.Key, config.NewHandler("querynode.searchfanout.poolsize", func(event *config.Event) {
+			if event.HasUpdated {
+				UpdateSearchFanoutThreadCoreCoefficient(fanoutRatio.GetAsFloat())
+			}
+		}))
 
 		paramtable.Get().CommonCfg.ThreadPoolMaxThreadsSize.RegisterCallback(func(ctx context.Context, key, oldValue, newValue string) error {
 			size, err := strconv.Atoi(newValue)

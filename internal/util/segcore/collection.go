@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/segcorepb"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -38,9 +39,9 @@ func CreateCCollection(req *CreateCCollectionRequest) (*CCollection, error) {
 	if req.ShareSchema {
 		return createSharedSchemaCollection(req)
 	}
-	schemaBlob, err := proto.Marshal(req.Schema)
+	schemaBlob, err := externalspec.MarshalCollectionSchema(req.Schema)
 	if err != nil {
-		return nil, merr.WrapErrSegcoreMsg("marshal schema failed")
+		return nil, merr.Wrap(err, "marshal schema failed")
 	}
 	var indexMetaBlob []byte
 	if req.IndexMeta != nil {
@@ -157,7 +158,7 @@ func (c *CCollection) UpdateSchema(sch *schemapb.CollectionSchema, version uint6
 		return merr.WrapErrServiceInternalMsg("cannot mutate a QueryView schema binding")
 	}
 
-	schemaBlob, err := proto.Marshal(sch)
+	schemaBlob, err := externalspec.MarshalCollectionSchema(sch)
 	if err != nil {
 		return err
 	}
