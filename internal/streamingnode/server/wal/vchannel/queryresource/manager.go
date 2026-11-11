@@ -205,9 +205,9 @@ func (m *Manager) Release(req snview.ReleaseResource) {
 			if req.OnDropped != nil {
 				req.OnDropped()
 			}
-		}}, nodescheduler.WithPriority(10))
+		}}, nodescheduler.WithPriority(5))
 	} else if hasAdvance && advanceRuntime != nil {
-		m.scheduler.Submit(resourceReleaseTask{runtime: advanceRuntime, resources: resources, version: advance, onDropped: req.OnDropped}, nodescheduler.WithPriority(10))
+		m.scheduler.Submit(resourceReleaseTask{runtime: advanceRuntime, resources: resources, version: advance, onDropped: req.OnDropped}, nodescheduler.WithPriority(5))
 	} else {
 		m.submitCallback(req.OnDropped)
 	}
@@ -475,7 +475,7 @@ func (m *Manager) submitReadyLocked(key qviews.QueryViewKey, ref queryViewRef) {
 		manager: m,
 		key:     key,
 		onReady: ref.onReady,
-	}, nodescheduler.WithPriority(5))
+	}, nodescheduler.WithPriority(0))
 }
 
 func (m *Manager) prepareViewRef(ctx context.Context, key qviews.QueryViewKey, ref queryViewRef, runtime *QueryRuntime, onReady func()) error {

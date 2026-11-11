@@ -18,6 +18,12 @@ type VChannelPersistRequester interface {
 	RequestPersistThrough(vchannel string, targetTimeTick uint64)
 }
 
+// PressurePersistRequester optionally promotes work that blocks the recovery tail.
+// The ordinary requester remains compatible with existing implementations.
+type PressurePersistRequester interface {
+	RequestPersistThroughUnderPressure(vchannel string, targetTimeTick uint64)
+}
+
 type trackedEntry struct {
 	point            utility.WALCheckpoint
 	logicalEndOffset uint64
@@ -34,6 +40,7 @@ type vchannelPending struct {
 }
 
 type persistRequest struct {
+	underPressure  bool
 	vchannel       string
 	targetTimeTick uint64
 }
@@ -129,7 +136,11 @@ func (t *Tracker) triggerStalledVChannels(now time.Time, stallTimeout time.Durat
 func (t *Tracker) triggerVChannels(now time.Time, stallTimeout time.Duration, force bool) {
 	requests := t.collectPersistRequests(now, stallTimeout, force)
 	for _, request := range requests {
-		t.persistRequester.RequestPersistThrough(request.vchannel, request.targetTimeTick)
+		if requester, ok := t.persistRequester.(PressurePersistRequester); ok && request.underPressure {
+			requester.RequestPersistThroughUnderPressure(request.vchannel, request.targetTimeTick)
+		} else {
+			t.persistRequester.RequestPersistThrough(request.vchannel, request.targetTimeTick)
+		}
 	}
 }
 
@@ -153,11 +164,16 @@ func (t *Tracker) collectPersistRequests(now time.Time, stallTimeout time.Durati
 		if len(state.pending) == 0 {
 			continue
 		}
+		if pressureHead != nil && pressureHead.vchannel == vchannel {
+			// Pressure and age requests have different scopes. Reissue the exact
+			// pressure target even if an ordinary request already scheduled it.
+			requests = append(requests, persistRequest{underPressure: true, vchannel: vchannel, targetTimeTick: pressureHead.point.TimeTick})
+		}
 		var maxStalledTimeTick uint64
 		hasStalledMessage := false
 		for _, entry := range state.pending {
 			stalled := stallTimeout > 0 && now.Sub(entry.trackedAt) >= stallTimeout
-			if entry.completed || (!stalled && entry != pressureHead) {
+			if entry.completed || !stalled {
 				continue
 			}
 			hasStalledMessage = true

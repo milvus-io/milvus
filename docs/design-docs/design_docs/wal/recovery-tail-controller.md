@@ -179,3 +179,19 @@ workloads. RecoveryStorage accepts that tradeoff to meet the recovery-tail
 target. Future log Defrag owns object coalescing, reference replacement, and old
 object reclamation. Defrag must not move the global WAL checkpoint or alter
 message Ack semantics.
+
+## Scheduler priorities
+
+Recovery-tail soft pressure promotes persistence requested to unblock the oldest
+incomplete VChannel prefix to priority 5. Segment serial predecessors and L0
+batches through the requested TimeTick inherit that priority, including work
+already queued or delayed. Pending final publication of L1 created before the
+target is also promoted because L0 materialization waits for it, even if its
+flush boundary is later than the target. Summary independently promotes chunk and manifest
+publication through its captured observed frontier. Later unrelated data work
+remains at -5; ordinary stall, size, age and explicit-flush triggers do not promote
+it. No running attempt is preempted and no retry deadline is shortened.
+
+The node scheduler caps all negative-priority work cumulatively at 75% of workers,
+with a further 50% cap for priorities at or below -10. Zero and positive priorities
+have no extra cap. ACK uses 20, Release uses 5, and QueryView Build/Ready uses 0.

@@ -130,23 +130,21 @@ func (h *ageTasks) Pop() any {
 	return entry
 }
 
-const priorityBands = 4
+const priorityBands = 3
 
 func priorityBand(priority int32) int {
 	switch {
-	case priority <= 0:
+	case priority <= -10:
 		return 0
-	case priority < 10:
+	case priority < 0:
 		return 1
-	case priority < 20:
-		return 2
 	default:
-		return 3
+		return 2
 	}
 }
 
 func (s *nodeScheduler) canRunLocked(band int) bool {
-	percentages := [priorityBands]int{50, 75, 90, 100}
+	percentages := [priorityBands]int{50, 75, 100}
 	for i := band; i < priorityBands; i++ {
 		// Divide first to avoid overflowing at large concurrency values.
 		limit := max(1, s.concurrency/100*percentages[i]+s.concurrency%100*percentages[i]/100)

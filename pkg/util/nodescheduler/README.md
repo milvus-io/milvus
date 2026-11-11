@@ -66,16 +66,16 @@ Priority bands impose cumulative limits on running attempts:
 
 | Priority | Maximum running tasks at this priority or below | Current use |
 | --- | --- | --- |
-| -20 through 0 | 50% of workers | Segment flush and other data tasks (0) |
-| 1 through 9 | 75% of workers | QueryView build/ready (5) |
-| 10 through 19 | 90% of workers | QueryView release (10) |
-| 20 | 100% of workers | Broadcast ACK (20) |
+| -20 through -10 | 50% of workers | Reserved for lower-priority background work |
+| -9 through -1 | 75% of workers | Ordinary data tasks (-5) |
+| 0 through 20 | 100% of workers | Build/Ready (0), Release (5), pressure-triggered data (5), ACK (20) |
 
-Each limit is rounded down, with a minimum of one worker. With 20 workers,
-the cumulative limits are 10, 15, 18 and 20. Higher-priority tasks can consume
-unused capacity; lower-priority tasks cannot borrow reserved capacity even when
-no higher-priority work is pending. A workload containing only default-priority
-tasks therefore uses at most 50% of workers (subject to rounding).
+Only negative priorities impose an additional cap. Each limit is rounded down,
+with a minimum of one worker. With 20 workers, the cumulative limits are 10, 15
+and 20. Higher-priority tasks can consume unused capacity; negative-priority
+work cannot borrow beyond its cap even when no higher-priority work is pending.
+Default (0) and positive-priority workloads can use the entire pool. The 75% cap
+includes all tasks in the 50% band; it is not a separate allocation.
 Small pools can have identical limits in adjacent bands; a one-worker pool has
 no reserved capacity. Fairness never bypasses a worker limit.
 
@@ -99,8 +99,8 @@ context, not the task's execution error. Close drains queued/delayed tasks and
 waits for running workers. Terminal handles detach cancellation and priority
 callbacks so retaining a handle does not retain its task or scheduler.
 
-The ready queue uses an indexed priority heap and four indexed age heaps, one
-per band. Fairness examines at most four age-heap roots, without scanning blocked
+The ready queue uses an indexed priority heap and three indexed age heaps, one
+per band. Fairness examines at most three age-heap roots, without scanning blocked
 backlogs. Submit,
 reprioritization, dispatch and removal cost O(log N), with O(N) pending storage.
 Delayed retries keep their separate indexed deadline heap and single timer.
@@ -115,3 +115,10 @@ waiting for retry. Its preceding legacy import completion RPC has no additional
 timeout, but remains cancelable; that transitional path can occupy a worker for
 longer than 100 ms. In-memory QueryView callbacks run in separate goroutines.
 QueryView scoring, wire fields and resource-priority aggregation are separate work.
+
+Recovery-tail soft-watermark requests promote the affected Segment/L0 persistence
+prefix and Summary chunk/manifest publication to 5. Already submitted pending
+work is reprioritized through the same handle; retries keep the promotion without
+shortening backoff. The promotion is scoped to the captured target, so subsequent
+unrelated data tasks start at -5. Ordinary age/size/explicit-flush triggers remain
+at -5. This does not introduce priority control for WAB cache occupancy.

@@ -65,7 +65,7 @@ func TestCumulativeWorkerLimits(t *testing.T) {
 	for _, band := range []struct {
 		priority int32
 		count    int
-	}{{0, 10}, {5, 5}, {10, 3}, {20, 2}} {
+	}{{-10, 10}, {-5, 5}, {0, 5}} {
 		for range band.count {
 			_, started, _ := holdCapacity(t, s, band.priority)
 			awaitCapacityStart(t, started)
@@ -83,25 +83,25 @@ func TestCumulativeWorkerLimits(t *testing.T) {
 	s.mu.Lock()
 	running := s.running
 	s.mu.Unlock()
-	require.Equal(t, [priorityBands]int{10, 15, 18, 20}, running)
+	require.Equal(t, [priorityBands]int{10, 15, 20}, running)
 }
 
 func TestPriorityChangePreservesRunningAdmission(t *testing.T) {
 	s := New(4)
 	defer s.Close()
-	first, started, release := holdCapacity(t, s, 0)
+	first, started, release := holdCapacity(t, s, -10)
 	awaitCapacityStart(t, started)
-	_, started, _ = holdCapacity(t, s, 0)
+	_, started, _ = holdCapacity(t, s, -10)
 	awaitCapacityStart(t, started)
-	queued, promoted, _ := holdCapacity(t, s, 0)
-	_, low, _ := holdCapacity(t, s, -1)
+	queued, promoted, _ := holdCapacity(t, s, -10)
+	_, low, _ := holdCapacity(t, s, -11)
 	require.True(t, first.SetPriority(20))
-	require.True(t, queued.SetPriority(5))
+	require.True(t, queued.SetPriority(-5))
 	awaitCapacityStart(t, promoted)
 	s.mu.Lock()
 	running := s.running
 	s.mu.Unlock()
-	require.Equal(t, [priorityBands]int{2, 3, 3, 3}, running,
+	require.Equal(t, [priorityBands]int{2, 3, 3}, running,
 		"running priority updates must not free the original band's slot")
 	release()
 	awaitCapacityStart(t, low)
@@ -111,7 +111,7 @@ func TestFairnessSkipsCapacityBlockedTasks(t *testing.T) {
 	s := New(4)
 	defer s.Close()
 	for range 2 {
-		_, started, _ := holdCapacity(t, s, 0)
+		_, started, _ := holdCapacity(t, s, -10)
 		awaitCapacityStart(t, started)
 	}
 	_, low, _ := holdCapacity(t, s, -20)
@@ -130,11 +130,11 @@ func TestFairnessSkipsCapacityBlockedTasks(t *testing.T) {
 func TestCapacityResizeDoesNotPreempt(t *testing.T) {
 	s := New(4)
 	defer s.Close()
-	first, started, releaseFirst := holdCapacity(t, s, 0)
+	first, started, releaseFirst := holdCapacity(t, s, -10)
 	awaitCapacityStart(t, started)
-	second, started, releaseSecond := holdCapacity(t, s, 0)
+	second, started, releaseSecond := holdCapacity(t, s, -10)
 	awaitCapacityStart(t, started)
-	_, queued, _ := holdCapacity(t, s, 0)
+	_, queued, _ := holdCapacity(t, s, -10)
 	s.resize(2)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
@@ -148,7 +148,7 @@ func TestCapacityResizeDoesNotPreempt(t *testing.T) {
 	releaseSecond()
 	require.NoError(t, second.Wait(ctx))
 	awaitCapacityStart(t, queued)
-	_, next, _ := holdCapacity(t, s, 0)
+	_, next, _ := holdCapacity(t, s, -10)
 	s.resize(4)
 	awaitCapacityStart(t, next)
 }
@@ -158,10 +158,10 @@ func TestWorkerLimitRounding(t *testing.T) {
 		workers int
 		limits  [priorityBands]int
 	}{
-		{1, [priorityBands]int{1, 1, 1, 1}},
-		{2, [priorityBands]int{1, 1, 1, 2}},
-		{3, [priorityBands]int{1, 2, 2, 3}},
-		{10, [priorityBands]int{5, 7, 9, 10}},
+		{1, [priorityBands]int{1, 1, 1}},
+		{2, [priorityBands]int{1, 1, 2}},
+		{3, [priorityBands]int{1, 2, 3}},
+		{10, [priorityBands]int{5, 7, 10}},
 	} {
 		s := &nodeScheduler{concurrency: tc.workers}
 		for band, limit := range tc.limits {
@@ -181,7 +181,7 @@ func TestWorkerLimitRounding(t *testing.T) {
 func TestDelayedAttemptReleasesBandCapacity(t *testing.T) {
 	s := New(4)
 	defer s.Close()
-	_, started, _ := holdCapacity(t, s, 0)
+	_, started, _ := holdCapacity(t, s, -10)
 	awaitCapacityStart(t, started)
 	entered, release := make(chan struct{}), make(chan struct{})
 	delayed := s.Submit(TaskFunc(func(ctx context.Context) error {
@@ -191,15 +191,15 @@ func TestDelayedAttemptReleasesBandCapacity(t *testing.T) {
 		case <-ctx.Done():
 		}
 		return DelayUntil(time.Now().Add(time.Hour))
-	}))
+	}), WithPriority(-10))
 	awaitCapacityStart(t, entered)
-	_, next, _ := holdCapacity(t, s, 0)
+	_, next, _ := holdCapacity(t, s, -10)
 	close(release)
 	awaitCapacityStart(t, next)
 	s.mu.Lock()
 	running, delayedCount := s.running, len(s.delayed)
 	s.mu.Unlock()
-	require.Equal(t, [priorityBands]int{2, 2, 2, 2}, running)
+	require.Equal(t, [priorityBands]int{2, 2, 2}, running)
 	require.Equal(t, 1, delayedCount)
 	delayed.Cancel()
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
@@ -211,4 +211,41 @@ func TestDelayedAttemptReleasesBandCapacity(t *testing.T) {
 		require.Nil(t, band)
 	}
 	require.Equal(t, [priorityBands]int{}, s.running)
+}
+
+func TestNonnegativePrioritiesUseEntirePool(t *testing.T) {
+	for _, priority := range []int32{0, 1, 5, 20} {
+		s := New(4)
+		for range 4 {
+			_, started, _ := holdCapacity(t, s, priority)
+			awaitCapacityStart(t, started)
+		}
+		s.Close()
+	}
+	// Existing callers that supply no option retain their full concurrency.
+	s := New(4)
+	defer s.Close()
+	started := make(chan struct{}, 4)
+	for range 4 {
+		s.Submit(TaskFunc(func(ctx context.Context) error {
+			started <- struct{}{}
+			<-ctx.Done()
+			return nil
+		}))
+	}
+	for range 4 {
+		awaitCapacityStart(t, started)
+	}
+}
+
+func TestPriorityBandBoundaries(t *testing.T) {
+	for priority := MinPriority; priority <= MaxPriority; priority++ {
+		expected := 2
+		if priority <= -10 {
+			expected = 0
+		} else if priority < 0 {
+			expected = 1
+		}
+		require.Equal(t, expected, priorityBand(priority))
+	}
 }

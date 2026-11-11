@@ -7,6 +7,7 @@ import (
 	"go.uber.org/atomic"
 	"golang.org/x/time/rate"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -29,14 +30,19 @@ type segmentTask interface {
 	Done() bool
 	Submitted() bool
 	markSubmitted()
+	taskPriority() *moduleapi.DataTaskPriority
+	timeTick() uint64
 }
 
 type segmentTaskBase struct {
+	priority  moduleapi.DataTaskPriority
 	segment   *SegmentView
 	taskName  string
 	done      atomic.Bool
 	submitted atomic.Bool
 }
+
+func (t *segmentTaskBase) taskPriority() *moduleapi.DataTaskPriority { return &t.priority }
 
 func (t *segmentTaskBase) Done() bool {
 	return t.done.Load()
@@ -106,6 +112,8 @@ type ensureGrowingSegmentTask struct {
 	timetick uint64
 }
 
+func (t *ensureGrowingSegmentTask) timeTick() uint64 { return t.timetick }
+
 func (t *ensureGrowingSegmentTask) Execute(ctx context.Context) error {
 	return t.execute(ctx, func(ctx context.Context) error {
 		segment := t.segment
@@ -132,6 +140,8 @@ type flushL1BufferTask struct {
 	timetick uint64
 }
 
+func (t *flushL1BufferTask) timeTick() uint64 { return t.timetick }
+
 func (t *flushL1BufferTask) Execute(ctx context.Context) error {
 	return t.execute(ctx, func(ctx context.Context) error {
 		return t.segment.FlushInsertChunk(ctx, t.timetick)
@@ -143,6 +153,8 @@ type commitL1SegmentTask struct {
 	timetick      uint64
 	flushTimeTick uint64
 }
+
+func (t *commitL1SegmentTask) timeTick() uint64 { return t.timetick }
 
 func (t *commitL1SegmentTask) Execute(ctx context.Context) error {
 	return t.execute(ctx, func(ctx context.Context) error {
@@ -289,7 +301,7 @@ func (s *SegmentView) maybeSubmitNextLocked() {
 		return
 	}
 	head.markSubmitted()
-	s.runtime.Scheduler.Submit(head)
+	head.taskPriority().Submit(s.runtime.Scheduler, head)
 }
 
 // finishTask pops the finished (success or terminal failure) task from the

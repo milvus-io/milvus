@@ -73,7 +73,7 @@ func scheduleResourceBuild(scheduler nodescheduler.Scheduler, task *resourceBuil
 			callbacks[0](scheduled)
 		}
 	}
-	scheduled.handle = scheduler.Submit(task, nodescheduler.WithPriority(5))
+	scheduled.handle = scheduler.Submit(task, nodescheduler.WithPriority(0))
 	return scheduled
 }
 

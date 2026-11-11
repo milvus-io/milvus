@@ -81,9 +81,10 @@ hold no worker. Module shutdown cancels an active attempt; scoped scheduler
 shutdown also cancels queued and delayed work without releasing unfinished Owners.
 
 ACK tasks use priority 20. The shared scheduler reserves capacity by cumulative
-priority bands: data work (priority 0) at most 50%, QueryView build/ready (5) and
-lower work at most 75%, release (10) and lower work at most 90%, and all tasks
-at most 100%. See the [scheduler contract](../../../../pkg/util/nodescheduler/README.md)
+priority bands: priorities -20 through -10 at most 50%, all negative priorities
+at most 75%, and nonnegative priorities without an extra limit. Ordinary data
+work uses -5; recovery-tail pressure promotes affected data work to 5. QueryView
+build/ready uses 0 and release uses 5. See the [scheduler contract](../../../../pkg/util/nodescheduler/README.md)
 for rounding, non-preemption and fairness.
 
 The 100ms budget bounds the client-side attempt. The Coordinator currently
