@@ -76,7 +76,11 @@ collections without a vector field; the last three add the conversion.
 *No vector field → vector.* A vector field can be added to a collection
 without one under the rule that already applies to adding a vector field to
 a vector collection: the field must be nullable. The same holds for a struct
-array field with a vector sub-field. Nothing is backfilled:
+array field with a vector sub-field, and for a vector sub-field added to a
+struct array field that has only scalar sub-fields; such a sub-field must be
+element-nullable (existing rule), and an element-nullable vector array
+supports only element-level metrics and search, not embedding-list search.
+Nothing is backfilled:
 
 - rows written before the field exists read it as null and are not returned
   by a search on it;
@@ -659,7 +663,8 @@ x86 standalone, 2026-11-10.
 | Go unit tests of `internal/util/schemautil` and `internal/proxy/ddl` | pass. Nine cases that asserted the rejections now assert "allowed with the switch on, rejected with it off" |
 | Go unit tests of `internal/rootcoord` | pass. A full run of the package used to fail 2 to 8 different `TestDDLCallbacks*` cases each time, without the conversion commits as well. The cause is the mock broadcaster of the tests, which gave two broadcasts in the same millisecond the same time tick, so the second ALTER was skipped as a replay (#55432); with the fix of #55433 the package passes in three runs out of three |
 | Python e2e cases in the repository: `test_milvus_client_vector_field_conversion.py` (4 cases), the three changed cases of `test_drop_field_feature.py`, `test_milvus_client_collection_without_vector.py` | pass |
-| RESTful `test_drop_field_operations.py`, with a new case that drops the only vector field | 8 passed |
+| RESTful `test_drop_field_operations.py`, with a new case that drops the only vector field and then checks that search and hybrid search return the error of a collection without a vector field | 8 passed |
+| `test_add_function_field_feature.py::test_add_bm25_function_field_to_collection_without_vector`, against an instance with StorageV3 and both backfill compactions on, as in the e2e helm values | pass |
 | C++ unit test `CApiTest.CPlanWithoutIndexMeta` | pass: a search plan on a collection with no index meta returns `FieldNotLoaded` |
 | Local scripts on standalone, 28 cases | 27 pass; the one not run adds a BM25 function field on an instance without StorageV3 and is rejected by the existing rule; it is covered by the backfill cases below |
 | Backfill of an added BM25 function field, with StorageV3 and both backfill compactions on; 4 cases, each run on a collection without a vector field and on a control with a `FLOAT_VECTOR` field | 8 of 8 pass, the same result on both collections at every step |
@@ -674,6 +679,7 @@ The local scripts cover, per group:
 | Round trips | 4 | vector → none → vector under the same field name, none → vector → none without ever indexing, inserts running during both changes, and a control with a scalar field |
 | No index at all, restart | 4 | a loaded collection with no index gains a vector field, is flushed and compacted; three converted collections are served again after a restart |
 | Struct array | 4 | a struct field with a vector sub-field added and dropped, only the vector sub-field dropped, and the two shapes at creation |
+| Struct array vector as the first vector | 3, each also on a control with a `FLOAT_VECTOR` field; run on a default instance and on one with StorageV3 | a struct field with a vector sub-field added to a loaded collection with no index at all; a vector sub-field added to a struct field that had only scalar sub-fields (element-level index and search over REST), then dropped; a struct vector added to a collection loaded with only a scalar index. Old rows read the struct, or its new sub-field, as null; search before the index is loaded returns "not loaded"; load without an index is rejected; after index and load, search returns only the rows that have the vector. Same result on both collections |
 | Index build | 1 | the vector index finishes on segments written before the field existed |
 | Row cap | 2 | both directions, numbers in Section 2 |
 | Switch off | 1 | create and every form of dropping the last vector are rejected; dropping one of two vector fields is allowed |
@@ -681,6 +687,14 @@ The local scripts cover, per group:
 | Import after a conversion | 2 | parquet import into a collection that gained a vector field (file with and without the vector column) and into one that lost its last vector field (file without and with the dropped column); each result equals that of a control collection created with the final schema; rows, null values and search results are checked |
 | Clustering compaction | 2 | 1 M rows, the schema change sent 1.5 s after the trigger. The log shows the change inside the execution of the plan in both directions (drop: plan 09:29:20.1 to 24.6, change at 21.4; add: plan 09:30:20.1 to 22.9, change at 21.2). The plan completes, the row count is unchanged, and a second clustering compaction after the change completes |
 | Two replicas (cluster only) | 2 | both conversions on a collection loaded with two replicas on two QueryNodes: repeated queries and searches return the same result or the same error, and the collection loads with two replicas again |
+
+The struct array cases found one gap of the collection without a vector
+field itself, not of the conversion: RESTful search and hybrid search
+resolved a vector field to decode the request body, and on any collection
+without a vector field failed with 1801 `can only accept json format
+request, error: cannot find a vector field`, while gRPC returns 1100 `has no
+vector field, search is not supported`. The RESTful handlers now return the
+gRPC error (`30c5723c68`).
 
 With inserts running during a change, the only client error is one rejected
 insert after a drop, sent with the schema the client had cached; the control
