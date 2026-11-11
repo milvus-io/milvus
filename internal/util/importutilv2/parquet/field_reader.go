@@ -703,6 +703,19 @@ func ReadNullableStringData(pcr *FieldReader, count int64) (any, []bool, error) 
 	return data, validData, nil
 }
 
+// validateJSONRow validates one row of raw JSON bytes: it must be valid JSON and,
+// for the dynamic field, a JSON object. The dynamic parse goes straight into the
+// map because being a JSON object already implies valid JSON, so one parse
+// covers both checks and no row is parsed twice.
+func validateJSONRow(field *schemapb.FieldSchema, str string) error {
+	if field.GetIsDynamic() {
+		var obj map[string]interface{}
+		return json.Unmarshal([]byte(str), &obj)
+	}
+	var value interface{}
+	return json.Unmarshal([]byte(str), &value)
+}
+
 func ReadJSONData(pcr *FieldReader, count int64) (any, error) {
 	// JSON field read data from string array Parquet
 	data, err := ReadStringData(pcr, count, false)
@@ -714,17 +727,8 @@ func ReadJSONData(pcr *FieldReader, count int64) (any, error) {
 	}
 	byteArr := make([][]byte, 0)
 	for _, str := range data.([]string) {
-		var dummy interface{}
-		err = json.Unmarshal([]byte(str), &dummy)
-		if err != nil {
+		if err = validateJSONRow(pcr.field, str); err != nil {
 			return nil, err
-		}
-		if pcr.field.GetIsDynamic() {
-			var dummy2 map[string]interface{}
-			err = json.Unmarshal([]byte(str), &dummy2)
-			if err != nil {
-				return nil, err
-			}
 		}
 		byteArr = append(byteArr, []byte(str))
 	}
@@ -747,17 +751,8 @@ func ReadNullableJSONData(pcr *FieldReader, count int64) (any, []bool, error) {
 			byteArr = append(byteArr, defaultValue)
 			continue
 		}
-		var dummy interface{}
-		err = json.Unmarshal([]byte(str), &dummy)
-		if err != nil {
+		if err = validateJSONRow(pcr.field, str); err != nil {
 			return nil, nil, err
-		}
-		if pcr.field.GetIsDynamic() {
-			var dummy2 map[string]interface{}
-			err = json.Unmarshal([]byte(str), &dummy2)
-			if err != nil {
-				return nil, nil, err
-			}
 		}
 		byteArr = append(byteArr, []byte(str))
 	}
