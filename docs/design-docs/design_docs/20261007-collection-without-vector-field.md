@@ -705,7 +705,9 @@ included.
 
 `add_function_field` returns after every sealed segment holds the output:
 the log shows the schema-bump compaction finishing before RootCoord
-completes the change. On segments that are already V3 this took 2 to 19 s.
+completes the change. On segments that are already V3 the 8 adds took 3.1
+to 19.5 s; each returned at the next run of the schema-bump policy, every
+20 s here.
 On V2 segments the add waits for the storage-version upgrade, whose rate
 limit (`rateLimitTokens` 3 per `rateLimitInterval` 120 s, for the whole
 cluster) set the time: 157.7 s for the collection without a vector field,
