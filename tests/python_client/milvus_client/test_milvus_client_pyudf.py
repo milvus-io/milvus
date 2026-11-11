@@ -2305,9 +2305,9 @@ def create_udf(context):
         # Preconditions: enabled PyUDF on 127.0.0.1:19090 and a runner outside its Pod;
         # point --uri at the actual Proxy/standalone Pod IP, with public port 19530 reachable.
         # A Service address alone does not establish the worker network boundary.
+        import errno
+        import socket
         from urllib.parse import urlparse
-
-        from common.pyudf_helpers import probe_endpoint
 
         client = self._client()
         try:
@@ -2316,10 +2316,22 @@ def create_udf(context):
             client.close()
         uri = cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
         target = urlparse(uri)
-        result = probe_endpoint(target.hostname, public_port=target.port or 19530)
+        observed = {}
+        for label, port in (("public_api", target.port or 19530), ("worker_rpc", 19090)):
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
+                connection.settimeout(2)
+                observed[label] = connection.connect_ex((target.hostname, port))
+        assert observed["public_api"] == 0, observed
+        assert observed["worker_rpc"] in {
+            errno.ECONNREFUSED,
+            errno.ETIMEDOUT,
+            errno.EHOSTUNREACH,
+            errno.ENETUNREACH,
+            errno.EAGAIN,
+        }, observed
         record_property("peer_target", target.hostname)
-        record_property("public_tcp_code", result["observation"]["public_api"]["tcp_connect_code"])
-        record_property("worker_tcp_code", result["observation"]["worker_rpc"]["tcp_connect_code"])
+        record_property("public_tcp_code", observed["public_api"])
+        record_property("worker_tcp_code", observed["worker_rpc"])
         record_property("scope", "supplied endpoint; bind it to a recorded Pod IP to certify the Pod boundary")
 
     @pytest.mark.xdist_group(name="rbac_serial")

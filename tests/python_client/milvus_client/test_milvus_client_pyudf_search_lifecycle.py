@@ -17,6 +17,7 @@ from contextlib import ExitStack
 from pathlib import Path
 from urllib.parse import urlparse
 
+import numpy as np
 import pyarrow.lib
 import pytest
 import requests
@@ -25,8 +26,6 @@ from common import common_func as cf
 from common.common_type import CaseLabel
 from common.minio_comm import copy_files_to_minio
 from common.pyudf_helpers import assert_pyudf_deadline
-from common.pyudf_schema import SCALAR_FIELDS, SCHEMA_MODULE, row
-from common.pyudf_vectors import metric_score, vector_data
 from pymilvus import (
     AnnSearchRequest,
     DataType,
@@ -137,6 +136,163 @@ class UDF:
 def create_udf(context):
     return UDF(context)
 """
+
+SCALAR_FIELDS = ["ts", "flag", "i8", "i16", "i32", "i64", "f32", "f64", "text", "optional"]
+
+
+def _schema_row(number, string_pk=False, primary=None):
+    primary = number if primary is None else primary
+    return {
+        "id": f"id_{primary:05d}" if string_pk else primary,
+        "ts": number,
+        "flag": number % 2 == 0,
+        "i8": number % 127,
+        "i16": number % 32767,
+        "i32": number * 3,
+        "i64": number * 5,
+        "f32": number * 0.25,
+        "f64": number * 0.125,
+        "text": f"row_{number}",
+        "optional": None if number % 3 == 0 else number,
+        "payload": {"boost": number * 7},
+        "dynamic_boost": number * 11,
+        "array": [number, number + 1],
+        "vector": [float(number % 17), float(number % 19)],
+    }
+
+
+SCHEMA_MODULE = """import os
+import pyarrow as pa
+class UDF:
+    def __init__(self, context):
+        self.context = context
+    def transform_query(self, params, columns):
+        if params.get("mode") != "schema":
+            return [pa.array([v.as_py() * 2 for v in columns[-1]], type=pa.float32())]
+        types = [pa.int64(), pa.bool_(), pa.int8(), pa.int16(), pa.int32(), pa.int64(),
+                 pa.float32(), pa.float64(), pa.string(), pa.int64()]
+        if [c.type for c in columns[:10]] != types:
+            raise AssertionError("scalar Arrow types changed")
+        for values in zip(*(c.to_pylist() for c in columns)):
+            n = values[0]
+            expected = (n, n % 2 == 0, n % 127, n % 32767, n * 3, n * 5,
+                        n / 4, n / 8, "row_" + str(n), None if n % 3 == 0 else n)
+            if values[:10] != expected:
+                raise AssertionError(("scalar alignment", values[:10], expected))
+            if len(values) == 11 and values[10] != (99 if n >= 20000 else None):
+                raise AssertionError("added field old/new row mismatch")
+        self.context.logger.warning("PYUDF_R2_SCHEMA resource=%s pid=%s rows=%s columns=%s",
+            self.context.resource_name, os.getpid(), len(columns[0]), len(columns))
+        return [pa.array([v.as_py() * 2 for v in columns[0]], type=pa.float32())]
+def create_udf(context):
+    return UDF(context)
+"""
+
+
+def _vector_data(kind, count=10000):
+    if kind == DataType.BINARY_VECTOR:
+        vectors = [index.to_bytes(2, "little") for index in range(count)]
+        return vectors, (1234).to_bytes(2, "little"), "BIN_FLAT", {"dim": 16}
+    if kind == DataType.SPARSE_FLOAT_VECTOR:
+        vectors = [{index % 97: float(index % 5 + 1), 100 + index // 97: 0.5} for index in range(count)]
+        return vectors, {3: 2.0, 104: 1.0}, "SPARSE_INVERTED_INDEX", {}
+    # Exact binary fractions survive FP16/BF16; int8 gets exact integer values.
+    raw = np.array([[index % 97 + 1, index // 97 + 1] + [1] * 14 for index in range(count)], dtype=np.float32)
+    if kind != DataType.INT8_VECTOR:
+        raw /= 128
+    query = raw[1234].copy()
+
+    def encode(value):
+        if kind == DataType.FLOAT_VECTOR:
+            return value.tolist()
+        if kind == DataType.FLOAT16_VECTOR:
+            return value.astype(np.float16).tobytes()
+        if kind == DataType.BFLOAT16_VECTOR:
+            return (value.view(np.uint32) >> 16).astype(np.uint16).tobytes()
+        return value.astype(np.int8).tobytes()
+
+    return [encode(value) for value in raw], encode(query), "HNSW", {"dim": 16}
+
+
+def _metric_score(kind, metric, vector, query):
+    if kind == DataType.BINARY_VECTOR:
+        first, second = int.from_bytes(vector, "little"), int.from_bytes(query, "little")
+        if metric == "HAMMING":
+            return (first ^ second).bit_count()
+        union = (first | second).bit_count()
+        return 1 - (first & second).bit_count() / union if union else 0
+    if kind == DataType.SPARSE_FLOAT_VECTOR:
+        return sum(value * query.get(key, 0) for key, value in vector.items())
+
+    def decode(value):
+        if kind == DataType.FLOAT_VECTOR:
+            return np.asarray(value, dtype=np.float64)
+        if kind == DataType.BFLOAT16_VECTOR:
+            return (np.frombuffer(value, dtype=np.uint16).astype(np.uint32) << 16).view(np.float32).astype(np.float64)
+        return np.frombuffer(value, dtype=np.float16 if kind == DataType.FLOAT16_VECTOR else np.int8).astype(np.float64)
+
+    first, second = decode(vector), decode(query)
+    if metric == "L2":
+        return float(np.sum((first - second) ** 2))
+    dot = float(np.dot(first, second))
+    return dot if metric == "IP" else dot / math.sqrt(float(np.dot(first, first) * np.dot(second, second)))
+
+
+LEGACY_SDK_PROBE = """import json
+import sys
+
+import pymilvus
+
+
+def main():
+    config = json.load(sys.stdin)
+    assert pymilvus.__version__ == "2.6.6", pymilvus.__version__
+    assert not hasattr(pymilvus, "FunctionChain")
+    assert not hasattr(pymilvus, "FunctionChainStage")
+    client = pymilvus.MilvusClient(uri=config["uri"], token=config["credential"])
+    try:
+        version = client.get_server_version(detail=True)
+        # SDK2.6.6 ignores detail=True and exposes only the version string.
+        # The current SDK independently binds this same endpoint to its commit.
+        assert isinstance(version, str) and version == config["server_version"], version
+        result = client.search(
+            config["collection"],
+            data=[[0.0, 0.0]],
+            anns_field="vector",
+            limit=3,
+            output_fields=["ts"],
+            search_params={"metric_type": "L2"},
+            timeout=30,
+        )
+        assert [hit["id"] for hit in result[0]] == [1, 2, 3], result
+        assert [hit["entity"]["ts"] for hit in result[0]] == [10, 20, 30], result
+        expected = [0, 0.0001, 0.0004]
+        for hit, distance in zip(result[0], expected, strict=True):
+            assert abs(hit["distance"] - distance) <= 1e-7, result
+        print(
+            json.dumps(
+                {
+                    "sdk": pymilvus.__version__,
+                    "server": version,
+                    "ordinary_search": "PASS",
+                    "function_chain_api": "ABSENT_LOCAL_SDK",
+                    "server_function_chain_request_attempted": False,
+                    "detailed_server_version_api": "ABSENT_LOCAL_SDK",
+                    "hits": [
+                        [{"id": hit["id"], "distance": hit["distance"], "ts": hit["entity"]["ts"]} for hit in hits]
+                        for hits in result
+                    ],
+                }
+            )
+        )
+    finally:
+        client.close()
+
+
+if __name__ == "__main__":
+    main()
+"""
+
 
 INDEX_TUPLES = (
     [
@@ -320,7 +476,7 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
         self, tmp_path, minio_host, minio_bucket, request, kind, metric, record_property
     ):
         """target: M2/M3; method: real indexed D2 and decoded-vector oracle; expected: metric and scalar alignment through two reloads."""
-        vectors, query, requested_index, dimensions = vector_data(kind)
+        vectors, query, requested_index, dimensions = _vector_data(kind)
         expected_autoindex = request.config.getoption("--pyudf-expected-autoindex")
         if expected_autoindex:
             actual = json.loads(self._pyudf_management_config(request, "autoIndex.params.build"))
@@ -381,7 +537,7 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
                         assert len(baseline) == 64
                         mismatches = []
                         for hit in baseline:
-                            exact = metric_score(kind, metric, vectors[hit["id"]], query)
+                            exact = _metric_score(kind, metric, vectors[hit["id"]], query)
                             if hit["distance"] != pytest.approx(exact, **score_tolerance):
                                 mismatches.append({"id": hit["id"], "actual": hit["distance"], "exact": exact})
                         metric_failures.extend(mismatches)
@@ -855,9 +1011,8 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
             environment = dict(
                 os.environ, VIRTUAL_ENV=str(env_path), PATH=str(env_path / "bin") + os.pathsep + os.environ["PATH"]
             )
-            probe = Path(__file__).parents[1] / "common/pyudf_legacy_sdk.py"
             process = subprocess.run(
-                [str(interpreter), str(probe)],
+                [str(interpreter), "-c", LEGACY_SDK_PROBE],
                 input=json.dumps(config),
                 env=environment,
                 capture_output=True,
@@ -1011,7 +1166,7 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
                 self.alter_collection_properties(
                     client, name, properties={"collection.autocompaction.enabled": "false"}
                 )
-                rows = [row(i, string_pk) for i in range(10000)]
+                rows = [_schema_row(i, string_pk) for i in range(10000)]
                 ledger = {item["id"]: item for item in rows}
                 if ingress == "insert":
                     self.insert(client, name, rows[:5000])
@@ -1089,15 +1244,15 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
                 self.add_collection_field(client, name, "added", DataType.INT64, nullable=True)
                 for item in ledger.values():
                     item["added"] = None
-                replacement = row(20000, string_pk, primary=9000)
+                replacement = _schema_row(20000, string_pk, primary=9000)
                 replacement["added"] = 99
                 self.upsert(client, name, [replacement])
                 ledger[replacement["id"]] = replacement
-                new = row(20001, string_pk)
+                new = _schema_row(20001, string_pk)
                 new["added"] = 99
                 self.insert(client, name, [new])
                 ledger[new["id"]] = new
-                deleted = [row(i, string_pk)["id"] for i in range(2500)]
+                deleted = [_schema_row(i, string_pk)["id"] for i in range(2500)]
                 self.delete(client, name, ids=deleted)
                 for key in deleted:
                     ledger.pop(key)
