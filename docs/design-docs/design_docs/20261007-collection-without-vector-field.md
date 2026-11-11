@@ -67,6 +67,32 @@ cap do not change during the life of a collection.
   counterparts return one error, `collection %s has no vector field, search
   is not supported`.
 
+**Clients**
+
+| Client | Create with an explicit schema that has no vector field | Change |
+|---|---|---|
+| pymilvus `MilvusClient` | works | none |
+| pymilvus ORM (Object-Relational Mapping) `Collection` | rejected on the client by `check_schema` (`No vector field is found.`) | none: the ORM interface is deprecated and stays as it is; use `MilvusClient` |
+| Java SDK, v1 and v2 | sent to the server unchanged (read from the source, not run) | none |
+| Go SDK | works | none |
+| Node SDK | rejected on the client by `checkCollectionFieldsWithOptions` | the check is removed in a milvus-sdk-node PR |
+| RESTful v2 | works | done in the implementation PR (insert check, one search error) |
+| RESTful v1 | has only the quick create by dimension | none |
+
+Two rules are the same for every client and are the rules of a vector
+collection:
+
+- The quick-setup form of create (no schema, a dimension) still creates a
+  vector collection.
+- Create does not load the collection unless index parameters are passed
+  with it. A collection without a vector field is usually created without
+  index parameters, so the user calls load once after creating it. No client
+  loads it automatically because it has no vector field.
+
+`search` and `hybrid_search` reach the server and get the error above. The
+V1 fallback of pymilvus `search_iterator` fails on the client with its own
+message, `there should be at least one vector field in milvus collection`.
+
 **Config**
 
 `common.enableCollectionWithoutVector` controls whether a collection without
@@ -423,11 +449,7 @@ Lowering it does not split existing segments.
   created during the upgrade window is not compacted and not loadable until
   every role is upgraded, and works afterwards. After a downgrade such a
   collection can still be read and dropped, but is not compacted.
-- Two clients reject the schema before the request is sent: the legacy
-  pymilvus ORM (Object-Relational Mapping, `check_schema`) and the Node SDK
-  (`checkCollectionFieldsWithOptions`). pymilvus `MilvusClient`, the Java SDK
-  (v1 and v2), the Go SDK and RESTful v2 with an explicit schema send it to
-  the server unchanged. Restore or
+- Clients are described in Section 2 ("Clients"). Restore or
   CDC (Change Data Capture) into an old cluster fails at `CreateCollection`
   with the old error.
 - Collections with a vector field are not affected by the row cap:
@@ -634,7 +656,8 @@ from `3df0cbcdd68`.
 | `datanode/importv2` Parquet / NumPy / CSV / JSON readers | a file that matches no schema column makes the task loop forever: the reader produces no row and never reaches EOF; a vector field used to prevent this | rejected when the reader is constructed |
 | StreamingNode `segment_limitation_policy.go`; DataCoord `compaction/trigger.go`, `trigger_v2.go`, `compaction/policy/helpers.go`, `clustering.go`, `bulkimport`; DataNode `compactor/segment_writer.go` | seal, full check, split and allocation on bytes only | collections without a vector field get the additional `maxRows` row cap (Section 4.2); `GetExpectedSegmentSize` is unchanged |
 | Search entries, REST handlers | four different errors | one error |
-| pymilvus `orm/schema.py:1330` `check_schema` | client-side reject | removed |
+| pymilvus `orm/schema.py` `check_schema` (legacy ORM) | client-side reject | not changed; `MilvusClient` has no such check |
+| milvus-sdk-node `milvus/utils/Validate.ts` `checkCollectionFieldsWithOptions` | client-side reject | check removed, in the milvus-sdk-node repository |
 
 ## Appendix B. Measurements
 
