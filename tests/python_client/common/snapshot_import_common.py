@@ -1648,6 +1648,10 @@ def inspect_snapshot_ownership(
     assert len(definitions) == 1 and int(definitions[0]["fieldID"]) == vector_field_id, (
         "Snapshot lost the index definition"
     )
+    definition = definitions[0]
+    params = {item["key"]: item["value"] for item in definition["index_params"]}
+    assert params["index_type"].upper() == "HNSW" and params["metric_type"].upper() == "L2"
+    assert int(params["M"]) == m and int(params["efConstruction"]) == ef_construction
     uri_bucket, metadata_key = unquote(urlsplit(uri).path.lstrip("/")).split("/", 1)
     assert uri_bucket == bucket
     anchor = re.fullmatch(r"(?:(.*)/)?snapshots/[0-9]+/metadata/[0-9]+\.json", metadata_key)
@@ -1699,7 +1703,7 @@ def inspect_snapshot_ownership(
         for legacy in segment.get("index_files", []):
             assert int(legacy["segment_id"]) == segment["segment_id"]
             params = {item["key"]: item["value"] for item in legacy["index_params"]}
-            entry = {**legacy, "properties": params, "index_type": params["index_type"]}
+            entry = {**legacy, "index_type": params["index_type"]}
             files = [
                 _snapshot_read_path(path, metadata, metadata_key, bucket, layout) for path in legacy["index_file_paths"]
             ]
@@ -1708,6 +1712,7 @@ def inspect_snapshot_ownership(
             if int(entry["field_id"]) != vector_field_id:
                 continue
             assert entry["index_name"] == index_name, entry
+            assert int(entry["index_id"]) == int(definition["indexID"])
             assert int(entry["num_rows"]) == segment["num_of_rows"]
             paths = entry["index_file_keys"] if direct_paths is None else direct_paths
             if not paths and int(entry["serialized_size"]) == 0:
@@ -1719,9 +1724,6 @@ def inspect_snapshot_ownership(
             found["index_files"].update(keys)
             if segment["num_of_rows"] >= minimum_rows:
                 assert entry["index_type"].upper() == "HNSW", entry
-                params = entry["properties"]
-                assert params["metric_type"].upper() == "L2"
-                assert int(params["M"]) == m and int(params["efConstruction"]) == ef_construction
                 indexed.append(segment["segment_id"])
     if not indexed:
         raise IndexEvidencePending("FN-17 real HNSW build NotCovered: no eligible segment with registered artifact")
