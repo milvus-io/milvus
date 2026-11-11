@@ -423,8 +423,11 @@ Lowering it does not split existing segments.
   created during the upgrade window is not compacted and not loadable until
   every role is upgraded, and works afterwards. After a downgrade such a
   collection can still be read and dropped, but is not compacted.
-- The legacy pymilvus ORM (Object-Relational Mapping) rejects the schema on
-  the client. `MilvusClient` and the Java, Go and Node SDKs work. Restore or
+- Two clients reject the schema before the request is sent: the legacy
+  pymilvus ORM (Object-Relational Mapping, `check_schema`) and the Node SDK
+  (`checkCollectionFieldsWithOptions`). pymilvus `MilvusClient`, the Java SDK
+  (v1 and v2), the Go SDK and RESTful v2 with an explicit schema send it to
+  the server unchanged. Restore or
   CDC (Change Data Capture) into an old cluster fails at `CreateCollection`
   with the old error.
 - Collections with a vector field are not affected by the row cap:
