@@ -36,6 +36,64 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
 
+func TestSearchFanoutPoolSizeRatio(t *testing.T) {
+	params := &ComponentParam{}
+	base := NewBaseTable(SkipRemote(true))
+	t.Cleanup(base.mgr.Close)
+	params.Init(base)
+	cfg := &params.CommonCfg
+	fanout := &params.QueryNodeCfg.SearchFanoutPoolSizeRatio
+	assert.Equal(t, "queryNode.segcore.searchFanoutPoolSizeRatio", fanout.Key)
+	assert.Equal(t, float64(2), fanout.GetAsFloat())
+	require.NoError(t, params.Save(cfg.MiddlePriorityThreadCoreCoefficient.Key, "8"))
+	require.NoError(t, params.Save(cfg.ThreadPoolMaxThreadsSize.Key, "1"))
+	require.NoError(t, params.Save(params.QueryNodeCfg.CGOPoolSizeRatio.Key, "3"))
+	assert.Equal(t, float64(2), fanout.GetAsFloat())
+	require.NoError(t, params.Save(fanout.Key, "3.5"))
+	assert.Equal(t, 3.5, fanout.GetAsFloat())
+	assert.Equal(t, "8", cfg.MiddlePriorityThreadCoreCoefficient.GetValue())
+	assert.Equal(t, "1", cfg.ThreadPoolMaxThreadsSize.GetValue())
+	assert.Equal(t, "3", params.QueryNodeCfg.CGOPoolSizeRatio.GetValue())
+}
+
+func TestSearchFanoutPoolSizeRatioValidation(t *testing.T) {
+	patch := mockey.Mock(hardware.GetCPUNum).Return(2).Build()
+	defer patch.UnPatch()
+	params := &ComponentParam{}
+	base := NewBaseTable(SkipRemote(true))
+	t.Cleanup(base.mgr.Close)
+	key := "queryNode.segcore.searchFanoutPoolSizeRatio"
+	require.NoError(t, base.Save(key, "NaN"))
+	params.Init(base)
+	fanout := &params.QueryNodeCfg.SearchFanoutPoolSizeRatio
+	assert.Equal(t, float64(DefaultSearchFanoutPoolSizeRatio), fanout.GetAsFloat())
+
+	for _, tc := range []struct {
+		value string
+		want  float64
+	}{
+		{"0.1", 0.1},
+		{"3.5", 3.5},
+		{"1e-20", 1e-20},
+		{"1073741760", 1073741760}, // Largest safe float32 ratio with two cores.
+		{"1073741823.5", 2},        // Rounds up to an overflowing float32 worker count.
+		{"2147483647", 2},
+		{"1e100", 2},
+		{"NaN", 2},
+		{"+Inf", 2},
+		{"-Inf", 2},
+		{"0", 2},
+		{"-1", 2},
+		{"1e-50", 2}, // Underflows to zero at the C.float boundary.
+		{"invalid", 2},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			require.NoError(t, params.Save(key, tc.value))
+			assert.Equal(t, tc.want, fanout.GetAsFloat())
+		})
+	}
+}
+
 func TestDataNodeConcurrencyAndImportMemoryFallbacks(t *testing.T) {
 	params := &ComponentParam{}
 	params.Init(NewBaseTable(SkipRemote(true)))
