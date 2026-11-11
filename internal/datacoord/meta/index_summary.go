@@ -49,14 +49,3 @@ func ApplyIndexSummary(segment *datapb.SegmentInfo, record *model.SegmentIndex, 
 		return 0
 	})
 }
-
-func manifestSummaryFieldID(commit SegmentManifestCommit, buildID int64) int64 {
-	if commit.Mutation.Updates != nil {
-		for _, entry := range commit.Mutation.Updates.Indexes {
-			if entry.BuildID == buildID {
-				return entry.FieldID
-			}
-		}
-	}
-	return 0
-}

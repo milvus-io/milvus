@@ -54,12 +54,13 @@ and artifacts. No new replicated side effect or WAL message is introduced.
 
 ## Stack and validation
 
-1. Persist completed inventory with segment manifest publication, with replacement
-   and failure tests. Keep existing readers and startup behavior.
-2. Add immutable new-cluster mode, summary readers and on-demand artifact loading;
-   retire completed in-memory records. Include lifecycle and restart tests.
-3. Complete GC and compatible snapshot/copy integration, then expose the mode.
-   Validate failures, cleanup races and end-to-end build/load/restart.
+1. Define completed-index summaries and their replacement rules. Keep publication,
+   readers and startup unchanged; manifest commits must not write summaries yet.
+2. Add summary readers and on-demand artifact loading behind the inactive mode.
+3. Add immutable new-cluster selection, summary publication, GC and compatible
+   snapshot/copy integration together. Legacy mode publishes completed SegmentIndex
+   records without summaries; summary mode publishes summaries and retires completed
+   records. Validate both modes, failures, cleanup races and build/load/restart.
 
 Use the matching Milvus development container for generation, formatting, builds
 and tests. Check catalog failure leaves both pointer and summaries unchanged;
