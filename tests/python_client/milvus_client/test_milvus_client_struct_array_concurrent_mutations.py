@@ -43,6 +43,55 @@ from pymilvus import DataType
 from pymilvus.exceptions import MilvusException, SchemaMismatchRetryableException
 from utils.util_log import test_log as log
 
+STALE_READ_SCHEMA_ISSUE = "https://github.com/milvus-io/milvus/issues/55024"
+REQUERY_SCHEMA_ISSUE = "https://github.com/milvus-io/milvus/issues/55411"
+
+
+class ConcurrentSchemaReadFailure(AssertionError):
+    """A verified read failure caused by concurrent removal of a Struct child."""
+
+
+def is_missing_dropped_field(code, message, field_id):
+    return (
+        code == 2000
+        and field_id is not None
+        and f"Cannot find field with field_id: {field_id} at " in (message or "")
+        and "Schema.h:" in message
+        and "segcoreCode=2001" in message
+    )
+
+
+def is_verified_stale_read_failure(error, history):
+    """Require successful reconciliation and exclude unrelated history failures."""
+    if type(error) is not AssertionError or not history.errors or str(error) != str(history.errors):
+        return False
+    field_id = getattr(history, "old_id", None)
+    if not all(
+        e["epoch"] == 3 and is_missing_dropped_field(e.get("code"), e.get("message"), field_id) for e in history.errors
+    ):
+        return False
+    failed = [e for e in history.events if e["event"] == "end" and e["outcome"] not in ("ack", "rejected_schema")]
+    if len(failed) != len(history.errors) or not all(
+        e["epoch"] == 3
+        and e.get("read")
+        and not e.get("write")
+        and is_missing_dropped_field(e.get("error_code"), e.get("error_message"), field_id)
+        for e in failed
+    ):
+        return False
+    if any(e["event"] in ("read_mismatch", "final_verification_failure") for e in history.events):
+        return False
+    summaries = [e for e in history.events if e["event"] == "summary"]
+    if (
+        len(summaries) != 1
+        or summaries[0]["uncertain_writes"]
+        or not summaries[0]["read_write_overlap"]
+        or not all(summaries[0]["ddl_write_overlap"].values())
+        or not all(summaries[0]["ddl_read_overlap"].values())
+    ):
+        return False
+    return any(e["event"] == "verified" and e["phase"] == "reloaded" for e in history.events)
+
 
 class TestMilvusClientStructArrayConcurrentMutations(MetadataStructArrayTestBase):
     @pytest.mark.tags(CaseLabel.L2)
@@ -250,8 +299,25 @@ class TestMilvusClientStructArrayConcurrentSchemaUpdates(StructArrayTestBase):
     skip_global_role_cleanup = True
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("kind", ["scalar", "nested", "vector"])
-    @pytest.mark.parametrize("surface", ["query", "search"])
+    @pytest.mark.parametrize(
+        "surface,kind",
+        [
+            pytest.param(
+                surface,
+                kind,
+                id=f"{surface}-{kind}",
+                marks=pytest.mark.xfail(
+                    strict=True,
+                    raises=ConcurrentSchemaReadFailure,
+                    reason=f"{STALE_READ_SCHEMA_ISSUE}: dropped child remains in an in-flight query plan"
+                    if surface == "query"
+                    else f"{REQUERY_SCHEMA_ISSUE}, {STALE_READ_SCHEMA_ISSUE}: concurrent drop invalidates requery or search",
+                ),
+            )
+            for surface in ("query", "search")
+            for kind in ("scalar", "nested", "vector")
+        ],
+    )
     def test_add_drop_readd_child_overlaps_queries_and_preserves_schema_snapshots(self, kind, surface):
         """
         target: exercise queries naming a child while it is added, dropped and recreated
@@ -270,6 +336,7 @@ class TestMilvusClientStructArrayConcurrentSchemaUpdates(StructArrayTestBase):
         field = cf.gen_scalar_field(dtype, name="changing", **options)
         query_vector = rows[0]["normal_vector"]
         journal = []
+        known_read_errors = []
         first_id = None
         for operation in ("add", "drop", "readd"):
             before = copy.deepcopy(model)
@@ -379,6 +446,17 @@ class TestMilvusClientStructArrayConcurrentSchemaUpdates(StructArrayTestBase):
                     else [before, after]
                 )
                 if "code" in observation:
+                    if operation == "drop" and observation["start"] < ddl_end and ddl_start < observation["end"]:
+                        missing_field = is_missing_dropped_field(observation["code"], observation["message"], first_id)
+                        stale_requery = (
+                            surface == "search"
+                            and not observation["target"]
+                            and observation["code"] == 1100
+                            and observation["message"] == "field clips[changing] not exist: invalid parameter"
+                        )
+                        if missing_field or stale_requery:
+                            known_read_errors.append(observation)
+                            continue
                     assert observation["target"], observation
                     assert any(
                         not any("changing" in e for r in state.values() for e in r["clips"] or []) for state in states
@@ -427,6 +505,9 @@ class TestMilvusClientStructArrayConcurrentSchemaUpdates(StructArrayTestBase):
                 self.create_index(client, name, indexes)
             self.reload_collection(client, name)
             self.assert_rows(client, name, model)
+        # Finish all snapshot, fresh-ID and reload checks before classifying known errors.
+        if known_read_errors:
+            raise ConcurrentSchemaReadFailure(known_read_errors)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("kind", ["scalar", "nested", "vector"])
@@ -584,7 +665,24 @@ class TestMilvusClientStructArrayConcurrentReadWrite(StructArrayTestBase):
     skip_global_role_cleanup = True
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("seed,smoke", [(7, True), (41, False), (109, False)], ids=["smoke", "seed41", "seed109"])
+    @pytest.mark.parametrize(
+        "seed,smoke",
+        [
+            pytest.param(
+                seed,
+                smoke,
+                id="smoke" if smoke else f"seed{seed}",
+                marks=pytest.mark.xfail(
+                    strict=True,
+                    raises=ConcurrentSchemaReadFailure,
+                    reason=f"{STALE_READ_SCHEMA_ISSUE}: mixed-history reads retain the dropped child ID",
+                )
+                if seed in (7, 41)
+                else (),
+            )
+            for seed, smoke in ((7, True), (41, False), (109, False))
+        ],
+    )
     def test_concurrent_reads_upserts_deletes_preserve_acknowledged_rows(self, seed, smoke, request, tmp_path):
         """
         target: preserve Struct values and logical offsets under overlapping DML/read/DDL
@@ -600,6 +698,10 @@ class TestMilvusClientStructArrayConcurrentReadWrite(StructArrayTestBase):
         history = MixedHistory(client, name, seed, smoke, evidence, config=WorkloadConfig(**options))
         try:
             history.run()
+        except AssertionError as error:
+            if seed in (7, 41) and is_verified_stale_read_failure(error, history):
+                raise ConcurrentSchemaReadFailure(history.errors) from error
+            raise
         finally:
             # Preserve the journal even if failure reconciliation itself raises.
             history.journal.close()
