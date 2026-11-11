@@ -41,7 +41,7 @@ const (
 //  3. Already has a Preparing view        → None (avoid stacking)
 //  4. Current DataVersion < DataView DV   → Must (data changed)
 //  5. Current view references an unavailable node → Must (node lost)
-//  6. LoadInfoVersion differs → Must
+//  6. LoadInfoVersion differs            → Must
 //  7. Otherwise                           → MayOptimize
 func classifyShard(snap balanceInput, shardID qviews.ShardID) actionKind {
 	desired := snap.ConfigForShard(shardID)

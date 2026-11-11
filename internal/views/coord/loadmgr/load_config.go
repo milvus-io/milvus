@@ -74,7 +74,6 @@ func (r *ReplicaAssignment) Clone() *ReplicaAssignment {
 }
 
 // FromAlterLoadConfigMessage builds a LoadConfig from a DDL message.
-// Legacy warmup epochs are ignored: a hint must never be replayed from the WAL.
 func FromAlterLoadConfigMessage(msg *messagespb.AlterLoadConfigMessageHeader) *LoadConfig {
 	cfg := &LoadConfig{
 		DbID:                     msg.GetDbId(),
@@ -94,8 +93,7 @@ func FromAlterLoadConfigMessage(msg *messagespb.AlterLoadConfigMessageHeader) *L
 	return cfg
 }
 
-// buildFromPersisted reconstructs versioned requirements, ignoring legacy
-// warmup epochs so recovery cannot recreate a one-time request.
+// buildFromPersisted reconstructs the complete versioned requirements.
 func buildFromPersisted(info *viewpb.CollectionLoadConfig) *LoadConfig {
 	cfg := &LoadConfig{
 		Version: info.GetVersion(), DbID: info.GetDbID(), CollectionID: info.GetCollectionID(),

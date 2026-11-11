@@ -306,10 +306,6 @@ func (s *LoadConfigStore) GetConfigWithVersion(collectionID int64) (*LoadConfig,
 func (s *LoadConfigStore) WithCurrentConfig(cfg *LoadConfig, accept func() error) error {
 	s.collectionLocks.Lock(cfg.CollectionID)
 	defer s.collectionLocks.Unlock(cfg.CollectionID)
-	return s.withCurrentConfigLocked(cfg, accept)
-}
-
-func (s *LoadConfigStore) withCurrentConfigLocked(cfg *LoadConfig, accept func() error) error {
 	if s.GetConfig(cfg.CollectionID) != cfg {
 		return merr.WrapErrServiceUnavailableMsg("load configuration changed during management operation")
 	}

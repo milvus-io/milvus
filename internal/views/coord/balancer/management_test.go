@@ -75,7 +75,6 @@ func TestManualBalance(t *testing.T) {
 	require.Equal(t, map[int64]int64{101: 2, 102: 1}, flattenAssignments(accepted[0]))
 	require.Equal(t, int32(7), accepted[0].GetMeta().GetSchemaVersion())
 	require.Equal(t, uint64(1), accepted[0].GetMeta().GetLoadInfoVersion())
-	require.Nil(t, accepted[0].GetMeta().ProtoReflect().Descriptor().Fields().ByName("warmup_epoch"))
 	for _, node := range accepted[0].QueryNode {
 		for _, partition := range node.Partitions {
 			if node.NodeId == 2 {
