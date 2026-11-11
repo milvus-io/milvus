@@ -13,13 +13,13 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
-	"github.com/milvus-io/milvus/internal/views/coord/shardstats"
+	"github.com/milvus-io/milvus/internal/views/coord/viewfeedback"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
-func TestShardStatsPersistentStreamWithoutViews(t *testing.T) {
+func TestViewFeedbackPersistentStreamWithoutViews(t *testing.T) {
 	mockey.PatchConvey("initial PChannels, idle connection, changes and reconnect over gRPC", t, func() {
 		listener := bufconn.Listen(1 << 20)
 		server := grpc.NewServer()
@@ -29,12 +29,12 @@ func TestShardStatsPersistentStreamWithoutViews(t *testing.T) {
 		viewpb.RegisterViewSyncServiceServer(server, handler.NewViewSyncServer(h))
 		go func() { _ = server.Serve(listener) }()
 		defer server.Stop()
-		conn, err := grpc.NewClient("passthrough:///stats", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
+		conn, err := grpc.NewClient("passthrough:///feedback", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
 		require.NoError(t, err)
 		defer conn.Close()
-		reports := make(chan qviews.ShardStatsWindow, 16)
-		sink := &shardstats.ReplicaStatsStore{}
-		mockey.Mock((*shardstats.ReplicaStatsStore).OnShardStats).To(func(_ *shardstats.ReplicaStatsStore, samples qviews.ShardStatsWindow) { reports <- samples }).Build()
+		reports := make(chan qviews.ViewFeedbackWindow, 16)
+		sink := &viewfeedback.ReplicaFeedbackStore{}
+		mockey.Mock((*viewfeedback.ReplicaFeedbackStore).OnViewFeedback).To(func(_ *viewfeedback.ReplicaFeedbackStore, samples qviews.ViewFeedbackWindow) { reports <- samples }).Build()
 		attempts := make(chan context.CancelFunc, 8)
 		client := newMockViewSyncClient()
 		client.openStreamFn = func(ctx context.Context, node qviews.WorkNode) (viewpb.ViewSyncService_SyncQueryViewClient, error) {
@@ -45,13 +45,13 @@ func TestShardStatsPersistentStreamWithoutViews(t *testing.T) {
 		}
 		rs := NewReliableSyncer(client, sink, []string{"p", "p"})
 		defer rs.Close()
-		next := func() qviews.ShardStatsWindow {
+		next := func() qviews.ViewFeedbackWindow {
 			select {
 			case batch := <-reports:
 				return batch
 			case <-time.After(8 * time.Second):
-				t.Fatal("missing stats report")
-				return qviews.ShardStatsWindow{}
+				t.Fatal("missing feedback report")
+				return qviews.ViewFeedbackWindow{}
 			}
 		}
 		first := next()
@@ -77,15 +77,15 @@ func TestShardStatsPersistentStreamWithoutViews(t *testing.T) {
 		previous := next()
 		require.EqualValues(t, 1, previous.Shards[id].RequestCount)
 		for range 2 {
-			for i := range qviews.ShardStatsMaxEntries {
+			for i := range qviews.ViewFeedbackMaxEntries {
 				h.RecordShardAccess(qviews.ShardID{ReplicaID: int64(i + 100), VChannel: "p_1v0"})
 			}
 			var end int64
-			for range qviews.ShardStatsMaxEntries / 256 {
+			for range qviews.ViewFeedbackMaxEntries / 256 {
 				select {
 				case batch := <-reports:
 					require.Len(t, batch.Shards, 256)
-					require.GreaterOrEqual(t, batch.EndUnixNanos-previous.EndUnixNanos, int64(qviews.ShardStatsMinInterval))
+					require.GreaterOrEqual(t, batch.EndUnixNanos-previous.EndUnixNanos, int64(qviews.ViewFeedbackMinInterval))
 					end = batch.EndUnixNanos
 				case <-time.After(2 * time.Second):
 					t.Fatal("size threshold did not wake sender")
@@ -102,25 +102,25 @@ func TestShardStatsPersistentStreamWithoutViews(t *testing.T) {
 	})
 }
 
-func TestShardStatsRouting(t *testing.T) {
-	mockey.PatchConvey("stats accepts only the owning SN", t, func() {
-		var received []qviews.ShardStats
-		sink := &shardstats.ReplicaStatsStore{}
-		mockey.Mock((*shardstats.ReplicaStatsStore).OnShardStats).To(func(_ *shardstats.ReplicaStatsStore, s qviews.ShardStatsWindow) {
+func TestViewFeedbackRouting(t *testing.T) {
+	mockey.PatchConvey("feedback accepts only the owning SN", t, func() {
+		var received []qviews.ViewFeedback
+		sink := &viewfeedback.ReplicaFeedbackStore{}
+		mockey.Mock((*viewfeedback.ReplicaFeedbackStore).OnViewFeedback).To(func(_ *viewfeedback.ReplicaFeedbackStore, s qviews.ViewFeedbackWindow) {
 			for _, sample := range s.Shards {
 				received = append(received, sample)
 			}
 		}).Build()
-		report := &viewpb.ShardStatsReport{Shards: []*viewpb.ShardStats{nil, {ShardId: &viewpb.ShardID{Vchannel: "other_1v0", ReplicaId: 1}}, {ShardId: &viewpb.ShardID{Vchannel: "p_1v0", ReplicaId: 1}, RequestCount: 3, LastAccessUnixNanos: 5}}}
-		rs := &resumableSyncer{node: qviews.QueryNode{}, statsHandler: sink}
-		rs.receiveShardStats(report)
+		report := &viewpb.ViewFeedbackReport{Shards: []*viewpb.ViewFeedback{nil, {ShardId: &viewpb.ShardID{Vchannel: "other_1v0", ReplicaId: 1}}, {ShardId: &viewpb.ShardID{Vchannel: "p_1v0", ReplicaId: 1}, RequestCount: 3, LastAccessUnixNanos: 5}}}
+		rs := &resumableSyncer{node: qviews.QueryNode{}, feedbackHandler: sink}
+		rs.receiveViewFeedback(report)
 		require.Empty(t, received)
 		rs.node = qviews.StreamingNode{PChannel: "p"}
-		rs.receiveShardStats(report)
+		rs.receiveViewFeedback(report)
 		require.Len(t, received, 1)
 		require.EqualValues(t, 3, received[0].RequestCount)
-		rs.statsHandler = nil
-		rs.receiveShardStats(report)
+		rs.feedbackHandler = nil
+		rs.receiveViewFeedback(report)
 		require.Len(t, received, 1)
 	})
 }

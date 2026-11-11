@@ -10,14 +10,14 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
-	"github.com/milvus-io/milvus/internal/views/coord/shardstats"
+	"github.com/milvus-io/milvus/internal/views/coord/viewfeedback"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-func TestQViewsStatsRecoveryFailureCleanup(t *testing.T) {
-	mockey.PatchConvey("registry recovery failure closes stats and initial streams", t, func() {
+func TestQViewsFeedbackRecoveryFailureCleanup(t *testing.T) {
+	mockey.PatchConvey("registry recovery failure closes feedback and initial streams", t, func() {
 		paramtable.Init()
 		catalog := queryview.NewCollectionLoadInfoCatalog(nil)
 		mockey.Mock(mockey.GetMethod(catalog, "List")).Return([]*viewpb.CollectionLoadConfig{{CollectionID: 1, Version: 1, Replicas: []*viewpb.LoadReplicaConfig{{ReplicaId: 7}}}}, nil).Build()
@@ -26,13 +26,13 @@ func TestQViewsStatsRecoveryFailureCleanup(t *testing.T) {
 			<-started
 			return nil, context.Canceled
 		}).Build()
-		var original func(*loadmgr.LoadConfigStore) *shardstats.ReplicaStatsStore
-		var store *shardstats.ReplicaStatsStore
+		var original func(*loadmgr.LoadConfigStore) *viewfeedback.ReplicaFeedbackStore
+		var store *viewfeedback.ReplicaFeedbackStore
 		id := qviews.ShardID{ReplicaID: 7, VChannel: "p_1v0"}
-		mockey.Mock(shardstats.New).Origin(&original).To(func(configs *loadmgr.LoadConfigStore) *shardstats.ReplicaStatsStore {
+		mockey.Mock(viewfeedback.New).Origin(&original).To(func(configs *loadmgr.LoadConfigStore) *viewfeedback.ReplicaFeedbackStore {
 			store = original(configs)
-			store.OnShardStats(runtimeTestStatsWindow(id, 1))
-			_, found := store.GetShardStats(id)
+			store.OnViewFeedback(runtimeTestFeedbackWindow(id, 1))
+			_, found := store.GetViewFeedback(id)
 			require.True(t, found)
 			return store
 		}).Build()
@@ -53,8 +53,8 @@ func TestQViewsStatsRecoveryFailureCleanup(t *testing.T) {
 		require.ErrorIs(t, err, context.Canceled)
 		require.Nil(t, runtime)
 		require.NotNil(t, store)
-		store.OnShardStats(runtimeTestStatsWindow(id, 2))
-		_, found := store.GetShardStats(id)
+		store.OnViewFeedback(runtimeTestFeedbackWindow(id, 2))
+		_, found := store.GetViewFeedback(id)
 		require.False(t, found)
 		select {
 		case <-stopped:
@@ -64,7 +64,7 @@ func TestQViewsStatsRecoveryFailureCleanup(t *testing.T) {
 	})
 }
 
-func runtimeTestStatsWindow(id qviews.ShardID, count uint64) qviews.ShardStatsWindow {
+func runtimeTestFeedbackWindow(id qviews.ShardID, count uint64) qviews.ViewFeedbackWindow {
 	now := time.Now().UnixNano()
-	return qviews.ShardStatsWindow{StartUnixNanos: now - int64(time.Second), EndUnixNanos: now, Shards: map[qviews.ShardID]qviews.ShardStats{id: {ShardID: id, RequestCount: count}}}
+	return qviews.ViewFeedbackWindow{StartUnixNanos: now - int64(time.Second), EndUnixNanos: now, Shards: map[qviews.ShardID]qviews.ViewFeedback{id: {ShardID: id, RequestCount: count}}}
 }

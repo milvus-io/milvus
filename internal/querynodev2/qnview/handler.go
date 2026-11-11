@@ -73,11 +73,11 @@ func NewQNQueryViewHandler(segMgr SegmentManager) *QNQueryViewHandler {
 	}
 }
 
-func (h *QNQueryViewHandler) TakeShardStats() qviews.ShardStatsWindow {
-	return qviews.ShardStatsWindow{}
+func (h *QNQueryViewHandler) TakeViewFeedback() qviews.ViewFeedbackWindow {
+	return qviews.ViewFeedbackWindow{}
 }
 
-func (h *QNQueryViewHandler) ShardStatsReady() <-chan struct{} { return nil }
+func (h *QNQueryViewHandler) ViewFeedbackReady() <-chan struct{} { return nil }
 
 // ApplyViews applies a batch of coord-pushed views.
 // Views are grouped by ShardID and applied atomically per shard.

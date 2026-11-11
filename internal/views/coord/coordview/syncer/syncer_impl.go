@@ -18,8 +18,8 @@ var (
 )
 
 type reliableSyncer struct {
-	client       ViewSyncClient
-	statsHandler ShardStatsHandler
+	client          ViewSyncClient
+	feedbackHandler ViewFeedbackHandler
 
 	mu               sync.Mutex
 	resumableSyncers map[qviews.WorkNodeKey]*resumableSyncer
@@ -33,11 +33,11 @@ type reliableSyncer struct {
 }
 
 // NewReliableSyncer creates a new ReliableSyncer.
-func NewReliableSyncer(client ViewSyncClient, statsHandler ShardStatsHandler, pchannels []string) ReliableSyncer {
+func NewReliableSyncer(client ViewSyncClient, feedbackHandler ViewFeedbackHandler, pchannels []string) ReliableSyncer {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &reliableSyncer{
 		client:           client,
-		statsHandler:     statsHandler,
+		feedbackHandler:  feedbackHandler,
 		resumableSyncers: make(map[qviews.WorkNodeKey]*resumableSyncer),
 		ctx:              ctx,
 		cancel:           cancel,
@@ -48,7 +48,7 @@ func NewReliableSyncer(client ViewSyncClient, statsHandler ShardStatsHandler, pc
 	for _, pchannel := range pchannels {
 		node := qviews.StreamingNode{PChannel: pchannel}
 		if s.resumableSyncers[node.Key()] == nil {
-			s.resumableSyncers[node.Key()] = newResumableSyncer(s.ctx, node, s.client, s.statsHandler)
+			s.resumableSyncers[node.Key()] = newResumableSyncer(s.ctx, node, s.client, s.feedbackHandler)
 		}
 	}
 	s.drainWG.Add(1)
@@ -142,7 +142,7 @@ func (s *reliableSyncer) syncViewsToNode(ctx context.Context, nodeKey qviews.Wor
 
 	mlog.Info(ctx, "ReliableSyncer: node discovered on demand, creating ResumableSyncer",
 		mlog.String("node", nodeKey))
-	rs := newResumableSyncer(s.ctx, node, s.client, s.statsHandler)
+	rs := newResumableSyncer(s.ctx, node, s.client, s.feedbackHandler)
 	s.resumableSyncers[nodeKey] = rs
 	rs.Sync(views)
 	return false, nil

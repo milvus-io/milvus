@@ -121,8 +121,8 @@ type ViewSyncClient interface {
 	Close()
 }
 
-// ShardStatsHandler receives bounded batches independently of pending Views.
+// ViewFeedbackHandler receives bounded batches independently of pending Views.
 // Implementations must be thread-safe and must not perform I/O.
-type ShardStatsHandler interface {
-	OnShardStats(qviews.ShardStatsWindow)
+type ViewFeedbackHandler interface {
+	OnViewFeedback(qviews.ViewFeedbackWindow)
 }

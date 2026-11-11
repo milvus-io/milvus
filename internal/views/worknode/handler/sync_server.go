@@ -74,12 +74,12 @@ func (s *ViewSyncServer) sendLoop(
 	stream viewpb.ViewSyncService_SyncQueryViewServer,
 	pending *pendingReports,
 ) {
-	timer := time.NewTimer(qviews.ShardStatsInterval)
+	timer := time.NewTimer(qviews.ViewFeedbackInterval)
 	defer timer.Stop()
-	sizeReady := s.handler.ShardStatsReady()
-	statsReady := sizeReady
-	lastStatsTake := time.Now()
-	if s.sendShardStats(stream, pending) {
+	sizeReady := s.handler.ViewFeedbackReady()
+	feedbackReady := sizeReady
+	lastFeedbackTake := time.Now()
+	if s.sendViewFeedback(stream, pending) {
 		return
 	}
 	for {
@@ -87,17 +87,17 @@ func (s *ViewSyncServer) sendLoop(
 		case <-ctx.Done():
 			return
 		case <-timer.C:
-			lastStatsTake = time.Now()
-			timer.Reset(qviews.ShardStatsInterval)
-			if s.sendShardStats(stream, pending) {
+			lastFeedbackTake = time.Now()
+			timer.Reset(qviews.ViewFeedbackInterval)
+			if s.sendViewFeedback(stream, pending) {
 				return
 			}
-			statsReady = sizeReady
-		case <-statsReady:
+			feedbackReady = sizeReady
+		case <-feedbackReady:
 			// Coalesce size notifications until the next allowed take. Keep
 			// serving state reports while the timer enforces the minimum gap.
-			statsReady = nil
-			timer.Reset(max(0, time.Until(lastStatsTake.Add(qviews.ShardStatsMinInterval))))
+			feedbackReady = nil
+			timer.Reset(max(0, time.Until(lastFeedbackTake.Add(qviews.ViewFeedbackMinInterval))))
 		case _, ok := <-pending.Ready():
 			// Drain pending reports regardless of whether the channel is
 			// still open or was closed (final drain before exit).
@@ -109,12 +109,12 @@ func (s *ViewSyncServer) sendLoop(
 	}
 }
 
-// sendShardStats runs only in sendLoop. Return true when sending must stop.
-func (s *ViewSyncServer) sendShardStats(stream viewpb.ViewSyncService_SyncQueryViewServer, pending *pendingReports) bool {
-	window := s.handler.TakeShardStats()
-	batch := make([]*viewpb.ShardStats, 0, min(256, len(window.Shards)))
+// sendViewFeedback runs only in sendLoop. Return true when sending must stop.
+func (s *ViewSyncServer) sendViewFeedback(stream viewpb.ViewSyncService_SyncQueryViewServer, pending *pendingReports) bool {
+	window := s.handler.TakeViewFeedback()
+	batch := make([]*viewpb.ViewFeedback, 0, min(256, len(window.Shards)))
 	sendBatch := func() bool {
-		// State/close reports take precedence between bounded stats batches.
+		// State/close reports take precedence between bounded feedback batches.
 		select {
 		case <-stream.Context().Done():
 			return true
@@ -125,19 +125,19 @@ func (s *ViewSyncServer) sendShardStats(stream viewpb.ViewSyncService_SyncQueryV
 			}
 		default:
 		}
-		err := stream.Send(&viewpb.SyncResponse{Response: &viewpb.SyncResponse_Stats{Stats: &viewpb.ShardStatsReport{
+		err := stream.Send(&viewpb.SyncResponse{Response: &viewpb.SyncResponse_ViewFeedback{ViewFeedback: &viewpb.ViewFeedbackReport{
 			Shards: batch, WindowStartUnixNanos: window.StartUnixNanos, WindowEndUnixNanos: window.EndUnixNanos,
 		}}})
 		// Detached windows are best effort; never restore or replay them.
 		return err != nil
 	}
 	for id, sample := range window.Shards {
-		batch = append(batch, &viewpb.ShardStats{ShardId: id.IntoProto(), RequestCount: sample.RequestCount, LastAccessUnixNanos: sample.LastAccessUnixNanos})
+		batch = append(batch, &viewpb.ViewFeedback{ShardId: id.IntoProto(), RequestCount: sample.RequestCount, LastAccessUnixNanos: sample.LastAccessUnixNanos})
 		if len(batch) == 256 {
 			if sendBatch() {
 				return true
 			}
-			batch = make([]*viewpb.ShardStats, 0, 256)
+			batch = make([]*viewpb.ViewFeedback, 0, 256)
 		}
 	}
 	return len(batch) > 0 && sendBatch()

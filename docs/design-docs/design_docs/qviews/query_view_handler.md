@@ -63,12 +63,12 @@ Implements the gRPC `SyncQueryView` bidirectional streaming RPC. Per-stream — 
 
 ## 3. QueryViewHandler
 
-The `QueryViewHandler` interface provides state application and Shard statistics:
+The `QueryViewHandler` interface provides state application and ViewFeedback:
 
 ```
 ApplyViews(views []ApplyView)
-TakeShardStats() qviews.ShardStatsWindow
-ShardStatsReady() <-chan struct{}
+TakeViewFeedback() qviews.ViewFeedbackWindow
+ViewFeedbackReady() <-chan struct{}
 ```
 
 Each `ApplyView` carries a coord-pushed `View` and an `OnReport` callback. All state reports — both immediate (from Coord push handling) and asynchronous (from external dependency callbacks) — are delivered exclusively through `OnReport`.
@@ -314,13 +314,13 @@ No RPC change is required for this handover. Validation blocks replacement
 preparation, releases the old View, then completes the dependency and verifies
 both protected resource reuse and eventual readiness without another push.
 
-## Shard access statistics
+## ViewFeedback
 
-[Shard access statistics](query_view_statistics.md) live in the SN handler's private
-`shardStats` child structure, independently of View state machines. Observe updates
+[ViewFeedback](view_feedback.md) lives in the SN handler's private
+`viewFeedback` child structure, independently of View state machines. Observe updates
 only the current window. The existing send loop takes ownership of its map every
 five seconds or at 1024 distinct Shards, then sends batches of up to 256 samples.
 Size-triggered takes are at least one second apart within a stream; the send loop
 continues processing state and close reports during the wait. Empty windows are
 skipped; failed windows are dropped rather than replayed.
-QN returns no statistics. State callbacks retain their existing View-key semantics.
+QN returns no feedback. State callbacks retain their existing View-key semantics.

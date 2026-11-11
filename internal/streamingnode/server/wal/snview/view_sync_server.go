@@ -48,12 +48,12 @@ type pchannelScopedQueryViewHandler struct {
 	handler  handler.QueryViewHandler
 }
 
-func (h *pchannelScopedQueryViewHandler) TakeShardStats() qviews.ShardStatsWindow {
-	return h.handler.TakeShardStats()
+func (h *pchannelScopedQueryViewHandler) TakeViewFeedback() qviews.ViewFeedbackWindow {
+	return h.handler.TakeViewFeedback()
 }
 
-func (h *pchannelScopedQueryViewHandler) ShardStatsReady() <-chan struct{} {
-	return h.handler.ShardStatsReady()
+func (h *pchannelScopedQueryViewHandler) ViewFeedbackReady() <-chan struct{} {
+	return h.handler.ViewFeedbackReady()
 }
 
 func (h *pchannelScopedQueryViewHandler) ApplyViews(views []handler.ApplyView) {

@@ -22,10 +22,10 @@ import (
 // Close stops the loop but does NOT drain pending views.
 // Use DrainPendingIfNodeLost after Close for node loss scenarios.
 type resumableSyncer struct {
-	statsHandler ShardStatsHandler
-	node         qviews.WorkNode
-	client       ViewSyncClient
-	pending      *pendingSyncQueryViews
+	feedbackHandler ViewFeedbackHandler
+	node            qviews.WorkNode
+	client          ViewSyncClient
+	pending         *pendingSyncQueryViews
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -36,16 +36,16 @@ func newResumableSyncer(
 	ctx context.Context,
 	node qviews.WorkNode,
 	client ViewSyncClient,
-	statsHandler ShardStatsHandler,
+	feedbackHandler ViewFeedbackHandler,
 ) *resumableSyncer {
 	ctx, cancel := context.WithCancel(ctx)
 	rs := &resumableSyncer{
-		statsHandler: statsHandler,
-		node:         node,
-		client:       client,
-		pending:      newPendingSyncQueryViews(),
-		ctx:          ctx,
-		cancel:       cancel,
+		feedbackHandler: feedbackHandler,
+		node:            node,
+		client:          client,
+		pending:         newPendingSyncQueryViews(),
+		ctx:             ctx,
+		cancel:          cancel,
 	}
 	rs.wg.Add(1)
 	go rs.loop()
@@ -204,8 +204,8 @@ func (rs *resumableSyncer) recvLoop(ctx context.Context, stream viewpb.ViewSyncS
 			return receivedResponse
 		}
 
-		if stats := resp.GetStats(); stats != nil {
-			rs.receiveShardStats(stats)
+		if feedback := resp.GetViewFeedback(); feedback != nil {
+			rs.receiveViewFeedback(feedback)
 			receivedResponse = true
 			continue
 		}
@@ -224,22 +224,22 @@ func (rs *resumableSyncer) recvLoop(ctx context.Context, stream viewpb.ViewSyncS
 	}
 }
 
-func (rs *resumableSyncer) receiveShardStats(report *viewpb.ShardStatsReport) {
+func (rs *resumableSyncer) receiveViewFeedback(report *viewpb.ViewFeedbackReport) {
 	node, ok := rs.node.(qviews.StreamingNode)
-	if !ok || rs.statsHandler == nil {
+	if !ok || rs.feedbackHandler == nil {
 		return
 	}
-	window := qviews.ShardStatsWindow{StartUnixNanos: report.GetWindowStartUnixNanos(), EndUnixNanos: report.GetWindowEndUnixNanos(), Shards: make(map[qviews.ShardID]qviews.ShardStats, len(report.GetShards()))}
+	window := qviews.ViewFeedbackWindow{StartUnixNanos: report.GetWindowStartUnixNanos(), EndUnixNanos: report.GetWindowEndUnixNanos(), Shards: make(map[qviews.ShardID]qviews.ViewFeedback, len(report.GetShards()))}
 	for _, sample := range report.GetShards() {
 		id := sample.GetShardId()
 		if id == nil || funcutil.ToPhysicalChannel(id.GetVchannel()) != node.PChannel {
 			continue
 		}
-		window.Shards[qviews.FromProtoShardID(id)] = qviews.ShardStats{
+		window.Shards[qviews.FromProtoShardID(id)] = qviews.ViewFeedback{
 			ShardID: qviews.FromProtoShardID(id), RequestCount: sample.GetRequestCount(), LastAccessUnixNanos: sample.GetLastAccessUnixNanos(),
 		}
 	}
-	rs.statsHandler.OnShardStats(window)
+	rs.feedbackHandler.OnViewFeedback(window)
 }
 
 // rePush sends all pending entries for this node through the stream in batches

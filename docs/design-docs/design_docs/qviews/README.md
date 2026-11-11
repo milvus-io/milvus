@@ -551,14 +551,14 @@ for its serving views. Full mixed-version upgrade validation is a separate check
 [DDL visibility](ddl_visibility.md) specifies the DataVersion and configuration
 fences and the operations still deferred.
 
-## Shard access statistics
+## ViewFeedback
 
-[Shard access statistics](query_view_statistics.md) collects best-effort access
+[ViewFeedback](view_feedback.md) collects best-effort access
 windows by ShardID in a dedicated top-level SN handler child structure. Windows
 are taken every five seconds or at 1024 distinct Shards and sent through persistent
-Syncer streams. Coord owns statistics by Replica load-config lifetime and expires
+Syncer streams. Coord owns feedback by Replica load-config lifetime and expires
 received windows after two minutes, independently of reports and reads.
-Statistics do not drive QueryView state machines or preparation priority.
+Feedback does not drive QueryView state machines or preparation priority.
 
 ## Partition statistics and pruning
 

@@ -1,8 +1,8 @@
-# Shard 近期访问统计
+# ViewFeedback：Shard 近期访问反馈
 
 关联需求：[milvus-io/milvus#55284](https://github.com/milvus-io/milvus/issues/55284)。
 
-统计按 ShardID 聚合，通过已有 SyncQueryView stream 尽力上报。SN 只维护当前时间窗口，
+ViewFeedback 按 ShardID 聚合，通过已有 SyncQueryView stream 尽力上报。SN 只维护当前时间窗口，
 Coord 保留最近 **2 分钟**的有效窗口并自主过期清理。统计允许丢失，不实现可靠投递、
 历史累计总量、加载优先级或调度评分。
 
@@ -21,10 +21,10 @@ Coord 保留最近 **2 分钟**的有效窗口并自主过期清理。统计允�
 
 ## 2. SN：只保存尚未取走的窗口
 
-顶层 `SNQueryViewHandler` 按 PChannel/WAL 实例存在，持有私有 `shardStats` 子结构：
+顶层 `SNQueryViewHandler` 按 PChannel/WAL 实例存在，持有私有 `viewFeedback` 子结构：
 
 ```text
-shardStats
+viewFeedback
   mu
   window start
   ShardID -> (window request count, last access)
@@ -34,7 +34,7 @@ shardStats
 Observe 在统计自己的短锁内更新当前窗口。它不获取 handler View map 锁、snShardView
 锁或状态机锁，也不编码 protobuf 或发送网络请求。
 
-`TakeShardStats` 在同一把锁下交换出当前 map，并以取走时刻开始空窗口。第一次访问
+`TakeViewFeedback` 在同一把锁下交换出当前 map，并以取走时刻开始空窗口。第一次访问
 初始化未开启的窗口。交换是 O(1)，不遍历 Shard；交出的 map 完全属于发送方，之后的
 Observe 只写新窗口。因此发送方可以在锁外遍历、编码、释放 map。
 
@@ -63,34 +63,34 @@ SN owner 解析和迁移重连继续由已有 HandlerClient 负责；Syncer 不�
 取走的窗口按每批最多 256 个 Shard 编码，批次之间优先处理 pending 状态/关闭报告。
 不要求整个窗口分批全部到达，Coord 可独立接收每批。发送失败、取消或关闭后，剩余
 统计直接丢弃；不回填、不 ACK、不去重重放，也不添加 sequence、epoch 或补偿队列。
-重连只恢复 stream 和原有 View pending，不能重发已经取走的 stats。
+重连只恢复 stream 和原有 View pending，不能重发已经取走的 ViewFeedback。
 
 窗口取走不再占用发送循环做全表扫描、变化比对。编码、网络发送仍有成本，已经开始
 的 gRPC Send 无法被后来的状态报告抢占；本方案不承诺慢网络下严格隔离状态同步延迟。
 
 ### 协议
 
-复用现有 `viewpb.ShardID` 和 `SyncResponse.stats`：
+复用现有 `viewpb.ShardID` 和 `SyncResponse.view_feedback`：
 
 ```proto
-message ShardStats {
+message ViewFeedback {
     ShardID shard_id = 1;
     uint64 request_count = 2;       // 当前窗口内次数
     int64 last_access_unix_nanos = 3;
 }
-message ShardStatsReport {
-    repeated ShardStats shards = 1;
+message ViewFeedbackReport {
+    repeated ViewFeedback shards = 1;
     int64 window_start_unix_nanos = 2;
     int64 window_end_unix_nanos = 3;
 }
 ```
 
-不改变 views/close 字段或 RPC 签名。缺少窗口时间的旧累计 stats 消息直接忽略，不能
-把累计值当增量相加；master 原有不带 stats 的节点继续正常进行状态同步。
+不改变 views/close 字段或 RPC 签名。缺少窗口时间的旧累计 ViewFeedback 消息直接忽略，不能
+把累计值当增量相加；master 原有不带 ViewFeedback 的节点继续正常进行状态同步。
 
 ## 4. Coord：Replica 生命周期和窗口生命周期
 
-ReliableSyncer 检查样本属于 stream 的 PChannel，直接调用 `ReplicaStatsStore.OnShardStats`。
+ReliableSyncer 检查样本属于 stream 的 PChannel，直接调用 `ReplicaFeedbackStore.OnViewFeedback`。
 Store 检查 Replica 当前存在及 VChannel 的 collection 归属，不经过 Registry 或状态机。
 
 `LoadConfigStore.RegisterLoadConfigListener` 的初始回放和增量通知管理 Replica：保留
@@ -107,11 +107,11 @@ ReplicaID 则保留其有效窗口，RG/字段/索引变化不清空；撤销 Re
 
 Store 启动一个独立 goroutine，每秒清除过期窗口和已经没有有效窗口的 Shard 条目。
 即使没有新的上报、没有任何读取，物理清理仍会进行；空 Replica 容器随配置保留。
-`GetShardStats` 在读时也过滤过期窗口，因此不需要等下一次清理 tick 才停止暴露过期值。
+`GetViewFeedback` 在读时也过滤过期窗口，因此不需要等下一次清理 tick 才停止暴露过期值。
 返回值为有效窗口次数之和、有效窗口中最后访问的最大值；没有有效样本返回 `found=false`。
 未知不等同于严格零访问，网络丢失会造成低估。
 
-配置差分、收样和过期清理使用 stats 自己的锁；LoadConfig listener 不做 I/O、不反向
+配置差分、收样和过期清理使用 ViewFeedback 自己的锁；LoadConfig listener 不做 I/O、不反向
 获取 LoadConfigStore 锁、不操作状态机。统计锁竞争仍可能间接延迟配置通知，不能将
 模块解耦描述为完全没有共享 CPU、分配或锁等待成本。
 
@@ -122,7 +122,7 @@ ReliableSyncer。关闭时先停止 Syncer，再注销 listener、停止并等�
 释放统计。初始化失败执行同样清理，Close 可重复调用。
 
 Coord 重启不恢复旧窗口，也不要求 SN 补发已消费窗口；等待后续访问产生新窗口。
-已建立的 SN/PChannel stream 在没有 View、没有 stats 时继续保活。QN 不生产 stats。
+已建立的 SN/PChannel stream 在没有 View、没有 ViewFeedback 时继续保活。QN 不生产 ViewFeedback。
 
 ## 6. 验证
 

@@ -25,11 +25,11 @@ type QueryViewHandler interface {
 	// exclusively through the OnReport callback in each ApplyView.
 	ApplyViews(views []ApplyView)
 
-	// TakeShardStats transfers the current window and starts an empty one.
+	// TakeViewFeedback transfers the current window and starts an empty one.
 	// The caller owns the samples and may discard them on send failure.
-	TakeShardStats() qviews.ShardStatsWindow
+	TakeViewFeedback() qviews.ViewFeedbackWindow
 
-	// ShardStatsReady signals that the current window reached its size threshold.
-	// QueryNodes return nil and never produce statistics.
-	ShardStatsReady() <-chan struct{}
+	// ViewFeedbackReady signals that the current window reached its size threshold.
+	// QueryNodes return nil and never produce feedback.
+	ViewFeedbackReady() <-chan struct{}
 }

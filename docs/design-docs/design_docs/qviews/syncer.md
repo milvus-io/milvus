@@ -333,17 +333,17 @@ internal/views/coord/coordview/
 └── state_machine.go                # CoordQueryView state machine
 ```
 
-## Shard access statistics
+## ViewFeedback
 
-See [Shard access statistics](query_view_statistics.md). ReliableSyncer receives
-a `ShardStatsHandler` at construction, after Replica configuration replay. SN
+See [ViewFeedback](view_feedback.md). ReliableSyncer receives
+a `ViewFeedbackHandler` at construction, after Replica configuration replay. SN
 responses carry best-effort ShardID windows and are dispatched directly to that handler,
 without matching pending View callbacks. The receiver validates the stream's
-PChannel; the stats store validates Replica and collection membership. The store retains received windows for two minutes and expires them independently.
-A stream reconnect does not replay consumed statistics, even if delivery failed.
+PChannel; the feedback store validates Replica and collection membership. The store retains received windows for two minutes and expires them independently.
+A stream reconnect does not replay consumed feedback, even if delivery failed.
 
 The Syncer has no ongoing PChannel discovery watcher. The initial topology comes
 from the local ChannelManager; later View synchronization adds targets. HandlerClient
 continues resolving SN owners for opening and reconnecting streams. Temporary
 assignment gaps do not discard pending View commands or stop SN reconnection.
-Stats do not introduce a separate source, subscriber or recovery-ready gate.
+Feedback does not introduce a separate source, subscriber or recovery-ready gate.

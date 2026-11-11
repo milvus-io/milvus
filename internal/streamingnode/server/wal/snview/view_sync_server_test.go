@@ -249,8 +249,8 @@ func TestViewSyncTransportUsesViewErrorProtocol(t *testing.T) {
 	}
 }
 
-func (fakeViewSyncQueryViewHandler) TakeShardStats() qviews.ShardStatsWindow {
-	return qviews.ShardStatsWindow{}
+func (fakeViewSyncQueryViewHandler) TakeViewFeedback() qviews.ViewFeedbackWindow {
+	return qviews.ViewFeedbackWindow{}
 }
 
-func (fakeViewSyncQueryViewHandler) ShardStatsReady() <-chan struct{} { return nil }
+func (fakeViewSyncQueryViewHandler) ViewFeedbackReady() <-chan struct{} { return nil }

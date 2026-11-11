@@ -1,5 +1,5 @@
-// Package shardstats owns planning access statistics for configured replicas.
-package shardstats
+// Package viewfeedback owns planning access feedback for configured replicas.
+package viewfeedback
 
 import (
 	"slices"
@@ -13,36 +13,36 @@ import (
 
 const retention = 2 * time.Minute
 
-// ReplicaStatsStore follows current load intent, independently of View state.
-type ReplicaStatsStore struct {
+// ReplicaFeedbackStore follows current load intent, independently of View state.
+type ReplicaFeedbackStore struct {
 	stop        chan struct{}
 	done        chan struct{}
 	closeOnce   sync.Once
 	mu          sync.RWMutex
 	collections map[int64][]int64
-	replicas    map[int64]*replicaStats
+	replicas    map[int64]*replicaFeedback
 	unregister  func()
 }
 
-type replicaStats struct {
+type replicaFeedback struct {
 	collectionID int64
 	shards       map[qviews.ShardID][]shardWindow
 }
 
 type shardWindow struct {
 	expiresAt int64
-	sample    qviews.ShardStats
+	sample    qviews.ViewFeedback
 }
 
 // New replays configured replicas before the caller starts receiving reports.
-func New(configs *loadmgr.LoadConfigStore) *ReplicaStatsStore {
-	s := &ReplicaStatsStore{collections: make(map[int64][]int64), replicas: make(map[int64]*replicaStats), stop: make(chan struct{}), done: make(chan struct{})}
+func New(configs *loadmgr.LoadConfigStore) *ReplicaFeedbackStore {
+	s := &ReplicaFeedbackStore{collections: make(map[int64][]int64), replicas: make(map[int64]*replicaFeedback), stop: make(chan struct{}), done: make(chan struct{})}
 	s.unregister = configs.RegisterLoadConfigListener(s.onLoadConfig)
 	go s.expireLoop()
 	return s
 }
 
-func (s *ReplicaStatsStore) onLoadConfig(collectionID int64, config *loadmgr.LoadConfig, _ uint64) {
+func (s *ReplicaFeedbackStore) onLoadConfig(collectionID int64, config *loadmgr.LoadConfig, _ uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var ids []int64
@@ -53,7 +53,7 @@ func (s *ReplicaStatsStore) onLoadConfig(collectionID int64, config *loadmgr.Loa
 			ids = append(ids, id)
 			kept[id] = struct{}{}
 			if s.replicas[id] == nil {
-				s.replicas[id] = &replicaStats{collectionID: collectionID, shards: make(map[qviews.ShardID][]shardWindow)}
+				s.replicas[id] = &replicaFeedback{collectionID: collectionID, shards: make(map[qviews.ShardID][]shardWindow)}
 			}
 		}
 	}
@@ -69,8 +69,8 @@ func (s *ReplicaStatsStore) onLoadConfig(collectionID int64, config *loadmgr.Loa
 	}
 }
 
-// OnShardStats accepts best-effort windows only for currently configured replicas.
-func (s *ReplicaStatsStore) OnShardStats(window qviews.ShardStatsWindow) {
+// OnViewFeedback accepts best-effort windows only for currently configured replicas.
+func (s *ReplicaFeedbackStore) OnViewFeedback(window qviews.ViewFeedbackWindow) {
 	now := time.Now().UnixNano()
 	// Legacy cumulative reports have no window. Future node clocks must not
 	// retain a window longer than two minutes after local receipt.
@@ -95,13 +95,13 @@ func (s *ReplicaStatsStore) OnShardStats(window qviews.ShardStatsWindow) {
 	}
 }
 
-// GetShardStats sums unexpired received windows; missing windows are not zeros.
+// GetViewFeedback sums unexpired received windows; missing windows are not zeros.
 // Expiration is checked here as well as by the independent cleanup worker.
-func (s *ReplicaStatsStore) GetShardStats(id qviews.ShardID) (qviews.ShardStats, bool) {
+func (s *ReplicaFeedbackStore) GetViewFeedback(id qviews.ShardID) (qviews.ViewFeedback, bool) {
 	now := time.Now().UnixNano()
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	var result qviews.ShardStats
+	var result qviews.ViewFeedback
 	found := false
 	if replica := s.replicas[id.ReplicaID]; replica != nil {
 		for _, window := range replica.shards[id] {
@@ -116,7 +116,7 @@ func (s *ReplicaStatsStore) GetShardStats(id qviews.ShardID) (qviews.ShardStats,
 	return result, found
 }
 
-func (s *ReplicaStatsStore) expireLoop() {
+func (s *ReplicaFeedbackStore) expireLoop() {
 	defer close(s.done)
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -130,7 +130,7 @@ func (s *ReplicaStatsStore) expireLoop() {
 	}
 }
 
-func (s *ReplicaStatsStore) expire(now int64) {
+func (s *ReplicaFeedbackStore) expire(now int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, replica := range s.replicas {
@@ -146,7 +146,7 @@ func (s *ReplicaStatsStore) expire(now int64) {
 }
 
 // Close follows Syncer shutdown and joins the expiration worker.
-func (s *ReplicaStatsStore) Close() {
+func (s *ReplicaFeedbackStore) Close() {
 	s.closeOnce.Do(func() {
 		s.unregister()
 		close(s.stop)
