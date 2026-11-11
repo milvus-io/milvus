@@ -1264,6 +1264,27 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 	segmentsIndexes := s.indexMeta.GetSegmentsIndexes(req.GetCollectionID(), req.GetSegmentIDs())
 	for _, segID := range req.GetSegmentIDs() {
 		segIdxes := segmentsIndexes[segID]
+		var summarySegment *datapb.SegmentInfo
+		if s.indexMeta.UsesSegmentSummaries() {
+			segment := s.meta.GetSegment(ctx, segID)
+			if segment == nil {
+				return &indexpb.GetIndexInfoResponse{Status: merr.Status(merr.WrapErrSegmentNotFound(segID))}, nil
+			}
+			if segment.GetCollectionID() != req.GetCollectionID() {
+				return &indexpb.GetIndexInfoResponse{Status: merr.Status(merr.WrapErrSegmentNotFound(segID))}, nil
+			}
+			summarySegment = segment.SegmentInfo
+			var err error
+			segIdxes, err = s.meta.ReadCompletedIndexes(ctx, summarySegment)
+			if err != nil {
+				return &indexpb.GetIndexInfoResponse{Status: merr.Status(err)}, nil
+			}
+			for id := range segIdxes {
+				if !s.indexMeta.IsIndexExist(req.GetCollectionID(), id) {
+					delete(segIdxes, id)
+				}
+			}
+		}
 		ret.SegmentInfo[segID] = &indexpb.SegmentInfo{
 			CollectionID: req.GetCollectionID(),
 			SegmentID:    segID,
@@ -1274,8 +1295,8 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 			ret.SegmentInfo[segID].EnableIndex = true
 			for _, segIdx := range segIdxes {
 				if segIdx.IndexState == commonpb.IndexState_Finished {
-					var segmentInfo *datapb.SegmentInfo
-					if metautil.IsSegmentRooted(segIdx.IndexStorePathVersion) {
+					segmentInfo := summarySegment
+					if segmentInfo == nil && metautil.IsSegmentRooted(segIdx.IndexStorePathVersion) {
 						if segment := s.meta.GetSegment(ctx, segID); segment != nil {
 							segmentInfo = segment.SegmentInfo
 						}
