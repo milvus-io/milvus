@@ -110,6 +110,27 @@ def wire_delta(counters, before):
     }
 
 
+def worker_accounting(before, after, expected_starts):
+    """Compare the same worker instances; never subtract unrelated snapshots."""
+
+    def indexed(snapshot):
+        return {(item["proxy"], item["resource"], item["pid"]): item["count"] for item in snapshot}
+
+    starts, ends = indexed(before), indexed(after)
+    result = {"worker_expected_starts": expected_starts, "worker_actual_starts": None, "internal_outcome": "FAIL"}
+    if not starts or starts.keys() != ends.keys() or len(starts) != len(before) or len(ends) != len(after):
+        return {**result, "internal_error": "Worker identities changed or snapshots are incomplete"}
+    deltas = [ends[key] - value for key, value in starts.items()]
+    if any(delta < 0 for delta in deltas):
+        return {**result, "internal_error": "Worker counters decreased during the window"}
+    actual_starts = sum(deltas)
+    return {
+        **result,
+        "worker_actual_starts": actual_starts,
+        "internal_outcome": "PASS" if actual_starts == expected_starts else "FAIL",
+    }
+
+
 def run_abba(
     checker,
     uri,
@@ -288,13 +309,8 @@ def run_abba(
                         "worker_after": internal_after,
                     }
                     if internal_before is not None and internal_after is not None:
-                        starts = sum(
-                            after["count"] - before["count"] for before, after in zip(internal_before, internal_after)
-                        )
                         expected_starts = offered if mode.startswith("python_") else 0
-                        result["worker_actual_starts"] = starts
-                        result["worker_expected_starts"] = expected_starts
-                        result["internal_outcome"] = "PASS" if starts == expected_starts else "FAIL"
+                        result.update(worker_accounting(internal_before, internal_after, expected_starts))
                     windows.append(result)
                     if failures:
                         rejected_modes[mode] = result["window"]

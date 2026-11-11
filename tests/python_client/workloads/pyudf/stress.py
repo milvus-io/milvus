@@ -7,8 +7,11 @@ import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
+from urllib.parse import urlparse
 
 import numpy as np
+import requests
 from common.pyudf_helpers import build_wheel
 from pymilvus import FunctionChain, FunctionChainStage, MilvusClient
 from pymilvus.function_chain import col
@@ -41,6 +44,7 @@ COUNTER_END = """        with self.lock:
             self.active -= 1
             self.counter[:] = struct.pack('<QQQQ', self.count, self.completed, self.active, self.peak)
 """
+COUNTER_FIELDS = ("pid", "count", "completed", "active", "peak")
 
 
 def counted_module():
@@ -52,12 +56,14 @@ def counted_module():
     source = source.replace(
         "    def transform_query(self, params, columns):",
         """    def transform_query(self, params, columns):
-        if 'counter_query' in params:
+        if params.get('counter_query'):
             with self.lock:
-                value = getattr(self, params['counter_query'])
+                values = (os.getpid(), self.count, self.completed, self.active, self.peak)
                 if params.get('reset_peak'):
                     self.peak = self.active
-            return [pa.array([value] * len(columns[0]), type=pa.float32())]""",
+            # Search scores are float32; reject counters that would lose precision.
+            assert all(0 <= value <= 2**24 for value in values), values
+            return [pa.array([values[index.as_py()] for index in columns[0]], type=pa.float32())]""",
     )
     body_start = source.index("        values = columns[0].to_pylist()")
     body_end = source.index("\ndef create_udf", body_start)
@@ -162,26 +168,80 @@ def instrumentation_comparison(checker, clients, original_resource, counted_reso
         save(output / "instrumentation-comparison.json", records)
 
 
+def verify_single_worker_proxies(config):
+    """Require explicit single-worker configuration on each directly addressed Proxy."""
+    endpoints = config.proxy_management_endpoints
+    assert endpoints and len(endpoints) == len(config.proxy_uris), (
+        "Performance counters require one proxy_management_endpoints entry per Proxy"
+    )
+    assert len(set(endpoints)) == len(endpoints), "Management endpoints must address distinct Proxies"
+    key = "function.pyUDF.server.workerCount"
+    observations = []
+    for proxy, (uri, endpoint) in enumerate(zip(config.proxy_uris, endpoints)):
+        assert urlparse(uri).hostname == urlparse(endpoint).hostname, (
+            "Search and management endpoints must directly address the same Proxy host"
+        )
+        response = requests.get(endpoint.rstrip("/") + "/management/config/get", params={"keys": key}, timeout=10)
+        response.raise_for_status()
+        entries = response.json()["configs"]
+        assert len(entries) == 1 and entries[0]["key"] == key, entries
+        assert entries[0].get("value") == "1", (
+            "Performance counters require explicit workerCount=1 on every Proxy",
+            proxy,
+            entries,
+        )
+        observations.append({"proxy": proxy, "worker_count": 1})
+    return observations
+
+
+def snapshot_worker_counters(checker, clients, stop_file, reset_peak=False):
+    """Read PID and counters atomically in one invocation per Proxy/resource."""
+    observations = []
+    for proxy, client in enumerate(clients):
+        for resource in checker.resources:
+            check_stop_file(stop_file)
+            chain = FunctionChain(FunctionChainStage.L2_RERANK).map(
+                "$score",
+                FunctionChainExpr(
+                    "py_udf",
+                    args=(col("id"),),
+                    params={"resource_name": resource, "udf_params": {"counter_query": True, "reset_peak": reset_peak}},
+                ),
+            )
+            # Bind scores by primary key, since Search may reorder output rows.
+            hits = checker.search(client, checker.queries[0], chain, limit=len(COUNTER_FIELDS), filter_expr="id < 5")
+            values = {hit["id"]: hit["distance"] for hit in hits}
+            assert len(hits) == len(COUNTER_FIELDS) and set(values) == set(range(len(COUNTER_FIELDS))), hits
+            assert all(value == int(value) and 0 <= value <= 2**24 for value in values.values()), values
+            counts = {field: int(values[index]) for index, field in enumerate(COUNTER_FIELDS)}
+            observation = {"proxy": proxy, "resource": resource, **counts}
+            assert counts["active"] == 0 and counts["count"] == counts["completed"], observation
+            observations.append(observation)
+    return observations
+
+
 def performance(root):
     config = WorkloadConfig.read(root)
+    prerequisites = verify_single_worker_proxies(config)
     checker, clients = load_checker(root)
-    output = root / "performance"
-    output.mkdir()
-    checker.evidence = output
-    prefix = config.collection + "_perf"
-    wheels = register(checker, output, prefix, 2, counted_module(), config)
-    original_resource = checker.resources[0]
-    checker.resources = [item["resource"] for item in wheels]
-    save(
-        output / "instrumentation.json",
-        {
-            "method": "32-byte mmap counters per resource/worker; start/end lock and memory writes",
-            "original_control_wheels": json.loads((root / "input/metadata.json").read_text())["wheels"],
-            "native_heap": "not covered by Go heap",
-            "component_spans": "not available; no encode/execute/decode time decomposition",
-        },
-    )
     try:
+        output = root / "performance"
+        output.mkdir()
+        save(output / "worker-prerequisites.json", prerequisites)
+        checker.evidence = output
+        prefix = config.collection + "_perf"
+        wheels = register(checker, output, prefix, 2, counted_module(), config)
+        original_resource = checker.resources[0]
+        checker.resources = [item["resource"] for item in wheels]
+        save(
+            output / "instrumentation.json",
+            {
+                "method": "32-byte mmap counters per resource/worker; start/end lock and memory writes",
+                "original_control_wheels": json.loads((root / "input/metadata.json").read_text())["wheels"],
+                "native_heap": "not covered by Go heap",
+                "component_spans": "not available; no encode/execute/decode time decomposition",
+            },
+        )
         # Only a newly registered resource's missing snapshot is a prerequisite wait.
         readiness = []
         for proxy, client in enumerate(clients):
@@ -210,28 +270,7 @@ def performance(root):
         instrumentation_comparison(checker, clients, original_resource, checker.resources[0], output)
         addresses = config.proxy_uris
 
-        def worker_snapshot(reset_peak=False):
-            observations = []
-            for proxy, client in enumerate(clients):
-                for resource in checker.resources:
-                    counts = {}
-                    for key in ("count", "completed", "active", "peak"):
-                        chain = FunctionChain(FunctionChainStage.L2_RERANK).map(
-                            "$score",
-                            FunctionChainExpr(
-                                "py_udf",
-                                args=(col("ts"),),
-                                params={
-                                    "resource_name": resource,
-                                    "udf_params": {"counter_query": key, "reset_peak": reset_peak and key == "peak"},
-                                },
-                            ),
-                        )
-                        hits = checker.search(client, checker.queries[0], chain, limit=1)
-                        counts[key] = int(hits[0]["distance"])
-                    assert counts["active"] == 0 and counts["count"] == counts["completed"], counts
-                    observations.append({"proxy": proxy, "resource": resource, **counts})
-            return observations
+        worker_snapshot = partial(snapshot_worker_counters, checker, clients, root / "STOP")
 
         windows = run_abba(
             checker,

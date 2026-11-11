@@ -80,6 +80,10 @@ scheduled requests/second with eight threads, followed by 300 seconds of drain
 and a 600-second replay. Smaller bounded durations are available through
 `--duration`, `--drain` and `--replay` for runner smoke checks. Those runs are not
 full soak validation. Creating `$EVIDENCE/STOP` stops load with a failure verdict.
+ABBA and batch measurements use the same stop file, including batch baseline
+collection. Already in-flight requests drain within their request timeouts;
+no later measurement window starts after the stop is observed. Standalone pytest
+benchmarks use `STOP` in their evidence directory.
 
 Additional phases are `performance`, `interference`, and `cache`. Cache steps
 are explicitly selected with `--cache-phase baseline|cold|replay|remove|recovery`;
@@ -88,6 +92,21 @@ evidence. Each phase writes separate machine-readable artifacts and propagates
 assertion failures to the process exit status. The `cleanup` phase removes the
 extra performance/interference registrations. Retained collections, input wheels
 and evidence remain owned by the caller until final environment cleanup.
+
+Performance counter measurements require an explicitly configured
+`function.pyUDF.server.workerCount: 1` on **each** Proxy. Add
+`"proxy_management_endpoints": ["http://proxy-a:9091", "http://proxy-b:9091"]`
+to `config.json`, in the same order as `proxy_uris`. Each Search/management pair
+must directly address the same Proxy host, not a load-balanced service. The runner
+checks both management endpoints before submitting performance load; missing or
+multi-worker configuration fails the prerequisite. Keep this deployment unchanged
+throughout the measurement. Other workload phases do not require this option.
+
+Each counter snapshot reads PID, started, completed, active and peak counts in
+one UDF invocation under its lock. ABBA compares snapshots by Proxy/resource/PID,
+and rejects restarts, missing workers or decreasing counters. This performance
+profile deliberately covers one Python worker per Proxy; it does not claim
+aggregate accounting for multi-worker pools.
 
 Periodic Jenkins deployment and fault orchestration belong in `test-jobs` and
 are a separate integration step. These workload files alone do not establish

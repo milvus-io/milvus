@@ -31,6 +31,7 @@ class WorkloadConfig:
     expected_commit: str
     rows: int = 100000
     minio_secure: bool = False
+    proxy_management_endpoints: list[str] | None = None
 
     def __post_init__(self):
         if len(self.proxy_uris) != 2 or len(set(self.proxy_uris)) != 2:
