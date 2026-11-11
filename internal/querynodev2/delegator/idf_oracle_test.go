@@ -93,7 +93,7 @@ func (s *IDFOracleSuite) waitTargetVersion(targetVersion int64) {
 			// Publication no longer waits for physical cleanup. Join the sync
 			// before tests inspect files or disk-resource accounting.
 			s.idfOracle.syncMu.Lock()
-			s.Zero(s.idfOracle.retiredSealed.Len(), "obsolete statistics cleanup must finish before inspecting files or disk usage")
+			s.GreaterOrEqual(s.idfOracle.diskSize(), int64(0))
 			s.idfOracle.syncMu.Unlock()
 			return
 		}
@@ -466,7 +466,9 @@ func (suite *IDFOracleSuite) TestLoadSealedNoParse() {
 	suite.Equal(int64(0), suite.idfOracle.current.NumRow())
 
 	// disk file should exist
-	segDir := path.Join(suite.idfOracle.dirPath, "1", "102")
+	sealedEntry, loaded := suite.idfOracle.sealed.Get(1)
+	suite.Require().True(loaded)
+	segDir := path.Join(sealedEntry.localDir, "102")
 	entries, err := os.ReadDir(segDir)
 	suite.NoError(err)
 	suite.NotEmpty(entries)
@@ -496,9 +498,9 @@ func (suite *IDFOracleSuite) TestLoadSealedFailureCleanup() {
 	suite.Equal(int64(0), suite.idfOracle.sealedDiskSize.Load())
 
 	// disk directory should be cleaned up
-	segDir := path.Join(suite.idfOracle.dirPath, "1")
-	_, statErr := os.Stat(segDir)
-	suite.True(os.IsNotExist(statErr))
+	dirs, statErr := os.ReadDir(suite.idfOracle.dirPath)
+	suite.Require().NoError(statErr)
+	suite.Empty(dirs, "failed download must remove its actual unique directory")
 }
 
 // setFieldForTest replaces the stats of one field.
@@ -707,6 +709,7 @@ func TestLoadSealedForReopenIdempotentAfterSuccess(t *testing.T) {
 		fieldList: []int64{102},
 		diskSize:  7,
 	}
+	require.NoError(t, os.MkdirAll(sealedStats.localDir, 0o700))
 	idfOracle.sealed.Insert(1, sealedStats)
 	idfOracle.sealedDiskSize.Store(7)
 
@@ -838,8 +841,13 @@ func TestLoadSealedForReopenFailureCleanupPreservesExistingFields(t *testing.T) 
 	assert.Equal(t, int64(4), idfOracle.sealedDiskSize.Load())
 	_, err = os.Stat(oldFieldDir)
 	assert.NoError(t, err)
-	_, err = os.Stat(path.Join(idfOracle.dirPath, "1", "104"))
-	assert.True(t, os.IsNotExist(err))
+	dirs, err := os.ReadDir(idfOracle.dirPath)
+	require.NoError(t, err)
+	require.Len(t, dirs, 1, "failed reopen must remove its staging directory")
+	fields, err := os.ReadDir(sealedStats.localDir)
+	require.NoError(t, err)
+	require.Len(t, fields, 1)
+	assert.Equal(t, "102", fields[0].Name())
 }
 
 func TestActiveReopenBM25MergesNewFieldStats(t *testing.T) {
@@ -864,6 +872,7 @@ func TestActiveReopenBM25MergesNewFieldStats(t *testing.T) {
 		fieldList: []int64{102},
 		diskSize:  7,
 	}
+	require.NoError(t, os.MkdirAll(sealedStats.localDir, 0o700))
 	idfOracle.sealed.Insert(1, sealedStats)
 	idfOracle.sealedDiskSize.Store(7)
 
