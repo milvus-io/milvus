@@ -133,16 +133,18 @@ field and no index has no index meta in segcore, and a search on a vector
 field added afterwards failed an assertion (`index meta not exist`) instead
 of returning the "not loaded" error above.
 
+The conversion depends on QueryView (#52977), which is the only load path
+on master and the one every test ran on. The QueryNode entries used before
+it (`WatchDmChannels` / `LoadSegments`) reject an empty index list when the
+schema has a vector field, the state of a loaded collection that gained a
+vector field and has no index yet; they are not adapted and the conversion
+is not supported on them.
+
 Not covered by the conversion work:
 
 - Backfill. A function field (BM25, MinHash) added to a collection without a
   vector field needs its output computed for existing rows; adding one
   requires StorageV3 and was not exercised.
-- The QueryNode load path used before QueryView (`WatchDmChannels` /
-  `LoadSegments`). It rejects an empty index list when the schema has a
-  vector field; a loaded collection with a vector field added and not yet
-  indexed is in exactly that state. The local tests ran on the QueryView
-  path only.
 - A conversion while roles of different versions are running.
 
 **Clients**
@@ -717,7 +719,7 @@ that drops a scalar field shows the same.
 ## 8. Follow-ups
 
 - The items listed as not covered under "Conversion" in Section 2: backfill
-  for function fields, the pre-QueryView load path and mixed version runs.
+  for function fields and mixed version runs.
 - The loader's memory estimate is about 3× too low for narrow fixed-width
   rows. The QueryNode uses it for admission before loading a segment; the
   formula adds up the `MemorySize` of each field's binlogs and multiplies by
