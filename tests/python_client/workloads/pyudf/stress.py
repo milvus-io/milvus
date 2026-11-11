@@ -429,23 +429,24 @@ def interference(workload):
 
 
 # Each wheel contains its own policy, so resource mix-ups change the expected ranking.
-RAG_RERANK_MODULE = """import numpy as np
-import pyarrow as pa
+RAG_RERANK_MODULE = """import pyarrow as pa
+import pyarrow.compute as pc
 
 class DocumentReranker:
     def transform_query(self, params, columns):
         distances, published, sources, quality = columns
-        distances = distances.to_numpy(zero_copy_only=False).astype(np.float64)
-        if not np.all(np.isfinite(distances)) or np.any(distances < 0):
+        distances = pc.cast(distances, pa.float64())
+        if pc.any(pc.invert(pc.is_finite(distances))).as_py() or pc.any(pc.less(distances, 0)).as_py():
             raise ValueError("Document reranking requires finite nonnegative L2 distances")
-        age_days = np.maximum(0, params['as_of'] - published.to_numpy(zero_copy_only=False)) / 86400
-        freshness = np.exp2(-age_days / POLICY['half_life_days'])
-        trust = np.array([{'official': 1.0, 'community': 0.65}.get(source, 0.25)
-                          for source in sources.to_pylist()])
-        quality = np.clip(np.nan_to_num(quality.to_numpy(zero_copy_only=False), nan=0.5), 0, 1)
-        scores = (0.6 / (1 + distances) + POLICY['freshness_weight'] * freshness
-                  + (0.3 - POLICY['freshness_weight']) * trust + 0.1 * quality)
-        return [pa.array(scores, type=pa.float32())]
+        age_seconds = pc.max_element_wise(0, pc.subtract(params['as_of'], published))
+        age_days = pc.divide(pc.cast(age_seconds, pa.float64()), 86400)
+        freshness = pc.power(2.0, pc.divide(pc.negate(age_days), POLICY['half_life_days']))
+        trust = pc.if_else(pc.equal(sources, 'official'), 1.0,
+                          pc.if_else(pc.equal(sources, 'community'), 0.65, 0.25))
+        quality = pc.min_element_wise(pc.max_element_wise(pc.fill_null(quality, 0.5), 0.0), 1.0)
+        scores = pc.add(pc.divide(0.6, pc.add(1.0, distances)), pc.multiply(POLICY['freshness_weight'], freshness))
+        scores = pc.add(scores, pc.add(pc.multiply(0.3 - POLICY['freshness_weight'], trust), pc.multiply(0.1, quality)))
+        return [pc.cast(scores, pa.float32())]
 
 def create_udf(context):
     context.logger.info('Document reranker policy=%s resource=%s', POLICY, context.resource_name)
