@@ -3,11 +3,11 @@
 import json
 import os
 import uuid
+from contextlib import ExitStack
 from dataclasses import asdict, replace
 from pathlib import Path
 
 import pytest
-from pymilvus import MilvusClient
 from workloads.pyudf.runner import WorkloadConfig, initialize, save
 
 
@@ -92,16 +92,15 @@ def pyudf_system(request, tmp_path, record_property, pyudf_system_config):
     save(root / "config.json", asdict(config))
     record_property("evidence_directory", str(root.resolve()))
     storage = config.storage()
-    # A dedicated connection survives the workload phases closing their clients.
-    client = MilvusClient(config.proxy_uris[0], token=os.environ["MILVUS_TOKEN"], dedicated=True, timeout=30)
-    try:
+    with ExitStack() as connections:
+        clients = config.connections()
+        for client in clients:
+            connections.callback(client.close)
+        client = clients[0]
         assert not client.has_collection(config.collection), "Refuse to own an existing collection"
         assert not any(item.name.startswith(config.collection + "_") for item in client.list_file_resources())
         try:
-            initialize(root)
-            yield root
+            yield initialize(config, root, clients, storage)
         finally:
             (root / "STOP").touch()
             cleanup(client, storage, config, root)
-    finally:
-        client.close()

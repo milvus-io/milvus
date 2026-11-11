@@ -330,37 +330,3 @@ def prepare(client, storage, args, evidence, stop_file=None):
     (evidence / "metadata.json").write_text(json.dumps(metadata, indent=2))
     print(json.dumps({"event": "prepared", **metadata}), flush=True)
     return PyUDFSearchChecker(client, name, resources, vectors, queries, evidence, args.index_type, stop_file)
-
-
-def resume(client, storage, args, evidence):
-    """Reuse retained inputs and candidate baselines; never silently re-baseline."""
-    metadata = json.loads((evidence / "metadata.json").read_text())
-    assert metadata["collection"] == args.collection and metadata["rows"] == args.rows
-    assert hashlib.sha256((evidence / "vectors.npy").read_bytes()).hexdigest() == metadata["vectors_sha256"]
-    assert client.query(args.collection, filter="", output_fields=["count(*)"])[0]["count(*)"] == args.rows
-    registered = {item.name: item.path for item in client.list_file_resources()}
-    for wheel in metadata["wheels"]:
-        assert registered[wheel["resource"]] == wheel["path"]
-        response = storage.get_object(args.bucket, wheel["path"])
-        try:
-            assert hashlib.sha256(response.read()).hexdigest() == wheel["sha256"]
-        finally:
-            response.close()
-            response.release_conn()
-    checker = PyUDFSearchChecker(
-        client,
-        args.collection,
-        [wheel["resource"] for wheel in metadata["wheels"]],
-        np.load(evidence / "vectors.npy"),
-        np.load(evidence / "queries.npy"),
-        evidence,
-        args.index_type,
-    )
-    checker.candidates = json.loads((evidence / "candidates.json").read_text())
-    if args.index_type == "AUTOINDEX":
-        checker.baseline_distances = [
-            {int(key): value for key, value in row.items()}
-            for row in json.loads((evidence / "baseline_distances.json").read_text())
-        ]
-    print(json.dumps({"event": "resumed", "metadata": metadata}), flush=True)
-    return checker

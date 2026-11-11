@@ -2,21 +2,25 @@
 
 import pytest
 from workloads.pyudf import stress
-from workloads.pyudf.runner import WorkloadConfig, soak
+from workloads.pyudf.runner import soak
 
 pytestmark = pytest.mark.tags("L3", "pyudf")
 
 
 def test_soak_and_replay_preserve_rows_and_scores(pyudf_system):
-    config = WorkloadConfig.read(pyudf_system)
-    soak(pyudf_system, config.duration, config.drain, config.replay)
+    soak(pyudf_system)
 
 
 @pytest.mark.usefixtures("single_worker_proxies")
 @pytest.mark.parametrize("pyudf_system", ["HNSW", "DISKANN"], indirect=True)
-def test_abba_and_batches_preserve_semantics_and_worker_counts(pyudf_system):
-    """Measure equivalent operations and batches; no latency acceptance threshold."""
-    stress.performance(pyudf_system)
+def test_abba_preserves_semantics_and_worker_counts(pyudf_system):
+    """Measure paired operations and worker counts; no latency acceptance threshold."""
+    stress.abba(pyudf_system)
+
+
+@pytest.mark.parametrize("pyudf_system", ["HNSW", "DISKANN"], indirect=True)
+def test_batches_preserve_scores_and_input_columns(pyudf_system):
+    stress.batches(pyudf_system)
 
 
 def test_concurrent_search_reaches_requested_rpc_concurrency(pyudf_system):

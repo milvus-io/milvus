@@ -1,5 +1,6 @@
 """Bounded performance telemetry, interference, and package-cache workloads."""
 
+import copy
 import hashlib
 import io
 import json
@@ -17,89 +18,56 @@ from pymilvus import FunctionChain, FunctionChainStage, MilvusClient
 from pymilvus.function_chain import col
 from pymilvus.function_chain.chain import FunctionChainExpr
 from workloads.pyudf.benchmark import SearchActivity, SearchWireCounter, run_abba, run_batch_measurements
-from workloads.pyudf.runner import WorkloadConfig, load_checker, save
+from workloads.pyudf.runner import save
 from workloads.pyudf.workload import MODULE, check_stop_file
 
-# The mmap counters measure real transform entries/completions without a syscall
-# on every invocation. They add a lock/write cost, explicitly retained in metadata.
-COUNTER_IMPORT = """import mmap
-import struct
-from pathlib import Path
-"""
-COUNTER_INIT = """        self.active = 0
-        self.peak = 0
-        self.completed = 0
-        path = Path('/tmp') / ('pyudf-r2-counter-' + context.resource_name + '-' + str(os.getpid()))
-        self.counter_file = path.open('w+b')
-        self.counter_file.truncate(32)
-        self.counter = mmap.mmap(self.counter_file.fileno(), 32)
-        context.logger.warning('PYUDF_R2_FACTORY resource=%s pid=%s', context.resource_name, os.getpid())
-"""
-COUNTER_START = """            self.active += 1
-            self.peak = max(self.peak, self.active)
-            self.counter[:] = struct.pack('<QQQQ', self.count, self.completed, self.active, self.peak)
-"""
-COUNTER_END = """        with self.lock:
-            self.completed += 1
-            self.active -= 1
-            self.counter[:] = struct.pack('<QQQQ', self.count, self.completed, self.active, self.peak)
-"""
+# The instrumented subclass preserves the original transform and its column checks.
+# Snapshots read process-local counters atomically through the same UDF instance.
 COUNTER_FIELDS = ("pid", "count", "completed", "active", "peak")
+COUNTED_MODULE = (
+    MODULE
+    + """
+class CountedUDF(UDF):
+    def __init__(self, context):
+        super().__init__(context)
+        self.active = self.peak = self.completed = 0
 
-
-def counted_module():
-    source = MODULE.replace("import pyarrow as pa", "import pyarrow as pa\n" + COUNTER_IMPORT)
-    source = source.replace(
-        "        self.lock = threading.Lock()", "        self.lock = threading.Lock()\n" + COUNTER_INIT
-    )
-    source = source.replace("            count = self.count", "            count = self.count\n" + COUNTER_START)
-    source = source.replace(
-        "    def transform_query(self, params, columns):",
-        """    def transform_query(self, params, columns):
-        if params.get('counter_query'):
-            with self.lock:
+    def transform_query(self, params, columns):
+        with self.lock:
+            if params.get('counter_query'):
                 values = (os.getpid(), self.count, self.completed, self.active, self.peak)
                 if params.get('reset_peak'):
                     self.peak = self.active
-            # Search scores are float32; reject counters that would lose precision.
-            assert all(0 <= value <= 2**24 for value in values), values
-            return [pa.array([values[index.as_py()] for index in columns[0]], type=pa.float32())]""",
-    )
-    body_start = source.index("        values = columns[0].to_pylist()")
-    body_end = source.index("\ndef create_udf", body_start)
-    body = source[body_start:body_end].rstrip()
-    wrapped = "        try:\n" + "\n".join("    " + line for line in body.splitlines())
-    wrapped += "\n        finally:\n" + "\n".join("    " + line for line in COUNTER_END.rstrip().splitlines()) + "\n"
-    return source[:body_start] + wrapped + source[body_end:]
+                # Search scores are float32; reject counters that would lose precision.
+                assert all(0 <= value <= 2**24 for value in values), values
+                return [pa.array([values[index.as_py()] for index in columns[0]], type=pa.float32())]
+            self.active += 1
+            self.peak = max(self.peak, self.active)
+        try:
+            return super().transform_query(params, columns)
+        finally:
+            with self.lock:
+                self.completed += 1
+                self.active -= 1
 
+def create_udf(context):
+    return CountedUDF(context)
+"""
+)
 
-INTERFERENCE_MODULE = (
-    """import os
-import threading
+INTERFERENCE_MODULE = """import os
 import time
 import pyarrow as pa
-"""
-    + COUNTER_IMPORT
-    + """
+
 class UDF:
     def __init__(self, context):
         self.context = context
-        self.count = 0
-        self.lock = threading.Lock()
-"""
-    + COUNTER_INIT
-    + """
+
     def transform_query(self, params, columns):
-        with self.lock:
-            self.count += 1
-"""
-    + COUNTER_START
-    + """
         started = time.time()
         self.context.logger.warning('PYUDF_R2_ENTER resource=%s pid=%s call=%s mode=%s unix=%s', self.context.resource_name, os.getpid(), params['call'], params['mode'], started)
         try:
-            # The shared absolute deadline prevents a queue from extending CPU
-            # pressure beyond the approved 60-second experiment window.
+            # Queued calls cannot extend CPU pressure beyond the observation window.
             deadline = min(params['deadline'], started + 1)
             if params['mode'] == 'wait':
                 time.sleep(max(0, deadline - time.time()))
@@ -109,20 +77,15 @@ class UDF:
                     value = (value * 1664525 + 1013904223) % 4294967296
             return [pa.array([v.as_py() * 2 for v in columns[0]], type=pa.float32())]
         finally:
-            with self.lock:
-                self.completed += 1
-                self.active -= 1
-                self.counter[:] = struct.pack('<QQQQ', self.count, self.completed, self.active, self.peak)
             self.context.logger.warning('PYUDF_R2_END resource=%s pid=%s call=%s mode=%s unix=%s', self.context.resource_name, os.getpid(), params['call'], params['mode'], time.time())
 
 def create_udf(context):
     return UDF(context)
 """
-)
 
 
-def register(checker, root, prefix, count, source, config):
-    store = config.storage()
+def register(workload, root, prefix, count, source):
+    checker, store, config = workload.checker, workload.storage, workload.config
     registered = {item.name for item in checker.client.list_file_resources()}
     wheels = []
     for number in range(count):
@@ -221,82 +184,87 @@ def snapshot_worker_counters(checker, clients, stop_file, reset_peak=False):
     return observations
 
 
-def performance(root):
-    config = WorkloadConfig.read(root)
+def abba(workload):
+    root, config = workload.root, workload.config
+    checker, clients = copy.copy(workload.checker), workload.clients
     prerequisites = verify_single_worker_proxies(config)
-    checker, clients = load_checker(root)
-    try:
-        output = root / "performance"
-        output.mkdir()
-        save(output / "worker-prerequisites.json", prerequisites)
-        checker.evidence = output
-        prefix = config.collection + "_perf"
-        wheels = register(checker, output, prefix, 2, counted_module(), config)
-        original_resource = checker.resources[0]
-        checker.resources = [item["resource"] for item in wheels]
-        save(
-            output / "instrumentation.json",
-            {
-                "method": "32-byte mmap counters per resource/worker; start/end lock and memory writes",
-                "original_control_wheels": json.loads((root / "input/metadata.json").read_text())["wheels"],
-                "native_heap": "not covered by Go heap",
-                "component_spans": "not available; no encode/execute/decode time decomposition",
-            },
-        )
-        # Only a newly registered resource's missing snapshot is a prerequisite wait.
-        readiness = []
-        for proxy, client in enumerate(clients):
-            for resource in checker.resources:
-                deadline = time.monotonic() + 30
-                while True:
-                    check_stop_file(root / "STOP")
-                    try:
-                        checker.verify_udf(
-                            checker.search(client, checker.queries[0], checker.chain(resource, 2, 0)),
-                            checker.candidates[0],
-                            2,
-                            0,
-                        )
-                        break
-                    except Exception as error:
-                        message = str(error)
-                        transient = (
-                            "snapshot is not ready" in message or "file resource" in message and "not found" in message
-                        )
-                        readiness.append({"proxy": proxy, "resource": resource, "unix": time.time(), "error": message})
-                        save(output / "readiness-attempts.json", readiness)
-                        if time.monotonic() >= deadline or not transient:
-                            raise
-                        time.sleep(0.2)
-        instrumentation_comparison(checker, clients, original_resource, checker.resources[0], output)
-        addresses = config.proxy_uris
+    output = root / "performance"
+    output.mkdir()
+    save(output / "worker-prerequisites.json", prerequisites)
+    checker.evidence = output
+    prefix = config.collection + "_perf"
+    wheels = register(workload, output, prefix, 2, COUNTED_MODULE)
+    original_resource = checker.resources[0]
+    checker.resources = [item["resource"] for item in wheels]
+    save(
+        output / "instrumentation.json",
+        {
+            "method": "Process-local counters per resource/worker; start/end lock overhead",
+            "original_control_resources": workload.checker.resources,
+            "native_heap": "not covered by Go heap",
+            "component_spans": "not available; no encode/execute/decode time decomposition",
+        },
+    )
+    # Only a newly registered resource's missing snapshot is a prerequisite wait.
+    readiness = []
+    for proxy, client in enumerate(clients):
+        for resource in checker.resources:
+            deadline = time.monotonic() + 30
+            while True:
+                check_stop_file(root / "STOP")
+                try:
+                    checker.verify_udf(
+                        checker.search(client, checker.queries[0], checker.chain(resource, 2, 0)),
+                        checker.candidates[0],
+                        2,
+                        0,
+                    )
+                    break
+                except Exception as error:
+                    message = str(error)
+                    transient = (
+                        "snapshot is not ready" in message or "file resource" in message and "not found" in message
+                    )
+                    readiness.append({"proxy": proxy, "resource": resource, "unix": time.time(), "error": message})
+                    save(output / "readiness-attempts.json", readiness)
+                    if time.monotonic() >= deadline or not transient:
+                        raise
+                    time.sleep(0.2)
+    instrumentation_comparison(checker, clients, original_resource, checker.resources[0], output)
+    addresses = config.proxy_uris
 
-        worker_snapshot = partial(snapshot_worker_counters, checker, clients, root / "STOP")
+    worker_snapshot = partial(snapshot_worker_counters, checker, clients, root / "STOP")
 
-        windows = run_abba(
-            checker,
-            addresses[0],
-            os.environ["MILVUS_TOKEN"],
-            proxy_uris=addresses,
-            worker_snapshot=worker_snapshot,
-            raise_on_failure=False,
-            stop_file=root / "STOP",
-        )
-        run_batch_measurements(
-            checker, addresses[0], os.environ["MILVUS_TOKEN"], proxy_uris=addresses, stop_file=root / "STOP"
-        )
-        failed = [
-            result for result in windows if result.get("outcome") == "FAIL" or result.get("internal_outcome") == "FAIL"
-        ]
-        save(
-            output / "terminal.json",
-            {"outcome": "FAIL" if failed else "MEASURED", "failed_windows": len(failed), "unix": time.time()},
-        )
-        assert not failed, "Strict benchmark gate failed; independent measurements retained"
-        save(output / "post-performance-audit.json", checker.audit_all_rows())
-    finally:
-        for client in clients:
-            client.close()
+    windows = run_abba(
+        checker,
+        addresses[0],
+        os.environ["MILVUS_TOKEN"],
+        proxy_uris=addresses,
+        worker_snapshot=worker_snapshot,
+        raise_on_failure=False,
+        stop_file=root / "STOP",
+    )
+    failed = [
+        result for result in windows if result.get("outcome") == "FAIL" or result.get("internal_outcome") == "FAIL"
+    ]
+    save(
+        output / "terminal.json",
+        {"outcome": "FAIL" if failed else "MEASURED", "failed_windows": len(failed), "unix": time.time()},
+    )
+    assert not failed, "Strict benchmark gate failed; independent measurements retained"
+    save(output / "post-performance-audit.json", checker.audit_all_rows())
+
+
+def batches(workload):
+    """Run the batch matrix independently of ABBA and worker instrumentation."""
+    checker = copy.copy(workload.checker)
+    checker.evidence = workload.root / "batches"
+    checker.evidence.mkdir()
+    addresses = workload.config.proxy_uris
+    run_batch_measurements(
+        checker, addresses[0], os.environ["MILVUS_TOKEN"], proxy_uris=addresses, stop_file=checker.stop_file
+    )
+    save(checker.evidence / "post-batch-audit.json", checker.audit_all_rows())
 
 
 def peer_baseline(checker, clients, output, seconds=15):
@@ -315,16 +283,16 @@ def peer_baseline(checker, clients, output, seconds=15):
     save(output, {"outcome": "PASS", "unix": time.time(), "samples": samples})
 
 
-def interference(root):
-    config = WorkloadConfig.read(root)
-    checker, clients = load_checker(root)
+def interference(workload):
+    root, config = workload.root, workload.config
+    checker, clients = copy.copy(workload.checker), workload.clients
     attackers = []
     try:
         output = root / "interference"
         output.mkdir()
         checker.evidence = output
         prefix = config.collection + "_interference"
-        resource = register(checker, output, prefix, 1, INTERFERENCE_MODULE, config)[0]["resource"]
+        resource = register(workload, output, prefix, 1, INTERFERENCE_MODULE)[0]["resource"]
         addresses = config.proxy_uris
         for number in range(32):
             attackers.append(MilvusClient(addresses[number % 2], token=os.environ["MILVUS_TOKEN"], dedicated=True))
@@ -455,184 +423,170 @@ def interference(root):
         assert all(value == "PASS" for value in outcomes.values()), outcomes
         save(output / "post-interference-audit.json", checker.audit_all_rows())
     finally:
-        for client in clients + attackers:
+        for client in attackers:
             client.close()
 
 
-def package_cache(root):
+def package_cache(workload):
     """Check wheel reuse and resource removal; latency does not prove a cache hit."""
-    config = WorkloadConfig.read(root)
-    checker, clients = load_checker(root)
-    try:
-        output = root / "package-cache"
-        output.mkdir()
-        wheels = []
-        for phase in ("baseline", "cold", "replay", "remove", "recovery"):
-            check_stop_file(root / "STOP")
-            if phase == "cold":
-                prefix = config.collection + "_package_cache"
-                package_source = MODULE.replace(
-                    "def create_udf(context):\n    return UDF(context)",
-                    "def create_udf(context):\n    context.logger.warning('PYUDF_R2_FACTORY resource=%s pid=%s', context.resource_name, os.getpid())\n    return UDF(context)",
-                )
-                wheels = register(checker, output, prefix, 32, package_source, config)
-            result = []
-            if phase in ("cold", "replay"):
-                for repeat in range(1 if phase == "cold" else 10):
-                    for wheel in wheels:
-                        check_stop_file(root / "STOP")
-                        before = time.monotonic()
-                        hits = checker.search(
-                            clients[0], checker.queries[repeat], checker.chain(wheel["resource"], 2, 0)
-                        )
-                        checker.verify_udf(hits, checker.candidates[repeat], 2, 0)
+    root, config = workload.root, workload.config
+    checker, clients = copy.copy(workload.checker), workload.clients
+    output = root / "package-cache"
+    output.mkdir()
+    wheels = []
+    for phase in ("baseline", "cold", "replay", "remove", "recovery"):
+        check_stop_file(root / "STOP")
+        if phase == "cold":
+            prefix = config.collection + "_package_cache"
+            package_source = MODULE.replace(
+                "def create_udf(context):\n    return UDF(context)",
+                "def create_udf(context):\n    context.logger.warning('PYUDF_R2_FACTORY resource=%s pid=%s', context.resource_name, os.getpid())\n    return UDF(context)",
+            )
+            wheels = register(workload, output, prefix, 32, package_source)
+        result = []
+        if phase in ("cold", "replay"):
+            for repeat in range(1 if phase == "cold" else 10):
+                for wheel in wheels:
+                    check_stop_file(root / "STOP")
+                    before = time.monotonic()
+                    hits = checker.search(clients[0], checker.queries[repeat], checker.chain(wheel["resource"], 2, 0))
+                    checker.verify_udf(hits, checker.candidates[repeat], 2, 0)
+                    result.append(
+                        {
+                            "resource": wheel["resource"],
+                            "repeat": repeat,
+                            "latency_ms": 1000 * (time.monotonic() - before),
+                        }
+                    )
+        elif phase == "remove":
+            for wheel in wheels:
+                check_stop_file(root / "STOP")
+                clients[0].remove_file_resource(wheel["resource"], timeout=30)
+            names = {item.name for item in clients[0].list_file_resources()}
+            assert not any(wheel["resource"] in names for wheel in wheels)
+            for wheel in wheels:
+                started = time.monotonic()
+                accepted_before_convergence = 0
+                while True:
+                    check_stop_file(root / "STOP")
+                    try:
+                        hits = checker.search(clients[0], checker.queries[0], checker.chain(wheel["resource"], 2, 0))
+                        checker.verify_udf(hits, checker.candidates[0], 2, 0)
+                        accepted_before_convergence += 1
+                    except Exception as error:
+                        message = str(error)
+                        assert (
+                            getattr(error, "code", None) == 1100
+                            and "file resource" in message
+                            and "not found" in message
+                        ), error
                         result.append(
                             {
                                 "resource": wheel["resource"],
-                                "repeat": repeat,
-                                "latency_ms": 1000 * (time.monotonic() - before),
+                                "rejected": True,
+                                "elapsed": time.monotonic() - started,
+                                "accepted_before_convergence": accepted_before_convergence,
+                                "error": message,
                             }
                         )
-            elif phase == "remove":
-                for wheel in wheels:
-                    check_stop_file(root / "STOP")
-                    clients[0].remove_file_resource(wheel["resource"], timeout=30)
-                names = {item.name for item in clients[0].list_file_resources()}
-                assert not any(wheel["resource"] in names for wheel in wheels)
-                for wheel in wheels:
-                    started = time.monotonic()
-                    accepted_before_convergence = 0
-                    while True:
-                        check_stop_file(root / "STOP")
-                        try:
-                            hits = checker.search(
-                                clients[0], checker.queries[0], checker.chain(wheel["resource"], 2, 0)
-                            )
-                            checker.verify_udf(hits, checker.candidates[0], 2, 0)
-                            accepted_before_convergence += 1
-                        except Exception as error:
-                            message = str(error)
-                            assert (
-                                getattr(error, "code", None) == 1100
-                                and "file resource" in message
-                                and "not found" in message
-                            ), error
-                            result.append(
-                                {
-                                    "resource": wheel["resource"],
-                                    "rejected": True,
-                                    "elapsed": time.monotonic() - started,
-                                    "accepted_before_convergence": accepted_before_convergence,
-                                    "error": message,
-                                }
-                            )
-                            break
-                        assert time.monotonic() - started < 30, (
-                            "Removed resource remained callable beyond the observation budget"
-                        )
-                        time.sleep(0.2)
-            elif phase in ("baseline", "recovery"):
-                for client in clients:
-                    checker.verify_control(checker.search(client, checker.queries[0]), 0)
-                    checker.once(client, 1)
-                checker.evidence = output
-                checker.audit_all_rows()
-            save(
-                output / f"{phase}.json",
-                {
-                    "workload": "pyudf_package_cache",
-                    "cache_hit_verification": "NOT_MEASURED",
-                    "phase": phase,
-                    "unix": time.time(),
-                    "outcome": "PASS",
-                    "operations": result,
-                    "packages": len(wheels),
-                    "target_proxy": 0,
-                },
-            )
-    finally:
-        for client in clients:
-            client.close()
-
-
-def concurrency(root):
-    """Follow up at the RPC boundary without repeating the full ABBA campaign."""
-    config = WorkloadConfig.read(root)
-    checker, controls = load_checker(root)
-    try:
-        output = root / "concurrency"
-        output.mkdir()
-        checker.evidence = output
-        addresses = config.proxy_uris
-        summaries = []
-        for workers in (1, 8, 32):
-            clients = []
-            try:
-                for number in range(max(2, workers)):
-                    clients.append(
-                        MilvusClient(addresses[number % 2], token=os.environ["MILVUS_TOKEN"], dedicated=True)
+                        break
+                    assert time.monotonic() - started < 30, (
+                        "Removed resource remained callable beyond the observation budget"
                     )
-                counters = [SearchWireCounter(client) for client in clients]
-                for mode in ("ordinary", "python_arithmetic"):
-                    activity = SearchActivity()
-                    for counter in counters:
-                        counter.activity = activity
-                    lock = threading.Lock()
-                    barrier = threading.Barrier(workers)
-                    started = time.monotonic()
-                    wall = time.time()
-                    count = 0
-                    failures = []
+                    time.sleep(0.2)
+        elif phase in ("baseline", "recovery"):
+            for client in clients:
+                checker.verify_control(checker.search(client, checker.queries[0]), 0)
+                checker.once(client, 1)
+            checker.evidence = output
+            checker.audit_all_rows()
+        save(
+            output / f"{phase}.json",
+            {
+                "workload": "pyudf_package_cache",
+                "cache_hit_verification": "NOT_MEASURED",
+                "phase": phase,
+                "unix": time.time(),
+                "outcome": "PASS",
+                "operations": result,
+                "packages": len(wheels),
+                "target_proxy": 0,
+            },
+        )
 
-                    def invoke():
-                        nonlocal count
-                        barrier.wait(timeout=30)
-                        while time.monotonic() - started < 20:
-                            with lock:
-                                sequence = count
-                                count += 1
-                            try:
-                                check_stop_file(root / "STOP")
-                                chain = checker.chain(checker.resources[0], 2, 0) if mode.startswith("python") else None
-                                hits = checker.search(
-                                    clients[sequence % len(clients)], checker.queries[sequence % 1000], chain
-                                )
-                                if chain is None:
-                                    checker.verify_control(hits, sequence % 1000)
-                                else:
-                                    checker.verify_udf(hits, checker.candidates[sequence % 1000], 2, 0)
-                            except Exception as error:
-                                with lock:
-                                    failures.append(str(error))
-                                return
 
-                    with ThreadPoolExecutor(max_workers=workers) as pool:
+def concurrency(workload):
+    """Follow up at the RPC boundary without repeating the full ABBA campaign."""
+    root, config = workload.root, workload.config
+    checker = copy.copy(workload.checker)
+    output = root / "concurrency"
+    output.mkdir()
+    checker.evidence = output
+    addresses = config.proxy_uris
+    summaries = []
+    for workers in (1, 8, 32):
+        clients = []
+        try:
+            for number in range(max(2, workers)):
+                clients.append(MilvusClient(addresses[number % 2], token=os.environ["MILVUS_TOKEN"], dedicated=True))
+            counters = [SearchWireCounter(client) for client in clients]
+            for mode in ("ordinary", "python_arithmetic"):
+                activity = SearchActivity()
+                for counter in counters:
+                    counter.activity = activity
+                lock = threading.Lock()
+                barrier = threading.Barrier(workers)
+                started = time.monotonic()
+                wall = time.time()
+                count = 0
+                failures = []
+
+                def invoke():
+                    nonlocal count
+                    barrier.wait(timeout=30)
+                    while time.monotonic() - started < 20:
+                        with lock:
+                            sequence = count
+                            count += 1
                         try:
-                            futures = [pool.submit(invoke) for _ in range(workers)]
-                            for future in futures:
-                                future.result()
-                        except BaseException:
-                            (root / "STOP").touch()
-                            raise
-                    measured = activity.snapshot()
-                    summary = {
-                        "mode": mode,
-                        "workers": workers,
-                        "started_unix": wall,
-                        "seconds": 20,
-                        "offered": count,
-                        "rpc": measured,
-                        "failures": failures,
-                        "outcome": "FAIL" if failures else "PASS" if measured["peak"] == workers else "INCONCLUSIVE",
-                    }
-                    summaries.append(summary)
-                    save(output / "summary.json", summaries)
-                    assert not failures, summary
-            finally:
-                for client in clients:
-                    client.close()
-        assert all(item["outcome"] == "PASS" for item in summaries), "RPC concurrency target not observed"
-        save(output / "post-concurrency-audit.json", checker.audit_all_rows())
-    finally:
-        for client in controls:
-            client.close()
+                            check_stop_file(root / "STOP")
+                            chain = checker.chain(checker.resources[0], 2, 0) if mode.startswith("python") else None
+                            hits = checker.search(
+                                clients[sequence % len(clients)], checker.queries[sequence % 1000], chain
+                            )
+                            if chain is None:
+                                checker.verify_control(hits, sequence % 1000)
+                            else:
+                                checker.verify_udf(hits, checker.candidates[sequence % 1000], 2, 0)
+                        except Exception as error:
+                            with lock:
+                                failures.append(str(error))
+                            return
+
+                with ThreadPoolExecutor(max_workers=workers) as pool:
+                    try:
+                        futures = [pool.submit(invoke) for _ in range(workers)]
+                        for future in futures:
+                            future.result()
+                    except BaseException:
+                        (root / "STOP").touch()
+                        raise
+                measured = activity.snapshot()
+                summary = {
+                    "mode": mode,
+                    "workers": workers,
+                    "started_unix": wall,
+                    "seconds": 20,
+                    "offered": count,
+                    "rpc": measured,
+                    "failures": failures,
+                    "outcome": "FAIL" if failures else "PASS" if measured["peak"] == workers else "INCONCLUSIVE",
+                }
+                summaries.append(summary)
+                save(output / "summary.json", summaries)
+                assert not failures, summary
+        finally:
+            for client in clients:
+                client.close()
+    assert all(item["outcome"] == "PASS" for item in summaries), "RPC concurrency target not observed"
+    save(output / "post-concurrency-audit.json", checker.audit_all_rows())

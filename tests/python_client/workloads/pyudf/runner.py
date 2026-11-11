@@ -12,11 +12,12 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 from minio import Minio
 from pymilvus import MilvusClient
-from workloads.pyudf.workload import check_stop_file, prepare, resume
+from workloads.pyudf.workload import PyUDFSearchChecker, check_stop_file, prepare
 
 
 @dataclass(frozen=True)
@@ -48,10 +49,6 @@ class WorkloadConfig:
         if not 0 < self.duration <= 7200 or not 0 <= self.drain <= 300 or not 0 < self.replay <= 600:
             raise ValueError("Require 0 < duration <= 7200, 0 <= drain <= 300 and 0 < replay <= 600")
 
-    @classmethod
-    def read(cls, root):
-        return cls(**json.loads((root / "config.json").read_text()))
-
     def storage(self):
         return Minio(
             self.minio_endpoint,
@@ -80,37 +77,31 @@ def save(path, value):
     print(json.dumps(value), flush=True)
 
 
-def load_checker(root):
-    config = WorkloadConfig.read(root)
-    clients = config.connections()
-    try:
-        checker = resume(clients[0], config.storage(), config, root / "input")
-        return checker, clients
-    except BaseException:
-        for client in clients:
-            client.close()
-        raise
+@dataclass(frozen=True)
+class PreparedWorkload:
+    """Live resources owned by one pytest fixture; files are retained evidence."""
+
+    config: WorkloadConfig
+    root: Path
+    checker: PyUDFSearchChecker
+    clients: list[MilvusClient]
+    storage: Minio
 
 
-def initialize(root):
+def initialize(config, root, clients, storage):
     check_stop_file(root / "STOP")
-    config = WorkloadConfig.read(root)
     inputs = root / "input"
     inputs.mkdir()
-    clients = config.connections()
-    try:
-        checker = prepare(clients[0], config.storage(), config, inputs, stop_file=root / "STOP")
-        checker.baseline()
-        checker.evidence = root
-        save(root / "pre-soak-audit.json", checker.audit_all_rows())
-        for number, client in enumerate(clients):
-            for sequence in range(1, 21):
-                checker.once(client, sequence)
-            save(root / f"proxy-{number}-version.json", client.get_server_version(detail=True))
-        save(root / "ready.json", {"event": "ready", "unix": time.time(), "collection": config.collection})
-    finally:
-        for client in clients:
-            client.close()
+    checker = prepare(clients[0], storage, config, inputs, stop_file=root / "STOP")
+    checker.baseline()
+    checker.evidence = root
+    save(root / "pre-soak-audit.json", checker.audit_all_rows())
+    for number, client in enumerate(clients):
+        for sequence in range(1, 21):
+            checker.once(client, sequence)
+        save(root / f"proxy-{number}-version.json", client.get_server_version(detail=True))
+    save(root / "ready.json", {"event": "ready", "unix": time.time(), "collection": config.collection})
+    return PreparedWorkload(config, root, checker, clients, storage)
 
 
 def paced(checker, clients, output, duration):
@@ -215,21 +206,17 @@ def paced(checker, clients, output, duration):
     return summary
 
 
-def soak(root, duration=7200, drain=300, replay=600):
-    checker, clients = load_checker(root)
-    try:
-        paced(checker, clients, root / "soak", duration)
-        checker.evidence = root
-        save(root / "post-soak-audit.json", checker.audit_all_rows())
-        save(root / "drain-started.json", {"unix": time.time(), "seconds": drain})
-        deadline = time.monotonic() + drain
-        while time.monotonic() < deadline:
-            check_stop_file(root / "STOP")
-            time.sleep(min(1, max(0, deadline - time.monotonic())))
-        save(root / "drain-ended.json", {"unix": time.time()})
-        paced(checker, clients, root / "replay", replay)
-        checker.evidence = root
-        save(root / "post-replay-audit.json", checker.audit_all_rows())
-    finally:
-        for client in clients:
-            client.close()
+def soak(workload):
+    root, checker, clients, config = workload.root, workload.checker, workload.clients, workload.config
+    paced(checker, clients, root / "soak", config.duration)
+    checker.evidence = root
+    save(root / "post-soak-audit.json", checker.audit_all_rows())
+    save(root / "drain-started.json", {"unix": time.time(), "seconds": config.drain})
+    deadline = time.monotonic() + config.drain
+    while time.monotonic() < deadline:
+        check_stop_file(root / "STOP")
+        time.sleep(min(1, max(0, deadline - time.monotonic())))
+    save(root / "drain-ended.json", {"unix": time.time()})
+    paced(checker, clients, root / "replay", config.replay)
+    checker.evidence = root
+    save(root / "post-replay-audit.json", checker.audit_all_rows())

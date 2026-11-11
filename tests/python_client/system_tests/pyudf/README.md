@@ -61,21 +61,24 @@ Select a node under `system_tests/pyudf/test_workloads.py`:
 | Node | Contract and approximate load duration, excluding setup |
 |---|---|
 | `test_soak_and_replay_preserve_rows_and_scores` | 2-hour soak at 20 scheduled requests/s with 8 threads, 5-minute drain, 10-minute replay; row and search audits |
-| `test_abba_and_batches_preserve_semantics_and_worker_counts[HNSW]` | Paired instrumentation control, 48-minute ABBA and 6-minute batch matrix; scores, fields, concurrency and PID-bound counters |
-| `test_abba_and_batches_preserve_semantics_and_worker_counts[DISKANN]` | Same gates against explicit DISKANN |
+| `test_abba_preserves_semantics_and_worker_counts[HNSW]` | 2-minute instrumentation control and 48-minute ABBA; scores, fields, concurrency and PID-bound counters |
+| `test_abba_preserves_semantics_and_worker_counts[DISKANN]` | Same gates against explicit DISKANN |
+| `test_batches_preserve_scores_and_input_columns[HNSW]` | Independent 6-minute NQ/candidate/input-layout matrix; scores and decoded columns |
+| `test_batches_preserve_scores_and_input_columns[DISKANN]` | Same batch gates against explicit DISKANN |
 | `test_concurrent_search_reaches_requested_rpc_concurrency` | 1/8/32 concurrent ordinary and PyUDF Search, 20 seconds per window; exact results and observed RPC concurrency |
 | `test_cpu_and_wait_load_preserve_peer_search` | Bounded CPU/wait load with ordinary peer Search and recovery; about 3 minutes |
 | `test_package_reuse_and_removal_preserve_search` | Baseline, first calls to 32 wheels, 10 replays, removal rejection and recovery in one test |
 
 Performance nodes replace the old SDK ABBA/batch entrypoints with explicit HNSW
-and DISKANN parameters, overriding `index_type` for those two nodes. Other nodes
+and DISKANN parameters, overriding `index_type` for ABBA and batch nodes.
+Select either family independently; batches do not run instrumentation or ABBA. Other nodes
 use `index_type` from the configuration. AUTOINDEX remains in the dedicated
 Cardinal SDK profile. DISKANN requires a deployment with disk indexing enabled
 and sufficient local disk; Search uses `search_list`, while HNSW uses `ef`.
 Preparation requires all rows to be indexed, so a tiny smoke dataset below the
 deployment's segment indexing threshold is not sufficient.
 
-Performance nodes require `function.pyUDF.server.workerCount: 1` on **each**
+ABBA nodes require `function.pyUDF.server.workerCount: 1` on **each**
 Proxy. Add `"proxy_management_endpoints": ["http://proxy-a:9091", "http://proxy-b:9091"]`
 in the same order as `proxy_uris`. Search and management endpoints must directly
 address the same host. The prerequisite is verified before initialization for these
@@ -96,8 +99,9 @@ test tiered storage or prove cache hits, eviction or memory reclamation;
 ## Failure handling and evidence
 
 Each test prints and records its unique evidence directory. Create `STOP` inside
-that directory to abort load with a failure verdict. In-flight requests drain
-within their RPC timeouts. Setup failures, assertion failures and cleanup errors
+that directory to abort preparation or load with a failure verdict. Guards run
+before each insert batch, baseline query, audit page and between index/load
+operations. In-flight requests drain within their RPC timeouts. Setup failures, assertion failures and cleanup errors
 are reported by pytest; measurements do not turn a failed semantic gate into PASS.
 
 Fixtures remove only their generated collection, registered resources and wheel
@@ -111,7 +115,9 @@ directory; otherwise pytest's temporary-directory retention applies.
 `workloads/pyudf` contains reusable preparation, load and oracle code. The old
 `python -m workloads.pyudf.runner <phase>` CLI and separate cleanup phase have
 been removed. Preparation and package-cache steps are fixtures/internal operations,
-not separately ordered pytest cases.
+not separately ordered pytest cases. The fixture owns clients, storage and the
+prepared checker for the entire scenario; JSON/NPY files are evidence, not an
+internal hand-off that reconnects clients or reloads vectors.
 
 ## Functional cases and dedicated profiles
 
@@ -138,7 +144,7 @@ Related read-only queries reuse their collection and indexes within one node:
 | mmap/warmup | All 30 profiles remain; configured load/reload calls drop from 4 to 2 and Search calls from 36 to 24 per profile | First configured load and one reload, cold/hot queries, every configuration and the full retained-row audit |
 | Ragged batches | Use NQ 1 and 8 rather than 1/2/4/8 | Singleton behavior and the complete nonempty/empty/nonempty sequence repeated twice |
 | SDK nesting | Use depths 1/24/32/64 rather than 1/16/24/32/64/65 | Shallow/deep accepted inputs and both protobuf rejection forms; raw REST depth cases remain separate |
-| Package lifecycle | Open clients and load the retained input ledger once rather than once per phase | All five phases, 32 packages, ten replays each, removal rejection and recovery |
+| Package lifecycle | Reuse the fixture-owned clients and in-memory input ledger through every phase | All five phases, 32 packages, ten replays each, removal rejection and recovery |
 
 These are reductions in setup and request counts, not measured wall-clock speedups.
 Assertions retain per-permutation/NQ evidence for grouped queries. An assertion
