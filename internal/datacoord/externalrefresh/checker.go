@@ -18,6 +18,7 @@ package externalrefresh
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/samber/lo"
@@ -96,6 +97,12 @@ type externalCollectionRefreshChecker struct {
 	// MUST be non-blocking — the manager's implementation dedups concurrent
 	// invocations and runs the actual work in a background goroutine.
 	onInitJobPending func(jobID int64)
+
+	// requestedJobs holds the jobs handed over by requestJobProcessing until
+	// the checker goroutine picks them up. requestNotify wakes that goroutine.
+	requestedJobsMu sync.Mutex
+	requestedJobs   map[int64]struct{}
+	requestNotify   chan struct{}
 }
 
 func NewRefreshChecker(
@@ -121,14 +128,16 @@ func NewRefreshChecker(
 		onJobFailed:      onJobFailed,
 		onJobGC:          onJobGC,
 		onInitJobPending: onInitJobPending,
+		requestedJobs:    make(map[int64]struct{}),
+		requestNotify:    make(chan struct{}, 1),
 	}
 }
 
 // run starts the checker loop. The checker periodically scans every refresh
-// job and runs the same per-job processing function (processJob) that the
-// eager task path invokes via processJobByID. The periodic pass acts as a
-// safety net for any state transition the eager path missed (e.g., DataCoord
-// restart between task completion and the eager call).
+// job and runs the same per-job processing function (processJob) for the jobs
+// the task path hands over through requestJobProcessing. The periodic pass
+// acts as a safety net for any state transition the task path missed (e.g.,
+// DataCoord restart between task completion and the request).
 func (c *externalCollectionRefreshChecker) run() {
 	checkInterval := Params.DataCoordCfg.ExternalCollectionCheckInterval.GetAsDuration(time.Second)
 	mlog.Info(c.ctx, "start external collection checker", mlog.Duration("checkInterval", checkInterval))
@@ -142,6 +151,8 @@ func (c *externalCollectionRefreshChecker) run() {
 			return
 		case <-ticker.C:
 			c.processJobs()
+		case <-c.requestNotify:
+			c.processRequestedJobs()
 		}
 	}
 }
@@ -212,16 +223,45 @@ func (c *externalCollectionRefreshChecker) processJob(job *datapb.ExternalCollec
 }
 
 // processJobByID looks up a job and runs one inspection pass for it
-// synchronously. Used by the eager task path after a task transitions to
-// a terminal state, so the schemaUpdater fires before the task call returns
-// and progress polls observe a consistent state. Returns silently if the
-// job is missing (e.g., already GC'd).
+// synchronously. Returns silently if the job is missing (e.g., already GC'd).
 func (c *externalCollectionRefreshChecker) processJobByID(jobID int64) {
 	job := c.refreshMeta.GetJob(jobID)
 	if job == nil {
 		return
 	}
 	c.processJob(job)
+}
+
+// requestJobProcessing asks the checker goroutine to run one inspection pass
+// for jobID without waiting for it.
+//
+// Tasks report their terminal state from the global task scheduler, and
+// processJob publishes the refreshed schema through AlterCollection, which
+// waits for the broadcast resource locks. A DDL holding those locks can be
+// waiting in its ack callback for a schema-bump compaction, and only the
+// scheduler can observe that compaction finish. Running processJob on the
+// scheduler would deadlock the two, so this call must never block.
+func (c *externalCollectionRefreshChecker) requestJobProcessing(jobID int64) {
+	c.requestedJobsMu.Lock()
+	c.requestedJobs[jobID] = struct{}{}
+	c.requestedJobsMu.Unlock()
+
+	select {
+	case c.requestNotify <- struct{}{}:
+	default:
+	}
+}
+
+// processRequestedJobs runs one inspection pass for every requested job.
+func (c *externalCollectionRefreshChecker) processRequestedJobs() {
+	c.requestedJobsMu.Lock()
+	jobIDs := c.requestedJobs
+	c.requestedJobs = make(map[int64]struct{})
+	c.requestedJobsMu.Unlock()
+
+	for jobID := range jobIDs {
+		c.processJobByID(jobID)
+	}
 }
 
 // indexWaitProgressFloor is what a job reports the moment it enters the index
@@ -543,8 +583,8 @@ func (c *externalCollectionRefreshChecker) AggregateJobState(job *datapb.Externa
 		if !c.beginIndexWait(job) {
 			return
 		}
-		// Settle the debt in the SAME pass. The eager task path calls this
-		// synchronously when the last task finishes, so deferring the first
+		// Settle the debt in the SAME pass. The task path requests this pass
+		// when the last task finishes, so deferring the first
 		// debt evaluation to the periodic tick costs every refresh a full
 		// externalCollectionCheckInterval - including a re-scan that changed
 		// nothing and whose segments are all already indexed, which is the
