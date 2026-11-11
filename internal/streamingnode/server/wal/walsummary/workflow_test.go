@@ -143,7 +143,7 @@ func TestManifestPublicationRetainsConcurrentUpdates(t *testing.T) {
 func TestNodeSchedulerUploadsInParallel(t *testing.T) {
 	ctx := context.Background()
 	m, store := newTestManagerWithStore(t)
-	// Default-priority uploads receive half the pool: retain three data slots
+	// Data-priority (-5) uploads may use 75% of the pool (four of six workers),
 	// so a blocked upload does not prevent another upload from completing.
 	scheduler := nodescheduler.New(6)
 	firstEntered, release := make(chan struct{}), make(chan struct{})

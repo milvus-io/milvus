@@ -71,8 +71,9 @@ between PChannels is future work in NodeScheduler. The scoped tracker forwards
 submission priority and `PriorityTaskHandle.SetPriority` to the shared executor;
 this does not interrupt running work or advance delayed retries. NodeScheduler
 provides task-level starvation protection within cumulative worker limits,
-not PChannel shares. ACK uses priority 20, QueryView release 10, build/ready 5,
-and data work defaults to 0. ACK tasks yield with ErrDelay when Broadcast.Ack
+not PChannel shares. ACK uses priority 20, QueryView release 5, build/ready 0,
+and ordinary data work -5 (promoted to 5 under recovery-tail pressure).
+ACK tasks yield with ErrDelay when Broadcast.Ack
 fails or reaches its 100ms timeout. The preceding legacy import completion RPC has no
 additional timeout, but remains cancelable during shutdown. Standalone QueryView
 notifications use independent goroutines.
