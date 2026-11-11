@@ -143,9 +143,7 @@ Not covered by the conversion work:
   vector field; a loaded collection with a vector field added and not yet
   indexed is in exactly that state. The local tests ran on the QueryView
   path only.
-- More than one QueryNode or replica, clustering compaction during a
-  conversion, bulk import after a conversion, and a conversion while roles
-  of different versions are running.
+- A conversion while roles of different versions are running.
 
 **Clients**
 
@@ -638,10 +636,12 @@ x86 standalone, 2026-11-10.
 | Test | Result |
 |---|---|
 | Go unit tests of `internal/util/schemautil` and `internal/proxy/ddl` | pass. Nine cases that asserted the rejections now assert "allowed with the switch on, rejected with it off" |
-| Go unit tests of `internal/rootcoord` | the changed cases pass on their own. A full run of the package fails 2 to 8 different `TestDDLCallbacks*` cases each time, on the tree without the conversion commits as well; the cause was not investigated |
+| Go unit tests of `internal/rootcoord` | pass. A full run of the package used to fail 2 to 8 different `TestDDLCallbacks*` cases each time, without the conversion commits as well. The cause is the mock broadcaster of the tests, which gave two broadcasts in the same millisecond the same time tick, so the second ALTER was skipped as a replay (#55432); with the fix of #55433 the package passes in three runs out of three |
 | Python e2e cases in the repository: `test_milvus_client_vector_field_conversion.py` (4 cases), the three changed cases of `test_drop_field_feature.py`, `test_milvus_client_collection_without_vector.py` | pass |
 | RESTful `test_drop_field_operations.py`, with a new case that drops the only vector field | 8 passed |
-| Local scripts, 24 cases | 23 pass, 1 not run |
+| C++ unit test `CApiTest.CPlanWithoutIndexMeta` | pass: a search plan on a collection with no index meta returns `FieldNotLoaded` |
+| Local scripts on standalone, 28 cases | 27 pass, 1 not run |
+| Local scripts on a cluster (mixcoord, proxy, two QueryNodes, datanode, two StreamingNodes; Pulsar), 14 cases | pass: the 12 cases of the first three groups below, and the 2 replica cases |
 
 The local scripts cover, per group:
 
@@ -656,6 +656,9 @@ The local scripts cover, per group:
 | Row cap | 2 | both directions, numbers in Section 2 |
 | Switch off | 1 | create and every form of dropping the last vector are rejected; dropping one of two vector fields is allowed |
 | Function field | 2 | dropping a BM25 function field that holds the only vector passes; adding one was not run (needs StorageV3 and backfill) |
+| Import after a conversion | 2 | parquet import into a collection that gained a vector field (file with and without the vector column) and into one that lost its last vector field (file without and with the dropped column); each result equals that of a control collection created with the final schema; rows, null values and search results are checked |
+| Clustering compaction | 2 | 1 M rows, the schema change sent 1.5 s after the trigger. The log shows the change inside the execution of the plan in both directions (drop: plan 09:29:20.1 to 24.6, change at 21.4; add: plan 09:30:20.1 to 22.9, change at 21.2). The plan completes, the row count is unchanged, and a second clustering compaction after the change completes |
+| Two replicas (cluster only) | 2 | both conversions on a collection loaded with two replicas on two QueryNodes: repeated queries and searches return the same result or the same error, and the collection loads with two replicas again |
 
 With inserts running during a change, the only client error is one rejected
 insert after a drop, sent with the schema the client had cached; the control
@@ -714,8 +717,7 @@ that drops a scalar field shows the same.
 ## 8. Follow-ups
 
 - The items listed as not covered under "Conversion" in Section 2: backfill
-  for function fields, the pre-QueryView load path, multi-node and mixed
-  version runs.
+  for function fields, the pre-QueryView load path and mixed version runs.
 - The loader's memory estimate is about 3× too low for narrow fixed-width
   rows. The QueryNode uses it for admission before loading a segment; the
   formula adds up the `MemorySize` of each field's binlogs and multiplies by
