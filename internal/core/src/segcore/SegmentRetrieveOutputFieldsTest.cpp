@@ -1059,8 +1059,8 @@ class SealedRetrieveOutputFieldsDeathTest : public ::testing::Test {
         vector_index.index_params = GenIndexParams(reader.get());
         SetTestIndexMetadata(
             vector_index, *reader, index::families::kVectorMem);
-        vector_index.cache_index =
-            CreateTestCacheIndex("retrieve-vector", std::move(reader));
+        vector_index.index =
+            CreateTestIndex("retrieve-vector", std::move(reader));
         segment->LoadIndex(vector_index);
         ASSERT_TRUE(segment->IndexHasRawData(vector));
         segment->DropFieldData(vector);
