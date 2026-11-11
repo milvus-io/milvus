@@ -61,12 +61,6 @@ def pytest_addoption(parser):
         help="Run L3 StructArray configuration contracts against an independently verified storage mode",
     )
     parser.addoption(
-        "--pyudf-expected-autoindex",
-        choices=("HNSW", "DISKANN", "CARDINAL_TIERED"),
-        default=None,
-        help="Run PyUDF against an explicitly reserved Cardinal index profile",
-    )
-    parser.addoption(
         "--run-pyudf-disabled",
         action="store_true",
         default=False,

@@ -297,12 +297,12 @@ if __name__ == "__main__":
 INDEX_TUPLES = (
     [
         pytest.param(index, mmap, None, None, False, id=f"{index}-mmap-{mmap}")
-        for index in ("FLAT", "HNSW", "IVF_FLAT", "AUTOINDEX")
+        for index in ("FLAT", "HNSW", "IVF_FLAT")
         for mmap in (None, True, False)
     ]
     + [
         pytest.param(
-            "AUTOINDEX",
+            "HNSW",
             (None, True, False)[(kind_id + policy_id) % 3],
             kind,
             policy,
@@ -312,10 +312,7 @@ INDEX_TUPLES = (
         for kind_id, kind in enumerate(("scalarField", "scalarIndex", "vectorField", "vectorIndex"))
         for policy_id, policy in enumerate((None, "sync", "async", "disable"))
     ]
-    + [
-        pytest.param("AUTOINDEX", mmap, "scalarField", "sync", True, id=f"priority-mmap-{mmap}")
-        for mmap in (True, False)
-    ]
+    + [pytest.param("HNSW", mmap, "scalarField", "sync", True, id=f"priority-mmap-{mmap}") for mmap in (True, False)]
 )
 
 
@@ -472,25 +469,10 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
             (DataType.SPARSE_FLOAT_VECTOR, "IP"),
         ],
     )
-    def test_pyudf_d2_vector_index_matrix(
-        self, tmp_path, minio_host, minio_bucket, request, kind, metric, record_property
-    ):
+    def test_pyudf_d2_vector_index_matrix(self, tmp_path, minio_host, minio_bucket, kind, metric, record_property):
         """target: M2/M3; method: real indexed D2 and decoded-vector oracle; expected: metric and scalar alignment through two reloads."""
         vectors, query, requested_index, dimensions = _vector_data(kind)
-        expected_autoindex = request.config.getoption("--pyudf-expected-autoindex")
-        if expected_autoindex:
-            actual = json.loads(self._pyudf_management_config(request, "autoIndex.params.build"))
-            assert actual["index_type"] == expected_autoindex, actual
-            requested_index = "AUTOINDEX"
-        # The cap profile trades ordinary floating-vector score precision for
-        # efficiency. Keep exact PyUDF arithmetic and other profiles unchanged.
         score_tolerance = {"rel": 1e-5, "abs": 1e-6}
-        if expected_autoindex == "DISKANN" and kind in (
-            DataType.FLOAT_VECTOR,
-            DataType.FLOAT16_VECTOR,
-            DataType.BFLOAT16_VECTOR,
-        ):
-            score_tolerance = {"rel": 1e-3, "abs": 1e-5}
         with self._pyudf_test_environment(tmp_path, minio_host, minio_bucket, MODULE) as (client, control, resource):
             self._assert_pyudf_recovery(client, control, resource)
             with ExitStack() as cleanup:
@@ -573,7 +555,7 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
                     i: i * 3 + 7 for i in range(10000)
                 }
             self._assert_pyudf_recovery(client, control, resource)
-            # Enforce the profile's ordinary-score tolerance after independently
+            # Enforce ordinary-score tolerance after independently
             # validating exact PyUDF arithmetic and alignment across every reload.
             assert not metric_failures, metric_failures
 
@@ -1557,10 +1539,9 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
     @pytest.mark.parametrize("merge", ["rrf", "weighted"])
     @pytest.mark.parametrize("rewrite", [False, True], ids=["read_only", "rewrite"])
     def test_pyudf_indexed_hybrid_fusion_read_and_rewrite(
-        self, tmp_path, minio_host, minio_bucket, request, merge, rewrite, record_property
+        self, tmp_path, minio_host, minio_bucket, merge, rewrite, record_property
     ):
-        """target: Q03 profile mapping; method: indexed dense/BM25 independent fusion; expected: exact read-only or rewritten scores."""
-        expected_auto = request.config.getoption("--pyudf-expected-autoindex")
+        """Verify indexed dense/BM25 fusion with exact read-only or rewritten scores."""
         with self._pyudf_test_environment(tmp_path, minio_host, minio_bucket, MODULE) as (client, control, resource):
             self._assert_pyudf_recovery(client, control, resource)
             with ExitStack() as cleanup:
@@ -1607,13 +1588,11 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
                 indexes = self.prepare_index_params(client)[0]
                 indexes.add_index(
                     "vector",
-                    index_type="AUTOINDEX" if expected_auto else "HNSW",
+                    index_type="HNSW",
                     metric_type="L2",
-                    params={} if expected_auto else {"M": 16, "efConstruction": 128},
+                    params={"M": 16, "efConstruction": 128},
                 )
-                indexes.add_index(
-                    "sparse", index_type="AUTOINDEX" if expected_auto else "SPARSE_INVERTED_INDEX", metric_type="BM25"
-                )
+                indexes.add_index("sparse", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
                 self.create_index(client, name, indexes)
                 index_details = {field: client.describe_index(name, field) for field in ("vector", "sparse")}
                 assert all(
@@ -1692,7 +1671,6 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
                                 "merge": merge,
                                 "nq": nq,
                                 "rewrite": rewrite,
-                                "expected_autoindex": expected_auto,
                                 "indices": index_details,
                                 "segments": [
                                     {"id": segment.segment_id, "rows": segment.num_rows, "index": segment.index_id}

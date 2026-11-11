@@ -72,8 +72,8 @@ Select a node under `system_tests/pyudf/test_workloads.py`:
 Performance nodes replace the old SDK ABBA/batch entrypoints with explicit HNSW
 and DISKANN parameters, overriding `index_type` for ABBA and batch nodes.
 Select either family independently; batches do not run instrumentation or ABBA. Other nodes
-use `index_type` from the configuration. SDK search-lifecycle cases retain their
-AUTOINDEX combinations. DISKANN requires a deployment with disk indexing enabled
+use `index_type` from the configuration. Tests use standard index types without
+image-specific overrides. DISKANN requires a deployment with disk indexing enabled
 and sufficient local disk; Search uses `search_list`, while HNSW uses `ef`.
 Preparation requires all rows to be indexed, so a tiny smoke dataset below the
 deployment's segment indexing threshold is not sufficient.
@@ -150,8 +150,7 @@ Existing SDK L3 profiles also carry `pyudf`. Worker-pool, admission, cancellatio
 and disabled-feature profiles require their specific deployment settings
 and exact node selectors; do not run all L3 profiles on one unchanged deployment.
 They retain the SDK suite's connection options, `--pyudf-management-endpoint`,
-`--run-pyudf-disabled` where applicable. Search-lifecycle cases also accept
-`--pyudf-expected-autoindex` for their existing index and hybrid-search checks.
+and `--run-pyudf-disabled` where applicable.
 
 ## Coverage and execution cost
 
