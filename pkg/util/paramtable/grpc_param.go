@@ -672,11 +672,12 @@ Raising this at a high compressionLevel is therefore expensive.`,
 	p.MaxCancelError = ParamItem{
 		Key:          "grpc.client.maxCancelError",
 		DefaultValue: "32",
+		Doc:          "maximum number of canceled or deadline exceeded errors before resetting the connection; negative values disable this reset",
 		Formatter: func(v string) string {
 			if v == "" {
 				return "32"
 			}
-			_, err := strconv.Atoi(v)
+			_, err := strconv.ParseInt(v, 10, 32)
 			if err != nil {
 				mlog.Warn(context.TODO(), "Failed to parse grpc.client.maxCancelError, set to default",
 					mlog.String("role", p.Domain), mlog.String("grpc.client.maxCancelError", v),

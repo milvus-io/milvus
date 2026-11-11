@@ -162,10 +162,12 @@ func testCall(t *testing.T) {
 
 	t.Run("Call normal return", func(t *testing.T) {
 		initClient()
+		base.ctxCounter.Store(5)
 		_, err := base.Call(context.Background(), func(client *mockClient) (any, error) {
 			return struct{}{}, nil
 		})
 		assert.NoError(t, err)
+		assert.Zero(t, base.ctxCounter.Load())
 	})
 
 	t.Run("Call with stream method", func(t *testing.T) {
@@ -185,6 +187,25 @@ func testCall(t *testing.T) {
 		})
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, context.Canceled))
+	})
+
+	t.Run("Call returns canceled grpc error after local context canceled", func(t *testing.T) {
+		initClient()
+		base.ctxCounter.Store(5)
+		defer base.ctxCounter.Store(0)
+		ctx, cancel := context.WithCancel(context.Background())
+		callCount := 0
+		_, err := base.Call(ctx, func(client *mockClient) (any, error) {
+			callCount++
+			cancel()
+			return nil, status.Error(codes.Canceled, "mocked")
+		})
+		assert.ErrorIs(t, err, context.Canceled)
+		assert.Equal(t, 1, callCount)
+		assert.Equal(t, int64(5), base.ctxCounter.Load())
+		base.grpcClientMtx.RLock()
+		assert.NotNil(t, base.grpcClient)
+		base.grpcClientMtx.RUnlock()
 	})
 
 	t.Run("Call canceled in caller func", func(t *testing.T) {
@@ -276,6 +297,60 @@ func testCall(t *testing.T) {
 		base.grpcClientMtx.RLock()
 		// client shall not be reset
 		assert.Nil(t, base.grpcClient)
+		base.grpcClientMtx.RUnlock()
+	})
+
+	t.Run("Call returns canceled grpc error with reset disabled", func(t *testing.T) {
+		initClient()
+		originalMaxCancelError := base.maxCancelError
+		base.maxCancelError = -1
+		base.ctxCounter.Store(10)
+		defer func() {
+			base.maxCancelError = originalMaxCancelError
+			base.ctxCounter.Store(0)
+		}()
+		errGrpc := status.Error(codes.Canceled, "mocked")
+		_, err := base.Call(context.Background(), func(client *mockClient) (any, error) {
+			return nil, errGrpc
+		})
+		assert.ErrorIs(t, err, errGrpc)
+		assert.Equal(t, int64(10), base.ctxCounter.Load())
+		base.grpcClientMtx.RLock()
+		assert.NotNil(t, base.grpcClient)
+		base.grpcClientMtx.RUnlock()
+	})
+
+	t.Run("cancel counter handles max int32 threshold", func(t *testing.T) {
+		originalMaxCancelError := base.maxCancelError
+		base.maxCancelError = int32(1<<31 - 1)
+		base.ctxCounter.Store(int64(base.maxCancelError))
+		defer func() {
+			base.maxCancelError = originalMaxCancelError
+			base.ctxCounter.Store(0)
+		}()
+
+		assert.True(t, base.needResetCancel())
+		assert.Zero(t, base.ctxCounter.Load())
+	})
+
+	t.Run("session verification failure does not reset connection", func(t *testing.T) {
+		initClient()
+		base.ctxCounter.Store(0)
+		base.lastSessionCheck.Store(time.Unix(0, 0))
+		mockSession := sessionutil.NewMockSession(t)
+		sessionErr := errors.New("session backend unavailable")
+		mockSession.EXPECT().GetSessions(mock.Anything, mock.Anything).Return(nil, 0, sessionErr)
+		base.sess = mockSession
+		defer func() {
+			base.sess = nil
+		}()
+		errGrpc := status.Error(codes.Canceled, "mocked")
+		_, err := base.Call(context.Background(), func(client *mockClient) (any, error) {
+			return nil, errGrpc
+		})
+		assert.ErrorIs(t, err, errGrpc)
+		base.grpcClientMtx.RLock()
+		assert.NotNil(t, base.grpcClient)
 		base.grpcClientMtx.RUnlock()
 	})
 

@@ -200,6 +200,12 @@ func TestGrpcClientParams(t *testing.T) {
 	assert.Equal(t, clientConfig.MaxCancelError.GetValue(), "32")
 	base.Save("grpc.client.maxCancelError", "64")
 	assert.Equal(t, clientConfig.MaxCancelError.GetValue(), "64")
+	base.Save("grpc.client.maxCancelError", "2147483648")
+	assert.Equal(t, clientConfig.MaxCancelError.GetValue(), "32")
+	base.Save("grpc.client.maxCancelError", "-2147483649")
+	assert.Equal(t, clientConfig.MaxCancelError.GetValue(), "32")
+	base.Save("grpc.client.maxCancelError", "-1")
+	assert.Equal(t, clientConfig.MaxCancelError.GetValue(), "-1")
 
 	base.Save("common.security.tlsMode", "1")
 	base.Save("tls.serverPemPath", "/pem")
