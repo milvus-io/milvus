@@ -85,6 +85,40 @@ class BitSlicedIndex final : public IScalarPredicateReader<T>,
     operator=(BitSlicedIndex&&) = default;
     ~BitSlicedIndex() override = default;
 
+    // The complete state of an index, as BitSlicedIndexArtifact persists it.
+    // The valid count is not part of it: it is the popcount of `existence`.
+    struct State {
+        size_t num_rows{0};
+        // Bounds over valid rows; both 0 when there are none.
+        T min{0};
+        T max{0};
+        TargetBitmap existence;
+        // slices[i] holds bit i of (value - min) for every valid row.
+        std::vector<TargetBitmap> slices;
+    };
+
+    // Rebuilds an index from persisted state. The state must satisfy the
+    // encoding invariants (see the header comment): every bitmap has
+    // num_rows bits; without valid rows min = max = 0 and there are no
+    // slices; otherwise slices.size() == bit_width(max - min), slice bits
+    // are set only on valid rows, no valid row encodes an offset above
+    // max - min, and some row holds min and some row holds max. A violation
+    // throws DataFormatBroken, so a corrupt artifact fails on load, not on
+    // query.
+    static BitSlicedIndex
+    FromState(State state);
+
+    // The existence bitmap and slice i, borrowed for serialization.
+    const TargetBitmap&
+    Existence() const {
+        return existence_;
+    }
+
+    const TargetBitmap&
+    Slice(size_t i) const {
+        return slices_[i];
+    }
+
     // In() strategy switch. Slice walks cost about one bitmap pass per run per
     // slice (O(runs * k)); decoding the row offsets costs a fixed transpose
     // per 64 rows plus one key probe per valid row, independent of the key
@@ -159,6 +193,9 @@ class BitSlicedIndex final : public IScalarPredicateReader<T>,
     IsNotNull() const override;
 
  private:
+    // An index with no rows; FromState fills it in.
+    BitSlicedIndex() = default;
+
     // Bounds are int64_t so that exclusive bounds can be converted to
     // inclusive ones (value +/- 1) without overflow.
     TargetBitmap
