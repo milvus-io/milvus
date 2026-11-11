@@ -1,4 +1,4 @@
-# ViewFeedback: Recent Replica Access Feedback
+# ViewFeedback: Replica and Global Access Feedback
 
 Related feature: [milvus-io/milvus#55284](https://github.com/milvus-io/milvus/issues/55284).
 
@@ -6,7 +6,9 @@ StreamingNode collects best-effort planning access windows by ShardID and sends
 those windows through the existing SyncQueryView streams. Coordinator publishes
 an immutable aggregate per Replica: the latest access time and four request
 rates, averaged over the Replica's full shard count. It retains received windows
-for two minutes and expires them independently of reports and reads.
+for two minutes and expires them independently of reports and reads. A separate
+immutable global rates snapshot sums the normalized Replica rates across all
+collections and Replicas.
 
 Feedback may be lost. This module does not implement reliable delivery,
 persistent access history, loading priority, or scheduling scores.
@@ -175,6 +177,7 @@ windows by Node End and calculate:
 shardRate[N] = sum(selected request counts)
                / seconds(max(selected End) - min(selected Start))
 replicaRate[N] = sum(shardRate[N]) / total collection shard count
+globalRate[N] = sum(replicaRate[N] across all configured Replicas)
 replicaLastAccess = max(all observed shard access timestamps)
 ```
 
@@ -206,6 +209,7 @@ type RequestRates struct {
 }
 
 func (*ReplicaFeedbackStore) GetViewFeedback(replicaID int64) (*Snapshot, bool)
+func (*ReplicaFeedbackStore) GetGlobalRequestRates() *RequestRates
 ```
 
 Reports and actual expiration update private shard counters/rates, then publish
@@ -225,6 +229,30 @@ Unknown/withdrawn Replicas, Replicas without feedback, or unavailable topology
 return `(nil, false)`. A previously observed Replica whose windows all expired
 still returns a snapshot with preserved LastAccess and zero rates. Expiration
 visibility can lag by approximately one cleanup interval.
+
+### Global rates
+
+Global rates are a sum, not an average over Replicas or over all cluster shards.
+Shard fanout is normalized within each Replica before summing. For example,
+Replica rates of 2/s and 3.5/s contribute 5.5/s globally even if the collections
+have different shard counts. The result estimates cluster-wide planning traffic;
+it inherits the shard window, loss, and retry semantics above and is not an
+exact count of distinct client requests.
+
+Replacing a Replica snapshot subtracts its previous rates from the global
+aggregate and adds its new rates under the same write lock. This adds O(1) work
+per affected Replica, without traversing other Replicas or windows. Reports,
+expiration, topology changes, and load-config withdrawal all use this path.
+Unavailable topology contributes zero. If only LastAccess changes and the rates
+stay identical, the global snapshot pointer stays unchanged.
+
+Global publication is also copy-on-write. `GetGlobalRequestRates` returns the
+published read-only pointer with no allocation, copying, or aggregation. It is
+always non-nil, including before any feedback and after Close. With no nonzero
+Replica contributions, the aggregate resets exactly to zero instead of retaining
+floating-point subtraction residue. Close publishes zero without changing any
+snapshot already held by a reader. Global and Replica reads are individually
+consistent; separate getter calls do not constitute an atomic multi-value read.
 
 Writes locate a window in O(log W); an out-of-order insertion moves its suffix.
 Rate-boundary refresh examines at most 2 + 6 + 12 + 24 contributions per affected
@@ -259,6 +287,8 @@ accesses provide new feedback. Persistent SN streams remain alive while idle.
   isolate Replica identities, and follow DataView shard counts.
 - Copy-on-write pointer identity, retained snapshot stability, zero-allocation
   reads, concurrent readers, LastAccess preservation, and lifecycle removal.
+- Global sums across collections/Replicas, replacement and withdrawal of
+  normalized contributions, zero after expiration/Close, and immutable zero-allocation reads.
 - Runtime recovery failure and repeated shutdown detach both listeners.
 - SDK queries observed by Coordinator, rates returning to zero after two minutes
   without traffic, renewed access, and release/reload/drop behavior.

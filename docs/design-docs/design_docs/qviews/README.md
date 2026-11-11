@@ -560,7 +560,8 @@ Syncer streams. Coord owns feedback by Replica load-config lifetime and expires
 received windows after two minutes, independently of reports and reads.
 It publishes copy-on-write Replica snapshots containing LastAccess and
 RequestRates averaged over all collection shards, including silent shards.
-Readers receive the immutable snapshot pointer without copying.
+Global rates sum the normalized Replica rates and update on contribution changes.
+Readers receive immutable snapshot pointers without copying.
 Feedback does not drive QueryView state machines or preparation priority.
 
 ## Partition statistics and pruning

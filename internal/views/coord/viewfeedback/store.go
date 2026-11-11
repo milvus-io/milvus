@@ -42,6 +42,8 @@ type ReplicaFeedbackStore struct {
 	collections         map[int64][]int64
 	replicas            map[int64]*replicaFeedback
 	shardCounts         map[int64]int
+	globalRates         *RequestRates
+	rateContributors    int
 	unregister          func()
 	unregisterDataViews func()
 }
@@ -73,7 +75,7 @@ type feedbackContribution struct {
 
 // New replays configured replicas before the caller starts receiving reports.
 func New(configs *loadmgr.LoadConfigStore, dataViews api.DataViewPublisher) *ReplicaFeedbackStore {
-	s := &ReplicaFeedbackStore{collections: make(map[int64][]int64), replicas: make(map[int64]*replicaFeedback), shardCounts: make(map[int64]int), stop: make(chan struct{}), done: make(chan struct{})}
+	s := &ReplicaFeedbackStore{collections: make(map[int64][]int64), replicas: make(map[int64]*replicaFeedback), shardCounts: make(map[int64]int), globalRates: &RequestRates{}, stop: make(chan struct{}), done: make(chan struct{})}
 	s.unregisterDataViews = dataViews.RegisterDataViewListener(s.onDataView)
 	s.unregister = configs.RegisterLoadConfigListener(s.onLoadConfig)
 	go s.expireLoop()
@@ -98,7 +100,7 @@ func (s *ReplicaFeedbackStore) onDataView(collectionID int64, view *api.Collecti
 		s.shardCounts[collectionID] = count
 	}
 	for _, id := range s.collections[collectionID] {
-		s.replicas[id].publishSnapshot(count)
+		s.publishReplicaSnapshot(s.replicas[id])
 	}
 }
 
@@ -119,6 +121,7 @@ func (s *ReplicaFeedbackStore) onLoadConfig(collectionID int64, config *loadmgr.
 	}
 	for _, id := range s.collections[collectionID] {
 		if _, ok := kept[id]; !ok {
+			s.replaceSnapshot(s.replicas[id], nil)
 			delete(s.replicas, id)
 		}
 	}
@@ -175,7 +178,7 @@ func (s *ReplicaFeedbackStore) OnViewFeedback(window qviews.ViewFeedbackWindow) 
 		changed[replica] = struct{}{}
 	}
 	for replica := range changed {
-		replica.publishSnapshot(s.shardCounts[replica.collectionID])
+		s.publishReplicaSnapshot(replica)
 	}
 }
 
@@ -190,11 +193,51 @@ func (s *ReplicaFeedbackStore) GetViewFeedback(replicaID int64) (*Snapshot, bool
 	return nil, false
 }
 
+// GetGlobalRequestRates returns the sum of all published Replica rates.
+// The pointer is immutable and always non-nil, including before any feedback.
+func (s *ReplicaFeedbackStore) GetGlobalRequestRates() *RequestRates {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.globalRates
+}
+
+// Replace one Replica's contribution in O(1), under the store's write lock.
+func (s *ReplicaFeedbackStore) replaceSnapshot(r *replicaFeedback, next *Snapshot) {
+	var before, after RequestRates
+	if r.snapshot != nil {
+		before = r.snapshot.RequestRates
+	}
+	if next != nil {
+		after = next.RequestRates
+	}
+	r.snapshot = next
+	if before == after {
+		return
+	}
+	if before != (RequestRates{}) {
+		s.rateContributors--
+	}
+	if after != (RequestRates{}) {
+		s.rateContributors++
+	}
+	rates := &RequestRates{}
+	if s.rateContributors != 0 {
+		rates.Last2Windows = s.globalRates.Last2Windows - before.Last2Windows + after.Last2Windows
+		rates.Last6Windows = s.globalRates.Last6Windows - before.Last6Windows + after.Last6Windows
+		rates.Last12Windows = s.globalRates.Last12Windows - before.Last12Windows + after.Last12Windows
+		rates.Last24Windows = s.globalRates.Last24Windows - before.Last24Windows + after.Last24Windows
+	}
+	// With no contributing Replica, reset exactly to zero instead of retaining
+	// floating-point subtraction residue after expiration or withdrawal.
+	s.globalRates = rates
+}
+
 // Called under the write lock, once per affected replica per report or sweep.
 // Missing shards contribute zero; the divisor comes from DataView, not reports.
-func (r *replicaFeedback) publishSnapshot(shardCount int) {
+func (s *ReplicaFeedbackStore) publishReplicaSnapshot(r *replicaFeedback) {
+	shardCount := s.shardCounts[r.collectionID]
 	if shardCount == 0 || len(r.shards) == 0 {
-		r.snapshot = nil
+		s.replaceSnapshot(r, nil)
 		return
 	}
 	var rates [4]float64
@@ -206,13 +249,13 @@ func (r *replicaFeedback) publishSnapshot(shardCount int) {
 	for i := range rates {
 		rates[i] /= float64(shardCount)
 	}
-	r.snapshot = &Snapshot{
+	s.replaceSnapshot(r, &Snapshot{
 		LastAccessUnixNanos: r.lastAccessUnixNanos,
 		RequestRates: RequestRates{
 			Last2Windows: rates[0], Last6Windows: rates[1],
 			Last12Windows: rates[2], Last24Windows: rates[3],
 		},
-	}
+	})
 }
 
 func (s *shardFeedback) updateRates() {
@@ -287,7 +330,7 @@ func (s *ReplicaFeedbackStore) expire(now int64) {
 			}
 		}
 		if changed {
-			replica.publishSnapshot(s.shardCounts[replica.collectionID])
+			s.publishReplicaSnapshot(replica)
 		}
 	}
 }
@@ -303,6 +346,8 @@ func (s *ReplicaFeedbackStore) Close() {
 		clear(s.collections)
 		clear(s.shardCounts)
 		clear(s.replicas)
+		s.globalRates = &RequestRates{}
+		s.rateContributors = 0
 		s.mu.Unlock()
 	})
 }

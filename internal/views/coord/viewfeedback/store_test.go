@@ -201,6 +201,8 @@ func TestReplicaFeedbackConcurrentWithdrawal(t *testing.T) {
 					require.Zero(t, snapshot.LastAccessUnixNanos)
 					require.GreaterOrEqual(t, snapshot.RequestRates.Last24Windows, 0.0)
 				}
+				rates := store.GetGlobalRequestRates()
+				require.GreaterOrEqual(t, rates.Last24Windows, 0.0)
 			}
 		}()
 	}
@@ -318,6 +320,9 @@ func TestReplicaFeedbackRecentGroupsMatchReceivedWindows(t *testing.T) {
 					expected = float64(attempts) / time.Duration(selected[len(selected)-1].EndUnixNanos-start).Seconds()
 				}
 				require.InDelta(t, expected, rates[index], 1e-10, "recent %d windows", count)
+				global := store.GetGlobalRequestRates()
+				globalRates := []float64{global.Last2Windows, global.Last6Windows, global.Last12Windows, global.Last24Windows}
+				require.InDelta(t, expected, globalRates[index], 1e-10, "global recent %d windows", count)
 			}
 		}
 		// Alternate old/new arrivals; varying durations also create overlapping
@@ -447,14 +452,66 @@ func TestReplicaFeedbackTopologyPublication(t *testing.T) {
 	first, found := store.GetViewFeedback(20)
 	require.True(t, found)
 	require.Equal(t, RequestRates{1, 1, 1, 1}, first.RequestRates)
+	require.Equal(t, &first.RequestRates, store.GetGlobalRequestRates())
 	store.onDataView(2, &api.CollectionDataView{Shards: []*api.ShardDataView{{VChannel: "p_2v0"}, {VChannel: "q_2v1"}, {VChannel: "r_2v2"}, {VChannel: "s_2v3"}}})
 	second, found := store.GetViewFeedback(20)
 	require.True(t, found)
 	require.NotSame(t, first, second)
 	require.Equal(t, RequestRates{0.5, 0.5, 0.5, 0.5}, second.RequestRates)
+	require.Equal(t, &second.RequestRates, store.GetGlobalRequestRates())
 	store.onDataView(2, nil)
+	require.Equal(t, &RequestRates{}, store.GetGlobalRequestRates())
 	missing, found = store.GetViewFeedback(20)
 	require.False(t, found)
 	require.Nil(t, missing)
 	require.Equal(t, &Snapshot{LastAccessUnixNanos: 99, RequestRates: RequestRates{1, 1, 1, 1}}, first)
+}
+
+func TestGlobalRequestRatesFollowReplicaContributions(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		store := New(&loadmgr.LoadConfigStore{}, testDataViews{})
+		defer store.Close()
+		initial := store.GetGlobalRequestRates()
+		require.Equal(t, &RequestRates{}, initial)
+		store.onLoadConfig(1, &loadmgr.LoadConfig{Replicas: []*loadmgr.ReplicaAssignment{{ReplicaID: 10}, {ReplicaID: 11}}}, 1)
+		store.onDataView(1, &api.CollectionDataView{Shards: make([]*api.ShardDataView, 2)})
+		store.onLoadConfig(2, &loadmgr.LoadConfig{Replicas: []*loadmgr.ReplicaAssignment{{ReplicaID: 20}}}, 1)
+		store.onDataView(2, &api.CollectionDataView{Shards: make([]*api.ShardDataView, 1)})
+		firstWindow := testWindow(
+			qviews.ViewFeedback{ShardID: qviews.ShardID{ReplicaID: 10, VChannel: "p_1v0"}, RequestCount: 100, LastAccessUnixNanos: 100},
+			qviews.ViewFeedback{ShardID: qviews.ShardID{ReplicaID: 11, VChannel: "q_1v1"}, RequestCount: 40, LastAccessUnixNanos: 200},
+		)
+		store.OnViewFeedback(firstWindow)
+		first := store.GetGlobalRequestRates()
+		require.Equal(t, &RequestRates{14, 14, 14, 14}, first, "sum shard-normalized Replica rates, without averaging Replicas")
+		require.Equal(t, &RequestRates{}, initial)
+		require.Zero(t, testing.AllocsPerRun(100, func() {
+			if store.GetGlobalRequestRates() != first {
+				panic("global read did not return the published pointer")
+			}
+		}))
+		time.Sleep(10 * time.Second)
+		secondWindow := testWindow(qviews.ViewFeedback{ShardID: qviews.ShardID{ReplicaID: 20, VChannel: "p_2v0"}, RequestCount: 30})
+		store.OnViewFeedback(secondWindow)
+		second := store.GetGlobalRequestRates()
+		require.Equal(t, &RequestRates{20, 20, 20, 20}, second, "include another collection's normalized rate")
+		require.NotSame(t, first, second)
+		require.Equal(t, &RequestRates{14, 14, 14, 14}, first)
+		store.expire(firstWindow.EndUnixNanos)
+		require.Same(t, second, store.GetGlobalRequestRates(), "no expiry keeps the snapshot")
+		store.onDataView(1, &api.CollectionDataView{Shards: make([]*api.ShardDataView, 4)})
+		require.Equal(t, &RequestRates{13, 13, 13, 13}, store.GetGlobalRequestRates(), "new divisor replaces the old contribution")
+		store.onLoadConfig(1, &loadmgr.LoadConfig{Replicas: []*loadmgr.ReplicaAssignment{{ReplicaID: 10}}}, 2)
+		require.Equal(t, &RequestRates{11, 11, 11, 11}, store.GetGlobalRequestRates(), "withdraw just Replica 11")
+		store.expire(firstWindow.EndUnixNanos + int64(retention))
+		require.Equal(t, &RequestRates{6, 6, 6, 6}, store.GetGlobalRequestRates(), "expiry retracts Replica 10 while retaining collection 2")
+		store.expire(secondWindow.EndUnixNanos + int64(retention))
+		require.Equal(t, &RequestRates{}, store.GetGlobalRequestRates(), "all windows expired")
+		store.OnViewFeedback(testWindow(qviews.ViewFeedback{ShardID: qviews.ShardID{ReplicaID: 20, VChannel: "p_2v0"}, RequestCount: 7}))
+		beforeClose := store.GetGlobalRequestRates()
+		require.Equal(t, &RequestRates{1.4, 1.4, 1.4, 1.4}, beforeClose)
+		store.Close()
+		require.Equal(t, &RequestRates{}, store.GetGlobalRequestRates())
+		require.Equal(t, &RequestRates{1.4, 1.4, 1.4, 1.4}, beforeClose, "Close leaves retained snapshots immutable")
+	})
 }
