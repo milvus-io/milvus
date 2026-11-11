@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	"github.com/milvus-io/milvus/internal/views/coord/balancer"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview/syncer"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
@@ -102,7 +103,7 @@ func newReadinessTestServerWithConfig(t *testing.T, info *querypb.CollectionLoad
 	syncer := &readinessSyncer{sent: make(chan syncer.SyncView, 64)}
 	registry, err := coordview.RecoverShardViewRegistry(ctx, &readinessCatalog{views: views}, syncer)
 	require.NoError(t, err)
-	runtime := &qviewsRuntime{loadConfigStore: store, shardViewRegistry: registry, readyChanges: newCollectionReadiness(store, registry)}
+	runtime := &qviewsRuntime{autoLoadDemand: &balancer.AutoLoadDemand{}, loadConfigStore: store, shardViewRegistry: registry, readyChanges: newCollectionReadiness(store, registry)}
 	t.Cleanup(func() { runtime.readyChanges.Close(); registry.Close() })
 	s := &Server{ctx: ctx, qviewsRuntime: runtime}
 	usageBroker := meta.NewMockBroker(t)
@@ -138,6 +139,7 @@ func TestEnsureCollectionReadyWakesFromStreamingNodeUp(t *testing.T) {
 	defer cancel()
 	go func() { status, err := s.EnsureCollectionReady(ctx, req); result <- merr.CheckRPCCall(status, err) }()
 	assertReadinessBlocked(t, result)
+	require.True(t, s.qviewsRuntime.autoLoadDemand.Pending(100))
 	shardID := qviews.ShardID{ReplicaID: 1000, VChannel: second}
 	builder := qviews.NewQueryViewAtCoordBuilder(1000, &viewpb.DataViewOfCollection{
 		CollectionId: 100, DataVersion: &viewpb.DataVersion{StreamingVersion: 1}, Shards: []*viewpb.DataViewOfShard{{Vchannel: second}},
@@ -158,6 +160,7 @@ func TestEnsureCollectionReadyWakesFromStreamingNodeUp(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("SN Up did not wake the readiness RPC")
 	}
+	require.False(t, s.qviewsRuntime.autoLoadDemand.Pending(100))
 	status, err := s.EnsureCollectionReady(ctx, req)
 	require.NoError(t, merr.CheckRPCCall(status, err), "an already-ready collection needs no new notification")
 }
@@ -287,6 +290,7 @@ func TestEnsureCollectionReadyEndsOnReleaseCancelAndShutdown(t *testing.T) {
 			result := make(chan error, 1)
 			go func() { result <- s.ensureCollectionReady(ctx, readinessRequest("by-dev-rootcoord-dml_100v0")) }()
 			assertReadinessBlocked(t, result)
+			require.True(t, s.qviewsRuntime.autoLoadDemand.Pending(100))
 			var want error = merr.ErrCollectionNotLoaded
 			switch scenario {
 			case "release":
@@ -305,6 +309,11 @@ func TestEnsureCollectionReadyEndsOnReleaseCancelAndShutdown(t *testing.T) {
 			case <-time.After(time.Second):
 				t.Fatal("waiter was not released")
 			}
+			if scenario == "cancel" {
+				require.True(t, s.qviewsRuntime.autoLoadDemand.Pending(100), "canceling one waiter does not cancel the shared load")
+				s.qviewsRuntime.readyChanges.Close()
+			}
+			require.Eventually(t, func() bool { return !s.qviewsRuntime.autoLoadDemand.Pending(100) }, time.Second, time.Millisecond)
 		})
 	}
 }
@@ -706,6 +715,7 @@ func TestEnsureCollectionReadyLoadFailureCanBeRetried(t *testing.T) {
 		require.Equal(t, merr.Code(want), resp.GetCode())
 		require.Equal(t, merr.IsRetryableErr(want), resp.GetRetriable())
 		require.False(t, s.qviewsRuntime.loadConfigStore.Contains(100))
+		require.False(t, s.qviewsRuntime.autoLoadDemand.Pending(100), "failed load must remove demand")
 	}
 	require.Equal(t, total+1, testutil.ToFloat64(metrics.QueryCoordLoadCount.WithLabelValues(metrics.TotalLabel)))
 	require.Equal(t, fail+1, testutil.ToFloat64(metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel)))

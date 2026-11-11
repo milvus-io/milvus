@@ -1481,3 +1481,23 @@ func TestUnrecognizedPush_DroppingIgnored(t *testing.T) {
 	assert.Equal(t, qviews.QueryViewStatePreparing, sm.State())
 	assertNoReport(t, sm)
 }
+
+func TestPreparationPrioritySurvivesDuplicateAndRecovery(t *testing.T) {
+	for _, priority := range []int32{-20, 0, 20} {
+		meta := buildTestMeta()
+		meta.Control = &viewpb.QueryViewControl{PreparationPriority: priority}
+		sm := newSNQueryViewStateMachine(meta, buildTestSNView(), buildTestQueryNodes())
+		for _, control := range []*viewpb.QueryViewControl{nil, {PreparationPriority: -15, PreemptServingLease: true}} {
+			incoming := proto.Clone(meta).(*viewpb.QueryViewMeta)
+			incoming.Control = control
+			sm.UpdateView(&viewpb.QueryViewOfShard{Meta: incoming})
+			require.Equal(t, priority, sm.Meta().GetControl().GetPreparationPriority())
+		}
+		sm.OnReady()
+		sm.OnCoordStateDelivered(qviews.QueryViewStateUp)
+		persist := sm.ConsumePersist()
+		require.NotNil(t, persist)
+		recovered := recoverSNQueryViewStateMachine(persist.Meta, persist.StreamingNode, persist.QueryNode)
+		require.Equal(t, priority, recovered.Meta().GetControl().GetPreparationPriority())
+	}
+}

@@ -84,7 +84,8 @@ ACK tasks use priority 20. The shared scheduler reserves capacity by cumulative
 priority bands: priorities -20 through -10 at most 50%, all negative priorities
 at most 75%, and nonnegative priorities without an extra limit. Ordinary data
 work uses -5; recovery-tail pressure promotes affected data work to 5. QueryView
-build/ready uses 0 and release uses 5. See the [scheduler contract](../../../../pkg/util/nodescheduler/README.md)
+build/ready uses the immutable View priority (default 0), with shared build tasks
+using the maximum pending dependency priority, and release uses 5. See the [scheduler contract](../../../../pkg/util/nodescheduler/README.md)
 for rounding, non-preemption and fairness.
 
 The 100ms budget bounds the client-side attempt. The Coordinator currently

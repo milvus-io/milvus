@@ -61,6 +61,9 @@ func (s *Server) ensureCollectionReady(ctx context.Context, req *querypb.EnsureC
 	}
 
 	result := s.autoLoadCollectionGroup.DoChan(strconv.FormatInt(collectionID, 10), func() (any, error) {
+		// Demand follows the shared operation, including callers joining an
+		// existing load. It is removed on success, failure or lifecycle timeout.
+		defer runtime.autoLoadDemand.Begin(collectionID)()
 		// The shared operation belongs to Coord, not to the first waiting Proxy.
 		loadCtx, cancelLifecycle := contextutil.MergeContext(context.WithoutCancel(ctx), s.ctx)
 		defer cancelLifecycle()

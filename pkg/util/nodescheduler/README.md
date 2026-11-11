@@ -114,7 +114,10 @@ a 100 ms RPC deadline to the client and returns `ErrDelay` on failure, releasing
 waiting for retry. Its preceding legacy import completion RPC has no additional
 timeout, but remains cancelable; that transitional path can occupy a worker for
 longer than 100 ms. In-memory QueryView callbacks run in separate goroutines.
-QueryView scoring, wire fields and resource-priority aggregation are separate work.
+QueryView preparation now supplies an immutable Coord score in [-20, 20].
+Per-View ready tasks use that score; shared QN/SN preparation tasks use the maximum
+priority of their pending dependencies. Zero remains the default. See the
+[QueryView design](../../../docs/design-docs/design_docs/qviews/query_view_preparation_priority.md).
 
 Recovery-tail soft-watermark requests promote the affected Segment/L0 persistence
 prefix and Summary chunk/manifest publication to 5. Already submitted pending

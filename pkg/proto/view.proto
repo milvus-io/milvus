@@ -531,8 +531,11 @@ message StreamingNodeRequestContext {
     int64 node_id = 1;
 }
 
-// Monotonic lifecycle controls for one QueryView identity.
+// Lifecycle controls and immutable preparation policy for one QueryView identity.
 message QueryViewControl {
     // Explicit collection teardown skips timed retention, never operation references.
     bool preempt_serving_lease = 1;
+    // Fixed at creation. Larger values prepare first; absent/default is zero.
+    // Only pending work is reordered; running preparation is not preempted.
+    sint32 preparation_priority = 2;
 }

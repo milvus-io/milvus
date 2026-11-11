@@ -2,7 +2,43 @@
 
 关联需求：[milvus-io/milvus#55284](https://github.com/milvus-io/milvus/issues/55284)。
 
-状态：设计方案，待实现。本文描述优先级的表达、创建时计算和 QN/SN 执行；访问统计的采集与聚合由 [QueryView 访问统计同步](query_view_statistics.md) 定义。
+状态：2026-11-11 已接通第一版待执行任务优先级。本文区分已实现的排队调度与后续更细粒度协作方案；访问统计的采集与聚合由 [ViewFeedback](view_feedback.md) 定义。
+
+## 当前实现范围（2026-11-11）
+
+用户明确第一版只改变尚未执行任务的顺序，不抢占正在执行的任务。已实现：
+
+- `QueryViewControl.preparation_priority` 使用 `sint32` 字段 2，取值 [-20, 20]，0 缺省、越大越优先；创建后 immutable。Builder 拷贝 Control，Coord lease 控制只加强 lease 字段；SN 同 identity 重发保留首次接收的准备优先级，包括旧消息省略字段的情况。Coord/SN 恢复使用持久化值。
+- Coord 正常规划、published-schema 恢复规划和手工迁移创建新 View 时计算分值。既有 View 不因统计变化被重建或重排；同一操作保留当前配置下各 replica 的不可变反馈快照，并按 RG 汇总最近 6 个窗口的 rate，分子与分母使用同一组快照。
+- `nodeScheduler` 的 `WithPriority(int32)` 和 `PriorityTaskHandle.SetPriority(int32)` 使用同一执行器。通常按分值、同分 FIFO；每 8 次优先派发后给最老 runnable 一次机会。SetPriority 保留排队年龄，不提前 retry deadline，不取消或重新启动 Execute。Running 的新有效值仅用于后续 retry。
+- QN 保存每个 SegmentResource 的任务句柄，对具有已解析依赖、尚未准备、未失败、未处于 retry/catch-up 等待的 binding 取 max；所有分值为负时仍取负值。依赖加入、释放、失败时重排待执行任务。资源内先发布可复用 read，再按优先级选择 eligible binding，同分保持 cursor 顺序，每 8 次优先选择给轮转起点一次机会。一次 reconcile 至多执行一次物理准备后重新入队，沿用原重试 timer 与 cleanup。
+- SN 共享 build 取未完成依赖的最大值，依赖移除时可以降分；优先级不改变最老 View 的构建快照。逐 View ready task 使用其固定值。WAL scoped handle 透传 SetPriority，不改变任务追踪与关闭语义。
+
+当前共享调度器完整引入 PR #55398（b36d566118），替换原本地实现。除优先出队外，它还按 ≤-10 / ≤-1 / ≤20 对运行任务设置 50% / 75% / 100% 的累计 worker 上限（向下取整、至少 1）。低档不能借用高档保留容量，公平派发也不能越过容量上限。分值变化因此同时影响出队顺序和后续 admission 的容量档位；已运行 attempt 仍按原档计费。
+
+ACK 固定为 20，release 固定为 5，data 默认 -5；recovery-tail 压力目标内尚未执行的 data 任务可提高到 5。QueryView build/ready 的默认 0 由 View 分值或共享依赖最大值替代。达到 20 的 View 与 ACK 同档竞争，保留容量不再是 ACK 独占。
+
+当前策略以用户需求选择场景，再叠加场景内流量分和配置偏移。此前 LOW=-10、独立活动时间加分和线性 rate 加分规则已替换。
+
+| 场景（按判断顺序） | 基础分 | 流量分上限 | 含配置后的范围 |
+| --- | --- | --- | --- |
+| 近期访问，缺少存活 UpView | +10 | 8 | [10,20] |
+| 有待完成的 AutoLoad/readiness 请求 | +5 | 0 | [5,7] |
+| 近期访问，已有存活 UpView | 0 | 2 | [0,4] |
+| 无近期访问，已有存活 UpView（冷 handoff） | -10 | 0 | [-10,-8] |
+| 已知长期无访问，缺少存活 UpView（冷恢复） | -5 | 0 | [-5,-3] |
+| 无访问历史、无存活 UpView、无 AutoLoad 需求（首次/手动加载） | 0 | 0 | [0,2] |
+
+- 配置偏移：HIGH（含 proto 默认值）+2，LOW 0，未知 enum 0。不使用 enum 底层数值。
+- 近期访问：LastAccessTime 非零，距离本轮规划时间 ≤10 分钟；未来时间按近期处理。LastAccessTime 负责场景选择，不另加一个活动分。
+- 流量映射：`share=clamp(replica.Last6Windows / same_RG_total,0,1)`，`heat=log1p(100*share)/log1p(100)`，`traffic=round(limit*heat)`。分母 ≤0 时流量分为 0。
+- 总分为 `clamp(base + traffic + config, -20,20)`；当前策略实际产生 [-10,20]，wire/scheduler 合法范围仍是 [-20,20]，不要求用满。
+- 最紧急档中，1%/5%/10%/50%/100% 占比分别得到 1/3/4/7/8 流量分。配置 +2 不会跨越主要场景之间的顺序。
+
+ViewFeedback 将超过 2 分钟的窗口清理，但保留 replica 的最后活动时间直到 replica 撤销。窗口归零不等于变冷：仍在 10 分钟内就保留该场景基准分。最近 6 窗口不假定固定 6 秒。缺失统计不能证明长期无人访问；没有历史的缺 UpView 场景使用首次/手动加载基准，不凭空创造访问记录。
+
+**尚未实现的细分方案：** 下文第 6、12 节的独立 Yield/Wait/Event 接口、collection 分组公平，以及 Transform catch-up 独立 drain 池、IDF permit 和 live-event dispatcher 内部的优先级细分。第一版保持这些已有执行边界与预算；一旦 Execute 已开始，其中的 I/O/native/模块阶段不会因更高分到达而中断或重新 admission。因此当前实现证明主要准备任务的排队优先级，不表示所有下游队列都能按 View 优先级排序，也不承诺墙钟恢复延迟。
+
 
 ## 1. 目标与已确定约束
 
@@ -13,13 +49,13 @@
 1. 优先级是范围 `[Pmin, Pmax]` 内的有符号整数，`Pmin < 0 < Pmax`。0 为默认基准，负数更低，正数更高。
 2. 它是绝对分值，不是增量命令；收到 `+10` 始终表示值为 10。
 3. **同一个 QueryView identity 的优先级 immutable**。创建时计算，此后准备、重试、重发与恢复均保留原值。
-4. Coord 使用 `(ResourceGroup, Collection)` 聚合访问统计计算新 View 的分值。SN 为状态机仍持有的 View 独立上报最后活动时间与 GetQueryPlan 累计访问次数，不按 Up 过滤；Coord 由各 View 状态机维护窗口请求数贡献后聚合，QN 不新增访问统计。
+4. Coord 使用目标 replica 的 LastAccessTime 和最近 6 个窗口的 rate，以同一 RG 内所有 collection 的所有 replica rate 总和计算占比。SN 通过 GetQueryPlan 采集，ReplicaFeedbackStore 提供 replica 快照，生命周期独立于 View；Balancer 不扫描 shard/window，不恢复旧 Contribution/Registry，QN 不新增访问统计。
 5. RG 内制定策略，不创建跨 RG 的唯一恢复目标或串行屏障。无实际资源竞争时并行推进。
 6. 优先级不改变 placement、readiness、schema/MVCC、lease、引用计数或 WAL 顺序。
 
 issue 最初提出的“已有 View 准备过程中调高/调低优先级”不属于本方案。统计持续更新，但只在正常流程创建新 View 时被消费，不为重新设置分值而替换 View。
 
-## 2. 当前实现与需要补齐的环节
+## 2. 原设计的接入点清单（完成情况以开头实现范围为准）
 
 | 位置 | 当前行为 | 需要实现 |
 | --- | --- | --- |
@@ -55,7 +91,7 @@ Control 的字段有各自语义：lease 控制可按现有规则加强，准备
 
 ```text
 Balancer 正常规划出新 QueryView
-  -> 读取目标 RG/collection 的统计快照及 replica 配置
+  -> 读取目标 replica 的统计快照、同 RG 总 rate 及 replica 配置
   -> 计算并固定 preparation_priority
   -> View 持久化
   -> SyncQueryView 下发同一 View
@@ -81,42 +117,49 @@ QN/SN 将固定值与当前 acquisition 一起保存。不能为重排而替换�
 
 ### 4.1 统计与策略范围
 
-统计输入来自同一 `(RG, collection)` 的整体访问情况：
+统计输入来自 ReplicaFeedbackStore 的不可变 replica snapshot：
 
-- 最后活动时间：域内已观测 View 最后活动时间的最大值。
-- 查询流量：域内存活 View 的近期窗口 GetQueryPlan 请求数之和；ObservedAt用于判断最近观测时间。
+- 最后活动时间：目标 replica 的 `LastAccessUnixNanos`。
+- 分子：目标 replica 的 `RequestRates.Last6Windows`。
+- 分母：当前配置中同一 RG 内所有 collection 的所有 replica 的 `Last6Windows` 之和；缺少 snapshot 的 replica 贡献为 0。不是 collection 内总和，也不是 Store 的集群级 `GetGlobalRequestRates()`。
 
-新 View 不需要有自己的查询历史，也不与某一个旧 View 一一对应。不同 RG 的同一 collection 独立计算；SN 共享物理资源不改变这一业务聚合边界。
+Store 已将各 shard 的窗口 rate 按 collection 的全部 shard 数平均成 replica rate（未上报 shard 按 0）。Balancer 直接消费这个 rate，不重新换算为请求数。有效性由 Store 的 2 分钟窗口策略负责，不额外引入报告超时。
+
+每次规划/手工操作首次需要评分时，遍历当前配置的 replica，保存不可变 snapshot 指针并累计各 RG rate。初始化时间和临时空间为 O(replica 数 + RG 数)，随后每个 View 的统计项读取 O(1)，健康判断遍历该 UpView 的 QN 列表，不扫描反馈 shard 或窗口。各 replica 的读取并非跨 replica 原子事务，但一次操作内保留相同快照，分子与分母不会因后续反馈而变化。
+
+新 View 不需要自己的查询历史。同一 replica 在一次操作中创建的 View 共享统计输入；同一 collection 的不同 replica 使用各自的热度。没有 snapshot 时结合加载需求与 UpView 状态选择场景；分母为 0 时只取消流量加分。
 
 已有 QN placement 按 `(CollectionID, ResourceGroup)` 规划，同 collection 的 replica 目标节点集可互斥，不同 collection 可共享节点。因此 RG 是策略范围，实际优先级选择发生在有竞争的节点/资源队列上，不能因为 RG 内另一 View 未完成就闲置独立执行资源。
 
-### 4.2 评分函数
-
-建议将计算封装为 Coord 的纯函数，输入是一次读取的配置与统计快照：
+### 4.2 场景评分
 
 ```text
-P(view) = clamp(
-    ConfigScore(replica_configuration)
-  + StatsScore(now - domain.last_active_time)
-  + TrafficScore(domain.recent_requests),
-  Pmin, Pmax)
+recent = LastAccessTime != 0 && now - LastAccessTime <= 10min
+(base, limit) = SelectScenario(recent, healthyUp, pendingAutoLoad, knownHistory)
+share = clamp(replica.Last6Windows / same_RG_total, 0, 1)
+traffic = round(limit * log1p(100 * share) / log1p(100))
+P(view) = clamp(base + traffic + ConfigOffset, -20, 20)
 ```
 
-这确定了实现边界，具体映射与权重尚未确定，不引入固定的 wire 枚举等级。
+具体场景与固定参数见开头映射表。总 rate ≤0 时 traffic=0；无 snapshot 或零 LastAccessTime 代表没有访问历史，不等同于已知长期无人访问。没有额外采集 NQ、执行成本或准备进度。
 
-函数应满足：
+同一 replica 的多个 shard 共用访问反馈，但 UpView 健康状态按 `(ReplicaID,VChannel)` 分别判断，因此可获得不同分值。同一 RG 的其他 replica 即使存在 UpView，也不会抵消目标 shard 的恢复紧急程度。配置只提供 +2 偏移，不颠倒主要场景顺序。
 
-- 默认配置、无额外有效统计偏好时基准为 0。统计未知采用明确默认，不把 unknown 当作已观测的冷数据。
-- 同等其他输入下，更近的活动时间不应降低 StatsScore；更多的窗口请求数不应降低 TrafficScore。分项有界，可采用分段或饱和函数，避免单一异常值吞掉整个数值范围。
-- `LoadReplicaConfig.priority` 通过显式语义映射进入 ConfigScore，不能直接使用已有 enum 的底层整数。默认配置映射到基准，不凭 HIGH/LOW 名称擅定数值。
-- 在足够宽的中间类型计算后截断，避免溢出。同一函数和参数用于所有 RG，最终值可在实际共享的 SN 队列中比较；不把每个 RG 的局部排名直接当成同尺度分值。
-- 不使用新采集的执行成本、NQ、资源压力或准备进度，因为这些不在第一版反馈范围内。
+### 4.3 UpView 与节点健康
 
-配置、活跃度和流量各占多大区间、配置能否压过热度等业务取舍需要明确参数，不能通过任意 enum 大小隐式决定。第一版不要求精确预测恢复耗时，也不要求扩展状态机来产生新的可服务信号。
+复用 Balancer 的 `healthyUp`：ShardStats 必须存在 UpVersion，UpNodes 中每个 QN 必须仍在节点快照中且 Alive。QN 已掉线但 Up 元数据尚未清理时，仍判定缺少健康 UpView；Stopping 仅禁止新 placement，不使仍存活的 UpView 失效。正常规划和手工迁移都捕获节点快照，不因手工路径缺少节点数据而误报掉线。
 
-同域新 View 共享统计分项；replica 配置不同可以导致最终分值不同。评分只在 View 创建时执行，统计更新本身不创建 View、不重排已经固定的 View 分值。
+这里消费既有状态和拓扑，不通过 ViewFeedback 再建立可服务状态。SN 故障由现有 PChannel assignment/恢复链路处理，不向 QN 节点表混入 SN。恢复同 identity 的 SN UpView 仍保留持久化 priority，不因故障重打分；此限制来自 immutable 约束。本次不改变 SN 故障恢复或 View 生命周期。
 
-原有故障检测、是否需要恢复/补副本和 placement 仍由现有 Coord 逻辑负责。本功能的收益来自：实际需要创建恢复 View 时，活跃 collection 的准备在竞争中获得优先机会。统计不会替代故障判断，也不保证每次故障都有新的评分机会。
+### 4.4 AutoLoad 需求的生命周期
+
+AutoLoad 的入口是 QueryCoord `EnsureCollectionReady`。在共享 singleflight 操作开始时登记 collection 的 `AutoLoadDemand.Begin`，在成功、错误、服务停止或操作超时退出时释放。已存在 LoadConfig 但尚不满足 readiness 的请求也登记，因为用户此时确实在等待。已经 Ready 的快速路径不登记。
+
+`AutoLoadDemand` 是独立的内存需求标记，按 collection 计数，`Pending(collectionID)` 提供 O(1) 读取。它不修改 ViewFeedback、不伪造 LastAccessTime/rate、不持久化、不创建 goroutine/timer。并发登记只有最后一次释放才移除；单个 Proxy 取消不提前清除仍在执行的共享加载操作。Coord 重启后由重试请求重新登记，不保留永久 AutoLoad 属性。
+
+默认策略通过 `WithAutoLoadDemand` 注入；本轮首次对某个 collection 评分时捕获其 pending 值，后续复用。未注入反馈读取器时不扫描全部 collection；AutoLoad 仅按需读取目标 collection。AutoLoad 可覆盖已知冷历史，表示新出现的查询需求；近期访问且缺 UpView 的故障恢复仍比它更紧急。手动首次加载无历史时自然落在普通档，不额外建立持久化的手动加载标记。
+
+已接受的 Preparing View 不因新 AutoLoad 请求到达而重新创建或调分。统计和请求需求只影响以后正常创建的 View，配置与场景输入不会被节点重新计算。
 
 ## 5. 固定 View 优先级与共享任务优先级
 
@@ -224,13 +267,13 @@ SN 仍共享物理执行器，不按 RG 复制 runtime 或引入新 RG 配额。
 
 ## 9. 实施顺序
 
-1. 完成独立的 [SN 访问统计与 Coord 聚合](query_view_statistics.md)，验证采样和统计未知的回退行为。
+1. 完成独立的 [SN 访问统计与 Coord 聚合](view_feedback.md)，验证采样和统计未知的回退行为。
 2. 增加固定 priority 字段及创建评分入口，打通持久化、恢复与首次 Acquire；处理 lease Control 更新保留字段。
 3. 扩展通用调度与必要等待/继续机制，先验证去重、取消、retry、公平和共享继承。
 4. 接入 QN 资源任务、binding、Transform catch-up，以及 SN build/readiness、关键 permit/dispatcher。
 5. 对粗粒度 native 调用及下游队列记录实际限制，在故障实验中验证哪些竞争点已经受控。
 
-实现可分批提交，但不能将只改变发送顺序或只有主队列排序描述为完整的协作式准备优先级。生产实现、验证和提交不在本次文档生成范围内。
+实现可分批提交，但不能将只改变发送顺序或只有主队列排序描述为完整的协作式准备优先级。具体已实现范围与限制见开头；验证证据记录在 docs/plans。
 
 ## 10. 验证要求
 
@@ -258,13 +301,13 @@ SN 仍共享物理执行器，不按 RG 复制 runtime 或引入新 RG 配额。
 
 后续按仓库 build/cluster/test/feature-verify skills 执行验证，新增/修改生产函数 statement coverage 至少 90%；本文没有运行结果或性能提升结论。
 
-## 11. 实现前需确定的参数
+## 11. 已定参数与后续讨论
 
-- `[Pmin, Pmax]`、ConfigScore 映射、StatsScore/TrafficScore 函数及权重；统计未知的默认策略。
-- 公平性 K、fairness key 和各资源阶段的协作 quantum。
+- 第一版范围、+2 配置偏移、需求场景、10 分钟近期阈值、最近 6 窗口 RG 内 rate 占比的对数映射与未知统计策略已确定，见第 4 节及开头映射表。
+- 当前 scheduler 每 8 次优先派发后进行一次年龄公平派发；collection fairness key 和细分资源阶段的协作 quantum 留待后续。
 - 第 12 节接口命名与兼容适配的实现细节，以及各 native/I/O 阶段的可继续边界。
 
-这些参数与实现接口可以继续评审；已固定的架构边界是：SN 两项访问统计、Coord RG/collection 聚合、创建时固定数值、节点协作执行及共享依赖继承。
+这些参数与实现接口可以继续评审；已固定的架构边界是：SN 两项访问统计、Coord replica 反馈与 RG 内 rate 占比、创建时固定数值、节点协作执行及共享依赖继承。
 
 ## 12. 资源准备调度器接口与实现方案
 

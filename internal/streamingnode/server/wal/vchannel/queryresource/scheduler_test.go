@@ -35,7 +35,7 @@ func TestResourceBuildTaskStoresResultBeforeHandleCompletion(t *testing.T) {
 	task := newResourceBuildTask(func(context.Context) (*QueryRuntime, error) {
 		return want, nil
 	})
-	scheduled := scheduleResourceBuild(scheduler, task)
+	scheduled := scheduleResourceBuild(scheduler, task, nil)
 
 	got, err := scheduled.Result()
 	require.NoError(t, err)
@@ -54,7 +54,7 @@ func TestResourceBuildTaskRetriesErrDelayBeforeCompleting(t *testing.T) {
 		}
 		return want, nil
 	})
-	scheduled := scheduleResourceBuild(scheduler, task)
+	scheduled := scheduleResourceBuild(scheduler, task, nil)
 
 	got, err := scheduled.Result()
 	require.NoError(t, err)
@@ -79,7 +79,7 @@ func TestResourceBuildTaskCanceledBeforeExecutionCompletesResult(t *testing.T) {
 		t.Fatal("canceled build must not execute")
 		return nil, nil
 	})
-	scheduled := scheduleResourceBuild(scheduler, task)
+	scheduled := scheduleResourceBuild(scheduler, task, nil)
 	scheduled.Cancel()
 	close(release)
 	require.NoError(t, blocking.Wait(context.Background()))

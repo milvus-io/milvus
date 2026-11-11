@@ -66,14 +66,14 @@ type scheduledBuild struct {
 	handle nodescheduler.TaskHandle
 }
 
-func scheduleResourceBuild(scheduler nodescheduler.Scheduler, task *resourceBuildTask, callbacks ...func(*scheduledBuild)) *scheduledBuild {
+func scheduleResourceBuild(scheduler nodescheduler.Scheduler, task *resourceBuildTask, callback func(*scheduledBuild), opts ...nodescheduler.Option) *scheduledBuild {
 	scheduled := &scheduledBuild{task: task}
 	task.doneCallback = func() {
-		if len(callbacks) > 0 && callbacks[0] != nil {
-			callbacks[0](scheduled)
+		if callback != nil {
+			callback(scheduled)
 		}
 	}
-	scheduled.handle = scheduler.Submit(task, nodescheduler.WithPriority(0))
+	scheduled.handle = scheduler.Submit(task, opts...)
 	return scheduled
 }
 
@@ -129,4 +129,11 @@ func (t resourceReleaseTask) Execute(ctx context.Context) error {
 		t.onDropped()
 	}
 	return nil
+}
+
+// SetPriority changes only the pending attempt, including a delayed retry.
+func (t *scheduledBuild) SetPriority(priority int32) {
+	if handle, ok := t.handle.(nodescheduler.PriorityTaskHandle); ok {
+		handle.SetPriority(priority)
+	}
 }

@@ -67,6 +67,7 @@ type qviewsRuntime struct {
 	refreshVersions   sync.Map // collection ID -> qviews.DataVersion, max requested refresh fence
 	syncer            syncer.ReliableSyncer
 	viewFeedback      *viewfeedback.ReplicaFeedbackStore
+	autoLoadDemand    *balancer.AutoLoadDemand
 	balancer          qviewsBalancer
 	balanceCache      *cache.Cache
 	nodePublisher     *nodeview.QueryNodePublisher
@@ -166,7 +167,8 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 			return deps.schemaVersion(ctx, id)
 		}
 	}
-	balancerController := qviewsBalancer(balancer.NewDefaultBalancer(balanceCache, shardViewRegistry, nil, schemaVersion))
+	autoLoadDemand := &balancer.AutoLoadDemand{}
+	balancerController := qviewsBalancer(balancer.NewDefaultBalancer(balanceCache, shardViewRegistry, balancer.NewDefaultBalancePolicy(balancer.WithViewFeedbackReader(feedback), balancer.WithAutoLoadDemand(autoLoadDemand)), schemaVersion))
 	if deps.balancerFactory != nil {
 		balancerController = deps.balancerFactory(balanceCache)
 	}
@@ -184,6 +186,7 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 		shardViewRegistry:    shardViewRegistry,
 		readyChanges:         newCollectionReadiness(loadConfigStore, shardViewRegistry),
 		syncer:               reliableSyncer,
+		autoLoadDemand:       autoLoadDemand,
 		viewFeedback:         feedback,
 		balancer:             balancerController,
 		balanceCache:         balanceCache,

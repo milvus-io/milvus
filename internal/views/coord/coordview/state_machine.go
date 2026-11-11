@@ -282,7 +282,10 @@ func (sm *CoordQueryViewStateMachine) EnterDownWithControl(control *viewpb.Query
 	}
 	if disableLease {
 		sm.view = proto.Clone(sm.view).(*viewpb.QueryViewOfShard)
-		sm.view.Meta.Control = proto.Clone(control).(*viewpb.QueryViewControl)
+		if sm.view.Meta.Control == nil {
+			sm.view.Meta.Control = &viewpb.QueryViewControl{}
+		}
+		sm.view.Meta.Control.PreemptServingLease = true
 	}
 	sm.state = qviews.QueryViewStateDown
 	sm.pending.Persist = sm.viewWithState(qviews.QueryViewStateDown)

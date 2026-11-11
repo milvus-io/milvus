@@ -1676,6 +1676,7 @@ func TestPreparing_AllQNReadyThenSNReady(t *testing.T) {
 
 func TestControlUpgradeOfPublishedDownIsPersistedAndResent(t *testing.T) {
 	view := buildTestView(2)
+	view.Meta.Control = &viewpb.QueryViewControl{PreparationPriority: -20}
 	view.Meta.State = viewpb.QueryViewState_QueryViewStateUp
 	sm := RecoverCoordQueryViewStateMachine(view)
 	sm.EnterDown()
@@ -1686,8 +1687,12 @@ func TestControlUpgradeOfPublishedDownIsPersistedAndResent(t *testing.T) {
 	require.Equal(t, viewpb.QueryViewState_QueryViewStateDown, flush.Persist.Meta.State)
 	require.Len(t, flush.Sync, 1)
 	require.True(t, flush.Sync[0].IntoProto().Meta.GetControl().GetPreemptServingLease())
+	require.EqualValues(t, -20, flush.Persist.Meta.GetControl().GetPreparationPriority())
+	require.EqualValues(t, -20, flush.Sync[0].IntoProto().Meta.GetControl().GetPreparationPriority())
 	recovered := RecoverCoordQueryViewStateMachine(flush.Persist)
-	require.True(t, recovered.ConsumeFlush().Sync[0].IntoProto().Meta.GetControl().GetPreemptServingLease())
+	recovery := recovered.ConsumeFlush()
+	require.True(t, recovery.Sync[0].IntoProto().Meta.GetControl().GetPreemptServingLease())
+	require.EqualValues(t, -20, recovery.Sync[0].IntoProto().Meta.GetControl().GetPreparationPriority())
 	require.False(t, sm.EnterDownWithControl(nil))
 	require.True(t, sm.View().Meta.GetControl().GetPreemptServingLease())
 	require.False(t, sm.EnterDownWithControl(&viewpb.QueryViewControl{PreemptServingLease: true}))
