@@ -790,7 +790,7 @@ func (m *IndexMeta) GetSegmentIndexState(collID, segmentID UniqueID, indexID Uni
 	}
 	m.fieldIndexLock.RUnlock()
 
-	indexes, ok := m.SegmentIndexes.Get(segmentID)
+	indexes, ok := m.segmentIndexRecords(segmentID)
 	if !ok {
 		state.State = commonpb.IndexState_Unissued
 		state.FailReason = fmt.Sprintf("segment index not exist with ID: %d", segmentID)
@@ -854,7 +854,7 @@ func (m *IndexMeta) GetIndexedSegments(collectionID int64, segmentIDs, fieldIDs 
 
 	ret := make([]int64, 0)
 	for _, sid := range segmentIDs {
-		if indexes, ok := m.SegmentIndexes.Get(sid); ok {
+		if indexes, ok := m.segmentIndexRecords(sid); ok {
 			if checkSegmentState(indexes) {
 				ret = append(ret, sid)
 			}
@@ -1015,7 +1015,7 @@ func (m *IndexMeta) GetUnIndexedSegmentIDsForIndexTask(collectionID UniqueID, se
 
 	for _, segID := range segIDs {
 		// the segment should be unindexed status if the fieldIndexes is not nil
-		segIndexInfos, ok := m.SegmentIndexes.Get(segID)
+		segIndexInfos, ok := m.segmentIndexRecords(segID)
 		if !ok || segIndexInfos.Len() == 0 {
 			unindexed.Insert(segID)
 			continue
@@ -1098,7 +1098,7 @@ func (m *IndexMeta) GetAllSegmentIndexSummaries(segID UniqueID) []*model.Segment
 // Note: thread-unsafe, don't call it outside indexMeta
 func (m *IndexMeta) GetSegmentIndexesUnsafe(collectionID UniqueID, segID UniqueID) map[UniqueID]*model.SegmentIndex {
 	ret := make(map[UniqueID]*model.SegmentIndex, 0)
-	segIndexInfos, ok := m.SegmentIndexes.Get(segID)
+	segIndexInfos, ok := m.segmentIndexRecords(segID)
 	if !ok || segIndexInfos.Len() == 0 {
 		return ret
 	}
@@ -1641,7 +1641,7 @@ func (m *IndexMeta) GetSegmentsIndexStates(collectionID UniqueID, segmentIDs []U
 	m.fieldIndexLock.RUnlock()
 
 	for _, segID := range segmentIDs {
-		segIndexInfos, ok := m.SegmentIndexes.Get(segID)
+		segIndexInfos, ok := m.segmentIndexRecords(segID)
 		if !ok || segIndexInfos.Len() == 0 {
 			// Leave the entry out rather than storing an empty map. Both
 			// callers read it as `states[indexID]`, which behaves identically
@@ -1782,7 +1782,7 @@ func (m *IndexMeta) GetSegmentIndexedFields(collectionID UniqueID, segmentID Uni
 	m.fieldIndexLock.RUnlock()
 
 	// the segment should be unindexed status if the segment indexes is not found
-	segIndexInfos, ok := m.SegmentIndexes.Get(segmentID)
+	segIndexInfos, ok := m.segmentIndexRecords(segmentID)
 	if !ok || segIndexInfos.Len() == 0 {
 		return false, []*metricsinfo.IndexedField{}
 	}

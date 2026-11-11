@@ -57,6 +57,13 @@ func (s *Server) getQueryViewSegmentLoadInfo(ctx context.Context, collectionID, 
 	if segment.GetTransformStartAfterTimetick() == 0 {
 		return nil, merr.WrapErrServiceNotReadyMsg("segment %d has no certified transform replay cursor", segmentID)
 	}
+	if s.indexMeta.UsesSegmentSummaries() {
+		var err error
+		segmentIndexes, err = s.meta.ReadCompletedIndexes(ctx, segment.SegmentInfo)
+		if err != nil {
+			return nil, err
+		}
+	}
 	cloned := segment.Clone()
 	segmentutil.ReCalcRowCount(segment.SegmentInfo, cloned.SegmentInfo)
 	// Expand compressed log IDs on the snapshot, preserving the compact
