@@ -818,7 +818,7 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 			"thread count and process RSS (observed 1500+ cgo threads / multiple GBs on coordinators). The budget is " +
 			"process-wide and shared by every component in the process. Values are clamped to [1, 2048]; read once at " +
 			"first manifest I/O, changes require restart.",
-		Export: true,
+		Export: false,
 	}
 	p.ManifestFFIConcurrency.Init(base.mgr)
 
