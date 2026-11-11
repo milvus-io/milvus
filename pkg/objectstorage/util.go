@@ -191,16 +191,21 @@ func NewAzureObjectStorageClient(ctx context.Context, c *Config) (*service.Clien
 	if c.UseIAM {
 		var cred azcore.TokenCredential
 		var credErr error
+		// credentialType names the branch taken below so it can be logged.
+		// Only the type is logged: never client/tenant IDs, secrets or tokens.
+		var credentialType string
 		// Credential priority: WI → SPN → MI.
 		// WI is checked first so that pods with valid Workload Identity config are not
 		// silently switched to a different identity when AZURE_CLIENT_SECRET is also set.
 		if os.Getenv("AZURE_FEDERATED_TOKEN_FILE") != "" {
+			credentialType = "WorkloadIdentity"
 			cred, credErr = azidentity.NewWorkloadIdentityCredential(&azidentity.WorkloadIdentityCredentialOptions{
 				ClientID:      os.Getenv("AZURE_CLIENT_ID"),
 				TenantID:      os.Getenv("AZURE_TENANT_ID"),
 				TokenFilePath: os.Getenv("AZURE_FEDERATED_TOKEN_FILE"),
 			})
 		} else if secret := os.Getenv("AZURE_CLIENT_SECRET"); secret != "" {
+			credentialType = "ServicePrincipal"
 			tenantID := os.Getenv("AZURE_TENANT_ID")
 			clientID := os.Getenv("AZURE_CLIENT_ID")
 			if tenantID == "" || clientID == "" {
@@ -208,6 +213,7 @@ func NewAzureObjectStorageClient(ctx context.Context, c *Config) (*service.Clien
 			}
 			cred, credErr = azidentity.NewClientSecretCredential(tenantID, clientID, secret, nil)
 		} else {
+			credentialType = "ManagedIdentity"
 			opts := &azidentity.ManagedIdentityCredentialOptions{}
 			if clientID := os.Getenv("AZURE_CLIENT_ID"); clientID != "" {
 				opts.ID = azidentity.ClientID(clientID)
@@ -217,6 +223,7 @@ func NewAzureObjectStorageClient(ctx context.Context, c *Config) (*service.Clien
 		if credErr != nil {
 			return nil, credErr
 		}
+		mlog.Info(ctx, "azure object storage credential selected", mlog.String("credentialType", credentialType))
 		client, err = service.NewClient("https://"+c.AccessKeyID+".blob."+c.Address+"/", cred, svcOpts)
 	} else {
 		connectionString := ""

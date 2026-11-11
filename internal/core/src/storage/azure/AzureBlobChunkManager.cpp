@@ -25,6 +25,7 @@
 
 #include "AzureBlobChunkManager.h"
 #include "common/EasyAssert.h"
+#include "log/Log.h"
 #include "azure/core/context.hpp"
 #include "azure/core/diagnostics/logger.hpp"
 #include "azure/core/http/http.hpp"
@@ -91,6 +92,8 @@ AzureBlobChunkManager::AzureBlobChunkManager(
         // WI is checked first so that pods with valid Workload Identity config are
         // not silently switched to a different identity when AZURE_CLIENT_SECRET
         // is also present in the environment.
+        // The selected credential type is logged at the end of each branch.
+        // Only the type is logged: never client/tenant IDs, secrets or tokens.
         const char* federated_token_file =
             std::getenv("AZURE_FEDERATED_TOKEN_FILE");
         const bool has_federated_token = federated_token_file != nullptr &&
@@ -114,6 +117,7 @@ AzureBlobChunkManager::AzureBlobChunkManager(
                 std::make_shared<Azure::Storage::Blobs::BlobServiceClient>(
                     "https://" + access_key_id + ".blob." + address + "/",
                     workloadIdentityCredential);
+            LOG_INFO("azure blob credential selected: WorkloadIdentity");
         } else if (has_client_secret) {
             const char* spn_client_id = std::getenv("AZURE_CLIENT_ID");
             const char* spn_tenant_id = std::getenv("AZURE_TENANT_ID");
@@ -130,6 +134,7 @@ AzureBlobChunkManager::AzureBlobChunkManager(
                 std::make_shared<Azure::Storage::Blobs::BlobServiceClient>(
                     "https://" + access_key_id + ".blob." + address + "/",
                     credential);
+            LOG_INFO("azure blob credential selected: ServicePrincipal");
         } else {
             const char* client_id_env = std::getenv("AZURE_CLIENT_ID");
             std::string client_id =
@@ -148,6 +153,7 @@ AzureBlobChunkManager::AzureBlobChunkManager(
                 std::make_shared<Azure::Storage::Blobs::BlobServiceClient>(
                     "https://" + access_key_id + ".blob." + address + "/",
                     credential);
+            LOG_INFO("azure blob credential selected: ManagedIdentity");
         }
     } else {
         client_ = std::make_shared<Azure::Storage::Blobs::BlobServiceClient>(
