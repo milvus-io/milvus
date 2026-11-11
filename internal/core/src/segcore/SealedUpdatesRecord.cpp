@@ -45,6 +45,14 @@ SealedUpdatesRecord::SealedUpdatesRecord(
 
 SealedUpdatesRecord::~SealedUpdatesRecord() = default;
 
+uint64_t
+SealedUpdatesRecord::LatestInsertionTimestamp() const {
+    return insertion_timestamps_.empty()
+               ? 0
+               : *std::max_element(insertion_timestamps_.begin(),
+                                   insertion_timestamps_.end());
+}
+
 void
 SealedUpdatesRecord::EnableExprEvaluation() {
     source_->AttachExperimentalUpdates(records_);

@@ -144,6 +144,7 @@ class TypedValueReader final : public ValueReader,
 
     std::optional<index::owned_t<T>>
     Lookup(int64_t offset) const override {
+        binding_->records->RecordRead(false);
         auto value = binding_->records->Lookup(
             binding_->field_id, offset, binding_->query_ts);
         if (!value || std::holds_alternative<std::monostate>(*value)) {
@@ -166,6 +167,7 @@ class TypedValueReader final : public ValueReader,
         }
         // Retain immutable values, then release the store lock before invoking
         // consumer callbacks. String views remain valid throughout each call.
+        binding_->records->RecordRead(false);
         auto values = binding_->records->Gather(
             binding_->field_id, rows, binding_->query_ts);
         for (int64_t i = 0; i < count; ++i) {
@@ -209,6 +211,7 @@ TempIndexReader::Caps() const {
 
 TargetBitmap
 TempIndexReader::ToBitmap(const std::vector<int64_t>& offsets) const {
+    binding_->records->RecordRead(true);
     TargetBitmap result(Count(), false);
     for (auto offset : offsets) {
         result.set(offset);
@@ -244,12 +247,14 @@ ValueReader::Caps() const {
 
 std::vector<std::shared_ptr<const UpdateValue>>
 ValueReader::Scan(int64_t begin_offset, size_t count) const {
+    binding_->records->RecordRead(false);
     return binding_->records->Scan(
         binding_->field_id, begin_offset, count, binding_->query_ts);
 }
 
 std::vector<std::shared_ptr<const UpdateValue>>
 ValueReader::ReadOffsets(const std::vector<int64_t>& offsets) const {
+    binding_->records->RecordRead(false);
     return binding_->records->Gather(
         binding_->field_id, offsets, binding_->query_ts);
 }

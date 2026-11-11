@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "segcore/UpdatesRecord.h"
+#include <atomic>
 
 #include <absl/container/btree_map.h>
 #include <absl/container/inlined_vector.h>
@@ -163,6 +164,7 @@ class UpdatesRecord::Impl {
     mutable std::shared_mutex mutex;
     std::unordered_map<int64_t, std::unique_ptr<Field>> fields;
     std::optional<uint64_t> last_mutation_ts;
+    std::atomic<uint64_t> index_reads{0}, value_reads{0};
 };
 
 UpdatesRecord::UpdatesRecord(size_t row_count, bool enable_temp_index)
@@ -174,6 +176,16 @@ UpdatesRecord::UpdatesRecord(std::shared_ptr<Impl> impl)
 }
 
 UpdatesRecord::~UpdatesRecord() = default;
+void
+UpdatesRecord::RecordRead(bool index) const {
+    (index ? impl_->index_reads : impl_->value_reads)
+        .fetch_add(1, std::memory_order_relaxed);
+}
+std::pair<uint64_t, uint64_t>
+UpdatesRecord::ReadCounts() const {
+    return {impl_->index_reads.load(std::memory_order_relaxed),
+            impl_->value_reads.load(std::memory_order_relaxed)};
+}
 
 bool
 UpdatesRecord::HasField(int64_t field_id) const {

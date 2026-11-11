@@ -144,6 +144,10 @@ class UpdatesRecord {
 
     size_t
     RowCount() const;
+    void
+    RecordRead(bool index) const;
+    std::pair<uint64_t, uint64_t>
+    ReadCounts() const;
 
     // Creates both access paths with one field/timestamp binding. The caller
     // must have completed the input prefix through query_ts before opening it;

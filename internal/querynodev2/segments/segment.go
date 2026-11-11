@@ -458,6 +458,9 @@ type LocalSegment struct {
 	rowNum          *atomic.Int64
 	insertCount     *atomic.Int64
 
+	pocMu              sync.Mutex
+	pocReady           atomic.Bool
+	pocQueries         atomic.Uint64
 	deltaMut           sync.Mutex
 	lastDeltaTimestamp *atomic.Uint64
 	fields             *typeutil.ConcurrentMap[int64, *FieldInfo]
@@ -790,6 +793,7 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *segcore.SearchRequ
 }
 
 func (s *LocalSegment) searchWithSegment(ctx context.Context, searchReq *segcore.SearchRequest, native segcore.CSegment) (*segcore.SearchResult, error) {
+	defer s.logPOCReadCounts(ctx)
 	filterOnly := searchReq.FilterOnly()
 	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		// TODO: check if the segment is readable but not released. too many related logic need to be refactor.
@@ -828,6 +832,7 @@ func (s *LocalSegment) retrieve(ctx context.Context, plan *segcore.RetrievePlan,
 }
 
 func (s *LocalSegment) retrieveNative(ctx context.Context, plan *segcore.RetrievePlan, log *mlog.Logger, native segcore.CSegment) (*segcore.RetrieveResult, error) {
+	defer s.logPOCReadCounts(ctx)
 	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		// TODO: check if the segment is readable but not released. too many related logic need to be refactor.
 		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")

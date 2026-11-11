@@ -4602,6 +4602,9 @@ Set to 0 to disable the penalty period.`,
 // /////////////////////////////////////////////////////////////////////////////
 // --- querynode ---
 type queryNodeConfig struct {
+	POCUpdatesCollectionID     ParamItem `refreshable:"false"`
+	POCUpdatesFile             ParamItem `refreshable:"false"`
+	POCEnabledTempIndex        ParamItem `refreshable:"false"`
 	MaterializeCodec           ParamItem `refreshable:"true"`
 	MaterializeZstdMinBodySize ParamItem `refreshable:"true"`
 
@@ -4852,6 +4855,12 @@ func formatDurationWithMillisecondFallback(v string) string {
 }
 
 func (p *queryNodeConfig) init(base *BaseTable, localStoragePath string) {
+	p.POCUpdatesCollectionID = ParamItem{Key: "queryNode.pkUpdatePOC.collectionID", Version: "3.1.0", DefaultValue: "0", Doc: "Experimental static single-segment collection; zero disables injection.", Export: false}
+	p.POCUpdatesCollectionID.Init(base.mgr)
+	p.POCUpdatesFile = ParamItem{Key: "queryNode.pkUpdatePOC.updatesFile", Version: "3.1.0", DefaultValue: "", Doc: "Local JSONL updates file. Missing files are retried every three seconds before segment readiness.", Export: false}
+	p.POCUpdatesFile.Init(base.mgr)
+	p.POCEnabledTempIndex = ParamItem{Key: "queryNode.pkUpdatePOC.enabled_temp_index", Version: "3.1.0", DefaultValue: "false", Doc: "Build and maintain the experimental all-data versioned index; false uses only UpdatesRecord.", Export: false}
+	p.POCEnabledTempIndex.Init(base.mgr)
 	p.MaterializeCodec = ParamItem{
 		Key:          "queryNode.materialize.codec",
 		Version:      "3.1.0",

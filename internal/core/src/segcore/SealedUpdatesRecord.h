@@ -53,6 +53,9 @@ class SealedUpdatesRecord {
     void
     EnableExprEvaluation();
 
+    uint64_t
+    LatestInsertionTimestamp() const;
+
     const UpdatesRecord&
     Records() const {
         return *records_;
