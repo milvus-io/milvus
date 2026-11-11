@@ -80,6 +80,7 @@ const (
 type ShardDelegator interface {
 	Collection() int64
 	Version() int64
+	UpdateVersion(version int64) bool
 	GetSegmentInfo(readable bool) (sealed []SnapshotItem, growing []SegmentEntry)
 	SyncDistribution(ctx context.Context, entries ...SegmentEntry)
 	SyncPartitionStats(ctx context.Context, partVersions map[int64]int64)
@@ -147,7 +148,7 @@ type shardDelegator struct {
 	collectionID int64
 	replicaID    int64
 	vchannelName string
-	version      int64
+	version      atomic.Int64
 	// collection schema
 	collection *segments.Collection
 
@@ -383,7 +384,19 @@ func (sd *shardDelegator) Collection() int64 {
 
 // Version returns delegator version.
 func (sd *shardDelegator) Version() int64 {
-	return sd.version
+	return sd.version.Load()
+}
+
+// UpdateVersion advances the channel generation acknowledged by WatchDmChannels.
+// Repeated or delayed watches must never move a live delegator backwards.
+// This does not change the query view's target version or serviceability.
+func (sd *shardDelegator) UpdateVersion(version int64) bool {
+	for current := sd.version.Load(); version > current; current = sd.version.Load() {
+		if sd.version.CompareAndSwap(current, version) {
+			return true
+		}
+	}
+	return false
 }
 
 // GetSegmentInfo returns current segment distribution snapshot.
@@ -1576,7 +1589,6 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		collectionID:      collectionID,
 		replicaID:         replicaID,
 		vchannelName:      channel,
-		version:           version,
 		collection:        collection,
 		collectionManager: manager.Collection,
 		segmentManager:    manager.Segment,
@@ -1599,6 +1611,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		latestRequiredMVCCTimeTick:    atomic.NewUint64(0),
 		schemaBarrierTs:               schemaBarrierTs,
 	}
+	sd.version.Store(version)
 	for _, opt := range opts {
 		opt(sd)
 	}

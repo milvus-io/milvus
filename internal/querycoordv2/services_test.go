@@ -1390,6 +1390,49 @@ func (suite *ServiceSuite) TestLoadBalance() {
 	suite.Equal(resp.GetCode(), merr.Code(merr.ErrServiceNotReady))
 }
 
+func (suite *ServiceSuite) TestLoadBalanceRejectsRODestination() {
+	suite.loadAll()
+	ctx := context.Background()
+	collectionID := suite.collections[0]
+	replica := suite.meta.GetByCollection(ctx, collectionID)[0]
+	nodes := replica.GetRWNodes()
+	suite.Require().GreaterOrEqual(len(nodes), 2)
+	srcNode, dstNode := nodes[0], nodes[1]
+	suite.updateCollectionStatus(ctx, collectionID, querypb.LoadStatus_Loaded)
+	suite.updateSegmentDist(collectionID, srcNode)
+	segmentID := suite.getAllSegments(collectionID)[0]
+	suite.Require().NotNil(suite.targetMgr.GetSealedSegment(ctx, collectionID, segmentID, meta.CurrentTarget))
+
+	mutable := replica.CopyForWrite()
+	mutable.AddRONode(dstNode)
+	suite.Require().NoError(suite.meta.Put(ctx, mutable.IntoReplica()))
+	replica = suite.meta.Get(ctx, replica.GetID())
+	suite.Require().True(replica.ContainRONode(dstNode))
+	suite.Require().True(replica.ContainRWNode(srcNode))
+	suite.Require().NoError(suite.server.isStoppingNode(ctx, dstNode))
+
+	// Use the real scheduler so its admission rejection cannot be hidden by a mock.
+	scheduler := task.NewScheduler(ctx, suite.meta, suite.dist, suite.targetMgr, suite.broker, suite.cluster, suite.nodeMgr)
+	defer scheduler.Stop()
+	suite.server.taskScheduler = scheduler
+	assign.ResetGlobalAssignPolicyFactoryForTest()
+	assign.InitGlobalAssignPolicyFactory(scheduler, suite.nodeMgr, suite.dist, suite.meta, suite.targetMgr)
+	factory := balance.NewBalancerFactory(scheduler, suite.nodeMgr, suite.dist, suite.targetMgr)
+	factoryMock := mockey.Mock(balance.GetGlobalBalancerFactory).Return(factory).Build()
+	defer factoryMock.UnPatch()
+
+	resp, err := suite.server.LoadBalance(ctx, &querypb.LoadBalanceRequest{
+		CollectionID:     collectionID,
+		SourceNodeIDs:    []int64{srcNode},
+		DstNodeIDs:       []int64{dstNode},
+		SealedSegmentIDs: []int64{segmentID},
+	})
+	suite.Require().NoError(err)
+	suite.ErrorIs(merr.Error(resp), merr.ErrNodeNotFound)
+	suite.Contains(resp.GetReason(), "read-write")
+	suite.Equal(0, scheduler.GetSegmentTaskNum())
+}
+
 func (suite *ServiceSuite) TestLoadBalanceWithNoDstNode() {
 	suite.loadAll()
 	ctx := context.Background()
