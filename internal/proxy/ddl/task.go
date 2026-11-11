@@ -3175,8 +3175,8 @@ func (t *LoadCollectionTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-// loadWarmupHint parses the optional load parameter that asks QueryNodes to
-// warm the loaded data in the background.
+// loadWarmupHint parses the optional load parameter requesting one background
+// prewarm pass after load readiness.
 func loadWarmupHint(params map[string]string) (bool, error) {
 	value, present := params[common.WarmupHintKey]
 	if !present {

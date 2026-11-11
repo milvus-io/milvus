@@ -129,28 +129,15 @@ func (s *LoadConfigStore) putLocked(ctx context.Context, cfg *LoadConfig) error 
 	s.mu.RLock()
 	previous := s.configs[cfg.CollectionID]
 	s.mu.RUnlock()
-	// Other DDL messages omit the warmup epoch, and epochs never decrease;
-	// only Remove clears it.
-	if previous != nil && previous.WarmupEpoch > cfg.WarmupEpoch {
-		cfg.WarmupEpoch = previous.WarmupEpoch
-	}
-	var version uint64
 	if sameLoadRequirements(previous, cfg) {
-		if previous.WarmupEpoch == cfg.WarmupEpoch {
-			return nil
-		}
-		// A warmup epoch changes no served data, so it keeps the version and
-		// readiness does not wait for the views rebuilt to carry it. The balancer
-		// still observes the new config through its publication.
-		version = previous.Version
-	} else {
-		version, err = s.allocateVersion(ctx)
-		if err != nil {
-			return err
-		}
-		if version == 0 || (previous != nil && version <= previous.Version) {
-			return merr.WrapErrServiceInternalMsg("non-increasing collection load version %d", version)
-		}
+		return nil
+	}
+	version, err := s.allocateVersion(ctx)
+	if err != nil {
+		return err
+	}
+	if version == 0 || (previous != nil && version <= previous.Version) {
+		return merr.WrapErrServiceInternalMsg("non-increasing collection load version %d", version)
 	}
 	cfg.Version = version
 	if err := s.catalog.Save(ctx, cfg.toCollectionLoadConfigProto()); err != nil {
@@ -217,15 +204,13 @@ func (s *LoadConfigStore) Remove(ctx context.Context, collectionID int64) error 
 
 // sameLoadRequirements compares canonical immutable content, not its identity.
 // It makes durable callback replay idempotent without reusing version IDs after
-// Release. Index selections and replica priorities participate in equality; the
-// warmup epoch does not, as it requires no different data.
+// Release. Index selections and replica priorities participate in equality.
 func sameLoadRequirements(a, b *LoadConfig) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
 	left, right := a.toCollectionLoadConfigProto(), b.toCollectionLoadConfigProto()
 	left.Version, right.Version = 0, 0
-	left.WarmupEpoch, right.WarmupEpoch = 0, 0
 	return proto.Equal(left, right)
 }
 
@@ -321,6 +306,21 @@ func (s *LoadConfigStore) GetConfigWithVersion(collectionID int64) (*LoadConfig,
 func (s *LoadConfigStore) WithCurrentConfig(cfg *LoadConfig, accept func() error) error {
 	s.collectionLocks.Lock(cfg.CollectionID)
 	defer s.collectionLocks.Unlock(cfg.CollectionID)
+	return s.withCurrentConfigLocked(cfg, accept)
+}
+
+// TryWithCurrentConfig fences optional work without waiting behind durable DDL.
+// A discarded hint must not delay runtime shutdown while another operation owns
+// this guard and retries persistence on its own lifetime.
+func (s *LoadConfigStore) TryWithCurrentConfig(cfg *LoadConfig, accept func() error) error {
+	if !s.collectionLocks.TryLock(cfg.CollectionID) {
+		return merr.WrapErrServiceUnavailableMsg("load configuration is changing")
+	}
+	defer s.collectionLocks.Unlock(cfg.CollectionID)
+	return s.withCurrentConfigLocked(cfg, accept)
+}
+
+func (s *LoadConfigStore) withCurrentConfigLocked(cfg *LoadConfig, accept func() error) error {
 	if s.GetConfig(cfg.CollectionID) != cfg {
 		return merr.WrapErrServiceUnavailableMsg("load configuration changed during management operation")
 	}

@@ -9,21 +9,9 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
-
-// warmed reports that the aggregate is materialized and the warm has ended.
-func warmed(r *oracleRuntime) bool {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.currentStats != nil && !r.warming.Load()
-}
 
 func mockSealedResources(t *testing.T, fn func(context.Context, qviews.DataVersion) ([]*datapb.StreamingNodeBM25Resource, error)) {
 	t.Helper()
@@ -33,25 +21,26 @@ func mockSealedResources(t *testing.T, fn func(context.Context, qviews.DataVersi
 	t.Cleanup(func() { patch.UnPatch() })
 }
 
-func TestWarmMaterializesTheLazyAggregateOnce(t *testing.T) {
+func startPrewarm(r *oracleRuntime, ctx context.Context, target qviews.DataVersion) <-chan error {
+	done := make(chan error, 1)
+	go func() { _, err := r.awaitMaterializationAt(ctx, &target); done <- err }()
+	return done
+}
+
+func TestPrewarmMaterializesLazyAggregateOnce(t *testing.T) {
 	var calls atomic.Int32
 	mockSealedResources(t, func(context.Context, qviews.DataVersion) ([]*datapb.StreamingNodeBM25Resource, error) {
 		calls.Add(1)
 		return nil, nil
 	})
 	r := newLazyOracle(t)
-	r.warm()
-	require.Eventually(t, func() bool { return warmed(r) }, 5*time.Second, time.Millisecond)
-
-	// A materialized aggregate needs no further warm, and queries reuse it.
-	r.warm()
-	require.False(t, r.warming.Load())
-	_, _, err := r.BuildIDF(context.Background(), qviews.DataVersion{}, 102, nil)
-	require.NoError(t, err)
-	require.Equal(t, int32(1), calls.Load())
+	require.NoError(t, <-startPrewarm(r, t.Context(), r.currentVersion))
+	require.NoError(t, <-startPrewarm(r, t.Context(), r.currentVersion))
+	require.NoError(t, r.ensureMaterialized(t.Context()))
+	require.EqualValues(t, 1, calls.Load())
 }
 
-func TestWarmRetriesFailures(t *testing.T) {
+func TestPrewarmFailureRequiresAnotherExplicitRequest(t *testing.T) {
 	var calls atomic.Int32
 	mockSealedResources(t, func(context.Context, qviews.DataVersion) ([]*datapb.StreamingNodeBM25Resource, error) {
 		if calls.Add(1) == 1 {
@@ -60,106 +49,124 @@ func TestWarmRetriesFailures(t *testing.T) {
 		return nil, nil
 	})
 	r := newLazyOracle(t)
-	r.warm()
-	require.Eventually(t, func() bool { return warmed(r) }, 10*time.Second, 10*time.Millisecond)
-	require.Equal(t, int32(2), calls.Load())
+	target := r.currentVersion
+	require.ErrorIs(t, <-startPrewarm(r, t.Context(), target), context.DeadlineExceeded)
+	require.Never(t, func() bool { return calls.Load() > 1 }, 100*time.Millisecond, time.Millisecond)
+	require.NoError(t, <-startPrewarm(r, t.Context(), target))
+	require.EqualValues(t, 2, calls.Load())
 }
 
-func TestWarmRetriesANewerTargetAfterBackoff(t *testing.T) {
+func TestPrewarmFinishesOldTargetWithoutFollowingNewView(t *testing.T) {
+	started := make(chan context.Context, 1)
+	finish := make(chan struct{})
 	var calls atomic.Int32
 	mockSealedResources(t, func(ctx context.Context, version qviews.DataVersion) ([]*datapb.StreamingNodeBM25Resource, error) {
 		calls.Add(1)
 		if version.StreamingVersion == 10 {
-			<-ctx.Done()
-			return nil, ctx.Err()
+			started <- ctx
+			select {
+			case <-finish:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
 		}
 		return nil, nil
 	})
 	r := newLazyOracle(t)
-	r.warm()
-	require.Eventually(t, func() bool { return calls.Load() == 1 }, 5*time.Second, time.Millisecond)
-	// A newer view cancels the attempt; the warm paces its retry with backoff.
-	require.NoError(t, r.PrepareDataVersion(context.Background(), qviews.DataVersion{StreamingVersion: 11}))
-	require.Never(t, func() bool { return calls.Load() > 1 }, 100*time.Millisecond, 10*time.Millisecond)
-	require.Eventually(t, func() bool { return warmed(r) }, 10*time.Second, 10*time.Millisecond)
-	require.Equal(t, int32(2), calls.Load())
+	done := startPrewarm(r, t.Context(), r.currentVersion)
+	ctx := <-started
+	require.NoError(t, r.PrepareDataVersion(t.Context(), qviews.DataVersion{StreamingVersion: 11}))
+	require.NoError(t, ctx.Err(), "changing the View must preserve the acquired reads")
+	close(finish)
+	require.NoError(t, <-done)
+	require.EqualValues(t, 1, calls.Load())
+	r.mu.RLock()
+	stats := r.currentStats
+	r.mu.RUnlock()
+	require.Nil(t, stats, "old aggregate cannot be published for the new target")
+	require.NoError(t, <-startPrewarm(r, t.Context(), qviews.DataVersion{StreamingVersion: 11}))
+	require.EqualValues(t, 2, calls.Load())
 }
 
-func TestWarmStopsWhenTheOracleCloses(t *testing.T) {
-	var calls atomic.Int32
+func TestPrewarmCancellationPreservesSharingQuery(t *testing.T) {
+	started := make(chan context.Context, 1)
+	finish := make(chan struct{})
 	mockSealedResources(t, func(ctx context.Context, _ qviews.DataVersion) ([]*datapb.StreamingNodeBM25Resource, error) {
-		calls.Add(1)
-		<-ctx.Done()
-		return nil, ctx.Err()
-	})
-	r := newLazyOracle(t)
-	r.warm()
-	require.Eventually(t, func() bool { return calls.Load() == 1 }, 5*time.Second, time.Millisecond)
-	r.Close()
-	require.Eventually(t, func() bool { return !r.warming.Load() }, 5*time.Second, time.Millisecond)
-}
-
-func TestWarmSkipsEagerAndClosedOracles(t *testing.T) {
-	var calls atomic.Int32
-	mockSealedResources(t, func(context.Context, qviews.DataVersion) ([]*datapb.StreamingNodeBM25Resource, error) {
-		calls.Add(1)
-		return nil, nil
-	})
-	eager, _ := newTestOracle(t)
-	closed := newLazyOracle(t)
-	closed.Close()
-	for _, r := range []*oracleRuntime{eager, closed} {
-		r.warm()
-		require.False(t, r.warming.Load())
-	}
-	require.Zero(t, calls.Load())
-}
-
-func TestWarmsRunOnBoundedWorkers(t *testing.T) {
-	patch := mockey.Mock(hardware.GetCPUNum).Return(1).Build()
-	t.Cleanup(func() { patch.UnPatch() })
-	release := make(chan struct{})
-	var calls atomic.Int32
-	mockSealedResources(t, func(ctx context.Context, _ qviews.DataVersion) ([]*datapb.StreamingNodeBM25Resource, error) {
-		calls.Add(1)
+		started <- ctx
 		select {
-		case <-release:
+		case <-finish:
 			return nil, nil
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
 	})
-	first, second := newLazyOracle(t), newLazyOracle(t)
-	first.warm()
-	second.warm()
-	require.Eventually(t, func() bool { return calls.Load() == 1 }, 5*time.Second, time.Millisecond)
-	require.Never(t, func() bool { return calls.Load() > 1 }, 100*time.Millisecond, 10*time.Millisecond)
-	close(release)
-	require.Eventually(t, func() bool { return warmed(first) && warmed(second) }, 5*time.Second, time.Millisecond)
+	r := newLazyOracle(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := startPrewarm(r, ctx, r.currentVersion)
+	loadCtx := <-started
+	query := make(chan error, 1)
+	go func() { query <- r.ensureMaterialized(t.Context()) }()
+	require.Eventually(t, func() bool {
+		r.mu.RLock()
+		defer r.mu.RUnlock()
+		return r.materialization != nil && r.materialization.waiters == 2
+	}, 5*time.Second, time.Millisecond)
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+	require.NoError(t, loadCtx.Err())
+	close(finish)
+	require.NoError(t, <-query)
 }
 
-func TestViewBindingWarmsTheOraclesOfItsFields(t *testing.T) {
-	params := paramtable.Get()
-	key := params.QueryViewCfg.IDFLazyLoadSealedStats.Key
-	require.NoError(t, params.Save(key, "true"))
-	defer params.Reset(key)
-	var calls atomic.Int32
+func TestPrewarmCancellationAndShutdownDiscardUnsharedWork(t *testing.T) {
+	for _, shutdown := range []bool{false, true} {
+		t.Run(map[bool]string{false: "request", true: "shutdown"}[shutdown], func(t *testing.T) {
+			started := make(chan context.Context, 1)
+			mockSealedResources(t, func(ctx context.Context, _ qviews.DataVersion) ([]*datapb.StreamingNodeBM25Resource, error) {
+				started <- ctx
+				<-ctx.Done()
+				return nil, ctx.Err()
+			})
+			r := newLazyOracle(t)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			done := startPrewarm(r, ctx, r.currentVersion)
+			loadCtx := <-started
+			if shutdown {
+				r.Close()
+			} else {
+				cancel()
+			}
+			require.ErrorIs(t, <-done, context.Canceled)
+			require.Eventually(t, func() bool { return loadCtx.Err() != nil }, time.Second, time.Millisecond)
+		})
+	}
+}
+
+func TestPrewarmShutdownDrainsDetachedFlight(t *testing.T) {
+	started, finish := make(chan struct{}), make(chan struct{})
 	mockSealedResources(t, func(context.Context, qviews.DataVersion) ([]*datapb.StreamingNodeBM25Resource, error) {
-		calls.Add(1)
+		close(started)
+		<-finish // Simulate a storage call that cannot immediately honor cancellation.
 		return nil, nil
 	})
-	runtime := &Runtime{provider: NewProvider(&mocks.MockMixCoordClient{})}
-	defer runtime.Close()
-	binding, err := prepareTestView(t, runtime, walview.VChannelWALView{CollectionID: 1, VChannel: "v1", Schema: fieldTestSchema(1, 102, 104)})
-	require.NoError(t, err)
-	require.Len(t, binding.fields, 2)
-	for _, field := range binding.fields {
-		require.Nil(t, field.oracle.currentStats, "a lazy oracle reads nothing before the warm")
+	r := newLazyOracle(t)
+	done := startPrewarm(r, t.Context(), r.currentVersion)
+	<-started
+	require.NoError(t, r.PrepareDataVersion(t.Context(), qviews.DataVersion{StreamingVersion: 11}))
+	closed := make(chan struct{})
+	go func() { r.Close(); close(closed) }()
+	select {
+	case <-closed:
+		t.Fatal("closed resources before the detached materialization returned")
+	case <-time.After(20 * time.Millisecond):
 	}
-	require.Zero(t, calls.Load())
-
-	var resource queryresource.QueryViewResource = binding
-	resource.(queryresource.QueryViewResourceWarmer).Warm()
-	require.Eventually(t, func() bool { return warmed(binding.fields[0].oracle) && warmed(binding.fields[1].oracle) }, 5*time.Second, time.Millisecond)
-	require.Equal(t, int32(2), calls.Load())
+	close(finish)
+	require.ErrorIs(t, <-done, context.Canceled)
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not drain prewarm")
+	}
 }

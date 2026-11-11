@@ -208,8 +208,7 @@ func (b *DefaultBalancer) MoveSegments(ctx context.Context, cfg *loadmgr.LoadCon
 			assignments[node][info.PartitionID] = append(assignments[node][info.PartitionID], segment)
 		}
 		builders[id] = qviews.NewQueryViewAtCoordBuilder(id.ReplicaID, syntheticDataView(cfg, data.DataVersion, data.Shard(id.VChannel)), id.VChannel).
-			SetAssignments(assignments).SetLoadInfoVersion(pl.ConfigVersion).SetSchemaVersion(stat.UpSchemaVersion).
-			SetWarmupEpoch(cfg.WarmupEpoch)
+			SetAssignments(assignments).SetLoadInfoVersion(pl.ConfigVersion).SetSchemaVersion(stat.UpSchemaVersion)
 	}
 	for id, builder := range builders {
 		// A concurrent data/schema change is handled by normal reconciliation;

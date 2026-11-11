@@ -60,7 +60,6 @@ func TestQueryViewAtCoordBuilder(t *testing.T) {
 	result := NewQueryViewAtCoordBuilder(1, dataView, "v1").
 		SetQueryVersion(3).
 		SetLoadInfoVersion(loadInfoVersion).
-		SetWarmupEpoch(42).
 		SetAssignments(assignments).
 		Build()
 
@@ -77,7 +76,6 @@ func TestQueryViewAtCoordBuilder(t *testing.T) {
 	assert.Equal(t, int64(3), result.Meta.Version.QueryVersion)
 	assert.Equal(t, loadInfoVersion, result.Meta.LoadInfoVersion)
 	assert.EqualValues(t, 7, result.Meta.SchemaVersion)
-	assert.EqualValues(t, 42, result.Meta.WarmupEpoch)
 	assert.Equal(t, uint64(12345), result.Meta.TransformStartAfterTimetick)
 
 	// Verify query nodes are sorted by node ID.

@@ -19,7 +19,6 @@ type LoadConfig struct {
 	LoadFields               []*viewpb.LoadFieldConfig // Explicit preload set; empty means no preloaded fields.
 	RequiredFields           []*viewpb.LoadFieldConfig // Explicit allowed query scope; empty means no user fields.
 	UserSpecifiedReplicaMode bool
-	WarmupEpoch              int64
 	Replicas                 []*ReplicaAssignment
 }
 
@@ -42,7 +41,6 @@ func (c *LoadConfig) Clone() *LoadConfig {
 		CollectionID:             c.CollectionID,
 		UserSpecifiedReplicaMode: c.UserSpecifiedReplicaMode,
 		RequiredFields:           cloneFieldConfigs(c.RequiredFields),
-		WarmupEpoch:              c.WarmupEpoch,
 	}
 	if len(c.PartitionIDs) > 0 {
 		out.PartitionIDs = append([]int64{}, c.PartitionIDs...)
@@ -76,6 +74,7 @@ func (r *ReplicaAssignment) Clone() *ReplicaAssignment {
 }
 
 // FromAlterLoadConfigMessage builds a LoadConfig from a DDL message.
+// Legacy warmup epochs are ignored: a hint must never be replayed from the WAL.
 func FromAlterLoadConfigMessage(msg *messagespb.AlterLoadConfigMessageHeader) *LoadConfig {
 	cfg := &LoadConfig{
 		DbID:                     msg.GetDbId(),
@@ -83,7 +82,6 @@ func FromAlterLoadConfigMessage(msg *messagespb.AlterLoadConfigMessageHeader) *L
 		PartitionIDs:             append([]int64{}, msg.GetPartitionIds()...),
 		UserSpecifiedReplicaMode: msg.GetUserSpecifiedReplicaMode(),
 		RequiredFields:           FieldsFromMessage(msg.GetRequiredFields()),
-		WarmupEpoch:              msg.GetWarmupEpoch(),
 	}
 	cfg.LoadFields = FieldsFromMessage(msg.GetLoadFields())
 	for _, r := range msg.GetReplicas() {
@@ -96,7 +94,8 @@ func FromAlterLoadConfigMessage(msg *messagespb.AlterLoadConfigMessageHeader) *L
 	return cfg
 }
 
-// buildFromPersisted reconstructs the complete versioned requirements.
+// buildFromPersisted reconstructs versioned requirements, ignoring legacy
+// warmup epochs so recovery cannot recreate a one-time request.
 func buildFromPersisted(info *viewpb.CollectionLoadConfig) *LoadConfig {
 	cfg := &LoadConfig{
 		Version: info.GetVersion(), DbID: info.GetDbID(), CollectionID: info.GetCollectionID(),
@@ -104,7 +103,6 @@ func buildFromPersisted(info *viewpb.CollectionLoadConfig) *LoadConfig {
 		RequiredFields:           cloneFieldConfigs(info.GetRequiredFields()),
 		LoadFields:               cloneFieldConfigs(info.GetPreloadFields()),
 		PartitionIDs:             append([]int64(nil), info.GetPartitionIds()...),
-		WarmupEpoch:              info.GetWarmupEpoch(),
 	}
 	for _, replica := range info.GetReplicas() {
 		cfg.Replicas = append(cfg.Replicas, &ReplicaAssignment{
@@ -123,7 +121,6 @@ func (c *LoadConfig) toCollectionLoadConfigProto() *viewpb.CollectionLoadConfig 
 		UserSpecifiedReplicaMode: c.UserSpecifiedReplicaMode,
 		RequiredFields:           cloneFieldConfigs(c.RequiredFields),
 		PartitionIds:             append([]int64(nil), c.PartitionIDs...),
-		WarmupEpoch:              c.WarmupEpoch,
 	}
 	info.PreloadFields = cloneFieldConfigs(c.LoadFields)
 	for _, replica := range c.Replicas {

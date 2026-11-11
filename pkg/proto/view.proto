@@ -37,8 +37,9 @@ message CollectionLoadConfig {
     repeated LoadReplicaConfig replicas = 7;
     // True for an explicitly chosen replica configuration; false follows cluster defaults.
     bool user_specified_replica_mode = 8;
-    // Epoch of the latest LoadCollection warmup hint; 0 means none.
-    int64 warmup_epoch = 9;
+    // Warmup is request-local, never durable load configuration.
+    reserved 9;
+    reserved "warmup_epoch";
 }
 
 // Field selection owned by immutable QueryView requirements. WAL messages use their own definition.
@@ -138,8 +139,9 @@ message QueryViewMeta {
     uint64 transform_start_after_timetick = 7;
     int32 schema_version = 8; // Required logical collection schema revision.
     QueryViewControl control = 9;
-    // Warmup epoch of the load config this view was built from; 0 means none.
-    int64 warmup_epoch = 10;
+    // Prewarm is an independent RPC, not QueryView state.
+    reserved 10;
+    reserved "warmup_epoch";
 }
 
 // QueryViewOfStreamingNode is the StreamingNode-local part of a QueryView.
@@ -405,12 +407,21 @@ message QueryPlan {
 // Implemented by both StreamingNode and QueryNode.
 // Each node determines which segments to query based on the view version.
 service ViewQueryService {
+    // Prewarm borrows resources from this exact View without changing its state.
+    rpc PrewarmOnView(PrewarmOnViewRequest) returns (PrewarmOnViewResponse) {}
     // SearchOnView executes a vector search on segments belonging to the given view version.
     rpc SearchOnView(SearchOnViewRequest) returns (SearchOnViewResponse) {}
     // QueryOnView executes a query (retrieve by expression) on segments belonging to the given view version.
     rpc QueryOnView(QueryOnViewRequest) returns (QueryOnViewResponse) {}
     rpc StatisticsOnView(StatisticsOnViewRequest) returns (StatisticsOnViewResponse) {}
 }
+
+message PrewarmOnViewRequest {
+    ShardID shard_id = 1;
+    QueryViewVersion version = 2;
+}
+
+message PrewarmOnViewResponse {}
 
 // Runtime physical row statistics: no expression, TTL or historical snapshot.
 // Consumption progress is supplied by the outer GetQueryPlanRequest MVCC.

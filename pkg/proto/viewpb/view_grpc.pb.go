@@ -272,6 +272,7 @@ var QueryPlanService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
+	ViewQueryService_PrewarmOnView_FullMethodName    = "/milvus.proto.view.ViewQueryService/PrewarmOnView"
 	ViewQueryService_SearchOnView_FullMethodName     = "/milvus.proto.view.ViewQueryService/SearchOnView"
 	ViewQueryService_QueryOnView_FullMethodName      = "/milvus.proto.view.ViewQueryService/QueryOnView"
 	ViewQueryService_StatisticsOnView_FullMethodName = "/milvus.proto.view.ViewQueryService/StatisticsOnView"
@@ -281,6 +282,8 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ViewQueryServiceClient interface {
+	// Prewarm borrows resources from this exact View without changing its state.
+	PrewarmOnView(ctx context.Context, in *PrewarmOnViewRequest, opts ...grpc.CallOption) (*PrewarmOnViewResponse, error)
 	// SearchOnView executes a vector search on segments belonging to the given view version.
 	SearchOnView(ctx context.Context, in *SearchOnViewRequest, opts ...grpc.CallOption) (*SearchOnViewResponse, error)
 	// QueryOnView executes a query (retrieve by expression) on segments belonging to the given view version.
@@ -294,6 +297,15 @@ type viewQueryServiceClient struct {
 
 func NewViewQueryServiceClient(cc grpc.ClientConnInterface) ViewQueryServiceClient {
 	return &viewQueryServiceClient{cc}
+}
+
+func (c *viewQueryServiceClient) PrewarmOnView(ctx context.Context, in *PrewarmOnViewRequest, opts ...grpc.CallOption) (*PrewarmOnViewResponse, error) {
+	out := new(PrewarmOnViewResponse)
+	err := c.cc.Invoke(ctx, ViewQueryService_PrewarmOnView_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *viewQueryServiceClient) SearchOnView(ctx context.Context, in *SearchOnViewRequest, opts ...grpc.CallOption) (*SearchOnViewResponse, error) {
@@ -327,6 +339,8 @@ func (c *viewQueryServiceClient) StatisticsOnView(ctx context.Context, in *Stati
 // All implementations should embed UnimplementedViewQueryServiceServer
 // for forward compatibility
 type ViewQueryServiceServer interface {
+	// Prewarm borrows resources from this exact View without changing its state.
+	PrewarmOnView(context.Context, *PrewarmOnViewRequest) (*PrewarmOnViewResponse, error)
 	// SearchOnView executes a vector search on segments belonging to the given view version.
 	SearchOnView(context.Context, *SearchOnViewRequest) (*SearchOnViewResponse, error)
 	// QueryOnView executes a query (retrieve by expression) on segments belonging to the given view version.
@@ -338,6 +352,9 @@ type ViewQueryServiceServer interface {
 type UnimplementedViewQueryServiceServer struct {
 }
 
+func (UnimplementedViewQueryServiceServer) PrewarmOnView(context.Context, *PrewarmOnViewRequest) (*PrewarmOnViewResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PrewarmOnView not implemented")
+}
 func (UnimplementedViewQueryServiceServer) SearchOnView(context.Context, *SearchOnViewRequest) (*SearchOnViewResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SearchOnView not implemented")
 }
@@ -357,6 +374,24 @@ type UnsafeViewQueryServiceServer interface {
 
 func RegisterViewQueryServiceServer(s grpc.ServiceRegistrar, srv ViewQueryServiceServer) {
 	s.RegisterService(&ViewQueryService_ServiceDesc, srv)
+}
+
+func _ViewQueryService_PrewarmOnView_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PrewarmOnViewRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ViewQueryServiceServer).PrewarmOnView(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ViewQueryService_PrewarmOnView_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ViewQueryServiceServer).PrewarmOnView(ctx, req.(*PrewarmOnViewRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _ViewQueryService_SearchOnView_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -420,6 +455,10 @@ var ViewQueryService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "milvus.proto.view.ViewQueryService",
 	HandlerType: (*ViewQueryServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "PrewarmOnView",
+			Handler:    _ViewQueryService_PrewarmOnView_Handler,
+		},
 		{
 			MethodName: "SearchOnView",
 			Handler:    _ViewQueryService_SearchOnView_Handler,

@@ -16,10 +16,10 @@ type QueryViewResource interface {
 	Release()
 }
 
-// QueryViewResourceWarmer warms, in the background, what a Ready QueryView with a
-// LoadCollection warmup hint serves. Warm must not block.
-type QueryViewResourceWarmer interface {
-	Warm()
+// QueryViewResourcePrewarmer fills caches during an explicit read operation.
+// The call completes before its borrowed resource references are released.
+type QueryViewResourcePrewarmer interface {
+	Prewarm(context.Context) error
 }
 
 // QueryViewResourceModule binds immutable metadata under the owner lock. BindView
@@ -132,17 +132,21 @@ func (v *viewResources) prepare(ctx context.Context, provider LoadInfoProvider) 
 	return nil
 }
 
-// warm borrows the resources like an operation does, so release cannot run
-// under it. A withdrawn View has nothing to warm.
-func (v *viewResources) warm() {
-	_, end, err := v.begin(context.Background())
+func (v *viewResources) prewarm(ctx context.Context) error {
+	ctx, end, err := v.begin(ctx)
 	if err != nil {
-		return
+		return err
 	}
 	defer end()
 	for _, resource := range v.modules {
-		if warmer, ok := resource.(QueryViewResourceWarmer); ok {
-			warmer.Warm()
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if warmer, ok := resource.(QueryViewResourcePrewarmer); ok {
+			if err := warmer.Prewarm(ctx); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }

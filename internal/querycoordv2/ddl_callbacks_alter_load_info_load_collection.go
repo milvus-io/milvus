@@ -42,7 +42,7 @@ import (
 )
 
 // broadcastAlterLoadConfigCollectionV2ForLoadCollection is called when the load collection request is received.
-func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) error {
+func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (retErr error) {
 	broadcaster, err := s.startBroadcastWithCollectionIDLock(ctx, req.GetCollectionID())
 	if err != nil {
 		return err
@@ -55,16 +55,25 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 		return err
 	}
 
+	if err := s.validateLoadCollectionWarmupHint(req, coll); err != nil {
+		return err
+	}
+	if req.GetWarmupHint() {
+		// Subscribe while holding the DDL guard, before Broadcast can release
+		// it. Release/reload must invalidate this request even if it races the
+		// return from Broadcast. Warmup is local work, never WAL intent.
+		subscription := s.qviewsRuntime.readyChanges.Subscribe(req.GetCollectionID())
+		defer func() {
+			if retErr != nil {
+				subscription.Close()
+				return
+			}
+			s.qviewsRuntime.warmCollectionOnce(ctx, req.GetCollectionID(), coll.VChannelNames, subscription)
+		}()
+	}
 	currentLoadConfig := s.qviewsRuntime.loadConfigStore.GetConfig(req.GetCollectionID())
 	if currentLoadConfig != nil && req.RequestsInPlaceWarmup() {
-		warmupEpoch, err := s.admitLoadCollectionWarmupHint(ctx, req, coll, currentLoadConfig)
-		if err != nil {
-			return err
-		}
-		header := loadConfigIntoAlterLoadConfigHeader(currentLoadConfig)
-		header.WarmupEpoch = warmupEpoch
-		_, err = broadcaster.Broadcast(ctx, newAlterLoadConfigBroadcast(header))
-		return err
+		return nil
 	}
 
 	loadFields, fieldIndexIDs := req.GetLoadFields(), req.GetFieldIndexID()
@@ -149,10 +158,6 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 		},
 	}
 
-	warmupEpoch, err := s.admitLoadCollectionWarmupHint(ctx, req, coll, currentLoadConfig)
-	if err != nil {
-		return err
-	}
 	msg, err := s.generateAlterLoadConfigMessageForLoadCollection(ctx, coll, currentLoadConfig, qviewsExpectedLoadConfig{
 		PartitionIDs:             partitionIDs,
 		ReplicaNumber:            expectedReplicasNumber,
@@ -160,7 +165,6 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 		LoadFields:               loadFields,
 		Priority:                 req.GetPriority(),
 		UserSpecifiedReplicaMode: userSpecifiedReplicaMode,
-		WarmupEpoch:              warmupEpoch,
 	})
 	if err != nil {
 		return err
@@ -183,34 +187,19 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadCollection(ctx conte
 	return nil
 }
 
-// admitLoadCollectionWarmupHint returns the warmup epoch a load request leaves
-// in the load config. Every request with a warmup hint gets a newer epoch, so
-// QueryNodes warm the loaded segments again, including a collection that was
-// loaded without warmup; any other request keeps the current epoch.
-func (s *Server) admitLoadCollectionWarmupHint(
-	ctx context.Context,
-	req *querypb.LoadCollectionRequest,
-	coll *metacache.CollectionInfo,
-	current *loadmgr.LoadConfig,
-) (int64, error) {
+// validateLoadCollectionWarmupHint validates an optional, local cache request.
+// It allocates no identity and never records durable load intent.
+func (s *Server) validateLoadCollectionWarmupHint(req *querypb.LoadCollectionRequest, coll *metacache.CollectionInfo) error {
 	if !req.GetWarmupHint() {
-		if current == nil {
-			return 0, nil
-		}
-		return current.WarmupEpoch, nil
+		return nil
 	}
 	if !paramtable.Get().QueryCoordCfg.EnableLoadCollectionWarmupHint.GetAsBool() {
-		return 0, merr.Wrap(merr.ErrServiceUnimplemented, "LoadCollection warmup hint requires queryCoord.enableLoadCollectionWarmupHint after a full-cluster upgrade")
+		return merr.Wrap(merr.ErrServiceUnimplemented, "LoadCollection warmup hint requires queryCoord.enableLoadCollectionWarmupHint after a full-cluster upgrade")
 	}
 	if typeutil.IsExternalCollection(coll.Schema) {
-		return 0, merr.WrapErrParameterInvalidMsg("load warmup hint is not supported for external collections")
+		return merr.WrapErrParameterInvalidMsg("load warmup hint is not supported for external collections")
 	}
-	epoch, err := s.idAllocator()
-	if err != nil {
-		return 0, merr.Wrap(err, "allocate warmup epoch")
-	}
-	mlog.Info(ctx, "accept load warmup hint", mlog.FieldCollectionID(req.GetCollectionID()), mlog.Int64("warmupEpoch", epoch))
-	return epoch, nil
+	return nil
 }
 
 func newAlterLoadConfigBroadcast(header *messagespb.AlterLoadConfigMessageHeader) message.BroadcastMutableMessage {
@@ -287,7 +276,6 @@ type qviewsExpectedLoadConfig struct {
 	LoadFields               []int64
 	Priority                 commonpb.LoadPriority
 	UserSpecifiedReplicaMode bool
-	WarmupEpoch              int64
 }
 
 func (s *Server) generateAlterLoadConfigMessageForLoadCollection(
@@ -308,7 +296,6 @@ func (s *Server) generateAlterLoadConfigMessageForLoadCollection(
 		RequiredFields:           loadmgr.FieldsToMessage(loadmgr.RequiredFieldsForSchema(coll.Schema)),
 		Replicas:                 replicas,
 		UserSpecifiedReplicaMode: expected.UserSpecifiedReplicaMode,
-		WarmupEpoch:              expected.WarmupEpoch,
 	}
 	if proto.Equal(loadConfigIntoAlterLoadConfigHeader(current), header) {
 		return nil, nil
@@ -385,7 +372,6 @@ func loadConfigIntoAlterLoadConfigHeader(cfg *loadmgr.LoadConfig) *messagespb.Al
 		RequiredFields:           loadmgr.FieldsToMessage(cloneAndSortLoadFields(cfg.RequiredFields)),
 		Replicas:                 replicas,
 		UserSpecifiedReplicaMode: cfg.UserSpecifiedReplicaMode,
-		WarmupEpoch:              cfg.WarmupEpoch,
 	}
 }
 

@@ -1305,11 +1305,15 @@ func (s *LocalSegment) Load(ctx context.Context) error {
 }
 
 func (s *LocalSegment) Prewarm(ctx context.Context, fieldIDs []int64) error {
+	return s.prewarmWithSegment(ctx, fieldIDs, s.csegment)
+}
+
+func (s *LocalSegment) prewarmWithSegment(ctx context.Context, fieldIDs []int64, native segcore.CSegment) error {
 	if err := s.PinIfNotReleased(); err != nil {
 		return err
 	}
 	defer s.Unpin()
-	return s.csegment.Prewarm(ctx, fieldIDs)
+	return native.Prewarm(ctx, fieldIDs)
 }
 
 func (s *LocalSegment) Reopen(ctx context.Context, newLoadInfo *querypb.SegmentLoadInfo) error {

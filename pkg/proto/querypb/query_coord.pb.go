@@ -911,7 +911,7 @@ type LoadCollectionRequest struct {
 	// schema either way.
 	LoadAllFields        bool `protobuf:"varint,11,opt,name=load_all_fields,json=loadAllFields,proto3" json:"load_all_fields,omitempty"`
 	SkipLoadDynamicField bool `protobuf:"varint,12,opt,name=skip_load_dynamic_field,json=skipLoadDynamicField,proto3" json:"skip_load_dynamic_field,omitempty"`
-	// Asks QueryNodes to warm the loaded data in the background until release.
+	// Requests one background prewarm pass after ordinary load readiness.
 	WarmupHint bool `protobuf:"varint,13,opt,name=warmup_hint,json=warmupHint,proto3" json:"warmup_hint,omitempty"`
 }
 

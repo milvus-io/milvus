@@ -10,6 +10,8 @@ import (
 )
 
 type resourceSegmentHandle struct {
+	base         *segmentBase
+	resource     *segmentResource
 	segment      TransformSegment
 	registration TransformRegistration
 	once         sync.Once
@@ -51,7 +53,7 @@ func (m *SegmentResourceManager) AcquireSealedSegmentHandles(ctx context.Context
 		read.base.operationRefs++
 		v.operationRefs++
 		segment := &viewSchemaSegment{TransformSegment: read.base.segment, collection: v.collection.Collection(), read: read.read}
-		handles = append(handles, &resourceSegmentHandle{segment: segment, registration: read.base.registration, release: func() {
+		handles = append(handles, &resourceSegmentHandle{base: read.base, resource: r, segment: segment, registration: read.base.registration, release: func() {
 			defer r.operations.Done()
 			unpinRead()
 			m.mu.Lock()

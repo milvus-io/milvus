@@ -11,7 +11,7 @@ import (
 
 func TestPlacementBuilderPreservesSource(t *testing.T) {
 	source := &viewpb.QueryViewOfShard{
-		Meta:          &viewpb.QueryViewMeta{CollectionId: 1, ReplicaId: 2, Vchannel: "v1", Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 3, CompactVersion: 4}, QueryVersion: 5}, SchemaVersion: 6, LoadInfoVersion: 7, WarmupEpoch: 42, TransformStartAfterTimetick: 8, State: viewpb.QueryViewState_QueryViewStatePreparing},
+		Meta:          &viewpb.QueryViewMeta{CollectionId: 1, ReplicaId: 2, Vchannel: "v1", Version: &viewpb.QueryViewVersion{DataVersion: &viewpb.DataVersion{StreamingVersion: 3, CompactVersion: 4}, QueryVersion: 5}, SchemaVersion: 6, LoadInfoVersion: 7, TransformStartAfterTimetick: 8, State: viewpb.QueryViewState_QueryViewStatePreparing},
 		QueryNode:     []*viewpb.QueryViewOfQueryNode{{NodeId: 10, Partitions: []*viewpb.QueryViewOfPartition{{PartitionId: 100, SegmentIds: []int64{101, 102}, SegmentManifestVersions: []int64{11, 12}}}}},
 		StreamingNode: &viewpb.QueryViewOfStreamingNode{PartitionStats: []*viewpb.ClusteredPartitionStats{{PartitionId: 100, Version: 13}, {PartitionId: 200, Version: 14}}},
 	}

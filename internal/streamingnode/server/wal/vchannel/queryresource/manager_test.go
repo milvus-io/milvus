@@ -615,7 +615,7 @@ func (*gatedQueryRuntimeModule) Close() {}
 type versionedQueryRuntimeModuleBuilder struct {
 	prepare func(context.Context, qviews.DataVersion) error
 	release func(qviews.DataVersion)
-	warm    func(*viewpb.QueryViewMeta)
+	warm    func(context.Context, *viewpb.QueryViewMeta)
 }
 
 func (b versionedQueryRuntimeModuleBuilder) NewRuntime() (QueryRuntimeModule, error) {
@@ -625,7 +625,7 @@ func (b versionedQueryRuntimeModuleBuilder) NewRuntime() (QueryRuntimeModule, er
 type versionedQueryRuntimeModule struct {
 	prepare func(context.Context, qviews.DataVersion) error
 	release func(qviews.DataVersion)
-	warm    func(*viewpb.QueryViewMeta)
+	warm    func(context.Context, *viewpb.QueryViewMeta)
 }
 
 func (*versionedQueryRuntimeModule) Prepare(context.Context, walview.VChannelWALView) error {
@@ -650,10 +650,11 @@ func (v *versionedQueryViewResource) Prepare(ctx context.Context, _ LoadInfoProv
 }
 func (*versionedQueryViewResource) Release() {}
 
-func (v *versionedQueryViewResource) Warm() {
+func (v *versionedQueryViewResource) Prewarm(ctx context.Context) error {
 	if v.module.warm != nil {
-		v.module.warm(v.meta)
+		v.module.warm(ctx, v.meta)
 	}
+	return nil
 }
 
 func (m *versionedQueryRuntimeModule) PrepareSchemaDataVersion(ctx context.Context, meta *viewpb.QueryViewMeta) error {
@@ -862,8 +863,7 @@ func (m *Manager) prepareReady(ctx context.Context, key qviews.QueryViewKey, onR
 	return m.prepareViewRef(ctx, key, ref, runtime, onReady)
 }
 
-func TestManagerWarmsHintedViewsAfterReady(t *testing.T) {
-	// One worker runs the readiness of both views in order.
+func TestManagerPrewarmsOnlyExplicitRequests(t *testing.T) {
 	scheduler := nodescheduler.New(1)
 	defer scheduler.Close()
 	dispatcher := NewDispatcher(1)
@@ -873,35 +873,21 @@ func TestManagerWarmsHintedViewsAfterReady(t *testing.T) {
 		Scheduler: scheduler, Dispatcher: dispatcher,
 		Builders: []QueryRuntimeModuleBuilder{versionedQueryRuntimeModuleBuilder{
 			prepare: func(context.Context, qviews.DataVersion) error { return nil },
-			warm:    func(meta *viewpb.QueryViewMeta) { warmed <- meta },
+			warm:    func(_ context.Context, meta *viewpb.QueryViewMeta) { warmed <- meta },
 		}},
 	})
 	defer manager.Close()
-
-	ready := make(chan struct{}, 2)
-	plain, plainKey := testManagerQueryViewMetaAndKey(1)
-	manager.AcquireLocked(snview.AcquireResource{Key: plainKey, Meta: plain, OnReady: func() { ready <- struct{}{} }}, testManagerViewBuilder)
-	// A view rebuilt for a warmup hint reuses the runtime and warms once Ready.
-	hinted, hintedKey := testManagerQueryViewMetaAndKey(2)
-	hinted.WarmupEpoch = 7
-	hinted.SchemaVersion = 3
-	manager.AcquireLocked(snview.AcquireResource{Key: hintedKey, Meta: hinted, OnReady: func() {
-		assert.Empty(t, warmed, "a warm must follow readiness")
-		ready <- struct{}{}
-	}}, testManagerViewBuilder)
-	for range 2 {
-		select {
-		case <-ready:
-		case <-time.After(time.Second):
-			t.Fatal("view did not become ready")
-		}
-	}
+	ready := make(chan struct{}, 1)
+	meta, key := testManagerQueryViewMetaAndKey(1)
+	manager.AcquireLocked(snview.AcquireResource{Key: key, Meta: meta, OnReady: func() { ready <- struct{}{} }}, testManagerViewBuilder)
 	select {
-	case meta := <-warmed:
-		require.Equal(t, int32(3), meta.GetSchemaVersion())
+	case <-ready:
 	case <-time.After(time.Second):
-		t.Fatal("hinted view was not warmed")
+		t.Fatal("view not ready")
 	}
-	require.Never(t, func() bool { return len(warmed) > 0 }, 100*time.Millisecond, 10*time.Millisecond,
-		"a view without a hint must not warm")
+	require.Empty(t, warmed, "View preparation must never trigger prewarm")
+	require.NoError(t, manager.Prewarm(t.Context(), key))
+	require.Equal(t, meta, <-warmed)
+	require.NoError(t, manager.Prewarm(t.Context(), key))
+	require.Equal(t, meta, <-warmed)
 }

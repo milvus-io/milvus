@@ -244,11 +244,16 @@ func (b *viewBinding) advance(ctx context.Context, target qviews.DataVersion) er
 	return nil
 }
 
-// Warm warms, in the background, the aggregates of the fields this View serves.
-func (b *viewBinding) Warm() {
+// Prewarm materializes only the target selected by this request. A later
+// target never extends the request or causes another materialization pass.
+func (b *viewBinding) Prewarm(ctx context.Context) error {
+	target := qviews.FromProtoDataVersion(b.meta.GetVersion().GetDataVersion())
 	for _, field := range b.fields {
-		field.oracle.warm()
+		if _, err := field.oracle.awaitMaterializationAt(ctx, &target); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func (b *viewBinding) Release() {

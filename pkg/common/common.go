@@ -507,8 +507,8 @@ const (
 	WarmupDisable        = "disable"
 	WarmupSync           = "sync"
 	WarmupAsync          = "async"
-	// WarmupHintKey is the LoadCollection parameter that asks QueryNodes to
-	// warm the loaded data in the background.
+	// WarmupHintKey is the LoadCollection parameter requesting one background
+	// prewarm pass over the serving resources.
 	WarmupHintKey = "warmup_hint"
 )
 

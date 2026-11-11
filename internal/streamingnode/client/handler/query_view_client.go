@@ -6,6 +6,7 @@ import (
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
 
+	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/lazygrpc"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
@@ -19,6 +20,9 @@ import (
 
 // QueryViewClient is the QueryView domain client under HandlerClient.
 type QueryViewClient interface {
+	// PrewarmOnView dispatches once to the current owner; it never follows reassignment.
+	PrewarmOnView(context.Context, string, *viewpb.PrewarmOnViewRequest) (*viewpb.PrewarmOnViewResponse, error)
+
 	// GetQueryPlan generates a shard-level query plan from the StreamingNode owning the shard pchannel.
 	GetQueryPlan(ctx context.Context, shardID qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error)
 
@@ -165,4 +169,25 @@ func queryViewRPCNeedsWaitForReady(err error) bool {
 	}
 	viewErr := viewerror.AsViewError(err)
 	return viewErr.IsOnShutdown() || viewErr.IsNotPrimary() || grpcstatus.Code(err) == codes.Unavailable
+}
+
+func (qvc *queryViewClient) PrewarmOnView(ctx context.Context, pchannel string, req *viewpb.PrewarmOnViewRequest) (*viewpb.PrewarmOnViewResponse, error) {
+	if !qvc.owner.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, ErrClientClosed
+	}
+	defer qvc.owner.lifetime.Done()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	assign := qvc.owner.watcher.Get(ctx, pchannel)
+	if assign == nil {
+		return nil, ErrClientAssignmentNotReady
+	}
+	client, err := qvc.viewQueryService.GetService(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ctx = contextutil.WithFailFastPick(contextutil.WithPickServerID(ctx, assign.Node.ServerID))
+	ctx = worknodehandler.EncodeQueryViewPChannelToOutgoingContext(ctx, assign.Channel)
+	return client.PrewarmOnView(ctx, req)
 }

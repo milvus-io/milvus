@@ -3,12 +3,15 @@ package segments
 import (
 	"strconv"
 	"sync"
+	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/queryutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -408,4 +411,17 @@ func (suite *SegmentSuite) TestViewReadStatePreparesWhileDeletesContinue() {
 	}
 	suite.Equal(int64(50), old.RowNum())
 	suite.Equal(old.RowNum(), local.RowNum())
+}
+
+func TestPrewarmUsesBorrowedNativeReadState(t *testing.T) {
+	ctx := t.Context()
+	fields := []int64{106}
+	current, borrowed := mock_segcore.NewMockCSegment(t), mock_segcore.NewMockCSegment(t)
+	parent := &LocalSegment{csegment: current, ptrLock: state.NewLoadStateLock(state.LoadStateDataLoaded)}
+	read := &sealedReadState{Segment: parent, parent: parent, native: borrowed}
+	borrowed.EXPECT().Prewarm(ctx, fields).Return(nil).Once()
+	require.NoError(t, read.Prewarm(ctx, fields))
+	current.AssertNotCalled(t, "Prewarm", ctx, fields)
+	current.EXPECT().Prewarm(ctx, fields).Return(nil).Once()
+	require.NoError(t, parent.Prewarm(ctx, fields))
 }
