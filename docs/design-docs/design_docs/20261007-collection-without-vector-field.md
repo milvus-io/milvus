@@ -759,38 +759,75 @@ sealed into about 20 small segments, which compaction then merged into 4
 segments of 2.25–3.0 M rows. That was dropped for the reason given in
 Section 4.2.
 
+The final run on head `2cc7740f6e` (2026-11-09 and 11-10) repeated the
+script twice, once with the default `maxRows` of 4 M and once with `maxRows`
+set to 400 k and every row count divided by 10.
+
+| Scenario | `maxRows` 4 M | `maxRows` 400 k |
+|---|---|---|
+| Insert (10 M / 1 M rows), then flush and a manual compaction | 3.95 M, 3.75 M, 2.30 M rows | 400 k, 400 k, 200 k rows |
+| Import from one parquet file (12 M / 1.2 M rows) | 3 segments allocated; 5.60 M, 3.61 M, 2.80 M rows | 3 segments allocated; all 1.2 M rows in one of them, the two empty ones are dropped |
+| One manual compaction of the imported collection | 4,000,000, 3.61 M, 2.80 M, 1.60 M rows | 400,000, 400,000, 400,000 rows |
+| 200 s of automatic trigger cycles afterwards | unchanged | unchanged |
+| Control: vector collection, dim 8 (6 M / 600 k rows) | not run, see Appendix C | 1 segment of 600 k rows |
+
+In the 400 k import the file (1.2 M rows, 14.4 MB in memory, 12 B per row)
+is smaller than one read batch of the import, so the whole file is one
+hashed piece and `PickSegment` writes it into one of the three allocated
+segments. The byte target after the conversion is 400 k × 12 B = 4.8 MB and
+14.4 MB / 4.8 MB gives the three segments seen in the DataCoord log. The
+segment count is right and the rows per segment are not, as Section 4.2
+states for the import path; the following compaction cuts at `maxRows`.
+
 ## Appendix C. Verification record
 
-Implementation branch `nonvec-phase1-enable`, local head `2cc7740f6e` on
-master `54ff5d5266` (2026-11-09, including the DataCoord package split
-#54499 and QueryView #52977); the remote head of Draft PR #54604 is still
-`54c6c19b76`, not pushed yet. Five commits: lifting the creation check and
+Implementation branch `nonvec-phase1-enable`, head `2cc7740f6e` on master
+`54ff5d5266` (including the DataCoord package split #54499 and QueryView
+#52977), Draft PR #54604. Five commits: lifting the creation check and
 fixing the checks, e2e case updates, the DataCoord readiness split, the row
 cap, and the import reader validation. The measurements of B.1–B.5 were
 taken on the earlier head `5ee87283ba`.
 
-- **Unit tests** (2026-11-09, local): DataCoord `compaction` (with `policy`,
-  `task`, `view`, `targets`), `bulkimport`, `meta`, `analyze` and the
-  top-level package, DataNode `compactor` and StreamingNode `shard` all
-  pass. New cases cover: the row cap applies to schemas without a vector
-  field only and is not affected by a JSON field; both mix planners produce
-  no plan for segments holding `maxRows` rows and pack smaller ones; the
-  writer cuts on rows and splits the record batch that crosses the limit;
-  the output count estimate of the mix compactor counts rows; the row limit
-  of the StreamingNode seal; the clustering row limit; the conversion of the
-  import byte target. Two cases of `pkg/util/paramtable` fail
-  (`TestComponentParam_QueryViewConcurrency`,
+Everything below was run on head `2cc7740f6e`, 2026-11-09 and 11-10, x86
+standalone, unless stated otherwise.
+
+- **Build**: passes.
+- **Unit tests**: the 17 groups of Go packages touched by the change pass,
+  among them DataCoord `compaction` (with `policy`, `task`, `view`,
+  `targets`), `bulkimport`, `meta`, `analyze` and the top-level package,
+  DataNode `compactor`, StreamingNode `shard` and `internal/proxy`. New
+  cases cover: the row cap applies to schemas without a vector field only
+  and is not affected by a JSON field; both mix planners produce no plan for
+  segments holding `maxRows` rows and pack smaller ones; the writer cuts on
+  rows and splits the record batch that crosses the limit; the output count
+  estimate of the mix compactor counts rows; the row limit of the
+  StreamingNode seal; the clustering row limit; the conversion of the import
+  byte target. `internal/proxy` timed out in the first run because the
+  shared etcd and object storage namespace held state of earlier runs (log:
+  `summary manifest term 60 supersedes writer term 2`); rerun with a fresh
+  namespace the package passes in 88 s. Two cases of `pkg/util/paramtable`
+  fail (`TestComponentParam_QueryViewConcurrency`,
   `TestComponentParam_QueryViewLiveDispatchConcurrency`); they fail on an
   unmodified master as well. `configs/milvus.yaml` was regenerated with the
   config tool; only the comment of `maxRows` changes.
-- **Row cap end to end** (Appendix B.6): all 8 checks pass; rerun once after
-  the seal rule dropped the seal proportion.
-- **Verified on earlier heads and not rerun this time**: the new pytest
-  cases and the local standalone functional script, the 44 M-row aarch64
-  runs (B.1–B.3), the five-process deployment and switch flip (B.4), and the
-  unit tests of the 17 Go packages touched by the rebase (morning of 11-09).
-  Apart from segment sizing, the code on these paths did not change this
-  time.
+- **Functional and compaction end-to-end scripts** on a local standalone:
+  pass.
+- **pytest**: the 4 new cases
+  (`test_milvus_client_collection_without_vector.py` and one case of
+  `test_milvus_client_collection.py`) pass.
+- **Row cap end to end** (Appendix B.6), two runs. With `maxRows` 4 M the
+  first 7 checks gave the expected output; the run then stopped in the
+  eighth (the vector collection control) because the data disk crossed the
+  0.90 hard watermark of woodpecker and writes were rejected. With `maxRows`
+  400 k and all row counts divided by 10, 7 of 8 checks pass, the vector
+  collection control among them. The one that fails is "import allocates at
+  least rows / `maxRows` non-empty segments": the file is smaller than one
+  read batch, which is a property of the reduced scale and of `PickSegment`
+  (B.6), and the DataCoord log shows the expected three segments allocated.
+  Each check has passed on this head in at least one of the two runs.
+- **Verified on earlier heads and not rerun**: the 44 M-row aarch64 runs
+  (B.1–B.3) and the five-process deployment and switch flip (B.4). Apart
+  from segment sizing, the code on these paths did not change.
 - **Not redone**: the planner simulation of the previous version (80 trigger
   cycles) was for the byte-target approach and has not been rerun against
   the current implementation; the stability of the current implementation
