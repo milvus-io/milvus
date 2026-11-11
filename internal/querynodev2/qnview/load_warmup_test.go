@@ -8,20 +8,23 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 )
 
 type warmupCall struct {
-	ctx     context.Context
-	segment TransformSegment
-	done    chan error
+	ctx  context.Context
+	read segments.ReadState
+	done chan error
 }
 
-func (*resourceTestLoader) Prewarm(context.Context, TransformSegment) error { return nil }
+func (*resourceTestRead) Prewarm(context.Context, []int64) error { return nil }
 
-func recordWarmups(f *resourceTestFixture) <-chan warmupCall {
+func recordWarmups(t *testing.T) <-chan warmupCall {
 	calls := make(chan warmupCall, 8)
-	mockey.Mock((*resourceTestLoader).Prewarm).To(func(_ *resourceTestLoader, ctx context.Context, segment TransformSegment) error {
-		call := warmupCall{ctx: ctx, segment: segment, done: make(chan error, 1)}
+	mockey.Mock((*resourceTestRead).Prewarm).To(func(read *resourceTestRead, ctx context.Context, fields []int64) error {
+		require.Empty(t, fields)
+		call := warmupCall{ctx: ctx, read: read, done: make(chan error, 1)}
 		calls <- call
 		select {
 		case err := <-call.done:
@@ -62,7 +65,7 @@ func startWarm(ctx context.Context, f *resourceTestFixture, req AcquireSegments)
 func TestPrewarmBorrowsReadStateAcrossViewReplacement(t *testing.T) {
 	mockey.PatchConvey("one request keeps its old read while new views remain cold", t, func() {
 		f := setupResourceTest(t, nil)
-		warms := recordWarmups(f)
+		warms := recordWarmups(t)
 		old := f.acquire(1, 1, 1)
 		f.await(t, 1)
 		expectNoWarmup(t, warms)
@@ -71,7 +74,7 @@ func TestPrewarmBorrowsReadStateAcrossViewReplacement(t *testing.T) {
 		f.manager.mu.Lock()
 		read := f.manager.views[old.Key].bindings[1000].prepared.read
 		f.manager.mu.Unlock()
-		require.Same(t, read, call.segment.(ReadableSealedSegment).QuerySegment())
+		require.Same(t, read, call.read)
 
 		// Queries remain usable while prewarm runs.
 		handles, err := f.manager.AcquireSealedSegmentHandles(t.Context(), old.Key, old.View, 0)
@@ -99,7 +102,7 @@ func TestPrewarmBorrowsReadStateAcrossViewReplacement(t *testing.T) {
 func TestPrewarmCancellationPreservesSharingQueries(t *testing.T) {
 	mockey.PatchConvey("cancel stops prewarm after the final query releases its shared cache loads", t, func() {
 		f := setupResourceTest(t, nil)
-		warms := recordWarmups(f)
+		warms := recordWarmups(t)
 		req := f.acquire(1, 1, 1)
 		f.await(t, 1)
 		ctx, cancel := context.WithCancel(t.Context())
@@ -120,7 +123,7 @@ func TestPrewarmCancellationPreservesSharingQueries(t *testing.T) {
 func TestPrewarmFailureDoesNotRequeueOrFollowReplacement(t *testing.T) {
 	mockey.PatchConvey("only an explicit request can retry a failed pass", t, func() {
 		f := setupResourceTest(t, nil)
-		warms := recordWarmups(f)
+		warms := recordWarmups(t)
 		req := f.acquire(1, 1, 1)
 		f.await(t, 1)
 		done := startWarm(t.Context(), f, req)
@@ -138,7 +141,7 @@ func TestPrewarmFailureDoesNotRequeueOrFollowReplacement(t *testing.T) {
 func TestPrewarmNodeCloseCancelsWithoutQueryConsumers(t *testing.T) {
 	mockey.PatchConvey("node shutdown discards the request instead of persisting work", t, func() {
 		f := setupResourceTest(t, nil)
-		warms := recordWarmups(f)
+		warms := recordWarmups(t)
 		req := f.acquire(1, 1, 1)
 		f.await(t, 1)
 		done := startWarm(t.Context(), f, req)

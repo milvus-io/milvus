@@ -33,8 +33,8 @@ the streaming transport; parent Proxy wiring must inject its MixCoord client.
 
 ## One-time prewarming
 
-`Client.Prewarm` uses the same replica subscriptions and query transports, with
-its own one-attempt orchestration. It captures every configured replica from
+`queryclient.Prewarm(ctx, client, collectionID)` uses the same replica subscriptions
+and query transports, with its own one-attempt orchestration. It captures every configured replica from
 load-info metadata, waits independently for each shard to advertise Up, and
 asks `GetPrewarmPlan` for that exact version. The request retains that topology
 and SN owner through execution; it does not use query retry/replan loops.

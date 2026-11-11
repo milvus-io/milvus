@@ -128,10 +128,6 @@ func (fakeCSegment) LoadFieldData(context.Context, *segcore.LoadFieldDataRequest
 	return nil, nil
 }
 
-func (fakeCSegment) Prewarm(context.Context, []int64) error {
-	return nil
-}
-
 func (fakeCSegment) DropIndex(context.Context, int64) error {
 	return nil
 }

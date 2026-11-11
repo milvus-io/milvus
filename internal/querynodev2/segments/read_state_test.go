@@ -1,11 +1,13 @@
 package segments
 
 import (
+	"context"
 	"strconv"
 	"sync"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
@@ -419,9 +421,15 @@ func TestPrewarmUsesBorrowedNativeReadState(t *testing.T) {
 	current, borrowed := mock_segcore.NewMockCSegment(t), mock_segcore.NewMockCSegment(t)
 	parent := &LocalSegment{csegment: current, ptrLock: state.NewLoadStateLock(state.LoadStateDataLoaded)}
 	read := &sealedReadState{Segment: parent, parent: parent, native: borrowed}
-	borrowed.EXPECT().Prewarm(ctx, fields).Return(nil).Once()
+	called := false
+	patch := mockey.Mock(segcore.PrewarmSealedReadState).To(func(callCtx context.Context, native segcore.CSegment, fieldIDs []int64) error {
+		require.Same(t, ctx, callCtx)
+		require.Same(t, borrowed, native)
+		require.Equal(t, fields, fieldIDs)
+		called = true
+		return nil
+	}).Build()
+	defer patch.UnPatch()
 	require.NoError(t, read.Prewarm(ctx, fields))
-	current.AssertNotCalled(t, "Prewarm", ctx, fields)
-	current.EXPECT().Prewarm(ctx, fields).Return(nil).Once()
-	require.NoError(t, parent.Prewarm(ctx, fields))
+	require.True(t, called)
 }

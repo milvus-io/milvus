@@ -18,6 +18,8 @@ import (
 // reference; each query retains another reference until result reduction ends.
 type ReadState interface {
 	Segment
+	// Prewarm fills caches through this retained immutable read state.
+	Prewarm(context.Context, []int64) error
 	RetainReadState() func()
 	ReleaseReadState()
 }
@@ -58,7 +60,11 @@ func (s *sealedReadState) RetrieveByOffsets(ctx context.Context, plan *segcore.R
 }
 
 func (s *sealedReadState) Prewarm(ctx context.Context, fieldIDs []int64) error {
-	return s.parent.prewarmWithSegment(ctx, fieldIDs, s.native)
+	if err := s.parent.PinIfNotReleased(); err != nil {
+		return err
+	}
+	defer s.parent.Unpin()
+	return segcore.PrewarmSealedReadState(ctx, s.native, fieldIDs)
 }
 
 func (s *sealedReadState) HasRawData(fieldID int64) bool {

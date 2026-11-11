@@ -474,8 +474,13 @@ AsyncSegmentPrewarm(CSegmentInterface c_segment,
         milvus::futures::ExecutePriority::LOW,
         [segment, fields = std::move(fields)](
             folly::CancellationToken cancel_token) -> bool* {
+            auto* sealed =
+                dynamic_cast<milvus::segcore::ChunkedSegmentSealedImpl*>(
+                    segment);
+            AssertInfo(sealed != nullptr,
+                       "prewarm requires a sealed read state");
             milvus::OpContext op_ctx(cancel_token);
-            segment->Prewarm(&op_ctx, fields);
+            sealed->Prewarm(&op_ctx, fields);
             return nullptr;
         },
         milvus::futures::PoolType::kLoad);

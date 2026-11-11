@@ -18,6 +18,17 @@ import (
 
 const prewarmConcurrency = 16
 
+// Prewarm warms each configured replica once using the client's query route.
+func Prewarm(ctx context.Context, client Client, collectionID int64) error {
+	warmer, ok := client.(interface {
+		Prewarm(context.Context, int64) error
+	})
+	if !ok {
+		return merr.Wrap(merr.ErrServiceUnimplemented, "query client does not support prewarm")
+	}
+	return warmer.Prewarm(ctx, collectionID)
+}
+
 func (c *legacyOnlyClient) Prewarm(ctx context.Context, collectionID int64) error {
 	return c.legacy.prewarm(ctx, collectionID)
 }

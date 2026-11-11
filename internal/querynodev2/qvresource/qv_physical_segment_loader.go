@@ -237,12 +237,3 @@ func (l *queryViewPhysicalSegmentLoader) AdoptReadState(segment qnview.Transform
 	transform := qnview.UnwrapTransformSegment(segment).(*queryViewTransformSegment)
 	return transform.QuerySegment().(*segments.LocalSegment).AdoptReadState(read)
 }
-
-// Prewarm fills caches through the borrowed ReadState, preserving its generation.
-func (l *queryViewPhysicalSegmentLoader) Prewarm(ctx context.Context, segment qnview.TransformSegment) error {
-	readable, ok := segment.(qnview.ReadableSealedSegment)
-	if !ok {
-		readable = qnview.UnwrapTransformSegment(segment).(qnview.ReadableSealedSegment)
-	}
-	return readable.QuerySegment().Prewarm(ctx, nil)
-}

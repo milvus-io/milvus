@@ -61,7 +61,7 @@ func (m *SegmentResourceManager) Prewarm(ctx context.Context, key qviews.QueryVi
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := m.loader.Prewarm(warm.ctx, warm.handle.Segment()); err != nil {
+		if err := warm.handle.read.Prewarm(warm.ctx, nil); err != nil {
 			return err
 		}
 	}

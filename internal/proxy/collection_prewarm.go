@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/views/queryclient"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -22,7 +23,7 @@ func (node *Proxy) prewarmCollection(ctx context.Context, collectionID int64) {
 		if node.viewQueryClient == nil {
 			err = merr.WrapErrServiceNotReadyMsg("query view client is unavailable")
 		} else {
-			err = node.viewQueryClient.Prewarm(ctx, collectionID)
+			err = queryclient.Prewarm(ctx, node.viewQueryClient, collectionID)
 		}
 		if err != nil {
 			mlog.Info(ctx, "discard one-time prewarm request", mlog.FieldCollectionID(collectionID), mlog.Err(err))

@@ -25,7 +25,7 @@ Existing collection and field cache warmup settings remain independent. Ordinary
 
 ## 3. Admission and dispatch
 
-The public hint is consumed by Proxy. Proxy sends the existing `LoadCollectionRequest` without any warmup fields. Its load task retains ordinary validation and dispatch. After success, Proxy asynchronously invokes `queryclient.Prewarm(collection_id)` once; errors are logged and cannot change the successful load result. The coordinator load callback, WAL broadcast and load completion criteria are unchanged. QC exposes no prewarm RPC and owns no prewarm task.
+The public hint is consumed by Proxy. Proxy sends the existing `LoadCollectionRequest` without any warmup fields. Its load task retains ordinary validation and dispatch. After success, Proxy asynchronously invokes `queryclient.Prewarm(ctx, client, collectionID)` once; errors are logged and cannot change the successful load result. The coordinator load callback, WAL broadcast and load completion criteria are unchanged. QC exposes no prewarm RPC and owns no prewarm task.
 
 The query client reads the current load configuration through existing `GetQueryViewLoadInfo`. That metadata response includes the immutable configured replica IDs, including replicas that are still loading. It captures that set and the collection channels once. Every captured replica/shard gets its own pass; ordinary query load balancing, which chooses one replica per shard, is not used to reduce the prewarm scope. Later additions do not enter this request.
 
@@ -45,7 +45,7 @@ Prewarming is local ephemeral cache work. It is not written to the WAL or replic
 
 The handler acquires the requested ready View using the same lease as a query. The segment manager then borrows its sealed segment handles and immutable ReadStates. The lease and handles remain held until prewarming returns, so retiring the View cannot destroy those resources or redirect the pass to another generation.
 
-Each borrowed ReadState is warmed once through the existing native load executor at low priority. The Go ReadState forwards its own native segment pointer, rather than the physical segment's subsequently adopted state. Segcore warms the pinned state's PK/timestamp resources, field chunks, JSON statistics and index readers. A failure ends this request without queuing retries.
+Each borrowed ReadState is warmed once through the existing native load executor at low priority. The resource manager calls `ReadState.Prewarm` directly; the generic Segment and physical loader contracts are unchanged. The Go ReadState forwards its own native segment pointer to `segcore.PrewarmSealedReadState`, rather than the physical segment's subsequently adopted state. Segcore warms the pinned state's PK/timestamp resources, field chunks, JSON statistics and index readers. A failure ends this request without queuing retries.
 
 A running warm holds an operation reference. Explicit cancellation reaches native/storage work once no live query or other warm request shares the base. Query release rechecks canceled work so it can unwind before destruction. Node shutdown also cancels unshared work. Cancellation is cooperative; slow storage may delay cleanup. Completion releases the pins and does not guarantee permanent cache residency.
 

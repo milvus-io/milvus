@@ -30,7 +30,6 @@ import (
 )
 
 type fakeViewQueryClient struct {
-	queryclient.Client
 	legacy queryclient.LegacyClient
 }
 

@@ -110,12 +110,16 @@ func awaitPrewarm[T any](t *testing.T, ch <-chan T) T {
 	}
 }
 
+func TestPrewarmUnsupportedClient(t *testing.T) {
+	require.ErrorIs(t, Prewarm(t.Context(), struct{ Client }{}, 100), merr.ErrServiceUnimplemented)
+}
+
 func TestPrewarmAllReplicasIndependentlyAndOnlyOnce(t *testing.T) {
 	f, c := newPrewarmRoutingFixture(t)
 	f.borrow = make(chan struct{})
 	f.publish(warmReplica(1, 10))
 	done := make(chan error, 1)
-	go func() { done <- c.Prewarm(t.Context(), 100) }()
+	go func() { done <- Prewarm(t.Context(), c, 100) }()
 	// Replica 1 must start while replica 2 is still cold.
 	for range 2 {
 		plan := awaitPrewarm(t, f.workers)
@@ -140,7 +144,7 @@ func TestPrewarmAllReplicasIndependentlyAndOnlyOnce(t *testing.T) {
 	require.Len(t, f.plans, 4)
 	require.Empty(t, f.workers)
 	// A second explicit request is allowed to warm the newly advertised version.
-	require.NoError(t, c.Prewarm(t.Context(), 100))
+	require.NoError(t, Prewarm(t.Context(), c, 100))
 	require.Len(t, f.plans, 8)
 }
 
@@ -155,7 +159,7 @@ func TestPrewarmFailuresAreNotRetried(t *testing.T) {
 				f.workerError = injected
 			}
 			f.publish(warmReplica(1, 10), warmReplica(2, 20))
-			require.Error(t, c.Prewarm(t.Context(), 100))
+			require.Error(t, Prewarm(t.Context(), c, 100))
 			require.Len(t, f.plans, 4, "each replica/shard is planned once even on retryable errors")
 			if phase == "plan" {
 				require.Empty(t, f.workers)
@@ -175,7 +179,7 @@ func TestPrewarmReleaseReplacementAndShutdownCancelWaitsAndBorrowers(t *testing.
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			done := make(chan error, 1)
-			go func() { done <- c.Prewarm(ctx, 100) }()
+			go func() { done <- Prewarm(ctx, c, 100) }()
 			awaitPrewarm(t, f.workers)
 			awaitPrewarm(t, f.workers)
 			switch event {
@@ -199,7 +203,7 @@ func TestPrewarmReleaseReplacementAndShutdownCancelWaitsAndBorrowers(t *testing.
 func TestPrewarmReleaseBeforeAnyViewIsUp(t *testing.T) {
 	f, c := newPrewarmRoutingFixture(t)
 	done := make(chan error, 1)
-	go func() { done <- c.Prewarm(t.Context(), 100) }()
+	go func() { done <- Prewarm(t.Context(), c, 100) }()
 	require.Eventually(t, func() bool { f.mu.Lock(); defer f.mu.Unlock(); return len(f.handlers) == 2 }, time.Second, time.Millisecond)
 	f.loadVersion.Store(0)
 	require.Error(t, awaitPrewarm(t, done))
@@ -212,7 +216,7 @@ func TestPrewarmDeadlineDoesNotDispatch(t *testing.T) {
 	f.publish(warmReplica(1, 10), warmReplica(2, 20))
 	ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
 	defer cancel()
-	require.Error(t, c.Prewarm(ctx, 100))
+	require.Error(t, Prewarm(ctx, c, 100))
 	require.Empty(t, f.plans)
 	require.Empty(t, f.workers)
 }

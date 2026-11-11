@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -13,6 +14,7 @@ type resourceSegmentHandle struct {
 	base         *segmentBase
 	resource     *segmentResource
 	segment      TransformSegment
+	read         segments.ReadState
 	registration TransformRegistration
 	once         sync.Once
 	release      func()
@@ -53,7 +55,7 @@ func (m *SegmentResourceManager) AcquireSealedSegmentHandles(ctx context.Context
 		read.base.operationRefs++
 		v.operationRefs++
 		segment := &viewSchemaSegment{TransformSegment: read.base.segment, collection: v.collection.Collection(), read: read.read}
-		handles = append(handles, &resourceSegmentHandle{base: read.base, resource: r, segment: segment, registration: read.base.registration, release: func() {
+		handles = append(handles, &resourceSegmentHandle{base: read.base, resource: r, segment: segment, read: read.read, registration: read.base.registration, release: func() {
 			defer r.operations.Done()
 			unpinRead()
 			m.mu.Lock()

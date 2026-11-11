@@ -369,7 +369,9 @@ func (s *cSegmentImpl) Load(ctx context.Context) error {
 	return err
 }
 
-func (s *cSegmentImpl) Prewarm(ctx context.Context, fieldIDs []int64) error {
+// PrewarmSealedReadState fills caches of a retained sealed read state. The caller
+// owns its lifetime, as with PinSealedReadState and AdoptSealedReadState.
+func PrewarmSealedReadState(ctx context.Context, source CSegment, fieldIDs []int64) error {
 	var fields *C.int64_t
 	if len(fieldIDs) > 0 {
 		fields = (*C.int64_t)(unsafe.Pointer(&fieldIDs[0]))
@@ -377,7 +379,7 @@ func (s *cSegmentImpl) Prewarm(ctx context.Context, fieldIDs []int64) error {
 	// The field IDs are copied before AsyncSegmentPrewarm returns.
 	future := cgo.Async(ctx,
 		func() cgo.CFuturePtr {
-			return (cgo.CFuturePtr)(C.AsyncSegmentPrewarm(s.ptr, fields, C.int64_t(len(fieldIDs))))
+			return (cgo.CFuturePtr)(C.AsyncSegmentPrewarm(C.CSegmentInterface(source.RawPointer()), fields, C.int64_t(len(fieldIDs))))
 		},
 		cgo.WithName("segment-prewarm"),
 	)
