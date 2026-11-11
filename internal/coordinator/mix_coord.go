@@ -1120,10 +1120,6 @@ func (s *mixCoordImpl) ListCheckers(ctx context.Context, req *querypb.ListChecke
 	return s.queryCoordServer.ListCheckers(ctx, req)
 }
 
-func (s *mixCoordImpl) PrewarmCollection(ctx context.Context, req *querypb.PrewarmCollectionRequest) (*commonpb.Status, error) {
-	return s.queryCoordServer.PrewarmCollection(ctx, req)
-}
-
 func (s *mixCoordImpl) EnsureCollectionReady(ctx context.Context, req *querypb.EnsureCollectionReadyRequest) (*commonpb.Status, error) {
 	return s.queryCoordServer.EnsureCollectionReady(ctx, req)
 }

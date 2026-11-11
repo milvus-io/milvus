@@ -17,6 +17,7 @@ import (
 
 // Client exposes QueryView query client domains.
 type Client interface {
+	Prewarm(context.Context, int64) error
 	Close()
 	Legacy() LegacyClient
 }

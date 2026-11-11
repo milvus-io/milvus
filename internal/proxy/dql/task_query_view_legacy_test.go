@@ -34,6 +34,7 @@ import (
 )
 
 type fakeLegacyViewQueryClient struct {
+	queryclient.Client
 	legacy queryclient.LegacyClient
 }
 

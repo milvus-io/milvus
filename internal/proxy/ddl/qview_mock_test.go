@@ -15,7 +15,3 @@ import (
 func (coord *MixCoordMock) EnsureCollectionReady(ctx context.Context, req *querypb.EnsureCollectionReadyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	panic("patch QueryView client method with mockey")
 }
-
-func (coord *MixCoordMock) PrewarmCollection(ctx context.Context, req *querypb.PrewarmCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	panic("unexpected prewarm request")
-}

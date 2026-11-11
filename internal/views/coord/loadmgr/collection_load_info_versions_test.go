@@ -385,3 +385,24 @@ func TestLoadInfoIndexPublicationRetry(t *testing.T) {
 	require.NoError(t, manager.RefreshIndexes(t.Context(), 1))
 	require.False(t, store.Contains(1), "index DDL must not load a collection")
 }
+
+func TestLoadInfoPinsReplicaMembershipToConfigVersion(t *testing.T) {
+	store, err := RecoverLoadConfigStore(t.Context(), versionedTestDependencies(t))
+	require.NoError(t, err)
+	cfg := versionedTestConfig()
+	cfg.Replicas = []*ReplicaAssignment{{ReplicaID: 10}, {ReplicaID: 20}}
+	require.NoError(t, store.Put(t.Context(), cfg))
+	first := store.GetConfigVersion(cfg.CollectionID)
+	cfg.Replicas = []*ReplicaAssignment{{ReplicaID: 30}}
+	require.NoError(t, store.Put(t.Context(), cfg))
+	old, err := store.GetLoadInfo(t.Context(), cfg.CollectionID, first)
+	require.NoError(t, err)
+	require.Equal(t, []int64{10, 20}, old.ReplicaIds)
+	old.ReplicaIds[0] = 99
+	current, err := store.GetLoadInfo(t.Context(), cfg.CollectionID, 0)
+	require.NoError(t, err)
+	require.Equal(t, []int64{30}, current.ReplicaIds)
+	old, err = store.GetLoadInfo(t.Context(), cfg.CollectionID, first)
+	require.NoError(t, err)
+	require.Equal(t, []int64{10, 20}, old.ReplicaIds)
+}

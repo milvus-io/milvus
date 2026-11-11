@@ -54,10 +54,6 @@ func (m *GrpcQueryCoordClient) GetStatisticsChannel(ctx context.Context, in *int
 	return &milvuspb.StringResponse{}, m.Err
 }
 
-func (m *GrpcQueryCoordClient) PrewarmCollection(ctx context.Context, req *querypb.PrewarmCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, m.Err
-}
-
 func (m *GrpcQueryCoordClient) EnsureCollectionReady(ctx context.Context, req *querypb.EnsureCollectionReadyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }

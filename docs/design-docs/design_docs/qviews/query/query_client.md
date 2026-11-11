@@ -31,6 +31,20 @@ Both client constructors also require `ViewQueryClientConfig.LoadInfoClient`
 to be supplied by the Coordinator client. This is a separate dependency from
 the streaming transport; parent Proxy wiring must inject its MixCoord client.
 
+## One-time prewarming
+
+`Client.Prewarm` uses the same replica subscriptions and query transports, with
+its own one-attempt orchestration. It captures every configured replica from
+load-info metadata, waits independently for each shard to advertise Up, and
+asks `GetPrewarmPlan` for that exact version. The request retains that topology
+and SN owner through execution; it does not use query retry/replan loops.
+View replacement leaves borrowed resources running. A request-owned load-info
+probe cancels on release/config replacement or probe failure; caller timeout,
+client closure and Proxy shutdown also cancel the request. No hint is persisted
+or passed through View synchronization. See the
+[warmup design](../../20260907-load-collection-warmup-hint.md) for lifetime and
+all-replica semantics.
+
 ## Planning, dispatch and retries
 
 For each resolved VChannel, the client retains one replica subscription from the

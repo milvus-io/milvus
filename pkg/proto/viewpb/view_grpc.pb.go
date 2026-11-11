@@ -139,6 +139,7 @@ var ViewSyncService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
+	QueryPlanService_GetPrewarmPlan_FullMethodName   = "/milvus.proto.view.QueryPlanService/GetPrewarmPlan"
 	QueryPlanService_GetQueryPlan_FullMethodName     = "/milvus.proto.view.QueryPlanService/GetQueryPlan"
 	QueryPlanService_GetMVCCTimestamp_FullMethodName = "/milvus.proto.view.QueryPlanService/GetMVCCTimestamp"
 )
@@ -147,6 +148,8 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type QueryPlanServiceClient interface {
+	// Returns topology for one exact Up View, without query execution or MVCC waits.
+	GetPrewarmPlan(ctx context.Context, in *GetPrewarmPlanRequest, opts ...grpc.CallOption) (*GetPrewarmPlanResponse, error)
 	GetQueryPlan(ctx context.Context, in *GetQueryPlanRequest, opts ...grpc.CallOption) (*GetQueryPlanResponse, error)
 	// GetMVCCTimestamp returns only the MVCC frontiers from the primary replica's WAL.
 	// Lightweight alternative to GetQueryPlan for cross-replica strong consistency:
@@ -161,6 +164,15 @@ type queryPlanServiceClient struct {
 
 func NewQueryPlanServiceClient(cc grpc.ClientConnInterface) QueryPlanServiceClient {
 	return &queryPlanServiceClient{cc}
+}
+
+func (c *queryPlanServiceClient) GetPrewarmPlan(ctx context.Context, in *GetPrewarmPlanRequest, opts ...grpc.CallOption) (*GetPrewarmPlanResponse, error) {
+	out := new(GetPrewarmPlanResponse)
+	err := c.cc.Invoke(ctx, QueryPlanService_GetPrewarmPlan_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *queryPlanServiceClient) GetQueryPlan(ctx context.Context, in *GetQueryPlanRequest, opts ...grpc.CallOption) (*GetQueryPlanResponse, error) {
@@ -185,6 +197,8 @@ func (c *queryPlanServiceClient) GetMVCCTimestamp(ctx context.Context, in *GetMV
 // All implementations should embed UnimplementedQueryPlanServiceServer
 // for forward compatibility
 type QueryPlanServiceServer interface {
+	// Returns topology for one exact Up View, without query execution or MVCC waits.
+	GetPrewarmPlan(context.Context, *GetPrewarmPlanRequest) (*GetPrewarmPlanResponse, error)
 	GetQueryPlan(context.Context, *GetQueryPlanRequest) (*GetQueryPlanResponse, error)
 	// GetMVCCTimestamp returns only the MVCC frontiers from the primary replica's WAL.
 	// Lightweight alternative to GetQueryPlan for cross-replica strong consistency:
@@ -197,6 +211,9 @@ type QueryPlanServiceServer interface {
 type UnimplementedQueryPlanServiceServer struct {
 }
 
+func (UnimplementedQueryPlanServiceServer) GetPrewarmPlan(context.Context, *GetPrewarmPlanRequest) (*GetPrewarmPlanResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetPrewarmPlan not implemented")
+}
 func (UnimplementedQueryPlanServiceServer) GetQueryPlan(context.Context, *GetQueryPlanRequest) (*GetQueryPlanResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetQueryPlan not implemented")
 }
@@ -213,6 +230,24 @@ type UnsafeQueryPlanServiceServer interface {
 
 func RegisterQueryPlanServiceServer(s grpc.ServiceRegistrar, srv QueryPlanServiceServer) {
 	s.RegisterService(&QueryPlanService_ServiceDesc, srv)
+}
+
+func _QueryPlanService_GetPrewarmPlan_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetPrewarmPlanRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryPlanServiceServer).GetPrewarmPlan(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryPlanService_GetPrewarmPlan_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryPlanServiceServer).GetPrewarmPlan(ctx, req.(*GetPrewarmPlanRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _QueryPlanService_GetQueryPlan_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -258,6 +293,10 @@ var QueryPlanService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "milvus.proto.view.QueryPlanService",
 	HandlerType: (*QueryPlanServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetPrewarmPlan",
+			Handler:    _QueryPlanService_GetPrewarmPlan_Handler,
+		},
 		{
 			MethodName: "GetQueryPlan",
 			Handler:    _QueryPlanService_GetQueryPlan_Handler,

@@ -26,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	qnhandler "github.com/milvus-io/milvus/internal/querynodev2/client/handler"
 	qnmanager "github.com/milvus-io/milvus/internal/querynodev2/client/manager"
 	streamingcoordclient "github.com/milvus-io/milvus/internal/streamingcoord/client"
 	snhandler "github.com/milvus-io/milvus/internal/streamingnode/client/handler"
@@ -39,12 +38,10 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/nodeview"
 	"github.com/milvus-io/milvus/internal/views/coord/readiness"
 	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
-	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -56,13 +53,6 @@ type qviewsBalancer interface {
 }
 
 type qviewsRuntime struct {
-	prewarm           func(context.Context, qviews.WorkNode, *viewpb.PrewarmOnViewRequest) error
-	queryNodeHandler  qnhandler.Client
-	warmMu            sync.Mutex
-	warmClosed        bool
-	warmCtx           context.Context
-	warmCancel        context.CancelFunc
-	warmWG            sync.WaitGroup
 	stopOnce          sync.Once
 	gcCancel          context.CancelFunc
 	gcDone            chan struct{}
@@ -83,8 +73,6 @@ type qviewsRuntime struct {
 }
 
 type qviewsRuntimeDependencies struct {
-	prewarm                func(context.Context, qviews.WorkNode, *viewpb.PrewarmOnViewRequest) error
-	queryNodeHandler       qnhandler.Client
 	replicaResources       loadmgr.ReplicaConfigResources
 	loadConfigDependencies loadmgr.LoadConfigStoreDependencies
 	dataViewReconciler     qvresource.DataViewReconciler
@@ -107,12 +95,6 @@ type qviewsRuntimeDependencies struct {
 }
 
 func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qviewsRuntime, error) {
-	handlerTransferred := false
-	defer func() {
-		if !handlerTransferred && deps.queryNodeHandler != nil {
-			deps.queryNodeHandler.Close()
-		}
-	}()
 	if deps.queryViewCatalog == nil {
 		return nil, merr.WrapErrServiceInternalMsg("query view catalog is nil")
 	}
@@ -190,8 +172,6 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 	)
 
 	runtime := &qviewsRuntime{
-		prewarm:              deps.prewarm,
-		queryNodeHandler:     deps.queryNodeHandler,
 		loadConfigStore:      loadConfigStore,
 		loadManager:          loadManager,
 		shardViewRegistry:    shardViewRegistry,
@@ -210,7 +190,6 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 			runtime.refreshVersions.Delete(collectionID)
 		}
 	})
-	handlerTransferred = true
 	return runtime, nil
 }
 
@@ -238,7 +217,6 @@ func (r *qviewsRuntime) start(ctx context.Context) {
 
 func (r *qviewsRuntime) stop() {
 	r.stopOnce.Do(func() {
-		r.stopWarmups()
 		if r.gcCancel != nil {
 			r.gcCancel()
 			<-r.gcDone
@@ -257,9 +235,6 @@ func (r *qviewsRuntime) stop() {
 			r.shardViewRegistry.Close()
 		}
 		_ = r.syncer.Close()
-		if r.queryNodeHandler != nil {
-			r.queryNodeHandler.Close()
-		}
 		if r.queryNodeManager != nil {
 			r.queryNodeManager.Close()
 		}
@@ -279,7 +254,6 @@ func newDefaultQViewsRuntimeDependencies(
 	mixCoord types.MixCoord,
 ) qviewsRuntimeDependencies {
 	queryNodeManager := qnmanager.NewManagerClient(etcdCli)
-	queryNodeHandler := qnhandler.NewClient(etcdCli)
 	streamingCoordClient := streamingcoordclient.NewClient(etcdCli)
 	streamingNodeHandler := snhandler.NewHandlerClient(streamingCoordClient.Assignment())
 	var dataViewProvider balancer.DataViewProvider
@@ -294,19 +268,6 @@ func newDefaultQViewsRuntimeDependencies(
 		reconciler = source.QueryViewDataReconciler()
 	}
 	deps := qviewsRuntimeDependencies{
-		queryNodeHandler: queryNodeHandler,
-		prewarm: func(ctx context.Context, node qviews.WorkNode, req *viewpb.PrewarmOnViewRequest) error {
-			switch node := node.(type) {
-			case qviews.QueryNode:
-				_, err := queryNodeHandler.QueryViewClient().PrewarmOnView(ctx, node.ID, req)
-				return err
-			case qviews.StreamingNode:
-				_, err := streamingNodeHandler.QueryViewClient().PrewarmOnView(ctx, node.PChannel, req)
-				return err
-			default:
-				return merr.WrapErrServiceInternalMsg("unknown prewarm worker %T", node)
-			}
-		},
 		loadConfigDependencies: loadmgr.LoadConfigStoreDependencies{
 			Catalog: queryview.NewCollectionLoadInfoCatalog(metaKV),
 			AllocateVersion: func(ctx context.Context) (uint64, error) {

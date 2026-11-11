@@ -1559,10 +1559,6 @@ func (coord *MixCoordMock) GetIndexBuildProgress(ctx context.Context, req *index
 	}, nil
 }
 
-func (coord *MixCoordMock) PrewarmCollection(ctx context.Context, req *querypb.PrewarmCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return merr.Success(), nil
-}
-
 func (coord *MixCoordMock) EnsureCollectionReady(ctx context.Context, req *querypb.EnsureCollectionReadyRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	if coord.EnsureCollectionReadyFunc != nil {
 		return coord.EnsureCollectionReadyFunc(ctx, req, opts...)

@@ -142,14 +142,16 @@ func TestQueryPlanOrdinaryErrorsBypassAssignmentRecovery(t *testing.T) {
 }
 
 type nodeMismatchFixture struct {
-	client     *handlerClientImpl
-	updates    chan *types.VersionedStreamingNodeAssignments
-	reported   chan types.PChannelInfo
-	address    string
-	vchannel   string
-	handled    atomic.Int32
-	executions atomic.Int32
-	serverID   atomic.Int64
+	prewarmPlans    atomic.Int32
+	failPrewarmPlan atomic.Bool
+	client          *handlerClientImpl
+	updates         chan *types.VersionedStreamingNodeAssignments
+	reported        chan types.PChannelInfo
+	address         string
+	vchannel        string
+	handled         atomic.Int32
+	executions      atomic.Int32
+	serverID        atomic.Int64
 }
 
 func newNodeMismatchFixture(t *testing.T, restartAfterPlan bool) *nodeMismatchFixture {
@@ -329,7 +331,7 @@ func TestPrewarmDoesNotRetryOrFollowAssignmentThroughGRPC(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
 	fixture.waitForPrewarmConnection(t, ctx)
-	_, err := fixture.client.QueryViewClient().PrewarmOnView(ctx, "p0", &viewpb.PrewarmOnViewRequest{})
+	_, err := fixture.client.QueryViewClient().PrewarmOnView(ctx, *fixture.client.watcher.Get(ctx, "p0"), &viewpb.PrewarmOnViewRequest{})
 	require.Equal(t, codes.Unavailable, status.Code(err))
 	require.EqualValues(t, 1, fixture.executions.Load(), "transport must not retry prewarm")
 	fixture.publish(2, 2, 1683)
@@ -343,7 +345,7 @@ func TestPrewarmNodeMismatchReturnsWithoutReassignment(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
 	fixture.waitForPrewarmConnection(t, ctx)
-	_, err := fixture.client.QueryViewClient().PrewarmOnView(ctx, "p0", &viewpb.PrewarmOnViewRequest{})
+	_, err := fixture.client.QueryViewClient().PrewarmOnView(ctx, *fixture.client.watcher.Get(ctx, "p0"), &viewpb.PrewarmOnViewRequest{})
 	require.Error(t, err)
 	require.NotEqual(t, codes.DeadlineExceeded, status.Code(err))
 	require.Zero(t, fixture.executions.Load())
@@ -366,4 +368,49 @@ func (f *nodeMismatchFixture) waitForPrewarmConnection(t *testing.T, ctx context
 
 func (s *nodeMismatchQueryServer) StatisticsOnView(context.Context, *viewpb.StatisticsOnViewRequest) (*viewpb.StatisticsOnViewResponse, error) {
 	return &viewpb.StatisticsOnViewResponse{}, nil
+}
+
+func (s *nodeMismatchQueryServer) GetPrewarmPlan(ctx context.Context, req *viewpb.GetPrewarmPlanRequest) (*viewpb.GetPrewarmPlanResponse, error) {
+	s.fixture.prewarmPlans.Add(1)
+	channel, err := worknodehandler.DecodeQueryViewPChannelFromIncomingContext(ctx)
+	assert.NoError(s.t, err)
+	assert.EqualValues(s.t, 1, channel.Term)
+	if s.fixture.failPrewarmPlan.Load() {
+		return nil, status.Error(codes.Unavailable, "injected planning failure")
+	}
+	return &viewpb.GetPrewarmPlanResponse{Plan: &viewpb.QueryPlan{ShardId: req.ShardId, Version: req.Version}}, nil
+}
+
+func TestPrewarmPlanDoesNotRetryThroughGRPC(t *testing.T) {
+	paramtable.Init()
+	fixture := newNodeMismatchFixture(t, true)
+	fixture.failPrewarmPlan.Store(true)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	fixture.waitForPrewarmConnection(t, ctx)
+	shard := qviews.ShardID{VChannel: fixture.vchannel, ReplicaID: 22}
+	_, err := fixture.client.QueryViewClient().GetPrewarmPlan(ctx, shard, &viewpb.GetPrewarmPlanRequest{ShardId: shard.IntoProto()})
+	require.Equal(t, codes.Unavailable, status.Code(err))
+	require.EqualValues(t, 1, fixture.prewarmPlans.Load())
+	require.Empty(t, fixture.reported)
+}
+
+func TestPrewarmKeepsPlanOwnerAfterAssignmentChanges(t *testing.T) {
+	paramtable.Init()
+	fixture := newNodeMismatchFixture(t, true)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	fixture.waitForPrewarmConnection(t, ctx)
+	shard := qviews.ShardID{VChannel: fixture.vchannel, ReplicaID: 22}
+	plan, err := fixture.client.QueryViewClient().GetPrewarmPlan(ctx, shard, &viewpb.GetPrewarmPlanRequest{ShardId: shard.IntoProto(), Version: &viewpb.QueryViewVersion{QueryVersion: 1}})
+	require.NoError(t, err)
+	require.EqualValues(t, 1682, plan.StreamingNode.Node.ServerID)
+	fixture.serverID.Store(1683)
+	fixture.publish(2, 2, 1683)
+	require.Eventually(t, func() bool { return fixture.client.watcher.Get(ctx, "p0").Node.ServerID == 1683 }, time.Second, time.Millisecond)
+	_, err = fixture.client.QueryViewClient().PrewarmOnView(ctx, plan.StreamingNode, &viewpb.PrewarmOnViewRequest{ShardId: plan.Plan.ShardId, Version: plan.Plan.Version})
+	require.Error(t, err)
+	require.Zero(t, fixture.executions.Load(), "replacement owner must not execute the old plan")
+	require.EqualValues(t, 1, fixture.prewarmPlans.Load())
+	require.Empty(t, fixture.reported)
 }

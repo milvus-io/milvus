@@ -299,6 +299,8 @@ message QueryPlanMVCC {
 // Also provides a lightweight GetMVCCTimestamp RPC for cross-replica strong consistency,
 // where Proxy obtains MVCC from the primary replica and forwards it to another replica.
 service QueryPlanService {
+    // Returns topology for one exact Up View, without query execution or MVCC waits.
+    rpc GetPrewarmPlan(GetPrewarmPlanRequest) returns (GetPrewarmPlanResponse);
     rpc GetQueryPlan(GetQueryPlanRequest) returns (GetQueryPlanResponse) {}
     // GetMVCCTimestamp returns only the MVCC frontiers from the primary replica's WAL.
     // Lightweight alternative to GetQueryPlan for cross-replica strong consistency:
@@ -536,4 +538,15 @@ message StreamingNodeRequestContext {
 message QueryViewControl {
     // Explicit collection teardown skips timed retention, never operation references.
     bool preempt_serving_lease = 1;
+}
+
+message GetPrewarmPlanRequest {
+    int64 collection_id = 1;
+    ShardID shard_id = 2;
+    QueryViewVersion version = 3;
+    uint64 load_info_version = 4;
+}
+
+message GetPrewarmPlanResponse {
+    QueryPlan plan = 1;
 }

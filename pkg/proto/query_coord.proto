@@ -29,9 +29,6 @@ service QueryCoord {
     }
     rpc LoadCollection(LoadCollectionRequest) returns (common.Status) {
     }
-    // Accept one local, ephemeral prewarm request without changing load intent.
-    rpc PrewarmCollection(PrewarmCollectionRequest) returns (common.Status) {
-    }
     rpc ReleaseCollection(ReleaseCollectionRequest) returns (common.Status) {
     }
     rpc SyncNewCreatedPartition(SyncNewCreatedPartitionRequest)
@@ -1265,15 +1262,11 @@ message GetQueryViewLoadInfoResponse {
     repeated view.LoadFieldConfig load_fields = 5; // Explicit preload set within required_fields; empty means none.
     repeated index.IndexInfo index_info_list = 6;
     repeated view.LoadFieldConfig required_fields = 7; // Explicit allowed query field scope; empty means none, never all fields.
+    repeated int64 replica_ids = 8; // Replica set belonging to this immutable load configuration.
 }
 
 message EnsureCollectionReadyRequest {
     common.MsgBase base = 1;
     int64 collectionID = 2;
     repeated string expected_vchannels = 3;
-}
-
-message PrewarmCollectionRequest {
-    common.MsgBase base = 1;
-    int64 collectionID = 2;
 }

@@ -9436,65 +9436,6 @@ func (_c *MixCoord_PinSnapshotData_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
-// PrewarmCollection provides a mock function with given fields: _a0, _a1
-func (_m *MixCoord) PrewarmCollection(_a0 context.Context, _a1 *querypb.PrewarmCollectionRequest) (*commonpb.Status, error) {
-	ret := _m.Called(_a0, _a1)
-
-	if len(ret) == 0 {
-		panic("no return value specified for PrewarmCollection")
-	}
-
-	var r0 *commonpb.Status
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *querypb.PrewarmCollectionRequest) (*commonpb.Status, error)); ok {
-		return rf(_a0, _a1)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *querypb.PrewarmCollectionRequest) *commonpb.Status); ok {
-		r0 = rf(_a0, _a1)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.Status)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, *querypb.PrewarmCollectionRequest) error); ok {
-		r1 = rf(_a0, _a1)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MixCoord_PrewarmCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PrewarmCollection'
-type MixCoord_PrewarmCollection_Call struct {
-	*mock.Call
-}
-
-// PrewarmCollection is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *querypb.PrewarmCollectionRequest
-func (_e *MixCoord_Expecter) PrewarmCollection(_a0 interface{}, _a1 interface{}) *MixCoord_PrewarmCollection_Call {
-	return &MixCoord_PrewarmCollection_Call{Call: _e.mock.On("PrewarmCollection", _a0, _a1)}
-}
-
-func (_c *MixCoord_PrewarmCollection_Call) Run(run func(_a0 context.Context, _a1 *querypb.PrewarmCollectionRequest)) *MixCoord_PrewarmCollection_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*querypb.PrewarmCollectionRequest))
-	})
-	return _c
-}
-
-func (_c *MixCoord_PrewarmCollection_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_PrewarmCollection_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MixCoord_PrewarmCollection_Call) RunAndReturn(run func(context.Context, *querypb.PrewarmCollectionRequest) (*commonpb.Status, error)) *MixCoord_PrewarmCollection_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // PushClientCommand provides a mock function with given fields: _a0, _a1
 func (_m *MixCoord) PushClientCommand(_a0 context.Context, _a1 *milvuspb.PushClientCommandRequest) (*milvuspb.PushClientCommandResponse, error) {
 	ret := _m.Called(_a0, _a1)

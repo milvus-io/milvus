@@ -20,8 +20,9 @@ import (
 
 // QueryViewClient is the QueryView domain client under HandlerClient.
 type QueryViewClient interface {
-	// PrewarmOnView dispatches once to the current owner; it never follows reassignment.
-	PrewarmOnView(context.Context, string, *viewpb.PrewarmOnViewRequest) (*viewpb.PrewarmOnViewResponse, error)
+	GetPrewarmPlan(context.Context, qviews.ShardID, *viewpb.GetPrewarmPlanRequest) (*qviews.PrewarmPlan, error)
+	// PrewarmOnView dispatches once to the owner captured during planning.
+	PrewarmOnView(context.Context, types.PChannelInfoAssigned, *viewpb.PrewarmOnViewRequest) (*viewpb.PrewarmOnViewResponse, error)
 
 	// GetQueryPlan generates a shard-level query plan from the StreamingNode owning the shard pchannel.
 	GetQueryPlan(ctx context.Context, shardID qviews.ShardID, req *viewpb.GetQueryPlanRequest) (*viewpb.GetQueryPlanResponse, error)
@@ -171,17 +172,13 @@ func queryViewRPCNeedsWaitForReady(err error) bool {
 	return viewErr.IsOnShutdown() || viewErr.IsNotPrimary() || grpcstatus.Code(err) == codes.Unavailable
 }
 
-func (qvc *queryViewClient) PrewarmOnView(ctx context.Context, pchannel string, req *viewpb.PrewarmOnViewRequest) (*viewpb.PrewarmOnViewResponse, error) {
+func (qvc *queryViewClient) PrewarmOnView(ctx context.Context, assign types.PChannelInfoAssigned, req *viewpb.PrewarmOnViewRequest) (*viewpb.PrewarmOnViewResponse, error) {
 	if !qvc.owner.lifetime.Add(typeutil.LifetimeStateWorking) {
 		return nil, ErrClientClosed
 	}
 	defer qvc.owner.lifetime.Done()
 	if err := ctx.Err(); err != nil {
 		return nil, err
-	}
-	assign := qvc.owner.watcher.Get(ctx, pchannel)
-	if assign == nil {
-		return nil, ErrClientAssignmentNotReady
 	}
 	client, err := qvc.viewQueryService.GetService(ctx)
 	if err != nil {
@@ -190,4 +187,30 @@ func (qvc *queryViewClient) PrewarmOnView(ctx context.Context, pchannel string, 
 	ctx = contextutil.WithFailFastPick(contextutil.WithPickServerID(ctx, assign.Node.ServerID))
 	ctx = worknodehandler.EncodeQueryViewPChannelToOutgoingContext(ctx, assign.Channel)
 	return client.PrewarmOnView(ctx, req)
+}
+
+func (qvc *queryViewClient) GetPrewarmPlan(ctx context.Context, shard qviews.ShardID, req *viewpb.GetPrewarmPlanRequest) (*qviews.PrewarmPlan, error) {
+	if !qvc.owner.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return nil, ErrClientClosed
+	}
+	defer qvc.owner.lifetime.Done()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	assignment := qvc.owner.watcher.Get(ctx, funcutil.ToPhysicalChannel(shard.VChannel))
+	if assignment == nil {
+		return nil, ErrClientAssignmentNotReady
+	}
+	owner := *assignment
+	client, err := qvc.queryPlanService.GetService(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ctx = contextutil.WithFailFastPick(contextutil.WithPickServerID(ctx, owner.Node.ServerID))
+	ctx = worknodehandler.EncodeQueryViewPChannelToOutgoingContext(ctx, owner.Channel)
+	resp, err := client.GetPrewarmPlan(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return &qviews.PrewarmPlan{Plan: resp.GetPlan(), StreamingNode: owner}, nil
 }

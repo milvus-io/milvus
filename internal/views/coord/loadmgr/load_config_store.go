@@ -309,17 +309,6 @@ func (s *LoadConfigStore) WithCurrentConfig(cfg *LoadConfig, accept func() error
 	return s.withCurrentConfigLocked(cfg, accept)
 }
 
-// TryWithCurrentConfig fences optional work without waiting behind durable DDL.
-// A discarded hint must not delay runtime shutdown while another operation owns
-// this guard and retries persistence on its own lifetime.
-func (s *LoadConfigStore) TryWithCurrentConfig(cfg *LoadConfig, accept func() error) error {
-	if !s.collectionLocks.TryLock(cfg.CollectionID) {
-		return merr.WrapErrServiceUnavailableMsg("load configuration is changing")
-	}
-	defer s.collectionLocks.Unlock(cfg.CollectionID)
-	return s.withCurrentConfigLocked(cfg, accept)
-}
-
 func (s *LoadConfigStore) withCurrentConfigLocked(cfg *LoadConfig, accept func() error) error {
 	if s.GetConfig(cfg.CollectionID) != cfg {
 		return merr.WrapErrServiceUnavailableMsg("load configuration changed during management operation")
