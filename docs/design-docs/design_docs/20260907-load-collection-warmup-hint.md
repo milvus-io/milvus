@@ -19,7 +19,7 @@ This is best-effort work without a public completion guarantee. SDK load waits, 
 
 The public parameter is `load_params={"warmup_hint": "true"}`; REST uses `warmupHint: true`. Existing proxy validation rejects malformed booleans, refresh combinations and unsupported external collections. `LoadPartitions` is unchanged.
 
-`queryCoord.enableLoadCollectionWarmupHint` remains disabled by default. Enable it only after all participants support the new request. A worker without `PrewarmOnView` rejects that attempt; there is no compatibility fallback to persisted hints.
+An explicit `warmup_hint=true` requests prewarming directly; no additional configuration switch is required. A worker without `PrewarmOnView` rejects that attempt; there is no compatibility fallback to persisted hints.
 
 Existing collection and field cache warmup settings remain independent. Ordinary loads may perform work required by those settings, but cannot inherit an earlier hint.
 

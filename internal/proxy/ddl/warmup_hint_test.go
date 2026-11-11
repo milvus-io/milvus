@@ -20,9 +20,6 @@ import (
 
 func TestLoadCollectionWarmupHintValidation(t *testing.T) {
 	paramtable.Init()
-	key := paramtable.Get().QueryCoordCfg.EnableLoadCollectionWarmupHint.Key
-	require.NoError(t, paramtable.Get().Save(key, "true"))
-	t.Cleanup(func() { _ = paramtable.Get().Reset(key) })
 	for _, tc := range []struct {
 		name    string
 		params  map[string]string
@@ -54,8 +51,6 @@ func TestLoadCollectionWarmupHintValidation(t *testing.T) {
 
 func TestLoadCollectionWarmupPartialFieldIndexes(t *testing.T) {
 	paramtable.Init()
-	key := paramtable.Get().QueryCoordCfg.EnableLoadCollectionWarmupHint.Key
-	t.Cleanup(func() { _ = paramtable.Get().Reset(key) })
 	const db, coll = "default", "partial"
 	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
 		Name: coll, Fields: []*schemapb.FieldSchema{
@@ -66,26 +61,21 @@ func TestLoadCollectionWarmupPartialFieldIndexes(t *testing.T) {
 	})
 	for _, tc := range []struct {
 		name    string
-		gate    string
 		fields  []string
 		wantErr error
 	}{
-		{"ordinary load checks all fields", "true", nil, merr.ErrParameterInvalid},
-		{"explicitly load indexed fields", "true", []string{"pk", "loaded"}, nil},
-		{"explicitly load unindexed field", "true", []string{"pk", "loaded", "other"}, merr.ErrParameterInvalid},
-		{"gate disabled", "false", nil, merr.ErrServiceUnimplemented},
+		{"ordinary load checks all fields", nil, merr.ErrParameterInvalid},
+		{"explicitly load indexed fields", []string{"pk", "loaded"}, nil},
+		{"explicitly load unindexed field", []string{"pk", "loaded", "other"}, merr.ErrParameterInvalid},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			require.NoError(t, paramtable.Get().Save(key, tc.gate))
 			cache := NewMockCache(t)
-			cache.EXPECT().GetCollectionID(mock.Anything, db, coll).Return(int64(1), nil).Maybe()
-			cache.EXPECT().GetCollectionSchema(mock.Anything, db, coll).Return(schema, nil).Maybe()
+			cache.EXPECT().GetCollectionID(mock.Anything, db, coll).Return(int64(1), nil).Once()
+			cache.EXPECT().GetCollectionSchema(mock.Anything, db, coll).Return(schema, nil).Once()
 			mix := mocks.NewMockMixCoordClient(t)
-			if tc.gate == "true" {
-				mix.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&indexpb.DescribeIndexResponse{
-					Status: merr.Success(), IndexInfos: []*indexpb.IndexInfo{{FieldID: 101, IndexID: 201}},
-				}, nil).Once()
-			}
+			mix.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&indexpb.DescribeIndexResponse{
+				Status: merr.Success(), IndexInfos: []*indexpb.IndexInfo{{FieldID: 101, IndexID: 201}},
+			}, nil).Once()
 			if tc.wantErr == nil {
 				mix.EXPECT().LoadCollection(mock.Anything, mock.MatchedBy(func(req *querypb.LoadCollectionRequest) bool {
 					return req.GetCollectionID() == 1 && len(req.GetLoadFields()) == 2 && req.GetFieldIndexID()[101] == 201
@@ -96,10 +86,6 @@ func TestLoadCollectionWarmupPartialFieldIndexes(t *testing.T) {
 				LoadParams: map[string]string{common.WarmupHintKey: "true"},
 			}, mixCoord: mix}
 			task.MetaCache = cache
-			if tc.gate == "false" {
-				require.ErrorIs(t, task.PreExecute(t.Context()), tc.wantErr)
-				return
-			}
 			require.NoError(t, task.PreExecute(t.Context()))
 			require.ErrorIs(t, task.Execute(t.Context()), tc.wantErr)
 		})

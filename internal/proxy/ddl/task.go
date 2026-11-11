@@ -3168,9 +3168,6 @@ func (t *LoadCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	t.warmupHint = warmupHint
-	if warmupHint && !paramtable.Get().QueryCoordCfg.EnableLoadCollectionWarmupHint.GetAsBool() {
-		return merr.Wrap(merr.ErrServiceUnimplemented, "LoadCollection warmup hint requires queryCoord.enableLoadCollectionWarmupHint after a full-cluster upgrade")
-	}
 	if warmupHint && t.GetRefresh() {
 		return merr.WrapErrParameterInvalidMsg("load parameter %s cannot be used with refresh", common.WarmupHintKey)
 	}
