@@ -186,11 +186,11 @@ type Manager struct {
 	wg        sync.WaitGroup
 
 	// notifiedJobs tracks jobs whose schema-update callback has already been
-	// delivered. It guards against concurrent invocations of handleJobFinished
-	// from the eager task path and the periodic checker tick — both paths read
-	// collection.Schema before calling schemaUpdater, so without this dedup
-	// they could both observe a stale snapshot (before the WAL broadcast
-	// propagates back into the DataCoord cache) and both broadcast.
+	// delivered. It guards against repeated invocations of handleJobFinished:
+	// each pass reads collection.Schema before calling schemaUpdater, so
+	// without this dedup a later pass could observe a stale snapshot (before
+	// the WAL broadcast propagates back into the DataCoord cache) and
+	// broadcast again.
 	// forgetJob on GC prevents unbounded growth.
 	//
 	// cleanedJobs is the same shape for the OTHER one-time side effect, the
@@ -601,9 +601,9 @@ func (m *Manager) Stop() {
 // whose segments are applied. It runs on the checker goroutine, both for jobs
 // the task path requested and from the periodic checker tick. The
 // notifiedJobs dedup map below admits at most ONE schemaUpdater call in
-// flight per jobID, and none at all once one has delivered: concurrent calls
-// from the two paths race on the mutex, the loser sees the jobID already
-// present and short-circuits. The source/spec equality check is a cheap
+// flight per jobID, and none at all once one has delivered: a later call
+// sees the jobID already present and short-circuits. The source/spec
+// equality check is a cheap
 // secondary guard (e.g., for jobs that finished with the same schema as the
 // current collection).
 //
@@ -622,7 +622,7 @@ func (m *Manager) handleJobFinished(ctx context.Context, job *datapb.ExternalCol
 		return
 	}
 
-	// Exactly-once dedup across concurrent eager + periodic paths.
+	// Exactly-once dedup across the requested and periodic passes.
 	m.notifiedMu.Lock()
 	if _, already := m.notifiedJobs[job.GetJobId()]; already {
 		m.notifiedMu.Unlock()

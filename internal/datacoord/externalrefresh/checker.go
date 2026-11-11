@@ -67,8 +67,7 @@ type externalCollectionRefreshChecker struct {
 	// onJobFinished is the manager-side callback that pushes the refreshed
 	// schema (ExternalSource/ExternalSpec) into RootCoord via the WAL
 	// broadcast. The manager holds a notifiedJobs dedup map so this callback
-	// is delivered exactly once per jobID even when called concurrently
-	// from the eager task path and the periodic checker tick.
+	// is delivered exactly once per jobID, however many passes reach it.
 	onJobFinished func(ctx context.Context, job *datapb.ExternalCollectionRefreshJob)
 	// applyJobInfo is invoked exactly before a job is persisted as Finished.
 	// It performs the collection-global segment update from all finished task
@@ -79,8 +78,8 @@ type externalCollectionRefreshChecker struct {
 	// transitions into Failed state (via aggregateJobState or tryTimeoutJob).
 	// Used to reclaim per-job resources (e.g. the explore temp directory)
 	// without waiting for the retention-gated GC path. The callback itself
-	// is idempotent — the manager dedups on its own cleanup key so concurrent
-	// eager and periodic paths only fire one cleanup per jobID. That key is
+	// is idempotent — the manager dedups on its own cleanup key so repeated
+	// passes only fire one cleanup per jobID. That key is
 	// deliberately NOT the schema-publish key: a job that applied its
 	// segments and then failed still owes the publish.
 	onJobFailed func(jobID int64)
@@ -173,10 +172,10 @@ func (c *externalCollectionRefreshChecker) processJobs() {
 }
 
 // processJob runs one inspection pass for a single job: state aggregation,
-// timeout check, finished-callback firing, and GC. Both the periodic loop
-// and the eager task path call this so the same code drives every job
-// state transition. Idempotent — repeated calls short-circuit on terminal
-// state and source/spec equality.
+// timeout check, finished-callback firing, and GC. The periodic loop and the
+// passes requested by the task path both call this, on the checker goroutine,
+// so the same code drives every job state transition. Idempotent — repeated
+// calls short-circuit on terminal state and source/spec equality.
 func (c *externalCollectionRefreshChecker) processJob(job *datapb.ExternalCollectionRefreshJob) {
 	// Retry Phase B task creation for jobs that are still in Init with no
 	// tasks (i.e. the async submission attempt did not land tasks yet).
@@ -680,8 +679,7 @@ func (c *externalCollectionRefreshChecker) AggregateJobState(job *datapb.Externa
 		// Fire onJobFailed right after the state transition persists, so
 		// per-job resources (explore temp dir) get reclaimed immediately
 		// instead of waiting for the retention-gated GC path (default 24h).
-		// The manager dedups so concurrent eager + periodic paths only
-		// clean once per jobID.
+		// The manager dedups so repeated passes only clean once per jobID.
 		if state == indexpb.JobState_JobStateFailed && c.onJobFailed != nil {
 			c.onJobFailed(job.GetJobId())
 		}
@@ -720,7 +718,7 @@ func (c *externalCollectionRefreshChecker) ensureJobFinishedNotified(job *datapb
 	if c.onJobFinished == nil {
 		return
 	}
-	// Re-read job from meta to get latest state (may have been updated eagerly)
+	// Re-read job from meta to get the latest state (this pass may have updated it)
 	latestJob := c.refreshMeta.GetJob(job.GetJobId())
 	if latestJob == nil {
 		return
@@ -838,9 +836,9 @@ func (c *externalCollectionRefreshChecker) tryTimeoutJob(job *datapb.ExternalCol
 			return
 		}
 		if !applied {
-			// Terminal-state guard fired — while the checker was about to
-			// time out this job a concurrent eager path already transitioned
-			// it to Finished/Failed. Bail out and let the path that actually
+			// Terminal-state guard fired — the job was already transitioned
+			// to Finished/Failed after this snapshot was read. Bail out and
+			// let the path that actually
 			// persisted the transition own the one-time side effects.
 			mlog.Info(c.ctx, "skip timeout fail path, job already in terminal state",
 				mlog.FieldJobID(job.GetJobId()))
