@@ -36,7 +36,7 @@ func newReliableTestSetup(t *testing.T, nodes ...qviews.WorkNode) *reliableTestS
 		return s, nil
 	}
 
-	syncer := NewReliableSyncer(client, nil)
+	syncer := NewReliableSyncer(client, nil, nil)
 	return &reliableTestSetup{
 		syncer:      syncer,
 		client:      client,
@@ -161,7 +161,7 @@ func TestReliable_LazyCreation(t *testing.T) {
 		return newMockStream(ctx), nil
 	}
 
-	syncer := NewReliableSyncer(client, nil)
+	syncer := NewReliableSyncer(client, nil, nil)
 	defer syncer.Close()
 
 	// No stream opened initially.
@@ -559,4 +559,58 @@ func TestReliable_CloseIsIdempotent(t *testing.T) {
 	setup := newReliableTestSetup(t)
 	require.NoError(t, setup.syncer.Close())
 	require.NoError(t, setup.syncer.Close())
+}
+
+func TestReliable_InitialPChannelsAndLaterViews(t *testing.T) {
+	client := newMockViewSyncClient()
+	initial := qviews.StreamingNode{PChannel: "initial"}
+	client.addNode(initial)
+	type openedStream struct {
+		node   qviews.WorkNode
+		stream *mockStream
+	}
+	opened := make(chan openedStream, 8)
+	client.openStreamFn = func(ctx context.Context, node qviews.WorkNode) (viewpb.ViewSyncService_SyncQueryViewClient, error) {
+		stream := newMockStream(ctx)
+		opened <- openedStream{node: node, stream: stream}
+		return stream, nil
+	}
+	s := NewReliableSyncer(client, nil, []string{initial.PChannel, initial.PChannel})
+	defer s.Close()
+	next := func() openedStream {
+		select {
+		case stream := <-opened:
+			return stream
+		case <-time.After(time.Second):
+			t.Fatal("missing SN stream")
+			return openedStream{}
+		}
+	}
+	first := next()
+	require.Equal(t, initial, first.node)
+	require.Empty(t, first.stream.sendCh, "initial channels need no pending View")
+
+	// The first View for a channel absent from the startup snapshot creates it.
+	view := newTestSNView(1)
+	client.addNode(view.WorkNode())
+	acked := make(chan struct{})
+	require.NoError(t, s.SyncViews(t.Context(), newTestSyncGroup(SyncView{
+		View: view, OnSyncResponse: func(qviews.QueryViewAtWorkNode) bool { close(acked); return true },
+	})))
+	later := next()
+	require.Equal(t, view.WorkNode(), later.node)
+	_, sent := later.stream.waitSend(time.Second)
+	require.True(t, sent)
+	later.stream.injectResponse(view.IntoProto())
+	require.True(t, waitFor(acked, time.Second))
+
+	// Empty pending state must not stop the new target from reconnecting.
+	close(later.stream.recvCh)
+	reconnected := next()
+	require.Equal(t, later.node, reconnected.node)
+	require.Empty(t, reconnected.stream.sendCh)
+	require.Empty(t, opened, "duplicate initial channels must share a syncer")
+	require.NoError(t, s.Close())
+	require.ErrorIs(t, first.stream.Context().Err(), context.Canceled)
+	require.ErrorIs(t, reconnected.stream.Context().Err(), context.Canceled)
 }

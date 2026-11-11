@@ -2,9 +2,7 @@ package syncer
 
 import (
 	"context"
-	"io"
 	"net"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,7 +20,7 @@ import (
 )
 
 func TestShardStatsPersistentStreamWithoutViews(t *testing.T) {
-	mockey.PatchConvey("discovery, idle connection, changes and reconnect over gRPC", t, func() {
+	mockey.PatchConvey("initial PChannels, idle connection, changes and reconnect over gRPC", t, func() {
 		listener := bufconn.Listen(1 << 20)
 		server := grpc.NewServer()
 		h := &snview.SNQueryViewHandler{}
@@ -37,12 +35,6 @@ func TestShardStatsPersistentStreamWithoutViews(t *testing.T) {
 		reports := make(chan qviews.ShardStatsWindow, 16)
 		sink := &shardstats.ReplicaStatsStore{}
 		mockey.Mock((*shardstats.ReplicaStatsStore).OnShardStats).To(func(_ *shardstats.ReplicaStatsStore, samples qviews.ShardStatsWindow) { reports <- samples }).Build()
-		mockey.Mock((*mockViewSyncClient).WatchPChannels).To(func(_ *mockViewSyncClient, ctx context.Context, cb func([]string)) error {
-			cb([]string{"p", "p"})
-			cb(nil)
-			<-ctx.Done()
-			return ctx.Err()
-		}).Build()
 		attempts := make(chan context.CancelFunc, 8)
 		client := newMockViewSyncClient()
 		client.openStreamFn = func(ctx context.Context, node qviews.WorkNode) (viewpb.ViewSyncService_SyncQueryViewClient, error) {
@@ -51,7 +43,7 @@ func TestShardStatsPersistentStreamWithoutViews(t *testing.T) {
 			attempts <- cancel
 			return viewpb.NewViewSyncServiceClient(conn).SyncQueryView(child)
 		}
-		rs := NewReliableSyncer(client, sink)
+		rs := NewReliableSyncer(client, sink, []string{"p", "p"})
 		defer rs.Close()
 		next := func() qviews.ShardStatsWindow {
 			select {
@@ -104,14 +96,14 @@ func TestShardStatsPersistentStreamWithoutViews(t *testing.T) {
 		require.NoError(t, rs.Close())
 		select {
 		case <-attempts:
-			t.Fatal("duplicate discovery created another stream")
+			t.Fatal("duplicate initial PChannel created another stream")
 		default:
 		}
 	})
 }
 
-func TestShardStatsRoutingAndDiscoveryRetry(t *testing.T) {
-	mockey.PatchConvey("stats accepts only the owning SN, discovery retries", t, func() {
+func TestShardStatsRouting(t *testing.T) {
+	mockey.PatchConvey("stats accepts only the owning SN", t, func() {
 		var received []qviews.ShardStats
 		sink := &shardstats.ReplicaStatsStore{}
 		mockey.Mock((*shardstats.ReplicaStatsStore).OnShardStats).To(func(_ *shardstats.ReplicaStatsStore, s qviews.ShardStatsWindow) {
@@ -130,35 +122,5 @@ func TestShardStatsRoutingAndDiscoveryRetry(t *testing.T) {
 		rs.statsHandler = nil
 		rs.receiveShardStats(report)
 		require.Len(t, received, 1)
-		var calls atomic.Int32
-		mockey.Mock((*mockViewSyncClient).WatchPChannels).To(func(_ *mockViewSyncClient, ctx context.Context, cb func([]string)) error {
-			if calls.Add(1) == 1 {
-				return io.ErrUnexpectedEOF
-			}
-			cb([]string{"p"})
-			<-ctx.Done()
-			cb([]string{"late"})
-			return ctx.Err()
-		}).Build()
-		client := newMockViewSyncClient()
-		s := NewReliableSyncer(client, nil)
-		require.Eventually(t, func() bool { return calls.Load() >= 2 }, 3*time.Second, 10*time.Millisecond)
-		require.NoError(t, s.Close())
-	})
-}
-
-func TestShardStatsDefaultClientDiscovery(t *testing.T) {
-	mockey.PatchConvey("forward discovery and allow QN-only clients to close", t, func() {
-		mockey.Mock((*fakeStreamingNodeViewSyncClient).WatchPChannels).To(func(_ *fakeStreamingNodeViewSyncClient, _ context.Context, cb func([]string)) error {
-			cb([]string{"p"})
-			return io.EOF
-		}).Build()
-		client := NewDefaultViewSyncClient(nil, &fakeStreamingNodeViewSyncClient{})
-		var channels []string
-		require.ErrorIs(t, client.WatchPChannels(t.Context(), func(c []string) { channels = c }), io.EOF)
-		require.Equal(t, []string{"p"}, channels)
-		ctx, cancel := context.WithCancel(t.Context())
-		cancel()
-		require.ErrorIs(t, NewDefaultViewSyncClient(nil, nil).WatchPChannels(ctx, func([]string) { t.Fatal("unexpected snapshot") }), context.Canceled)
 	})
 }

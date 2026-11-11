@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	qnmanager "github.com/milvus-io/milvus/internal/querynodev2/client/manager"
 	streamingcoordclient "github.com/milvus-io/milvus/internal/streamingcoord/client"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	snhandler "github.com/milvus-io/milvus/internal/streamingnode/client/handler"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer"
@@ -81,6 +82,7 @@ type qviewsRuntimeDependencies struct {
 	vchannels              func(context.Context, int64) ([]string, error)
 	queryViewCatalog       queryview.QueryViewCatalog
 
+	pchannels            []string
 	viewSyncClient       syncer.ViewSyncClient
 	queryNodeClient      nodeview.QueryNodeStatePublisher
 	resourceGroupManager nodeview.ResourceGroupStatePublisher
@@ -139,7 +141,7 @@ func newQViewsRuntime(ctx context.Context, deps qviewsRuntimeDependencies) (*qvi
 		return nil, err
 	}
 	stats := shardstats.New(loadConfigStore)
-	reliableSyncer := syncer.NewReliableSyncer(deps.viewSyncClient, stats)
+	reliableSyncer := syncer.NewReliableSyncer(deps.viewSyncClient, stats, deps.pchannels)
 	shardViewRegistry, err := coordview.RecoverShardViewRegistryWithDataViews(ctx, deps.queryViewCatalog, reliableSyncer, deps.dataViewProvider, loadConfigStore)
 	if err != nil {
 		nodePublisher.Close()
@@ -274,6 +276,7 @@ func newDefaultQViewsRuntimeDependencies(
 		reconciler = source.QueryViewDataReconciler()
 	}
 	deps := qviewsRuntimeDependencies{
+		pchannels: channel.GetClusterChannels(channel.OptIncludeUnavailableInReplication()).Channels,
 		loadConfigDependencies: loadmgr.LoadConfigStoreDependencies{
 			Catalog: queryview.NewCollectionLoadInfoCatalog(metaKV),
 			AllocateVersion: func(ctx context.Context) (uint64, error) {

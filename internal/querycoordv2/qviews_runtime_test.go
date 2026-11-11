@@ -284,8 +284,3 @@ func (c *fakeRuntimeQueryNodeClient) RegisterQueryNodeListener(context.Context, 
 func (m *fakeRuntimeResourceGroupManager) RegisterResourceGroupListener(func(string, []int64)) func() {
 	return func() {}
 }
-
-func (*fakeRuntimeViewSyncClient) WatchPChannels(ctx context.Context, callback func([]string)) error {
-	<-ctx.Done()
-	return ctx.Err()
-}

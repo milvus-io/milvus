@@ -89,12 +89,17 @@ func TestReplicaStatsExpiresWithoutReportsOrReads(t *testing.T) {
 		sample.RequestCount = 2
 		sample.LastAccessUnixNanos = 20
 		store.OnShardStats(testWindow(sample))
-		time.Sleep(11 * time.Second)
+		time.Sleep(99 * time.Second)
+		synctest.Wait()
+		got, ok := store.GetShardStats(id)
+		require.True(t, ok)
+		require.EqualValues(t, 6, got.RequestCount, "retain both windows before two minutes")
+		time.Sleep(2 * time.Second)
 		synctest.Wait()
 		store.mu.RLock()
 		require.Len(t, store.replicas[10].shards[id], 1)
 		store.mu.RUnlock()
-		got, ok := store.GetShardStats(id)
+		got, ok = store.GetShardStats(id)
 		require.True(t, ok)
 		require.EqualValues(t, 2, got.RequestCount)
 		time.Sleep(20 * time.Second)
@@ -125,22 +130,22 @@ func TestReplicaStatsWindowValidationAndReadExpiry(t *testing.T) {
 		bad.StartUnixNanos = bad.EndUnixNanos
 		store.OnShardStats(bad)
 		long := w
-		long.StartUnixNanos -= int64(time.Minute)
+		long.StartUnixNanos -= int64(3 * time.Minute)
 		store.OnShardStats(long)
 		old := w
-		old.StartUnixNanos -= int64(time.Minute)
-		old.EndUnixNanos -= int64(time.Minute)
+		old.StartUnixNanos -= int64(3 * time.Minute)
+		old.EndUnixNanos -= int64(3 * time.Minute)
 		store.OnShardStats(old)
 		_, ok := store.GetShardStats(id)
 		require.False(t, ok)
 		// Expire between cleanup ticks: reads must not expose the stale window.
-		w.StartUnixNanos -= int64(29*time.Second + 500*time.Millisecond)
-		w.EndUnixNanos -= int64(29*time.Second + 500*time.Millisecond)
+		w.StartUnixNanos -= int64(119*time.Second + 500*time.Millisecond)
+		w.EndUnixNanos -= int64(119*time.Second + 500*time.Millisecond)
 		store.OnShardStats(w)
 		time.Sleep(600 * time.Millisecond)
 		_, ok = store.GetShardStats(id)
 		require.False(t, ok)
-		// Future sender timestamps still expire thirty seconds after receipt.
+		// Future sender timestamps still expire two minutes after receipt.
 		future := testWindow(sample)
 		future.StartUnixNanos += int64(time.Hour)
 		future.EndUnixNanos += int64(time.Hour)
@@ -148,7 +153,7 @@ func TestReplicaStatsWindowValidationAndReadExpiry(t *testing.T) {
 		got, ok := store.GetShardStats(id)
 		require.True(t, ok)
 		require.EqualValues(t, 3, got.RequestCount)
-		time.Sleep(31 * time.Second)
+		time.Sleep(121 * time.Second)
 		synctest.Wait()
 		store.mu.RLock()
 		require.Empty(t, store.replicas[10].shards)

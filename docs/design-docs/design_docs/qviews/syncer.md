@@ -18,7 +18,7 @@
 │  ┌─────────────────────────────────────────────────────────────┐ │
 │  │                     ReliableSyncer                          │ │
 │  │  • Watches node changes via ViewSyncClient                 │ │
-│  │  • Discovers SN streams; lazily creates QN streams                │ │
+│  │  • Seeds SN streams; adds targets on SyncViews                │ │
 │  │  • Drains removed nodes (service discovery)                │ │
 │  │                                                             │ │
 │  │  ┌──────────────────┐ ┌──────────────────┐                 │ │
@@ -37,7 +37,7 @@
 ```
 
 **ReliableSyncer**: Top-level component that:
-1. Creates SN/PChannel `resumableSyncer` instances from initial and subsequent assignment discovery, even without pending Views. QN streams are created on first `SyncViews`.
+1. Creates SN/PChannel `resumableSyncer` instances from the initial full cluster channel list, even without pending Views. `SyncViews` creates targets added after that snapshot; QN streams are also created on first `SyncViews`.
 2. Watches node changes via `ViewSyncClient` and drains `resumableSyncer` instances for removed nodes.
 3. Detects QueryNode loss via service discovery (not reconnect timeout).
 
@@ -201,7 +201,7 @@ node-change worker:
 ```
 
 Key design decisions:
-- **SN keepalive**: assignment discovery creates SN streams eagerly. Existing SN streams keep resuming across idle periods and temporary assignment gaps; shutdown closes them. QN streams remain lazy and the QN membership notifier handles their removal.
+- **SN keepalive**: runtime initialization reads `channel.GetClusterChannels(channel.OptIncludeUnavailableInReplication()).Channels` and passes the snapshot to `NewReliableSyncer`. This includes channels without a current owner. Subsequent `SyncViews` adds new PChannels on demand. Existing SN streams keep resuming across idle periods and assignment gaps; shutdown closes them. QN streams remain lazy and the QN membership notifier handles their removal.
 - **No reconnect timeout**: `resumableSyncer` retries indefinitely with backoff until closed.
 - **Separation of concerns**: Stream reconnection (resumableSyncer) is independent of node liveness (service discovery).
 
@@ -339,9 +339,11 @@ See [Shard access statistics](query_view_statistics.md). ReliableSyncer receives
 a `ShardStatsHandler` at construction, after Replica configuration replay. SN
 responses carry best-effort ShardID windows and are dispatched directly to that handler,
 without matching pending View callbacks. The receiver validates the stream's
-PChannel; the stats store validates Replica and collection membership. The store retains received windows for thirty seconds and expires them independently.
+PChannel; the stats store validates Replica and collection membership. The store retains received windows for two minutes and expires them independently.
 A stream reconnect does not replay consumed statistics, even if delivery failed.
 
-The PChannel discovery watcher is canceled and joined during Close. Temporary
+The Syncer has no ongoing PChannel discovery watcher. The initial topology comes
+from the local ChannelManager; later View synchronization adds targets. HandlerClient
+continues resolving SN owners for opening and reconnecting streams. Temporary
 assignment gaps do not discard pending View commands or stop SN reconnection.
 Stats do not introduce a separate source, subscriber or recovery-ready gate.

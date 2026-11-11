@@ -557,7 +557,7 @@ fences and the operations still deferred.
 windows by ShardID in a dedicated top-level SN handler child structure. Windows
 are taken every five seconds or at 1024 distinct Shards and sent through persistent
 Syncer streams. Coord owns statistics by Replica load-config lifetime and expires
-received windows after thirty seconds, independently of reports and reads.
+received windows after two minutes, independently of reports and reads.
 Statistics do not drive QueryView state machines or preparation priority.
 
 ## Partition statistics and pruning

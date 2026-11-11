@@ -3,7 +3,7 @@
 关联需求：[milvus-io/milvus#55284](https://github.com/milvus-io/milvus/issues/55284)。
 
 统计按 ShardID 聚合，通过已有 SyncQueryView stream 尽力上报。SN 只维护当前时间窗口，
-Coord 保留最近 **30 秒**的有效窗口并自主过期清理。统计允许丢失，不实现可靠投递、
+Coord 保留最近 **2 分钟**的有效窗口并自主过期清理。统计允许丢失，不实现可靠投递、
 历史累计总量、加载优先级或调度评分。
 
 ## 1. 统计口径
@@ -44,7 +44,13 @@ SN 重启或 WAL owner 迁移可以丢失当前窗口，不重建统计。
 
 ## 3. 触发和传输
 
-沿用现有发送循环及所有 SN/PChannel 的常驻 resumable stream：
+初始化时由 qviewsRuntime 调用本地 `GetClusterChannels(OptIncludeUnavailableInReplication())`，
+把全量 PChannel 名单传给 ReliableSyncer，预建常驻 resumable stream；无需等待 View 或
+assignment owner 就绪。之后新 PChannel 在第一次 `SyncViews` 时补建，建好后持续保活。
+新增但尚无 View 的 PChannel 暂不建流，因为尚无可服务的 QueryView 产生访问统计。
+SN owner 解析和迁移重连继续由已有 HandlerClient 负责；Syncer 不增加持续发现监听。
+
+沿用现有发送循环：
 
 - 建流时取走当前尚未发送的窗口；没有历史重放。
 - 此后取窗后满 **5 秒**，或当前 map 达到 **1024 个不同 Shard 条目**，触发下一次取窗。
@@ -93,11 +99,11 @@ ReplicaID 则保留其有效窗口，RG/字段/索引变化不清空；撤销 Re
 
 每个 Shard 保存近期收到的窗口样本及失效时间：
 
-- 通常在 `window end + 30 秒` 过期。延迟到达且已经过期的窗口直接丢弃。
-- 断线或发送阻塞会延长实际窗口；超过 30 秒的整窗直接丢弃，不将长时间积累的计数当作近期活动。
-- 对 SN 时钟超前，过期时间最多是 `Coord 接收时间 + 30 秒`，避免未来时间无限滞留。
+- 通常在 `window end + 2 分钟` 过期。延迟到达且已经过期的窗口直接丢弃。
+- 断线或发送阻塞会延长实际窗口；超过 2 分钟的整窗直接丢弃，不将长时间积累的计数当作近期活动。
+- 对 SN 时钟超前，过期时间最多是 `Coord 接收时间 + 2 分钟`，避免未来时间无限滞留。
 - 不将重复投递当作正常恢复方式，不维护跨流去重协议。流中窗口只消费一次。
-- 按整个窗口过期，不对跨越 30 秒边界的窗口做请求级切分或比例折算；这是一份近似统计。
+- 按整个窗口过期，不对跨越 2 分钟边界的窗口做请求级切分或比例折算；这是一份近似统计。
 
 Store 启动一个独立 goroutine，每秒清除过期窗口和已经没有有效窗口的 Shard 条目。
 即使没有新的上报、没有任何读取，物理清理仍会进行；空 Replica 容器随配置保留。
@@ -116,7 +122,7 @@ ReliableSyncer。关闭时先停止 Syncer，再注销 listener、停止并等�
 释放统计。初始化失败执行同样清理，Close 可重复调用。
 
 Coord 重启不恢复旧窗口，也不要求 SN 补发已消费窗口；等待后续访问产生新窗口。
-SN/PChannel stream 在没有 View、没有 stats 时继续保活。QN 不生产 stats。
+已建立的 SN/PChannel stream 在没有 View、没有 stats 时继续保活。QN 不生产 stats。
 
 ## 6. 验证
 
@@ -127,7 +133,7 @@ SN/PChannel stream 在没有 View、没有 stats 时继续保活。QN 不生产 
 - 状态/关闭报告批次优先；失败、重连只发送新窗口；无 pending View 也能建流。
 - Coord 累计近期窗口、按期淘汰、无上报/无读取自主清理、未来时间限制、晚到旧窗口丢弃。
 - Replica 删除、RG 变化、runtime 恢复失败和重复关闭；race 与变更函数覆盖率。
-- 真实 SDK 查询后停止访问超过 30 秒，验证统计变为 unknown；再查询从新窗口计数。
+- 真实 SDK 查询后停止访问超过 2 分钟，验证统计变为 unknown；再查询从新窗口计数。
 
 实际构建、测试、benchmark、覆盖率和 E2E 结果记录于本工作区 docs/plans，不以文档
 验收清单替代已执行证据。

@@ -77,11 +77,3 @@ func (c *DefaultViewSyncClient) OpenSyncStream(ctx context.Context, node qviews.
 }
 
 func (c *DefaultViewSyncClient) Close() {}
-
-func (c *DefaultViewSyncClient) WatchPChannels(ctx context.Context, callback func([]string)) error {
-	if c.streamingNodes == nil {
-		<-ctx.Done()
-		return ctx.Err()
-	}
-	return c.streamingNodes.WatchPChannels(ctx, callback)
-}

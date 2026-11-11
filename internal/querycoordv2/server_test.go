@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
@@ -55,6 +56,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -128,6 +130,9 @@ func (suite *ServerSuite) SetupSuite() {
 
 func (suite *ServerSuite) SetupTest() {
 	initStreamingSystem()
+	// Node lifecycle tests do not start StreamingCoord's ChannelManager.
+	channels := mockey.Mock(channel.GetClusterChannels).Return(message.ClusterChannels{}).Build()
+	suite.T().Cleanup(func() { channels.UnPatch() })
 	// These node lifecycle tests have no pending schema ALTER.
 	schemaTarget := mockey.Mock(broadcast.GetPendingSchemaTarget).Return(nil, nil).Build()
 	suite.T().Cleanup(func() { schemaTarget.UnPatch() })

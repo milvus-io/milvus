@@ -4,7 +4,6 @@ import (
 	"context"
 	"sync"
 
-	"github.com/cenkalti/backoff/v4"
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -34,7 +33,7 @@ type reliableSyncer struct {
 }
 
 // NewReliableSyncer creates a new ReliableSyncer.
-func NewReliableSyncer(client ViewSyncClient, statsHandler ShardStatsHandler) ReliableSyncer {
+func NewReliableSyncer(client ViewSyncClient, statsHandler ShardStatsHandler, pchannels []string) ReliableSyncer {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &reliableSyncer{
 		client:           client,
@@ -44,41 +43,18 @@ func NewReliableSyncer(client ViewSyncClient, statsHandler ShardStatsHandler) Re
 		cancel:           cancel,
 		nodeChanged:      make(chan struct{}, 1),
 	}
-	s.drainWG.Add(2)
-	go s.watchNodeChanged()
-	go s.watchPChannels()
-	client.RegisterNodeChangedNotifier(s.notifyNodeChanged)
-	return s
-}
-
-// SN streams are discovered eagerly and kept even without pending Views.
-// Assignment gaps must not discard pending state or stop reconnection.
-func (s *reliableSyncer) watchPChannels() {
-	defer s.drainWG.Done()
-	bo := backoff.NewExponentialBackOff()
-	bo.MaxElapsedTime = 0
-	for s.ctx.Err() == nil {
-		err := s.client.WatchPChannels(s.ctx, func(channels []string) {
-			s.mu.Lock()
-			defer s.mu.Unlock()
-			if s.closed {
-				return
-			}
-			for _, channel := range channels {
-				node := qviews.StreamingNode{PChannel: channel}
-				if s.resumableSyncers[node.Key()] == nil {
-					s.resumableSyncers[node.Key()] = newResumableSyncer(s.ctx, node, s.client, s.statsHandler)
-				}
-			}
-		})
-		if s.ctx.Err() != nil {
-			return
-		}
-		mlog.Warn(s.ctx, "ReliableSyncer: channel discovery interrupted", mlog.Err(err))
-		if !waitReconnectBackoff(s.ctx, bo) {
-			return
+	// Seed all known PChannels, including those temporarily without an owner.
+	// SyncViews adds targets introduced after this snapshot.
+	for _, pchannel := range pchannels {
+		node := qviews.StreamingNode{PChannel: pchannel}
+		if s.resumableSyncers[node.Key()] == nil {
+			s.resumableSyncers[node.Key()] = newResumableSyncer(s.ctx, node, s.client, s.statsHandler)
 		}
 	}
+	s.drainWG.Add(1)
+	go s.watchNodeChanged()
+	client.RegisterNodeChangedNotifier(s.notifyNodeChanged)
+	return s
 }
 
 // notifyNodeChanged coalesces membership-change notifications without blocking

@@ -11,7 +11,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
-const retention = 30 * time.Second
+const retention = 2 * time.Minute
 
 // ReplicaStatsStore follows current load intent, independently of View state.
 type ReplicaStatsStore struct {
@@ -73,7 +73,7 @@ func (s *ReplicaStatsStore) onLoadConfig(collectionID int64, config *loadmgr.Loa
 func (s *ReplicaStatsStore) OnShardStats(window qviews.ShardStatsWindow) {
 	now := time.Now().UnixNano()
 	// Legacy cumulative reports have no window. Future node clocks must not
-	// retain a window longer than thirty seconds after local receipt.
+	// retain a window longer than two minutes after local receipt.
 	expiresAt := min(window.EndUnixNanos, now) + int64(retention)
 	if window.StartUnixNanos <= 0 || window.EndUnixNanos <= window.StartUnixNanos || window.EndUnixNanos-window.StartUnixNanos > int64(retention) || expiresAt <= now {
 		return

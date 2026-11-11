@@ -309,8 +309,3 @@ func waitForCond(fn func() bool, timeout time.Duration) bool {
 	}
 	return false
 }
-
-func (*mockViewSyncClient) WatchPChannels(ctx context.Context, callback func([]string)) error {
-	<-ctx.Done()
-	return ctx.Err()
-}
