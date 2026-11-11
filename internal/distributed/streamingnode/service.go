@@ -263,6 +263,10 @@ func (s *Server) initSession() error {
 		return merr.WrapErrServiceUnavailable("session is nil, the etcd client connection may have failed")
 	}
 	s.session.Init(typeutil.StreamingNodeRole, s.listener.Address(), false, true)
+	// Record the session so that the supervisor process (--run-with-subprocess) removes it as soon as
+	// this process exits abnormally. Otherwise the streamingnode session lingers until its lease
+	// expires, and every WAL owned by this node stays unavailable for up to common.session.ttl.
+	sessionutil.SaveServerInfo(typeutil.StreamingNodeRole, s.session.ServerID)
 	paramtable.SetNodeID(s.session.ServerID)
 	log.Ctx(s.ctx).Info("StreamingNode init session", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("node address", s.listener.Address()))
 	return nil
