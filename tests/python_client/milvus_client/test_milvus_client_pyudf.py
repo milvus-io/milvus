@@ -1777,7 +1777,7 @@ def create_udf(context):
             self._assert_pyudf_recovery(client, name, resource)
 
     @pytest.mark.xdist_group(name="rbac_serial")
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L3, "pyudf")
     def test_pyudf_search_privileges_follow_grant_and_revoke(self, tmp_path, minio_host, minio_bucket):
         """target: Search and resource privileges; method: grant/revoke on same user; expected: isolation and recovery."""
         # Preconditions: function.pyUDF.enabled=true, common.fileResource.mode.proxy=sync,
@@ -1978,7 +1978,7 @@ def create_udf(context):
         assert [TestMilvusClientPyUDF._hit_field(h, "ts") for h in hits] == [30 * scale, 20 * scale, 10 * scale]
 
     @pytest.mark.xdist_group(name="rbac_serial")
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L3, "pyudf")
     @pytest.mark.parametrize("credential", ["missing", "malformed", "wrong_password"])
     def test_pyudf_security_rpc_authentication(self, tmp_path, minio_host, minio_bucket, credential):
         """target: four public RPC auth gates; method: raw requests; expected: denial and intact assets."""
@@ -2037,7 +2037,7 @@ def create_udf(context):
                     self._assert_pyudf_recovery(root, name, resource)
 
     @pytest.mark.xdist_group(name="rbac_serial")
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L3, "pyudf")
     @pytest.mark.parametrize("surface", ["sdk", "rest"])
     def test_pyudf_security_collection_scope_and_revocation(self, tmp_path, minio_host, minio_bucket, surface):
         """target: collection-scoped Search; method: A/B and revoke; expected: exact A, denied B, intact peer."""
@@ -2155,7 +2155,7 @@ def create_udf(context):
                     )
 
     @pytest.mark.xdist_group(name="rbac_serial")
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L3, "pyudf")
     def test_pyudf_security_resource_manager_has_no_search_privilege(self, tmp_path, minio_host, minio_bucket):
         """target: management/execution separation; method: grant only resources; expected: Search denied."""
         # Preconditions: function.pyUDF.enabled=true, common.fileResource.mode.proxy=sync,
@@ -2257,7 +2257,7 @@ def create_udf(context):
             self._assert_pyudf_security_hits(result[0])
 
     @pytest.mark.xdist_group(name="rbac_serial")
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L3, "pyudf")
     def test_pyudf_security_exception_disclosure_characterization(
         self, tmp_path, minio_host, minio_bucket, record_property
     ):
@@ -2299,7 +2299,7 @@ def create_udf(context):
                 record_property("security_verdict", "EXPOSURE_OBSERVATION_NOT_SECURITY_PASS")
                 self._assert_pyudf_recovery(root, name, resource)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L3, "pyudf")
     def test_pyudf_security_worker_endpoint_not_peer_accessible(self, record_property):
         """target: supplied endpoint exposure; method: bounded peer TCP probes; expected: API reachable, worker closed."""
         # Preconditions: enabled PyUDF on 127.0.0.1:19090 and a runner outside its Pod;
@@ -2335,7 +2335,7 @@ def create_udf(context):
         record_property("scope", "supplied endpoint; bind it to a recorded Pod IP to certify the Pod boundary")
 
     @pytest.mark.xdist_group(name="rbac_serial")
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L3, "pyudf")
     def test_pyudf_security_database_scope_with_colliding_names(self, tmp_path, minio_host, minio_bucket):
         """target: database-scoped Search; method: identical names and separate grants; expected: exact scoped data."""
         # Preconditions: function.pyUDF.enabled=true, common.fileResource.mode.proxy=sync,
@@ -2391,7 +2391,7 @@ def create_udf(context):
                 observed = self.query(owner, name, filter="id >= 0", output_fields=["id", "ts"])[0]
                 assert sorted(observed, key=lambda row: row["id"]) == [{"id": i, "ts": i * 100} for i in (1, 2, 3)]
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L3, "pyudf")
     def test_pyudf_mixed_segment_states_preserve_results(
         self, tmp_path, minio_host, minio_bucket, record_property, request
     ):
@@ -2741,7 +2741,7 @@ def create_udf(context):
                 finally:
                     self._remove_file_resource(client, resource)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L3, "pyudf")
     def test_pyudf_package_collision_preserves_original(self, tmp_path, minio_host, minio_bucket, request):
         """target: package ownership; method: same package in two wheel paths; expected: rejection and intact control."""
         # Preconditions: one standalone instance with PyUDF enabled, Proxy resource

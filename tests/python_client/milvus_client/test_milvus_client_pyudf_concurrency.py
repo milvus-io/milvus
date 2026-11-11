@@ -42,7 +42,7 @@ def require_config(request, expected):
         assert response.json()["configs"][0]["value"] == str(value), response.json()
 
 
-@pytest.mark.tags("L3")
+@pytest.mark.tags("L3", "pyudf")
 def test_pyudf_expired_active_call_retains_capacity_until_actual_completion(
     request, runtime_connection, record_property
 ):
@@ -117,7 +117,7 @@ def create_udf(ctx):
 """
 
 
-@pytest.mark.tags("L3")
+@pytest.mark.tags("L3", "pyudf")
 @pytest.mark.parametrize(
     "workers,pool_size",
     [(w, p) for w in (1, 2, 4) for p in (1, 4, 10)],
@@ -233,7 +233,7 @@ def create_udf(ctx): return UDF(ctx)
 """
 
 
-@pytest.mark.tags("L3")
+@pytest.mark.tags("L3", "pyudf")
 def test_pyudf_256_workers_serving_search_with_bounded_load(request, runtime_connection, record_property):
     """target: upper worker profile; method: Search and PID probes; expected: exact results under bounded load."""
     require_config(
@@ -386,7 +386,7 @@ def create_udf(ctx):
 """
 
 
-@pytest.mark.tags("L3")
+@pytest.mark.tags("L3", "pyudf")
 def test_pyudf_search_cancels_loader_wait_and_later_query_batches(request, runtime_connection, record_property):
     """target: Search cancellation; method: persisted entry markers; expected: no expired transform or later batch."""
     require_config(
@@ -494,7 +494,7 @@ def test_pyudf_search_cancels_loader_wait_and_later_query_batches(request, runti
                 storage.remove_object(bucket, path)
 
 
-@pytest.mark.tags("L3")
+@pytest.mark.tags("L3", "pyudf")
 def test_pyudf_admission_queue_expiry_and_server_deadline(request, runtime_connection, record_property):
     """Reject excess RPCs; skip expired queued code; finish timed-out running code once."""
     endpoint = request.config.getoption("--pyudf-management-endpoint")
@@ -556,7 +556,7 @@ def test_pyudf_admission_queue_expiry_and_server_deadline(request, runtime_conne
         probe.check(with_udf=False)
 
 
-@pytest.mark.tags("L3")
+@pytest.mark.tags("L3", "pyudf")
 @pytest.mark.parametrize("mode", ["output_under", "output_over", "repeated_under", "distinct_over"])
 def test_pyudf_message_limit_and_repeated_input_deduplication(request, runtime_connection, record_property, mode):
     """Check both message directions at 1 MiB, keeping precise scalar recovery controls."""

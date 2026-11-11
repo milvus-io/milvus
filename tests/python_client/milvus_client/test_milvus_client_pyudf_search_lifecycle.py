@@ -381,7 +381,7 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
             record_property("atomic_response", "Search raised; no partial Search result returned")
             self._assert_pyudf_recovery(client, name, resource)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L3, "pyudf")
     def test_pyudf_actual_pod_worker_network_boundary(self, request, record_property):
         """Probe a recorded target Pod IP from the external E2E runner Pod."""
         endpoint = request.config.getoption("--pyudf-management-endpoint")
@@ -766,7 +766,7 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
                 ),
             )
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L3, "pyudf")
     @pytest.mark.parametrize("kind", ["scalarField", "vectorField"])
     @pytest.mark.parametrize("policy", [None, "sync", "async", "disable"])
     def test_pyudf_field_data_warmup_observation(
@@ -871,7 +871,7 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
                 )
                 self.release_collection(client, name)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L3, "pyudf")
     def test_pyudf_large_topk_collection_support(self, tmp_path, minio_host, minio_bucket, record_property):
         """target: large_topk interaction; method: 16385 real candidates; expected: ordinary and PyUDF requests preserve every row."""
         count = 16385
@@ -909,7 +909,7 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
                     f"large_topk_{limit}", json.dumps({"collection": name, "resource": resource, "hits": len(result)})
                 )
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L3, "pyudf")
     @pytest.mark.parametrize("axis", ["topk", "nq"])
     @pytest.mark.parametrize("position", ["one", "below", "limit"])
     def test_pyudf_positive_capacity_boundaries(
@@ -966,7 +966,7 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
                 ),
             )
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L3, "pyudf")
     def test_pyudf_pinned_old_sdk_capability_boundary(
         self, tmp_path, minio_host, minio_bucket, request, record_property
     ):
@@ -1023,7 +1023,7 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
             record_property("old_sdk", process.stdout.strip())
             self._assert_pyudf_recovery(client, name, resource)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L3, "pyudf")
     def test_pyudf_wheel_switch_after_actual_timeout_drain(
         self, tmp_path, minio_host, minio_bucket, request, record_property
     ):
@@ -1281,7 +1281,7 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
                 verify("compacted_reload", added=True)
             self._assert_pyudf_recovery(client, control, resource)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L3, "pyudf")
     @pytest.mark.parametrize(
         "invalid", ["duplicate_stage", "invalid_stage", "topk_zero", "topk_over", "nq_zero", "nq_over"]
     )
@@ -1434,7 +1434,7 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
                 )
             self._assert_pyudf_recovery(owner, control, good)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L3, "pyudf")
     def test_pyudf_search_only_cannot_manage_resources(self, tmp_path, minio_host, minio_bucket):
         """target: reverse RBAC; method: Search-only actor attempts add/list/remove; expected: owner state unchanged."""
         with self._pyudf_test_environment(tmp_path, minio_host, minio_bucket, MODULE) as (root, name, resource):
@@ -1707,7 +1707,7 @@ class TestMilvusClientPyUDFSearchLifecycle(PyUDFClientBase):
                 )
             self._assert_pyudf_recovery(client, control, resource)
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L3, "pyudf")
     @pytest.mark.parametrize("warm_resource", [False, True], ids=["cold-resource", "warm-resource"])
     def test_pyudf_same_cluster_snapshot_restore_reuses_registered_resource(
         self, tmp_path, minio_host, minio_bucket, warm_resource, record_property

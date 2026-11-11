@@ -124,7 +124,7 @@ def test_pyudf_vector_recall_types_preserve_scalar_rerank(probe_connection, kind
         record_property("vector_tuple", f"{kind.name}/{metric}/3 exhaustive candidates/reload")
 
 
-@pytest.mark.tags("L3")
+@pytest.mark.tags("L3", "pyudf")
 def test_pyudf_timeout_completes_without_replay(owned_probe, request, record_property):
     """A deadline ends the RPC; the bounded user call completes exactly once."""
     import requests

@@ -14,7 +14,7 @@ from pymilvus import MilvusClient
 from workloads.pyudf.workload import prepare
 
 
-@pytest.mark.tags("L3")
+@pytest.mark.tags("L3", "pyudf")
 def test_pyudf_cardinal_profile_reload(request, minio_host, minio_bucket, tmp_path, record_property):
     expected = request.config.getoption("--pyudf-expected-autoindex")
     if expected is None:
