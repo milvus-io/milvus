@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -52,9 +53,6 @@ func ValidateSchemaEvolution(oldSchema, newSchema *schemapb.CollectionSchema) er
 		return err
 	}
 	if err := validateDroppedEvolutionFields(oldFields, newFields, newSchema); err != nil {
-		return err
-	}
-	if err := validateVectorFieldIntroduction(oldSchema, newSchema); err != nil {
 		return err
 	}
 	// Function-graph validation (single producer, output binding, alter-immutability,
@@ -408,27 +406,13 @@ func validateDroppedEvolutionField(field *schemapb.FieldSchema, newSchema *schem
 	if function := evolutionFunctionReferencing(newSchema, field.GetFieldID()); function != "" {
 		return merr.WrapErrParameterInvalidMsg("cannot drop field %q while function %q still references it", name, function)
 	}
-	if typeutil.IsVectorType(field.GetDataType()) && !evolutionHasVectorField(newSchema) {
+	// Dropping the last vector field turns the collection into one without a
+	// vector field, which is allowed only while such collections may be created.
+	if typeutil.IsVectorType(field.GetDataType()) && !evolutionHasVectorField(newSchema) &&
+		!paramtable.Get().CommonCfg.EnableCollectionWithoutVector.GetAsBool() {
 		return merr.WrapErrParameterInvalidMsg("cannot drop the last vector field %q", name)
 	}
 	return nil
-}
-
-// validateVectorFieldIntroduction rejects any schema change that turns a
-// collection created without a vector field into one with a vector field,
-// whether through a top-level field, a struct array sub-field or a function
-// output. Whether a collection has vectors is fixed at creation: load, index
-// readiness and segment sizing read it from the schema, and none of them
-// handles the transition on an existing collection.
-func validateVectorFieldIntroduction(oldSchema, newSchema *schemapb.CollectionSchema) error {
-	if typeutil.HasVectorField(oldSchema) || !typeutil.HasVectorField(newSchema) {
-		return nil
-	}
-	added := make([]string, 0, 1)
-	for _, field := range typeutil.GetVectorFieldSchemas(newSchema) {
-		added = append(added, field.GetName())
-	}
-	return merr.WrapErrParameterInvalidMsg("collection %s has no vector field, adding a vector field is not supported, field name(s) = %v", newSchema.GetName(), added)
 }
 
 // validateEvolutionClusteringKey allows a clustering-key field to be added

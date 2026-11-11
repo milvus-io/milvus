@@ -743,9 +743,6 @@ func validateAddStructFieldRequest(schema *schemapb.CollectionSchema, structFiel
 	vectorFields := len(typeutil.GetVectorFieldSchemas(schema))
 	for _, subField := range structFieldSchema.GetFields() {
 		if typeutil.IsVectorType(subField.GetDataType()) {
-			if vectorFields == 0 {
-				return merr.WrapErrParameterInvalidMsg("collection %s has no vector field, adding a vector field is not supported, field name = %s", schema.GetName(), subField.GetName())
-			}
 			vectorFields++
 		}
 	}
@@ -906,9 +903,6 @@ func validateAddFieldRequest(schema *schemapb.CollectionSchema, newFieldSchema *
 		}
 	}
 	if typeutil.IsVectorType(newFieldSchema.DataType) {
-		if !typeutil.HasVectorField(schema) {
-			return merr.WrapErrParameterInvalidMsg("collection %s has no vector field, adding a vector field is not supported, field name = %s", schema.GetName(), newFieldSchema.GetName())
-		}
 		vectorFields := len(typeutil.GetVectorFieldSchemas(schema))
 		if vectorFields >= paramtable.Get().ProxyCfg.MaxVectorFieldNum.GetAsInt() {
 			return merr.WrapErrParameterInvalidMsg("maximum vector field's number should be limited to %d", paramtable.Get().ProxyCfg.MaxVectorFieldNum.GetAsInt())
@@ -1294,7 +1288,7 @@ func validateDropField(schema *schemapb.CollectionSchema, fieldName string) erro
 	// Check: cannot drop the last vector field. GetVectorFieldSchemas counts
 	// vectors in both top-level Fields and StructArrayField sub-fields.
 	if typeutil.IsVectorType(targetField.DataType) {
-		if len(typeutil.GetVectorFieldSchemas(schema)) <= 1 {
+		if len(typeutil.GetVectorFieldSchemas(schema)) <= 1 && !paramtable.Get().CommonCfg.EnableCollectionWithoutVector.GetAsBool() {
 			return merr.WrapErrParameterInvalidMsg("cannot drop the last vector field: %s", fieldName)
 		}
 	}
@@ -1335,7 +1329,8 @@ func validateDropStructSubField(schema *schemapb.CollectionSchema, parent *schem
 	if sub.GetIsPrimaryKey() || sub.GetAutoID() || sub.GetIsPartitionKey() || sub.GetIsClusteringKey() || sub.GetIsDynamic() || sub.GetIsFunctionOutput() || sub.GetExternalField() != "" {
 		return merr.WrapErrParameterInvalidMsg("cannot drop struct sub-field %q with a protected role", sub.GetName())
 	}
-	if typeutil.IsVectorType(sub.GetDataType()) && len(typeutil.GetVectorFieldSchemas(schema)) <= 1 {
+	if typeutil.IsVectorType(sub.GetDataType()) && len(typeutil.GetVectorFieldSchemas(schema)) <= 1 &&
+		!paramtable.Get().CommonCfg.EnableCollectionWithoutVector.GetAsBool() {
 		return merr.WrapErrParameterInvalidMsg("cannot drop the last vector field: %s", storedName)
 	}
 	for _, fn := range schema.GetFunctions() {
@@ -1384,7 +1379,7 @@ func validateDropStructArrayField(schema *schemapb.CollectionSchema, sf *schemap
 			removedVectors++
 		}
 	}
-	if removedVectors > 0 && removedVectors >= len(typeutil.GetVectorFieldSchemas(schema)) {
+	if removedVectors > 0 && removedVectors >= len(typeutil.GetVectorFieldSchemas(schema)) && !paramtable.Get().CommonCfg.EnableCollectionWithoutVector.GetAsBool() {
 		return merr.WrapErrParameterInvalidMsg(
 			"cannot drop struct array field %s: it would leave no vector field in the collection",
 			sf.GetName())
@@ -1424,7 +1419,7 @@ func validateDropFunction(schema *schemapb.CollectionSchema, functionName string
 			removedVectors++
 		}
 	}
-	if removedVectors > 0 && removedVectors >= len(typeutil.GetVectorFieldSchemas(schema)) {
+	if removedVectors > 0 && removedVectors >= len(typeutil.GetVectorFieldSchemas(schema)) && !paramtable.Get().CommonCfg.EnableCollectionWithoutVector.GetAsBool() {
 		return merr.WrapErrParameterInvalidMsg(
 			"cannot drop function %s: it would leave no vector field in the collection",
 			functionName)

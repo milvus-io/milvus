@@ -1164,9 +1164,8 @@ func TestValidateAddStructFieldRequest(t *testing.T) {
 	t.Run("vector sub-field on a collection without vector field", func(t *testing.T) {
 		schema := proto.Clone(baseSchema).(*schemapb.CollectionSchema)
 		schema.Fields = schema.Fields[:1]
-		err := validateAddStructFieldRequest(schema, newAddStructFieldSchema("profile"))
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "has no vector field")
+		// A collection without a vector field may gain one through a struct sub-field.
+		require.NoError(t, validateAddStructFieldRequest(schema, newAddStructFieldSchema("profile")))
 	})
 
 	t.Run("struct must be nullable", func(t *testing.T) {
@@ -6760,10 +6759,8 @@ func TestValidateAddFieldRequest(t *testing.T) {
 			Nullable:   true,
 			TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}},
 		}
-		err := validateAddFieldRequest(schema, newField)
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-		assert.Contains(t, err.Error(), "has no vector field")
+		// A collection without a vector field may gain one.
+		assert.NoError(t, validateAddFieldRequest(schema, newField))
 	})
 
 	t.Run("text field requires storage v3", func(t *testing.T) {
@@ -7809,10 +7806,17 @@ func TestValidateDropField(t *testing.T) {
 		assert.Contains(t, err.Error(), "cannot drop primary key field")
 	})
 
-	t.Run("cannot drop the last vector field", func(t *testing.T) {
-		err := validateDropField(baseSchema, "vector")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "cannot drop the last vector field")
+	t.Run("the last vector field may be dropped while collections without vector are enabled", func(t *testing.T) {
+		// "vector" is also a function output here, which is a separate rule; the
+		// last-vector rule itself no longer rejects the drop.
+		if err := validateDropField(baseSchema, "vector"); err != nil {
+			assert.NotContains(t, err.Error(), "cannot drop the last vector field")
+		}
+		withCollectionWithoutVectorDisabled(func() {
+			err := validateDropField(baseSchema, "vector")
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "cannot drop the last vector field")
+		})
 	})
 
 	t.Run("can drop vector field when multiple exist", func(t *testing.T) {
@@ -7985,9 +7989,12 @@ func TestValidateDropField(t *testing.T) {
 				},
 			},
 		}
-		err := validateDropField(schema, "paragraphs")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "would leave no vector field")
+		assert.NoError(t, validateDropField(schema, "paragraphs"))
+		withCollectionWithoutVectorDisabled(func() {
+			err := validateDropField(schema, "paragraphs")
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "would leave no vector field")
+		})
 	})
 
 	t.Run("reject drop struct array field with protected sub-field", func(t *testing.T) {
@@ -8559,7 +8566,10 @@ func TestValidateDropStructSubField(t *testing.T) {
 	vector := proto.Clone(schema).(*schemapb.CollectionSchema)
 	vector.Fields = vector.Fields[:1]
 	vector.StructArrayFields[0].Fields[1].DataType = schemapb.DataType_ArrayOfVector
-	require.ErrorContains(t, validateDropField(vector, "profile[b]"), "cannot drop the last vector field")
+	require.NoError(t, validateDropField(vector, "profile[b]"))
+	withCollectionWithoutVectorDisabled(func() {
+		require.ErrorContains(t, validateDropField(vector, "profile[b]"), "cannot drop the last vector field")
+	})
 
 	used := proto.Clone(schema).(*schemapb.CollectionSchema)
 	used.Functions = []*schemapb.FunctionSchema{{Name: "f", InputFieldNames: []string{"profile[b]"}}}
@@ -8755,9 +8765,12 @@ func TestValidateDropFunction(t *testing.T) {
 				},
 			},
 		}
-		err := validateDropFunction(schema, "bm25_func", true)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "would leave no vector field")
+		assert.NoError(t, validateDropFunction(schema, "bm25_func", true))
+		withCollectionWithoutVectorDisabled(func() {
+			err := validateDropFunction(schema, "bm25_func", true)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "would leave no vector field")
+		})
 	})
 
 	t.Run("drop function field preserves vector in struct array field", func(t *testing.T) {
@@ -8785,4 +8798,14 @@ func TestValidateDropFunction(t *testing.T) {
 		err := validateDropFunction(schema, "bm25_func", true)
 		assert.NoError(t, err)
 	})
+}
+
+// withCollectionWithoutVectorDisabled runs fn with
+// common.enableCollectionWithoutVector turned off: a schema change that would
+// leave a collection with no vector field is rejected then.
+func withCollectionWithoutVectorDisabled(fn func()) {
+	key := paramtable.Get().CommonCfg.EnableCollectionWithoutVector.Key
+	paramtable.Get().Save(key, "false")
+	defer paramtable.Get().Reset(key)
+	fn()
 }

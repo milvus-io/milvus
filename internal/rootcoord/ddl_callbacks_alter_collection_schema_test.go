@@ -1101,7 +1101,7 @@ func TestBuildSchemaForDropFunctionField(t *testing.T) {
 		require.Contains(t, err.Error(), "function not found")
 	})
 
-	t.Run("dropping the last vector field rejected", func(t *testing.T) {
+	t.Run("dropping the last vector field follows the creation switch", func(t *testing.T) {
 		coll := &model.Collection{
 			Fields: []*model.Field{
 				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
@@ -1114,6 +1114,12 @@ func TestBuildSchemaForDropFunctionField(t *testing.T) {
 			SchemaVersion: 1,
 		}
 		_, _, _, err := buildSchemaForDropFunctionField(coll, "embed_func")
+		require.NoError(t, err)
+
+		key := paramtable.Get().CommonCfg.EnableCollectionWithoutVector.Key
+		paramtable.Get().Save(key, "false")
+		defer paramtable.Get().Reset(key)
+		_, _, _, err = buildSchemaForDropFunctionField(coll, "embed_func")
 		require.ErrorContains(t, err, "leave no vector field")
 	})
 
@@ -2344,10 +2350,21 @@ func TestBuildSchemaForDropStructSubField(t *testing.T) {
 		})
 	}
 
-	lastVector := newCollection()
-	lastVector.Fields = lastVector.Fields[:1]
+	newLastVector := func() *model.Collection {
+		coll := newCollection()
+		coll.Fields = coll.Fields[:1]
+		return coll
+	}
+	lastVector := newLastVector()
 	_, _, _, err = buildSchemaForDropField(lastVector, "items[vector]", 0)
-	require.ErrorContains(t, err, "would leave no vector field")
+	require.NoError(t, err)
+	func() {
+		key := paramtable.Get().CommonCfg.EnableCollectionWithoutVector.Key
+		paramtable.Get().Save(key, "false")
+		defer paramtable.Get().Reset(key)
+		_, _, _, err = buildSchemaForDropField(newLastVector(), "items[vector]", 0)
+		require.ErrorContains(t, err, "would leave no vector field")
+	}()
 
 	for _, role := range []string{"input", "output"} {
 		t.Run("function "+role, func(t *testing.T) {

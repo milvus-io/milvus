@@ -629,7 +629,8 @@ func buildSchemaForDropField(coll *model.Collection, fieldName string, fieldID i
 			if fn, kind := functionReferencing(coll.Functions, storedName); fn != "" {
 				return nil, nil, nil, merr.WrapErrParameterInvalidMsg("field is referenced by function %s as %s, drop function first", fn, kind)
 			}
-			if typeutil.IsVectorType(sub.DataType) && len(typeutil.GetVectorFieldSchemas(coll.ToCollectionSchemaPB())) <= 1 {
+			if typeutil.IsVectorType(sub.DataType) && len(typeutil.GetVectorFieldSchemas(coll.ToCollectionSchemaPB())) <= 1 &&
+				!paramtable.Get().CommonCfg.EnableCollectionWithoutVector.GetAsBool() {
 				return nil, nil, nil, merr.WrapErrParameterInvalidMsg("cannot drop field %s: it would leave no vector field in the collection", storedName)
 			}
 
@@ -720,14 +721,15 @@ func buildSchemaForDropFunctionField(coll *model.Collection, functionName string
 	}
 
 	// Mirror the proxy guard for direct-coord callers: dropping the output vector
-	// field(s) must not leave the collection with no vector field.
+	// field(s) may leave the collection with no vector field only while such
+	// collections may be created.
 	removedVectors := 0
 	for _, field := range coll.Fields {
 		if _, ok := outputFieldIDSet[field.FieldID]; ok && typeutil.IsVectorType(field.DataType) {
 			removedVectors++
 		}
 	}
-	if removedVectors > 0 && removedVectors >= len(typeutil.GetVectorFieldSchemas(coll.ToCollectionSchemaPB())) {
+	if removedVectors > 0 && removedVectors >= len(typeutil.GetVectorFieldSchemas(coll.ToCollectionSchemaPB())) && !paramtable.Get().CommonCfg.EnableCollectionWithoutVector.GetAsBool() {
 		return nil, nil, nil, merr.WrapErrParameterInvalidMsg("cannot drop function %s: it would leave no vector field in the collection", functionName)
 	}
 

@@ -1466,10 +1466,12 @@ Large numeric passwords require double quotes to avoid yaml parsing precision is
 		Key:          "common.enableCollectionWithoutVector",
 		Version:      "3.0.0",
 		DefaultValue: "true",
-		Doc: `Whether CreateCollection accepts a schema with no vector field. Such a collection supports
-every operation except search, and a vector field cannot be added to it later.
-Turning it off rejects new requests to create such a collection on this cluster. Collections that already
-exist keep working, and collections received through replication are not affected.
+		Doc: `Whether a collection may have no vector field: CreateCollection accepts such a schema, and the last
+vector field of a collection may be dropped. Such a collection supports every operation except search;
+a nullable vector field can be added to it later, which makes it a vector collection.
+Turning it off rejects new requests to create such a collection, or to drop the last vector field of one,
+on this cluster. Collections that already exist keep working, and collections received through
+replication are not affected.
 It may be turned off for the duration of a rolling upgrade: such a collection created while an old role
 is still running cannot be loaded or compacted until every role is upgraded.`,
 		Export: true,
