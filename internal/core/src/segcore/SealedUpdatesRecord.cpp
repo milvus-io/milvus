@@ -22,6 +22,7 @@
 #include <utility>
 
 #include "common/EasyAssert.h"
+#include "common/Utils.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 
 namespace milvus::segcore::experimental {
@@ -117,10 +118,11 @@ SealedUpdatesRecord::Build(std::shared_ptr<ChunkedSegmentSealedImpl> source,
             AssertInfo((is_int ? scalars.long_data().data_size()
                                : scalars.string_data().data_size()) == count,
                        "POC source value count differs from requested offsets");
-            AssertInfo(!field.is_nullable() || data->valid_data_size() == count,
+            const auto& validity = GetFieldDataRowValidData(*data);
+            AssertInfo(!field.is_nullable() || validity.size() == count,
                        "POC nullable source has incomplete validity");
             for (int64_t i = 0; i < count; ++i) {
-                if (field.is_nullable() && !data->valid_data(i)) {
+                if (field.is_nullable() && !validity[i]) {
                     values.emplace_back(std::monostate{});
                 } else if (is_int) {
                     values.emplace_back(scalars.long_data().data(i));
