@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 from minio import Minio
 from pymilvus import MilvusClient
-from workloads.pyudf.workload import prepare, resume
+from workloads.pyudf.workload import check_stop_file, prepare, resume
 
 
 @dataclass(frozen=True)
@@ -137,7 +137,7 @@ def paced(checker, clients, output, duration):
                 active += 1
                 peak = max(peak, active)
             try:
-                assert not (output.parent / "STOP").exists(), "Resource guard requested stop"
+                check_stop_file(output.parent / "STOP")
                 item = checker.once(clients[number % 2], sequence)
                 item.update(proxy=number % 2, elapsed=time.monotonic() - started)
                 with lock:

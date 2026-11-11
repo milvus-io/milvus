@@ -10,6 +10,7 @@ import numpy as np
 from pymilvus import FunctionChain, FunctionChainStage, MilvusClient
 from pymilvus.function_chain import col, fn
 from pymilvus.function_chain.chain import FunctionChainExpr
+from workloads.pyudf.workload import check_stop_file
 
 
 class SearchActivity:
@@ -118,10 +119,13 @@ def run_abba(
     proxy_uris=None,
     worker_snapshot=None,
     raise_on_failure=True,
+    stop_file=None,
 ):
     """Bound client concurrency; measure offered/completed load without rate pacing."""
     assert 0 < window_seconds <= 120
     assert all(0 < workers <= 32 for workers in worker_counts)
+    stop_file = Path(stop_file) if stop_file is not None else checker.evidence / "STOP"
+    check_stop_file(stop_file)
     identity = FunctionChain(FunctionChainStage.L2_RERANK).map(
         "$score",
         FunctionChainExpr(
@@ -176,6 +180,7 @@ def run_abba(
                     "python_arithmetic",
                     "builtin_arithmetic",
                 ):
+                    check_stop_file(stop_file)
                     if mode in rejected_modes:
                         result = {
                             "window": len(windows),
@@ -215,7 +220,7 @@ def run_abba(
                                 offered += 1
                                 peak = max(peak, active)
                             try:
-                                assert not Path("/tmp/pyudf-benchmark-stop").exists(), "Resource guard requested stop"
+                                check_stop_file(stop_file)
                                 query = sequence % len(checker.queries)
                                 client_index = sequence % len(clients)
                                 latency = once(clients[client_index], mode, query)
@@ -257,7 +262,10 @@ def run_abba(
                             future.result()
                     elapsed = time.monotonic() - started
                     measured_wire = wire_delta(wire, wire_before)
-                    internal_after = worker_snapshot() if worker_snapshot else None
+                    stopped = stop_file.exists()
+                    if stopped and not failures:
+                        failures.append({"type": "RuntimeError", "error": "Resource guard requested stop"})
+                    internal_after = worker_snapshot() if worker_snapshot and not stopped else None
                     result = {
                         "event": "benchmark_window",
                         "window": len(windows),
@@ -279,7 +287,7 @@ def run_abba(
                         "worker_before": internal_before,
                         "worker_after": internal_after,
                     }
-                    if internal_before is not None:
+                    if internal_before is not None and internal_after is not None:
                         starts = sum(
                             after["count"] - before["count"] for before, after in zip(internal_before, internal_after)
                         )
@@ -295,6 +303,9 @@ def run_abba(
                         json.dumps({"windows": windows, "rejected_modes": rejected_modes}, indent=2)
                     )
                     print(json.dumps(result), flush=True)
+                    # A resource stop aborts all modes, even when semantic
+                    # failures are retained for independent measurements.
+                    check_stop_file(stop_file)
             finally:
                 for client in clients:
                     client.close()
@@ -310,9 +321,11 @@ def run_abba(
     return windows
 
 
-def run_batch_measurements(checker, uri, token, proxy_uris=None):
+def run_batch_measurements(checker, uri, token, proxy_uris=None, stop_file=None):
     """Measure bounded NQ/candidate tuples; validate every decoded input column."""
     summaries = []
+    stop_file = Path(stop_file) if stop_file is not None else checker.evidence / "STOP"
+    check_stop_file(stop_file)
     addresses = proxy_uris or [uri]
     clients = [MilvusClient(addresses[n % len(addresses)], token=token, dedicated=True) for n in range(8)]
     wire = [SearchWireCounter(client) for client in clients]
@@ -320,9 +333,10 @@ def run_batch_measurements(checker, uri, token, proxy_uris=None):
         for candidate_count in (10, 100, 1000):
             # Retain one baseline per tuple. The two input-layout windows share it.
             queries = checker.queries[:100]
-            candidates = [
-                checker.verify_fields(checker.search(checker.client, query, limit=candidate_count)) for query in queries
-            ]
+            candidates = []
+            for query in queries:
+                check_stop_file(stop_file)
+                candidates.append(checker.verify_fields(checker.search(checker.client, query, limit=candidate_count)))
             (checker.evidence / f"batch-candidates-{candidate_count}.json").write_text(json.dumps(candidates))
             for nq in (1, 8):
                 for mode in ("repeated", "unique"):
@@ -345,7 +359,7 @@ def run_batch_measurements(checker, uri, token, proxy_uris=None):
                     )
 
                     def invoke(sequence):
-                        assert not Path("/tmp/pyudf-benchmark-stop").exists(), "Resource guard requested stop"
+                        check_stop_file(stop_file)
                         selected = [(sequence * nq + number) % len(queries) for number in range(nq)]
                         started = time.monotonic()
                         result = clients[sequence % len(clients)].search(
@@ -372,10 +386,12 @@ def run_batch_measurements(checker, uri, token, proxy_uris=None):
                     with ThreadPoolExecutor(max_workers=8) as pool:
                         sequence = 0
                         while time.monotonic() - started < 30:
+                            check_stop_file(stop_file)
                             due = started + sequence / 5
                             if due >= started + 30:
                                 break
                             time.sleep(max(0, due - time.monotonic()))
+                            check_stop_file(stop_file)
                             if len(pending) >= 8:
                                 results.append(pending.pop(0).result(timeout=35))
                             pending.append(pool.submit(invoke, sequence))
@@ -383,6 +399,7 @@ def run_batch_measurements(checker, uri, token, proxy_uris=None):
                             while started + sequence / 5 < time.monotonic():
                                 sequence += 1
                         results.extend(future.result(timeout=35) for future in pending)
+                    check_stop_file(stop_file)
                     summary = {
                         "event": "batch_window",
                         "nq": nq,
@@ -401,6 +418,10 @@ def run_batch_measurements(checker, uri, token, proxy_uris=None):
                     summaries.append(summary)
                     (checker.evidence / "batch-summary.json").write_text(json.dumps(summaries, indent=2))
                     print(json.dumps(summary), flush=True)
+    except Exception as error:
+        summaries.append({"event": "batch_abort", "outcome": "FAIL", "error": str(error)})
+        (checker.evidence / "batch-summary.json").write_text(json.dumps(summaries, indent=2))
+        raise
     finally:
         for client in clients:
             client.close()

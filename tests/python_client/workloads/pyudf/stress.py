@@ -15,7 +15,7 @@ from pymilvus.function_chain import col
 from pymilvus.function_chain.chain import FunctionChainExpr
 from workloads.pyudf.benchmark import SearchActivity, SearchWireCounter, run_abba, run_batch_measurements
 from workloads.pyudf.runner import WorkloadConfig, load_checker, save
-from workloads.pyudf.workload import MODULE
+from workloads.pyudf.workload import MODULE, check_stop_file
 
 # The mmap counters measure real transform entries/completions without a syscall
 # on every invocation. They add a lock/write cost, explicitly retained in metadata.
@@ -141,7 +141,7 @@ def instrumentation_comparison(checker, clients, original_resource, counted_reso
         values = []
         sequence = 0
         while time.monotonic() - started < 30:
-            assert not (output.parent / "STOP").exists(), "Resource guard requested stop"
+            check_stop_file(output.parent / "STOP")
             before = time.monotonic()
             query = sequence % 1000
             hits = checker.search(clients[sequence % 2], checker.queries[query], checker.chain(resource, 2, 0))
@@ -188,6 +188,7 @@ def performance(root):
             for resource in checker.resources:
                 deadline = time.monotonic() + 30
                 while True:
+                    check_stop_file(root / "STOP")
                     try:
                         checker.verify_udf(
                             checker.search(client, checker.queries[0], checker.chain(resource, 2, 0)),
@@ -239,8 +240,11 @@ def performance(root):
             proxy_uris=addresses,
             worker_snapshot=worker_snapshot,
             raise_on_failure=False,
+            stop_file=root / "STOP",
         )
-        run_batch_measurements(checker, addresses[0], os.environ["MILVUS_TOKEN"], proxy_uris=addresses)
+        run_batch_measurements(
+            checker, addresses[0], os.environ["MILVUS_TOKEN"], proxy_uris=addresses, stop_file=root / "STOP"
+        )
         failed = [
             result for result in windows if result.get("outcome") == "FAIL" or result.get("internal_outcome") == "FAIL"
         ]
@@ -307,7 +311,7 @@ def interference(root):
                         peak = max(peak, active)
                     before = time.monotonic()
                     try:
-                        assert not (root / "STOP").exists(), "Resource guard requested stop"
+                        check_stop_file(root / "STOP")
                         chain = (
                             FunctionChain(FunctionChainStage.L2_RERANK)
                             .map(
@@ -523,7 +527,7 @@ def concurrency(root):
                                 sequence = count
                                 count += 1
                             try:
-                                assert not (root / "STOP").exists(), "Resource guard requested stop"
+                                check_stop_file(root / "STOP")
                                 chain = checker.chain(checker.resources[0], 2, 0) if mode.startswith("python") else None
                                 hits = checker.search(
                                     clients[sequence % len(clients)], checker.queries[sequence % 1000], chain

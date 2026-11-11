@@ -62,6 +62,12 @@ class CandidateDrift(AssertionError):
     """A changed ANN candidate set needs diagnosis before attributing a UDF bug."""
 
 
+def check_stop_file(path):
+    """Stop submitting load when the scenario's resource guard requests it."""
+    if path.exists():
+        raise RuntimeError("Resource guard requested stop")
+
+
 class PyUDFSearchChecker:
     """A reusable oracle for immutable collections; no fault injection or retries."""
 
