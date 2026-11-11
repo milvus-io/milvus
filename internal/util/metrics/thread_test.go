@@ -118,21 +118,28 @@ func TestCollectActiveThreadGroups(t *testing.T) {
 }
 
 func TestAdditionalThreadPools(t *testing.T) {
+	for _, rule := range threadNameGroupRules {
+		require.LessOrEqual(t, len(rule.prefix), 15, "prefix must fit Linux comm: %s", rule.prefix)
+	}
 	for name, want := range map[string]string{
-		"HIGH_SEGC_POOL0":  "segcore_high",
-		"MIDD_SEGC_POOL0":  "segcore_middle",
-		"LOW_SEGC_POOL0":   "segcore_low",
-		"MILVUS_ASYNC_LOA": "async_load",
-		"MILVUS_LF_IO_0":   "local_file_io",
-		"MILVUS_PREFETCH":  "prefetch",
-		"AwsEventLoop1":    "aws_crt_event_loop",
-		"AwsEventLoop 1":   "aws_crt_event_loop",
-		"AwsHostResolver":  "aws_crt_resolver",
-		"EvntLoopCleanup":  "aws_crt_cleanup",
-		"knowhere_build0":  "knowhere_build",
-		"knowhere_search":  "knowhere_search",
-		"knowhere_fetch_":  "knowhere_fetch",
+		"HIGH_SEGC_POOL0":     "segcore_high",
+		"MIDD_SEGC_POOL0":     "segcore_middle",
+		"LOW_SEGC_POOL0":      "segcore_low",
+		"MILVUS_ASYNC_LOAD_0": "async_load",
+		"MILVUS_LF_IO_0":      "local_file_io",
+		"MILVUS_PREFETCH":     "prefetch",
+		"AwsEventLoop1":       "aws_crt_event_loop",
+		"AwsEventLoop 1":      "aws_crt_event_loop",
+		"AwsHostResolver":     "aws_crt_resolver",
+		"EvntLoopCleanup":     "aws_crt_cleanup",
+		"knowhere_build0":     "knowhere_build",
+		"knowhere_search":     "knowhere_search",
+		"knowhere_fetch_":     "knowhere_fetch",
 	} {
+		// Linux comm holds at most 15 name bytes plus the terminating NUL.
+		if len(name) > 15 {
+			name = name[:15]
+		}
 		group, ok := classifyThreadName(name)
 		require.True(t, ok, name)
 		require.Equal(t, want, group, name)
