@@ -2149,8 +2149,10 @@ func TestStorageV3Reader_VarcharTargetLimit(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			source := typeutil.AppendSystemFields(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-				{FieldID: 101, Name: "source_text", DataType: schemapb.DataType_VarChar, Nullable: true,
-					TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "64"}}},
+				{
+					FieldID: 101, Name: "source_text", DataType: schemapb.DataType_VarChar, Nullable: true,
+					TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "64"}},
+				},
 			}})
 			target := typeutil.Clone(source)
 			text := typeutil.GetField(target, 101)
