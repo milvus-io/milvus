@@ -47,10 +47,8 @@ move between the two states; the rules for load, compaction and the segment
 row cap follow the schema at the time they are evaluated. A struct array
 field with only scalar sub-fields does not make a vector collection.
 
-The implementation is in two steps. Draft PR #54604 creates collections
-without a vector field and rejects both conversions. The conversion is a
-separate change stacked on it (branch `nonvec-phase2-convert`, not yet a
-pull request).
+The implementation is Draft PR #54604. Its first five commits create
+collections without a vector field; the last three add the conversion.
 
 ## 2. What changes
 
@@ -118,8 +116,8 @@ because each of them reads the current schema:
 | Growing segment seal on rows (Section 4) | StreamingNode shard manager, updated on schema change | segments sealed after the change follow the new state |
 | Compaction planners and writer row cap (Section 4) | DataCoord, per trigger | after a vector field is added the capped segments are merged on bytes; after the last one is dropped, segments above `maxRows` are cut at `maxRows` by the next compaction that rewrites them |
 
-Measured with `maxRows` set to 400 k (local standalone, branch
-`nonvec-phase2-convert`):
+Measured with `maxRows` set to 400 k (local standalone, #54604 head
+`ff26017cbc`):
 
 | Direction | Step | Segment rows |
 |---|---|---|
@@ -634,13 +632,13 @@ yet; they do not start while the PR is a draft.
 
 ### 6.2 Conversion
 
-Run on branch `nonvec-phase2-convert` (stacked on #54604), local x86
-standalone, 2026-11-10.
+Run on the #54604 head `ff26017cbc` (the three conversion commits), local
+x86 standalone, 2026-11-10.
 
 | Test | Result |
 |---|---|
 | Go unit tests of `internal/util/schemautil` and `internal/proxy/ddl` | pass. Nine cases that asserted the rejections now assert "allowed with the switch on, rejected with it off" |
-| Go unit tests of `internal/rootcoord` | the changed cases pass on their own. A full run of the package fails 2 to 8 different `TestDDLCallbacks*` cases each time, on the #54604 tree as well; the cause was not investigated |
+| Go unit tests of `internal/rootcoord` | the changed cases pass on their own. A full run of the package fails 2 to 8 different `TestDDLCallbacks*` cases each time, on the tree without the conversion commits as well; the cause was not investigated |
 | Python e2e cases in the repository: `test_milvus_client_vector_field_conversion.py` (4 cases), the three changed cases of `test_drop_field_feature.py`, `test_milvus_client_collection_without_vector.py` | pass |
 | RESTful `test_drop_field_operations.py`, with a new case that drops the only vector field | 8 passed |
 | Local scripts, 24 cases | 23 pass, 1 not run |
@@ -787,8 +785,8 @@ from `3df0cbcdd68`.
 | `proxy/task.go:3141`, `:3410` load collection / partitions | `ErrIndexNotFound` fails the load | fail only if a loaded vector field has no index; QueryCoord already treats "no index" as an empty index list |
 | `querynodev2/services.go:206` `WatchDmChannels`, `:497` `LoadSegments` | an empty `IndexInfoList` returns `ErrIndexNotFound`, the channel watch retries forever and the load times out after `loadTimeoutSeconds` | the check applies only when the schema has vector fields |
 | `httpserver/utils.go:3061` `anyToColumns` | REST insert needs a vector or function | check removed |
-| RootCoord `prepareAlterSchemaAddField` and the function-add path, `schemautil.ValidateSchemaEvolution`; Proxy `addCollectionFieldTask`, `validateAddStructFieldRequest` | a vector field, struct vector sub-field or vector-output function may be added | #54604: rejected when the collection has no vector field. Conversion: allowed again, under the existing rule that an added vector field is nullable |
-| Proxy `validateDropField`, `validateDropStructSubField`, drop struct field, `validateDropFunction`; RootCoord `buildSchemaForDropField`, `buildSchemaForDropFunctionField`; `schemautil.validateDroppedEvolutionField` | dropping the last vector field is rejected (eight checks with three messages) | #54604: unchanged. Conversion: rejected only when `common.enableCollectionWithoutVector` is off |
+| RootCoord `prepareAlterSchemaAddField` and the function-add path, `schemautil.ValidateSchemaEvolution`; Proxy `addCollectionFieldTask`, `validateAddStructFieldRequest` | a vector field, struct vector sub-field or vector-output function may be added | first five commits of #54604: rejected when the collection has no vector field. Conversion commits: allowed again, under the existing rule that an added vector field is nullable |
+| Proxy `validateDropField`, `validateDropStructSubField`, drop struct field, `validateDropFunction`; RootCoord `buildSchemaForDropField`, `buildSchemaForDropFunctionField`; `schemautil.validateDroppedEvolutionField` | dropping the last vector field is rejected (eight checks with three messages) | first five commits of #54604: unchanged. Conversion commits: rejected only when `common.enableCollectionWithoutVector` is off |
 | segcore `plan_c.cpp` `CreateSearchPlanByExpr` | asserts that the collection has index meta; always true while a loaded collection had a vector index | Conversion: no index meta is reported as "field index is not loaded", the error of a vector field whose index is not loaded |
 | QueryCoord `collection_readiness.go` `prepareAutoLoadRequest` (`proxy.enableAutoLoad`) | `ErrIndexNotFound` fails the automatic load | fail only if the schema has a vector field |
 | `proxy/task.go:1297`, `:1337` drop struct field / function | `removed >= vectorCount` blocks the drop; always true at 0, so every struct-field and function drop is blocked | `removed > 0 &&`, as RootCoord already does |
