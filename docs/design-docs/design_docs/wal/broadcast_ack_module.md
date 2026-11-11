@@ -68,6 +68,26 @@ On success, BroadcastAck releases the Owner and unblocks later conflicting
 tasks. On failure, it keeps the Owner and ResourceKey claim, waits for retry,
 and does not block unrelated tasks.
 
+Each execution has a 100ms context budget covering the legacy import commit RPC
+and Broadcast.Ack. Broadcast.Ack makes one client call with at most 100ms and
+does not retry internally. Failure returns NodeScheduler's ErrDelay; the shared
+scheduler retains the same submission and applies its exponential backoff.
+The task stays in flight across delayed retries, so the dispatcher cannot submit
+a duplicate and later conflicting broadcasts cannot overtake it. Delayed retries
+hold no worker. Module shutdown cancels an active attempt; scoped scheduler
+shutdown also cancels queued and delayed work without releasing unfinished Owners.
+
+ACK tasks use priority 20. The shared scheduler reserves capacity by cumulative
+priority bands: data work (priority 0) at most 50%, QueryView build/ready (5) and
+lower work at most 75%, release (10) and lower work at most 90%, and all tasks
+at most 100%. See the [scheduler contract](../../../../pkg/util/nodescheduler/README.md)
+for rounding, non-preemption and fairness.
+
+The 100ms budget bounds the client-side attempt. The Coordinator currently
+detaches client cancellation after acquiring the broadcaster, so a timed-out
+server-side ACK may still complete. ACK processing and business callbacks must
+retain their existing idempotent replay semantics.
+
 Coordinator Ack is idempotent. A crash before global checkpoint publication may
 replay and repeat it.
 

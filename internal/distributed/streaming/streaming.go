@@ -240,7 +240,8 @@ type Local interface {
 // Broadcast is the interface for writing broadcast message into the wal.
 type Broadcast interface {
 	// Ack acknowledges a broadcast message at the specified vchannel.
-	// It must be called after the message is comsumed by the unique-consumer.
-	// It will only return error when the ctx is canceled.
+	// It must be called after the message is consumed by the unique-consumer.
+	// Each call has a maximum 100 ms context budget and does not retry internally.
+	// The consumer must arrange retries after errors, including timeouts.
 	Ack(ctx context.Context, msg message.ImmutableMessage) error
 }

@@ -106,7 +106,7 @@ func TestSubmitKeepsBackoffIndependentWhenTaskAndOptionAreReused(t *testing.T) {
 		<-started
 		handle := scheduler.Submit(task, option)
 		s.mu.Lock()
-		b := s.queue.Back().Value.(*taskEntry).backoff
+		b := s.ready[0].backoff
 		s.mu.Unlock()
 		close(release)
 		require.NoError(t, handle.Wait(ctx))

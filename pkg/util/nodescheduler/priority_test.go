@@ -18,7 +18,6 @@ package nodescheduler
 
 import (
 	"context"
-	"math"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -46,10 +45,10 @@ func TestPriorityOrderAndNonPreemption(t *testing.T) {
 	low := submit(1, -10)
 	high := submit(2, 10)
 	same := submit(3, 10)
-	canceled := submit(4, 100)
+	canceled := submit(4, 20)
 	canceled.Cancel()
 	require.True(t, low.SetPriority(20))
-	require.True(t, first.SetPriority(-100))
+	require.True(t, first.SetPriority(-20))
 	require.Empty(t, order, "priority changes must not interrupt the running task")
 	close(release)
 	for _, h := range []TaskHandle{first, low, high, same, canceled} {
@@ -58,8 +57,8 @@ func TestPriorityOrderAndNonPreemption(t *testing.T) {
 	require.Equal(t, 1, <-order)
 	require.Equal(t, 2, <-order)
 	require.Equal(t, 3, <-order)
-	require.False(t, low.SetPriority(30))
-	require.False(t, canceled.SetPriority(30))
+	require.False(t, low.SetPriority(20))
+	require.False(t, canceled.SetPriority(20))
 	s.Close()
 	h := submit(5, 0)
 	require.False(t, h.SetPriority(10))
@@ -79,7 +78,7 @@ func TestPriorityFairnessAndDelayedDeadline(t *testing.T) {
 	}))
 	<-started
 	order := make(chan int, priorityBurst*2+1)
-	handles := []TaskHandle{s.Submit(TaskFunc(func(context.Context) error { order <- -1; return nil }), WithPriority(-100))}
+	handles := []TaskHandle{s.Submit(TaskFunc(func(context.Context) error { order <- -1; return nil }), WithPriority(-20))}
 	for i := 0; i < priorityBurst*2; i++ {
 		handles = append(handles, s.Submit(TaskFunc(func(context.Context) error { order <- 1; return nil }), WithPriority(10)))
 	}
@@ -101,11 +100,11 @@ func TestPriorityFairnessAndDelayedDeadline(t *testing.T) {
 	h := s.Submit(TaskFunc(func(context.Context) error { attempt++; return DelayUntil(deadline) })).(PriorityTaskHandle)
 	barrier := s.Submit(TaskFunc(func(context.Context) error { return nil }))
 	require.NoError(t, barrier.Wait(t.Context()))
-	require.True(t, h.SetPriority(100))
+	require.True(t, h.SetPriority(20))
 	s.mu.Lock()
 	require.Len(t, s.delayed, 1)
 	require.Equal(t, deadline, s.delayed[0].nextRun)
-	require.EqualValues(t, 100, s.delayed[0].priority)
+	require.EqualValues(t, 20, s.delayed[0].priority)
 	s.mu.Unlock()
 	h.Cancel()
 	require.NoError(t, h.Wait(t.Context()))
@@ -140,7 +139,7 @@ func TestPrioritySignedRangeAndStableUpdates(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			release := blockPriorityWorker(t, s)
-			priorities := []int32{math.MinInt32, -1, 0, math.MaxInt32, math.MaxInt32, -1}
+			priorities := []int32{MinPriority, -1, 0, MaxPriority, MaxPriority, -1}
 			order := make(chan int, len(priorities))
 			handles := make([]PriorityTaskHandle, 0, len(priorities))
 			for i, priority := range priorities {
@@ -153,10 +152,10 @@ func TestPrioritySignedRangeAndStableUpdates(t *testing.T) {
 			if update {
 				// Exercise both directions of heap.Fix, preserving the original
 				// ready order when an entry returns to a tied priority.
-				require.True(t, handles[0].SetPriority(math.MaxInt32))
-				require.True(t, handles[3].SetPriority(math.MinInt32))
-				require.True(t, handles[3].SetPriority(math.MaxInt32))
-				require.True(t, handles[4].SetPriority(math.MaxInt32))
+				require.True(t, handles[0].SetPriority(MaxPriority))
+				require.True(t, handles[3].SetPriority(MinPriority))
+				require.True(t, handles[3].SetPriority(MaxPriority))
+				require.True(t, handles[4].SetPriority(MaxPriority))
 				want = []int{0, 3, 4, 2, 1, 5}
 			}
 			release()
@@ -190,10 +189,10 @@ func TestPriorityRunningUpdateAppliesToRetry(t *testing.T) {
 		}
 		order <- "retry"
 		return nil
-	}), WithPriority(-100)).(PriorityTaskHandle)
+	}), WithPriority(-20)).(PriorityTaskHandle)
 	<-started
 	other := s.Submit(TaskFunc(func(context.Context) error { order <- "other"; return nil }), WithPriority(10))
-	require.True(t, first.SetPriority(100))
+	require.True(t, first.SetPriority(20))
 	require.Empty(t, order)
 	close(release)
 	require.NoError(t, first.Wait(ctx))
@@ -227,7 +226,7 @@ func TestPriorityDelayedUpdateAppliesAfterDeadline(t *testing.T) {
 		retriedAt = time.Now()
 		order <- "retry"
 		return nil
-	}), WithPriority(-100)).(PriorityTaskHandle)
+	}), WithPriority(-20)).(PriorityTaskHandle)
 	<-firstAttempt
 	// Queue the blocker before allowing the first attempt to finish. Its higher
 	// priority keeps it ahead of the retry even if the deadline has elapsed.
@@ -247,7 +246,7 @@ func TestPriorityDelayedUpdateAppliesAfterDeadline(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("blocker did not start")
 	}
-	require.True(t, retry.SetPriority(100))
+	require.True(t, retry.SetPriority(20))
 	other := s.Submit(TaskFunc(func(context.Context) error { order <- "other"; return nil }), WithPriority(10))
 	require.Eventually(t, func() bool {
 		s.mu.Lock()
@@ -278,20 +277,20 @@ func TestPriorityFairnessWithContinuousArrivals(t *testing.T) {
 			counts <- highRuns.Load()
 			lowRuns.Add(1)
 			return nil
-		}), WithPriority(math.MinInt32)).(PriorityTaskHandle))
+		}), WithPriority(MinPriority)).(PriorityTaskHandle))
 	}
 	// Changing priority must not erase age even across multiple fairness turns.
 	require.True(t, handles[0].SetPriority(-1))
-	require.True(t, handles[0].SetPriority(math.MinInt32))
+	require.True(t, handles[0].SetPriority(MinPriority))
 	var high TaskFunc
 	high = func(context.Context) error {
 		highRuns.Add(1)
 		if lowRuns.Load() < 3 {
-			s.Submit(high, WithPriority(math.MaxInt32))
+			s.Submit(high, WithPriority(MaxPriority))
 		}
 		return nil
 	}
-	s.Submit(high, WithPriority(math.MaxInt32))
+	s.Submit(high, WithPriority(MaxPriority))
 	release()
 	for i, h := range handles {
 		require.NoError(t, h.Wait(ctx))
@@ -309,6 +308,6 @@ func TestPriorityUpdateAfterFinishIgnoresStaleCallback(t *testing.T) {
 	h.mu.Unlock()
 	h.Cancel()
 	require.False(t, update(100))
-	require.False(t, h.SetPriority(100))
+	require.False(t, h.SetPriority(20))
 	release()
 }

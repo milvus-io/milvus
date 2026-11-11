@@ -70,7 +70,11 @@ no per-PChannel concurrency limit or separate pending queue. Scheduling fairness
 between PChannels is future work in NodeScheduler. The scoped tracker forwards
 submission priority and `PriorityTaskHandle.SetPriority` to the shared executor;
 this does not interrupt running work or advance delayed retries. NodeScheduler
-provides task-level starvation protection, not PChannel shares. See the
+provides task-level starvation protection within cumulative worker limits,
+not PChannel shares. ACK uses priority 20, QueryView release 10, build/ready 5,
+and data work defaults to 0. ACK attempts yield with ErrDelay after failure or
+a 100ms timeout. Standalone QueryView notifications use independent goroutines.
+See the
 [NodeScheduler contract](../../../../pkg/util/nodescheduler/README.md).
 
 ## 3. One Global Checkpoint

@@ -2,6 +2,7 @@ package recovery
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,13 +19,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
 func TestBroadcastAckLegacyImportRetriesBeforeAck(t *testing.T) {
 	scheduler := &recordingAckTaskScheduler{}
 	module := newBroadcastAckModule(moduleapi.Runtime{Scheduler: scheduler})
 	t.Cleanup(module.Close)
-	module.retryDelay = time.Millisecond
 	var events []string
 	attempt := 0
 	patch := mockey.Mock(commitLegacyImportVChannel).To(func(_ context.Context, req *datapb.HandleCommitVchannelRequest) error {
@@ -49,11 +50,12 @@ func TestBroadcastAckLegacyImportRetriesBeforeAck(t *testing.T) {
 	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
 	owner := tracker.Track(msg)
 	module.Accept(owner)
-	require.NoError(t, scheduler.waitTask(t).Execute(context.Background()))
+	task := scheduler.waitTask(t)
+	require.ErrorIs(t, task.Execute(context.Background()), nodescheduler.ErrDelay)
 	require.Equal(t, []string{"rpc"}, events)
 	require.Zero(t, tracker.CompletedPoint().TimeTick)
 	require.Same(t, msg, owner.Message())
-	require.NoError(t, scheduler.waitTaskAfter(t, 1).Execute(context.Background()))
+	require.NoError(t, task.Execute(context.Background()))
 	require.Equal(t, []string{"rpc", "rpc", "ack"}, events)
 	require.EqualValues(t, 100, tracker.CompletedPoint().TimeTick)
 }
@@ -77,7 +79,6 @@ func TestBroadcastAckHoldsOwnerUntilExclusiveAndAckSucceeds(t *testing.T) {
 	scheduler := &recordingAckTaskScheduler{}
 	module := newBroadcastAckModule(moduleapi.Runtime{Scheduler: scheduler})
 	t.Cleanup(module.Close)
-	module.retryDelay = time.Millisecond
 	module.ack = func(context.Context, message.ImmutableMessage) error { return nil }
 	msg := newBroadcastAckMessage(t, message.NewCreateCollectionMessageBuilderV1().
 		WithBroadcast([]string{"v1"}).
@@ -137,7 +138,6 @@ func TestBroadcastAckSubmitsExclusiveOwnerImmediately(t *testing.T) {
 	scheduler := &recordingAckTaskScheduler{}
 	module := newBroadcastAckModule(moduleapi.Runtime{Scheduler: scheduler})
 	t.Cleanup(module.Close)
-	module.retryDelay = time.Millisecond
 	module.ack = func(context.Context, message.ImmutableMessage) error { return nil }
 	msg := newBroadcastAckMessage(t, message.NewCreateCollectionMessageBuilderV1().
 		WithBroadcast([]string{"v1"}).
@@ -191,11 +191,12 @@ func TestBroadcastAckRetriesSameTaskAfterFailure(t *testing.T) {
 	module.Accept(owner)
 
 	first := scheduler.waitTask(t)
-	require.NoError(t, first.Execute(context.Background()))
+	require.ErrorIs(t, first.Execute(context.Background()), nodescheduler.ErrDelay)
 	assert.Same(t, msg, owner.Message())
 
-	retry := scheduler.waitTaskAfter(t, 1)
-	require.NoError(t, retry.Execute(context.Background()))
+	module.dispatchReadyTasks()
+	require.Len(t, scheduler.snapshot(), 1, "retry stays owned by the same scheduler submission")
+	require.NoError(t, first.Execute(context.Background()))
 	assert.Equal(t, 2, attempts)
 	assert.Panics(t, func() { _ = owner.Message() })
 	assert.Equal(t, msg.TimeTick(), tracker.CompletedPoint().TimeTick)
@@ -265,17 +266,18 @@ func TestBroadcastAckKeepsConflictingTasksOrderedAcrossRetry(t *testing.T) {
 	module.Accept(secondOwner)
 	firstTask := scheduler.waitTask(t)
 
-	require.NoError(t, firstTask.Execute(context.Background()))
+	require.ErrorIs(t, firstTask.Execute(context.Background()), nodescheduler.ErrDelay)
 	assert.Empty(t, acked)
 	assert.Same(t, firstMsg, firstOwner.Message())
 	assert.Same(t, secondMsg, secondOwner.Message())
 	assert.Len(t, scheduler.snapshot(), 1)
 
-	retryTask := scheduler.waitTaskAfter(t, 1)
-	require.NoError(t, retryTask.Execute(context.Background()))
+	module.dispatchReadyTasks()
+	require.Len(t, scheduler.snapshot(), 1)
+	require.NoError(t, firstTask.Execute(context.Background()))
 	assert.Panics(t, func() { _ = firstOwner.Message() })
 	assert.Same(t, secondMsg, secondOwner.Message())
-	secondTask := scheduler.waitTaskAfter(t, 2)
+	secondTask := scheduler.waitTaskAfter(t, 1)
 	require.NoError(t, secondTask.Execute(context.Background()))
 	assert.Panics(t, func() { _ = secondOwner.Message() })
 	assert.Equal(t, []uint64{10, 20}, acked)
@@ -399,7 +401,6 @@ func TestBroadcastAckCloseCancelsPendingRetry(t *testing.T) {
 	scheduler := &recordingAckTaskScheduler{}
 	module := newBroadcastAckModule(moduleapi.Runtime{Scheduler: scheduler})
 	t.Cleanup(module.Close)
-	module.retryDelay = time.Hour
 	module.ack = func(context.Context, message.ImmutableMessage) error {
 		return errors.New("coordinator unavailable")
 	}
@@ -412,10 +413,126 @@ func TestBroadcastAckCloseCancelsPendingRetry(t *testing.T) {
 	module.Accept(owner)
 
 	first := scheduler.waitTask(t)
-	require.NoError(t, first.Execute(context.Background()))
+	require.ErrorIs(t, first.Execute(context.Background()), nodescheduler.ErrDelay)
 	module.Close()
 
 	assert.Len(t, scheduler.snapshot(), 1)
 	assert.Zero(t, tracker.CompletedPoint().TimeTick)
 	assert.Same(t, msg, owner.Message())
+}
+
+func TestBroadcastAckTimeoutYieldsWorkerAndRetries(t *testing.T) {
+	scheduler := nodescheduler.New(1)
+	defer scheduler.Close()
+	scoped := newScopedTaskScheduler(scheduler)
+	defer scoped.Close()
+	module := newBroadcastAckModule(moduleapi.Runtime{Scheduler: scoped})
+	defer module.Close()
+	firstAttempt, acked, otherRan := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var attempts atomic.Int32
+	module.ack = func(ctx context.Context, _ message.ImmutableMessage) error {
+		if attempts.Add(1) == 1 {
+			close(firstAttempt)
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		close(acked)
+		return nil
+	}
+	msg := newBroadcastAckMessage(t, message.NewCreateCollectionMessageBuilderV1().
+		WithBroadcast([]string{"v1"}).WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 1}).
+		WithBody(&msgpb.CreateCollectionRequest{}))
+	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
+	owner := tracker.Track(msg)
+	module.Accept(owner)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	select {
+	case <-firstAttempt:
+	case <-ctx.Done():
+		t.Fatal("ack did not start")
+	}
+	scheduler.Submit(nodeschedulerTaskFunc(func(context.Context) error { close(otherRan); return nil }))
+	select {
+	case <-otherRan:
+	case <-ctx.Done():
+		t.Fatal("timed-out ACK did not release the worker")
+	}
+	select {
+	case <-acked:
+	case <-ctx.Done():
+		t.Fatal("scheduler did not retry ACK")
+	}
+	require.NoError(t, scoped.WaitIdle(ctx))
+	require.EqualValues(t, 2, attempts.Load())
+	require.Equal(t, msg.TimeTick(), tracker.CompletedPoint().TimeTick)
+}
+
+func TestBroadcastAckModuleCloseCancelsAttempt(t *testing.T) {
+	module := newBroadcastAckModule(moduleapi.Runtime{})
+	defer module.Close()
+	started := make(chan struct{})
+	module.ack = func(ctx context.Context, _ message.ImmutableMessage) error {
+		close(started)
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	msg := newBroadcastAckMessage(t, message.NewCreateCollectionMessageBuilderV1().
+		WithBroadcast([]string{"v1"}).WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 1}).
+		WithBody(&msgpb.CreateCollectionRequest{}))
+	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
+	owner := tracker.Track(msg)
+	task := &broadcastAckTask{module: module, owner: owner}
+	done := make(chan error, 1)
+	go func() { done <- task.Execute(t.Context()) }()
+	<-started
+	module.Close()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, nodescheduler.ErrDelay)
+	case <-time.After(time.Second):
+		t.Fatal("module close did not cancel attempt")
+	}
+	require.ErrorIs(t, task.Execute(t.Context()), context.Canceled)
+	require.Same(t, msg, owner.Message())
+	require.Zero(t, tracker.CompletedPoint().TimeTick)
+}
+
+func TestBroadcastAckUsesReservedWorker(t *testing.T) {
+	scheduler := nodescheduler.New(2)
+	defer scheduler.Close()
+	scoped := newScopedTaskScheduler(scheduler)
+	defer scoped.Close()
+	module := newBroadcastAckModule(moduleapi.Runtime{Scheduler: scoped})
+	defer module.Close()
+	busy := make(chan struct{})
+	scheduler.Submit(nodeschedulerTaskFunc(func(ctx context.Context) error {
+		close(busy)
+		<-ctx.Done()
+		return nil
+	}))
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	select {
+	case <-busy:
+	case <-ctx.Done():
+		t.Fatal("data worker did not start")
+	}
+	acked := make(chan struct{})
+	module.ack = func(context.Context, message.ImmutableMessage) error {
+		close(acked)
+		return nil
+	}
+	msg := newBroadcastAckMessage(t, message.NewCreateCollectionMessageBuilderV1().
+		WithBroadcast([]string{"v1"}).WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 1}).
+		WithBody(&msgpb.CreateCollectionRequest{}))
+	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
+	module.Accept(tracker.Track(msg))
+	select {
+	case <-acked:
+	case <-ctx.Done():
+		t.Fatal("ACK did not use reserved capacity while data worker remained busy")
+	}
+	require.NoError(t, scoped.WaitIdle(ctx))
+	require.Equal(t, msg.TimeTick(), tracker.CompletedPoint().TimeTick)
 }

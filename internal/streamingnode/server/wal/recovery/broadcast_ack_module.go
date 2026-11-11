@@ -19,31 +19,27 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
-const broadcastAckRetryInterval = 200 * time.Millisecond
+const broadcastAckAttemptTimeout = 100 * time.Millisecond
 
 type broadcastAckModule struct {
-	runtime    moduleapi.Runtime
-	ctx        context.Context
-	cancel     context.CancelFunc
-	retryDelay time.Duration
-	closeOnce  sync.Once
-	workerMu   sync.Mutex
-	closed     bool
-	workerWG   sync.WaitGroup
-	ackTaskMu  sync.Mutex
-	ackTasks   []*broadcastAckTask
-	wakeup     chan struct{}
-	ack        func(context.Context, message.ImmutableMessage) error
+	runtime   moduleapi.Runtime
+	ctx       context.Context
+	cancel    context.CancelFunc
+	closeOnce sync.Once
+	workerWG  sync.WaitGroup
+	ackTaskMu sync.Mutex
+	ackTasks  []*broadcastAckTask
+	wakeup    chan struct{}
+	ack       func(context.Context, message.ImmutableMessage) error
 }
 
 func newBroadcastAckModule(runtime moduleapi.Runtime) *broadcastAckModule {
 	ctx, cancel := context.WithCancel(context.Background()) // #nosec G118 -- Close invokes the retained cancel function.
 	m := &broadcastAckModule{
-		runtime:    runtime,
-		ctx:        ctx,
-		cancel:     cancel,
-		retryDelay: broadcastAckRetryInterval,
-		wakeup:     make(chan struct{}, 1),
+		runtime: runtime,
+		ctx:     ctx,
+		cancel:  cancel,
+		wakeup:  make(chan struct{}, 1),
 		ack: func(ctx context.Context, msg message.ImmutableMessage) error {
 			return streaming.WAL().Broadcast().Ack(ctx, msg)
 		},
@@ -120,49 +116,15 @@ func (m *broadcastAckModule) dispatchReadyTasks() {
 	m.ackTaskMu.Unlock()
 
 	for _, task := range readyTasks {
-		m.runtime.Scheduler.Submit(task)
+		m.runtime.Scheduler.Submit(task, nodescheduler.WithPriority(20))
 	}
-}
-
-func (m *broadcastAckModule) retry(task *broadcastAckTask) {
-	if !m.beginWorker() {
-		return
-	}
-	go func() {
-		defer m.workerWG.Done()
-		timer := time.NewTimer(m.retryDelay)
-		defer timer.Stop()
-		select {
-		case <-timer.C:
-			m.ackTaskMu.Lock()
-			if !task.completed {
-				task.inFlight = false
-			}
-			m.ackTaskMu.Unlock()
-			m.wakeDispatcher()
-		case <-m.ctx.Done():
-		}
-	}()
 }
 
 func (m *broadcastAckModule) Close() {
 	m.closeOnce.Do(func() {
-		m.workerMu.Lock()
-		m.closed = true
 		m.cancel()
-		m.workerMu.Unlock()
 		m.workerWG.Wait()
 	})
-}
-
-func (m *broadcastAckModule) beginWorker() bool {
-	m.workerMu.Lock()
-	defer m.workerMu.Unlock()
-	if m.closed {
-		return false
-	}
-	m.workerWG.Add(1)
-	return true
 }
 
 func (m *broadcastAckModule) finishTask(task *broadcastAckTask) {
@@ -195,13 +157,20 @@ type broadcastAckTask struct {
 }
 
 func (t *broadcastAckTask) Execute(ctx context.Context) error {
+	// Include the legacy import RPC in the same attempt budget. Scheduler
+	// cancellation and module shutdown both stop an in-flight attempt.
+	ctx, cancel := context.WithTimeout(ctx, broadcastAckAttemptTimeout)
+	defer cancel()
+	stop := context.AfterFunc(t.module.ctx, cancel)
+	defer stop()
+	if t.module.ctx.Err() != nil {
+		return t.module.ctx.Err()
+	}
 	if err := ackLegacyCommitImport(ctx, t.owner.Message()); err != nil {
-		t.module.retry(t)
-		return nil
+		return nodescheduler.ErrDelay
 	}
 	if err := t.module.ack(ctx, t.owner.Message()); err != nil {
-		t.module.retry(t)
-		return nil
+		return nodescheduler.ErrDelay
 	}
 	t.owner.Release()
 	t.module.finishTask(t)

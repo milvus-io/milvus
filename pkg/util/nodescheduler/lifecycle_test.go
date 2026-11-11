@@ -102,7 +102,7 @@ func TestCompletedHandlesReleaseExecutionReferences(t *testing.T) {
 				return task.Value() == nil && scheduler.Value() == nil
 			}, 5*time.Second, time.Millisecond)
 			h.Cancel()
-			require.False(t, h.SetPriority(100))
+			require.False(t, h.SetPriority(20))
 			require.NoError(t, h.Wait(context.Background()))
 			runtime.KeepAlive(h)
 		})
@@ -170,7 +170,7 @@ func TestCancelCloseAndCompletionConcurrent(t *testing.T) {
 		for range 2 {
 			waiters.Go(func() {
 				for priority := range 4 {
-					h.(PriorityTaskHandle).SetPriority(int32(priority))
+					h.(PriorityTaskHandle).SetPriority(int32(priority%41) - 20)
 					h.Cancel()
 				}
 				require.NoError(t, h.Wait(ctx))
@@ -179,7 +179,7 @@ func TestCancelCloseAndCompletionConcurrent(t *testing.T) {
 	}
 	s.Close()
 	waiters.Wait()
-	require.Zero(t, s.queue.Len())
+	require.Zero(t, len(s.ready))
 	require.Nil(t, s.ready)
 	require.Nil(t, s.delayed)
 	require.Nil(t, s.timer)

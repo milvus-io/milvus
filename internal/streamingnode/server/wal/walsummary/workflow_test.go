@@ -143,7 +143,9 @@ func TestManifestPublicationRetainsConcurrentUpdates(t *testing.T) {
 func TestNodeSchedulerUploadsInParallel(t *testing.T) {
 	ctx := context.Background()
 	m, store := newTestManagerWithStore(t)
-	scheduler := nodescheduler.New(3)
+	// Default-priority uploads receive half the pool: retain three data slots
+	// so a blocked upload does not prevent another upload from completing.
+	scheduler := nodescheduler.New(6)
 	firstEntered, release := make(chan struct{}), make(chan struct{})
 	patch := mockey.Mock((*Store).writeChunk).To(func(s *Store, ctx context.Context, gen uint64, sections map[string]*ChunkSections, coverage TimeTickRange) (*streamingpb.PChannelSummaryChunkFooter, []byte, error) {
 		// Consume mock arguments before blocking: runtime patching cannot tell

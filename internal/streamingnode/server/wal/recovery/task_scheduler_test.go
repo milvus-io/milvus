@@ -77,8 +77,8 @@ func TestScopedTaskSchedulerTracksDelayedTaskUntilSuccess(t *testing.T) {
 }
 
 func TestScopedTaskSchedulerUsesNodeConcurrency(t *testing.T) {
-	// One WAL can use all available workers, including more than the former
-	// per-PChannel default of 16.
+	// One WAL can use all available workers for the highest-priority band,
+	// including more than the former per-PChannel default of 16.
 	const concurrency = 20
 	inner := nodescheduler.New(concurrency)
 	defer inner.Close()
@@ -90,7 +90,7 @@ func TestScopedTaskSchedulerUsesNodeConcurrency(t *testing.T) {
 			started <- struct{}{}
 			<-ctx.Done()
 			return ctx.Err()
-		}))
+		}), nodescheduler.WithPriority(nodescheduler.MaxPriority))
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -278,12 +278,12 @@ func TestScopedTaskSchedulerPriority(t *testing.T) {
 			return nil
 		}), nodescheduler.WithPriority(priority)).(nodescheduler.PriorityTaskHandle)
 	}
-	low, high, canceled := submit(1, -10), submit(2, 10), submit(3, 100)
+	low, high, canceled := submit(1, -10), submit(2, 10), submit(3, 20)
 	require.True(t, low.SetPriority(20))
-	require.True(t, running.SetPriority(-100))
+	require.True(t, running.SetPriority(-20))
 	canceled.Cancel()
 	require.NoError(t, canceled.Wait(ctx))
-	require.False(t, canceled.SetPriority(30))
+	require.False(t, canceled.SetPriority(20))
 	require.Empty(t, order)
 	close(release)
 	for _, h := range []nodescheduler.TaskHandle{running, low, high} {
@@ -291,10 +291,10 @@ func TestScopedTaskSchedulerPriority(t *testing.T) {
 	}
 	require.Equal(t, 1, <-order)
 	require.Equal(t, 2, <-order)
-	require.False(t, low.SetPriority(30))
+	require.False(t, low.SetPriority(20))
 	require.NoError(t, scheduler.WaitIdle(ctx))
 	scheduler.Close()
-	require.False(t, submit(4, 10).SetPriority(100))
+	require.False(t, submit(4, 10).SetPriority(20))
 	// The scoped owner still does not own or shut down the shared workers.
 	require.NoError(t, inner.Submit(nodeschedulerTaskFunc(func(context.Context) error { return nil })).Wait(ctx))
 }
