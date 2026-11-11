@@ -10,15 +10,15 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/qviews"
-	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 // --- helpers ---
 
 func cfgFor(collectionID, replicaID int64, partitions []int64, fields []int64) *loadmgr.LoadConfig {
-	lf := make([]*messagespb.LoadFieldConfig, len(fields))
+	lf := make([]*viewpb.LoadFieldConfig, len(fields))
 	for i, fid := range fields {
-		lf[i] = &messagespb.LoadFieldConfig{FieldId: fid}
+		lf[i] = &viewpb.LoadFieldConfig{FieldId: fid}
 	}
 	return &loadmgr.LoadConfig{
 		CollectionID: collectionID,

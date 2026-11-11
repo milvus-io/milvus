@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/quota"
 	rlinternal "github.com/milvus-io/milvus/internal/util/ratelimitutil"
+	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/config"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -171,10 +172,9 @@ type QuotaCenter struct {
 
 	rateAllocateStrategy RateAllocateStrategy
 
-	// Cache previous collection rates (baseLimit * factor) to avoid unnecessary updates
-	// If rate change is less than FactorChangeThreshold, skip SetLimit to reduce proxy updates
-	// Key format: "collectionID-rateType"
-	prevRates map[string]float64
+	// Write factors applied in the last round, by collection ID. calculateWriteRates reuses a collection's
+	// previous factor while the new one differs by less than FactorChangeThreshold, so small changes don't move proxy rates.
+	prevFactors map[int64]float64
 
 	keyManager *KeyManager
 
@@ -201,7 +201,7 @@ func NewQuotaCenter(proxies proxyutil.ProxyClientManagerInterface, mixCoord type
 		collectionProps:      make(map[int64]map[string]string),
 		rateLimiter:          rlinternal.NewRateLimiterTree(initInfLimiter(internalpb.RateScope_Cluster, allOps)),
 		rateAllocateStrategy: DefaultRateAllocateStrategy,
-		prevRates:            make(map[string]float64),
+		prevFactors:          make(map[int64]float64),
 		stopChan:             make(chan struct{}),
 	}
 	q.clearMetrics()
@@ -410,6 +410,34 @@ func SplitCollectionKey(key string) (dbID int64, collectionName string) {
 	return dbID, collectionName
 }
 
+// indexedEntitiesKey identifies an aggregate-mode indexed entity series.
+type indexedEntitiesKey struct {
+	dbName        string
+	indexName     string
+	isVectorIndex string
+}
+
+// publishAggregateEntityMetrics replaces the aggregate entity gauges with the
+// values of one complete refresh.
+func publishAggregateEntityMetrics(loadedByDB, totalByDB map[string]int64, indexedByKey map[indexedEntitiesKey]int64) {
+	metrics.RootCoordNumEntities.Reset()
+	metrics.RootCoordIndexedNumEntities.Reset()
+	for dbName, numEntity := range loadedByDB {
+		metrics.RootCoordNumEntities.WithLabelValues(dbName, metrics.AllLabel, metrics.LoadedLabel).Set(float64(numEntity))
+	}
+	for dbName, numEntity := range totalByDB {
+		metrics.RootCoordNumEntities.WithLabelValues(dbName, metrics.AllLabel, metrics.TotalLabel).Set(float64(numEntity))
+	}
+	for key, numEntity := range indexedByKey {
+		metrics.RootCoordIndexedNumEntities.WithLabelValues(
+			key.dbName,
+			metrics.AllLabel,
+			key.indexName,
+			key.isVectorIndex,
+		).Set(float64(numEntity))
+	}
+}
+
 // collectMetrics sends GetMetrics requests to DataCoord and QueryCoord to sync the metrics in DataNodes and QueryNodes.
 func (q *QuotaCenter) collectMetrics() error {
 	q.lock.Lock()
@@ -423,6 +451,14 @@ func (q *QuotaCenter) collectMetrics() error {
 	defer cancel()
 
 	group := &errgroup.Group{}
+
+	// In aggregate mode the entity gauges are built per database here and
+	// published only after every source answered, so a slow or failed refresh
+	// keeps the last complete values instead of exposing partial ones.
+	aggregateCollectionMetrics := metrics.IsCollectionLevelMetricsAggregateMode()
+	numEntitiesLoadedByDB := make(map[string]int64)
+	numEntitiesTotalByDB := make(map[string]int64)
+	indexedEntitiesByKey := make(map[indexedEntitiesKey]int64)
 
 	// get Query cluster metrics
 	group.Go(func() error {
@@ -444,6 +480,16 @@ func (q *QuotaCenter) collectMetrics() error {
 			}
 		}
 
+		// Empty and growing-only QueryViews need read quotas too. QN physical
+		// metrics alone do not enumerate them. Keep released-but-resident views
+		// covered until their cleanup completes.
+		if resources := qvresource.Resource(); resources != nil {
+			collections.Insert(resources.ShardViews.CollectionIDs()...)
+			for collectionID := range resources.LoadConfigs.Snapshot().ConfigsMap() {
+				collections.Insert(collectionID)
+			}
+		}
+
 		q.readableCollections = make(map[int64]map[int64][]int64, 0)
 		var rangeErr error
 		collections.Range(func(collectionID int64) bool {
@@ -461,7 +507,11 @@ func (q *QuotaCenter) collectMetrics() error {
 				lo.Map(coll.Partitions, func(part *model.Partition, _ int) int64 { return part.PartitionID })...)
 			q.collections.Insert(FormatCollectionKey(coll.DBID, coll.Name), collectionID)
 			if numEntity, ok := numEntitiesLoaded[collectionID]; ok {
-				metrics.RootCoordNumEntities.WithLabelValues(coll.DBName, coll.Name, metrics.LoadedLabel).Set(float64(numEntity))
+				if aggregateCollectionMetrics {
+					numEntitiesLoadedByDB[coll.DBName] += numEntity
+				} else {
+					metrics.RootCoordNumEntities.WithLabelValues(coll.DBName, coll.Name, metrics.LoadedLabel).Set(float64(numEntity))
+				}
 			}
 			return true
 		})
@@ -520,18 +570,32 @@ func (q *QuotaCenter) collectMetrics() error {
 				return true
 			}
 			if datacoordCollectionMetric, ok := collectionMetrics[collectionID]; ok {
-				metrics.RootCoordNumEntities.WithLabelValues(coll.DBName, coll.Name, metrics.TotalLabel).Set(float64(datacoordCollectionMetric.NumEntitiesTotal))
+				if aggregateCollectionMetrics {
+					numEntitiesTotalByDB[coll.DBName] += datacoordCollectionMetric.NumEntitiesTotal
+				} else {
+					metrics.RootCoordNumEntities.WithLabelValues(coll.DBName, coll.Name, metrics.TotalLabel).Set(float64(datacoordCollectionMetric.NumEntitiesTotal))
+				}
 				fields := lo.KeyBy(coll.Fields, func(v *model.Field) int64 { return v.FieldID })
 				for _, indexInfo := range datacoordCollectionMetric.IndexInfo {
 					if _, ok := fields[indexInfo.FieldID]; !ok {
 						continue
 					}
 					field := fields[indexInfo.FieldID]
-					metrics.RootCoordIndexedNumEntities.WithLabelValues(
-						coll.DBName,
-						coll.Name,
-						indexInfo.IndexName,
-						strconv.FormatBool(typeutil.IsVectorType(field.DataType))).Set(float64(indexInfo.NumEntitiesIndexed))
+					isVectorIndex := strconv.FormatBool(typeutil.IsVectorType(field.DataType))
+					if aggregateCollectionMetrics {
+						key := indexedEntitiesKey{
+							dbName:        coll.DBName,
+							indexName:     indexInfo.IndexName,
+							isVectorIndex: isVectorIndex,
+						}
+						indexedEntitiesByKey[key] += indexInfo.NumEntitiesIndexed
+					} else {
+						metrics.RootCoordIndexedNumEntities.WithLabelValues(
+							coll.DBName,
+							coll.Name,
+							indexInfo.IndexName,
+							isVectorIndex).Set(float64(indexInfo.NumEntitiesIndexed))
+					}
 				}
 			}
 			return true
@@ -578,6 +642,9 @@ func (q *QuotaCenter) collectMetrics() error {
 	err := group.Wait()
 	if err != nil {
 		return err
+	}
+	if aggregateCollectionMetrics {
+		publishAggregateEntityMetrics(numEntitiesLoadedByDB, numEntitiesTotalByDB, indexedEntitiesByKey)
 	}
 
 	for oldDN := range oldDataNodes {
@@ -917,6 +984,8 @@ func (q *QuotaCenter) calculateWriteRates() error {
 
 	// Get factorChangeThreshold
 	factorChangeThreshold := Params.QuotaConfig.FactorChangeThreshold.GetAsFloat()
+	prevFactors := q.prevFactors
+	q.prevFactors = make(map[int64]float64, len(collectionFactors))
 
 	for collection, factor := range collectionFactors {
 		metrics.RootCoordRateLimitRatio.WithLabelValues(strconv.FormatInt(collection, 10)).Set(1 - factor)
@@ -939,6 +1008,13 @@ func (q *QuotaCenter) calculateWriteRates() error {
 			return merr.WrapErrServiceInternalMsg("collection limiter not found: %d", collection)
 		}
 
+		// Reuse the previous factor if the new one differs by less than FactorChangeThreshold, unless the new one lifts
+		// the throttling (factor 1). resetAllCurrentRates rebuilt the limiters at baseLimit, so always set the rate.
+		if prevFactor := prevFactors[collection]; factor < 1 && math.Abs(factor-prevFactor) < factorChangeThreshold*prevFactor {
+			factor = prevFactor
+		}
+		q.prevFactors[collection] = factor
+
 		limiter := collectionLimiter.GetLimiters()
 		for _, rt := range []internalpb.RateType{
 			internalpb.RateType_DMLInsert,
@@ -948,21 +1024,7 @@ func (q *QuotaCenter) calculateWriteRates() error {
 			if !ok || v.Limit() == Inf {
 				continue
 			}
-
-			// Check if rate change is significant enough to trigger an update
-			// Calculate newRate = baseLimit * factor for each rate type and compare with previous rate
-			// If the rate change is less than FactorChangeThreshold, skip SetLimit to reduce proxy updates
-			newRate := float64(v.Limit() * Limit(factor))
-			rateKey := strconv.FormatInt(collection, 10) + "-" + strconv.FormatInt(int64(rt), 10)
-			prevRate, ok := q.prevRates[rateKey]
-			if ok && prevRate > 0 {
-				relativeChange := math.Abs(newRate-prevRate) / prevRate
-				if relativeChange < factorChangeThreshold {
-					continue
-				}
-			}
-			v.SetLimit(Limit(newRate))
-			q.prevRates[rateKey] = newRate
+			v.SetLimit(v.Limit() * Limit(factor))
 		}
 
 		collectionProps := q.getCollectionLimitProperties(collection)

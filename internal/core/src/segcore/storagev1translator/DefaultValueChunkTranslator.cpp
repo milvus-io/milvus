@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "segcore/storagev1translator/DefaultValueChunkTranslator.h"
+#include "storage/LocalFileIOPool.h"
 
 #include <assert.h>
 #include <algorithm>
@@ -28,6 +29,7 @@
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
 #include "fmt/core.h"
+#include "folly/coro/BlockingWait.h"
 #include "mmap/Types.h"
 #include "pb/schema.pb.h"
 #include "segcore/Utils.h"
@@ -215,30 +217,31 @@ DefaultValueChunkTranslator::value_size() const {
     return value_size;
 }
 
-std::pair<milvus::cachinglayer::ResourceUsage,
-          milvus::cachinglayer::ResourceUsage>
-DefaultValueChunkTranslator::estimated_byte_size_of_cell(
-    milvus::cachinglayer::cid_t cid) const {
-    // TODO: actually only the first cell is used, other cells share the same buffer,
-    // but for now we estimate the same size for all cells
-    auto value_size = this->value_size();
-    auto rows_begin = meta_.num_rows_until_chunk_[cid];
-    auto rows_end = meta_.num_rows_until_chunk_[cid + 1];
-    auto rows = rows_end - rows_begin;
-    auto cell_bytes = value_size * rows;
-    if (struct_offsets_) {
-        std::vector<int32_t> starts(rows + 1);
-        struct_offsets_->CopyRowElementStarts(rows_begin, rows, starts.data());
-        auto elements = starts.back() - starts.front();
-        cell_bytes = (rows + elements + 1) * sizeof(int64_t) +
-                     (rows + elements + 7) / 8 +
-                     elements * std::max<int64_t>(1, value_size);
+milvus::cachinglayer::LoadingResourceUsage
+DefaultValueChunkTranslator::estimated_loading_usage(
+    const std::vector<milvus::cachinglayer::cid_t>& cids) const {
+    // TODO: cells share a buffer, but retain the per-cell resident allowance.
+    const auto value_size = this->value_size();
+    int64_t cell_bytes = 0;
+    for (const auto cid : cids) {
+        const auto rows_begin = meta_.num_rows_until_chunk_[cid];
+        const auto rows = meta_.num_rows_until_chunk_[cid + 1] - rows_begin;
+        if (struct_offsets_) {
+            std::vector<int32_t> starts(rows + 1);
+            struct_offsets_->CopyRowElementStarts(
+                rows_begin, rows, starts.data());
+            const auto elements = starts.back() - starts.front();
+            cell_bytes += (rows + elements + 1) * sizeof(int64_t) +
+                          (rows + elements + 7) / 8 +
+                          elements * std::max<int64_t>(1, value_size);
+        } else {
+            cell_bytes += value_size * rows;
+        }
     }
-    if (use_mmap_) {
-        return {{0, cell_bytes}, {0, 0}};
-    } else {
-        return {{cell_bytes, 0}, {0, 0}};
-    }
+    return {use_mmap_ ? cachinglayer::ResourceUsage{0, cell_bytes}
+                      : cachinglayer::ResourceUsage{cell_bytes, 0},
+            {},
+            {}};
 }
 
 const std::string&
@@ -387,47 +390,62 @@ std::vector<
 DefaultValueChunkTranslator::get_cells(
     milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
-    std::vector<
-        std::pair<milvus::cachinglayer::cid_t, std::unique_ptr<milvus::Chunk>>>
-        res;
-    res.reserve(cids.size());
+    return folly::coro::blockingWait(get_cells_async(ctx, cids));
+}
 
-    for (auto cid : cids) {
-        assert(cid + 1 < meta_.num_rows_until_chunk_.size());
+folly::coro::Task<DefaultValueChunkTranslator::CellResults>
+DefaultValueChunkTranslator::get_cells_async(
+    milvus::OpContext* ctx, const std::vector<cachinglayer::cid_t>& cids) {
+    auto load = [&]() -> CellResults {
+        std::vector<std::pair<milvus::cachinglayer::cid_t,
+                              std::unique_ptr<milvus::Chunk>>>
+            res;
+        res.reserve(cids.size());
 
-        auto rows_begin = meta_.num_rows_until_chunk_[cid];
-        auto rows_end = meta_.num_rows_until_chunk_[cid + 1];
-        auto num_rows = rows_end - rows_begin;
+        for (auto cid : cids) {
+            assert(cid + 1 < meta_.num_rows_until_chunk_.size());
 
-        std::unique_ptr<milvus::Chunk> chunk;
-        if (struct_offsets_) {
-            auto buffer = build_buffer_for_rows(
-                rows_begin, num_rows, fmt::format("_cell_{}", cid));
-            chunk = milvus::make_chunk_from_buffer(field_meta_, buffer, 0);
-        } else if (can_share_buffer_) {
-            // Fixed-width types: share the pre-built buffer, override row count
-            AssertInfo(primary_buffer_.has_value(),
-                       "primary buffer is not initialized");
-            chunk = milvus::make_chunk_from_buffer(
-                field_meta_, primary_buffer_.value(), num_rows);
-        } else {
-            // Variable-length types: use matching buffer (primary or tail)
-            // because buffer layout (null bitmap, offsets) must match row count.
-            // row_nums_override=0: use the buffer's own row_nums.
-            if (tail_buffer_.has_value() && num_rows == tail_cell_rows_) {
-                chunk = milvus::make_chunk_from_buffer(
-                    field_meta_, tail_buffer_.value(), 0);
-            } else {
+            auto rows_begin = meta_.num_rows_until_chunk_[cid];
+            auto rows_end = meta_.num_rows_until_chunk_[cid + 1];
+            auto num_rows = rows_end - rows_begin;
+
+            std::unique_ptr<milvus::Chunk> chunk;
+            if (struct_offsets_) {
+                auto buffer = build_buffer_for_rows(
+                    rows_begin, num_rows, fmt::format("_cell_{}", cid));
+                chunk = milvus::make_chunk_from_buffer(field_meta_, buffer, 0);
+            } else if (can_share_buffer_) {
+                // Fixed-width types: share the pre-built buffer, override row count
                 AssertInfo(primary_buffer_.has_value(),
                            "primary buffer is not initialized");
                 chunk = milvus::make_chunk_from_buffer(
-                    field_meta_, primary_buffer_.value(), 0);
+                    field_meta_, primary_buffer_.value(), num_rows);
+            } else {
+                // Variable-length types: use matching buffer (primary or tail)
+                // because buffer layout (null bitmap, offsets) must match row count.
+                // row_nums_override=0: use the buffer's own row_nums.
+                if (tail_buffer_.has_value() && num_rows == tail_cell_rows_) {
+                    chunk = milvus::make_chunk_from_buffer(
+                        field_meta_, tail_buffer_.value(), 0);
+                } else {
+                    AssertInfo(primary_buffer_.has_value(),
+                               "primary buffer is not initialized");
+                    chunk = milvus::make_chunk_from_buffer(
+                        field_meta_, primary_buffer_.value(), 0);
+                }
             }
+            res.emplace_back(cid, std::move(chunk));
         }
-        res.emplace_back(cid, std::move(chunk));
-    }
 
-    return res;
+        return res;
+    };
+    if (struct_offsets_ && use_mmap_ && !mmap_dir_path_.empty()) {
+        CellResults result;
+        co_await storage::RunLocalFileIOAsync(
+            [&] { result = load(); }, proto::common::LoadPriority::HIGH);
+        co_return result;
+    }
+    co_return load();
 }
 
 }  // namespace milvus::segcore::storagev1translator

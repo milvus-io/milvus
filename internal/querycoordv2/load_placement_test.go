@@ -24,13 +24,14 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	ext "github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -149,20 +150,20 @@ func TestLoadCollectionBroadcastAppliesTheCompletedPlacement(t *testing.T) {
 	paramtable.Init()
 	setForm(t, true)
 	const collectionID = int64(7)
-	broker := meta.NewMockBroker(t)
-	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
-		Return(&milvuspb.DescribeCollectionResponse{CollectionID: collectionID}, nil).Maybe()
-	broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{1}, nil).Maybe()
-	s := &Server{broker: broker}
+	s := &Server{
+		broker:        meta.NewMockBroker(t),
+		meta:          newViewMeta(&metacache.CollectionInfo{ID: collectionID, Partitions: []int64{1}, Schema: &schemapb.CollectionSchema{}}),
+		qviewsRuntime: &qviewsRuntime{loadConfigStore: &loadmgr.LoadConfigStore{}},
+	}
 	var captured *capturedPlacement
 	mockey.PatchConvey("a load naming one resource group carries the other's placement", t, func() {
 		mockey.Mock((*Server).startBroadcastWithCollectionIDLock).
 			Return(stubBroadcaster{}, nil).Build()
 		mockey.Mock(utils.AssignReplica).Return(map[string]int{"rg_1": 1}, nil).Build()
 		mockey.Mock((*Server).getCurrentLoadConfig).Return(loadedIn(collectionID, "rg_0")).Build()
-		mockey.Mock(job.GenerateAlterLoadConfigMessage).To(
-			func(_ context.Context, req *job.AlterLoadConfigRequest) (message.BroadcastMutableMessage, error) {
-				captured = capturePlacement(req)
+		mockey.Mock((*Server).generateAlterLoadConfigMessageForLoadCollection).To(
+			func(_ *Server, _ context.Context, _ *metacache.CollectionInfo, _ *loadmgr.LoadConfig, expected qviewsExpectedLoadConfig) (message.BroadcastMutableMessage, error) {
+				captured = &capturedPlacement{ExpectedReplicaNumber: maps.Clone(expected.ReplicaNumber)}
 				return nil, nil
 			}).Build()
 		err := s.broadcastAlterLoadConfigCollectionV2ForLoadCollection(context.Background(),
@@ -255,11 +256,11 @@ func TestLoadCollectionBroadcastOfABareRequestKeepsThePlacementItAsksFor(t *test
 	paramtable.Init()
 	setForm(t, true)
 	const collectionID = int64(8)
-	broker := meta.NewMockBroker(t)
-	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
-		Return(&milvuspb.DescribeCollectionResponse{CollectionID: collectionID}, nil).Maybe()
-	broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{1}, nil).Maybe()
-	s := &Server{broker: broker}
+	s := &Server{
+		broker:        meta.NewMockBroker(t),
+		meta:          newViewMeta(&metacache.CollectionInfo{ID: collectionID, Partitions: []int64{1}, Schema: &schemapb.CollectionSchema{}}),
+		qviewsRuntime: &qviewsRuntime{loadConfigStore: &loadmgr.LoadConfigStore{}},
+	}
 	var captured *capturedPlacement
 	mockey.PatchConvey("a load naming no resource group states the whole placement", t, func() {
 		mockey.Mock((*Server).startBroadcastWithCollectionIDLock).
@@ -267,9 +268,9 @@ func TestLoadCollectionBroadcastOfABareRequestKeepsThePlacementItAsksFor(t *test
 		mockey.Mock(utils.AssignReplica).
 			Return(map[string]int{meta.DefaultResourceGroupName: 1}, nil).Build()
 		mockey.Mock((*Server).getCurrentLoadConfig).Return(loadedIn(collectionID, "rg_a")).Build()
-		mockey.Mock(job.GenerateAlterLoadConfigMessage).To(
-			func(_ context.Context, req *job.AlterLoadConfigRequest) (message.BroadcastMutableMessage, error) {
-				captured = capturePlacement(req)
+		mockey.Mock((*Server).generateAlterLoadConfigMessageForLoadCollection).To(
+			func(_ *Server, _ context.Context, _ *metacache.CollectionInfo, _ *loadmgr.LoadConfig, expected qviewsExpectedLoadConfig) (message.BroadcastMutableMessage, error) {
+				captured = &capturedPlacement{ExpectedReplicaNumber: maps.Clone(expected.ReplicaNumber)}
 				return nil, nil
 			}).Build()
 		err := s.broadcastAlterLoadConfigCollectionV2ForLoadCollection(context.Background(),
@@ -294,10 +295,10 @@ func TestLoadPartitionsBroadcastOfABareRequestIsNotRefused(t *testing.T) {
 	paramtable.Init()
 	setForm(t, true)
 	const collectionID = int64(9)
-	broker := meta.NewMockBroker(t)
-	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
-		Return(&milvuspb.DescribeCollectionResponse{CollectionID: collectionID}, nil).Maybe()
-	s := &Server{broker: broker}
+	s := &Server{
+		broker: meta.NewMockBroker(t),
+		meta:   newViewMeta(&metacache.CollectionInfo{ID: collectionID, Partitions: []int64{1}, Schema: &schemapb.CollectionSchema{}}),
+	}
 	current := loadedIn(collectionID, "rg_a")
 	current.Collection = &meta.Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{CollectionID: collectionID, ReplicaNumber: 1},
@@ -334,10 +335,10 @@ func TestLoadPartitionsBroadcastOfAScopedRequestCarriesTheSiblings(t *testing.T)
 	paramtable.Init()
 	setForm(t, true)
 	const collectionID = int64(10)
-	broker := meta.NewMockBroker(t)
-	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
-		Return(&milvuspb.DescribeCollectionResponse{CollectionID: collectionID}, nil).Maybe()
-	s := &Server{broker: broker}
+	s := &Server{
+		broker: meta.NewMockBroker(t),
+		meta:   newViewMeta(&metacache.CollectionInfo{ID: collectionID, Partitions: []int64{1}, Schema: &schemapb.CollectionSchema{}}),
+	}
 	// The collection is registered as loaded, so CheckIfLoadPartitionsExecutable
 	// runs for real: the scoped expansion must pass it.
 	current := loadedIn(collectionID, "rg_a")
@@ -390,20 +391,20 @@ func TestAStockLoadCollectionBroadcastStatesTheWholePlacement(t *testing.T) {
 	paramtable.Init()
 	setForm(t, false)
 	const collectionID = int64(11)
-	broker := meta.NewMockBroker(t)
-	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
-		Return(&milvuspb.DescribeCollectionResponse{CollectionID: collectionID}, nil).Maybe()
-	broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{1}, nil).Maybe()
-	s := &Server{broker: broker}
+	s := &Server{
+		broker:        meta.NewMockBroker(t),
+		meta:          newViewMeta(&metacache.CollectionInfo{ID: collectionID, Partitions: []int64{1}, Schema: &schemapb.CollectionSchema{}}),
+		qviewsRuntime: &qviewsRuntime{loadConfigStore: &loadmgr.LoadConfigStore{}},
+	}
 	var captured *capturedPlacement
 	mockey.PatchConvey("a stock load naming one resource group states the whole placement", t, func() {
 		mockey.Mock((*Server).startBroadcastWithCollectionIDLock).
 			Return(stubBroadcaster{}, nil).Build()
 		mockey.Mock(utils.AssignReplica).Return(map[string]int{"rg_1": 1}, nil).Build()
 		mockey.Mock((*Server).getCurrentLoadConfig).Return(loadedIn(collectionID, "rg_0")).Build()
-		mockey.Mock(job.GenerateAlterLoadConfigMessage).To(
-			func(_ context.Context, req *job.AlterLoadConfigRequest) (message.BroadcastMutableMessage, error) {
-				captured = capturePlacement(req)
+		mockey.Mock((*Server).generateAlterLoadConfigMessageForLoadCollection).To(
+			func(_ *Server, _ context.Context, _ *metacache.CollectionInfo, _ *loadmgr.LoadConfig, expected qviewsExpectedLoadConfig) (message.BroadcastMutableMessage, error) {
+				captured = &capturedPlacement{ExpectedReplicaNumber: maps.Clone(expected.ReplicaNumber)}
 				return nil, nil
 			}).Build()
 		err := s.broadcastAlterLoadConfigCollectionV2ForLoadCollection(context.Background(),
@@ -426,10 +427,10 @@ func TestAStockLoadPartitionsBroadcastStatesTheWholePlacement(t *testing.T) {
 	paramtable.Init()
 	setForm(t, false)
 	const collectionID = int64(12)
-	broker := meta.NewMockBroker(t)
-	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
-		Return(&milvuspb.DescribeCollectionResponse{CollectionID: collectionID}, nil).Maybe()
-	s := &Server{broker: broker}
+	s := &Server{
+		broker: meta.NewMockBroker(t),
+		meta:   newViewMeta(&metacache.CollectionInfo{ID: collectionID, Partitions: []int64{1}, Schema: &schemapb.CollectionSchema{}}),
+	}
 	current := loadedIn(collectionID, "rg_a")
 	current.Collection = &meta.Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{CollectionID: collectionID, ReplicaNumber: 1},

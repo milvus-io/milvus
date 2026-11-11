@@ -17,7 +17,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type collectionRuntimeKey struct {
@@ -54,11 +53,11 @@ func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *q
 	if err != nil {
 		return nil, isRetryableCollectionRuntimeError(err), err
 	}
-	if collection == nil || collection.Schema == nil {
+	if collection == nil || collection.CollectionSchema == nil {
 		return nil, false, merr.WrapErrServiceInternalMsg("collection metadata is incomplete")
 	}
-	if collection.Schema.GetVersion() != meta.GetSchemaVersion() {
-		return nil, false, merr.WrapErrServiceInternalMsg("query view requires schema %d, streaming returned %d", meta.GetSchemaVersion(), collection.Schema.GetVersion())
+	if collection.GetVersion() != meta.GetSchemaVersion() {
+		return nil, false, merr.WrapErrServiceInternalMsg("query view requires schema %d, streaming returned %d", meta.GetSchemaVersion(), collection.GetVersion())
 	}
 	loadInfo, err := m.loadInfo(ctx, meta)
 	if err != nil {
@@ -72,14 +71,14 @@ func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *q
 	defer m.mu.Unlock()
 	collections := m.collections[key]
 	if collections == nil {
-		indexMeta := segments.ComposeIndexMeta(ctx, loadInfo.IndexInfos, collection.Schema)
+		indexMeta := segments.ComposeIndexMeta(ctx, loadInfo.IndexInfos, collection.CollectionSchema)
 		collections = m.newCollections()
 		if err := collections.PutOrRef(
-			meta.GetCollectionId(), collection.Schema, indexMeta,
+			meta.GetCollectionId(), collection.CollectionSchema, indexMeta,
 			&querypb.LoadMetaInfo{
 				LoadType:     querypb.LoadType_LoadCollection,
 				CollectionID: meta.GetCollectionId(),
-				DbName:       collection.Schema.GetDbName(),
+				DbName:       collection.GetDbName(),
 			},
 		); err != nil {
 			return nil, false, err
@@ -91,7 +90,7 @@ func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *q
 	localCollection := collections.Get(meta.GetCollectionId())
 	var ccollection *segcore.CCollection
 	if localCollection != nil {
-		localCollection = localCollection.WithLoadScope(loadInfo.PartitionIDs, loadInfoFieldIDs(loadInfo), loadInfoHintIDs(loadInfo, collection.Schema))
+		localCollection = localCollection.WithLoadScope(loadInfo.PartitionIDs, loadInfoFieldIDs(loadInfo), loadInfoHintIDs(loadInfo))
 		ccollection = localCollection.GetCCollection()
 	}
 	return &queryViewCollectionRuntimeGuard{
@@ -99,8 +98,8 @@ func (m *queryViewCollectionRuntimeManager) Acquire(ctx context.Context, view *q
 		key:           key,
 		collection:    localCollection,
 		collectionID:  meta.GetCollectionId(),
-		databaseName:  collection.Schema.GetDbName(),
-		schema:        collection.Schema,
+		databaseName:  collection.GetDbName(),
+		schema:        collection.CollectionSchema,
 		schemaVersion: int64(meta.GetSchemaVersion()),
 		ccollection:   ccollection,
 		indexes:       loadInfo.IndexInfos,
@@ -127,9 +126,7 @@ func (m *queryViewCollectionRuntimeManager) loadInfo(ctx context.Context, meta *
 	if info.CollectionID != meta.GetCollectionId() || uint64(info.Version) != meta.GetLoadInfoVersion() {
 		return qnview.QueryViewLoadInfo{}, merr.WrapErrServiceNotReadyMsg("requested load snapshot (%d, %d), received (%d, %d)", meta.GetCollectionId(), meta.GetLoadInfoVersion(), info.CollectionID, info.Version)
 	}
-	if len(info.RequiredFields) == 0 {
-		return qnview.QueryViewLoadInfo{}, merr.WrapErrServiceInternalMsg("query view load snapshot %d for collection %d has no required fields", info.Version, info.CollectionID)
-	}
+
 	return info, nil
 }
 
@@ -193,19 +190,10 @@ func loadInfoFieldIDs(info qnview.QueryViewLoadInfo) []int64 {
 	return fields
 }
 
-func loadInfoHintIDs(info qnview.QueryViewLoadInfo, schema *schemapb.CollectionSchema) []int64 {
-	if len(info.LoadFields) == 0 {
-		return nil
-	}
-	allowed := make(map[int64]bool)
+func loadInfoHintIDs(info qnview.QueryViewLoadInfo) []int64 {
+	fields := make([]int64, 0, len(info.LoadFields))
 	for _, field := range info.LoadFields {
-		allowed[field.GetFieldId()] = true
-	}
-	fields := make([]int64, 0)
-	for _, field := range typeutil.GetAllFieldSchemas(schema) {
-		if allowed[field.GetFieldID()] {
-			fields = append(fields, field.GetFieldID())
-		}
+		fields = append(fields, field.GetFieldId())
 	}
 	return fields
 }

@@ -251,6 +251,9 @@ var routeToMethod = map[string]string{ //nolint:gosec // not credentials, just a
 	"/v2/vectordb/segments/describe":    "GetSegmentsInfo",
 	"/v2/vectordb/quotacenter/describe": "GetQuotaMetrics",
 
+	"/v2/vectordb/requests/running/list":   "ListRunningRequests",
+	"/v2/vectordb/requests/running/cancel": "CancelRequests",
+
 	"/v2/vectordb/common/run_analyzer": "RunAnalyzer",
 }
 
@@ -427,6 +430,8 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	// segment group
 	router.POST(SegmentCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &GetSegmentsInfoReq{} }, wrapperTraceLog(h.getSegmentsInfo))))
 	router.POST(QuotaCenterCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &GetQuotaMetricsReq{} }, wrapperTraceLog(h.getQuotaMetrics))))
+	router.POST(RunningRequestCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &ListRunningRequestsReq{} }, wrapperTraceLog(h.listRunningRequests))))
+	router.POST(RunningRequestCategory+CancelAction, timeoutMiddleware(wrapperPost(func() any { return &CancelRequestsReq{} }, wrapperTraceLog(h.cancelRequests))))
 
 	// common
 	router.POST(CommonCategory+RunAnalyzerAction, timeoutMiddleware(wrapperPost(func() any { return &RunAnalyzerReq{} }, wrapperTraceLog(h.runAnalyzer))))
@@ -1487,6 +1492,15 @@ func (h *HandlersV2) addCollectionField(ctx context.Context, c *gin.Context, any
 		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return nil, err
 	}
+	// A fieldName of the form "struct[sub]" adds a sub-field to an existing
+	// struct. The full name is sent as the field name and the server parses
+	// and validates it.
+	if open := strings.IndexByte(httpReq.Schema.FieldName, '['); open >= 0 && typeutil.IsNestedArrayTypeSchema(schemaProto.GetTypeSchema()) {
+		if err := completeNestedSubFieldTypeSchema(httpReq.Schema.FieldName[:open], httpReq.Schema, schemaProto, nil); err != nil {
+			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			return nil, err
+		}
+	}
 
 	req := &milvuspb.AlterCollectionSchemaRequest{
 		DbName:         dbName,
@@ -1591,6 +1605,11 @@ func matchCountRule(outputs []string) bool {
 }
 
 func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	vectorEncoding, err := parseFloatVectorEncoding(c.Request.Header)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
 	httpReq := anyReq.(*QueryReqV2)
 	req := &milvuspb.QueryRequest{
 		DbName:         dbName,
@@ -1600,7 +1619,6 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 		PartitionNames: httpReq.PartitionNames,
 		QueryParams:    []*commonpb.KeyValuePair{},
 	}
-	var err error
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
 	if err != nil {
 		return nil, err
@@ -1647,7 +1665,10 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 	if err == nil {
 		queryResp := resp.(*milvuspb.QueryResults)
 		allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-		outputData, err := buildQueryResp(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema)
+		outputData, err := buildQueryRespWithEncoding(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema, vectorEncoding)
+		if err == nil {
+			err = setQueryElementOffsets(outputData, queryResp.GetElementIndices())
+		}
 		if err != nil {
 			mlog.Warn(ctx, "high level restful api, fail to deal with query result", mlog.Any("response", resp), mlog.Err(err))
 			HTTPReturn(c, http.StatusOK, gin.H{
@@ -1678,6 +1699,11 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 }
 
 func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	vectorEncoding, err := parseFloatVectorEncoding(c.Request.Header)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
 	httpReq := anyReq.(*CollectionIDReq)
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
 	if err != nil {
@@ -1716,7 +1742,7 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 	if err == nil {
 		queryResp := resp.(*milvuspb.QueryResults)
 		allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-		outputData, err := buildQueryResp(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema)
+		outputData, err := buildQueryRespWithEncoding(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS, collSchema, vectorEncoding)
 		if err != nil {
 			mlog.Warn(ctx, "high level restful api, fail to deal with get result", mlog.Any("response", resp), mlog.Err(err))
 			HTTPReturn(c, http.StatusOK, gin.H{
@@ -2003,15 +2029,13 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 	var err error
 	var vectorField *schemapb.FieldSchema
 	if len(fieldName) == 0 {
-		for _, field := range collSchema.Fields {
-			if typeutil.IsVectorType(field.DataType) {
-				if len(fieldName) == 0 {
-					fieldName = field.Name
-					vectorField = field
-				} else {
-					return nil, merr.WrapErrParameterInvalidMsg("search without annsField, but already found multiple vector fields: [%s, %s,,,]", fieldName, field.Name)
-				}
+		// Same candidates as the proxy's default anns_field: top-level vectors
+		// and struct vector sub-fields.
+		for _, field := range typeutil.GetVectorFieldSchemas(collSchema) {
+			if vectorField != nil {
+				return nil, merr.WrapErrParameterInvalidMsg("search without annsField, but already found multiple vector fields: [%s, %s,,,]", vectorField.GetName(), field.GetName())
 			}
+			vectorField = field
 		}
 	} else {
 		for _, field := range collSchema.Fields {
@@ -2112,6 +2136,11 @@ func appendGroupParams(params []*commonpb.KeyValuePair, groupByField string, gro
 }
 
 func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	vectorEncoding, err := parseFloatVectorEncoding(c.Request.Header)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
 	httpReq := anyReq.(*SearchReqV2)
 	req := &milvuspb.SearchRequest{
 		DbName:         dbName,
@@ -2121,7 +2150,6 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		OutputFields:   httpReq.OutputFields,
 		PartitionNames: httpReq.PartitionNames,
 	}
-	var err error
 	req.ConsistencyLevel, req.UseDefaultConsistency, err = convertConsistencyLevel(httpReq.ConsistencyLevel)
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, search with consistency_level invalid", mlog.Err(err))
@@ -2387,7 +2415,10 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-			outputData, err := buildQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema)
+			outputData, err := buildQueryRespWithEncoding(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema, vectorEncoding)
+			if err == nil {
+				err = setSearchElementOffsets(outputData, searchResp.Results.GetElementIndices())
+			}
 			if err != nil {
 				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Any("result", searchResp.Results), mlog.Err(err))
 				HTTPReturn(c, http.StatusOK, gin.H{
@@ -2443,6 +2474,11 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 }
 
 func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	vectorEncoding, err := parseFloatVectorEncoding(c.Request.Header)
+	if err != nil {
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		return nil, err
+	}
 	httpReq := anyReq.(*HybridSearchReq)
 	req := &milvuspb.HybridSearchRequest{
 		DbName:         dbName,
@@ -2451,7 +2487,6 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 		Requests:       []*milvuspb.SearchRequest{},
 		OutputFields:   httpReq.OutputFields,
 	}
-	var err error
 	req.ConsistencyLevel, req.UseDefaultConsistency, err = convertConsistencyLevel(httpReq.ConsistencyLevel)
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, search with consistency_level invalid", mlog.Err(err))
@@ -2576,7 +2611,10 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-			outputData, err := buildQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema)
+			outputData, err := buildQueryRespWithEncoding(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS, collSchema, vectorEncoding)
+			if err == nil {
+				err = setSearchElementOffsets(outputData, searchResp.Results.GetElementIndices())
+			}
 			if err != nil {
 				mlog.Warn(ctx, "high level restful api, fail to deal with search result", mlog.Any("result", searchResp.Results), mlog.Err(err))
 				HTTPReturn(c, http.StatusOK, gin.H{
@@ -2805,10 +2843,11 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		if enStr, ok := httpReq.Params["enableDynamicField"]; ok {
 			enableDynamic, err = strconv.ParseBool(fmt.Sprintf("%v", enStr))
 			if err != nil {
+				err = merr.WrapErrParameterInvalidErr(err, "the value for enableDynamicField must be a boolean")
 				mlog.Warn(ctx, "high level restful api, parse enableDynamicField fail", mlog.Err(err), requestLogField)
 				HTTPAbortReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(err),
-					HTTPReturnMessage: "parse enableDynamicField fail, err:" + err.Error(),
+					HTTPReturnMessage: err.Error(),
 				})
 				return nil, err
 			}
@@ -2894,6 +2933,19 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				TypeParams:      []*commonpb.KeyValuePair{},
 				Nullable:        field.Nullable,
 				ExternalField:   field.ExternalField,
+				// Only struct sub-fields support these; they are passed on so
+				// the server rejects them instead of their being dropped here.
+				ElementNullable: field.ElementNullable,
+			}
+			if field.TypeSchema != nil {
+				fieldSchema.TypeSchema, err = field.TypeSchema.GetProto(field.FieldName)
+				if err != nil {
+					HTTPAbortReturn(c, http.StatusOK, gin.H{
+						HTTPReturnCode:    merr.Code(err),
+						HTTPReturnMessage: err.Error(),
+					})
+					return nil, err
+				}
 			}
 
 			fieldSchema.DefaultValue, err = convertDefaultValue(field.DefaultValue, dataType)
@@ -4535,6 +4587,58 @@ func (h *HandlersV2) getQuotaMetrics(ctx context.Context, c *gin.Context, anyReq
 		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: response.GetMetricsInfo()})
 	}
 
+	return resp, err
+}
+
+func (h *HandlersV2) listRunningRequests(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*ListRunningRequestsReq)
+	req := &milvuspb.ListRunningRequestsRequest{
+		// Here the database name is one of four filters, not the target of the
+		// call, so it is taken from the body as written rather than from the
+		// name the wrapper resolved. The wrapper substitutes "default" when
+		// the body and the header name none, which for a filter would silently
+		// hide every other database's requests from an operator who asked
+		// about all of them. An empty filter means every database, which is
+		// what the same call over gRPC does.
+		DbName:         httpReq.DbName,
+		CollectionName: httpReq.CollectionName,
+		User:           httpReq.User,
+		MinElapsedMs:   httpReq.MinElapsedMs,
+	}
+	c.Set(ContextRequest, req)
+	resp, err := h.wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/ListRunningRequests", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.ListRunningRequests(reqCtx, req.(*milvuspb.ListRunningRequestsRequest))
+	})
+	if err == nil {
+		response := resp.(*milvuspb.ListRunningRequestsResponse)
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{
+			"requests":    response.GetRequests(),
+			"nodeResults": response.GetNodeResults(),
+		}})
+	}
+	return resp, err
+}
+
+func (h *HandlersV2) cancelRequests(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	httpReq := anyReq.(*CancelRequestsReq)
+	req := &milvuspb.CancelRequestsRequest{
+		RequestIds: httpReq.RequestIDs,
+		Reason:     httpReq.Reason,
+		User:       httpReq.User,
+	}
+	c.Set(ContextRequest, req)
+	resp, err := h.wrapperProxy(ctx, c, req, h.checkAuth, false, "/milvus.proto.milvus.MilvusService/CancelRequests", func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.CancelRequests(reqCtx, req.(*milvuspb.CancelRequestsRequest))
+	})
+	if err == nil {
+		response := resp.(*milvuspb.CancelRequestsResponse)
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{
+			"canceled":     response.GetCanceled(),
+			"notFound":     response.GetNotFound(),
+			"undetermined": response.GetUndetermined(),
+			"nodeResults":  response.GetNodeResults(),
+		}})
+	}
 	return resp, err
 }
 

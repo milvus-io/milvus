@@ -25,19 +25,15 @@ func (w *walAdaptorImpl) GetCollectionSchema(ctx context.Context, req *streaming
 	if w.rwWALImpls.Channel().AccessMode != types.AccessModeRW {
 		return nil, status.NewUnrecoverableError("schema lookup requires the primary WAL")
 	}
-	var snapshot *streamingpb.CollectionSchemaOfVChannel
-	var err error
 	// The handler validates the canonical vchannel before entering the WAL.
 	collectionID := funcutil.GetCollectionIDFromVChannel(req.GetVchannel())
-	if req.GetCurrentWrite() {
-		snapshot, err = w.getWriteSchema(collectionID, req.GetVchannel())
-	} else {
+	snapshot, err := w.getWriteSchema(collectionID, req.GetVchannel())
+	if !req.GetCurrentWrite() && (err != nil || snapshot.GetSchema().GetVersion() != req.GetSchemaVersion()) {
+		// Write admission can lead the observer. Serve matching versions directly;
+		// only historical versions need the recovery module.
 		module := w.viewResourceManager.Module(req.GetVchannel())
 		if module == nil {
-			// The observer can lag write admission, but an absent collection
-			// cannot produce schema history. Preserve that terminal error;
-			// never substitute the current write schema for an exact version.
-			if _, err := w.getWriteSchema(collectionID, req.GetVchannel()); err != nil {
+			if err != nil {
 				return nil, err
 			}
 			return nil, status.NewInner("schema history for vchannel %s is not ready", req.GetVchannel())
@@ -48,7 +44,7 @@ func (w *walAdaptorImpl) GetCollectionSchema(ctx context.Context, req *streaming
 		return nil, err
 	}
 	return &streamingpb.StreamingNodeGetCollectionSchemaResponse{
-		Schema: snapshot.GetSchema(), EffectiveTimeTick: snapshot.GetCheckpointTimeTick(),
+		Schema: snapshot.GetSchema(),
 	}, nil
 }
 

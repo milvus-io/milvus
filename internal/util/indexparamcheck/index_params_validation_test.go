@@ -279,6 +279,7 @@ func TestValidateFieldIndexParams(t *testing.T) {
 }
 
 func TestElementNullableArrayOfVectorMetrics(t *testing.T) {
+	paramtable.Init()
 	scalar := &schemapb.FieldSchema{
 		Name: "scores", DataType: schemapb.DataType_Array,
 		ElementType: schemapb.DataType_Int64, ElementNullable: true,
@@ -296,10 +297,20 @@ func TestElementNullableArrayOfVectorMetrics(t *testing.T) {
 		err = ValidateFieldIndexParams(field, map[string]string{common.IndexTypeKey: "HNSW", common.MetricTypeKey: metricType})
 		assert.ErrorContains(t, err, "only support element-level metrics")
 	}
-	for _, metricType := range []string{"COSINE", "L2", "IP", "UNKNOWN"} {
-		err := ValidateFieldIndexParams(field, map[string]string{common.IndexTypeKey: "HNSW", common.MetricTypeKey: metricType})
-		assert.ErrorContains(t, err, "indexing element-nullable vector array field vectors is not supported yet")
+	for _, metricType := range []string{"COSINE", "L2", "IP"} {
+		field := &schemapb.FieldSchema{
+			Name: "vectors", DataType: schemapb.DataType_ArrayOfVector,
+			ElementType: schemapb.DataType_FloatVector, ElementNullable: true,
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}},
+		}
+		params := map[string]string{
+			common.IndexTypeKey: "HNSW", common.MetricTypeKey: metricType,
+			"M": "16", "efConstruction": "64",
+		}
+		assert.NoError(t, ValidateFieldIndexParams(field, params), metricType)
 	}
+	err := ValidateFieldIndexParams(field, map[string]string{common.IndexTypeKey: "HNSW", common.MetricTypeKey: "UNKNOWN"})
+	assert.ErrorContains(t, err, "does not support metric type")
 	assert.NoError(t, ValidateArrayOfVectorMetricType(field.GetElementType(), true, "COSINE"))
 	assert.NoError(t, ValidateArrayOfVectorMetricType(field.GetElementType(), false, "MAX_SIM_COSINE"))
 }

@@ -258,19 +258,22 @@ func (c *FieldReader) Next(count int64) (any, any, error) {
 		}
 		byteArr := make([][]byte, 0)
 		for _, str := range strs {
-			var dummy interface{}
-			err = json.Unmarshal([]byte(str), &dummy)
-			if err != nil {
-				return nil, nil, merr.WrapErrImportFailed(
-					fmt.Sprintf("failed to parse value '%v' for JSON field '%s', error: %v", str, c.field.GetName(), err))
-			}
+			// A dynamic row must be a JSON object, which is valid JSON by
+			// definition, so that parse covers the syntax check too.
 			if c.field.GetIsDynamic() {
-				var dummy2 map[string]interface{}
-				err = json.Unmarshal([]byte(str), &dummy2)
+				var obj map[string]interface{}
+				err = json.Unmarshal([]byte(str), &obj)
 				if err != nil {
 					return nil, nil, merr.WrapErrImportFailed(
 						fmt.Sprintf("failed to parse value '%v' for dynamic JSON field '%s', error: %v",
 							str, c.field.GetName(), err))
+				}
+			} else {
+				var value interface{}
+				err = json.Unmarshal([]byte(str), &value)
+				if err != nil {
+					return nil, nil, merr.WrapErrImportFailed(
+						fmt.Sprintf("failed to parse value '%v' for JSON field '%s', error: %v", str, c.field.GetName(), err))
 				}
 			}
 			byteArr = append(byteArr, []byte(str))

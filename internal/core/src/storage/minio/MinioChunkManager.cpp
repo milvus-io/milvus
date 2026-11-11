@@ -32,6 +32,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstdlib>
 #include <exception>
 #include <functional>
 #include <mutex>
@@ -75,6 +76,11 @@ std::mutex MinioChunkManager::client_mutex_;
 
 namespace {
 
+// The options the SDK was last initialized with: Aws::ShutdownAPI undoes what
+// Aws::InitAPI set up from them.
+Aws::SDKOptions sdk_options_at_init;
+std::once_flag release_sdk_at_exit;
+
 std::mutex&
 GcsEndpointsMutex() {
     static std::mutex mutex;
@@ -88,10 +94,9 @@ GcsEndpointHosts() {
 }
 
 // The IAM providers of the GCS buckets Milvus itself is configured with,
-// guarded by GcsEndpointsMutex(). milvus-storage replaces its registry entry
-// for a bucket whenever it opens a filesystem there, possibly with another
-// identity (an external table on the same bucket), so Milvus' own requests do
-// not use the registry entry. Reusing the provider also keeps its cached token.
+// guarded by GcsEndpointsMutex(). Keep the existing preference for Milvus's
+// own provider when selecting credentials from the shared registry. Reusing
+// the provider also keeps its cached token.
 using GcpProviderMap =
     std::unordered_map<milvus_storage::GcpBucketKey,
                        std::shared_ptr<milvus_storage::GcpCredentialProvider>,
@@ -188,6 +193,9 @@ GoogleHttpClientFactory::CreateHttpRequest(
     auto request = Aws::MakeShared<Aws::Http::Standard::StandardHttpRequest>(
         GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG, uri, method);
     request->SetResponseStreamFactory(streamFactory);
+    if (IsCredentialBrokerEndpoint(uri.GetURIString().c_str())) {
+        return request;
+    }
     // Only GCS endpoints get a token, and only for buckets with a registered
     // provider, as in milvus-storage's GCP factory. Requests to any other
     // host, such as the instance metadata endpoint or an external table
@@ -195,12 +203,13 @@ GoogleHttpClientFactory::CreateHttpRequest(
     if (!IsGcsHostForCredentials(uri.GetAuthority().c_str())) {
         return request;
     }
+    auto& registry = milvus_storage::GcpCredentialRegistry::Instance();
     auto provider = LookupMilvusGcpProvider(uri);
     if (provider == nullptr) {
-        provider =
-            milvus_storage::GcpCredentialRegistry::Instance().Lookup(uri);
+        provider = registry.Lookup(uri);
     }
-    if (provider == nullptr) {
+    if (provider == nullptr || !provider->IssuesBearerToken() ||
+        !registry.MayCarryBearerToken(uri)) {
         return request;
     }
     // The AWS SDK calls this and is built with -fno-exceptions: an exception
@@ -310,7 +319,7 @@ MinioChunkManager::InitSDKAPI(RemoteStorageType type,
         sdk_options_.loggingOptions.logger_create_fn = [log_level]() {
             return std::make_shared<AwsLogger>(log_level);
         };
-        Aws::InitAPI(sdk_options_);
+        InitSDKAPIUntilExit(sdk_options_);
     }
 }
 
@@ -363,7 +372,7 @@ MinioChunkManager::InitSDKAPIDefault(const std::string& log_level_str,
         sdk_options_.loggingOptions.logger_create_fn = [log_level]() {
             return std::make_shared<AwsLogger>(log_level);
         };
-        Aws::InitAPI(sdk_options_);
+        InitSDKAPIUntilExit(sdk_options_);
     }
 }
 
@@ -373,6 +382,34 @@ MinioChunkManager::ShutdownSDKAPI() {
     const size_t initCount = --init_count_;
     if (initCount == 0) {
         Aws::ShutdownAPI(sdk_options_);
+    }
+}
+
+// MinioChunkManagers share one reference to the AWS SDK. The first manager
+// takes it, and managers coming and going do not release it, since the SDK
+// would then have to be initialized again for the next one (#42459). It is
+// released when the process exits instead. A Go process ends with exit_group
+// and runs no exit handlers, but a host process that runs them would
+// otherwise destroy the SDK's static objects while the SDK is still
+// initialized: the default client bootstrap then shuts down from its static
+// destructor, and the cleanup thread that starts races the destruction of the
+// SDK's log redirection (a SIGSEGV in s_aws_logger_redirect_get_log_level).
+// Aws::ShutdownAPI counts references, so whichever holder releases the SDK
+// last shuts it down, this one or milvus-storage's own release at exit.
+void
+MinioChunkManager::InitSDKAPIUntilExit(const Aws::SDKOptions& options) {
+    Aws::InitAPI(options);
+    sdk_options_at_init = options;
+    std::call_once(release_sdk_at_exit,
+                   [] { std::atexit(MinioChunkManager::ReleaseSDKAPIAtExit); });
+}
+
+void
+MinioChunkManager::ReleaseSDKAPIAtExit() {
+    std::scoped_lock lock{client_mutex_};
+    // ShutdownSDKAPI may have released the reference already.
+    if (init_count_.exchange(0) > 0) {
+        Aws::ShutdownAPI(sdk_options_at_init);
     }
 }
 
@@ -529,7 +566,12 @@ MinioChunkManager::BuildGoogleCloudClient(
                 MilvusGcpProviders().emplace(key, provider).first->second;
         }
     }
-    milvus_storage::GcpCredentialRegistry::Instance().Register(key, provider);
+    // Only operator-configured storage can authorize a custom GCS endpoint.
+    auto status = milvus_storage::GcpCredentialRegistry::Instance().Register(
+        key, provider, /*trusted_endpoint=*/true);
+    if (!status.ok()) {
+        throw milvus_storage::ToSegcoreError(status);
+    }
     AddGcsEndpointForCredentials(storage_config.address, storage_config.useSSL);
 
     if (storage_config.useIAM) {
@@ -654,7 +696,7 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
 
 MinioChunkManager::~MinioChunkManager() {
     client_.reset();
-    // ShutdownSDKAPI();
+    // The SDK reference outlives the manager: see InitSDKAPIUntilExit.
 }
 
 uint64_t

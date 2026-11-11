@@ -23,7 +23,7 @@ type capturedDirtyViewTaskScheduler struct {
 	tasks []nodescheduler.Task
 }
 
-func (s *capturedDirtyViewTaskScheduler) Submit(task nodescheduler.Task) nodescheduler.TaskHandle {
+func (s *capturedDirtyViewTaskScheduler) Submit(task nodescheduler.Task, opts ...nodescheduler.Option) nodescheduler.TaskHandle {
 	s.mu.Lock()
 	s.tasks = append(s.tasks, task)
 	s.mu.Unlock()

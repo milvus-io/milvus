@@ -3830,8 +3830,8 @@ func TestRefreshExternalCollectionMilvusTableSnapshot(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(deletedCount), delRes.DeleteCount)
 
-	// Wait for the standalone flush rate limiter to reset before flushing
-	// the delete log. The local default is 0.1 flush requests per second.
+	// Allow time for the deployment's per-collection flush quota to replenish
+	// before flushing the delete log.
 	time.Sleep(10 * time.Second)
 
 	flushTask, err = mc.Flush(ctx, client.NewFlushOption(sourceName))
@@ -3967,8 +3967,8 @@ func TestRefreshExternalCollectionMilvusTableSnapshotVirtualPK(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(deletedCount), delRes.DeleteCount)
 
-	// Wait for the standalone flush rate limiter to reset before flushing
-	// the delete log. The local default is 0.1 flush requests per second.
+	// Allow time for the deployment's per-collection flush quota to replenish
+	// before flushing the delete log.
 	time.Sleep(10 * time.Second)
 
 	flushTask, err = mc.Flush(ctx, client.NewFlushOption(sourceName))

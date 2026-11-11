@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/metacache"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
@@ -514,6 +515,7 @@ func TestProxyFunctionEdit(t *testing.T) {
 }
 
 func TestProxy_ResourceGroup(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	factory := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
 
@@ -599,6 +601,7 @@ func TestProxy_ResourceGroup(t *testing.T) {
 }
 
 func TestProxy_InvalidResourceGroupName(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	factory := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
 
@@ -1388,6 +1391,7 @@ func TestProxyDescribeDatabase(t *testing.T) {
 }
 
 func TestProxyDescribeCollection(t *testing.T) {
+	metacache.MockPublishedSchemaForTest(t)
 	paramtable.Init()
 	node := &Proxy{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
 	ctx := context.Background()
@@ -1407,6 +1411,20 @@ func TestProxyDescribeCollection(t *testing.T) {
 	mixCoord.On("DescribeCollection", mock.Anything, mock.MatchedBy(func(req *milvuspb.DescribeCollectionRequest) bool {
 		return req.DbName == "db_not_exists"
 	})).Return(nil, merr.WrapErrDatabaseNotFound("db_not_exists")).Maybe()
+	mixCoord.On("DescribeCollection", mock.Anything, mock.MatchedBy(func(req *milvuspb.DescribeCollectionRequest) bool {
+		return req.CollectionName == "" && req.CollectionID == 1
+	})).Return(&milvuspb.DescribeCollectionResponse{
+		Status:         merr.Success(),
+		CollectionID:   1,
+		CollectionName: "test_collection",
+		DbName:         "test_1",
+		Schema: &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{Name: "pk", DataType: schemapb.DataType_Int64},
+			},
+		},
+	}, nil).Maybe()
 	mixCoord.On("ShowPartitions", mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
 		Status:               merr.Success(),
 		PartitionNames:       []string{"default"},
@@ -1478,6 +1496,22 @@ func TestProxyDescribeCollection(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
+	t.Run("batch describe collection by ID", func(t *testing.T) {
+		resp, err := node.BatchDescribeCollection(ctx, &milvuspb.BatchDescribeCollectionRequest{
+			CollectionID: []int64{1, 1000},
+		})
+		assert.NoError(t, err)
+		assert.NoError(t, merr.Error(resp.GetStatus()))
+		assert.Equal(t, 2, len(resp.GetResponses()))
+		assert.NoError(t, merr.Error(resp.GetResponses()[0].GetStatus()))
+		assert.Equal(t, int64(1), resp.GetResponses()[0].GetCollectionID())
+		assert.Equal(t, "test_collection", resp.GetResponses()[0].GetCollectionName())
+		assert.Equal(t, "test_1", resp.GetResponses()[0].GetDbName())
+		// a missing collection comes back as a status, and keeps its ID
+		assert.ErrorIs(t, merr.Error(resp.GetResponses()[1].GetStatus()), merr.ErrCollectionNotFound)
+		assert.Equal(t, int64(1000), resp.GetResponses()[1].GetCollectionID())
+	})
+
 	t.Run("batch describe collection ok", func(t *testing.T) {
 		resp, err := node.BatchDescribeCollection(ctx, &milvuspb.BatchDescribeCollectionRequest{
 			DbName:         "test_1",
@@ -1488,6 +1522,115 @@ func TestProxyDescribeCollection(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, 1, len(resp.GetResponses()))
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetResponses()[0].GetStatus().GetErrorCode())
+	})
+}
+
+func TestProxyBatchDescribeCollection(t *testing.T) {
+	ctx := context.Background()
+	node := &Proxy{}
+
+	// The per-collection describe answers a known name or ID, and fails
+	// everything else the way DescribeCollection reports a missing collection.
+	var described []*milvuspb.DescribeCollectionRequest
+	mockDescribe := mockey.Mock((*Proxy).DescribeCollection).To(
+		func(_ *Proxy, _ context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+			described = append(described, req)
+			switch {
+			case req.GetCollectionName() == "docs" || req.GetCollectionID() == 100:
+				return &milvuspb.DescribeCollectionResponse{Status: merr.Success(), CollectionName: "docs", CollectionID: 100}, nil
+			case req.GetCollectionID() == 999:
+				return nil, errors.New("rpc failed")
+			case req.GetCollectionName() == "partial":
+				// a failed entry that already names a collection keeps it
+				return &milvuspb.DescribeCollectionResponse{
+					Status:         merr.Status(merr.WrapErrCollectionNotFound("other")),
+					CollectionName: "other",
+				}, nil
+			default:
+				return &milvuspb.DescribeCollectionResponse{Status: merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionID()))}, nil
+			}
+		}).Build()
+	defer mockDescribe.UnPatch()
+
+	t.Run("by ID", func(t *testing.T) {
+		described = nil
+		resp, err := node.BatchDescribeCollection(ctx, &milvuspb.BatchDescribeCollectionRequest{
+			DbName:       "db1",
+			CollectionID: []int64{100, 200},
+		})
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(resp.GetStatus()))
+		require.Len(t, resp.GetResponses(), 2)
+		assert.NoError(t, merr.Error(resp.GetResponses()[0].GetStatus()))
+		assert.Equal(t, "docs", resp.GetResponses()[0].GetCollectionName())
+		// One missing collection does not fail the others, and is reported
+		// under the ID it was requested by.
+		assert.ErrorIs(t, merr.Error(resp.GetResponses()[1].GetStatus()), merr.ErrCollectionNotFound)
+		assert.Equal(t, int64(200), resp.GetResponses()[1].GetCollectionID())
+
+		require.Len(t, described, 2)
+		for i, id := range []int64{100, 200} {
+			assert.Equal(t, "db1", described[i].GetDbName())
+			assert.Equal(t, id, described[i].GetCollectionID())
+			assert.Empty(t, described[i].GetCollectionName())
+		}
+	})
+
+	t.Run("by name", func(t *testing.T) {
+		described = nil
+		resp, err := node.BatchDescribeCollection(ctx, &milvuspb.BatchDescribeCollectionRequest{
+			DbName:         "db1",
+			CollectionName: []string{"docs"},
+		})
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(resp.GetStatus()))
+		require.Len(t, resp.GetResponses(), 1)
+		assert.Equal(t, int64(100), resp.GetResponses()[0].GetCollectionID())
+		require.Len(t, described, 1)
+		assert.Equal(t, "docs", described[0].GetCollectionName())
+		assert.Zero(t, described[0].GetCollectionID())
+	})
+
+	t.Run("a missing name is reported under that name", func(t *testing.T) {
+		resp, err := node.BatchDescribeCollection(ctx, &milvuspb.BatchDescribeCollectionRequest{
+			CollectionName: []string{"missing", "partial"},
+		})
+		require.NoError(t, err)
+		require.Len(t, resp.GetResponses(), 2)
+		assert.ErrorIs(t, merr.Error(resp.GetResponses()[0].GetStatus()), merr.ErrCollectionNotFound)
+		assert.Equal(t, "missing", resp.GetResponses()[0].GetCollectionName())
+		assert.Equal(t, "other", resp.GetResponses()[1].GetCollectionName())
+	})
+
+	t.Run("a failed describe is reported under its ID", func(t *testing.T) {
+		resp, err := node.BatchDescribeCollection(ctx, &milvuspb.BatchDescribeCollectionRequest{
+			CollectionID: []int64{999},
+		})
+		require.NoError(t, err)
+		require.Len(t, resp.GetResponses(), 1)
+		assert.Error(t, merr.Error(resp.GetResponses()[0].GetStatus()))
+		assert.Equal(t, int64(999), resp.GetResponses()[0].GetCollectionID())
+	})
+
+	t.Run("neither names nor IDs", func(t *testing.T) {
+		resp, err := node.BatchDescribeCollection(ctx, &milvuspb.BatchDescribeCollectionRequest{DbName: "db1"})
+		require.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterMissing)
+	})
+
+	t.Run("names take precedence over IDs", func(t *testing.T) {
+		described = nil
+		resp, err := node.BatchDescribeCollection(ctx, &milvuspb.BatchDescribeCollectionRequest{
+			CollectionName: []string{"docs"},
+			CollectionID:   []int64{200},
+		})
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(resp.GetStatus()))
+		require.Len(t, resp.GetResponses(), 1)
+		assert.NoError(t, merr.Error(resp.GetResponses()[0].GetStatus()))
+		require.Len(t, described, 1)
+		assert.Equal(t, "docs", described[0].GetCollectionName())
+		assert.Zero(t, described[0].GetCollectionID())
 	})
 }
 
@@ -1541,6 +1684,7 @@ func TestProxy_AllocTimestamp(t *testing.T) {
 }
 
 func TestProxy_Delete(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	collectionName := "test_delete"
 	collectionID := int64(111)
 	partitionName := "default"
@@ -1634,6 +1778,7 @@ func TestProxy_Delete(t *testing.T) {
 }
 
 func TestProxy_ImportV2(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	ctx := context.Background()
 	mockErr := errors.New("mock error")
 
@@ -2652,6 +2797,7 @@ func searchByPKRequest(ids []int64) *milvuspb.SearchRequest {
 // treats the Nq dimension positionally: result block N belongs to ids[N]. The
 // rewritten placeholder group must therefore follow the request's ID order.
 func TestHandleIfSearchByPK_PreservesInputIDOrder(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	mockey.PatchConvey("TestHandleIfSearchByPK_PreservesInputIDOrder", t, func() {
 		paramtable.Init()
 
@@ -2693,6 +2839,7 @@ func TestHandleIfSearchByPK_PreservesInputIDOrder(t *testing.T) {
 // the value the query result's PK column yields, and looked up with the value
 // the request's IDs yield; both must be the same Go type for a string key.
 func TestHandleIfSearchByPK_PreservesInputIDOrderForVarCharPK(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	mockey.PatchConvey("TestHandleIfSearchByPK_PreservesInputIDOrderForVarCharPK", t, func() {
 		paramtable.Init()
 
@@ -2746,6 +2893,7 @@ func TestHandleIfSearchByPK_PreservesInputIDOrderForVarCharPK(t *testing.T) {
 // validData is consumed positionally by adjustSearchResultsForNullVectors, so
 // it must follow the request's ID order too, not the query result's PK order.
 func TestHandleIfSearchByPK_PreservesInputIDOrderForValidData(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	mockey.PatchConvey("TestHandleIfSearchByPK_PreservesInputIDOrderForValidData", t, func() {
 		paramtable.Init()
 
@@ -2789,6 +2937,7 @@ func TestHandleIfSearchByPK_PreservesInputIDOrderForValidData(t *testing.T) {
 // block per requested ID. Reordering the fetched rows must not lose the
 // typed-but-empty vector payload that carries this case.
 func TestHandleIfSearchByPK_AllNullVectorsYieldEmptySearch(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	mockey.PatchConvey("TestHandleIfSearchByPK_AllNullVectorsYieldEmptySearch", t, func() {
 		paramtable.Init()
 
@@ -2892,6 +3041,7 @@ func searchByPKBM25QueryResult(pks []int64, texts []string, validData []bool) *m
 // so that Nq equals the number of true entries in validData -- the contract
 // adjustSearchResultsForNullVectors re-expands the result blocks from.
 func TestHandleIfSearchByPK_CompactsNullableBM25Text(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	mockey.PatchConvey("TestHandleIfSearchByPK_CompactsNullableBM25Text", t, func() {
 		paramtable.Init()
 
@@ -2928,6 +3078,7 @@ func TestHandleIfSearchByPK_CompactsNullableBM25Text(t *testing.T) {
 }
 
 func TestHandleIfSearchByPK_AllNullBM25TextYieldsEmptySearch(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	mockey.PatchConvey("TestHandleIfSearchByPK_AllNullBM25TextYieldsEmptySearch", t, func() {
 		paramtable.Init()
 
@@ -3019,6 +3170,7 @@ func TestProxy_Search_PlainRequestNotCopied(t *testing.T) {
 }
 
 func TestProxy_ManualCompaction_ExternalCollection(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	cache := &MetaCache{}
 
 	// Create external collection schema
@@ -3947,6 +4099,7 @@ func TestProxy_RefreshExternalCollection_AtomicSourceSpec(t *testing.T) {
 }
 
 func TestProxy_RefreshExternalCollection_ReusePathRequiresPersistedSourceSpec(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	factory := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
 	node, err := NewProxy(ctx, factory)
@@ -4056,6 +4209,7 @@ func TestProxy_ListRefreshExternalCollectionJobs_ListAll(t *testing.T) {
 }
 
 func TestProxy_ListRefreshExternalCollectionJobs_ByCollection(t *testing.T) {
+	metacache.MockWriteSchemaForTest(t)
 	paramtable.Init()
 	ctx := context.Background()
 	node := &Proxy{mixCoord: &MixCoordMock{}}

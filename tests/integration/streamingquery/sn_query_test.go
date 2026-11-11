@@ -3,6 +3,7 @@ package streamingquery
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"math"
 	"os"
 	"testing"
@@ -19,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
@@ -32,8 +34,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// TestStreamingQueryRPC exercises the extracted server independently of the
-// future Coord balancer and Proxy query client. The explicit endpoint and etcd
+// TestStreamingQueryRPC drives SN view transitions independently of the Proxy
+// query client, borrowing requirements from a loaded fixture. Keep that fixture
+// loaded and its schema/load configuration unchanged until the test completes.
+// The explicit endpoint and etcd
 // namespace must belong to an isolated cluster created by the cluster skill.
 // The fixture has one shard and id=0..19. Its vector is [id,0,0,0], or
 // SN_QUERY_TEST_BM25=1 selects a BM25 output for text "shared special" (id=3)
@@ -50,6 +54,9 @@ func TestStreamingQueryRPC(t *testing.T) {
 	require.NotEmpty(t, name)
 	recovering := os.Getenv("SN_QUERY_TEST_RECOVER") == "1"
 	bm25 := os.Getenv("SN_QUERY_TEST_BM25") == "1"
+	if os.Getenv("SN_QUERY_TEST_MULTIVERSION") == "1" {
+		require.NotEqual(t, "1", os.Getenv("SN_QUERY_TEST_KEEP_UP"), "retention checks require dropping the original view")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	dial := func(address string) *grpc.ClientConn {
@@ -66,7 +73,31 @@ func TestStreamingQueryRPC(t *testing.T) {
 	vc := desc.GetVirtualChannelNames()[0]
 	etcd, err := clientv3.New(clientv3.Config{Endpoints: []string{os.Getenv("SN_QUERY_TEST_ETCD")}, DialTimeout: 5 * time.Second})
 	require.NoError(t, err)
-	defer etcd.Close()
+	t.Cleanup(func() { _ = etcd.Close() })
+	// Master reads immutable loading requirements, while the ordinary Proxy
+	// fixture still uses legacy loading. Explicitly seed only this test's View
+	// dependency when exercising the extracted RPCs without the QV publisher.
+	if os.Getenv("SN_QUERY_TEST_BOOTSTRAP_LOAD_INFO") == "1" && !recovering {
+		partitions, err := proxy.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{CollectionName: name})
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(partitions.GetStatus()))
+		config := &viewpb.CollectionLoadConfig{CollectionID: desc.GetCollectionID(), Version: 1, PartitionIds: partitions.GetPartitionIDs()}
+		for _, field := range desc.GetSchema().GetFields() {
+			config.RequiredFields = append(config.RequiredFields, &viewpb.LoadFieldConfig{FieldId: field.GetFieldID()})
+		}
+		value, err := proto.Marshal(config)
+		require.NoError(t, err)
+		key := fmt.Sprintf("%s/meta/%s/%d/1", namespace, queryview.VersionedLoadInfoPrefix, desc.GetCollectionID())
+		created, err := etcd.Txn(ctx).If(clientv3.Compare(clientv3.CreateRevision(key), "=", 0)).Then(clientv3.OpPut(key, string(value))).Commit()
+		require.NoError(t, err)
+		require.True(t, created.Succeeded, "test must never replace existing load requirements")
+		t.Cleanup(func() {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_, err := etcd.Txn(cleanupCtx).If(clientv3.Compare(clientv3.Value(key), "=", string(value))).Then(clientv3.OpDelete(key)).Commit()
+			require.NoError(t, err)
+		})
+	}
 	var assignment *streamingpb.PChannelMeta
 	var sn *grpc.ClientConn
 	var rpcctx context.Context
@@ -93,18 +124,34 @@ func TestStreamingQueryRPC(t *testing.T) {
 		}
 		return false
 	}, 30*time.Second, 100*time.Millisecond, "assigned SN WAL must be query-ready")
-	kvs, err := etcd.Get(ctx, namespace+"/meta/coord/dv/", clientv3.WithPrefix())
-	require.NoError(t, err)
-	var dv *viewpb.DataViewOfCollection
-	for _, kv := range kvs.Kvs {
-		var v viewpb.DataViewOfCollection
-		require.NoError(t, proto.Unmarshal(kv.Value, &v))
-		if v.GetCollectionId() == desc.GetCollectionID() && (dv == nil || qviews.FromProtoDataVersion(v.GetDataVersion()).GT(qviews.FromProtoDataVersion(dv.GetDataVersion()))) {
-			dv = &v
+	// LoadInfo identities are allocated durably. Borrow one complete, serving
+	// requirement set rather than inventing a version or mixing metadata from
+	// independently selected DataViews and load configurations.
+	var published *viewpb.QueryViewOfShard
+	require.Eventually(t, func() bool {
+		kvs, err := etcd.Get(ctx, namespace+"/meta/coord/qv/", clientv3.WithPrefix())
+		require.NoError(t, err)
+		for _, kv := range kvs.Kvs {
+			var candidate viewpb.QueryViewOfShard
+			require.NoError(t, proto.Unmarshal(kv.Value, &candidate))
+			meta := candidate.GetMeta()
+			if meta.GetCollectionId() != desc.GetCollectionID() || meta.GetVchannel() != vc || meta.GetState() != viewpb.QueryViewState_QueryViewStateUp {
+				continue
+			}
+			if published == nil || qviews.FromProtoQueryViewVersion(meta.GetVersion()).GT(qviews.FromProtoQueryViewVersion(published.GetMeta().GetVersion())) {
+				published = &candidate
+			}
 		}
+		return published != nil
+	}, 30*time.Second, 100*time.Millisecond, "fixture must have a persisted Up view")
+	require.NotZero(t, published.GetMeta().GetLoadInfoVersion())
+	require.Equal(t, desc.GetSchema().GetVersion(), published.GetMeta().GetSchemaVersion())
+	view := &viewpb.QueryViewOfShard{
+		Meta:          proto.Clone(published.GetMeta()).(*viewpb.QueryViewMeta),
+		StreamingNode: &viewpb.QueryViewOfStreamingNode{},
 	}
-	require.NotNil(t, dv)
-	view := &viewpb.QueryViewOfShard{Meta: &viewpb.QueryViewMeta{CollectionId: desc.GetCollectionID(), ReplicaId: 40451, Vchannel: vc, Version: &viewpb.QueryViewVersion{DataVersion: dv.GetDataVersion(), QueryVersion: 1}, State: viewpb.QueryViewState_QueryViewStatePreparing, LoadInfoVersion: 1}, StreamingNode: &viewpb.QueryViewOfStreamingNode{}}
+	view.Meta.ReplicaId = 40451
+	view.Meta.State = viewpb.QueryViewState_QueryViewStatePreparing
 	if recovering {
 		saved, err := etcd.Get(ctx, namespace+"/meta/streamingnode-meta/wal/"+assignment.GetChannel().GetName()+"/qv/", clientv3.WithPrefix())
 		require.NoError(t, err)
@@ -159,8 +206,7 @@ func TestStreamingQueryRPC(t *testing.T) {
 	plans := viewpb.NewQueryPlanServiceClient(sn)
 	queries := viewpb.NewViewQueryServiceClient(sn)
 	getPlan := func() *viewpb.QueryPlan {
-		response, err := plans.GetQueryPlan(rpcctx, &viewpb.GetQueryPlanRequest{CollectionId: desc.GetCollectionID(), ShardId: &viewpb.ShardID{ReplicaId: 40451, Vchannel: vc}, Mvcc: &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, Request: &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{CollectionID: desc.GetCollectionID(), SerializedExprPlan: retrieveBytes, OutputFieldsId: []int64{pk.GetFieldID()}, Limit: 100}}})
-		require.NoError(t, err)
+		response := getQueryPlanWithPayloads(t, rpcctx, plans, &viewpb.GetQueryPlanRequest{CollectionId: desc.GetCollectionID(), ShardId: &viewpb.ShardID{ReplicaId: 40451, Vchannel: vc}, Mvcc: &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, Request: &viewpb.GetQueryPlanRequest_LegacyRetrieveRequest{LegacyRetrieveRequest: &internalpb.RetrieveRequest{CollectionID: desc.GetCollectionID(), SchemaVersion: view.GetMeta().GetSchemaVersion(), SerializedExprPlan: retrieveBytes, OutputFieldsId: []int64{pk.GetFieldID()}, Limit: 100}}})
 		require.NotEmpty(t, response.GetPlan().GetWorkNodes())
 		return response.GetPlan()
 	}
@@ -224,9 +270,8 @@ func TestStreamingQueryRPC(t *testing.T) {
 	require.NoError(t, err)
 	vectorField, err := schema.GetFieldFromName("vector")
 	require.NoError(t, err)
-	searchReq := &internalpb.SearchRequest{CollectionID: desc.GetCollectionID(), FieldId: vectorField.GetFieldID(), SerializedExprPlan: searchBytes, PlaceholderGroup: placeholder, Nq: 1, Topk: 3, MetricType: metric}
-	optimized, err := plans.GetQueryPlan(rpcctx, &viewpb.GetQueryPlanRequest{CollectionId: desc.GetCollectionID(), ShardId: plan.GetShardId(), Mvcc: &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, Request: &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: searchReq}})
-	require.NoError(t, err)
+	searchReq := &internalpb.SearchRequest{CollectionID: desc.GetCollectionID(), SchemaVersion: view.GetMeta().GetSchemaVersion(), FieldId: vectorField.GetFieldID(), SerializedExprPlan: searchBytes, PlaceholderGroup: placeholder, Nq: 1, Topk: 3, MetricType: metric}
+	optimized := getQueryPlanWithPayloads(t, rpcctx, plans, &viewpb.GetQueryPlanRequest{CollectionId: desc.GetCollectionID(), ShardId: plan.GetShardId(), Mvcc: &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, Request: &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: searchReq}})
 	searchPlanRPC := optimized.GetPlan()
 	if bm25 {
 		var debugPlan planpb.PlanNode
@@ -295,15 +340,15 @@ func TestStreamingQueryRPC(t *testing.T) {
 		require.NotContains(t, ids, int64(3))
 		t.Log("live delete is visible through the SN query MVCC")
 	}
+	var finishRetention func()
 	if os.Getenv("SN_QUERY_TEST_MULTIVERSION") == "1" {
-		verifyConcurrentSNViews(t, ctx, rpcctx, proxy, sn, etcd, namespace, name, view, getPlan(), searchPlanRPC.GetLegacySearchRequest())
+		finishRetention = verifyConcurrentSNViews(t, ctx, rpcctx, proxy, sn, etcd, namespace, name, view, getPlan(), searchPlanRPC.GetLegacySearchRequest())
 	}
 	if bm25 && os.Getenv("SN_QUERY_TEST_MULTIVERSION") == "1" {
-		response, err := plans.GetQueryPlan(rpcctx, &viewpb.GetQueryPlanRequest{CollectionId: desc.GetCollectionID(), ShardId: plan.GetShardId(), Mvcc: &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, Request: &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: searchReq}})
-		require.NoError(t, err)
+		response := getQueryPlanWithPayloads(t, rpcctx, plans, &viewpb.GetQueryPlanRequest{CollectionId: desc.GetCollectionID(), ShardId: plan.GetShardId(), Mvcc: &viewpb.GetQueryPlanRequest_ConsistencyLevel{ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, Request: &viewpb.GetQueryPlanRequest_LegacySearchRequest{LegacySearchRequest: searchReq}})
 		require.True(t, proto.Equal(view.Meta.Version, response.GetPlan().GetVersion()))
 		require.NotEmpty(t, response.GetPlan().GetWorkNodes())
-		t.Log("old Up view still builds BM25 plans after the newer DataView was prepared and released")
+		t.Log("old Up view still builds BM25 plans while another replica retains the newer DataView")
 	}
 	if os.Getenv("SN_QUERY_TEST_KEEP_UP") == "1" {
 		require.NoError(t, syncer.CloseSend())
@@ -352,4 +397,17 @@ func TestStreamingQueryRPC(t *testing.T) {
 	apply(viewpb.QueryViewState_QueryViewStateDropped)
 	await(viewpb.QueryViewState_QueryViewStateDropped)
 	require.NoError(t, syncer.CloseSend())
+	if finishRetention != nil {
+		finishRetention()
+	}
+}
+
+// Raw RPC callers must restore the unchanged payloads omitted by Phase 1,
+// just as QueryViewClient does before dispatching Phase 2.
+func getQueryPlanWithPayloads(t *testing.T, ctx context.Context, client viewpb.QueryPlanServiceClient, request *viewpb.GetQueryPlanRequest) *viewpb.GetQueryPlanResponse {
+	t.Helper()
+	response, err := client.GetQueryPlan(ctx, request)
+	require.NoError(t, err)
+	require.NoError(t, qviews.RestoreQueryPlanPayloads(response, request))
+	return response
 }

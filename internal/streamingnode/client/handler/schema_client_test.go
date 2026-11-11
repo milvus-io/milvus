@@ -61,7 +61,7 @@ func TestSchemaAssignmentRetry(t *testing.T) {
 						return nil, status.NewUnrecoverableError("retired schema")
 					}
 				}
-				return &streamingpb.StreamingNodeGetCollectionSchemaResponse{Schema: &schemapb.CollectionSchema{}, EffectiveTimeTick: 10}, nil
+				return &streamingpb.StreamingNodeGetCollectionSchemaResponse{Schema: &schemapb.CollectionSchema{}}, nil
 			}).Build()
 			client := &handlerClientImpl{lifetime: typeutil.NewLifetime(), watcher: &analyzerWatcher{}, service: &analyzerService{}, rebalanceTrigger: &analyzerTrigger{}}
 			req := &streamingpb.StreamingNodeGetCollectionSchemaRequest{Vchannel: "p_1v0", Selector: &streamingpb.StreamingNodeGetCollectionSchemaRequest_SchemaVersion{SchemaVersion: 0}}
@@ -75,7 +75,6 @@ func TestSchemaAssignmentRetry(t *testing.T) {
 				require.Equal(t, 1, calls)
 			} else {
 				require.NoError(t, err)
-				require.EqualValues(t, 10, resp.EffectiveTimeTick)
 				require.Equal(t, 2, calls)
 			}
 			if scenario == "migration" {

@@ -5,14 +5,14 @@ package mockrootcoord
 import (
 	context "context"
 
-	mock "github.com/stretchr/testify/mock"
-
+	commonpb "github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	featureusage "github.com/milvus-io/milvus/internal/featureusage"
 	model "github.com/milvus-io/milvus/internal/metastore/model"
 	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	messagespb "github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	message "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	mock "github.com/stretchr/testify/mock"
 
 	rootcoordpb "github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 )
@@ -1321,6 +1321,53 @@ func (_c *IMetaTable_CheckIfUpdateCredential_Call) RunAndReturn(run func(context
 	return _c
 }
 
+// CompleteRestoreCollection provides a mock function with given fields: ctx, collectionID
+func (_m *IMetaTable) CompleteRestoreCollection(ctx context.Context, collectionID int64) error {
+	ret := _m.Called(ctx, collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CompleteRestoreCollection")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) error); ok {
+		r0 = rf(ctx, collectionID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_CompleteRestoreCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CompleteRestoreCollection'
+type IMetaTable_CompleteRestoreCollection_Call struct {
+	*mock.Call
+}
+
+// CompleteRestoreCollection is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+func (_e *IMetaTable_Expecter) CompleteRestoreCollection(ctx interface{}, collectionID interface{}) *IMetaTable_CompleteRestoreCollection_Call {
+	return &IMetaTable_CompleteRestoreCollection_Call{Call: _e.mock.On("CompleteRestoreCollection", ctx, collectionID)}
+}
+
+func (_c *IMetaTable_CompleteRestoreCollection_Call) Run(run func(ctx context.Context, collectionID int64)) *IMetaTable_CompleteRestoreCollection_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_CompleteRestoreCollection_Call) Return(_a0 error) *IMetaTable_CompleteRestoreCollection_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_CompleteRestoreCollection_Call) RunAndReturn(run func(context.Context, int64) error) *IMetaTable_CompleteRestoreCollection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateDatabase provides a mock function with given fields: ctx, db, ts
 func (_m *IMetaTable) CreateDatabase(ctx context.Context, db *model.Database, ts uint64) error {
 	ret := _m.Called(ctx, db, ts)
@@ -1984,6 +2031,55 @@ func (_c *IMetaTable_FeatureUsageSnapshot_Call) RunAndReturn(run func(context.Co
 	return _c
 }
 
+// FindFileResource provides a mock function with given fields: ctx, name
+func (_m *IMetaTable) FindFileResource(ctx context.Context, name string) *internalpb.FileResourceInfo {
+	ret := _m.Called(ctx, name)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FindFileResource")
+	}
+
+	var r0 *internalpb.FileResourceInfo
+	if rf, ok := ret.Get(0).(func(context.Context, string) *internalpb.FileResourceInfo); ok {
+		r0 = rf(ctx, name)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.FileResourceInfo)
+		}
+	}
+
+	return r0
+}
+
+// IMetaTable_FindFileResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FindFileResource'
+type IMetaTable_FindFileResource_Call struct {
+	*mock.Call
+}
+
+// FindFileResource is a helper method to define mock.On call
+//   - ctx context.Context
+//   - name string
+func (_e *IMetaTable_Expecter) FindFileResource(ctx interface{}, name interface{}) *IMetaTable_FindFileResource_Call {
+	return &IMetaTable_FindFileResource_Call{Call: _e.mock.On("FindFileResource", ctx, name)}
+}
+
+func (_c *IMetaTable_FindFileResource_Call) Run(run func(ctx context.Context, name string)) *IMetaTable_FindFileResource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_FindFileResource_Call) Return(_a0 *internalpb.FileResourceInfo) *IMetaTable_FindFileResource_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_FindFileResource_Call) RunAndReturn(run func(context.Context, string) *internalpb.FileResourceInfo) *IMetaTable_FindFileResource_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetAvailableCollectionCount provides a mock function with given fields: ctx, dbID
 func (_m *IMetaTable) GetAvailableCollectionCount(ctx context.Context, dbID int64) (int, int, bool) {
 	ret := _m.Called(ctx, dbID)
@@ -2275,6 +2371,65 @@ func (_c *IMetaTable_GetCollectionID_Call) Return(_a0 int64) *IMetaTable_GetColl
 }
 
 func (_c *IMetaTable_GetCollectionID_Call) RunAndReturn(run func(context.Context, string, string) int64) *IMetaTable_GetCollectionID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetCollectionProperties provides a mock function with given fields: ctx, collectionID
+func (_m *IMetaTable) GetCollectionProperties(ctx context.Context, collectionID int64) ([]*commonpb.KeyValuePair, error) {
+	ret := _m.Called(ctx, collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetCollectionProperties")
+	}
+
+	var r0 []*commonpb.KeyValuePair
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) ([]*commonpb.KeyValuePair, error)); ok {
+		return rf(ctx, collectionID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64) []*commonpb.KeyValuePair); ok {
+		r0 = rf(ctx, collectionID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*commonpb.KeyValuePair)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64) error); ok {
+		r1 = rf(ctx, collectionID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// IMetaTable_GetCollectionProperties_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCollectionProperties'
+type IMetaTable_GetCollectionProperties_Call struct {
+	*mock.Call
+}
+
+// GetCollectionProperties is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+func (_e *IMetaTable_Expecter) GetCollectionProperties(ctx interface{}, collectionID interface{}) *IMetaTable_GetCollectionProperties_Call {
+	return &IMetaTable_GetCollectionProperties_Call{Call: _e.mock.On("GetCollectionProperties", ctx, collectionID)}
+}
+
+func (_c *IMetaTable_GetCollectionProperties_Call) Run(run func(ctx context.Context, collectionID int64)) *IMetaTable_GetCollectionProperties_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_GetCollectionProperties_Call) Return(_a0 []*commonpb.KeyValuePair, _a1 error) *IMetaTable_GetCollectionProperties_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *IMetaTable_GetCollectionProperties_Call) RunAndReturn(run func(context.Context, int64) ([]*commonpb.KeyValuePair, error)) *IMetaTable_GetCollectionProperties_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2576,6 +2731,79 @@ func (_c *IMetaTable_GetFileResources_Call) Return(_a0 []*internalpb.FileResourc
 }
 
 func (_c *IMetaTable_GetFileResources_Call) RunAndReturn(run func(context.Context, ...int64) ([]*internalpb.FileResourceInfo, error)) *IMetaTable_GetFileResources_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetFileResourcesByNames provides a mock function with given fields: ctx, names
+func (_m *IMetaTable) GetFileResourcesByNames(ctx context.Context, names ...string) ([]*internalpb.FileResourceInfo, error) {
+	_va := make([]interface{}, len(names))
+	for _i := range names {
+		_va[_i] = names[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetFileResourcesByNames")
+	}
+
+	var r0 []*internalpb.FileResourceInfo
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, ...string) ([]*internalpb.FileResourceInfo, error)); ok {
+		return rf(ctx, names...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, ...string) []*internalpb.FileResourceInfo); ok {
+		r0 = rf(ctx, names...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*internalpb.FileResourceInfo)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, ...string) error); ok {
+		r1 = rf(ctx, names...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// IMetaTable_GetFileResourcesByNames_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetFileResourcesByNames'
+type IMetaTable_GetFileResourcesByNames_Call struct {
+	*mock.Call
+}
+
+// GetFileResourcesByNames is a helper method to define mock.On call
+//   - ctx context.Context
+//   - names ...string
+func (_e *IMetaTable_Expecter) GetFileResourcesByNames(ctx interface{}, names ...interface{}) *IMetaTable_GetFileResourcesByNames_Call {
+	return &IMetaTable_GetFileResourcesByNames_Call{Call: _e.mock.On("GetFileResourcesByNames",
+		append([]interface{}{ctx}, names...)...)}
+}
+
+func (_c *IMetaTable_GetFileResourcesByNames_Call) Run(run func(ctx context.Context, names ...string)) *IMetaTable_GetFileResourcesByNames_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]string, len(args)-1)
+		for i, a := range args[1:] {
+			if a != nil {
+				variadicArgs[i] = a.(string)
+			}
+		}
+		run(args[0].(context.Context), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *IMetaTable_GetFileResourcesByNames_Call) Return(_a0 []*internalpb.FileResourceInfo, _a1 error) *IMetaTable_GetFileResourcesByNames_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *IMetaTable_GetFileResourcesByNames_Call) RunAndReturn(run func(context.Context, ...string) ([]*internalpb.FileResourceInfo, error)) *IMetaTable_GetFileResourcesByNames_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -3466,11 +3694,6 @@ func (_c *IMetaTable_ListDatabases_Call) RunAndReturn(run func(context.Context, 
 	return _c
 }
 
-// GetFileResourcesByNames is patched with mockey by resource-binding tests.
-func (_m *IMetaTable) GetFileResourcesByNames(ctx context.Context, names ...string) ([]*internalpb.FileResourceInfo, error) {
-	panic("mock GetFileResourcesByNames with mockey")
-}
-
 // ListFileResource provides a mock function with given fields: ctx
 func (_m *IMetaTable) ListFileResource(ctx context.Context) ([]*internalpb.FileResourceInfo, uint64) {
 	ret := _m.Called(ctx)
@@ -3853,6 +4076,65 @@ func (_c *IMetaTable_OperateUserRole_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
+// PrepareRemoveFileResource provides a mock function with given fields: ctx, name
+func (_m *IMetaTable) PrepareRemoveFileResource(ctx context.Context, name string) (*internalpb.FileResourceInfo, error) {
+	ret := _m.Called(ctx, name)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PrepareRemoveFileResource")
+	}
+
+	var r0 *internalpb.FileResourceInfo
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (*internalpb.FileResourceInfo, error)); ok {
+		return rf(ctx, name)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) *internalpb.FileResourceInfo); ok {
+		r0 = rf(ctx, name)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.FileResourceInfo)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, name)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// IMetaTable_PrepareRemoveFileResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PrepareRemoveFileResource'
+type IMetaTable_PrepareRemoveFileResource_Call struct {
+	*mock.Call
+}
+
+// PrepareRemoveFileResource is a helper method to define mock.On call
+//   - ctx context.Context
+//   - name string
+func (_e *IMetaTable_Expecter) PrepareRemoveFileResource(ctx interface{}, name interface{}) *IMetaTable_PrepareRemoveFileResource_Call {
+	return &IMetaTable_PrepareRemoveFileResource_Call{Call: _e.mock.On("PrepareRemoveFileResource", ctx, name)}
+}
+
+func (_c *IMetaTable_PrepareRemoveFileResource_Call) Run(run func(ctx context.Context, name string)) *IMetaTable_PrepareRemoveFileResource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_PrepareRemoveFileResource_Call) Return(_a0 *internalpb.FileResourceInfo, _a1 error) *IMetaTable_PrepareRemoveFileResource_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *IMetaTable_PrepareRemoveFileResource_Call) RunAndReturn(run func(context.Context, string) (*internalpb.FileResourceInfo, error)) *IMetaTable_PrepareRemoveFileResource_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RecoverFileResourceRefCnt provides a mock function with given fields: pendingCollections
 func (_m *IMetaTable) RecoverFileResourceRefCnt(pendingCollections map[int64][]int64) {
 	_m.Called(pendingCollections)
@@ -3934,9 +4216,9 @@ func (_c *IMetaTable_RemoveCollection_Call) RunAndReturn(run func(context.Contex
 	return _c
 }
 
-// RemoveFileResource provides a mock function with given fields: ctx, name
-func (_m *IMetaTable) RemoveFileResource(ctx context.Context, name string) (error, bool) {
-	ret := _m.Called(ctx, name)
+// RemoveFileResource provides a mock function with given fields: ctx, name, resourceID
+func (_m *IMetaTable) RemoveFileResource(ctx context.Context, name string, resourceID int64) (error, bool) {
+	ret := _m.Called(ctx, name, resourceID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for RemoveFileResource")
@@ -3944,17 +4226,17 @@ func (_m *IMetaTable) RemoveFileResource(ctx context.Context, name string) (erro
 
 	var r0 error
 	var r1 bool
-	if rf, ok := ret.Get(0).(func(context.Context, string) (error, bool)); ok {
-		return rf(ctx, name)
+	if rf, ok := ret.Get(0).(func(context.Context, string, int64) (error, bool)); ok {
+		return rf(ctx, name, resourceID)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string) error); ok {
-		r0 = rf(ctx, name)
+	if rf, ok := ret.Get(0).(func(context.Context, string, int64) error); ok {
+		r0 = rf(ctx, name, resourceID)
 	} else {
 		r0 = ret.Error(0)
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, string) bool); ok {
-		r1 = rf(ctx, name)
+	if rf, ok := ret.Get(1).(func(context.Context, string, int64) bool); ok {
+		r1 = rf(ctx, name, resourceID)
 	} else {
 		r1 = ret.Get(1).(bool)
 	}
@@ -3970,13 +4252,14 @@ type IMetaTable_RemoveFileResource_Call struct {
 // RemoveFileResource is a helper method to define mock.On call
 //   - ctx context.Context
 //   - name string
-func (_e *IMetaTable_Expecter) RemoveFileResource(ctx interface{}, name interface{}) *IMetaTable_RemoveFileResource_Call {
-	return &IMetaTable_RemoveFileResource_Call{Call: _e.mock.On("RemoveFileResource", ctx, name)}
+//   - resourceID int64
+func (_e *IMetaTable_Expecter) RemoveFileResource(ctx interface{}, name interface{}, resourceID interface{}) *IMetaTable_RemoveFileResource_Call {
+	return &IMetaTable_RemoveFileResource_Call{Call: _e.mock.On("RemoveFileResource", ctx, name, resourceID)}
 }
 
-func (_c *IMetaTable_RemoveFileResource_Call) Run(run func(ctx context.Context, name string)) *IMetaTable_RemoveFileResource_Call {
+func (_c *IMetaTable_RemoveFileResource_Call) Run(run func(ctx context.Context, name string, resourceID int64)) *IMetaTable_RemoveFileResource_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string))
+		run(args[0].(context.Context), args[1].(string), args[2].(int64))
 	})
 	return _c
 }
@@ -3986,7 +4269,7 @@ func (_c *IMetaTable_RemoveFileResource_Call) Return(_a0 error, _a1 bool) *IMeta
 	return _c
 }
 
-func (_c *IMetaTable_RemoveFileResource_Call) RunAndReturn(run func(context.Context, string) (error, bool)) *IMetaTable_RemoveFileResource_Call {
+func (_c *IMetaTable_RemoveFileResource_Call) RunAndReturn(run func(context.Context, string, int64) (error, bool)) *IMetaTable_RemoveFileResource_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -101,7 +101,7 @@ PhyGISCoarseConjunctExpr::RunRTreeQuery(GISGroupState::Pred& p) {
     if (spatial_reader_ == nullptr) {
         auto req = MakeIndexRequirement(RequiredReader::Spatial);
         req.value_type = DataType::GEOMETRY;
-        SelectAndPinIndex(req);
+        SelectAndCreateIndexReader(req);
         exec_path_ = ExprExecPath::RawData;
     }
     if (spatial_reader_ == nullptr) {
@@ -217,11 +217,12 @@ PhyGISCoarseConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
         // or permanently, if it is broken -- so warn: nothing else in the
         // pipeline reports it and a degraded deployment would otherwise look
         // exactly like a healthy one. All preds share the field's index, so
-        // num_index_chunk_/spatial_reader_ reflect that shared pin state.
+        // num_index_chunk_/spatial_reader_ reflect that shared reader state.
         if (unusable_index > 0) {
             LOG_WARN(
                 "GIS coarse pruning degraded to full scan: field {} reports an "
-                "index but the pin yielded no usable string index for {} of {} "
+                "index but reader selection yielded no usable string index for "
+                "{} of {} "
                 "predicate(s) (num_index_chunk={}, pinned={}); results stay "
                 "correct via Refine, R-Tree pruning is lost for this segment",
                 st_->field_id.get(),

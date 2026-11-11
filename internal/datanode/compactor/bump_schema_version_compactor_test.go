@@ -711,6 +711,18 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReconciliationPersist
 				Key: common.MaxCapacityKey, Value: "16",
 			}},
 		},
+		{
+			FieldID:         203,
+			Name:            "profile[vecs]",
+			DataType:        schemapb.DataType_ArrayOfVector,
+			ElementType:     schemapb.DataType_FloatVector,
+			Nullable:        true,
+			ElementNullable: true,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: common.MaxCapacityKey, Value: "16"},
+				{Key: common.DimKey, Value: "2"},
+			},
+		},
 	}
 	s.task.plan.Schema.Functions = nil
 	s.task.plan.Schema.Fields = s.task.plan.Schema.Fields[:4]
@@ -726,10 +738,12 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestAdditiveReconciliationPersist
 	s.Require().NoError(err)
 	segment := result.GetSegments()[0]
 	s.EqualValues(3, segment.GetNumOfRows())
-	s.Require().Len(segment.GetInsertLogs(), 2)
-	s.ElementsMatch([]int64{201, 202}, lo.Map(segment.GetInsertLogs(), func(fb *datapb.FieldBinlog, _ int) int64 {
+	s.Require().Len(segment.GetInsertLogs(), 3)
+	s.ElementsMatch([]int64{201, 202, 203}, lo.Map(segment.GetInsertLogs(), func(fb *datapb.FieldBinlog, _ int) int64 {
 		return fb.GetFieldID()
 	}))
+	// The added VectorArray has only null rows: zero valid elements.
+	s.Equal(map[int64]int64{203: 0}, segment.GetStats().GetValidElementCounts())
 
 	manifest := s.materializeAdditiveManifest(segment)
 	manifestFields, err := packed.GetManifestFieldIDs(manifest, s.task.compactionParams.StorageConfig)
@@ -2193,7 +2207,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestMaterializationStatsDeltaIgno
 	// The builder takes no plan input at all, which is the property under test:
 	// there is no argument through which an empty or populated plan array could
 	// change the answer.
-	got := buildMaterializationStatsDelta(columnGroups, memorySizes, nullCounts, 256)
+	got := buildMaterializationStatsDelta(columnGroups, memorySizes, nullCounts, nil, 256)
 
 	s.EqualValues(4096, got.GetInsertBinlogSize())
 	s.EqualValues(1, got.GetInsertBinlogCount())

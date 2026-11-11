@@ -29,6 +29,17 @@
 #include <vector>
 
 #include "index/Families.h"
+#include "index/Meta.h"
+#include "index/SingleCellIndexStorageTranslator.h"
+#include "index/test_utils/ArtifactTestUtils.h"
+#include "index/Utils.h"
+#include "index/scalar/json/JsonFlatIndexReader.h"
+#include "index/scalar/json/JsonPathIndexReader.h"
+#include "index/scalar/json/JsonProjectedIndexArtifact.h"
+#include "index/scalar/bitmap/BitmapIndexReader.h"
+#include "storage/artifact/LocalDirectory.h"
+#include "tantivy-wrapper.h"
+#include "test_utils/Constants.h"
 #include "index/contracts/query/IJsonIndexReader.h"
 #include "index/contracts/query/INgramReader.h"
 #include "index/contracts/query/INullReader.h"
@@ -39,6 +50,721 @@
 #include "index/test_utils/CaseTestDriver.h"
 
 namespace milvus::index::test {
+void
+CheckCachedJsonFlat() {
+    const auto& backend =
+        ScalarReaderBackends().Get<std::string_view>("JsonFlatV7");
+    ScalarTestData<std::string_view> data({R"({"flag":false})",
+                                           R"({"flag":true})",
+                                           R"({"flag":true})",
+                                           R"({"flag":false})"});
+    data.validity.reset(3);
+    const ScalarTestInput<std::string_view> input(data);
+    auto artifact =
+        backend.Build(input.View(), {.row_count = data.values.size()});
+    for (const bool known_count : {false, true}) {
+        for (const bool mmap : {false, true}) {
+            for (const bool packed : {false, true}) {
+                for (const bool async : {false, true}) {
+                    SCOPED_TRACE(::testing::Message()
+                                 << packed << async << mmap << known_count);
+                    auto staging = storage::LocalDirectory::CreateOwned(
+                        std::filesystem::temp_directory_path().string(),
+                        "jsonflat-cache-XXXXXX",
+                        "JsonFlat cache test");
+                    const auto persisted = packed ? SerializeV3(*artifact)
+                                                  : SerializeV1V2(*artifact);
+                    auto source = [&]() -> OpenedIndexSource {
+                        if (!packed) {
+                            return LegacyIndexSource{
+                                std::make_shared<TestArtifactSource>(
+                                    persisted, storage::Generation::V1V2),
+                                async};
+                        }
+                        auto input =
+                            std::make_shared<storage::RemoteInputStream>(
+                                std::make_shared<arrow::io::BufferReader>(
+                                    MakePackedArtifactBuffer(persisted)));
+                        if (async) {
+                            return PackedIndexSource{std::shared_ptr<
+                                storage::AsyncIndexEntryReader>(
+                                folly::coro::blockingWait(
+                                    folly::coro::co_withExecutor(
+                                        storage::ResolveAsyncLoadExecutor(
+                                            {},
+                                            proto::common::LoadPriority::HIGH),
+                                        storage::AsyncIndexEntryReader::Open(
+                                            input,
+                                            0,
+                                            proto::common::LoadPriority::
+                                                HIGH))))};
+                        }
+                        return PackedIndexSource{
+                            std::shared_ptr<storage::IndexEntryReader>(
+                                storage::IndexEntryReader::Open(
+                                    input, input->Size()))};
+                    }();
+                    storage::LoadOptions options;
+                    options.params = backend.LoadParams({.row_count = 4});
+                    options.enable_mmap = mmap;
+                    if (known_count)
+                        options.params[INDEX_NUM_ROWS_KEY] = 4;
+                    else
+                        options.params.erase(INDEX_NUM_ROWS_KEY);
+                    options.mmap_dir_path = staging->Path();
+                    IndexCacheConfig cache{
+                        staging->Path(),
+                        cachinglayer::Meta{
+                            mmap ? cachinglayer::StorageType::DISK
+                                 : cachinglayer::StorageType::MEMORY,
+                            cachinglayer::CellIdMappingMode::IDENTICAL,
+                            cachinglayer::CellDataType::OTHER,
+                            CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                            true},
+                        {1024 * 1024, 1024 * 1024},
+                        {},
+                        4096};
+                    auto index = LoaderRegistry::Instance()
+                                     .Lookup(backend.Family())
+                                     .Load({std::move(source), options, cache});
+                    EXPECT_EQ(index->Metadata().count.has_value(), known_count);
+                    folly::CancellationSource cancellation;
+                    cancellation.requestCancellation();
+                    OpContext cancelled(cancellation.getToken());
+                    auto reader = index->CreateReader(&cancelled);
+                    if (known_count)
+                        EXPECT_EQ(reader->Count(), 4);
+                    else
+                        ExpectSegcoreError(ErrorCode::FollyCancel,
+                                           [&] { (void)reader->Count(); });
+                    EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+                    const auto* nulls =
+                        dynamic_cast<const INullReader*>(reader.get());
+                    ASSERT_NE(nulls, nullptr);
+                    ExpectSegcoreError(ErrorCode::FollyCancel,
+                                       [&] { (void)nulls->IsNull(); });
+                    index->CancelWarmup();
+                    OpContext retry;
+                    reader = index->CreateReader(&retry);
+                    index.reset();
+                    EXPECT_EQ(reader->Count(), 4);
+                    nulls = dynamic_cast<const INullReader*>(reader.get());
+                    ASSERT_NE(nulls, nullptr);
+                    const auto result = nulls->IsNull();
+                    EXPECT_EQ(result.count(), 1);
+                    EXPECT_TRUE(result[3]);
+                    const auto* json =
+                        dynamic_cast<const IJsonIndexReader*>(reader.get());
+                    ASSERT_NE(json, nullptr);
+                    auto path = json->Resolve("/flag",
+                                              JsonCastType::FromString("BOOL"));
+                    const auto* predicate =
+                        dynamic_cast<const IScalarPredicateReader<bool>*>(
+                            path.get());
+                    ASSERT_NE(predicate, nullptr);
+                    const bool value = true;
+                    ExpectBitmap(predicate->In(1, &value), Hits(4, {1, 2}));
+                    ExpectBitmap(predicate->NotIn(1, &value), Hits(4, {0}));
+                }
+            }
+        }
+    }
+}
+
+void
+CheckCachedStringProjection(const char* backend_name,
+                            bool corrupt = false,
+                            bool roaring = false) {
+    const auto& backend =
+        ScalarReaderBackends().Get<std::string_view>(backend_name);
+    std::vector<std::string> values{"apple", "pear", "", ""};
+    const size_t row_count = roaring ? 600 : 4;
+    values.reserve(row_count);
+    for (size_t i = values.size(); i < row_count; ++i) {
+        values.push_back("value-" + std::to_string(i));
+    }
+    ScalarTestData<std::string_view> data(std::move(values));
+    data.validity.reset(2);
+    data.validity.reset(3);
+    const ScalarTestInput<std::string_view> input(data);
+    auto artifact = std::make_unique<JsonProjectedIndexArtifact>(
+        backend.Build(input.View(), {.row_count = row_count}),
+        "/a",
+        JsonCastType::FromString("VARCHAR"),
+        row_count,
+        std::vector<size_t>{3},
+        true);
+    for (const bool known_count : {false, true}) {
+        for (const bool mmap : {false, true}) {
+            for (const bool packed : {false, true}) {
+                for (const bool async : {false, true}) {
+                    SCOPED_TRACE(::testing::Message()
+                                 << packed << async << mmap << known_count);
+                    auto staging = storage::LocalDirectory::CreateOwned(
+                        std::filesystem::temp_directory_path().string(),
+                        "json-marisa-cache-XXXXXX",
+                        "JSON Marisa cache test");
+                    auto persisted = packed ? SerializeV3(*artifact)
+                                            : SerializeV1V2(*artifact);
+                    if (corrupt) {
+                        const size_t bad_offset = row_count;
+                        auto& bytes = persisted.entries.at(
+                            std::string(INDEX_NON_EXIST_OFFSET_FILE_NAME));
+                        std::memcpy(
+                            bytes.data(), &bad_offset, sizeof(bad_offset));
+                    }
+                    auto source = [&]() -> OpenedIndexSource {
+                        if (!packed) {
+                            return LegacyIndexSource{
+                                std::make_shared<TestArtifactSource>(
+                                    persisted, storage::Generation::V1V2),
+                                async};
+                        }
+                        auto input =
+                            std::make_shared<storage::RemoteInputStream>(
+                                std::make_shared<arrow::io::BufferReader>(
+                                    MakePackedArtifactBuffer(persisted)));
+                        if (async) {
+                            return PackedIndexSource{std::shared_ptr<
+                                storage::AsyncIndexEntryReader>(
+                                folly::coro::blockingWait(
+                                    folly::coro::co_withExecutor(
+                                        storage::ResolveAsyncLoadExecutor(
+                                            {},
+                                            proto::common::LoadPriority::HIGH),
+                                        storage::AsyncIndexEntryReader::Open(
+                                            input,
+                                            0,
+                                            proto::common::LoadPriority::
+                                                HIGH))))};
+                        }
+                        return PackedIndexSource{
+                            std::shared_ptr<storage::IndexEntryReader>(
+                                storage::IndexEntryReader::Open(
+                                    input, input->Size()))};
+                    }();
+                    storage::LoadOptions options;
+                    options.params =
+                        backend.LoadParams({.row_count = row_count});
+                    options.params["field_type"] = DataType::JSON;
+                    options.params[INDEX_TYPE] =
+                        backend.Family() == families::kMarisa
+                            ? HYBRID_INDEX_TYPE
+                        : backend.Family() == families::kNgram
+                            ? NGRAM_INDEX_TYPE
+                        : backend.Family() == families::kSort ? ASCENDING_SORT
+                        : backend.Family() == families::kBitmap
+                            ? BITMAP_INDEX_TYPE
+                            : INVERTED_INDEX_TYPE;
+                    options.params[JSON_PATH] = "/a";
+                    options.params[JSON_CAST_TYPE] = "VARCHAR";
+                    options.enable_mmap = mmap;
+                    if (known_count)
+                        options.params[INDEX_NUM_ROWS_KEY] = row_count;
+                    else
+                        options.params.erase(INDEX_NUM_ROWS_KEY);
+                    options.mmap_dir_path = staging->Path();
+                    if (auto* legacy =
+                            std::get_if<LegacyIndexSource>(&source)) {
+                        options.params = AnnotateJsonProjectionCompleteness(
+                            std::move(options.params), *legacy->source);
+                    } else {
+                        const auto& packed_source =
+                            std::get<PackedIndexSource>(source);
+                        options.params = AnnotateJsonProjectionCompleteness(
+                            std::move(options.params),
+                            packed_source.Directory(),
+                            packed_source.Metadata());
+                    }
+                    IndexCacheConfig cache{
+                        staging->Path(),
+                        cachinglayer::Meta{
+                            mmap ? cachinglayer::StorageType::DISK
+                                 : cachinglayer::StorageType::MEMORY,
+                            cachinglayer::CellIdMappingMode::IDENTICAL,
+                            cachinglayer::CellDataType::OTHER,
+                            CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                            true},
+                        {1024 * 1024, 1024 * 1024},
+                        {},
+                        4096};
+                    if (corrupt) {
+                        cache.meta.cache_warmup_policy =
+                            CacheWarmupPolicy::CacheWarmupPolicy_Sync;
+                        ExpectSegcoreError(ErrorCode::UnexpectedError, [&] {
+                            (void)LoaderRegistry::Instance()
+                                .Lookup(backend.Family())
+                                .Load({std::move(source), options, cache});
+                        });
+                        EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+                        continue;
+                    }
+                    auto index = LoaderRegistry::Instance()
+                                     .Lookup(backend.Family())
+                                     .Load({std::move(source), options, cache});
+                    const bool count_known =
+                        known_count || backend.Family() == families::kSort ||
+                        backend.Family() == families::kBitmap ||
+                        (packed && backend.Family() == families::kMarisa);
+                    EXPECT_EQ(index->Metadata().count.has_value(), count_known);
+                    folly::CancellationSource cancellation;
+                    cancellation.requestCancellation();
+                    OpContext cancelled(cancellation.getToken());
+                    auto reader = index->CreateReader(&cancelled);
+                    if (count_known)
+                        EXPECT_EQ(reader->Count(), row_count);
+                    else
+                        ExpectSegcoreError(ErrorCode::FollyCancel,
+                                           [&] { (void)reader->Count(); });
+                    EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+                    const auto* json =
+                        dynamic_cast<const IJsonIndexReader*>(reader.get());
+                    ASSERT_NE(json, nullptr);
+                    EXPECT_TRUE(json->Resolve(
+                        "/a", JsonCastType::FromString("VARCHAR")));
+                    EXPECT_FALSE(json->Resolve(
+                        "/wrong", JsonCastType::FromString("VARCHAR")));
+                    ExpectSegcoreError(ErrorCode::FollyCancel,
+                                       [&] { (void)json->Exists("/a"); });
+                    index->CancelWarmup();
+                    OpContext retry;
+                    reader = index->CreateReader(&retry);
+                    index.reset();
+                    EXPECT_EQ(reader->Count(), row_count);
+                    json = dynamic_cast<const IJsonIndexReader*>(reader.get());
+                    ASSERT_NE(json, nullptr);
+                    TargetBitmap expected_exists(row_count, true);
+                    expected_exists.reset(3);
+                    ExpectBitmap(json->Exists("/a"), expected_exists);
+                    auto path = json->Resolve(
+                        "/a", JsonCastType::FromString("VARCHAR"));
+                    if (backend.Family() == families::kNgram) {
+                        const auto* ngram =
+                            dynamic_cast<const INgramReader*>(path.get());
+                        ASSERT_NE(ngram, nullptr);
+                        TargetBitmap candidates(row_count, true);
+                        ngram->Candidates(
+                            "app", PatternOp::InnerMatch, candidates);
+                        ExpectBitmap(candidates, Hits(row_count, {0}));
+                    } else {
+                        const auto* predicate = dynamic_cast<
+                            const IScalarPredicateReader<std::string_view>*>(
+                            path.get());
+                        ASSERT_NE(predicate, nullptr);
+                        const std::string_view value = "apple";
+                        ExpectBitmap(predicate->In(1, &value),
+                                     Hits(row_count, {0}));
+                        TargetBitmap expected_not_in(row_count, true);
+                        for (const auto row : {0, 2, 3})
+                            expected_not_in.reset(row);
+                        ExpectBitmap(predicate->NotIn(1, &value),
+                                     expected_not_in);
+                    }
+                }
+            }
+        }
+    }
+}
+
+TEST(JsonPathIndexCacheTest, MarisaStorageLoadsExistenceWithRequestContext) {
+    CheckCachedStringProjection("MarisaVarchar");
+}
+
+TEST(JsonPathIndexCacheTest,
+     MarisaWarmupRejectsInvalidExistenceBeforePublication) {
+    CheckCachedStringProjection("MarisaVarchar", true);
+}
+
+TEST(JsonPathIndexCacheTest, NgramStorageLoadsExistenceWithRequestContext) {
+    CheckCachedStringProjection("NgramVarcharMin2Max4Heap");
+}
+TEST(JsonPathIndexCacheTest,
+     NgramWarmupRejectsInvalidExistenceBeforePublication) {
+    CheckCachedStringProjection("NgramVarcharMin2Max4Heap", true);
+}
+
+TEST(JsonPathIndexCacheTest, InvertedStorageLoadsExistenceWithRequestContext) {
+    CheckCachedStringProjection("InvertedVarchar");
+}
+TEST(JsonPathIndexCacheTest,
+     InvertedWarmupRejectsInvalidExistenceBeforePublication) {
+    CheckCachedStringProjection("InvertedVarchar", true);
+}
+
+void
+CheckCachedArrayProjection(const char* backend_name) {
+    const auto& backend = ScalarReaderBackends().Get<ArrayView>(backend_name);
+    auto data = ScalarDataSets()
+                    .Get<ArrayView>("JsonProjectedArrayVarchar")
+                    .make_data();
+    const ScalarTestInput<ArrayView> input(data);
+    const BackendCaseMetadata metadata{data.values.size(), data.metadata};
+    auto artifact = backend.Build(input.View(), metadata);
+    for (const bool packed : {false, true}) {
+        for (const bool known_count : {false, true}) {
+            auto staging = storage::LocalDirectory::CreateOwned(
+                std::filesystem::temp_directory_path().string(),
+                "json-array-cache-XXXXXX",
+                "JSON array cache test");
+            const auto persisted =
+                packed ? SerializeV3(*artifact) : SerializeV1V2(*artifact);
+            auto source = [&]() -> OpenedIndexSource {
+                if (!packed) {
+                    return LegacyIndexSource{
+                        std::make_shared<TestArtifactSource>(
+                            persisted, storage::Generation::V1V2),
+                        false};
+                }
+                auto stream = std::make_shared<storage::RemoteInputStream>(
+                    std::make_shared<arrow::io::BufferReader>(
+                        MakePackedArtifactBuffer(persisted)));
+                return PackedIndexSource{
+                    std::shared_ptr<storage::IndexEntryReader>(
+                        storage::IndexEntryReader::Open(stream,
+                                                        stream->Size()))};
+            }();
+            storage::LoadOptions options;
+            options.params = backend.LoadParams(metadata);
+            options.mmap_dir_path = staging->Path();
+            if (known_count)
+                options.params[INDEX_NUM_ROWS_KEY] = 7;
+            else
+                options.params.erase(INDEX_NUM_ROWS_KEY);
+            if (auto* legacy = std::get_if<LegacyIndexSource>(&source)) {
+                options.params = AnnotateJsonProjectionCompleteness(
+                    std::move(options.params), *legacy->source);
+            } else {
+                const auto& packed_source = std::get<PackedIndexSource>(source);
+                options.params = AnnotateJsonProjectionCompleteness(
+                    std::move(options.params),
+                    packed_source.Directory(),
+                    packed_source.Metadata());
+            }
+            IndexCacheConfig cache{
+                staging->Path(),
+                cachinglayer::Meta{cachinglayer::StorageType::MEMORY,
+                                   cachinglayer::CellIdMappingMode::IDENTICAL,
+                                   cachinglayer::CellDataType::OTHER,
+                                   CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                                   true},
+                {1024 * 1024, 1024 * 1024},
+                {},
+                4096};
+            const auto family =
+                packed ? ResolvePackedLoadFamily(
+                             backend.Family(),
+                             std::get<PackedIndexSource>(source).Metadata(),
+                             options.params)
+                       : ResolveLoadFamily(
+                             backend.Family(),
+                             *std::get<LegacyIndexSource>(source).source);
+            if (backend.Family() == families::kHybrid) {
+                EXPECT_EQ(family, families::kBitmap);
+            }
+            auto index = LoaderRegistry::Instance().Lookup(family).Load(
+                {std::move(source), options, cache});
+            EXPECT_EQ(index->Metadata().count.has_value(),
+                      known_count || family == families::kSort ||
+                          family == families::kBitmap);
+            EXPECT_FALSE(index->Metadata().caps.nested);
+            OpContext ctx;
+            auto reader = index->CreateReader(&ctx);
+            EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+            EXPECT_EQ(reader->Count(), 7);
+            const auto* json =
+                dynamic_cast<const IJsonIndexReader*>(reader.get());
+            ASSERT_NE(json, nullptr);
+            ExpectBitmap(json->Exists("/a"), Hits(7, {0, 1, 2, 3}));
+            auto path =
+                json->Resolve("/a", JsonCastType::FromString("ARRAY_VARCHAR"));
+            const auto* predicate =
+                dynamic_cast<const IScalarPredicateReader<std::string_view>*>(
+                    path.get());
+            ASSERT_NE(predicate, nullptr);
+            const std::string_view key = "alpha";
+            ExpectBitmap(predicate->In(1, &key), Hits(7, {0, 3}));
+            ExpectBitmap(predicate->NotIn(1, &key), Hits(7, {1, 2}));
+        }
+    }
+}
+
+TEST(JsonPathIndexCacheTest,
+     InvertedArrayUsesParentRowsForExistenceAndPredicates) {
+    CheckCachedArrayProjection("JsonProjectedInvertedArrayVarchar");
+}
+TEST(JsonPathIndexCacheTest,
+     SortedArrayUsesParentRowsForExistenceAndPredicates) {
+    CheckCachedArrayProjection("JsonProjectedSortedArrayVarchar");
+}
+
+TEST(JsonPathIndexCacheTest, SortedStorageLoadsExistenceWithRequestContext) {
+    CheckCachedStringProjection("SortedVarchar");
+}
+TEST(JsonPathIndexCacheTest,
+     SortedWarmupRejectsInvalidExistenceBeforePublication) {
+    CheckCachedStringProjection("SortedVarchar", true);
+}
+
+TEST(JsonPathIndexCacheTest, BitmapStorageLoadsExistenceWithRequestContext) {
+    for (const bool roaring : {false, true})
+        CheckCachedStringProjection("BitmapVarchar", false, roaring);
+}
+TEST(JsonPathIndexCacheTest,
+     BitmapWarmupRejectsInvalidExistenceBeforePublication) {
+    for (const bool roaring : {false, true})
+        CheckCachedStringProjection("BitmapVarchar", true, roaring);
+}
+TEST(JsonPathIndexCacheTest,
+     BitmapArrayUsesParentRowsForExistenceAndPredicates) {
+    CheckCachedArrayProjection("JsonProjectedHybridArrayVarchar");
+}
+
+TEST(JsonFlatIndexArtifactTest, CachedStorageLoadsWithRequestContext) {
+    CheckCachedJsonFlat();
+}
+
+TEST(JsonFlatIndexArtifactTest, WarmupRejectsCountMismatchBeforePublication) {
+    const auto& backend =
+        ScalarReaderBackends().Get<std::string_view>("JsonFlatV7");
+    ScalarTestData<std::string_view> data({R"({"flag":false})",
+                                           R"({"flag":true})",
+                                           R"({"flag":true})",
+                                           R"({"flag":false})"});
+    data.validity.reset(3);
+    const ScalarTestInput<std::string_view> input(data);
+    auto artifact = backend.Build(input.View(), {.row_count = 4});
+    for (const bool packed : {false, true}) {
+        SCOPED_TRACE(packed);
+        auto staging = storage::LocalDirectory::CreateOwned(
+            std::filesystem::temp_directory_path().string(),
+            "jsonflat-bad-count-XXXXXX",
+            "jsonflat count test");
+        const auto persisted =
+            packed ? SerializeV3(*artifact) : SerializeV1V2(*artifact);
+        auto source = [&]() -> OpenedIndexSource {
+            if (!packed)
+                return LegacyIndexSource{
+                    std::make_shared<TestArtifactSource>(
+                        persisted, storage::Generation::V1V2),
+                    false};
+            auto input = std::make_shared<storage::RemoteInputStream>(
+                std::make_shared<arrow::io::BufferReader>(
+                    MakePackedArtifactBuffer(persisted)));
+            return PackedIndexSource{std::shared_ptr<storage::IndexEntryReader>(
+                storage::IndexEntryReader::Open(input, input->Size()))};
+        }();
+        storage::LoadOptions options;
+        options.params = backend.LoadParams({.row_count = 4});
+        options.params[INDEX_NUM_ROWS_KEY] = 3;
+        options.enable_mmap = true;
+        options.mmap_dir_path = staging->Path();
+        IndexCacheConfig cache{
+            staging->Path(),
+            cachinglayer::Meta{cachinglayer::StorageType::DISK,
+                               cachinglayer::CellIdMappingMode::IDENTICAL,
+                               cachinglayer::CellDataType::OTHER,
+                               CacheWarmupPolicy::CacheWarmupPolicy_Sync,
+                               true},
+            {1024 * 1024, 1024 * 1024},
+            {},
+            4096};
+        ExpectSegcoreError(ErrorCode::DataFormatBroken, [&] {
+            (void)LoaderRegistry::Instance()
+                .Lookup(backend.Family())
+                .Load({std::move(source), options, cache});
+        });
+        EXPECT_TRUE(std::filesystem::is_empty(staging->Path()));
+    }
+}
+
+TEST(JsonFlatIndexCacheTest, FreshSlotUsesEachReadersContext) {
+    const cachinglayer::ResourceUsage limit{16 * 1024 * 1024, 0};
+    auto dlist = std::make_shared<cachinglayer::internal::DList>(
+        false, limit, limit, limit, cachinglayer::EvictionConfig{});
+    std::vector<int32_t> priorities;
+    auto load = [&](OpContext* ctx)
+        -> folly::coro::Task<std::unique_ptr<JsonFlatIndexStorage>> {
+        priorities.push_back(ctx->runtime_load_priority.value_or(-1));
+        auto directory = storage::LocalDirectory::CreateOwned(
+            std::filesystem::temp_directory_path().string(),
+            "jsonflat-pin-XXXXXX",
+            "jsonflat pin test");
+        auto engine = std::make_shared<milvus::tantivy::TantivyIndexWrapper>(
+            "json",
+            TantivyDataType::JSON,
+            directory->Path().c_str(),
+            TANTIVY_INDEX_LATEST_VERSION,
+            false,
+            false);
+        const std::vector<Json> values{
+            Json(std::string_view(R"({"flag":true})")),
+            Json(std::string_view(R"({"flag":false})"))};
+        engine->add_json_data(values.data(), values.size(), 0);
+        engine->finish();
+        engine->create_reader(SetBitsetSealed);
+        co_return JsonFlatIndexStorage::Create(
+            std::move(directory),
+            std::move(engine),
+            "",
+            std::make_shared<const std::vector<size_t>>(),
+            true,
+            0,
+            0);
+    };
+    IndexCacheConfig cache{
+        "jsonflat-storage-test",
+        cachinglayer::Meta{cachinglayer::StorageType::MEMORY,
+                           cachinglayer::CellIdMappingMode::IDENTICAL,
+                           cachinglayer::CellDataType::OTHER,
+                           CacheWarmupPolicy::CacheWarmupPolicy_Disable,
+                           true},
+        {1024 * 1024, 0},
+        {},
+        4096};
+    std::weak_ptr<cachinglayer::CacheSlot<JsonFlatIndexStorage>> slot_lifetime;
+    auto make_index = [&] {
+        auto slot =
+            std::make_shared<cachinglayer::CacheSlot<JsonFlatIndexStorage>>(
+                std::make_unique<
+                    SingleCellIndexStorageTranslator<JsonFlatIndexStorage>>(
+                    cache, false, load),
+                dlist.get(),
+                true,
+                true,
+                true,
+                std::chrono::seconds(5),
+                std::chrono::seconds(5));
+        slot_lifetime = slot;
+        return std::make_shared<JsonFlatIndex>(slot, 2, "");
+    };
+    auto index = make_index();
+    OpContext first_ctx;
+    first_ctx.runtime_load_priority = 0;
+    OpContext second_ctx;
+    second_ctx.runtime_load_priority = 1;
+    auto first = index->CreateReader(&first_ctx);
+    EXPECT_EQ(first->Count(), 2);
+    EXPECT_TRUE(priorities.empty());
+    const auto* json = dynamic_cast<const IJsonIndexReader*>(first.get());
+    ASSERT_NE(json, nullptr);
+    EXPECT_FALSE(json->CastTypesOf("/flag").empty());
+    EXPECT_TRUE(priorities.empty());
+    auto path = json->Resolve("/flag", JsonCastType::FromString("BOOL"));
+    const auto* predicate =
+        dynamic_cast<const IScalarPredicateReader<bool>*>(path.get());
+    ASSERT_NE(predicate, nullptr);
+    const bool value = true;
+    ExpectBitmap(predicate->In(1, &value), Hits(2, {0}));
+    const auto scanned = first_ctx.storage_usage.scanned_total_bytes.load();
+    ASSERT_GT(scanned, 0);
+    EXPECT_EQ(json->Exists("/flag").count(), 2);
+    EXPECT_EQ(dynamic_cast<const INullReader*>(first.get())->IsNull().count(),
+              0);
+    EXPECT_EQ(first_ctx.storage_usage.scanned_total_bytes.load(), scanned);
+    EXPECT_EQ(priorities, (std::vector<int32_t>{0}));
+    index.reset();
+    EXPECT_FALSE(slot_lifetime.expired());
+    first.reset();
+    EXPECT_FALSE(slot_lifetime.expired());
+    path = {};
+    EXPECT_TRUE(slot_lifetime.expired());
+    index = make_index();
+    auto second = index->CreateReader(&second_ctx);
+    EXPECT_EQ(priorities, (std::vector<int32_t>{0}));
+    const auto* nulls = dynamic_cast<const INullReader*>(second.get());
+    ASSERT_NE(nulls, nullptr);
+    EXPECT_EQ(nulls->IsNull().count(), 0);
+    EXPECT_EQ(priorities, (std::vector<int32_t>{0, 1}));
+    EXPECT_GT(second_ctx.storage_usage.scanned_total_bytes.load(), 0);
+    index.reset();
+    second.reset();
+    EXPECT_TRUE(slot_lifetime.expired());
+}
+
+TEST(JsonFlatIndexOwnershipTest, ReaderRetainsStorageAfterIndexRelease) {
+    auto directory = storage::LocalDirectory::CreateOwned(
+        TestLocalPath, "json-owner-XXXXXX", "JSON ownership test");
+    auto engine = std::make_shared<milvus::tantivy::TantivyIndexWrapper>(
+        "json",
+        TantivyDataType::JSON,
+        directory->Path().c_str(),
+        TANTIVY_INDEX_LATEST_VERSION,
+        false,
+        false);
+    const std::vector<Json> values{Json(std::string_view(R"({"flag":true})")),
+                                   Json(std::string_view(R"({"flag":false})"))};
+    engine->add_json_data(values.data(), values.size(), 0);
+    engine->finish();
+    engine->create_reader(SetBitsetSealed);
+    std::shared_ptr<const JsonFlatIndexStorage> state =
+        JsonFlatIndexStorage::Create(
+            std::move(directory),
+            std::move(engine),
+            "",
+            std::make_shared<const std::vector<size_t>>(),
+            true,
+            0,
+            0);
+    std::weak_ptr<const JsonFlatIndexStorage> lifetime = state;
+    auto index = std::make_shared<JsonFlatIndex>(std::move(state));
+    EXPECT_EQ(index->Metadata().count, 2);
+    auto first = index->CreateReader(nullptr);
+    auto second = index->CreateReader(nullptr);
+    EXPECT_NE(first.get(), second.get());
+    index.reset();
+    first.reset();
+    EXPECT_FALSE(lifetime.expired());
+    const auto* json = dynamic_cast<const IJsonIndexReader*>(second.get());
+    ASSERT_NE(json, nullptr);
+    auto exists = json->Exists("/flag");
+    ASSERT_EQ(exists.size(), 2);
+    EXPECT_TRUE(exists[0]);
+    EXPECT_TRUE(exists[1]);
+    second.reset();
+    EXPECT_TRUE(lifetime.expired());
+}
+
+TEST(JsonPathIndexOwnershipTest, RequestsShareMetadataAndRetainTypedIndex) {
+    for (const auto* cast_name : {"BOOL", "ARRAY_BOOL"}) {
+        BitmapRoaringPostingMap<bool> postings;
+        postings[true].add(0);
+        BitmapStorageOptions options;
+        options.total_num_rows = 3;
+        options.valid_bitset = TargetBitmap(3);
+        options.valid_bitset.set(0);
+        options.value_type = DataType::BOOL;
+        auto child =
+            CreateBitmapIndex<bool>(std::move(postings), std::move(options));
+        std::weak_ptr<IIndex> child_lifetime = child;
+        const auto cast = JsonCastType::FromString(cast_name);
+        auto index = std::make_shared<JsonPathIndex>(
+            std::move(child),
+            JsonProjectedIndexSpec("/flag", cast, 3),
+            std::vector<size_t>{1});
+        auto first = index->CreateReader(nullptr);
+        auto second = index->CreateReader(nullptr);
+        const auto* json = dynamic_cast<const IJsonIndexReader*>(second.get());
+        ASSERT_NE(json, nullptr);
+        index.reset();
+        first.reset();
+        EXPECT_FALSE(child_lifetime.expired());
+        const auto exists = json->Exists("/flag");
+        EXPECT_TRUE(exists[0]);
+        EXPECT_FALSE(exists[1]);
+        EXPECT_TRUE(exists[2]);
+        EXPECT_EQ(second->Count(), 3);
+        const auto resolved = json->Resolve("/flag", cast);
+        const auto* nulls = dynamic_cast<const INullReader*>(resolved.get());
+        ASSERT_NE(nulls, nullptr);
+        const auto missing_or_null = nulls->IsNull();
+        EXPECT_FALSE(missing_or_null[0]);
+        EXPECT_TRUE(missing_or_null[1]);
+        EXPECT_TRUE(missing_or_null[2]);
+        second.reset();
+        EXPECT_TRUE(child_lifetime.expired());
+    }
+}
+
 namespace {
 
 JsonCastType
@@ -1612,16 +2338,6 @@ class TrackingReader final : public IIndexReaderBase {
     DataType
     ValueType() const override {
         return DataType::INT64;
-    }
-
-    int64_t
-    MemoryUsage() const override {
-        return 0;
-    }
-
-    cachinglayer::ResourceUsage
-    CellByteSize() const override {
-        return {0, 0};
     }
 
  private:

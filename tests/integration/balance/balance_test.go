@@ -34,8 +34,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
@@ -49,8 +47,14 @@ type BalanceTestSuit struct {
 
 func (s *BalanceTestSuit) SetupSuite() {
 	s.WithMilvusConfig(paramtable.Get().RootCoordCfg.DmlChannelNum.Key, "4")
-	s.WithMilvusConfig(paramtable.Get().QueryCoordCfg.BalanceCheckInterval.Key, "100")
-	s.WithMilvusConfig(paramtable.Get().QueryCoordCfg.AutoBalanceInterval.Key, "100")
+	// These fixtures contain only a few thousand rows. Use a matching scoring
+	// scale; the production tolerance intentionally ignores loads this small.
+	cfg := &paramtable.Get().QueryViewCfg
+	s.WithMilvusConfig(cfg.BalancerReconcileInterval.Key, "100ms")
+	s.WithMilvusConfig(cfg.BalancerMinScoreGain.Key, "0.0001")
+	s.WithMilvusConfig(cfg.BalancerTargetLogicalSizePerNode.Key, "1000")
+	s.WithMilvusConfig(cfg.BalancerResourceGroupAbsoluteTolerance.Key, "1")
+	s.WithMilvusConfig(cfg.BalancerResourceGroupRelativeTolerance.Key, "0")
 	s.WithMilvusConfig(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "1")
 	s.WithMilvusConfig(paramtable.Get().StreamingCfg.WALBalancerPolicyMinRebalanceIntervalThreshold.Key, "1ms")
 
@@ -112,7 +116,7 @@ func (s *BalanceTestSuit) initCollection(collectionName string, replica int, cha
 				segmentDeleteNum = segmentRowNum
 			}
 
-			pks := insertResult.GetIDs().GetIntId().GetData()
+			pks := insertResult.GetIDs().GetIntId().GetData()[:segmentDeleteNum]
 			mlog.Info(context.TODO(), "========================delete expr==================",
 				mlog.Int("length of pk", len(pks)),
 			)
@@ -168,263 +172,154 @@ func (s *BalanceTestSuit) initCollection(collectionName string, replica int, cha
 	mlog.Info(context.TODO(), "initCollection Done")
 }
 
-func (s *BalanceTestSuit) TestBalanceOnSingleReplica() {
-	testBalanceOnSingleReplica(s)
+// distribution reads serving QueryViews. Preparing resources and retained Down
+// views must not inflate either the segment or shard counts.
+func (s *BalanceTestSuit) distribution(name string) (map[int64]int, map[int64]int, bool) {
+	ctx, cancel := context.WithTimeout(s.Cluster.GetContext(), 5*time.Second)
+	defer cancel()
+	segments, err := s.Cluster.MilvusClient.GetQuerySegmentInfo(ctx, &milvuspb.GetQuerySegmentInfoRequest{CollectionName: name})
+	if merr.CheckRPCCall(segments, err) != nil {
+		return nil, nil, false
+	}
+	replicas, err := s.Cluster.MilvusClient.GetReplicas(ctx, &milvuspb.GetReplicasRequest{CollectionName: name, WithShardNodes: true})
+	if merr.CheckRPCCall(replicas, err) != nil {
+		return nil, nil, false
+	}
+	byQN, bySN := make(map[int64]int), make(map[int64]int)
+	for _, segment := range segments.GetInfos() {
+		for _, node := range segment.GetNodeIds() {
+			byQN[node]++
+		}
+	}
+	for _, replica := range replicas.GetReplicas() {
+		for _, shard := range replica.GetShardReplicas() {
+			if shard.GetLeaderID() == 0 {
+				return nil, nil, false // WAL assignment is still recovering.
+			}
+			bySN[shard.GetLeaderID()]++
+		}
+	}
+	mlog.Info(ctx, "serving balance distribution", mlog.Any("segments", byQN), mlog.Any("shards", bySN))
+	return byQN, bySN, true
 }
 
-func testBalanceOnSingleReplica(s *BalanceTestSuit) {
+func (s *BalanceTestSuit) assertTotals(name string, segmentCount, shardCount int) {
+	s.Require().Eventually(func() bool {
+		segments, shards, ok := s.distribution(name)
+		return ok && lo.Sum(lo.Values(segments)) == segmentCount && lo.Sum(lo.Values(shards)) == shardCount
+	}, 30*time.Second, 200*time.Millisecond)
+}
+
+func (s *BalanceTestSuit) TestBalanceOnSingleReplica() {
 	name := "test_balance_" + funcutil.GenRandomStr()
 	s.initCollection(name, 1, 2, 2, 2000, 500)
-
-	ctx := context.Background()
-	// add a querynode, expected balance happens
-	qn := s.Cluster.AddQueryNode().MustGetClient(ctx)
-	sn := s.Cluster.AddStreamingNode().MustGetClient(ctx)
-
-	// check segment number on new querynode
-	s.Eventually(func() bool {
-		resp, err := qn.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
-		s.NoError(err)
-		resp2, err := sn.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
-		s.NoError(err)
-		s.True(merr.Ok(resp.GetStatus()))
-		mlog.Info(context.TODO(), "balance on single replica", mlog.Int("channel", len(resp2.Channels)), mlog.Int("segments", len(resp.Segments)))
-		return len(resp2.Channels) == 1 && len(resp.Segments) == 2
-	}, 30*time.Second, 1*time.Second)
-
-	// check total segment number and total channel number
-	s.Eventually(func() bool {
-		segNum, chNum := 0, 0
-		for _, node := range s.Cluster.GetAllStreamingAndQueryNodesClient() {
-			resp1, err := node.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
-			s.NoError(err)
-			s.True(merr.Ok(resp1.GetStatus()))
-			segNum += len(resp1.Segments)
-			chNum += len(resp1.Channels)
-		}
-		return segNum == 4 && chNum == 2
-	}, 30*time.Second, 1*time.Second)
+	qn := s.Cluster.AddQueryNode()
+	sn := s.Cluster.AddStreamingNode()
+	s.Require().Eventually(func() bool {
+		segments, shards, ok := s.distribution(name)
+		return ok && segments[qn.GetNodeID()] == 2 && shards[sn.GetNodeID()] == 1
+	}, 60*time.Second, 200*time.Millisecond)
+	s.assertTotals(name, 4, 2)
 }
 
 func (s *BalanceTestSuit) TestBalanceOnMultiReplica() {
-	ctx := context.Background()
-
-	// init collection with 2 channel, each channel has 4 segment, each segment has 2000 row
-	// and load it with 2 replicas on 2 nodes.
-	// then we add 2 query node, after balance happens, expected each node have 1 channel and 2 segments
 	name := "test_balance_" + funcutil.GenRandomStr()
 	s.initCollection(name, 2, 2, 2, 2000, 500)
-
-	resp, err := s.Cluster.MilvusClient.GetReplicas(ctx, &milvuspb.GetReplicasRequest{CollectionName: name})
-	s.NoError(err)
-	s.Len(resp.Replicas, 2)
-
-	// add a querynode, expected balance happens
-	qn1 := s.Cluster.AddQueryNode().MustGetClient(ctx)
-	sn1 := s.Cluster.AddStreamingNode().MustGetClient(ctx)
-	qn2 := s.Cluster.AddQueryNode().MustGetClient(ctx)
-	sn2 := s.Cluster.AddStreamingNode().MustGetClient(ctx)
-
-	// check segment num on new query node
-	s.Eventually(func() bool {
-		resp, err := qn1.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
-		s.NoError(err)
-		resp2, err := sn1.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
-		s.NoError(err)
-		resp3, err := qn2.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
-		s.NoError(err)
-		resp4, err := sn2.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
-		s.NoError(err)
-		mlog.Info(context.TODO(), "balance on multi replica",
-			mlog.Int("channel1", len(resp2.Channels)), mlog.Int("segments1", len(resp.Segments)),
-			mlog.Int("channel2", len(resp4.Channels)), mlog.Int("segments2", len(resp3.Segments)))
-		// TODO:https://github.com/milvus-io/milvus/issues/42966
-		// return len(resp2.Channels) == 1 && len(resp.Segments) == 2 &&
-		// len(resp4.Channels) == 1 && len(resp3.Segments) == 2
-		return len(resp.Segments) == 2 && len(resp3.Segments) == 2
-	}, 60*time.Second, 1*time.Second)
-
-	// check total segment number and total channel number
-	s.Eventually(func() bool {
-		segNum, chNum := 0, 0
-		for _, node := range s.Cluster.GetAllStreamingAndQueryNodesClient() {
-			resp1, err := node.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
-			s.NoError(err)
-			s.True(merr.Ok(resp1.GetStatus()))
-			segNum += len(resp1.Segments)
-			chNum += len(resp1.Channels)
-			mlog.Info(context.TODO(), "balance on multi replica",
-				mlog.Int("channel", len(resp1.Channels)), mlog.Int("segments", len(resp1.Segments)))
-		}
-		// TODO:https://github.com/milvus-io/milvus/issues/42966
-		// return segNum == 8 && chNum == 4
-		return segNum == 8 && chNum >= 4
-	}, 30*time.Second, 1*time.Second)
+	qn1 := s.Cluster.AddQueryNode()
+	s.Cluster.AddStreamingNode()
+	qn2 := s.Cluster.AddQueryNode()
+	s.Cluster.AddStreamingNode()
+	s.Require().Eventually(func() bool {
+		segments, _, ok := s.distribution(name)
+		return ok && segments[qn1.GetNodeID()] == 2 && segments[qn2.GetNodeID()] == 2
+	}, 60*time.Second, 200*time.Millisecond)
+	s.assertTotals(name, 8, 4)
 }
 
 func (s *BalanceTestSuit) TestNodeDown() {
-	ctx := context.Background()
-
-	// disable balance channel
-	revertGuard := s.Cluster.MustModifyMilvusConfig(map[string]string{
-		paramtable.Get().QueryCoordCfg.AutoBalanceChannel.Key:    "false",
-		paramtable.Get().QueryCoordCfg.EnableStoppingBalance.Key: "false",
-	})
-	defer revertGuard()
-
-	// init collection with 2 channel, each channel has 15 segment, each segment has 2000 row
-	// and load it with 1 replicas on 2 nodes.
 	name := "test_balance_" + funcutil.GenRandomStr()
 	s.initCollection(name, 1, 2, 15, 2000, 500)
-
-	// then we add 2 query node, after balance happens, expected each node have 10 segments
 	qn1 := s.Cluster.AddQueryNode()
-	qn2 := s.Cluster.AddQueryNode().MustGetClient(ctx)
-
-	// check segment num on new query node
-	s.Eventually(func() bool {
-		resp, err := qn1.MustGetClient(ctx).GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
-		s.NoError(err)
-		s.True(merr.Ok(resp.GetStatus()))
-		mlog.Info(context.TODO(), "balance when node down", mlog.Any("channel", resp.Channels), mlog.Any("segments", len(resp.Segments)))
-		return len(resp.Channels) == 0 && len(resp.Segments) >= 10
-	}, 30*time.Second, 1*time.Second)
-
-	s.Eventually(func() bool {
-		resp, err := qn2.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
-		s.NoError(err)
-		s.True(merr.Ok(resp.GetStatus()))
-		mlog.Info(context.TODO(), "balance when node down", mlog.Any("channel", resp.Channels), mlog.Any("segments", resp.Segments))
-		return len(resp.Channels) == 0 && len(resp.Segments) >= 10
-	}, 30*time.Second, 1*time.Second)
-
-	// then we force stop qn1 and resume balance channel, let balance channel and load segment happens concurrently on qn2
-	revertGuard()
-	time.Sleep(1 * time.Second)
+	qn2 := s.Cluster.AddQueryNode()
+	s.Require().Eventually(func() bool {
+		segments, _, ok := s.distribution(name)
+		return ok && segments[qn1.GetNodeID()] == 10 && segments[qn2.GetNodeID()] == 10
+	}, 60*time.Second, 200*time.Millisecond)
 	qn1.Stop()
-
-	info, err := s.Cluster.MilvusClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
-		Base:           commonpbutil.NewMsgBase(),
-		CollectionName: name,
-	})
-	s.NoError(err)
-	s.True(merr.Ok(info.GetStatus()))
-	collectionID := info.GetCollectionID()
-
-	// expected channel and segment concurrent move to qn2
-	s.Eventually(func() bool {
-		resp, err := qn2.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
-		s.NoError(err)
-		s.True(merr.Ok(resp.GetStatus()))
-		mlog.Info(context.TODO(), "balance when node down", mlog.Any("channel", resp.Channels), mlog.Any("segments", resp.Segments))
-		return len(resp.Channels) == 0 && len(resp.Segments) == 15
-	}, 30*time.Second, 1*time.Second)
-
-	// expect all delegator will recover to healthy
-	s.Eventually(func() bool {
-		resp, err := s.Cluster.MixCoordClient.GetShardLeaders(ctx, &querypb.GetShardLeadersRequest{
-			Base:         commonpbutil.NewMsgBase(),
-			CollectionID: collectionID,
-		})
-		s.NoError(err)
-		return len(resp.Shards) == 2
-	}, 30*time.Second, 1*time.Second)
+	s.Require().Eventually(func() bool {
+		segments, _, ok := s.distribution(name)
+		return ok && segments[qn1.GetNodeID()] == 0 && segments[qn2.GetNodeID()] == 15
+	}, 60*time.Second, 200*time.Millisecond)
+	s.WaitForLoad(s.Cluster.GetContext(), name)
+	s.assertTotals(name, 30, 2)
 }
 
 func (s *BalanceTestSuit) TestConcurrentBalanceChannelAndSegment() {
-	ctx := context.Background()
-
-	// init collection with 10 channel, each channel has 10 segment, each segment has 2000 row
-	// and load it with 1 replicas on 2 nodes.
 	name := "test_balance_" + funcutil.GenRandomStr()
 	s.initCollection(name, 1, 4, 10, 2000, 500)
-
-	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.AutoBalanceChannel.Key, "false")
-
-	stopSearchCh := make(chan struct{})
-	failCounter := atomic.NewInt64(0)
-
-	// keep query during balance
-	wg := sync.WaitGroup{}
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	failures, successes := atomic.NewInt64(0), atomic.NewInt64(0)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		for {
 			select {
-			case <-stopSearchCh:
-				mlog.Info(context.TODO(), "stop search")
+			case <-stop:
 				return
 			default:
-				queryResult, err := s.Cluster.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
-					DbName:         "",
-					CollectionName: name,
-					Expr:           "",
-					OutputFields:   []string{"count(*)"},
-				})
-
-				if err := merr.CheckRPCCall(queryResult.GetStatus(), err); err != nil {
-					mlog.Info(context.TODO(), "query failed", mlog.Err(err))
-					failCounter.Inc()
+			}
+			ctx, cancel := context.WithTimeout(s.Cluster.GetContext(), 10*time.Second)
+			result, err := s.Cluster.MilvusClient.Query(ctx, &milvuspb.QueryRequest{
+				CollectionName: name, OutputFields: []string{"count(*)"},
+			})
+			cancel()
+			if merr.CheckRPCCall(result, err) != nil || len(result.GetFieldsData()) != 1 ||
+				len(result.GetFieldsData()[0].GetScalars().GetLongData().GetData()) != 1 ||
+				result.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0] != 15000 {
+				if failures.Inc() == 1 {
+					mlog.Warn(ctx, "query during balance failed", mlog.Err(err), mlog.Any("result", result))
 				}
+			} else {
+				successes.Inc()
 			}
 		}
 	}()
-
-	for _, qn := range s.Cluster.GetAllQueryNodes() {
-		resp, err := qn.MustGetClient(ctx).GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
-		s.NoError(err)
-		s.True(merr.Ok(resp.GetStatus()))
-		mlog.Info(context.TODO(), "segments on query node before balance", mlog.FieldNodeID(qn.GetNodeID()), mlog.Int("channel", len(resp.Channels)), mlog.Int("segments", len(resp.Segments)))
-	}
-	for _, sn := range s.Cluster.GetAllStreamingNodes() {
-		resp, err := sn.MustGetClient(ctx).GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
-		s.NoError(err)
-		s.True(merr.Ok(resp.GetStatus()))
-		mlog.Info(context.TODO(), "channel on streaming node before balance", mlog.FieldNodeID(sn.GetNodeID()), mlog.Int("channel", len(resp.Channels)), mlog.Int("segments", len(resp.Segments)))
-	}
-
-	// then we add 1 query node, expected segment and channel will be move to new query node concurrently
-	qn1 := s.Cluster.AddQueryNode()
-	sn1 := s.Cluster.AddStreamingNode()
-
-	// wait until balance channel finished
-	s.Eventually(func() bool {
-		for _, qn := range s.Cluster.GetAllQueryNodes() {
-			resp, err := qn.MustGetClient(ctx).GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
-			s.NoError(err)
-			s.True(merr.Ok(resp.GetStatus()))
-			mlog.Info(context.TODO(), "segments on query node", mlog.FieldNodeID(qn.GetNodeID()), mlog.Int("channel", len(resp.Channels)), mlog.Int("segments", len(resp.Segments)))
-		}
-		for _, sn := range s.Cluster.GetAllStreamingNodes() {
-			resp, err := sn.MustGetClient(ctx).GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
-			s.NoError(err)
-			s.True(merr.Ok(resp.GetStatus()))
-			mlog.Info(context.TODO(), "channel on streaming node", mlog.FieldNodeID(sn.GetNodeID()), mlog.Int("channel", len(resp.Channels)), mlog.Int("segments", len(resp.Segments)))
-		}
-
-		resp, err := qn1.MustGetClient(ctx).GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
-		s.NoError(err)
-		resp2, err := sn1.MustGetClient(ctx).GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
-		s.NoError(err)
-		s.True(merr.Ok(resp.GetStatus()))
-		mlog.Info(context.TODO(), "concurrent balance channel and segment", mlog.Int("channel1", len(resp2.Channels)), mlog.Int("segments1", len(resp.Segments)))
-		return len(resp2.Channels) == 2 && len(resp.Segments) >= 20
-	}, 30*time.Second, 1*time.Second)
-
-	// expected concurrent balance will execute successfully, shard serviceable won't be broken
-	close(stopSearchCh)
-	wg.Wait()
-	s.Equal(int64(0), failCounter.Load())
+	defer func() {
+		close(stop)
+		wg.Wait()
+		s.Zero(failures.Load(), "handoff must preserve successful queries and row counts")
+		s.Positive(successes.Load())
+	}()
+	qn := s.Cluster.AddQueryNode()
+	sn := s.Cluster.AddStreamingNode()
+	s.Require().Eventually(func() bool {
+		segments, shards, ok := s.distribution(name)
+		return ok && segments[qn.GetNodeID()] == 20 && shards[sn.GetNodeID()] == 2
+	}, 60*time.Second, 200*time.Millisecond)
+	s.assertTotals(name, 40, 4)
 }
 
-func (s *BalanceTestSuit) TestMultiTargetBalancePolicy() {
-	// Set balance policy to MultipleTargetBalancer
-	revertGuard := s.Cluster.MustModifyMilvusConfig(map[string]string{
-		paramtable.Get().QueryCoordCfg.Balancer.Key: "MultipleTargetBalancer",
+func (s *BalanceTestSuit) TestOptimizationDisabledThenEnabled() {
+	// The legacy MultipleTargetBalancer switch does not control QueryView.
+	// Exercise its live optimization switch instead, keeping forced placement.
+	restore := s.Cluster.MustModifyMilvusConfig(map[string]string{
+		paramtable.Get().QueryViewCfg.BalancerOptimizationEnabled.Key: "false",
 	})
-	defer revertGuard()
-
-	testBalanceOnSingleReplica(s)
+	defer restore()
+	name := "test_balance_" + funcutil.GenRandomStr()
+	s.initCollection(name, 1, 2, 2, 2000, 500)
+	qn := s.Cluster.AddQueryNode()
+	s.Require().Never(func() bool {
+		segments, _, ok := s.distribution(name)
+		return ok && segments[qn.GetNodeID()] != 0
+	}, 3*time.Second, 200*time.Millisecond)
+	restore()
+	s.Require().Eventually(func() bool {
+		segments, _, ok := s.distribution(name)
+		return ok && segments[qn.GetNodeID()] == 2
+	}, 60*time.Second, 200*time.Millisecond)
+	s.assertTotals(name, 4, 2)
 }
 
 func TestBalance(t *testing.T) {

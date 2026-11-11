@@ -44,7 +44,7 @@ class LoadScope {
                 fields.push_back(id.get());
             }
         }
-        auto scope = LoadScope(fields);
+        auto scope = LoadScope(fields, fields);
         scope.explicit_ = false;
         return scope;
     }
@@ -54,15 +54,17 @@ class LoadScope {
         return id.get() < START_USER_FIELDID || fields_.count(id.get()) != 0;
     }
 
-    // Dependencies are physically loaded without granting logical access to
-    // fields outside the View's explicit selection.
+    // Query dependencies are eager within the selected scope. They cannot
+    // expand an explicit View selection.
     LoadScope
     WithDependencies(const Schema& schema) const {
         auto scope = *this;
-        if (auto pk = schema.get_primary_field_id()) {
+        if (auto pk = schema.get_primary_field_id();
+            pk && (!explicit_ || Contains(*pk))) {
             scope.dependencies_.emplace(pk->get());
         }
-        if (auto ttl = schema.get_ttl_field_id()) {
+        if (auto ttl = schema.get_ttl_field_id();
+            ttl && (!explicit_ || Contains(*ttl))) {
             scope.dependencies_.emplace(ttl->get());
         }
         return scope;
@@ -77,7 +79,7 @@ class LoadScope {
     ShouldPreload(FieldId id) const {
         return Requires(id) && (id.get() < START_USER_FIELDID ||
                                 dependencies_.count(id.get()) != 0 ||
-                                hints_.empty() || hints_.count(id.get()) != 0);
+                                hints_.count(id.get()) != 0);
     }
 
     bool

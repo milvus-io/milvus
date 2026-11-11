@@ -23,7 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 
@@ -379,30 +378,35 @@ func (c *dispatcherManager) tryMerge() {
 }
 
 func (c *dispatcherManager) uploadMetric() {
+	var gauge *metrics.CardinalityGaugeVec
+	switch c.role {
+	case typeutil.DataNodeRole:
+		gauge = metrics.DataNodeMsgDispatcherTtLag
+	case typeutil.QueryNodeRole:
+		gauge = metrics.QueryNodeMsgDispatcherTtLag
+	default:
+		return
+	}
+	// Skip the target scan under c.mu when the gauge discards every write.
+	if gauge.Suppressed() {
+		return
+	}
+
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	nodeIDStr := fmt.Sprintf("%d", c.nodeID)
-	fn := func(gauge *prometheus.GaugeVec) {
-		if c.mainDispatcher == nil {
-			return
-		}
-		for _, t := range c.mainDispatcher.GetTargets() {
-			gauge.WithLabelValues(nodeIDStr, t.vchannel).Set(
-				float64(time.Since(tsoutil.PhysicalTime(c.mainDispatcher.CurTs())).Milliseconds()))
-		}
-		for _, dispatcher := range c.deputyDispatchers {
-			for _, t := range dispatcher.GetTargets() {
-				gauge.WithLabelValues(nodeIDStr, t.vchannel).Set(
-					float64(time.Since(tsoutil.PhysicalTime(dispatcher.CurTs())).Milliseconds()))
-			}
-		}
-	}
-	if c.role == typeutil.DataNodeRole {
-		fn(metrics.DataNodeMsgDispatcherTtLag)
+	if c.mainDispatcher == nil {
 		return
 	}
-	if c.role == typeutil.QueryNodeRole {
-		fn(metrics.QueryNodeMsgDispatcherTtLag)
+	nodeIDStr := fmt.Sprintf("%d", c.nodeID)
+	setLag := func(d *Dispatcher) {
+		lag := float64(time.Since(tsoutil.PhysicalTime(d.CurTs())).Milliseconds())
+		for _, t := range d.GetTargets() {
+			gauge.WithLabelValues(nodeIDStr, t.vchannel).Set(lag)
+		}
+	}
+	setLag(c.mainDispatcher)
+	for _, dispatcher := range c.deputyDispatchers {
+		setLag(dispatcher)
 	}
 }

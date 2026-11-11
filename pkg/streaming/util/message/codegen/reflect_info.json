@@ -27,6 +27,26 @@
     "messageReflectInfoTable": [
         {
             "MessageSpecializedType": {
+                "HeaderType": "messagespb.AddFileResourceMessageHeader",
+                "BodyType": "messagespb.AddFileResourceMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeAddFileResource",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.RemoveFileResourceMessageHeader",
+                "BodyType": "messagespb.RemoveFileResourceMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeRemoveFileResource",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
                 "HeaderType": "messagespb.TimeTickMessageHeader",
                 "BodyType": "msgpb.TimeTickMsg"
             },

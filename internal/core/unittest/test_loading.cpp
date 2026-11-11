@@ -361,7 +361,7 @@ TEST_P(IndexLoadTest, ResourceEstimate) {
     loadIndexInfo.index_version = 1;
     loadIndexInfo.index_params = index_params;
     loadIndexInfo.index_files = {"/tmp/index/1"};
-    loadIndexInfo.cache_index = nullptr;
+    loadIndexInfo.index = nullptr;
     loadIndexInfo.uri = "";
     loadIndexInfo.index_engine_version =
         knowhere::Version::GetCurrentVersion().VersionNumber();
@@ -439,7 +439,7 @@ TEST(IndexLoadTest, DiskAnnIdMapMmapEstimateChargesDiskCost) {
             {"nlist", "1024"},
         };
         loadIndexInfo.index_files = {"/tmp/index/1"};
-        loadIndexInfo.cache_index = nullptr;
+        loadIndexInfo.index = nullptr;
         loadIndexInfo.uri = "";
         loadIndexInfo.index_engine_version =
             knowhere::Version::GetCurrentVersion().VersionNumber();
@@ -535,7 +535,7 @@ TEST(IndexLoadTest, ScalarSortMmapEstimateReservesLegacyAux) {
         {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"},
     };
     loadIndexInfo.index_files = {"/tmp/index/1"};
-    loadIndexInfo.cache_index = nullptr;
+    loadIndexInfo.index = nullptr;
     loadIndexInfo.uri = "";
     loadIndexInfo.index_engine_version =
         knowhere::Version::GetCurrentVersion().VersionNumber();
@@ -581,7 +581,7 @@ TEST(IndexLoadTest, ScalarSortMemoryEstimateReservesLegacyAux) {
         {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"},
     };
     loadIndexInfo.index_files = {"/tmp/index/1"};
-    loadIndexInfo.cache_index = nullptr;
+    loadIndexInfo.index = nullptr;
     loadIndexInfo.uri = "";
     loadIndexInfo.index_engine_version =
         knowhere::Version::GetCurrentVersion().VersionNumber();
@@ -628,7 +628,7 @@ TEST(IndexLoadTest, MarisaMmapEstimateReservesLegacyCsrFallback) {
         {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"},
     };
     loadIndexInfo.index_files = {"/tmp/index/1"};
-    loadIndexInfo.cache_index = nullptr;
+    loadIndexInfo.index = nullptr;
     loadIndexInfo.uri = "";
     loadIndexInfo.index_engine_version =
         knowhere::Version::GetCurrentVersion().VersionNumber();
@@ -666,7 +666,7 @@ TEST(IndexLoadWarmupTest, WarmupPolicyKeptInIndexParams) {
     loadIndexInfo.index_build_id = 6;
     loadIndexInfo.index_version = 1;
     loadIndexInfo.index_files = {"/tmp/index/1"};
-    loadIndexInfo.cache_index = nullptr;
+    loadIndexInfo.index = nullptr;
     loadIndexInfo.uri = "";
     loadIndexInfo.index_engine_version =
         knowhere::Version::GetCurrentVersion().VersionNumber();

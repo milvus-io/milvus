@@ -16,9 +16,10 @@ import (
 func TestWALSchemaClientUsesHandlerDiscovery(t *testing.T) {
 	mockey.PatchConvey("schema API shares the WAL handler client", t, func() {
 		handler := &mock_handler.MockHandlerClient{}
-		w := &walAccesserImpl{handlerClient: handler}
+		c := newSchemaClient(handler, 0)
+		defer c.close()
+		w := &walAccesserImpl{handlerClient: handler, schemaClient: c}
 		var callErr error
-		effectiveTick := uint64(42)
 		mockey.Mock((*mock_handler.MockHandlerClient).GetCollectionSchema).To(func(_ *mock_handler.MockHandlerClient, _ context.Context, actual *streamingpb.StreamingNodeGetCollectionSchemaRequest) (*streamingpb.StreamingNodeGetCollectionSchemaResponse, error) {
 			require.Equal(t, "p_1v0", actual.Vchannel)
 			require.Nil(t, actual.Pchannel, "assignment belongs to the handler client")
@@ -35,26 +36,22 @@ func TestWALSchemaClientUsesHandlerDiscovery(t *testing.T) {
 			default:
 				t.Fatal("missing schema selector")
 			}
-			return &streamingpb.StreamingNodeGetCollectionSchemaResponse{Schema: &schemapb.CollectionSchema{Version: version}, EffectiveTimeTick: effectiveTick}, nil
+			return &streamingpb.StreamingNodeGetCollectionSchemaResponse{Schema: &schemapb.CollectionSchema{Version: version}}, nil
 		}).Build()
 		response, err := w.SchemaClient().GetCurrentWriteSchema(context.Background(), GetCurrentWriteSchemaRequest{VChannel: "p_1v0"})
 		require.NoError(t, err)
-		require.EqualValues(t, 5, response.Schema.Version)
-		require.EqualValues(t, 42, response.EffectiveTimeTick)
+		require.EqualValues(t, 5, response.Version)
 		for _, version := range []int32{0, 3} {
 			response, err = w.SchemaClient().GetSchemaVersion(context.Background(), GetSchemaVersionRequest{VChannel: "p_1v0", Version: version})
 			require.NoError(t, err)
-			require.Equal(t, version, response.Schema.Version)
-			require.EqualValues(t, 42, response.EffectiveTimeTick)
+			require.Equal(t, version, response.Version)
 		}
-		effectiveTick = 0 // Legacy baselines lack an exact effective boundary.
 		response, err = w.SchemaClient().GetCurrentWriteSchema(t.Context(), GetCurrentWriteSchemaRequest{VChannel: "p_1v0"})
 		require.NoError(t, err)
-		require.Zero(t, response.EffectiveTimeTick)
+		require.EqualValues(t, 5, response.Version)
 		response, err = w.SchemaClient().GetSchemaVersion(t.Context(), GetSchemaVersionRequest{VChannel: "p_1v0", Version: 0})
 		require.NoError(t, err)
-		require.Zero(t, response.Schema.Version)
-		require.Zero(t, response.EffectiveTimeTick)
+		require.Zero(t, response.Version)
 		callErr = status.NewUnrecoverableError("schema retired")
 		response, err = w.SchemaClient().GetSchemaVersion(context.Background(), GetSchemaVersionRequest{VChannel: "p_1v0", Version: 0})
 		require.Nil(t, response)

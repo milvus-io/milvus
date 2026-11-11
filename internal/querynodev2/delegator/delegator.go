@@ -64,6 +64,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/resource"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -81,12 +82,14 @@ const (
 type ShardDelegator interface {
 	Collection() int64
 	Version() int64
+	UpdateVersion(version int64) bool
 	GetSegmentInfo(readable bool) (sealed []SnapshotItem, growing []SegmentEntry)
 	SyncDistribution(ctx context.Context, entries ...SegmentEntry)
 	SyncPartitionStats(ctx context.Context, partVersions map[int64]int64)
 	GetPartitionStatsVersions(ctx context.Context) map[int64]int64
 	Search(ctx context.Context, req *querypb.SearchRequest) ([]*internalpb.SearchResults, error)
 	Query(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error)
+	Materialize(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.MaterializeResults, error)
 	QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error
 	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) ([]*internalpb.GetStatisticsResponse, error)
 	UpdateSchema(ctx context.Context, sch *schemapb.CollectionSchema, schemaBarrierTs uint64) error
@@ -148,7 +151,7 @@ type shardDelegator struct {
 	collectionID int64
 	replicaID    int64
 	vchannelName string
-	version      int64
+	version      atomic.Int64
 	// collection schema
 	collection *segments.Collection
 
@@ -384,7 +387,19 @@ func (sd *shardDelegator) Collection() int64 {
 
 // Version returns delegator version.
 func (sd *shardDelegator) Version() int64 {
-	return sd.version
+	return sd.version.Load()
+}
+
+// UpdateVersion advances the channel generation acknowledged by WatchDmChannels.
+// Repeated or delayed watches must never move a live delegator backwards.
+// This does not change the query view's target version or serviceability.
+func (sd *shardDelegator) UpdateVersion(version int64) bool {
+	for current := sd.version.Load(); version > current; current = sd.version.Load() {
+		if sd.version.CompareAndSwap(current, version) {
+			return true
+		}
+	}
+	return false
 }
 
 // GetSegmentInfo returns current segment distribution snapshot.
@@ -430,11 +445,13 @@ func (sd *shardDelegator) modifySearchRequest(req *querypb.SearchRequest, scope 
 
 func (sd *shardDelegator) modifyQueryRequest(req *querypb.QueryRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.QueryRequest {
 	return &querypb.QueryRequest{
-		Req:             shallowcopy.ShallowCopyRetrieveRequest(req.GetReq(), targetID),
-		DmlChannels:     []string{sd.vchannelName},
-		SegmentIDs:      segmentIDs,
-		FromShardLeader: req.FromShardLeader,
-		Scope:           scope,
+		Req:                          shallowcopy.ShallowCopyRetrieveRequest(req.GetReq(), targetID),
+		DmlChannels:                  []string{sd.vchannelName},
+		SegmentIDs:                   segmentIDs,
+		FromShardLeader:              req.FromShardLeader,
+		Scope:                        scope,
+		MaterializeSchemaFingerprint: req.GetMaterializeSchemaFingerprint(),
+		MaterializeFormatVersion:     req.GetMaterializeFormatVersion(),
 	}
 }
 
@@ -820,11 +837,13 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 	return nil
 }
 
-// Query performs query operation on shard.
-func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error) {
-	log := sd.getLogger(ctx)
+// withQuerySubTasks runs Query's steps up to the sub-task split, then run on
+// the sub-tasks while the delegator and the pinned segments are held.
+func (sd *shardDelegator) withQuerySubTasks(ctx context.Context, req *querypb.QueryRequest,
+	run func(tasks []subTask[*querypb.QueryRequest], sealedRowCount map[int64]int64, delegatorBits uint64) error,
+) error {
 	if err := sd.lifetime.Add(sd.IsWorking); err != nil {
-		return nil, err
+		return err
 	}
 	defer sd.lifetime.Done()
 
@@ -832,7 +851,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		mlog.Warn(ctx, "delegator received query request not belongs to it",
 			mlog.Strings("reqChannels", req.GetDmlChannels()),
 		)
-		return nil, merr.WrapErrChannelMisrouted(sd.vchannelName, fmt.Sprintf("request channels %v", req.GetDmlChannels()))
+		return merr.WrapErrChannelMisrouted(sd.vchannelName, fmt.Sprintf("request channels %v", req.GetDmlChannels()))
 	}
 
 	req.Req.GuaranteeTimestamp = sd.speedupGuranteeTS(
@@ -853,7 +872,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 
 	if err != nil {
 		mlog.Warn(ctx, "delegator query failed to wait tsafe", mlog.Err(err))
-		return nil, err
+		return err
 	}
 
 	// External reads always use the full snapshot MVCC timestamp. Normal reads
@@ -865,7 +884,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 	sealed, growing, sealedRowCount, version, err := sd.distribution.PinReadableSegments(float64(1.0), req.GetReq().GetPartitionIDs()...)
 	if err != nil {
 		mlog.Warn(ctx, "delegator failed to query, current distribution is not serviceable", mlog.Err(err))
-		return nil, err
+		return err
 	}
 	defer sd.distribution.Unpin(version)
 
@@ -903,23 +922,9 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, true, sd.modifyQueryRequest)
 	if err != nil {
 		mlog.Warn(ctx, "query organizeSubTask failed", mlog.Err(err))
-		return nil, err
+		return err
 	}
 
-	results, err := executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount), func(ctx context.Context, req *querypb.QueryRequest, worker cluster.Worker) (*internalpb.RetrieveResults, error) {
-		ctx = retry.WithMaxAttemptsContext(ctx, 3)
-		resp, err := worker.QuerySegments(ctx, req)
-		if errors.Is(err, merr.ErrNodeNotFound) || grpcclient.IsServerIDMismatchErr(err) {
-			sd.markSegmentOffline(req.GetSegmentIDs()...)
-		}
-		return resp, err
-	}, "Query", log)
-	if err != nil {
-		mlog.Warn(ctx, "Delegator query failed", mlog.Err(err))
-		return nil, err
-	}
-
-	mlog.Debug(ctx, "Delegator Query done")
 	if mlog.LevelEnabled(mlog.DebugLevel) {
 		sealedIDs := lo.FlatMap(sealed, func(item SnapshotItem, _ int) []int64 {
 			return lo.Map(item.Segments, func(segment SegmentEntry, _ int) int64 {
@@ -937,7 +942,89 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 		)
 	}
 
-	orFeatureBits(results, delegatorBits)
+	return run(tasks, sealedRowCount, delegatorBits)
+}
+
+// Query performs query operation on shard.
+func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error) {
+	log := sd.getLogger(ctx)
+	var results []*internalpb.RetrieveResults
+	err := sd.withQuerySubTasks(ctx, req, func(tasks []subTask[*querypb.QueryRequest], sealedRowCount map[int64]int64, delegatorBits uint64) error {
+		var err error
+		results, err = executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount), func(ctx context.Context, req *querypb.QueryRequest, worker cluster.Worker) (*internalpb.RetrieveResults, error) {
+			ctx = retry.WithMaxAttemptsContext(ctx, 3)
+			resp, err := worker.QuerySegments(ctx, req)
+			if errors.Is(err, merr.ErrNodeNotFound) || grpcclient.IsServerIDMismatchErr(err) {
+				sd.markSegmentOffline(req.GetSegmentIDs()...)
+			}
+			return resp, err
+		}, "Query", log)
+		if err != nil {
+			mlog.Warn(ctx, "Delegator query failed", mlog.Err(err))
+			return err
+		}
+		orFeatureBits(results, delegatorBits)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	mlog.Debug(ctx, "Delegator Query done")
+	return results, nil
+}
+
+// Materialize relays the workers' Arrow replies unchanged (design doc
+// 20261019 §5). Query-stage failures are fail-fast, so a worker that does
+// not support Materialize fails the request.
+func (sd *shardDelegator) Materialize(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.MaterializeResults, error) {
+	log := sd.getLogger(ctx)
+	var results []*internalpb.MaterializeResults
+	err := sd.withQuerySubTasks(ctx, req, func(tasks []subTask[*querypb.QueryRequest], sealedRowCount map[int64]int64, delegatorBits uint64) error {
+		// Every reply received, so that a failure can release their bodies.
+		var (
+			receivedMu sync.Mutex
+			received   []*internalpb.MaterializeResults
+		)
+		var err error
+		results, err = executeSubTasks(ctx, tasks, NewRowCountBasedEvaluator(sealedRowCount), func(ctx context.Context, req *querypb.QueryRequest, worker cluster.Worker) (*internalpb.MaterializeResults, error) {
+			ctx = retry.WithMaxAttemptsContext(ctx, 3)
+			resp, err := worker.MaterializeSegments(ctx, req)
+			if errors.Is(err, merr.ErrNodeNotFound) || grpcclient.IsServerIDMismatchErr(err) {
+				sd.markSegmentOffline(req.GetSegmentIDs()...)
+			}
+			if resp != nil {
+				receivedMu.Lock()
+				received = append(received, resp)
+				receivedMu.Unlock()
+			}
+			return resp, err
+		}, "Materialize", log)
+		if err != nil {
+			// executeSubTasks has waited for every sub-task and returns none
+			// of the replies, so the replies of the workers that succeeded
+			// before a sibling failed are dropped: return their bodies to the
+			// pool now instead of leaving them to the GC.
+			for _, r := range received {
+				resource.ReleaseMaterializeBody(r)
+			}
+			mlog.Warn(ctx, "Delegator materialize failed", mlog.Err(err))
+			return err
+		}
+		if delegatorBits != 0 {
+			for _, r := range results {
+				if h := r.GetHeader(); h != nil {
+					h.FeatureBits |= delegatorBits
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	mlog.Debug(ctx, "Delegator Materialize done")
 	return results, nil
 }
 
@@ -1615,7 +1702,6 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		collectionID:      collectionID,
 		replicaID:         replicaID,
 		vchannelName:      channel,
-		version:           version,
 		collection:        collection,
 		collectionManager: manager.Collection,
 		segmentManager:    manager.Segment,
@@ -1638,6 +1724,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		latestRequiredMVCCTimeTick:    atomic.NewUint64(0),
 		schemaBarrierTs:               schemaBarrierTs,
 	}
+	sd.version.Store(version)
 	for _, opt := range opts {
 		opt(sd)
 	}

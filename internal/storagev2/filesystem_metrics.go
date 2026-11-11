@@ -124,6 +124,7 @@ var (
 	propUseCustomPartUpload = C.GoString(C.loon_properties_fs_use_custom_part_upload)
 	propRequestTimeoutMS    = C.GoString(C.loon_properties_fs_request_timeout_ms)
 	propMaxConnections      = C.GoString(C.loon_properties_fs_max_connections)
+	propS3UseCRT            = C.GoString(C.loon_properties_fs_s3_use_crt)
 	propTLSMinVersion       = C.GoString(C.loon_properties_fs_tls_min_version)
 	propUseCRC32CChecksum   = C.GoString(C.loon_properties_fs_use_crc32c_checksum)
 )
@@ -191,6 +192,9 @@ func makePropertiesFromConfig(storageConfig *indexpb.StorageConfig) (C.LoonPrope
 	values = append(values, strconv.FormatBool(storageConfig.GetUseVirtualHost()))
 	keys = append(keys, propUseCustomPartUpload)
 	values = append(values, "true")
+	// Match the SDK backend selected by the data I/O property producers.
+	keys = append(keys, propS3UseCRT)
+	values = append(values, "false")
 
 	keys = append(keys, propRequestTimeoutMS)
 	values = append(values, strconv.FormatInt(storageConfig.GetRequestTimeoutMs(), 10))
@@ -232,10 +236,6 @@ func makePropertiesFromConfig(storageConfig *indexpb.StorageConfig) (C.LoonPrope
 	}
 
 	count := len(keys)
-	if count == 0 {
-		return C.LoonProperties{}, nil
-	}
-
 	cKeys := make([]*C.char, count)
 	cValues := make([]*C.char, count)
 	for i := 0; i < count; i++ {

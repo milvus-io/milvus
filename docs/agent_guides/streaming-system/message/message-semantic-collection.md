@@ -8,7 +8,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 |---------|----------|-------------------|-------------|
 | CreateCollection | Broadcast: VChannels + CChannel | Yes (VChannel) | SharedDBName + ExclusiveCollectionName |
 | DropCollection | Broadcast: VChannels + CChannel | Yes (VChannel) | SharedDBName + ExclusiveCollectionName |
-| AlterCollection | Broadcast: VChannels + CChannel | Yes (VChannel) | SharedDBName + ExclusiveCollectionName |
+| AlterCollection | Broadcast: VChannels + CChannel (AckSyncUp) | Yes (VChannel) | SharedDBName + ExclusiveCollectionName |
 | TruncateCollection | Broadcast: VChannels + CChannel (AckSyncUp) | Yes (VChannel) | SharedDBName + ExclusiveCollectionName |
 | CreatePartition | Broadcast: VChannels + CChannel | Yes (VChannel) | SharedDBName + ExclusiveCollectionName |
 | DropPartition | Broadcast: VChannels + CChannel | Yes (VChannel) | SharedDBName + ExclusiveCollectionName |
@@ -17,7 +17,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | DropIndex | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 | CreateSnapshot | Broadcast: All Collection VChannels + CChannel (AckSyncUp) | Yes | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
 | DropSnapshot | Broadcast: CChannel | No | ExclusiveSnapshotName |
-| RestoreSnapshot | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
+| RestoreSnapshot | Broadcast: target VChannels + CChannel (AckSyncUp); legacy messages CChannel-only | Yes (VChannel) | SharedDBName + ExclusiveCollectionName |
 | DropSnapshotsByCollection | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
 | Import | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
 | UpdateImport | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
@@ -30,18 +30,19 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | AlterLoadConfig | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 | DropLoadConfig | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName (or ExclusiveCluster) |
 | BatchUpdateManifest | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
-| RefreshExternalCollection | Broadcast: CChannel | No | — |
+| RefreshExternalCollection | Broadcast: CChannel + collection VChannels (AckSyncUp) | No | — |
 
 ## Message Descriptions
 
 - **CreateCollection**: Creates a new collection with its partitions and VChannels.
 - **DropCollection**: Drops a collection and all its data, indexes, and load config. Implicitly flushes all growing segments.
-- **AlterCollection**: Alters collection properties, description, consistency level, or schema. Schema changes implicitly flush growing segments. When used for **RenameCollection**, the ResourceKey changes to `ExclusiveDBName(srcDB) + ExclusiveDBName(dstDB)` (deduplicated if same DB), blocking all collection DDL in both databases.
+- **AlterCollection**: Alters collection properties, description, consistency level, or schema. Schema changes implicitly flush growing segments. Producers use AckSyncUp so recovery schema updates complete before the coordinator callback invalidates Proxy metadata caches; checkpoint publication is independent. When used for **RenameCollection**, the ResourceKey changes to `ExclusiveDBName(srcDB) + ExclusiveDBName(dstDB)` (deduplicated if same DB), blocking all collection DDL in both databases.
 - **TruncateCollection**: Logically truncates by sealing and dropping all segments before the truncation timestamp. Implicitly flushes all growing segments. Uses AckSyncUp.
 - **CreatePartition** / **DropPartition**: Creates or drops a partition. DropPartition seals and flushes all earlier growing segments of the collection on each VChannel, but logically drops only the requested partition.
 - **CreateIndex** / **AlterIndex** / **DropIndex**: Manages indexes on a collection's field. CChannel-only.
 - **CreateSnapshot**: Broadcasts to all collection VChannels plus CChannel with AckSyncUp. Flushes earlier L1/L0 data and uses each business channel's message position as the snapshot cut.
-- **DropSnapshot** / **RestoreSnapshot** / **DropSnapshotsByCollection**: Manages collection snapshots. CChannel-only.
+- **DropSnapshot** / **DropSnapshotsByCollection**: Deletes collection snapshots. CChannel-only.
+- **RestoreSnapshot**: Restores a collection through target VChannels plus CChannel with AckSyncUp. Legacy messages remain CChannel-only.
 - **Import**: Initiates a bulk import job for a collection through its broadcast callback; CChannel is excluded from the job's data-channel list.
 - **CommitImport**: The DataCoord callback persists Committing, publishes imported segment visibility at each business VChannel's own append TimeTick, then persists Completed. The broadcast task retries failures. New jobs carry `commit_by_coordinator=true` and do not require a StreamingNode Flush or per-channel commit RPC. Legacy messages keep the per-channel RPC before BroadcastAckModule Ack and the counter-based checker completion.
 - **RollbackImport**: The DataCoord callback marks an uncommitted job Failed; committed jobs are unchanged.
@@ -52,7 +53,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 - **AlterLoadConfig**: Modifies load configuration — partition set, replica count, load fields, etc. CChannel-only, consumed by QueryCoord.
 - **DropLoadConfig**: Removes load configuration, unloading/releasing from query nodes. Uses ExclusiveCluster when part of DropCollection flow.
 - **BatchUpdateManifest**: Updates segment manifest versions in batch. Used after compaction or index building. CChannel-only.
-- **RefreshExternalCollection**: Submits an external collection refresh job using a pre-allocated job ID from the WAL message. CChannel-only.
+- **RefreshExternalCollection**: Submits an external collection refresh job using a pre-allocated job ID from the WAL message. Target business VChannels advance Transform MVCC; the callback persists their TimeTicks with the job. Legacy CChannel-only messages remain consumable. Job completion separately waits for schema publication and QueryView handoff after applying segment results.
 
 The retired `AlterRLSMetadata` and `DropRLSMetadata` wire types remain decodable,
 but have no ACK callbacks and do not maintain metadata during replay.

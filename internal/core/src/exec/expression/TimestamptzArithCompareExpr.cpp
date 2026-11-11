@@ -166,7 +166,7 @@ PhyTimestamptzArithCompareExpr::DetermineExecPath() {
 
     auto req = MakeIndexRequirement(RequiredReader::ValueLookup);
     req.value_type = DataType::TIMESTAMPTZ;
-    if (SelectAndPinIndex(req)) {
+    if (SelectAndCreateIndexReader(req)) {
         return;
     }
 

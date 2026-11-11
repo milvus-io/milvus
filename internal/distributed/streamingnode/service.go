@@ -258,6 +258,10 @@ func (s *Server) initSession() error {
 		return merr.WrapErrServiceUnavailable("session is nil, the etcd client connection may have failed")
 	}
 	s.session.Init(typeutil.StreamingNodeRole, s.listener.Address(), false)
+	// Record the session so that the supervisor process (--run-with-subprocess) removes it as soon as
+	// this process exits abnormally. Otherwise the streamingnode session lingers until its lease
+	// expires, and every WAL owned by this node stays unavailable for up to common.session.ttl.
+	sessionutil.SaveServerInfo(typeutil.StreamingNodeRole, s.session.ServerID)
 	paramtable.SetNodeID(s.session.ServerID)
 	mlog.Info(s.ctx, "StreamingNode init session", mlog.Int64("nodeID", paramtable.GetNodeID()), mlog.String("node address", s.listener.Address()))
 	return nil
@@ -341,13 +345,13 @@ func (s *Server) initGRPCServer() {
 		grpc.MaxSendMsgSize(cfg.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			mlog.UnaryServerInterceptor(typeutil.StreamingNodeRole),
-			streamingserviceinterceptor.NewStreamingServiceUnaryServerInterceptor(),
+			streamingserviceinterceptor.NewServiceUnaryServerInterceptor(),
 			interceptor.ClusterValidationUnaryServerInterceptor(),
 			interceptor.ServerIDValidationUnaryServerInterceptor(serverIDGetter),
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
 			mlog.StreamServerInterceptor(typeutil.StreamingNodeRole),
-			streamingserviceinterceptor.NewStreamingServiceStreamServerInterceptor(),
+			streamingserviceinterceptor.NewServiceStreamServerInterceptor(),
 			interceptor.ClusterValidationStreamServerInterceptor(),
 			interceptor.ServerIDValidationStreamServerInterceptor(serverIDGetter),
 		)),

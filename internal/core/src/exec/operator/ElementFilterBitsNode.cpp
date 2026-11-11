@@ -307,10 +307,9 @@ PhyElementFilterBitsNode::EvaluateElementExpression(
                         total_elements,
                         total_elements));
 
-        // Element filter targets individual elements within arrays.
-        // While the array field itself can be nullable (handled by doc_bitset_valid),
-        // individual elements inside an array do not support null values.
-        // Therefore, the element-level valid_bitset is always all true.
+        // Only TRUE elements are selected: an UNKNOWN element (e.g. a null
+        // sub-field value) has its data bit cleared and is filtered out like
+        // FALSE, so the element-level valid_bitset is all true.
         TargetBitmap valid_bitset(total_elements, true);
         return std::make_pair(std::move(eval_bitset), std::move(valid_bitset));
     }

@@ -38,7 +38,10 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -71,7 +74,7 @@ func Test_NumRows_hostileFooterLength(t *testing.T) {
 	var before, after runtime.MemStats
 	runtime.GC()
 	runtime.ReadMemStats(&before)
-	_, err := NumRows(context.Background(), cm, "bad.parquet")
+	_, err := NumRows(context.Background(), cm, &schemapb.CollectionSchema{}, "bad.parquet")
 	runtime.ReadMemStats(&after)
 
 	require.Error(t, err)
@@ -158,7 +161,7 @@ func Test_NumRows_boundsConcurrentFooterParses(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := NumRows(context.Background(), cm, "f.parquet")
+			_, err := NumRows(context.Background(), cm, &schemapb.CollectionSchema{}, "f.parquet")
 			assert.Error(t, err)
 		}()
 	}
@@ -214,7 +217,10 @@ func Test_NumRowsAndBytesReportsDecodedLogicalSize(t *testing.T) {
 	data := writePlainParquetInt64(t, rows)
 	cm := cmServingBytes(t, path, data)
 
-	gotRows, logical, fileSize, err := NumRowsAndBytes(context.Background(), cm, path)
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "v", DataType: schemapb.DataType_Int64},
+	}}
+	gotRows, logical, fileSize, err := NumRowsAndBytes(context.Background(), cm, schema, path)
 	require.NoError(t, err)
 	require.Equal(t, int64(rows), gotRows)
 	require.Equal(t, int64(len(data)), fileSize)
@@ -284,4 +290,71 @@ func cmServingBytes(t *testing.T, path string, data []byte) *mocks.ChunkManager 
 			return data[off:end], nil
 		}).Maybe()
 	return cm
+}
+
+// idAndVectorSchema is a required Int64 primary key and a required 8-dim vector.
+func idAndVectorSchema() *schemapb.CollectionSchema {
+	return &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{
+			FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}},
+		},
+	}}
+}
+
+// emptyParquet writes a zero-row parquet file with the given arrow schema.
+func emptyParquet(t *testing.T, arrSchema *arrow.Schema) []byte {
+	t.Helper()
+	builder := array.NewRecordBuilder(memory.DefaultAllocator, arrSchema)
+	defer builder.Release()
+	record := builder.NewRecord()
+	defer record.Release()
+	table := array.NewTableFromRecords(arrSchema, []arrow.Record{record})
+	defer table.Release()
+
+	buf := new(bytes.Buffer)
+	require.NoError(t, pqarrow.WriteTable(table, buf, 1<<20,
+		arrowparquet.NewWriterProperties(), pqarrow.DefaultWriterProps()))
+	return buf.Bytes()
+}
+
+// Test_NumRowsValidatesSchemaBeforeZeroRowCompletion covers zero-row parquet
+// inputs: invalid schemas fail, the valid empty file imports zero rows.
+func Test_NumRowsValidatesSchemaBeforeZeroRowCompletion(t *testing.T) {
+	t.Run("missing required columns", func(t *testing.T) {
+		data := emptyParquet(t, arrow.NewSchema([]arrow.Field{
+			{Name: "wrong_id", Type: arrow.PrimitiveTypes.Int64},
+			{Name: "wrong_vector", Type: arrow.ListOf(arrow.PrimitiveTypes.Float32)},
+		}, nil))
+		cm := cmServingBytes(t, "f.parquet", data)
+
+		_, _, _, err := NumRowsAndBytes(context.Background(), cm, idAndVectorSchema(), "f.parquet")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "not in arrow schema")
+	})
+
+	t.Run("wrong element type", func(t *testing.T) {
+		data := emptyParquet(t, arrow.NewSchema([]arrow.Field{
+			{Name: "id", Type: arrow.BinaryTypes.String},
+			{Name: "vector", Type: arrow.ListOf(arrow.PrimitiveTypes.Float32)},
+		}, nil))
+		cm := cmServingBytes(t, "f.parquet", data)
+
+		_, _, _, err := NumRowsAndBytes(context.Background(), cm, idAndVectorSchema(), "f.parquet")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "type mis-match")
+	})
+
+	t.Run("valid empty columns still import zero rows", func(t *testing.T) {
+		data := emptyParquet(t, arrow.NewSchema([]arrow.Field{
+			{Name: "id", Type: arrow.PrimitiveTypes.Int64},
+			{Name: "vector", Type: arrow.ListOf(arrow.PrimitiveTypes.Float32)},
+		}, nil))
+		cm := cmServingBytes(t, "f.parquet", data)
+
+		rows, _, _, err := NumRowsAndBytes(context.Background(), cm, idAndVectorSchema(), "f.parquet")
+		require.NoError(t, err)
+		require.Equal(t, int64(0), rows)
+	})
 }

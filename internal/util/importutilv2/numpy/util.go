@@ -36,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
-	pkgcommon "github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -55,9 +54,7 @@ var (
 // basename collapse to one entry in both maps.
 func resolveFieldPaths(schema *schemapb.CollectionSchema, paths []string) (sourced, all map[string]string) {
 	all = lo.SliceToMap(paths, func(path string) (string, string) {
-		nameWithExt := filepath.Base(path)
-		name := strings.TrimSuffix(nameWithExt, filepath.Ext(nameWithExt))
-		return name, path
+		return pathFieldName(path), path
 	})
 	nameToField := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) string {
 		return field.GetName()
@@ -69,6 +66,50 @@ func resolveFieldPaths(schema *schemapb.CollectionSchema, paths []string) (sourc
 		}
 	}
 	return sourced, all
+}
+
+// pathFieldName returns the field name a NumPy file is matched by: its
+// basename without extension.
+func pathFieldName(path string) string {
+	nameWithExt := filepath.Base(path)
+	return strings.TrimSuffix(nameWithExt, filepath.Ext(nameWithExt))
+}
+
+// checkStructFilePaths rejects a file named after a struct field or one of its
+// sub-fields, which resolveFieldPaths would otherwise skip as redundant and
+// leave the struct rows null. A sub-field is matched by its stored name
+// (struct[sub]) and by its own name (sub). A name that is also a top-level
+// field belongs to that field.
+func checkStructFilePaths(schema *schemapb.CollectionSchema, paths []string) error {
+	if len(schema.GetStructArrayFields()) == 0 {
+		return nil
+	}
+	topLevel := typeutil.NewSet[string]()
+	for _, field := range schema.GetFields() {
+		topLevel.Insert(field.GetName())
+	}
+	structNames := make(map[string]string) // file name -> struct field name
+	for _, structField := range schema.GetStructArrayFields() {
+		structNames[structField.GetName()] = structField.GetName()
+		for _, subField := range structField.GetFields() {
+			structNames[subField.GetName()] = structField.GetName()
+			if name, err := typeutil.ExtractStructFieldName(subField.GetName()); err == nil {
+				structNames[name] = structField.GetName()
+			}
+		}
+	}
+	for _, path := range paths {
+		name := pathFieldName(path)
+		if topLevel.Contain(name) {
+			continue
+		}
+		if structName, ok := structNames[name]; ok {
+			return merr.WrapErrImportFailedMsg(
+				"numpy import does not support struct data: file '%s' names struct field '%s' or one of its sub-fields; use JSON, CSV or Parquet files",
+				path, structName)
+		}
+	}
+	return nil
 }
 
 // SourcePaths returns the paths CreateReaders will open for this schema: those
@@ -83,7 +124,10 @@ func SourcePaths(schema *schemapb.CollectionSchema, paths []string) []string {
 func CreateReaders(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, paths []string) (result map[int64]storage.FileReader, err error) {
 	// Paths naming no field are redundant and ignored; only the special "$meta"
 	// field carries dynamic data, and it is a schema field like any other.
-	sourcedPaths, nameToPath := resolveFieldPaths(schema, paths)
+	if err := ValidateSchema(schema, paths); err != nil {
+		return nil, err
+	}
+	sourcedPaths, _ := resolveFieldPaths(schema, paths)
 	nameToField := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) string {
 		return field.GetName()
 	})
@@ -100,29 +144,6 @@ func CreateReaders(ctx context.Context, cm storage.ChunkManager, schema *schemap
 	}()
 	for name, path := range sourcedPaths {
 		field := nameToField[name]
-
-		// auto-id field must not provided
-		if typeutil.IsAutoPKField(field) {
-			return nil, merr.WrapErrImportFailed(
-				fmt.Sprintf("the primary key '%s' is auto-generated, no need to provide", field.GetName()))
-		}
-		// validate function output field
-		if field.GetIsFunctionOutput() {
-			if typeutil.IsBM25FunctionOutputField(field, schema) {
-				return nil, merr.WrapErrImportFailed(
-					fmt.Sprintf("not allowed to provide data for BM25 function output field '%s'", field.GetName()))
-			}
-			if !pkgcommon.GetCollectionAllowInsertNonBM25FunctionOutputs(schema.GetProperties()) {
-				return nil, merr.WrapErrImportFailed(
-					fmt.Sprintf("not allowed to provide data for function output field '%s', "+
-						"set collection property '%s' to enable", field.GetName(), pkgcommon.CollectionAllowInsertNonBM25FunctionOutputs))
-			}
-		}
-		// report an error if user provided the files for unsupported fields
-		err := checkUnsupportedDataType(field.GetDataType())
-		if err != nil {
-			return nil, err
-		}
 
 		reader, err := cm.Reader(ctx, path)
 		if err != nil {
@@ -155,28 +176,6 @@ func CreateReaders(ctx context.Context, cm storage.ChunkManager, schema *schemap
 		}
 		readers[field.GetFieldID()] = retryableReader
 		readFields[field.GetName()] = field.GetFieldID()
-	}
-
-	// this loop is for "are there any fields not provided?"
-	for _, field := range nameToField {
-		// auto-id field, function output field already checked
-		// dynamic field, nullable field, default value field, not provided or provided both ok
-		if typeutil.IsAutoPKField(field) || field.GetIsDynamic() || field.GetIsFunctionOutput() ||
-			field.GetNullable() || field.GetDefaultValue() != nil {
-			continue
-		}
-
-		// report an error if the collection contains an unsupported field even user doesn't provide a numpy file for the field
-		err := checkUnsupportedDataType(field.GetDataType())
-		if err != nil {
-			return nil, err
-		}
-
-		// the other field must be provided
-		if _, ok := readers[field.GetFieldID()]; !ok {
-			return nil, merr.WrapErrImportFailed(
-				fmt.Sprintf("no file for field: %s, files: %v", field.GetName(), lo.Values(nameToPath)))
-		}
 	}
 
 	mlog.Info(ctx, "create numpy readers", mlog.Any("readFields", readFields))

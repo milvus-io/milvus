@@ -22,6 +22,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -41,6 +42,8 @@ import (
 	"github.com/milvus-io/milvus/internal/tso"
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
 	"github.com/milvus-io/milvus/internal/util/schemautil"
+	"github.com/milvus-io/milvus/internal/views/coord/coordview"
+	qvresource "github.com/milvus-io/milvus/internal/views/coord/resource"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -132,6 +135,7 @@ func buildAlterSchemaAddFunctionReq(dbName, collName string, functionSchema *sch
 }
 
 func TestDDLCallbacksBroadcastAlterCollectionSchema(t *testing.T) {
+	enableFunctionBackfillForTest(t)
 	core := initStreamingSystemAndCore(t)
 
 	ctx := context.Background()
@@ -1017,6 +1021,7 @@ func TestDDLCallbacksAlterCollectionDropFieldWaitsForSchemaDropReady(t *testing.
 }
 
 func TestDDLCallbacksAlterCollectionSchemaAddSkipsSchemaDropReady(t *testing.T) {
+	enableFunctionBackfillForTest(t)
 	core := initStreamingSystemAndCore(t)
 
 	ctx := context.Background()
@@ -1456,12 +1461,29 @@ func TestAlterCollectionV2AckCallbackUsesHeaderDroppedFieldIDs(t *testing.T) {
 		WithBroadcast([]string{funcutil.GetControlChannel("test")}).
 		MustBuildBroadcast()
 
-	meta := &mockMetaTable{}
-	meta.AlterCollectionFunc = func(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {
+	published, waited := false, false
+	meta := &MetaTable{}
+	read := mockey.Mock((*MetaTable).GetCollectionByIDWithMaxTs).Return(&model.Collection{CollectionID: 1, SchemaVersion: 1}, nil).Build()
+	defer read.UnPatch()
+	publish := mockey.Mock((*MetaTable).AlterCollection).To(func(_ *MetaTable, ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {
+		require.True(t, waited)
+		published = true
 		return nil
-	}
-
+	}).Build()
+	defer publish.UnPatch()
+	previous := qvresource.Resource()
+	qvresource.Init(&qvresource.Resources{ShardViews: &coordview.ShardViewRegistry{}})
+	defer qvresource.Init(previous)
 	mixc := imocks.NewMixCoord(t)
+	handoff := mockey.Mock((*qvresource.Resources).PrepareSchema).To(func(_ *qvresource.Resources, _ context.Context, id int64, old, target *schemapb.CollectionSchema) error {
+		require.False(t, published, "public metadata must stay old during preparation")
+		require.EqualValues(t, 1, id)
+		require.EqualValues(t, 1, old.GetVersion())
+		require.EqualValues(t, 2, target.GetVersion())
+		waited = true
+		return nil
+	}).Build()
+	defer handoff.UnPatch()
 	mixc.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(
 		&indexpb.DescribeIndexResponse{
 			Status: merr.Success(),
@@ -1481,6 +1503,7 @@ func TestAlterCollectionV2AckCallbackUsesHeaderDroppedFieldIDs(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
+	require.True(t, waited)
 }
 
 func newBoundIndexTestPlan() (*model.Collection, *schemautil.AlterSchemaAddPlan) {
@@ -2040,7 +2063,13 @@ func TestPrepareAlterSchemaAddStructSubFieldRejectsInvalid(t *testing.T) {
 				&commonpb.KeyValuePair{Key: common.DimKey, Value: "4"},
 				&commonpb.KeyValuePair{Key: common.LocalFormatKey, Value: common.LocalFormatVortex})
 		}},
-		{"capacity mismatch", "items", "same max_capacity", func(f *schemapb.FieldSchema) { f.TypeParams[0].Value = "8" }},
+		{"capacity mismatch", "items", "but struct field items uses 16", func(f *schemapb.FieldSchema) { f.TypeParams[0].Value = "8" }},
+		{"enable_match", "items", "enable_match is not supported on struct sub-field", func(f *schemapb.FieldSchema) {
+			f.TypeParams = append(f.TypeParams, &commonpb.KeyValuePair{Key: common.EnableMatchKey, Value: "true"})
+		}},
+		{"enable_analyzer", "items", "enable_analyzer is not supported on struct sub-field", func(f *schemapb.FieldSchema) {
+			f.TypeParams = append(f.TypeParams, &commonpb.KeyValuePair{Key: common.EnableAnalyzerKey, Value: "true"})
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			field := validField()
@@ -2051,6 +2080,77 @@ func TestPrepareAlterSchemaAddStructSubFieldRejectsInvalid(t *testing.T) {
 			plan := &schemautil.AlterSchemaAddPlan{Kind: schemautil.AlterSchemaAddStructSubField, StructPath: tc.path, Field: field}
 			err := prepareAlterSchemaAddStructSubField(rootStructSubFieldTestCollection(false), plan)
 			require.ErrorContains(t, err, tc.want)
+		})
+	}
+}
+
+func TestPrepareAlterSchemaAddStructSubFieldFillsMaxCapacity(t *testing.T) {
+	t.Run("single level", func(t *testing.T) {
+		field := &schemapb.FieldSchema{Name: "items[added]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ElementNullable: true}
+		plan := &schemautil.AlterSchemaAddPlan{Kind: schemautil.AlterSchemaAddStructSubField, StructPath: "items", Field: field}
+		require.NoError(t, prepareAlterSchemaAddStructSubField(rootStructSubFieldTestCollection(false), plan))
+		value, ok := common.GetStringValue(field.GetTypeParams(), common.MaxCapacityKey)
+		require.True(t, ok)
+		require.Equal(t, "16", value)
+	})
+
+	newNested := func() *schemapb.FieldSchema {
+		return &schemapb.FieldSchema{
+			Name: "items[nested]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Array, ElementNullable: true,
+			TypeSchema: &schemapb.TypeSchema{
+				Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+					Nullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "8"}},
+					Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+						Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int64},
+					}},
+				}},
+			},
+		}
+	}
+	t.Run("nested fills the type_schema root only", func(t *testing.T) {
+		field := newNested()
+		plan := &schemautil.AlterSchemaAddPlan{Kind: schemautil.AlterSchemaAddStructSubField, StructPath: "items", Field: field}
+		require.NoError(t, prepareAlterSchemaAddStructSubField(rootStructSubFieldTestCollection(false), plan))
+		value, ok := common.GetStringValue(field.GetTypeSchema().GetTypeParams(), common.MaxCapacityKey)
+		require.True(t, ok)
+		require.Equal(t, "16", value)
+		inner, _ := common.GetStringValue(field.GetTypeSchema().GetArrayElement().GetTypeParams(), common.MaxCapacityKey)
+		require.Equal(t, "8", inner)
+	})
+	t.Run("nested mirror must match", func(t *testing.T) {
+		field := newNested()
+		field.TypeParams = []*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "32"}}
+		plan := &schemautil.AlterSchemaAddPlan{Kind: schemautil.AlterSchemaAddStructSubField, StructPath: "items", Field: field}
+		require.ErrorContains(t, prepareAlterSchemaAddStructSubField(rootStructSubFieldTestCollection(false), plan), "but struct field items uses 16")
+	})
+}
+
+// An existing sub-field may carry enable_match or enable_analyzer: earlier
+// versions accepted them. Adding a sub-field to its struct must still succeed;
+// the params are only rejected on the added sub-field.
+func TestPrepareAlterSchemaAddStructSubFieldAllowsStoredTextMatch(t *testing.T) {
+	for _, key := range []string{common.EnableMatchKey, common.EnableAnalyzerKey} {
+		t.Run(key, func(t *testing.T) {
+			coll := rootStructSubFieldTestCollection(false)
+			coll.StructArrayFields[0].Fields[0].TypeParams = append(coll.StructArrayFields[0].Fields[0].TypeParams,
+				&commonpb.KeyValuePair{Key: key, Value: "true"})
+			newField := func(params ...*commonpb.KeyValuePair) *schemapb.FieldSchema {
+				return &schemapb.FieldSchema{
+					Name: "items[added]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ElementNullable: true,
+					TypeParams: append([]*commonpb.KeyValuePair{{Key: common.MaxCapacityKey, Value: "16"}}, params...),
+				}
+			}
+
+			plan := &schemautil.AlterSchemaAddPlan{Kind: schemautil.AlterSchemaAddStructSubField, StructPath: "items", Field: newField()}
+			require.NoError(t, prepareAlterSchemaAddStructSubField(coll, plan))
+
+			plan = &schemautil.AlterSchemaAddPlan{
+				Kind: schemautil.AlterSchemaAddStructSubField, StructPath: "items",
+				Field: newField(&commonpb.KeyValuePair{Key: key, Value: "true"}),
+			}
+			err := prepareAlterSchemaAddStructSubField(coll, plan)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.ErrorContains(t, err, key+" is not supported on struct sub-field")
 		})
 	}
 }
@@ -2338,24 +2438,36 @@ func TestAlterCollectionV2AckCallbackCascadesDroppedStructSubFieldIndex(t *testi
 	// inline index cascade, then capture the synthetic DropIndex callback.
 	initStreamingSystemAndCore(t)
 	registry.ResetRegistration()
+	published := false
 	var droppedIndexIDs []int64
 	registry.RegisterDropIndexV2AckCallback(func(ctx context.Context, result message.BroadcastResultDropIndexMessageV2) error {
+		require.True(t, published, "schema publication must precede index cleanup")
 		droppedIndexIDs = append(droppedIndexIDs, result.Message.Header().IndexIds...)
 		return nil
 	})
 
-	meta := &mockMetaTable{}
-	meta.AlterCollectionFunc = func(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {
+	// The schema callback reads the published version before preparing the
+	// target. Keep the real unloaded-collection preparation path from the fixture.
+	meta := &MetaTable{}
+	read := mockey.Mock((*MetaTable).GetCollectionByIDWithMaxTs).Return(&model.Collection{
+		CollectionID: 1, Name: "test", SchemaVersion: 1, UpdateTimestamp: 50,
+	}, nil).Build()
+	defer read.UnPatch()
+	publish := mockey.Mock((*MetaTable).AlterCollection).To(func(_ *MetaTable, _ context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {
+		require.EqualValues(t, 2, result.Message.MustBody().GetUpdates().GetSchema().GetVersion())
+		published = true
 		return nil
-	}
-	mixc := imocks.NewMixCoord(t)
-	mixc.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&indexpb.DescribeIndexResponse{
+	}).Build()
+	defer publish.UnPatch()
+	mixc := &imocks.MixCoord{}
+	describe := mockey.Mock((*imocks.MixCoord).DescribeIndex).Return(&indexpb.DescribeIndexResponse{
 		Status: merr.Success(),
 		IndexInfos: []*indexpb.IndexInfo{
 			{FieldID: 104, IndexID: 201, IndexName: "items_middle_idx"},
 			{FieldID: 200, IndexID: 202, IndexName: "other_idx"},
 		},
-	}, nil)
+	}, nil).Build()
+	defer describe.UnPatch()
 	core := newTestCore(withMeta(meta), withMixCoord(mixc), withBroker(newValidMockBroker()))
 	controlChannel := funcutil.GetControlChannel("test")
 	raw := message.NewAlterCollectionMessageBuilderV2().
@@ -2377,5 +2489,6 @@ func TestAlterCollectionV2AckCallbackCascadesDroppedStructSubFieldIndex(t *testi
 		Message: message.MustAsBroadcastAlterCollectionMessageV2(raw),
 		Results: map[string]*message.AppendResult{controlChannel: {TimeTick: 100}},
 	}))
+	require.Equal(t, 1, describe.Times())
 	require.Equal(t, []int64{201}, droppedIndexIDs)
 }

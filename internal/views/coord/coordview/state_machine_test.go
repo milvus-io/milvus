@@ -1673,3 +1673,40 @@ func TestPreparing_AllQNReadyThenSNReady(t *testing.T) {
 	assertNoPendingPersist(t, sm)
 	assertPendingSyncState(t, sm, qviews.QueryViewStateUp)
 }
+
+func TestControlUpgradeOfPublishedDownIsPersistedAndResent(t *testing.T) {
+	view := buildTestView(2)
+	view.Meta.State = viewpb.QueryViewState_QueryViewStateUp
+	sm := RecoverCoordQueryViewStateMachine(view)
+	sm.EnterDown()
+	sm.ConsumeFlush()
+	sm.EnterDownWithControl(&viewpb.QueryViewControl{PreemptServingLease: true})
+	flush := sm.ConsumeFlush()
+	require.True(t, flush.Persist.Meta.GetControl().GetPreemptServingLease())
+	require.Equal(t, viewpb.QueryViewState_QueryViewStateDown, flush.Persist.Meta.State)
+	require.Len(t, flush.Sync, 1)
+	require.True(t, flush.Sync[0].IntoProto().Meta.GetControl().GetPreemptServingLease())
+	recovered := RecoverCoordQueryViewStateMachine(flush.Persist)
+	require.True(t, recovered.ConsumeFlush().Sync[0].IntoProto().Meta.GetControl().GetPreemptServingLease())
+	sm.EnterDownWithControl(nil)
+	require.True(t, sm.View().Meta.GetControl().GetPreemptServingLease())
+	sm.EnterDownWithControl(&viewpb.QueryViewControl{PreemptServingLease: true})
+	require.True(t, sm.ConsumeFlush().Empty(), "replaying the same control is idempotent")
+}
+
+func TestControlledReleaseUpgradesAllDownViewsWithoutChangingHandoff(t *testing.T) {
+	older, newer := buildTestViewWithVersion(1, 1, 1, 1), buildTestViewWithVersion(1, 1, 1, 2)
+	older.Meta.State = viewpb.QueryViewState_QueryViewStateDown
+	newer.Meta.State = viewpb.QueryViewState_QueryViewStateUp
+	manager := newTestManager(t, newMockCatalog(), newMockSyncer(), older, newer)
+	require.NoError(t, manager.RequestRelease(t.Context()))
+	for _, sm := range manager.views {
+		require.False(t, sm.View().Meta.GetControl().GetPreemptServingLease())
+	}
+	require.NoError(t, manager.RequestReleaseWithControl(t.Context(), &viewpb.QueryViewControl{PreemptServingLease: true}))
+	manager.waitFlush()
+	for _, sm := range manager.views {
+		require.Equal(t, qviews.QueryViewStateDown, sm.State())
+		require.True(t, sm.View().Meta.GetControl().GetPreemptServingLease())
+	}
+}

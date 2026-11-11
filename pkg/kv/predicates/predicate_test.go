@@ -22,6 +22,21 @@ func (s *PredicateSuite) TestValueEqual() {
 	s.False(p.IsTrue(1))
 }
 
+func (s *PredicateSuite) TestKeyNotExist() {
+	p := KeyNotExist("key")
+	s.Equal("key", p.Key())
+	s.Nil(p.TargetValue())
+	s.Equal(PredTargetKeyExistence, p.Target())
+	s.Equal(PredTypeNotExist, p.Type())
+	s.NotEqual(PredTargetValue, p.Target())
+	s.NotEqual(PredTypeEqual, p.Type())
+	// IsTrue receives the value of a key that exists, so it never holds.
+	s.False(p.IsTrue("value"))
+	s.False(p.IsTrue([]byte("value")))
+	s.False(p.IsTrue([]byte{}))
+	s.False(p.IsTrue(nil))
+}
+
 func (s *PredicateSuite) TestPredicateValue() {
 	s.True(predicateValue(PredTypeEqual, 1, 1))
 	s.False(predicateValue(PredTypeEqual, 1, 2))

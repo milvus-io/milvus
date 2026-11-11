@@ -11,6 +11,7 @@
 
 #include <fmt/core.h>
 #include <gtest/gtest.h>
+#include <numeric>
 #include <stddef.h>
 #include <algorithm>
 #include <cstdint>
@@ -23,6 +24,7 @@
 #include <utility>
 #include <vector>
 
+#include "folly/coro/BlockingWait.h"
 #include "cachinglayer/Utils.h"
 #include "common/Array.h"
 #include "common/StructElementOffsets.h"
@@ -119,8 +121,10 @@ TEST_P(DefaultValueChunkTranslatorTest, TestInt64WithDefaultValue) {
         EXPECT_EQ(translator->cell_id_of(i), i);
     }
 
-    // Test estimated_byte_size_of_cell
-    auto [usage, peak_usage] = translator->estimated_byte_size_of_cell(0);
+    // Test estimated_loading_usage
+    auto [usage, private_overhead, shared_overhead] =
+        translator->estimated_loading_usage({0});
+    const auto peak_usage = private_overhead + shared_overhead;
     if (use_mmap) {
         EXPECT_GT(usage.file_bytes, 0);
     } else {
@@ -238,7 +242,17 @@ TEST_P(DefaultValueChunkTranslatorTest, StructOffsetsBackfillNullElements) {
         FieldDataInfo info(meta.get_id().get(), 3, getMmapDirPath());
         auto translator = MakeDefaultValueChunkTranslatorForTest(
             segment_id_, meta, info, GetParam(), true, offsets);
-        auto cells = translator->get_cells(nullptr, {0});
+        const auto usage = translator->estimated_loading_usage({0});
+        const int64_t expected_bytes =
+            9 * sizeof(int64_t) + 1 + 5 * sizeof(Array);
+        EXPECT_EQ(
+            usage.resident,
+            (GetParam() ? cachinglayer::ResourceUsage{0, expected_bytes}
+                        : cachinglayer::ResourceUsage{expected_bytes, 0}));
+        EXPECT_EQ(usage.private_overhead, cachinglayer::ResourceUsage{});
+        EXPECT_EQ(usage.shared_overhead, cachinglayer::ResourceUsage{});
+        auto cells = folly::coro::blockingWait(
+            translator->get_cells_async(nullptr, {0}));
         ASSERT_EQ(cells.size(), 1);
         auto* chunk = dynamic_cast<ColumnarArrayChunk*>(cells[0].second.get());
         ASSERT_NE(chunk, nullptr);
@@ -265,7 +279,12 @@ TEST_P(DefaultValueChunkTranslatorTest, StructOffsetsBackfillNullElements) {
     FieldDataInfo info(1403, 3, getMmapDirPath());
     auto translator = MakeDefaultValueChunkTranslatorForTest(
         segment_id_, vectors, info, GetParam(), true, offsets);
-    auto cells = translator->get_cells(nullptr, {0});
+    const auto usage = translator->estimated_loading_usage({0});
+    EXPECT_EQ(usage.resident,
+              (GetParam() ? cachinglayer::ResourceUsage{0, 78}
+                          : cachinglayer::ResourceUsage{78, 0}));
+    auto cells =
+        folly::coro::blockingWait(translator->get_cells_async(nullptr, {0}));
     ASSERT_EQ(cells.size(), 1);
     auto* chunk = dynamic_cast<VectorArrayChunk*>(cells[0].second.get());
     ASSERT_NE(chunk, nullptr);
@@ -302,7 +321,8 @@ TEST_P(DefaultValueChunkTranslatorTest, StructOffsetsBackfillNullElements) {
         FieldDataInfo null_info(meta.get_id().get(), 3, getMmapDirPath());
         auto null_translator = MakeDefaultValueChunkTranslatorForTest(
             segment_id_, meta, null_info, GetParam(), true, zero_offsets);
-        auto null_cells = null_translator->get_cells(nullptr, {0});
+        auto null_cells = folly::coro::blockingWait(
+            null_translator->get_cells_async(nullptr, {0}));
         ASSERT_EQ(null_cells.size(), 1);
         auto* null_chunk =
             dynamic_cast<ColumnarArrayChunk*>(null_cells[0].second.get());
@@ -328,7 +348,8 @@ TEST_P(DefaultValueChunkTranslatorTest, StructOffsetsBackfillNullElements) {
                                                GetParam(),
                                                true,
                                                zero_offsets);
-    auto null_cells = null_translator->get_cells(nullptr, {0});
+    auto null_cells = folly::coro::blockingWait(
+        null_translator->get_cells_async(nullptr, {0}));
     ASSERT_EQ(null_cells.size(), 1);
     auto* null_chunk =
         dynamic_cast<VectorArrayChunk*>(null_cells[0].second.get());
@@ -674,7 +695,8 @@ TEST_P(DefaultValueChunkTranslatorTest, TestGetMultipleCells) {
             cids.push_back(i);
         }
 
-        auto cells = translator->get_cells(nullptr, cids);
+        auto cells = folly::coro::blockingWait(
+            translator->get_cells_async(nullptr, cids));
         EXPECT_EQ(cells.size(), cids.size());
 
         for (size_t i = 0; i < cells.size(); ++i) {
@@ -799,7 +821,7 @@ TEST_P(DefaultValueChunkTranslatorTest, TestZeroRows) {
     EXPECT_EQ(translator->num_cells(), 0);
 }
 
-// Test estimated_byte_size_of_cell for different cell indices
+// Test estimated_loading_usage for different cell indices
 TEST_P(DefaultValueChunkTranslatorTest, TestEstimatedByteSizeMultipleCells) {
     bool use_mmap = GetParam();
     int64_t row_count = 5000000;  // Ensure multiple cells
@@ -817,18 +839,22 @@ TEST_P(DefaultValueChunkTranslatorTest, TestEstimatedByteSizeMultipleCells) {
     auto translator = MakeDefaultValueChunkTranslatorForTest(
         segment_id_, field_meta, field_data_info, use_mmap, true);
 
-    size_t num_cells = translator->num_cells();
-    if (num_cells > 1) {
-        for (size_t i = 0; i < num_cells; ++i) {
-            auto [usage, peak_usage] =
-                translator->estimated_byte_size_of_cell(i);
-            if (use_mmap) {
-                EXPECT_GT(usage.file_bytes, 0);
-            } else {
-                EXPECT_GT(usage.memory_bytes, 0);
-            }
-        }
-    }
+    const size_t num_cells = translator->num_cells();
+    ASSERT_GT(num_cells, 1);
+    std::vector<cachinglayer::cid_t> cids(num_cells);
+    std::iota(cids.begin(), cids.end(), 0);
+    const auto usage = translator->estimated_loading_usage(cids);
+    EXPECT_EQ(
+        usage.resident,
+        (use_mmap
+             ? cachinglayer::ResourceUsage{0, row_count * sizeof(int64_t)}
+             : cachinglayer::ResourceUsage{row_count * sizeof(int64_t), 0}));
+    EXPECT_EQ(usage.private_overhead, cachinglayer::ResourceUsage{});
+    EXPECT_EQ(usage.shared_overhead, cachinglayer::ResourceUsage{});
+    const auto empty = translator->estimated_loading_usage({});
+    EXPECT_EQ(empty.resident, cachinglayer::ResourceUsage{});
+    EXPECT_EQ(empty.private_overhead, cachinglayer::ResourceUsage{});
+    EXPECT_EQ(empty.shared_overhead, cachinglayer::ResourceUsage{});
 }
 
 // Parameterized test with both mmap modes
@@ -1056,7 +1082,8 @@ TEST_F(DefaultValueChunkTranslatorMmapTest, TestMmapMultipleCells) {
     for (size_t i = 0; i < std::min<size_t>(3, num_cells); ++i) {
         cids.push_back(i);
     }
-    auto cells = translator->get_cells(nullptr, cids);
+    auto cells =
+        folly::coro::blockingWait(translator->get_cells_async(nullptr, cids));
     ASSERT_EQ(cells.size(), cids.size());
 
     // Verify file was created (all cells share the same buffer/file)
@@ -1152,7 +1179,8 @@ TEST_P(DefaultValueChunkTranslatorTest, TestStringMultipleCellsWithTailBuffer) {
         cids.push_back(i);
     }
 
-    auto cells = translator->get_cells(nullptr, cids);
+    auto cells =
+        folly::coro::blockingWait(translator->get_cells_async(nullptr, cids));
     EXPECT_EQ(cells.size(), num_cells);
 
     int64_t total_rows = 0;

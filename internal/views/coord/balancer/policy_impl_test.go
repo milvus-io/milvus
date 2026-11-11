@@ -54,6 +54,7 @@ func TestDefaultBalancePolicy_ReleaseResidualShard(t *testing.T) {
 
 	require.Empty(t, plan.Prepares)
 	assert.Equal(t, []qviews.ShardID{shardID}, plan.Releases)
+	require.True(t, plan.ReleaseControls[shardID].GetPreemptServingLease())
 }
 
 func TestDefaultBalancePolicy_MandatoryInitialLoadAllocatesLargestRowCountFirst(t *testing.T) {
@@ -599,5 +600,21 @@ func TestDefaultBalancePolicy_LargerShardPrecedesSmallerShard(t *testing.T) {
 		require.Len(t, plan.Prepares, 2)
 		require.Equal(t, map[int64]int64{2000: 1}, assignmentsFromBuilder(plan.Prepares[large]))
 		require.Equal(t, map[int64]int64{1000: 2}, assignmentsFromBuilder(plan.Prepares[small]))
+	}
+}
+
+func TestReleaseControlDistinguishesCollectionAndReplicaRemoval(t *testing.T) {
+	for _, collectionReleased := range []bool{false, true} {
+		t.Run(map[bool]string{false: "replica removed", true: "collection released"}[collectionReleased], func(t *testing.T) {
+			shard := cacheShard(1, 10)
+			c := newTestCache(cfgFor(1, 11, nil, nil))    // Replica 10 is no longer desired.
+			c.PublishShard(shard, testShardStats(nil, 0)) // SN-only Down still needs cleanup.
+			if collectionReleased {
+				c.PublishLoadConfig(1, nil, 2)
+			}
+			plan := NewDefaultBalancePolicy().Plan(c, []qviews.ShardID{shard})
+			require.Contains(t, plan.Releases, shard)
+			require.Equal(t, collectionReleased, plan.ReleaseControls[shard].GetPreemptServingLease())
+		})
 	}
 }

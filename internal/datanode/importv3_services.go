@@ -51,7 +51,7 @@ func (node *DataNode) submitReshardTask(ctx context.Context, req *datapb.Reshard
 	if err != nil {
 		return merr.Status(storage.ToMilvusIoError(req.GetStorageConfig().GetBucketName(), err)), nil
 	}
-	pluginContext, err := hookutil.GetCPluginContext(req.GetPluginContext(), req.GetPlan().GetCollectionId())
+	pluginContext, err := hookutil.GetCollectionPluginContext(req.GetPlan().GetCollectionSchema().GetProperties(), req.GetPlan().GetCollectionId())
 	if err != nil {
 		return merr.Status(err), nil
 	}
@@ -66,7 +66,7 @@ func (node *DataNode) submitImportTaskV3(ctx context.Context, req *datapb.Import
 	if req == nil || req.GetRunId() <= 0 || req.GetStorageConfig() == nil || req.GetSlot() <= 0 || req.GetPlan() == nil {
 		return merr.Status(merr.WrapErrImportSysFailedMsg("invalid or incomplete ImportTaskV3 request")), nil
 	}
-	pluginContext, err := hookutil.GetCPluginContext(req.GetPluginContext(), req.GetPlan().GetCollectionId())
+	pluginContext, err := hookutil.GetCollectionPluginContext(req.GetPlan().GetCollectionSchema().GetProperties(), req.GetPlan().GetCollectionId())
 	if err != nil {
 		return merr.Status(err), nil
 	}

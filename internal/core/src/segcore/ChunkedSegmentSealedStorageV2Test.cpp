@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include <arrow/api.h>
+#include <arrow/c/abi.h>
 #include <arrow/array/array_base.h>
 #include <arrow/array/builder_binary.h>
 #include <arrow/array/builder_primitive.h>
@@ -51,6 +52,7 @@
 #include <utility>
 #include <vector>
 #include "segcore/default_fs.h"
+#include "segcore/retrieve_result_export_c.h"
 
 #include "NamedType/named_type_impl.hpp"
 #include "cachinglayer/Manager.h"
@@ -550,6 +552,19 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
             test_data_count = 100000;
             fixed_string_width = 32;
         }
+        if (test_name.find("DupPkAcrossChunk") != std::string::npos) {
+            // 1M rows -> several segcore chunks (storage v2: ~1MB parquet row
+            // groups, grouped into chunks by the translator). One PK is
+            // duplicated over the sorted row range [dup_begin, dup_end), which
+            // is wide enough to cover the start of the chunk the chunk-level
+            // binary search visits first and to extend into the chunk before.
+            chunk_num = 10;
+            test_data_count = 100000;
+            fixed_string_width = 32;
+            dup_pk_test = true;
+            dup_begin = 150000;
+            dup_end = 550000;
+        }
 
         schema_ = segcore::GenChunkedSegmentTestSchema(pk_is_string);
 
@@ -598,6 +613,14 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
             string_data.push_back(MakeStringValue(i));
         }
         std::sort(string_data.begin(), string_data.end());
+        int_pk_data.resize(RowCount());
+        std::iota(int_pk_data.begin(), int_pk_data.end(), 0);
+        if (dup_pk_test) {
+            for (int64_t i = dup_begin; i < dup_end; i++) {
+                string_data[i] = string_data[dup_begin];
+                int_pk_data[i] = int_pk_data[dup_begin];
+            }
+        }
 
         fields = {{"int64", schema_->get_field_id(FieldName("int64"))},
                   {"pk", schema_->get_field_id(FieldName("pk"))},
@@ -617,8 +640,12 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
                 if (arrow_schema->fields()[i]->type()->id() ==
                     arrow::Type::INT64) {
                     arrow::Int64Builder builder;
-                    auto status =
-                        builder.AppendValues(test_data.data(), test_data_count);
+                    const int64_t* src = test_data.data();
+                    if (dup_pk_test &&
+                        arrow_schema->fields()[i]->name() == "pk") {
+                        src = int_pk_data.data() + start_id;
+                    }
+                    auto status = builder.AppendValues(src, test_data_count);
                     EXPECT_TRUE(status.ok());
                     std::shared_ptr<arrow::Array> array;
                     status = builder.Finish(&array);
@@ -747,8 +774,12 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
     int test_data_count = 10000;
     size_t fixed_string_width = 0;
     bool test_data_created = false;
+    bool dup_pk_test = false;
+    int64_t dup_begin = 0;  // [dup_begin, dup_end): rows sharing one PK
+    int64_t dup_end = 0;
     std::unordered_map<std::string, FieldId> fields;
     std::vector<std::string> string_data;
+    std::vector<int64_t> int_pk_data;
 };
 
 INSTANTIATE_TEST_SUITE_P(TestChunkSegmentStorageV2,
@@ -771,12 +802,12 @@ class TestLazyManifest : public TestChunkSegmentStorageV2 {
 
 INSTANTIATE_TEST_SUITE_P(TestLazyManifest, TestLazyManifest, testing::Bool());
 
-IndexInventory::RootSlot
-LazyTestIndexSlot(const IndexInventory& inventory, FieldId field) {
+index::IndexPtr
+LazyTestIndexOwner(const IndexInventory& inventory, FieldId field) {
     for (const auto& entry : inventory.Entries(field)) {
         if (entry.kind == IndexKind::Vector) {
             auto copy = inventory;
-            return copy.Drop(entry.key);
+            return copy.Drop(entry.key)->Peek();
         }
     }
     return nullptr;
@@ -861,35 +892,32 @@ TEST_P(TestLazyManifest, LazyManifestPreparesInterimIndex) {
             ASSERT_TRUE(column->IsLazy());
             if (num_rows == 1) {
                 EXPECT_FALSE(column->IsMaterialized());
-                EXPECT_EQ((LazyTestIndexSlot(snapshot->runtime->indexes, vec) !=
-                           nullptr),
+                EXPECT_EQ((LazyTestIndexOwner(snapshot->runtime->indexes,
+                                              vec) != nullptr),
                           0);
                 EXPECT_FALSE(snapshot->binlog_index_bitset[vec.get() -
                                                            START_USER_FIELDID]);
                 continue;
             }
 
-            ASSERT_TRUE((LazyTestIndexSlot(snapshot->runtime->indexes, vec) !=
+            ASSERT_TRUE((LazyTestIndexOwner(snapshot->runtime->indexes, vec) !=
                          nullptr));
             EXPECT_TRUE(
                 snapshot->binlog_index_bitset[vec.get() - START_USER_FIELDID]);
-            auto slot = LazyTestIndexSlot(snapshot->runtime->indexes, vec);
+            auto slot = LazyTestIndexOwner(snapshot->runtime->indexes, vec);
             ASSERT_NE(slot, nullptr);
             if (warmup == CacheWarmupPolicy::CacheWarmupPolicy_Disable) {
                 EXPECT_FALSE(column->IsMaterialized());
-                EXPECT_FALSE(slot->IsCached(0));
             } else if (warmup == CacheWarmupPolicy::CacheWarmupPolicy_Sync) {
                 EXPECT_TRUE(column->IsMaterialized());
-                EXPECT_TRUE(slot->IsCached(0));
             }
 
-            auto first =
-                cachinglayer::SemiInlineGet(slot->PinCells(&op_ctx, {0}));
+            auto first = slot->CreateReader(&op_ctx);
+            EXPECT_EQ(first->Count(), num_rows);
             EXPECT_TRUE(column->IsMaterialized());
-            EXPECT_EQ(first->get_cell_of(0)->Count(), num_rows);
-            auto second =
-                cachinglayer::SemiInlineGet(slot->PinCells(&op_ctx, {0}));
-            EXPECT_EQ(first->get_cell_of(0), second->get_cell_of(0));
+            auto second = slot->CreateReader(&op_ctx);
+            EXPECT_NE(first.get(), second.get());
+            EXPECT_EQ(second->Count(), num_rows);
         }
     }
 }
@@ -1559,8 +1587,15 @@ TEST_P(TestLazyManifest,
     ASSERT_GT(column->num_chunks(), 0);
     EXPECT_FALSE(column->CellsLoaded(&first_offset, 1));
 
-    int64_t value = 0;
-    column->BulkPrimitiveValueAt(nullptr, &value, &first_offset, 1);
+    auto take = column->Take(
+        nullptr,
+        ChunkedColumnInterface::TakeOptions{
+            ChunkedColumnInterface::OffsetView::From(&first_offset, 1),
+            ChunkedColumnInterface::TargetType::Int64,
+            nullptr,
+            TakePinPolicy::Batch});
+    ASSERT_NE(take, nullptr);
+    EXPECT_TRUE(take->Get<int64_t>(0).is_valid);
     EXPECT_TRUE(column->CellsLoaded(&first_offset, 1));
 }
 
@@ -1648,6 +1683,32 @@ TEST_P(TestLazyManifest, LazyManifestRetrieveSizeAndValuesAreCorrect) {
         std::make_shared<expr::AlwaysTrueExpr>());
     plan->field_ids_ = {fields.at("string1")};
 
+    // Late materialization must use the same real column statistics, not a
+    // schema/default string length. This check must precede bulk field reads.
+    CSegmentInterface c_segment = manifest_segment.get();
+    int32_t segment_index = 0;
+    int64_t segment_offset = 0;
+    ArrowSchema out_schema{};
+    ArrowArray out_array{};
+    auto status = FillRetrieveFieldsOrdered(&c_segment,
+                                            1,
+                                            plan.get(),
+                                            &segment_index,
+                                            &segment_offset,
+                                            1,
+                                            eager_avg_size - 1,
+                                            &out_schema,
+                                            &out_array,
+                                            nullptr);
+    EXPECT_EQ(status.error_code, InvalidParameter);
+    EXPECT_EQ(out_schema.release, nullptr);
+    EXPECT_EQ(out_array.release, nullptr);
+    if (status.error_code != Success) {
+        free(const_cast<char*>(status.error_msg));
+    }
+    EXPECT_EQ(segment_impl->get_fields_avg_size(plan->field_ids_),
+              eager_avg_size);
+
     segment_interface->set_field_avg_size(
         fields.at("string1"), kNumRows, kNumRows);
     try {
@@ -1683,6 +1744,118 @@ TEST_P(TestLazyManifest, LazyManifestRetrieveSizeAndValuesAreCorrect) {
         if (expected_valid[i]) {
             EXPECT_EQ(values.data(i), expected[i]) << "row " << i;
         }
+    }
+}
+
+TEST_P(TestLazyManifest, UnsortedPkInPreservesQueryLoadPriority) {
+    auto policies =
+        cachinglayer::TieredStorageConfig::GetInstance().warmup_policies();
+    policies.scalarFieldCacheWarmupPolicy =
+        CacheWarmupPolicy::CacheWarmupPolicy_Disable;
+    CacheWarmupPolicyGuard warmup_guard(policies);
+    auto schema = std::make_shared<Schema>();
+    const auto type = GetParam() ? DataType::VARCHAR : DataType::INT64;
+    const auto pk = schema->AddDebugField("pk", type, false);
+    schema->AddField(FieldName("Timestamp"),
+                     TimestampFieldID,
+                     DataType::INT64,
+                     false,
+                     std::nullopt);
+    schema->set_primary_field_id(pk);
+    constexpr int64_t kRows = 64;
+    auto expected = DataGen(schema, kRows, 42);
+    std::vector<proto::plan::GenericValue> values(1);
+    IdArray ids;
+    if (GetParam()) {
+        auto value = expected.get_col<std::string>(pk)[0];
+        values[0].set_string_val(value);
+        ids.mutable_str_id()->add_data(value);
+    } else {
+        auto value = expected.get_col<int64_t>(pk)[0];
+        values[0].set_int64_val(value);
+        ids.mutable_int_id()->add_data(value);
+    }
+    // A fresh index and evicted PK column exercise the real translator load.
+    for (bool query : {false, true}) {
+        SCOPED_TRACE(query);
+        auto path = UniqueManifestTestPath("unsorted_pk_priority");
+        StorageV2TempDirGuard dir_guard(GetDefaultArrowFileSystem(), path);
+        milvus::test::V3SegmentTestData data(
+            schema,
+            1,
+            kRows,
+            1,
+            TestLocalPath,
+            path,
+            fmt::format("{},{}", pk.get(), TimestampFieldID.get()));
+        auto segment = CreateV3ManifestSegment(
+            data, 3290 + query + 10 * GetParam(), 0, schema);
+        auto* impl = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(impl, nullptr);
+        auto runtime = impl->TestCloneMutableRuntimeResourceState();
+        auto column = runtime->fields.at(pk);
+        column->ManualEvictCache();
+        bool loaded = false;
+        class CheckingPkTranslator
+            : public storagev2translator::PkIndexTranslator {
+         public:
+            CheckingPkTranslator(int64_t id,
+                                 std::shared_ptr<ChunkedColumnInterface> column,
+                                 DataType type,
+                                 bool query,
+                                 bool& loaded)
+                : PkIndexTranslator(id, std::move(column), type, false),
+                  query_(query),
+                  loaded_(loaded) {
+            }
+            std::vector<
+                std::pair<cachinglayer::cid_t,
+                          std::unique_ptr<storagev2translator::PkIndexCell>>>
+            get_cells(milvus::OpContext* ctx,
+                      const std::vector<cachinglayer::cid_t>& cids) override {
+                loaded_ = true;
+                if (query_) {
+                    EXPECT_NE(ctx, nullptr);
+                    if (ctx)
+                        EXPECT_EQ(ctx->runtime_load_priority,
+                                  proto::common::LoadPriority::HIGH);
+                } else {
+                    EXPECT_TRUE(ctx == nullptr ||
+                                !ctx->runtime_load_priority.has_value());
+                }
+                return PkIndexTranslator::get_cells(ctx, cids);
+            }
+
+         private:
+            bool query_;
+            bool& loaded_;
+        };
+        runtime->pk_index_slot =
+            cachinglayer::Manager::GetInstance()
+                .CreateCacheSlot<storagev2translator::PkIndexCell>(
+                    std::make_unique<CheckingPkTranslator>(
+                        impl->get_segment_id(), column, type, query, loaded));
+        EXPECT_FALSE(runtime->pk_index_slot->IsCached(0));
+        impl->TestPublishRuntimeResourceState(std::move(runtime));
+        if (query) {
+            auto plan = std::make_unique<query::RetrievePlan>(schema);
+            plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
+            plan->plan_node_->plannodes_ =
+                milvus::test::CreateRetrievePlanByExpr(
+                    std::make_shared<expr::TermFilterExpr>(
+                        expr::ColumnInfo(pk, type), values));
+            auto result = segment->Retrieve(nullptr,
+                                            plan.get(),
+                                            MAX_TIMESTAMP,
+                                            DEFAULT_MAX_OUTPUT_SIZE,
+                                            false);
+            EXPECT_GT(result->offset_size(), 0);
+        } else {
+            BitsetType bits(kRows, false);
+            static_cast<SegmentInternalInterface*>(impl)->search_ids(bits, ids);
+            EXPECT_TRUE(bits[0]);
+        }
+        EXPECT_TRUE(loaded);
     }
 }
 
@@ -2335,9 +2508,12 @@ TEST_P(TestLazyManifest, LazyManifestReopenRebindsGeneration) {
 
     auto read_value = [](const std::shared_ptr<ChunkedColumnInterface>& column,
                          int64_t offset) {
-        int64_t value = -1;
-        column->BulkPrimitiveValueAt(nullptr, &value, &offset, 1);
-        return value;
+        auto take = column->Take(
+            nullptr,
+            ChunkedColumnInterface::TakeOptions{
+                ChunkedColumnInterface::OffsetView::From(&offset, 1),
+                ChunkedColumnInterface::TargetType::Int64});
+        return *take->Get<int64_t>(0).value;
     };
     EXPECT_EQ(read_value(old_column, 40), 40);
 
@@ -2448,9 +2624,12 @@ TEST_P(TestLazyManifest, LazyManifestSchemaOnlyDropKeepsSurvivorTask) {
     // keeps the unchanged physical Task for surviving fields.
     auto read_int64 = [](const std::shared_ptr<ChunkedColumnInterface>& column,
                          int64_t offset) {
-        int64_t value = -1;
-        column->BulkPrimitiveValueAt(nullptr, &value, &offset, 1);
-        return value;
+        auto take = column->Take(
+            nullptr,
+            ChunkedColumnInterface::TakeOptions{
+                ChunkedColumnInterface::OffsetView::From(&offset, 1),
+                ChunkedColumnInterface::TargetType::Int64});
+        return *take->Get<int64_t>(0).value;
     };
 
     EXPECT_EQ(read_int64(new_survivor, kOffset), kOffset);
@@ -2647,11 +2826,16 @@ TEST(LazyManifest, ExternalMappedColumnsStayColdUntilRead) {
 
         ASSERT_TRUE(fs->Move(hidden_path, parquet_path).ok());
         restore_file.dismiss();
-        int64_t values[4];
-        number_column->BulkPrimitiveValueAt(
-            nullptr, values, offsets, 4, /*small_int_raw_type=*/false);
+        auto take = number_column->Take(
+            nullptr,
+            ChunkedColumnInterface::TakeOptions{
+                ChunkedColumnInterface::OffsetView::From(offsets, 4),
+                ChunkedColumnInterface::TargetType::Int64,
+                nullptr,
+                TakePinPolicy::Batch});
+        ASSERT_NE(take, nullptr);
         for (int i = 0; i < 4; ++i) {
-            EXPECT_EQ(values[i], offsets[i]);
+            EXPECT_EQ(*take->Get<int64_t>(i).value, offsets[i]);
         }
         EXPECT_TRUE(number_column->IsMaterialized());
         // Separate Tasks from the same physical CG materialize independently.
@@ -4946,4 +5130,177 @@ TEST(ChunkedSegmentSealedStorageV2, PackedFooterFieldIDReadErrorsKeepClass) {
                     .ok());
     ASSERT_TRUE(sink->Close().ok());
     EXPECT_EQ(FooterReadErrorCode(fs, path), ErrorCode::DataFormatBroken);
+}
+
+// Regression: a PK whose rows straddle a chunk boundary of a sorted sealed
+// segment must be found completely by pk == X (pk_range) and pk in [X]
+// (search_ids / TermExpr). pk_lower_bound's chunk-level binary search stops at
+// the first chunk whose [min,max] covers the pk, which is not necessarily the
+// earliest chunk containing it, so rows in the previous chunk are missed.
+TEST_P(TestChunkSegmentStorageV2, DupPkAcrossChunkBoundary) {
+    bool pk_is_string = GetParam();
+    ASSERT_TRUE(dup_pk_test);
+    const int64_t expected = dup_end - dup_begin;
+    auto pk_fid = fields.at("pk");
+    auto pk_type =
+        pk_is_string ? milvus::DataType::VARCHAR : milvus::DataType::INT64;
+
+    // actual chunk layout of the pk column
+    const int64_t num_chunk = segment->num_chunk(pk_fid);
+    std::string layout;
+    std::vector<int64_t> chunk_start(num_chunk + 1);
+    for (int64_t c = 0; c < num_chunk; c++) {
+        chunk_start[c] = segment->num_rows_until_chunk(pk_fid, c);
+        layout += fmt::format("[c{} start={} rows={}]",
+                              c,
+                              chunk_start[c],
+                              segment->chunk_size(pk_fid, c));
+    }
+    chunk_start[num_chunk] = RowCount();
+    std::cout << "pk column chunks=" << num_chunk << " layout=" << layout
+              << " dup_run=[" << dup_begin << "," << dup_end << ")"
+              << std::endl;
+    ASSERT_GE(num_chunk, 3) << layout;
+    // the chunk the chunk-level binary search visits first
+    const int64_t mid = (num_chunk - 1) / 2;
+    ASSERT_GT(mid, 0) << layout;
+    // the duplicated run must start before chunk `mid` and cover its first row,
+    // so pk_lower_bound stops at chunk `mid` although earlier chunks hold the PK
+    ASSERT_LT(dup_begin, chunk_start[mid]) << layout;
+    ASSERT_GT(dup_end, chunk_start[mid]) << layout;
+
+    PkType dup = pk_is_string ? PkType(string_data[dup_begin])
+                              : PkType(int_pk_data[dup_begin]);
+    const int64_t b = dup_end;  // first row after the run (distinct PKs)
+
+    // 1. pk == X  (segment-level pk_range, used by UnaryExpr on sorted pk)
+    {
+        BitsetType bitset(RowCount(), false);
+        BitsetTypeView view(bitset);
+        segment->pk_range(nullptr, proto::plan::OpType::Equal, dup, view);
+        EXPECT_EQ(expected, bitset.count())
+            << "pk_range(Equal) missed rows of a PK run straddling a chunk "
+               "boundary";
+    }
+    // 2. pk in [X]  (segment-level search_ids -> search_pks)
+    {
+        IdArray ids;
+        if (pk_is_string) {
+            ids.mutable_str_id()->add_data(std::get<std::string>(dup));
+        } else {
+            ids.mutable_int_id()->add_data(std::get<int64_t>(dup));
+        }
+        BitsetType bitset(RowCount(), false);
+        segment->search_ids(bitset, ids);
+        EXPECT_EQ(expected, bitset.count())
+            << "search_ids missed rows of a PK run straddling a chunk boundary";
+    }
+    // 3. pk in [X, <another pk in chunk 2>]: two-pointer path with a 2nd key
+    {
+        IdArray ids;
+        if (pk_is_string) {
+            ids.mutable_str_id()->add_data(std::get<std::string>(dup));
+            ids.mutable_str_id()->add_data(string_data[b + 10]);
+        } else {
+            ids.mutable_int_id()->add_data(std::get<int64_t>(dup));
+            ids.mutable_int_id()->add_data(int_pk_data[b + 10]);
+        }
+        BitsetType bitset(RowCount(), false);
+        segment->search_ids(bitset, ids);
+        EXPECT_EQ(expected + 1, bitset.count())
+            << "search_ids (2 keys) missed rows of a PK run straddling a chunk "
+               "boundary";
+    }
+    // 4. expression path pk == X
+    {
+        proto::plan::GenericValue v;
+        if (pk_is_string) {
+            v.set_string_val(std::get<std::string>(dup));
+        } else {
+            v.set_int64_val(std::get<int64_t>(dup));
+        }
+        auto expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(pk_fid, pk_type), proto::plan::OpType::Equal, v);
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        BitsetType final = query::ExecuteQueryExpr(
+            plan, segment.get(), RowCount(), MAX_TIMESTAMP);
+        EXPECT_EQ(expected, final.count())
+            << "UnaryRangeFilterExpr(pk == X) missed straddling rows";
+    }
+    // 5. expression path pk in [X]
+    {
+        std::vector<proto::plan::GenericValue> vals(1);
+        if (pk_is_string) {
+            vals[0].set_string_val(std::get<std::string>(dup));
+        } else {
+            vals[0].set_int64_val(std::get<int64_t>(dup));
+        }
+        auto expr = std::make_shared<expr::TermFilterExpr>(
+            expr::ColumnInfo(pk_fid, pk_type), vals);
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        BitsetType final = query::ExecuteQueryExpr(
+            plan, segment.get(), RowCount(), MAX_TIMESTAMP);
+        EXPECT_EQ(expected, final.count())
+            << "TermFilterExpr(pk in [X]) missed straddling rows";
+    }
+    // control: a PK fully inside chunk 2 is found
+    {
+        PkType single = pk_is_string ? PkType(string_data[b + 10])
+                                     : PkType(int_pk_data[b + 10]);
+        BitsetType bitset(RowCount(), false);
+        BitsetTypeView view(bitset);
+        segment->pk_range(nullptr, proto::plan::OpType::Equal, single, view);
+        EXPECT_EQ(1, bitset.count());
+    }
+}
+
+// Same layout as DupPkAcrossChunkBoundary; checks the four range branches of
+// pk_range on a PK whose duplicates straddle a chunk boundary.
+//   >= X : rows [dup_begin, N)      > X : rows [dup_end, N)
+//   <= X : rows [0, dup_end)        < X : rows [0, dup_begin)
+TEST_P(TestChunkSegmentStorageV2, DupPkAcrossChunkBoundaryRangeOps) {
+    bool pk_is_string = GetParam();
+    ASSERT_TRUE(dup_pk_test);
+    auto pk_fid = fields.at("pk");
+    auto pk_type =
+        pk_is_string ? milvus::DataType::VARCHAR : milvus::DataType::INT64;
+    const int64_t n = RowCount();
+    PkType dup = pk_is_string ? PkType(string_data[dup_begin])
+                              : PkType(int_pk_data[dup_begin]);
+    proto::plan::GenericValue v;
+    if (pk_is_string) {
+        v.set_string_val(std::get<std::string>(dup));
+    } else {
+        v.set_int64_val(std::get<int64_t>(dup));
+    }
+    struct Case {
+        proto::plan::OpType op;
+        int64_t expected;
+        const char* name;
+    };
+    const Case cases[] = {
+        {proto::plan::OpType::GreaterEqual, n - dup_begin, ">="},
+        {proto::plan::OpType::GreaterThan, n - dup_end, ">"},
+        {proto::plan::OpType::LessEqual, dup_end, "<="},
+        {proto::plan::OpType::LessThan, dup_begin, "<"},
+    };
+    for (const auto& c : cases) {
+        BitsetType bitset(n, false);
+        BitsetTypeView view(bitset);
+        segment->pk_range(nullptr, c.op, dup, view);
+        std::cout << "pk_range(" << c.name << ") count=" << bitset.count()
+                  << " expected=" << c.expected << std::endl;
+        EXPECT_EQ(c.expected, bitset.count()) << "pk_range " << c.name;
+
+        auto expr = std::make_shared<expr::UnaryRangeFilterExpr>(
+            expr::ColumnInfo(pk_fid, pk_type), c.op, v);
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+        BitsetType final =
+            query::ExecuteQueryExpr(plan, segment.get(), n, MAX_TIMESTAMP);
+        EXPECT_EQ(c.expected, final.count())
+            << "UnaryRangeFilterExpr(pk " << c.name << " X)";
+    }
 }

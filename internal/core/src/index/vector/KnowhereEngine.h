@@ -21,6 +21,7 @@
 #include <string>
 #include <vector>
 
+#include "cachinglayer/Utils.h"
 #include "common/Types.h"
 #include "index/contracts/query/IVectorReader.h"
 #include "index/vector/VectorTypeUtils.h"
@@ -94,6 +95,12 @@ class KnowhereEngine {
     std::shared_ptr<const void> backing_owner;
     knowhere::Index<knowhere::IndexNode> native_index;
 
+    // Native owned memory/file accounting is unavailable; zero is a sentinel.
+    cachinglayer::ResourceUsage
+    CellByteSize() const {
+        return {};
+    }
+
     // --- self-description ---------------------------------------------------
 
     IndexType
@@ -132,10 +139,12 @@ class KnowhereEngine {
     }
 
     // Embedding-list offsets are shared with readers through an immutable
-    // generation.
+    // generation. They also mark an index of only empty lists that an older
+    // build persisted for an element-level metric, so they do not require
+    // embedding-list mode here.
     bool
     IsEmptyEmbListIndex() const {
-        return embedding_list_ && !EmptyEmbListOffsets().empty();
+        return !EmptyEmbListOffsets().empty();
     }
 
     void

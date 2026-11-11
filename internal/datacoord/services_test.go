@@ -27,6 +27,16 @@ import (
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/datacoord/bulkimport"
+	"github.com/milvus-io/milvus/internal/datacoord/copysegment"
+	"github.com/milvus-io/milvus/internal/datacoord/ddl"
+	"github.com/milvus-io/milvus/internal/datacoord/externalrefresh"
+	"github.com/milvus-io/milvus/internal/datacoord/gc"
+	"github.com/milvus-io/milvus/internal/datacoord/index"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
+	"github.com/milvus-io/milvus/internal/datacoord/partitionstats"
+	"github.com/milvus-io/milvus/internal/datacoord/segment"
+	"github.com/milvus-io/milvus/internal/datacoord/snapshot"
 	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -52,6 +62,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/kv"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -74,6 +85,20 @@ type ServerSuite struct {
 
 	testServer   *Server
 	mockMixCoord *mocks2.MixCoord
+}
+
+func TestPackQueryViewCollectionIndexInfosUsesDeterministicOrder(t *testing.T) {
+	indexes := []*model.Index{
+		{CollectionID: 1, FieldID: 103, IndexID: 30, IndexName: "third"},
+		{CollectionID: 1, FieldID: 101, IndexID: 10, IndexName: "first"},
+		{CollectionID: 1, FieldID: 102, IndexID: 20, IndexName: "second"},
+	}
+
+	infos := packQueryViewCollectionIndexInfos(indexes)
+
+	require.Equal(t, []int64{10, 20, 30}, lo.Map(infos, func(info *indexpb.IndexInfo, _ int) int64 {
+		return info.GetIndexID()
+	}))
 }
 
 func (s *ServerSuite) SetupSuite() {
@@ -105,19 +130,8 @@ func TestServerSuite(t *testing.T) {
 }
 
 func (s *ServerSuite) TestGetFlushState_ByFlushTs() {
-	s.mockMixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-		if req.CollectionID == 0 {
-			return &milvuspb.DescribeCollectionResponse{
-				Status:              merr.Success(),
-				CollectionID:        0,
-				VirtualChannelNames: []string{"ch1"},
-			}, nil
-		}
-		return &milvuspb.DescribeCollectionResponse{
-			Status:       merr.Success(),
-			CollectionID: 1,
-		}, nil
-	})
+	s.testServer.meta.AddCollection(&meta.CollectionInfo{ID: 0, VChannelNames: []string{"ch1"}})
+	s.testServer.meta.AddCollection(&meta.CollectionInfo{ID: 1})
 	tests := []struct {
 		description string
 		inTs        Timestamp
@@ -154,11 +168,7 @@ func (s *ServerSuite) TestGetFlushState_ByFlushTs() {
 }
 
 func (s *ServerSuite) TestGetFlushState_ByFlushTsMissingCheckpoint() {
-	s.mockMixCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		Status:              merr.Success(),
-		CollectionID:        0,
-		VirtualChannelNames: []string{"missing-cp-channel"},
-	}, nil)
+	s.testServer.meta.AddCollection(&meta.CollectionInfo{ID: 0, VChannelNames: []string{"missing-cp-channel"}})
 
 	resp, err := s.testServer.GetFlushState(context.TODO(), &datapb.GetFlushStateRequest{FlushTs: 13})
 	s.NoError(err)
@@ -184,7 +194,7 @@ func (s *ServerSuite) TestGetFlushState_BySegment() {
 
 	for _, test := range tests {
 		s.Run(test.description, func() {
-			err := s.testServer.meta.AddSegment(context.TODO(), &SegmentInfo{
+			err := s.testServer.meta.AddSegment(context.TODO(), &meta.SegmentInfo{
 				SegmentInfo: &datapb.SegmentInfo{
 					ID:    test.segID,
 					State: test.state,
@@ -231,7 +241,7 @@ func (s *ServerSuite) TestSaveBinlogPath_ChannelNotMatch() {
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_SaveUnhealthySegment() {
-	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
+	s.testServer.meta.AddCollection(&meta.CollectionInfo{ID: 0})
 
 	segments := map[int64]commonpb.SegmentState{
 		1: commonpb.SegmentState_NotExist,
@@ -243,7 +253,7 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveUnhealthySegment() {
 			InsertChannel: "ch1",
 			State:         state,
 		}
-		err := s.testServer.meta.AddSegment(context.TODO(), NewSegmentInfo(info))
+		err := s.testServer.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(info))
 		s.Require().NoError(err)
 	}
 
@@ -276,7 +286,7 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveUnhealthySegment() {
 
 func (s *ServerSuite) TestSaveBinlogPathRetriesDataViewPublication() {
 	ctx := context.Background()
-	segment := NewSegmentInfo(&datapb.SegmentInfo{
+	seg := meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID:             10,
 		CollectionID:   100,
 		PartitionID:    10,
@@ -286,14 +296,14 @@ func (s *ServerSuite) TestSaveBinlogPathRetriesDataViewPublication() {
 		NumOfRows:      50,
 		StorageVersion: storage.StorageV3,
 	})
-	require.NoError(s.T(), s.testServer.meta.AddSegment(ctx, segment))
+	require.NoError(s.T(), s.testServer.meta.AddSegment(ctx, seg))
 
 	// Flush always takes the atomic-publish path (no sort-compaction gating
 	// since the M1 fix): with the default EnableSortCompaction=true the same
 	// txn also marks the segment invisible, yet the DataView snapshot must
 	// still be published (streaming_version advances unconditionally). This
 	// test therefore runs under the default config.
-	catalog := datacoordkv.NewCatalog(NewMetaMemoryKV(), "", "")
+	catalog := datacoordkv.NewCatalog(meta.NewMetaMemoryKV(), "", "")
 	manager := dataview.NewManager(catalog, nil)
 	_, err := manager.OnCreateCollection(ctx, dataview.CreateCollectionDataViewEvent{
 		CollectionID: 100,
@@ -354,7 +364,7 @@ func (s *ServerSuite) TestSaveBinlogPathRetriesDataViewPublication() {
 	partition := ref.DataView().GetShards()[0].GetPartitions()[0]
 	require.Equal(s.T(), int64(10), partition.GetPartitionId())
 	require.Equal(s.T(), []int64{10}, partition.GetSegmentIds())
-	// The DataView stats RowNum must match the SegmentInfo row count this txn
+	// The DataView stats RowNum must match the meta.SegmentInfo row count this txn
 	// commits: the meta value was 50 (stale growing-side count), the
 	// checkpoint commits 100, so Stats must surface 100 - not the stale
 	// pre-txn meta value.
@@ -379,7 +389,7 @@ func (s *ServerSuite) TestSaveBinlogPathRetriesDataViewPublication() {
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_StorageVersionImmutable() {
-	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
+	s.testServer.meta.AddCollection(&meta.CollectionInfo{ID: 0})
 	info := &datapb.SegmentInfo{
 		ID:             10,
 		InsertChannel:  "ch1",
@@ -387,7 +397,7 @@ func (s *ServerSuite) TestSaveBinlogPath_StorageVersionImmutable() {
 		Level:          datapb.SegmentLevel_L1,
 		StorageVersion: storage.StorageV2,
 	}
-	err := s.testServer.meta.AddSegment(context.TODO(), NewSegmentInfo(info))
+	err := s.testServer.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(info))
 	s.Require().NoError(err)
 
 	resp, err := s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
@@ -410,8 +420,8 @@ func (s *ServerSuite) TestSaveBinlogPath_StorageVersionImmutable() {
 	})
 	s.NoError(err)
 	s.ErrorIs(merr.Error(resp), merr.ErrDataIntegrity)
-	segment := s.testServer.meta.GetSegment(context.TODO(), 10)
-	s.EqualValues(storage.StorageV2, segment.GetStorageVersion())
+	seg := s.testServer.meta.GetSegment(context.TODO(), 10)
+	s.EqualValues(storage.StorageV2, seg.GetStorageVersion())
 
 	info = &datapb.SegmentInfo{
 		ID:             11,
@@ -420,7 +430,7 @@ func (s *ServerSuite) TestSaveBinlogPath_StorageVersionImmutable() {
 		Level:          datapb.SegmentLevel_L1,
 		StorageVersion: storage.StorageV1,
 	}
-	err = s.testServer.meta.AddSegment(context.TODO(), NewSegmentInfo(info))
+	err = s.testServer.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(info))
 	s.Require().NoError(err)
 
 	resp, err = s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
@@ -433,12 +443,12 @@ func (s *ServerSuite) TestSaveBinlogPath_StorageVersionImmutable() {
 	})
 	s.NoError(err)
 	s.ErrorIs(merr.Error(resp), merr.ErrDataIntegrity)
-	segment = s.testServer.meta.GetSegment(context.TODO(), 11)
-	s.EqualValues(storage.StorageV1, segment.GetStorageVersion())
+	seg = s.testServer.meta.GetSegment(context.TODO(), 11)
+	s.EqualValues(storage.StorageV1, seg.GetStorageVersion())
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
-	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
+	s.testServer.meta.AddCollection(&meta.CollectionInfo{ID: 0, VChannelNames: []string{"ch1"}})
 
 	segments := map[int64]commonpb.SegmentState{
 		0: commonpb.SegmentState_Flushed,
@@ -451,13 +461,14 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 			numOfRows = 0
 		}
 		info := &datapb.SegmentInfo{
-			ID:            segID,
-			InsertChannel: "ch1",
-			State:         state,
-			Level:         datapb.SegmentLevel_L1,
-			NumOfRows:     numOfRows,
+			TransformStartAfterTimetick: 10,
+			ID:                          segID,
+			InsertChannel:               "ch1",
+			State:                       state,
+			Level:                       datapb.SegmentLevel_L1,
+			NumOfRows:                   numOfRows,
 		}
-		err := s.testServer.meta.AddSegment(context.TODO(), NewSegmentInfo(info))
+		err := s.testServer.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(info))
 		s.Require().NoError(err)
 	}
 
@@ -482,6 +493,7 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 		s.Run(test.description, func() {
 			ctx := context.Background()
 			resp, err := s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+				GrowingTransformStartAfterTimetick: 10,
 				Base: &commonpb.MsgBase{
 					Timestamp: uint64(time.Now().Unix()),
 				},
@@ -493,19 +505,20 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 			s.NoError(err)
 			s.EqualValues(resp.ErrorCode, commonpb.ErrorCode_Success)
 
-			segment := s.testServer.meta.GetSegment(context.TODO(), test.inSegID)
-			s.NotNil(segment)
-			s.EqualValues(0, len(segment.GetBinlogs()))
-			s.EqualValues(segment.NumOfRows, test.numOfRows)
+			seg := s.testServer.meta.GetSegment(context.TODO(), test.inSegID)
+			s.NotNil(seg)
+			s.EqualValues(0, len(seg.GetBinlogs()))
+			s.EqualValues(seg.NumOfRows, test.numOfRows)
 
-			s.Equal(test.expectedState, segment.GetState())
+			s.Equal(test.expectedState, seg.GetState())
 		})
 	}
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_TextRequiresStorageV3Manifest() {
-	s.testServer.meta.AddCollection(&collectionInfo{
-		ID: 0,
+	s.testServer.meta.AddCollection(&meta.CollectionInfo{
+		ID:            0,
+		VChannelNames: []string{"ch1"},
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
@@ -515,30 +528,32 @@ func (s *ServerSuite) TestSaveBinlogPath_TextRequiresStorageV3Manifest() {
 	})
 
 	addSegment := func(segmentID int64, state commonpb.SegmentState, storageVersion int64) {
-		err := s.testServer.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
-			ID:             segmentID,
-			CollectionID:   0,
-			PartitionID:    1,
-			InsertChannel:  "ch1",
-			State:          state,
-			Level:          datapb.SegmentLevel_L1,
-			NumOfRows:      1,
-			StorageVersion: storageVersion,
+		err := s.testServer.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(&datapb.SegmentInfo{
+			TransformStartAfterTimetick: 10,
+			ID:                          segmentID,
+			CollectionID:                0,
+			PartitionID:                 1,
+			InsertChannel:               "ch1",
+			State:                       state,
+			Level:                       datapb.SegmentLevel_L1,
+			NumOfRows:                   1,
+			StorageVersion:              storageVersion,
 		}))
 		s.Require().NoError(err)
 	}
 
 	saveBinlog := func(segmentID int64, flushed bool, storageVersion int64, binlogs []*datapb.FieldBinlog) *commonpb.Status {
 		resp, err := s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
-			Base:              &commonpb.MsgBase{Timestamp: uint64(time.Now().Unix())},
-			SegmentID:         segmentID,
-			CollectionID:      0,
-			PartitionID:       1,
-			Channel:           "ch1",
-			SegLevel:          datapb.SegmentLevel_L1,
-			Flushed:           flushed,
-			StorageVersion:    storageVersion,
-			Field2BinlogPaths: binlogs,
+			GrowingTransformStartAfterTimetick: 10,
+			Base:                               &commonpb.MsgBase{Timestamp: uint64(time.Now().Unix())},
+			SegmentID:                          segmentID,
+			CollectionID:                       0,
+			PartitionID:                        1,
+			Channel:                            "ch1",
+			SegLevel:                           datapb.SegmentLevel_L1,
+			Flushed:                            flushed,
+			StorageVersion:                     storageVersion,
+			Field2BinlogPaths:                  binlogs,
 		})
 		s.NoError(err)
 		return resp
@@ -581,18 +596,18 @@ func (s *ServerSuite) TestSaveBinlogPath_TextRequiresStorageV3Manifest() {
 
 func (s *ServerSuite) TestSaveBinlogPath_EmptyTextSegmentRetirement() {
 	ctx := context.Background()
-	s.testServer.meta.AddCollection(&collectionInfo{
+	s.testServer.meta.AddCollection(&meta.CollectionInfo{
 		ID: 100,
 		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 			{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 			{FieldID: 101, DataType: schemapb.DataType_Text},
 		}},
 	})
-	s.Require().NoError(s.testServer.meta.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+	s.Require().NoError(s.testServer.meta.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID: 10, CollectionID: 100, PartitionID: 1, InsertChannel: "ch1",
 		State: commonpb.SegmentState_Growing, Level: datapb.SegmentLevel_L1, StorageVersion: storage.StorageV3,
 	})))
-	manager := dataview.NewManager(datacoordkv.NewCatalog(NewMetaMemoryKV(), "", ""), nil)
+	manager := dataview.NewManager(datacoordkv.NewCatalog(meta.NewMetaMemoryKV(), "", ""), nil)
 	_, err := manager.OnCreateCollection(ctx, dataview.CreateCollectionDataViewEvent{
 		CollectionID: 100, VChannels: []string{"ch1"},
 	})
@@ -627,10 +642,10 @@ func (s *ServerSuite) TestSaveBinlogPath_EmptyTextSegmentRetirement() {
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_L0Segment() {
-	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
+	s.testServer.meta.AddCollection(&meta.CollectionInfo{ID: 0})
 
-	segment := s.testServer.meta.GetHealthySegment(context.TODO(), 1)
-	s.Require().Nil(segment)
+	seg := s.testServer.meta.GetHealthySegment(context.TODO(), 1)
+	s.Require().Nil(seg)
 	ctx := context.Background()
 	startPosition := &msgpb.MsgPosition{ChannelName: "ch1", Timestamp: 100}
 	resp, err := s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
@@ -677,21 +692,21 @@ func (s *ServerSuite) TestSaveBinlogPath_L0Segment() {
 	s.NoError(err)
 	s.EqualValues(resp.ErrorCode, commonpb.ErrorCode_Success)
 
-	segment = s.testServer.meta.GetHealthySegment(context.TODO(), 1)
-	s.NotNil(segment)
-	s.EqualValues(datapb.SegmentLevel_L0, segment.GetLevel())
-	s.Equal(startPosition, segment.GetStartPosition())
+	seg = s.testServer.meta.GetHealthySegment(context.TODO(), 1)
+	s.NotNil(seg)
+	s.EqualValues(datapb.SegmentLevel_L0, seg.GetLevel())
+	s.Equal(startPosition, seg.GetStartPosition())
 
 	// Check the catalog too: keeping the boundary only in memory would lose
 	// the L0 delete retention boundary after coordinator recovery.
-	persisted, err := s.testServer.meta.catalog.ListSegments(ctx, 0)
+	persisted, err := s.testServer.meta.Catalog.ListSegments(ctx, 0)
 	s.Require().NoError(err)
 	s.Require().Len(persisted, 1)
 	s.Equal(startPosition, persisted[0].GetStartPosition())
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
-	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
+	s.testServer.meta.AddCollection(&meta.CollectionInfo{ID: 0})
 
 	segments := map[int64]int64{
 		0: 0,
@@ -706,7 +721,7 @@ func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
 			InsertChannel: "ch1",
 			State:         commonpb.SegmentState_Growing,
 		}
-		err := s.testServer.meta.AddSegment(context.TODO(), NewSegmentInfo(info))
+		err := s.testServer.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(info))
 		s.Require().NoError(err)
 	}
 
@@ -766,9 +781,9 @@ func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
 	s.NoError(err)
 	s.EqualValues(resp.ErrorCode, commonpb.ErrorCode_Success)
 
-	segment := s.testServer.meta.GetHealthySegment(context.TODO(), 1)
-	s.NotNil(segment)
-	binlogs := segment.GetBinlogs()
+	seg := s.testServer.meta.GetHealthySegment(context.TODO(), 1)
+	s.NotNil(seg)
+	binlogs := seg.GetBinlogs()
 	s.EqualValues(1, len(binlogs))
 	fieldBinlogs := binlogs[0]
 	s.NotNil(fieldBinlogs)
@@ -779,9 +794,9 @@ func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
 	s.EqualValues("", fieldBinlogs.GetBinlogs()[1].GetLogPath())
 	s.EqualValues(int64(2), fieldBinlogs.GetBinlogs()[1].GetLogID())
 
-	s.EqualValues(segment.DmlPosition.ChannelName, "ch1")
-	s.EqualValues(segment.DmlPosition.MsgID, []byte{1, 2, 3})
-	s.EqualValues(segment.NumOfRows, 10)
+	s.EqualValues(seg.DmlPosition.ChannelName, "ch1")
+	s.EqualValues(seg.DmlPosition.MsgID, []byte{1, 2, 3})
+	s.EqualValues(seg.NumOfRows, 10)
 
 	resp, err = s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
 		Base: &commonpb.MsgBase{
@@ -797,9 +812,9 @@ func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
 	})
 	s.NoError(err)
 	s.EqualValues(resp.ErrorCode, commonpb.ErrorCode_Success)
-	segment = s.testServer.meta.GetSegment(context.TODO(), 2)
-	s.NotNil(segment)
-	s.Equal(commonpb.SegmentState_Dropped, segment.GetState())
+	seg = s.testServer.meta.GetSegment(context.TODO(), 2)
+	s.NotNil(seg)
+	s.Equal(commonpb.SegmentState_Dropped, seg.GetState())
 
 	resp, err = s.testServer.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
 		Base: &commonpb.MsgBase{
@@ -856,9 +871,9 @@ func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
 	s.NoError(err)
 	s.EqualValues(resp.ErrorCode, commonpb.ErrorCode_Success)
 
-	segment = s.testServer.meta.GetHealthySegment(context.TODO(), 3)
-	s.NotNil(segment)
-	binlogs = segment.GetBinlogs()
+	seg = s.testServer.meta.GetHealthySegment(context.TODO(), 3)
+	s.NotNil(seg)
+	binlogs = seg.GetBinlogs()
 	s.EqualValues(1, len(binlogs))
 	fieldBinlogs = binlogs[0]
 	s.NotNil(fieldBinlogs)
@@ -932,9 +947,9 @@ func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
 	s.NoError(err)
 	s.EqualValues(resp.ErrorCode, commonpb.ErrorCode_Success)
 
-	segment = s.testServer.meta.GetHealthySegment(context.TODO(), 3)
-	s.NotNil(segment)
-	binlogs = segment.GetBinlogs()
+	seg = s.testServer.meta.GetHealthySegment(context.TODO(), 3)
+	s.NotNil(seg)
+	binlogs = seg.GetBinlogs()
 	s.EqualValues(1, len(binlogs))
 	fieldBinlogs = binlogs[0]
 	s.NotNil(fieldBinlogs)
@@ -974,9 +989,9 @@ func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
 	s.NoError(err)
 	s.EqualValues(resp.ErrorCode, commonpb.ErrorCode_Success)
 
-	segment = s.testServer.meta.GetHealthySegment(context.TODO(), 3)
-	s.NotNil(segment)
-	binlogs = segment.GetBinlogs()
+	seg = s.testServer.meta.GetHealthySegment(context.TODO(), 3)
+	s.NotNil(seg)
+	binlogs = seg.GetBinlogs()
 	s.EqualValues(1, len(binlogs))
 	fieldBinlogs = binlogs[0]
 	s.NotNil(fieldBinlogs)
@@ -996,23 +1011,25 @@ func (s *ServerSuite) TestSaveBinlogPath_FlushedSegmentStaysInvisibleBeforeSortC
 		paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
 	})
 
-	s.testServer.meta.AddCollection(&collectionInfo{ID: 100})
-	segment := NewSegmentInfo(&datapb.SegmentInfo{
-		ID:            10,
-		CollectionID:  100,
-		PartitionID:   20,
-		InsertChannel: "ch-1",
-		State:         commonpb.SegmentState_Growing,
-		Level:         datapb.SegmentLevel_L1,
+	s.testServer.meta.AddCollection(&meta.CollectionInfo{ID: 100, VChannelNames: []string{"ch-1"}})
+	seg := meta.NewSegmentInfo(&datapb.SegmentInfo{
+		TransformStartAfterTimetick: 10,
+		ID:                          10,
+		CollectionID:                100,
+		PartitionID:                 20,
+		InsertChannel:               "ch-1",
+		State:                       commonpb.SegmentState_Growing,
+		Level:                       datapb.SegmentLevel_L1,
 	})
-	s.Require().NoError(s.testServer.meta.AddSegment(context.Background(), segment))
+	s.Require().NoError(s.testServer.meta.AddSegment(context.Background(), seg))
 
 	status, err := s.testServer.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
-		SegmentID:    10,
-		CollectionID: 100,
-		PartitionID:  20,
-		Channel:      "ch-1",
-		SegLevel:     datapb.SegmentLevel_L1,
+		GrowingTransformStartAfterTimetick: 10,
+		SegmentID:                          10,
+		CollectionID:                       100,
+		PartitionID:                        20,
+		Channel:                            "ch-1",
+		SegLevel:                           datapb.SegmentLevel_L1,
 		Field2BinlogPaths: []*datapb.FieldBinlog{{
 			FieldID: 1,
 			Binlogs: []*datapb.Binlog{{
@@ -1050,8 +1067,8 @@ func (s *ServerSuite) TestBootstrapDataViews() {
 	ctx := context.Background()
 	// a Collection that predates DataView management: no persisted snapshot,
 	// the bootstrap seeds the initial (1,0,0) from SegmentMeta
-	s.testServer.meta.AddCollection(&collectionInfo{ID: 100, VChannelNames: []string{"ch-1"}})
-	s.Require().NoError(s.testServer.meta.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+	s.testServer.meta.AddCollection(&meta.CollectionInfo{ID: 100, VChannelNames: []string{"ch-1"}})
+	s.Require().NoError(s.testServer.meta.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID:            1,
 		CollectionID:  100,
 		PartitionID:   10,
@@ -1061,7 +1078,7 @@ func (s *ServerSuite) TestBootstrapDataViews() {
 		Binlogs:       []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
 	})))
 	// a growing Segment and a Flushed L0 Segment are not loadable seeds
-	s.Require().NoError(s.testServer.meta.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+	s.Require().NoError(s.testServer.meta.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID:            2,
 		CollectionID:  100,
 		PartitionID:   10,
@@ -1069,7 +1086,7 @@ func (s *ServerSuite) TestBootstrapDataViews() {
 		State:         commonpb.SegmentState_Growing,
 		Level:         datapb.SegmentLevel_L1,
 	})))
-	s.Require().NoError(s.testServer.meta.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+	s.Require().NoError(s.testServer.meta.AddSegment(ctx, meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID:            3,
 		CollectionID:  100,
 		PartitionID:   10,
@@ -1084,17 +1101,17 @@ func (s *ServerSuite) TestBootstrapDataViews() {
 	// The declared vchannel skeleton (collectionVChannels) seeds empty shards
 	// for channels without loadable segments.
 	recoverDataViews := func() {
-		catalog := datacoordkv.NewCatalog(NewMetaMemoryKV(), "", "")
-		collectionIDs := lo.Map(s.testServer.meta.GetCollections(), func(c *collectionInfo, _ int) int64 { return c.ID })
-		collectionVChannels := lo.SliceToMap(s.testServer.meta.GetCollections(), func(c *collectionInfo) (int64, []string) {
+		catalog := datacoordkv.NewCatalog(meta.NewMetaMemoryKV(), "", "")
+		collectionIDs := lo.Map(s.testServer.meta.GetCollections(), func(c *meta.CollectionInfo, _ int) int64 { return c.ID })
+		collectionVChannels := lo.SliceToMap(s.testServer.meta.GetCollections(), func(c *meta.CollectionInfo) (int64, []string) {
 			return c.ID, c.VChannelNames
 		})
 		var err error
 		s.testServer.dataViewManager, err = dataview.RecoverManager(ctx, catalog,
 			func(_ context.Context, _ int64) (bool, error) { return true, nil },
-			s.testServer.meta.loadableProjection, collectionIDs, collectionVChannels)
+			s.testServer.meta.LoadableProjection, collectionIDs, collectionVChannels)
 		s.Require().NoError(err)
-		s.testServer.meta.dataViewManager = s.testServer.dataViewManager
+		s.testServer.meta.DataViewManager = s.testServer.dataViewManager
 	}
 	recoverDataViews()
 
@@ -1129,15 +1146,15 @@ func (s *ServerSuite) TestFlush_NormalCase() {
 		CollectionID: 0,
 	}
 
-	schema := newTestSchema()
-	s.testServer.meta.AddCollection(&collectionInfo{ID: 0, Schema: schema, Partitions: []int64{}, VChannelNames: []string{"channel-1"}})
+	schema := meta.NewTestSchema()
+	s.testServer.meta.AddCollection(&meta.CollectionInfo{ID: 0, Schema: schema, Partitions: []int64{}, VChannelNames: []string{"channel-1"}})
 	allocations, err := s.testServer.segmentManager.AllocSegment(context.TODO(), 0, 1, "channel-1", 1, storage.StorageV1)
 	s.NoError(err)
 	s.EqualValues(1, len(allocations))
 	expireTs := allocations[0].ExpireTime
 	segID := allocations[0].SegmentID
 
-	info, err := s.testServer.segmentManager.AllocNewGrowingSegment(context.TODO(), AllocNewGrowingSegmentRequest{
+	info, err := s.testServer.segmentManager.AllocNewGrowingSegment(context.TODO(), segment.AllocNewGrowingSegmentRequest{
 		CollectionID:         0,
 		PartitionID:          1,
 		SegmentID:            1,
@@ -1152,7 +1169,7 @@ func (s *ServerSuite) TestFlush_NormalCase() {
 	s.NoError(err)
 	s.EqualValues(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 
-	setTestRowCount(s.testServer.meta, segID, 1)
+	segment.SetTestRowCount(s.testServer.meta, segID, 1)
 	ids, err := s.testServer.segmentManager.GetFlushableSegments(context.TODO(), "channel-1", expireTs)
 	s.NoError(err)
 	s.EqualValues(1, len(ids))
@@ -1175,7 +1192,7 @@ func (s *ServerSuite) TestFlush_CollectionNotExist() {
 	s.NoError(err)
 	s.EqualValues(commonpb.ErrorCode_CollectionNotExists, resp.GetStatus().GetErrorCode())
 
-	mockHandler := NewNMockHandler(s.T())
+	mockHandler := meta.NewNMockHandler(s.T())
 	mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).
 		Return(nil, errors.New("mock error"))
 	s.testServer.handler = mockHandler
@@ -1211,14 +1228,14 @@ func (s *ServerSuite) TestGetSegmentInfoChannel() {
 
 func (s *ServerSuite) TestGetSegmentInfo() {
 	testSegmentID := int64(1)
-	s.testServer.meta.AddSegment(context.TODO(), &SegmentInfo{
+	s.testServer.meta.AddSegment(context.TODO(), &meta.SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:        1,
 			Deltalogs: []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 100}}}},
 		},
 	})
 
-	s.testServer.meta.AddSegment(context.TODO(), &SegmentInfo{
+	s.testServer.meta.AddSegment(context.TODO(), &meta.SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:             2,
 			Deltalogs:      []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 101}}}},
@@ -1245,8 +1262,8 @@ func (s *ServerSuite) TestAssignSegmentID() {
 		s.SetupTest()
 		defer s.TearDownTest()
 
-		schema := newTestSchema()
-		s.testServer.meta.AddCollection(&collectionInfo{
+		schema := meta.NewTestSchema()
+		s.testServer.meta.AddCollection(&meta.CollectionInfo{
 			ID:         collID,
 			Schema:     schema,
 			Partitions: []int64{},
@@ -1296,8 +1313,8 @@ func (s *ServerSuite) TestAssignSegmentID() {
 		s.SetupTest()
 		defer s.TearDownTest()
 
-		schema := newTestSchema()
-		s.testServer.meta.AddCollection(&collectionInfo{
+		schema := meta.NewTestSchema()
+		s.testServer.meta.AddCollection(&meta.CollectionInfo{
 			ID:         collID,
 			Schema:     schema,
 			Partitions: []int64{},
@@ -1329,112 +1346,25 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("test meta non exist", func(t *testing.T) {
-		s := &Server{meta: newEmptyTestMeta(), notifyStatsChan: make(chan UniqueID, 1)}
+	// Collections are read from RootCoord's meta, so the RPC has nothing to
+	// refresh and must not write the collection it names.
+	t.Run("does not touch collections", func(t *testing.T) {
+		ms := metacache.NewMetaStore(nil)
+		existing := &meta.CollectionInfo{ID: 1, Partitions: []int64{10}}
+		ms.PutCollection(existing)
+		s := &Server{meta: &meta.Meta{MetaStore: ms}}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
-		ctx := context.Background()
-		req := &datapb.AlterCollectionRequest{
-			CollectionID: 1,
-			PartitionIDs: []int64{1},
-			Properties:   []*commonpb.KeyValuePair{{Key: "k", Value: "v"}},
+
+		for _, id := range []int64{1, 2} {
+			resp, err := s.BroadcastAlteredCollection(context.Background(), &datapb.AlterCollectionRequest{
+				CollectionID: id,
+				PartitionIDs: []int64{10, 11},
+				Properties:   []*commonpb.KeyValuePair{{Key: "k", Value: "v"}},
+			})
+			assert.NoError(t, merr.CheckRPCCall(resp, err))
 		}
-		resp, err := s.BroadcastAlteredCollection(ctx, req)
-		assert.NotNil(t, resp)
-		assert.NoError(t, err)
-		assert.Equal(t, 1, len(s.meta.ListCollections()))
-		assert.Equal(t, UniqueID(1), <-s.notifyStatsChan)
-	})
-
-	t.Run("test update meta", func(t *testing.T) {
-		ms := metacache.NewMetaStore(nil)
-		ms.PutCollection(&collectionInfo{ID: 1})
-		s := &Server{meta: &meta{metaStore: ms}, notifyStatsChan: make(chan UniqueID, 1)}
-		s.stateCode.Store(commonpb.StateCode_Healthy)
-		ctx := context.Background()
-		req := &datapb.AlterCollectionRequest{
-			CollectionID: 1,
-			PartitionIDs: []int64{1},
-			Properties:   []*commonpb.KeyValuePair{{Key: "k", Value: "v"}},
-		}
-
-		coll := s.meta.GetCollection(1)
-		assert.NotNil(t, coll)
-		assert.Nil(t, coll.Properties)
-		resp, err := s.BroadcastAlteredCollection(ctx, req)
-		assert.NotNil(t, resp)
-		assert.NoError(t, err)
-		coll = s.meta.GetCollection(1)
-		assert.NotNil(t, coll)
-		assert.NotNil(t, coll.Properties)
-		assert.Equal(t, UniqueID(1), <-s.notifyStatsChan, "an altered schema may add fields that need stats")
-	})
-
-	t.Run("published external source notifies index build", func(t *testing.T) {
-		spec := `{"format":"parquet"}`
-		ms := metacache.NewMetaStore(nil)
-		ms.PutCollection(&collectionInfo{ID: 100, Schema: externalRefreshIndexSchema("s3://bucket/a", spec)})
-		notifyIndexChan := make(chan UniqueID, 1)
-		s := &Server{meta: &meta{metaStore: ms}, notifyIndexChan: notifyIndexChan}
-		s.stateCode.Store(commonpb.StateCode_Healthy)
-		ctx := context.Background()
-
-		resp, err := s.BroadcastAlteredCollection(ctx, &datapb.AlterCollectionRequest{
-			CollectionID: 100,
-			Schema:       externalRefreshIndexSchema("s3://bucket/a", spec),
-		})
-		assert.NoError(t, merr.CheckRPCCall(resp, err))
-		assert.Empty(t, notifyIndexChan)
-
-		resp, err = s.BroadcastAlteredCollection(ctx, &datapb.AlterCollectionRequest{
-			CollectionID: 100,
-			Schema:       externalRefreshIndexSchema("s3://bucket/b", spec),
-		})
-		assert.NoError(t, merr.CheckRPCCall(resp, err))
-		require.Len(t, notifyIndexChan, 1)
-		assert.Equal(t, UniqueID(100), <-notifyIndexChan)
-	})
-
-	// RootCoord rebuilds this request from its authoritative meta on every
-	// alter, so an update must adopt the request's view wholesale. The previous
-	// code kept Partitions/StartPositions/DatabaseName/DatabaseID from the
-	// cached entry, which pinned them to whatever the initial load saw: create
-	// and drop partition never refreshed the partition list, and a rename that
-	// moves a collection to another database left the stale database on the
-	// entry that resource-key locks are built from.
-	t.Run("update adopts the request's partitions and database", func(t *testing.T) {
-		ms := metacache.NewMetaStore(nil)
-		ms.PutCollection(&collectionInfo{
-			ID:             1,
-			Partitions:     []int64{10},
-			StartPositions: []*commonpb.KeyDataPair{{Key: "ch-0", Data: []byte{1}}},
-			DatabaseName:   "old_db",
-			DatabaseID:     100,
-			VChannelNames:  []string{"ch-0"},
-			CreatedAt:      42,
-		})
-		s := &Server{meta: &meta{metaStore: ms}}
-		s.stateCode.Store(commonpb.StateCode_Healthy)
-
-		resp, err := s.BroadcastAlteredCollection(context.Background(), &datapb.AlterCollectionRequest{
-			CollectionID:   1,
-			Schema:         &schemapb.CollectionSchema{Name: "coll", DbName: "new_db"},
-			PartitionIDs:   []int64{10, 11},
-			StartPositions: []*commonpb.KeyDataPair{{Key: "ch-1", Data: []byte{2}}},
-			DbID:           200,
-			VChannels:      []string{"ch-1"},
-			Properties:     []*commonpb.KeyValuePair{{Key: "k", Value: "v"}},
-		})
-		assert.NoError(t, merr.CheckRPCCall(resp, err))
-
-		coll := s.meta.GetCollection(1)
-		assert.Equal(t, []int64{10, 11}, coll.Partitions, "a newly created partition must show up")
-		assert.Equal(t, "new_db", coll.DatabaseName, "a cross-database rename must move the entry")
-		assert.Equal(t, int64(200), coll.DatabaseID)
-		assert.Equal(t, []string{"ch-1"}, coll.VChannelNames)
-		assert.Equal(t, "ch-1", coll.StartPositions[0].GetKey())
-		// The request carries no creation timestamp, so it is the one field the
-		// cached entry still owns.
-		assert.Equal(t, uint64(42), coll.CreatedAt)
+		assert.Same(t, existing, s.meta.GetCollection(1))
+		assert.Nil(t, s.meta.GetCollection(2))
 	})
 }
 
@@ -1451,12 +1381,12 @@ func TestServer_GcConfirm(t *testing.T) {
 		s := &Server{}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 
-		m := &meta{}
+		m := &meta.Meta{}
 		catalog := mocks.NewDataCoordCatalog(t)
 		catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
 		catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
-		m.catalog = catalog
-		m.metaStore = metacache.NewMetaStore(catalog)
+		m.Catalog = catalog
+		m.MetaStore = metacache.NewMetaStore(catalog)
 
 		catalog.On("GcConfirm",
 			mock.Anything,
@@ -1477,8 +1407,13 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 	t.Run("test get recovery info with no segments", func(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
+		svr.meta.AddCollection(&meta.CollectionInfo{
+			ID:            0,
+			Schema:        meta.NewTestSchema(),
+			VChannelNames: []string{"vchan1"},
+		})
 		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
-			return newMockMixCoord(), nil
+			return meta.NewMockMixCoord(), nil
 		}
 		req := &datapb.GetRecoveryInfoRequestV2{
 			CollectionID: 0,
@@ -1519,11 +1454,12 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		defer closeTestServer(t, svr)
 
 		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
-			return newMockMixCoord(), nil
+			return meta.NewMockMixCoord(), nil
 		}
 
-		svr.meta.AddCollection(&collectionInfo{
-			Schema: newTestSchema(),
+		svr.meta.AddCollection(&meta.CollectionInfo{
+			Schema:        meta.NewTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1533,7 +1469,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+		err = svr.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
 			IndexID:      rand.Int63n(1000),
@@ -1576,26 +1512,26 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 				},
 			},
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg1))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg1))
 		assert.NoError(t, err)
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg2))
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+		err = svr.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: seg1.ID,
 			BuildID:   seg1.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
+		err = svr.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: seg1.ID,
 			State:   commonpb.IndexState_Finished,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+		err = svr.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
 			SegmentID: seg2.ID,
 			BuildID:   seg2.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
+		err = svr.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
 			BuildID: seg2.ID,
 			State:   commonpb.IndexState_Finished,
 		})
@@ -1620,11 +1556,12 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
-			return newMockMixCoord(), nil
+			return meta.NewMockMixCoord(), nil
 		}
-		svr.meta.AddCollection(&collectionInfo{
-			ID:     0,
-			Schema: newTestSchema(),
+		svr.meta.AddCollection(&meta.CollectionInfo{
+			ID:            0,
+			Schema:        meta.NewTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1670,9 +1607,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 				},
 			},
 		}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg1))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg1))
 		assert.NoError(t, err)
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg2))
 		assert.NoError(t, err)
 
 		req := &datapb.GetRecoveryInfoRequestV2{
@@ -1691,10 +1628,11 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
-			return newMockMixCoord(), nil
+			return meta.NewMockMixCoord(), nil
 		}
-		svr.meta.AddCollection(&collectionInfo{
-			Schema: newTestSchema(),
+		svr.meta.AddCollection(&meta.CollectionInfo{
+			Schema:        meta.NewTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		binlogReq := &datapb.SaveBinlogPathsRequest{
@@ -1741,23 +1679,27 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			},
 			Flushed: true,
 		}
-		segment := createSegment(binlogReq.SegmentID, 0, 1, 100, 10, "vchan1", commonpb.SegmentState_Growing)
-		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
+		seg := createSegment(binlogReq.SegmentID, 0, 1, 100, 10, "vchan1", commonpb.SegmentState_Growing)
+		// Native Flush carries the WAL-proven frontier.
+		seg.TransformStartAfterTimetick = 10
+		binlogReq.GrowingTransformStartAfterTimetick = 10
+
+		err := svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg))
 		assert.NoError(t, err)
 
-		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+		err = svr.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
 			IndexID:      rand.Int63n(1000),
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
-			SegmentID: segment.ID,
-			BuildID:   segment.ID,
+		err = svr.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+			SegmentID: seg.ID,
+			BuildID:   seg.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
-			BuildID: segment.ID,
+		err = svr.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
+			BuildID: seg.ID,
 			State:   commonpb.IndexState_Finished,
 		})
 		assert.NoError(t, err)
@@ -1785,10 +1727,11 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
-			return newMockMixCoord(), nil
+			return meta.NewMockMixCoord(), nil
 		}
-		svr.meta.AddCollection(&collectionInfo{
-			Schema: newTestSchema(),
+		svr.meta.AddCollection(&meta.CollectionInfo{
+			Schema:        meta.NewTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		const expectedDataVersion int32 = 7
@@ -1807,24 +1750,26 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			},
 			Flushed: true,
 		}
-		segment := createSegment(binlogReq.SegmentID, 0, 1, 100, 10, "vchan1", commonpb.SegmentState_Growing)
-		segment.DataVersion = expectedDataVersion
-		err := svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment))
+		seg := createSegment(binlogReq.SegmentID, 0, 1, 100, 10, "vchan1", commonpb.SegmentState_Growing)
+		seg.DataVersion = expectedDataVersion
+		seg.TransformStartAfterTimetick = 10
+		binlogReq.GrowingTransformStartAfterTimetick = 10
+		err := svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg))
 		assert.NoError(t, err)
 
-		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+		err = svr.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
 			IndexID:      rand.Int63n(1000),
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
-			SegmentID: segment.ID,
-			BuildID:   segment.ID,
+		err = svr.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
+			SegmentID: seg.ID,
+			BuildID:   seg.ID,
 		})
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
-			BuildID: segment.ID,
+		err = svr.indexMeta.FinishTask(&workerpb.IndexTaskInfo{
+			BuildID: seg.ID,
 			State:   commonpb.IndexState_Finished,
 		})
 		assert.NoError(t, err)
@@ -1856,12 +1801,13 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		defer closeTestServer(t, svr)
 
 		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
-			return newMockMixCoord(), nil
+			return meta.NewMockMixCoord(), nil
 		}
 
-		svr.meta.AddCollection(&collectionInfo{
-			ID:     0,
-			Schema: newTestSchema(),
+		svr.meta.AddCollection(&meta.CollectionInfo{
+			ID:            0,
+			Schema:        meta.NewTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1873,9 +1819,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 
 		seg1 := createSegment(7, 0, 0, 100, 30, "vchan1", commonpb.SegmentState_Growing)
 		seg2 := createSegment(8, 0, 0, 100, 40, "vchan1", commonpb.SegmentState_Dropped)
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg1))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg1))
 		assert.NoError(t, err)
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg2))
 		assert.NoError(t, err)
 
 		req := &datapb.GetRecoveryInfoRequestV2{
@@ -1896,12 +1842,13 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
-			return newMockMixCoord(), nil
+			return meta.NewMockMixCoord(), nil
 		}
 
-		svr.meta.AddCollection(&collectionInfo{
-			ID:     0,
-			Schema: newTestSchema(),
+		svr.meta.AddCollection(&meta.CollectionInfo{
+			ID:            0,
+			Schema:        meta.NewTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1914,9 +1861,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		seg1 := createSegment(7, 0, 0, 100, 30, "vchan1", commonpb.SegmentState_Growing)
 		seg2 := createSegment(8, 0, 0, 100, 40, "vchan1", commonpb.SegmentState_Flushed)
 		seg2.IsFake = true
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg1))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg1))
 		assert.NoError(t, err)
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg2))
 		assert.NoError(t, err)
 
 		req := &datapb.GetRecoveryInfoRequestV2{
@@ -1935,12 +1882,13 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
-			return newMockMixCoord(), nil
+			return meta.NewMockMixCoord(), nil
 		}
 
-		svr.meta.AddCollection(&collectionInfo{
-			ID:     0,
-			Schema: newTestSchema(),
+		svr.meta.AddCollection(&meta.CollectionInfo{
+			ID:            0,
+			Schema:        meta.NewTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1954,7 +1902,7 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		seg1 := createSegment(100, 0, 0, 50, 10, "vchan1", commonpb.SegmentState_Flushed)
 		seg1.Binlogs = []*datapb.FieldBinlog{} // empty binlogs for V3 storage
 		seg1.ManifestPath = "files/binlogs/0/0/100/manifest_0"
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg1))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg1))
 		assert.NoError(t, err)
 
 		req := &datapb.GetRecoveryInfoRequestV2{
@@ -1975,12 +1923,13 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		defer closeTestServer(t, svr)
 
 		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
-			return newMockMixCoord(), nil
+			return meta.NewMockMixCoord(), nil
 		}
 
-		svr.meta.AddCollection(&collectionInfo{
-			ID:     0,
-			Schema: newTestSchema(),
+		svr.meta.AddCollection(&meta.CollectionInfo{
+			ID:            0,
+			Schema:        meta.NewTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1997,24 +1946,24 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		seg4 := createSegment(12, 0, 0, 2048, 40, "vchan1", commonpb.SegmentState_Dropped)
 		seg5 := createSegment(13, 0, 0, 2048, 40, "vchan1", commonpb.SegmentState_Flushed)
 		seg5.CompactionFrom = []int64{11, 12}
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg1))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg1))
 		assert.NoError(t, err)
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg2))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg2))
 		assert.NoError(t, err)
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg3))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg3))
 		assert.NoError(t, err)
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg4))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg4))
 		assert.NoError(t, err)
-		err = svr.meta.AddSegment(context.TODO(), NewSegmentInfo(seg5))
+		err = svr.meta.AddSegment(context.TODO(), meta.NewSegmentInfo(seg5))
 		assert.NoError(t, err)
-		err = svr.meta.indexMeta.CreateIndex(context.TODO(), &model.Index{
+		err = svr.indexMeta.CreateIndex(context.TODO(), &model.Index{
 			CollectionID: 0,
 			FieldID:      2,
 			IndexID:      rand.Int63n(1000),
 			IndexName:    "_default_idx_2",
 		})
 		assert.NoError(t, err)
-		svr.meta.indexMeta.updateSegmentIndex(&model.SegmentIndex{
+		svr.indexMeta.UpdateSegmentIndex(&model.SegmentIndex{
 			SegmentID:           seg4.ID,
 			CollectionID:        0,
 			PartitionID:         0,
@@ -2063,11 +2012,11 @@ func TestGetRecoveryInfoV2_ManifestOnlySegment(t *testing.T) {
 	)
 	manifestPath := packed.MarshalManifestPath("files/binlogs/1/2/100", 1)
 	ctx := context.Background()
-	channel := &channelMeta{Name: channelName, CollectionID: collectionID}
+	channel := &meta.ChannelMeta{Name: channelName, CollectionID: collectionID}
 	checkpoint := &msgpb.MsgPosition{ChannelName: channelName, MsgID: []byte{1}, Timestamp: 10}
-	channelsMock := mockey.Mock((*Server).getChannelsByCollectionID).Return([]RWChannel{channel}, nil).Build()
+	channelsMock := mockey.Mock((*Server).getChannelsByCollectionID).Return([]meta.RWChannel{channel}, nil).Build()
 	defer channelsMock.UnPatch()
-	indexMock := mockey.Mock(FilterInIndexedSegments).Return([]*SegmentInfo(nil)).Build()
+	indexMock := mockey.Mock(index.FilterInIndexedSegments).Return([]*meta.SegmentInfo(nil)).Build()
 	defer indexMock.UnPatch()
 
 	for _, test := range []struct {
@@ -2150,16 +2099,16 @@ func TestGetRecoveryInfoV2_ManifestOnlySegment(t *testing.T) {
 			store := metacache.NewMetaStore(nil)
 			svr := &Server{
 				ctx: ctx,
-				meta: &meta{
-					segments:           NewSegmentsInfo(store),
-					partitionStatsMeta: &partitionStatsMeta{},
-					metaStore:          store,
-					channelSync:        newChannelSync(),
+				meta: &meta.Meta{
+					Segments:    meta.NewSegmentsInfo(store),
+					MetaStore:   store,
+					ChannelSync: meta.NewChannelSync(),
 				},
+				domainMetas: domainMetas{partitionStatsMeta: &partitionstats.PartitionStatsMeta{}},
 			}
 			store.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{channelName: checkpoint})
 			svr.stateCode.Store(commonpb.StateCode_Healthy)
-			svr.meta.segments.SetSegment(segmentID, NewSegmentInfo(seg))
+			svr.meta.Segments.SetSegment(segmentID, meta.NewSegmentInfo(seg))
 			svr.handler = &ServerHandler{s: svr}
 
 			// Keep both the channel filtering and recovery response construction real.
@@ -2204,8 +2153,8 @@ func TestImportV2(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotEqual(t, int32(0), resp.GetStatus().GetCode())
 		s.stateCode.Store(commonpb.StateCode_Healthy)
-		mockHandler := NewNMockHandler(t)
-		mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
+		mockHandler := meta.NewNMockHandler(t)
+		mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&meta.CollectionInfo{
 			ID:            1000,
 			VChannelNames: []string{"foo_1v1"},
 		}, nil).Maybe()
@@ -2231,7 +2180,7 @@ func TestImportV2(t *testing.T) {
 		catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
-		s.importMeta, err = NewImportMeta(context.TODO(), catalog, nil, nil)
+		s.importMeta, err = bulkimport.NewImportMeta(context.TODO(), catalog, nil, nil)
 		assert.NoError(t, err)
 		alloc := allocator.NewMockAllocator(t)
 		alloc.EXPECT().AllocN(mock.Anything).Return(0, 0, merr.WrapErrServiceUnavailable("mock err"))
@@ -2272,7 +2221,7 @@ func TestImportV2(t *testing.T) {
 		// streaming.SetWALForTest(wal)
 		// defer streaming.RecoverWALForTest()
 
-		s.importMeta, err = NewImportMeta(context.TODO(), catalog, nil, nil)
+		s.importMeta, err = bulkimport.NewImportMeta(context.TODO(), catalog, nil, nil)
 		assert.NoError(t, err)
 		resp, err = s.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{
 			JobID: "-1",
@@ -2282,7 +2231,7 @@ func TestImportV2(t *testing.T) {
 		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportSysFailed))
 
 		// normal case
-		var job ImportJob = &importJob{
+		var job bulkimport.ImportJob = &bulkimport.Job{
 			ImportJob: &datapb.ImportJob{
 				JobID:        0,
 				CollectionID: 42,
@@ -2321,9 +2270,9 @@ func TestImportV2(t *testing.T) {
 		catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 		catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 		catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
-		s.importMeta, err = NewImportMeta(context.TODO(), catalog, nil, nil)
+		s.importMeta, err = bulkimport.NewImportMeta(context.TODO(), catalog, nil, nil)
 		assert.NoError(t, err)
-		var job ImportJob = &importJob{
+		var job bulkimport.ImportJob = &bulkimport.Job{
 			ImportJob: &datapb.ImportJob{
 				JobID:        0,
 				CollectionID: 1,
@@ -2337,8 +2286,8 @@ func TestImportV2(t *testing.T) {
 			TaskID: 1,
 			State:  datapb.ImportTaskStateV2_Failed,
 		}
-		var task ImportTask = &preImportTask{}
-		task.(*preImportTask).task.Store(taskProto)
+		var task bulkimport.ImportTask = &bulkimport.PreImportTask{}
+		task.(*bulkimport.PreImportTask).Task.Store(taskProto)
 		err = s.importMeta.AddTask(context.TODO(), task)
 		assert.NoError(t, err)
 		resp, err = s.ListImports(ctx, &internalpb.ListImportsRequestInternal{
@@ -2380,15 +2329,15 @@ func TestGetChannelRecoveryInfo(t *testing.T) {
 		IndexedSegmentIds:   []int64{4},
 	}
 
-	handler := NewNMockHandler(t)
+	handler := meta.NewNMockHandler(t)
 	handler.EXPECT().GetDataVChanPositions(mock.Anything, mock.Anything).Return(channelInfo)
 	s.handler = handler
 	store := metacache.NewMetaStore(nil)
-	s.meta = &meta{
-		metaStore: store,
-		segments:  NewSegmentsInfo(store),
+	s.meta = &meta.Meta{
+		MetaStore: store,
+		Segments:  meta.NewSegmentsInfo(store),
 	}
-	s.meta.segments.SetSegment(1, NewSegmentInfo(&datapb.SegmentInfo{
+	s.meta.Segments.SetSegment(1, meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID:                   1,
 		CollectionID:         0,
 		PartitionID:          0,
@@ -2469,7 +2418,7 @@ func (s *GcControlServiceSuite) TestPause() {
 // status: the timeout path used to return nil, so GcControl reported Success
 // while garbage collection was in fact never paused.
 func (s *GcControlServiceSuite) TestPauseErrorSurfacesAsFailedStatus() {
-	mockPause := mockey.Mock((*garbageCollector).Pause).Return(context.DeadlineExceeded).Build()
+	mockPause := mockey.Mock((*gc.GarbageCollector).Pause).Return(context.DeadlineExceeded).Build()
 	defer mockPause.UnPatch()
 
 	resp, err := s.server.GcControl(context.Background(), &datapb.GcControlRequest{
@@ -2495,7 +2444,7 @@ func (s *GcControlServiceSuite) TestPauseErrorSurfacesAsFailedStatus() {
 // the client: merr.CheckRPCCall in restful_mgr_routes.go is what tells a caller
 // to retry, and a hand-built UnexpectedError status would report retriable=false.
 func (s *GcControlServiceSuite) TestPauseUnavailableStaysRetriable() {
-	mockPause := mockey.Mock((*garbageCollector).Pause).
+	mockPause := mockey.Mock((*gc.GarbageCollector).Pause).
 		Return(merr.WrapErrServiceUnavailable("garbage collector is closing")).Build()
 	defer mockPause.UnPatch()
 
@@ -2520,7 +2469,7 @@ func (s *GcControlServiceSuite) TestResume() {
 }
 
 func (s *GcControlServiceSuite) TestTimeoutCtx() {
-	s.server.garbageCollector.close()
+	s.server.garbageCollector.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -2554,9 +2503,9 @@ func createTestFlushAllServer() *Server {
 	server := &Server{
 		allocator: mockAlloc,
 		broker:    mockBroker,
-		meta: &meta{
-			metaStore: ms,
-			segments:  NewSegmentsInfo(ms),
+		meta: &meta.Meta{
+			MetaStore: ms,
+			Segments:  meta.NewSegmentsInfo(ms),
 		},
 		// handler will be set to a mock in individual tests when needed
 	}
@@ -2579,7 +2528,7 @@ func TestServer_FlushAll(t *testing.T) {
 
 	t.Run("flush all successfully", func(t *testing.T) {
 		server := createTestFlushAllServer()
-		server.handler = NewNMockHandler(t)
+		server.handler = meta.NewNMockHandler(t)
 
 		// Mock channel.GetClusterChannels
 		mockGetClusterChannels := mockey.Mock(channel.GetClusterChannels).Return(message.ClusterChannels{
@@ -2723,12 +2672,12 @@ func TestServer_DropSegmentsByTime(t *testing.T) {
 		t.Run(checkpoint.name, func(t *testing.T) {
 			s := &Server{}
 			s.stateCode.Store(commonpb.StateCode_Healthy)
-			meta, err := newMemoryMeta(t)
+			mt, err := meta.NewMemoryMeta(t)
 			require.NoError(t, err)
-			s.meta = meta
+			s.meta = mt
 
 			if checkpoint.ts != 0 {
-				require.NoError(t, meta.UpdateChannelCheckpoint(ctx, channelName, &msgpb.MsgPosition{
+				require.NoError(t, mt.UpdateChannelCheckpoint(ctx, channelName, &msgpb.MsgPosition{
 					ChannelName: channelName,
 					MsgID:       []byte{1},
 					Timestamp:   checkpoint.ts,
@@ -2745,14 +2694,14 @@ func TestServer_DropSegmentsByTime(t *testing.T) {
 				{channelName, flushTs + 1, commonpb.SegmentState_Flushed},
 				{"other-channel", flushTs - 1, commonpb.SegmentState_Flushed},
 			}
-			for i, segment := range segments {
-				require.NoError(t, meta.AddSegment(ctx, &SegmentInfo{
+			for i, seg := range segments {
+				require.NoError(t, mt.AddSegment(ctx, &meta.SegmentInfo{
 					SegmentInfo: &datapb.SegmentInfo{
 						ID:            int64(i + 1),
 						CollectionID:  collectionID,
-						InsertChannel: segment.channel,
+						InsertChannel: seg.channel,
 						State:         commonpb.SegmentState_Flushed,
-						DmlPosition:   &msgpb.MsgPosition{Timestamp: segment.ts},
+						DmlPosition:   &msgpb.MsgPosition{Timestamp: seg.ts},
 					},
 				}))
 			}
@@ -2762,10 +2711,10 @@ func TestServer_DropSegmentsByTime(t *testing.T) {
 			ctx, cancel := context.WithTimeout(ctx, time.Second)
 			defer cancel()
 			require.NoError(t, s.DropSegmentsByTime(ctx, collectionID, map[string]uint64{channelName: flushTs}))
-			for i, segment := range segments {
-				actual := meta.GetSegment(ctx, int64(i+1))
+			for i, seg := range segments {
+				actual := mt.GetSegment(ctx, int64(i+1))
 				require.NotNil(t, actual)
-				assert.Equal(t, segment.state, actual.GetState())
+				assert.Equal(t, seg.state, actual.GetState())
 			}
 		})
 	}
@@ -2780,11 +2729,11 @@ func TestGetSegmentInfo_WithCompaction(t *testing.T) {
 			closeTestServer(t, svr)
 		})
 
-		svr.meta.AddCollection(&collectionInfo{
+		svr.meta.AddCollection(&meta.CollectionInfo{
 			ID:         collID,
 			Partitions: []int64{partID},
 		})
-		require.NoError(t, svr.meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		require.NoError(t, svr.meta.AddSegment(context.Background(), meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID:           parentID,
 			CollectionID: collID,
 			PartitionID:  partID,
@@ -2802,7 +2751,7 @@ func TestGetSegmentInfo_WithCompaction(t *testing.T) {
 		svr := setupParent(t, collID, partID, parentID)
 
 		// Create child segment with delta logs
-		child := NewSegmentInfo(&datapb.SegmentInfo{
+		child := meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID:             childID,
 			CollectionID:   collID,
 			PartitionID:    partID,
@@ -2846,7 +2795,7 @@ func TestGetSegmentInfo_WithCompaction(t *testing.T) {
 
 		svr := setupParent(t, collID, partID, parentID)
 
-		child := NewSegmentInfo(&datapb.SegmentInfo{
+		child := meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID:             childID,
 			CollectionID:   collID,
 			PartitionID:    partID,
@@ -2884,7 +2833,7 @@ func TestGetSegmentInfo_WithCompaction(t *testing.T) {
 
 		svr := setupParent(t, collID, partID, parentID)
 
-		require.NoError(t, svr.meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		require.NoError(t, svr.meta.AddSegment(context.Background(), meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID:             legacyChildID,
 			CollectionID:   collID,
 			PartitionID:    partID,
@@ -2900,7 +2849,7 @@ func TestGetSegmentInfo_WithCompaction(t *testing.T) {
 			}},
 		})))
 
-		require.NoError(t, svr.meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+		require.NoError(t, svr.meta.AddSegment(context.Background(), meta.NewSegmentInfo(&datapb.SegmentInfo{
 			ID:             v3GrandChildID,
 			CollectionID:   collID,
 			PartitionID:    partID,
@@ -2940,7 +2889,7 @@ func TestGetRestoreSnapshotState(t *testing.T) {
 		defer closeTestServer(t, svr)
 
 		// Add a copy job
-		job := &copySegmentJob{
+		job := &copysegment.Job{
 			CopySegmentJob: &datapb.CopySegmentJob{
 				JobId:          100,
 				CollectionId:   1,
@@ -2950,7 +2899,7 @@ func TestGetRestoreSnapshotState(t *testing.T) {
 				SnapshotName:   "test_snapshot",
 				StartTs:        uint64(time.Now().UnixNano()),
 			},
-			tr: timerecord.NewTimeRecorder("test job"),
+			Tr: timerecord.NewTimeRecorder("test job"),
 		}
 		err := svr.copySegmentMeta.AddJob(context.TODO(), job)
 		require.NoError(t, err)
@@ -2976,7 +2925,7 @@ func TestGetRestoreSnapshotState(t *testing.T) {
 		startTime := time.Now()
 		endTime := startTime.Add(10 * time.Second)
 
-		job := &copySegmentJob{
+		job := &copysegment.Job{
 			CopySegmentJob: &datapb.CopySegmentJob{
 				JobId:          200,
 				CollectionId:   1,
@@ -2987,7 +2936,7 @@ func TestGetRestoreSnapshotState(t *testing.T) {
 				StartTs:        uint64(startTime.UnixNano()),
 				CompleteTs:     uint64(endTime.UnixNano()),
 			},
-			tr: timerecord.NewTimeRecorder("completed job"),
+			Tr: timerecord.NewTimeRecorder("completed job"),
 		}
 		err := svr.copySegmentMeta.AddJob(context.TODO(), job)
 		require.NoError(t, err)
@@ -3013,7 +2962,7 @@ func TestListRestoreSnapshotJobs(t *testing.T) {
 
 		// Add multiple jobs
 		for i := 1; i <= 3; i++ {
-			job := &copySegmentJob{
+			job := &copysegment.Job{
 				CopySegmentJob: &datapb.CopySegmentJob{
 					JobId:          int64(100 + i),
 					CollectionId:   1,
@@ -3022,7 +2971,7 @@ func TestListRestoreSnapshotJobs(t *testing.T) {
 					CopiedSegments: int64(i * 5),
 					SnapshotName:   fmt.Sprintf("snapshot_%d", i),
 				},
-				tr: timerecord.NewTimeRecorder(fmt.Sprintf("job_%d", i)),
+				Tr: timerecord.NewTimeRecorder(fmt.Sprintf("job_%d", i)),
 			}
 			err := svr.copySegmentMeta.AddJob(context.TODO(), job)
 			require.NoError(t, err)
@@ -3041,26 +2990,26 @@ func TestListRestoreSnapshotJobs(t *testing.T) {
 		defer closeTestServer(t, svr)
 
 		// Add jobs for different collections
-		job1 := &copySegmentJob{
+		job1 := &copysegment.Job{
 			CopySegmentJob: &datapb.CopySegmentJob{
 				JobId:        201,
 				CollectionId: 100,
 				State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
 				SnapshotName: "snapshot_1",
 			},
-			tr: timerecord.NewTimeRecorder("job_1"),
+			Tr: timerecord.NewTimeRecorder("job_1"),
 		}
 		err := svr.copySegmentMeta.AddJob(context.TODO(), job1)
 		require.NoError(t, err)
 
-		job2 := &copySegmentJob{
+		job2 := &copysegment.Job{
 			CopySegmentJob: &datapb.CopySegmentJob{
 				JobId:        202,
 				CollectionId: 200,
 				State:        datapb.CopySegmentJobState_CopySegmentJobExecuting,
 				SnapshotName: "snapshot_2",
 			},
-			tr: timerecord.NewTimeRecorder("job_2"),
+			Tr: timerecord.NewTimeRecorder("job_2"),
 		}
 		err = svr.copySegmentMeta.AddJob(context.TODO(), job2)
 		require.NoError(t, err)
@@ -3082,8 +3031,8 @@ func TestServer_CreateSnapshot_DuplicateName(t *testing.T) {
 		existingSnapshotName := "test_snapshot"
 
 		// Mock snapshotManager.GetSnapshot to simulate existing snapshot
-		mockGetSnapshot := mockey.Mock((*snapshotManager).GetSnapshot).To(func(
-			sm *snapshotManager,
+		mockGetSnapshot := mockey.Mock((*snapshot.Manager).GetSnapshot).To(func(
+			sm *snapshot.Manager,
 			ctx context.Context,
 			collectionID int64,
 			name string,
@@ -3094,7 +3043,7 @@ func TestServer_CreateSnapshot_DuplicateName(t *testing.T) {
 		defer mockGetSnapshot.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -3130,7 +3079,7 @@ func TestServer_ExportSnapshot_ForwardsForeignStorageFields(t *testing.T) {
 	lockAcquired := false
 	fakeHandler := &embeddedHandler{}
 	mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
-		&collectionInfo{
+		&meta.CollectionInfo{
 			ID:           100,
 			DatabaseName: "test_db",
 			Schema:       &schemapb.CollectionSchema{Name: "test_coll"},
@@ -3147,9 +3096,9 @@ func TestServer_ExportSnapshot_ForwardsForeignStorageFields(t *testing.T) {
 			return mockBroadcaster, nil
 		}).Build()
 	defer mockBroadcast.UnPatch()
-	mockExport := mockey.Mock((*snapshotManager).ExportSnapshot).To(
+	mockExport := mockey.Mock((*snapshot.Manager).ExportSnapshot).To(
 		func(
-			_ *snapshotManager,
+			_ *snapshot.Manager,
 			_ context.Context,
 			collectionID int64,
 			snapshotName string,
@@ -3171,7 +3120,7 @@ func TestServer_ExportSnapshot_ForwardsForeignStorageFields(t *testing.T) {
 
 	server := &Server{
 		handler:         fakeHandler,
-		snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+		snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 	}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -3275,14 +3224,14 @@ func TestServer_DropSnapshot(t *testing.T) {
 
 		// Mock GetSnapshot to return ErrSnapshotNotFound — DropSnapshot should
 		// treat this as idempotent success and return early BEFORE broadcast.
-		mockGetSnapshot := mockey.Mock((*snapshotManager).GetSnapshot).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
+		mockGetSnapshot := mockey.Mock((*snapshot.Manager).GetSnapshot).To(
+			func(sm *snapshot.Manager, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
 				return nil, merr.WrapErrSnapshotNotFound(name)
 			}).Build()
 		defer mockGetSnapshot.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -3299,14 +3248,14 @@ func TestServer_DropSnapshot(t *testing.T) {
 
 		// Mock GetSnapshot to return a non-NotFound error (e.g. etcd timeout).
 		// DropSnapshot must NOT swallow it as idempotent success.
-		mockGetSnapshot := mockey.Mock((*snapshotManager).GetSnapshot).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
+		mockGetSnapshot := mockey.Mock((*snapshot.Manager).GetSnapshot).To(
+			func(sm *snapshot.Manager, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
 				return nil, errors.New("etcd unavailable")
 			}).Build()
 		defer mockGetSnapshot.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -3326,8 +3275,8 @@ func TestServer_DropSnapshot(t *testing.T) {
 		// This simulates another goroutine dropping the snapshot between the
 		// pre-lock check and the post-lock double-check (TOCTOU pattern).
 		callCount := 0
-		mockGetSnapshot := mockey.Mock((*snapshotManager).GetSnapshot).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
+		mockGetSnapshot := mockey.Mock((*snapshot.Manager).GetSnapshot).To(
+			func(sm *snapshot.Manager, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
 				callCount++
 				if callCount == 1 {
 					return &datapb.SnapshotInfo{Name: name}, nil
@@ -3339,7 +3288,7 @@ func TestServer_DropSnapshot(t *testing.T) {
 		// Resolve collection via datacoord-local handler cache — no broker RPC.
 		fakeHandler := &embeddedHandler{}
 		mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
-			&collectionInfo{
+			&meta.CollectionInfo{
 				ID:           100,
 				DatabaseName: "test_db",
 				Schema:       &schemapb.CollectionSchema{Name: "test_coll"},
@@ -3359,7 +3308,7 @@ func TestServer_DropSnapshot(t *testing.T) {
 
 		server := &Server{
 			handler:         fakeHandler,
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -3379,16 +3328,16 @@ func TestServer_DropSnapshot(t *testing.T) {
 		// the ack callback (which would hold the resource key lock forever).
 		ctx := context.Background()
 
-		mockGetSnapshot := mockey.Mock((*snapshotManager).GetSnapshot).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
+		mockGetSnapshot := mockey.Mock((*snapshot.Manager).GetSnapshot).To(
+			func(sm *snapshot.Manager, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
 				return &datapb.SnapshotInfo{Name: name}, nil
 			}).Build()
 		defer mockGetSnapshot.UnPatch()
 
 		// Pin check returns true — snapshot is pinned.
 		hasPinsCallCount := 0
-		mockHasPins := mockey.Mock((*snapshotManager).HasActivePins).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string) (bool, error) {
+		mockHasPins := mockey.Mock((*snapshot.Manager).HasActivePins).To(
+			func(sm *snapshot.Manager, ctx context.Context, collectionID int64, name string) (bool, error) {
 				hasPinsCallCount++
 				return true, nil
 			}).Build()
@@ -3396,7 +3345,7 @@ func TestServer_DropSnapshot(t *testing.T) {
 
 		fakeHandler := &embeddedHandler{}
 		mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
-			&collectionInfo{
+			&meta.CollectionInfo{
 				ID:           100,
 				DatabaseName: "test_db",
 				Schema:       &schemapb.CollectionSchema{Name: "test_coll"},
@@ -3425,7 +3374,7 @@ func TestServer_DropSnapshot(t *testing.T) {
 
 		server := &Server{
 			handler:         fakeHandler,
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -3447,21 +3396,21 @@ func TestServer_DropSnapshot(t *testing.T) {
 		// to broadcast — that would bypass the pin check.
 		ctx := context.Background()
 
-		mockGetSnapshot := mockey.Mock((*snapshotManager).GetSnapshot).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
+		mockGetSnapshot := mockey.Mock((*snapshot.Manager).GetSnapshot).To(
+			func(sm *snapshot.Manager, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
 				return &datapb.SnapshotInfo{Name: name}, nil
 			}).Build()
 		defer mockGetSnapshot.UnPatch()
 
-		mockHasPins := mockey.Mock((*snapshotManager).HasActivePins).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string) (bool, error) {
+		mockHasPins := mockey.Mock((*snapshot.Manager).HasActivePins).To(
+			func(sm *snapshot.Manager, ctx context.Context, collectionID int64, name string) (bool, error) {
 				return false, errors.New("etcd timeout during pin check")
 			}).Build()
 		defer mockHasPins.UnPatch()
 
 		fakeHandler := &embeddedHandler{}
 		mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
-			&collectionInfo{
+			&meta.CollectionInfo{
 				ID:           100,
 				DatabaseName: "test_db",
 				Schema:       &schemapb.CollectionSchema{Name: "test_coll"},
@@ -3481,7 +3430,7 @@ func TestServer_DropSnapshot(t *testing.T) {
 
 		server := &Server{
 			handler:         fakeHandler,
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -3521,14 +3470,14 @@ func TestServer_DescribeSnapshot(t *testing.T) {
 		ctx := context.Background()
 
 		// Mock DescribeSnapshot to return error
-		mockDescribe := mockey.Mock((*snapshotManager).DescribeSnapshot).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string) (*snapshotstorage.SnapshotData, error) {
+		mockDescribe := mockey.Mock((*snapshot.Manager).DescribeSnapshot).To(
+			func(sm *snapshot.Manager, ctx context.Context, collectionID int64, name string) (*snapshotstorage.SnapshotData, error) {
 				return nil, errors.New("snapshot not found: " + name)
 			}).Build()
 		defer mockDescribe.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -3548,8 +3497,8 @@ func TestServer_DescribeSnapshot(t *testing.T) {
 		defer mockBuildURI.UnPatch()
 
 		// Mock DescribeSnapshot to return snapshot data
-		mockDescribe := mockey.Mock((*snapshotManager).DescribeSnapshot).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string) (*snapshotstorage.SnapshotData, error) {
+		mockDescribe := mockey.Mock((*snapshot.Manager).DescribeSnapshot).To(
+			func(sm *snapshot.Manager, ctx context.Context, collectionID int64, name string) (*snapshotstorage.SnapshotData, error) {
 				return &snapshotstorage.SnapshotData{
 					SnapshotInfo: &datapb.SnapshotInfo{
 						Name:         name,
@@ -3565,7 +3514,7 @@ func TestServer_DescribeSnapshot(t *testing.T) {
 		defer mockDescribe.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -3591,8 +3540,8 @@ func TestServer_DescribeSnapshot(t *testing.T) {
 		defer mockBuildURI.UnPatch()
 
 		// Mock DescribeSnapshot to return snapshot data with collection info
-		mockDescribe := mockey.Mock((*snapshotManager).DescribeSnapshot).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string) (*snapshotstorage.SnapshotData, error) {
+		mockDescribe := mockey.Mock((*snapshot.Manager).DescribeSnapshot).To(
+			func(sm *snapshot.Manager, ctx context.Context, collectionID int64, name string) (*snapshotstorage.SnapshotData, error) {
 				return &snapshotstorage.SnapshotData{
 					SnapshotInfo: &datapb.SnapshotInfo{
 						Name:         name,
@@ -3611,7 +3560,7 @@ func TestServer_DescribeSnapshot(t *testing.T) {
 		defer mockDescribe.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -3629,14 +3578,14 @@ func TestServer_DescribeSnapshot(t *testing.T) {
 
 	t.Run("missing_snapshot_info", func(t *testing.T) {
 		ctx := context.Background()
-		mockDescribe := mockey.Mock((*snapshotManager).DescribeSnapshot).Return(
+		mockDescribe := mockey.Mock((*snapshot.Manager).DescribeSnapshot).Return(
 			&snapshotstorage.SnapshotData{},
 			nil,
 		).Build()
 		defer mockDescribe.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -3668,14 +3617,14 @@ func TestServer_ListSnapshots(t *testing.T) {
 		ctx := context.Background()
 
 		// Mock ListSnapshots to return empty list
-		mockList := mockey.Mock((*snapshotManager).ListSnapshots).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID, dbID int64) ([]*datapb.SnapshotSummary, error) {
+		mockList := mockey.Mock((*snapshot.Manager).ListSnapshots).To(
+			func(sm *snapshot.Manager, ctx context.Context, collectionID, partitionID, dbID int64) ([]*datapb.SnapshotSummary, error) {
 				return []*datapb.SnapshotSummary{}, nil
 			}).Build()
 		defer mockList.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -3692,14 +3641,14 @@ func TestServer_ListSnapshots(t *testing.T) {
 		ctx := context.Background()
 
 		// Mock ListSnapshots to return list
-		mockList := mockey.Mock((*snapshotManager).ListSnapshots).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID, dbID int64) ([]*datapb.SnapshotSummary, error) {
+		mockList := mockey.Mock((*snapshot.Manager).ListSnapshots).To(
+			func(sm *snapshot.Manager, ctx context.Context, collectionID, partitionID, dbID int64) ([]*datapb.SnapshotSummary, error) {
 				return []*datapb.SnapshotSummary{{Name: "snapshot1", CreateTs: 200, Description: "daily"}, {Name: "snapshot2", CreateTs: 100}}, nil
 			}).Build()
 		defer mockList.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -3722,14 +3671,14 @@ func TestServer_ListSnapshots(t *testing.T) {
 		ctx := context.Background()
 
 		// Mock ListSnapshots to return error
-		mockList := mockey.Mock((*snapshotManager).ListSnapshots).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID, dbID int64) ([]*datapb.SnapshotSummary, error) {
+		mockList := mockey.Mock((*snapshot.Manager).ListSnapshots).To(
+			func(sm *snapshot.Manager, ctx context.Context, collectionID, partitionID, dbID int64) ([]*datapb.SnapshotSummary, error) {
 				return nil, errors.New("failed to list snapshots")
 			}).Build()
 		defer mockList.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -3802,7 +3751,7 @@ func TestServer_RestoreSnapshot(t *testing.T) {
 		// performed under the restore lock by PinSnapshot (which calls
 		// getSnapshotByName internally). We mock PinSnapshot to return
 		// ErrSnapshotNotFound.
-		mockPin := mockey.Mock((*snapshotMeta).PinSnapshot).Return(
+		mockPin := mockey.Mock((*snapshot.SnapshotMeta).PinSnapshot).Return(
 			int64(0), 0, merr.WrapErrSnapshotNotFound("non_existent_snapshot")).Build()
 		defer mockPin.UnPatch()
 
@@ -3817,9 +3766,10 @@ func TestServer_RestoreSnapshot(t *testing.T) {
 		defer mockBroadcast.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, newRestoreAbsentTargetBroker(t), nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(snapshot.NewRestoreAbsentTargetMeta(), nil, nil, nil, nil, snapshot.NewRestoreBrokerTarget(), nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
+		server.ddl = newDDLCallbacks(server)
 
 		resp, err := server.RestoreSnapshot(ctx, &datapb.RestoreSnapshotRequest{
 			Name:                 "non_existent_snapshot",
@@ -3837,7 +3787,7 @@ func TestServer_ExportSnapshot(t *testing.T) {
 
 	fakeHandler := &embeddedHandler{}
 	mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
-		&collectionInfo{
+		&meta.CollectionInfo{
 			ID:           100,
 			DatabaseName: "test_db",
 			Schema:       &schemapb.CollectionSchema{Name: "test_coll"},
@@ -3849,12 +3799,12 @@ func TestServer_ExportSnapshot(t *testing.T) {
 	defer mockClose.UnPatch()
 	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).Return(mockBroadcaster, nil).Build()
 	defer mockBroadcast.UnPatch()
-	mockExport := mockey.Mock((*snapshotManager).ExportSnapshot).Return(int64(0), merr.WrapErrServiceUnimplemented(errors.New("not implemented"))).Build()
+	mockExport := mockey.Mock((*snapshot.Manager).ExportSnapshot).Return(int64(0), merr.WrapErrServiceUnimplemented(errors.New("not implemented"))).Build()
 	defer mockExport.UnPatch()
 
 	server := &Server{
 		handler:         fakeHandler,
-		snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+		snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 	}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -3886,14 +3836,14 @@ func TestServer_GetExportSnapshotState(t *testing.T) {
 	})
 
 	t.Run("returns persisted job info", func(t *testing.T) {
-		manager := &snapshotManager{}
+		manager := &snapshot.Manager{}
 		expected := &datapb.ExportSnapshotJobInfo{
 			JobId:               9001,
 			State:               datapb.ExportSnapshotJobState_ExportSnapshotJobCompleted,
 			Progress:            100,
 			SnapshotMetadataUri: "s3://bucket/export-root/snapshots/100/metadata/1.json",
 		}
-		mockGetState := mockey.Mock((*snapshotManager).GetExportSnapshotState).Return(expected, nil).Build()
+		mockGetState := mockey.Mock((*snapshot.Manager).GetExportSnapshotState).Return(expected, nil).Build()
 		defer mockGetState.UnPatch()
 		server := &Server{snapshotManager: manager}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
@@ -3906,8 +3856,8 @@ func TestServer_GetExportSnapshotState(t *testing.T) {
 	})
 
 	t.Run("returns lookup error in status", func(t *testing.T) {
-		manager := &snapshotManager{}
-		mockGetState := mockey.Mock((*snapshotManager).GetExportSnapshotState).
+		manager := &snapshot.Manager{}
+		mockGetState := mockey.Mock((*snapshot.Manager).GetExportSnapshotState).
 			Return((*datapb.ExportSnapshotJobInfo)(nil), merr.WrapErrParameterInvalidMsg("snapshot export job 9001 not found")).
 			Build()
 		defer mockGetState.UnPatch()
@@ -3926,16 +3876,14 @@ func TestServer_GetExportSnapshotState(t *testing.T) {
 
 func TestServer_CreateSnapshotFlushBroadcast(t *testing.T) {
 	ctx := context.Background()
-	patch := mockey.Mock((*snapshotManager).GetSnapshot).
+	patch := mockey.Mock((*snapshot.Manager).GetSnapshot).
 		Return(nil, merr.WrapErrSnapshotNotFound("snap", "not found")).Build()
 	defer patch.UnPatch()
-	patchCollection := mockey.Mock((*embeddedHandler).GetCollection).Return(&collectionInfo{
+	patchCollection := mockey.Mock((*embeddedHandler).GetCollection).Return(&meta.CollectionInfo{
 		ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "collection"},
 		VChannelNames: []string{"p1_100v0", "p2_100v1"},
 	}, nil).Build()
 	defer patchCollection.UnPatch()
-	patchExists := mockey.Mock((*embeddedBroker).HasCollection).Return(true, nil).Build()
-	defer patchExists.UnPatch()
 	patchStart := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).Return(&embeddedBroadcastAPI{}, nil).Build()
 	defer patchStart.UnPatch()
 	patchClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
@@ -3952,8 +3900,9 @@ func TestServer_CreateSnapshotFlushBroadcast(t *testing.T) {
 		}).Build()
 	defer patchBroadcast.UnPatch()
 	server := &Server{
-		snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
-		handler:         &embeddedHandler{}, broker: &embeddedBroker{},
+		snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+		handler:         &embeddedHandler{},
+		meta:            meta.NewMetaWithCollections(&meta.CollectionInfo{ID: 100}),
 	}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 	resp, err := server.CreateSnapshot(ctx, &datapb.CreateSnapshotRequest{Name: "snap", CollectionId: 100})
@@ -3982,14 +3931,14 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		ctx := context.Background()
 
 		// Mock GetSnapshot to return existing snapshot (no error means it exists)
-		mockGet := mockey.Mock((*snapshotManager).GetSnapshot).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
+		mockGet := mockey.Mock((*snapshot.Manager).GetSnapshot).To(
+			func(sm *snapshot.Manager, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
 				return &datapb.SnapshotInfo{Name: name}, nil
 			}).Build()
 		defer mockGet.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -4052,8 +4001,8 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		// decode failure). Such errors must be surfaced — not silently treated
 		// as "snapshot does not exist" — so the broadcast path is never reached.
 		unexpectedErr := errors.New("etcd request timeout")
-		mockGet := mockey.Mock((*snapshotManager).GetSnapshot).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
+		mockGet := mockey.Mock((*snapshot.Manager).GetSnapshot).To(
+			func(sm *snapshot.Manager, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
 				return nil, unexpectedErr
 			}).Build()
 		defer mockGet.UnPatch()
@@ -4064,14 +4013,14 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		handlerCalled := false
 		fakeHandler := &embeddedHandler{}
 		mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).To(
-			func(_ *embeddedHandler, _ context.Context, _ int64) (*collectionInfo, error) {
+			func(_ *embeddedHandler, _ context.Context, _ int64) (*meta.CollectionInfo, error) {
 				handlerCalled = true
-				return &collectionInfo{DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "test_coll"}}, nil
+				return &meta.CollectionInfo{DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "test_coll"}}, nil
 			}).Build()
 		defer mockGetColl.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 			handler:         fakeHandler,
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
@@ -4094,8 +4043,8 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		// First call (pre-lock): NotFound — pass through.
 		// Second call (post-lock double-check): non-NotFound — must be surfaced.
 		callCount := 0
-		mockGet := mockey.Mock((*snapshotManager).GetSnapshot).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
+		mockGet := mockey.Mock((*snapshot.Manager).GetSnapshot).To(
+			func(sm *snapshot.Manager, ctx context.Context, collectionID int64, name string) (*datapb.SnapshotInfo, error) {
 				callCount++
 				if callCount == 1 {
 					return nil, merr.WrapErrSnapshotNotFound(name, "first lookup")
@@ -4107,7 +4056,7 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		// Resolve collection via local handler cache — no broker RPC.
 		fakeHandler := &embeddedHandler{}
 		mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
-			&collectionInfo{
+			&meta.CollectionInfo{
 				ID:           100,
 				DatabaseName: "default",
 				Schema:       &schemapb.CollectionSchema{Name: "test_collection"},
@@ -4125,14 +4074,10 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 			}).Build()
 		defer mockBroadcast.UnPatch()
 
-		fakeBroker := &embeddedBroker{}
-		mockHasCollection := mockey.Mock((*embeddedBroker).HasCollection).Return(true, nil).Build()
-		defer mockHasCollection.UnPatch()
-
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 			handler:         fakeHandler,
-			broker:          fakeBroker,
+			meta:            meta.NewMetaWithCollections(&meta.CollectionInfo{ID: 100}),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -4151,14 +4096,14 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 	t.Run("collection_dropped_after_lock_acquisition", func(t *testing.T) {
 		ctx := context.Background()
 
-		mockGet := mockey.Mock((*snapshotManager).GetSnapshot).Return(
+		mockGet := mockey.Mock((*snapshot.Manager).GetSnapshot).Return(
 			nil, merr.WrapErrSnapshotNotFound("race_snapshot", "not found"),
 		).Build()
 		defer mockGet.UnPatch()
 
 		fakeHandler := &embeddedHandler{}
 		mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
-			&collectionInfo{
+			&meta.CollectionInfo{
 				ID:           100,
 				DatabaseName: "default",
 				Schema:       &schemapb.CollectionSchema{Name: "test_collection"},
@@ -4182,20 +4127,14 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 			}).Build()
 		defer mockStartBroadcast.UnPatch()
 
-		hasCollectionCalled := false
-		fakeBroker := &embeddedBroker{}
-		mockHasCollection := mockey.Mock((*embeddedBroker).HasCollection).To(
-			func(_ *embeddedBroker, _ context.Context, collectionID int64) (bool, error) {
-				hasCollectionCalled = true
-				assert.Equal(t, int64(100), collectionID)
-				return false, nil
-			}).Build()
-		defer mockHasCollection.UnPatch()
-
+		// The handler still resolved the collection before the lock; the view
+		// now shows it Dropping.
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 			handler:         fakeHandler,
-			broker:          fakeBroker,
+			meta: meta.NewMetaWithCollections(&meta.CollectionInfo{
+				ID: 100, State: etcdpb.CollectionState_CollectionDropping,
+			}),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -4207,66 +4146,7 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Error(t, merr.Error(resp))
 		assert.True(t, errors.Is(merr.Error(resp), merr.ErrCollectionNotFound))
-		assert.True(t, hasCollectionCalled, "collection availability must be checked under the resource lock")
 		assert.False(t, broadcastCalled, "CreateSnapshot must not broadcast after DropCollection wins the lock race")
-	})
-
-	t.Run("collection_recheck_error_after_lock", func(t *testing.T) {
-		ctx := context.Background()
-
-		mockGet := mockey.Mock((*snapshotManager).GetSnapshot).Return(
-			nil, merr.WrapErrSnapshotNotFound("race_snapshot", "not found"),
-		).Build()
-		defer mockGet.UnPatch()
-
-		fakeHandler := &embeddedHandler{}
-		mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
-			&collectionInfo{
-				ID:           100,
-				DatabaseName: "default",
-				Schema:       &schemapb.CollectionSchema{Name: "test_collection"},
-			}, nil,
-		).Build()
-		defer mockGetColl.UnPatch()
-
-		broadcastCalled := false
-		mockBroadcaster := &embeddedBroadcastAPI{}
-		mockClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
-		defer mockClose.UnPatch()
-		mockDoBroadcast := mockey.Mock((*embeddedBroadcastAPI).Broadcast).To(
-			func(_ *embeddedBroadcastAPI, _ context.Context, _ message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
-				broadcastCalled = true
-				return &types2.BroadcastAppendResult{}, nil
-			}).Build()
-		defer mockDoBroadcast.UnPatch()
-		mockStartBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
-			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
-				return mockBroadcaster, nil
-			}).Build()
-		defer mockStartBroadcast.UnPatch()
-
-		fakeBroker := &embeddedBroker{}
-		mockHasCollection := mockey.Mock((*embeddedBroker).HasCollection).Return(
-			false, errors.New("rootcoord unavailable"),
-		).Build()
-		defer mockHasCollection.UnPatch()
-
-		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
-			handler:         fakeHandler,
-			broker:          fakeBroker,
-		}
-		server.stateCode.Store(commonpb.StateCode_Healthy)
-
-		resp, err := server.CreateSnapshot(ctx, &datapb.CreateSnapshotRequest{
-			Name:         "race_snapshot",
-			CollectionId: 100,
-		})
-
-		assert.NoError(t, err)
-		assert.Error(t, merr.Error(resp))
-		assert.Contains(t, resp.GetReason(), "rootcoord unavailable")
-		assert.False(t, broadcastCalled, "CreateSnapshot must not broadcast if the lock-held collection recheck fails")
 	})
 }
 
@@ -4286,7 +4166,7 @@ func TestServer_PinSnapshotData_AcquiresResourceKeyLock(t *testing.T) {
 		// broker RPC on the hot path.
 		fakeHandler := &embeddedHandler{}
 		mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
-			&collectionInfo{
+			&meta.CollectionInfo{
 				ID:           100,
 				DatabaseName: "test_db",
 				Schema:       &schemapb.CollectionSchema{Name: "test_coll"},
@@ -4309,8 +4189,8 @@ func TestServer_PinSnapshotData_AcquiresResourceKeyLock(t *testing.T) {
 		defer mockBroadcast.UnPatch()
 
 		// PinSnapshotData must be called AFTER the lock is acquired.
-		mockPin := mockey.Mock((*snapshotManager).PinSnapshotData).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string, ttl int64) (int64, error) {
+		mockPin := mockey.Mock((*snapshot.Manager).PinSnapshotData).To(
+			func(sm *snapshot.Manager, ctx context.Context, collectionID int64, name string, ttl int64) (int64, error) {
 				assert.True(t, lockAcquired, "lock must be acquired before PinSnapshotData is called")
 				return 42, nil
 			}).Build()
@@ -4318,7 +4198,7 @@ func TestServer_PinSnapshotData_AcquiresResourceKeyLock(t *testing.T) {
 
 		server := &Server{
 			handler:         fakeHandler,
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -4375,7 +4255,7 @@ func TestServer_PinSnapshotData_AcquiresResourceKeyLock(t *testing.T) {
 
 		server := &Server{
 			handler:         fakeHandler,
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -4402,7 +4282,7 @@ func TestServer_PinSnapshotData_AcquiresResourceKeyLock(t *testing.T) {
 
 		server := &Server{
 			handler:         fakeHandler,
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -4421,7 +4301,7 @@ func TestServer_PinSnapshotData_AcquiresResourceKeyLock(t *testing.T) {
 
 		fakeHandler := &embeddedHandler{}
 		mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
-			&collectionInfo{
+			&meta.CollectionInfo{
 				ID:           100,
 				DatabaseName: "test_db",
 				Schema:       &schemapb.CollectionSchema{Name: "test_coll"},
@@ -4437,8 +4317,8 @@ func TestServer_PinSnapshotData_AcquiresResourceKeyLock(t *testing.T) {
 
 		// PinSnapshotData must NOT be called if lock fails.
 		pinCalled := false
-		mockPin := mockey.Mock((*snapshotManager).PinSnapshotData).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string, ttl int64) (int64, error) {
+		mockPin := mockey.Mock((*snapshot.Manager).PinSnapshotData).To(
+			func(sm *snapshot.Manager, ctx context.Context, collectionID int64, name string, ttl int64) (int64, error) {
 				pinCalled = true
 				return 0, nil
 			}).Build()
@@ -4446,7 +4326,7 @@ func TestServer_PinSnapshotData_AcquiresResourceKeyLock(t *testing.T) {
 
 		server := &Server{
 			handler:         fakeHandler,
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -4466,20 +4346,16 @@ func TestServer_PinSnapshotData_AcquiresResourceKeyLock(t *testing.T) {
 func TestServer_CommitBackfillResult(t *testing.T) {
 	// Small helper to build a minimal Server with a healthy state and a
 	// chunk manager that always returns the supplied JSON bytes.
-	newServerForCommit := func(t *testing.T, m *meta, b broker.Broker, jsonBytes []byte) *Server {
+	newServerForCommit := func(t *testing.T, m *meta.Meta, b broker.Broker, jsonBytes []byte) *Server {
 		cm := mock_storage.NewMockChunkManager(t)
 		cm.EXPECT().Size(mock.Anything, mock.Anything).Return(int64(len(jsonBytes)), nil).Maybe()
 		cm.EXPECT().Read(mock.Anything, mock.Anything).Return(jsonBytes, nil).Maybe()
-		m.chunkManager = cm
-		if b == nil {
-			// CommitBackfillResult describes the collection before classification;
-			// a nil broker stands in for tests that do not exercise the broker.
-			mockBroker := broker.NewMockBroker(t)
-			mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-				Return(&milvuspb.DescribeCollectionResponse{
-					Status: merr.Success(), DbName: "default", CollectionName: "c",
-				}, nil).Maybe()
-			b = mockBroker
+		m.ChunkManager = cm
+		if m.GetCollection(100) == nil {
+			// CommitBackfillResult reads the collection before classification;
+			// tests that do not set up the view get collection 100 without a
+			// schema, which skips field validation.
+			m.AddCollection(&meta.CollectionInfo{ID: 100, DatabaseName: "default"})
 		}
 		s := &Server{
 			meta:   m,
@@ -4489,13 +4365,27 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		return s
 	}
 
+	// onCollectionRead runs fn with the 1-based count of each collection read
+	// CommitBackfillResult makes (the fast-fail read, then the re-check before
+	// each commit batch), so a test can interleave a change between them.
+	onCollectionRead := func(fn func(call int)) func() {
+		calls := 0
+		patch := mockey.Mock((*meta.Meta).GetCollectionOrNotFound).To(
+			func(m *meta.Meta, collectionID UniqueID) (*meta.CollectionInfo, error) {
+				calls++
+				fn(calls)
+				return m.GetCollection(collectionID), nil
+			}).Build()
+		return func() { patch.UnPatch() }
+	}
+
 	// captureManifestCommits intercepts meta.CommitSegmentManifests so tests can
 	// assert the exact commit units the backfill handler builds, instead of
 	// inspecting broadcast payloads.
-	captureManifestCommits := func(t *testing.T) (*[]SegmentManifestCommit, func()) {
-		var captured []SegmentManifestCommit
-		patch := mockey.Mock((*meta).CommitSegmentManifests).To(
-			func(_ *meta, _ context.Context, commits []SegmentManifestCommit, _ ...UpdateOperator) error {
+	captureManifestCommits := func(t *testing.T) (*[]meta.SegmentManifestCommit, func()) {
+		var captured []meta.SegmentManifestCommit
+		patch := mockey.Mock((*meta.Meta).CommitSegmentManifests).To(
+			func(_ *meta.Meta, _ context.Context, commits []meta.SegmentManifestCommit, _ ...meta.UpdateOperator) error {
 				captured = append(captured, commits...)
 				return nil
 			}).Build()
@@ -4506,10 +4396,10 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// per-segment commit) for replace-of-indexed-field entries, which the
 	// handler routes through the single-commit path because it can retract
 	// SegmentIndex records atomically with the manifest pointer.
-	captureSingleManifestCommit := func(t *testing.T) (*[]SegmentManifestCommit, func()) {
-		var captured []SegmentManifestCommit
-		patch := mockey.Mock((*meta).CommitSegmentManifest).To(
-			func(_ *meta, _ context.Context, commit SegmentManifestCommit) error {
+	captureSingleManifestCommit := func(t *testing.T) (*[]meta.SegmentManifestCommit, func()) {
+		var captured []meta.SegmentManifestCommit
+		patch := mockey.Mock((*meta.Meta).CommitSegmentManifest).To(
+			func(_ *meta.Meta, _ context.Context, commit meta.SegmentManifestCommit) error {
 				captured = append(captured, commit)
 				return nil
 			}).Build()
@@ -4532,11 +4422,11 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// through meta.CommitSegmentManifests (Noop mutations, no broadcast).
 	t.Run("v3_happy_path", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 
 		for _, id := range []int64{1001, 1002} {
-			m.AddSegment(ctx, &SegmentInfo{
+			m.AddSegment(ctx, &meta.SegmentInfo{
 				SegmentInfo: &datapb.SegmentInfo{
 					ID:             id,
 					CollectionID:   100,
@@ -4557,12 +4447,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
         }`
 
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				DbName:         "default",
-				CollectionName: "test_collection",
-			}, nil).Maybe()
+		m.AddCollection(&meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
 
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
@@ -4584,7 +4469,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		// Both entries are legacy Noop adoptions with no source-version pin.
 		require.Len(t, *captured, 2)
 		for _, c := range *captured {
-			assert.Equal(t, ManifestMutationNoop, c.Mutation.Type)
+			assert.Equal(t, meta.ManifestMutationNoop, c.Mutation.Type)
 			assert.Equal(t, "", c.ExpectedManifest)
 			_, ver, err := packed.UnmarshalManifestPath(c.Mutation.ManifestPath)
 			require.NoError(t, err)
@@ -4608,9 +4493,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// The handler must not add a second notification after a V3 commit.
 	t.Run("v3_commit_recomputes_data_view", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
-		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 903, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV3,
 			ManifestPath:   packed.MarshalManifestPath("/seg/903", 1),
@@ -4623,15 +4508,11 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		var recomputeCalls int
-		patch := mockey.Mock((*meta).recomputeDataView).To(
-			func(_ *meta, _ context.Context, _ int64) {
+		patch := mockey.Mock((*meta.Meta).RecomputeDataView).To(
+			func(_ *meta.Meta, _ context.Context, _ int64) {
 				recomputeCalls++
 			}).Build()
 		defer patch.UnPatch()
@@ -4649,9 +4530,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// unchanged membership/manifest projection does not publish a new DataVersion.
 	t.Run("v2_commit_notifies_data_view_reconciliation", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
-		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 202, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV2,
 		}})
@@ -4672,15 +4553,11 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		var recomputeCalls int
-		patch := mockey.Mock((*meta).recomputeDataView).To(
-			func(_ *meta, _ context.Context, _ int64) {
+		patch := mockey.Mock((*meta.Meta).RecomputeDataView).To(
+			func(_ *meta.Meta, _ context.Context, _ int64) {
 				recomputeCalls++
 			}).Build()
 		defer patch.UnPatch()
@@ -4699,9 +4576,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// as a whole (no broadcast), with every segment reported failed.
 	t.Run("schema_version_mismatch_rejected", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
-		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 501, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV3,
 			ManifestPath:   packed.MarshalManifestPath("/seg/501", 1),
@@ -4716,13 +4593,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				DbName:         "default",
-				CollectionName: "c",
-				Schema:         &schemapb.CollectionSchema{Version: 5},
-			}, nil).Maybe()
+		m.AddCollection(&meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "c", Version: 5}})
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		wal := mock_streaming.NewMockWALAccesser(t)
@@ -4745,9 +4616,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// Schema-version fence: a matching version passes and reaches broadcast.
 	t.Run("schema_version_match_accepted", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
-		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 502, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV3,
 			ManifestPath:   packed.MarshalManifestPath("/seg/502", 1),
@@ -4761,13 +4632,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				DbName:         "default",
-				CollectionName: "c",
-				Schema:         &schemapb.CollectionSchema{Version: 5},
-			}, nil).Maybe()
+		m.AddCollection(&meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "c", Version: 5}})
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		captured, unpatch := captureManifestCommits(t)
@@ -4785,7 +4650,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		assert.Equal(t, int32(1), resp.GetCommittedSegments())
 		assert.Equal(t, int32(0), resp.GetFailedSegments())
 		require.Len(t, *captured, 1)
-		assert.Equal(t, ManifestMutationNoop, (*captured)[0].Mutation.Type)
+		assert.Equal(t, meta.ManifestMutationNoop, (*captured)[0].Mutation.Type)
 	})
 
 	// Schema-version fence: the fast-fail pre-check passes, but the version
@@ -4794,9 +4659,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// aborted and every segment reported failed.
 	t.Run("schema_version_changed_before_commit_rejected", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
-		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 504, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV3,
 			ManifestPath:   packed.MarshalManifestPath("/seg/504", 1),
@@ -4813,21 +4678,15 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		// before the batch commit) sees version 6, as if an alter/drop-function
 		// committed between the two.
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				DbName:         "default",
-				CollectionName: "c",
-				Schema:         &schemapb.CollectionSchema{Version: 5},
-			}, nil).Once()
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				DbName:         "default",
-				CollectionName: "c",
-				Schema:         &schemapb.CollectionSchema{Version: 6},
-			}, nil).Once()
+		m.AddCollection(&meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "c", Version: 5}})
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
+
+		unpatchRead := onCollectionRead(func(call int) {
+			if call == 2 {
+				m.AddCollection(&meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "c", Version: 6}})
+			}
+		})
+		defer unpatchRead()
 
 		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
 			ResultPath: "s3a://bkt/result.json",
@@ -4846,9 +4705,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// producer that does not stamp it) is exempt from the fence.
 	t.Run("schema_version_zero_exempt", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
-		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 503, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV3,
 			ManifestPath:   packed.MarshalManifestPath("/seg/503", 1),
@@ -4863,13 +4722,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				DbName:         "default",
-				CollectionName: "c",
-				Schema:         &schemapb.CollectionSchema{Version: 9},
-			}, nil).Maybe()
+		m.AddCollection(&meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "c", Version: 9}})
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		captured, unpatch := captureManifestCommits(t)
@@ -4891,7 +4744,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 
 	t.Run("success_false_rejected", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		jsonStr := `{"success": false, "collectionId": 1, "segments": {"1": {"version": 1}}}`
 		server := newServerForCommit(t, m, nil, []byte(jsonStr))
@@ -4904,7 +4757,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 
 	t.Run("bad_json_rejected", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		server := newServerForCommit(t, m, nil, []byte("not json"))
 		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
@@ -4917,7 +4770,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// All segments fail pre-validation -> no broadcast, top-level error.
 	t.Run("all_segments_prevalidation_fail", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		// Seg 1 does NOT exist in meta, so pre-validation rejects it.
 		jsonStr := `{
@@ -4945,15 +4798,15 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// one fails (wrong collection).
 	t.Run("partial_failure_reported", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
-		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 101, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV3,
 			ManifestPath:   packed.MarshalManifestPath("/seg/101", 1),
 		}})
 		// 102 belongs to a different collection
-		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 102, CollectionID: 999, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV3,
 			ManifestPath:   packed.MarshalManifestPath("/seg/102", 1),
@@ -4967,12 +4820,6 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				DbName:         "default",
-				CollectionName: "c",
-			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		captured, unpatch := captureManifestCommits(t)
@@ -4999,9 +4846,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// UpdateSegmentsInfo and lands on the segment's FieldBinlogs.
 	t.Run("v2_happy_path", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
-		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 201, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV2,
 		}})
@@ -5022,10 +4869,6 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
@@ -5057,7 +4900,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// writes for the whole commit.
 	t.Run("v2_batched_update_segments_info", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 
 		var segIDs []string
@@ -5066,7 +4909,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		for i := 1; i <= maxBackfillCommitBatch+5; i++ {
 			id := int64(10000 + i)
 			segIDs = append(segIDs, strconv.FormatInt(id, 10))
-			m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID: id, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 				StorageVersion: storage.StorageV2,
 			}})
@@ -5077,15 +4920,11 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		}
 		b.WriteString(`}}`)
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(b.String()))
 
 		var updateCalls int
-		patch := mockey.Mock((*meta).UpdateSegmentsInfo).To(
-			func(_ *meta, _ context.Context, ops ...UpdateOperator) error {
+		patch := mockey.Mock((*meta.Meta).UpdateSegmentsInfo).To(
+			func(_ *meta.Meta, _ context.Context, ops ...meta.UpdateOperator) error {
 				updateCalls++
 				return nil
 			}).Build()
@@ -5107,9 +4946,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// to a different partition -> rejected.
 	t.Run("wrong_partition_rejected", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
-		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 401, CollectionID: 100, PartitionID: 999,
 			State:          commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV3,
@@ -5140,11 +4979,11 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// partition ID; segments from different partitions are all accepted.
 	t.Run("multi_partition_negative_partition_id_ok", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		for _, p := range []int64{101, 102} {
 			id := 1000 + p
-			m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID: id, CollectionID: 100, PartitionID: p,
 				State:          commonpb.SegmentState_Flushed,
 				StorageVersion: storage.StorageV3,
@@ -5161,10 +5000,6 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		captured, unpatch := captureManifestCommits(t)
@@ -5190,9 +5025,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// would otherwise see a fake committed=true.
 	t.Run("v3_rejected_on_non_v3_segment", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
-		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 301, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV2, // V2 segment, JSON misroutes it as V3
 			ManifestPath:   packed.MarshalManifestPath("/seg/301", 1),
@@ -5221,9 +5056,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// Spark retry from silently rolling the manifest pointer backwards.
 	t.Run("v3_rejected_on_stale_version", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
-		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 401, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV3,
 			// current manifest version = 10
@@ -5254,9 +5089,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// commit as a no-op while we report committed=true.
 	t.Run("v3_rejected_on_equal_version", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
-		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 402, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV3,
 			ManifestPath:   packed.MarshalManifestPath("/seg/402", 7),
@@ -5282,9 +5117,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// (ManifestPath == "") must be rejected at pre-validation.
 	t.Run("v3_rejected_on_empty_manifest_path", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
-		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 302, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV3,
 			// ManifestPath intentionally empty.
@@ -5312,13 +5147,13 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// so an oversized or malicious file cannot OOM DataCoord.
 	t.Run("oversized_result_rejected", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 
 		cm := mock_storage.NewMockChunkManager(t)
 		cm.EXPECT().Size(mock.Anything, mock.Anything).Return(maxBackfillResultBytes+1, nil)
 		// Read must not be called -- assert by omitting the expectation.
-		m.chunkManager = cm
+		m.ChunkManager = cm
 
 		s := &Server{meta: m}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
@@ -5337,9 +5172,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// drop those changes.
 	t.Run("v3_legacy_rejected_on_source_version_mismatch", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
-		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 403, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV3,
 			// current manifest version = 10
@@ -5369,9 +5204,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// commit carrying the column-group descriptor, with no source-version pin.
 	t.Run("v3_delta_add_happy_path", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
-		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 601, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV3,
 			ManifestPath:   packed.MarshalManifestPath("/seg/601", 3),
@@ -5391,10 +5226,6 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		captured, unpatch := captureManifestCommits(t)
@@ -5412,7 +5243,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		assert.Equal(t, int32(1), resp.GetCommittedSegments())
 		require.Len(t, *captured, 1)
 		commit := (*captured)[0]
-		assert.Equal(t, ManifestMutationCommitUpdates, commit.Mutation.Type)
+		assert.Equal(t, meta.ManifestMutationCommitUpdates, commit.Mutation.Type)
 		assert.Equal(t, "", commit.ExpectedManifest)
 		require.NotNil(t, commit.Mutation.Updates)
 		assert.Len(t, commit.Mutation.Updates.ColumnGroups, 1)
@@ -5430,9 +5261,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// path cannot mutate SegmentIndex records.
 	t.Run("v3_delta_replace_happy_path", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
-		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 602, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV3,
 			ManifestPath:   packed.MarshalManifestPath("/seg/602", 3),
@@ -5452,10 +5283,6 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		captured, unpatch := captureSingleManifestCommit(t)
@@ -5473,7 +5300,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		assert.Equal(t, int32(1), resp.GetCommittedSegments())
 		require.Len(t, *captured, 1)
 		commit := (*captured)[0]
-		assert.Equal(t, ManifestMutationCommitUpdates, commit.Mutation.Type)
+		assert.Equal(t, meta.ManifestMutationCommitUpdates, commit.Mutation.Type)
 		assert.Equal(t, "", commit.ExpectedManifest)
 		require.NotNil(t, commit.Mutation.Updates)
 		assert.Equal(t, []string{"100"}, commit.Mutation.Updates.DropColumns)
@@ -5488,9 +5315,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// republishes a new revision nor re-retracts rebuilt SegmentIndex records.
 	t.Run("v3_delta_replace_replay_idempotent", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
-		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 603, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV3,
 			ManifestPath:   packed.MarshalManifestPath("/seg/603", 3),
@@ -5510,10 +5337,6 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		captured, unpatch := captureSingleManifestCommit(t)
@@ -5552,7 +5375,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		defer paramtable.Get().Reset(Params.CommonCfg.StorageType.Key)
 		defer paramtable.Get().Reset(Params.LocalStorageCfg.Path.Key)
 
-		cfg := createStorageConfig()
+		cfg := meta.CreateStorageConfig()
 		basePath := path.Join(localRoot, "backfill_replace_indexed", "seg810")
 		oldPath := path.Join(basePath, "_data", "100_old.parquet")
 		// Seed a manifest holding an old group for field 100 plus an index
@@ -5576,17 +5399,17 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		_, _, err = packed.UnmarshalManifestPath(seedManifest)
 		require.NoError(t, err)
 
-		m, err := newMemoryMeta(t)
+		m, dm, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
-		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 810, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV3,
 			ManifestPath:   packed.MarshalManifestPath(basePath, 1),
 		}})
-		require.NoError(t, m.indexMeta.CreateIndex(ctx, &model.Index{
+		require.NoError(t, dm.IndexMeta.CreateIndex(ctx, &model.Index{
 			CollectionID: 100, FieldID: 100, IndexID: 10, IndexName: "idx_100",
 		}))
-		require.NoError(t, m.indexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
+		require.NoError(t, dm.IndexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
 			CollectionID: 100, SegmentID: 810, IndexID: 10, BuildID: 500,
 			IndexState: commonpb.IndexState_Finished, IndexVersion: 1,
 		}))
@@ -5607,10 +5430,6 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`, newPath)
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
@@ -5623,7 +5442,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		// The SegmentIndex record is retracted in the same transaction, so the
 		// stale Finished record no longer serves the old artifact and the
 		// inspector will rebuild against the new column data.
-		require.Empty(t, m.indexMeta.GetSegmentIndexes(100, 810))
+		require.Empty(t, dm.IndexMeta.GetSegmentIndexes(100, 810))
 		// The manifest dropped the column's index entries and re-registered
 		// the field with the new files.
 		manifestPath := m.GetSegment(ctx, 810).GetManifestPath()
@@ -5649,7 +5468,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		defer paramtable.Get().Reset(Params.CommonCfg.StorageType.Key)
 		defer paramtable.Get().Reset(Params.LocalStorageCfg.Path.Key)
 
-		cfg := createStorageConfig()
+		cfg := meta.CreateStorageConfig()
 		basePath := path.Join(localRoot, "backfill_replay", "seg810")
 		// Seed a manifest with a 5-row group for field 101. Column-group file
 		// paths are absolute object keys under the segment base (the form the
@@ -5667,9 +5486,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, int64(1), seedVersion)
 
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
-		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 810, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV3,
 			ManifestPath:   packed.MarshalManifestPath(basePath, 1),
@@ -5691,10 +5510,6 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`, addPath)
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		// First submission commits the real manifest revision.
@@ -5731,7 +5546,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		defer paramtable.Get().Reset(Params.CommonCfg.StorageType.Key)
 		defer paramtable.Get().Reset(Params.LocalStorageCfg.Path.Key)
 
-		cfg := createStorageConfig()
+		cfg := meta.CreateStorageConfig()
 		basePath := path.Join(localRoot, "backfill_conflict", "seg811")
 		oldPath := path.Join(basePath, "_data", "100_old.parquet")
 		seedManifest, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(basePath, packed.ManifestEarliest), cfg, &packed.ManifestUpdates{
@@ -5745,9 +5560,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		_, _, err = packed.UnmarshalManifestPath(seedManifest)
 		require.NoError(t, err)
 
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
-		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 811, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV3,
 			ManifestPath:   packed.MarshalManifestPath(basePath, 1),
@@ -5783,14 +5598,14 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// kinds in one batch, dispatched together.
 	t.Run("v3_mixed_delta_and_legacy_batch", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
-		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 901, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV3,
 			ManifestPath:   packed.MarshalManifestPath("/seg/901", 3),
 		}})
-		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 902, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV3,
 			ManifestPath:   packed.MarshalManifestPath("/seg/902", 10),
@@ -5811,10 +5626,6 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		captured, unpatch := captureManifestCommits(t)
@@ -5831,12 +5642,12 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		assert.True(t, merr.Ok(resp.GetStatus()))
 		assert.Equal(t, int32(2), resp.GetCommittedSegments())
 		require.Len(t, *captured, 2)
-		var delta, legacy *SegmentManifestCommit
+		var delta, legacy *meta.SegmentManifestCommit
 		for i := range *captured {
 			switch (*captured)[i].Mutation.Type {
-			case ManifestMutationCommitUpdates:
+			case meta.ManifestMutationCommitUpdates:
 				delta = &(*captured)[i]
-			case ManifestMutationNoop:
+			case meta.ManifestMutationNoop:
 				legacy = &(*captured)[i]
 			}
 		}
@@ -5856,9 +5667,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// per-segment failure instead of reporting a fake committed=true.
 	t.Run("v3_legacy_stale_cas_surfaces_failed", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
-		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 701, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV3,
 			ManifestPath:   packed.MarshalManifestPath("/seg/701", 10),
@@ -5871,17 +5682,13 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		// The framework's own stale error, as produced when the pointer moved
 		// past the pinned source version between pre-check and lock.
-		patch := mockey.Mock((*meta).CommitSegmentManifests).To(
-			func(_ *meta, _ context.Context, _ []SegmentManifestCommit, _ ...UpdateOperator) error {
-				return staleSegmentManifestError(701,
+		patch := mockey.Mock((*meta.Meta).CommitSegmentManifests).To(
+			func(_ *meta.Meta, _ context.Context, _ []meta.SegmentManifestCommit, _ ...meta.UpdateOperator) error {
+				return meta.StaleSegmentManifestError(701,
 					packed.MarshalManifestPath("/seg/701", 10),
 					packed.MarshalManifestPath("/seg/701", 11))
 			}).Build()
@@ -5903,9 +5710,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// legacy CAS treats the replay as stale rather than rolling back.
 	t.Run("v3_legacy_idempotent_replay", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
-		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 702, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV3,
 			ManifestPath:   packed.MarshalManifestPath("/seg/702", 10),
@@ -5918,10 +5725,6 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		first, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
@@ -5957,18 +5760,14 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		newStandalone := func(t *testing.T) *Server {
-			mm, err := newMemoryMeta(t)
+			mm, _, err := index.NewMemoryMetaWithIndex(t)
 			require.NoError(t, err)
-			mm.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			mm.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID: 801, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 				StorageVersion: storage.StorageV3,
 				ManifestPath:   packed.MarshalManifestPath("/seg/801", 10),
 			}})
 			b := broker.NewMockBroker(t)
-			b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-				Return(&milvuspb.DescribeCollectionResponse{
-					Status: merr.Success(), DbName: "default", CollectionName: "c",
-				}, nil).Maybe()
 			return newServerForCommit(t, mm, b, []byte(jsonStr))
 		}
 
@@ -5999,13 +5798,13 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// arbitrarily large batch.
 	t.Run("commits_split_across_manifest_batches", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 
 		segIDs := make([]int64, 0, maxBackfillCommitBatch+5)
 		for i := int64(1); i <= int64(maxBackfillCommitBatch+5); i++ {
 			segIDs = append(segIDs, 10000+i)
-			m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID: 10000 + i, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 				StorageVersion: storage.StorageV3,
 				ManifestPath:   packed.MarshalManifestPath("/seg/"+strconv.FormatInt(10000+i, 10), 1),
@@ -6023,17 +5822,13 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		b.WriteString(`}}`)
 
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil).Maybe()
 
 		server := newServerForCommit(t, m, mockBroker, []byte(b.String()))
 
 		var commitCalls int
-		var committed []SegmentManifestCommit
-		patch := mockey.Mock((*meta).CommitSegmentManifests).To(
-			func(_ *meta, _ context.Context, cs []SegmentManifestCommit, _ ...UpdateOperator) error {
+		var committed []meta.SegmentManifestCommit
+		patch := mockey.Mock((*meta.Meta).CommitSegmentManifests).To(
+			func(_ *meta.Meta, _ context.Context, cs []meta.SegmentManifestCommit, _ ...meta.UpdateOperator) error {
 				commitCalls++
 				committed = append(committed, cs...)
 				return nil
@@ -6063,7 +5858,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 
 		// Twice the classification concurrency, so more than a full worker
@@ -6122,7 +5917,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		defer paramtable.Get().Reset(Params.CommonCfg.StorageType.Key)
 		defer paramtable.Get().Reset(Params.LocalStorageCfg.Path.Key)
 
-		cfg := createStorageConfig()
+		cfg := meta.CreateStorageConfig()
 		basePath := path.Join(localRoot, "backfill_replace_race", "seg812")
 		oldPath := path.Join(basePath, "_data", "100_old.parquet")
 		_, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(basePath, packed.ManifestEarliest), cfg, &packed.ManifestUpdates{
@@ -6134,16 +5929,16 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		m, err := newMemoryMeta(t)
+		m, dm, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
-		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 812, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV3,
 			ManifestPath:   packed.MarshalManifestPath(basePath, 1),
 		}})
 		// The field has an index definition but NO build record at classification:
 		// a build created afterwards must still be retracted by the commit.
-		require.NoError(t, m.indexMeta.CreateIndex(ctx, &model.Index{
+		require.NoError(t, dm.IndexMeta.CreateIndex(ctx, &model.Index{
 			CollectionID: 100, FieldID: 100, IndexID: 10, IndexName: "idx_100",
 		}))
 
@@ -6163,26 +5958,21 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`, newPath)
 
-		// The broker describe runs before classification, which reads no index
+		// The collection read runs before classification, which reads no index
 		// state: interleave the late build (create + finish build 500 against
 		// the still-current old column) there, so the commit's under-lock
 		// re-enumeration must retract a record that classification could never
 		// have snapshotted.
-		created := false
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, _ int64) (*milvuspb.DescribeCollectionResponse, error) {
-				if !created {
-					created = true
-					require.NoError(t, m.indexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
-						CollectionID: 100, SegmentID: 812, IndexID: 10, BuildID: 500,
-						IndexState: commonpb.IndexState_Finished, IndexVersion: 1,
-					}))
-				}
-				return &milvuspb.DescribeCollectionResponse{
-					Status: merr.Success(), DbName: "default", CollectionName: "c",
-				}, nil
-			}).Maybe()
+		unpatchRead := onCollectionRead(func(call int) {
+			if call == 1 {
+				require.NoError(t, dm.IndexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
+					CollectionID: 100, SegmentID: 812, IndexID: 10, BuildID: 500,
+					IndexState: commonpb.IndexState_Finished, IndexVersion: 1,
+				}))
+			}
+		})
+		defer unpatchRead()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
@@ -6195,7 +5985,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		// The late Finished record is retracted atomically with the new pointer:
 		// readers never serve an index built from the old column data, and the
 		// inspector rebuilds against the new data.
-		require.Empty(t, m.indexMeta.GetSegmentIndexes(100, 812))
+		require.Empty(t, dm.IndexMeta.GetSegmentIndexes(100, 812))
 	})
 
 	// A backfill replace whose field has NO index definition at classification
@@ -6212,7 +6002,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		defer paramtable.Get().Reset(Params.CommonCfg.StorageType.Key)
 		defer paramtable.Get().Reset(Params.LocalStorageCfg.Path.Key)
 
-		cfg := createStorageConfig()
+		cfg := meta.CreateStorageConfig()
 		basePath := path.Join(localRoot, "backfill_replace_idx_window", "seg814")
 		oldPath := path.Join(basePath, "_data", "100_old.parquet")
 		_, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(basePath, packed.ManifestEarliest), cfg, &packed.ManifestUpdates{
@@ -6224,9 +6014,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		m, err := newMemoryMeta(t)
+		m, dm, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
-		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 814, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV3,
 			ManifestPath:   packed.MarshalManifestPath(basePath, 1),
@@ -6249,29 +6039,24 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`, newPath)
 
-		// The broker describe runs before classification, which reads no index
+		// The collection read runs before classification, which reads no index
 		// state: create the index definition AND finish a build against the
 		// still-current old column there, so the commit resolves the removal
 		// set under the manifest lock against a definition that did not exist
 		// when the result was classified.
-		created := false
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, _ int64) (*milvuspb.DescribeCollectionResponse, error) {
-				if !created {
-					created = true
-					require.NoError(t, m.indexMeta.CreateIndex(ctx, &model.Index{
-						CollectionID: 100, FieldID: 100, IndexID: 10, IndexName: "idx_100",
-					}))
-					require.NoError(t, m.indexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
-						CollectionID: 100, SegmentID: 814, IndexID: 10, BuildID: 500,
-						IndexState: commonpb.IndexState_Finished, IndexVersion: 1,
-					}))
-				}
-				return &milvuspb.DescribeCollectionResponse{
-					Status: merr.Success(), DbName: "default", CollectionName: "c",
-				}, nil
-			}).Maybe()
+		unpatchRead := onCollectionRead(func(call int) {
+			if call == 1 {
+				require.NoError(t, dm.IndexMeta.CreateIndex(ctx, &model.Index{
+					CollectionID: 100, FieldID: 100, IndexID: 10, IndexName: "idx_100",
+				}))
+				require.NoError(t, dm.IndexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
+					CollectionID: 100, SegmentID: 814, IndexID: 10, BuildID: 500,
+					IndexState: commonpb.IndexState_Finished, IndexVersion: 1,
+				}))
+			}
+		})
+		defer unpatchRead()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
@@ -6283,7 +6068,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 
 		// The record created against the index definition that appeared during
 		// the window is retracted atomically with the new pointer.
-		require.Empty(t, m.indexMeta.GetSegmentIndexes(100, 814))
+		require.Empty(t, dm.IndexMeta.GetSegmentIndexes(100, 814))
 		groups, err := packed.ReadManifestColumnGroups(m.GetSegment(ctx, 814).GetManifestPath(), cfg)
 		require.NoError(t, err)
 		require.Len(t, groups, 1)
@@ -6298,10 +6083,10 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// column against its schema before any manifest read.
 	t.Run("v3_delta_op_columns_validated_against_schema", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		for _, id := range []int64{701, 702, 703, 704, 705, 706, 707, 708} {
-			m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID: id, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 				StorageVersion: storage.StorageV3,
 				ManifestPath:   packed.MarshalManifestPath("/seg/"+strconv.FormatInt(id, 10), 1),
@@ -6336,19 +6121,15 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		b.WriteString(`}}`)
 
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-				Schema: &schemapb.CollectionSchema{
-					Fields: []*schemapb.FieldSchema{
-						{FieldID: 100, Name: "f100", DataType: schemapb.DataType_VarChar},
-						{FieldID: 101, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
-						{FieldID: 102, Name: "fn_out", IsFunctionOutput: true, DataType: schemapb.DataType_FloatVector},
-						{FieldID: 103, Name: "pkey", IsPartitionKey: true, DataType: schemapb.DataType_Int64},
-						{FieldID: 104, Name: "$meta", IsDynamic: true, DataType: schemapb.DataType_JSON},
-					},
-				},
-			}, nil).Maybe()
+		m.AddCollection(&meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "f100", DataType: schemapb.DataType_VarChar},
+				{FieldID: 101, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+				{FieldID: 102, Name: "fn_out", IsFunctionOutput: true, DataType: schemapb.DataType_FloatVector},
+				{FieldID: 103, Name: "pkey", IsPartitionKey: true, DataType: schemapb.DataType_Int64},
+				{FieldID: 104, Name: "$meta", IsDynamic: true, DataType: schemapb.DataType_JSON},
+			},
+		}})
 		server := newServerForCommit(t, m, mockBroker, []byte(b.String()))
 
 		captured, unpatch := captureManifestCommits(t)
@@ -6385,10 +6166,10 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 	// group.
 	t.Run("v2_group_field_ids_validated_against_schema", func(t *testing.T) {
 		ctx := context.Background()
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
 		for _, id := range []int64{201, 202, 203, 204} {
-			m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID: id, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 				StorageVersion: storage.StorageV2,
 			}})
@@ -6420,17 +6201,13 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status: merr.Success(), DbName: "default", CollectionName: "c",
-				Schema: &schemapb.CollectionSchema{
-					Fields: []*schemapb.FieldSchema{
-						{FieldID: 100, Name: "f100", DataType: schemapb.DataType_Int64},
-						{FieldID: 103, Name: "pkey", IsPartitionKey: true, DataType: schemapb.DataType_Int64},
-						{FieldID: 104, Name: "$meta", IsDynamic: true, DataType: schemapb.DataType_JSON},
-					},
-				},
-			}, nil).Maybe()
+		m.AddCollection(&meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "f100", DataType: schemapb.DataType_Int64},
+				{FieldID: 103, Name: "pkey", IsPartitionKey: true, DataType: schemapb.DataType_Int64},
+				{FieldID: 104, Name: "$meta", IsDynamic: true, DataType: schemapb.DataType_JSON},
+			},
+		}})
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
@@ -6464,7 +6241,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		defer paramtable.Get().Reset(Params.CommonCfg.StorageType.Key)
 		defer paramtable.Get().Reset(Params.LocalStorageCfg.Path.Key)
 
-		cfg := createStorageConfig()
+		cfg := meta.CreateStorageConfig()
 		basePath := path.Join(localRoot, "backfill_replace_text_stats", "seg815")
 		oldPath := path.Join(basePath, "_data", "100_old.parquet")
 		_, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(basePath, packed.ManifestEarliest), cfg, &packed.ManifestUpdates{
@@ -6475,9 +6252,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
-		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 815, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV3,
 			ManifestPath:   packed.MarshalManifestPath(basePath, 1),
@@ -6534,7 +6311,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		defer paramtable.Get().Reset(Params.CommonCfg.StorageType.Key)
 		defer paramtable.Get().Reset(Params.LocalStorageCfg.Path.Key)
 
-		cfg := createStorageConfig()
+		cfg := meta.CreateStorageConfig()
 		basePath := path.Join(localRoot, "backfill_replay_race", "seg813")
 		aPath := path.Join(basePath, "_data", "100_a.parquet")
 		_, err := packed.CommitManifestUpdates(packed.MarshalManifestPath(basePath, packed.ManifestEarliest), cfg, &packed.ManifestUpdates{
@@ -6546,9 +6323,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		m, err := newMemoryMeta(t)
+		m, _, err := index.NewMemoryMetaWithIndex(t)
 		require.NoError(t, err)
-		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		m.AddSegment(ctx, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 813, CollectionID: 100, State: commonpb.SegmentState_Flushed,
 			StorageVersion: storage.StorageV3,
 			ManifestPath:   packed.MarshalManifestPath(basePath, 1),
@@ -6574,49 +6351,44 @@ func TestServer_CommitBackfillResult(t *testing.T) {
           }
         }`, aPath, bPath)
 
-		// The broker is consulted twice: the first describe runs before
-		// classification (it supplies the schema the op-column validation reads);
-		// the schema re-check immediately before the batch commit is the second.
-		// Replace field 100 with a different group on that second consult, so
-		// classification still reads manifest v1 (where add(100->a) is an
-		// already-applied replay and is omitted), then the commit sees an
+		// The collection is read twice: the first read runs before
+		// classification (it supplies the schema the op-column validation
+		// reads); the schema re-check immediately before the batch commit is
+		// the second. Replace field 100 with a different group on that second
+		// read, so classification still reads manifest v1 (where add(100->a)
+		// is an already-applied replay and is omitted), then the commit sees an
 		// inspected pointer that has moved and must abort as stale instead of
 		// silently dropping the omitted add(100->a) and committing add(101->b)
 		// against the replacement.
-		brokerCalls := 0
+		m.AddCollection(&meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{
+			Version: 1,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "f100", DataType: schemapb.DataType_VarChar},
+				{FieldID: 101, Name: "f101", DataType: schemapb.DataType_VarChar},
+			},
+		}})
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, _ int64) (*milvuspb.DescribeCollectionResponse, error) {
-				brokerCalls++
-				if brokerCalls > 1 {
-					replace := &SegmentManifestCommit{
-						SegmentID:     813,
-						StorageConfig: cfg,
-						Mutation: ManifestMutation{
-							Type: ManifestMutationCommitUpdates,
-							Updates: &packed.ManifestUpdates{
-								DropColumns: []string{"100"},
-								ColumnGroups: []packed.ColumnGroupEntry{{
-									Columns: []string{"100"},
-									Format:  "parquet",
-									Files:   []packed.ColumnGroupFileEntry{{Path: cPath, StartIndex: 0, EndIndex: 5}},
-								}},
-							},
-						},
-					}
-					require.NoError(t, m.CommitSegmentManifest(ctx, *replace))
-				}
-				return &milvuspb.DescribeCollectionResponse{
-					Status: merr.Success(), DbName: "default", CollectionName: "c",
-					Schema: &schemapb.CollectionSchema{
-						Version: 1,
-						Fields: []*schemapb.FieldSchema{
-							{FieldID: 100, Name: "f100", DataType: schemapb.DataType_VarChar},
-							{FieldID: 101, Name: "f101", DataType: schemapb.DataType_VarChar},
+		unpatchRead := onCollectionRead(func(call int) {
+			if call > 1 {
+				replace := &meta.SegmentManifestCommit{
+					SegmentID:     813,
+					StorageConfig: cfg,
+					Mutation: meta.ManifestMutation{
+						Type: meta.ManifestMutationCommitUpdates,
+						Updates: &packed.ManifestUpdates{
+							DropColumns: []string{"100"},
+							ColumnGroups: []packed.ColumnGroupEntry{{
+								Columns: []string{"100"},
+								Format:  "parquet",
+								Files:   []packed.ColumnGroupFileEntry{{Path: cPath, StartIndex: 0, EndIndex: 5}},
+							}},
 						},
 					},
-				}, nil
-			}).Maybe()
+				}
+				require.NoError(t, m.CommitSegmentManifest(ctx, *replace))
+			}
+		})
+		defer unpatchRead()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
 		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
@@ -6667,12 +6439,10 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 		ctx := context.Background()
 
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(nil, errors.New("collection not found"))
 
-		server := &Server{
+		server := seedCollections(&Server{
 			broker: mockBroker,
-		}
+		})
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
 		resp, err := server.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{
@@ -6690,12 +6460,6 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 		ctx := context.Background()
 
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				DbName:         "default",
-				CollectionName: "test_collection",
-			}, nil)
 
 		mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
 			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
@@ -6703,9 +6467,9 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 			}).Build()
 		defer mockBroadcast.UnPatch()
 
-		server := &Server{
+		server := seedCollections(&Server{
 			broker: mockBroker,
-		}
+		}, &meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
 		resp, err := server.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{
@@ -6723,12 +6487,6 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 		ctx := context.Background()
 
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				DbName:         "default",
-				CollectionName: "test_collection",
-			}, nil)
 
 		// Mock WAL
 		wal := mock_streaming.NewMockWALAccesser(t)
@@ -6746,9 +6504,9 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 			}).Build()
 		defer mockBroadcastPatch.UnPatch()
 
-		server := &Server{
+		server := seedCollections(&Server{
 			broker: mockBroker,
-		}
+		}, &meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
 		resp, err := server.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{
@@ -6766,12 +6524,6 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 		ctx := context.Background()
 
 		mockBroker := broker.NewMockBroker(t)
-		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Status:         merr.Success(),
-				DbName:         "default",
-				CollectionName: "test_collection",
-			}, nil)
 
 		// Mock WAL
 		wal := mock_streaming.NewMockWALAccesser(t)
@@ -6798,9 +6550,9 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 			}).Build()
 		defer mockBroadcastPatch.UnPatch()
 
-		server := &Server{
+		server := seedCollections(&Server{
 			broker: mockBroker,
-		}
+		}, &meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "test_collection"}})
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
 		resp, err := server.BatchUpdateManifest(ctx, &datapb.BatchUpdateManifestRequest{
@@ -6822,11 +6574,11 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 		ctx := context.Background()
 
 		registry.ResetRegistration()
-		drainBuildIndexChForTest()
-		defer drainBuildIndexChForTest()
+		meta.DrainBuildIndexChForTest()
+		defer meta.DrainBuildIndexChForTest()
 
-		mockUpdateSegmentsInfo := mockey.Mock((*meta).UpdateSegmentsInfo).To(
-			func(m *meta, ctx context.Context, operators ...UpdateOperator) error {
+		mockUpdateSegmentsInfo := mockey.Mock((*meta.Meta).UpdateSegmentsInfo).To(
+			func(m *meta.Meta, ctx context.Context, operators ...meta.UpdateOperator) error {
 				return nil
 			}).Build()
 		defer mockUpdateSegmentsInfo.UnPatch()
@@ -6836,7 +6588,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 		recomputeManager := &recordingDataViewManager{}
 		server := &Server{
 			ctx:  ctx,
-			meta: &meta{segments: NewSegmentsInfo(ms), dataViewManager: recomputeManager},
+			meta: &meta.Meta{Segments: meta.NewSegmentsInfo(ms), DataViewManager: recomputeManager},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 		RegisterDDLCallbacks(server)
@@ -6862,7 +6614,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 			},
 		})
 		assert.NoError(t, err)
-		assertBuildIndexEvents(t, 1, 2)
+		meta.AssertBuildIndexEvents(t, 1, 2)
 
 		recomputeManager.mu.Lock()
 		defer recomputeManager.mu.Unlock()
@@ -6876,7 +6628,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 
 		server := &Server{
 			ctx:  ctx,
-			meta: &meta{segments: NewSegmentsInfo(ms)},
+			meta: &meta.Meta{Segments: meta.NewSegmentsInfo(ms)},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 		RegisterDDLCallbacks(server)
@@ -6903,18 +6655,18 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 		ctx := context.Background()
 
 		registry.ResetRegistration()
-		drainBuildIndexChForTest()
-		defer drainBuildIndexChForTest()
+		meta.DrainBuildIndexChForTest()
+		defer meta.DrainBuildIndexChForTest()
 
-		mockUpdateSegmentsInfo := mockey.Mock((*meta).UpdateSegmentsInfo).To(
-			func(m *meta, ctx context.Context, operators ...UpdateOperator) error {
+		mockUpdateSegmentsInfo := mockey.Mock((*meta.Meta).UpdateSegmentsInfo).To(
+			func(m *meta.Meta, ctx context.Context, operators ...meta.UpdateOperator) error {
 				return errors.New("update segments info failed")
 			}).Build()
 		defer mockUpdateSegmentsInfo.UnPatch()
 
 		server := &Server{
 			ctx:  ctx,
-			meta: &meta{segments: NewSegmentsInfo(ms)},
+			meta: &meta.Meta{Segments: meta.NewSegmentsInfo(ms)},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 		RegisterDDLCallbacks(server)
@@ -6939,7 +6691,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 			},
 		})
 		assert.Error(t, err)
-		assertNoBuildIndexEvent(t)
+		meta.AssertNoBuildIndexEvent(t)
 	})
 
 	t.Run("v2_column_groups_dispatches_operator", func(t *testing.T) {
@@ -6948,8 +6700,8 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 		registry.ResetRegistration()
 
 		var capturedOps int
-		mockUpdate := mockey.Mock((*meta).UpdateSegmentsInfo).To(
-			func(m *meta, ctx context.Context, operators ...UpdateOperator) error {
+		mockUpdate := mockey.Mock((*meta.Meta).UpdateSegmentsInfo).To(
+			func(m *meta.Meta, ctx context.Context, operators ...meta.UpdateOperator) error {
 				capturedOps = len(operators)
 				return nil
 			}).Build()
@@ -6957,7 +6709,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 
 		server := &Server{
 			ctx:  ctx,
-			meta: &meta{segments: NewSegmentsInfo(ms)},
+			meta: &meta.Meta{Segments: meta.NewSegmentsInfo(ms)},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 		RegisterDDLCallbacks(server)
@@ -6990,7 +6742,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 			},
 		})
 		assert.NoError(t, err)
-		// Two operators dispatched: one V3 UpdateManifestVersion, one V2
+		// Two operators dispatched: one V3 meta.UpdateManifestVersion, one V2
 		// UpdateSegmentColumnGroupsOperator. Both flow through the single
 		// UpdateSegmentsInfo batch call.
 		assert.Equal(t, 2, capturedOps)
@@ -7002,8 +6754,8 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 		registry.ResetRegistration()
 
 		var capturedOps int
-		mockUpdate := mockey.Mock((*meta).UpdateSegmentsInfo).To(
-			func(m *meta, ctx context.Context, operators ...UpdateOperator) error {
+		mockUpdate := mockey.Mock((*meta.Meta).UpdateSegmentsInfo).To(
+			func(m *meta.Meta, ctx context.Context, operators ...meta.UpdateOperator) error {
 				capturedOps = len(operators)
 				return nil
 			}).Build()
@@ -7011,7 +6763,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 
 		server := &Server{
 			ctx:  ctx,
-			meta: &meta{segments: NewSegmentsInfo(ms)},
+			meta: &meta.Meta{Segments: meta.NewSegmentsInfo(ms)},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 		RegisterDDLCallbacks(server)
@@ -7075,6 +6827,7 @@ func TestServer_RefreshExternalCollection(t *testing.T) {
 			externalCollectionRefreshManager: nil, // Not initialized
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
+		server.ddl = newDDLCallbacks(server)
 
 		resp, err := server.RefreshExternalCollection(ctx, &datapb.RefreshExternalCollectionRequest{
 			CollectionId:   100,
@@ -7093,21 +6846,22 @@ func TestServer_RefreshExternalCollection(t *testing.T) {
 		mockAllocator.EXPECT().AllocID(mock.Anything).Return(int64(0), errors.New("alloc failed"))
 
 		// Create a mock refresh manager (non-nil)
-		mockRefreshMgr := &externalCollectionRefreshManager{}
+		mockRefreshMgr := &externalrefresh.Manager{}
 
 		server := &Server{
 			allocator:                        mockAllocator,
 			externalCollectionRefreshManager: mockRefreshMgr,
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
+		server.ddl = newDDLCallbacks(server)
 
 		// Bypass startBroadcast (broker not wired in test) and the new
 		// duplicate-active-job pre-check (refreshMeta is nil here).
-		mockStartBroadcast := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(&embeddedBroadcastAPI{}, nil).Build()
+		mockStartBroadcast := mockey.Mock((*ddl.Callbacks).StartBroadcastWithCollectionID).Return(&embeddedBroadcastAPI{}, nil).Build()
 		defer mockStartBroadcast.UnPatch()
 		mockClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
 		defer mockClose.UnPatch()
-		mockGetActive := mockey.Mock((*externalCollectionRefreshManager).GetActiveJobByCollectionID).Return(nil).Build()
+		mockGetActive := mockey.Mock((*externalrefresh.Manager).GetActiveJobByCollectionID).Return(nil).Build()
 		defer mockGetActive.UnPatch()
 
 		resp, err := server.RefreshExternalCollection(ctx, &datapb.RefreshExternalCollectionRequest{
@@ -7122,17 +6876,18 @@ func TestServer_RefreshExternalCollection(t *testing.T) {
 	t.Run("rejects_when_active_job_in_progress", func(t *testing.T) {
 		ctx := context.Background()
 
-		mockRefreshMgr := &externalCollectionRefreshManager{}
+		mockRefreshMgr := &externalrefresh.Manager{}
 		server := &Server{
 			externalCollectionRefreshManager: mockRefreshMgr,
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
+		server.ddl = newDDLCallbacks(server)
 
-		mockStartBroadcast := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(&embeddedBroadcastAPI{}, nil).Build()
+		mockStartBroadcast := mockey.Mock((*ddl.Callbacks).StartBroadcastWithCollectionID).Return(&embeddedBroadcastAPI{}, nil).Build()
 		defer mockStartBroadcast.UnPatch()
 		mockClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
 		defer mockClose.UnPatch()
-		mockGetActive := mockey.Mock((*externalCollectionRefreshManager).GetActiveJobByCollectionID).Return(&datapb.ExternalCollectionRefreshJob{
+		mockGetActive := mockey.Mock((*externalrefresh.Manager).GetActiveJobByCollectionID).Return(&datapb.ExternalCollectionRefreshJob{
 			JobId:        12345,
 			CollectionId: 100,
 			State:        indexpb.JobState_JobStateInProgress,
@@ -7156,15 +6911,16 @@ func TestServer_RefreshExternalCollection(t *testing.T) {
 
 		// startBroadcast now runs before AllocID, so AllocID should never
 		// be reached when the broadcaster fails to start.
-		mockRefreshMgr := &externalCollectionRefreshManager{}
+		mockRefreshMgr := &externalrefresh.Manager{}
 
 		server := &Server{
 			externalCollectionRefreshManager: mockRefreshMgr,
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
+		server.ddl = newDDLCallbacks(server)
 
-		// Mock startBroadcastWithCollectionID to return error
-		mockStartBroadcast := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(nil, errors.New("broadcaster failed")).Build()
+		// Mock StartBroadcastWithCollectionID to return error
+		mockStartBroadcast := mockey.Mock((*ddl.Callbacks).StartBroadcastWithCollectionID).Return(nil, errors.New("broadcaster failed")).Build()
 		defer mockStartBroadcast.UnPatch()
 
 		resp, err := server.RefreshExternalCollection(ctx, &datapb.RefreshExternalCollectionRequest{
@@ -7215,10 +6971,10 @@ func TestServer_GetRefreshExternalCollectionProgress(t *testing.T) {
 		ctx := context.Background()
 
 		// Mock GetJobProgress to return error
-		mockGetJobProgress := mockey.Mock((*externalCollectionRefreshManager).GetJobProgress).Return(nil, errors.New("job not found")).Build()
+		mockGetJobProgress := mockey.Mock((*externalrefresh.Manager).GetJobProgress).Return(nil, errors.New("job not found")).Build()
 		defer mockGetJobProgress.UnPatch()
 
-		mockRefreshMgr := &externalCollectionRefreshManager{}
+		mockRefreshMgr := &externalrefresh.Manager{}
 
 		server := &Server{
 			externalCollectionRefreshManager: mockRefreshMgr,
@@ -7245,10 +7001,10 @@ func TestServer_GetRefreshExternalCollectionProgress(t *testing.T) {
 		}
 
 		// Mock GetJobProgress to return success
-		mockGetJobProgress := mockey.Mock((*externalCollectionRefreshManager).GetJobProgress).Return(expectedJob, nil).Build()
+		mockGetJobProgress := mockey.Mock((*externalrefresh.Manager).GetJobProgress).Return(expectedJob, nil).Build()
 		defer mockGetJobProgress.UnPatch()
 
-		mockRefreshMgr := &externalCollectionRefreshManager{}
+		mockRefreshMgr := &externalrefresh.Manager{}
 
 		server := &Server{
 			externalCollectionRefreshManager: mockRefreshMgr,
@@ -7306,10 +7062,10 @@ func TestServer_ListRefreshExternalCollectionJobs(t *testing.T) {
 		ctx := context.Background()
 
 		// Mock ListJobs to return error
-		mockListJobs := mockey.Mock((*externalCollectionRefreshManager).ListJobs).Return(nil, errors.New("list failed")).Build()
+		mockListJobs := mockey.Mock((*externalrefresh.Manager).ListJobs).Return(nil, errors.New("list failed")).Build()
 		defer mockListJobs.UnPatch()
 
-		mockRefreshMgr := &externalCollectionRefreshManager{}
+		mockRefreshMgr := &externalrefresh.Manager{}
 
 		server := &Server{
 			externalCollectionRefreshManager: mockRefreshMgr,
@@ -7328,10 +7084,10 @@ func TestServer_ListRefreshExternalCollectionJobs(t *testing.T) {
 		ctx := context.Background()
 
 		// Mock ListJobs to return empty list
-		mockListJobs := mockey.Mock((*externalCollectionRefreshManager).ListJobs).Return([]*datapb.ExternalCollectionRefreshJob{}, nil).Build()
+		mockListJobs := mockey.Mock((*externalrefresh.Manager).ListJobs).Return([]*datapb.ExternalCollectionRefreshJob{}, nil).Build()
 		defer mockListJobs.UnPatch()
 
-		mockRefreshMgr := &externalCollectionRefreshManager{}
+		mockRefreshMgr := &externalrefresh.Manager{}
 
 		server := &Server{
 			externalCollectionRefreshManager: mockRefreshMgr,
@@ -7368,15 +7124,15 @@ func TestServer_ListRefreshExternalCollectionJobs(t *testing.T) {
 			},
 		}
 
-		mockListJobs := mockey.Mock((*externalCollectionRefreshManager).ListJobs).To(
-			func(_ *externalCollectionRefreshManager, _ context.Context, collectionID int64) ([]*datapb.ExternalCollectionRefreshJob, error) {
+		mockListJobs := mockey.Mock((*externalrefresh.Manager).ListJobs).To(
+			func(_ *externalrefresh.Manager, _ context.Context, collectionID int64) ([]*datapb.ExternalCollectionRefreshJob, error) {
 				capturedCollectionID = collectionID
 				return expectedJobs, nil
 			}).Build()
 		defer mockListJobs.UnPatch()
 
 		server := &Server{
-			externalCollectionRefreshManager: &externalCollectionRefreshManager{},
+			externalCollectionRefreshManager: &externalrefresh.Manager{},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -7410,10 +7166,10 @@ func TestServer_ListRefreshExternalCollectionJobs(t *testing.T) {
 		}
 
 		// Mock ListJobs to return jobs
-		mockListJobs := mockey.Mock((*externalCollectionRefreshManager).ListJobs).Return(expectedJobs, nil).Build()
+		mockListJobs := mockey.Mock((*externalrefresh.Manager).ListJobs).Return(expectedJobs, nil).Build()
 		defer mockListJobs.UnPatch()
 
-		mockRefreshMgr := &externalCollectionRefreshManager{}
+		mockRefreshMgr := &externalrefresh.Manager{}
 
 		server := &Server{
 			externalCollectionRefreshManager: mockRefreshMgr,
@@ -7439,8 +7195,8 @@ func TestServer_ListSnapshots_WithDbID(t *testing.T) {
 		ctx := context.Background()
 
 		var capturedCollectionID, capturedPartitionID, capturedDbID int64
-		mockList := mockey.Mock((*snapshotManager).ListSnapshots).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID, dbID int64) ([]*datapb.SnapshotSummary, error) {
+		mockList := mockey.Mock((*snapshot.Manager).ListSnapshots).To(
+			func(sm *snapshot.Manager, ctx context.Context, collectionID, partitionID, dbID int64) ([]*datapb.SnapshotSummary, error) {
 				capturedCollectionID = collectionID
 				capturedPartitionID = partitionID
 				capturedDbID = dbID
@@ -7449,7 +7205,7 @@ func TestServer_ListSnapshots_WithDbID(t *testing.T) {
 		defer mockList.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -7470,8 +7226,8 @@ func TestServer_ListSnapshots_WithDbID(t *testing.T) {
 		ctx := context.Background()
 
 		var capturedCollectionID, capturedDbID int64
-		mockList := mockey.Mock((*snapshotManager).ListSnapshots).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID, partitionID, dbID int64) ([]*datapb.SnapshotSummary, error) {
+		mockList := mockey.Mock((*snapshot.Manager).ListSnapshots).To(
+			func(sm *snapshot.Manager, ctx context.Context, collectionID, partitionID, dbID int64) ([]*datapb.SnapshotSummary, error) {
 				capturedCollectionID = collectionID
 				capturedDbID = dbID
 				return []*datapb.SnapshotSummary{{Name: "snap1"}, {Name: "snap2"}}, nil
@@ -7479,7 +7235,7 @@ func TestServer_ListSnapshots_WithDbID(t *testing.T) {
 		defer mockList.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -7501,8 +7257,8 @@ func TestServer_ListRestoreSnapshotJobs_WithDbID(t *testing.T) {
 		ctx := context.Background()
 
 		var capturedCollectionID, capturedDbID int64
-		mockList := mockey.Mock((*snapshotManager).ListRestoreJobs).To(
-			func(sm *snapshotManager, ctx context.Context, collectionIDFilter, dbID int64) ([]*datapb.RestoreSnapshotInfo, error) {
+		mockList := mockey.Mock((*snapshot.Manager).ListRestoreJobs).To(
+			func(sm *snapshot.Manager, ctx context.Context, collectionIDFilter, dbID int64) ([]*datapb.RestoreSnapshotInfo, error) {
 				capturedCollectionID = collectionIDFilter
 				capturedDbID = dbID
 				return []*datapb.RestoreSnapshotInfo{
@@ -7512,7 +7268,7 @@ func TestServer_ListRestoreSnapshotJobs_WithDbID(t *testing.T) {
 		defer mockList.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -7532,15 +7288,15 @@ func TestServer_ListRestoreSnapshotJobs_WithDbID(t *testing.T) {
 		ctx := context.Background()
 
 		var capturedDbID int64
-		mockList := mockey.Mock((*snapshotManager).ListRestoreJobs).To(
-			func(sm *snapshotManager, ctx context.Context, collectionIDFilter, dbID int64) ([]*datapb.RestoreSnapshotInfo, error) {
+		mockList := mockey.Mock((*snapshot.Manager).ListRestoreJobs).To(
+			func(sm *snapshot.Manager, ctx context.Context, collectionIDFilter, dbID int64) ([]*datapb.RestoreSnapshotInfo, error) {
 				capturedDbID = dbID
 				return []*datapb.RestoreSnapshotInfo{}, nil
 			}).Build()
 		defer mockList.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -7562,8 +7318,8 @@ func TestServer_RestoreSnapshot_SourceCollectionID(t *testing.T) {
 
 		var capturedSourceCollectionID int64
 		var capturedSnapshotName, capturedTargetCollName, capturedTargetDbName string
-		mockRestore := mockey.Mock((*snapshotManager).RestoreSnapshot).To(
-			func(sm *snapshotManager, ctx context.Context, sourceCollectionID int64, snapshotName, targetCollectionName, targetDbName string, startRestoreLock StartRestoreLockFunc, startBroadcaster StartBroadcasterFunc, rollback RollbackFunc, validateResources ValidateResourcesFunc) (int64, error) {
+		mockRestore := mockey.Mock((*snapshot.Manager).RestoreSnapshot).To(
+			func(sm *snapshot.Manager, ctx context.Context, sourceCollectionID int64, snapshotName, targetCollectionName, targetDbName string, startRestoreLock snapshot.StartRestoreLockFunc, startBroadcaster snapshot.StartBroadcasterFunc, rollback snapshot.RollbackFunc, validateResources snapshot.ValidateResourcesFunc) (int64, error) {
 				capturedSourceCollectionID = sourceCollectionID
 				capturedSnapshotName = snapshotName
 				capturedTargetCollName = targetCollectionName
@@ -7573,7 +7329,7 @@ func TestServer_RestoreSnapshot_SourceCollectionID(t *testing.T) {
 		defer mockRestore.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -7597,15 +7353,15 @@ func TestServer_RestoreSnapshot_SourceCollectionID(t *testing.T) {
 		ctx := context.Background()
 
 		var capturedSourceCollectionID int64
-		mockRestore := mockey.Mock((*snapshotManager).RestoreSnapshot).To(
-			func(sm *snapshotManager, ctx context.Context, sourceCollectionID int64, snapshotName, targetCollectionName, targetDbName string, startRestoreLock StartRestoreLockFunc, startBroadcaster StartBroadcasterFunc, rollback RollbackFunc, validateResources ValidateResourcesFunc) (int64, error) {
+		mockRestore := mockey.Mock((*snapshot.Manager).RestoreSnapshot).To(
+			func(sm *snapshot.Manager, ctx context.Context, sourceCollectionID int64, snapshotName, targetCollectionName, targetDbName string, startRestoreLock snapshot.StartRestoreLockFunc, startBroadcaster snapshot.StartBroadcasterFunc, rollback snapshot.RollbackFunc, validateResources snapshot.ValidateResourcesFunc) (int64, error) {
 				capturedSourceCollectionID = sourceCollectionID
 				return 99, nil
 			}).Build()
 		defer mockRestore.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -7645,18 +7401,18 @@ func TestServer_RestoreSnapshot_External(t *testing.T) {
 
 		var capturedLocation, capturedTargetCollName, capturedTargetDbName string
 		var capturedExternalSpec string
-		mockRestore := mockey.Mock((*snapshotManager).RestoreExternalSnapshot).To(
+		mockRestore := mockey.Mock((*snapshot.Manager).RestoreExternalSnapshot).To(
 			func(
-				sm *snapshotManager,
+				sm *snapshot.Manager,
 				ctx context.Context,
 				snapshotS3Location string,
 				targetCollectionName string,
 				targetDbName string,
 				externalSpec string,
-				startExternalRestoreLock StartExternalRestoreLockFunc,
-				startBroadcaster StartBroadcasterFunc,
-				rollback RollbackFunc,
-				validateResources ValidateResourcesFunc,
+				startExternalRestoreLock snapshot.StartExternalRestoreLockFunc,
+				startBroadcaster snapshot.StartBroadcasterFunc,
+				rollback snapshot.RollbackFunc,
+				validateResources snapshot.ValidateResourcesFunc,
 			) (int64, error) {
 				capturedLocation = snapshotS3Location
 				capturedTargetCollName = targetCollectionName
@@ -7667,7 +7423,7 @@ func TestServer_RestoreSnapshot_External(t *testing.T) {
 		defer mockRestore.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -7712,7 +7468,7 @@ func TestPinSnapshotData(t *testing.T) {
 
 		fakeHandler := &embeddedHandler{}
 		mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
-			&collectionInfo{
+			&meta.CollectionInfo{
 				ID:           100,
 				DatabaseName: "test_db",
 				Schema:       &schemapb.CollectionSchema{Name: "test_coll"},
@@ -7729,8 +7485,8 @@ func TestPinSnapshotData(t *testing.T) {
 			}).Build()
 		defer mockBroadcast.UnPatch()
 
-		mockPin := mockey.Mock((*snapshotManager).PinSnapshotData).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string, ttlSeconds int64) (int64, error) {
+		mockPin := mockey.Mock((*snapshot.Manager).PinSnapshotData).To(
+			func(sm *snapshot.Manager, ctx context.Context, collectionID int64, name string, ttlSeconds int64) (int64, error) {
 				assert.Equal(t, int64(100), collectionID)
 				assert.Equal(t, "test_snap", name)
 				return 5001, nil
@@ -7739,7 +7495,7 @@ func TestPinSnapshotData(t *testing.T) {
 
 		server := &Server{
 			handler:         fakeHandler,
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -7758,7 +7514,7 @@ func TestPinSnapshotData(t *testing.T) {
 
 		fakeHandler := &embeddedHandler{}
 		mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
-			&collectionInfo{
+			&meta.CollectionInfo{
 				ID:           100,
 				DatabaseName: "test_db",
 				Schema:       &schemapb.CollectionSchema{Name: "test_coll"},
@@ -7775,15 +7531,15 @@ func TestPinSnapshotData(t *testing.T) {
 			}).Build()
 		defer mockBroadcast.UnPatch()
 
-		mockPin := mockey.Mock((*snapshotManager).PinSnapshotData).To(
-			func(sm *snapshotManager, ctx context.Context, collectionID int64, name string, ttlSeconds int64) (int64, error) {
+		mockPin := mockey.Mock((*snapshot.Manager).PinSnapshotData).To(
+			func(sm *snapshot.Manager, ctx context.Context, collectionID int64, name string, ttlSeconds int64) (int64, error) {
 				return 0, errors.New("snapshot not found")
 			}).Build()
 		defer mockPin.UnPatch()
 
 		server := &Server{
 			handler:         fakeHandler,
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -7817,15 +7573,15 @@ func TestUnpinSnapshotData(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		ctx := context.Background()
 
-		mockUnpin := mockey.Mock((*snapshotManager).UnpinSnapshotData).To(
-			func(sm *snapshotManager, ctx context.Context, pinID int64) error {
+		mockUnpin := mockey.Mock((*snapshot.Manager).UnpinSnapshotData).To(
+			func(sm *snapshot.Manager, ctx context.Context, pinID int64) error {
 				assert.Equal(t, int64(5001), pinID)
 				return nil
 			}).Build()
 		defer mockUnpin.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -7840,14 +7596,14 @@ func TestUnpinSnapshotData(t *testing.T) {
 	t.Run("unpin_error", func(t *testing.T) {
 		ctx := context.Background()
 
-		mockUnpin := mockey.Mock((*snapshotManager).UnpinSnapshotData).To(
-			func(sm *snapshotManager, ctx context.Context, pinID int64) error {
+		mockUnpin := mockey.Mock((*snapshot.Manager).UnpinSnapshotData).To(
+			func(sm *snapshot.Manager, ctx context.Context, pinID int64) error {
 				return errors.New("snapshot not pinned")
 			}).Build()
 		defer mockUnpin.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -7863,7 +7619,7 @@ func TestUnpinSnapshotData(t *testing.T) {
 func TestCommitImport_HappyPath(t *testing.T) {
 	ctx := context.Background()
 
-	job := &importJob{
+	job := &bulkimport.Job{
 		ImportJob: &datapb.ImportJob{
 			JobID:        1001,
 			CollectionID: 200,
@@ -7872,7 +7628,7 @@ func TestCommitImport_HappyPath(t *testing.T) {
 		},
 	}
 
-	importMetaMock := NewMockImportMeta(t)
+	importMetaMock := bulkimport.NewMockImportMeta(t)
 	// GetJob is called twice: once before lock and once after lock.
 	importMetaMock.EXPECT().GetJob(mock.Anything, int64(1001)).Return(job).Times(2)
 
@@ -7895,7 +7651,7 @@ func TestCommitImport_HappyPath(t *testing.T) {
 func TestAbortImport_HappyPath(t *testing.T) {
 	ctx := context.Background()
 
-	job := &importJob{
+	job := &bulkimport.Job{
 		ImportJob: &datapb.ImportJob{
 			JobID:        2001,
 			CollectionID: 300,
@@ -7904,7 +7660,7 @@ func TestAbortImport_HappyPath(t *testing.T) {
 		},
 	}
 
-	importMetaMock := NewMockImportMeta(t)
+	importMetaMock := bulkimport.NewMockImportMeta(t)
 	importMetaMock.EXPECT().GetJob(mock.Anything, int64(2001)).Return(job).Times(2)
 
 	server := &Server{
@@ -7926,7 +7682,7 @@ func TestAbortImport_HappyPath(t *testing.T) {
 func TestAbortImport_UserAbortedJobIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 
-	job := &importJob{
+	job := &bulkimport.Job{
 		ImportJob: &datapb.ImportJob{
 			JobID:      2002,
 			State:      internalpb.ImportJobState_Failed,
@@ -7935,7 +7691,7 @@ func TestAbortImport_UserAbortedJobIsIdempotent(t *testing.T) {
 		},
 	}
 
-	importMetaMock := NewMockImportMeta(t)
+	importMetaMock := bulkimport.NewMockImportMeta(t)
 	importMetaMock.EXPECT().GetJob(mock.Anything, int64(2002)).Return(job).Once()
 
 	server := &Server{
@@ -7950,8 +7706,7 @@ func TestAbortImport_UserAbortedJobIsIdempotent(t *testing.T) {
 }
 
 func TestHandleCommitVchannelRPCIsNoOpForCoordinatorOwnedJob(t *testing.T) {
-	callbacks, _, _ := newImportCommitCallbackTest(t)
-	server := callbacks.Server
+	server, _, _ := newImportCommitCallbackTest(t)
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 	for _, ts := range []uint64{0, 300, 500} {
 		resp, err := server.HandleCommitVchannel(context.Background(), &datapb.HandleCommitVchannelRequest{
@@ -7995,9 +7750,10 @@ func TestHandleCommitVchannelRPC_MissingJob_SecondaryRetries(t *testing.T) {
 
 func TestLoadableProjectionUsesFinalSegments(t *testing.T) {
 	ctx := context.Background()
-	segments := NewSegmentsInfo(metacache.NewMetaStore(nil))
+	store := metacache.NewMetaStore(nil)
+	segments := meta.NewSegmentsInfo(store)
 	addSegment := func(id int64, channel string, state commonpb.SegmentState, invisible bool) {
-		segments.SetSegment(id, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		segments.SetSegment(id, &meta.SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID:            id,
 			CollectionID:  100,
 			PartitionID:   10,
@@ -8016,8 +7772,8 @@ func TestLoadableProjectionUsesFinalSegments(t *testing.T) {
 	addSegment(110, "vchan-0", commonpb.SegmentState_Flushed, false)
 	addSegment(120, "vchan-0", commonpb.SegmentState_Flushed, false)
 
-	meta := &meta{ctx: ctx, segments: segments}
-	actual, err := meta.loadableProjection(ctx, 100)
+	mt := &meta.Meta{Ctx: ctx, MetaStore: store, Segments: segments}
+	actual, err := mt.LoadableProjection(ctx, 100, nil)
 	require.NoError(t, err)
 	require.ElementsMatch(t, []dataview.LoadableSegment{
 		{SegmentID: 110, VChannel: "vchan-0", PartitionID: 10, Size: 2048},
@@ -8045,20 +7801,19 @@ func (r *recordingDataViewManager) Recompute(_ context.Context, collectionID int
 // instead of anonymous struct{ Iface } avoids a go1.26 `go vet` printf-pass
 // panic in x/tools refactor/satisfy on method expressions of *struct{...}.
 type (
-	embeddedHandler      struct{ Handler }
+	embeddedHandler      struct{ meta.Handler }
 	embeddedBroadcastAPI struct{ broadcaster.BroadcastAPI }
-	embeddedBroker       struct{ broker.Broker }
 )
 
 func TestAbortImport_FailedSourceBroadcastsRollback(t *testing.T) {
 	ctx := context.Background()
 	// A source whose own import failed (real reason, not user-aborted) must still be
 	// abortable, so the control plane can release the peer cluster's Uncommitted job.
-	job := &importJob{ImportJob: &datapb.ImportJob{
+	job := &bulkimport.Job{ImportJob: &datapb.ImportJob{
 		JobID: 2101, CollectionID: 300,
 		State: internalpb.ImportJobState_Failed, Reason: "disk quota exceeded",
 	}}
-	im := NewMockImportMeta(t)
+	im := bulkimport.NewMockImportMeta(t)
 	im.EXPECT().GetJob(mock.Anything, int64(2101)).Return(job).Times(2)
 
 	server := &Server{importMeta: im, importJobLock: lock.NewKeyLock[int64]()}
@@ -8069,7 +7824,7 @@ func TestAbortImport_FailedSourceBroadcastsRollback(t *testing.T) {
 	rollbackCalls := 0
 	var rollbackJobID int64
 	bm := mockey.Mock((*Server).broadcastRollbackImportMessage).To(
-		func(s *Server, ctx context.Context, job ImportJob) error {
+		func(s *Server, ctx context.Context, job bulkimport.ImportJob) error {
 			rollbackCalls++
 			rollbackJobID = job.GetJobID()
 			return nil
@@ -8085,10 +7840,10 @@ func TestAbortImport_FailedSourceBroadcastsRollback(t *testing.T) {
 
 func TestAbortImport_CompletedRejected(t *testing.T) {
 	ctx := context.Background()
-	job := &importJob{ImportJob: &datapb.ImportJob{
+	job := &bulkimport.Job{ImportJob: &datapb.ImportJob{
 		JobID: 2103, State: internalpb.ImportJobState_Completed,
 	}}
-	im := NewMockImportMeta(t)
+	im := bulkimport.NewMockImportMeta(t)
 	im.EXPECT().GetJob(mock.Anything, int64(2103)).Return(job).Once()
 
 	server := &Server{importMeta: im, importJobLock: lock.NewKeyLock[int64]()}
@@ -8102,10 +7857,10 @@ func TestAbortImport_CompletedRejected(t *testing.T) {
 func TestAbortImport_CommittingRejected(t *testing.T) {
 	ctx := context.Background()
 	// Committing is mid-commit and cannot be rolled back.
-	job := &importJob{ImportJob: &datapb.ImportJob{
+	job := &bulkimport.Job{ImportJob: &datapb.ImportJob{
 		JobID: 2104, State: internalpb.ImportJobState_Committing,
 	}}
-	im := NewMockImportMeta(t)
+	im := bulkimport.NewMockImportMeta(t)
 	im.EXPECT().GetJob(mock.Anything, int64(2104)).Return(job).Once()
 
 	server := &Server{importMeta: im, importJobLock: lock.NewKeyLock[int64]()}
@@ -8120,32 +7875,32 @@ func TestGetImportSegmentIDsByVchannel_V3OnlyAcceptedCompletedOutputs(t *testing
 	ctx := context.Background()
 	const jobID int64 = 3003
 
-	completed := newImportTaskV3(&datapb.ImportTaskV3{
+	completed := bulkimport.NewImportTaskV3(&datapb.ImportTaskV3{
 		JobId: jobID, TaskId: 41, State: datapb.ImportTaskStateV2_Completed,
 		SegmentId: 101,
 	}, nil, nil, nil)
-	running := newImportTaskV3(&datapb.ImportTaskV3{
+	running := bulkimport.NewImportTaskV3(&datapb.ImportTaskV3{
 		JobId: jobID, TaskId: 42, State: datapb.ImportTaskStateV2_InProgress,
 		SegmentId: 105,
 	}, nil, nil, nil)
-	importMetaMock := NewMockImportMeta(t)
+	importMetaMock := bulkimport.NewMockImportMeta(t)
 	importMetaMock.EXPECT().GetTaskByJob(mock.Anything, mock.Anything, mock.Anything).
-		Return([]ImportTask{completed, running})
+		Return([]bulkimport.ImportTask{completed, running})
 
 	store := metacache.NewMetaStore(nil)
-	segments := NewSegmentsInfo(store)
-	for _, segment := range []*datapb.SegmentInfo{
+	segments := meta.NewSegmentsInfo(store)
+	for _, seg := range []*datapb.SegmentInfo{
 		{ID: 101, InsertChannel: "vchan-0", State: commonpb.SegmentState_Flushed, NumOfRows: 10, IsImporting: true},
 		{ID: 102, InsertChannel: "vchan-0", State: commonpb.SegmentState_Importing, NumOfRows: 0, IsImporting: true},
 		{ID: 103, InsertChannel: "vchan-1", State: commonpb.SegmentState_Flushed, NumOfRows: 10, IsImporting: true},
 		{ID: 104, InsertChannel: "vchan-0", State: commonpb.SegmentState_Flushed, NumOfRows: 10, IsImporting: false},
 		{ID: 105, InsertChannel: "vchan-0", State: commonpb.SegmentState_Flushed, NumOfRows: 10, IsImporting: true},
 	} {
-		segments.SetSegment(segment.GetID(), &SegmentInfo{SegmentInfo: segment})
+		segments.SetSegment(seg.GetID(), &meta.SegmentInfo{SegmentInfo: seg})
 	}
 
-	server := &Server{importMeta: importMetaMock, meta: &meta{segments: segments, metaStore: store}}
-	segIDs := server.getImportSegmentIDsByVchannel(ctx, jobID, "vchan-0")
+	server := &Server{importMeta: importMetaMock, meta: &meta.Meta{Segments: segments, MetaStore: store}}
+	segIDs := bulkimport.GetImportSegmentIDsByVchannel(ctx, server.importMeta, server.meta, jobID, "vchan-0")
 	assert.Equal(t, []int64{101}, segIDs)
 }
 
@@ -8153,7 +7908,7 @@ func TestServer_CreateSnapshot_PreparationFailures(t *testing.T) {
 	for _, scenario := range []string{"collection_error", "collection_missing", "lock_error", "duplicate_after_lock", "broadcast_error"} {
 		t.Run(scenario, func(t *testing.T) {
 			calls := 0
-			lookup := mockey.Mock((*snapshotManager).GetSnapshot).To(func(_ *snapshotManager, _ context.Context, _ int64, _ string) (*datapb.SnapshotInfo, error) {
+			lookup := mockey.Mock((*snapshot.Manager).GetSnapshot).To(func(_ *snapshot.Manager, _ context.Context, _ int64, _ string) (*datapb.SnapshotInfo, error) {
 				calls++
 				if scenario == "duplicate_after_lock" && calls == 2 {
 					return &datapb.SnapshotInfo{Name: "backup"}, nil
@@ -8161,14 +7916,14 @@ func TestServer_CreateSnapshot_PreparationFailures(t *testing.T) {
 				return nil, merr.WrapErrSnapshotNotFound("backup", "not found")
 			}).Build()
 			defer lookup.UnPatch()
-			collection := mockey.Mock((*embeddedHandler).GetCollection).To(func(_ *embeddedHandler, _ context.Context, _ int64) (*collectionInfo, error) {
+			collection := mockey.Mock((*embeddedHandler).GetCollection).To(func(_ *embeddedHandler, _ context.Context, _ int64) (*meta.CollectionInfo, error) {
 				if scenario == "collection_error" {
 					return nil, merr.ErrServiceNotReady
 				}
 				if scenario == "collection_missing" {
 					return nil, nil
 				}
-				return &collectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "books"}, VChannelNames: []string{"p1_100v0"}}, nil
+				return &meta.CollectionInfo{ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "books"}, VChannelNames: []string{"p1_100v0"}}, nil
 			}).Build()
 			defer collection.UnPatch()
 			start := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(func(_ context.Context, _ ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
@@ -8180,11 +7935,10 @@ func TestServer_CreateSnapshot_PreparationFailures(t *testing.T) {
 			defer start.UnPatch()
 			close := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
 			defer close.UnPatch()
-			exists := mockey.Mock((*embeddedBroker).HasCollection).Return(true, nil).Build()
-			defer exists.UnPatch()
 			publish := mockey.Mock((*embeddedBroadcastAPI).Broadcast).Return((*types2.BroadcastAppendResult)(nil), merr.ErrServiceNotReady).Build()
 			defer publish.UnPatch()
-			server := &Server{snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil), handler: &embeddedHandler{}, broker: &embeddedBroker{}}
+			server := seedCollections(&Server{snapshotManager: snapshot.NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil), handler: &embeddedHandler{}, broker: &meta.EmbeddedBroker{}},
+				&meta.CollectionInfo{ID: 100})
 			server.stateCode.Store(commonpb.StateCode_Healthy)
 			status, err := server.CreateSnapshot(context.Background(), &datapb.CreateSnapshotRequest{Name: "backup", CollectionId: 100, Description: "daily"})
 			require.NoError(t, err)

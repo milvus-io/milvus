@@ -314,8 +314,6 @@ type MixCoord interface {
 
 	DropSegmentsByTime(ctx context.Context, collectionID int64, flushTsList map[string]uint64) error
 
-	ManualUpdateCurrentTarget(ctx context.Context, collectionID int64) error
-
 	// GetFileResources resolves RootCoord-owned file resources inside MixCoord.
 	GetFileResources(ctx context.Context, resourceIDs ...int64) ([]*internalpb.FileResourceInfo, error)
 }
@@ -340,6 +338,9 @@ type MixCoordComponent interface {
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 
 	RegisterStreamingCoordGRPCService(server *grpc.Server)
+
+	// RegisterPKIndexCoordGRPCService registers the grpc service of the primary key index manifests.
+	RegisterPKIndexCoordGRPCService(server *grpc.Server)
 
 	GracefulStop()
 

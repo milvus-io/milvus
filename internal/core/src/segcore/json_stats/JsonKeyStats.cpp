@@ -54,7 +54,7 @@
 #include "storage/AsyncLoadExecutor.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/RemoteInputStream.h"
-#include "segcore/storagev1translator/IndexReaderTranslator.h"
+#include "index/IndexLoadContext.h"
 #include "folly/futures/Future.h"
 #include "futures/Executor.h"
 #include "index/Utils.h"
@@ -83,7 +83,7 @@
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "segcore/Utils.h"
 #include "segcore/default_fs.h"
-#include "segcore/storagev1translator/BsonInvertedIndexTranslator.h"
+#include "segcore/json_stats/BsonInvertedIndexTranslator.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/FileManager.h"
 #include "storage/LocalChunkManager.h"
@@ -359,7 +359,7 @@ ReadJsonStatsParquetMetadata(const std::string& file,
         std::make_shared<milvus_storage::parquet::ParquetFormatReader>(
             fs,
             file,
-            properties,
+            std::make_shared<const milvus_storage::api::Properties>(properties),
             std::vector<std::string>{},
             NoopParquetKeyRetriever);
     // The storage API cannot interrupt an issued open; keep the reader alive.
@@ -1993,6 +1993,8 @@ JsonKeyStats::LoadShreddingMeta(
     storage::ThrowIfCancelled(token, "prepare JSON stats footers");
     if (key_field_map_.empty()) {
         // Arrow's stored schema can omit user KV appended to the raw footer.
+        auto metadata_properties =
+            std::make_shared<const milvus_storage::api::Properties>(properties);
         auto read_layout = [&]() -> folly::coro::Task<void> {
             using MetadataReader =
                 milvus_storage::parquet::ParquetFormatReader::MetaTrait;
@@ -2009,9 +2011,11 @@ JsonKeyStats::LoadShreddingMeta(
                                           "prepare JSON stats legacy layout");
                 result = co_await folly::coro::co_withCancellation(
                     folly::CancellationToken{},
-                    MetadataReader::load_metadata_async(file, properties, {}));
+                    MetadataReader::load_metadata_async(
+                        file, metadata_properties, {}));
             } else {
-                result = MetadataReader::load_metadata(file, properties, {});
+                result = MetadataReader::load_metadata(
+                    file, metadata_properties, {});
             }
             storage::ThrowIfCancelled(token,
                                       "prepare JSON stats legacy layout");
@@ -2157,7 +2161,11 @@ JsonKeyStats::LoadColumnGroup(
             std::make_shared<std::vector<std::string>>(column_names);
         const auto reader = std::shared_ptr<milvus_storage::api::Reader>(
             milvus_storage::api::Reader::create(
-                column_groups, nullptr, needed_columns, properties));
+                column_groups,
+                nullptr,
+                needed_columns,
+                std::make_shared<const milvus_storage::api::Properties>(
+                    properties)));
         AssertInfo(reader != nullptr,
                    "[JsonStats] failed to create reader for column group {} "
                    "segment {}",
@@ -2241,7 +2249,11 @@ JsonKeyStats::LoadColumnGroup(
         std::make_shared<std::vector<std::string>>(column_names);
     const auto reader = std::shared_ptr<milvus_storage::api::Reader>(
         milvus_storage::api::Reader::create(
-            column_groups, nullptr, all_columns, properties));
+            column_groups,
+            nullptr,
+            all_columns,
+            std::make_shared<const milvus_storage::api::Properties>(
+                properties)));
     AssertInfo(reader != nullptr,
                "[JsonStats] failed to create reader for column group {} "
                "segment {}",
@@ -2395,7 +2407,7 @@ JsonKeyStats::LoadSharedKeyIndex(
     const std::string& warmup_policy,
     OpContext* ctx) {
     // shared_key_index_files are absolute remote paths (basePath already prepended)
-    segcore::storagev1translator::BsonInvertedIndexLoadInfo load_info;
+    segcore::BsonInvertedIndexLoadInfo load_info;
     load_info.enable_mmap = enable_mmap;
     load_info.segment_id = segment_id_;
     load_info.field_id = field_id_;
@@ -2405,8 +2417,7 @@ JsonKeyStats::LoadSharedKeyIndex(
     load_info.warmup_policy = warmup_policy;
     load_info.shard = shard_;
     std::unique_ptr<cachinglayer::Translator<index::BsonInvertedIndex>>
-        translator = std::make_unique<
-            segcore::storagev1translator::BsonInvertedIndexTranslator>(
+        translator = std::make_unique<segcore::BsonInvertedIndexTranslator>(
             load_info, file_manager_context_, ctx);
 
     bson_index_cache_slot_ =
@@ -2428,7 +2439,7 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx,
     file_manager_context_.use_async_load =
         file_manager_context_.use_async_load.value_or(
             segcore::storagev2translator::StorageV2AsyncLoadEnabled());
-    segcore::storagev1translator::IndexLoadContext preparation_ctx(
+    index::IndexLoadContext preparation_ctx(
         op_ctx, GetValueFromConfig<int32_t>(config, LOAD_PRIORITY).value_or(0));
     auto* context = &preparation_ctx.ctx;
     storage::ThrowIfCancelled(context->cancellation_token,
@@ -2527,12 +2538,7 @@ JsonKeyStats::Upload(const Config& config) {
 
     // upload meta file
     auto meta_file_path = GetMetaFilePath();
-    if (!(disk_file_manager_->AddJsonStatsMetaLog(meta_file_path))) {
-        ThrowInfo(ErrorCode::FileWriteFailed,
-                  "failed to upload meta file: {} for segment {}",
-                  meta_file_path,
-                  segment_id_);
-    }
+    disk_file_manager_->AddJsonStatsMetaLog(meta_file_path);
 
     // upload parquet file, parquet writer has already upload file to remote
     const auto& shredding_remote_paths_to_size =

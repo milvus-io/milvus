@@ -2,55 +2,48 @@ package interceptor
 
 import (
 	"context"
+	"io"
 	"strings"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc"
+	grpcstatus "google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// NewStreamingServiceUnaryServerInterceptor returns a new unary server interceptor for error handling, metric...
-func NewStreamingServiceUnaryServerInterceptor() grpc.UnaryServerInterceptor {
+// NewServiceUnaryServerInterceptor encodes domain errors using the protocol of
+// the invoked service, paired with NewServiceUnaryClientInterceptor.
+func NewServiceUnaryServerInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		resp, err := handler(ctx, req)
-		if err == nil {
-			return resp, nil
-		}
-		// Streaming Service Method should be overwrite the response error code.
-		if strings.HasPrefix(info.FullMethod, streamingpb.ServiceMethodPrefix) {
-			err = convertMilvusErrorIntoStreamingError(err)
-			err := status.AsStreamingError(err)
-			if err == nil {
-				// return no error if StreamingError is ok.
-				return resp, nil
-			}
-			return resp, status.NewGRPCStatusFromStreamingError(err).Err()
-		}
-		return resp, err
+		return resp, convertServiceError(info.FullMethod, err)
 	}
 }
 
-// NewStreamingServiceStreamServerInterceptor returns a new stream server interceptor for error handling, metric...
-func NewStreamingServiceStreamServerInterceptor() grpc.StreamServerInterceptor {
+// NewServiceStreamServerInterceptor applies the same policy to terminal stream
+// errors, paired with NewServiceStreamClientInterceptor.
+func NewServiceStreamServerInterceptor() grpc.StreamServerInterceptor {
 	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		err := handler(srv, ss)
-		if err == nil {
-			return nil
-		}
+		return convertServiceError(info.FullMethod, handler(srv, ss))
+	}
+}
 
-		// Streaming Service Method should be overwrite the response error code.
-		if strings.HasPrefix(info.FullMethod, streamingpb.ServiceMethodPrefix) {
-			err = convertMilvusErrorIntoStreamingError(err)
-			err := status.AsStreamingError(err)
-			if err == nil {
-				// return no error if StreamingError is ok.
-				return nil
-			}
-			return status.NewGRPCStatusFromStreamingError(err).Err()
-		}
+func convertServiceError(method string, err error) error {
+	if err == nil {
+		return nil
+	}
+	switch {
+	case strings.HasPrefix(method, streamingpb.ServiceMethodPrefix):
+		err = convertMilvusErrorIntoStreamingError(err)
+		return status.NewGRPCStatusFromStreamingError(status.AsStreamingError(err)).Err()
+	case strings.HasPrefix(method, viewpb.ServiceMethodPrefix):
+		return convertViewServiceError(err)
+	default:
 		return err
 	}
 }
@@ -63,4 +56,34 @@ func convertMilvusErrorIntoStreamingError(err error) error {
 		return status.NewIgnoreOperation(err.Error())
 	}
 	return err
+}
+
+// convertViewServiceError owns the View RPC wire boundary. WAL errors may reach
+// the handler from local dependencies, but StreamingError never crosses this
+// boundary. The client therefore selects its wrapper solely by service path.
+func convertViewServiceError(err error) error {
+	if err == nil || errors.IsAny(err, context.Canceled, context.DeadlineExceeded, io.EOF) {
+		return err
+	}
+	if errors.IsAny(err, merr.ErrNodeNotMatch, merr.ErrServiceCrossClusterRouting) {
+		err = viewerror.NewNotPrimaryError(err.Error())
+	}
+	var streamingErr *status.StreamingError
+	if errors.As(err, &streamingErr) {
+		switch {
+		case streamingErr.IsWrongStreamingNode(), streamingErr.IsFenced(), streamingErr.IsIgnoredOperation():
+			err = viewerror.NewNotPrimaryError(streamingErr.Error())
+		case streamingErr.IsOnShutdown():
+			err = viewerror.NewOnShutdownError(streamingErr.Error())
+		case streamingErr.IsRateLimitRejected():
+			err = merr.Wrap(merr.ErrServiceRateLimit, streamingErr.Error())
+		default:
+			err = viewerror.NewUnknownError(streamingErr.Error())
+		}
+	}
+	// Recv/Send can return a native gRPC transport error. Preserve its status.
+	if _, ok := grpcstatus.FromError(err); ok {
+		return err
+	}
+	return viewerror.NewGRPCStatusFromError(err).Err()
 }

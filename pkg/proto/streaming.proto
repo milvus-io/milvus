@@ -863,6 +863,8 @@ message VChannelMeta {
     uint64 transform_materialized_time_tick = 5; // The L0 materialization frontier of the transform consumer. Delete entries through this timetick have been emitted as L0 output.
     // Oldest DataVersion reconstructible after segment recovery metadata cleanup.
     view.DataVersion segment_data_version_summary = 6;
+    // Immutable per-VChannel collection creation TimeTick.
+    uint64 create_collection_time_tick = 7;
 }
 
 // CollectionInfoOfVChannel is the collection info in vchannel.
@@ -1042,6 +1044,7 @@ message StreamingNodeRunAnalyzerRequest {
     oneof operation {
         TokenizeOptions tokenize = 4;
         PhraseMatchOptions phrase_match = 5;
+        HighlightOptions highlight = 6;
     }
 }
 message TokenizeOptions {
@@ -1068,6 +1071,7 @@ message StreamingNodeRunAnalyzerResponse {
     oneof result {
         TokenizeResult tokenize = 1;
         PhraseMatchResult phrase_match = 3;
+        HighlightResult highlight = 4;
     }
     common.Status status = 2;
 }
@@ -1181,9 +1185,6 @@ message StreamingNodeGetCollectionSchemaRequest {
 
 message StreamingNodeGetCollectionSchemaResponse {
     schema.CollectionSchema schema = 1;
-    // Zero means the exact effective boundary is unknown for a legacy schema
-    // baseline, not proof that the channel has crossed a schema boundary.
-    uint64 effective_time_tick = 2;
 }
 
 // Analyzer validation is collection-independent. Business failures use Status;
@@ -1263,3 +1264,28 @@ message CloseReplicaWatchSubscriptionResponse {
 }
 
 message CloseReplicaWatchStreamResponse {}
+
+// Texts are in placeholder order: search texts, query texts, then corpus texts.
+// Analyzer selection belongs to source, including per-text analyzer names.
+message HighlightOptions {
+    int64 search_text_num = 1;
+    int64 corpus_text_num = 2;
+    // All extra query texts currently use lexical token matching.
+    int64 query_text_num = 3;
+    int64 fragment_size = 4;
+    int64 fragment_offset = 5;
+    int64 num_of_fragments = 6;
+    repeated int64 topks = 7;
+}
+message HighlightFragment {
+    // Rune offsets in the original corpus text, not byte offsets.
+    int64 start_offset = 1;
+    int64 end_offset = 2;
+    repeated int64 offsets = 3;
+}
+message HighlightRowResult {
+    repeated HighlightFragment fragments = 1;
+}
+message HighlightResult {
+    repeated HighlightRowResult results = 1;
+}

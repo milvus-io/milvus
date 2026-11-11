@@ -24,6 +24,7 @@
 #include <numeric>
 #include <shared_mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -1146,7 +1147,7 @@ TEST(Growing, LoadedVectorReclaimedByInterimIndexIsNotBackfilled) {
 
     // Fixture guard: the load must leave the raw column reclaimed by an index
     // that covers every loaded row.
-    const auto pin = growing->PinGrowingIndex(vec);
+    const auto pin = growing->PinGrowingIndex(nullptr, vec);
     ASSERT_TRUE(pin);
     ASSERT_EQ(pin.CoveredRowEnd(), rows);
     ASSERT_TRUE(growing->CanReadRawVectorFromIndex(vec));
@@ -2444,10 +2445,43 @@ TEST(GrowingTest, VectorArrayGrowingMmapMatchesHeap) {
                                    BitsetView{},
                                    nullptr,
                                    unsupported_result);
-            FAIL() << "element-nullable VECTOR_ARRAY search must reject";
+            FAIL() << "embedding-list search on element-nullable "
+                      "VECTOR_ARRAY must reject";
         } catch (const SegcoreError& error) {
             EXPECT_EQ(error.get_error_code(), ErrorCode::NotImplemented);
         }
+
+        // Element-level search on the element-nullable field returns
+        // logical element positions and never a null element. Logical ids:
+        // row 0 -> 0..2 (1 null), row 3 -> 3 (null), row 4 -> 4.
+        info.topk_ = 3;
+        info.struct_element_offsets_ =
+            segment->GetStructElementOffsets(nullable);
+        ASSERT_NE(info.struct_element_offsets_, nullptr);
+        ASSERT_EQ(info.struct_element_offsets_->GetTotalElementCount(), 5);
+        SearchResult nullable_search;
+        query::SearchOnGrowing(*growing,
+                               info,
+                               query_vec,
+                               nullptr,
+                               1,
+                               MAX_TIMESTAMP,
+                               BitsetView{},
+                               nullptr,
+                               nullable_search);
+        EXPECT_TRUE(nullable_search.element_level_);
+        ASSERT_EQ(nullable_search.seg_offsets_.size(), 3);
+        EXPECT_EQ(nullable_search.seg_offsets_[0], 0);
+        EXPECT_EQ(nullable_search.element_indices_[0], 0);
+        EXPECT_FLOAT_EQ(nullable_search.distances_[0], 0.0f);
+        std::set<std::pair<int64_t, int32_t>> tail{
+            {nullable_search.seg_offsets_[1],
+             nullable_search.element_indices_[1]},
+            {nullable_search.seg_offsets_[2],
+             nullable_search.element_indices_[2]}};
+        EXPECT_EQ(tail,
+                  (std::set<std::pair<int64_t, int32_t>>{{0, 2}, {4, 0}}));
+        info.topk_ = 2;
         if (enable_mmap) {
             EXPECT_EQ(plain_result->SerializeAsString(), heap_plain);
             EXPECT_EQ(nullable_result->SerializeAsString(), heap_nullable);
@@ -3324,7 +3358,7 @@ TEST(Growing, NullableVectorInsertBuildsMonotonicOffsetMapping) {
                     second.timestamps_.data(),
                     std::make_shared<InsertRecordProto>(*second.raw_));
     EXPECT_EQ(segment->get_row_count(), total_rows);
-    const auto index_pin = segment_impl->PinGrowingIndex(vec);
+    const auto index_pin = segment_impl->PinGrowingIndex(nullptr, vec);
     ASSERT_TRUE(index_pin);
     EXPECT_EQ(index_pin.CoveredRowEnd(), total_rows);
     EXPECT_EQ(index_pin.Reader().Count(), valid_per_batch * 2);
@@ -3410,7 +3444,7 @@ TEST(Growing, ChunkReclamationKeepsSharedStorageAlive) {
 
     // Fixture guard: the first batch must stay below the build threshold so
     // the raw chunks still exist when the reference is taken.
-    ASSERT_FALSE(segment_impl->PinGrowingIndex(vec));
+    ASSERT_FALSE(segment_impl->PinGrowingIndex(nullptr, vec));
     auto* vec_base = segment_impl->get_insert_record().get_data_base(vec);
     ASSERT_GT(vec_base->num_chunk(), 0);
 
@@ -3434,7 +3468,7 @@ TEST(Growing, ChunkReclamationKeepsSharedStorageAlive) {
                     second.row_ids_.data(),
                     second.timestamps_.data(),
                     std::make_shared<InsertRecordProto>(*second.raw_));
-    const auto index_pin = segment_impl->PinGrowingIndex(vec);
+    const auto index_pin = segment_impl->PinGrowingIndex(nullptr, vec);
     ASSERT_TRUE(index_pin);
     EXPECT_EQ(index_pin.CoveredRowEnd(), total_rows);
     EXPECT_EQ(index_pin.Reader().Count(), total_rows);

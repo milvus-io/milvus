@@ -1,0 +1,1747 @@
+package storage
+
+import (
+	"fmt"
+	"reflect"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+)
+
+func TestArrayFieldDataSuite(t *testing.T) {
+	suite.Run(t, new(ArrayFieldDataSuite))
+}
+
+type ArrayFieldDataSuite struct {
+	suite.Suite
+}
+
+func (s *ArrayFieldDataSuite) TestArrayFieldData() {
+	fieldID2Type := map[int64]schemapb.DataType{
+		ArrayField + 1: schemapb.DataType_Bool,
+		ArrayField + 2: schemapb.DataType_Int8,
+		ArrayField + 3: schemapb.DataType_Int16,
+		ArrayField + 4: schemapb.DataType_Int32,
+		ArrayField + 5: schemapb.DataType_Int64,
+		ArrayField + 6: schemapb.DataType_Float,
+		ArrayField + 7: schemapb.DataType_Double,
+		ArrayField + 8: schemapb.DataType_VarChar,
+	}
+
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  RowIDField,
+				DataType: schemapb.DataType_Int64,
+			},
+			{
+				FieldID:  TimestampField,
+				DataType: schemapb.DataType_Int64,
+			},
+			{
+				FieldID:      Int64Field,
+				IsPrimaryKey: true,
+				DataType:     schemapb.DataType_Int64,
+			},
+		},
+	}
+
+	for fieldID, elementType := range fieldID2Type {
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			FieldID:     fieldID,
+			DataType:    schemapb.DataType_Array,
+			ElementType: elementType,
+		})
+	}
+
+	insertData, err := NewInsertData(schema)
+	s.NoError(err)
+
+	s.Equal(0, insertData.GetRowNum())
+	s.Equal(19, insertData.GetMemorySize())
+	s.True(insertData.IsEmpty())
+
+	fieldIDToData := map[int64]interface{}{
+		RowIDField:     int64(1),
+		TimestampField: int64(2),
+		Int64Field:     int64(3),
+		ArrayField + 1: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_BoolData{
+				BoolData: &schemapb.BoolArray{Data: []bool{true, false}},
+			},
+		},
+		ArrayField + 2: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_IntData{
+				IntData: &schemapb.IntArray{Data: []int32{0, 0}},
+			},
+		},
+		ArrayField + 3: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_IntData{
+				IntData: &schemapb.IntArray{Data: []int32{1, 1}},
+			},
+		},
+		ArrayField + 4: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_IntData{
+				IntData: &schemapb.IntArray{Data: []int32{2, 2}},
+			},
+		},
+		ArrayField + 5: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_LongData{
+				LongData: &schemapb.LongArray{Data: []int64{3, 3}},
+			},
+		},
+		ArrayField + 6: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_FloatData{
+				FloatData: &schemapb.FloatArray{Data: []float32{4, 4}},
+			},
+		},
+		ArrayField + 7: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_DoubleData{
+				DoubleData: &schemapb.DoubleArray{Data: []float64{5, 5}},
+			},
+		},
+		ArrayField + 8: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_StringData{
+				StringData: &schemapb.StringArray{Data: []string{"6", "6"}},
+			},
+		},
+	}
+
+	err = insertData.Append(fieldIDToData)
+	s.NoError(err)
+	s.Equal(1, insertData.GetRowNum())
+	s.Equal(134, insertData.GetMemorySize())
+	s.False(insertData.IsEmpty())
+	s.Equal(115, insertData.GetRowSize(0))
+}
+
+func makeFloatVec(dim int, vals ...float32) *schemapb.VectorField {
+	return &schemapb.VectorField{
+		Dim: int64(dim),
+		Data: &schemapb.VectorField_FloatVector{
+			FloatVector: &schemapb.FloatArray{Data: vals},
+		},
+	}
+}
+
+func TestNullableVectorAppendRowsRejectsNonCompactData(t *testing.T) {
+	validData := []bool{true, false, true}
+	sparseRows := &SparseFloatVectorFieldData{
+		SparseFloatArray: schemapb.SparseFloatArray{
+			Dim: 8,
+			Contents: [][]byte{
+				typeutil.CreateSparseFloatRow([]uint32{1}, []float32{1.0}),
+				typeutil.CreateSparseFloatRow([]uint32{2}, []float32{2.0}),
+				typeutil.CreateSparseFloatRow([]uint32{3}, []float32{3.0}),
+			},
+		},
+	}
+
+	tests := []struct {
+		name      string
+		fieldData FieldData
+		rows      any
+	}{
+		{
+			name:      "binary vector",
+			fieldData: &BinaryVectorFieldData{Dim: 8, Nullable: true},
+			rows:      []byte{0x01, 0x02, 0x03},
+		},
+		{
+			name:      "float vector",
+			fieldData: &FloatVectorFieldData{Dim: 2, Nullable: true},
+			rows:      []float32{1, 2, 3, 4, 5, 6},
+		},
+		{
+			name:      "float16 vector",
+			fieldData: &Float16VectorFieldData{Dim: 2, Nullable: true},
+			rows:      []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+		},
+		{
+			name:      "bfloat16 vector",
+			fieldData: &BFloat16VectorFieldData{Dim: 2, Nullable: true},
+			rows:      []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+		},
+		{
+			name:      "sparse vector",
+			fieldData: &SparseFloatVectorFieldData{Nullable: true},
+			rows:      sparseRows,
+		},
+		{
+			name:      "int8 vector",
+			fieldData: &Int8VectorFieldData{Dim: 2, Nullable: true},
+			rows:      []int8{1, 2, 3, 4, 5, 6},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.fieldData.AppendRows(tt.rows, validData)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "compact")
+			assert.Equal(t, 0, tt.fieldData.RowNum())
+			assert.Empty(t, nullableVectorValidDataForTest(tt.fieldData))
+		})
+	}
+}
+
+func nullableVectorValidDataForTest(fieldData FieldData) []bool {
+	switch data := fieldData.(type) {
+	case *BinaryVectorFieldData:
+		return data.ValidData
+	case *FloatVectorFieldData:
+		return data.ValidData
+	case *Float16VectorFieldData:
+		return data.ValidData
+	case *BFloat16VectorFieldData:
+		return data.ValidData
+	case *SparseFloatVectorFieldData:
+		return data.ValidData
+	case *Int8VectorFieldData:
+		return data.ValidData
+	default:
+		return nil
+	}
+}
+
+func TestVectorArrayFieldData_NullableAppendAndGetRow(t *testing.T) {
+	fd := &VectorArrayFieldData{
+		Dim:         4,
+		ElementType: schemapb.DataType_FloatVector,
+		Data:        make([]*schemapb.VectorField, 0),
+		ValidData:   make([]bool, 0),
+		Nullable:    true,
+	}
+
+	vec0 := makeFloatVec(4, 1, 2, 3, 4)
+	vec2 := makeFloatVec(4, 5, 6, 7, 8)
+
+	require.NoError(t, fd.AppendRow(vec0))
+	require.NoError(t, fd.AppendRow(nil))
+	require.NoError(t, fd.AppendRow(vec2))
+
+	assert.Equal(t, 3, fd.RowNum(), "RowNum should count all rows including null placeholders")
+	assert.Equal(t, 3, len(fd.Data), "Plan B: Data is dense; null rows hold empty placeholders")
+	assert.Equal(t, []bool{true, false, true}, fd.GetValidData())
+	assert.True(t, fd.GetNullable())
+
+	assert.Equal(t, vec0, fd.GetRow(0))
+	assert.Nil(t, fd.GetRow(1), "null row should return nil despite placeholder in Data")
+	assert.Equal(t, vec2, fd.GetRow(2))
+}
+
+func TestVectorArrayFieldData_NonNullable(t *testing.T) {
+	fd := &VectorArrayFieldData{
+		Dim:         4,
+		ElementType: schemapb.DataType_FloatVector,
+		Data:        make([]*schemapb.VectorField, 0),
+		Nullable:    false,
+	}
+
+	vec := makeFloatVec(4, 1, 2, 3, 4)
+	require.NoError(t, fd.AppendRow(vec))
+
+	assert.Equal(t, 1, fd.RowNum())
+	assert.False(t, fd.GetNullable())
+	assert.Nil(t, fd.GetValidData())
+	assert.Equal(t, vec, fd.GetRow(0))
+}
+
+func TestVectorArrayFieldData_AppendValidDataRows(t *testing.T) {
+	fd := &VectorArrayFieldData{
+		Dim:         4,
+		ElementType: schemapb.DataType_FloatVector,
+		Data: []*schemapb.VectorField{
+			makeFloatVec(4, 1, 2, 3, 4),
+			makeFloatVec(4, 5, 6, 7, 8),
+		},
+		Nullable: true,
+	}
+
+	err := fd.AppendValidDataRows([]bool{true, false, true})
+	require.NoError(t, err)
+
+	assert.Equal(t, []bool{true, false, true}, fd.GetValidData())
+
+	assert.NoError(t, fd.AppendValidDataRows(nil))
+	assert.Error(t, fd.AppendValidDataRows("bad"))
+}
+
+func TestVectorArrayFieldData_GetMemorySize(t *testing.T) {
+	fd := &VectorArrayFieldData{
+		Dim:         4,
+		ElementType: schemapb.DataType_FloatVector,
+		Data:        []*schemapb.VectorField{makeFloatVec(4, 1, 2, 3, 4)},
+		ValidData:   []bool{true, false},
+		Nullable:    true,
+	}
+
+	assert.Greater(t, fd.GetMemorySize(), 0)
+}
+
+func TestVectorArrayFieldData_AllNull(t *testing.T) {
+	fd := &VectorArrayFieldData{
+		Dim:         4,
+		ElementType: schemapb.DataType_FloatVector,
+		Data:        make([]*schemapb.VectorField, 0),
+		ValidData:   make([]bool, 0),
+		Nullable:    true,
+	}
+
+	for i := 0; i < 3; i++ {
+		require.NoError(t, fd.AppendRow(nil))
+	}
+
+	assert.Equal(t, 3, fd.RowNum())
+	assert.Equal(t, 3, len(fd.Data), "Plan B: Data is dense, null rows hold placeholders")
+	for i := 0; i < 3; i++ {
+		assert.Nil(t, fd.GetRow(i))
+	}
+}
+
+func TestNewFieldData_NullableArrayOfVector(t *testing.T) {
+	schema := &schemapb.FieldSchema{
+		FieldID:     100,
+		Name:        "vec_arr",
+		DataType:    schemapb.DataType_ArrayOfVector,
+		ElementType: schemapb.DataType_FloatVector,
+		Nullable:    true,
+		TypeParams:  []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}},
+	}
+	fd, err := NewFieldDataBuilder(schemapb.DataType_ArrayOfVector, schema).WithCapacity(10).Build()
+	require.NoError(t, err)
+
+	vafd, ok := fd.(*VectorArrayFieldData)
+	require.True(t, ok)
+	assert.True(t, vafd.Nullable)
+	assert.NotNil(t, vafd.ValidData)
+	assert.Equal(t, int64(4), vafd.Dim)
+}
+
+func TestNewFieldData_ElementNullableArrayPayloads(t *testing.T) {
+	arraySchema := &schemapb.FieldSchema{
+		FieldID:         100,
+		Name:            "arr",
+		DataType:        schemapb.DataType_Array,
+		ElementType:     schemapb.DataType_Int64,
+		ElementNullable: true,
+	}
+	fd, err := NewFieldDataBuilder(schemapb.DataType_Array, arraySchema).WithCapacity(10).Build()
+	require.NoError(t, err)
+
+	arrayData, ok := fd.(*ArrayFieldData)
+	require.True(t, ok)
+	assert.True(t, arrayData.ElementNullable)
+	assert.NotNil(t, arrayData.Data)
+
+	vectorArraySchema := &schemapb.FieldSchema{
+		FieldID:         101,
+		Name:            "vec_arr",
+		DataType:        schemapb.DataType_ArrayOfVector,
+		ElementType:     schemapb.DataType_FloatVector,
+		ElementNullable: true,
+		TypeParams:      []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}},
+	}
+	fd, err = NewFieldDataBuilder(schemapb.DataType_ArrayOfVector, vectorArraySchema).WithCapacity(10).Build()
+	require.NoError(t, err)
+
+	vectorArrayData, ok := fd.(*VectorArrayFieldData)
+	require.True(t, ok)
+	assert.True(t, vectorArrayData.ElementNullable)
+	assert.NotNil(t, vectorArrayData.Data)
+}
+
+func TestNewFieldData_NullableVectorCap(t *testing.T) {
+	cases := []struct {
+		dataType schemapb.DataType
+		scaled   int
+		check    func(t *testing.T, fd FieldData, scaled int)
+	}{
+		{schemapb.DataType_FloatVector, 1000 * 128, func(t *testing.T, fd FieldData, scaled int) {
+			assert.Equal(t, scaled, cap(fd.(*FloatVectorFieldData).Data))
+		}},
+		{schemapb.DataType_Float16Vector, 1000 * 128 * 2, func(t *testing.T, fd FieldData, scaled int) {
+			assert.Equal(t, scaled, cap(fd.(*Float16VectorFieldData).Data))
+		}},
+		{schemapb.DataType_BFloat16Vector, 1000 * 128 * 2, func(t *testing.T, fd FieldData, scaled int) {
+			assert.Equal(t, scaled, cap(fd.(*BFloat16VectorFieldData).Data))
+		}},
+		{schemapb.DataType_BinaryVector, 1000 * 128 / 8, func(t *testing.T, fd FieldData, scaled int) {
+			assert.Equal(t, scaled, cap(fd.(*BinaryVectorFieldData).Data))
+		}},
+		{schemapb.DataType_Int8Vector, 1000 * 128, func(t *testing.T, fd FieldData, scaled int) {
+			assert.Equal(t, scaled, cap(fd.(*Int8VectorFieldData).Data))
+		}},
+	}
+	for _, c := range cases {
+		newSchema := func(nullable bool) *schemapb.FieldSchema {
+			return &schemapb.FieldSchema{
+				FieldID:    100,
+				Name:       "vec",
+				DataType:   c.dataType,
+				Nullable:   nullable,
+				TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}},
+			}
+		}
+		fd, err := NewFieldDataBuilder(c.dataType, newSchema(false)).WithCapacity(1000).Build()
+		require.NoError(t, err)
+		c.check(t, fd, c.scaled)
+
+		fd, err = NewFieldDataBuilder(c.dataType, newSchema(true)).WithCapacity(1000).Build()
+		require.NoError(t, err)
+		c.check(t, fd, 1000)
+	}
+}
+
+// These tests check logical-size accounting, not Go heap usage.
+// Expected sizes are independent of GetRowSize and the incremental cache.
+func TestFieldMemorySizeNullableAppend(t *testing.T) {
+	tests := []struct {
+		name  string
+		field FieldData
+		row   any
+		// Empty, one null, null + value, null + value + null.
+		want [4]int
+	}{
+		{"bool", &BoolFieldData{Nullable: true}, true, [4]int{1, 3, 5, 7}},
+		{"int8", &Int8FieldData{Nullable: true}, int8(1), [4]int{1, 3, 5, 7}},
+		{"int16", &Int16FieldData{Nullable: true}, int16(1), [4]int{1, 4, 7, 10}},
+		{"int32", &Int32FieldData{Nullable: true}, int32(1), [4]int{1, 6, 11, 16}},
+		{"int64", &Int64FieldData{Nullable: true}, int64(1), [4]int{1, 10, 19, 28}},
+		{"float", &FloatFieldData{Nullable: true}, float32(1), [4]int{1, 6, 11, 16}},
+		{"double", &DoubleFieldData{Nullable: true}, float64(1), [4]int{1, 10, 19, 28}},
+		{"timestamptz", &TimestamptzFieldData{Nullable: true}, int64(1), [4]int{1, 10, 19, 28}},
+		{"string", &StringFieldData{Nullable: true}, "中", [4]int{1, 18, 38, 55}},
+		{"json", &JSONFieldData{Nullable: true}, []byte("{}"), [4]int{1, 18, 37, 54}},
+		{"geometry", &GeometryFieldData{Nullable: true}, []byte{1, 2, 3}, [4]int{1, 18, 38, 55}},
+		// Compact nullable vectors store no payload for null rows and charge
+		// 16 bytes per non-null L2P entry, in addition to the validity byte.
+		{"binary", &BinaryVectorFieldData{Nullable: true, Dim: 8}, []byte{1}, [4]int{13, 14, 32, 33}},
+		{"float_vector", &FloatVectorFieldData{Nullable: true, Dim: 2}, []float32{1, 2}, [4]int{13, 14, 39, 40}},
+		{"float16", &Float16VectorFieldData{Nullable: true, Dim: 2}, []byte{0, 0, 0, 0}, [4]int{13, 14, 35, 36}},
+		{"bfloat16", &BFloat16VectorFieldData{Nullable: true, Dim: 2}, []byte{0, 0, 0, 0}, [4]int{13, 14, 35, 36}},
+		{"int8_vector", &Int8VectorFieldData{Nullable: true, Dim: 2}, []int8{1, 2}, [4]int{13, 14, 33, 34}},
+		{"sparse", &SparseFloatVectorFieldData{Nullable: true}, typeutil.CreateSparseFloatRow([]uint32{0}, []float32{1}), [4]int{9, 10, 39, 40}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want[0], tt.field.GetMemorySize())
+			for i, row := range []any{nil, tt.row, nil} {
+				require.NoError(t, tt.field.AppendRow(row))
+				require.Equal(t, tt.want[i+1], tt.field.GetMemorySize(), "after append %d", i)
+			}
+		})
+	}
+}
+
+func TestFieldMemorySizeSparseEncodingBoundaries(t *testing.T) {
+	field := &SparseFloatVectorFieldData{}
+	require.Equal(t, 9, field.GetMemorySize())
+	// Each one-entry row is 8 bytes plus a one-byte tag and length.
+	// Dim=127 encodes in one byte; Dim=128 encodes in two bytes.
+	for i, step := range []struct {
+		index uint32
+		want  int
+	}{
+		{126, 21}, // 9 fixed + 10 contents + 2 Dim
+		{127, 32}, // 9 fixed + 20 contents + 3 Dim
+		{0, 42},   // smaller row dimension does not shrink the batch Dim
+	} {
+		require.NoError(t, field.AppendRow(typeutil.CreateSparseFloatRow([]uint32{step.index}, []float32{1})))
+		require.Equal(t, step.want, field.GetMemorySize(), "step %d", i)
+	}
+	indices := make([]uint32, 16)
+	values := make([]float32, 16)
+	for i := range indices {
+		indices[i], values[i] = uint32(i), 1
+	}
+	// 128-byte contents needs a two-byte length prefix: 1 + 2 + 128.
+	require.NoError(t, field.AppendRow(typeutil.CreateSparseFloatRow(indices, values)))
+	require.Equal(t, 173, field.GetMemorySize())
+	// An empty, non-null sparse row still has a protobuf tag and length.
+	require.NoError(t, field.AppendRow([]byte{}))
+	require.Equal(t, 175, field.GetMemorySize())
+}
+
+func TestFieldMemorySizeArrayValidity(t *testing.T) {
+	row := &schemapb.ScalarField{
+		Data:      &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10, 0}}},
+		ValidData: []bool{true, false},
+	}
+	field := &ArrayFieldData{ElementType: schemapb.DataType_Int64, Nullable: true, ElementNullable: true}
+	require.Equal(t, 2, field.GetMemorySize())
+	require.NoError(t, field.AppendRow(nil))
+	require.Equal(t, 3, field.GetMemorySize())
+	require.NoError(t, field.AppendRow(row))
+	// Two flags + two row-validity bytes + 16 payload + two element-validity bytes.
+	require.Equal(t, 22, field.GetMemorySize())
+
+	// Each non-nil string-array leaf includes a one-byte Nullable flag.
+	strings := &ArrayFieldData{ElementType: schemapb.DataType_VarChar}
+	require.NoError(t, strings.AppendRow(&schemapb.ScalarField{
+		Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"a", ""}}},
+	}))
+	require.Equal(t, 36, strings.GetMemorySize()) // 2 + (17 + 16 + 1)
+}
+
+func TestFieldMemorySizeVectorArrayValidity(t *testing.T) {
+	field := &VectorArrayFieldData{Dim: 2, ElementType: schemapb.DataType_FloatVector, Nullable: true, ElementNullable: true}
+	require.Equal(t, 2, field.GetMemorySize())
+	require.NoError(t, field.AppendRow(nil))
+	// AppendRow(nil) creates a non-nil empty vector: its Dim costs 4 bytes.
+	require.Equal(t, 7, field.GetMemorySize())
+	require.NoError(t, field.AppendRow(&schemapb.VectorField{
+		Dim:       2,
+		Data:      &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: []float32{1, 2}}},
+		ValidData: []bool{true, false},
+	}))
+	require.Equal(t, 22, field.GetMemorySize()) // 7 + 8 payload + 4 Dim + 2 element-validity + 1 row-validity
+}
+
+func TestFieldMemorySizeSplitAppendAndFailure(t *testing.T) {
+	field := &StringFieldData{Nullable: true}
+	require.NoError(t, field.AppendDataRows([]string{"a", ""}))
+	require.Equal(t, 34, field.GetMemorySize())
+	require.NoError(t, field.AppendValidDataRows([]bool{true, false}))
+	require.Equal(t, 36, field.GetMemorySize())
+	require.NoError(t, field.AppendRows([]string{"中"}, []bool{true}))
+	require.Equal(t, 56, field.GetMemorySize())
+	// AppendRows mutates data before checking the validity argument's type.
+	require.Error(t, field.AppendRows([]string{"b"}, "invalid validity"))
+	require.Equal(t, 73, field.GetMemorySize())
+}
+
+// Expected sizes are literal values, independent of production sizing functions.
+// shared is charged only by the first row in each fixture.
+type fieldMemoryCase struct {
+	dataType                       schemapb.DataType
+	row, batch                     any
+	fixed, perRow, shared, mapping int
+}
+
+func fieldMemoryCases() []fieldMemoryCase {
+	sparse := typeutil.CreateSparseFloatRow([]uint32{0}, []float32{1})
+	array := &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}}}
+	vector := &schemapb.VectorField{Dim: 8, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, 8)}}}
+	return []fieldMemoryCase{
+		{schemapb.DataType_Bool, true, []bool{true}, 1, 1, 0, 0},
+		{schemapb.DataType_Int8, int8(1), []int8{1}, 1, 1, 0, 0},
+		{schemapb.DataType_Int16, int16(1), []int16{1}, 1, 2, 0, 0},
+		{schemapb.DataType_Int32, int32(1), []int32{1}, 1, 4, 0, 0},
+		{schemapb.DataType_Int64, int64(1), []int64{1}, 1, 8, 0, 0},
+		{schemapb.DataType_Timestamptz, int64(1), []int64{1}, 1, 8, 0, 0},
+		{schemapb.DataType_Float, float32(1), []float32{1}, 1, 4, 0, 0},
+		{schemapb.DataType_Double, float64(1), []float64{1}, 1, 8, 0, 0},
+		{schemapb.DataType_VarChar, "中", []string{"中"}, 1, 19, 0, 0},
+		{schemapb.DataType_String, "中", []string{"中"}, 1, 19, 0, 0},
+		{schemapb.DataType_JSON, []byte("{}"), [][]byte{[]byte("{}")}, 1, 18, 0, 0},
+		{schemapb.DataType_Geometry, []byte{1, 2, 3}, [][]byte{{1, 2, 3}}, 1, 19, 0, 0},
+		{schemapb.DataType_BinaryVector, []byte{1}, []byte{1}, 13, 1, 0, 16},
+		{schemapb.DataType_FloatVector, make([]float32, 8), make([]float32, 8), 13, 32, 0, 16},
+		{schemapb.DataType_Float16Vector, make([]byte, 16), make([]byte, 16), 13, 16, 0, 16},
+		{schemapb.DataType_BFloat16Vector, make([]byte, 16), make([]byte, 16), 13, 16, 0, 16},
+		{schemapb.DataType_Int8Vector, make([]int8, 8), make([]int8, 8), 13, 8, 0, 16},
+		{schemapb.DataType_SparseFloatVector, sparse, &SparseFloatVectorFieldData{SparseFloatArray: schemapb.SparseFloatArray{Contents: [][]byte{sparse}, Dim: 1}}, 9, 10, 2, 16},
+		{schemapb.DataType_Array, array, []*schemapb.ScalarField{array}, 2, 16, 0, 0},
+		{schemapb.DataType_ArrayOfVector, vector, []*schemapb.VectorField{vector}, 2, 36, 0, 0},
+	}
+}
+
+func (c fieldMemoryCase) newField(t *testing.T, nullable bool, capacity int) FieldData {
+	t.Helper()
+	element := schemapb.DataType_Int64
+	if c.dataType == schemapb.DataType_ArrayOfVector {
+		element = schemapb.DataType_FloatVector
+	}
+	field, err := NewFieldDataBuilder(c.dataType, &schemapb.FieldSchema{
+		DataType: c.dataType, Nullable: nullable, ElementType: element,
+		TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}},
+	}).WithCapacity(capacity).WithMemoryTracking().Build()
+	require.NoError(t, err)
+	return field
+}
+
+func TestFieldMemorySizeAppendPaths(t *testing.T) {
+	for _, c := range fieldMemoryCases() {
+		for _, nullable := range []bool{false, true} {
+			for _, capacity := range []int{0, 64} {
+				for _, path := range []string{"row", "rows", "split"} {
+					t.Run(fmt.Sprintf("%s/nullable=%t/cap=%d/%s", c.dataType, nullable, capacity, path), func(t *testing.T) {
+						field := c.newField(t, nullable, capacity)
+						require.Equal(t, c.fixed, field.GetMemorySize())
+						validitySize := 0
+						var validity any
+						if nullable {
+							validity, validitySize = []bool{true}, 1+c.mapping
+						}
+						for n := 1; n <= 2; n++ {
+							want := c.fixed + c.shared + n*(c.perRow+validitySize)
+							switch path {
+							case "row":
+								require.NoError(t, field.AppendRow(c.row))
+							case "rows":
+								require.NoError(t, field.AppendRows(c.batch, validity))
+							case "split":
+								require.NoError(t, field.AppendDataRows(c.batch))
+								require.Equal(t, want-validitySize, field.GetMemorySize(), "data only")
+								require.NoError(t, field.AppendValidDataRows(validity))
+							}
+							require.Equal(t, want, field.GetMemorySize(), "rows=%d", n)
+							require.Equal(t, n, field.RowNum())
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
+func TestFieldMemorySizeArrayElementTypes(t *testing.T) {
+	tests := []struct {
+		element schemapb.DataType
+		row     *schemapb.ScalarField
+		payload int
+	}{
+		{schemapb.DataType_Bool, &schemapb.ScalarField{Data: &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: []bool{true, false}}}}, 2},
+		{schemapb.DataType_Int8, &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{1, 2}}}}, 2},
+		{schemapb.DataType_Int16, &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{1, 2}}}}, 4},
+		{schemapb.DataType_Int32, &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{1, 2}}}}, 8},
+		{schemapb.DataType_Int64, &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}}}, 16},
+		{schemapb.DataType_Timestamptz, &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}}}, 16},
+		{schemapb.DataType_Float, &schemapb.ScalarField{Data: &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: []float32{1, 2}}}}, 8},
+		{schemapb.DataType_Double, &schemapb.ScalarField{Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: []float64{1, 2}}}}, 16},
+		{schemapb.DataType_String, &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"中", ""}}}}, 36},
+		{schemapb.DataType_VarChar, &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"中", ""}}}}, 36},
+	}
+	for _, tt := range tests {
+		t.Run(tt.element.String(), func(t *testing.T) {
+			field := &ArrayFieldData{ElementType: tt.element, Nullable: true, ElementNullable: true}
+			require.Equal(t, 2, field.GetMemorySize())
+			tt.row.ValidData = []bool{true, false}
+			require.NoError(t, field.AppendRows([]*schemapb.ScalarField{nil, tt.row}, []bool{false, true}))
+			require.Equal(t, 2+2+2+tt.payload, field.GetMemorySize())
+		})
+	}
+}
+
+func TestFieldMemorySizeVectorArrayElementTypes(t *testing.T) {
+	tests := []struct {
+		element schemapb.DataType
+		row     *schemapb.VectorField
+		payload int
+	}{
+		{schemapb.DataType_BinaryVector, &schemapb.VectorField{Dim: 8, Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{1, 2}}}, 2},
+		{schemapb.DataType_FloatVector, &schemapb.VectorField{Dim: 8, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, 16)}}}, 64},
+		{schemapb.DataType_Float16Vector, &schemapb.VectorField{Dim: 8, Data: &schemapb.VectorField_Float16Vector{Float16Vector: make([]byte, 32)}}, 32},
+		{schemapb.DataType_BFloat16Vector, &schemapb.VectorField{Dim: 8, Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: make([]byte, 32)}}, 32},
+		{schemapb.DataType_Int8Vector, &schemapb.VectorField{Dim: 8, Data: &schemapb.VectorField_Int8Vector{Int8Vector: make([]byte, 16)}}, 16},
+	}
+	for _, tt := range tests {
+		t.Run(tt.element.String(), func(t *testing.T) {
+			field := &VectorArrayFieldData{Dim: 8, ElementType: tt.element, Nullable: true, ElementNullable: true}
+			require.Equal(t, 2, field.GetMemorySize())
+			tt.row.ValidData = []bool{true, false}
+			require.NoError(t, field.AppendRows([]*schemapb.VectorField{nil, tt.row}, []bool{false, true}))
+			// nil contributes no dimension; the non-nil row contributes four bytes.
+			require.Equal(t, 2+2+2+4+tt.payload, field.GetMemorySize())
+		})
+	}
+}
+
+func TestStringFieldDataTrackedAppend(t *testing.T) {
+	for _, dataType := range []schemapb.DataType{schemapb.DataType_String, schemapb.DataType_VarChar, schemapb.DataType_Text} {
+		for _, nullable := range []bool{false, true} {
+			for _, capacity := range []int{0, 64} {
+				t.Run(fmt.Sprintf("%s/nullable=%t/cap=%d", dataType, nullable, capacity), func(t *testing.T) {
+					field := newFieldDataForTest[*StringFieldData](&schemapb.FieldSchema{
+						DataType: dataType,
+						Nullable: nullable,
+					}, capacity, true)
+					legacy := &StringFieldData{Data: make([]string, 0, capacity), DataType: dataType, Nullable: nullable}
+					if nullable {
+						legacy.ValidData = make([]bool, 0, capacity)
+					}
+					require.Equal(t, 1, checkedMemorySize(t, field))
+					require.Equal(t, capacity, cap(field.Data))
+					require.Equal(t, dataType, field.GetDataType())
+					steps := []struct {
+						name         string
+						tracked, old func() error
+					}{
+						{"row", func() error { return field.AppendRow("中") }, func() error { return legacy.AppendRow("中") }},
+						{"empty row", func() error { return field.AppendRow("") }, func() error { return legacy.AppendRow("") }},
+						{"null row", func() error { return field.AppendRow(nil) }, func() error { return legacy.AppendRow(nil) }},
+						{"invalid row", func() error { return field.AppendRow(42) }, func() error { return legacy.AppendRow(42) }},
+						{"batch", func() error { return field.AppendRows([]string{"a", "", "你好"}, []bool{true, false, true}) }, func() error { return legacy.AppendRows([]string{"a", "", "你好"}, []bool{true, false, true}) }},
+						{"data only", func() error { return field.AppendDataRows([]string{"split", ""}) }, func() error { return legacy.AppendDataRows([]string{"split", ""}) }},
+						{"validity only", func() error { return field.AppendValidDataRows([]bool{true, false}) }, func() error { return legacy.AppendValidDataRows([]bool{true, false}) }},
+						{"nil validity", func() error { return field.AppendValidDataRows(nil) }, func() error { return legacy.AppendValidDataRows(nil) }},
+						{"empty batch", func() error { return field.AppendRows([]string(nil), []bool(nil)) }, func() error { return legacy.AppendRows([]string(nil), []bool(nil)) }},
+						{"invalid data", func() error { return field.AppendRows(42, []bool{true}) }, func() error { return legacy.AppendRows(42, []bool{true}) }},
+						{"partial success", func() error { return field.AppendRows([]string{"retained"}, "bad validity") }, func() error { return legacy.AppendRows([]string{"retained"}, "bad validity") }},
+						{"after error", func() error { return field.AppendRow("last") }, func() error { return legacy.AppendRow("last") }},
+					}
+					for _, step := range steps {
+						t.Run(step.name, func(t *testing.T) {
+							got, want := step.tracked(), step.old()
+							if want != nil {
+								require.EqualError(t, got, want.Error())
+							} else {
+								require.NoError(t, got)
+							}
+							require.Equal(t, legacy.Data, field.Data)
+							require.Equal(t, legacy.ValidData, field.ValidData)
+							require.Equal(t, legacy.GetMemorySize(), checkedMemorySize(t, field))
+							require.Equal(t, field.GetMemorySize(), checkedMemorySize(t, field))
+						})
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestStringFieldDataTrackedSizeBaseline(t *testing.T) {
+	field := newFieldDataForTest[*StringFieldData](&schemapb.FieldSchema{
+		DataType: schemapb.DataType_VarChar,
+		Nullable: true,
+	}, 64, true)
+	require.Equal(t, 1, checkedMemorySize(t, field))
+	require.NoError(t, field.AppendRow(nil))
+	require.Equal(t, 18, checkedMemorySize(t, field))
+	require.NoError(t, field.AppendRow("中"))
+	require.Equal(t, 38, checkedMemorySize(t, field))
+	require.NoError(t, field.AppendDataRows([]string{"a", ""}))
+	require.Equal(t, 71, checkedMemorySize(t, field))
+	require.NoError(t, field.AppendValidDataRows([]bool{true, false}))
+	require.Equal(t, 73, checkedMemorySize(t, field))
+	require.Error(t, field.AppendRows([]string{"b"}, "invalid"))
+	require.Equal(t, 90, checkedMemorySize(t, field))
+	require.Equal(t, field.GetMemorySize(), checkedMemorySize(t, field))
+}
+
+func TestScalarFieldDataTrackedAppend(t *testing.T) {
+	cases := []struct {
+		name               string
+		newField           func(bool, int) FieldData
+		row, batch         any
+		rowSize, batchSize int
+	}{
+		{"Bool", func(n bool, c int) FieldData { return newFixedFieldDataForTest(schemapb.DataType_Bool, n, c, 0) }, true, []bool{true, false}, 1, 2},
+		{"Int8", func(n bool, c int) FieldData { return newFixedFieldDataForTest(schemapb.DataType_Int8, n, c, 0) }, int8(1), []int8{1, 0}, 1, 2},
+		{"Int16", func(n bool, c int) FieldData { return newFixedFieldDataForTest(schemapb.DataType_Int16, n, c, 0) }, int16(1), []int16{1, 0}, 2, 4},
+		{"Int32", func(n bool, c int) FieldData { return newFixedFieldDataForTest(schemapb.DataType_Int32, n, c, 0) }, int32(1), []int32{1, 0}, 4, 8},
+		{"Int64", func(n bool, c int) FieldData { return newFixedFieldDataForTest(schemapb.DataType_Int64, n, c, 0) }, int64(1), []int64{1, 0}, 8, 16},
+		{"Float", func(n bool, c int) FieldData { return newFixedFieldDataForTest(schemapb.DataType_Float, n, c, 0) }, float32(1), []float32{1, 0}, 4, 8},
+		{"Double", func(n bool, c int) FieldData { return newFixedFieldDataForTest(schemapb.DataType_Double, n, c, 0) }, float64(1), []float64{1, 0}, 8, 16},
+		{"Timestamptz", func(n bool, c int) FieldData { return newFixedFieldDataForTest(schemapb.DataType_Timestamptz, n, c, 0) }, int64(1), []int64{1, 0}, 8, 16},
+		{"JSON", func(n bool, c int) FieldData {
+			return newFieldDataForTest[*JSONFieldData](&schemapb.FieldSchema{
+				DataType: schemapb.DataType_JSON,
+				Nullable: n,
+			}, c, true)
+		}, []byte("{}"), [][]byte{[]byte("{}"), nil}, 18, 34},
+		{"Geometry", func(n bool, c int) FieldData {
+			return newFieldDataForTest[*GeometryFieldData](&schemapb.FieldSchema{
+				DataType: schemapb.DataType_Geometry,
+				Nullable: n,
+			}, c, true)
+		}, []byte{1, 2, 3}, [][]byte{{1, 2, 3}, nil}, 19, 35},
+		{"GeometryString", func(n bool, c int) FieldData {
+			return newFieldDataForTest[*GeometryFieldData](&schemapb.FieldSchema{
+				DataType: schemapb.DataType_Geometry,
+				Nullable: n,
+			}, c, true)
+		}, "中", []string{"中", ""}, 19, 35},
+	}
+	for _, tc := range cases {
+		for _, nullable := range []bool{false, true} {
+			for _, capacity := range []int{0, 64} {
+				t.Run(fmt.Sprintf("%s/nullable=%t/cap=%d", tc.name, nullable, capacity), func(t *testing.T) {
+					field, legacy := tc.newField(nullable, capacity), tc.newField(nullable, capacity)
+					want := 1
+					check := func() {
+						t.Helper()
+						require.Equal(t, want, checkedMemorySize(t, field))
+						require.Equal(t, legacy.GetMemorySize(), checkedMemorySize(t, field))
+						require.Equal(t, field.GetMemorySize(), checkedMemorySize(t, field))
+						require.Equal(t, legacy.GetDataRows(), field.GetDataRows())
+						require.Equal(t, legacy.GetValidData(), field.GetValidData())
+					}
+					check()
+					// Multiple batches exercise growth beyond the initial capacity.
+					for i := 0; i < 40; i++ {
+						require.NoError(t, field.AppendRow(tc.row))
+						require.NoError(t, legacy.AppendRow(tc.row))
+						want += tc.rowSize
+						if nullable {
+							want++
+						}
+						check()
+						require.NoError(t, field.AppendRows(tc.batch, []bool{true, false}))
+						require.NoError(t, legacy.AppendRows(tc.batch, []bool{true, false}))
+						want += tc.batchSize + 2
+						check()
+					}
+					require.NoError(t, field.AppendDataRows(tc.batch))
+					require.NoError(t, legacy.AppendDataRows(tc.batch))
+					want += tc.batchSize
+					check()
+					require.NoError(t, field.AppendValidDataRows([]bool{true, false}))
+					require.NoError(t, legacy.AppendValidDataRows([]bool{true, false}))
+					want += 2
+					check()
+					require.NoError(t, field.AppendValidDataRows(nil))
+					require.NoError(t, legacy.AppendValidDataRows(nil))
+					check()
+					got, old := field.AppendRow(nil), legacy.AppendRow(nil)
+					if nullable {
+						require.NoError(t, got)
+						require.NoError(t, old)
+						if tc.name == "JSON" || tc.name == "Geometry" || tc.name == "GeometryString" {
+							want += 17
+						} else {
+							want += tc.rowSize + 1
+						}
+					} else {
+						require.Error(t, old)
+						require.EqualError(t, got, old.Error())
+					}
+					check()
+					got, old = field.AppendRow(struct{}{}), legacy.AppendRow(struct{}{})
+					require.Error(t, old)
+					require.EqualError(t, got, old.Error())
+					check()
+					got, old = field.AppendRows(struct{}{}, []bool{true}), legacy.AppendRows(struct{}{}, []bool{true})
+					require.Error(t, old)
+					require.EqualError(t, got, old.Error())
+					check()
+					got, old = field.AppendRows(tc.batch, "invalid validity"), legacy.AppendRows(tc.batch, "invalid validity")
+					require.Error(t, old)
+					require.EqualError(t, got, old.Error())
+					want += tc.batchSize
+					check()
+					require.NoError(t, field.AppendRow(tc.row))
+					require.NoError(t, legacy.AppendRow(tc.row))
+					want += tc.rowSize
+					if nullable {
+						want++
+					}
+					check()
+				})
+			}
+		}
+	}
+}
+
+func TestArrayFieldDataTrackedAppend(t *testing.T) {
+	tests := []struct {
+		element schemapb.DataType
+		row     *schemapb.ScalarField
+		payload int
+	}{
+		{schemapb.DataType_Bool, &schemapb.ScalarField{Data: &schemapb.ScalarField_BoolData{BoolData: &schemapb.BoolArray{Data: []bool{true, false}}}}, 2},
+		{schemapb.DataType_Int8, &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{1, 2}}}}, 2},
+		{schemapb.DataType_Int16, &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{1, 2}}}}, 4},
+		{schemapb.DataType_Int32, &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{1, 2}}}}, 8},
+		{schemapb.DataType_Int64, &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}}}, 16},
+		{schemapb.DataType_Timestamptz, &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{1, 2}}}}, 16},
+		{schemapb.DataType_Float, &schemapb.ScalarField{Data: &schemapb.ScalarField_FloatData{FloatData: &schemapb.FloatArray{Data: []float32{1, 2}}}}, 8},
+		{schemapb.DataType_Double, &schemapb.ScalarField{Data: &schemapb.ScalarField_DoubleData{DoubleData: &schemapb.DoubleArray{Data: []float64{1, 2}}}}, 16},
+		{schemapb.DataType_String, &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"中", ""}}}}, 36},
+		{schemapb.DataType_VarChar, &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"中", ""}}}}, 36},
+	}
+
+	tests = append(tests, struct {
+		element schemapb.DataType
+		row     *schemapb.ScalarField
+		payload int
+	}{
+		schemapb.DataType_Array,
+		nestedArrayData(schemapb.DataType_Array, nestedArrayData(schemapb.DataType_Int16, nestedArrayIntData(1, 2), nestedArrayIntData(3))),
+		// Six bytes of Int16 leaves plus the fixed cost of three inner arrays:
+		// the one at the outer level and the two below it.
+		6 + 3*nestedArrayElementOverhead,
+	})
+
+	for _, tt := range tests {
+		for _, elementNullable := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/elementNullable=%t", tt.element, elementNullable), func(t *testing.T) {
+				tt.row.ValidData = nil
+				elementSize := 0
+				if elementNullable {
+					tt.row.ValidData = []bool{true, false}
+					elementSize = 2
+				}
+
+				runTrackedArrayAppend(t, func(nullable bool, capacity int) FieldData {
+					field := newFieldDataForTest[*ArrayFieldData](&schemapb.FieldSchema{
+						DataType:        schemapb.DataType_Array,
+						ElementType:     tt.element,
+						Nullable:        nullable,
+						ElementNullable: elementNullable,
+					}, capacity, true)
+					require.Equal(t, capacity, cap(field.Data))
+					require.Equal(t, tt.element, field.GetElementType())
+					require.Equal(t, elementNullable, field.GetElementNullable())
+					return field
+				}, tt.row, []*schemapb.ScalarField{tt.row, nil}, []*schemapb.ScalarField(nil), (*schemapb.ScalarField)(nil), tt.payload+elementSize, 0)
+			})
+		}
+	}
+}
+
+func TestVectorArrayFieldDataTrackedAppend(t *testing.T) {
+	tests := []struct {
+		element schemapb.DataType
+		row     *schemapb.VectorField
+		payload int
+	}{
+		{schemapb.DataType_BinaryVector, &schemapb.VectorField{Dim: 8, Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{1, 2}}}, 2},
+		{schemapb.DataType_FloatVector, &schemapb.VectorField{Dim: 8, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, 16)}}}, 64},
+		{schemapb.DataType_Float16Vector, &schemapb.VectorField{Dim: 8, Data: &schemapb.VectorField_Float16Vector{Float16Vector: make([]byte, 32)}}, 32},
+		{schemapb.DataType_BFloat16Vector, &schemapb.VectorField{Dim: 8, Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: make([]byte, 32)}}, 32},
+		{schemapb.DataType_Int8Vector, &schemapb.VectorField{Dim: 8, Data: &schemapb.VectorField_Int8Vector{Int8Vector: make([]byte, 16)}}, 16},
+	}
+
+	for _, tt := range tests {
+		for _, elementNullable := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/elementNullable=%t", tt.element, elementNullable), func(t *testing.T) {
+				tt.row.ValidData = nil
+				elementSize := 0
+				if elementNullable {
+					tt.row.ValidData = []bool{true, false}
+					elementSize = 2
+				}
+
+				runTrackedArrayAppend(t, func(nullable bool, capacity int) FieldData {
+					field := newFieldDataForTest[*VectorArrayFieldData](&schemapb.FieldSchema{
+						DataType:        schemapb.DataType_ArrayOfVector,
+						ElementType:     tt.element,
+						Nullable:        nullable,
+						ElementNullable: elementNullable,
+						TypeParams:      []*commonpb.KeyValuePair{{Key: "dim", Value: fmt.Sprint(8)}},
+					}, capacity, true)
+					require.Equal(t, capacity, cap(field.Data))
+					require.Equal(t, tt.element, field.ElementType)
+					require.EqualValues(t, 8, field.Dim)
+					require.Equal(t, elementNullable, field.GetElementNullable())
+					return field
+				}, tt.row, []*schemapb.VectorField{tt.row, nil}, []*schemapb.VectorField(nil), (*schemapb.VectorField)(nil), tt.payload+4+elementSize, 4)
+			})
+		}
+	}
+}
+
+// runTrackedArrayAppend uses a batch containing one row and one typed nil pointer.
+// AppendRow(nil) has a different cost for VectorArray because it creates a placeholder.
+func runTrackedArrayAppend(t *testing.T, newField func(bool, int) FieldData, row, batch, emptyBatch, nilRow any, rowSize, nullSize int) {
+	t.Helper()
+	for _, nullable := range []bool{false, true} {
+		for _, capacity := range []int{0, 8} {
+			t.Run(fmt.Sprintf("nullable=%t/cap=%d", nullable, capacity), func(t *testing.T) {
+				field, legacy := newField(nullable, capacity), newField(nullable, capacity)
+				want := 2
+				check := func() {
+					t.Helper()
+					require.Equal(t, want, checkedMemorySize(t, field))
+					require.Equal(t, legacy.GetMemorySize(), checkedMemorySize(t, field))
+					require.Equal(t, field.GetMemorySize(), checkedMemorySize(t, field))
+					require.Equal(t, legacy.GetDataRows(), field.GetDataRows())
+					require.Equal(t, legacy.GetValidData(), field.GetValidData())
+				}
+				check()
+				for i := 0; i < 8; i++ {
+					require.NoError(t, field.AppendRow(row))
+					require.NoError(t, legacy.AppendRow(row))
+					want += rowSize
+					if nullable {
+						want++
+					}
+					check()
+					require.NoError(t, field.AppendRows(batch, []bool{true, false}))
+					require.NoError(t, legacy.AppendRows(batch, []bool{true, false}))
+					want += rowSize + 2
+					check()
+				}
+				require.NoError(t, field.AppendDataRows(batch))
+				require.NoError(t, legacy.AppendDataRows(batch))
+				want += rowSize
+				check()
+				require.NoError(t, field.AppendValidDataRows([]bool{true, false}))
+				require.NoError(t, legacy.AppendValidDataRows([]bool{true, false}))
+				want += 2
+				check()
+				require.NoError(t, field.AppendRows(emptyBatch, nil))
+				require.NoError(t, legacy.AppendRows(emptyBatch, nil))
+				require.NoError(t, field.AppendValidDataRows(nil))
+				require.NoError(t, legacy.AppendValidDataRows(nil))
+				check()
+				// Typed nil pointers are accepted as data, even for non-nullable fields.
+				require.NoError(t, field.AppendRow(nilRow))
+				require.NoError(t, legacy.AppendRow(nilRow))
+				if nullable {
+					want++
+				}
+				check()
+				got, old := field.AppendRow(nil), legacy.AppendRow(nil)
+				if nullable {
+					require.NoError(t, got)
+					require.NoError(t, old)
+					want += nullSize + 1
+				} else {
+					require.Error(t, old)
+					require.EqualError(t, got, old.Error())
+				}
+				check()
+				got, old = field.AppendRow(42), legacy.AppendRow(42)
+				require.Error(t, old)
+				require.EqualError(t, got, old.Error())
+				check()
+				got, old = field.AppendRows(42, []bool{true}), legacy.AppendRows(42, []bool{true})
+				require.Error(t, old)
+				require.EqualError(t, got, old.Error())
+				check()
+				got, old = field.AppendRows(batch, "invalid validity"), legacy.AppendRows(batch, "invalid validity")
+				require.Error(t, old)
+				require.EqualError(t, got, old.Error())
+				want += rowSize
+				check()
+				require.NoError(t, field.AppendRow(row))
+				require.NoError(t, legacy.AppendRow(row))
+				want += rowSize
+				if nullable {
+					want++
+				}
+				check()
+			})
+		}
+	}
+}
+
+func TestVectorFieldDataTrackedAppend(t *testing.T) {
+	constructors := map[schemapb.DataType]func(bool, int) FieldData{
+		schemapb.DataType_BinaryVector: func(n bool, c int) FieldData {
+			return newFixedFieldDataForTest(schemapb.DataType_BinaryVector, n, c, 8)
+		},
+		schemapb.DataType_FloatVector: func(n bool, c int) FieldData { return newFixedFieldDataForTest(schemapb.DataType_FloatVector, n, c, 8) },
+		schemapb.DataType_Float16Vector: func(n bool, c int) FieldData {
+			return newFixedFieldDataForTest(schemapb.DataType_Float16Vector, n, c, 8)
+		},
+		schemapb.DataType_BFloat16Vector: func(n bool, c int) FieldData {
+			return newFixedFieldDataForTest(schemapb.DataType_BFloat16Vector, n, c, 8)
+		},
+		schemapb.DataType_Int8Vector: func(n bool, c int) FieldData { return newFixedFieldDataForTest(schemapb.DataType_Int8Vector, n, c, 8) },
+		schemapb.DataType_SparseFloatVector: func(n bool, c int) FieldData {
+			return newFieldDataForTest[*SparseFloatVectorFieldData](&schemapb.FieldSchema{
+				DataType: schemapb.DataType_SparseFloatVector,
+				Nullable: n,
+			}, c, true)
+		},
+	}
+	for _, tc := range fieldMemoryCases() {
+		newField, ok := constructors[tc.dataType]
+		if !ok {
+			continue
+		}
+		for _, nullable := range []bool{false, true} {
+			for _, capacity := range []int{0, 8} {
+				t.Run(fmt.Sprintf("%s/nullable=%t/cap=%d", tc.dataType, nullable, capacity), func(t *testing.T) {
+					field, legacy := newField(nullable, capacity), newField(nullable, capacity)
+					want := tc.fixed
+					check := func() {
+						t.Helper()
+						require.Equal(t, want, checkedMemorySize(t, field))
+						require.Equal(t, legacy.GetMemorySize(), checkedMemorySize(t, field))
+						require.Equal(t, field.GetMemorySize(), checkedMemorySize(t, field))
+						require.Equal(t, legacy.GetDataRows(), field.GetDataRows())
+						require.Equal(t, legacy.GetValidData(), field.GetValidData())
+					}
+					apply := func(name string, tracked, old func() error, delta int, fail bool) {
+						t.Helper()
+						t.Run(name, func(t *testing.T) {
+							got, expected := tracked(), old()
+							if fail {
+								require.Error(t, expected)
+								require.EqualError(t, got, expected.Error())
+							} else {
+								require.NoError(t, expected)
+								require.NoError(t, got)
+							}
+							want += delta
+							check()
+						})
+					}
+					check()
+					single := tc.perRow
+					if nullable {
+						single += 17
+					}
+					for i := 0; i < 12; i++ {
+						delta := single
+						if i == 0 {
+							delta += tc.shared
+						}
+						apply(fmt.Sprintf("row-%d", i), func() error { return field.AppendRow(tc.row) }, func() error { return legacy.AppendRow(tc.row) }, delta, false)
+					}
+					nullDelta := 0
+					if nullable {
+						nullDelta = 1
+					}
+					apply("null", func() error { return field.AppendRow(nil) }, func() error { return legacy.AppendRow(nil) }, nullDelta, !nullable)
+					// Explicit validity is stored and mapped even for a non-nullable field.
+					apply("compact batch", func() error { return field.AppendRows(tc.batch, []bool{true, false}) }, func() error { return legacy.AppendRows(tc.batch, []bool{true, false}) }, tc.perRow+18, false)
+					apply("data only", func() error { return field.AppendDataRows(tc.batch) }, func() error { return legacy.AppendDataRows(tc.batch) }, tc.perRow, false)
+					apply("nil validity during split", func() error { return field.AppendValidDataRows(nil) }, func() error { return legacy.AppendValidDataRows(nil) }, 0, false)
+					apply("typed nil validity during split", func() error { return field.AppendValidDataRows([]bool(nil)) }, func() error { return legacy.AppendValidDataRows([]bool(nil)) }, 0, nullable)
+					if nullable {
+						apply("invalid validity count", func() error { return field.AppendValidDataRows([]bool{false}) }, func() error { return legacy.AppendValidDataRows([]bool{false}) }, 0, true)
+					}
+					apply("validity only", func() error { return field.AppendValidDataRows([]bool{true, false}) }, func() error { return legacy.AppendValidDataRows([]bool{true, false}) }, 18, false)
+					apply("nil validity", func() error { return field.AppendValidDataRows(nil) }, func() error { return legacy.AppendValidDataRows(nil) }, 0, false)
+					apply("invalid row type", func() error { return field.AppendRow(42) }, func() error { return legacy.AppendRow(42) }, 0, true)
+					apply("invalid data type", func() error { return field.AppendDataRows(42) }, func() error { return legacy.AppendDataRows(42) }, 0, true)
+					apply("invalid batch type", func() error { return field.AppendRows(42, []bool{true}) }, func() error { return legacy.AppendRows(42, []bool{true}) }, 0, true)
+					delta := tc.perRow
+					if nullable {
+						delta = 0
+					}
+					apply("invalid validity type", func() error { return field.AppendRows(tc.batch, "invalid") }, func() error { return legacy.AppendRows(tc.batch, "invalid") }, delta, true)
+					apply("after error", func() error { return field.AppendRow(tc.row) }, func() error { return legacy.AppendRow(tc.row) }, single, false)
+				})
+			}
+		}
+	}
+}
+
+func TestSparseFloatVectorFieldDataTrackedEncoding(t *testing.T) {
+	field := newFieldDataForTest[*SparseFloatVectorFieldData](&schemapb.FieldSchema{
+		DataType: schemapb.DataType_SparseFloatVector,
+		Nullable: false,
+	}, 64, true)
+	for _, step := range []struct {
+		index uint32
+		want  int
+	}{{126, 21}, {127, 32}, {0, 42}, {16383, 53}} {
+		require.NoError(t, field.AppendRow(typeutil.CreateSparseFloatRow([]uint32{step.index}, []float32{1})))
+		require.Equal(t, step.want, checkedMemorySize(t, field))
+		require.Equal(t, field.GetMemorySize(), checkedMemorySize(t, field))
+	}
+	indices, values := make([]uint32, 16), make([]float32, 16)
+	for i := range indices {
+		indices[i], values[i] = uint32(i), 1
+	}
+	require.NoError(t, field.AppendRow(typeutil.CreateSparseFloatRow(indices, values)))
+	require.Equal(t, 184, checkedMemorySize(t, field)) // 128-byte row + tag + two-byte length.
+	require.NoError(t, field.AppendRow([]byte{}))
+	require.Equal(t, 186, checkedMemorySize(t, field))
+	require.Equal(t, field.GetMemorySize(), checkedMemorySize(t, field))
+	require.Error(t, field.AppendRow([]byte{1}))
+	require.Equal(t, 186, checkedMemorySize(t, field))
+	// An empty source can still increase the shared Dim encoding size.
+	source := &SparseFloatVectorFieldData{SparseFloatArray: schemapb.SparseFloatArray{Dim: 1 << 21}}
+	require.NoError(t, field.AppendDataRows(source))
+	require.Equal(t, 187, checkedMemorySize(t, field))
+	require.Equal(t, field.GetMemorySize(), checkedMemorySize(t, field))
+}
+
+func TestSparseFloatVectorFieldDataTrackedWireBoundaries(t *testing.T) {
+	for _, dim := range []int64{0, 1, 127, 128, 16383, 16384, 1 << 21, 1 << 32, 1<<63 - 1} {
+		for _, length := range []int{0, 120, 128, 16376, 16384} {
+			t.Run(fmt.Sprintf("dim=%d/length=%d", dim, length), func(t *testing.T) {
+				field := newFieldDataForTest[*SparseFloatVectorFieldData](&schemapb.FieldSchema{
+					DataType: schemapb.DataType_SparseFloatVector,
+					Nullable: false,
+				}, 0, true)
+				source := &SparseFloatVectorFieldData{SparseFloatArray: schemapb.SparseFloatArray{
+					Contents: [][]byte{nil, make([]byte, length)}, Dim: dim,
+				}}
+				for i := 0; i < 2; i++ {
+					require.NoError(t, field.AppendDataRows(source))
+					checkedMemorySize(t, field)
+				}
+				// Dim-only appends can grow its varint without adding rows.
+				require.NoError(t, field.AppendDataRows(&SparseFloatVectorFieldData{
+					SparseFloatArray: schemapb.SparseFloatArray{Dim: 1<<63 - 1},
+				}))
+				checkedMemorySize(t, field)
+			})
+		}
+	}
+}
+
+func TestSparseFloatVectorFieldDataTrackingAllocations(t *testing.T) {
+	field := newFieldDataForTest[*SparseFloatVectorFieldData](&schemapb.FieldSchema{
+		DataType: schemapb.DataType_SparseFloatVector,
+		Nullable: false,
+	}, 0, true)
+	field.Contents = make([][]byte, 0, 1)
+	source := &SparseFloatVectorFieldData{SparseFloatArray: schemapb.SparseFloatArray{
+		Contents: [][]byte{make([]byte, 128)}, Dim: 128,
+	}}
+	var err error
+	allocs := testing.AllocsPerRun(100, func() {
+		field.Contents = field.Contents[:0]
+		field.Dim = 0
+		field.memorySize = 9
+		err = field.AppendDataRows(source)
+	})
+	require.NoError(t, err)
+	require.Zero(t, allocs, "tracking must not allocate temporary protobuf messages")
+	require.Equal(t, 143, checkedMemorySize(t, field))
+}
+
+func TestSparseFloatVectorFieldDataTrackedAppendAllRows(t *testing.T) {
+	field := newFieldDataForTest[*SparseFloatVectorFieldData](&schemapb.FieldSchema{
+		DataType: schemapb.DataType_SparseFloatVector,
+		Nullable: false,
+	}, 8, true)
+	source := newFieldDataForTest[*SparseFloatVectorFieldData](&schemapb.FieldSchema{
+		DataType: schemapb.DataType_SparseFloatVector,
+		Nullable: true,
+	}, 8, true)
+	require.NoError(t, source.AppendRow(nil))
+	require.NoError(t, source.AppendRow(typeutil.CreateSparseFloatRow([]uint32{127}, []float32{1})))
+	for i := 1; i <= 2; i++ {
+		field.AppendAllRows(source)
+		require.True(t, field.Nullable)
+		require.Equal(t, 9+3+i*(10+2+16), checkedMemorySize(t, field))
+		require.Equal(t, field.GetMemorySize(), checkedMemorySize(t, field))
+		require.Nil(t, field.GetRow((i-1)*2))
+		require.Equal(t, source.GetRow(1), field.GetRow((i-1)*2+1))
+	}
+}
+
+func TestTrackedAppendValidDataRowsInvalidType(t *testing.T) {
+	fields := []FieldData{
+		newFixedFieldDataForTest(schemapb.DataType_Bool, true, 0, 0),
+		newFixedFieldDataForTest(schemapb.DataType_Int8, true, 0, 0),
+		newFixedFieldDataForTest(schemapb.DataType_Int16, true, 0, 0),
+		newFixedFieldDataForTest(schemapb.DataType_Int32, true, 0, 0),
+		newFixedFieldDataForTest(schemapb.DataType_Int64, true, 0, 0),
+		newFixedFieldDataForTest(schemapb.DataType_Float, true, 0, 0),
+		newFixedFieldDataForTest(schemapb.DataType_Double, true, 0, 0),
+		newFixedFieldDataForTest(schemapb.DataType_Timestamptz, true, 0, 0),
+		newFieldDataForTest[*JSONFieldData](&schemapb.FieldSchema{
+			DataType: schemapb.DataType_JSON,
+			Nullable: true,
+		}, 0, true),
+		newFieldDataForTest[*GeometryFieldData](&schemapb.FieldSchema{
+			DataType: schemapb.DataType_Geometry,
+			Nullable: true,
+		}, 0, true),
+
+		newFieldDataForTest[*StringFieldData](&schemapb.FieldSchema{
+			DataType: schemapb.DataType_VarChar,
+			Nullable: true,
+		}, 0, true),
+		newFieldDataForTest[*ArrayFieldData](&schemapb.FieldSchema{
+			DataType:        schemapb.DataType_Array,
+			ElementType:     schemapb.DataType_Int64,
+			Nullable:        true,
+			ElementNullable: true,
+		}, 0, true),
+		newFieldDataForTest[*VectorArrayFieldData](&schemapb.FieldSchema{
+			DataType:        schemapb.DataType_ArrayOfVector,
+			ElementType:     schemapb.DataType_FloatVector,
+			Nullable:        true,
+			ElementNullable: true,
+			TypeParams:      []*commonpb.KeyValuePair{{Key: "dim", Value: fmt.Sprint(8)}},
+		}, 0, true),
+		newFixedFieldDataForTest(schemapb.DataType_BinaryVector, true, 0, 8),
+		newFixedFieldDataForTest(schemapb.DataType_FloatVector, true, 0, 8),
+		newFixedFieldDataForTest(schemapb.DataType_Float16Vector, true, 0, 8),
+		newFixedFieldDataForTest(schemapb.DataType_BFloat16Vector, true, 0, 8),
+		newFixedFieldDataForTest(schemapb.DataType_Int8Vector, true, 0, 8),
+		newFieldDataForTest[*SparseFloatVectorFieldData](&schemapb.FieldSchema{
+			DataType: schemapb.DataType_SparseFloatVector,
+			Nullable: true,
+		}, 0, true),
+	}
+	for _, field := range fields {
+		t.Run(field.GetDataType().String(), func(t *testing.T) {
+			before := checkedMemorySize(t, field)
+			got := field.AppendValidDataRows("invalid")
+			want := field.AppendValidDataRows("invalid")
+			require.Error(t, want)
+			require.EqualError(t, got, want.Error())
+			require.Empty(t, field.GetValidData())
+			require.Equal(t, before, checkedMemorySize(t, field))
+			require.Equal(t, field.GetMemorySize(), checkedMemorySize(t, field))
+		})
+	}
+}
+
+func TestNewFieldDataTrackedSize(t *testing.T) {
+	cases := fieldMemoryCases()
+	cases = append(cases, fieldMemoryCase{schemapb.DataType_Text, "中", []string{"中"}, 1, 19, 0, 0})
+	for _, tc := range cases {
+		for _, nullable := range []bool{false, true} {
+			for _, capacity := range []int{0, 64} {
+				t.Run(fmt.Sprintf("%s/nullable=%t/cap=%d", tc.dataType, nullable, capacity), func(t *testing.T) {
+					field := tc.newField(t, nullable, capacity)
+					tracked := field
+					require.Equal(t, tc.fixed, checkedMemorySize(t, tracked))
+					require.Zero(t, field.RowNum())
+					require.Equal(t, tc.dataType, field.GetDataType())
+					require.Equal(t, nullable, field.GetNullable())
+					wantCapacity := capacity
+					if tc.dataType == schemapb.DataType_SparseFloatVector {
+						wantCapacity = 0 // Sparse contents do not reserve row capacity.
+					} else if !nullable {
+						switch tc.dataType {
+						case schemapb.DataType_FloatVector, schemapb.DataType_Int8Vector:
+							wantCapacity *= 8
+						case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+							wantCapacity *= 16
+						}
+					}
+					require.Equal(t, wantCapacity, reflect.ValueOf(field.GetDataRows()).Cap())
+					if nullable {
+						require.Equal(t, capacity, cap(field.GetValidData()))
+					} else {
+						require.Nil(t, field.GetValidData())
+					}
+					for n := 1; n <= 2; n++ {
+						require.NoError(t, tracked.AppendRow(tc.row))
+						want := tc.fixed + tc.shared + n*tc.perRow
+						if nullable {
+							want += n * (1 + tc.mapping)
+						}
+						require.Equal(t, want, checkedMemorySize(t, tracked))
+						require.Equal(t, field.GetMemorySize(), checkedMemorySize(t, tracked))
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestNewFieldDataMissingDimension(t *testing.T) {
+	for _, dataType := range []schemapb.DataType{
+		schemapb.DataType_BinaryVector, schemapb.DataType_FloatVector,
+		schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector,
+		schemapb.DataType_Int8Vector, schemapb.DataType_ArrayOfVector,
+	} {
+		t.Run(dataType.String(), func(t *testing.T) {
+			field, err := NewFieldDataBuilder(dataType, &schemapb.FieldSchema{DataType: dataType}).WithMemoryTracking().Build()
+			require.Error(t, err)
+			require.Nil(t, field)
+		})
+	}
+}
+
+// BenchmarkFieldDataMemoryAccounting measures append and size accounting for one batch per operation.
+// Input decoding is excluded; append-time slice growth and GC are included.
+// Each batch requests capacity for 1024 rows; sparse contents grow on append.
+func BenchmarkFieldDataMemoryAccounting(b *testing.B) {
+	indices, values := make([]uint32, 64), make([]float32, 64)
+	for i := range indices {
+		indices[i], values[i] = uint32(i*3), float32(i+1)
+	}
+	sparse := typeutil.CreateSparseFloatRow(indices, values)
+	text := strings.Repeat("x", 1024)
+	cases := []struct {
+		name     string
+		newField func(bool, int, bool) FieldData
+		row      any
+	}{
+		{"Int64", func(nullable bool, capacity int, enabled bool) FieldData {
+			return newFixedFieldDataForTest(schemapb.DataType_Int64, nullable, capacity, 0)
+		}, int64(42)},
+		{"String1024", func(nullable bool, capacity int, enabled bool) FieldData {
+			return newFieldDataForTest[*StringFieldData](&schemapb.FieldSchema{
+				DataType: schemapb.DataType_VarChar,
+				Nullable: nullable,
+			}, capacity, enabled)
+		}, text},
+		{"JSON1024", func(nullable bool, capacity int, enabled bool) FieldData {
+			return newFieldDataForTest[*JSONFieldData](&schemapb.FieldSchema{
+				DataType: schemapb.DataType_JSON,
+				Nullable: nullable,
+			}, capacity, enabled)
+		}, []byte(`{"value":"` + text + `"}`)},
+		{"Sparse64", func(nullable bool, capacity int, enabled bool) FieldData {
+			return newFieldDataForTest[*SparseFloatVectorFieldData](&schemapb.FieldSchema{
+				DataType: schemapb.DataType_SparseFloatVector,
+				Nullable: nullable,
+			}, capacity, enabled)
+		}, sparse},
+	}
+	for _, tc := range cases {
+		rowCounts := []int{1000, 10000, 100000}
+		if tc.name == "Int64" {
+			rowCounts = append(rowCounts, 1000000)
+		}
+		for _, nullable := range []bool{false, true} {
+			for _, rowCount := range rowCounts {
+				b.Run(fmt.Sprintf("%s/nullable=%t/rows=%d", tc.name, nullable, rowCount), func(b *testing.B) {
+					// Payloads are reused; input decoding and payload allocation are not timed.
+					// Nullable inputs contain 10% nulls.
+					// Timed appends include validity and sparse L2P mapping updates.
+					rows := make([]any, rowCount)
+					for i := range rows {
+						if !nullable || i%10 != 0 {
+							rows[i] = tc.row
+						}
+					}
+					// Verify identical sizes at each checkpoint outside timed work.
+					legacy, tracked := tc.newField(nullable, 1024, false), tc.newField(nullable, 1024, true)
+					for i, row := range rows {
+						require.NoError(b, legacy.AppendRow(row))
+						require.NoError(b, tracked.AppendRow(row))
+						if (i+1)%100 == 0 {
+							require.Equal(b, legacy.GetMemorySize(), checkedMemorySize(b, tracked))
+						}
+					}
+					require.Equal(b, legacy.RowNum(), tracked.RowNum())
+					for _, checkEvery := range []int{0, 100} {
+						for _, useTracked := range []bool{false, true} {
+							method := "TrackingOff"
+							if useTracked {
+								method = "TrackingOn"
+							}
+							b.Run(fmt.Sprintf("check=%d/%s", checkEvery, method), func(b *testing.B) {
+								var field FieldData
+								var size int
+								b.ReportAllocs()
+								b.ResetTimer()
+								for n := 0; n < b.N; n++ {
+									field = tc.newField(nullable, 1024, useTracked)
+									appendRow, getSize := field.AppendRow, field.GetMemorySize
+									for i, row := range rows {
+										if err := appendRow(row); err != nil {
+											b.Fatal(err)
+										}
+										if checkEvery != 0 && (i+1)%checkEvery == 0 {
+											size = getSize()
+										}
+									}
+								}
+								b.StopTimer()
+								require.Equal(b, rowCount, field.RowNum())
+								if useTracked {
+									require.Equal(b, field.GetMemorySize(), checkedMemorySize(b, field))
+								}
+								if checkEvery != 0 {
+									require.Equal(b, field.GetMemorySize(), size)
+								}
+								b.ReportMetric(float64(rowCount)*float64(b.N)/b.Elapsed().Seconds(), "rows/s")
+							})
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
+func checkedMemorySize(t testing.TB, data interface{ GetMemorySize() int }) int {
+	t.Helper()
+	size := data.GetMemorySize()
+	require.Equal(t, scannedMemorySize(data), size)
+	return size
+}
+
+// scannedMemorySize bypasses variable-width size caches.
+func scannedMemorySize(data interface{ GetMemorySize() int }) int {
+	if field, ok := data.(interface{ getMemorySize() int }); ok {
+		return field.getMemorySize()
+	}
+	if insert, ok := data.(*InsertData); ok {
+		total := 0
+		for _, field := range insert.Data {
+			total += scannedMemorySize(field)
+		}
+		return total
+	}
+	return data.GetMemorySize() // Fixed-width fields have no cache.
+}
+
+func TestFieldDataMemoryTrackingMode(t *testing.T) {
+	for _, tc := range fieldMemoryCases() {
+		for _, nullable := range []bool{false, true} {
+			for _, tracked := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/nullable=%t/tracked=%t", tc.dataType, nullable, tracked), func(t *testing.T) {
+					element := schemapb.DataType_Int64
+					if tc.dataType == schemapb.DataType_ArrayOfVector {
+						element = schemapb.DataType_FloatVector
+					}
+					schema := &schemapb.FieldSchema{
+						DataType: tc.dataType, Nullable: nullable, ElementType: element,
+						TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "8"}},
+					}
+					builder := NewFieldDataBuilder(tc.dataType, schema)
+					if tracked {
+						builder.WithMemoryTracking()
+					}
+					field, err := builder.Build()
+					require.NoError(t, err)
+					check := func() {
+						require.Equal(t, scannedMemorySize(field), field.GetMemorySize())
+					}
+					check()
+					require.NoError(t, field.AppendRow(tc.row))
+					check()
+					if nullable {
+						require.NoError(t, field.AppendRow(nil))
+						check()
+					}
+				})
+			}
+		}
+	}
+}
+
+// newFieldDataForTest creates fields through NewFieldData and returns the concrete type.
+func newFieldDataForTest[T FieldData](schema *schemapb.FieldSchema, capacity int, trackMemory bool) T {
+	var field FieldData
+	var err error
+	if trackMemory {
+		field, err = NewFieldDataBuilder(schema.GetDataType(), schema).WithCapacity(capacity).WithMemoryTracking().Build()
+	} else {
+		field, err = NewFieldDataBuilder(schema.GetDataType(), schema).WithCapacity(capacity).Build()
+	}
+	if err != nil {
+		panic(err)
+	}
+	return field.(T)
+}
+
+func newFixedFieldDataForTest(dataType schemapb.DataType, nullable bool, capacity, dim int) FieldData {
+	schema := &schemapb.FieldSchema{DataType: dataType, Nullable: nullable}
+	if dim > 0 {
+		schema.TypeParams = []*commonpb.KeyValuePair{{Key: "dim", Value: fmt.Sprint(dim)}}
+	}
+	field, err := NewFieldDataBuilder(dataType, schema).WithCapacity(capacity).Build()
+	if err != nil {
+		panic(err)
+	}
+	return field
+}
+
+func TestFieldDataBuilderCapacity(t *testing.T) {
+	schema := &schemapb.FieldSchema{DataType: schemapb.DataType_VarChar, Nullable: true}
+	for _, capacity := range []int{0, 8} {
+		for _, tracked := range []bool{false, true} {
+			t.Run(fmt.Sprintf("capacity=%d/tracked=%t", capacity, tracked), func(t *testing.T) {
+				builder := NewFieldDataBuilder(schema.GetDataType(), schema)
+				if capacity != 0 {
+					builder.WithCapacity(capacity)
+				}
+				if tracked {
+					builder.WithMemoryTracking()
+				}
+				field, err := builder.Build()
+				require.NoError(t, err)
+				strings := field.(*StringFieldData)
+				require.Equal(t, capacity, cap(strings.Data))
+				require.Equal(t, capacity, cap(strings.ValidData))
+				require.Equal(t, tracked, strings.trackMemory)
+				for i := 0; i < capacity+1; i++ {
+					require.NoError(t, field.AppendRow("hello"))
+				}
+				require.NoError(t, field.AppendRow(nil))
+				require.Equal(t, capacity+2, field.RowNum())
+				require.Equal(t, scannedMemorySize(field), field.GetMemorySize())
+			})
+		}
+	}
+}
+
+func TestDenseVectorFieldDataCopyFromDimMismatch(t *testing.T) {
+	for _, vector := range []struct {
+		name     string
+		newField func(dim int, nullable bool) (FieldData, any)
+	}{
+		{"Binary", func(dim int, nullable bool) (FieldData, any) {
+			return &BinaryVectorFieldData{Dim: dim, Nullable: nullable}, make([]byte, dim/8)
+		}},
+		{"Float", func(dim int, nullable bool) (FieldData, any) {
+			return &FloatVectorFieldData{Dim: dim, Nullable: nullable}, make([]float32, dim)
+		}},
+		{"Float16", func(dim int, nullable bool) (FieldData, any) {
+			return &Float16VectorFieldData{Dim: dim, Nullable: nullable}, make([]byte, dim*2)
+		}},
+		{"BFloat16", func(dim int, nullable bool) (FieldData, any) {
+			return &BFloat16VectorFieldData{Dim: dim, Nullable: nullable}, make([]byte, dim*2)
+		}},
+		{"Int8", func(dim int, nullable bool) (FieldData, any) {
+			return &Int8VectorFieldData{Dim: dim, Nullable: nullable}, make([]int8, dim)
+		}},
+	} {
+		t.Run(vector.name, func(t *testing.T) {
+			for _, tc := range []struct {
+				name     string
+				srcDim   int
+				dstDim   int
+				nullable bool
+			}{
+				{"wider source", 16, 8, false},
+				{"narrower source", 8, 16, false},
+				{"nullable wider source", 16, 8, true},
+				{"nullable narrower source", 8, 16, true},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					src, row := vector.newField(tc.srcDim, tc.nullable)
+					dst, original := vector.newField(tc.dstDim, tc.nullable)
+					require.NoError(t, src.AppendRow(row))
+					require.NoError(t, dst.AppendRow(original))
+
+					require.ErrorIs(t, dst.CopyFrom(src, []int{0}), merr.ErrServiceInternal)
+					require.Equal(t, 1, dst.RowNum())
+					require.Equal(t, original, dst.GetRow(0))
+					if tc.nullable {
+						require.Equal(t, []bool{true}, dst.GetValidData())
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestFieldDataCopyFromMemoryTracking(t *testing.T) {
+	for _, tc := range fieldMemoryCases() {
+		for _, nullable := range []bool{false, true} {
+			for _, capacity := range []int{0, 64} {
+				t.Run(fmt.Sprintf("%s/nullable=%t/cap=%d", tc.dataType, nullable, capacity), func(t *testing.T) {
+					src := tc.newField(t, nullable, capacity)
+					dst := tc.newField(t, nullable, capacity)
+					require.NoError(t, src.AppendRow(tc.row))
+					if nullable {
+						require.NoError(t, src.AppendRow(nil))
+					}
+					require.NoError(t, dst.AppendRow(tc.row))
+					checkedMemorySize(t, dst)
+					for _, indices := range [][]int{nil, {}, {0, 0}, {0}} {
+						require.NoError(t, dst.CopyFrom(src, indices))
+						checkedMemorySize(t, dst)
+					}
+					if nullable {
+						for _, indices := range [][]int{{1}, {1, 0, 1, 0}} {
+							require.NoError(t, dst.CopyFrom(src, indices))
+							checkedMemorySize(t, dst)
+						}
+					}
+					size := checkedMemorySize(t, dst)
+					require.Error(t, dst.CopyFrom(nil, []int{0}))
+					require.Equal(t, size, checkedMemorySize(t, dst))
+				})
+			}
+		}
+	}
+}
+
+func TestFieldDataCopyFromSourceValidation(t *testing.T) {
+	for _, tc := range []struct {
+		target    FieldData
+		nilSource FieldData
+	}{
+		{&BoolFieldData{}, (*BoolFieldData)(nil)},
+		{&Int8FieldData{}, (*Int8FieldData)(nil)},
+		{&Int16FieldData{}, (*Int16FieldData)(nil)},
+		{&Int32FieldData{}, (*Int32FieldData)(nil)},
+		{&Int64FieldData{}, (*Int64FieldData)(nil)},
+		{&FloatFieldData{}, (*FloatFieldData)(nil)},
+		{&DoubleFieldData{}, (*DoubleFieldData)(nil)},
+		{&TimestamptzFieldData{}, (*TimestamptzFieldData)(nil)},
+		{&StringFieldData{}, (*StringFieldData)(nil)},
+		{&ArrayFieldData{}, (*ArrayFieldData)(nil)},
+		{&JSONFieldData{}, (*JSONFieldData)(nil)},
+		{&GeometryFieldData{}, (*GeometryFieldData)(nil)},
+		{&BinaryVectorFieldData{}, (*BinaryVectorFieldData)(nil)},
+		{&FloatVectorFieldData{}, (*FloatVectorFieldData)(nil)},
+		{&Float16VectorFieldData{}, (*Float16VectorFieldData)(nil)},
+		{&BFloat16VectorFieldData{}, (*BFloat16VectorFieldData)(nil)},
+		{&SparseFloatVectorFieldData{}, (*SparseFloatVectorFieldData)(nil)},
+		{&Int8VectorFieldData{}, (*Int8VectorFieldData)(nil)},
+		{&VectorArrayFieldData{}, (*VectorArrayFieldData)(nil)},
+	} {
+		require.NoError(t, tc.target.CopyFrom(nil, nil))
+		require.NoError(t, tc.target.CopyFrom(tc.nilSource, []int{}))
+		require.ErrorIs(t, tc.target.CopyFrom(nil, []int{0}), merr.ErrServiceInternal)
+		require.ErrorIs(t, tc.target.CopyFrom(tc.nilSource, []int{0}), merr.ErrServiceInternal)
+		var wrongType FieldData = &BoolFieldData{}
+		if _, ok := tc.target.(*BoolFieldData); ok {
+			wrongType = &Int64FieldData{}
+		}
+		require.ErrorIs(t, tc.target.CopyFrom(wrongType, []int{0}), merr.ErrServiceInternal)
+	}
+}
+
+// A nullable vector stores only valid rows physically. Copying into an existing
+// column must preserve logical order across nulls and repeated source rows.
+func TestFloatVectorFieldDataCopyFrom(t *testing.T) {
+	src := &FloatVectorFieldData{
+		Dim: 2, Nullable: true,
+		Data:      []float32{10, 11, 20, 21},
+		ValidData: []bool{true, false, true},
+	}
+	dst := &FloatVectorFieldData{Dim: 2, Nullable: true}
+	require.NoError(t, dst.AppendRow([]float32{1, 2}))
+	require.NoError(t, dst.CopyFrom(src, nil))
+	require.Equal(t, 1, dst.RowNum())
+
+	require.NoError(t, dst.CopyFrom(src, []int{2, 1, 0, 2}))
+	want := []any{[]float32{1, 2}, []float32{20, 21}, nil, []float32{10, 11}, []float32{20, 21}}
+	require.Equal(t, len(want), dst.RowNum())
+	for i, row := range want {
+		require.Equal(t, row, dst.GetRow(i), "row %d", i)
+	}
+	require.Equal(t, []bool{true, true, false, true, true}, dst.ValidData)
+
+	dst.Data[2] = 99
+	dst.ValidData[1] = false
+	require.Equal(t, []float32{10, 11, 20, 21}, src.Data)
+	require.Equal(t, []bool{true, false, true}, src.ValidData)
+}
+
+func TestSparseFloatVectorFieldDataCopyFromTrackedEncoding(t *testing.T) {
+	for _, nullable := range []bool{false, true} {
+		t.Run(fmt.Sprintf("nullable=%t", nullable), func(t *testing.T) {
+			schema := &schemapb.FieldSchema{DataType: schemapb.DataType_SparseFloatVector, Nullable: nullable}
+			dst := newFieldDataForTest[*SparseFloatVectorFieldData](schema, 0, true)
+			src := newFieldDataForTest[*SparseFloatVectorFieldData](schema, 0, false)
+			require.NoError(t, dst.AppendRow(typeutil.CreateSparseFloatRow([]uint32{0}, []float32{1})))
+			for _, index := range []uint32{126, 127, 16383} {
+				require.NoError(t, src.AppendRow(typeutil.CreateSparseFloatRow([]uint32{index}, []float32{1})))
+			}
+			indices, values := make([]uint32, 16), make([]float32, 16)
+			for i := range indices {
+				indices[i], values[i] = uint32(i), 1
+			}
+			require.NoError(t, src.AppendRow(typeutil.CreateSparseFloatRow(indices, values)))
+			for _, selection := range [][]int{{0}, {1}, {2}, {3, 1, 3}} {
+				require.NoError(t, dst.CopyFrom(src, selection))
+				checkedMemorySize(t, dst)
+			}
+		})
+	}
+}
+
+func TestFieldDataBuilderReuse(t *testing.T) {
+	schema := &schemapb.FieldSchema{DataType: schemapb.DataType_VarChar}
+	builder := NewFieldDataBuilder(schema.GetDataType(), schema).WithCapacity(8).WithMemoryTracking()
+	first, err := builder.Build()
+	require.NoError(t, err)
+	second, err := builder.Build()
+	require.NoError(t, err)
+	require.NotSame(t, first, second)
+	require.NoError(t, first.AppendRow("first"))
+	require.Zero(t, second.RowNum())
+	require.Equal(t, scannedMemorySize(first), first.GetMemorySize())
+
+	third, err := builder.WithCapacity(16).Build()
+	require.NoError(t, err)
+	require.Equal(t, 8, cap(second.(*StringFieldData).Data))
+	require.Equal(t, 16, cap(third.(*StringFieldData).Data))
+	require.True(t, third.(*StringFieldData).trackMemory)
+}

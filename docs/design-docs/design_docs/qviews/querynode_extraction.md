@@ -1,12 +1,24 @@
-# QueryNode QueryView extraction
+# QueryNode QueryView integration
 
 The [resource preparation contract](qnview/querynode_queryview_resource_preparation.md)
-is implemented by `querynodev2/{qnview,qvresource,transformlogbuffer,viewquery}`.
+is implemented by `querynodev2/{qnview,qvresource,transformlogbuffer,viewquery}`,
+including shared-layout ownership and the
+[versioned CollectionLoadConfig contract](collection_load_info.md).
 `distributed/querynode` registers ViewSyncService and ViewQueryService against the
 same handler. Query handles retain their concrete physical generation and wait
 for its applied Transform MVCC before execution.
 
 ## Metadata supply and production boundary
+
+The Coordinator persists immutable LoadInfo versions containing partition
+membership, required fields, preload hints, replica intent and exact IndexID
+references. CreateIndex and DropIndex publish new versions for loaded
+collections; AlterIndex has no hot-update promise. QueryViews retain their
+versions through node cleanup and final catalog deletion. Recovery reconstructs
+all View references before LoadInfo history GC is enabled. Release withdraws
+intent, drains reconciliation and View removal, then deletes all versions.
+Legacy metadata migration and complete physical-object retention remain separate
+work; they do not make the implemented LoadInfo reference protocol pending.
 
 Remote TransformLog transport is supplied by the base branch through
 `streaming.WAL().TransformLogStreamManager()`. The QueryNode adapter returns
@@ -17,12 +29,14 @@ transport. Buffer observes the logical stream's Done/Error to propagate terminal
 failure to its retained VChannels; Handler receives only Entry/SyncUp.
 
 The accompanying metadata supply adds unary GetQueryViewSegmentLoadInfo and
-exact retained collection LoadInfo lookup. Segment loading assumes StorageV3
-with index artifacts published into manifests. New View requirements trigger
+exact retained collection LoadInfo lookup. StorageV3 loading uses committed
+Manifests with published indexes. The StorageV2 fallback obtains a fresh full
+loading snapshot per zero-Manifest binding before read reuse, refreshing it on
+preparation failure. New View requirements trigger
 metadata acquisition; ready Views do not poll or subscribe to metadata changes.
 Manifest publication retains its DataView recompute notification.
-`coord/load_info/<collection>/<version>` contains the parent's immutable
-CollectionLoadConfig records. The child supplies a read-only exact-version adapter:
+`coord/load_info/<collection>/<version>` contains immutable CollectionLoadConfig
+records. The metadata service supplies an exact-version adapter:
 records without required fields fail with DataIntegrity, and each read resolves
 only the recorded IndexIDs, including multiple indexes on one field and fields
 outside preload hints. Missing selected index metadata returns ServiceNotReady.
@@ -37,24 +51,21 @@ empty hints follow the bound schema, and explicit hints select preloaded fields.
 Dynamic fields remain in `required_fields` and retain query access independently
 of preloading.
 
-Version zero is a current-load-state probe. Until the Coordinator QueryView
-runtime owns live load configuration, it reads the existing CollectionManager:
-a loading collection counts as loaded configuration, while a released collection
-returns CollectionNotLoaded even if retained snapshots remain. This probe does
-not publish a historical scope or supply a resource-preparation identity. Once
-integrated, the parent runtime resolves its current LoadConfigStore version
-through its LoadConfigStore.GetLoadInfo interface. Nonzero historical reads remain independent of
-current load state.
+Version zero is a current-load-state probe: the Coordinator resolves the current
+LoadConfigStore identity, while a released collection returns
+CollectionNotLoaded even if historical records have not yet drained. The probe
+does not create a historical version or supply a resource-preparation identity.
+Nonzero historical reads remain independent of current load state.
 
-This extraction does not publish LoadInfo snapshots from legacy Load APIs,
-generate QueryViews, generate DataView W/A or Segment replay cursors, switch Proxy
-routing, or implement schema publication. A production producer must persist the
-exact requirements before publishing its View and provide the certified base cursor and
-retained Transform range. The cursor field is transported without reconstructing
-it from StartPosition/DeltaPosition. A missing/zero base cursor returns
-ServiceNotReady rather than claiming safe replay. Those producer workflows are separate
-changes. Explicit ViewSync/component tests do not prove automatic cluster-wide
-query routing or complete production recovery.
+The production producer persists exact requirements before publishing a View,
+uses the selected DataView's certified schema and W/A frontier, and supplies
+Segment replay cursors with their concrete loading snapshot. QN fetches the
+cursor atomically with the physical base/Manifest metadata, rather than
+reconstructing it from StartPosition or DeltaPosition. A missing/zero cursor
+returns ServiceNotReady instead of certifying unsafe replay. QueryCoord
+placement, node preparation and Proxy routing are connected through the
+QueryView lifecycle. Component tests still do not substitute for cluster-level
+handoff and recovery validation.
 
 ## Native requirements
 
@@ -69,10 +80,17 @@ operation references retain CCollection until synchronous CSegment operations
 and their native children and result conversion complete. There is no additional
 Collection Pin layer. Shared expression and scoring code use the plan schema.
 
-Building the node requires the matching native implementation of the new create,
-reopen, pin and adopt C APIs. Old installed headers/libraries cannot validate this
-path. Native build artifacts must be supplied through the workspace's approved
-trunk artifact binding.
+SealedFieldLayout owns its immutable scope and shared Schema/index metadata.
+Views, PublishedStates and retained reads can share the layout. Releasing the
+CCollection handle drops its ownership; it does not destroy metadata still used
+by a layout. Native borrowing is protected by the exact state/layout owner,
+including asynchronous reopen and base adoption. Schema objects are not copied
+per Segment. Physical index artifacts are filtered by the View selection before
+preparation; Segment metadata cannot overwrite the logical binding.
+
+Building the node requires matching native create/reopen/pin/adopt APIs and the
+shared-Schema binding constructor. Old installed headers/libraries cannot
+validate this path. See resource preparation sections 6.1–6.2 for lifecycle rules.
 
 ## Query execution protocol alignment
 
@@ -81,22 +99,22 @@ extraction (#54550): requests match the selected View's exact schema and retain
 its resources through execution. Phase 2 does not require a SchemaBinding or a
 Phase 1 field allowlist. Retained requery uses QueryOnView and may select additional
 fields supported by the same View and LoadScope at the original MVCC. A newer WAL
-write schema does not independently revoke the retained View's fields. This
-supersedes the earlier field-removal/allowlist contract in the source snapshot's
-schema_evolution.md section 6.2. Exact-instance Transform MVCC and poison checks
+write schema does not independently revoke the retained View's fields. This follows the read-Schema publication boundary defined in
+[schema evolution section 6.2](schema_evolution.md#62-dropped-field-validity),
+without a separate per-field WAL removal fence. Exact-instance Transform MVCC and poison checks
 remain mandatory.
 
 The QN handler client uses fail-fast server-ID picking and disables configured
 same-node gRPC retries. A missing-session error carries the shared resolver
 revision notification captured before dispatch, allowing the shard client to
 reconsider unavailable nodes after discovery changes without losing a racing
-update. Closing the client joins its single session observer. Proxy ownership
-and routing integration remain outside this extraction.
+update. Closing the client joins its single session observer. Proxy's
+QueryViewClient owns routing and replica reselection around this node client.
 
 QueryViewOfPartition carries segment_manifest_versions at tag 4, aligned with the
 Coordinator producer (#54547). The packed array follows segment_ids in the same
-order. Neither the retired tag 5 nor the removed schema-binding protocol is a
-released compatibility contract.
+order. The requirements describe immutable physical bases; native preparation
+and execution retain the exact selected generation.
 
 ## Segment selection contract
 
@@ -105,8 +123,10 @@ contract. QN applies selection after partition filtering and before pinning
 physical handles; exact-registration Transform waits and failure checks remain
 unchanged. Hybrid selections retain subrequest positions, including empty All
 and None slots. SN providers accept the shared parameter without applying sealed
-statistics to growing resources. SN partition-statistics preparation, global
-pruning and Proxy planning/requery orchestration remain separate integration work.
+statistics to growing resources. SN prepares the View's versioned partition
+statistics and applies global pruning during planning; Proxy dispatches the
+resulting selections and retains the plan for requery. See
+[segment pruning](query/segment_pruning.md).
 
 ## Node-local observability
 

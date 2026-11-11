@@ -18,17 +18,20 @@
 
 #include <string_view>
 #include <utility>
+#include <optional>
 
 #include "index/Families.h"
 #include "index/IndexLoader.h"
 #include "index/IndexLoadInput.h"
 #include "index/IndexLoadPlan.h"
 #include "storage/IndexEntryFormat.h"
-#include "index/contracts/query/IIndexReaderBase.h"
+#include "index/contracts/IIndex.h"
 #include "storage/artifact/FileSource.h"
 #include "storage/artifact/LoadOptions.h"
 
 namespace milvus::index {
+
+class FmIndexStorage;
 
 /**
  * @brief Loads FM-index readers from packed V3 artifacts.
@@ -48,19 +51,19 @@ class FmIndexLoader final : public IndexLoader {
      * source.
      * @param source Opened storage source owned by the resulting loader.
      * @param options Fixed load options without a retained operation context.
-     * @return A ready loader with reusable family metadata.
+     * @return A ready loader with prepared family metadata.
      */
     static folly::coro::Task<std::unique_ptr<IndexLoader>>
     Create(OpenedIndexSource source, storage::LoadOptions options);
 
     /** @copydoc IndexLoader::Load */
-    folly::coro::Task<IIndexReaderBasePtr>
-    Load(milvus::OpContext* context = nullptr) override;
+    IndexPtr
+    Load(milvus::OpContext* context, const IndexCacheConfig& cache) override;
 
  private:
     friend struct LoaderTestAccess;
 
-    PackedIndexSource source_;
+    std::optional<PackedIndexSource> source_;
     // Retained options never keep the Create caller's op_ctx.
     storage::LoadOptions options_;
 
@@ -77,16 +80,10 @@ class FmIndexLoader final : public IndexLoader {
                const nlohmann::json& metadata,
                const storage::LoadOptions& opts);
 
-    /**
-     * @brief Initialize a reader from populated targets without committing them.
-     * @pre All planned reads and local writes have finished successfully.
-     * @note Async offloads blocking file operations and resumes CPU work on
-     * the loading executor. Sync executes inline on the caller thread.
-     */
-    static folly::coro::Task<IIndexReaderBasePtr>
-    FinishPacked(IndexLoadPlan& plan,
-                 const storage::LoadOptions& opts,
-                 bool use_async);
+    static folly::coro::Task<std::unique_ptr<FmIndexStorage>>
+    FinishPackedStorage(IndexLoadPlan& plan,
+                        const storage::LoadOptions& opts,
+                        bool use_async);
 };
 
 }  // namespace milvus::index

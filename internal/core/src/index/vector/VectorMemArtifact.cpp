@@ -21,7 +21,6 @@
 
 #include "common/EasyAssert.h"
 #include "common/Utils.h"
-#include "index/vector/VectorIndexReader.h"
 #include "index/vector/VectorIndexValidDataUtils.h"
 #include "knowhere/binaryset.h"
 
@@ -103,9 +102,9 @@ VectorMemArtifact::VectorMemArtifact(KnowhereEngine engine,
                "empty embedding-list offsets must be monotonic");
 }
 
-IIndexReaderBasePtr
-VectorMemArtifact::IntoReader() && {
-    return std::make_unique<VectorIndexReader>(std::move(engine_));
+KnowhereEngine
+VectorMemArtifact::IntoEngine() && {
+    return std::move(engine_);
 }
 
 void

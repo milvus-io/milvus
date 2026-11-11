@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -97,64 +98,6 @@ const (
 func validateTextStorageV3Enabled(schema *schemapb.CollectionSchema) error {
 	if err := typeutil.ValidateTextRequiresStorageV3(schema, paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool()); err != nil {
 		return merr.WrapErrParameterInvalidMsg("%s", err.Error())
-	}
-	return nil
-}
-
-// validateAddFunctionRequiresStorageV3 rejects adding a function to an existing collection
-// unless the compaction infrastructure that backfills its output field into pre-existing
-// sealed segments is enabled. The new function-output field is materialized only by
-// compaction (bump_schema_version compaction requires a StorageV3 segment):
-//   - common.storage.useLoonFFI: StorageV3 mode (bump works only on V3 segments; TEXT needs V3).
-//   - dataCoord.compaction.bumpSchemaVersion.enabled: the bumpSchemaVersionPolicy that directly
-//     backfills pre-existing V3 segments; it defaults to false, and there is no direct trigger
-//     on the add-function DDL, so without it an already-V3 old segment never receives the output.
-//   - dataCoord.compaction.storageVersion.enabled: the storageVersionUpgradePolicy that first
-//     mix-upgrades a pre-existing V2 segment to V3 so it can be bumped.
-//
-// Without all three, the DDL would succeed while old rows silently never get the function output.
-// New writes always compute the function output at flush, so create_collection with a function is
-// unaffected; this guard applies only to add-function on an existing collection. See issue #51167.
-func validateAddFunctionRequiresStorageV3() error {
-	if !paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool() {
-		return merr.WrapErrParameterInvalidMsg("adding a function field requires StorageV3; enable common.storage.useLoonFFI")
-	}
-	if !paramtable.Get().DataCoordCfg.BumpSchemaVersionCompactionEnabled.GetAsBool() {
-		return merr.WrapErrParameterInvalidMsg("adding a function field requires schema-bump compaction to backfill existing segments; enable dataCoord.compaction.bumpSchemaVersion.enabled")
-	}
-	if !paramtable.Get().DataCoordCfg.StorageVersionCompactionEnabled.GetAsBool() {
-		return merr.WrapErrParameterInvalidMsg("adding a function field requires the storage-version upgrade compaction; enable dataCoord.compaction.storageVersion.enabled")
-	}
-	return nil
-}
-
-// validateAddFunctionInputNotText rejects adding a BM25/MinHash function whose input is a
-// TEXT field. TEXT columns are stored as binary LOB references, so when the async backfill
-// compaction materializes the function output for pre-existing segments it reads the input
-// back as *array.Binary and hard-fails in stringInputsFromRecord ("cannot materialize bm25
-// from text binary values without lob decoding"); the add-function DDL would return success
-// while the backfill silently fails and old rows never get the output. Reject it up front
-// (fail-fast). VarChar inputs stay allowed, and create_collection with such a function is
-// unaffected -- its output is computed at flush from the raw text. Distinct from the
-// storage-version gate (validateAddFunctionRequiresStorageV3): this is a request-content
-// input-type constraint, not an environment/config check. See issue #51167.
-func validateAddFunctionInputNotText(schema *schemapb.CollectionSchema, function *schemapb.FunctionSchema) error {
-	switch function.GetType() {
-	case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash:
-	default:
-		// Only BM25/MinHash are materialized from string input during backfill.
-		return nil
-	}
-	fieldByName := make(map[string]*schemapb.FieldSchema, len(schema.GetFields()))
-	for _, f := range schema.GetFields() {
-		fieldByName[f.GetName()] = f
-	}
-	for _, name := range function.GetInputFieldNames() {
-		if f, ok := fieldByName[name]; ok && f.GetDataType() == schemapb.DataType_Text {
-			return merr.WrapErrParameterInvalidMsg(
-				"adding a %s function with a TEXT input field (%s) is not supported: its output cannot be backfilled into existing segments; use a VARCHAR input field",
-				function.GetType().String(), name)
-		}
 	}
 	return nil
 }
@@ -378,7 +321,7 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 	t.schema = &schemapb.CollectionSchema{}
 	err := proto.Unmarshal(t.Schema, t.schema)
 	if err != nil {
-		return err
+		return merr.WrapErrParameterInvalidErr(err, "failed to parse schema for collection %s", t.GetCollectionName())
 	}
 	t.schema.AutoID = false
 	t.schema.DbName = t.GetDbName()
@@ -403,6 +346,11 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 	}
 	if err := typeutil.NormalizeAndValidateExternalCollectionSchema(t.schema); err != nil {
 		return err
+	}
+	if t.schema.GetExternalSource() != "" {
+		if err := externalspec.ValidateSourceAndSpec(t.schema.GetExternalSource(), t.schema.GetExternalSpec(), paramtable.Get().CommonCfg.CredentialBrokerPolicy()); err != nil {
+			return err
+		}
 	}
 	if err := validateTextStorageV3Enabled(t.schema); err != nil {
 		return err
@@ -541,6 +489,11 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 	}
+	// RootCoord skips this check when preserve_field_ids is set, as for a
+	// snapshot restore, which does not go through proxy.
+	if err := schemautil.RejectStructSubFieldsTextMatch(t.schema.GetStructArrayFields()); err != nil {
+		return err
+	}
 	if err := validateNativeListArrayGrowingSourceFlush(t.schema, typeutil.GetAllFieldSchemas(t.schema)...); err != nil {
 		return err
 	}
@@ -566,10 +519,6 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 	}
 
 	if err := t.validateTTL(); err != nil {
-		return err
-	}
-
-	if err := checkArrayFeatureGate(t.schema); err != nil {
 		return err
 	}
 
@@ -649,7 +598,7 @@ func (t *AddCollectionFieldTask) PreExecute(ctx context.Context) error {
 
 	t.fieldSchema = &schemapb.FieldSchema{}
 	if err := proto.Unmarshal(t.GetSchema(), t.fieldSchema); err != nil {
-		return err
+		return merr.WrapErrParameterInvalidErr(err, "failed to parse field schema for collection %s", t.GetCollectionName())
 	}
 	if err := validateAddFieldRequest(t.oldSchema, t.fieldSchema); err != nil {
 		return err
@@ -660,9 +609,6 @@ func (t *AddCollectionFieldTask) PreExecute(ctx context.Context) error {
 		return merr.WrapErrParameterInvalidMsg("added field must be nullable, please check it, field name = %s", t.fieldSchema.GetName())
 	}
 	if err := ValidateField(t.fieldSchema, t.oldSchema); err != nil {
-		return err
-	}
-	if err := checkArrayFeatureGateField(t.fieldSchema); err != nil {
 		return err
 	}
 	mlog.Info(context.TODO(), "PreExecute addField task done", mlog.Any("field schema", t.fieldSchema))
@@ -744,9 +690,6 @@ func (t *AddCollectionStructFieldTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	if err := validateNativeListArrayGrowingSourceFlush(t.oldSchema, t.structFieldSchema.GetFields()...); err != nil {
-		return err
-	}
-	if err := checkArrayFeatureGateStruct(t.structFieldSchema); err != nil {
 		return err
 	}
 	transformStructArrayFieldSubNames(t.structFieldSchema)
@@ -1057,15 +1000,7 @@ func (t *AlterCollectionSchemaTask) PreExecute(ctx context.Context) error {
 
 	switch action.GetOp().(type) {
 	case *milvuspb.AlterCollectionSchemaRequest_Action_AddRequest:
-		if err := t.preExecuteAdd(ctx); err != nil {
-			return err
-		}
-		for _, fieldInfo := range action.GetAddRequest().GetFieldInfos() {
-			if err := checkArrayFeatureGateField(fieldInfo.GetFieldSchema()); err != nil {
-				return err
-			}
-		}
-		return nil
+		return t.preExecuteAdd(ctx)
 	case *milvuspb.AlterCollectionSchemaRequest_Action_DropRequest:
 		return t.preExecuteDrop(ctx)
 	default:
@@ -1102,7 +1037,7 @@ func (t *AlterCollectionSchemaTask) preExecuteAdd(ctx context.Context) error {
 		}
 	}
 	if plan.HasFunction() {
-		if err := validateAddFunctionRequiresStorageV3(); err != nil {
+		if err := schemautil.ValidateAddFunctionRequiresStorageV3(); err != nil {
 			return err
 		}
 		if err := schemautil.ValidateAlterSchemaAddFunctionPlan(plan); err != nil {
@@ -1146,7 +1081,7 @@ func (t *AlterCollectionSchemaTask) preExecuteAdd(ctx context.Context) error {
 		mergedSchema.Fields = append(mergedSchema.Fields, proto.Clone(plan.Field).(*schemapb.FieldSchema))
 	}
 	mergedSchema.Functions = append(mergedSchema.Functions, plan.Function)
-	if err := validateAddFunctionInputNotText(mergedSchema, plan.Function); err != nil {
+	if err := schemautil.ValidateAddFunctionInputNotText(mergedSchema, plan.Function); err != nil {
 		return err
 	}
 	if err := validator.ValidateFunction(mergedSchema, plan.Function.GetName(), false); err != nil {
@@ -1199,6 +1134,9 @@ func validateAddStructSubFieldRequest(schema *schemapb.CollectionSchema, plan *s
 	}
 	if !field.GetElementNullable() {
 		return merr.WrapErrParameterInvalidMsg("added sub-field %q of struct field %q must set element_nullable=true", field.GetName(), structPath)
+	}
+	if err := schemautil.FillAddedStructSubFieldMaxCapacity(parent, field); err != nil {
+		return err
 	}
 	if field.GetIsDynamic() {
 		return merr.WrapErrParameterInvalidMsg("cannot add struct sub-field %q with a protected role", field.GetName())
@@ -1731,9 +1669,10 @@ type DescribeCollectionTask struct {
 	baseTask
 	Condition
 	*milvuspb.DescribeCollectionRequest
-	ctx      context.Context
-	mixCoord types.MixCoordClient
-	result   *milvuspb.DescribeCollectionResponse
+	ctx              context.Context
+	mixCoord         types.MixCoordClient
+	result           *milvuspb.DescribeCollectionResponse
+	internalMetadata bool
 }
 
 func (t *DescribeCollectionTask) TraceCtx() context.Context {
@@ -1796,7 +1735,11 @@ func (t *DescribeCollectionTask) Execute(ctx context.Context) error {
 		DbName:               t.GetDbName(),
 	}
 
-	ctx = DescribeCollectionRPCContext(ctx)
+	if t.internalMetadata {
+		ctx = describeCollectionMetadataContext(ctx)
+	} else {
+		ctx = DescribeCollectionRPCContext(ctx)
+	}
 	result, err := t.mixCoord.DescribeCollection(ctx, t.DescribeCollectionRequest)
 	if err != nil {
 		return err
@@ -1806,6 +1749,9 @@ func (t *DescribeCollectionTask) Execute(ctx context.Context) error {
 		t.result.Status = DescribeCollectionErrorStatus(
 			merr.Error(result.GetStatus()), t.GetDbName(), t.GetCollectionName())
 		return nil
+	}
+	if t.internalMetadata && result.GetDbName() == "" {
+		return merr.WrapErrServiceUnavailable("collection database is unavailable for visibility check")
 	}
 	if t.result.CollectionName == "" {
 		t.result.CollectionName = result.GetCollectionName()
@@ -2593,6 +2539,18 @@ func (t *AlterCollectionFieldTask) PreExecute(ctx context.Context) error {
 	}
 
 	t.Properties = updatePropertiesKeys(t.Properties)
+	if target := schemautil.StructAlterTarget(collSchema.CollectionSchema, t.FieldName); target != "" {
+		keys := make([]string, 0, len(t.Properties)+len(t.DeleteKeys))
+		for _, prop := range t.Properties {
+			keys = append(keys, prop.GetKey())
+		}
+		for _, key := range t.DeleteKeys {
+			keys = append(keys, updateKey(key))
+		}
+		if err := schemautil.ValidateStructFieldAlterKeys(target, t.FieldName, keys); err != nil {
+			return err
+		}
+	}
 	for _, prop := range t.Properties {
 		if !IsKeyAllowAlter(prop.Key) {
 			return merr.WrapErrParameterInvalidMsg("%s does not allow update in collection field param", prop.Key)
@@ -2632,20 +2590,18 @@ func (t *AlterCollectionFieldTask) PreExecute(ctx context.Context) error {
 
 		case common.MaxLengthKey:
 			IsStringType := false
-			fieldName := ""
 			for _, field := range collSchema.Fields {
 				if field.GetName() == t.FieldName && (typeutil.IsStringType(field.DataType) || typeutil.IsArrayContainStringElementType(field.DataType, field.ElementType)) {
 					IsStringType = true
-					fieldName = field.GetName()
 					break
 				}
 			}
 			if !IsStringType {
-				return merr.WrapErrParameterInvalidMsg("%s can not modify the maxlength for non-string types", fieldName)
+				return merr.WrapErrParameterInvalidMsg("%s can not modify the maxlength for non-string types", t.FieldName)
 			}
 			value, err := strconv.Atoi(prop.Value)
 			if err != nil {
-				return merr.WrapErrParameterInvalidMsg("%s should be an integer, but got %T", prop.Key, prop.Value)
+				return merr.WrapErrParameterInvalidErr(err, "the value for %s of field %s must be an integer", prop.Key, t.FieldName)
 			}
 
 			defaultMaxVarCharLength := paramtable.Get().ProxyCfg.MaxVarCharLength.GetAsInt64()
@@ -2654,21 +2610,19 @@ func (t *AlterCollectionFieldTask) PreExecute(ctx context.Context) error {
 			}
 		case common.MaxCapacityKey:
 			IsArrayType := false
-			fieldName := ""
 			for _, field := range collSchema.Fields {
 				if field.GetName() == t.FieldName && typeutil.IsArrayType(field.DataType) {
 					IsArrayType = true
-					fieldName = field.GetName()
 					break
 				}
 			}
 			if !IsArrayType {
-				return merr.WrapErrParameterInvalidMsg("%s can not modify the maxcapacity for non-array types", fieldName)
+				return merr.WrapErrParameterInvalidMsg("%s can not modify the maxcapacity for non-array types", t.FieldName)
 			}
 
 			maxCapacityPerRow, err := strconv.ParseInt(prop.Value, 10, 64)
 			if err != nil {
-				return merr.WrapErrParameterInvalidMsg("the value for %s of field %s must be an integer", common.MaxCapacityKey, fieldName)
+				return merr.WrapErrParameterInvalidErr(err, "the value for %s of field %s must be an integer", common.MaxCapacityKey, t.FieldName)
 			}
 			maxArrayCapacity := paramtable.Get().ProxyCfg.MaxArrayCapacity.GetAsInt64()
 			if maxCapacityPerRow > maxArrayCapacity || maxCapacityPerRow <= 0 {
@@ -3272,9 +3226,7 @@ func (t *LoadCollectionTask) Execute(ctx context.Context) (err error) {
 	unindexedVecFields := make([]string, 0)
 	allFields := typeutil.GetAllFieldSchemas(collSchema.CollectionSchema)
 	for _, field := range allFields {
-		// Element-nullable vector arrays cannot be indexed but can be loaded for queries.
-		if typeutil.IsVectorType(field.GetDataType()) && loadFieldsSet.Contain(field.GetFieldID()) &&
-			(field.GetDataType() != schemapb.DataType_ArrayOfVector || !field.GetElementNullable()) {
+		if typeutil.IsVectorType(field.GetDataType()) && loadFieldsSet.Contain(field.GetFieldID()) {
 			if _, ok := fieldIndexIDs[field.GetFieldID()]; !ok {
 				unindexedVecFields = append(unindexedVecFields, field.GetName())
 			}
@@ -3541,9 +3493,7 @@ func (t *LoadPartitionsTask) Execute(ctx context.Context) error {
 	unindexedVecFields := make([]string, 0)
 	allFields := typeutil.GetAllFieldSchemas(collSchema.CollectionSchema)
 	for _, field := range allFields {
-		// Element-nullable vector arrays cannot be indexed but can be loaded for queries.
-		if typeutil.IsVectorType(field.GetDataType()) && loadFieldsSet.Contain(field.GetFieldID()) &&
-			(field.GetDataType() != schemapb.DataType_ArrayOfVector || !field.GetElementNullable()) {
+		if typeutil.IsVectorType(field.GetDataType()) && loadFieldsSet.Contain(field.GetFieldID()) {
 			if _, ok := fieldIndexIDs[field.GetFieldID()]; !ok {
 				unindexedVecFields = append(unindexedVecFields, field.GetName())
 			}
@@ -4224,3 +4174,7 @@ func (t *ListResourceGroupsTask) Execute(ctx context.Context) error {
 func (t *ListResourceGroupsTask) PostExecute(ctx context.Context) error {
 	return nil
 }
+
+// UseInternalMetadata is selected only by the trusted Proxy provider. The provider
+// must authorize the resolved result before it is returned to a user.
+func (t *DescribeCollectionTask) UseInternalMetadata() { t.internalMetadata = true }

@@ -136,6 +136,17 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 		if err := validator.ValidateFunction(schema, plan.Function.GetName(), true); err != nil {
 			return merr.Wrap(err, "invalid function schema")
 		}
+		// The Coordinator is the authoritative admission boundary: older Proxy
+		// versions or direct callers must not commit an impossible handoff.
+		if err := schemautil.ValidateAddFunctionRequiresStorageV3(); err != nil {
+			return err
+		}
+		if err := schemautil.ValidateAddFunctionInputNotText(schema, plan.Function); err != nil {
+			return err
+		}
+		if typeutil.IsExternalCollection(schema) {
+			return merr.WrapErrParameterInvalidMsg("adding a function to an external collection cannot backfill historical outputs")
+		}
 	}
 	if err := typeutil.ValidateExternalCollectionResolvedSchema(schema); err != nil {
 		return err
@@ -182,7 +193,7 @@ func (c *Core) broadcastAlterCollectionSchemaAdd(ctx context.Context, broadcaste
 				BoundFieldIndexes: boundFieldIndexes,
 			},
 		}).
-		WithBroadcast(coll.VirtualChannelNames).
+		WithBroadcast(coll.VirtualChannelNames, message.OptBuildBroadcastAckSyncUp()).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		rollbackAlterCollectionAnalyzerFileResourceReservation(ctx, c.meta, coll.CollectionID, addedFileResourceIds, err)
@@ -346,10 +357,18 @@ func prepareAlterSchemaAddStructSubField(coll *model.Collection, plan *schemauti
 	if !field.GetElementNullable() {
 		return merr.WrapErrParameterInvalidMsg("added sub-field %q of struct field %q must set element_nullable=true", originalName, parent.Name)
 	}
+	if err := schemautil.FillAddedStructSubFieldMaxCapacity(model.MarshalStructArrayFieldModel(parent), field); err != nil {
+		return err
+	}
 	if err := validateAddedStructSubFieldProperties(originalName, field); err != nil {
 		return err
 	}
 	if err := schemautil.RejectStructSubFieldOriginMarker(field); err != nil {
+		return err
+	}
+	// Only the added sub-field: stored siblings may carry these params from an
+	// earlier version, so the merged struct below is not checked for them.
+	if err := schemautil.RejectStructSubFieldTextMatch(field); err != nil {
 		return err
 	}
 	// Segments written before this add have no column for the new sub-field;
@@ -505,7 +524,7 @@ func (c *Core) broadcastAlterCollectionSchemaDrop(ctx context.Context, broadcast
 				Properties: properties,
 			},
 		}).
-		WithBroadcast(coll.VirtualChannelNames).
+		WithBroadcast(coll.VirtualChannelNames, message.OptBuildBroadcastAckSyncUp()).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		rollbackAlterCollectionAnalyzerFileResourceReservation(ctx, c.meta, coll.CollectionID, addedFileResourceIds, err)

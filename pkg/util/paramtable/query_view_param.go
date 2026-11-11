@@ -69,7 +69,7 @@ func (p *queryViewConfig) init(base *BaseTable) {
 	p.LeaseDuration = ParamItem{
 		Key:          "queryView.leaseDuration",
 		Version:      "3.1.0",
-		DefaultValue: "60s",
+		DefaultValue: "5s",
 		Doc:          "Renewable SN Up-view retention after query access. Delays normal Down; non-positive durations disable timed retention. Not refreshable.",
 		Export:       true,
 	}

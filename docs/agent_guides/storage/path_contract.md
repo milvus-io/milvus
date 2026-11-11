@@ -26,6 +26,16 @@ Explore is a separate layout: local temporary manifests live under
 
 - Writers use shared layout helpers: `storage.SegmentManifestBasePath`,
   `SegmentPartitionBasePath`, and the binlog/index helpers in `metautil`.
+- Primary key index objects live under
+  `minio.rootPath/pk_index/<collectionID>/<vchannel>/`: manifest bodies in
+  `manifest/<version>-<uuid>.pb` and SSTs in `sst/<id>.sst`. All writers, the
+  manifest service and its GC build these keys with
+  `internal/pkindex/objpath.go`. `pk_index` is `common.PKIndexPath` and is
+  listed in `InternalStorageRootSegments`. The manifest pointers are meta kv
+  keys under `pkindex-meta/manifest/`, built by
+  `internal/datacoord/pkindex/manifest`. A flush also reads the streaming
+  coordinator key `streamingcoord-meta/pchannel/<pchannel>`, built by
+  `BuildPChannelInfoPath` in `internal/metastore/kv/streamingcoord`.
 - Readers consume the complete key recorded in metadata or the manifest.
   They must not prepend another root.
 - Some API fields describe relative file names rather than complete keys.
@@ -127,6 +137,12 @@ directory from the output manifest base.
   covers them; malformed objects without a segment row can remain orphaned.
 - Therefore an uncommitted stats file inside a live V3 segment is not guaranteed
   to be reclaimed by DataCoord's orphan scan.
+- Primary key index: only the GC in `internal/datacoord/pkindex/gc` deletes
+  under `pk_index/`. It finds a vchannel only through its manifest pointer,
+  and keeps the manifest bodies of the retention and the SSTs that they
+  reference. The other orphan scans do not enter `pk_index/`. Nothing deletes
+  a `pk_index/<collectionID>/` prefix after a collection drop, or the objects
+  of a vchannel whose first manifest commit never succeeded.
 - Legacy `R/M/insert_log` orphan/LOB layouts and old Explore temporary paths
   have separate cleanup gaps. Do not claim this PR repairs all such leftovers.
   Startup cannot recover indexes hidden with an old container's CWD.
@@ -140,6 +156,26 @@ directory from the output manifest base.
 - Compatibility: `internal/datacoord/meta_local_manifest*.go` and
   `snapshot_local_manifest_test.go`.
 - Cleanup: `internal/datacoord/garbage_collector*.go` and `task_stats*.go`.
+- Primary key index: `internal/pkindex/objpath.go`,
+  `internal/datacoord/pkindex/manifest/metakey.go`,
+  `internal/datacoord/pkindex/gc`.
 
 Source review and unit tests do not replace a real version-to-version upgrade
 test. Report which versions, layouts, and failure cases were actually exercised.
+
+## Historical index migration
+
+Backfill copies the explicit index files from path version 0/1 into the existing
+segment manifest base's `_index/<build>/<version>` and atomically publishes path
+version 2 with catalog-row retirement. Rollback copies v2 files to the
+collection-rooted `index_v1` namespace before restoring a path-version-1 catalog
+row and retracting the manifest entry. Existing v0/v1 rollback records keep their
+layout. Build IDs and file keys are unchanged.
+
+Copies use object-storage server-side Copy operations, concurrently with a shared
+bounded budget; no download/upload or local migration fallback is permitted.
+Copy failure/cancellation leaves visible metadata at the source. Source files
+and all three layout aliases of a retained V3 build's recorded keys/version stay
+protected from orphan scans until build retirement, subject to snapshot guards.
+This also protects partial destinations across failed attempts and restarts.
+See the [migration design](../../design-docs/design_docs/20260901-storagev3-manifest-index-backfill.md).

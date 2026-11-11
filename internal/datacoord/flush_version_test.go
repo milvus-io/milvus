@@ -11,6 +11,8 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/datacoord/meta"
 	"github.com/milvus-io/milvus/internal/dataview"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -24,19 +26,19 @@ import (
 )
 
 func (s *ServerSuite) setupFlushVersionCatalog() (*datacoordkv.Catalog, dataview.Manager) {
-	catalog := datacoordkv.NewCatalog(NewMetaMemoryKV(), "", "")
+	catalog := datacoordkv.NewCatalog(meta.NewMetaMemoryKV(), "", "")
 	manager := dataview.NewManager(catalog, nil)
 	_, err := manager.OnCreateCollection(context.Background(), dataview.CreateCollectionDataViewEvent{
 		CollectionID: 100, VChannels: []string{"ch1"},
 	})
 	require.NoError(s.T(), err)
-	s.testServer.meta.catalog = catalog
+	s.testServer.meta.Catalog = catalog
 	s.testServer.dataViewManager = manager
 	return catalog, manager
 }
 
 func (s *ServerSuite) addFlushVersionSegment(id, rows int64) *datapb.SaveBinlogPathsRequest {
-	require.NoError(s.T(), s.testServer.meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
+	require.NoError(s.T(), s.testServer.meta.AddSegment(context.Background(), meta.NewSegmentInfo(&datapb.SegmentInfo{
 		ID: id, CollectionID: 100, PartitionID: 10, InsertChannel: "ch1",
 		State: commonpb.SegmentState_Growing, Level: datapb.SegmentLevel_L1,
 		NumOfRows: rows, StorageVersion: storage.StorageV2,
@@ -81,11 +83,11 @@ func (s *ServerSuite) TestFlushVersionSurvivesRetryRecoveryAndDataViewGC() {
 	segments, err := catalog.ListSegments(ctx, 100)
 	require.NoError(s.T(), err)
 	// Background compaction still reads segment indexes during this simulated restart.
-	s.testServer.meta.segMu.Lock()
+	s.testServer.meta.SegMu.Lock()
 	for _, segment := range segments {
-		s.testServer.meta.segments.SetSegment(segment.GetID(), NewSegmentInfo(segment))
+		s.testServer.meta.Segments.SetSegment(segment.GetID(), meta.NewSegmentInfo(segment))
 	}
-	s.testServer.meta.segMu.Unlock()
+	s.testServer.meta.SegMu.Unlock()
 	recovered, err := dataview.RecoverManager(ctx, catalog, func(context.Context, int64) (bool, error) {
 		return true, nil
 	}, nil, nil, nil)
@@ -95,8 +97,8 @@ func (s *ServerSuite) TestFlushVersionSurvivesRetryRecoveryAndDataViewGC() {
 
 	// Compaction may retire the source before SN retries. The original version
 	// must survive, and a retry must not put the source back into membership.
-	require.NoError(s.T(), s.testServer.meta.UpdateSegmentsInfo(ctx, UpdateStatusOperator(10, commonpb.SegmentState_Dropped)))
-	_, err = recovered.RecomputeNow(ctx, 100, func(context.Context, int64) ([]dataview.LoadableSegment, error) {
+	require.NoError(s.T(), s.testServer.meta.UpdateSegmentsInfo(ctx, meta.UpdateStatusOperator(10, commonpb.SegmentState_Dropped)))
+	_, err = recovered.RecomputeNow(ctx, 100, func(context.Context, int64, *viewpb.DataViewOfCollection) ([]dataview.LoadableSegment, error) {
 		return []dataview.LoadableSegment{{SegmentID: 20, VChannel: "ch1", PartitionID: 10, RowNum: 10}}, nil
 	})
 	require.NoError(s.T(), err)
@@ -151,7 +153,7 @@ func (s *ServerSuite) TestFlushVersionEmptyAndDropped() {
 	require.Equal(s.T(), int64(1), ref.Version().GetStreamingVersion())
 
 	req = s.addFlushVersionSegment(20, 10)
-	require.NoError(s.T(), s.testServer.meta.UpdateSegmentsInfo(context.Background(), UpdateStatusOperator(20, commonpb.SegmentState_Dropped)))
+	require.NoError(s.T(), s.testServer.meta.UpdateSegmentsInfo(context.Background(), meta.UpdateStatusOperator(20, commonpb.SegmentState_Dropped)))
 	require.Nil(s.T(), s.flushVersion(req))
 }
 
@@ -182,7 +184,7 @@ func (s *ServerSuite) TestFlushVersionFailedPublicationDoesNotInstallBinding() {
 // Force the catalog's large-binlog fallback and fail its final transaction.
 func TestFlushVersionChunkedCatalogCommit(t *testing.T) {
 	ctx := context.Background()
-	store := NewMetaMemoryKV()
+	store := meta.NewMetaMemoryKV()
 	catalog := datacoordkv.NewCatalog(store, "", "")
 	segment := &datapb.SegmentInfo{ID: 10, CollectionID: 100, PartitionID: 10, NumOfRows: 10, State: commonpb.SegmentState_Growing}
 	require.NoError(t, catalog.AddSegment(ctx, segment))
@@ -242,7 +244,7 @@ func TestFlushVersionChunkedCatalogCommit(t *testing.T) {
 // its many source records must remain eligible for the chunked write phase.
 func TestFlushVersionDoesNotExpandCompactionCommit(t *testing.T) {
 	ctx := context.Background()
-	catalog := datacoordkv.NewCatalog(NewMetaMemoryKV(), "", "")
+	catalog := datacoordkv.NewCatalog(meta.NewMetaMemoryKV(), "", "")
 	limit := mockey.Mock((*memkv.MemoryKV).MaxTxnOps).Return(2).Build()
 	defer limit.UnPatch()
 	var actions []metastore.UpdateAction
@@ -302,4 +304,70 @@ func (s *ServerSuite) TestFlushPublishesCommittedSize() {
 	require.True(s.T(), ok)
 	require.Zero(s.T(), stat.Size)
 	require.Equal(s.T(), int64(17), stat.LogicalSize)
+}
+
+func (s *ServerSuite) TestDualFrontierFlushTransactionAndCheckpointIsolation() {
+	t := s.T()
+	catalog := datacoordkv.NewCatalog(meta.NewMetaMemoryKV(), "", "")
+	manager := dataview.NewManager(catalog, nil,
+		dataview.WithFrontierProjector(func(context.Context, int64) (map[string]uint64, error) {
+			t.Fatal("native Flush must not read collection cache or checkpoint")
+			return nil, nil
+		}),
+		dataview.WithPendingTransformProjector(func(ctx context.Context, view *viewpb.DataViewOfCollection) (map[string]uint64, error) {
+			return pendingTransformBounds(ctx, s.testServer.meta, nil, view)
+		}))
+	_, err := manager.OnCreateCollection(t.Context(), dataview.CreateCollectionDataViewEvent{CollectionID: 100, VChannels: []string{"ch1"}, TransformStarts: map[string]uint64{"ch1": 10}})
+	require.NoError(t, err)
+	s.testServer.meta.Catalog = catalog
+	s.testServer.dataViewManager = manager
+	req := s.addFlushVersionSegment(10, 10)
+	// Final Flush follows the durable first-pack publication.
+	require.NoError(t, s.testServer.meta.UpdateSegmentsInfo(t.Context(), meta.UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 10, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1}, Timestamp: 50}}})))
+	req.GrowingTransformStartAfterTimetick = 100
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	patch := mockey.Mock((*datacoordkv.Catalog).Update).To(func(_ *datacoordkv.Catalog, _ context.Context, _ ...metastore.UpdateAction) error {
+		cancel()
+		return context.Canceled
+	}).Build()
+	defer patch.UnPatch()
+	resp, err := s.testServer.SaveBinlogPaths(ctx, proto.Clone(req).(*datapb.SaveBinlogPathsRequest))
+	require.Error(t, merr.CheckRPCCall(resp, err))
+	require.Positive(t, patch.Times(), "failure must reach the atomic persistence boundary")
+	ref, err := manager.Latest(t.Context(), 100)
+	require.NoError(t, err)
+	require.Equal(t, uint64(10), ref.DataView().Shards[0].GetGrowingTransformStartAfterTimetick())
+	ref.Deref()
+	patch.UnPatch()
+	version := s.flushVersion(req)
+	ref, err = manager.Latest(t.Context(), 100)
+	require.NoError(t, err)
+	defer ref.Deref()
+	published := ref.DataView()
+	require.Equal(t, uint64(100), published.Shards[0].GetGrowingTransformStartAfterTimetick())
+	require.Equal(t, uint64(50), published.Shards[0].GetCompactedTransformStartAfterTimetick())
+	stored, err := catalog.ListDataViews(t.Context(), 100)
+	require.NoError(t, err)
+	found := false
+	for _, view := range stored {
+		if proto.Equal(view.GetDataVersion(), version) {
+			require.True(t, proto.Equal(published, view))
+			found = true
+		}
+	}
+	require.True(t, found)
+	// A newer proof on a duplicate RPC must not change the original binding.
+	req.GrowingTransformStartAfterTimetick = 500
+	require.True(t, proto.Equal(version, s.flushVersion(req)))
+	recompute := mockey.Mock((*meta.Meta).RecomputeDataView).To(func(_ *meta.Meta, _ context.Context, _ int64) {
+		t.Fatal("checkpoint report must not enqueue a DataView")
+	}).Build()
+	defer recompute.UnPatch()
+	require.NoError(t, s.testServer.meta.UpdateChannelCheckpoint(t.Context(), "ch1", &msgpb.MsgPosition{ChannelName: "ch1", MsgID: []byte{2}, Timestamp: 200}))
+	require.NoError(t, s.testServer.meta.UpdateChannelCheckpoints(t.Context(), []*msgpb.MsgPosition{{ChannelName: "ch1", MsgID: []byte{3}, Timestamp: 300}}))
+	latest, err := manager.Latest(t.Context(), 100)
+	require.NoError(t, err)
+	defer latest.Deref()
+	require.True(t, proto.Equal(published, latest.DataView()))
 }

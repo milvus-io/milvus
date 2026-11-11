@@ -716,7 +716,7 @@ TEST(JsonIndexTest, LargeInt64LiteralDoesNotAliasInDoublePathIndex) {
         using exec::PhyTermFilterExpr::PhyTermFilterExpr;
         bool
         HasSelectedPin() const {
-            return static_cast<bool>(selected_root_pin_);
+            return static_cast<bool>(selected_index_reader_);
         }
     };
     TermPinProbe physical_expr({},

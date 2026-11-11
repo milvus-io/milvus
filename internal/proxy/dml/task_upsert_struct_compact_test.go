@@ -826,7 +826,7 @@ func newCCPathReplace(t *testing.T, children []ccChild, rowNullable bool, pks []
 	p.task.req.FieldOps = []*schemapb.FieldPartialUpdateOp{{
 		FieldName: ccStructName, Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, Path: path,
 	}}
-	plans, _, err := resolveFieldPartialUpdateOps(p.task.req, p.task.schema.CollectionSchema)
+	plans, _, err := resolveFieldPartialUpdateOps(p.task.req, p.task.schema)
 	require.NoError(t, err)
 	p.task.fieldPartialUpdatePlans = plans
 	p.task.partialUpdateOriginalFields = cloneFieldDataList(p.task.req.GetFieldsData())

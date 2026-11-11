@@ -64,18 +64,18 @@ func TestCollectionSchemaRPCWithWAL(t *testing.T) {
 	}).Build()
 	defer manager.UnPatch()
 	listener := bufconn.Listen(1024 * 1024)
-	server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewStreamingServiceUnaryServerInterceptor()))
+	server := grpc.NewServer(grpc.UnaryInterceptor(interceptor.NewServiceUnaryServerInterceptor()))
 	streamingpb.RegisterStreamingNodeHandlerServiceServer(server, service.NewHandlerService(&schemaRPCManager{}))
 	go server.Serve(listener)
 	defer server.Stop()
 	conn, err := grpc.NewClient("passthrough:///schema-wal", grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithUnaryInterceptor(interceptor.NewStreamingServiceUnaryClientInterceptor()),
+		grpc.WithUnaryInterceptor(interceptor.NewServiceUnaryClientInterceptor()),
 		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
 	require.NoError(t, err)
 	defer conn.Close()
 	client := streamingpb.NewStreamingNodeHandlerServiceClient(conn)
 	const vchannel = "schema-rpc_1v0"
-	created, err := w.Append(ctx, message.NewCreateCollectionMessageBuilderV1().WithVChannel(vchannel).
+	_, err = w.Append(ctx, message.NewCreateCollectionMessageBuilderV1().WithVChannel(vchannel).
 		WithHeader(&message.CreateCollectionMessageHeader{CollectionId: 1, PartitionIds: []int64{2}}).
 		WithBody(&msgpb.CreateCollectionRequest{CollectionSchema: &schemapb.CollectionSchema{Name: "schema_rpc", Version: 0}}).MustBuildMutable())
 	require.NoError(t, err)
@@ -87,13 +87,11 @@ func TestCollectionSchemaRPCWithWAL(t *testing.T) {
 	current, err := client.GetCollectionSchema(ctx, req)
 	require.NoError(t, err)
 	require.Zero(t, current.Schema.Version)
-	require.Equal(t, created.TimeTick, current.EffectiveTimeTick)
 	req.Selector = &streamingpb.StreamingNodeGetCollectionSchemaRequest_SchemaVersion{SchemaVersion: 0}
-	require.Eventually(t, func() bool {
-		exact, err := client.GetCollectionSchema(ctx, req)
-		return err == nil && exact.Schema.Version == 0 && exact.EffectiveTimeTick == created.TimeTick
-	}, 5*time.Second, time.Millisecond)
-	altered, err := w.Append(ctx, message.NewAlterCollectionMessageBuilderV2().WithVChannel(vchannel).
+	exact, err := client.GetCollectionSchema(ctx, req)
+	require.NoError(t, err, "the just-created version is immediately readable from write admission")
+	require.Zero(t, exact.Schema.Version)
+	_, err = w.Append(ctx, message.NewAlterCollectionMessageBuilderV2().WithVChannel(vchannel).
 		WithHeader(&message.AlterCollectionMessageHeader{CollectionId: 1, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionSchema}}}).
 		WithBody(&message.AlterCollectionMessageBody{Updates: &message.AlterCollectionMessageUpdates{Schema: &schemapb.CollectionSchema{Name: "schema_rpc", Version: 1}}}).MustBuildMutable())
 	require.NoError(t, err)
@@ -101,11 +99,14 @@ func TestCollectionSchemaRPCWithWAL(t *testing.T) {
 	current, err = client.GetCollectionSchema(ctx, req)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, current.Schema.Version)
-	require.Equal(t, altered.TimeTick, current.EffectiveTimeTick)
 	req.Selector = &streamingpb.StreamingNodeGetCollectionSchemaRequest_SchemaVersion{SchemaVersion: 1}
+	exact, err = client.GetCollectionSchema(ctx, req)
+	require.NoError(t, err, "the newly appended version is immediately readable from write admission")
+	require.EqualValues(t, 1, exact.Schema.Version)
+	req.Selector = &streamingpb.StreamingNodeGetCollectionSchemaRequest_SchemaVersion{SchemaVersion: 0}
 	require.Eventually(t, func() bool {
 		exact, err := client.GetCollectionSchema(ctx, req)
-		return err == nil && exact.Schema.Version == 1 && exact.EffectiveTimeTick == altered.TimeTick
+		return err == nil && exact.Schema.Version == 0
 	}, 5*time.Second, time.Millisecond)
 	req.Pchannel.Term++
 	_, err = client.GetCollectionSchema(ctx, req)

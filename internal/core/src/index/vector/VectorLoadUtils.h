@@ -32,6 +32,7 @@
 #include "index/vector/VectorIndexValidDataUtils.h"
 #include "index/vector/VectorLoadParamUtils.h"
 #include "index/vector/VectorParamUtils.h"
+#include "knowhere/emb_list_utils.h"
 #include "nlohmann/json.hpp"
 
 namespace milvus::index::vector_load_params {
@@ -124,6 +125,7 @@ struct NormalizedLoadMetadata {
     std::optional<int64_t> runtime_dim;
     std::optional<int64_t> num_rows;
     std::optional<bool> nullable;
+    bool element_nullable{false};
     IdMapMmapFlags id_map_mmap;
     Config knowhere_config;
 };
@@ -211,6 +213,8 @@ ParseNormalizedLoadMetadata(const Config& params, LoadBackend backend) {
                   "vector indexes do not use scalar nested coordinates");
     }
     result.nullable = ReadBool(params, "nullable");
+    result.element_nullable =
+        ReadBool(params, ELEMENT_NULLABLE).value_or(false);
     result.index_type = vector_params::ReadRequiredString(
         params, INDEX_TYPE, "normalized vector parameter");
     result.metric_type = vector_params::ReadRequiredString(
@@ -334,7 +338,14 @@ ValidateLoadedShape(const NormalizedLoadMetadata& params,
                     const Engine& engine,
                     LoadBackend backend) {
     const auto valid = InspectLoadedValidity(engine);
-    if (params.nullable.has_value()) {
+    // An element-level VECTOR_ARRAY index (non-embedding-list metric) keeps
+    // element-domain validity: present only for an element-nullable field and
+    // sized by logical elements, so neither the row nullability nor the row
+    // count describes it.
+    const bool element_level =
+        params.elem_type != DataType::NONE &&
+        !knowhere::get_el_metric_type(params.metric_type).has_value();
+    if (params.nullable.has_value() && !element_level) {
         const bool zero_rows = params.num_rows.value_or(-1) == 0;
         if ((!*params.nullable && valid.enabled) ||
             (*params.nullable && !valid.enabled && !zero_rows)) {
@@ -400,14 +411,14 @@ ValidateLoadedShape(const NormalizedLoadMetadata& params,
                   engine.native_index.Count(),
                   valid.valid_count);
     }
-    // A normal embedding-list artifact is not compared with the row count:
-    // with an ordinary metric knowhere replaces the row validity by an
-    // element-domain identity map built from the vector count. The memory
-    // builder skips the same check for embedding lists.
-    const bool row_domain_validity =
-        params.elem_type == DataType::NONE || state != ArtifactState::Normal;
+    // Element validity is not row-addressed. Normal disk indexes may restore
+    // validity without retaining the complete logical row count.
+    const bool check_validity_rows =
+        (backend == LoadBackend::Memory &&
+         params.elem_type == DataType::NONE) ||
+        (state != ArtifactState::Normal && !element_level);
     if (params.num_rows.has_value()) {
-        if (valid.enabled && row_domain_validity &&
+        if (valid.enabled && check_validity_rows &&
             valid.total_count != *params.num_rows) {
             if (backend == LoadBackend::Memory) {
                 ThrowInfo(UnexpectedError,

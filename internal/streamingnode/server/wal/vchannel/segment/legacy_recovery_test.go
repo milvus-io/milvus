@@ -19,7 +19,7 @@ func TestSealedRecoveryReplaysTailBeforeFinalCommit(t *testing.T) {
 	ctx := context.Background()
 	publish := mockey.Mock((*segmentLifecycleWriter).PersistGrowingSegment).Return(nil).Build()
 	defer publish.UnPatch()
-	commit := mockey.Mock((*segmentLifecycleWriter).CommitL1Segment).Return(nil, context.DeadlineExceeded).Build()
+	commit := mockey.Mock((*segmentLifecycleWriter).CommitL1SegmentWithTransformStart).Return(nil, context.DeadlineExceeded).Build()
 	defer commit.UnPatch()
 	writer := &durableSnapshotTestPackWriter{}
 	config := runtimeConfig{packWriter: writer, lifecycle: &segmentLifecycleWriter{}, owner: testSegmentOwner{}, runtime: moduleapi.Runtime{Scheduler: &recordingSegmentScheduler{}}}
@@ -52,7 +52,7 @@ func TestSealedRecoveryReplaysTailBeforeFinalCommit(t *testing.T) {
 	require.NoError(t, proto.Unmarshal(encoded, restored))
 	second := newSegmentViewFromMeta(restored, nil, config)
 	commit.UnPatch()
-	success := mockey.Mock((*segmentLifecycleWriter).CommitL1Segment).Return(&viewpb.DataVersion{StreamingVersion: 7}, nil).Build()
+	success := mockey.Mock((*segmentLifecycleWriter).CommitL1SegmentWithTransformStart).Return(&viewpb.DataVersion{StreamingVersion: 7}, nil).Build()
 	defer success.UnPatch()
 	second.ResumePendingRecovery()
 	require.NoError(t, second.pendingFinalCommit.Execute(ctx))

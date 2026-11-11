@@ -19,7 +19,10 @@ import (
 // asyncAllocSegment allocates a new growing segment asynchronously.
 func (m *partitionManager) asyncAllocSegment(schemaVersion int32, requiresStorageV3 bool) {
 	if m.onAllocating != nil {
-		m.Logger().Debug(context.TODO(), "segment alloc worker is already on allocating")
+		m.Logger().Debug(m.ctx, "segment alloc worker is already on allocating",
+			mlog.FieldVChannel(m.vchannel),
+			mlog.FieldCollectionID(m.collectionID),
+			mlog.FieldPartitionID(m.partitionID))
 		// manager is already on allocating.
 		return
 	}
@@ -34,7 +37,10 @@ func (m *partitionManager) asyncAllocSegment(schemaVersion int32, requiresStorag
 		schemaVersion:     schemaVersion,
 		requiresStorageV3: requiresStorageV3,
 	}
-	w.SetLogger(m.Logger())
+	w.SetLogger(m.Logger().With(
+		mlog.FieldVChannel(m.vchannel),
+		mlog.FieldCollectionID(m.collectionID),
+		mlog.FieldPartitionID(m.partitionID)))
 	// It should always done asynchronously.
 	// Otherwise, a dead lock may happens when wal is on writing.
 	go w.do()

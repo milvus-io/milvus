@@ -4,11 +4,14 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -110,4 +113,20 @@ func TestEnsureGrowingSegmentTaskFailsOnCoordInputError(t *testing.T) {
 	require.Error(t, err)
 	require.False(t, errors.Is(err, nodescheduler.ErrDelay), "terminal error must not be requeued")
 	require.Error(t, view.unrecoverableErr())
+}
+
+func TestCommitL1SegmentCarriesConditionalTransformProof(t *testing.T) {
+	coord := &coordStub{}
+	var saved *datapb.SaveBinlogPathsRequest
+	patch := mockey.Mock((*coordStub).SaveBinlogPaths).To(func(_ *coordStub, _ context.Context, req *datapb.SaveBinlogPathsRequest, _ ...grpc.CallOption) (*commonpb.Status, error) {
+		saved = proto.Clone(req).(*datapb.SaveBinlogPathsRequest)
+		return dataview.FlushResultStatus(nil), nil
+	}).Build()
+	defer patch.UnPatch()
+	writer := &segmentLifecycleWriter{serverID: 7, coord: coord}
+	_, err := writer.CommitL1SegmentWithTransformStart(t.Context(), newCommitL1SegmentTestMeta(), 123)
+	require.NoError(t, err)
+	require.Equal(t, uint64(123), saved.GetGrowingTransformStartAfterTimetick())
+	require.True(t, saved.GetFlushed())
+	require.Equal(t, int64(1), saved.GetSegmentID())
 }

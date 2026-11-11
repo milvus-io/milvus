@@ -29,10 +29,11 @@ type ShardDataView struct {
 // segments are embedded (not IDs plus an external lookup), so traversal
 // paths read the published LogicalSize directly.
 type PartitionDataView struct {
-	PartitionID int64
-	Segments    []*SegmentDataView
-	TotalRows   int64
-	LogicalSize int64
+	PartitionStatsVersion int64
+	PartitionID           int64
+	Segments              []*SegmentDataView
+	TotalRows             int64
+	LogicalSize           int64
 }
 
 // SegmentDataView carries physical rows and the scheduling size frozen by the

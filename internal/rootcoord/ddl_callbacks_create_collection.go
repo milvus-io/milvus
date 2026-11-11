@@ -43,6 +43,10 @@ type collectionDataViewCreator interface {
 	CreateCollectionDataView(ctx context.Context, collectionID int64, vchannels []string) error
 }
 
+type collectionDataViewTransformCreator interface {
+	CreateCollectionDataViewWithTransformStarts(ctx context.Context, result message.BroadcastResultCreateCollectionMessageV1) error
+}
+
 func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.CreateCollectionRequest) error {
 	schema := &schemapb.CollectionSchema{}
 	if err := proto.Unmarshal(req.GetSchema(), schema); err != nil {
@@ -109,6 +113,10 @@ func (c *Core) broadcastCreateCollectionV1(ctx context.Context, req *milvuspb.Cr
 }
 
 func (c *DDLCallback) createCollectionV1AckCallback(ctx context.Context, result message.BroadcastResultCreateCollectionMessageV1) error {
+	return c.applyCollectionCreation(ctx, result, etcdpb.CollectionState_CollectionCreated)
+}
+
+func (c *DDLCallback) applyCollectionCreation(ctx context.Context, result message.BroadcastResultCreateCollectionMessageV1, state etcdpb.CollectionState) error {
 	msg := result.Message
 	header := msg.Header()
 	body := msg.MustBody()
@@ -121,13 +129,18 @@ func (c *DDLCallback) createCollectionV1AckCallback(ctx context.Context, result 
 		}
 	}
 	creator, ok := c.mixCoord.(collectionDataViewCreator)
-	if !ok {
+	if transformCreator, supportsTransform := c.mixCoord.(collectionDataViewTransformCreator); supportsTransform {
+		if err := transformCreator.CreateCollectionDataViewWithTransformStarts(ctx, result); err != nil {
+			return merr.Wrap(err, "failed to create collection data view")
+		}
+	} else if !ok {
 		mlog.Warn(ctx, "MixCoord does not support DataView collection creation",
 			mlog.FieldCollectionID(header.CollectionId))
 	} else if err := creator.CreateCollectionDataView(ctx, header.CollectionId, body.VirtualChannelNames); err != nil {
 		return merr.Wrap(err, "failed to create collection data view")
 	}
 	newCollInfo := newCollectionModelWithMessage(header, body, result)
+	newCollInfo.State = state
 	if err := c.meta.AddCollection(ctx, newCollInfo); err != nil {
 		return merr.Wrap(err, "failed to add collection to meta table")
 	}
@@ -226,7 +239,7 @@ func newCollectionModel(header *message.CreateCollectionMessageHeader, body *mes
 		EnableDynamicField:   body.CollectionSchema.EnableDynamicField,
 		EnableNamespace:      body.CollectionSchema.EnableNamespace,
 		UpdateTimestamp:      ts,
-		SchemaVersion:        0,
+		SchemaVersion:        body.CollectionSchema.GetVersion(),
 		ShardInfos:           shardInfos,
 		FileResourceIds:      body.CollectionSchema.GetFileResourceIds(),
 		ExternalSource:       body.CollectionSchema.ExternalSource,

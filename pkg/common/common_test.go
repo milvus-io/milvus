@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"math"
 	"strconv"
 	"strings"
 	"testing"
@@ -15,6 +16,40 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+func TestGetCollectionAutoReleaseIdleTTL(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		properties []*commonpb.KeyValuePair
+		ttl        time.Duration
+		invalid    bool
+	}{
+		{name: "absent"},
+		{name: "unknown key", properties: []*commonpb.KeyValuePair{{Key: "collection.autorelease.ttl.second", Value: "bad"}}},
+		{name: "override", properties: []*commonpb.KeyValuePair{{Key: "collection.autorelease.ttl.seconds", Value: "300"}}, ttl: 300 * time.Second},
+		{name: "disabled", properties: []*commonpb.KeyValuePair{{Key: CollectionAutoReleaseIdleTTLKey, Value: "-1"}}, ttl: -time.Second},
+		{name: "maximum", properties: []*commonpb.KeyValuePair{{Key: CollectionAutoReleaseIdleTTLKey, Value: strconv.FormatInt(math.MaxInt64/int64(time.Second), 10)}}, ttl: time.Duration(math.MaxInt64/int64(time.Second)) * time.Second},
+		{name: "zero", properties: []*commonpb.KeyValuePair{{Key: CollectionAutoReleaseIdleTTLKey, Value: "0"}}, invalid: true},
+		{name: "negative", properties: []*commonpb.KeyValuePair{{Key: CollectionAutoReleaseIdleTTLKey, Value: "-2"}}, invalid: true},
+		{name: "empty", properties: []*commonpb.KeyValuePair{{Key: CollectionAutoReleaseIdleTTLKey, Value: ""}}, invalid: true},
+		{name: "not an integer", properties: []*commonpb.KeyValuePair{{Key: CollectionAutoReleaseIdleTTLKey, Value: "1.5"}}, invalid: true},
+		{name: "duration overflow", properties: []*commonpb.KeyValuePair{{Key: CollectionAutoReleaseIdleTTLKey, Value: "9223372037"}}, invalid: true},
+		{name: "integer overflow", properties: []*commonpb.KeyValuePair{{Key: CollectionAutoReleaseIdleTTLKey, Value: "9223372036854775808"}}, invalid: true},
+		{name: "last value wins", properties: []*commonpb.KeyValuePair{{Key: CollectionAutoReleaseIdleTTLKey, Value: "300"}, {Key: CollectionAutoReleaseIdleTTLKey, Value: "-1"}}, ttl: -time.Second},
+		{name: "invalid duplicate", properties: []*commonpb.KeyValuePair{{Key: CollectionAutoReleaseIdleTTLKey, Value: "300"}, {Key: CollectionAutoReleaseIdleTTLKey, Value: "0"}}, invalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ttl, err := GetCollectionAutoReleaseIdleTTL(tc.properties)
+			if tc.invalid {
+				assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+				assert.Equal(t, merr.InputError, merr.GetErrorType(err))
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tc.ttl, ttl)
+		})
+	}
+}
 
 func TestIsSystemField(t *testing.T) {
 	type args struct {

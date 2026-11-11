@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/test_utils/IndexCacheTestUtils.h"
+
 #include <arrow/io/memory.h>
 #include <boost/regex.hpp>
 #include <gtest/gtest.h>
@@ -80,10 +82,13 @@ BuildTantivyStringReader(const std::vector<std::string>& data) {
     const auto loader = LoaderRegistry::Instance().Lookup(families::kInverted);
     AssertInfo(static_cast<bool>(loader),
                "inverted benchmark loader is missing");
-    return loader.Load(
-        {OpenedIndexSource{PackedIndexSource{
-             std::shared_ptr<storage::IndexEntryReader>(std::move(source))}},
-         std::move(options)});
+    return loader
+        .Load({OpenedIndexSource{
+                   PackedIndexSource{std::shared_ptr<storage::IndexEntryReader>(
+                       std::move(source))}},
+               std::move(options),
+               milvus::index::test::TestIndexCacheConfig()})
+        ->CreateReader(nullptr);
 }
 
 std::vector<std::string>

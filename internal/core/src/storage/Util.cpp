@@ -18,6 +18,10 @@
 #include <atomic>
 #include <cerrno>
 #include <charconv>
+#include <fcntl.h>
+#include <unistd.h>
+#include <folly/ScopeGuard.h>
+#include <folly/futures/Future.h>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -28,6 +32,7 @@
 #include <limits>
 #include <memory>
 #include <string_view>
+#include <numeric>
 #include "common/FastMem.h"
 
 #include "arrow/array/builder_binary.h"
@@ -70,6 +75,7 @@
 #include "storage/RecordBatchSize.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
+#include "storage/artifact/LocalFileUtils.h"
 #include "common/Common.h"
 #include "common/Types.h"
 #include "common/VectorArray.h"
@@ -77,6 +83,7 @@
 #include "storage/MemFileManagerImpl.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/KeyRetriever.h"
+#include "storage/PluginLoader.h"
 #include "segcore/memory_planner.h"
 #include "mmap/Types.h"
 #include "storage/loon_ffi/ffi_reader_c.h"
@@ -90,11 +97,35 @@
 #include "milvus-storage/filesystem/fs.h"
 #include "milvus-storage/lob_column/lob_column_manager.h"
 #include "milvus-storage/reader.h"
+#include "milvus-storage/thread_pool.h"
 #include "milvus-storage/segment/segment_reader.h"
 #include "nlohmann/json.hpp"
 #include "storage/StatusToErrorCode.h"
 
 namespace milvus::storage {
+
+void
+WriteRawData(const std::string& path, const void* data, size_t bytes) {
+    int fd = ::open(path.c_str(), O_WRONLY);
+    auto close = folly::makeGuard([&] {
+        if (fd >= 0) {
+            ::close(fd);
+        }
+    });
+    if (fd < 0 || ::lseek(fd, 2 * sizeof(uint32_t), SEEK_SET) < 0) {
+        ThrowInfo(FileOpenFailed,
+                  "failed to open vector build input {}: {}",
+                  path,
+                  strerror(errno));
+    }
+    WriteAll(fd, data, bytes, path, "vector build input");
+    if (::close(std::exchange(fd, -1)) != 0) {
+        ThrowInfo(FileWriteFailed,
+                  "failed to close vector build input {}: {}",
+                  path,
+                  strerror(errno));
+    }
+}
 
 namespace {
 
@@ -1850,12 +1881,19 @@ detail::VisitFieldDataFromStorageV2Paged(
 
     for (const auto& column_group_file : remote_chunk_files) {
         // get all row groups for each file
-        auto result = milvus_storage::FileRowGroupReader::Make(
-            fs,
-            column_group_file,
-            milvus_storage::DEFAULT_READ_BUFFER_SIZE,
-            GetReaderProperties(),
-            GetArrowReaderProperties());
+        auto prepared_result = milvus_storage::PreparedParquetFile::Open(
+            fs, column_group_file, GetReaderProperties());
+        if (!prepared_result.ok()) {
+            ThrowInfo(ArrowStatusToErrorCode(prepared_result.status()),
+                      "[StorageV2] Failed to prepare file {}: {}",
+                      column_group_file,
+                      prepared_result.status().ToString());
+        }
+        auto prepared = std::move(prepared_result).ValueOrDie();
+        auto result =
+            prepared->MakeReader(nullptr,
+                                 milvus_storage::DEFAULT_READ_BUFFER_SIZE,
+                                 GetArrowReaderProperties());
         if (!result.ok()) {
             ThrowInfo(ArrowStatusToErrorCode(result.status()),
                       "[StorageV2] Failed to create file row group reader: " +
@@ -1967,6 +2005,7 @@ detail::VisitFieldDataFromStorageV2Paged(
                 pool.Submit([channel,
                              column_group_file,
                              fs,
+                             prepared,
                              parallel_degree,
                              row_groups = std::move(row_groups)]() mutable {
                     auto strategy =
@@ -1982,7 +2021,8 @@ detail::VisitFieldDataFromStorageV2Paged(
                         row_group_lists,
                         fs,
                         nullptr,
-                        milvus::proto::common::LoadPriority::HIGH);
+                        milvus::proto::common::LoadPriority::HIGH,
+                        {prepared});
                 });
 
             bool channel_exhausted = false;
@@ -2098,6 +2138,176 @@ GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                       "always-continue storage-v2 visitor stopped early");
     }
     return field_data_list;
+}
+
+std::optional<size_t>
+ReadFieldDataFromManifestInto(const std::string& manifest_path,
+                              const FileManagerContext& context,
+                              size_t expected_rows,
+                              const std::function<uint8_t*()>& allocate) {
+    const auto& schema = context.fieldDataMeta.field_schema;
+    const auto type = static_cast<DataType>(schema.data_type());
+    const auto mapping =
+        context.storage_column_mappings.find(context.fieldDataMeta.field_id);
+    if (schema.nullable() || !IsVectorDataType(type) ||
+        type == DataType::VECTOR_ARRAY || IsSparseFloatVectorDataType(type) ||
+        !schema.external_field().empty() ||
+        (mapping != context.storage_column_mappings.end() &&
+         mapping->second.is_external_column)) {
+        return std::nullopt;
+    }
+    const auto& properties = context.loon_ffi_properties;
+    AssertInfo(properties != nullptr, "manifest reader properties are missing");
+    auto column = mapping != context.storage_column_mappings.end()
+                      ? mapping->second.storage_column_name
+                      : std::string{};
+    if (column.empty()) {
+        column = std::to_string(context.fieldDataMeta.field_id);
+    }
+    auto column_groups = std::make_shared<milvus_storage::api::ColumnGroups>(
+        GetLoonManifest(manifest_path, properties)->columnGroups());
+    for (size_t i = 0; i < column_groups->size(); ++i) {
+        const auto& group = column_groups->at(i);
+        if (std::find(group->columns.begin(), group->columns.end(), column) ==
+            group->columns.end()) {
+            continue;
+        }
+        if (group->format != LOON_FORMAT_PARQUET) {
+            return std::nullopt;
+        }
+        uint64_t source_rows = 0;
+        for (const auto& file : group->files) {
+            source_rows += file.end_index - file.start_index;
+        }
+        if (source_rows != expected_rows) {
+            return std::nullopt;
+        }
+        auto read = [&]() -> arrow::Result<size_t> {
+            auto columns = std::make_shared<std::vector<std::string>>(
+                std::vector<std::string>{column});
+            auto reader_properties =
+                std::make_shared<milvus_storage::api::Properties>(*properties);
+            const auto error = milvus_storage::api::SetValue(
+                *reader_properties,
+                PROPERTY_READER_ASYNC_TASK_SPLIT_STRATEGY,
+                "bytes");
+            if (error.has_value()) {
+                return arrow::Status::Invalid(
+                    PROPERTY_READER_ASYNC_TASK_SPLIT_STRATEGY, ": ", *error);
+            }
+            auto reader = milvus_storage::api::Reader::create(
+                column_groups, nullptr, columns, reader_properties);
+            if (PluginLoader::GetInstance().getCipherPlugin()) {
+                reader->set_keyretriever([](const std::string& key_metadata) {
+                    return KeyRetriever().GetKey(key_metadata);
+                });
+            }
+            const auto parallelism =
+                milvus_storage::ThreadPoolHolder::GetParallelism();
+            auto pool =
+                milvus_storage::ThreadPoolHolder::GetThreadPool(parallelism);
+            ARROW_ASSIGN_OR_RAISE(auto chunks,
+                                  reader->get_chunk_reader_async(i, columns)
+                                      .via(pool.get())
+                                      .get());
+            std::vector<int64_t> chunk_indices(
+                chunks->total_number_of_chunks());
+            std::iota(chunk_indices.begin(), chunk_indices.end(), 0);
+            auto batches_future =
+                chunks->get_chunks_async(chunk_indices, parallelism)
+                    .via(pool.get());
+            // Keep the reader alive if allocation fails while I/O is in flight.
+            auto wait_for_read = folly::makeGuard([&] {
+                if (batches_future.valid()) {
+                    batches_future.wait();
+                }
+            });
+            const auto row_bytes =
+                vector_bytes_per_element(type, context.indexMeta.dim);
+            auto* destination = allocate();
+            // The parallel copies establish destination pages after decoding.
+            ARROW_ASSIGN_OR_RAISE(auto batches,
+                                  std::move(batches_future).get());
+            std::vector<folly::Future<arrow::Status>> copies;
+            copies.reserve(std::min(batches.size(), parallelism));
+            std::vector<size_t> offsets;
+            offsets.reserve(batches.size());
+            // An input error or submission failure must not release the
+            // destination while previously submitted copies are still writing.
+            auto wait_for_copies = folly::makeGuard([&] {
+                for (auto& copy : copies) {
+                    if (copy.valid()) {
+                        copy.wait();
+                    }
+                }
+            });
+            size_t rows = 0;
+            // Storage restores chunk order after asynchronous completion.
+            // Assign disjoint destinations in that order; copies can then run
+            // independently on the existing read pool.
+            for (auto& batch : batches) {
+                if (batch->num_columns() != 1) {
+                    return arrow::Status::Invalid(
+                        "Vector input requires a single projected column");
+                }
+                if (rows > expected_rows ||
+                    batch->num_rows() > expected_rows - rows) {
+                    return arrow::Status::Invalid(
+                        "Vector input does not match its destination");
+                }
+                offsets.push_back(rows * row_bytes);
+                rows += batch->num_rows();
+            }
+            if (rows != expected_rows) {
+                return arrow::Status::Invalid(
+                    "Vector input returned an unexpected row count");
+            }
+            // Group adjacent batches into a bounded number of copy tasks.
+            // Each task still starts only after every read/decode completed.
+            const auto copy_tasks = std::min(batches.size(), parallelism);
+            for (size_t task = 0; task < copy_tasks; ++task) {
+                const auto first = task * batches.size() / copy_tasks;
+                const auto last = (task + 1) * batches.size() / copy_tasks;
+                copies.push_back(
+                    folly::via(pool.get(), [&, first, last]() -> arrow::Status {
+                        for (size_t index = first; index < last; ++index) {
+                            const auto& batch = batches[index];
+                            auto values = batch->column(0);
+                            if (values->type_id() !=
+                                    arrow::Type::FIXED_SIZE_BINARY ||
+                                values->null_count() != 0) {
+                                return arrow::Status::Invalid(
+                                    "Vector input requires non-null fixed-size "
+                                    "binary values");
+                            }
+                            auto binary = std::static_pointer_cast<
+                                arrow::FixedSizeBinaryArray>(values);
+                            if (binary->byte_width() != row_bytes) {
+                                return arrow::Status::Invalid(
+                                    "Vector input does not match its "
+                                    "destination");
+                            }
+                            std::memcpy(destination + offsets[index],
+                                        binary->raw_values(),
+                                        batch->num_rows() * row_bytes);
+                            batches[index].reset();
+                        }
+                        return arrow::Status::OK();
+                    }));
+            }
+            for (auto& copy : copies) {
+                ARROW_RETURN_NOT_OK(std::move(copy).get());
+            }
+            return rows;
+        }();
+        if (!read.ok()) {
+            ThrowInfo(ArrowStatusToErrorCode(read.status()),
+                      "failed to read manifest input: {}",
+                      read.status().ToString());
+        }
+        return read.ValueOrDie();
+    }
+    return std::nullopt;
 }
 
 // Shared implementation of the manifest read paths. `max_rows == 0` streams
@@ -2216,10 +2426,15 @@ VisitFieldDataFromManifestPaged(
     auto needed_cols_ptr =
         std::make_shared<std::vector<std::string>>(needed_columns);
     auto reader = milvus_storage::api::Reader::create(
-        column_groups, reader_schema, needed_cols_ptr, *loon_ffi_properties);
+        column_groups, reader_schema, needed_cols_ptr, loon_ffi_properties);
 
     if (!(reader != nullptr)) {
         ThrowInfo(ErrorCode::FileReadFailed, "Failed to create reader");
+    }
+    if (PluginLoader::GetInstance().getCipherPlugin()) {
+        reader->set_keyretriever([](const std::string& key_metadata) {
+            return KeyRetriever().GetKey(key_metadata);
+        });
     }
     std::shared_ptr<arrow::RecordBatch> batch;
 
@@ -2784,13 +2999,14 @@ BuildTextSegmentReaderConfig(const milvus_storage::api::Properties& properties,
                              int64_t field_id,
                              const std::string& lob_base_path) {
     milvus_storage::segment::SegmentReaderConfig config;
-    config.properties = properties;
+    config.properties =
+        std::make_shared<const milvus_storage::api::Properties>(properties);
 
     milvus_storage::lob_column::LobColumnConfig lob_config;
     lob_config.data_type = milvus_storage::lob_column::LobDataType::kText;
     lob_config.field_id = field_id;
     lob_config.lob_base_path = lob_base_path;
-    lob_config.properties = properties;
+    lob_config.properties = config.properties;
     config.lob_columns[field_id] = std::move(lob_config);
     return config;
 }
@@ -2808,7 +3024,7 @@ OpenTextFieldSegmentReader(
         BuildTextLobBasePath(segment_base_path, field_meta.field_id);
 
     auto fs_result = milvus_storage::FilesystemCache::getInstance().get(
-        *loon_ffi_properties, segment_base_path);
+        loon_ffi_properties, segment_base_path);
     if (!fs_result.ok()) {
         auto error = milvus_storage::ToSegcoreError(fs_result.status());
         ThrowInfo(error.get_error_code(),
