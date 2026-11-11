@@ -723,7 +723,7 @@ func (r *reader) Read() (*storage.InsertData, error) {
 	if r.readErr != nil {
 		return nil, r.readErr
 	}
-	insertData, err := storage.NewInsertDataWithMemoryTracking(r.schema)
+	insertData, err := storage.NewInsertDataBuilder(r.schema).WithFunctionOutputFields().WithMemoryTracking().Build()
 	if err != nil {
 		return nil, err
 	}
@@ -777,7 +777,7 @@ func (r *reader) Read() (*storage.InsertData, error) {
 		for _, field := range allFields {
 			fieldData := insertData.Data[field.GetFieldID()]
 			if fieldData == nil {
-				fieldData, err = storage.NewFieldDataWithMemoryTracking(field.GetDataType(), field, 1024)
+				fieldData, err = storage.NewFieldDataBuilder(field.GetDataType(), field).WithCapacity(1024).WithMemoryTracking().Build()
 				if err != nil {
 					return nil, err
 				}
@@ -820,7 +820,7 @@ OUTER:
 	if len(masks) == 0 { // no data will undergo filtration, return directly
 		return insertData, nil
 	}
-	result, err := storage.NewInsertDataWithFunctionOutputField(r.schema)
+	result, err := storage.NewInsertDataBuilder(r.schema).WithFunctionOutputFields().Build()
 	if err != nil {
 		return nil, err
 	}
