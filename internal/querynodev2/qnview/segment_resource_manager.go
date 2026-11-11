@@ -525,8 +525,6 @@ func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collec
 		_, ok := selected[index.GetIndexID()]
 		return !ok
 	})
-	snapshot.LoadInfo = info
-	snapshot.IndexInfos = collection.IndexInfos()
 	if m.estimator != nil {
 		reservation, err := m.estimator.Reserve(ctx, info, collection)
 		if err != nil {
@@ -571,6 +569,9 @@ func (r *segmentResource) prepare(ctx context.Context, b *segmentBinding, collec
 		m.mu.Unlock()
 		go r.catchup(base)
 	}
+	// Only preparation uses the filtered copy; the base retains the immutable source snapshot.
+	snapshot.LoadInfo = info
+
 	read, err := m.loader.PrepareReadState(ctx, base.segment, reuse, collection, snapshot)
 	if err != nil {
 		return nil, err

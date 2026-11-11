@@ -40,7 +40,10 @@ func newBatchMetadataTestProvider(t *testing.T, ctx context.Context, call func(c
 func batchMetadataSuccess(req *querypb.GetQueryViewSegmentLoadInfoRequest) *querypb.GetQueryViewSegmentLoadInfoResponse {
 	response := &querypb.GetQueryViewSegmentLoadInfoResponse{Status: merr.Success(), IndexInfoList: []*indexpb.IndexInfo{{IndexID: 99}}}
 	for _, id := range req.SegmentIDs {
-		response.Results = append(response.Results, &querypb.QueryViewSegmentLoadInfoResult{SegmentID: id, Status: merr.Success(), LoadInfo: &querypb.SegmentLoadInfo{CollectionID: req.CollectionID, SegmentID: id, ManifestPath: "segment/_metadata/manifest-1.avro", TransformStartAfterTimetick: 100}})
+		response.Results = append(response.Results, &querypb.QueryViewSegmentLoadInfoResult{SegmentID: id, Status: merr.Success(), LoadInfo: &querypb.SegmentLoadInfo{
+			CollectionID: req.CollectionID, SegmentID: id, ManifestPath: "segment/_metadata/manifest-1.avro", TransformStartAfterTimetick: 100,
+			IndexInfos: []*querypb.FieldIndexInfo{{FieldID: 100, IndexID: 100 + id}},
+		}})
 	}
 	return response
 }
@@ -74,7 +77,7 @@ func TestQueryViewMetadataBatchGrouping(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, item[0], snapshot.LoadInfo.CollectionID)
 				require.Equal(t, item[1], snapshot.LoadInfo.SegmentID)
-				require.EqualValues(t, 99, snapshot.IndexInfos[0].IndexID)
+				require.EqualValues(t, 100+item[1], snapshot.LoadInfo.IndexInfos[0].IndexID)
 			})
 		}
 		synctest.Wait()
