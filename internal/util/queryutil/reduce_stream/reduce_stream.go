@@ -535,11 +535,17 @@ func (s *OrderedReduceStream) attachMetadata(chunk *internalpb.RetrieveResults) 
 }
 
 func buildRetrieveChunk(units []queryReduceUnit) (*internalpb.RetrieveResults, error) {
-	results := make([]*internalpb.RetrieveResults, len(units))
+	results := make([]*internalpb.RetrieveResults, 0, len(units))
+	resultIndexes := make(map[*internalpb.RetrieveResults]int)
 	rows := make([]queryutil.RowRef, len(units))
 	for i, unit := range units {
-		results[i] = unit.result
-		rows[i] = queryutil.NewRowRef(i, unit.rowIndex)
+		index, exists := resultIndexes[unit.result]
+		if !exists {
+			index = len(results)
+			resultIndexes[unit.result] = index
+			results = append(results, unit.result)
+		}
+		rows[i] = queryutil.NewRowRef(index, unit.rowIndex)
 	}
 	chunk, err := queryutil.BuildMergedRetrieveResults(results, rows, nil)
 	if err != nil {

@@ -33,6 +33,50 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
+func BenchmarkShardOrderByBatchAndStream(b *testing.B) {
+	const rows = 512
+	inputs := make([]*internalpb.RetrieveResults, 2)
+	for i := range inputs {
+		ids, values := make([]int64, rows), make([]int64, rows)
+		for j := range ids {
+			ids[j], values[j] = int64(i*rows+j), int64(rows-j)
+		}
+		inputs[i] = newQueryTestChunk(ids, values)
+		inputs[i].FieldsData = append(inputs[i].FieldsData, &schemapb.FieldData{
+			Type: schemapb.DataType_FloatVector, FieldId: 102, ValidData: make([]bool, rows),
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Dim: 2, Data: &schemapb.VectorField_FloatVector{FloatVector: &schemapb.FloatArray{Data: make([]float32, rows*2)}}}},
+		})
+		for j := range inputs[i].FieldsData[1].ValidData {
+			inputs[i].FieldsData[1].ValidData[j] = true
+		}
+	}
+	for _, mode := range []string{"batch", "stream"} {
+		b.Run(mode, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if mode == "batch" {
+					merged, err := queryutil.NewDeduplicatePKOperator(0, nil).Run(b.Context(), nil, inputs)
+					require.NoError(b, err)
+					_, err = queryutil.NewOrderByLimitOperator([]*orderby.OrderByField{{FieldID: 101, DataType: schemapb.DataType_Int64, Ascending: true}}, rows).Run(b.Context(), nil, merged[0])
+					require.NoError(b, err)
+				} else {
+					children := []ReduceStream{&queryTestStream{recv: []queryTestRecv{{chunk: inputs[0]}}}, &queryTestStream{recv: []queryTestRecv{{chunk: inputs[1]}}}}
+					stream, err := NewShardReduceStream(&internalpb.RetrieveRequest{Limit: rows, OrderByFields: []*planpb.OrderByField{{FieldId: 101, Ascending: true}}}, nil, children, 1<<20)
+					require.NoError(b, err)
+					for {
+						_, err = stream.Recv()
+						if err == io.EOF {
+							break
+						}
+						require.NoError(b, err)
+					}
+					require.NoError(b, stream.Close())
+				}
+			}
+		})
+	}
+}
+
 func TestShardOrderByStreamMatchesBatch(t *testing.T) {
 	for _, chunkBytes := range []int{1, 100, 1 << 20} {
 		for _, ascending := range []bool{false, true} {

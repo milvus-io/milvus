@@ -121,6 +121,42 @@ func TestRetrieveUnitByteSizeMixedFields(t *testing.T) {
 	require.Equal(t, queryUnitReferenceSize(t, unit), got)
 }
 
+func TestBuildRetrieveChunkReusesSources(t *testing.T) {
+	result := newQueryTestChunk([]int64{1, 2, 3}, []int64{10, 20, 30})
+	result.FieldsData = append(result.FieldsData, &schemapb.FieldData{Type: schemapb.DataType_SparseFloatVector, FieldId: 104,
+		ValidData: []bool{true, false, true}, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+			Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{Contents: [][]byte{make([]byte, 8), make([]byte, 16)}}},
+		}}})
+	other := proto.Clone(result).(*internalpb.RetrieveResults)
+	other.GetFieldsData()[1].GetVectors().GetSparseFloatVector().Contents[0][0] = 3
+	for i := range other.GetIds().GetIntId().Data {
+		other.GetIds().GetIntId().Data[i] += 100
+	}
+	units := make([]queryReduceUnit, 96)
+	for i := range units {
+		source := result
+		if i%2 != 0 {
+			source = other
+		}
+		units[i] = queryReduceUnit{result: source, rowIndex: int64(i % 3)}
+	}
+	var chunkErr error
+	small := testing.AllocsPerRun(5, func() { _, chunkErr = buildRetrieveChunk(units[:2]) })
+	require.NoError(t, chunkErr)
+	large := testing.AllocsPerRun(5, func() { _, chunkErr = buildRetrieveChunk(units) })
+	require.NoError(t, chunkErr)
+	require.Less(t, large-small, float64(48), "repeated Units must not rebuild nullable indexes")
+	chunk, err := buildRetrieveChunk(units)
+	require.NoError(t, err)
+	require.Equal(t, []int64{1, 102, 3, 101}, queryTestIDs(chunk)[:4])
+	require.Equal(t, []bool{true, false, true, true}, typeutil.GetFieldDataValidData(chunk.GetFieldsData()[1])[:4])
+	require.Len(t, chunk.GetFieldsData()[1].GetVectors().GetSparseFloatVector().GetContents(), 64)
+	contents := chunk.GetFieldsData()[1].GetVectors().GetSparseFloatVector().GetContents()
+	require.Equal(t, byte(0), contents[0][0])
+	require.Len(t, contents[1], 16)
+	require.Equal(t, byte(3), contents[2][0])
+}
+
 func TestRetrieveUnitByteSizeVectorArray(t *testing.T) {
 	for _, valid := range []bool{false, true} {
 		result := newQueryTestChunk([]int64{1}, []int64{10})
