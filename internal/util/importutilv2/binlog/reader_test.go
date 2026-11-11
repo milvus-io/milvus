@@ -1418,7 +1418,7 @@ func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.Data
 	expectInsertData, err := storage.NewInsertData(schema)
 	suite.NoError(err)
 	for _, field := range schema.GetFields() {
-		expectInsertData.Data[field.GetFieldID()], err = storage.NewFieldData(field.GetDataType(), field, suite.numRows)
+		expectInsertData.Data[field.GetFieldID()], err = storage.NewFieldDataBuilder(field.GetDataType(), field).WithCapacity(suite.numRows).Build()
 		suite.NoError(err)
 	}
 OUTER:
@@ -2658,24 +2658,32 @@ func TestStorageV3Reader_ReadFailurePaths(t *testing.T) {
 			}).Build()
 			defer nextPatch.UnPatch()
 
-			data, err := storage.NewInsertDataWithMemoryTracking(r.schema)
+			data, err := storage.NewInsertDataBuilder(r.schema).WithFunctionOutputFields().WithMemoryTracking().Build()
 			require.NoError(t, err)
 			if name == "missing_field" || name == "allocate_field" {
 				delete(data.Data, 100)
 			}
-			batchPatch := mockey.Mock(storage.NewInsertDataWithMemoryTracking).To(func(_ *schemapb.CollectionSchema) (*storage.InsertData, error) {
+			batchPatch := mockey.Mock((*storage.InsertDataBuilder).Build).To(func(builder *storage.InsertDataBuilder) (*storage.InsertData, error) {
+				readBuilder := storage.NewInsertDataBuilder(r.schema).WithFunctionOutputFields().WithMemoryTracking()
+				if name == "filter_batch" && *builder != *readBuilder {
+					// The filter stage builds a fresh batch without memory tracking.
+					return nil, cause
+				}
+				expected := readBuilder
+				require.Equal(t, expected, builder, "reader must include function output fields and enable memory tracking")
 				if name == "allocate_batch" {
 					return nil, cause
 				}
 				return data, nil
 			}).Build()
 			defer batchPatch.UnPatch()
-			if name == "filter_batch" {
-				filterPatch := mockey.Mock(storage.NewInsertDataWithFunctionOutputField).Return(nil, cause).Build()
-				defer filterPatch.UnPatch()
-			}
 			if name == "allocate_field" {
-				fieldPatch := mockey.Mock(storage.NewFieldDataWithMemoryTracking).Return(nil, cause).Build()
+				fieldPatch := mockey.Mock((*storage.FieldDataBuilder).Build).To(func(builder *storage.FieldDataBuilder) (storage.FieldData, error) {
+					field := schema.Fields[0]
+					expected := storage.NewFieldDataBuilder(field.GetDataType(), field).WithCapacity(1024).WithMemoryTracking()
+					require.Equal(t, expected, builder, "reader must preserve field capacity and enable memory tracking")
+					return nil, cause
+				}).Build()
 				defer fieldPatch.UnPatch()
 			}
 			if name == "filter_batch" {
@@ -2931,7 +2939,7 @@ func TestStorageV2ReaderTrackedBufferBoundary(t *testing.T) {
 		{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, Nullable: true},
 	}}
 	rows := make([]map[int64]any, 135)
-	baseline, err := storage.NewInsertDataWithFunctionOutputField(schema)
+	baseline, err := storage.NewInsertDataBuilder(schema).WithFunctionOutputFields().Build()
 	require.NoError(t, err)
 	for i := range rows {
 		var text, sparse any
@@ -2976,7 +2984,7 @@ func TestStorageV2ReaderTrackedBufferBoundary(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, count, actual.GetRowNum())
 				require.Equal(t, offset+count, consumed)
-				expected, err := storage.NewInsertDataWithFunctionOutputField(schema)
+				expected, err := storage.NewInsertDataBuilder(schema).WithFunctionOutputFields().Build()
 				require.NoError(t, err)
 				for _, row := range rows[offset : offset+count] {
 					require.NoError(t, expected.Append(row))
