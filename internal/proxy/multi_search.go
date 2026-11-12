@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -31,6 +32,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
@@ -160,7 +164,12 @@ func (node *Proxy) CheckMultiSearchAdmission() error {
 
 // RunMultiSearch accepts a structurally validated list of Search operations.
 // A failure of an individual search is returned in its native SearchResults.
-func (node *Proxy) RunMultiSearch(ctx context.Context, options MultiSearchOptions, items []MultiSearchPrepare, execute MultiSearchExecute) ([]*milvuspb.SearchResults, error) {
+func (node *Proxy) RunMultiSearch(ctx context.Context, options MultiSearchOptions, items []MultiSearchPrepare, execute MultiSearchExecute) (results []*milvuspb.SearchResults, err error) {
+	startedAt := time.Now()
+	nodeID := paramtable.GetStringNodeID()
+	ctx, span := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-MultiSearch")
+	defer span.End()
+	defer func() { observeMultiSearchBatch(ctx, nodeID, startedAt, len(items), results, err) }()
 	if len(items) == 0 {
 		return nil, merr.WrapErrParameterMissingMsg("MultiSearch requires at least one search")
 	}
@@ -192,7 +201,10 @@ func (node *Proxy) RunMultiSearch(ctx context.Context, options MultiSearchOption
 		defer cancelExecution()
 	}
 	batch := &multiSearchBatch{
+		nodeID:    nodeID,
+		startedAt: startedAt,
 		results:   make([]*milvuspb.SearchResults, len(items)),
+		progress:  make([]multiSearchItemProgress, len(items)),
 		remaining: len(items),
 		done:      make(chan struct{}),
 	}
@@ -207,22 +219,23 @@ func (node *Proxy) RunMultiSearch(ctx context.Context, options MultiSearchOption
 	case <-executionCtx.Done():
 	}
 	s.remove(entry)
+	batchResults := batch.finish(ctx, multiSearchContextErr(executionCtx))
 	if err := multiSearchContextErr(ctx); err != nil {
 		return nil, err
 	}
 	if s.ctx.Err() != nil {
 		return nil, merr.WrapErrServiceUnavailableMsg("MultiSearch scheduler is stopping")
 	}
-	results := batch.finish()
-	if err := multiSearchContextErr(ctx); err != nil {
-		return nil, err
-	}
-	return results, nil
+	return batchResults, nil
 }
 
 type multiSearchBatch struct {
+	nodeID    string
+	startedAt time.Time
+
 	mu        sync.Mutex
 	results   []*milvuspb.SearchResults
+	progress  []multiSearchItemProgress
 	remaining int
 	done      chan struct{}
 }
@@ -241,7 +254,7 @@ func (b *multiSearchBatch) run(ctx context.Context, maxConcurrency uint32, items
 		group.Go(func() error {
 			if multiSearchContextErr(ctx) == nil {
 				itemCtx := metrics.WithIndependentRPCStats(ctx)
-				b.complete(ctx, i, runMultiSearchItem(itemCtx, prepare, execute))
+				b.complete(ctx, i, b.runItem(itemCtx, i, prepare, execute))
 			}
 			return nil
 		})
@@ -254,27 +267,34 @@ func (b *multiSearchBatch) run(ctx context.Context, maxConcurrency uint32, items
 func (b *multiSearchBatch) complete(ctx context.Context, i int, result *milvuspb.SearchResults) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.results == nil || multiSearchContextErr(ctx) != nil {
+	if result == nil || b.results == nil || multiSearchContextErr(ctx) != nil {
 		return
 	}
 	b.results[i] = result
+	b.progress[i].completedAt = time.Now()
 	b.remaining--
 	if b.remaining == 0 {
 		close(b.done)
 	}
 }
 
-func (b *multiSearchBatch) finish() []*milvuspb.SearchResults {
+func (b *multiSearchBatch) finish(ctx context.Context, unfinished error) []*milvuspb.SearchResults {
 	b.mu.Lock()
 	// Transfer ownership to the caller. Late searches can no longer write
 	// slots or retain completed Search data while they unwind.
-	results := b.results
-	b.results = nil
+	results, progress := b.results, b.progress
+	b.results, b.progress = nil, nil
+	finishedAt := time.Now()
 	b.mu.Unlock()
+
 	for i, result := range results {
 		if result == nil {
-			results[i] = &milvuspb.SearchResults{Status: merr.Status(context.DeadlineExceeded)}
+			result = &milvuspb.SearchResults{Status: merr.Status(unfinished)}
+			results[i] = result
+			progress[i].completedAt = finishedAt
 		}
+		progress[i].finishBackoff(progress[i].completedAt)
+		progress[i].observe(ctx, b.nodeID, i, b.startedAt, result.GetStatus())
 	}
 	return results
 }
@@ -290,7 +310,11 @@ func multiSearchContextErr(ctx context.Context) error {
 	return nil
 }
 
-func runMultiSearchItem(ctx context.Context, prepare MultiSearchPrepare, execute MultiSearchExecute) *milvuspb.SearchResults {
+type multiSearchDQLAdmissionKey struct{}
+
+type multiSearchDQLAdmission struct{ rejected bool }
+
+func (b *multiSearchBatch) runItem(ctx context.Context, index int, prepare MultiSearchPrepare, execute MultiSearchExecute) *milvuspb.SearchResults {
 	request, err := prepare(ctx)
 	if err != nil {
 		return &milvuspb.SearchResults{Status: multiSearchErrorStatus(err)}
@@ -298,16 +322,44 @@ func runMultiSearchItem(ctx context.Context, prepare MultiSearchPrepare, execute
 	if request == nil {
 		return &milvuspb.SearchResults{Status: merr.Status(merr.WrapErrServiceInternalMsg("MultiSearch prepared no Search request"))}
 	}
-	if err := multiSearchContextErr(ctx); err != nil {
-		return &milvuspb.SearchResults{Status: merr.Status(err)}
-	}
-	result, err := execute(ctx, request)
-	if err != nil {
-		return &milvuspb.SearchResults{Status: multiSearchErrorStatus(err)}
-	}
-	if result.GetStatus() == nil {
-		return &milvuspb.SearchResults{Status: merr.Status(merr.WrapErrServiceInternalMsg("Search returned no status"))}
-	}
+	var result *milvuspb.SearchResults
+	var reason string
+	admission := multiSearchDQLAdmission{}
+	ctx = context.WithValue(ctx, multiSearchDQLAdmissionKey{}, &admission)
+	// Keep the native response. retry.Handle may return an earlier error
+	// when a later attempt stops on a context error.
+	_ = retry.Handle(ctx, func() (bool, error) {
+		if !b.startAttempt(ctx, index, reason) {
+			return false, nil
+		}
+		admission.rejected = false
+		var err error
+		result, err = execute(ctx, copySearchRequestForAttempt(request))
+		if err != nil {
+			result = &milvuspb.SearchResults{Status: multiSearchErrorStatus(err)}
+		}
+		st := result.GetStatus()
+		if st == nil {
+			result = &milvuspb.SearchResults{Status: merr.Status(merr.WrapErrServiceInternalMsg("Search returned no status"))}
+			return false, nil
+		}
+		if st.GetExtraInfo()[merr.InputErrorFlagKey] == "true" {
+			return false, nil
+		}
+		switch merr.Code(merr.Error(st)) {
+		case merr.Code(merr.ErrServiceRateLimit):
+			reason = multiSearchRetryRateLimit
+			b.recordRejection(index, reason)
+			return true, merr.ErrServiceRateLimit
+		case merr.Code(merr.ErrServiceTooManyRequests):
+			if admission.rejected {
+				reason = multiSearchRetryQueueFull
+				b.recordRejection(index, reason)
+				return true, merr.ErrServiceTooManyRequests
+			}
+		}
+		return false, nil
+	}, retry.OnBackoff(func() { b.startBackoff(ctx, index) }))
 	if !merr.Ok(result.GetStatus()) && result.GetResults() != nil {
 		return &milvuspb.SearchResults{
 			Status:         result.GetStatus(),

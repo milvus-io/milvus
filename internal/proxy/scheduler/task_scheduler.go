@@ -95,12 +95,25 @@ func (queue *BaseTaskQueue) IsFull() bool {
 	return queue.utFull()
 }
 
+// Queue saturation is also reported by downstream components. Keep the local
+// admission source available to callers that decide whether to retry a task.
+var errAdmissionQueueFull = errors.New("proxy task admission queue full")
+
+// IsAdmissionQueueFull reports an error from the local Proxy task queue.
+func IsAdmissionQueueFull(err error) bool {
+	return errors.Is(err, errAdmissionQueueFull)
+}
+
+func (queue *BaseTaskQueue) admissionQueueFull() error {
+	return merr.Mark(merr.WrapErrTooManyRequests(int32(queue.GetMaxTaskNum())), errAdmissionQueueFull)
+}
+
 func (queue *BaseTaskQueue) addUnissuedTask(t taskmodel.Task) (*list.Element, error) {
 	queue.utLock.Lock()
 	defer queue.utLock.Unlock()
 
 	if queue.utFull() {
-		return nil, merr.WrapErrTooManyRequests(int32(queue.GetMaxTaskNum()))
+		return nil, queue.admissionQueueFull()
 	}
 	element := queue.unissuedTasks.PushBack(t)
 	// utBufChan is an edge-triggered, capacity-1 notifier: a pending token
@@ -228,7 +241,7 @@ func (queue *BaseTaskQueue) enqueue(t taskmodel.Task) (*list.Element, error) {
 	full := queue.utFull()
 	queue.utLock.RUnlock()
 	if full {
-		return nil, merr.WrapErrTooManyRequests(int32(queue.GetMaxTaskNum()))
+		return nil, queue.admissionQueueFull()
 	}
 
 	// A task whose request is already canceled or timed out must not take a

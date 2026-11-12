@@ -274,3 +274,33 @@ func TestMultiSearchParentCancellationEndsCall(t *testing.T) {
 		require.ErrorIs(t, <-cancelled, context.Canceled)
 	})
 }
+
+func TestMultiSearchRetriesRateLimitedItem(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p := NewMultiSearchTestProxy(t, 1, 1)
+		start := time.Now()
+		var limitedAttempts []time.Duration
+		var readyAttempts []time.Duration
+		prepare := []MultiSearchPrepare{multiSearchTestPrepare("limited"), multiSearchTestPrepare("ready")}
+		results, err := p.RunMultiSearch(t.Context(), MultiSearchOptions{MaxConcurrency: 1}, prepare, func(_ context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+			if req.GetCollectionName() == "limited" {
+				limitedAttempts = append(limitedAttempts, time.Since(start))
+				// Search may rewrite fields as it prepares a task. Retry with the original request.
+				req.CollectionName = "rewritten"
+				if len(limitedAttempts) <= 2 {
+					return nil, merr.WrapErrServiceRateLimit(10)
+				}
+			} else {
+				readyAttempts = append(readyAttempts, time.Since(start))
+			}
+			return &milvuspb.SearchResults{Status: merr.Success()}, nil
+		})
+		require.NoError(t, err)
+		require.Len(t, results, 2)
+		for _, result := range results {
+			require.True(t, merr.Ok(result.GetStatus()))
+		}
+		require.Equal(t, []time.Duration{0, 200 * time.Millisecond, 600 * time.Millisecond}, limitedAttempts)
+		require.Equal(t, []time.Duration{600 * time.Millisecond}, readyAttempts)
+	})
+}
