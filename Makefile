@@ -167,10 +167,10 @@ ifneq ($(filter ON on TRUE True true 1,$(WITH_GPU)),)
 endif
 
 # Ensure git works inside containers where .git is owned by a different user.
-# Must use git config --global because in some git versions (seen in the CI
-# build container, #47916) the ownership check runs before both -c options and
-# GIT_CONFIG_COUNT env vars are processed.
-# Every make run parses this line, so write only when git refuses the repo and
+# Must use git config --global: git 2.35.2-2.37, and distro builds that
+# backported that fix (as seen in the CI build container in #47916), read
+# safe.directory only from system/global config, ignoring -c and GIT_CONFIG_COUNT.
+# Every make run parses this line, so write only when `git rev-parse` fails and
 # '*' is not trusted yet. An unconditional --add appended a duplicate entry to
 # ~/.gitconfig on each run and disabled git's ownership check for all repos on
 # developer machines that never needed it.
