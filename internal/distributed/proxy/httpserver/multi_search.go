@@ -36,6 +36,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/accesslog/info"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -153,7 +155,7 @@ func (h *HandlersV2) multiSearch(ctx context.Context, c *gin.Context, anyReq any
 	return merr.Success(), nil
 }
 
-func (h *HandlersV2) prepareMultiSearchItem(ctx context.Context, body []byte, dbName string) (*milvuspb.SearchRequest, *schemapb.CollectionSchema, error) {
+func (h *HandlersV2) prepareMultiSearchItem(ctx context.Context, body []byte, fallbackDB string) (*milvuspb.SearchRequest, *schemapb.CollectionSchema, error) {
 	httpReq := SearchReqV2{Limit: 100}
 	if err := stdjson.Unmarshal(body, &httpReq); err != nil {
 		return nil, nil, restSearchError{merr.ErrIncorrectParameterFormat, merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error()}
@@ -161,6 +163,11 @@ func (h *HandlersV2) prepareMultiSearchItem(ctx context.Context, body []byte, db
 	if err := binding.Validator.ValidateStruct(&httpReq); err != nil {
 		return nil, nil, restSearchError{merr.ErrMissingRequiredParameters, merr.ErrMissingRequiredParameters.Error() + ", error: " + err.Error()}
 	}
+	dbName := httpReq.GetDbName()
+	if dbName == "" {
+		dbName = fallbackDB
+	}
+	ctx = contextutil.SetToIncomingContext(ctx, util.HeaderDBName, dbName)
 	req, err := newRESTSearchRequest(ctx, &httpReq, dbName)
 	if err != nil {
 		return nil, nil, err
@@ -186,6 +193,7 @@ func (h *HandlersV2) prepareMultiSearchItem(ctx context.Context, body []byte, db
 
 func (h *HandlersV2) executeMultiSearchItem(ctx context.Context, req *milvuspb.SearchRequest, username, token string) (*milvuspb.SearchResults, error) {
 	const searchMethod = milvuspb.MilvusService_Search_FullMethodName
+	ctx = contextutil.SetToIncomingContext(ctx, util.HeaderDBName, req.GetDbName())
 	if h.checkAuth {
 		var err error
 		ctx, err = proxy.PrivilegeInterceptorWithMetaCache(h.metaCache)(ctx, req)

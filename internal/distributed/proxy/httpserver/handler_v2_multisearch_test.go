@@ -19,9 +19,15 @@ package httpserver
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/trace"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -29,11 +35,14 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type multiSearchAdmissionProxy struct {
@@ -88,6 +97,10 @@ func (p *multiSearchRESTProxy) RunMultiSearch(ctx context.Context, _ uint32, ite
 			results[i], err = execute(ctx, req)
 		}
 		if err != nil {
+			// The Proxy converts unary permission failures to item statuses.
+			if grpcStatus := status.Convert(err); grpcStatus.Code() == codes.PermissionDenied {
+				err = merr.WrapErrPrivilegeNotPermitted("%s", grpcStatus.Message())
+			}
 			results[i] = &milvuspb.SearchResults{Status: merr.Status(err)}
 		}
 	}
@@ -215,6 +228,142 @@ func TestMultiSearchRendersOrderedSearchResults(t *testing.T) {
 	require.Equal(t, merr.Code(merr.ErrServiceRateLimit), body.Data[2].Search.Code)
 	require.Equal(t, merr.Code(merr.ErrCollectionNotFound), body.Data[3].Search.Code)
 	require.Equal(t, []int{2, 1}, checked)
+}
+
+func TestMultiSearchRoutesAndAuthorizesEachDatabase(t *testing.T) {
+	params := paramtable.Get()
+	for _, key := range []string{
+		params.CommonCfg.AuthorizationEnabled.Key,
+		params.ProxyCfg.ResolveAliasForPrivilege.Key,
+		params.QuotaConfig.QuotaAndLimitsEnabled.Key,
+	} {
+		require.NoError(t, params.Save(key, "true"))
+		t.Cleanup(func() { require.NoError(t, params.Reset(key)) })
+	}
+
+	const username = "multisearch_reader"
+	cache := proxy.InitEmptyMetaCacheForTest()
+	policy := privilege.GetPrivilegeCache()
+	for _, target := range []struct {
+		db, collection, dim, role  string
+		dbID, collectionID, partID int64
+	}{
+		{DefaultDbName, "papers", "2", "default_reader", 11, 101, 201},
+		{"catalog", "catalog_papers", "3", "catalog_reader", 12, 102, 202},
+		{"archive", "papers", "2", "", 13, 103, 203},
+	} {
+		schema, err := metacache.NewSchemaInfo(&schemapb.CollectionSchema{
+			Name: target.collection,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				{FieldID: 101, Name: "embedding", DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: target.dim}}},
+			},
+		})
+		require.NoError(t, err)
+		cache.SeedDBInfoForTest(target.db, &metacache.DatabaseInfo{DBID: target.dbID})
+		collection := cache.SeedCollectionForTest(target.db, target.collection, target.collectionID, "current")
+		collection.Schema = schema
+		cache.SeedPartitionCacheForTest(target.collectionID, []*metacache.PartitionInfo{
+			{Name: "ready", PartitionID: target.partID},
+		}, false)
+		if target.role != "" {
+			require.NoError(t, policy.RefreshPolicyInfo(typeutil.CacheOp{
+				OpType: typeutil.CacheGrantPrivilege,
+				OpKey:  funcutil.PolicyForPrivilege(target.role, commonpb.ObjectType_Collection.String(), target.collection, commonpb.ObjectPrivilege_PrivilegeSearch.String(), target.db),
+			}))
+			require.NoError(t, policy.RefreshPolicyInfo(typeutil.CacheOp{
+				OpType: typeutil.CacheAddUserToRole,
+				OpKey:  funcutil.EncodeUserRoleCache(username, target.role),
+			}))
+		}
+	}
+
+	span := trace.NewSpanContext(trace.SpanContextConfig{TraceID: trace.TraceID{1}, SpanID: trace.SpanID{1}})
+	type quotaCharge struct {
+		db          int64
+		collections map[int64][]int64
+		nq          int
+	}
+	var charges []quotaCharge
+	server := newRESTV2ServerForRBACTest(t, &multiSearchRESTProxy{
+		cache: cache,
+		limiter: multiSearchRESTLimiter{check: func(db int64, collections map[int64][]int64, kind internalpb.RateType, nq int) error {
+			require.Equal(t, internalpb.RateType_DQLSearch, kind)
+			charges = append(charges, quotaCharge{db, collections, nq})
+			return nil
+		}},
+		search: func(ctx context.Context, req *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+			require.Equal(t, []string{req.GetDbName()}, metadata.ValueFromIncomingContext(ctx, util.HeaderDBName))
+			require.Equal(t, []string{"batch"}, metadata.ValueFromIncomingContext(ctx, "request-marker"))
+			require.Equal(t, span.TraceID(), trace.SpanContextFromContext(ctx).TraceID())
+			require.Equal(t, username, proxy.GetCurUserFromContextOrDefault(ctx))
+			require.ElementsMatch(t, []string{"default_reader", "catalog_reader", util.RolePublic}, ctx.Value(proxy.RBACRoleContextKey))
+			id := map[string]int64{DefaultDbName: 101, "catalog": 102}[req.GetDbName()]
+			require.NotZero(t, id)
+			topks := make([]int64, req.GetNq())
+			topks[0] = 1
+			return &milvuspb.SearchResults{
+				Status: merr.Success(),
+				Results: &schemapb.SearchResultData{
+					TopK: 1, NumQueries: req.GetNq(), Topks: topks, Scores: []float32{1},
+					Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{id}}}},
+				},
+			}, nil
+		},
+	})
+	post := func(headerDB, items string) multiSearchRESTResponse {
+		t.Helper()
+		parent := metadata.NewIncomingContext(trace.ContextWithSpanContext(t.Context(), span), metadata.Pairs(
+			util.HeaderDBName, "upstream_db", "request-marker", "batch",
+		))
+		req := httptest.NewRequestWithContext(parent, http.MethodPost, versionalV2(EntityCategory, MultiSearchAction), strings.NewReader(`{"requests":[`+items+`]}`))
+		req.SetBasicAuth(username, "pwd")
+		if headerDB != "" {
+			req.Header.Set(HTTPHeaderDBName, headerDB)
+		}
+		response := httptest.NewRecorder()
+		server.ServeHTTP(response, req)
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		var body multiSearchRESTResponse
+		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+		require.Zero(t, body.Code, response.Body.String())
+		require.Equal(t, []string{"upstream_db"}, metadata.ValueFromIncomingContext(parent, util.HeaderDBName))
+		return body
+	}
+
+	body := post("catalog", `
+		{"search":{"dbName":"default","collectionName":"current","partitionNames":["ready"],"data":[[1,0],[0,1]]}},
+		{"search":{"collectionName":"current","partitionNames":["ready"],"data":[[1,0,0]]}},
+		{"search":{"dbName":"","collectionName":"current","partitionNames":["ready"],"data":[[1,0,0]]}},
+		{"search":{"dbName":"archive","collectionName":"papers","data":[[1,0]]}},
+		{"search":{"dbName":"archive","collectionName":"current","data":[[1,0]]}}`)
+	require.Len(t, body.Data, 5)
+	for i, id := range []string{"101", "102", "102"} {
+		require.Zero(t, body.Data[i].Search.Code, body.Data[i].Search.Message)
+		require.Len(t, body.Data[i].Search.Data, 1)
+		require.Equal(t, id, body.Data[i].Search.Data[0]["id"])
+	}
+	for _, item := range body.Data[3:] {
+		require.Equal(t, merr.Code(merr.ErrPrivilegeNotPermitted), item.Search.Code, item.Search.Message)
+		require.Contains(t, item.Search.Message, "`archive` database")
+		require.Empty(t, item.Search.Data)
+	}
+	require.ElementsMatch(t, []quotaCharge{
+		{11, map[int64][]int64{101: {201}}, 2},
+		{12, map[int64][]int64{102: {202}}, 1},
+		{12, map[int64][]int64{102: {202}}, 1},
+	}, charges)
+
+	body = post("unused_database", `
+		{"search":{"dbName":"default","collectionName":"current","data":[[1,0]]}},
+		{"search":{"dbName":"catalog","collectionName":"current","data":[[1,0,0]]}}`)
+	require.Len(t, body.Data, 2)
+	require.Zero(t, body.Data[0].Search.Code, body.Data[0].Search.Message)
+	require.Zero(t, body.Data[1].Search.Code, body.Data[1].Search.Message)
+	body = post("", `{"search":{"collectionName":"current","data":[[1,0]]}}`)
+	require.Len(t, body.Data, 1)
+	require.Zero(t, body.Data[0].Search.Code, body.Data[0].Search.Message)
 }
 
 func TestMultiSearchStructuralFailureStopsWholeBatch(t *testing.T) {
