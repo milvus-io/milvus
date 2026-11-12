@@ -21,7 +21,6 @@ import copy
 import numpy as np
 import pytest
 from common import common_func as cf
-from ml_dtypes import bfloat16
 from pymilvus import DataType
 
 SCALARS = [
@@ -54,8 +53,7 @@ def scalar_boundary_value(dtype, n):
 
 
 def normalized_vector(n, dim=DIM):
-    value = np.random.RandomState(n % (2**32)).normal(size=dim).astype(np.float32)
-    return (value / np.linalg.norm(value)).tolist()
+    return cf.gen_vectors(1, dim, seed=n, normalize=True)[0]
 
 
 def make_nullable_row(schema, n, clips, revision=0):
@@ -252,12 +250,7 @@ def make_typed_vector(dtype, seed, dim=None):
         return rng.bytes(dim // 8)
     if dtype == DataType.INT8_VECTOR:
         return rng.randint(-16, 17, dim).astype(np.int8)
-    values = rng.uniform(-1, 1, dim)
-    if dtype == DataType.FLOAT16_VECTOR:
-        return values.astype(np.float16)
-    if dtype == DataType.BFLOAT16_VECTOR:
-        return values.astype(bfloat16)
-    return values.astype(np.float32).tolist()
+    return cf.gen_vectors(1, dim, dtype, seed=seed, normalize=False)[0]
 
 
 def decode_vector(value, dtype):

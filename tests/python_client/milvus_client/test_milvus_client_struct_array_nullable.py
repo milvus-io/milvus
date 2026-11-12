@@ -32,7 +32,7 @@ from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
-from common.struct_array_data import normalized_vector, vector_score_tolerance
+from common.struct_array_data import vector_score_tolerance
 from minio import Minio
 from minio.error import S3Error
 from pymilvus import AnnSearchRequest, DataType, WeightedRanker
@@ -286,6 +286,7 @@ def gen_struct_array_schema(
 
 
 def gen_vector(seed: int, dim: int | None = None) -> list[float]:
+    """Ordered L2 control: row-ID distances are intentional in these FLAT tests."""
     dim = dim or VECTOR_DIM
     return [float(seed) + float(i) / 1000 for i in range(dim)]
 
@@ -467,7 +468,7 @@ def gen_vector_index_filler_rows(
             {
                 INT_SUBFIELD: -(start_id + i),
                 TAG_SUBFIELD: f"{tag_prefix}_profile_{i}",
-                VECTOR_SUBFIELD: gen_vector(start_id + i, vector_dim),
+                VECTOR_SUBFIELD: cf.gen_embedding_vectors(1, vector_dim, seed=start_id + i)[0],
             }
         ]
         for i in range(count)
@@ -489,28 +490,17 @@ def gen_unit_vector(axis: int, dim: int | None = None) -> list[float]:
     return vector
 
 
-def gen_profile(
-    row_id: int,
-) -> list[dict[str, Any]]:
+def gen_profile(row_id: int) -> list[dict[str, Any]]:
+    vectors = cf.gen_embedding_vectors(2, VECTOR_SUBFIELD_DIM, seed=row_id)
     return [
-        {
-            INT_SUBFIELD: row_id * 10,
-            TAG_SUBFIELD: f"profile_{row_id}_0",
-            VECTOR_SUBFIELD: gen_vector(row_id * 10, VECTOR_SUBFIELD_DIM),
-        },
-        {
-            INT_SUBFIELD: row_id * 10 + 1,
-            TAG_SUBFIELD: f"profile_{row_id}_1",
-            VECTOR_SUBFIELD: gen_vector(row_id * 10 + 1, VECTOR_SUBFIELD_DIM),
-        },
+        {INT_SUBFIELD: row_id * 10 + offset, TAG_SUBFIELD: f"profile_{row_id}_{offset}", VECTOR_SUBFIELD: vector}
+        for offset, vector in enumerate(vectors)
     ]
 
 
 def gen_typed_vector(vector_type: DataType, seed: int, dim: int = EMB_LIST_DIM):
-    if vector_type == DataType.FLOAT16_VECTOR:
-        return np.array([((seed + i) % 17) / 17 for i in range(dim)], dtype=np.float16)
-    if vector_type == DataType.BFLOAT16_VECTOR:
-        return np.array([((seed + i) % 19) / 19 for i in range(dim)], dtype=cf.bfloat16)
+    if vector_type in (DataType.FLOAT_VECTOR, DataType.FLOAT16_VECTOR, DataType.BFLOAT16_VECTOR):
+        return cf.gen_vectors(1, dim, vector_type, seed=seed)[0]
     if vector_type == DataType.INT8_VECTOR:
         return np.array([((seed + i) % 255) - 128 for i in range(dim)], dtype=np.int8)
     if vector_type == DataType.BINARY_VECTOR:
@@ -1117,10 +1107,8 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
 
         def profile(row_id, length, tag_prefix="keep"):
             result = []
-            for offset in range(length):
-                rng = np.random.RandomState(row_id * STRUCT_MAX_CAPACITY + offset)
-                vector = rng.uniform(-1.0, 1.0, VECTOR_SUBFIELD_DIM).astype(np.float32)
-                vector = (vector / np.linalg.norm(vector)).tolist()
+            vectors = cf.gen_embedding_vectors(length, VECTOR_SUBFIELD_DIM, seed=row_id)
+            for offset, vector in enumerate(vectors):
                 result.append(
                     {
                         INT_SUBFIELD: row_id * 10 + offset,
@@ -3015,14 +3003,13 @@ class TestMilvusClientStructArraySchemaEvolution(TestMilvusClientV2Base):
                 }
             )
         sealed_rows = control_rows + filler_rows
-        # Use the same seeded dense distribution for probes and background vectors.
-        # Nearly collinear fillers plus a few one-hot probes turn this mapping/reload
-        # test into a degenerate quantizer-calibration case instead.
+        # Controls and fillers share the common clustered profile. Each document
+        # has correlated tokens, while separate documents use independent samples.
         for row in sealed_rows:
-            for offset, element in enumerate(row.get(STRUCT_FIELD) or []):
-                element[VECTOR_SUBFIELD] = normalized_vector(
-                    row[PK_FIELD] * STRUCT_MAX_CAPACITY + offset, VECTOR_SUBFIELD_DIM
-                )
+            elements = row.get(STRUCT_FIELD) or []
+            vectors = cf.gen_embedding_vectors(len(elements), VECTOR_SUBFIELD_DIM, seed=row[PK_FIELD])
+            for element, vector in zip(elements, vectors):
+                element[VECTOR_SUBFIELD] = vector
         # With one filler element per row, the two null/empty rows and two
         # double-element control rows cancel out, hiding the row/element mismatch.
         element_count = sum(len(row.get(STRUCT_FIELD) or []) for row in sealed_rows)
@@ -12465,10 +12452,6 @@ class TestMilvusClientStructArrayNullableImport(TestMilvusClientV2Base):
                 profile = []
             else:
                 profile = gen_profile(row_id)
-                for offset, element in enumerate(profile):
-                    rng = np.random.RandomState(row_id * STRUCT_MAX_CAPACITY + offset)
-                    vector = rng.uniform(-1.0, 1.0, VECTOR_SUBFIELD_DIM).astype(np.float32)
-                    element[VECTOR_SUBFIELD] = (vector / np.linalg.norm(vector)).tolist()
             row = {
                 PK_FIELD: row_id,
                 VECTOR_FIELD: gen_vector(row_id),

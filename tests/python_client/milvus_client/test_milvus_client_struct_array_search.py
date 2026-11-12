@@ -704,8 +704,7 @@ def vector(kind, seed):
         return rng.randint(0, 256, PRECISION_DIM // 8, dtype=np.uint8).tobytes()
     if kind == DataType.INT8_VECTOR:
         return rng.randint(-100, 101, PRECISION_DIM, dtype=np.int8)
-    dtype = np.float16 if kind == DataType.FLOAT16_VECTOR else cf.bfloat16
-    return rng.normal(size=PRECISION_DIM).astype(dtype)
+    return cf.gen_vectors(1, PRECISION_DIM, kind, seed=seed, normalize=False)[0]
 
 
 def decoded(value, kind):
@@ -818,7 +817,9 @@ class TestMilvusClientStructArrayVectorScores(TestMilvusClientV2Base):
                 limit=20,
                 consistency_level="Strong",
                 output_fields=["revision"],
-                search_params={"metric_type": metric, "params": {"ef": 512} if index_type == "HNSW" else {}},
+                # The clustered corpus needs a wider candidate set to retain the
+                # existing 95% recall gate while this case checks coordinates/scores.
+                search_params={"metric_type": metric, "params": {"ef": 1024} if index_type == "HNSW" else {}},
             )
             assert len(results) == len(queries)
             for query, hits in zip(queries, results):
