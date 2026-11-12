@@ -7,29 +7,34 @@ task model (`taskmodel`) plus `pkg/v3`.
 
 ## Overview
 
-The proxy has four task queues, each backed by its own scheduler loop:
+The proxy exposes four task queues:
 
 - **DdQueue** (definition) — DDL tasks such as create/drop collection, alias,
   index, database, resource-group operations.
 - **DmQueue** (manipulation) — DML tasks: insert/delete/upsert.
-- **DqQueue** (query) — DQL tasks: search/query.
+- **DqQueue** (query) — search and query tasks, with a separate queue for
+  requery and lexical highlight tasks. Each queue has its own dispatch loop
+  and worker pool so a Search waiting on a subtask can finish even when the
+  main pool is full.
 - **DcQueue** (control) — data-control operations such as flush.
 
-Each task is enqueued by the proxy's RPC handlers and, when picked up by its
-loop, runs `PreExecute -> Execute -> PostExecute` under a bounded worker pool.
+RPC handlers and Search tasks enqueue work. The dispatcher runs each task's
+`PreExecute -> Execute -> PostExecute` lifecycle under a bounded worker pool.
 
 ## Responsibilities
 
 1. **Queues** (`DdTaskQueue`, `DmTaskQueue`, `DqTaskQueue`, `DcTaskQueue`) —
    each maintains an unissued list and an active map, plus the enqueue/dequeue
    and task-lookup primitives.
-2. **`TaskScheduler`** — owns the four queues and their loops (`definitionLoop`,
-   `controlLoop`, `manipulationLoop`, `queryLoop`), and exposes `Start`/`Close`.
+2. **`TaskScheduler`** — owns the queues and their loops (`definitionLoop`,
+   `controlLoop`, `manipulationLoop`, and one `queryLoop` for each DQL queue),
+   and exposes `Start`/`Close`.
 3. **TSO + ID allocation** — `Enqueue` allocates a timestamp (or an ID from the
    meta cache for tasks that skip timestamp allocation) before a task is
    unissued.
-4. **Metrics** — `GetMetrics` reports per-queue pending/executing task counts
-   and timing, consumed by the proxy's quota/system-info metrics.
+4. **Metrics** — `GetMetrics` reports pending/executing task counts and
+   timing, consumed by the proxy's quota/system-info metrics. Both DQL queues
+   contribute to the `dql` metrics.
 
 ## Architecture
 

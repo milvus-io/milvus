@@ -240,9 +240,8 @@ func (node *Proxy) CheckClusterPrivilege(ctx context.Context, req interface{}, f
 	return CheckClusterPrivilege(ctx, req, fullMethod, objectPrivilege)
 }
 
-// IsDQLQueueFull reports whether the next DQL enqueue would be rejected with
-// TooManyRequests. The REST layer probes it (via interface assertion, like
-// GetMetaCache) to reject search/query before paying for body decoding.
+// IsDQLQueueFull reports whether the main queue would reject a Search or Query
+// with TooManyRequests. REST probes it before decoding the request body.
 func (node *Proxy) IsDQLQueueFull() bool {
 	return node.sched != nil && node.sched.DqQueue.IsFull()
 }
